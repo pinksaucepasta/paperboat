@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	"github.com/pinksaucepasta/paperboat/shared/reattach"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 	"io"
 	"net"
 	"net/url"
@@ -285,7 +286,7 @@ func StartExisting(ctx context.Context, config SessionConfig, lease Lease) (*Ses
 
 func prepareSessionConfig(config SessionConfig) (SessionConfig, error) {
 	if config.Now == nil {
-		config.Now = func() time.Time { return time.Now().UTC() }
+		config.Now = func() time.Time { return serverclock.Now().UTC() }
 	}
 	config.OwnerMachineID = strings.TrimSpace(config.OwnerMachineID)
 	config.OwnerSessionID = strings.TrimSpace(config.OwnerSessionID)

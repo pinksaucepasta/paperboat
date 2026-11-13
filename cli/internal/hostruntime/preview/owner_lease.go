@@ -18,6 +18,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 )
 
 const (
@@ -123,7 +125,7 @@ func NewOwnerSessionLeaseManager(config OwnerSessionLeaseManagerConfig) (*OwnerS
 		return nil, ErrOwnerSessionLeaseInvalid
 	}
 	if config.Now == nil {
-		config.Now = func() time.Time { return time.Now().UTC() }
+		config.Now = func() time.Time { return serverclock.Now().UTC() }
 	}
 	if config.Random == nil {
 		config.Random = rand.Reader

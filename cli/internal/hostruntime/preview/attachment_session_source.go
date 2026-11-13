@@ -24,6 +24,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/connector"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/identity"
 	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 )
 
 var (
@@ -160,7 +161,7 @@ func NewMachineAttachmentSessionSource(config MachineAttachmentSessionSourceConf
 		return nil, ErrMachineAttachmentSessionInvalid
 	}
 	if config.Clock == nil {
-		config.Clock = func() time.Time { return time.Now().UTC() }
+		config.Clock = func() time.Time { return serverclock.Now().UTC() }
 	}
 	if config.SessionFactory == nil {
 		config.SessionFactory = newMachineAttachmentNetworkSessionSource

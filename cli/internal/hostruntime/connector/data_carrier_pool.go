@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 	"io"
 	"math/rand/v2"
 	"slices"
@@ -136,7 +137,7 @@ func (p *DataCarrierPool) Connect(ctx context.Context) error {
 		} else {
 			next := p.config
 			next.Targets, next.MaximumCarriers, next.TargetsExpireAt = targets, len(targets), expiry
-			if err := next.Validate(); err != nil || !expiry.After(time.Now()) {
+			if err := next.Validate(); err != nil || !expiry.After(serverclock.Now()) {
 				errs = append(errs, ErrInvalidDataCarrierConfig)
 			} else {
 				p.mu.Lock()
@@ -173,7 +174,7 @@ func (p *DataCarrierPool) Connect(ctx context.Context) error {
 	}
 	p.removeClosed()
 	for slot := 0; slot < p.maximumCarriers; slot++ {
-		if !p.targetExpiry.IsZero() && !p.targetExpiry.After(time.Now()) {
+		if !p.targetExpiry.IsZero() && !p.targetExpiry.After(serverclock.Now()) {
 			break
 		}
 		p.mu.RLock()

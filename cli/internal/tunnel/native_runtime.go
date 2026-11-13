@@ -455,7 +455,7 @@ func (t *PeerTerminalTunnel) acquireNativeRuntime(ctx context.Context, accountID
 	}
 	fingerprint := identity.LocalCertificate.Fingerprint()
 	networkAPI := cliNativeNetworkAPI{issuer: t.config.Issuer, auth: t.config.Auth, http: t.config.HTTPClient}
-	if current := t.nativeRuntime; current != nil && current.alive() && current.accountID == accountID && current.endpointID == endpointID && current.identityFingerprint == fingerprint && identity.LocalCertificate.Claims.ExpiresAt.After(time.Now().UTC()) {
+	if current := t.nativeRuntime; current != nil && current.alive() && current.accountID == accountID && current.endpointID == endpointID && current.identityFingerprint == fingerprint && identity.LocalCertificate.Claims.ExpiresAt.After(serverclock.Now().UTC()) {
 		t.nativeMu.Unlock()
 		diagnosticlog.TryInfo("native cache reuse", "stage", "admission_check", "predicate_present", admitted != nil)
 		if admitted != nil && admitted(current.authority) {

@@ -21,6 +21,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/tunnelmanager"
 	"github.com/pinksaucepasta/paperboat/internal/inspector"
 	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 )
 
 var (
@@ -549,7 +550,7 @@ func (c *DataCarrierPreviewCarrier) Run(ctx context.Context, lease Lease, ready 
 		if registry != nil && strings.TrimSpace(lease.ID) != "" {
 			registry.Unregister(lease.ID)
 		}
-		if store != nil && strings.TrimSpace(lease.ID) != "" && (ctx.Err() != nil || !time.Now().UTC().Before(lease.LeaseDeadline) || c.isClosed()) {
+		if store != nil && strings.TrimSpace(lease.ID) != "" && (ctx.Err() != nil || !serverclock.Now().UTC().Before(lease.LeaseDeadline) || c.isClosed()) {
 			store.Revoke(lease.ID)
 		}
 	}()
