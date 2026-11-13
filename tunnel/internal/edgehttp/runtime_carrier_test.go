@@ -276,6 +276,13 @@ func TestRuntimeCarrierGatewayRequiresHelperAuthAndPreservesRenewedStream(t *tes
 					t.Fatalf("unauthorized %s=%d", path, rec.Code)
 				}
 			}
+			if selfhost { // an edge published on a port other than 443 is reached as edge:port
+				rec := httptest.NewRecorder()
+				gateway.ServeHTTP(rec, httptest.NewRequest("GET", "https://edge.customer.example.test:18446/v1/runtime/"+hostname+"/v1/runtime", nil))
+				if rec.Code != http.StatusUnauthorized {
+					t.Fatalf("edge name with its published port=%d, want 401", rec.Code)
+				}
+			}
 			done := make(chan error, 1)
 			go func() {
 				stream, open, err := client.AcceptStream(context.Background())

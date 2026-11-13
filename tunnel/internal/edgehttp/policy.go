@@ -564,7 +564,12 @@ func (p *Policy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// cannot send a fresh admission to the former active edge. The path names
 	// only a candidate route; the one-use ticket and current node/epoch are
 	// still checked before any terminal stream is opened.
-	if p.config.BrowserTerminalEdgeHost != "" && r.Host == p.config.BrowserTerminalEdgeHost && (strings.HasPrefix(r.URL.Path, "/v1/browser-terminal/") || strings.HasPrefix(r.URL.Path, "/v1/runtime/")) {
+	// The edge's own name may carry the port its public HTTPS listener is published on (it advertises it to the control plane).
+	requestHost := r.Host
+	if parsed, _, err := net.SplitHostPort(requestHost); err == nil {
+		requestHost = parsed
+	}
+	if p.config.BrowserTerminalEdgeHost != "" && requestHost == p.config.BrowserTerminalEdgeHost && (strings.HasPrefix(r.URL.Path, "/v1/browser-terminal/") || strings.HasPrefix(r.URL.Path, "/v1/runtime/")) {
 		browserTerminal := strings.HasPrefix(r.URL.Path, "/v1/browser-terminal/")
 		prefix := "/v1/runtime/"
 		if browserTerminal {
