@@ -63,4 +63,30 @@ HTTP/1.1 421 Misdirected Request
 ```
 
 L<->W: every part passed on dev-bb9da7fb1 on both machines (Linux container, Windows runner winpool-2): each OS as host and as client, address per account, one account never reaches the other, refusal page on both gateways, simultaneous connect.
-## Not run: any macOS host or client (L<->M, M<->W): macpool runs pending in GitHub's macOS queue; the fleet Mac is one account and cannot host two.
+
+## Mac runner macpool-3 (macOS 26.7.2, user runner, account B machine rx44-m, dev-bb9da7fb1) as client and host of the Linux and Windows machines
+```
+== Mac runner (account B, machine rx44-m) Version dev-bb9da7fb1
+mac exec rx44-l : pbt
+mac exec rx44-w-2: runnervmm7ud1\runneradmin
+mac exec rx44-lc (account C): pb: No machine has that name or ID. Run `pb machine list` to
+linux pbt exec rx44-m: runner
+linux pbt2 (C) exec rx44-m: pb: No machine has that name or ID. Run `pb machine list` to
+win runneradmin exec rx44-m: pb: Paperboat could not reach the target machine. It may be offline, or its netw
+(first Windows->Mac exec: "could not reach the target machine" right after the Mac paired; the next two tries returned `runner`)
+```
+## Mac as host with two OS users: FAIL (logged in failures.md, not producible on macpool)
+A second OS user macc (uid 502, passwordless sudo, file-fallback config) installs, but `pb pair` as that user prints "Completing one-shot machine enrollment..." and is killed by SIGHUP (rc 129); doctor then says awaiting_enrollment and hostd not running. F23-01's M [x] used a real login session user.
+
+## Test of the Windows fix on a runner without a guard (after `pb uninstall` of both users), device
+```
+== wfp
+--- PASS: TestApplyLetsAnyUserConnectToTheGateway (0.28s)
+PASS
+== wfp-nofix
+    paperboat_windows_test.go:198: a user without a lease is blocked from the gateway: no refusal page can reach it
+--- FAIL: TestApplyLetsAnyUserConnectToTheGateway (0.27s)
+FAIL
+```
+machineguard device tests on the fixed tree (Gateway|Route|Attribution|Refusal): all PASS (TestGatewayRoutesTwoOSUsersOnDevice skips without its fixture). CI: tools/ci-test.sh cli -run 'Gateway|WFP|...' at 26d61874b: success, 0 FAIL, machineguard ok (run 43369499902).
+## Open: L<->M and M<->W (a Mac host with two OS users); everything else of those pairs passed.
