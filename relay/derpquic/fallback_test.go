@@ -226,6 +226,44 @@ func TestFallbackCarrierAsksAgainAfterARefusalOnTheNextRead(t *testing.T) {
 	}
 }
 
+// A reconnect that fails without a refusal (both children unreachable) leaves no active carrier: the next read must
+// dial again instead of answering "closed" forever.
+func TestFallbackCarrierReadReconnectsAfterAFailedReconnect(t *testing.T) {
+	preferred := &fakeCarrier{connected: true, recvErr: ErrAdmission}
+	fallback := &fakeCarrier{}
+	c := NewFallbackCarrier(preferred, fallback, time.Hour)
+	defer c.Close()
+	c.mu.Lock()
+	c.active = preferred
+	c.mu.Unlock()
+	if _, _, err := c.RecvDetail(); !errors.Is(err, ErrAdmission) {
+		t.Fatalf("first read=%v", err)
+	}
+	unreachable := errors.New("unreachable")
+	preferred.mu.Lock()
+	preferred.connectErr = unreachable
+	preferred.mu.Unlock()
+	fallback.mu.Lock()
+	fallback.connectErr = unreachable
+	fallback.mu.Unlock()
+	if _, _, err := c.RecvDetail(); !errors.Is(err, unreachable) {
+		t.Fatalf("read while unreachable=%v", err)
+	}
+	preferred.mu.Lock()
+	preferred.connectErr, preferred.recvErr = nil, nil
+	preferred.mu.Unlock()
+	if _, _, err := c.RecvDetail(); err != nil {
+		t.Fatalf("read after the relay is reachable again=%v", err)
+	}
+	if _, err := c.current(); err != nil {
+		t.Fatalf("no active carrier after the read reconnected: %v", err)
+	}
+	c.Close()
+	if _, _, err := c.RecvDetail(); !errors.Is(err, ErrClosed) {
+		t.Fatalf("read after close=%v", err)
+	}
+}
+
 func TestRecoveryRetryDelayBounds(t *testing.T) {
 	base := 5 * time.Second
 	for _, test := range []struct {
