@@ -1,0 +1,10 @@
+{
+ "check": "xplat-removal",
+ "results": [
+  {
+   "id": "X-41:revoke:W",
+   "status": "PASS",
+   "detail": "rx41b-l: pb: No machine has that name or ID. Run `pb machine list` to see your machines. Support reference: support_9dd; rx41b-m: pb: No machine has that name or ID. Run `pb machine list` to see your machines. Support reference: support_8e4; revoked target: 36 events/min; observers: 36, 11 events/min; new identity after enrolling again, both observers exec and pb ssh it (exec reachable 3/8 s after the new identity was listed, pb ssh 2/7 s later)"
+  }
+ ]
+}

@@ -1,0 +1,15 @@
+{
+ "check": "xplat-removal",
+ "results": [
+  {
+   "id": "X-41:uninstall:M",
+   "status": "PASS",
+   "detail": "rx41b-l: pb: No machine has that name or ID. Run `pb machine list` to see your machines. Support reference: support_447; rx41b-w: pb: No machine has that name or ID. Run `pb machine list` to see your machines. Support reference: support_d5c; observers: 38, 9 events/min; new identity after enrolling again, both observers exec and pb ssh it (exec reachable 3/13 s after the new identity was listed, pb ssh 14/9 s later)"
+  },
+  {
+   "id": "X-41:revoke:M",
+   "status": "PASS",
+   "detail": "rx41b-l: pb: No machine has that name or ID. Run `pb machine list` to see your machines. Support reference: support_0dc; rx41b-w: pb: No machine has that name or ID. Run `pb machine list` to see your machines. Support reference: support_e51; revoked target: 29 events/min; observers: 35, 12 events/min; new identity after enrolling again, both observers exec and pb ssh it (exec reachable 5/8 s after the new identity was listed, pb ssh 3/9 s later)"
+  }
+ ]
+}

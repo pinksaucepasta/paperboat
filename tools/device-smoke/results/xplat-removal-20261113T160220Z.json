@@ -1,0 +1,10 @@
+{
+ "check": "xplat-removal",
+ "results": [
+  {
+   "id": "X-41:revoke:W",
+   "status": "FAIL",
+   "detail": "rx41b-l daemon wrote 51 diagnostic events in 60 s (observer)"
+  }
+ ]
+}

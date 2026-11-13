@@ -1,0 +1,25 @@
+{
+ "check": "xplat-removal",
+ "results": [
+  {
+   "id": "X-41:reset:L",
+   "status": "PASS",
+   "detail": "observers: 9 events/min; new identity after enrolling again, both observers exec and pb ssh it (exec reachable 7 s after the new identity was listed, pb ssh 8 s later)"
+  },
+  {
+   "id": "X-41:reset:W",
+   "status": "PASS",
+   "detail": "observers: 11 events/min; new identity after enrolling again, both observers exec and pb ssh it (exec reachable 4 s after the new identity was listed, pb ssh 2 s later)"
+  },
+  {
+   "id": "X-41:uninstall:L",
+   "status": "PASS",
+   "detail": "rx41b-w: pb: No machine has that name or ID. Run `pb machine list` to see your machines. Support reference: support_fbb; observers: 15 events/min; new identity after enrolling again, both observers exec and pb ssh it (exec reachable 6 s after the new identity was listed, pb ssh 6 s later)"
+  },
+  {
+   "id": "X-41:uninstall:W",
+   "status": "PASS",
+   "detail": "rx41b-l: pb: No machine has that name or ID. Run `pb machine list` to see your machines. Support reference: support_d3f; observers: 41 events/min; new identity after enrolling again, both observers exec and pb ssh it (exec reachable 2 s after the new identity was listed, pb ssh 12 s later)"
+  }
+ ]
+}

@@ -1,0 +1,50 @@
+{
+ "check": "xplat-removal",
+ "results": [
+  {
+   "id": "X-41:reset:L",
+   "status": "PASS",
+   "detail": "observers: 8, 12 events/min; new identity after enrolling again, both observers exec and pb ssh it (exec reachable 6/6 s after the new identity was listed, pb ssh 5/8 s later)"
+  },
+  {
+   "id": "X-41:reset:M",
+   "status": "PASS",
+   "detail": "observers: 11, 14 events/min; new identity after enrolling again, both observers exec and pb ssh it (exec reachable 3/8 s after the new identity was listed, pb ssh 3/9 s later)"
+  },
+  {
+   "id": "X-41:reset:W",
+   "status": "PASS",
+   "detail": "observers: 13, 12 events/min; new identity after enrolling again, both observers exec and pb ssh it (exec reachable 3/8 s after the new identity was listed, pb ssh 2/3 s later)"
+  },
+  {
+   "id": "X-41:uninstall:L",
+   "status": "PASS",
+   "detail": "rx41b-m: pb: No machine has that name or ID. Run `pb machine list` to see your machines. Support reference: support_21a; rx41b-w: pb: No machine has that name or ID. Run `pb machine list` to see your machines. Support reference: support_1aa; observers: 13, 13 events/min; new identity after enrolling again, both observers exec and pb ssh it (exec reachable 6/6 s after the new identity was listed, pb ssh 5/6 s later)"
+  },
+  {
+   "id": "X-41:uninstall:M",
+   "status": "FAIL",
+   "detail": "rx41b-l cannot exec rx41b-m:  e. It may be offline, or its network or Paperboat service is not ready yet. Check that its Runtime is ready in `pb status`, then retry. Support reference: support_db7d21d2-68ef-4907-a5fc-7cd8183c9563. Run `pb bugreport --upload` to send the details.\n | doctor: ['selected_path: warning: The active Paperboat path uses a regional relay.']"
+  },
+  {
+   "id": "X-41:uninstall:W",
+   "status": "PASS",
+   "detail": "rx41b-l: pb: No machine has that name or ID. Run `pb machine list` to see your machines. Support reference: support_9d0; rx41b-m: pb: No machine has that name or ID. Run `pb machine list` to see your machines. Support reference: support_387; observers: 11, 12 events/min; new identity after enrolling again, both observers exec and pb ssh it (exec reachable 3/8 s after the new identity was listed, pb ssh 13/7 s later)"
+  },
+  {
+   "id": "X-41:revoke:L",
+   "status": "PASS",
+   "detail": "rx41b-m: pb: No machine has that name or ID. Run `pb machine list` to see your machines. Support reference: support_29a; rx41b-w: pb: No machine has that name or ID. Run `pb machine list` to see your machines. Support reference: support_61d; revoked target: 28 events/min; observers: 12, 15 events/min; new identity after enrolling again, both observers exec and pb ssh it (exec reachable 6/6 s after the new identity was listed, pb ssh 5/7 s later)"
+  },
+  {
+   "id": "X-41:revoke:M",
+   "status": "FAIL",
+   "detail": "rx41b-l cannot exec rx41b-m:  e. It may be offline, or its network or Paperboat service is not ready yet. Check that its Runtime is ready in `pb status`, then retry. Support reference: support_d69b2dfe-0fae-448a-8877-196cad22da18. Run `pb bugreport --upload` to send the details.\n | doctor: ['selected_path: warning: The active Paperboat path uses a regional relay.']"
+  },
+  {
+   "id": "X-41:revoke:W",
+   "status": "FAIL",
+   "detail": "rx41b-l lists no online machine rx41b-w (has rx41b-l/online, rx41b-m/online, rx41b-w/offline, soft-e-11051723/offline)"
+  }
+ ]
+}

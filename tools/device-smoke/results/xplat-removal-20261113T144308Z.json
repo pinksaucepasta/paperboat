@@ -1,0 +1,35 @@
+{
+ "check": "xplat-removal",
+ "results": [
+  {
+   "id": "X-41:revoke:L",
+   "status": "PASS",
+   "detail": "rx41b-w: pb: No machine has that name or ID. Run `pb machine list` to see your machines. Support reference: support_ca8; revoked target: 38 events/min; observers: 42 events/min; new identity after enrolling again, both observers exec and pb ssh it (exec reachable 6 s after the new identity was listed, pb ssh 6 s later)"
+  },
+  {
+   "id": "X-41:revoke:W",
+   "status": "FAIL",
+   "detail": "rx41b-w daemon wrote 55 diagnostic events in 60 s (revoked target)"
+  },
+  {
+   "id": "X-41:reset:L",
+   "status": "FAIL",
+   "detail": "'machines'"
+  },
+  {
+   "id": "X-41:reset:W",
+   "status": "FAIL",
+   "detail": "rx41b-l lists no online machine rx41b-w (has rx41b-l/online, soft-e-11051723/offline)"
+  },
+  {
+   "id": "X-41:uninstall:L",
+   "status": "FAIL",
+   "detail": "'machines'"
+  },
+  {
+   "id": "X-41:uninstall:W",
+   "status": "FAIL",
+   "detail": "rx41b-l lists no online machine rx41b-w (has rx41b-l/online, soft-e-11051723/offline)"
+  }
+ ]
+}
