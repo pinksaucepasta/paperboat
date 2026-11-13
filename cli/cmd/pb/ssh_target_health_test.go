@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"net/http"
 	"strings"
 	"testing"
 
+	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
 )
 
@@ -25,6 +27,21 @@ func TestSSHToATargetThatIsNotReadyNamesTheReason(t *testing.T) {
 	status.SSHReadiness, status.Health = "ready", nil
 	if err := sshTargetHealth(context.Background(), "machine_b", "box"); err != nil {
 		t.Fatalf("a ready target was refused: %v", err)
+	}
+}
+
+// A machine with no SSH target (an OS user name managed SSH cannot serve) answers 404; pb ssh says why and what to
+// do instead of "The requested Paperboat resource was not found" (X-28, OS user "Zoë Test").
+func TestSSHToAMachineWithoutATargetNamesTheCauses(t *testing.T) {
+	err := sshTargetLookupError("rx28-zoe", &api.APIError{Status: http.StatusNotFound, Code: "not_found"})
+	message := commandFailureMessage(err, classifyCommandFailure(err))
+	if classifyCommandFailure(err).kind != commandRejected || !strings.Contains(message, "SSH to rx28-zoe is not ready: Paperboat has no SSH target for it") ||
+		!strings.Contains(message, "spaces or non-ASCII letters") || !strings.Contains(message, "pb ssh doctor") || strings.Contains(message, "resource was not found") {
+		t.Fatalf("message=%q", message)
+	}
+	other := &api.APIError{Status: http.StatusServiceUnavailable, Code: "managed_ssh_unavailable"}
+	if got := sshTargetLookupError("rx28-zoe", other); got != error(other) {
+		t.Fatalf("a non-404 error was rewritten: %v", got)
 	}
 }
 
