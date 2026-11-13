@@ -274,17 +274,7 @@ func relayGrantPeersConfigured(g, earlier peernetwork.RelayGrant, chunk bool, cf
 		// without expiry, so a kept scope appears with the grant's own expiry and the rest is left out
 		// (peernetwork.RelayGrantKeepsStanding, the rule the server applies). A peer with nothing kept is not
 		// named. Everything else must match exactly.
-		mesh := slices.ContainsFunc(peer.Scopes, func(s NetworkScope) bool { return s.ResourceKind == "machine_network" })
-		var scopes []NetworkScope
-		for _, scope := range peer.Scopes {
-			if scope.ExpiresAt == 0 {
-				if !peernetwork.RelayGrantKeepsStanding(scope, mesh) {
-					continue
-				}
-				scope.ExpiresAt = g.ExpiresAt
-			}
-			scopes = append(scopes, scope)
-		}
+		scopes := peernetwork.RelayGrantScopes(peer.Scopes, g.ExpiresAt)
 		if len(scopes) == 0 {
 			continue
 		}

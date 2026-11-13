@@ -234,3 +234,47 @@ func TestConfigurationBuildLockHonorsCancellation(t *testing.T) {
 		t.Fatal("canceled waiter retained a lock reference")
 	}
 }
+
+// F21-164: a peer with 300 sessions of three scopes each and 150 more peers: every peer is named once, every grant stays
+// within the relay's scope and peer bounds, and the busy peer keeps its longest-lived session (not cut by id order).
+func TestRelayGrantsNameEveryPeerWhenOnePeerHoldsHundredsOfSessions(t *testing.T) {
+	self := networkBinding{Binding: peernetwork.Binding{AccountID: "account", EndpointID: "host"}}
+	var busy []networkScope
+	for i := range 300 {
+		for _, capability := range []string{"terminal", "file_transfer", "private_access"} {
+			expires := int64(1_000 + i%50)
+			if i == 299 {
+				expires = 5_000
+			}
+			busy = append(busy, networkScope{ResourceKind: "machine_access", ResourceID: fmt.Sprintf("session_%04d", i), ResourceGeneration: 1, Capability: capability, Direction: "accept", Port: 443, ExpiresAt: expires})
+		}
+	}
+	peers := []networkPeer{{Identity: networkBinding{Binding: peernetwork.Binding{AccountID: "other", EndpointID: "busy", WireGuardPublicKey: "key_busy"}}, Scopes: busy}}
+	for i := range 150 {
+		peers = append(peers, networkPeer{Identity: networkBinding{Binding: peernetwork.Binding{AccountID: "account", EndpointID: fmt.Sprintf("cli_%03d", i), WireGuardPublicKey: fmt.Sprintf("key_%03d", i)}}, Scopes: []networkScope{
+			{ResourceKind: "machine_network", ResourceID: fmt.Sprintf("network_%03d", i), ResourceGeneration: 1, Capability: "connect", Direction: "accept", Port: 443},
+			{ResourceKind: "machine_access", ResourceID: fmt.Sprintf("s_%03d", i), ResourceGeneration: 1, Capability: "terminal", Direction: "accept", Port: 443, ExpiresAt: 2_000}}})
+	}
+	named, longest := map[string]bool{}, false
+	for _, chunk := range relayGrantChunks(self, peers, peernetwork.MaxGrantPeers, 9_000) {
+		total := 0
+		for _, entry := range chunk.peers {
+			if named[entry.WireGuardPublicKey] {
+				t.Fatalf("peer %s named in two chunks", entry.WireGuardPublicKey)
+			}
+			named[entry.WireGuardPublicKey] = true
+			total += len(entry.Scopes)
+			if entry.WireGuardPublicKey == "key_busy" {
+				for _, scope := range entry.Scopes {
+					longest = longest || scope.ResourceID == "session_0299" && scope.ExpiresAt == 5_000
+				}
+			}
+		}
+		if total > peernetwork.MaxGrantScopes || len(chunk.peers) > peernetwork.MaxGrantPeers {
+			t.Fatalf("a grant holds %d scopes for %d peers", total, len(chunk.peers))
+		}
+	}
+	if len(named) != 151 || !longest {
+		t.Fatalf("%d peers named (want 151), busy peer kept its longest session: %v", len(named), longest)
+	}
+}

@@ -1,6 +1,9 @@
 package peernetwork
 
-import "slices"
+import (
+	"cmp"
+	"slices"
+)
 
 // scopeCapabilities lists, for each resource kind of a signed access scope, the capabilities it may carry. It is the
 // one list: the client accepts exactly these in a network configuration and the relay in a grant (anything else
@@ -82,3 +85,69 @@ func RelayGrantKeepsStanding(s Scope, peerHasMesh bool) bool {
 	}
 	return false
 }
+
+// RelayGrantScopes is the part of one peer's document scopes a relay grant carries: every scope with an expiry, and
+// of the until-revoked ones those RelayGrantKeepsStanding keeps, stamped with grantExpiry. The server builds the grant
+// and the CLI rebuilds the same set, so both call this.
+//
+// One scope is one right of one access session (a terminal, an exec, ...) for one capability and direction. The relay
+// uses scopes for one thing: a pair of endpoints may talk while a scope of one grant has a reciprocal scope (same
+// resource, capability and generation, opposite direction) in the other's, live until min(both expiries). Which session
+// carries the pair does not matter, only the latest expiry does. A grant holds at most MaxGrantScopes scopes and the
+// relay refuses the whole grant over that, while a document names every session of the peer (100 terminals of three
+// scopes each, F21-164). So over the bound the sessions of a (kind, capability, direction) are reduced to the
+// relayGrantSessionsPerKey with the latest expiry (lowest id on a tie): both ends of a pair choose from the same set by
+// the same rule, so they keep the same sessions, and the longest-lived reciprocal pair, the pair's lifetime, stays. A
+// cut in document order (sorted by session id) would drop it arbitrarily. Scopes that were until-revoked (standing),
+// the mesh pair among them, are never reduced.
+func RelayGrantScopes(scopes []Scope, grantExpiry int64) []Scope {
+	mesh := slices.ContainsFunc(scopes, func(s Scope) bool { return s.ResourceKind == "machine_network" })
+	out := make([]Scope, 0, len(scopes))
+	standing := make([]bool, 0, len(scopes))
+	for _, scope := range scopes {
+		kept := scope.ExpiresAt == 0
+		if kept {
+			if !RelayGrantKeepsStanding(scope, mesh) {
+				continue
+			}
+			scope.ExpiresAt = grantExpiry
+		}
+		out = append(out, scope)
+		standing = append(standing, kept)
+	}
+	if len(out) <= MaxGrantScopes {
+		return out
+	}
+	type key struct{ kind, capability, direction string }
+	groups := map[key][]int{}
+	for i, scope := range out {
+		if !standing[i] {
+			k := key{scope.ResourceKind, scope.Capability, scope.Direction}
+			groups[k] = append(groups[k], i)
+		}
+	}
+	drop := make([]bool, len(out))
+	for _, indexes := range groups {
+		slices.SortFunc(indexes, func(a, b int) int {
+			if out[a].ExpiresAt != out[b].ExpiresAt {
+				return cmp.Compare(out[b].ExpiresAt, out[a].ExpiresAt)
+			}
+			return cmp.Compare(out[a].ResourceID, out[b].ResourceID)
+		})
+		for _, i := range indexes[min(len(indexes), relayGrantSessionsPerKey):] {
+			drop[i] = true
+		}
+	}
+	reduced := out[:0]
+	for i, scope := range out {
+		if !drop[i] {
+			reduced = append(reduced, scope)
+		}
+	}
+	// Distinct (kind, capability, direction) keys are few and fixed (scopeCapabilities), so this holds for every peer
+	// that has fewer than MaxGrantScopes - keys*relayGrantSessionsPerKey standing scopes; a peer past it is cut last.
+	return reduced[:min(len(reduced), MaxGrantScopes)]
+}
+
+// relayGrantSessionsPerKey is how many sessions of one (kind, capability, direction) a grant keeps over the bound.
+const relayGrantSessionsPerKey = 4

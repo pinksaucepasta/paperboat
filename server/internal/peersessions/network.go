@@ -875,18 +875,7 @@ func relayGrantChunks(self networkBinding, peers []networkPeer, size int, grantE
 // went past the relay's 128-scope bound); a team peer of another account has no machine_network scope, so its standing
 // machine_access scopes are the pair. The CLI builds the same set to compare a grant with its configuration.
 func relayGrantScopes(scopes []networkScope, grantExpiry int64) []networkScope {
-	mesh := slices.ContainsFunc(scopes, func(s networkScope) bool { return s.ResourceKind == "machine_network" })
-	out := make([]networkScope, 0, len(scopes))
-	for _, scope := range scopes {
-		if scope.ExpiresAt == 0 {
-			if !peernetwork.RelayGrantKeepsStanding(scope, mesh) {
-				continue
-			}
-			scope.ExpiresAt = grantExpiry
-		}
-		out = append(out, scope)
-	}
-	return out
+	return peernetwork.RelayGrantScopes(scopes, grantExpiry)
 }
 
 func peersHaveDiscoKeys(peers []networkPeer) bool {
