@@ -582,6 +582,25 @@ func TestMappedReconcileLeavesALocalLinkAndItsRepositoryFileAlone(t *testing.T) 
 	}
 }
 
+func TestTreeCaseCollisionsNamesBothSpellingsInTheMappedRule(t *testing.T) {
+	m, err := ResolvePathRules(resolvedTempDir(t), []PathRule{{ID: "app", RepositoryPath: "app", LocalPath: resolvedTempDir(t), Kind: "directory"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := ParseManifest([]byte("app/\n"), nil, DefaultManifestLimits())
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := []string{"app/Same.txt", "app/same.txt", "app/ok.txt", "other/Y.txt", "other/y.txt"}
+	got := map[string]string{}
+	for _, skipped := range m.TreeCaseCollisions(names, testRuntimeDescriptor().Policy, manifest) {
+		got[skipped.Path] = skipped.Reason
+	}
+	if len(got) != 2 || got["app/Same.txt"] != "case_collision" || got["app/same.txt"] != "case_collision" {
+		t.Fatalf("collisions = %v, want both spellings below the rule and nothing else", got)
+	}
+}
+
 func TestExplicitLocalPathRefusesWindowsFormsOnUnix(t *testing.T) {
 	if os.PathSeparator == '\\' {
 		t.Skip("Windows accepts these forms")

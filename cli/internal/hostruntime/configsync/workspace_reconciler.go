@@ -231,6 +231,16 @@ func (r *PlaintextWorkspaceReconciler) Reconcile(ctx context.Context, repository
 	if err != nil {
 		return PreparedPublication{}, err
 	}
+	collisions, err := r.remoteCaseCollisions(repository, remoteHash, manifest)
+	if err != nil {
+		return PreparedPublication{}, err
+	}
+	for _, skipped := range collisions {
+		delete(remoteFiles.Files, skipped.Path)
+		if !hasSkipped(remoteFiles.Skipped, skipped.Path) {
+			remoteFiles.Skipped = append(remoteFiles.Skipped, skipped)
+		}
+	}
 	// A path one side cannot carry (a link, an unsafe file, a case collision) is left alone on both sides: its absence
 	// must not read as a deletion.
 	for _, skipped := range localFiles.Skipped {
@@ -578,4 +588,33 @@ func (r *PlaintextWorkspaceReconciler) Rollback() error {
 	}
 	r.pending = nil
 	return nil
+}
+
+func hasSkipped(list []PathSummary, path string) bool {
+	for _, item := range list {
+		if item.Path == path {
+			return true
+		}
+	}
+	return false
+}
+
+// remoteCaseCollisions lists the files of the remote commit that a case-insensitive peer could not hold side by side.
+func (r *PlaintextWorkspaceReconciler) remoteCaseCollisions(repository *git.Repository, commit plumbing.Hash, manifest Manifest) ([]PathSummary, error) {
+	head, err := repository.CommitObject(commit)
+	if err != nil {
+		return nil, ErrRemoteRevisionChanged
+	}
+	tree, err := head.Tree()
+	if err != nil {
+		return nil, ErrRemoteRevisionChanged
+	}
+	var names []string
+	if err := tree.Files().ForEach(func(file *object.File) error {
+		names = append(names, file.Name)
+		return nil
+	}); err != nil {
+		return nil, ErrRemoteRevisionChanged
+	}
+	return r.mapping.TreeCaseCollisions(names, r.descriptor.Policy, manifest), nil
 }

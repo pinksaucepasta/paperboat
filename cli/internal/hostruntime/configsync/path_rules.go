@@ -402,6 +402,28 @@ func (m *PathMapping) SnapshotContext(ctx context.Context, policy RuntimePolicy,
 	}
 	return result, nil
 }
+
+// TreeCaseCollisions reports the mapped repository paths of a commit whose names differ only by case. A case-insensitive
+// checkout holds only one of them, so the disk walk of Snapshot cannot see the collision there.
+func (m *PathMapping) TreeCaseCollisions(names []string, policy RuntimePolicy, manifest Manifest) []PathSummary {
+	groups := map[string][]string{}
+	for _, name := range names {
+		if destination, ok := m.LocalPath(name); ok && m.eligible(name, destination, policy, manifest) {
+			key := strings.ToLower(name)
+			groups[key] = append(groups[key], name)
+		}
+	}
+	var result []PathSummary
+	for _, group := range groups {
+		if len(group) > 1 {
+			for _, name := range group {
+				result = append(result, PathSummary{Path: name, Reason: "case_collision"})
+			}
+		}
+	}
+	return result
+}
+
 func (m *PathMapping) write(name string, value []byte, mode os.FileMode) error {
 	target, ok := m.LocalPath(name)
 	if !ok {
