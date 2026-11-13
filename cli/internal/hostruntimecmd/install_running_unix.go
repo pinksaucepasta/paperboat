@@ -111,7 +111,10 @@ func installUpdateSource(ctx context.Context, executable string, source installs
 	if err != nil {
 		return "", err
 	}
-	request := supplyInstallRequest(account, uid, gid, group.Name, executable, source, bundlePath, force, explicitUpdate, installControlURL(controlURL, cfg.ServerURL))
+	// The daemon keeps the server it was paired with: --server, else the installed declaration's, else the configured one.
+	declaredServer, _ := localdaemon.DeclaredServer(executable) // an unreadable declaration is rewritten by this install
+	server := installControlURL(controlURL, installControlURL(declaredServer, cfg.ServerURL))
+	request := supplyInstallRequest(account, uid, gid, group.Name, executable, source, bundlePath, force, explicitUpdate, server)
 	installerExecutable, err := os.Executable()
 	if err != nil {
 		return "", err
@@ -196,7 +199,7 @@ func installUpdateSource(ctx context.Context, executable string, source installs
 		// install-supplied has unpacked it); commit-supplied must verify the installed one.
 		request = suppliedCommitRequest(request, source)
 	}
-	if restoreService, err = localdaemon.ReplaceCurrentUserService(ctx, layout.Binary, cfg.Path(), cfg.ServerURL, source.Version); err != nil {
+	if restoreService, err = localdaemon.ReplaceCurrentUserService(ctx, layout.Binary, cfg.Path(), server, source.Version); err != nil {
 		return rollback(err)
 	}
 	// The same bound as the privileged validator: a new daemon may report starting while its first local-access

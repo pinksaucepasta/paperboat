@@ -31,16 +31,34 @@ func declaredConfigPath(config serviceConfig) (string, error) {
 }
 
 func declaredConfigAt(platform, definitionPath string) (string, error) {
+	return declaredFlagAt(platform, definitionPath, "--config")
+}
+
+func declaredFlagAt(platform, definitionPath, flag string) (string, error) {
 	arguments, err := hostservice.DeclaredArguments(platform, definitionPath)
 	if err != nil {
 		return "", err
 	}
 	for i := 0; i+1 < len(arguments); i++ {
-		if arguments[i] == "--config" {
+		if arguments[i] == flag {
 			return arguments[i+1], nil
 		}
 	}
 	return "", nil
+}
+
+// DeclaredServer is the --server the installed local daemon service runs with ("" when none is installed or it has none).
+// A reinstall that selects no server keeps it: the profile and its credentials belong to that server.
+func DeclaredServer(executable string) (string, error) {
+	config, err := currentUserServiceConfig(executable)
+	if err != nil {
+		return "", err
+	}
+	installer, err := newServiceInstaller(config)
+	if err != nil {
+		return "", err
+	}
+	return declaredFlagAt(config.Platform, installer.DefinitionPath(), "--server")
 }
 
 // refuseOtherProfile fails when the installed service runs for a different config than the one being installed.

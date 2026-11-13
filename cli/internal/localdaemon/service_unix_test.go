@@ -255,3 +255,24 @@ func TestInstallServiceRefusesToRewriteAnotherProfilesService(t *testing.T) {
 		})
 	}
 }
+
+// A reinstall that selects no server keeps the one the service was paired with (macOS, 2026-11-13: the second pb install
+// rewrote the declaration with the default server and the daemon lost the account's session).
+func TestDeclaredFlagAtReadsTheInstalledServer(t *testing.T) {
+	for _, platform := range []string{"darwin", "linux"} {
+		t.Run(platform, func(t *testing.T) {
+			home := t.TempDir()
+			config := serviceConfig{Platform: platform, Home: home, Executable: serviceExecutable(t), ConfigPath: filepath.Join(home, "config.json"), ServerURL: "https://api.paperboat.test", Username: "test", Group: "staff", UID: 501, Environment: map[string]string{"HOME": home}, Runner: &serviceRunner{}}
+			if err := installService(context.Background(), config); err != nil {
+				t.Fatal(err)
+			}
+			installer, err := newServiceInstaller(config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if server, err := declaredFlagAt(platform, installer.DefinitionPath(), "--server"); err != nil || server != config.ServerURL {
+				t.Fatalf("declared server %q %v, want %q", server, err, config.ServerURL)
+			}
+		})
+	}
+}
