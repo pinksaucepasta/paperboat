@@ -4,13 +4,16 @@
 # stack by its build: install a pb whose version string is unique to this machine (-X ...buildinfo.Version=dev-<sha>-idle),
 # the access log's `client=paperboat/<version>` then counts exactly its requests (edge/node/trust calls and the edge's
 # Go-http-client are not the machine's). Run it next to tools/device-smoke/perf_idle.py on the machine.
-#   VERSION=dev-<sha>-idle LOG_CMD='ssh ubuntu@anvit "cd ~/pb-release-staging && docker compose logs --no-log-prefix --since \$START --until \$END server"' \
+#   VERSION=dev-<sha>-idle LOG_CMD='ssh ubuntu@anvit "cd ~/pb-release-staging && docker compose logs --no-log-prefix --since $START --until $END server"' \
 #     idle_api_requests.sh [seconds=600]
 # LOG_CMD prints the server's log between the UTC times in $START and $END (RFC 3339).
 set -euo pipefail
 SECONDS_WINDOW=${1:-600}; : "${VERSION:?unique pb build version of the idle machine}" "${LOG_CMD:?command printing the server log between START and END}"
 start=$(date -u +%Y-%m-%dT%H:%M:%SZ); sleep "$SECONDS_WINDOW"; end=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-count=$(START=$start END=$end bash -c "$LOG_CMD" | grep 'msg=http_request' | grep -c "client=paperboat/$VERSION\$" || true)
+log=$(START=$start END=$end bash -c "$LOG_CMD")
+# an empty or failed log read must not look like an idle machine ($START and $END expand locally, not on the remote side)
+[ "$(grep -c 'msg=http_request' <<<"$log")" -gt 0 ] || { echo "idle_api_requests: LOG_CMD printed no http_request lines between $start and $end" >&2; exit 1; }
+count=$(grep 'msg=http_request' <<<"$log" | grep -c "client=paperboat/$VERSION\$" || true)
 python3 - "$count" "$SECONDS_WINDOW" "$(cd "$(dirname "$0")/../device-smoke" && pwd)" <<'PY'
 import json, sys
 count, seconds, path = int(sys.argv[1]), int(sys.argv[2]), sys.argv[3]

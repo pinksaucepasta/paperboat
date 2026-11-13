@@ -45,10 +45,6 @@ type runtimeObservationService struct {
 	done          chan struct{}
 }
 
-// machineServicesWatchInterval bounds how long a newly listening port waits before it is announced:
-// the periodic observation alone would make other computers wait for the next one.
-const machineServicesWatchInterval = 2 * time.Second
-
 func (s *runtimeObservationService) Start(ctx context.Context) error {
 	if s.sender == nil || s.interval <= 0 || s.timeout <= 0 {
 		return ErrProductionInvalid

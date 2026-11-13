@@ -103,20 +103,31 @@ func (s Source) Verify(path string) error {
 	if err := s.Validate(); err != nil {
 		return err
 	}
-	identity, cacheable := fileIdentityOf(path)
-	if !cacheable || !verifiedFiles.matches(path, identity, s) {
-		length, digest, err := digestFile(path)
-		if err != nil {
-			return err
-		}
-		if length != s.Length || digest != s.SHA256 {
-			return ErrInvalid
-		}
-		if after, ok := fileIdentityOf(path); cacheable && ok && after == identity {
-			verifiedFiles.remember(path, identity, s)
-		}
+	if err := VerifyDigest(path, s.Length, s.SHA256); err != nil {
+		return err
 	}
 	return binarytarget.Validate(path, s.Platform, s.Architecture)
+}
+
+// VerifyDigest checks that path holds exactly length bytes with the given SHA-256, hashing the file only when its
+// on-disk identity changed since a match. Callers that verify an executable against a recorded digest (the Windows
+// service definitions) use it so the 5 s reconciliation does not re-read ~100 MB per call.
+func VerifyDigest(path string, length int64, sha256 string) error {
+	identity, cacheable := fileIdentityOf(path)
+	if cacheable && verifiedFiles.matches(path, identity, length, sha256) {
+		return nil
+	}
+	got, digest, err := digestFile(path)
+	if err != nil {
+		return err
+	}
+	if got != length || digest != sha256 {
+		return ErrInvalid
+	}
+	if after, ok := fileIdentityOf(path); cacheable && ok && after == identity {
+		verifiedFiles.remember(path, identity, length, sha256)
+	}
+	return nil
 }
 
 // verifiedFiles remembers files whose bytes matched a source, keyed by their exact on-disk
@@ -129,10 +140,9 @@ var verifiedFiles = &verificationCache{entries: map[string]verifiedFile{}}
 const maxVerifiedFiles = 16
 
 type verifiedFile struct {
-	identity       fileIdentity
-	length         int64
-	sha256         string
-	platform, arch string
+	identity fileIdentity
+	length   int64
+	sha256   string
 }
 
 type verificationCache struct {
@@ -140,20 +150,20 @@ type verificationCache struct {
 	entries map[string]verifiedFile
 }
 
-func (c *verificationCache) matches(path string, identity fileIdentity, s Source) bool {
+func (c *verificationCache) matches(path string, identity fileIdentity, length int64, sha256 string) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	entry, ok := c.entries[path]
-	return ok && entry == verifiedFile{identity, s.Length, s.SHA256, s.Platform, s.Architecture}
+	return ok && entry == verifiedFile{identity, length, sha256}
 }
 
-func (c *verificationCache) remember(path string, identity fileIdentity, s Source) {
+func (c *verificationCache) remember(path string, identity fileIdentity, length int64, sha256 string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if _, ok := c.entries[path]; !ok && len(c.entries) >= maxVerifiedFiles {
 		clear(c.entries)
 	}
-	c.entries[path] = verifiedFile{identity, s.Length, s.SHA256, s.Platform, s.Architecture}
+	c.entries[path] = verifiedFile{identity, length, sha256}
 }
 
 func digestFile(path string) (length int64, digest string, resultErr error) {

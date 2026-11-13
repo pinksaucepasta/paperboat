@@ -3,10 +3,9 @@
 package service
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
+	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
 	"github.com/pinksaucepasta/paperboat/internal/windowssecurity"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -55,15 +54,11 @@ func VerifyOwnedWindowsRoleExecutable(kind, instance, path string) (WindowsExecu
 	if err != nil || !strings.EqualFold(identity.Executable, path) {
 		return WindowsExecutableIdentity{}, ErrInvalidDefinition
 	}
-	file, err := os.Open(path)
-	if err != nil {
+	if err := installsource.VerifyDigest(path, identity.Length, identity.SHA256); err != nil {
+		if errors.Is(err, installsource.ErrInvalid) {
+			err = ErrInvalidDefinition
+		}
 		return WindowsExecutableIdentity{}, err
-	}
-	defer file.Close()
-	digest := sha256.New()
-	n, err := io.Copy(digest, io.LimitReader(file, identity.Length+1))
-	if err != nil || n != identity.Length || hex.EncodeToString(digest.Sum(nil)) != identity.SHA256 {
-		return WindowsExecutableIdentity{}, ErrInvalidDefinition
 	}
 	return identity, nil
 }
