@@ -97,7 +97,7 @@ Result: during the portal (4.5 min) `pb doctor` is unhealthy (authentication fai
 
 ## Linux host firewalls in their default state: PASS (no prompt exists on Linux)
 Machines x38-f (firewall on) and x38-g, both directions per round: `pb ping` (4 samples), `pb exec -- hostname`, plus `pb doctor` on x38-f.
-- ufw (`ufw default deny incoming`, `default allow outgoing`, enabled; 63 ufw nft chains): every ping `path=direct`, exec both ways, doctor healthy.
+- ufw (`ufw default deny incoming`, `default allow outgoing`, enabled; 63 ufw nft chains), one round (a 3-round rerun was cut short when hp went offline): every ping `path=direct`, exec both ways, doctor healthy.
 - firewalld (package default, zone public; started with its nft table `inet firewalld`; its D-Bus API does not answer inside a container, the loaded nft rules are the default): 3 rounds, every ping `path=direct` 4/4, exec both ways OK, doctor healthy. (A first attempt right after starting it, under a host load of 300, timed out once; see below.)
 - nftables stateful default-drop input (`policy drop`, established/related, lo, icmp accepted): 5 rounds clean, doctor healthy. One earlier round (3 rounds) had one `pb exec` x38-f>x38-g fail ("could not reach the target machine") while the ping beside it was direct 4/4; not repeated in the next 5 rounds.
 firewalld/nftables round output, trimmed:
@@ -204,3 +204,8 @@ load average: 12.70, 137.02, 129.37
 rc=0
 ```
 Host load: hp reached load 330 from other lanes during the first firewalld attempt (pings 100% loss, 1-5 s) and later became unreachable; the numbers above are from runs at load 12-60.
+
+## Not run (named gaps)
+- Wi-Fi switch (a machine moving between two networks with a new address, gateway and NAT while an exec runs) and the daemon-level proxy check (shell has a proxy, service has none; service has it): scripts were ready, but hp went unreachable at 19:05 IST (Tailscale offline, ssh timeout) after load 330 from other lanes, and pbvm2 stayed at load 160-230 for the next hour (container create/removal and `pb machine add` took minutes or failed); a result taken there would not be a product result.
+- Full-tunnel VPN on M and W, and every part above on M and W: unchanged from part 2 (WireGuard full tunnel passes on Linux and Windows only).
+- IPv6-only needs the hosted endpoints to be names (see the failure above) before a rerun can pass.
