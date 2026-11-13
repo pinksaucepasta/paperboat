@@ -399,11 +399,46 @@ func serveLocalPeerConn(ctx context.Context, local net.Conn, remote Conn, includ
 			}
 		}()
 	}
+	// Acknowledgements are taken here, ahead of the frames below: handling a key can wait for output to be read (the Ctrl-C
+	// hold), and output is read only as acknowledgements arrive.
+	type localPeerFrame struct {
+		kind    byte
+		payload []byte
+		err     error
+	}
+	frames := make(chan localPeerFrame, 256)
+	go func() {
+		for {
+			kind, payload, err := readLocalPeerFrame(local)
+			if err == nil && kind == localPeerTerminalAck {
+				if isExec || len(payload) != 8 {
+					err = ErrPeerTerminalInvalid
+				} else {
+					pacer.ack(binary.BigEndian.Uint64(payload))
+					continue
+				}
+			}
+			select {
+			case frames <- localPeerFrame{kind, payload, err}:
+			case <-stop:
+				return
+			}
+			if err != nil {
+				return
+			}
+		}
+	}()
 	workers.Add(1)
 	go func() {
 		defer workers.Done()
 		for {
-			kind, payload, err := readLocalPeerFrame(local)
+			var frame localPeerFrame
+			select {
+			case frame = <-frames:
+			case <-stop:
+				return
+			}
+			kind, payload, err := frame.kind, frame.payload, frame.err
 			if err != nil {
 				done <- err
 				return
@@ -414,12 +449,6 @@ func serveLocalPeerConn(ctx context.Context, local net.Conn, remote Conn, includ
 					done <- err
 					return
 				}
-			case localPeerTerminalAck:
-				if isExec || len(payload) != 8 {
-					done <- ErrPeerTerminalInvalid
-					return
-				}
-				pacer.ack(binary.BigEndian.Uint64(payload))
 			case localPeerResize:
 				if len(payload) != 4 {
 					done <- ErrPeerTerminalInvalid
