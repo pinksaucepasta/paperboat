@@ -178,7 +178,7 @@ def mint_token(kind, name=None, controller_dev=None):
               'url=re.search(r"\'(https?://[^\']+)\'",cmd).group(1)\n'
               'body=subprocess.run(["curl","-fsSL",url],capture_output=True,text=True).stdout\n'
               'print(re.search(r"ENROLLMENT_TOKEN\\W+([A-Za-z0-9]+)",body).group(1))\n')
-    name = name or (os.environ.get('XPLAT_W_NAME') if kind == 'windows' else None) or PREFIX + '-' + ('w' if kind == 'windows' else 'l')
+    name = name or os.environ.get('XPLAT_W_NAME' if kind == 'windows' else 'XPLAT_L_NAME') or PREFIX + '-' + ('w' if kind == 'windows' else 'l')
     ctl = controller_dev or controller()
     done = ctl.run(['python3', '-', name, kind, ctl.pb_path], input=script.encode(), timeout=90)
     token = done.text.strip()
