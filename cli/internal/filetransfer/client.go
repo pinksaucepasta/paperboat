@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/rand/v2"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -18,6 +19,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
 	"github.com/pinksaucepasta/paperboat/shared/httptransport"
+	"github.com/pinksaucepasta/paperboat/shared/reattach"
 	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 )
 
@@ -148,18 +150,21 @@ type Client struct {
 	// Committed is told each file's committed offset as the receiver confirms it.
 	Committed func(transferID string, offset int64)
 	retryWait func(context.Context, int) error
-	authMu    sync.RWMutex
-	refreshMu sync.Mutex
-	auth      Auth
-	binding   Binding
-	native    bool
+	// renewDelay is the pause before the n-th renewal in a row without progress (a field only so tests can shorten it).
+	renewDelay func(int) time.Duration
+	authMu     sync.RWMutex
+	refreshMu  sync.Mutex
+	renewals   int // renewals since the last committed chunk, guarded by refreshMu
+	auth       Auth
+	binding    Binding
+	native     bool
 }
 
 func NewClient(endpoint string, auth Auth, binding Binding, client *http.Client) *Client {
 	if client == nil {
 		client = &http.Client{Transport: httptransport.Default(), Timeout: 5 * time.Minute}
 	}
-	return &Client{Endpoint: strings.TrimRight(endpoint, "/"), HTTPClient: client, MaxConcurrent: 2, DeliveryTimeout: 10 * time.Minute, retryWait: waitOperationRetry, auth: auth, binding: binding}
+	return &Client{Endpoint: strings.TrimRight(endpoint, "/"), HTTPClient: client, MaxConcurrent: 2, DeliveryTimeout: 10 * time.Minute, retryWait: waitOperationRetry, renewDelay: renewalDelay, auth: auth, binding: binding}
 }
 
 func (c *Client) UpdateAuth(auth Auth) { c.setAuth(auth) }
@@ -173,6 +178,7 @@ func (c *Client) WithTransport(transport http.RoundTripper) *Client {
 	clone.MaxConcurrent = c.MaxConcurrent
 	clone.DeliveryTimeout = c.DeliveryTimeout
 	clone.retryWait = c.retryWait
+	clone.renewDelay = c.renewDelay
 	clone.native = c.native
 	return clone
 }
@@ -792,12 +798,41 @@ func (c *Client) afterTransportLoss(ctx context.Context, previous Auth, err erro
 	if c.currentAuth() != previous {
 		return err
 	}
+	// A refused stream (the host closes it, the sender sees an EOF) looks like a lost connection, and each renewal opens
+	// an access session: without a pause and a bound the sender renewed until the server's operations cap answered 429
+	// (X-15). The first renewal is immediate; later ones without a committed chunk between them back off and then stop.
+	if c.renewals >= maxRenewalsWithoutProgress {
+		return errors.Join(err, &nativeAuthorizationFailure{errors.New("the destination keeps refusing the transfer after renewed authorization")})
+	}
+	if c.renewals > 0 {
+		if waitErr := reattach.Wait(ctx, c.renewDelay(c.renewals)); waitErr != nil {
+			return errors.Join(err, waitErr)
+		}
+	}
 	fresh, refreshErr := c.RefreshAuth(ctx)
 	if refreshErr != nil {
+		// a failed renewal opened no session (daemon restarting, machine offline): not counted
 		return errors.Join(err, refreshErr)
 	}
+	c.renewals++
 	c.setAuth(fresh)
 	return err
+}
+
+// maxRenewalsWithoutProgress bounds renewals in a row that no committed chunk followed: 8 with the backoff below is
+// about two minutes, inside the 32-operation cap and far shorter than the recovery window.
+const maxRenewalsWithoutProgress = 8
+
+// renewalDelay is n^2 * 250 ms capped at 30 s, jittered 0.5-1.5x (prior art: ~/ref/tailscale/util/backoff/backoff.go).
+func renewalDelay(n int) time.Duration {
+	d := min(time.Duration(n*n)*250*time.Millisecond, 30*time.Second)
+	return time.Duration(float64(d) * (rand.Float64() + 0.5))
+}
+
+func (c *Client) renewalProgressed() {
+	c.refreshMu.Lock()
+	c.renewals = 0
+	c.refreshMu.Unlock()
 }
 
 func decodeError(response *http.Response) error {

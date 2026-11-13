@@ -81,6 +81,7 @@ func (c *Client) uploadNative(ctx context.Context, manifest Manifest, source Sou
 			if err == nil {
 				requestCancel()
 				state.recovery.Progressed()
+				c.renewalProgressed()
 				previous = offset
 				if c.Committed != nil {
 					c.Committed(manifest.TransferID, committed)
