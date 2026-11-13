@@ -131,14 +131,6 @@ func printPolicyErrors(w io.Writer, problems []api.PolicyError) {
 	}
 }
 
-func formatPorts(ports []any) string {
-	parts := make([]string, 0, len(ports))
-	for _, port := range ports {
-		parts = append(parts, fmt.Sprint(port))
-	}
-	return strings.Join(parts, ",")
-}
-
 func printPolicyChanges(w io.Writer, changes []api.PolicyChange) {
 	if len(changes) == 0 {
 		fmt.Fprintln(w, "No access changes.")
@@ -151,8 +143,8 @@ func printPolicyChanges(w io.Writer, changes []api.PolicyChange) {
 			sign = "-"
 		}
 		line := fmt.Sprintf("%s %s %s %s %s", sign, change.Change, change.Subject, change.Target, change.Action)
-		if len(change.Ports) > 0 {
-			line += " ports " + formatPorts(change.Ports)
+		if change.Ports != "" {
+			line += " ports " + change.Ports
 		}
 		if len(change.Rules) > 0 {
 			line += " (" + strings.Join(change.Rules, ", ") + ")"

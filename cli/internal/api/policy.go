@@ -48,7 +48,7 @@ type PolicyChange struct {
 	Subject string   `json:"subject"`
 	Target  string   `json:"target"`
 	Action  string   `json:"action"`
-	Ports   []any    `json:"ports,omitempty"`
+	Ports   string   `json:"ports,omitempty"` // "5432" or "22,8000-8080": the server's one-string form
 	Rules   []string `json:"rules,omitempty"`
 }
 
@@ -78,7 +78,7 @@ type PolicyAccess struct {
 	Subject string   `json:"subject"`
 	Target  string   `json:"target"`
 	Action  string   `json:"action"`
-	Ports   []any    `json:"ports,omitempty"`
+	Ports   string   `json:"ports,omitempty"`
 	Reason  string   `json:"reason"`
 	Rules   []string `json:"rules,omitempty"`
 }

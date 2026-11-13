@@ -89,7 +89,7 @@ const (
 	testPolicyText  = "{\n  // keep me\n  \"rules\": []\n}\n"
 	testPolicyJSON  = `{"workspace":"acme","version":7,"policy":"{\n  // keep me\n  \"rules\": []\n}\n","digest":"sha256:ab","updated_at":"2026-10-20T10:00:00Z","updated_by":"user:ana@example.test","message":"m","can_edit":"all","names":{"users":["ana@example.test"],"machines":["db"],"previews":[],"tunnels":[],"tags":[],"groups":[]},"future_field":1}`
 	savedPolicyJSON = `{"workspace":"acme","version":8,"policy":"x","digest":"sha256:cd","updated_at":"2026-10-20T10:00:00Z","updated_by":"user:ana@example.test","message":"m","can_edit":"all","names":{}}`
-	changesJSON     = `[{"change":"gained","subject":"user:bo@example.test","target":"machine:db","action":"exec","rules":["/rules/0"]},{"change":"lost","subject":"user:cy@example.test","target":"machine:db","action":"private_access","ports":[5432,"8000-8080"]}]`
+	changesJSON     = `[{"change":"gained","subject":"user:bo@example.test","target":"machine:db","action":"exec","rules":["/rules/0"]},{"change":"lost","subject":"user:cy@example.test","target":"machine:db","action":"private_access","ports":"5432,8000-8080"}]`
 )
 
 func runPolicyCLI(t *testing.T, serverURL string, args ...string) (int, string, string) {
@@ -266,6 +266,17 @@ func TestPolicyExplainDecisionAndTables(t *testing.T) {
 	}
 	if code, _, _ := runPolicyCLI(t, url, "policy", "explain", "--dst", "machine:db"); code == 0 {
 		t.Fatal("--dst without --action must be rejected")
+	}
+}
+
+// The server sends ports as one string ("5432,8000-8080", shared/policy.Access); a client that read it as a list failed
+// `pb policy explain`/`test`/`set` with "could not finish the command" on every private_access rule (X-34).
+func TestPolicyExplainWhoCanReadsThePortsTheServerSends(t *testing.T) {
+	fake, url := newPolicyFake(t)
+	fake.on("POST "+policyBase+"/explain", 200, data(`{"who_can":[{"subject":"user:ana@example.test","target":"machine:db","action":"private_access","ports":"5432,8000-8080","reason":"rule","rules":["/rules/0"]}]}`))
+	code, out, errOut := runPolicyCLI(t, url, "policy", "explain", "--dst", "machine:db", "--action", "private_access")
+	if code != 0 || !strings.Contains(out, "5432,8000-8080") || !strings.Contains(out, "/rules/0") {
+		t.Fatalf("code=%d out=%s err=%s", code, out, errOut)
 	}
 }
 

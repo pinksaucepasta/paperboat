@@ -88,7 +88,7 @@ func printExplanation(w io.Writer, explanation api.PolicyExplanation) error {
 		writer := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
 		fmt.Fprintln(writer, "SUBJECT\tTARGET\tACTION\tPORTS\tREASON\tRULES")
 		for _, row := range table.rows {
-			ports, rules := formatPorts(row.Ports), strings.Join(row.Rules, ",")
+			ports, rules := row.Ports, strings.Join(row.Rules, ",")
 			fmt.Fprintf(writer, "%s\t%s\t%s\t%s\t%s\t%s\n", row.Subject, row.Target, row.Action, dashIfEmpty(ports), row.Reason, dashIfEmpty(rules))
 		}
 		if err := writer.Flush(); err != nil {
