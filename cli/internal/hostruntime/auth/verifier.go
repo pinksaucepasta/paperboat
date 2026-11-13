@@ -113,9 +113,11 @@ type Claims struct {
 	// TransferMode and MaxBytes bind a file_transfer credential to its mode (PLAN 3b, File transfer modes):
 	// "automatic" carries MaxBytes, the declared batch total (at most AutomaticTransferLimit); "unlimited" has none.
 	TransferMode string `json:"transfer_mode,omitempty"`
-	MaxBytes     int64  `json:"max_bytes,omitempty"`
-	CounterEpoch string `json:"counter_epoch,omitempty"`
-	Confirmation *struct {
+	// TransferDirection is "send" on a credential the server issues to an API-token session; the destination only checks it.
+	TransferDirection string `json:"transfer_direction,omitempty"`
+	MaxBytes          int64  `json:"max_bytes,omitempty"`
+	CounterEpoch      string `json:"counter_epoch,omitempty"`
+	Confirmation      *struct {
 		JKT string `json:"jkt"`
 	} `json:"cnf,omitempty"`
 }
@@ -244,7 +246,7 @@ func (v Verifier) Verify(ctx context.Context, token string, policy Policy) (Clai
 	if err := decodeSegment(parts[1], &claims); err != nil {
 		return Claims{}, &Error{Code: Malformed, Cause: err}
 	}
-	if !validTransferModeClaims(claims) {
+	if !validTransferModeClaims(claims) || claims.TransferDirection != "" && claims.TransferDirection != "send" {
 		return Claims{}, &Error{Code: Malformed}
 	}
 	if claims.CredentialClass == "browser_terminal_operation" || claims.CredentialClass == "browser_inspector_operation" || claims.CredentialClass == recording.CredentialClass && claims.BrowserAttachmentID != "" {

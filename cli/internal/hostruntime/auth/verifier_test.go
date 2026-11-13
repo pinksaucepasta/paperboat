@@ -290,3 +290,19 @@ func TestVerifierAcceptsOnlyValidTransferModeClaims(t *testing.T) {
 		}
 	}
 }
+
+// An API-token session's file_transfer credential carries transfer_direction "send" (server mint.go): the destination
+// accepted nothing with that claim, so every team or token send ended as credential_malformed (X-15, 2026-11-13).
+func TestVerifierAcceptsTheSendTransferDirectionOnly(t *testing.T) {
+	fixture, private, public := loadFixture(t)
+	keys := &keySource{keys: map[string]ed25519.PublicKey{"test-key-1": public}}
+	v := Verifier{Keys: keys, Clock: fixedClock{time.Unix(fixture.Claims.IssuedAt+1, 0)}, ClockSkew: time.Minute}
+	for direction, ok := range map[string]bool{"": true, "send": true, "receive": false} {
+		claims := fixture.Claims
+		claims.TransferDirection = direction
+		_, err := v.Verify(context.Background(), signToken(t, fixture.Header, claims, private), terminalPolicy(fixture.Claims))
+		if (err == nil) != ok {
+			t.Fatalf("transfer_direction=%q: err=%v, want accepted=%v", direction, err, ok)
+		}
+	}
+}
