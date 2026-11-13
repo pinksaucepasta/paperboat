@@ -701,6 +701,7 @@ type windowsRuntimeWorker struct {
 	ready      hostdproto.Status
 	active     bool // the control pipe then carries the handover lines (serveWorkerControl)
 	stdout     io.ReadCloser
+	stderr     *tailBuffer
 	outputOnce sync.Once
 	outputErr  error
 	waitOnce   sync.Once
@@ -727,12 +728,13 @@ func startWindowsRuntimeWorkerForRelease(ctx context.Context, executable, socket
 	if err != nil {
 		return nil, runtimeFailure("starting the runtime worker failed", err, control.Close())
 	}
-	command.Stderr = io.Discard
+	stderr := &tailBuffer{limit: 2048}
+	command.Stderr = stderr
 	command.WaitDelay = time.Second
 	if err := command.Start(); err != nil {
 		return nil, runtimeFailure("starting the runtime worker failed", err, control.Close(), stdout.Close())
 	}
-	return &windowsRuntimeWorker{command: command, control: control, lines: bufio.NewReader(io.LimitReader(stdout, 4096)), workerID: workerID, stdout: stdout}, nil
+	return &windowsRuntimeWorker{command: command, control: control, lines: bufio.NewReader(io.LimitReader(stdout, 4096)), workerID: workerID, stdout: stdout, stderr: stderr}, nil
 }
 
 func (w *windowsRuntimeWorker) Ready(ctx context.Context) (hostdproto.Status, error) {
@@ -743,7 +745,7 @@ func (w *windowsRuntimeWorker) Ready(ctx context.Context) (hostdproto.Status, er
 	}
 	line, err := readWindowsWorkerLine(ctx, w.lines, w.closeOutput)
 	if err != nil {
-		return hostdproto.Status{}, err
+		return hostdproto.Status{}, w.exitFailure(err)
 	}
 	status, err := parseWindowsWorkerStatus(line, "ready", w.workerID)
 	if err == nil {
@@ -764,13 +766,38 @@ func (w *windowsRuntimeWorker) Activate(ctx context.Context) (hostdproto.Status,
 	w.active = true
 	line, err := readWindowsWorkerLine(ctx, w.lines, w.closeOutput)
 	if err != nil {
-		return hostdproto.Status{}, err
+		return hostdproto.Status{}, w.exitFailure(err)
 	}
 	status, err := parseWindowsWorkerStatus(line, "active", w.workerID)
 	if err != nil || status.Epoch != w.ready.Epoch || status.APIVersion != w.ready.APIVersion {
 		return hostdproto.Status{}, errors.New("invalid Windows worker activation")
 	}
 	return status, nil
+}
+
+// exitFailure adds the worker's own last output to an end of its lifecycle output: the worker exited, and only its
+// stderr says why (a bare EOF rolled an update back on victus with no cause anywhere).
+func (w *windowsRuntimeWorker) exitFailure(err error) error {
+	if !errors.Is(err, io.EOF) || w.stderr == nil {
+		return err
+	}
+	select {
+	case <-w.exited():
+	case <-time.After(2 * time.Second):
+	}
+	if tail := w.stderr.String(); tail != "" {
+		return fmt.Errorf("%w; the runtime worker said: %s", err, tail)
+	}
+	return err
+}
+
+// exited starts the one Wait for the worker process and returns its completion.
+func (w *windowsRuntimeWorker) exited() <-chan struct{} {
+	w.waitOnce.Do(func() {
+		w.waitDone = make(chan struct{})
+		go func() { w.waitErr = w.command.Wait(); close(w.waitDone) }()
+	})
+	return w.waitDone
 }
 
 func (w *windowsRuntimeWorker) closeOutput() error {
@@ -847,10 +874,7 @@ func (w *windowsRuntimeWorker) stopWithin(ctx context.Context, grace time.Durati
 		w.control = nil
 	}
 	w.mu.Unlock()
-	w.waitOnce.Do(func() {
-		w.waitDone = make(chan struct{})
-		go func() { w.waitErr = w.command.Wait(); close(w.waitDone) }()
-	})
+	w.exited()
 	var expired <-chan time.Time
 	if grace > 0 {
 		timer := time.NewTimer(grace)

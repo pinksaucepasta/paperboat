@@ -97,29 +97,6 @@ func (nativeWorkerStarter) Start(ctx context.Context, request workerStartRequest
 	return worker, nil
 }
 
-// tailBuffer keeps the last bytes a worker wrote to stderr for the exit report.
-type tailBuffer struct {
-	mu    sync.Mutex
-	limit int
-	data  []byte
-}
-
-func (b *tailBuffer) Write(p []byte) (int, error) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	b.data = append(b.data, p...)
-	if len(b.data) > b.limit {
-		b.data = append([]byte(nil), b.data[len(b.data)-b.limit:]...)
-	}
-	return len(p), nil
-}
-
-func (b *tailBuffer) String() string {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return strings.TrimSpace(string(b.data))
-}
-
 // execWorker uses a private stdin pipe for exactly one fixed activation word.
 // Capability bytes travel only through the inherited descriptor, so they can
 // never be confused with an activation request.

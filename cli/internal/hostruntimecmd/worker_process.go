@@ -5,6 +5,8 @@ package hostruntimecmd
 import (
 	"context"
 	"os"
+	"strings"
+	"sync"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
 )
@@ -45,4 +47,27 @@ type exitWatcher interface {
 // requests before exiting, used when a new hostd generation took over.
 type drainer interface {
 	Drain(context.Context) error
+}
+
+// tailBuffer keeps the last bytes a worker wrote to stderr for the exit report.
+type tailBuffer struct {
+	mu    sync.Mutex
+	limit int
+	data  []byte
+}
+
+func (b *tailBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.data = append(b.data, p...)
+	if len(b.data) > b.limit {
+		b.data = append([]byte(nil), b.data[len(b.data)-b.limit:]...)
+	}
+	return len(p), nil
+}
+
+func (b *tailBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return strings.TrimSpace(string(b.data))
 }

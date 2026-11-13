@@ -201,3 +201,47 @@ func TestStagingSweepsElevationExecutablesLeftByAKilledInstaller(t *testing.T) {
 		t.Fatalf("left in TEMP: %v", matches)
 	}
 }
+
+func TestWindowsWorkerThatExitsDuringActivationReportsItsOwnCause(t *testing.T) {
+	command := exec.Command(os.Args[0], "-test.run=^TestWindowsWorkerExitHelper$")
+	command.Env = append(os.Environ(), "PAPERBOAT_WORKER_EXIT_HELPER=1")
+	command.WaitDelay = time.Second
+	stdout, err := command.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	control, err := command.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stderr := &tailBuffer{limit: 2048}
+	command.Stderr = stderr
+	if err := command.Start(); err != nil {
+		t.Fatal(err)
+	}
+	worker := &windowsRuntimeWorker{command: command, control: control, stdout: stdout, stderr: stderr, lines: bufio.NewReader(stdout), workerID: "exits"}
+	defer func() {
+		stopCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = worker.Stop(stopCtx)
+	}()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if _, err := worker.Ready(ctx); err != nil {
+		t.Fatal(err)
+	}
+	_, err = worker.Activate(ctx)
+	if !errors.Is(err, io.EOF) || !strings.Contains(err.Error(), "pb: the session owner is unavailable") {
+		t.Fatalf("activation failure lost the worker's cause: %v", err)
+	}
+}
+
+func TestWindowsWorkerExitHelper(t *testing.T) {
+	if os.Getenv("PAPERBOAT_WORKER_EXIT_HELPER") != "1" {
+		return
+	}
+	_, _ = io.WriteString(os.Stdout, "ready 1 1\n")
+	_, _ = bufio.NewReader(os.Stdin).ReadString('\n')
+	_, _ = io.WriteString(os.Stderr, "pb: the session owner is unavailable\n")
+	os.Exit(1)
+}
