@@ -90,6 +90,13 @@ func (m *Manager) PruneRecordings(retention time.Duration, quotaBytes int64) ([]
 	return m.config.Recordings.Prune(retention, quotaBytes)
 }
 
+// endRecording ends the recording of a session that is gone; having none is not an error.
+func (m *Manager) endRecording(sessionID string) {
+	if m.config.Recordings != nil {
+		_, _ = m.config.Recordings.Stop(sessionID, "", recordings.ReasonSessionEnded)
+	}
+}
+
 // CloseInterruptedRecording ends an open recording whose session the caller found no longer running.
 func (m *Manager) CloseInterruptedRecording(recordingID string) (recordings.Meta, error) {
 	metas, err := m.Recordings()
@@ -98,8 +105,14 @@ func (m *Manager) CloseInterruptedRecording(recordingID string) (recordings.Meta
 	}
 	for _, meta := range metas {
 		if meta.ID == recordingID {
-			if m.config.Recordings.State(meta.SessionID) != nil {
-				return meta, recordings.ErrRecording // this owner still records it
+			if active := m.config.Recordings.State(meta.SessionID); active != nil && active.ID == meta.ID {
+				if live, err := m.get(meta.SessionID); err == nil {
+					if state, _ := live.lifecycle.Snapshot(); state == Running || state == Closing {
+						return meta, recordings.ErrRecording // this owner still records it
+					}
+				}
+				// Its session is gone or over, so the recorder that was left active ends with it.
+				return m.config.Recordings.Stop(meta.SessionID, "", recordings.ReasonSessionEnded)
 			}
 			return m.config.Recordings.CloseInterrupted(meta)
 		}

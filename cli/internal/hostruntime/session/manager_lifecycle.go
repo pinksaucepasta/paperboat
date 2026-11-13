@@ -350,5 +350,6 @@ func (m *Manager) deleteAtGeneration(sessionID string, expectedGeneration uint64
 	delete(m.sessions, sessionID)
 	delete(m.names, session.name)
 	m.mu.Unlock()
+	m.endRecording(sessionID)
 	return nil
 }
