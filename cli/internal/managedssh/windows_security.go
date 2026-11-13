@@ -280,9 +280,10 @@ func windowsAccountName(sid *windows.SID) string {
 	return sid.String()
 }
 
-// verifyCurrentUserProfileRoot accepts SYSTEM ownership only for the existing
+// verifyCurrentUserProfileRoot accepts SYSTEM or Administrators ownership only for the existing
 // Windows profile root. Provisioning and profile migration commonly leave
-// C:\Users\<name> owned by SYSTEM even though the enrolled user owns .ssh.
+// C:\Users\<name> owned by SYSTEM, and the first sign-in of an administrator account
+// leaves it owned by Administrators, even though the enrolled user owns .ssh.
 // Writable descendants continue through openSecureSSHDirectory and must be
 // owned by the exact current-user SID.
 func verifyCurrentUserProfileRoot(path, sid string) error {
@@ -306,5 +307,5 @@ func verifyCurrentUserProfileRoot(path, sid string) error {
 }
 
 func validWindowsProfileRootState(mode os.FileMode, reparse bool, owner, sid string) bool {
-	return mode.IsDir() && mode&os.ModeSymlink == 0 && !reparse && (owner == sid || owner == windowsSystemSID)
+	return mode.IsDir() && mode&os.ModeSymlink == 0 && !reparse && (owner == sid || owner == windowsSystemSID || owner == windowsAdministratorsSID)
 }

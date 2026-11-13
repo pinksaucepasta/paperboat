@@ -13,7 +13,7 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-func TestValidWindowsProfileRootStateAllowsOnlyUserOrSystemDirectory(t *testing.T) {
+func TestValidWindowsProfileRootStateAllowsOnlyUserSystemOrAdministratorsDirectory(t *testing.T) {
 	const userSID = "S-1-5-21-1000"
 	for _, test := range []struct {
 		name    string
@@ -24,7 +24,7 @@ func TestValidWindowsProfileRootStateAllowsOnlyUserOrSystemDirectory(t *testing.
 	}{
 		{name: "current user", mode: os.ModeDir, owner: userSID, want: true},
 		{name: "system", mode: os.ModeDir, owner: windowsSystemSID, want: true},
-		{name: "administrators", mode: os.ModeDir, owner: "S-1-5-32-544"},
+		{name: "administrators", mode: os.ModeDir, owner: windowsAdministratorsSID, want: true},
 		{name: "foreign user", mode: os.ModeDir, owner: "S-1-5-21-2000"},
 		{name: "reparse directory", mode: os.ModeDir, reparse: true, owner: userSID},
 		{name: "symlink", mode: os.ModeSymlink, owner: userSID},
