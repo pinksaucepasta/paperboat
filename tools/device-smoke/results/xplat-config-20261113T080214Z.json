@@ -1,0 +1,25 @@
+{
+ "check": "xplat-config",
+ "results": [
+  {
+   "id": "X-03:x03_merge:L>W",
+   "status": "PASS",
+   "detail": "three-way merge kept CRLF on every line"
+  },
+  {
+   "id": "X-03:x03_merge:W>L",
+   "status": "PASS",
+   "detail": "three-way merge kept CRLF on every line"
+  },
+  {
+   "id": "X-03:x03_eol_edit:L>W",
+   "status": "PASS",
+   "detail": "line-ending-only edit travelled alone; against an edit on the other side it conflicted and both files stayed as written"
+  },
+  {
+   "id": "X-03:x03_eol_edit:W>L",
+   "status": "PASS",
+   "detail": "line-ending-only edit travelled alone; against an edit on the other side it conflicted and both files stayed as written"
+  }
+ ]
+}
