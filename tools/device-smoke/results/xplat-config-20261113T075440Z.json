@@ -1,0 +1,25 @@
+{
+ "check": "xplat-config",
+ "results": [
+  {
+   "id": "X-04:x04_exec:L>W",
+   "status": "PASS",
+   "detail": "repository 100755, rx04-w executable=n/a; kept through a Windows edit and back"
+  },
+  {
+   "id": "X-04:x04_exec:W>L",
+   "status": "PASS",
+   "detail": "repository 100644, rx04-l executable=False"
+  },
+  {
+   "id": "X-04:x04_unsafe:L>W",
+   "status": "FAIL",
+   "detail": "no status for rx04-l @ status_of:30 <- skipped:34 <- <lambda>:38 <- wait:120 <- wait_skipped:38 <- x04_unsafe:115 <- <lambda>:495 <- check:251"
+  },
+  {
+   "id": "X-04:x04_unsafe:W>L",
+   "status": "PASS",
+   "detail": "skipped as unsafe_permissions, sibling synced, travelled once safe"
+  }
+ ]
+}

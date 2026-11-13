@@ -1,0 +1,15 @@
+{
+ "check": "xplat-config",
+ "results": [
+  {
+   "id": "X-04:x04_unsafe:W>M",
+   "status": "PASS",
+   "detail": "skipped as unsafe_permissions, sibling synced, travelled once safe"
+  },
+  {
+   "id": "X-04:x04_unsafe:M>W",
+   "status": "PASS",
+   "detail": "skipped as unsafe_permissions, sibling synced, travelled once safe"
+  }
+ ]
+}
