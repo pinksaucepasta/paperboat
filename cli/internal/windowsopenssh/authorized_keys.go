@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/pinksaucepasta/paperboat/internal/atomicfile"
+	wire "github.com/pinksaucepasta/paperboat/shared/managedssh"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -30,7 +31,7 @@ const AllSessions = "*"
 // ReconcileAuthorizedKeysRevoking is ReconcileAuthorizedKeysContext that also returns the SHA256 fingerprints of the
 // keys that left the file, the one change after which their open sessions must end (sshd checks keys only at login).
 func ReconcileAuthorizedKeysRevoking(ctx context.Context, stateRoot string, publicKeys []string) (changed bool, removed []string, err error) {
-	if ctx == nil || !filepath.IsAbs(stateRoot) || filepath.Clean(stateRoot) != stateRoot || len(publicKeys) > 256 {
+	if ctx == nil || !filepath.IsAbs(stateRoot) || filepath.Clean(stateRoot) != stateRoot || len(publicKeys) > wire.MaxClientKeys {
 		return false, nil, ErrInvalidConfig
 	}
 	if err := ctx.Err(); err != nil {

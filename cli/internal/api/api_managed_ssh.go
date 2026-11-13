@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+
+	wire "github.com/pinksaucepasta/paperboat/shared/managedssh"
 )
 
 func (c *Client) ManagedSSHTarget(ctx context.Context, machineID string, generation uint64) (ManagedSSHTarget, error) {
@@ -79,7 +81,7 @@ func (c *Client) ManagedSSHAuthorizedKeys(ctx context.Context, machineID, keyID 
 	if err != nil {
 		return ManagedSSHAuthorizedKeys{}, err
 	}
-	if set.Type != "authorized_key_set" || set.Version != 1 || set.MachineID != machineID || set.MachineGeneration != generation || len(set.Keys) > 64 {
+	if set.Type != "authorized_key_set" || set.Version != 1 || set.MachineID != machineID || set.MachineGeneration != generation || len(set.Keys) > wire.MaxClientKeys {
 		return ManagedSSHAuthorizedKeys{}, errors.New("paperboat-server returned an invalid managed SSH authorized-key set")
 	}
 	return set, nil

@@ -16,6 +16,7 @@ import (
 	"strings"
 	"syscall"
 
+	wire "github.com/pinksaucepasta/paperboat/shared/managedssh"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/sys/unix"
 )
@@ -37,7 +38,7 @@ type AuthorizedKeysResult struct {
 }
 
 func ReconcileAuthorizedKeys(home string, ownerUID uint32, publicKeys []string) (AuthorizedKeysResult, error) {
-	if !filepath.IsAbs(home) || len(publicKeys) > MaxAgentIdentities {
+	if !filepath.IsAbs(home) || len(publicKeys) > wire.MaxClientKeys {
 		return AuthorizedKeysResult{}, ErrAuthorizedKeysConflict
 	}
 	home = filepath.Clean(home)

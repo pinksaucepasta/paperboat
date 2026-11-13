@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strings"
 
+	wire "github.com/pinksaucepasta/paperboat/shared/managedssh"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/sys/windows"
 )
@@ -35,7 +36,7 @@ type AuthorizedKeysResult struct {
 // owned by the user, SYSTEM or Administrators, writable by no one else; a
 // refusal names the path and the fix (UnsafeSSHPathError).
 func ReconcileAuthorizedKeys(home string, _ uint32, publicKeys []string) (AuthorizedKeysResult, error) {
-	if !filepath.IsAbs(home) || len(publicKeys) > MaxAgentIdentities {
+	if !filepath.IsAbs(home) || len(publicKeys) > wire.MaxClientKeys {
 		return AuthorizedKeysResult{}, ErrAuthorizedKeysConflict
 	}
 	directory, sid, unlock, err := openWindowsSSHDirectory(home, true)

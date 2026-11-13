@@ -624,7 +624,7 @@ SELECT k.fingerprint, k.user_id, k.cli_client_session_id, k.algorithm, k.public_
 JOIN cli_client_sessions cs ON cs.id=k.cli_client_session_id AND cs.user_id=k.user_id AND cs.state='active' AND cs.revoked_at IS NULL
  AND coalesce(cs.last_used_at,cs.created_at) >= $1
 WHERE k.state='active' AND machine_capability_allowed(k.user_id,$2,'managed_ssh')
-ORDER BY k.created_at DESC,k.cli_client_session_id DESC LIMIT 65
+ORDER BY k.created_at DESC,k.cli_client_session_id DESC LIMIT 257
 `
 
 type ListActiveManagedSSHClientKeysForMachineParams struct {
@@ -669,7 +669,7 @@ JOIN cli_client_sessions cs ON cs.id = k.cli_client_session_id AND cs.state = 'a
   AND coalesce(cs.last_used_at, cs.created_at) >= $1
 WHERE k.user_id = $2 AND k.state = 'active'
 ORDER BY k.created_at DESC, k.cli_client_session_id DESC
-LIMIT 64
+LIMIT 256
 `
 
 type ListActiveManagedSSHClientKeysForUserParams struct {

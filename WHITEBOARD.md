@@ -447,3 +447,7 @@ Also: the derpquic relay drops on its 64-slot per-peer queue (`server.go` select
 benchmark lost up to 1.5 %. Tune before measuring under loss (two victus VMs, forced relay, `tc netem` 1/3/5 %
 loss + 100 ms: transfer rate, terminal echo, network switch). `cli/upstream/PATCHES.md` names fork commit
 ac1095ce while both go.mod files pin 2d32e5f0.
+
+## Managed SSH via SSH certificates — after launch
+
+Today each host keeps a per-key authorized_keys list of every signed-in computer's client key, so an account is capped (`wire.MaxClientKeys`, 256) and every register, logout or revoke rewrites the list on every host. Design: hosts trust one Paperboat user CA (`TrustedUserCAKeys` in sshd, set once at install); a client gets a short-lived SSH certificate bound to its CLI session (principal = the OS user, validity of minutes, renewed while the session lives). No per-account key cap and no host-side key churn; revoking a session just stops issuing, and short validity bounds the window for open logins. Needs: CA key custody and rotation on the server, certificate issuance endpoint authorizing the exact machine and OS user, Windows OpenSSH `TrustedUserCAKeys` support check, tests that an expired or wrong-principal certificate is refused. Prior art: Teleport issues user certs (`lib/auth/keygen/keygen.go`) and hosts verify them against the cluster CA (`lib/srv/authhandlers.go`) in ~/ref/teleport.

@@ -15,6 +15,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/config"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/teams"
+	wire "github.com/pinksaucepasta/paperboat/shared/managedssh"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -356,8 +357,8 @@ func TestSQLRepositoryManagedSSHClientKeySetIsBounded(t *testing.T) {
 	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state,online,installation_generation) VALUES ($1,$2,$3,'windows','amd64','C:\\workspace','online','occupied',true,1)`, machineID, userID, "env_"+machineID); err != nil {
 		t.Fatal(err)
 	}
-	publicKeys := make([]string, 65)
-	for index := 0; index < 65; index++ {
+	publicKeys := make([]string, wire.MaxClientKeys+1)
+	for index := 0; index < wire.MaxClientKeys+1; index++ {
 		sessionID := fmt.Sprintf("ssh_bounded_cli_%02d_%s", index, suffix)
 		createdAt := now.Add(time.Duration(index) * time.Second)
 		if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.cli_client_sessions (id,user_id,client_id,client_label,device_type,os,scopes,state,created_at,approved_at) VALUES ($1,$2,$3,'bounded key','desktop','windows',ARRAY['account:read'],'active',$4,$4)`, sessionID, userID, "client_"+sessionID, createdAt); err != nil {
@@ -389,26 +390,26 @@ func TestSQLRepositoryManagedSSHClientKeySetIsBounded(t *testing.T) {
 		t.Fatal(err)
 	}
 	set, err = service.ListClientKeys(ctx, ListClientKeysRequest{ActorUserID: userID, UserMachineID: machineID, MachineGeneration: 1})
-	if err != nil || len(set.Keys) != 64 {
+	if err != nil || len(set.Keys) != wire.MaxClientKeys {
 		t.Fatalf("keys=%d err=%v", len(set.Keys), err)
 	}
-	if set.Keys[0].PublicKey != publicKeys[64] || set.Keys[63].PublicKey != publicKeys[1] {
+	if set.Keys[0].PublicKey != publicKeys[wire.MaxClientKeys] || set.Keys[wire.MaxClientKeys-1].PublicKey != publicKeys[1] {
 		t.Fatal("bounded client-key order does not match creation times")
 	}
 	registrationSession := "ssh_bounded_cli_registration_" + suffix
-	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.cli_client_sessions (id,user_id,client_id,client_label,device_type,os,scopes,state,created_at,approved_at) VALUES ($1,$2,$3,'bounded registration','desktop','windows',ARRAY['machines:connect'],'active',$4,$4)`, registrationSession, userID, "client_"+registrationSession, now.Add(65*time.Second)); err != nil {
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.cli_client_sessions (id,user_id,client_id,client_label,device_type,os,scopes,state,created_at,approved_at) VALUES ($1,$2,$3,'bounded registration','desktop','windows',ARRAY['machines:connect'],'active',$4,$4)`, registrationSession, userID, "client_"+registrationSession, now.Add((wire.MaxClientKeys+1)*time.Second)); err != nil {
 		t.Fatal(err)
 	}
 	registrationKey := publicLine(t, "ed25519")
-	if _, err := service.RegisterClient(ctx, RegisterClientRequest{OperationID: "operation_bounded_capacity_" + suffix, UserID: userID, CLIClientSessionID: registrationSession, PublicKey: registrationKey, Now: now.Add(65 * time.Second)}); !errors.Is(err, ErrClientKeyCapacity) {
+	if _, err := service.RegisterClient(ctx, RegisterClientRequest{OperationID: "operation_bounded_capacity_" + suffix, UserID: userID, CLIClientSessionID: registrationSession, PublicKey: registrationKey, Now: now.Add((wire.MaxClientKeys + 1) * time.Second)}); !errors.Is(err, ErrClientKeyCapacity) {
 		t.Fatalf("registration over account key capacity error=%v, want the typed capacity refusal", err)
 	}
 	// A signed-out (revoked) session frees its slot at once: dead sessions cannot hold the cap (hp 2026-10-27,
 	// a full test account refused every new computer's key).
-	if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.cli_client_sessions SET state='revoked',revoked_at=$2 WHERE id=$1`, "ssh_bounded_cli_01_"+suffix, now.Add(66*time.Second)); err != nil {
+	if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.cli_client_sessions SET state='revoked',revoked_at=$2 WHERE id=$1`, "ssh_bounded_cli_01_"+suffix, now.Add((wire.MaxClientKeys+2)*time.Second)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.RegisterClient(ctx, RegisterClientRequest{OperationID: "operation_bounded_capacity_freed_" + suffix, UserID: userID, CLIClientSessionID: registrationSession, PublicKey: registrationKey, Now: now.Add(67 * time.Second)}); err != nil {
+	if _, err := service.RegisterClient(ctx, RegisterClientRequest{OperationID: "operation_bounded_capacity_freed_" + suffix, UserID: userID, CLIClientSessionID: registrationSession, PublicKey: registrationKey, Now: now.Add((wire.MaxClientKeys + 3) * time.Second)}); err != nil {
 		t.Fatalf("registration after a session was revoked: %v", err)
 	}
 }
