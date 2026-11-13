@@ -307,6 +307,7 @@ func TestTerminalTitleIsPushedAndRestored(t *testing.T) {
 // X-25: a screen checkpoint that enters the alternate screen must not be written under the bar's scroll margin: its last
 // CRLF would scroll the first row away on a terminal that keeps the margin across the switch (seen through ConPTY).
 func TestScrollMarginIsClearedBeforeTheChunkThatEntersTheAlternateScreen(t *testing.T) {
+	t.Setenv("TERM_PROGRAM", "")
 	input, _, _ := os.Pipe()
 	reader, output, _ := os.Pipe()
 	defer input.Close()
@@ -324,6 +325,11 @@ func TestScrollMarginIsClearedBeforeTheChunkThatEntersTheAlternateScreen(t *test
 	enter, clear := strings.Index(text, "\x1b[?1049h"), strings.LastIndex(text[:strings.Index(text, "\x1b[?1049h")], "\x1b[r")
 	if enter < 0 || clear < 0 || strings.Index(text, "main row") > clear {
 		t.Fatalf("no margin reset between the main row and the alternate-screen chunk: %q", text)
+	}
+	// ESC[r homes the cursor and the terminal saves the cursor at ?1049h: the reset must be wrapped in a cursor save/restore, or the
+	// shell prompt comes back on row 1 after vim (X-24, found in a real Terminal.app window)
+	if !strings.HasPrefix(text[clear:enter], "\x1b[r\x1b[u") || !strings.HasSuffix(text[:clear], "\x1b[s") {
+		t.Fatalf("margin reset before the alternate screen is not wrapped in a cursor save/restore: %q", text[:enter])
 	}
 }
 

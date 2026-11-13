@@ -239,12 +239,14 @@ func New(options Options) *Bar {
 
 // clearMarginBeforeFullscreen drops the bar's scroll margin before a chunk that enters the alternate screen is written: the
 // chunk is often a whole screen checkpoint (rows separated by CRLF), and with the margin still set its last LF scrolls the
-// top row away. consumeANSI clears it only after the chunk. shortcut: a sequence split across two writes is not seen.
+// top row away. consumeANSI clears it only after the chunk. ESC[r homes the cursor, and the terminal saves the cursor at ?1049h, so the
+// cursor is saved and restored around it: otherwise the shell prompt came back on row 1 after vim. shortcut: a sequence split across
+// two writes is not seen.
 func (b *Bar) clearMarginBeforeFullscreen(data []byte) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if !b.alternate && bytes.Contains(data, []byte("\x1b[?1049h")) {
-		_, _ = fmt.Fprint(b.serializedOut, "\x1b[r")
+		_, _ = fmt.Fprint(b.serializedOut, b.cursorSave+"\x1b[r"+b.cursorRestore)
 	}
 }
 
