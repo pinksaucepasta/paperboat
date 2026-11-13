@@ -41,22 +41,22 @@ func TestWorkerFailuresAreSafeAndRecoveryRetainsAuthority(t *testing.T) {
 		defer routes.Close()
 		source := &runtimeSourceFake{admissions: []runtimewire.Admission{a}}
 		worker := &RuntimeCarrierWorker{Reporter: reporter, Source: source, Expected: expected, Routes: routes, Endpoints: endpointRegistry(t, a.Binding.EdgeProcessEpoch), Timeout: time.Second}
-		if err := worker.reconcile(ctx); err != nil || len(expected.Snapshot()) != 1 {
+		if err := worker.reconcile(ctx, nil); err != nil || len(expected.Snapshot()) != 1 {
 			t.Fatal("initial runtime authority was not installed")
 		}
 		invalid := a
 		invalid.RouteKind = "PRIVATE_PAYLOAD"
 		source.admissions = []runtimewire.Admission{invalid}
-		if err := worker.reconcile(ctx); err == nil || len(expected.Snapshot()) != 1 {
+		if err := worker.reconcile(ctx, nil); err == nil || len(expected.Snapshot()) != 1 {
 			t.Fatal("invalid pull replaced authority")
 		}
 		source.admissions = []runtimewire.Admission{a}
-		if err := worker.reconcile(ctx); err != nil || len(expected.Snapshot()) != 1 {
+		if err := worker.reconcile(ctx, nil); err != nil || len(expected.Snapshot()) != 1 {
 			t.Fatal("runtime recovery failed")
 		}
 		// An HTTP-owned failure is not repeated at the semantic worker boundary.
 		source.err = &control.RequestFailure{Err: control.ErrControlUnavailable, Cause: syscall.ECONNREFUSED}
-		if err := worker.reconcile(ctx); !errors.Is(err, syscall.ECONNREFUSED) {
+		if err := worker.reconcile(ctx, nil); !errors.Is(err, syscall.ECONNREFUSED) {
 			t.Fatal("request cause lost")
 		}
 

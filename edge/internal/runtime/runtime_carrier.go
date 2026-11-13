@@ -153,7 +153,7 @@ func (w *RuntimeCarrierWorker) Start(ctx context.Context) error {
 			case <-w.Ready:
 			}
 		}
-		w.reconcile(run)
+		w.reconcile(run, nil)
 		w.reconcileEndpoints(run) // the first endpoint set is part of being warm, not a tick away
 		var lastMissPull time.Time
 		ticker := time.NewTicker(w.Interval)
@@ -169,7 +169,7 @@ func (w *RuntimeCarrierWorker) Start(ctx context.Context) error {
 			case <-run.Done():
 				return
 			case <-ticker.C:
-				w.reconcile(run)
+				w.reconcile(run, nil)
 			case <-fast:
 				w.reconcileEndpoints(run)
 			case <-w.wake:
@@ -187,10 +187,11 @@ func (w *RuntimeCarrierWorker) Start(ctx context.Context) error {
 				w.pullDone = nil
 				w.mu.Unlock()
 				lastMissPull = time.Now()
-				w.reconcile(run)
-				if done != nil {
-					close(done)
-				}
+				w.reconcile(run, func() {
+					if done != nil {
+						close(done)
+					}
+				})
 			}
 		}
 	}()
@@ -245,8 +246,17 @@ func (w *RuntimeCarrierWorker) changed() {
 	}
 }
 
-func (w *RuntimeCarrierWorker) reconcile(parent context.Context) (failure error) {
+// reconcile pulls the runtime admissions and installs them. pulled (if any) runs once the admissions are
+// installed, or the pull failed, before the withdrawals and the observation report that follow: a carrier
+// handshake waiting for this pull must not also wait for a control plane that answers the report slowly
+// (a replacement server's first requests; gated deploys 2026-11-13 refused machines unknown_machine on it).
+func (w *RuntimeCarrierWorker) reconcile(parent context.Context, pulled func()) (failure error) {
 	defer func() { observeWorkerFailure(parent, w.Reporter, "runtime_admission", failure) }()
+	release := func() {}
+	if pulled != nil {
+		release = sync.OnceFunc(pulled)
+		defer release()
+	}
 	ctx, cancel := context.WithTimeout(parent, w.Timeout)
 	defer cancel()
 	values, err := w.Source.RuntimeCarrierAdmissions(ctx, w.Expected.NodeID(), w.Expected.ProcessEpoch())
@@ -269,6 +279,7 @@ func (w *RuntimeCarrierWorker) reconcile(parent context.Context) (failure error)
 		}
 		w.pulledCount = len(w.runtimeSet)
 	}
+	release()
 	w.withdraw()
 	w.observe(parent)
 	return err
