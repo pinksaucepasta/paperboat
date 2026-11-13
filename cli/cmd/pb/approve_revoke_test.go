@@ -33,7 +33,8 @@ func TestOnlyMachineRevokeAndTheDesktopActionCallTheServerDisconnect(t *testing.
 		})
 	}
 	for name := range callers {
-		if name != "machine_commands.go" && name != "desktop_command.go" {
+		// uninstall_server_record.go removes only the uninstalling machine's own record.
+		if name != "machine_commands.go" && name != "desktop_command.go" && name != "uninstall_server_record.go" {
 			t.Fatalf("%s calls the server disconnect; revoking a machine is pb machine revoke with its confirmation", name)
 		}
 	}
