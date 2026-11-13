@@ -11,4 +11,4 @@ You may not, without written permission:
 - call a fork, modified build or hosted service "Paperboat", or use a confusingly similar name or logo;
 - suggest that your product or service is official or endorsed by Paperboat.
 
-If you fork, rename it and remove the logo.
+If you fork, rename it and remove the logo. Questions: hello@paperboat.cloud.
