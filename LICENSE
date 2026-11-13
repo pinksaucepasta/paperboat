@@ -4,8 +4,7 @@ Portions of this software are licensed as follows:
 
 * Everything under the "server/", "console/" and "admin/" directories is licensed under the
   GNU Affero General Public License version 3.0 (AGPLv3), as defined in the LICENSE file in
-  each of those directories. For a commercial licence to those parts, contact
-  pprbtdev@gmail.com.
+  each of those directories.
 * Third-party components keep the licence of their original owner (for example
   "cli/upstream/licenses/").
 * Everything else is available under the MIT license below.
