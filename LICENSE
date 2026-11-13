@@ -1,3 +1,8 @@
+This MIT license applies to all parts of the repository except for the directories
+server/, console/ and admin/. Those directories are licensed under the GNU Affero
+General Public License version 3.0 (AGPLv3); see the LICENSE file inside each of them.
+See LICENSING.md for details.
+
 MIT License
 
 Copyright (c) 2026 Paperboat contributors
