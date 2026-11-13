@@ -1,0 +1,13 @@
+# F5-12 on macOS, 2026-11-13 (IST), by plat lane: managed-SSH session audit, online and offline-origin, macOS host
+Target: macpool-8 (GitHub macos-latest arm64, paired as plat-m, pb dev-aee62911e = CYCLE 1 build; `pb version` checked on it). Client: plat-c1 (hp container, pb dev-aee62911e). Control plane: prod, server 2026.11.13.9.
+Commands: ssh_mac_rows.py --alias plat-m --mac-user runner --only offline_audit  and  --only audit (MAC_CMD=ssh macpool-8, CLIENT_CMD=docker exec on plat-c1). No secrets or contents printed.
+
+## offline_audit (11 control-plane addresses blocked by pf on the Mac for 245 s, one real pb ssh run past the 2 min refresh hint, block lifted, host upload read from paperboat.audit_events)
+PASS F5-12 offline-audit
+outage 245s (11 addresses blocked) access_ended:56a49922:closed:3751:4442 access_ended:cef7e8b3:closed:3751:4442 access_started:9cf4e50c::0:0 access_ended:2af00004:closed:3751:4442 access_started:2af00004::0:0 access_started:f28c989e::0:0 access_ended:966588f6:closed:3751:4442 access_ended:9cf4e50c:closed:3751:4442 access_started:966588f6::0:0 access_started:cef7e8b3::0:0 access_started:56a49922::0:0 access_ended:f28c989e:closed:3751:4442
+
+## audit (online sessions: every access_started has its access_ended, origin online, outcome closed, bytes in/out > 0)
+PASS F5-12 audit
+access_started:5d7b532c::0:0 access_started:1566499b::0:0 access_started:dd5312b6::0:0 access_ended:5d7b532c:closed:3727:4382 access_ended:1566499b:closed:3735:4426 access_ended:dd5312b6:closed:3743:4442 access_started:8bd947a0::0:0 access_ended:7c1a274f:closed:3735:4426 access_ended:a597aec6:closed:3743:4442 access_started:72684298::0:0 access_ended:8bd947a0:closed:3727:4382 access_started:7c1a274f::0:0 access_started:a597aec6::0:0
+
+## Note: two earlier audit runs (01:47Z) FAILED only because the offline run's rows, filed late by the host uploader (one batch at 01:47:35Z), fell inside the check's 90 s window and are origin offline, which the online check rejects; run 3 in a quiet window PASS. First offline run FAIL (empty): the runner had a stale enrollment (system install u501 of an earlier owner, session invalid); uninstalled, reinstalled, re-paired plat-m, rerun PASS.
