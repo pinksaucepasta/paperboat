@@ -11,8 +11,10 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/pinksaucepasta/paperboat/internal/config"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/filetransfer"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/store"
+	"github.com/pinksaucepasta/paperboat/internal/windowssecurity"
 	"golang.org/x/sys/windows"
 )
 
@@ -118,5 +120,39 @@ func TestNativeRepairWindowsTreeAcceptsAReceivedFile(t *testing.T) {
 	}
 	if body, err := os.ReadFile(published); err != nil || !bytes.Equal(body, data) {
 		t.Fatalf("the received file changed: %q %v", body, err)
+	}
+}
+
+// A shared credential lock directory is checked against its exact creation DACL (no inheritance flags). The repair
+// gave it the tree's inheritable DACL, so the lock could no longer be released or cleared and the carrier stayed
+// down after pb doctor --repair on winpool-5 (2026-11-13).
+func TestNativeRepairWindowsTreeLeavesSharedLockDirectoriesAlone(t *testing.T) {
+	tokenUser, err := windows.GetCurrentProcessToken().GetTokenUser()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ownerSID := tokenUser.User.Sid.String()
+	root := t.TempDir()
+	lock := filepath.Join(root, "profile"+config.SharedLockDirectorySuffix)
+	if err := os.Mkdir(lock, 0700); err != nil {
+		t.Fatal(err)
+	}
+	sddl := "D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;" + ownerSID + ")"
+	descriptor, err := windows.SecurityDescriptorFromString(sddl)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dacl, _, err := descriptor.DACL()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := windows.SetNamedSecurityInfo(lock, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION, nil, nil, dacl, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := repairWindowsTreeACL(root, ownerSID); err != nil {
+		t.Fatal(err)
+	}
+	if !windowssecurity.ProtectedDACLMatches(lock, sddl) {
+		t.Fatal("the repair rewrote the shared lock directory's DACL")
 	}
 }

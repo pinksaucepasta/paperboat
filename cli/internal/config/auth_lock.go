@@ -41,6 +41,9 @@ const sharedLockInspectGrace = 2 * time.Second
 // inspectSharedLock validates another process's lock directory; a variable so a test can release it mid-inspection.
 var inspectSharedLock = validateSharedLockDirectory
 
+// SharedLockDirectorySuffix ends the directory of every shared credential lock (newSharedLock adds ".d" to a ".lock" path).
+const SharedLockDirectorySuffix = ".lock.d"
+
 func newSharedLock(path string) *sharedLock {
 	key := path + ".d"
 	local, _ := sharedLockMu.LoadOrStore(key, &sync.Mutex{})

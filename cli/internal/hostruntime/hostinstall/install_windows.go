@@ -28,6 +28,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/atomicfile"
 	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
+	"github.com/pinksaucepasta/paperboat/internal/config"
 	"github.com/pinksaucepasta/paperboat/internal/diskspace"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/binarytarget"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/bootstrap"
@@ -4247,6 +4248,11 @@ func repairWindowsLocalDaemonTreeChildren(root string, rootHandle windows.Handle
 		}
 		if path == root {
 			return nil
+		}
+		if entry.IsDir() && strings.HasSuffix(entry.Name(), config.SharedLockDirectorySuffix) {
+			// A shared credential lock is validated against its exact creation DACL (no inheritance flags): giving it the
+			// tree's inheritable one made it unreleasable and wedged the carrier until it was removed by hand.
+			return filepath.SkipDir
 		}
 		handle, err := openWindowsLocalDaemonStateObject(path, entry.IsDir())
 		if err != nil {
