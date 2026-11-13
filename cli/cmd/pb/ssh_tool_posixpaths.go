@@ -74,10 +74,11 @@ func rsyncRemoteShellChosen(args, environment []string) bool {
 // rsync died with "connection unexpectedly closed"). Two cats turn the sockets into pipes ssh.exe can use; pipefail
 // keeps ssh's exit status. The input cat is a process substitution so the wrapper ends when ssh.exe does: rsync keeps
 // its end of the socket open until the shell exits, and a waited-for cat would never see EOF.
+// Resolve cat beside bash: a Git/Cygwin cat earlier on PATH cannot read another MSYS2 runtime's sockets.
 // rsync splits the command on spaces and keeps a quoted argument whole, a quote inside doubled.
 func rsyncRemoteShellArgument(bash, ssh string) string {
 	quote := func(value string) string { return "'" + strings.ReplaceAll(value, "'", "''") + "'" }
-	return "--rsh=" + quote(bash) + ` -c 'set -o pipefail; "$0" "$@" < <(cat) | cat' ` + quote(ssh)
+	return "--rsh=" + quote(bash) + ` -c 'set -o pipefail; cat="${BASH%/*}/cat"; "$0" "$@" < <("$cat") | "$cat"' ` + quote(ssh)
 }
 
 // withDefaultEnvironment adds key=value unless the environment already sets key (any case, as on Windows).

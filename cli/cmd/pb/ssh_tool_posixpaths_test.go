@@ -46,7 +46,7 @@ func TestRsyncRemoteShellChosen(t *testing.T) {
 }
 
 func TestRsyncRemoteShellArgumentAndDefaultEnvironment(t *testing.T) {
-	const pipes = ` -c 'set -o pipefail; "$0" "$@" < <(cat) | cat' `
+	const pipes = ` -c 'set -o pipefail; cat="${BASH%/*}/cat"; "$0" "$@" < <("$cat") | "$cat"' `
 	if got := rsyncRemoteShellArgument("/usr/bin/bash", "/c/Program Files/OpenSSH/ssh.exe"); got != "--rsh='/usr/bin/bash'"+pipes+"'/c/Program Files/OpenSSH/ssh.exe'" {
 		t.Fatalf("rsh = %q", got)
 	}
