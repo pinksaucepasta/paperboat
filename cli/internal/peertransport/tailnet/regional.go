@@ -116,7 +116,10 @@ func eligible(c *RegionalCandidates, role, transport string, regions map[string]
 		return nil, RedundancyNone, ErrRegionalAuthority
 	}
 	// The nodes' observation age and lease are judged as of signing, not now; "observed in the future" stays a
-	// check against now (a heartbeat can land a second after the set's issue time).
+	// check against now (a heartbeat can land a second after the set's issue time), widened by the clock leeway:
+	// a machine whose clock is seconds behind the server's (below serverclock.Threshold it is not corrected) saw
+	// every relay as observed in the future, refused every grant and failed each refresh (X-27).
+	future := now.Add(peernetwork.MaxClockSkew).Unix()
 	at := now
 	if signed := time.Unix(c.IssuedAt, 0); signed.Before(now) {
 		at = signed
@@ -124,7 +127,7 @@ func eligible(c *RegionalCandidates, role, transport string, regions map[string]
 	out := make([]RegionalNode, 0, len(c.Nodes))
 	seen := map[string]bool{}
 	for _, n := range c.Nodes {
-		if !peernetwork.ValidID(n.NodeID) || !peernetwork.ValidID(n.ProcessEpoch) || !peernetwork.ValidID(n.Region) || !peernetwork.ValidID(n.FailureDomain) || seen[n.NodeID] || n.NodeGeneration == 0 || n.State != "ready" || n.ObservedAt > now.Unix() || at.Unix()-n.ObservedAt > int64(regionalObservationMaxAge/time.Second) || n.ExpiresAt <= at.Unix() || n.CapacityObservedAt > now.Unix() || at.Unix()-n.CapacityObservedAt > int64(regionalObservationMaxAge/time.Second) || n.CapacityLimit == 0 || n.CapacityUsed >= n.CapacityLimit-n.CapacityLimit/10 || n.DrainDeadline != nil {
+		if !peernetwork.ValidID(n.NodeID) || !peernetwork.ValidID(n.ProcessEpoch) || !peernetwork.ValidID(n.Region) || !peernetwork.ValidID(n.FailureDomain) || seen[n.NodeID] || n.NodeGeneration == 0 || n.State != "ready" || n.ObservedAt > future || at.Unix()-n.ObservedAt > int64(regionalObservationMaxAge/time.Second) || n.ExpiresAt <= at.Unix() || n.CapacityObservedAt > future || at.Unix()-n.CapacityObservedAt > int64(regionalObservationMaxAge/time.Second) || n.CapacityLimit == 0 || n.CapacityUsed >= n.CapacityLimit-n.CapacityLimit/10 || n.DrainDeadline != nil {
 			continue
 		}
 		if len(regions) > 0 && !regions[n.Region] || !contains(n.Roles, role) || !contains(n.Transports, transport) || !validEndpointHost(n.EndpointHost) || (n.EndpointTCPPort == 0 && n.EndpointQUICPort == 0) {
