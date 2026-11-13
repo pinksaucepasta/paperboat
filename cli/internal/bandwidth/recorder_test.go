@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"sync"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 )
 
 type testSink struct {
@@ -325,5 +327,24 @@ func TestIdleRecorderReportsOnceThenOnlyChangesBatched(t *testing.T) {
 	}
 	if !r.idle(time.Now().Add(24 * time.Hour)) {
 		t.Fatal("delivered bytes were reported again")
+	}
+}
+
+// A machine whose clock is 10 minutes ahead meters on the server's clock: the server refuses a report whose interval is
+// in its future, and the recorder then resends the same refused batch forever (X-27).
+func TestUsageIntervalsAreOnTheServerClock(t *testing.T) {
+	sent := time.Now()
+	serverclock.Observe(sent.Add(-10*time.Minute).UTC().Format(http.TimeFormat), sent, sent) // the machine's clock is 10 minutes ahead
+	t.Cleanup(func() { serverclock.Observe(time.Now().UTC().Format(http.TimeFormat), time.Now(), time.Now()) })
+	r := newTestRecorder(t, &testSink{})
+	conn := r.Wrap(partialConn{}, Binding{AccessSessionID: "access", StreamID: "stream", Consumer: "terminal"}, func(string) Path { return Path{Mode: "direct"} })
+	_, _ = conn.Read(make([]byte, 8))
+	for _, value := range r.state.Counters {
+		if value.Report.IntervalEnd.After(time.Now().Add(-9 * time.Minute)) {
+			t.Fatalf("usage interval ends at %s: on this machine's clock, not the server's", value.Report.IntervalEnd)
+		}
+	}
+	if len(r.state.Counters) == 0 {
+		t.Fatal("nothing was metered")
 	}
 }

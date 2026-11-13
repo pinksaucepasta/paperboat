@@ -3,7 +3,8 @@ package bandwidth
 
 import (
 	"net"
-	"time"
+
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 )
 
 type Path struct{ Mode, NodeID string }
@@ -48,7 +49,7 @@ func (c *meteredConn) Read(p []byte) (int, error) {
 	before := c.observe(direction)
 	n, err := c.Conn.Read(p)
 	if n > 0 {
-		c.recorder.add(c.binding, samePath(before, c.observe(direction)), int64(n), !c.binding.Reverse, time.Now().UTC())
+		c.recorder.add(c.binding, samePath(before, c.observe(direction)), int64(n), !c.binding.Reverse, serverclock.Now().UTC())
 	}
 	return n, err
 }
@@ -60,7 +61,7 @@ func (c *meteredConn) Write(p []byte) (int, error) {
 	before := c.observe(direction)
 	n, err := c.Conn.Write(p)
 	if n > 0 {
-		c.recorder.add(c.binding, samePath(before, c.observe(direction)), int64(n), c.binding.Reverse, time.Now().UTC())
+		c.recorder.add(c.binding, samePath(before, c.observe(direction)), int64(n), c.binding.Reverse, serverclock.Now().UTC())
 	}
 	return n, err
 }

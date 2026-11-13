@@ -14,6 +14,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/atomicfile"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 )
 
 const maxCounters = 8192
@@ -236,7 +237,7 @@ func (r *Recorder) flush(ctx context.Context, cleanShutdown bool) error {
 	if cleanShutdown {
 		r.state.CleanShutdown = true
 	}
-	now := time.Now().UTC()
+	now := serverclock.Now().UTC()
 	revision := r.revision
 	for id, c := range r.state.Counters {
 		if now.Sub(c.Report.IntervalStart) > retention {
