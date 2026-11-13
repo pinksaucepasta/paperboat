@@ -1,0 +1,25 @@
+F21-165 M and W: a prod server + edge switch with an open native terminal on a Mac and a Windows client (by hand, 2026-11-13)
+
+Machines (all dev-aee62911e, the cycle-1 client build; `pb version` read at 02:58Z on each), paired to the production test account:
+  W  f165-win  (machine_17406712-9fce-4db4-a48e-f7ffb5c52018)  GitHub Windows Server runner (winpool-12), amd64
+  M  f165-mac  GitHub macOS arm64 runner (macpool-3), paired after the VM attempt was removed
+  peer f165-peer (machine_0a609fc5-c94b-4303-9207-ecbb74b4ac76) Linux container on a victus VM, direct path
+Each client held `pb connect f165-peer` through an ssh pty with a marker (`echo tick-<epoch>`) typed every 5 s, and polled every ~6 s:
+`pb status` (is "Control plane is unavailable" shown?) and, every 3rd poll, `pb exec f165-peer -- echo ok`.
+A separate sampler fetched the API health endpoint every 2 s from the controller (02:05-02:59Z): 0 non-200 samples.
+
+Switch under test: prod server 2026.11.13.11 first, then both edges 3-6 minutes later, after the gate started at 02:50Z (coordinator: DEP7;
+exact switch times are in its report; the window below covers 02:44-02:59Z).
+
+Result inside 02:44-02:59Z (the .11 switch):
+  W: 116 polls, 0 "Control plane is unavailable", 0 exec failures; terminal 180 ticks, largest gap 7 s; longest gap between polls 20 s.
+  M: 119 polls, 0 "Control plane is unavailable", 0 exec failures; terminal 180 ticks, largest gap 6 s; longest gap between polls 23 s.
+  health sampler: 362 samples, all 200 (no 5xx seen by the clients).
+Whole holds: W 01:16:57-02:59:32Z terminal 1230 ticks, largest gap 13 s (02:34:17), no disconnect text; M 02:37:41-02:59:36Z terminal 264 ticks, largest gap 7 s.
+The earlier rolled-back attempts (.10 at about 01:37-01:41Z, .11 at 02:15Z and 02:30-02:36Z) were covered by W only; the terminal stayed up through them.
+
+Not clean, and not explained (outside the .11 window, flagged for the coordinator):
+  W `pb exec f165-peer` failed in about every third poll 01:22-01:25Z (4 samples, 3 with "Control plane is unavailable" in `pb status`) and from 01:57Z to
+  02:33Z (about 105 samples) while `pb status` was ok and the terminal kept ticking; it recovered at 02:33Z by itself and stayed ok after (probe every 20 s
+  to 03:00Z: 0 failures). The failing exec's error text was not captured, the peer's journal for 01:55-02:35Z has no error lines. The 01:57Z start has no known prod event.
+Server-side 5xx for the window is the deploy gate's check, not read here.
