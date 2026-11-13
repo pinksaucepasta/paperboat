@@ -239,7 +239,7 @@ func configSyncPathRuleRefusal(err error) error {
 		return err
 	}
 	if rule.Code == "unsupported_destination" {
-		return configSyncRefusal(fmt.Sprintf("Config path rule %s: local_path is not a valid destination on this machine. Use ~/... or an absolute path of this system without .. parts or unset variables; backslashes and drive letters (C:\\...) work only on Windows, so put a Windows path in an [os.windows] section.", rule.RuleID))
+		return configSyncRefusal(fmt.Sprintf("Config path rule %s: local_path is not valid on this machine. Drive letters and backslashes (C:\\...) work only on Windows; use ~/... or an absolute path here, or an [os.windows] section.", rule.RuleID))
 	}
 	return configSyncRefusal(rule.Error())
 }

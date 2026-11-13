@@ -365,6 +365,7 @@ def refuses(dev, ctx, extra, what):
     done = dev.pb('config', 'sync', 'validate', '--json')
     ctx.write_sync_file(dev, machine_file(ctx.repository_id, '', ctx.urls[dev.key]))
     assert done.rc != 0 and '"ok":false' in done.text.replace(' ', ''), '%s: %s was accepted: %s' % (dev.name, what, done.text[-200:])
+    return done.text
 
 
 def accepted(dev, ctx, extra, what, mode='bidirectional', automatic=True):
@@ -396,16 +397,20 @@ def x06(ctx, a, b, direction):
 
 
 def x07_paths(ctx, a, b, direction):
-    """X-07: a drive-letter or backslash local_path is accepted on Windows only; elsewhere it fails validation."""
+    """X-07: drive-letter and backslash local_path forms are accepted on Windows only; elsewhere validate refuses with a clear message."""
     for dev in (a, b):
         win = (dev.home if dev.os == 'windows' else 'C:\\Users\\someone') + '\\xplat\\x07\\drive.txt'
-        extra = rule('cfg/x07-drive.txt', win.replace('\\', '\\\\'))
-        if dev.os == 'windows':
-            accepted(dev, ctx, extra, 'a drive-letter path on Windows')
-        else:
-            refuses(dev, ctx, extra, 'a Windows drive-letter path on ' + dev.os)
-            assert not dev.exists(dev.home + '/C:\\Users\\someone\\xplat\\x07\\drive.txt'), 'a literal path was created'
-    return 'drive-letter path accepted on Windows only'
+        back = '~\\\\xplat\\\\x07\\\\back.txt'
+        for name, local in (('x07-drive.txt', win.replace('\\', '\\\\')), ('x07-back.txt', back)):
+            extra = rule('cfg/' + name, local)
+            if dev.os == 'windows':
+                accepted(dev, ctx, extra, 'a Windows-form path on Windows')
+                continue
+            text = refuses(dev, ctx, extra, 'a Windows-form path on ' + dev.os)
+            assert 'cfg/' + name in text and 'only on Windows' in text, '%s: the refusal is not a clear message: %s' % (dev.name, text[-300:])
+        assert not dev.exists(dev.home + '/C:\\Users\\someone\\xplat\\x07\\drive.txt'), 'a literal path was created'
+        assert not dev.exists(dev.home + '/xplat\\x07\\back.txt'), 'a literal path was created'
+    return 'drive-letter and backslash paths accepted on Windows only, refused on Unix with a clear message'
 
 
 def x02(ctx, a, b, direction):
