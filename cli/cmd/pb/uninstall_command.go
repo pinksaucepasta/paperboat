@@ -70,6 +70,10 @@ func uninstallCommand() *cobra.Command {
 				command.SetOut(io.Discard)
 				command.SetErr(io.Discard)
 			}
+			serverRecordNotice := removeOwnServerRecord(actionContext(command, nil))
+			if serverRecordNotice != "" && !jsonOutput {
+				fmt.Fprintln(command.ErrOrStderr(), serverRecordNotice)
+			}
 			preservedInboxes, inboxErr := uninstallInboxPaths(command)
 			executable, executableErr := os.Executable()
 			home, homeErr := os.UserHomeDir()
@@ -161,6 +165,10 @@ func uninstallCommand() *cobra.Command {
 			}
 			if jsonOutput {
 				result := uninstallJSONResult(hostname, removedByName)
+				if serverRecordNotice != "" {
+					result["server_record_removed"] = false
+					result["server_record_notice"] = serverRecordNotice
+				}
 				if platformProductHandoffRequired() {
 					result["uninstalled"] = false
 					result["state"] = "pending"
