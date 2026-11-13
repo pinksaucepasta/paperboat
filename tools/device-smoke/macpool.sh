@@ -6,6 +6,8 @@
 #   macpool.sh list              machines whose tunnel is up, and who started them
 #   macpool.sh ssh N [COMMAND]   SSH into machine N
 #   macpool.sh stop [N...]       stop machines you started (default: all of yours)
+#   macpool.sh release N...      give up your claim but leave the machine running for the next lane
+#   macpool.sh adopt [N]         claim a running machine nobody claims (default: the first one), print its target
 #
 # Machine N is the SSH host macpool-N: user runner (passwordless sudo), reached through the jump host's loopback port
 # 22300+N with the key ~/.ssh/winpool_controller. "You" is your worktree (or MACPOOL_OWNER): every lane starts its
@@ -86,6 +88,27 @@ stop() { # only machines this caller started: another lane's checks are running 
   done
 }
 
+release() { # the next lane adopts it: reuse takes seconds, a new runner minutes plus GitHub's queue
+  local n
+  for n in "$@"; do
+    slot "$n"
+    [ "$(owner "$n")" = "$OWNER" ] || die "macpool-$n was not started by you ($OWNER) but by: $(owner "$n")"
+    rm -f "$CLAIMS/$n"; echo "macpool-$n released"
+  done
+}
+
+adopt() {
+  local n
+  mkdir -p "$CLAIMS"
+  exec 9>"$CLAIMS/lock"; flock 9
+  for n in ${1:-$(up)}; do
+    slot "$n"
+    [ -z "$(owner "$n")" ] && answers "$n" || continue
+    echo "$OWNER" > "$CLAIMS/$n"; echo "macpool-$n"; return
+  done
+  die "no running unclaimed machine (macpool.sh list); use macpool.sh start 1"
+}
+
 command=${1:-}
 [ $# -gt 0 ] && shift
 case "$command" in
@@ -93,5 +116,7 @@ case "$command" in
   list) configure; for n in $(up); do echo "macpool-$n  $(owner "$n")"; done ;;
   ssh) configure; slot "${1:-}"; n=$1; shift; exec ssh "macpool-$n" "$@" ;;
   stop) configure; stop "$@" ;;
+  release) configure; release "$@" ;;
+  adopt) configure; adopt "$@" ;;
   *) sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
 esac
