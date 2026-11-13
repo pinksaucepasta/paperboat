@@ -134,3 +134,10 @@ source commit `b2feb8a78` (CLI vet, race tests and filtered root tests; job 8m8s
 [GitHub run](https://github.com/pinksaucepasta/paperboat/actions/runs/43354627060).
 No Go build/vet/test ran on oracle. No fixed binary was built or installed on
 the Windows runner; next-cycle verification of the default command is pending.
+
+## Windows rsync on cycle 3 (dev-051c1f7f2, containing 313fbdf87), by the parent lane, 2026-11-13 ~10:20-10:40 IST
+Client: winpool-4 (GitHub-hosted Windows runner, MSYS2 rsync 3.5.1), target plat-s3 (hp container); `pb version` of both dev-051c1f7f2 (installed by pb install of the cycle build; default pb rsync, no RSYNC_RSH workaround). Same harness (resume_check.py, interrupted first run now also carries --partial). Lines from f503-w7.txt (tree) and f503-w13.txt (resume):
+PASS rsync up large-tree ok 602 files 111s
+PASS rsync down large-tree ok 602 files 179s
+PASS rsync up resume interrupted=True (first run: killed after 20.1s; stat: 112394240) partial=112394240 of 209715200 bytes; resumed ok 200s; hash match=True
+PASS rsync down resume interrupted=True partial=46923776 of 209715200 bytes; resumed ok 58s; hash match=True
