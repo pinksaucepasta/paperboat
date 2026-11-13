@@ -83,6 +83,30 @@ func TestSwitchWorkspaceRejectsUnlistedSelectorWithoutChangingDefault(t *testing
 	}
 }
 
+func TestSwitchWorkspaceWithoutTerminalNamesTheArgument(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.json")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeAPIData(t, w, map[string]any{"items": []map[string]string{{"id": "personal", "name": "Personal", "kind": "personal", "role": "owner"}}})
+	}))
+	defer server.Close()
+	writeWorkspaceAuthProfile(t, dir, configPath, server.URL, "account-1")
+	t.Setenv("PAPERBOAT_WORKSPACE", "")
+	oldTerminal := workspaceTerminal
+	workspaceTerminal = func() bool { return false }
+	t.Cleanup(func() { workspaceTerminal = oldTerminal })
+
+	for _, args := range [][]string{{"switch"}, {"switch", "team-unknown"}} {
+		var output bytes.Buffer
+		if code := run(context.Background(), append([]string{"--config", configPath}, args...), &output, &output); code == 0 {
+			t.Fatalf("%v unexpectedly succeeded: %q", args, output.String())
+		}
+		if !strings.Contains(output.String(), "pb switch personal") || strings.Contains(output.String(), "could not finish") {
+			t.Fatalf("%v output = %q, want a message naming `pb switch personal`", args, output.String())
+		}
+	}
+}
+
 func TestSwitchWorkspaceCancellationDoesNotPersist(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.json")

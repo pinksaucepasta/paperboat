@@ -89,7 +89,7 @@ func selectWorkspace(command *cobra.Command, args []string) (bool, error) {
 		return false, err
 	}
 	if !workspaceTerminal() {
-		return false, errors.New("choose a workspace in an interactive terminal or run `pb switch <workspace>`")
+		return false, localArgumentError("pb switch needs a workspace when it has no terminal to ask in. Run `pb switch personal` or `pb switch <team-slug>`.")
 	}
 	items := make([]selector.Item, 0, len(workspaces))
 	for _, workspace := range workspaces {
@@ -130,7 +130,7 @@ func saveSelectedWorkspace(command *cobra.Command, cfg *config.Config, accountID
 		}
 	}
 	if selected == nil {
-		return fmt.Errorf("workspace %q is not available to this account; choose a listed workspace or run `pb switch personal`", selector)
+		return localArgumentError("that workspace is not available to this account. Choose a listed workspace or run `pb switch personal`.")
 	}
 	if err := saveWorkspaceDefault(cfg, cfg.ServerURL, accountID, selector); err != nil {
 		return fmt.Errorf("save active workspace: %w", err)
