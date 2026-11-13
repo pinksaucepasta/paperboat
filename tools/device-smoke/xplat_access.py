@@ -39,9 +39,19 @@ while True:
     c.sendall(("%d %s\n" % (n, h.hexdigest())).encode()); c.shutdown(socket.SHUT_WR); c.close()
 '''
 
+# An HTTP origin on port 720 (below 1024), wildcard-bound so an unprivileged user may bind it on macOS too.
+LOW_ORIGIN = (
+    "import http.server\n"
+    "class P(http.server.BaseHTTPRequestHandler):\n"
+    "    def log_message(self, *a): pass\n"
+    "    def do_GET(self):\n"
+    "        b = b'xplat-https-ok-low'; self.send_response(200); self.send_header('Content-Length', str(len(b))); self.end_headers(); self.wfile.write(b)\n"
+    "http.server.ThreadingHTTPServer(('0.0.0.0', 720), P).serve_forever()\n")
+
 DRIVER = r'''
-import hashlib, json, os, socket, subprocess, sys, time
+import hashlib, json, os, re, socket, subprocess, sys, time
 pb, machine, origin_port, listen_port, origin_code, origin_py, domain = sys.argv[1:8]
+low_code = sys.argv[8] if len(sys.argv) > 8 else ""
 PAYLOAD = (("private TCP λ船\n".encode() + bytes(range(256))) * 4096)[:1 << 20]
 want = "%d %s" % (len(PAYLOAD), hashlib.sha256(PAYLOAD).hexdigest())
 quiet = dict(stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -61,7 +71,7 @@ try:
     time.sleep(6)
     bad = subprocess.run([pb, "access", "machine", machine, "--port", origin_port, "--listen", "192.0.2.1:%s" % listen_port], capture_output=True, text=True, timeout=60)
     out["non_loopback_refused"] = bad.returncode != 0
-    out["non_loopback_message"] = (bad.stderr + bad.stdout).strip()[-160:]
+    out["non_loopback_message"] = (bad.stderr + bad.stdout).strip()[:160]
     access = subprocess.Popen([pb, "access", "machine", machine, "--port", origin_port, "--listen", "127.0.0.1:" + listen_port], **quiet)
     deadline = time.time() + 40
     while time.time() < deadline:
@@ -80,7 +90,7 @@ try:
     out["address"] = address
     out["private_address"] = bool(address) and exchange(address, origin_port) == want
     try:
-        out["name_resolves"] = socket.gethostbyname("%s.%s" % (machine, domain)) == address
+        out["name_resolves"] = socket.gethostbyname("%s.%s" % (machine, domain)) == "127.100.0.1"  # the public wildcard answers the loopback gateway
     except OSError as error:
         out["name_resolves"] = False; out["name_error"] = str(error)[:80]
     curl = "curl.exe" if os.name == "nt" else "/usr/bin/curl"
@@ -90,6 +100,24 @@ try:
         if got.stdout == "xplat-https-ok": break
         time.sleep(5)
     out["https_url"] = got.stdout == "xplat-https-ok"; out["https_detail"] = (got.stderr or got.stdout)[-120:]
+    if low_code:  # https://<machine>.<domain>:720, a port below 1024, needs an explicit on-demand policy
+        low = subprocess.Popen([pb, "exec", machine, "--", origin_py, "-c", low_code], **quiet)
+        policy = None
+        try:
+            time.sleep(4)
+            allow = subprocess.run([pb, "tunnel", "policy", "allow", machine, "http://127.0.0.1:720", "--json"], capture_output=True, text=True, timeout=60)
+            found = re.search(r"lap_[a-z0-9]+", allow.stdout); policy = found.group(0) if found else None
+            for _ in range(6):
+                got = subprocess.run([curl, "-sS", "-m", "20", "https://%s.%s:720/" % (machine, domain)], capture_output=True, text=True)
+                if got.stdout == "xplat-https-ok-low": break
+                time.sleep(5)
+            out["https_low_port"] = got.stdout == "xplat-https-ok-low"; out["https_low_detail"] = (got.stderr or got.stdout or allow.stderr)[-160:]
+        finally:
+            if policy: subprocess.run([pb, "tunnel", "policy", "revoke", policy], capture_output=True, timeout=60)
+            if low.poll() is None:
+                low.terminate()
+                try: low.wait(10)
+                except Exception: low.kill()
 finally:
     for p in (access, origin):
         if p and p.poll() is None:
@@ -110,14 +138,15 @@ def domain_of(dev):
 
 def t_access(src, dst):
     port = 21000 + sum(map(ord, src.name + dst.name)) % 2000
-    done = src.run([py(src), '-c', DRIVER, src.pb_path, dst.alias, str(port), str(port + 5000), ORIGIN, py(dst), domain_of(src)], timeout=300)
+    done = src.run([py(src), '-c', DRIVER, src.pb_path, dst.alias, str(port), str(port + 5000), ORIGIN, py(dst), domain_of(src), LOW_ORIGIN], timeout=300)
     assert done.rc == 0, 'driver: %s %s' % (done.text[-300:], done.errtext[-300:])
     out = json.loads(done.text.strip().splitlines()[-1])
     assert out.get('forward'), 'the 1 MiB exchange through the forward was not byte-exact with half-close: %s' % out
     assert out.get('private_address'), 'the exchange through the private address %s failed: %s' % (out.get('address'), out)
     if not CORE:
-        assert out.get('name_resolves'), 'the machine name did not resolve to its private address without a hosts edit: %s' % out
+        assert out.get('name_resolves'), 'the machine name did not resolve to the loopback gateway 127.100.0.1 through the public wildcard: %s' % out
         assert out.get('https_url'), 'https://<port>.<machine>.<domain> did not answer through the trust store of this OS: %s' % out
+        assert out.get('https_low_port'), 'https://<machine>.<domain>:720 (a port below 1024) did not answer: %s' % out
     assert out.get('non_loopback_refused'), '--listen accepted a non-loopback address: %s' % out
     return 'forward and %s byte-exact with half-close; non-loopback --listen refused (%s)' % (out['address'], out['non_loopback_message'][:70])
 
