@@ -88,8 +88,17 @@ def t_origin(dev, key):
         url = endpoint(created)
         time.sleep(5)
         for flag, version in (('--http1.1', '1.1'), ('--http2', '2')):
-            out = curl(url + '/', flag).stdout.decode().rsplit('\n', 1)
-            assert out[0] == marker and out[1].split()[0] == '200' and out[1].split()[1] == version, '%s %s -> %r' % (flag, url, out)
+            def first_fetch(flag=flag, version=version):
+                out = curl(url + '/', flag).stdout.decode().rsplit('\n', 1)
+                assert out[0] == marker and out[1].split()[0] == '200' and out[1].split()[1] == version, '%s %s -> %r' % (flag, url, out)
+            for attempt in range(12):  # a fresh tunnel's first request may meet the edge's route warm-up (xpc_tunnel.py retries the same way)
+                try:
+                    first_fetch()
+                    break
+                except AssertionError:
+                    if attempt == 11:
+                        raise
+                    time.sleep(4)
         big = curl(url + '/big', '--http1.1', timeout=120).stdout.rsplit(b'\n', 1)[0]
         assert hashlib.sha256(big).hexdigest() == hashlib.sha256(BIG).hexdigest(), 'download differs (%d bytes)' % len(big)
         curl(url + '/__stop', '--http1.1')
