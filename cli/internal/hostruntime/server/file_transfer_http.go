@@ -662,7 +662,7 @@ func writeFileTransferError(ctx context.Context, stage string, writer http.Respo
 
 // permanentStorageFailure reports an Inbox write the operating system refuses for a reason waiting will not change.
 func permanentStorageFailure(err error) bool {
-	return errors.Is(err, fs.ErrPermission) || errors.Is(err, syscall.EROFS) || errors.Is(err, syscall.ENAMETOOLONG) || errors.Is(err, syscall.EFBIG)
+	return errors.Is(err, fs.ErrPermission) || errors.Is(err, syscall.EROFS) || errors.Is(err, syscall.ENAMETOOLONG) || errors.Is(err, syscall.EFBIG) || writeProtected(err)
 }
 
 // storageOSError is the operating system's own words for the failure (a read-only file system, access denied),
