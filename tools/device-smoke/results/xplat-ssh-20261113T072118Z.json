@@ -1,0 +1,40 @@
+{
+ "check": "xplat-ssh",
+ "devices": [
+  "L",
+  "M",
+  "W"
+ ],
+ "results": [
+  {
+   "id": "X-18:rsync:L>M",
+   "status": "PASS",
+   "detail": "rsync -a sha256 equal; target: openrsync: protocol version 29"
+  },
+  {
+   "id": "X-18:rsync:L>W",
+   "status": "PASS",
+   "detail": "rsync works with a Windows endpoint"
+  },
+  {
+   "id": "X-18:rsync:M>L",
+   "status": "PASS",
+   "detail": "rsync -a sha256 equal; target: rsync  version 3.2.7  protocol version 31"
+  },
+  {
+   "id": "X-18:rsync:M>W",
+   "status": "PASS",
+   "detail": "rsync works with a Windows endpoint"
+  },
+  {
+   "id": "X-18:rsync:W>L",
+   "status": "PASS",
+   "detail": "rsync works with a Windows endpoint"
+  },
+  {
+   "id": "X-18:rsync:W>M",
+   "status": "PASS",
+   "detail": "rsync works with a Windows endpoint"
+  }
+ ]
+}

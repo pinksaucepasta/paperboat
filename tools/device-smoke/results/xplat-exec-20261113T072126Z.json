@@ -1,0 +1,40 @@
+{
+ "check": "xplat-exec",
+ "devices": [
+  "L",
+  "M",
+  "W"
+ ],
+ "results": [
+  {
+   "id": "X-17:pty:L>M",
+   "status": "PASS",
+   "detail": "--pty allocates a terminal on the target"
+  },
+  {
+   "id": "X-17:pty:L>W",
+   "status": "PASS",
+   "detail": "--pty allocates a terminal on the target"
+  },
+  {
+   "id": "X-17:pty:M>L",
+   "status": "PASS",
+   "detail": "--pty allocates a terminal on the target"
+  },
+  {
+   "id": "X-17:pty:M>W",
+   "status": "PASS",
+   "detail": "--pty allocates a terminal on the target"
+  },
+  {
+   "id": "X-17:pty:W>L",
+   "status": "PASS",
+   "detail": "--pty allocates a terminal on the target"
+  },
+  {
+   "id": "X-17:pty:W>M",
+   "status": "PASS",
+   "detail": "--pty allocates a terminal on the target"
+  }
+ ]
+}
