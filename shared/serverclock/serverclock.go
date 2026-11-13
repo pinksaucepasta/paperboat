@@ -112,9 +112,5 @@ func Offset() time.Duration {
 // Now is the current time on the server's clock.
 func Now() time.Time { return time.Now().Add(Offset()) }
 
-// Local is the machine-clock time of an instant given on the server's clock, for timers and net deadlines, which
-// run on the machine's own clock.
-func Local(t time.Time) time.Time { return t.Add(-Offset()) }
-
 // Until is the server-clock duration until t.
 func Until(t time.Time) time.Duration { return t.Sub(Now()) }

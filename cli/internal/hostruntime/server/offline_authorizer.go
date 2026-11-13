@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
-	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 )
 
 // OfflinePeerConn is a native stream the host admitted from its own signed session scope while
