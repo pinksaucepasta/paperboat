@@ -215,7 +215,13 @@ func listenPacket(packetConn net.PacketConn, tlsConfig *tls.Config, quicConfig *
 	configured.Tracer = func(_ context.Context, _ bool, id quic.ConnectionID) qlogwriter.Trace {
 		return &wireTrace{pto: pto, id: id.String()}
 	}
-	listener, err := transport.Listen(tlsConfig.Clone(), configured)
+	serverTLS := tlsConfig.Clone()
+	if serverTLS.GetCertificate != nil {
+		// crypto/tls calls GetCertificate only with no static certificate or an SNI, and peers send no SNI: the
+		// static leaf issued at startup was served until it expired 23h45m later (canary 2026-11-13, X-41).
+		serverTLS.Certificates = nil
+	}
+	listener, err := transport.Listen(serverTLS, configured)
 	if err != nil {
 		_ = transport.Close()
 		return nil, fmt.Errorf("listen peer QUIC: %w", err)
