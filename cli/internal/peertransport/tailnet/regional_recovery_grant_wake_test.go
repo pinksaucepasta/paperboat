@@ -81,8 +81,21 @@ func TestNewRelayGrantWakesSleepingRecoverySweep(t *testing.T) {
 		defer r.mu.Unlock()
 		return r.status.Reason == "regional_admission_denied"
 	})
+	// Every relay refusing the held grant asks for a fresh one at once, not at the idle renewal (fleet outage
+	// 2026-11-12: a relay fence after peer changes left same-account peers unreachable for 1.5 h), and only once
+	// per generation, so an endpoint that stays refused does not loop.
+	select {
+	case <-a.refreshNow:
+	default:
+		t.Fatal("every relay refused the held grant and no fresh grant was asked for")
+	}
 	// The refusal fence lasts under 0.75 s here; the sleeping timer 2.4 s or more.
 	time.Sleep(900 * time.Millisecond)
+	select {
+	case <-a.refreshNow:
+		t.Fatal("a second refused sweep under the same generation asked for another grant")
+	default:
+	}
 	before := engine.prepares.Load()
 	if err := a.ApplyRelayGrants(t.Context(), []string{grant()}); err != nil {
 		t.Fatal(err)

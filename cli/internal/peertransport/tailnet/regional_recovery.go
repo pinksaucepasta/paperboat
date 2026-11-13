@@ -805,6 +805,12 @@ func (r *regionalRecovery) run(ctx context.Context) {
 			if fence.deny(leaseGeneration, time.Now()) { // logged when the state begins, not at every sweep
 				diagnosticlog.TryWarn("every relay refused admission; they are tried again with backoff, at once on a network change or a new grant", "generation", leaseGeneration, "failures", fmt.Sprint(failures))
 			}
+			if fence.renew(leaseGeneration) {
+				// A refusal answers the grant held (a relay fence above its generation after a peer or key change):
+				// ask for a fresh one now instead of waiting for the idle renewal. Once per generation, so a revoked
+				// endpoint, which gets no newer one, does not loop (fleet outage 2026-11-12: 1.5 h unreachable).
+				r.authority.RequestRefresh()
+			}
 			_ = r.engine.SetRelayRegions(nil)
 			r.mu.Lock()
 			r.status = RegionalStatus{Redundancy: RedundancyNone, Reason: "regional_admission_denied", ProbeFailures: failures}
@@ -914,6 +920,7 @@ type deniedFence struct {
 	failures   int
 	next       time.Time
 	since      time.Time
+	renewed    uint64 // the generation a fresh grant was last asked for
 }
 
 const (
@@ -935,6 +942,15 @@ func (f *deniedFence) deny(lease uint64, now time.Time) bool {
 	f.generation, f.failures = lease, f.failures+1
 	f.next = now.Add(backoff.Retry(f.failures, deniedBackoffBase, deniedBackoffCap))
 	return began
+}
+
+// renew reports whether a refused sweep under lease should ask for a fresh grant: once per generation.
+func (f *deniedFence) renew(lease uint64) bool {
+	if f.renewed == lease {
+		return false
+	}
+	f.renewed = lease
+	return true
 }
 
 // networkChanged lifts the wait and restarts its backoff; the refused state itself stays until a relay prepares.
