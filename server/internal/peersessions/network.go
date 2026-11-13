@@ -24,6 +24,9 @@ import (
 	"golang.org/x/crypto/curve25519"
 )
 
+// The function keeps the expanded authorization view's plan across configuration requests.
+const inspectorAdmissionsQuery = `SELECT * FROM paperboat.peer_network_inspector_admissions($1,$2,$3,$4)`
+
 // networkConfigLimit bounds one signed configuration or regional candidate token (a relay grant has its own,
 // smaller bound, peernetwork.MaxGrantBytes);
 // it is the client's bound (shared/peernetwork), so a configuration the server signs is one the
@@ -379,7 +382,7 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
 	if rowErr != nil {
 		return NetworkConfigResult{}, rowErr
 	}
-	inspectorRows, err := tx.QueryContext(ctx, `SELECT credential_id,native_cli_session_id,native_machine_id,account_id,owner_account_id,expires_at FROM paperboat.inspector_native_admissions WHERE ((native_cli_session_id=$1 AND account_id=$2) OR (native_machine_id=$1 AND owner_account_id=$2)) AND (expires_at>$3 OR credential_id=ANY($4::text[])) ORDER BY (credential_id=ANY($4::text[])) DESC, credential_id LIMIT 257`, in.EndpointID, in.UserID, now, live["inspector"])
+	inspectorRows, err := tx.QueryContext(ctx, inspectorAdmissionsQuery, in.EndpointID, in.UserID, now, live["inspector"])
 	if err != nil {
 		return NetworkConfigResult{}, err
 	}
