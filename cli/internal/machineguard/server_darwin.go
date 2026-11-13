@@ -245,6 +245,9 @@ func ServeSocketChild(ctx context.Context, address, loopbackCIDR string) error {
 }
 
 func shutdownListener(listener net.Listener) error {
+	if route, ok := listener.(*gatewayRoute); ok { // the last route also closes the shared gateway socket, as on Linux
+		return route.release()
+	}
 	socket, ok := listener.(*net.TCPListener)
 	if !ok {
 		return listener.Close()
