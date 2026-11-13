@@ -1,0 +1,29 @@
+{
+ "check": "xplat-exec",
+ "devices": [
+  "L",
+  "W"
+ ],
+ "results": [
+  {
+   "id": "X-17:argv:L>W",
+   "status": "PASS",
+   "detail": "15 arguments exact (spaces, empty, quotes, trailing backslashes, unicode, shell metacharacters)"
+  },
+  {
+   "id": "X-17:exit:L>W",
+   "status": "PASS",
+   "detail": "codes 0,1,7,255 and 3221225477 exact"
+  },
+  {
+   "id": "X-17:argv:W>L",
+   "status": "PASS",
+   "detail": "15 arguments exact (spaces, empty, quotes, trailing backslashes, unicode, shell metacharacters)"
+  },
+  {
+   "id": "X-17:exit:W>L",
+   "status": "PASS",
+   "detail": "codes 0,1,7,255 exact; SIGKILL = 137"
+  }
+ ]
+}

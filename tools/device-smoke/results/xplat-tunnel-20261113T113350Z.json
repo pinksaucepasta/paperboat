@@ -1,0 +1,19 @@
+{
+ "check": "xplat-tunnel",
+ "devices": [
+  "L",
+  "W"
+ ],
+ "results": [
+  {
+   "id": "X-20:v4:L",
+   "status": "PASS",
+   "detail": "public kind-jade-ca: marker on HTTP/1.1 and HTTP/2, 16 MiB sha256 equal; origin stopped -> ' 000 0'"
+  },
+  {
+   "id": "X-20:v4:W",
+   "status": "PASS",
+   "detail": "public firm-silver-: marker on HTTP/1.1 and HTTP/2, 16 MiB sha256 equal; origin stopped -> ' 000 0'"
+  }
+ ]
+}

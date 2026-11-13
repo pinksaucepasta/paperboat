@@ -1,0 +1,19 @@
+{
+ "check": "xplat-tunnel",
+ "devices": [
+  "W",
+  "L"
+ ],
+ "results": [
+  {
+   "id": "X-20:v4:L",
+   "status": "PASS",
+   "detail": "public bright-winte: marker on HTTP/1.1 and HTTP/2, 16 MiB sha256 equal; origin stopped -> ' 000 0'"
+  },
+  {
+   "id": "X-20:v4:W",
+   "status": "PASS",
+   "detail": "public clever-gray-: marker on HTTP/1.1 and HTTP/2, 16 MiB sha256 equal; origin stopped -> ' 000 0'"
+  }
+ ]
+}

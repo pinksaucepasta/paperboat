@@ -1,0 +1,29 @@
+{
+ "check": "xplat-term",
+ "devices": [
+  "W",
+  "L"
+ ],
+ "results": [
+  {
+   "id": "X-16:shell:L>W",
+   "status": "PASS",
+   "detail": "the target shell started and answered (cmd)"
+  },
+  {
+   "id": "X-16:utf8:L>W",
+   "status": "PASS",
+   "detail": "UTF-8 and wide characters typed and echoed unchanged (cmd)"
+  },
+  {
+   "id": "X-16:shell:W>L",
+   "status": "PASS",
+   "detail": "the target shell started and answered (unix)"
+  },
+  {
+   "id": "X-16:utf8:W>L",
+   "status": "PASS",
+   "detail": "UTF-8 and wide characters typed and echoed unchanged (unix)"
+  }
+ ]
+}

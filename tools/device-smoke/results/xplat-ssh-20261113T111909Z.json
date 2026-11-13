@@ -1,0 +1,29 @@
+{
+ "check": "xplat-ssh",
+ "devices": [
+  "L",
+  "W"
+ ],
+ "results": [
+  {
+   "id": "X-18:ssh:L>W",
+   "status": "PASS",
+   "detail": "pb ssh ran a command on the target (hostname runnervmm7ud1)"
+  },
+  {
+   "id": "X-18:scp:L>W",
+   "status": "PASS",
+   "detail": "scp both ways sha256 equal (524291 bytes), remote path in forward-slash form"
+  },
+  {
+   "id": "X-18:ssh:W>L",
+   "status": "FAIL",
+   "detail": "ssh hostname '' vs 'd3f1daedf6cb':  command. Check the current state before retrying; run `pb doctor` if this continues. Support reference: support_d20a15e1-86d1-4034-8a23-916aea819334. Run `pb bugreport --upload` to send the details.\n"
+  },
+  {
+   "id": "X-18:scp:W>L",
+   "status": "PASS",
+   "detail": "scp both ways sha256 equal (49155 bytes), remote path in forward-slash form"
+  }
+ ]
+}

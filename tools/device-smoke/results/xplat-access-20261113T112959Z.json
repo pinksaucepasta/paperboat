@@ -1,0 +1,19 @@
+{
+ "check": "xplat-access",
+ "devices": [
+  "L",
+  "W"
+ ],
+ "results": [
+  {
+   "id": "X-19:tcp:L>W",
+   "status": "PASS",
+   "detail": "forward and 127.100.0.3 byte-exact with half-close; non-loopback --listen refused (nd TUI preferences\n      --server string      paperboat-server base UR)"
+  },
+  {
+   "id": "X-19:tcp:W>L",
+   "status": "PASS",
+   "detail": "forward and 127.100.0.4 byte-exact with half-close; non-loopback --listen refused (nd TUI preferences\n      --server string      paperboat-server base UR)"
+  }
+ ]
+}
