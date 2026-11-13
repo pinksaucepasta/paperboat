@@ -5,6 +5,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 )
 
 // The Paperboat-owned OpenSSH fragment (~/.ssh/paperboat_config) has one format on every platform:
@@ -70,13 +72,19 @@ func matchUserPattern(target OpenSSHAliasTarget) string {
 	patterns := []string{target.User}
 	if target.AnyCaseUser {
 		lower := strings.ToLower(target.User)
-		for _, spelling := range []string{lower, strings.ToUpper(target.User), strings.ToUpper(lower[:1]) + lower[1:]} {
+		for _, spelling := range []string{lower, strings.ToUpper(target.User), capitalized(lower)} {
 			if !slices.Contains(patterns, spelling) {
 				patterns = append(patterns, spelling)
 			}
 		}
 	}
 	return strings.Join(patterns, ",")
+}
+
+// capitalized upper-cases the first letter, not the first byte: a name can start with a multi-byte letter.
+func capitalized(value string) string {
+	first, size := utf8.DecodeRuneInString(value)
+	return string(unicode.ToUpper(first)) + value[size:]
 }
 
 // formatOwnedOpenSSH renders the fragment. Callers validate the inputs first.

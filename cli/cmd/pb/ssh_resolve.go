@@ -43,14 +43,14 @@ func resolveSSHCommandTarget(ctx *command.Context, requested string) (*api.Clien
 // sshTargetLookupError says why a machine can have no SSH target for this account when the server answers 404.
 // The server gives the same 404 for a missing target and a refused permission so nothing leaks, hence the
 // causes are listed; the generic "resource not found" gave the user nothing to act on (X-28, an OS user
-// named "Zoë Test" pairs but managed SSH serves printable ASCII user names without spaces).
+// that pairs without a target: a name with a quote or wildcard managed SSH cannot carry).
 func sshTargetLookupError(alias string, err error) error {
 	var refused *api.APIError
 	if !errors.As(err, &refused) || refused.Status != http.StatusNotFound {
 		return err
 	}
 	return &sshTargetNotReadyError{machine: alias, title: "Paperboat has no SSH target for it that you may use",
-		recovery: "Managed SSH serves only OS user names without spaces or non-ASCII letters, so a machine paired by a user like that has none: pair it from an OS user with a plain name. Otherwise check that you have SSH permission on it and run `pb ssh doctor` on that machine"}
+		recovery: "Managed SSH cannot carry an OS user name with a quote, comma, $, % or wildcard, so a machine paired by a user like that has none: pair it from an OS user with a plain name. Otherwise check that you have SSH permission on it and run `pb ssh doctor` on that machine"}
 }
 
 // resolveSSHCommandTargetWarm resolves the machine and its SSH target from the daemon's snapshot, which the

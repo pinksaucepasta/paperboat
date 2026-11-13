@@ -352,7 +352,7 @@ func setupCommand() *cobra.Command {
 			if err := verifySetupInstallSource(); err != nil {
 				return setupFailure(fmt.Errorf("verify supplied installation executable: %w", err))
 			}
-			// An OS account managed SSH cannot target (spaces or non-ASCII letters, e.g. a Windows user "Zoë Test") is set up
+			// An OS account managed SSH cannot target (a quote, comma, $, % or wildcard in its name) is set up
 			// without managed SSH instead of failing setup (X-28); terminals, exec and files do not need it.
 			if managedssh.ValidUsername(sshUser) {
 				if _, err := client.RegisterManagedSSHTarget(command.Context(), machine.ID, uint64(machine.InstallationGeneration), sshUser, uint16(sshPortValue), newIdempotencyKey()); err != nil {
@@ -360,7 +360,7 @@ func setupCommand() *cobra.Command {
 				}
 				registration.SSHUser, registration.SSHPort = sshUser, uint16(sshPortValue)
 			} else {
-				fmt.Fprintf(command.ErrOrStderr(), "Managed SSH is not set up for this OS account: its name has spaces or non-ASCII letters. Terminals, exec and file transfers still work.\n")
+				fmt.Fprintf(command.ErrOrStderr(), "Managed SSH is not set up for this OS account: its name has a character OpenSSH cannot carry. Terminals, exec and file transfers still work.\n")
 			}
 			if err := identityStore.SaveRegistration(registration); err != nil {
 				return setupFailure(fmt.Errorf("save registered SSH target: %w", err))

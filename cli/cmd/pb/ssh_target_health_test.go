@@ -36,7 +36,7 @@ func TestSSHToAMachineWithoutATargetNamesTheCauses(t *testing.T) {
 	err := sshTargetLookupError("rx28-zoe", &api.APIError{Status: http.StatusNotFound, Code: "not_found"})
 	message := commandFailureMessage(err, classifyCommandFailure(err))
 	if classifyCommandFailure(err).kind != commandRejected || !strings.Contains(message, "SSH to rx28-zoe is not ready: Paperboat has no SSH target for it") ||
-		!strings.Contains(message, "spaces or non-ASCII letters") || !strings.Contains(message, "pb ssh doctor") || strings.Contains(message, "resource was not found") {
+		!strings.Contains(message, "quote, comma") || !strings.Contains(message, "pb ssh doctor") || strings.Contains(message, "resource was not found") {
 		t.Fatalf("message=%q", message)
 	}
 	other := &api.APIError{Status: http.StatusServiceUnavailable, Code: "managed_ssh_unavailable"}

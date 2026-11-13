@@ -3971,10 +3971,10 @@ func TestTerminalOperationsOfRevokedAndDeletedMachinesEnd(t *testing.T) {
 	}
 }
 
-// X-28: a second OS user of the same Windows host pairs into the same account. "Zoë Test" is a Windows account managed
-// SSH cannot target (space, non-ASCII), so that machine pairs without a managed SSH target; writing the target hit the
-// machine_ssh_targets CHECK and failed the pairing with HTTP 500. The first user keeps its target.
-func TestSecondWindowsOSUserPairsWithoutAManagedSSHTarget(t *testing.T) {
+// X-28: a second OS user of the same Windows host pairs into the same account. "Zoë Test" (space, non-ASCII) gets a
+// managed SSH target like any account (the machine_ssh_targets CHECK used to refuse it: HTTP 500); an account with a
+// quote in its name pairs without one.
+func TestSecondWindowsOSUserPairsWithAManagedSSHTarget(t *testing.T) {
 	store := testStore(t)
 	ctx := context.Background()
 	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
@@ -3995,12 +3995,12 @@ func TestSecondWindowsOSUserPairsWithoutAManagedSSHTarget(t *testing.T) {
 	service.ConfigureHelperEnrollment(func(_ context.Context, _, _, _ string, _ time.Duration) (HelperEnrollmentGrant, error) {
 		return HelperEnrollmentGrant{EnrollmentID: "henr_winusers_" + uuid.NewString(), HelperID: "hlp_winusers_" + uuid.NewString(), Credential: "enrollment-credential", ExpiresAt: time.Now().UTC().Add(10 * time.Minute)}, nil
 	})
-	for i, osUser := range []string{"runneradmin", "Zoë Test"} {
+	for i, osUser := range []string{"Zoë Test", `bad"name`} {
 		start, err := service.StartEnrollment(ctx, userID, fmt.Sprintf("idem-winusers-%d", i))
 		if err != nil {
 			t.Fatal(err)
 		}
-		alias := []string{"xpc-w", "xpc-zoe"}[i]
+		alias := []string{"xpc-zoe", "xpc-w"}[i]
 		if _, err := service.CreatePairing(ctx, PairingInput{EnrollmentToken: start.BootstrapToken, Verifier: fmt.Sprintf("verifier-winusers-%d-%s", i, suffix), Alias: alias, Platform: "windows", Architecture: "amd64", WorkspaceRoot: `C:\Users\` + osUser, RuntimeVersions: json.RawMessage(`{"pb":"test"}`), PublicIdentityKey: newIntegrationPublicIdentityKey(t), SSHUser: osUser, SSHPort: 22}); err != nil {
 			t.Fatalf("OS user %q could not pair: %v", osUser, err)
 		}

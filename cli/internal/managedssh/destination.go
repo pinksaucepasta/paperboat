@@ -4,6 +4,8 @@ import (
 	"errors"
 	"strconv"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 )
 
 var (
@@ -173,8 +175,10 @@ func validAliasLabel(value string) bool {
 	return true
 }
 
-// ValidUsername is an OS account managed SSH can target ([A-Za-z0-9._-], optionally DOMAIN\user); the server's
-// rule (managedssh.ValidOSUser) accepts every such name. Other accounts work without managed SSH.
+// ValidUsername is an OS account managed SSH can target: any printable account name (Unicode letters, spaces,
+// dots, hyphens), optionally DOMAIN\user. The server's rule (managedssh.ValidOSUser) is the same. Characters that
+// OpenSSH patterns, its quoting or the ProxyCommand shell (`"%r"`) cannot carry are refused; such an account
+// works without managed SSH.
 func ValidUsername(value string) bool {
 	if len(value) > 255 {
 		return false
@@ -192,15 +196,12 @@ func ValidUsername(value string) bool {
 }
 
 func validUnqualifiedSSHUsername(value string) bool {
-	if value == "" || len(value) > 255 || value[0] == '-' || strings.TrimSpace(value) != value || strings.ContainsAny(value, "\x00\r\n@") {
+	if value == "" || len(value) > 255 || value[0] == '-' || strings.TrimSpace(value) != value || !utf8.ValidString(value) {
 		return false
 	}
-	for _, character := range value {
-		if character != '.' && character != '_' && character != '-' && (character < 'A' || character > 'Z') && (character < 'a' || character > 'z') && (character < '0' || character > '9') {
-			return false
-		}
-	}
-	return true
+	return !strings.ContainsFunc(value, func(character rune) bool {
+		return !unicode.IsPrint(character) || strings.ContainsRune("\"'`$%*,?![]/@;|&<>(){}^#=:+~", character)
+	})
 }
 
 func usernamesEqual(left, right, platform string) bool {

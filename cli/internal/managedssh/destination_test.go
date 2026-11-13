@@ -2,6 +2,7 @@ package managedssh
 
 import (
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -90,7 +91,7 @@ func TestResolveUsernameRejectsConflictAndUnsafeValues(t *testing.T) {
 	if got, err := ResolveUsername("bob", "", "deploy", "local", true); err != nil || got != "bob" {
 		t.Fatalf("another user = %q, %v", got, err)
 	}
-	for _, value := range []string{"-oProxyCommand=x", "user@host", "bad user", "bad;user", "bad\nuser", ""} {
+	for _, value := range []string{"-oProxyCommand=x", "user@host", "bad;user", "bad\"user", "bad\nuser", ""} {
 		_, err := ResolveUsername(value, "", "", "", false)
 		if value == "" {
 			if !errors.Is(err, ErrSSHUsernameMissing) {
@@ -157,5 +158,35 @@ func TestResolveDestinationMarksOnlyTheSetupUserAsManaged(t *testing.T) {
 	input.RequestedUser, input.Platform, input.RegisteredUser = "pujan", "windows", "Pujan"
 	if got, err := ResolveDestination(input); err != nil || !got.Managed || got.User != "Pujan" {
 		t.Fatalf("Windows user names are case-insensitive: %+v %v", got, err)
+	}
+}
+
+// X-28: a Windows account such as "Zoë Test" is a valid managed SSH target; names OpenSSH patterns, its quoting or the
+// ProxyCommand shell cannot carry are refused. The server's ValidOSUser has the same table.
+func TestValidUsernameAcceptsSpacesAndUnicodeLettersOnly(t *testing.T) {
+	for _, value := range []string{"Zoë Test", "zoë", "東京 ユーザー", "a b", "pb.user_1", "HOST\\Zoë Test", "runneradmin"} {
+		if !ValidUsername(value) {
+			t.Errorf("%q refused", value)
+		}
+	}
+	for _, value := range []string{"", " a", "a ", "-a", "a\tb", "a\u00a0b", "a\xffb", `a"b`, "a'b", "a,b", "a*b", "a$b", "a`b", "a%b", "a/b", "a@b", "a;b", `A\B\C`, `\a`, `a\`} {
+		if ValidUsername(value) {
+			t.Errorf("%q accepted", value)
+		}
+	}
+}
+
+func TestOwnedOpenSSHRoundTripsAnAccountWithASpaceAndANonASCIIFirstLetter(t *testing.T) {
+	for _, user := range []string{"Zoë Test", "ëric", "HOST\\Zoë Test"} {
+		owned := ownedOpenSSH{Agent: "/run/agent", Identity: "/home/a/key.pub", ProxyCommand: "pb __ssh-proxy", KnownHostsCommand: "pb known",
+			Targets: []OpenSSHAliasTarget{{Alias: "box", User: user, Port: 22, AnyCaseUser: true}}}
+		raw, err := formatOwnedOpenSSH(testAliasDomain, owned)
+		if err != nil || !strings.Contains(string(raw), `user "`+user+`,`) {
+			t.Fatalf("%q: %v\n%s", user, err, raw)
+		}
+		back, ok := parseOwnedOpenSSH(raw, testAliasDomain)
+		if !ok || back.Targets[0].User != user {
+			t.Fatalf("%q did not round-trip: ok=%v %+v", user, ok, back.Targets)
+		}
 	}
 }

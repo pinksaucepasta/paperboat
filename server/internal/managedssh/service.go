@@ -13,6 +13,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 )
 
 var (
@@ -287,18 +289,16 @@ func bounded(value string) bool {
 	return len(value) > 0 && len(value) <= 128 && !strings.ContainsAny(value, "\r\n\x00")
 }
 
-// ValidOSUser is an OS account managed SSH can target: printable ASCII without spaces or @, the same rule as the
-// machine_ssh_targets CHECK and the CLI's OpenSSH configuration.
+// ValidOSUser is an OS account managed SSH can target: any printable account name (Unicode letters, spaces, dots,
+// hyphens) without the characters OpenSSH patterns, its quoting or the client's ProxyCommand shell cannot carry. The
+// CLI's managedssh.ValidUsername is the same rule; the machine_ssh_targets CHECK only guards the broad shape.
 func ValidOSUser(value string) bool {
-	if value == "" || len(value) > 255 || value[0] == '-' || strings.TrimSpace(value) != value || strings.ContainsAny(value, "\r\n\x00@") {
+	if value == "" || len(value) > 255 || value[0] == '-' || strings.TrimSpace(value) != value || !utf8.ValidString(value) {
 		return false
 	}
-	for _, character := range value {
-		if character < 0x21 || character > 0x7e {
-			return false
-		}
-	}
-	return true
+	return !strings.ContainsFunc(value, func(character rune) bool {
+		return !unicode.IsPrint(character) || strings.ContainsRune("\"'`$%*,?![]/@;|&<>(){}^#=:+~", character)
+	})
 }
 
 // HostKeyInUseError is ErrHostKeyInUse naming the other machine when the caller may see it.

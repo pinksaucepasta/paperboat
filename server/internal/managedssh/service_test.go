@@ -175,3 +175,17 @@ func TestServiceHostSetEntropyFailureDoesNotObserve(t *testing.T) {
 		t.Fatalf("entropy failure=%v observed=%q", err, repository.host.ID)
 	}
 }
+
+// X-28: the same table as the CLI's TestValidUsernameAcceptsSpacesAndUnicodeLettersOnly.
+func TestValidOSUserAcceptsSpacesAndUnicodeLettersOnly(t *testing.T) {
+	for _, value := range []string{"Zoë Test", "zoë", "東京 ユーザー", "a b", "pb.user_1", `HOST\Zoë Test`, "runneradmin"} {
+		if !ValidOSUser(value) {
+			t.Errorf("%q refused", value)
+		}
+	}
+	for _, value := range []string{"", " a", "a ", "-a", "a\tb", "a\u00a0b", "a\xffb", `a"b`, "a'b", "a,b", "a*b", "a$b", "a`b", "a%b", "a/b", "a@b", "a;b"} {
+		if ValidOSUser(value) {
+			t.Errorf("%q accepted", value)
+		}
+	}
+}

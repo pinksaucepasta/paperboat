@@ -66,8 +66,8 @@ func saveBootstrapRegistration(store *identity.Store, serverURL string, material
 	})
 }
 
-// bootstrapSSHFields is the managed SSH target saved for this OS account; an account managed SSH cannot target (a
-// Windows user named "Zoë Test") is saved without one, as the server pairs it (X-28).
+// bootstrapSSHFields is the managed SSH target saved for this OS account; an account managed SSH cannot carry (a
+// quote, comma, $ or % in its name) is saved without one, as the server pairs it (X-28).
 func bootstrapSSHFields(sshUser string, sshPort uint16) (string, uint16) {
 	sshUser = strings.TrimSpace(sshUser)
 	if !managedssh.ValidUsername(sshUser) {

@@ -322,7 +322,7 @@ func ensurePairingSSHTarget(ctx context.Context, tx *db.Tx, pairing dbsqlc.UserM
 	if !pairing.SshUser.Valid || !pairing.SshPort.Valid || !validPairingSSHUser(pairing.SshUser.String) || pairing.SshPort.Int32 < 1 || pairing.SshPort.Int32 > 65535 || machine.InstallationGeneration < 1 {
 		return ErrInvalidPairing
 	}
-	// An OS account managed SSH cannot target (a Windows user named "Zoë Test") still pairs, without a managed SSH
+	// An OS account managed SSH cannot carry (a quote, comma, $ or % in its name) still pairs, without a managed SSH
 	// target; writing it hit the machine_ssh_targets CHECK and failed the whole pairing with HTTP 500 (X-28).
 	if !managedssh.ValidOSUser(pairing.SshUser.String) {
 		return nil
