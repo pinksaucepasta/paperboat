@@ -62,10 +62,10 @@ func SanitizeURL(raw string) (string, bool) {
 	return string(textPrefix([]byte(raw), URLMaxBytes)), true
 }
 
-// textBody reports whether body can be shown as text: valid UTF-8 without
+// TextBody reports whether body can be shown as text: valid UTF-8 without
 // control characters other than tab, newline and carriage return. Binary
 // bodies are marked unsupported instead.
-func textBody(body []byte) bool {
+func TextBody(body []byte) bool {
 	if !utf8.Valid(body) {
 		return false
 	}

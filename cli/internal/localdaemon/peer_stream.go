@@ -15,6 +15,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/configsync"
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
+	"github.com/pinksaucepasta/paperboat/internal/peertransport/native"
 	"github.com/pinksaucepasta/paperboat/internal/resolver"
 	"github.com/pinksaucepasta/paperboat/internal/tunnel"
 	"github.com/pinksaucepasta/paperboat/shared/supportref"
@@ -217,6 +218,16 @@ func inspectorBroker(call func(context.Context, localapi.Peer, localapi.Inspecto
 	return localapi.InspectorBrokerFunc(call)
 }
 
+// inspectorFailure types a target's admission refusal (an invalid or unauthorized grant) as a
+// permission failure so the local API answers 403, not a connectivity 503.
+func inspectorFailure(err error) error {
+	var refusal *native.AdmissionRefusal
+	if errors.As(err, &refusal) && refusal.Code == native.AdmissionDenied {
+		return localapi.PermissionFailure(err)
+	}
+	return err
+}
+
 // TunnelInspectorRequest runs an inspector call on the daemon's own native peer session.
 func TunnelInspectorRequest(peerTunnel *tunnel.PeerTerminalTunnel) func(context.Context, localapi.Peer, localapi.InspectorRequest) (localapi.InspectorResult, error) {
 	return func(ctx context.Context, _ localapi.Peer, request localapi.InspectorRequest) (localapi.InspectorResult, error) {
@@ -229,7 +240,7 @@ func TunnelInspectorRequest(peerTunnel *tunnel.PeerTerminalTunnel) func(context.
 		}
 		payload, status, err := peerTunnel.InspectorRequest(ctx, request.Access, request.Grant, request.Method, request.Path, request.Body, query)
 		if err != nil {
-			return localapi.InspectorResult{}, err
+			return localapi.InspectorResult{}, inspectorFailure(err)
 		}
 		return localapi.InspectorResult{Status: status, Payload: payload}, nil
 	}

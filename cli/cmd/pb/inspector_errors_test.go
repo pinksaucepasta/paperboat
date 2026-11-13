@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 	"testing"
@@ -23,5 +24,20 @@ func TestInspectorDaemonRefusalsAreCodedUserErrors(t *testing.T) {
 	ambiguous := classifyCLIJSONError(decodeInspectorDaemonError(http.StatusConflict, []byte(`{"code":"inspector_replay_ambiguous"}`)))
 	if ambiguous.StateChanged != "unknown" || !ambiguous.OutcomeUncertain {
 		t.Fatalf("ambiguous replay must stay uncertain: %+v", ambiguous)
+	}
+}
+
+// X-43: `--body` without `--enable` is a usage error that names the fix, not "could not finish the command".
+func TestInspectBodyWithoutEnableIsAUsageError(t *testing.T) {
+	command := previewInspectCommand()
+	if err := command.Flags().Set("body", "true"); err != nil {
+		t.Fatal(err)
+	}
+	_, err := readTunnelInspectOptions(command)
+	if !errors.Is(err, errUsage) || !strings.Contains(err.Error(), "--enable") || strings.Contains(err.Error(), "could not finish") {
+		t.Fatalf("err = %v", err)
+	}
+	if result := classifyCLIJSONError(err); !strings.Contains(result.Message, "--enable") {
+		t.Fatalf("message = %q", result.Message)
 	}
 }

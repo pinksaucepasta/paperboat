@@ -560,7 +560,7 @@ func responseCaptureState(header http.Header, body []byte, truncated bool) Captu
 	if len(body) == 0 {
 		return StateComplete
 	}
-	if !textBody(body) {
+	if !TextBody(body) {
 		return StateUnsupported
 	}
 	return StateComplete

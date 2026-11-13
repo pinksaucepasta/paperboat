@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
+	"github.com/pinksaucepasta/paperboat/internal/peertransport/native"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/tailnet"
 )
 
@@ -31,5 +32,20 @@ func TestNativeProbeRejectsOnlyProvenAuthorityFailures(t *testing.T) {
 		if !tc.denied && result != tc.err {
 			t.Fatal("operational failure was converted to permission denial")
 		}
+	}
+}
+
+// X-43: an inspector call the target refuses is a permission failure; a transport failure is not.
+func TestInspectorFailureTypesOnlyProvenRefusals(t *testing.T) {
+	refused := fmt.Errorf("open: %w", &native.AdmissionRefusal{Code: native.AdmissionDenied, Err: errors.New("reset")})
+	if got := inspectorFailure(refused); !localapi.IsPermissionFailure(got) || !errors.Is(got, tailnet.ErrAdmission) {
+		t.Fatalf("refused grant = %v", got)
+	}
+	unavailable := &native.AdmissionRefusal{Code: native.AdmissionUnavailable, Err: errors.New("reset")}
+	if got := inspectorFailure(unavailable); localapi.IsPermissionFailure(got) {
+		t.Fatalf("temporary unavailability became a refusal: %v", got)
+	}
+	if got := inspectorFailure(syscall.EIO); localapi.IsPermissionFailure(got) || got != syscall.EIO {
+		t.Fatalf("transport failure = %v", got)
 	}
 }

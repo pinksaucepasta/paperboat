@@ -1345,6 +1345,40 @@ func TestInspectorRequestGoesThroughTheDaemon(t *testing.T) {
 	<-done
 }
 
+// X-43: a target that refuses the inspector grant is a 403 for the caller; only a transport failure is the 503.
+func TestInspectorRefusedGrantIs403AndTransportFailureIs503(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+		want int
+		code string
+	}{
+		{"refused grant", PermissionFailure(errors.New("admission denied")), http.StatusForbidden, "permission_denied"},
+		{"transport failure", errors.New("dial failed"), http.StatusServiceUnavailable, "inspector_unavailable"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			broker := InspectorBrokerFunc(func(context.Context, Peer, InspectorRequest) (InspectorResult, error) {
+				return InspectorResult{}, tc.err
+			})
+			server, err := NewServer(ServerConfig{SocketPath: filepath.Join(localAPITestDir(t), "unused.sock"), OwnerUID: os.Geteuid(), OwnerGID: os.Getegid(), Source: snapshotSourceFunc(func(context.Context) (Snapshot, error) { return validSnapshot(), nil }), InspectorRequests: broker})
+			if err != nil {
+				t.Fatal(err)
+			}
+			body, _ := json.Marshal(InspectorRequest{Access: api.InspectorAccess{MachineID: "machine_1", ResourceKind: "tunnel", ResourceID: "tun_1", RouteID: "route_1"}, Grant: "g", Method: "GET", Path: "/v1/inspector/records"})
+			request := httptest.NewRequest(http.MethodPost, "/v1/inspector", bytes.NewReader(body))
+			request.Header.Set("Content-Type", "application/json")
+			response := httptest.NewRecorder()
+			server.inspectorRequest(response, request, "request_1", Peer{UID: os.Geteuid(), GID: os.Getegid(), PID: os.Getpid()})
+			var envelope struct {
+				Code string `json:"code"`
+			}
+			if err := json.Unmarshal(response.Body.Bytes(), &envelope); err != nil || response.Code != tc.want || envelope.Code != tc.code {
+				t.Fatalf("status=%d code=%q err=%v", response.Code, envelope.Code, err)
+			}
+		})
+	}
+}
+
 // A peer stream that fails on a machine the control plane has just revoked says the machine is signed
 // out (pb: "session is no longer valid"), not that the target is unreachable (C036).
 func TestPeerStreamFailureOnASignedOutMachineSaysAuthenticationRequired(t *testing.T) {

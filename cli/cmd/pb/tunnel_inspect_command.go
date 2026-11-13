@@ -126,8 +126,10 @@ type inspectorCapture struct {
 	ResponseHeaders   map[string][]string `json:"response_headers"`
 	HeadersTruncated  bool                `json:"headers_truncated"`
 	RequestBody       string              `json:"request_body"`
+	RequestBodyEnc    string              `json:"request_body_encoding"`
 	RequestBodyState  string              `json:"request_body_state"`
 	ResponseBody      string              `json:"response_body"`
+	ResponseBodyEnc   string              `json:"response_body_encoding"`
 	ResponseBodyState string              `json:"response_body_state"`
 	ResponseStatus    int                 `json:"response_status"`
 	ErrorCode         string              `json:"error_code"`
@@ -354,7 +356,8 @@ func readTunnelInspectOptions(command *cobra.Command) (tunnelInspectOptions, err
 	options.withRaw, _ = command.Flags().GetBool("raw")
 	options.purge, _ = command.Flags().GetBool("purge")
 	if (options.withBody || options.withRaw) && !options.enable {
-		return options, errors.New("--body and --raw require --enable")
+		return options, usageError{err: errors.New("--body and --raw require --enable"),
+			publicMessage: "--body and --raw only work together with --enable, for example `pb preview inspect <preview> --enable --body`"}
 	}
 	selected := 0
 	for _, active := range []bool{options.purge, options.enable, options.disable, options.captureID != ""} {

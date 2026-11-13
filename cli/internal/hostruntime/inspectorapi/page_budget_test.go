@@ -1,6 +1,8 @@
 package inspectorapi
 
 import (
+	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"github.com/pinksaucepasta/paperboat/internal/inspector"
 	"net/http"
@@ -55,5 +57,24 @@ func TestCapturePageBoundsEncodedBodiesAndContinues(t *testing.T) {
 	}
 	if len(seen) != 12 {
 		t.Fatalf("lost records: got %d", len(seen))
+	}
+}
+
+// X-43: binary and non-UTF-8 bodies reach the viewer exactly as captured, labelled base64; text stays plain.
+func TestCaptureWireLabelsBinaryBodiesBase64(t *testing.T) {
+	binary := []byte{0x89, 'P', 'N', 'G', 0, 0xff}
+	body, enc := wireBody(binary)
+	if raw, err := base64.StdEncoding.DecodeString(body); err != nil || !bytes.Equal(raw, binary) || enc != "base64" {
+		t.Fatalf("binary = %q %q", body, enc)
+	}
+	latin := []byte("caf\xe9")
+	if body, enc := wireBody(latin); enc != "base64" || body != base64.StdEncoding.EncodeToString(latin) {
+		t.Fatalf("latin1 = %q %q", body, enc)
+	}
+	if body, enc := wireBody([]byte("plain")); body != "plain" || enc != "" {
+		t.Fatalf("text = %q %q", body, enc)
+	}
+	if body, enc := wireBody(nil); body != "" || enc != "" {
+		t.Fatalf("empty = %q %q", body, enc)
 	}
 }

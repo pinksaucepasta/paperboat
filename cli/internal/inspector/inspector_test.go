@@ -1,6 +1,8 @@
 package inspector
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
 	"fmt"
 	"net/http"
@@ -160,7 +162,7 @@ func TestBodyOptInShowsTruncationAndDrop(t *testing.T) {
 		t.Fatalf("record state must reflect truncation: %+v", record.State)
 	}
 
-	// Binary bodies are never presented as safely redacted.
+	// Binary bodies are kept as sent.
 	pending, err = store.TryBegin("tunnel_01")
 	if err != nil {
 		t.Fatal(err)
@@ -170,8 +172,8 @@ func TestBodyOptInShowsTruncationAndDrop(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if record.RequestBodyState != StateUnsupported || len(record.RequestBody) != 0 {
-		t.Fatalf("binary body must be unsupported without bytes: %+v", record.RequestBodyState)
+	if record.RequestBodyState != StateComplete || !bytes.Equal(record.RequestBody, []byte{0, 1, 2, 3}) {
+		t.Fatalf("binary body must be kept as sent: %+v %v", record.RequestBodyState, record.RequestBody)
 	}
 }
 
@@ -355,16 +357,42 @@ func TestLongURLIsTruncatedOnARuneBoundary(t *testing.T) {
 	}
 }
 
-// Text bodies of any content type are stored as sent; binary ones are marked unsupported.
-func TestBodiesAreStoredAsTextOrMarkedUnsupported(t *testing.T) {
-	if body, state := sanitizeBody([]byte("a=1&password=x"), false, false, true); string(body) != "a=1&password=x" || state != StateComplete {
+// X-43: bodies are kept as sent: text, binary and non-UTF-8 bytes alike; gzip is decoded; streams stay unsupported.
+func TestBodiesAreStoredAsSentAndGzipIsDecoded(t *testing.T) {
+	gz := func(data []byte) []byte {
+		var buf bytes.Buffer
+		w := gzip.NewWriter(&buf)
+		w.Write(data)
+		w.Close()
+		return buf.Bytes()
+	}
+	gzipHeader := http.Header{"Content-Encoding": {"gzip"}}
+	if body, state := sanitizeBody([]byte("a=1&password=x"), nil, false, false, true); string(body) != "a=1&password=x" || state != StateComplete {
 		t.Fatalf("form body = %q %q", body, state)
 	}
-	if body, state := sanitizeBody([]byte{0x89, 'P', 'N', 'G', 0}, false, false, true); body != nil || state != StateUnsupported {
+	png := []byte{0x89, 'P', 'N', 'G', 0, 0xff}
+	if body, state := sanitizeBody(png, nil, false, false, true); !bytes.Equal(body, png) || state != StateComplete {
 		t.Fatalf("binary body = %q %q", body, state)
 	}
+	latin := []byte("caf\xe9")
+	if body, state := sanitizeBody(latin, nil, false, false, true); !bytes.Equal(body, latin) || state != StateComplete || TextBody(body) {
+		t.Fatalf("iso-8859-1 body = %q %q", body, state)
+	}
+	if body, state := sanitizeBody(gz([]byte(`{"a":1}`)), gzipHeader, false, false, true); string(body) != `{"a":1}` || state != StateComplete {
+		t.Fatalf("gzip body = %q %q", body, state)
+	}
+	if body, state := sanitizeBody([]byte(`{"a":1}`), gzipHeader, false, false, true); string(body) != `{"a":1}` || state != StateComplete {
+		t.Fatalf("already decoded body under a gzip header = %q %q", body, state)
+	}
+	bomb := gz(bytes.Repeat([]byte("a"), 4*BodyMaxBytes))
+	if body, state := sanitizeBody(bomb, gzipHeader, false, false, true); len(body) != BodyMaxBytes || state != StateTruncated {
+		t.Fatalf("gzip bomb = %d bytes %q", len(body), state)
+	}
+	if body, state := sanitizeBody(png, nil, false, true, true); body != nil || state != StateUnsupported {
+		t.Fatalf("stream = %q %q", body, state)
+	}
 	long := []byte(strings.Repeat("é", BodyMaxBytes))
-	body, state := sanitizeBody(long[:BodyMaxBytes], true, false, true)
+	body, state := sanitizeBody(long[:BodyMaxBytes], nil, true, false, true)
 	if state != StateTruncated || !utf8.Valid(body) || len(body) == 0 || len(body) > BodyMaxBytes {
 		t.Fatalf("truncated body = %d bytes %q", len(body), state)
 	}

@@ -11,6 +11,7 @@ package inspectorapi
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
@@ -420,8 +421,10 @@ type recordWire struct {
 	ResponseHeaders   http.Header `json:"response_headers"`
 	HeadersTruncated  bool        `json:"headers_truncated"`
 	RequestBody       string      `json:"request_body,omitempty"`
+	RequestBodyEnc    string      `json:"request_body_encoding,omitempty"`
 	RequestBodyState  string      `json:"request_body_state"`
 	ResponseBody      string      `json:"response_body,omitempty"`
+	ResponseBodyEnc   string      `json:"response_body_encoding,omitempty"`
 	ResponseBodyState string      `json:"response_body_state"`
 	ResponseStatus    int         `json:"response_status"`
 	ErrorCode         string      `json:"error_code"`
@@ -432,7 +435,18 @@ type recordWire struct {
 	FinishedAt        time.Time   `json:"finished_at"`
 }
 
+// wireBody sends text as is and any other bytes (binary, non-UTF-8 charsets) as
+// base64, labelled by the encoding field, so JSON never alters them.
+func wireBody(body []byte) (string, string) {
+	if len(body) == 0 || inspector.TextBody(body) {
+		return string(body), ""
+	}
+	return base64.StdEncoding.EncodeToString(body), "base64"
+}
+
 func wireRecord(record inspector.Record) recordWire {
+	requestBody, requestEnc := wireBody(record.RequestBody)
+	responseBody, responseEnc := wireBody(record.ResponseBody)
 	return recordWire{
 		Schema: SchemaV1, Kind: "capture",
 		ID: record.ID, ResourceID: record.ResourceID,
@@ -440,8 +454,8 @@ func wireRecord(record inspector.Record) recordWire {
 		Method: record.Method, URL: record.URL, URLTruncated: record.URLTruncated,
 		RequestHeaders: record.RequestHeaders, ResponseHeaders: record.ResponseHeaders,
 		HeadersTruncated: record.HeadersTruncated,
-		RequestBody:      string(record.RequestBody), RequestBodyState: string(record.RequestBodyState),
-		ResponseBody: string(record.ResponseBody), ResponseBodyState: string(record.ResponseBodyState),
+		RequestBody:      requestBody, RequestBodyEnc: requestEnc, RequestBodyState: string(record.RequestBodyState),
+		ResponseBody: responseBody, ResponseBodyEnc: responseEnc, ResponseBodyState: string(record.ResponseBodyState),
 		ResponseStatus: record.ResponseStatus, ErrorCode: record.ErrorCode,
 		State: string(record.State), ReplayIneligible: record.ReplayIneligible, ReplayOf: record.ReplayOf,
 		StartedAt: record.StartedAt, FinishedAt: record.FinishedAt,

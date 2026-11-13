@@ -1,6 +1,8 @@
 package inspector
 
 import (
+	"bytes"
+	"compress/gzip"
 	"io"
 	"net/http"
 	"strings"
@@ -183,10 +185,10 @@ func buildRecord(pending *Pending, policy ResourcePolicy, completed CompletedCap
 	headersTruncated := requestHeaderTruncated || responseHeaderTruncated
 
 	requestBody, requestState := sanitizeBody(
-		completed.RequestBody, completed.RequestTruncated, completed.RequestUnsupported,
+		completed.RequestBody, requestHeaders, completed.RequestTruncated, completed.RequestUnsupported,
 		policy.CaptureRequestBody)
 	responseBody, responseState := sanitizeBody(
-		completed.ResponseBody, completed.ResponseTruncated, completed.ResponseUnsupported,
+		completed.ResponseBody, responseHeaders, completed.ResponseTruncated, completed.ResponseUnsupported,
 		policy.CaptureResponseBody)
 
 	// Enforce the 16 KiB metadata cap by dropping response headers first,
@@ -286,28 +288,51 @@ func dropOneHeader(header http.Header) {
 }
 
 // sanitizeBody applies the opt-in policy: disabled modes report dropped
-// without storing bytes; unsupported streams and binary bodies report
-// unsupported; text bodies are stored as sent, truncated ones as their
-// retained prefix.
-func sanitizeBody(body []byte, truncated, unsupported, enabled bool) ([]byte, CaptureState) {
+// without storing bytes and unsupported streams report unsupported. Every
+// other body is stored as sent (binary and non-UTF-8 bytes included; the wire
+// layer labels the encoding), gzip bodies decoded as ngrok's inspector does,
+// and a body over BodyMaxBytes keeps its prefix and reports truncated.
+func sanitizeBody(body []byte, header http.Header, truncated, unsupported, enabled bool) ([]byte, CaptureState) {
 	if unsupported {
 		return nil, StateUnsupported
 	}
 	if !enabled {
 		return nil, StateDropped
 	}
-	if truncated && int64(len(body)) >= BodyMaxBytes {
-		prefix := textPrefix(body, int(BodyMaxBytes))
-		if !textBody(prefix) {
-			return nil, StateTruncated
+	if strings.EqualFold(strings.TrimSpace(header.Get("Content-Encoding")), "gzip") {
+		decoded, more := gunzipBounded(body)
+		if decoded != nil {
+			body, truncated = decoded, truncated || more
 		}
-		return append([]byte(nil), prefix...), StateTruncated
+	}
+	if int64(len(body)) > BodyMaxBytes {
+		body, truncated = body[:BodyMaxBytes], true
+	}
+	if truncated {
+		if prefix := textPrefix(body, len(body)); TextBody(prefix) {
+			body = prefix
+		}
+		return append([]byte(nil), body...), StateTruncated
 	}
 	if len(body) == 0 {
 		return nil, StateComplete
 	}
-	if !textBody(body) {
-		return nil, StateUnsupported
-	}
 	return append([]byte(nil), body...), StateComplete
+}
+
+// gunzipBounded returns the first BodyMaxBytes of the decompressed body and
+// whether more followed. A body that is not valid gzip (a replayed record
+// already holds decoded bytes) returns nil so the caller keeps the original;
+// a truncated gzip stream returns what it decoded with more=true.
+func gunzipBounded(body []byte) (decoded []byte, more bool) {
+	reader, err := gzip.NewReader(bytes.NewReader(body))
+	if err != nil {
+		return nil, false
+	}
+	defer reader.Close()
+	decoded, err = io.ReadAll(io.LimitReader(reader, BodyMaxBytes+1))
+	if err != nil && len(decoded) == 0 {
+		return nil, false
+	}
+	return decoded, err != nil || int64(len(decoded)) > BodyMaxBytes
 }
