@@ -1,0 +1,109 @@
+{
+ "check": "xplat-team",
+ "pairs": [
+  "M>W",
+  "W>M"
+ ],
+ "results": [
+  {
+   "id": "X-21:visible:M>W",
+   "status": "PASS",
+   "detail": "the member sees lanex2-m with exactly the granted permissions (private_access only while the team setting is on)"
+  },
+  {
+   "id": "X-21:exec:M>W",
+   "status": "PASS",
+   "detail": "a member of OS windows ran a command on the darwin machine with exact argv"
+  },
+  {
+   "id": "X-21:terminal:M>W",
+   "status": "PASS",
+   "detail": "pb connect from the member machine started the target shell (unix) and echoed UTF-8"
+  },
+  {
+   "id": "X-21:session:M>W",
+   "status": "PASS",
+   "detail": "viewer read and could not type, interactive typed, removal ended the join in 4s (member OS windows, target OS darwin)"
+  },
+  {
+   "id": "X-21:files:M>W",
+   "status": "PASS",
+   "detail": "approved send arrived with equal bytes in the darwin Inbox; a declined send failed and left nothing (ba-1fa6-4328-b108-1c5e3368f362. Run `pb bugreport --upload` to send the details.)"
+  },
+  {
+   "id": "X-21:manage:M>W",
+   "status": "PASS",
+   "detail": "member (windows) listed, paused, resumed the team tunnel and stopped the team preview of the darwin machine; revoking the grant hid both"
+  },
+  {
+   "id": "X-21:private:M>W",
+   "status": "PASS",
+   "detail": "member forward and private address 127.100.0.7 byte-exact with half-close; non-loopback --listen refused"
+  },
+  {
+   "id": "X-21:end:M>W",
+   "status": "PASS",
+   "detail": "revoke ended the open terminal in 2s; unshare ended the open terminal in 2s"
+  },
+  {
+   "id": "X-21:removal:M>W",
+   "status": "PASS",
+   "detail": "removing the machine owner ended the open terminal in 2s and hid the machine (member OS windows, machine OS darwin)"
+  },
+  {
+   "id": "X-21:suspension:M>W",
+   "status": "PASS",
+   "detail": "suspension ended the open terminal in 2s, hid the machine and refused a mutation naming it; resume brought access back (member OS windows, machine OS darwin)"
+  },
+  {
+   "id": "X-21:visible:W>M",
+   "status": "PASS",
+   "detail": "the member sees rx21-w with exactly the granted permissions (private_access only while the team setting is on)"
+  },
+  {
+   "id": "X-21:exec:W>M",
+   "status": "PASS",
+   "detail": "a member of OS darwin ran a command on the windows machine with exact argv"
+  },
+  {
+   "id": "X-21:terminal:W>M",
+   "status": "PASS",
+   "detail": "pb connect from the member machine started the target shell (cmd) and echoed UTF-8"
+  },
+  {
+   "id": "X-21:session:W>M",
+   "status": "PASS",
+   "detail": "viewer read and could not type, interactive typed, removal ended the join in 0s (member OS darwin, target OS windows)"
+  },
+  {
+   "id": "X-21:files:W>M",
+   "status": "PASS",
+   "detail": "approved send arrived with equal bytes in the windows Inbox; a declined send failed and left nothing (ec-fc5c-4be6-9bb9-bc968dcade8e. Run `pb bugreport --upload` to send the details.)"
+  },
+  {
+   "id": "X-21:manage:W>M",
+   "status": "FAIL",
+   "detail": "preview: ror\":{\"code\":\"operation_refused\",\"category\":\"conflict\",\"message\":\"The preview did not become ready in time and was stopped. Retry; run pb doctor if this continues.\",\"retryable\":false,\"state_changed\":false,\"outcome_uncertain\":false,\"support_reference\":\"support_a1de0346-f412-428f-bbb0-542decebb2c8\"}}\n"
+  },
+  {
+   "id": "X-21:private:W>M",
+   "status": "PASS",
+   "detail": "member forward and private address 127.100.0.15 byte-exact with half-close; non-loopback --listen refused"
+  },
+  {
+   "id": "X-21:end:W>M",
+   "status": "PASS",
+   "detail": "revoke ended the open terminal in 3s; unshare ended the open terminal in 2s"
+  },
+  {
+   "id": "X-21:removal:W>M",
+   "status": "PASS",
+   "detail": "removing the member ended the open terminal in 2s and hid the machine (member OS darwin, machine OS windows)"
+  },
+  {
+   "id": "X-21:suspension:W>M",
+   "status": "PASS",
+   "detail": "suspension ended the open terminal in 2s, hid the machine and refused a mutation naming it; resume brought access back (member OS darwin, machine OS windows)"
+  }
+ ]
+}

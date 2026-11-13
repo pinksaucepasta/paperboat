@@ -1,0 +1,58 @@
+{
+ "check": "xplat-team",
+ "pairs": [
+  "W>M"
+ ],
+ "results": [
+  {
+   "id": "X-21:visible:W>M",
+   "status": "PASS",
+   "detail": "the member sees rx21-w with exactly the granted permissions (private_access only while the team setting is on)"
+  },
+  {
+   "id": "X-21:exec:W>M",
+   "status": "PASS",
+   "detail": "a member of OS darwin ran a command on the windows machine with exact argv"
+  },
+  {
+   "id": "X-21:terminal:W>M",
+   "status": "PASS",
+   "detail": "pb connect from the member machine started the target shell (cmd) and echoed UTF-8"
+  },
+  {
+   "id": "X-21:session:W>M",
+   "status": "PASS",
+   "detail": "viewer read and could not type, interactive typed, removal ended the join in 0s (member OS darwin, target OS windows)"
+  },
+  {
+   "id": "X-21:files:W>M",
+   "status": "PASS",
+   "detail": "approved send arrived with equal bytes in the windows Inbox; a declined send failed and left nothing (c1-bbea-4f0f-9775-089c5f5b0abb. Run `pb bugreport --upload` to send the details.)"
+  },
+  {
+   "id": "X-21:manage:W>M",
+   "status": "FAIL",
+   "detail": "preview: ror\":{\"code\":\"operation_refused\",\"category\":\"conflict\",\"message\":\"The preview did not become ready in time and was stopped. Retry; run pb doctor if this continues.\",\"retryable\":false,\"state_changed\":false,\"outcome_uncertain\":false,\"support_reference\":\"support_d79693e3-f701-460e-ac05-aa3677b2b6cb\"}}\n"
+  },
+  {
+   "id": "X-21:private:W>M",
+   "status": "FAIL",
+   "detail": "driver:  .9/lib/python3.9/socket.py\", line 843, in create_connection\n    raise err\n  File \"/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/socket.py\", line 831, in create_connection\n    sock.connect(sa)\nConnectionRefusedError: [Errno 61] Connection refused\n"
+  },
+  {
+   "id": "X-21:end:W>M",
+   "status": "FAIL",
+   "detail": "End Of File (EOF). Exception style platform.\n<pexpect.pty_spawn.spawn object at 0xe787eb465a00>\ncommand: /usr/bin/ssh\nargs: [b'/usr/bin/ssh', b'-tt', b'-o', b'StrictHostKeyChecking=no', b'-o', b'UserKnownHostsFile=/dev/null', b'-o', b'LogLevel=ERROR', b'-o', b'BatchMode=yes', b'admin@100.88.169.42', b'security unlock-keychain -p admin \"$HOME/Library/Keychains/login.keychain-db\" >/dev/null 2>&1; TERM=xterm-256color \\'/Users/admin/.local/bin/pb\\' \\'connect\\' \\'rx21-w\\' \\'--workspace\\' \\'paperboat-smoke-7f37869cf64a\\'']\nbuffer (last 100 chars): ''\nbefore (last 100 chars): 'ce: support_7d4da705-8e3c-4d42-b012-2b97cb16aab2. Run `pb bugreport --upload` to send the details.\\r\\n'\nafter: <class 'pexp"
+  },
+  {
+   "id": "X-21:removal:W>M",
+   "status": "FAIL",
+   "detail": "End Of File (EOF). Exception style platform.\n<pexpect.pty_spawn.spawn object at 0xe787eb465b80>\ncommand: /usr/bin/ssh\nargs: [b'/usr/bin/ssh', b'-tt', b'-o', b'StrictHostKeyChecking=no', b'-o', b'UserKnownHostsFile=/dev/null', b'-o', b'LogLevel=ERROR', b'-o', b'BatchMode=yes', b'admin@100.88.169.42', b'security unlock-keychain -p admin \"$HOME/Library/Keychains/login.keychain-db\" >/dev/null 2>&1; TERM=xterm-256color \\'/Users/admin/.local/bin/pb\\' \\'connect\\' \\'rx21-w\\' \\'--workspace\\' \\'paperboat-smoke-7f37869cf64a\\'']\nbuffer (last 100 chars): ''\nbefore (last 100 chars): '           connected\\x1b[27m\\x1b[u\\x1b[?1000l\\x1b[?1002l\\x1b[?1003l\\x1b[?1006l\\x1b[?1015l\\x1b[?2004l\\x1b[?1049l\\x1b[?25h\\x1"
+  },
+  {
+   "id": "X-21:suspension:W>M",
+   "status": "FAIL",
+   "detail": "End Of File (EOF). Exception style platform.\n<pexpect.pty_spawn.spawn object at 0xe787eb497170>\ncommand: /usr/bin/ssh\nargs: [b'/usr/bin/ssh', b'-tt', b'-o', b'StrictHostKeyChecking=no', b'-o', b'UserKnownHostsFile=/dev/null', b'-o', b'LogLevel=ERROR', b'-o', b'BatchMode=yes', b'admin@100.88.169.42', b'security unlock-keychain -p admin \"$HOME/Library/Keychains/login.keychain-db\" >/dev/null 2>&1; TERM=xterm-256color \\'/Users/admin/.local/bin/pb\\' \\'connect\\' \\'rx21-w\\' \\'--workspace\\' \\'paperboat-smoke-7f37869cf64a\\'']\nbuffer (last 100 chars): ''\nbefore (last 100 chars): '\\r\\n\\x1b[K\\r\\n\\x1b[K\\r\\n\\x1b[K\\x1b[7;22H\\x1b[?25h\\x1b[?1000l\\x1b[?1002l\\x1b[?1003l\\x1b[?1006l\\x1b[?1015l\\x1b[?2004l\\x1b[?10"
+  }
+ ]
+}
