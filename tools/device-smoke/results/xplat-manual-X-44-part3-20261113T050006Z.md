@@ -41,4 +41,26 @@ linux host users resolving their other-OS machine:
      12 pbt rx44-w-2 runnervmm7ud1
      12 pbt2 rx44-wc runnervmm7ud1
 
-## Not run: any macOS host or client (macpool queue: runs pending 30+ min on GitHub's macOS runners)
+
+## Refusal page on the Linux gateway, dev-bb9da7fb1 (container, OS users root, stranger without a daemon, pbt with one): PASS
+```
+== root
+HTTP/1.1 403 Forbidden
+Content-Type: text/plain; charset=utf-8
+Connection: close
+Content-Length: 92
+
+This OS user has no running Paperboat daemon. Run `pb install` and `pb login` as this user.
+== stranger
+HTTP/1.1 403 Forbidden
+Content-Type: text/plain; charset=utf-8
+Connection: close
+Content-Length: 92
+
+This OS user has no running Paperboat daemon. Run `pb install` and `pb login` as this user.
+== pbt (own daemon)
+HTTP/1.1 421 Misdirected Request
+```
+
+L<->W: every part passed on dev-bb9da7fb1 on both machines (Linux container, Windows runner winpool-2): each OS as host and as client, address per account, one account never reaches the other, refusal page on both gateways, simultaneous connect.
+## Not run: any macOS host or client (L<->M, M<->W): macpool runs pending in GitHub's macOS queue; the fleet Mac is one account and cannot host two.
