@@ -53,3 +53,12 @@ export function mobileKeySequence(key: MobileKey, applicationCursorMode: boolean
   if (key === "TAB") return modifiers.alt ? "\x1b\t" : "\t"
   return applyMobileModifiers(key, modifiers)
 }
+
+/** ESC b / ESC f for a bare Option+Left / Option+Right on macOS (word motion); null for every other key. */
+export function optionArrowSequence(
+  event: Pick<KeyboardEvent, "key" | "altKey" | "ctrlKey" | "metaKey" | "shiftKey">,
+  mac: boolean,
+): string | null {
+  if (!mac || !event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return null
+  return event.key === "ArrowLeft" ? "\x1bb" : event.key === "ArrowRight" ? "\x1bf" : null
+}

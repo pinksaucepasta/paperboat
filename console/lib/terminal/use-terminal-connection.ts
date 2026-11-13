@@ -27,6 +27,7 @@ import {
 import {
   applyMobileModifiers,
   mobileKeySequence,
+  optionArrowSequence,
   noMobileModifiers,
   type MobileKey,
   type MobileModifiers,
@@ -545,6 +546,14 @@ export function useTerminalConnection({
       if (selection.kind === "files") void uploadFiles(selection.files)
       else showFilePasteNotice(filePasteMessage(selection.kind))
     }
+    // macOS Option+Left/Right is word motion (ESC b / ESC f) as in Terminal.app and xterm.js; zsh binds nothing else.
+    const onOptionArrowCapture = (event: KeyboardEvent) => {
+      const sequence = optionArrowSequence(event, /^Mac/i.test(navigator.platform))
+      if (!sequence || event.isComposing || phaseRef.current !== "attached") return
+      event.preventDefault()
+      event.stopPropagation()
+      sendInput(new TextEncoder().encode(sequence))
+    }
     const hasFiles = (transfer: DataTransfer | null) => !!transfer && Array.from(transfer.types ?? []).includes("Files")
     const onDragEnter = (event: DragEvent) => {
       if (!hasFiles(event.dataTransfer)) return
@@ -655,6 +664,7 @@ export function useTerminalConnection({
         window.addEventListener("online", onOnline)
         document.addEventListener("visibilitychange", onActive)
         host.addEventListener("paste", onPasteCapture, true)
+        host.addEventListener("keydown", onOptionArrowCapture, true)
         host.addEventListener("dragenter", onDragEnter, true)
         host.addEventListener("dragover", onDragOver, true)
         host.addEventListener("dragleave", onDragLeave, true)
@@ -683,6 +693,7 @@ export function useTerminalConnection({
       window.removeEventListener("online", onOnline)
       document.removeEventListener("visibilitychange", onActive)
       host.removeEventListener("paste", onPasteCapture, true)
+      host.removeEventListener("keydown", onOptionArrowCapture, true)
       host.removeEventListener("dragenter", onDragEnter, true)
       host.removeEventListener("dragover", onDragOver, true)
       host.removeEventListener("dragleave", onDragLeave, true)
