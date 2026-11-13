@@ -746,7 +746,12 @@ func installWindows(ctx context.Context, request Request, lifecycleOwned bool, c
 	if err := runWindowsInstallPhase(ctx, "repair Paperboat user-state permissions", func() error { return repairWindowsTreeACL(request.StateRoot, request.OwnerSID) }); err != nil {
 		return err
 	}
-	if _, err := ensureWindowsPinnedRuntimeFrom(ctx, layout, request.Source, request.OwnerSID, request.Executable); err != nil {
+	pinned, err := ensureWindowsPinnedRuntimeFrom(ctx, layout, request.Source, request.OwnerSID, request.Executable)
+	if err != nil {
+		return err
+	}
+	// The pin and the installed slot run in the user's session; a rule per path keeps the firewall dialog away.
+	if err := AllowWindowsFirewall(ctx, layout, pinned, layout.Binary); err != nil {
 		return err
 	}
 	tokenPath, _ := WindowsInstanceTokenPath(instance)

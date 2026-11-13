@@ -726,6 +726,9 @@ func PrepareWindowsReplacement(ctx context.Context, request Request) (func(), er
 	if _, err := ensureWindowsPinnedRuntimeFrom(ctx, layout, request.Source, request.OwnerSID, request.Executable); err != nil {
 		return nil, err
 	}
+	if err := AllowWindowsFirewall(ctx, layout, pin); err != nil {
+		return nil, err
+	}
 	return func() {
 		if statErr == nil {
 			return
