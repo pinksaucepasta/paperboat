@@ -1,0 +1,15 @@
+{
+ "check": "xplat-envscopes",
+ "devices": [
+  "L",
+  "M",
+  "W"
+ ],
+ "results": [
+  {
+   "id": "X-12:rotation:L+M+W",
+   "status": "PASS",
+   "detail": "revoke: pending on L, M, W, re-sealed by unlock at newer fences, value delivered, revoked machine not given the rotation"
+  }
+ ]
+}

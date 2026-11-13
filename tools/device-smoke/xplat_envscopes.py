@@ -165,6 +165,9 @@ def throwaway(prefix, container):
     docker = os.environ.get('XPLAT_L_DOCKER', 'docker').split()
     sh = lambda script: subprocess.run(['ssh', host_ssh, script], capture_output=True, text=True, timeout=240)  # noqa: E731
     d = ' '.join(docker)
+    stale = fleet.machines().get(prefix + '-rot')  # a record left by an interrupted run would make the server name this one '-rot-2' and every exec by alias would hit the offline one
+    if stale:
+        revoke(fleet.controller(), stale['id'])
     sh('%s rm -f %s; %s run -d --name %s --hostname %s --privileged --cgroupns=host -v /sys/fs/cgroup:/sys/fs/cgroup:rw --tmpfs /run --tmpfs /run/lock f1407s-systemd' % (d, container, d, container, container))
     time.sleep(8)
     sh("%s exec %s bash -c \"useradd -m -u 1001 -s /bin/bash tester && echo 'tester ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/tester && loginctl enable-linger tester && systemctl start user@1001.service\"" % (d, container))
