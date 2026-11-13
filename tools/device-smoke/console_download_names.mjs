@@ -1,5 +1,5 @@
 // X-14: what a browser saves when each Inbox item of one machine is downloaded from the console Files screen.
-// usage: ORIGIN=<console origin> STATE=<storage state> [PW_CHROMIUM=<path> | PW_CHANNEL=chrome|msedge] [PW_MODULE=<playwright-core index.mjs>]
+// usage: ORIGIN=<console origin> STATE=<storage state> [ONLY=<regex of the item labels to download>] [PW_CHROMIUM=<path> | PW_CHANNEL=chrome|msedge] [PW_MODULE=<playwright-core index.mjs>]
 //        node console_download_names.mjs <machine-id> <out.json> [OS label]
 // Downloads every `a[download]` link of /files?machine=<id> through the browser's own download, saves each under the name the browser
 // chose into a scratch folder of this OS (so the OS file system must accept it) and writes {item, suggested, saved, bytes} per item.
@@ -16,7 +16,8 @@ const page = await context.newPage()
 await page.goto(`${process.env.ORIGIN}/files?machine=${machine}`)
 await page.waitForLoadState("networkidle").catch(() => {})
 await page.waitForSelector("a[download]", { timeout: 60000 })
-const items = await page.$$eval("a[download]", (links) => links.map((a) => a.textContent.trim()))
+const only = process.env.ONLY ? new RegExp(process.env.ONLY) : null
+const items = (await page.$$eval("a[download]", (links) => links.map((a) => a.textContent.trim()))).filter((item) => !only || only.test(item))
 const scratch = mkdtempSync(join(tmpdir(), "pb-x14-"))
 const rows = []
 for (const item of items) {
