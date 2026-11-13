@@ -8,10 +8,12 @@ import (
 	"errors"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/auth"
 	"io"
+	"io/fs"
 	"net/http"
 	"path"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
@@ -650,12 +652,35 @@ func writeJSON(writer http.ResponseWriter, status int, value any) {
 }
 func writeFileTransferError(ctx context.Context, stage string, writer http.ResponseWriter, requestID string, err error) {
 	code := reportFileTransferFailure(ctx, stage, err)
-	writeHTTPErrorDetails(writer, requestID, code, fileTransferHTTPStatus(code), code == "storage_unavailable" || code == "resource_limit" || code == "update_in_progress" || code == "no_active_writer", insufficientStorageDetails(err))
+	status, permanent := fileTransferHTTPStatus(code), code == "storage_unavailable" && permanentStorageFailure(err)
+	if permanent { // a 503 would be retried until the timeout
+		status = http.StatusInsufficientStorage
+	}
+	retryable := code == "storage_unavailable" && !permanent || code == "resource_limit" || code == "update_in_progress" || code == "no_active_writer"
+	writeHTTPErrorDetails(writer, requestID, code, status, retryable, insufficientStorageDetails(err))
+}
+
+// permanentStorageFailure reports an Inbox write the operating system refuses for a reason waiting will not change.
+func permanentStorageFailure(err error) bool {
+	return errors.Is(err, fs.ErrPermission) || errors.Is(err, syscall.EROFS) || errors.Is(err, syscall.ENAMETOOLONG) || errors.Is(err, syscall.EFBIG)
+}
+
+// storageOSError is the operating system's own words for the failure (a read-only file system, access denied),
+// without the path it names, so the sender can show the cause.
+func storageOSError(err error) string {
+	var errno syscall.Errno
+	if errors.As(err, &errno) {
+		return errno.Error()
+	}
+	return ""
 }
 
 // insufficientStorageDetails carries how much room the files need and the receiver has, when the
 // shortage was measured before anything was sent, so the sender can name both.
 func insufficientStorageDetails(err error) map[string]any {
+	if osError := storageOSError(err); osError != "" && fileTransferErrorCode(err) == "storage_unavailable" {
+		return map[string]any{"os_error": osError}
+	}
 	var transferErr *filetransfer.Error
 	if !errors.As(err, &transferErr) || transferErr == nil {
 		return nil

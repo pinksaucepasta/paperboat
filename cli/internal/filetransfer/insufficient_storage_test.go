@@ -36,3 +36,16 @@ func TestFileTooLargeIsPermanentAndCarriesTheLimit(t *testing.T) {
 		t.Fatal("a file the file system cannot hold would be retried until the timeout")
 	}
 }
+
+// X-37: a receiver that cannot write its Inbox sends the operating system's words and the sender does not retry (507).
+func TestStorageFailureCarriesTheReceiversOSErrorAndIsNotRetried(t *testing.T) {
+	body := `{"code":"storage_unavailable","requestId":"request_1","retryable":false,"details":{"os_error":"read-only file system"}}`
+	err := decodeError(&http.Response{StatusCode: http.StatusInsufficientStorage, Body: io.NopCloser(strings.NewReader(body))})
+	remote, ok := err.(*Error)
+	if !ok || remote.Code != "storage_unavailable" || remote.OSError != "read-only file system" {
+		t.Fatalf("decoded = %#v", err)
+	}
+	if retryableTransferFailure(err) {
+		t.Fatal("a read-only Inbox would be retried until the timeout")
+	}
+}

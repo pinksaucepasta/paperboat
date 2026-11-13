@@ -17,10 +17,16 @@ import (
 type destinationStorageFullError struct {
 	machine      string
 	needed, free uint64
-	cause        error
+	// osError is the receiver's operating system's words when it could not store the file for another reason
+	// (a read-only file system, access denied); then the disk is not necessarily full.
+	osError string
+	cause   error
 }
 
 func (e destinationStorageFullError) Error() string {
+	if e.osError != "" {
+		return fmt.Sprintf("%s could not store the file in its Inbox: %s. Nothing was delivered. Fix that disk or point its Inbox at another one with `pb inbox set`, then send again.", e.machine, e.osError)
+	}
 	if e.needed > 0 {
 		return fmt.Sprintf("%s has no room for this in its Inbox (needs %s, %s free). Free space on it or point its Inbox at a bigger disk with `pb inbox set`, then send again. Nothing was delivered.", e.machine, transferSize(int64(e.needed)), transferSize(int64(e.free)))
 	}
@@ -29,11 +35,18 @@ func (e destinationStorageFullError) Error() string {
 
 func (e destinationStorageFullError) Unwrap() error { return e.cause }
 
-// destinationStorageFull turns the receiver's insufficient_storage refusal into the typed error that
-// names the computer; any other error is returned unchanged.
+// destinationStorageFull turns the receiver's insufficient_storage refusal, or a storage failure it reports
+// with the operating system's error, into the typed error that names the computer; any other error is
+// returned unchanged.
 func destinationStorageFull(machine string, err error) error {
 	var remote *filetransfer.Error
-	if err == nil || !errors.As(err, &remote) || remote.Code != "insufficient_storage" {
+	if err == nil || !errors.As(err, &remote) {
+		return err
+	}
+	if remote.Code == "storage_unavailable" && remote.OSError != "" {
+		return destinationStorageFullError{machine: machine, osError: remote.OSError, cause: err}
+	}
+	if remote.Code != "insufficient_storage" {
 		return err
 	}
 	return destinationStorageFullError{machine: machine, needed: remote.NeededBytes, free: remote.FreeBytes, cause: err}

@@ -95,7 +95,10 @@ type Error struct {
 	// system's per-file limit and name.
 	FileBytes, FileLimit uint64 `json:"-"`
 	FileSystem           string `json:"-"`
-	cause                error
+	// OSError is the receiver's operating system's own words for a storage failure it will not retry
+	// ("read-only file system"), sent with "storage_unavailable".
+	OSError string `json:"-"`
+	cause   error
 }
 
 func (e *Error) Error() string {
@@ -854,6 +857,7 @@ func decodeError(response *http.Response) error {
 			FileBytes   uint64 `json:"file_bytes"`
 			FileLimit   uint64 `json:"file_limit_bytes"`
 			FileSystem  string `json:"file_system"`
+			OSError     string `json:"os_error"`
 		} `json:"details"`
 	}
 	decodeErr := json.NewDecoder(io.LimitReader(response.Body, 64<<10)).Decode(&envelope)
@@ -868,6 +872,10 @@ func decodeError(response *http.Response) error {
 		switch failure.Code {
 		case "insufficient_storage":
 			failure.NeededBytes, failure.FreeBytes = envelope.Details.NeededBytes, envelope.Details.FreeBytes
+		case "storage_unavailable":
+			if len(envelope.Details.OSError) <= 200 {
+				failure.OSError = envelope.Details.OSError
+			}
 		case "file_too_large":
 			failure.FileBytes, failure.FileLimit = envelope.Details.FileBytes, envelope.Details.FileLimit
 			if len(envelope.Details.FileSystem) <= 32 {

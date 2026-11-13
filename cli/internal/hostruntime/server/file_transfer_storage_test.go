@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"syscall"
 	"testing"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/filetransfer"
@@ -53,5 +55,38 @@ func TestFileTooLargeIsAnUnretryable413WithTheLimit(t *testing.T) {
 	}
 	if body.Code != "file_too_large" || body.Retryable || body.Details.File != 4500000000 || body.Details.Limit != 1<<32-1 || body.Details.FileSystem != "FAT" {
 		t.Fatalf("body = %+v", body)
+	}
+}
+
+// X-37: an Inbox the operating system will not write (read-only file system, access denied) is a 507 the sender does not
+// retry, and it carries the operating system's words; a hiccup like an I/O error stays a retried 503.
+func TestInboxWriteRefusedByTheOperatingSystemIsPermanentAndNamesTheCause(t *testing.T) {
+	type body struct {
+		Code      string `json:"code"`
+		Retryable bool   `json:"retryable"`
+		Details   struct {
+			OSError string `json:"os_error"`
+		} `json:"details"`
+	}
+	run := func(err error) (int, body) {
+		recorder := httptest.NewRecorder()
+		writeFileTransferError(t.Context(), "command", recorder, "request_1", err)
+		var decoded body
+		if json.Unmarshal(recorder.Body.Bytes(), &decoded) != nil {
+			t.Fatalf("body %s", recorder.Body.String())
+		}
+		return recorder.Code, decoded
+	}
+	status, readOnly := run(fmt.Errorf("publish: %w", &os.PathError{Op: "open", Path: "/mnt/ro/Inbox/x", Err: syscall.EROFS}))
+	if status != http.StatusInsufficientStorage || readOnly.Code != "storage_unavailable" || readOnly.Retryable || readOnly.Details.OSError != "read-only file system" {
+		t.Fatalf("read-only: status %d body %+v", status, readOnly)
+	}
+	status, denied := run(&os.PathError{Op: "mkdir", Path: "/x", Err: syscall.EACCES})
+	if status != http.StatusInsufficientStorage || denied.Retryable || denied.Details.OSError != "permission denied" {
+		t.Fatalf("denied: status %d body %+v", status, denied)
+	}
+	status, hiccup := run(&os.PathError{Op: "write", Path: "/x", Err: syscall.EIO})
+	if status != http.StatusServiceUnavailable || !hiccup.Retryable || hiccup.Details.OSError != "input/output error" {
+		t.Fatalf("hiccup: status %d body %+v", status, hiccup)
 	}
 }

@@ -147,3 +147,23 @@ func TestSendOfAFileTheInboxFileSystemCannotHoldNamesTheLimit(t *testing.T) {
 		t.Fatal("another failure was converted")
 	}
 }
+
+// X-37: a receiver that cannot write its Inbox for a reason other than room says what its operating system said, in text and JSON.
+func TestSendToAnInboxTheReceiverCannotWriteNamesTheOSError(t *testing.T) {
+	remote := &filetransfer.Error{Code: "storage_unavailable", StatusCode: http.StatusInsufficientStorage, OSError: "read-only file system"}
+	err := destinationStorageFull("usb-laptop", fmt.Errorf("send batch: %w", remote))
+	failure := classifyCommandFailure(err)
+	message := commandFailureMessage(err, failure)
+	for _, want := range []string{"usb-laptop could not store the file in its Inbox: read-only file system", "pb inbox set", "Nothing was delivered"} {
+		if !strings.Contains(message, want) {
+			t.Fatalf("message %q lacks %q", message, want)
+		}
+	}
+	if result := classifyCLIJSONError(err); failure.kind != commandRejected || result.Code != "destination_cannot_store" || result.Retryable || result.StateChanged != false {
+		t.Fatalf("kind=%v json=%+v", failure.kind, result)
+	}
+	ordinary := &filetransfer.Error{Code: "storage_unavailable", StatusCode: http.StatusServiceUnavailable}
+	if destinationStorageFull("hp", ordinary) != error(ordinary) {
+		t.Fatal("a storage failure without an operating system error was converted")
+	}
+}

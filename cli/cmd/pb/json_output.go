@@ -244,6 +244,10 @@ func classifyCLIJSONFailure(err error, failure commandFailure) cliJSONError {
 		// Nothing was delivered; the partial upload is discarded by the receiver.
 		result.Code, result.Category, result.StateChanged, result.Retryable = "destination_storage_full", "conflict", false, false
 		result.Recovery = "Free space on the destination or move its Inbox with `pb inbox set`, then send again."
+		if typed.osError != "" {
+			result.Code = "destination_cannot_store"
+			result.Recovery = "Fix the destination's Inbox disk or move its Inbox with `pb inbox set`, then send again."
+		}
 	case destinationFileTooLargeError:
 		result.Code, result.Category, result.StateChanged, result.Retryable = "destination_file_system_limit", "conflict", false, false
 		result.Recovery = "Send a smaller file or move the destination's Inbox to a disk without a file-size limit with `pb inbox set`."
