@@ -1,0 +1,60 @@
+{
+ "check": "xplat-envscopes",
+ "devices": [
+  "L",
+  "M",
+  "W"
+ ],
+ "results": [
+  {
+   "id": "X-12:override:L",
+   "status": "PASS",
+   "detail": "each device sees only its own override: rx12-l, rx12-m, rx12-w"
+  },
+  {
+   "id": "X-12:override:M",
+   "status": "PASS",
+   "detail": "each device sees only its own override: rx12-l, rx12-m, rx12-w"
+  },
+  {
+   "id": "X-12:override:W",
+   "status": "PASS",
+   "detail": "each device sees only its own override: rx12-l, rx12-m, rx12-w"
+  },
+  {
+   "id": "X-12:personal:L+M+W",
+   "status": "PASS",
+   "detail": "the personal value reaches rx12-l, rx12-m, rx12-w"
+  },
+  {
+   "id": "X-12:case:L",
+   "status": "PASS",
+   "detail": "rx12-l: two variables, each with its own value"
+  },
+  {
+   "id": "X-12:case:M",
+   "status": "PASS",
+   "detail": "rx12-m: two variables, each with its own value"
+  },
+  {
+   "id": "X-12:case:W",
+   "status": "PASS",
+   "detail": "rx12-w: one variable, the device override wins"
+  },
+  {
+   "id": "X-12:hoststate:L",
+   "status": "PASS",
+   "detail": "host show: published and applied; `pb env names` names the variable on rx12-l"
+  },
+  {
+   "id": "X-12:hoststate:M",
+   "status": "PASS",
+   "detail": "host show: published and applied; `pb env names` names the variable on rx12-m"
+  },
+  {
+   "id": "X-12:hoststate:W",
+   "status": "PASS",
+   "detail": "host show: published and applied; `pb env names` names the variable on rx12-w"
+  }
+ ]
+}
