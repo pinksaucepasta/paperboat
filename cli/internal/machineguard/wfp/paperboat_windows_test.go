@@ -166,6 +166,42 @@ func TestApplyRetiresTheFiltersOfAWithdrawnLease(t *testing.T) {
 	}
 }
 
+// A user without a lease reaches the browser gateway's ports, so the gateway can answer it with the refusal page
+// (X-44); every other address of the range stays blocked for it.
+func TestApplyLetsAnyUserConnectToTheGateway(t *testing.T) {
+	if !windows.GetCurrentProcessToken().IsElevated() {
+		t.Skip("requires elevated native WFP access")
+	}
+	prior := sublayerKey
+	if len(installedIn(t, prior)) != 0 {
+		t.Skip("an installed guard's own filters decide the connect")
+	}
+	sublayerKey = guidFor(fmt.Sprintf("paperboat-gateway-test-%d", os.Getpid()))
+	t.Cleanup(func() {
+		if err := Remove(context.Background()); err != nil {
+			t.Error(err)
+		}
+		sublayerKey = prior
+	})
+	if err := Apply(nil, "127.100.0.0/16"); err != nil {
+		t.Fatal(err)
+	}
+	denied := func(address string) bool {
+		conn, err := net.DialTimeout("tcp4", address, 2*time.Second)
+		if err == nil {
+			conn.Close()
+			return false
+		}
+		return errors.Is(err, windows.WSAEACCES)
+	}
+	if denied("127.100.0.1:80") || denied("127.100.0.1:443") {
+		t.Fatal("a user without a lease is blocked from the gateway: no refusal page can reach it")
+	}
+	if !denied("127.100.0.9:80") {
+		t.Fatal("the gateway permit opened another address of the range")
+	}
+}
+
 // installedIn lists the filter keys installed in one sublayer.
 func installedIn(t *testing.T, sublayer windows.GUID) []windows.GUID {
 	t.Helper()

@@ -82,6 +82,11 @@ func Apply(leases []Lease, loopbackCIDR string, protectedValues ...string) error
 			if err = addRule(engine, fmt.Sprintf("paperboat-browser-in-permit-%d", port), cFWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V4, cFWP_ACTION_PERMIT, 14, []wtFwpmFilterCondition0{protocol(), uint32Condition(cFWPM_CONDITION_IP_LOCAL_ADDRESS, gatewayAddress), uint16Condition(cFWPM_CONDITION_IP_LOCAL_PORT, port), blobCondition(cFWPM_CONDITION_ALE_APP_ID, cFWP_BYTE_BLOB_TYPE, unsafe.Pointer(app)), blobCondition(cFWPM_CONDITION_ALE_USER_ID, cFWP_SECURITY_DESCRIPTOR_TYPE, unsafe.Pointer(&systemBlob))}); err != nil {
 				return fmt.Errorf("browser inbound app permit: %w", err)
 			}
+			// Any local user may connect: the gateway attributes the connection and answers a user without a daemon with
+			// the refusal page (gateway_route_windows.go handoff); the range's connect block would fail it with WSAEACCES first.
+			if err = addRule(engine, fmt.Sprintf("paperboat-browser-out-permit-%d", port), cFWPM_LAYER_ALE_AUTH_CONNECT_V4, cFWP_ACTION_PERMIT, 14, []wtFwpmFilterCondition0{protocol(), uint32Condition(cFWPM_CONDITION_IP_REMOTE_ADDRESS, gatewayAddress), uint16Condition(cFWPM_CONDITION_IP_REMOTE_PORT, port)}); err != nil {
+				return fmt.Errorf("browser outbound permit: %w", err)
+			}
 		}
 		runtime.KeepAlive(systemSD)
 		runtime.KeepAlive(systemBlob)
