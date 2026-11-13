@@ -3,11 +3,13 @@ package server
 import (
 	"context"
 	"net"
+	"net/http"
 	"testing"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/nativeproto"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 )
 
 type offlineTestConn struct {
@@ -60,5 +62,23 @@ func TestOfflineStreamsAuthorizeOnlyTheirOwnSession(t *testing.T) {
 	}
 	if _, err := m.controlAuthorizer(offlineTestConn{Conn: plain, consumer: "ssh"}, nativeproto.Preface{}); err == nil {
 		t.Fatal("an offline ssh stream reached the hostd protocol")
+	}
+}
+
+// A machine whose clock is 10 minutes ahead judges the peer's deadline, which the peer stamped on the server's clock, on
+// the server's clock too: a deadline a minute away is open and one a minute gone is closed (X-27).
+func TestOfflineAuthorizerJudgesTheDeadlineOnTheServerClock(t *testing.T) {
+	sent := time.Now()
+	serverNow := sent.Add(-10 * time.Minute) // this machine's clock is 10 minutes ahead of the server's
+	serverclock.Observe(serverNow.UTC().Format(http.TimeFormat), sent, sent)
+	t.Cleanup(func() { serverclock.Observe(time.Now().UTC().Format(http.TimeFormat), time.Now(), time.Now()) })
+	frame := protocol.Frame{Capability: "exec.v1", OperationID: "op"}
+	open := &offlineAuthorizer{consumer: "exec", operationID: "op", accountID: "a", endpointID: "e", deadline: serverNow.Add(time.Minute)}
+	if _, err := open.Authorize(context.Background(), frame); err != nil {
+		t.Fatalf("a deadline one minute away on the server was refused: %v", err)
+	}
+	closed := &offlineAuthorizer{consumer: "exec", operationID: "op", accountID: "a", endpointID: "e", deadline: serverNow.Add(-time.Minute)}
+	if _, err := closed.Authorize(context.Background(), frame); err == nil {
+		t.Fatal("a deadline one minute gone on the server was accepted")
 	}
 }
