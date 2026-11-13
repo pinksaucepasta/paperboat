@@ -289,11 +289,10 @@ def count_line(prefix, last, slow=False):
 
 
 def flood_line(lines=None):
-    """`lines` lines of 49 characters (about 51 bytes each), or `y` lines without end (yes)."""
-    if lines is None:
-        return typed_line("while(1){[Console]::Out.WriteLine('y')}")
-    return typed_line("$l='0123456789012345678901234567890123456789012345678';"
-                      "for($i=0;$i -lt %d;$i++){[Console]::Out.WriteLine($l)}" % lines)
+    """`lines` lines of 49 characters (about 51 bytes each), or such lines without end. Lines of `y` are no flood on a
+    ConPTY: a loop of those runs at 2-5 KB/s even without pb (measured on the Windows PC over plain ssh, X-24)."""
+    loop = "while(1)" if lines is None else "for($i=0;$i -lt %d;$i++)" % lines
+    return typed_line("$l='0123456789012345678901234567890123456789012345678';%s{[Console]::Out.WriteLine($l)}" % loop)
 
 
 def sink_line():
