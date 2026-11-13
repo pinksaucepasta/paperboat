@@ -357,7 +357,8 @@ def edge(image):
             "connector_advertise_host": host, "carrier_tcp_listen_address": f"0.0.0.0:{EDGE_PORT}",
             "carrier_quic_listen_address": f"0.0.0.0:{EDGE_QUIC_PORT}", "public_https_listen_address": "0.0.0.0:18446",
             "private_https_listen_address": "127.0.0.1:9443", "public_http_listen_address": "0.0.0.0:18447",
-            "preview_base_domain": public_base, "tunnel_base_domain": public_base, "runtime_base_domain": f"rt.{domain()}",
+            # a self-hosted edge has no platform base domains (previews and tunnels use the customer's own domains), as pbh writes it
+            "preview_base_domain": "", "tunnel_base_domain": "", "runtime_base_domain": "",
             "trusted_proxy_cidrs": [], "public_routes": [], "node_capacity": 32, "control_interval": 5_000_000_000,
             "control_timeout": 5_000_000_000, "max_body_bytes": 52428800, "max_header_bytes": 32768}),
     }
