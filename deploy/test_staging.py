@@ -117,7 +117,7 @@ class RegistrationTest(unittest.TestCase):
         self.assertIn('-issuer https://anvit.stg.example.test:18443', run)
 
     def test_edge_replaces_only_its_own_install_so_a_relay_survives_it(self):
-        statements, _ = self.register(staging.edge, 'paperboat-tunnel:stg-test')
+        statements, _ = self.register(staging.edge, 'paperboat-edge:stg-test')
         self.assertIn("scope_id='usr_staging' AND capability='tunnel'", statements[0])
         self.assertNotIn("capability='relay'", '\n'.join(statements))
 

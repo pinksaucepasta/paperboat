@@ -9,9 +9,10 @@ import (
 	"regexp"
 )
 
+// Images are keyed by control-plane capability; the edge serves the tunnel capability.
 type Images struct {
-	Relay  string `json:"relay,omitempty"`
-	Tunnel string `json:"tunnel,omitempty"`
+	Relay string `json:"relay,omitempty"`
+	Edge  string `json:"tunnel,omitempty"`
 }
 
 var imagePattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._:/@-]{0,511}$`)
@@ -22,7 +23,7 @@ func (i Images) Image(capability string) (string, error) {
 	case "relay":
 		image = i.Relay
 	case "tunnel":
-		image = i.Tunnel
+		image = i.Edge
 	default:
 		return "", errors.New("unsupported runtime capability")
 	}
@@ -36,7 +37,7 @@ func SaveImages(dir string, images Images) error {
 	if !filepath.IsAbs(dir) {
 		return errors.New("installation directory must be absolute")
 	}
-	for _, image := range []string{images.Relay, images.Tunnel} {
+	for _, image := range []string{images.Relay, images.Edge} {
 		if image != "" && !imagePattern.MatchString(image) {
 			return errors.New("runtime image is invalid")
 		}

@@ -12,7 +12,7 @@ import (
 
 // TestE2ESelfhostNode is the edge-and-relay node of server/internal/app TestE2ECore: the installation supervisor
 // pbh runs (Run: the claim endpoint, then the claimed components), with the binary launcher instead of Docker,
-// so the real paperboat-tunnel and paperboat-relay built from the tree run as its children. It initializes the
+// so the real paperboat-edge and paperboat-relay built from the tree run as its children. It initializes the
 // installation from PAPERBOAT_E2E_SELFHOST_CONFIG, writes a claim code to claim.json until claimed, and runs
 // until SIGTERM. Started again on a claimed installation it only runs (TestE2ECore restarts it like a deploy).
 func TestE2ESelfhostNode(t *testing.T) {

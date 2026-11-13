@@ -97,7 +97,7 @@ func (l *Launcher) Run(ctx context.Context, capability, componentDir string, out
 		return err
 	}
 	owner := installationOwner(l.StateDir)
-	name := "paperboat-pbh-" + owner + "-" + capability
+	name := containerName(owner, capability)
 	imageID, err := resolvedImage(ctx, image)
 	if err != nil {
 		return err
@@ -179,7 +179,7 @@ func (l *Launcher) Run(ctx context.Context, capability, componentDir string, out
 }
 
 // handOver replaces a serving tunnel container without a gap. The new image starts beside it as
-// <name>-next and inherits its sockets and process epoch (tunnel/internal/handover). The serving
+// <name>-next and inherits its sockets and process epoch (edge/internal/handover). The serving
 // process releases them once the new one is warm, drains and exits on its own; then the new
 // container takes the name. A replacement that exits or never takes over is removed, and the
 // serving container keeps serving.

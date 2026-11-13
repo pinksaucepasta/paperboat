@@ -38,7 +38,7 @@ jobs:
             server/go.sum
             cli/go.sum
             relay/go.sum
-            tunnel/go.sum
+            edge/go.sum
             helper/go.sum
             go.work.sum
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends python3-yaml python3-cryptography
@@ -53,7 +53,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        module: [shared, cli, relay, tunnel, helper]
+        module: [shared, cli, relay, edge, helper]
     defaults:
       run:
         working-directory: ${{ matrix.module }}
@@ -67,7 +67,7 @@ jobs:
             server/go.sum
             cli/go.sum
             relay/go.sum
-            tunnel/go.sum
+            edge/go.sum
             helper/go.sum
             go.work.sum
       - run: go vet ./...

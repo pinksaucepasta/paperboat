@@ -72,6 +72,6 @@ jobs:
           cache-dependency-path: '**/go.sum'
       # Compile what the targeted job compiles (vet, and the -race test binaries) without running a test.
       - run: |
-          for module in shared server cli relay tunnel helper; do
+          for module in shared server cli relay edge helper; do
             (cd "$module" && go vet ./... && go test -race -count=1 -run '^$' ./...)
           done

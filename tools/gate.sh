@@ -5,7 +5,7 @@
 #      require a device smoke result for a build of HEAD (tools/device-smoke/results/*.json
 #      whose expect_version is dev-<short HEAD>) in which every check that passed in any
 #      earlier result still passes. Feature status in CHECKLIST.md does not matter.
-#      server/ tunnel/ helper/ changes push on unit and PostgreSQL tests; their deploy is what
+#      server/ edge/ helper/ changes push on unit and PostgreSQL tests; their deploy is what
 #      the next device smoke checks (AGENTS.md "Regression gate").
 # Exit status is non-zero if anything fails.
 set -uo pipefail
@@ -13,7 +13,7 @@ cd "$(dirname "$0")/.." || exit 1
 fail=0
 step() { printf '\n== %s\n' "$1"; }
 
-for m in shared cli relay tunnel server helper; do
+for m in shared cli relay edge server helper; do
   [ -d "$m" ] || continue
   step "go vet + test: $m"
   (cd "$m" && go vet ./... && go test ./...) || { echo "FAIL: $m"; fail=1; }

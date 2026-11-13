@@ -298,7 +298,7 @@ for the current machine-access grant and then owned exclusively by HTTP/3; the
 CONNECT request carries the exact signed preview/tunnel route and target
 binding. Paperboat revalidates current state before dialing the literal-loopback
 origin. A broken request is not replayed: the next browser connection obtains a
-fresh grant and session. This native path never enters `paperboat-tunnel` and
+fresh grant and session. This native path never enters `paperboat-edge` and
 does not silently fall back to the edge-decrypted browser path.
 
 ## Diagnostics and support

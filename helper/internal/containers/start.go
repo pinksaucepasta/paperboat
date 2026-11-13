@@ -22,8 +22,16 @@ func bindMount(path string, readOnly bool) string {
 	return strings.TrimSuffix(out.String(), "\n")
 }
 
+// containerName uses the service name; capability remains the control-plane contract.
+func containerName(owner, capability string) string {
+	if capability == "tunnel" {
+		capability = "edge"
+	}
+	return "paperboat-pbh-" + owner + "-" + capability
+}
+
 func (l *Launcher) startContainer(ctx context.Context, capability, image string) error {
-	return l.startContainerNamed(ctx, capability, image, "paperboat-pbh-"+installationOwner(l.StateDir)+"-"+capability)
+	return l.startContainerNamed(ctx, capability, image, containerName(installationOwner(l.StateDir), capability))
 }
 
 func (l *Launcher) startContainerNamed(ctx context.Context, capability, image, name string) error {
@@ -56,4 +64,14 @@ func (l *Launcher) startContainerNamed(ctx context.Context, capability, image, n
 		return errors.New("start runtime container failed; installation state retained")
 	}
 	return nil
+}
+
+// RemoveRenamedRuntime removes the former capability-named container after the
+// new service is ready and the previous supervisor has stopped.
+func RemoveRenamedRuntime(ctx context.Context, dir string) error {
+	if !filepath.IsAbs(dir) {
+		return errors.New("installation directory must be absolute")
+	}
+	owner := installationOwner(dir)
+	return removeOwned(ctx, "paperboat-pbh-"+owner+"-tunnel", owner)
 }

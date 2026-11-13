@@ -6,7 +6,7 @@ Runs on oracle, next to the production canary (tools/probe/canary.py, user unit 
      deploy/staging.py + deploy/staging-canary.sh); a failing stage refuses the deploy before prod or the lock is touched;
   1. refuses when the canary is red before the deploy (--force "<reason>" overrides);
   2. takes the deploy lock on the control-plane host and holds it to the end;
-  3. notes the serving server image and every edge's relay/tunnel images;
+  3. notes the serving server image and every edge's relay/edge images;
   4. runs the deploy command (normally deploy/check-edges.sh --deploy '...', which keeps the 5xx check);
   5. waits up to --wait seconds for one full canary pass that started after the switch;
   6. if the deploy command failed or no pass came, rolls back everything that changed (server first,
@@ -32,11 +32,11 @@ def iso(t):
 
 
 def parse_edge(text):
-    """{'relay': image, 'tunnel': image} from `docker ps` lines of one pbh installation."""
+    """{'relay': image, 'edge': image} from `docker ps` lines of one pbh installation."""
     images = {}
     for line in text.splitlines():
         name, _, image = line.strip().partition(" ")
-        for role in ("relay", "tunnel"):
+        for role in ("relay", "edge"):
             if name.endswith("-" + role) and image:
                 images[role] = image
     return images
@@ -55,8 +55,8 @@ class Gate:
         for edge in self.a.edge:
             rc, out = self.sh(edge, EDGE_IMAGES)
             parsed = parse_edge(out)
-            if rc != 0 or set(parsed) != {"relay", "tunnel"}:
-                raise RuntimeError(f"could not read the relay and tunnel images on edge {edge}")
+            if rc != 0 or set(parsed) != {"relay", "edge"}:
+                raise RuntimeError(f"could not read the relay and edge images on edge {edge}")
             images[edge] = parsed
         return images
 
@@ -83,7 +83,7 @@ class Gate:
                 b = before[edge]
                 self.say(f"rollback: edge {edge} {now[edge]} -> {b}")
                 rc, out = self.sh(edge, f"sudo -n {PBH} install --relay-image {shlex.quote(b['relay'])} "
-                                  f"--tunnel-image {shlex.quote(b['tunnel'])}")
+                                  f"--edge-image {shlex.quote(b['edge'])}")
                 ok &= rc == 0 or bool(self.say(f"rollback: edge {edge} failed (exit {rc}): {out[-300:]}"))
         return ok
 

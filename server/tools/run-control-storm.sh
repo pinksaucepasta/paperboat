@@ -2,7 +2,7 @@
 set -eu
 
 root=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
-tunnel_root=$(CDPATH= cd -- "$root/../legacy/paperboat-tunnel" && pwd)
+repo=$(CDPATH= cd -- "$root/.." && pwd)
 run_id="paperboat-control-storm-$(date -u +%Y%m%d%H%M%S)-$$"
 network="$run_id-network"
 postgres="$run_id-postgres"
@@ -98,17 +98,17 @@ docker stats --format '{{.CPUPerc}}\t{{.MemUsage}}\t{{.PIDs}}\t{{.NetIO}}\t{{.Bl
 postgres_sampler_pid=$!
 
 docker run --rm --network "$network" --label "paperboat.test.run=$run_id" \
-	-v "$root:/workspace:ro" -v "$tunnel_root:/paperboat-tunnel:ro" \
+	-v "$repo:/workspace:ro" \
 	-v "$go_cache:/root/.cache/go-build" -v "$mod_cache:/go/pkg/mod" \
-	-v "$(dirname "$report"):/report" -w /workspace \
+	-v "$(dirname "$report"):/report" -w /workspace/server \
 	-e GOTOOLCHAIN=local -e PAPERBOAT_CONTROL_STORM=1 \
-	-e PAPERBOAT_CONTROL_STORM_TUNNEL_BINARY=/tmp/paperboat-tunnel-control.test \
+	-e PAPERBOAT_CONTROL_STORM_EDGE_BINARY=/tmp/paperboat-edge-control.test \
 	-e "PAPERBOAT_CONTROL_STORM_SCALES=${PAPERBOAT_CONTROL_STORM_SCALES:-1,10,100,300,1000}" \
 	-e PAPERBOAT_CONTROL_STORM_REPORT=/report/$(basename "$report") \
 	-e PAPERBOAT_TEST_DATABASE_DSN="postgres://paperboat:paperboat-test-only@$postgres:5432/paperboat_test?sslmode=disable" \
-	"$go_image" sh -eu -c 'cd /paperboat-tunnel
-go test -c ./internal/control -o /tmp/paperboat-tunnel-control.test
-cd /workspace
+	"$go_image" sh -eu -c 'cd /workspace/edge
+go test -c ./internal/control -o /tmp/paperboat-edge-control.test
+cd /workspace/server
 go test ./internal/controlplane -run "^TestControlPlaneStorm$" -count=1 -v'
 
 stop_postgres_sampler

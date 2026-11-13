@@ -24,7 +24,7 @@ before origin dial; a new grant and native stream are required for every raw TCP
 
 Native HTTP uses the same grant and exact binding in one HTTP/3 extended
 CONNECT request on a dedicated preview-class Paperboat QUIC session. That
-session has no `paperboat-tunnel`, edge-assignment, connector, browser-cookie,
+session has no `paperboat-edge`, edge-assignment, connector, browser-cookie,
 or `ActiveDataCarrier` authority. The host rejects stale or foreign bindings
 before origin dial, and request failure requires an explicitly fresh request;
 arbitrary HTTP bytes are never replayed automatically.

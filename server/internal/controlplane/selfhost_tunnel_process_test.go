@@ -41,7 +41,7 @@ import (
 // Every control response comes from the production composition. The fixture
 // changes only listener addresses to avoid binding public/shared workspace ports.
 func TestSelfhostTunnelOperatorProcessOnPostgres(t *testing.T) {
-	binary, dsn := os.Getenv("PAPERBOAT_SELFHOST_TUNNEL_BINARY"), os.Getenv("PAPERBOAT_TEST_DATABASE_DSN")
+	binary, dsn := os.Getenv("PAPERBOAT_SELFHOST_EDGE_BINARY"), os.Getenv("PAPERBOAT_TEST_DATABASE_DSN")
 	if binary == "" || dsn == "" {
 		t.Skip("requires prebuilt tunnel binary and isolated PostgreSQL")
 	}

@@ -9,7 +9,7 @@
 #     (the same run on a real machine reached over ssh with passwordless sudo, e.g. amd64 hardware;
 #      Docker stays installed afterwards, everything pbh created is removed)
 # Needs docker (set DOCKER="sudo docker" if required), PAPERBOAT_SELFHOST_RELAY_IMAGE and
-# PAPERBOAT_SELFHOST_TUNNEL_IMAGE (published images). Everything it creates is removed on exit.
+# PAPERBOAT_SELFHOST_EDGE_IMAGE (published images). Everything it creates is removed on exit.
 set -eu
 base=ubuntu:24.04 enable=relay platform='' refusal=false published='' ssh=''
 while [ "$#" -gt 0 ]; do
@@ -19,7 +19,7 @@ while [ "$#" -gt 0 ]; do
  esac
 done
 docker=${DOCKER:-docker}
-[ -n "$published" ] || : "${PAPERBOAT_SELFHOST_RELAY_IMAGE:?set the published relay image}" "${PAPERBOAT_SELFHOST_TUNNEL_IMAGE:?set the published tunnel image}"
+[ -n "$published" ] || : "${PAPERBOAT_SELFHOST_RELAY_IMAGE:?set the published relay image}" "${PAPERBOAT_SELFHOST_EDGE_IMAGE:?set the published edge image}"
 repo=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 work=$(mktemp -d "$repo/.build/qualify.XXXXXX" 2>/dev/null || { mkdir -p "$repo/.build" && mktemp -d "$repo/.build/qualify.XXXXXX"; })
 id=$(basename "$work" | tr 'A-Z.' 'a-z-')

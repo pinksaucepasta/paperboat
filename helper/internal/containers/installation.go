@@ -77,7 +77,7 @@ func WaitInstallationReady(ctx context.Context, dir string, previous map[string]
 	for {
 		ready := true
 		for role, client := range clients {
-			info, exists, err := inspectContainer(ctx, "paperboat-pbh-"+owner+"-"+role)
+			info, exists, err := inspectContainer(ctx, containerName(owner, role))
 			if err != nil {
 				return err
 			}

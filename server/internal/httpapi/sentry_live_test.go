@@ -235,7 +235,7 @@ func TestLiveSentryOperationalReadback(t *testing.T) {
 		}
 		required := []string{"paperboat-server"}
 		if os.Getenv("PAPERBOAT_LIVE_SENTRY_ALL_COMPONENTS") == "true" {
-			required = append(required, "paperboat-relay", "paperboat-tunnel", "paperboat-cli", "paperboat-daemon")
+			required = append(required, "paperboat-relay", "paperboat-edge", "paperboat-cli", "paperboat-daemon")
 		}
 		complete := true
 		for _, component := range required {

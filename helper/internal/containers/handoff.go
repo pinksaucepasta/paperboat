@@ -43,7 +43,7 @@ func PrepareHandoff(ctx context.Context, dir string, images Images) (map[string]
 		if err != nil {
 			return nil, err
 		}
-		info, exists, err := inspectContainer(ctx, "paperboat-pbh-"+owner+"-"+role)
+		info, exists, err := inspectContainer(ctx, containerName(owner, role))
 		if err != nil {
 			return nil, err
 		}

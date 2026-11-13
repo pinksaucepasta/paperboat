@@ -27,7 +27,7 @@ The [CLI guide](cli/docs/cli.md) and [command reference](cli/docs/cli/README.md)
 | `cli/` | `pb`, the CLI and the background service that runs on each machine |
 | `server/` | control plane: accounts, teams, authorization |
 | `relay/` | relay used when a direct connection is not possible |
-| `tunnel/` | edge for preview links and public tunnels |
+| `edge/` | edge for preview links and public tunnels |
 | `helper/` | `pbh`, installs and manages a self-hosted relay and edge |
 | `shared/` | Go packages used by more than one of the above |
 | `console/` | web console (Next.js) |

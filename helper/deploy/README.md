@@ -15,7 +15,7 @@ curl -fsSL https://get.pprbt.dev/selfhost/install | sh -s -- --enable both
 
 The installer downloads the configured immutable package, verifies its SHA256,
 installs `pbh`, installs Docker from the configured official source when missing, pulls
-the selected relay/tunnel images (an unreachable registry or wrong architecture stops the
+the selected relay/edge images (an unreachable registry or wrong architecture stops the
 install before anything changes) and enables a protected system service. The helper runs
 the images with host networking and a protected state mount; runtime binaries are not
 installed on the host. Re-running the same command upgrades in place and keeps data.
@@ -150,10 +150,10 @@ private traffic, credential values, headers, URLs, raw errors, locals, and comma
 arguments; public browser traffic still has the edge trust boundary described above.
 
 Container image references are supplied by the package build using
-`PAPERBOAT_SELFHOST_RELAY_IMAGE` and `PAPERBOAT_SELFHOST_TUNNEL_IMAGE`; the
+`PAPERBOAT_SELFHOST_RELAY_IMAGE` and `PAPERBOAT_SELFHOST_EDGE_IMAGE`; the
 initial public-address API uses `PAPERBOAT_SELFHOST_ADDRESS_URL`. The installer
 renderer supplies `DOCKER_INSTALL_URL` alongside package URLs and SHA256 values.
-An operator can explicitly pass `--relay-image` and `--tunnel-image` to `pbh install`.
+An operator can explicitly pass `--relay-image` and `--edge-image` to `pbh install`.
 Image configuration is atomic and owner-only; the claim and certificate identity
 remain owned by the shared installation supervisor.
 

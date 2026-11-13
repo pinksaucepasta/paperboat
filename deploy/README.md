@@ -28,7 +28,7 @@ custom builds is independent of this publication and needs no server release rec
 PostgreSQL is reachable only on VPS loopback and the private Compose network.
 Preserve the named volumes and protected secret files during upgrades; do not use
 `down --volumes` for ordinary teardown. Back up PostgreSQL and test a restore before
-calling this deployment complete. The self-host installer manages relay/tunnel
+calling this deployment complete. The self-host installer manages relay/edge
 nodes separately; this stack does not provide a self-hostable server.
 
 Install `paperboat-backup.service` and `paperboat-backup.timer` into systemd on
@@ -128,10 +128,10 @@ The server also needs `--build-arg PAPERBOAT_COMMIT=<40-hex HEAD>`; it is the co
 test PostgreSQL before rolling out. Never run test suites against the production database.
 
 Edges are `pbh`-managed. Copy the image to the host (`docker save | ssh host docker load`) and run,
-one host at a time, `/usr/local/lib/paperboat-selfhost/pbh install -relay-image <relay> -tunnel-image
-<tunnel>`: both images must be named, and the installation keeps its ownership and configuration.
+one host at a time, `/usr/local/lib/paperboat-selfhost/pbh install -relay-image <relay> -edge-image
+<edge>`: both images must be named, and the installation keeps its ownership and configuration.
 After each host, check that its node row heartbeats (`control_tunnel_nodes.last_heartbeat_at`) and
-the edge logs show no `route_invalid`/`tunnel_route_reconcile_failed` before touching the next.
+the edge logs show no `route_invalid`/`edge_route_reconcile_failed` before touching the next.
 Rolling back is the same command with the previous image tags.
 
 ## Deploy procedure for any lane (server and edges)
@@ -180,18 +180,18 @@ The rollout runs additive migrations, starts a candidate, waits for `/readyz` an
 Caddy; a failed candidate leaves the serving process untouched. Check the result:
 `curl -fsS https://api.pprbt.dev/v1/server-version` must report `$C`, and `/readyz` must be 200.
 
-**4. Edges** (only when `tunnel/`, `relay/`, `helper/` or shared edge code changed). Oracle builds
+**4. Edges** (only when `edge/`, `relay/`, `helper/` or shared edge code changed). Oracle builds
 natively (arm64); anvit takes the image by `docker save | ssh anvit docker load`. One edge at a time,
 oracle first, and wait for its node row to heartbeat before the next:
 
 ```sh
-sudo docker build --build-arg PAPERBOAT_VERSION=$V --build-arg PAPERBOAT_COMMIT=$C -t paperboat-tunnel:$V -f tunnel/deploy/Dockerfile $D
-sudo /usr/local/lib/paperboat-selfhost/pbh install --relay-image paperboat-relay:<current> --tunnel-image paperboat-tunnel:$V
+sudo docker build --build-arg PAPERBOAT_VERSION=$V --build-arg PAPERBOAT_COMMIT=$C -t paperboat-edge:$V -f edge/deploy/Dockerfile $D
+sudo /usr/local/lib/paperboat-selfhost/pbh install --relay-image paperboat-relay:<current> --edge-image paperboat-edge:$V
 # check: select node_id,last_heartbeat_at from control_tunnel_nodes; edge logs show no route_invalid
 ```
 
 If `pbh` itself changed, install the new binary to `/usr/local/lib/paperboat-selfhost/pbh` and
-`/usr/local/bin/pbh` first: the old binary regenerates `tunnel/deployment.json` from its own config on
+`/usr/local/bin/pbh` first: the old binary regenerates `edge/deployment.json` from its own config on
 start and drops new fields. The current tags are in `docker ps` on each edge and in the PLAN Log.
 
 **5. Roll back** at once, without asking, when the new build breaks anything that worked before
@@ -205,7 +205,7 @@ with the previous tags; roll edges back only after the server is back on the mat
 `PROBE='<runs a shell on the paired probe machine>' SQL='<runs read-only psql on the production database,
 SQL on stdin, -At>' deploy/check-edges.sh --deploy '<the step 3 or 4 command>' local=<oracle ip> anvit=<anvit ip>`.
 The probe machine must run a `pb` built from `main` (`pb update --from <build>`): a build from before a9f2a2e5f (2026-11-05, host handling of the edge goaway) cannot move to the replacement edge process and shows a 5 s run of 404s on every edge swap (anvit, 2026-11-09), whatever the images are. It makes a preview on the probe before the deploy, fetches it through every edge each second during it, and
-follows the log of every tunnel container that runs in the window, the replaced one included. It fails unless
+follows the log of every edge container that runs in the window, the replaced one included. It fails unless
 all of these are 0: preview failures, edge control failures, refused host carriers
 (`carrier_connection_failed`), host route attach refusals, edge-made 5xx (`edge_http_5xx`), server 5xx
 (`support_reports`), and machines online before the deploy that went offline during it. A failure means roll
@@ -229,7 +229,7 @@ python3 deploy/gated-deploy.py --what 'W4 server 2026.11.11.10 + oracle edge' \
 ```
 
 It refuses (exit 3) when the production canary is red before the deploy; `--force '<reason>'` overrides
-and writes the reason into the lock. It notes the serving server image and both edges' relay/tunnel images,
+and writes the reason into the lock. It notes the serving server image and both edges' relay/edge images,
 runs the command (check-edges.sh keeps the 5xx, preview and offline checks), then triggers canary runs
 until one that started after the switch passes, for up to `--wait` (300) seconds. A failed command or no
 green run rolls back every image that changed, server first (after `--reap`), then each edge with
@@ -279,7 +279,7 @@ anvit), `init`, `up <image>`, `seed` (account `usr_staging`, a paid entitlement 
 the stored regional certificate is kept so Let's Encrypt duplicate limits are not hit), `status`, `logs`, `down`.
 Staging machines: containers `pb-stg-a` and `pb-stg-b` on anvit paired with a `pb` built with that `DefaultServerURL`.
 Staging never reads or writes prod data; it copies only the WorkOS client id/key and the Cloudflare DNS token from the
-prod env, in memory. `staging.py edge <tunnel image>` runs a staging edge as a plain container `pb-stg-edge` (no `pbh`, no firewall or nft
+prod env, in memory. `staging.py edge <edge image>` runs a staging edge as a plain container `pb-stg-edge` (no `pbh`, no firewall or nft
 change; the prod edge keeps 80/443/27443-27446): it registers the node the way a claim would (SQL, as
 `selfhost_tunnel_process_test.go` does), pins the account to a self-hosted-only pool, marks ingress verified by hand
 and listens on TCP 18445 (carrier). State on 2026-11-12: node ready and heartbeating, edge set assigned, machine

@@ -17,7 +17,7 @@ import (
 type binaryLauncher struct{ directory string }
 
 func (l binaryLauncher) Validate(_ context.Context, capability, _ string) error {
-	binary := filepath.Join(l.directory, "paperboat-"+capability)
+	binary := filepath.Join(l.directory, runtimeBinary(capability))
 	info, err := os.Stat(binary)
 	if err != nil {
 		return fmt.Errorf("runtime binary unavailable: %w", err)
@@ -29,7 +29,7 @@ func (l binaryLauncher) Validate(_ context.Context, capability, _ string) error 
 }
 
 func (l binaryLauncher) Run(ctx context.Context, capability, dir string, output io.Writer) error {
-	cmd := exec.CommandContext(ctx, filepath.Join(l.directory, "paperboat-"+capability), "run", "--state-dir", dir)
+	cmd := exec.CommandContext(ctx, filepath.Join(l.directory, runtimeBinary(capability)), "run", "--state-dir", dir)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Stdout, cmd.Stderr = output, output
 	cmd.Cancel = func() error {
@@ -48,4 +48,11 @@ func (l binaryLauncher) Run(ctx context.Context, capability, dir string, output 
 		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 	}
 	return err
+}
+
+func runtimeBinary(capability string) string {
+	if capability == "tunnel" {
+		return "paperboat-edge"
+	}
+	return "paperboat-" + capability
 }

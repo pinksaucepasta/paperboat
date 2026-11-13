@@ -33,10 +33,10 @@ jobs:
             sentry_variable: SENTRY_DSN_RELAY
             context: .
             dockerfile: relay/deploy/Dockerfile
-          - service: tunnel
-            sentry_variable: SENTRY_DSN_TUNNEL
+          - service: edge
+            sentry_variable: SENTRY_DSN_EDGE
             context: .
-            dockerfile: tunnel/deploy/Dockerfile
+            dockerfile: edge/deploy/Dockerfile
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:

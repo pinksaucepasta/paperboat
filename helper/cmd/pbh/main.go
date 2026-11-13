@@ -30,7 +30,7 @@ var version = "development"
 // Official helper packages receive the configured address endpoint at build time.
 var defaultAddressURL string
 var defaultRelayImage string
-var defaultTunnelImage string
+var defaultEdgeImage string
 
 const defaultState = "/var/lib/paperboat-selfhost"
 const defaultBinaries = "/usr/local/lib/paperboat-selfhost"
@@ -205,7 +205,7 @@ func install(ctx context.Context, args []string, out io.Writer) (err error) {
 	dir := fs.String("state-dir", defaultState, "protected installation directory")
 	noService := fs.Bool("no-service", false, "initialize without systemd (isolated testing)")
 	relayImage := fs.String("relay-image", defaultRelayImage, "configured relay container image")
-	tunnelImage := fs.String("tunnel-image", defaultTunnelImage, "configured tunnel container image")
+	edgeImage := fs.String("edge-image", defaultEdgeImage, "configured edge container image")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			fs.SetOutput(out)
@@ -249,7 +249,7 @@ func install(ctx context.Context, args []string, out io.Writer) (err error) {
 			err = errors.Join(err, discardFreshInstall(*dir))
 		}
 	}()
-	images := containers.Images{Relay: *relayImage, Tunnel: *tunnelImage}
+	images := containers.Images{Relay: *relayImage, Edge: *edgeImage}
 	selected := strings.Split(strings.ReplaceAll(*enable, "both", "relay,tunnel"), ",")
 	for _, capability := range selected {
 		if _, err := images.Image(capability); err != nil {

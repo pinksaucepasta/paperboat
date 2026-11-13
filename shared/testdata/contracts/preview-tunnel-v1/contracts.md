@@ -16,7 +16,7 @@ replacement audience/method semantics. Tasks 24–32 replace their owning schema
 producers, consumers, OpenAPI, and positive/negative vectors together at the gates
 listed below. Do not teach the old runtime to accept unsupported fields, add a v2,
 or retain compatibility readers after cutover. This document in paperboat-server
-owns product policy; identical copies in paperboat, paperboat-tunnel, and
+owns product policy; identical copies in paperboat, paperboat-edge, and
 paperboat-web give each consumer the same declaration.
 
 ## Fixed vocabulary
@@ -406,7 +406,7 @@ The public family is `paperboat.preview-tunnel` version `1.0.0`:
   DNS and certificate coordination.
 - `paperboat` owns foreground preview leases, host service, local persistence,
   connectors, origins and updates.
-- `paperboat-tunnel` owns ingress, TLS termination, route and connector selection,
+- `paperboat-edge` owns ingress, TLS termination, route and connector selection,
   forwarding, draining and edge health.
 - `paperboat-web` consumes safe server read models and never connector credentials,
   private keys or edge-private configuration.
@@ -425,7 +425,7 @@ with an explicit resource grant. Membership alone, account discovery, email suff
 URL knowledge, a ready carrier, and the application's own login grant nothing.
 `native` supports private/team and uses Task 2's common pair/resource authority;
 public/native is invalid. Native is end-to-end encrypted. Edge is browser HTTP
-with TLS termination at paperboat-tunnel, including private/team; it never claims
+with TLS termination at paperboat-edge, including private/team; it never claims
 end-to-end encryption. Neither method silently falls back to the other. HTTP/3 to
 HTTP/2 connector fallback stays within edge and does not change audience.
 

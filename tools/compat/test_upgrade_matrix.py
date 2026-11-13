@@ -70,7 +70,7 @@ class EdgeReplacement(unittest.TestCase):
                     return ''
                 with patch.object(matrix, 'command', side_effect=docker), patch.object(matrix, 'EDGE_RECIPE', None):
                     with self.assertRaises(matrix.RemoteFailure):
-                        matrix.edge('paperboat-tunnel:stg-candidate')
+                        matrix.edge('paperboat-edge:stg-candidate')
                 self.assertEqual(containers, {name: {'image': 'previous', 'running': True}})
 
 

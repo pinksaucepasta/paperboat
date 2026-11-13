@@ -153,7 +153,7 @@ func flatten(s runtimewire.Snapshot) []runtimewire.Admission {
 }
 
 // endpointPullGolden holds a full and a delta endpoint answer as the server really sends them, read
-// by the edge's client in tunnel/internal/control (TestEndpointPullGoldenThroughTheEdgeClient).
+// by the edge's client in edge/internal/control (TestEndpointPullGoldenThroughTheEdgeClient).
 // PAPERBOAT_UPDATE_GOLDEN=<shared/runtimeattachment/testdata> rewrites it.
 func writeEndpointPullGolden(t *testing.T, full, delta runtimewire.Snapshot) {
 	t.Helper()

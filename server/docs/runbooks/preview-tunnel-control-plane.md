@@ -81,7 +81,7 @@ firewall rejects it, `refused` that the host answered with nothing listening. Fr
 ## Managed certificate deployment readiness
 
 Run this gate before deploying or restarting the server or rolling a
-paperboat-tunnel image. Production requires
+paperboat-edge image. Production requires
 `PAPERBOAT_CERTIFICATES_ENABLED=true`; `false` is not a production workaround
 for missing references or failed issuance. A healthy process is not
 sufficient: the server-side issuer, durable certificate ledger, authenticated

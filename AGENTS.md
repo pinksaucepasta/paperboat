@@ -36,8 +36,8 @@ after each push batch. Each lane keeps one paired pair of test machines and inst
 | `cli/` | `pb` CLI and the endpoint runtime (`pb daemon`), Go |
 | `server/` | control plane: identity, authorization, product state, Go + PostgreSQL |
 | `relay/` | peer relay service (fallback when P2P fails), Go |
-| `helper/` | `pbh` command: self-host installer/manager for relay and tunnel (moving here from `relay/` in S4-00), Go |
-| `tunnel/` | public/browser edge for previews and tunnels, Go |
+| `helper/` | `pbh` command: self-host installer/manager for relay and edge (moving here from `relay/` in S4-00), Go |
+| `edge/` | public/browser edge for previews and tunnels, Go |
 | `shared/` | code used by more than one module (wire protocols, common packages, helpers), Go |
 | `console/` | web console (Next.js; read `console/AGENTS.md`, `DESIGN.md`, `NOTES.md`) |
 | `marketing/` | marketing site (Astro) |
@@ -80,7 +80,7 @@ Regressions are the most expensive failure in this project. They are prevented m
    feature completion; say which).
 2. **`make gate` before every push.** It runs vet and unit tests for every Go module, the
    console lint/build, and, when anything under `cli/`, `relay/` or `shared/`
-   changed, the device smoke suite on a build of HEAD. `server/`, `tunnel/` and `helper/` changes
+   changed, the device smoke suite on a build of HEAD. `server/`, `edge/` and `helper/` changes
    push on their unit and PostgreSQL tests; after deploying them, Lane B asks Lane A for one smoke
    run against the deployed server, and a regression there is reverted or fixed first. **Every smoke check that has ever
    passed must still pass**, whether or not its feature is `[x]` yet.
@@ -105,7 +105,7 @@ PLAN.md (section 5) and done by that lane. **Only Lane A uses the test devices.*
 | Lane | Who | Owns | Works on (PLAN.md) |
 |---|---|---|---|
 | A — CLI & devices | Codex | `cli/`, `relay/`, `tools/device-smoke/`, the Tailscale fork (github.com/pinksaucepasta/tailscale) | S0 (except CI rows), F1–F12, F14, F15 device and CLI parts |
-| B — Server & infrastructure | Codex | `server/`, `tunnel/`, `helper/`, `shared/`, `deploy/`, `.github/` | S0 CI rows, S1, S4, F13, server parts of every feature, S3 |
+| B — Server & infrastructure | Codex | `server/`, `edge/`, `helper/`, `shared/`, `deploy/`, `.github/` | S0 CI rows, S1, S4, F13, server parts of every feature, S3 |
 | C — Console & marketing | Claude only | `console/`, `marketing/` | all frontend work: console parts of every feature, S2 |
 
 **Codex never edits `console/` or `marketing/`.** When a feature needs frontend work, Codex

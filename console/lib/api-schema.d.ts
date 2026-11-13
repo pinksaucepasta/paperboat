@@ -11249,7 +11249,7 @@ export interface components {
             /** @description Exact name selected from the fixed Paperboat metric catalog. */
             dataset: string;
             /** @enum {string} */
-            component: "paperboat-server" | "paperboat-cli" | "paperboat-daemon" | "paperboat-relay" | "paperboat-tunnel";
+            component: "paperboat-server" | "paperboat-cli" | "paperboat-daemon" | "paperboat-relay" | "paperboat-edge";
             aggregation: string;
             points: {
                 /** Format: date-time */
@@ -25261,7 +25261,7 @@ export interface operations {
         parameters: {
             query?: {
                 period?: "1h" | "6h" | "24h" | "7d";
-                component?: "paperboat-server" | "paperboat-cli" | "paperboat-daemon" | "paperboat-relay" | "paperboat-tunnel";
+                component?: "paperboat-server" | "paperboat-cli" | "paperboat-daemon" | "paperboat-relay" | "paperboat-edge";
                 reference?: string;
                 cursor?: string;
                 limit?: number;
@@ -25355,7 +25355,7 @@ export interface operations {
         parameters: {
             query: {
                 metric: string;
-                component: "paperboat-server" | "paperboat-cli" | "paperboat-daemon" | "paperboat-relay" | "paperboat-tunnel";
+                component: "paperboat-server" | "paperboat-cli" | "paperboat-daemon" | "paperboat-relay" | "paperboat-edge";
                 region?: string;
                 instance?: string;
                 period?: "1h" | "6h" | "24h" | "7d";

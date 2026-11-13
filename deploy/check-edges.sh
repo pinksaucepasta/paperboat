@@ -4,13 +4,13 @@
 # and SETTLE seconds after it.
 #   preview   non-200 answers for a preview that existed before the deploy, fetched through every edge
 #             once a second (the request rides the probe machine's held carrier on that edge)
-#   control   edge control failures (tunnel_control_request_failed, tunnel_route_reconcile_failed)
+#   control   edge control failures (edge_control_request_failed, edge_route_reconcile_failed)
 #   carrier   refused host carriers (carrier_connection_failed: data-carrier TLS handshake failures)
 #   attach    host route attach refusals (runtime_route_attach_refused)
 #   edge5xx   5xx pages the edge answered itself, dispatch failures included (edge_http_5xx)
 #   server5xx support_reports rows with HTTP status >= 500 (every server component)
 #   offline   machines online before the deploy that went offline during it
-# Edge logs are followed from every tunnel container that runs in the window, the replaced one included.
+# Edge logs are followed from every edge container that runs in the window, the replaced one included.
 # Usage: PROBE='<runs a shell on the paired probe machine>' SQL='<runs read-only psql on the production
 #   database, SQL on stdin, -At output>' check-edges.sh [--deploy '<deploy command>'] <ssh-target>=<ip> ...
 #   ssh-target "local" reads this host's edge. Without --deploy the gate watches for OBSERVE seconds.
@@ -42,7 +42,7 @@ cleanup() {
 trap 'cleanup "$@"' EXIT
 trap 'exit 1' INT TERM
 
-# Follow each tunnel container's log from the window start until the gate stops; a replaced container's
+# Follow each edge container's log from the window start until the gate stops; a replaced container's
 # follower ends by itself when that container exits, after its last line. The followers run as root, so the
 # script's own kill cannot reach them: each runs under `timeout`, and the exit trap pkills them through sudo
 # (a surviving follower held the ssh session open for 30 min on 2026-11-05).
@@ -51,7 +51,7 @@ for edge in "$@"; do
 	on "$target" "since=$start; stop=$stopfile; seen=' '; end=\$((\$(date +%s) + 3600))
 trap 'sudo -n pkill -f \"[d]ocker logs --follow --since \$since\" 2>/dev/null' EXIT
 while [ ! -e \$stop ] && [ \$(date +%s) -lt \$end ]; do
-	for c in \$(sudo -n docker ps -q --no-trunc --filter name=-tunnel); do
+	for c in \$(sudo -n docker ps -q --no-trunc --filter name=-edge); do
 		case \"\$seen\" in *\" \$c \"*) ;; *) seen=\"\$seen\$c \"; sudo -n timeout 3700 docker logs --follow --since \$since \$c 2>&1 & ;; esac
 	done
 	sleep 1
@@ -119,7 +119,7 @@ count() { grep -c -E "$1" "$2" || true; }
 for edge in "$@"; do
 	target=${edge%%=*} log=$work/edge-${edge%%=*}.log
 	probes=$(grep -c " $target " "$work/probe-failed" || true)
-	control=$(count 'tunnel_control_request_failed|tunnel_route_reconcile_failed' "$log")
+	control=$(count 'edge_control_request_failed|edge_route_reconcile_failed' "$log")
 	carrier=$(count 'carrier_connection_failed' "$log")
 	attach=$(count 'runtime_route_attach_refused' "$log")
 	# Error pages for a visitor's own app (refused or timed out behind its tunnel) are not deploy failures; their

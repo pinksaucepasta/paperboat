@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
     inputs:
       modules:
-        description: 'Modules to test: shared cli relay tunnel helper server console smoke e2e (empty = all)'
+        description: 'Modules to test: shared cli relay edge helper server console smoke e2e (empty = all)'
         default: ''
       run:
         description: 'go test -run pattern (empty = all tests)'
@@ -45,14 +45,14 @@ jobs:
         env:
           MODULES: ${{ inputs.modules }}
         run: |
-          all="shared cli relay tunnel helper server console smoke e2e"
+          all="shared cli relay edge helper server console smoke e2e"
           want="${MODULES:-$all}"
           for m in $want; do
             case " $all " in *" $m "*) ;; *) echo "unknown module '$m' (modules: $all)" >&2; exit 1 ;; esac
           done
-          # server and tunnel also run their PostgreSQL suites (a service container below).
+          # server and edge also run their PostgreSQL suites (a service container below).
           go=$(for m in $want; do [ "$m" = console ] || [ "$m" = smoke ] || [ "$m" = e2e ] || echo "$m"; done |
-            jq -R '{module: ., pg: (. == "server" or . == "tunnel")}' | jq -sc .)
+            jq -R '{module: ., pg: (. == "server" or . == "edge")}' | jq -sc .)
           echo "go=$go" >> "$GITHUB_OUTPUT"
           case " $want " in *" console "*) echo "console=true" ;; *) echo "console=false" ;; esac >> "$GITHUB_OUTPUT"
           case " $want " in *" smoke "*) echo "smoke=true" ;; *) echo "smoke=false" ;; esac >> "$GITHUB_OUTPUT"
@@ -201,7 +201,7 @@ jobs:
       # The browser terminal drain check needs the machine side as a compiled test binary (built in cli, a separate
       # module); it skipped in every step here before. terminal-drain.yml runs the same pair on its own trigger.
       - name: browser terminal drain across updates (edge + machine)
-        if: matrix.module == 'tunnel' && !cancelled() && (inputs.run == '' || contains(inputs.run, 'Drain'))
+        if: matrix.module == 'edge' && !cancelled() && (inputs.run == '' || contains(inputs.run, 'Drain'))
         env:
           PAPERBOAT_DRAIN_MACHINE_TEST_BINARY: ${{ runner.temp }}/drain-machine.test
         run: |
@@ -209,15 +209,15 @@ jobs:
           (cd ../cli && go test -c -o "$PAPERBOAT_DRAIN_MACHINE_TEST_BINARY" ./cmd/browserterminal-wasm)
           go test -json -race -count=1 -timeout 10m -run '^TestBrowserTerminalDrainAcrossUpdates$' ./internal/runtime |
             python3 ../tools/gotest-json.py --save "$GOTEST_EVENTS/drain.jsonl" --verbose
-      # The Docker tunnel handover test builds its serving and replacement images from any local /bin/sh image.
-      - name: docker tunnel handover (local fixture image)
-        if: matrix.module == 'helper' && !cancelled() && (inputs.run == '' || contains(inputs.run, 'DockerTunnelInstall'))
+      # The Docker edge handover test builds its serving and replacement images from any local /bin/sh image.
+      - name: docker edge handover (local fixture image)
+        if: matrix.module == 'helper' && !cancelled() && (inputs.run == '' || contains(inputs.run, 'DockerEdgeInstall'))
         env:
           PAPERBOAT_TEST_DOCKER_BASE_IMAGE: alpine:3.21
         run: |
           set -o pipefail
           docker pull "$PAPERBOAT_TEST_DOCKER_BASE_IMAGE"
-          go test -json -race -count=1 -timeout 10m -run '^TestDockerTunnelInstallHandsOverWithoutStoppingTheServingContainer$' ./internal/containers |
+          go test -json -race -count=1 -timeout 10m -run '^TestDockerEdgeInstallHandsOverWithoutStoppingTheServingContainer$' ./internal/containers |
             python3 ../tools/gotest-json.py --save "$GOTEST_EVENTS/docker-handover.jsonl" --verbose
       - name: migration tests (each on its own empty database)
         if: matrix.module == 'server' && !cancelled()

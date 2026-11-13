@@ -101,7 +101,7 @@ func TestOriginHealthCodeNamesTheFailure(t *testing.T) {
 		if got != tc.want {
 			t.Errorf("%v: %q, want %q", tc.err, got, tc.want)
 		}
-		// The edge's page table (tunnel/internal/edgehttp) is keyed by this shared list.
+		// The edge's page table (edge/internal/edgehttp) is keyed by this shared list.
 		if !slices.Contains(sharedprotocol.OriginFailureCodes, got) {
 			t.Errorf("%v: code %q is not in connectorprotocol.OriginFailureCodes", tc.err, got)
 		}

@@ -34,7 +34,7 @@ func TestInstallUpgradeRetainsProtectedSettingsWithoutRepeatingFlags(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	args := []string{"install", "--no-service", "--state-dir", dir, "--relay-image", "example.test/relay:next", "--tunnel-image", "example.test/tunnel:next"}
+	args := []string{"install", "--no-service", "--state-dir", dir, "--relay-image", "example.test/relay:next", "--edge-image", "example.test/edge:next"}
 	if err := run(context.Background(), args, io.Discard); err != nil {
 		t.Fatalf("upgrade rejected existing installation: %v", err)
 	}
@@ -47,7 +47,7 @@ func TestInstallUpgradeRetainsProtectedSettingsWithoutRepeatingFlags(t *testing.
 		t.Fatal("upgrade replaced protected TLS identity")
 	}
 	images, err := containers.LoadImages(dir)
-	if err != nil || images.Relay != "example.test/relay:next" || images.Tunnel != "example.test/tunnel:next" {
+	if err != nil || images.Relay != "example.test/relay:next" || images.Edge != "example.test/edge:next" {
 		t.Fatal("upgrade did not select new configured images")
 	}
 	args = append(args, "--name", "replacement-name")

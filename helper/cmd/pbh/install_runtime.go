@@ -55,7 +55,7 @@ func installRuntimeImages(ctx context.Context, dir string, c selfhost.Config, im
 	}
 	err = restartInstallation(ctx, dir, c, claimed, before)
 	if err == nil {
-		return nil
+		return containers.RemoveRenamedRuntime(ctx, dir)
 	}
 	recovery, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()

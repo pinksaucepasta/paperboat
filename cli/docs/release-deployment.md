@@ -4,7 +4,7 @@ The native release build requires the `SENTRY_DSN` repository variable: `tools/b
 validates it and embeds it together with the exact release identity (`paperboat:<version>`).
 Missing or malformed configuration fails the build; the API read/write token is never
 embedded. The service container images take per-service variables (`SENTRY_DSN_SERVER`,
-`SENTRY_DSN_RELAY`, `SENTRY_DSN_TUNNEL`); a malformed value fails the image build and an empty one
+`SENTRY_DSN_RELAY`, `SENTRY_DSN_EDGE`); a malformed value fails the image build and an empty one
 leaves reporting disabled. Source code contains no default ingestion DSN,
 and ordinary builds remain disabled until explicitly configured for their own Sentry.
 The release DSN is public in shipped binaries, so these are distribution defaults,

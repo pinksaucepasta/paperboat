@@ -44,7 +44,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/session"
 )
 
-// drainEdge is what the edge (tunnel/internal/runtime TestBrowserTerminalDrainAcrossUpdates) tells the machine.
+// drainEdge is what the edge (edge/internal/runtime TestBrowserTerminalDrainAcrossUpdates) tells the machine.
 type drainEdge struct {
 	NodeID      string `json:"node_id"`
 	Epoch       string `json:"epoch"`
@@ -88,7 +88,7 @@ const (
 func TestBrowserTerminalDrainMachine(t *testing.T) {
 	dir := os.Getenv("PAPERBOAT_DRAIN_DIR")
 	if dir == "" {
-		t.Skip("run by tunnel/internal/runtime TestBrowserTerminalDrainAcrossUpdates")
+		t.Skip("run by edge/internal/runtime TestBrowserTerminalDrainAcrossUpdates")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()

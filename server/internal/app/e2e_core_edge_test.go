@@ -24,7 +24,7 @@ import (
 )
 
 // The edge half of TestE2ECore: a self-hosted installation (relay/selfhost, the supervisor pbh runs) with the real
-// paperboat-tunnel and paperboat-relay, claimed by the operator as a managed edge, so previews, tunnels, sends and
+// paperboat-edge and paperboat-relay, claimed by the operator as a managed edge, so previews, tunnels, sends and
 // relayed native traffic go through it; certificates come from Pebble (Let's Encrypt's test CA, validation off).
 
 const e2ePebbleImage = "ghcr.io/letsencrypt/pebble:2.7.0"
@@ -54,7 +54,7 @@ func allocateE2EPorts(t *testing.T, host string, taken ...string) e2ePorts {
 func (e *e2eCore) buildEdge() error {
 	bin := filepath.Join(e.work, "bin")
 	for _, build := range [][]string{
-		{"tunnel", "build", "-trimpath", "-o", filepath.Join(bin, "paperboat-tunnel"), "./cmd/paperboat-tunnel"},
+		{"edge", "build", "-trimpath", "-o", filepath.Join(bin, "paperboat-edge"), "./cmd/paperboat-edge"},
 		{"relay", "build", "-trimpath", "-o", filepath.Join(bin, "paperboat-relay"), "./cmd/paperboat-relay"},
 		{"relay", "test", "-c", "-o", filepath.Join(e.work, "selfhost-node.test"), "./selfhost"},
 	} {
@@ -213,7 +213,7 @@ func (e *e2eCore) awaitEdgeReady() error {
 }
 
 // edgeServesWithin bounds how long a restarted edge may take to complete a TLS handshake after it reports ready. It
-// serves the certificates its previous process persisted (tunnel/internal/tlscert/persist.go) while the server
+// serves the certificates its previous process persisted (edge/internal/tlscert/persist.go) while the server
 // stages the new epoch's, so a deploy is not a TLS outage (it was 18 to 109 s when certificates were memory-only,
 // run 43078027365). The server's preview dispatch gives a handshake 10 s.
 const edgeServesWithin = 5 * time.Second

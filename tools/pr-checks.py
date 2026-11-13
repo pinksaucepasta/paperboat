@@ -9,9 +9,9 @@ import sys
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
-MODULES = ('shared', 'server', 'cli', 'relay', 'tunnel', 'helper')
+MODULES = ('shared', 'server', 'cli', 'relay', 'edge', 'helper')
 ROOT = Path(__file__).resolve().parents[1]
-DATABASE_MODULES = ('server', 'tunnel', 'helper')
+DATABASE_MODULES = ('server', 'edge', 'helper')
 
 
 def affected(packages, paths, transitive=True):

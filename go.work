@@ -6,5 +6,5 @@ use (
 	./relay
 	./shared
 	./server
-	./tunnel
+	./edge
 )

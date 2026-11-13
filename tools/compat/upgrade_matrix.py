@@ -297,7 +297,7 @@ def main():
         parser.error('refusing a non-staging Compose project')
     if any(not getattr(args, name).startswith('paperboat-server:stg-') for name in ('old_server', 'new_server')):
         parser.error('server images must be staging builds')
-    if any(not getattr(args, name).startswith('paperboat-tunnel:stg-') for name in ('old_edge', 'new_edge')):
+    if any(not getattr(args, name).startswith('paperboat-edge:stg-') for name in ('old_edge', 'new_edge')):
         parser.error('edge images must be staging builds')
     global EDGE_RECIPE
     EDGE_RECIPE = json.loads(command(['docker', 'inspect', staging.EDGE_NAME]))[0]

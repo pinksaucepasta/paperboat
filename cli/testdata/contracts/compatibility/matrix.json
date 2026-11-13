@@ -29,7 +29,7 @@
       "supported": [
         "1.0"
       ],
-      "owner": "paperboat-server,paperboat-tunnel"
+      "owner": "paperboat-server,paperboat-edge"
     }
   },
   "consumers": {
@@ -55,7 +55,7 @@
         "1.0"
       ]
     },
-    "paperboat-tunnel": {
+    "paperboat-edge": {
       "edge_control": [
         "1.0"
       ]
@@ -96,7 +96,7 @@
     },
     {
       "producer": "paperboat-server",
-      "consumer": "paperboat-tunnel",
+      "consumer": "paperboat-edge",
       "interface": "edge_control",
       "versions": [
         "1.0"

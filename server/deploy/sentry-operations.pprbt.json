@@ -111,7 +111,7 @@
       "project": "go",
       "enabled": true,
       "kind": "error_count",
-      "component": "paperboat-tunnel",
+      "component": "paperboat-edge",
       "threshold": 10,
       "recovery_threshold": 2
     },
@@ -129,7 +129,7 @@
       "project": "go",
       "enabled": true,
       "kind": "span_latency_p95",
-      "component": "paperboat-tunnel",
+      "component": "paperboat-edge",
       "threshold": 500,
       "recovery_threshold": 400
     }

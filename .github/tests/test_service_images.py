@@ -13,7 +13,7 @@ class ServiceImageContractTest(unittest.TestCase):
         job = workflow["jobs"]["publish"]
         matrix = job["strategy"]["matrix"]["include"]
         expected = {"server": "SENTRY_DSN_SERVER", "relay": "SENTRY_DSN_RELAY",
-                    "tunnel": "SENTRY_DSN_TUNNEL"}
+                    "edge": "SENTRY_DSN_EDGE"}
         self.assertEqual({row["service"]: row.get("sentry_variable") for row in matrix}, expected)
         build = next(step for step in job["steps"]
                      if step.get("uses", "").startswith("docker/build-push-action@"))

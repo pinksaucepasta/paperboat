@@ -12654,7 +12654,7 @@
               "paperboat-cli",
               "paperboat-daemon",
               "paperboat-relay",
-              "paperboat-tunnel"
+              "paperboat-edge"
             ]
           },
           "aggregation": {
@@ -40912,7 +40912,7 @@
                 "paperboat-cli",
                 "paperboat-daemon",
                 "paperboat-relay",
-                "paperboat-tunnel"
+                "paperboat-edge"
               ]
             }
           },
@@ -41160,7 +41160,7 @@
                 "paperboat-cli",
                 "paperboat-daemon",
                 "paperboat-relay",
-                "paperboat-tunnel"
+                "paperboat-edge"
               ]
             }
           },

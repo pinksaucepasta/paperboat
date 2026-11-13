@@ -274,7 +274,7 @@ Operational investigation uses only fixed queries and safe projections:
 
 Periods are limited to `1h`, `6h`, `24h`, or `7d`; result limits are at most 100.
 Components are limited to `paperboat-server`, `paperboat-cli`, `paperboat-daemon`,
-`paperboat-relay`, and `paperboat-tunnel`. Reference correlation reports
+`paperboat-relay`, and `paperboat-edge`. Reference correlation reports
 `available` or `unsupported` independently for errors, logs and spans, so an account
 without one dataset still returns its audited evidence from supported datasets.
 Each operation has one five-second deadline spanning project resolution, all provider

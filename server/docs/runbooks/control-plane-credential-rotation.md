@@ -1,7 +1,7 @@
 # Control-Plane Credential Rotation
 
 This runbook covers Paperboat mint signing keys and the revocation snapshots consumed by
-`paperboat-tunnel` and helpers. Never paste private key material into tickets, logs, API
+`paperboat-edge` and helpers. Never paste private key material into tickets, logs, API
 requests, or the workspace.
 
 ## Planned rotation

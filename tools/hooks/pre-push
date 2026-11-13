@@ -14,7 +14,7 @@ import sys
 from pathlib import Path
 
 ZERO = "0" * 40
-MODULES = ("cli", "relay", "tunnel", "server", "helper", "shared")
+MODULES = ("cli", "relay", "edge", "server", "helper", "shared")
 TIMEOUT = 600
 
 

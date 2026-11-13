@@ -19,7 +19,7 @@ lazy activation and inspection. Do not interpret `private_access_http` or
 `private_access_tcp` as the replacement browser or native method.
 
 The replacement connector consumes server-issued binding and target authority in
-paperboat-tunnel and independently checks it in paperboatd on every stream before
+paperboat-edge and independently checks it in paperboatd on every stream before
 origin dial. HTTP/3 and HTTP/2 carry the same binding and typed provenance; neither
 changes audience or grants access. Current SQL projects public durable HTTP
 authority only. Task 26 supplies browser and
@@ -689,7 +689,7 @@ access at an edge. No healthy target means an unavailable resource, never anothe
 account/region or an unready fallback pool. Retain names, DNS ownership and certificates
 through connector replacement. At promotion, require matching readiness acknowledgments
 for every route sharing the hostname; stage generation changes so mixed DNS cache
-contents cannot authorize an old target. TLS remains terminated by paperboat-tunnel.
+contents cannot authorize an old target. TLS remains terminated by paperboat-edge.
 Custom domain readiness includes its delegation and resolver TTL behavior; customer
 DNS outside the supported bounds does not receive the same recovery claim.
 

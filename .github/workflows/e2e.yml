@@ -13,7 +13,7 @@ on:
     branches: ['r21-e2e*']
     paths:
       - 'server/**'
-      - 'tunnel/**'
+      - 'edge/**'
       - 'relay/**'
       - 'shared/**'
       - 'helper/**'
@@ -64,7 +64,7 @@ jobs:
             server/go.sum
             cli/go.sum
             relay/go.sum
-            tunnel/go.sum
+            edge/go.sum
             go.work.sum
       # The edge's control client dials the server by name, and the edge serves HTTP and HTTPS on 80 and 443.
       - run: |

@@ -14,7 +14,7 @@ import (
 
 // DeliveryWindow permits an edge offline for a weekend to deliver its durable
 // queue, with additional recovery time. The v1 wire contract uses the same seven
-// day bound in paperboat-tunnel/internal/usage/policy.go.
+// day bound in paperboat-edge/internal/usage/policy.go.
 const DeliveryWindow = 7 * 24 * time.Hour
 
 // MaximumPerNode bounds the bindings a node holds admitted at once (the edge's 4096-route registry).

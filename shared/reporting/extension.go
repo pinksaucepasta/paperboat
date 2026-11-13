@@ -33,7 +33,7 @@ type Metric struct {
 }
 
 var (
-	components = map[string]bool{"paperboat-relay": true, "paperboat-tunnel": true, "paperboat-selfhost": true}
+	components = map[string]bool{"paperboat-relay": true, "paperboat-edge": true, "paperboat-selfhost": true}
 	outcomes   = values("success", "failed", "rejected", "canceled", "state_change")
 	causes     = values("internal", "process_panic", "context_canceled", "deadline_exceeded", "server_closed", "not_found", "permission_denied", "conflict", "rate_limited", "service_unavailable", "invalid_request", "upstream_failure", "connection_closed", "end_of_stream", "truncated_stream", "connection_refused", "connection_reset", "broken_pipe", "network_unreachable", "address_in_use", "invalid_argument", "resource_exhausted", "network_timeout", "dns_failure", "system_error")
 	stageNames = map[string]string{
@@ -110,8 +110,8 @@ func serviceName(component, name string) string {
 		return name
 	}
 	service := "relay"
-	if component == "paperboat-tunnel" {
-		service = "tunnel"
+	if component == "paperboat-edge" {
+		service = "edge"
 	}
 	return strings.Replace(name, "%s", service, 1)
 }

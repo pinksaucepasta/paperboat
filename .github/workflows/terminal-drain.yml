@@ -1,8 +1,8 @@
 name: Terminal drain
 
-# pb update's browser terminal drain across real processes: the edge (tunnel) and the machine (cli: one PTY session,
+# pb update's browser terminal drain across real processes: the edge and the machine (cli: one PTY session,
 # three worker generations, the console's browser terminal client built from cmd/browserterminal-wasm protocol.go and
-# flow.go). tunnel/internal/runtime TestBrowserTerminalDrainAcrossUpdates starts the machine test binary and fails
+# flow.go). edge/internal/runtime TestBrowserTerminalDrainAcrossUpdates starts the machine test binary and fails
 # unless the browser sees no close and no pause through two handovers and exactly one 4301 reattach at the drain cap.
 # One runner, a few minutes; it runs on pushes that touch either side.
 
@@ -11,7 +11,7 @@ on:
     # main only: with no branch filter every lane-submit push that touched these paths started a run (2026-11-12 runner starvation).
     branches: [main]
     paths:
-      - 'tunnel/**'
+      - 'edge/**'
       - 'cli/internal/hostruntime/**'
       - 'cli/cmd/browserterminal-wasm/**'
       - 'shared/runtimeattachment/**'
@@ -57,13 +57,13 @@ jobs:
           path: |
             ${{ steps.paths.outputs.build }}
             ${{ steps.paths.outputs.mod }}
-          key: lane-test-go-tunnel-${{ hashFiles('go.work.sum', '*/go.sum') }}
-          restore-keys: lane-test-go-tunnel-
+          key: lane-test-go-edge-${{ hashFiles('go.work.sum', '*/go.sum') }}
+          restore-keys: lane-test-go-edge-
       - name: build the machine side
         working-directory: cli
         run: go test -c -o "$RUNNER_TEMP/drain-machine.test" ./cmd/browserterminal-wasm
       - name: run the edge with the machine
-        working-directory: tunnel
+        working-directory: edge
         env:
           PAPERBOAT_DRAIN_MACHINE_TEST_BINARY: ${{ runner.temp }}/drain-machine.test
         run: |

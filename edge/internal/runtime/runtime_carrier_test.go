@@ -1,0 +1,313 @@
+package runtime
+
+import (
+	"context"
+	"crypto/ed25519"
+	"crypto/sha256"
+	"encoding/base64"
+	"errors"
+	"fmt"
+	"net"
+	"sync"
+	"testing"
+	"time"
+
+	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
+
+	"github.com/pinksaucepasta/paperboat/edge/internal/control"
+	"github.com/pinksaucepasta/paperboat/edge/internal/datacarrier"
+	"github.com/pinksaucepasta/paperboat/edge/internal/edgehttp"
+	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
+)
+
+type runtimeSourceFake struct {
+	mu           sync.Mutex
+	admissions   []runtimewire.Admission
+	err          error
+	endpointErr  error
+	observations []runtimewire.Observation
+	// endpointUpdate, when set, answers endpoint pulls; endpointPulls records each since sent.
+	endpointUpdate func(since string) control.EndpointUpdate
+	endpointPulls  []string
+}
+
+func (s *runtimeSourceFake) RuntimeCarrierAdmissions(context.Context, string, string) ([]runtimewire.Admission, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]runtimewire.Admission(nil), s.admissions...), s.err
+}
+func (s *runtimeSourceFake) EndpointAdmissions(_ context.Context, _, _, since string) (control.EndpointUpdate, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.endpointPulls = append(s.endpointPulls, since)
+	if s.endpointUpdate != nil {
+		return s.endpointUpdate(since), s.endpointErr
+	}
+	out := []runtimewire.Admission{}
+	for _, a := range s.admissions {
+		if a.EndpointID != "" {
+			out = append(out, a)
+		}
+	}
+	return control.EndpointUpdate{Complete: true, Admissions: out, Cursor: "cursor"}, s.endpointErr
+}
+func (s *runtimeSourceFake) ObserveRuntimeCarriers(_ context.Context, _, _ string, o []runtimewire.Observation) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.observations = append(s.observations, o...)
+	return nil
+}
+func runtimeAdmission(t *testing.T) runtimewire.Admission {
+	t.Helper()
+	publicKey := make(ed25519.PublicKey, ed25519.PublicKeySize)
+	for index := range publicKey {
+		publicKey[index] = byte(index + 1)
+	}
+	digest := sha256.Sum256(publicKey)
+	trust, err := control.NewProcessCarrierServerTrust("edge_1", "edge_epoch_1", "edge.example.test", time.Now().UTC(), time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return runtimewire.Admission{Schema: runtimewire.Schema, Binding: runtimewire.Binding{AccountID: "account_1", HostID: "host_1", TunnelID: "tunnel_1", ConnectorID: "connector_1", SessionID: "session_1", ProcessGeneration: 1, ConfigGeneration: 1, InstallationGeneration: 1, RouteID: "runtime_route", RouteGeneration: 1, EdgeNodeID: "edge_1", EdgeProcessEpoch: "edge_epoch_1", EdgeCarrierServerSPKISHA256: trust.SPKISHA256, EdgeCarrierServerCertificateChainPEM: trust.CertificateChainPEM, MachineIdentityPublicKey: base64.RawURLEncoding.EncodeToString(publicKey), MachineIdentityThumbprint: "sha256:" + base64.RawURLEncoding.EncodeToString(digest[:])}, AttachmentGeneration: 1, ConfigContentHash: "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", EdgeEndpoints: []string{"h2://edge.example.test:27443", "h3://edge.example.test:27444"}, Hostname: "machine.runtime.example.test", RouteKind: runtimewire.RouteKind, RouteRevision: 1, ExpiresAt: time.Now().Add(time.Hour)}
+}
+func waitRuntime(t *testing.T, f func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if f() {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("runtime carrier condition timed out")
+}
+func TestRuntimeCarrierReadinessRevocationExpiryAndRecovery(t *testing.T) {
+	for _, mode := range []string{"revocation", "expiry", "disconnect"} {
+		t.Run(mode, func(t *testing.T) {
+			a := runtimeAdmission(t)
+			if mode == "expiry" {
+				a.ExpiresAt = time.Now().Add(700 * time.Millisecond)
+			}
+			source := &runtimeSourceFake{admissions: []runtimewire.Admission{a}}
+			expected, err := datacarrier.NewExpectedAdmissionRegistry(datacarrier.ExpectedAdmissionRegistryConfig{NodeID: a.Binding.EdgeNodeID, ProcessEpoch: a.Binding.EdgeProcessEpoch})
+			if err != nil {
+				t.Fatal(err)
+			}
+			routes, err := edgehttp.NewDataCarrierPreviewRegistry(edgehttp.DataCarrierPreviewRegistryConfig{BaseDomain: "runtime.example.test", ProcessEpoch: a.Binding.EdgeProcessEpoch})
+			if err != nil {
+				t.Fatal(err)
+			}
+			w := &RuntimeCarrierWorker{Source: source, Expected: expected, Routes: routes, Endpoints: endpointRegistry(t, a.Binding.EdgeProcessEpoch), Interval: 20 * time.Millisecond, Timeout: time.Second}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			if err = w.Start(ctx); err != nil {
+				t.Fatal(err)
+			}
+			defer func() {
+				if err := w.Shutdown(context.Background()); err != nil {
+					t.Error(err)
+				}
+			}()
+			waitRuntime(t, func() bool { return len(expected.Snapshot()) == 1 })
+			source.mu.Lock()
+			for _, o := range source.observations {
+				if o.Ready {
+					t.Error("ready before carrier attached")
+				}
+			}
+			source.mu.Unlock()
+			ea, err := control.ExpectedRuntimeAdmission(a, a.Binding.EdgeNodeID, a.Binding.EdgeProcessEpoch, time.Now())
+			if err != nil {
+				t.Fatal(err)
+			}
+			server := newTestCarrierServer(t, ea.Identity)
+			done := make(chan error, 1)
+			go func() { done <- w.Handle(ctx, server) }()
+			waitRuntime(t, func() bool {
+				source.mu.Lock()
+				defer source.mu.Unlock()
+				for _, o := range source.observations {
+					if o.Ready {
+						return true
+					}
+				}
+				return false
+			})
+			source.mu.Lock()
+			source.err = errors.New("control unavailable")
+			source.mu.Unlock()
+			time.Sleep(60 * time.Millisecond)
+			if routes.Len() != 1 {
+				t.Fatal("failed pull removed valid route")
+			}
+			if mode == "expiry" {
+				time.Sleep(time.Until(a.ExpiresAt) + 100*time.Millisecond)
+				if routes.Len() != 1 {
+					t.Fatal("admitted runtime carrier expired during authority outage")
+				}
+			}
+			switch mode {
+			case "revocation", "expiry":
+				source.mu.Lock()
+				source.err = nil
+				source.admissions = nil
+				source.mu.Unlock()
+			case "disconnect":
+				_ = server.Close()
+			}
+			waitRuntime(t, func() bool { return routes.Len() == 0 })
+			if mode == "disconnect" {
+				source.mu.Lock()
+				source.err = nil
+				source.mu.Unlock()
+				second := newTestCarrierServer(t, ea.Identity)
+				secondDone := make(chan error, 1)
+				go func() { secondDone <- w.Handle(ctx, second) }()
+				waitRuntime(t, func() bool { return routes.Len() == 1 })
+				_ = second.Close()
+				select {
+				case <-secondDone:
+				case <-time.After(time.Second):
+					t.Fatal("replacement handler leaked")
+				}
+			}
+			_ = server.Close()
+			select {
+			case <-done:
+			case <-time.After(time.Second):
+				t.Fatal("handler leaked")
+			}
+		})
+	}
+}
+
+// Audit T10: when the host sends a goaway on its runtime carrier, its routes stay (the transport
+// prefers another live carrier of the route and uses this one only while it is the last, so a
+// worker handover loses no request) and the edge keeps the carrier until the host closes it.
+func TestRuntimeCarrierRoutesStayOnHostGoaway(t *testing.T) {
+	a := runtimeAdmission(t)
+	source := &runtimeSourceFake{admissions: []runtimewire.Admission{a}}
+	expected, err := datacarrier.NewExpectedAdmissionRegistry(datacarrier.ExpectedAdmissionRegistryConfig{NodeID: a.Binding.EdgeNodeID, ProcessEpoch: a.Binding.EdgeProcessEpoch})
+	if err != nil {
+		t.Fatal(err)
+	}
+	routes, err := edgehttp.NewDataCarrierPreviewRegistry(edgehttp.DataCarrierPreviewRegistryConfig{BaseDomain: "runtime.example.test", ProcessEpoch: a.Binding.EdgeProcessEpoch})
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := &RuntimeCarrierWorker{Source: source, Expected: expected, Routes: routes, Endpoints: endpointRegistry(t, a.Binding.EdgeProcessEpoch), Interval: 20 * time.Millisecond, Timeout: time.Second}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := w.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = w.Shutdown(context.Background()) }()
+	waitRuntime(t, func() bool { return len(expected.Snapshot()) == 1 })
+	ea, err := control.ExpectedRuntimeAdmission(a, a.Binding.EdgeNodeID, a.Binding.EdgeProcessEpoch, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	session := newTestCarrierSession()
+	session.inbound = make(chan datacarrier.StreamLink, 1)
+	config := datacarrier.DefaultConfig()
+	config.Identity = ea.Identity
+	config.Authorize = datacarrier.AuthorizerFunc(func(context.Context, datacarrier.Identity, datacarrier.StreamOpen) error { return nil })
+	server, err := datacarrier.NewServerWithSession(context.Background(), session, config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer server.Close()
+	done := make(chan error, 1)
+	go func() { done <- w.Handle(ctx, server) }()
+	waitRuntime(t, func() bool { return routes.Len() == 1 })
+
+	edgeEnd, hostEnd := net.Pipe()
+	session.inbound <- edgeEnd
+	id := ea.Identity
+	open := connectorprotocol.StreamOpen{Protocol: connectorprotocol.ProtocolName, Version: connectorprotocol.ProtocolVersion, AccountID: id.AccountID, TunnelID: id.TunnelID, ConnectorID: id.ConnectorID, SessionID: id.SessionID, ProcessGeneration: id.ProcessGeneration, Generation: id.Generation, RouteID: a.Binding.RouteID, RequestID: "request_goaway", Kind: connectorprotocol.Goaway}
+	if err := connectorprotocol.WriteStreamOpen(hostEnd, open); err != nil {
+		t.Fatal(err)
+	}
+	// A short goaway (whole seconds on the wire): the carrier stays open past it, as a shared
+	// carrier the agent keeps using does (audit T10, prod 2026-10-26).
+	if err := connectorprotocol.WriteGoawayNotice(hostEnd, connectorprotocol.GoawayHostDraining, time.Now().Add(2*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	_ = hostEnd.Close()
+	waitRuntime(t, server.DrainingNow)
+	select {
+	case err := <-done:
+		t.Fatalf("handler left before the host closed its carrier: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	if routes.Len() != 1 {
+		t.Fatal("a goaway detached the routes of a carrier that still serves")
+	}
+	// The goaway ends while the carrier is still open: it is a normal carrier again.
+	for deadline := time.Now().Add(6 * time.Second); server.DrainingNow(); time.Sleep(20 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("the goaway did not end on a carrier that is still open")
+		}
+	}
+	if routes.Len() != 1 {
+		t.Fatal("routes left when the goaway ended")
+	}
+	_ = server.Close()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("handler after the carrier closed: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("handler kept a closed carrier")
+	}
+}
+
+// A carrier that matched no admission asks for a pull; the pull it waits for starts after it asked,
+// concurrent asks share one pull, and asks are paced to one pull per missPullInterval.
+func TestRuntimeCarrierRequestPullCoalescesAndSeesNewAdmissions(t *testing.T) {
+	a := runtimeAdmission(t)
+	source := &runtimeSourceFake{}
+	expected, err := datacarrier.NewExpectedAdmissionRegistry(datacarrier.ExpectedAdmissionRegistryConfig{NodeID: a.Binding.EdgeNodeID, ProcessEpoch: a.Binding.EdgeProcessEpoch})
+	if err != nil {
+		t.Fatal(err)
+	}
+	routes, err := edgehttp.NewDataCarrierPreviewRegistry(edgehttp.DataCarrierPreviewRegistryConfig{BaseDomain: "runtime.example.test", ProcessEpoch: a.Binding.EdgeProcessEpoch})
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := &RuntimeCarrierWorker{Source: source, Expected: expected, Routes: routes, Endpoints: endpointRegistry(t, a.Binding.EdgeProcessEpoch), Interval: 5 * time.Minute, Timeout: time.Second}
+	if err := w.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = w.Shutdown(context.Background()) }()
+	first, second := w.RequestPull(), w.RequestPull()
+	if first != second {
+		t.Fatal("concurrent pull requests did not share one pull")
+	}
+	<-first
+	source.mu.Lock()
+	source.admissions = []runtimewire.Admission{a}
+	source.mu.Unlock()
+	asked := time.Now()
+	select {
+	case <-w.RequestPull():
+	case <-time.After(3 * time.Second):
+		t.Fatal("requested pull did not finish")
+	}
+	if len(expected.Snapshot()) != 1 {
+		t.Fatal("the requested pull did not install the admission issued before the request")
+	}
+	if waited := time.Since(asked); waited < missPullInterval/2 {
+		t.Fatalf("second requested pull ran after %v, want it paced to about %v", waited, missPullInterval)
+	}
+}
+
+func TestAttachFailureOfAClosingRegistryIsNotARefusal(t *testing.T) {
+	if attachFailureIsRefusal(edgehttp.ErrDataCarrierPreviewRegistryClosed) || attachFailureIsRefusal(fmt.Errorf("attach: %w", edgehttp.ErrDataCarrierPreviewRegistryClosed)) {
+		t.Fatal("a registry closed by shutdown was logged as a refusal")
+	}
+	if !attachFailureIsRefusal(errors.New("route conflict")) {
+		t.Fatal("a real refusal is no longer logged")
+	}
+}

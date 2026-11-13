@@ -1,0 +1,13 @@
+**
+!go.mod
+!go.sum
+!LICENSE
+!cmd/
+!cmd/paperboat-edge/
+!cmd/paperboat-edge/**
+!internal/
+!internal/**
+**/*_test.go
+
+!vendor/
+!vendor/**

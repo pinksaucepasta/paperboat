@@ -41,7 +41,7 @@ func TestDockerTeardownPreservesForeignContainerAndRemovesOwnedContainer(t *test
 	if _, err := docker(ctx, "create", "--name", name, "--label", ownerLabel+"="+owner, image, "--version"); err != nil {
 		t.Fatal("create owned integration container failed")
 	}
-	tunnelName := "paperboat-pbh-" + owner + "-tunnel"
+	tunnelName := "paperboat-pbh-" + owner + "-edge"
 	if _, err := docker(ctx, "create", "--name", tunnelName, "--label", ownerLabel+"="+owner, image, "--version"); err != nil {
 		t.Fatal("create owned tunnel fixture failed")
 	}
@@ -102,7 +102,7 @@ func TestLiveDockerSupervisorReadinessAndBoundedDrain(t *testing.T) {
 	}
 	owner := installationOwner(dir)
 	for _, role := range roles {
-		running, err := containerRunning(ctx, "paperboat-pbh-"+owner+"-"+role, owner)
+		running, err := containerRunning(ctx, containerName(owner, role), owner)
 		if err != nil || !running {
 			t.Fatal("ready node did not have its owned running container")
 		}
@@ -121,7 +121,7 @@ func TestLiveDockerSupervisorReadinessAndBoundedDrain(t *testing.T) {
 	cleanup, stop := context.WithTimeout(context.Background(), 10*time.Second)
 	defer stop()
 	for _, role := range roles {
-		_, exists, err := inspectContainer(cleanup, "paperboat-pbh-"+owner+"-"+role)
+		_, exists, err := inspectContainer(cleanup, containerName(owner, role))
 		if err != nil || exists {
 			t.Fatal("owned runtime container survived supervisor shutdown")
 		}

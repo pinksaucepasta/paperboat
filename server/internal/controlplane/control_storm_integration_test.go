@@ -295,15 +295,15 @@ func runControlStorm(t *testing.T, machines int) controlStormReport {
 
 func runTunnelClientStorm(t *testing.T, ctx context.Context, server *httptest.Server, prefix string, nodes int) stormPhaseReport {
 	t.Helper()
-	binary := os.Getenv("PAPERBOAT_CONTROL_STORM_TUNNEL_BINARY")
+	binary := os.Getenv("PAPERBOAT_CONTROL_STORM_EDGE_BINARY")
 	if binary == "" {
-		t.Fatal("PAPERBOAT_CONTROL_STORM_TUNNEL_BINARY is required")
+		t.Fatal("PAPERBOAT_CONTROL_STORM_EDGE_BINARY is required")
 	}
 	certificate := server.Certificate()
 	if certificate == nil {
 		t.Fatal("control-storm TLS certificate is unavailable")
 	}
-	reportFile, err := os.CreateTemp("", "paperboat-tunnel-control-storm-*.json")
+	reportFile, err := os.CreateTemp("", "paperboat-edge-control-storm-*.json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -322,7 +322,7 @@ func runTunnelClientStorm(t *testing.T, ctx context.Context, server *httptest.Se
 	}
 	started := time.Now()
 	command := exec.CommandContext(ctx, binary, "-test.run", "^TestControlStormParticipant$", "-test.count=1")
-	command.Env = append(os.Environ(), "PAPERBOAT_TUNNEL_CONTROL_STORM="+string(config))
+	command.Env = append(os.Environ(), "PAPERBOAT_EDGE_CONTROL_STORM="+string(config))
 	output, err := command.CombinedOutput()
 	elapsed := time.Since(started)
 	if len(output) > maxEdgeDocument {

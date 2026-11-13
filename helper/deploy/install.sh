@@ -83,6 +83,6 @@ $elevate /usr/local/lib/paperboat-selfhost/pbh install "$@"
 
 installation_complete=true
 # A successful Docker transition no longer needs the retired host runtimes.
-for binary in paperboat-relay paperboat-tunnel; do
+for binary in paperboat-relay paperboat-edge; do
  $elevate rm -f "/usr/local/lib/paperboat-selfhost/$binary"
 done

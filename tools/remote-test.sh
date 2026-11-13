@@ -15,7 +15,7 @@ usage() { sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
 [ $# -ge 2 ] || usage
 host=$1 module=$2
 shift 2
-case $module in shared | cli | relay | tunnel | helper | server) ;; *) echo "remote-test: unknown module '$module'" >&2; usage ;; esac
+case $module in shared | cli | relay | edge | helper | server) ;; *) echo "remote-test: unknown module '$module'" >&2; usage ;; esac
 
 root=$(git rev-parse --show-toplevel)
 cd "$root"
@@ -55,7 +55,7 @@ export PATH=$HOME/.local/go1.27.4/bin:$HOME/go-sdk-1.27.4/bin:$PATH GOTOOLCHAIN=
 cd "$HOME/pb-remote-test/$lane/$module"
 go version
 # A host with ~/.pb-test-pg-dsn (anvit) runs PostgreSQL suites like CI: each package gets its own fresh database.
-case $module in server | tunnel | helper) ;; *) exec nice go test -p 2 "$@" ;; esac # no database suites elsewhere
+case $module in server | edge | helper) ;; *) exec nice go test -p 2 "$@" ;; esac # no database suites elsewhere
 [ -f "$HOME/.pb-test-pg-dsn" ] || exec nice go test -p 2 "$@"
 base=$(cat "$HOME/.pb-test-pg-dsn") pkgs=() args=() failed=0
 for a in "$@"; do case $a in ./* | ...) pkgs+=("$a") ;; *) args+=("$a") ;; esac; done

@@ -13,7 +13,7 @@
 - Private terminal, exec, preview, SSH, and file content is end-to-end encrypted
   between the initiating CLI endpoint and the target machine endpoint. Direct QUIC, relay
   QUIC, WSS, relay HTTP/3, and relay HTTP/2 carry only authenticated ciphertext. WSS never
-  carries file bytes. `paperboat-server` and `paperboat-tunnel` have no content-decryption
+  carries file bytes. `paperboat-server` and `paperboat-edge` have no content-decryption
   key or support decryption path. Public-preview content is intentionally public and outside
   this claim.
 - Endpoint certificates bind account, endpoint ID, role, generation, and QUIC key,
@@ -73,7 +73,7 @@ terminal output, preview bodies, SSH payloads, or file manifests/chunks in plain
 | --- | --- | --- |
 | Machine-code phishing or brute force | Server-authoritative expiry/interval; user sees the complete URL and short code; no token in output | Server/dashboard rate limits and approval UX |
 | Token theft or refresh replay | OS credential store, issuer-namespaced profiles, refresh rotation, durable revoke queue | Server session-family revocation |
-| Malicious route or descriptor | Scheme, issuer, environment, endpoint, scope, generation, and expiry validation; no raw VM/public-TCP fallback | Server route authorization and `paperboat-tunnel` enforcement |
+| Malicious route or descriptor | Scheme, issuer, environment, endpoint, scope, generation, and expiry validation; no raw VM/public-TCP fallback | Server route authorization and `paperboat-edge` enforcement |
 | Compromised relay or control plane | Authenticated registered signing keys and endpoint certificates, endpoint-authenticated QUIC handshakes, encrypted stream headers and records, replay/generation fencing | Traffic timing, endpoint addressing, ciphertext length, and authorized routing metadata remain observable |
 | Carrier downgrade | Authentication, authorization, certificate, protocol, revocation, and generation failures are terminal; only availability failures may select the next equally encrypted carrier | A network observer can block preferred carriers and force an allowed encrypted fallback |
 | Terminal injection | Non-file bytes pass through unchanged; rewriting is limited to a bracketed paste frame | `pb` host-runtime terminal authorization |
@@ -99,5 +99,5 @@ must never fabricate a replacement root or silently trust an endpoint. Loss of o
 revokes and re-enrolls only that endpoint when the account root remains available.
 
 The CLI intentionally cannot prove downstream revocation propagation;
-`paperboat-server`, `paperboat-tunnel`, and `paperboat` must provide that evidence
+`paperboat-server`, `paperboat-edge`, and `paperboat` must provide that evidence
 in the release review.

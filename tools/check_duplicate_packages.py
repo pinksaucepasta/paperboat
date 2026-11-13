@@ -2,7 +2,7 @@
 """Fail if two Go package directories in different modules are byte-identical (F21-33)."""
 import hashlib, os, sys
 
-MODULES = ["cli", "server", "relay", "helper", "tunnel", "shared"]
+MODULES = ["cli", "server", "relay", "helper", "edge", "shared"]
 
 
 def packages(root):

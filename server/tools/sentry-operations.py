@@ -21,7 +21,7 @@ ALLOWED_TOP = {"schema", "api_base", "organization", "environment", "cron_monito
 CRON_KEYS = {"slug", "name", "project", "status", "producer_configured", "schedule", "checkin_margin", "max_runtime", "failure_issue_threshold", "recovery_threshold"}
 DETECTOR_KEYS = {"name", "project", "enabled", "kind", "component", "threshold", "recovery_threshold"}
 ENVIRONMENTS = {"production", "sentry-validation", "development"}
-COMPONENTS = {"paperboat-server", "paperboat-cli", "paperboat-daemon", "paperboat-relay", "paperboat-tunnel"}
+COMPONENTS = {"paperboat-server", "paperboat-cli", "paperboat-daemon", "paperboat-relay", "paperboat-edge"}
 
 
 class Error(Exception):

@@ -497,7 +497,7 @@ VALUES ($1,$2,$3,decode(repeat('42',32),'hex'),'route.create','route',$4,'connec
 }
 
 // engineRouteGolden is the engine route row the server sends an edge, kept where the edge's test
-// reads it (tunnel/internal/runtime: TestEdgeAdmitsTheServersEngineRouteGolden), so both sides run
+// reads it (edge/internal/runtime: TestEdgeAdmitsTheServersEngineRouteGolden), so both sides run
 // their real code against one contract. PAPERBOAT_UPDATE_GOLDEN=<that testdata directory> rewrites it.
 const engineRouteGolden = "../../../shared/runtimeattachment/testdata/engine_route_snapshot.json"
 

@@ -71,7 +71,7 @@ func Teardown(ctx context.Context, dir string) error {
 func removeInstallationRuntimes(ctx context.Context, dir string, handoff bool) error {
 	owner := installationOwner(dir)
 	for _, role := range []string{"relay", "tunnel"} {
-		name := "paperboat-pbh-" + owner + "-" + role
+		name := containerName(owner, role)
 		if handoff {
 			info, exists, err := inspectContainer(ctx, name)
 			if err != nil {

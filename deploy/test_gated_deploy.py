@@ -24,7 +24,7 @@ class Fake:
 
     def __init__(self, canary_after_deploy, deploy_rc=0):
         self.clock = T0
-        self.images = {'server': 'paperboat-server:1', 'local': ('paperboat-relay:1', 'paperboat-tunnel:1')}
+        self.images = {'server': 'paperboat-server:1', 'local': ('paperboat-relay:1', 'paperboat-edge:1')}
         self.calls, self.lock, self.deployed = [], None, False
         self.after = list(canary_after_deploy)  # canary results (ok bools) for runs after the switch
         self.deploy_rc = deploy_rc
@@ -46,7 +46,7 @@ class Fake:
             return 0, self.images['server'] + '\n'
         if 'docker ps' in script:
             relay, tunnel = self.images[target]
-            return 0, f'paperboat-pbh-x-relay {relay}\npaperboat-pbh-x-tunnel {tunnel}\n'
+            return 0, f'paperboat-pbh-x-relay {relay}\npaperboat-pbh-x-edge {tunnel}\n'
         if '--image' in script:
             if self.rollout_error:
                 return 1, 'Draining servers retained: 1\n' + self.rollout_error
@@ -54,13 +54,13 @@ class Fake:
             return 0, ''
         if 'pbh install' in script:
             parts = script.split()
-            self.images[target] = (parts[parts.index('--relay-image') + 1], parts[parts.index('--tunnel-image') + 1])
+            self.images[target] = (parts[parts.index('--relay-image') + 1], parts[parts.index('--edge-image') + 1])
             return 0, ''
         raise AssertionError(script)
 
     def deploy(self):
         self.deployed = True
-        self.images = {'server': 'paperboat-server:2', 'local': ('paperboat-relay:1', 'paperboat-tunnel:2')}
+        self.images = {'server': 'paperboat-server:2', 'local': ('paperboat-relay:1', 'paperboat-edge:2')}
         self.clock += 60
         return self.deploy_rc
 
@@ -123,7 +123,7 @@ class GatedDeployTest(unittest.TestCase):
         code, out = gate(fake, self.status)
         self.assertEqual(code, 1)
         self.assertEqual(fake.images, {'server': 'paperboat-server:1',
-                                       'local': ('paperboat-relay:1', 'paperboat-tunnel:1')})
+                                       'local': ('paperboat-relay:1', 'paperboat-edge:1')})
         rollback = [s for _, s in fake.calls if '--image' in s or 'pbh install' in s]
         self.assertEqual(len(rollback), 2)
         self.assertIn('--reap', rollback[0])  # server first, reaped so retained generations never block it
@@ -211,8 +211,8 @@ class GatedDeployTest(unittest.TestCase):
         self.assertFalse(fake.deployed)
 
     def test_parse_edge(self):
-        self.assertEqual(gated.parse_edge('paperboat-pbh-1-relay r:1\npaperboat-pbh-1-tunnel t:2\nother x\n'),
-                         {'relay': 'r:1', 'tunnel': 't:2'})
+        self.assertEqual(gated.parse_edge('paperboat-pbh-1-relay r:1\npaperboat-pbh-1-edge t:2\nother x\n'),
+                         {'relay': 'r:1', 'edge': 't:2'})
 
 
 if __name__ == '__main__':
