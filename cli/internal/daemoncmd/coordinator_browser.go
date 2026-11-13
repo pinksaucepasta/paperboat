@@ -234,17 +234,24 @@ func browserListenerPorts(routes map[string]splitdns.BrowserRoute) map[int]bool 
 
 // addBrowserPortListeners makes https://<machine>.<domain>:<port> work for every routed port not in served, by
 // serving the gateway address on that port, and records it. A port that cannot be served never degrades the
-// other browser URLs: it is logged with its cause, pb doctor names the step (browser_port_listener) and the
-// reconcile retry tries it again.
+// other browser URLs: it is logged with its cause. A bind the guard refuses for another reason makes pb doctor
+// name the step (browser_port_listener) and the reconcile retry tries it again; a port another program or the
+// OS owns (machineguard.ErrPortInUse) is only logged, tried again at the next reconcile.
 func (c *Coordinator) addBrowserPortListeners(ctx context.Context, client guardedNameClient, ip netip.Addr, routes map[string]splitdns.BrowserRoute, proxy *splitdns.Proxy, served map[int]bool) {
 	for _, port := range slices.Sorted(maps.Keys(browserListenerPorts(routes))) {
 		if served[port] {
 			continue
 		}
 		listener, err := client.Acquire(ctx, splitdns.BrowserGatewayHostname, ip, port)
+		if errors.Is(err, machineguard.ErrPortInUse) {
+			// Another program (sshd on 22) or a Windows excluded port range owns the port: permanent, like a
+			// native port conflict. Retrying and a doctor warning cannot fix it (victus, 2026-11-14).
+			diagnosticlog.TryInfo("browser port URL unavailable: another program or the OS owns the port", "port", port)
+			continue
+		}
 		if err != nil {
 			c.browserPortsPending = true
-			diagnosticlog.TryWarn("browser port URL unavailable: the machine guard could not bind the port", "port", port, "port_in_use", errors.Is(err, machineguard.ErrPortInUse), "error", err)
+			diagnosticlog.TryWarn("browser port URL unavailable: the machine guard could not bind the port", "port", port, "error", err)
 			continue
 		}
 		limited := &limitedListener{Listener: listener, permits: c.connections, ctx: context.WithoutCancel(ctx)}

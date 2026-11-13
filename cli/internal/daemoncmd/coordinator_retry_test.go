@@ -169,6 +169,48 @@ func TestCoordinatorNamesAFailedBrowserPortListenerAndRetries(t *testing.T) {
 	}
 }
 
+// A port another program or the OS owns (sshd on 22, a Windows excluded port range) cannot be served by any retry:
+// like a native port conflict it is not a pending step, so pb doctor stays healthy on a Windows PC whose
+// peers export port 22, and the ports that can be bound are still served (victus, 2026-11-14).
+func TestCoordinatorDoesNotNagAboutABrowserPortAnotherProgramOwns(t *testing.T) {
+	ca, err := testcert.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := &coordinatorNameClient{conflictPorts: map[int]bool{22: true}}
+	c, err := NewCoordinator(CoordinatorConfig{
+		NameClient:  names,
+		DialMachine: func(context.Context, string, int) (net.Conn, error) { return nil, errors.New("unexpected dial") },
+		IssueCertificate: func(_ context.Context, name, _ string, _ int) (tls.Certificate, error) {
+			cert, key, err := ca.IssueCertificate([]string{name})
+			if err != nil {
+				return tls.Certificate{}, err
+			}
+			return tls.X509KeyPair(cert, key)
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.mu.Lock()
+	c.ctx, c.running = t.Context(), true
+	c.mu.Unlock()
+	t.Cleanup(c.resetReconcileRetry)
+	peer := &daemonrpc.PeerUpdate{PeerId: "machine", Alias: "hp", AssignedIp: "127.100.0.22", Approved: true, Online: true, ExportedPorts: []int32{22, 8080}}
+	if err := c.reconcileSnapshot(t.Context(), []*daemonrpc.PeerUpdate{peer}, 1); err != nil {
+		t.Fatal(err)
+	}
+	if step := c.PendingLocalAccessStep(); step != "" {
+		t.Fatalf("pending step=%q: a port another program owns must not make pb doctor warn", step)
+	}
+	names.mu.Lock()
+	served22, served8080 := names.gateway[22], names.gateway[8080]
+	names.mu.Unlock()
+	if served22 != "" || served8080 == "" {
+		t.Fatalf("gateway listeners 22=%q 8080=%q: want only 8080 served", served22, served8080)
+	}
+}
+
 // Another program on :80 turns the browser gateway off. Native access stays, doctor's pending step is
 // browser_gateway_port with the owner the OS named, and the retry brings the URLs back once the port is free.
 func TestCoordinatorNamesABusyGatewayPortAndRestoresBrowserURLsWhenItIsFree(t *testing.T) {
