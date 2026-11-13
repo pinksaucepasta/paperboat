@@ -2,13 +2,16 @@ package connector
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
+	"github.com/pinksaucepasta/paperboat/shared/quicdial"
 	"io"
 	"net/http"
 	"sync"
 	"time"
 
+	"github.com/quic-go/quic-go"
 	"github.com/quic-go/quic-go/http3"
 	"golang.org/x/net/http2"
 )
@@ -92,7 +95,9 @@ func dialHTTPCarrier(ctx context.Context, endpoint DataCarrierEndpointConfig, h3
 		tlsConfig.NextProtos = []string{"h3"}
 		quicConfig := defaultQUICConfig()
 		quicConfig.MaxIncomingUniStreams = 3
-		rt := &http3.Transport{TLSClientConfig: tlsConfig, QUICConfig: quicConfig}
+		rt := &http3.Transport{TLSClientConfig: tlsConfig, QUICConfig: quicConfig, Dial: func(ctx context.Context, addr string, tlsCfg *tls.Config, cfg *quic.Config) (*quic.Conn, error) {
+			return quicdial.Dial(ctx, addr, tlsCfg, cfg, true)
+		}}
 		transport = carrierRoundTripper{RoundTripper: rt, close: rt.Close}
 	} else {
 		tlsConfig.NextProtos = []string{"h2"}

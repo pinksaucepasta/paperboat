@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"github.com/pinksaucepasta/paperboat/internal/neterr"
 	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
+	"github.com/pinksaucepasta/paperboat/shared/quicdial"
 	"io"
 	"net"
 	"strings"
@@ -203,7 +204,7 @@ func dialQUIC(ctx context.Context, endpoint DataCarrierEndpointConfig) (DataCarr
 	if err != nil {
 		return nil, DataCarrierIdentity{}, err
 	}
-	connection, err := quic.DialAddr(ctx, endpoint.Address, tlsConfig, defaultQUICConfig())
+	connection, err := quicdial.Dial(ctx, endpoint.Address, tlsConfig, defaultQUICConfig(), false)
 	if err != nil {
 		return nil, DataCarrierIdentity{}, fmt.Errorf("%w: QUIC carrier dial: %w", ErrDataCarrierTLS, err)
 	}

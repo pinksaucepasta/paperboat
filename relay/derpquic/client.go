@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/shared/quicdial"
 	"github.com/quic-go/quic-go"
 	"tailscale.com/derp"
 	"tailscale.com/types/key"
@@ -128,7 +129,7 @@ func (c *Client) ensure(ctx context.Context) (*clientConn, error) {
 	config := c.config.TLS.Clone()
 	config.NextProtos = []string{ALPN}
 	config.MinVersion = tls.VersionTLS13
-	conn, err := quic.DialAddr(dialCtx, c.config.Address, config, quicConfig())
+	conn, err := quicdial.Dial(dialCtx, c.config.Address, config, quicConfig(), false)
 	if err != nil {
 		err = classify(err)
 		var fatal interface{ Fatal() bool }
