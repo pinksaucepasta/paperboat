@@ -113,6 +113,9 @@ class MacEnv:
 def revoked_before(env, args):
     """After `revoke` R is revoked and signed out: with the control plane cut again, the Mac still refuses R and L still reaches it."""
     res = c.Result(args.redact)
+    # the carrier needs a moment after the previous cut before it takes inbound again: start the cut from a working pair
+    ok, detail = c.eventually(lambda: w.exec_lw(env, "prerevoked-baseline"), 240, 10)
+    res.add("L reaches the Mac before the second cut", ok, detail)
     block, routes = env.cut([w.L], 300)
     try:
         res.add("Mac and L cut off from the control plane", routes[0] == 0, routes[1].strip()[-120:])

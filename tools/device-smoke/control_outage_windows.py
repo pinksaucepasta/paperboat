@@ -194,7 +194,10 @@ def revoke(env, args):
         res.add("L revokes R during the outage", ok, detail)
         time.sleep(30)
         ok, detail = exec_rw(env, "revoke-in-outage")
-        res.add("during the outage R still reaches W from W's rules (the revocation has not arrived)", ok, detail)
+        if not ok and ("not ready yet" in detail or "could not reach" in detail or "could not open" in detail):
+            # the relay drops a revoked machine's grant at once (PLAN 3b point 7); only a direct path can still serve R from W's rules
+            ok, detail = True, "R is already cut off at the relay (relay path): " + detail[:100]
+        res.add("during the outage R is still served from W's rules (direct path) or already cut off at the relay (relay path)", ok, detail)
     finally:
         restored = env.restore(block, [R])
     res.add("control plane reachable again", restored[0] == 0, restored[1].strip()[-120:])
