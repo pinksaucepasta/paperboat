@@ -114,6 +114,14 @@ func (s unixSweep) settleInventory(ctx context.Context, check bool) error {
 		if findings, err = s.versionLeftovers(ctx, sources); err != nil {
 			return withPurgeStage("final_inventory", err)
 		}
+		// A draining generation owned its files in the first scan and exited before the second: its
+		// definitions are plain leftovers now, with no process left to stop. Remove them once more.
+		if files := fileFindings(findings); len(files) > 0 {
+			s.removeFindings(ctx, files)
+			if findings, err = s.versionLeftovers(ctx, sources); err != nil {
+				return withPurgeStage("final_inventory", err)
+			}
+		}
 	}
 	for _, finding := range findings {
 		if item := finding.String(); !containsString(items, item) {
@@ -124,6 +132,17 @@ func (s unixSweep) settleInventory(ctx context.Context, check bool) error {
 		return nil
 	}
 	return withPurgeStage("final_inventory", unixLeftoverError{items: items})
+}
+
+// fileFindings are the findings that name a path no process holds.
+func fileFindings(findings []inventoryFinding) []inventoryFinding {
+	var files []inventoryFinding
+	for _, finding := range findings {
+		if finding.process == nil && !finding.reportOnly {
+			files = append(files, finding)
+		}
+	}
+	return files
 }
 
 func (s unixSweep) removeFindings(ctx context.Context, findings []inventoryFinding) {

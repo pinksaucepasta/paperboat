@@ -402,6 +402,27 @@ func TestInstallInventoryDrainingGenerationIsBoundedByItsCap(t *testing.T) {
 	assertGone(t, past.root, versionFiles(digestA)...)
 }
 
+// A draining generation owns its files in the first scan. If it exits while the install removes
+// another leftover, its definitions are plain leftovers in the second scan: they go too, and the
+// install does not fail for them (fleet: ok=false, the rerun ok=true).
+func TestInstallInventoryRemovesTheFilesOfAGenerationThatExitedDuringTheSweep(t *testing.T) {
+	activated := time.Unix(1_800_000_000, 0)
+	files := append(append(append([]string(nil), versionFiles(digestA)...), versionFiles(digestB)...), versionFiles(digestC)...)
+	draining := managedProcess(4002, invPin(digestA), "paperboat-carrier-u1001-"+digestA[:32]+".service", activated.Add(-time.Hour))
+	active := managedProcess(4001, invPin(digestB), "paperboat-hostd-u1001-"+digestB[:32]+".service", activated.Add(time.Second))
+	h := newInventoryHost(t, digestB, activated, activated.Add(time.Minute), files, active, draining)
+	h.sweep.run = func(ctx context.Context, name string, arguments ...string) error {
+		delete(h.fake.alive, 4002) // the drained generation finishes its last stream
+		return h.fake.run(ctx, name, arguments...)
+	}
+	if err := h.sweep.settleInventory(context.Background(), false); err != nil {
+		t.Fatalf("install failed for a generation that exited meanwhile: %v", err)
+	}
+	assertGone(t, h.root, versionFiles(digestA)...)
+	assertGone(t, h.root, versionFiles(digestC)...)
+	assertPresent(t, h.root, versionFiles(digestB)...)
+}
+
 // Second account on the same host: its install and upgrade remove only its own
 // old version. The other account's items, whatever version, and the shared
 // guard at the current image stay.
