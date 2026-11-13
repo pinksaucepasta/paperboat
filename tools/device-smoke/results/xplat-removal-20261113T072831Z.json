@@ -1,0 +1,15 @@
+{
+ "check": "xplat-removal",
+ "results": [
+  {
+   "id": "X-41:uninstall:W",
+   "status": "FAIL",
+   "detail": "rx41-l: pb ssh rx41-w after 692 s:  ute or two. If this stays, install \"App Installer\" (winget) from the Microsoft Store on the machine, then run pb doctor --repair there. Support reference: support_636130af-3160-4f22-90e3-9d009842e174. Run `pb bugreport --upload` to send the details.\n"
+  },
+  {
+   "id": "X-41:uninstall:L",
+   "status": "PASS",
+   "detail": "rx41-w: pb: No machine has that name or ID. Run `pb machine list` to see your machines. Support reference: support_b5d; observers: 13 events/min; new identity after enrolling again, both observers exec and pb ssh it (exec reachable 9 s after the new identity was listed, pb ssh 7 s later)"
+  }
+ ]
+}

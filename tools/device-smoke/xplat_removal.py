@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """X-41: a machine of one OS is revoked or reset (or uninstalled) and the machines of the other two OSes see it (F1-09, F1-10, F2-05).
 
-  xplat_removal.py [--only revoke,reset,uninstall] [--targets L,M,W]
+  xplat_removal.py [--only revoke,reset,uninstall] [--targets L,M,W] [--devices L,M,W]
 
 Needs the three devices of one account (xplat_fleet) and every device signed in with one API token (env ORIGIN, STATE,
 PW_CHROMIUM, [PW_MODULE]: a console session of the account; a token is minted and removed again), so that a device can mint the
@@ -228,7 +228,8 @@ def main():
     argv = sys.argv[1:]
     kinds = argv[argv.index('--only') + 1].split(',') if '--only' in argv else ['revoke', 'reset']
     targets = argv[argv.index('--targets') + 1].split(',') if '--targets' in argv else ['L', 'M', 'W']
-    devices = fleet.fleet()
+    keys = argv[argv.index('--devices') + 1].split(',') if '--devices' in argv else ['L', 'M', 'W']
+    devices = fleet.fleet(tuple(keys))
     token = mint_api_token()
     for dev in devices.values():
         sign_in(dev, token)
@@ -236,7 +237,7 @@ def main():
         for key in targets:
             target = devices[key]
             observers = [d for k, d in devices.items() if k != key]
-            controller = next(d for d in (devices['L'], devices['M']) if d is not target)
+            controller = next(devices[k] for k in 'LMW' if k in devices and k != key)
             check(kind, key, lambda: flow(kind, target, observers, controller))
             for dev in devices.values():  # a reset or uninstall of a device drops its own sign-in
                 try:

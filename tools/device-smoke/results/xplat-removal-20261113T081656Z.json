@@ -1,0 +1,35 @@
+{
+ "check": "xplat-removal",
+ "results": [
+  {
+   "id": "X-41:revoke:M",
+   "status": "PASS",
+   "detail": "rx41-l: pb: No machine has that name or ID. Run `pb machine list` to see your machines. Support reference: support_3e1; revoked target: 41 events/min; observers: 11 events/min; new identity after enrolling again, both observers exec and pb ssh it (exec reachable 5 s after the new identity was listed, pb ssh 4 s later)"
+  },
+  {
+   "id": "X-41:revoke:L",
+   "status": "PASS",
+   "detail": "rx41-m: pb: No machine has that name or ID. Run `pb machine list` to see your machines. Support reference: support_0bd; revoked target: 26 events/min; observers: 17 events/min; new identity after enrolling again, both observers exec and pb ssh it (exec reachable 11 s after the new identity was listed, pb ssh 6 s later)"
+  },
+  {
+   "id": "X-41:reset:M",
+   "status": "FAIL",
+   "detail": "rx41-l cannot exec rx41-m:  e. It may be offline, or its network or Paperboat service is not ready yet. Check that its Runtime is ready in `pb status`, then retry. Support reference: support_d12c4a6b-cd03-48a5-b999-b5bea54cf581. Run `pb bugreport --upload` to send the details.\n | doctor: ['selected_path: warning: The active Paperboat path uses a regional relay.']"
+  },
+  {
+   "id": "X-41:reset:L",
+   "status": "PASS",
+   "detail": "observers: 17 events/min; new identity after enrolling again, both observers exec and pb ssh it (exec reachable 7 s after the new identity was listed, pb ssh 6 s later)"
+  },
+  {
+   "id": "X-41:uninstall:M",
+   "status": "FAIL",
+   "detail": "rx41-l cannot exec rx41-m:  e. It may be offline, or its network or Paperboat service is not ready yet. Check that its Runtime is ready in `pb status`, then retry. Support reference: support_d4a27d7f-3ee5-4ae9-a9e6-60d1c2c5d59b. Run `pb bugreport --upload` to send the details.\n | doctor: ['selected_path: warning: The active Paperboat path uses a regional relay.']"
+  },
+  {
+   "id": "X-41:uninstall:L",
+   "status": "PASS",
+   "detail": "rx41-m: pb: No machine has that name or ID. Run `pb machine list` to see your machines. Support reference: support_d58; observers: 12 events/min; new identity after enrolling again, both observers exec and pb ssh it (exec reachable 6 s after the new identity was listed, pb ssh 5 s later)"
+  }
+ ]
+}
