@@ -24,15 +24,17 @@ export const ViewerTime = createContext<Viewer | undefined>(undefined)
  */
 export function useTimeFormat(intervalMs?: number) {
   const now = useNow(intervalMs)
-  // With the viewer's zone and locale known, dates read the same before and after hydration.
+  // With the viewer's zone and locale known, the hydrating render reads the same as the server's.
   const viewer = useContext(ViewerTime)
   return {
     /** 0 until hydrated, then the current time (refreshed every `intervalMs`). */
     now,
     relative: (iso: string) => (now ? formatRelative(iso, now) : formatStable(iso)),
-    dateTime: (iso: string) => (now || viewer ? formatDateTime(iso, viewer) : formatStable(iso)),
+    // Once hydrated the browser's own zone and locale win: the cookie is what the server saw, which is UTC on a
+    // first visit and the old zone after the viewer travelled (X-27).
+    dateTime: (iso: string) => (now ? formatDateTime(iso) : viewer ? formatDateTime(iso, viewer) : formatStable(iso)),
     date: (iso: string, style: DateStyle) =>
-      now || viewer ? formatDate(iso, style, viewer) : formatDateStable(iso, style),
+      now ? formatDate(iso, style) : viewer ? formatDate(iso, style, viewer) : formatDateStable(iso, style),
     exact: (iso: string) => (now ? formatExact(iso) : { local: formatStable(iso), utc: formatStable(iso) }),
   }
 }
