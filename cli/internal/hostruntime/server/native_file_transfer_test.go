@@ -7,7 +7,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	clienttransfer "github.com/pinksaucepasta/paperboat/internal/filetransfer"
-	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -106,7 +105,7 @@ func TestNativeTransferPolicyUsesAuthorizedReceiver(t *testing.T) {
 	}
 }
 
-func TestNativeTransferCompletedCancellationReturnsConflictAndPreservesContent(t *testing.T) {
+func TestNativeTransferCompletedCancellationReturnsConflictAndPreservesTheRecord(t *testing.T) {
 	handler, _ := fileTransferTestHandler(t)
 	data := []byte("published record")
 	created, err := handler.config.Service.Create(t.Context(), filetransfer.CreateRequest{BatchID: "completed_cancel", SourceMachineID: "machine_client", DestinationMachineID: "machine_host", InitiatingUserID: "user_1", SessionID: "ses_1", Files: []filetransfer.File{{Basename: "completed.txt", Size: int64(len(data)), SHA256: transferDigest(data)}}})
@@ -132,13 +131,8 @@ func TestNativeTransferCompletedCancellationReturnsConflictAndPreservesContent(t
 	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil || body.Code != "state_conflict" || body.Retryable {
 		t.Fatalf("error=%s", response.Body.String())
 	}
-	content, _, err := handler.config.Service.OpenContent(t.Context(), id)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer content.Close()
-	got, err := io.ReadAll(content)
-	if err != nil || !bytes.Equal(got, data) {
-		t.Fatalf("content lost: %v", err)
+	// The record stays published: the refused cancel changed nothing.
+	if current, err := handler.config.Service.Get(t.Context(), id); err != nil || current.State != "published" {
+		t.Fatalf("record after the refused cancel = %+v (err=%v)", current, err)
 	}
 }

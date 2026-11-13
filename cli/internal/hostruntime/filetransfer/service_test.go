@@ -111,14 +111,8 @@ func TestResumableTransferPersistsExactCommittedOffsetAndPublishes(t *testing.T)
 	if repeated, err := service.PublishedPath(context.Background(), id); err != nil || repeated != published {
 		t.Fatalf("repeated published path=%q err=%v", repeated, err)
 	}
-	file, manifest, err := service.OpenContent(context.Background(), id)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer file.Close()
-	got, _ := io.ReadAll(file)
-	if !bytes.Equal(got, data) || manifest.SHA256 != digest(data) {
-		t.Fatalf("content=%q manifest=%#v", got, manifest)
+	if _, _, err := service.OpenContent(context.Background(), id); !hasCode(err, InvalidPath) {
+		t.Fatalf("a published transfer serves no spool content: %v", err)
 	}
 	persisted, err := durable.FileTransfer(context.Background(), id)
 	if err != nil || persisted.CommittedOffset != int64(len(data)) {
@@ -1095,15 +1089,15 @@ func TestInboxChangeKeepsPublishedHistoryAndUsesNewDestination(t *testing.T) {
 	if got, err := restarted.ExistingPublishedPath(t.Context(), first); err != nil || got != want {
 		t.Fatalf("changed Inbox lost the original receipt: path=%q err=%v", got, err)
 	}
-	// A crash may leave a durable destination before its hard link exists.
+	// The user deleted the received file: it is gone (nothing is kept to republish), and no lookup invents another.
 	if err := os.Remove(want); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := restarted.ExistingPublishedPath(t.Context(), first); !hasCode(err, InvalidPath) {
-		t.Fatalf("read-only lookup repaired an unfinished publication: %v", err)
+		t.Fatalf("read-only lookup repaired a removed file: %v", err)
 	}
-	if got, err := restarted.PublishedPath(t.Context(), first); err != nil || got != want {
-		t.Fatalf("retried completion moved the original file: path=%q err=%v", got, err)
+	if got, err := restarted.PublishedPath(t.Context(), first); err == nil {
+		t.Fatalf("a removed received file was published again: %q", got)
 	}
 	if got, err := restarted.ExistingPublishedPath(t.Context(), second); err != nil || got != filepath.Join(secondRoot, "data.bin") {
 		t.Fatalf("new transfer ignored the new Inbox: path=%q err=%v", got, err)

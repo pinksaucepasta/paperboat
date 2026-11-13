@@ -67,7 +67,8 @@ func (s *Service) OpenContent(ctx context.Context, id string) (*os.File, store.F
 	if err != nil {
 		return nil, transfer, lookupFailure(err)
 	}
-	if transfer.State != "published" && transfer.State != "pending" && transfer.State != "delivered" {
+	// A published transfer is in the Inbox: its spool content moved there, nothing is left to serve.
+	if transfer.State != "pending" && transfer.State != "delivered" {
 		return nil, transfer, &Error{Code: InvalidPath}
 	}
 	file, err := os.Open(s.contentPath(id))

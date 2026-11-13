@@ -237,7 +237,8 @@ func TestFileTransferHTTPResumesCompletesAndRangesOpaqueContent(t *testing.T) {
 	request.Header.Set("Range", "bytes=2-5")
 	response = httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
-	if response.Code != http.StatusPartialContent || response.Body.String() != "cdef" || response.Header().Get("Content-Type") != "application/octet-stream" {
+	// Published means in the Inbox: the spool content moved there, so there is nothing to range over any more.
+	if response.Code == http.StatusPartialContent || !strings.Contains(response.Body.String(), "invalid_path") {
 		t.Fatalf("download=%d body=%q headers=%v", response.Code, response.Body.String(), response.Header())
 	}
 }

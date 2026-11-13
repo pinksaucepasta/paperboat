@@ -125,3 +125,26 @@ func TestPublishWithoutHardLinksNeverReplacesAnExistingFile(t *testing.T) {
 		t.Fatalf("the spool content was lost on a failed publish: %q %v", got, err)
 	}
 }
+
+// A crash after the content was renamed into the Inbox leaves only the hidden temporary file; the next attempt
+// publishes it instead of failing for want of the spool content.
+func TestPublishAfterACrashBetweenTheMoveAndTheLinkFinishesFromTheTemporaryFile(t *testing.T) {
+	dir := t.TempDir()
+	inbox := filepath.Join(dir, "inbox")
+	if err := os.Mkdir(inbox, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(inbox, ".tx.publish"), []byte("payload"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(inbox, "file.bin")
+	if err := (&Service{}).copyToInbox(filepath.Join(dir, "gone.content"), inbox, path, "tx"); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := os.ReadFile(path); err != nil || string(got) != "payload" {
+		t.Fatalf("inbox file = %q, %v", got, err)
+	}
+	if entries, _ := os.ReadDir(inbox); len(entries) != 1 {
+		t.Fatalf("leftovers in the Inbox: %v", entries)
+	}
+}
