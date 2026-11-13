@@ -1,7 +1,7 @@
 # Trademarks
 
 "Paperboat" and the Paperboat logo are trademarks of the Paperboat project. The code licences
-(see [LICENSING.md](LICENSING.md)) do not grant any right to use them.
+(see [LICENSE](LICENSE)) do not grant any right to use them.
 
 You may:
 - say that your software works with, connects to or is built on Paperboat;
