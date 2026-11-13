@@ -455,7 +455,7 @@ func (s *Service) run(ctx context.Context) {
 			}
 			wantedCount = len(wanted)
 			for key, item := range lives {
-				if !wanted[key] || item.active.Pool().State() != connector.DataCarrierPoolReady {
+				if carrierRetired(item.active.Pool().State() == connector.DataCarrierPoolReady, wanted[key], len(lives)) {
 					if publisherKey == key && s.broadcaster != nil {
 						diagnosticlog.TryInfo("browser output publisher stopped: carrier unwanted or pool not ready", "wanted", wanted[key], "pool_state", string(item.active.Pool().State()))
 						s.broadcaster.SetPublisher(nil)
@@ -589,6 +589,18 @@ func carriersReady(lives map[string]*live, publisherKey string) bool {
 		}
 	}
 	return true
+}
+
+// maxHeldCarriers is the admitted pair: a ready carrier the server no longer lists stays up while the pair has room.
+const maxHeldCarriers = 2
+
+// carrierRetired reports whether a live carrier is closed. The server stops listing an edge whose control heartbeat
+// went stale (30 s), which is also what a control outage between that edge and the server looks like, while the
+// carrier to it is healthy and the edge keeps serving from its last decisions (F21-17; cloudflared keeps its tunnel
+// connections without the API). A ready carrier therefore ends only when its pool fails, the edge sends goaway, or
+// more than the pair is held.
+func carrierRetired(ready, wanted bool, held int) bool {
+	return !ready || !wanted && held > maxHeldCarriers
 }
 
 func chooseLive(ordered []admissionBinding, lives map[string]*live, activeNode, activeEpoch string) (*live, admissionBinding) {

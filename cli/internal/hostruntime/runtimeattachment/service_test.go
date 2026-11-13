@@ -70,6 +70,24 @@ func TestNewUsesOneSharedCarrierWithBrowserStreamCapacity(t *testing.T) {
 	}
 }
 
+func TestUnlistedReadyCarrierStaysUpWhilePairHasRoom(t *testing.T) {
+	for _, c := range []struct {
+		ready, wanted bool
+		held          int
+		retired       bool
+	}{
+		{ready: true, wanted: true, held: 2, retired: false},
+		{ready: true, wanted: false, held: 2, retired: false}, // edge cut from control: server stopped listing it
+		{ready: true, wanted: false, held: 3, retired: true},  // placement moved on to another pair
+		{ready: false, wanted: true, held: 1, retired: true},
+		{ready: false, wanted: false, held: 1, retired: true},
+	} {
+		if got := carrierRetired(c.ready, c.wanted, c.held); got != c.retired {
+			t.Fatalf("carrierRetired(%+v) = %v", c, got)
+		}
+	}
+}
+
 func TestChooseLiveKeepsRecoveredPrimaryAsBackup(t *testing.T) {
 	primary := admissionBinding{Binding: binding{EdgeNodeID: "edge-primary", EdgeProcessEpoch: "epoch-primary", SessionID: "session-primary"}}
 	backup := admissionBinding{Binding: binding{EdgeNodeID: "edge-backup", EdgeProcessEpoch: "epoch-backup", SessionID: "session-backup"}}
