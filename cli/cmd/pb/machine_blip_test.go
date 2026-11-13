@@ -144,6 +144,25 @@ func TestSSHDialRetriesTheFirstDialAfterAccessAppears(t *testing.T) {
 	}
 }
 
+// A machine paired seconds ago: the first stream open waits its 10 s open timeout and answers peer_transport_unavailable
+// because the host and the relay have not learned this peer yet. The dial repeats within the 30 s bound instead of
+// failing the user's first `pb ssh` (FIX-FIRSTSSH; before, the 10 s handover grace ended the retry after that open).
+func TestSSHDialWaitsPastTheFirstStreamOpenTimeoutForANewPeer(t *testing.T) {
+	t.Parallel()
+	calls := 0
+	_, err := retrySSHDial(t.Context(), func() (tunnel.Conn, error) {
+		calls++
+		if calls == 1 {
+			time.Sleep(10*time.Second + 200*time.Millisecond)
+			return nil, &localapi.RemoteError{StatusCode: http.StatusServiceUnavailable, Code: "peer_transport_unavailable"}
+		}
+		return nil, nil
+	})
+	if err != nil || calls != 2 {
+		t.Fatalf("err=%v calls=%d, want the second dial to open the stream", err, calls)
+	}
+}
+
 // pb exec waits a short bounded time for a machine the server calls offline (a host that just updated), and says
 // machine_offline when it stays offline; any other failure returns at once.
 func TestWaitForMachineOnline(t *testing.T) {

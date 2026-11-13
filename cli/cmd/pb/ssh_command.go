@@ -387,9 +387,6 @@ func explainSSHDial(alias string, err error) error {
 	return err
 }
 
-// sshHandoverGrace bounds the repeated dial while the target's network is handed over (about a second on pbvm4).
-const sshHandoverGrace = 10 * time.Second
-
 // sshHandoverBlip is a dial failure that a moment later no longer applies: the peer transport was lost or is not
 // there yet. A refusal, a timeout or a stopped local service is not.
 func sshHandoverBlip(err error) bool {
@@ -397,18 +394,14 @@ func sshHandoverBlip(err error) bool {
 	return errors.Is(err, tunnel.ErrTransportLost) || errors.As(err, &remote) && remote.Code == "peer_transport_unavailable"
 }
 
-// retrySSHDial repeats a dial that failed before any byte reached the target (nothing to replay) while the failure is a
-// blip: a handover of the target's network for sshHandoverGrace, and for the whole dial bound the target not yet
-// accepting this machine or the local service dropping the setup connection, as happens on the first relayed dial
-// right after access appeared (the host and the relay learn the new peer seconds later).
+// retrySSHDial repeats a dial that failed before any byte reached the target (nothing to replay) for the whole dial
+// bound while the failure is a blip: the peer transport lost or not there yet (a handover of the target's network, or
+// a machine paired seconds ago that the host and the relay have not learned yet: its first stream open times out at
+// 10 s), the target not yet accepting this machine, or the local service dropping the setup connection. The server
+// already called the target online; like Tailscale's wait for a peer in the netmap, wait for its state up to the bound
+// instead of failing the user's first command.
 func retrySSHDial(ctx context.Context, dial func() (tunnel.Conn, error)) (tunnel.Conn, error) {
-	started := time.Now()
-	return retryWhile(ctx, sshDialTimeout, func(err error) bool {
-		if sshHandoverBlip(err) {
-			return time.Since(started) < sshHandoverGrace
-		}
-		return sshFirstDialBlip(err)
-	}, dial)
+	return retryWhile(ctx, sshDialTimeout, func(err error) bool { return sshHandoverBlip(err) || sshFirstDialBlip(err) }, dial)
 }
 
 func sshFirstDialBlip(err error) bool {
