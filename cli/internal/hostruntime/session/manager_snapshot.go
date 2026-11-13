@@ -5,11 +5,11 @@ import (
 	"errors"
 	"io"
 	"sort"
-	"strings"
 
 	"github.com/google/uuid"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/pty"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/store"
+	"github.com/pinksaucepasta/paperboat/shared/sessionname"
 )
 
 func (m *Manager) Snapshot(sessionID string) (Snapshot, error) {
@@ -150,15 +150,8 @@ func randomID(random io.Reader) (string, error) {
 	return "terminal_" + id.String(), nil
 }
 
-// ValidSessionName is shared by creation and duplicate-launch preflight.
+// ValidSessionName is shared by creation and duplicate-launch preflight. It accepts what the server and the CLI accept
+// (shared/sessionname: any text a person types); "default" stays creatable here because it is the host's own session name.
 func ValidSessionName(name string) bool {
-	if len(name) < 1 || len(name) > 64 {
-		return false
-	}
-	for _, char := range name {
-		if !(char >= 'a' && char <= 'z' || char >= '0' && char <= '9' || char == '-' || char == '_') {
-			return false
-		}
-	}
-	return !strings.HasPrefix(name, "-")
+	return name == "default" || sessionname.Validate(name) == nil
 }
