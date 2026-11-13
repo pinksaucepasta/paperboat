@@ -132,7 +132,7 @@ func runSendCommand(cobraCommand *cobra.Command, paths []string) error {
 	}
 	preparedPaths := make([]string, len(paths))
 	for i, path := range paths {
-		preparedPaths[i], err = filepath.Abs(path)
+		preparedPaths[i], err = sendSourcePath(path)
 		if err != nil {
 			return err
 		}
@@ -395,4 +395,13 @@ func missingSendSource(err error, sources []string) error {
 		return usageError{err: err, publicMessage: message, refusal: true}
 	}
 	return err
+}
+
+// sendSourcePath makes a path absolute. An extended-length Windows path (\\?\...) is the only way to name a file with
+// a trailing space or dot, and filepath.Abs (GetFullPathName) strips those, so the send would look for another file.
+func sendSourcePath(path string) (string, error) {
+	if strings.HasPrefix(path, `\\?\`) && filepath.IsAbs(path) {
+		return filepath.Clean(path), nil
+	}
+	return filepath.Abs(path)
 }
