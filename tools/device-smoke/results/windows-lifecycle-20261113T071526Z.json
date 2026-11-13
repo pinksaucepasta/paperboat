@@ -1,0 +1,12 @@
+{
+ "version": "dev-e4d2cc0f8",
+ "device": "winpool-8",
+ "results": [
+  {
+   "id": "windows:install-pair",
+   "status": "PASS",
+   "seconds": 125,
+   "detail": ""
+  }
+ ]
+}

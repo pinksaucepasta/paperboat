@@ -1,0 +1,12 @@
+{
+ "version": "dev-fdfe1baad",
+ "device": "winpool-8",
+ "results": [
+  {
+   "id": "windows:update",
+   "status": "PASS",
+   "seconds": 56,
+   "detail": ""
+  }
+ ]
+}

@@ -1,0 +1,12 @@
+{
+ "version": "dev-fdfe1baad",
+ "device": "winpool-8",
+ "results": [
+  {
+   "id": "windows:uninstall",
+   "status": "PASS",
+   "seconds": 25,
+   "detail": ""
+  }
+ ]
+}

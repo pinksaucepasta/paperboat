@@ -1,0 +1,12 @@
+{
+ "version": "dev-d63bbdcf5",
+ "device": "winpool-8",
+ "results": [
+  {
+   "id": "windows:update",
+   "status": "PASS",
+   "seconds": 59,
+   "detail": ""
+  }
+ ]
+}
