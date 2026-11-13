@@ -344,7 +344,7 @@ func configStatus(c *command.Context) error {
 		fmt.Fprintf(c.Writer, "%s: %s, %s, manifest %s, %d managed, %d pending clean\n",
 			name, item.State, strings.ReplaceAll(item.Mode, "_", "-"), item.ManifestHealth,
 			item.ManagedPathCount, item.PendingCleanPathCount)
-		for _, line := range configSkippedLines(item) {
+		for _, line := range append(configSkippedLines(item), configConflictLines(item)...) {
 			fmt.Fprintln(c.Writer, line)
 		}
 		switch item.ErrorCode {
@@ -362,6 +362,20 @@ func configSkippedLines(item api.ConfigSyncEnvironmentState) []string {
 	lines := make([]string, 0, len(item.Skipped))
 	for _, skipped := range item.Skipped {
 		lines = append(lines, fmt.Sprintf("  skipped %s: %s", skipped.Path, strings.ReplaceAll(skipped.Reason, "_", " ")))
+	}
+	return lines
+}
+
+// configConflictLines names each file whose two sides differ and the commands that settle it: sync never overwrites either side.
+func configConflictLines(item api.ConfigSyncEnvironmentState) []string {
+	name := item.Alias
+	if name == "" {
+		name = item.EnvironmentID
+	}
+	lines := make([]string, 0, len(item.Conflicts))
+	for _, conflict := range item.Conflicts {
+		lines = append(lines, fmt.Sprintf("  conflict %s: %s; see both versions with `pb config conflict compare %s %s`, then keep one with `pb config conflict resolve %s %s --keep machine` or `--keep repository`",
+			conflict.Path, strings.ReplaceAll(conflict.Reason, "_", " "), name, conflict.Path, name, conflict.Path))
 	}
 	return lines
 }

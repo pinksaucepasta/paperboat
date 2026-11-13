@@ -43,3 +43,16 @@ func TestConfigStatusNamesSkippedPaths(t *testing.T) {
 		t.Fatalf("--json drops the skipped paths: %s", encoded)
 	}
 }
+
+// A machine enrolled again with an old file on disk reports a conflict; status once printed only the word "conflict".
+func TestConfigStatusNamesConflictsAndHowToResolve(t *testing.T) {
+	var item api.ConfigSyncEnvironmentState
+	if err := json.Unmarshal([]byte(`{"alias":"rx41n-l","state":"conflict","conflicts":[{"path":"cfg/settings.json","reason":"concurrent_update"}]}`), &item); err != nil {
+		t.Fatal(err)
+	}
+	lines := configConflictLines(item)
+	want := "  conflict cfg/settings.json: concurrent update; see both versions with `pb config conflict compare rx41n-l cfg/settings.json`, then keep one with `pb config conflict resolve rx41n-l cfg/settings.json --keep machine` or `--keep repository`"
+	if len(lines) != 1 || lines[0] != want {
+		t.Fatalf("lines = %q", lines)
+	}
+}
