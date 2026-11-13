@@ -20,6 +20,9 @@ class FreshRawDenialTest(unittest.TestCase):
         for platform in ('linux', 'darwin', 'windows'):
             with self.subTest(platform=platform):
                 self.assertEqual(raw_denied(platform, {'phase': 'connect', 'outcome': 'timeout'}), platform == 'darwin')
+                denied = {'phase': 'connect', 'outcome': 'permission', 'winerror': 10013}
+                self.assertEqual(raw_denied(platform, denied), platform == 'windows')
+                self.assertFalse(raw_denied(platform, {**denied, 'phase': 'receive'}))
                 self.assertFalse(raw_denied(platform, {'phase': 'receive', 'outcome': 'timeout'}))
                 self.assertFalse(raw_denied(platform, {'phase': 'receive', 'outcome': 'data'}))
                 self.assertTrue(raw_denied(platform, {'phase': 'receive', 'outcome': 'EOF'}))

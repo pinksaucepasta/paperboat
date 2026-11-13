@@ -109,6 +109,7 @@ try:
     result={'phase':phase,'outcome':'EOF' if not b else 'data'}
     s.close()
 except socket.timeout: result={'phase':phase,'outcome':'timeout'}
+except PermissionError as error: result={'phase':phase,'outcome':'permission','winerror':getattr(error,'winerror',None)}
 except (ConnectionRefusedError,ConnectionResetError,BrokenPipeError) as error:
     result={'phase':phase,'outcome':type(error).__name__}
 print(json.dumps(result))
@@ -116,6 +117,8 @@ print(json.dumps(result))
 
 def raw_denied(os_name, probe):
     if probe.get('outcome') in ('EOF', 'ConnectionRefusedError', 'ConnectionResetError', 'BrokenPipeError'):
+        return True
+    if os_name == 'windows' and probe == {'phase': 'connect', 'outcome': 'permission', 'winerror': 10013}:
         return True
     # macOS PF deliberately drops unleased SYNs; a connected but silent socket is never proof.
     return os_name == 'darwin' and probe == {'phase': 'connect', 'outcome': 'timeout'}
