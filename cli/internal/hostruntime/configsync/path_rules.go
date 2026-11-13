@@ -319,8 +319,8 @@ func (m *PathMapping) SnapshotContext(ctx context.Context, policy RuntimePolicy,
 		if err := checkSafeAbsolutePath(source); err != nil {
 			return &PathRuleError{Code: "unsafe_source"}
 		}
-		if !safeSnapshotPermissions(source, info) {
-			skip(name, "unsafe_permissions")
+		if reason := unsafeSnapshotReason(source, info); reason != "" {
+			skip(name, reason)
 			return nil
 		}
 		if info.Size() > policy.MaxFileBytes || info.Size() > policy.MaxBatchBytes-total {
