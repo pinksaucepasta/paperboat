@@ -144,6 +144,8 @@ def run_pair(team, owner, member, oid, records, origin_controller):
     base = member.home + sep + 'rx19t-' + suffix
     origin_stop = owner.home + ('\\' if owner.os == 'windows' else '/') + 'rx19t-origin-' + suffix
     port = str(24000 + int(suffix, 16) % 15000)
+    records['fixture'] = {'team': team.id, 'owner': owner.alias, 'member': member.alias,
+                          'machine_id': oid, 'origin_port': port, 'granted': ['exec', 'private_access']}
     with concurrent.futures.ThreadPoolExecutor(2) as pool:
         origin = None
         try:
