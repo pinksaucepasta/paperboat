@@ -75,7 +75,7 @@ func readTx(ctx context.Context, tx *db.Tx, id, lock string, summary bool) (Team
 	if summary {
 		err = tx.QueryRow(ctx, `SELECT (SELECT count(*) FROM team_members WHERE team_id=$1),
  (SELECT count(*) FROM team_resource_grants WHERE team_id=$1 AND `+grantRowFilter+`),
- (SELECT count(*) FROM team_resource_bindings b JOIN live_user_machines m ON m.id=b.resource_id WHERE b.team_id=$1 AND b.resource_kind='machine')`, id).Scan(&out.MemberCount, &out.GrantCount, &out.MachineCount)
+ (SELECT count(*) FROM team_resource_bindings b JOIN live_user_machines m ON m.id=b.resource_id WHERE b.team_id=$1 AND b.resource_kind='machine' AND b.active)`, id).Scan(&out.MemberCount, &out.GrantCount, &out.MachineCount)
 		if err != nil {
 			return out, err
 		}

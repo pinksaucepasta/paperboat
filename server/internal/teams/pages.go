@@ -136,10 +136,10 @@ func (s *Service) Machines(ctx context.Context, account, team, cursor string, li
 		after = key[0]
 	}
 	err = s.readPage(ctx, account, team, func(ctx context.Context, tx *db.Tx) error {
-		if err := tx.QueryRow(ctx, `SELECT count(*) FROM team_resource_bindings b JOIN live_user_machines m ON m.id=b.resource_id WHERE b.team_id=$1 AND b.resource_kind='machine'`, team).Scan(&out.Total); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM team_resource_bindings b JOIN live_user_machines m ON m.id=b.resource_id WHERE b.team_id=$1 AND b.resource_kind='machine' AND b.active`, team).Scan(&out.Total); err != nil {
 			return err
 		}
-		rows, err := tx.Query(ctx, `SELECT m.id,CASE WHEN m.owner_team_id IS NULL THEN m.user_id ELSE '' END,coalesce(m.owner_team_id,''),m.alias,m.state,m.online,m.configured_capabilities,b.generation,b.active FROM team_resource_bindings b JOIN live_user_machines m ON m.id=b.resource_id WHERE b.team_id=$1 AND b.resource_kind='machine' AND m.id>$2 ORDER BY m.id LIMIT $3`, team, after, limit+1)
+		rows, err := tx.Query(ctx, `SELECT m.id,CASE WHEN m.owner_team_id IS NULL THEN m.user_id ELSE '' END,coalesce(m.owner_team_id,''),m.alias,m.state,m.online,m.configured_capabilities,b.generation,b.active FROM team_resource_bindings b JOIN live_user_machines m ON m.id=b.resource_id WHERE b.team_id=$1 AND b.resource_kind='machine' AND b.active AND m.id>$2 ORDER BY m.id LIMIT $3`, team, after, limit+1)
 		if err != nil {
 			return err
 		}
