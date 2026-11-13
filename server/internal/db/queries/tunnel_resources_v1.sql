@@ -83,6 +83,7 @@ SELECT EXISTS (
     AND desired_state = 'active'
     AND deleted_at IS NULL
     AND (protocol = 'tls') = (sqlc.arg(protocol)::text = 'tls')
+    AND (protocol = 'tcp') = (sqlc.arg(protocol)::text = 'tcp')
     AND (
       match_type = sqlc.arg(match_type)
       OR (

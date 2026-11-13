@@ -770,6 +770,7 @@ SELECT EXISTS (
     AND desired_state = 'active'
     AND deleted_at IS NULL
     AND (protocol = 'tls') = ($3::text = 'tls')
+    AND (protocol = 'tcp') = ($3::text = 'tcp')
     AND (
       match_type = $4
       OR (
