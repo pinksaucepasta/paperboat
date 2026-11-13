@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"sync"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/store"
 	"github.com/pinksaucepasta/paperboat/internal/transfername"
@@ -103,8 +105,34 @@ func (s *Service) copyToInbox(content, root, path string, id string) error {
 	if err := errors.Join(copyErr, file.Close()); err != nil {
 		return errors.Join(err, os.Remove(temporary))
 	}
-	linkErr := os.Link(temporary, path)
+	linkErr := linkFile(temporary, path)
+	if linkErr != nil && !errors.Is(linkErr, os.ErrExist) {
+		// exFAT and FAT have no hard links (macOS: ENOTSUP, Linux: EPERM). The finished copy is renamed into place
+		// instead of copied again after the failure; like taildrop, the check and the rename share one lock.
+		if renameErr := renameNoReplace(temporary, path); renameErr == nil {
+			return nil
+		} else {
+			linkErr = errors.Join(linkErr, renameErr)
+		}
+	}
 	return errors.Join(linkErr, os.Remove(temporary))
+}
+
+var renameMu sync.Mutex
+
+// linkFile is replaced by tests to stand in for a file system without hard links.
+var linkFile = os.Link
+
+// renameNoReplace never replaces a file that appeared meanwhile; ErrExist then means what it means for os.Link.
+func renameNoReplace(from, to string) error {
+	renameMu.Lock()
+	defer renameMu.Unlock()
+	if _, err := os.Lstat(to); err == nil {
+		return fs.ErrExist
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return os.Rename(from, to)
 }
 
 func (s *Service) publicationRoot(transfer store.FileTransfer) (string, string, error) {
