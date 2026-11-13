@@ -62,3 +62,18 @@ func startedAt(v *struct {
 	}
 	return v.StartedAt
 }
+
+// The server takes a changed started_at within one boot only as a restart and answers 409 to everything after it. A clock
+// stepped 10 minutes while the process runs moves the offset, so the reported start must not move with it (X-27).
+func TestProcessStartDoesNotMoveWhenTheClockIsSteppedLater(t *testing.T) {
+	t.Cleanup(func() { serverclock.Observe(time.Now().UTC().Format(http.TimeFormat), time.Now(), time.Now()) })
+	sent := time.Now()
+	serverclock.Observe(sent.UTC().Format(http.TimeFormat), sent, sent) // clock right: offset 0
+	sender := &runtimeObservationSender{lazyStartedAt: time.Now().Add(-time.Hour).UTC()}
+	before := sender.startedOnServerClock()
+	stepped := time.Now()
+	serverclock.Observe(stepped.Add(-10*time.Minute).UTC().Format(http.TimeFormat), stepped, stepped) // the machine's clock jumped 10 min ahead
+	if after := sender.startedOnServerClock(); !after.Equal(before) {
+		t.Fatalf("process start moved from %s to %s when the clock was stepped", before, after)
+	}
+}

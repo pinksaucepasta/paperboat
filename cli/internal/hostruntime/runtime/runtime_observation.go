@@ -228,6 +228,8 @@ type runtimeObservationSender struct {
 	osBootID               string
 	lazyBootID             string
 	lazyStartedAt          time.Time
+	startedMu              sync.Mutex
+	startedServer          time.Time // lazyStartedAt on the server's clock, fixed once the offset is known
 	serviceScope           string
 	// carriers is the agent's runtime carrier set; its hubs decide the reported connector_state.
 	carriers interface {
@@ -592,7 +594,18 @@ func availabilityObservation(ctx context.Context, source interface {
 	return source.Observation(ctx)
 }
 
-// startedOnServerClock is the process start time on the server's clock; it was read before the offset was known.
+// startedOnServerClock is the process start time on the server's clock. The server accepts a changed started_at
+// within one boot only as a restart, so once the offset is known the value never changes: a clock stepped later
+// moves the offset, not the moment the process started (X-27: every observation after a +10 min jump was refused 409).
 func (s *runtimeObservationSender) startedOnServerClock() time.Time {
-	return s.lazyStartedAt.UTC().Add(serverclock.Offset())
+	s.startedMu.Lock()
+	defer s.startedMu.Unlock()
+	if !s.startedServer.IsZero() {
+		return s.startedServer
+	}
+	started := s.lazyStartedAt.UTC().Add(serverclock.Offset())
+	if serverclock.Learned() {
+		s.startedServer = started
+	}
+	return started
 }
