@@ -63,3 +63,12 @@ func TestInvalidInputIsRefusedAndFailuresNameTheStep(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+func TestScriptsDoNothingWithoutTheFirewallService(t *testing.T) {
+	for _, script := range []string{AllowScript("g", `C:\pb.exe`), RemoveScript("g")} {
+		skip := strings.Index(script, "Get-Service mpssvc")
+		if skip < 0 || skip > strings.Index(script, "NetFirewallRule") {
+			t.Fatalf("script must skip before any firewall cmdlet when mpssvc is not running:\n%s", script)
+		}
+	}
+}

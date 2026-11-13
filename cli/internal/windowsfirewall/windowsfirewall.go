@@ -22,6 +22,10 @@ var errInvalid = errors.New("invalid Windows firewall rule input")
 // Group is the rule group of one installation instance; uninstall removes the whole group.
 func Group(instance string) string { return "Paperboat " + instance }
 
+// With the Windows Firewall service stopped or disabled (a third-party firewall), there is no dialog to avoid
+// and the cmdlets fail, so the scripts do nothing.
+const skipWithoutFirewall = "if((Get-Service mpssvc).Status -ne 'Running'){exit 0}"
+
 func quote(value string) string { return "'" + strings.ReplaceAll(value, "'", "''") + "'" }
 
 func valid(group, program string) bool {
@@ -34,6 +38,7 @@ func valid(group, program string) bool {
 func AllowScript(group, program string) string {
 	return strings.Join([]string{
 		"$ErrorActionPreference='Stop'",
+		skipWithoutFirewall,
 		"$g=" + quote(group),
 		"$p=" + quote(program),
 		"Get-NetFirewallRule -Group $g -ErrorAction SilentlyContinue|ForEach-Object{$a=($_|Get-NetFirewallApplicationFilter).Program;if(($a -ieq $p) -or -not (Test-Path -LiteralPath $a)){$_|Remove-NetFirewallRule}}",
@@ -43,7 +48,7 @@ func AllowScript(group, program string) string {
 
 // RemoveScript removes every rule of the group; a group without rules is not an error.
 func RemoveScript(group string) string {
-	return "$ErrorActionPreference='Stop';Get-NetFirewallRule -Group " + quote(group) + " -ErrorAction SilentlyContinue|Remove-NetFirewallRule"
+	return "$ErrorActionPreference='Stop';" + skipWithoutFirewall + ";Get-NetFirewallRule -Group " + quote(group) + " -ErrorAction SilentlyContinue|Remove-NetFirewallRule"
 }
 
 func run(ctx context.Context, runner Runner, script string) error {

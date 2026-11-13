@@ -40,18 +40,11 @@ func ensureWindowsPinnedRuntime(ctx context.Context, layout service.Layout, sour
 	return ensureWindowsPinnedRuntimeFrom(ctx, layout, source, ownerSID, layout.Binary)
 }
 func ensureWindowsPinnedRuntimeFrom(ctx context.Context, layout service.Layout, source installsource.Source, ownerSID, executable string) (string, error) {
-	path, err := stageWindowsPinnedRuntime(ctx, layout, source, ownerSID, executable)
-	if err != nil {
-		return "", err
-	}
-	// The pin and the installed slot run in the user's session; a rule per path keeps the firewall dialog away.
-	if err := AllowWindowsFirewall(ctx, layout, path, layout.Binary); err != nil {
-		return "", err
-	}
-	return path, nil
+	return stageWindowsPinnedRuntime(ctx, layout, source, ownerSID, executable)
 }
 
-// AllowWindowsFirewall adds the inbound allow rules for the given pb.exe paths of layout's instance.
+// AllowWindowsFirewall adds the inbound allow rules for the given pb.exe paths of layout's instance. Only install
+// and update call it, where a new image path appears; carrier and session starts reuse a path that has its rule.
 func AllowWindowsFirewall(ctx context.Context, layout service.Layout, programs ...string) error {
 	for _, program := range programs {
 		if err := windowsfirewall.Allow(ctx, service.ExecRunner{}, windowsfirewall.Group(layout.Instance), program); err != nil {
