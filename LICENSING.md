@@ -1,12 +1,16 @@
 # Licensing
 
-The source code in this repository is licensed under the
-[PolyForm Noncommercial License 1.0.0](LICENSE): personal, hobby, study, research and
-noncommercial-organization use, including self-hosting and modification, is allowed;
-commercial use is not. For a commercial licence, contact pprbtdev@gmail.com.
+Each directory's `LICENSE` file applies to the code in it.
 
-Official Paperboat release binaries and the hosted Paperboat service are provided under the
-Paperboat terms of service, which allow use at work, including commercial use, with the hosted
-service.
+| Directories | Licence |
+|---|---|
+| `server/`, `console/`, `admin/` | [GNU Affero General Public License v3.0](server/LICENSE) |
+| everything else, including `cli/`, `shared/`, `helper/`, `relay/`, `tunnel/`, `marketing/` | [MIT](LICENSE) |
+
+The AGPL parts may be self-hosted and modified freely; if you offer a modified version to users
+over a network, you must publish your changes under the AGPL. For a commercial licence to the
+AGPL parts, contact pprbtdev@gmail.com.
 
 Third-party code keeps its own licence (for example `cli/upstream/licenses/`).
+
+The Paperboat name and logo are not covered by these licences; see [TRADEMARKS.md](TRADEMARKS.md).
