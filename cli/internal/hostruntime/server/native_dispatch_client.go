@@ -124,7 +124,7 @@ func (c *NativeDispatchClient) call(
 	}
 	deadline := time.Now().Add(c.config.DialTimeout)
 	if operation == "stream" && header != nil {
-		deadline = time.Unix(header.DeadlineUnix, 0)
+		deadline = serverclock.Local(time.Unix(header.DeadlineUnix, 0)) // the caller's deadline is on the server's clock
 	}
 	var lastErr error
 	for {

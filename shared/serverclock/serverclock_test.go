@@ -88,3 +88,15 @@ func TestAClockSetBackMakesItAskTheServerAgain(t *testing.T) {
 	default:
 	}
 }
+
+// Local turns a server-clock instant into the machine-clock time a timer or net deadline needs (X-27).
+func TestLocalMapsAServerInstantToTheMachineClock(t *testing.T) {
+	sent := time.Now()
+	serverNow := sent.Add(-10 * time.Minute) // the machine's clock is 10 minutes ahead
+	Observe(serverNow.UTC().Format(http.TimeFormat), sent, sent)
+	t.Cleanup(func() { Observe(time.Now().UTC().Format(http.TimeFormat), time.Now(), time.Now()) })
+	deadline := serverNow.Add(30 * time.Second)
+	if until := time.Until(Local(deadline)); until < 29*time.Second || until > 31*time.Second {
+		t.Fatalf("a server deadline 30 s away is %s away on the machine clock", until)
+	}
+}
