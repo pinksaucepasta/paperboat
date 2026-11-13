@@ -42,6 +42,16 @@ up() { # machine numbers whose tunnel port listens on the jump host
   grep -oE '127\.0\.0\.1:2230[1-8] ' <<<"$listening" | sed -E 's/.*:2230([1-8]) /\1/' | sort -n || true
 }
 
+pending() { # machine numbers whose GitHub job is still queued or starting: GitHub's Mac queue can outlast any claim age
+  local run status
+  for status in queued in_progress; do
+    for run in $(gh run list --workflow macpool.yml --status "$status" --limit 20 --json databaseId --jq '.[].databaseId'); do
+      gh api "repos/{owner}/{repo}/actions/runs/$run/jobs" --jq '.jobs[] | select(.status != "completed") | .name' |
+        sed -nE 's/^macpool-([1-8])$/\1/p'
+    done
+  done
+}
+
 answers() { ssh -o BatchMode=yes -o ConnectTimeout=15 "macpool-$1" true 2>/dev/null </dev/null; }
 
 slot() { [[ ${1:-} =~ ^[1-8]$ ]] || die "machine number must be 1-$MAX"; }
@@ -54,7 +64,7 @@ start() {
   # two lanes starting seconds apart otherwise pick the same numbers.
   mkdir -p "$CLAIMS"
   exec 9>"$CLAIMS/lock"; flock 9
-  busy=$(up; find "$CLAIMS" -regextype posix-extended -regex '.*/[1-8]' -mmin -15 -printf '%f\n')
+  busy=$(up; pending; find "$CLAIMS" -regextype posix-extended -regex '.*/[1-8]' -mmin -15 -printf '%f\n')
   for n in $(seq "$MAX"); do grep -qx "$n" <<<"$busy" || free+=("$n"); done
   [ "${#free[@]}" -ge "$count" ] || die "only ${#free[@]} of $MAX machines are free (macpool.sh list)"
   free=("${free[@]:0:count}")
