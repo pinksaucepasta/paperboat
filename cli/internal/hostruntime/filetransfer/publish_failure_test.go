@@ -91,7 +91,7 @@ func TestFailedInboxCopyReleasesItsSpoolAtRetention(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(spool, id+".content")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("the spool of a failed copy survived retention: %v", err)
 	}
-	if record, err := durable.FileTransfer(context.Background(), id); err != nil || record.State != "expired" || record.ResultCode == "" {
-		t.Fatalf("record after retention = %+v (err=%v), want expired with the reason kept", record, err)
+	if record, err := durable.FileTransfer(context.Background(), id); err != nil || record.State != "canceled" || record.ResultCode == "" {
+		t.Fatalf("record after retention = %+v (err=%v), want canceled with the reason kept", record, err)
 	}
 }
