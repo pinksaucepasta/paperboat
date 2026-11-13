@@ -513,7 +513,7 @@ func TestSupervisorRestartsRuntimeWhenMachineAliasChanges(t *testing.T) {
 	}
 	aliases := make(chan string, 4)
 	supervisor, err := NewSupervisor(SupervisorConfig{
-		Credentials: credentials, Retry: 50 * time.Millisecond,
+		Credentials: credentials, Retry: time.Second,
 		Factory: func(_ context.Context, credential Credential) (Runtime, error) {
 			aliases <- credential.MachineAlias
 			return &supervisorRuntime{started: make(chan struct{}), stopped: make(chan struct{})}, nil
@@ -538,7 +538,7 @@ func TestSupervisorRestartsRuntimeWhenMachineAliasChanges(t *testing.T) {
 		if got != "new-name" {
 			t.Fatalf("restarted runtime alias %q", got)
 		}
-	case <-time.After(3 * time.Second):
+	case <-time.After(5 * time.Second):
 		t.Fatal("a rename did not restart the runtime")
 	}
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), time.Second)

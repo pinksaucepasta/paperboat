@@ -169,7 +169,7 @@ func TestControlClientRevalidationRetainsUnexpiredRepositoryAccess(t *testing.T)
 		case "/v1/config/credentials":
 			credentialRequests++
 			writeTestJSON(t, w, map[string]any{"data": map[string]any{
-				"credential": "credential", "environment_id": "env", "machine_id": "helper",
+				"credential": "credential", "environment_id": "env", "machine_id": "helper", "machine_alias": "alias-1",
 				"assignment_id": "assignment", "warning_revision": "warning",
 				"expires_at": now.Add(5 * time.Minute),
 			}})
