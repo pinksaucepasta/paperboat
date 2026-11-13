@@ -1,0 +1,49 @@
+{
+ "check": "xplat-send",
+ "devices": [
+  "L",
+  "W"
+ ],
+ "results": [
+  {
+   "id": "X-15:batch:L>W",
+   "status": "PASS",
+   "detail": "ten files arrive (sha256 equal); eleven are refused: pb: That is 11 files and one send takes at most 10. Send them in smaller groups; nothing was sent. Support reference: su"
+  },
+  {
+   "id": "X-15:modes:L>W",
+   "status": "PASS",
+   "detail": "files arrive owner-only on lanex2-w (no Everyone/Users entry)"
+  },
+  {
+   "id": "X-15:refuse:L>W",
+   "status": "PASS",
+   "detail": "refused with the path and what to do: is a folder, is a symbolic link"
+  },
+  {
+   "id": "X-15:inboxset:L>W",
+   "status": "PASS",
+   "detail": "refused: relative and Linux form; accepted: ~, spaces/non-ASCII, other drive, share; each delivered"
+  },
+  {
+   "id": "X-15:batch:W>L",
+   "status": "PASS",
+   "detail": "ten files arrive (sha256 equal); eleven are refused: pb: That is 11 files and one send takes at most 10. Send them in smaller groups; nothing was sent. Support reference: su"
+  },
+  {
+   "id": "X-15:modes:W>L",
+   "status": "PASS",
+   "detail": "sender modes (4755, 0755, 0777, 0600) all arrive without setuid, group/other or exec bits"
+  },
+  {
+   "id": "X-15:refuse:W>L",
+   "status": "PASS",
+   "detail": "refused with the path and what to do: is a folder, is a symbolic link"
+  },
+  {
+   "id": "X-15:inboxset:W>L",
+   "status": "PASS",
+   "detail": "refused: relative and Windows form; accepted: ~, spaces/non-ASCII; each delivered"
+  }
+ ]
+}
