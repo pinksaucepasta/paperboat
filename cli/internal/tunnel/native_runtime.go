@@ -527,6 +527,11 @@ func (t *PeerTerminalTunnel) WakePeer(machineID string) {
 	}
 	go func() {
 		defer runtime.waking.Delete(machineID)
+		// Dialing a live association sends nothing, so a machine whose UDP was blocked would keep its stale
+		// endpoints: re-learn them first.
+		if runtime.authority != nil {
+			runtime.authority.ReSTUN("wake-peer")
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		if session, err := runtime.Dial(ctx, machineID, peerquic.ClassInteractive); err == nil {

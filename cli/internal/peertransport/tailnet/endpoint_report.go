@@ -63,6 +63,30 @@ func (a *Authority) endpointReportDue() *[]string {
 	return &current
 }
 
+// restunSpacing is magicsock's own periodic STUN interval (20-26 s, wgengine/magicsock/magicsock.go
+// updateEndpoints): waking a peer at every retry of a waiting transfer must not out-run it.
+const restunSpacing = 20 * time.Second
+
+// ReSTUN re-learns this engine's own endpoints (magicsock netcheck, which also re-reports a change to the server
+// and makes its next peer pings carry the fresh address), at most once per restunSpacing. A machine whose UDP
+// came back after a block otherwise keeps the endpoints it learned while blocked (Tailscale: userspace.go
+// linkChange and magicsock.go maybeRebindOnError both ReSTUN when a path stops working).
+func (a *Authority) ReSTUN(why string) {
+	a.mu.Lock()
+	engine := a.clientEngine
+	if engine == nil && a.server != nil {
+		engine = a.server.server
+	}
+	due := engine != nil && time.Since(a.lastReSTUN) >= restunSpacing
+	if due {
+		a.lastReSTUN = time.Now()
+	}
+	a.mu.Unlock()
+	if due {
+		engine.ReSTUN(why)
+	}
+}
+
 // endpointsReported records the set the server accepted.
 func (a *Authority) endpointsReported(endpoints []string) {
 	a.reportMu.Lock()

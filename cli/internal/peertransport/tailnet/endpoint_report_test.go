@@ -173,3 +173,33 @@ func TestAuthorityDropClearsThePreviousEngineEndpointBudget(t *testing.T) {
 		t.Fatal("replacement engine inherited the previous engine's endpoint budget")
 	}
 }
+
+// X-37: waking a peer re-learns this machine's endpoints, and a transfer that retries its wake every few seconds
+// does not run a netcheck each time.
+func TestReSTUNIsSpacedAndNeedsAnEngine(t *testing.T) {
+	a, _, _, _ := networkTestAuthority(t)
+	a.ReSTUN("wake-peer")
+	if !a.lastReSTUN.IsZero() {
+		t.Fatal("a ReSTUN counted without an engine")
+	}
+	a.mu.Lock()
+	a.clientEngine = &mesh.Server{}
+	a.mu.Unlock()
+	t.Cleanup(func() { a.mu.Lock(); a.clientEngine = nil; a.mu.Unlock() })
+	a.ReSTUN("wake-peer")
+	first := a.lastReSTUN
+	if first.IsZero() {
+		t.Fatal("the first ReSTUN did not run")
+	}
+	a.ReSTUN("wake-peer")
+	if !a.lastReSTUN.Equal(first) {
+		t.Fatal("a second ReSTUN inside the spacing ran")
+	}
+	a.mu.Lock()
+	a.lastReSTUN = first.Add(-restunSpacing)
+	a.mu.Unlock()
+	a.ReSTUN("wake-peer")
+	if !a.lastReSTUN.After(first.Add(-restunSpacing)) {
+		t.Fatal("a ReSTUN after the spacing did not run")
+	}
+}

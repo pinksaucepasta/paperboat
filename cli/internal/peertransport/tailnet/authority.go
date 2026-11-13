@@ -123,6 +123,7 @@ type Authority struct {
 	done           chan struct{}
 	server         *UDPServer
 	clientEngine   *mesh.Server
+	lastReSTUN     time.Time // guarded by mu
 	// clientRelay: the client engine was started with at least one relay region (from a descriptor or configured nodes).
 	clientRelay bool
 	// reportMu guards the endpoint report schedule (endpoint_report.go).
