@@ -1,0 +1,19 @@
+{
+ "check": "xplat-send",
+ "devices": [
+  "M",
+  "W"
+ ],
+ "results": [
+  {
+   "id": "X-14:names:M>W",
+   "status": "PASS",
+   "detail": "'a:b.txt': refused (machine_6d47647f-dabb-405d-a3fb-d4262535fc16)\npb: Nothing was sent: lanex2-w2 cannot store); 'trail.': refused ( lanex2-w2 (machine_6d47647f-dabb-405d-a3fb-d4262535fc16)\npb: Nothing was sent: lanex2-w2 ); 'sp ': refused (f-dabb-405d-a3fb-d4262535fc16)\npb: Nothing was sent: lanex2-w2 cannot store \"sp \": the nam); 'CON.txt': refused (chine_6d47647f-dabb-405d-a3fb-d4262535fc16)\npb: Nothing was sent: lanex2-w2 cannot store \"); 'q\"u*?.txt': refused (hine_6d47647f-dabb-405d-a3fb-d4262535fc16)\npb: Nothing was sent: lanex2-w2 cannot store \"q); 'A.txt': arrived (stored as 'A.txt'); 'a.txt': arrived (stored as 'a (2).txt' (renamed, reported)); 'xxxxxxxxxxxxxxxxxxxx': arrived (stored as 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'); 'caf\u00e9-nfc.txt': arrived (stored as 'caf\u00e9-nfc.txt'); 'cafe\u0301-nfd.txt': arrived (stored as 'cafe\u0301-nfd.txt'); '-lead.txt': arrived (stored as '-lead.txt'); 'sp ace and \u00fc\u00f1\u00ed.txt': arrived (stored as 'sp ace and \u00fc\u00f1\u00ed.txt')"
+  },
+  {
+   "id": "X-14:names:W>M",
+   "status": "PASS",
+   "detail": "'A.txt': arrived (stored as 'A (5).txt' (renamed, reported)); 'a.txt': arrived (stored as 'a (6).txt' (renamed, reported)); 'xxxxxxxxxxxxxxxxxxxx': arrived (stored as 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx' (renamed, reporte); 'caf\u00e9-nfc.txt': arrived (stored as 'caf\u00e9-nfc (3).txt' (renamed, reported)); 'cafe\u0301-nfd.txt': arrived (stored as 'cafe\u0301-nfd (3).txt' (renamed, reported)); '-lead.txt': arrived (stored as '-lead (3).txt' (renamed, reported)); 'sp ace and \u00fc\u00f1\u00ed.txt': arrived (stored as 'sp ace and \u00fc\u00f1\u00ed (3).txt' (renamed, reported))"
+  }
+ ]
+}
