@@ -207,3 +207,34 @@ func TestVaultScopeMissingStatusCannotHideOperationalCause(t *testing.T) {
 		})
 	}
 }
+
+type staleTeamControl struct{ *vaultScopesControl }
+
+func (c staleTeamControl) CreateVaultTeam(context.Context, api.VaultTeamCreate) (api.VaultTeamState, error) {
+	return api.VaultTeamState{}, &api.APIError{Status: 409, Code: "version_conflict"}
+}
+
+// A staged team operation the server rejects with version_conflict can never succeed by resuming (its team
+// generation is gone): the vault must not stay blocked on it (the X-12 account that could only be reset by
+// removing local custody).
+func TestVaultResumeDropsStagedTeamCreateRejectedAsSuperseded(t *testing.T) {
+	vault, control, store := newVaultScopesFixture(t)
+	vault.Client = staleTeamControl{control}
+
+	err := vault.CreateTeamAt(context.Background(), "team_stale", 9, 4)
+	var rejected *api.APIError
+	if !errors.As(err, &rejected) || rejected.Code != "version_conflict" {
+		t.Fatalf("create error = %v, want the version_conflict rejection", err)
+	}
+	local, loadErr := store.LoadPasswordVault(vaultScopesTestIssuer, vaultScopesTestAccount)
+	if loadErr != nil {
+		t.Fatal(loadErr)
+	}
+	defer local.Clear()
+	if local.Operation != nil || local.Pending != nil {
+		t.Fatalf("superseded team create left the vault blocked: operation=%v pending=%v", local.Operation != nil, local.Pending != nil)
+	}
+	if err := vault.Resume(context.Background()); err != nil {
+		t.Fatalf("resume after the dropped operation = %v, want nil", err)
+	}
+}

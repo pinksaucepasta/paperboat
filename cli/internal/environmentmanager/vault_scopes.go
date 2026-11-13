@@ -201,7 +201,7 @@ func (v PasswordVault) publishOperation(ctx context.Context, local *config.Passw
 		}
 		out, err := c.CreateVaultTeam(ctx, in)
 		if err != nil {
-			return err
+			return v.dropSupersededOperation(local, err)
 		}
 		if out.TeamID != in.TeamID || out.Scope.Envelope != in.ScopeEnvelope {
 			return ErrIntegrity
@@ -213,7 +213,7 @@ func (v PasswordVault) publishOperation(ctx context.Context, local *config.Passw
 		}
 		out, err := c.GrantVaultTeamMember(ctx, op.OwnerID, in)
 		if err != nil {
-			return err
+			return v.dropSupersededOperation(local, err)
 		}
 		if out.TeamID != op.OwnerID {
 			return ErrIntegrity
@@ -225,7 +225,7 @@ func (v PasswordVault) publishOperation(ctx context.Context, local *config.Passw
 		}
 		out, err := c.RotateVaultTeam(ctx, op.OwnerID, in)
 		if err != nil {
-			return err
+			return v.dropSupersededOperation(local, err)
 		}
 		if out.TeamID != op.OwnerID || out.Scope.Envelope != in.ScopeEnvelope {
 			return ErrIntegrity
@@ -245,7 +245,7 @@ func (v PasswordVault) publishOperation(ctx context.Context, local *config.Passw
 		}
 		out, err := resetClient.ResetVault(ctx, in)
 		if err != nil {
-			return err
+			return v.dropSupersededOperation(local, err)
 		}
 		if out.Envelope != in.VaultEnvelope {
 			return ErrIntegrity

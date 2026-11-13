@@ -48,6 +48,21 @@ func (v PasswordVault) dropDeniedOperation(local *config.PasswordVaultRecord, de
 	return denied
 }
 
+// dropSupersededOperation clears a staged team or reset operation the server rejected with version_conflict:
+// the generation it was staged against is gone, so resume would replay the same request forever. The unpublished
+// successor goes with it; unlock reads the server's current head and the user submits the intended change again.
+func (v PasswordVault) dropSupersededOperation(local *config.PasswordVaultRecord, rejected error) error {
+	var api409 *api.APIError
+	if !errors.As(rejected, &api409) || api409.Status != 409 || api409.Code != "version_conflict" {
+		return rejected
+	}
+	if local.Pending != nil {
+		clear(local.Pending.Payload)
+	}
+	local.Pending = nil
+	return v.dropDeniedOperation(local, rejected)
+}
+
 func (v PasswordVault) reconcileScopeConflict(ctx context.Context, local *config.PasswordVaultRecord, c VaultDataClient, in api.VaultScopePut, rejected error) error {
 	pending := func(cause error) error { return &ScopePublicationPending{Cause: errors.Join(rejected, cause)} }
 	op := local.Operation
