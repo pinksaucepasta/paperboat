@@ -500,3 +500,50 @@ func TestSupervisorMachineFileChangesStopOldRuntimeWithoutFlushOffline(t *testin
 		})
 	}
 }
+
+// A rename (the server credential carries the machine's new name) restarts the runtime so its factory re-reads the
+// descriptor: X-02 "sync pauses after pb machine rename".
+func TestSupervisorRestartsRuntimeWhenMachineAliasChanges(t *testing.T) {
+	credentials := &supervisorCredentials{
+		calls: make(chan struct{}, 64),
+		credential: Credential{
+			Value: "credential", EnvironmentID: "environment", MachineID: "helper", MachineAlias: "old-name",
+			AssignmentID: "assignment", WarningRevision: "warning", ExpiresAt: time.Now().Add(time.Hour),
+		},
+	}
+	aliases := make(chan string, 4)
+	supervisor, err := NewSupervisor(SupervisorConfig{
+		Credentials: credentials, Retry: 50 * time.Millisecond,
+		Factory: func(_ context.Context, credential Credential) (Runtime, error) {
+			aliases <- credential.MachineAlias
+			return &supervisorRuntime{started: make(chan struct{}), stopped: make(chan struct{})}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := supervisor.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := <-aliases; got != "old-name" {
+		t.Fatalf("first runtime alias %q", got)
+	}
+	credentials.mu.Lock()
+	credentials.credential.MachineAlias = "new-name"
+	credentials.mu.Unlock()
+	select {
+	case got := <-aliases:
+		if got != "new-name" {
+			t.Fatalf("restarted runtime alias %q", got)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("a rename did not restart the runtime")
+	}
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), time.Second)
+	defer shutdownCancel()
+	if err := supervisor.Shutdown(shutdownCtx); err != nil {
+		t.Fatal(err)
+	}
+}

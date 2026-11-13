@@ -50,7 +50,7 @@ func TestControlClientCredentialAndLeaseLifecycle(t *testing.T) {
 				t.Fatalf("credential authorization = %#v", r.Header)
 			}
 			writeTestJSON(t, w, map[string]any{"data": map[string]any{
-				"credential": "config-credential", "environment_id": "env-1", "machine_id": "helper-1",
+				"credential": "config-credential", "environment_id": "env-1", "machine_id": "helper-1", "machine_alias": "alias-1",
 				"assignment_id": "assignment-1", "assignment_version": 1, "warning_revision": "warning-1", "expires_at": now.Add(7 * time.Minute),
 			}})
 		case "/v1/config/leases/acquire":
@@ -200,8 +200,8 @@ func TestControlClientRevalidationRetainsUnexpiredRepositoryAccess(t *testing.T)
 		t.Fatal(err)
 	}
 	client.RevalidateCredential()
-	if _, err := client.Credential(context.Background()); err != nil {
-		t.Fatal(err)
+	if got, err := client.Credential(context.Background()); err != nil || got.MachineAlias != "alias-1" {
+		t.Fatalf("credential alias = %q, %v", got.MachineAlias, err)
 	}
 	if _, err := client.RepositoryAccess(context.Background()); err != nil {
 		t.Fatal(err)

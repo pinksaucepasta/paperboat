@@ -214,6 +214,10 @@ func TestConfigCredentialIsBoundReplaySafeAndRevokedWithAssignment(t *testing.T)
 	if err != nil || replay.Credential != issued.Credential {
 		t.Fatalf("replay = %#v, %v", replay, err)
 	}
+	machine, err := store.Queries().GetActiveUserMachineForControl(ctx, identity.MachineID)
+	if err != nil || machine.Alias == "" || issued.MachineAlias != machine.Alias || replay.MachineAlias != machine.Alias {
+		t.Fatalf("the credential carries the machine's current name (a rename restarts the daemon's sync): %q %q want %q, %v", issued.MachineAlias, replay.MachineAlias, machine.Alias, err)
+	}
 	updatedAssignments := NewConfigAssignmentService(store, nil, "warning-8")
 	updatedAssignments.clock = func() time.Time { return now }
 	replacement, err := assignConfigTestProjection(updatedAssignments, ctx, user, identity.MachineID, repository.ID, ConfigModePullOnly, "warning-8", assignment.Version)

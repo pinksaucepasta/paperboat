@@ -48,6 +48,7 @@ type ConfigCredential struct {
 	Credential        string    `json:"credential"`
 	EnvironmentID     string    `json:"environment_id"`
 	MachineID         string    `json:"machine_id"`
+	MachineAlias      string    `json:"machine_alias"`
 	AssignmentID      string    `json:"assignment_id"`
 	AssignmentVersion int64     `json:"assignment_version"`
 	WarningRevision   string    `json:"warning_revision"`
@@ -82,6 +83,14 @@ func (s *ConfigCredentialService) Issue(ctx context.Context, identityToken strin
 			}
 			return err
 		}
+		// The machine's current name: a rename changes it, which restarts the daemon's config sync (supervisor binding check).
+		machine, err := tx.Queries().GetActiveUserMachineForControl(ctx, claims.MachineID)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return ErrConfigCredentialInvalid
+			}
+			return err
+		}
 		if !assignment.WarningRevision.Valid || s.warningRevision == "" || assignment.WarningRevision.String != s.warningRevision {
 			return ErrConfigCredentialInvalid
 		}
@@ -93,6 +102,7 @@ func (s *ConfigCredentialService) Issue(ctx context.Context, identityToken strin
 			if decryptErr != nil || json.Unmarshal([]byte(plaintext), &result) != nil {
 				return ErrConfigCredentialInvalid
 			}
+			result.MachineAlias = machine.Alias
 			return nil
 		}
 		if !errors.Is(getErr, sql.ErrNoRows) {
@@ -111,7 +121,7 @@ func (s *ConfigCredentialService) Issue(ctx context.Context, identityToken strin
 		if err != nil {
 			return err
 		}
-		result = ConfigCredential{Credential: token, EnvironmentID: claims.EnvironmentID, MachineID: claims.MachineID, AssignmentID: assignment.ID, AssignmentVersion: assignment.Version, WarningRevision: assignment.WarningRevision.String, ExpiresAt: expiresAt}
+		result = ConfigCredential{Credential: token, EnvironmentID: claims.EnvironmentID, MachineID: claims.MachineID, MachineAlias: machine.Alias, AssignmentID: assignment.ID, AssignmentVersion: assignment.Version, WarningRevision: assignment.WarningRevision.String, ExpiresAt: expiresAt}
 		encoded, err := json.Marshal(result)
 		if err != nil {
 			return err

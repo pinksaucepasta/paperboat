@@ -73,6 +73,7 @@ type Credential struct {
 	Value             string    `json:"credential"`
 	EnvironmentID     string    `json:"environment_id"`
 	MachineID         string    `json:"machine_id"`
+	MachineAlias      string    `json:"machine_alias"`
 	AssignmentID      string    `json:"assignment_id"`
 	AssignmentVersion int64     `json:"assignment_version"`
 	WarningRevision   string    `json:"warning_revision"`
@@ -240,6 +241,7 @@ func (c *ControlClient) Credential(ctx context.Context) (result Credential, resu
 			Credential        string    `json:"credential"`
 			EnvironmentID     string    `json:"environment_id"`
 			MachineID         string    `json:"machine_id"`
+			MachineAlias      string    `json:"machine_alias"`
 			AssignmentID      string    `json:"assignment_id"`
 			AssignmentVersion int64     `json:"assignment_version"`
 			WarningRevision   string    `json:"warning_revision"`
@@ -262,7 +264,7 @@ func (c *ControlClient) Credential(ctx context.Context) (result Credential, resu
 		return Credential{}, controlFailure(ErrControlClientInvalid, ErrControlClientInvalid)
 	}
 	c.credential = Credential{
-		Value: envelope.Data.Credential, EnvironmentID: envelope.Data.EnvironmentID, MachineID: envelope.Data.MachineID,
+		Value: envelope.Data.Credential, EnvironmentID: envelope.Data.EnvironmentID, MachineID: envelope.Data.MachineID, MachineAlias: envelope.Data.MachineAlias,
 		AssignmentID: envelope.Data.AssignmentID, AssignmentVersion: envelope.Data.AssignmentVersion, WarningRevision: envelope.Data.WarningRevision, ExpiresAt: envelope.Data.ExpiresAt.UTC(),
 	}
 	return c.credential, nil
