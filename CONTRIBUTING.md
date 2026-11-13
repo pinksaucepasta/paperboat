@@ -15,6 +15,6 @@ saves wasted work.
 - Describe what broke or what is missing, the cause, and how you checked the fix.
 
 By contributing, you agree that your contribution is licensed under the licence of the
-directory it changes (see [LICENSING.md](LICENSING.md)).
+directory it changes (see [LICENSE](LICENSE)).
 
 Please follow the [Code of Conduct](CODE_OF_CONDUCT.md).

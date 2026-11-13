@@ -208,7 +208,7 @@ consumers. 1.4c's shared admission/reattach packages also move into `shared/`.
 
 - This monorepo lives at github.com/pinksaucepasta/paperboat and is **public since 2026-10-15** (user decision; full-history secret scan clean: only test
   fixtures and placeholders). Licence (user decision 2026-11-13): `server/`,
-  `console/`, `admin/` AGPL-3.0; everything else MIT (`LICENSING.md`, a `LICENSE` per directory);
+  `console/`, `admin/` AGPL-3.0; everything else MIT (root `LICENSE`, a `LICENSE` in each AGPL directory);
   name and logo reserved (`TRADEMARKS.md`).
   Releases are published on this repo's GitHub Releases (no separate download repo).
   Push `main` after every commit.

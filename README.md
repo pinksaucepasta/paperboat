@@ -48,4 +48,4 @@ Report bugs in [issues](https://github.com/pinksaucepasta/paperboat/issues). Rep
 
 ## License
 
-`server/` and `console/` are AGPL-3.0; everything else is MIT. See [LICENSING.md](LICENSING.md).
+`server/` and `console/` are AGPL-3.0; everything else is MIT. See [LICENSE](LICENSE).

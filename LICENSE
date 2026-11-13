@@ -1,11 +1,18 @@
-This MIT license applies to all parts of the repository except for the directories
-server/, console/ and admin/. Those directories are licensed under the GNU Affero
-General Public License version 3.0 (AGPLv3); see the LICENSE file inside each of them.
-See LICENSING.md for details.
+Copyright (c) 2026 Paperboat contributors
+
+Portions of this software are licensed as follows:
+
+* Everything under the "server/", "console/" and "admin/" directories is licensed under the
+  GNU Affero General Public License version 3.0 (AGPLv3), as defined in the LICENSE file in
+  each of those directories. For a commercial licence to those parts, contact
+  pprbtdev@gmail.com.
+* Third-party components keep the licence of their original owner (for example
+  "cli/upstream/licenses/").
+* Everything else is available under the MIT license below.
+
+The Paperboat name and logo are not covered by these licences; see TRADEMARKS.md.
 
 MIT License
-
-Copyright (c) 2026 Paperboat contributors
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
