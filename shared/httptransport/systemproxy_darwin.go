@@ -4,7 +4,6 @@ package httptransport
 
 import (
 	"context"
-	"fmt"
 	"os/exec"
 	"sync"
 	"time"
@@ -28,12 +27,13 @@ func (NativeSystemProxySource) Snapshot(ctx context.Context) (ProxySnapshot, err
 	if !scutilCache.at.IsZero() && time.Since(scutilCache.at) < scutilCacheTTL {
 		return scutilCache.snapshot, nil
 	}
+	parent := ctx
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	out, err := exec.CommandContext(ctx, "/usr/sbin/scutil", "--proxy").Output()
-	if err != nil {
-		return ProxySnapshot{}, fmt.Errorf("read macOS system proxy with scutil --proxy: %w", err)
+	if parent.Err() != nil { // the request was cancelled; that says nothing about scutil
+		return ProxySnapshot{}, parent.Err()
 	}
-	scutilCache.snapshot, scutilCache.at = parseScutilProxy(string(out)), time.Now()
+	scutilCache.snapshot, scutilCache.at = snapshotFromScutil(out, err), time.Now()
 	return scutilCache.snapshot, nil
 }

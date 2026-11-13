@@ -7,7 +7,36 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
+
+	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 )
+
+const scutilWarnInterval = time.Minute
+
+var scutilWarn = struct {
+	sync.Mutex
+	at  time.Time
+	log func(string, ...any)
+}{log: diagnosticlog.TryWarn}
+
+// snapshotFromScutil turns one `scutil --proxy` run into a snapshot. A failed run is "no proxy" (direct), logged
+// at most once a minute, like Tailscale's system-proxy lookup (ref/tailscale/net/tshttpproxy/tshttpproxy.go):
+// a scutil hiccup must not fail every API call. A successful run with an unsupported config (PACOnly) still
+// refuses, through the snapshot.
+func snapshotFromScutil(output []byte, err error) ProxySnapshot {
+	if err == nil {
+		return parseScutilProxy(string(output))
+	}
+	scutilWarn.Lock()
+	defer scutilWarn.Unlock()
+	if scutilWarn.at.IsZero() || time.Since(scutilWarn.at) >= scutilWarnInterval {
+		scutilWarn.at = time.Now()
+		scutilWarn.log("macOS system proxy unreadable, connecting directly", "error", err.Error())
+	}
+	return ProxySnapshot{}
+}
 
 // parseScutilProxy reads `scutil --proxy` output (a CF dictionary dump), the
 // cgo-free way to read macOS network proxy settings; Tailscale also shells out

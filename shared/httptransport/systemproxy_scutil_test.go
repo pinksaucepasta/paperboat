@@ -1,6 +1,10 @@
 package httptransport
 
-import "testing"
+import (
+	"errors"
+	"testing"
+	"time"
+)
 
 const scutilSample = `<dictionary> {
   ExceptionsList : <array> {
@@ -74,3 +78,25 @@ func TestParseScutilProxyIgnoresScopedBlock(t *testing.T) {
 }
 
 func dict(body string) string { return "<dictionary> {\n" + body + "}\n" }
+
+func TestSnapshotFromScutilFailureIsDirectAndLoggedOnce(t *testing.T) {
+	var logged int
+	scutilWarn.Lock()
+	scutilWarn.at, scutilWarn.log = time.Time{}, func(string, ...any) { logged++ }
+	scutilWarn.Unlock()
+	for range 3 {
+		if got := snapshotFromScutil(nil, errors.New("exec failed")); got != (ProxySnapshot{}) {
+			t.Fatalf("failed scutil run = %+v, want no proxy", got)
+		}
+	}
+	if logged != 1 {
+		t.Fatalf("logged %d times, want once within the interval", logged)
+	}
+	if got := snapshotFromScutil([]byte(scutilSample), nil); got.HTTPProxy == "" {
+		t.Fatalf("successful run lost its proxy: %+v", got)
+	}
+	pac := "<dictionary> {\n  ProxyAutoConfigEnable : 1\n  ProxyAutoConfigURLString : http://pac.example.test/a.pac\n}\n"
+	if got := snapshotFromScutil([]byte(pac), nil); !got.PACOnly {
+		t.Fatalf("unsupported PAC config must stay PACOnly: %+v", got)
+	}
+}
