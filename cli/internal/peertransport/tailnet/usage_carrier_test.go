@@ -126,3 +126,12 @@ func TestRelayRefusalOnReadIsNotTerminalForMagicsock(t *testing.T) {
 		t.Fatalf("read refusal err=%v repair=%v", err, r.repair.Load())
 	}
 }
+
+func TestRelayErrorKindNamesTheRejectionCodeNotTheText(t *testing.T) {
+	if got := relayErrorKind(fmt.Errorf("dial: %w", derpquic.ErrAdmission)); got != "relay_code_1" {
+		t.Fatalf("kind=%q", got)
+	}
+	if got := relayErrorKind(errors.New("secret detail")); got != "*errors.errorString" {
+		t.Fatalf("kind=%q", got)
+	}
+}

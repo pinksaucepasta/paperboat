@@ -3,6 +3,7 @@ package tailnet
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync/atomic"
 	"time"
 	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=peer-path-accounting
@@ -11,6 +12,9 @@ import (
 	"tailscale.com/types/key"
 	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=peer-path-accounting
 	"tailscale.com/wgengine/magicsock"
+
+	"github.com/pinksaucepasta/paperboat/relay/derpquic"
+	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 )
 
 const relayUsageFreshness = time.Second
@@ -78,9 +82,19 @@ func (c *usageObservedCarrier) lostPath() {
 func (c *usageObservedCarrier) Connect(ctx context.Context) error {
 	err := c.DERPCarrier.Connect(ctx)
 	if err != nil && ctx.Err() == nil {
+		diagnosticlog.TryInfo("native packet lifecycle", "stage", "relay_connect_failed", "kind", relayErrorKind(err))
 		c.lostPath()
 	}
 	return err
+}
+
+// relayErrorKind names a relay failure without its text: the relay's own rejection code, else the error's type.
+func relayErrorKind(err error) string {
+	var rejected *derpquic.Error
+	if errors.As(err, &rejected) {
+		return fmt.Sprintf("relay_code_%d", rejected.Code)
+	}
+	return fmt.Sprintf("%T", err)
 }
 
 func (c *usageObservedCarrier) Close() error {
@@ -123,6 +137,7 @@ func (e relayRefusedRead) Error() string {
 func (c *usageObservedCarrier) RecvDetail() (derp.ReceivedMessage, int, error) {
 	message, generation, err := c.DERPCarrier.RecvDetail()
 	if err != nil {
+		diagnosticlog.TryInfo("native packet lifecycle", "stage", "relay_read_failed", "kind", relayErrorKind(err))
 		c.lostPath()
 		var fatal interface{ Fatal() bool }
 		if errors.As(err, &fatal) && fatal.Fatal() {
