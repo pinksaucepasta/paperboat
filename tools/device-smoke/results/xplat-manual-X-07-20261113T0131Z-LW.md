@@ -12,3 +12,11 @@ Run: tools/device-smoke/xplat_config.py --only X-07 --devices L,W (scratch repos
 - `local_path = "C:\\Users\\someone\\x07\\drive.txt"` on Linux: `pb config sync validate` rc 1 with only "Paperboat could not finish the command. Check the current state before retrying; run `pb doctor` ..." (--json: code operation_failed, category local_io). No mention of the path or the OS.
 - `local_path = "~\\x07\\back.txt"` on Linux: `validate` rc 0, the rule is listed with the raw backslash path, i.e. it would be applied as a file literally named `x07\back.txt` under the home directory.
 The row asks for a clear message and for no literal path, so L<->W stays [~] until both are fixed and re-run on the next cycle.
+
+## Rerun after the fix (2026-11-13 ~08:50 IST): L<->W PASS 6/6 on dev-acc70ad3c
+Fix commits d63bbdcf5 (backslash forms refused on Unix, PathRuleError shown as a refusal) and 7330af46f (message shortened to fit the 240-character cap; dev-acc70ad3c is the same change before the final rebase onto main).
+`pb version` laner07-l (Linux container) and laner07-w (hosted Windows Server runner winpool-5): dev-acc70ad3c on both.
+Run: xplat_config.py --only X-07 --devices L,W, results/xplat-config-20261113T032330Z.json:
+- x07_paths L>W, W>L: drive-letter (`C:\\Users\\...`) and backslash (`~\\xplat\\...`) local_path accepted on W; on Linux `validate` refuses both with a message naming the rule ("Config path rule machine:cfg/x07-drive.txt: local_path is not valid on this machine. Drive letters and backslashes (C:\...) work only on Windows; use ~/... or an absolute path here, or an [os.windows] section."), and neither a literal `C:\Users...` nor `xplat\x07\back.txt` file exists under the home directory.
+- x07_unicode L>W, W>L: pass (one file for the NFD/NFC name on both, edit round-trips, no conflict, CJK name intact).
+- x07_long_path L>W, W>L: a 394-character destination arrives byte-identical on W.
