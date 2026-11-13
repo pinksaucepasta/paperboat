@@ -1,0 +1,35 @@
+{
+ "check": "xplat-config",
+ "results": [
+  {
+   "id": "X-06:x06:L>W",
+   "status": "PASS",
+   "detail": "overlap by case and 12 reserved or unsafe names refused on laner-x06-l and laner-x06-w"
+  },
+  {
+   "id": "X-06:x06:W>L",
+   "status": "PASS",
+   "detail": "overlap by case and 12 reserved or unsafe names refused on laner-x06-w and laner-x06-l"
+  },
+  {
+   "id": "X-06:x06_case_collision:L>W",
+   "status": "PASS",
+   "detail": "both spellings reported as case_collision on laner-x06-l and laner-x06-w, created on neither"
+  },
+  {
+   "id": "X-06:x06_case_collision:W>L",
+   "status": "PASS",
+   "detail": "both spellings reported as case_collision on laner-x06-w and laner-x06-l, created on neither"
+  },
+  {
+   "id": "X-06:x06_windows_case:L>W",
+   "status": "PASS",
+   "detail": "refused on laner-x06-w"
+  },
+  {
+   "id": "X-06:x06_windows_case:W>L",
+   "status": "PASS",
+   "detail": "refused on laner-x06-w"
+  }
+ ]
+}
