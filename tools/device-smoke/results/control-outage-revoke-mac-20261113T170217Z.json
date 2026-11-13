@@ -1,0 +1,34 @@
+{
+ "checks": [
+  {
+   "check": "baseline exec R->W before the revocation",
+   "status": "PASS",
+   "detail": "revoke-baseline"
+  },
+  {
+   "check": "W and R cut off from the control plane",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "check": "L revokes R during the outage",
+   "status": "PASS",
+   "detail": "x-macwedge2-r\",\"id\":\"machine_9b742c2e-f485-4b89-ad17-d00931c0fdbb\",\"state\":\"disconnected\"},\"outcome\":\"confirmed\",\"retry\":\"not_required\",\"version\":\"1\"}"
+  },
+  {
+   "check": "during the outage R is still served from W's rules (direct path) or already cut off at the relay (relay path)",
+   "status": "PASS",
+   "detail": "R is already cut off at the relay (relay path):  service is not ready yet. Check that its Runtime is ready in `pb status`, then retry. Support refer"
+  },
+  {
+   "check": "control plane reachable again",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "check": "after the connection returned R is refused within 180 s",
+   "status": "PASS",
+   "detail": "1 s; `pb login` and approve this CLI in your browser. The printed link works on another device when this machine has no browser. Then retry. Support reference: support_8252bb50-0de9-4df8-a8c2-042a8ff9f4de."
+  }
+ ]
+}

@@ -1,0 +1,50 @@
+{
+  "fix_commit": "2830fb5170b57f3c3f59a0a4a8d0a4d6b2345319",
+  "lane": "FIX-MACWEDGE2",
+  "before_build": "dev-fbcb4c295",
+  "after_build": "dev-2830fb517",
+  "machines": {
+    "Mac": "macpool-7; macOS 26.7.2 arm64; fix-macwedge2-m2",
+    "L": "pbvm2 container fix-macwedge2-l; Linux amd64",
+    "R": "pbvm2 container fix-macwedge2-r; Linux amd64"
+  },
+  "versions": {
+    "Mac": "dev-2830fb517",
+    "L": "dev-2830fb517",
+    "R": "dev-2830fb517"
+  },
+  "results": {
+    "control-outage-revoke-mac-20261113T170217Z.json": {
+      "PASS": 6,
+      "FAIL": 0
+    },
+    "control-outage-revoked-mac-20261113T170909Z.json": {
+      "PASS": 3,
+      "FAIL": 2
+    },
+    "control-outage-revoke-mac-20261113T173206Z.json": {
+      "PASS": 6,
+      "FAIL": 0
+    },
+    "control-outage-revoked-mac-20261113T173322Z.json": {
+      "PASS": 5,
+      "FAIL": 0
+    },
+    "fix-macwedge2-carrier-pair-20261113T173516Z.json": {
+      "PASS": 6,
+      "FAIL": 0
+    }
+  },
+  "unit_test": {
+    "name": "TestFallbackCarrierReadReconnectsAfterAFailedReconnect",
+    "before": "FAIL: read after the relay is reachable again=relay closed",
+    "after": "PASS with -race on anvit"
+  },
+  "ci": "https://github.com/pinksaucepasta/paperboat/actions/runs/43470855691",
+  "ci_scope": "CLI and relay vet and race tests matching TestFallbackCarrier|TestRelay|TestRegional|TestNetworkRecoveryAutomaticFallbackReference",
+  "prior_complete_checks": "932e86b4f: Mac outage drill 33/33, offline audit read-back and ENV wording already passed; only post-revoke inbound wedge remained",
+  "diagnostics": "relay_read_failed and relay_connect_failed observed on before build; kind omitted by diagnostic field allowlist, so rejection type unavailable",
+  "before_recovery": "Mac->L worked while L->Mac remained unavailable beyond 4 minutes; carrier-only launchctl kickstart restored L->Mac immediately",
+  "separate_gap": "Online pb connect to a path-prefixed staging ingress has an incomplete terminal descriptor: server omits quic; CLI requires quic. Existing paths unchanged by this fix. Offline pb connect over recovered Mac carrier PASS.",
+  "cleanup": "Mac clean uninstall removed its M2 enrollment (not listed afterward); M1 and L exact-ID revocations confirmed; R revoked by the drill; both own Linux containers stopped and removed; macpool-7 released; queued replacement cancelled."
+}

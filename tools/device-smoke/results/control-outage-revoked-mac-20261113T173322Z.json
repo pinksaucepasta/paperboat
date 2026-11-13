@@ -1,0 +1,29 @@
+{
+ "checks": [
+  {
+   "check": "L reaches the Mac before the second cut",
+   "status": "PASS",
+   "detail": "prerevoked-baseline"
+  },
+  {
+   "check": "Mac and L cut off from the control plane",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "check": "a user revoked before the outage (R) is refused by the Mac",
+   "status": "PASS",
+   "detail": "`pb login` and approve this CLI in your browser. The printed link works on another device when this machine has no browser. Then retry. Support reference: support_b5a34de2-6a87-4c5d-86ab-58c53d6a718a."
+  },
+  {
+   "check": "a user that was not revoked (L) still reaches the Mac",
+   "status": "PASS",
+   "detail": "prerevoked-LW Paperboat ENV not applied: ENV needs Paperboat online. The command ran without your managed values; run it again once `pb status` shows Paperboat is reachable."
+  },
+  {
+   "check": "control plane reachable again",
+   "status": "PASS",
+   "detail": ""
+  }
+ ]
+}

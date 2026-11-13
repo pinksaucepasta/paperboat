@@ -1,0 +1,30 @@
+{
+  "commit": "2830fb517",
+  "checks": [
+    {
+      "check": "fix-macwedge2-l version",
+      "status": "PASS",
+      "detail": "      \u2584\u2588\u2584       Paperboat   \u2584\u2584\u259d\u2580\u2580\u2580\u2580\u2580\u2598\u2584\u2584   Version dev-2830fb517    \u2580\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2580 "
+    },
+    {
+      "check": "fix-macwedge2-r version",
+      "status": "PASS",
+      "detail": "      \u2584\u2588\u2584       Paperboat   \u2584\u2584\u259d\u2580\u2580\u2580\u2580\u2580\u2598\u2584\u2584   Version dev-2830fb517    \u2580\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2580 "
+    },
+    {
+      "check": "exec a->b",
+      "status": "PASS",
+      "detail": "fixmacwedge2-pair-ab"
+    },
+    {
+      "check": "exec b->a",
+      "status": "PASS",
+      "detail": "fixmacwedge2-pair-ba"
+    },
+    {
+      "check": "pb connect L->R",
+      "status": "FAIL",
+      "detail": "e retrying; run `pb doctor` if this continues. Support reference: support_e0687180-f850-4b13-adfe-6be205818088. Run `pb bugreport --upload` to send the details."
+    }
+  ]
+}

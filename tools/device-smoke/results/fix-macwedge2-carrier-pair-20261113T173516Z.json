@@ -1,0 +1,35 @@
+{
+ "commit": "2830fb5170b57f3c3f59a0a4a8d0a4d6b2345319",
+ "checks": [
+  {
+   "check": "Mac pb version dev-2830fb517",
+   "status": "PASS",
+   "detail": "dev-2830fb517"
+  },
+  {
+   "check": "post-revoke exec L->M",
+   "status": "PASS",
+   "detail": "fixmacwedge2-post-revoke-LM"
+  },
+  {
+   "check": "post-revoke exec M->L",
+   "status": "PASS",
+   "detail": "fixmacwedge2-post-revoke-ML"
+  },
+  {
+   "check": "Mac and L cut for offline connect",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "check": "pb connect L->M on recovered carrier during API cut",
+   "status": "PASS",
+   "detail": "Typed arithmetic marker evaluated to 42; remote shell exited."
+  },
+  {
+   "check": "API restored after pair check",
+   "status": "PASS",
+   "detail": ""
+  }
+ ]
+}

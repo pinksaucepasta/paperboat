@@ -1,0 +1,29 @@
+{
+ "checks": [
+  {
+   "check": "L reaches the Mac before the second cut",
+   "status": "FAIL",
+   "detail": " service is not ready yet. Check that its Runtime is ready in `pb status`, then retry. Support reference: support_77be5a7e-83a9-4132-bac1-8b011e294ddf. Run `pb bugreport --upload` to send the details."
+  },
+  {
+   "check": "Mac and L cut off from the control plane",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "check": "a user revoked before the outage (R) is refused by the Mac",
+   "status": "PASS",
+   "detail": "`pb login` and approve this CLI in your browser. The printed link works on another device when this machine has no browser. Then retry. Support reference: support_db2a6d5d-0400-4c47-951a-25662d4a5af9."
+  },
+  {
+   "check": "a user that was not revoked (L) still reaches the Mac",
+   "status": "FAIL",
+   "detail": " service is not ready yet. Check that its Runtime is ready in `pb status`, then retry. Support reference: support_17130066-46b4-42fe-a3ef-ec74b77dd9f5. Run `pb bugreport --upload` to send the details."
+  },
+  {
+   "check": "control plane reachable again",
+   "status": "PASS",
+   "detail": ""
+  }
+ ]
+}
