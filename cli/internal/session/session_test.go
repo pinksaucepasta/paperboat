@@ -86,6 +86,30 @@ func TestRunPropagatesRemoteOutputExitAndCloses(t *testing.T) {
 	}
 }
 
+// The host's in-band resize broadcast resizes Terminal.app's window to the last typer's size (a 100x1 window on the Mac VM, X-24), so no
+// platform may pass it to the local terminal.
+func TestRunDropsTheHostsInBandResizeRequest(t *testing.T) {
+	inR, inW, _ := os.Pipe()
+	_ = inW.Close()
+	var out bytes.Buffer
+	oldIn := os.Stdin
+	os.Stdin = inR
+	defer func() { os.Stdin = oldIn; _ = inR.Close() }()
+	c := &testConn{Reader: bytes.NewBufferString("a\x1b[8;1;100tb"), wait: make(chan struct{})}
+	go func() {
+		for !c.halfClosed.Load() {
+			time.Sleep(time.Millisecond)
+		}
+		close(c.wait)
+	}()
+	if _, err := Run(context.Background(), c, &sink{}, WithOutput(&out)); err != nil {
+		t.Fatal(err)
+	}
+	if out.String() != "ab" {
+		t.Fatalf("local terminal received %q, want the resize request removed", out.String())
+	}
+}
+
 func TestRunContinuesAfterUnsupportedStdinEOF(t *testing.T) {
 	inR, inW, _ := os.Pipe()
 	outR, outW, _ := os.Pipe()

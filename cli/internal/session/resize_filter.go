@@ -8,7 +8,7 @@ import (
 )
 
 // resizeFilter removes the in-band window resize request ESC [ 8 ; rows ; cols t from remote output. The host broadcasts it to every
-// attached client when a resize is applied (hostruntime/session/manager_input.go); a Unix terminal ignores it, but a ConPTY obeys it by
+// attached client when a resize is applied (hostruntime/session/manager_input.go); xterm ignores it, but Terminal.app (a 100x1 window on the Mac VM, X-24) and a ConPTY obey it by
 // resizing itself for real, which pb's own size poll then reports back as the client's size: the last typer's size sticks and every other
 // window shrinks to it for good (F3-14, N1/N15 on a Windows client). A chunk may end inside a request, so a tail that could still become
 // one is held for the next chunk; the caller flushes what stays held (take) when the stream goes quiet or ends.
