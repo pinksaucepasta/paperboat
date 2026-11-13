@@ -437,7 +437,8 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 		return store.State{Version: store.CurrentVersion, CounterEpoch: epoch, Operations: journal.Snapshot(), Counters: counters.Snapshot(), PendingUsage: queue.Snapshot()}
 	}
 	verifier := &auth.Verifier{Issuer: deployment.CredentialIssuer, NodeID: cfg.NodeID, Keys: trust.Snapshot, Revocations: trust.Snapshot, ClockSkew: 30 * time.Second}
-	previewRoutes, err := edgehttp.NewDataCarrierPreviewRegistry(edgehttp.DataCarrierPreviewRegistryConfig{BaseDomain: deployment.PreviewBaseDomain, ProcessEpoch: processEpoch, MaximumRoutes: 4096})
+	var ingressAuthority *control.IngressAuthority // set below; the preview registry asks it which route a host is admitted on
+	previewRoutes, err := edgehttp.NewDataCarrierPreviewRegistry(edgehttp.DataCarrierPreviewRegistryConfig{BaseDomain: deployment.PreviewBaseDomain, ProcessEpoch: processEpoch, MaximumRoutes: 4096, HostRoute: func(host string) string { return ingressAuthority.PreviewRouteID(host) }})
 	if err != nil {
 		return nil, fmt.Errorf("create endpoint route registry: %w", err)
 	}
@@ -487,7 +488,7 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 	// A request for a host whose carrier is still on the replaced process waits, bounded by that process's drain
 	// deadline (it gets the host's GOAWAY then), for the host to re-attach here.
 	routeGrace := func() time.Duration { return handover.RemainingAfterTakeover(cfg.ShutdownTimeout / 2) }
-	ingressAuthority := &control.IngressAuthority{Client: client, NodeID: cfg.NodeID, ProcessEpoch: processEpoch, Grace: routeGrace}
+	ingressAuthority = &control.IngressAuthority{Client: client, NodeID: cfg.NodeID, ProcessEpoch: processEpoch, Grace: routeGrace}
 	durableRoutes, err := edgehttp.NewDataCarrierRouteRegistry(edgehttp.DataCarrierRouteRegistryConfig{MaximumRoutes: 4096, Usage: meter, IngressAuthority: ingressAuthority.Resolve, PublicTCPIdleTimeout: deployment.PublicTCPIdle(), AddressAllowed: ingressAuthority.AddressAllowed})
 	if err != nil {
 		return nil, fmt.Errorf("create durable carrier route registry: %w", err)

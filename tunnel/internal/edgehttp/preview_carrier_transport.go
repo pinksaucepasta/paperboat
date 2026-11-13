@@ -80,12 +80,17 @@ type DataCarrierPreviewRegistryConfig struct {
 	BaseDomain    string
 	ProcessEpoch  string
 	MaximumRoutes int
+	// HostRoute names the route id a public hostname the registry holds no route for is admitted on:
+	// a self-hosted edge publishes a preview under the account's own domain while its carrier attaches
+	// under the platform name. Empty when the host is not admitted.
+	HostRoute func(host string) string
 }
 
 type DataCarrierPreviewRegistry struct {
 	baseDomain   string
 	processEpoch string
 	maximum      int
+	hostRoute    func(host string) string
 	done         chan struct{}
 	closeOnce    sync.Once
 	mu           sync.RWMutex
@@ -95,10 +100,7 @@ type DataCarrierPreviewRegistry struct {
 	// standby holds the routes newer carriers of the same machine replaced (worker handovers), by route
 	// id, oldest first: their open streams finish (a browser terminal held through two updates is on the
 	// one two back) and a failed request may retry on the newest.
-	standby         map[string][]*dataCarrierPreviewRouteEntry
-	aliasesByID     map[string]DataCarrierPreviewAlias
-	aliasIDsByRoute map[string]map[string]struct{}
-	desiredAliases  map[string]DataCarrierPreviewAlias
+	standby map[string][]*dataCarrierPreviewRouteEntry
 }
 
 type dataCarrierPreviewRouteEntry struct {
@@ -130,10 +132,9 @@ func NewDataCarrierPreviewRegistry(config DataCarrierPreviewRegistryConfig) (*Da
 		return nil, ErrDataCarrierPreviewRegistryInvalid
 	}
 	return &DataCarrierPreviewRegistry{
-		baseDomain: baseDomain, processEpoch: config.ProcessEpoch, maximum: config.MaximumRoutes,
+		baseDomain: baseDomain, processEpoch: config.ProcessEpoch, maximum: config.MaximumRoutes, hostRoute: config.HostRoute,
 		done: make(chan struct{}), byRoute: make(map[string]*dataCarrierPreviewRouteEntry),
-		byHost: make(map[string]*dataCarrierPreviewRouteEntry), standby: make(map[string][]*dataCarrierPreviewRouteEntry), aliasesByID: make(map[string]DataCarrierPreviewAlias),
-		aliasIDsByRoute: make(map[string]map[string]struct{}), desiredAliases: make(map[string]DataCarrierPreviewAlias),
+		byHost: make(map[string]*dataCarrierPreviewRouteEntry), standby: make(map[string][]*dataCarrierPreviewRouteEntry),
 	}, nil
 }
 
@@ -196,11 +197,9 @@ func (r *DataCarrierPreviewRegistry) Attach(route DataCarrierPreviewRoute) error
 	if old != nil {
 		r.retireLocked(old, validated)
 		delete(r.byHost, old.host)
-		r.removeAliasesForRouteLocked(old.route.RouteID)
 	}
 	r.byRoute[validated.RouteID] = entry
 	r.byHost[entry.host] = entry
-	r.activateDesiredAliasesForRouteLocked(validated.RouteID)
 	r.mu.Unlock()
 	go r.watchEntry(entry)
 	return nil
@@ -309,7 +308,6 @@ func (r *DataCarrierPreviewRegistry) detachEntry(entry *dataCarrierPreviewRouteE
 	if current := r.byRoute[entry.route.RouteID]; current == entry {
 		delete(r.byRoute, entry.route.RouteID)
 		delete(r.byHost, entry.host)
-		r.removeAliasesForRouteLocked(entry.route.RouteID)
 		entry.close()
 		r.promoteStandbyLocked(entry.route.RouteID)
 	}
@@ -341,7 +339,6 @@ func (r *DataCarrierPreviewRegistry) Detach(routeID string, identity datacarrier
 	r.dropStandbyLocked(routeID)
 	delete(r.byRoute, routeID)
 	delete(r.byHost, entry.host)
-	r.removeAliasesForRouteLocked(routeID)
 	entry.close()
 	return nil
 }
@@ -374,7 +371,6 @@ func (r *DataCarrierPreviewRegistry) DetachAdmission(admission datacarrier.Expec
 	r.dropStandbyLocked(admission.RouteID)
 	delete(r.byRoute, admission.RouteID)
 	delete(r.byHost, entry.host)
-	r.removeAliasesForRouteLocked(admission.RouteID)
 	entry.close()
 	return nil
 }
@@ -503,9 +499,6 @@ func (r *DataCarrierPreviewRegistry) Close() error {
 		r.standby = make(map[string][]*dataCarrierPreviewRouteEntry)
 		r.byRoute = make(map[string]*dataCarrierPreviewRouteEntry)
 		r.byHost = make(map[string]*dataCarrierPreviewRouteEntry)
-		r.aliasesByID = make(map[string]DataCarrierPreviewAlias)
-		r.aliasIDsByRoute = make(map[string]map[string]struct{})
-		r.desiredAliases = make(map[string]DataCarrierPreviewAlias)
 		r.mu.Unlock()
 		close(r.done)
 	})

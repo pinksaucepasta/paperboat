@@ -75,7 +75,6 @@ func (r *DataCarrierPreviewRegistry) promoteStandbyLocked(routeID string) {
 		}
 		r.byRoute[routeID] = next
 		r.byHost[next.host] = next
-		r.activateDesiredAliasesForRouteLocked(routeID)
 		return
 	}
 }

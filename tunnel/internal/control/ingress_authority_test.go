@@ -515,6 +515,21 @@ func TestAdmitsPreviewByHostname(t *testing.T) {
 	}
 }
 
+func TestPreviewRouteIDIsTheAdmittedPublicationsRoute(t *testing.T) {
+	var d connectorprotocol.IngressDecision
+	d.Binding.Hostname, d.Binding.RouteID, d.Binding.Audience, d.Binding.Lifecycle = "app.account.example.test", "route_1", "public", connectorprotocol.TunnelEphemeral
+	a := &IngressAuthority{decisions: []connectorprotocol.IngressDecision{d}}
+	if got := a.PreviewRouteID("app.account.example.test"); got != "route_1" {
+		t.Errorf("PreviewRouteID = %q, want route_1", got)
+	}
+	if got := a.PreviewRouteID("other.account.example.test"); got != "" {
+		t.Errorf("PreviewRouteID of an unadmitted host = %q", got)
+	}
+	if got := (*IngressAuthority)(nil).PreviewRouteID("app.account.example.test"); got != "" {
+		t.Errorf("a missing authority named route %q", got)
+	}
+}
+
 // A decision issued to another edge is that edge's preview: this edge answers 404 for it as before, not 503.
 func TestAdmitsPreviewOnlyForDecisionsIssuedToThisEdge(t *testing.T) {
 	mine, other := connectorprotocol.IngressDecision{EdgeNodeID: "edge_1"}, connectorprotocol.IngressDecision{EdgeNodeID: "edge_2"}

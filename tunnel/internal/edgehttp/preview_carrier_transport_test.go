@@ -213,6 +213,33 @@ func TestDataCarrierPreviewRegistryProjectsOnlyAuthenticatedReadyRoutes(t *testi
 	}
 }
 
+// A self-hosted edge publishes a preview under the account's own domain while its carrier attached under the platform
+// name: the host the server admitted on that route is served, any other unknown host is not.
+func TestDataCarrierPreviewRegistryServesTheHostAdmittedOnARoute(t *testing.T) {
+	admitted := map[string]string{"app.account.example.test": "preview_01"}
+	registry, err := NewDataCarrierPreviewRegistry(DataCarrierPreviewRegistryConfig{BaseDomain: "preview.example.test", ProcessEpoch: "edge_epoch_1", HostRoute: func(host string) string { return admitted[host] }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer registry.Close()
+	server, client := testEdgePreviewCarrierPair(t, testEdgePreviewIdentity(1, 1))
+	defer client.Close()
+	if err := registry.Attach(DataCarrierPreviewRoute{RouteID: "preview_01", Hostname: "p1.preview.example.test", Kind: dataCarrierPreviewRouteKind, EdgeProcessEpoch: "edge_epoch_1", Revision: 1, Server: server}); err != nil {
+		t.Fatal(err)
+	}
+	got, ok := registry.Lookup("app.account.example.test")
+	if !ok || got.RouteID != "preview_01" || got.Hostname != "app.account.example.test" {
+		t.Fatalf("admitted host route = %+v %v", got, ok)
+	}
+	if _, ok := registry.Lookup("other.account.example.test"); ok {
+		t.Fatal("a host the server did not admit was served")
+	}
+	admitted["app.account.example.test"] = "preview_missing"
+	if _, ok := registry.Lookup("app.account.example.test"); ok {
+		t.Fatal("a host admitted on a route with no carrier was served")
+	}
+}
+
 func TestDataCarrierPreviewTransportRejectsPrivatePublicRequest(t *testing.T) {
 	identity := testEdgePreviewIdentity(1, 1)
 	server, client := testEdgePreviewCarrierPair(t, identity)

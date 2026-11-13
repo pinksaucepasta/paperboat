@@ -449,18 +449,31 @@ func (a *IngressAuthority) ResolveDecision(ctx context.Context, candidate connec
 // tells an app that lost its carrier for a moment from a name the server never admitted. Only decisions issued to
 // this edge count: a preview another edge serves is answered 404 here as before.
 func (a *IngressAuthority) AdmitsPreview(hostname string) bool {
+	_, ok := a.previewDecision(hostname)
+	return ok
+}
+
+// PreviewRouteID is the route the held snapshot admits a preview publication on hostname on, or "": the
+// edge serves a preview published under the account's own domain on the route its carrier attached under
+// the platform name.
+func (a *IngressAuthority) PreviewRouteID(hostname string) string {
+	d, _ := a.previewDecision(hostname)
+	return d.Binding.RouteID
+}
+
+func (a *IngressAuthority) previewDecision(hostname string) (connectorprotocol.IngressDecision, bool) {
 	if a == nil || hostname == "" {
-		return false
+		return connectorprotocol.IngressDecision{}, false
 	}
 	now := time.Now()
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 	for _, d := range a.decisions {
 		if d.Binding.Hostname == hostname && d.EdgeNodeID == a.NodeID && d.Binding.Lifecycle == connectorprotocol.TunnelEphemeral && (d.Binding.Audience == "public" || now.Before(d.ExpiresAt)) {
-			return true
+			return d, true
 		}
 	}
-	return false
+	return connectorprotocol.IngressDecision{}, false
 }
 
 // QuotaDenied reports whether the last server snapshot withheld the hostname with a typed refusal: its
