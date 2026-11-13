@@ -730,3 +730,20 @@ func TestWaitForProcessExitReportsProgress(t *testing.T) {
 		t.Fatalf("%d progress reports during a 700 ms wait at a 150 ms interval", reports)
 	}
 }
+
+type namedTimedOutStep struct{ cause error }
+
+func (e namedTimedOutStep) Error() string              { return RuntimeInstallFailureMessage("install_runtime") }
+func (e namedTimedOutStep) Unwrap() error              { return e.cause }
+func (namedTimedOutStep) ElevationFailureCode() string { return "install_runtime" }
+
+// victus: the install timed out in the machine guard phase and the message said "failed while installing runtime
+// services" twice; the phase that ran out of time was only in a log file.
+func TestTimedOutStepMessageNamesThePhaseOnce(t *testing.T) {
+	err := namedTimedOutStep{cause: fmt.Errorf("install Paperboat machine guard: %w", context.DeadlineExceeded)}
+	message := timedOutMessage(err)
+	step := RuntimeInstallFailureMessage("install_runtime")
+	if strings.Count(message, step) != 1 || !strings.Contains(message, "install Paperboat machine guard: context deadline exceeded") {
+		t.Fatalf("message = %q", message)
+	}
+}

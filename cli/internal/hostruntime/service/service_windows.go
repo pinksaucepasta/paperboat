@@ -1069,13 +1069,41 @@ func waitWindowsService(ctx context.Context, service *mgr.Service, want svc.Stat
 		select {
 		case <-operationCtx.Done():
 			timer.Stop()
+			cause := operationCtx.Err()
 			if ctx.Err() != nil {
-				return ctx.Err()
+				cause = ctx.Err()
 			}
-			return operationCtx.Err()
+			return windowsServiceWaitError(service.Name, status.State, want, cause)
 		case <-timer.C:
 		}
 	}
+}
+
+// windowsServiceWaitError names the service and the state it is stuck in: a bare deadline told victus's operator
+// nothing about which of a generation's services never left StartPending.
+func windowsServiceWaitError(name string, have, want svc.State, cause error) error {
+	return fmt.Errorf("Windows service %s is still %s, not %s (check it with: sc.exe queryex %s): %w",
+		name, windowsServiceStateText(have), windowsServiceStateText(want), name, cause)
+}
+
+func windowsServiceStateText(state svc.State) string {
+	switch state {
+	case svc.Stopped:
+		return "stopped"
+	case svc.StartPending:
+		return "start pending"
+	case svc.StopPending:
+		return "stop pending"
+	case svc.Running:
+		return "running"
+	case svc.ContinuePending:
+		return "continue pending"
+	case svc.PausePending:
+		return "pause pending"
+	case svc.Paused:
+		return "paused"
+	}
+	return fmt.Sprintf("in state %d", state)
 }
 
 var (

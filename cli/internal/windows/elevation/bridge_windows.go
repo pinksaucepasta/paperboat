@@ -22,6 +22,7 @@ import (
 	"unsafe"
 
 	"github.com/pinksaucepasta/paperboat/internal/atomicfile"
+	"github.com/pinksaucepasta/paperboat/internal/causetext"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
 	"golang.org/x/sys/windows"
@@ -439,14 +440,7 @@ func Execute(ctx context.Context, requestPath, resultPath, cancelPath string, ha
 	case errors.Is(operationContextErr, context.Canceled) || errors.Is(operationErr, context.Canceled):
 		result.Status, result.ErrorCode, result.ErrorMessage = statusCanceled, "canceled", boundedContextMessage(ErrElevationCanceled, operationErr)
 	case errors.Is(operationContextErr, context.DeadlineExceeded) || errors.Is(operationErr, context.DeadlineExceeded):
-		result.Status, result.ErrorCode, result.ErrorMessage = statusTimedOut, "deadline_exceeded", boundedContextMessage(ErrElevationTimedOut, operationErr)
-		// A step that ran out of time still names itself: the caller otherwise sees only the elapsed deadline.
-		var named interface{ ElevationFailureCode() string }
-		if errors.As(operationErr, &named) {
-			if message := RuntimeInstallFailureMessage(named.ElevationFailureCode()); message != "" {
-				result.ErrorMessage = sanitizeMessage(message+" "+result.ErrorMessage, 2048)
-			}
-		}
+		result.Status, result.ErrorCode, result.ErrorMessage = statusTimedOut, "deadline_exceeded", timedOutMessage(operationErr)
 	case operationErr == nil:
 	default:
 		result.Status, result.ErrorCode, result.ErrorMessage = statusError, operationFailed, sanitizeMessage(operationErr.Error(), 2048)
@@ -484,6 +478,26 @@ func resultContextError(base error, message string) error {
 // deadline is raised from within a handler. The caller can then retry from the
 // resume journal without guessing whether staging, SCM activation, or cleanup
 // was interrupted.
+// timedOutMessage is the result message of an operation that ran out of time. A named step still names itself, and
+// since that step's Error() is the same prose, the cause leaves say which phase ran out (victus: "install Paperboat
+// machine guard: context deadline exceeded" was only in a log file, the message repeated the step twice).
+func timedOutMessage(operationErr error) string {
+	var named interface{ ElevationFailureCode() string }
+	if errors.As(operationErr, &named) {
+		if message := RuntimeInstallFailureMessage(named.ElevationFailureCode()); message != "" {
+			detail := ""
+			if step, ok := named.(interface{ Unwrap() error }); ok {
+				detail = causetext.Text(step.Unwrap())
+			}
+			if detail == "" {
+				detail = boundedContextMessage(ErrElevationTimedOut, operationErr)
+			}
+			return sanitizeMessage(message+" "+detail, 2048)
+		}
+	}
+	return boundedContextMessage(ErrElevationTimedOut, operationErr)
+}
+
 func boundedContextMessage(base, operationErr error) string {
 	if operationErr == nil {
 		return base.Error()
