@@ -200,7 +200,10 @@ func retryableManagedSSHAuthorityError(err error) bool {
 	}
 	var response *clientapi.APIError
 	if errors.As(err, &response) {
-		return response.Status == http.StatusRequestTimeout || response.Status == http.StatusTooManyRequests || response.Status >= 500 && response.Status <= 599
+		// Over the key cap is the account's size, not a revocation: emptying authorized_keys locked every
+		// client out of this host whenever another machine enrolled (prod canary, 2026-11-13).
+		capacity := response.Status == http.StatusConflict && response.Code == "managed_ssh_key_capacity"
+		return capacity || response.Status == http.StatusRequestTimeout || response.Status == http.StatusTooManyRequests || response.Status >= 500 && response.Status <= 599
 	}
 	if errors.Is(err, context.DeadlineExceeded) {
 		return true

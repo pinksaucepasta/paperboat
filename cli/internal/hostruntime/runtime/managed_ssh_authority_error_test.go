@@ -22,6 +22,7 @@ func TestManagedSSHAuthorityNetworkFailuresKeepTheKeys(t *testing.T) {
 		"client timeout":             &url.Error{Op: "Post", URL: "https://control.example.test/", Err: context.DeadlineExceeded},
 		"wrapped lookup failure":     errors.Join(errors.New("authority"), &url.Error{Op: "Post", URL: "https://control.example.test/", Err: &net.DNSError{Err: "server misbehaving", Name: "control.example.test"}}),
 		"server unavailable":         &clientapi.APIError{Status: http.StatusServiceUnavailable},
+		"account over the key cap":   &clientapi.APIError{Status: http.StatusConflict, Code: "managed_ssh_key_capacity"},
 	} {
 		if !retryableManagedSSHAuthorityError(err) {
 			t.Errorf("%s: treated as an answer, the keys would be removed", name)
@@ -31,6 +32,7 @@ func TestManagedSSHAuthorityNetworkFailuresKeepTheKeys(t *testing.T) {
 		"signed out":       clientapi.ErrUnauthenticated,
 		"explicit refusal": &clientapi.APIError{Status: http.StatusForbidden},
 		"canceled":         context.Canceled,
+		"other conflict":   &clientapi.APIError{Status: http.StatusConflict, Code: "operation_conflict"},
 		"plain error":      errors.New("the answer is not valid"),
 	} {
 		if retryableManagedSSHAuthorityError(err) {
