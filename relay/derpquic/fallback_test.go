@@ -200,6 +200,32 @@ func TestFallbackCarrierCurrentFatalReceiveRemainsTerminal(t *testing.T) {
 	}
 }
 
+// A refusal latched for the old grant must not end the reader: once the child accepts again (a fresh grant), the next
+// read asks again and receives.
+func TestFallbackCarrierAsksAgainAfterARefusalOnTheNextRead(t *testing.T) {
+	preferred := &fakeCarrier{connected: true, recvErr: ErrAdmission}
+	c := NewFallbackCarrier(preferred, &fakeCarrier{}, time.Hour)
+	defer c.Close()
+	c.mu.Lock()
+	c.active = preferred
+	c.mu.Unlock()
+	if _, _, err := c.RecvDetail(); !errors.Is(err, ErrAdmission) {
+		t.Fatalf("first read=%v", err)
+	}
+	preferred.mu.Lock()
+	preferred.connectErr = ErrAdmission // still refused: the latch holds and the read keeps failing
+	preferred.mu.Unlock()
+	if _, _, err := c.RecvDetail(); !errors.Is(err, ErrAdmission) {
+		t.Fatalf("read while refused=%v", err)
+	}
+	preferred.mu.Lock()
+	preferred.connectErr, preferred.recvErr = nil, nil // a fresh grant is accepted
+	preferred.mu.Unlock()
+	if _, _, err := c.RecvDetail(); errors.Is(err, ErrAdmission) {
+		t.Fatalf("the refusal stayed latched after the child accepted again: %v", err)
+	}
+}
+
 func TestRecoveryRetryDelayBounds(t *testing.T) {
 	base := 5 * time.Second
 	for _, test := range []struct {

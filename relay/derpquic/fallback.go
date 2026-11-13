@@ -339,7 +339,20 @@ func (c *FallbackCarrier) RecvDetail() (derp.ReceivedMessage, int, error) {
 	for {
 		a, e := c.current()
 		if e != nil {
-			return nil, 0, e
+			if !fatalCarrier(e) {
+				return nil, 0, e
+			}
+			// A latched refusal is asked again on every read, under magicsock's own backoff: Connect clears it and each
+			// child keeps it only for the grant it answered (refused), so a fresh grant gets through. Without this the
+			// reader kept returning the latch and nothing called Connect: a Mac whose relay refused it during a control-
+			// plane cut never reached the relay again until its carrier restarted (F21-01/F21-11 M, 2026-11-13).
+			ctx, cancel := context.WithTimeout(c.ctx, 5*time.Second)
+			err := c.Connect(ctx)
+			cancel()
+			if err != nil {
+				return nil, 0, err
+			}
+			continue
 		}
 		m, g, e := a.RecvDetail()
 		if e == nil {
