@@ -79,8 +79,12 @@ func Portable(name string) string {
 	if n := len(out); n > 0 && (out[n-1] == ' ' || out[n-1] == '.') {
 		out = out[:n-1] + "_"
 	}
-	if windowsRefusal(out) != "" {
+	if out != "" && windowsRefusal(out) != "" {
 		out = "_" + out
+	}
+	for len(out) > MaxBytes { // the prefix can push a 255-byte name over the limit
+		_, size := utf8.DecodeLastRuneInString(out)
+		out = out[:len(out)-size]
 	}
 	return out
 }

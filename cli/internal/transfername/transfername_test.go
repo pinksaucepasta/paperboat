@@ -33,6 +33,13 @@ func TestUnixReceiversOnlyRefuseWhatNoFileSystemStores(t *testing.T) {
 	}
 }
 
+func TestPortableNameStaysWithinTheFileSystemLimit(t *testing.T) {
+	got := Portable("CON." + strings.Repeat("x", MaxBytes-4))
+	if len(got) > MaxBytes || Refusal("windows", got) != "" || Portable("") != "" {
+		t.Fatalf("Portable = %d bytes", len(got))
+	}
+}
+
 func TestPortableNameIsSavedUnchangedOnEveryOS(t *testing.T) {
 	for name, want := range map[string]string{
 		"a:b.txt": "a_b.txt", `q"u*?.txt`: "q_u__.txt", "trail.": "trail_", "sp ": "sp_", "CON.txt": "_CON.txt", "com1": "_com1",

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/inbox"
+	"github.com/pinksaucepasta/paperboat/internal/transfername"
 )
 
 // ErrSharedFileUnavailable means a file preview's Inbox file is gone or the Inbox cannot be read.
@@ -77,7 +78,7 @@ func sharedFileHandler(root, id string) http.Handler {
 			contentType, disposition = "application/octet-stream", "attachment"
 		}
 		header.Set("Content-Type", contentType)
-		header.Set("Content-Disposition", disposition+"; filename*=UTF-8''"+url.PathEscape(file.Name))
+		header.Set("Content-Disposition", disposition+"; filename*=UTF-8''"+url.PathEscape(transfername.Portable(file.Name)))
 		header.Set("X-Content-Type-Options", "nosniff")
 		header.Set("Referrer-Policy", "no-referrer")
 		header.Set("Cache-Control", "private, no-cache")

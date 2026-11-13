@@ -17,6 +17,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hoststate"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/tunnelmanager"
 	"github.com/pinksaucepasta/paperboat/internal/inbox"
+	"github.com/pinksaucepasta/paperboat/internal/transfername"
 )
 
 func sharedFileRoot(t *testing.T, files map[string]string) func() (string, error) {
@@ -64,13 +65,14 @@ func TestSharedFileContentTypes(t *testing.T) {
 		{"draw.svg", "image/svg+xml", "inline", true},
 		{"tool.exe", "application/octet-stream", "attachment", false},
 		{"noext", "application/octet-stream", "attachment", false},
+		{"trail.", "application/octet-stream", "attachment", false}, // saved as "trail_" on every OS
 	}
 	for _, tc := range cases {
 		response := fileRequest(t, root, inbox.FileID(tc.name), "GET / HTTP/1.1\r\nHost: x\r\n\r\n")
 		if response.StatusCode != http.StatusOK || response.Header.Get("Content-Type") != tc.contentType {
 			t.Fatalf("%s: status %d type %q", tc.name, response.StatusCode, response.Header.Get("Content-Type"))
 		}
-		if got := response.Header.Get("Content-Disposition"); got != tc.disposition+"; filename*=UTF-8''"+tc.name {
+		if got := response.Header.Get("Content-Disposition"); got != tc.disposition+"; filename*=UTF-8''"+transfername.Portable(tc.name) {
 			t.Fatalf("%s: disposition %q", tc.name, got)
 		}
 		if response.Header.Get("X-Content-Type-Options") != "nosniff" {
