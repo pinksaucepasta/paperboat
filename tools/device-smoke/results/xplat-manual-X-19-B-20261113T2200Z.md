@@ -263,8 +263,10 @@ revoke exact rx19b-l machine_5187be94-67b2-4ea5-bae8-0c387f89cf96 rc 0
 uninstalled rx19b-m
 uninstalled rx19b-w
 uninstalled rx19b-l
-CPU usage: 20.0% user, 41.42% sys, 38.57% idle 
+CPU usage: 20.0% user, 41.42% sys, 38.57% idle
 CPU usage: 0.97% user, 2.28% sys, 96.73% idle
 ```
 
 No product change or unit-test run was needed. No Go build/vet/test was run on oracle.
+
+Final cleanup: `macpool-4 released`; `winpool-6 stopping`; `docker rm -f rx19b-l` returned `rx19b-l`; `fresh account deleted`. Only the released, idle Mac remains running for reuse; no pb installation or test process remains on it. Local account credentials and raw browser logs removed after evidence extraction.
