@@ -5573,3 +5573,5 @@ Approved corrections: machine-signed delegated generation key, no client server 
 2026-11-12 | SDK + agent tools removed | `sdk/`, `pb mcp`, its device-smoke checks, docs and marketing claims deleted from main until after launch (user decision); F24 section and C293 moved to WHITEBOARD.md; restore from git history. CLI build only to deploy.
 
 2026-11-13 | FIX-DBLOAD | Prod 20 samples/59.2 s: inspector lookup 8/49 non-idle observations, no ungranted DB locks; empty lookup plans 119.7 ms, executes 0.9 ms. Migration 304 caches its plan (generic reuse 0.08-0.10 ms), retains snapshot authorization; deploy lane compare CPU/503 after gate.
+
+2026-11-13 | X-27 | CLI expiry fix: CI 43387383178 vet/race/root PASS; post-rebase config/daemon/API race checks PASS. Anvit broad run omits console vault fixture; native handshake timing exceeded its bound once (2.92 s), isolated race rerun PASS. No device build/run; lane verifies Windows/Linux skew.
