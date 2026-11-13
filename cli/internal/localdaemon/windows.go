@@ -59,6 +59,8 @@ type DaemonConfig struct {
 	InventoryEvents *machineevents.Subscription
 	// AccessEvents wakes it at once for an access change (see InventoryConfig.AccessEvents).
 	AccessEvents *machineevents.Subscription
+	// LocalAccessChanged wakes it when a local access step clears or fails (see InventoryConfig.Nudge).
+	LocalAccessChanged <-chan struct{}
 	// CredentialsEnded is read by the Unix daemon only (it closes open peer streams at sign-out); the Windows local API
 	// is not wired to it yet (Windows follows the launch).
 	CredentialsEnded func() bool

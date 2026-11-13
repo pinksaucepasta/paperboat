@@ -49,6 +49,8 @@ type DaemonConfig struct {
 	InventoryEvents *machineevents.Subscription
 	// AccessEvents wakes it at once for an access change (see InventoryConfig.AccessEvents).
 	AccessEvents *machineevents.Subscription
+	// LocalAccessChanged wakes it when a local access step clears or fails (see InventoryConfig.Nudge).
+	LocalAccessChanged <-chan struct{}
 	// Steps is the daemon's step tracker: start steps and background loops that are failing show in the
 	// snapshot's health (applySteps).
 	Steps *health.Registry
@@ -123,7 +125,7 @@ func Run(ctx context.Context, config DaemonConfig) (runErr error) {
 		return err
 	}
 	diagnosticAPI := &diagnosticService{recorder: recorder, snapshots: store, stateRoot: config.Paths.StateRoot, ownerUID: config.OwnerUID, clock: diagnosticClock}
-	inventory, err := NewInventory(InventoryConfig{Source: config.Source, Store: store, RefreshInterval: config.RefreshInterval, RequestTimeout: config.RequestTimeout, Clock: config.Clock, ReconcileMachines: config.ReconcileMachines, Events: config.InventoryEvents, AccessEvents: config.AccessEvents, OnRefresh: inventoryRefreshObserver(ctx, recorder), OnMachines: func(refreshCtx context.Context, machines []api.UserMachine) {
+	inventory, err := NewInventory(InventoryConfig{Source: config.Source, Store: store, RefreshInterval: config.RefreshInterval, RequestTimeout: config.RequestTimeout, Clock: config.Clock, ReconcileMachines: config.ReconcileMachines, Events: config.InventoryEvents, AccessEvents: config.AccessEvents, Nudge: config.LocalAccessChanged, OnRefresh: inventoryRefreshObserver(ctx, recorder), OnMachines: func(refreshCtx context.Context, machines []api.UserMachine) {
 		if config.OnMachines != nil {
 			config.OnMachines(refreshCtx, machines)
 		}

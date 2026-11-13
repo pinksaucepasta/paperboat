@@ -86,6 +86,8 @@ type InventoryConfig struct {
 	Events *machineevents.Subscription
 	// AccessEvents wakes a refresh for an access change, spaced like a local request; nil: none.
 	AccessEvents *machineevents.Subscription
+	// Nudge wakes a refresh like RequestRefresh (a local change the server does not announce); nil: none.
+	Nudge <-chan struct{}
 	// EventRefreshSpacing is the least time between two refreshes woken by events (0: the default).
 	// EventFallback is the refresh period while events are healthy (0: the default).
 	EventRefreshSpacing time.Duration
@@ -103,6 +105,7 @@ type Inventory struct {
 	onRefresh         func(error)
 	events            *machineevents.Subscription
 	accessEvents      *machineevents.Subscription
+	nudge             <-chan struct{}
 	eventSpacing      time.Duration
 	eventFallback     time.Duration
 	wake              chan struct{} // RequestRefresh; one pending request is enough
@@ -150,6 +153,7 @@ func NewInventory(config InventoryConfig) (*Inventory, error) {
 		onRefresh:         config.OnRefresh,
 		events:            config.Events,
 		accessEvents:      config.AccessEvents,
+		nudge:             config.Nudge,
 		eventSpacing:      config.EventRefreshSpacing,
 		eventFallback:     config.EventFallback,
 		wake:              make(chan struct{}, 1),
@@ -209,6 +213,8 @@ func (i *Inventory) Run(ctx context.Context) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-i.wake:
+			pending = soon()
+		case <-i.nudge:
 			pending = soon()
 		case <-i.accessEvents.Changed():
 			// An access change (a machine shared with this account, a grant, the team's private access setting)

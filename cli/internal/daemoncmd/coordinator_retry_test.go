@@ -257,6 +257,11 @@ func TestCoordinatorNamesABusyGatewayPortAndRestoresBrowserURLsWhenItIsFree(t *t
 	if step, detail := c.PendingLocalAccessStep(), c.PendingLocalAccessDetail(); step != "browser_gateway_port" || detail != "nginx, PID 4242" {
 		t.Fatalf("pending step=%q detail=%q", step, detail)
 	}
+	select {
+	case <-c.LocalAccessChanged(): // the busy port woke the inventory once; pb doctor now shows it
+	default:
+		t.Fatal("setting the busy gateway port did not wake the inventory")
+	}
 	names.mu.Lock()
 	delete(names.conflictPorts, 80) // the other program stopped
 	names.mu.Unlock()
@@ -266,6 +271,11 @@ func TestCoordinatorNamesABusyGatewayPortAndRestoresBrowserURLsWhenItIsFree(t *t
 			t.Fatal("browser URLs did not come back after the port was freed")
 		}
 		time.Sleep(5 * time.Millisecond)
+	}
+	select {
+	case <-c.LocalAccessChanged(): // clearing the step wakes the inventory so pb doctor stops naming it
+	case <-time.After(5 * time.Second):
+		t.Fatal("clearing the busy gateway port did not wake the inventory")
 	}
 	c.mu.Lock()
 	web = len(c.webRoutes)

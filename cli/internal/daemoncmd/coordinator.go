@@ -30,6 +30,7 @@ type Coordinator struct {
 	rpcBackend        *daemonrpc.LiveDaemonBackend
 	errors            chan error
 	servicesNudge     chan struct{}
+	accessChanged     chan struct{}
 	nameClient        guardedNameClient
 	ctx               context.Context
 	cancel            context.CancelFunc
@@ -104,6 +105,7 @@ func NewCoordinator(cfg CoordinatorConfig) (*Coordinator, error) {
 		connections:   make(chan struct{}, 256),
 		errors:        make(chan error, 1),
 		servicesNudge: make(chan struct{}, 1),
+		accessChanged: make(chan struct{}, 1),
 	}
 	coordinator.rpcBackend.SetApprovalHandler(cfg.ApprovePeer)
 	coordinator.rpcBackend.SetAccount(cfg.AccountID, cfg.AccountLabel)
@@ -379,8 +381,15 @@ func (c *Coordinator) applySnapshot(peers []*daemonrpc.PeerUpdate, revision uint
 func (c *Coordinator) reconcileSnapshot(ctx context.Context, peers []*daemonrpc.PeerUpdate, revision uint64) error {
 	c.snapshotMu.Lock()
 	defer c.snapshotMu.Unlock()
+	before := c.PendingLocalAccessStep()
 	err := c.applySnapshotLocked(ctx, peers, revision)
 	c.reconcileErr = err
+	if c.PendingLocalAccessStep() != before { // pb doctor reads the inventory snapshot: refresh it now
+		select {
+		case c.accessChanged <- struct{}{}:
+		default:
+		}
+	}
 	if err == nil {
 		c.reportMu.Lock()
 		c.reconcileFailed = false
@@ -603,6 +612,10 @@ func (c *Coordinator) Stop() error {
 
 // Errors reports a terminal control-sync or daemon RPC listener failure.
 func (c *Coordinator) Errors() <-chan error { return c.errors }
+
+// LocalAccessChanged wakes the machine inventory when the pending local access step changes (a retry bound the
+// browser gateway again), so pb doctor stops naming a step that has cleared.
+func (c *Coordinator) LocalAccessChanged() <-chan struct{} { return c.accessChanged }
 
 // ServicesNudge wakes the machine-services refresh early (a browser request for a just-started service).
 func (c *Coordinator) ServicesNudge() <-chan struct{} { return c.servicesNudge }

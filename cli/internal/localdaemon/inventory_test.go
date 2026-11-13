@@ -999,6 +999,34 @@ func TestInventoryRefreshesAtOnceForAnAccessChange(t *testing.T) {
 	}
 }
 
+// A local access step that clears (the browser gateway port freed) nudges the inventory, so pb doctor stops
+// naming it without waiting for the event fallback.
+func TestInventoryRefreshesWhenLocalAccessChanges(t *testing.T) {
+	source := &scriptedMachineSource{results: []machineResult{{machines: []api.UserMachine{{ID: "machine_1", Alias: "studio"}}}}}
+	refreshed := make(chan struct{}, 8)
+	nudge := make(chan struct{}, 1)
+	store, err := localapi.NewSnapshotStore(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inventory, err := NewInventory(InventoryConfig{Source: source, Store: store, RefreshInterval: time.Hour, RequestTimeout: time.Second,
+		Nudge: nudge, OnRefresh: func(error) { refreshed <- struct{}{} }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- inventory.Run(ctx) }()
+	defer func() { cancel(); <-done }()
+	<-refreshed
+	nudge <- struct{}{}
+	select {
+	case <-refreshed:
+	case <-time.After(requestedRefreshSpacing + 2*time.Second):
+		t.Fatal("a local access change did not refresh the inventory")
+	}
+}
+
 // F14-03: a daemon that just started and has not finished its first local-access setup (the native listener waits for
 // the peer network) reports starting, which a supplied install waits for; past the grace, or after a setup that
 // succeeded, a failure is degraded, which fails the install at once.
