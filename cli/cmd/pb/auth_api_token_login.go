@@ -13,6 +13,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/auth"
 	"github.com/pinksaucepasta/paperboat/internal/command"
 	"github.com/pinksaucepasta/paperboat/internal/config"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 )
 
 // apiTokenLogin signs this computer in with an API token instead of browser approval (PLAN
@@ -56,7 +57,7 @@ func apiTokenLogin(c *command.Context, path string) error {
 	if t.TokenType != "Bearer" || t.AccessToken == "" || t.RefreshToken == "" || t.CLIClientSessionID == "" || t.ExpiresIn <= 0 || t.ExpiresIn > 86400 {
 		return errors.New("the server returned an invalid session for the API token")
 	}
-	credential := config.Credential{AccessToken: t.AccessToken, RefreshToken: t.RefreshToken, TokenType: t.TokenType, ExpiresAt: time.Now().UTC().Add(time.Duration(t.ExpiresIn) * time.Second)}
+	credential := config.Credential{AccessToken: t.AccessToken, RefreshToken: t.RefreshToken, TokenType: t.TokenType, ExpiresAt: serverclock.Now().UTC().Add(time.Duration(t.ExpiresIn) * time.Second)}
 	client := api.New(issuer, credential, loginHTTPClient())
 	me, err := client.Me(c.Context)
 	if err != nil {

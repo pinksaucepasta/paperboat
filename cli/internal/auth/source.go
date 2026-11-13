@@ -139,7 +139,7 @@ func (s *Source) credential(refreshWindow time.Duration) (result config.Credenti
 			if err != nil {
 				return config.Credential{}, "", fmt.Errorf("refresh Paperboat session: %w", err)
 			}
-			expires := time.Now().UTC().Add(time.Duration(tokens.ExpiresIn) * time.Second)
+			expires := serverclock.Now().UTC().Add(time.Duration(tokens.ExpiresIn) * time.Second)
 			return config.Credential{AccessToken: tokens.AccessToken, RefreshToken: tokens.RefreshToken, TokenType: tokens.TokenType, ExpiresAt: expires}, tokens.CLIClientSessionID, nil
 		})
 		if err != nil || serverclock.Now().Before(credential.ExpiresAt) {

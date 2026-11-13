@@ -11,6 +11,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/auth"
 	"github.com/pinksaucepasta/paperboat/internal/config"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/bootstrap"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 )
 
 // installBootstrapCLI initializes the enrollment's CLI profile, endpoint
@@ -38,7 +39,7 @@ func installBootstrapCLI(ctx context.Context, session *bootstrap.ClientSession, 
 	if err != nil {
 		return err
 	}
-	cred := config.Credential{AccessToken: session.AccessToken, RefreshToken: session.RefreshToken, TokenType: session.TokenType, ExpiresAt: time.Now().UTC().Add(time.Duration(session.ExpiresIn) * time.Second)}
+	cred := config.Credential{AccessToken: session.AccessToken, RefreshToken: session.RefreshToken, TokenType: session.TokenType, ExpiresAt: serverclock.Now().UTC().Add(time.Duration(session.ExpiresIn) * time.Second)}
 	client := api.New(cfg.ServerURL, cred, nil)
 	return installBootstrapCLIWith(ctx, session, cfg.ServerURL, store, cred, client, bootstrapLocalDaemonInstaller(cfg))
 }

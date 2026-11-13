@@ -206,7 +206,7 @@ func browserLogin(c *command.Context, resume *config.BrowserLoginState) error {
 					if t.TokenType != "Bearer" || t.AccessToken == "" || t.RefreshToken == "" || t.CLIClientSessionID == "" || t.ExpiresIn <= 0 || t.ExpiresIn > 86400 {
 						return abortBrowserLogin(c.Context, issuer, state, save, errors.New("server returned an invalid login session"))
 					}
-					expires := time.Now().UTC().Add(time.Duration(t.ExpiresIn) * time.Second)
+					expires := serverclock.Now().UTC().Add(time.Duration(t.ExpiresIn) * time.Second)
 					state.Credential = &config.Credential{AccessToken: t.AccessToken, RefreshToken: t.RefreshToken, TokenType: t.TokenType, ExpiresAt: expires}
 					// Never save an unchecked account; retaining the device grant recovers ambiguous responses.
 					me, meErr := api.New(issuer, *state.Credential, loginHTTPClient()).Me(c.Context)
