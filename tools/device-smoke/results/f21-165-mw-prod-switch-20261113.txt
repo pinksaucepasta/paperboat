@@ -23,3 +23,4 @@ Not clean, and not explained (outside the .11 window, flagged for the coordinato
   02:33Z (about 105 samples) while `pb status` was ok and the terminal kept ticking; it recovered at 02:33Z by itself and stayed ok after (probe every 20 s
   to 03:00Z: 0 failures). The failing exec's error text was not captured, the peer's journal for 01:55-02:35Z has no error lines. The 01:57Z start has no known prod event.
 Server-side 5xx for the window is the deploy gate's check, not read here.
+Likely cause of the W exec failures (coordinator, 2026-11-13): before the relay fence fix went live (02:52Z), any lane's revocation fenced every endpoint of the account; not re-measured after the fix.
