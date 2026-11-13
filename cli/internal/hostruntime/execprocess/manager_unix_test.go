@@ -444,8 +444,12 @@ func TestPTYInputEOFDoesNotEndARunningCommand(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := execution.CloseInput(); err != nil {
-		t.Fatal(err)
+	deadline := time.Now().Add(5 * time.Second)
+	for err := execution.CloseInput(); err != nil; err = execution.CloseInput() { // the process starts asynchronously
+		if !errors.Is(err, ErrInvalid) || time.Now().After(deadline) {
+			t.Fatal(err)
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 	snapshot, err := execution.Wait(context.Background())
 	if err != nil || snapshot.State != StateExited || snapshot.Result == nil || snapshot.Result.Code != 0 {
