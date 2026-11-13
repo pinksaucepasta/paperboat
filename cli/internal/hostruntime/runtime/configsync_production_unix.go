@@ -135,6 +135,9 @@ func newProductionConfigSync(config productionConfigSyncConfig) (*configsync.Sup
 			if err := os.MkdirAll(assignmentRoot, 0o700); err != nil {
 				return nil, err
 			}
+			if err := repairConfigSyncStateAccess(filepath.Join(config.StateRoot, "config-sync")); err != nil {
+				return nil, err
+			}
 			if err := pruneOrphanedAssignmentState(filepath.Join(config.StateRoot, "config-sync"), assignmentRoot); err != nil {
 				return nil, err
 			}
