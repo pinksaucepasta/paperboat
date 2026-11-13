@@ -129,3 +129,62 @@ func TestRecordingEndsWithItsSession(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 }
+
+func startManualRecording(t *testing.T, manager *Manager, sessionID string, team *ecdh.PrivateKey) recordings.State {
+	t.Helper()
+	state, err := manager.StartRecording(sessionID, recordings.StartRequest{Trigger: recordings.TriggerManual, ActorAccountID: "acct_1", Key: recordings.Key{Generation: 1, Public: team.PublicKey().Bytes()}, QuotaBytes: 1 << 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return state
+}
+
+// A deleted session leaves no open recording: Delete finalizes it before it returns, so the machine never
+// reports a recording of a session that is gone as still recording (X-23: records stayed "recording").
+func TestDeletedSessionEndsItsRecordingBeforeDeleteReturns(t *testing.T) {
+	manager, root, shell, team := recordingManager(t)
+	created, err := manager.Create(context.Background(), CreateRequest{Name: "rec", Command: shellCommand(shell, root, "read line")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	startManualRecording(t, manager, created.ID, team)
+	if _, err := manager.StopRecording(created.ID, "acct_1", recordings.ReasonStopped); err != nil {
+		t.Fatal(err)
+	}
+	startManualRecording(t, manager, created.ID, team)
+	if err := manager.Delete(created.ID); err != nil {
+		t.Fatal(err)
+	}
+	if manager.config.Recordings.State(created.ID) != nil {
+		t.Fatal("the deleted session still has an active recording")
+	}
+	metas, err := manager.Recordings()
+	if err != nil || len(metas) != 2 {
+		t.Fatalf("recordings %+v %v", metas, err)
+	}
+	for _, meta := range metas {
+		if meta.EndedAt == nil {
+			t.Fatalf("recording %s of the deleted session is still open", meta.ID)
+		}
+	}
+}
+
+// The machine closes a recording whose session is gone even if its recorder was left active.
+func TestCloseInterruptedRecordingEndsARecorderOfAGoneSession(t *testing.T) {
+	manager, root, shell, team := recordingManager(t)
+	created, err := manager.Create(context.Background(), CreateRequest{Name: "rec", Command: shellCommand(shell, root, "read line")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := startManualRecording(t, manager, created.ID, team)
+	manager.mu.Lock()
+	delete(manager.sessions, created.ID) // the session is gone from the manager; its recorder is not
+	manager.mu.Unlock()
+	meta, err := manager.CloseInterruptedRecording(state.ID)
+	if err != nil || meta.EndedAt == nil {
+		t.Fatalf("close interrupted: %+v %v", meta, err)
+	}
+	if manager.config.Recordings.State(created.ID) != nil {
+		t.Fatal("the recorder is still active")
+	}
+}
