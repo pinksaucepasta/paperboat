@@ -137,6 +137,15 @@ def start_origin(controller, owner, stop, port):
     return controller.pb('exec', owner.alias, '--', *argv, timeout=540)
 
 
+def stop_origin(controller, owner, stop):
+    code = ('import pathlib,sys,time; p=pathlib.Path(sys.argv[1]); p.touch(); '
+            'end=time.monotonic()+15\n'
+            'while p.exists() and time.monotonic()<end: time.sleep(.2)\n'
+            'assert not p.exists(), "origin did not stop"')
+    done = controller.pb('exec', owner.alias, '--', xplat_access.py(owner), '-c', code, stop, timeout=60)
+    assert done.rc == 0, 'origin cleanup: ' + (done.text + done.errtext)[-400:]
+
+
 def run_pair(team, owner, member, oid, records, origin_controller):
     original = fleet.json_pb(team.admin, 'team', 'get', team.id)['allow_private_access']
     suffix = uuid.uuid4().hex[:8]
@@ -202,12 +211,7 @@ def run_pair(team, owner, member, oid, records, origin_controller):
             # Attempt every cleanup even when an earlier mutation/cleanup failed.
             actions = []
             if origin is not None:
-                actions.append(lambda: origin_controller.pb('exec', owner.alias, '--',
-                    xplat_access.py(owner), '-c',
-                    'import pathlib,sys,time; p=pathlib.Path(sys.argv[1]); p.touch(); '
-                    'end=time.monotonic()+15\n'
-                    'while p.exists() and time.monotonic()<end: time.sleep(.2)\n'
-                    'assert not p.exists(), \"origin did not stop\"', origin_stop, timeout=60))
+                actions.append(lambda: stop_origin(origin_controller, owner, origin_stop))
             actions.extend([lambda: team.setting(original),
                             lambda: team.revoke(oid, 'exec,private_access'),
                             lambda: team.unshare(oid)])
