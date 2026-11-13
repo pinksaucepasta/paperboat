@@ -58,11 +58,11 @@ func Dial(ctx context.Context, address string, tlsConf *tls.Config, conf *quic.C
 		_ = socket.Close()
 		return nil, err
 	}
-	go func() {
-		<-connection.Context().Done()
+	// AfterFunc, not a goroutine that waits: an idle connection must not cost a goroutine more than quic.DialAddr's.
+	context.AfterFunc(connection.Context(), func() {
 		_ = transport.Close()
 		_ = socket.Close()
-	}()
+	})
 	return connection, nil
 }
 
