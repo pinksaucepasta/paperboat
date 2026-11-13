@@ -163,7 +163,9 @@ type ConnectConfig struct {
 	AllowedRouteHosts []string `json:"allowed_route_hosts,omitempty"`
 	DialRetries       int      `json:"dial_retries"`
 	DialRetrySeconds  int      `json:"dial_retry_seconds,omitempty"`
-	// TerminalOutputQueueChunks bounds buffered remote output events.
+	// TerminalOutputQueueChunks bounds buffered remote output events: pb connect's queue between the link and the screen and the
+	// daemon's queue before its local stream. What waits there is painted after a Ctrl-C however slow the screen is, so it
+	// stays at a couple of chunks (X-24: 256 chunks of 32 KiB were 8 MB, 14 s on a console painting 600 KB/s).
 	TerminalOutputQueueChunks int `json:"terminal_output_queue_chunks,omitempty"`
 	// TerminalOutputBatchMilliseconds coalesces animation bursts before local rendering.
 	TerminalOutputBatchMilliseconds int `json:"terminal_output_batch_milliseconds,omitempty"`
@@ -182,7 +184,7 @@ const (
 	DefaultDialRetries                     = 6
 	DefaultDialRetrySeconds                = 2
 	DefaultTelemetryMaxBytes               = 5 * 1024 * 1024
-	DefaultTerminalOutputQueueChunks       = 256
+	DefaultTerminalOutputQueueChunks       = 2
 	DefaultTerminalOutputBatchMilliseconds = 0
 	DefaultTerminalOutputBufferBytes       = 128 * 1024
 	DefaultInputPartialFlushMilliseconds   = 1

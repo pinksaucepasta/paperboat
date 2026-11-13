@@ -150,7 +150,7 @@ type localPeerMetadataPayload struct {
 // seconds after the key (X-24); what stays behind the window is cut by the host. Prior art: ttyd pauses the PTY while its
 // websocket send buffer is full, tmux stops reading a pane while the client's backlog is large.
 const (
-	localPeerWindowBytes  = 64 << 10
+	localPeerWindowBytes  = 32 << 10
 	localPeerAckStepBytes = 8 << 10
 )
 
