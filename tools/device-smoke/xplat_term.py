@@ -78,7 +78,7 @@ class Terminal:
             return 'echo M_%s_$((6*7))' % token, 'M_%s_42' % token
         if self.kind == 'powershell':
             return 'echo ("M_%s_" + (6*7))' % token, 'M_%s_42' % token
-        return 'echo M_%s_& set /a 6*7' % token, r'M_%s_\s+42' % token
+        return 'echo M_%s_& set /a 6*7' % token, r'M_%s_\s+(?:\x1b\][^\x07]*\x07\s*)*42' % token  # cmd's own window-title sequences may sit between the two lines
 
     def ready(self):
         kinds = [self.kind] if self.kind else ['cmd', 'powershell']

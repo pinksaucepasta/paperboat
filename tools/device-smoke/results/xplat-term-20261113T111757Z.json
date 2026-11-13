@@ -1,0 +1,40 @@
+{
+ "check": "xplat-term",
+ "devices": [
+  "L",
+  "M",
+  "W"
+ ],
+ "results": [
+  {
+   "id": "X-16:join:L>M",
+   "status": "PASS",
+   "detail": "a terminal started from lanex2-l was joined from lanex2-w: earlier and live output identical (unix)"
+  },
+  {
+   "id": "X-16:join:L>W",
+   "status": "FAIL",
+   "detail": "timed out waiting for 'M_JOINB_8d0add_\\\\s+42'; screen tail: 'ministrator: C:\\\\Windows\\\\System32\\\\cmd.exe - echo  M_JOINB_8d0add_\\x07M_JOINB_8d0add_\\r\\n\\x1b]0;Administrator: C:\\\\Windows\\\\System32\\\\cmd.exe\\x0742\\r\\n\\x1b]2;\\x07\\x1b]9;9;C:\\\\Users\\\\Pujan\\x07C:\\\\Users\\\\Pujan>\\x1b[s\\x1b[30;1H\\x1b[2K\\x1b[7mlanex2-w  xplat-7f50b6                                                                  connected  d\\x1b[27m\\x1b[u'"
+  },
+  {
+   "id": "X-16:join:M>L",
+   "status": "PASS",
+   "detail": "a terminal started from lanex2-m was joined from lanex2-w: earlier and live output identical (unix)"
+  },
+  {
+   "id": "X-16:join:M>W",
+   "status": "PASS",
+   "detail": "a terminal started from lanex2-m was joined from lanex2-l: earlier and live output identical (cmd)"
+  },
+  {
+   "id": "X-16:join:W>L",
+   "status": "PASS",
+   "detail": "a terminal started from lanex2-w was joined from lanex2-m: earlier and live output identical (unix)"
+  },
+  {
+   "id": "X-16:join:W>M",
+   "status": "PASS",
+   "detail": "a terminal started from lanex2-w was joined from lanex2-l: earlier and live output identical (unix)"
+  }
+ ]
+}

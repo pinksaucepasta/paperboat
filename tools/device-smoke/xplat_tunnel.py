@@ -81,7 +81,9 @@ def t_origin(dev, key):
     origin = threading.Thread(target=lambda: dev.run([py(dev), '-c', ORIGIN, bind, str(port), marker], timeout=300), daemon=True)
     origin.start()
     time.sleep(5)
-    created = fleet.json_pb(dev, 'tunnel', 'create', name, '--port', str(port), '--wait', timeout=240)
+    # --port dials 127.0.0.1; `localhost` is dialed as written and reaches an app on ::1 only (as in xpc_tunnel.py)
+    origin_flag = ('--from', 'http://localhost:%d' % port) if key == 'v6' else ('--port', str(port))
+    created = fleet.json_pb(dev, 'tunnel', 'create', name, *origin_flag, '--wait', timeout=240)
     try:
         url = endpoint(created)
         time.sleep(5)

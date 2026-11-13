@@ -1,0 +1,29 @@
+{
+ "check": "xplat-tunnel",
+ "devices": [
+  "L",
+  "W"
+ ],
+ "results": [
+  {
+   "id": "X-20:v6:L",
+   "status": "PASS",
+   "detail": "public simple-amber: marker on HTTP/1.1 and HTTP/2, 16 MiB sha256 equal; origin stopped -> ' 000 0'"
+  },
+  {
+   "id": "X-20:v4:L",
+   "status": "PASS",
+   "detail": "public daring-peach: marker on HTTP/1.1 and HTTP/2, 16 MiB sha256 equal; origin stopped -> ' 000 0'"
+  },
+  {
+   "id": "X-20:v6:W",
+   "status": "PASS",
+   "detail": "public brave-lake-o: marker on HTTP/1.1 and HTTP/2, 16 MiB sha256 equal; origin stopped -> ' 000 0'"
+  },
+  {
+   "id": "X-20:v4:W",
+   "status": "PASS",
+   "detail": "public fine-dawn-sh: marker on HTTP/1.1 and HTTP/2, 16 MiB sha256 equal; origin stopped -> ' 000 0'"
+  }
+ ]
+}
