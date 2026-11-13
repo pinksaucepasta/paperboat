@@ -29,9 +29,15 @@ type missSource struct {
 	mu         sync.Mutex
 	admissions []runtimewire.Admission
 	pulls      int
+	// pullDelay and observeDelay model a control plane that answers slowly (a replacement server's first requests).
+	pullDelay, observeDelay time.Duration
 }
 
 func (s *missSource) RuntimeCarrierAdmissions(context.Context, string, string) ([]runtimewire.Admission, error) {
+	s.mu.Lock()
+	delay := s.pullDelay
+	s.mu.Unlock()
+	time.Sleep(delay)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.pulls++
@@ -42,7 +48,14 @@ func (s *missSource) EndpointAdmissions(context.Context, string, string, string)
 	return control.EndpointUpdate{Complete: true, Cursor: "cursor"}, nil
 }
 
-func (s *missSource) ObserveRuntimeCarriers(context.Context, string, string, []runtimewire.Observation) error {
+func (s *missSource) ObserveRuntimeCarriers(ctx context.Context, _, _ string, _ []runtimewire.Observation) error {
+	s.mu.Lock()
+	delay := s.observeDelay
+	s.mu.Unlock()
+	select {
+	case <-time.After(delay):
+	case <-ctx.Done():
+	}
 	return nil
 }
 
@@ -51,7 +64,19 @@ func (s *missSource) ObserveRuntimeCarriers(context.Context, string, string, []r
 // ("data carrier TLS handshake failed"), so the hosts backed off. A carrier whose admission the
 // server already issued must be accepted on its first dial, with no pull tick in between.
 func TestCarrierAdmittedOnFirstDialWhenItsAdmissionIsNewerThanTheEdgePull(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	carrierAdmittedOnFirstDial(t, 0, 0)
+}
+
+// Gated deploys 2026-11-13 (.17, .20 server swaps): the replacement server answers its first requests
+// slowly, and the handshake's wait covered the pull AND the observation report that follows it, so a
+// machine that re-attached at the swap was refused unknown_machine after 3 s although the pull
+// itself had answered in time. The wait ends with the pull.
+func TestCarrierAdmittedOnFirstDialWhenTheControlPlaneObservationIsSlow(t *testing.T) {
+	carrierAdmittedOnFirstDial(t, time.Second, 4*time.Second)
+}
+
+func carrierAdmittedOnFirstDial(t *testing.T, pullDelay, observeDelay time.Duration) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	const edgeNode, edgeProcess = "edge_miss", "edge_epoch_miss"
 	tcpAddress, quicAddress := dynamicCarrierListenAddresses(t)
@@ -87,7 +112,7 @@ func TestCarrierAdmittedOnFirstDialWhenItsAdmissionIsNewerThanTheEdgePull(t *tes
 		t.Fatal(err)
 	}
 	// The pull ticker is far longer than the test: only the handshake's own pull can admit the carrier.
-	worker := &edgeruntime.RuntimeCarrierWorker{Source: source, Expected: expected, Routes: routes, Endpoints: endpoints, Interval: 5 * time.Minute, Timeout: time.Second}
+	worker := &edgeruntime.RuntimeCarrierWorker{Source: source, Expected: expected, Routes: routes, Endpoints: endpoints, Interval: 5 * time.Minute, Timeout: 10 * time.Second}
 	if err := worker.Start(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -114,6 +139,7 @@ func TestCarrierAdmittedOnFirstDialWhenItsAdmissionIsNewerThanTheEdgePull(t *tes
 	// The server issues the admission now, after the edge's last pull.
 	source.mu.Lock()
 	source.admissions = []runtimewire.Admission{admission}
+	source.pullDelay, source.observeDelay = pullDelay, observeDelay
 	source.mu.Unlock()
 
 	certificate, err := dynamicCarrierCertificateWithURI(t, "host-carrier", machinePublic, machinePrivate, identity, edgeProcess)
