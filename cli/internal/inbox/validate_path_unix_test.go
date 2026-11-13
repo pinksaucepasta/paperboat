@@ -3,8 +3,11 @@
 package inbox
 
 import (
+	"errors"
+	"io/fs"
 	"os"
 	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -20,5 +23,10 @@ func TestValidatePathNamesTheOSCauseOfAnInboxItCannotWrite(t *testing.T) {
 	err := ValidatePath(dir)
 	if err == nil || !strings.Contains(err.Error(), "not writable: permission denied") || strings.Contains(err.Error(), ".paperboat-inbox-probe") {
 		t.Fatalf("want the OS cause without the probe path, got %v", err)
+	}
+	// The receiver's HTTP layer classifies a permanent write refusal by these two lookups (file_transfer_http.go).
+	var errno syscall.Errno
+	if !errors.Is(err, fs.ErrPermission) || !errors.As(err, &errno) {
+		t.Fatalf("the cause must stay in the error chain, got %#v", err)
 	}
 }
