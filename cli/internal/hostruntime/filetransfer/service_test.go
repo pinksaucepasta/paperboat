@@ -999,8 +999,8 @@ func hasCode(err error, code Code) bool {
 	return errors.As(err, &transferErr) && transferErr.Code == code
 }
 
-func TestCancelCompletedTransferPreservesContentAndSignals(t *testing.T) {
-	service, durable, root := newService(t)
+func TestCancelCompletedTransferPreservesPublishedFileAndSignals(t *testing.T) {
+	service, durable, _ := newService(t)
 	data := []byte("completed content")
 	created, err := service.Create(t.Context(), requestFor(data))
 	if err != nil {
@@ -1025,11 +1025,8 @@ func TestCancelCompletedTransferPreservesContentAndSignals(t *testing.T) {
 		if err != nil || current.State != "published" {
 			t.Fatalf("state=%v err=%v", current.State, err)
 		}
-		for _, path := range []string{filepath.Join(root, id+".content"), published} {
-			got, err := os.ReadFile(path)
-			if err != nil || !bytes.Equal(got, data) {
-				t.Fatalf("completed content changed: %v", err)
-			}
+		if got, err := os.ReadFile(published); err != nil || !bytes.Equal(got, data) {
+			t.Fatalf("completed content changed: %v", err)
 		}
 		select {
 		case <-service.CancellationSignal(id):
@@ -1234,7 +1231,7 @@ func TestPublishChecksTheRootEveryTime(t *testing.T) {
 // A received file is published as a copy: the spool content and the Inbox file each have one link (a second link in the
 // user-state tree made the privileged install repair refuse every later update on Windows), an edit of the Inbox file
 // does not reach what the spool serves, and publishing again, also after such an edit, stays on the same path.
-func TestPublishedFileIsACopyAndRepublishingStaysIdempotent(t *testing.T) {
+func TestPublishedFileLeavesNoSpoolCopyAndRepublishingStaysIdempotent(t *testing.T) {
 	root := t.TempDir()
 	durable, err := store.Open(context.Background(), store.Config{Root: filepath.Join(root, "state")})
 	if err != nil {
@@ -1263,18 +1260,20 @@ func TestPublishedFileIsACopyAndRepublishingStaysIdempotent(t *testing.T) {
 	if err != nil || published != filepath.Join(inbox, "data.bin") {
 		t.Fatalf("published=%q err=%v", published, err)
 	}
+	// X-37: taildrop keeps nothing after the rename; neither do we. The record stays published for its retention.
 	content := filepath.Join(spool, id+".content")
-	for _, path := range []string{content, published} {
-		if links, err := fileLinks(path); err != nil || links != 1 {
-			t.Fatalf("%s has %d links (err=%v), want 1", path, links, err)
-		}
+	if _, err := os.Stat(content); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("the spool still holds the received content after publishing: %v", err)
 	}
-	// The user edits the received file; the spool still serves what was received.
+	if links, err := fileLinks(published); err != nil || links != 1 {
+		t.Fatalf("%s has %d links (err=%v), want 1", published, links, err)
+	}
+	if record, err := durable.FileTransfer(context.Background(), id); err != nil || record.State != "published" || record.ReceiptPath != published {
+		t.Fatalf("record after publishing = %+v (err=%v)", record, err)
+	}
+	// The user edits the received file; nothing else holds the bytes.
 	if err := os.WriteFile(published, []byte("edited by the user"), 0o600); err != nil {
 		t.Fatal(err)
-	}
-	if kept, err := os.ReadFile(content); err != nil || !bytes.Equal(kept, data) {
-		t.Fatalf("an edit of the Inbox file reached the spool: %q %v", kept, err)
 	}
 	for _, call := range []func(context.Context, string) (string, error){service.PublishedPath, service.ExistingPublishedPath} {
 		if again, err := call(context.Background(), id); err != nil || again != published {

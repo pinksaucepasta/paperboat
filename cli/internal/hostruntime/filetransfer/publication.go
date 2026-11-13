@@ -82,13 +82,58 @@ func (s *Service) publishedMarked(id string) bool {
 	return err == nil && info.Mode().IsRegular()
 }
 
-// copyToInbox writes the content next to path and links it into place without replacing anything (an existing file is
-// ErrExist), so the Inbox never shows a half-written file and a file someone else put there is never overwritten.
+// copyToInbox moves the spooled content into the Inbox and links it into place without replacing anything (an
+// existing file is ErrExist), so the Inbox never shows a half-written file and a file someone else put there is never
+// overwritten. Like taildrop (feature/taildrop/fileops_fs.go Rename) the finished file is renamed, not kept: on the
+// same volume the spool content itself becomes the Inbox file; across volumes it is copied and then removed. The
+// spool keeps the content on every failure, so a repeated complete publishes it again. A crash after the rename
+// leaves only the hidden temporary file, which the next attempt publishes.
 func (s *Service) copyToInbox(content, root, path string, id string) error {
 	temporary := filepath.Join(root, "."+id+".publish")
-	if err := os.Remove(temporary); err != nil && !errors.Is(err, os.ErrNotExist) {
+	moved := false
+	if _, err := os.Lstat(content); err == nil {
+		if err := os.Remove(temporary); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		//paperboat:allow-source-policy atomic-replacement owner=file-transfer reason=inbox-publish-move
+		if moveFile(content, temporary) == nil {
+			moved = true
+		} else if err := copyFile(content, temporary); err != nil {
+			return errors.Join(err, os.Remove(temporary))
+		}
+	} else if _, tempErr := os.Lstat(temporary); tempErr != nil {
+		return err
+	} else {
+		moved = true
+	}
+	linkErr := linkFile(temporary, path)
+	if linkErr != nil && !errors.Is(linkErr, os.ErrExist) {
+		// exFAT and FAT have no hard links (macOS: ENOTSUP, Linux: EPERM). The finished copy is renamed into place
+		// instead of copied again after the failure; like taildrop, the check and the rename share one lock.
+		if renameErr := renameNoReplace(temporary, path); renameErr == nil {
+			return removeIfExists(content) // the copy path left the spool content behind; a moved one has none
+		} else {
+			linkErr = errors.Join(linkErr, renameErr)
+		}
+	}
+	if linkErr != nil {
+		if moved { // keep the content for a repeated complete
+			//paperboat:allow-source-policy atomic-replacement owner=file-transfer reason=inbox-publish-move-rollback
+			return errors.Join(linkErr, os.Rename(temporary, content))
+		}
+		return errors.Join(linkErr, os.Remove(temporary))
+	}
+	return errors.Join(os.Remove(temporary), removeIfExists(content))
+}
+
+func removeIfExists(path string) error {
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
+	return nil
+}
+
+func copyFile(content, temporary string) error {
 	source, err := os.Open(content)
 	if err != nil {
 		return err
@@ -102,26 +147,16 @@ func (s *Service) copyToInbox(content, root, path string, id string) error {
 	if copyErr == nil {
 		copyErr = file.Sync()
 	}
-	if err := errors.Join(copyErr, file.Close()); err != nil {
-		return errors.Join(err, os.Remove(temporary))
-	}
-	linkErr := linkFile(temporary, path)
-	if linkErr != nil && !errors.Is(linkErr, os.ErrExist) {
-		// exFAT and FAT have no hard links (macOS: ENOTSUP, Linux: EPERM). The finished copy is renamed into place
-		// instead of copied again after the failure; like taildrop, the check and the rename share one lock.
-		if renameErr := renameNoReplace(temporary, path); renameErr == nil {
-			return nil
-		} else {
-			linkErr = errors.Join(linkErr, renameErr)
-		}
-	}
-	return errors.Join(linkErr, os.Remove(temporary))
+	return errors.Join(copyErr, file.Close())
 }
 
 var renameMu sync.Mutex
 
 // linkFile is replaced by tests to stand in for a file system without hard links.
 var linkFile = os.Link
+
+// moveFile is replaced by tests to stand in for an Inbox on another volume (EXDEV).
+var moveFile = os.Rename
 
 // renameNoReplace never replaces a file that appeared meanwhile; ErrExist then means what it means for os.Link.
 func renameNoReplace(from, to string) error {
@@ -132,6 +167,7 @@ func renameNoReplace(from, to string) error {
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
+	//paperboat:allow-source-policy atomic-replacement owner=file-transfer reason=inbox-publish-no-hard-links
 	return os.Rename(from, to)
 }
 
@@ -173,9 +209,6 @@ func (s *Service) publishToRoot(ctx context.Context, transfer store.FileTransfer
 		}
 	}
 	content := s.contentPath(transfer.ID)
-	if _, err := os.Stat(content); err != nil {
-		return "", &Error{Code: StorageUnavailable, Cause: err}
-	}
 	// Try the reserved destination first after a restart, before considering a
 	// collision. Never consult a new Inbox setting for an existing receipt.
 	for index := 0; index <= 10000; index++ {
