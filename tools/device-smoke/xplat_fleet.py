@@ -136,7 +136,7 @@ def linux(name=None, ct=None):
     docker = os.environ.get('XPLAT_L_DOCKER', 'docker').split()  # `sudo -n docker` on a host where the user is not in the docker group
     prefix = ['ssh', L_HOST, *docker, 'exec', '-i', '-u', user, '-e', 'HOME=/home/' + user,
               '-e', 'XDG_RUNTIME_DIR=/run/user/' + uid, ct or L_CT]
-    return Unix(name or PREFIX + '-l', 'linux', prefix, '/home/' + user, '/home/%s/.local/bin/pb' % user)
+    return Unix(name or os.environ.get('XPLAT_L_NAME') or PREFIX + '-l', 'linux', prefix, '/home/' + user, '/home/%s/.local/bin/pb' % user)
 
 
 def mac_unlock():
