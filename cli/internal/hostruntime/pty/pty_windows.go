@@ -251,10 +251,32 @@ func (p *Process) WriteContext(ctx context.Context, data []byte) (int, error) {
 	return n, err
 }
 
-// consoleModeQueryTimeout bounds the helper that reads the console mode before the key is acted on: it starts inside the
-// session's pseudoconsole, and under an output flood it took over a second (X-24: the cut and the screen came 1.4 s after
-// the key), where it takes 10-40 ms otherwise. A timeout is the unknown answer, which keeps the key an interrupt.
+// consoleModeQueryTimeout bounds the whole console-mode query that precedes a Ctrl-C (starting the helper included): the helper
+// starts inside the session's pseudoconsole, and under an output flood that took 0.4-1.4 s (X-24: the cut and the screen came
+// that long after the key), where it takes 10-40 ms otherwise. A timeout is the unknown answer, which keeps the key an interrupt.
 const consoleModeQueryTimeout = 200 * time.Millisecond
+
+// inputIsProcessedWithin is inputIsProcessed that never takes longer than bound to answer; known is false then (or on an
+// error). The query itself finishes on its own, bounded by its own wait.
+func (p *Process) inputIsProcessedWithin(bound time.Duration) (processed, known bool) {
+	type answer struct {
+		processed bool
+		err       error
+	}
+	result := make(chan answer, 1)
+	go func() {
+		value, err := p.inputIsProcessed(time.Second)
+		result <- answer{value, err}
+	}()
+	timer := time.NewTimer(bound)
+	defer timer.Stop()
+	select {
+	case got := <-result:
+		return got.processed, got.err == nil
+	case <-timer.C:
+		return false, false
+	}
+}
 
 // Interrupt delivers a lone Ctrl-C (ETX) ahead of input stuck in a full ConPTY input pipe: a paste the foreground
 // program never reads (a flood such as `yes`) blocks WriteFile, and the key would wait behind it for the 20 s input
@@ -273,7 +295,7 @@ func (p *Process) Interrupt(key byte, accepted func()) (bool, error) {
 	// vim-like editor, PSReadLine mid-edit) gets 0x03 as data, so nothing is cut or discarded and the caller writes it
 	// normally. Unknown (no console, helper failed or timed out) keeps the key an interrupt, as before.
 	if p.console != 0 {
-		if processed, err := p.inputIsProcessed(consoleModeQueryTimeout); err == nil && !processed {
+		if processed, known := p.inputIsProcessedWithin(consoleModeQueryTimeout); known && !processed {
 			return false, nil
 		}
 	}
