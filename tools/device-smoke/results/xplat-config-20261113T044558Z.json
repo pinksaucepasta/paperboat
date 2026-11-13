@@ -1,0 +1,35 @@
+{
+ "check": "xplat-config",
+ "results": [
+  {
+   "id": "X-05:x05_local_links:L>M",
+   "status": "PASS",
+   "detail": "links reported unsupported_file_type: dirlink-LM.txt, filelink-LM.txt; targets untouched"
+  },
+  {
+   "id": "X-05:x05_local_links:M>L",
+   "status": "PASS",
+   "detail": "links reported unsupported_file_type: dirlink-ML.txt, filelink-ML.txt; targets untouched"
+  },
+  {
+   "id": "X-05:x05_repo_link:L>M",
+   "status": "PASS",
+   "detail": "repository symlink reported on both devices, not created"
+  },
+  {
+   "id": "X-05:x05_repo_link:M>L",
+   "status": "PASS",
+   "detail": "repository symlink reported on both devices, not created"
+  },
+  {
+   "id": "X-05:x05_ancestor:L>M",
+   "status": "PASS",
+   "detail": "a destination behind a link is refused on lanex2-l and lanex2-m; target untouched"
+  },
+  {
+   "id": "X-05:x05_ancestor:M>L",
+   "status": "PASS",
+   "detail": "a destination behind a link is refused on lanex2-m and lanex2-l; target untouched"
+  }
+ ]
+}
