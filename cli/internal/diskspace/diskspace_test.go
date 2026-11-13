@@ -34,3 +34,13 @@ func TestIsFullRecognisesTheDiskFullErrnoThroughWrapping(t *testing.T) {
 		t.Fatal("an unrelated error was taken for a full disk")
 	}
 }
+
+func TestMaxFileIsUnlimitedOnTheTestDisk(t *testing.T) {
+	limit, name, err := MaxFile(filepath.Join(t.TempDir(), "not", "yet"))
+	if err != nil || limit != 0 || name == "" {
+		t.Fatalf("a normal disk has no per-file limit: %d %q %v", limit, name, err)
+	}
+	if _, _, err := MaxFile("relative"); err == nil {
+		t.Fatal("a relative path was accepted")
+	}
+}

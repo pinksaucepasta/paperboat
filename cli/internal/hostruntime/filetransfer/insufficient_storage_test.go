@@ -47,3 +47,29 @@ func TestCreateRefusesABatchTheDisksCannotHoldBeforeAnythingIsSent(t *testing.T)
 		t.Fatalf("Create with room: %v", err)
 	}
 }
+
+// X-37: a file the Inbox's file system cannot hold (FAT32 stops at 4 GiB) is refused before a byte is sent.
+func TestCreateRefusesAFileTheInboxFileSystemCannotHold(t *testing.T) {
+	service, _, _ := newService(t)
+	published := t.TempDir()
+	service.config.PublishRoot = func() (string, error) { return published, nil }
+	limit := uint64(4 << 20)
+	service.config.MaxFile = func(path string) (uint64, string, error) {
+		if path != published {
+			t.Fatalf("measured %q, not the Inbox", path)
+		}
+		return limit, "FAT", nil
+	}
+	request := requestFor(make([]byte, 5<<20))
+	request.BatchID = "fb_fat"
+	_, err := service.Create(context.Background(), request)
+	var refusal *Error
+	if !errors.As(err, &refusal) || refusal.Code != FileTooLarge || refusal.FileBytes != 5<<20 || refusal.FileLimit != limit || refusal.FileSystem != "FAT" {
+		t.Fatalf("Create of an oversized file = %#v", err)
+	}
+	limit = 0 // a file system without a per-file limit
+	request.BatchID = "fb_ok"
+	if _, err := service.Create(context.Background(), request); err != nil {
+		t.Fatalf("Create on an unlimited file system: %v", err)
+	}
+}

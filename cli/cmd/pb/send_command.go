@@ -289,7 +289,7 @@ func runSendCommand(cobraCommand *cobra.Command, paths []string) error {
 					progress.finish("done", declared.Bytes)
 				}
 			}
-			err = destinationBusy(destination.Alias, destinationStorageFull(destination.Alias, destinationGone(destination.Alias, err)))
+			err = destinationBusy(destination.Alias, destinationFileTooLarge(destination.Alias, destinationStorageFull(destination.Alias, destinationGone(destination.Alias, err))))
 			if closeErr := nativeClient.Close(); closeErr != nil {
 				err = errors.Join(err, closeErr)
 			}

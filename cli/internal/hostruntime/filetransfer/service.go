@@ -217,6 +217,9 @@ func (s *Service) Create(ctx context.Context, request CreateRequest) ([]store.Fi
 		if err := s.requireRoom(uint64(total)); err != nil {
 			return nil, err
 		}
+		if err := s.requireFilesFit(request.Files); err != nil {
+			return nil, err
+		}
 	}
 	if err := s.config.Store.CreateFileTransfersWithinLimits(ctx, transfers, spool, policy.MaxConcurrentTransfers); err != nil {
 		if errors.Is(err, store.ErrConflict) {
@@ -676,6 +679,32 @@ func classifyIO(err error) error {
 		return err
 	}
 	return storageFailure(err)
+}
+
+// requireFilesFit refuses a batch holding a file the Inbox's file system cannot store (FAT32 stops at 4 GiB),
+// before a byte is sent: otherwise the copy runs to the limit and then fails on every retry.
+func (s *Service) requireFilesFit(files []File) error {
+	if s.config.PublishRoot == nil {
+		return nil
+	}
+	root, err := s.config.PublishRoot()
+	if err != nil {
+		return nil
+	}
+	maxFile := s.config.MaxFile
+	if maxFile == nil {
+		maxFile = diskspace.MaxFile
+	}
+	limit, name, err := maxFile(root)
+	if err != nil || limit == 0 {
+		return nil // an unreadable disk is reported by the write itself
+	}
+	for _, file := range files {
+		if uint64(file.Size) > limit {
+			return &Error{Code: FileTooLarge, FileBytes: uint64(file.Size), FileLimit: limit, FileSystem: name}
+		}
+	}
+	return nil
 }
 
 // requireRoom refuses a batch the receiving disk cannot hold before a single byte is sent, so the

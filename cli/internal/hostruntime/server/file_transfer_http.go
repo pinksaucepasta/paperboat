@@ -657,10 +657,16 @@ func writeFileTransferError(ctx context.Context, stage string, writer http.Respo
 // shortage was measured before anything was sent, so the sender can name both.
 func insufficientStorageDetails(err error) map[string]any {
 	var transferErr *filetransfer.Error
-	if !errors.As(err, &transferErr) || transferErr == nil || transferErr.Code != filetransfer.InsufficientStorage || transferErr.NeededBytes == 0 {
+	if !errors.As(err, &transferErr) || transferErr == nil {
 		return nil
 	}
-	return map[string]any{"needed_bytes": transferErr.NeededBytes, "free_bytes": transferErr.FreeBytes}
+	switch {
+	case transferErr.Code == filetransfer.FileTooLarge:
+		return map[string]any{"file_bytes": transferErr.FileBytes, "file_limit_bytes": transferErr.FileLimit, "file_system": transferErr.FileSystem}
+	case transferErr.Code == filetransfer.InsufficientStorage && transferErr.NeededBytes != 0:
+		return map[string]any{"needed_bytes": transferErr.NeededBytes, "free_bytes": transferErr.FreeBytes}
+	}
+	return nil
 }
 
 func reportFileTransferFailure(ctx context.Context, stage string, err error) string {
@@ -714,6 +720,8 @@ func fileTransferHTTPStatus(code string) int {
 		return http.StatusTooManyRequests
 	case "insufficient_storage":
 		return http.StatusInsufficientStorage
+	case "file_too_large":
+		return http.StatusRequestEntityTooLarge
 	default:
 		return http.StatusServiceUnavailable
 	}

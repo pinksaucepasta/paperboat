@@ -126,3 +126,24 @@ func TestSendDestinationAndPlanLimitMessages(t *testing.T) {
 		t.Fatalf("billing link lost: %q", message)
 	}
 }
+
+// X-37: a receiver whose Inbox file system cannot hold the file refuses at once and the sender names the limit, in text and JSON.
+func TestSendOfAFileTheInboxFileSystemCannotHoldNamesTheLimit(t *testing.T) {
+	remote := &filetransfer.Error{Code: "file_too_large", StatusCode: http.StatusRequestEntityTooLarge, FileBytes: 4500000000, FileLimit: 1<<32 - 1, FileSystem: "FAT"}
+	err := destinationFileTooLarge("usb-laptop", fmt.Errorf("send batch: %w", remote))
+	failure := classifyCommandFailure(err)
+	message := commandFailureMessage(err, failure)
+	for _, want := range []string{"usb-laptop keeps its Inbox on a FAT volume", "cannot hold a file over", "pb inbox set", "Nothing was sent"} {
+		if !strings.Contains(message, want) {
+			t.Fatalf("message %q lacks %q", message, want)
+		}
+	}
+	result := classifyCLIJSONError(err)
+	if failure.kind != commandRejected || result.Code != "destination_file_system_limit" || result.StateChanged != false || result.Retryable {
+		t.Fatalf("kind=%v json=%+v", failure.kind, result)
+	}
+	other := &filetransfer.Error{Code: "storage_unavailable", StatusCode: http.StatusServiceUnavailable}
+	if destinationFileTooLarge("hp", other) != error(other) {
+		t.Fatal("another failure was converted")
+	}
+}

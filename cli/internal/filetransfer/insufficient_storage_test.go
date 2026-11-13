@@ -23,3 +23,16 @@ func TestInsufficientStorageIsPermanentAndCarriesTheShortage(t *testing.T) {
 		t.Fatal("an ordinary storage hiccup is no longer retried")
 	}
 }
+
+// X-37: a receiver whose file system cannot hold the file says so with the limit, and the sender does not retry it.
+func TestFileTooLargeIsPermanentAndCarriesTheLimit(t *testing.T) {
+	body := `{"code":"file_too_large","requestId":"request_1","retryable":false,"details":{"file_bytes":4500000000,"file_limit_bytes":4294967295,"file_system":"FAT"}}`
+	err := decodeError(&http.Response{StatusCode: http.StatusRequestEntityTooLarge, Body: io.NopCloser(strings.NewReader(body))})
+	remote, ok := err.(*Error)
+	if !ok || remote.Code != "file_too_large" || remote.FileBytes != 4500000000 || remote.FileLimit != 1<<32-1 || remote.FileSystem != "FAT" {
+		t.Fatalf("decoded = %#v", err)
+	}
+	if retryableTransferFailure(err) {
+		t.Fatal("a file the file system cannot hold would be retried until the timeout")
+	}
+}

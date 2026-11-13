@@ -52,6 +52,9 @@ func validateInboxPath(path string, _ os.FileInfo) error {
 	if err != nil || attributes&windows.FILE_ATTRIBUTE_REPARSE_POINT != 0 {
 		return errors.New("inbox path must not be a reparse point")
 	}
+	if !volumeKeepsFilesPrivate(path) {
+		return errors.New("inbox path is on a FAT or exFAT volume, which cannot keep files private to you; choose a folder on an NTFS drive")
+	}
 	sid, err := currentUserSID()
 	if err != nil {
 		return err
@@ -74,6 +77,24 @@ func validateInboxPath(path string, _ os.FileInfo) error {
 		return errors.New("inbox path ACL grants access outside the current user and SYSTEM")
 	}
 	return nil
+}
+
+// volumeKeepsFilesPrivate is false for a volume without file permissions (FAT32, exFAT), where the Inbox's
+// owner and ACL cannot exist; when the volume cannot be read the later checks name the failure.
+func volumeKeepsFilesPrivate(path string) bool {
+	name, err := windows.UTF16PtrFromString(path)
+	if err != nil {
+		return true
+	}
+	root := make([]uint16, windows.MAX_PATH+1)
+	if windows.GetVolumePathName(name, &root[0], uint32(len(root))) != nil {
+		return true
+	}
+	var flags uint32
+	if windows.GetVolumeInformation(&root[0], nil, 0, nil, nil, &flags, nil, 0) != nil {
+		return true
+	}
+	return flags&windows.FILE_PERSISTENT_ACLS != 0
 }
 
 func inboxDACL(value string) string {

@@ -30,6 +30,9 @@ const (
 	// InsufficientStorage means the receiving disk has no room for the files. It is permanent until
 	// space is freed, so a sender must not keep retrying it.
 	InsufficientStorage Code = "insufficient_storage"
+	// FileTooLarge means one file is bigger than the receiving file system can hold (FAT32: 4 GiB minus one byte).
+	// Permanent for that Inbox; refused before any byte is sent.
+	FileTooLarge Code = "file_too_large"
 )
 
 type Error struct {
@@ -37,6 +40,9 @@ type Error struct {
 	Cause error
 	// NeededBytes and FreeBytes accompany InsufficientStorage when the shortage is known up front.
 	NeededBytes, FreeBytes uint64
+	// FileBytes, FileLimit and FileSystem accompany FileTooLarge: the file's size, the file system's per-file limit and its name.
+	FileBytes, FileLimit uint64
+	FileSystem           string
 }
 
 func (e *Error) Error() string {

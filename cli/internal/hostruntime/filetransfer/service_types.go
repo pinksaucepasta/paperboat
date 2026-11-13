@@ -117,6 +117,8 @@ type Config struct {
 	CancellationDrainTimeout time.Duration
 	// FreeSpace reports the bytes available on the disk holding a path; zero uses the real disk.
 	FreeSpace func(string) (uint64, error)
+	// MaxFile reports the largest single file the disk holding a path can store and the file system's name; zero uses the real disk.
+	MaxFile func(string) (uint64, string, error)
 }
 
 type Service struct {

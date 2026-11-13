@@ -140,3 +140,27 @@ func serverTransferLimit(err error, sources []filetransfer.Source) error {
 	}
 	return nil
 }
+
+// destinationFileTooLargeError is a send the receiving computer refused because one file is bigger than its
+// Inbox's file system can hold (FAT32: 4 GiB minus one byte). Nothing was sent.
+type destinationFileTooLargeError struct {
+	machine, fileSystem string
+	size, limit         uint64
+	cause               error
+}
+
+func (e destinationFileTooLargeError) Error() string {
+	return fmt.Sprintf("%s keeps its Inbox on a %s volume, which cannot hold a file over %s (this one is %s). Send a smaller file, or point its Inbox at a disk with NTFS, exFAT, APFS or ext4 with `pb inbox set`. Nothing was sent.", e.machine, e.fileSystem, transferSize(int64(e.limit)), transferSize(int64(e.size)))
+}
+
+func (e destinationFileTooLargeError) Unwrap() error { return e.cause }
+
+// destinationFileTooLarge turns the receiver's file_too_large refusal into the typed error that names the
+// computer; any other error is returned unchanged.
+func destinationFileTooLarge(machine string, err error) error {
+	var remote *filetransfer.Error
+	if err == nil || !errors.As(err, &remote) || remote.Code != "file_too_large" {
+		return err
+	}
+	return destinationFileTooLargeError{machine: machine, fileSystem: remote.FileSystem, size: remote.FileBytes, limit: remote.FileLimit, cause: err}
+}

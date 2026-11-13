@@ -12,17 +12,45 @@ import (
 // does not exist yet is measured through its nearest existing parent, which is the disk it would
 // be created on.
 func Available(path string) (uint64, error) {
+	existing, err := nearestExisting(path)
+	if err != nil {
+		return 0, err
+	}
+	return available(existing)
+}
+
+// FatFileLimit is the largest file FAT volumes hold: 4 GiB minus one byte.
+const FatFileLimit = 1<<32 - 1
+
+// MaxFile returns the largest single file the disk holding path can store, and the file system's name for
+// messages. Zero means no limit that matters here: only FAT volumes (FAT32 on USB sticks and SD cards) have one.
+func MaxFile(path string) (limit uint64, name string, err error) {
+	existing, err := nearestExisting(path)
+	if err != nil {
+		return 0, "", err
+	}
+	name, err = fileSystem(existing)
+	if err != nil {
+		return 0, "", err
+	}
+	if name == "FAT" {
+		return FatFileLimit, name, nil
+	}
+	return 0, name, nil
+}
+
+func nearestExisting(path string) (string, error) {
 	if !filepath.IsAbs(path) {
-		return 0, errors.New("disk space path must be absolute")
+		return "", errors.New("disk space path must be absolute")
 	}
 	for current := filepath.Clean(path); ; current = filepath.Dir(current) {
 		if _, err := os.Stat(current); err == nil {
-			return available(current)
+			return current, nil
 		} else if !errors.Is(err, os.ErrNotExist) {
-			return 0, err
+			return "", err
 		}
 		if parent := filepath.Dir(current); parent == current {
-			return 0, os.ErrNotExist
+			return "", os.ErrNotExist
 		}
 	}
 }

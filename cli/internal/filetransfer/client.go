@@ -91,7 +91,11 @@ type Error struct {
 	// NeededBytes and FreeBytes come with "insufficient_storage" when the receiver measured the
 	// shortage before accepting the files.
 	NeededBytes, FreeBytes uint64 `json:"-"`
-	cause                  error
+	// FileBytes, FileLimit and FileSystem come with "file_too_large": the file's size and the receiving file
+	// system's per-file limit and name.
+	FileBytes, FileLimit uint64 `json:"-"`
+	FileSystem           string `json:"-"`
+	cause                error
 }
 
 func (e *Error) Error() string {
@@ -847,6 +851,9 @@ func decodeError(response *http.Response) error {
 		Details   struct {
 			NeededBytes uint64 `json:"needed_bytes"`
 			FreeBytes   uint64 `json:"free_bytes"`
+			FileBytes   uint64 `json:"file_bytes"`
+			FileLimit   uint64 `json:"file_limit_bytes"`
+			FileSystem  string `json:"file_system"`
 		} `json:"details"`
 	}
 	decodeErr := json.NewDecoder(io.LimitReader(response.Body, 64<<10)).Decode(&envelope)
@@ -858,8 +865,14 @@ func decodeError(response *http.Response) error {
 			failure.RequestID = envelope.RequestID
 		}
 		failure.Retryable = envelope.Retryable
-		if failure.Code == "insufficient_storage" {
+		switch failure.Code {
+		case "insufficient_storage":
 			failure.NeededBytes, failure.FreeBytes = envelope.Details.NeededBytes, envelope.Details.FreeBytes
+		case "file_too_large":
+			failure.FileBytes, failure.FileLimit = envelope.Details.FileBytes, envelope.Details.FileLimit
+			if len(envelope.Details.FileSystem) <= 32 {
+				failure.FileSystem = envelope.Details.FileSystem
+			}
 		}
 	} else if decodeErr != io.EOF {
 		failure.cause = decodeErr

@@ -33,3 +33,25 @@ func TestInsufficientStorageIsAnUnretryable507WithTheShortage(t *testing.T) {
 		t.Fatalf("an ordinary storage failure carried a shortage: %v", details)
 	}
 }
+
+// X-37: the receiver's "file too large for this file system" answer is 413, not retryable, with the limit and the file system.
+func TestFileTooLargeIsAnUnretryable413WithTheLimit(t *testing.T) {
+	err := fmt.Errorf("create: %w", &filetransfer.Error{Code: filetransfer.FileTooLarge, FileBytes: 4500000000, FileLimit: 1<<32 - 1, FileSystem: "FAT"})
+	recorder := httptest.NewRecorder()
+	writeFileTransferError(t.Context(), "command", recorder, "request_1", err)
+	var body struct {
+		Code      string `json:"code"`
+		Retryable bool   `json:"retryable"`
+		Details   struct {
+			File       uint64 `json:"file_bytes"`
+			Limit      uint64 `json:"file_limit_bytes"`
+			FileSystem string `json:"file_system"`
+		} `json:"details"`
+	}
+	if recorder.Code != http.StatusRequestEntityTooLarge || json.Unmarshal(recorder.Body.Bytes(), &body) != nil {
+		t.Fatalf("status %d body %s", recorder.Code, recorder.Body.String())
+	}
+	if body.Code != "file_too_large" || body.Retryable || body.Details.File != 4500000000 || body.Details.Limit != 1<<32-1 || body.Details.FileSystem != "FAT" {
+		t.Fatalf("body = %+v", body)
+	}
+}
