@@ -54,11 +54,20 @@ export function mobileKeySequence(key: MobileKey, applicationCursorMode: boolean
   return applyMobileModifiers(key, modifiers)
 }
 
-/** ESC b / ESC f for a bare Option+Left / Option+Right on macOS (word motion); null for every other key. */
-export function optionArrowSequence(
-  event: Pick<KeyboardEvent, "key" | "altKey" | "ctrlKey" | "metaKey" | "shiftKey">,
+/**
+ * What a bare Option+key sends on macOS, as in Terminal.app: ESC b / ESC f for Option+Left / Option+Right (word motion), and the
+ * character Option composed (Option+E gives the acute accent, Option+G a copyright sign) without an ESC in front. Safari reports
+ * Option+arrow with the control character in `key` (Left is U+001C), so arrows are told apart by `code`. Null for every other key.
+ */
+export function optionKeySequence(
+  event: Pick<KeyboardEvent, "key" | "code" | "altKey" | "ctrlKey" | "metaKey" | "shiftKey">,
   mac: boolean,
 ): string | null {
-  if (!mac || !event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return null
-  return event.key === "ArrowLeft" ? "\x1bb" : event.key === "ArrowRight" ? "\x1bf" : null
+  if (!mac || !event.altKey || event.ctrlKey || event.metaKey) return null
+  if (!event.shiftKey) {
+    if (event.key === "ArrowLeft" || event.code === "ArrowLeft") return "\x1bb"
+    if (event.key === "ArrowRight" || event.code === "ArrowRight") return "\x1bf"
+  }
+  const composed = [...event.key].length === 1 && event.key > "~"
+  return composed && !event.code.startsWith("Arrow") ? event.key : null
 }

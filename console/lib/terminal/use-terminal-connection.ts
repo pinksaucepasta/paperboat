@@ -27,7 +27,7 @@ import {
 import {
   applyMobileModifiers,
   mobileKeySequence,
-  optionArrowSequence,
+  optionKeySequence,
   noMobileModifiers,
   type MobileKey,
   type MobileModifiers,
@@ -546,9 +546,9 @@ export function useTerminalConnection({
       if (selection.kind === "files") void uploadFiles(selection.files)
       else showFilePasteNotice(filePasteMessage(selection.kind))
     }
-    // macOS Option+Left/Right is word motion (ESC b / ESC f) as in Terminal.app and xterm.js; zsh binds nothing else.
+    // macOS Option+Left/Right is word motion (ESC b / ESC f) and Option+letter sends the composed character, as in Terminal.app.
     const onOptionArrowCapture = (event: KeyboardEvent) => {
-      const sequence = optionArrowSequence(event, /^Mac/i.test(navigator.platform))
+      const sequence = optionKeySequence(event, /^Mac/i.test(navigator.platform))
       if (!sequence || event.isComposing || phaseRef.current !== "attached") return
       event.preventDefault()
       event.stopPropagation()
