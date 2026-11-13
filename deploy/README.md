@@ -55,6 +55,18 @@ Install the distribution's `python3-boto3` on the managed VPS and run
 bucket if absent, checks upload/download, verifies anonymous reads are denied, and
 removes its random disposable object. It never prints credentials or payloads.
 
+## Hosted edges and relays are advertised by DNS name
+
+A machine on an IPv6-only network behind NAT64+DNS64 reaches IPv4-only servers only through DNS names (DNS64
+synthesizes AAAA for a name, never for an IPv4 literal). Every hosted edge and relay therefore advertises a name:
+one name per host, one `A` record each (the hosts have no global IPv6, so no `AAAA`), in a zone the operator
+controls and outside the preview, tunnel and runtime base domains. The same name serves the edge carrier, the
+relay and the public HTTPS listener of that host. Install with `pbh install --endpoint-host <name>`: the carrier
+certificate gets the name as SAN and the node registers it; an existing installation refuses a changed
+`--endpoint-host`, so a host that advertises its IP is uninstalled and installed again. Public HTTPS for the name:
+`edge-ip-certificate.py` asks Certbot for `--domain <name>` (it still uses `--ip-address` for an IP). Check from a
+v6-only host: `getent ahostsv6 <name>` returns a `64:ff9b::` address, `pb ping` shows a path.
+
 ## Public HTTPS for enrolled IP edges
 
 Relay/edge installations live on their own hosts. An installation advertising a
