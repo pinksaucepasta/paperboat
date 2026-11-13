@@ -16,21 +16,24 @@ import (
 // The same computer enrolled again (pb reset, reinstall) gets a new machine record but keeps its
 // SSH host keys. The retired record must not hold them against the new one forever.
 func TestSQLRepositoryHostKeysMoveToTheMachineThatReplacedARetiredRecord(t *testing.T) {
-	hostKeysMoveToTheReplacement(t, "disconnected")
+	hostKeysMoveToTheReplacement(t, "disconnected", true)
 }
 
-// An OFFLINE record of the same account that cannot answer is released the same way: the computer was added again.
-func TestSQLRepositoryHostKeysMoveFromAnOfflineRecordOfTheSameAccount(t *testing.T) {
-	hostKeysMoveToTheReplacement(t, "offline")
+// An OFFLINE record keeps its host keys and its record: it may only be cut off from Paperboat (offline until
+// revoked), and host keys do not prove the same computer, since cloned images share them. Two hosted macOS runners
+// from one image replaced each other's record whenever one was offline (staging 2026-11-12). The newcomer is
+// refused as "in use"; a reinstall replaces explicitly (pb reset, replaces_machine_id).
+func TestSQLRepositoryHostKeysStayWithAnOfflineRecordOfTheSameAccount(t *testing.T) {
+	hostKeysMoveToTheReplacement(t, "offline", false)
 }
 
 // The computer paired into another account: its own revoked record in the old account must not keep
 // managed SSH degraded ("host keys identical to another machine's") in the new one.
 func TestSQLRepositoryHostKeysMoveToAnotherAccountFromARevokedRecord(t *testing.T) {
-	hostKeysMoveToTheReplacement(t, "revoked")
+	hostKeysMoveToTheReplacement(t, "revoked", true)
 }
 
-func hostKeysMoveToTheReplacement(t *testing.T, retiredState string) {
+func hostKeysMoveToTheReplacement(t *testing.T, retiredState string, moves bool) {
 	dsn := os.Getenv("PAPERBOAT_TEST_DATABASE_DSN")
 	if dsn == "" {
 		t.Skip("set PAPERBOAT_TEST_DATABASE_DSN to run managed SSH repository integration tests")
@@ -100,6 +103,16 @@ func hostKeysMoveToTheReplacement(t *testing.T, retiredState string) {
 	}
 	if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.user_machines SET state=$2,online=false WHERE id=$1`, oldID, retiredState); err != nil {
 		t.Fatal(err)
+	}
+	if !moves {
+		var kept int
+		if err := observe("operation_reenroll_new", user, newID, hostKey); !errors.As(err, &inUse) {
+			t.Fatalf("an offline record's host keys were handed to another machine: %v", err)
+		}
+		if err := store.SQL().QueryRowContext(ctx, `SELECT count(*) FROM paperboat.user_machines WHERE id=$1 AND deleted_at IS NULL`, oldID).Scan(&kept); err != nil || kept != 1 {
+			t.Fatalf("the offline record was removed (kept=%d, err=%v)", kept, err)
+		}
+		return
 	}
 	if err := observe("operation_reenroll_new", user, newID, hostKey); err != nil {
 		t.Fatalf("the replacement machine could not record the host keys it now has: %v", err)

@@ -16,7 +16,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/machineevents"
 )
 
-// ReplaceRetiredMachineTx removes the disconnected, revoked or offline record of a computer that was
+// ReplaceRetiredMachineTx removes the disconnected or revoked record of a computer that was
 // added again. The caller has already proved it is the same computer (the new machine reports
 // SSH host keys the retired record owned) and that both records belong to userID.
 //
@@ -92,9 +92,10 @@ func (s *Service) replaceMachineTx(ctx context.Context, tx *db.Tx, userID, retir
 	if err != nil {
 		return false, err
 	}
-	// Only a record that cannot answer is replaced: removed/revoked/disconnected, or offline right now.
+	// Only a retired record is replaced: removed, revoked or disconnected. An offline one may only be cut off from
+	// Paperboat (offline until revoked), and host keys do not prove the same computer: cloned images share them.
 	// A live machine is never removed.
-	if onlyRetired && retired.State != "disconnected" && retired.State != "revoked" && !(retired.State == "offline" && !retired.Online) {
+	if onlyRetired && retired.State != "disconnected" && retired.State != "revoked" {
 		return false, nil
 	}
 	replacement, err := tx.Queries().GetUserMachineForUpdate(ctx, dbsqlc.GetUserMachineForUpdateParams{ID: replacementID, UserID: userID})
