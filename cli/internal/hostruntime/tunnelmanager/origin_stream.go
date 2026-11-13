@@ -233,7 +233,7 @@ func (f OriginStreamForwarder) serve(ctx context.Context, active StreamSource, i
 				defer release()
 				streamCtx = authorized
 			}
-			bounded := &idleOriginStream{ReadWriteCloser: stream, idle: time.Duration(route.IdleTimeoutMs) * time.Millisecond}
+			bounded := boundedOriginStream(stream, route)
 			if opaqueTCP(route) {
 				_ = f.serveTCP(streamCtx, bounded, route)
 			} else {

@@ -3,6 +3,8 @@ package tunnelmanager
 import (
 	"io"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hoststate"
 )
 
 // idleOriginStream applies the authoritative route's inactivity bound to each
@@ -42,4 +44,14 @@ func (s *idleOriginStream) CloseWrite() error {
 		return h.CloseWrite()
 	}
 	return ErrInvalidConfig
+}
+
+// boundedOriginStream applies the route's inactivity bound to an HTTP stream. Opaque TCP streams are
+// left alone: the edge owns their idle limit (1 h by default, F21-37), and the route's 90 s HTTP bound
+// must not cut a quiet SSH or database session.
+func boundedOriginStream(stream io.ReadWriteCloser, route hoststate.TunnelConfigRoute) io.ReadWriteCloser {
+	if opaqueTCP(route) {
+		return stream
+	}
+	return &idleOriginStream{ReadWriteCloser: stream, idle: time.Duration(route.IdleTimeoutMs) * time.Millisecond}
 }
