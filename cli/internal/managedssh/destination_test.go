@@ -113,7 +113,7 @@ func TestResolveUsernameWindowsIsCaseInsensitiveAndCanonical(t *testing.T) {
 	if _, err := ResolveUsernameForPlatform(`VICTUS\Pujan`, "", "", "", false, "linux"); !errors.Is(err, ErrSSHUsernameInvalid) {
 		t.Fatalf("Unix accepted qualified Windows identity: %v", err)
 	}
-	for _, value := range []string{`\Pujan`, `VICTUS\`, `VICTUS\Pujan\extra`, `-domain\Pujan`, `VICTUS\-user`, `VICTUS/Pujan`, `VICTUS\bad user`, `VICTUS\bad;user`} {
+	for _, value := range []string{`\Pujan`, `VICTUS\`, `VICTUS\Pujan\extra`, `-domain\Pujan`, `VICTUS\-user`, `VICTUS/Pujan`, `VICTUS\bad"user`, `VICTUS\bad;user`} {
 		if _, err := ResolveUsernameForPlatform(value, "", "", "", false, "windows"); !errors.Is(err, ErrSSHUsernameInvalid) {
 			t.Fatalf("unsafe qualified identity %q accepted: %v", value, err)
 		}

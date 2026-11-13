@@ -104,7 +104,7 @@ func TestResolveSSHRequestedUser(t *testing.T) {
 	if _, err := resolveSSHRequestedUser("root", "deploy"); !errors.Is(err, managedssh.ErrSSHUsernameConflict) {
 		t.Fatalf("conflict error = %v", err)
 	}
-	if _, err := resolveSSHRequestedUser("", "bad user"); !errors.Is(err, managedssh.ErrSSHUsernameInvalid) {
+	if _, err := resolveSSHRequestedUser("", `bad"user`); !errors.Is(err, managedssh.ErrSSHUsernameInvalid) {
 		t.Fatalf("invalid username error = %v", err)
 	}
 }

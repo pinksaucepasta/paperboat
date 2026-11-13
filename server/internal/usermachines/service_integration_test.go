@@ -4001,7 +4001,7 @@ func TestSecondWindowsOSUserPairsWithAManagedSSHTarget(t *testing.T) {
 			t.Fatal(err)
 		}
 		alias := []string{"xpc-zoe", "xpc-w"}[i]
-		if _, err := service.CreatePairing(ctx, PairingInput{EnrollmentToken: start.BootstrapToken, Verifier: fmt.Sprintf("verifier-winusers-%d-%s", i, suffix), Alias: alias, Platform: "windows", Architecture: "amd64", WorkspaceRoot: `C:\Users\` + osUser, RuntimeVersions: json.RawMessage(`{"pb":"test"}`), PublicIdentityKey: newIntegrationPublicIdentityKey(t), SSHUser: osUser, SSHPort: 22}); err != nil {
+		if _, err := service.CreatePairing(ctx, PairingInput{EnrollmentToken: start.BootstrapToken, Verifier: fmt.Sprintf("verifier-winusers-%d-%s", i, suffix), Alias: alias, Platform: "windows", Architecture: "amd64", WorkspaceRoot: `C:\Users\test-` + fmt.Sprint(i), RuntimeVersions: json.RawMessage(`{"pb":"test"}`), PublicIdentityKey: newIntegrationPublicIdentityKey(t), SSHUser: osUser, SSHPort: 22}); err != nil {
 			t.Fatalf("OS user %q could not pair: %v", osUser, err)
 		}
 		status, err := service.Enrollment(ctx, userID, start.ID)

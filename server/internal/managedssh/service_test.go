@@ -133,7 +133,7 @@ func TestServiceValidatesMachineTarget(t *testing.T) {
 	if err != nil || target.OSUser != "deploy" || target.TargetPort != 2222 || target.MachineGeneration != 2 {
 		t.Fatalf("target=%+v error=%v", target, err)
 	}
-	for _, user := range []string{"", "-root", "bad user", "user@host", "bad\nuser"} {
+	for _, user := range []string{"", "-root", `bad"user`, "user@host", "bad\nuser"} {
 		if _, err := service.RegisterTarget(context.Background(), RegisterTargetRequest{OperationID: "operation_managed_ssh_01", ActorUserID: "user_01", UserMachineID: "machine_01", MachineGeneration: 2, OSUser: user, TargetPort: 22, Now: now}); !errors.Is(err, wire.ErrInvalid) {
 			t.Fatalf("OS user %q error=%v", user, err)
 		}
