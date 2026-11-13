@@ -31,17 +31,22 @@ type extendedHandle struct {
 // handle rule below identify a foreground program; for any other shell (PowerShell keeps handles to its job workers and background
 // processes while idle) nothing may be terminated on a Ctrl-C: missing a cancel is better than killing background work.
 func (p *Process) shellIsCommandInterpreter() bool {
-	handle, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, p.processID)
+	return strings.EqualFold(imageBase(p.processID), "cmd.exe")
+}
+
+// imageBase is the file name of a process's executable, or "" when it cannot be read.
+func imageBase(pid uint32) string {
+	handle, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, pid)
 	if err != nil {
-		return false
+		return ""
 	}
 	defer windows.CloseHandle(handle)
 	buffer := make([]uint16, windows.MAX_PATH)
 	size := uint32(len(buffer))
 	if windows.QueryFullProcessImageName(handle, 0, &buffer[0], &size) != nil {
-		return false
+		return ""
 	}
-	return strings.EqualFold(filepath.Base(windows.UTF16ToString(buffer[:size])), "cmd.exe")
+	return filepath.Base(windows.UTF16ToString(buffer[:size]))
 }
 
 // processesHeldBy returns the pids of the processes the process shell holds an open handle to, or nil when the handle table cannot be

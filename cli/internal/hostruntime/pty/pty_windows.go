@@ -420,8 +420,8 @@ func (p *Process) foregroundTree() []processKey {
 			newest = key
 		}
 	}
-	if newest.pid == 0 {
-		return nil
+	if newest.pid == 0 || handlesInterruptItself(imageBase(newest.pid)) {
+		return nil // a shell started from cmd.exe cancels its own command on ETX; terminating it would end the whole session of it
 	}
 	tree := []processKey{newest}
 	in := map[uint32]bool{newest.pid: true}

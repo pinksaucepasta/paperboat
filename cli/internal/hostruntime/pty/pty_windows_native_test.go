@@ -225,6 +225,33 @@ func TestNativeConPTYInterruptStopsAForegroundProgramThatIgnoresETX(t *testing.T
 	}
 }
 
+// A PowerShell started from cmd.exe handles Ctrl-C itself: the command it runs stops and its prompt stays. The descendant fallback
+// used to terminate it as "the program cmd is waiting on", returning to cmd.exe (seen from a browser terminal, X-23).
+func TestNativeConPTYInterruptKeepsAPowerShellStartedFromCmd(t *testing.T) {
+	commandShell := os.Getenv("ComSpec")
+	if commandShell == "" {
+		commandShell = filepath.Join(os.Getenv("WINDIR"), "System32", "cmd.exe")
+	}
+	process, output := startNativePTY(t, commandShell, []string{"/d", "/q"})
+	defer process.CloseIO()
+	if _, err := process.Write([]byte(nativePowerShell(t) + " -NoLogo -NoProfile\r\n")); err != nil {
+		t.Fatal(err)
+	}
+	output.waitFor(t, "PS ")
+	if _, err := process.Write([]byte("Start-Sleep 300\r\n")); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(2 * time.Second)
+	if _, err := process.Interrupt(0x03, nil); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(time.Second)
+	if _, err := process.Write([]byte("'paperboat-ps-still-' + (20 + 2)\r\n")); err != nil {
+		t.Fatalf("shell did not survive: %v", err)
+	}
+	output.waitForWithin(t, "paperboat-ps-still-22", 10*time.Second)
+}
+
 // Ctrl-C ends the foreground program only: a program the shell started earlier in the background keeps running, like the unix twin that
 // signals the foreground process group. (cmd: `start /b` background ping, then a foreground ping that ignores the pipe ETX.)
 func TestNativeConPTYInterruptLeavesBackgroundWorkAlone(t *testing.T) {
