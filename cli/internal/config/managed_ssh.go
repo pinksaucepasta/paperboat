@@ -24,15 +24,17 @@ type ManagedSSHIdentity struct {
 	Algorithm   string
 }
 
-func (s ProfileStore) ManagedSSHIdentity(issuer, cliClientSessionID string) (identity ManagedSSHIdentity, resultErr error) {
-	if s.Path == "" || s.Secrets == nil || !validCredentialID(cliClientSessionID) {
+// ManagedSSHIdentity is local to this credential store and account, and survives logout.
+// Server registration binds it to the current session; logout removes that authority.
+func (s ProfileStore) ManagedSSHIdentity(issuer, accountID string) (identity ManagedSSHIdentity, resultErr error) {
+	if s.Path == "" || s.Secrets == nil || !validCredentialID(accountID) {
 		return ManagedSSHIdentity{}, ErrCredentialStoreUnavailable
 	}
 	issuer, err := NormalizeIssuer(issuer)
 	if err != nil {
 		return ManagedSSHIdentity{}, err
 	}
-	ref := managedSSHSecretRef(issuer, cliClientSessionID)
+	ref := managedSSHSecretRef(issuer, accountID)
 	lock := newSharedLock(s.profilePath(issuer) + ".managed-ssh.lock")
 	return s.managedSSHIdentity(ref, lock)
 }
@@ -77,25 +79,6 @@ func (s ProfileStore) managedSSHIdentity(ref string, lock credentialLock) (ident
 	return identity, nil
 }
 
-func (s ProfileStore) DeleteManagedSSHIdentity(issuer, cliClientSessionID string) (resultErr error) {
-	if s.Path == "" || s.Secrets == nil || !validCredentialID(cliClientSessionID) {
-		return ErrCredentialStoreUnavailable
-	}
-	issuer, err := NormalizeIssuer(issuer)
-	if err != nil {
-		return err
-	}
-	lock := newSharedLock(s.profilePath(issuer) + ".managed-ssh.lock")
-	if err := lock.Lock(); err != nil {
-		return fmt.Errorf("lock managed SSH identity: %w", err)
-	}
-	defer func() { resultErr = errors.Join(resultErr, lock.Unlock()) }()
-	if err := s.Secrets.Delete(managedSSHSecretRef(issuer, cliClientSessionID)); err != nil {
-		return safeConfigCause("managed SSH identity could not be deleted", err)
-	}
-	return nil
-}
-
 func decodeManagedSSHIdentity(encoded string) (ManagedSSHIdentity, error) {
 	block, rest := pem.Decode([]byte(encoded))
 	if block == nil || block.Type != "OPENSSH PRIVATE KEY" || len(strings.TrimSpace(string(rest))) != 0 {
@@ -123,8 +106,8 @@ func decodeManagedSSHIdentity(encoded string) (ManagedSSHIdentity, error) {
 	}, nil
 }
 
-func managedSSHSecretRef(issuer, cliClientSessionID string) string {
-	digest := sha256.Sum256([]byte(issuer + "\x00" + cliClientSessionID))
+func managedSSHSecretRef(issuer, accountID string) string {
+	digest := sha256.Sum256([]byte(issuer + "\x00" + accountID))
 	return "managed-ssh-v1-" + hex.EncodeToString(digest[:16])
 }
 

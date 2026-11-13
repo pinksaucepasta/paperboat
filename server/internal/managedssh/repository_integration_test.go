@@ -412,6 +412,35 @@ func TestSQLRepositoryManagedSSHClientKeySetIsBounded(t *testing.T) {
 	if _, err := service.RegisterClient(ctx, RegisterClientRequest{OperationID: "operation_bounded_capacity_freed_" + suffix, UserID: userID, CLIClientSessionID: registrationSession, PublicKey: registrationKey, Now: now.Add((wire.MaxClientKeys + 3) * time.Second)}); err != nil {
 		t.Fatalf("registration after a session was revoked: %v", err)
 	}
+	// A different login on the same endpoint rebinds its existing key even at capacity.
+	for round := 0; round < 2; round++ {
+		session := fmt.Sprintf("ssh_relogin_%d_%s", round, suffix)
+		at := now.Add(time.Duration(wire.MaxClientKeys+4+round*3) * time.Second)
+		if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.cli_client_sessions (id,user_id,client_id,client_label,device_type,os,scopes,state,created_at,approved_at) VALUES ($1,$2,$1,'relogin','desktop','test',ARRAY['machines:connect'],'active',$3,$3)`, session, userID, at); err != nil {
+			t.Fatal(err)
+		}
+		key, err := service.RegisterClient(ctx, RegisterClientRequest{OperationID: fmt.Sprintf("operation_relogin_%d_%s", round, suffix), UserID: userID, CLIClientSessionID: session, PublicKey: publicKeys[2], Now: at})
+		if err != nil || key.CLIClientSessionID != session || key.State != "active" {
+			t.Fatalf("reused key round %d: state=%s err=%v", round, key.State, err)
+		}
+		if round == 0 {
+			if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.cli_client_sessions SET state='revoked',revoked_at=$2 WHERE id=$1`, "ssh_bounded_cli_02_"+suffix, at.Add(time.Second)); err != nil {
+				t.Fatal(err)
+			}
+		}
+		set, err := service.ListClientKeys(ctx, ListClientKeysRequest{ActorUserID: userID, UserMachineID: machineID, MachineGeneration: 1})
+		if err != nil || len(set.Keys) != wire.MaxClientKeys {
+			t.Fatalf("relogin projection: count=%d err=%v", len(set.Keys), err)
+		}
+		if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.cli_client_sessions SET state='revoked',revoked_at=$2,revocation_reason='client_logout' WHERE id=$1`, session, at.Add(2*time.Second)); err != nil {
+			t.Fatal(err)
+		}
+		set, err = service.ListClientKeys(ctx, ListClientKeysRequest{ActorUserID: userID, UserMachineID: machineID, MachineGeneration: 1})
+		if err != nil || len(set.Keys) != wire.MaxClientKeys-1 {
+			t.Fatalf("logout projection: count=%d err=%v", len(set.Keys), err)
+		}
+	}
+
 }
 
 func TestSQLRepositoryManagedSSHKeyRevokesWithClientSessionAndAccount(t *testing.T) {

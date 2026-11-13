@@ -14,7 +14,7 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-func TestManagedSSHIdentityIsDurableConcurrentAndDeletable(t *testing.T) {
+func TestManagedSSHIdentityIsDurableAndConcurrent(t *testing.T) {
 	root := t.TempDir()
 	secrets := FileSecretStore{Dir: filepath.Join(root, "secrets")}
 	store := ProfileStore{Path: root, Secrets: secrets}
@@ -60,16 +60,7 @@ func TestManagedSSHIdentityIsDurableConcurrentAndDeletable(t *testing.T) {
 	if err != nil || reloaded.PublicKey != expected.PublicKey {
 		t.Fatalf("reloaded=%+v error=%v", reloaded, err)
 	}
-	if err := store.DeleteManagedSSHIdentity(issuer, session); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.DeleteManagedSSHIdentity(issuer, session); err != nil {
-		t.Fatalf("idempotent delete: %v", err)
-	}
-	replacement, err := store.ManagedSSHIdentity(issuer, session)
-	if err != nil || replacement.PublicKey == expected.PublicKey {
-		t.Fatalf("replacement=%+v error=%v", replacement, err)
-	}
+
 }
 
 func TestManagedSSHIdentityWithholdsSignerWhenUnlockFails(t *testing.T) {
@@ -148,38 +139,31 @@ func TestManagedSSHIdentityRejectsSymlinkedFileFallback(t *testing.T) {
 	}
 }
 
-func TestProfileRemovalAndRevocationCleanupDeleteManagedSSHIdentity(t *testing.T) {
+func TestManagedSSHIdentitySurvivesLogoutAndRelogin(t *testing.T) {
 	root := t.TempDir()
-	secrets := FileSecretStore{Dir: filepath.Join(root, "secrets")}
-	store := ProfileStore{Path: root, Secrets: secrets}
-	issuer := "https://api.example.test"
-	profile := Profile{Issuer: issuer, CLIClientSessionID: "cli_active"}
+	store := ProfileStore{Path: root, Secrets: FileSecretStore{Dir: filepath.Join(root, "secrets")}}
+	const issuer = "https://api.example.test"
+	profile := Profile{Issuer: issuer, Account: Account{ID: "account_one"}, CLIClientSessionID: "cli_first"}
 	if err := store.Save(profile, Credential{AccessToken: "access", RefreshToken: "refresh"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.ManagedSSHIdentity(issuer, profile.CLIClientSessionID); err != nil {
+	first, err := store.ManagedSSHIdentity(issuer, profile.Account.ID)
+	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.Remove(issuer); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := secrets.Get(managedSSHSecretRef(issuer, profile.CLIClientSessionID)); !errors.Is(err, ErrSecretNotFound) {
-		t.Fatalf("active managed key remains: %v", err)
-	}
-	if _, err := store.ManagedSSHIdentity(issuer, "cli_pending"); err != nil {
+	profile.CLIClientSessionID = "cli_second"
+	if err := store.Save(profile, Credential{AccessToken: "access", RefreshToken: "refresh"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.QueueRevocation(issuer, "cli_pending", "pending-refresh"); err != nil {
-		t.Fatal(err)
+	second, err := store.ManagedSSHIdentity(issuer, profile.Account.ID)
+	if err != nil || first.PublicKey != second.PublicKey {
+		t.Fatalf("relogin changed managed key: %v", err)
 	}
-	records, err := store.PendingRevocations(issuer)
-	if err != nil || len(records) != 1 {
-		t.Fatalf("records=%+v error=%v", records, err)
-	}
-	if err := store.CompleteRevocation(records[0]); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := secrets.Get(managedSSHSecretRef(issuer, "cli_pending")); !errors.Is(err, ErrSecretNotFound) {
-		t.Fatalf("revoked managed key remains: %v", err)
+	other, err := store.ManagedSSHIdentity(issuer, "account_two")
+	if err != nil || other.PublicKey == first.PublicKey {
+		t.Fatalf("accounts share managed key: %v", err)
 	}
 }

@@ -196,9 +196,6 @@ func (s ProfileStore) CompleteRevocation(record PendingRevocation) (resultErr er
 		return err
 	}
 	if activeErr != nil || active.CLIClientSessionID != record.CLIClientSessionID {
-		if err := s.DeleteManagedSSHIdentity(record.Issuer, record.CLIClientSessionID); err != nil {
-			return err
-		}
 		if err := s.DeletePeerEndpointIdentity(record.Issuer, record.CLIClientSessionID); err != nil {
 			return err
 		}
@@ -309,9 +306,6 @@ func (s ProfileStore) DiscardPendingRevocations(issuer string) (resultErr error)
 			if strings.HasPrefix(record.RefreshSecretRef, "revocation-") {
 				errs = append(errs, s.Secrets.Delete(record.RefreshSecretRef))
 			}
-			if record.CLIClientSessionID != "" {
-				errs = append(errs, s.DeleteManagedSSHIdentity(issuer, record.CLIClientSessionID))
-			}
 			if removeErr := os.Remove(path); removeErr != nil && !os.IsNotExist(removeErr) {
 				errs = append(errs, removeErr)
 			}
@@ -379,7 +373,7 @@ func (s ProfileStore) QueueActiveRevocation(issuer string) (resultErr error) {
 		return err
 	}
 	var deleteErrs []error
-	deleteErrs = append(deleteErrs, s.Secrets.Delete(p.AccessSecretRef), s.Secrets.Delete(p.RefreshSecretRef), s.DeleteManagedSSHIdentity(p.Issuer, p.CLIClientSessionID))
+	deleteErrs = append(deleteErrs, s.Secrets.Delete(p.AccessSecretRef), s.Secrets.Delete(p.RefreshSecretRef))
 	for _, ref := range p.ObsoleteSecretRefs {
 		deleteErrs = append(deleteErrs, s.Secrets.Delete(ref))
 	}

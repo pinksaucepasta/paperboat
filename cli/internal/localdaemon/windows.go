@@ -19,6 +19,7 @@ type ManagedSSHConfig struct {
 	ServerURL            string
 	Auth                 config.AuthSource
 	Store                config.ProfileStore
+	AccountID            string
 	CLIClientSessionID   string
 	Home                 string
 	RuntimeDirectory     string

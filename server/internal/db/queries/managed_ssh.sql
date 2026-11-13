@@ -64,7 +64,7 @@ LIMIT 256;
 SELECT count(*) FROM managed_ssh_client_keys k
 JOIN cli_client_sessions cs ON cs.id = k.cli_client_session_id AND cs.state = 'active'
   AND coalesce(cs.last_used_at, cs.created_at) >= sqlc.arg(used_since)
-WHERE k.user_id = sqlc.arg(user_id) AND k.state = 'active';
+WHERE k.user_id = sqlc.arg(user_id) AND k.state = 'active' AND k.fingerprint <> sqlc.arg(fingerprint);
 
 -- name: ResolveMachineSSHHostKeyAuthorityForUpdate :one
 SELECT machine.id AS user_machine_id, machine.user_id, machine.installation_generation

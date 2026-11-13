@@ -27,6 +27,8 @@ func TestManagedSSHUsesDiscoveredDomainAndRefreshesAliases(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(root) })
+	registrations := make(chan string, 3)
+	operations := make(chan string, 3)
 	var domain atomic.Value
 	domain.Store("fleet.example.test")
 	mux := http.NewServeMux()
@@ -39,6 +41,8 @@ func TestManagedSSHUsesDiscoveredDomainAndRefreshesAliases(t *testing.T) {
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
+		registrations <- input.PublicKey
+		operations <- r.Header.Get("Idempotency-Key")
 		writeManagedSSHTestResponse(w, api.ManagedSSHClientKey{Type: "client_key", Version: 1,
 			Fingerprint: r.PathValue("fingerprint"), PublicKey: input.PublicKey, State: "active", ReconciliationVersion: 1})
 	})
@@ -62,10 +66,11 @@ func TestManagedSSHUsesDiscoveredDomainAndRefreshesAliases(t *testing.T) {
 	if err := os.Mkdir(filepath.Join(root, "run"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	runtime, err := StartManagedSSH(t.Context(), ManagedSSHConfig{ServerURL: server.URL, Auth: &rotatingAuthSource{},
-		Store:              config.ProfileStore{Path: filepath.Join(root, "profiles"), Secrets: config.FileSecretStore{Dir: filepath.Join(root, "secrets")}},
-		CLIClientSessionID: "cli_domain_test", Home: root, RuntimeDirectory: filepath.Join(root, "run"),
-		Executable: executable, OwnerUID: uint32(os.Geteuid())}, machines)
+	cfg := ManagedSSHConfig{ServerURL: server.URL, Auth: &rotatingAuthSource{},
+		Store:     config.ProfileStore{Path: filepath.Join(root, "profiles"), Secrets: config.FileSecretStore{Dir: filepath.Join(root, "secrets")}},
+		AccountID: "account_domain", CLIClientSessionID: "cli_domain_test", Home: root, RuntimeDirectory: filepath.Join(root, "run"),
+		Executable: executable, OwnerUID: uint32(os.Geteuid())}
+	runtime, err := StartManagedSSH(t.Context(), cfg, machines)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,4 +94,21 @@ func TestManagedSSHUsesDiscoveredDomainAndRefreshesAliases(t *testing.T) {
 			}
 		}
 	}
+	firstKey, firstOperation := <-registrations, <-operations
+	if err := runtime.Close(); err != nil {
+		t.Fatal(err)
+	}
+	cfg.CLIClientSessionID = "cli_relogin"
+	replacement, err := StartManagedSSH(t.Context(), cfg, machines)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer replacement.Close()
+	if key := <-registrations; key != firstKey {
+		t.Fatal("relogin minted another SSH key")
+	}
+	if operation := <-operations; operation == "" || operation == firstOperation {
+		t.Fatal("relogin reused the old session's registration operation")
+	}
+
 }

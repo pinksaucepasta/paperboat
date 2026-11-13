@@ -4,6 +4,7 @@ package localdaemon
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"net"
@@ -39,10 +40,10 @@ type ManagedSSHRuntime struct {
 }
 
 func StartManagedSSH(ctx context.Context, cfg ManagedSSHConfig, machines []api.UserMachine) (*ManagedSSHRuntime, error) {
-	if ctx == nil || strings.TrimSpace(cfg.ServerURL) == "" || cfg.Auth == nil || cfg.Store.Path == "" || strings.TrimSpace(cfg.CLIClientSessionID) == "" || !filepath.IsAbs(cfg.Home) || !filepath.IsAbs(cfg.RuntimeDirectory) || !filepath.IsAbs(cfg.Executable) {
+	if ctx == nil || strings.TrimSpace(cfg.ServerURL) == "" || cfg.Auth == nil || cfg.Store.Path == "" || strings.TrimSpace(cfg.CLIClientSessionID) == "" || strings.TrimSpace(cfg.AccountID) == "" || !filepath.IsAbs(cfg.Home) || !filepath.IsAbs(cfg.RuntimeDirectory) || !filepath.IsAbs(cfg.Executable) {
 		return nil, ErrInvalidInventoryConfig
 	}
-	identity, err := cfg.Store.ManagedSSHIdentity(cfg.ServerURL, cfg.CLIClientSessionID)
+	identity, err := cfg.Store.ManagedSSHIdentity(cfg.ServerURL, cfg.AccountID)
 	if err != nil {
 		return nil, err
 	}
@@ -53,7 +54,8 @@ func StartManagedSSH(ctx context.Context, cfg ManagedSSHConfig, machines []api.U
 	registerCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	client := api.New(cfg.ServerURL, credential, nil)
 	client.SetCredentialSource(cfg.Auth)
-	_, err = client.RegisterManagedSSHClientKey(registerCtx, identity.PublicKey, identity.Fingerprint, "managed-ssh-register-"+hex.EncodeToString(identity.Fingerprint[:16]))
+	operation := sha256.Sum256([]byte(identity.PublicKey + "\x00" + cfg.CLIClientSessionID))
+	_, err = client.RegisterManagedSSHClientKey(registerCtx, identity.PublicKey, identity.Fingerprint, "managed-ssh-register-"+hex.EncodeToString(operation[:16]))
 	cancel()
 	if err != nil {
 		return nil, managedSSHAuthorityError(err)

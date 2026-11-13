@@ -104,7 +104,7 @@ func (r *SQLRepository) RegisterClient(ctx context.Context, request RegisterClie
 		if err != pgx.ErrNoRows {
 			return err
 		}
-		activeCount, err := q.CountActiveManagedSSHClientKeysForUser(ctx, dbsqlc.CountActiveManagedSSHClientKeysForUserParams{UserID: request.UserID, UsedSince: sql.NullTime{Time: r.usedSince(request.Now), Valid: true}})
+		activeCount, err := q.CountActiveManagedSSHClientKeysForUser(ctx, dbsqlc.CountActiveManagedSSHClientKeysForUserParams{Fingerprint: proposed.Fingerprint[:], UserID: request.UserID, UsedSince: sql.NullTime{Time: r.usedSince(request.Now), Valid: true}})
 		if err != nil {
 			return err
 		}
@@ -113,8 +113,9 @@ func (r *SQLRepository) RegisterClient(ctx context.Context, request RegisterClie
 		}
 		existing, err := q.GetManagedSSHClientKeyByFingerprint(ctx, proposed.Fingerprint[:])
 		if err == nil {
-			if !sameClientKey(existing, proposed) {
-				return ErrConflict
+			existing, err = reuseClientKey(ctx, tx, existing, proposed)
+			if err != nil {
+				return err
 			}
 			result, err = clientKeyFromRow(existing)
 			if err != nil {
@@ -139,6 +140,28 @@ func (r *SQLRepository) RegisterClient(ctx context.Context, request RegisterClie
 		return r.audit.WriteTx(ctx, tx, audit.Event{ActorUserID: request.UserID, ActorType: audit.ActorUser, EventType: "managed_ssh.client_key_registered", ResourceType: "managed_ssh_client_key", ResourceID: hex.EncodeToString(proposed.Fingerprint[:]), IdempotencyKey: request.OperationID, Metadata: map[string]any{"cli_client_session_id": request.CLIClientSessionID, "algorithm": proposed.Algorithm, "reconciliation_version": proposed.ReconciliationVersion}})
 	})
 	return result, conflictOnUnique(err)
+}
+
+// A fresh login moves this endpoint's account key to its new session. Revoking
+// the old session then cannot remove authority belonging to the new login.
+func reuseClientKey(ctx context.Context, tx *db.Tx, existing dbsqlc.ManagedSshClientKey, proposed ClientKey) (dbsqlc.ManagedSshClientKey, error) {
+	if existing.UserID != proposed.UserID || existing.Algorithm != proposed.Algorithm || existing.PublicKey != proposed.PublicKey {
+		return existing, ErrConflict
+	}
+	if existing.CLIClientSessionID == proposed.CLIClientSessionID {
+		return existing, nil
+	}
+	if _, err := tx.Exec(ctx, `UPDATE managed_ssh_client_keys
+ SET cli_client_session_id=$2, state='active', revoked_at=NULL, revocation_reason=NULL,
+ reconciliation_version=reconciliation_version+1 WHERE fingerprint=$1`, proposed.Fingerprint[:], proposed.CLIClientSessionID); err != nil {
+		return existing, err
+	}
+	// An idle key may already be absent from hosts although its row stays active.
+	// Rebinding it must wake their authorized_keys sync even without a state change.
+	if _, err := tx.Exec(ctx, `SELECT publish_managed_ssh_account($1)`, proposed.UserID); err != nil {
+		return existing, err
+	}
+	return tx.Queries().GetManagedSSHClientKeyByFingerprint(ctx, proposed.Fingerprint[:])
 }
 
 func (r *SQLRepository) RevokeClient(ctx context.Context, request RevokeClientRequest) (ClientKey, error) {

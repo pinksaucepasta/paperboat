@@ -37,16 +37,17 @@ const countActiveManagedSSHClientKeysForUser = `-- name: CountActiveManagedSSHCl
 SELECT count(*) FROM managed_ssh_client_keys k
 JOIN cli_client_sessions cs ON cs.id = k.cli_client_session_id AND cs.state = 'active'
   AND coalesce(cs.last_used_at, cs.created_at) >= $1
-WHERE k.user_id = $2 AND k.state = 'active'
+WHERE k.user_id = $2 AND k.state = 'active' AND k.fingerprint <> $3
 `
 
 type CountActiveManagedSSHClientKeysForUserParams struct {
-	UsedSince sql.NullTime
-	UserID    string
+	UsedSince   sql.NullTime
+	UserID      string
+	Fingerprint []byte
 }
 
 func (q *Queries) CountActiveManagedSSHClientKeysForUser(ctx context.Context, arg CountActiveManagedSSHClientKeysForUserParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countActiveManagedSSHClientKeysForUser, arg.UsedSince, arg.UserID)
+	row := q.db.QueryRow(ctx, countActiveManagedSSHClientKeysForUser, arg.UsedSince, arg.UserID, arg.Fingerprint)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
