@@ -9,7 +9,7 @@ func TestBoundGrantsKeepsTheFirstEntriesInsteadOfFailing(t *testing.T) {
 	if got := boundGrants(few); len(got) != 10 {
 		t.Fatalf("a small set was changed: %d", len(got))
 	}
-	many := make([]int, 200)
+	many := make([]int, 2*maximumNetworkGrants)
 	for i := range many {
 		many[i] = i
 	}

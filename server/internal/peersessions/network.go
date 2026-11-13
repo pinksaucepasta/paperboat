@@ -324,7 +324,7 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
 		 OR (coalesce(a.terminal_role,'owner')='owner' AND a.team_id IS NOT NULL AND NOT ('private_access'=ANY(a.capabilities)) AND NOT EXISTS(
 		  SELECT 1 FROM unnest(a.capabilities) capability
 		  WHERE NOT paperboat.team_machine_capability_allowed(a.user_id,a.team_id,a.user_machine_id,capability))))
-		ORDER BY (a.id=ANY($4::text[])) DESC, (a.expires_at>$3) DESC, a.expires_at DESC, a.id LIMIT 129`, in.UserID, in.EndpointID, now, live["machine_access"])
+		ORDER BY (a.id=ANY($4::text[])) DESC, (a.expires_at>$3) DESC, a.expires_at DESC, a.id LIMIT 257`, in.UserID, in.EndpointID, now, live["machine_access"])
 	if err != nil {
 		return NetworkConfigResult{}, err
 	}
@@ -379,7 +379,7 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
 	if rowErr != nil {
 		return NetworkConfigResult{}, rowErr
 	}
-	inspectorRows, err := tx.QueryContext(ctx, `SELECT credential_id,native_cli_session_id,native_machine_id,account_id,owner_account_id,expires_at FROM paperboat.inspector_native_admissions WHERE ((native_cli_session_id=$1 AND account_id=$2) OR (native_machine_id=$1 AND owner_account_id=$2)) AND (expires_at>$3 OR credential_id=ANY($4::text[])) ORDER BY (credential_id=ANY($4::text[])) DESC, credential_id LIMIT 129`, in.EndpointID, in.UserID, now, live["inspector"])
+	inspectorRows, err := tx.QueryContext(ctx, `SELECT credential_id,native_cli_session_id,native_machine_id,account_id,owner_account_id,expires_at FROM paperboat.inspector_native_admissions WHERE ((native_cli_session_id=$1 AND account_id=$2) OR (native_machine_id=$1 AND owner_account_id=$2)) AND (expires_at>$3 OR credential_id=ANY($4::text[])) ORDER BY (credential_id=ANY($4::text[])) DESC, credential_id LIMIT 257`, in.EndpointID, in.UserID, now, live["inspector"])
 	if err != nil {
 		return NetworkConfigResult{}, err
 	}
@@ -409,7 +409,7 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
  WHERE ((a.native_cli_session_id=$2 AND a.account_id=$1) OR (a.machine_id=$2 AND a.account_id=$1))
  AND (a.expires_at>$3 OR a.assignment_id=ANY($4::text[]))
  AND ((a.workspace_id='personal' AND assignment.adopted_team_id IS NULL) OR (assignment.adopted_team_id=a.workspace_id AND EXISTS(SELECT 1 FROM teams t JOIN team_members member USING(team_id) WHERE t.team_id=a.workspace_id AND t.deleted_at IS NULL AND NOT t.suspended AND member.account_id=a.account_id AND member.active)))
- AND EXISTS(SELECT 1 FROM jsonb_array_elements(status.conflicts) conflict WHERE conflict->>'path'=a.config_path AND conflict->>'revision'=a.conflict_revision) ORDER BY a.assignment_id,a.native_cli_session_id,a.machine_id,a.expires_at DESC LIMIT 129`, in.UserID, in.EndpointID, now, live["config_compare"])
+ AND EXISTS(SELECT 1 FROM jsonb_array_elements(status.conflicts) conflict WHERE conflict->>'path'=a.config_path AND conflict->>'revision'=a.conflict_revision) ORDER BY a.assignment_id,a.native_cli_session_id,a.machine_id,a.expires_at DESC LIMIT 257`, in.UserID, in.EndpointID, now, live["config_compare"])
 	if err != nil {
 		return NetworkConfigResult{}, err
 	}
@@ -440,7 +440,7 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
  WHERE ((a.native_cli_session_id = $1 AND a.account_id = $2) OR (a.machine_id = $1 AND m.user_id = $2))
  AND (a.expires_at > $3 OR a.recording_id = ANY($4::text[]))
  AND NOT isempty(paperboat.workspace_policy_rule_ports(a.account_id, t.team_id, a.machine_id, 'recording_view'))
- ORDER BY a.recording_id, a.native_cli_session_id, a.machine_id, a.expires_at DESC LIMIT 129`, in.EndpointID, in.UserID, now, live["recording"])
+ ORDER BY a.recording_id, a.native_cli_session_id, a.machine_id, a.expires_at DESC LIMIT 257`, in.EndpointID, in.UserID, now, live["recording"])
 	if err != nil {
 		return NetworkConfigResult{}, err
 	}
@@ -947,12 +947,15 @@ func regionalCandidateSet(issuer, accountID, endpointID string, generation int64
 		AuthorizationGeneration: uint64(generation), Generation: uint64(generation), IssuedAt: now.Unix(), ExpiresAt: expires.Unix(), Nodes: nodes}
 }
 
-const maximumNetworkGrants = 128
+// maximumNetworkGrants bounds the access sessions one endpoint's document carries. A terminal's session projects three
+// scopes (terminal, file_transfer, private_access), so 96 access scopes held only 32 terminals per client (F21-164): the
+// bound is sized for 256 sessions of three scopes, and a machine holds 100 terminals for each of two busy clients.
+const maximumNetworkGrants = 256
 
 // Application access scopes (newest first) leave room for the durable machine mesh, so
 // accumulated sessions can never push it out of the configuration.
 const (
-	maximumNetworkScopes       = 128
+	maximumNetworkScopes       = 3*maximumNetworkGrants + 32
 	maximumNetworkAccessScopes = maximumNetworkScopes - 32
 	maximumNetworkAccessPeers  = 48
 )
