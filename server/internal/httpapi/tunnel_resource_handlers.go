@@ -112,7 +112,8 @@ func tunnelResourceRouteHostMatch(document tunnelResourceRouteHostMatchDocument)
 		}
 		return document.Type, "", "", nil
 	}
-	if document.Hostname == "" {
+	// An empty managed_exact host is a public TCP route whose hostname the service names; the service refuses it elsewhere.
+	if document.Hostname == "" && document.Type != "managed_exact" {
 		return "", "", "", fmt.Errorf("%w: host_match.hostname is required", tunnelv1.ErrInvalidInput)
 	}
 	if document.Type == "one_label_wildcard" {

@@ -68,7 +68,7 @@ func (r *SQLRepository) CreateResourceRoute(ctx context.Context, input RouteReco
 		if tunnel.DesiredState == DesiredDeleted {
 			return ErrTerminalState
 		}
-		input.Hostname = serverOwnedTLSHostname(tunnel, input)
+		input.Hostname = serverOwnedHostname(tunnel, input)
 		candidate := routeCandidate(input)
 		if err := rejectManagedHTTPForSelfhostOnly(ctx, tx, input.AccountID, candidate.Protocol, candidate.MatchType, input.RouteID); err != nil {
 			return err
@@ -509,11 +509,12 @@ func routeCandidateFromRecord(current dbsqlc.TunnelRoute, input RouteRecord) dbs
 	return candidate
 }
 
-// serverOwnedTLSHostname gives a managed TLS route the tunnel's authoritative
-// endpoint host. A self-hosted-only account sees its customer URL as the tunnel
-// endpoint, so the client cannot know the managed name the edge keys the route on.
-func serverOwnedTLSHostname(tunnel dbsqlc.Tunnel, input RouteRecord) sql.NullString {
-	if input.Protocol != "tls" || input.MatchType != "managed" {
+// serverOwnedHostname gives a managed TLS or TCP route the tunnel's authoritative
+// endpoint host. A self-hosted-only account sees its customer URL (or none, for a
+// TCP-only tunnel) as the tunnel endpoint, so the client cannot know the managed
+// name the edge keys the route on.
+func serverOwnedHostname(tunnel dbsqlc.Tunnel, input RouteRecord) sql.NullString {
+	if input.Protocol != "tls" && input.Protocol != "tcp" || input.MatchType != "managed" {
 		return input.Hostname
 	}
 	if endpoint, err := url.Parse(tunnel.StableEndpoint); err == nil && endpoint.Hostname() != "" {

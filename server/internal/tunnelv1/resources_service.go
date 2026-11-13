@@ -732,7 +732,12 @@ func normalizeRouteCreate(input RouteCreateRequest) (normalizedRouteCreate, erro
 	if err != nil {
 		return normalizedRouteCreate{}, err
 	}
-	matchType, hostname, wildcard, err := normalizeRouteMatch(input.MatchType, input.Hostname, input.WildcardSuffix)
+	// A public TCP route may leave the host out: the repository names the tunnel's managed hostname.
+	serverNamed := protocol == "tcp" && input.Hostname == "" && (input.MatchType == "managed_exact" || input.MatchType == "managed")
+	matchType, hostname, wildcard, err := "managed", sql.NullString{}, sql.NullString{}, error(nil)
+	if !serverNamed {
+		matchType, hostname, wildcard, err = normalizeRouteMatch(input.MatchType, input.Hostname, input.WildcardSuffix)
+	}
 	if err != nil {
 		return normalizedRouteCreate{}, err
 	}
@@ -750,7 +755,7 @@ func normalizeRouteCreate(input RouteCreateRequest) (normalizedRouteCreate, erro
 	if protocol == "tcp_private" && (matchType != "catch_all" || hostname.Valid || wildcard.Valid || pathPrefix.Valid) {
 		return normalizedRouteCreate{}, fmt.Errorf("%w: tcp_private requires a catch-all host match without a path prefix", ErrInvalidInput)
 	}
-	if (protocol == "tcp" || protocol == "tls") && (origin.Scheme != "tcp" || matchType != "managed" || !hostname.Valid || wildcard.Valid || pathPrefix.Valid || origin.PreserveHost || origin.HostOverride != nil || origin.TLS != nil) {
+	if (protocol == "tcp" || protocol == "tls") && (origin.Scheme != "tcp" || matchType != "managed" || !hostname.Valid && !serverNamed || wildcard.Valid || pathPrefix.Valid || origin.PreserveHost || origin.HostOverride != nil || origin.TLS != nil) {
 		return normalizedRouteCreate{}, fmt.Errorf("%w: public tcp/tls requires an exact managed hostname, plain tcp origin, and no HTTP/TLS-origin settings", ErrInvalidInput)
 	}
 	if protocol == "http" && origin.Scheme == "tcp" {

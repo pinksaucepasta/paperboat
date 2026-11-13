@@ -334,7 +334,7 @@ func TestTunnelCreateHumanOutputExplainsPendingCustomerDomain(t *testing.T) {
 	}
 }
 
-func TestPublicTCPRouteRequiresVerifiedDomainWhenStableEndpointIsPending(t *testing.T) {
+func TestPublicTLSRouteRequiresVerifiedDomainWhenStableEndpointIsPending(t *testing.T) {
 	withTunnelCommandClient(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet || r.URL.Path != "/v1/tunnels/tun_1" {
 			t.Fatalf("unexpected request = %s %s", r.Method, r.URL.Path)
@@ -346,7 +346,7 @@ func TestPublicTCPRouteRequiresVerifiedDomainWhenStableEndpointIsPending(t *test
 		_ = json.NewEncoder(w).Encode(map[string]any{"data": tunnel})
 	})
 	command := tunnelCobraCommandV1()
-	command.SetArgs([]string{"route", "add", "tun_1", "--name", "postgres", "--protocol", "tcp", "--to", "tcp://127.0.0.1:5432"})
+	command.SetArgs([]string{"route", "add", "tun_1", "--name", "postgres", "--protocol", "tls", "--to", "tcp://127.0.0.1:5432"})
 	err := command.Execute()
 	if err == nil || !strings.Contains(err.Error(), "verified customer domain") || !strings.Contains(err.Error(), "pb tunnel domain add tun_1 HOSTNAME") {
 		t.Fatalf("error = %v", err)
@@ -576,23 +576,17 @@ func TestTunnelMutationRejectsInvalidWaitBeforeRequest(t *testing.T) {
 func TestTunnelRoutePrivateTCPAndPathClearUseCanonicalWireShapes(t *testing.T) {
 	t.Run("public tcp add", func(t *testing.T) {
 		withTunnelCommandClient(t, func(w http.ResponseWriter, r *http.Request) {
-			if r.Method == http.MethodGet && r.URL.Path == "/v1/tunnels/tun_1" {
-				tunnel := validCommandTunnel()
-				tunnel.AccessMode = "public"
-				w.Header().Set("ETag", tunnel.ETag)
-				_ = json.NewEncoder(w).Encode(map[string]any{"data": tunnel})
-				return
-			}
 			var input api.TunnelRouteInput
 			if r.Method != http.MethodPost || r.URL.Path != "/v1/tunnels/tun_1/routes" || json.NewDecoder(r.Body).Decode(&input) != nil {
 				t.Fatalf("request=%s %s", r.Method, r.URL.Path)
 			}
-			host := "123e4567-e89b-42d3-a456-426614174000.tunnels.example.test"
-			if input.Protocol != "tcp" || input.HostMatch.Type != "managed_exact" || input.HostMatch.Hostname != host || input.Origin.Scheme != "tcp" {
+			// The server names the managed hostname, so a self-hosted-only account with an empty stable_endpoint can add the route.
+			if input.Protocol != "tcp" || input.HostMatch.Type != "managed_exact" || input.HostMatch.Hostname != "" || input.Origin.Scheme != "tcp" {
 				t.Fatalf("public TCP input=%+v", input)
 			}
 			route := validCommandRoute("route_tcp_1", "postgres")
-			route.Protocol, route.HostMatch, route.Origin = "tcp", input.HostMatch, input.Origin
+			route.Protocol, route.Origin = "tcp", input.Origin
+			route.HostMatch = api.TunnelRouteHostMatch{Type: "managed_exact", Hostname: "123e4567-e89b-42d3-a456-426614174000.tunnels.example.test"}
 			route.PublicTCPListenerID, route.PublicTCPPort = "listener_1", 24567
 			_ = json.NewEncoder(w).Encode(map[string]any{"data": api.TunnelRouteMutation{Route: route, Operation: validCommandOperation("route", route.ID), Changed: true}})
 		})

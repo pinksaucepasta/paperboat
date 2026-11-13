@@ -226,7 +226,9 @@ func validateTunnelRouteInput(in TunnelRouteInput, allowDefaults bool) error {
 	if in.Protocol != "http" && in.Protocol != "tcp" && in.Protocol != "tls" && in.Protocol != "tcp_private" {
 		return errors.New("route protocol must be http, tcp, tls, or tcp_private")
 	}
-	if err := validateHostMatch(in.HostMatch); err != nil {
+	// A request for a public TCP route names no host: the server owns the tunnel's managed hostname.
+	serverNamed := allowDefaults && in.Protocol == "tcp" && in.HostMatch.Type == "managed_exact" && in.HostMatch.Hostname == ""
+	if err := validateHostMatch(in.HostMatch); err != nil && !serverNamed {
 		return err
 	}
 	if in.PathPrefix != nil && (*in.PathPrefix == "" || len(*in.PathPrefix) > 2048 || !strings.HasPrefix(*in.PathPrefix, "/") || strings.ContainsAny(*in.PathPrefix, "\x00\r\n")) {
@@ -235,7 +237,7 @@ func validateTunnelRouteInput(in TunnelRouteInput, allowDefaults bool) error {
 	if in.Protocol == "tcp_private" && (in.HostMatch.Type != "catch_all" || in.PathPrefix != nil || in.Origin.Scheme != "tcp") {
 		return errors.New("private TCP routes require catch-all matching and a tcp origin")
 	}
-	if (in.Protocol == "tcp" || in.Protocol == "tls") && (in.HostMatch.Type != "managed_exact" || in.HostMatch.Hostname == "" || in.PathPrefix != nil || in.Origin.Scheme != "tcp" || in.Origin.PreserveHost) {
+	if (in.Protocol == "tcp" || in.Protocol == "tls") && (in.HostMatch.Type != "managed_exact" || in.HostMatch.Hostname == "" && !serverNamed || in.PathPrefix != nil || in.Origin.Scheme != "tcp" || in.Origin.PreserveHost) {
 		return errors.New("public TCP routes require managed hostname matching and a tcp origin")
 	}
 	if err := validateRouteOrigin(in.Origin); err != nil {

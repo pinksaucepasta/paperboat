@@ -243,7 +243,7 @@ func TestTLSRouteManagedHostnameCannotClaimAnotherName(t *testing.T) {
 func TestTLSRouteCreateUsesTheManagedEndpointNotTheCustomerURLTheClientSaw(t *testing.T) {
 	tunnel := dbsqlc.Tunnel{AccessMode: AccessPublic, StableEndpoint: "https://Managed.example.test"}
 	input := RouteRecord{Protocol: "tls", MatchType: "managed", Hostname: sql.NullString{String: "customer.example.test", Valid: true}}
-	got := serverOwnedTLSHostname(tunnel, input)
+	got := serverOwnedHostname(tunnel, input)
 	if got.String != "managed.example.test" {
 		t.Fatalf("hostname=%q, want the managed endpoint host", got.String)
 	}
@@ -253,8 +253,25 @@ func TestTLSRouteCreateUsesTheManagedEndpointNotTheCustomerURLTheClientSaw(t *te
 		t.Fatal(err)
 	}
 	input.Protocol = "tcp"
-	if got := serverOwnedTLSHostname(tunnel, input); got.String != "customer.example.test" {
-		t.Fatalf("non-TLS hostname changed to %q", got.String)
+	input.Hostname = sql.NullString{}
+	if got := serverOwnedHostname(tunnel, input); got.String != "managed.example.test" {
+		t.Fatalf("TCP hostname=%q, want the managed endpoint host", got.String)
+	}
+	input.Protocol = "http"
+	input.Hostname = sql.NullString{String: "customer.example.test", Valid: true}
+	if got := serverOwnedHostname(tunnel, input); got.String != "customer.example.test" {
+		t.Fatalf("HTTP hostname changed to %q", got.String)
+	}
+}
+
+func TestPublicTCPRouteMayLeaveTheHostnameToTheServer(t *testing.T) {
+	tcp := RouteCreateRequest{Name: "db", Protocol: "tcp", MatchType: "managed_exact", Origin: RouteOriginRequest{Scheme: "tcp", Address: "127.0.0.1:5432"}}
+	if _, err := normalizeRouteCreate(tcp); err != nil {
+		t.Fatal(err)
+	}
+	tcp.Protocol = "tls"
+	if _, err := normalizeRouteCreate(tcp); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("TLS without hostname error=%v", err)
 	}
 }
 

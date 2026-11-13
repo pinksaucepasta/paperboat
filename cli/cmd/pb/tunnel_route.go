@@ -165,12 +165,16 @@ func routeAddCommand() *cobra.Command {
 		// Public routes answer on the tunnel's own hostname unless --domain names
 		// another; the edge cannot serve a public catch-all. Private HTTP routes
 		// keep catch_all.
-		if protocol == "tcp" || protocol == "tls" || protocol == "http" && host == "" {
+		if protocol == "tcp" {
+			// The server names the tunnel's managed hostname; a self-hosted-only account has no customer URL to copy it from.
+			hostMatch = api.TunnelRouteHostMatch{Type: "managed_exact"}
+		}
+		if protocol == "tls" || protocol == "http" && host == "" {
 			tunnel, getErr := c.GetTunnelV1(ctx, tunnelID)
 			if getErr != nil {
 				return getErr
 			}
-			if protocol == "tcp" || protocol == "tls" || tunnel.AccessMode == "public" {
+			if protocol == "tls" || tunnel.AccessMode == "public" {
 				if tunnel.StableEndpoint == "" {
 					return fmt.Errorf("public %s routes require a verified customer domain; list routes with `pb tunnel route list %s`, add a domain with `pb tunnel domain add %s HOSTNAME --route ROUTE_ID`, then retry", strings.ToUpper(protocol), tunnelID, tunnelID)
 				}
