@@ -7,7 +7,8 @@ F approves their shares and the fleet Mac is the member, driven via pb exec.
 XPE_MEMBER_L_HOST/USER/UID/DOCKER describe its Linux container independently.
 XPE_TEAM must name a throwaway team owned by the owner account. Only its
 setting, exact machine shares and member grants are mutated. Run --pairs A>B.
-Origins run through the owner's pb exec; the holder runs ON the member device.
+Origins run through another device in their owner's account via pb exec,
+so grant changes cannot kill the origin. The holder runs ON the member device.
 """
 import argparse
 import concurrent.futures
@@ -123,7 +124,7 @@ def wait_state(dev, path, predicate, seconds):
         time.sleep(.3)
 
 
-def run_pair(team, owner, member, oid, records):
+def run_pair(team, owner, member, oid, records, origin_controller):
     original = fleet.json_pb(team.admin, 'team', 'get', team.id)['allow_private_access']
     suffix = uuid.uuid4().hex[:8]
     sep = '\\' if member.os == 'windows' else '/'
@@ -135,8 +136,6 @@ def run_pair(team, owner, member, oid, records):
         try:
             team.share(oid, 'exec,private_access')
             team.setting(True)
-            origin = pool.submit(member.pb, 'exec', '--workspace', team.id, owner.alias, '--',
-                                 xplat_access.py(owner), '-c', ORIGIN, origin_stop, port, timeout=540)
             time.sleep(3)
             for mutation in ('grant_revoke', 'setting_off'):
                 team.setting(True)
@@ -148,6 +147,10 @@ def run_pair(team, owner, member, oid, records):
                     if visible and {'exec', 'private_access'} <= set(visible[0]['permissions']): break
                     assert time.monotonic() < deadline, 'allowed target not visible with exec/private_access: %r' % visible
                     time.sleep(1)
+                if origin is None:
+                    origin = pool.submit(origin_controller.pb, 'exec', owner.alias, '--',
+                        xplat_access.py(owner), '-c', ORIGIN, origin_stop, port, timeout=540)
+                    time.sleep(3)
                 state, stop = base + '-' + mutation, base + '-' + mutation + '.stop'
                 holder = pool.submit(member.run, [xplat_access.py(member), '-c', HOLDER,
                                      member.pb_path, owner.alias, team.id, port, state, stop], timeout=240)
@@ -179,7 +182,7 @@ def run_pair(team, owner, member, oid, records):
             # Attempt every cleanup even when an earlier mutation/cleanup failed.
             actions = []
             if origin is not None:
-                actions.append(lambda: member.pb('exec', '--workspace', team.id, owner.alias, '--',
+                actions.append(lambda: origin_controller.pb('exec', owner.alias, '--',
                     xplat_access.py(owner), '-c',
                     'import pathlib,sys; pathlib.Path(sys.argv[1]).touch()', origin_stop, timeout=60))
             actions.extend([lambda: team.setting(original),
@@ -230,7 +233,7 @@ def main():
     results = {}
     stamp = time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())
     out = Path(__file__).parent / 'results' / ('xplat-team-private-end-' + stamp + '.json')
-    needed = {('owner', 'L'), ('member', 'W')}
+    needed = {('owner', 'L'), ('member', 'L'), ('member', 'W')}
     for pair in pairs:
         a, b = pair.split('>')
         needed.update({('member' if b == 'M' or a == 'W' else 'owner', a),
@@ -257,7 +260,11 @@ def main():
                                if m['alias'] == target.alias and m['online']]
                 assert len(matches) == 1, 'need one online target %s, found %d' % (target.alias, len(matches))
                 oid = matches[0]['id']
-                run_pair(pair_team, target, client, oid, results[pair])
+                if b == 'M' or a == 'W':
+                    origin_controller = member['L'] if a == 'W' else member['W']
+                else:
+                    origin_controller = owner['M'] if a == 'L' else owner['L']
+                run_pair(pair_team, target, client, oid, results[pair], origin_controller)
             except Exception as error:
                 results.setdefault(pair, {}).update(status='FAIL', error=str(error))
                 raise  # stop on unexplained behaviour; diagnose read-only before any rerun
