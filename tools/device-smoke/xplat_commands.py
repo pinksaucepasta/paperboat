@@ -54,6 +54,7 @@ def devices(keys):
         out['M'] = fleet.mac(NAMES['M'])
     if 'W' in keys:
         out['W'] = fleet.windows(NAMES['W'])
+        refresh(out['W'])  # a Windows install made earlier by another step has its pb.exe under the per-user directory
     return out
 
 
@@ -120,9 +121,9 @@ def wait_online(ctl, name, seconds=240):
 
 def uninstall(dev, ctl):
     """Back to a fresh machine: `pb uninstall`, then the dead record is revoked by exact id."""
-    record = machine_record(ctl, dev.name)
     if dev.pb_path and dev.exists(dev.pb_path):
-        fleet.uninstall(dev)
+        fleet.uninstall(dev)  # revokes the machine's own record too
+    record = machine_record(ctl, dev.name)
     if record:
         token = json.loads(ctl.pb('machine', 'revoke', record['id'], '--json').text)['data']['confirmation_token']
         ctl.pb('machine', 'revoke', record['id'], '--json', '--confirm', token)
@@ -132,7 +133,7 @@ def signin(dev):
     """The account's pb sign-in on dev by a one-day API token (minted from STATE, passed on stdin) unless it is signed in already."""
     if dev.pb('auth', 'status', '--json').rc == 0 and '"signed_in":true' in dev.pb('auth', 'status', '--json').text.replace(' ', ''):
         return
-    token = subprocess.run(['node', str(HERE / 'mint_api_token.mjs'), 'xpe-x31'], capture_output=True, env=os.environ, timeout=180).stdout
+    token = subprocess.run(['node', str(HERE / 'mint_api_token.mjs'), 'xpe-x31-%s-%d' % (dev.name, time.time())], capture_output=True, env=os.environ, timeout=180).stdout
     done = dev.pb('login', '--api-token-file', '-', '--json', input=token, timeout=120)
     assert done.rc == 0, 'sign-in on %s: %s' % (dev.name, mask(done.errtext)[-200:])
 
@@ -267,7 +268,12 @@ def t_addjson(ctl, dev):
 def t_install(ctl, src, dst):
     """The command printed on src for dst's platform installs and pairs dst (dst uninstalled first, its old record revoked)."""
     uninstall(dst, ctl)
-    assert not leftovers(dst), 'uninstall left %r' % leftovers(dst)
+    for _ in range(12):  # service teardown on Windows finishes a moment after `pb uninstall` returns
+        left = leftovers(dst)
+        if not left:
+            break
+        time.sleep(5)
+    assert not left, 'uninstall left %r' % left
     signin(src)
     posix, powershell = printed(src)
     done = paste(dst, powershell if dst.os == 'windows' else posix)
@@ -312,6 +318,12 @@ def main():
         if want('tunnel'):
             check('tunnel', key, lambda: t_tunnel(ctl, dev))
     if want('install'):
+        for dev in devs.values():  # every machine is the source of some pair: it needs pb and the account's sign-in first
+            if not (dev.pb_path and dev.exists(dev.pb_path)):
+                posix, powershell = printed(ctl)
+                assert paste(dev, powershell if dev.os == 'windows' else posix).rc == 0, 'first install on ' + dev.name
+                refresh(dev)
+                wait_online(ctl, dev.name)
         for a_key, src in devs.items():
             for b_key, dst in devs.items():
                 if a_key != b_key:
