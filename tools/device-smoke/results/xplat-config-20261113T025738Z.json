@@ -1,0 +1,35 @@
+{
+ "check": "xplat-config",
+ "results": [
+  {
+   "id": "X-05:x05_local_links:L>W",
+   "status": "PASS",
+   "detail": "links reported unsupported_file_type: dirlink-LW.txt, filelink-LW.txt; targets untouched"
+  },
+  {
+   "id": "X-05:x05_local_links:W>L",
+   "status": "PASS",
+   "detail": "links reported unsupported_file_type: filelink-WL.txt, junction-WL.txt; targets untouched"
+  },
+  {
+   "id": "X-05:x05_repo_link:L>W",
+   "status": "FAIL",
+   "detail": "timed out waiting for lanex2-l reports cfg/app/x-app/repolink-LW.txt as unsupported_file_type @ wait:122 <- wait_skipped:38 <- x05_repo_link:174 <- <lambda>:489 <- check:250"
+  },
+  {
+   "id": "X-05:x05_repo_link:W>L",
+   "status": "FAIL",
+   "detail": "timed out waiting for lanex2-w reports cfg/app/x-app/repolink-WL.txt as unsupported_file_type @ wait:122 <- wait_skipped:38 <- x05_repo_link:174 <- <lambda>:489 <- check:250"
+  },
+  {
+   "id": "X-05:x05_ancestor:L>W",
+   "status": "PASS",
+   "detail": "a destination behind a link is refused on lanex2-l and lanex2-w; target untouched"
+  },
+  {
+   "id": "X-05:x05_ancestor:W>L",
+   "status": "PASS",
+   "detail": "a destination behind a link is refused on lanex2-w and lanex2-l; target untouched"
+  }
+ ]
+}
