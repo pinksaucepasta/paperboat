@@ -30,6 +30,9 @@ type WorkspaceReconcilerConfig struct {
 	// MergeConcurrentEdits lets a push-only half merge an edit made on both sides: a bidirectional assignment runs as a
 	// pull half and a push half, and neither is bidirectional on its own, so without it nothing ever merges.
 	MergeConcurrentEdits bool
+	// PushBaselinePath is the push half's baseline of a split assignment. The pull half reads it as a merge ancestor for a
+	// file its own baseline has not recorded yet (see adoptPushBaselineAncestors).
+	PushBaselinePath string
 }
 
 type pendingBaseline struct {
@@ -109,6 +112,7 @@ type PlaintextWorkspaceReconciler struct {
 	resolutions           ConflictResolutionAuthority
 	clock                 func() time.Time
 	mergeConcurrentEdits  bool
+	pushBaselinePath      string
 
 	mu          sync.Mutex
 	pending     *pendingBaseline
@@ -152,7 +156,7 @@ func NewPlaintextWorkspaceReconciler(config WorkspaceReconcilerConfig) (*Plainte
 		homeRoot: config.HomeRoot, stateRoot: config.StateRoot, comparisonStatusPath: config.ComparisonStatusPath,
 		baselinePath: filepath.Join(config.StateRoot, "baseline.json"),
 		descriptor:   config.Descriptor, machineSource: config.MachineSource, resolutions: config.Resolutions,
-		clock: config.Clock, mergeConcurrentEdits: config.MergeConcurrentEdits,
+		clock: config.Clock, mergeConcurrentEdits: config.MergeConcurrentEdits, pushBaselinePath: config.PushBaselinePath,
 	}
 	return reconciler, nil
 }
@@ -298,6 +302,7 @@ func (r *PlaintextWorkspaceReconciler) Reconcile(ctx context.Context, repository
 			}
 		}
 	}
+	r.adoptPushBaselineAncestors(baselineFiles, localFiles.Files, remoteFiles.Files)
 	effectiveMode := r.descriptor.Mode
 	writesEnabled := r.descriptor.WriteMode == "leased_writes"
 	if !writesEnabled && effectiveMode == ModeBidirectional {
@@ -604,4 +609,29 @@ func (r *PlaintextWorkspaceReconciler) remoteCaseCollisions(repository *git.Repo
 		return nil, ErrRemoteRevisionChanged
 	}
 	return r.mapping.TreeCaseCollisions(names, r.descriptor.Policy, manifest), nil
+}
+
+// adoptPushBaselineAncestors makes a local file that still equals what this machine's push half last published count as
+// unchanged for the pull half, so a remote change to it is applied instead of conflicting. The pull half records a file only
+// when it sees local and remote agree; a file created and edited on both machines within one poll is never recorded, its
+// merge ancestor is empty, and the other machine's already merged result would conflict forever. Git does the same with the
+// remote-tracking branch: what we last sent is the base. Only files the remote still has are adopted, so a removal on the
+// remote side is never read as a deletion of a file the pull half never saw.
+func (r *PlaintextWorkspaceReconciler) adoptPushBaselineAncestors(baseline, local, remote map[string]FileState) {
+	if r.pushBaselinePath == "" {
+		return
+	}
+	pushed, err := ReadBaseline(r.pushBaselinePath)
+	// A push half writing to another repository says nothing about the one this half pulls from.
+	if err != nil || pushed.AssignmentID != r.descriptor.AssignmentID || pushed.RepositoryID != r.descriptor.RepositoryID {
+		return
+	}
+	for name, state := range local {
+		if _, known := baseline[name]; known {
+			continue
+		}
+		if remoteState, ok := remote[name]; ok && remoteState != state && pushed.Files[name] == state {
+			baseline[name] = state
+		}
+	}
 }
