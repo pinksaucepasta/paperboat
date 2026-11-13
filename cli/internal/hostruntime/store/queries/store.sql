@@ -20,7 +20,7 @@ SELECT * FROM file_transfers WHERE batch_id=? ORDER BY created_at,id;
 SELECT * FROM file_transfers WHERE delivery_client_id=? AND session_id=? AND state='pending' AND expires_at>? ORDER BY created_at,id LIMIT ?;
 
 -- name: ExpiredFileTransfers :many
-SELECT * FROM file_transfers WHERE expires_at<=? AND state IN ('created','uploading','published','pending') ORDER BY expires_at,id LIMIT 100;
+SELECT * FROM file_transfers WHERE expires_at<=? AND (state IN ('created','uploading','published','pending') OR state='failed' AND delivery_client_id IS NULL) ORDER BY expires_at,id LIMIT 100;
 
 -- name: DeleteExpiredOperations :exec
 DELETE FROM operation_results WHERE expires_at<=?;

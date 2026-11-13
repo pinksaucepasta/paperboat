@@ -33,7 +33,18 @@ func (s *Service) PublishedPath(ctx context.Context, id string) (string, error) 
 	if transfer.DestinationMachineID != s.config.LocalMachineID || transfer.State != "published" {
 		return "", &Error{Code: InvalidPath}
 	}
-	return s.publishToRoot(ctx, transfer)
+	path, err := s.publishToRoot(ctx, transfer)
+	if err != nil && ctx.Err() == nil {
+		// Nothing was delivered, so the record must not say published: it says failed with the reason, and the spool
+		// stays for a repeated complete. A failure to record it must not hide the primary error.
+		code := StorageUnavailable
+		var failure *Error
+		if errors.As(err, &failure) {
+			code = failure.Code
+		}
+		_ = s.config.Store.FailFileTransferPublication(ctx, id, s.config.LocalMachineID, string(code))
+	}
+	return path, err
 }
 
 // ExistingPublishedPath is read-only, including when the user removed the file.
@@ -177,6 +188,9 @@ func (s *Service) publishToRoot(ctx context.Context, transfer store.FileTransfer
 			if errors.Is(err, os.ErrExist) {
 				_ = os.Remove(s.markerPath(transfer.ID)) // the marker says the pinned name is ours; someone's file is there
 				continue
+			}
+			if _, statErr := os.Lstat(path); errors.Is(statErr, os.ErrNotExist) {
+				_ = os.Remove(s.markerPath(transfer.ID)) // nothing was linked: the marker must not claim the pinned name
 			}
 			return "", storageFailure(err) // a full disk is its own permanent code
 		}

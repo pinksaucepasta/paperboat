@@ -336,6 +336,12 @@ func (s *Store) ExpireFileTransfers(ctx context.Context, transfers []FileTransfe
 	}
 	defer retainRollback(tx, &resultErr)
 	for _, transfer := range transfers {
+		if transfer.State == "failed" { // a failed Inbox copy keeps its reason; only the spool is released
+			if _, err := tx.ExecContext(ctx, `UPDATE file_transfers SET state='expired' WHERE id=? AND expires_at<=? AND state='failed' AND delivery_client_id IS NULL`, transfer.ID, transfer.ExpiresAt.UnixNano()); err != nil {
+				return err
+			}
+			continue
+		}
 		state, code := "canceled", "canceled"
 		if transfer.DeliveryClientID != "" {
 			state, code = "failed", "delivery_timeout"

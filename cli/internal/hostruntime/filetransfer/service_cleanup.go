@@ -95,7 +95,7 @@ func (s *Service) CleanupExpired(ctx context.Context) error {
 
 func expirationState(state string) bool {
 	switch state {
-	case "created", "uploading", "published", "pending":
+	case "created", "uploading", "published", "pending", "failed":
 		return true
 	default:
 		return false

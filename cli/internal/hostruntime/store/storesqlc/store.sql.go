@@ -79,7 +79,7 @@ func (q *Queries) DeleteExpiredOperations(ctx context.Context, expiresAt int64) 
 }
 
 const expiredFileTransfers = `-- name: ExpiredFileTransfers :many
-SELECT id, batch_id, source_machine_id, destination_machine_id, initiating_user_id, session_id, delivery_client_id, basename, size, sha256, committed_offset, state, result_code, receipt_path, created_at, expires_at FROM file_transfers WHERE expires_at<=? AND state IN ('created','uploading','published','pending') ORDER BY expires_at,id LIMIT 100
+SELECT id, batch_id, source_machine_id, destination_machine_id, initiating_user_id, session_id, delivery_client_id, basename, size, sha256, committed_offset, state, result_code, receipt_path, created_at, expires_at FROM file_transfers WHERE expires_at<=? AND (state IN ('created','uploading','published','pending') OR state='failed' AND delivery_client_id IS NULL) ORDER BY expires_at,id LIMIT 100
 `
 
 func (q *Queries) ExpiredFileTransfers(ctx context.Context, expiresAt int64) ([]FileTransfer, error) {

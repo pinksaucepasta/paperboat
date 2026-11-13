@@ -398,6 +398,18 @@ func (s *Service) Complete(ctx context.Context, id string) (store.FileTransfer, 
 	if err != nil {
 		return store.FileTransfer{}, lookupFailure(err)
 	}
+	for index, transfer := range transfers {
+		if transfer.State != "failed" || transfer.DestinationMachineID != s.config.LocalMachineID {
+			continue
+		}
+		// The Inbox copy failed earlier but the spool still holds the upload: publish it again.
+		if _, statErr := os.Lstat(s.contentPath(transfer.ID)); statErr == nil {
+			if err := s.config.Store.ReopenFileTransferPublication(ctx, transfer.ID, s.config.LocalMachineID); err != nil {
+				return requested, storageFailure(err)
+			}
+			transfers[index].State = "published"
+		}
+	}
 	allTerminal := true
 	for _, transfer := range transfers {
 		if transfer.State != "published" && transfer.State != "pending" && transfer.State != "delivered" {
