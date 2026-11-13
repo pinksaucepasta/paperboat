@@ -6,6 +6,7 @@ import (
 	"context"
 	"io"
 	"os"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -71,5 +72,21 @@ func TestRealShellLauncherStartsLoginShellInPTY(t *testing.T) {
 	}
 	if runtime.exit.Code != 7 || !strings.Contains(runtime.output, "PAPERBOAT_LOGIN_SHELL_OK") {
 		t.Fatalf("exit=%#v output=%q", runtime.exit, runtime.output)
+	}
+}
+
+func TestShellEnvironmentGetsUTF8OnlyWhenNoLocaleIsSet(t *testing.T) {
+	want := "C.UTF-8"
+	if runtime.GOOS == "darwin" {
+		want = "en_US.UTF-8"
+	}
+	if got := environmentValue(platformShellEnvironment("/bin/sh", []string{"TERM=xterm"}), "LANG"); got != want {
+		t.Fatalf("LANG = %q, want %q", got, want)
+	}
+	for _, kept := range []string{"LANG=de_DE.ISO-8859-1", "LC_ALL=C", "LC_CTYPE=en_US.UTF-8"} {
+		environment := platformShellEnvironment("/bin/sh", []string{kept})
+		if len(environment) != 1 {
+			t.Fatalf("%s: environment = %#v", kept, environment)
+		}
 	}
 }
