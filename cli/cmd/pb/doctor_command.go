@@ -685,8 +685,16 @@ func doctorLocalNamesCheck(ctx context.Context, domain string, lookup func(conte
 		return check
 	}
 	check.Status = doctorpkg.StatusWarning
-	check.Summary = "Local browser names under " + domain + " do not resolve here (no internet DNS, or a router or DNS filter that blocks private answers)."
-	check.Recovery = "Allow " + domain + " in your router or DNS filter, or add `" + splitdns.BrowserGatewayIP + " <name>." + domain + "` to your hosts file for the names you open. Machine access with pb does not use these names."
+	// An answer that is empty, missing or not the gateway while the resolver is reachable is what a rebind-protecting
+	// resolver (dnsmasq --stop-dns-rebind, Pi-hole, router "DNS rebind protection") does to a public name answering 127.x.
+	var dnsErr *net.DNSError
+	if err == nil || (errors.As(err, &dnsErr) && dnsErr.IsNotFound) {
+		check.Summary = "Your DNS resolver blocks private answers (DNS rebinding protection), so names under " + domain + " do not resolve here."
+		check.Recovery = "Allow " + domain + " in your router or Pi-hole, or use the machine's 127.100.x.y address (`pb resolve <machine>`) with `pb access machine`. Machine access with pb does not use these names."
+		return check
+	}
+	check.Summary = "Local browser names under " + domain + " do not resolve here (no internet DNS?): " + err.Error() + "."
+	check.Recovery = "Check this computer's internet DNS, or use the machine's address from `pb resolve <machine>`. Machine access with pb does not use these names."
 	return check
 }
 

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"net"
 	"strings"
 	"testing"
 
@@ -20,9 +21,25 @@ func TestDoctorLocalNamesSaysWhatToDoWhenTheNamesDoNotResolve(t *testing.T) {
 	if got := doctorLocalNamesCheck(t.Context(), "local.example.test", resolves); got.Status != doctorpkg.StatusPass {
 		t.Fatalf("resolving names: %+v", got)
 	}
-	for name, lookup := range map[string]func(context.Context, string) ([]string, error){"offline": offline, "wrong answer": filtered} {
+	notFound := func(context.Context, string) ([]string, error) {
+		return nil, &net.DNSError{Err: "no such host", Name: "dns-check.local.example.test", IsNotFound: true}
+	}
+	timeout := func(context.Context, string) ([]string, error) {
+		return nil, &net.DNSError{Err: "i/o timeout", Name: "dns-check.local.example.test", IsTimeout: true}
+	}
+	for name, lookup := range map[string]func(context.Context, string) ([]string, error){"empty answer": notFound, "wrong answer": filtered} {
 		got := doctorLocalNamesCheck(t.Context(), "local.example.test", lookup)
-		if got.Status != doctorpkg.StatusWarning || !strings.Contains(got.Recovery, "hosts file") || !strings.Contains(got.Recovery, splitdns.BrowserGatewayIP+" <name>.local.example.test") {
+		if got.Status != doctorpkg.StatusWarning || !strings.Contains(got.Summary, "DNS rebinding protection") ||
+			!strings.Contains(got.Recovery, "Allow local.example.test in your router or Pi-hole") || !strings.Contains(got.Recovery, "127.100.x.y") {
+			t.Fatalf("%s: %+v", name, got)
+		}
+		if err := got.Validate(); err != nil {
+			t.Fatalf("%s: invalid check: %v", name, err)
+		}
+	}
+	for name, lookup := range map[string]func(context.Context, string) ([]string, error){"offline": offline, "timeout": timeout} {
+		got := doctorLocalNamesCheck(t.Context(), "local.example.test", lookup)
+		if got.Status != doctorpkg.StatusWarning || strings.Contains(got.Summary, "rebinding") || !strings.Contains(got.Recovery, "pb resolve") {
 			t.Fatalf("%s: %+v", name, got)
 		}
 		if err := got.Validate(); err != nil {
