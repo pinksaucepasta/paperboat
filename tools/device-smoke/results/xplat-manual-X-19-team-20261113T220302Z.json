@@ -337,7 +337,7 @@
   },
   "build_commit": "ac409910b",
   "harness_commit": "de44c7516",
-  "cleanup": "Mac and Windows uninstalled; four exact own machine IDs revoked; team rx19d-team deleted and test entitlement removed; anvit rx19d-a/b containers deleted; macpool-3 released; winpool-5 stopped.",
+  "cleanup": "Mac and Windows uninstalled; four exact own machine IDs revoked/removed; team rx19d-team deleted and test entitlement removed; anvit rx19d-a/b containers deleted; macpool-3 released; winpool-5 stopped.",
   "notes": [
     "holder>shared target; seconds conservatively bound both transports, measured before mutation until both EOF/reset observations",
     "Mac fresh SYN is denied by PF drop (connect timeout only); Windows by WSAEACCES 10013; Linux by rejection/EOF",
@@ -348,5 +348,6 @@
   "validation": {
     "focused": "python3 -m unittest discover -s tools/device-smoke -p test_xplat_team_private_end.py (2 PASS)",
     "ci": "https://github.com/pinksaucepasta/paperboat/actions/runs/43515822853 (smoke PASS)"
-  }
+  },
+  "submission": "tools/push.sh refused: gh Branch not protected (HTTP 404); main must require PRs and CI for admins first. No bypass or direct push."
 }

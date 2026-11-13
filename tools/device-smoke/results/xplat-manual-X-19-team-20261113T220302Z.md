@@ -23,7 +23,9 @@ Provenance: L>M is preserved from the first run (215345Z); the other five pairs 
 
 Validation: focused Python tests (2 PASS), `git diff --check`, and smoke harness CI https://github.com/pinksaucepasta/paperboat/actions/runs/43515822853 (PASS). No Go paths changed; no Go build/vet/test ran on oracle.
 
-Cleanup: Mac and Windows uninstalled; four exact own machine IDs revoked; team rx19d-team deleted and test entitlement removed; anvit rx19d-a/b containers deleted; macpool-3 released; winpool-5 stopped.
+Cleanup: Mac and Windows uninstalled; four exact own machine IDs revoked/removed; team rx19d-team deleted and test entitlement removed; anvit rx19d-a/b containers deleted; macpool-3 released; winpool-5 stopped.
+
+Submission blocked: `tools/push.sh` refused with `Branch not protected (HTTP 404)` / `main must require PRs and CI for admins first`. No bypass or direct push. Commits remain local for the parent to submit once protection is restored.
 
 CHECKLIST.md is unchanged for the parent to update.
 
