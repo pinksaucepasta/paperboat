@@ -20,6 +20,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -2366,6 +2367,16 @@ func windowsRepairRequest(config WindowsRuntimeConfig) Request {
 	}
 }
 
+// windowsRuntimeServiceArguments reports whether a registered service command line is exactly the one the plan declares
+// (windowsRuntimeServiceDefinitions): hostd's carries its generation after the instance, the other roles do not.
+func windowsRuntimeServiceArguments(arguments []string, role, instance, generation string) bool {
+	expected := []string{"daemon", role, "--instance", instance}
+	if role == "__runtime-hostd" {
+		expected = append(expected, "--generation", generation)
+	}
+	return len(arguments) == 1+len(expected) && slices.Equal(arguments[1:], expected)
+}
+
 func reconcileWindowsRepairVersion(ctx context.Context, config WindowsRuntimeConfig, layout service.Layout) (returnedConfig WindowsRuntimeConfig, resultErr error) {
 	manager, err := mgr.Connect()
 	if err != nil {
@@ -2392,7 +2403,7 @@ func reconcileWindowsRepairVersion(ctx context.Context, config WindowsRuntimeCon
 			return config, errors.Join(configErr, closeErr)
 		}
 		arguments, err := windows.DecomposeCommandLine(definition.BinaryPathName)
-		if err != nil || len(arguments) != 5 || arguments[1] != "daemon" || arguments[2] != item.argument || arguments[3] != "--instance" || arguments[4] != config.Instance {
+		if err != nil || !windowsRuntimeServiceArguments(arguments, item.argument, config.Instance, sourceGenerationOrAbsent(config.Source)) {
 			return config, ErrInvalidRequest
 		}
 		pinned, pathErr := WindowsPinnedSourcePath(layout, config.Source)
