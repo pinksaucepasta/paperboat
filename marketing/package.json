@@ -2,6 +2,7 @@
   "name": "paperboat-astro",
   "private": true,
   "type": "module",
+  "packageManager": "bun@1.4.2",
   "scripts": {
     "dev": "astro dev",
     "build": "astro build",
