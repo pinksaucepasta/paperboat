@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
 	"github.com/pinksaucepasta/paperboat/internal/machineguard"
 	"github.com/spf13/cobra"
@@ -17,7 +18,12 @@ var machineGuardBrowserDomain = hostinstall.MachineGuardBrowserDomain
 func AddMachineGuardCommand(root *cobra.Command) {
 	command := &cobra.Command{Use: "machine-guard", Short: "Manage protected local machine access"}
 	run := &cobra.Command{Use: "run", Short: "Run the machine guard under service supervision", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
-		return machineguard.Serve(cmd.Context(), machineguard.Config{})
+		err := machineguard.Serve(cmd.Context(), machineguard.Config{})
+		if err != nil {
+			// The service log is the only place a stopped guard can say why; pb's error printer hides untyped errors.
+			fmt.Fprintln(cmd.ErrOrStderr(), "machine guard stopped:", err)
+		}
+		return err
 	}}
 	install := &cobra.Command{Use: "install", Short: "Install the root-owned machine guard service", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		executable, err := os.Executable()
