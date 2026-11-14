@@ -1,0 +1,10 @@
+// The marketing site on Cloudflare Workers: static files only, built by `npm run build` into dist/.
+{
+  "name": "paperboat",
+  "compatibility_date": "2026-11-01",
+  "assets": {
+    "directory": "./dist",
+    "not_found_handling": "404-page",
+    "html_handling": "auto-trailing-slash"
+  }
+}
