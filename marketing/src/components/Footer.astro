@@ -1,13 +1,13 @@
 ---
 import Lockup from "./Lockup.astro"
-import { footerColumns } from "../nav"
+import { footerColumns, legalLinks } from "../nav"
 ---
 
 <footer class="footer">
   <div class="wrap footer-inner">
     <div class="footer-brand">
       <Lockup />
-      <p class="small">Work on every machine as if it were this one.</p>
+      <p>Work on every machine as if it were this one.</p>
     </div>
     {
       footerColumns.map((column) => (
@@ -25,13 +25,26 @@ import { footerColumns } from "../nav"
     }
   </div>
   <div class="wrap">
-    <p class="footer-base small">© 2026 Paperboat</p>
+    <div class="footer-base">
+    <p>© 2026 Paperboat</p>
+    <nav aria-label="Legal">
+      <ul class="legal">
+        {
+          legalLinks.map((link) => (
+            <li>
+              <a href={link.href}>{link.label}</a>
+            </li>
+          ))
+        }
+      </ul>
+    </nav>
+    </div>
   </div>
 </footer>
 
 <style>
   .footer {
-    padding-block: var(--s8) var(--s6);
+    padding-block: clamp(56px, 7vw, 88px) var(--s6);
     border-top: 1px solid var(--rule);
   }
 
@@ -46,26 +59,36 @@ import { footerColumns } from "../nav"
     display: grid;
     gap: var(--s3);
     align-content: start;
-    max-width: 30ch;
+  }
+
+  .footer-brand p {
+    max-width: 32ch;
+    font-size: var(--text-ui);
+    color: var(--fog);
   }
 
   .column-title {
-    margin-bottom: var(--s2);
+    margin-bottom: var(--s3);
     font-family: var(--font-sans);
-    font-size: var(--text-ui);
+    font-size: var(--text-small);
     font-weight: 500;
     color: var(--ink);
+  }
+
+  ul {
+    display: grid;
+    gap: 2px;
   }
 
   /* Each link is a full-height row, so a thumb can hit it. */
   ul a {
     display: flex;
     align-items: center;
-    min-height: 36px;
-    white-space: nowrap;
+    min-height: 32px;
     font-size: var(--text-ui);
-    line-height: 1.3;
     color: var(--fog);
+    white-space: nowrap;
+    transition: color 0.15s ease;
   }
 
   ul a:hover {
@@ -73,21 +96,38 @@ import { footerColumns } from "../nav"
   }
 
   .footer-base {
-    margin-top: var(--s8);
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--s3) var(--s6);
+    margin-top: clamp(48px, 6vw, 72px);
     padding-top: var(--s5);
     border-top: 1px solid var(--rule);
+    font-size: var(--text-small);
+    color: var(--fog);
   }
 
-  @media (min-width: 640px) {
+  .legal {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--s5);
+  }
+
+  .legal a {
+    min-height: 32px;
+    font-size: var(--text-small);
+  }
+
+  @media (min-width: 720px) {
     .footer-inner {
       grid-template-columns: repeat(4, minmax(0, 1fr));
     }
   }
 
-  @media (min-width: 1200px) {
+  @media (min-width: 1100px) {
     .footer-inner {
-      grid-template-columns: 1.3fr repeat(4, minmax(0, 1fr));
-      gap: var(--s6);
+      grid-template-columns: minmax(0, 2fr) repeat(4, minmax(0, 1fr));
     }
 
     .footer-brand {
@@ -95,7 +135,7 @@ import { footerColumns } from "../nav"
     }
 
     ul a {
-      min-height: 30px;
+      min-height: 28px;
     }
   }
 </style>

@@ -72,10 +72,7 @@ const versus = [
       <header class="split-head">
         <h2 class="h2" id="terminal-title">Terminals that outlive the connection</h2>
         <div class="split-side">
-          <p>
-            Start a shell on studio, close the laptop, open it again from another computer or a browser. It kept running, and shows you what you
-            missed.
-          </p>
+          <p>Close the laptop, change networks, come back hours later. The shell kept running and shows what you missed.</p>
           <a class="more" href="/features/terminal/">How terminals work <span aria-hidden="true">→</span></a>
         </div>
       </header>
@@ -90,10 +87,7 @@ const versus = [
       <header class="split-head">
         <h2 class="h2" id="preview-title">Share what you're building</h2>
         <div class="split-side">
-          <p>
-            <code>pb preview 3000</code> puts your dev server on an address like <code>quiet-river-4821.{previewDomain}</code>. Keep it to yourself,
-            give it a time limit, and inspect or replay every request it gets.
-          </p>
+          <p>One command puts localhost on a link like <code>quiet-river-4821.{previewDomain}</code>, with every request kept to replay.</p>
           <a class="more" href="/features/previews/">Previews and tunnels <span aria-hidden="true">→</span></a>
         </div>
       </header>
@@ -108,7 +102,7 @@ const versus = [
       <header class="split-head">
         <h2 class="h2" id="all-title">Everything in one install</h2>
         <div class="split-side">
-          <p>Twelve features in one <code>pb</code> for Linux, macOS and Windows. Every one of them is on the free plan.</p>
+          <p>Twelve features for Linux, macOS and Windows, and every one of them is on the free plan.</p>
           <a class="more" href="/features/">All features <span aria-hidden="true">→</span></a>
         </div>
       </header>
@@ -121,7 +115,7 @@ const versus = [
       <header class="split-head">
         <h2 class="h2" id="price-title">Free for personal use</h2>
         <div class="split-side">
-          <p>Every feature is free for personal use. Pay for more relay and edge traffic, or for a team. Direct traffic is never counted.</p>
+          <p>Every feature is free for personal use. Pay for more relay and edge traffic, or for a team.</p>
           <a class="more" href="/pricing/">Pricing in full <span aria-hidden="true">→</span></a>
         </div>
       </header>
@@ -134,7 +128,7 @@ const versus = [
       <header class="split-head">
         <h2 class="h2" id="versus-title">How it compares</h2>
         <div class="split-side">
-          <p>Some of these tools do their one job better. Each comparison says where, with links to their own docs.</p>
+          <p>Some of these tools do their one job better. Each comparison says where.</p>
           <a class="more" href="/compare/">All comparisons <span aria-hidden="true">→</span></a>
         </div>
       </header>
@@ -274,14 +268,14 @@ const versus = [
   }
 
   .split-side p {
-    max-width: 46ch;
+    max-width: 54ch;
     font-size: var(--text-body);
     color: var(--fog);
   }
 
   @media (min-width: 900px) {
     .split-head {
-      grid-template-columns: minmax(0, 6fr) minmax(0, 5fr);
+      grid-template-columns: minmax(0, 4fr) minmax(0, 5fr);
       align-items: end;
     }
   }

@@ -1,59 +1,47 @@
 ---
 import Install from "./Install.astro"
-import Mark from "./Mark.astro"
-/** The last thing on a page: the boat, one line, and the install command. */
+/** The last section of a page: one line on the left, the install command on the right. */
 interface Props {
   title?: string
 }
-const { title = "Install pb on the machine in front of you" } = Astro.props
+const { title = "Start with the machine in front of you" } = Astro.props
 ---
 
-<section class="closing section-rule" aria-labelledby="closing-title">
+<section class="section section-rule closing" aria-labelledby="closing-title">
   <div class="wrap closing-inner">
-    <Mark height={48} class="closing-mark" />
-    <h2 class="h2 closing-title" id="closing-title">{title}</h2>
-    <p class="closing-lede">Free for personal use. No card needed.</p>
+    <div class="closing-text">
+      <h2 class="h2" id="closing-title">{title}</h2>
+      <p>Install Paperboat here, then on a second machine. Free for personal use, no card needed.</p>
+    </div>
     <div class="closing-install"><Install /></div>
   </div>
 </section>
 
 <style>
-  .closing {
-    padding-block: clamp(88px, 10vw, 144px);
-  }
-
   .closing-inner {
     display: grid;
     grid-template-columns: minmax(0, 1fr);
-    justify-items: center;
-    gap: var(--s5);
-    text-align: center;
+    gap: var(--s6) var(--s8);
+    align-items: end;
   }
 
-  .closing :global(.closing-mark) {
-    margin-bottom: var(--s3);
-    color: var(--cobalt);
+  .closing-text {
+    display: grid;
+    gap: var(--s4);
   }
 
-  .closing-title {
+  .closing-text .h2 {
     max-width: 18ch;
   }
 
-  .closing-lede {
-    max-width: 46ch;
-    font-size: var(--text-lede);
+  .closing-text p {
+    max-width: 44ch;
     color: var(--fog);
-    text-wrap: balance;
   }
 
-  .closing-install {
-    width: 100%;
-    max-width: 560px;
-    margin-top: var(--s3);
-  }
-
-  .closing-install :global(.install),
-  .closing-install :global(.os-panel) {
-    justify-items: center;
+  @media (min-width: 960px) {
+    .closing-inner {
+      grid-template-columns: minmax(0, 5fr) minmax(0, 4fr);
+    }
   }
 </style>

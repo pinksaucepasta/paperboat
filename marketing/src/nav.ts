@@ -1,4 +1,4 @@
-import { consoleUrl } from "./site"
+import { consoleUrl, sourceUrl } from "./site"
 import { compares } from "./compare-data"
 import { features, useCases } from "./features"
 import { legalPages } from "./legal-data"
@@ -18,19 +18,31 @@ export const topLinks: NavLink[] = [
   { href: "/docs/", label: "Docs" },
 ]
 
+/** The comparisons the footer lists by name; the rest are one click away on /compare. */
+const footerCompares = ["tailscale", "ngrok", "cloudflare-tunnel", "teleport", "netbird"]
+
 export const footerColumns: { title: string; links: NavLink[] }[] = [
-  { title: "Features", links: [{ href: "/features/", label: "All features" }, ...featureLinks] },
-  { title: "Use cases", links: useCaseLinks },
-  { title: "Compare", links: [{ href: "/compare/", label: "All comparisons" }, ...compareLinks] },
   {
-    title: "Paperboat",
+    title: "Product",
     links: [
+      { href: "/features/", label: "Features" },
       { href: "/pricing/", label: "Pricing" },
       { href: "/security/", label: "Security" },
       { href: "/docs/", label: "Docs" },
-      { href: "/#install", label: "Install" },
+      { href: sourceUrl, label: "Source code" },
       { href: consoleUrl, label: "Sign in" },
-      ...legalPages.map((page) => ({ href: `/legal/${page.slug}/`, label: page.title })),
     ],
   },
+  { title: "Features", links: featureLinks },
+  {
+    title: "Compare",
+    links: [
+      ...compareLinks.filter((link) => footerCompares.some((slug) => link.href === `/compare/${slug}/`)),
+      { href: "/compare/", label: "All comparisons" },
+    ],
+  },
+  { title: "Use cases", links: useCaseLinks },
 ]
+
+/** The legal pages, in the footer's bottom row. */
+export const legalLinks: NavLink[] = legalPages.map((page) => ({ href: `/legal/${page.slug}/`, label: page.short }))

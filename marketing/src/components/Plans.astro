@@ -20,7 +20,7 @@ const extras = [
   ["Members and roles", "Session recordings in your S3 bucket", `SSO and SCIM from ${ssoMinSeats} seats`, "Audit log export"],
 ]
 const actions = [
-  { href: "/#install", label: "Install pb", primary: false },
+  { href: "/#install", label: "Install Paperboat", primary: false },
   { href: consoleUrl, label: "Upgrade to Pro", primary: false },
   { href: consoleUrl, label: "Start a 14-day trial", primary: true },
 ]
@@ -84,7 +84,7 @@ const id = `plans-${Math.random().toString(36).slice(2, 8)}`
 
   .period {
     display: inline-flex;
-    justify-self: start;
+    justify-self: end;
     padding: 4px;
     border-radius: 10px;
     background: var(--surface);

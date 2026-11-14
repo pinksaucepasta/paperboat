@@ -589,7 +589,7 @@ footer {
 /* A section opening on a hairline across the frame; it keeps its full top space. */
 .section.section-rule {
   padding-top: var(--section);
-  background: linear-gradient(var(--rule), var(--rule)) top center / min(100%, calc(var(--max) + var(--gutter) * 2)) 1px no-repeat;
+  background: linear-gradient(var(--rule), var(--rule)) top center / min(calc(100% - var(--gutter) * 2), var(--max)) 1px no-repeat;
 }
 
 /* Centered section opening: heading, one grey line. */
