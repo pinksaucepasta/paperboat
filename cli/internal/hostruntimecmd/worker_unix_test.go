@@ -314,3 +314,42 @@ func workerStartupFixture(t *testing.T) (*hostdproto.Server, string, []byte, []s
 	})
 	return server, endpoint, token, []string{"--socket", endpoint, "--token-file", tokenPath}
 }
+
+// TestWorkerLivenessReportsAFrozenWorker: lanex2-l2 (2026-11-13) kept a worker
+// alive that had stopped serving and heartbeating; hostd never restarted it and
+// the machine showed offline for 2.5 h. A heartbeat that stops advancing for
+// workerFrozenAfter of hostd's own time is now a lost worker.
+func TestWorkerLivenessReportsAFrozenWorker(t *testing.T) {
+	start := time.Now()
+	active := func(epoch uint64, beat int64) hostdproto.Status {
+		return hostdproto.Status{State: hostdproto.StateActive, WorkerID: "runtime-test", Epoch: epoch, LastHeartbeatUnixMilli: beat}
+	}
+	var l workerLiveness
+	if l.silent(active(1, 100), start) {
+		t.Fatal("first observation reported silent")
+	}
+	// Heartbeats advancing every tick keep the worker alive however long it runs.
+	for i := int64(1); i <= 10; i++ {
+		if l.silent(active(1, 100+i), start.Add(time.Duration(i)*5*time.Second)) {
+			t.Fatalf("advancing heartbeat reported silent at tick %d", i)
+		}
+	}
+	base := start.Add(50 * time.Second)
+	if l.silent(active(1, 110), base.Add(workerFrozenAfter)) {
+		t.Fatal("silent at exactly the limit")
+	}
+	if !l.silent(active(1, 110), base.Add(workerFrozenAfter+time.Second)) {
+		t.Fatal("frozen heartbeat was not reported")
+	}
+	// A new worker epoch (replacement) starts its own window.
+	if l.silent(active(2, 110), base.Add(workerFrozenAfter+2*time.Second)) {
+		t.Fatal("a new epoch inherited the old window")
+	}
+	// No active worker (candidate/empty) is never reported.
+	var idle workerLiveness
+	for i := 0; i < 10; i++ {
+		if idle.silent(hostdproto.Status{State: hostdproto.StateCandidate}, start.Add(time.Duration(i)*workerFrozenAfter)) {
+			t.Fatal("non-active worker reported silent")
+		}
+	}
+}

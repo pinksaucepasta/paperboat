@@ -188,6 +188,9 @@ func runHostdWith(ctx context.Context, output io.Writer, newHost hostdHostFactor
 		defer watchdogTicker.Stop()
 		watchdog = watchdogTicker.C
 	}
+	livenessTicker := time.NewTicker(workerLivenessInterval)
+	defer livenessTicker.Stop()
+	var liveness workerLiveness
 	for {
 		select {
 		case serverErr := <-serverDone:
@@ -214,6 +217,11 @@ func runHostdWith(ctx context.Context, output io.Writer, newHost hostdHostFactor
 			return errors.Join(lost, notifier.Degraded("runtime worker exited"))
 		case <-ctx.Done():
 			return runtimeFailureIfAny("hostd draining failed", runtimeShutdownCause(ctx), notifier.Draining())
+		case now := <-livenessTicker.C:
+			if liveness.silent(server.Status(), now) {
+				// Alive but frozen serves nobody either (lanex2-l2, 2026-11-13: offline 2.5 h).
+				return errors.Join(runtimeFailure("the runtime worker stopped sending heartbeats", errWorkerSilent), notifier.Degraded("runtime worker stopped sending heartbeats"))
+			}
 		case <-watchdog:
 			if err := notifier.Watchdog(); err != nil {
 				return errors.Join(err, notifier.Degraded("watchdog notification failed"))
@@ -350,4 +358,29 @@ func readWorkerToken(path string) ([]byte, error) {
 		return nil, runtimeFailure("opening the runtime token file failed", err)
 	}
 	return readRuntimeToken(file)
+}
+
+var errWorkerSilent = errors.New("runtime worker stopped sending heartbeats")
+
+const workerLivenessInterval = 5 * time.Second
+
+// workerFrozenAfter is well past the longest gap a serving worker leaves between
+// heartbeats (a 30 s bridge health call, its retry, then the 5 s heartbeat).
+const workerFrozenAfter = 2 * time.Minute
+
+// workerLiveness reports an active worker whose heartbeat has not advanced for
+// workerFrozenAfter of hostd's own (monotonic) running time. A suspended machine
+// resumes both processes, so the heartbeat moves again before that.
+type workerLiveness struct {
+	epoch     uint64
+	heartbeat int64
+	since     time.Time
+}
+
+func (l *workerLiveness) silent(status hostdproto.Status, now time.Time) bool {
+	if status.State != hostdproto.StateActive || l.since.IsZero() || status.Epoch != l.epoch || status.LastHeartbeatUnixMilli != l.heartbeat {
+		*l = workerLiveness{epoch: status.Epoch, heartbeat: status.LastHeartbeatUnixMilli, since: now}
+		return false
+	}
+	return now.Sub(l.since) > workerFrozenAfter
 }
