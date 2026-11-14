@@ -367,8 +367,8 @@ svg {
   background: var(--surface);
   color: var(--ink);
   font-size: 0.86em;
-  /* A long command may break on a phone instead of pushing the page sideways. */
-  overflow-wrap: break-word;
+  /* A command never breaks in the middle; it moves to the next line whole. */
+  white-space: nowrap;
   -webkit-box-decoration-break: clone;
   box-decoration-break: clone;
 }
@@ -522,6 +522,26 @@ button code {
 .facts td:last-child,
 .facts th:last-child {
   padding-right: 0;
+}
+
+/* On a phone, a two-column table of facts stacks each row: the label, then what is true about it. */
+@media (max-width: 639px) {
+  .facts:not(.table) thead:has(th:nth-child(2):last-child) {
+    display: none;
+  }
+
+  .facts:not(.table) tbody tr:has(> :nth-child(2):last-child) {
+    display: grid;
+    gap: 2px;
+    padding-block: var(--s3);
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .facts:not(.table) tbody tr:has(> :nth-child(2):last-child) > * {
+    width: auto;
+    padding: 0;
+    border: 0;
+  }
 }
 
 /* A wide table scrolls inside its own box, never the page. */
