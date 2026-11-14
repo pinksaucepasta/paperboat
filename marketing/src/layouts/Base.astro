@@ -37,7 +37,9 @@ const graph = [organization, ...schema.map((item) => ({ "@context": "https://sch
     <meta name="description" content={description} />
     {noindex ? <meta name="robots" content="noindex" /> : <link rel="canonical" href={canonical} />}
     <meta name="theme-color" content="#ffffff" />
+    <link rel="icon" href="/favicon.ico" sizes="48x48" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="preload" href={figtree} as="font" type="font/woff2" crossorigin />
     <link rel="preload" href={geist} as="font" type="font/woff2" crossorigin />
     <link rel="preload" href={mono} as="font" type="font/woff2" crossorigin />

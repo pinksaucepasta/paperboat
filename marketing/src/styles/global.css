@@ -293,7 +293,7 @@ svg {
 .h2,
 .h3 {
   font-family: var(--font-brand);
-  font-weight: 500;
+  font-weight: 600;
   color: var(--ink);
   text-wrap: balance;
 }

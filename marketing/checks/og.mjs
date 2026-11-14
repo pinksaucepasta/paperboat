@@ -26,7 +26,7 @@ const style = `
   * { box-sizing: border-box; margin: 0; }
   body { position: relative; width: 1200px; height: 630px; overflow: hidden; background: #fafaf9; color: #141414; font-family: G; }
   .lockup { display: flex; align-items: center; gap: 16px; font: 600 28px F; letter-spacing: -0.025em; }
-  h1 { font-family: F; font-weight: 500; letter-spacing: -0.035em; line-height: 1.04; text-wrap: balance; }`
+  h1 { font-family: F; font-weight: 600; letter-spacing: -0.035em; line-height: 1.04; text-wrap: balance; }`
 const lockup = `<div class="lockup"><svg viewBox="0 0 600 360" height="28" fill="#1d52eb"><path fill-rule="evenodd" d="${boat}"/></svg>paperboat</div>`
 
 const home = (headline) => `<style>${style}
