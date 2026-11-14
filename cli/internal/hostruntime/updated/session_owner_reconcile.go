@@ -10,8 +10,6 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/sessionowner"
 )
 
-const sessionOwnerReconcileInterval = 5 * time.Second
-
 // controlMutex serializes owner catalog mutations. The background owner pass
 // only borrows it: Lock cancels a pass in progress, which stops at its next
 // owner call and retries on the next tick (interrupted retirement is
