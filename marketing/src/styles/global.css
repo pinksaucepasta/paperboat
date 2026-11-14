@@ -225,7 +225,7 @@ svg {
 }
 
 .section-head .h2 {
-  max-width: 16ch;
+  max-width: 20ch;
 }
 
 .section-head .lede {
@@ -237,7 +237,7 @@ svg {
 
 @media (min-width: 900px) {
   .section-head:has(> :nth-child(2)) {
-    grid-template-columns: minmax(0, 4fr) minmax(0, 5fr);
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
     align-items: end;
   }
 }

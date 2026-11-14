@@ -10,7 +10,7 @@ import Plans from "../components/Plans.astro"
 import Closing from "../components/Closing.astro"
 import FeatureIndex from "../components/FeatureIndex.astro"
 import { softwareSchema } from "../schema"
-import { localDomain, previewDomain } from "../site"
+import { previewDomain } from "../site"
 
 const description =
   "Paperboat puts pb on each of your machines: a terminal that survives a closed laptop, SSH without keys, public HTTPS links to local ports, file sending and encrypted environment variables. Free for personal use."
@@ -61,7 +61,7 @@ const versus = [
         </li>
         <li>
           <h2 class="h3">Your firewall stays shut</h2>
-          <p>SSH, files and private ports like <code>5432.studio.{localDomain}</code> reach your machines through any NAT, encrypted end to end.</p>
+          <p>SSH, files and private ports reach your machines through any NAT, encrypted end to end.</p>
         </li>
       </ul>
     </div>
@@ -257,7 +257,7 @@ const versus = [
   }
 
   .split-head .h2 {
-    max-width: 14ch;
+    max-width: 20ch;
   }
 
   .split-side {
@@ -275,7 +275,7 @@ const versus = [
 
   @media (min-width: 900px) {
     .split-head {
-      grid-template-columns: minmax(0, 4fr) minmax(0, 5fr);
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
       align-items: end;
     }
   }
