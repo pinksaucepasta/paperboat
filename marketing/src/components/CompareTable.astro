@@ -165,7 +165,7 @@ const empty = (text: string) => text === "n/a" || text === "No"
     position: sticky;
     top: var(--header);
     z-index: 5;
-    background: rgb(255 255 255 / 0.94);
+    background: color-mix(in srgb, var(--ground) 94%, transparent);
     backdrop-filter: saturate(1.6) blur(14px);
     -webkit-backdrop-filter: saturate(1.6) blur(14px);
     box-shadow: 0 1px 0 var(--rule);
@@ -173,7 +173,7 @@ const empty = (text: string) => text === "n/a" || text === "No"
   }
 
   .compare-tint .heads {
-    background: rgb(245 246 248 / 0.94);
+    background: color-mix(in srgb, var(--paper) 94%, transparent);
   }
 
   .heads-track,
@@ -227,9 +227,10 @@ const empty = (text: string) => text === "n/a" || text === "No"
     background-color: var(--surface-strong);
   }
 
+  /* Drawn inside the menu: the heading strip clips anything outside its last column. */
   .slot select:focus-visible {
     outline: 2px solid var(--cobalt);
-    outline-offset: 2px;
+    outline-offset: -2px;
   }
 
   .body {
