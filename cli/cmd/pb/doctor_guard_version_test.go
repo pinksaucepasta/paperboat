@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -23,5 +24,17 @@ func TestDoctorReportsAMachineGuardOnAnotherVersion(t *testing.T) {
 	check := probeDoctorGuardVersion(context.Background())
 	if check.Status != doctorpkg.StatusWarning || !strings.Contains(check.Summary, "2026.10.23.6") || !strings.Contains(check.Summary, buildinfo.Version) {
 		t.Fatalf("mismatch: %+v", check)
+	}
+}
+
+// A guard that never started says why in pb doctor instead of only "could not be asked".
+func TestDoctorNamesWhyTheMachineGuardDidNotStart(t *testing.T) {
+	prevRead, prevReason := readMachineGuardVersion, machineGuardStartFailure
+	t.Cleanup(func() { readMachineGuardVersion, machineGuardStartFailure = prevRead, prevReason })
+	readMachineGuardVersion = func(context.Context) (string, error) { return "", errors.New("connect: no such file") }
+	machineGuardStartFailure = func() string { return "machine guard could not enable PF: pfctl failed: Operation not permitted" }
+	check := probeDoctorGuardVersion(context.Background())
+	if check.Status != doctorpkg.StatusWarning || !strings.Contains(check.Summary, "could not enable PF: pfctl failed: Operation not permitted") {
+		t.Fatalf("start failure not named: %+v", check)
 	}
 }

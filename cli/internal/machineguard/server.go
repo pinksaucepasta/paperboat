@@ -117,8 +117,10 @@ func Serve(ctx context.Context, cfg Config) (resultErr error) {
 	defer retirePlatform(cfg)
 	defer g.startPreviewPAC(ctx)()
 	if err = g.applyRules(ctx); err != nil {
+		recordStartFailure(cfg.Socket, err)
 		return err
 	}
+	clearStartFailure(cfg.Socket)
 	trustCtx, trustCancel := context.WithTimeout(ctx, 2*time.Minute)
 	err = g.prepareLocalCA(trustCtx)
 	trustCancel()

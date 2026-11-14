@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"syscall"
@@ -307,6 +308,9 @@ func darwinRules(ctx context.Context, leases []*guardedLease, loopbackCIDR ...st
 	return b.String(), nil
 }
 
+// pfNoise is pfctl's ALTQ banner, printed on every call and never the cause.
+var pfNoise = regexp.MustCompile(`(?m)^(No ALTQ support in kernel|ALTQ related functions disabled)\n?`)
+
 func darwinRun(ctx context.Context, input string, program string, args ...string) ([]byte, error) {
 	command := exec.CommandContext(ctx, program, args...)
 	if input != "" {
@@ -314,7 +318,7 @@ func darwinRun(ctx context.Context, input string, program string, args ...string
 	}
 	output, err := command.CombinedOutput()
 	if err != nil {
-		return nil, fmt.Errorf("machine guard %s failed: %w: %s", filepath.Base(program), err, strings.TrimSpace(string(output)))
+		return nil, fmt.Errorf("machine guard %s failed: %w: %s", filepath.Base(program), err, pfNoise.ReplaceAllString(strings.TrimSpace(string(output)), ""))
 	}
 	return output, nil
 }

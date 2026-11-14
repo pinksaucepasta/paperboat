@@ -22,6 +22,9 @@ var readMachineGuardVersion = func(ctx context.Context) (string, error) {
 	return status.Version, err
 }
 
+// machineGuardStartFailure is the reason the guard last stopped before serving; tests replace it.
+var machineGuardStartFailure = machineguard.StartFailure
+
 // probeDoctorGuardVersion reports a machine guard on another version than pb: the guard ships with pb and
 // every installation, update and rollback keeps the two equal.
 func probeDoctorGuardVersion(ctx context.Context) doctorpkg.Check {
@@ -31,6 +34,9 @@ func probeDoctorGuardVersion(ctx context.Context) doctorpkg.Check {
 	version, err := readMachineGuardVersion(ctx)
 	if err != nil {
 		check.Status, check.Summary = doctorpkg.StatusWarning, "The machine guard could not be asked for its version."
+		if reason := machineGuardStartFailure(); reason != "" {
+			check.Summary = "The machine guard did not start: " + reason
+		}
 		check.Recovery = "Run `pb install` again to reinstall the machine guard, then run `pb doctor` again."
 		return check
 	}

@@ -98,26 +98,32 @@ func applyProtection(ctx context.Context, cfg Config, leases []*guardedLease) er
 	darwinPlatform.Lock()
 	defer darwinPlatform.Unlock()
 	if err := darwinLoadAliases(cfg); err != nil {
-		return err
+		return darwinStep("read the alias journal", err)
 	}
-	if err := darwinValidatePolicy(ctx); err != nil {
-		return err
+	needHook, err := darwinValidatePolicy(ctx)
+	if err != nil {
+		return darwinStep("check the PF root ruleset", err)
 	}
 	rules, err := darwinRules(ctx, leases, protectedLoopbackCIDRs()...)
 	if err != nil {
-		return err
+		return darwinStep("build the PF rules", err)
 	}
 	if _, err = darwinRun(ctx, rules, "/sbin/pfctl", "-a", darwinAnchor, "-f", "-"); err != nil {
-		return err
+		return darwinStep("load the Paperboat PF anchor", err)
+	}
+	if needHook {
+		if err = darwinInstallHook(ctx); err != nil {
+			return darwinStep("add the Paperboat anchor to the PF root ruleset", err)
+		}
 	}
 	status, err := darwinRun(ctx, "", "/sbin/pfctl", "-s", "info")
 	if err != nil {
-		return err
+		return darwinStep("read the PF status", err)
 	}
 	if !strings.Contains(string(status), "Status: Enabled") {
 		output, err := darwinRun(ctx, "", "/sbin/pfctl", "-E")
 		if err != nil {
-			return err
+			return darwinStep("enable PF", err)
 		}
 		token := ""
 		for _, line := range strings.Split(string(output), "\n") {
@@ -126,10 +132,10 @@ func applyProtection(ctx context.Context, cfg Config, leases []*guardedLease) er
 			}
 		}
 		if token == "" {
-			return errors.New("PF enable reference was not returned")
+			return darwinStep("enable PF", errors.New("PF enable reference was not returned"))
 		}
 		if err = darwinWrite(filepath.Join(cfg.StateDir, "pf-enable-token"), []byte(token), 0600); err != nil {
-			return err
+			return darwinStep("record the PF enable reference", err)
 		}
 	}
 	active := map[string]bool{}
@@ -157,6 +163,10 @@ func applyProtection(ctx context.Context, cfg Config, leases []*guardedLease) er
 		delete(darwinPlatform.aliases, address)
 	}
 	return darwinSaveAliases()
+}
+
+func darwinStep(step string, err error) error {
+	return fmt.Errorf("machine guard could not %s: %w", step, err)
 }
 
 func retirePlatform(cfg Config) {
@@ -197,10 +207,13 @@ func retirePlatform(cfg Config) {
 	}
 }
 
-// PF evaluates quick matches before later anchors. Support the standard Apple
-// root policy only, and require our child to precede any other Apple anchor.
-// A custom administrator policy is never silently rewritten to make room.
-func darwinValidatePolicy(ctx context.Context) error {
+// PF evaluates `quick` matches in order, so Paperboat's quick rules for the protected range decide first when
+// the root ruleset reaches the guard's anchor before any other quick rule. An administrator's own pf.conf and
+// third-party firewalls are normal: rules AFTER the guard's anchor never see protected traffic, so they are
+// accepted; a quick rule BEFORE it could bypass protection and is named in the error. A root ruleset without
+// the Apple wildcard anchor gets a hook for the guard's own anchor added at its top (darwinInstallHook), and
+// every other user rule stays as it is.
+func darwinValidatePolicy(ctx context.Context) (needHook bool, err error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	query := func(args ...string) (string, error) {
@@ -212,108 +225,31 @@ func darwinValidatePolicy(ctx context.Context) error {
 	}
 	root, err := query("-sr")
 	if err != nil {
-		return err
+		return false, err
 	}
 	interfaces, err := query("-v", "-s", "Interfaces", "-i", "lo0")
 	if err != nil {
-		return err
+		return false, err
 	}
-	anchors, err := query("-a", "com.apple", "-s", "Anchors")
-	if err != nil {
-		return err
+	anchors := ""
+	if hook, _, _ := parseDarwinRoot(root, darwinAnchor); hook == appleHook {
+		if anchors, err = query("-a", "com.apple", "-s", "Anchors"); err != nil {
+			return false, err
+		}
 	}
 	budget := 64
-	return validateDarwinPolicy(root, interfaces, anchors, darwinAnchor, func(anchor string) error { return darwinEarlierAnchorEmpty(query, anchor, &budget, 0) })
-}
-func validateDarwinPolicy(root, interfaces, anchors, ownedAnchor string, inspectEarlier ...func(string) error) error {
-	found := false
-	for _, line := range strings.Split(root, "\n") {
-		line = strings.Join(strings.Fields(line), " ")
-		switch line {
-		case "":
-		case `scrub-anchor "com.apple/*" all`, `scrub-anchor "com.apple/*" all fragment reassemble`:
-		case `anchor "com.apple/*" all`:
-			if found {
-				return errors.New("duplicate Apple PF anchor is unsupported")
-			}
-			found = true
-		default:
-			return errors.New("custom PF root policy must be reconciled before protected machine names can start")
-		}
-	}
-	if !found {
-		return errors.New("PF root policy must retain the standard Apple wildcard anchor")
-	}
-	// pfctl -v prints '(skip)' when PFI_IFLAG_SKIP is active; no suffix means
-	// filtering is enabled. Reject unknown output rather than infer protection.
-	if strings.TrimSpace(interfaces) != "lo0" {
-		return errors.New("PF must filter lo0 before protected machine names can start")
-	}
-	if !strings.HasPrefix(ownedAnchor, "com.apple/") {
-		return errors.New("machine guard PF anchor must be an Apple child")
-	}
-	own := strings.TrimPrefix(ownedAnchor, "com.apple/")
-	for _, line := range strings.Split(anchors, "\n") {
-		name := strings.TrimPrefix(strings.TrimSpace(line), "com.apple/")
-		if name == "" || name == own {
-			continue
-		}
-		if !darwinAnchorName(name) {
-			return errors.New("unknown PF child anchor name")
-		}
-		if name < own {
-			if len(inspectEarlier) != 1 {
-				return errors.New("an earlier PF child anchor could bypass protected machine names")
-			}
-			if err := inspectEarlier[0]("com.apple/" + name); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
+	return validateDarwinPolicy(root, interfaces, anchors, darwinAnchor,
+		func(anchor string) error { return darwinEarlierAnchorOK(query, anchor, &budget, 0, darwinRulesEmpty) },
+		func(anchor string) error { return darwinEarlierAnchorOK(query, anchor, &budget, 0, darwinRulesNoQuick) })
 }
 
-// PF retains empty named nodes after flushing a task-owned anchor. Only a fully
-// inspected empty subtree can precede the guard; live/unknown state fails closed.
-func darwinEarlierAnchorEmpty(query func(...string) (string, error), anchor string, budget *int, depth int) error {
-	if *budget <= 0 || depth > 16 {
-		return errors.New("PF anchor inspection limit exceeded")
-	}
-	*budget--
-	rules, err := query("-a", anchor, "-sr")
+// darwinInstallHook reloads only the root FILTER rules (-R) with the guard's anchor first: NAT, options and
+// every user rule are kept as they are.
+func darwinInstallHook(ctx context.Context) error {
+	out, err := exec.CommandContext(ctx, "/sbin/pfctl", "-sr").Output()
 	if err != nil {
-		return err
+		return fmt.Errorf("read the PF root ruleset: %w", err)
 	}
-	if strings.TrimSpace(rules) != "" {
-		return errors.New("an earlier PF child anchor contains rules that could bypass machine protection")
-	}
-	children, err := query("-a", anchor, "-s", "Anchors")
-	if err != nil {
-		return err
-	}
-	for _, line := range strings.Split(children, "\n") {
-		name := strings.TrimSpace(line)
-		if name == "" {
-			continue
-		}
-		name = strings.TrimPrefix(name, anchor+"/")
-		if !darwinAnchorName(name) {
-			return errors.New("unknown nested PF anchor name")
-		}
-		if err = darwinEarlierAnchorEmpty(query, anchor+"/"+name, budget, depth+1); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-func darwinAnchorName(name string) bool {
-	if name == "" || name == "." || name == ".." {
-		return false
-	}
-	for _, r := range name {
-		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '_' || r == '-' || r == '.') {
-			return false
-		}
-	}
-	return true
+	_, err = darwinRun(ctx, darwinInsertHook(string(out), darwinAnchor), "/sbin/pfctl", "-R", "-f", "-")
+	return err
 }
