@@ -13,7 +13,7 @@ import { softwareSchema } from "../schema"
 import { previewDomain } from "../site"
 
 const description =
-  "Paperboat puts pb on each of your machines: a terminal that survives a closed laptop, SSH without keys, public HTTPS links to local ports, file sending and encrypted environment variables. Free for personal use."
+  "Persistent terminals, keyless SSH, public previews and encrypted secrets for all your machines. One install, end-to-end encrypted. Free for personal use."
 
 const versus = [
   ["tailscale", "Tailscale", "A network for every device. Paperboat is for working on your machines."],
@@ -24,7 +24,7 @@ const versus = [
 ---
 
 <Page
-  title="Paperboat: work on every machine as if it were this one"
+  title="Paperboat | Remote access for every machine you own"
   description={description}
   schema={[softwareSchema(Astro.site, description)]}
 >
