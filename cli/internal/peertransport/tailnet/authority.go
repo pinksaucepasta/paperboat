@@ -665,6 +665,43 @@ func (a *Authority) Allows(peerID, resourceID, capability, direction string) boo
 	return false
 }
 
+// DialStanding is the scope a new terminal, exec or inspector stream to machineID dials on when its own access session
+// is not in this document yet, mirroring the host's standing rule (native Session.standingResource): the machine's
+// standing machine_access rule for capability (a team host), else the personal mesh pair (the caller's own machine,
+// whose host admits its own account by its signed rules). Empty when neither is held. Like Tailscale's SSH, which
+// decides from the netmap it holds (ref/tailscale/ssh/tailssh/tailssh.go evalSSHPolicy), the stream then needs no
+// control-plane round trip; the host still verifies the operation credential and its own rules.
+func (a *Authority) DialStanding(peerID, machineID, capability string) string {
+	if machineID == "" || capability != "terminal" && capability != "exec" && capability != "inspector" {
+		return ""
+	}
+	if a.Allows(peerID, machineID, capability, "dial") {
+		return machineID
+	}
+	return a.PersonalScope(peerID)
+}
+
+// PersonalScope is the id of the live personal mesh pair (machine_network connect, dial) this document holds for
+// peerID, or empty.
+func (a *Authority) PersonalScope(peerID string) string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if !a.usableLocked() {
+		return ""
+	}
+	for _, p := range a.current.Peers {
+		if p.Identity.EndpointID != peerID {
+			continue
+		}
+		for _, s := range p.Scopes {
+			if s.ResourceKind == "machine_network" && s.Capability == "connect" && s.Direction == "dial" && scopeLive(s, serverclock.Now().Unix()) {
+				return s.ResourceID
+			}
+		}
+	}
+	return ""
+}
+
 // Self returns the currently authorized local binding without exposing the
 // mutable configuration document. Callers must treat failure as revocation.
 func (a *Authority) Self() (NetworkBinding, error) {

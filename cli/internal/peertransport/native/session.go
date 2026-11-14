@@ -223,9 +223,9 @@ func (s *Session) Accept(ctx context.Context) (net.Conn, error) {
 func (s *Session) OpenAuthorized(ctx context.Context, header streamauth.Header, accessSessionID, capability string) (net.Conn, error) {
 	resource := accessSessionID
 	if !s.owner.authority.Allows(s.peerID, resource, capability, "dial") {
-		// A terminal resume carries no credential of its own. When its access session has left the signed scope
-		// (an old session, a refreshed configuration) the host's standing rule for this peer admits it, as the host
-		// does on its side (standingResource); only a withdrawn rule refuses it here.
+		// An access session this document does not hold (a new operation's, committed after the last refresh; a
+		// resume's that left the signed scope) is admitted on the host by its standing rule for this peer
+		// (standingResource); the client dials on the same rule, and only a withdrawn rule refuses it here.
 		resource = s.dialStandingResource(header, capability)
 		if resource == "" {
 			return nil, tailnet.ErrAdmission
@@ -238,14 +238,19 @@ func (s *Session) OpenAuthorized(ctx context.Context, header streamauth.Header, 
 	return s.openAdmitted(ctx, header, encoded, resource, capability)
 }
 
-// dialStandingResource is the host machine's id when its signed rules let this peer dial capability there, for a
-// resume stream only; empty otherwise.
+// dialStandingResource is the scope that stands for the stream's access session (tailnet.Authority.DialStanding): a
+// new terminal, exec or inspector stream, or a terminal resume; empty otherwise.
 func (s *Session) dialStandingResource(header streamauth.Header, capability string) string {
-	machineID := s.binding.MachineID
-	if header.Resume == "" || capability != "terminal" || machineID == "" || !s.owner.authority.Allows(s.peerID, machineID, capability, "dial") {
+	if header.Resume != "" && capability != "terminal" {
 		return ""
 	}
-	return machineID
+	return s.owner.authority.DialStanding(s.peerID, s.binding.MachineID, capability)
+}
+
+// dialAdmits reports whether resource still admits a dial of capability: its signed scope, or the personal mesh pair
+// that stands for it.
+func (s *Session) dialAdmits(resource, capability string) bool {
+	return s.owner.authority.Allows(s.peerID, resource, capability, "dial") || resource == s.owner.authority.PersonalScope(s.peerID) && resource != ""
 }
 
 // AcceptAuthorized validates the operation credential first, then requires

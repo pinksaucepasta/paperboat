@@ -246,8 +246,11 @@ func hostRulesAdmission(target *resolver.TerminalTarget, machineID, capability s
 			return false
 		}
 		allowed := network.Allows(machineID, target.Auth.ResourceID, capability, "dial")
-		diagnosticlog.TryInfo("native cache admission", "reason", "exact_scope_check", "allowed", allowed, "capability", capability, "resource_present", target.Auth.ResourceID != "")
-		return allowed
+		// A new terminal or exec grant is not in the cached document yet; the stream dials on the standing rule
+		// the host admits it by (native Session.dialStandingResource), so it waits for no refresh.
+		standing := !allowed && network.DialStanding(machineID, machineID, capability) != ""
+		diagnosticlog.TryInfo("native cache admission", "reason", "exact_scope_check", "allowed", allowed, "standing", standing, "capability", capability, "resource_present", target.Auth.ResourceID != "")
+		return allowed || standing
 	}
 }
 

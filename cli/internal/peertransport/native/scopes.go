@@ -67,7 +67,9 @@ func (c *scopeConn) Close() error {
 }
 
 func (s *Session) admitScope(k scopeKey, expires time.Time) (*admission.Lease, error) {
-	if !s.owner.authority.Allows(s.peerID, k.resource, k.capability, k.direction) {
+	// A dial on the personal mesh pair (dialStandingResource) is held by that pair, which the carrier already tracks.
+	personal := k.direction == "dial" && k.resource != "" && k.resource == s.owner.authority.PersonalScope(s.peerID)
+	if !personal && !s.owner.authority.Allows(s.peerID, k.resource, k.capability, k.direction) {
 		return nil, tailnet.ErrAdmission
 	}
 	// The session owns the watcher until disconnect; no credential or descriptor
@@ -76,13 +78,18 @@ func (s *Session) admitScope(k scopeKey, expires time.Time) (*admission.Lease, e
 	if err != nil {
 		return nil, err
 	}
-	release, err := s.owner.authority.TrackAdmittedScope(s.peerID, k.resource, k.capability, k.direction)
-	if err != nil {
-		lease.Close()
-		return nil, err
+	if !personal {
+		release, err := s.owner.authority.TrackAdmittedScope(s.peerID, k.resource, k.capability, k.direction)
+		if err != nil {
+			lease.Close()
+			return nil, err
+		}
+		lease.OnDone(release)
 	}
-	lease.OnDone(release)
 	if err := lease.Watch(s.owner.authority.ScopeChanges, func() bool {
+		if personal {
+			return s.owner.authority.PersonalScope(s.peerID) == k.resource
+		}
 		return s.owner.authority.AllowsAdmitted(s.peerID, k.resource, k.capability, k.direction)
 	}); err != nil {
 		lease.Close()

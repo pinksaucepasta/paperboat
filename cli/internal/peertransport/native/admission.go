@@ -60,7 +60,7 @@ func (s *Session) openAdmitted(
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		if !s.owner.authority.Allows(s.peerID, resource, capability, "dial") {
+		if !s.dialAdmits(resource, capability) {
 			return nil, tailnet.ErrAdmission
 		}
 		connection, err := s.Open(ctx)

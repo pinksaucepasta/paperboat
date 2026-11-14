@@ -1,0 +1,18 @@
+FIX-EXECLAT warm `pb exec <peer> -- true`, two containers on pbvm2 (el-a, el-b), same account, dev server RTT 168 ms.
+Each run: `pb exec` wall time from the host shell (docker exec), after one warm-up exec.
+
+before: dev-8aafdbab9 (main)
+a->b 1393 1892 1630 1643 1391 ms; b->a 2653 1668 1624 ms
+daemon timeline (b->a, one exec): runtime_acquire 875 ms = network_refresh (refresh_required: exact_scope_check
+allowed=false, the exec's new access session is not in the cached signed document) -> server_request.POST
+365 ms, server_call 846 ms; then 3 serial stream_authorize 3+1+2 ms (peer RTT ~1 ms here), stream open.
+The host admitted the stream by its standing rule (no host refresh).
+
+after: dev-x75124ee7 (branch fix-execlat, client-only)
+a->b 899 676 651 1649 957 ms; b->a 2518 637 640 ms
+every warm exec: exact_scope_check allowed=false -> refresh_skipped (dials on the standing rule, no server call).
+outliers 1649/2518 ms: quic_handshake 1001 ms on a fresh carrier (first packet lost, 1 s retransmit timer), not admission.
+
+pair check on dev-x75124ee7 (el-a, el-b, `pb version` dev-x75124ee7 on both):
+pb exec el-a->el-b rc=0, el-b->el-a rc=0 (runs above); pb connect el-a->el-b rc=0 echoed el-b hostname,
+pb connect el-b->el-a rc=0 echoed el-a hostname.
