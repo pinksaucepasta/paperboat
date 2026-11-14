@@ -26,26 +26,28 @@ export const tunnelDomain = config.tunnel_base_domain
 /** The public source repository (LICENSE: MIT and AGPL-3.0). */
 export const sourceUrl = "https://github.com/pinksaucepasta/paperboat"
 
-/** Launch platforms (PLAN 1.1): macOS on Apple Silicon and Linux; Windows follows after launch. */
-export const platforms = "macOS (Apple Silicon) and Linux"
 export const installCommand = `curl -fsSL ${installUrl} | bash`
+/** The Windows installer (server /install.ps1), run in PowerShell. */
+export const windowsInstallCommand = `irm ${installUrl}.ps1 | iex`
 
 /** Plans and prices (PLAN 1.3): the one place the site states them. */
 export const plans = [
   {
     name: "Free",
     price: "$0",
-    period: "",
+    yearly: "$0",
+    unit: "",
     bandwidth: "5 GB",
     machines: "100",
     publications: "100",
     browserTerminals: "10",
-    detail: "Everything for one person, on your own machines.",
+    detail: "Every feature for personal use, on your own machines.",
   },
   {
     name: "Pro",
     price: "$8",
-    period: "/month, or $80/year",
+    yearly: "$80",
+    unit: "",
     bandwidth: "100 GB",
     machines: "1,000",
     publications: "1,000",
@@ -55,8 +57,9 @@ export const plans = [
   {
     name: "Team",
     price: "$15",
-    period: "/seat/month, or $150/seat/year",
-    bandwidth: "100 GB per seat",
+    yearly: "$150",
+    unit: "a seat",
+    bandwidth: "100 GB a seat",
     machines: "Unlimited",
     publications: "Unlimited",
     browserTerminals: "Unlimited",

@@ -1,8 +1,8 @@
 ---
 /**
- * A terminal transcript on a sheet of paper, with notes in the margin. The commands are real pb
- * commands and the output is what pb prints (formats from cli/cmd/pb). On a phone the notes sit
- * under their lines.
+ * A terminal window with the commands and what pb prints (formats from cli/cmd/pb). Lines never
+ * wrap; a long one scrolls inside the window. Notes are numbered under the window, each number
+ * also standing beside the lines it explains.
  */
 export type Step = {
   /**
@@ -10,19 +10,18 @@ export type Step = {
    * command typed in a shell on another machine; "# ..." is our remark; anything else is output.
    */
   lines: string[]
-  /** Said in the margin, beside these lines. */
+  /** Said under the window, numbered to match these lines. */
   note?: string
 }
 interface Props {
   steps: Step[]
-  /** Where this is typed, shown above the first line ("On your laptop"). */
+  /** Where this is typed, shown in the title bar ("On your laptop"). */
   where?: string
-  /** Output is a table: keep its columns and scroll sideways instead of wrapping. */
+  /** Kept for callers whose output is a table; every window keeps its columns now. */
   table?: boolean
   class?: string
 }
-const { steps, where, table = false, class: className } = Astro.props
-const hasNotes = steps.some((step) => step.note)
+const { steps, where, class: className } = Astro.props
 const escape = (value: string) => value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
 const prompt = /^(\$|[\w.-]+@[\w.-]+:\S*[$#]) (.*)$/
 const line = (text: string) => {
@@ -33,79 +32,107 @@ const line = (text: string) => {
 }
 /** One string per step, so no stray whitespace gets inside the <pre>. */
 const html = (step: Step) => step.lines.map(line).join("\n")
+let count = 0
+const numbered = steps.map((step) => ({ ...step, n: step.note ? ++count : 0 }))
+const notes = numbered.filter((step) => step.note)
 ---
 
-<figure class:list={["sheet", { "sheet-notes": hasNotes, "sheet-table": table }, className]}>
-  {where && <figcaption class="where">{where}</figcaption>}
-  <div class="rows">
-    {
-      steps.map((step) => (
-        <div class="row">
-          <pre class="lines" tabindex={table ? 0 : undefined}><code set:html={html(step)} /></pre>
-          {step.note && <p class="note" set:html={step.note} />}
-        </div>
-      ))
-    }
+<figure class:list={["sheet", className]}>
+  <div class="window">
+    <div class="bar" aria-hidden={where ? undefined : "true"}>
+      {where && <figcaption class="where">{where}</figcaption>}
+    </div>
+    <div class="rows" tabindex="0">
+      {
+        numbered.map((step) => (
+          <div class="row">
+            {step.n > 0 && (
+              <span class="num" aria-hidden="true">
+                {step.n}
+              </span>
+            )}
+            <pre class="lines"><code set:html={html(step)} /></pre>
+          </div>
+        ))
+      }
+    </div>
   </div>
+  {
+    notes.length > 0 && (
+      <ol class:list={["notes", `notes-${Math.min(notes.length, 4)}`]}>
+        {notes.map((step) => (
+          <li>
+            <span class="num">{step.n}</span>
+            <p set:html={step.note} />
+          </li>
+        ))}
+      </ol>
+    )
+  }
 </figure>
 
 <style>
   .sheet {
-    --notes: 0px;
-    --pad: clamp(16px, 2.4vw, 28px);
-    position: relative;
+    container-type: inline-size;
+    display: grid;
+    gap: var(--s5);
     min-width: 0;
   }
 
-  /* The paper: one sheet behind every row's lines. */
-  .sheet::before {
-    content: "";
-    position: absolute;
-    inset: 0 var(--notes) 0 0;
-    border-radius: var(--radius);
+  .window {
+    min-width: 0;
+    border-radius: 12px;
     background: var(--paper);
-    box-shadow: var(--shadow-sheet);
+    box-shadow: 0 0 0 1px var(--rule);
+    overflow: hidden;
   }
 
-  .where,
-  .rows {
-    position: relative;
+  .bar {
+    display: flex;
+    align-items: center;
+    height: 40px;
+    padding-inline: var(--s5);
+    border-bottom: 1px solid var(--rule);
+    background: var(--surface);
+  }
+
+  .bar:not(:has(.where)) {
+    display: none;
   }
 
   .where {
-    padding: var(--s3) var(--pad) 0;
-    margin-right: var(--notes);
-    font-size: var(--text-small);
+    font-family: var(--font-mono);
+    font-size: var(--text-tiny);
     color: var(--fog);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .rows {
     display: grid;
-    padding-block: calc(var(--pad) - 6px);
-  }
-
-  .where + .rows {
-    padding-top: var(--s2);
+    gap: var(--s4);
+    padding: var(--s5) 0;
+    overflow-x: auto;
+    scrollbar-width: thin;
   }
 
   .row {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    gap: var(--s2);
-    padding: 6px var(--pad);
+    position: relative;
+    padding-inline: var(--s5);
+  }
+
+  .row:has(.num) {
+    padding-left: 44px;
   }
 
   .lines {
-    min-width: 0;
-    line-height: var(--leading-code);
+    width: max-content;
+    min-width: 100%;
+    font-size: var(--text-small);
+    line-height: 1.85;
     color: var(--text);
-    white-space: pre-wrap;
-    overflow-wrap: anywhere;
-  }
-
-  .sheet-table .lines {
     white-space: pre;
-    overflow-x: auto;
   }
 
   .lines :global(.p) {
@@ -115,7 +142,7 @@ const html = (step: Step) => step.lines.map(line).join("\n")
 
   .lines :global(.r) {
     color: var(--ink);
-    font-weight: 600;
+    font-weight: 500;
   }
 
   .lines :global(.u) {
@@ -126,52 +153,71 @@ const html = (step: Step) => step.lines.map(line).join("\n")
     color: var(--fog);
   }
 
-  .note {
-    padding-left: var(--s3);
-    border-left: 2px solid var(--hull);
+  .num {
+    display: inline-grid;
+    place-items: center;
+    flex-shrink: 0;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: var(--hull);
+    color: var(--cobalt);
+    font-family: var(--font-mono);
+    font-size: var(--text-tiny);
+    font-weight: 600;
+    line-height: 1;
+  }
+
+  .row .num {
+    position: absolute;
+    left: 16px;
+    top: 4px;
+  }
+
+  .notes {
+    display: grid;
+    gap: var(--s4) var(--s6);
+  }
+
+  .notes li {
+    display: flex;
+    gap: var(--s3);
+    align-items: baseline;
+  }
+
+  .notes .num {
+    position: relative;
+    top: 3px;
+  }
+
+  .notes p {
     font-size: var(--text-ui);
     line-height: 1.5;
     color: var(--fog);
     text-wrap: pretty;
   }
 
-  .note :global(strong) {
+  .notes p :global(strong) {
     color: var(--ink);
     font-weight: 500;
   }
 
-  /* Wide: the notes leave the sheet and stand in the margin, level with their lines. */
-  @media (min-width: 760px) {
-    .sheet-notes {
-      --notes: min(38%, 300px);
+  @container (min-width: 480px) {
+    .notes-2,
+    .notes-4 {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
     }
+  }
 
-    .sheet-notes .row {
-      grid-template-columns: minmax(0, 1fr) var(--notes);
-      gap: 0;
-      padding-right: 0;
+  @container (min-width: 720px) {
+    .notes-3 {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
     }
+  }
 
-    .sheet-notes .lines {
-      padding-right: var(--pad);
-    }
-
-    .sheet-notes .note {
-      position: relative;
-      margin-top: 3px;
-      font-size: var(--text-code);
-      padding-left: var(--s5);
-      border-left: 0;
-    }
-
-    /* A short rule ties the note to its line. */
-    .sheet-notes .note::before {
-      content: "";
-      position: absolute;
-      left: 0;
-      top: 0.72em;
-      width: var(--s3);
-      border-top: 1px solid var(--cobalt);
+  @container (min-width: 960px) {
+    .notes-4 {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
     }
   }
 </style>

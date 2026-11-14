@@ -5,16 +5,12 @@ import Lanes from "../components/Lanes.astro"
 import Faq from "../components/Faq.astro"
 import Closing from "../components/Closing.astro"
 import Icon from "../components/Icon.astro"
-import { consoleUrl, plans, teamTrial, topUp } from "../site"
+import Plans from "../components/Plans.astro"
+import { teamTrial, topUp } from "../site"
 import { faq, featureGroups, planNames } from "../pricing-data"
 import { directLane, relayLane, publicLane } from "../diagrams"
 import { breadcrumbSchema, faqSchema } from "../schema"
 
-const actions = [
-  { href: "/#install", label: "Install pb", primary: false },
-  { href: consoleUrl, label: "Upgrade in the console", primary: false },
-  { href: consoleUrl, label: "Start a 14-day trial", primary: true },
-]
 const lanes = [
   { ...directLane, name: "Direct: never counted", text: "Machines that can reach each other talk peer to peer. That is most traffic, and it is free on every plan." },
   { ...relayLane, name: "Relayed: counted", text: "When a network blocks the direct path, our relay carries the encrypted bytes. Those bytes count." },
@@ -23,54 +19,19 @@ const lanes = [
 ---
 
 <Page
-  title="Paperboat pricing: free for one person, $8 Pro, $15 per seat for teams"
-  description="Every Paperboat feature for one person is free, with 100 machines. Pro is $8 a month for more bandwidth. Team is $15 a seat with roles and audit log export, and SSO from 10 seats. Direct traffic is never counted."
+  title="Paperboat pricing: free for personal use, $8 Pro, $15 per seat for teams"
+  description="Every Paperboat feature is free for personal use, with 100 machines. Pro is $8 a month for more bandwidth. Team is $15 a seat with roles and audit log export, and SSO from 10 seats. Direct traffic is never counted."
   schema={[breadcrumbSchema(Astro.site, [["Pricing", "/pricing/"]]), faqSchema(faq)]}
 >
-  <Head title="Free for one person. Paid for bandwidth or a team.">
+  <Head title="Pricing">
     <p>
-      Free and Pro have the same features. You move up when you need more traffic through our servers, or when other people need lasting access to
-      your machines.
+      Every feature is free for personal use. Pro adds relay and edge traffic; Team adds people.
     </p>
   </Head>
 
   <section class="section plans-section" aria-label="Plans">
     <div class="wrap">
-      <div class="plans">
-        {
-          plans.map((plan, index) => (
-            <article class="plan">
-              <h2 class="h3">{plan.name}</h2>
-              <p class="price">
-                <span class="amount">{plan.price}</span>
-                <span class="period">{plan.period || "for good"}</span>
-              </p>
-              <p class="for">{plan.detail}</p>
-              <dl class="limits">
-                <div>
-                  <dt>Relay and edge bandwidth</dt>
-                  <dd>{plan.bandwidth} a month</dd>
-                </div>
-                <div>
-                  <dt>Machines</dt>
-                  <dd>{plan.machines}</dd>
-                </div>
-                <div>
-                  <dt>Previews and tunnels at once</dt>
-                  <dd>{plan.publications}</dd>
-                </div>
-                <div>
-                  <dt>Console terminals at once</dt>
-                  <dd>{plan.browserTerminals}</dd>
-                </div>
-              </dl>
-              <a class:list={["button", actions[index].primary ? "button-primary" : "button-quiet"]} href={actions[index].href}>
-                {actions[index].label}
-              </a>
-            </article>
-          ))
-        }
-      </div>
+      <Plans />
       <p class="small trial">{teamTrial}</p>
     </div>
   </section>
@@ -78,7 +39,7 @@ const lanes = [
   <section class="section section-tint" aria-labelledby="bandwidth-title">
     <div class="wrap">
       <header class="section-head">
-        <h2 class="h2" id="bandwidth-title">What counts as bandwidth</h2>
+        <h2 class="h2" id="bandwidth-title">Bandwidth</h2>
         <p class="lede">
           Only bytes that pass through a server we run. If you <a href="/features/self-hosting/">run your own relay or edge</a>, those bytes are not
           counted either.
@@ -117,7 +78,7 @@ const lanes = [
   <section class="section" aria-labelledby="table-title">
     <div class="wrap">
       <header class="section-head">
-        <h2 class="h2" id="table-title">Everything, plan by plan</h2>
+        <h2 class="h2" id="table-title">Every feature by plan</h2>
         <p class="lede">
           Not sure which tool you need at all? <a href="/compare/">Compare Paperboat</a> with Tailscale, ngrok, Cloudflare Tunnel and others.
         </p>
@@ -177,98 +138,9 @@ const lanes = [
     padding-top: 0;
   }
 
-  .plans {
-    display: grid;
-    border-top: 1px solid var(--ink);
-  }
-
-  .plan {
-    display: grid;
-    gap: var(--s4);
-    align-content: start;
-    padding-block: var(--s6);
-    border-bottom: 1px solid var(--rule);
-  }
-
-  .price {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: baseline;
-    gap: var(--s2);
-  }
-
-  .amount {
-    font-family: var(--font-brand);
-    font-size: var(--text-h2);
-    font-weight: 600;
-    line-height: 1;
-    letter-spacing: -0.03em;
-    color: var(--ink);
-  }
-
-  .period,
-  .for {
-    font-size: var(--text-ui);
-    line-height: 1.5;
-    color: var(--fog);
-  }
-
-  .for {
-    min-height: 3em;
-  }
-
-  .limits {
-    display: grid;
-    margin-block: var(--s2);
-    font-size: var(--text-ui);
-  }
-
-  .limits div {
-    display: flex;
-    justify-content: space-between;
-    gap: var(--s4);
-    padding-block: var(--s2);
-    border-top: 1px solid var(--rule);
-  }
-
-  .limits dt {
-    color: var(--fog);
-  }
-
-  .limits dd {
-    color: var(--ink);
-    font-weight: 500;
-    text-align: right;
-  }
-
-  .plan .button {
-    justify-self: start;
-  }
-
   .trial {
     margin-top: var(--s5);
     max-width: 70ch;
-  }
-
-  @media (min-width: 900px) {
-    .plans {
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-    }
-
-    .plan {
-      padding-inline: var(--s6);
-      border-bottom: 0;
-      border-left: 1px solid var(--rule);
-    }
-
-    .plan:first-child {
-      padding-left: 0;
-      border-left: 0;
-    }
-
-    .plan:last-child {
-      padding-right: 0;
-    }
   }
 
   .rules {

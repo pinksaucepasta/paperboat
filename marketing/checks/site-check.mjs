@@ -84,13 +84,9 @@ for (const [path, html] of pages) {
     fail(path, `missing space around inline element: ${hit.replace(/<[^>]*>/g, "|")}`)
 
   // (Never call our own text honest or plain; "in seconds" and "in a minute" are time claims nobody measured.)
-  // No placeholder or filler copy; no Windows claim beyond "coming"; no removed domains.
+  // No placeholder or filler copy; no removed domains.
   for (const banned of [/being written/i, /keep going/i, /coming soon/i, /lorem ipsum/i, /\bseamless/i, /\bsupercharge/i, /\bunlock\b/i, /\brobust\b/i, /in today.s world/i, /—/, /\bhonest/i, /plain account/i, /\bin seconds\b/i, /\b(with)?in a minute\b/i, /\bhappily\b/i])
     if (banned.test(body)) fail(path, `banned text ${banned}`)
-  // Windows is not shipped: our own pages may only say it is coming. (Compare pages list other products' platforms.)
-  if (!path.startsWith("/compare/"))
-    for (const [hit] of body.matchAll(/.{0,40}\bWindows\b(?! (support )?is coming| coming).{0,40}/g)) fail(path, `Windows mentioned as supported: "${hit.trim()}"`)
-  if (/powershell/i.test(body)) fail(path, "PowerShell mentioned")
   if (/\.local\.pprbt\.dev|preview\.pprbt\.dev|tunnels\.pprbt\.dev/.test(html)) fail(path, "removed domain")
 }
 
@@ -100,11 +96,12 @@ for (const [path, html] of pages)
 
 // Claims that must match the server's configuration and the plan table (PLAN 1.3).
 const home = pages.get("/")
-const pricing = text(pages.get("/pricing/"))
+const pricing = text(pages.get("/pricing/")).replace(/\s+/g, " ")
 if (!home.includes(`data-copy="curl -fsSL ${config.installer_base_url}/install | bash"`)) fail("/", "install command does not use the configured installer host")
+if (!home.includes(`data-copy="irm ${config.installer_base_url}/install.ps1 | iex"`)) fail("/", "Windows install command does not use the configured installer host")
 if (!home.includes(`href="${config.console_url}"`)) fail("/", "sign-in link is not the configured console")
 if (!text(home).includes(`.${config.preview_base_domain}`) || !text(home).includes(`.${config.local_access_base_domain}`)) fail("/", "example addresses are not the configured domains")
-for (const claim of ["$0", "$8", "$80/year", "$15", "$150/seat/year", "5 GB", "100 GB", "1,000", "Unlimited", "14-day", "$5 per 100 GB", "30 days", "90 days", "365 days"])
+for (const claim of ["$0", "$8", "$80 a year", "$15", "$150 a seat a year", "5 GB", "100 GB", "1,000", "Unlimited", "14-day", "$5 per 100 GB", "30 days", "90 days", "365 days"])
   if (!pricing.includes(claim)) fail("/pricing/", `missing pricing claim ${claim}`)
 if (!existsSync(join(dist, "robots.txt"))) fail("/robots.txt", "missing")
 

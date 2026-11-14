@@ -9,12 +9,15 @@ export type Feature = {
   /** What you can do, in one plain sentence. */
   line: string
   command: string
+  /** Phosphor icon name, shown beside the feature in lists. */
+  icon: string
   group: "Reach your machines" | "Put things online" | "Keep it together"
 }
 
 export const features: Feature[] = [
   {
     slug: "terminal",
+    icon: "terminal-window",
     name: "Terminal",
     line: "A shell on the machine that keeps running when you disconnect, and shows what you missed.",
     command: "pb connect studio",
@@ -22,6 +25,7 @@ export const features: Feature[] = [
   },
   {
     slug: "exec",
+    icon: "lightning",
     name: "Remote commands",
     line: "Run one command on another machine and get its output and exit code.",
     command: "pb exec studio -- git status",
@@ -29,6 +33,7 @@ export const features: Feature[] = [
   },
   {
     slug: "ssh",
+    icon: "key",
     name: "SSH",
     line: "ssh, scp, sftp and rsync with no keys to hand out and no port to open.",
     command: "pb ssh studio",
@@ -36,6 +41,7 @@ export const features: Feature[] = [
   },
   {
     slug: "files",
+    icon: "paper-plane-tilt",
     name: "Files",
     line: "Send files straight into another machine's Inbox. Interrupted sends resume.",
     command: "pb send ./build.tar.gz --to studio",
@@ -43,6 +49,7 @@ export const features: Feature[] = [
   },
   {
     slug: "private-access",
+    icon: "lock-key",
     name: "Private access",
     line: "Open a port on another machine as if it were local, without publishing it.",
     command: "pb access machine studio --port 5432",
@@ -50,13 +57,15 @@ export const features: Feature[] = [
   },
   {
     slug: "previews",
+    icon: "globe-simple",
     name: "Previews",
-    line: "A public HTTPS link to a local port, for as long as you keep it running.",
+    line: "A public HTTPS link to a local port, with an inspector to see and replay each request.",
     command: "pb preview 3000",
     group: "Put things online",
   },
   {
     slug: "tunnels",
+    icon: "plugs-connected",
     name: "Tunnels and domains",
     line: "A permanent public address for a service, on your own domain if you want.",
     command: "pb tunnel create api --port 8080",
@@ -64,6 +73,7 @@ export const features: Feature[] = [
   },
   {
     slug: "self-hosting",
+    icon: "hard-drives",
     name: "Self-hosting",
     line: "Run the relay and the tunnel server on your own Linux box.",
     command: "pbh status",
@@ -71,6 +81,7 @@ export const features: Feature[] = [
   },
   {
     slug: "env",
+    icon: "vault",
     name: "ENV",
     line: "Environment variables encrypted on your device and delivered to your machines.",
     command: "pb env run -- npm test",
@@ -78,6 +89,7 @@ export const features: Feature[] = [
   },
   {
     slug: "config-sync",
+    icon: "arrows-clockwise",
     name: "Config sync",
     line: "The same dotfiles on every machine, from a Git repository you own.",
     command: "pb config sync apply",
@@ -85,6 +97,7 @@ export const features: Feature[] = [
   },
   {
     slug: "teams",
+    icon: "users-three",
     name: "Teams and access",
     line: "Share a machine with people, one capability at a time, with a policy file and an audit log.",
     command: "pb policy explain",
@@ -92,6 +105,7 @@ export const features: Feature[] = [
   },
   {
     slug: "console",
+    icon: "browser",
     name: "Web console",
     line: "Your machines in a browser: terminals, files, previews, access rules and billing.",
     command: "pb machine add",

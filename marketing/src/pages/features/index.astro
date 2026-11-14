@@ -12,7 +12,7 @@ import { breadcrumbSchema } from "../../schema"
   description="Everything pb does, one command per line: persistent terminals, remote commands, SSH, file sending, private ports, public previews and tunnels, encrypted environment variables, config sync, teams and self-hosting."
   schema={[breadcrumbSchema(Astro.site, [["Features", "/features/"]])]}
 >
-  <Head title="Everything pb does">
+  <Head title="Features">
     <p>
       Twelve things, one program. Every one of them is on the free plan. Each page shows the real commands, what they print, the limits, and
       where another tool would serve you better.
@@ -21,13 +21,13 @@ import { breadcrumbSchema } from "../../schema"
 
   <section class="section list">
     <div class="wrap">
-      <FeatureIndex level="h2" />
+      <FeatureIndex />
     </div>
   </section>
 
   <section class="section section-tint" aria-labelledby="uses-title">
     <div class="wrap cols">
-      <h2 class="h2" id="uses-title">Put together</h2>
+      <h2 class="h2" id="uses-title">Use cases</h2>
       <ul class="uses">
         {
           useCases.map((item) => (

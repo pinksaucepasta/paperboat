@@ -1,102 +1,59 @@
 ---
 import Install from "./Install.astro"
 import Mark from "./Mark.astro"
-/** The last thing on a page: install it. One sentence above the command says what happens next. */
+/** The last thing on a page: the boat, one line, and the install command. */
 interface Props {
   title?: string
 }
-const { title = "Start with the machine in front of you." } = Astro.props
+const { title = "Install pb on the machine in front of you" } = Astro.props
 ---
 
-<section class="closing sea" aria-labelledby="closing-title">
+<section class="closing section-rule" aria-labelledby="closing-title">
   <div class="wrap closing-inner">
-    <div class="closing-text">
-      <Mark height={36} class="closing-mark" />
-      <h2 class="h2 closing-title" id="closing-title">{title}</h2>
-      <p class="closing-lede">
-        Install <code>pb</code>, sign in, then run the same line on a second machine. Free for one person: 100 machines, no card.
-      </p>
-    </div>
-    <div class="closing-install">
-      <Install tone="sea" />
-      <p class="closing-links">
-        <a href="/docs/">Read the quickstart</a>
-        <a href="/pricing/">See pricing</a>
-      </p>
-    </div>
+    <Mark height={48} class="closing-mark" />
+    <h2 class="h2 closing-title" id="closing-title">{title}</h2>
+    <p class="closing-lede">Free for personal use. No card needed.</p>
+    <div class="closing-install"><Install /></div>
   </div>
 </section>
 
 <style>
   .closing {
-    padding-block: clamp(72px, 9vw, 128px);
+    padding-block: clamp(88px, 10vw, 144px);
   }
 
   .closing-inner {
     display: grid;
-    gap: var(--s7);
-    align-items: center;
-  }
-
-  .closing-text {
-    display: grid;
-    gap: var(--s4);
+    grid-template-columns: minmax(0, 1fr);
+    justify-items: center;
+    gap: var(--s5);
+    text-align: center;
   }
 
   .closing :global(.closing-mark) {
-    color: #fff;
-    margin-bottom: var(--s2);
+    margin-bottom: var(--s3);
+    color: var(--cobalt);
   }
 
   .closing-title {
-    color: #fff;
     max-width: 18ch;
   }
 
   .closing-lede {
-    max-width: 44ch;
-    color: rgb(255 255 255 / 0.9);
-  }
-
-  .closing-lede code {
-    background: rgb(255 255 255 / 0.16);
-    color: #fff;
+    max-width: 46ch;
+    font-size: var(--text-lede);
+    color: var(--fog);
+    text-wrap: balance;
   }
 
   .closing-install {
-    display: grid;
-    gap: var(--s4);
+    width: 100%;
+    max-width: 560px;
+    margin-top: var(--s3);
   }
 
-  .closing-links {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--s2) var(--s5);
-    font-size: var(--text-ui);
-  }
-
-  .closing-links a {
-    display: inline-flex;
-    align-items: center;
-    min-height: 44px;
-    color: #fff;
-    text-decoration: underline;
-    text-decoration-color: rgb(255 255 255 / 0.5);
-    text-underline-offset: 3px;
-  }
-
-  .closing-links a:hover {
-    text-decoration-color: #fff;
-  }
-
-  .closing :global(:focus-visible) {
-    outline-color: #fff;
-  }
-
-  @media (min-width: 900px) {
-    .closing-inner {
-      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-      gap: var(--s8);
-    }
+  .closing-install :global(.install),
+  .closing-install :global(.os-panel) {
+    justify-items: center;
   }
 </style>

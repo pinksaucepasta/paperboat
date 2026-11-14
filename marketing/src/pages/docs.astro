@@ -22,7 +22,7 @@ const steps = [
   {
     title: "Add a second machine",
     text: "Run the same install line there. On a server with no browser, pb prints a link and a short code; open the link on any device and approve. Or create a ready-made install line that needs no approval:",
-    sheet: [{ lines: ["$ pb machine add --name studio"], note: "Prints an install command for Linux and macOS with a one-time token. Run it on the new machine within ten minutes." }],
+    sheet: [{ lines: ["$ pb machine add --name studio"], note: "Prints install commands for Linux, macOS and Windows with a one-time token. Run it on the new machine within ten minutes." }],
   },
   {
     title: "See your machines",
@@ -68,10 +68,9 @@ const help = [
   description="Install pb, sign in, add a second machine, open a terminal on it and share a local port. Plus where every command is documented: built-in help, man pages and pb doctor."
   schema={[breadcrumbSchema(Astro.site, [["Docs", "/docs/"]])]}
 >
-  <Head title="Two machines, one terminal between them">
+  <Head title="Quickstart">
     <p>
-      This is the quickstart. The full reference ships inside <code>pb</code> itself, as built-in help and manual pages that always match the
-      version you have installed.
+      Install <code>pb</code>, add a second machine and open a terminal on it. The full reference is built into <code>pb</code>.
     </p>
   </Head>
 

@@ -40,7 +40,7 @@ const faq = [
   name="AI agents"
   title="Run AI coding agents on remote machines, with scoped access | Paperboat"
   description="Keep a coding agent running on a remote machine after your laptop sleeps, give it other machines through pb exec, limit it with an expiring scoped token, and let it use secrets without seeing them."
-  headline="Give a coding agent your other machines"
+  headline="Remote machines for coding agents"
   faq={faq}
   related={["exec", "env", "teams", "terminal"]}
 >
@@ -53,7 +53,7 @@ const faq = [
   <section class="section" aria-labelledby="token-title">
     <div class="wrap">
       <header class="section-head">
-        <h2 class="h2" id="token-title">A token that can only do what you wrote down</h2>
+        <h2 class="h2" id="token-title">Scoped API tokens</h2>
         <p class="lede">
           An agent should not inherit everything you can do. Tag the machines, create a token for those tags and those actions, and give it an
           expiry.
@@ -66,7 +66,7 @@ const faq = [
   <section class="section section-tint" aria-labelledby="shape-title">
     <div class="wrap">
       <header class="section-head">
-        <h2 class="h2" id="shape-title">Commands shaped for a program to call</h2>
+        <h2 class="h2" id="shape-title">Commands for programs</h2>
         <p class="lede">The same properties that make pb safe in a shell script make it predictable for a model.</p>
       </header>
       <div class="points points-3">

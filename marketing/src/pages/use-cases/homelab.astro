@@ -48,7 +48,7 @@ const faq = [
   },
   {
     q: "Which machines can I install it on?",
-    a: "Linux on x86-64 and ARM64, and macOS on Apple Silicon. Windows support is coming.",
+    a: "Linux and Windows on x86-64 and ARM64, and macOS on Apple Silicon.",
   },
 ]
 ---
@@ -58,7 +58,7 @@ const faq = [
   name="Home lab"
   title="Access your home lab from anywhere without port forwarding | Paperboat"
   description="SSH into a home server behind NAT or CGNAT, open its web apps by name with trusted HTTPS, and publish one service on your own domain. No port forwarding, no dynamic DNS. Free for 100 machines."
-  headline="Reach the server at home without opening the router"
+  headline="Reach your home lab from anywhere"
   faq={faq}
   related={["private-access", "ssh", "tunnels", "self-hosting"]}
   compare={["tailscale", "cloudflare-tunnel", "zerotier"]}
@@ -72,7 +72,7 @@ const faq = [
   <section class="section section-tint" aria-labelledby="jobs-title">
     <div class="wrap">
       <header class="section-head">
-        <h2 class="h2" id="jobs-title">The usual jobs</h2>
+        <h2 class="h2" id="jobs-title">Common home lab tasks</h2>
         <p class="lede">Each of these is one line, and none of them changes your router, your DNS or your firewall.</p>
       </header>
       <div class="scroll">
@@ -89,7 +89,7 @@ const faq = [
   <section class="section" aria-labelledby="public-title">
     <div class="wrap cols">
       <div class="stack">
-        <h2 class="h2" id="public-title">Publish one thing, keep the rest private</h2>
+        <h2 class="h2" id="public-title">Publish one service</h2>
         <div class="prose">
           <p>
             Most of a home lab should never be on the internet. For the blog or the status page that should, a tunnel gives it a permanent

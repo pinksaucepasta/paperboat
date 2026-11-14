@@ -1,87 +1,25 @@
 ---
+import { Image } from "astro:assets"
 import Page from "../layouts/Page.astro"
+import machines from "../assets/console/machines.png"
+import terminals from "../assets/console/terminals.png"
+import previews from "../assets/console/previews.png"
 import Install from "../components/Install.astro"
-import Sheet from "../components/Sheet.astro"
-import FeatureIndex from "../components/FeatureIndex.astro"
-import Lanes from "../components/Lanes.astro"
+import Icon from "../components/Icon.astro"
+import Plans from "../components/Plans.astro"
 import Closing from "../components/Closing.astro"
-import { plans, previewDomain, tunnelDomain, localDomain } from "../site"
-import { directLane, relayLane, publicLane } from "../diagrams"
+import FeatureIndex from "../components/FeatureIndex.astro"
 import { softwareSchema } from "../schema"
+import { localDomain, previewDomain } from "../site"
 
 const description =
-  "Paperboat puts pb on each of your machines: a terminal that survives a closed laptop, SSH without keys, public HTTPS links to local ports, file sending and encrypted environment variables. Free for one person."
-
-const afternoon = [
-  {
-    lines: ["$ pb connect studio", "ana@studio:~/api$ make release", "# you close the laptop and go home; make keeps running"],
-    note: "A shell on <strong>studio</strong>, the Linux box in the office. Nothing to open on its firewall.",
-  },
-  {
-    lines: ["$ pb connect studio", "# the same shell, with the output you missed"],
-    note: "Hours later, from another computer.",
-  },
-  {
-    lines: ["$ pb preview 3000", "Preview ready", `https://quiet-river-lantern-4821.${previewDomain} -> http://127.0.0.1:3000`],
-    note: "A public HTTPS link to the app on port 3000. It stops when you press Ctrl+C.",
-  },
-  {
-    lines: ["$ pb send ./build.tar.gz --to studio", "build.tar.gz: delivered to /home/ana/Paperboat/Inbox/build.tar.gz on studio"],
-    note: "Machine to machine, encrypted. A dropped transfer resumes.",
-  },
-]
-
-const reattach = [
-  {
-    lines: ["$ pb connect studio", "ana@studio:~$ pg_restore -d app latest.dump", "# forty minutes of work; the train enters a tunnel"],
-    note: "Creates a session on studio, or returns to the one you left.",
-  },
-  {
-    lines: ["$ pb connect studio", "# pg_restore is still going; you see what it printed meanwhile"],
-    note: "Back in. Recent output is replayed, then it is live again.",
-  },
-  {
-    lines: ["$ pb session share <session-id> --team <team> --member <account>"],
-    note: "A teammate watches the restore. Give <code>interactive</code> and they can type.",
-  },
-]
-
-const publish = [
-  {
-    lines: ["$ pb preview 3000", "Preview ready", `https://quiet-river-lantern-4821.${previewDomain} -> http://127.0.0.1:3000`, "", "Press Ctrl+C to stop"],
-    note: "For a review, a webhook test, a demo. Add <code>--private</code> and only you can open it.",
-  },
-  {
-    lines: [
-      "$ pb tunnel create api --port 8080 --wait",
-      "Created tunnel api (tunnel_4kq81zc2)",
-      `https://calm-summer-beach-3476.${tunnelDomain} -> http://127.0.0.1:8080`,
-      "Status: ready",
-    ],
-    note: "The address never changes, and the tunnel comes back after a reboot or an update.",
-  },
-  {
-    lines: ["$ pb domain add dev.example.com"],
-    note: "Two DNS records, one certificate, and any name under your domain can point at a tunnel. On every plan.",
-  },
-]
-
-const agent = [
-  {
-    lines: [
-      `$ pb api-token create ci --expires 30d --scope '[{"dst":["tag:ci"],"allow":["exec"]}]'`,
-      "$ pb exec build-01 --json -- make test",
-      "$ pb env run -- ./deploy.sh",
-    ],
-  },
-]
+  "Paperboat puts pb on each of your machines: a terminal that survives a closed laptop, SSH without keys, public HTTPS links to local ports, file sending and encrypted environment variables. Free for personal use."
 
 const versus = [
-  ["tailscale", "Tailscale", "A private network for every device, phones included. Paperboat is narrower: it is for working on your machines."],
-  ["ngrok", "ngrok", "The most complete tunnel product. Paperboat adds terminals, SSH and files, and has custom domains on the free plan."],
-  ["cloudflare-tunnel", "Cloudflare Tunnel", "Free and fast if your domain is on Cloudflare. Paperboat needs no domain to start."],
-  ["teleport", "Teleport", "Built for audited infrastructure access at company scale. Paperboat is one install and a sign-in."],
-  ["netbird", "NetBird", "An open-source mesh network you can host yourself, control plane included."],
+  ["tailscale", "Tailscale", "A network for every device. Paperboat is for working on your machines."],
+  ["ngrok", "ngrok", "The full tunnel product. Paperboat adds terminals, SSH and files."],
+  ["cloudflare-tunnel", "Cloudflare Tunnel", "Fast if your domain is on Cloudflare. Paperboat needs none."],
+  ["teleport", "Teleport", "Audited access at company scale. Paperboat is one install."],
 ]
 ---
 
@@ -91,164 +29,123 @@ const versus = [
   schema={[softwareSchema(Astro.site, description)]}
 >
   <section class="hero">
-    <div class="wrap hero-inner">
-      <div class="hero-text">
-        <h1 class="h1">Work on any machine you own, from any other.</h1>
-        <p class="lede">
-          Install <code>pb</code> on your laptop, your server and the box under your desk. You get a terminal that survives a closed lid, SSH with no
-          keys to manage, a public link to a local port, and a way to move files and secrets. Encrypted end to end between your machines.
-        </p>
-        <div id="install"><Install /></div>
+    <div class="wrap">
+      <h1 class="h1 hero-title">Work on every machine as if it were this one</h1>
+      <p class="hero-lede">Terminals, files, ports and secrets from every machine you own, right where you are.</p>
+      <div id="install" class="hero-actions">
+        <Install />
       </div>
-      <Sheet steps={afternoon} where="One afternoon, two computers" class="hero-sheet" />
+    </div>
+    <figure class="hero-shot">
+      <Image
+        src={machines}
+        alt="The Paperboat console: seven machines, six online, with their addresses, what each is running and this month's bandwidth."
+        widths={[1376, 2752]}
+        sizes="1376px"
+        format="png"
+        loading="eager"
+      />
+    </figure>
+  </section>
+
+  <section class="section" aria-label="What changes">
+    <div class="wrap">
+      <ul class="three">
+        <li>
+          <h2 class="h3">Close the lid. Keep the shell.</h2>
+          <p>Terminals live on the machine, not on your laptop. Come back hours later, from any computer, to the same shell.</p>
+        </li>
+        <li>
+          <h2 class="h3">localhost, now with a link</h2>
+          <p>One command gives a local port a public HTTPS address, with every request kept to inspect and replay.</p>
+        </li>
+        <li>
+          <h2 class="h3">Your firewall stays shut</h2>
+          <p>SSH, files and private ports like <code>5432.studio.{localDomain}</code> reach your machines through any NAT, encrypted end to end.</p>
+        </li>
+      </ul>
     </div>
   </section>
 
-  <section class="section section-tint" aria-labelledby="does-title">
+  <section class="section section-rule" aria-labelledby="terminal-title">
     <div class="wrap">
-      <header class="section-head">
-        <h2 class="h2" id="does-title">What pb does</h2>
-        <p class="lede">
-          One program, one sign-in. Each line below is a real command; its page shows what it prints, what it costs and where it stops.
-        </p>
+      <header class="split-head">
+        <h2 class="h2" id="terminal-title">Terminals that outlive the connection</h2>
+        <div class="split-side">
+          <p>
+            Start a shell on studio, close the laptop, open it again from another computer or a browser. It kept running, and shows you what you
+            missed.
+          </p>
+          <a class="more" href="/features/terminal/">How terminals work <span aria-hidden="true">→</span></a>
+        </div>
+      </header>
+      <figure class="shot">
+        <Image src={terminals} alt="The console's Terminals page: four open terminals on studio, gpu-box and staging, one in use." widths={[1136, 2272]} sizes="1136px" format="png" />
+      </figure>
+    </div>
+  </section>
+
+  <section class="section section-rule" aria-labelledby="preview-title">
+    <div class="wrap">
+      <header class="split-head">
+        <h2 class="h2" id="preview-title">Share what you're building</h2>
+        <div class="split-side">
+          <p>
+            <code>pb preview 3000</code> puts your dev server on an address like <code>quiet-river-4821.{previewDomain}</code>. Keep it to yourself,
+            give it a time limit, and inspect or replay every request it gets.
+          </p>
+          <a class="more" href="/features/previews/">Previews and tunnels <span aria-hidden="true">→</span></a>
+        </div>
+      </header>
+      <figure class="shot">
+        <Image src={previews} alt="The console's Previews page: three live previews on macbook, studio and staging, one visible only to its owner." widths={[1136, 2272]} sizes="1136px" format="png" />
+      </figure>
+    </div>
+  </section>
+
+  <section class="section section-rule" aria-labelledby="all-title">
+    <div class="wrap">
+      <header class="split-head">
+        <h2 class="h2" id="all-title">Everything in one install</h2>
+        <div class="split-side">
+          <p>Twelve features in one <code>pb</code> for Linux, macOS and Windows. Every one of them is on the free plan.</p>
+          <a class="more" href="/features/">All features <span aria-hidden="true">→</span></a>
+        </div>
       </header>
       <FeatureIndex />
     </div>
   </section>
 
-  <section class="section" aria-labelledby="terminal-title">
-    <div class="wrap cols">
-      <div class="stack">
-        <h2 class="h2" id="terminal-title">Close the laptop. The shell keeps going.</h2>
-        <div class="prose">
-          <p>
-            An SSH session dies with its connection, so everyone ends up wrapping work in tmux. A Paperboat terminal runs on the machine itself. Your
-            laptop only attaches to it.
-          </p>
-          <p>
-            Sleep, a Wi-Fi switch or a 45-second network drop reconnects to the same shell with no lost or repeated keystrokes. Open it from another
-            machine or from a browser, and let a teammate watch or type along.
-          </p>
-          <p><a href="/features/terminal/">How the terminal works, and its limits</a></p>
-        </div>
-      </div>
-      <Sheet steps={reattach} />
-    </div>
-  </section>
-
-  <section class="section section-tint" aria-labelledby="public-title">
-    <div class="wrap cols cols-flip">
-      <div class="stack">
-        <h2 class="h2" id="public-title">Put a local port on the internet</h2>
-        <div class="prose">
-          <p>
-            <code>pb preview</code> is for the next ten minutes. <code>pb tunnel</code> is for a service that stays up. Both speak HTTP/1.1, HTTP/2,
-            HTTP/3 and WebSocket, and both can record requests so you can inspect and replay them.
-          </p>
-          <p>
-            These links are public on purpose, so their HTTPS ends at our edge. That is the one place Paperboat is not end-to-end encrypted, and we
-            say so wherever it matters.
-          </p>
-          <p>
-            <a href="/features/previews/">Previews</a> and <a href="/features/tunnels/">tunnels and custom domains</a>
-          </p>
-        </div>
-      </div>
-      <Sheet steps={publish} />
-    </div>
-  </section>
-
-  <section class="section" aria-labelledby="paths-title">
+  <section class="section section-rule" aria-labelledby="price-title">
     <div class="wrap">
-      <header class="section-head">
-        <h2 class="h2" id="paths-title">Three ways traffic can travel</h2>
-        <p class="lede">
-          Terminals, SSH, files and private ports go machine to machine. Our servers introduce the two ends and step aside.
-          <a href="/security/">What our servers can and cannot see</a>
-        </p>
-      </header>
-      <Lanes
-        lanes={[directLane, relayLane, publicLane]}
-        caption="Direct: laptop to studio, end-to-end encrypted. Relayed: laptop to relay to studio, end-to-end encrypted through the relay. Public link: any browser to the edge over HTTPS, then encrypted from the edge to your machine."
-      />
-      <p class="private-note">
-        Private ports get a name on your own machines only: <code>https://5432.studio.{localDomain}</code> reaches port 5432 on studio from your
-        laptop and from nowhere else. <a href="/features/private-access/">How private access works</a>
-      </p>
-    </div>
-  </section>
-
-  <section class="section section-tint" aria-labelledby="agents-title">
-    <div class="wrap cols">
-      <div class="stack">
-        <h2 class="h2" id="agents-title">Built so an agent can use it</h2>
-        <div class="prose">
-          <p>
-            <code>pb exec</code> runs an exact argument list with no shell in between and returns the remote exit code, and commands that return data take <code>--json</code>. A token
-            can be limited to one action on machines with one tag, and it expires.
-          </p>
-          <p>
-            Secrets reach the agent's commands through their environment, so the agent can use a key without ever printing it.
-          </p>
-          <p><a href="/use-cases/ai-agents/">Paperboat for AI agents</a></p>
+      <header class="split-head">
+        <h2 class="h2" id="price-title">Free for personal use</h2>
+        <div class="split-side">
+          <p>Every feature is free for personal use. Pay for more relay and edge traffic, or for a team. Direct traffic is never counted.</p>
+          <a class="more" href="/pricing/">Pricing in full <span aria-hidden="true">→</span></a>
         </div>
-      </div>
-      <Sheet steps={agent} where="In a CI job or an agent's tool call" />
+      </header>
+      <Plans />
     </div>
   </section>
 
-  <section class="section" aria-labelledby="price-title">
+  <section class="section section-rule" aria-labelledby="versus-title">
     <div class="wrap">
-      <header class="section-head">
-        <h2 class="h2" id="price-title">Every feature is on the free plan</h2>
-        <p class="lede">
-          You pay for bandwidth through our relays and edges, or for teammates. Traffic that goes directly between your machines is never counted.
-        </p>
-      </header>
-      <div class="scroll">
-        <table class="facts plans">
-          <thead>
-            <tr><th scope="col">Plan</th><th scope="col">Price</th><th scope="col">Relay and edge bandwidth</th><th scope="col">Machines</th></tr>
-          </thead>
-          <tbody>
-            {
-              plans.map((plan) => (
-                <tr>
-                  <th scope="row">{plan.name}</th>
-                  <td>
-                    <strong>{plan.price}</strong>{plan.period}
-                  </td>
-                  <td>{plan.bandwidth} a month</td>
-                  <td>{plan.machines}</td>
-                </tr>
-              ))
-            }
-          </tbody>
-        </table>
-      </div>
-      <p class="after-table"><a class="button button-quiet" href="/pricing/">Pricing in full</a></p>
-    </div>
-  </section>
-
-  <section class="section section-tint" aria-labelledby="versus-title">
-    <div class="wrap cols">
-      <div class="stack">
-        <h2 class="h2" id="versus-title">You may not need it</h2>
-        <div class="prose">
-          <p>
-            Some of these tools are better than Paperboat at what they set out to do. Each comparison says where, with links to the other
-            product's own documentation.
-          </p>
-          <p><a href="/compare/">All comparisons, side by side</a></p>
+      <header class="split-head">
+        <h2 class="h2" id="versus-title">How it compares</h2>
+        <div class="split-side">
+          <p>Some of these tools do their one job better. Each comparison says where, with links to their own docs.</p>
+          <a class="more" href="/compare/">All comparisons <span aria-hidden="true">→</span></a>
         </div>
-      </div>
+      </header>
       <ul class="versus">
         {
           versus.map(([slug, name, line]) => (
             <li>
               <a href={`/compare/${slug}/`}>
-                <span class="versus-name">Paperboat vs {name}</span>
+                <span class="versus-name">Paperboat and {name}</span>
                 <span class="versus-line">{line}</span>
+                <Icon name="arrow-right" size={16} class="versus-arrow" />
               </a>
             </li>
           ))
@@ -262,59 +159,174 @@ const versus = [
 
 <style>
   .hero {
-    padding-block: clamp(40px, 6vw, 96px) var(--section);
+    padding-top: clamp(56px, 8vw, 112px);
   }
 
-  .hero-inner {
-    display: grid;
-    gap: var(--s7);
+  .hero-title {
+    max-width: 16ch;
+    font-family: var(--font-brand);
+    font-size: var(--text-h1);
+    font-weight: 500;
+    letter-spacing: -0.035em;
+    line-height: 1.04;
   }
 
-  .hero-text {
-    display: grid;
-    gap: var(--s5);
-    align-content: start;
+  .hero-lede {
+    max-width: 48rem;
+    margin-top: var(--s5);
+    font-size: var(--text-lede);
+    line-height: 1.5;
+    color: var(--fog);
+    text-wrap: balance;
   }
 
-  .hero-text .h1 {
-    max-width: 14ch;
+  .hero-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: var(--s4) var(--s6);
+    margin-top: var(--s7);
   }
 
-  #install {
-    margin-top: var(--s3);
+  /*
+   * Shown at the size it was captured (1376 px) so the console's text stays sharp: it starts on the
+   * text's left edge and runs off the right side of the screen.
+   */
+  .hero {
+    overflow-x: clip;
   }
 
-  @media (min-width: 1040px) {
-    .hero-inner {
-      grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
-      column-gap: var(--s7);
-      align-items: center;
+  .hero-shot {
+    width: 1376px;
+    max-width: none;
+    margin: clamp(56px, 7vw, 88px) 0 0 max(var(--gutter), calc((100% - var(--max)) / 2));
+    border-radius: 12px;
+    overflow: hidden;
+    background: var(--paper);
+    box-shadow:
+      0 0 0 1px rgb(20 20 20 / 0.08),
+      0 1px 2px rgb(20 20 20 / 0.04),
+      0 32px 64px -32px rgb(20 20 20 / 0.18);
+  }
+
+  .hero-shot :global(img) {
+    display: block;
+    width: 100%;
+    height: auto;
+  }
+
+  /* A phone shows the console's left part at a readable size instead of the whole page shrunk. */
+  @media (max-width: 639px) {
+    .hero-shot {
+      height: 340px;
+    }
+
+    .hero-shot :global(img) {
+      width: 900px;
+      max-width: none;
     }
   }
 
-  .private-note {
-    margin-top: var(--s6);
-    max-width: 70ch;
+  .three {
+    display: grid;
+    gap: var(--s6);
+  }
+
+  .three li {
+    display: grid;
+    gap: var(--s3);
+    align-content: start;
+  }
+
+  .three p {
+    max-width: 38ch;
     color: var(--fog);
   }
 
-  .private-note a {
-    color: var(--cobalt);
-    text-decoration: underline;
-    text-underline-offset: 3px;
+  @media (min-width: 900px) {
+    .three {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 0;
+    }
+
+    .three li {
+      padding-inline: var(--s6);
+      border-left: 1px solid var(--rule);
+    }
+
+    .three li:first-child {
+      padding-left: 0;
+      border-left: 0;
+    }
   }
 
-  .plans strong {
+  /* A section's opening: the heading on the left, one short paragraph and a link on the right. */
+  .split-head {
+    display: grid;
+    gap: var(--s4) var(--s8);
+    margin-bottom: clamp(40px, 5vw, 64px);
+  }
+
+  .split-head .h2 {
+    max-width: 14ch;
+    font-family: var(--font-brand);
+    font-weight: 500;
+    letter-spacing: -0.03em;
+  }
+
+  .split-side {
+    display: grid;
+    gap: var(--s4);
+    align-content: start;
+    justify-items: start;
+  }
+
+  .split-side p {
+    max-width: 46ch;
+    font-size: var(--text-body);
+    color: var(--fog);
+  }
+
+  @media (min-width: 900px) {
+    .split-head {
+      grid-template-columns: minmax(0, 6fr) minmax(0, 5fr);
+      align-items: end;
+    }
+  }
+
+  .more {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: var(--text-ui);
+    font-weight: 500;
     color: var(--ink);
-    font-weight: 600;
   }
 
-  .plans {
-    min-width: 560px;
+  .more span {
+    transition: transform 0.15s ease;
   }
 
-  .after-table {
-    margin-top: var(--s6);
+  .more:hover span {
+    transform: translateX(3px);
+  }
+
+  .shot {
+    width: fit-content;
+    max-width: 100%;
+    border-radius: 12px;
+    overflow: hidden;
+    background: var(--paper);
+    box-shadow:
+      0 0 0 1px rgb(20 20 20 / 0.08),
+      0 24px 48px -32px rgb(20 20 20 / 0.18);
+  }
+
+  .shot :global(img) {
+    display: block;
+    width: 1136px;
+    max-width: 100%;
+    height: auto;
   }
 
   .versus {
@@ -323,23 +335,49 @@ const versus = [
 
   .versus a {
     display: grid;
-    gap: 2px;
-    padding-block: var(--s4);
+    grid-template-columns: minmax(0, 1fr) auto;
+    column-gap: var(--s5);
+    align-items: center;
+    padding: var(--s5) var(--s2);
     border-bottom: 1px solid var(--rule);
   }
 
   .versus-name {
+    white-space: nowrap;
     font-weight: 500;
     color: var(--ink);
   }
 
-  .versus a:hover .versus-name {
-    color: var(--cobalt);
+  .versus-line {
+    grid-column: 1;
+    font-size: var(--text-ui);
+    color: var(--fog);
   }
 
-  .versus-line {
-    font-size: var(--text-ui);
-    line-height: 1.5;
+  .versus a :global(.versus-arrow) {
+    grid-column: 2;
+    grid-row: 1 / span 2;
     color: var(--fog);
+    transition: transform 0.15s ease;
+  }
+
+  .versus a:hover :global(.versus-arrow) {
+    color: var(--ink);
+    transform: translateX(3px);
+  }
+
+  @media (min-width: 760px) {
+    .versus a {
+      grid-template-columns: 290px minmax(0, 1fr) auto;
+    }
+
+    .versus-line {
+      grid-column: 2;
+    }
+
+    .versus a :global(.versus-arrow) {
+      grid-column: 3;
+      grid-row: 1;
+    }
   }
 </style>

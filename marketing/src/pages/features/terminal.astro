@@ -67,7 +67,7 @@ const faq = [
   slug="terminal"
   title="Persistent remote terminal that survives disconnects | Paperboat"
   description="A remote terminal that keeps running when your laptop sleeps or the network drops, replays the output you missed, opens from any machine or a browser, and can be shared. No open ports."
-  headline="A terminal that is still there when you come back"
+  headline="A terminal that survives disconnects"
   faq={faq}
   related={["ssh", "exec", "console"]}
   compare={["ssh-bastion", "tailscale", "vscode-tunnels"]}
@@ -82,7 +82,7 @@ const faq = [
     <div class="wrap">
       <header class="section-head">
         <h2 class="h2" id="survives-title">What it survives</h2>
-        <p class="lede">Each row is checked on real Linux and macOS machines before a release, including the one where the answer is no.</p>
+        <p class="lede">Each row is checked on real Linux, macOS and Windows machines before a release, including the one where the answer is no.</p>
       </header>
       <table class="facts">
         <thead>
@@ -98,7 +98,7 @@ const faq = [
   <section class="section" aria-labelledby="sessions-title">
     <div class="wrap">
       <header class="section-head">
-        <h2 class="h2" id="sessions-title">More than one, and you can name them</h2>
+        <h2 class="h2" id="sessions-title">Several sessions per machine</h2>
         <p class="lede">
           A machine holds many sessions. <code>pb connect studio</code> returns to the default one; <code>new</code> starts another.
           <code>pb new</code> does the same on the machine you are sitting at.
@@ -111,7 +111,7 @@ const faq = [
   <section class="section section-tint" aria-labelledby="share-title">
     <div class="wrap cols">
       <div class="stack">
-        <h2 class="h2" id="share-title">Let someone watch, or type</h2>
+        <h2 class="h2" id="share-title">Share a session</h2>
         <div class="prose">
           <p>
             Share one session with a teammate or a whole team as a viewer or as interactive. They join the live shell and first see its recent
@@ -140,7 +140,7 @@ const faq = [
   <section class="section" aria-labelledby="browser-title">
     <div class="wrap">
       <header class="section-head">
-        <h2 class="h2" id="browser-title">The same session in a browser</h2>
+        <h2 class="h2" id="browser-title">In the browser</h2>
         <p class="lede">
           Open a machine in the <a href="/features/console/">web console</a> and you are in the same shell, encrypted from the browser to the
           machine. Useful on a computer where you cannot install anything.

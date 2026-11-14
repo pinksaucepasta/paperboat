@@ -15,37 +15,37 @@
   --hull: #eaf0ff;
   --brand-gradient: linear-gradient(to bottom, var(--sky) 0%, var(--cobalt) 55%, var(--deep) 100%);
 
+  /* Warm off-white ground, white panels on it, pure-grey text (console neutrals). */
+  --ground: #fafaf9;
   --paper: #ffffff;
-  --ink: #0b0b0c;
-  --text: #1c1d20;
-  /* Secondary text: 6.5:1 on paper, 6:1 on surface (WCAG AA needs 4.5:1). */
-  --fog: #585c64;
-  --rule: #e3e5e9;
-  --surface: #f5f6f8;
-  --surface-strong: #ebedf0;
+  --ink: #141414;
+  --text: #2a2a2a;
+  --fog: #6b6b6b;
+  --rule: #e8e8e6;
+  --surface: #f6f6f5;
+  --surface-strong: #ececea;
 
-  /* Meaning only. */
-  --good: #0a7d47;
+  --good: #12805c;
   --warn: #9a5b00;
 
-  /* Type scale: the only sizes on the site. */
-  --text-small: 0.8125rem; /* 13: captions, table footnotes */
-  --text-code: 0.875rem; /* 14: commands and output */
-  --text-ui: 0.9375rem; /* 15: navigation, buttons, tables */
-  --text-body: 1.0625rem; /* 17: reading */
-  --text-lede: clamp(1.125rem, 1.05rem + 0.4vw, 1.3125rem);
-  --text-h3: 1.3125rem;
-  --text-h2: clamp(1.75rem, 1.3rem + 1.9vw, 2.625rem);
-  --text-h1: clamp(2.375rem, 1.45rem + 3.9vw, 4.25rem);
-  /* The headline when it shares the row with a transcript. */
-  --text-h1-split: clamp(2.375rem, 1rem + 3.2vw, 3.5rem);
+  --text-tiny: 0.75rem; /* 12 */
+  --text-small: 0.8125rem; /* 13 */
+  --text-code: 0.875rem; /* 14 */
+  --text-ui: 0.9375rem; /* 15 */
+  --text-body: 1rem; /* 16 */
+  --text-lede: clamp(1.0625rem, 1rem + 0.35vw, 1.25rem);
+  --text-card: 1.125rem;
+  --text-price: 2.5rem; /* 40: plan prices */
+  --text-h3: 1.25rem;
+  --text-h2: clamp(2rem, 1.35rem + 2.2vw, 3.25rem);
+  --text-h1: clamp(2.5rem, 1.5rem + 3.4vw, 4rem);
+  --text-h1-split: clamp(2.25rem, 1.4rem + 2.6vw, 3.25rem);
 
-  --leading-tight: 1.04;
-  --leading-heading: 1.2;
+  --leading-tight: 1.05;
+  --leading-heading: 1.15;
   --leading-body: 1.6;
-  --leading-code: 1.75;
+  --leading-code: 1.7;
 
-  /* Space scale. */
   --s1: 4px;
   --s2: 8px;
   --s3: 12px;
@@ -54,17 +54,19 @@
   --s6: 32px;
   --s7: 48px;
   --s8: 64px;
-  --section: clamp(64px, 8vw, 112px);
+  --section: clamp(64px, 7vw, 100px);
 
   --font-brand: "Figtree Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Geist Variable", ui-sans-serif, system-ui, sans-serif;
   --font-sans: "Geist Variable", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "JetBrains Mono Variable", ui-monospace, "SF Mono", Menlo, monospace;
 
-  --radius: 10px;
-  --header: 60px;
+  --radius: 8px;
+  --radius-lg: 14px;
+  --header: 64px;
   --gutter: 20px;
-  --max: 1160px;
-  --shadow-sheet: 0 0 0 1px var(--rule), 0 1px 2px rgb(11 11 12 / 0.04), 0 18px 40px -22px rgb(15 61 216 / 0.22);
+  --max: 1200px;
+  --shadow-panel: 0 1px 2px rgb(20 20 20 / 0.04), 0 12px 32px -16px rgb(20 20 20 / 0.12);
 
   color-scheme: light;
 }
@@ -95,7 +97,7 @@ html {
 
 body {
   margin: 0;
-  background: var(--paper);
+  background: var(--ground);
   color: var(--text);
   font-family: var(--font-sans);
   font-size: var(--text-body);
@@ -203,10 +205,11 @@ svg {
 }
 
 .section-tint {
-  background: var(--surface);
+  background: var(--paper);
+  border-block: 1px solid var(--rule);
 }
 
-.section + .section:not(.section-tint, .sea) {
+.section + .section:not(.section-tint, .sea, .section-rule) {
   padding-top: 0;
 }
 
@@ -214,39 +217,29 @@ svg {
   padding-top: var(--section);
 }
 
-/*
- * A section's heading sits beside its introduction on wide screens, so the page is balanced
- * across its full width instead of hugging the left edge.
- */
+/* A section opens with its heading and one short line under it, both left on the content edge. */
 .section-head {
   display: grid;
   gap: var(--s4);
-  margin-bottom: clamp(32px, 4vw, 56px);
+  max-width: 44rem;
+  margin-bottom: clamp(40px, 5vw, 72px);
 }
 
-@media (min-width: 900px) {
-  .section-head {
-    grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
-    column-gap: var(--s8);
-    align-items: end;
-  }
-
-  .section-head > :only-child {
-    grid-column: 1 / -1;
-    max-width: 22ch;
-  }
+.section-head .lede {
+  max-width: 52ch;
 }
 
 /* Two columns that become one on a phone: the left one names a thing, the right one shows it. */
 .cols {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--s6);
 }
 
 @media (min-width: 900px) {
   .cols {
     grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
-    column-gap: var(--s8);
+    column-gap: clamp(48px, 6vw, 96px);
     align-items: start;
   }
 
@@ -270,6 +263,7 @@ svg {
 
 .stack {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--s4);
   align-content: start;
 }
@@ -285,8 +279,8 @@ svg {
 .h1,
 .h2,
 .h3 {
-  font-family: var(--font-brand);
-  font-weight: 600;
+  font-family: var(--font-display);
+  font-weight: 500;
   color: var(--ink);
   text-wrap: balance;
 }
@@ -294,13 +288,13 @@ svg {
 .h1 {
   font-size: var(--text-h1);
   line-height: var(--leading-tight);
-  letter-spacing: -0.04em;
+  letter-spacing: -0.045em;
 }
 
 .h2 {
   font-size: var(--text-h2);
   line-height: 1.08;
-  letter-spacing: -0.034em;
+  letter-spacing: -0.04em;
 }
 
 .h3 {
@@ -309,18 +303,24 @@ svg {
   letter-spacing: -0.02em;
 }
 
+/* A heading's quieter second sentence. */
+.h1 .muted,
+.h2 .muted {
+  color: var(--fog);
+}
+
 .lede {
   font-size: var(--text-lede);
   line-height: 1.5;
   color: var(--fog);
-  text-wrap: pretty;
+  text-wrap: balance;
   max-width: 58ch;
 }
 
 .prose {
   color: var(--fog);
   text-wrap: pretty;
-  max-width: 64ch;
+  max-width: 60ch;
 }
 
 .prose > * + * {
@@ -363,19 +363,17 @@ svg {
 /* A command or a name inside a sentence. */
 :where(p, li, dd, td, th, figcaption, summary) code {
   padding: 0.1em 0.35em;
-  border-radius: 5px;
+  border-radius: 4px;
   background: var(--surface);
   color: var(--ink);
   font-size: 0.86em;
   /* A long command may break on a phone instead of pushing the page sideways. */
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
   -webkit-box-decoration-break: clone;
   box-decoration-break: clone;
 }
 
-:where(.section-tint) :where(p, li, dd, td, th, figcaption, summary) code {
-  background: var(--surface-strong);
-}
+
 
 /* Not inside a transcript or a button: there the whole block is code already. */
 pre code,
@@ -383,6 +381,7 @@ button code {
   padding: 0;
   border-radius: 0;
   background: none;
+  color: inherit;
   font-size: var(--text-code);
 }
 
@@ -439,35 +438,49 @@ button code {
   justify-content: center;
   gap: var(--s2);
   min-height: 44px;
-  padding-inline: 18px;
-  border-radius: 8px;
+  padding-inline: 20px;
+  border-radius: var(--radius);
   font-size: var(--text-ui);
   font-weight: 500;
   white-space: nowrap;
-  transition: background-color 0.15s ease;
+  transition:
+    background-color 0.15s ease,
+    transform 0.1s ease;
+}
+
+.button:active {
+  transform: translateY(1px);
 }
 
 .button-primary {
-  background: var(--cobalt);
+  background: var(--ink);
   color: #fff;
 }
 
 .button-primary:hover {
-  background: var(--deep);
+  background: #333;
 }
 
 .button-quiet {
-  background: var(--surface);
+  background: var(--paper);
   color: var(--ink);
+  box-shadow: inset 0 0 0 1px var(--rule);
 }
 
-.section-tint .button-quiet {
+.button-quiet:hover {
+  background: var(--surface);
+}
+
+/* A big rounded panel on the ground: the frame a product picture sits in. */
+.panel {
+  border-radius: var(--radius-lg);
   background: var(--paper);
   box-shadow: 0 0 0 1px var(--rule);
 }
 
-.button-quiet:hover {
-  background: var(--surface-strong);
+/* A short label that never breaks. */
+.nowrap {
+  white-space: nowrap;
 }
 
 .actions {
@@ -546,3 +559,29 @@ button code {
   clip: rect(0 0 0 0);
   white-space: nowrap;
 }
+
+main,
+footer {
+  position: relative;
+  z-index: 1;
+}
+
+/* A section opening on a hairline across the frame; it keeps its full top space. */
+.section.section-rule {
+  padding-top: var(--section);
+  background: linear-gradient(var(--rule), var(--rule)) top center / min(100%, calc(var(--max) + var(--gutter) * 2)) 1px no-repeat;
+}
+
+/* Centered section opening: heading, one grey line. */
+.center-head {
+  display: grid;
+  justify-items: center;
+  gap: var(--s4);
+  text-align: center;
+  margin-bottom: clamp(40px, 5vw, 64px);
+}
+
+.center-head .lede {
+  max-width: 56ch;
+}
+

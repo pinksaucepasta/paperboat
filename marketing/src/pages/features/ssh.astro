@@ -54,7 +54,7 @@ const faq = [
   slug="ssh"
   title="SSH to a machine behind NAT, with no keys to manage | Paperboat"
   description="pb ssh connects to any of your machines without open ports, public IPs or key distribution. Plain ssh, scp, sftp, rsync and VS Code Remote-SSH work through generated host names."
-  headline="SSH without keys to hand out or ports to open"
+  headline="SSH without keys or open ports"
   faq={faq}
   related={["terminal", "files", "teams"]}
   compare={["tailscale", "teleport", "ssh-bastion"]}
@@ -68,7 +68,7 @@ const faq = [
   <section class="section section-tint" aria-labelledby="details-title">
     <div class="wrap">
       <header class="section-head">
-        <h2 class="h2" id="details-title">What changes and what does not</h2>
+        <h2 class="h2" id="details-title">What changes from plain SSH</h2>
         <p class="lede">SSH is something you already trust. This is exactly where Paperboat sits in it.</p>
       </header>
       <table class="facts">
@@ -82,7 +82,7 @@ const faq = [
   <section class="section" aria-labelledby="editor-title">
     <div class="wrap cols">
       <div class="stack">
-        <h2 class="h2" id="editor-title">Your editor does not know the difference</h2>
+        <h2 class="h2" id="editor-title">Works with VS Code and other editors</h2>
         <div class="prose">
           <p>
             pb writes host entries for your machines into your SSH configuration, so anything that runs <code>ssh</code> can reach them:

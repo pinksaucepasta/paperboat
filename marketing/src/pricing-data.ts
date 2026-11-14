@@ -1,6 +1,6 @@
 /**
  * What the pricing page compares (user pricing decisions 2026-10-22). Free and Pro have everything
- * for one person and differ only in bandwidth, which comes from `plans` in site.ts; Team adds people.
+ * for personal use and differ only in bandwidth, which comes from `plans` in site.ts; Team adds people.
  */
 import { auditRetention, plans, publicTcp, ssoMinSeats, teamTrial, topUp } from "./site"
 
@@ -75,7 +75,7 @@ export const faq = [
   },
   {
     q: "Are features locked behind a paid plan?",
-    a: `Not for one person. Free and Pro have the same features and differ in limits and bandwidth. Team adds what a company needs: members, roles and audit log export, and single sign-on and directory sync for teams of ${ssoMinSeats} seats or more.`,
+    a: `No. Free and Pro have the same features and differ in limits and bandwidth. Team adds what a company needs: members, roles and audit log export, and single sign-on and directory sync for teams of ${ssoMinSeats} seats or more.`,
   },
   {
     q: "Do I need Team to share with someone?",

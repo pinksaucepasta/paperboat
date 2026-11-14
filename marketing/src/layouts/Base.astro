@@ -59,6 +59,9 @@ const graph = [organization, ...schema.map((item) => ({ "@context": "https://sch
     <a class="skip" href="#main">Skip to content</a>
     <slot />
     <script>
+      // Windows visitors see the Windows install command first.
+      if (/Windows/.test(navigator.userAgent))
+        document.querySelectorAll<HTMLInputElement>("[data-windows-tab]").forEach((input) => (input.checked = true))
       // A command copies when its button is pressed; the button says so, also to a screen reader.
       document.querySelectorAll<HTMLElement>("[data-copy]").forEach((el) => {
         const status = el.querySelector("[data-copy-status]")

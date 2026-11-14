@@ -1,0 +1,234 @@
+---
+/**
+ * The three plans in one hairline grid, monthly or yearly (a switch above; no script). Every column
+ * has the same rows in the same order, then what the plan adds, then its action at the bottom.
+ */
+import { auditRetention, consoleUrl, plans, publicTcp, ssoMinSeats, topUp } from "../site"
+
+const forWhom = ["For personal use", "Personal use, more traffic", "For teams"]
+const rows: [string, (i: number) => string][] = [
+  ["Bandwidth a month", (i) => plans[i].bandwidth],
+  ["Machines", (i) => plans[i].machines],
+  ["Previews and tunnels", (i) => plans[i].publications],
+  ["Public TCP addresses", (i) => publicTcp[i].replace(" per seat", " a seat")],
+  ["Console terminals", (i) => plans[i].browserTerminals],
+  ["Audit log", (i) => auditRetention[i]],
+]
+const extras = [
+  ["Every feature", "Self-hosted relays and edges"],
+  ["Everything in Free", `Extra traffic, ${topUp.price} per ${topUp.size}`, "Invoices"],
+  ["Members and roles", "Session recordings in your S3 bucket", `SSO and SCIM from ${ssoMinSeats} seats`, "Audit log export"],
+]
+const actions = [
+  { href: "/#install", label: "Install pb", primary: false },
+  { href: consoleUrl, label: "Upgrade to Pro", primary: false },
+  { href: consoleUrl, label: "Start a 14-day trial", primary: true },
+]
+const id = `plans-${Math.random().toString(36).slice(2, 8)}`
+---
+
+<div class="plans-block">
+  <input class="period-input" type="radio" name={id} id={`${id}-m`} checked />
+  <input class="period-input" type="radio" name={id} id={`${id}-y`} />
+  <div class="period" role="group" aria-label="Billing period">
+    <label for={`${id}-m`}>Monthly</label>
+    <label for={`${id}-y`}>Yearly <span class="save">2 months free</span></label>
+  </div>
+  <div class="plans">
+    {
+      plans.map((plan, i) => (
+        <article class="plan">
+          <div class="plan-head">
+            <h3 class="name">{plan.name}</h3>
+            <p class="who">{forWhom[i]}</p>
+          </div>
+          <p class="price monthly">
+            <span class="amount">{plan.price}</span> <span class="per">{i === 0 ? "forever" : `${plan.unit ? "a seat " : ""}a month`}</span>
+          </p>
+          <p class="price yearly">
+            <span class="amount">{plan.yearly}</span> <span class="per">{i === 0 ? "forever" : `${plan.unit ? "a seat " : ""}a year`}</span>
+          </p>
+          <dl class="rows">
+            {rows.map(([label, value]) => (
+              <div>
+                <dt>{label}</dt>
+                <dd>{value(i)}</dd>
+              </div>
+            ))}
+          </dl>
+          <ul class="extras">
+            {extras[i].map((line) => (
+              <li>{line}</li>
+            ))}
+          </ul>
+          <a class:list={["button", actions[i].primary ? "button-primary" : "button-quiet"]} href={actions[i].href}>
+            {actions[i].label}
+          </a>
+        </article>
+      ))
+    }
+  </div>
+</div>
+
+<style>
+  .plans-block {
+    display: grid;
+    gap: var(--s6);
+  }
+
+  .period-input {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .period {
+    display: inline-flex;
+    justify-self: start;
+    padding: 4px;
+    border-radius: 10px;
+    background: var(--surface);
+  }
+
+  .period label {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--s2);
+    min-height: 40px;
+    padding-inline: var(--s4);
+    border-radius: 7px;
+    font-size: var(--text-ui);
+    font-weight: 500;
+    color: var(--fog);
+    white-space: nowrap;
+    cursor: pointer;
+  }
+
+  .save {
+    font-size: var(--text-small);
+    color: var(--good);
+  }
+
+  .period-input:nth-of-type(1):checked ~ .period label:nth-child(1),
+  .period-input:nth-of-type(2):checked ~ .period label:nth-child(2) {
+    background: var(--paper);
+    color: var(--ink);
+    box-shadow:
+      0 0 0 1px var(--rule),
+      0 1px 2px rgb(20 20 20 / 0.06);
+  }
+
+  .period-input:focus-visible ~ .period {
+    outline: 2px solid var(--cobalt);
+    outline-offset: 2px;
+  }
+
+  .period-input:nth-of-type(1):checked ~ .plans .yearly,
+  .period-input:nth-of-type(2):checked ~ .plans .monthly {
+    display: none;
+  }
+
+  .plans {
+    display: grid;
+    border-radius: var(--radius-lg);
+    box-shadow: 0 0 0 1px var(--rule);
+    background: var(--paper);
+  }
+
+  .plan {
+    display: flex;
+    flex-direction: column;
+    gap: var(--s5);
+    padding: var(--s6);
+  }
+
+  .plan + .plan {
+    border-top: 1px solid var(--rule);
+  }
+
+  @media (min-width: 960px) {
+    .plans {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .plan + .plan {
+      border-top: 0;
+      border-left: 1px solid var(--rule);
+    }
+  }
+
+  .name {
+    font-size: var(--text-body);
+    font-weight: 500;
+    color: var(--ink);
+  }
+
+  .who {
+    font-size: var(--text-ui);
+    color: var(--fog);
+  }
+
+  .price {
+    display: flex;
+    align-items: baseline;
+    gap: var(--s2);
+    white-space: nowrap;
+  }
+
+  .amount {
+    font-family: var(--font-display);
+    font-size: var(--text-price);
+    font-weight: 500;
+    line-height: 1;
+    letter-spacing: -0.04em;
+    color: var(--ink);
+  }
+
+  .per {
+    font-size: var(--text-ui);
+    color: var(--fog);
+  }
+
+  .rows {
+    display: grid;
+    font-size: var(--text-ui);
+  }
+
+  .rows div {
+    display: flex;
+    justify-content: space-between;
+    gap: var(--s4);
+    padding-block: 10px;
+    border-top: 1px solid var(--rule);
+    white-space: nowrap;
+  }
+
+  .rows dt {
+    color: var(--fog);
+  }
+
+  .rows dd {
+    color: var(--ink);
+    font-weight: 500;
+  }
+
+  .extras {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .extras li {
+    padding: 3px 9px;
+    border-radius: 6px;
+    box-shadow: inset 0 0 0 1px var(--rule);
+    font-size: var(--text-small);
+    color: var(--text);
+    white-space: nowrap;
+  }
+
+  .plan .button {
+    margin-top: auto;
+    align-self: start;
+  }
+</style>

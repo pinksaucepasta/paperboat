@@ -1,58 +1,159 @@
 ---
 import Icon from "./Icon.astro"
-import { installCommand, platforms } from "../site"
-/** The install command; pressing it copies. */
+import { installCommand, windowsInstallCommand } from "../site"
+/** The install command for macOS and Linux, or for Windows; pressing it copies. */
 interface Props {
   tone?: "light" | "sea"
 }
 const { tone = "light" } = Astro.props
+const id = `os-${Math.random().toString(36).slice(2, 8)}`
+const commands = [
+  { key: "unix", label: "macOS and Linux", command: installCommand, prompt: "$ ", note: "Opens your browser to sign in." },
+  { key: "windows", label: "Windows", command: windowsInstallCommand, prompt: "> ", note: "In PowerShell. Opens your browser to sign in." },
+]
 ---
 
 <div class:list={["install", `install-${tone}`]}>
-  <button class="install-command" type="button" data-copy={installCommand}>
-    <span class="visually-hidden">Copy the install command: </span>
-    <code><span class="prompt">$ </span>{installCommand}</code>
-    <span class="install-icon">
-      <Icon name="copy" size={18} class="when-idle" />
-      <Icon name="check" size={18} class="when-copied" />
-    </span>
-    <span class="visually-hidden" role="status" data-copy-status></span>
-  </button>
-  <p class="install-note">{platforms}. No account needed first: your browser opens to sign in when it finishes.</p>
+  <input class="os-input" type="radio" name={id} id={`${id}-unix`} checked />
+  <input class="os-input" type="radio" name={id} id={`${id}-windows`} data-windows-tab />
+  <div class="os" role="group" aria-label="Operating system">
+    {commands.map((item) => <label for={`${id}-${item.key}`}>{item.label}</label>)}
+  </div>
+  <div class="os-panels">
+  {
+    commands.map((item) => (
+      <div class:list={["os-panel", `os-${item.key}`]}>
+        <button class="install-command" type="button" data-copy={item.command}>
+          <span class="visually-hidden">Copy the {item.label} install command: </span>
+          <code>
+            <span class="prompt">{item.prompt}</span>
+            {item.command}
+          </code>
+          <span class="install-icon">
+            <Icon name="copy" size={18} class="when-idle" />
+            <Icon name="check" size={18} class="when-copied" />
+          </span>
+          <span class="visually-hidden" role="status" data-copy-status />
+        </button>
+        <p class="install-note">{item.note}</p>
+      </div>
+    ))
+  }
+  </div>
 </div>
 
 <style>
   .install {
     display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    justify-items: start;
     gap: var(--s3);
+    max-width: 100%;
+  }
+
+  .os-input {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .os {
+    display: inline-flex;
+    gap: var(--s1);
+  }
+
+  .os label {
+    display: inline-flex;
+    align-items: center;
+    min-height: 32px;
+    padding-inline: var(--s3);
+    border-radius: 999px;
+    font-size: var(--text-small);
+    font-weight: 500;
+    color: var(--fog);
+    cursor: pointer;
+  }
+
+  .os-input:nth-of-type(1):checked ~ .os label:nth-child(1),
+  .os-input:nth-of-type(2):checked ~ .os label:nth-child(2) {
+    background: var(--surface-strong);
+    color: var(--ink);
+  }
+
+  .os-input:focus-visible ~ .os {
+    outline: 2px solid var(--cobalt);
+    outline-offset: 2px;
+    border-radius: 999px;
+  }
+
+  /* Both commands share one cell, so the box keeps the longer one's width whichever is shown. */
+  .os-panels {
+    display: grid;
+    width: fit-content;
+    max-width: 100%;
+    grid-template-columns: minmax(0, auto);
+  }
+
+  .os-panels .install-command {
     width: 100%;
-    max-width: 540px;
+  }
+
+  .os-panel {
+    grid-area: 1 / 1;
+  }
+
+  .os-input:nth-of-type(1):checked ~ .os-panels .os-windows,
+  .os-input:nth-of-type(2):checked ~ .os-panels .os-unix {
+    visibility: hidden;
+  }
+
+  .os-panel {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    justify-items: inherit;
+    gap: var(--s3);
   }
 
   .install-command {
     position: relative;
     display: flex;
-    width: 100%;
+    max-width: 100%;
     align-items: center;
-    gap: var(--s3);
-    min-height: 56px;
-    padding: var(--s3) var(--s4);
+    gap: var(--s5);
+    min-height: 52px;
+    padding: 0 var(--s4) 0 var(--s5);
     border-radius: var(--radius);
     background: var(--ink);
     text-align: left;
+    transition: background-color 0.15s ease, transform 0.1s ease;
+  }
+
+  .install-command:hover {
+    background: #22252b;
+  }
+
+  .install-command:active {
+    transform: translateY(1px);
   }
 
   .install-command code {
-    flex: 1;
     min-width: 0;
     line-height: 1.5;
     color: #fff;
-    overflow-wrap: anywhere;
+    white-space: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
   }
 
   .prompt {
     color: rgb(255 255 255 / 0.55);
     user-select: none;
+  }
+
+  @media (max-width: 520px) {
+    .install-command code {
+      mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
+    }
   }
 
   .install-icon {
@@ -83,6 +184,16 @@ const { tone = "light" } = Astro.props
   .install-sea .install-command {
     background: rgb(11 11 12 / 0.32);
     box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.16);
+  }
+
+  .install-sea .os label {
+    color: rgb(255 255 255 / 0.75);
+  }
+
+  .install-sea .os-input:nth-of-type(1):checked ~ .os label:nth-child(1),
+  .install-sea .os-input:nth-of-type(2):checked ~ .os label:nth-child(2) {
+    background: rgb(255 255 255 / 0.18);
+    color: #fff;
   }
 
   .install-sea .install-note {
