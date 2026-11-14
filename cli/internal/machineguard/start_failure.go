@@ -19,8 +19,10 @@ func recordStartFailure(socket string, cause error) {
 	if runtime.GOOS == "windows" || socket == "" || cause == nil {
 		return
 	}
-	if os.MkdirAll(filepath.Dir(socket), 0755) == nil {
-		_ = os.WriteFile(startFailurePath(socket), []byte(cause.Error()+"\n"), 0644)
+	// Service umasks make both 0700; the public readers are why this file exists, as for the control directory.
+	dir, path := filepath.Dir(socket), startFailurePath(socket)
+	if os.MkdirAll(dir, 0755) == nil && os.Chmod(dir, 0755) == nil && os.WriteFile(path, []byte(cause.Error()+"\n"), 0644) == nil {
+		_ = os.Chmod(path, 0644)
 	}
 }
 
