@@ -44,37 +44,6 @@ const hasAside = Astro.slots.has("aside")
     padding-block: clamp(64px, 8vw, 120px) clamp(64px, 7vw, 104px);
   }
 
-  /* Without a picture beside it the opening stands in the middle, like the home page's sections. */
-  .head-inner:not(.head-split) .head-text {
-    justify-items: center;
-    max-width: 44rem;
-    margin-inline: auto;
-    text-align: center;
-  }
-
-  .head-inner:not(.head-split) .crumbs ol {
-    justify-content: center;
-  }
-
-  .head-inner {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    gap: var(--s7);
-  }
-
-  .head-text {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    gap: var(--s5);
-    align-content: start;
-    max-width: 46rem;
-  }
-
-  .head-lede {
-    display: grid;
-    gap: var(--s3);
-  }
-
   .crumbs ol {
     display: flex;
     flex-wrap: wrap;

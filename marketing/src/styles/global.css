@@ -279,7 +279,7 @@ svg {
 .h1,
 .h2,
 .h3 {
-  font-family: var(--font-display);
+  font-family: var(--font-brand);
   font-weight: 500;
   color: var(--ink);
   text-wrap: balance;
@@ -288,13 +288,13 @@ svg {
 .h1 {
   font-size: var(--text-h1);
   line-height: var(--leading-tight);
-  letter-spacing: -0.045em;
+  letter-spacing: -0.035em;
 }
 
 .h2 {
   font-size: var(--text-h2);
   line-height: 1.08;
-  letter-spacing: -0.04em;
+  letter-spacing: -0.03em;
 }
 
 .h3 {
