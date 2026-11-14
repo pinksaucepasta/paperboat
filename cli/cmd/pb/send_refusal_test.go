@@ -159,6 +159,10 @@ func TestSendToAnInboxTheReceiverCannotWriteNamesTheOSError(t *testing.T) {
 			t.Fatalf("message %q lacks %q", message, want)
 		}
 	}
+	windows := destinationStorageFull("win-box", &filetransfer.Error{Code: "storage_unavailable", StatusCode: http.StatusInsufficientStorage, OSError: "The media is write protected."})
+	if message := commandFailureMessage(windows, classifyCommandFailure(windows)); strings.Contains(message, "..") || !strings.Contains(message, "The media is write protected. Nothing was delivered") {
+		t.Fatalf("message %q doubles the full stop of the operating system's text", message)
+	}
 	if result := classifyCLIJSONError(err); failure.kind != commandRejected || result.Code != "destination_cannot_store" || result.Retryable || result.StateChanged != false {
 		t.Fatalf("kind=%v json=%+v", failure.kind, result)
 	}

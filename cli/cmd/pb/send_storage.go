@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
@@ -25,7 +26,7 @@ type destinationStorageFullError struct {
 
 func (e destinationStorageFullError) Error() string {
 	if e.osError != "" {
-		return fmt.Sprintf("%s could not store the file in its Inbox: %s. Nothing was delivered. Fix that disk or point its Inbox at another one with `pb inbox set`, then send again.", e.machine, e.osError)
+		return fmt.Sprintf("%s could not store the file in its Inbox: %s. Nothing was delivered. Fix that disk or point its Inbox at another one with `pb inbox set`, then send again.", e.machine, strings.TrimRight(e.osError, "."))
 	}
 	if e.needed > 0 {
 		return fmt.Sprintf("%s has no room for this in its Inbox (needs %s, %s free). Free space on it or point its Inbox at a bigger disk with `pb inbox set`, then send again. Nothing was delivered.", e.machine, transferSize(int64(e.needed)), transferSize(int64(e.free)))
