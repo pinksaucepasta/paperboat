@@ -1,5 +1,5 @@
 // Makes one share image (1200 x 630) per indexable page into public/og/, from the built site. The home page
-// shows its headline over the console's Machines screen; every other page its section and headline.
+// shows the brand and its headline; every other page its section and headline.
 // Run after a build, then build again:
 //   bun run build && CHROME=/path/to/chrome node checks/og.mjs && bun run build
 // Needs playwright-core (npm i --no-save playwright-core) and a Chromium binary in CHROME.
@@ -10,7 +10,6 @@ const root = new URL("../", import.meta.url).pathname
 // Inlined, because a page set from a string may not load file:// fonts or images.
 const font = (name) =>
   `data:font/woff2;base64,${readFileSync(`${root}node_modules/@fontsource-variable/${name}/files/${name}-latin-wght-normal.woff2`).toString("base64")}`
-const consoleShot = `data:image/png;base64,${readFileSync(`${root}src/assets/console/machines.png`).toString("base64")}`
 const boat =
   "M270 0 H330 V60 H390 V120 H450 V180 H150 V120 H210 V60 H270 Z M0 180 H120 V240 H480 V180 H600 V240 H540 V300 H480 V360 H120 V300 H60 V240 H0 Z"
 const sitemap = readFileSync(`${root}dist/sitemap.xml`, "utf8")
@@ -29,15 +28,16 @@ const style = `
   h1 { font-family: F; font-weight: 600; letter-spacing: -0.035em; line-height: 1.04; text-wrap: balance; }`
 const lockup = `<div class="lockup"><svg viewBox="0 0 600 360" height="28" fill="#1d52eb"><path fill-rule="evenodd" d="${boat}"/></svg>paperboat</div>`
 
+// The home image is the brand: the logo's gradient, the mark and wordmark in white, the headline under them.
+// Centred and sized so a square crop (chat apps) keeps all of it.
 const home = (headline) => `<style>${style}
-  .top { position: absolute; left: 80px; top: 64px; right: 80px; }
-  h1 { margin-top: 40px; font-size: 64px; max-width: 900px; }
-  .shot { position: absolute; left: 80px; top: 304px; width: 1376px; border-radius: 14px; overflow: hidden;
-    box-shadow: 0 0 0 1px rgb(20 20 20 / 0.08), 0 30px 60px -30px rgb(20 20 20 / 0.25); transform: scale(0.82); transform-origin: top left; }
-  .shot img { display: block; width: 1376px; }
+  body { display: grid; place-items: center; align-content: center; gap: 28px; background: linear-gradient(to bottom, #4275f8 0%, #1d52eb 55%, #0f3dd8 100%); color: #fff; }
+  .lockup { gap: 28px; font: 500 84px/1 F; }
+  .lockup span { transform: translateY(-4px); }
+  p { font-size: 24px; letter-spacing: -0.01em; color: rgb(255 255 255 / 0.82); }
 </style>
-<div class="top">${lockup}<h1>${escape(headline)}</h1></div>
-<div class="shot"><img src="${consoleShot}"></div>`
+<div class="lockup"><svg viewBox="0 0 600 360" height="66" width="110"><defs><linearGradient id="b" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff"/><stop offset="1" stop-color="#eaf0ff"/></linearGradient></defs><path fill="url(#b)" fill-rule="evenodd" d="${boat}"/></svg><span>paperboat</span></div>
+<p>${escape(headline)}</p>`
 
 const inner = (section, headline) => `<style>${style}
   body { display: flex; flex-direction: column; padding: 64px 80px; }
@@ -48,7 +48,7 @@ const inner = (section, headline) => `<style>${style}
 </style>
 ${lockup}
 <div class="title">${section ? `<p class="label">${escape(section)}</p>` : ""}<h1>${escape(headline)}</h1></div>
-<div class="foot"><span>Work on every machine as if it were this one</span><span>${escape(site)}</span></div>`
+<div class="foot"><span>Use every machine like it's right in front of you</span><span>${escape(site)}</span></div>`
 
 mkdirSync(`${root}public/og`, { recursive: true })
 const browser = await chromium.launch({ executablePath: process.env.CHROME, args: ["--font-render-hinting=none"] })
