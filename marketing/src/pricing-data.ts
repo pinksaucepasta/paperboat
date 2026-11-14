@@ -57,6 +57,7 @@ export const featureGroups: { title: string; rows: { feature: string; cells: [Pl
       { feature: "Roles: owner, admin, billing, auditor, member", cells: [false, false, true] },
       { feature: "Single sign-on (SAML, OIDC) and directory sync (SCIM)", cells: [false, false, `From ${ssoMinSeats} seats`] },
       { feature: "Audit log export and streaming", cells: [false, false, true] },
+      { feature: "Terminal session recordings, archived to your own S3 bucket", cells: [false, false, true] },
       { feature: "Invoices and receipts", cells: [false, true, true] },
     ],
   },

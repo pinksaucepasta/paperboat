@@ -96,15 +96,11 @@ const faq = [
       <div class="stack">
         <h2 class="h2" id="policy-title">The whole policy is one file</h2>
         <div class="prose">
+          <p>Group people, tag machines, allow or deny. A deny always wins, and the owner can never lock themselves out.</p>
           <p>
-            Who, what, and which actions. Group people, tag machines, allow or deny. A deny always wins, and the owner can never lock
-            themselves out.
+            <code>pb policy set</code> shows whose access would change before saving, and every save can be restored. The console edits the same
+            file as a grid.
           </p>
-          <p>
-            <code>pb policy set</code> shows every person whose access would change and asks before saving. Each save is a version you can
-            diff and restore. <code>pb policy test</code> checks a draft before you apply it.
-          </p>
-          <p>Prefer clicking? The console's Access page edits the same file as a grid.</p>
         </div>
       </div>
       <Code name="policy.hujson" text={policy} />
@@ -183,16 +179,16 @@ const faq = [
           <p>Search by person, action, target and result. Export as CSV or JSON, or stream it, signed, to an HTTPS endpoint or S3-compatible storage.</p>
         </div>
         <div>
+          <h3 class="h3">Session recordings</h3>
+          <p>Record Paperboat terminals by rule or by hand. Recordings are encrypted and archived to your own S3-compatible bucket; every replay is audited.</p>
+        </div>
+        <div>
           <h3 class="h3">Machine approval</h3>
           <p>A team can hold a member's newly shared machine until an owner or admin accepts it.</p>
         </div>
         <div>
           <h3 class="h3">Team secrets</h3>
           <p>A team has its own <a href="/features/env/">ENV</a> scope with its own keys. Rules decide who reads and who writes.</p>
-        </div>
-        <div>
-          <h3 class="h3">Your machine stays yours</h3>
-          <p>Share a personal machine and take it back later, or transfer it to the team for good. Those are different commands on purpose.</p>
         </div>
       </div>
     </div>

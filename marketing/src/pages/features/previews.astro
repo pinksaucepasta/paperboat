@@ -76,8 +76,7 @@ const faq = [
   compare={["ngrok", "cloudflare-tunnel", "vscode-tunnels"]}
 >
   <p slot="lede">
-    <code>pb preview</code> puts the app running on your machine at a public address. Send the link for a review, point a webhook at it, show a
-    demo. Stop the command and the link is gone.
+    One command puts the app on your machine at a public address. Stop the command and the link is gone.
   </p>
   <Sheet slot="aside" steps={hero} />
 
@@ -126,13 +125,9 @@ const faq = [
         <h2 class="h2" id="inspect-title">Request inspector</h2>
         <div class="prose">
           <p>
-            Turn on capture and every request to the preview is recorded on your machine: method, path, status, duration, full headers and, if
-            you ask, bodies. Replay one after you fix the handler, without waiting for the webhook to fire again.
+            Turn on capture and every request is kept on your machine, headers and bodies included. Replay one after you fix the handler.
           </p>
-          <p>
-            The <a href="/features/console/">web console</a> shows the same list live, with filters. Capture is off until you turn it on, and
-            it is free on every plan.
-          </p>
+          <p>The <a href="/features/console/">web console</a> shows the same list live. Free on every plan.</p>
         </div>
       </div>
       <Sheet steps={inspect} />
@@ -144,8 +139,8 @@ const faq = [
       <header class="section-head">
         <h2 class="h2" id="path-title">Where the encryption ends</h2>
         <p class="lede">
-          A visitor's browser speaks HTTPS to our edge. The edge reads the request to route it, then sends it to your machine over an encrypted
-          connection. Run <a href="/features/self-hosting/">your own edge</a> if that middle should be yours.
+          HTTPS ends at our edge, which routes the request to your machine, encrypted.
+          <a href="/features/self-hosting/">Run your own edge</a> to own that step.
         </p>
       </header>
       <Lanes lanes={[publicLane]} caption="Any browser connects over HTTPS to the edge. The edge forwards the request to your machine over an encrypted connection." />

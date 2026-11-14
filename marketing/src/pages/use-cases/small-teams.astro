@@ -53,8 +53,7 @@ const faq = [
   compare={["teleport", "tailscale", "twingate"]}
 >
   <p slot="lede">
-    Small teams share machines by sharing keys, and then nobody knows who can reach what. Paperboat makes each kind of access a rule you can
-    read, and takes it away the second you remove it.
+    Stop sharing keys. Each kind of access is a rule you can read, and it ends the moment you remove it.
   </p>
   <Sheet slot="aside" steps={hero} />
 
@@ -78,20 +77,16 @@ const faq = [
         <h2 class="h2" id="cost-title">What it costs</h2>
         <div class="prose">
           <p>
-            <strong>{plans[2].price} a seat a month</strong>, or $150 a year. Machines are not counted. Single sign-on and directory sync
-            need {ssoMinSeats} seats; everything else is included from the first.
+            <strong>{plans[2].price} a seat a month</strong>, or $150 a year, with unlimited machines. Five people is $75 a month.
           </p>
-          <p>
-            Five people is $75 a month. The trial is 14 days; a card is taken at the start and nothing is charged if you cancel before day 15.
-          </p>
+          <p>The trial is 14 days. Single sign-on and directory sync start at {ssoMinSeats} seats.</p>
           <p><a href="/pricing/">Pricing in full</a></p>
         </div>
       </div>
       <div class="prose">
         <p>
-          <strong>Where a bigger tool fits better.</strong> If you need recorded sessions for compliance, access requests with approvals, or
-          Kubernetes and database protocols proxied and audited per query, that is <a href="/compare/teleport/">Teleport</a>'s job. Paperboat
-          records who connected to what and when, not what they typed.
+          <strong>Where a bigger tool fits better.</strong> For access requests with approvals, or Kubernetes and database sessions audited per
+          query, use <a href="/compare/teleport/">Teleport</a>. Paperboat records its own terminals on Team, archived to your S3 bucket.
         </p>
       </div>
     </div>

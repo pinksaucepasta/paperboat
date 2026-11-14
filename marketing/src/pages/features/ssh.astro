@@ -85,13 +85,9 @@ const faq = [
         <h2 class="h2" id="editor-title">Works with VS Code and other editors</h2>
         <div class="prose">
           <p>
-            pb writes host entries for your machines into your SSH configuration, so anything that runs <code>ssh</code> can reach them:
-            Remote-SSH in VS Code and Cursor, Zed, Git over SSH, Ansible, <code>rsync</code> in a cron job.
+            Paperboat adds your machines to your SSH config, so VS Code and Cursor Remote-SSH, Zed, Git, Ansible and <code>rsync</code> reach them.
           </p>
-          <p>
-            With the <a href="/features/env/">ENV</a> shell hook installed on the machine, the secrets your terminals get are present in plain SSH
-            sessions and in VS Code's remote terminals too.
-          </p>
+          <p>With the <a href="/features/env/">ENV</a> hook installed, those sessions get your secrets too.</p>
         </div>
       </div>
       <Sheet steps={tools} />

@@ -74,16 +74,10 @@ const faq = [
         <h2 class="h2" id="file-title">The config file</h2>
         <div class="prose">
           <p>
-            Shared rules live in <code>.paperboat/config-sync.toml</code> in the repository. Each machine can also keep its own small file for
-            what differs only there.
+            Shared rules live in <code>.paperboat/config-sync.toml</code>. A machine's own file wins, then its <code>[machine.&lt;name&gt;]</code>
+            section, then its OS, then the defaults.
           </p>
-          <p>
-            The order is simple: the machine's own file wins, then its <code>[machine.&lt;name&gt;]</code> section, then its operating system's
-            section, then the shared defaults.
-          </p>
-          <p>
-            <code>mode = "pull_only"</code> makes a machine follow the repository without ever pushing its local edits back.
-          </p>
+          <p><code>mode = "pull_only"</code> makes a machine follow the repository without pushing its edits back.</p>
         </div>
       </div>
       <Code name=".paperboat/config-sync.toml" text={shared} />

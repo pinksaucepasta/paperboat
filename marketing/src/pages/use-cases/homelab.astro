@@ -64,8 +64,7 @@ const faq = [
   compare={["tailscale", "cloudflare-tunnel", "zerotier"]}
 >
   <p slot="lede">
-    Port forwarding exposes your home network, and dynamic DNS breaks at the worst time. Install <code>pb</code> on the server and on your
-    laptop, and the server is one name away wherever you are.
+    No port forwarding, no dynamic DNS. Install Paperboat on the server and your laptop, and it is one name away.
   </p>
   <Sheet slot="aside" steps={hero} />
 
@@ -92,13 +91,9 @@ const faq = [
         <h2 class="h2" id="public-title">Publish one service</h2>
         <div class="prose">
           <p>
-            Most of a home lab should never be on the internet. For the blog or the status page that should, a tunnel gives it a permanent
-            HTTPS address without exposing the machine behind it.
+            For the one thing that should be public, a tunnel gives it a permanent HTTPS address and keeps the machine hidden.
           </p>
-          <p>
-            The tunnel comes back by itself after a power cut. If your home IP changes, nothing needs updating, because the server connects out
-            to the edge.
-          </p>
+          <p>It comes back by itself after a power cut, and a new home IP changes nothing.</p>
         </div>
       </div>
       <Sheet steps={publish} />

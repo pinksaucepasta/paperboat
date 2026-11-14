@@ -76,14 +76,9 @@ const faq = [
         <h2 class="h2" id="script-title">Use it in scripts</h2>
         <div class="prose">
           <p>
-            A non-zero exit on the remote side is a non-zero exit here, so <code>set -e</code> works. Standard input, output and errors pass
-            through separately.
+            A non-zero exit there is a non-zero exit here, so <code>set -e</code> works. Output and errors stay separate.
           </p>
-          <p>
-            <code>pb wait</code> blocks until a machine is ready (<code>runtime</code>, <code>transport</code> or <code>ssh</code>).
-            <code>pb ping</code> measures the connection and tells you whether it is direct or relayed.
-          </p>
-          <p>Fifty commands in a row, or ten at once, is a normal load and is part of what we test.</p>
+          <p><code>pb wait</code> blocks until a machine is ready; <code>pb ping</code> says whether the path is direct or relayed.</p>
         </div>
       </div>
       <Code name="deploy.sh" text={script} />

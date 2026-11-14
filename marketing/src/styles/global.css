@@ -204,9 +204,9 @@ svg {
   padding-block: var(--section);
 }
 
+/* Sections are parted by one hairline at the content edges, never by bands of colour. */
 .section-tint {
-  background: var(--paper);
-  border-block: 1px solid var(--rule);
+  background: linear-gradient(var(--rule), var(--rule)) top center / min(calc(100% - var(--gutter) * 2), var(--max)) 1px no-repeat;
 }
 
 .section + .section:not(.section-tint, .sea, .section-rule) {
@@ -217,16 +217,29 @@ svg {
   padding-top: var(--section);
 }
 
-/* A section opens with its heading and one short line under it, both left on the content edge. */
+/* A section opens with its heading on the left and one or two lines on the right, as on the home page. */
 .section-head {
   display: grid;
-  gap: var(--s4);
-  max-width: 44rem;
-  margin-bottom: clamp(40px, 5vw, 72px);
+  gap: var(--s4) var(--s8);
+  margin-bottom: clamp(40px, 5vw, 64px);
+}
+
+.section-head .h2 {
+  max-width: 16ch;
 }
 
 .section-head .lede {
-  max-width: 52ch;
+  max-width: 54ch;
+  font-size: var(--text-body);
+  line-height: 1.6;
+  text-wrap: pretty;
+}
+
+@media (min-width: 900px) {
+  .section-head:has(> :nth-child(2)) {
+    grid-template-columns: minmax(0, 4fr) minmax(0, 5fr);
+    align-items: end;
+  }
 }
 
 /* Two columns that become one on a phone: the left one names a thing, the right one shows it. */

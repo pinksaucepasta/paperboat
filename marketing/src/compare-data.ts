@@ -760,12 +760,12 @@ export const products: Product[] = [
         title: "Audit and compliance",
         body: [
           "Teleport's session recording, access requests and audit export are mature and made for regulated companies.",
-          "Paperboat has roles, single sign-on, directory sync and an audit log you can export or stream. It records who connected to what and when, not what was typed, and it has no access-request workflow. If you need recorded sessions or approvals, Teleport is the better fit.",
+          "Paperboat has roles, single sign-on, directory sync and an audit log you can export or stream. On Team, Paperboat terminals can be recorded by rule or by hand, encrypted and archived to your own S3-compatible bucket, with every replay audited; plain SSH and remote commands are not recorded. It has no access-request workflow, so if you need approvals, or recording of every protocol, Teleport is the better fit.",
         ],
       },
     ],
     chooseThem: [
-      "You need recorded sessions, access requests and audit across many servers.",
+      "You need access requests with approvals, and recording of SSH, Kubernetes and database sessions.",
       "You manage Kubernetes clusters, databases and Windows desktops for a company.",
     ],
     chooseUs: [
@@ -782,12 +782,12 @@ export const products: Product[] = [
     switching: [
       install,
       "Use pb ssh or the generated SSH host names instead of tsh ssh for day-to-day access.",
-      "Keep Teleport where you need its recording and audit; Paperboat can run beside it.",
+      "Keep Teleport where you need access requests or protocol-level audit; Paperboat can run beside it.",
     ],
     faq: [
       {
         q: "Does Paperboat record sessions?",
-        a: "Terminals keep their scrollback so you can reattach and see what happened; Paperboat doesn't keep recordings for audit.",
+        a: "On Team, yes: Paperboat terminals (in the console and from pb connect) can be recorded by policy rule or by hand, encrypted, and archived to your team's own S3-compatible bucket. Every replay is an audit event. Plain SSH and remote commands are not recorded.",
       },
       {
         q: "Can I self-host Paperboat like Teleport?",

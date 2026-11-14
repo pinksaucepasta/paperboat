@@ -100,8 +100,7 @@ const faq = [
       <header class="section-head">
         <h2 class="h2" id="sessions-title">Several sessions per machine</h2>
         <p class="lede">
-          A machine holds many sessions. <code>pb connect studio</code> returns to the default one; <code>new</code> starts another.
-          <code>pb new</code> does the same on the machine you are sitting at.
+          <code>pb connect studio</code> returns to the default session; <code>new</code> starts another, with a name you choose.
         </p>
       </header>
       <Sheet steps={sessions} table />
@@ -114,16 +113,9 @@ const faq = [
         <h2 class="h2" id="share-title">Share a session</h2>
         <div class="prose">
           <p>
-            Share one session with a teammate or a whole team as a viewer or as interactive. They join the live shell and first see its recent
-            output. From the console you can also hand out a join code to someone without an account.
+            Let a teammate or a whole team watch a live shell, or type in it. Up to 50 people can watch; removing someone ends their access at once.
           </p>
-          <p>
-            Up to 50 people can watch one session. Only the owner and interactive participants can type or resize; removing someone ends their
-            access at once.
-          </p>
-          <p>
-            <strong>Careful:</strong> a new participant sees up to 64 KiB of recent output. If a secret was printed there, they see it too.
-          </p>
+          <p><strong>Careful:</strong> someone who joins sees up to 64 KiB of recent output, secrets included.</p>
         </div>
       </div>
       <Sheet
@@ -142,8 +134,7 @@ const faq = [
       <header class="section-head">
         <h2 class="h2" id="browser-title">In the browser</h2>
         <p class="lede">
-          Open a machine in the <a href="/features/console/">web console</a> and you are in the same shell, encrypted from the browser to the
-          machine. Useful on a computer where you cannot install anything.
+          The <a href="/features/console/">web console</a> opens the same shell, encrypted from your browser to the machine.
         </p>
       </header>
       <div class="points points-3">
