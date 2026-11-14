@@ -2,7 +2,7 @@
 """Idle cost of one machine over an interval, checked against perf_budgets.BUDGETS['idle'] (PR-03).
 
 Run on the machine itself while nothing uses it. Measures the CPU time and context switches
-(wakeups) of every `pb` process from /proc, and the TCP bytes sent and received on port 443
+(wakeups) of every `pb` process from /proc, and the TCP bytes sent and received by pb processes to other hosts
 (control plane and edge) from two `ss -tni` snapshots. Prints one JSON receipt with numbers only.
 Usage: perf_idle.py [--seconds 600] [--no-budget]
 """
@@ -38,13 +38,18 @@ def pb_processes():
 
 
 def tls_bytes():
-    """(local, remote) -> bytes sent + received for established TCP connections to port 443."""
-    lines = subprocess.run(['ss', '-tni'], capture_output=True, text=True, timeout=30).stdout.splitlines()
+    """(local, remote) -> bytes sent + received for established TCP connections of pb processes to another host
+    (any port: staging serves its API on 18443, where the old ':443' filter counted nothing and reported 0.0)."""
+    return parse_ss(subprocess.run(['ss', '-tnip'], capture_output=True, text=True, timeout=30).stdout.splitlines())
+
+
+def parse_ss(lines):
     out, key = {}, None
     for line in lines:
         if line.startswith('ESTAB'):
             parts = line.split()
-            key = (parts[3], parts[4]) if parts[4].endswith(':443') else None
+            remote = parts[4].rsplit(':', 1)[0].strip('[]')
+            key = (parts[3], parts[4]) if 'users:(("pb"' in line and not remote.startswith('127.') and remote != '::1' else None
         elif key:
             counters = dict(re.findall(r'\b(bytes_sent|bytes_received):(\d+)', line))
             out[key] = int(counters.get('bytes_sent', 0)) + int(counters.get('bytes_received', 0))
