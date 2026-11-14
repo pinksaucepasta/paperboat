@@ -46,7 +46,12 @@ LOW_ORIGIN = (
     "    def log_message(self, *a): pass\n"
     "    def do_GET(self):\n"
     "        b = b'xplat-https-ok-low'; self.send_response(200); self.send_header('Content-Length', str(len(b))); self.end_headers(); self.wfile.write(b)\n"
-    "http.server.ThreadingHTTPServer(('0.0.0.0', 720), P).serve_forever()\n")
+    "        if self.path == '/__quit': self.wfile.flush(); __import__('os')._exit(0)\n"
+    "import threading, time\n"
+    "s = http.server.ThreadingHTTPServer(('0.0.0.0', 720), P)\n"
+    # A Windows driver ends `pb exec` with TerminateProcess, which cannot cancel the remote process: the origin ends
+    # itself so it never holds port 720 on the target for the next run.
+    "threading.Thread(target=s.serve_forever, daemon=True).start(); time.sleep(120)\n")
 
 DRIVER = r'''
 import hashlib, json, os, re, socket, subprocess, sys, time
@@ -113,6 +118,8 @@ try:
                 time.sleep(5)
             out["https_low_port"] = got.stdout == "xplat-https-ok-low"; out["https_low_detail"] = (got.stderr or got.stdout or allow.stderr)[-160:]
         finally:
+            # Ends the origin on the target for good: terminating `pb exec` (TerminateProcess on Windows) cannot cancel it.
+            subprocess.run([curl, "-sS", "-m", "10", "https://%s.%s:720/__quit" % (machine, domain)], capture_output=True)
             if policy: subprocess.run([pb, "tunnel", "policy", "revoke", policy], capture_output=True, timeout=60)
             if low.poll() is None:
                 low.terminate()

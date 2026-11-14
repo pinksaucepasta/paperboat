@@ -1,0 +1,21 @@
+{
+ "check": "xplat-access",
+ "tag": "vpn-V>M x3",
+ "results": [
+  {
+   "id": "X-19:tcp:vpn V>M #0",
+   "status": "PASS",
+   "detail": "forward and 127.100.0.18 byte-exact with half-close; non-loopback --listen refused (pb: --listen must be a literal loopback address such as 127.0.0.1:8080)"
+  },
+  {
+   "id": "X-19:tcp:vpn V>M #1",
+   "status": "PASS",
+   "detail": "forward and 127.100.0.18 byte-exact with half-close; non-loopback --listen refused (pb: --listen must be a literal loopback address such as 127.0.0.1:8080)"
+  },
+  {
+   "id": "X-19:tcp:vpn V>M #2",
+   "status": "PASS",
+   "detail": "forward and 127.100.0.18 byte-exact with half-close; non-loopback --listen refused (pb: --listen must be a literal loopback address such as 127.0.0.1:8080)"
+  }
+ ]
+}

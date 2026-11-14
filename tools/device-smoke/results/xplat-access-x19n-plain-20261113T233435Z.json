@@ -1,0 +1,36 @@
+{
+ "check": "xplat-access",
+ "tag": "plain",
+ "results": [
+  {
+   "id": "X-19:tcp:plain rx19v-l>rx19n-m",
+   "status": "PASS",
+   "detail": "forward and 127.100.0.18 byte-exact with half-close; non-loopback --listen refused (pb: --listen must be a literal loopback address such as 127.0.0.1:8080)"
+  },
+  {
+   "id": "X-19:tcp:plain rx19n-m>rx19v-l",
+   "status": "PASS",
+   "detail": "forward and 127.100.0.2 byte-exact with half-close; non-loopback --listen refused (pb: --listen must be a literal loopback address such as 127.0.0.1:8080)"
+  },
+  {
+   "id": "X-19:tcp:plain rx19v-l>rx19n-w",
+   "status": "PASS",
+   "detail": "forward and 127.100.0.19 byte-exact with half-close; non-loopback --listen refused (pb: --listen must be a literal loopback address such as 127.0.0.1:8080)"
+  },
+  {
+   "id": "X-19:tcp:plain rx19n-w>rx19v-l",
+   "status": "FAIL",
+   "detail": "https://<port>.<machine>.<domain> did not answer through the trust store of this OS: {'non_loopback_refused': True, 'non_loopback_message': 'pb: --listen must be a literal loopback address such as 127.0.0.1:8080 or [::1]:8080; other addresses are refused\\nUsage:\\n  pb access machine <machine> [flags]\\n\\n', 'forward': True, 'address': '127.100.0.2', 'private_address': True, 'name_resolves': True, 'https_url': False, 'https_detail': 'curl: (7) Failed to connect to 25225.rx19v-l.ppr.boats:443 after 2051 ms: Could not connect to server\\n', 'https_low_port': False, 'https_low_detail': 'curl: (7) Failed to connect to rx19v-l.ppr.boats:720 after 32 ms: Could not connect to server\\n'}"
+  },
+  {
+   "id": "X-19:tcp:plain rx19n-m>rx19n-w",
+   "status": "PASS",
+   "detail": "forward and 127.100.0.19 byte-exact with half-close; non-loopback --listen refused (pb: --listen must be a literal loopback address such as 127.0.0.1:8080)"
+  },
+  {
+   "id": "X-19:tcp:plain rx19n-w>rx19n-m",
+   "status": "FAIL",
+   "detail": "https://<port>.<machine>.<domain> did not answer through the trust store of this OS: {'non_loopback_refused': True, 'non_loopback_message': 'pb: --listen must be a literal loopback address such as 127.0.0.1:8080 or [::1]:8080; other addresses are refused\\nUsage:\\n  pb access machine <machine> [flags]\\n\\n', 'forward': True, 'address': '127.100.0.18', 'private_address': True, 'name_resolves': True, 'https_url': False, 'https_detail': 'curl: (7) Failed to connect to 25218.rx19n-m.ppr.boats:443 after 2050 ms: Could not connect to server\\n', 'https_low_port': False, 'https_low_detail': 'curl: (7) Failed to connect to rx19n-m.ppr.boats:720 after 29 ms: Could not connect to server\\n'}"
+  }
+ ]
+}

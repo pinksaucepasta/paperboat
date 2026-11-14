@@ -1,0 +1,26 @@
+{
+ "check": "xplat-access",
+ "tag": "vpn",
+ "results": [
+  {
+   "id": "X-19:tcp:vpn rx19v-l>rx19n-m",
+   "status": "FAIL",
+   "detail": "driver:  ne 33, in <module>\n  File \"<string>\", line 9, in exchange\n  File \"/usr/lib/python3.12/socket.py\", line 852, in create_connection\n    raise exceptions[0]\n  File \"/usr/lib/python3.12/socket.py\", line 837, in create_connection\n    sock.connect(sa)\nConnectionRefusedError: [Errno 111] Connection refused\n"
+  },
+  {
+   "id": "X-19:tcp:vpn rx19n-m>rx19v-l",
+   "status": "PASS",
+   "detail": "forward and 127.100.0.2 byte-exact with half-close; non-loopback --listen refused (pb: --listen must be a literal loopback address such as 127.0.0.1:8080)"
+  },
+  {
+   "id": "X-19:tcp:vpn rx19v-l>rx19n-w",
+   "status": "PASS",
+   "detail": "forward and 127.100.0.19 byte-exact with half-close; non-loopback --listen refused (pb: --listen must be a literal loopback address such as 127.0.0.1:8080)"
+  },
+  {
+   "id": "X-19:tcp:vpn rx19n-w>rx19v-l",
+   "status": "PASS",
+   "detail": "forward and 127.100.0.2 byte-exact with half-close; non-loopback --listen refused (pb: --listen must be a literal loopback address such as 127.0.0.1:8080)"
+  }
+ ]
+}

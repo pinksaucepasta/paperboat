@@ -1,0 +1,36 @@
+{
+ "check": "xplat-access",
+ "tag": "plain",
+ "results": [
+  {
+   "id": "X-19:tcp:plain rx19v-l>rx19n-m",
+   "status": "PASS",
+   "detail": "forward and 127.100.0.18 byte-exact with half-close; non-loopback --listen refused (pb: --listen must be a literal loopback address such as 127.0.0.1:8080)"
+  },
+  {
+   "id": "X-19:tcp:plain rx19n-m>rx19v-l",
+   "status": "PASS",
+   "detail": "forward and 127.100.0.2 byte-exact with half-close; non-loopback --listen refused (pb: --listen must be a literal loopback address such as 127.0.0.1:8080)"
+  },
+  {
+   "id": "X-19:tcp:plain rx19v-l>rx19n-w",
+   "status": "PASS",
+   "detail": "forward and 127.100.0.19 byte-exact with half-close; non-loopback --listen refused (pb: --listen must be a literal loopback address such as 127.0.0.1:8080)"
+  },
+  {
+   "id": "X-19:tcp:plain rx19n-w>rx19v-l",
+   "status": "PASS",
+   "detail": "forward and 127.100.0.2 byte-exact with half-close; non-loopback --listen refused (pb: --listen must be a literal loopback address such as 127.0.0.1:8080)"
+  },
+  {
+   "id": "X-19:tcp:plain rx19n-m>rx19n-w",
+   "status": "PASS",
+   "detail": "forward and 127.100.0.19 byte-exact with half-close; non-loopback --listen refused (pb: --listen must be a literal loopback address such as 127.0.0.1:8080)"
+  },
+  {
+   "id": "X-19:tcp:plain rx19n-w>rx19n-m",
+   "status": "PASS",
+   "detail": "forward and 127.100.0.18 byte-exact with half-close; non-loopback --listen refused (pb: --listen must be a literal loopback address such as 127.0.0.1:8080)"
+  }
+ ]
+}
