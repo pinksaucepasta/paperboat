@@ -1,44 +1,47 @@
 ---
 import Icon from "./Icon.astro"
-import { installCommand, windowsInstallCommand } from "../site"
-/** The install command for macOS and Linux, or for Windows; pressing it copies. */
-interface Props {
-  tone?: "light" | "sea"
-}
-const { tone = "light" } = Astro.props
+import { installCommand, installUrl, windowsInstallCommand } from "../site"
+/**
+ * The install command, with its copy button inside the box; below it the platform switch and a link
+ * to the script itself. No script: radio inputs pick the platform, so both commands share one box.
+ */
 const id = `os-${Math.random().toString(36).slice(2, 8)}`
 const commands = [
-  { key: "unix", label: "macOS and Linux", command: installCommand, prompt: "$ ", note: "Opens your browser to sign in." },
-  { key: "windows", label: "Windows", command: windowsInstallCommand, prompt: "> ", note: "In PowerShell. Opens your browser to sign in." },
+  { key: "unix", label: "macOS & Linux", command: installCommand, prompt: "$", script: installUrl },
+  { key: "windows", label: "Windows", command: windowsInstallCommand, prompt: ">", script: `${installUrl}.ps1` },
 ]
 ---
 
-<div class:list={["install", `install-${tone}`]}>
+<div class="install">
   <input class="os-input" type="radio" name={id} id={`${id}-unix`} checked />
   <input class="os-input" type="radio" name={id} id={`${id}-windows`} data-windows-tab />
-  <div class="os" role="group" aria-label="Operating system">
-    {commands.map((item) => <label for={`${id}-${item.key}`}>{item.label}</label>)}
-  </div>
-  <div class="os-panels">
-  {
-    commands.map((item) => (
-      <div class:list={["os-panel", `os-${item.key}`]}>
-        <button class="install-command" type="button" data-copy={item.command}>
-          <span class="visually-hidden">Copy the {item.label} install command: </span>
-          <code>
-            <span class="prompt">{item.prompt}</span>
-            {item.command}
+  <div class="boxes">
+    {
+      commands.map((item) => (
+        <div class:list={["box", `os-${item.key}`]}>
+          <code class="command">
+            <span class="prompt">{item.prompt}</span> {item.command}
           </code>
-          <span class="install-icon">
+          <button class="copy" type="button" data-copy={item.command} aria-label={`Copy the ${item.label} install command`}>
             <Icon name="copy" size={18} class="when-idle" />
             <Icon name="check" size={18} class="when-copied" />
-          </span>
-          <span class="visually-hidden" role="status" data-copy-status />
-        </button>
-        <p class="install-note">{item.note}</p>
-      </div>
-    ))
-  }
+            <span class="visually-hidden" role="status" data-copy-status />
+          </button>
+        </div>
+      ))
+    }
+  </div>
+  <div class="below">
+    <div class="os" role="group" aria-label="Operating system">
+      {commands.map((item) => <label for={`${id}-${item.key}`}>{item.label}</label>)}
+    </div>
+    {
+      commands.map((item) => (
+        <a class:list={["script", `os-${item.key}`]} href={item.script} rel="noopener">
+          View install script <Icon name="arrow-up-right" size={14} />
+        </a>
+      ))
+    }
   </div>
 </div>
 
@@ -46,9 +49,9 @@ const commands = [
   .install {
     display: grid;
     grid-template-columns: minmax(0, 1fr);
-    justify-items: start;
     gap: var(--s3);
-    max-width: 100%;
+    width: 100%;
+    max-width: 560px;
   }
 
   .os-input {
@@ -57,88 +60,29 @@ const commands = [
     pointer-events: none;
   }
 
-  .os {
-    display: inline-flex;
-    gap: var(--s1);
-  }
-
-  .os label {
-    display: inline-flex;
-    align-items: center;
-    min-height: 32px;
-    padding-inline: var(--s3);
-    border-radius: 999px;
-    font-size: var(--text-small);
-    font-weight: 500;
-    color: var(--fog);
-    cursor: pointer;
-  }
-
-  .os-input:nth-of-type(1):checked ~ .os label:nth-child(1),
-  .os-input:nth-of-type(2):checked ~ .os label:nth-child(2) {
-    background: var(--surface-strong);
-    color: var(--ink);
-  }
-
-  .os-input:focus-visible ~ .os {
-    outline: 2px solid var(--cobalt);
-    outline-offset: 2px;
-    border-radius: 999px;
-  }
-
-  /* Both commands share one cell, so the box keeps the longer one's width whichever is shown. */
-  .os-panels {
+  /* Both boxes share one cell, so switching platform never changes the width. */
+  .boxes {
     display: grid;
-    width: fit-content;
-    max-width: 100%;
-    grid-template-columns: minmax(0, auto);
   }
 
-  .os-panels .install-command {
-    width: 100%;
-  }
-
-  .os-panel {
+  .box {
     grid-area: 1 / 1;
-  }
-
-  .os-input:nth-of-type(1):checked ~ .os-panels .os-windows,
-  .os-input:nth-of-type(2):checked ~ .os-panels .os-unix {
-    visibility: hidden;
-  }
-
-  .os-panel {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    justify-items: inherit;
-    gap: var(--s3);
-  }
-
-  .install-command {
-    position: relative;
     display: flex;
-    max-width: 100%;
-    align-items: center;
-    gap: var(--s5);
-    min-height: 52px;
-    padding: 0 var(--s4) 0 var(--s5);
+    align-items: stretch;
+    min-height: 56px;
     border-radius: var(--radius);
     background: var(--ink);
-    text-align: left;
-    transition: background-color 0.15s ease, transform 0.1s ease;
+    overflow: hidden;
   }
 
-  .install-command:hover {
-    background: #22252b;
-  }
-
-  .install-command:active {
-    transform: translateY(1px);
-  }
-
-  .install-command code {
+  .command {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 0.6em;
     min-width: 0;
-    line-height: 1.5;
+    padding: 0 var(--s5);
+    font-size: var(--text-ui);
     color: #fff;
     white-space: nowrap;
     overflow-x: auto;
@@ -146,62 +90,101 @@ const commands = [
   }
 
   .prompt {
-    color: rgb(255 255 255 / 0.55);
+    color: var(--sky);
     user-select: none;
   }
 
-  @media (max-width: 520px) {
-    .install-command code {
-      mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
-    }
-  }
-
-  .install-icon {
+  .copy {
+    display: grid;
+    place-items: center;
+    width: 56px;
     flex-shrink: 0;
+    border-left: 1px solid rgb(255 255 255 / 0.12);
     color: rgb(255 255 255 / 0.7);
+    transition:
+      background-color 0.15s ease,
+      color 0.15s ease;
   }
 
-  .install-command:hover .install-icon {
+  .copy:hover {
+    background: rgb(255 255 255 / 0.06);
     color: #fff;
   }
 
-  .install-icon :global(.when-copied),
-  [data-copied] .install-icon :global(.when-idle) {
+  .copy :global(.when-copied),
+  .copy[data-copied] :global(.when-idle) {
     display: none;
   }
 
-  [data-copied] .install-icon :global(.when-copied) {
+  .copy[data-copied] :global(.when-copied) {
     display: block;
     color: #fff;
   }
 
-  .install-note {
+  .below {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--s3);
+  }
+
+  .os {
+    display: inline-flex;
+    padding: 3px;
+    border-radius: var(--radius);
+    box-shadow: inset 0 0 0 1px var(--rule);
+  }
+
+  .os label {
+    display: inline-flex;
+    align-items: center;
+    min-height: 32px;
+    padding-inline: var(--s3);
+    border-radius: 6px;
     font-size: var(--text-small);
-    line-height: 1.5;
+    font-weight: 500;
     color: var(--fog);
+    white-space: nowrap;
+    cursor: pointer;
   }
 
-  .install-sea .install-command {
-    background: rgb(11 11 12 / 0.32);
-    box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.16);
+  .os label:hover {
+    color: var(--ink);
   }
 
-  .install-sea .os label {
-    color: rgb(255 255 255 / 0.75);
+  .os-input:nth-of-type(1):checked ~ .below .os label:nth-child(1),
+  .os-input:nth-of-type(2):checked ~ .below .os label:nth-child(2) {
+    background: var(--surface-strong);
+    color: var(--ink);
   }
 
-  .install-sea .os-input:nth-of-type(1):checked ~ .os label:nth-child(1),
-  .install-sea .os-input:nth-of-type(2):checked ~ .os label:nth-child(2) {
-    background: rgb(255 255 255 / 0.18);
-    color: #fff;
+  .os-input:focus-visible ~ .below .os {
+    outline: 2px solid var(--cobalt);
+    outline-offset: 2px;
   }
 
-  .install-sea .install-note {
-    color: rgb(255 255 255 / 0.85);
+  .script {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    min-height: 32px;
+    font-size: var(--text-small);
+    color: var(--fog);
+    white-space: nowrap;
   }
 
-  .install-sea :global(:focus-visible),
-  .install-sea.install :focus-visible {
-    outline-color: #fff;
+  .script:hover {
+    color: var(--ink);
+  }
+
+  .os-input:nth-of-type(1):checked ~ .boxes .os-windows,
+  .os-input:nth-of-type(2):checked ~ .boxes .os-unix {
+    visibility: hidden;
+  }
+
+  .os-input:nth-of-type(1):checked ~ .below .os-windows,
+  .os-input:nth-of-type(2):checked ~ .below .os-unix {
+    display: none;
   }
 </style>

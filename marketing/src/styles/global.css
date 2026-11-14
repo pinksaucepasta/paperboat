@@ -450,8 +450,8 @@ button code {
   align-items: center;
   justify-content: center;
   gap: var(--s2);
-  min-height: 44px;
-  padding-inline: 20px;
+  min-height: 40px;
+  padding-inline: 16px;
   border-radius: var(--radius);
   font-size: var(--text-ui);
   font-weight: 500;
@@ -465,13 +465,14 @@ button code {
   transform: translateY(1px);
 }
 
+/* The brand blue, as on the console's primary actions. */
 .button-primary {
-  background: var(--ink);
+  background: var(--cobalt);
   color: #fff;
 }
 
 .button-primary:hover {
-  background: #333;
+  background: var(--deep);
 }
 
 .button-quiet {
