@@ -1,4 +1,4 @@
-// Checks the built site (dist/) without a browser: `npm run build && npm run check:site`.
+// Checks the built site (dist/) without a browser: `bun run build && bun run check:site`.
 // It fails on anything a visitor or a search engine would trip over: a missing or repeated title,
 // a broken internal link or anchor, placeholder text, a page without a real command, a claim that
 // does not match the server's configuration, a missing share image, invalid structured data.

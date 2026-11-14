@@ -1,6 +1,6 @@
 // Makes one share image (1200 x 630) per indexable page into public/og/, from the built site:
 // the page's headline and its first real command. Run after a build, then build again:
-//   npm run build && CHROME=/path/to/chrome node checks/og.mjs && npm run build
+//   bun run build && CHROME=/path/to/chrome node checks/og.mjs && bun run build
 // Needs playwright-core (npm i --no-save playwright-core) and a Chromium binary in CHROME.
 import { chromium } from "playwright-core"
 import { readFileSync, mkdirSync } from "node:fs"
