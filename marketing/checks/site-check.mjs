@@ -43,7 +43,8 @@ for (const [path, html] of pages) {
   const title = first(html, /<title>([^<]*)<\/title>/)
   const description = first(html, /<meta name="description" content="([^"]*)"/)
   if (!title || title.length < 20 || title.length > 80) fail(path, `title length ${title?.length ?? 0} (want 20-80): ${title}`)
-  if (!description || description.length < 70 || description.length > 260) fail(path, `description length ${description?.length ?? 0} (want 70-260)`)
+  // Social previews show about 125 characters, on phones less; search results about 155.
+  if (!description || description.length < 70 || description.length > 125) fail(path, `description length ${description?.length ?? 0} (want 70-125)`)
   if (titles.has(title)) fail(path, `same title as ${titles.get(title)}`)
   if (descriptions.has(description)) fail(path, `same description as ${descriptions.get(description)}`)
   titles.set(title, path)
