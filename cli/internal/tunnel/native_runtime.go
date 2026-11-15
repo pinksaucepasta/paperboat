@@ -361,7 +361,19 @@ func (r *cliNativeRuntime) openApplication(ctx context.Context, machineID, consu
 	group := &cliNativeStreamGroup{session: session, target: target, application: application, consumer: consumer, now: now, resume: target.Resume}
 	if application.helper != nil {
 		authEnd := diagnostics.ReconnectStep(ctx, "application_authenticate")
-		message, err := authenticateNativeStreamGroup(ctx, group, target, "native")
+		var message helperMessageConnection
+		var err error
+		if consumer == "exec" {
+			// One stream; its admission, preface, hello and start request go out in one flight (Session.OpenAuthorized).
+			var unified *nativeMessageConnection
+			var helloID string
+			unified, helloID, err = startUnifiedNativeStream(ctx, group, target, "native")
+			if err == nil {
+				message = &pipelinedWelcome{helperMessageConnection: unified, helloID: helloID}
+			}
+		} else {
+			message, err = authenticateNativeStreamGroup(ctx, group, target, "native")
+		}
 		authEnd(err)
 		if err != nil {
 			_ = session.Close()

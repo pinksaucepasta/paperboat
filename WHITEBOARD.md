@@ -238,9 +238,10 @@ heavy-merge-group split. Native merge limits do not amortize CI across PRs. Prio
 ## Exec round trips: what is left — after launch
 
 Measured 2026-11-12: one `pb exec` over a 290 ms path took ~12 dependent round trips. Fixed 2026-11-16 (1f9007a39): the per-exec
-network refresh (2-5 round trips) is gone; a warm exec is ~0.65 s on the dev server. Left: send authenticate and the exec start in the
-same flight as the preface (saves 3-4 round trips), and keep the WireGuard session a few seconds between back-to-back commands
-(saves 1). Re-measure with tools/device-smoke/perf_dataplane.py.
+network refresh (2-5 round trips) is gone. Fixed 2026-11-16 (FIX-EXECRTT): exec runs on one stream whose credential, preface, hello and
+start go out in one flight, and the peer association lingers 5 s after its last user; 290 ms path 2.57 s -> 1.05-1.3 s
+(tools/device-smoke/results/20261116T-execrtt.json). Left: the daemon's per-exec descriptor fetch from the server
+(`MachineExecDescriptor`, one control-server round trip per exec).
 
 - Socket-based agent that Git-for-Windows ssh can reach (after launch): the managed agent is a Windows named pipe, which MSYS OpenSSH cannot use; until then Git runs through `git config --global core.sshCommand C:/Windows/System32/OpenSSH/ssh.exe` (pb ssh doctor prints it).
 

@@ -1,0 +1,25 @@
+{
+  "check": "exec round trips (pipelined exec start + 5 s association linger)",
+  "build": "dev-c3ad8d243",
+  "baseline_build": "dev-524977877",
+  "machines": {"execrtt-a": "pbvm2 container, Ubuntu 24.04, dev-c3ad8d243", "execrtt-b": "pbvm2 container, Ubuntu 24.04, dev-c3ad8d243", "execrtt-w": "winpool-2 GitHub Windows runner, dev-c3ad8d243"},
+  "warm_exec_true_seconds": {
+    "plain_back_to_back": {"before": [0.64, 0.56, 0.55, 0.57], "after": [0.59, 0.56, 0.55, 0.55, 0.55]},
+    "netem_290ms_on_b_back_to_back": {"before": [2.57, 2.57, 2.55, 2.57], "after": [1.05, 1.3, 1.06, 1.3, 1.05]},
+    "netem_290ms_on_b_8s_apart": {"before": [2.56, 2.84, 2.8], "after": [1.3, 1.55, 2.07]}
+  },
+  "device": {
+    "exec a->b, b->a (output, exit 7, stdin)": "PASS",
+    "exec 20 MB stdin a->b (sha256 match)": "PASS",
+    "connect a->b, b->a": "PASS",
+    "ssh a->b, b->a": "PASS",
+    "send a->b, b->a (sha256 match)": "PASS",
+    "exec a->w (output, exit 7)": "PASS",
+    "exec w->a": "PASS",
+    "connect a->w": "PASS",
+    "ssh w->a": "PASS",
+    "send a->w, w->a (sha256 match)": "PASS",
+    "ssh a->w": "GAP: GitHub Windows runner never publishes SSH host keys (pb asks for winget); fixture, not this change",
+    "connect w->a": "GAP: interactive terminal not drivable over the runner's ssh hop"
+  }
+}

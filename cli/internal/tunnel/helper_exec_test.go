@@ -18,6 +18,7 @@ import (
 type execMessage struct {
 	kind helperMessageType
 	data []byte
+	err  error
 }
 
 func TestHelperExecClassifiesLostStartResponseAsUncertain(t *testing.T) {
@@ -112,7 +113,7 @@ func newExecMessageConnection() *execMessageConnection {
 func (c *execMessageConnection) ReadMessage(ctx context.Context) (helperMessageType, []byte, error) {
 	select {
 	case message := <-c.reads:
-		return message.kind, message.data, nil
+		return message.kind, message.data, message.err
 	case <-ctx.Done():
 		return 0, nil, ctx.Err()
 	case <-c.closed:

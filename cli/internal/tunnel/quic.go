@@ -166,27 +166,72 @@ func authenticateNativeStreamGroup(ctx context.Context, connection nativeStreamG
 }
 
 func authenticateUnifiedNativeStream(ctx context.Context, connection nativeStreamGroup, target *resolver.TerminalTarget, transport string) (*nativeMessageConnection, error) {
-	var id [16]byte
-	if _, err := io.ReadFull(rand.Reader, id[:]); err != nil {
-		_ = connection.Close()
+	message, helloID, err := startUnifiedNativeStream(ctx, connection, target, transport)
+	if err != nil {
 		return nil, err
 	}
-	control, err := connection.OpenStream(ctx)
-	if err != nil {
-		_ = connection.Close()
-		return nil, errors.Join(ErrPeerStreamOpen, &terminalTransportError{transport: transport, cause: err})
-	}
-	if err := writeNativePreface(control, nativeRoleUnified, id, nil, target.Auth.Token); err != nil {
-		_ = connection.Close()
-		return nil, classifyNativeHandshakeError(ctx, transport, err)
-	}
-	message := newNativeMessageConnection(connection, control)
-	message.unified = true
-	if _, err := nativeHandshake(ctx, message); err != nil {
+	if _, err := readNativeWelcome(ctx, message, helloID); err != nil {
 		_ = message.Close()
 		return nil, classifyNativeHandshakeError(ctx, transport, err)
 	}
 	return message, nil
+}
+
+// startUnifiedNativeStream opens one unified stream and sends its preface and hello without waiting for the welcome;
+// readNativeWelcome reads it.
+func startUnifiedNativeStream(ctx context.Context, connection nativeStreamGroup, target *resolver.TerminalTarget, transport string) (*nativeMessageConnection, string, error) {
+	var id [16]byte
+	if _, err := io.ReadFull(rand.Reader, id[:]); err != nil {
+		_ = connection.Close()
+		return nil, "", err
+	}
+	control, err := connection.OpenStream(ctx)
+	if err != nil {
+		_ = connection.Close()
+		return nil, "", errors.Join(ErrPeerStreamOpen, &terminalTransportError{transport: transport, cause: err})
+	}
+	if err := writeNativePreface(control, nativeRoleUnified, id, nil, target.Auth.Token); err != nil {
+		_ = connection.Close()
+		return nil, "", classifyNativeHandshakeError(ctx, transport, err)
+	}
+	message := newNativeMessageConnection(connection, control)
+	message.unified = true
+	helloID, err := writeNativeHello(ctx, message)
+	if err != nil {
+		_ = message.Close()
+		return nil, "", classifyNativeHandshakeError(ctx, transport, err)
+	}
+	return message, helloID, nil
+}
+
+// pipelinedWelcome is a unified stream whose hello is sent but whose welcome is not yet read: the caller sends its
+// first request in the same flight, and the first read takes the welcome. The host answers in order and starts nothing
+// from a stream it refused (admission or hello), so a refusal read here means the request never ran (errNotAdmitted).
+type pipelinedWelcome struct {
+	helperMessageConnection
+	helloID string
+	once    sync.Once
+	err     error
+}
+
+// errNotAdmitted marks a refusal of the stream itself (admission or hello) read in place of the welcome.
+type errNotAdmitted struct{ cause error }
+
+func (e *errNotAdmitted) Error() string { return e.cause.Error() }
+func (e *errNotAdmitted) Unwrap() error { return e.cause }
+
+func (c *pipelinedWelcome) ReadMessage(ctx context.Context) (helperMessageType, []byte, error) {
+	c.once.Do(func() {
+		_, c.err = readNativeWelcome(ctx, c.helperMessageConnection, c.helloID)
+		var remote *helperRemoteError
+		if errors.Is(c.err, tailnet.ErrAdmission) || errors.As(c.err, &remote) {
+			c.err = &errNotAdmitted{cause: c.err}
+		}
+	})
+	if c.err != nil {
+		return 0, nil, c.err
+	}
+	return c.helperMessageConnection.ReadMessage(ctx)
 }
 
 func classifyNativeHandshakeError(ctx context.Context, transport string, err error) error {
@@ -204,11 +249,20 @@ func classifyNativeHandshakeError(ctx context.Context, transport string, err err
 }
 
 func nativeHandshake(ctx context.Context, message helperMessageConnection) ([]byte, error) {
-	payload, _ := json.Marshal(map[string]any{"min_version": helperProtocolVersion, "max_version": helperProtocolVersion, "capabilities": helperCapabilities()})
-	id := helperID("request")
-	if err := writeHelperFrame(ctx, message, helperFrame{Type: "hello", RequestID: id, Version: helperProtocolVersion, Payload: payload}); err != nil {
+	id, err := writeNativeHello(ctx, message)
+	if err != nil {
 		return nil, err
 	}
+	return readNativeWelcome(ctx, message, id)
+}
+
+func writeNativeHello(ctx context.Context, message helperMessageConnection) (string, error) {
+	payload, _ := json.Marshal(map[string]any{"min_version": helperProtocolVersion, "max_version": helperProtocolVersion, "capabilities": helperCapabilities()})
+	id := helperID("request")
+	return id, writeHelperFrame(ctx, message, helperFrame{Type: "hello", RequestID: id, Version: helperProtocolVersion, Payload: payload})
+}
+
+func readNativeWelcome(ctx context.Context, message helperMessageConnection, id string) ([]byte, error) {
 	frame, err := readHelperStructured(ctx, message)
 	if err != nil {
 		return nil, err

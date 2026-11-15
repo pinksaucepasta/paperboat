@@ -116,15 +116,32 @@ func TestNativeDialSharedHoldsHundredTerminalsOnOneAssociation(t *testing.T) {
 	if got := clientOwner.OpenSessions(); got != 1 {
 		t.Fatalf("with one handle left the association count is %d, want 1 (closing a handle must not close the shared association)", got)
 	}
-	// The last handle closing ends the association; the next dial makes a new one.
+	// The last handle closing leaves the association open for associationLinger: a dial right after reuses it.
 	_ = streams[terminals-1].Close()
 	_ = handles[terminals-1].Close()
-	deadline := time.Now().Add(5 * time.Second)
+	if got := clientOwner.OpenSessions(); got != 1 {
+		t.Fatalf("right after the last handle closed %d associations remain, want the lingering 1", got)
+	}
+	reused, err := clientOwner.DialShared(ctx, descriptor.Address(), "machine_admission", peerquic.ClassInteractive)
+	if err != nil {
+		t.Fatalf("dial during the linger: %v", err)
+	}
+	stream, err := openAdmissionStream(ctx, reused, "reused")
+	if err != nil {
+		t.Fatalf("stream on the lingering association: %v", err)
+	}
+	if got := clientOwner.OpenSessions(); got != 1 {
+		t.Fatalf("a dial during the linger holds %d associations, want the same 1", got)
+	}
+	_ = stream.Close()
+	_ = reused.Close()
+	// Idle past the linger, it closes; the next dial makes a new one.
+	deadline := time.Now().Add(15 * time.Second)
 	for clientOwner.OpenSessions() != 0 && time.Now().Before(deadline) {
-		time.Sleep(20 * time.Millisecond)
+		time.Sleep(50 * time.Millisecond)
 	}
 	if got := clientOwner.OpenSessions(); got != 0 {
-		t.Fatalf("after the last handle closed %d associations remain", got)
+		t.Fatalf("after the linger %d associations remain", got)
 	}
 	again, err := clientOwner.DialShared(ctx, descriptor.Address(), "machine_admission", peerquic.ClassInteractive)
 	if err != nil {

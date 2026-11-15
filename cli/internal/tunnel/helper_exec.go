@@ -118,7 +118,8 @@ func (t *PeerTerminalTunnel) DialExec(ctx context.Context, info resolver.Connect
 		}
 		return exec, nil
 	}})
-	if err != nil && !requested.Load() {
+	var refused *errNotAdmitted
+	if err != nil && (!requested.Load() || errors.As(err, &refused)) {
 		return nil, &ExecNotStartedError{Cause: err}
 	}
 	if err != nil {

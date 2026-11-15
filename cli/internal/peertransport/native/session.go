@@ -46,6 +46,7 @@ type Session struct {
 	handlesMu sync.Mutex
 	handles   int
 	dead      bool
+	idle      *time.Timer // closes the association associationLinger after its last handle left
 	base      *Session
 }
 
@@ -405,6 +406,10 @@ func (s *Session) share() (*Session, bool) {
 	if s.dead || s.closing.Load() || s.quic.Connection.Context().Err() != nil {
 		return nil, false
 	}
+	if s.idle != nil {
+		s.idle.Stop()
+		s.idle = nil
+	}
 	s.handles++
 	s.routerMu.Lock()
 	router := s.router
@@ -412,16 +417,29 @@ func (s *Session) share() (*Session, bool) {
 	return &Session{traceLabel: s.traceLabel, owner: s.owner, peerID: s.peerID, binding: s.binding, quic: s.quic, router: router, carrier: s.carrier, base: s}, true
 }
 
-// release is a handle's Close: the association closes with its last handle.
+// associationLinger keeps an association open after its last handle leaves, so back-to-back commands to a peer
+// (pb exec in a loop, a script) reuse it instead of paying a new handshake each. Every stream on it is still
+// admitted on its own (OpenAuthorized), and the peer's removal closes it like any other association.
+const associationLinger = 5 * time.Second
+
+// release is a handle's Close: the association closes associationLinger after its last handle, unless share takes it.
 func (s *Session) release() {
 	s.handlesMu.Lock()
+	defer s.handlesMu.Unlock()
 	s.handles--
-	last := s.handles <= 0
-	if last {
+	if s.handles <= 0 && !s.dead {
+		s.idle = time.AfterFunc(associationLinger, s.closeIdle)
+	}
+}
+
+func (s *Session) closeIdle() {
+	s.handlesMu.Lock()
+	idle := s.handles <= 0 && !s.dead
+	if idle {
 		s.dead = true
 	}
 	s.handlesMu.Unlock()
-	if last {
+	if idle {
 		_ = s.Close()
 	}
 }
