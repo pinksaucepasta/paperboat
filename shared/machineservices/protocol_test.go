@@ -32,3 +32,16 @@ func TestSnapshotBoundsAndExactPorts(t *testing.T) {
 		t.Fatalf("route %d %v", n, e)
 	}
 }
+
+func TestPortNameAndFrontDeskRules(t *testing.T) {
+	for name, want := range map[string]bool{"app": true, "jelly-fin": true, "a1": true, "1a": true, "8080": false, "": false, "-a": false, "a-": false, "App": false, "a.b": false, strings.Repeat("a", 64): false} {
+		if ValidPortName(name) != want {
+			t.Errorf("ValidPortName(%q) = %v, want %v", name, !want, want)
+		}
+	}
+	for desk, want := range map[FrontDesk]bool{{80, "http"}: true, {443, "https"}: true, {0, "http"}: false, {65536, "http"}: false, {80, "ftp"}: false} {
+		if ValidFrontDesk(desk) != want {
+			t.Errorf("ValidFrontDesk(%v) = %v, want %v", desk, !want, want)
+		}
+	}
+}

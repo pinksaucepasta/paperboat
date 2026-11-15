@@ -362,6 +362,15 @@ unambiguous in the caller's account namespace. Listing allocates no public hostn
 or activation policy. The URL requires the signed-in native daemon, a ready local
 TLS certificate and an exact current private-access grant; it has no hosted fallback.
 Ambiguous shared aliases retain service metadata but omit the browser URL.
+Each item also carries `port_names` (`<name>.<alias>.<domain>`; a machine name beats an
+all-machines name of the same label), `top_level_names` (`<name>.<domain>`; a machine named
+`<name>` wins) and `front_desk` (`{port, scheme}`, default 80/http: where an unmatched
+`<name>.<alias>.<domain>` goes). Only names of listed ports are delivered: a name never grants
+access. `GET`/`POST /v1/port-names` and `DELETE /v1/port-names/{name_id}` manage the selected
+workspace's names (`scope` `machine` needs machine management; `all_machines` and `top_level`
+need a workspace owner or admin; a top-level name equal to a workspace machine name answers 409
+`name_is_machine`, and one a machine takes later is listed `shadowed`).
+`GET`/`PUT /v1/machines/{machine_id}/front-desk` reads and sets the front desk (machine managers).
 `GET`/`PUT /v1/machines/{machine_id}/private-access-policy` provides
 metadata-manage-authorized personal automatic-access settings (it starts enabled and
 applies only to personal ownership). Team members reach the ports of a machine shared into

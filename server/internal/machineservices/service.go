@@ -457,6 +457,9 @@ SELECT m.id,m.alias,s.installation_generation,s.boot_id,m.machine_service_policy
 			}
 		}
 	}
+	if e = attachPortNames(ctx, tx, out); e != nil {
+		return nil, e
+	}
 	return out, tx.Commit()
 }
 

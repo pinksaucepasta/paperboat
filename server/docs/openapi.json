@@ -10252,12 +10252,30 @@
             "items": {
               "type": "object",
               "additionalProperties": false,
-              "required": ["purchased_bytes", "remaining_bytes", "purchased_at", "expires_at"],
+              "required": [
+                "purchased_bytes",
+                "remaining_bytes",
+                "purchased_at",
+                "expires_at"
+              ],
               "properties": {
-                "purchased_bytes": {"type": "integer", "minimum": 1},
-                "remaining_bytes": {"type": "integer", "minimum": 0},
-                "purchased_at": {"type": "string", "format": "date-time"},
-                "expires_at": {"type": "string", "format": "date-time", "description": "End of the allowance month the top-up was bought in; unused bytes are gone then."}
+                "purchased_bytes": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "remaining_bytes": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "purchased_at": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "expires_at": {
+                  "type": "string",
+                  "format": "date-time",
+                  "description": "End of the allowance month the top-up was bought in; unused bytes are gone then."
+                }
               }
             }
           }
@@ -10504,6 +10522,23 @@
             "items": {
               "$ref": "#/components/schemas/MachineServicePublishedPort"
             }
+          },
+          "port_names": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PortName"
+            },
+            "description": "Browser names of listed ports: <name>.<alias>.<domain>. Machine names beat all-machines names of the same label."
+          },
+          "top_level_names": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PortName"
+            },
+            "description": "<name>.<domain> names of listed ports of this machine. A machine named <name> wins."
+          },
+          "front_desk": {
+            "$ref": "#/components/schemas/MachineFrontDesk"
           }
         },
         "required": [
@@ -10514,7 +10549,10 @@
           "policy_generation",
           "announcement_generation",
           "expires_at",
-          "services"
+          "services",
+          "port_names",
+          "top_level_names",
+          "front_desk"
         ]
       },
       "MachineServiceNativeBinding": {
@@ -16887,6 +16925,124 @@
             }
           }
         }
+      },
+      "PortName": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 63
+          },
+          "port": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535
+          }
+        },
+        "required": [
+          "name",
+          "port"
+        ]
+      },
+      "MachineFrontDesk": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Where an unmatched <name>.<machine>.<domain> goes (a reverse proxy). Default port 80 over http.",
+        "properties": {
+          "port": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535
+          },
+          "scheme": {
+            "type": "string",
+            "enum": [
+              "http",
+              "https"
+            ]
+          }
+        },
+        "required": [
+          "port",
+          "scheme"
+        ]
+      },
+      "PortNameRecord": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "machine",
+              "all_machines",
+              "top_level"
+            ]
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 63
+          },
+          "port": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535
+          },
+          "machine_id": {
+            "type": "string"
+          },
+          "machine_alias": {
+            "type": "string"
+          },
+          "shadowed": {
+            "type": "boolean",
+            "description": "A top-level name whose label is also a machine name in the workspace: <name>.<domain> opens the machine."
+          }
+        },
+        "required": [
+          "id",
+          "scope",
+          "name",
+          "port",
+          "shadowed"
+        ]
+      },
+      "PortNameSet": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "scope": {
+            "type": "string",
+            "enum": [
+              "machine",
+              "all_machines",
+              "top_level"
+            ]
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 63,
+            "description": "One lowercase DNS label that is not a number."
+          },
+          "port": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535
+          },
+          "machine_id": {
+            "type": "string",
+            "description": "Required for machine and top_level; absent for all_machines."
+          }
+        },
+        "required": [
+          "scope",
+          "name",
+          "port"
+        ]
       }
     },
     "responses": {
@@ -19240,7 +19396,7 @@
       "get": {
         "summary": "Download the Paperboat installer",
         "security": [],
-        "description": "Without a query, serves the published shell installer (`curl … | bash`) without adding enrollment options. The optional p parameter carries one exact dashboard enrollment parameter. Empty, duplicate, malformed or additional query parameters are rejected. Responses are not cached.",
+        "description": "Without a query, serves the published shell installer (`curl \u2026 | bash`) without adding enrollment options. The optional p parameter carries one exact dashboard enrollment parameter. Empty, duplicate, malformed or additional query parameters are rejected. Responses are not cached.",
         "parameters": [
           {
             "name": "p",
@@ -19274,7 +19430,7 @@
       "get": {
         "summary": "Download the Paperboat PowerShell installer",
         "security": [],
-        "description": "Without a query, serves the published PowerShell installer (`irm … | iex`) without adding enrollment options. The optional p parameter carries one exact dashboard enrollment parameter. Empty, duplicate, malformed or additional query parameters are rejected. Responses are not cached.",
+        "description": "Without a query, serves the published PowerShell installer (`irm \u2026 | iex`) without adding enrollment options. The optional p parameter carries one exact dashboard enrollment parameter. Empty, duplicate, malformed or additional query parameters are rejected. Responses are not cached.",
         "parameters": [
           {
             "name": "p",
@@ -52763,6 +52919,282 @@
           },
           "404": {
             "description": "domain_not_found."
+          }
+        }
+      }
+    },
+    "/v1/port-names": {
+      "get": {
+        "operationId": "get_v1_port_names",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "items": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/components/schemas/PortNameRecord"
+                          }
+                        }
+                      },
+                      "required": [
+                        "items"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Exact resource access denied"
+          }
+        },
+        "parameters": [
+          {
+            "name": "workspace",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 63
+            },
+            "description": "Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field."
+          }
+        ],
+        "summary": "List port names",
+        "description": "Machine names of the workspace machines, its all-machines names and its top-level names. Names never grant access.",
+        "security": [
+          {
+            "bearerAccess": []
+          }
+        ]
+      },
+      "post": {
+        "operationId": "post_v1_port_names",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/PortNameRecord"
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Exact resource access denied"
+          }
+        },
+        "parameters": [
+          {
+            "name": "workspace",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 63
+            },
+            "description": "Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field."
+          }
+        ],
+        "summary": "Set a port name",
+        "description": "Creates a name or moves it to another port. Machine names need machine management; all-machines and top-level names need a workspace owner or admin. 409 name_is_machine: a top-level name equal to a machine name.",
+        "security": [
+          {
+            "bearerAccess": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PortNameSet"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/port-names/{name_id}": {
+      "delete": {
+        "operationId": "delete_v1_port_names_name_id",
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "403": {
+            "description": "Exact resource access denied"
+          }
+        },
+        "parameters": [
+          {
+            "name": "name_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 63
+            },
+            "description": "Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field."
+          }
+        ],
+        "summary": "Remove a port name",
+        "description": "Same permission rule as setting it.",
+        "security": [
+          {
+            "bearerAccess": []
+          }
+        ]
+      }
+    },
+    "/v1/machines/{machine_id}/front-desk": {
+      "get": {
+        "operationId": "get_v1_machines_machine_id_front_desk",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/MachineFrontDesk"
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Exact resource access denied"
+          }
+        },
+        "parameters": [
+          {
+            "name": "machine_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 63
+            },
+            "description": "Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field."
+          }
+        ],
+        "summary": "Read a machine front desk",
+        "description": "Requires machine management.",
+        "security": [
+          {
+            "bearerAccess": []
+          }
+        ]
+      },
+      "put": {
+        "operationId": "put_v1_machines_machine_id_front_desk",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/MachineFrontDesk"
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Exact resource access denied"
+          }
+        },
+        "parameters": [
+          {
+            "name": "machine_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 63
+            },
+            "description": "Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field."
+          }
+        ],
+        "summary": "Set a machine front desk",
+        "description": "Requires machine management. Where an unmatched <name>.<machine>.<domain> goes.",
+        "security": [
+          {
+            "bearerAccess": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MachineFrontDesk"
+              }
+            }
           }
         }
       }

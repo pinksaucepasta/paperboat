@@ -618,6 +618,11 @@ func NewRouter(opts Options) http.Handler {
 				mux.Handle("GET /v1/machines/{machine_id}/private-access-policy", userMachineAuth("machines:read", machineServicePolicy(opts.MachineServices)))
 				mux.Handle("PUT /v1/machines/{machine_id}/private-access-policy", userMachineAuth("machines:connect", requireCSRF(opts.Auth, machineServicePolicy(opts.MachineServices))))
 				mux.Handle("GET /v1/machine-services", userMachineAuth("machines:read", machineServiceList(opts.MachineServices)))
+				mux.Handle("GET /v1/port-names", userMachineAuth("machines:read", portNames(opts.MachineServices)))
+				mux.Handle("POST /v1/port-names", userMachineAuth("machines:connect", requireCSRF(opts.Auth, portNames(opts.MachineServices))))
+				mux.Handle("DELETE /v1/port-names/{name_id}", userMachineAuth("machines:connect", requireCSRF(opts.Auth, portNames(opts.MachineServices))))
+				mux.Handle("GET /v1/machines/{machine_id}/front-desk", userMachineAuth("machines:read", machineFrontDesk(opts.MachineServices)))
+				mux.Handle("PUT /v1/machines/{machine_id}/front-desk", userMachineAuth("machines:connect", requireCSRF(opts.Auth, machineFrontDesk(opts.MachineServices))))
 				if opts.NativePrivateAccess != nil {
 					mux.HandleFunc("POST /v1/runtime-machine-services/authorize", runtimeMachineServiceAuthorize(opts.RuntimeIdentity, opts.NativePrivateAccess))
 				}

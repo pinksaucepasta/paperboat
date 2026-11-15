@@ -1674,12 +1674,32 @@ type MachineEdgePlacement struct {
 	ObservedAt             time.Time
 }
 
+type MachineFrontDesk struct {
+	MachineID string
+	Port      int32
+	Scheme    string
+	UpdatedBy string
+	UpdatedAt time.Time
+}
+
 type MachineNodeLatency struct {
 	MachineID  string
 	NodeID     string
 	Role       string
 	RttMs      int32
 	MeasuredAt time.Time
+}
+
+type MachinePortName struct {
+	ID             string
+	Scope          string
+	Name           string
+	Port           int32
+	MachineID      sql.NullString
+	OwnerAccountID sql.NullString
+	OwnerTeamID    sql.NullString
+	CreatedBy      string
+	CreatedAt      time.Time
 }
 
 type MachineServiceDiscoveryPolicy struct {

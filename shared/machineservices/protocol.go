@@ -91,6 +91,71 @@ type Item struct {
 	AnnouncementGeneration int64           `json:"announcement_generation"`
 	ExpiresAt              time.Time       `json:"expires_at"`
 	Services               []PublishedPort `json:"services"`
+	// PortNames are the browser names of this machine's listed ports (<name>.<alias>.<domain>): machine names
+	// first, then the workspace's all-machines names of another label. Names grant no access: only listed ports.
+	PortNames []PortName `json:"port_names"`
+	// TopLevelNames map <name>.<domain> to one of this machine's listed ports. A machine named <name> wins.
+	TopLevelNames []PortName `json:"top_level_names"`
+	FrontDesk     FrontDesk  `json:"front_desk"`
+}
+
+// Port name scopes.
+const (
+	ScopeMachine     = "machine"
+	ScopeAllMachines = "all_machines"
+	ScopeTopLevel    = "top_level"
+)
+
+// DefaultFrontDesk is where an unmatched <name>.<machine>.<domain> goes when the machine sets none.
+var DefaultFrontDesk = FrontDesk{Port: 80, Scheme: "http"}
+
+type PortName struct {
+	Name string `json:"name"`
+	Port int    `json:"port"`
+}
+
+// FrontDesk is the port (and scheme) of a machine's reverse proxy, such as Coolify, Traefik or Caddy.
+type FrontDesk struct {
+	Port   int    `json:"port"`
+	Scheme string `json:"scheme"`
+}
+
+// PortNameRecord is one stored name, as the management API lists it.
+type PortNameRecord struct {
+	ID           string `json:"id"`
+	Scope        string `json:"scope"`
+	Name         string `json:"name"`
+	Port         int    `json:"port"`
+	MachineID    string `json:"machine_id,omitempty"`
+	MachineAlias string `json:"machine_alias,omitempty"`
+	// Shadowed: a top-level name whose label is also a machine's name; <name>.<domain> opens that machine.
+	Shadowed bool `json:"shadowed"`
+}
+
+type PortNameSet struct {
+	Scope     string `json:"scope"`
+	Name      string `json:"name"`
+	Port      int    `json:"port"`
+	MachineID string `json:"machine_id,omitempty"`
+}
+
+// ValidPortName: one lowercase DNS label that is not a number (numeric labels always mean the port).
+func ValidPortName(name string) bool {
+	if len(name) < 1 || len(name) > 63 || name[0] == '-' || name[len(name)-1] == '-' {
+		return false
+	}
+	numeric := true
+	for _, c := range name {
+		if c != '-' && (c < 'a' || c > 'z') && (c < '0' || c > '9') {
+			return false
+		}
+		numeric = numeric && c >= '0' && c <= '9'
+	}
+	return !numeric
+}
+
+func ValidFrontDesk(f FrontDesk) bool {
+	return f.Port >= 1 && f.Port <= 65535 && (f.Scheme == "http" || f.Scheme == "https")
 }
 
 func ValidBoot(s string) bool {
