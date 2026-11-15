@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"github.com/pinksaucepasta/paperboat/internal/api"
-	"github.com/pinksaucepasta/paperboat/internal/config"
 	"github.com/pinksaucepasta/paperboat/internal/daemonrpc"
 	"github.com/pinksaucepasta/paperboat/internal/machineguard"
 	"github.com/pinksaucepasta/paperboat/internal/shorttemp"
@@ -64,7 +63,7 @@ func TestCoordinatorBrowserGatewayPortInUseKeepsNativeRoutes(t *testing.T) {
 	}
 }
 
-func TestCoordinatorCustomDomainAliasesWithdrawWithAuthorization(t *testing.T) {
+func TestCoordinatorCustomDomainWithdrawsWithAuthorization(t *testing.T) {
 	testCoordinatorSharedBrowserGateway(t, false, "apps.local.example.test")
 }
 
@@ -80,7 +79,7 @@ func testCoordinatorSharedBrowserGateway(t *testing.T, nativeConflict bool, doma
 		defer origins[id].Close()
 	}
 	names := &coordinatorNameClient{domain: domain, conflictPorts: map[int]bool{6767: nativeConflict}}
-	c, err := NewCoordinator(CoordinatorConfig{LocalAccess: config.LocalAccessConfig{ServiceAliases: []config.LocalServiceAlias{{MachineAlias: "hp", Name: "jellyfin", Port: 6767}, {MachineAlias: "hp", Name: "ungranted", Port: 6768}}}, NameClient: names, DialMachine: func(ctx context.Context, machineID string, port int) (net.Conn, error) {
+	c, err := NewCoordinator(CoordinatorConfig{NameClient: names, DialMachine: func(ctx context.Context, machineID string, port int) (net.Conn, error) {
 		origin := origins[machineID]
 		if origin == nil || port != 6767 {
 			return nil, errors.New("wrong exact machine/port")
@@ -140,29 +139,8 @@ func testCoordinatorSharedBrowserGateway(t *testing.T, nativeConflict bool, doma
 	if err != nil || response.StatusCode != 200 || !strings.Contains(string(indexBody), "https://6767.hp."+domain+"/") {
 		t.Fatalf("base HTTPS index: %s %v", indexBody, err)
 	}
-	aliasHost := "jellyfin.hp." + domain
-	aliasTransport := &http.Transport{TLSClientConfig: &tls.Config{RootCAs: roots, ServerName: aliasHost}}
-	defer aliasTransport.CloseIdleConnections()
-	aliasRequest, _ := http.NewRequest(http.MethodGet, "https://"+names.addresses[443]+"/", nil)
-	aliasRequest.Host = aliasHost
-	aliasResponse, aliasErr := (&http.Client{Transport: aliasTransport}).Do(aliasRequest)
-	if aliasErr != nil {
-		t.Fatal(aliasErr)
-	}
-	aliasBody, _ := io.ReadAll(aliasResponse.Body)
-	aliasResponse.Body.Close()
-	if aliasResponse.StatusCode != 200 || string(aliasBody) != "first" {
-		t.Fatalf("alias forwarded wrong resource: %s", aliasBody)
-	}
-	webBefore := c.webRoutes[splitdns.BrowserGatewayHostname]
-	if _, err := webBefore.proxy.GetCertificate(&tls.ClientHelloInfo{ServerName: "ungranted.hp." + domain}); err == nil {
-		t.Fatal("alias granted access to unexported port")
-	}
-	if !strings.Contains(string(indexBody), "https://"+aliasHost+"/") {
-		t.Fatal("index omitted alias")
-	}
 	if c.BrowserURLs()["first"][6767] != "https://6767.hp."+domain {
-		t.Fatal("alias replaced numeric URL")
+		t.Fatal("numeric URL changed")
 	}
 	if err := c.replaceGuardedRoutes(t.Context(), peers[1:]); err != nil {
 		t.Fatal(err)
@@ -171,7 +149,7 @@ func testCoordinatorSharedBrowserGateway(t *testing.T, nativeConflict bool, doma
 		t.Fatal("withdrawn machine remains published")
 	}
 	web := c.webRoutes[splitdns.BrowserGatewayHostname]
-	if _, err := web.proxy.GetCertificate(&tls.ClientHelloInfo{ServerName: aliasHost}); err == nil {
+	if _, err := web.proxy.GetCertificate(&tls.ClientHelloInfo{ServerName: "6767.hp." + domain}); err == nil {
 		t.Fatal("withdrawn TLS route remains admitted")
 	}
 	if err := c.replaceGuardedRoutes(t.Context(), nil); err != nil {

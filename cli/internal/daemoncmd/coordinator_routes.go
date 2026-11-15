@@ -108,6 +108,7 @@ func (c *Coordinator) replaceGuardedRoutes(ctx context.Context, peers []*daemonr
 	aliases := make(map[string]string)
 	browserRoutes := make(map[string]splitdns.BrowserRoute)
 	conflictedPorts, firstConflictedPort := 0, 0
+	var topLevel [][2]string // top-level name, numeric hostname of its port
 	for _, peer := range peers {
 		if peer == nil || !peer.GetApproved() || !peer.GetOnline() || peer.GetAlias() == "" {
 			continue
@@ -131,13 +132,13 @@ func (c *Coordinator) replaceGuardedRoutes(ctx context.Context, peers []*daemonr
 		})
 		browserReady := c.cfg.IssueCertificate != nil || localCertificates
 		if browserReady {
-			proxyPort := 80
-			for _, machineProxy := range c.cfg.LocalAccess.MachineProxies {
-				if machineProxy.MachineAlias == strings.ToLower(alias) {
-					proxyPort = int(machineProxy.Port)
-					break
-				}
+			// Names come from the server's service list, for listed ports only: a name grants no access.
+			listed := c.portNames[peer.GetPeerId()]
+			frontDesk := listed.FrontDesk.Port
+			if frontDesk == 0 {
+				frontDesk = 80
 			}
+			lower := strings.ToLower(alias)
 			for _, raw := range ports {
 				port := int(raw)
 				name, err := splitdns.BrowserHostname(alias, port, c.localDomain())
@@ -151,61 +152,39 @@ func (c *Coordinator) replaceGuardedRoutes(ctx context.Context, peers []*daemonr
 				}
 				browserRoutes[name] = splitdns.BrowserRoute{Address: ip, Port: port, MachineID: peer.GetPeerId(), HTTPS: port == 443}
 				aliases[name] = splitdns.BrowserGatewayHostname
-				if len(aliases) > machineguard.MaxBrowserAliases {
-					c.resetNameGenerationLocked(ctx)
-					return fmt.Errorf("local browser routes exceed the limit of %d; remove service aliases or exported ports", machineguard.MaxBrowserAliases)
-				}
-				if port == proxyPort {
-					pattern, err := splitdns.BrowserWildcardPattern(strings.ToLower(alias), c.localDomain())
+				if port == frontDesk {
+					pattern, err := splitdns.BrowserWildcardPattern(lower, c.localDomain())
 					if err != nil {
 						c.resetNameGenerationLocked(ctx)
 						return err
 					}
-					browserRoutes[pattern] = browserRoutes[name]
+					desk := browserRoutes[name]
+					desk.HTTPS = listed.FrontDesk.Scheme == "https" || listed.FrontDesk.Scheme == "" && port == 443
+					browserRoutes[pattern] = desk
 					aliases[pattern] = name
-					if len(aliases) > machineguard.MaxBrowserAliases {
-						c.resetNameGenerationLocked(ctx)
-						return errors.New("local browser routes exceed the alias limit")
-					}
 				}
-				for _, serviceAlias := range c.cfg.LocalAccess.ServiceAliases {
-					if serviceAlias.MachineAlias != strings.ToLower(alias) || int(serviceAlias.Port) != port {
+				for _, named := range listed.PortNames {
+					if named.Port != port {
 						continue
 					}
-					aliasName := serviceAlias.Name + "." + strings.ToLower(alias) + "." + c.localDomain()
-					_, label, err := splitdns.ParseBrowserHostname(aliasName, c.localDomain())
-					if err != nil || label == "" {
-						c.resetNameGenerationLocked(ctx)
-						return errors.New("invalid configured browser alias")
+					namedHost := named.Name + "." + lower + "." + c.localDomain()
+					if _, label, err := splitdns.ParseBrowserHostname(namedHost, c.localDomain()); err != nil || label == "" || splitdns.NumericBrowserLabel(label) {
+						continue // the server validates names; a name this computer cannot use is left out alone
 					}
-					if _, exists := browserRoutes[aliasName]; exists {
-						c.resetNameGenerationLocked(ctx)
-						return errors.New("ambiguous browser service alias")
+					if _, exists := browserRoutes[namedHost]; !exists {
+						browserRoutes[namedHost] = browserRoutes[name]
+						aliases[namedHost] = name
 					}
-					browserRoutes[aliasName] = browserRoutes[name]
-					aliases[aliasName] = name
-					if len(aliases) > machineguard.MaxBrowserAliases {
-						c.resetNameGenerationLocked(ctx)
-						return fmt.Errorf("local browser routes exceed the limit of %d; remove service aliases or exported ports", machineguard.MaxBrowserAliases)
+				}
+				for _, named := range listed.TopLevelNames {
+					if named.Port == port {
+						topLevel = append(topLevel, [2]string{named.Name, name})
 					}
 				}
 			}
-
-			for _, serviceAlias := range c.cfg.LocalAccess.ServiceAliases {
-				if serviceAlias.MachineAlias != strings.ToLower(alias) {
-					continue
-				}
-				aliasName := serviceAlias.Name + "." + strings.ToLower(alias) + "." + c.localDomain()
-				if _, active := browserRoutes[aliasName]; active {
-					continue
-				}
-				if _, proxy := aliases["*."+strings.ToLower(alias)+"."+c.localDomain()]; proxy {
-					aliases[aliasName] = ""
-					if len(aliases) > machineguard.MaxBrowserAliases {
-						c.resetNameGenerationLocked(ctx)
-						return errors.New("local browser routes exceed the alias limit")
-					}
-				}
+			if len(aliases) > machineguard.MaxBrowserAliases {
+				c.resetNameGenerationLocked(ctx)
+				return fmt.Errorf("local browser routes exceed the limit of %d; remove port names or exported ports", machineguard.MaxBrowserAliases)
 			}
 		}
 		for _, raw := range ports {
@@ -239,6 +218,19 @@ func (c *Coordinator) replaceGuardedRoutes(ctx context.Context, peers []*daemonr
 			c.routes[key] = route
 			c.wg.Add(1)
 			go c.serveRoute(route)
+		}
+	}
+	// <name>.<domain> opens the named port unless a machine has that name: the machine wins.
+	for _, named := range topLevel {
+		host := named[0] + "." + c.localDomain()
+		if _, exists := browserRoutes[host]; exists || c.machineAliases[named[0]] || named[0] == "gateway" {
+			continue
+		}
+		browserRoutes[host] = browserRoutes[named[1]]
+		aliases[host] = named[1]
+		if len(aliases) > machineguard.MaxBrowserAliases {
+			c.resetNameGenerationLocked(ctx)
+			return fmt.Errorf("local browser routes exceed the limit of %d; remove port names or exported ports", machineguard.MaxBrowserAliases)
 		}
 	}
 	if conflictedPorts > 0 {

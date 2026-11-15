@@ -1,0 +1,55 @@
+.nh
+.TH "PB-PORT-FRONT-DESK" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-port-front-desk - Show or set where unnamed addresses of a machine go
+
+
+.SH SYNOPSIS
+\fBpb port front-desk <machine> [<port> [http|https]] [flags]\fP
+
+
+.SH DESCRIPTION
+A machine's front desk is the port where <name>\&.<machine>\&.<domain> goes when no
+port has that name: a reverse proxy such as Coolify, Traefik or Caddy. The default is
+port 80 over http. Machine managers set it; the scheme defaults to https for port 443.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for front-desk
+
+.PP
+\fB--json\fP[=false]
+	print JSON
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH EXAMPLE
+.EX
+  pb port front-desk homelab
+  pb port front-desk homelab 443 https
+.EE
+
+
+.SH SEE ALSO
+\fBpb-port(1)\fP

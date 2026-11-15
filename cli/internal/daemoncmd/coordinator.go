@@ -9,6 +9,7 @@ import (
 	"os"
 	"reflect"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -48,7 +49,11 @@ type Coordinator struct {
 	inventoryMachines []api.UserMachine
 	// claimMachines is every machine of the last complete inventory read, online or not (guarded by mu);
 	// the guard releases claims only against it. Nil until the first complete read.
-	claimMachines   []string
+	claimMachines []string
+	// portNames is each listed machine's server port names and front desk, and machineAliases the name of every
+	// inventory machine, from the last ApplyMachines (guarded by mu): browser routes read both.
+	portNames       map[string]api.MachineServicesMachine
+	machineAliases  map[string]bool
 	cleanups        []*generationCleanup
 	reportMu        sync.Mutex
 	reconcileFailed bool
@@ -225,9 +230,6 @@ func (c *Coordinator) ApplyMachines(ctx context.Context, machines []api.UserMach
 			claimMachines = append(claimMachines, m.ID)
 		}
 	}
-	c.mu.Lock()
-	c.claimMachines = claimMachines
-	c.mu.Unlock()
 	byID := make(map[string]api.MachineServicesMachine, len(services))
 	// A listed service stays forwarded until the next list (topic, nudge or idle refresh) or until
 	// its machine leaves the inventory; the server's short lease is the host's to renew.
@@ -236,6 +238,14 @@ func (c *Coordinator) ApplyMachines(ctx context.Context, machines []api.UserMach
 			byID[service.MachineID] = service
 		}
 	}
+	machineAliases := make(map[string]bool, len(machines))
+	for _, m := range machines {
+		machineAliases[strings.ToLower(m.Alias)] = true
+	}
+	c.mu.Lock()
+	c.claimMachines = claimMachines
+	c.portNames, c.machineAliases = byID, machineAliases
+	c.mu.Unlock()
 	peers := make([]*daemonrpc.PeerUpdate, 0, len(machines))
 	for _, m := range machines {
 		if m.AssignedIP == "" || !m.NetworkApproved || !m.Online || m.State != "online" {

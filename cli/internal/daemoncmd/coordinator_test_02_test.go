@@ -7,7 +7,6 @@ import (
 	"crypto/x509"
 	"errors"
 	"github.com/pinksaucepasta/paperboat/internal/api"
-	"github.com/pinksaucepasta/paperboat/internal/config"
 	"github.com/pinksaucepasta/paperboat/internal/daemonrpc"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	previewruntime "github.com/pinksaucepasta/paperboat/internal/hostruntime/preview"
@@ -19,7 +18,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"net/http/httptest"
 	"net/netip"
 	"os"
 	"slices"
@@ -678,111 +676,6 @@ func TestCoordinatorStreamingReadinessReportsFailedAndRecoveredReconciliation(t 
 	}
 	if len(faults) != 1 {
 		t.Fatal("healthy recovery emitted duplicate failure")
-	}
-}
-
-func TestCoordinatorMachineProxyFollowsAuthorizedExportAndRevocation(t *testing.T) {
-	ca, err := testcert.New()
-	if err != nil {
-		t.Fatal(err)
-	}
-	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, r.Host) }))
-	defer origin.Close()
-	names := &coordinatorNameClient{}
-	c, err := NewCoordinator(CoordinatorConfig{LocalAccess: config.LocalAccessConfig{ServiceAliases: []config.LocalServiceAlias{{MachineAlias: "homelab", Name: "bob", Port: 8080}, {MachineAlias: "homelab", Name: "jellyfin", Port: 80}}}, NameClient: names, DialMachine: func(ctx context.Context, id string, port int) (net.Conn, error) {
-		if id != "home" || port != 80 {
-			return nil, errors.New("wrong authorized destination")
-		}
-		return (&net.Dialer{}).DialContext(ctx, "tcp", origin.Listener.Addr().String())
-	}, IssueCertificate: func(_ context.Context, name, _ string, _ int) (tls.Certificate, error) { return ca.TLS(name) }})
-	if err != nil {
-		t.Fatal(err)
-	}
-	c.ctx = t.Context()
-	defer c.Stop()
-	peer := &daemonrpc.PeerUpdate{PeerId: "home", Alias: "homelab", AssignedIp: "127.100.0.4", Approved: true, Online: true, ExportedPorts: []int32{80}}
-	if err := c.replaceGuardedRoutes(t.Context(), []*daemonrpc.PeerUpdate{peer}); err != nil {
-		t.Fatal(err)
-	}
-	web := c.webRoutes[splitdns.BrowserGatewayHostname]
-
-	blocked := "bob.homelab." + testBrowserDomain
-	if _, err := web.proxy.GetCertificate(&tls.ClientHelloInfo{ServerName: blocked}); err == nil {
-		t.Fatal("unavailable explicit alias certified via fallback")
-	}
-	denied := httptest.NewRecorder()
-	web.proxy.ServeHTTP(denied, httptest.NewRequest("GET", "http://"+blocked+"/", nil))
-	if denied.Code != 421 {
-		t.Fatal("unavailable explicit alias forwarded via fallback")
-	}
-	count := len(web.browserRoutes)
-	roots := x509.NewCertPool()
-	roots.AppendCertsFromPEM(ca.CertPEM())
-	for _, app := range []string{"first", "second", "third", "jellyfin"} {
-		host := app + ".homelab." + testBrowserDomain
-		tr := &http.Transport{TLSClientConfig: &tls.Config{RootCAs: roots, ServerName: host}}
-		req, _ := http.NewRequest("GET", "https://"+names.addresses[443]+"/", nil)
-		req.Host = host
-		res, err := (&http.Client{Transport: tr}).Do(req)
-		if err != nil {
-			tr.CloseIdleConnections()
-			t.Fatal(err)
-		}
-		body, _ := io.ReadAll(res.Body)
-		res.Body.Close()
-		tr.CloseIdleConnections()
-		if res.StatusCode != 200 || string(body) != host {
-			t.Fatalf("app forwarding: %d %s", res.StatusCode, body)
-		}
-	}
-	if len(web.browserRoutes) != count {
-		t.Fatal("application added route state")
-	}
-
-	// An explicit override selects only that port. Removing it restores port 80.
-	c.cfg.LocalAccess.MachineProxies = []config.LocalMachineProxy{{MachineAlias: "homelab", Port: 8080}}
-	if err := c.replaceGuardedRoutes(t.Context(), []*daemonrpc.PeerUpdate{peer}); err != nil {
-		t.Fatal(err)
-	}
-	web = c.webRoutes[splitdns.BrowserGatewayHostname]
-	if _, err := web.proxy.GetCertificate(&tls.ClientHelloInfo{ServerName: "third.homelab." + testBrowserDomain}); err == nil {
-		t.Fatal("unexported override fell back to default80")
-	}
-	peer.ExportedPorts = []int32{80, 8080}
-	if err := c.replaceGuardedRoutes(t.Context(), []*daemonrpc.PeerUpdate{peer}); err != nil {
-		t.Fatal(err)
-	}
-	web = c.webRoutes[splitdns.BrowserGatewayHostname]
-	if route, ok := browserRouteForHostDomain(web.browserRoutes, "third.homelab."+testBrowserDomain, testBrowserDomain); !ok || route.Port != 8080 {
-		t.Fatal("override failed to select authorized8080")
-	}
-	c.cfg.LocalAccess.MachineProxies = nil
-	if err := c.replaceGuardedRoutes(t.Context(), []*daemonrpc.PeerUpdate{peer}); err != nil {
-		t.Fatal(err)
-	}
-	web = c.webRoutes[splitdns.BrowserGatewayHostname]
-	if route, ok := browserRouteForHostDomain(web.browserRoutes, "third.homelab."+testBrowserDomain, testBrowserDomain); !ok || route.Port != 80 {
-		t.Fatal("unset override did not restore default80")
-	}
-	peer.ExportedPorts = []int32{8080}
-	if err := c.replaceGuardedRoutes(t.Context(), []*daemonrpc.PeerUpdate{peer}); err != nil {
-		t.Fatal(err)
-	}
-	web = c.webRoutes[splitdns.BrowserGatewayHostname]
-	if _, err := web.proxy.GetCertificate(&tls.ClientHelloInfo{ServerName: "third.homelab." + testBrowserDomain}); err == nil {
-		t.Fatal("unauthorized proxy port certified")
-	}
-	w := httptest.NewRecorder()
-	web.proxy.ServeHTTP(w, httptest.NewRequest("GET", "http://third.homelab."+testBrowserDomain+"/", nil))
-	if w.Code != 421 {
-		t.Fatal("unauthorized proxy forwarded")
-	}
-	peer.Approved = false
-	if err := c.replaceGuardedRoutes(t.Context(), []*daemonrpc.PeerUpdate{peer}); err != nil {
-		t.Fatal(err)
-	}
-	if len(c.webRoutes) != 0 {
-		t.Fatal("revocation retained gateway")
 	}
 }
 

@@ -1,10 +1,10 @@
 ## pb config local-access show
 
-Show local browser domains and aliases
+Show the local browser domain
 
 ### Synopsis
 
-Show the effective browser domain and named service mappings stored in the local configuration. This is a read-only view and does not change trust, machine permissions, active routes, or running services.
+Show the browser domain this computer uses for private browser addresses. This is a read-only view: it does not change trust, machine permissions, active routes, port names or running services.
 
 JSON output is supported with --json.
 
@@ -30,5 +30,5 @@ pb config local-access show [flags]
 
 ### SEE ALSO
 
-* [pb config local-access](pb_config_local-access.md)	 - Configure local browser domains, aliases and reverse proxies
+* [pb config local-access](pb_config_local-access.md)	 - Configure the local browser domain
 

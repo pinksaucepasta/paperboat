@@ -9,7 +9,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/config"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/machineguard"
 	"github.com/pinksaucepasta/paperboat/internal/splitdns"
@@ -87,7 +86,6 @@ type guardedNameClient interface {
 }
 
 type CoordinatorConfig struct {
-	LocalAccess          config.LocalAccessConfig
 	SocketAddress        string
 	NameClient           guardedNameClient
 	AccountID            string // the signed-in account this daemon serves; CLI requests must carry it

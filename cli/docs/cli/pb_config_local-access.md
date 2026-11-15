@@ -1,10 +1,10 @@
 ## pb config local-access
 
-Configure local browser domains, aliases and reverse proxies
+Configure the local browser domain
 
 ### Synopsis
 
-Configure the browser domain and named service URLs used by this local Paperboat client. These settings only select names for machine ports already authorized elsewhere; they do not grant access or publish additional ports.
+Configure the DNS domain this computer uses for private browser addresses such as https://3000.homelab.<domain>. Port names and a machine's front desk are stored on the server and set with `pb port name set` and `pb port front-desk`.
 
 With --json, this command group lists its available commands.
 
@@ -31,9 +31,6 @@ pb config local-access [flags]
 ### SEE ALSO
 
 * [pb config](pb_config.md)	 - Inspect the local CLI config
-* [pb config local-access alias](pb_config_local-access_alias.md)	 - Manage named browser aliases for authorized machine ports
-* [pb config local-access apply](pb_config_local-access_apply.md)	 - Apply local browser settings from the config file
 * [pb config local-access domain](pb_config_local-access_domain.md)	 - Set the local browser domain
-* [pb config local-access proxy](pb_config_local-access_proxy.md)	 - Route machine app names through Coolify or another reverse proxy
-* [pb config local-access show](pb_config_local-access_show.md)	 - Show local browser domains and aliases
+* [pb config local-access show](pb_config_local-access_show.md)	 - Show the local browser domain
 

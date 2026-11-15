@@ -113,73 +113,6 @@ func TestRemovedNetworkOverridesAreNotLoadedOrSaved(t *testing.T) {
 	}
 }
 
-func TestLocalAccessCanonicalizesAliases(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "config.json")
-	if err := os.WriteFile(path, []byte(`{"local_access":{"service_aliases":[{"machine_alias":" HP ","name":"JellyFin","port":8989}]}}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	cfg, err := Load(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(cfg.LocalAccess.ServiceAliases) != 1 {
-		t.Fatalf("local access = %+v", cfg.LocalAccess)
-	}
-	want := LocalServiceAlias{MachineAlias: "hp", Name: "jellyfin", Port: 8989}
-	if got := cfg.LocalAccess.ServiceAliases[0]; got != want {
-		t.Fatalf("service alias = %+v, want %+v", got, want)
-	}
-	if err := cfg.Save(); err != nil {
-		t.Fatal(err)
-	}
-	reloaded, err := Load(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := reloaded.LocalAccess.ServiceAliases; len(got) != 1 || got[0] != want {
-		t.Fatalf("reloaded aliases = %+v, want %+v", got, want)
-	}
-}
-
-func TestLocalAccessValidationRejectsUnsafeOrAmbiguousSettings(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		cfg  LocalAccessConfig
-	}{
-		{name: "numeric service label", cfg: LocalAccessConfig{ServiceAliases: []LocalServiceAlias{{MachineAlias: "hp", Name: "8989", Port: 8989}}}},
-		{name: "invalid service label", cfg: LocalAccessConfig{ServiceAliases: []LocalServiceAlias{{MachineAlias: "hp", Name: "jellyfin.web", Port: 8989}}}},
-		{name: "invalid machine label", cfg: LocalAccessConfig{ServiceAliases: []LocalServiceAlias{{MachineAlias: "hp.other", Name: "jellyfin", Port: 8989}}}},
-		{name: "zero port", cfg: LocalAccessConfig{ServiceAliases: []LocalServiceAlias{{MachineAlias: "hp", Name: "jellyfin", Port: 0}}}},
-		{name: "duplicate after canonicalization", cfg: LocalAccessConfig{ServiceAliases: []LocalServiceAlias{{MachineAlias: "HP", Name: "Jellyfin", Port: 8989}, {MachineAlias: "hp", Name: "jellyfin", Port: 3000}}}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			cfg := &Config{LocalAccess: tc.cfg}
-			cfg.applyDefaults()
-			if err := cfg.Validate(); err == nil {
-				t.Fatal("invalid local access configuration was accepted")
-			}
-		})
-	}
-}
-
-func TestLocalAccessAllows128AliasesAndRejects129(t *testing.T) {
-	makeConfig := func(count int) *Config {
-		aliases := make([]LocalServiceAlias, count)
-		for index := range aliases {
-			aliases[index] = LocalServiceAlias{MachineAlias: "hp", Name: fmt.Sprintf("service-%d", index), Port: 8989}
-		}
-		cfg := &Config{LocalAccess: LocalAccessConfig{ServiceAliases: aliases}}
-		cfg.applyDefaults()
-		return cfg
-	}
-	if err := makeConfig(MaxLocalServiceAliases).Validate(); err != nil {
-		t.Fatalf("maximum alias count rejected: %v", err)
-	}
-	if err := makeConfig(MaxLocalServiceAliases + 1).Validate(); err == nil {
-		t.Fatal("alias count above guard limit was accepted")
-	}
-}
-
 func TestLoadPreservesExplicitZeroDialRetries(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
 	if err := os.WriteFile(path, []byte(`{"connect":{"dial_retries":0},"server_url":"https://api.example"}`), 0o600); err != nil {
@@ -344,29 +277,5 @@ func TestTelemetryPathDefaultsBesideConfigAndCanBeDisabled(t *testing.T) {
 	cfg.Diagnostics.EventLogPath = "events/custom.jsonl"
 	if got, want := cfg.TelemetryPath(), filepath.Join(filepath.Dir(path), "events", "custom.jsonl"); got != want {
 		t.Fatalf("relative TelemetryPath() = %q, want %q", got, want)
-	}
-}
-
-func TestLocalMachineProxyValidationAndBounds(t *testing.T) {
-	c, err := Load(filepath.Join(t.TempDir(), "config.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	c.LocalAccess.MachineProxies = []LocalMachineProxy{{MachineAlias: " HOMELAB ", Port: 80}}
-	if err := c.Validate(); err != nil {
-		t.Fatal(err)
-	}
-	if c.LocalAccess.MachineProxies[0].MachineAlias != "homelab" {
-		t.Fatal("machine alias not normalized")
-	}
-	for _, proxies := range [][]LocalMachineProxy{{{MachineAlias: "bad.machine", Port: 80}}, {{MachineAlias: "hp", Port: 0}}, {{MachineAlias: "HP", Port: 80}, {MachineAlias: "hp", Port: 81}}} {
-		c.LocalAccess.MachineProxies = proxies
-		if err := c.Validate(); err == nil {
-			t.Fatalf("invalid proxy accepted: %+v", proxies)
-		}
-	}
-	c.LocalAccess.MachineProxies = make([]LocalMachineProxy, MaxLocalMachineProxies+1)
-	if err := c.Validate(); err == nil {
-		t.Fatal("proxy bound not enforced")
 	}
 }

@@ -40,4 +40,8 @@ type MachineServicesMachine struct {
 	Alias                  string               `json:"alias"`
 	Services               []MachineServicePort `json:"services"`
 	ExpiresAt              time.Time            `json:"expires_at"`
+	// PortNames name listed ports as <name>.<alias>.<domain>; TopLevelNames as <name>.<domain>.
+	PortNames     []PortName `json:"port_names"`
+	TopLevelNames []PortName `json:"top_level_names"`
+	FrontDesk     FrontDesk  `json:"front_desk"`
 }

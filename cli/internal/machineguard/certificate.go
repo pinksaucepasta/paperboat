@@ -149,7 +149,7 @@ func (g *guardServer) certificateAuthorizedDomain(conn controlConn, owner, alias
 	}
 	for name, base := range g.aliases[conn] {
 		machine, label, e := splitdns.ParseBrowserHostname(name, domain)
-		if e == nil && machine == alias && numericBrowserLabel(label) && base == splitdns.BrowserGatewayHostname {
+		if e == nil && machine == alias && (numericBrowserLabel(label) && base == splitdns.BrowserGatewayHostname || label == "" && browserAliasTarget(g.aliases[conn], name, domain) != "") {
 			return true
 		}
 	}

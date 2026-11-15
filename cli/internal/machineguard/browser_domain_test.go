@@ -55,3 +55,25 @@ func TestNamedBrowserAliasesRequireExactNumericTarget(t *testing.T) {
 		t.Fatal("named route survived numeric withdrawal")
 	}
 }
+
+// A top-level name (<name>.<domain>) targets one exact numeric registration of any machine, never a chain.
+func TestTopLevelBrowserNameRequiresExactNumericTarget(t *testing.T) {
+	domain := "mynet.xyz"
+	numeric := "8096.media." + domain
+	top := "jellyfin." + domain
+	aliases := map[string]string{numeric: splitdns.BrowserGatewayHostname, top: numeric}
+	if got := browserAliasTarget(aliases, top, domain); got != numeric {
+		t.Fatalf("top-level name resolved to %q", got)
+	}
+	for _, target := range []string{splitdns.BrowserGatewayHostname, "app.media." + domain, "3000.media." + domain, "gateway." + domain, ""} {
+		aliases[top] = target
+		aliases["app.media."+domain] = numeric
+		if browserAliasTarget(aliases, top, domain) != "" {
+			t.Fatalf("accepted invalid top-level target %q", target)
+		}
+	}
+	aliases = map[string]string{numeric: splitdns.BrowserGatewayHostname, "gateway." + domain: numeric}
+	if browserAliasTarget(aliases, "gateway."+domain, domain) != "" {
+		t.Fatal("accepted the reserved gateway label as a top-level name")
+	}
+}

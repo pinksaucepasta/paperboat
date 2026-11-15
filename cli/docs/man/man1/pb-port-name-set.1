@@ -1,0 +1,68 @@
+.nh
+.TH "PB-PORT-NAME-SET" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-port-name-set - Name a machine port
+
+
+.SH SYNOPSIS
+\fBpb port name set <name> <port> [flags]\fP
+
+
+.SH DESCRIPTION
+Give a port a name, or move an existing name to another port. With --machine the
+address is <name>\&.<machine>\&.<domain>; with --all-machines the name works on every machine
+of the active workspace; with --top-level --machine the address is <name>\&.<domain>\&.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB--all-machines\fP[=false]
+	name this port on every machine of the workspace
+
+.PP
+\fB-h\fP, \fB--help\fP[=false]
+	help for set
+
+.PP
+\fB--json\fP[=false]
+	print JSON
+
+.PP
+\fB--machine\fP=""
+	the machine whose port is named
+
+.PP
+\fB--top-level\fP[=false]
+	make <name>\&.<domain> open the port of --machine
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH EXAMPLE
+.EX
+  pb port name set app 3000 --machine homelab
+  pb port name set grafana 3000 --all-machines
+  pb port name set jellyfin 8096 --top-level --machine media
+.EE
+
+
+.SH SEE ALSO
+\fBpb-port-name(1)\fP

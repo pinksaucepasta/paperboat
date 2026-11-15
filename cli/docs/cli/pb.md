@@ -88,6 +88,7 @@ pb [environment] [new] [flags]
 * [pb pair](pb_pair.md)	 - Enroll this machine with a one-shot token
 * [pb ping](pb_ping.md)	 - Measure authenticated connectivity to a machine
 * [pb policy](pb_policy.md)	 - Read, test and change the workspace access policy
+* [pb port](pb_port.md)	 - Name machine ports and set a machine's front desk
 * [pb preview](pb_preview.md)	 - Expose a local target through a temporary preview
 * [pb recordings](pb_recordings.md)	 - List and replay team terminal recordings
 * [pb relay](pb_relay.md)	 - Inspect hosted and self-hosted relays

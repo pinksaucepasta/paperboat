@@ -1,0 +1,48 @@
+.nh
+.TH "PB-PORT" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-port - Name machine ports and set a machine's front desk
+
+
+.SH SYNOPSIS
+\fBpb port [flags]\fP
+
+
+.SH DESCRIPTION
+Name machine ports for private browser addresses and choose where unnamed addresses of a
+machine go. Names live on the server and work on every computer of everyone allowed
+the port; they never grant access to a port.
+
+.PP
+With --json, this command group lists its available commands.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for port
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--json\fP[=false]
+	print machine-readable JSON
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb(1)\fP, \fBpb-port-front-desk(1)\fP, \fBpb-port-name(1)\fP

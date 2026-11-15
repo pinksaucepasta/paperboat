@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -17,66 +16,29 @@ import (
 	"github.com/pinksaucepasta/paperboat/shared/supportref"
 )
 
-func TestLocalAccessCommandsApplyAndPersistDomainAndAliases(t *testing.T) {
+func TestLocalAccessDomainSetNormalizesAndApplies(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
 	oldApply := applyLocalAccessSettings
-	var applied []config.LocalAccessConfig
 	var appliedDomains []string
-	applyLocalAccessSettings = func(_ context.Context, cfg *config.Config, next config.LocalAccessConfig, domain string) error {
-		applied = append(applied, cloneLocalAccess(next))
+	applyLocalAccessSettings = func(_ context.Context, _ *config.Config, domain string) error {
 		appliedDomains = append(appliedDomains, domain)
-		cfg.LocalAccess = cloneLocalAccess(next)
-		return cfg.Save()
+		return nil
 	}
 	t.Cleanup(func() { applyLocalAccessSettings = oldApply })
 
-	for _, args := range [][]string{
-		{"config", "local-access", "domain", "set", "DEV.Example.COM"},
-		{"config", "local-access", "alias", "set", "HP", "Jellyfin", "8989"},
-		{"config", "local-access", "alias", "set", "hp", "jellyfin", "8096"},
-	} {
-		var stdout, stderr bytes.Buffer
-		root := newRootCommand()
-		root.SetOut(&stdout)
-		root.SetErr(&stderr)
-		root.SetArgs(append([]string{"--config", path}, args...))
-		if err := root.ExecuteContext(context.Background()); err != nil {
-			t.Fatalf("execute %v: %v; stderr=%q", args, err, stderr.String())
-		}
-		if strings.TrimSpace(stdout.String()) == "" {
-			t.Fatalf("execute %v reported success without output", args)
-		}
-	}
-	if len(applied) != 3 {
-		t.Fatalf("apply calls = %d, want 3", len(applied))
-	}
-	if got := appliedDomains[0]; got != "dev.example.com" {
-		t.Fatalf("applied domain = %q", got)
-	}
-	if appliedDomains[1] != "" || appliedDomains[2] != "" {
-		t.Fatalf("an alias change tried to change the domain: %q", appliedDomains)
-	}
-	if got := applied[2].ServiceAliases; len(got) != 1 || got[0] != (config.LocalServiceAlias{MachineAlias: "hp", Name: "jellyfin", Port: 8096}) {
-		t.Fatalf("replacement alias = %+v", got)
-	}
-
-	var stdout bytes.Buffer
+	var stdout, stderr bytes.Buffer
 	root := newRootCommand()
 	root.SetOut(&stdout)
-	root.SetErr(&bytes.Buffer{})
-	root.SetArgs([]string{"--config", path, "config", "local-access", "alias", "unset", "hp", "jellyfin"})
+	root.SetErr(&stderr)
+	root.SetArgs([]string{"--config", path, "config", "local-access", "domain", "set", "DEV.Example.COM"})
 	if err := root.ExecuteContext(context.Background()); err != nil {
-		t.Fatal(err)
+		t.Fatalf("execute: %v; stderr=%q", err, stderr.String())
 	}
-	cfg, err := config.Load(path)
-	if err != nil {
-		t.Fatal(err)
+	if strings.TrimSpace(stdout.String()) == "" {
+		t.Fatal("domain set reported success without output")
 	}
-	if len(cfg.LocalAccess.ServiceAliases) != 0 {
-		t.Fatalf("persisted local access = %+v", cfg.LocalAccess)
-	}
-	if len(applied) != 4 || len(applied[3].ServiceAliases) != 0 {
-		t.Fatalf("unset was not applied: %+v", applied)
+	if len(appliedDomains) != 1 || appliedDomains[0] != "dev.example.com" {
+		t.Fatalf("applied domains = %q", appliedDomains)
 	}
 }
 
@@ -92,7 +54,7 @@ func TestLocalAccessApplyFailureDoesNotClaimSuccessOrChangeConfig(t *testing.T) 
 
 	oldApply := applyLocalAccessSettings
 	applyErr := errors.New("PRIVATE_TRUST_PROVISIONING_FAILURE")
-	applyLocalAccessSettings = func(context.Context, *config.Config, config.LocalAccessConfig, string) error { return applyErr }
+	applyLocalAccessSettings = func(context.Context, *config.Config, string) error { return applyErr }
 	t.Cleanup(func() { applyLocalAccessSettings = oldApply })
 
 	var stdout, stderr bytes.Buffer
@@ -126,7 +88,7 @@ func TestLocalAccessReportedFailureRetainsMixedCausesWithoutPrivateText(t *testi
 	primary := errors.New("PRIVATE_LOCAL_ACCESS_PAYLOAD")
 	causes := errors.Join(primary, &os.PathError{Op: "open", Path: secretPath, Err: syscall.EIO})
 	priorApply := applyLocalAccessSettings
-	applyLocalAccessSettings = func(context.Context, *config.Config, config.LocalAccessConfig, string) error { return causes }
+	applyLocalAccessSettings = func(context.Context, *config.Config, string) error { return causes }
 	t.Cleanup(func() { applyLocalAccessSettings = priorApply })
 
 	reference := "support_01234567-89ab-4def-8123-456789abcdef"
@@ -172,10 +134,7 @@ func TestLocalAccessConfirmationWriteFailureKeepsAppliedStateAndCause(t *testing
 		t.Fatal(err)
 	}
 	priorApply := applyLocalAccessSettings
-	applyLocalAccessSettings = func(_ context.Context, cfg *config.Config, next config.LocalAccessConfig, _ string) error {
-		cfg.LocalAccess = cloneLocalAccess(next)
-		return cfg.Save()
-	}
+	applyLocalAccessSettings = func(context.Context, *config.Config, string) error { return nil }
 	t.Cleanup(func() { applyLocalAccessSettings = priorApply })
 
 	secretPath := filepath.Join(t.TempDir(), "PRIVATE_LOCAL_ACCESS_OUTPUT_PATH")
@@ -215,43 +174,26 @@ func useGuardStatus(t *testing.T, status machineguard.RuntimeStatus, err error) 
 	t.Cleanup(func() { localAccessGuardStatus = prior })
 }
 
-func TestLocalAccessResetAndApplyUseTheGuardsDomain(t *testing.T) {
+func TestLocalAccessResetUsesTheGuardsDomain(t *testing.T) {
 	useGuardStatus(t, machineguard.RuntimeStatus{BrowserDomain: "custom.example.test", DefaultBrowserDomain: "reset.example.test"}, nil)
 	path := filepath.Join(t.TempDir(), "config.json")
-	cfg, err := config.Load(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	cfg.LocalAccess = config.LocalAccessConfig{ServiceAliases: []config.LocalServiceAlias{{MachineAlias: "hp", Name: "jellyfin", Port: 8989}}}
-	if err := cfg.Save(); err != nil {
-		t.Fatal(err)
-	}
-
 	oldApply := applyLocalAccessSettings
-	var applied []config.LocalAccessConfig
 	var appliedDomains []string
-	applyLocalAccessSettings = func(_ context.Context, cfg *config.Config, next config.LocalAccessConfig, domain string) error {
-		applied = append(applied, cloneLocalAccess(next))
+	applyLocalAccessSettings = func(_ context.Context, _ *config.Config, domain string) error {
 		appliedDomains = append(appliedDomains, domain)
-		cfg.LocalAccess = cloneLocalAccess(next)
-		return cfg.Save()
+		return nil
 	}
 	t.Cleanup(func() { applyLocalAccessSettings = oldApply })
 
-	for _, args := range [][]string{{"config", "local-access", "domain", "reset"}, {"config", "local-access", "apply"}} {
-		root := newRootCommand()
-		root.SetOut(&bytes.Buffer{})
-		root.SetErr(&bytes.Buffer{})
-		root.SetArgs(append([]string{"--config", path}, args...))
-		if err := root.ExecuteContext(context.Background()); err != nil {
-			t.Fatalf("execute %v: %v", args, err)
-		}
+	root := newRootCommand()
+	root.SetOut(&bytes.Buffer{})
+	root.SetErr(&bytes.Buffer{})
+	root.SetArgs([]string{"--config", path, "config", "local-access", "domain", "reset"})
+	if err := root.ExecuteContext(context.Background()); err != nil {
+		t.Fatal(err)
 	}
-	if len(applied) != 2 || appliedDomains[0] != "reset.example.test" || appliedDomains[1] != "" {
-		t.Fatalf("applied domains = %q (reset must restore the guard's recorded server domain; apply must not change it)", appliedDomains)
-	}
-	if got := applied[0].ServiceAliases; len(got) != 1 || got[0].Name != "jellyfin" {
-		t.Fatalf("reset unexpectedly changed aliases: %+v", got)
+	if len(appliedDomains) != 1 || appliedDomains[0] != "reset.example.test" {
+		t.Fatalf("applied domains = %q (reset must restore the guard's recorded server domain)", appliedDomains)
 	}
 }
 
@@ -259,7 +201,7 @@ func TestLocalAccessResetAndApplyUseTheGuardsDomain(t *testing.T) {
 func TestLocalAccessIgnoresAStaleDomainInTheConfigFile(t *testing.T) {
 	useGuardStatus(t, machineguard.RuntimeStatus{BrowserDomain: "ppr.example.test", DefaultBrowserDomain: "ppr.example.test"}, nil)
 	path := filepath.Join(t.TempDir(), "config.json")
-	if err := os.WriteFile(path, []byte(`{"local_access":{"domain":"local.pprbt.example.test","service_aliases":[{"machine_alias":"hp","name":"jellyfin","port":8989}]}}`), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte(`{"local_access":{"domain":"local.pprbt.example.test"}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	var output bytes.Buffer
@@ -279,7 +221,7 @@ func TestLocalAccessInvalidValuesDoNotReachApply(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
 	oldApply := applyLocalAccessSettings
 	calls := 0
-	applyLocalAccessSettings = func(context.Context, *config.Config, config.LocalAccessConfig, string) error {
+	applyLocalAccessSettings = func(context.Context, *config.Config, string) error {
 		calls++
 		return nil
 	}
@@ -287,9 +229,6 @@ func TestLocalAccessInvalidValuesDoNotReachApply(t *testing.T) {
 
 	for _, args := range [][]string{
 		{"config", "local-access", "domain", "set", "com"},
-		{"config", "local-access", "alias", "set", "hp", "8989", "8989"},
-		{"config", "local-access", "alias", "set", "hp", "jellyfin", "0"},
-		{"config", "local-access", "alias", "set", "hp", "jellyfin", "65536"},
 	} {
 		root := newRootCommand()
 		root.SetOut(&bytes.Buffer{})
@@ -304,47 +243,18 @@ func TestLocalAccessInvalidValuesDoNotReachApply(t *testing.T) {
 	}
 }
 
-func TestLocalAccessConfigurationViewsExposeDomainAndAliases(t *testing.T) {
+func TestLocalAccessShowExposesDomain(t *testing.T) {
 	useGuardStatus(t, machineguard.RuntimeStatus{BrowserDomain: "dev.example.com"}, nil)
 	path := filepath.Join(t.TempDir(), "config.json")
-	cfg, err := config.Load(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	cfg.LocalAccess = config.LocalAccessConfig{
-		ServiceAliases: []config.LocalServiceAlias{{MachineAlias: "studio", Name: "jellyfin", Port: 8989}},
-	}
-	if err := cfg.Save(); err != nil {
-		t.Fatal(err)
-	}
-
-	var jsonOutput bytes.Buffer
-	root := newRootCommand()
-	root.SetOut(&jsonOutput)
-	root.SetErr(&bytes.Buffer{})
-	root.SetArgs([]string{"--config", path, "config", "show", "--json"})
-	if err := root.ExecuteContext(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	var result struct {
-		LocalAccess config.LocalAccessConfig `json:"local_access"`
-	}
-	if err := json.Unmarshal(jsonOutput.Bytes(), &result); err != nil {
-		t.Fatalf("decode config show JSON: %v; output=%q", err, jsonOutput.String())
-	}
-	if len(result.LocalAccess.ServiceAliases) != 1 || result.LocalAccess.ServiceAliases[0].Name != "jellyfin" {
-		t.Fatalf("config show local access = %+v", result.LocalAccess)
-	}
-
 	var humanOutput bytes.Buffer
-	root = newRootCommand()
+	root := newRootCommand()
 	root.SetOut(&humanOutput)
 	root.SetErr(&bytes.Buffer{})
 	root.SetArgs([]string{"--config", path, "config", "local-access", "show"})
 	if err := root.ExecuteContext(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(humanOutput.String(), "domain: dev.example.com") || !strings.Contains(humanOutput.String(), "jellyfin.studio -> configured port 8989") {
+	if !strings.Contains(humanOutput.String(), "domain: dev.example.com") {
 		t.Fatalf("human local-access view = %q", humanOutput.String())
 	}
 }
@@ -354,10 +264,7 @@ func TestLocalAccessCLICommandsAreDiscoverable(t *testing.T) {
 	for _, path := range []string{
 		"config local-access domain set",
 		"config local-access domain reset",
-		"config local-access alias set",
-		"config local-access alias unset",
 		"config local-access show",
-		"config local-access apply",
 	} {
 		command, _, err := root.Find(strings.Fields(path))
 		if err != nil || command.CommandPath() != "pb "+path {
@@ -382,7 +289,7 @@ func TestLocalAccessDomainResetNeedsTheGuardsRecordedDomain(t *testing.T) {
 			prior := applyLocalAccessSettings
 			var appliedDomain string
 			applies := 0
-			applyLocalAccessSettings = func(_ context.Context, cfg *config.Config, next config.LocalAccessConfig, domain string) error {
+			applyLocalAccessSettings = func(_ context.Context, cfg *config.Config, domain string) error {
 				applies++
 				appliedDomain = domain
 				return nil

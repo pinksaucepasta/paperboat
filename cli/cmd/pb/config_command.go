@@ -123,7 +123,7 @@ func configShow(c *command.Context) error {
 	}
 	sshPort, sshPortSet := configuredSSHTargetPort()
 	if c.Bool("json") {
-		shown := map[string]any{"path": d.cfg.Path(), "server_url": d.cfg.ServerURL, "auth_file_fallback": d.cfg.Auth.AllowFileFallback, "file_paste": d.cfg.FilePaste, "status_bar": d.cfg.StatusBar, "local_access": d.cfg.LocalAccess}
+		shown := map[string]any{"path": d.cfg.Path(), "server_url": d.cfg.ServerURL, "auth_file_fallback": d.cfg.Auth.AllowFileFallback, "file_paste": d.cfg.FilePaste, "status_bar": d.cfg.StatusBar}
 		if sshPortSet {
 			shown["ssh_target_port"] = sshPort
 		}
@@ -139,13 +139,5 @@ func configShow(c *command.Context) error {
 	fmt.Fprintf(c.Writer, "status_bar.fullscreen: %s\n", d.cfg.StatusBar.Fullscreen)
 	fmt.Fprintf(c.Writer, "status_bar.theme: %s\n", d.cfg.StatusBar.Theme)
 	fmt.Fprintf(c.Writer, "local_access.domain: %s\n", orNone(localAccessDomain(c.Context)))
-	fmt.Fprintln(c.Writer, "local_access.service_aliases:")
-	if len(d.cfg.LocalAccess.ServiceAliases) == 0 {
-		fmt.Fprintln(c.Writer, "  (none)")
-	} else {
-		for _, alias := range d.cfg.LocalAccess.ServiceAliases {
-			fmt.Fprintf(c.Writer, "  %s.%s -> configured port %d\n", alias.Name, alias.MachineAlias, alias.Port)
-		}
-	}
 	return nil
 }

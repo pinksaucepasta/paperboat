@@ -12,15 +12,14 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/machineguard"
 	"os"
 	"path/filepath"
-	"reflect"
 	"time"
 )
 
 var applyLocalAccessSettings = applyLocalAccessConfig
 
-// Provision trust before publishing configuration. Restore the previous namespace
-// and daemon if persistence or activation fails.
-func applyLocalAccessConfig(ctx context.Context, cfg *config.Config, next config.LocalAccessConfig, domain string) error {
+// Provision trust before activating the daemon. Restore the previous domain
+// and daemon if activation fails.
+func applyLocalAccessConfig(ctx context.Context, cfg *config.Config, domain string) error {
 	defaultConfig, err := config.Load("")
 	if err != nil {
 		return err
@@ -35,14 +34,6 @@ func applyLocalAccessConfig(ctx context.Context, cfg *config.Config, next config
 		return err
 	}
 	defer unlock()
-	fresh, err := config.Load(cfg.Path())
-	if err != nil {
-		return err
-	}
-	if !reflect.DeepEqual(fresh.LocalAccess, cfg.LocalAccess) {
-		return errors.New("local browser settings changed while this command was waiting; retry the command")
-	}
-	*cfg = *fresh
 	executable, err := os.Executable()
 	if err != nil {
 		return err
@@ -66,7 +57,6 @@ func applyLocalAccessConfig(ctx context.Context, cfg *config.Config, next config
 	if priorDomain == "" || nextDomain == "" {
 		return errors.New("this computer has no local access domain; run pb install again")
 	}
-	old := cloneLocalAccess(cfg.LocalAccess)
 	changedDomain := priorDomain != nextDomain
 	if err = localdaemon.StopCurrentUserService(ctx, executable); err != nil {
 		return err
@@ -78,10 +68,8 @@ func applyLocalAccessConfig(ctx context.Context, cfg *config.Config, next config
 		if changedDomain {
 			trustErr = hostruntimecmd.ConfigureBrowserDomain(recovery, priorDomain)
 		}
-		cfg.LocalAccess = old
-		saveErr := cfg.Save()
 		startErr := localdaemon.StartCurrentUserService(recovery, executable)
-		return errors.Join(cause, trustErr, saveErr, startErr)
+		return errors.Join(cause, trustErr, startErr)
 	}
 	if changedDomain {
 		if err = hostruntimecmd.ConfigureBrowserDomain(ctx, nextDomain); err != nil {
@@ -90,10 +78,6 @@ func applyLocalAccessConfig(ctx context.Context, cfg *config.Config, next config
 		if err = machineguard.CleanupUserTrust(ctx); err != nil {
 			return restore(fmt.Errorf("retire previous browser certificate trust: %w", err))
 		}
-	}
-	cfg.LocalAccess = next
-	if err = cfg.Save(); err != nil {
-		return restore(fmt.Errorf("save local browser settings: %w", err))
 	}
 	if err = localdaemon.StartCurrentUserService(ctx, executable); err != nil {
 		return restore(fmt.Errorf("activate local browser settings: %w", err))

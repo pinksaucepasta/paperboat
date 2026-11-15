@@ -15,7 +15,6 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/atomicfile"
 	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
-	"github.com/pinksaucepasta/paperboat/internal/splitdns"
 	"github.com/pinksaucepasta/paperboat/internal/userpaths"
 )
 
@@ -46,34 +45,6 @@ type Favorite struct {
 	ID   string `json:"id"`
 }
 
-const (
-	MaxLocalServiceAliases = 128
-	MaxLocalMachineProxies = 128
-)
-
-// LocalAccessConfig controls this user's named service URLs. The local access
-// domain is not configuration: the machine guard owns it. It does not grant access to ports; runtime
-// publication remains limited to ports already authorized for the machine.
-type LocalAccessConfig struct {
-	ServiceAliases []LocalServiceAlias `json:"service_aliases,omitempty"`
-	MachineProxies []LocalMachineProxy `json:"machine_proxies,omitempty"`
-}
-
-// LocalServiceAlias names one authorized machine port below the browser
-// hostname for its machine alias.
-type LocalServiceAlias struct {
-	MachineAlias string `json:"machine_alias"`
-	Name         string `json:"name"`
-	Port         uint16 `json:"port"`
-}
-
-// LocalMachineProxy forwards otherwise-unmapped nonnumeric browser names to
-// one already authorized reverse-proxy port. Numeric URLs and aliases take priority.
-type LocalMachineProxy struct {
-	MachineAlias string `json:"machine_alias"`
-	Port         uint16 `json:"port"`
-}
-
 // Config is the on-disk CLI configuration.
 type Config struct {
 	// ServerURL is the paperboat-server base URL. It is required for production commands.
@@ -86,8 +57,6 @@ type Config struct {
 	Connect ConnectConfig `json:"connect,omitempty"`
 	// Diagnostics controls the local metadata-only event log.
 	Diagnostics DiagnosticsConfig `json:"diagnostics,omitempty"`
-	// LocalAccess contains user-local browser names and service aliases.
-	LocalAccess LocalAccessConfig `json:"local_access,omitempty"`
 	// StatusBar controls the local terminal status line during interactive sessions.
 	StatusBar StatusBarConfig `json:"status_bar,omitempty"`
 
@@ -367,47 +336,6 @@ func normalizeStatusWidgets(values []string) []string {
 // Validate checks the complete effective configuration. Callers that mutate a
 // loaded Config can use it before presenting success.
 func (c *Config) Validate() error {
-	if len(c.LocalAccess.ServiceAliases) > MaxLocalServiceAliases {
-		return fmt.Errorf("local_access.service_aliases cannot contain more than %d items", MaxLocalServiceAliases)
-	}
-	seenLocalAliases := make(map[string]struct{}, len(c.LocalAccess.ServiceAliases))
-	for index := range c.LocalAccess.ServiceAliases {
-		alias := &c.LocalAccess.ServiceAliases[index]
-		alias.MachineAlias = strings.ToLower(strings.TrimSpace(alias.MachineAlias))
-		alias.Name = strings.ToLower(strings.TrimSpace(alias.Name))
-		if !splitdns.ValidBrowserLabel(alias.MachineAlias) {
-			return fmt.Errorf("local_access.service_aliases[%d].machine_alias must be one DNS label", index)
-		}
-		if !splitdns.ValidBrowserLabel(alias.Name) || localAliasNameIsNumeric(alias.Name) {
-			return fmt.Errorf("local_access.service_aliases[%d].name must be a nonnumeric DNS label", index)
-		}
-		if alias.Port == 0 {
-			return fmt.Errorf("local_access.service_aliases[%d].port must be between 1 and 65535", index)
-		}
-		key := alias.MachineAlias + "\x00" + alias.Name
-		if _, exists := seenLocalAliases[key]; exists {
-			return fmt.Errorf("local_access.service_aliases contains duplicate %q for machine %q", alias.Name, alias.MachineAlias)
-		}
-		seenLocalAliases[key] = struct{}{}
-	}
-	if len(c.LocalAccess.MachineProxies) > MaxLocalMachineProxies {
-		return fmt.Errorf("local_access.machine_proxies cannot contain more than %d items", MaxLocalMachineProxies)
-	}
-	seenProxies := make(map[string]struct{}, len(c.LocalAccess.MachineProxies))
-	for index := range c.LocalAccess.MachineProxies {
-		proxy := &c.LocalAccess.MachineProxies[index]
-		proxy.MachineAlias = strings.ToLower(strings.TrimSpace(proxy.MachineAlias))
-		if !splitdns.ValidBrowserLabel(proxy.MachineAlias) {
-			return fmt.Errorf("local_access.machine_proxies[%d].machine_alias must be one DNS label", index)
-		}
-		if proxy.Port == 0 {
-			return fmt.Errorf("local_access.machine_proxies[%d].port must be between 1 and 65535", index)
-		}
-		if _, exists := seenProxies[proxy.MachineAlias]; exists {
-			return fmt.Errorf("local_access.machine_proxies contains duplicate machine %q", proxy.MachineAlias)
-		}
-		seenProxies[proxy.MachineAlias] = struct{}{}
-	}
 	if len(c.Favorites) > MaxFavorites {
 		return fmt.Errorf("favorites cannot contain more than %d items", MaxFavorites)
 	}
@@ -476,18 +404,6 @@ func (c *Config) Validate() error {
 		}
 	}
 	return nil
-}
-
-func localAliasNameIsNumeric(value string) bool {
-	if value == "" {
-		return false
-	}
-	for _, char := range value {
-		if char < '0' || char > '9' {
-			return false
-		}
-	}
-	return true
 }
 
 func (c *Config) IsFavorite(kind, id string) bool {

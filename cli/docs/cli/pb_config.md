@@ -37,7 +37,7 @@ pb config [flags]
 * [pb config conflict](pb_config_conflict.md)	 - Inspect and resolve configuration conflicts
 * [pb config customize](pb_config_customize.md)	 - Customize local shortcuts, command defaults, and TUI appearance
 * [pb config force](pb_config_force.md)	 - Force a scoped configuration direction
-* [pb config local-access](pb_config_local-access.md)	 - Configure local browser domains, aliases and reverse proxies
+* [pb config local-access](pb_config_local-access.md)	 - Configure the local browser domain
 * [pb config path](pb_config_path.md)	 - Print the config file path
 * [pb config repository](pb_config_repository.md)	 - Connect custom Git repositories and manage machine credentials
 * [pb config set](pb_config_set.md)	 - Set a local configuration value

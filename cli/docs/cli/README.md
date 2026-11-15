@@ -43,18 +43,11 @@ Read the [CLI guide](../cli.md) for interactive use, scripting, installation of 
 | [pb config customize show](pb_config_customize_show.md) | Show the local preference document |
 | [pb config customize validate](pb_config_customize_validate.md) | Validate preferences without executing any action |
 | [pb config force](pb_config_force.md) | Force a scoped configuration direction |
-| [pb config local-access](pb_config_local-access.md) | Configure local browser domains, aliases and reverse proxies |
-| [pb config local-access alias](pb_config_local-access_alias.md) | Manage named browser aliases for authorized machine ports |
-| [pb config local-access alias set](pb_config_local-access_alias_set.md) | Set and apply a service alias |
-| [pb config local-access alias unset](pb_config_local-access_alias_unset.md) | Remove a service alias |
-| [pb config local-access apply](pb_config_local-access_apply.md) | Apply local browser settings from the config file |
+| [pb config local-access](pb_config_local-access.md) | Configure the local browser domain |
 | [pb config local-access domain](pb_config_local-access_domain.md) | Set the local browser domain |
 | [pb config local-access domain reset](pb_config_local-access_domain_reset.md) | Restore the default local browser domain |
 | [pb config local-access domain set](pb_config_local-access_domain_set.md) | Set and apply the local browser domain |
-| [pb config local-access proxy](pb_config_local-access_proxy.md) | Route machine app names through Coolify or another reverse proxy |
-| [pb config local-access proxy set](pb_config_local-access_proxy_set.md) | Set the machine reverse-proxy port |
-| [pb config local-access proxy unset](pb_config_local-access_proxy_unset.md) | Restore the default reverse-proxy port |
-| [pb config local-access show](pb_config_local-access_show.md) | Show local browser domains and aliases |
+| [pb config local-access show](pb_config_local-access_show.md) | Show the local browser domain |
 | [pb config path](pb_config_path.md) | Print the config file path |
 | [pb config repository](pb_config_repository.md) | Connect custom Git repositories and manage machine credentials |
 | [pb config repository connect](pb_config_repository_connect.md) | Connect an HTTPS, SSH, or local Git repository |
@@ -159,6 +152,12 @@ Read the [CLI guide](../cli.md) for interactive use, scripting, installation of 
 | [pb policy set](pb_policy_set.md) | Validate and save a workspace policy file |
 | [pb policy test](pb_policy_test.md) | Validate a policy file and run its tests |
 | [pb policy versions](pb_policy_versions.md) | List saved policy versions |
+| [pb port](pb_port.md) | Name machine ports and set a machine's front desk |
+| [pb port front-desk](pb_port_front-desk.md) | Show or set where unnamed addresses of a machine go |
+| [pb port name](pb_port_name.md) | Name machine ports for browser addresses |
+| [pb port name list](pb_port_name_list.md) | List the workspace's port names |
+| [pb port name set](pb_port_name_set.md) | Name a machine port |
+| [pb port name unset](pb_port_name_unset.md) | Remove a port name |
 | [pb preview](pb_preview.md) | Expose a local target through a temporary preview |
 | [pb preview delete](pb_preview_delete.md) | Delete a temporary preview |
 | [pb preview inspect](pb_preview_inspect.md) | Show daemon-local HTTP captures |

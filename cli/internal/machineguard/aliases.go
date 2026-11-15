@@ -28,8 +28,17 @@ func browserAliasTarget(aliases map[string]string, name, domain string) string {
 		parseName = strings.TrimPrefix(name, "*.")
 	}
 	machine, label, err := splitdns.ParseBrowserHostname(parseName, domain)
-	if err != nil || machine == "gateway" || (!wildcard && label == "") {
+	if err != nil || machine == "gateway" {
 		return ""
+	}
+	if !wildcard && label == "" {
+		// A top-level name (<name>.<domain>) targets one exact numeric registration of any machine.
+		target := aliases[name]
+		_, targetLabel, err := splitdns.ParseBrowserHostname(target, domain)
+		if err != nil || !numericBrowserLabel(targetLabel) || aliases[target] != splitdns.BrowserGatewayHostname {
+			return ""
+		}
+		return target
 	}
 	if wildcard && label != "" {
 		return ""

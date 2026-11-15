@@ -1,0 +1,68 @@
+.nh
+.TH "PB-PORT-NAME-UNSET" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-port-name-unset - Remove a port name
+
+
+.SH SYNOPSIS
+\fBpb port name unset <name> [flags]\fP
+
+
+.SH DESCRIPTION
+Remove one port name of the active workspace. Say which one with --machine (a name
+of that machine's port), --all-machines or --top-level. The same people who may set a
+name may remove it; the port itself and its access do not change.
+
+.PP
+This command does not support --json output; it rejects that mode before execution. Use --help --json for structured command help.
+
+
+.SH OPTIONS
+\fB--all-machines\fP[=false]
+	name this port on every machine of the workspace
+
+.PP
+\fB-h\fP, \fB--help\fP[=false]
+	help for unset
+
+.PP
+\fB--machine\fP=""
+	the machine whose port is named
+
+.PP
+\fB--top-level\fP[=false]
+	make <name>\&.<domain> open the port of --machine
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--json\fP[=false]
+	print machine-readable JSON
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH EXAMPLE
+.EX
+  pb port name unset app --machine homelab
+  pb port name unset grafana --all-machines
+  pb port name unset jellyfin --top-level
+.EE
+
+
+.SH SEE ALSO
+\fBpb-port-name(1)\fP

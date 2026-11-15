@@ -335,7 +335,7 @@ func localDaemonCommand() *cobra.Command {
 					})
 				}()
 			}
-			coordinatorConfig := CoordinatorConfig{LocalAccess: cfg.LocalAccess}
+			coordinatorConfig := CoordinatorConfig{}
 			if profileErr == nil {
 				coordinatorConfig.AccountID = profile.Account.ID
 				coordinatorConfig.AccountLabel = accountLabel(profile.Account)

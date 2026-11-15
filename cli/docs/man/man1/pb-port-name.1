@@ -1,0 +1,52 @@
+.nh
+.TH "PB-PORT-NAME" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-port-name - Name machine ports for browser addresses
+
+
+.SH SYNOPSIS
+\fBpb port name [flags]\fP
+
+
+.SH DESCRIPTION
+Give a machine port a name: <name>\&.<machine>\&.<domain> then opens that port in a
+browser on every computer of everyone allowed that port. A name never grants access.
+--machine names one machine's port (machine managers). --all-machines names that port
+on every machine of the active workspace (owners and admins); a machine name of the
+same label wins. --top-level --machine makes <name>\&.<domain> open that machine's port
+(owners and admins); a machine with that name wins, and pb port name list shows the
+top-level name as shadowed. Numeric labels always mean the port.
+
+.PP
+With --json, this command group lists its available commands.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for name
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--json\fP[=false]
+	print machine-readable JSON
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-port(1)\fP, \fBpb-port-name-list(1)\fP, \fBpb-port-name-set(1)\fP, \fBpb-port-name-unset(1)\fP

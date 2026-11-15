@@ -90,17 +90,17 @@ func BrowserWildcardPattern(machine, domain string) (string, error) {
 	return "*." + base, nil
 }
 
-// ResolveBrowserRoute keeps numeric services and exact named aliases authoritative.
-// A machine proxy accepts only a single nonnumeric application label.
+// ResolveBrowserRoute keeps numeric services and exact named aliases authoritative, including a top-level
+// name (<name>.<domain>, no service label). A machine proxy accepts only a single nonnumeric application label.
 func ResolveBrowserRoute(routes map[string]BrowserRoute, host, domain string) (BrowserRoute, bool) {
 	machine, label, err := ParseBrowserHostname(host, domain)
-	if err != nil || label == "" {
+	if err != nil {
 		return BrowserRoute{}, false
 	}
 	if route, ok := routes[host]; ok {
 		return route, true
 	}
-	if NumericBrowserLabel(label) {
+	if label == "" || NumericBrowserLabel(label) {
 		return BrowserRoute{}, false
 	}
 	route, ok := routes["*."+machine+"."+domain]

@@ -1,16 +1,18 @@
 .nh
-.TH "PB-CONFIG-LOCAL-ACCESS-PROXY-UNSET" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+.TH "PB-PORT-NAME-LIST" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
 
 .SH NAME
-pb-config-local-access-proxy-unset - Restore the default reverse-proxy port
+pb-port-name-list - List the workspace's port names
 
 
 .SH SYNOPSIS
-\fBpb config local-access proxy unset <machine-alias> [flags]\fP
+\fBpb port name list [flags]\fP
 
 
 .SH DESCRIPTION
-Remove the machine reverse-proxy override and restore automatic app-name routing through authorized port 80. Numeric URLs and explicit aliases retain their destinations. The running gateway is updated before success is reported.
+List the port names of the active workspace: names of its machines' ports, its
+all-machines names and its top-level names. A top-level name whose label is also a
+machine's name is shown as shadowed: that address opens the machine.
 
 .PP
 JSON output is supported with --json.
@@ -18,7 +20,7 @@ JSON output is supported with --json.
 
 .SH OPTIONS
 \fB-h\fP, \fB--help\fP[=false]
-	help for unset
+	help for list
 
 .PP
 \fB--json\fP[=false]
@@ -43,4 +45,4 @@ JSON output is supported with --json.
 
 
 .SH SEE ALSO
-\fBpb-config-local-access-proxy(1)\fP
+\fBpb-port-name(1)\fP

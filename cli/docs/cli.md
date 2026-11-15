@@ -83,15 +83,11 @@ one, configure a DNS-only wildcard record `*.example.com` that resolves to
 The command applies local certificate trust and helper configuration before
 reporting success. These commands apply to the installed user's active config;
 check its path with `pb config path`. Applying an alternate `--config` file is
-rejected because the installed helper reads the active config. To map an
-already authorized machine port to a readable name, run
-`pb config local-access alias set studio jellyfin 8989`. With the server's
-domain, this creates `https://jellyfin.studio.ppr.boats`; with
-`example.com`, the URL is `https://jellyfin.studio.example.com`. It does not
-grant access to the port, and Paperboat publishes the name only while that port
-is authorized. Use `pb config local-access show` to inspect the effective
-settings, `alias unset` to remove a mapping, and `apply` after editing the
-`local_access` section of the config file directly.
+rejected because the installed helper reads the active config. Use `pb config local-access show` to inspect the effective domain.
+
+Readable names for ports are set with `pb port name set <name> <port> --machine <m>`
+(or `--all-machines`, or `--top-level --machine <m>` for `<name>.<domain>`). They are
+stored on the server and work on every computer of everyone allowed the port.
 
 ### Machine names and ports
 
@@ -120,33 +116,17 @@ except 80 and 443, which belong to the gateway itself (reach those with
 
 ### Coolify and other reverse proxies
 
-App-name routing automatically uses authorized port 80 on each machine.
-No Paperboat command is needed for Coolify’s default HTTP proxy.
-If your reverse proxy uses another port, configure that override on the browsing computer:
-
-```console
-pb config local-access proxy set homelab 8081
-```
-Set an application's HTTP domain in Coolify to `jellyfin.homelab.ppr.boats`,
-then open `https://jellyfin.homelab.ppr.boats` from this computer.
-Paperboat handles local HTTPS and forwards the original hostname privately to
-Coolify, which selects the application. Keep Coolify's backend HTTP configuration;
-it does not need to obtain a public certificate for these local names.
-New app names work without another Paperboat setting. No public tunnel or DNS
-changes are required for the default local browser domain.
-
-Numeric URLs such as `8080.homelab.ppr.boats` always select port 8080;
-explicit service aliases take precedence over the proxy. The machine base URL
-keeps its service index. Only one nonnumeric app label is supported; nested app
-names are rejected. Proxy settings do not grant machine or port access and are
-active only while the machine and proxy port are authorized and available.
-Automatic service discovery covers this user’s ports from 1024 upward; port 80
-needs explicit private access authorization. An explicitly authorized loopback
-service can be a root-owned or Docker-published port; automatic discovery does
-not expose other users’ services.
-Use `pb config local-access show` to inspect settings or
-`pb config local-access proxy unset homelab` to restore the automatic port-80 default while
-keeping numeric ports and explicit aliases.
+On a machine, an unmatched `<name>.<machine>.<domain>` goes to the machine's front
+desk, by default port 80 over HTTP. Set another port or scheme with
+`pb port front-desk <machine> <port> [http|https]`. Set an application's HTTP domain
+in Coolify to `jellyfin.homelab.ppr.boats`, then open
+`https://jellyfin.homelab.ppr.boats`. Paperboat handles local HTTPS and forwards the
+original hostname privately to Coolify, which selects the application. Numeric URLs
+such as `8080.homelab.ppr.boats` always select port 8080, and named ports take
+precedence over the front desk. Only one nonnumeric app label is supported; nested
+app names are rejected. Neither setting grants machine or port access. An explicitly
+authorized loopback service can be a root-owned or Docker-published port; automatic
+discovery does not expose other users' services.
 
 ## Scripting and output
 

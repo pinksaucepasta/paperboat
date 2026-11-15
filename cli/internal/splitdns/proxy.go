@@ -113,12 +113,12 @@ func NewProxy(cfg ProxyConfig) (*Proxy, error) {
 func browserRouteTable(explicit map[string]BrowserRoute, deniedHosts map[string]bool, domain string) (map[string]BrowserRoute, map[string]bool, map[string][]string, error) {
 	routes := make(map[string]BrowserRoute, len(explicit))
 	for host, route := range explicit {
-		_, label, parseErr := ParseBrowserHostname(strings.TrimPrefix(host, "*."), domain)
+		_, _, parseErr := ParseBrowserHostname(strings.TrimPrefix(host, "*."), domain)
 		wildcard := strings.HasPrefix(host, "*.")
 		if wildcard {
 			_, parseErr = BrowserWildcardPattern(strings.TrimSuffix(strings.TrimPrefix(host, "*."), "."+domain), domain)
 		}
-		if parseErr != nil || (!wildcard && label == "") || !route.Address.IsValid() || route.Port < 1 || route.Port > 65535 {
+		if parseErr != nil || !route.Address.IsValid() || route.Port < 1 || route.Port > 65535 {
 			return nil, nil, nil, errors.New("invalid explicit browser route")
 		}
 		routes[host] = route
@@ -148,8 +148,8 @@ func browserRouteTable(explicit map[string]BrowserRoute, deniedHosts map[string]
 	}
 	machines := make(map[string][]string)
 	for host := range routes {
-		if strings.HasPrefix(host, "*.") {
-			continue
+		if _, label, _ := ParseBrowserHostname(host, domain); strings.HasPrefix(host, "*.") || label == "" {
+			continue // a top-level name is no machine's service
 		}
 		_, base, _ := strings.Cut(host, ".")
 		machines[base] = append(machines[base], host)

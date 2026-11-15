@@ -30,7 +30,7 @@ pb config local-access domain [flags]
 
 ### SEE ALSO
 
-* [pb config local-access](pb_config_local-access.md)	 - Configure local browser domains, aliases and reverse proxies
+* [pb config local-access](pb_config_local-access.md)	 - Configure the local browser domain
 * [pb config local-access domain reset](pb_config_local-access_domain_reset.md)	 - Restore the default local browser domain
 * [pb config local-access domain set](pb_config_local-access_domain_set.md)	 - Set and apply the local browser domain
 
