@@ -28,6 +28,7 @@ import {
 import { usePageParam } from "@/lib/use-page-param"
 import { CommandBlock } from "@/components/add-machine-dialog"
 import { DomainList } from "@/components/domains/domain-list"
+import { PortNames } from "@/components/network/port-names"
 import { pickerOption } from "@/components/crumb-picker"
 import { ListPager } from "@/components/list-pager"
 import { ConfirmAction, SearchField } from "@/components/list-toolbar"
@@ -96,6 +97,8 @@ export function NetworkPage() {
       />
 
       <DomainList />
+
+      <PortNames />
 
       <Section
         title={team ? `${workspace?.name ?? "Team"} servers` : "Your servers"}

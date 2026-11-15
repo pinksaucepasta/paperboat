@@ -8093,6 +8093,74 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/port-names": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List port names
+         * @description Machine names of the workspace machines, its all-machines names and its top-level names. Names never grant access.
+         */
+        get: operations["get_v1_port_names"];
+        put?: never;
+        /**
+         * Set a port name
+         * @description Creates a name or moves it to another port. Machine names need machine management; all-machines and top-level names need a workspace owner or admin. 409 name_is_machine: a top-level name equal to a machine name.
+         */
+        post: operations["post_v1_port_names"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/port-names/{name_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove a port name
+         * @description Same permission rule as setting it.
+         */
+        delete: operations["delete_v1_port_names_name_id"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/machines/{machine_id}/front-desk": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read a machine front desk
+         * @description Requires machine management.
+         */
+        get: operations["get_v1_machines_machine_id_front_desk"];
+        /**
+         * Set a machine front desk
+         * @description Requires machine management. Where an unmatched <name>.<machine>.<domain> goes.
+         */
+        put: operations["put_v1_machines_machine_id_front_desk"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -10722,6 +10790,11 @@ export interface components {
             /** Format: date-time */
             expires_at: string;
             services: components["schemas"]["MachineServicePublishedPort"][];
+            /** @description Browser names of listed ports: <name>.<alias>.<domain>. Machine names beat all-machines names of the same label. */
+            port_names: components["schemas"]["PortName"][];
+            /** @description <name>.<domain> names of listed ports of this machine. A machine named <name> wins. */
+            top_level_names: components["schemas"]["PortName"][];
+            front_desk: components["schemas"]["MachineFrontDesk"];
         };
         MachineServiceNativeBinding: {
             /** @constant */
@@ -12375,6 +12448,36 @@ export interface components {
             data: {
                 items: components["schemas"]["WorkspaceDomain"][];
             };
+        };
+        PortName: {
+            name: string;
+            port: number;
+        };
+        /** @description Where an unmatched <name>.<machine>.<domain> goes (a reverse proxy). Default port 80 over http. */
+        MachineFrontDesk: {
+            port: number;
+            /** @enum {string} */
+            scheme: "http" | "https";
+        };
+        PortNameRecord: {
+            id: string;
+            /** @enum {string} */
+            scope: "machine" | "all_machines" | "top_level";
+            name: string;
+            port: number;
+            machine_id?: string;
+            machine_alias?: string;
+            /** @description A top-level name whose label is also a machine name in the workspace: <name>.<domain> opens the machine. */
+            shadowed: boolean;
+        };
+        PortNameSet: {
+            /** @enum {string} */
+            scope: "machine" | "all_machines" | "top_level";
+            /** @description One lowercase DNS label that is not a number. */
+            name: string;
+            port: number;
+            /** @description Required for machine and top_level; absent for all_machines. */
+            machine_id?: string;
         };
     };
     responses: {
@@ -31007,6 +31110,178 @@ export interface operations {
             };
             /** @description domain_not_found. */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    get_v1_port_names: {
+        parameters: {
+            query?: {
+                /** @description Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field. */
+                workspace?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: {
+                            items: components["schemas"]["PortNameRecord"][];
+                        };
+                    };
+                };
+            };
+            /** @description Exact resource access denied */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    post_v1_port_names: {
+        parameters: {
+            query?: {
+                /** @description Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field. */
+                workspace?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PortNameSet"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["PortNameRecord"];
+                    };
+                };
+            };
+            /** @description Exact resource access denied */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    delete_v1_port_names_name_id: {
+        parameters: {
+            query?: {
+                /** @description Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field. */
+                workspace?: string;
+            };
+            header?: never;
+            path: {
+                name_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Exact resource access denied */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    get_v1_machines_machine_id_front_desk: {
+        parameters: {
+            query?: {
+                /** @description Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field. */
+                workspace?: string;
+            };
+            header?: never;
+            path: {
+                machine_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["MachineFrontDesk"];
+                    };
+                };
+            };
+            /** @description Exact resource access denied */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    put_v1_machines_machine_id_front_desk: {
+        parameters: {
+            query?: {
+                /** @description Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field. */
+                workspace?: string;
+            };
+            header?: never;
+            path: {
+                machine_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MachineFrontDesk"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["MachineFrontDesk"];
+                    };
+                };
+            };
+            /** @description Exact resource access denied */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };

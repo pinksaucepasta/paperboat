@@ -8,6 +8,7 @@ import { Time } from "@/components/time"
 import { cn } from "@/lib/utils"
 import { CopyRow } from "@/components/copy-button"
 import { DangerZone } from "@/components/machine-identity"
+import { FrontDesk } from "@/components/front-desk"
 import { useCurrentMachine, useMachineLoading } from "@/components/machine-shell"
 import { StatusDot, machineVersion } from "@/components/machine-status"
 import { MachineUpdate, UpdateAttention, updateNeedsAttention } from "@/components/machine-update"
@@ -75,6 +76,7 @@ export function MachineOverview() {
           </Detail>
         </dl>
       </Section>
+      <FrontDesk />
       <Network />
       <DangerZone machine={machine} />
     </div>
@@ -94,6 +96,7 @@ function OverviewSkeleton() {
           ))}
         </dl>
       </Section>
+      <FrontDesk />
       <Network />
       {/* Shown to those who manage the machine, the usual case; Remove works once it loads. */}
       <DangerZonePanel
