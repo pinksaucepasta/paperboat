@@ -300,6 +300,11 @@ func (s *Server) DialAuthorizedUDP(ctx context.Context, peer key.NodePublic, dis
 	if err := s.prepareAuthorizedPeer(ctx, peer, disco); err != nil {
 		return nil, err
 	}
+	// A carrier that restarted kept its keys and port, so nothing says its WireGuard session died with it (Tailscale
+	// learns that from a new disco key: ipn/ipnlocal/local.go MarkDevicePeerForHandshake). This flow's first packets
+	// ask for a handshake: a live session keeps carrying them, a dead one is replaced within a round trip instead of
+	// wireguard-go's 15 s. wireguard-go sends at most one initiation per RekeyTimeout.
+	s.lb.sys.Engine.Get().MarkDevicePeerForHandshake(peer)
 	conn, err := s.lb.ns.DialContextUDPWithBind(ctx, s.lb.addr, ap)
 	if err != nil {
 		return nil, err

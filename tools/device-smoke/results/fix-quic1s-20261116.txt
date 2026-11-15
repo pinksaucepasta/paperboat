@@ -1,0 +1,23 @@
+FIX-QUIC1S: ~1.0 s lost on a fresh peer QUIC handshake. Two containers on pbvm2 (q1-a, q1-b), same account,
+direct path. Per exec: `pb exec <peer> -- true`; quic_handshake from the client's redial_step diagnostics.
+
+Reproduce (dev-d84c3dc52, main):
+ warm carriers, 30 execs a->b: handshake 2-26 ms, no outlier.
+ client carrier restarted before each exec (12): handshake 2-12 ms, no outlier.
+ TARGET carrier restarted, exec 3 s later: 9 of 10 = quic_handshake 1001 ms failed (idle timeout) + retry 4-70 ms.
+ TARGET restarted, exec 6/10 s later: 5 of 6 the same; 14 s: 1 of 3; 20 s and 60 s: 0 of 6.
+Cause: the carrier keeps its keys and UDP port (41642 before and after the restart), so the signed contacts do not
+change and nothing tells the client its WireGuard session died. The QUIC Initial goes out on dead keys, the restarted
+target drops it, wireguard-go re-handshakes only after 15 s; QUIC gives up at its 1 s handshake idle timeout and the
+retry's peer reset gets through. Tailscale learns a restart from a new disco key and calls MarkDevicePeerForHandshake
+(ref tailscale ipn/ipnlocal/local.go:2579, wgengine/wgengine.go:215); our disco key is derived from the node key.
+
+Fix (dev-bfb9766ea, branch build): every new authorized flow marks the peer for a handshake on its first send.
+ TARGET restarted, exec 3 s later (a->b 12, b->a 6) and 6 s later (a->b 10): 28 execs,
+ quic_handshake 204-210 ms (first PTO) x16, 606-610 ms (second PTO) x9, 1001 ms + retry x3 (first exec of each batch).
+ Before: 17 of 19 at 1001 ms + retry.
+ warm, 30 execs a->b: every handshake < 100 ms (unchanged).
+Pair check on dev-bfb9766ea (`pb version` dev-bfb9766ea on q1-a and q1-b):
+ pb exec q1-a->q1-b rc=0, q1-b->q1-a rc=0; pb connect q1-a->q1-b rc=0 echoed q1-b's hostname, q1-b->q1-a rc=0 echoed q1-a's.
+Remaining gap: wireguard-go sends at most one initiation per RekeyTimeout (5 s), so an exec right after a target
+restart can still wait out the 1 s timeout + retry (3 of 28 here).
