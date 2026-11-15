@@ -28,6 +28,9 @@ head=$(git -C "$tree" rev-parse HEAD)
 cd "$tree/console"
 bun install --frozen-lockfile
 rm -rf "$new"
+# The running slot's generated route types are not read at runtime, but tsc includes them: a page removed since that
+# build (11-16: domains, recordings) fails the type check. Drop them; the next build of that slot regenerates them.
+rm -rf "$old/types" "$old/dev/types"
 NEXT_DIST_DIR=$new bun run build || { echo "console-live: build failed; $old keeps running" >&2; exit 1; }
 
 point "$new"
