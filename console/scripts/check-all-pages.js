@@ -211,7 +211,7 @@
     "/network",
     "/tunnels",
     "/previews",
-    "/domains",
+    "/network",
     "/files",
     "/terminals",
     "/environment",

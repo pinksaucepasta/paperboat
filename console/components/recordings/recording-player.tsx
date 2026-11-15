@@ -26,7 +26,7 @@ export function RecordingPlayer({ id }: { id: string }) {
   return (
     <>
       <PageHeader>
-        <CrumbLink href="/recordings">Recordings</CrumbLink>
+        <CrumbLink href="/terminals?view=recordings">Recordings</CrumbLink>
         <Crumb>Replay</Crumb>
       </PageHeader>
       <main

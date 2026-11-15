@@ -13,7 +13,8 @@ import { terminalCanAttach, type TerminalSession } from "@/lib/terminal/use-term
 import { useCurrentMachine } from "@/components/machine-shell"
 import { NewTerminalButton } from "@/components/terminal/new-terminal"
 import { StatusDot } from "@/components/machine-status"
-import { ConfirmAction, SearchField, useListScope, ViewToggle } from "@/components/list-toolbar"
+import { ConfirmAction, SearchField, useListScope, usePickedView, ViewToggle } from "@/components/list-toolbar"
+import { RecordingList } from "@/components/recordings/recording-list"
 import { RowMenus, type Entry } from "@/components/row-menus"
 import { Badge } from "@/components/ui/badge"
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
@@ -58,7 +59,7 @@ function groupOf(
   return { key: `${when.getFullYear()}-${when.getMonth()}`, label: date(when.toISOString(), "month") }
 }
 
-type View = "open" | "closed"
+type View = "open" | "closed" | "recordings"
 
 /** The machine page's Terminals tab. */
 export function MachineTerminals() {
@@ -72,12 +73,16 @@ export function MachineTerminals() {
 export function TerminalList({ machine: tabMachine }: { machine?: Machine }) {
   const { scope, machine } = useListScope(tabMachine)
   const { now, date } = useTimeFormat(60_000)
-  const [view, setView] = useState<View>("open")
+  const picked = usePickedView()
+  const [view, setView] = useState<View>(!tabMachine && picked === "recordings" ? "recordings" : "open")
   const [search, setSearch] = useState("")
   const q = useDeferredValue(search.trim())
   const pages = usePageParam(`${view}|${q}|${scope ?? ""}`)
   const counts = useApiQuery(terminalCountsQuery(scope ?? undefined))
-  const query = useApiQuery(terminalsPageQuery({ closed: view === "closed", q, page: pages.page, machine: scope ?? undefined }))
+  const query = useApiQuery({
+    ...terminalsPageQuery({ closed: view === "closed", q, page: pages.page, machine: scope ?? undefined }),
+    enabled: view !== "recordings",
+  })
   const total = query.data?.total ?? 0
   const shown = (query.data?.items ?? []).map((session) => ({ session, time: lastUsed(session, now) }))
 
@@ -117,7 +122,7 @@ export function TerminalList({ machine: tabMachine }: { machine?: Machine }) {
     `terminals-empty:${scope ?? ""}`,
     counts.data ? Number(counts.data.open + counts.data.closed === 0) : undefined,
   )
-  if (counts.data ? counts.data.open + counts.data.closed === 0 : lastEmpty === 1) {
+  if (view !== "recordings" && (counts.data ? counts.data.open + counts.data.closed === 0 : lastEmpty === 1)) {
     return (
       <Empty className="py-16">
         <EmptyHeader>
@@ -137,6 +142,22 @@ export function TerminalList({ machine: tabMachine }: { machine?: Machine }) {
     )
   }
 
+  // Recordings are the team's, across machines: only on the Terminals page, where the machine page has its own tab.
+  const views = [
+    { value: "open" as const, label: "Open", count: counts.data?.open },
+    { value: "closed" as const, label: "Closed", count: counts.data?.closed },
+    ...(tabMachine ? [] : [{ value: "recordings" as const, label: "Recordings" }]),
+  ]
+  if (view === "recordings")
+    return (
+      <section className="flex flex-col gap-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <ViewToggle value={view} onChange={setView} views={views} />
+        </div>
+        <RecordingList />
+      </section>
+    )
+
   return (
     <section className="flex flex-col gap-3">
       {/* On a phone the search takes its own line, so the toggle and buttons keep their size. */}
@@ -144,14 +165,7 @@ export function TerminalList({ machine: tabMachine }: { machine?: Machine }) {
         <div className="w-full sm:w-auto sm:max-w-sm sm:flex-1">
           <SearchField value={search} onChange={setSearch} placeholder="Search terminals" />
         </div>
-        <ViewToggle
-          value={view}
-          onChange={setView}
-          views={[
-            { value: "open", label: "Open", count: counts.data?.open },
-            { value: "closed", label: "Closed", count: counts.data?.closed },
-          ]}
-        />
+        <ViewToggle value={view} onChange={setView} views={views} />
         <div className="ml-auto">
           <NewTerminalButton machine={machine} />
         </div>

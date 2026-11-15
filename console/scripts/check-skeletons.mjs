@@ -29,7 +29,7 @@ const tabs = ["", "/terminals", "/previews", "/tunnels", "/files", "/environment
 const routes = process.argv.slice(2).length
   ? process.argv.slice(2)
   : [
-      "/", "/terminals", "/previews", "/tunnels", "/files", "/environment", "/config", "/domains", "/network",
+      "/", "/terminals", "/previews", "/tunnels", "/files", "/environment", "/config", "/network",
       "/usage", "/activity", "/team", "/access", "/settings/api-tokens", "/billing", "/account",
       ...(machine ? tabs.map((tab) => `/machines/${machine}${tab}`) : []),
     ]

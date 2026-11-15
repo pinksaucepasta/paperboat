@@ -308,3 +308,22 @@ export function originLabel(origin: { scheme: string; address: string }) {
   const address = origin.address.replace(/^127\.0\.0\.1(?=:)/, "localhost")
   return origin.scheme === "http" ? address : `${origin.scheme}://${address}`
 }
+
+export type IPRules = { allow: string[]; deny: string[] }
+
+const rulesPath = (kind: "tunnel" | "preview", id: string) =>
+  `${kind === "tunnel" ? tunnelPath(id) : previewPath(id)}/ip-rules`
+
+export const ipRulesQuery = (kind: "tunnel" | "preview", id: string) =>
+  queryOptions({
+    queryKey: ["ip-rules", kind, id] as const,
+    queryFn: ({ signal }) => api<IPRules>(rulesPath(kind, id), { signal }),
+  })
+
+/** Replaces both lists in one request; a 400 `invalid_ip_rules` names the entry the server refused. */
+export const saveIpRules = (kind: "tunnel" | "preview", id: string, rules: IPRules) =>
+  api<IPRules>(rulesPath(kind, id), {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(rules),
+  })

@@ -13,7 +13,7 @@
   const machines = (await (await fetch("/api/v1/machines?limit=200")).json()).data
   const machine = window.__machine ?? (machines.items ?? machines)[0]?.id
   delete window.__machine
-  const pages = window.__pages ?? ["/", `/machines/${machine}`, "/terminals", "/activity", "/billing", "/usage", "/domains"]
+  const pages = window.__pages ?? ["/", `/machines/${machine}`, "/terminals", "/activity", "/billing", "/usage", "/network"]
   delete window.__pages
   for (const path of pages) {
     // The server's HTML: relative times would differ by the time the browser hydrates.

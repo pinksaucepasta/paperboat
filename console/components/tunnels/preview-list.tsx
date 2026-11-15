@@ -1,6 +1,6 @@
 "use client"
 
-import { CopyIcon, EyeIcon, MagnifyingGlassIcon, StopIcon } from "@phosphor-icons/react"
+import { CopyIcon, EyeIcon, InfoIcon, MagnifyingGlassIcon, StopIcon } from "@phosphor-icons/react"
 import { useQueryClient } from "@tanstack/react-query"
 import { useDeferredValue, useState } from "react"
 import { toast } from "sonner"
@@ -55,7 +55,7 @@ function endedAt(preview: Preview) {
  * Whether a live preview answers. The address only works once the edge route and the machine's
  * connection are both ready, and then only while the app on the machine is listening.
  */
-function PreviewStatus({ preview }: { preview: Preview }) {
+export function PreviewStatus({ preview }: { preview: Preview }) {
   const [online, label] =
     preview.state === "owner_disconnected"
       ? [false, "Machine disconnected"]
@@ -219,8 +219,15 @@ function Row({ preview, now, machineName }: { preview: Preview; now: number; mac
   const live = !ended(preview, now)
   const host = hostOf(preview.endpoint)
 
+  const details: Entry = {
+    kind: "item",
+    label: "Details",
+    icon: InfoIcon,
+    href: `/previews/${encodeURIComponent(preview.id)}`,
+  }
   const entries: Entry[] = live
     ? [
+        details,
         {
           kind: "item",
           label: "Copy address",
@@ -236,7 +243,7 @@ function Row({ preview, now, machineName }: { preview: Preview; now: number; mac
         { kind: "separator" },
         { kind: "item", label: "Stop preview", icon: StopIcon, destructive: true, onSelect: () => setStopping(true) },
       ]
-    : []
+    : [details]
 
   const row = (actions: React.ReactNode) => (
     <tr

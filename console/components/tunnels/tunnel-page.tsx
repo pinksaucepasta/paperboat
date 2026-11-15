@@ -6,6 +6,7 @@ import {
   PauseIcon,
   PlayIcon,
   PlusIcon,
+  ShieldWarningIcon,
   WarningCircleIcon,
 } from "@phosphor-icons/react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
@@ -21,6 +22,7 @@ import { CrumbLink, Crumb, PageHeader } from "@/components/page-header"
 import { Time } from "@/components/time"
 import { useTunnelActions } from "@/components/tunnels/tunnel-actions"
 import { TunnelTitle } from "@/components/tunnels/tunnel-rename"
+import { IpRules } from "@/components/tunnels/ip-rules"
 import { TunnelHostnames } from "@/components/tunnels/tunnel-hostnames"
 import { TunnelStatus, tunnelState } from "@/components/tunnels/tunnel-status"
 import {
@@ -171,6 +173,7 @@ function Loaded({ tunnel }: { tunnel: Tunnel }) {
       </div>
 
       <HealthNotice tunnel={tunnel} />
+      <FloodNotice tunnel={tunnel} />
 
       <section className="flex flex-col gap-3">
         <SectionHeading title="Details" />
@@ -199,6 +202,8 @@ function Loaded({ tunnel }: { tunnel: Tunnel }) {
       </section>
 
       <TunnelHostnames tunnel={tunnel} />
+
+      <IpRules kind="tunnel" id={tunnel.id} />
 
       <DangerZone
         title="Delete tunnel"
@@ -235,6 +240,24 @@ function HealthNotice({ tunnel }: { tunnel: Tunnel }) {
             </Link>
           </p>
         )}
+      </div>
+    </div>
+  )
+}
+
+/** Traffic Paperboat's edge refused to protect the edge from floods; nothing shows while there is none. */
+function FloodNotice({ tunnel }: { tunnel: Tunnel }) {
+  const flood = useApiQuery(tunnelHealthQuery(tunnel.id)).data?.flood_protection
+  if (!flood) return null
+  return (
+    <div className="flex items-start gap-3 rounded-lg bg-surface p-4 text-sm" data-flood-protection>
+      <ShieldWarningIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+      <div className="flex min-w-0 flex-col gap-0.5">
+        <p className="font-medium">
+          {flood.refused} {flood.refused === 1 ? "request" : "requests"} refused since{" "}
+          <Time iso={flood.since} />
+        </p>
+        <p className="text-muted-foreground">{flood.summary}</p>
       </div>
     </div>
   )

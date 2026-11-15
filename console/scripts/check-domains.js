@@ -1,5 +1,5 @@
-// Browser check for the Domains page (F8-02): add a workspace domain, show its DNS records, verify it
-// live, show the certificate, refuse nothing extra, remove it. Paste into a signed-in tab on /domains with
+// Browser check for the Domains section of the Network page (F8-02): add a workspace domain, show its DNS records, verify it
+// live, show the certificate, refuse nothing extra, remove it. Paste into a signed-in tab on /network with
 // `window.__domain` set to a new name in a zone you control (e.g. wsd-<n>.<test zone>). The caller
 // creates the records the script publishes in `window.__dnsRecords` ([{type, name, value, purpose}];
 // the verification CNAME is enough) and sets `window.__dnsReady = true`. Prints the steps

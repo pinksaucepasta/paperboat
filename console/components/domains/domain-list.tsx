@@ -21,6 +21,8 @@ import { CommandBlock } from "@/components/add-machine-dialog"
 import { ConfirmAction } from "@/components/list-toolbar"
 import { RowMenus, type Entry } from "@/components/row-menus"
 import { Time } from "@/components/time"
+import { SectionHeading } from "@/components/section"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Field, FieldError, FieldLabel } from "@/components/ui/field"
@@ -31,8 +33,8 @@ import { Skeleton } from "@/components/ui/skeleton"
 /*
  * Domains you add to the workspace once (ngrok reserved domains, Vercel team domains): verified by
  * one _acme-challenge CNAME, then any name under them serves tunnels and previews with HTTPS from
- * the domain's certificate. Paperboat's own machine domain is listed first; it gives machine
- * addresses only.
+ * the domain's certificate. Paperboat's own machine domain is the only Private one; preview and
+ * tunnel addresses and custom domains are Public.
  */
 
 function State({ tone, label }: { tone: Tone; label: string }) {
@@ -67,73 +69,121 @@ function usedBy(domain: WorkspaceDomain) {
   return uses.filter(Boolean).join(", ") || "Not used yet"
 }
 
+function Access({ kind }: { kind: "Private" | "Public" }) {
+  return (
+    <Badge variant="outline" className="font-normal text-muted-foreground">
+      {kind}
+    </Badge>
+  )
+}
+
+const columns = (
+  <>
+    <colgroup>
+      <col className="w-[38%]" />
+      <col className="hidden w-[12%] sm:table-column" />
+      <col className="hidden md:table-column" />
+      <col className="w-[24%]" />
+      <col className="w-12" />
+    </colgroup>
+    <thead className="sr-only">
+      <tr>
+        <th>Domain</th>
+        <th>Access</th>
+        <th>Used by</th>
+        <th>Status</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+  </>
+)
+
+/** Domains and addresses, as part of the Network page: Private ones first, then Public ones. */
 export function DomainList() {
   const workspace = useWorkspace()
   const ws = workspace?.id ?? ""
   const list = useApiQuery({ ...workspaceDomainsQuery(ws), enabled: Boolean(workspace) })
-  const machineDomain = useApiQuery(clientConfigQuery).data?.local_access_base_domain
+  const config = useApiQuery(clientConfigQuery).data
   const [adding, setAdding] = useState(false)
   const [open, setOpen] = useState<string>()
   const selected = list.data?.find((domain) => domain.id === open)
+  const edgeDomains = [
+    config && { domain: config.preview_base_domain, use: "Preview addresses" },
+    config && { domain: config.tunnel_base_domain, use: "Tunnel addresses" },
+  ].filter((row) => row && row.domain) as { domain: string; use: string }[]
 
   return (
-    <section className="flex flex-col gap-3">
-      <div className="flex items-center gap-2">
-        <div className="ml-auto">
+    <section id="domains" className="flex flex-col gap-3">
+      <SectionHeading
+        title="Domains"
+        action={
           <Button size="lg" onClick={() => setAdding(true)}>
             <PlusIcon data-icon="inline-start" />
             Add domain
           </Button>
-        </div>
+        }
+      />
+
+      <div className="flex flex-col gap-1">
+        <p className="text-sm text-muted-foreground">
+          Private: open only on your signed-in computers, end-to-end encrypted.
+        </p>
+        <table className="w-full table-fixed text-sm">
+          {columns}
+          <tbody className="divide-y divide-divider border-y border-divider">
+            {config?.local_access_base_domain && (
+              <tr className="[&>td]:h-14 [&>td]:px-3">
+                <td className="truncate font-mono text-code font-medium">{config.local_access_base_domain}</td>
+                <td className="hidden sm:table-cell">
+                  <Access kind="Private" />
+                </td>
+                <td className="hidden truncate text-muted-foreground md:table-cell">
+                  Machine addresses, like <span className="font-mono text-code">homelab.{config.local_access_base_domain}</span>
+                </td>
+                <td>
+                  <State tone="ok" label="Ready" />
+                </td>
+                <td />
+              </tr>
+            )}
+          </tbody>
+        </table>
       </div>
 
-      <table className="w-full table-fixed text-sm">
-        <colgroup>
-          <col className="w-[38%]" />
-          <col />
-          <col className="w-[24%]" />
-          <col className="w-12" />
-        </colgroup>
-        <thead className="border-b border-divider text-left text-xs text-muted-foreground">
-          <tr className="[&>th]:h-9 [&>th]:px-3 [&>th]:font-normal">
-            <th>Domain</th>
-            <th>Used by</th>
-            <th>Status</th>
-            <th aria-label="Actions" />
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-divider border-b border-divider">
-          {machineDomain && (
-            <tr className="[&>td]:h-14 [&>td]:px-3">
-              <td className="truncate font-mono text-code font-medium">{machineDomain}</td>
-              <td className="truncate text-muted-foreground">
-                Machine addresses, like <span className="font-mono text-code">homelab.{machineDomain}</span>
-              </td>
-              <td>
-                <State tone="ok" label="Ready" />
-              </td>
-              <td />
-            </tr>
-          )}
-          {list.data?.map((domain) => (
-            <DomainRow key={domain.id} domain={domain} onOpen={() => setOpen(domain.id)} />
-          ))}
-        </tbody>
-      </table>
+      <div className="flex flex-col gap-1">
+        <p className="text-sm text-muted-foreground">
+          Public: anyone with the link can open these. HTTPS ends at Paperboat’s edge.
+        </p>
+        <table className="w-full table-fixed text-sm">
+          {columns}
+          <tbody className="divide-y divide-divider border-y border-divider">
+            {edgeDomains.map(({ domain, use }) => (
+              <tr key={use} className="[&>td]:h-14 [&>td]:px-3">
+                <td className="truncate font-mono text-code font-medium">{domain}</td>
+                <td className="hidden sm:table-cell">
+                  <Access kind="Public" />
+                </td>
+                <td className="hidden truncate text-muted-foreground md:table-cell">{use}</td>
+                <td>
+                  <State tone="ok" label="Ready" />
+                </td>
+                <td />
+              </tr>
+            ))}
+            {list.data?.map((domain) => (
+              <DomainRow key={domain.id} domain={domain} onOpen={() => setOpen(domain.id)} />
+            ))}
+          </tbody>
+        </table>
+      </div>
       {list.isPending && <Skeleton className="h-4 w-1/3" />}
       {list.isError && (
         <p className="py-3 text-sm text-muted-foreground">Couldn’t load domains. {list.error.message}</p>
       )}
       {list.data?.length === 0 && (
-        <div className="flex flex-col items-center gap-3 py-12 text-center">
-          <p className="text-sm text-muted-foreground">
-            Add a domain once, then use any name under it for your tunnels and previews.
-          </p>
-          <Button variant="secondary" onClick={() => setAdding(true)}>
-            <PlusIcon data-icon="inline-start" />
-            Add domain
-          </Button>
-        </div>
+        <p className="text-sm text-muted-foreground">
+          Add your own domain once, then use any name under it for your tunnels and previews.
+        </p>
       )}
 
       {adding && (
@@ -182,7 +232,10 @@ function DomainRow({ domain, onOpen }: { domain: WorkspaceDomain; onOpen: () => 
               {domain.hostname}
             </button>
           </td>
-          <td className="truncate text-muted-foreground">{usedBy(domain)}</td>
+          <td className="hidden sm:table-cell">
+            <Access kind="Public" />
+          </td>
+          <td className="hidden truncate text-muted-foreground md:table-cell">{usedBy(domain)}</td>
           <td>
             <State tone={status.tone} label={status.label} />
           </td>

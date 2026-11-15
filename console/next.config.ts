@@ -15,6 +15,13 @@ const nextConfig: NextConfig = {
   async rewrites() {
     return [{ source: "/.paperboat/access/login", destination: "/access-login" }]
   },
+  // Domains live on the Network page and Recordings on the Terminals page; old links still land there.
+  async redirects() {
+    return [
+      { source: "/domains", destination: "/network#domains", permanent: false },
+      { source: "/recordings", destination: "/terminals?view=recordings", permanent: false },
+    ]
+  },
   async headers() {
     // The Ghostty core's URL carries its version, so browsers may keep it for good.
     return [

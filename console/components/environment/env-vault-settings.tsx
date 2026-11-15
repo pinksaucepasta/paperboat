@@ -1,8 +1,11 @@
 "use client"
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { useEffect, useState } from "react"
+import { useEffect, useState, useSyncExternalStore } from "react"
+import { subscribeVaultLock, vaultUnlocked } from "@/lib/envvault/crypto"
+import { readVault } from "@/lib/envvault/vault"
 import { changePassword, newRecoveryCode, recoveryEnabled, replaceRecoveryCode } from "@/lib/envvault/protection"
+import { EnvRecover } from "@/components/environment/env-recover"
 import { PasswordForm, RecoveryCodeStep } from "@/components/environment/env-recovery-code"
 import { Section, SettingRow } from "@/components/section"
 import {
@@ -17,11 +20,51 @@ import {
 } from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
+import { Skeleton } from "@/components/ui/skeleton"
 
 type Change = "password" | "create" | "replace" | "off"
 
-/** Environment page, vault unlocked: the vault's password and its recovery code. */
+/**
+ * Environment page: the Vault section is always there. Unlocked it holds the password and recovery
+ * code; before a vault exists or while it is locked it says what to do, with the recovery path in sight.
+ */
 export function EnvVaultSettings() {
+  const unlocked = useSyncExternalStore(subscribeVaultLock, vaultUnlocked, () => false)
+  return unlocked ? <OpenVault /> : <ClosedVault />
+}
+
+function ClosedVault() {
+  const vault = useQuery({ queryKey: ["env-vault"], queryFn: ({ signal }) => readVault(signal), staleTime: 0 })
+  const [recovering, setRecovering] = useState(false)
+  const notSetUp = vault.isSuccess && !vault.data
+  return (
+    <Section title="Vault">
+      <SettingRow
+        label="Password"
+        description={
+          vault.isPending ? (
+            <Skeleton className="my-0.5 h-4 w-56" />
+          ) : vault.isError ? (
+            vault.error.message
+          ) : notSetUp ? (
+            "Not set up. Create your vault above to store variables."
+          ) : (
+            "Locked. Unlock it above to change the password or recovery code."
+          )
+        }
+      >
+        {!notSetUp && (
+          <Button variant="link" className="h-auto p-0 text-muted-foreground" onClick={() => setRecovering(true)}>
+            Forgot password? Use your recovery code
+          </Button>
+        )}
+      </SettingRow>
+      {recovering && <EnvRecover onCancel={() => setRecovering(false)} />}
+    </Section>
+  )
+}
+
+function OpenVault() {
   const client = useQueryClient()
   const [change, setChange] = useState<Change>()
   const recovery = useQuery({ queryKey: ["env-vault-recovery"], queryFn: recoveryEnabled, staleTime: 0, gcTime: 0 })

@@ -29,6 +29,10 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 
 /** `?machine=`, as `UrlScope` reads it; null outside one (machine tabs pass their machine instead). */
 const PickedMachine = createContext<string | null>(null)
+/** `?view=`, as `UrlScope` reads it (the Terminals page opens on Recordings from a link). */
+const PickedView = createContext<string | null>(null)
+
+export const usePickedView = () => useContext(PickedView)
 
 /**
  * Reads `?machine=` for the lists inside. A prerender can't know it, so the static shell renders the
@@ -44,7 +48,12 @@ export function UrlScope({ children }: { children: React.ReactNode }) {
 }
 
 function FromUrl({ children }: { children: React.ReactNode }) {
-  return <PickedMachine value={useSearchParams().get("machine")}>{children}</PickedMachine>
+  const params = useSearchParams()
+  return (
+    <PickedMachine value={params.get("machine")}>
+      <PickedView value={params.get("view")}>{children}</PickedView>
+    </PickedMachine>
+  )
 }
 
 /**

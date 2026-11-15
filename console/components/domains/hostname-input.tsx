@@ -54,7 +54,7 @@ export function HostnameInput({
     return (
       <p className="text-sm text-muted-foreground">
         No verified domain yet.{" "}
-        <Link href="/domains" className="text-foreground underline underline-offset-4">
+        <Link href="/network#domains" className="text-foreground underline underline-offset-4">
           Add a domain
         </Link>{" "}
         first, then pick a name under it here.

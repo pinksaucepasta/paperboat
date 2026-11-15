@@ -28,12 +28,11 @@ export function MachineEnvironment() {
  */
 export function EnvironmentPage() {
   const [adding, setAdding] = useState(false)
-  const unlocked = useSyncExternalStore(subscribeVaultLock, vaultUnlocked, () => false)
   return (
     <div className="flex flex-col gap-10">
       <EnvironmentList adding={adding} onAddingChange={setAdding} />
       <EnvNamesSwitch />
-      {unlocked && <EnvVaultSettings />}
+      <EnvVaultSettings />
       <Section title="Use them">
         <div className="flex flex-col gap-4 pt-3 text-sm">
           <div className="flex flex-col gap-1.5">

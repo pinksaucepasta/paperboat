@@ -34,13 +34,13 @@ const page = await ctx.newPage()
 try {
   // 1. Personal: recordings are a Teams feature.
   await workspace("personal")
-  await page.goto(`${origin}/recordings`, { waitUntil: "networkidle", timeout: 120000 })
+  await page.goto(`${origin}/terminals?view=recordings`, { waitUntil: "networkidle", timeout: 120000 })
   log(await page.locator("[data-recordings-upgrade]").waitFor({ timeout: 20000 }).then(() => true, () => false), "Personal shows the Teams upgrade state")
 
   // 2. The team's list matches the server's first page.
   await workspace(team)
   const list = await get(`teams/${encodeURIComponent(team)}/recordings?limit=50&offset=0`)
-  await page.goto(`${origin}/recordings`, { waitUntil: "networkidle", timeout: 120000 })
+  await page.goto(`${origin}/terminals?view=recordings`, { waitUntil: "networkidle", timeout: 120000 })
   if (list.status === 409) log(await page.locator("[data-recordings-upgrade]").isVisible(), "a team without the plan shows the upgrade state")
   else {
     const rows = list.body?.data?.recordings ?? []
