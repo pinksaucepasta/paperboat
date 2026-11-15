@@ -124,7 +124,7 @@ func TestConfigurationRefreshFetchesKeysOnlyForAnUnknownKey(t *testing.T) {
 
 // While renewals bring no usable relay, an engine in regional recovery renewed every ~9 s, and its
 // recovery loop asked for a renewal every second: during a relay outage the whole fleet polled. Renewals
-// now back off to about a minute and return to the observation schedule once a relay is usable.
+// now back off to about five minutes and return to the observation schedule once a relay is usable.
 func TestRenewalsBackOffWhileNoRelayIsUsable(t *testing.T) {
 	a, c, signer, _ := networkTestAuthority(t)
 	c.IssuedAt = time.Now().Unix()
@@ -144,7 +144,7 @@ func TestRenewalsBackOffWhileNoRelayIsUsable(t *testing.T) {
 			t.Fatalf("first renewal without a usable relay after %v, want about %v", got, regionalUnusableRetry)
 		}
 		if got := a.nextRefresh(nil, 0, 10); got < regionalUnusableRetryMaximum/2 {
-			t.Fatalf("renewal after ten without a usable relay came after %v, want about a minute", got)
+			t.Fatalf("renewal after ten without a usable relay came after %v, want about five minutes", got)
 		}
 	}
 }

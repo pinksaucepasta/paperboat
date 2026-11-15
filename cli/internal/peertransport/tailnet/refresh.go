@@ -390,10 +390,12 @@ func (a *Authority) knowSigningKeys(ctx context.Context, tokens []string) error 
 // regionalUnusableRetry and regionalUnusableRetryMaximum space renewals while the signed configuration
 // names no usable relay (a relay outage, or relays withheld): every engine renewing every ~9 s, or every
 // second before, for as long as that lasted is the whole fleet polling. No topic announces a relay coming
-// back, so the cap bounds how long a recovered relay waits to be used.
+// back, so the cap bounds how long a recovered relay waits to be used; direct paths do not wait for it. At a
+// minute an idle machine with no relay to use (staging has none) made ~11 renewals per 10 minutes, a fifth of
+// its request budget (PR-03).
 const (
 	regionalUnusableRetry        = 8 * time.Second
-	regionalUnusableRetryMaximum = time.Minute
+	regionalUnusableRetryMaximum = 5 * time.Minute
 )
 
 // nextRefresh is the wait before the next refresh after one that ended with err (nil on success),
