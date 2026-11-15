@@ -1,0 +1,15 @@
+{
+ "check": "xplat-config",
+ "results": [
+  {
+   "id": "X-02:x02:L>M",
+   "status": "PASS",
+   "detail": "machine file > [machine.lanex2-l2] > [os.linux] > shared; override only on lanex2-l2; [os.*]/[machine.*] refused in a machine file; typo warns"
+  },
+  {
+   "id": "X-02:x02:M>L",
+   "status": "PASS",
+   "detail": "machine file > [machine.lanex2-m] > [os.darwin] > shared; override only on lanex2-m; [os.*]/[machine.*] refused in a machine file; typo warns"
+  }
+ ]
+}
