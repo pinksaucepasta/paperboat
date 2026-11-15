@@ -11,6 +11,7 @@ import {
 import { SidebarTrigger } from "@/components/ui/sidebar"
 import { WorkspaceSwitcher } from "@/components/workspace-switcher"
 import { CommandPalette } from "@/components/command-palette"
+import { RequestsMenu } from "@/components/requests-menu"
 
 /** The bar at the top of every page: where you are, and which machine you are looking at. */
 export function PageHeader({ children, actions }: { children: React.ReactNode; actions?: React.ReactNode }) {
@@ -30,6 +31,7 @@ export function PageHeader({ children, actions }: { children: React.ReactNode; a
         </BreadcrumbList>
       </Breadcrumb>
       {actions}
+      <RequestsMenu />
       <CommandPalette />
     </header>
   )
