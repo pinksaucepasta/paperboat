@@ -212,9 +212,7 @@ function AddNameDialog({ wide, domain, onClose }: { wide: boolean; domain: strin
           {needsMachine && (
             <Field className="gap-1.5">
               <FieldLabel>Machine</FieldLabel>
-              <div className="-ml-2.5">
-                <MachinePicker value={machineId} onChange={setMachineId} />
-              </div>
+              <MachinePicker value={machineId} onChange={setMachineId} />
             </Field>
           )}
           <Field data-invalid={Boolean(nameProblem)} className="gap-1.5">
