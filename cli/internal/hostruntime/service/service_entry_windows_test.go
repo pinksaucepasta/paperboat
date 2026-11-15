@@ -67,9 +67,7 @@ func TestSystemServiceEntryDoesNotReportRunningBeforeReadiness(t *testing.T) {
 	if status := <-statuses; status.State != svc.StopPending {
 		t.Fatalf("stop service state=%d want stop pending", status.State)
 	}
-	if status := <-statuses; status.State != svc.Stopped || status.Win32ExitCode != 0 {
-		t.Fatalf("final service status=%+v want clean stop", status)
-	}
+	noStoppedStatus(t, statuses)
 	select {
 	case outcome := <-result:
 		if outcome.failed || outcome.code != 0 {
@@ -96,9 +94,7 @@ func TestSystemServiceEntryFailsIfRunExitsBeforeReadiness(t *testing.T) {
 	if status := <-statuses; status.State != svc.StartPending {
 		t.Fatalf("initial service state=%d want start pending", status.State)
 	}
-	if status := <-statuses; status.State != svc.Stopped || status.Win32ExitCode != uint32(windows.ERROR_SERVICE_SPECIFIC_ERROR) || status.ServiceSpecificExitCode != 1 {
-		t.Fatalf("failed service status=%+v", status)
-	}
+	noStoppedStatus(t, statuses)
 }
 
 func TestSystemServiceEntryTreatsHandoffBeforeReadinessAsCleanStop(t *testing.T) {
@@ -118,9 +114,7 @@ func TestSystemServiceEntryTreatsHandoffBeforeReadinessAsCleanStop(t *testing.T)
 	if status := <-statuses; status.State != svc.StartPending {
 		t.Fatalf("initial service state=%d want start pending", status.State)
 	}
-	if status := <-statuses; status.State != svc.Stopped || status.Win32ExitCode != 0 {
-		t.Fatalf("handoff service status=%+v want clean stop", status)
-	}
+	noStoppedStatus(t, statuses)
 }
 
 func TestSystemServiceEntryDoesNotHideMixedStartupHandoffFailure(t *testing.T) {
@@ -140,9 +134,7 @@ func TestSystemServiceEntryDoesNotHideMixedStartupHandoffFailure(t *testing.T) {
 	if status := <-statuses; status.State != svc.StartPending {
 		t.Fatalf("initial service state=%d want start pending", status.State)
 	}
-	if status := <-statuses; status.State != svc.Stopped || status.ServiceSpecificExitCode != 1 {
-		t.Fatalf("mixed handoff service status=%+v want failure", status)
-	}
+	noStoppedStatus(t, statuses)
 }
 
 func TestSystemServiceEntryDoesNotHideMixedFailureDuringStop(t *testing.T) {
@@ -177,9 +169,7 @@ func TestSystemServiceEntryDoesNotHideMixedFailureDuringStop(t *testing.T) {
 	if status := <-statuses; status.State != svc.StopPending {
 		t.Fatalf("stop service state=%d want stop pending", status.State)
 	}
-	if status := <-statuses; status.State != svc.Stopped || status.ServiceSpecificExitCode != 1 {
-		t.Fatalf("mixed cancellation service status=%+v want failure", status)
-	}
+	noStoppedStatus(t, statuses)
 	select {
 	case outcome := <-result:
 		if !outcome.failed || outcome.code != 1 {
@@ -307,5 +297,22 @@ func TestEnrolledOwnerExistenceDistinguishesResolvedAndDeletedSIDs(t *testing.T)
 	}
 	if _, err := enrolledOwnerExists("not-a-sid"); err == nil {
 		t.Fatal("malformed owner SID was accepted")
+	}
+}
+
+// noStoppedStatus: x/sys/windows/svc takes the exit code only from Execute's return value and sends the
+// final Stopped itself; a Stopped sent through the channel earlier reaches the SCM with exit code 0, so a
+// failed service looked like a clean stop and its recovery action never ran.
+func noStoppedStatus(t *testing.T, statuses <-chan svc.Status) {
+	t.Helper()
+	for {
+		select {
+		case status := <-statuses:
+			if status.State == svc.Stopped {
+				t.Fatalf("Execute sent a Stopped status itself: %+v", status)
+			}
+		default:
+			return
+		}
 	}
 }

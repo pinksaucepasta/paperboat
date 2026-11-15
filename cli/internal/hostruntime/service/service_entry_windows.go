@@ -112,10 +112,8 @@ func (s *systemServiceEntry) Execute(_ []string, requests <-chan svc.ChangeReque
 		case <-readyCh:
 		case err := <-done:
 			if onlyServiceError(err, ErrWindowsServiceHandoff) {
-				statuses <- stoppedServiceStatus(0, false)
 				return false, 0
 			}
-			statuses <- stoppedServiceStatus(1, true)
 			return true, 1
 		case request := <-requests:
 			switch request.Cmd {
@@ -126,10 +124,8 @@ func (s *systemServiceEntry) Execute(_ []string, requests <-chan svc.ChangeReque
 				cancel()
 				err := <-done
 				if err != nil && !onlyContextCanceled(err) && !onlyServiceError(err, ErrWindowsServiceHandoff) {
-					statuses <- stoppedServiceStatus(1, true)
 					return true, 1
 				}
-				statuses <- stoppedServiceStatus(0, false)
 				return false, 0
 			}
 		}
@@ -139,10 +135,8 @@ func (s *systemServiceEntry) Execute(_ []string, requests <-chan svc.ChangeReque
 		select {
 		case err := <-done:
 			if err != nil {
-				statuses <- stoppedServiceStatus(1, true)
 				return true, 1
 			}
-			statuses <- stoppedServiceStatus(0, false)
 			return false, 0
 		case request := <-requests:
 			switch request.Cmd {
@@ -153,10 +147,8 @@ func (s *systemServiceEntry) Execute(_ []string, requests <-chan svc.ChangeReque
 				cancel()
 				err := <-done
 				if err != nil && !onlyContextCanceled(err) {
-					statuses <- stoppedServiceStatus(1, true)
 					return true, 1
 				}
-				statuses <- stoppedServiceStatus(0, false)
 				return false, 0
 			}
 		}
@@ -179,11 +171,9 @@ func (s *serviceEntry) Execute(_ []string, requests <-chan svc.ChangeRequest, st
 			if s.config.LaunchFailure != nil {
 				s.config.LaunchFailure(err)
 			}
-			statuses <- stoppedServiceStatus(1, true)
 			return true, 1
 		}
 		if sidecar.Done == nil {
-			statuses <- stoppedServiceStatus(1, true)
 			return true, 1
 		}
 	}
@@ -208,7 +198,6 @@ func (s *serviceEntry) Execute(_ []string, requests <-chan svc.ChangeRequest, st
 				}
 			}
 		}
-		statuses <- stoppedServiceStatus(1, true)
 		return true, 1
 	}
 	processClosed := false
@@ -266,7 +255,6 @@ func (s *serviceEntry) Execute(_ []string, requests <-chan svc.ChangeRequest, st
 			code = 1
 			failed = true
 		}
-		statuses <- stoppedServiceStatus(code, failed)
 		return failed, code
 	}
 	var waitHandle windows.Handle
@@ -366,13 +354,6 @@ func enrolledOwnerExists(value string) (bool, error) {
 		return false, nil
 	}
 	return err == nil, err
-}
-
-func stoppedServiceStatus(code uint32, failed bool) svc.Status {
-	if !failed {
-		return svc.Status{State: svc.Stopped, Win32ExitCode: code}
-	}
-	return svc.Status{State: svc.Stopped, Win32ExitCode: uint32(windows.ERROR_SERVICE_SPECIFIC_ERROR), ServiceSpecificExitCode: code}
 }
 
 func sessionChangeFor(request svc.ChangeRequest, sessionID uint32) bool {
