@@ -336,13 +336,25 @@ func (s *Service) StoredReceived(ctx context.Context, machine, id, digest string
 		if err := teams.Lock(ctx, tx); err != nil {
 			return err
 		}
-		tag, err := tx.Exec(ctx, `UPDATE team_inbox_requests r SET status='completed',completed_at=coalesce(completed_at,$4),updated_at=$4
+		tag, err := tx.Exec(ctx, `UPDATE team_inbox_requests r SET status='completed',completed_at=coalesce(completed_at,$4),updated_at=$4,
+ decision_generation=decision_generation+CASE WHEN status='consumed' THEN 1 ELSE 0 END,
+ committed_bytes=(SELECT sum((f->>'size')::bigint) FROM jsonb_array_elements(r.manifest) f),transfer_state='done',pause_reason=NULL
  WHERE r.request_id=$2 AND r.stored_machine_id=$1 AND r.manifest_digest=$3 AND r.status IN('consumed','completed')
  AND `+storedMachineAllowed+` AND `+storedAuthorized, machine, id, digest, s.now())
 		if err == nil && tag.RowsAffected() == 0 {
 			return ErrNotFound
 		}
-		return err
+		if err != nil {
+			return err
+		}
+		r, err := readTx(ctx, tx, id, "")
+		if err != nil {
+			return err
+		}
+		if err := s.queueReceiptTx(ctx, tx, r.RecipientAccount, id); err != nil {
+			return err
+		}
+		return auditLifecycleTx(ctx, tx, r.RecipientAccount, r, "complete", id, "completed")
 	})
 	if err != nil {
 		return err

@@ -263,6 +263,7 @@ func TestPostgresStoredApprovalClaimsOneMachineAndDeletesOnReceipt(t *testing.T)
 	if _, err := f.s.Decide(f.ctx, f.recipient, r.RequestID, "approved", r.DecisionGeneration, f.alternate); err != nil {
 		t.Fatal(err)
 	}
+	f.exec(`UPDATE paperboat.user_machines SET state='offline',online=false WHERE id=$1`, f.source)
 	page, err = f.s.StoredDeliverable(f.ctx, f.alternate)
 	if err != nil || len(page.Transfers) != 1 || page.Transfers[0].RequestID != r.RequestID || len(page.Transfers[0].Metadata.SealedKeys) != 1 || len(page.Transfers[0].Metadata.SealedKeys[f.alternate]) == 0 {
 		t.Fatal("approved transfer did not address the alternate host alone", err)
@@ -322,7 +323,7 @@ func TestPostgresStoredApprovalClaimsOneMachineAndDeletesOnReceipt(t *testing.T)
 }
 
 func TestPostgresStoredDeclineExpiryAndRevocationCleanLateUploads(t *testing.T) {
-	for _, reason := range []string{"decline", "expiry", "revocation"} {
+	for _, reason := range []string{"decline", "expiry", "revocation", "source_revocation"} {
 		t.Run(reason, func(t *testing.T) {
 			f := newStoredFixture(t)
 			r := f.uploaded()
@@ -333,6 +334,8 @@ func TestPostgresStoredDeclineExpiryAndRevocationCleanLateUploads(t *testing.T) 
 				}
 			case "expiry":
 				f.exec(`UPDATE paperboat.team_inbox_requests SET expires_at=$2 WHERE request_id=$1`, r.RequestID, f.now.Add(-time.Second))
+			case "source_revocation":
+				f.exec(`UPDATE paperboat.user_machines SET revoked_at=now() WHERE id=$1`, f.source)
 			case "revocation":
 				f.exec(`UPDATE paperboat.team_members SET active=false WHERE team_id=$1 AND account_id=$2`, f.team, f.sender)
 			}
@@ -363,5 +366,25 @@ func TestPostgresStoredDeclineExpiryAndRevocationCleanLateUploads(t *testing.T) 
 				t.Fatal("terminal request remained deliverable", err)
 			}
 		})
+	}
+}
+
+func TestPostgresStoredBucketCannotBeRemovedBeforeCleanup(t *testing.T) {
+	f := newStoredFixture(t)
+	f.exec(`INSERT INTO paperboat.team_buckets(team_id,endpoint,region,bucket,prefix,path_style,access_key_id,secret,checked_at,use_files)
+ VALUES($1,'https://bucket.example.test','test-region','test-bucket','stored-tests',true,'test-access',decode('00','hex'),now(),true)`, f.team)
+	r, err := f.create()
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := teambucket.New(f.db, "test-bucket-custody-key")
+	if err := service.Delete(f.ctx, f.recipient, f.team); !errors.Is(err, teambucket.ErrInUse) {
+		t.Fatalf("pending files lost bucket custody: %v", err)
+	}
+	if _, err := f.s.Decide(f.ctx, f.recipient, r.RequestID, "declined", r.DecisionGeneration); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.Delete(f.ctx, f.recipient, f.team); err != nil {
+		t.Fatalf("cleaned request still held bucket: %v", err)
 	}
 }

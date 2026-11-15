@@ -45,6 +45,7 @@ func teamBucketCommand() *cobra.Command {
 	for _, flag := range []struct{ name, help string }{{"endpoint", "https address of the S3 service, without a path"}, {"region", "region of the bucket"}, {"bucket", "bucket name"}, {"prefix", "optional folder inside the bucket"}, {"access-key-id", "access key ID"}} {
 		set.Flags().String(flag.name, "", flag.help)
 	}
+	set.Flags().Bool("use-files", false, "hold encrypted files for recipients until they accept")
 	set.Flags().Bool("path-style", false, "address the bucket in the URL path (MinIO and some other services)")
 	set.Flags().Bool("secret-access-key-stdin", false, "read the secret access key from standard input")
 	set.Flags().Bool("json", false, "print JSON")
@@ -76,6 +77,7 @@ func bucketInput(c *cobra.Command) (teambucket.Input, error) {
 	flag := func(name string) string { value, _ := c.Flags().GetString(name); return strings.TrimSpace(value) }
 	in := teambucket.Input{Endpoint: flag("endpoint"), Region: flag("region"), Bucket: flag("bucket"), Prefix: flag("prefix"), AccessKeyID: flag("access-key-id")}
 	in.PathStyle, _ = c.Flags().GetBool("path-style")
+	in.UseFiles, _ = c.Flags().GetBool("use-files")
 	if stdin, _ := c.Flags().GetBool("secret-access-key-stdin"); stdin {
 		line, err := bufio.NewReader(io.LimitReader(c.InOrStdin(), 1024)).ReadString('\n')
 		if err != nil && err != io.EOF {
@@ -97,7 +99,7 @@ func printBucket(w io.Writer, config teambucket.Config, asJSON bool) error {
 	if prefix == "" {
 		prefix = "(bucket root)"
 	}
-	_, err := fmt.Fprintf(w, "Bucket: %s on %s (%s)\nPrefix: %s\nAccess key ID: %s\nChecked: %s\n",
-		config.Bucket, config.Endpoint, config.Region, prefix, config.AccessKeyID, config.CheckedAt.Local().Format(time.RFC3339))
+	_, err := fmt.Fprintf(w, "Bucket: %s on %s (%s)\nPrefix: %s\nPending files: %t\nAccess key ID: %s\nChecked: %s\n",
+		config.Bucket, config.Endpoint, config.Region, prefix, config.UseFiles, config.AccessKeyID, config.CheckedAt.Local().Format(time.RFC3339))
 	return err
 }

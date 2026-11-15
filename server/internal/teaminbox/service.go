@@ -617,15 +617,8 @@ func (s *Service) Complete(ctx context.Context, recipient, requestID, digest str
 				return err
 			}
 		}
-		var optedIn bool
-		if err = tx.QueryRow(ctx, `SELECT coalesce((SELECT receipt_email FROM team_inbox_policies WHERE account_id=$1),false)`, recipient).Scan(&optedIn); err != nil {
+		if err := s.queueReceiptTx(ctx, tx, recipient, requestID); err != nil {
 			return err
-		}
-		if optedIn {
-			_, err = tx.Exec(ctx, `INSERT INTO team_inbox_receipt_outbox(request_id,recipient_account) VALUES($1,$2) ON CONFLICT(request_id) DO NOTHING`, requestID, recipient)
-			if err != nil {
-				return err
-			}
 		}
 		return auditLifecycleTx(ctx, tx, recipient, out, "complete", requestID, "completed")
 	})
@@ -638,3 +631,15 @@ func ManifestDigest(files []File) (string, error) {
 }
 
 func (r Request) String() string { return fmt.Sprintf("%s:%s", r.RequestID, r.Status) }
+
+func (s *Service) queueReceiptTx(ctx context.Context, tx *db.Tx, recipient, requestID string) error {
+	var optedIn bool
+	if err := tx.QueryRow(ctx, `SELECT coalesce((SELECT receipt_email FROM team_inbox_policies WHERE account_id=$1),false)`, recipient).Scan(&optedIn); err != nil {
+		return err
+	}
+	if !optedIn {
+		return nil
+	}
+	_, err := tx.Exec(ctx, `INSERT INTO team_inbox_receipt_outbox(request_id,recipient_account) VALUES($1,$2) ON CONFLICT(request_id) DO NOTHING`, requestID, recipient)
+	return err
+}

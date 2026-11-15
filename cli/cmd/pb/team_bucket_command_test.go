@@ -27,9 +27,9 @@ func bucketCommandWith(t *testing.T, stdin string, args ...string) (teambucket.I
 }
 
 func TestBucketInputTakesTheSecretFromStandardInputAndChecksTheRest(t *testing.T) {
-	base := []string{"--endpoint", "https://s3.example.test", "--region", "us-east-1", "--bucket", "team-bucket", "--access-key-id", "AKIAEXAMPLE", "--secret-access-key-stdin"}
+	base := []string{"--endpoint", "https://s3.example.test", "--region", "us-east-1", "--bucket", "team-bucket", "--access-key-id", "AKIAEXAMPLE", "--use-files", "--secret-access-key-stdin"}
 	in, err := bucketCommandWith(t, "top-secret\nignored\n", base...)
-	if err != nil || in.SecretAccessKey != "top-secret" || in.Prefix != "" {
+	if err != nil || in.SecretAccessKey != "top-secret" || !in.UseFiles || in.Prefix != "" {
 		t.Fatalf("%+v %v", in, err)
 	}
 	if in, err = bucketCommandWith(t, "", base[:len(base)-1]...); err != nil || in.SecretAccessKey != "" {
