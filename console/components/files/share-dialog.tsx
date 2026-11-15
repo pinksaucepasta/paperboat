@@ -161,8 +161,14 @@ function InboxBody({
   onShared: (shared: Shared) => void
   onCancel: () => void
 }) {
+  const workspace = useWorkspace()
   const share = useMutation({
-    mutationFn: () => shareInboxFile(source.machine.id, source.file.id, { access: settings.access, hours: settings.hours }),
+    mutationFn: () =>
+      shareInboxFile(source.machine.id, source.file.id, {
+        access: settings.access,
+        hours: settings.hours,
+        workspace: workspace?.id ?? "personal",
+      }),
     onSuccess: (id) =>
       onShared({
         id,

@@ -109,10 +109,10 @@ export const sendToMachine = (machineId: string, fileId: string, destinationId: 
 export const shareInboxFile = async (
   machineId: string,
   fileId: string,
-  input: { access: "public" | "private"; hours: number },
+  input: { access: "public" | "private"; hours: number; workspace: string },
 ) =>
   resourceId(
-    await post<OperationOrResource>(`${filePath(machineId, fileId)}/share`, {
+    await post<OperationOrResource>(`${filePath(machineId, fileId)}/share?${new URLSearchParams({ workspace: input.workspace })}`, {
       access_mode: input.access,
       expires_at: new Date(Date.now() + input.hours * 3_600_000).toISOString(),
     }),
@@ -141,7 +141,7 @@ export function shareNewFile(
     const name = receipt ? inboxBasename(receipt) : input.file.name
     const item = (await steps.list(input.machine.id, input.workspace)).items.find((entry) => entry.name === name)
     if (!item) throw new Error(`${input.file.name} reached the machine but isn't in its Inbox yet. Share it from its row in a moment.`)
-    return steps.share(input.machine.id, item.id, { access: input.access, hours: input.hours })
+    return steps.share(input.machine.id, item.id, { access: input.access, hours: input.hours, workspace: input.workspace })
   })
   return { done, cancel: upload.cancel }
 }

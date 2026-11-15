@@ -17,7 +17,7 @@ function steps(options: { receipt?: string; items?: InboxFile[]; uploadFails?: s
     }
   }
   const list = async () => ({ total: 1, items: options.items ?? [item("file_1", "report.html")] })
-  const share = async (machineId: string, fileId: string, input: { access: string; hours: number }) => {
+  const share = async (machineId: string, fileId: string, input: { access: string; hours: number; workspace: string }) => {
     calls.shared.push([machineId, fileId, input])
     return "preview_1"
   }
@@ -31,7 +31,7 @@ test("a new file goes into the machine's Inbox, then that Inbox file is shared w
   const result = await shareNewFile(input, (fraction) => fractions.push(fraction), fake).done
   expect(result).toBe("preview_1")
   expect(calls.upload).toEqual([["machine_1", "personal", "report.html"]])
-  expect(calls.shared).toEqual([["machine_1", "file_1", { access: "private", hours: 8 }]])
+  expect(calls.shared).toEqual([["machine_1", "file_1", { access: "private", hours: 8, workspace: "personal" }]])
   expect(fractions).toEqual([0.5])
 })
 
@@ -41,7 +41,7 @@ test("the Inbox file is found under the name the machine gave it, not the upload
     items: [item("file_old", "report.html"), item("file_new", "report (2).html")],
   })
   await shareNewFile(input, () => undefined, fake).done
-  expect(calls.shared).toEqual([["machine_1", "file_new", { access: "private", hours: 8 }]])
+  expect(calls.shared).toEqual([["machine_1", "file_new", { access: "private", hours: 8, workspace: "personal" }]])
 })
 
 test("a file missing from the Inbox or a failed upload is a sentence, and nothing is shared", async () => {
