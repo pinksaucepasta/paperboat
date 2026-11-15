@@ -78,7 +78,12 @@ type Coordinator struct {
 	retryAttempt  int
 	retryPeers    []*daemonrpc.PeerUpdate
 	retryRevision uint64
-	domain        atomic.Pointer[string] // the local access domain, as the machine guard reports it
+	// lastPeers/lastRevision are the newest snapshot reconciled; the guard watch re-applies it after the guard
+	// restarts (guarded by snapshotMu; haveSnapshot is false until the first reconcile).
+	lastPeers    []*daemonrpc.PeerUpdate
+	lastRevision uint64
+	haveSnapshot bool
+	domain       atomic.Pointer[string] // the local access domain, as the machine guard reports it
 }
 
 // connectTimeout bounds connecting to the protected machine-name service and stopping the coordinator.
@@ -171,8 +176,12 @@ func (c *Coordinator) Start(parent context.Context) (err error) {
 	c.mu.Lock()
 	c.rpcListener, c.rpcServer, c.running = listener, server, true
 	c.mu.Unlock()
-	c.wg.Add(1)
-	runCtx := c.ctx
+	c.wg.Add(2)
+	runCtx, watchEvery := c.ctx, guardWatchInterval
+	go func() {
+		defer c.wg.Done()
+		c.watchGuard(runCtx, watchEvery)
+	}()
 	go func() {
 		defer c.wg.Done()
 		if err := server.Serve(listener); err != nil {
@@ -391,6 +400,11 @@ func (c *Coordinator) applySnapshot(peers []*daemonrpc.PeerUpdate, revision uint
 func (c *Coordinator) reconcileSnapshot(ctx context.Context, peers []*daemonrpc.PeerUpdate, revision uint64) error {
 	c.snapshotMu.Lock()
 	defer c.snapshotMu.Unlock()
+	return c.reconcileSnapshotLocked(ctx, peers, revision)
+}
+
+func (c *Coordinator) reconcileSnapshotLocked(ctx context.Context, peers []*daemonrpc.PeerUpdate, revision uint64) error {
+	c.lastPeers, c.lastRevision, c.haveSnapshot = peers, revision, true
 	before := c.PendingLocalAccessStep()
 	err := c.applySnapshotLocked(ctx, peers, revision)
 	c.reconcileErr = err
@@ -414,6 +428,47 @@ func (c *Coordinator) reconcileSnapshot(ctx context.Context, peers []*daemonrpc.
 		c.resetReconcileRetry()
 	}
 	return err
+}
+
+// guardWatchInterval is how often a successful reconciliation checks that the guard connection still answers.
+// A restarted guard drops the connection and every lease on it; nothing else tells the daemon, because a
+// reconciliation that succeeded schedules no retry (a Linux daemon stayed unregistered until it was restarted).
+var guardWatchInterval = 10 * time.Second
+
+func (c *Coordinator) watchGuard(ctx context.Context, every time.Duration) {
+	ticker := time.NewTicker(every)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			c.checkGuard(ctx)
+		}
+	}
+}
+
+// checkGuard re-applies the latest snapshot when the connected guard no longer answers; the reconcile drops
+// the dead client, and its own retry backoff connects to the restarted guard.
+func (c *Coordinator) checkGuard(ctx context.Context) {
+	c.mu.Lock()
+	client := c.nameClient
+	c.mu.Unlock()
+	if client == nil {
+		return // no connection to lose: a failed reconcile is already retrying
+	}
+	statusCtx, cancel := context.WithTimeout(ctx, connectTimeout)
+	_, err := client.Status(statusCtx)
+	cancel()
+	if err == nil || ctx.Err() != nil {
+		return
+	}
+	c.snapshotMu.Lock()
+	defer c.snapshotMu.Unlock()
+	if !c.haveSnapshot {
+		return
+	}
+	_ = c.reconcileSnapshotLocked(ctx, c.lastPeers, c.lastRevision)
 }
 
 // Local access setup that fails (machine names, browser aliases, the browser certificate) is retried with
