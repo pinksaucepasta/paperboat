@@ -23,6 +23,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { isLimitReached, LimitReached } from "@/components/limit-reached"
+import { useTrack } from "@/lib/analytics"
 import { Field, FieldError, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { NewMachineAccess } from "@/components/team/new-machine-access"
@@ -175,6 +176,8 @@ function AddMachine({
   onDone: () => void
 }) {
   const queryClient = useQueryClient()
+  const track = useTrack()
+  const workspaceKind = workspace === "personal" ? "personal" : "team"
   // The token is the same for every computer; the toggle only picks which installer path the command uses.
   const [shell, setShell] = useState<Shell>("posix")
   const [name, setName] = useState("")
@@ -220,9 +223,15 @@ function AddMachine({
     [],
   )
 
+  const started = enrollment?.id
   useEffect(() => {
-    if (state === "ready" && machineId) void queryClient.invalidateQueries({ queryKey: ["machines"] })
-  }, [state, machineId, queryClient])
+    if (started) track("add_machine_started", { workspace_kind: workspaceKind })
+  }, [started, workspaceKind, track])
+  useEffect(() => {
+    if (state !== "ready" || !machineId) return
+    void queryClient.invalidateQueries({ queryKey: ["machines"] })
+    track("machine_paired", { workspace_kind: workspaceKind, via: "pairing_command" })
+  }, [state, machineId, queryClient, track, workspaceKind])
 
   const finalName = name.replace(/-+$/, "")
   const problem = nameProblem(name)

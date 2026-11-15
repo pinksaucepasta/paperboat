@@ -22,7 +22,7 @@ const commands = [
           <code class="command">
             <span class="prompt">{item.prompt}</span> {item.command}
           </code>
-          <button class="copy" type="button" data-copy={item.command} aria-label={`Copy the ${item.label} install command`}>
+          <button class="copy" type="button" data-copy={item.command} data-os={item.key} aria-label={`Copy the ${item.label} install command`}>
             <Icon name="copy" size={18} class="when-idle" />
             <Icon name="check" size={18} class="when-copied" />
             <span class="visually-hidden" role="status" data-copy-status />

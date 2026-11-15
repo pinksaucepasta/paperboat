@@ -11,6 +11,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
 import { useMachines, useWorkspace, type Machine } from "@/lib/api"
 import { createPreview, hostOf, isRouting, previewPoll, previewQuery, type Preview } from "@/lib/tunnels"
+import { useTrack } from "@/lib/analytics"
 import { useNow } from "@/lib/use-now"
 import { CopyRow } from "@/components/copy-button"
 import { HostnameInput } from "@/components/domains/hostname-input"
@@ -63,6 +64,7 @@ function NewPreviewDialog({ machine, onClose }: { machine?: Machine; onClose: ()
       ? "Enter an address like demo.acme.dev."
       : undefined
 
+  const track = useTrack()
   const create = useMutation({
     mutationFn: () =>
       createPreview({
@@ -73,7 +75,10 @@ function NewPreviewDialog({ machine, onClose }: { machine?: Machine; onClose: ()
         hours,
         hostname: ownAddress ? hostname : undefined,
       }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["previews"] }),
+    onSuccess: () => {
+      track("preview_created", { workspace_kind: workspace?.kind ?? "personal", access, own_address: ownAddress })
+      return queryClient.invalidateQueries({ queryKey: ["previews"] })
+    },
   })
   const ready = Boolean(target && canPreview(target) && port.value && (!ownAddress || (hostname && !hostnameProblem)))
 

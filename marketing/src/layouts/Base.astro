@@ -1,5 +1,6 @@
 ---
 import "../styles/global.css"
+import { consoleUrl } from "../site"
 import figtree from "@fontsource-variable/figtree/files/figtree-latin-wght-normal.woff2?url"
 import geist from "@fontsource-variable/geist/files/geist-latin-wght-normal.woff2?url"
 import mono from "@fontsource-variable/jetbrains-mono/files/jetbrains-mono-latin-wght-normal.woff2?url"
@@ -57,10 +58,12 @@ const graph = [organization, ...schema.map((item) => ({ "@context": "https://sch
     <meta name="twitter:image" content={ogImage} />
     {graph.map((item) => <script type="application/ld+json" set:html={JSON.stringify(item)} />)}
   </head>
-  <body>
+  <body data-console={new URL(consoleUrl).origin}>
     <a class="skip" href="#main">Skip to content</a>
     <slot />
     <script>
+      import { startAnalytics } from "../analytics"
+      startAnalytics(document.body.dataset.console ?? "")
       // Windows visitors see the Windows install command first.
       if (/Windows/.test(navigator.userAgent))
         document.querySelectorAll<HTMLInputElement>("[data-windows-tab]").forEach((input) => (input.checked = true))

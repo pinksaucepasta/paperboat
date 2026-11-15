@@ -438,3 +438,24 @@ Tailscale-grade machine page would also need, reported by the daemon and stored 
 - **Client:** release channel, auto-update on/off, last update result, daemon start time.
 - **Security:** identity key expiry or rotation date, SSH host key fingerprints (already served
   by `/v1/machines/{id}/ssh-host-keys`).
+
+## Product analytics (PostHog)
+
+`lib/analytics.ts`: explicit events, no SDK, no autocapture, no session replay. Build env:
+`NEXT_PUBLIC_POSTHOG_KEY` and `NEXT_PUBLIC_POSTHOG_HOST` (public browser key; in `.env.local`, never in git).
+Without them, with Do Not Track or Global Privacy Control, or with Settings → Privacy → "Share usage
+statistics" off (per browser), nothing is sent; a blocked request is ignored. Events carry the account's
+server id and coarse properties only: never email, machine or team name, command, file name, URL or content.
+Nothing runs in apps behind previews or tunnels.
+
+| Event | When | Properties |
+|---|---|---|
+| `add_machine_started` | Add machine dialog got its pairing token | `workspace_kind` |
+| `machine_paired` | the server reports the enrollment `ready` with a machine | `workspace_kind`, `via` |
+| `cli_approved` | the server accepted the approval on `/cli/authorize` | `enroll` |
+| `preview_created` | the server accepted a preview from the console | `workspace_kind`, `access`, `own_address` |
+| `invitation_accepted` | the server accepted a team invitation | `role` |
+| `checkout_completed` | billing shows the plan after the page waited for Stripe's webhook | `workspace_kind`, `product` |
+
+Tunnels are created by `pb tunnel`, not the console, so there is no console tunnel event.
+The marketing site sends `pageview` (path only), `install_command_copied` and `signup_clicked` (see its `.env.example`).

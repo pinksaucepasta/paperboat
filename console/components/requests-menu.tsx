@@ -24,6 +24,7 @@ import {
 } from "@/lib/requests"
 import { answerInvitation, answerMachine, roleLabels, type TeamInvitation } from "@/lib/teams"
 import { queryKeys } from "@/lib/query-keys"
+import { useTrack } from "@/lib/analytics"
 
 /**
  * The header's Requests: things waiting for you to accept or decline (files teammates want to send,
@@ -179,9 +180,11 @@ function InvitationRequests({ total, page, go }: { total: number; page: number; 
 
 function InvitationRequest({ invitation }: { invitation: TeamInvitation }) {
   const queryClient = useQueryClient()
+  const track = useTrack()
   const answer = useMutation({
     mutationFn: (reply: "accept" | "decline") => answerInvitation(invitation.invitation_id, reply),
     onSuccess: async (_, reply) => {
+      if (reply === "accept") track("invitation_accepted", { role: invitation.role })
       await queryClient.invalidateQueries({ queryKey: ["my-invitations"] })
       if (reply === "accept") await queryClient.invalidateQueries({ queryKey: workspacesQuery.queryKey })
       toast.success(reply === "accept" ? `Joined ${invitation.team_id}` : "Declined")

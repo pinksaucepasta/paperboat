@@ -2,7 +2,7 @@
 
 import { CircleNotchIcon } from "@phosphor-icons/react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { ApiError, idempotencyKey, useApiQuery, useWorkspace, type Workspace } from "@/lib/api"
 import {
   billingProductsQuery,
@@ -19,6 +19,7 @@ import {
 import { formatBytes } from "@/lib/format"
 import { PlanActions, Seats, TopUps } from "@/components/billing/billing-sections"
 import { Row, Section } from "@/components/section"
+import { useTrack } from "@/lib/analytics"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
@@ -66,6 +67,17 @@ function useConfirmingCheckout(workspace: Workspace | undefined, billing: Billin
     window.history.replaceState(null, "", url)
   }, [])
   const active = since !== null && !billing?.product_code
+  const track = useTrack()
+  const product = billing?.product_code
+  const waited = useRef(false)
+  useEffect(() => {
+    // Counted when the server shows the plan after the page waited for it; a top-up on an existing plan is not.
+    if (active && billing) waited.current = true
+    else if (waited.current && product) {
+      waited.current = false
+      track("checkout_completed", { workspace_kind: workspace?.kind ?? "personal", product })
+    }
+  }, [active, billing, product, workspace?.kind, track])
   useEffect(() => {
     if (!active || !workspace) return
     const timer = setInterval(() => {

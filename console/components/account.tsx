@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation"
 import { meQuery, useApiQuery } from "@/lib/api"
 import { accountDeletionLive } from "@/lib/account-deletion"
-import { setHideEmail, useHideEmail } from "@/lib/privacy"
+import { setAnalyticsOff, setHideEmail, useAnalyticsOff, useHideEmail } from "@/lib/privacy"
 import { Email } from "@/components/email"
 import { TransferModeSection } from "@/components/transfer-mode"
 import { DangerZone, Section, SettingRow } from "@/components/section"
@@ -14,6 +14,7 @@ export function Account() {
   const router = useRouter()
   const { data: me } = useApiQuery(meQuery)
   const hideEmail = useHideEmail()
+  const analyticsOff = useAnalyticsOff()
   return (
     <>
       <Section title="Profile">
@@ -27,6 +28,13 @@ export function Account() {
           description="Blurs your email in this browser, for screen sharing and screenshots."
         >
           <Switch id="hide-email" checked={hideEmail} onCheckedChange={setHideEmail} />
+        </SettingRow>
+        <SettingRow
+          label="Share usage statistics"
+          htmlFor="usage-statistics"
+          description="Counts steps like adding a machine or starting a preview, tied to a random account id. Never names, emails, commands or content. This browser only."
+        >
+          <Switch id="usage-statistics" checked={!analyticsOff} onCheckedChange={(on) => setAnalyticsOff(!on)} />
         </SettingRow>
       </Section>
       <TransferModeSection />

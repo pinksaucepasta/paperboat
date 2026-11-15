@@ -11,6 +11,7 @@ import { Field, FieldDescription, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { NewMachineAccess } from "@/components/team/new-machine-access"
 import { WorkspacePicker } from "@/components/workspace-picker"
+import { useTrack } from "@/lib/analytics"
 
 type DeviceRequest = Data<"/v1/auth/device/requests/{user_code}">
 
@@ -68,6 +69,7 @@ function Request({ code }: { code: string }) {
     retry: false,
   })
   const workspaces = useApiQuery(workspacesQuery)
+  const track = useTrack()
   const decide = useMutation({
     mutationFn: ({ decision, workspaceId }: { decision: "approve" | "deny"; workspaceId?: string }) =>
       api<DeviceRequest>(`${requestPath(code)}/${decision}`, {
@@ -77,7 +79,10 @@ function Request({ code }: { code: string }) {
           body: JSON.stringify({ workspace_id: workspaceId }),
         }),
       }),
-    onSuccess: (data) => client.setQueryData(key, data),
+    onSuccess: (data) => {
+      if (data.state === "approved") track("cli_approved", { enroll: data.enroll })
+      client.setQueryData(key, data)
+    },
   })
 
   if (request.isPending || workspaces.isPending) {
