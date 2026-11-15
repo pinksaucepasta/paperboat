@@ -115,12 +115,16 @@ func attributeOwnerState(tuple socketTuple, lookup lookupOwners, live bool) (uin
 // attributeConnection finds the daemon an accepted gateway connection belongs to. daemons maps a uid to its
 // registered daemon; a uid without one (root, system users, users who never installed) is refused with
 // errAttributionNoDaemon, which the gateway answers with the refusal page on 80 and a close elsewhere (443 too:
-// no per-user CA exists for such a caller, so no certificate it trusts).
-func attributeConnection[D any](accepted net.Conn, lookup lookupOwners, daemons func(uint32) (D, bool)) (uint32, D, error) {
+// no per-user CA exists for such a caller, so no certificate it trusts). port is the port the client dialed when
+// the gateway listens elsewhere (0: the accepted connection's own).
+func attributeConnection[D any](accepted net.Conn, port uint16, lookup lookupOwners, daemons func(uint32) (D, bool)) (uint32, D, error) {
 	var none D
 	tuple, err := clientTuple(accepted)
 	if err != nil {
 		return 0, none, err
+	}
+	if port != 0 { // a redirected gateway port: the client socket still names the port it dialed
+		tuple.Destination = netip.AddrPortFrom(tuple.Destination.Addr(), port)
 	}
 	uid, err := attributeOwner(tuple, lookup)
 	if err != nil {

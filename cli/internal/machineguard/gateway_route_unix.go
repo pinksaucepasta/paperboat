@@ -24,13 +24,21 @@ import (
 const gatewayRouting = true
 
 type sharedGateway struct {
-	port     int
+	port     int // the port clients connect to (browser URLs)
 	listener net.Listener
 	mu       sync.Mutex
 	routes   map[uint32]*gatewayRoute
 	slots    chan struct{}
 	lookup   lookupOwners
 	release  func(*sharedGateway) // called once the last route is closed, under the guard lock
+}
+
+// listenPort is the port the listener really holds: port, or the free high port a nat rule redirects it to.
+func (s *sharedGateway) listenPort() int {
+	if addr, ok := s.listener.Addr().(*net.TCPAddr); ok && addr.Port != 0 {
+		return addr.Port
+	}
+	return s.port
 }
 
 // gatewayRoute is one uid's registration on a gateway port. It stands in a lease as its listener: File gives the
@@ -52,6 +60,10 @@ func (g *guardServer) routeGateway(ctx context.Context, uid string, port int) (*
 	gateway := g.gateways[port]
 	if gateway == nil {
 		listener, err := listenProtected(ctx, net.JoinHostPort(splitdns.BrowserGatewayIP, strconv.Itoa(port)), g.cfg.LoopbackCIDR)
+		if errors.Is(err, ErrPortInUse) && gatewayRedirects {
+			// A web server holds this port on every address: listen on a free one; the guard's nat rule sends the gateway address there.
+			listener, err = listenProtected(ctx, net.JoinHostPort(splitdns.BrowserGatewayIP, "0"), g.cfg.LoopbackCIDR)
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -114,7 +126,7 @@ func (s *sharedGateway) route(uid uint32) (*gatewayRoute, bool) {
 // handoff attributes one accepted connection and passes it to its uid's daemon; anything else is refused.
 func (s *sharedGateway) handoff(accepted net.Conn) {
 	defer accepted.Close()
-	_, route, err := attributeConnection(accepted, s.lookup, s.route)
+	_, route, err := attributeConnection(accepted, uint16(s.port), s.lookup, s.route)
 	if err != nil {
 		countGatewayRefusal(attributionRefusalReason(err), s.port, err)
 		if s.port == 80 {

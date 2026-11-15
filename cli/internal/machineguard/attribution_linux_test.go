@@ -65,7 +65,7 @@ func TestGatewayAttributesTheConnectingSocketsUID(t *testing.T) {
 	client, accepted := gatewayPair(t, gatewayListener(t), &net.Dialer{})
 	defer client.Close()
 	defer accepted.Close()
-	uid, daemon, err := attributeConnection(accepted, lookupOwnersINETDiag, ownDaemon)
+	uid, daemon, err := attributeConnection(accepted, 0, lookupOwnersINETDiag, ownDaemon)
 	if err != nil || uid != uint32(os.Getuid()) || daemon != "daemon" {
 		t.Fatalf("attribution = %d %q %v, want own uid", uid, daemon, err)
 	}
@@ -76,7 +76,7 @@ func TestGatewayRefusesAUIDWithoutADaemon(t *testing.T) {
 	defer client.Close()
 	defer accepted.Close()
 	noDaemons := func(uint32) (string, bool) { return "", false }
-	if _, _, err := attributeConnection(accepted, lookupOwnersINETDiag, noDaemons); !errors.Is(err, errAttributionNoDaemon) || !errors.Is(err, ErrAttribution) {
+	if _, _, err := attributeConnection(accepted, 0, lookupOwnersINETDiag, noDaemons); !errors.Is(err, errAttributionNoDaemon) || !errors.Is(err, ErrAttribution) {
 		t.Fatalf("attribution without a daemon = %v, want refused", err)
 	}
 }
@@ -89,7 +89,7 @@ func TestGatewayRefusesAPeerThatClosedBeforeLookup(t *testing.T) {
 		}
 		_ = client.Close()
 		time.Sleep(10 * time.Millisecond)
-		if uid, _, err := attributeConnection(accepted, lookupOwnersINETDiag, ownDaemon); !errors.Is(err, ErrAttribution) {
+		if uid, _, err := attributeConnection(accepted, 0, lookupOwnersINETDiag, ownDaemon); !errors.Is(err, ErrAttribution) {
 			t.Fatalf("closed peer (reset %v) attributed to %d", reset, uid)
 		}
 		_ = accepted.Close()
@@ -110,7 +110,7 @@ func TestGatewayAttributionUnderTupleReuseChurn(t *testing.T) {
 	var previous string
 	for round := 0; round < 100; round++ {
 		client, accepted := gatewayPair(t, listener, dialer)
-		if uid, _, err := attributeConnection(accepted, lookupOwnersINETDiag, ownDaemon); err != nil || uid != uint32(os.Getuid()) {
+		if uid, _, err := attributeConnection(accepted, 0, lookupOwnersINETDiag, ownDaemon); err != nil || uid != uint32(os.Getuid()) {
 			t.Fatalf("round %d: live connection = %d %v", round, uid, err)
 		}
 		if previous != "" && previous != accepted.RemoteAddr().String() {
@@ -120,7 +120,7 @@ func TestGatewayAttributionUnderTupleReuseChurn(t *testing.T) {
 		_ = client.(*net.TCPConn).SetLinger(0)
 		_ = client.Close()
 		time.Sleep(time.Millisecond)
-		if _, _, err := attributeConnection(accepted, lookupOwnersINETDiag, ownDaemon); !errors.Is(err, ErrAttribution) {
+		if _, _, err := attributeConnection(accepted, 0, lookupOwnersINETDiag, ownDaemon); !errors.Is(err, ErrAttribution) {
 			t.Fatalf("round %d: reset client still attributed: %v", round, err)
 		}
 		_ = accepted.Close()
@@ -164,7 +164,7 @@ func TestGatewayAttributesAnIPv6LoopbackConnection(t *testing.T) {
 	client, accepted := gatewayPair(t, listener, &net.Dialer{})
 	defer client.Close()
 	defer accepted.Close()
-	if uid, _, err := attributeConnection(accepted, lookupOwnersINETDiag, ownDaemon); err != nil || uid != uint32(os.Getuid()) {
+	if uid, _, err := attributeConnection(accepted, 0, lookupOwnersINETDiag, ownDaemon); err != nil || uid != uint32(os.Getuid()) {
 		t.Fatalf("IPv6 connection = uid %d, %v; want this process's uid", uid, err)
 	}
 }

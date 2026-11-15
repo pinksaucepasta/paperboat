@@ -9,9 +9,11 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/machineloopback"
 	"github.com/pinksaucepasta/paperboat/internal/splitdns"
 	"golang.org/x/sys/unix"
+	"maps"
 	"net"
 	"os"
 	"os/exec"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -21,6 +23,10 @@ const DefaultSocket = "/run/paperboat-machineguard/control.sock"
 const DefaultStateDir = "/var/lib/paperboat-machineguard"
 const guardMark = 0x5042
 const guardTable = "paperboat_machineguard"
+
+// gatewayRedirects: when a gateway port is held on all addresses, the guard listens on a free high port and the
+// nat rule above sends the gateway address there.
+const gatewayRedirects = true
 
 func peerUID(conn *net.UnixConn) (uint32, error) {
 	raw, err := conn.SyscallConn()
@@ -58,20 +64,61 @@ func notifyReady() error {
 	return err
 }
 func applyProtection(ctx context.Context, cfg Config, leases []*guardedLease) error {
+	rules, err := protectionRules(leases)
+	if err != nil {
+		return err
+	}
 	var script strings.Builder
 	// nft's batch transaction swaps the entire owned table atomically.
 	if err := exec.CommandContext(ctx, "nft", "list", "table", "inet", guardTable).Run(); err == nil {
 		fmt.Fprintf(&script, "delete table inet %s\n", guardTable)
 	}
-	fmt.Fprintf(&script, "table inet %s {\nchain output { type filter hook output priority -10; policy accept;\n", guardTable)
+	script.WriteString(rules)
+	command := exec.CommandContext(ctx, "nft", "-f", "-")
+	command.Stdin = strings.NewReader(script.String())
+	if output, err := command.CombinedOutput(); err != nil {
+		return fmt.Errorf("install protected listener rules: %w: %s", err, strings.TrimSpace(string(output)))
+	}
+	return nil
+}
+
+// leaseListenPort is the port the lease's socket really listens on: the gateway's high port when a program holds
+// the browser port on every address (gatewayRedirects), else the lease's own port.
+func leaseListenPort(l *guardedLease) int {
+	if route, ok := l.listener.(*gatewayRoute); ok {
+		return route.gateway.listenPort()
+	}
+	return l.port
+}
+
+// protectionRules is the owned nft table for the leases. A gateway port moved to a high port (a web server holds
+// :80/:443 on all addresses) gets a nat output DNAT from the gateway address, so every URL stays unchanged; the
+// filter chains see the packet after that rewrite and so name the high port.
+func protectionRules(leases []*guardedLease) (string, error) {
+	var script strings.Builder
+	fmt.Fprintf(&script, "table inet %s {\n", guardTable)
+	redirects := map[int]int{}
+	for _, l := range leases {
+		if port := leaseListenPort(l); port != l.port {
+			redirects[l.port] = port
+		}
+	}
+	if len(redirects) > 0 {
+		script.WriteString("chain gateway_nat { type nat hook output priority -100; policy accept;\n")
+		for _, port := range slices.Sorted(maps.Keys(redirects)) {
+			fmt.Fprintf(&script, "ip daddr %s tcp dport %d dnat ip to %s:%d\n", splitdns.BrowserGatewayIP, port, splitdns.BrowserGatewayIP, redirects[port])
+		}
+		script.WriteString("}\n")
+	}
+	script.WriteString("chain output { type filter hook output priority -10; policy accept;\n")
 	for _, l := range leases {
 		uid, err := strconv.ParseUint(l.uid, 10, 32)
 		if err != nil {
-			return errors.New("invalid Unix guard owner")
+			return "", errors.New("invalid Unix guard owner")
 		}
 		if l.ip == splitdns.BrowserGatewayIP {
 			// Any uid may connect to the gateway; the guard attributes each connection and refuses the rest.
-			fmt.Fprintf(&script, "ip daddr %s tcp dport %d accept\n", l.ip, l.port)
+			fmt.Fprintf(&script, "ip daddr %s tcp dport %d accept\n", l.ip, leaseListenPort(l))
 			continue
 		}
 		fmt.Fprintf(&script, "ip daddr %s tcp dport %d meta skuid %d accept\n", l.ip, l.port, uid)
@@ -87,8 +134,9 @@ func applyProtection(ctx context.Context, cfg Config, leases []*guardedLease) er
 		fmt.Fprintf(&script, "iifname != \"lo\" ip daddr %s reject\n", cidr)
 	}
 	for _, l := range leases {
-		fmt.Fprintf(&script, "ip daddr %s tcp dport %d tcp flags & (syn | ack) == syn socket mark %d ct mark set %d accept\n", l.ip, l.port, guardMark, guardMark)
-		fmt.Fprintf(&script, "ip daddr %s tcp dport %d tcp flags & syn == 0 ct mark %d ct state established,related accept\n", l.ip, l.port, guardMark)
+		port := leaseListenPort(l)
+		fmt.Fprintf(&script, "ip daddr %s tcp dport %d tcp flags & (syn | ack) == syn socket mark %d ct mark set %d accept\n", l.ip, port, guardMark, guardMark)
+		fmt.Fprintf(&script, "ip daddr %s tcp dport %d tcp flags & syn == 0 ct mark %d ct state established,related accept\n", l.ip, port, guardMark)
 	}
 	// Return traffic inherits the connection mark installed on an owned SYN.
 	fmt.Fprintf(&script, "ct mark %d ct state established,related accept\n", guardMark)
@@ -96,12 +144,7 @@ func applyProtection(ctx context.Context, cfg Config, leases []*guardedLease) er
 		fmt.Fprintf(&script, "ip daddr %s reject\n", cidr)
 	}
 	script.WriteString("}\n}\n")
-	command := exec.CommandContext(ctx, "nft", "-f", "-")
-	command.Stdin = strings.NewReader(script.String())
-	if output, err := command.CombinedOutput(); err != nil {
-		return fmt.Errorf("install protected listener rules: %w: %s", err, strings.TrimSpace(string(output)))
-	}
-	return nil
+	return script.String(), nil
 }
 func shutdownListener(listener net.Listener) error {
 	if route, ok := listener.(*gatewayRoute); ok {

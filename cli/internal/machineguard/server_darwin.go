@@ -23,6 +23,9 @@ import (
 
 const DefaultSocket = "/Library/Application Support/Paperboat/machineguard-control/control.sock"
 const DefaultStateDir = "/Library/Application Support/Paperboat/machineguard"
+// gatewayRedirects: pf here has no equivalent redirect yet; a held gateway port stays a refusal (pb doctor names the holder).
+const gatewayRedirects = false
+
 const darwinBrokerAccount = "_paperboat_machineguard"
 
 // The receiver must have its own OS identity: permitting all root sockets would
