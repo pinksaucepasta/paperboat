@@ -91,7 +91,7 @@ func newStoredFixture(t *testing.T) *storedFixture {
 	t.Cleanup(cancel)
 	suffix := strings.ReplaceAll(uuid.NewString(), "-", "")
 	f := &storedFixture{t: t, ctx: ctx, db: inboxTestStore(t), now: time.Now().UTC().Truncate(time.Second),
-		sender: "stored_sender_" + suffix, recipient: "stored_recipient_" + suffix, team: "stored_team_" + suffix,
+		sender: "stored_sender_" + suffix, recipient: "stored_recipient_" + suffix, team: "stored-team-" + suffix,
 		source: "stored_source_" + suffix, destination: "stored_dest_" + suffix, alternate: "stored_alt_" + suffix,
 		b: &storedTestBucket{enabled: true, objects: map[string]bool{}}}
 	for _, account := range []string{f.sender, f.recipient} {
