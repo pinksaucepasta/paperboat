@@ -23,7 +23,7 @@ export function PreviewPage({ id }: { id: string }) {
     <>
       <PageHeader>
         <CrumbLink href="/previews">Previews</CrumbLink>
-        {preview ? <Crumb>{hostOf(preview.endpoint) || "Ended"}</Crumb> : <Skeleton className="my-0.5 h-4 w-24" />}
+        {preview ? <Crumb>{hostOf(preview.endpoint) || "Preview"}</Crumb> : <Skeleton className="my-0.5 h-4 w-24" />}
       </PageHeader>
       <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-10 px-4 py-6 md:px-8 md:py-8">
         {query.isError ? (
@@ -62,7 +62,7 @@ function Loaded({ preview }: { preview: Preview }) {
     <>
       <div className="flex flex-wrap items-start gap-4">
         <div className="flex min-w-0 flex-1 flex-col gap-2">
-          <h1 className="truncate font-mono text-xl font-semibold">{host || "Ended"}</h1>
+          <h1 className="truncate font-mono text-xl font-semibold">{host || "Preview"}</h1>
           <div className="text-sm text-muted-foreground">
             {over ? "Ended" : <PreviewStatus preview={preview} />}
           </div>

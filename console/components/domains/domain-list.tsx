@@ -80,8 +80,8 @@ function Access({ kind }: { kind: "Private" | "Public" }) {
 const columns = (
   <>
     <colgroup>
-      <col className="w-[38%]" />
-      <col className="hidden w-[12%] sm:table-column" />
+      <col className="w-[30%]" />
+      <col className="hidden w-[10%] sm:table-column" />
       <col className="hidden md:table-column" />
       <col className="w-[24%]" />
       <col className="w-12" />

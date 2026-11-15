@@ -1,0 +1,18 @@
+PASS  tunnel: no flood notice without refusals
+PASS  tunnel: IP rules section shows Allow and Deny
+PASS  tunnel: chips match the server
+PASS  tunnel: invalid entry is refused naming it
+PASS  tunnel: the refused save changed nothing
+PASS  tunnel: both lists saved in one request
+PASS  tunnel: reload shows the saved chips
+PASS  tunnel: original rules restored
+PASS  tunnel: flood notice shows count, since and summary (injected status)
+PASS  preview: detail page shows its details
+PASS  preview: IP rules section shows Allow and Deny
+PASS  preview: chips match the server
+PASS  preview: invalid entry is refused naming it
+PASS  preview: the refused save changed nothing
+PASS  preview: both lists saved in one request
+PASS  preview: reload shows the saved chips
+PASS  preview: original rules restored
+all passed
