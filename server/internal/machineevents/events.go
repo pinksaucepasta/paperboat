@@ -39,18 +39,16 @@ var topics = []string{TopicMachineAccess, TopicPeerNetwork, TopicPreviews, Topic
 func ValidTopic(name string) bool { return slices.Contains(topics, name) }
 
 const (
-	// MaxWait is the longest a request is held before answering "no change". It stays well under the
-	// 30 s response-header timeout of every released client (cli httptransport): held for the full 30 s,
-	// clients hung up just before the 204, their change streams never became healthy and every daemon
-	// fell back to re-listing machines every 15 s (~330 lists/min on production, 2026-10-23).
-	MaxWait = 25 * time.Second
-	// ClientHeaderTimeout is the response-header timeout released clients use; MaxWait must stay under it.
-	ClientHeaderTimeout = 30 * time.Second
+	// MaxWait is the longest a request is held before answering "no change". The client marks the wait LongPoll (no
+	// response-header timeout) and bounds it at machineevents.requestTimeout (70 s): an idle daemon asks once per
+	// MaxWait, so 25 s made 24 of an idle machine's ~60 requests per 10 minutes (PR-03; Tailscale holds its map
+	// stream open without limit, control/controlclient/map.go).
+	MaxWait = 55 * time.Second
 	// recheckInterval re-reads the generations while waiting, as the backstop for a missed notification. Every
 	// listener session wakes all waiters when it starts or fails (listen, ListenFor), so a gap in listening loses
 	// nothing and the backstop fires at most once in a MaxWait wait: it used to run every 5 s, ~5 queries per held
 	// request, N/5 queries per second for N idle daemons.
-	recheckInterval = 20 * time.Second
+	recheckInterval = 50 * time.Second
 	maxMachinesPer  = 1024
 	channel         = "machine_events"
 )

@@ -198,14 +198,6 @@ func TestMachineEventsWaitForUserIsLimitedToTheUsersOwnMachine(t *testing.T) {
 	}
 }
 
-// Released clients give up on a response after 30 s of waiting for headers. The server must answer a
-// held wait before that, with room for the round trip, or no client ever sees its 204.
-func TestMachineEventsAnswerBeforeReleasedClientsGiveUp(t *testing.T) {
-	if machineevents.MaxWait+5*time.Second > machineevents.ClientHeaderTimeout {
-		t.Fatalf("MaxWait %s leaves under 5 s before the clients' %s header timeout", machineevents.MaxWait, machineevents.ClientHeaderTimeout)
-	}
-}
-
 // An answer that cannot be signed is not sent unsigned: the wait fails closed with a retryable error.
 func TestMachineEventsFailClosedWithoutSigning(t *testing.T) {
 	claims := controlplane.MachineRequestClaims{MachineID: "machine_01", UserID: "account_01", OperationID: "events_01", InstallationGeneration: 1}

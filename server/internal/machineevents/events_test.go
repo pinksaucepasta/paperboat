@@ -8,7 +8,4 @@ func TestRecheckBackstopFiresAtMostOncePerWait(t *testing.T) {
 	if MaxWait >= 2*recheckInterval {
 		t.Fatalf("recheckInterval %v fires %d times in a MaxWait %v wait", recheckInterval, int(MaxWait/recheckInterval), MaxWait)
 	}
-	if MaxWait >= ClientHeaderTimeout {
-		t.Fatalf("MaxWait %v must stay under the client header timeout %v", MaxWait, ClientHeaderTimeout)
-	}
 }

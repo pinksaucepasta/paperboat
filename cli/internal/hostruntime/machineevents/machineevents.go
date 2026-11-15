@@ -1,7 +1,7 @@
 // Package machineevents lets a machine learn about server-side changes to what it caches without
 // polling at a short interval. One Hub per process holds a single long request to the control plane
 // (POST /v1/machine-events/wait). The server answers with the generation of every topic that moved
-// past the generation the machine last saw, or with 204 after about 30 seconds. Generations carry no
+// past the generation the machine last saw, or with 204 after about 55 seconds. Generations carry no
 // data: a woken subscriber refreshes through its own endpoint.
 //
 // While the wait loop is healthy, a subscriber's own poll becomes a slow safety net; while it is not,
@@ -55,8 +55,8 @@ const (
 const (
 	// DefaultFallbackInterval is how often a subscriber still polls while the wait loop is healthy.
 	DefaultFallbackInterval = time.Minute
-	// requestTimeout exceeds the 30 s the server holds a request, with room for the round trip.
-	requestTimeout = 40 * time.Second
+	// requestTimeout exceeds the 55 s the server holds a request (machineevents.MaxWait), with room for the round trip.
+	requestTimeout = 70 * time.Second
 	// WaitTimeout bounds one wait made by a caller's own client; see requestTimeout.
 	WaitTimeout   = requestTimeout
 	minBackoff    = time.Second
