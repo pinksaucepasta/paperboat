@@ -1069,6 +1069,382 @@ IdP's job), SAML-only Paperboat accounts without email.
 - F19-14: CLI `pb team sso`, `pb team scim`, `pb team activity` (filters, export) and new roles in `pb team role` work end to end against the live server.
 - F19-15: Admin reference `server/docs/teams-business.md`: roles matrix, SSO and SCIM setup per IdP through the Admin Portal, enforcement and break-glass, audit event catalog and shape, export and stream formats with signature verification, billing; a test keeps the roles table and event catalog equal to the code.
 
+### F26. Recipes: one command turns a computer into a configured machine (design, user decision 2026-11-16)
+
+**What:** a recipe is a small file that says what happens on a machine when it joins: its tags,
+what it may reach, which ENV vaults it can read, which repository it pulls config from, which
+preview or tunnel it opens, and when it is removed. One command installs pb, pairs the machine
+and applies the recipe, with nobody online and no prompt. Recipes **replace API tokens**
+entirely (removed, no compatibility). Every section calls an existing pb command; the only new
+things are the recipe itself, its token, and named ENV vaults.
+**Surfaces:** `pb recipe create|list|show|update|rotate|revoke`, `pb pair [pbr_…]` (also reads
+`PB_RECIPE`), the installer reading `PB_RECIPE`, `pb env vault create|list|delete` and
+`pb env set --vault`; console Settings → Recipes (replaces Settings → API tokens); schema and
+validation in `shared/recipe` (one owner for cli, server and console).
+**Owner:** Lane B server + `shared/recipe`, Lane A cli, Lane C console; this section is the contract.
+
+**What we took from whom.** Tailscale auth keys: reusable, ephemeral, pre-tagged, expiring;
+key given by flag, file or env (`tailscale/cmd/tailscale/cli/up.go:102` `--auth-key` with
+`file:`; `tailscale/cmd/containerboot/settings.go:96` `TS_AUTHKEY`). Headscale: key = public
+prefix + stored hash, `Reusable/Ephemeral/Tags/Expiration` on the key
+(`headscale/hscontrol/types/preauth_key.go:42-69`), ephemeral garbage collector that skips a
+node with a live session (`headscale/hscontrol/app.go:160-192`). Teleport: a join token names
+what the joiner becomes (`api/types/provisioning.go:42,299-314`); tbot's one file of
+onboarding + outputs + services (`assets/loadtest/ansible-like/tbot.yaml`). cloud-init: one
+user-data line runs at first boot and is safe to run again. devcontainer.json / fly.toml: one
+small declarative file per thing, arrays of tables (`[[services]]`) for repeatable sections.
+1Password service accounts: the token itself carries the key material, access is per named
+vault, nobody has to be online (`OP_SERVICE_ACCOUNT_TOKEN`). GitHub tokens: fixed prefix and
+shape so secret scanners find leaks.
+
+#### 1. Three recipes
+
+**CI runner: tests with ENV and a preview** (`ci.toml`)
+
+```toml
+# A GitHub Actions runner: canary secrets for the tests, a 2-hour preview of the app.
+tags = ["ci"]
+max_machines = 20
+remove_after_offline = "30m"
+
+[env]
+vaults = ["canary-env"]
+
+[[preview]]
+port = 3000
+ttl = "2h"
+```
+
+```yaml
+# .github/workflows/test.yml (secret PB_RECIPE holds the token)
+- run: curl -fsSL https://get.pprbt.dev/install | bash
+  env: { PB_RECIPE: "${{ secrets.PB_RECIPE }}" }
+- run: pb env run -- npm test
+- run: npm start &        # the recipe's preview serves port 3000 for 2 hours
+```
+
+**Homelab VM fleet: config pulled from a repo, a tunnel per VM** (`homelab.toml`)
+
+```toml
+# Every VM created from this image pulls dotfiles and publishes its dashboard.
+tags = ["homelab"]
+expires = "365d"
+remove_after_offline = "7d"
+
+[config]
+repository = "dotfiles"      # connected once with `pb config repository connect`
+
+[[tunnel]]
+port = 8123                  # name defaults to the machine name
+private = true
+```
+
+```yaml
+#cloud-config
+runcmd:
+  - curl -fsSL https://get.pprbt.dev/install | PB_RECIPE=pbr_k7f3q9xa2m_... bash
+```
+
+**AI-agent sandbox: may run commands only on `tag:ci`** (`agent.toml`)
+
+```toml
+# A disposable sandbox for a coding agent: it can exec and copy files on CI machines, nothing else.
+max_machines = 1
+remove_after_offline = "10m"
+
+[[reach]]
+dst = ["tag:ci"]
+allow = ["exec", "managed_ssh", "files"]
+```
+
+```sh
+docker run -e PB_RECIPE "$PAPERBOAT_IMAGE"   # the release image (cli/deploy/container) reads PB_RECIPE
+# inside the sandbox the agent runs:  pb exec runner-7 -- make test
+```
+
+#### 2. CLI session (real output)
+
+```text
+$ pb recipe create -f ci.toml
+Recipe ci created in workspace acme.
+  Tags        ci
+  Reach       nothing (machines from this recipe cannot use other machines)
+  ENV         canary-env (key wrapped on this computer; Paperboat cannot read it)
+  Preview     port 3000 for 2h
+  Machines    up to 20; removed 30m after going offline
+  Expires     2027-02-14 (90 days)
+
+Token (shown once; save it as the secret PB_RECIPE):
+  pbr_k7f3q9xa2m_g4zt6vw2nr6yh1sk9df3gj5lp7xc0bn2ma4eu6io8qrst2uvwxy
+
+Install, with PB_RECIPE set:
+  Linux, macOS  curl -fsSL https://get.pprbt.dev/install | bash
+  Windows       irm https://get.pprbt.dev/install.ps1 | iex
+  pb installed  pb pair
+
+$ pb recipe list
+NAME      TAGS      MACHINES   EXPIRES      LAST USED
+agent     -         0 / 1      2027-02-14   never
+ci        ci        3 / 20     2027-02-14   4 min ago
+homelab   homelab   5          2027-11-16   2 days ago
+
+$ pb recipe show ci
+Recipe ci, revision 2, token pbr_k7f3q9xa2m_…, expires 2027-02-14, created by ana@acme.test
+<the file as created, comments kept>
+Machines (3 of 20)
+  fv-az512-118   online    applied revision 2   3 min ago
+  fv-az512-204   offline   removed in 24 min
+  fv-az512-311   online    preview failed: preview limit reached (pb doctor on the machine)
+
+$ pb recipe update -f ci.toml
+Recipe ci updated to revision 3: preview ttl 2h -> 4h. 2 online machines apply it now.
+
+$ pb recipe rotate ci
+Rotating ci gives it a new token and a new key for vault canary-env.
+  The old token stops working at once. Its 3 machines keep running and get the new key.
+  Then replace PB_RECIPE everywhere the old token is stored.
+Rotate with: pb recipe rotate ci --confirm K3M9QX
+$ pb recipe rotate ci --confirm K3M9QX
+Recipe ci rotated. New token (shown once):
+  pbr_k7f3q9xa2m_w8bd2kq5mt3zr7fc1hx6yn4jp9ga2se5vl3ou7ic4rbn6dz2tqk
+
+$ pb recipe revoke ci
+Revoking ci:
+  - its token stops working
+  - its 3 machines are removed: fv-az512-118, fv-az512-204, fv-az512-311
+  - vault canary-env gets a new key (1 other recipe, canary, keeps access)
+Revoke with: pb recipe revoke ci --confirm 7RT2WD
+$ pb recipe revoke ci --confirm 7RT2WD
+Recipe ci revoked. 3 machines removed. canary-env has a new key.
+```
+
+On the machine (the installer is the same script for everyone; the token never goes in a URL):
+
+```text
+$ curl -fsSL https://get.pprbt.dev/install | bash
+Paperboat 2026.11.16 for linux/amd64
+Installed pb to /usr/local/bin/pb.
+Paired fv-az512-118 to workspace acme with recipe ci.
+  Tags      ci
+  ENV       canary-env, 4 values, in new shells and pb env run
+  Preview   https://calm-summer-beach-3476.pprbt.app -> port 3000, until 16:42 IST
+Done in 6 s. Check it any time with pb doctor.
+```
+
+Running the installer again on the same machine with the same recipe prints `Already paired
+from recipe ci; revision 3 applied.` and exits 0 (cloud-init and CI caches rerun it). Windows:
+`$env:PB_RECIPE='pbr_…'; irm https://get.pprbt.dev/install.ps1 | iex`. Container:
+`-e PB_RECIPE`, consumed on first start like today's enrollment credential.
+
+#### 3. Every error in the first five minutes
+
+Writing the file (`pb recipe create|update`, console editor; same text from `shared/recipe`):
+
+```text
+Error: ci.toml:7:9: expected a value after "=".
+Error: ci.toml:3:1: unknown key "tag". Did you mean "tags"?
+Error: ci.toml:9:1: unknown section [envs]. Did you mean [env]?
+Error: ci.toml:4:16: max_machines must be a whole number, like max_machines = 20.
+Error: ci.toml:5:24: remove_after_offline must be a duration like "30m", "12h" or "7d" (5m to 30d).
+Error: ci.toml:2:1: expires must be at most 365d. Rotate the recipe to extend it.
+Error: ci.toml:12:1: [[preview]] needs port, like port = 3000.
+Error: ci.toml:16:1: [[tunnel]] needs port or from, not both.
+Error: ci.toml:19:7: allow has unknown action "ssh". Did you mean "managed_ssh"? Actions: pb policy schema
+Error: vault "canary" does not exist in workspace acme. Your vaults: canary-env, prod-env. Did you mean "canary-env"?
+Error: repository "dotfile" is not connected in workspace acme. Connected: dotfiles. Did you mean "dotfiles"? Connect one with pb config repository connect <url>.
+Error: a recipe named ci already exists. Change it with pb recipe update -f ci.toml.
+Error: recipes in team acme are created by owners and admins (a recipe tags machines, which edits the access policy).
+```
+
+Vault locked (create, update, rotate or revoke of a recipe with vaults):
+
+```text
+Error: recipe ci reads vault canary-env, and your ENV vault is locked on this computer.
+Unlock it with pb env vault unlock, then run the command again. The vault key is wrapped for
+the recipe here, on your computer; Paperboat never sees it.
+```
+
+On the machine (the installer and `pb pair`):
+
+```text
+Paperboat: PB_RECIPE is not set. Copy the token from pb recipe create or the console
+(Settings -> Recipes) and run: curl -fsSL https://get.pprbt.dev/install | PB_RECIPE=<token> bash
+
+Paperboat: PB_RECIPE is not a recipe token. A token starts with pbr_ and is 67 characters;
+this value is 41. Copy it again from where you saved it.
+
+Paperboat: this recipe token expired on 2027-02-14 at 12:00 IST.
+Get a new token with pb recipe rotate ci (its machines keep working), then update PB_RECIPE.
+
+Paperboat: this recipe token was replaced on 2026-12-02 (pb recipe rotate ci).
+Use the new token; update PB_RECIPE where this one is stored.
+
+Paperboat: this recipe token is not valid: the recipe was revoked or the token was mistyped.
+
+Paperboat: recipe ci already has 20 of 20 machines.
+A machine leaves the recipe when it is removed (pb machine revoke <machine>, or by
+remove_after_offline). To allow more, set max_machines and run pb recipe update -f ci.toml.
+
+Paperboat: workspace acme has reached its plan's machine limit. Remove machines you no longer
+use (pb machine revoke <machine>) or upgrade under Billing in the Paperboat console.
+
+Paperboat: installing needs root or passwordless sudo, and this shell has neither.
+Run the installer as root (in Docker the default user is root), or allow passwordless sudo for
+this user. Recipe installs never ask for a password, so they never hang a CI job.
+
+Paperboat: installing needs an administrator PowerShell. Start PowerShell with "Run as
+administrator" and run the command again.
+
+Paperboat: this machine is already paired to workspace other-team as build-3. To pair it from
+this recipe instead, remove it first (pb uninstall), then run the installer again.
+
+Paperboat: paired fv-az512-118, but the preview did not start: workspace acme has reached its
+plan's preview limit. Stop a preview (pb preview list, pb preview stop <name>). Paperboat
+retries every few minutes; pb doctor shows the state. (exit status 3)
+```
+
+Pairing is atomic (machine, tags, credentials in one server transaction); a later section that
+fails leaves the machine paired, prints that section's own error, exits 3, and is retried by
+the daemon with bounded backoff.
+
+#### 4. The file
+
+TOML or JSON, chosen by extension; the recipe's name is the file's base name (`ci.toml` → `ci`,
+lowercase letters, digits, `-`, up to 63). Unknown keys are errors with a suggestion. The client
+parses and validates, then sends canonical JSON plus the source text; the server validates the
+JSON strictly again (`shared/recipe`) and stores both (the source keeps comments for `show`).
+
+| Key | Type, default, rules | Calls (in-process, the same code as the command) |
+|---|---|---|
+| `tags` | tag names, default none; policy tag syntax | `pb machine tag <m> add <tags…>`, done server-side inside pairing |
+| `[[reach]]` `dst`, `allow`, `ports` | policy rule fields; default none = this machine's pb reaches nothing | today's API-token scope check (`api_token_scope_allows`), renamed `recipe_reach_allows`; never more than the creator may do at that moment |
+| `expires` | duration, default `90d`, max `365d` | token expiry (server) |
+| `max_machines` | integer ≥ 1, default no limit | refusal at pairing (server) |
+| `remove_after_offline` | duration `5m`–`30d`, default never | `pb machine revoke <m>` by the server, as Headscale's ephemeral collector |
+| `[env]` `vaults` | vault names in the recipe's workspace, required in `[env]` | ENV delivery + `pb env load` / `pb env run`, decrypting with the recipe key |
+| `[env]` `shell` | bool, default `true` | `pb env hook --install` for the installing user |
+| `[config]` `repository` | a connected repository's name, required in `[config]` | `pb config repository connect` (already done by the creator) + `pb config sync apply --repository <name>` with machine mode `pull_only`; approval = the recipe's creation |
+| `[[preview]]` `port` | 1–65535, required | `pb preview <port> --background` |
+| `[[preview]]` `ttl`, `private`, `team`, `host_header`, `domain` | as the flags; `ttl` default `1h`, max `24h` | `--ttl`, `--private`, `--team`, `--host-header`, `--domain` |
+| `[[tunnel]]` `name` | default the machine name (tunnel names need not be unique) | `pb tunnel create <name>` |
+| `[[tunnel]]` `port` or `from`, `private`, `team`, `domain`, `duration` | exactly one of `port`/`from` | `--port`, `--from`, `--private`, `--team`, `--domain`, `--duration` |
+
+Rules: config is pull only (many machines must not push to one repository); new repository
+revisions apply without review only if the repository's shared file sets
+`automatic_updates = true`, otherwise they wait for `pb config approve` like any machine. A
+preview expires for good (re-applying never restarts an expired preview). The machine name is
+the host name (`pb pair --name` on a clash, as today). Recipes live in one workspace (the
+`--workspace` at creation). Not in v1: running arbitrary commands (the CI job or cloud-init
+does that), machine availability, inbox and terminal settings; each can become a section
+later, one existing command each.
+
+#### 5. Console: Settings → Recipes (replaces API tokens)
+
+- **List:** table Name, Tags, Machines (`3 / 20`), Expires, Last used; row menu Show, Rotate,
+  Revoke. Empty state: one sentence ("A recipe pairs and sets up machines with one command")
+  and the CI example as a "Start from" card, plus Homelab and Agent sandbox cards.
+- **New recipe / edit:** left a form (Tags, Reach rows with target + action chips, Max
+  machines, Remove after offline, ENV vaults picker, Config repository picker, Preview and
+  Tunnel rows); right the same recipe as TOML, live, editable; both views edit one value and
+  show the same `shared/recipe` errors inline. Picking a vault asks for the browser vault
+  unlock (existing `console/lib/envvault`), which wraps the key in the browser.
+- **Created:** the token once, Copy buttons for the token and for the Linux/macOS and Windows
+  install lines, "I saved it" closes; a GitHub Actions snippet under a disclosure.
+- **Show:** the file, revision, creator, its machines with apply state per section (links to
+  each machine), Rotate and Revoke with the same impact text and confirmation as the CLI.
+
+#### 6. Architecture
+
+- **Token:** `pbr_<id>_<secret>`, `id` 10 and `secret` 52 lowercase base32 characters (32 random
+  bytes); fixed shape for secret scanning. The device derives two values with HKDF-SHA256:
+  `auth = HKDF(secret, "paperboat recipe auth")`, sent to the server, which stores only
+  SHA-256(auth); and `key = HKDF(secret, "paperboat recipe key")`, an X25519 private key that
+  never leaves the device. The server can admit a machine but can never decrypt a vault.
+- **Tags and reach:** pairing creates the machine under the creator's account in the recipe's
+  workspace and adds it to the recipe's tags in the policy (one policy version, author "recipe
+  ci") in the same transaction, so the machine never exists untagged. Its pb gets an ordinary
+  CLI session of the creator carrying `recipe_id` (today's `cli_client_sessions.api_token_id`
+  path, renamed); every machine authorization also checks `recipe_reach_allows`. The creator
+  leaving the workspace or losing a right takes it from the recipe at once; leaving revokes it.
+- **Ephemeral removal:** when a recipe machine's last control connection ends, the server
+  schedules removal at now + `remove_after_offline`; a new connection cancels it; removal is
+  the `pb machine revoke` path (hidden at once, hard-deleted after revocations deliver).
+- **Vaults:** a named vault has its own 32-byte key, kept in the owner's key ring (team vaults:
+  through today's team key grants); values are encrypted once with it. Creating a recipe with
+  vaults: the unlocked client derives the recipe public key from the new secret and uploads
+  each vault key wrapped to it. The device unwraps with its derived private key, keeps that key
+  in protected ENV key storage (`cli/internal/hostruntime/environmentkey`) and decrypts only
+  those vaults, with nobody online. A value change is one encryption with the vault key,
+  delivered by today's ENV delivery (new shells, `pb env run`). **Revoke:** delete the recipe's
+  wraps, make a new vault key, re-encrypt the values, re-wrap for remaining recipes and members.
+  **Rotate:** the same re-key with a new secret for this recipe; the new recipe private key is
+  sent to each of its live machines encrypted to that machine's existing ENV host-recipient key
+  (threat-model "ENV host-recipient custody"), so they keep working while the old token can
+  neither pair nor read new values (values it already read stay read: rotate the secrets too).
+- **Apply and re-apply:** `pb pair` exchanges `auth` for machine credentials and the recipe's
+  canonical JSON + revision; the daemon stores the revision and a list of what each section
+  created (preview id, tunnel id, managed machine config file). Apply runs tags (done
+  server-side), env, config, preview, tunnel, each an "ensure": present and matching → nothing;
+  missing → create; changed → change; removed from the recipe → delete what it created. The
+  daemon re-applies on start and when the server pushes a new revision (machine events), so
+  running it twice is a no-op. A failed section is retried with backoff (1 min doubling to 30
+  min) and shown in `pb doctor` and `pb recipe show`.
+- **Installs never prompt:** root runs directly; otherwise `sudo -n` only; neither → the error
+  above (today `cli/internal/hostruntimecmd/bootstrap_unix.go:512` always calls `/usr/bin/sudo`
+  and may ask `sudo -v`; a recipe install skips sudo as root and never runs `sudo -v`).
+  Containers use `cli/deploy/container` with `PB_RECIPE`.
+
+#### 7. API tokens today and after
+
+| Use today | After |
+|---|---|
+| `pb login --api-token-file`: a pb session of the creator for scripts and agents (exec, terminal, SSH, files, previews, tunnels), narrowed by scope | a machine from a recipe: its pb has the same session, narrowed by `[[reach]]` (agent sandbox example) |
+| Scope check on machine access (`usermachines/shared_access.go:424`, `nativeprivateaccess`, SQL `api_token_scope_allows`) | the same check keyed by recipe, `recipe_reach_allows` |
+| `Authorization: Bearer pbat_…` on any HTTP route (`httpapi/router.go:740`, `api_token_handlers.go:26-120`) | removed; scripts drive `pb … --json` on a recipe machine (see open question 3) |
+| `QUICK_UPDATE_API_TOKEN` mints enrollment tokens (`.github/workflows/quick-update.yml:96`, `tools/quick-update/run.sh:7`) | a reusable ephemeral recipe token stored as the secret |
+| `pb policy explain --api-token`, `shared/policy` `DecideToken` | `--recipe <name>`, `DecideRecipe` |
+| Audit/activity actor `api_token_id`, policy version author | `recipe_id`, author "recipe <name>" |
+| Plan-limit session counting (`planlimits/sdk.go:64`), offline access exclusion (`peersessions/offline_access.go:63`) | same rule for recipe sessions |
+| Smoke: `policy_token.py`, `mint_api_token.mjs`, `staging_api_token.py` | one recipe check (pair, tags, reach refusal, ENV, preview, rotate, revoke) |
+
+Delete: `cli/cmd/pb/api_token_command{,_test}.go`, `auth_api_token_login{,_test}.go`,
+`cli/docs/man/man1/pb-api-token*.1`, `cli/docs/cli/pb_api-token*.md`; `server/internal/apitokens/`,
+`server/internal/auth/api_token_session.go`, `api_token_source.go`,
+`server/internal/httpapi/api_token_handlers.go`, `api_token_postgres_test.go`,
+`api_token_scope_route_test.go`, `token_scope_code_test.go`,
+`server/internal/usermachines/api_token_scope_postgres_test.go`, `server/internal/teams/policy_tokens.go`,
+`server/internal/db/queries/api_token_scope.sql`, `dbsqlc/api_token_scope.sql.go`;
+`shared/client/session/source{,_test}.go` (token login only; confirm no caller);
+`console/app/(console)/settings/api-tokens/`, `console/components/access/api-tokens.tsx`,
+`new-token.tsx`; `tools/device-smoke/mint_api_token.mjs`, `staging_api_token.py`,
+`policy_token.py`. Edit the token branches in `server/internal/httpapi/{router,router_02,auth_handlers,errors,policy_handlers,workspace_scope}.go`,
+`server/internal/{app,config,audit,activity,accountdeletion,teams,usermachines,nativeprivateaccess,peersessions,planlimits}`,
+`shared/policy`, `cli/internal/api/{policy,device,errors}.go`, `console/lib/{policy,activity,sections,query-keys}.ts`,
+marketing pages that sell API tokens for agents, `server/docs/openapi.json`. Database: a
+post-deploy migration drops `api_tokens` (127), `api_token_scope_rules` (133),
+`api_token_create_requests` (153), `cli_client_sessions.api_token_id`,
+`workspace_policies.updated_with_api_token`, `workspace_policy_versions.api_token` and
+`api_token_scope_allows`, after the recipe tables (`recipes`, `recipe_reach_rules`,
+`recipe_vault_wraps`, `cli_client_sessions.recipe_id`) ship.
+
+**Acceptance (CHECKLIST rows to add when built):** F26-01 create/list/show/update/rotate/revoke
+with the texts above; F26-02 install from a recipe on Linux, macOS, Windows and a container, no
+prompt, rerun is a no-op; F26-03 tags at pairing and reach refusal outside `[[reach]]`; F26-04
+vault values readable with nobody online, revoke and rotate re-key; F26-05 config pull,
+preview, tunnel sections applied and re-applied; F26-06 max_machines and remove_after_offline;
+F26-07 every error in section 3; F26-08 API tokens gone (CLI, server routes, console, DB).
+
+**Open questions (USER DECIDES):**
+1. `pb env vault` already names your password-unlocked key ring (`init|unlock|lock|…`). Rename
+   those to `pb env unlock|lock|password|recover|…` so "vault" means a named vault, as in
+   1Password? (Recommended.) Otherwise named vaults need another word.
+2. Reuse `https://get.pprbt.dev/install` (one script, reads `PB_RECIPE`) instead of a separate
+   `/recipe` path? (Recommended: one installer.)
+3. No bearer credential for the HTTP API at launch: scripts use `pb … --json` on a recipe
+   machine. OK?
+4. Expiry default 90 days, max 365, no "never" (extend by rotating). OK?
+5. Revoke also removes the recipe's machines; rotate keeps them. OK?
+
 ### S2. Marketing site
 
 - S2-01: Content matches the product (features, platforms 1.1, pricing 1.3, domains 1.2); install instructions use the configured installer host; builds; hosting **USER DECIDES**.
@@ -3424,6 +3800,9 @@ owner discovery (F7), Windows repair self-lock and session-owner generation clea
 The coolify format (S1) also removes the old dev deployment and its test backups.
 
 ## 5. Log
+
+2026-11-16 | RECIPES-DESIGN F26 | Design written (PLAN F26): file schema, CLI texts, errors, console, architecture, API-token removal list.
+Waits for USER DECIDES: F26 open questions 1-5 (vault naming, installer path, no HTTP bearer, expiry, revoke removes machines).
 
 2026-11-13 | REL-EDGE F21-17/22/28/36/37/38/47 L[~]: first-pass automated checks PASS at 261b23966; result tools/device-smoke/results/rel-edge-first-pass-20261112T214806Z.md; no ticks or deploy.
 Live edge checks wait for anvit load <16 (51.49 then 44.91); F21-28 edge blackhole proof missing.
