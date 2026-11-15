@@ -24,6 +24,7 @@ pb team bucket set <team> [flags]
       --prefix string             optional folder inside the bucket
       --region string             region of the bucket
       --secret-access-key-stdin   read the secret access key from standard input
+      --use-files                 hold encrypted files for recipients until they accept
 ```
 
 ### Options inherited from parent commands
