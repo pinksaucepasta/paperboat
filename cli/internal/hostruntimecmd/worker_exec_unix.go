@@ -62,8 +62,13 @@ func (nativeWorkerStarter) Start(ctx context.Context, request workerStartRequest
 		controlWriter.Close()
 		return nil, err
 	}
-	stderr := &tailBuffer{limit: 2048}
-	command.Stderr = stderr
+	stderr, dump := &tailBuffer{limit: 2048}, &tailBuffer{limit: stackDumpLimit}
+	command.Stderr = io.MultiWriter(stderr, dump)
+	// SIGABRT from DumpStacks must print every goroutine, not only the current one.
+	if command.Env == nil {
+		command.Env = os.Environ()
+	}
+	command.Env = append(command.Env, "GOTRACEBACK=all")
 	if os.Geteuid() == 0 {
 		command.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{Uid: uint32(request.UID), Gid: uint32(request.GID)}}
 	}
@@ -89,7 +94,7 @@ func (nativeWorkerStarter) Start(ctx context.Context, request workerStartRequest
 		_ = command.Wait()
 		return nil, err
 	}
-	worker := &execWorker{command: command, control: controlWriter, lines: bufio.NewReader(io.LimitReader(stdout, 128)), workerID: request.WorkerID, stderr: stderr, exited: make(chan struct{})}
+	worker := &execWorker{command: command, control: controlWriter, lines: bufio.NewReader(io.LimitReader(stdout, 128)), workerID: request.WorkerID, stderr: stderr, dump: dump, exited: make(chan struct{})}
 	go func() {
 		worker.waitErr = command.Wait()
 		close(worker.exited)
@@ -108,6 +113,7 @@ type execWorker struct {
 	mu       sync.Mutex
 	ready    hostdproto.Status
 	stderr   *tailBuffer
+	dump     *tailBuffer
 	exited   chan struct{}
 	waitErr  error
 }
@@ -128,6 +134,18 @@ func (w *execWorker) ExitReason() string {
 		reason += "; last output: " + tail
 	}
 	return reason
+}
+
+// DumpStacks makes the worker crash with Go's goroutine dump (SIGQUIT is its
+// drain signal) and returns what it wrote; the process is gone afterwards.
+func (w *execWorker) DumpStacks(ctx context.Context) (string, error) {
+	err := w.command.Process.Signal(syscall.SIGABRT)
+	select {
+	case <-w.exited:
+	case <-ctx.Done():
+		err = errors.Join(err, ctx.Err())
+	}
+	return w.dump.String(), err
 }
 
 func (w *execWorker) Ready(ctx context.Context) (hostdproto.Status, error) {

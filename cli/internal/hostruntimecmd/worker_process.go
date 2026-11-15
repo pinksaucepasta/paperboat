@@ -49,6 +49,9 @@ type drainer interface {
 	Drain(context.Context) error
 }
 
+// stackDumpLimit bounds the stderr kept for a goroutine dump of a frozen worker.
+const stackDumpLimit = 512 << 10
+
 // tailBuffer keeps the last bytes a worker wrote to stderr for the exit report.
 type tailBuffer struct {
 	mu    sync.Mutex

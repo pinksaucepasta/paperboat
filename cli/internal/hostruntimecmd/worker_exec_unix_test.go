@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -102,5 +103,39 @@ func TestNativeWorkerProcessUsesSealedCapabilityAndOwnerLifetime(t *testing.T) {
 				t.Fatal("native owner left a live child or unreaped process")
 			}
 		})
+	}
+}
+
+// TestDumpActiveStacksCapturesAFrozenWorker: a worker that stopped heartbeating
+// is aborted by hostd so the daemon log names where its goroutines were stuck.
+func TestDumpActiveStacksCapturesAFrozenWorker(t *testing.T) {
+	t.Setenv("PAPERBOAT_NATIVE_STARTUP_TEST_CHILD", "1")
+	_, endpoint, token, _ := workerStartupFixture(t)
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	process, err := (nativeWorkerStarter{}).Start(t.Context(), workerStartRequest{Executable: executable, Version: "stack-dump", WorkerID: "runtime-stack-dump", UID: os.Geteuid(), GID: os.Getegid(), APIMin: 1, APIMax: 1, HostdEndpoint: endpoint, Capability: token, MutationsDisabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	if _, err := process.Ready(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := process.Activate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	owned := &ownedWorkers{active: "w", workers: map[string]*ownedWorker{"w": {process: process}}}
+	var sink strings.Builder
+	owned.dumpActiveStacks(ctx, &sink)
+	if out := sink.String(); !strings.Contains(out, "goroutine ") || !strings.Contains(out, "runWorkerWith") {
+		t.Fatalf("no goroutine stacks of the worker in the dump:\n%.2000s", out)
+	}
+	select {
+	case <-process.(*execWorker).Exited():
+	default:
+		t.Fatal("the dumped worker is still running")
 	}
 }

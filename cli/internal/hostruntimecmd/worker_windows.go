@@ -434,26 +434,40 @@ func runOwnerHostd(ctx context.Context, output io.Writer, install hostinstall.Wi
 	go func() {
 		handedOver <- hostdproto.ServeHandover(serverCtx, hostdproto.HandoverConfig{Token: token, Listener: func() net.Listener { return handoverListener }, StopAccepting: owned.stopAccepting, Resume: owned.resumeAccepting})
 	}()
-	select {
-	case <-ctx.Done():
-		return runtimeShutdownCause(ctx)
-	case serverErr := <-serverDone:
-		if ctx.Err() != nil && serverErr == nil {
+	livenessTicker := time.NewTicker(workerLivenessInterval)
+	defer livenessTicker.Stop()
+	var liveness workerLiveness
+	for {
+		select {
+		case <-ctx.Done():
 			return runtimeShutdownCause(ctx)
+		case serverErr := <-serverDone:
+			if ctx.Err() != nil && serverErr == nil {
+				return runtimeShutdownCause(ctx)
+			}
+			return runtimeFailure("hostd lifecycle listener stopped", serverErr)
+		case err := <-handedOver:
+			if ctx.Err() != nil {
+				return runtimeShutdownCause(ctx)
+			}
+			if err != nil {
+				return runtimeFailure("hostd handover listener stopped", err)
+			}
+			// The next generation serves the worker address. This one finishes its accepted work, bounded like Unix
+			// (worker_unix.go), and exits 0, a clean stop that starts no recovery action; the sweep then removes it.
+			drainCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), runtimewire.DrainLimit)
+			defer cancel()
+			return owned.drain(drainCtx)
+		case lost := <-owned.lost:
+			// Without its worker the machine is not serving; the nonzero exit makes the SCM recovery action
+			// restart this service and a fresh worker (as Restart=always does on Unix).
+			return lost
+		case now := <-livenessTicker.C:
+			if liveness.silent(server.Status(), now) {
+				owned.dumpActiveStacks(ctx, os.Stderr)
+				return runtimeFailure("the runtime worker stopped sending heartbeats", errWorkerSilent)
+			}
 		}
-		return runtimeFailure("hostd lifecycle listener stopped", serverErr)
-	case err := <-handedOver:
-		if ctx.Err() != nil {
-			return runtimeShutdownCause(ctx)
-		}
-		if err != nil {
-			return runtimeFailure("hostd handover listener stopped", err)
-		}
-		// The next generation serves the worker address. This one finishes its accepted work, bounded like Unix
-		// (worker_unix.go), and exits 0, a clean stop that starts no recovery action; the sweep then removes it.
-		drainCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), runtimewire.DrainLimit)
-		defer cancel()
-		return owned.drain(drainCtx)
 	}
 }
 
@@ -798,6 +812,21 @@ func (w *windowsRuntimeWorker) exited() <-chan struct{} {
 		go func() { w.waitErr = w.command.Wait(); close(w.waitDone) }()
 	})
 	return w.waitDone
+}
+
+func (w *windowsRuntimeWorker) Exited() <-chan struct{} { return w.exited() }
+
+// ExitReason reports the exit status and the last stderr lines (the worker holds no secrets in them).
+func (w *windowsRuntimeWorker) ExitReason() string {
+	<-w.exited()
+	reason := "exit status 0"
+	if w.waitErr != nil {
+		reason = w.waitErr.Error()
+	}
+	if tail := w.stderr.String(); tail != "" {
+		reason += "; last output: " + tail
+	}
+	return reason
 }
 
 func (w *windowsRuntimeWorker) closeOutput() error {
