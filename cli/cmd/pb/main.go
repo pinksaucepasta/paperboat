@@ -38,6 +38,7 @@ import (
 )
 
 func main() {
+	startCPUProfile()
 	os.Exit(mainExit())
 }
 
