@@ -2556,6 +2556,7 @@ type TeamBucket struct {
 	Secret      []byte
 	CheckedAt   time.Time
 	UpdatedAt   time.Time
+	UseFiles    bool
 }
 
 type TeamConfigDefault struct {
@@ -2644,6 +2645,12 @@ type TeamInboxRequest struct {
 	ProgressAt             sql.NullTime
 	SourceMachineName      string
 	DestinationMachineName string
+	StoredMetadata         []byte
+	StoredPrefix           sql.NullString
+	StoredUploaded         bool
+	StoredMachineID        sql.NullString
+	StoredDeletedAt        sql.NullTime
+	StoredUploadUntil      sql.NullTime
 }
 
 type TeamInboxSenderPolicy struct {

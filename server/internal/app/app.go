@@ -689,6 +689,7 @@ func New(opts Options) (*App, error) {
 	recordingService := recordings.New(store, opts.Config.Recordings, mintKeys, config.NormalizeIssuer(opts.Config.HTTP.PublicBaseURL))
 	teamBuckets := teambucket.New(store, opts.Config.Secrets.EncryptionKey)
 	recordingService.SetBuckets(teamBuckets)
+	teamInboxService.SetBuckets(teamBuckets)
 	browserTerminalGateway := &browserterminal.Gateway{
 		AdmissionLifetime: opts.Config.CLIAuth.MintProofLifetime,
 		RecordUsageAdmission: func(ctx context.Context, attachment, machine, terminal, node, actor string, expires time.Time) error {
@@ -863,7 +864,7 @@ func New(opts Options) (*App, error) {
 			}
 		}
 		_, retentionErr := retention.Run(pruneContext, store, opts.Config.Retention)
-		err = errors.Join(err, retentionErr, recordingService.PruneArchive(pruneContext), enrollmentService.PruneProofNonces(pruneContext), privateaccess.PurgeIdempotency(pruneContext, store))
+		err = errors.Join(err, retentionErr, recordingService.PruneArchive(pruneContext), teamInboxService.PruneStored(pruneContext), enrollmentService.PruneProofNonces(pruneContext), privateaccess.PurgeIdempotency(pruneContext, store))
 		workers.IterationFailure(ctx, "team_retention_cleanup", "team_retention_failed", err)
 		outcome := "success"
 		if err != nil {

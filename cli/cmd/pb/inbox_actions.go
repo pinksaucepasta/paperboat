@@ -106,7 +106,8 @@ func inboxDecisionCommand(c *command.Context, action string) error {
 		}
 		generation = request.DecisionGeneration
 	}
-	request, err := client.DecideTeamInboxRequest(c.Context, c.Args().First(), action, generation)
+	machineID, _ := configuredMachineID()
+	request, err := client.DecideTeamInboxRequest(c.Context, c.Args().First(), action, generation, machineID)
 	if err != nil {
 		return friendlyCommandError(err)
 	}

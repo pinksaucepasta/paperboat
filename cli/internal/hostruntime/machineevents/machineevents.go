@@ -50,6 +50,7 @@ const (
 	TopicMachineServices Topic = "machine_services"
 	// TopicRecordingPolicy moves when the machine's team recording policy or key changed.
 	TopicRecordingPolicy Topic = recording.Topic
+	TopicStoredFiles     Topic = "stored_files"
 )
 
 const (

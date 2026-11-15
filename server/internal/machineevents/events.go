@@ -31,12 +31,14 @@ const (
 	TopicPrivateRoutes = "private_routes"
 	// TopicRecordingPolicy moves when a team machine's recording policy may have changed (shared/recording).
 	TopicRecordingPolicy = "recording_policy"
+	// TopicStoredFiles moves when a stored (offline) team file becomes deliverable to a machine.
+	TopicStoredFiles = "stored_files"
 	// TopicRecipe moves when what a recipe machine applies changed: a new revision, a rotated key, or a
 	// vault the recipe reads (GET /v1/recipe-machine).
 	TopicRecipe = "recipe"
 )
 
-var topics = []string{TopicMachineAccess, TopicPeerNetwork, TopicPreviews, TopicTunnels, TopicConfig, TopicInventory, TopicMachineServices, TopicPrivateRoutes, TopicRecordingPolicy, TopicRecipe}
+var topics = []string{TopicMachineAccess, TopicPeerNetwork, TopicPreviews, TopicTunnels, TopicConfig, TopicInventory, TopicMachineServices, TopicPrivateRoutes, TopicRecordingPolicy, TopicRecipe, TopicStoredFiles}
 
 // ValidTopic reports whether name is a topic a host may wait on.
 func ValidTopic(name string) bool { return slices.Contains(topics, name) }

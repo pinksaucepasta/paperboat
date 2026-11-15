@@ -249,7 +249,8 @@ func actionHomeInbox(command *cobra.Command) error {
 			}
 			return actionErr
 		}
-		if _, err = client.DecideTeamInboxRequest(ctx.Context, request.RequestID, action.ID, request.DecisionGeneration); err != nil {
+		machineID, _ := configuredMachineID()
+		if _, err = client.DecideTeamInboxRequest(ctx.Context, request.RequestID, action.ID, request.DecisionGeneration, machineID); err != nil {
 			return friendlyCommandError(err)
 		}
 	}

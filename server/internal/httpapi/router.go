@@ -362,6 +362,9 @@ func NewRouter(opts Options) http.Handler {
 			mux.Handle("GET /v1/activity/export", requireAnyAuth(opts.Auth, opts.DeviceAuth, requireScope("account:read", activityExport(opts.Activity))))
 		}
 
+		if opts.TeamInbox != nil && opts.RuntimeIdentity != nil {
+			registerStoredMachineRoutes(mux, opts.RuntimeIdentity, opts.TeamInbox)
+		}
 		if opts.ResourceUsage != nil {
 			mux.HandleFunc("POST /v1/usage/native", resourceUsageNative(opts.RuntimeIdentity, opts.ResourceUsage))
 			mux.HandleFunc("POST /v1/machines/{id}/audit-backlog", machineAuditBacklog(opts.RuntimeIdentity, opts.Machines))

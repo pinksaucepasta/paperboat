@@ -59,6 +59,8 @@ func teamBucket(s *teambucket.Service, action string) http.HandlerFunc {
 			writeError(w, r, http.StatusNotFound, "bucket_not_configured", "This team has no bucket.")
 		case errors.Is(err, teambucket.ErrForbidden):
 			writeError(w, r, http.StatusForbidden, "forbidden", teambucket.ErrForbidden.Error())
+		case errors.Is(err, teambucket.ErrInUse):
+			writeError(w, r, http.StatusConflict, "bucket_has_pending_files", teambucket.ErrInUse.Error())
 		case errors.Is(err, teambucket.ErrNeedsTeam):
 			writeError(w, r, http.StatusConflict, "team_plan_required", "The team bucket is part of the Team plan.")
 		case errors.Is(err, teams.ErrSSORequired):

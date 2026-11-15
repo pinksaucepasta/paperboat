@@ -115,18 +115,7 @@ func runSendCommand(cobraCommand *cobra.Command, paths []string) error {
 	if sessionID == "" && !destination.Capabilities.FileReceive.Configured {
 		return &api.APIError{Code: "machine_capability_unavailable", Message: "This machine is not configured to receive files."}
 	}
-	if sessionID == "" && (!destination.Online || !destination.Capabilities.FileReceive.Observed) {
-		destination, err = retryWhileMachineOffline(ctx.Context, func() (api.UserMachine, error) {
-			current, resolveErr := resolveUserMachine(ctx.Context, client, destination.ID)
-			if resolveErr == nil && (!current.Online || !current.Capabilities.FileReceive.Observed) {
-				return current, &api.APIError{Code: "machine_offline", Message: "The destination machine is offline."}
-			}
-			return current, resolveErr
-		})
-		if err != nil {
-			return friendlyCommandError(err)
-		}
-	}
+
 	if !jsonOutput {
 		fmt.Fprintf(cobraCommand.ErrOrStderr(), "Sending to %s (%s)\n", destination.Alias, destination.ID)
 	}
@@ -167,6 +156,9 @@ func runSendCommand(cobraCommand *cobra.Command, paths []string) error {
 			return limit
 		}
 		return friendlyCommandError(err)
+	}
+	if acceptance.Stored {
+		return sendStoredFiles(ctx.Context, cobraCommand, client, acceptance, prepared.Sources, destination.Alias, jsonOutput)
 	}
 	if acceptance.Status == "pending" {
 		if !jsonOutput {

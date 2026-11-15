@@ -426,6 +426,7 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 			return nil, err
 		}
 	}
+	dependencies.StoredFiles = productionStoredFiles(controlURL, runtimeConfig.StateRoot, transport, managedSSHIdentity, machineRegistration, operationID, machineEvents)
 	dependencies.RecordingControl = productionRecordingControl(controlURL, runtimeConfig.StateRoot, transport, renewingTokens, operationID, machineEvents, offlineAudit)
 	if len(ownerDependencies) != 0 {
 		dependencies.Sessions = ownerDependencies[0].Sessions

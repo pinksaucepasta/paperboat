@@ -114,6 +114,7 @@ type HostDependencies struct {
 	ReconcileCarrierSSH func(context.Context, bool) error
 	Capabilities        server.CapabilityGate
 	// RecordingControl builds the team recordings controller over the host's sessions.
+	StoredFiles      func(*filetransfer.Service) (Service, error)
 	RecordingControl func(session.Service) (*recordingcontrol.Controller, error)
 }
 
@@ -328,6 +329,13 @@ func NewHost(ctx context.Context, config HostConfig, dependencies HostDependenci
 	})
 	if err != nil {
 		return nil, err
+	}
+	var storedControl Service
+	if dependencies.StoredFiles != nil {
+		storedControl, err = dependencies.StoredFiles(transferService)
+		if err != nil {
+			return nil, err
+		}
 	}
 	var recordingControl *recordingcontrol.Controller
 	var recordingDecisions server.RecordingControl
@@ -633,6 +641,9 @@ func NewHost(ctx context.Context, config HostConfig, dependencies HostDependenci
 		// unavailable target authority must fail SSH closed without taking the
 		// terminal, file-transfer, or preview services down with it.
 		stableComponents = append(stableComponents, stablehostd.Component{Name: "managed_ssh_authority", Required: false, Service: dependencies.ManagedSSHService})
+	}
+	if storedControl != nil {
+		stableComponents = append(stableComponents, stablehostd.Component{Name: "stored_files", Required: false, Service: storedControl})
 	}
 	if recordingControl != nil {
 		// Recording is optional: a policy Paperboat cannot serve must not take terminals down.

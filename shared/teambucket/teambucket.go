@@ -32,6 +32,7 @@ const (
 
 // Config is the team's bucket as the console and CLI read it. The secret key is never returned.
 type Config struct {
+	UseFiles    bool      `json:"use_files"`
 	Endpoint    string    `json:"endpoint"`
 	Region      string    `json:"region"`
 	Bucket      string    `json:"bucket"`
@@ -45,6 +46,7 @@ type Config struct {
 // bucket already exists. Saving a changed bucket checks it with a probe object; a failed check is a refusal that names
 // the step, and nothing is stored.
 type Input struct {
+	UseFiles        bool   `json:"use_files"`
 	Endpoint        string `json:"endpoint"`
 	Region          string `json:"region"`
 	Bucket          string `json:"bucket"`

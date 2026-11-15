@@ -108,6 +108,8 @@ func machineAuthorizedRequest(method, path string) bool {
 		return false
 	}
 	switch parts[1] {
+	case "machine":
+		return parts[2] == "stored-transfers" && (method == http.MethodGet && len(parts) == 3 || method == http.MethodPost && len(parts) == 5 && (parts[4] == "download-urls" || parts[4] == "received"))
 	case "previews":
 		return method == http.MethodDelete && len(parts) == 3 || method == http.MethodPost && (len(parts) == 4 && parts[3] == "readiness" || len(parts) == 5 && parts[3] == "lease" && parts[4] == "renew")
 	case "tunnels":

@@ -32,13 +32,14 @@ func teamInboxError(w http.ResponseWriter, r *http.Request, err error) {
 	case errors.Is(err, teaminbox.ErrLimit):
 		writeError(w, r, http.StatusTooManyRequests, "team_inbox_limit", "The recipient has too many pending transfer requests.")
 	case errors.Is(err, teaminbox.ErrOffline):
-		writeError(w, r, http.StatusConflict, "team_inbox_recipient_offline", "The recipient is offline; Paperboat does not store file payloads for later delivery.")
+		writeError(w, r, http.StatusConflict, "team_inbox_recipient_offline", "The recipient is offline and has no team bucket enabled for files. Ask a team admin to enable bucket files, or retry when the recipient is online.")
 	default:
 		writeError(w, r, http.StatusServiceUnavailable, "team_inbox_unavailable", "Team Inbox is temporarily unavailable.", err)
 	}
 }
 
 func registerTeamInboxRoutes(mux *http.ServeMux, service *teaminbox.Service, read, write func(http.Handler) http.Handler) {
+	registerStoredSenderRoutes(mux, service, read, write)
 	principal := func(w http.ResponseWriter, r *http.Request) (string, bool) { return vaultScopePrincipal(w, r) }
 	mux.Handle("GET /v1/teams/{team_id}/receipt-smtp", read(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		account, ok := principal(w, r)
@@ -183,11 +184,12 @@ func registerTeamInboxRoutes(mux *http.ServeMux, service *teaminbox.Service, rea
 			limitEnvironmentJSON(w, r, 1024)
 			var in struct {
 				ExpectedGeneration uint64 `json:"expected_generation"`
+				MachineID          string `json:"machine_id"`
 			}
 			if !decodeStrictJSON(w, r, &in) {
 				return
 			}
-			out, err := service.Decide(r.Context(), account, r.PathValue("request_id"), decision, in.ExpectedGeneration)
+			out, err := service.Decide(r.Context(), account, r.PathValue("request_id"), decision, in.ExpectedGeneration, in.MachineID)
 			if err != nil {
 				teamInboxError(w, r, err)
 				return

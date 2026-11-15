@@ -21,6 +21,7 @@ var (
 	ErrForbidden = errors.New("your team role cannot manage the team bucket")
 	ErrNotFound  = errors.New("team or bucket not found")
 	ErrNeedsTeam = errors.New("the team bucket is a Team plan feature")
+	ErrInUse     = errors.New("the team bucket has pending files; receive, decline or expire them before changing its location or removing it")
 	ErrNoKey     = errors.New("the server has no encryption key for bucket credentials")
 )
 
@@ -59,11 +60,11 @@ func authorizeTx(ctx context.Context, tx *db.Tx, account, team string) error {
 	return teams.SSOGuardTx(ctx, tx, team, account)
 }
 
-const columns = `endpoint, region, bucket, prefix, path_style, access_key_id, checked_at`
+const columns = `endpoint, region, bucket, prefix, path_style, access_key_id, checked_at, use_files`
 
 func scan(row interface{ Scan(...any) error }) (shared.Config, error) {
 	var c shared.Config
-	err := row.Scan(&c.Endpoint, &c.Region, &c.Bucket, &c.Prefix, &c.PathStyle, &c.AccessKeyID, &c.CheckedAt)
+	err := row.Scan(&c.Endpoint, &c.Region, &c.Bucket, &c.Prefix, &c.PathStyle, &c.AccessKeyID, &c.CheckedAt, &c.UseFiles)
 	return c, err
 }
 
@@ -121,7 +122,7 @@ func (s *Service) Put(ctx context.Context, account, team string, in shared.Input
 			return shared.Config{}, err
 		}
 	}
-	next := shared.Config{Endpoint: in.Endpoint, Region: in.Region, Bucket: in.Bucket, Prefix: in.Prefix, PathStyle: in.PathStyle,
+	next := shared.Config{UseFiles: in.UseFiles, Endpoint: in.Endpoint, Region: in.Region, Bucket: in.Bucket, Prefix: in.Prefix, PathStyle: in.PathStyle,
 		AccessKeyID: in.AccessKeyID, CheckedAt: s.now().UTC()}
 	if current != nil && in.SecretAccessKey == "" && sameBucket(*current, next) {
 		return *current, nil // nothing changed: the bucket was already proved
@@ -142,11 +143,20 @@ func (s *Service) Put(ctx context.Context, account, team string, in shared.Input
 		if err := authorizeTx(ctx, tx, account, team); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(ctx, `INSERT INTO team_buckets(team_id,endpoint,region,bucket,prefix,path_style,access_key_id,secret,checked_at)
- VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)
+		var locationChanged bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM team_buckets WHERE team_id=$1 AND (endpoint<>$2 OR bucket<>$3 OR prefix<>$4 OR region<>$5 OR path_style<>$6))`, team, next.Endpoint, next.Bucket, next.Prefix, next.Region, next.PathStyle).Scan(&locationChanged); err != nil {
+			return err
+		}
+		if locationChanged {
+			if err := noPendingFiles(ctx, tx, team); err != nil {
+				return err
+			}
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO team_buckets(team_id,endpoint,region,bucket,prefix,path_style,access_key_id,secret,checked_at,use_files)
+ VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
  ON CONFLICT(team_id) DO UPDATE SET endpoint=EXCLUDED.endpoint,region=EXCLUDED.region,bucket=EXCLUDED.bucket,prefix=EXCLUDED.prefix,path_style=EXCLUDED.path_style,
- access_key_id=EXCLUDED.access_key_id,secret=EXCLUDED.secret,checked_at=EXCLUDED.checked_at,updated_at=now()`,
-			team, next.Endpoint, next.Region, next.Bucket, next.Prefix, next.PathStyle, next.AccessKeyID, box, next.CheckedAt); err != nil {
+ access_key_id=EXCLUDED.access_key_id,secret=EXCLUDED.secret,checked_at=EXCLUDED.checked_at,use_files=EXCLUDED.use_files,updated_at=now()`,
+			team, next.Endpoint, next.Region, next.Bucket, next.Prefix, next.PathStyle, next.AccessKeyID, box, next.CheckedAt, next.UseFiles); err != nil {
 			return err
 		}
 		out = next
@@ -156,13 +166,16 @@ func (s *Service) Put(ctx context.Context, account, team string, in shared.Input
 }
 
 func sameBucket(a, b shared.Config) bool {
-	return a.Endpoint == b.Endpoint && a.Region == b.Region && a.Bucket == b.Bucket && a.Prefix == b.Prefix && a.PathStyle == b.PathStyle && a.AccessKeyID == b.AccessKeyID
+	return a.UseFiles == b.UseFiles && a.Endpoint == b.Endpoint && a.Region == b.Region && a.Bucket == b.Bucket && a.Prefix == b.Prefix && a.PathStyle == b.PathStyle && a.AccessKeyID == b.AccessKeyID
 }
 
 // Delete is DELETE /v1/teams/{team}/bucket. Objects already in the bucket stay: they are the team's.
 func (s *Service) Delete(ctx context.Context, account, team string) error {
 	return s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
 		if err := authorizeTx(ctx, tx, account, team); err != nil {
+			return err
+		}
+		if err := noPendingFiles(ctx, tx, team); err != nil {
 			return err
 		}
 		tag, err := tx.Exec(ctx, `DELETE FROM team_buckets WHERE team_id=$1`, team)
@@ -184,7 +197,7 @@ func (s *Service) StoreFor(ctx context.Context, tx *db.Tx, team string) (ObjectS
 	var sealed []byte
 	var c shared.Config
 	err := tx.QueryRow(ctx, `SELECT `+columns+`, secret FROM team_buckets WHERE team_id=$1`, team).
-		Scan(&c.Endpoint, &c.Region, &c.Bucket, &c.Prefix, &c.PathStyle, &c.AccessKeyID, &c.CheckedAt, &sealed)
+		Scan(&c.Endpoint, &c.Region, &c.Bucket, &c.Prefix, &c.PathStyle, &c.AccessKeyID, &c.CheckedAt, &c.UseFiles, &sealed)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -200,4 +213,15 @@ func (s *Service) StoreFor(ctx context.Context, tx *db.Tx, team string) (ObjectS
 		return nil, err
 	}
 	return store, nil
+}
+
+func noPendingFiles(ctx context.Context, tx *db.Tx, team string) error {
+	var pending bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM team_inbox_requests WHERE team_id=$1 AND stored_prefix IS NOT NULL AND stored_deleted_at IS NULL)`, team).Scan(&pending); err != nil {
+		return err
+	}
+	if pending {
+		return ErrInUse
+	}
+	return nil
 }

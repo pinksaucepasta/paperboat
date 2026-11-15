@@ -16,7 +16,9 @@ import (
 	serverconfig "github.com/pinksaucepasta/paperboat/server/internal/config"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	serverdiagnostics "github.com/pinksaucepasta/paperboat/server/internal/diagnostics"
+	"github.com/pinksaucepasta/paperboat/server/internal/teambucket"
 	"github.com/pinksaucepasta/paperboat/server/internal/teams"
+	"github.com/pinksaucepasta/paperboat/shared/storedfiles"
 )
 
 const (
@@ -60,6 +62,7 @@ type RequestInput struct {
 }
 
 type Request struct {
+	Stored                 bool      `json:"stored"`
 	RequestID              string    `json:"request_id"`
 	TeamID                 string    `json:"team_id"`
 	SenderAccount          string    `json:"sender_account"`
@@ -88,6 +91,7 @@ type Page struct {
 }
 
 type Service struct {
+	buckets       Buckets
 	transfer      serverconfig.FileTransferPolicy
 	db            *db.DB
 	now           func() time.Time
@@ -183,7 +187,7 @@ func (s *Service) Inventory(ctx context.Context, account, q, state, owner string
 	if err := tx.QueryRowContext(ctx, "SELECT count(*)"+predicate, args...).Scan(&total); err != nil {
 		return Page{}, 0, err
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT r.request_id,r.team_id,r.sender_account,r.recipient_account,r.source_machine_id,r.destination_machine_id,r.source_machine_name,r.destination_machine_name,r.batch_id,r.manifest_digest,r.manifest,`+effectiveStatus+`,r.decision_generation,r.expires_at,coalesce(o.status,''),coalesce(r.transfer_mode,''),coalesce(r.transfer_state,''),coalesce(r.pause_reason,''),r.committed_bytes`+predicate+` ORDER BY r.created_at DESC,r.request_id DESC LIMIT $5 OFFSET $6`, append(args, limit, offset)...)
+	rows, err := tx.QueryContext(ctx, `SELECT r.request_id,r.team_id,r.sender_account,r.recipient_account,r.source_machine_id,r.destination_machine_id,r.source_machine_name,r.destination_machine_name,r.batch_id,r.manifest_digest,r.manifest,`+effectiveStatus+`,r.decision_generation,r.expires_at,coalesce(o.status,''),coalesce(r.transfer_mode,''),coalesce(r.transfer_state,''),coalesce(r.pause_reason,''),r.committed_bytes,(r.stored_prefix IS NOT NULL)`+predicate+` ORDER BY r.created_at DESC,r.request_id DESC LIMIT $5 OFFSET $6`, append(args, limit, offset)...)
 	if err != nil {
 		return Page{}, 0, err
 	}
@@ -192,7 +196,7 @@ func (s *Service) Inventory(ctx context.Context, account, q, state, owner string
 	for rows.Next() {
 		var request Request
 		var manifest []byte
-		if err = rows.Scan(&request.RequestID, &request.TeamID, &request.SenderAccount, &request.RecipientAccount, &request.SourceMachineID, &request.DestinationMachineID, &request.SourceMachineName, &request.DestinationMachineName, &request.BatchID, &request.ManifestDigest, &manifest, &request.Status, &request.DecisionGeneration, &request.ExpiresAt, &request.ReceiptNotification, &request.TransferMode, &request.TransferState, &request.PauseReason, &request.CommittedBytes); err != nil {
+		if err = rows.Scan(&request.RequestID, &request.TeamID, &request.SenderAccount, &request.RecipientAccount, &request.SourceMachineID, &request.DestinationMachineID, &request.SourceMachineName, &request.DestinationMachineName, &request.BatchID, &request.ManifestDigest, &manifest, &request.Status, &request.DecisionGeneration, &request.ExpiresAt, &request.ReceiptNotification, &request.TransferMode, &request.TransferState, &request.PauseReason, &request.CommittedBytes, &request.Stored); err != nil {
 			return Page{}, 0, err
 		}
 		if err = json.Unmarshal(manifest, &request.Files); err != nil {
@@ -210,7 +214,7 @@ func (s *Service) Get(ctx context.Context, account, requestID string) (Request, 
 	}
 	var out Request
 	var manifest []byte
-	err := s.db.SQL().QueryRowContext(ctx, `SELECT r.request_id,r.team_id,r.sender_account,r.recipient_account,r.source_machine_id,r.destination_machine_id,r.source_machine_name,r.destination_machine_name,r.batch_id,r.manifest_digest,r.manifest,`+effectiveStatus+`,r.decision_generation,r.expires_at,coalesce(o.status,''),coalesce(r.transfer_mode,''),coalesce(r.transfer_state,''),coalesce(r.pause_reason,''),r.committed_bytes FROM paperboat.team_inbox_requests r LEFT JOIN paperboat.team_inbox_receipt_outbox o USING(request_id) WHERE r.request_id=$1 AND (r.sender_account=$2 OR r.recipient_account=$2)`, requestID, account).Scan(&out.RequestID, &out.TeamID, &out.SenderAccount, &out.RecipientAccount, &out.SourceMachineID, &out.DestinationMachineID, &out.SourceMachineName, &out.DestinationMachineName, &out.BatchID, &out.ManifestDigest, &manifest, &out.Status, &out.DecisionGeneration, &out.ExpiresAt, &out.ReceiptNotification, &out.TransferMode, &out.TransferState, &out.PauseReason, &out.CommittedBytes)
+	err := s.db.SQL().QueryRowContext(ctx, `SELECT r.request_id,r.team_id,r.sender_account,r.recipient_account,r.source_machine_id,r.destination_machine_id,r.source_machine_name,r.destination_machine_name,r.batch_id,r.manifest_digest,r.manifest,`+effectiveStatus+`,r.decision_generation,r.expires_at,coalesce(o.status,''),coalesce(r.transfer_mode,''),coalesce(r.transfer_state,''),coalesce(r.pause_reason,''),r.committed_bytes,(r.stored_prefix IS NOT NULL) FROM paperboat.team_inbox_requests r LEFT JOIN paperboat.team_inbox_receipt_outbox o USING(request_id) WHERE r.request_id=$1 AND (r.sender_account=$2 OR r.recipient_account=$2)`, requestID, account).Scan(&out.RequestID, &out.TeamID, &out.SenderAccount, &out.RecipientAccount, &out.SourceMachineID, &out.DestinationMachineID, &out.SourceMachineName, &out.DestinationMachineName, &out.BatchID, &out.ManifestDigest, &manifest, &out.Status, &out.DecisionGeneration, &out.ExpiresAt, &out.ReceiptNotification, &out.TransferMode, &out.TransferState, &out.PauseReason, &out.CommittedBytes, &out.Stored)
 	if noRows(err) {
 		return Request{}, ErrNotFound
 	}
@@ -342,8 +346,27 @@ func (s *Service) Create(ctx context.Context, in RequestInput) (Request, error) 
 		if err != nil {
 			return err
 		}
-		if destinationState != "online" || !online || !configured || !observed {
+		var storedPrefix *string
+		if s.buckets != nil {
+			store, bucketErr := s.buckets.StoreFor(ctx, tx, team)
+			if bucketErr == nil && store.Config().UseFiles {
+				prefix := store.Config().Prefix
+				storedPrefix = &prefix
+			} else if bucketErr != nil && !errors.Is(bucketErr, teambucket.ErrNotFound) {
+				return bucketErr
+			}
+		}
+		if !configured || (storedPrefix == nil && (destinationState != "online" || !online || !observed)) {
 			return ErrOffline
+		}
+		if storedPrefix != nil {
+			if _, err := storedRecipientsTx(ctx, tx, recipient); err != nil {
+				return err
+			}
+			if _, err := storedfiles.PartKey(*storedPrefix, in.RequestID, 0); err != nil {
+				return ErrInvalid
+			}
+			in.ExpiresAt = now.Add(storedfiles.Lifetime)
 		}
 		var pending int
 		if err = tx.QueryRow(ctx, `SELECT count(*) FROM team_inbox_requests WHERE recipient_account=$1 AND status='pending' AND expires_at>$2`, recipient, now).Scan(&pending); err != nil {
@@ -365,10 +388,10 @@ func (s *Service) Create(ctx context.Context, in RequestInput) (Request, error) 
 			return err
 		}
 		status := "pending"
-		if mode == "automatic" {
+		if mode == "automatic" && storedPrefix == nil {
 			status = "approved"
 		}
-		_, err = tx.Exec(ctx, `INSERT INTO team_inbox_requests(request_id,operation_id,team_id,sender_account,recipient_account,source_machine_id,destination_machine_id,batch_id,manifest_digest,manifest,status,decision_kind,policy_generation,expires_at,decided_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,CASE WHEN $11::text='approved' THEN $15::timestamptz ELSE NULL END) ON CONFLICT(sender_account,operation_id) DO NOTHING`, in.RequestID, in.OperationID, team, in.SenderAccount, recipient, in.SourceMachineID, in.DestinationMachineID, in.BatchID, digest, manifest, status, mode, generation, in.ExpiresAt.UTC(), now)
+		_, err = tx.Exec(ctx, `INSERT INTO team_inbox_requests(request_id,operation_id,team_id,sender_account,recipient_account,source_machine_id,destination_machine_id,batch_id,manifest_digest,manifest,status,decision_kind,policy_generation,expires_at,stored_prefix,decided_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$16,CASE WHEN $11::text='approved' THEN $15::timestamptz ELSE NULL END) ON CONFLICT(sender_account,operation_id) DO NOTHING`, in.RequestID, in.OperationID, team, in.SenderAccount, recipient, in.SourceMachineID, in.DestinationMachineID, in.BatchID, digest, manifest, status, mode, generation, in.ExpiresAt.UTC(), now, storedPrefix)
 		if err != nil {
 			return err
 		}
@@ -387,7 +410,7 @@ func (s *Service) Create(ctx context.Context, in RequestInput) (Request, error) 
 func readTx(ctx context.Context, tx *db.Tx, requestID, account string) (Request, error) {
 	var out Request
 	var manifest []byte
-	err := tx.QueryRow(ctx, `SELECT request_id,team_id,sender_account,recipient_account,source_machine_id,destination_machine_id,source_machine_name,destination_machine_name,batch_id,manifest_digest,manifest,status,decision_generation,expires_at,coalesce(transfer_mode,''),coalesce(transfer_state,''),coalesce(pause_reason,''),committed_bytes FROM team_inbox_requests WHERE request_id=$1 AND ($2='' OR sender_account=$2 OR recipient_account=$2)`, requestID, account).Scan(&out.RequestID, &out.TeamID, &out.SenderAccount, &out.RecipientAccount, &out.SourceMachineID, &out.DestinationMachineID, &out.SourceMachineName, &out.DestinationMachineName, &out.BatchID, &out.ManifestDigest, &manifest, &out.Status, &out.DecisionGeneration, &out.ExpiresAt, &out.TransferMode, &out.TransferState, &out.PauseReason, &out.CommittedBytes)
+	err := tx.QueryRow(ctx, `SELECT request_id,team_id,sender_account,recipient_account,source_machine_id,destination_machine_id,source_machine_name,destination_machine_name,batch_id,manifest_digest,manifest,status,decision_generation,expires_at,coalesce(transfer_mode,''),coalesce(transfer_state,''),coalesce(pause_reason,''),committed_bytes,(stored_prefix IS NOT NULL) FROM team_inbox_requests WHERE request_id=$1 AND ($2='' OR sender_account=$2 OR recipient_account=$2)`, requestID, account).Scan(&out.RequestID, &out.TeamID, &out.SenderAccount, &out.RecipientAccount, &out.SourceMachineID, &out.DestinationMachineID, &out.SourceMachineName, &out.DestinationMachineName, &out.BatchID, &out.ManifestDigest, &manifest, &out.Status, &out.DecisionGeneration, &out.ExpiresAt, &out.TransferMode, &out.TransferState, &out.PauseReason, &out.CommittedBytes, &out.Stored)
 	if noRows(err) {
 		return Request{}, ErrNotFound
 	}
@@ -409,7 +432,7 @@ func readOperationTx(ctx context.Context, tx *db.Tx, sender, operation string) (
 	return readTx(ctx, tx, requestID, sender)
 }
 
-func (s *Service) Decide(ctx context.Context, recipient, requestID, decision string, expected uint64) (Request, error) {
+func (s *Service) Decide(ctx context.Context, recipient, requestID, decision string, expected uint64, machines ...string) (Request, error) {
 	if !safeID.MatchString(recipient) || !safeID.MatchString(requestID) || expected == 0 || decision != "approved" && decision != "declined" {
 		return Request{}, ErrInvalid
 	}
@@ -427,6 +450,18 @@ func (s *Service) Decide(ctx context.Context, recipient, requestID, decision str
 		if current.RecipientAccount != recipient {
 			return ErrNotFound
 		}
+		if current.Stored && decision == "approved" {
+			if len(machines) != 1 || !safeID.MatchString(machines[0]) {
+				return ErrInvalid
+			}
+			var eligible bool
+			if err := tx.QueryRow(ctx, `SELECT `+storedMachineAllowed+` FROM team_inbox_requests r WHERE r.request_id=$2`, machines[0], requestID).Scan(&eligible); err != nil {
+				return err
+			}
+			if !eligible {
+				return ErrForbidden
+			}
+		}
 		var authorized bool
 		if readErr = tx.QueryRow(ctx, `SELECT EXISTS(
 			SELECT 1 FROM team_inbox_requests r
@@ -436,7 +471,7 @@ func (s *Service) Decide(ctx context.Context, recipient, requestID, decision str
 			JOIN user_machines source ON source.id=r.source_machine_id AND source.user_id=r.sender_account AND source.revoked_at IS NULL AND source.deleted_at IS NULL
 			JOIN user_machines destination ON destination.id=r.destination_machine_id AND destination.user_id=r.recipient_account AND destination.revoked_at IS NULL AND destination.deleted_at IS NULL
 			WHERE r.request_id=$1 AND r.recipient_account=$2
-			AND destination.configured_capabilities @> ARRAY['file_receive'] AND destination.observed_capabilities @> ARRAY['file_receive']
+			AND destination.configured_capabilities @> ARRAY['file_receive'] AND (r.stored_prefix IS NOT NULL OR destination.observed_capabilities @> ARRAY['file_receive'])
 			AND team_machine_capability_allowed(r.sender_account,r.team_id,r.destination_machine_id,'files'))`, requestID, recipient).Scan(&authorized); readErr != nil {
 			return readErr
 		}
@@ -461,12 +496,20 @@ func (s *Service) Decide(ctx context.Context, recipient, requestID, decision str
 		if result.RowsAffected() != 1 {
 			return ErrConflict
 		}
+		if current.Stored && decision == "approved" {
+			if _, err := tx.Exec(ctx, `UPDATE team_inbox_requests SET stored_machine_id=$2 WHERE request_id=$1`, requestID, machines[0]); err != nil {
+				return err
+			}
+		}
 		out, err = readTx(ctx, tx, requestID, recipient)
 		if err != nil {
 			return err
 		}
 		return auditLifecycleTx(ctx, tx, recipient, out, "decide", requestID+":"+decision, decision)
 	})
+	if err == nil && (decision == "declined" || outcomeErr != nil) {
+		err = s.DeleteStored(ctx, requestID)
+	}
 	if err == nil && outcomeErr != nil {
 		return out, outcomeErr
 	}
@@ -500,6 +543,9 @@ func (s *Service) Consume(ctx context.Context, sender, requestID, digest string)
 			}
 			outcomeErr = ErrRevoked
 			return nil
+		}
+		if out.Stored {
+			return ErrConflict
 		}
 		if out.ManifestDigest != digest {
 			return ErrConflict
@@ -554,6 +600,9 @@ func (s *Service) Complete(ctx context.Context, recipient, requestID, digest str
 		}
 		if out.RecipientAccount != recipient {
 			return ErrNotFound
+		}
+		if out.Stored {
+			return ErrConflict
 		}
 		if out.ManifestDigest != digest || out.Status != "consumed" && out.Status != "completed" {
 			return ErrConflict

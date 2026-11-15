@@ -14,6 +14,7 @@ type TeamInboxFile struct {
 }
 
 type TeamInboxRequest struct {
+	Stored               bool            `json:"stored"`
 	RequestID            string          `json:"request_id"`
 	TeamID               string          `json:"team_id"`
 	SenderAccount        string          `json:"sender_account"`
@@ -69,9 +70,14 @@ func (c *Client) TeamInboxRequest(ctx context.Context, requestID string) (TeamIn
 	return out, err
 }
 
-func (c *Client) DecideTeamInboxRequest(ctx context.Context, requestID, action string, generation uint64) (TeamInboxRequest, error) {
+func (c *Client) DecideTeamInboxRequest(ctx context.Context, requestID, action string, generation uint64, machines ...string) (TeamInboxRequest, error) {
 	var out TeamInboxRequest
-	err := c.do(ctx, http.MethodPost, "/v1/team-inbox/requests/"+url.PathEscape(requestID)+"/"+action, map[string]uint64{"expected_generation": generation}, &out)
+	err := c.do(ctx, http.MethodPost, "/v1/team-inbox/requests/"+url.PathEscape(requestID)+"/"+action, map[string]any{"expected_generation": generation, "machine_id": func() string {
+		if len(machines) == 1 {
+			return machines[0]
+		}
+		return ""
+	}()}, &out)
 	return out, err
 }
 

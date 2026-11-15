@@ -43,7 +43,19 @@ func deliverySignature(domain string, e vaultDeliveryEnvelope) []byte {
 	return raw
 }
 func sealVaultDelivery(ctx context.Context, domain string, claims, recipient, seed, plain []byte) ([]byte, error) {
-	if ctx == nil || len(seed) != 32 || !validVaultPublic(recipient) {
+	if len(seed) != 32 {
+		return nil, ErrInvalid
+	}
+	signer := ed25519.NewKeyFromSeed(seed)
+	defer clear(signer)
+	return sealVaultDeliveryWithSigner(ctx, domain, claims, recipient, plain, func(message []byte) []byte {
+		return ed25519.Sign(signer, message)
+	})
+}
+
+// sealVaultDeliveryWithSigner lets machine identities sign without exposing their seed.
+func sealVaultDeliveryWithSigner(ctx context.Context, domain string, claims, recipient, plain []byte, sign func([]byte) []byte) ([]byte, error) {
+	if ctx == nil || sign == nil || !validVaultPublic(recipient) {
 		return nil, ErrInvalid
 	}
 	if err := ctx.Err(); err != nil {
@@ -62,9 +74,10 @@ func sealVaultDelivery(ctx context.Context, domain string, claims, recipient, se
 		return nil, err
 	}
 	e := vaultDeliveryEnvelope{Claims: claims, Enc: enc, Ciphertext: ciphertext}
-	signer := ed25519.NewKeyFromSeed(seed)
-	defer clear(signer)
-	e.Signature = ed25519.Sign(signer, deliverySignature(domain, e))
+	e.Signature = sign(deliverySignature(domain, e))
+	if len(e.Signature) != ed25519.SignatureSize {
+		return nil, ErrInvalid
+	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
