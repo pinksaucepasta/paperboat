@@ -1103,7 +1103,7 @@ and the open review lows; Windows-only and macOS-only findings have `n/a` on the
 
 | ID | Scenario | L | M | W | Evidence |
 |---|---|---|---|---|---|
-| F26-01 | `pb recipe create|list|show|update|rotate|revoke` and the console Recipes page work with the texts in PLAN F26; the token is shown once, stored hashed. | [ ] | [ ] | [ ] | Added 2026-11-16 (user decision, PLAN Log 2026-11-16). |
+| F26-01 | `pb recipe create`, `list`, `show`, `update`, `rotate`, `revoke` and the console Recipes page work with the texts in PLAN F26; the token is shown once, stored hashed. | [ ] | [ ] | [ ] | Added 2026-11-16 (user decision, PLAN Log 2026-11-16). |
 | F26-02 | `get.<domain>/recipe` with PB_RECIPE (and recipe.ps1, `pb pair pbr_…`) installs, pairs and applies a recipe with no prompt on Linux, macOS, Windows and a container; a missing or malformed PB_RECIPE stops at once with a clear message; a rerun is a no-op. | [ ] | [ ] | [ ] | Added 2026-11-16 (user decision, PLAN Log 2026-11-16). |
 | F26-03 | Recipe machines get the recipe's tags at pairing and are refused outside `[[reach]]`. | [ ] | [ ] | [ ] | Added 2026-11-16 (user decision, PLAN Log 2026-11-16). |
 | F26-04 | Named ENV vaults: a recipe machine reads its vaults with nobody online; revoke and rotate re-key the vault; values never reach the server in plaintext. | [ ] | [ ] | [ ] | Added 2026-11-16 (user decision, PLAN Log 2026-11-16). |
@@ -1116,7 +1116,7 @@ and the open review lows; Windows-only and macOS-only findings have `n/a` on the
 
 | ID | Scenario | L | M | W | Evidence |
 |---|---|---|---|---|---|
-| F27-01 | Port names follow the machine: `pb port name set|list|unset <name> <port> --machine m | --all-machines` (and the console Network page) stores the name on the server; `<name>.<machine>.<local domain>` opens on every computer of everyone allowed that port with nothing run there; a machine name beats an all-machines name; numeric labels mean the port; names grant no access; the old per-computer alias/proxy settings are gone. | [ ] | [ ] | [ ] | Added 2026-11-16 (user decision, PLAN Log 2026-11-16). |
+| F27-01 | Port names follow the machine: `pb port name set`, `list`, `unset` (`<name> <port> --machine m` or `--all-machines`) (and the console Network page) stores the name on the server; `<name>.<machine>.<local domain>` opens on every computer of everyone allowed that port with nothing run there; a machine name beats an all-machines name; numeric labels mean the port; names grant no access; the old per-computer alias/proxy settings are gone. | [ ] | [ ] | [ ] | Added 2026-11-16 (user decision, PLAN Log 2026-11-16). |
 | F27-02 | Top-level names: `<name>.<local domain>` (e.g. jellyfin.ppr.boats) opens a named port on a machine; a machine with that name added later takes the address and the name shows as shadowed; setting a name equal to an existing machine is refused. | [ ] | [ ] | [ ] | Added 2026-11-16 (user decision, PLAN Log 2026-11-16). |
 | F27-03 | Front desk per machine: an address that matches no name goes to the machine's front-desk port and scheme (default 80/http, e.g. 443/https for Coolify, Traefik, Caddy). | [ ] | [ ] | [ ] | Added 2026-11-16 (user decision, PLAN Log 2026-11-16). |
 | F27-04 | HTTPS to the app: `443.<machine>` and an https front desk connect over TLS with the browser's host as SNI and no certificate check; a Coolify app with an https:// domain opens without a redirect loop; an app that still redirects to its own address gets the explanation page. | [ ] | [ ] | [ ] | Added 2026-11-16 (user decision, PLAN Log 2026-11-16). |
