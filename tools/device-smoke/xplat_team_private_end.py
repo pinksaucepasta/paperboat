@@ -3,7 +3,8 @@
 
 Pairs use holder OS > shared target OS. XPLAT_L_HOST supplies two isolated
 Linux containers rx19d-a/rx19d-b in distinct accounts. XPLAT_MAC_SSH is the
-account-A Mac; XPE_MEMBER_WIN_SSH is the account-B Windows runner. XPE_TEAM
+account-A Mac; XPE_MEMBER_WIN_SSH is the account-B Windows runner; XPE_BUILD is the
+build id every pb must report. XPE_TEAM
 names a throwaway paid team owned by A with B as a member. Direct SSH starts
 bounded origins, so grant changes cannot stop the origin itself. Each mutation
 holds both a pb access forward and raw 127.100.x.y TCP; both must echo first,
@@ -282,7 +283,7 @@ def main():
     for d in (a,b,m,w):
         version = d.pb('version')
         assert version.rc == 0, d.name + ' version unavailable'
-        assert 'dev-ac409910b' in version.text, 'wrong cycle build: ' + d.name
+        assert os.environ['XPE_BUILD'] in version.text, 'wrong build: ' + d.name
         versions[d.name] = version.text.strip()
     def save():
         out.write_text(json.dumps({'check': 'X-19-team-private-end',
