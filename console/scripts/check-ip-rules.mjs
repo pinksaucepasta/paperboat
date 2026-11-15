@@ -68,7 +68,7 @@ try {
   const notice = page.locator("[data-flood-protection]")
   if (flood) {
     const text = await notice.innerText().catch(() => "")
-    log(text.includes(String(flood.refused)) && text.includes(flood.summary), "tunnel: flood notice shows count and summary")
+    log(text.includes(String(flood.refused)) && text.includes(flood.summary) && /refused since/.test(text), "tunnel: flood notice shows count, since and summary")
   } else log((await notice.count()) === 0, "tunnel: no flood notice without refusals")
   await rules("tunnel", tunnel)
 

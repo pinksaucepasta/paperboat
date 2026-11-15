@@ -1,0 +1,72 @@
+{
+ "check": "flood-rows",
+ "row": "F8-14",
+ "status": "PASS",
+ "steps": [
+  {
+   "step": "baseline: both addresses are served",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "step": "the flooding address is denied by its owner (403 before the app) so the edge answers its flood itself",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "step": "the flooding address is refused 429 edge_rate_limited with Retry-After, after getting its burst",
+   "status": "PASS",
+   "detail": "{'403': 6892, '429': 7252} {'status': 429, 'type': 'text/html; charset=utf-8', 'error': 'edge_rate_limited', 'retry_after': '1', 'body': '<!doctype html>\\n<html lang=\"en\"><head><meta charset=\"utf-8\">'}"
+  },
+  {
+   "step": "a new preview made during the flood is served to another address within 20 s",
+   "status": "PASS",
+   "detail": "0.5 s"
+  },
+  {
+   "step": "another address is served every time during the flood",
+   "status": "PASS",
+   "detail": "[200, 200, 200, 200, 200, 200, 200, 200, 200, 200, 200, 200, 200, 200, 200, 200, 200, 200, 200, 200, 200, 200, 200, 200, 200]"
+  },
+  {
+   "step": "a browser gets a page, an API client problem+json",
+   "status": "PASS",
+   "detail": "{'status': 429, 'type': 'text/html; charset=utf-8', 'error': 'edge_rate_limited', 'retry_after': '1', 'body': '<!doctype html>\\n<html lang=\"en\"><head><meta charset=\"utf-8\">'} {'status': 429, 'type': 'application/problem+json', 'error': 'edge_rate_limited', 'retry_after': '1', 'body': '{\"type\":\"urn:paperboat:error:edge_rate_limited\",\"title\":\"Thi'}"
+  },
+  {
+   "step": "new TLS handshakes from the address are limited",
+   "status": "PASS",
+   "detail": "{'ok': 191, 'refused': 97}"
+  },
+  {
+   "step": "WebSocket upgrades from the address are limited",
+   "status": "PASS",
+   "detail": "{'403': 174, '429': 10, 'error': 8}"
+  },
+  {
+   "step": "the address is served again after it stops (within 30 s)",
+   "status": "PASS",
+   "detail": "200"
+  },
+  {
+   "step": "the owner sees the refusals in pb tunnel status (flood_protection)",
+   "status": "PASS",
+   "detail": "{'refused': 7264, 'since': '2026-11-15T22:00:00Z', 'summary': \"Paperboat's flood protection refused 7264 requests to this tunnel since 22:00 UTC: some client addresses sent more than the edge allows.\"}"
+  }
+ ],
+ "tunnel_id": "tunnel_f74e5daf-5f19-4e9b-acef-0e52c42e926a",
+ "refused": 7264,
+ "since": "2026-11-15T22:00:00Z",
+ "machine_id": "machine_5e03ff16-19d2-4fbe-a20f-0289ab135056",
+ "device": "Linux: console3-flood container on pbvm2; observer A oracle; observer B dadape; operator pprbtdev@gmail.com; production edges",
+ "pb_version": "dev-a63c76ef1",
+ "build_dir": "/home/ubuntu/pb-builds/dev-a63c76ef1",
+ "flood_workers": 8,
+ "flood_pipeline_batch": 32,
+ "cleanup": {
+  "released": true,
+  "tunnel_list_empty_for_console3_and_tor_flood": true,
+  "machine_revoked_by_exact_id": true,
+  "container_removed": true
+ }
+}
