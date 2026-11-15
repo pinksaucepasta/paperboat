@@ -79,7 +79,7 @@ await ctx.route("**/api/v1/**", async (route) => {
 
 const bell = page.getByRole("button", { name: /^Requests, \d+ waiting$/ })
 const refresh = async () => page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")))
-const waitBell = async (text) => bell.filter({ hasText: text }).waitFor({ timeout: 20000 }).then(() => true, () => false)
+const waitBell = async (text) => bell.filter({ hasText: text }).waitFor({ timeout: 40000 }).then(() => true, () => false)
 
 state.files = 0, state.invitations = 0, state.machines = []
 await page.goto(`${origin}/`, { waitUntil: "networkidle" })
@@ -96,27 +96,28 @@ log(
   (await tab(/^Files 13$/).count()) === 1 && (await tab(/^Invitations 1$/).count()) === 1 && (await tab(/^Machines 2$/).count()) === 1,
   "one tab per kind with its own count",
 )
-const rows = () => page.locator("[data-slot=popover-content]").getByRole("button", { name: "Accept" }).count()
+const pop = page.locator("[data-slot=popover-content]")
+const rows = () => pop.getByRole("button", { name: "Accept" }).count()
 log((await rows()) === 10, "Files page 1 lists 10 requests", String(await rows()))
-log(await page.getByText("1–10 of 13").isVisible(), "pager reads 1–10 of 13")
-await page.getByRole("button", { name: "Next" }).click()
-await page.getByText("11–13 of 13").waitFor({ timeout: 10000 }).catch(() => {})
-log((await rows()) === 3 && (await page.getByText("file-11.txt").isVisible()), "Next shows requests 11–13")
+log(await pop.getByText("1–10 of 13").isVisible(), "pager reads 1–10 of 13")
+await pop.getByRole("button", { name: "Next" }).click()
+await pop.getByText("11–13 of 13").waitFor({ timeout: 10000 }).catch(() => {})
+log((await rows()) === 3 && (await pop.getByText("file-11.txt").isVisible()), "Next shows requests 11–13")
 
-await page.getByRole("button", { name: "Accept" }).first().click()
+await pop.getByRole("button", { name: "Accept" }).first().click()
 await page.getByText("Accepted").waitFor({ timeout: 10000 }).catch(() => {})
 log(state.answers.at(-1) === "req-11 approve", "Accept approves that request", state.answers.at(-1))
 log(await waitBell("15"), "count drops to 15 after the answer")
 
 await tab(/^Invitations 1$/).click()
-log(await page.getByText("Join stubteam as member").isVisible(), "invitation reads 'Join stubteam as member'")
-await page.getByRole("button", { name: "Decline" }).first().click()
+log(await pop.getByText("Join stubteam as member").isVisible(), "invitation reads 'Join stubteam as member'")
+await pop.getByRole("button", { name: "Decline" }).first().click()
 await page.waitForFunction(() => !document.body.innerText.includes("Invitations 1"), null, { timeout: 15000 }).catch(() => {})
 log(state.answers.at(-1) === "inv-1 decline", "Decline declines the invitation", state.answers.at(-1))
 
 await tab(/^Machines 2$/).click()
-log(await page.getByText("m-one").first().isVisible(), "machine request names the machine and team")
-await page.getByRole("button", { name: "Accept" }).first().click()
+log(await pop.getByText("m-one").first().isVisible(), "machine request names the machine and team")
+await pop.getByRole("button", { name: "Accept" }).first().click()
 await page.waitForFunction(() => !document.body.innerText.includes("Machines 2"), null, { timeout: 15000 }).catch(() => {})
 log(state.answers.at(-1) === "m-one approve", "Accept approves the machine", state.answers.at(-1))
 

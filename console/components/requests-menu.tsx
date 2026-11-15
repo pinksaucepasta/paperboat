@@ -53,7 +53,7 @@ export function RequestsMenu() {
           {total > 99 ? "99+" : total}
         </span>
       </PopoverTrigger>
-      <PopoverContent align="end" className="w-[min(26rem,calc(100vw-2rem))] gap-2 p-3 text-sm">
+      <PopoverContent align="end" className="max-h-[min(36rem,calc(100dvh-5rem))] w-[min(26rem,calc(100vw-2rem))] gap-2 overflow-y-auto p-3 text-sm">
         <RequestList counts={counts} machines={machines} workspace={workspace} />
       </PopoverContent>
     </Popover>
