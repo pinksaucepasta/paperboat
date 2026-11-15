@@ -455,3 +455,7 @@ Today each host keeps a per-key authorized_keys list of every signed-in computer
 ## macOS Developer ID signing — after launch
 
 Release builds are ad-hoc signed only (`.github/workflows/release.yml`), so macOS treats every `pb` update as a new app: the local-network permission prompt returns after each update and the identity macOS keys permissions on is not stable. Needs an Apple Developer Program membership (paid, user decision 2026-11-16: not now), a Developer ID Application certificate in CI secrets, `codesign --options runtime` with that identity and notarization (`notarytool`) in the release job, and a check that an update keeps the local-network grant.
+
+## Direct HTTP API with the SDK — after launch (user decision 2026-11-16)
+
+API tokens are removed with recipes (F26). Scripts use `pb … --json` on a recipe machine at launch. A direct, token-authenticated HTTP API ships together with the Go SDK (sdk/go), scoped like a recipe and attributed in Activity.
