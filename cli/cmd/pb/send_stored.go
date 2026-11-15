@@ -23,7 +23,7 @@ import (
 
 // sendStoredFiles uploads client-side ciphertext before returning. The recipient
 // can accept and receive it later without retaining a connection to this sender.
-func sendStoredFiles(ctx context.Context, command *cobra.Command, client *api.Client, request api.TeamInboxRequest, sources []filetransfer.Source, destination string, jsonOutput bool) error {
+func sendStoredFiles(ctx context.Context, command *cobra.Command, client *api.Client, request api.TeamInboxRequest, sources []filetransfer.Source, destination string, jsonOutput bool) (resultErr error) {
 	identityStore, err := runtimeIdentityStore()
 	if err != nil {
 		return fmt.Errorf("open source machine identity: %w", err)
@@ -57,7 +57,7 @@ func sendStoredFiles(ctx context.Context, command *cobra.Command, client *api.Cl
 	if err != nil {
 		return fmt.Errorf("prepare encrypted stored files: %w", err)
 	}
-	defer prepared.Close()
+	defer func() { resultErr = errors.Join(resultErr, prepared.Close()) }()
 	metadata.Parts = prepared.Parts
 	if err := client.PutStoredFile(ctx, request.RequestID, metadata); err != nil {
 		return friendlyCommandError(err)

@@ -223,6 +223,11 @@ func TestPostgresStoredCreateOfflineAndFrozenManifest(t *testing.T) {
 	if err := f.s.PutStored(f.ctx, f.sender, r.RequestID, m); err != nil {
 		t.Fatal("exact metadata retry failed", err)
 	}
+	choices, err := f.s.StoredRecipients(f.ctx, f.recipient, r.RequestID)
+	if err != nil || len(choices) != 2 || choices[0].MachineID == choices[1].MachineID {
+		t.Fatal("recipient cannot choose a sealed receiving machine", err)
+	}
+
 	changed := f.metadata()
 	changed.Parts[0].SHA256 = strings.Repeat("ef", 32)
 	if err := f.s.PutStored(f.ctx, f.sender, r.RequestID, changed); !errors.Is(err, ErrConflict) {

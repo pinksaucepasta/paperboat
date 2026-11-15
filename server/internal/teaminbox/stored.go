@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"sort"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
@@ -68,7 +69,21 @@ func (s *Service) StoredRecipients(ctx context.Context, sender, id string) ([]wi
 		if err != nil {
 			return err
 		}
-		if r.SenderAccount != sender || !r.Stored {
+		if !r.Stored {
+			return ErrNotFound
+		}
+		if r.RecipientAccount == sender {
+			m, _, err := readStoredTx(ctx, tx, id)
+			if err != nil {
+				return err
+			}
+			for machine := range m.SealedKeys {
+				out = append(out, wire.Recipient{MachineID: machine})
+			}
+			sort.Slice(out, func(i, j int) bool { return out[i].MachineID < out[j].MachineID })
+			return nil
+		}
+		if r.SenderAccount != sender {
 			return ErrNotFound
 		}
 		out, err = storedRecipientsTx(ctx, tx, r.RecipientAccount)
