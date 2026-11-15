@@ -14,6 +14,7 @@ type TeamInboxFile struct {
 }
 
 type TeamInboxRequest struct {
+	StoredUploaded       bool            `json:"stored_uploaded"`
 	Stored               bool            `json:"stored"`
 	RequestID            string          `json:"request_id"`
 	TeamID               string          `json:"team_id"`

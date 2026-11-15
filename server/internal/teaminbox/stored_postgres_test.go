@@ -257,7 +257,7 @@ func TestPostgresStoredApprovalClaimsOneMachineAndDeletesOnReceipt(t *testing.T)
 	if _, err := f.s.Decide(f.ctx, f.recipient, r.RequestID, "approved", r.DecisionGeneration); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("stored approval without a receiving machine: %v", err)
 	}
-	if _, err := f.s.Decide(f.ctx, f.recipient, r.RequestID, "approved", r.DecisionGeneration, f.source); !errors.Is(err, ErrInvalid) {
+	if _, err := f.s.Decide(f.ctx, f.recipient, r.RequestID, "approved", r.DecisionGeneration, f.source); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("stored approval into another account's machine: %v", err)
 	}
 	if _, err := f.s.Decide(f.ctx, f.recipient, r.RequestID, "approved", r.DecisionGeneration, f.alternate); err != nil {

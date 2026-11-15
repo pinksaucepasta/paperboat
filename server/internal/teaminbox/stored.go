@@ -252,7 +252,7 @@ const storedAuthorized = `EXISTS(SELECT 1 FROM teams t
 const storedMachineAllowed = `EXISTS(SELECT 1 FROM user_machines m JOIN environment_vault_hosts h ON h.machine_id=m.id AND h.account_id=m.user_id
  WHERE m.id=$1 AND m.user_id=r.recipient_account AND m.deleted_at IS NULL AND m.revoked_at IS NULL
  AND m.installation_generation=h.installation_generation AND m.configured_capabilities @> ARRAY['file_receive'])
- AND r.stored_metadata->'sealed_keys' ? $1`
+ AND coalesce(r.stored_metadata->'sealed_keys' ? $1,false)`
 
 func (s *Service) StoredDeliverable(ctx context.Context, machine string) (wire.Page, error) {
 	out := wire.Page{Transfers: []wire.Delivery{}}
