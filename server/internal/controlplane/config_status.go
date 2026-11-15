@@ -8,6 +8,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/config"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
@@ -38,6 +40,7 @@ type ConfigStatusPath struct {
 	Path     string `json:"path"`
 	Bytes    int64  `json:"bytes,omitempty"`
 	Reason   string `json:"reason"`
+	Detail   string `json:"detail,omitempty"`
 	Revision string `json:"revision,omitempty"`
 }
 
@@ -493,6 +496,7 @@ func validateConfigStatus(report ConfigStatusReport, limit int, now time.Time) e
 	for _, group := range [][]ConfigStatusPath{report.Skipped, report.Conflicts, report.Review} {
 		for _, item := range group {
 			if !safeConfigStatusPath(item.Path) || item.Bytes < 0 || !statusCodePattern.MatchString(item.Reason) ||
+				!safeConfigStatusDetail(item.Detail) ||
 				(item.Revision != "" && !conflictRevisionPattern.MatchString(item.Revision)) {
 				return ErrConfigStatusInvalid
 			}
@@ -504,6 +508,14 @@ func validateConfigStatus(report ConfigStatusReport, limit int, now time.Time) e
 		}
 	}
 	return nil
+}
+
+// safeConfigStatusDetail bounds the free text a machine adds to a path reason (the account that owns a skipped file).
+func safeConfigStatusDetail(value string) bool {
+	if len(value) > 256 || !utf8.ValidString(value) {
+		return false
+	}
+	return !strings.ContainsFunc(value, unicode.IsControl)
 }
 
 func safeConfigStatusPath(value string) bool {

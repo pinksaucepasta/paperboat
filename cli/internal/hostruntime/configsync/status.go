@@ -39,6 +39,7 @@ type PathSummary struct {
 	Path     string `json:"path"`
 	Bytes    int64  `json:"bytes,omitempty"`
 	Reason   string `json:"reason"`
+	Detail   string `json:"detail,omitempty"` // e.g. the owner of a file skipped as owned_by_other_user
 	Revision string `json:"revision,omitempty"`
 }
 

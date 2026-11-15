@@ -278,8 +278,8 @@ func (m *PathMapping) SnapshotContext(ctx context.Context, policy RuntimePolicy,
 	seen := map[string]string{}
 	collided := map[string]bool{}
 	// A file the mapping cannot carry safely is reported and left alone, so one bad file does not stop the rest.
-	skip := func(name, reason string) {
-		result.Skipped = append(result.Skipped, PathSummary{Path: name, Reason: reason})
+	skip := func(name, reason, detail string) {
+		result.Skipped = append(result.Skipped, PathSummary{Path: name, Reason: reason, Detail: detail})
 	}
 	add := func(name, source string) error {
 		if err := ctx.Err(); err != nil {
@@ -294,14 +294,14 @@ func (m *PathMapping) SnapshotContext(ctx context.Context, policy RuntimePolicy,
 		}
 		key := strings.ToLower(name)
 		if collided[key] {
-			skip(name, "case_collision")
+			skip(name, "case_collision", "")
 			return nil
 		}
 		if old, ok := seen[key]; ok && old != name {
 			delete(result.Files, old) // neither spelling syncs: a case-insensitive peer could hold only one of them
 			collided[key] = true
-			skip(old, "case_collision")
-			skip(name, "case_collision")
+			skip(old, "case_collision", "")
+			skip(name, "case_collision", "")
 			return nil
 		}
 		seen[key] = name
@@ -313,14 +313,14 @@ func (m *PathMapping) SnapshotContext(ctx context.Context, policy RuntimePolicy,
 			return err
 		}
 		if !info.Mode().IsRegular() { // a link, junction or special file: reported, never followed
-			skip(name, "unsupported_file_type")
+			skip(name, "unsupported_file_type", "")
 			return nil
 		}
 		if err := checkSafeAbsolutePath(source); err != nil {
 			return &PathRuleError{Code: "unsafe_source"}
 		}
-		if reason := unsafeSnapshotReason(source, info); reason != "" {
-			skip(name, reason)
+		if reason, detail := unsafeSnapshotReason(source, info); reason != "" {
+			skip(name, reason, detail)
 			return nil
 		}
 		if info.Size() > policy.MaxFileBytes || info.Size() > policy.MaxBatchBytes-total {

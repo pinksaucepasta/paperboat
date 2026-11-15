@@ -361,7 +361,11 @@ func configStatus(c *command.Context) error {
 func configSkippedLines(item api.ConfigSyncEnvironmentState) []string {
 	lines := make([]string, 0, len(item.Skipped))
 	for _, skipped := range item.Skipped {
-		lines = append(lines, fmt.Sprintf("  skipped %s: %s", skipped.Path, strings.ReplaceAll(skipped.Reason, "_", " ")))
+		reason := strings.ReplaceAll(skipped.Reason, "_", " ")
+		if skipped.Reason == "owned_by_other_user" && skipped.Detail != "" {
+			reason = "owned by " + skipped.Detail + ", not you, Administrators or SYSTEM"
+		}
+		lines = append(lines, fmt.Sprintf("  skipped %s: %s", skipped.Path, reason))
 	}
 	return lines
 }

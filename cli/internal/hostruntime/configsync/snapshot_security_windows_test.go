@@ -53,7 +53,7 @@ func TestUnsafeSnapshotReasonOwnersAndWriters(t *testing.T) {
 	info, _ := os.Stat(path)
 	check := func(label, want string) {
 		t.Helper()
-		if got := unsafeSnapshotReason(path, info); got != want {
+		if got, _ := unsafeSnapshotReason(path, info); got != want {
 			t.Fatalf("%s: reason %q, want %q", label, got, want)
 		}
 	}
@@ -64,6 +64,9 @@ func TestUnsafeSnapshotReasonOwnersAndWriters(t *testing.T) {
 	check("owned by SYSTEM", "")
 	setSnapshotOwner(t, path, "S-1-5-32-546") // Guests: not the user, Administrators or SYSTEM
 	check("owned by another ordinary account", "owned_by_other_user")
+	if _, detail := unsafeSnapshotReason(path, info); detail != `NT AUTHORITY\Guests` && detail != `BUILTIN\Guests` {
+		t.Fatalf("owner detail = %q, want the Guests account", detail)
+	}
 	setSnapshotOwner(t, path, me)
 	setSnapshotDACL(t, path, "D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;"+me+")(A;;FW;;;WD)")
 	check("Everyone may write", "writable_by_other_users")

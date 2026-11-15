@@ -44,6 +44,18 @@ func TestConfigStatusNamesSkippedPaths(t *testing.T) {
 	}
 }
 
+// A file another account owns names that owner, so the user knows whose file to fix.
+func TestConfigStatusNamesOwnerOfForeignFile(t *testing.T) {
+	var item api.ConfigSyncEnvironmentState
+	if err := json.Unmarshal([]byte(`{"alias":"w","skipped":[{"path":"cfg/a.txt","reason":"owned_by_other_user","detail":"DESKTOP\\bob"}]}`), &item); err != nil {
+		t.Fatal(err)
+	}
+	want := `  skipped cfg/a.txt: owned by DESKTOP\bob, not you, Administrators or SYSTEM`
+	if lines := configSkippedLines(item); len(lines) != 1 || lines[0] != want {
+		t.Fatalf("lines = %q, want %q", lines, want)
+	}
+}
+
 // A machine enrolled again with an old file on disk reports a conflict; status once printed only the word "conflict".
 func TestConfigStatusNamesConflictsAndHowToResolve(t *testing.T) {
 	var item api.ConfigSyncEnvironmentState

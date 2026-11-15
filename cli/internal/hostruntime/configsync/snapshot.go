@@ -117,8 +117,8 @@ func takeSelectedSnapshot(
 			result.Skipped = append(result.Skipped, PathSummary{Path: rel, Reason: "special_file"})
 			return nil
 		}
-		if reason := unsafeSnapshotReason(full, info); reason != "" {
-			result.Skipped = append(result.Skipped, PathSummary{Path: rel, Bytes: info.Size(), Reason: reason})
+		if reason, detail := unsafeSnapshotReason(full, info); reason != "" {
+			result.Skipped = append(result.Skipped, PathSummary{Path: rel, Bytes: info.Size(), Reason: reason, Detail: detail})
 			return nil
 		}
 		if info.Size() > policy.MaxFileBytes {

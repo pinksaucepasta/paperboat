@@ -64,12 +64,22 @@ func TestConfigStatusValidationRejectsStaleLeakingAndInconsistentReports(t *test
 	if err := validateConfigStatus(valid, 10, now); err != nil {
 		t.Fatalf("valid status error = %v", err)
 	}
+	valid.Skipped = []ConfigStatusPath{{Path: "cfg/a.txt", Reason: "owned_by_other_user", Detail: "DESKTOP\\bob"}}
+	if err := validateConfigStatus(valid, 10, now); err != nil {
+		t.Fatalf("skipped file with its owner rejected: %v", err)
+	}
+	valid.Skipped = nil
 	tests := []ConfigStatusReport{
 		func() ConfigStatusReport { value := valid; value.SyncRevision = 0; return value }(),
 		func() ConfigStatusReport { value := valid; value.UpdatedAt = now.Add(-6 * time.Minute); return value }(),
 		func() ConfigStatusReport {
 			value := valid
 			value.Skipped = []ConfigStatusPath{{Path: "/Users/alice/.secret", Reason: "excluded"}}
+			return value
+		}(),
+		func() ConfigStatusReport {
+			value := valid
+			value.Skipped = []ConfigStatusPath{{Path: "cfg/a.txt", Reason: "owned_by_other_user", Detail: "DESKTOP\\bob\nx"}}
 			return value
 		}(),
 		func() ConfigStatusReport { value := valid; value.FencingToken = 2; return value }(),

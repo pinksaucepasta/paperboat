@@ -264,7 +264,8 @@ func readComparisonLocal(target string, maxBytes int64) (ConflictComparisonSide,
 		}
 		return ConflictComparisonSide{Present: true, Kind: "symlink", SHA256: hashSnapshotBytes(append([]byte("symlink:"), content...)), Content: content}, nil
 	}
-	if !info.Mode().IsRegular() || unsafeSnapshotReason(target, info) != "" || info.Size() > maxBytes {
+	unsafeReason, _ := unsafeSnapshotReason(target, info)
+	if !info.Mode().IsRegular() || unsafeReason != "" || info.Size() > maxBytes {
 		return empty, ErrSourceChanged
 	}
 	content, opened, err := secureReadFile(target, maxBytes)

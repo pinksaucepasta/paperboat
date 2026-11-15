@@ -10,12 +10,13 @@ import (
 // platformHasExecBits is false where files carry no POSIX executable bit (Windows): the executable intent then comes from the repository.
 const platformHasExecBits = true
 
-// unsafeSnapshotReason is the skip reason for a file the worker must not sync, or "" when it is safe to read.
-func unsafeSnapshotReason(_ string, info fs.FileInfo) string {
+// unsafeSnapshotReason is the skip reason for a file the worker must not sync, or "" when it is safe to read. detail names the foreign owner
+// (Windows only).
+func unsafeSnapshotReason(_ string, info fs.FileInfo) (reason, detail string) {
 	if info.Mode().Perm()&0o002 != 0 {
-		return "unsafe_permissions"
+		return "unsafe_permissions", ""
 	}
-	return ""
+	return "", ""
 }
 
 func snapshotFileMode(info fs.FileInfo) os.FileMode { return info.Mode().Perm() }

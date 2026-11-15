@@ -263,6 +263,7 @@ type ConfigSyncPathSummary struct {
 	Path     string `json:"path"`
 	Bytes    int64  `json:"bytes,omitempty"`
 	Reason   string `json:"reason"`
+	Detail   string `json:"detail,omitempty"`
 	Revision string `json:"revision,omitempty"`
 }
 
