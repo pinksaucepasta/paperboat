@@ -236,3 +236,25 @@ func TestAJustStartedServiceIsAdmittedAfterAFreshScan(t *testing.T) {
 		t.Fatal("a just-started service was refused", err)
 	}
 }
+
+// The periodic observation reuses the port watch's scan of the last interval; a watch or on-demand scan (maxAge 0)
+// always looks again.
+func TestMachineServicesObservationWithinReusesARecentScan(t *testing.T) {
+	scans := 0
+	sender := &runtimeObservationSender{
+		lazyBootID: "boot", lazyStartedAt: time.Now(), installationGeneration: 1,
+		machineServicesDiscover: func(context.Context) ([]machineservices.Service, error) {
+			scans++
+			return nil, nil
+		},
+	}
+	sender.machineServicesObservationWithin(t.Context(), time.Hour)
+	sender.machineServicesObservationWithin(t.Context(), time.Hour)
+	if scans != 1 {
+		t.Fatalf("%d scans for two observations inside the reuse window, want 1", scans)
+	}
+	sender.machineServicesObservation(t.Context())
+	if scans != 2 {
+		t.Fatalf("an on-demand observation did not scan again (%d scans)", scans)
+	}
+}

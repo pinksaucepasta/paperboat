@@ -197,6 +197,9 @@ func (s *runtimeObservationService) Shutdown(ctx context.Context) error {
 type runtimeObservationSender struct {
 	machineServicesDiscover                             func(context.Context) ([]machineservices.Service, error)
 	machineServicesMu                                   sync.Mutex
+	machineServicesScan                                 []machineservices.Service
+	machineServicesScanErr                              error
+	machineServicesScanAt                               time.Time
 	machineServicesFaultMu                              sync.Mutex
 	machineServicesFaults                               [2]errorreport.Fault
 	machineServicesPolicy                               clientapi.MachineServicesPolicy
@@ -277,7 +280,7 @@ func (s *runtimeObservationSender) send(ctx context.Context, mayConfirm bool) er
 		Update              *runtimeUpdateObservation          `json:"update,omitempty"`
 		MachineCapabilities *machineCapabilitiesObservation    `json:"machine_capabilities,omitempty"`
 	}{
-		MachineServices:     s.machineServicesObservation(ctx),
+		MachineServices:     s.machineServicesObservationWithin(ctx, machineServicesWatchInterval),
 		LazyRuntime:         s.lazyRuntimeObservation(),
 		EnvironmentID:       s.environmentID,
 		ResourceID:          s.machineID,

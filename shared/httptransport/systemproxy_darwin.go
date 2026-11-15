@@ -10,8 +10,9 @@ import (
 )
 
 // scutilCacheTTL bounds how stale a proxy change can be; RoundTrip asks for a snapshot on every request and each
-// miss is a process spawn.
-const scutilCacheTTL = 5 * time.Second
+// miss is a process spawn: at 5 s an idle machine's worker, daemon and carrier ran `scutil --proxy` 14 times a minute
+// (PR-03); a proxy change reaches new connections within 30 s.
+const scutilCacheTTL = 30 * time.Second
 
 var scutilCache struct {
 	sync.Mutex

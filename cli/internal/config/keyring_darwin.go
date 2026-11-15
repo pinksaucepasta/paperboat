@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os/exec"
 	"path/filepath"
+	"time"
 
 	"github.com/zalando/go-keyring"
 )
@@ -76,16 +77,24 @@ func (smallKeychainStore) Delete(ref string) error {
 	return vaultKeychainError(err)
 }
 
+var keychainReads = &secretCache{ttl: 30 * time.Second, now: time.Now}
+
 func keychainSet(ref, value string) error {
 	_, err := boundedKeychain(func() (struct{}, error) { return struct{}{}, keyring.Set(keyringService, ref, value) })
+	if err == nil {
+		keychainReads.set(ref, value)
+	}
 	return err
 }
 
 func keychainGet(ref string) (string, error) {
-	return boundedKeychain(func() (string, error) { return keyring.Get(keyringService, ref) })
+	return keychainReads.get(ref, func() (string, error) {
+		return boundedKeychain(func() (string, error) { return keyring.Get(keyringService, ref) })
+	})
 }
 
 func keychainDelete(ref string) error {
+	keychainReads.drop(ref)
 	_, err := boundedKeychain(func() (struct{}, error) { return struct{}{}, keyring.Delete(keyringService, ref) })
 	return err
 }

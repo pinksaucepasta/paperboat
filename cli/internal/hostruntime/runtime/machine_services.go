@@ -6,6 +6,7 @@ import (
 	"errors"
 	"reflect"
 	"sort"
+	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
@@ -13,6 +14,12 @@ import (
 )
 
 func (s *runtimeObservationSender) machineServicesObservation(ctx context.Context) *api.MachineServicesSnapshot {
+	return s.machineServicesObservationWithin(ctx, 0)
+}
+
+// machineServicesObservationWithin reuses the listener scan of the last maxAge instead of scanning again: the
+// periodic observation follows the port watch by seconds, and on macOS every scan is two lsof spawns (PR-03).
+func (s *runtimeObservationSender) machineServicesObservationWithin(ctx context.Context, maxAge time.Duration) *api.MachineServicesSnapshot {
 	if s.installationGeneration == 0 || s.lazyBootID == "" || s.lazyStartedAt.IsZero() {
 		return nil
 	}
@@ -32,7 +39,15 @@ func (s *runtimeObservationSender) machineServicesObservation(ctx context.Contex
 	if discover == nil {
 		discover = machineservices.Snapshot
 	}
-	observed, discoveryErr := discover(ctx)
+	var observed []machineservices.Service
+	if maxAge > 0 && !s.machineServicesScanAt.IsZero() && time.Since(s.machineServicesScanAt) < maxAge {
+		observed, discoveryErr = s.machineServicesScan, s.machineServicesScanErr
+	} else {
+		observed, discoveryErr = discover(ctx)
+		if ctx.Err() == nil {
+			s.machineServicesScan, s.machineServicesScanErr, s.machineServicesScanAt = observed, discoveryErr, time.Now()
+		}
+	}
 	// Discovery failure withdraws automatic availability rather than retaining stale ports.
 	if discoveryErr == nil {
 		seen := map[int]bool{}
