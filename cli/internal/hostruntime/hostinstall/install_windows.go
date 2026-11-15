@@ -174,6 +174,13 @@ func Decode(reader io.Reader) (Request, error) {
 var windowsProgramDataRoot = `C:\ProgramData\Paperboat`
 
 func WindowsProgramDataRoot() string { return windowsProgramDataRoot }
+
+// WindowsSessionOwnerLogPath is where an account's session owners write their stdout and stderr (one file for all
+// its generations, like the Unix units' log); the uninstall removes it (purgeWindowsSharedResidue).
+func WindowsSessionOwnerLogPath(instance string) string {
+	return filepath.Join(WindowsProgramDataRoot(), "PaperboatSessionOwner-"+instance+".log")
+}
+
 func WindowsInstallConfigPath() string {
 	return filepath.Join(WindowsProgramDataRoot(), "runtime-install.json")
 }

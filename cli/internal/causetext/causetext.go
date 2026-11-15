@@ -46,7 +46,12 @@ func leafTexts(current error, depth int) []string {
 			continue
 		}
 		if len(children) == 1 && strings.HasSuffix(text, child.Error()) {
-			step = strings.TrimSuffix(strings.TrimSpace(strings.TrimSuffix(text, child.Error())), ":")
+			// Only "step: cause" names a step; "the runtime worker stopped" + "runtime worker stopped" is one sentence.
+			prefix := strings.TrimSpace(strings.TrimSuffix(text, child.Error()))
+			step = ""
+			if strings.HasSuffix(prefix, ":") {
+				step = strings.TrimSuffix(prefix, ":")
+			}
 			break
 		}
 		if strings.Contains(text, child.Error()) {

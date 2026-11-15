@@ -32,3 +32,16 @@ func TestTextKeepsAWrapperWhoseTextHoldsItsCause(t *testing.T) {
 		t.Fatalf("got %q", got)
 	}
 }
+
+func TestTextDoesNotTurnALeadingWordIntoAStep(t *testing.T) {
+	cause := errors.New("runtime worker stopped sending heartbeats")
+	err := &sentenceError{cause: cause}
+	if got := Text(err); got != "runtime worker stopped sending heartbeats" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+type sentenceError struct{ cause error }
+
+func (e *sentenceError) Error() string { return "the " + e.cause.Error() }
+func (e *sentenceError) Unwrap() error { return e.cause }

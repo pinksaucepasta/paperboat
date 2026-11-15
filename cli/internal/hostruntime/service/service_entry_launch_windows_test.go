@@ -4,8 +4,12 @@ package service
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/pinksaucepasta/paperboat/internal/windowssecurity"
 	"golang.org/x/sys/windows"
 )
 
@@ -21,7 +25,7 @@ func TestEnrolledProcessLaunchIsSilentAndSuspended(t *testing.T) {
 }
 
 func TestEnrolledProcessOwnsUsablePrivateStandardHandles(t *testing.T) {
-	startup, closeStartup, err := enrolledProcessStartupWithStdio()
+	startup, closeStartup, err := enrolledProcessStartupWithStdio("")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,5 +45,43 @@ func TestEnrolledProcessOwnsUsablePrivateStandardHandles(t *testing.T) {
 		if _, err := windows.GetFileType(handle); !errors.Is(err, windows.ERROR_INVALID_HANDLE) {
 			t.Fatal("owned standard handle remained open")
 		}
+	}
+}
+
+func TestEnrolledProcessOutputGoesToItsServiceLog(t *testing.T) {
+	log := filepath.Join(t.TempDir(), "owner.log")
+	if err := os.WriteFile(log, []byte(strings.Repeat("x", serviceLogLimit+1)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	startup, closeStartup, err := enrolledProcessStartupWithStdio(log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var written uint32
+	for _, line := range []string{"stdout-line\n", "stderr-line\n"} {
+		handle := startup.StdOutput
+		if strings.HasPrefix(line, "stderr") {
+			handle = startup.StdErr
+		}
+		if err := windows.WriteFile(handle, []byte(line), &written, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	closeStartup()
+	got, err := os.ReadFile(log)
+	if err != nil || string(got) != "stdout-line\nstderr-line\n" {
+		t.Fatalf("service log = %q, %v; want both streams, the oversized log started over", got, err)
+	}
+}
+
+func TestNewServiceLogIsProtected(t *testing.T) {
+	log := filepath.Join(t.TempDir(), "owner.log")
+	handle, err := openServiceLog(log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer windows.CloseHandle(handle)
+	if !windowssecurity.ProtectedDACLMatches(log, serviceLogSecurity) {
+		t.Fatal("a new service log must be readable by SYSTEM and Administrators only")
 	}
 }

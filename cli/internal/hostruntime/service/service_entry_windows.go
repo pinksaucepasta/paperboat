@@ -36,6 +36,8 @@ type ServiceEntryConfig struct {
 	Arguments   []string
 	EnrolledSID string
 	Environment map[string]string
+	// LogPath receives the workload's stdout and stderr (append-only, protected, bounded); empty discards them.
+	LogPath string
 	// LaunchFailure receives a startup error before SCM transitions to stopped.
 	// Production callers use this for bounded service diagnostics; native
 	// qualification uses it to preserve exact S4U failure evidence.
@@ -583,7 +585,7 @@ func launchEnrolledProcess(config ServiceEntryConfig) (result *enrolledProcess, 
 	if err != nil {
 		return nil, err
 	}
-	startup, closeStartup, err := enrolledProcessStartupWithStdio()
+	startup, closeStartup, err := enrolledProcessStartupWithStdio(config.LogPath)
 	if err != nil {
 		return nil, err
 	}

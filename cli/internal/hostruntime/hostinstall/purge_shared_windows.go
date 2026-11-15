@@ -51,6 +51,7 @@ func purgeWindowsSharedResidue(ctx context.Context, shared service.Layout, progr
 				resultErr = errors.Join(resultErr, hostInstallFailure("remove the "+base+" startup log", retireWindowsSharedObject(ctx, path, false, ownerSID)))
 			}
 		}
+		resultErr = errors.Join(resultErr, hostInstallFailure("remove the session owner log", retireWindowsSharedObject(ctx, filepath.Join(programData, "PaperboatSessionOwner-"+instance+".log"), false, ownerSID)))
 		for _, path := range []string{filepath.Join(programData, "services"), filepath.Join(programData, "users"), filepath.Join(shared.UpdateStateRoot, "users"), shared.UpdateStateRoot} {
 			resultErr = errors.Join(resultErr, retireWindowsSharedObject(ctx, path, true, ""))
 		}

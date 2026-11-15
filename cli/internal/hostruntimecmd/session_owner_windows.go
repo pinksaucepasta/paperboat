@@ -59,6 +59,7 @@ func runSessionOwner(ctx context.Context, args []string, _ io.Writer, stderr io.
 	}
 	return service.RunWindowsService(service.ServiceEntryConfig{
 		Name: name, Executable: d.Executable, EnrolledSID: d.OwnerSID,
+		LogPath:     hostinstall.WindowsSessionOwnerLogPath(instance),
 		Arguments:   []string{"daemon", "__runtime-session-owner", "--generation", generation, "--instance", instance},
 		Environment: map[string]string{"PAPERBOAT_SESSION_OWNER_CATALOG": catalog, "PAPERBOAT_RUNTIME_STATE_ROOT": d.RuntimeRoot, "PAPERBOAT_WORKSPACE_ROOT": d.Workspace, "PAPERBOAT_SHELL": d.Shell},
 	})
