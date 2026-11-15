@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
+	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	"github.com/pinksaucepasta/paperboat/shared/supportref"
 )
 
@@ -55,6 +56,8 @@ type Proxy struct {
 	httpsServer      *http.Server
 	certCacheMu      sync.RWMutex
 	transport        *http.Transport
+	dialContext      func(context.Context, string, string) (net.Conn, error)
+	httpsTransports  map[string]*http.Transport // by SNI host, bounded by maxHTTPSTransports
 	issueCertificate func(context.Context, string) (tls.Certificate, error)
 	awaitRoute       func(context.Context, string) bool
 	httpListener     net.Listener
@@ -97,6 +100,8 @@ func NewProxy(cfg ProxyConfig) (*Proxy, error) {
 		httpAddr:         httpAddr,
 		httpsAddr:        httpsAddr,
 		transport:        &http.Transport{DialContext: cfg.DialContext, ForceAttemptHTTP2: false, MaxIdleConns: 64, MaxIdleConnsPerHost: 8, IdleConnTimeout: 30 * time.Second, ResponseHeaderTimeout: 15 * time.Second},
+		dialContext:      cfg.DialContext,
+		httpsTransports:  make(map[string]*http.Transport),
 		issueCertificate: cfg.IssueCertificate,
 		awaitRoute:       cfg.AwaitRoute,
 	}
@@ -124,7 +129,9 @@ func browserRouteTable(explicit map[string]BrowserRoute, deniedHosts map[string]
 		}
 		machine, _, _ := ParseBrowserHostname(strings.TrimPrefix(host, "*."), domain)
 		numeric, err := BrowserHostname(machine, route.Port, domain)
-		if err != nil || routes[numeric] != route {
+		numericRoute := routes[numeric]
+		numericRoute.HTTPS = route.HTTPS // the front desk's scheme may differ from the port's own
+		if err != nil || numericRoute != route {
 			return nil, nil, nil, errors.New("browser proxy requires the same authorized numeric route")
 		}
 	}
@@ -263,6 +270,10 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	proxy := httputil.NewSingleHostReverseProxy(targetURL)
 	proxy.Transport = p.transport
+	if route.HTTPS {
+		targetURL.Scheme = "https"
+		proxy.Transport = p.httpsTransport(host)
+	}
 	proxy.Director = nil
 	proxy.Rewrite = func(request *httputil.ProxyRequest) {
 		request.SetURL(targetURL)
@@ -274,15 +285,56 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	proxy.ModifyResponse = func(response *http.Response) error {
 		response.Header.Set(supportref.Header, reference)
+		if connectorprotocol.IsSelfRedirect(response.Request.Method, host, response.Request.URL.RequestURI(), response) {
+			return errOriginRedirectLoop
+		}
 		return nil
 	}
 	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
+		if errors.Is(err, errOriginRedirectLoop) {
+			w.Header().Set("X-Paperboat-Error", "origin_redirect_loop")
+			http.Error(w, originRedirectLoopMessage, http.StatusBadGateway)
+			return
+		}
 		fault := errorreport.Current().ObserveFailure(r.Context(), "paperboat-daemon", "local_gateway", "local_gateway", "local_gateway_failed", err)
 		w.Header().Set(supportref.Header, fault.SupportReference)
 		http.Error(w, gatewayFailureMessage(fault.Stage)+" Support reference: "+fault.SupportReference, http.StatusBadGateway)
 	}
 
 	proxy.ServeHTTP(w, r)
+}
+
+// errOriginRedirectLoop: the service sent the browser back to the URL it asked for (IsSelfRedirect), as
+// tunnels and previews detect it (eaeb0ec7d). The browser would follow it forever.
+var errOriginRedirectLoop = errors.New("service redirects to the URL it was asked for")
+
+const originRedirectLoopMessage = "This app redirects to HTTPS, but Paperboat already serves it over HTTPS, so the browser would loop forever. " +
+	"Open it as 443.<machine> (or set the machine's front desk to https), or turn off the app's own HTTP-to-HTTPS redirect."
+
+// maxHTTPSTransports bounds the pooled HTTPS transports: a wildcard route takes any single label as its SNI.
+const maxHTTPSTransports = 256
+
+// httpsTransport returns the pooled transport that dials the service over TLS with serverName as SNI and no
+// certificate verification: the hop is inside Paperboat's encrypted connection (f164f76ae; cloudflared's
+// noTLSVerify + originServerName do the same).
+func (p *Proxy) httpsTransport(serverName string) *http.Transport {
+	p.certCacheMu.Lock()
+	defer p.certCacheMu.Unlock()
+	if t := p.httpsTransports[serverName]; t != nil {
+		return t
+	}
+	if len(p.httpsTransports) >= maxHTTPSTransports {
+		for name, old := range p.httpsTransports {
+			old.CloseIdleConnections()
+			delete(p.httpsTransports, name)
+			break
+		}
+	}
+	t := &http.Transport{DialContext: p.dialContext, MaxIdleConns: 64, MaxIdleConnsPerHost: 8, IdleConnTimeout: 30 * time.Second,
+		TLSHandshakeTimeout: 10 * time.Second, ResponseHeaderTimeout: 15 * time.Second,
+		TLSClientConfig: &tls.Config{ServerName: serverName, InsecureSkipVerify: true}} //nolint:gosec // see above
+	p.httpsTransports[serverName] = t
+	return t
 }
 
 func gatewayFailureMessage(stage string) string {
@@ -536,6 +588,12 @@ func (p *Proxy) Stop(ctx context.Context) error {
 	}
 	p.portServers, p.portListeners, p.portNumbers = nil, nil, nil
 	p.transport.CloseIdleConnections()
+	p.certCacheMu.Lock()
+	for name, t := range p.httpsTransports {
+		t.CloseIdleConnections()
+		delete(p.httpsTransports, name)
+	}
+	p.certCacheMu.Unlock()
 	p.started = false
 	if err := errors.Join(errs...); err != nil {
 		p.stopErr = proxyShutdownFailure{cause: err}

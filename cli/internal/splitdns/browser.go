@@ -20,6 +20,10 @@ type BrowserRoute struct {
 	Address   netip.Addr
 	Port      int
 	MachineID string
+	// HTTPS makes the gateway speak TLS to the service (port 443, or a front desk set to https):
+	// it sends the browser's hostname as SNI and skips certificate verification, because the hop
+	// is inside Paperboat's encrypted connection (as tunnel origins do).
+	HTTPS bool
 }
 
 // BrowserHostname identifies an explicit browser service as <port>.<alias>.<suffix>.

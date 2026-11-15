@@ -149,7 +149,7 @@ func (c *Coordinator) replaceGuardedRoutes(ctx context.Context, peers []*daemonr
 					c.resetNameGenerationLocked(ctx)
 					return errors.New("ambiguous browser hostname")
 				}
-				browserRoutes[name] = splitdns.BrowserRoute{Address: ip, Port: port, MachineID: peer.GetPeerId()}
+				browserRoutes[name] = splitdns.BrowserRoute{Address: ip, Port: port, MachineID: peer.GetPeerId(), HTTPS: port == 443}
 				aliases[name] = splitdns.BrowserGatewayHostname
 				if len(aliases) > machineguard.MaxBrowserAliases {
 					c.resetNameGenerationLocked(ctx)
