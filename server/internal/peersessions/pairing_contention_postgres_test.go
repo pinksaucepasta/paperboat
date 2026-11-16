@@ -68,6 +68,7 @@ SELECT $1,$1||'_m_'||g,'machine',$1||'_m_'||g,1,1,1,sha256(convert_to('key'||$1|
 	if err != nil {
 		t.Fatal(err)
 	}
+	usePolicyCache(t, service, store)
 	if _, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "pairing_probe_" + s, UserID: account, EndpointID: account + "_m_0"}); err != nil {
 		t.Fatalf("the daemons' refresh does not work on this fixture: %v", err)
 	}

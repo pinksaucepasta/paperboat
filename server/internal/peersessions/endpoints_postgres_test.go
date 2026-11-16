@@ -71,6 +71,7 @@ SELECT $1,$1||'_m_'||g,'machine',$1||'_m_'||g,1,1,1,sha256(convert_to('key'||$1|
 	if err != nil {
 		t.Fatal(err)
 	}
+	usePolicyCache(t, service, store)
 	return endpointsFixture{ctx: ctx, store: store, account: account, suffix: s, service: service, signed: &signed}
 }
 

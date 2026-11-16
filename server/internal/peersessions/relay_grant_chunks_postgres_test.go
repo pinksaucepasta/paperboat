@@ -49,6 +49,7 @@ func TestRelayGrantsNameEveryPeerOfAHundredPeerAccountOnPostgres(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	usePolicyCache(t, service, store)
 	now := time.Now().UTC().Truncate(time.Second)
 	suffix := fmt.Sprint(now.UnixNano())
 	account, node := "chunk_user_"+suffix, "chunk_node_"+suffix
@@ -70,12 +71,11 @@ func TestRelayGrantsNameEveryPeerOfAHundredPeerAccountOnPostgres(t *testing.T) {
 		peers = append(peers, p)
 		want[p.Identity.WireGuardPublicKey] = true
 	}
-	tx, err := store.SQL().BeginTx(ctx, nil)
+	nodes, err := service.relayNodes(ctx, account, now)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer tx.Rollback()
-	grants, err := service.relayGrants(ctx, tx, self, peers, peers, 7, now)
+	grants, err := service.relayGrants(nodes, self, peers, peers, 7, now)
 	if err != nil {
 		t.Fatal(err)
 	}

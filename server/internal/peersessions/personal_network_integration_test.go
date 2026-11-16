@@ -52,6 +52,7 @@ func TestPersonalNetworkCarriesEveryComputerOfALargeAccountOnPostgres(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
+	usePolicyCache(t, service, store)
 	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.users(id,workos_subject,primary_email,status) VALUES($1,$1,$2,'active')`, account, account+"@example.test"); err != nil {
 		t.Fatal(err)
 	}
@@ -155,6 +156,7 @@ func TestPersonalNetworkAdmissionOnPostgres(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	usePolicyCache(t, service, store)
 	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.users(id,workos_subject,primary_email,status) VALUES($1,$1,$2,'active')`, account, account+"@example.test"); err != nil {
 		t.Fatal(err)
 	}

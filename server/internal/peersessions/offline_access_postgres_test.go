@@ -57,6 +57,7 @@ func TestOfflineSessionRightsEqualTheDescriptorDecisionOnPostgres(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
+	usePolicyCache(t, service, store)
 	exec := func(query string, args ...any) {
 		t.Helper()
 		if _, err := store.SQL().ExecContext(ctx, query, args...); err != nil {

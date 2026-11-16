@@ -24,31 +24,9 @@ func (s *NetworkService) ConfigureQuota(billingURL string) {
 // account's personal workspace) still has relay and edge allowance. The decision is per
 // workspace, so a member of a team with allowance left gets no free relay for a capped personal
 // workspace, and the reverse. The gate is read-only, cached and never blocks (bandwidthgate).
-func (s *NetworkService) billableRelayPeers(ctx context.Context, tx *sql.Tx, self networkBinding, peers []networkPeer, at time.Time) ([]networkPeer, error) {
+func (s *NetworkService) billableRelayPeers(ctx context.Context, self networkBinding, peers []networkPeer, teamOf map[string]string, at time.Time) []networkPeer {
 	if s.quotaGate == nil || len(peers) == 0 {
-		return peers, nil
-	}
-	ids := make([]string, 0, len(peers)+1)
-	ids = append(ids, self.MachineID)
-	for _, peer := range peers {
-		ids = append(ids, peer.Identity.MachineID)
-	}
-	rows, err := tx.QueryContext(ctx, `SELECT id,coalesce(owner_team_id,'') FROM paperboat.user_machines WHERE id=ANY($1::text[])`, ids)
-	if err != nil {
-		return nil, err
-	}
-	teamOf := make(map[string]string, len(ids))
-	for rows.Next() {
-		var id, team string
-		if err := rows.Scan(&id, &team); err != nil {
-			rows.Close()
-			return nil, err
-		}
-		teamOf[id] = team
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return nil, err
+		return peers
 	}
 	billable := make([]networkPeer, 0, len(peers))
 	for _, peer := range peers {
@@ -62,5 +40,29 @@ func (s *NetworkService) billableRelayPeers(ctx context.Context, tx *sql.Tx, sel
 			billable = append(billable, peer)
 		}
 	}
-	return billable, nil
+	return billable
+}
+
+// relayTeams is the owning team ("" for personal) of the endpoint's machine and of every peer's machine, read with the
+// policy document (an ownership change publishes the machines' inventory topic to their accounts).
+func relayTeams(ctx context.Context, tx *sql.Tx, self networkBinding, peers []networkPeer) (map[string]string, error) {
+	ids := make([]string, 0, len(peers)+1)
+	ids = append(ids, self.MachineID)
+	for _, peer := range peers {
+		ids = append(ids, peer.Identity.MachineID)
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT id,coalesce(owner_team_id,'') FROM paperboat.user_machines WHERE id=ANY($1::text[])`, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	teamOf := make(map[string]string, len(ids))
+	for rows.Next() {
+		var id, team string
+		if err := rows.Scan(&id, &team); err != nil {
+			return nil, err
+		}
+		teamOf[id] = team
+	}
+	return teamOf, rows.Err()
 }

@@ -82,6 +82,7 @@ func recordingReplayAdmission(t *testing.T, shared bool) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	usePolicyCache(t, service, store)
 	service.now = func() time.Time { return now.Add(250 * time.Millisecond) }
 	for _, endpoint := range []struct {
 		id       string

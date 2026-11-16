@@ -13,12 +13,14 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/bandwidthgate"
 	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
 	"github.com/pinksaucepasta/paperboat/shared/relaylimits"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"golang.org/x/crypto/curve25519"
@@ -87,6 +89,14 @@ type NetworkService struct {
 	// Relay quota gate (relay_quota.go): nil (off) until ConfigureQuota.
 	quotaGate  *bandwidthgate.Gate
 	billingURL string
+	// The in-memory policy documents (policy_cache.go) and their LISTEN session; relay nodes per account (relay_nodes.go).
+	cache        *policyCache
+	policyListen sync.Mutex
+	policyConn   *pgx.Conn
+	nodes        relayNodeCache
+	// policySync, when set (tests), runs before a cached document is read: it waits until the listener has seen
+	// every notification committed so far, so a test reads its own writes.
+	policySync func(context.Context) error
 }
 
 func NewNetworkService(store *db.DB, signer interface {
@@ -97,7 +107,7 @@ func NewNetworkService(store *db.DB, signer interface {
 	if store == nil || signer == nil || issuer == "" {
 		return nil, ErrInvalid
 	}
-	return &NetworkService{store: store, signer: signer, issuer: issuer, now: time.Now}, nil
+	return &NetworkService{store: store, signer: signer, issuer: issuer, now: time.Now, cache: newPolicyCache()}, nil
 }
 
 // Register records a peer endpoint registration. Its serializable transaction is replayed after a
@@ -263,7 +273,6 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
 	if ctx == nil || !bounded(in.OperationID, 8, 128) || !bounded(in.UserID, 1, 256) || !bounded(in.EndpointID, 1, 128) || in.Authority != "" && in.Authority != AuthorityUntilRevoked {
 		return NetworkConfigResult{}, ErrInvalid
 	}
-	untilRevoked := in.Authority == AuthorityUntilRevoked
 	live, err := admittedScopeIDs(in.AdmittedScopes)
 	if err != nil {
 		return NetworkConfigResult{}, err
@@ -283,6 +292,7 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
 	if err != nil {
 		return NetworkConfigResult{}, err
 	}
+	start, cacheable := s.cache.begin()
 	err = s.store.SQL().QueryRowContext(ctx, endpointsUpdate, now, in.UserID, in.EndpointID, endpoints, endpointPublishInterval.Seconds()).
 		Scan(&generation)
 	if err == sql.ErrNoRows {
@@ -291,23 +301,47 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
 	if err != nil {
 		return NetworkConfigResult{}, err
 	}
+	// Everything of the request the document depends on: the account, the authority shape, the admitted scopes.
+	key := fmt.Sprintf("%s\x02%s\x02%t\x02%s", in.UserID, in.Authority, len(in.AdmittedScopes) > 0, liveKey(live))
+	if s.policySync != nil {
+		if err = s.policySync(ctx); err != nil {
+			return NetworkConfigResult{}, err
+		}
+	}
+	doc := s.cache.get(in.EndpointID, key, now)
+	if doc == nil {
+		if doc, err = s.buildPolicy(ctx, in, live, now); err != nil {
+			return NetworkConfigResult{}, err
+		}
+		doc.liveKey = key
+		if cacheable {
+			s.cache.put(in.EndpointID, doc, start)
+		}
+	}
+	return s.signConfiguration(ctx, in, doc, generation, now)
+}
+
+// buildPolicy is the policy part of an endpoint's configuration, read from one snapshot: its binding, every peer
+// with its scopes, the refresh hint, and until when the result holds without a notification (policy_cache.go).
+func (s *NetworkService) buildPolicy(ctx context.Context, in NetworkConfigRequest, live map[string][]string, now time.Time) (*policyDoc, error) {
+	untilRevoked := in.Authority == AuthorityUntilRevoked
 	// The shared mesh is brought up to date (once per change for the whole account) before the snapshot opens, so
 	// the snapshot sees it; this writes, like the generation above.
 	meshSeq, err := s.refreshMesh(ctx, in.UserID)
 	if err != nil {
-		return NetworkConfigResult{}, err
+		return nil, err
 	}
 	tx, err := s.store.SQL().BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
 	if err != nil {
-		return NetworkConfigResult{}, err
+		return nil, err
 	}
 	defer tx.Rollback()
 	self, certExpiry, err := loadNetworkBinding(ctx, tx, in.UserID, in.EndpointID, now, len(in.AdmittedScopes) > 0)
 	if err == sql.ErrNoRows || err == ErrUnavailable {
-		return NetworkConfigResult{}, ErrDenied
+		return nil, ErrDenied
 	}
 	if err != nil {
-		return NetworkConfigResult{}, err
+		return nil, err
 	}
 	rows, err := tx.QueryContext(ctx, `SELECT a.id,a.cli_client_session_id,a.user_machine_id,a.user_id,m.user_id,a.expires_at,array_to_json(a.capabilities),coalesce(a.terminal_session_id,''),coalesce(a.terminal_role,'')
 		FROM paperboat.user_machine_access_sessions a
@@ -329,7 +363,7 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
 		  WHERE NOT paperboat.team_machine_capability_allowed(a.user_id,a.team_id,a.user_machine_id,capability))))
 		ORDER BY (a.id=ANY($4::text[])) DESC, (a.expires_at>$3) DESC, a.expires_at DESC, a.id LIMIT 257`, in.UserID, in.EndpointID, now, live["machine_access"])
 	if err != nil {
-		return NetworkConfigResult{}, err
+		return nil, err
 	}
 	type grantRow struct {
 		id, cli, machine, cliAccount, machineAccount, kind, terminalSession, terminalRole string
@@ -342,12 +376,12 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
 		var rawCapabilities []byte
 		if err = rows.Scan(&g.id, &g.cli, &g.machine, &g.cliAccount, &g.machineAccount, &g.expiry, &rawCapabilities, &g.terminalSession, &g.terminalRole); err != nil {
 			rows.Close()
-			return NetworkConfigResult{}, unavailableWithCause(err)
+			return nil, unavailableWithCause(err)
 		}
 		var storedCapabilities []string
 		if err = json.Unmarshal(rawCapabilities, &storedCapabilities); err != nil {
 			rows.Close()
-			return NetworkConfigResult{}, unavailableWithCause(err)
+			return nil, unavailableWithCause(err)
 		}
 		g.kind = "machine_access"
 		if g.terminalRole == "viewer" || g.terminalRole == "interactive" {
@@ -367,7 +401,7 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
 			default:
 				rows.Close()
 				slog.Warn("peer network authority unavailable", "site", "network.go:326")
-				return NetworkConfigResult{}, ErrUnavailable
+				return nil, ErrUnavailable
 			}
 			if !seenCapabilities[projected] {
 				seenCapabilities[projected] = true
@@ -380,17 +414,17 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
 	rowErr := rows.Err()
 	rows.Close()
 	if rowErr != nil {
-		return NetworkConfigResult{}, rowErr
+		return nil, rowErr
 	}
 	inspectorRows, err := tx.QueryContext(ctx, inspectorAdmissionsQuery, in.EndpointID, in.UserID, now, live["inspector"])
 	if err != nil {
-		return NetworkConfigResult{}, err
+		return nil, err
 	}
 	for inspectorRows.Next() {
 		var g grantRow
 		if err = inspectorRows.Scan(&g.id, &g.cli, &g.machine, &g.cliAccount, &g.machineAccount, &g.expiry); err != nil {
 			inspectorRows.Close()
-			return NetworkConfigResult{}, err
+			return nil, err
 		}
 		g.kind = "inspector"
 		g.capabilities = []string{"inspector"}
@@ -399,7 +433,7 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
 	err = inspectorRows.Err()
 	inspectorRows.Close()
 	if err != nil {
-		return NetworkConfigResult{}, err
+		return nil, err
 	}
 
 	compareRows, err := tx.QueryContext(ctx, `SELECT DISTINCT ON (a.assignment_id,a.native_cli_session_id,a.machine_id) a.assignment_id,a.native_cli_session_id,a.machine_id,a.account_id,a.account_id,a.expires_at
@@ -414,13 +448,13 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
  AND ((a.workspace_id='personal' AND assignment.adopted_team_id IS NULL) OR (assignment.adopted_team_id=a.workspace_id AND EXISTS(SELECT 1 FROM teams t JOIN team_members member USING(team_id) WHERE t.team_id=a.workspace_id AND t.deleted_at IS NULL AND NOT t.suspended AND member.account_id=a.account_id AND member.active)))
  AND EXISTS(SELECT 1 FROM jsonb_array_elements(status.conflicts) conflict WHERE conflict->>'path'=a.config_path AND conflict->>'revision'=a.conflict_revision) ORDER BY a.assignment_id,a.native_cli_session_id,a.machine_id,a.expires_at DESC LIMIT 257`, in.UserID, in.EndpointID, now, live["config_compare"])
 	if err != nil {
-		return NetworkConfigResult{}, err
+		return nil, err
 	}
 	for compareRows.Next() {
 		var g grantRow
 		if err = compareRows.Scan(&g.id, &g.cli, &g.machine, &g.cliAccount, &g.machineAccount, &g.expiry); err != nil {
 			compareRows.Close()
-			return NetworkConfigResult{}, err
+			return nil, err
 		}
 		g.kind = "config_compare"
 		g.capabilities = []string{"config_compare"}
@@ -429,7 +463,7 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
 	err = compareRows.Err()
 	compareRows.Close()
 	if err != nil {
-		return NetworkConfigResult{}, err
+		return nil, err
 	}
 	// A session recording replay from the CLI (recordings.admitNativeTx): the viewer's endpoint reaches the machine
 	// for capability recording until its latest ticket for the recording expires, while the account may still replay
@@ -445,13 +479,13 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
  AND ((paperboat.recording_team(m.id) IS NULL AND m.user_id = a.account_id) OR NOT isempty(paperboat.workspace_policy_rule_ports(a.account_id, t.team_id, a.machine_id, 'recording_view')))
  ORDER BY a.recording_id, a.native_cli_session_id, a.machine_id, a.expires_at DESC LIMIT 257`, in.EndpointID, in.UserID, now, live["recording"])
 	if err != nil {
-		return NetworkConfigResult{}, err
+		return nil, err
 	}
 	for recordingRows.Next() {
 		var g grantRow
 		if err = recordingRows.Scan(&g.id, &g.cli, &g.machine, &g.cliAccount, &g.machineAccount, &g.expiry); err != nil {
 			recordingRows.Close()
-			return NetworkConfigResult{}, err
+			return nil, err
 		}
 		g.kind = "recording"
 		g.capabilities = []string{"recording"}
@@ -460,7 +494,7 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
 	err = recordingRows.Err()
 	recordingRows.Close()
 	if err != nil {
-		return NetworkConfigResult{}, err
+		return nil, err
 	}
 	// Work the endpoint already runs leads, so the grant and scope bounds drop the newest grants, never a running
 	// stream (pbvm4: ~3 exec grants/s pushed a held exec or terminal out after ~45 s and its scope lease closed it).
@@ -500,7 +534,7 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
 				continue
 			}
 			if e != nil {
-				return NetworkConfigResult{}, e
+				return nil, e
 			}
 			if len(byPeer) >= maximumNetworkAccessPeers {
 				continue
@@ -523,19 +557,19 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
 	// Exact access-session scopes above still authorize every application stream.
 	mesh, err := personalNetworkPeers(ctx, tx, self, now, &expiry, admittedPeers, live["machine_network"], meshSeq)
 	if err != nil {
-		return NetworkConfigResult{}, err
+		return nil, err
 	}
 	for _, binding := range mesh {
 		p := byPeer[binding.EndpointID]
 		if p == nil {
 			if len(byPeer) >= maximumAccountEndpoints {
-				return NetworkConfigResult{}, ErrResourceLimit
+				return nil, ErrResourceLimit
 			}
 			p = &networkPeer{Identity: binding}
 			byPeer[binding.EndpointID] = p
 		}
 		if scopes >= peernetwork.MaxScopes {
-			return NetworkConfigResult{}, ErrResourceLimit
+			return nil, ErrResourceLimit
 		}
 		meshExpiry := expiry.Unix()
 		if untilRevoked {
@@ -547,7 +581,7 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
 	if untilRevoked && self.Role == peernetwork.RoleCLI {
 		hosts, err := teamHostPeers(ctx, tx, self, now)
 		if err != nil {
-			return NetworkConfigResult{}, err
+			return nil, err
 		}
 	teamHosts:
 		for _, h := range hosts {
@@ -574,7 +608,7 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
 	if untilRevoked && self.Role == peernetwork.RoleMachine {
 		offline, err := offlineAccessPeers(ctx, tx, self, now)
 		if err != nil {
-			return NetworkConfigResult{}, err
+			return nil, err
 		}
 	offlinePeers:
 		for _, o := range offline {
@@ -614,7 +648,48 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
 		})
 		peers = append(peers, *p)
 	}
-	claims := configurationClaims(s.issuer, now, expiry, generation, self, peers)
+	// The document holds until its earliest time-based input: the refresh hint (certificates) and every grant expiry.
+	validUntil := now.Add(maxPolicyAge)
+	if expiry.Before(validUntil) {
+		validUntil = expiry
+	}
+	for _, g := range grants {
+		if g.expiry.After(now) && g.expiry.Before(validUntil) {
+			validUntil = g.expiry
+		}
+	}
+	// A team's paid entitlement (paperboat.team_paid_entitled) starts and ends by time, with no write: the document
+	// holds only until the next such instant of a team the endpoint's account belongs to or its machine is shared with.
+	var entitlementChange sql.NullTime
+	if err = tx.QueryRowContext(ctx, `WITH teams AS (
+ SELECT team_id FROM paperboat.team_members WHERE account_id=$1 AND active
+ UNION SELECT team_id FROM paperboat.team_resource_bindings WHERE resource_kind='machine' AND resource_id=$2 AND active
+ UNION SELECT owner_team_id FROM paperboat.user_machines WHERE id=$2 AND owner_team_id IS NOT NULL)
+SELECT min(t) FROM (
+ SELECT w.period_start AS t FROM paperboat.billing_workspaces w JOIN teams USING (team_id) WHERE w.user_id IS NULL
+ UNION ALL SELECT paperboat.billing_workspace_paid_until(w) FROM paperboat.billing_workspaces w JOIN teams USING (team_id) WHERE w.user_id IS NULL) x
+WHERE t>$3`, self.AccountID, self.MachineID, now).Scan(&entitlementChange); err != nil {
+		return nil, err
+	}
+	if entitlementChange.Valid && entitlementChange.Time.Before(validUntil) {
+		validUntil = entitlementChange.Time
+	}
+	var teamOf map[string]string
+	if s.quotaGate != nil && len(peers) > 0 {
+		if teamOf, err = relayTeams(ctx, tx, self, peers); err != nil {
+			return nil, err
+		}
+	}
+	if err = tx.Commit(); err != nil {
+		return nil, err
+	}
+	return &policyDoc{self: self, peers: peers, expiry: expiry, teamOf: teamOf, validUntil: validUntil, keys: policyKeys(self, peers)}, nil
+}
+
+// signConfiguration signs one request's answer from a policy document: the configuration under this request's
+// generation, the regional candidates and relay grants from the current relay nodes, and the relay quota decision.
+func (s *NetworkService) signConfiguration(ctx context.Context, in NetworkConfigRequest, doc *policyDoc, generation int64, now time.Time) (NetworkConfigResult, error) {
+	claims := configurationClaims(s.issuer, now, doc.expiry, generation, doc.self, doc.peers)
 	token, err := s.signer.SignNetworkConfiguration(claims)
 	if err != nil {
 		return NetworkConfigResult{}, err
@@ -622,7 +697,11 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
 	if len(token) > networkConfigLimit {
 		return NetworkConfigResult{}, ErrResourceLimit
 	}
-	candidates, err := s.regionalCandidates(ctx, tx, in.UserID, in.EndpointID, generation, now)
+	nodes, err := s.relayNodes(ctx, in.UserID, now)
+	if err != nil {
+		return NetworkConfigResult{}, err
+	}
+	candidates, err := s.regionalCandidates(nodes, in.UserID, in.EndpointID, generation, now)
 	if err != nil {
 		return NetworkConfigResult{}, err
 	}
@@ -630,16 +709,10 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
 		slog.Warn("peer network authority unavailable", "site", "network.go:500")
 		return NetworkConfigResult{}, ErrUnavailable
 	}
-	billable, err := s.billableRelayPeers(ctx, tx, self, peers, now)
+	billable := s.billableRelayPeers(ctx, doc.self, doc.peers, doc.teamOf, now)
+	withheld := len(billable) < len(doc.peers)
+	relayGrants, err := s.relayGrants(nodes, doc.self, doc.peers, billable, generation, now)
 	if err != nil {
-		return NetworkConfigResult{}, err
-	}
-	withheld := len(billable) < len(peers)
-	relayGrants, err := s.relayGrants(ctx, tx, self, peers, billable, generation, now)
-	if err != nil {
-		return NetworkConfigResult{}, err
-	}
-	if err = tx.Commit(); err != nil {
 		return NetworkConfigResult{}, err
 	}
 	result := NetworkConfigResult{Configuration: token, CandidateSet: candidates, RelayGrants: relayGrants}
@@ -744,28 +817,19 @@ func personalNetworkPeers(ctx context.Context, tx *sql.Tx, self networkBinding, 
 // relayGrants signs one grant per eligible relay node. A Paperboat-hosted node relays only the
 // billable peers (their workspace has allowance left); a customer-run node (never metered
 // against Paperboat's allowance) relays every peer.
-func (s *NetworkService) relayGrants(ctx context.Context, tx *sql.Tx, self networkBinding, peers, billable []networkPeer, generation int64, now time.Time) ([]string, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT id,node_generation,process_epoch,roles @> ARRAY['peer_relay']::text[],peer_relay_wireguard_public_key,peer_relay_disco_public_key,host(peer_relay_virtual_address),EXISTS(SELECT 1 FROM paperboat.selfhost_installations i WHERE i.node_id=control_tunnel_nodes.id AND i.scope_kind IN ('account','team')) FROM paperboat.control_tunnel_nodes WHERE region IS NOT NULL AND paperboat.node_pool_eligible(id,$1,'relay') AND state='ready' AND ready AND last_heartbeat_at>$2::timestamptz-interval '15 seconds' AND registry_expires_at>$2::timestamptz AND capacity_observed_at>$2::timestamptz-interval '15 seconds' AND capacity_used<capacity_limit-capacity_limit/10 AND drain_deadline IS NULL AND roles @> ARRAY['relay']::text[] AND transports @> ARRAY['derp_quic']::text[] ORDER BY region,id LIMIT 33`, self.AccountID, now)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
+func (s *NetworkService) relayGrants(nodes []relayNodeRow, self networkBinding, peers, billable []networkPeer, generation int64, now time.Time) ([]string, error) {
 	grants := make([]string, 0, 4)
-	nodes := 0
-	for rows.Next() {
-		if nodes == 32 {
+	relays := 0
+	for _, n := range nodes {
+		if !n.relay {
+			continue
+		}
+		if relays == 32 {
 			return nil, ErrResourceLimit
 		}
-		nodes++
-		var nodeID, processEpoch string
-		var nodeGeneration int64
-		var peerRelayEnabled bool
-		var peerRelayWG, peerRelayDisco []byte
-		var peerRelayAddress sql.NullString
-		var customerOwned bool
-		if err := rows.Scan(&nodeID, &nodeGeneration, &processEpoch, &peerRelayEnabled, &peerRelayWG, &peerRelayDisco, &peerRelayAddress, &customerOwned); err != nil {
-			return nil, err
-		}
+		relays++
+		nodeID, processEpoch, nodeGeneration, peerRelayEnabled := n.id, n.processEpoch, n.nodeGeneration, n.peerRelay
+		peerRelayWG, peerRelayDisco, peerRelayAddress, customerOwned := n.peerRelayWG, n.peerRelayDisco, n.peerRelayAddress, n.selfHosted
 		nodePeers := billable
 		if customerOwned {
 			nodePeers = peers
@@ -803,9 +867,6 @@ func (s *NetworkService) relayGrants(ctx context.Context, tx *sql.Tx, self netwo
 			}
 			grants = append(grants, grant)
 		}
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
 	}
 	return grants, nil
 }
@@ -890,23 +951,15 @@ func peersHaveDiscoKeys(peers []networkPeer) bool {
 	return true
 }
 
-func (s *NetworkService) regionalCandidates(ctx context.Context, tx *sql.Tx, accountID, endpointID string, generation int64, now time.Time) (string, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT id,node_generation,process_epoch,region,failure_domain,array_to_json(roles),array_to_json(transports),coalesce(endpoint_host,''),coalesce(endpoint_tcp_port,0),coalesce(endpoint_quic_port,0),state,last_heartbeat_at,registry_expires_at,capacity_limit,capacity_used,capacity_observed_at,drain_deadline,tls_spki_sha256,EXISTS(SELECT 1 FROM paperboat.selfhost_installations i WHERE i.node_id=control_tunnel_nodes.id AND i.scope_kind IN ('account','team')) FROM paperboat.control_tunnel_nodes WHERE region IS NOT NULL AND paperboat.node_pool_eligible(id,$1,'relay') AND state='ready' AND ready AND last_heartbeat_at>$2::timestamptz-interval '15 seconds' AND registry_expires_at>$2::timestamptz AND capacity_observed_at>$2::timestamptz-interval '15 seconds' AND capacity_used<capacity_limit-capacity_limit/10 AND drain_deadline IS NULL ORDER BY region,id LIMIT $3`, accountID, now, peernetwork.MaxRegionalCandidates)
-	if err != nil {
-		return "", err
-	}
-	defer rows.Close()
+func (s *NetworkService) regionalCandidates(rows []relayNodeRow, accountID, endpointID string, generation int64, now time.Time) (string, error) {
 	nodes := make([]peernetwork.RegionalNode, 0, peernetwork.MaxRegionalCandidates)
-	for rows.Next() {
-		var n peernetwork.RegionalNode
-		var roles, transports, pin []byte
-		var tcpPort, quicPort int
-		var observed, expires, capacityAt time.Time
-		var drain sql.NullTime
-		var selfHosted bool
-		if err := rows.Scan(&n.NodeID, &n.NodeGeneration, &n.ProcessEpoch, &n.Region, &n.FailureDomain, &roles, &transports, &n.EndpointHost, &tcpPort, &quicPort, &n.State, &observed, &expires, &n.CapacityLimit, &n.CapacityUsed, &capacityAt, &drain, &pin, &selfHosted); err != nil {
-			return "", err
+	for i, r := range rows {
+		if i == peernetwork.MaxRegionalCandidates {
+			break
 		}
+		n := peernetwork.RegionalNode{NodeID: r.id, NodeGeneration: uint64(r.nodeGeneration), ProcessEpoch: r.processEpoch, Region: r.region, FailureDomain: r.failureDomain, EndpointHost: r.host, State: r.state, CapacityLimit: r.capacityLimit, CapacityUsed: r.capacityUsed}
+		roles, transports, pin, tcpPort, quicPort := r.roles, r.transports, r.pin, r.tcpPort, r.quicPort
+		observed, expires, capacityAt, drain, selfHosted := r.observed, r.expires, r.capacityAt, r.drain, r.selfHosted
 		// A node whose row clients would refuse is left out; it never withholds the other relays.
 		if json.Unmarshal(roles, &n.Roles) != nil || json.Unmarshal(transports, &n.Transports) != nil || tcpPort < 0 || tcpPort > 65535 || quicPort < 0 || quicPort > 65535 || len(pin) != 0 && len(pin) != sha256.Size {
 			slog.Warn("regional candidates omit a relay with an invalid registry row", "site", "network.go:regionalCandidates", "node", n.NodeID)
@@ -925,9 +978,6 @@ func (s *NetworkService) regionalCandidates(ctx context.Context, tx *sql.Tx, acc
 			n.Hosting = peernetwork.HostingSelfHosted
 		}
 		nodes = append(nodes, n)
-	}
-	if err := rows.Err(); err != nil {
-		return "", err
 	}
 	expires := now.Add(relaylimits.MaxGrantLifetime) // as long as the grants of the relays it names
 	return s.signer.SignRegionalCandidates(regionalCandidateSet(s.issuer, accountID, endpointID, generation, now, expires, nodes))

@@ -958,6 +958,10 @@ func New(opts Options) (*App, error) {
 		}), progress),
 		observedWorker(supportService, "worker_machine_events", listenerWorker(24*time.Second, func(ctx context.Context) error {
 			return machineEventHub.ListenFor(ctx, 24*time.Second)
+		}), progress),
+		// Every replica keeps its own in-memory peer policy documents in sync from the same notifications.
+		observedWorker(supportService, "worker_peer_policy", listenerWorker(24*time.Second, func(ctx context.Context) error {
+			return peerNetworkService.ListenPolicy(ctx, store.Direct(), 24*time.Second)
 		}), progress))
 	serverWorkers = append(serverWorkers, observedWorker(supportService, "worker_edge_sets", periodicPreviewTunnelWorker(opts.Config.TerminalSessions.WorkerInterval, func(ctx context.Context) error {
 		reconcileContext, cancel := context.WithTimeout(ctx, opts.Config.HTTP.RequestTimeout)

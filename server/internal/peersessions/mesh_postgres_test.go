@@ -96,6 +96,7 @@ SELECT 'mesh-revocation-'||$1||'-'||g,$1,sha256(convert_to($1||'_m_'||g,'UTF8'))
 	if err != nil {
 		t.Fatal(err)
 	}
+	usePolicyCache(t, service, store)
 	logRows := func() (rows int, last string) {
 		t.Helper()
 		if err := store.SQL().QueryRowContext(ctx, `SELECT count(*),coalesce((SELECT op||' '||endpoint_id FROM paperboat.peer_mesh_log WHERE account_id=$1 ORDER BY mesh_seq DESC LIMIT 1),'')

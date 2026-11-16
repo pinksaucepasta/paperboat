@@ -94,6 +94,7 @@ func TestNetworkCertificateRebindKeepsWireGuardKeyPostgres(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	usePolicyCache(t, service, store)
 	service.now = func() time.Time { return now }
 	wgPrivate, wgPublic := networkX25519Key(t)
 	disco := networkDiscoPublic(t, wgPrivate)

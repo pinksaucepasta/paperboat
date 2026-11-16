@@ -126,6 +126,7 @@ func TestNetworkAuthorityProductionIdentityAndAccessLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	usePolicyCache(t, service, store)
 	service.now = func() time.Time { return now }
 	cliPrivate, cliPublic := networkX25519Key(t)
 	machinePrivate, machinePublic := networkX25519Key(t)

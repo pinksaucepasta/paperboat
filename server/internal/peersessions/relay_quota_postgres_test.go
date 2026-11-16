@@ -87,11 +87,11 @@ func TestRelayGrantsAreWithheldOnlyWhenTheGateDeniesPostgres(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer tx.Rollback()
-		out, err := service.billableRelayPeers(ctx, tx, self, peers, now)
+		teamOf, err := relayTeams(ctx, tx, self, peers)
 		if err != nil {
 			t.Fatal(err)
 		}
-		return out
+		return service.billableRelayPeers(ctx, self, peers, teamOf, now)
 	}
 	exec(`INSERT INTO paperboat.billing_workspace_usage_periods(workspace_id,period_start,period_end,included_bytes,consumed_bytes,paid,budget_start) VALUES($1,$2,$3,100,100,false,$2)`, "personal:"+user, now.Add(-time.Hour), now.AddDate(0, 1, 0))
 	if got := billable(personalPeer, teamPeer); len(got) != 2 {
