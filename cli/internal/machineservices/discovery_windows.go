@@ -50,6 +50,8 @@ func snapshot(ctx context.Context) ([]Service, error) {
 		return nil, ErrDiscoveryUnavailable
 	}
 	var services []Service
+	// A process listens on several sockets (43 listeners from 16 processes on an idle runner): ask each pid once.
+	owned := memoizeByPID(func(pid uint32) bool { return processOwnedBy(pid, currentUser.User.Sid) })
 	for _, family := range []uint32{windows.AF_INET, windows.AF_INET6} {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -58,7 +60,7 @@ func snapshot(ctx context.Context) ([]Service, error) {
 		if err != nil {
 			return nil, err
 		}
-		parsed, err := parseTCPTable(data, family, func(pid uint32) bool { return processOwnedBy(pid, currentUser.User.Sid) })
+		parsed, err := parseTCPTable(data, family, owned)
 		if err != nil {
 			return nil, err
 		}

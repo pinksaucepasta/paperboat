@@ -94,3 +94,16 @@ func readBounded(r io.Reader, remaining int64) ([]byte, error) {
 	}
 	return data, nil
 }
+
+// memoizeByPID answers each process id once for the life of the returned function (one discovery pass).
+func memoizeByPID(check func(uint32) bool) func(uint32) bool {
+	answers := make(map[uint32]bool)
+	return func(pid uint32) bool {
+		if answer, known := answers[pid]; known {
+			return answer
+		}
+		answer := check(pid)
+		answers[pid] = answer
+		return answer
+	}
+}

@@ -95,3 +95,16 @@ func TestNormalize(t *testing.T) {
 		t.Errorf("unexpected second service: %+v", output[1])
 	}
 }
+
+func TestMemoizeByPIDAsksEachProcessOnce(t *testing.T) {
+	asked := map[uint32]int{}
+	owned := memoizeByPID(func(pid uint32) bool { asked[pid]++; return pid%2 == 0 })
+	for _, pid := range []uint32{4, 7, 4, 7, 4, 8} {
+		if owned(pid) != (pid%2 == 0) {
+			t.Fatalf("pid %d answered wrongly", pid)
+		}
+	}
+	if asked[4] != 1 || asked[7] != 1 || asked[8] != 1 {
+		t.Fatalf("asked %v, want one question per pid", asked)
+	}
+}
