@@ -193,9 +193,15 @@ func TestBoundPairWithAWorkingPathRenewsOnTheIdleCadence(t *testing.T) {
 // every ~12 s (before the relays' fresh observations ended) for as long as that lasted, ~4 requests a minute per
 // engine; they back off like any engine with no usable relay instead.
 func TestRecoveryDoesNotRenewForObservationsOfRelaysTheWorkspaceMayNotUse(t *testing.T) {
-	a, c, _, _ := networkTestAuthority(t)
+	a, c, signer, _ := networkTestAuthority(t)
 	now := time.Now()
-	a.regional = &RegionalCandidates{IssuedAt: now.Unix() - 10, ExpiresAt: now.Add(time.Minute).Unix(), Nodes: []RegionalNode{{
+	c.IssuedAt = now.Unix()
+	c.ExpiresAt = c.IssuedAt + 3600
+	c.Peers[0].Scopes[0].ExpiresAt = c.ExpiresAt
+	if err := a.Apply(t.Context(), networkToken(t, signer, c)); err != nil {
+		t.Fatal(err)
+	}
+	a.regional = &RegionalCandidates{IssuedAt: now.Unix() - 10, ExpiresAt: now.Add(time.Hour).Unix(), Nodes: []RegionalNode{{
 		NodeID: "relay_denied", NodeGeneration: 1, ProcessEpoch: "epoch_denied", Region: "test", FailureDomain: "rack",
 		Roles: []string{"relay"}, Transports: []string{"derp_quic"}, EndpointHost: "relay.example.test", EndpointQUICPort: 443,
 		State: "ready", ObservedAt: now.Unix() - 10, CapacityObservedAt: now.Unix() - 10, ExpiresAt: now.Add(time.Minute).Unix(), CapacityLimit: 10,
