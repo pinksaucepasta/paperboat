@@ -19,9 +19,12 @@ func TestReadinessOwnerFailuresSurviveMutationAndRetryExhaustion(t *testing.T) {
 	for _, scenario := range []struct {
 		name, reason string
 		posts, reads int
+		ended        bool
 	}{
-		{"invalid owner lease", "readiness_owner_validate", 1, 0},
-		{"publication read retry exhaustion", "readiness_get_json_decode", 4, 4},
+		{"invalid owner lease", "readiness_owner_validate", 1, 0, false},
+		{"publication read retry exhaustion", "readiness_get_json_decode", 4, 4, false},
+		// the other side of 634daa4eb: the server's status is authoritative, so an expired answer is never published
+		{"expired server answer", "readiness_post_lease_state_invalid", 1, 0, true},
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
 			admitted := testDispatchRequest(t, time.Now().UTC()).Lease()
@@ -43,9 +46,13 @@ func TestReadinessOwnerFailuresSurviveMutationAndRetryExhaustion(t *testing.T) {
 				}
 				generation++
 				observed := sessionReadyLease(admitted)
-				if scenario.reads > 0 {
+				switch {
+				case scenario.ended:
+					observed.State, observed.EndpointState, observed.Endpoint = "expired", "ended", ""
+					observed.LeaseDeadline = time.Now().UTC().Add(-time.Second)
+				case scenario.reads > 0:
 					observed.State, observed.EdgeState = "connecting", "pending"
-				} else { // not a past LeaseDeadline: a foreground lease keeps it across a sleep (634daa4eb)
+				default: // not a past LeaseDeadline: a foreground lease keeps it across a sleep (634daa4eb)
 					observed.Endpoint = "http://preview.example.test"
 				}
 				w.Header().Set("ETag", formatLeaseETag(admitted.ID, generation))
@@ -80,7 +87,11 @@ func TestReadinessOwnerFailuresSurviveMutationAndRetryExhaustion(t *testing.T) {
 				t.Fatal("invalid publication became ready")
 			}
 			failure := session.Wait()
-			if scenario.reads > 0 {
+			if scenario.ended {
+				if !errors.Is(failure, ErrDispatchInvalid) {
+					t.Fatalf("an expired server answer lost its failure class: %v", failure)
+				}
+			} else if scenario.reads > 0 {
 				if !errors.Is(failure, ErrDispatchUnavailable) || !errors.Is(failure, ErrDispatchInvalid) {
 					t.Fatalf("retry exhaustion lost the original rejection: %v", failure)
 				}
