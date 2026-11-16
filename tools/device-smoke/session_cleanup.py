@@ -40,7 +40,8 @@ def command(pb, *args):
 
 
 def inventory(pb, target, environment=None):
-    code, receipt = command(pb, "list", target)
+    # --all: the default list is one page of 50, and a session past it read as already gone (F21-164 left 39 live).
+    code, receipt = command(pb, "list", target, "--all")
     actual = receipt.get("environment", {}).get("id")
     sessions = receipt.get("sessions")
     if code or receipt.get("version") != "1" or not isinstance(actual, str) or not actual:
