@@ -5,7 +5,6 @@ package runtime
 import (
 	"context"
 	"errors"
-	"net"
 	"net/http"
 	"sync"
 	"time"
@@ -30,11 +29,10 @@ func (w *controlWatch) RoundTrip(request *http.Request) (*http.Response, error) 
 	response, err := w.next.RoundTrip(request)
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	var network net.Error
 	switch {
 	case err == nil:
 		w.failedAt = time.Time{}
-	case errors.As(err, &network) || errors.Is(err, context.DeadlineExceeded): // a caller's own cancel says nothing about the path
+	case !errors.Is(err, context.Canceled): // a caller's own cancel says nothing about the path; a client timeout surfaces as "request canceled"
 		w.failedAt = time.Now()
 	}
 	return response, err

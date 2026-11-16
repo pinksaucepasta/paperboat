@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"testing"
+	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/envinject"
 )
@@ -31,10 +32,15 @@ func TestControlWatchMarksNetworkFailuresAndAnAnswerClearsThem(t *testing.T) {
 	if watch.ControlDown() {
 		t.Fatal("a caller's own cancel marked the control plane down")
 	}
-	fail = &net.OpError{Op: "dial", Err: errors.New("i/o timeout")}
-	_, _ = watch.RoundTrip(request)
-	if !watch.ControlDown() {
-		t.Fatal("a failed dial did not mark the control plane down")
+	for _, failure := range []error{&net.OpError{Op: "dial", Err: errors.New("i/o timeout")}, errors.New("net/http: request canceled")} { // the second is what the client's own 15 s timeout leaves
+		fail = context.Canceled
+		_, _ = watch.RoundTrip(request)
+		watch.failedAt = time.Time{}
+		fail = failure
+		_, _ = watch.RoundTrip(request)
+		if !watch.ControlDown() {
+			t.Fatalf("%v did not mark the control plane down", failure)
+		}
 	}
 	fail = nil
 	if _, err := watch.RoundTrip(request); err != nil || watch.ControlDown() {
