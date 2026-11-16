@@ -32,7 +32,7 @@ export function RecordingList({ machine: tabMachine }: { machine?: Machine }) {
   const teamId = personal ? personalWorkspace : workspace?.kind === "team" ? workspace.id : ""
   const pages = usePageParam(`${teamId}|${scope ?? ""}`)
   const query = useApiQuery(recordingsQuery(teamId, scope ?? undefined, pages.page))
-  const team = useApiQuery({ ...teamQuery(teamId), enabled: Boolean(teamId) })
+  const team = useApiQuery({ ...teamQuery(teamId), enabled: Boolean(teamId) && !personal })
   const emails = new Map(team.data?.members.map((member) => [member.account_id, member.email ?? member.account_id]))
 
   const key = useApiQuery({ ...recordingKeyQuery(teamId), enabled: personal })
