@@ -128,11 +128,11 @@ TASKS = ("@(Get-ScheduledTask -TaskPath $req.path -ErrorAction SilentlyContinue|
          "Select-Object TaskName,@{n='State';e={[string]$_.State}})|ConvertTo-Json -Compress")
 SERVICE_PATHS = ("@(Get-CimInstance Win32_Service|Where-Object{$_.Name -like $req.pattern}|"
                  "Select-Object Name,PathName)|ConvertTo-Json -Compress")
-# Outgoing UDP except DNS is dropped while the rule exists (the iptables/pf rule of the Unix checks): pb falls back
+# Outgoing UDP except the $req.ports gaps (DNS by default) is dropped while the rule exists (the iptables/pf rule of the Unix checks): pb falls back
 # to relays. TCP, and with it the controller's SSH, is untouched. A rule on a disabled firewall would do nothing.
 UDP_BLOCK = ("if($req.action -eq 'remove'){Remove-NetFirewallRule -DisplayName $req.name -ErrorAction SilentlyContinue;exit 0}\n"
              "if(@(Get-NetFirewallProfile|Where-Object{-not $_.Enabled}).Count){throw 'Windows Firewall is off for a profile: a block rule would not be enforced'}\n"
-             "[void](New-NetFirewallRule -DisplayName $req.name -Direction Outbound -Action Block -Protocol UDP -RemotePort @('1-52','54-65535'))\n"
+             "[void](New-NetFirewallRule -DisplayName $req.name -Direction Outbound -Action Block -Protocol UDP -RemotePort @($req.ports))\n"
              # A socket that already sent keeps sending through a new Block rule (see NET_CUT): replace the pb.exe that own UDP sockets.
              "$k=@{};Get-NetUDPEndpoint|ForEach-Object{$k[[int]$_.OwningProcess]=1}\n"
              "$pp=@(Get-ChildItem -LiteralPath (Join-Path $env:ProgramFiles 'Paperboat') -Recurse -Filter pb.exe -File|ForEach-Object{$_.FullName})\n"

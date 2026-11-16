@@ -353,6 +353,15 @@ class WindowsChecksRunner(unittest.TestCase):
             device.cut_network(5, addresses=['203.0.113.7'], inbound=False)
         self.assertEqual(['add', 'remove'], [c[1] for c in calls if c[0] == winhost.NET_CUT])  # no timer: the rule goes again
 
+    def test_udp_block_drops_every_port_except_the_allowed_ones(self):
+        calls = []
+        device = winhost.WindowsDevice(target='t', pb_exe='C:\\pb.exe')
+        device.ps = lambda step, script, **kw: calls.append((kw.get('action'), kw.get('ports'))) or (0, '')
+        with device.udp_blocked((53, 443)):
+            pass
+        self.assertEqual([('add', ['1-52', '54-442', '444-65535']), ('remove', None)], calls)
+        self.assertIn('-RemotePort @($req.ports)', winhost.UDP_BLOCK)  # the rule blocks what udp_blocked computed, not a fixed range
+
     def test_every_check_names_a_script_and_missing_fixtures_are_reported(self):
         import windows_checks
         table = windows_checks.checks(self.args())
