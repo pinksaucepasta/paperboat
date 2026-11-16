@@ -1,0 +1,10 @@
+# F21-170 config sync status under load: TestLoadConfigStatus (tag load), anvit PostgreSQL (host load average ~26), commit 13c4f1771
+# 100 machines of 20 teams report every 1 s (every 10th publishes; all take the global team write lock), 4 readers page a 200-machine status list, 1 neighbor; then 20 machines of 4 teams back to back
+config_status_load_postgres_test.go:234: neighbor alone: report p99 55.451085ms, status list p99 22.649422ms
+config_status_load_postgres_test.go:307: daily: 100 machines in 20 teams, a report every 1s for 20 s: 1561 reports (78.0/s), 51 full status-list pages of 200 machines, 0 worker errors (first: <nil>)
+config_status_load_postgres_test.go:308: daily: neighbor report p99 856.265035ms (147 samples), status list p99 314.741008ms (147 samples), 0 failures; database: max idle-in-transaction 4, max sessions waiting on a lock 18
+config_status_load_postgres_test.go:307: saturating: 20 machines in 4 teams, a report every 0s for 20 s: 1950 reports (97.5/s), 62 full status-list pages of 200 machines, 0 worker errors (first: <nil>)
+config_status_load_postgres_test.go:308: saturating: neighbor report p99 496.132982ms (85 samples), status list p99 78.261069ms (85 samples), 0 failures; database: max idle-in-transaction 3, max sessions waiting on a lock 19
+--- PASS: TestLoadConfigStatus (61.17s)
+PASS
+ok  	github.com/pinksaucepasta/paperboat/server/internal/controlplane	61.268s
