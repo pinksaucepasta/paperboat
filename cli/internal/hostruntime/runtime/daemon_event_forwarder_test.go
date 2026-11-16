@@ -66,6 +66,13 @@ func TestWorkerForwardsDaemonTopicsFromSingleWait(t *testing.T) {
 			found[topic] = true
 		}
 	}
+	// An unauthorized wait wakes caches even when no generation moved.
+	plane.FailNextWith(1, 401)
+	gotAll := false
+	for !gotAll {
+		push := next()
+		gotAll = len(push.Topics) == len(machineevents.DaemonTopics)
+	}
 	// Every server request belongs to the same worker stream and includes the
 	// union; the local forwarder creates no independent server request source.
 	for _, request := range plane.Requests() {

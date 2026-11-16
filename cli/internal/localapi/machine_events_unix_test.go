@@ -55,7 +55,8 @@ func TestMachineEventsPushOverOwnerSocket(t *testing.T) {
 		t.Fatal("stream health lost over socket")
 	}
 	// Notification writes need ownership even if read access was granted.
-	server.config.Authorize = func(Peer) bool { return true }
+	boundary := *server
+	boundary.config.Authorize = func(Peer) bool { return true }
 	for _, test := range []struct {
 		name, body string
 		owner      bool
@@ -74,7 +75,7 @@ func TestMachineEventsPushOverOwnerSocket(t *testing.T) {
 			request := httptest.NewRequest(http.MethodPost, "/v1/machine-events", strings.NewReader(test.body))
 			request = request.WithContext(context.WithValue(request.Context(), peerContextKey{}, peer))
 			response := httptest.NewRecorder()
-			server.handler().ServeHTTP(response, request)
+			boundary.handler().ServeHTTP(response, request)
 			if response.Code != test.status {
 				t.Fatalf("got %d, want %d", response.Code, test.status)
 			}
