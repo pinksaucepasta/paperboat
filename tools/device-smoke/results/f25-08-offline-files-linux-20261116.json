@@ -1,0 +1,23 @@
+{
+ "row": "F25-08",
+ "lane": "OFFLINE-FILES-2",
+ "date": "2026-11-16 (IST 07:00-07:25)",
+ "platform": "Linux (x86_64 Ubuntu systemd containers on pbvm2)",
+ "client_build": "dev-81626a639 (contains bbc3e6d1a; pb version dev-81626a639 on all three machines)",
+ "server": "staging stack on anvit, image paperboat-server:stg-58798cd00 (server code of bbc3e6d1a plus the BurntSushi/toml go.mod fix, migrations 318-323 applied); not yet on production",
+ "fixture": {
+  "team": "ofiles-team (Teams billing row, sender usr_ofs member, owner usr_ofr)",
+  "sender": "ofs-a machine_d57cdbdd-d472-4806-965b-dff68c6c2a05",
+  "recipients": ["ofr-b1 machine_f9cada81-7da8-4a06-b4db-5cd8fab469c6", "ofr-b2 machine_48c7546e-4fd5-41c9-ac54-a7d0b0a6618e"],
+  "bucket": "versitygw on anvit behind a Let's Encrypt certificate, `pb team bucket set --use-files --path-style`, saved after the server's write/read/delete check"
+ },
+ "checks": {
+  "offline_send": "both recipient machines stopped (server lists offline); `pb send ofiles-test.bin --to ofr-b1` (3 MiB random) returned stored=true uploaded=true status=pending, expiry +30 d",
+  "ciphertext_only": "one bucket object of 3145756 bytes (plaintext 3145728 + 28 bytes AES-GCM overhead), object sha256 differs from the plaintext, key has no file name",
+  "accept_first_other_machine": "sent to ofr-b1, only ofr-b2 started, `pb inbox approve <id>` on ofr-b2: status completed, file in ofr-b2 Inbox sha256 44be004ff7e6721a5f8d633205bdf9174124a3bbd9f854fefe5748edbeb67d2d == sender's file; bucket objects after delivery: 0",
+  "decline_sender_offline": "second file (1 MiB) pending, sender and ofr-b2 stopped, `pb inbox decline <id>` on ofr-b1: bucket objects 0 at once, nothing in ofr-b1 Inbox, sender later sees status declined",
+  "expiry": "third file (512 KiB) pending, expires_at set in the past on the staging row: status expired after the retention sweep (~60 s), bucket objects 0",
+  "automated": ["TestPostgresStoredCreateOfflineAndFrozenManifest", "TestPostgresStoredApprovalClaimsOneMachineAndDeletesOnReceipt", "TestPostgresStoredDeclineExpiryAndRevocationCleanLateUploads", "TestPostgresStoredDeclineKeepsDecisionWhenDeleteFails", "TestStoredFileKeyAddressedToExistingMachineKeys", "TestStoredPullResumesAfterRestartAndPublishesOnce", "TestStoredPullRejectsTamperedCiphertextBeforeCommit", "TestSendOfflineStoresCiphertextForEveryRecipientMachine"]
+ },
+ "gaps": "macOS and Windows cells not run (X-48 covers cross-OS); Lane C requests list UI; production server deploy (migrations 318-323) pending the combined deploy"
+}
