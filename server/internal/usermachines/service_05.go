@@ -609,14 +609,17 @@ func (s *Service) transitionTerminalSession(ctx context.Context, userID, machine
 }
 
 func (s *Service) ApplyTerminalSessionOperations(ctx context.Context, userMachineID string) error {
-	return s.applyTerminalSessionOperations(ctx, userMachineID, "")
+	return s.applyTerminalSessionOperations(ctx, userMachineID, "", false)
 }
 
 func (s *Service) applyTerminalSessionOperationsForSession(ctx context.Context, userMachineID, terminalSessionID string) error {
-	return s.applyTerminalSessionOperations(ctx, userMachineID, terminalSessionID)
+	return s.applyTerminalSessionOperations(ctx, userMachineID, terminalSessionID, false)
 }
 
-func (s *Service) applyTerminalSessionOperations(ctx context.Context, userMachineID, terminalSessionID string) error {
+// applyTerminalSessionOperations applies the machine's pending operations (only terminalSessionID's when set).
+// skipCreate leaves a pending create to the worker: a CLI attach starts the shell itself (create-or-get), so a
+// connection descriptor must not hold the request open for a second host round trip that starts it first.
+func (s *Service) applyTerminalSessionOperations(ctx context.Context, userMachineID, terminalSessionID string, skipCreate bool) error {
 	for {
 		items, err := s.db.Queries().ListPendingUserMachineTerminalSessionOperations(ctx, dbsqlc.ListPendingUserMachineTerminalSessionOperationsParams{UserMachineID: userMachineID, BatchSize: 32})
 		if err != nil {
@@ -626,7 +629,7 @@ func (s *Service) applyTerminalSessionOperations(ctx context.Context, userMachin
 			return nil
 		}
 		for _, item := range items {
-			if terminalSessionID != "" && item.TerminalSessionID != terminalSessionID {
+			if terminalSessionID != "" && item.TerminalSessionID != terminalSessionID || skipCreate && item.Operation == "create" {
 				continue
 			}
 			if err := s.applyTerminalSessionOperation(ctx, item.ID, item.UserMachineID, item.TerminalSessionID, item.Operation, item.Attempts, item.UserID, item.EnvironmentID, item.ProviderRouteHttpBaseUrl); err != nil {

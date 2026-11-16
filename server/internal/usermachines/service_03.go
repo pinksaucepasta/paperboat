@@ -460,7 +460,9 @@ func (s *Service) ConnectTerminalSession(ctx context.Context, userID, sourceMach
 			}
 		}
 	}
-	if err := s.applyTerminalSessionOperationsForSession(ctx, row.ID, terminalSession.ID); err != nil {
+	// A pending create is left to the CLI's create-or-get on attach (and the worker): starting the shell here held
+	// every new-session descriptor ~2 s on a second edge round trip (prod p50 2.6 s per create).
+	if err := s.applyTerminalSessionOperations(ctx, row.ID, terminalSession.ID, true); err != nil {
 		response.Status = "helper_starting"
 		response.Reason = "terminal_session_operation_pending"
 		return response, nil

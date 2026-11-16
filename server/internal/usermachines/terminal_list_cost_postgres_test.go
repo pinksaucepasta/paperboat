@@ -67,6 +67,17 @@ func (r *delayedRuntime) Terminal(ctx context.Context, route, credential, operat
 	return r.terminalIdentificationRuntime.Terminal(ctx, route, credential, operation, session, operationID)
 }
 
+// CreateTerminal starts a shell after the same latency (a real create took p50 2.6 s on production).
+func (r *delayedRuntime) CreateTerminal(ctx context.Context, route, credential, session, operationID, name, cwd string) (helperruntime.Snapshot, error) {
+	r.calls.Add(1)
+	select {
+	case <-time.After(r.delay):
+	case <-ctx.Done():
+		return helperruntime.Snapshot{}, ctx.Err()
+	}
+	return helperruntime.Snapshot{ID: session, Name: name, CWD: cwd, State: "running", Generation: 1}, nil
+}
+
 // A live page costs one host round trip and one write per listed session (the cost the stored list avoids), so callers that only
 // match names or states ask for live=false.
 func TestTerminalListLiveCostPostgres(t *testing.T) {
@@ -102,13 +113,20 @@ func TestTerminalDescriptorCostPostgres(t *testing.T) {
 	f, source, _ := newWorkspaceDescriptorFixture(t)
 	seedTerminalNoise(t, f, 200, 120, 300)
 	ctx := workspace.WithContext(f.ctx, workspace.Scope{ID: "personal"})
+	// The new session's create is still pending and the host takes 2 s to start a shell: the descriptor leaves the
+	// create to the CLI's create-or-get on attach instead of waiting for it.
+	runtime := &delayedRuntime{delay: 2 * time.Second}
+	f.service.controlRuntime = runtime
 	session, err := f.service.CreateTerminalSession(ctx, f.account, f.machine, "descriptor", "descriptor_cost"+f.suffix)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.store.SQL().ExecContext(f.ctx, `DELETE FROM paperboat.user_machine_terminal_session_operations WHERE terminal_session_id=$1`, session.ID); err != nil {
-		t.Fatal(err)
-	}
+	defer func() {
+		var pending bool
+		if err := f.store.SQL().QueryRowContext(f.ctx, `SELECT EXISTS(SELECT 1 FROM paperboat.user_machine_terminal_session_operations WHERE terminal_session_id=$1 AND operation='create' AND state='pending')`, session.ID).Scan(&pending); err != nil || !pending || runtime.calls.Load() != 0 {
+			t.Fatalf("create pending for the worker = %t, host calls = %d, err = %v", pending, runtime.calls.Load(), err)
+		}
+	}()
 	for i := 0; i < 3; i++ {
 		start := time.Now()
 		d, err := f.service.ConnectTerminalSession(ctx, f.account, source, f.machine, "cli_"+f.suffix, session.ID)

@@ -3037,13 +3037,17 @@ VALUES ($1,$2,$3,1,1,$4,1,$5,$6,$7,1,$8,$9,'{}',now()+interval '1 hour',true,now
 	}
 	runtime := &terminalCompositionRuntime{signer: signer, machineID: userMachineID, environmentID: environmentID, userID: userID, sessionID: created.ID, name: "bench-run", cwd: "/tmp/local project"}
 	service.controlRuntime = runtime
-	pending, err := service.ConnectTerminalSession(ctx, userID, userMachineID, userMachineID, "cls_mc_1", created.ID)
-	if err != nil || pending.Connectable || pending.Reason != "terminal_session_operation_pending" {
-		t.Fatalf("pending operation connectable=%v reason=%s err=%v", pending.Connectable, pending.Reason, err)
-	}
-	runtime.ready = true
+	// The descriptor does not start the shell: the CLI's attach does (create-or-get), so a host that is not ready
+	// does not hold or fail the descriptor, and the create stays pending for the worker.
 	descriptor, err := service.ConnectTerminalSession(ctx, userID, userMachineID, userMachineID, "cls_mc_1", created.ID)
 	if err != nil {
+		t.Fatal(err)
+	}
+	if runtime.operationID != "" {
+		t.Fatalf("descriptor called the host to create the shell (operation %s)", runtime.operationID)
+	}
+	runtime.ready = true
+	if err := service.applyTerminalSessionOperationsForSession(ctx, userMachineID, created.ID); err != nil { // the worker's apply
 		t.Fatal(err)
 	}
 	if _, err := service.ConnectTerminalSession(ctx, "unauthorized-user", userMachineID, userMachineID, "cls_mc_1", created.ID); !errors.Is(err, ErrNotFound) {
