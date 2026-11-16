@@ -292,17 +292,68 @@ func TestVaultCustodyRequiresExactOwnerBeforeReadingSecretBody(t *testing.T) {
 	store := NewVaultCustodyStore()
 	defer store.Close()
 	for _, tc := range []struct {
-		sid  string
-		peer Peer
-	}{{"", Peer{UID: os.Geteuid() + 1}}, {"S-1-5-21-owner", Peer{SID: "S-1-5-18"}}} {
+		sid, path string
+		peer      Peer
+	}{
+		{"", "/v1/vault-custody", Peer{UID: os.Geteuid() + 1}},
+		{"", "/v1/vault-custody/handoff", Peer{UID: os.Geteuid() + 1}},
+		{"S-1-5-21-owner", "/v1/vault-custody", Peer{SID: "S-1-5-18"}},
+		{"S-1-5-21-owner", "/v1/vault-custody/handoff", Peer{SID: "S-1-5-18"}},
+	} {
 		server := &Server{config: ServerConfig{OwnerUID: os.Geteuid(), OwnerSID: tc.sid, Authorize: func(Peer) bool { return true }, VaultCustody: store}}
-		secret := "private-marker-must-not-appear"
-		request := httptest.NewRequest(http.MethodPost, "/v1/vault-custody", strings.NewReader(secret))
+		secret := `{"operation":"export","private-marker-must-not-appear":1}`
+		request := httptest.NewRequest(http.MethodPost, tc.path, strings.NewReader(secret))
+		request.Header.Set("Content-Type", "application/json")
 		request = request.WithContext(context.WithValue(request.Context(), peerContextKey{}, tc.peer))
 		response := httptest.NewRecorder()
 		server.handler().ServeHTTP(response, request)
-		if response.Code != http.StatusForbidden || strings.Contains(response.Body.String(), secret) || response.Header().Get("Cache-Control") != "no-store" {
-			t.Fatal("custody endpoint admitted nonowner or disclosed request payload")
+		if response.Code != http.StatusForbidden || strings.Contains(response.Body.String(), "private-marker") || response.Header().Get("Cache-Control") != "no-store" {
+			t.Fatalf("%s admitted nonowner or disclosed request payload", tc.path)
 		}
+	}
+}
+
+// A replaced daemon hands its unlocked custody to the new one in memory and keeps no copy.
+func TestVaultCustodyHandoffMovesCustodyToReplacementDaemon(t *testing.T) {
+	ref, raw := vaultCustodyFixture(t)
+	oldStore, newStore := NewVaultCustodyStore(), NewVaultCustodyStore()
+	old, replacement := startVaultCustodySocket(t, oldStore), startVaultCustodySocket(t, newStore)
+	begin := mustCustody(t, old, VaultCustodyRequest{Reference: ref, Operation: "begin", SessionID: "session_1"})
+	saved := mustCustody(t, old, VaultCustodyRequest{Reference: ref, Operation: "put", SessionID: "session_1", Generation: begin.Generation, Lease: begin.Lease, Value: raw, Unlock: true})
+	mustCustody(t, old, VaultCustodyRequest{Reference: ref, Operation: "end", SessionID: "session_1", Lease: begin.Lease})
+	oldOwner, err := NewOwnerClient(old.socket, time.Second, os.Geteuid())
+	if err != nil {
+		t.Fatal(err)
+	}
+	handoff, err := oldOwner.VaultCustodyHandoff(context.Background(), VaultCustodyHandoff{Operation: "export"})
+	if err != nil || len(handoff.Entries) != 1 {
+		t.Fatalf("export entries=%d err=%v", len(handoff.Entries), err)
+	}
+	defer handoff.Clear()
+	if left := mustCustody(t, old, VaultCustodyRequest{Reference: ref, Operation: "get", SessionID: "session_1"}); len(left.Value) != 0 {
+		t.Fatal("old daemon kept custody after export")
+	}
+	newOwner, err := NewOwnerClient(replacement.socket, time.Second, os.Geteuid())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A client that read the fresh daemon before the handoff does not block it.
+	mustCustody(t, replacement, VaultCustodyRequest{Reference: ref, Operation: "get", SessionID: "session_1"})
+	if _, err := newOwner.VaultCustodyHandoff(context.Background(), handoff); err != nil {
+		t.Fatal(err)
+	}
+	read := mustCustody(t, replacement, VaultCustodyRequest{Reference: ref, Operation: "get", SessionID: "session_1"})
+	record := decodedCustody(t, read.Value)
+	defer record.Clear()
+	if len(record.Payload) == 0 || !read.ExpiresAt.Equal(saved.ExpiresAt) {
+		t.Fatal("replacement daemon did not receive the unlocked custody with its expiry")
+	}
+	if _, err := newOwner.VaultCustodyHandoff(context.Background(), handoff); !errors.Is(err, ErrVaultCustodyStale) {
+		t.Fatalf("second import err=%v", err)
+	}
+	if other, err := NewOwnerClient(replacement.socket, time.Second, os.Geteuid()+1); err != nil {
+		t.Fatal(err)
+	} else if _, err := other.VaultCustodyHandoff(context.Background(), VaultCustodyHandoff{Operation: "export"}); err == nil {
+		t.Fatal("handoff client accepted a daemon run by another user")
 	}
 }

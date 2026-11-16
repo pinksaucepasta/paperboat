@@ -65,13 +65,19 @@ func ReplaceCurrentUserService(ctx context.Context, executable, configPath, serv
 	}
 	// Supplied-install validation already activated this version. Preserve that
 	// process while still activating any changed service declaration.
+	replace := installer.Replace
 	if version != "" {
 		probe, probeErr := ProbeCurrentUserForUpdate(ctx)
 		if probeErr == nil && probe.Running && probe.Version == version && probe.State != "starting" && probe.State != "stopping" {
-			return installer.Reconcile(ctx)
+			replace = installer.Reconcile
 		}
 	}
-	return installer.Replace(ctx)
+	var restore func(context.Context) error
+	err = handOverVaultCustody(ctx, currentUserDaemonClient, func() (replaceErr error) {
+		restore, replaceErr = replace(ctx)
+		return replaceErr
+	})
+	return restore, err
 }
 
 func RemoveCurrentUserService(ctx context.Context, executable string) error {

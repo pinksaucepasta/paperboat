@@ -393,3 +393,111 @@ func validateVaultCustodyRecord(ref string, value []byte) (config.PasswordVaultR
 	store := config.ProfileStore{Path: "memory-only", Secrets: &vaultValidationMemory{ref: ref, value: value}}
 	return store.LoadPasswordVault(issuer, account)
 }
+
+// VaultCustodyHandoff carries custody, in memory only, from a daemon being replaced to its successor
+// (pb update, pb install, pb login binding), so an unlocked vault stays unlocked across the restart.
+type VaultCustodyHandoff struct {
+	Operation string                     `json:"operation"`
+	Entries   []VaultCustodyHandoffEntry `json:"entries,omitempty"`
+}
+type VaultCustodyHandoffEntry struct {
+	Reference string    `json:"reference"`
+	SessionID string    `json:"session_id"`
+	Value     []byte    `json:"value"`
+	ExpiresAt time.Time `json:"expires_at"`
+}
+
+func (h *VaultCustodyHandoff) Clear() {
+	for i := range h.Entries {
+		clear(h.Entries[i].Value)
+	}
+	h.Entries = nil
+}
+
+// Export hands every held record to the caller and wipes this daemon's copy: the successor holds
+// the only one. Requests that raced the export see a stale generation and unlock again.
+func (s *VaultCustodyStore) Export() (VaultCustodyHandoff, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := VaultCustodyHandoff{Operation: "import"}
+	if s.closed {
+		return out, ErrVaultCustodyStale
+	}
+	s.expireLocked(time.Now())
+	for ref, e := range s.entries {
+		if e.present {
+			raw, err := json.Marshal(struct {
+				Version int `json:"version"`
+				config.PasswordVaultRecord
+			}{1, e.record})
+			if err != nil {
+				out.Clear()
+				return VaultCustodyHandoff{}, ErrVaultCustodyInvalid
+			}
+			out.Entries = append(out.Entries, VaultCustodyHandoffEntry{Reference: ref, SessionID: e.session, Value: raw, ExpiresAt: e.expires})
+		}
+		clearVaultCustodyRecord(&e.record)
+		e.size, e.present = 0, false
+		s.lockEntryLocked(e)
+		delete(s.entries, ref)
+	}
+	s.scheduleLocked()
+	return out, nil
+}
+
+// Import accepts a predecessor's export into a daemon that holds no record yet (a client may already
+// have read the empty store); a held record means the handoff came late or twice and is refused whole.
+func (s *VaultCustodyStore) Import(handoff VaultCustodyHandoff) error {
+	if handoff.Operation != "import" || len(handoff.Entries) > vaultCustodyMaximumEntries {
+		return ErrVaultCustodyInvalid
+	}
+	entries := make(map[string]*vaultCustodyEntry, len(handoff.Entries))
+	discard := func() {
+		for _, e := range entries {
+			clearVaultCustodyRecord(&e.record)
+		}
+	}
+	total := 0
+	for _, in := range handoff.Entries {
+		if !validVaultCustodyReference(in.Reference) || !validVaultCustodySession(in.SessionID) || entries[in.Reference] != nil {
+			discard()
+			return ErrVaultCustodyInvalid
+		}
+		record, err := validateVaultCustodyRecord(in.Reference, in.Value)
+		if err != nil {
+			discard()
+			return ErrVaultCustodyInvalid
+		}
+		total += len(in.Value)
+		var seed [8]byte
+		if _, err := rand.Read(seed[:]); err != nil {
+			clearVaultCustodyRecord(&record)
+			discard()
+			return ErrVaultCustodyInvalid
+		}
+		// A fresh generation: clients holding the old daemon's generation re-read before writing.
+		generation := binary.BigEndian.Uint64(seed[:])&((1<<52)-1) | 1
+		entries[in.Reference] = &vaultCustodyEntry{record: record, size: len(in.Value), present: true, generation: generation, session: in.SessionID, expires: in.ExpiresAt, changed: make(chan struct{})}
+	}
+	if total > vaultCustodyMaximumBytes {
+		discard()
+		return ErrVaultCustodyLimit
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	held := s.closed
+	for _, e := range s.entries {
+		held = held || e.present
+	}
+	if held {
+		discard()
+		return ErrVaultCustodyStale
+	}
+	for _, e := range s.entries {
+		s.invalidateLeaseLocked(e)
+	}
+	s.entries = entries
+	s.expireLocked(time.Now())
+	s.scheduleLocked()
+	return nil
+}

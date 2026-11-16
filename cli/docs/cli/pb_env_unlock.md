@@ -6,7 +6,7 @@ Unlock this account's ENV vault on this machine
 
 Unlock this account's ENV vault on this machine
 
-Unlock encrypted local custody with the password supplied interactively, by stdin, or from a private file. Authorized workspace layers refresh automatically after unlock. On headless Linux without a persistent secure store, keys remain in the user daemon memory for 15 minutes; lock or daemon restart clears them. Locked keys never publish a delivery. No ENV value is printed by unlocking.
+Unlock encrypted local custody with the password supplied interactively, by stdin, or from a private file. Authorized workspace layers refresh automatically after unlock. On headless Linux without a persistent secure store, keys remain in the user daemon memory for 15 minutes; pb update and reinstalls hand them to the new daemon, lock or a daemon restart clears them. Locked keys never publish a delivery. No ENV value is printed by unlocking.
 
 ENV values are encrypted before they leave the client. The interactive picker separates shared Team globals, your private member globals, and device overrides in the active workspace; commands select exact scopes explicitly; list output shows metadata rather than secret values. Unlock the local vault when a key operation requires it.
 

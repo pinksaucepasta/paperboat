@@ -259,9 +259,13 @@ func (s *Server) handler() http.Handler {
 			s.machineEvents(writer, request, requestID)
 			return
 		}
-		if request.URL.Path == "/v1/vault-custody" {
+		if request.URL.Path == "/v1/vault-custody" || request.URL.Path == "/v1/vault-custody/handoff" {
 			if !ok || !s.ownsPeer(peer) {
 				writeError(writer, http.StatusForbidden, requestID, "permission_denied", "local API access denied")
+				return
+			}
+			if request.URL.Path == "/v1/vault-custody/handoff" {
+				s.serveVaultCustodyHandoff(writer, request, requestID)
 				return
 			}
 			s.serveVaultCustody(writer, request, requestID)

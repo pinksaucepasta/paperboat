@@ -102,7 +102,7 @@ func currentUserDaemonClient(ctx context.Context) (*localapi.Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	return localapi.NewClient(paths.SocketPath, time.Second)
+	return localapi.NewOwnerClient(paths.SocketPath, time.Second, os.Geteuid())
 }
 
 func RestartCurrentUserForUpdate(ctx context.Context) error {
@@ -114,10 +114,12 @@ func RestartCurrentUserForUpdate(ctx context.Context) error {
 		return err
 	}
 	controller := updateDaemonController()
-	if err := controller.Stop(ctx, ""); err != nil {
-		return err
-	}
-	return controller.Start(ctx, updateServiceDefinitionPath(runtime.GOOS, home, os.Geteuid()))
+	return handOverVaultCustody(ctx, currentUserDaemonClient, func() error {
+		if err := controller.Stop(ctx, ""); err != nil {
+			return err
+		}
+		return controller.Start(ctx, updateServiceDefinitionPath(runtime.GOOS, home, os.Geteuid()))
+	})
 }
 
 func updateDaemonController() service.NativeLifecycleController {
