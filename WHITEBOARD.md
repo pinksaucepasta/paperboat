@@ -278,3 +278,12 @@ Release builds are ad-hoc signed only (`.github/workflows/release.yml`), so macO
 We need a Go SDK (sdk/go exists in part), a direct token-authenticated HTTP API that ships with it (scoped like a recipe,
 attributed in Activity; API tokens were replaced by recipes), and an MCP server / agent skill so AI agents can use Paperboat.
 Design each when it is picked up; earlier F24 design notes are in git history (WHITEBOARD before 2026-11-16).
+
+## Terminal recordings: asciicast v3 and player features — after launch (user 2026-11-17)
+
+Today recordings are asciicast v2 segments, `pb recordings export` writes v2, and the console replays with the same
+wterm + Ghostty renderer as live sessions (seek, 1–8× speed; the CLI also has `--idle-limit`). Decision: keep v2 and our
+own player for launch (v2 is what most tools read; one renderer keeps replay identical to live). Later, in order:
+idle limit in the console player; markers and keyboard shortcuts in our player; optional
+`pb recordings export --format v3` (asciicast v3: relative intervals, marker/exit events, header term metadata) with v2
+staying the default. Not planned: switching to asciinema-player (it brings a second terminal emulator).
