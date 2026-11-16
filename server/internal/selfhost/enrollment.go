@@ -350,11 +350,12 @@ func (s *Service) reserve(ctx context.Context, actor string, scope Scope, i Insp
 	if existing != 0 && existing != len(i.Components) {
 		return nil, "", ErrUsed
 	}
-	var total, scoped int
-	if e = tx.QueryRowContext(ctx, `SELECT count(*),count(*) FILTER(WHERE scope_kind=$1 AND scope_id=$2) FROM paperboat.selfhost_installations WHERE state='active'`, scope.Kind, scope.ID).Scan(&total, &scoped); e != nil {
+	// Only a per-scope bound: a server-wide total would let one scope's installations refuse every other scope's.
+	var scoped int
+	if e = tx.QueryRowContext(ctx, `SELECT count(*) FROM paperboat.selfhost_installations WHERE state='active' AND scope_kind=$1 AND scope_id=$2`, scope.Kind, scope.ID).Scan(&scoped); e != nil {
 		return nil, "", e
 	}
-	if existing == 0 && (total+len(i.Components) > 16384 || scoped+len(i.Components) > 256) {
+	if existing == 0 && scoped+len(i.Components) > 256 {
 		return nil, "", ErrLimit
 	}
 	claimID := "claim_" + randomIdentity()
