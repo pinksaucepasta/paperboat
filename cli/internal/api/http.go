@@ -3,6 +3,7 @@ package api
 import (
 	"crypto/tls"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
 	"net"
 	"net/http"
 	"net/http/httptrace"
@@ -28,6 +29,7 @@ func defaultHTTPClient() *http.Client {
 
 func newProcessHTTPTransport() http.RoundTripper {
 	config := httptransport.DevelopmentConfig()
+	config.UserAgent = "paperboat/" + buildinfo.Version
 	config.TLSHandshakeTimeout = defaultTLSHandshakeTimeout
 	transport, err := httptransport.New(config)
 	if err != nil {

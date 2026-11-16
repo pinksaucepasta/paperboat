@@ -294,6 +294,7 @@ func localDaemonCommand() *cobra.Command {
 				managedConfig = &localdaemon.ManagedSSHConfig{ServerURL: cfg.ServerURL, Auth: authSource, Store: store, AccountID: profile.Account.ID, CLIClientSessionID: profile.CLIClientSessionID, Home: home, RuntimeDirectory: paths.RuntimeRoot, Executable: executable, OwnerUID: uint32(os.Geteuid()), InheritedAgentSocket: os.Getenv("SSH_AUTH_SOCK")}
 			}
 			transportConfig := httptransport.DevelopmentConfig()
+			transportConfig.UserAgent = "paperboat/" + buildinfo.Version
 			if transportConfig.TLSConfig == nil {
 				transportConfig.TLSConfig = &tls.Config{}
 			}

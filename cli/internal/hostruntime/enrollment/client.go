@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
 	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 	"github.com/pinksaucepasta/paperboat/shared/wirejson"
 	"io"
@@ -325,6 +326,7 @@ func controlTransport(caPath string) (http.RoundTripper, error) {
 		tlsConfig.RootCAs = roots
 	}
 	transportConfig := httptransport.DevelopmentConfig()
+	transportConfig.UserAgent = "paperboat/" + buildinfo.Version
 	transportConfig.TLSConfig = tlsConfig
 	return httptransport.New(transportConfig)
 }

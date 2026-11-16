@@ -93,6 +93,9 @@ type Config struct {
 	// until its TCP retransmission timer gives up minutes later.
 	HealthCheckInterval time.Duration
 	HealthCheckTimeout  time.Duration
+	// UserAgent is sent on a request that has none, so the server's request log counts every machine process's
+	// calls under the build's own agent instead of Go's default (PR-03: the worker's calls were unattributable).
+	UserAgent string
 }
 
 func DevelopmentConfig() Config {
@@ -138,6 +141,10 @@ func New(config Config) (*Transport, error) {
 func (t *Transport) RoundTrip(request *http.Request) (*http.Response, error) {
 	if t == nil || request == nil {
 		return nil, errors.New("invalid HTTP transport request")
+	}
+	if t.config.UserAgent != "" && request.Header.Get("User-Agent") == "" {
+		request = request.Clone(request.Context()) // a RoundTripper must not modify the caller's request
+		request.Header.Set("User-Agent", t.config.UserAgent)
 	}
 	snapshot, err := t.config.ProxySource.Snapshot(request.Context())
 	if err != nil {

@@ -12,6 +12,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
 	"log/slog"
 	"net"
 	"net/http"
@@ -965,6 +966,7 @@ func productionTransport(caPath string, environ func(string) string) (http.Round
 		tlsConfig.RootCAs = roots
 	}
 	transportConfig := httptransport.DevelopmentConfig()
+	transportConfig.UserAgent = "paperboat/" + buildinfo.Version
 	transportConfig.TLSConfig = tlsConfig
 	transportConfig.DialContext = newControlDialer(environ("PAPERBOAT_RUNTIME_STATE_ROOT")).DialContext
 	administrator := httptransport.ProxySnapshot{
