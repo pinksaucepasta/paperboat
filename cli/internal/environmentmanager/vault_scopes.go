@@ -57,6 +57,11 @@ func (v PasswordVault) withVaultKeys(ctx context.Context, fn func(*config.Passwo
 		return err
 	}
 	local, err := v.Store.LoadPasswordVault(v.Issuer, v.AccountID)
+	if errors.Is(err, config.ErrSecretNotFound) {
+		// Custody is gone (the user daemon restarted, the idle time ran out, or this computer never unlocked): say so,
+		// instead of the bare "credential secret not found".
+		return ErrVaultLocked
+	}
 	if err != nil {
 		return err
 	}

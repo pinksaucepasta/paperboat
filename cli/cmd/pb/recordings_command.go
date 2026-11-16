@@ -19,6 +19,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/command"
+	"github.com/pinksaucepasta/paperboat/internal/environmentmanager"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
 	"github.com/pinksaucepasta/paperboat/internal/recording"
@@ -255,7 +256,11 @@ func openRecordingKey(c *command.Context, parent *cobra.Command, replay wire.Rep
 	for i, link := range replay.Chain {
 		chain[i] = recording.ChainLink{Generation: link.Generation, SealedPrevious: link.SealedPrevious}
 	}
-	return vault.RecordingKey(c.Context, replay.TeamID, replay.ViewerKey.Generation, replay.ViewerKey.Sealed, chain, replay.KeyGeneration)
+	key, err := vault.RecordingKey(c.Context, replay.TeamID, replay.ViewerKey.Generation, replay.ViewerKey.Sealed, chain, replay.KeyGeneration)
+	if errors.Is(err, environmentmanager.ErrVaultLocked) {
+		return nil, localArgumentError("your ENV vault is locked on this computer (its keys live in memory and are gone after a restart or 15 idle minutes); run `pb env unlock`, then retry")
+	}
+	return key, err
 }
 
 // readArchive replays from the team bucket: the server audits the replay and signs one download per archived
