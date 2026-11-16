@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"sync"
 	"testing"
 	"time"
@@ -387,5 +388,33 @@ func TestRouteReconcileFailureIsNotReportedAfterShutdownStarted(t *testing.T) {
 	}
 	if reportRouteReconcileFailure(context.Background(), nil, false) {
 		t.Fatal("no error was reported as a failure")
+	}
+}
+
+type poisonHeadSink struct{ delivered []string }
+
+func (s *poisonHeadSink) ReportUsage(_ context.Context, report control.UsageReport) (control.UsageResult, error) {
+	if report.OperationID == "op_poison" {
+		return control.UsageResult{}, &control.RequestFailure{Path: "/v1/edge/usage-reports", Status: http.StatusBadRequest, Err: control.ErrControlUnavailable}
+	}
+	s.delivered = append(s.delivered, report.OperationID)
+	return control.UsageResult{Disposition: "accounted"}, nil
+}
+
+// One report the server refuses for good at the head of the queue must not stop the same tick's later reports.
+func TestUsageWorkerDeliversThePastARefusedReportInTheSameTick(t *testing.T) {
+	queue, _ := usage.NewQueue(4, 1024)
+	for _, id := range []string{"op_poison", "op_a", "op_b"} {
+		if err := queue.Enqueue(usage.Report{OperationID: id, Key: usage.Key{Node: "n", Epoch: "e", Environment: "env", Route: id, Revision: 1, Direction: "egress"}, Bytes: 1, Payload: []byte("signed")}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sink := &poisonHeadSink{}
+	worker := &UsageWorker{Queue: queue, Sink: sink}
+	if _, delivered, err := worker.deliver(context.Background()); !delivered || !errors.Is(err, control.ErrUsageRefused) {
+		t.Fatalf("deliver = delivered:%v err:%v", delivered, err)
+	}
+	if queue.Len() != 0 || len(sink.delivered) != 2 || len(queue.DeadLetters()) != 1 {
+		t.Fatalf("queue=%d delivered=%v dead=%d", queue.Len(), sink.delivered, len(queue.DeadLetters()))
 	}
 }

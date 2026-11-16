@@ -4,6 +4,7 @@ import (
 	"math"
 	"strconv"
 	"testing"
+	"time"
 )
 
 func TestEpochIsRandomAndQueueRetriesExactReport(t *testing.T) {
@@ -127,5 +128,35 @@ func TestQueueAcknowledgementsBoundRetentionAndPreserveFIFO(t *testing.T) {
 		if !q.Ack(second) || len(q.order) != 0 || cap(q.order) > q.maxReports || q.Stats().Bytes != 0 || len(q.Snapshot().Reports) != 0 {
 			t.Fatal("ACK retained unbounded ordering or payload state")
 		}
+	}
+}
+
+func TestRefuseKeepsABoundedAuditTrailThatSurvivesARestore(t *testing.T) {
+	queue, err := NewQueue(MaxDeadLetters+4, 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < MaxDeadLetters+2; i++ {
+		id := "op_" + strconv.Itoa(i)
+		if err := queue.Enqueue(Report{OperationID: id, Key: Key{Route: id}, Bytes: 1, Payload: []byte("p")}); err != nil {
+			t.Fatal(err)
+		}
+		if !queue.Refuse(id, "bad signature", time.Unix(1, 0)) {
+			t.Fatalf("refuse %s", id)
+		}
+	}
+	if queue.Refuse("op_missing", "x", time.Now()) || queue.Len() != 0 {
+		t.Fatal("refusing a report that is not pending changed the queue")
+	}
+	dead := queue.DeadLetters()
+	if len(dead) != MaxDeadLetters || dead[0].Report.OperationID != "op_2" || queue.Stats().Refused != MaxDeadLetters+2 {
+		t.Fatalf("kept %d, first %s, refused %d", len(dead), dead[0].Report.OperationID, queue.Stats().Refused)
+	}
+	restored, err := RestoreQueue(queue.Snapshot(), MaxDeadLetters+4, 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(restored.DeadLetters()) != MaxDeadLetters || restored.Stats().Refused != MaxDeadLetters+2 {
+		t.Fatal("dead letters were lost across a restore")
 	}
 }

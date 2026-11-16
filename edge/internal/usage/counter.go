@@ -163,10 +163,14 @@ type Queue struct {
 	bytes          int
 	pending        map[string]Report
 	order          []string
+	dead           []DeadLetter
+	refused        uint64
 }
 
 type QueueState struct {
-	Reports []Report `json:"reports"`
+	Reports     []Report     `json:"reports"`
+	DeadLetters []DeadLetter `json:"dead_letters,omitempty"`
+	Refused     uint64       `json:"refused,omitempty"`
 }
 
 type QueueStats struct {
@@ -175,6 +179,9 @@ type QueueStats struct {
 	MaxReports int
 	MaxBytes   int
 	OldestAt   time.Time
+	// DeadLetters are the refused reports still kept; Refused counts every refusal since the counters began.
+	DeadLetters int
+	Refused     uint64
 }
 
 func NewQueue(maxReports, maxBytes int) (*Queue, error) {
@@ -263,9 +270,15 @@ func (q *Queue) Next() (Report, bool) {
 func (q *Queue) Ack(operationID string) bool {
 	q.mu.Lock()
 	defer q.mu.Unlock()
+	_, ok := q.remove(operationID)
+	return ok
+}
+
+// remove takes one report out of the queue; the caller holds q.mu.
+func (q *Queue) remove(operationID string) (Report, bool) {
 	report, ok := q.pending[operationID]
 	if !ok {
-		return false
+		return Report{}, false
 	}
 	delete(q.pending, operationID)
 	for index, id := range q.order {
@@ -277,7 +290,7 @@ func (q *Queue) Ack(operationID string) bool {
 		}
 	}
 	q.bytes -= len(report.Payload)
-	return true
+	return report, true
 }
 
 func (q *Queue) Len() int {
@@ -289,7 +302,7 @@ func (q *Queue) Len() int {
 func (q *Queue) Stats() QueueStats {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	stats := QueueStats{Reports: len(q.pending), Bytes: q.bytes, MaxReports: q.maxReports, MaxBytes: q.maxBytes}
+	stats := QueueStats{Reports: len(q.pending), Bytes: q.bytes, MaxReports: q.maxReports, MaxBytes: q.maxBytes, DeadLetters: len(q.dead), Refused: q.refused}
 	for _, id := range q.order {
 		report, ok := q.pending[id]
 		if !ok {
@@ -331,7 +344,7 @@ func (q *Queue) pendingKeys() map[Key]struct{} {
 func (q *Queue) Snapshot() QueueState {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	state := QueueState{Reports: make([]Report, 0, len(q.pending))}
+	state := QueueState{Reports: make([]Report, 0, len(q.pending)), DeadLetters: append([]DeadLetter(nil), q.dead...), Refused: q.refused}
 	for _, id := range q.order {
 		if report, ok := q.pending[id]; ok {
 			report.Payload = append([]byte(nil), report.Payload...)
@@ -351,6 +364,10 @@ func RestoreQueue(state QueueState, maxReports, maxBytes int) (*Queue, error) {
 			return nil, err
 		}
 	}
+	if len(state.DeadLetters) > MaxDeadLetters {
+		state.DeadLetters = state.DeadLetters[len(state.DeadLetters)-MaxDeadLetters:]
+	}
+	queue.dead, queue.refused = append([]DeadLetter(nil), state.DeadLetters...), state.Refused
 	return queue, nil
 }
 

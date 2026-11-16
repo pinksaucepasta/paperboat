@@ -113,6 +113,11 @@ func (w *UsageWorker) deliver(ctx context.Context) (control.UsageResult, bool, e
 	unsaved := 0
 	for i := 0; i < usageBatchLimit && ctx.Err() == nil; i++ {
 		result, delivered, err := control.DeliverNext(ctx, w.Queue, w.Sink)
+		if errors.Is(err, control.ErrUsageRefused) {
+			// The refused report is a dead letter now: say so once and go on with the next one.
+			sendErr = errors.Join(sendErr, err)
+			continue
+		}
 		if err != nil {
 			sendErr = errors.Join(sendErr, err)
 			break
