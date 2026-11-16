@@ -276,6 +276,12 @@ all three (`canary-a`, `canary-b`, `canary-t`) on the same `main` build, upgrade
 `/home/pbt/pb` in the container, `chmod 0755`, `./pb install` as `pbt`): there is no compatibility between builds, so a
 host left on an older build refuses the newer client's streams (canary-t on dev-6e1e23255 refused dev-65dddfdfe's
 workspace header, team_exec red 2026-11-16 18:36-18:50 UTC).
+**Every server ship that changes the client or relay contract upgrades the canary with it** (part of the deploy, not a
+follow-up): before the server switch, roll the relay image on both edge hosts if the relay changed, then install a `pb` built
+from the server image's own commit (`~/bin/pb-build.sh <commit>`) on canary-a, -b and -t together, then switch the server.
+A canary on an older client is an old consumer the new server does not serve: server .49 (8200fbeb1 relay membership
+grants) with canaries on dev-65dddfdfe and relays .22 turned exec_b_to_a and send_a_to_b red and was rolled back
+(2026-11-16 22:00-22:04 UTC). Tell the fleet owner to upgrade the test fleet at the same time.
 They are in the shared test account, protected from `cleanup_test_account.py`; never revoke them.
 **Account probe** (`tools/probe/account.py`, run by `canary.py --account` from `deploy/paperboat-canary-account.{service,timer}`
 every hour, not every minute: WorkOS rate-limits sign-ins and mails new-device alerts): a headless WorkOS password
