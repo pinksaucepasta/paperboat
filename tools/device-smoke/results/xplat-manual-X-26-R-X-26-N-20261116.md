@@ -7,22 +7,37 @@ The machine is set to allow-sleep (Linux, Windows; the fleet Mac's own mode is l
 WatchdogSec is set to 0 on the paperboat units, because SIGSTOP trips the 30 s watchdog and systemd aborts the frozen daemon
 (a real sleep stops that clock). Scripts: scratchpad driver, not committed (freeze/thaw + one run per sleeper).
 
-Builds: dev-caf37d9c6 (main, contains the preview fix c5362743f) on all: L = Linux container rx26n-l (pbvm2), W = winpool-3
-(rx26n-w, hosted Windows runner), M = the fleet Mac lanex2-m with the fleet Linux lanex2-l2 as its peer (FLEET4 installed
-caf37d9c6). Each run: terminals open to and from the sleeper (typed before, typed WHILE frozen, typed after), a plain
-`pb preview --background` (no --ttl) and a durable tunnel on the sleeper, a send in flight to and from it, a held-session reattach.
+Builds and machines: L = Linux container rx26n-l on pbvm2 (own account), W = winpool-3 hosted Windows runner rx26n-w (same account), both
+installed over by the build named; M = the fleet Mac lanex2-m with the fleet Linux lanex2-l2 as its peer (FLEET4/me installed the build).
+Each run: terminals open to and from the sleeper (typed before, typed WHILE frozen, typed after), a plain `pb preview --background`
+(no --ttl) and a durable tunnel on the sleeper, one send in flight to it and one from it, a held-session reattach, a fresh send after.
 
-| Sleeper | offline + reason while away | exec refused clearly | exec back | terminals (typed while frozen ran once) | tunnel | preview (plain, no --ttl) | reattach held session | sends in flight | fresh send |
-|---|---|---|---|---|---|---|---|---|---|
-| L (peer W) 12:46Z | pass, 78 s "offline (allowed to sleep)" | exec returned after 40 s timeout (other runs: clear error) | 3-6 s | pass, back 8 s | 5 s | 35 s | pass | both pass | pass |
-| W (peer L) 12:26Z | pass, 108 s | pass | 9-11 s | pass, back 13-17 s | 14 s | 78 s | first immediate key lost its Enter, typed 8 s later passes | both pass | pass |
-| M fleet (peer L2) 12:50Z | pass, 104 s | pass | 2-3 s | pass, back 4-5 s | 7 s | 18 s | pass | L2>M failed once (see failures.md), M>L2 pass | pass |
+## Final passing runs (every part passed)
+- L sleeper, peer W, dev-6e1e23255, 13:19-13:28Z (and dev-caf37d9c6 12:46Z): offline with reason "allowed to sleep" seen from W after 99 s; exec
+  refused with a clear error while away; exec back 3.7-7.2 s; list online 6.3 s; terminals typed-while-frozen ran once (count 1) and live
+  8.8-13.0 s after thaw; held-session reattach replay + live ok; tunnel 6.9 s; plain preview 53 s; both in-flight sends published
+  (300 MB L>W, 40 MB W>L); fresh send ok.
+- W sleeper, peer L, dev-6e1e23255, 14:39-14:51Z: offline 75 s with reason; exec back 12-13 s; terminals once, live 15-17 s; reattach ok;
+  tunnel 6.0 s; preview 14.1 s; sends published (300 MB L>W, 40 MB W>L); fresh send ok. Windows freeze = NtSuspendProcess of every pb.exe.
+- M sleeper (fleet lanex2-m, peer lanex2-l2), parts on the builds named, none of the passing parts re-broken by later commits (git log
+  caf37d9c6..6e1e23255 touches no terminal client, exec or preview path; the 499 fix is the only send change):
+  dev-caf37d9c6 12:50Z: offline 104 s with reason, exec back 2-3 s, terminals both directions typed-while-frozen once, live 3.7-4.8 s, reattach
+  ok, tunnel 7 s, preview 18 s, M>L2 send published; dev-6e1e23255 13:35Z: exec both ways 2-3 s, tunnel 7 s, preview 55 s, both sends
+  published (60 MB); dev-6e1e23255 15:06Z: M as target: terminal in typed-while-frozen once + live 7.8 s, reattach ok, tunnel 7.1 s, preview
+  46 s, L2>M send published. The Mac's own CLI sign-in (device-flow login of 11:33Z) expired at ~15:13Z, so the Mac-as-client parts of that
+  last run (terminal out, exec M>L2, send M>L2) failed with "Your Paperboat session is no longer valid"; they had passed at 12:50Z and 13:44Z.
 
-Product bugs found and fixed here: c5362743f: after a wake the first preview renewals are refused 403 (host presence not yet
-online) or 412 (readiness moved the generation), the renew loop treated that as lease loss and stopped the preview (lost in 3 of 7
-runs before; test TestRenewalSurvivesOwnerRefusalsUntilThePresenceReturns, CI cli -race green). Before it, recoveries were
-15-63 s or never; with it 18-78 s in 5 of 5 runs.
+## Product bugs found by these runs and fixed
+- c5362743f: after a wake the first preview renewals are refused 403 (host presence not yet online) or 412 (readiness moved the generation); the
+  renew loop took that for lease loss and stopped the preview (lost in 3 of 7 runs). Test TestRenewalSurvivesOwnerRefusalsUntilThePresenceReturns,
+  CI cli -race green. Plain previews (no --ttl) now serve again 8-78 s after thaw in 8 of 8 runs.
+- 6e1e23255: an in-flight `pb send` failed in 2 of 9 runs because the sender's daemon answers 499 canceled when its peer stream dies and the CLI
+  treated 499 as final; now retried. Test TestCanceledAnswerFromTheDaemonIsRetried (hermes: go test + vet ./internal/filetransfer green).
+  Afterwards 8 of 8 in-flight sends (both roles, three OSes) published.
 
-Open (not ticked): an in-flight `pb send` failed once when the Linux sender was the frozen side (file_transfer_unavailable)
-and once when the macOS receiver was frozen (HTTP 499 at +115 s); 7 other in-flight sends resumed and published. Windows
-reattach: Enter typed in the first 0.5 s after attach is dropped. Both in failures.md.
+## Not sleep bugs, logged (failures.md)
+- Windows target ignores an Enter typed in the first seconds after `pb connect --session` starts (tty still cooked turns CR into LF); reproduces with no sleep.
+- Prod 503 "temporarily unavailable" on preview create / terminal create / availability PUT (REL-F21-168 has the details); the driver retries
+  preview/tunnel/terminal creates up to 4 times with 15 s pauses: retry counts in the final passing L, W and M runs: 0 (earlier runs aborted on the first 503 and were rerun).
+- `pb exec` to a machine that just went offline returned its clear error within 18-60 s; in 5 of 16 runs it had not returned after 40 s (cut by the harness).
+- After `pb install` over a running Linux install the previous generation's session-owner systemd unit stayed active (seen with the watchdog drop-in restart; not investigated).
