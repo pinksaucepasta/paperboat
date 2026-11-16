@@ -44,15 +44,15 @@ func TestPostgresOfflineTerminalSessionIsAdoptedOnceTheMachineIsOnline(t *testin
 	}
 	// An account without terminal access to the machine, and a machine that is not the caller's, are refused without
 	// asking the host or leaving a row.
-	asked := host.askedCount(first)
+	askedBefore := host.askedCount(first)
 	if _, err := service.AdoptOfflineTerminalSession(ctx, "ti_stranger_"+first, machine, first); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("an account without access to the machine = %v, want ErrNotFound", err)
 	}
 	if _, err := service.AdoptOfflineTerminalSession(ctx, owner, "ti_machine_other_"+first, first); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("a machine that is not the caller's = %v, want ErrNotFound", err)
 	}
-	if host.askedCount(first) != asked || listed(first) {
-		t.Fatalf("refused calls asked the host (%d -> %d) or left the session listed=%v", asked, host.askedCount(first), listed(first))
+	if host.askedCount(first) != askedBefore || listed(first) {
+		t.Fatalf("refused calls asked the host (%d -> %d) or left the session listed=%v", askedBefore, host.askedCount(first), listed(first))
 	}
 	if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.user_machines SET online=false WHERE id=$1`, machine); err != nil {
 		t.Fatal(err)
