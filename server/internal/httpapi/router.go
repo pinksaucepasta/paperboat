@@ -524,6 +524,7 @@ func NewRouter(opts Options) http.Handler {
 				mux.Handle("DELETE /v1/config-repositories/{repository_id}", configAuth("machines:connect", requireCSRF(opts.Auth, configRepositoryDisconnect(opts.ConfigAssignments))))
 				mux.Handle("GET /v1/machines/{machine_id}/config-assignment", configAuth("machines:read", configAssignmentGet(opts.ConfigAssignments)))
 				mux.Handle("PUT /v1/machines/{machine_id}/config-assignment", configAuth("machines:connect", requireCSRF(opts.Auth, configAssignmentSet(opts.ConfigAssignments))))
+				mux.Handle("GET /v1/machines/{machine_id}/config-rule", configAuth("machines:read", configMachineRule(opts.ConfigAssignments)))
 				mux.Handle("GET /v1/machines/{machine_id}/config-assignment/warning", configAuth("machines:read", configWarning(opts.ConfigAssignments)))
 				mux.Handle("POST /v1/machines/{machine_id}/config-assignment/consent", configAuth("machines:connect", requireCSRF(opts.Auth, configConsent(opts.ConfigAssignments))))
 				mux.Handle("DELETE /v1/machines/{machine_id}/config-assignment/consent", configAuth("machines:connect", requireCSRF(opts.Auth, configConsentRemove(opts.ConfigAssignments))))

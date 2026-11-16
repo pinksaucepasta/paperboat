@@ -132,7 +132,7 @@ func TestNativeConfigCompareDescriptorAndMeterPostgres(t *testing.T) {
 	}
 	set := func(id string, revision string, expected int64) dbsqlc.ControlConfigAssignment {
 		t.Helper()
-		row, err := store.Queries().SetControlConfigAssignment(ctx, dbsqlc.SetControlConfigAssignmentParams{AssignmentID: id, EnvironmentID: environment, RepositoryID: sql.NullString{String: repository, Valid: true}, Mode: mode, ConsentState: "pending", WarningRevision: sql.NullString{String: "warning", Valid: true}, PathRules: rules, RepositoryBindings: bindings, ConfigurationRevision: revision, Now: time.Now(), ExpectedVersion: expected})
+		row, err := store.Queries().SetControlConfigAssignment(ctx, dbsqlc.SetControlConfigAssignmentParams{AssignmentID: id, EnvironmentID: environment, RepositoryID: sql.NullString{String: repository, Valid: true}, Mode: mode, ConsentState: "pending", WarningRevision: sql.NullString{String: "warning", Valid: true}, PathRules: rules, RepositoryBindings: bindings, ConfigurationRevision: revision, Source: "machine", Now: time.Now(), ExpectedVersion: expected})
 		if err != nil {
 			t.Fatalf("assigning config: %v", err)
 		}

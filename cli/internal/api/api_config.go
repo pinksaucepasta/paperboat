@@ -63,6 +63,19 @@ type ConfigAssignment struct {
 	Mode                  string                    `json:"mode"`
 	WarningRevision       *string                   `json:"warning_revision"`
 	Version               int64                     `json:"version"`
+	Source                string                    `json:"source"`
+}
+
+// ConfigMachineRule is the workspace policy config_sync rule that picks a machine's repository
+// when its owner made no explicit choice (GET /v1/machines/{id}/config-rule).
+type ConfigMachineRule struct {
+	Matched      bool   `json:"matched"`
+	TeamID       string `json:"team_id"`
+	Target       string `json:"target"`
+	Repository   string `json:"repository"`
+	Branch       string `json:"branch"`
+	RepositoryID string `json:"repository_id"`
+	State        string `json:"state"`
 }
 
 type ConfigWarningFacts struct {
@@ -143,7 +156,13 @@ func (c *Client) ConfigAssignment(ctx context.Context, machineID string) (Config
 	return out, err
 }
 
-func (c *Client) ConfigureConfigProjection(ctx context.Context, machineID, pullRepositoryID, pushRepositoryID, mode string, automaticUpdates bool, expectedVersion int64, rules []ConfigPathRule, bindings []ConfigRepositoryBinding, revision string) (ConfigAssignment, error) {
+func (c *Client) ConfigMachineRule(ctx context.Context, machineID string) (ConfigMachineRule, error) {
+	var out ConfigMachineRule
+	err := c.do(ctx, http.MethodGet, "/v1/machines/"+url.PathEscape(machineID)+"/config-rule", nil, &out)
+	return out, err
+}
+
+func (c *Client) ConfigureConfigProjection(ctx context.Context, machineID, pullRepositoryID, pushRepositoryID, mode string, automaticUpdates bool, expectedVersion int64, rules []ConfigPathRule, bindings []ConfigRepositoryBinding, revision, source string) (ConfigAssignment, error) {
 	if rules == nil {
 		rules = []ConfigPathRule{}
 	}
@@ -151,7 +170,7 @@ func (c *Client) ConfigureConfigProjection(ctx context.Context, machineID, pullR
 		bindings = []ConfigRepositoryBinding{}
 	}
 	var out ConfigAssignment
-	err := c.do(ctx, http.MethodPut, "/v1/machines/"+url.PathEscape(machineID)+"/config-assignment", map[string]any{"pull_repository_id": pullRepositoryID, "push_repository_id": pushRepositoryID, "mode": mode, "automatic_updates": automaticUpdates, "warning_revision": "", "expected_version": expectedVersion, "path_rules": rules, "repository_bindings": bindings, "configuration_revision": revision}, &out)
+	err := c.do(ctx, http.MethodPut, "/v1/machines/"+url.PathEscape(machineID)+"/config-assignment", map[string]any{"pull_repository_id": pullRepositoryID, "push_repository_id": pushRepositoryID, "mode": mode, "automatic_updates": automaticUpdates, "warning_revision": "", "expected_version": expectedVersion, "path_rules": rules, "repository_bindings": bindings, "configuration_revision": revision, "source": source}, &out)
 	return out, err
 }
 

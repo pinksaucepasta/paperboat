@@ -819,6 +819,7 @@ func TestOpenAPIDocumentCoversPublicAndFrozenTargetPaths(t *testing.T) {
 		"/v1/machines/{machine_id}/config-assignment":                        {"get", "put", "delete"},
 		"/v1/machines/{machine_id}/config-assignment/consent":                {"post", "delete"},
 		"/v1/machines/{machine_id}/config-assignment/warning":                {"get"},
+		"/v1/machines/{machine_id}/config-rule":                              {"get"},
 		"/v1/previews":                                                       {"get"},
 		"/v1/previews/{preview_id}":                                          {"delete"},
 		"/v1/environments/{environment_id}/routes":                           {"post"},

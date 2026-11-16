@@ -36,7 +36,7 @@ func TestSchemaMatchesTheParser(t *testing.T) {
 	if s.Additional == nil || *s.Additional {
 		t.Fatal("the top level must refuse unknown keys")
 	}
-	if got := keys(s.Properties); !reflect.DeepEqual(got, []string{"$schema", "allow_private_access", "groups", "rules", "tags", "tests"}) {
+	if got := keys(s.Properties); !reflect.DeepEqual(got, []string{"$schema", "allow_private_access", "config_sync", "groups", "rules", "tags", "tests"}) {
 		t.Fatalf("top-level keys %q", got)
 	}
 	if got := keys(s.Defs["rule"].Properties); !reflect.DeepEqual(got, []string{"allow", "deny", "dst", "note", "ports", "src"}) {

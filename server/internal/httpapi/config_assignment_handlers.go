@@ -32,6 +32,7 @@ type configAssignmentResponse struct {
 	Version               int64                                  `json:"version"`
 	PathRules             []controlplane.ConfigPathRule          `json:"path_rules"`
 	RepositoryBindings    []controlplane.ConfigRepositoryBinding `json:"repository_bindings"`
+	Source                string                                 `json:"source"`
 }
 
 func repositoryResponse(item dbsqlc.ControlConfigRepository) configRepositoryResponse {
@@ -56,7 +57,7 @@ func assignmentResponse(item dbsqlc.ControlConfigAssignment) configAssignmentRes
 		value := item.PushRepositoryID.String
 		push = &value
 	}
-	return configAssignmentResponse{ID: item.ID, MachineID: item.MachineID, EnvironmentID: item.EnvironmentID, PullRepositoryID: pull, PushRepositoryID: push, AutomaticUpdates: item.AutomaticUpdates, Mode: item.Mode, ConsentState: item.ConsentState, WarningRevision: warning, Version: item.Version, ConfigurationRevision: item.ConfigurationRevision, PathRules: controlplane.ConfigAssignmentRules(item.PathRules), RepositoryBindings: controlplane.ConfigAssignmentBindings(item.RepositoryBindings)}
+	return configAssignmentResponse{ID: item.ID, MachineID: item.MachineID, EnvironmentID: item.EnvironmentID, PullRepositoryID: pull, PushRepositoryID: push, AutomaticUpdates: item.AutomaticUpdates, Mode: item.Mode, ConsentState: item.ConsentState, WarningRevision: warning, Version: item.Version, ConfigurationRevision: item.ConfigurationRevision, PathRules: controlplane.ConfigAssignmentRules(item.PathRules), RepositoryBindings: controlplane.ConfigAssignmentBindings(item.RepositoryBindings), Source: item.Source}
 }
 
 func writeConfigAssignmentFailure(w http.ResponseWriter, r *http.Request, err error, message string) bool {
@@ -193,6 +194,28 @@ func configAssignmentGet(service *controlplane.ConfigAssignmentService) http.Han
 	}
 }
 
+// configMachineRule answers which workspace policy config_sync rule picks the machine's
+// repository (GET /v1/machines/{machine_id}/config-rule).
+func configMachineRule(service *controlplane.ConfigAssignmentService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		p, ok := principalFromContext(r.Context())
+		if !ok {
+			writeError(w, r, 401, "unauthenticated", "Authentication is required.")
+			return
+		}
+		view, err := service.MachineRule(r.Context(), p.User.ID, r.PathValue("machine_id"))
+		if errors.Is(err, controlplane.ErrAssignmentForbidden) {
+			writeError(w, r, 404, "not_found_or_forbidden", "Machine was not found or is unavailable.")
+			return
+		}
+		if err != nil {
+			writeError(w, r, 503, "configuration_unavailable", "Config sync rules could not be checked. Retry when the control plane is available.", err)
+			return
+		}
+		writeJSON(w, 200, SuccessResponse{Data: view})
+	}
+}
+
 func configAssignmentSet(service *controlplane.ConfigAssignmentService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		p, ok := principalFromContext(r.Context())
@@ -210,11 +233,15 @@ func configAssignmentSet(service *controlplane.ConfigAssignmentService) http.Han
 			ExpectedVersion       int64                                  `json:"expected_version"`
 			PathRules             []controlplane.ConfigPathRule          `json:"path_rules"`
 			RepositoryBindings    []controlplane.ConfigRepositoryBinding `json:"repository_bindings"`
+			Source                string                                 `json:"source"`
 		}
 		if !decodeStrictJSON(w, r, &in) {
 			return
 		}
-		item, err := service.ConfigureProjection(r.Context(), p.User.ID, r.PathValue("machine_id"), in.PullRepositoryID, in.PushRepositoryID, in.Mode, in.AutomaticUpdates, in.WarningRevision, in.ExpectedVersion, in.PathRules, in.RepositoryBindings, in.ConfigurationRevision)
+		if in.Source == "" {
+			in.Source = controlplane.ConfigSourceMachine
+		}
+		item, err := service.ConfigureProjection(r.Context(), p.User.ID, r.PathValue("machine_id"), in.PullRepositoryID, in.PushRepositoryID, in.Mode, in.AutomaticUpdates, in.WarningRevision, in.ExpectedVersion, in.PathRules, in.RepositoryBindings, in.ConfigurationRevision, in.Source)
 		if err != nil {
 			if writeConfigAssignmentFailure(w, r, err, "Config assignment could not be changed.") {
 				return

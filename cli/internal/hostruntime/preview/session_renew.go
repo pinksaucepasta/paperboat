@@ -10,14 +10,17 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/api"
 )
 
-// ownerRefusalWindow is how long renewals that the server refuses with 403 or 412 are retried. A host just back
-// from sleep is refused (403: its presence is not yet re-established; 412: a readiness step moved the generation)
-// until it is online again, a few seconds later (X-26). shortcut: fixed 2 min, a revoked machine retries that long.
+// ownerRefusalWindow is how long renewals that the server refuses with 401, 403 or 412 are retried. A host just back
+// from sleep is refused (401: its short-lived machine credential expired during the sleep and is not renewed yet;
+// 403: its presence is not yet re-established; 412: a readiness step moved the generation) until it is online again,
+// a few seconds later (X-26; the 401 ended a background preview at once on 2026-11-16).
+// shortcut: fixed 2 min, a revoked machine retries that long.
 var ownerRefusalWindow = 2 * time.Minute
 
 func ownerRefusal(err error) bool {
 	var refusal *api.APIError
-	return errors.As(err, &refusal) && (refusal.Status == http.StatusForbidden || refusal.Status == http.StatusPreconditionFailed)
+	return errors.As(err, &refusal) && (refusal.Status == http.StatusUnauthorized ||
+		refusal.Status == http.StatusForbidden || refusal.Status == http.StatusPreconditionFailed)
 }
 
 // LeaseMutation applies an authenticated projection through the session owner.

@@ -5,7 +5,10 @@ import (
 	"crypto/ed25519"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"golang.org/x/crypto/ssh"
+	"net/netip"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -41,5 +44,27 @@ func TestHostKeyInventoryCanonicalWireFingerprint(t *testing.T) {
 				t.Fatalf("invalid inventory accepted: %v", err)
 			}
 		})
+	}
+}
+
+// Each user's loopback source is stable, inside the range the certificates and CA lines allow, one of the addresses
+// the macOS guard aliases, and different users are spread over the pool.
+func TestLoopbackSourceIsStablePerUserAndInsideTheTrustedRange(t *testing.T) {
+	trusted := netip.MustParsePrefix("127.0.0.0/8")
+	pool := LoopbackSources()
+	seen := map[netip.Addr]bool{}
+	for index := range 200 {
+		user := fmt.Sprintf("user_%d", index)
+		source := LoopbackSource(user)
+		if source != LoopbackSource(user) || !trusted.Contains(source) || !slices.Contains(pool, source) || source == netip.MustParseAddr("127.0.0.1") {
+			t.Fatalf("%s source %s", user, source)
+		}
+		seen[source] = true
+	}
+	if len(seen) < 40 {
+		t.Fatalf("200 users use only %d of %d sources", len(seen), len(pool))
+	}
+	if !strings.Contains(CATrustFrom, "127.0.0.0/8") || !strings.HasPrefix(CertificateSourceAddress, "127.0.0.0/8,") {
+		t.Fatalf("trusted ranges %s %s", CATrustFrom, CertificateSourceAddress)
 	}
 }

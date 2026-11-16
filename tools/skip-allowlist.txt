@@ -9,3 +9,4 @@ TestBrowserTerminalDrainMachine: .*run by edge/internal/runtime	lane-test.yml go
 TestActivationHelperTailChild: .*helper process only	lane-test.yml go cli root step (re-exec child of TestActivationHelperHoldsTheLockThroughTheActivationTail)
 TestEdgeHandoverHelperProcess: .*helper process for	lane-test.yml go edge (re-exec child of TestEdgeHandoverKeepsThePreviewAndTheHostCarrierUp)
 TestOriginProxyMatrix: .*origin_proxy_matrix\.sh	tools/device-smoke/origin_proxy_matrix.sh on a Docker host (Caddy/Traefik/nginx/Apache in containers; needs Docker, not available in lane-test steps)
+TestQUICCarrierStreamHoldsTheBudgetAtRealRTT: .*race instrumentation	cross-platform.yml Windows job (no race detector) on every push to main, and by hand without -race on macOS, Windows and Linux (PR-06)
