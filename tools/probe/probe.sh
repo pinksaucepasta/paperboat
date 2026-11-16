@@ -11,7 +11,7 @@
 #   PROBE_STEPS          only these steps, space separated (default: all); staging has no edge, so it runs
 #                        exec_a_to_b exec_b_to_a ssh_a_to_b (deploy/staging-canary.sh)
 #   CANARY_ENV_NAME/_VALUE  one managed ENV value set once for the pair's workspace (fixture); the env_exec step needs both
-#   CANARY_TEAM / CANARY_TEAM_MACHINE  a team the canary account owns and a machine shared into it with an exact exec
+#   CANARY_TEAM / CANARY_TEAM_MACHINE  a team the canary account owns and a machine the team owns with an exact exec
 #                        grant to that account (fixture); when set, team_exec runs A -> that machine in the team workspace
 #   CANARY_EDGES         every managed edge address (space separated); each must serve the canary tunnel
 #                        directly, so an edge that dropped out of DNS or was null-routed still fails a step
