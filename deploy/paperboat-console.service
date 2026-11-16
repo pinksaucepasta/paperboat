@@ -1,0 +1,18 @@
+[Unit]
+Description=Paperboat console (next start behind the proxy; deployed by tools/console-prod.sh)
+After=network-online.target docker.service
+
+[Service]
+User=pbconsole
+WorkingDirectory=/opt/paperboat-console
+# console.env: PAPERBOAT_SERVER_URL, WORKOS_CLIENT_ID, WORKOS_REDIRECT_URI, NEXT_PUBLIC_POSTHOG_*. slot.env: NEXT_DIST_DIR.
+EnvironmentFile=/etc/paperboat-console/console.env
+EnvironmentFile=/opt/paperboat-console/slot.env
+Environment=NODE_ENV=production
+# The proxy container reaches the host through the compose network's gateway; nothing listens publicly.
+ExecStart=/usr/local/bin/bun run start -p 3100 -H 172.18.0.1
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
