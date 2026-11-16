@@ -1306,16 +1306,7 @@ func (s *Store) decoratePreviewEndpoints(ctx context.Context, records []PreviewL
 		indices[record.ID] = i
 	}
 	rows, err := s.db.Pool().Query(ctx, `SELECT p.id,paperboat.workspace_edge_mode(p.account_id,p.owner_team_id),CASE WHEN paperboat.workspace_edge_mode(p.account_id,p.owner_team_id)='self-hosted-only' THEN coalesce((SELECT 'https://'||d.hostname FROM paperboat.preview_domains d WHERE d.preview_id=p.id AND d.account_id=p.account_id AND d.deleted_at IS NULL AND d.match_type='exact' AND d.ownership_state='verified' AND d.conflict_state='clear' AND d.certificate_state='ready' AND d.certificate_reference IS NOT NULL AND d.preview_generation=p.generation ORDER BY d.hostname LIMIT 1),'') ELSE NULL END,
- paperboat.workspace_edge_mode(p.account_id,p.owner_team_id)='managed-only' AND (
- NOT EXISTS (SELECT 1 FROM paperboat.preview_routes a WHERE a.preview_id=p.id AND a.account_id=p.account_id
-  AND a.state='ready' AND a.edge_ready AND a.origin_ready AND a.expires_at>now())
- OR EXISTS (SELECT 1 FROM paperboat.control_tunnel_nodes n
-  WHERE n.state='ready' AND n.ready AND n.drain_deadline IS NULL AND n.roles @> ARRAY['edge']::text[]
-  AND n.last_heartbeat_at>now()-interval '15 seconds' AND n.registry_expires_at>now() AND n.public_ingress_verified_at IS NOT NULL
-  AND paperboat.node_workspace_edge_eligible(n.id,p.account_id,p.owner_team_id)
-  AND NOT EXISTS (SELECT 1 FROM paperboat.preview_routes a WHERE a.preview_id=p.id AND a.account_id=p.account_id
-   AND a.edge_node_id=n.id AND a.edge_process_epoch=n.process_epoch
-   AND a.state='ready' AND a.edge_ready AND a.origin_ready AND a.expires_at>now())))
+ paperboat.preview_managed_route_pending(p.id)
  FROM paperboat.preview_leases p WHERE p.id=ANY($1::text[])`, ids)
 	if err != nil {
 		return err
