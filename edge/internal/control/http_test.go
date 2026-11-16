@@ -589,3 +589,33 @@ func TestHTTPClientReportsRouteObservationsInBatches(t *testing.T) {
 		t.Fatalf("more routes than a node holds = %v", err)
 	}
 }
+
+// A refused control request names who answered and what it said: the prod edge logged usage 400s the server's log
+// never showed, and the failure carried only the status (FIX-EDGE-USAGE).
+func TestRefusedControlRequestKeepsResponderAndBodyExcerpt(t *testing.T) {
+	answer := func(header, value, body string) *HTTPClient {
+		return controlClient(t, func(*http.Request) (*http.Response, error) {
+			r := response(http.StatusBadRequest, body)
+			r.Header.Set(header, value)
+			return r, nil
+		})
+	}
+	report := UsageReport{OperationID: "op", Interval: [2]time.Time{time.Unix(1, 0), time.Unix(2, 0)}}
+	for _, tc := range []struct {
+		client          *HTTPClient
+		responder, body string
+	}{
+		{answer("Request-Id", "req_abc", `{"code":"invalid_request"}`+"\n\x1b[31m"+strings.Repeat("y", 400)), "server request req_abc", `{"code":"invalid_request"}`},
+		{answer("Via", "1.1 proxy", "<html>Bad Request</html>"), "via 1.1 proxy", "<html>Bad Request</html>"},
+	} {
+		_, err := tc.client.ReportUsage(context.Background(), report)
+		var failure *RequestFailure
+		if !errors.As(err, &failure) || failure.Status != http.StatusBadRequest {
+			t.Fatalf("err = %v", err)
+		}
+		responder, body := failure.DiagnosticResponse()
+		if responder != tc.responder || !strings.HasPrefix(body, tc.body) || len(body) > responseExcerptBytes || strings.ContainsAny(body, "\n\x1b") {
+			t.Fatalf("responder %q body %q", responder, body)
+		}
+	}
+}

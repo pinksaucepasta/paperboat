@@ -36,7 +36,10 @@ type Fault struct {
 	Errno            int       `json:"errno,omitempty"`
 	HTTPStatus       int       `json:"http_status,omitempty"`
 	// Path is the control API path a failed request used (a fixed route, never an id or query).
-	Path           string `json:"path,omitempty"`
+	Path string `json:"path,omitempty"`
+	// Responder and ResponseBody say who answered a refused control request and a short filtered excerpt of it.
+	Responder      string `json:"responder,omitempty"`
+	ResponseBody   string `json:"response_body,omitempty"`
 	SourceFile     string `json:"source_file,omitempty"`
 	SourceFunction string `json:"source_function,omitempty"`
 	SourceLine     int    `json:"source_line,omitempty"`
@@ -209,6 +212,9 @@ func (r *Reporter) captureFaultLog(ctx context.Context, fault Fault) {
 	if fault.Path != "" {
 		attrs = append(attrs, attribute.String("path", fault.Path))
 	}
+	if fault.Responder != "" || fault.ResponseBody != "" {
+		attrs = append(attrs, attribute.String("responder", fault.Responder), attribute.String("response_body", fault.ResponseBody))
+	}
 	logger.SetAttributes(attrs...)
 	if fault.Severity == "warning" {
 		entry = logger.Warn()
@@ -225,11 +231,18 @@ func projectFault(component string, definition Definition, reference string, err
 	}
 	// Project's walk is bounded (an error chain may cycle); it also finds the request path.
 	var located interface{ DiagnosticPath() string }
+	var answered interface{ DiagnosticResponse() (string, string) }
 	p := Project(err, Options{Visit: func(node error) {
 		if located == nil {
 			located, _ = node.(interface{ DiagnosticPath() string })
 		}
+		if answered == nil {
+			answered, _ = node.(interface{ DiagnosticResponse() (string, string) })
+		}
 	}})
+	if answered != nil {
+		fault.Responder, fault.ResponseBody = answered.DiagnosticResponse()
+	}
 	fault.Cause, fault.ErrorType, fault.ErrorChain, fault.Errno, fault.HTTPStatus = p.Cause, p.ErrorType, p.ErrorChain, p.Errno, p.HTTPStatus
 	if located != nil && safeRoutePath(located.DiagnosticPath()) {
 		fault.Path = located.DiagnosticPath()
@@ -452,6 +465,9 @@ func writeLocalFault(fault Fault) {
 	}
 	if fault.Path != "" {
 		attrs = append(attrs, slog.String("path", fault.Path))
+	}
+	if fault.Responder != "" || fault.ResponseBody != "" {
+		attrs = append(attrs, slog.String("responder", fault.Responder), slog.String("response_body", fault.ResponseBody))
 	}
 	localLogger.LogAttrs(context.Background(), level, fault.Name, attrs...)
 }

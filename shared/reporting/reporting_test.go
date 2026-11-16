@@ -749,3 +749,19 @@ func TestObserveFailureNamesTheControlPath(t *testing.T) {
 		t.Fatalf("local faults %d", len(local))
 	}
 }
+
+type answeredFailure struct{ pathedFailure }
+
+func (answeredFailure) DiagnosticResponse() (string, string) {
+	return "server request req_1", `{"code":"x"}`
+}
+
+// A refused control request's fault carries who answered and the body excerpt (FIX-EDGE-USAGE).
+func TestObserveFailureKeepsTheResponder(t *testing.T) {
+	reporter := &Reporter{localFault: func(Fault) {}}
+	ctx := WithSupportReference(context.Background(), "support_01234567-89ab-4def-8123-456789abcdef")
+	fault := reporter.ObserveFailure(ctx, "control_request", fmt.Errorf("attempt: %w", answeredFailure{pathedFailure{"/v1/edge/usage-reports"}}))
+	if fault.Responder != "server request req_1" || fault.ResponseBody != `{"code":"x"}` || fault.Path != "/v1/edge/usage-reports" {
+		t.Fatalf("fault = %+v", fault)
+	}
+}

@@ -505,8 +505,7 @@ func (c *HTTPClient) trustDocument(ctx context.Context, path string) (data []byt
 	}
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, maxControlDocument))
-		return nil, &RequestFailure{Path: path, Status: response.StatusCode, Category: "http_status", SupportReference: controlReference(ctx), Err: ErrControlUnavailable}
+		return nil, responseFailure(ctx, path, response, maxControlDocument)
 	}
 	data, err = io.ReadAll(io.LimitReader(response.Body, maxControlDocument+1))
 	if err != nil {
@@ -603,20 +602,18 @@ func (c *HTTPClient) postNodeWithMaximumAndIdentity(ctx context.Context, path, n
 	}
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, int64(maximum)))
-		if path == "/v1/nodes/heartbeat" && response.StatusCode == http.StatusConflict {
-			return &RequestFailure{Path: path, Status: response.StatusCode, Category: "http_status", SupportReference: controlReference(ctx), Err: ErrNodeObservationStale}
+		failure := responseFailure(ctx, path, response, int64(maximum))
+		switch {
+		case path == "/v1/nodes/heartbeat" && response.StatusCode == http.StatusConflict:
+			failure.Err = ErrNodeObservationStale
+		case path == runtimewire.EdgeObservePath && response.StatusCode == http.StatusConflict:
+			failure.Err = ErrRuntimeCarrierStale
+		case path == CertificateDistributionRequestPath && response.StatusCode == http.StatusConflict:
+			failure.Err = ErrCertificateNotIssuedYet
+		case path == InspectorAccessPath && response.StatusCode == http.StatusForbidden:
+			failure.Err = ErrInspectorAccessDenied
 		}
-		if path == runtimewire.EdgeObservePath && response.StatusCode == http.StatusConflict {
-			return &RequestFailure{Path: path, Status: response.StatusCode, Category: "http_status", SupportReference: controlReference(ctx), Err: ErrRuntimeCarrierStale}
-		}
-		if path == CertificateDistributionRequestPath && response.StatusCode == http.StatusConflict {
-			return &RequestFailure{Path: path, Status: response.StatusCode, Category: "http_status", SupportReference: controlReference(ctx), Err: ErrCertificateNotIssuedYet}
-		}
-		if path == InspectorAccessPath && response.StatusCode == http.StatusForbidden {
-			return &RequestFailure{Path: path, Status: response.StatusCode, Category: "http_status", SupportReference: controlReference(ctx), Err: ErrInspectorAccessDenied}
-		}
-		return &RequestFailure{Path: path, Status: response.StatusCode, Category: "http_status", SupportReference: controlReference(ctx), Err: ErrControlUnavailable}
+		return failure
 	}
 	if output == nil || response.StatusCode == http.StatusNoContent {
 		_, err = io.Copy(io.Discard, io.LimitReader(response.Body, int64(maximum)+1))
