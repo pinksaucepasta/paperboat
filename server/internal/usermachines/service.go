@@ -479,7 +479,7 @@ func (s *Service) ConfigureAuthenticatedHelperEnrollment(
 
 func New(store *db.DB, auditWriter *audit.Writer, policy Policy, seats SeatAuthorizer) *Service {
 	if policy.OfflineAfter <= 0 {
-		policy.OfflineAfter = 2 * time.Minute
+		policy.OfflineAfter = 90 * time.Second
 	}
 	return &Service{db: store, audit: auditWriter, policy: policy, seats: seats, now: time.Now}
 }

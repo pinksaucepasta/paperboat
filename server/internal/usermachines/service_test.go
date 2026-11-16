@@ -176,7 +176,7 @@ func TestEntitlementActiveRejectsExpiredPeriod(t *testing.T) {
 
 func TestNewDefaultsUserMachineOfflineTimeout(t *testing.T) {
 	service := New(nil, nil, Policy{}, nil)
-	if service.policy.OfflineAfter != 2*time.Minute {
+	if service.policy.OfflineAfter != 90*time.Second {
 		t.Fatalf("offline timeout = %s", service.policy.OfflineAfter)
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"mime"
 	"net/http"
 	"strings"
@@ -61,6 +62,12 @@ type machineEventWaiter interface {
 	Wait(ctx context.Context, machineID string, known map[string]int64, maxWait time.Duration) (map[string]int64, error)
 }
 
+// machinePresenceToucher records that a machine's held wait is alive: the wait is its presence signal (Tailscale's
+// map long-poll, headscale hscontrol/poll.go), so an idle machine does not need to post observations to stay online.
+type machinePresenceToucher interface {
+	TouchMachinePresence(ctx context.Context, machineID string) error
+}
+
 type machineEventsRequest struct {
 	Topics map[string]int64 `json:"topics"`
 }
@@ -73,7 +80,7 @@ type machineEventsResponse struct {
 // generation it last saw per topic; the answer is 200 with the topics that moved past it as soon as
 // there are any, or 204 after 30 seconds without a change. It carries no data, only generations.
 // Authentication is the renewable machine identity and a detached proof, as for other host calls.
-func machineEventsWait(waiter machineEventWaiter, identities machineRequestVerifier, signing MachineEventSigning) http.HandlerFunc {
+func machineEventsWait(waiter machineEventWaiter, identities machineRequestVerifier, signing MachineEventSigning, presence machinePresenceToucher) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		request, body, ok := readMachineEventsRequest(w, r)
 		if !ok {
@@ -100,6 +107,12 @@ func machineEventsWait(waiter machineEventWaiter, identities machineRequestVerif
 			logHTTPRejection(r, http.StatusForbidden, "machine_events_forbidden", nil)
 			writePreviewTunnelError(w, r, http.StatusForbidden, "machine_events_forbidden", "This machine cannot wait for events.", "unchanged", false, "use_authorized_host")
 			return
+		}
+		if presence != nil {
+			// A failed touch must not fail the wait: the observation heartbeat still refreshes presence.
+			if err := presence.TouchMachinePresence(r.Context(), claims.MachineID); err != nil && r.Context().Err() == nil {
+				slog.WarnContext(r.Context(), "machine events wait could not record presence", "machine_id", claims.MachineID, "error", err)
+			}
 		}
 		answerMachineEvents(w, r, waiter, signing, claims.MachineID, body, request)
 	}
@@ -198,9 +211,9 @@ func isMachineEventsWait(path string) bool {
 }
 
 // NewMachineEventsHandler mounts the host's event wait on the machine identity verifier.
-func NewMachineEventsHandler(waiter machineEventWaiter, identities machineRequestVerifier, signing MachineEventSigning) (http.Handler, error) {
-	if waiter == nil || identities == nil || signing.signer == nil {
+func NewMachineEventsHandler(waiter machineEventWaiter, identities machineRequestVerifier, signing MachineEventSigning, presence machinePresenceToucher) (http.Handler, error) {
+	if waiter == nil || identities == nil || signing.signer == nil || presence == nil {
 		return nil, errors.New("machine events dependencies are required")
 	}
-	return machineEventsWait(waiter, identities, signing), nil
+	return machineEventsWait(waiter, identities, signing, presence), nil
 }

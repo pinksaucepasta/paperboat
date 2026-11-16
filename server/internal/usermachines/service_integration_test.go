@@ -1144,6 +1144,53 @@ func TestWorkerMarksStaleMachineOfflineAndHeartbeatRestoresIt(t *testing.T) {
 	}
 }
 
+// A machine whose only traffic is its held machine-events wait (a touch each wait start) stays online past the offline
+// cutoff, and goes offline once the waits stop: presence is the long-poll, not the observation posts.
+func TestMachineKeptOnlineByWaitTouchesGoesOfflineWhenTheyStop(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	userID, machineID, environmentID := "usr_um_wait_"+suffix, "um_wait_"+suffix, "env_wait_"+suffix
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.users (id,workos_subject,primary_email,status) VALUES ($1,$2,$3,'active')`, userID, "workos_"+suffix, "wait_"+suffix+"@example.test"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state,online,last_seen_at) VALUES ($1,$2,$3,'linux','amd64','/home/test','online','occupied',true,now())`, machineID, userID, environmentID); err != nil {
+		t.Fatal(err)
+	}
+	const offlineAfter = 600 * time.Millisecond
+	service := New(store, audit.NewWriter(store), Policy{OfflineAfter: offlineAfter}, nil)
+	workerCtx, cancel := context.WithCancel(ctx)
+	done := make(chan error, 1)
+	go func() { done <- service.Worker(5 * time.Millisecond)(workerCtx) }()
+	t.Cleanup(func() {
+		cancel()
+		<-done
+	})
+	state := func() string {
+		var state string
+		if err := store.SQL().QueryRowContext(ctx, `SELECT state FROM paperboat.user_machines WHERE id=$1`, machineID).Scan(&state); err != nil {
+			t.Fatal(err)
+		}
+		return state
+	}
+	// Touch every 100 ms (a wait start, gate 0.05 s) for twice the cutoff: never offline.
+	for end := time.Now().Add(2 * offlineAfter); time.Now().Before(end); time.Sleep(100 * time.Millisecond) {
+		if _, err := store.Queries().TouchUserMachinePresence(ctx, dbsqlc.TouchUserMachinePresenceParams{ID: machineID, GateSeconds: 0.05}); err != nil {
+			t.Fatal(err)
+		}
+		if got := state(); got != "online" {
+			t.Fatalf("a machine whose waits keep arriving went %s", got)
+		}
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for state() != "offline" {
+		if time.Now().After(deadline) {
+			t.Fatal("a machine whose waits stopped never went offline")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
 func TestCreateTerminalSessionMapsDuplicateNameToConflict(t *testing.T) {
 	store := testStore(t)
 	ctx := context.Background()

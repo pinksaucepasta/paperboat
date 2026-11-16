@@ -545,7 +545,7 @@ func Default() Config {
 		WorkspacePolicy:   defaultWorkspacePolicy(),
 		RuntimeBaseDomain: "localhost",
 		ManagedSSH:        ManagedSSH{CertificateValidity: 12 * time.Hour},
-		UserMachines:      UserMachines{PairingLifetime: 10 * time.Minute, OfflineAfter: 2 * time.Minute, ExpiredAccessSessionRetention: 7 * 24 * time.Hour, AllowedPlatforms: []string{"darwin", "linux", "windows"}, RuntimeListenPort: 38080},
+		UserMachines:      UserMachines{PairingLifetime: 10 * time.Minute, OfflineAfter: 90 * time.Second, ExpiredAccessSessionRetention: 7 * 24 * time.Hour, AllowedPlatforms: []string{"darwin", "linux", "windows"}, RuntimeListenPort: 38080},
 		TerminalSessions:  TerminalSessions{OperationTimeout: 15 * time.Second, RetryBackoff: time.Second, WorkerInterval: time.Second, MaxAttemptsBeforeAlert: 10, OperationMaxAge: 30 * 24 * time.Hour},
 		Preview:           Preview{BaseDomain: "preview.localhost", SharedFileMaxBytes: 2 << 30},
 		Tunnel:            Tunnel{BaseDomain: "tunnels.localhost"},

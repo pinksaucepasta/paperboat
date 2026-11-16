@@ -29,6 +29,17 @@ func NewRuntimeRepository(store *db.DB, presenceRefresh time.Duration, identityC
 	return &RuntimeRepository{db: store, presenceRefresh: presenceRefresh, identityConflictWindow: window}
 }
 
+// machineWaitPresenceGate is how old last_seen_at may get before a held machine-events wait refreshes it. A wait is
+// held up to 55 s, so a healthy machine's row is never older than that plus its reconnect gap, well inside the
+// offline cutoff (90 s).
+const machineWaitPresenceGate = 30 * time.Second
+
+// TouchMachinePresence records that machineID's machine-events wait is alive (see TouchUserMachinePresence).
+func (r *RuntimeRepository) TouchMachinePresence(ctx context.Context, machineID string) error {
+	_, err := r.db.Queries().TouchUserMachinePresence(ctx, dbsqlc.TouchUserMachinePresenceParams{ID: machineID, GateSeconds: machineWaitPresenceGate.Seconds()})
+	return err
+}
+
 type RuntimeObservation struct {
 	EnvironmentID         string
 	MachineID             string

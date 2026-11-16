@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -103,7 +104,7 @@ func TestMachineEventsWaitAuthenticatesAndAnswersChangesOrNothing(t *testing.T) 
 	claims := controlplane.MachineRequestClaims{MachineID: "machine_01", UserID: "account_01", OperationID: "events_01", InstallationGeneration: 1}
 	signing, provider := testMachineEventSigning(t)
 	send := func(waiter *machineEventWaiterFake, verifier bootstrapVerifier, body string, mutate func(*http.Request)) *httptest.ResponseRecorder {
-		handler := machineEventsWait(waiter, verifier, signing)
+		handler := machineEventsWait(waiter, verifier, signing, nil)
 		request := httptest.NewRequest(http.MethodPost, MachineEventsPath, strings.NewReader(body))
 		request.Header.Set("Content-Type", "application/json")
 		request.Header.Set("X-Paperboat-Machine-Identity", strings.Repeat("m", 48))
@@ -201,7 +202,7 @@ func TestMachineEventsWaitForUserIsLimitedToTheUsersOwnMachine(t *testing.T) {
 // An answer that cannot be signed is not sent unsigned: the wait fails closed with a retryable error.
 func TestMachineEventsFailClosedWithoutSigning(t *testing.T) {
 	claims := controlplane.MachineRequestClaims{MachineID: "machine_01", UserID: "account_01", OperationID: "events_01", InstallationGeneration: 1}
-	handler := machineEventsWait(&machineEventWaiterFake{changed: map[string]int64{"previews": 5}}, bootstrapVerifier{claims: claims}, MachineEventSigning{})
+	handler := machineEventsWait(&machineEventWaiterFake{changed: map[string]int64{"previews": 5}}, bootstrapVerifier{claims: claims}, MachineEventSigning{}, nil)
 	request := httptest.NewRequest(http.MethodPost, MachineEventsPath, strings.NewReader(`{"topics":{"previews":4}}`))
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("X-Paperboat-Machine-Identity", strings.Repeat("m", 48))
@@ -220,4 +221,38 @@ type bootstrapVerifier struct {
 
 func (v bootstrapVerifier) VerifyMachineRequest(context.Context, string, []byte, string, string, []byte) (controlplane.MachineRequestClaims, error) {
 	return v.claims, nil
+}
+
+type presenceFake struct {
+	machines []string
+	err      error
+}
+
+func (f *presenceFake) TouchMachinePresence(_ context.Context, machineID string) error {
+	f.machines = append(f.machines, machineID)
+	return f.err
+}
+
+// The held wait is the machine's presence signal: each wait of a verified machine identity records it, and a failing
+// record does not fail the wait.
+func TestMachineEventsWaitRecordsPresenceAndSurvivesAFailingRecord(t *testing.T) {
+	claims := controlplane.MachineRequestClaims{MachineID: "machine_01", UserID: "account_01", OperationID: "events_01", InstallationGeneration: 1}
+	signing, _ := testMachineEventSigning(t)
+	for _, failing := range []bool{false, true} {
+		presence := &presenceFake{}
+		if failing {
+			presence.err = errors.New("database unavailable")
+		}
+		handler := machineEventsWait(&machineEventWaiterFake{changed: map[string]int64{"previews": 5}}, bootstrapVerifier{claims: claims}, signing, presence)
+		request := httptest.NewRequest(http.MethodPost, MachineEventsPath, strings.NewReader(`{"topics":{"previews":4}}`))
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("X-Paperboat-Machine-Identity", strings.Repeat("m", 48))
+		request.Header.Set("X-Paperboat-Machine-Proof", base64.RawURLEncoding.EncodeToString([]byte("proof")))
+		request.Header.Set("Idempotency-Key", "events_01")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusOK || len(presence.machines) != 1 || presence.machines[0] != "machine_01" {
+			t.Fatalf("failing=%v: status=%d recorded=%v", failing, response.Code, presence.machines)
+		}
+	}
 }

@@ -640,6 +640,14 @@ WITH present AS (
 )
 SELECT EXISTS(SELECT 1 FROM present)::boolean AS eligible;
 
+-- name: TouchUserMachinePresence :execrows
+-- The held machine-events wait is an idle machine's presence signal: it refreshes last_seen_at of a machine that is
+-- already online once the row is older than gate_seconds, and writes nothing else (no version, no capabilities). It
+-- never brings an offline machine online: that takes an observation, which also restores its capabilities.
+UPDATE user_machines SET last_seen_at = now()
+WHERE id = sqlc.arg(id) AND state = 'online' AND online AND deleted_at IS NULL
+  AND (last_seen_at IS NULL OR last_seen_at < now() - make_interval(secs => sqlc.arg(gate_seconds)::float8));
+
 -- name: GetUserMachineRuntimeInstanceForUpdate :one
 SELECT online, last_seen_at, os_boot_id, worker_generation
 FROM user_machines

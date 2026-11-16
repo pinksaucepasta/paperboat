@@ -325,7 +325,8 @@ func New(opts Options) (*App, error) {
 		_ = store.Close()
 		return nil, fmt.Errorf("configure machine event signing: %w", err)
 	}
-	machineEventsHandler, err := httpapi.NewMachineEventsHandler(machineEventHub, enrollmentService, machineEventSigning)
+	runtimeRepository := metering.NewRuntimeRepository(store, opts.Config.UserMachines.OfflineAfter/2, opts.Config.ConfigSync.StaleHeartbeatAfter)
+	machineEventsHandler, err := httpapi.NewMachineEventsHandler(machineEventHub, enrollmentService, machineEventSigning, runtimeRepository)
 	if err != nil {
 		_ = store.Close()
 		return nil, fmt.Errorf("configure machine events: %w", err)
@@ -762,7 +763,7 @@ func New(opts Options) (*App, error) {
 		Teams:                    teamService,
 		Policy:                   teamService,
 		TeamInbox:                teamInboxService,
-		MeteringRepo:             metering.NewRuntimeRepository(store, opts.Config.UserMachines.OfflineAfter/2, opts.Config.ConfigSync.StaleHeartbeatAfter),
+		MeteringRepo:             runtimeRepository,
 		RuntimeIdentity:          enrollmentService,
 		Machines:                 userMachineService,
 		Inbox:                    inboxDispatcher,
