@@ -17,3 +17,18 @@ cache_builds in the 120 s idle+terminal window (documents rebuilt):
   before-1 145, before-2 112      after-1 0, after-2 0
 (idle phase: 0 builds on both sides.) Latency in this profile is dominated by the per-request path outside the cached
 document at 200 peers per account (p50 tens of seconds on the loaded host on both sides); that is the next fix.
+
+Part 2: the per-request cost at 200 peers per account (the cause of the latency above).
+CPU profile, after-side load run (anvit, 380 s): 92% of server CPU in peernetwork.ValidWireGuardKey -> X25519 scalar
+multiplication, once per peer key in configurationClaims (Binding.Valid) and again in Configuration.Check at signing:
+~400 scalar multiplications per renewal on a cache hit. Fix: low-order blacklist (libsodium has_small_order).
+TestLoadPeerPolicy, anvit, 1005 endpoints (5 x 200 machines + CLI), 90 s windows, before = 3b248753d, after = this change,
+alternating, fresh database per run:
+                         before-1   before-2    after-1   after-2
+  server ms / config       101.9     138.5        7.7       8.3
+  idle p50 / p99 ms   26450/44606  662/4580      7/35     11/83
+  idle failed (deadline)     600        0          0         0
+  idle+active failed         350      762          0         0
+  idle machines / server core 589     433       7762      7221
+TestValidWireGuardKeyMatchesX25519 (shared/peernetwork): blacklist == X25519 zero-output check for every listed point and
+its bit-255 twin, u = 0..63, p-40..p+23, 2000 random keys.
