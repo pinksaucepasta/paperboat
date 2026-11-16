@@ -101,7 +101,8 @@ func TestEnsureCertificateReusesUntilItsLastHourAndRidesOutAnOutage(t *testing.T
 		t.Fatalf("a new sign-in did not renew: calls=%d err=%v", calls-before, err)
 	}
 	testSession = "session_1"
-	if _, err := EnsureCertificate(t.Context(), relogin, publicKey, online(stillValid), stillValid, renewal); err == nil {
+	fresh := CertificateTarget{Home: home, Alias: "fresh", OSUser: "alice", Session: "session_2"}
+	if _, err := EnsureCertificate(t.Context(), fresh, publicKey, online(stillValid), stillValid, renewal); err == nil {
 		t.Fatal("the server's certificate for another session was accepted")
 	}
 	wrongUser := CertificateTarget{Home: home, Alias: "other", OSUser: "bob", Session: "session_1"}
