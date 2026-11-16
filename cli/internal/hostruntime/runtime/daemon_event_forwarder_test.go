@@ -17,9 +17,14 @@ import (
 func TestWorkerForwardsDaemonTopicsFromSingleWait(t *testing.T) {
 	hub, _, plane := eventstest.Start(t, time.Hour, machineevents.DaemonTopics...)
 	var refuse atomic.Bool
+	refused := make(chan struct{}, 1)
 	pushed := make(chan localapi.MachineEventPush, 16)
 	forwarder := newDaemonEventForwarder(hub, "machine_test", func(_ context.Context, push localapi.MachineEventPush) error {
 		if refuse.Load() {
+			select {
+			case refused <- struct{}{}:
+			default:
+			}
 			return errors.New("daemon restarting")
 		}
 		pushed <- push
@@ -51,16 +56,10 @@ func TestWorkerForwardsDaemonTopicsFromSingleWait(t *testing.T) {
 	// forwarder; otherwise a daemon restart loses invalidations until safety polls.
 	refuse.Store(true)
 	plane.Publish(machineevents.TopicRecipe)
-	deadline := time.Now().Add(3 * time.Second)
-	for {
-		known, _ := hub.Generations()
-		if known[machineevents.TopicRecipe] >= 2 {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("worker did not see recipe change")
-		}
-		time.Sleep(time.Millisecond)
+	select {
+	case <-refused:
+	case <-time.After(3 * time.Second):
+		t.Fatal("local delivery failure was not exercised")
 	}
 	refuse.Store(false)
 	plane.Publish(machineevents.TopicInventory)
