@@ -41,6 +41,16 @@ async function person(state, workspace) {
       await page.waitForLoadState("networkidle").catch(() => {})
     },
     unlocked: () => button("Add variable").waitFor(long),
+    /** Open after a page load: the vault is locked then, so unlock it with the password when the unlock card shows first. */
+    ready: async (secret) => {
+      const locked = page.getByLabel("Vault password")
+      await locked.or(button("Add variable")).first().waitFor(long)
+      if (await locked.isVisible()) {
+        await locked.fill(secret)
+        await button("Unlock").click()
+      }
+      await button("Add variable").waitFor(long)
+    },
     locked: () => page.getByLabel("Vault password").waitFor(long),
     unlock: async (secret) => {
       await page.getByLabel("Vault password").fill(secret)
@@ -160,8 +170,7 @@ try {
   await step("the owner's Team vaults section offers Create and the member cannot create", async () => {
     if (resumed) return "skipped: resumed"
     await owner.open()
-    await owner.unlock(pwA).catch(() => {})
-    await owner.unlocked().catch(() => {})
+    await owner.ready(pwA)
     await rowOf(owner).getByText("No variables yet.").waitFor(long)
     await rowOf(owner).getByRole("button", { name: "Create…" }).waitFor(long)
     await member.open()
@@ -195,10 +204,7 @@ try {
       if (!saved.ok) throw new Error(`policy save answered ${saved.status} ${(await saved.text()).slice(0, 160)}`)
     }, team.id)
     await owner.open()
-    await owner.unlocked().catch(async () => {
-      await owner.unlock(pwA)
-      await owner.unlocked()
-    })
+    await owner.ready(pwA)
     await rowOf(owner).getByText(/1 member needs the key/).waitFor(long)
   })
 
@@ -214,36 +220,24 @@ try {
   await step("the owner adds a team variable in the team workspace", async () => {
     await owner.context.addCookies([{ name: "pb-workspace", value: team.id, url: origin }])
     await owner.open()
-    await owner.unlocked().catch(async () => {
-      await owner.unlock(pwA)
-      await owner.unlocked()
-    })
+    await owner.ready(pwA)
     await addVariable(owner, teamVar, `value-${randomBytes(6).toString("hex")}`)
   })
 
   await step("the member accepts the key and then reads the team variable", async () => {
     await member.open()
-    await member.unlocked().catch(async () => {
-      await member.unlock(pwB)
-      await member.unlocked()
-    })
+    await member.ready(pwB)
     await member.button("Accept keys").click()
     await member.page.getByText("1 accepted.").waitFor(long)
     await member.context.addCookies([{ name: "pb-workspace", value: team.id, url: origin }])
     await member.open()
-    await member.unlocked().catch(async () => {
-      await member.unlock(pwB)
-      await member.unlocked()
-    })
+    await member.ready(pwB)
     await member.variable(teamVar).waitFor(long)
   })
 
   await step("the owner removes the member's access (typed team id) and the member loses the variable", async () => {
     await owner.open()
-    await owner.unlocked().catch(async () => {
-      await owner.unlock(pwA)
-      await owner.unlocked()
-    })
+    await owner.ready(pwA)
     await rowOf(owner).getByRole("button", { name: "Remove access…" }).click()
     const dialog = owner.dialog()
     await dialog.getByRole("textbox").fill(team.id)
@@ -251,10 +245,7 @@ try {
     await dialog.waitFor({ state: "detached", ...long })
     await owner.variable(teamVar).waitFor(long)
     await member.open()
-    await member.unlocked().catch(async () => {
-      await member.unlock(pwB)
-      await member.unlocked()
-    })
+    await member.ready(pwB)
     await member.page.waitForTimeout(3000)
     if (await member.variable(teamVar).count()) throw new Error("the removed member still lists the team variable")
   })
@@ -266,20 +257,14 @@ try {
     await owner.dialog().waitFor({ state: "detached", ...long })
     await rowOf(owner).getByText("Key in use.").waitFor(long)
     await owner.open()
-    await owner.unlocked().catch(async () => {
-      await owner.unlock(pwA)
-      await owner.unlocked()
-    })
+    await owner.ready(pwA)
     await owner.variable(teamVar).waitFor(long)
   })
 
   await step("the personal key is replaced (typed ROTATE ENV): the variable and the password still work", async () => {
     await owner.context.addCookies([{ name: "pb-workspace", value: "personal", url: origin }])
     await owner.open()
-    await owner.unlocked().catch(async () => {
-      await owner.unlock(pwA)
-      await owner.unlocked()
-    })
+    await owner.ready(pwA)
     await addVariable(owner, personalVar, `value-${randomBytes(6).toString("hex")}`)
     await owner.page.getByText("Personal key", { exact: true }).locator("xpath=ancestor::div[contains(@class,'border-b')][1]").getByRole("button", { name: "Replace…" }).click()
     await owner.typeConfirm("ROTATE ENV")
@@ -295,10 +280,7 @@ try {
   await step("the owner resets the team vault (typed RESET <team>): the team variable is gone", async () => {
     await owner.context.addCookies([{ name: "pb-workspace", value: team.id, url: origin }])
     await owner.open()
-    await owner.unlocked().catch(async () => {
-      await owner.unlock(pwA)
-      await owner.unlocked()
-    })
+    await owner.ready(pwA)
     await owner.variable(teamVar).waitFor(long)
     await rowOf(owner).getByRole("button", { name: "Reset…" }).click()
     await owner.typeConfirm(`RESET ${team.id}`)
@@ -306,20 +288,14 @@ try {
     await owner.dialog().waitFor({ state: "detached", ...long })
     await owner.page.waitForTimeout(3000)
     await owner.open()
-    await owner.unlocked().catch(async () => {
-      await owner.unlock(pwA)
-      await owner.unlocked()
-    })
+    await owner.ready(pwA)
     if (await owner.variable(teamVar).count()) throw new Error("the team variable survived the reset")
   })
 
   await step("a locked vault is reset with RESET ENV and a new password: old password dead, variables gone", async () => {
     await member.context.addCookies([{ name: "pb-workspace", value: "personal", url: origin }])
     await member.open()
-    await member.unlocked().catch(async () => {
-      await member.unlock(pwB)
-      await member.unlocked()
-    })
+    await member.ready(pwB)
     await addVariable(member, personalVar, `value-${randomBytes(6).toString("hex")}`)
     await member.button("Lock").click()
     await member.locked()
