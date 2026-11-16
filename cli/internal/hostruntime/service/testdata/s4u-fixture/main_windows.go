@@ -72,7 +72,6 @@ type limitations struct {
 	EFS                         limitation `json:"efs"`
 	Git                         limitation `json:"git"`
 	Network                     limitation `json:"network"`
-	Codex                       limitation `json:"codex"`
 	PreviewIdentityOpen         limitation `json:"preview_identity_open"`
 	PreviewRegistration         limitation `json:"preview_registration"`
 	PreviewMachineControlSource limitation `json:"preview_machine_control_source"`
@@ -307,16 +306,6 @@ func writeChildReport(ownerSID, reportPath string) error {
 		_ = connection.Close()
 		network = limitation{Status: "pass", Reason: "logged-out S4U established outbound TCP with the owner environment"}
 	}
-	codex := limitation{Status: "fail", Reason: "logged-out S4U could not execute native Codex"}
-	if codexPath, readErr := os.ReadFile(reportPath + ".codex-path"); readErr != nil {
-		codex.Reason += ": " + readErr.Error()
-	} else if output, codexErr := exec.Command(strings.TrimSpace(string(codexPath)), "--version").CombinedOutput(); codexErr != nil {
-		codex.Reason += ": " + codexErr.Error() + ": " + strings.TrimSpace(string(output))
-	} else if !strings.HasPrefix(strings.TrimSpace(string(output)), "codex-cli ") {
-		codex.Reason += ": malformed version output"
-	} else {
-		codex = limitation{Status: "pass", Reason: "logged-out S4U executed the supported native Codex binary"}
-	}
 	record := report{
 		Schema:             "paperboat.windows-s4u-qualification/v1",
 		OwnerSID:           ownerSID,
@@ -334,7 +323,6 @@ func writeChildReport(ownerSID, reportPath string) error {
 			EFS:                         efs,
 			Git:                         git,
 			Network:                     network,
-			Codex:                       codex,
 			PreviewIdentityOpen:         previewIdentityOpen,
 			PreviewRegistration:         previewRegistration,
 			PreviewMachineControlSource: previewMachineControlSource,

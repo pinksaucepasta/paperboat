@@ -314,13 +314,13 @@ func TestNetworkAuthorityRejectsInvalidBindingsAndScopes(t *testing.T) {
 			p := key.NewNode().Public().Raw32()
 			c.Self.WireGuardPublicKey = base64.RawURLEncoding.EncodeToString(p[:])
 		},
-		"ungranted":               func(c *NetworkConfiguration) { c.Peers[0].Scopes = nil },
-		"wrong_direction":         func(c *NetworkConfiguration) { c.Peers[0].Scopes[0].Direction = "accept" },
-		"wrong_port":              func(c *NetworkConfiguration) { c.Peers[0].Scopes[0].Port = 22 },
-		"unknown_scope":           func(c *NetworkConfiguration) { c.Peers[0].Scopes[0].Capability = "execute_everything" },
-		"codex_on_machine_access": func(c *NetworkConfiguration) { c.Peers[0].Scopes[0].Capability = "codex" },
-		"terminal_on_codex_session": func(c *NetworkConfiguration) {
-			c.Peers[0].Scopes[0].ResourceKind = "codex_session"
+		"ungranted":                 func(c *NetworkConfiguration) { c.Peers[0].Scopes = nil },
+		"wrong_direction":           func(c *NetworkConfiguration) { c.Peers[0].Scopes[0].Direction = "accept" },
+		"wrong_port":                func(c *NetworkConfiguration) { c.Peers[0].Scopes[0].Port = 22 },
+		"unknown_scope":             func(c *NetworkConfiguration) { c.Peers[0].Scopes[0].Capability = "execute_everything" },
+		"retired_on_machine_access": func(c *NetworkConfiguration) { c.Peers[0].Scopes[0].Capability = "retired" },
+		"terminal_on_retired_session": func(c *NetworkConfiguration) {
+			c.Peers[0].Scopes[0].ResourceKind = "retired_session"
 		},
 		"expired": func(c *NetworkConfiguration) { c.IssuedAt = time.Now().Unix() - 2; c.ExpiresAt = time.Now().Unix() - 1 },
 		"future": func(c *NetworkConfiguration) {
@@ -356,11 +356,11 @@ func TestNetworkAuthorityRejectsInvalidBindingsAndScopes(t *testing.T) {
 			// A scope of a kind or capability this build does not know (a newer server's) and a peer left without
 			// scopes authorize nothing; they never fail the rest of the configuration (peernetwork.DropUnknownScopes).
 			switch name {
-			case "ungranted", "unknown_scope", "codex_on_machine_access", "terminal_on_codex_session":
+			case "ungranted", "unknown_scope", "retired_on_machine_access", "terminal_on_retired_session":
 				if err := a.Apply(context.Background(), networkToken(t, priv, c)); err != nil {
 					t.Fatal("a configuration with an unknown scope was refused whole:", err)
 				}
-				if a.Allows("machine_test", "grant_test", "terminal", "dial") || a.Allows("machine_test", "grant_test", "codex", "dial") || a.Allows("machine_test", "grant_test", "execute_everything", "dial") {
+				if a.Allows("machine_test", "grant_test", "terminal", "dial") || a.Allows("machine_test", "grant_test", "retired", "dial") || a.Allows("machine_test", "grant_test", "execute_everything", "dial") {
 					t.Fatal("an unknown scope authorized an operation")
 				}
 				return

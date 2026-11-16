@@ -378,7 +378,7 @@ func TestNativeOwnerCannotMutateS4UFixture(t *testing.T) {
 // logon prepares machine-scope v2 DPAPI values behind the owner's strict ACL.
 // This phase proves no interactive owner token is selectable and requires the
 // actual LocalSystem -> enrolled-owner S4U child to decrypt them. It deliberately
-// has no Git, Codex, EFS, or network dependency.
+// has no Git, EFS, or network dependency.
 func TestNativeLoggedOutS4UDPAPIQualification(t *testing.T) {
 	fixture := requiredS4UFixture(t)
 	ownerSID := requiredS4UOwnerSID(t)
@@ -564,10 +564,6 @@ type s4uQualificationReport struct {
 			Status string `json:"status"`
 			Reason string `json:"reason"`
 		} `json:"network"`
-		Codex struct {
-			Status string `json:"status"`
-			Reason string `json:"reason"`
-		} `json:"codex"`
 		PreviewIdentityOpen struct {
 			Status string `json:"status"`
 			Reason string `json:"reason"`
@@ -633,13 +629,6 @@ func TestNativeLoggedOutS4UQualification(t *testing.T) {
 	}
 	defer listener.Close()
 	if err := os.WriteFile(reportPath+".network", []byte(listener.Addr().String()), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	codexPath := os.Getenv("PAPERBOAT_WINDOWS_E2E_CODEX_PATH")
-	if !filepath.IsAbs(codexPath) || !strings.EqualFold(filepath.Ext(codexPath), ".exe") {
-		t.Fatal("PAPERBOAT_WINDOWS_E2E_CODEX_PATH must name an absolute native Codex .exe")
-	}
-	if err := os.WriteFile(reportPath+".codex-path", []byte(codexPath), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	accepted := make(chan error, 1)
@@ -826,7 +815,7 @@ func assertS4UReport(t *testing.T, record s4uQualificationReport, ownerSID strin
 	if record.Limitations.FileSecretStore.Status != "pass" || strings.TrimSpace(record.Limitations.FileSecretStore.Reason) == "" {
 		t.Fatalf("logged-out S4U must write and read a fresh FileSecretStore credential: %+v", record.Limitations.FileSecretStore)
 	}
-	for name, result := range map[string]struct{ Status, Reason string }{"EFS": {record.Limitations.EFS.Status, record.Limitations.EFS.Reason}, "Git": {record.Limitations.Git.Status, record.Limitations.Git.Reason}, "network": {record.Limitations.Network.Status, record.Limitations.Network.Reason}, "Codex": {record.Limitations.Codex.Status, record.Limitations.Codex.Reason}} {
+	for name, result := range map[string]struct{ Status, Reason string }{"EFS": {record.Limitations.EFS.Status, record.Limitations.EFS.Reason}, "Git": {record.Limitations.Git.Status, record.Limitations.Git.Reason}, "network": {record.Limitations.Network.Status, record.Limitations.Network.Reason}} {
 		if result.Status != "pass" {
 			t.Errorf("logged-out S4U %s result: %s: %s", name, result.Status, result.Reason)
 		} else {

@@ -8,7 +8,7 @@
 # connectorprotocol (+165153), api (+159625), config (+156210),
 # fxamacker/cbor (+153382), workerupdate (+135015), tunnelenrollment (+134035),
 # connectorrotation (+127625), environmente2ee (+119710), x/net/http2
-# (+116458), codexsession (+107430), and envinject (+101616) bytes. The
+# (+116458), and envinject (+101616) bytes. The
 # remaining measured growth includes Go runtime/linker/static data and newly
 # reachable feature code. Updating a size requires this attribution.
 darwin	arm64	64288082

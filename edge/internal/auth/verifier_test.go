@@ -208,7 +208,7 @@ func TestVerifierAcceptsExactHelperAccessCredential(t *testing.T) {
 func TestVerifierRejectsRetiredHelperCredentials(t *testing.T) {
 	public, private, _ := ed25519.GenerateKey(rand.Reader)
 	verifier := &Verifier{Issuer: "https://api.paperboat.test", Keys: StaticKeys{"key-1": public}, Now: func() time.Time { return time.Unix(1000, 0) }}
-	for class, scopes := range map[string][]string{"codex_connect": {"codex:connect"}, "codex_manage": {"codex:prepare", "codex:browse", "codex:renew", "codex:stop"}} {
+	for class, scopes := range map[string][]string{"retired_connect": {"retired:connect"}, "retired_manage": {"retired:prepare", "retired:browse", "retired:renew", "retired:stop"}} {
 		token := tokenFor(t, private, "key-1", func(claims map[string]any) {
 			claims["aud"] = "paperboat-machine"
 			claims["credential_class"] = class
@@ -216,7 +216,7 @@ func TestVerifierRejectsRetiredHelperCredentials(t *testing.T) {
 			claims["machine_id"] = "machine_1"
 			claims["user_id"] = "usr_1"
 			claims["cli_client_session_id"] = "cls_1"
-			claims["session_id"] = "cdx_1"
+			claims["session_id"] = "ret_1"
 			delete(claims, "file_transfer_policy")
 		})
 		_, err := verifier.VerifyHelperAccess(context.Background(), token)

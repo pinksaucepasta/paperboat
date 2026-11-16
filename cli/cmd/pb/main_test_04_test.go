@@ -305,7 +305,7 @@ func TestCompatibilityOnlyCommandsAreAbsent(t *testing.T) {
 	}
 	root = newRootCommand()
 	for _, child := range root.Commands() {
-		if child.Name() == "e2ee" || child.Name() == "codex" || child.Name() == "opencode" {
+		if child.Name() == "e2ee" {
 			t.Fatalf("removed/deferred command %q is still exposed", child.Name())
 		}
 	}

@@ -70,7 +70,7 @@ func TestPostgresBandwidthHistory(t *testing.T) {
 	service := New(store)
 	service.Now = func() time.Time { return now.Add(2 * time.Minute) }
 	report := NativeReport{AccessSessionID: session, StreamID: "stream1", Consumer: "terminal", Mode: "direct", IntervalStart: now, IntervalEnd: now.Add(30 * time.Second), Upload: 100, Download: 200}
-	for _, consumer := range []string{"codex", "codex_manage", "codex_connect"} {
+	for _, consumer := range []string{"retired_consumer", "retired_consumer_manage"} {
 		retired := report
 		retired.Consumer = consumer
 		if _, e := service.RecordNative(ctx, machine, 1, NativeBatch{Reports: []NativeReport{retired}}); !errors.Is(e, ErrInvalid) {

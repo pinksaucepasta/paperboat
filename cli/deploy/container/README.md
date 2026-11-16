@@ -2,7 +2,7 @@
 
 The self-hosted image runs a stable `paperboat-hostd` process and a
 separate root `paperboat-updated` process. Hostd owns terminal PTYs, managed
-SSH channels, file transfers, previews, Codex processes, and live relay or
+SSH channels, file transfers, previews, and live relay or
 direct streams. The updater owns only TUF verification, release staging,
 cutover, rollback, and bounded cleanup.
 
