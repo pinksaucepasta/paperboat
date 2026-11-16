@@ -20,6 +20,7 @@ import os
 import pathlib
 import random
 import re
+import shlex
 import shutil
 import signal
 import subprocess
@@ -158,6 +159,33 @@ NET_CUT = ("if($req.action -eq 'remove'){Remove-NetFirewallRule -DisplayName $re
            "ForEach-Object{$k[[int]$_.OwningProcess]=1}}\n"
            "Get-Process pb -ErrorAction SilentlyContinue|Where-Object{$k.ContainsKey([int]$_.Id) -and $p -contains $_.Path}|Stop-Process -Force")
 # Every non-loopback IPv4 and global/link-local/unique-local IPv6 address.
+# SMOKE_PEER_CUT: a command that cuts the PEER instead of the Windows device (`<cmd> add all`, `<cmd> add server IP...`,
+# `<cmd> add addresses IP...`, `<cmd> remove`; container_cut.sh HOST CONTAINER). NET_CUT has to stop pb.exe for its rule
+# to apply, which turns "survives a network cut" into "survives a restart"; a peer-side cut leaves pb.exe running.
+# `remove` prints the capture that proves the cut.
+PEER_CUT = shlex.split(os.environ.get('SMOKE_PEER_CUT', ''))
+
+
+def peer_cut(*args):
+    done = subprocess.run(PEER_CUT + list(args), check=True, capture_output=True, text=True, timeout=120)
+    sys.stderr.write(done.stderr)
+    out = done.stdout.strip()
+    if out:
+        print(out, file=sys.stderr, flush=True)
+    return out
+
+
+@contextlib.contextmanager
+def peer_cut_held(*args):
+    """The peer cut for the duration; yields a list that holds the capture line once the cut is removed."""
+    capture = []
+    peer_cut('add', *args)
+    try:
+        yield capture
+    finally:
+        capture.append(peer_cut('remove'))
+
+
 NON_LOOPBACK = ['0.0.0.0-126.255.255.255', '128.0.0.0-255.255.255.255', '2000::/3', 'fe80::/10', 'fc00::/7']
 LISTENING = ("try{$c=New-Object Net.Sockets.TcpClient('127.0.0.1',[int]$req.port);$c.Close();'yes'}catch{'no'}")
 ALIVE = "if(Get-Process -Id $req.pid -ErrorAction SilentlyContinue){'yes'}else{'no'}"

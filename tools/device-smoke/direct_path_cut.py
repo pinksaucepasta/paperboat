@@ -26,6 +26,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('peer', help='machine name of the Unix peer')
     parser.add_argument('--peer-address', required=True, help='the peer host address the direct path runs to (blocked)')
+    parser.add_argument('--device-address', action='append', default=[],
+                        help='with SMOKE_PEER_CUT: an address the peer sees this device at (dropped on the peer; repeat)')
     parser.add_argument('--budget', type=float, default=15.0, help='seconds the stream may stall after the cut')
     parser.add_argument('--cut-seconds', type=int, default=30)
     parser.add_argument('--output', default='')
@@ -62,10 +64,15 @@ def main():
             before = lines(device, out)
             step('the stream runs before the cut', len(before) >= 15, '%d lines in 15 s' % len(before))
             cut_at = time.time()
-            cut = device.cut_network(args.cut_seconds + 60, addresses=[args.peer_address])
-            time.sleep(args.cut_seconds)
-            cut.release()
-            cut = None
+            if winhost.PEER_CUT:  # on the peer's host, silently: pb.exe keeps the stream it is measured on, and no send fails
+                with winhost.peer_cut_held('silent', *args.device_address) as capture:
+                    time.sleep(args.cut_seconds)
+                step('the cut held (capture on the peer)', capture[0].startswith('capture') and ' sent=0 ' in capture[0], capture[0])
+            else:
+                cut = device.cut_network(args.cut_seconds + 60, addresses=[args.peer_address])
+                time.sleep(args.cut_seconds)
+                cut.release()
+                cut = None
             time.sleep(10)
             rows = lines(device, out)
             gaps = [(b - a) for a, b in zip(rows, rows[1:])]

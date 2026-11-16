@@ -141,6 +141,9 @@ class Windows:
         return contextlib.nullcontext()  # the WinDivert NAT of rebind() starts during the cut
 
     def cut_all(self, seconds):
+        import winhost
+        if winhost.PEER_CUT:  # the outage on the peer: pb.exe keeps its sockets, so the rebind is one the daemon lives through
+            return winhost.peer_cut_held('all')
         return self.device.cut_network(seconds)
 
     def udp_blocked(self, allow, seconds):
@@ -249,14 +252,16 @@ def rebind(args, target, peer):
     report.add(f"baseline exec {target.kind}->peer", rc == 0, f"{time.time() - start:.1f} s {out[-120:]}")
     cut = contextlib.ExitStack()
     try:
-        cut.enter_context(target.cut_all(total))
-        report.add(f"network of the {target.kind} machine cut", True)
+        held = cut.enter_context(target.cut_all(total))
+        report.add("network of the peer cut" if isinstance(held, list) else f"network of the {target.kind} machine cut", True)
         time.sleep(min(30, args.outage_seconds // 4))
         with target.rebind(total) as moved:
             report.add(f"UDP source ports of the {target.kind} machine rebound", True)
             time.sleep(args.outage_seconds - min(30, args.outage_seconds // 4))
             cut.close()  # the network returns
             returned = time.time()
+            if isinstance(held, list):  # the peer-side cut's capture
+                report.add("the cut held (capture on the peer)", " sent=0 " in held[0], held[0])
             first = None
             while time.time() < returned + 90:
                 if peer.exec_into(target, 12)[0]:

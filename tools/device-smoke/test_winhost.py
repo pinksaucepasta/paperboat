@@ -362,6 +362,16 @@ class WindowsChecksRunner(unittest.TestCase):
         self.assertEqual([('add', ['1-52', '54-442', '444-65535']), ('remove', None)], calls)
         self.assertIn('-RemotePort @($req.ports)', winhost.UDP_BLOCK)  # the rule blocks what udp_blocked computed, not a fixed range
 
+    def test_a_peer_cut_runs_add_then_remove_and_keeps_the_capture(self):
+        calls = []
+        with patch.object(winhost, "PEER_CUT", ["cut.sh", "h", "ct"]), \
+                patch.object(winhost.subprocess, "run", lambda argv, **kw: calls.append(argv[3:]) or
+                                  subprocess.CompletedProcess(argv, 0, 'capture sent=0' if argv[3] == 'remove' else '', '')):
+            with self.assertRaises(RuntimeError), winhost.peer_cut_held('silent', '203.0.113.7') as capture:
+                raise RuntimeError('the check failed')  # the cut is lifted on every path
+        self.assertEqual([['add', 'silent', '203.0.113.7'], ['remove']], calls)
+        self.assertEqual(['capture sent=0'], capture)
+
     def test_every_check_names_a_script_and_missing_fixtures_are_reported(self):
         import windows_checks
         table = windows_checks.checks(self.args())

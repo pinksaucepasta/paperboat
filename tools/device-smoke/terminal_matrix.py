@@ -264,6 +264,9 @@ def has_iptables():
                           capture_output=True).returncode == 0
 
 
+PEER_CUT, peer_cut = winhost.PEER_CUT, winhost.peer_cut  # the peer-side cut (winhost.py)
+
+
 NO_FIREWALL = ('no passwordless sudo pfctl on this machine' if DARWIN else 'no iptables on this machine')
 
 
@@ -273,6 +276,8 @@ def iptables(*rule):
 
 def drop_all(seconds):
     """Silently drop every non-loopback packet in both directions; drop_restore undoes it."""
+    if PEER_CUT:
+        return peer_cut('add', 'all') or 'peer'
     if DEVICE:  # pb.exe's own traffic only: the SSH that drives the device keeps working
         return DEVICE.cut_network(seconds + 60)
     if DARWIN:
@@ -284,6 +289,8 @@ def drop_all(seconds):
 
 
 def drop_restore(block):
+    if PEER_CUT:
+        return peer_cut('remove')
     if DEVICE:
         return block.release()
     if DARWIN:
@@ -471,7 +478,7 @@ def sleep_wake(a, sessions):
 
 def network_drop(a, sessions):
     """W6/W8: the client's network drops for 45 s while output continues on the host."""
-    if not has_iptables():
+    if not (PEER_CUT or has_iptables()):
         row('N4 network drop: session resumes, nothing lost or doubled', None, NO_FIREWALL)
         return
     name = fresh_name(); sessions.append(name)
@@ -483,11 +490,12 @@ def network_drop(a, sessions):
         try:
             time.sleep(45)
         finally:
-            drop_restore(block)
+            capture = drop_restore(block)
         t0 = time.monotonic()
         try:
             c1.expect('ND60', 120)
-            row('N4 network drop: session resumes on its own', True, f'{time.monotonic() - t0:.1f} s after the network returned')
+            row('N4 network drop: session resumes on its own', True, f'{time.monotonic() - t0:.1f} s after the network returned'
+                + (f'; {capture}' if PEER_CUT else ''))
         except RuntimeError:
             seen = sorted({int(n) for n in re.findall(rb'ND(\d+)', bytes(c1.output))})  # the test's own markers only
             try:
@@ -508,7 +516,7 @@ def network_drop(a, sessions):
 
 def control_plane_down(a, sessions):
     """W7: the server is unreachable (deploy, outage) mid-session; the open terminal keeps working."""
-    if not has_iptables():
+    if not (PEER_CUT or has_iptables()):
         row('N5 server unreachable: open terminal keeps working', None, NO_FIREWALL)
         return
     import json
@@ -519,7 +527,9 @@ def control_plane_down(a, sessions):
     name = fresh_name(); sessions.append(name)
     c1 = connect(a.target, name)
     try:
-        if DEVICE:
+        if PEER_CUT:
+            block = peer_cut('add', 'server', *addrs)
+        elif DEVICE:
             block = DEVICE.cut_network(240, addresses=addrs, inbound=False)
         elif DARWIN:
             block = pf_block('block drop out quick to { %s }\n' % ' '.join(addrs), 240)
@@ -535,15 +545,18 @@ def control_plane_down(a, sessions):
                 except RuntimeError:
                     ok = False
                     break
-            row('N5 server unreachable 2 min: open terminal keeps working', ok, f'{(i + 1) * 30} s')
         finally:
-            if DEVICE:
+            capture = ''
+            if PEER_CUT:
+                capture = '; ' + peer_cut('remove')
+            elif DEVICE:
                 block.release()
             elif DARWIN:
                 pf_release(block)
             else:
                 for ip in addrs:
                     iptables('-D', 'OUTPUT', '-d', ip, '-j', 'DROP')
+        row('N5 server unreachable 2 min: open terminal keeps working', ok, f'{(i + 1) * 30} s' + capture)
     finally:
         c1.close()
 
