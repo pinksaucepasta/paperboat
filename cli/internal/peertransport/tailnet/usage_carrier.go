@@ -63,6 +63,8 @@ type usageObservedCarrier struct {
 	node      RegionalNode
 	namespace [32]byte
 	closed    atomic.Bool
+	// refresh asks for fresh relay authority (Authority.RequestRefresh: coalesced, spaced by the renewal budget).
+	refresh func()
 }
 
 // A lost listening path is real recovery demand even before a session exists.
@@ -83,9 +85,21 @@ func (c *usageObservedCarrier) Connect(ctx context.Context) error {
 	err := c.DERPCarrier.Connect(ctx)
 	if err != nil && ctx.Err() == nil {
 		diagnosticlog.TryInfo("native packet lifecycle", "stage", "relay_connect_failed", "kind", relayErrorKind(err))
+		c.refreshIfExpired(err)
 		c.lostPath()
 	}
 	return err
+}
+
+// refreshIfExpired asks for fresh relay authority when the relay refused this machine's grant as expired (code 4: a
+// restarted relay process, a grant past its time, a part of a batch that is either). The carrier redials with whatever
+// grant it holds, so without a renewal it kept presenting the refused one until the next scheduled renewal: 213
+// refusals and no relayed path after an edge+relay restart (TestE2ECore). Tailscale's DERP client likewise fetches
+// fresh authority and redials after every failure (wgengine/magicsock/derp.go runDerpReader).
+func (c *usageObservedCarrier) refreshIfExpired(err error) {
+	if c.refresh != nil && errors.Is(err, derpquic.ErrExpired) {
+		c.refresh()
+	}
 }
 
 // relayErrorKind names a relay failure without its text: the relay's own rejection code, else the error's type.
@@ -138,6 +152,7 @@ func (c *usageObservedCarrier) RecvDetail() (derp.ReceivedMessage, int, error) {
 	message, generation, err := c.DERPCarrier.RecvDetail()
 	if err != nil {
 		diagnosticlog.TryInfo("native packet lifecycle", "stage", "relay_read_failed", "kind", relayErrorKind(err))
+		c.refreshIfExpired(err)
 		c.lostPath()
 		var fatal interface{ Fatal() bool }
 		if errors.As(err, &fatal) && fatal.Fatal() {

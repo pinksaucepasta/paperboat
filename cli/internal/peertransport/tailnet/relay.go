@@ -662,6 +662,6 @@ func (a *Authority) regionalCarrierFactory(config *tls.Config, namespace [32]byt
 		if a.options.TestOnlyDERPCarrier != nil {
 			carrier = a.options.TestOnlyDERPCarrier(carrier)
 		}
-		return &usageObservedCarrier{DERPCarrier: carrier, authority: &a.relay, node: node, namespace: namespace}
+		return &usageObservedCarrier{DERPCarrier: carrier, authority: &a.relay, node: node, namespace: namespace, refresh: a.RequestRefresh}
 	}
 }
