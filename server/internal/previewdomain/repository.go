@@ -16,6 +16,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
 	"github.com/pinksaucepasta/paperboat/server/internal/previewtunnelapi"
+	"github.com/pinksaucepasta/paperboat/server/internal/previewtunnelstore"
 	"github.com/pinksaucepasta/paperboat/server/internal/publicationdns"
 	"github.com/pinksaucepasta/paperboat/server/internal/workspacedomain"
 )
@@ -230,7 +231,7 @@ func (r *SQLRepository) Delete(ctx context.Context, input MutationRecord) (Repos
 		if current.Generation != input.ExpectedGeneration {
 			return ErrGenerationConflict
 		}
-		current, err = q.DeletePreviewDomainV1(ctx, dbsqlc.DeletePreviewDomainV1Params{QuarantineUntil: sql.NullTime{Time: input.Now.UTC().Add(Quarantine), Valid: true}, Now: sql.NullTime{Time: input.Now.UTC(), Valid: true}, DomainID: input.DomainID, AccountID: input.AccountID, PreviewID: input.PreviewID, ExpectedGeneration: input.ExpectedGeneration})
+		current, err = q.DeletePreviewDomainV1(ctx, dbsqlc.DeletePreviewDomainV1Params{QuarantineUntil: sql.NullTime{Time: input.Now.UTC().Add(previewtunnelstore.DomainQuarantine), Valid: true}, Now: sql.NullTime{Time: input.Now.UTC(), Valid: true}, DomainID: input.DomainID, AccountID: input.AccountID, PreviewID: input.PreviewID, ExpectedGeneration: input.ExpectedGeneration})
 		if isSolePreviewDomainError(err, pgx.ErrNoRows) {
 			return ErrGenerationConflict
 		}

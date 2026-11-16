@@ -36,7 +36,8 @@ var (
 	ErrSelfhostPreviewDomainRequired   = fmt.Errorf("%w: self-hosted-only tunnel pools cannot serve a Paperboat-managed preview URL; configure a custom preview domain, or select managed edge mode", ErrInvalidInput)
 )
 
-const previewDomainQuarantine = 7 * 24 * time.Hour
+// DomainQuarantine is how long a released preview or tunnel domain stays held before anyone can claim it.
+const DomainQuarantine = 7 * 24 * time.Hour
 
 // EdgeMode selects managed or self-hosted publication edges.
 type EdgeMode string
@@ -691,7 +692,7 @@ func (s *Store) StopPreviewLeaseV1(ctx context.Context, input StopPreviewLeaseV1
 			return translate(err)
 		}
 		if _, err := q.WithdrawPreviewDomainsV1(ctx, dbsqlc.WithdrawPreviewDomainsV1Params{
-			QuarantineUntil: sql.NullTime{Time: now.Add(previewDomainQuarantine), Valid: true},
+			QuarantineUntil: sql.NullTime{Time: now.Add(DomainQuarantine), Valid: true},
 			Now:             sql.NullTime{Time: now, Valid: true}, PreviewID: input.PreviewID, AccountID: input.AccountID,
 			TerminalPreviewGeneration: stopped.Generation,
 		}); err != nil {
@@ -863,7 +864,7 @@ func (s *Store) ReconcilePreviewLeasesV1(ctx context.Context, input ReconcilePre
 			}
 			record := previewLeaseRecordFromRow(lease)
 			if _, err := q.WithdrawPreviewDomainsV1(ctx, dbsqlc.WithdrawPreviewDomainsV1Params{
-				QuarantineUntil: sql.NullTime{Time: now.Add(previewDomainQuarantine), Valid: true}, Now: sql.NullTime{Time: now, Valid: true},
+				QuarantineUntil: sql.NullTime{Time: now.Add(DomainQuarantine), Valid: true}, Now: sql.NullTime{Time: now, Valid: true},
 				PreviewID: record.ID, AccountID: record.AccountID, TerminalPreviewGeneration: record.Generation,
 			}); err != nil {
 				return translate(err)
@@ -895,7 +896,7 @@ func (s *Store) ReconcilePreviewLeasesV1(ctx context.Context, input ReconcilePre
 			}
 			record := previewLeaseRecordFromRow(lease)
 			if _, err := q.WithdrawPreviewDomainsV1(ctx, dbsqlc.WithdrawPreviewDomainsV1Params{
-				QuarantineUntil: sql.NullTime{Time: now.Add(previewDomainQuarantine), Valid: true}, Now: sql.NullTime{Time: now, Valid: true},
+				QuarantineUntil: sql.NullTime{Time: now.Add(DomainQuarantine), Valid: true}, Now: sql.NullTime{Time: now, Valid: true},
 				PreviewID: record.ID, AccountID: record.AccountID, TerminalPreviewGeneration: record.Generation,
 			}); err != nil {
 				return translate(err)

@@ -10,6 +10,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
 	"github.com/pinksaucepasta/paperboat/server/internal/previewtunnelapi"
+	"github.com/pinksaucepasta/paperboat/server/internal/previewtunnelstore"
 )
 
 func TestNormalizeHostnameCanonicalizesExactAndOneLabelWildcard(t *testing.T) {
@@ -165,7 +166,7 @@ func TestServiceProjectsListGetRenewStopAndReadyAliases(t *testing.T) {
 	withdrawn.OwnershipState = "revoked"
 	withdrawn.CertificateState = "revoked"
 	withdrawn.ConflictState = "quarantined"
-	withdrawn.QuarantineUntil = sql.NullTime{Time: now.Add(Quarantine), Valid: true}
+	withdrawn.QuarantineUntil = sql.NullTime{Time: now.Add(previewtunnelstore.DomainQuarantine), Valid: true}
 	if view := DomainViewFromRow(withdrawn); view.State != "quarantined" {
 		t.Fatalf("withdrawn domain state = %q, want quarantined", view.State)
 	}

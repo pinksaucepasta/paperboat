@@ -18,6 +18,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
 	"github.com/pinksaucepasta/paperboat/server/internal/planlimits"
 	"github.com/pinksaucepasta/paperboat/server/internal/previewtunnelapi"
+	"github.com/pinksaucepasta/paperboat/server/internal/previewtunnelstore"
 	"github.com/pinksaucepasta/paperboat/server/internal/publicationdns"
 	"github.com/pinksaucepasta/paperboat/server/internal/tunnelcert"
 	"github.com/pinksaucepasta/paperboat/server/internal/workspacedomain"
@@ -991,7 +992,7 @@ func (r *SQLRepository) DeleteResourceDomain(ctx context.Context, input DomainRe
 		if current.Generation != input.ExpectedGeneration {
 			return ErrGenerationConflict
 		}
-		current, err = q.DeleteTunnelDomainV1(ctx, dbsqlc.DeleteTunnelDomainV1Params{Now: sql.NullTime{Time: input.Now, Valid: true}, QuarantineUntil: sql.NullTime{Time: input.Now.Add(7 * 24 * time.Hour), Valid: true}, DomainID: input.DomainID, AccountID: input.AccountID, TunnelID: input.TunnelID, ExpectedGeneration: input.ExpectedGeneration})
+		current, err = q.DeleteTunnelDomainV1(ctx, dbsqlc.DeleteTunnelDomainV1Params{Now: sql.NullTime{Time: input.Now, Valid: true}, QuarantineUntil: sql.NullTime{Time: input.Now.Add(previewtunnelstore.DomainQuarantine), Valid: true}, DomainID: input.DomainID, AccountID: input.AccountID, TunnelID: input.TunnelID, ExpectedGeneration: input.ExpectedGeneration})
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrGenerationConflict
 		}

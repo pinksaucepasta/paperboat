@@ -27,7 +27,6 @@ const (
 	Kind       = "domain_binding"
 	TargetKind = "preview_lease"
 	MaxDomains = 8
-	Quarantine = 7 * 24 * time.Hour
 )
 
 var (
