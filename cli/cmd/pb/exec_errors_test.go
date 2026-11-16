@@ -223,20 +223,25 @@ func TestExecCancelAttachmentRetainsAlreadyCompletedNativeResult(t *testing.T) {
 	}
 }
 
+// countingCycleError unwraps to itself forever and counts how often it is unwrapped.
+type countingCycleError struct{ unwraps int }
+
+func (*countingCycleError) Error() string   { panic("must not format cyclic error") }
+func (e *countingCycleError) Unwrap() error { e.unwraps++; return e }
+
 func TestExecPresentedCycleFirstJoinSelectsOwnerBoundedly(t *testing.T) {
-	cause := errors.Join(&cyclicCommandError{}, execCommandFailure{cause: &tunnel.RemoteExecError{Code: "exec_canceled"}, code: 130, presented: true})
-	done := make(chan commandFailure, 1)
-	go func() { done <- classifyCommandFailure(cause) }()
-	select {
-	case failure := <-done:
-		if failure.kind != commandUnexpected || !failure.presented || failure.execCount != 1 || failure.execCode != 130 {
-			t.Fatal("bounded mixed presented owner was lost")
-		}
-		if presentedCommandExitCode(failure) != 1 {
-			t.Fatal("independent cycle incorrectly retained cancellation status")
-		}
-	case <-time.After(time.Second):
-		t.Fatal("presented owner selection traversed cycle without bound")
+	cycle := &countingCycleError{}
+	cause := errors.Join(cycle, execCommandFailure{cause: &tunnel.RemoteExecError{Code: "exec_canceled"}, code: 130, presented: true})
+	failure := classifyCommandFailure(cause)
+	// Steps, not wall-clock time: an unbounded walk would unwrap the cycle without end.
+	if cycle.unwraps > 32 {
+		t.Fatalf("presented owner selection unwrapped the cycle %d times", cycle.unwraps)
+	}
+	if failure.kind != commandUnexpected || !failure.presented || failure.execCount != 1 || failure.execCode != 130 {
+		t.Fatal("bounded mixed presented owner was lost")
+	}
+	if presentedCommandExitCode(failure) != 1 {
+		t.Fatal("independent cycle incorrectly retained cancellation status")
 	}
 	multiple := classifyCommandFailure(errors.Join(execCommandFailure{cause: context.Canceled, code: 130, presented: true}, execCommandFailure{cause: context.DeadlineExceeded, code: 124, presented: true}))
 	if presentedCommandExitCode(multiple) != 1 {
