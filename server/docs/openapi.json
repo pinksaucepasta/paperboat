@@ -56277,6 +56277,86 @@
           }
         ]
       }
+    },
+    "/v1/machines/{machine_id}/ssh-descriptor": {
+      "parameters": [
+        {
+          "name": "machine_id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "summary": "Issue a managed SSH operation credential (sessions the server authorizes per operation: API token, recipe)",
+        "description": "Like exec-descriptor, for managed SSH: an ssh_operation credential with scope ssh:operate and a managed_ssh access session. Other sessions need none; hosts admit their SSH from signed rules.",
+        "security": [
+          {
+            "bearerAccess": []
+          }
+        ],
+        "x-required-bearer-scopes": [
+          "machines:connect"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "source_machine_id",
+                  "operation_id"
+                ],
+                "properties": {
+                  "source_machine_id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "operation_id": {
+                    "type": "string",
+                    "minLength": 8,
+                    "maxLength": 128
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Fresh execution descriptor."
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "operationId": "post_v1_machines_machine_id_ssh_descriptor",
+        "parameters": [
+          {
+            "name": "workspace",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 63
+            },
+            "description": "Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field."
+          }
+        ]
+      }
     }
   }
 }

@@ -782,9 +782,30 @@ type ExecDescriptor struct {
 // instead of machine_not_ready. Released clients do not send it and keep the old answer.
 // Prior art: Tailscale SSH authorizes per connection from the netmap, independent of DERP reachability
 // (ssh/tailssh/tailssh.go).
-func (s *Service) ExecDescriptor(ctx context.Context, userID, sourceMachineID, userMachineID, cliClientSessionID, operationID string, nativeOnly bool) (descriptor ExecDescriptor, returnErr error) {
+func (s *Service) ExecDescriptor(ctx context.Context, userID, sourceMachineID, userMachineID, cliClientSessionID, operationID string, nativeOnly bool) (ExecDescriptor, error) {
+	return s.operationDescriptor(ctx, execOperation, userID, sourceMachineID, userMachineID, cliClientSessionID, operationID, nativeOnly)
+}
+
+// SSHDescriptor issues a managed SSH operation credential. Only a session the server authorizes per operation (an
+// API token or recipe sign-in) needs one: hosts hold no standing rule for such a session, so every other session's
+// SSH is admitted from the host's own signed rules with no request. Same checks and access session as an exec.
+func (s *Service) SSHDescriptor(ctx context.Context, userID, sourceMachineID, userMachineID, cliClientSessionID, operationID string, nativeOnly bool) (ExecDescriptor, error) {
+	return s.operationDescriptor(ctx, sshOperation, userID, sourceMachineID, userMachineID, cliClientSessionID, operationID, nativeOnly)
+}
+
+// operationKind is what one per-operation credential grants: the machine capability the caller must hold, the
+// incoming capability the machine must offer, the credential class and scope the host checks (static_auth), and the
+// access session's capability (its signed network scope, peerconsumer.NetworkCapability).
+type operationKind struct{ capability, incoming, class, scope string }
+
+var (
+	execOperation = operationKind{capability: "exec", incoming: "terminal_host", class: "exec_operation", scope: "exec:operate"}
+	sshOperation  = operationKind{capability: "managed_ssh", incoming: "ssh_host", class: "ssh_operation", scope: "ssh:operate"}
+)
+
+func (s *Service) operationDescriptor(ctx context.Context, kind operationKind, userID, sourceMachineID, userMachineID, cliClientSessionID, operationID string, nativeOnly bool) (descriptor ExecDescriptor, returnErr error) {
 	defer func() {
-		auditErr := s.recordSDKAuthorization(ctx, userID, cliClientSessionID, userMachineID, operationID, "exec", returnErr)
+		auditErr := s.recordSDKAuthorization(ctx, userID, cliClientSessionID, userMachineID, operationID, kind.capability, returnErr)
 		if auditErr != nil {
 			if returnErr == nil {
 				descriptor = ExecDescriptor{}
@@ -796,17 +817,17 @@ func (s *Service) ExecDescriptor(ctx context.Context, userID, sourceMachineID, u
 	if !execOperationIDPattern.MatchString(operationID) {
 		return ExecDescriptor{}, ErrExecOperationInvalid
 	}
-	if err := s.descriptorSourceAllowed(ctx, userID, sourceMachineID, cliClientSessionID, userMachineID, "exec"); err != nil {
+	if err := s.descriptorSourceAllowed(ctx, userID, sourceMachineID, cliClientSessionID, userMachineID, kind.capability); err != nil {
 		return ExecDescriptor{}, err
 	}
-	row, err := s.machineForCapability(ctx, s.db.Queries(), dbsqlc.GetUserMachineForCapabilityParams{ID: userMachineID, UserID: userID, Capability: "exec"})
+	row, err := s.machineForCapability(ctx, s.db.Queries(), dbsqlc.GetUserMachineForCapabilityParams{ID: userMachineID, UserID: userID, Capability: kind.capability})
 	if errors.Is(err, sql.ErrNoRows) {
 		return ExecDescriptor{}, ErrNotFound
 	}
 	if err != nil {
 		return ExecDescriptor{}, err
 	}
-	const incoming = "terminal_host"
+	incoming := kind.incoming
 	if row.State != "online" || row.SeatState != "occupied" || !row.Online || !slices.Contains(row.ObservedCapabilities, incoming) || !slices.Contains(row.ConfiguredCapabilities, incoming) {
 		return ExecDescriptor{}, ErrMachineCapabilityUnavailable
 	}
@@ -824,7 +845,7 @@ func (s *Service) ExecDescriptor(ctx context.Context, userID, sourceMachineID, u
 		return ExecDescriptor{}, err
 	}
 	if s.controlSigner == nil {
-		return ExecDescriptor{}, errors.New("user-machine exec credential issuer is unavailable")
+		return ExecDescriptor{}, errors.New("user-machine operation credential issuer is unavailable")
 	}
 	issuedAt := s.now().UTC()
 	expiresAt := admission.Expiry(s.controlSigner, issuedAt)
@@ -832,7 +853,7 @@ func (s *Service) ExecDescriptor(ctx context.Context, userID, sourceMachineID, u
 	accessSessionID := newID("session")
 	token, err := s.signProcessCredential(ctx, mint.CredentialInput{
 		Issuer: s.issuer, Audience: "paperboat-machine", Subject: userID, JTI: operationJTI,
-		IssuedAt: issuedAt, ExpiresAt: expiresAt, CredentialClass: "exec_operation", Scopes: []string{"exec:operate"},
+		IssuedAt: issuedAt, ExpiresAt: expiresAt, CredentialClass: kind.class, Scopes: []string{kind.scope},
 		EnvironmentID: row.EnvironmentID, MachineID: row.ID, SourceMachineID: sourceMachineID, UserID: userID, CLIClientSessionID: cliClientSessionID, OperationID: operationID, AssignmentID: accessSessionID,
 	})
 	if err != nil {
@@ -851,7 +872,7 @@ func (s *Service) ExecDescriptor(ctx context.Context, userID, sourceMachineID, u
 	if err := s.createAccessSession(ctx, dbsqlc.CreateUserMachineAccessSessionParams{
 		ID: accessSessionID, UserMachineID: row.ID, UserID: userID, EnvironmentID: row.EnvironmentID,
 		CLIClientSessionID: cliClientSessionID, HttpBaseUrl: httpIngressURL,
-		HelperTerminalSessionID: operationJTI, HelperFileSessionID: "", ExpiresAt: expiresAt, Capabilities: []string{"exec"}, OperationID: operationID,
+		HelperTerminalSessionID: operationJTI, HelperFileSessionID: "", ExpiresAt: expiresAt, Capabilities: []string{kind.capability}, OperationID: operationID,
 	}, machineCredentialSigned); err != nil {
 		return ExecDescriptor{}, err
 	}
@@ -859,7 +880,7 @@ func (s *Service) ExecDescriptor(ctx context.Context, userID, sourceMachineID, u
 		OperationID: operationID,
 		Environment: map[string]any{"id": row.EnvironmentID, "kind": accessdescriptor.EnvironmentMachine, "resource_id": row.ID, "alias": row.Alias, "state": "ready", "root": row.WorkspaceRoot},
 		Endpoints:   endpoints,
-		Auth:        map[string]any{"method": "bearer", "token": token, "expires_at": expiresAt, "scopes": []string{"exec:operate"}, "access_session_id": accessSessionID},
+		Auth:        map[string]any{"method": "bearer", "token": token, "expires_at": expiresAt, "scopes": []string{kind.scope}, "access_session_id": accessSessionID},
 		ExpiresAt:   expiresAt,
 	}, nil
 }

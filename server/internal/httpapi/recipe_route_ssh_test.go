@@ -11,6 +11,9 @@ func TestRecipeRouteAllowsManagedSSHCertificates(t *testing.T) {
 	if !recipeRoute(httptest.NewRequest("POST", "/v1/machines/m1/ssh-certificate", nil), "") {
 		t.Fatal("a recipe session cannot get a managed SSH certificate")
 	}
+	if !recipeRoute(httptest.NewRequest("POST", "/v1/machines/m1/ssh-descriptor", nil), "") {
+		t.Fatal("a recipe session cannot get a managed SSH operation credential")
+	}
 	if recipeRoute(httptest.NewRequest("PUT", "/v1/ssh/client-keys/abc", nil), "") {
 		t.Fatal("the removed client-key route is allowed")
 	}

@@ -69,25 +69,24 @@ func (s AuthenticatedMachineSource) IssuePeerStream(ctx context.Context, request
 	var expires time.Time
 	var token string
 	var quicEndpoint, wssEndpoint string
-	if request.Consumer == "ssh" {
-		// D1 (F5-07): the host admits every SSH stream from its own signed access rules, online or offline,
-		// so an SSH connection makes no control-plane request.
-		return hostRulesPeerStream(request)
-	}
-	if request.Consumer != "exec" {
+	if request.Consumer != "exec" && request.Consumer != "ssh" {
 		return request, errors.New("daemon descriptor issuance is unavailable for this consumer")
 	}
-	// An exec is admitted by the host's signed standing rule for this endpoint, like SSH (Tailscale tailssh, NetBird):
-	// no control-plane request, access session or peer-configuration change per command. The host queues the audit
-	// event. Only a session the server authorizes per operation (API token, recipe) asks Paperboat for each exec.
-	if authorized, ok := s.Auth.(interface{ ServerAuthorized() (bool, error) }); ok {
-		perOperation, err := authorized.ServerAuthorized()
-		if err != nil {
+	// An exec or SSH stream is admitted by the host's signed standing rule for this endpoint (D1, F5-07; Tailscale
+	// tailssh, NetBird): no control-plane request, access session or peer-configuration change per connection. Only a
+	// session the server authorizes per operation (API token, recipe) has no standing rule on hosts, so it asks
+	// Paperboat for each operation's credential, SSH included (else every SSH from it was refused as no_access).
+	authorized, known := s.Auth.(interface{ ServerAuthorized() (bool, error) })
+	perOperation := false
+	if known {
+		var err error
+		if perOperation, err = authorized.ServerAuthorized(); err != nil {
 			return request, err
 		}
-		if !perOperation {
-			return hostRulesPeerStream(request)
-		}
+	}
+	// SSH asks only for a session known to be authorized per operation; exec also for one that cannot say.
+	if !perOperation && (known || request.Consumer == "ssh") {
+		return hostRulesPeerStream(request)
 	}
 	var descriptor api.ExecDescriptor
 	for attempt := 0; attempt < 2; attempt++ {
@@ -105,7 +104,11 @@ func (s AuthenticatedMachineSource) IssuePeerStream(ctx context.Context, request
 			return request, err
 		}
 		client.SetSourceMachineID(s.SourceMachineID)
-		descriptor, err = client.MachineExecDescriptor(ctx, request.MachineID, request.OperationID)
+		if request.Consumer == "ssh" {
+			descriptor, err = client.MachineSSHDescriptor(ctx, request.MachineID, request.OperationID)
+		} else {
+			descriptor, err = client.MachineExecDescriptor(ctx, request.MachineID, request.OperationID)
+		}
 		if err == nil {
 			break
 		}

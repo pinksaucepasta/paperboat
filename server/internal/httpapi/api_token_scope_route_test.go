@@ -23,6 +23,7 @@ func TestScopedTokenRoute(t *testing.T) {
 		{"POST", "/v1/machines/m1/events/wait", true},
 		{"POST", "/v1/peer-network/config", true},
 		{"POST", "/v1/machines/m1/ssh-certificate", true},
+		{"POST", "/v1/machines/m1/ssh-descriptor", true},
 		{"PUT", "/v1/ssh/client-keys/abc", false},
 		{"POST", "/v1/workspaces/acme/policy/explain", true},
 		{"POST", "/v1/auth/api-token-sessions", true},

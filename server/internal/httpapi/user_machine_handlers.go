@@ -726,6 +726,15 @@ func sharedTerminalConnectionDescriptor(service *usermachines.Service) http.Hand
 }
 
 func userMachineExecDescriptor(service *usermachines.Service) http.HandlerFunc {
+	return userMachineOperationDescriptor(service.ExecDescriptor)
+}
+
+// userMachineSSHDescriptor issues a managed SSH operation credential (usermachines.Service.SSHDescriptor).
+func userMachineSSHDescriptor(service *usermachines.Service) http.HandlerFunc {
+	return userMachineOperationDescriptor(service.SSHDescriptor)
+}
+
+func userMachineOperationDescriptor(issue func(context.Context, string, string, string, string, string, bool) (usermachines.ExecDescriptor, error)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		p, ok := principalFromContext(r.Context())
 		if !ok || p.Client == nil {
@@ -745,7 +754,7 @@ func userMachineExecDescriptor(service *usermachines.Service) http.HandlerFunc {
 			writeError(w, r, http.StatusBadRequest, "invalid_request", "Request body must contain a valid source machine and operation ID.")
 			return
 		}
-		response, err := service.ExecDescriptor(r.Context(), p.User.ID, body.SourceMachineID, r.PathValue("machine_id"), p.Client.SessionID, body.OperationID, body.NativeOnlyAccepted)
+		response, err := issue(r.Context(), p.User.ID, body.SourceMachineID, r.PathValue("machine_id"), p.Client.SessionID, body.OperationID, body.NativeOnlyAccepted)
 		if writeSDKLimitError(w, r, err) {
 			return
 		}

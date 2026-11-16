@@ -13,15 +13,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/pinksaucepasta/paperboat/server/internal/planlimits"
 	"io"
 	"os"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/server/internal/planlimits"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -3150,6 +3152,28 @@ VALUES ($1,$2,$3,1,1,$4,1,$5,$6,$7,1,$8,$9,'{}',now()+interval '1 hour',true,now
 	}
 	if _, err := service.ExecDescriptor(ctx, "usr_unrelated_"+suffix, machineID, machineID, "cli_exec_1", "operation_exec_foreign_"+suffix, false); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("self IDs bypassed source ownership: %v", err)
+	}
+	// SSH for a session the server authorizes per operation (API token, recipe): an ssh_operation credential and a
+	// managed_ssh access session (its signed scope admits the stream on the host), once the machine offers SSH.
+	if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.user_machines SET configured_capabilities=array_append(array_remove(configured_capabilities,'ssh_host'),'ssh_host'), observed_capabilities=array_append(array_remove(observed_capabilities,'ssh_host'),'ssh_host') WHERE id=$1`, machineID); err != nil {
+		t.Fatal(err)
+	}
+	sshOperationID := "operation_ssh_" + suffix
+	sshDescriptor, err := service.SSHDescriptor(ctx, userID, sourceMachineID, machineID, "cli_exec_1", sshOperationID, false)
+	if err != nil {
+		t.Fatalf("ssh descriptor: %v", err)
+	}
+	sshToken, _ := sshDescriptor.Auth["token"].(string)
+	sshClaims, err := signer.VerifyCredential(sshToken, "https://api.paperboat.test", "ssh_operation", time.Now().UTC())
+	if err != nil || sshClaims.OperationID != sshOperationID || sshClaims.MachineID != machineID || !slices.Contains(sshClaims.Scopes, "ssh:operate") {
+		t.Fatalf("ssh claims=%#v err=%v", sshClaims, err)
+	}
+	var sshCapabilities string
+	if err := store.SQL().QueryRowContext(ctx, `SELECT array_to_string(capabilities, ',') FROM paperboat.user_machine_access_sessions WHERE id=$1`, sshDescriptor.Auth["access_session_id"]).Scan(&sshCapabilities); err != nil || sshCapabilities != "managed_ssh" {
+		t.Fatalf("ssh access session capabilities=%v err=%v", sshCapabilities, err)
+	}
+	if _, err := service.SSHDescriptor(ctx, "usr_unrelated_"+suffix, machineID, machineID, "cli_exec_1", "operation_ssh_foreign_"+suffix, false); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("ssh descriptor for an unrelated account: %v", err)
 	}
 	if err := service.RevokeUserMachineSessions(ctx, machineID, "test_revocation"); err != nil {
 		t.Fatal(err)

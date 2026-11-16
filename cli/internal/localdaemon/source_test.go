@@ -374,6 +374,30 @@ func TestIssuePeerStreamSendsSSHToTheHostRulesWithoutARequest(t *testing.T) {
 	}
 }
 
+// An API token or recipe session has no standing SSH rule on hosts: its SSH asks Paperboat for a managed SSH
+// operation credential (ssh-descriptor), like its exec; every other session's SSH asks nothing.
+func TestIssuePeerStreamAsksForAnSSHCredentialOnlyForAServerAuthorizedSession(t *testing.T) {
+	expires := time.Now().UTC().Add(time.Minute).Format(time.RFC3339Nano)
+	var paths []string
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		paths = append(paths, request.URL.Path)
+		writer.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprintf(writer, `{"data":{"operation_id":"operation_1","environment":{"id":"environment_1","kind":"machine","resource_id":"machine_1","state":"ready","root":"/root"},"endpoints":{},"auth":{"method":"bearer","token":"ssh-token","expires_at":%q,"scopes":["ssh:operate"],"access_session_id":"session_access_1"},"expires_at":%q}}`, expires, expires)
+	}))
+	defer server.Close()
+	request := localapi.PeerStreamRequest{Workspace: "personal", Schema: localapi.PeerStreamSchemaV1, Consumer: "ssh", MachineID: "machine_1", EnvironmentID: "environment_1", MachineGeneration: 1, OperationID: "operation_1", Deadline: time.Now().UTC().Add(time.Minute), MaximumBytes: 1024}
+	auth := &standingAuthSource{}
+	source := AuthenticatedMachineSource{ServerURL: server.URL, Auth: auth, SourceMachineID: "source_1"}
+	if result, err := source.IssuePeerStream(context.Background(), request); err != nil || !result.Offline || len(paths) != 0 {
+		t.Fatalf("a standing session's SSH: result=%+v err=%v requests=%v", result, err, paths)
+	}
+	auth.perOperation = true
+	result, err := source.IssuePeerStream(context.Background(), request)
+	if err != nil || result.Offline || result.Credential != "ssh-token" || result.AccessSessionID != "session_access_1" || len(paths) != 1 || paths[0] != "/v1/machines/machine_1/ssh-descriptor" {
+		t.Fatalf("an API token session's SSH: result=%+v err=%v requests=%v", result, err, paths)
+	}
+}
+
 type failingAuthSource struct{ err error }
 
 func (s failingAuthSource) Credential() (config.Credential, error) { return config.Credential{}, s.err }

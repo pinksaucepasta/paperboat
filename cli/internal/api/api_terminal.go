@@ -287,13 +287,23 @@ func (c *Client) UserMachineConnectionDescriptorForSession(ctx context.Context, 
 }
 
 func (c *Client) MachineExecDescriptor(ctx context.Context, machineID, operationID string) (ExecDescriptor, error) {
+	return c.machineOperationDescriptor(ctx, "exec-descriptor", "exec:operate", "exec", machineID, operationID)
+}
+
+// MachineSSHDescriptor is a managed SSH operation credential, for a session the server authorizes per operation (an
+// API token or recipe sign-in): hosts hold no standing SSH rule for it.
+func (c *Client) MachineSSHDescriptor(ctx context.Context, machineID, operationID string) (SSHDescriptor, error) {
+	return c.machineOperationDescriptor(ctx, "ssh-descriptor", "ssh:operate", "ssh", machineID, operationID)
+}
+
+func (c *Client) machineOperationDescriptor(ctx context.Context, route, scope, kind, machineID, operationID string) (ExecDescriptor, error) {
 	if strings.TrimSpace(machineID) == "" || len(operationID) < 8 || len(operationID) > 128 || c.sourceMachineID == "" {
 		return ExecDescriptor{}, errors.New("machine, source machine, and operation IDs are required")
 	}
 	var out ExecDescriptor
-	err := c.doIssuance(ctx, http.MethodPost, "/v1/machines/"+url.PathEscape(machineID)+"/exec-descriptor", operationDescriptorRequest{SourceMachineID: c.sourceMachineID, OperationID: operationID, NativeOnlyAccepted: true}, &out, false)
+	err := c.doIssuance(ctx, http.MethodPost, "/v1/machines/"+url.PathEscape(machineID)+"/"+route, operationDescriptorRequest{SourceMachineID: c.sourceMachineID, OperationID: operationID, NativeOnlyAccepted: true}, &out, false)
 	if err == nil {
-		err = validateOperationDescriptor(out, machineID, operationID, "exec:operate", "exec")
+		err = validateOperationDescriptor(out, machineID, operationID, scope, kind)
 	}
 	return out, err
 }
