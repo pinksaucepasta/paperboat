@@ -279,6 +279,7 @@ var commandHelpDetails = map[string]string{
 	"pb tunnel policy":                        "Inspect, allow, or revoke exact on-demand private port policies. A policy authorizes a target port but does not publish it as a public tunnel.",
 	"pb tunnel policy allow":                  "Authorize on-demand access to one machine port or URL with an exact access audience and optional expiry. --generation protects updates to an existing policy.",
 	"pb tunnel policy get":                    "Show one on-demand port policy, including its target and authorization state. Use its identity and generation for a deliberate revoke.",
+	"pb tunnel policy list":                   "List this account's on-demand port policies with their IDs, targets, generations and expiry, expired ones included. Use the ID and generation to update or revoke a policy whose ID was lost.",
 	"pb tunnel policy revoke":                 "Revoke one exact on-demand port policy at its expected generation. Subsequent activations are denied; this does not delete unrelated tunnel routes.",
 	"pb tunnel replay":                        "Replay one retained HTTP request to the same tunnel origin and route. This can repeat a side effect; use the capture identity and optional idempotency key deliberately.",
 	"pb tunnel resume":                        "Resume new traffic for a paused durable tunnel without creating a new identity. --wait observes readiness; machine connection and origin failures may still need repair.",

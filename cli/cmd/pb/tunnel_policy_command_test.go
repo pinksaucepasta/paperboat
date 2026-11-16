@@ -20,6 +20,9 @@ type fakeLazyPolicyClient struct {
 func (f *fakeLazyPolicyClient) GetLazyPolicy(context.Context, string) (api.LazyPolicy, error) {
 	return f.current, nil
 }
+func (f *fakeLazyPolicyClient) ListLazyPolicies(context.Context) ([]api.LazyPolicy, error) {
+	return []api.LazyPolicy{f.current}, nil
+}
 func (f *fakeLazyPolicyClient) UpsertLazyPolicy(_ context.Context, in api.LazyPolicyUpsertRequest) (api.LazyPolicy, error) {
 	f.upsert = in
 	out := f.current
@@ -74,5 +77,17 @@ func TestTunnelPolicyAllowAcceptsAMachineName(t *testing.T) {
 	runLazyPolicyCommand(t, fake, tunnelPolicyAllowCommand(), "hp", "19090")
 	if fake.upsert.MachineID != "machine_hp_id" {
 		t.Fatalf("the policy stored machine %q, want the ID the name resolves to", fake.upsert.MachineID)
+	}
+}
+
+// A lost policy ID (allow answers policy_changed for a target that already has one) is recovered from the list,
+// and a successful allow prints the ID and generation without --json.
+func TestTunnelPolicyListAndAllowShowTheIDAndGeneration(t *testing.T) {
+	fake := &fakeLazyPolicyClient{current: api.LazyPolicy{ID: "lap_7", Hostname: "p3000-env.example.test", Generation: 3, Target: api.LazyPolicyTarget{Scheme: "http", Address: "127.0.0.1:3000"}, AccessMode: "private", ExpiresAt: time.Now().Add(time.Hour)}}
+	if out := runLazyPolicyCommand(t, fake, tunnelPolicyListCommand()); !strings.Contains(out, "lap_7") || !strings.Contains(out, "generation 3") {
+		t.Fatalf("list output=%q", out)
+	}
+	if out := runLazyPolicyCommand(t, fake, tunnelPolicyAllowCommand(), "hp", "3000"); !strings.Contains(out, "policy lap_7, generation 1") {
+		t.Fatalf("allow output lacks the policy id: %q", out)
 	}
 }

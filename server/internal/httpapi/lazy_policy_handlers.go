@@ -11,6 +11,7 @@ import (
 type LazyPolicyAPI interface {
 	Upsert(context.Context, string, lazyaccess.UpsertRequest) (lazyaccess.Policy, error)
 	Get(context.Context, string, string) (lazyaccess.Policy, error)
+	List(context.Context, string) ([]lazyaccess.Policy, error)
 	Delete(context.Context, string, string, int64) error
 }
 
@@ -33,6 +34,11 @@ func registerLazyPolicyRoutes(mux *http.ServeMux, service LazyPolicyAPI, read, w
 					return
 				}
 				out, err = service.Upsert(r.Context(), principal.User.ID, input)
+			case "list":
+				policies, listErr := service.List(r.Context(), principal.User.ID)
+				out, err = struct {
+					Items []lazyaccess.Policy `json:"items"`
+				}{policies}, listErr
 			case "get":
 				out, err = service.Get(r.Context(), principal.User.ID, r.PathValue("policy_id"))
 			case "delete":
@@ -57,6 +63,7 @@ func registerLazyPolicyRoutes(mux *http.ServeMux, service LazyPolicyAPI, read, w
 		})
 	}
 	mux.Handle("PUT /v1/lazy-policies", write(handler("upsert")))
+	mux.Handle("GET /v1/lazy-policies", read(handler("list")))
 	mux.Handle("GET /v1/lazy-policies/{policy_id}", read(handler("get")))
 	mux.Handle("DELETE /v1/lazy-policies/{policy_id}", write(handler("delete")))
 }

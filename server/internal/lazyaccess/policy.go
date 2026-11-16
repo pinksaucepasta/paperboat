@@ -236,6 +236,33 @@ WHERE p.id=$1 AND p.account_id=$2 AND p.deleted_at IS NULL AND m.user_id=$2 AND 
 	return p, nil
 }
 
+// List returns the account's current policies, expired ones included (they stay re-approvable by ID), so a lost ID is recoverable.
+func (s *Service) List(ctx context.Context, accountID string) ([]Policy, error) {
+	if strings.TrimSpace(accountID) == "" {
+		return nil, ErrInvalid
+	}
+	rows, err := s.db.SQL().QueryContext(ctx, `SELECT p.id,p.hostname,p.account_id,p.machine_id,p.installation_generation,p.generation,p.target_scheme,p.target_address,p.access_mode,p.ownership_mode,p.expires_at
+FROM paperboat.lazy_access_policies p JOIN paperboat.user_machines m ON m.id=p.machine_id AND m.environment_id=p.environment_id
+WHERE p.account_id=$1 AND p.deleted_at IS NULL AND m.user_id=$1 AND m.installation_generation=p.installation_generation AND m.revoked_at IS NULL AND m.deleted_at IS NULL AND m.state NOT IN ('revoked','deleted')
+ORDER BY p.created_at,p.id LIMIT $2`, accountID, maxPoliciesPerEnvironment)
+	if err != nil {
+		return nil, fmt.Errorf("list lazy policies: %w", err)
+	}
+	defer rows.Close()
+	out := []Policy{}
+	for rows.Next() {
+		var p Policy
+		if err = rows.Scan(&p.ID, &p.Hostname, &p.AccountID, &p.MachineID, &p.InstallationGeneration, &p.Generation, &p.Target.Scheme, &p.Target.Address, &p.AccessMode, &p.OwnershipMode, &p.ExpiresAt); err != nil {
+			return nil, fmt.Errorf("scan lazy policy: %w", err)
+		}
+		out = append(out, p)
+	}
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("list lazy policies: %w", err)
+	}
+	return out, nil
+}
+
 func (s *Service) Delete(ctx context.Context, accountID, id string, expectedGeneration int64) error {
 	if strings.TrimSpace(accountID) == "" || !validID(id) || expectedGeneration < 1 {
 		return ErrInvalid

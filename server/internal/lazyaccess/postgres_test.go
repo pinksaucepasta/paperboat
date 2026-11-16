@@ -84,6 +84,9 @@ func TestPolicyPostgres(t *testing.T) {
 	if got, err := svc.Get(ctx, owner, p.ID); err != nil || got.Hostname != p.Hostname {
 		t.Fatalf("expired reservation is not inspectable: %v", err)
 	}
+	if listed, err := svc.List(ctx, owner); err != nil || len(listed) != 1 || listed[0].ID != p.ID {
+		t.Fatalf("an expired policy must stay listed so its ID is recoverable: %#v %v", listed, err)
+	}
 	svc.now = func() time.Time { return now }
 	in.ID = p.ID
 	in.ExpectedGeneration = 1

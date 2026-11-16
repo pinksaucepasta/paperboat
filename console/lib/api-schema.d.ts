@@ -4299,7 +4299,8 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /** List the owned port policies, expired ones included, so a lost policy ID can be recovered */
+        get: operations["list_lazy_policies"];
         /** Approve or update an exact private/team port policy without activating forwarding */
         put: operations["upsert_lazy_policy"];
         post?: never;
@@ -22809,6 +22810,24 @@ export interface operations {
                 };
             };
             412: components["responses"]["Error"];
+        };
+    };
+    list_lazy_policies: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Policies */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
     upsert_lazy_policy: {

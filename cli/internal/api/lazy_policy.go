@@ -63,6 +63,21 @@ func (c *Client) GetLazyPolicy(ctx context.Context, id string) (LazyPolicy, erro
 	return out, err
 }
 
+func (c *Client) ListLazyPolicies(ctx context.Context) ([]LazyPolicy, error) {
+	var out struct {
+		Items []LazyPolicy `json:"items"`
+	}
+	if err := c.doTunnelRequest(ctx, http.MethodGet, "/v1/lazy-policies", nil, &out, nil, nil); err != nil {
+		return nil, err
+	}
+	for _, p := range out.Items {
+		if validateLazyPolicy(p) != nil {
+			return nil, ErrUnsafeTunnelResponse
+		}
+	}
+	return out.Items, nil
+}
+
 func (c *Client) DeleteLazyPolicy(ctx context.Context, id string, expectedGeneration int64) error {
 	if !validLazyPolicyID(id) || expectedGeneration < 1 {
 		return ErrUnsafeTunnelResponse

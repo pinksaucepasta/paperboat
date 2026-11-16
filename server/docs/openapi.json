@@ -37051,6 +37051,23 @@
       }
     },
     "/v1/lazy-policies": {
+      "get": {
+        "summary": "List the owned port policies, expired ones included, so a lost policy ID can be recovered",
+        "security": [
+          {
+            "cookieSession": []
+          },
+          {
+            "bearerAccess": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Policies"
+          }
+        },
+        "operationId": "list_lazy_policies"
+      },
       "put": {
         "summary": "Approve or update an exact private/team port policy without activating forwarding",
         "security": [

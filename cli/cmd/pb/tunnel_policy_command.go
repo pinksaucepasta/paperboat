@@ -17,6 +17,7 @@ const lazyPolicyDefaultLifetime = 8 * time.Hour
 type lazyPolicyClient interface {
 	UpsertLazyPolicy(context.Context, api.LazyPolicyUpsertRequest) (api.LazyPolicy, error)
 	GetLazyPolicy(context.Context, string) (api.LazyPolicy, error)
+	ListLazyPolicies(context.Context) ([]api.LazyPolicy, error)
 	DeleteLazyPolicy(context.Context, string, int64) error
 }
 
@@ -40,7 +41,7 @@ var lazyPolicyMachineID = func(command *cobra.Command, requested string) (string
 
 func tunnelPolicyCommand() *cobra.Command {
 	root := &cobra.Command{Use: "policy", Short: "Manage permission to activate a private port on demand", Args: commandArgs(cobra.NoArgs), Long: "Manage on-demand private or team access to an exact host port. A replacement application listening on the same approved port inherits access. Paperboat does not start the application."}
-	root.AddCommand(tunnelPolicyAllowCommand(), tunnelPolicyGetCommand(), tunnelPolicyRevokeCommand())
+	root.AddCommand(tunnelPolicyAllowCommand(), tunnelPolicyListCommand(), tunnelPolicyGetCommand(), tunnelPolicyRevokeCommand())
 	return root
 }
 
@@ -75,12 +76,40 @@ func tunnelPolicyAllowCommand() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		return tunnelOutput(command, out, fmt.Sprintf("Allowed %s access at https://%s -> %s://%s until %s. Applications replacing the listener on this exact port inherit access; Paperboat will not start them.", out.AccessMode, out.Hostname, out.Target.Scheme, out.Target.Address, out.ExpiresAt.Format(time.RFC3339)))
+		return tunnelOutput(command, out, fmt.Sprintf("Allowed %s access (policy %s, generation %d) at https://%s -> %s://%s until %s. Applications replacing the listener on this exact port inherit access; Paperboat will not start them.", out.AccessMode, out.ID, out.Generation, out.Hostname, out.Target.Scheme, out.Target.Address, out.ExpiresAt.Format(time.RFC3339)))
 	}, SilenceUsage: true, SilenceErrors: true}
 	command.Flags().String("access", "private", "access audience: private or team")
 	command.Flags().Duration("expires", lazyPolicyDefaultLifetime, "policy lifetime")
 	command.Flags().String("id", "", "existing policy ID to update")
 	command.Flags().Int64("generation", 0, "expected existing policy generation")
+	tunnelJSONFlag(command)
+	return command
+}
+
+func lazyPolicyLine(p api.LazyPolicy) string {
+	return fmt.Sprintf("%s\t%s\t%s://%s\t%s\tgeneration %d\texpires %s", p.ID, p.Hostname, p.Target.Scheme, p.Target.Address, p.AccessMode, p.Generation, p.ExpiresAt.Format(time.RFC3339))
+}
+
+func tunnelPolicyListCommand() *cobra.Command {
+	command := &cobra.Command{Use: "list", Short: "List on-demand port policies (their IDs and generations)", Args: commandArgs(cobra.NoArgs), RunE: func(command *cobra.Command, args []string) error {
+		client, err := lazyPolicyClientForCommand(command)
+		if err != nil {
+			return err
+		}
+		items, err := client.ListLazyPolicies(command.Context())
+		if err != nil {
+			return err
+		}
+		lines := make([]string, len(items))
+		for i, p := range items {
+			lines[i] = lazyPolicyLine(p)
+		}
+		human := "No on-demand port policies."
+		if len(lines) > 0 {
+			human = strings.Join(lines, "\n")
+		}
+		return tunnelOutput(command, map[string]any{"items": items}, human)
+	}, SilenceUsage: true, SilenceErrors: true}
 	tunnelJSONFlag(command)
 	return command
 }
@@ -95,7 +124,7 @@ func tunnelPolicyGetCommand() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		return tunnelOutput(command, out, fmt.Sprintf("%s\t%s\t%s://%s\t%s\tgeneration %d\texpires %s", out.ID, out.Hostname, out.Target.Scheme, out.Target.Address, out.AccessMode, out.Generation, out.ExpiresAt.Format(time.RFC3339)))
+		return tunnelOutput(command, out, lazyPolicyLine(out))
 	}, SilenceUsage: true, SilenceErrors: true}
 	tunnelJSONFlag(command)
 	return command
