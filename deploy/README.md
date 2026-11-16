@@ -282,13 +282,15 @@ provider null-route) still turns the canary red. With `CANARY_TEAM`/`CANARY_TEAM
 (server .34, 2026-11-16) turns the canary red although personal machines still work. A step that fails two runs in a row sends one line to the coordinator thread (`t3 thread send`,
 `CANARY_ALERT_THREAD` in the mode-0600 `~/.config/paperboat-canary.env`) and its first pass sends one
 recovery line; both also go to `alerts.log`. Set the machines up with `tools/probe/canary-setup.sh`; keep
-all three (`canary-a`, `canary-b`, `canary-t`) on the same `main` build, upgraded together (copy the binary to
+all four canary containers (`canary-a`, `canary-b`, `canary-t` and the account probe's pair host `pb-canary-pair`) on the same `main` build, upgraded together (copy the binary to
 `/home/pbt/pb` in the container, `chmod 0755`, `./pb install` as `pbt`): there is no compatibility between builds, so a
 host left on an older build refuses the newer client's streams (canary-t on dev-6e1e23255 refused dev-65dddfdfe's
 workspace header, team_exec red 2026-11-16 18:36-18:50 UTC).
 **Every server ship that changes the client or relay contract upgrades the canary with it** (part of the deploy, not a
 follow-up): before the server switch, roll the relay image on both edge hosts if the relay changed, then install a `pb` built
-from the server image's own commit (`~/bin/pb-build.sh <commit>`) on canary-a, -b and -t together, then switch the server.
+from the server image's own commit (`~/bin/pb-build.sh <commit>`) on all four canary containers (pb-canary-a, -b, -t and
+pb-canary-pair) together, then switch the server. pb-canary-pair left on dev-261b23966 failed the account probe's fresh
+pair against server .49 ("installing system services", 2026-11-16 23:30 UTC).
 A canary on an older client is an old consumer the new server does not serve: server .49 (8200fbeb1 relay membership
 grants) with canaries on dev-65dddfdfe and relays .22 turned exec_b_to_a and send_a_to_b red and was rolled back
 (2026-11-16 22:00-22:04 UTC). Tell the fleet owner to upgrade the test fleet at the same time.
