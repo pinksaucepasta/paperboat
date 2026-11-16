@@ -25,7 +25,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 import winhost  # noqa: E402
 
 PREFIX = os.environ.get('XPLAT_PREFIX', 'lanex')
-L_HOST, L_CT = os.environ.get('XPLAT_L_HOST', 'hp'), os.environ.get('XPLAT_L_CT', 'laneX-l')
+L_HOST, L_CT = os.environ.get('XPLAT_L_HOST', 'hp'), os.environ.get('XPLAT_L_CT', '')  # no default container: another lane's machine is not a fallback
 M_NAME = os.environ.get('XPLAT_M_NAME', 'apple')
 MAC_SSH = str(Path.home() / '.pbmac/ssh.sh')
 BUILD_DIR = Path(os.environ.get('XPLAT_BUILD_DIR', '.build/xplat'))
@@ -96,7 +96,10 @@ class Windows:
     def __init__(self, name, target=None, pb_exe=None):
         self.name, self.alias = name, name
         self.pb_path = pb_exe or os.environ.get('XPLAT_W_PB', '')
-        self.device = winhost.WindowsDevice(target=target or os.environ.get('SMOKE_WINDOWS_SSH', 'winpool-1'),
+        target = target or os.environ.get('SMOKE_WINDOWS_SSH')
+        if not target:  # no default runner: winpool-1 belongs to whoever holds it
+            raise SystemExit('SMOKE_WINDOWS_SSH is not set: name the Windows machine of this run')
+        self.device = winhost.WindowsDevice(target=target,
                                             pb_exe=self.pb_path or None, password=None)
         self.home = str(self.device.home())
         if not self.pb_path:  # the per-user install the build made
@@ -132,6 +135,8 @@ class Windows:
 
 
 def linux(name=None, ct=None):
+    if not (ct or L_CT):
+        raise SystemExit('XPLAT_L_CT is not set: name the Linux container of this run')
     user, uid = os.environ.get('XPLAT_L_USER', 'tester'), os.environ.get('XPLAT_L_UID', '1001')
     docker = os.environ.get('XPLAT_L_DOCKER', 'docker').split()  # `sudo -n docker` on a host where the user is not in the docker group
     prefix = ['ssh', L_HOST, *docker, 'exec', '-i', '-u', user, '-e', 'HOME=/home/' + user,
