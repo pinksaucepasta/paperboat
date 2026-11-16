@@ -256,6 +256,14 @@ green run rolls back every image that changed, server first (after `--reap`), th
 rollback step failed; 0 kept). Previous images stay on the hosts; never prune the last two tags. Tests:
 `python3 deploy/test_gated_deploy.py`.
 
+**Edge control access log.** The API site logs every `/v1/edge/*` request at the proxy (`deploy/Caddyfile`, `log edge_control`):
+JSON in the proxy's data volume, `/data/access/edge-control.log` inside `paperboat-proxy-1`
+(`/var/lib/docker/volumes/paperboat_proxy_data/_data/access/` on the host), rotated at 20 MiB, 5 files, 7 days; request and response headers and
+TLS fields are dropped. When an edge logs `edge_control_request_failed` and the server has no line for it, this log shows
+whether Caddy answered (status, upstream, duration) or the request never arrived:
+`docker exec paperboat-proxy-1 sh -c 'tail -n 200 /data/access/edge-control.log' | grep -v '"status":200'`.
+The live `/opt/paperboat/Caddyfile` carries the same block; `rollout-server.py` only rewrites its upstream names.
+
 ## Production canary
 
 A user unit on oracle (`deploy/paperboat-canary.{service,timer}` in `~/.config/systemd/user/`) runs

@@ -4,6 +4,24 @@
 	# config (relay grants) and long polls stay uncompressed.
 	@compressible expression `(method('GET') && path('/v1/machines', '/v1/machines/*/terminal-sessions', '/v1/terminal-sessions', '/v1/previews', '/v1/tunnels', '/v1/machine-services')) || (method('POST') && path('/v1/machine-peer-identity/status'))`
 	encode @compressible zstd gzip
+	# Edge control requests are logged at the proxy, so a refusal that never reached the server (no server log line,
+	# e.g. the usage-report 400s of 2026-11-16) still shows who answered. Only /v1/edge/*; JSON; headers and TLS
+	# fields dropped (credentials); bounded: 20 MiB per file, 5 files, 7 days.
+	@not_edge not path /v1/edge/*
+	log_skip @not_edge
+	log edge_control {
+		output file /data/access/edge-control.log {
+			roll_size 20MiB
+			roll_keep 5
+			roll_keep_for 168h
+		}
+		format filter {
+			request>headers delete
+			request>tls delete
+			resp_headers delete
+			wrap json
+		}
+	}
 	# Long-lived edge control and event streams outlive a rollout's Caddy reload; without this Caddy
 	# closes them the moment the old config unloads (edges saw end_of_stream at every server rollout).
 	reverse_proxy server:8080 {
