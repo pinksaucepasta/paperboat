@@ -32,10 +32,11 @@ const workspace = (id) => ctx.addCookies([{ name: "pb-workspace", value: id, url
 const page = await ctx.newPage()
 
 try {
-  // 1. Personal: recordings are a Teams feature.
+  // 1. Personal: recordings are on every plan (the key setup card, or the list), never the Teams upgrade state.
   await workspace("personal")
   await page.goto(`${origin}/terminals?view=recordings`, { waitUntil: "networkidle", timeout: 120000 })
-  log(await page.locator("[data-recordings-upgrade]").waitFor({ timeout: 20000 }).then(() => true, () => false), "Personal shows the Teams upgrade state")
+  const personalReady = await page.locator("[data-recording-setup], [data-recordings], [data-recordings-empty]").first().waitFor({ timeout: 20000 }).then(() => true, () => false)
+  log(personalReady && !(await page.locator("[data-recordings-upgrade]").count()), "Personal shows recordings (setup or list), not the Teams upgrade state")
 
   // 2. The team's list matches the server's first page.
   await workspace(team)

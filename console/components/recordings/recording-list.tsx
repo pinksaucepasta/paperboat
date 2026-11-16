@@ -43,7 +43,7 @@ export function RecordingList({ machine: tabMachine }: { machine?: Machine }) {
     return (
       <div className="flex flex-col gap-4">
         <RecordingAccess teamId={teamId} />
-        <Empty className="py-16">
+        <Empty className="py-16" data-recordings-empty>
           <EmptyHeader>
             <EmptyMedia variant="icon">
               <RecordIcon />
