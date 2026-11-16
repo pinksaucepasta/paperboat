@@ -1,0 +1,5 @@
+FIX-WINENV winpool-4 (Windows Server 2025 runner), client hp via pb-winenv dev-048fa5d22
+old dev-f24ee62dd: pb exec cmd /c set = 25 variables, pb connect set = 27 (no OS, ProgramFiles, SystemDrive, COMPUTERNAME, PROCESSOR_*)
+dev-048fa5d22: exec 104 variables but pb connect could not start (envinject.Merge rejected ProgramFiles(x86)); fixed e90b01b80
+dev-2094267cc: pb connect set = 107 names incl OS USERNAME USERDOMAIN COMPUTERNAME SystemDrive ProgramFiles PROCESSOR_ARCHITECTURE NUMBER_OF_PROCESSORS; exec shows USERNAME/USERDOMAIN/OS
+pb ssh: not run (publickey denied until DEP2 deploys SSH certificates, coordinator)
