@@ -90,6 +90,9 @@ type ClientSession struct {
 	TokenType    string `json:"token_type"`
 	ExpiresIn    int    `json:"expires_in"`
 	Scope        string `json:"scope"`
+	// ServerAuthorized marks a recipe or API-token machine session: its pb asks the server for every
+	// machine action (config.Profile.ServerAuthorized).
+	ServerAuthorized bool `json:"server_authorized,omitempty"`
 }
 
 func CreatePairing(ctx context.Context, config Config) (Pairing, error) {

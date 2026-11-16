@@ -18,6 +18,15 @@ import (
 )
 
 func TestAuthenticatedMachineScopeRefreshPreservesInstallation(t *testing.T) {
+	t.Run("plain session", func(t *testing.T) { authenticatedMachineScopeRefresh(t, "") })
+	// F26 security: pb pair pbr_… (and pb setup after an API-token login) run this installation with a
+	// restricted session; the machine session it mints keeps the restriction (never a plain session of
+	// the creator) and is marked server-authorized.
+	t.Run("recipe session", func(t *testing.T) { authenticatedMachineScopeRefresh(t, "recipe") })
+	t.Run("api token session", func(t *testing.T) { authenticatedMachineScopeRefresh(t, "api_token") })
+}
+
+func authenticatedMachineScopeRefresh(t *testing.T, parent string) {
 	store := testStore(t)
 	ctx := context.Background()
 	user, client := "user_"+uuid.NewString(), "session_"+uuid.NewString()
@@ -29,6 +38,15 @@ func TestAuthenticatedMachineScopeRefreshPreservesInstallation(t *testing.T) {
 	}
 	exec(`INSERT INTO paperboat.users(id,workos_subject,primary_email,status) VALUES($1,$1,$2,'active')`, user, user+"@example.test")
 	exec(`INSERT INTO paperboat.cli_client_sessions(id,user_id,client_id,client_label,device_type,os,scopes,state,created_at,approved_at) VALUES($1,$2,'paperboat-cli','Scope refresh','desktop','linux',ARRAY['machines:connect'],'active',now(),now())`, client, user)
+	recipeID, tokenID := "recipe_"+uuid.NewString(), "apitok_"+uuid.NewString()
+	switch parent {
+	case "recipe":
+		exec(`INSERT INTO paperboat.recipes(id,token_id,account_id,name,source,source_format,canonical,auth_hash,expires_at) VALUES($1,substr(md5($1),1,10),$2,'scope','','toml','{"expires":"90d"}',sha256(convert_to($1::text,'UTF8')),now()+interval '1 day')`, recipeID, user)
+		exec(`UPDATE paperboat.cli_client_sessions SET recipe_id=$2 WHERE id=$1`, client, recipeID)
+	case "api_token":
+		exec(`INSERT INTO paperboat.api_tokens(id,account_id,name,secret_hash,expires_at) VALUES($1,$2,'scope',sha256(convert_to($1::text,'UTF8')),now()+interval '1 day')`, tokenID, user)
+		exec(`UPDATE paperboat.cli_client_sessions SET api_token_id=$2 WHERE id=$1`, client, tokenID)
+	}
 	exec(`INSERT INTO paperboat.user_machine_entitlements(id,user_id,provider_subscription_id,product_code,state,seat_quantity,allowance_bytes,current_period_start,current_period_end) VALUES($1,$2,$1,'connected-test','active',1,1048576,now()-interval '1 hour',now()+interval '1 hour')`, "period_"+uuid.NewString(), user)
 	public, _, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
@@ -106,10 +124,22 @@ func TestAuthenticatedMachineScopeRefreshPreservesInstallation(t *testing.T) {
 		t.Fatal("refresh changed the installation binding or retained the replaced incarnation")
 	}
 	var fields struct {
-		Credential string `json:"enrollment_credential"`
+		Credential    string `json:"enrollment_credential"`
+		ClientSession struct {
+			SessionID        string `json:"session_id"`
+			ServerAuthorized bool   `json:"server_authorized"`
+		} `json:"client_session"`
 	}
 	if err = json.Unmarshal(material, &fields); err != nil {
 		t.Fatal(err)
+	}
+	var mintedRecipe, mintedToken string
+	if err = store.SQL().QueryRowContext(ctx, `SELECT coalesce(recipe_id,''), coalesce(api_token_id,'') FROM paperboat.cli_client_sessions WHERE id=$1`, fields.ClientSession.SessionID).Scan(&mintedRecipe, &mintedToken); err != nil {
+		t.Fatal(err)
+	}
+	wantRecipe, wantToken := map[string]string{"recipe": recipeID}[parent], map[string]string{"api_token": tokenID}[parent]
+	if mintedRecipe != wantRecipe || mintedToken != wantToken || fields.ClientSession.ServerAuthorized != (parent != "") {
+		t.Fatalf("minted machine session recipe=%q token=%q server_authorized=%v (parent %q)", mintedRecipe, mintedToken, fields.ClientSession.ServerAuthorized, parent)
 	}
 	refreshed, err := enrollments.Exchange(ctx, fields.Credential, public)
 	if err != nil {

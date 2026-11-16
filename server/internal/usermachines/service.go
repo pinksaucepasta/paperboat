@@ -832,7 +832,12 @@ func (s *Service) PrepareAuthenticatedMachineInstallation(ctx context.Context, u
 			}
 			return nil
 		}
-		build, buildErr := s.buildInstallationMaterial(ctx, userID, pairing, machine, operationKey, nil, true, in.CanReuseRuntimeIdentity, "", authorityGuard)
+		// A recipe or API-token session's machine session stays restricted and server-authorized.
+		var restricted bool
+		if err := s.db.SQL().QueryRowContext(ctx, `SELECT recipe_id IS NOT NULL OR api_token_id IS NOT NULL FROM paperboat.cli_client_sessions WHERE id=$1 AND user_id=$2`, cliClientSessionID, userID).Scan(&restricted); err != nil {
+			return AuthenticatedMachineInstallation{}, err
+		}
+		build, buildErr := s.buildInstallationMaterial(ctx, userID, pairing, machine, operationKey, nil, true, in.CanReuseRuntimeIdentity, "", authorityGuard, restricted)
 		if buildErr != nil {
 			return AuthenticatedMachineInstallation{}, buildErr
 		}
@@ -848,7 +853,7 @@ func (s *Service) PrepareAuthenticatedMachineInstallation(ctx context.Context, u
 			if len(candidateCiphertext) == 0 {
 				return ErrMachineInstallationOperationConflict
 			}
-			if err := s.persistInstallationCLISessionTx(ctx, tx, userID, currentMachine, candidateBuild); err != nil {
+			if err := s.persistInstallationCLISessionTx(ctx, tx, userID, currentMachine, candidateBuild, cliClientSessionID); err != nil {
 				return err
 			}
 			if n, setErr := tx.Queries().SetUserMachineInstallationConfig(ctx, dbsqlc.SetUserMachineInstallationConfigParams{ID: current.ID, Ciphertext: candidateCiphertext}); setErr != nil {

@@ -48,7 +48,7 @@ func installBootstrapCLIWith(ctx context.Context, session *bootstrap.ClientSessi
 	if session == nil || client == nil || installDaemon == nil {
 		return errors.New("bootstrap CLI installation is not configured")
 	}
-	if _, err := auth.CompleteLogin(ctx, auth.LoginCompletion{Store: store, Client: client, Issuer: issuer, Credential: cred, SessionID: session.SessionID}); err != nil {
+	if _, err := auth.CompleteLogin(ctx, auth.LoginCompletion{Store: store, Client: client, Issuer: issuer, Credential: cred, SessionID: session.SessionID, ServerAuthorized: session.ServerAuthorized}); err != nil {
 		return err
 	}
 	return installDaemon(ctx)

@@ -149,8 +149,11 @@ func TestBootstrapCLICompletionUsesValidatedPeerEnrollment(t *testing.T) {
 				}
 			}
 			credential := testBootstrapCredential("new")
+			// The first install is a recipe machine's session: the server marks it server-authorized (F26).
+			session := testBootstrapSession("cli_new")
+			session.ServerAuthorized = phase == "first"
 			install := func() error {
-				return installBootstrapCLIWith(context.Background(), testBootstrapSession("cli_new"), issuer, store, credential, api.New(issuer, credential, srv.Client()), func(context.Context) error { daemonCalls++; return nil })
+				return installBootstrapCLIWith(context.Background(), session, issuer, store, credential, api.New(issuer, credential, srv.Client()), func(context.Context) error { daemonCalls++; return nil })
 			}
 			err := install()
 			if phase == "cross_account" || phase == "inactive" {
@@ -182,6 +185,9 @@ func TestBootstrapCLICompletionUsesValidatedPeerEnrollment(t *testing.T) {
 			}
 			if daemonCalls != 1 {
 				t.Fatal("daemon not installed after completion")
+			}
+			if p, e := store.Load(issuer); e != nil || p.ServerAuthorized != (phase == "first") {
+				t.Fatalf("profile server_authorized = %v (%v), want %v", p.ServerAuthorized, e, phase == "first")
 			}
 			p, err := store.Load(issuer)
 			if err != nil || p.CLIClientSessionID != "cli_new" {

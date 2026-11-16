@@ -420,13 +420,21 @@ type installationClientSession struct {
 	Scope        string `json:"scope"`
 }
 
-func (s *Service) persistInstallationCLISessionTx(ctx context.Context, tx *db.Tx, userID string, machine UserMachine, build installationMaterialBuild) error {
+func (s *Service) persistInstallationCLISessionTx(ctx context.Context, tx *db.Tx, userID string, machine UserMachine, build installationMaterialBuild, parentSessionID string) error {
 	if build.cliSessionID == "" {
 		return nil
 	}
 	now := s.now().UTC()
 	if err := auth.CreateClientSessionTx(ctx, tx, dbsqlc.CreateClientSessionParams{ID: build.cliSessionID, UserID: userID, ClientID: s.cliClientID, ClientLabel: "Paperboat enrollment: " + machine.Alias, DeviceType: "desktop", Os: machine.Platform, Scopes: s.cliScopes, CreatedAt: now, ApprovedAt: now}, build.cliAccessToken, build.cliRefreshToken, s.cliTokenPolicy()); err != nil {
 		return err
+	}
+	// A machine session minted from a recipe or API-token session keeps that restriction: it never
+	// becomes a plain session of the creator (F26 security fix).
+	if parentSessionID != "" {
+		if _, err := tx.Exec(ctx, `UPDATE cli_client_sessions n SET recipe_id=p.recipe_id, api_token_id=p.api_token_id
+		 FROM cli_client_sessions p WHERE n.id=$1 AND p.id=$2 AND p.user_id=n.user_id`, build.cliSessionID, parentSessionID); err != nil {
+			return err
+		}
 	}
 	if err := tx.Queries().MarkFreshE2EEBootstrapSession(ctx, build.cliSessionID); err != nil {
 		return err
@@ -441,7 +449,7 @@ func (s *Service) persistInstallationCLISessionTx(ctx context.Context, tx *db.Tx
 	return nil
 }
 
-func (s *Service) buildInstallationMaterial(ctx context.Context, userID string, pairing dbsqlc.UserMachinePairing, machine UserMachine, operationKey string, existingClientSession json.RawMessage, issueCLICredentials, reuseRuntimeIdentity bool, expectedHelperID string, authorityGuard HelperEnrollmentAuthorityGuard) (installationMaterialBuild, error) {
+func (s *Service) buildInstallationMaterial(ctx context.Context, userID string, pairing dbsqlc.UserMachinePairing, machine UserMachine, operationKey string, existingClientSession json.RawMessage, issueCLICredentials, reuseRuntimeIdentity bool, expectedHelperID string, authorityGuard HelperEnrollmentAuthorityGuard, serverAuthorized bool) (installationMaterialBuild, error) {
 	if strings.TrimSpace(s.encryptionKey) == "" {
 		return installationMaterialBuild{}, errors.New("user-machine provisioning encryption is not configured")
 	}
@@ -528,6 +536,11 @@ func (s *Service) buildInstallationMaterial(ctx context.Context, userID string, 
 			"access_token": cliAccessToken, "refresh_token": cliRefreshToken,
 			"token_type": "Bearer", "expires_in": int(s.cliAccessLifetime / time.Second), "scope": s.cliScopes,
 		}
+		if serverAuthorized {
+			// The session is authorized by the server per operation (recipe or API token): its pb must
+			// ask the server for every machine action instead of relying on standing host rules.
+			materialMap["client_session"].(map[string]any)["server_authorized"] = true
+		}
 	}
 	material, err := json.Marshal(materialMap)
 	if err != nil {
@@ -551,12 +564,12 @@ func (s *Service) provisionApprovedUserMachineWithOperation(ctx context.Context,
 	if err != nil {
 		return err
 	}
-	build, err := s.buildInstallationMaterial(ctx, userID, pairing, machine, operationKey, nil, true, pairing.CanReuseRuntimeIdentity, "", nil)
+	build, err := s.buildInstallationMaterial(ctx, userID, pairing, machine, operationKey, nil, true, pairing.CanReuseRuntimeIdentity, "", nil, false)
 	if err != nil {
 		return err
 	}
 	return s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-		if err := s.persistInstallationCLISessionTx(ctx, tx, userID, machine, build); err != nil {
+		if err := s.persistInstallationCLISessionTx(ctx, tx, userID, machine, build, ""); err != nil {
 			return err
 		}
 		n, err := tx.Queries().SetUserMachineInstallationConfig(ctx, dbsqlc.SetUserMachineInstallationConfigParams{ID: pairingID, Ciphertext: build.ciphertext})
@@ -627,7 +640,7 @@ func (s *Service) provisionRecoveredUserMachine(ctx context.Context, userID stri
 	if authenticatedBinding != nil {
 		authorityGuard = s.authenticatedMachineInstallationRecoveryAuthorityGuard(userID, pairing, *authenticatedBinding, materialSessionID)
 	}
-	build, err := s.buildInstallationMaterial(ctx, userID, pairing, machine, operationKey, existingClientSession, !runtimeEnrolled, runtimeEnrolled, expectedHelperID, authorityGuard)
+	build, err := s.buildInstallationMaterial(ctx, userID, pairing, machine, operationKey, existingClientSession, !runtimeEnrolled, runtimeEnrolled, expectedHelperID, authorityGuard, false)
 	if err != nil {
 		return nil, err
 	}
@@ -708,7 +721,7 @@ func (s *Service) provisionRecoveredUserMachine(ctx context.Context, userID stri
 			}
 		}
 		if build.cliSessionID != "" {
-			if err := s.persistInstallationCLISessionTx(ctx, tx, userID, machine, build); err != nil {
+			if err := s.persistInstallationCLISessionTx(ctx, tx, userID, machine, build, ""); err != nil {
 				return err
 			}
 		}
