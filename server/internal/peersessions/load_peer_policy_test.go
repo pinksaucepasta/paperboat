@@ -96,6 +96,7 @@ func TestLoadPeerPolicy(t *testing.T) {
 	machineEvery := time.Duration(loadEnv("PEER_LOAD_MACHINE_RENEW_SECONDS", 60)) * time.Second
 	cliEvery := time.Duration(loadEnv("PEER_LOAD_CLI_RENEW_SECONDS", 1200)) * time.Second
 	activeEvery := time.Duration(loadEnv("PEER_LOAD_ACTIVE_CYCLE_SECONDS", 10)) * time.Second
+	terminalsPerMinute := loadEnv("PEER_LOAD_TERMINALS_PER_MINUTE", 20)
 
 	store, err := db.Open(config.Database{Driver: "postgres", DSN: dsn})
 	if err != nil {
@@ -282,9 +283,15 @@ func TestLoadPeerPolicy(t *testing.T) {
 		mu.Lock()
 		latencies = latencies[:0]
 		mu.Unlock()
+		service.cache.mu.Lock()
+		hits0, builds0 := service.cache.hits, service.cache.builds
+		service.cache.mu.Unlock()
 		cpu0, db0, started := processCPU(), databaseCPU(t, store), time.Now()
 		time.Sleep(window)
 		cpu, dbCPU, elapsed := processCPU()-cpu0, databaseCPU(t, store)-db0, time.Since(started)
+		service.cache.mu.Lock()
+		hits, builds := service.cache.hits-hits0, service.cache.builds-builds0
+		service.cache.mu.Unlock()
 		if db0 < 0 {
 			dbCPU = -1
 		}
@@ -298,7 +305,7 @@ func TestLoadPeerPolicy(t *testing.T) {
 			p50, p99 = values[len(values)/2], values[len(values)*99/100]
 		}
 		out, _ := json.Marshal(map[string]any{"phase": name, "seconds": elapsed.Seconds(), "configurations": n, "failed": failures.Load(),
-			"per_s": float64(n) / elapsed.Seconds(), "p50_ms": p50.Milliseconds(), "p99_ms": p99.Milliseconds(),
+			"per_s": float64(n) / elapsed.Seconds(), "cache_hits": hits, "cache_builds": builds, "p50_ms": p50.Milliseconds(), "p99_ms": p99.Milliseconds(),
 			"server_cpu_cores": cpu.Seconds() / elapsed.Seconds(), "db_cpu_cores": dbCPU.Seconds() / elapsed.Seconds(), "gomaxprocs": runtime.GOMAXPROCS(0)})
 		t.Logf("RESULT %s", out)
 		return cpu, dbCPU, n
@@ -307,6 +314,25 @@ func TestLoadPeerPolicy(t *testing.T) {
 	perReq := idleCPU.Seconds() / float64(max(idleN, 1))
 	dbPerReq := idleDB.Seconds() / float64(max(idleN, 1))
 	perMachine := 1/machineEvery.Seconds() + 1/cliEvery.Seconds()/float64(perAccount) // a machine plus its share of the account's CLI
+
+	// Terminal churn on the idle fleet: one machine of the first account opens and closes a terminal session (no viewer)
+	// terminalsPerMinute times a minute, as a terminal test did in production on 2026-11-16 (~40 notifications a minute).
+	// A terminal nobody views is in no document, so the account's documents must stay cached.
+	churnCtx, stopChurn := context.WithCancel(runCtx)
+	go func() {
+		churnHost := firstMachine[owner]
+		for n := 0; churnCtx.Err() == nil; n++ {
+			id := fmt.Sprintf("load_ts_%s_%d", run, n)
+			_, _ = store.SQL().ExecContext(churnCtx, `INSERT INTO paperboat.user_machine_terminal_sessions(id,user_machine_id,owner_account,name,launch_cwd) VALUES($1,$2,$3,$4,'/')`, id, churnHost, owner, fmt.Sprintf("t%d", n))
+			_, _ = store.SQL().ExecContext(churnCtx, `DELETE FROM paperboat.user_machine_terminal_sessions WHERE id=$1`, id)
+			select {
+			case <-churnCtx.Done():
+			case <-time.After(time.Minute / time.Duration(terminalsPerMinute)):
+			}
+		}
+	}()
+	measure("idle+terminal")
+	stopChurn()
 
 	// Active users on top of the idle fleet: each exec on one of the user's own machines. The host admits it from its
 	// standing rule (no access session, no configuration fetch), queues the start for audit and uploads its queue every

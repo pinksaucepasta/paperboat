@@ -1,0 +1,19 @@
+FIX-PEERCONFIG: peer configuration documents dropped by terminal churn (prod DB ~90% CPU on server 2026.11.13.30).
+
+Prod 2026-11-16 ~08:50 UTC (read-only sampling):
+- pg_stat_activity, 60 x 1 s: teamHostPeers aggregate ("SELECT n.endpoint_id,m.user_id,array_agg(cap.network ...") top statement (10/60).
+- LISTEN machine_events 60 s: 130 notifications; one machine (terminal test "fts-t") and its account each 40/min, as
+  'policy:<machine>' + 'policy:account:<owner>' pairs = user_machine_terminal_sessions insert/delete (migration 356 trigger).
+  The account has 209 live peer identities; every pair drops every cached document of the account (each has the
+  machine and the account as peer keys), so renewals rebuild instead of hitting the cache.
+- Account topic bumps for the same account: ~21/min (private_routes 7, inventory 6, peer_network 4, previews 2,
+  machine_services 2); these stay (some document inputs are covered only by topic triggers, see below).
+- EXPLAIN ANALYZE teamHostPeers for that account: 110 ms execution + 81 ms planning (team_machine_capability_allowed per row).
+
+Load: TestLoadPeerPolicy -tags load, new phase idle+terminal (one machine opens+closes a viewerless terminal 20/min =
+40 notifications/min, as in prod). anvit (ARM64, shared, load ~17), PostgreSQL on anvit, fresh database per run,
+before = same tree without migration 366, alternating. 5 accounts x 200 machines + 1 CLI = 1005 endpoints.
+cache_builds in the 120 s idle+terminal window (documents rebuilt):
+  before-1 145, before-2 112      after-1 0, after-2 0
+(idle phase: 0 builds on both sides.) Latency in this profile is dominated by the per-request path outside the cached
+document at 200 peers per account (p50 tens of seconds on the loaded host on both sides); that is the next fix.
