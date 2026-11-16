@@ -210,6 +210,34 @@ func TestConfigCredentialIsBoundReplaySafeAndRevokedWithAssignment(t *testing.T)
 	if err != nil || claims.AssignmentID != assignment.ID || claims.WarningRevision != "warning-7" || claims.MachineID != identity.MachineID {
 		t.Fatalf("claims = %#v, %v", claims, err)
 	}
+	t.Run("revocation publishes machine access once", func(t *testing.T) {
+		tx, err := store.SQL().BeginTx(ctx, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer tx.Rollback()
+		generation := func() int64 {
+			t.Helper()
+			var value int64
+			if err := tx.QueryRowContext(ctx, `SELECT coalesce((SELECT generation FROM paperboat.machine_topic_generations WHERE machine_id=$1 AND topic='machine_access'),0)`, identity.MachineID).Scan(&value); err != nil {
+				t.Fatal(err)
+			}
+			return value
+		}
+		before := generation()
+		if _, err := tx.ExecContext(ctx, `UPDATE paperboat.control_config_credentials SET revoked_at=$1 WHERE jti=$2`, now, claims.JTI); err != nil {
+			t.Fatal(err)
+		}
+		if generation() != before+1 {
+			t.Fatal("credential revocation did not publish machine_access")
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE paperboat.control_config_credentials SET revoked_at=revoked_at WHERE jti=$1`, claims.JTI); err != nil {
+			t.Fatal(err)
+		}
+		if generation() != before+1 {
+			t.Fatal("unchanged credential published machine_access again")
+		}
+	})
 	replay, err := credentials.Issue(ctx, identity.Credential, resignHelperProof(proofClaims, helperPrivate), body, "POST", "/v1/config/credentials")
 	if err != nil || replay.Credential != issued.Credential {
 		t.Fatalf("replay = %#v, %v", replay, err)
