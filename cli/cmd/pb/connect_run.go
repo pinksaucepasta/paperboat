@@ -146,11 +146,11 @@ func actionConnectTargetInDirectory(c *command.Context, requested, cwd string) e
 	}
 	// A new terminal does not wait out the request timeouts of a control plane that is down (a blackholed API holds each
 	// of the token refresh, the grant and the ENV lookup for 30 s): the daemon's health says so, or a health request
-	// gets no answer within a few seconds (the daemon may not have noticed yet).
-	controlPlaneDown := daemonReportsControlPlaneUnavailable(c.Context) || !api.ControlPlaneReachable(c.Context, d.cfg.ServerURL, controlPlaneProbeTimeout)
+	// gets no answer within a few seconds. The health request runs beside the descriptor request, not before it.
+	probe := startControlPlaneProbe(c.Context, d.cfg.ServerURL)
 	var cred config.Credential
-	if !controlPlaneDown {
-		cred, err = d.auth.Credential()
+	if !probe.Down() {
+		cred, err = probe.credential(d.auth)
 		if err != nil && !api.Unreachable(err) { // an expired token that cannot be refreshed offline still opens a new session offline
 			return err
 		}
@@ -346,11 +346,11 @@ func actionConnectTargetInDirectory(c *command.Context, requested, cwd string) e
 	createdSessionID, createdMachineID := "", ""
 	offlineSessionID := "" // an offline session is named only once its dial succeeds, so a retry mints another
 	for attempt := 0; attempt <= d.cfg.Connect.DialRetries; attempt++ {
-		resolveRequest := resolver.ConnectRequest{Machine: machineRef, Credential: cred, TerminalSessionID: terminalSessionID, CreateTerminalSession: createSession, ControlPlaneUnavailable: controlPlaneDown}
+		resolveRequest := resolver.ConnectRequest{Machine: machineRef, Credential: cred, TerminalSessionID: terminalSessionID, CreateTerminalSession: createSession}
 		if target.kind == environmentUserMachine && resolvedMachine.ID != "" && resolvedMachine.InstallationGeneration > 0 {
 			resolveRequest.ResolvedMachine = &resolver.ResolvedMachine{ID: resolvedMachine.ID, Name: resolvedMachine.Alias, State: resolvedMachine.State, Generation: uint64(resolvedMachine.InstallationGeneration), EnvironmentID: resolvedMachine.EnvironmentID}
 		}
-		info, err = d.resolver.Resolve(ctx, resolveRequest)
+		info, err = resolveWhileProbing(ctx, d.resolver, resolveRequest, probe)
 		if err == nil {
 			if createSession != nil && info.TerminalSession != nil {
 				created := info.TerminalSession

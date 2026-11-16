@@ -412,6 +412,89 @@ func daemonReportsControlPlaneUnavailable(ctx context.Context) bool {
 	return err == nil && len(snapshot.Health) == 1 && snapshot.Health[0].Code == "control_plane_unavailable"
 }
 
+// controlPlaneProbe asks, beside the work that needs the control plane, whether Paperboat answers at all. Its verdict
+// is read without waiting (Down), so a healthy control plane costs the command no health round trip.
+type controlPlaneProbe struct {
+	done chan struct{}
+	down bool // valid once done is closed
+}
+
+// startControlPlaneProbe takes the daemon's own report at once and checks the server's health in the background.
+func startControlPlaneProbe(ctx context.Context, serverURL string) *controlPlaneProbe {
+	p := &controlPlaneProbe{done: make(chan struct{}), down: daemonReportsControlPlaneUnavailable(ctx)}
+	if p.down {
+		close(p.done)
+		return p
+	}
+	go func() {
+		defer close(p.done)
+		p.down = !api.ControlPlaneReachable(ctx, serverURL, controlPlaneProbeTimeout)
+	}()
+	return p
+}
+
+// Down reports a finished probe's verdict; a probe still running says false.
+func (p *controlPlaneProbe) Down() bool {
+	select {
+	case <-p.done:
+		return p.down
+	default:
+		return false
+	}
+}
+
+// credential is auth.Credential, except that a probe finding Paperboat down ends the wait: an expired token's refresh
+// would hold the command for the request timeout, and a terminal opens offline without it.
+func (p *controlPlaneProbe) credential(auth config.AuthSource) (config.Credential, error) {
+	type result struct {
+		cred config.Credential
+		err  error
+	}
+	got := make(chan result, 1)
+	go func() {
+		cred, err := auth.Credential()
+		got <- result{cred, err}
+	}()
+	select {
+	case r := <-got:
+		return r.cred, r.err
+	case <-p.done:
+		if p.down {
+			return config.Credential{}, nil
+		}
+		r := <-got
+		return r.cred, r.err
+	}
+}
+
+// resolveWhileProbing resolves beside the health probe. A probe that finds Paperboat down cuts the request short and
+// resolves again from the host's own rules, instead of holding the terminal for the request timeout.
+func resolveWhileProbing(ctx context.Context, r resolver.MachineResolver, request resolver.ConnectRequest, probe *controlPlaneProbe) (resolver.ConnectInfo, error) {
+	offline := func() (resolver.ConnectInfo, error) {
+		request.ControlPlaneUnavailable, request.Credential = true, config.Credential{}
+		return r.Resolve(ctx, request)
+	}
+	if probe.Down() {
+		return offline()
+	}
+	attempt, cancel := context.WithCancel(ctx)
+	defer cancel()
+	go func() {
+		select {
+		case <-probe.done:
+			if probe.down {
+				cancel()
+			}
+		case <-attempt.Done():
+		}
+	}()
+	info, err := r.Resolve(attempt, request)
+	if err != nil && ctx.Err() == nil && probe.Down() {
+		return offline()
+	}
+	return info, err
+}
+
 func resolveTerminalSession(ctx context.Context, client *api.Client, target environmentTarget, ref string) (api.TerminalSession, error) {
 	sessions, err := listStoredTerminalSessionsForTarget(ctx, client, target)
 	if err != nil {
