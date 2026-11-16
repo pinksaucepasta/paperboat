@@ -147,7 +147,7 @@ function Loaded({ preview }: { preview: Preview }) {
 
       <IpRules kind="preview" id={preview.id} />
 
-      {!preview.owner_team_id && <ShareWithTeam kind="preview" id={preview.id} />}
+      {!over && !preview.owner_team_id && <ShareWithTeam kind="preview" id={preview.id} />}
 
       <ResourceHistory kind="preview" id={preview.id} />
     </>
