@@ -176,6 +176,8 @@ func TestPostgresTeamMachineAuthority(t *testing.T) {
 	grant(enroller, machine, "selected_member", memberID, []string{"terminal", "files"}, true, "selected")
 	check(memberID, team, machine, "terminal", true)
 	check(memberID, team, machine, "exec", false)
+	// The installer keeps its personal access to a shared machine after a selected_member grant (X-12 fleet report).
+	check(enroller, "", machine, "exec", true)
 	check(owner, team, machine, "terminal", false)
 	check(outsider, team, machine, "terminal", false)
 	check(memberID, otherTeam, machine, "terminal", false)
@@ -193,6 +195,13 @@ func TestPostgresTeamMachineAuthority(t *testing.T) {
 	check(memberID, team, machine, "files", false)
 	machineAction(enroller, personal, "unshare")
 	check(enroller, "", personal, "files", true)
+	// A real unshare leaves the team's count and machine page (X-12: machine_count stayed 3 and shared=true).
+	if current.MachineCount != 1 {
+		t.Fatalf("machine_count after unshare = %d, want 1", current.MachineCount)
+	}
+	if page, e := s.Machines(ctx, owner, team, "", 100); e != nil || page.Total != 1 || page.Items[0].MachineID != machine {
+		t.Fatalf("team machines after unshare: %+v, %v", page, e)
+	}
 	// Transfer is explicit, and requires both personal ownership and team admin authority.
 	if _, err = s.Machine(ctx, enroller, team, MachineRequest{OperationID: "denied_transfer", ExpectedGeneration: current.Generation, MachineID: machine, Action: "transfer_to_team", Confirmation: machine}); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("ordinary member transferred ownership: %v", err)
