@@ -139,6 +139,8 @@ func readSharedRepositoryConfig(ctx context.Context, root, credentialRoot string
 			return fail(&sanitizedGitFailure{cause: ErrRepositoryEmpty})
 		case errors.As(underlying, &noRef):
 			return fail(&sanitizedGitFailure{cause: ErrRepositoryBranchMissing})
+		case errors.Is(underlying, transport.ErrAuthenticationRequired), errors.Is(underlying, transport.ErrAuthorizationFailed):
+			return fail(ErrRepositoryCredentials) // read anonymously (no saved profile) and the server wants credentials
 		}
 		return fail(sanitizeGitError(err))
 	}

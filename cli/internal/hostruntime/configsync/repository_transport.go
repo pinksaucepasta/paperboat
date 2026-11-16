@@ -146,6 +146,11 @@ func resolveRepositoryTransportAccess(ctx context.Context, credentialRoot string
 		return result, nil
 	}
 	p, err := LoadRepositoryCredentialProfile(credentialRoot, a.RepositoryID)
+	if errors.Is(err, os.ErrNotExist) && a.Transport == "https" {
+		// No saved profile: an HTTPS repository is read anonymously, as git clone does, so a public repository
+		// needs no per-machine setup (a recipe machine's [config]); one that wants credentials still says so.
+		return result, nil
+	}
 	if err != nil || p.Transport != a.Transport {
 		return result, ErrRepositoryCredentials
 	}
