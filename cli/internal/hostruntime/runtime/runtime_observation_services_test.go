@@ -133,6 +133,65 @@ func TestRuntimeObservationIsSentAtOnceWhenAPolicyEventWakesIt(t *testing.T) {
 	}
 }
 
+// switchingPolicyTransport answers the first observation with automatic discovery off and every later one with it on.
+type switchingPolicyTransport struct{ calls atomic.Int32 }
+
+func (t *switchingPolicyTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+	n := t.calls.Add(1)
+	if request.Body != nil {
+		_, _ = io.Copy(io.Discard, request.Body)
+		_ = request.Body.Close()
+	}
+	body := `{"data":{"machine_services_policy":{"generation":1,"automatic_discovery_enabled":false}}}`
+	if n > 1 {
+		body = `{"data":{"machine_services_policy":{"generation":2,"automatic_discovery_enabled":true}}}`
+	}
+	return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body)), Request: request}, nil
+}
+
+// The observation a policy event wakes carries the old policy; the port the new policy lists is announced by the
+// next observation at once, not at the next watch tick (an hour away here).
+func TestRuntimeObservationAnnouncesAPortAPolicyListsRightAfterTheWake(t *testing.T) {
+	transport := &switchingPolicyTransport{}
+	wake := make(chan struct{}, 1)
+	sender := &runtimeObservationSender{
+		endpoint:         "https://observations.invalid/v1/runtime-observations",
+		tokens:           livenessObservationTokenSource{},
+		proofs:           livenessObservationProofSource{},
+		operationID:      func() (string, error) { return "op_runtime_observation_policy_0001", nil },
+		environmentID:    "env_policy",
+		machineID:        "machine_policy",
+		reporterVersion:  "test",
+		client:           &http.Client{Transport: transport},
+		receiptPath:      filepath.Join(t.TempDir(), "runtime", "server-heartbeat.json"),
+		workerGeneration: 1,
+		osBootID:         "boot-policy",
+		lazyBootID:       "boot-policy", lazyStartedAt: time.Now(), installationGeneration: 7,
+		machineServicesDiscover: func(context.Context) ([]machineservices.Service, error) {
+			return []machineservices.Service{{Port: 18312, Loopback: "127.0.0.1"}}, nil
+		},
+	}
+	service := &runtimeObservationService{sender: sender, interval: time.Hour, heartbeat: time.Hour, wake: wake, timeout: time.Second, servicesWatch: time.Hour}
+	if err := service.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = service.Shutdown(shutdownCtx)
+	}()
+	time.Sleep(100 * time.Millisecond)
+	before := transport.calls.Load()
+	wake <- struct{}{}
+	deadline := time.Now().Add(2 * time.Second)
+	for transport.calls.Load() < before+2 {
+		if time.Now().After(deadline) {
+			t.Fatalf("a policy wake sent %d observations, want 2 (the second announces the port the policy lists)", transport.calls.Load()-before)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
 func TestTimelessDigestIgnoresTimestampsOnly(t *testing.T) {
 	a := timelessDigest([]byte(`{"sampled_at":"2026-11-16T01:00:00Z","update":{"state":"idle","operation_id":"update-1-111","observed_at":"2026-11-16T01:00:01.5Z"},"machine_services":{"generation":3}}`))
 	b := timelessDigest([]byte(`{"sampled_at":"2026-11-16T01:00:10Z","update":{"state":"idle","operation_id":"update-1-222","observed_at":"2026-11-16T01:00:11Z"},"machine_services":{"generation":3}}`))

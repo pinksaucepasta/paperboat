@@ -205,6 +205,11 @@ func (s *runtimeObservationService) loop(ctx context.Context, done chan<- struct
 			}
 		case <-s.wake:
 			next.Reset(s.runtimeObservationWait(send(), failures))
+			// The response just applied the policy that woke us: a port it lists is announced now, not at the next
+			// watch tick (2 s Linux, 5 s Windows, 10 s macOS).
+			if failures == 0 && s.sender.machineServicesChanged(ctx) {
+				next.Reset(s.runtimeObservationWait(send(), failures))
+			}
 		}
 	}
 }
