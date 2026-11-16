@@ -21,6 +21,8 @@ import {
   FilePasteError,
   FilePasteUploader,
   filePasteMessage,
+  pasteLineCount,
+  pastedAsOneLine,
   terminalPasteText,
   type FilePasteProgress,
 } from "@/lib/terminal/file-paste"
@@ -148,11 +150,14 @@ export function useTerminalConnection({
   theme,
   hostRef,
   accessMethod = "account",
+  targetPlatform,
 }: {
   session: TerminalSession
   theme: TerminalTheme
   /** "code" for guests who joined with a join code: they get a guest ticket and have no account. */
   accessMethod?: "account" | "code"
+  /** The machine's platform. A multi-line paste into a Windows target asks first: its shell runs each line as it arrives. */
+  targetPlatform?: string
   /** The element wterm renders into. The caller owns it, so the returned state holds no refs. */
   hostRef: React.RefObject<HTMLDivElement | null>
 }) {
@@ -190,6 +195,9 @@ export function useTerminalConnection({
   const [filePasteProgress, setFilePasteProgress] = useState<FilePasteProgress | null>(null)
   const [filePasteNotice, setFilePasteNotice] = useState("")
   const [fileDragOver, setFileDragOver] = useState(false)
+  // A multi-line paste into a Windows target, waiting for the choice in the paste confirmation.
+  const [pendingPaste, setPendingPaste] = useState<string | null>(null)
+  const targetPlatformRef = useRef(targetPlatform)
   const [filePasteBusy, setFilePasteBusyState] = useState(false)
 
   const terminalRef = useRef<WTerm | null>(null)
@@ -231,6 +239,9 @@ export function useTerminalConnection({
   const offlineConnectionRef = useRef("")
   const startConnectionRef = useRef<((retry?: boolean) => Promise<void>) | null>(null)
 
+  useEffect(() => {
+    targetPlatformRef.current = targetPlatform
+  }, [targetPlatform])
   // Polled session details (title, participants) must not restart the terminal.
   useEffect(() => {
     sessionRef.current = session
@@ -538,6 +549,11 @@ export function useTerminalConnection({
         // wterm sends (and wraps) the converted text; the repeat has no LF, so it passes this check.
         event.preventDefault()
         event.stopImmediatePropagation()
+        // Windows Terminal and VS Code ask first: a Windows shell runs each pasted line as it arrives.
+        if (targetPlatformRef.current === "windows" && pasteLineCount(text) > 1 && roleRef.current !== "viewer") {
+          setPendingPaste(text)
+          return
+        }
         pasteIntoWTerm(textarea, terminalPasteText(text))
         return
       }
@@ -1061,6 +1077,18 @@ export function useTerminalConnection({
   }, [])
 
   const focus = useCallback(() => terminalRef.current?.element.querySelector("textarea")?.focus(), [])
+  const answerPendingPaste = useCallback(
+    (choice: "lines" | "one-line" | "cancel") => {
+      const text = pendingPaste
+      setPendingPaste(null)
+      const textarea = terminalRef.current?.element.querySelector("textarea")
+      if (text !== null && textarea && choice !== "cancel") {
+        pasteIntoWTerm(textarea, choice === "lines" ? terminalPasteText(text) : pastedAsOneLine(text))
+      }
+      textarea?.focus()
+    },
+    [pendingPaste],
+  )
 
   /** Starts or stops recording this session; resolves with a refusal code, or nothing when the machine agreed. */
   const controlRecording = useCallback(async (action: "record-start" | "record-stop"): Promise<string | undefined> => {
@@ -1091,6 +1119,7 @@ export function useTerminalConnection({
     reconnect,
     fitToWindow,
     focus,
+    paste: { lines: pendingPaste === null ? 0 : pasteLineCount(pendingPaste), answer: answerPendingPaste },
     upload: {
       progress: filePasteProgress,
       notice: filePasteNotice,

@@ -47,7 +47,7 @@ export function TerminalSurface({
   onLeave?: { label: string; action: () => void }
   className?: string
 }) {
-  const { phase, error, upload, role, mobile } = connection
+  const { phase, error, upload, role, mobile, paste } = connection
   const busy = phase === "connecting" || phase === "reconnecting"
   const stopped = phase === "denied" || phase === "closed" || phase === "transport-error" || phase === "quota" || phase === "limit"
   // Overlays take the theme's colours, so they belong to the terminal rather than the page.
@@ -190,6 +190,35 @@ export function TerminalSurface({
             >
               Cancel
             </Button>
+          </div>
+        )}
+
+        {paste.lines > 0 && (
+          <div
+            className="absolute inset-0 flex items-center justify-center p-6"
+            style={{ background: overlay.background }}
+            data-terminal-paste-confirm={paste.lines}
+            role="alertdialog"
+            aria-label="Confirm paste"
+            onKeyDown={(event) => event.key === "Escape" && paste.answer("cancel")}
+          >
+            <div className="w-full max-w-sm rounded-lg border p-5 text-sm" style={overlay}>
+              <p className="font-medium">Paste {paste.lines} lines?</p>
+              <p className="mt-1.5" style={muted}>
+                Each line runs as you paste.
+              </p>
+              <div className="mt-4 flex flex-wrap justify-end gap-2">
+                <Button size="sm" variant="outline" onClick={() => paste.answer("cancel")}>
+                  Cancel
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => paste.answer("one-line")}>
+                  Paste as one line
+                </Button>
+                <Button size="sm" autoFocus onClick={() => paste.answer("lines")}>
+                  Paste
+                </Button>
+              </div>
+            </div>
           </div>
         )}
 

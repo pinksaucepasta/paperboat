@@ -6,7 +6,7 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { Children, Fragment, useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
-import { ApiError, meQuery, useApiQuery } from "@/lib/api"
+import { ApiError, meQuery, useApiQuery, useMachine } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import { recordingSentences } from "@/lib/recordings"
 import { closeTerminal, terminalKeys, terminalQuery } from "@/lib/terminal/queries"
@@ -178,7 +178,14 @@ export function TerminalRoom({
   const router = useRouter()
   const { theme } = useTerminalTheme()
   const hostRef = useRef<HTMLDivElement>(null)
-  const connection = useTerminalConnection({ session: polled, theme, hostRef, accessMethod: guest ? "code" : "account" })
+  const { data: target } = useMachine(guest ? null : polled.target.machine_id)
+  const connection = useTerminalConnection({
+    session: polled,
+    theme,
+    hostRef,
+    accessMethod: guest ? "code" : "account",
+    targetPlatform: target?.platform,
+  })
   const session = useLiveParticipants(polled, connection.participants, onPushed)
   const { data: me } = useApiQuery({ ...meQuery, enabled: !guest })
   const isOwner = session.role === "owner"

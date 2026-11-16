@@ -182,6 +182,16 @@ export function terminalPasteText(text: string): string {
   return text.replace(/\r?\n/g, "\r")
 }
 
+/** Lines in pasted text, not counting one trailing line break: what a Windows target would run as you paste. */
+export function pasteLineCount(text: string): number {
+  return text.replace(/\r?\n$/, "").split(/\r?\n/).length
+}
+
+/** The same text as one line: each line break becomes a space, so nothing runs until Enter. */
+export function pastedAsOneLine(text: string): string {
+  return text.replace(/\r?\n$/, "").replace(/\r?\n/g, " ")
+}
+
 export function classifyFilePaste(data: Pick<DataTransfer, "files" | "items" | "getData"> | null): FilePasteSelection {
   if (!data) return { kind: "text" }
   const found = fileItems(data)

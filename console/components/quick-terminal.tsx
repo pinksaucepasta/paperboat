@@ -11,7 +11,7 @@ import {
   XIcon,
 } from "@phosphor-icons/react"
 import { useEffect, useRef, useState } from "react"
-import { useApiQuery, type Machine } from "@/lib/api"
+import { useApiQuery, useMachine, type Machine } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import { closeTerminal, terminalQuery } from "@/lib/terminal/queries"
 import { useTerminalConnection, type TerminalSession } from "@/lib/terminal/use-terminal-connection"
@@ -183,7 +183,8 @@ export function QuickTerminal({
 function LiveTerminal({ session, onPushed }: { session: TerminalSession; onPushed?: (pushed: boolean) => void }) {
   const { theme } = useTerminalTheme()
   const hostRef = useRef<HTMLDivElement>(null)
-  const connection = useTerminalConnection({ session, theme, hostRef })
+  const { data: target } = useMachine(session.target.machine_id)
+  const connection = useTerminalConnection({ session, theme, hostRef, targetPlatform: target?.platform })
   const pushed = connection.participants !== null
   useEffect(() => onPushed?.(pushed), [pushed, onPushed])
   return (
