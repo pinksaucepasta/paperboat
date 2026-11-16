@@ -37,11 +37,10 @@ func apiTokenLogin(c *command.Context, path string) error {
 		return invocationError(err)
 	}
 	cfg.ServerURL = issuer
-	store, err := config.ProfileStoreFor(cfg)
+	// A headless machine (SSH or CI, no unlocked Keychain) keeps the session in owner-only files, as a
+	// browser sign-in and a recipe pairing do (pbmac2 over SSH: Keychain exit 36).
+	store, err := loginProfileStore(cfg, issuer)
 	if err != nil {
-		return err
-	}
-	if err = store.Recover(issuer); err != nil {
 		return err
 	}
 	label := "API token on " + firstNonEmpty(loginDeviceName(), runtime.GOOS)

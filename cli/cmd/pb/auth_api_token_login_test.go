@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/pinksaucepasta/paperboat/internal/config"
 )
 
 // pb login --api-token-file exchanges the token for a CLI session and activates it like a
@@ -48,6 +50,16 @@ func TestAPITokenLoginStartsATokenSession(t *testing.T) {
 	t.Cleanup(func() { loginHTTPClient = old })
 	loginHTTPClient = srv.Client
 	path, store := browserLoginFixture(t, srv.URL)
+	// A headless Mac or container has no usable credential store: the session goes to owner-only files
+	// (pbmac2 over SSH refused the Keychain write, exit 36).
+	headless, _ := config.Load(path)
+	headless.Auth.AllowFileFallback = false
+	if err := headless.Save(); err != nil {
+		t.Fatal(err)
+	}
+	oldStore := authCredentialStoreAvailable
+	t.Cleanup(func() { authCredentialStoreAvailable = oldStore })
+	authCredentialStoreAvailable = func() bool { return false }
 	tokenFile := filepath.Join(t.TempDir(), "token")
 	if err := os.WriteFile(tokenFile, []byte(secret+"\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -55,6 +67,9 @@ func TestAPITokenLoginStartsATokenSession(t *testing.T) {
 	out, err := runBrowserLogin(t, context.Background(), path, "login", "--api-token-file", tokenFile)
 	if err != nil || !strings.Contains(out, "Signed in as agent@example.test with an API token") {
 		t.Fatalf("login: %v %s", err, out)
+	}
+	if saved, _ := config.Load(path); !saved.Auth.AllowFileFallback {
+		t.Fatal("a headless API token sign-in did not switch to owner-only files")
 	}
 	profile, err := store.Load(srv.URL)
 	if err != nil || profile.CLIClientSessionID != "cls_token" || profile.Account.ID != "usr_token" {
