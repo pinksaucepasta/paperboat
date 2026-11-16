@@ -107,6 +107,10 @@ func commandFailureMessage(err error, failure commandFailure) string {
 	if failure.kind == commandOperational && errors.As(err, &lost) {
 		return "The change was sent, but its answer was lost on the way back, so it may have been applied. " + responseLostRecovery
 	}
+	// A fixed sentence, no response content: the real cause must not vanish behind the generic text (L264).
+	if boundedErrorWalk(err, func(cause error) bool { return cause == api.ErrUnsafeTunnelResponse }) {
+		return "This pb rejected the tunnel answer from the server as unsafe or unexpected, so nothing was changed or shown. Run `pb update`; if it continues, run `pb doctor` and report the support reference."
+	}
 	var sshNotReady *sshTargetNotReadyError
 	if failure.kind == commandRejected && errors.As(err, &sshNotReady) {
 		return sshNotReady.Error()
