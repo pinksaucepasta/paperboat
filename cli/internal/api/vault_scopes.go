@@ -68,15 +68,14 @@ type VaultTeamMember struct {
 	EnvPermission        string `json:"env_permission"`
 }
 type VaultTeamState struct {
-	RecordSequence   uint64            `json:"record_sequence"`
-	Entitled         bool              `json:"entitled"`
-	RotationRequired bool              `json:"rotation_required"`
-	TeamID           string            `json:"team_id"`
-	OwnerAccount     string            `json:"owner_account"`
-	Generation       uint64            `json:"generation"`
-	KeyEpoch         uint64            `json:"key_epoch"`
-	Members          []VaultTeamMember `json:"members"`
-	Scope            VaultScopeState   `json:"scope"`
+	RecordSequence uint64            `json:"record_sequence"`
+	Entitled       bool              `json:"entitled"`
+	TeamID         string            `json:"team_id"`
+	OwnerAccount   string            `json:"owner_account"`
+	Generation     uint64            `json:"generation"`
+	KeyEpoch       uint64            `json:"key_epoch"`
+	Members        []VaultTeamMember `json:"members"`
+	Scope          VaultScopeState   `json:"scope"`
 }
 type VaultTeamCreate struct {
 	VaultEnvelope          string `json:"vault_envelope"`
@@ -218,9 +217,8 @@ func (c *Client) AckVaultGrant(ctx context.Context, digest, vaultID string) erro
 }
 
 type VaultPersonalInventory struct {
-	RotationRequired bool              `json:"rotation_required"`
-	KeyEpoch         uint64            `json:"key_epoch"`
-	Scopes           []VaultScopeState `json:"scopes"`
+	KeyEpoch uint64            `json:"key_epoch"`
+	Scopes   []VaultScopeState `json:"scopes"`
 }
 type VaultReset struct {
 	OperationID             string   `json:"operation_id"`

@@ -64,26 +64,6 @@ func TestTeamActivityRejectsInvalidLimitBeforeNetwork(t *testing.T) {
 	}
 }
 
-func TestTeamGetShowsActionablePendingENVStatus(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{
-			"env_status": "rotation_pending", "team_id": "team_1", "owner_account": "acct_1", "generation": 4,
-			"deleted": false, "members": []any{}, "grants": []any{}, "machines": []any{}, "machine_grants": []any{},
-		}})
-	}))
-	defer server.Close()
-	dir := t.TempDir()
-	configPath := filepath.Join(dir, "config.json")
-	writeTestProfile(t, dir, configPath, server.URL)
-	var out bytes.Buffer
-	if code := run(context.Background(), []string{"team", "get", "team_1", "--config", configPath, "--server", server.URL}, &out, &out); code != 0 {
-		t.Fatalf("code=%d output=%s", code, out.String())
-	}
-	if text := out.String(); !strings.Contains(text, "ENV\trotation_pending") || !strings.Contains(text, "authorized ENV keys") || !strings.Contains(text, "pb env team rotate <team>") {
-		t.Fatalf("pending ENV output=%q", text)
-	}
-}
-
 func TestTeamActivityFiltersAndExport(t *testing.T) {
 	var queries []url.Values
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

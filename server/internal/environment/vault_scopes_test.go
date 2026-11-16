@@ -168,7 +168,7 @@ func TestVaultGrantBindsExactRecipientsAndSender(t *testing.T) {
 func b64Vault(raw []byte) string { return base64.RawURLEncoding.EncodeToString(raw) }
 
 func TestVaultTeamRotationAuthorization(t *testing.T) {
-	team := VaultTeamState{OwnerAccount: "owner", KeyEpoch: 2, RotationRequired: true, Members: []VaultTeamMember{
+	team := VaultTeamState{OwnerAccount: "owner", KeyEpoch: 2, Members: []VaultTeamMember{
 		{AccountID: "owner", Role: "owner", Active: true, GrantEpoch: 2, ENVPermission: "write"},
 		{AccountID: "admin", Role: "admin", Active: true, GrantEpoch: 2, ENVPermission: "write"},
 		{AccountID: "member", Role: "member", Active: true, GrantEpoch: 2, ENVPermission: "write"},
@@ -188,7 +188,7 @@ func TestVaultTeamRotationAuthorization(t *testing.T) {
 		{"admin reset denied", "admin", VaultTeamRotate{ConfirmTotalLoss: true}, false},
 		{"admin remove owner denied", "admin", VaultTeamRotate{RemoveAccountIDs: []string{"owner"}}, false},
 		{"admin remove admin denied", "admin", VaultTeamRotate{RemoveAccountIDs: []string{"pending"}}, false},
-		{"admin finish revoked member rekey", "admin", VaultTeamRotate{RemoveAccountIDs: []string{"revoked-member"}}, true},
+		{"admin remove an already removed member denied", "admin", VaultTeamRotate{RemoveAccountIDs: []string{"revoked-member"}}, false},
 		{"admin remove member", "admin", VaultTeamRotate{RemoveAccountIDs: []string{"member"}}, true},
 		{"role without key denied", "pending", VaultTeamRotate{}, false},
 		{"key without membership denied", "removed", VaultTeamRotate{}, false},

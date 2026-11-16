@@ -40,7 +40,7 @@ beforeEach(() => {
     const ok = (data: unknown) => Response.json({ data })
     if (url.pathname === "/api/v1/me") return ok(sampleFor("GET /v1/me", { id: account }))
     if (url.pathname === "/api/v1/environment-vault") return ok(stored)
-    if (url.pathname === "/api/v1/environment/scopes") return ok({ rotation_required: false, key_epoch: 1, scopes: [] })
+    if (url.pathname === "/api/v1/environment/scopes") return ok({ key_epoch: 1, scopes: [] })
     const team = {
       ...sampleFor("GET /v1/environment/teams/{team_id}"),
       team_id: "acme",
@@ -50,7 +50,6 @@ beforeEach(() => {
       members: [
         { account_id: account, membership_generation: 1, role: "owner", active: true, grant_epoch: 0, env_permission: "write" },
       ],
-      rotation_required: false,
       entitled: true,
       record_sequence: 0,
     }

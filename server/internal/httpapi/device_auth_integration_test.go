@@ -286,22 +286,12 @@ func TestBrowserLogoutKeepsCLIClientActiveAndDeleteReturnsNoContent(t *testing.T
 	}
 
 	survivor := authorizeCLI(t, router, loginCookies(t, router, "workos_logout_scope:logout-scope@example.com:Logout Scope"))
-	var rotationRequired bool
-	if err := store.SQL().QueryRow(`SELECT COALESCE((SELECT COALESCE((SELECT rotation_required FROM paperboat.environment_vault_personal_epochs WHERE account_id=$1),false)),false)`, accountID).Scan(&rotationRequired); err != nil || rotationRequired {
-		t.Fatal("routine browser logout required key rotation", err)
-	}
 	req = httptest.NewRequest(http.MethodDelete, "/v1/auth/cli-client-sessions/"+tokens.CLIClientSessionID, nil)
 	req.Header.Set("Authorization", "Bearer "+tokens.AccessToken)
 	rec = httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 	if rec.Code != http.StatusNoContent || rec.Body.Len() != 0 {
 		t.Fatalf("delete status=%d body=%q, want empty 204", rec.Code, rec.Body.String())
-	}
-	if err := store.SQL().QueryRow(`SELECT COALESCE((SELECT rotation_required FROM paperboat.environment_vault_personal_epochs WHERE account_id=$1),false)`, accountID).Scan(&rotationRequired); err != nil || rotationRequired {
-		t.Fatal("CLI session revocation required personal key rotation", err)
-	}
-	if err := store.SQL().QueryRow(`SELECT rotation_required FROM paperboat.environment_vault_teams WHERE team_id=$1`, teamID).Scan(&rotationRequired); err != nil || rotationRequired {
-		t.Fatal("CLI session revocation required team key rotation", err)
 	}
 
 	for _, credential := range []struct {

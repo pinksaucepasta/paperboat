@@ -12,7 +12,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/teams"
 )
 
-func TestExplicitMachineRevocationFencesVaultAndTeams(t *testing.T) {
+func TestExplicitMachineRevocationLeavesEveryDeliveryUntouched(t *testing.T) {
 	store := testStore(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -88,39 +88,17 @@ func TestExplicitMachineRevocationFencesVaultAndTeams(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			var personalRequired, teamRequired bool
-			if err := store.SQL().QueryRowContext(ctx, `SELECT COALESCE((SELECT rotation_required FROM paperboat.environment_vault_personal_epochs WHERE account_id=$1),false)`, account).Scan(&personalRequired); err != nil {
-				t.Fatal(err)
-			}
-			if err := store.SQL().QueryRowContext(ctx, `SELECT rotation_required FROM paperboat.environment_vault_teams WHERE team_id=$1`, team).Scan(&teamRequired); err != nil {
-				t.Fatal(err)
-			}
-			if personalRequired || teamRequired {
-				t.Fatal("machine removal must fence delivery without requiring key rotation")
-			}
-			// Only the sources the removed machine could read are fenced: the one it
-			// sourced itself here, never the account's other private sources.
-			var ownCount, sourcedByMachine int
-			if err := store.SQL().QueryRowContext(ctx, `SELECT count(*) FILTER (WHERE generation=2),count(*) FILTER (WHERE generation=2 AND source_machine_id=$2) FROM environment_vault_layer_fences WHERE owner_kind='personal' AND owner_id=$1`, account, machine).Scan(&ownCount, &sourcedByMachine); err != nil || ownCount != 1 || sourcedByMachine != 1 {
-				t.Fatalf("private source fences advanced=%d sourced by the machine=%d err=%v, want only the machine's own", ownCount, sourcedByMachine, err)
-			}
-			var teamFence, unrelatedFence uint64
-			wantTeamFence := uint64(2) // a machine holding a team layer fences that team
-			if deletion {
-				wantTeamFence = 1 // a deleted machine that never received a layer leaves the team alone
-			}
-			if err := store.SQL().QueryRowContext(ctx, `SELECT generation FROM environment_vault_layer_fences WHERE owner_kind='team' AND owner_id=$1`, team).Scan(&teamFence); err != nil || teamFence != wantTeamFence {
-				t.Fatalf("shared source fence=%d want %d err=%v", teamFence, wantTeamFence, err)
-			}
-			if err := store.SQL().QueryRowContext(ctx, `SELECT generation FROM environment_vault_layer_fences WHERE owner_kind='personal' AND owner_id=$1`, "unrelated_"+suffix).Scan(&unrelatedFence); err != nil || unrelatedFence != 1 {
-				t.Fatalf("unrelated source fence changed=%d err=%v", unrelatedFence, err)
+			// Removing one machine never touches anyone's deliveries: no source fence moved.
+			var moved int
+			if err := store.SQL().QueryRowContext(ctx, `SELECT count(*) FROM environment_vault_layer_fences WHERE generation<>1 AND owner_id IN ($1,$2,$3)`, account, team, "unrelated_"+suffix).Scan(&moved); err != nil || moved != 0 {
+				t.Fatalf("machine removal advanced %d delivery fences err=%v, want none", moved, err)
 			}
 
 		})
 	}
 }
 
-func TestMemberWithoutPersonalVaultRemovalFencesSharedLayer(t *testing.T) {
+func TestMemberWithoutPersonalVaultRemovalLeavesSharedLayerDelivered(t *testing.T) {
 	store := testStore(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -145,12 +123,12 @@ func TestMemberWithoutPersonalVaultRemovalFencesSharedLayer(t *testing.T) {
 	if err := store.InTx(ctx, func(ctx context.Context, tx *db.Tx) error { return teams.RemoveMemberTx(ctx, tx, team, member) }); err != nil {
 		t.Fatal(err)
 	}
-	var required, active bool
+	var active bool
 	var fence uint64
-	if err := store.SQL().QueryRowContext(ctx, `SELECT t.rotation_required,f.generation,m.active FROM environment_vault_teams t JOIN environment_vault_layer_fences f ON f.owner_kind='team' AND f.owner_id=t.team_id JOIN team_members m ON m.team_id=t.team_id AND m.account_id=$2 WHERE t.team_id=$1`, team, member).Scan(&required, &fence, &active); err != nil {
+	if err := store.SQL().QueryRowContext(ctx, `SELECT f.generation,m.active FROM environment_vault_teams t JOIN environment_vault_layer_fences f ON f.owner_kind='team' AND f.owner_id=t.team_id JOIN team_members m ON m.team_id=t.team_id AND m.account_id=$2 WHERE t.team_id=$1`, team, member).Scan(&fence, &active); err != nil {
 		t.Fatal(err)
 	}
-	if !required || fence != 2 || active {
-		t.Fatal("keyless member removal did not atomically revoke and fence Team ENV")
+	if fence != 1 || active {
+		t.Fatal("keyless member removal must revoke the member without moving the delivery fence")
 	}
 }

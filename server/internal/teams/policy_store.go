@@ -405,8 +405,8 @@ func recordingEntitlementTx(ctx context.Context, tx *db.Tx, team string, next po
 }
 
 // envAccessChangedTx applies a policy change to the team ENV: a member the policy no longer
-// lets read it loses their key exactly as `pb env team revoke` takes it (rotation required when
-// they held one); any ENV change invalidates the team's ENV layers.
+// lets read it loses their key exactly as `pb env team revoke` takes it. Nothing else moves: the
+// remaining members keep their ENV and their key.
 func envAccessChangedTx(ctx context.Context, tx *db.Tx, team string, changes []policy.Change) error {
 	changed := false
 	for _, c := range changes {
@@ -415,20 +415,12 @@ func envAccessChangedTx(ctx context.Context, tx *db.Tx, team string, changes []p
 	if !changed {
 		return nil
 	}
-	var held bool
-	err := tx.QueryRow(ctx, `WITH lost AS (
+	_, err := tx.Exec(ctx, `WITH lost AS (
 	  UPDATE environment_vault_team_members e SET grant_epoch=0
 	  WHERE e.team_id=$1 AND e.grant_epoch>0 AND team_env_permission(e.account_id,e.team_id)=''
 	  RETURNING e.account_id
-	), dropped AS (DELETE FROM environment_vault_team_grants g USING lost WHERE g.team_id=$1 AND g.account_id=lost.account_id)
-	SELECT EXISTS(SELECT 1 FROM lost)`, team).Scan(&held)
-	if err != nil {
-		return err
-	}
-	if held {
-		return FenceENVTx(ctx, tx, team)
-	}
-	return InvalidateENVTx(ctx, tx, team)
+	) DELETE FROM environment_vault_team_grants g USING lost WHERE g.team_id=$1 AND g.account_id=lost.account_id`, team)
+	return err
 }
 
 // tagRowsTx is a policy's stored tags as "machine|tag" entries (neither contains '|').

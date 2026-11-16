@@ -320,7 +320,6 @@ func TestTeamHumanOutputReturnsWriterFailures(t *testing.T) {
 	}{
 		{name: "list row", args: []string{"team", "list"}, failAt: 1},
 		{name: "ENV status", args: []string{"team", "get", "team_1"}, failAt: 2},
-		{name: "ENV recovery guidance", args: []string{"team", "get", "team_1"}, failAt: 3},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -332,7 +331,7 @@ func TestTeamHumanOutputReturnsWriterFailures(t *testing.T) {
 					json.NewEncoder(w).Encode(map[string]any{"data": []map[string]any{{"team_id": "team_1", "owner_account": "acct_1", "generation": 4}}})
 				case "/v1/teams/team_1":
 					json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{
-						"env_status": "rotation_pending", "team_id": "team_1", "owner_account": "acct_1", "generation": 4,
+						"env_status": "ready", "team_id": "team_1", "owner_account": "acct_1", "generation": 4,
 						"deleted": false, "member_count": 0, "grant_count": 0, "machine_count": 0, "machine_grants": []any{},
 					}})
 				case "/v1/teams/team_1/members", "/v1/teams/team_1/grants", "/v1/teams/team_1/machines":

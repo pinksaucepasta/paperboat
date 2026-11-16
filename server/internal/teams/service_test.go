@@ -366,10 +366,6 @@ func TestPostgresTeamAuthorityLifecycle(t *testing.T) {
 	if _, err = s.Authorize(ctx, ordinary, team, "env", team, "read"); !errors.Is(err, ErrForbidden) {
 		t.Fatal(err)
 	}
-	var pending bool
-	if err = store.SQL().QueryRowContext(ctx, `SELECT rotation_required FROM paperboat.environment_vault_teams WHERE team_id=$1`, team).Scan(&pending); err != nil || !pending {
-		t.Fatalf("removal must fence pending rekey: %v %v", pending, err)
-	}
 	// Acceptance after removal does not restore old grants or administrative roles.
 	i = invite(owner, ordinary, "reinvite")
 	accept(ordinary, i, "reaccept")
@@ -738,13 +734,12 @@ func TestPostgresENVGrantRevocationRequiresRotation(t *testing.T) {
 		t.Fatal(err)
 	}
 	grantState, err = s.Grant(ctx, owner, grantTeam, GrantRequest{OperationID: "revoke_initialized_env_grant", ExpectedGeneration: grantState.Generation, AccountID: ordinary, ResourceKind: "env", ResourceID: grantTeam, Permission: "read", Active: false})
-	if err != nil || grantState.ENVStatus != "rotation_pending" {
-		t.Fatalf("ENV grant revoke must require rotation: state=%s err=%v", grantState.ENVStatus, err)
+	if err != nil || grantState.ENVStatus != "ready" {
+		t.Fatalf("ENV grant revoke must leave the team ready: state=%s err=%v", grantState.ENVStatus, err)
 	}
-	var grantPending bool
 	var grantEpoch, grantFence uint64
-	if err := store.SQL().QueryRowContext(ctx, `SELECT t.rotation_required,m.grant_epoch,f.generation FROM environment_vault_teams t JOIN environment_vault_team_members m USING(team_id) JOIN environment_vault_layer_fences f ON f.owner_kind='team' AND f.owner_id=t.team_id WHERE t.team_id=$1 AND m.account_id=$2`, grantTeam, ordinary).Scan(&grantPending, &grantEpoch, &grantFence); err != nil || !grantPending || grantEpoch != 0 || grantFence != fenceBefore+1 {
-		t.Fatalf("grant revocation custody/fence: pending=%t epoch=%d fence=%d err=%v", grantPending, grantEpoch, grantFence, err)
+	if err := store.SQL().QueryRowContext(ctx, `SELECT m.grant_epoch,f.generation FROM environment_vault_teams t JOIN environment_vault_team_members m USING(team_id) JOIN environment_vault_layer_fences f ON f.owner_kind='team' AND f.owner_id=t.team_id WHERE t.team_id=$1 AND m.account_id=$2`, grantTeam, ordinary).Scan(&grantEpoch, &grantFence); err != nil || grantEpoch != 0 || grantFence != fenceBefore {
+		t.Fatalf("grant revocation custody (the fence stays): epoch=%d fence=%d err=%v", grantEpoch, grantFence, err)
 	}
 	if _, err = s.Authorize(ctx, ordinary, grantTeam, "env", grantTeam, "read"); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("revoked ENV grant authorization: %v", err)

@@ -68,7 +68,7 @@ const grantRowFilter = `resource_kind<>'env' AND permission NOT IN ('inspect','r
 
 func readTx(ctx context.Context, tx *db.Tx, id, lock string, summary bool) (Team, error) {
 	out := Team{TeamID: id, Members: []Member{}, Grants: []Grant{}, Machines: []MachineBinding{}, MachineGrants: []MachineGrant{}, MachineRequests: []MachineAdmission{}, TerminalSessionGrants: []TerminalSessionGrant{}}
-	err := tx.QueryRow(ctx, `SELECT sso_required,approve_new_machines,env_names_listable,coalesce((SELECT p.allow_private_access FROM workspace_policies p WHERE p.team_id=$1),false),coalesce(display_name,team_id),coalesce(display_name,team_id),owner_account,generation,deleted_at IS NOT NULL,suspended,CASE WHEN deleted_at IS NOT NULL THEN 'deleted' WHEN suspended THEN 'suspended' ELSE coalesce((SELECT CASE WHEN rotation_required THEN 'rotation_pending' ELSE 'ready' END FROM environment_vault_teams WHERE team_id=$1),'not_initialized') END FROM teams WHERE team_id=$1`+lock, id).Scan(&out.SSORequired, &out.ApproveNewMachines, &out.ENVNamesListable, &out.AllowPrivateAccess, &out.Name, &out.DisplayName, &out.OwnerAccount, &out.Generation, &out.Deleted, &out.Suspended, &out.ENVStatus)
+	err := tx.QueryRow(ctx, `SELECT sso_required,approve_new_machines,env_names_listable,coalesce((SELECT p.allow_private_access FROM workspace_policies p WHERE p.team_id=$1),false),coalesce(display_name,team_id),coalesce(display_name,team_id),owner_account,generation,deleted_at IS NOT NULL,suspended,CASE WHEN deleted_at IS NOT NULL THEN 'deleted' WHEN suspended THEN 'suspended' ELSE coalesce((SELECT 'ready' FROM environment_vault_teams WHERE team_id=$1),'not_initialized') END FROM teams WHERE team_id=$1`+lock, id).Scan(&out.SSORequired, &out.ApproveNewMachines, &out.ENVNamesListable, &out.AllowPrivateAccess, &out.Name, &out.DisplayName, &out.OwnerAccount, &out.Generation, &out.Deleted, &out.Suspended, &out.ENVStatus)
 	if err != nil {
 		return out, mapTeamReadNotFound(err)
 	}
@@ -241,13 +241,7 @@ func (s *Service) Authorize(ctx context.Context, account, team, kind, id, permis
 	})
 	return out, err
 }
-func FenceENVTx(ctx context.Context, tx *db.Tx, team string) error {
-	_, err := tx.Exec(ctx, `UPDATE environment_vault_teams SET rotation_required=true WHERE team_id=$1`, team)
-	if err != nil {
-		return err
-	}
-	return InvalidateENVTx(ctx, tx, team)
-}
+
 func InvalidateENVTx(ctx context.Context, tx *db.Tx, team string) error {
 	_, err := tx.Exec(ctx, `UPDATE environment_vault_layer_fences SET generation=generation+1 WHERE owner_kind='team' AND owner_id=$1`, team)
 	return err
@@ -268,9 +262,7 @@ func RemoveMemberTx(ctx context.Context, tx *db.Tx, team, account string) error 
 	if err := refreshPolicyTx(ctx, tx, Workspace{TeamID: team}, ""); err != nil {
 		return err
 	}
-
-	// Shared host layers can be received without an individual Team vault key.
-	return FenceENVTx(ctx, tx, team)
+	return nil
 }
 func replay(ctx context.Context, tx *db.Tx, account, op, kind string, request, out any) (bool, []byte, error) {
 	if !validID(account) || !validID(op) {

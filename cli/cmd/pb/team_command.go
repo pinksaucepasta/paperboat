@@ -519,11 +519,6 @@ func writeTeamOutput(c *cobra.Command, jsonOutput bool, team api.Team) error {
 		if _, err = fmt.Fprintf(c.OutOrStdout(), "ENV\t%s\n", team.ENVStatus); err != nil {
 			return err
 		}
-		if team.ENVStatus == "rotation_pending" {
-			if _, err = fmt.Fprintln(c.OutOrStdout(), "An owner/admin with authorized ENV keys must run pb env team rotate <team>. Access remains fenced until rotation completes."); err != nil {
-				return err
-			}
-		}
 	}
 	for _, machine := range team.Machines {
 		owner := machine.OwnerAccount

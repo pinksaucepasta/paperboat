@@ -299,34 +299,24 @@ func TestPostgresVaultScopesTeamRotationAndReconciliation(t *testing.T) {
 	}
 	scopeRaw = memberScope
 	granted.Generation = writable.Generation
-	if err := store.InTx(ctx, func(ctx context.Context, tx *db.Tx) error { return db.FenceRemovedMachineVaultTx(ctx, tx, member, "") }); err != nil {
-		t.Fatal(err)
-	}
-	memberInventory, err := service.GetVaultPersonalScopes(ctx, member)
-	if err != nil || memberInventory.RotationRequired {
-		t.Fatal("machine removal required personal key rotation", err)
-	}
 	fencedTeam, err := service.GetVaultTeam(ctx, owner, team)
-	if err != nil || fencedTeam.RotationRequired || fencedTeam.Generation != granted.Generation+1 {
-		t.Fatal("machine removal must preserve ready team keys and advance delivery authority", err)
+	if err != nil || fencedTeam.Generation != granted.Generation {
+		t.Fatal("machine removal must leave ready team keys and delivery authority untouched", err)
 	}
 	removedTeam, err := authority.Mutate(ctx, owner, team, teams.MutationRequest{OperationID: "remove_before_rekey_" + suffix, ExpectedGeneration: fencedTeam.Generation, Action: "remove", AccountID: member})
 	if err != nil {
 		t.Fatal("shared membership removal failed", err)
 	}
 	fencedTeam, err = service.GetVaultTeam(ctx, owner, team)
-	if err != nil || !fencedTeam.RotationRequired || fencedTeam.Generation != removedTeam.Generation {
-		t.Fatal("shared removal lost pending rekey", err)
-	}
-	if _, err := service.PutVaultScope(ctx, owner, team, "team", team, "", VaultScopePut{OperationID: "blocked_" + suffix, Envelope: b64Vault(scopeRaw)}); !errors.Is(err, ErrVaultRotationRequired) {
-		t.Fatal("unrotated team write accepted", err)
+	if err != nil || fencedTeam.Generation != removedTeam.Generation {
+		t.Fatal("shared removal changed the team keys", err)
 	}
 	nextDigest := sha256.Sum256(nextRaw)
 	thirdRaw := passwordVaultFixtureByte(t, "https://control.example", owner, 3, nextDigest[:], 10)
 	third, _ := ParsePasswordVaultMetadata(thirdRaw, "https://control.example", owner)
 	scopeDigest := sha256.Sum256(scopeRaw)
 	rotatedRaw := vaultScopeFixture(t, fixtureScopeHeader(team, "team", owner, 2, 2, 3, scopeDigest[:]), 11)
-	rotation := VaultTeamRotate{OperationID: "rotate_" + suffix, ExpectedTeamGeneration: fencedTeam.Generation, RemoveAccountIDs: []string{member}, ScopeEnvelope: b64Vault(rotatedRaw), VaultEnvelope: b64Vault(thirdRaw), GrantEnvelopes: []string{}}
+	rotation := VaultTeamRotate{OperationID: "rotate_" + suffix, ExpectedTeamGeneration: fencedTeam.Generation, RemoveAccountIDs: []string{}, ScopeEnvelope: b64Vault(rotatedRaw), VaultEnvelope: b64Vault(thirdRaw), GrantEnvelopes: []string{}}
 	if _, err := service.RotateVaultTeam(ctx, owner, team, rotation); !errors.Is(err, ErrPrecondition) {
 		t.Fatal("missing exact recipient set accepted", err)
 	}
@@ -360,7 +350,7 @@ func TestPostgresVaultScopesTeamRotationAndReconciliation(t *testing.T) {
 	if _, err := service.RotateVaultTeam(ctx, owner, team, rotation); err != nil {
 		t.Fatal("exact rotation retry failed", err)
 	}
-	rotation.RemoveAccountIDs = []string{}
+	rotation.GrantEnvelopes = []string{}
 	if _, err := service.RotateVaultTeam(ctx, owner, team, rotation); !errors.Is(err, ErrOperationConflict) {
 		t.Fatal("operation substitution accepted", err)
 	}
@@ -483,7 +473,7 @@ func TestPostgresVaultScopesTeamRotationAndReconciliation(t *testing.T) {
 	// Staged personal rotation retains usable committed ciphertext until all scopes
 	// and the replacement vault can commit together.
 	rotationInventory, err := service.GetVaultPersonalScopes(ctx, owner)
-	if err != nil || rotationInventory.RotationRequired || len(rotationInventory.Scopes) != 2 {
+	if err != nil || len(rotationInventory.Scopes) != 2 {
 		t.Fatal("rotation inventory invalid", err)
 	}
 	resetDigest := sha256.Sum256(resetRaw)
@@ -534,7 +524,7 @@ func TestPostgresVaultScopesTeamRotationAndReconciliation(t *testing.T) {
 		t.Fatal("committed staged retry failed", err)
 	}
 	rotationInventory, err = service.GetVaultPersonalScopes(ctx, owner)
-	if err != nil || rotationInventory.RotationRequired || rotationInventory.KeyEpoch != 3 {
+	if err != nil || rotationInventory.KeyEpoch != 3 {
 		t.Fatal("rotation did not release personal fence", err)
 	}
 	var stagedCount int

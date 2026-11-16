@@ -8484,8 +8484,7 @@
         "additionalProperties": false,
         "required": [
           "key_epoch",
-          "scopes",
-          "rotation_required"
+          "scopes"
         ],
         "properties": {
           "key_epoch": {
@@ -8499,9 +8498,6 @@
             "items": {
               "$ref": "#/components/schemas/EnvironmentVaultPersonalScopeHead"
             }
-          },
-          "rotation_required": {
-            "type": "boolean"
           }
         },
         "description": "All encrypted private source heads owned by this account across Personal and Team workspaces. Team roles never expose another member's private scope. Heads contain no values; every signed source read and rotation successor preserves its workspace/device tuple."
@@ -8564,7 +8560,6 @@
           "key_epoch",
           "members",
           "scope",
-          "rotation_required",
           "entitled",
           "record_sequence"
         ],
@@ -8594,9 +8589,6 @@
           },
           "scope": {
             "$ref": "#/components/schemas/EnvironmentVaultScope"
-          },
-          "rotation_required": {
-            "type": "boolean"
           },
           "entitled": {
             "type": "boolean",
@@ -9158,7 +9150,6 @@
             "enum": [
               "not_initialized",
               "ready",
-              "rotation_pending",
               "deleted"
             ]
           },

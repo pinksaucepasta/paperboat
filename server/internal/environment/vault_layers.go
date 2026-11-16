@@ -189,9 +189,6 @@ func (s *Service) PutVaultLayer(ctx context.Context, account, workspace, machine
 		if err := lockVaultScopes(ctx, tx); err != nil {
 			return err
 		}
-		if err := allowVaultWritesTx(ctx, tx, account); err != nil {
-			return err
-		}
 		writer, err := s.vaultMetadataTx(ctx, tx, account)
 		if err != nil {
 			return err
@@ -338,14 +335,6 @@ func (s *Service) VaultLayerContext(ctx context.Context, machineOwner, machine, 
 			}
 			if err := requireVaultWorkspaceMemberTx(ctx, tx, machineOwner, workspace); err != nil {
 				return err
-			}
-			var rotation bool
-			err := tx.QueryRow(ctx, `SELECT rotation_required FROM environment_vault_teams WHERE team_id=$1`, workspace).Scan(&rotation)
-			if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-				return err
-			}
-			if rotation {
-				return ErrVaultRotationRequired
 			}
 			coordinates = append(coordinates, VaultLayerCoordinate{WorkspaceID: workspace, OwnerKind: "team", OwnerID: workspace})
 		}

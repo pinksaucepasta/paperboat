@@ -915,11 +915,6 @@ func (s *Service) revokeUserMachineControlTx(ctx context.Context, tx *db.Tx, use
 	if changed != 1 {
 		return ErrNotFound
 	}
-	if machine.State != "disconnected" && machine.State != "deleted" && machine.State != "revoked" {
-		if err := db.FenceRemovedMachineVaultTx(ctx, tx, machine.UserID, machine.ID); err != nil {
-			return err
-		}
-	}
 	if _, err := tx.Queries().RevokeUserMachineAccessSessions(ctx, dbsqlc.RevokeUserMachineAccessSessionsParams{UserMachineID: machine.ID, Reason: sql.NullString{String: "user_machine_deleted", Valid: true}}); err != nil {
 		return err
 	}

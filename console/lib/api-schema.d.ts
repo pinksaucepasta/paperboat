@@ -451,6 +451,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/recipe": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Download the Paperboat recipe installer
+         * @description Serves the published shell installer (`curl … | bash`) marked as a recipe install: it pairs from PB_RECIPE and refuses at once, before downloading, when PB_RECIPE is missing or not a recipe token. The token never goes in the URL, so any query is rejected (400). Responses are not cached.
+         */
+        get: operations["get_recipe"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/install.ps1": {
         parameters: {
             query?: never;
@@ -463,6 +483,26 @@ export interface paths {
          * @description Without a query, serves the published PowerShell installer (`irm … | iex`) without adding enrollment options. The optional p parameter carries one exact dashboard enrollment parameter. Empty, duplicate, malformed or additional query parameters are rejected. Responses are not cached.
          */
         get: operations["get_install_ps1"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/recipe.ps1": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Download the Paperboat recipe installer
+         * @description Serves the published PowerShell installer (`irm … | iex`) marked as a recipe install: it pairs from PB_RECIPE and refuses at once, before downloading, when PB_RECIPE is missing or not a recipe token. The token never goes in the URL, so any query is rejected (400). Responses are not cached.
+         */
+        get: operations["get_recipe_ps1"];
         put?: never;
         post?: never;
         delete?: never;
@@ -10509,7 +10549,6 @@ export interface components {
         EnvironmentVaultPersonalScopes: {
             key_epoch: number;
             scopes: components["schemas"]["EnvironmentVaultPersonalScopeHead"][];
-            rotation_required: boolean;
         };
         EnvironmentVaultTeamMember: {
             account_id: string;
@@ -10528,7 +10567,6 @@ export interface components {
             key_epoch: number;
             members: components["schemas"]["EnvironmentVaultTeamMember"][];
             scope: components["schemas"]["EnvironmentVaultScope"];
-            rotation_required: boolean;
             /** @description Current active Team subscription permits ENV scope use. Initialization and encrypted key management do not imply this entitlement. */
             entitled: boolean;
             record_sequence: number;
@@ -10662,7 +10700,7 @@ export interface components {
         };
         TeamTeam: {
             /** @enum {string} */
-            env_status: "not_initialized" | "ready" | "rotation_pending" | "deleted";
+            env_status: "not_initialized" | "ready" | "deleted";
             team_id: string;
             owner_account: string;
             generation: number;
@@ -14268,12 +14306,80 @@ export interface operations {
             };
         };
     };
+    get_recipe: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Product-pinned Paperboat installer with exact Content-Length. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": unknown;
+                };
+            };
+            /** @description Invalid enrollment parameter. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No installer has been published. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     get_install_ps1: {
         parameters: {
             query?: {
                 /** @description Dashboard enrollment token, optionally prefixed by the machine alias and a hyphen. */
                 p?: string;
             };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Product-pinned Paperboat installer with exact Content-Length. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": unknown;
+                };
+            };
+            /** @description Invalid enrollment parameter. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No installer has been published. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    get_recipe_ps1: {
+        parameters: {
+            query?: never;
             header?: never;
             path?: never;
             cookie?: never;

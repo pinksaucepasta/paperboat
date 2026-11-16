@@ -76,9 +76,6 @@ func (s *Service) PutVaultRecords(ctx context.Context, account string, c VaultLa
 		if err := lockVaultScopes(ctx, tx); err != nil {
 			return err
 		}
-		if err := allowVaultWritesTx(ctx, tx, account); err != nil {
-			return err
-		}
 		epoch, err := authorizeVaultRecordsTx(ctx, tx, account, c, true)
 		if err != nil {
 			return err

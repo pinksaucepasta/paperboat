@@ -25,18 +25,16 @@ again. Paperboat membership controls the team default and its adoption. Access g
 directly by a Git provider remains external and is not revoked or represented as revoked by
 Paperboat.
 
-Removing a device revokes that device and stops all future ENV delivery to it, including already-connected sessions. It does not require ENV key rotation or change the personal or Team key epoch. The removed device may keep the old key and any ENV it already downloaded. Rotating ENV keys is an optional Owner/Admin action for lost or compromised devices. Member removal and ENV grant revocation still require rotation.
+Removing a device revokes that device and stops all future ENV delivery to it, including already-connected sessions. It does not require ENV key rotation or change the personal or Team key epoch. The removed device may keep the old key and any ENV it already downloaded. Rotating ENV keys is an optional Owner/Admin action for lost or compromised devices. Member removal and ENV grant revocation behave the same way: they never withhold ENV from anyone else and never block team writes.
 
 Team ENV status appears in `pb team get` and the dashboard:
 
 - `not_initialized`: the team has no ENV epoch yet.
 - `ready`: the current epoch is available through authorized key delivery.
-- `rotation_pending`: member removal or ENV grant revocation has been applied, but rotation cannot finish until an
-  authorized owner or admin supplies access to the current key material.
 - `suspended`: the team is suspended.
 - `deleted`: the team and its ENV are no longer usable.
 
-Rotation never bypasses the key requirement. Owners and admins can coordinate rotation only
+Rotation is always the owner's explicit choice (`pb env team rotate`) and never bypasses the key requirement. Owners and admins can coordinate rotation only
 when they already have authorized key access; their role does not decrypt the ENV. Revocation
 cannot make someone forget secrets they already learned, just as it cannot erase files already
 received. Rotate any externally usable credentials that a departing member may know.

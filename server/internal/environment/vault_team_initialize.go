@@ -27,9 +27,6 @@ func (s *Service) CreateVaultTeam(ctx context.Context, account string, request V
 		if err := lockVaultScopes(ctx, tx); err != nil {
 			return err
 		}
-		if err := allowVaultWritesTx(ctx, tx, account); err != nil {
-			return err
-		}
 		authority, err := teams.ReadTx(ctx, tx, request.TeamID)
 		if errors.Is(err, teams.ErrNotFound) {
 			return ErrKeyAuthorizationRequired

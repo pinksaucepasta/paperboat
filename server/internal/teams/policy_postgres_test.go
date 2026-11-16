@@ -430,12 +430,11 @@ func TestPolicyDecidesTeamENV(t *testing.T) {
 	}
 	f.save(string(next))
 	var epoch uint64
-	var rotation bool
-	if err := f.store.SQL().QueryRowContext(f.ctx, `SELECT e.grant_epoch,t.rotation_required FROM paperboat.environment_vault_team_members e JOIN paperboat.environment_vault_teams t USING(team_id) WHERE e.team_id=$1 AND e.account_id=$2`, f.team, f.member).Scan(&epoch, &rotation); err != nil {
+	if err := f.store.SQL().QueryRowContext(f.ctx, `SELECT e.grant_epoch FROM paperboat.environment_vault_team_members e WHERE e.team_id=$1 AND e.account_id=$2`, f.team, f.member).Scan(&epoch); err != nil {
 		t.Fatal(err)
 	}
-	if permission(f.member) != "" || epoch != 0 || !rotation {
-		t.Fatalf("removing the member's ENV rule: permission %q, key epoch %d, rotation required %v; want none, 0, true", permission(f.member), epoch, rotation)
+	if permission(f.member) != "" || epoch != 0 {
+		t.Fatalf("removing the member's ENV rule: permission %q, key epoch %d; want none, 0", permission(f.member), epoch)
 	}
 	if grant(f.other, "write", false); permission(f.other) != "" || permission(f.admin) != "write" {
 		t.Fatalf("revoking other's grant: other %q admin %q", permission(f.other), permission(f.admin))

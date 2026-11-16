@@ -79,9 +79,8 @@ function TeamRow({ team, unlocked }: { team: Workspace; unlocked: boolean }) {
           "No variables yet."
         ) : (
           [
-            state!.rotation_required && "A new key is needed.",
             behind > 0 && `${behind} ${behind === 1 ? "member needs" : "members need"} the key.`,
-            !state!.rotation_required && behind === 0 && "Key in use.",
+            behind === 0 && "Key in use.",
           ]
             .filter(Boolean)
             .join(" ")

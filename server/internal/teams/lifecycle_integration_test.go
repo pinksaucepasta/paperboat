@@ -137,7 +137,7 @@ func TestPostgresUnifiedLifecycleNoRevivedAuthority(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if state.ENVStatus != "rotation_pending" {
+	if state.ENVStatus != "ready" {
 		t.Fatalf("ENV status=%s", state.ENVStatus)
 	}
 	assertCount := func(q string, want int, args ...any) {

@@ -107,7 +107,7 @@ func writeVaultScopeTx(ctx context.Context, tx *db.Tx, scope parsedVaultScope, w
 }
 func readVaultTeamTx(ctx context.Context, tx *db.Tx, team string) (VaultTeamState, error) {
 	out := VaultTeamState{TeamID: team, Members: []VaultTeamMember{}}
-	err := tx.QueryRow(ctx, `SELECT t.owner_account,t.generation,e.key_epoch,e.rotation_required,team_paid_entitled(t.team_id) FROM teams t JOIN environment_vault_teams e USING(team_id) WHERE t.team_id=$1 AND t.deleted_at IS NULL AND NOT t.suspended`, team).Scan(&out.OwnerAccount, &out.Generation, &out.KeyEpoch, &out.RotationRequired, &out.Entitled)
+	err := tx.QueryRow(ctx, `SELECT t.owner_account,t.generation,e.key_epoch,team_paid_entitled(t.team_id) FROM teams t JOIN environment_vault_teams e USING(team_id) WHERE t.team_id=$1 AND t.deleted_at IS NULL AND NOT t.suspended`, team).Scan(&out.OwnerAccount, &out.Generation, &out.KeyEpoch, &out.Entitled)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return out, ErrNotFound
 	}
@@ -239,14 +239,6 @@ func (s *Service) PutVaultScope(ctx context.Context, account, workspace, kind, o
 	err = s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
 		if err := lockVaultScopes(ctx, tx); err != nil {
 			return err
-		}
-		if err := allowVaultWritesTx(ctx, tx, account); err != nil {
-			return err
-		}
-		if kind == "team" {
-			if err := allowVaultTeamWritesTx(ctx, tx, owner); err != nil {
-				return err
-			}
 		}
 		if kind == "team" {
 			team, err := readVaultTeamTx(ctx, tx, owner)
@@ -394,9 +386,6 @@ func (s *Service) GrantVaultTeamMember(ctx context.Context, account, teamID stri
 		if err := lockVaultScopes(ctx, tx); err != nil {
 			return err
 		}
-		if err := allowVaultWritesTx(ctx, tx, account); err != nil {
-			return err
-		}
 		team, err := readVaultTeamTx(ctx, tx, teamID)
 		if err != nil {
 			return err
@@ -428,9 +417,6 @@ func (s *Service) GrantVaultTeamMember(ctx context.Context, account, teamID stri
 		}
 		if !exists || !member.Active || (member.ENVPermission != "read" && member.ENVPermission != "write") {
 			return ErrKeyAuthorizationRequired
-		}
-		if team.RotationRequired {
-			return ErrVaultRotationRequired
 		}
 		generation := member.MembershipGeneration
 		sender, err := s.vaultMetadataTx(ctx, tx, account)
@@ -520,7 +506,7 @@ func (s *Service) RotateVaultTeam(ctx context.Context, account, teamID string, r
 		removed := map[string]bool{}
 		for _, id := range request.RemoveAccountIDs {
 			m, ok := vaultMember(team, id)
-			if !ok || (!m.Active && !team.RotationRequired) || id == account || removed[id] {
+			if !ok || !m.Active || id == account || removed[id] {
 				return ErrProtocolInvalid
 			}
 			removed[id] = true
@@ -592,7 +578,7 @@ func (s *Service) RotateVaultTeam(ctx context.Context, account, teamID string, r
 		if _, err := tx.Exec(ctx, `DELETE FROM environment_vault_team_grants WHERE team_id=$1`, teamID); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(ctx, `UPDATE environment_vault_teams SET key_epoch=key_epoch+1,rotation_required=false WHERE team_id=$1`, teamID); err != nil {
+		if _, err := tx.Exec(ctx, `UPDATE environment_vault_teams SET key_epoch=key_epoch+1 WHERE team_id=$1`, teamID); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, `UPDATE teams SET generation=generation+1 WHERE team_id=$1`, teamID); err != nil {
@@ -652,7 +638,7 @@ func (s *Service) ListVaultGrants(ctx context.Context, account string) ([]VaultG
 		if err != nil {
 			return err
 		}
-		rows, err := tx.Query(ctx, `SELECT g.team_id,g.membership_generation,g.team_epoch,g.document_id,g.envelope,g.sender_writer_public,g.acknowledged FROM environment_vault_team_grants g JOIN team_members m USING(team_id,account_id) JOIN environment_vault_team_members e USING(team_id,account_id) JOIN environment_vault_teams t USING(team_id) JOIN teams authority USING(team_id) JOIN users recipient ON recipient.id=g.account_id AND recipient.status='active' JOIN team_resource_bindings binding ON binding.team_id=g.team_id AND binding.resource_kind='env' AND binding.resource_id=g.team_id AND binding.active WHERE g.account_id=$1 AND m.active AND authority.deleted_at IS NULL AND NOT authority.suspended AND NOT t.rotation_required AND team_paid_entitled(g.team_id) AND e.grant_epoch=t.key_epoch AND g.team_epoch=t.key_epoch AND g.membership_generation=m.membership_generation AND g.recipient_sharing_public=$2 ORDER BY g.team_id LIMIT 129`, account, current.SharingPublicKey[:])
+		rows, err := tx.Query(ctx, `SELECT g.team_id,g.membership_generation,g.team_epoch,g.document_id,g.envelope,g.sender_writer_public,g.acknowledged FROM environment_vault_team_grants g JOIN team_members m USING(team_id,account_id) JOIN environment_vault_team_members e USING(team_id,account_id) JOIN environment_vault_teams t USING(team_id) JOIN teams authority USING(team_id) JOIN users recipient ON recipient.id=g.account_id AND recipient.status='active' JOIN team_resource_bindings binding ON binding.team_id=g.team_id AND binding.resource_kind='env' AND binding.resource_id=g.team_id AND binding.active WHERE g.account_id=$1 AND m.active AND authority.deleted_at IS NULL AND NOT authority.suspended AND team_paid_entitled(g.team_id) AND e.grant_epoch=t.key_epoch AND g.team_epoch=t.key_epoch AND g.membership_generation=m.membership_generation AND g.recipient_sharing_public=$2 ORDER BY g.team_id LIMIT 129`, account, current.SharingPublicKey[:])
 		if err != nil {
 			return err
 		}
@@ -689,7 +675,7 @@ func (s *Service) AcknowledgeVaultGrant(ctx context.Context, account, documentID
 		if current.Head.DocumentID != vaultID {
 			return ErrPasswordVaultConflict
 		}
-		command, err := tx.Exec(ctx, `UPDATE environment_vault_team_grants g SET acknowledged=true FROM team_members m,environment_vault_team_members e,environment_vault_teams t,teams authority,team_resource_bindings binding,users recipient WHERE g.account_id=$1 AND g.document_id=$2 AND g.recipient_sharing_public=$3 AND m.account_id=g.account_id AND m.team_id=g.team_id AND m.active AND m.membership_generation=g.membership_generation AND e.team_id=g.team_id AND e.account_id=g.account_id AND e.grant_epoch=g.team_epoch AND t.team_id=g.team_id AND t.key_epoch=g.team_epoch AND NOT t.rotation_required AND authority.team_id=t.team_id AND authority.deleted_at IS NULL AND NOT authority.suspended AND team_paid_entitled(g.team_id) AND binding.team_id=t.team_id AND binding.resource_kind='env' AND binding.resource_id=t.team_id AND binding.active AND recipient.id=g.account_id AND recipient.status='active'`, account, documentID, current.SharingPublicKey[:])
+		command, err := tx.Exec(ctx, `UPDATE environment_vault_team_grants g SET acknowledged=true FROM team_members m,environment_vault_team_members e,environment_vault_teams t,teams authority,team_resource_bindings binding,users recipient WHERE g.account_id=$1 AND g.document_id=$2 AND g.recipient_sharing_public=$3 AND m.account_id=g.account_id AND m.team_id=g.team_id AND m.active AND m.membership_generation=g.membership_generation AND e.team_id=g.team_id AND e.account_id=g.account_id AND e.grant_epoch=g.team_epoch AND t.team_id=g.team_id AND t.key_epoch=g.team_epoch AND authority.team_id=t.team_id AND authority.deleted_at IS NULL AND NOT authority.suspended AND team_paid_entitled(g.team_id) AND binding.team_id=t.team_id AND binding.resource_kind='env' AND binding.resource_id=t.team_id AND binding.active AND recipient.id=g.account_id AND recipient.status='active'`, account, documentID, current.SharingPublicKey[:])
 		if err != nil {
 			return err
 		}
@@ -872,7 +858,7 @@ func (s *Service) mutatePersonalVault(ctx context.Context, account string, reque
 			}
 			delete(scopes, key)
 		}
-		if _, err := tx.Exec(ctx, `INSERT INTO environment_vault_personal_epochs(account_id,key_epoch,rotation_required) VALUES($1,$2,false) ON CONFLICT(account_id) DO UPDATE SET key_epoch=EXCLUDED.key_epoch,rotation_required=false`, account, personalEpoch+1); err != nil {
+		if _, err := tx.Exec(ctx, `INSERT INTO environment_vault_personal_epochs(account_id,key_epoch) VALUES($1,$2) ON CONFLICT(account_id) DO UPDATE SET key_epoch=EXCLUDED.key_epoch`, account, personalEpoch+1); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, `UPDATE environment_password_vaults SET generation=$2,document_id=$3,envelope=$4,updated_at=now() WHERE account_id=$1`, account, incoming.metadata.Head.Generation, incoming.metadata.Head.DocumentID, raw); err != nil {
@@ -914,9 +900,6 @@ func (s *Service) GetVaultPersonalScopes(ctx context.Context, account string) (V
 		}
 		var err error
 		out.KeyEpoch, err = personalVaultEpochTx(ctx, tx, account)
-		if err == nil {
-			out.RotationRequired, err = personalVaultRotationRequiredTx(ctx, tx, account)
-		}
 		if err != nil {
 			return err
 		}
@@ -947,37 +930,6 @@ var ErrVaultRotationRequired = errors.New("ENV key rotation is required")
 // LockVaultMutationsTx coordinates explicit machine revocation with ENV publication.
 // Call before acquiring session/machine locks in the owning revocation transaction.
 func LockVaultMutationsTx(ctx context.Context, tx *db.Tx) error { return lockVaultScopes(ctx, tx) }
-func personalVaultRotationRequiredTx(ctx context.Context, tx *db.Tx, account string) (bool, error) {
-	var required bool
-	err := tx.QueryRow(ctx, `SELECT COALESCE((SELECT rotation_required FROM environment_vault_personal_epochs WHERE account_id=$1),false)`, account).Scan(&required)
-	return required, err
-}
-func allowVaultWritesTx(ctx context.Context, tx *db.Tx, account string) error {
-	required, err := personalVaultRotationRequiredTx(ctx, tx, account)
-	if err != nil {
-		return err
-	}
-	if required {
-		return ErrVaultRotationRequired
-	}
-	return nil
-}
-
-func allowVaultTeamWritesTx(ctx context.Context, tx *db.Tx, team string) error {
-	var required bool
-	err := tx.QueryRow(ctx, `SELECT rotation_required FROM environment_vault_teams WHERE team_id=$1`, team).Scan(&required)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return ErrNotFound
-	}
-	if err != nil {
-		return err
-	}
-	if required {
-		return ErrVaultRotationRequired
-	}
-	return nil
-}
-
 func vaultTeamRotationAllowed(team VaultTeamState, account string, request VaultTeamRotate) bool {
 	member, exists := vaultMember(team, account)
 	if !exists || !member.Active || (member.Role != "owner" && member.Role != "admin") {
@@ -991,7 +943,7 @@ func vaultTeamRotationAllowed(team VaultTeamState, account string, request Vault
 	}
 	for _, id := range request.RemoveAccountIDs {
 		target, ok := vaultMember(team, id)
-		if !ok || (!target.Active && !team.RotationRequired) || id == team.OwnerAccount || id == account {
+		if !ok || !target.Active || id == team.OwnerAccount || id == account {
 			return false
 		}
 		if member.Role == "admin" && (target.Role == "owner" || target.Role == "admin") {

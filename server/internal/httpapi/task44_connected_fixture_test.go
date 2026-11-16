@@ -420,7 +420,7 @@ func TestTask44ConnectedCollaboration(t *testing.T) {
 	sql(`INSERT INTO paperboat.environment_vault_teams(team_id,key_epoch) VALUES($1,1)`, teamID)
 	sql(`INSERT INTO paperboat.environment_vault_team_members(team_id,account_id,grant_epoch) VALUES($1,$2,1)`, teamID, member.id)
 	call(owner, "POST", "/v1/teams/"+teamID+"/actions", teams.MutationRequest{OperationID: "remove", ExpectedGeneration: state.Generation, Action: "remove", AccountID: member.id}, &state, 200)
-	if state.ENVStatus != "rotation_pending" {
+	if state.ENVStatus != "ready" {
 		t.Fatalf("ENV state=%s", state.ENVStatus)
 	}
 	if _, e := machines.ConnectSharedTerminalSession(ctx, member.id, source, member.cli, terminal); !errors.Is(e, usermachines.ErrTerminalSessionNotFound) {

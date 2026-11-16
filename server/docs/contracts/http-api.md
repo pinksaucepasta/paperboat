@@ -168,11 +168,11 @@ See [provider contracts](provider-contracts.md) for ownership, quantities and re
 
 ### Teams
 
-Removing a device revokes that device and stops all future ENV delivery to it, including already-connected sessions. It does not require ENV key rotation or change the personal or Team key epoch. The removed device may keep the old key and any ENV it already downloaded. Rotating ENV keys is an optional Owner/Admin action for lost or compromised devices. Member removal and ENV grant revocation still require rotation.
+Removing a device revokes that device and stops all future ENV delivery to it, including already-connected sessions. It does not require ENV key rotation or change the personal or Team key epoch. The removed device may keep the old key and any ENV it already downloaded. Rotating ENV keys is an optional Owner/Admin action for lost or compromised devices. Member removal and ENV grant revocation behave the same way: they never withhold ENV from anyone else and never block team writes.
 
 - `GET /v1/teams/{team_id}` returns the current team state, including `env_status` as
-  `not_initialized`, `ready`, `rotation_pending`, `suspended`, or `deleted`. A role never grants ENV
-  decryption by itself. Member removal and ENV grant revocation can set `rotation_pending`; device removal cannot.
+  `not_initialized`, `ready`, `suspended`, or `deleted`. A role never grants ENV
+  decryption by itself. Removing a device or a member never changes it: rotation is the owner's explicit action.
 - `GET /v1/teams/{team_id}/activity?cursor={opaque}&limit={integer}` returns
   `{items,next_cursor}`. Each item contains `id`, `actor_account`, `action`, `created_at`,
   and allowlisted `metadata`; `action` omits the stored `team.` prefix. `limit` defaults

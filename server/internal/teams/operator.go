@@ -39,11 +39,8 @@ func SetOperatorSuspensionTx(ctx context.Context, tx *db.Tx, actor, target strin
 	if err != nil {
 		return 0, err
 	}
-	if suspend {
-		if err := FenceENVTx(ctx, tx, target); err != nil {
-			return 0, err
-		}
-	} else if err := InvalidateENVTx(ctx, tx, target); err != nil {
+	// Suspending or resuming a whole team moves its ENV delivery; removing one member never does.
+	if err := InvalidateENVTx(ctx, tx, target); err != nil {
 		return 0, err
 	}
 	return generation, nil

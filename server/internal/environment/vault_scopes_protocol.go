@@ -43,15 +43,14 @@ type VaultTeamMember struct {
 	GrantEpoch           uint64 `json:"grant_epoch"`
 }
 type VaultTeamState struct {
-	RecordSequence   uint64            `json:"record_sequence"`
-	Entitled         bool              `json:"entitled"`
-	RotationRequired bool              `json:"rotation_required"`
-	TeamID           string            `json:"team_id"`
-	OwnerAccount     string            `json:"owner_account"`
-	Generation       uint64            `json:"generation"`
-	KeyEpoch         uint64            `json:"key_epoch"`
-	Members          []VaultTeamMember `json:"members"`
-	Scope            VaultScopeState   `json:"scope"`
+	RecordSequence uint64            `json:"record_sequence"`
+	Entitled       bool              `json:"entitled"`
+	TeamID         string            `json:"team_id"`
+	OwnerAccount   string            `json:"owner_account"`
+	Generation     uint64            `json:"generation"`
+	KeyEpoch       uint64            `json:"key_epoch"`
+	Members        []VaultTeamMember `json:"members"`
+	Scope          VaultScopeState   `json:"scope"`
 }
 type VaultMemberGrant struct {
 	OperationID                  string `json:"operation_id"`
@@ -187,9 +186,8 @@ func parseVaultGrant(raw []byte, issuer string, sender, recipient PasswordVaultM
 }
 
 type VaultPersonalScopes struct {
-	RotationRequired bool              `json:"rotation_required"`
-	KeyEpoch         uint64            `json:"key_epoch"`
-	Scopes           []VaultScopeState `json:"scopes"`
+	KeyEpoch uint64            `json:"key_epoch"`
+	Scopes   []VaultScopeState `json:"scopes"`
 }
 
 type VaultPersonalRotate struct {

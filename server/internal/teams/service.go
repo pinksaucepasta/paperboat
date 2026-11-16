@@ -301,9 +301,6 @@ func (s *Service) Mutate(ctx context.Context, account, team string, r MutationRe
 // with the team lock held (Lock). The caller checks the owner and billing: the team delete action does, and
 // account deletion does for a team whose only member is the account.
 func DeleteTeamTx(ctx context.Context, tx *db.Tx, team string) error {
-	if err := FenceENVTx(ctx, tx, team); err != nil {
-		return err
-	}
 	if err := removeTeamMachinesTx(ctx, tx, team); err != nil {
 		return err
 	}

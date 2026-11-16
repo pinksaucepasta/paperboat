@@ -20,14 +20,13 @@ type teamMember struct {
 	Permission string `json:"env_permission"`
 }
 type teamState struct {
-	RecordSequence   uint64       `json:"record_sequence"`
-	ID               string       `json:"team_id"`
-	Owner            string       `json:"owner_account"`
-	Generation       uint64       `json:"generation"`
-	Epoch            uint64       `json:"key_epoch"`
-	Members          []teamMember `json:"members"`
-	Scope            scopeState   `json:"scope"`
-	RotationRequired bool         `json:"rotation_required"`
+	RecordSequence uint64       `json:"record_sequence"`
+	ID             string       `json:"team_id"`
+	Owner          string       `json:"owner_account"`
+	Generation     uint64       `json:"generation"`
+	Epoch          uint64       `json:"key_epoch"`
+	Members        []teamMember `json:"members"`
+	Scope          scopeState   `json:"scope"`
 }
 type sharingState struct {
 	Account    string `json:"account_id"`
