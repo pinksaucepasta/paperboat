@@ -40,6 +40,15 @@ pb completion bash > $(brew --prefix)/etc/bash_completion.d/pb
 You will need to start a new shell for this setup to take effect.
 
 .PP
+Bash completion requires Bash 4.2+ and bash-completion v2. On macOS: brew install bash bash-completion@2. Start the installed Bash and load bash_completion.sh before sourcing the pb completion script.
+
+.PP
+On macOS, after installing:
+  exec "$(brew --prefix)/bin/bash"
+  source "$(brew --prefix)/etc/profile.d/bash_completion.sh"
+  source <(pb completion bash)
+
+.PP
 This command does not support --json output; it rejects that mode before execution. Use --help --json for structured command help.
 
 
