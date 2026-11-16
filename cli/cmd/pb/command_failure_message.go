@@ -296,7 +296,7 @@ func typedCommandOwnerMessage(owner error, failure commandFailure) string {
 		if owner.Code == "environment_unavailable" {
 			return "Managed environment variables could not be delivered on the target. Check ENV delivery and retry."
 		}
-		if owner.Code == "terminal_session_limit_reached" || localapi.Refusal(owner.Code) {
+		if owner.Code == "terminal_session_limit_reached" || owner.Code == "exec_limit_reached" || localapi.Refusal(owner.Code) {
 			return owner.Message
 		}
 		return localAPIFailureMessage(owner.Code)

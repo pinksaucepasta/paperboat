@@ -1193,34 +1193,39 @@ type sessionLimitDenial struct{}
 func (sessionLimitDenial) Error() string        { return "private detail must never escape" }
 func (sessionLimitDenial) LocalAPICode() string { return "resource_limit" }
 
-func TestPeerStreamExplainsTheTerminalSessionLimit(t *testing.T) {
-	socket := filepath.Join(localAPITestDir(t), "limit.sock")
-	server, err := NewServer(ServerConfig{SocketPath: socket, OwnerUID: os.Geteuid(), OwnerGID: os.Getegid(), Source: snapshotSourceFunc(func(context.Context) (Snapshot, error) { return validSnapshot(), nil }), PeerStreams: peerStreamBrokerFunc(func(context.Context, Peer, PeerStreamRequest) (net.Conn, error) {
-		return nil, sessionLimitDenial{}
-	})})
-	if err != nil {
-		t.Fatal(err)
+// F21-166: the capacity refusal names what is full: terminals for a terminal, commands for an exec (not the terminal ceiling).
+func TestPeerStreamExplainsTheSessionAndExecLimits(t *testing.T) {
+	for _, c := range []struct{ consumer, code, text string }{{"terminal", "terminal_session_limit_reached", "pb session close"}, {"exec", "exec_limit_reached", "as many commands as it accepts"}} {
+		t.Run(c.consumer, func(t *testing.T) {
+			socket := filepath.Join(localAPITestDir(t), "limit.sock")
+			server, err := NewServer(ServerConfig{SocketPath: socket, OwnerUID: os.Geteuid(), OwnerGID: os.Getegid(), Source: snapshotSourceFunc(func(context.Context) (Snapshot, error) { return validSnapshot(), nil }), PeerStreams: peerStreamBrokerFunc(func(context.Context, Peer, PeerStreamRequest) (net.Conn, error) {
+				return nil, sessionLimitDenial{}
+			})})
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			done := make(chan error, 1)
+			go func() { done <- server.Run(ctx) }()
+			waitForSocket(t, socket)
+			client, err := NewClient(socket, time.Second)
+			if err != nil {
+				t.Fatal(err)
+			}
+			request, err := NewPeerStreamRequest("machine_1", "environment_1", 1, c.consumer, "operation_limit", "credential", time.Now().Add(time.Minute), 1024, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = client.OpenPeerStream(t.Context(), request)
+			var remote *RemoteError
+			if !errors.As(err, &remote) || remote.Code != c.code || !strings.Contains(remote.Message, c.text) || strings.Contains(remote.Message, "private detail") {
+				t.Fatalf("session limit=%v", err)
+			}
+			cancel()
+			<-done
+		})
 	}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	done := make(chan error, 1)
-	go func() { done <- server.Run(ctx) }()
-	waitForSocket(t, socket)
-	client, err := NewClient(socket, time.Second)
-	if err != nil {
-		t.Fatal(err)
-	}
-	request, err := NewPeerStreamRequest("machine_1", "environment_1", 1, "terminal", "operation_limit", "credential", time.Now().Add(time.Minute), 1024, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = client.OpenPeerStream(t.Context(), request)
-	var remote *RemoteError
-	if !errors.As(err, &remote) || remote.Code != "terminal_session_limit_reached" || !strings.Contains(remote.Message, "pb session close") || strings.Contains(remote.Message, "private detail") {
-		t.Fatalf("session limit=%v", err)
-	}
-	cancel()
-	<-done
 }
 
 func TestPeerStreamPreservesSafeEnvironmentLaunchDenial(t *testing.T) {

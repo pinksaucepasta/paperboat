@@ -666,8 +666,13 @@ func (s *Server) peerStream(writer http.ResponseWriter, request *http.Request, r
 				code = "environment_unavailable"
 				message = "Managed environment variables could not be delivered on the target. Check ENV delivery and retry."
 			case "resource_limit":
-				code = "terminal_session_limit_reached"
-				message = hostconfig.TerminalCeilingMessage()
+				if value.Consumer == "exec" {
+					code = "exec_limit_reached"
+					message = "The target is already running as many commands as it accepts at once. Wait for one to finish, then retry."
+				} else {
+					code = "terminal_session_limit_reached"
+					message = hostconfig.TerminalCeilingMessage()
+				}
 			}
 		}
 		writeError(writer, http.StatusServiceUnavailable, requestID, code, message)
