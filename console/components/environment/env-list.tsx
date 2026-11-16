@@ -9,6 +9,7 @@ import { readVault, type EnvScope } from "@/lib/envvault/vault"
 import { CommandBlock } from "@/components/add-machine-dialog"
 import { EnvUnlock } from "@/components/environment/env-unlock"
 import { EnvVariables } from "@/components/environment/env-variables"
+import { EnvTeamVaults } from "@/components/environment/env-team-vaults"
 import { EnvVaultSettings } from "@/components/environment/env-vault-settings"
 import { EnvVaultSetup } from "@/components/environment/env-vault-setup"
 import { useCurrentMachine } from "@/components/machine-shell"
@@ -33,6 +34,7 @@ export function EnvironmentPage() {
       <EnvironmentList adding={adding} onAddingChange={setAdding} />
       <EnvNamesSwitch />
       <EnvVaultSettings />
+      <EnvTeamVaults />
       <Section title="Use them">
         <div className="flex flex-col gap-4 pt-3 text-sm">
           <div className="flex flex-col gap-1.5">

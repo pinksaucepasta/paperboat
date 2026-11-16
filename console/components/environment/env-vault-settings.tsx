@@ -4,9 +4,11 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useState, useSyncExternalStore } from "react"
 import { subscribeVaultLock, vaultUnlocked } from "@/lib/envvault/crypto"
 import { readVault } from "@/lib/envvault/vault"
+import { rotatePersonalKey, resetVault } from "@/lib/envvault/manage"
 import { changePassword, newRecoveryCode, recoveryEnabled, replaceRecoveryCode } from "@/lib/envvault/protection"
 import { EnvRecover } from "@/components/environment/env-recover"
 import { PasswordForm, RecoveryCodeStep } from "@/components/environment/env-recovery-code"
+import { ConfirmAction } from "@/components/list-toolbar"
 import { Section, SettingRow } from "@/components/section"
 import {
   AlertDialog,
@@ -20,9 +22,11 @@ import {
 } from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
+import { Field, FieldLabel } from "@/components/ui/field"
+import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 
-type Change = "password" | "create" | "replace" | "off"
+type Change = "password" | "create" | "replace" | "off" | "key" | "reset"
 
 /**
  * Environment page: the Vault section is always there. Unlocked it holds the password and recovery
@@ -36,6 +40,7 @@ export function EnvVaultSettings() {
 function ClosedVault() {
   const vault = useQuery({ queryKey: ["env-vault"], queryFn: ({ signal }) => readVault(signal), staleTime: 0 })
   const [recovering, setRecovering] = useState(false)
+  const [resetting, setResetting] = useState(false)
   const notSetUp = vault.isSuccess && !vault.data
   return (
     <Section title="Vault">
@@ -59,7 +64,15 @@ function ClosedVault() {
           </Button>
         )}
       </SettingRow>
+      {!notSetUp && vault.isSuccess && (
+        <SettingRow label="Lost both?" description="Starting over deletes your variables and your team keys.">
+          <Button variant="outline" onClick={() => setResetting(true)}>
+            Reset vault…
+          </Button>
+        </SettingRow>
+      )}
       {recovering && <EnvRecover onCancel={() => setRecovering(false)} />}
+      {resetting && <ResetDialog onClose={() => setResetting(false)} />}
     </Section>
   )
 }
@@ -106,6 +119,29 @@ function OpenVault() {
           )}
         </span>
       </SettingRow>
+      <SettingRow label="Personal key" description="Seals your variables again with a new key. Your password stays.">
+        <Button variant="outline" onClick={() => setChange("key")}>
+          Replace…
+        </Button>
+      </SettingRow>
+      <SettingRow label="Reset vault" description="Deletes your variables and team keys, then starts over with a new password.">
+        <Button variant="outline" onClick={() => setChange("reset")}>
+          Reset…
+        </Button>
+      </SettingRow>
+      {change === "key" && (
+        <ConfirmAction
+          open
+          onOpenChange={(open) => !open && setChange(undefined)}
+          title="Replace your personal key?"
+          description="Every variable is sealed again with a new key. This can take a moment."
+          action="Replace key"
+          pending="Replacing…"
+          confirmName="ROTATE ENV"
+          mutation={{ mutationFn: rotatePersonalKey, onSuccess: () => client.invalidateQueries({ queryKey: ["env-names"] }) }}
+        />
+      )}
+      {change === "reset" && <ResetDialog onClose={() => setChange(undefined)} />}
       {change === "password" && <PasswordDialog onClose={() => setChange(undefined)} onDone={done} />}
       {(change === "create" || change === "replace") && (
         <CodeDialog replacing={change === "replace"} onClose={() => setChange(undefined)} onDone={done} />
@@ -202,5 +238,45 @@ function TurnOff({ open, onClose, onDone }: { open: boolean; onClose: () => void
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
+  )
+}
+
+/** A new password for a vault whose old one is lost: every personal variable and team key goes. */
+function ResetDialog({ onClose }: { onClose: () => void }) {
+  const client = useQueryClient()
+  const [typed, setTyped] = useState("")
+  const reset = useMutation({
+    mutationFn: resetVault,
+    onSuccess: async () => {
+      await client.invalidateQueries({ queryKey: ["env-names"] })
+      await client.invalidateQueries({ queryKey: ["env-vault"] })
+      await client.invalidateQueries({ queryKey: ["env-team"] })
+      onClose()
+    },
+  })
+  return (
+    <Dialog open onOpenChange={(open) => !open && !reset.isPending && onClose()}>
+      <DialogContent className="gap-4 sm:max-w-md">
+        <DialogTitle>Reset your vault</DialogTitle>
+        <p className="text-sm text-muted-foreground">
+          Your variables and team keys are deleted. This can’t be undone.
+        </p>
+        <PasswordForm
+          submitLabel="Reset vault"
+          pending={reset.isPending}
+          error={reset.error}
+          ready={typed.trim() === "RESET ENV"}
+          onSubmit={(password) => reset.mutate(password)}
+          onCancel={onClose}
+        >
+          <Field className="gap-1.5">
+            <FieldLabel htmlFor="reset-confirm" className="font-normal text-muted-foreground">
+              Type <span className="font-mono font-medium text-foreground">RESET ENV</span> to confirm
+            </FieldLabel>
+            <Input id="reset-confirm" value={typed} autoComplete="off" onChange={(event) => setTyped(event.target.value)} />
+          </Field>
+        </PasswordForm>
+      </DialogContent>
+    </Dialog>
   )
 }

@@ -1,8 +1,5 @@
 import { afterEach, beforeAll, beforeEach, expect, test } from "bun:test"
 import { createHash } from "node:crypto"
-import { readFileSync } from "node:fs"
-import { createRequire } from "node:module"
-import { join } from "node:path"
 import { lockVault, vaultUnlocked } from "@/lib/envvault/crypto"
 import {
   changePassword,
@@ -12,53 +9,14 @@ import {
   replaceRecoveryCode,
   setUpVault,
 } from "@/lib/envvault/protection"
+import { fixture, loadVaultWasm, WasmWorker } from "@/lib/envvault/testkit"
 import { unlockVault, type Vault } from "@/lib/envvault/vault"
 
 // The console's own vault code (crypto.ts worker client, vault.ts, protection.ts) on the real vault WASM, against a
 // vault the CLI's code sealed (testdata/cli-vault.json, checked natively by TestConsoleFixtureIsANativeVaultWithRecovery
 // in cli/cmd/environmentvault-wasm). Only the browser's Worker and fetch are stood in for.
 
-const fixture = JSON.parse(readFileSync(join(import.meta.dir, "testdata", "cli-vault.json"), "utf8")) as {
-  password: string
-  recovery_code: string
-  vault: Vault
-}
-
-const wasm = (json: string) =>
-  (globalThis as unknown as { paperboatEnvironmentVault: (json: string) => Promise<string> }).paperboatEnvironmentVault(
-    json,
-  )
-
-/** A Worker that runs the module in this process; terminating it is the lock, as in a browser. */
-class WasmWorker {
-  onmessage?: (event: { data: { id: number; reply: string } }) => void
-  onerror?: () => void
-  constructor(readonly url: string) {}
-  postMessage({ id, request }: { id: number; request: string }) {
-    void wasm(request).then((reply) => this.onmessage?.({ data: { id, reply } }))
-  }
-  terminate() {
-    void wasm(JSON.stringify({ action: "lock" }))
-  }
-}
-
-beforeAll(async () => {
-  const assets = join(import.meta.dir, "..", "..", "public", "environment-vault")
-  createRequire(import.meta.url)(join(assets, "wasm_exec.js"))
-  const go = new (
-    globalThis as unknown as {
-      Go: new () => { importObject: WebAssembly.Imports; run(i: WebAssembly.Instance): Promise<void> }
-    }
-  ).Go()
-  const { instance } = await WebAssembly.instantiate(
-    readFileSync(join(assets, "environment-vault.wasm")),
-    go.importObject,
-  )
-  void go.run(instance)
-  for (let i = 0; i < 500 && !(globalThis as { paperboatEnvironmentVault?: unknown }).paperboatEnvironmentVault; i++) {
-    await new Promise((r) => setTimeout(r, 10))
-  }
-})
+beforeAll(loadVaultWasm)
 
 const realFetch = globalThis.fetch
 const realWorker = (globalThis as { Worker?: unknown }).Worker
