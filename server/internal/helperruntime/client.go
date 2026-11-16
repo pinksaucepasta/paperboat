@@ -213,7 +213,28 @@ func (c Client) terminalEndpoint(ctx context.Context, endpoint, credential, acti
 		"min_version": protocolVersion, "max_version": protocolVersion,
 		"capabilities": []string{"terminal.v1", "health.v1"},
 	})
+	requestID, err := randomID("request")
+	if err != nil {
+		return Snapshot{}, err
+	}
+	payload, _ := json.Marshal(requestPayload)
+	deadline := uint32(30000)
+	if remaining, ok := ctx.Deadline(); ok {
+		milliseconds := time.Until(remaining).Milliseconds()
+		if milliseconds < 1 {
+			return Snapshot{}, context.DeadlineExceeded
+		}
+		if milliseconds < int64(deadline) {
+			deadline = uint32(milliseconds)
+		}
+	}
+	// Hello and the request leave in one flight: the host answers in order and runs nothing after a hello it refuses,
+	// so waiting for the welcome first only added a round trip through the edge to every terminal operation.
 	if err := writeFrame(ctx, connection, frame{Type: "hello", RequestID: helloID, Version: protocolVersion, Payload: helloPayload}); err != nil {
+		return Snapshot{}, err
+	}
+	request := frame{Type: "request", RequestID: requestID, Version: protocolVersion, OperationID: operationID, Capability: "terminal.v1", DeadlineMS: deadline, Payload: payload}
+	if err := writeFrame(ctx, connection, request); err != nil {
 		return Snapshot{}, err
 	}
 	welcome, err := readFrame(ctx, connection)
@@ -232,26 +253,6 @@ func (c Client) terminalEndpoint(ctx context.Context, endpoint, credential, acti
 	}
 	if negotiated.Version != protocolVersion || !contains(negotiated.Capabilities, "terminal.v1") || !contains(negotiated.Capabilities, "health.v1") {
 		return Snapshot{}, protocolError("capabilities_mismatch", "helper runtime did not negotiate required capabilities", nil)
-	}
-
-	requestID, err := randomID("request")
-	if err != nil {
-		return Snapshot{}, err
-	}
-	payload, _ := json.Marshal(requestPayload)
-	deadline := uint32(30000)
-	if remaining, ok := ctx.Deadline(); ok {
-		milliseconds := time.Until(remaining).Milliseconds()
-		if milliseconds < 1 {
-			return Snapshot{}, context.DeadlineExceeded
-		}
-		if milliseconds < int64(deadline) {
-			deadline = uint32(milliseconds)
-		}
-	}
-	request := frame{Type: "request", RequestID: requestID, Version: protocolVersion, OperationID: operationID, Capability: "terminal.v1", DeadlineMS: deadline, Payload: payload}
-	if err := writeFrame(ctx, connection, request); err != nil {
-		return Snapshot{}, err
 	}
 	for {
 		response, err := readFrame(ctx, connection)

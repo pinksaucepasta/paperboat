@@ -13,6 +13,7 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/coder/websocket"
 )
@@ -172,6 +173,39 @@ func TestCreateTerminalUsesExactSessionAndAcceptsReplay(t *testing.T) {
 	}
 	if decodeResponse(operation.Payload, &input) != nil || input.Action != "create" || input.SessionID != "umts_1" || input.Name != "work" || input.CWD != "/home/user" || input.Columns != 80 || input.Rows != 24 || input.Environment["COLORTERM"] != "truecolor" || !input.ExistingSnapshot {
 		t.Fatalf("create request=%#v", input)
+	}
+}
+
+// Hello and the operation arrive in one flight: this host reads both before it answers anything, so a client that
+// waits for the welcome before sending its request never gets a response (the context ends the wait).
+func TestTerminalOperationPipelinesHelloAndRequest(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		connection, err := websocket.Accept(writer, request, &websocket.AcceptOptions{Subprotocols: []string{subprotocol}})
+		if err != nil {
+			return
+		}
+		defer connection.Close(websocket.StatusNormalClosure, "complete")
+		hello, err := readFrame(request.Context(), connection)
+		if err != nil || hello.Type != "hello" {
+			return
+		}
+		operation, err := readFrame(request.Context(), connection)
+		if err != nil || operation.Type != "request" {
+			return
+		}
+		welcome, _ := json.Marshal(map[string]any{"version": protocolVersion, "capabilities": []string{"terminal.v1", "health.v1"}})
+		if writeFrame(request.Context(), connection, frame{Type: "welcome", RequestID: hello.RequestID, Version: protocolVersion, Payload: welcome}) != nil {
+			return
+		}
+		payload := json.RawMessage(`{"result":{"id":"umts_1","name":"work","cwd":"/home/user","dimensions":{"columns":80,"rows":24},"state":"running","generation":2,"earliest_sequence":0,"latest_sequence":0,"existing":false},"replay":false}`)
+		_ = writeFrame(request.Context(), connection, frame{Type: "response", RequestID: operation.RequestID, Version: protocolVersion, Payload: payload})
+	}))
+	defer server.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	observed, err := (Client{HTTPClient: server.Client()}).CreateTerminal(ctx, server.URL, "signed-operation", "umts_1", "umtso_1", "work", "/home/user")
+	if err != nil || observed.ID != "umts_1" || observed.Generation != 2 {
+		t.Fatalf("created=%#v err=%v", observed, err)
 	}
 }
 
