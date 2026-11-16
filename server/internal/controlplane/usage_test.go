@@ -273,7 +273,8 @@ func openControlPlaneTestDB(t *testing.T) *db.DB {
 	if err := db.ValidateIsolatedTestDSN(dsn, os.Getenv("PAPERBOAT_DATABASE_DSN")); err != nil {
 		t.Fatal(err)
 	}
-	store, err := db.Open(config.Database{Driver: "postgres", DSN: dsn})
+	// Named connections: the storm test samples only its own store's sessions, not the shared database's.
+	store, err := db.Open(config.Database{Driver: "postgres", DSN: db.TestDSNWithApplicationName(dsn, fmt.Sprintf("controlplane_test_%d", time.Now().UnixNano()))})
 	if err != nil {
 		t.Fatal(err)
 	}

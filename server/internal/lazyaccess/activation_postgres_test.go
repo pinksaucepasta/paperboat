@@ -331,7 +331,7 @@ func TestActivationPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	exec(`UPDATE lazy_activations SET state='ready',preview_id=$2,policy_generation=$3,boot_id=$4 WHERE policy_id=$1`, p.ID, created.Preview.ID, p.Generation, newer.BootID)
-	if _, err = leases.Reconcile(ctx, "task27_fixture", "reconcile_current_"+suffix, "reconcile_current_"+suffix); err != nil {
+	if _, err = leases.Reconcile(ctx, "task27_fixture_"+suffix, "reconcile_current_"+suffix, "reconcile_current_"+suffix); err != nil {
 		t.Fatal(err)
 	}
 	current, err := leases.Get(ctx, authority, created.Preview.ID)
@@ -339,7 +339,7 @@ func TestActivationPostgres(t *testing.T) {
 		t.Fatalf("current lazy lease falsely revoked: %+v %v", current.Preview, err)
 	}
 	exec(`UPDATE lazy_access_policies SET generation=generation+1 WHERE id=$1`, p.ID)
-	if _, err = leases.Reconcile(ctx, "task27_fixture", "reconcile_revoked_"+suffix, "reconcile_revoked_"+suffix); err != nil {
+	if _, err = leases.Reconcile(ctx, "task27_fixture_"+suffix, "reconcile_revoked_"+suffix, "reconcile_revoked_"+suffix); err != nil {
 		t.Fatal(err)
 	}
 	current, err = leases.Get(ctx, authority, created.Preview.ID)

@@ -25,7 +25,11 @@ func TestReconnectStormRuntimeObservationsTakeNoPredicateLocksOnPostgres(t *test
 	if err := db.ValidateIsolatedTestDSN(dsn, os.Getenv("PAPERBOAT_DATABASE_DSN")); err != nil {
 		t.Fatal(err)
 	}
-	store, err := db.Open(config.Database{Driver: "postgres", DSN: dsn})
+	s := fmt.Sprint(time.Now().UnixNano())
+	// Predicate locks are counted by this store's own connections (its application_name): the database also holds
+	// whatever serializable work other tests and workers left behind, which a database-wide count blamed on the storm.
+	application := "coldstart_" + s
+	store, err := db.Open(config.Database{Driver: "postgres", DSN: db.TestDSNWithApplicationName(dsn, application)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -36,7 +40,6 @@ func TestReconnectStormRuntimeObservationsTakeNoPredicateLocksOnPostgres(t *test
 		t.Fatal(err)
 	}
 	const machines = 300
-	s := fmt.Sprint(time.Now().UnixNano())
 	user, env := "storm_user_"+s, "storm_env_"+s
 	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.users(id,workos_subject,primary_email,status) VALUES($1,$1,$1||'@example.test','active')`, user); err != nil {
 		t.Fatal(err)
@@ -48,7 +51,7 @@ SELECT 'storm_m_'||$3||'_'||g, $1, $2||'_'||g, 'storm-'||g||'-'||right($3,6), 'l
 	countSIRead := func() int {
 		t.Helper()
 		var n int
-		if err := store.SQL().QueryRowContext(ctx, `SELECT count(*) FROM pg_locks WHERE mode = 'SIReadLock'`).Scan(&n); err != nil {
+		if err := store.SQL().QueryRowContext(ctx, `SELECT count(*) FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid WHERE l.mode = 'SIReadLock' AND a.application_name = $1`, application).Scan(&n); err != nil {
 			t.Fatal(err)
 		}
 		return n
@@ -63,7 +66,36 @@ SELECT 'storm_m_'||$3||'_'||g, $1, $2||'_'||g, 'storm-'||g||'-'||right($3,6), 'l
 	if _, err := held.ExecContext(ctx, `SELECT 1`); err != nil {
 		t.Fatal(err)
 	}
+	// Positive control: the count sees this store's own predicate locks, so a zero below means none were taken.
+	if _, err := held.ExecContext(ctx, `SET LOCAL enable_seqscan TO off`); err != nil {
+		t.Fatal(err)
+	}
+	if err := held.QueryRowContext(ctx, `SELECT online FROM paperboat.user_machines WHERE id = $1`, "storm_m_"+s+"_1").Scan(new(bool)); err != nil {
+		t.Fatal(err)
+	}
+	if countSIRead() == 0 {
+		t.Fatal("a serializable read took no predicate lock the count can see: the check would pass vacuously")
+	}
 	before := countSIRead()
+	// Serializable work of another client, committed while the storm runs, is not this store's and must not count.
+	other, err := db.Open(config.Database{Driver: "postgres", DSN: dsn})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer other.Close()
+	otherTx, err := other.SQL().BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := otherTx.ExecContext(ctx, `SET LOCAL enable_seqscan TO off`); err != nil {
+		t.Fatal(err)
+	}
+	if err := otherTx.QueryRowContext(ctx, `SELECT online FROM paperboat.user_machines WHERE id = $1`, "storm_m_"+s+"_2").Scan(new(bool)); err != nil {
+		t.Fatal(err)
+	}
+	if err := otherTx.Commit(); err != nil {
+		t.Fatal(err)
+	}
 
 	repo := NewRuntimeRepository(store, time.Hour)
 	// storm runs one observation per machine at once, plus one serializable read per machine when withReaders (the

@@ -414,8 +414,8 @@ func (s *stormDatabaseSampler) sample(parent context.Context) {
 	var active, waiting, locks, operationDepth, staleDepth int64
 	var counters stormDatabaseCounters
 	err := s.database.QueryRowContext(ctx, `SELECT
-		(SELECT count(*) FROM pg_stat_activity WHERE datname=current_database()),
-		(SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND wait_event IS NOT NULL),
+		(SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND application_name=current_setting('application_name')),
+		(SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND application_name=current_setting('application_name') AND wait_event IS NOT NULL),
 		(SELECT count(*) FROM pg_locks),
 		(SELECT count(*) FROM control_operations WHERE state IN ('pending','failed','uncertain') OR (state='running' AND lease_expires_at <= now())),
 		(SELECT count(*) FROM control_tunnel_nodes WHERE state IN ('registered','ready') AND (last_heartbeat_at IS NULL OR last_heartbeat_at <= now() - interval '2 minutes')),

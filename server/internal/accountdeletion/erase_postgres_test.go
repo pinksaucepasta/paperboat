@@ -312,7 +312,13 @@ func TestAccountDeletionWaitsOnlyForItsOwnAccount(t *testing.T) {
 				return nil
 			})
 		}()
-		<-held
+		select {
+		case <-held:
+		case err := <-finished:
+			t.Fatalf("ENV transaction ended before it held its locks: %v", err)
+		case <-time.After(time.Minute):
+			t.Fatal("ENV transaction did not take its locks within a minute")
+		}
 		return func() {
 			close(done)
 			if err := <-finished; err != nil {
@@ -320,7 +326,8 @@ func TestAccountDeletionWaitsOnlyForItsOwnAccount(t *testing.T) {
 			}
 		}
 	}
-	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	// Bounds are generous: a loaded database made a 10 s one fail a deletion that was merely slow.
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	defer cancel()
 	release := holdENV(other.ID)
 	deleted := make(chan error, 1)
@@ -338,12 +345,16 @@ func TestAccountDeletionWaitsOnlyForItsOwnAccount(t *testing.T) {
 
 	v := f.user("waits")
 	release = holdENV(v.ID)
-	go func() { deleted <- f.svc.Delete(t.Context(), v, time.Now(), v.PrimaryEmail) }()
+	waitCtx, cancelWait := context.WithTimeout(t.Context(), 2*time.Minute)
+	defer cancelWait()
+	go func() { deleted <- f.svc.Delete(waitCtx, v, time.Now(), v.PrimaryEmail) }()
+	// The deletion polls for the lock with a bound of its own (about 30 s), so it never shows as a blocked backend;
+	// it must still be running after a pause far longer than a deletion takes, yet shorter than that bound.
 	select {
 	case err := <-deleted:
 		release()
 		t.Fatalf("the deletion did not wait for its own account's ENV transaction (err %v)", err)
-	case <-time.After(500 * time.Millisecond):
+	case <-time.After(3 * time.Second):
 	}
 	release()
 	if err := <-deleted; err != nil {
