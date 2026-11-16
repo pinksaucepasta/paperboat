@@ -296,12 +296,19 @@ func TestAccountDeletionWaitsOnlyForItsOwnAccount(t *testing.T) {
 	f := newFixture(t)
 	u := f.user("scoped")
 	other := f.user("bystander")
-	f.seedTeam(u, "Own team")
+	own := f.seedTeam(u, "Own team")
 	holdENV := func(account string) (release func()) {
+		// A team in another fence bucket: one of 16 random ids shared the owned team's bucket and blocked the deletion.
+		bystander := ""
+		for i := 0; bystander == ""; i++ {
+			if candidate := fmt.Sprintf("bystander-team-%s-%d", account, i); db.TeamWriteFenceBucket(candidate) != db.TeamWriteFenceBucket(own) {
+				bystander = candidate
+			}
+		}
 		held, done, finished := make(chan struct{}), make(chan struct{}), make(chan error, 1)
 		go func() {
 			finished <- f.store.InReadCommittedTx(t.Context(), func(ctx context.Context, tx *db.Tx) error {
-				if err := db.LockTeamsFor(ctx, tx, false, "bystander-team-"+account); err != nil {
+				if err := db.LockTeamsFor(ctx, tx, false, bystander); err != nil {
 					return err
 				}
 				if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock_shared(hashtextextended($1,$2))`, account, int64(environment.VaultAccountLockSeed)); err != nil {
