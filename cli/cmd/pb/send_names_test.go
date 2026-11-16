@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/filetransfer"
 )
 
@@ -86,5 +87,24 @@ func TestSendNamesAFileThatChangedWhileItsFolderWasSent(t *testing.T) {
 	other := errors.New("boom")
 	if folderChanged(other) != other {
 		t.Fatal("another error was rewritten")
+	}
+}
+
+func TestApproveRefusesStoredNamesThisOSCannotStore(t *testing.T) {
+	files := []api.TeamInboxFile{{Basename: "ok.txt"}, {Basename: "CON.txt"}}
+	err := approveNameRefusal("windows", files)
+	if err == nil {
+		t.Fatal("a Windows machine approved a file it cannot store: the request would stay approved and never arrive")
+	}
+	for _, want := range []string{`"CON.txt"`, "reserved", "Not approved", "ask the sender to rename"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("message %q lacks %q", err.Error(), want)
+		}
+	}
+	if strings.Contains(err.Error(), `"ok.txt"`) {
+		t.Errorf("message names a file that is fine: %q", err.Error())
+	}
+	if err := approveNameRefusal("linux", files); err != nil {
+		t.Fatalf("a Linux machine refused names it can store: %v", err)
 	}
 }

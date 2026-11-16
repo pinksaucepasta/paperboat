@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -99,12 +100,21 @@ func inboxDecisionCommand(c *command.Context, action string) error {
 		return err
 	}
 	generation := uint64(c.Uint("generation"))
-	if generation == 0 {
+	if generation == 0 || action == "approve" {
 		request, getErr := client.TeamInboxRequest(c.Context, c.Args().First())
 		if getErr != nil {
 			return friendlyCommandError(getErr)
 		}
-		generation = request.DecisionGeneration
+		if action == "approve" {
+			// A stored file is pulled by the machine that approves it: refuse here what this OS cannot store, instead of leaving
+			// the request approved with an Inbox that can never be written.
+			if err := approveNameRefusal(runtime.GOOS, request.Files); err != nil {
+				return err
+			}
+		}
+		if generation == 0 {
+			generation = request.DecisionGeneration
+		}
 	}
 	machineID, _ := configuredMachineID()
 	request, err := client.DecideTeamInboxRequest(c.Context, c.Args().First(), action, generation, machineID)

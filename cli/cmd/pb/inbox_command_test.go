@@ -28,6 +28,10 @@ func TestInboxPolicyAndDecisionsReachTheirAuthenticatedOwners(t *testing.T) {
 					_, _ = w.Write([]byte(`{"data":{"acceptance":"automatic","receipt_email":false,"generation":5}}`))
 					return
 				}
+				if !policy && r.Method == http.MethodGet && r.URL.Path == "/v1/team-inbox/requests/request_1" { // approve reads the files first
+					_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"request_id": "request_1", "status": "pending", "decision_generation": 7, "files": []map[string]any{{"basename": "ok.txt"}}}})
+					return
+				}
 				var input map[string]any
 				if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 					t.Error(err)
@@ -62,6 +66,9 @@ func TestInboxPolicyAndDecisionsReachTheirAuthenticatedOwners(t *testing.T) {
 			if !policy {
 				args = []string{"inbox", action, "request_1", "--generation", "7"}
 				expectedCalls = 1
+				if action == "approve" {
+					expectedCalls = 2
+				}
 			}
 			args = append(args, "--json", "--server", backend.URL, "--config", configPath)
 			var output, errors bytes.Buffer

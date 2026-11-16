@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/filetransfer"
 	"github.com/pinksaucepasta/paperboat/internal/transfername"
 )
@@ -47,4 +48,20 @@ func plural(count int) string {
 		return ""
 	}
 	return "s"
+}
+
+// approveNameRefusal names every file of a team request this computer cannot store under its name, with the reason: the sender
+// checked the addressed machine's OS, but another machine of the recipient may approve a stored (offline) send.
+func approveNameRefusal(platform string, files []api.TeamInboxFile) error {
+	var reasons []string
+	for _, file := range files {
+		if reason := transfername.Refusal(platform, file.Basename); reason != "" {
+			reasons = append(reasons, fmt.Sprintf("%q: %s", file.Basename, reason))
+		}
+	}
+	if len(reasons) == 0 {
+		return nil
+	}
+	message := fmt.Sprintf("Not approved: this computer cannot store %s. Approve it on a machine whose OS can store the name, or ask the sender to rename the file%s and send again.", strings.Join(reasons, "; "), plural(len(reasons)))
+	return usageError{err: errors.New(message), publicMessage: message, refusal: true}
 }
