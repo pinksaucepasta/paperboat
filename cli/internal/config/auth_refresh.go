@@ -18,6 +18,11 @@ func (s ProfileStore) CredentialFor(issuer string) (Credential, error) {
 }
 
 func (s ProfileStore) credentialForProfile(p Profile) (Credential, error) {
+	// Every refresh rewrites the profile after its tokens: an access token cached before that write belongs to the
+	// pair another process just replaced, and sending it failed the command as signed out.
+	if info, err := os.Stat(s.profilePath(p.Issuer)); err == nil {
+		secretReads.dropOlderThan(info.ModTime(), p.AccessSecretRef)
+	}
 	a, err := s.Secrets.Get(p.AccessSecretRef)
 	if err != nil {
 		return Credential{}, fmt.Errorf("read access token: %w", err)

@@ -66,3 +66,22 @@ func TestSecretCacheNeverServesRefreshTokens(t *testing.T) {
 		t.Fatal("access tokens stopped being cached")
 	}
 }
+
+func TestSecretCacheDropsEntriesOlderThanProfileWrite(t *testing.T) {
+	now := time.Unix(1000, 0)
+	cache := &secretCache{ttl: time.Hour, now: func() time.Time { return now }}
+	keychain := "a0"
+	read := func() (string, error) { return keychain, nil }
+	cache.get("profile-abc-access", read)
+	keychain = "a1"
+	cache.dropOlderThan(now.Add(-time.Second), "profile-abc-access")
+	if value, _ := cache.get("profile-abc-access", read); value != "a0" {
+		t.Fatal("an entry newer than the profile write was dropped")
+	}
+	cache.dropOlderThan(now.Add(time.Second), "profile-abc-access")
+	if value, _ := cache.get("profile-abc-access", read); value != "a1" {
+		t.Fatalf("served access token %q cached before another process rewrote the profile", value)
+	}
+	var none *secretCache
+	none.dropOlderThan(now, "profile-abc-access")
+}

@@ -25,6 +25,20 @@ type cachedSecret struct {
 
 const maxCachedSecrets = 32
 
+// secretReads is the process's keychain read cache (macOS only; nil elsewhere).
+var secretReads *secretCache
+
+func (c *secretCache) dropOlderThan(t time.Time, ref string) {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if entry, ok := c.entries[ref]; ok && entry.at.Before(t) {
+		delete(c.entries, ref)
+	}
+}
+
 func uncachedSecret(ref string) bool {
 	return strings.HasSuffix(ref, "-refresh") || strings.HasPrefix(ref, "refresh-attempt-")
 }

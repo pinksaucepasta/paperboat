@@ -79,6 +79,8 @@ func (smallKeychainStore) Delete(ref string) error {
 
 var keychainReads = &secretCache{ttl: 30 * time.Second, now: time.Now}
 
+func init() { secretReads = keychainReads }
+
 func keychainSet(ref, value string) error {
 	_, err := boundedKeychain(func() (struct{}, error) { return struct{}{}, keyring.Set(keyringService, ref, value) })
 	if err == nil {
