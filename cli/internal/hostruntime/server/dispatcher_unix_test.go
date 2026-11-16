@@ -547,7 +547,7 @@ func TestTerminalStreamEndFollowsOutputWithExactExit(t *testing.T) {
 	}{
 		{name: "zero", command: "printf final-output; exit 0", code: 0},
 		{name: "nonzero", command: "printf final-output; exit 7", code: 7},
-		{name: "signal", command: "printf final-output; kill -TERM $$", code: 143, signal: "terminated"},
+		{name: "signal", command: "printf final-output; kill -TERM $$", code: 143, signal: "SIGTERM"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			ready := filepath.Join(t.TempDir(), "release-output")

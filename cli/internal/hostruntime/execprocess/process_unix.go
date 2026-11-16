@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/pty"
+	"golang.org/x/sys/unix"
 )
 
 type processConfig struct {
@@ -312,7 +313,7 @@ func exitResult(state *os.ProcessState) Result {
 	result := Result{ExitedAt: time.Now().UTC()}
 	if status, ok := state.Sys().(syscall.WaitStatus); ok {
 		if status.Signaled() {
-			result.Code, result.Signal = 128+int(status.Signal()), status.Signal().String()
+			result.Code, result.Signal = 128+int(status.Signal()), unix.SignalName(status.Signal())
 		} else {
 			result.Code = status.ExitStatus()
 		}

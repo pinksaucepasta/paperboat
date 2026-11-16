@@ -349,7 +349,7 @@ func (p *Process) wait() {
 	if status, ok := p.cmd.ProcessState.Sys().(syscall.WaitStatus); ok {
 		if status.Signaled() {
 			result.Code = 128 + int(status.Signal())
-			result.Signal = status.Signal().String()
+			result.Signal = unix.SignalName(status.Signal()) // "SIGTERM", the name every consumer maps
 		} else {
 			result.Code = status.ExitStatus()
 		}
