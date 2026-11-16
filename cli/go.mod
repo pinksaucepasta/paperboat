@@ -2,7 +2,7 @@ module github.com/pinksaucepasta/paperboat
 
 go 1.27.4
 
-replace tailscale.com => github.com/pinksaucepasta/tailscale v1.103.0-pre.0.20261101154814-2d32e5f0efa6
+replace tailscale.com => github.com/pinksaucepasta/tailscale v1.103.0-pre.0.20261116114144-c543eba25d33
 
 require (
 	charm.land/bubbles/v2 v2.2.1

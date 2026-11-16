@@ -1,0 +1,55 @@
+FIX-PATHLOSS: a direct UDP path that loses a third or more of its packets is dropped for the relay (2026-11-16 IST)
+Cause: magicsock keeps bestAddr while any heartbeat pong lands within trustUDPAddrDuration (6.5 s) and betterAddr
+compares latency only; nothing counts loss. Upstream Tailscale has the same rule (ref/tailscale
+wgengine/magicsock/endpoint.go handlePongConnLocked, discoPingTimeout); a path losing half its packets answers
+enough pongs to stay preferred over a clean relay.
+Fix (fork pinksaucepasta/tailscale f3b499e17 + 22a0c35bd): heartbeats to bestAddr fill a 10-probe window per
+address; a lost heartbeat with 3+ losses in the window demotes it (next candidate, else DERP/peer relay) and keeps its
+pongs from re-promoting it for 30 s, doubling per demotion in a row up to 8 min. The window survives the demotion,
+so a path promoted again after the hold-down is dropped on its first lost heartbeat; a recovered path's clean
+probes shift the losses out, and a loss-free window resets the doubling. Prior art: none of ref/tailscale
+(magicsock), ref/netbird (client/internal/peer conn.go, worker_ice.go, worker_relay.go) demotes on partial loss;
+they only drop a path on full timeout / ICE failure.
+Machines: two throwaway Linux containers on pbvm2 (plos-a, later plos-c, caller, plos-b target, one account, docker bridge, direct
+path 172.17.0.9 <-> 172.17.0.12). Loss = iptables in plos-b dropping 40% of UDP from plos-a's address at random
+(only the direct path; the relay's address is untouched). Data: 8 MB /dev/urandom as `pb exec plos-b -- sh -c
+'cat >/dev/null'` stdin. Before: path from `pb ping plos-b --json`. After: bytes that reached plos-b per source
+address during the transfer (tcpdump on plos-b's veth), because `pb ping` reports a direct path whenever a direct
+disco ping answers, even while data rides the relay. 172.17.0.17 = direct (plos-c), 49.36.124.90 = direct via the
+NAT hairpin (pbvm2's public address), 152.67.0.60 / 140.245.11.41 / 157.180.74.88 = Paperboat relays.
+pbvm2 sits on a mobile hotspot today (power cut), which caps every relay run at 0.5-1.9 MB/s.
+
+before (dev-ce16dafb2, main):
+  clean   run1 path=direct 7.49 MB/s   run2 path=direct 7.87 MB/s
+  loss40  run1 path=direct 0.30 MB/s   run2 path=direct 1.26 MB/s   (1534 UDP datagrams dropped by the rule)
+
+after, first version (dev-763a4e11d, fork f3b499e17), plos-c -> plos-b:
+  clean   9.19, 10.89 MB/s direct
+  loss40 (hairpin open): the lossy 172.17.0.17 path is dropped mid-transfer for the clean hairpin
+          run a 0.30 MB/s (1744 KB direct, then 7440 KB hairpin), run b 1.59 MB/s (8544 KB hairpin, 0 KB lossy direct)
+  loss40 (hairpin blocked): a 1.75 MB/s relay; b 0.2 MB/s (8695 KB lossy direct: after the 30 s hold-down the path
+          came back and needed a fresh 30 s window to be dropped again); c 1.58 MB/s relay. Relay-only 0.92 MB/s.
+  -> fixed in 22a0c35bd (window kept across a demotion; demote only on a lost heartbeat).
+after (dev-619d8dd6a, fork 22a0c35bd; linux/amd64 built on pbvm2 because the shared build queue was full),
+pb version dev-619d8dd6a on plos-c and plos-b:
+  clean        5.70, 9.77 MB/s; 8642 / 8518 KB direct (172.17.0.17)            -> a clean pair stays direct
+  loss40 (hairpin blocked, 45 s after the rule; 20 s between runs; 4509 datagrams dropped in all):
+    run1 0.25 MB/s  9358 KB lossy direct, 4293 KB relay   (demoted during the run)
+    run2 0.39 MB/s  2701 KB direct (re-probe), 7963 KB relay
+    run3 0.42 MB/s   863 KB direct (re-probe), 8981 KB relay
+    run4 0.41 MB/s   529 KB direct (re-probe), 9211 KB relay   (re-probes shrink as the hold-down doubles)
+  relay-only (direct and hairpin blocked, same window): 0.54, 0.56 MB/s via 152.67.0.60
+  loss removed (hairpin still blocked), 150 s later: 8.98, 10.40 MB/s, 8577 / 8427 KB direct -> back on direct
+Result: a 40%-lossy direct path no longer carries the session: it moves to a clean candidate or the relay within
+one 30 s window, re-probes cost one lost heartbeat each, and the clean path returns once loss stops. Over this
+hotspot the relay itself is only 0.55 MB/s, so lossy-after (0.4) is close to the relay ceiling, not above the
+before numbers; the throughput gain shows where the relay is faster than the lossy path (Windows runner -> hp:
+relay 2.05 vs lossy direct 0.06-0.31 MB/s, fix-execstdin-20261116.txt). That Windows rerun was not done here.
+Tests (fork c543eba25, pinned in cli and relay): Test_endpoint_lossyDirectPathFallsBackToRelay PASS x3; the whole
+wgengine/magicsock -race suite PASS (hermes) after c543eba25 also fixed two red tests of the fork: TestTwoDevicePing
+(failed 1/5 under -race with and without this change: it accepted only the IPv4 loopback path while betterAddr may
+pick [::1]; now -race -count=20 PASS) and TestConn_receiveIP (fixture without logf, panicked every run since
+2d32e5f0e). cli internal/peertransport/mesh + native -race PASS (pbvm2 on f3b499e17, hermes on 22a0c35bd; c543eba25
+changes tests only), relay ./... PASS (pbvm2).
+Pair check (dev-619d8dd6a, plos-c <-> plos-b): pb exec plos-b -- hostname and pb exec plos-c -- hostname answer with
+the other container's hostname; pb connect plos-b echoes PLOSMARK42 computed by the remote shell.
