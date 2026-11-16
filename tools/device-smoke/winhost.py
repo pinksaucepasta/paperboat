@@ -132,7 +132,11 @@ SERVICE_PATHS = ("@(Get-CimInstance Win32_Service|Where-Object{$_.Name -like $re
 # to relays. TCP, and with it the controller's SSH, is untouched. A rule on a disabled firewall would do nothing.
 UDP_BLOCK = ("if($req.action -eq 'remove'){Remove-NetFirewallRule -DisplayName $req.name -ErrorAction SilentlyContinue;exit 0}\n"
              "if(@(Get-NetFirewallProfile|Where-Object{-not $_.Enabled}).Count){throw 'Windows Firewall is off for a profile: a block rule would not be enforced'}\n"
-             "[void](New-NetFirewallRule -DisplayName $req.name -Direction Outbound -Action Block -Protocol UDP -RemotePort @('1-52','54-65535'))")
+             "[void](New-NetFirewallRule -DisplayName $req.name -Direction Outbound -Action Block -Protocol UDP -RemotePort @('1-52','54-65535'))\n"
+             # A socket that already sent keeps sending through a new Block rule (see NET_CUT): replace the pb.exe that own UDP sockets.
+             "$k=@{};Get-NetUDPEndpoint|ForEach-Object{$k[[int]$_.OwningProcess]=1}\n"
+             "$pp=@(Get-ChildItem -LiteralPath (Join-Path $env:ProgramFiles 'Paperboat') -Recurse -Filter pb.exe -File|ForEach-Object{$_.FullName})\n"
+             "Get-Process pb -ErrorAction SilentlyContinue|Where-Object{$k.ContainsKey([int]$_.Id) -and $pp -contains $_.Path}|Stop-Process -Force")
 # Blocks pb.exe's own traffic (every pb.exe under Program Files\\Paperboat: the daemon, the host runtime, the client) to
 # $req.addr and, with $req.inbound, from them; the program scope keeps the controller's SSH (sshd, the runner's tunnel
 # ssh.exe) alive, which a machine-wide cut would sever. The firewall drops silently: no reset, no link-down.
@@ -143,7 +147,16 @@ NET_CUT = ("if($req.action -eq 'remove'){Remove-NetFirewallRule -DisplayName $re
            "foreach($d in @('Outbound')+$(if($req.inbound){@('Inbound')}else{@()})){foreach($x in $p){foreach($pr in $(if($req.ports){@($req.protos)}else{@('')})){\n"
            "$a=@{DisplayName=$req.name;Direction=$d;Action='Block';Program=$x;RemoteAddress=@($req.addr)}\n"
            "if($req.ports){$a.Protocol=$pr;$a.RemotePort=@($req.ports)}\n"
-           "[void](New-NetFirewallRule @a)}}}")
+           "[void](New-NetFirewallRule @a)}}}\n"
+           # Windows Firewall judges a flow once, when its socket first uses it: a pb.exe that already talks to the addresses keeps
+           # sending and receiving through a new Block rule (2026-11-17: 193 of 442 packets per 30 s still left the machine). Stopping
+           # the pb.exe that own such sockets (their services restart them) makes every flow new, so the rule decides it.
+           "$k=@{}\n"
+           "if(-not $req.ports -or $req.protos -contains 'UDP'){Get-NetUDPEndpoint|ForEach-Object{$k[[int]$_.OwningProcess]=1}}\n"
+           "if(-not $req.ports -or $req.protos -contains 'TCP'){Get-NetTCPConnection -State Established -ErrorAction SilentlyContinue|"
+           "Where-Object{$_.RemoteAddress -notin '127.0.0.1','::1' -and (-not $req.ports -or $req.ports -contains $_.RemotePort)}|"
+           "ForEach-Object{$k[[int]$_.OwningProcess]=1}}\n"
+           "Get-Process pb -ErrorAction SilentlyContinue|Where-Object{$k.ContainsKey([int]$_.Id) -and $p -contains $_.Path}|Stop-Process -Force")
 # Every non-loopback IPv4 and global/link-local/unique-local IPv6 address.
 NON_LOOPBACK = ['0.0.0.0-126.255.255.255', '128.0.0.0-255.255.255.255', '2000::/3', 'fe80::/10', 'fc00::/7']
 LISTENING = ("try{$c=New-Object Net.Sockets.TcpClient('127.0.0.1',[int]$req.port);$c.Close();'yes'}catch{'no'}")
