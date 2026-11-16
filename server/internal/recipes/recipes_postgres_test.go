@@ -328,3 +328,29 @@ func (f *fixture) topicWatch(machine string) func() {
 		}
 	}
 }
+
+// A recipe machine may read the config repository its recipe's [config] names (by display name or short
+// name) and no other; a revoked recipe reads none (F26-05 device check: config sync apply was refused).
+func TestRecipeReadsOnlyItsConfigRepository(t *testing.T) {
+	f := newFixture(t)
+	for id, name := range map[string]string{"cfgrepo_a_" + f.account: "octo/dotfiles", "cfgrepo_b_" + f.account: "octo/other"} {
+		f.exec(`INSERT INTO paperboat.control_config_repositories(id,owner_user_id,provider,external_ref,display_name) VALUES($1,$2,'git',$1,$3)`, id, f.account, name)
+	}
+	t.Cleanup(func() {
+		_, _ = f.store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.control_config_repositories WHERE owner_user_id=$1`, f.account)
+	})
+	tok := f.token()
+	created, err := f.service.Create(f.ctx, f.account, f.personal, Input{Name: "cfg", Source: "[config]\nrepository = \"dotfiles\"\n", Format: "toml", TokenID: tok.ID, Auth: tok.Auth(), PublicKey: tok.PublicKey()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for repository, want := range map[string]bool{"cfgrepo_a_" + f.account: true, "cfgrepo_b_" + f.account: false, "cfgrepo_missing": false} {
+		if got, err := f.service.ReadsRepository(f.ctx, created.ID, repository); err != nil || got != want {
+			t.Fatalf("%s: reads=%v err=%v", repository, got, err)
+		}
+	}
+	f.exec(`UPDATE paperboat.recipes SET revoked_at=now(), revoked_by=account_id WHERE id=$1`, created.ID)
+	if got, err := f.service.ReadsRepository(f.ctx, created.ID, "cfgrepo_a_"+f.account); err != nil || got {
+		t.Fatalf("revoked recipe reads=%v err=%v", got, err)
+	}
+}

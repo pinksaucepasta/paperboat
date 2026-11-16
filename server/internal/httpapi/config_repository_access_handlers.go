@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -59,13 +60,30 @@ func configRepositoryAccessIssue(service *controlplane.ConfigRepositoryAccessSer
 	}
 }
 
-func configRepositoryReadAccess(service *controlplane.ConfigRepositoryAccessService) http.HandlerFunc {
+func configRepositoryReadAccess(service *controlplane.ConfigRepositoryAccessService, recipeRepositories interface {
+	ReadsRepository(ctx context.Context, recipeID, repositoryID string) (bool, error)
+}) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		p, ok := principalFromContext(r.Context())
 		if !ok {
 			writeError(w, r, http.StatusUnauthorized, "unauthenticated", "Authentication is required.")
 			return
+		}
+		// A recipe machine reads only the repository its recipe's [config] names (recipeRoute lets it reach here).
+		if p.Client != nil && p.Client.RecipeID != "" {
+			allowed := false
+			if recipeRepositories != nil {
+				var err error
+				if allowed, err = recipeRepositories.ReadsRepository(r.Context(), p.Client.RecipeID, r.PathValue("repository_id")); err != nil {
+					writeError(w, r, http.StatusServiceUnavailable, "access_uncertain", "The recipe's repository could not be checked; retry.", err)
+					return
+				}
+			}
+			if !allowed {
+				writeRecipeRouteRefusal(w, r)
+				return
+			}
 		}
 		var in struct {
 			URL string `json:"url"`

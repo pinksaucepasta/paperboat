@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strings"
@@ -47,6 +48,10 @@ func recipeRoute(r *http.Request, own string) bool {
 		return false
 	}
 	if p == "/v1/native-private-access/grants" {
+		return true
+	}
+	// Read access to a config repository: the handler allows only the recipe's own [config] repository.
+	if strings.HasPrefix(p, "/v1/config-repositories/") && strings.HasSuffix(p, "/read-access") {
 		return true
 	}
 	parts := strings.Split(strings.TrimPrefix(p, "/v1/"), "/")
@@ -443,4 +448,14 @@ func registerRecipeRoutes(mux *http.ServeMux, service *recipes.Service, account 
 		mux.Handle("GET /v1/recipe-machine", requireBearerAuth(device, recipeMachine(service)))
 		mux.Handle("PUT /v1/recipe-machine/apply", requireBearerAuth(device, recipeMachineApply(service)))
 	}
+}
+
+// recipeRepositoryReader is nil (every recipe read refused) when the server runs without recipes.
+func recipeRepositoryReader(service *recipes.Service) interface {
+	ReadsRepository(ctx context.Context, recipeID, repositoryID string) (bool, error)
+} {
+	if service == nil {
+		return nil
+	}
+	return service
 }

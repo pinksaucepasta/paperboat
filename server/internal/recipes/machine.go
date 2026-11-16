@@ -81,3 +81,18 @@ func publishVaultTx(ctx context.Context, tx *db.Tx, vaultID string) error {
 	 JOIN recipe_machines rm ON rm.recipe_id=w.recipe_id JOIN live_user_machines m ON m.id=rm.machine_id WHERE w.vault_id=$1), 'recipe')`, vaultID)
 	return err
 }
+
+// ReadsRepository reports whether the recipe's [config] names this connected repository (its display name,
+// or the name after "owner/"), so the recipe's machines may get read access to that repository and no
+// other (F26 device check: pb config sync apply on a recipe machine was refused outright).
+func (s *Service) ReadsRepository(ctx context.Context, recipeID, repositoryID string) (bool, error) {
+	var allowed bool
+	err := s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+		return tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM recipes r
+		 JOIN control_config_repositories c ON c.owner_user_id=r.account_id AND c.state='active'
+		 WHERE r.id=$1 AND r.revoked_at IS NULL AND c.id=$2
+		 AND r.canonical->'config'->>'repository' IN (c.display_name, nullif(split_part(c.display_name,'/',2),'')))`,
+			recipeID, repositoryID).Scan(&allowed)
+	})
+	return allowed, err
+}
