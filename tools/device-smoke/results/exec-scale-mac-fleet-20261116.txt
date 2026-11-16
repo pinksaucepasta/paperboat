@@ -9,4 +9,19 @@ total seconds 292
 (the churn's own seconds figure was garbled by a quoting error in the driver; the whole run took 292 s, 2,000 of 2,000 ok.)
 36 concurrent 'pb exec lanex2-m -- sleep 25' from lanex2-l2: 32 ran (rc 0, 27-28 s), 4 refused in 3 s with rc 1; the refusal text on this build was the
 terminal one ("ceiling of 256 open terminals ... pb session close"): fixed in c9053a60c (exec_limit_reached), not yet on the fleet.
-Transfer queue to the Mac: not run, the fleet build lacks 638f9397c (host journal replays the busy refusal).
+Transfer queue to the Mac: see the second pass below.
+
+== second pass on dev-caf37d9c6 (contains 7e45959e9 and 638f9397c), lanex2-m + lanex2-l2, 2026-11-16 IST evening ==
+36 concurrent 'pb exec lanex2-m -- sleep 25' from lanex2-l2: 32 ran (rc 0, 27-28 s), 4 refused in 3-4 s: 'The target is already running as many commands as it accepts at once. Wait for one to finish, then retry.'
+Mac as client, 32x sleep 20 (lanex2-m -> lanex2-l2): fastest 22.48 s, median 22.90 s, slowest 23.44 s, 0 over 30 s, 0 failed.
+6 parallel 10 MiB sends l2 -> lanex2-m:
+t=4 s2: lanex2-m is already receiving as many transfers as it accepts at once: waiting for one to finish (up to 15m0s)
+t=4 s3: lanex2-m is already receiving as many transfers as it accepts at once: waiting for one to finish (up to 15m0s)
+t=4 s4: lanex2-m is already receiving as many transfers as it accepts at once: waiting for one to finish (up to 15m0s)
+t=4 s5: lanex2-m is already receiving as many transfers as it accepts at once: waiting for one to finish (up to 15m0s)
+t=24 s1 END rc=0
+t=24 s6 END rc=0
+t=42 s4 END rc=0
+t=43 s5 END rc=0
+t=55 s2 END rc=0
+t=55 s3 END rc=0
