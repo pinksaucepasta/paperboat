@@ -45,10 +45,14 @@ func runPurge(ctx context.Context, args []string, _ io.Reader, _, stderr io.Writ
 	}
 	arguments := append([]string{"--", "/usr/bin/env", "PAPERBOAT_INVOKING_UID=" + strconv.Itoa(os.Getuid()), executable, "__runtime-service", "purge"}, args...)
 	command := sudoCommand(ctx, arguments...)
-	command.Stderr = io.Discard
+	reason := &tailBuffer{limit: 2048}
+	command.Stderr = reason
 	var output purgeOutput
 	command.Stdout = &output
 	err = command.Run()
+	if refused := sudoRefusal("Removing the Paperboat system runtime", err, reason.String()); refused != nil {
+		return nil, refused
+	}
 	if output.exceeded {
 		return nil, runtimeFailure("privileged cleanup result exceeded its bound", err)
 	}

@@ -4,7 +4,6 @@ package hostruntimecmd
 
 import (
 	"context"
-	"io"
 	"os"
 	"strconv"
 )
@@ -18,8 +17,12 @@ func RepairManagedHost(ctx context.Context) error {
 	}
 	command := sudoCommand(ctx, "--", "/usr/bin/env",
 		"PAPERBOAT_INVOKING_UID="+strconv.Itoa(os.Getuid()), systemWorkerExecutable(), "__runtime-service", "repair-persisted")
-	command.Stderr = io.Discard
+	reason := &tailBuffer{limit: 2048}
+	command.Stderr = reason
 	if err := command.Run(); err != nil {
+		if refused := sudoRefusal("Repairing the Paperboat system service", err, reason.String()); refused != nil {
+			return refused
+		}
 		return runtimeFailure("administrator approval or host service repair failed", err, runtimeContextFailure(ctx))
 	}
 	return nil

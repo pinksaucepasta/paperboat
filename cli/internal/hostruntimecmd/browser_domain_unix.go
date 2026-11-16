@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"strconv"
 )
@@ -25,8 +26,12 @@ func ConfigureBrowserDomain(ctx context.Context, domain string) error {
 	command := sudoCommand(ctx, args...)
 	command.Stdin = bytes.NewReader(body)
 	command.Stdout = os.Stderr
-	command.Stderr = os.Stderr
+	reason := &tailBuffer{limit: 2048}
+	command.Stderr = io.MultiWriter(os.Stderr, reason)
 	if err := command.Run(); err != nil {
+		if refused := sudoRefusal("Setting up the trusted local browser domain", err, reason.String()); refused != nil {
+			return refused
+		}
 		return fmt.Errorf("configure trusted local browser domain: %w", err)
 	}
 	return nil

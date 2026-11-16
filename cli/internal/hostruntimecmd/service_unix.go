@@ -133,8 +133,12 @@ func authorizePersistedUninstall(ctx context.Context) error {
 	executable := systemWorkerExecutable()
 	command := sudoCommand(ctx, "--", "/usr/bin/env",
 		"PAPERBOAT_INVOKING_UID="+strconv.Itoa(os.Getuid()), executable, "__runtime-service", "uninstall-persisted")
-	command.Stderr = io.Discard
+	reason := &tailBuffer{limit: 2048}
+	command.Stderr = reason
 	if err := command.Run(); err != nil {
+		if refused := sudoRefusal("Removing the Paperboat system service", err, reason.String()); refused != nil {
+			return refused
+		}
 		return runtimeFailure("administrator approval or service removal failed", err, runtimeContextFailure(ctx))
 	}
 	return nil

@@ -149,6 +149,9 @@ func installUpdateSource(ctx context.Context, executable string, source installs
 					return hostinstall.ErrNoPendingInstallation
 				}
 			}
+			if refused := sudoRefusal("Installing the supplied Paperboat executable", err, reason.String()); refused != nil {
+				return refused
+			}
 			// The privileged step prints its own reason first; administrator approval is only one cause.
 			return runtimeFailure("installing the supplied Paperboat executable failed (its reason is printed above); if administrator access was declined, approve it and rerun `pb install`", err, stderrReason(reason), runtimeContextFailure(callCtx))
 		}
@@ -318,7 +321,9 @@ func KeepInstallFailureOwner(installErr, inventoryErr error) error {
 	}
 	if failure, ok := installErr.(*CommandFailure); ok {
 		message := failure.message
-		if authored, ok := inventoryErr.(*CommandFailure); ok && authored.message != "" {
+		var inventoryRefused, installRefused *AdministratorRequiredError
+		bothRefused := errors.As(inventoryErr, &inventoryRefused) && errors.As(installErr, &installRefused)
+		if authored, ok := inventoryErr.(*CommandFailure); ok && authored.message != "" && !bothRefused {
 			message += "\n" + authored.message
 		}
 		return &CommandFailure{message: message, causes: append(append([]error(nil), failure.causes...), inventoryErr)}

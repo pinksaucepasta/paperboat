@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -494,8 +495,12 @@ var inspectInventoryExecutable = installsource.InspectCandidate
 func runInventoryCommand(ctx context.Context, command *exec.Cmd, executable string) error {
 	var output purgeOutput
 	command.Stdout = &output
-	command.Stderr = os.Stderr
+	reason := &tailBuffer{limit: 2048}
+	command.Stderr = io.MultiWriter(os.Stderr, reason)
 	err := command.Run()
+	if refused := sudoRefusal("Cleaning up other Paperboat versions (the install inventory)", err, reason.String()); refused != nil {
+		return refused
+	}
 	var exit *exec.ExitError
 	if errors.As(err, &exit) && exit.ExitCode() == ServiceUsageExitCode {
 		unsupported := InventoryUnsupportedError{}

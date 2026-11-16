@@ -14,7 +14,7 @@ func sudoCommand(ctx context.Context, args ...string) *exec.Cmd {
 	if runningAsRoot() && len(args) > 1 && args[0] == "--" {
 		return exec.CommandContext(ctx, args[1], args[2:]...)
 	}
-	return exec.CommandContext(ctx, "/usr/bin/sudo", append(sudoHome(), args...)...)
+	return exec.CommandContext(ctx, sudoExecutable, append(sudoHome(), args...)...)
 }
 
 var runningAsRoot = func() bool { return os.Geteuid() == 0 }

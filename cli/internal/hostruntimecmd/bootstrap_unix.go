@@ -557,8 +557,12 @@ func authorizeServiceOperation(ctx context.Context, executable, operation string
 		"PAPERBOAT_INVOKING_UID="+strconv.Itoa(os.Getuid()), executable, "__runtime-service", operation)
 	command.Stdin = bytes.NewReader(payload)
 	command.Stdout = stdout
-	command.Stderr = stderr
+	reason := &tailBuffer{limit: 2048}
+	command.Stderr = io.MultiWriter(stderr, reason)
 	if err := command.Run(); err != nil {
+		if refused := sudoRefusal("Installing the Paperboat system service", err, reason.String()); refused != nil {
+			return refused
+		}
 		return fmt.Errorf("administrator approval or service installation failed: %w", err)
 	}
 	return nil
