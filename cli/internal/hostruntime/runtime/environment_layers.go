@@ -71,7 +71,7 @@ func (s *layerEnvironmentService) layerEnvironment(ctx context.Context, names *l
 	if controlKnownDown(s.transport) {
 		return nil, controlDownError{} // no ENV lookup waits out a control plane the host's own requests just failed to reach
 	}
-	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, environmentBudget(s.transport))
 	defer cancel()
 	if err := s.registerLayerRecipient(ctx); err != nil {
 		return nil, err

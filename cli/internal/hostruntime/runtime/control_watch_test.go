@@ -80,3 +80,21 @@ func layerRegistration(t *testing.T) runtimeidentity.Registration {
 	t.Helper()
 	return runtimeidentity.Registration{MachineID: "machine_1", InstallationGeneration: 11}
 }
+
+// Until the first control answer after boot the host cannot know Paperboat is down, so a launch's ENV lookup is short;
+// once anything answered, it gets the full budget.
+func TestEnvironmentLookupIsShortUntilTheControlPlaneFirstAnswers(t *testing.T) {
+	watch := &controlWatch{next: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Body: http.NoBody}, nil
+	})}
+	if got := environmentBudget(watch); got != unprovenLookupBudget {
+		t.Fatalf("budget before any answer = %v", got)
+	}
+	request, _ := http.NewRequest(http.MethodGet, "https://control.example.test/", nil)
+	if _, err := watch.RoundTrip(request); err != nil {
+		t.Fatal(err)
+	}
+	if got := environmentBudget(watch); got != environmentLookupBudget {
+		t.Fatalf("budget after an answer = %v", got)
+	}
+}
