@@ -29887,11 +29887,19 @@
         },
         "responses": {
           "201": {
-            "description": "Maintenance approval requested.",
+            "description": "Created.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SuccessResponse"
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/MaintenanceApproval"
+                    }
+                  }
                 }
               }
             }

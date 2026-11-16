@@ -19167,13 +19167,15 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Maintenance approval requested. */
+            /** @description Created. */
             201: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SuccessResponse"];
+                    "application/json": {
+                        data: components["schemas"]["MaintenanceApproval"];
+                    };
                 };
             };
             400: components["responses"]["Error"];

@@ -370,7 +370,7 @@ export type UpdateState = UpdateObservation["state"]
 export async function approveUpdate(workspace: string, machineId: string, targetVersion: string): Promise<void> {
   const machine = encodeURIComponent(machineId)
   const selector = `?workspace=${encodeURIComponent(workspace)}`
-  const approval = await api<{ id: string }>(`machines/${machine}/maintenance-approvals${selector}`, {
+  const approval = await api<Data<"/v1/machines/{machine_id}/maintenance-approvals", "post">>(`machines/${machine}/maintenance-approvals${selector}`, {
     method: "POST",
     headers: { "content-type": "application/json", "idempotency-key": idempotencyKey() },
     body: JSON.stringify({ action: "update", target_version: targetVersion, reason: "Approved from the console" }),

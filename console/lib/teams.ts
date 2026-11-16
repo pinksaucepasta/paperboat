@@ -155,7 +155,7 @@ export async function createPaidTeam(teamId: string, seats: number, interval: "m
 
 /** Invites by email; the person can accept after signing up with that address. */
 export function inviteMember(team: TeamSummary, email: string, role: TeamRole = "member") {
-  return api<TeamInvitation>(`${teamPath(team.team_id)}/invitations`, {
+  return api<Data<"/v1/teams/{team_id}/invitations", "post">>(`${teamPath(team.team_id)}/invitations`, {
     method: "POST",
     headers: json,
     body: JSON.stringify({
