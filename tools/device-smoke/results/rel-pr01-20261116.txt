@@ -1,0 +1,18 @@
+PR-01 relay forwarding + busy neighbour (REL-PR-01, 2026-11-16 IST, staging stack on anvit, one shared relay node)
+Build on every machine: pb dev-46de6c262 (main 07:28 IST; relay/ and shared/ unchanged since on main, git log 46de6c262..origin/main -- relay shared/relaylimits shared/peernetwork is empty)
+Accounts: A (usr_pr01a: pr01-a1, pr01-a2 Linux containers on pbvm2, pr01-mac macpool-1, pr01-win winpool-5), B = busy neighbour (usr_pr01b: pr01-hb1, pr01-hb2 Linux containers on hp).
+Both accounts use the same relay node (global relay installation, pool mixed); relay budgets are per account (relay/derpquic server.go accounts map).
+UDP blocked on every machine (Linux nft/iptables, macOS pf, Windows firewall rule): pb status selected_path wss, region anvit.
+Flood = 4 parallel `pb exec hb2 -- head -c 4000M /dev/zero` from hb1 (account B), ~15.7 MB/s aggregate, 330 s.
+
+Download (target stdout -> client), 50 MB, MB/s through the relay:
+  L  a2->a1 WSS     quiet 12.9, 15.0   during B flood 14.5, 14.5, 14.9   after 10.5   (B: 14.7 MB/s aggregate in the same window)
+  L  a2->a1 QUIC    quiet 11.6         during B flood 13.2, 15.4         (direct path cut, UDP open, selected_path relay; B also on QUIC, 16 MB/s)
+  M  mac client     quiet 6.17         during B flood 5.43
+  W  win client     quiet 2.82, 2.71   during B flood 2.96
+Upload (client stdin -> target, `pb exec` stdin) through the relay: L 0.4-1.0, M 0.64 / 0.69 flood, W 0.57 / 0.36 flood / 0.31 quiet (runner variance):
+  same ~0.8 MB/s over the QUIC relay, 11.4 MB/s on the direct path, so it is the exec stdin path (32 KiB per round trip), not relay forwarding. Logged in failures.md, not part of PR-01.
+Exec round trips in both directions on the relay: a1<->a2 (wss and relay/QUIC), a1->mac, mac->a1, a1->win, win->a1: all ok.
+First exec of a freshly signed-in client: failed 2-3 times (14 s each) until `pb ping`; after a daemon restart the first exec passes (win 10.9 s, mac 4.8 s). Network-map propagation of a new peer, not forwarding.
+Workspace: relay/derpquic TestBusyAccountDoesNotSlowANeighbor PASS in CI (run 43789628326, -race): a flooding account does not delay another account's packets (50 round trips < 1 s), over-budget datagrams are dropped and counted, never forwarded, and the neighbour keeps forwarding both ways.
+Peer relay (UDP, relay/peerrelay): forwarding and budget by workspace tests only (TestForwardBudgetCarriesFullSizePacketsAtLinkRate, cli peerrelay_integration_test); the staging relay does not run a registered peer-relay service, so there is no device run of it.
