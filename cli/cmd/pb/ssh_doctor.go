@@ -30,7 +30,7 @@ func actionSSHDoctor(command *cobra.Command, args []string) error {
 	}
 	keys, err := client.ManagedSSHHostKeys(command.Context(), machine.ID, uint64(machine.InstallationGeneration))
 	if err != nil {
-		return friendlyCommandError(err)
+		return sshDoctorHostKeysFailure(command.Context(), machine, err)
 	}
 	cfg, store, err := requireAuthConfig(actionContext(command, args))
 	if err != nil {
@@ -156,4 +156,14 @@ func pendingHostKeyFailure(ctx context.Context, client *api.Client, machine api.
 		return &sshDialError{message: machine.Alias + " presented an SSH host key that is not in its trusted set, and has not reported new keys yet. If you changed its host keys, retry `pb ssh doctor " + machine.Alias + "` in a minute; if you did not, do not connect: it may not be that machine.", cause: authErr}
 	}
 	return &sshDialError{message: pendingSSHHostIdentityMessage(machine.Alias, pending.Fingerprint), cause: authErr}
+}
+
+// sshDoctorHostKeysFailure: the server has no host keys to give for a machine whose SSH is not ready (no sshd yet,
+// cloned host keys) and answers 404; the daemon's health says why and what to do, as pb ssh does, instead of "The
+// requested Paperboat resource was not found".
+func sshDoctorHostKeysFailure(ctx context.Context, machine api.UserMachine, err error) error {
+	if notReady := sshTargetHealth(ctx, machine.ID, machine.Alias); notReady != nil {
+		return notReady
+	}
+	return friendlyCommandError(err)
 }

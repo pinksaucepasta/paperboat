@@ -58,3 +58,23 @@ func TestSSHToolsNameTheClientKeyLimit(t *testing.T) {
 		t.Fatalf("err=%v", err)
 	}
 }
+
+// pb ssh doctor on a machine whose SSH is not ready (pbvm2: host keys cloned from another machine, so the server
+// publishes none and answers 404) names the reason like pb ssh, not "The requested Paperboat resource was not found".
+func TestSSHDoctorNamesWhySSHIsNotReadyInsteadOfNotFound(t *testing.T) {
+	previous := readDaemonSnapshot
+	t.Cleanup(func() { readDaemonSnapshot = previous })
+	status := localapi.MachineStatus{ID: "machine_b", Alias: "box", SSHReadiness: "degraded", Health: []localapi.HealthItem{{Code: "ssh_host_keys_cloned", Severity: "warning", Title: "The machine's SSH host keys are identical to other's", Recovery: "On it, remove /etc/ssh/ssh_host_*, run ssh-keygen -A and restart sshd"}}}
+	readDaemonSnapshot = func(context.Context) (localapi.Snapshot, error) {
+		return localapi.Snapshot{Machines: []localapi.MachineStatus{status}}, nil
+	}
+	notFound := &api.APIError{Status: http.StatusNotFound, Code: "not_found"}
+	err := sshDoctorHostKeysFailure(context.Background(), api.UserMachine{ID: "machine_b", Alias: "box"}, notFound)
+	if message := commandFailureMessage(err, classifyCommandFailure(err)); !strings.Contains(message, "SSH to box is not ready: The machine's SSH host keys are identical") || strings.Contains(message, "not found") {
+		t.Fatalf("message=%q", message)
+	}
+	status.SSHReadiness, status.Health = "ready", nil
+	if err := sshDoctorHostKeysFailure(context.Background(), api.UserMachine{ID: "machine_b", Alias: "box"}, notFound); err == nil {
+		t.Fatal("a lookup failure on a ready machine was dropped")
+	}
+}
