@@ -1,0 +1,10 @@
+{
+ "check": "xplat-removal",
+ "results": [
+  {
+   "id": "X-41:uninstall:L",
+   "status": "FAIL",
+   "detail": "rx41n-m: pb ssh rx41n-l after 6 s:  tester@rx41n-l.ppr.boats: Permission denied (publickey,password).\r\n"
+  }
+ ]
+}

@@ -1,0 +1,29 @@
+events after revoke: 118
+--- 0..60 s: 98 events
+28 ('reconnect_transport', 'carriercontrol.Client.do.func1')
+9 ('control_request_failed', 'errorreport.ownedTransport.RoundTrip')
+7 ('reconnect_transport', 'tailnet.Authority.refresh')
+6 ('unclassified_log', 'recordingcontrol.Controller.refreshPolicy')
+6 ('unclassified_log', 'runtime.storedFileControl.Start.func1')
+6 ('unclassified_log', 'runtime.managedSSHKeyReconciler.run')
+5 ('reconnect_transport', 'runtime.productionNativePeerGeneration.stop.fu')
+5 ('reconnect_transport', 'tailnet.Authority.RestoreOrRegister')
+5 ('unclassified_log', 'daemoncmd.refreshMachineServices')
+4 ('peer_authority_failed', 'runtime.productionNativePeerService.recordPeer')
+2 ('reconnect_transport', 'native.Owner.Close')
+2 ('control_request_failed', 'machineevents.Hub.run')
+2 ('control_request_failed', 'api.publicCallOptions.func2')
+2 ('reconnect_transport', 'connector.DataCarrier.shutdownFor.func1')
+--- 60..100 s: 18 events
+5 ('reconnect_transport', 'carriercontrol.Client.do.func1')
+2 ('control_request_failed', 'errorreport.ownedTransport.RoundTrip')
+2 ('unclassified_log', 'runtime.managedSSHKeyReconciler.run')
+2 ('unclassified_log', 'daemoncmd.refreshMachineServices')
+2 ('unclassified_log', 'daemoncmd.Coordinator.replaceGuardedRoutes')
+1 ('control_request_failed', 'api.publicCallOptions.func2')
+1 ('reconnect_transport', 'tailnet.Authority.RestoreOrRegister')
+1 ('reconnect_transport', 'tailnet.Authority.refresh')
+1 ('unclassified_log', 'recordingcontrol.Controller.refreshPolicy')
+1 ('unclassified_log', 'runtime.storedFileControl.Start.func1')
+W enrolled again machine_d1b85f8c-a78f-4bb0-9a1d-385d09cef59d
+rc=0

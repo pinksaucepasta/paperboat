@@ -1,0 +1,50 @@
+{
+ "check": "xplat-removal",
+ "results": [
+  {
+   "id": "X-41:revoke:L",
+   "status": "PASS",
+   "detail": "rx41n-m: pb: No machine has that name or ID. Run `pb machine list` to see your machines. Support reference: support_317; rx41n-w: pb: No machine has that name or ID. Run `pb machine list` to see your machines. Support reference: support_b53; revoked target: 22 events/min; observers: 7, 6 events/min; new identity after enrolling again, both observers exec and pb ssh it (exec reachable 4/5 s after the new identity was listed, pb ssh 5/7 s later)"
+  },
+  {
+   "id": "X-41:revoke:M",
+   "status": "PASS",
+   "detail": "rx41n-l: pb: No machine has that name or ID. Run `pb machine list` to see your machines. Support reference: support_2c7; rx41n-w: pb: No machine has that name or ID. Run `pb machine list` to see your machines. Support reference: support_c39; revoked target: 39 events/min; observers: 1, 1 events/min; new identity after enrolling again, both observers exec and pb ssh it (exec reachable 2/6 s after the new identity was listed, pb ssh 3/5 s later)"
+  },
+  {
+   "id": "X-41:revoke:W",
+   "status": "FAIL",
+   "detail": "rx41n-w daemon wrote 60 diagnostic events in 60 s (revoked target)"
+  },
+  {
+   "id": "X-41:reset:L",
+   "status": "FAIL",
+   "detail": "rx41n-w cannot exec rx41n-l:  : Your Paperboat session is no longer valid. Run `pb login` and approve this CLI in your browser. The printed link works on another device when this machine has no browser. Then retry. Support reference: support_f0ef0dfc-bfae-4718-8888-2f6ed30874b9.\n | doctor: []"
+  },
+  {
+   "id": "X-41:reset:M",
+   "status": "FAIL",
+   "detail": "rx41n-w cannot exec rx41n-m:  : Your Paperboat session is no longer valid. Run `pb login` and approve this CLI in your browser. The printed link works on another device when this machine has no browser. Then retry. Support reference: support_ab5f1ef3-9138-41e4-8ffe-89015e91d803.\n | doctor: []"
+  },
+  {
+   "id": "X-41:reset:W",
+   "status": "FAIL",
+   "detail": "rx41n-l lists no online machine rx41n-w (has rx41n-l/online, rx41n-m/online)"
+  },
+  {
+   "id": "X-41:uninstall:L",
+   "status": "FAIL",
+   "detail": "rx41n-w cannot exec rx41n-l:  : Your Paperboat session is no longer valid. Run `pb login` and approve this CLI in your browser. The printed link works on another device when this machine has no browser. Then retry. Support reference: support_4e93318f-ef55-4a68-ae1c-ba3a2080723c.\n | doctor: []"
+  },
+  {
+   "id": "X-41:uninstall:M",
+   "status": "FAIL",
+   "detail": "rx41n-w cannot exec rx41n-m:  : Your Paperboat session is no longer valid. Run `pb login` and approve this CLI in your browser. The printed link works on another device when this machine has no browser. Then retry. Support reference: support_abc46a50-54d2-462e-9dda-81b0cbc645c9.\n | doctor: []"
+  },
+  {
+   "id": "X-41:uninstall:W",
+   "status": "FAIL",
+   "detail": "rx41n-l lists no online machine rx41n-w (has rx41n-l/online, rx41n-m/online)"
+  }
+ ]
+}
