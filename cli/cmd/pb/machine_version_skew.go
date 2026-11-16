@@ -27,10 +27,14 @@ type machineVersionReader interface {
 }
 
 // explainMachineVersionSkew replaces a peer stream refusal with the skew message when the target reports another pb
-// build than this one. Any other error, or an unreadable version, comes back unchanged.
-func explainMachineVersionSkew(ctx context.Context, client machineVersionReader, machine api.UserMachine, err error) error {
+// build than this one. Any other error, or an unreadable version, comes back unchanged. workspace is the one the
+// stream's header carried: a non-default one is the field an older target rejects, and an exec it rejects ends as an
+// uncertain start (the reset arrives after the request was written), so that outcome counts as a refusal then too.
+func explainMachineVersionSkew(ctx context.Context, client machineVersionReader, machine api.UserMachine, workspace string, err error) error {
 	var remote *localapi.RemoteError
-	if client == nil || !errors.As(err, &remote) || (remote.Code != "peer_transport_unavailable" && remote.Code != "peer_stream_unavailable") {
+	refused := errors.As(err, &remote) && (remote.Code == "peer_transport_unavailable" || remote.Code == "peer_stream_unavailable")
+	namedWorkspace := workspace != "" && workspace != "personal"
+	if client == nil || !(refused || namedWorkspace && execStartUncertain(err)) {
 		return err
 	}
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)

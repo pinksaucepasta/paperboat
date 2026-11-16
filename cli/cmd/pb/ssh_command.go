@@ -293,7 +293,7 @@ func actionSSHProxy(command *cobra.Command, _ []string) error {
 			return notReady
 		}
 		if resolvedClient != nil {
-			if skew := explainMachineVersionSkew(command.Context(), resolvedClient, machine, err); skew != err {
+			if skew := explainMachineVersionSkew(command.Context(), resolvedClient, machine, resolvedClient.Workspace(), err); skew != err {
 				return skew
 			}
 		}

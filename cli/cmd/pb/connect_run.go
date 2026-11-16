@@ -454,7 +454,7 @@ func actionConnectTargetInDirectory(c *command.Context, requested, cwd string) e
 		if createdSessionID != "" {
 			reportTerminalAuxFailure(ctx, "cleanup", "terminal_session_failed", closeAbandonedSession(backend, createdMachineID, createdSessionID))
 		}
-		if skew := explainMachineVersionSkew(c.Context, backend, resolvedMachine, err); skew != err {
+		if skew := explainMachineVersionSkew(c.Context, backend, resolvedMachine, backend.Workspace(), err); skew != err {
 			return skew
 		}
 		return fmt.Errorf("connect to %q: %w", machineRef, err)
