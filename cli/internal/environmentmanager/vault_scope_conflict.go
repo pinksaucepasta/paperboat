@@ -38,6 +38,13 @@ func vaultWriteDenied(err error) bool {
 	return errors.As(err, &rejected) && rejected.Status == 403 && rejected.Code == "forbidden"
 }
 
+// vaultLimitRefused reports the server's definite refusal of a write that would pass the scope's bounds (128 variables,
+// 256 KiB live): nothing was committed and resuming the staged write can never succeed.
+func vaultLimitRefused(err error) bool {
+	var rejected *api.APIError
+	return errors.As(err, &rejected) && rejected.Status == 409 && rejected.Code == "record_capacity_exceeded"
+}
+
 // dropDeniedOperation removes a staged source write the server refused, so the
 // vault is not left blocked on an operation that resume would retry forever.
 func (v PasswordVault) dropDeniedOperation(local *config.PasswordVaultRecord, denied error) error {

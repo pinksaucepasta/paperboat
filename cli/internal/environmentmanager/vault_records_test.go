@@ -44,6 +44,9 @@ func (c *vaultScopesControl) PutVaultRecords(_ context.Context, coordinate api.V
 	if c.recordFailure == "conflict" {
 		return api.VaultRecordsResult{}, &api.APIError{Status: 409, Code: "version_conflict"}
 	}
+	if c.recordFailure == "full" {
+		return api.VaultRecordsResult{}, &api.APIError{Status: 409, Code: "record_capacity_exceeded"}
+	}
 	if c.recordFailure == "denied" {
 		return api.VaultRecordsResult{}, &api.APIError{Status: 403, Code: "forbidden"}
 	}
@@ -193,6 +196,32 @@ func TestDeniedRecordWriteIsReportedAndNotLeftPending(t *testing.T) {
 	c.recordFailure = ""
 	if err := v.SetScopeVariable(ctx, "personal", v.AccountID, "", "VALUE", []byte("second")); err != nil {
 		t.Fatalf("next edit after denial: %v", err)
+	}
+}
+
+// F21-170: the server refuses the 129th variable (or the byte after 256 KiB) with 409 record_capacity_exceeded; that is
+// a definite refusal, so the staged write is dropped and the next edit is not blocked behind `pb env vault resume`.
+func TestScopeLimitRefusalIsReportedAndNotLeftPending(t *testing.T) {
+	ctx := context.Background()
+	v, c, store := newVaultScopesFixture(t)
+	c.recordFailure = "full"
+	err := v.SetScopeVariable(ctx, "personal", v.AccountID, "", "VALUE", []byte("first"))
+	var rejected *api.APIError
+	var pending *ScopePublicationPending
+	if !errors.As(err, &rejected) || rejected.Code != "record_capacity_exceeded" || errors.As(err, &pending) {
+		t.Fatalf("full scope err=%v, want the definite 409 and not pending", err)
+	}
+	local, err := store.LoadPasswordVault(v.Issuer, v.AccountID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer local.Clear()
+	if local.Operation != nil {
+		t.Fatal("a refused write left a staged operation")
+	}
+	c.recordFailure = ""
+	if err := v.SetScopeVariable(ctx, "personal", v.AccountID, "", "VALUE", []byte("second")); err != nil {
+		t.Fatalf("next edit after the refusal: %v", err)
 	}
 }
 

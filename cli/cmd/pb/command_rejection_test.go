@@ -404,6 +404,19 @@ func TestENVNotSetUpIsNamedNotAuthentication(t *testing.T) {
 	}
 }
 
+// F21-170: the 129th variable (or the byte after 256 KiB) is a definite refusal that says the scope is full and what to do,
+// not a publication of unknown outcome.
+func TestENVScopeLimitRefusalIsClear(t *testing.T) {
+	err := safeEnvironmentVariableCommandError(&api.APIError{Status: 409, Code: "record_capacity_exceeded"})
+	failure := classifyCommandFailure(err)
+	result := classifyCLIJSONFailure(err, failure)
+	message := userFacingError(err)
+	if failure.kind != commandRejected || result.Code != "record_capacity_exceeded" || result.OutcomeUncertain || result.Retryable ||
+		!strings.Contains(message, "128 variables and 256 KiB") || !strings.Contains(message, "Nothing was changed") || strings.Contains(message, "resume") {
+		t.Fatalf("kind=%v result=%+v message=%q", failure.kind, result, message)
+	}
+}
+
 func TestServiceCommandOnADegradedDaemonIsRejectedWithItsHealth(t *testing.T) {
 	err := rejectDaemonDegraded(fmt.Errorf("start: %w", &daemoncmd.DaemonDegraded{State: "degraded", Title: "Local machine access is unavailable: the guard connect step failed (connection_refused)", Recovery: "Check Paperboat local access settings and repair the installation"}))
 	failure := classifyCommandFailure(err)

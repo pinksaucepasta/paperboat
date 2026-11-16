@@ -168,7 +168,7 @@ func classifyCLIJSONFailure(err error, failure commandFailure) cliJSONError {
 			switch rejected.Code {
 			case "team_entitlement_required":
 				result.Code, result.Category, result.Retryable = rejected.Code, "authorization_or_entitlement", false
-			case "version_conflict", "precondition_failed", "vault_conflict", "operation_conflict":
+			case "version_conflict", "precondition_failed", "vault_conflict", "operation_conflict", "record_capacity_exceeded":
 				result.Code, result.Category = rejected.Code, "conflict"
 			case "rotation_required", "key_authorization_required":
 				result.Code = rejected.Code
