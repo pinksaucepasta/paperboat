@@ -2,6 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useState, useSyncExternalStore } from "react"
+import { useApiQuery } from "@/lib/api"
 import { subscribeVaultLock, vaultUnlocked } from "@/lib/envvault/crypto"
 import { readVault } from "@/lib/envvault/vault"
 import { rotatePersonalKey, resetVault } from "@/lib/envvault/manage"
@@ -38,7 +39,7 @@ export function EnvVaultSettings() {
 }
 
 function ClosedVault() {
-  const vault = useQuery({ queryKey: ["env-vault"], queryFn: ({ signal }) => readVault(signal), staleTime: 0 })
+  const vault = useApiQuery({ queryKey: ["env-vault"], queryFn: ({ signal }) => readVault(signal), staleTime: 0 })
   const [recovering, setRecovering] = useState(false)
   const [resetting, setResetting] = useState(false)
   const notSetUp = vault.isSuccess && !vault.data

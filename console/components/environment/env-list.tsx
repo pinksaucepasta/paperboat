@@ -1,7 +1,6 @@
 "use client"
 
 import { LockSimpleIcon, PlusIcon } from "@phosphor-icons/react"
-import { useQuery } from "@tanstack/react-query"
 import { useState, useSyncExternalStore } from "react"
 import { meQuery, useApiQuery, useWorkspace, type Machine } from "@/lib/api"
 import { lockVault, subscribeVaultLock, vaultUnlocked } from "@/lib/envvault/crypto"
@@ -73,7 +72,7 @@ export function EnvironmentList({
   const me = useApiQuery(meQuery)
   const { scope: machineId } = useListScope(tabMachine)
   const unlocked = useSyncExternalStore(subscribeVaultLock, vaultUnlocked, () => false)
-  const vault = useQuery({ queryKey: ["env-vault"], queryFn: ({ signal }) => readVault(signal), staleTime: 0 })
+  const vault = useApiQuery({ queryKey: ["env-vault"], queryFn: ({ signal }) => readVault(signal), staleTime: 0 })
   // Most visits find the vault locked, so it loads as the unlock card (typing works, Unlock waits),
   // in the static shell too, before the session is known.
   if (!workspace || !me.data || vault.isPending) return <EnvUnlock loading />

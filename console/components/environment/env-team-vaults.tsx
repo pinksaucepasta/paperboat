@@ -1,6 +1,6 @@
 "use client"
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useState, useSyncExternalStore } from "react"
 import { useApiQuery, workspacesQuery, type Workspace } from "@/lib/api"
 import { subscribeVaultLock, vaultUnlocked } from "@/lib/envvault/crypto"
@@ -59,7 +59,7 @@ type Action = "grant" | "remove" | "rotate" | "reset" | "create" | null
 
 function TeamRow({ team, unlocked }: { team: Workspace; unlocked: boolean }) {
   const queryClient = useQueryClient()
-  const vault = useQuery({ queryKey: ["env-team", team.id], queryFn: ({ signal }) => readTeamVault(team.id, signal) })
+  const vault = useApiQuery({ queryKey: ["env-team", team.id], queryFn: ({ signal }) => readTeamVault(team.id, signal) })
   const [dialog, setDialog] = useState<Action>(null)
   const owner = team.role === "owner"
   const admin = owner || team.role === "admin"
