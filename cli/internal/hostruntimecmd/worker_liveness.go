@@ -17,7 +17,7 @@ var errWorkerSilent = errors.New("runtime worker stopped sending heartbeats")
 const workerLivenessInterval = 5 * time.Second
 
 // workerFrozenAfter is well past the longest gap a serving worker leaves between
-// heartbeats (a 30 s bridge health call, its retry, then the 5 s heartbeat).
+// heartbeats (a 30 s bridge health call, its retry, then the 15 s Windows heartbeat: 75 s).
 const workerFrozenAfter = 2 * time.Minute
 
 // workerLiveness reports an active worker whose heartbeat has not advanced for

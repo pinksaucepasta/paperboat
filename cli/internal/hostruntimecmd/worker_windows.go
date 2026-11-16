@@ -535,7 +535,7 @@ func runWorkerWith(ctx context.Context, args []string, input io.Reader, output, 
 	version := flags.String("version", buildinfo.Version, "runtime version")
 	apiMin := flags.Uint("api-min", 1, "minimum hostd API")
 	apiMax := flags.Uint("api-max", 1, "maximum hostd API")
-	heartbeat := flags.Duration("heartbeat", 5*time.Second, "hostd heartbeat interval")
+	heartbeat := flags.Duration("heartbeat", 15*time.Second, "hostd heartbeat interval")
 	waitActivation := flags.Bool("wait-activation", false, "wait for private supervisor activation")
 	if flags.Parse(args) != nil {
 		return errors.New("invalid worker invocation")

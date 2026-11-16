@@ -47,7 +47,7 @@ func newProductionManagedSSH(controlURL string, transport http.RoundTripper, reg
 	if err != nil {
 		return nil, nil, err
 	}
-	service := &managedSSHService{gate: gate, interval: 2 * time.Second, timeout: 45 * time.Second, cleanup: func(ctx context.Context) error { return cleanupProductionManagedSSH(ctx, registration) }, initialize: func(ctx context.Context) (Service, error) {
+	service := &managedSSHService{gate: gate, interval: 5 * time.Second, timeout: 45 * time.Second, cleanup: func(ctx context.Context) error { return cleanupProductionManagedSSH(ctx, registration) }, initialize: func(ctx context.Context) (Service, error) {
 		return initializeProductionManagedSSH(ctx, host, controlURL, transport, registration, identity, generation, workerEpoch, keyEvents)
 	}}
 	return host, service, nil
