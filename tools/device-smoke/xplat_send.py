@@ -422,7 +422,7 @@ def main():
     argv = sys.argv[1:]
     keys = argv[argv.index('--devices') + 1].split(',') if '--devices' in argv else ['L', 'M', 'W']
     only = set(argv[argv.index('--only') + 1].split(',')) if '--only' in argv else set()
-    devices = {k: d for k, d in fleet.fleet().items() if k in keys}
+    devices = fleet.fleet(tuple(keys))
     for a_key, b_key in permutations(devices, 2):
         for name, test in TESTS:
             if only and name not in only:
