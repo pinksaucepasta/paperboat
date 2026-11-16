@@ -234,6 +234,31 @@ func TestFileTransferOffsetIsCompareAndSwapAndBounded(t *testing.T) {
 	}
 }
 
+func TestFileTransferLeaseFollowsCommittedBytesAndNeverShrinks(t *testing.T) {
+	state, _ := openStore(t, nil)
+	defer state.Close()
+	ctx := context.Background()
+	now := time.Now().UTC()
+	transfer := FileTransfer{ID: "ft_lease", BatchID: "fb_lease", SourceMachineID: "machine_client", DestinationMachineID: "machine_host", InitiatingUserID: "user_1", Basename: "big.bin", Size: 6, SHA256: strings.Repeat("a", 64), CreatedAt: now, ExpiresAt: now.Add(10 * time.Minute)}
+	if err := state.CreateFileTransfers(ctx, []FileTransfer{transfer}); err != nil {
+		t.Fatal(err)
+	}
+	renewed := now.Add(40 * time.Minute)
+	if err := state.CommitFileTransferOffset(ctx, transfer.ID, 0, 2, renewed); err != nil {
+		t.Fatal(err)
+	}
+	if err := state.CommitFileTransferOffset(ctx, transfer.ID, 2, 4, now.Add(15*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := state.FileTransfer(ctx, transfer.ID)
+	if !got.ExpiresAt.Equal(renewed) {
+		t.Fatalf("expires_at=%v want %v: a committed chunk renews the lease and an earlier lease never shortens it", got.ExpiresAt, renewed)
+	}
+	if expired, err := state.ExpiredFileTransfers(ctx, now.Add(30*time.Minute)); err != nil || len(expired) != 0 {
+		t.Fatalf("a transfer that committed bytes 30 minutes in expired: %v %v", expired, err)
+	}
+}
+
 func TestFileTransferBatchCreationIsAtomic(t *testing.T) {
 	state, _ := openStore(t, nil)
 	defer state.Close()
