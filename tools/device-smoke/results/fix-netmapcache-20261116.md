@@ -32,4 +32,12 @@ dev-92456af4b 143.5 requests / machine / 5 min, statuses 200/202/204 only, no 42
 dev-bd6620efe 151.3, dev-4188ece01 121.3, dev-f0ac66fb3 103.2, dev-e7a0aa89a 254.0. No extra requests.
 
 ## Mac
-Pending: macpool runner queued behind the 5-Mac GitHub cap; recorded in a follow-up commit.
+Mac restarted side (dev-9edd5b5cf = main incl. 5cf648eb9), macpool-5 machine nmc-m (macOS 26.7.2 arm64) + hp nmc-a
+(dev-9edd5b5cf), API cut on both (pf block on the Mac, DOCKER-USER DROP on hp), nmc-m daemon restarted during the cut:
+| check | result | time |
+|---|---|---|
+| pb exec nmc-m -> nmc-a | PASS x2 | 15.5 s, 0.4 s |
+| pb exec nmc-a -> nmc-m | PASS x2 | 0.6 s, 0.4 s |
+| pb connect nmc-a -> nmc-m | PASS (echo marker) | prompt 2.3 s |
+| pb connect nmc-m -> nmc-a | PASS (echo marker, ssh -tt) | prompt 4.7 s |
+Relay files present for both runtimes before the cut (credentials/ and runtime/peer-network/peer-network-relays-v1-*).
