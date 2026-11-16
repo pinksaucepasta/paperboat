@@ -29,3 +29,19 @@ func TestDaemonReportsControlPlaneUnavailableOnlyForItsOwnOutageHealth(t *testin
 		}
 	}
 }
+
+// During an outage exec resolves a machine the snapshot last saw offline (a restart looks like that) instead of
+// asking the server for 30 s; outside an outage it still asks the server.
+func TestWarmUserMachineTakesAnOfflineMachineOnlyDuringAnOutage(t *testing.T) {
+	previous := loadWarmMachineSnapshot
+	t.Cleanup(func() { loadWarmMachineSnapshot = previous })
+	snapshot := localapi.Snapshot{Machines: []localapi.MachineStatus{{ID: "mch_a", Alias: "a", Eligible: true, RuntimeState: "offline", Generation: 3}}}
+	loadWarmMachineSnapshot = func(context.Context) (localapi.Snapshot, error) { return snapshot, nil }
+	if _, ok := warmUserMachine(context.Background(), "a", false); ok {
+		t.Fatal("an offline machine was taken from the snapshot without an outage")
+	}
+	got, ok := warmUserMachine(context.Background(), "a", true)
+	if !ok || got.ID != "mch_a" || got.InstallationGeneration != 3 {
+		t.Fatalf("an offline machine was not taken from the snapshot during an outage: %+v %v", got, ok)
+	}
+}

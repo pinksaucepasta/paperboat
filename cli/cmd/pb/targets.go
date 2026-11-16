@@ -373,6 +373,12 @@ func resolveMachineWarmFirst(ctx context.Context, requested string, server func(
 }
 
 func resolveWarmUserMachine(ctx context.Context, requested string) (api.UserMachine, bool) {
+	return warmUserMachine(ctx, requested, false)
+}
+
+// warmUserMachine resolves from the daemon's snapshot. During a control-plane outage anyState also takes a machine
+// the snapshot last saw offline: the server cannot be asked, and an exec is admitted by the host's own rules.
+func warmUserMachine(ctx context.Context, requested string, anyState bool) (api.UserMachine, bool) {
 	if _, local := workspaceSnapshotMachines(ctx, nil); !local {
 		return api.UserMachine{}, false
 	}
@@ -385,7 +391,7 @@ func resolveWarmUserMachine(ctx context.Context, requested string) (api.UserMach
 	// Only a machine the snapshot sees ready is taken from it. Presence in the snapshot can lag (a just-paired
 	// peer stays cached offline until the daemon's next refresh), so anything else is resolved on the server:
 	// a cached "offline" never refuses a command.
-	if err != nil || !status.Eligible || status.Generation == 0 || status.RuntimeState != "ready" {
+	if err != nil || !status.Eligible || status.Generation == 0 || (status.RuntimeState != "ready" && !anyState) {
 		return api.UserMachine{}, false
 	}
 	return api.UserMachine{ID: status.ID, EnvironmentID: status.EnvironmentID, WorkspaceRoot: status.WorkspaceRoot, Alias: status.Alias, Platform: status.Platform, State: "ready", Online: true, InstallationGeneration: int64(status.Generation), SSHUser: status.SSHUser, SSHPort: status.SSHPort, SSHHostKeys: status.SSHHostKeys}, true

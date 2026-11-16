@@ -992,7 +992,11 @@ func productionTransport(caPath string, environ func(string) string) (http.Round
 		Environment:   httptransport.EnvironmentProxySource{},
 		System:        httptransport.NativeSystemProxySource{},
 	}
-	return httptransport.New(transportConfig)
+	transport, err := httptransport.New(transportConfig)
+	if err != nil {
+		return nil, err
+	}
+	return &controlWatch{next: transport}, nil
 }
 func valueOrRuntime(value, fallback string) string {
 	if strings.TrimSpace(value) == "" {

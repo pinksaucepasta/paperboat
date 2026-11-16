@@ -47,7 +47,13 @@ func actionRemoteExec(c *command.Context, requested string, request tunnel.ExecR
 		err = errors.New("Paperboat server and peer transport are required for remote execution")
 		return fail(255, "local_configuration", false, false, err)
 	}
-	_, err = d.auth.Credential()
+	// The daemon's report spares exec the 30 s request timeouts of a control plane it already knows is down (the token
+	// refresh and the machine list, as in pb connect). No health request of its own: exec stays free of server calls.
+	controlPlaneDown := daemonReportsControlPlaneUnavailable(c.Context)
+	var credential config.Credential
+	if !controlPlaneDown {
+		credential, err = d.auth.Credential()
+	}
 	if api.Unreachable(err) {
 		// The access token ran out during an outage and its refresh cannot reach Paperboat: the daemon opens this exec
 		// offline, for the host to admit from its own signed scopes (F21-01, no time limit).
@@ -60,7 +66,7 @@ func actionRemoteExec(c *command.Context, requested string, request tunnel.ExecR
 	if err != nil {
 		return fail(255, "authentication_unavailable", false, false, err)
 	}
-	client, err := newWorkspaceAPIClient(c, d.cfg.ServerURL, d.auth)
+	client, err := newWorkspaceAPIClientWith(c, d.cfg.ServerURL, d.auth, credential)
 	if err != nil {
 		return fail(255, "workspace_unavailable", false, false, err)
 	}
@@ -72,7 +78,7 @@ func actionRemoteExec(c *command.Context, requested string, request tunnel.ExecR
 		return fail(255, "local_transport_unavailable", false, false, fmt.Errorf("prepare local peer transport: %w", err))
 	}
 	client.SetSourceMachineID(sourceMachineID)
-	machine, warm := resolveWarmUserMachine(c.Context, requested)
+	machine, warm := warmUserMachine(c.Context, requested, controlPlaneDown)
 	if !warm {
 		machine, err = resolveUserMachine(c.Context, client, requested)
 	}

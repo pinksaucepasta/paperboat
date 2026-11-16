@@ -68,6 +68,9 @@ func (s *layerEnvironmentService) layerEnvironment(ctx context.Context, names *l
 	if !ok || s == nil || s.isClosed() {
 		return nil, envinject.ErrNotReady
 	}
+	if controlKnownDown(s.transport) {
+		return nil, controlDownError{} // no ENV lookup waits out a control plane the host's own requests just failed to reach
+	}
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	if err := s.registerLayerRecipient(ctx); err != nil {
