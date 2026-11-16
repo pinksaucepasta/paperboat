@@ -117,12 +117,12 @@ func TestTeamReadsDoNotSerializePostgres(t *testing.T) {
 	if err := tryFence(store, db.LockTeamWrites); err == nil {
 		t.Fatal("a global team write did not wait for a team's read")
 	}
-	if err := tryFence(store, db.LockOutsideTeams); err != nil {
+	if err := tryFence(store, lockNoTeams); err != nil {
 		t.Fatalf("a write outside teams waited for a team read: %v", err)
 	}
 	release()
 	release = holdFence(t, store, writesFor(teamA))
-	if err := tryFence(store, db.LockOutsideTeams); err != nil {
+	if err := tryFence(store, lockNoTeams); err != nil {
 		t.Fatalf("a write outside teams waited for a team write: %v", err)
 	}
 	if err := tryFence(store, readsFor(teamA)); err == nil {
@@ -130,10 +130,13 @@ func TestTeamReadsDoNotSerializePostgres(t *testing.T) {
 	}
 	release()
 	release = holdFence(t, store, db.LockTeamWrites)
-	for name, lock := range map[string]func(context.Context, *db.Tx) error{"team read": readsFor(teamA), "write outside teams": db.LockOutsideTeams} {
+	for name, lock := range map[string]func(context.Context, *db.Tx) error{"team read": readsFor(teamA), "write outside teams": lockNoTeams} {
 		if err := tryFence(store, lock); err == nil {
 			t.Fatalf("a %s did not wait for the global write", name)
 		}
 	}
 	release()
 }
+
+// lockNoTeams is how a transaction that touches no team's state orders itself against team writes.
+func lockNoTeams(ctx context.Context, tx *db.Tx) error { return db.LockTeamsFor(ctx, tx, true) }

@@ -34,8 +34,10 @@ func (s *Service) Create(ctx context.Context, account string, r CreateRequest) (
 	if !validTeamSlug(r.TeamID) || r.Name != "" && !validTeamName(r.Name) {
 		return out, ErrInvalid
 	}
-	err := s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-		if err := Lock(ctx, tx); err != nil {
+	// Only the new team's lock: the account's team count across teams is a serializable read (capacity), so two
+	// concurrent creates or joins by one account still cannot both pass it.
+	err := s.inMembershipTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+		if err := LockTeam(ctx, tx, r.TeamID); err != nil {
 			return err
 		}
 		done, digest, err := replay(ctx, tx, account, r.OperationID, "create", r, &out)
@@ -94,7 +96,7 @@ func (s *Service) mutate(ctx context.Context, account, team, op, kind string, ex
 	if !validID(team) {
 		return out, ErrInvalid
 	}
-	err := s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+	err := s.inMembershipTx(ctx, func(ctx context.Context, tx *db.Tx) error {
 		// One team's write waits only for its own bucket and global writers (F21-20).
 		if err := LockTeam(ctx, tx, team); err != nil {
 			return err
@@ -326,8 +328,8 @@ func (s *Service) Invite(ctx context.Context, account, team string, r InviteRequ
 	if !validID(team) || (r.AccountID == "") == (r.Email == "") || (r.AccountID != "" && !validID(r.AccountID)) {
 		return out, ErrInvalid
 	}
-	err := s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-		if err := Lock(ctx, tx); err != nil {
+	err := s.inMembershipTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+		if err := LockTeam(ctx, tx, team); err != nil {
 			return err
 		}
 		if r.Email != "" {
@@ -409,8 +411,12 @@ func (s *Service) Accept(ctx context.Context, account, id string, r AcceptReques
 	if !validID(id) {
 		return out, ErrInvalid
 	}
-	err := s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-		if err := Lock(ctx, tx); err != nil {
+	locked, err := s.invitationTeam(ctx, id)
+	if err != nil {
+		return out, err
+	}
+	err = s.inMembershipTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+		if err := LockTeam(ctx, tx, locked); err != nil {
 			return err
 		}
 		done, digest, err := replay(ctx, tx, account, r.OperationID, "accept", []any{id, r}, &out)
@@ -438,6 +444,9 @@ func (s *Service) Accept(ctx context.Context, account, id string, r AcceptReques
 		}
 		if err != nil {
 			return err
+		}
+		if team != locked {
+			return ErrConflict
 		}
 		if !recipient {
 			return ErrForbidden

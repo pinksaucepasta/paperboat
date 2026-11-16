@@ -5,8 +5,10 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
 	"github.com/pinksaucepasta/paperboat/server/internal/teams"
@@ -102,14 +104,22 @@ var eraseSteps = []struct{ name, query string }{
 
 // eraseTx performs the whole deletion. It returns OwnedTeamsError before changing anything when the
 // account owns a team with other members; any other error rolls the whole deletion back.
-func (s *Service) eraseTx(ctx context.Context, tx *db.Tx, userID string) error {
-	// The global team lock also excludes every ENV vault transaction (they hold ROW SHARE on the same fence).
-	if err := teams.Lock(ctx, tx); err != nil {
+func (s *Service) eraseTx(ctx context.Context, tx *db.Tx, userID string, locked []string) error {
+	if err := db.LockTeamsFor(ctx, tx, true, locked...); err != nil {
 		return fmt.Errorf("account deletion: lock teams: %w", err)
 	}
 	subject, email, err := lockActiveUserTx(ctx, tx, userID)
 	if err != nil {
 		return err
+	}
+	current, err := accountTeams(ctx, tx, userID)
+	if err != nil {
+		return fmt.Errorf("account deletion: list teams: %w", err)
+	}
+	for _, team := range current {
+		if !slices.Contains(locked, team) {
+			return errTeamsChanged
+		}
 	}
 	owned, err := ownedTeamsTx(ctx, tx, userID)
 	if err != nil {
@@ -150,6 +160,20 @@ func (s *Service) eraseTx(ctx context.Context, tx *db.Tx, userID string) error {
 		return fmt.Errorf("account deletion: mark user deleted: %w", err)
 	}
 	return nil
+}
+
+// errTeamsChanged means the account joined a team after its teams were read; the deletion is retried.
+var errTeamsChanged = errors.New("account deletion: the account's teams changed; retry")
+
+// accountTeams is every team the deletion may write: those the account is or was a member of, and those it owns.
+func accountTeams(ctx context.Context, q interface {
+	Query(context.Context, string, ...any) (pgx.Rows, error)
+}, userID string) ([]string, error) {
+	rows, err := q.Query(ctx, `SELECT team_id FROM paperboat.team_members WHERE account_id=$1 UNION SELECT team_id FROM paperboat.teams WHERE owner_account=$1`, userID)
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, pgx.RowTo[string])
 }
 
 func lockActiveUserTx(ctx context.Context, tx *db.Tx, userID string) (subject, email string, err error) {

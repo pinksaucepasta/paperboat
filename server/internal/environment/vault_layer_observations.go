@@ -72,7 +72,7 @@ func (s *Service) RecordVaultLayerObservations(ctx context.Context, account, mac
 				teams = append(teams, c.WorkspaceID)
 			}
 		}
-		if err := lockVaultTeams(ctx, tx, false, teams...); err != nil {
+		if err := db.LockTeamsFor(ctx, tx, false, teams...); err != nil {
 			return err
 		}
 		if err := lockVaultAccounts(ctx, tx, true, account); err != nil {

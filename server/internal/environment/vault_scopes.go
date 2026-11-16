@@ -2,7 +2,6 @@ package environment
 
 import (
 	"bytes"
-	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
@@ -18,39 +17,32 @@ import (
 )
 
 // ENV vault transactions run at READ COMMITTED and lock exactly what they touch, as their first statements and
-// in one order (FIX-ENVLOCK): ROW SHARE on the team write fence, so team-wide writers (teams.Lock, account
-// deletion) still exclude them; each named team's fence bucket, in bucket order (EXCLUSIVE to write, ROW SHARE to
-// read); then each account's users row, in id order (FOR UPDATE to write, FOR SHARE to read). Every writer of an
+// in one order (FIX-ENVLOCK): db.LockTeamsFor (ROW SHARE on the team write fence, so the remaining global team
+// writers still exclude them, then each named team's bucket, EXCLUSIVE to write, ROW SHARE to read); then each
+// account's lock, in id order (exclusive to write, shared to read; VaultAccountLockSeed). Every writer of an
 // account's or a team's ENV state holds that account's or team's lock, so one account's ENV never waits for
 // another's, and every read after the locks sees one committed state. Machine liveness is ordered by a FOR SHARE
 // lock on the user_machines row (authorizeVaultHostTx, authorizeVaultScopeTx, readVaultLayerTx), which machine
 // revocation updates.
-func lockVaultTeams(ctx context.Context, tx *db.Tx, write bool, ids ...string) error {
-	if err := db.LockOutsideTeams(ctx, tx); err != nil {
-		return err
+
+// VaultAccountLockSeed keys an account's ENV lock, the advisory lock hashtextextended(account, seed). Account
+// deletion takes it as a session lock before its serializable transaction begins (db.InTxUnderSessionLock), so
+// the deletion's snapshot already contains every ENV write of the account it waited for.
+const VaultAccountLockSeed = 1885687001
+
+func lockVaultAccounts(ctx context.Context, tx *db.Tx, write bool, accounts ...string) error {
+	lock := "pg_advisory_xact_lock_shared"
+	if write {
+		lock = "pg_advisory_xact_lock"
 	}
-	ids = slices.Clone(ids)
-	slices.SortFunc(ids, func(a, b string) int {
-		return cmp.Or(cmp.Compare(db.TeamWriteFenceBucket(a), db.TeamWriteFenceBucket(b)), cmp.Compare(a, b))
-	})
-	for _, team := range ids {
-		lock := db.LockTeamReadsFor
-		if write {
-			lock = db.LockTeamWritesFor
-		}
-		if err := lock(ctx, tx, team); err != nil {
+	accounts = slices.Clone(accounts)
+	slices.Sort(accounts)
+	for _, account := range slices.Compact(accounts) {
+		if _, err := tx.Exec(ctx, `SELECT `+lock+`(hashtextextended($1,$2))`, account, int64(VaultAccountLockSeed)); err != nil {
 			return err
 		}
 	}
 	return nil
-}
-func lockVaultAccounts(ctx context.Context, tx *db.Tx, write bool, accounts ...string) error {
-	mode := "SHARE"
-	if write {
-		mode = "UPDATE"
-	}
-	_, err := tx.Exec(ctx, `SELECT id FROM users WHERE id=ANY($1::text[]) ORDER BY id FOR `+mode, accounts)
-	return err
 }
 
 // lockVaultWorkspace locks a vault workspace ("personal" or a team id) and the accounts whose ENV state the
@@ -60,7 +52,7 @@ func lockVaultWorkspace(ctx context.Context, tx *db.Tx, write bool, workspace st
 	if workspace != "personal" {
 		ids = []string{workspace}
 	}
-	if err := lockVaultTeams(ctx, tx, write, ids...); err != nil {
+	if err := db.LockTeamsFor(ctx, tx, write, ids...); err != nil {
 		return err
 	}
 	return lockVaultAccounts(ctx, tx, write, accounts...)
@@ -776,7 +768,7 @@ func (s *Service) mutatePersonalVault(ctx context.Context, account string, reque
 			}
 			ids = slices.DeleteFunc(ids, func(id string) bool { return slices.Contains(locked, id) })
 			locked = append(locked, ids...)
-			return lockVaultTeams(ctx, tx, true, ids...)
+			return db.LockTeamsFor(ctx, tx, true, ids...)
 		}
 		if err := lockTeams(); err != nil {
 			return err

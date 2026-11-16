@@ -67,8 +67,8 @@ func (s *Service) enqueueInvitation(ctx context.Context, tx *db.Tx, id string, e
 
 func (s *Service) ResendInvitation(ctx context.Context, account, team, id string, r AcceptRequest) (InvitationSummary, error) {
 	var receipt Invitation
-	err := s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-		if err := Lock(ctx, tx); err != nil {
+	err := s.inMembershipTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+		if err := LockTeam(ctx, tx, team); err != nil {
 			return err
 		}
 		done, digest, err := replay(ctx, tx, account, r.OperationID, "resend_invitation", []any{team, id, r}, &receipt)

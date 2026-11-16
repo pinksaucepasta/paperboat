@@ -40,6 +40,27 @@ func Lock(ctx context.Context, tx *db.Tx) error {
 	return db.LockTeamWrites(ctx, tx)
 }
 
+// invitationTeam is the team an invitation belongs to, fixed when it is created. It is read before the transaction
+// so the transaction can lock that team first; "" when there is no such invitation (the transaction reports it).
+func (s *Service) invitationTeam(ctx context.Context, id string) (string, error) {
+	var team string
+	err := s.db.Pool().QueryRow(ctx, `SELECT team_id FROM paperboat.team_invitations WHERE invitation_id=$1`, id).Scan(&team)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil
+	}
+	return team, err
+}
+
+// Team structure writes (creating a team, invitations, membership and settings changes) queue on one session lock
+// taken before their serializable snapshot (db.InTxUnderSessionLock). Run concurrently they abort each other with
+// 40001 across teams: the per-account team cap (capacity) and the small membership tables put every team's reads
+// and writes on the same pages. No other transaction takes it, so ENV and other accounts never wait for it.
+const membershipLockKey, membershipLockSeed = "team-membership", 1885687002
+
+func (s *Service) inMembershipTx(ctx context.Context, fn func(context.Context, *db.Tx) error) error {
+	return s.db.InTxUnderSessionLock(ctx, membershipLockKey, membershipLockSeed, fn)
+}
+
 // LockTeam serializes writes that touch only this team (see db.LockTeamWritesFor).
 func LockTeam(ctx context.Context, tx *db.Tx, team string) error {
 	return db.LockTeamWritesFor(ctx, tx, team)

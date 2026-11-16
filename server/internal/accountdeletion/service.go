@@ -14,6 +14,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/auth"
 	"github.com/pinksaucepasta/paperboat/server/internal/config"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/environment"
 	"github.com/pinksaucepasta/paperboat/server/internal/usermachines"
 )
 
@@ -86,7 +87,19 @@ func (s *Service) Delete(ctx context.Context, user auth.User, signedInAt time.Ti
 	if !strings.EqualFold(strings.TrimSpace(confirmEmail), strings.TrimSpace(user.PrimaryEmail)) {
 		return ErrConfirmationMismatch
 	}
-	return s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-		return s.eraseTx(ctx, tx, user.ID)
-	})
+	// The account's ENV lock is held as a session lock before the transaction begins and its teams' locks are
+	// the transaction's first statements, so the deletion waits only for this account and its teams, and its
+	// snapshot already holds what they wrote. A team joined between the read and the locks retries the deletion.
+	for attempt := 1; ; attempt++ {
+		locked, err := accountTeams(ctx, s.db.Pool(), user.ID)
+		if err != nil {
+			return fmt.Errorf("account deletion: list teams: %w", err)
+		}
+		err = s.db.InTxUnderSessionLock(ctx, user.ID, environment.VaultAccountLockSeed, func(ctx context.Context, tx *db.Tx) error {
+			return s.eraseTx(ctx, tx, user.ID, locked)
+		})
+		if !errors.Is(err, errTeamsChanged) || attempt == 3 {
+			return err
+		}
+	}
 }

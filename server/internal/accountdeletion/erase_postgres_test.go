@@ -15,6 +15,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/auth"
 	"github.com/pinksaucepasta/paperboat/server/internal/config"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/environment"
 	"github.com/pinksaucepasta/paperboat/server/internal/usermachines"
 )
 
@@ -286,4 +287,66 @@ type fixedVerifier struct {
 
 func (v fixedVerifier) VerifyCallback(context.Context, auth.CallbackInput) (auth.WorkOSProfile, error) {
 	return auth.WorkOSProfile{Subject: v.subject, Email: v.email, EmailVerified: true, DisplayName: "Again"}, nil
+}
+
+// FIX-TEAMLOCK2: a deletion waits for its own account's ENV and teams, never for another account's. With
+// another account's ENV transaction open (ROW SHARE on the team write fence, that account's ENV lock) the
+// deletion completes; with the deleted account's own ENV transaction open it waits until that one ends.
+func TestAccountDeletionWaitsOnlyForItsOwnAccount(t *testing.T) {
+	f := newFixture(t)
+	u := f.user("scoped")
+	other := f.user("bystander")
+	f.seedTeam(u, "Own team")
+	holdENV := func(account string) (release func()) {
+		held, done, finished := make(chan struct{}), make(chan struct{}), make(chan error, 1)
+		go func() {
+			finished <- f.store.InReadCommittedTx(t.Context(), func(ctx context.Context, tx *db.Tx) error {
+				if err := db.LockTeamsFor(ctx, tx, false, "bystander-team-"+account); err != nil {
+					return err
+				}
+				if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock_shared(hashtextextended($1,$2))`, account, int64(environment.VaultAccountLockSeed)); err != nil {
+					return err
+				}
+				close(held)
+				<-done
+				return nil
+			})
+		}()
+		<-held
+		return func() {
+			close(done)
+			if err := <-finished; err != nil {
+				t.Error(err)
+			}
+		}
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	release := holdENV(other.ID)
+	deleted := make(chan error, 1)
+	go func() { deleted <- f.svc.Delete(ctx, u, time.Now(), u.PrimaryEmail) }()
+	select {
+	case err := <-deleted:
+		release()
+		if err != nil {
+			t.Fatalf("deletion with another account's ENV transaction open: %v", err)
+		}
+	case <-ctx.Done():
+		release()
+		t.Fatal("the deletion waited for another account's ENV transaction")
+	}
+
+	v := f.user("waits")
+	release = holdENV(v.ID)
+	go func() { deleted <- f.svc.Delete(t.Context(), v, time.Now(), v.PrimaryEmail) }()
+	select {
+	case err := <-deleted:
+		release()
+		t.Fatalf("the deletion did not wait for its own account's ENV transaction (err %v)", err)
+	case <-time.After(500 * time.Millisecond):
+	}
+	release()
+	if err := <-deleted; err != nil {
+		t.Fatalf("deletion after its account's ENV transaction ended: %v", err)
+	}
 }

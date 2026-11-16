@@ -98,8 +98,12 @@ func validTeamName(name string) bool {
 
 func (s *Service) DeclineInvitation(ctx context.Context, account, id string, request AcceptRequest) (InvitationSummary, error) {
 	var result Invitation
-	err := s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-		if err := Lock(ctx, tx); err != nil {
+	locked, err := s.invitationTeam(ctx, id)
+	if err != nil {
+		return InvitationSummary{}, err
+	}
+	err = s.inMembershipTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+		if err := LockTeam(ctx, tx, locked); err != nil {
 			return err
 		}
 		done, digest, err := replay(ctx, tx, account, request.OperationID, "decline", []any{id, request}, &result)
@@ -115,6 +119,9 @@ func (s *Service) DeclineInvitation(ctx context.Context, account, id string, req
 		}
 		if err != nil {
 			return err
+		}
+		if team != locked {
+			return ErrConflict
 		}
 		if !recipient {
 			return ErrForbidden

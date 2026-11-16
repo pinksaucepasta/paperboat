@@ -1,9 +1,11 @@
 package db
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"hash/fnv"
+	"slices"
 )
 
 // LockTeamWrites serializes team-touching writes (membership, grants, policy, access sessions). It must be
@@ -45,10 +47,25 @@ func LockTeamReadsFor(ctx context.Context, tx *Tx, team string) error {
 	return err
 }
 
-// LockOutsideTeams orders a transaction that touches no team's state (an account's own vault rows) against the
-// global lock only: it waits for LockTeamWrites, never for team writers or other such transactions. It must be
-// the first statement of the transaction.
-func LockOutsideTeams(ctx context.Context, tx *Tx) error {
-	_, err := tx.Exec(ctx, `LOCK TABLE paperboat.team_write_fence IN ROW SHARE MODE`)
-	return err
+// LockTeamsFor orders a transaction against several teams at once: ROW SHARE on the global fence, then each team's
+// bucket in bucket order (EXCLUSIVE to write, ROW SHARE to read), so two such transactions never deadlock on the
+// buckets. Like LockTeamWritesFor it must come before the transaction's first snapshot.
+func LockTeamsFor(ctx context.Context, tx *Tx, write bool, teams ...string) error {
+	if _, err := tx.Exec(ctx, `LOCK TABLE paperboat.team_write_fence IN ROW SHARE MODE`); err != nil {
+		return err
+	}
+	teams = slices.Clone(teams)
+	slices.SortFunc(teams, func(a, b string) int {
+		return cmp.Or(cmp.Compare(TeamWriteFenceBucket(a), TeamWriteFenceBucket(b)), cmp.Compare(a, b))
+	})
+	mode := "ROW SHARE"
+	if write {
+		mode = "EXCLUSIVE"
+	}
+	for _, team := range teams {
+		if _, err := tx.Exec(ctx, fmt.Sprintf(`LOCK TABLE paperboat.team_write_fence_%02d IN %s MODE`, TeamWriteFenceBucket(team), mode)); err != nil {
+			return err
+		}
+	}
+	return nil
 }
