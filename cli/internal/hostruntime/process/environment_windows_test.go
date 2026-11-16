@@ -4,6 +4,7 @@ package process
 
 import (
 	"context"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/envinject"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/pty"
 	"golang.org/x/sys/windows"
 	"os"
@@ -109,6 +110,10 @@ func TestWindowsBaseEnvironmentHasStandardVariables(t *testing.T) {
 		if strings.HasPrefix(strings.ToUpper(entry), "PAPERBOAT_") {
 			t.Errorf("hostd variable reached the session: %s", strings.SplitN(entry, "=", 2)[0])
 		}
+	}
+	// The terminal launch merges managed ENV into the base; it must accept every name Windows hands out.
+	if _, err := envinject.Merge(environment, nil); err != nil {
+		t.Fatalf("managed ENV merge rejected the owner environment: %v", err)
 	}
 	manager := &sessions{}
 	launcher, err := NewShellLauncher(filepath.Join(system, "cmd.exe"), environment, manager)

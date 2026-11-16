@@ -2,7 +2,6 @@ package envinject
 
 import (
 	env "github.com/pinksaucepasta/paperboat/internal/environmente2ee"
-	"regexp"
 	"sort"
 	"strings"
 	"unicode/utf8"
@@ -53,8 +52,8 @@ func Merge(base, managed []string) ([]string, error) {
 	return result, nil
 }
 
-var launchNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
-
+// The base is the owner's own environment, which on Windows holds names such as ProgramFiles(x86);
+// only the managed names are held to the portable ENV name rules.
 func portableLaunchName(name string) bool {
-	return len(name) > 0 && len(name) <= env.MaximumNameBytes && launchNamePattern.MatchString(name)
+	return len(name) > 0 && len(name) <= env.MaximumNameBytes && !strings.ContainsAny(name, "\x00\r\n")
 }
