@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useState, useSyncExternalStore } from "react"
 import { newToken, tokenId, type NewToken } from "@/lib/recipe-token"
 import { subscribeVaultLock, vaultUnlocked } from "@/lib/envvault/crypto"
-import { confirmation, revokeRecipe, rewrapVaults, rotateRecipe, type Impact, type Recipe } from "@/lib/recipes"
+import { confirmation, revokeRecipe, rotateRecipe, type Impact, type Recipe } from "@/lib/recipes"
 import { queryKeys } from "@/lib/query-keys"
 import { EnvUnlock } from "@/components/environment/env-unlock"
 import { TokenOnce } from "@/components/recipes/token-once"
@@ -131,7 +131,7 @@ export function RotateRecipe({ workspace, recipe, onClose }: Props) {
 function RotateHere({ workspace, recipe, onClose }: Props) {
   const queryClient = useQueryClient()
   const [typed, setTyped] = useState("")
-  const [made, setMade] = useState<{ token: NewToken; rewrap?: string }>()
+  const [made, setMade] = useState<NewToken>()
   const token = useQuery({
     queryKey: ["recipe-rotate-token", recipe.id],
     gcTime: 0,
@@ -149,12 +149,7 @@ function RotateHere({ workspace, recipe, onClose }: Props) {
       const next = token.data
       if (!next) throw new Error("The new token isn’t ready yet. Try again.")
       await rotateRecipe(workspace, recipe.name, next, code ?? "")
-      // The token has changed from here on: a failure to wrap the vaults is told, not undone.
-      const rewrap = await rewrapVaults(workspace, recipe, next).then(
-        () => undefined,
-        (error: Error) => error.message,
-      )
-      return { token: next, rewrap }
+      return next
     },
     onSuccess: async (next) => {
       setMade(next)
@@ -168,13 +163,7 @@ function RotateHere({ workspace, recipe, onClose }: Props) {
       <Dialog open onOpenChange={(open) => !open && onClose()}>
         <DialogContent className="gap-4 sm:max-w-lg">
           <DialogTitle>{recipe.name} rotated</DialogTitle>
-          {made.rewrap && (
-            <p className="text-sm text-destructive">
-              The token changed, but the vault keys were not wrapped to it ({made.rewrap}). Unlock ENV and change the file
-              (a comment is enough), then save, to give it its vaults.
-            </p>
-          )}
-          <TokenOnce token={made.token.token} onDone={onClose} />
+          <TokenOnce token={made.token} onDone={onClose} />
         </DialogContent>
       </Dialog>
     )

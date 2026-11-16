@@ -4,7 +4,7 @@ import { queryOptions } from "@tanstack/react-query"
 import { api, ApiError, idempotencyKey, type Data, type Schemas } from "@/lib/api"
 import { queryKeys } from "@/lib/query-keys"
 import { tokenId, type NewToken } from "@/lib/recipe-token"
-import { withVaultKeys, wrapVault, type VaultWrap } from "@/lib/recipe-vaults"
+import { withVaultKeys, type VaultWrap } from "@/lib/recipe-vaults"
 
 // Recipes. Contract: shared/recipe/README.md ("API"). `{ws}` is "personal" or the team id.
 
@@ -70,26 +70,19 @@ export async function updateRecipe(workspace: string, recipe: Recipe, file: { so
   return key ? withVaultKeys(workspace, key, send, wraps) : send(wraps)
 }
 
-/** Rotate and revoke refuse (409) until sent the current code; the refusal carries it and the impact. */
-export const rotateRecipe = (workspace: string, name: string, token: NewToken, confirm: string) =>
-  write<Data<"/v1/workspaces/{ws}/recipes/{name}/rotate", "post">>(`${recipePath(workspace, name)}/rotate`, "POST", {
-    auth: token.auth,
-    public_key: token.publicKey,
-    confirm,
-  })
-
 /**
- * After a rotate the recipe's vault keys are wrapped to its old public key: wrap each vault it reads to the new
- * one (an update of the same file carrying the wraps), so machines made from the new token read them.
+ * Rotate and revoke refuse (409) until sent the current code; the refusal carries it and the impact. A rotate of a
+ * recipe that reads vaults moves its vault keys to the new token's public key in the same call (ENV unlocked).
  */
-export async function rewrapVaults(workspace: string, recipe: Recipe, token: NewToken) {
-  const names = recipe.recipe.env?.vaults ?? []
-  if (!names.length) return
-  const wraps = []
-  for (const name of names) wraps.push(await wrapVault(workspace, name, token))
-  await withVaultKeys(workspace, token, (vault_wraps) =>
-    write(recipePath(workspace, recipe.name), "PUT", { source: recipe.source, format: recipe.format, vault_wraps }), wraps)
-}
+export const rotateRecipe = (workspace: string, name: string, token: NewToken, confirm: string) =>
+  withVaultKeys(workspace, token, (vault_wraps) =>
+    write<Data<"/v1/workspaces/{ws}/recipes/{name}/rotate", "post">>(`${recipePath(workspace, name)}/rotate`, "POST", {
+      auth: token.auth,
+      public_key: token.publicKey,
+      vault_wraps,
+      confirm,
+    }),
+  )
 
 export const revokeRecipe = (workspace: string, name: string, confirm: string) =>
   write<{ recipe: Recipe; impact: Impact }>(`${recipePath(workspace, name)}/revoke`, "POST", { confirm })

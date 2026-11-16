@@ -121,3 +121,22 @@ test("a new vault's key is made by the engine (for the team too) and sent as its
     body: { name: "canary-env", wraps: [{ recipient_kind: "account", recipient_id: "a1", wrapped: "bmV3" }] },
   })
 })
+
+test("a rotate of a recipe that reads a vault sends the new token's public key and the vault's wrap in the same call", async () => {
+  await vaultCrypto({ action: "unlock" })
+  const rotates: Record<string, unknown>[] = []
+  const vaultFetch = globalThis.fetch
+  globalThis.fetch = (async (input: string | URL, init?: RequestInit) => {
+    const url = new URL(String(input), "http://console.example.test")
+    if (!url.pathname.endsWith("/rotate")) return vaultFetch(input, init)
+    const body = JSON.parse(String(init?.body))
+    rotates.push(body)
+    if (!body.vault_wraps.length) return Response.json({ error: { code: "vault_key_missing", message: "x", details: { vault: "canary-env" } } }, { status: 422 })
+    return Response.json({ data: { recipe: sampleFor("GET /v1/workspaces/{ws}/recipes/{name}").recipe } })
+  }) as typeof fetch
+  const { rotateRecipe } = await import("@/lib/recipes")
+  const next = { ...token, auth: "YXV0aA==" }
+  await rotateRecipe("personal", "ci", next, "code")
+  expect(rotates.map((r) => r.vault_wraps)).toEqual([[], [{ vault: "canary-env", wrapped: "d3JhcHBlZA==" }]])
+  expect(rotates[1]).toMatchObject({ auth: "YXV0aA==", public_key: token.publicKey, confirm: "code" })
+})
