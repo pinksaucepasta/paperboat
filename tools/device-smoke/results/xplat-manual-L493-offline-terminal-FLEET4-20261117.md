@@ -10,4 +10,6 @@ Build dev-b112b2a4a (host adoption b112b2a4a; client retry f1bd427a4) on two Lin
 4. fos-b unblocked, fos-a still blocked: session listed from the other machine after 8 s: terminal_offline_4780df57_...
 5. pb session close fos-b <id> (confirm code): "Session closed. Recent output was deleted."; bash -l on fos-b after 15 s: 0
 ```
-PASS (steps 4 and 5). Gap: the queue file `<state>/runtime/offline-audit.json.adopt` was not found by `find /home/pbt -name offline-audit.json.adopt` in the container (state directory elsewhere), so "queue holds the session after restart" and "queue is [] afterwards" were not read; the listing within 8 s while the client stayed cut off shows the host registered it. Fixtures revoked by exact id (machine_a87e1cdf-..., machine_6550245a-...), containers removed.
+PASS (steps 4 and 5), run three times on dev-b112b2a4a (04:12, 04:17, 04:21 IST), listed after 8 s each time.
+
+Queue file (read in the third run, 22:50 UTC): `/home/pbt/.local/state/paperboat/runtime/carrier-0-offline-audit.json.adopt` (the carrier names it `<role>-offline-audit.json.adopt`, not `runtime/offline-audit.json.adopt` as the failures.md steps say). After the host service restart, with the API still cut, it held the `offline_session_started` event of the session; after the host's API returned and the session was listed it read `null` (drained). Fixtures revoked by exact id, containers removed.
