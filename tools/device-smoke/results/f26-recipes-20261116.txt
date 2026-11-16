@@ -857,3 +857,69 @@ $ (rcp-l, rcpx) pb env run -- sh -c echo RCP_SECRET
 RCP_SECRET=vault-value-1
 $ (rcp-l8, rcpv revoked) pb env run -- sh -c echo RCP_SECRET
 pb: Paperboat ENV not loaded: Paperboat account credentials are unavailable; the command did not run. Support reference: support_645a67f7-d4f0-4419-b3fe-75806150b20e. Run `pb bugreport --upload` to se
+
+################ f26-03-W.txt (Windows reach, full)
+=== rcp-w (victus, Windows 11, user rcpw), server .31, client dev-3ec969af2, 2026-11-16T10:37:17Z ===
+$ pb version 
+  ▄▄▝▀▀▀▀▀▘▄▄   Version dev-3ec969af2
+$ PB_RECIPE=<current token> pb pair (again) 
+This machine is already paired; nothing to do.
+$ pb exec rcp-l -- hostname 
+pb: This machine's recipe does not reach that machine or action. Add it to [[reach]] and run `pb recipe update`. Support reference: support_cb0cc8bc-118f-46f9-a138-bc9abb42db27. Run `pb bugreport --upload` to send the details.
+$ pb exec rcp-m -- hostname 
+pb: the machine is offline; start or repair Paperboat on it (`pb doctor`), then retry. Support reference: support_dff1f0d8-3b43-4e34-bb2e-2d68f930ee23. Run `pb bugreport --upload` to send the details.
+$ pb ssh rcp-l hostname 
+pb: The command arguments are invalid. Run `pb COMMAND --help` and retry.
+Usage:
+  pb ssh [user@]<machine> [-- <OpenSSH arguments...>] [flags]
+  pb ssh [command]
+
+Available Commands:
+  doctor      Check SSH integration for a machine
+  trust-host  Approve a changed SSH host identity
+
+Flags:
+  -h, --help          help for ssh
+      --user string   remote operating-system user
+
+Global Flags:
+      --config string      path to the CLI config file
+      --json               print machine-readable JSON
+      --no-customization   ignore local shortcuts, command defaults, and TUI preferences
+      --server string      paperboat-server base URL override
+      --workspace string   resource workspace selector: personal or a team slug
+
+Use "pb ssh [command] --help" for more information about a command.
+$ pb env run -- cmd /c echo RCP_SECRET 
+RCP_SECRET=vault-value-1
+$ pb recipe show rcpx 
+Recipe rcpx, revision 1, token pbr_5vw3urzbsx_…, expires 2027-02-14, created by <email>
+# F26 device check, server .31
+tags = ["rcpx"]
+max_machines = 5
+
+[env]
+vaults = ["rcp-env"]
+
+[[preview]]
+port = 3000
+ttl = "1h"
+
+Machines (3 of 5)
+  rcp-l   online    applied revision 1   now
+  rcp-m   offline   preview failed: pb --config /Users/admin/Library/Application Support/paperboat/config.json preview 3000: The local Paperboat service did not keep the preview open: it did not answer in time or is restarting. Retry; if this continues, run `pb doctor`. (pb doctor on the machine)
+  rcp-w   online    applied revision 1   now
+$ pb ssh rcp-l -- hostname 
+pb: SSH to rcp-l is not ready: Publishing the machine's SSH host keys. A newly set up machine publishes them within a minute or two. If this stays, start an SSH server (sshd) on the machine. Support reference: support_7c692b62-ad62-4764-a10c-b146d7203d22. Run `pb bugreport --upload` to send the details.
+$ pb ssh rcp-w2 -- hostname 
+pb: No machine has that name or ID. Run `pb machine list` to see your machines. Support reference: support_3855c441-a8a7-436a-9dae-55d3bd29a4f6. Run `pb bugreport --upload` to send the details.
+$ pb exec rcp-w2 -- hostname 
+pb: No machine has that name or ID. Run `pb machine list` to see your machines. Support reference: support_bc488a4f-92ab-44e8-8b0b-2293f9aace1e. Run `pb bugreport --upload` to send the details.
+--- 11:04:10 rcp-l runs sshd now; rcpx reach = exec on tag:rcpx only ---
+$ (rcp-w) pb ssh --user tester rcp-l -- hostname   [managed_ssh not in allow] 
+pb: SSH to rcp-l is not ready: Publishing the machine's SSH host keys. A newly set up machine publishes them within a minute or two. If this stays, start an SSH server (sshd) on the machine. Support reference: support_4b8ecf21-efb5-4806-909b-ff3309435a8d. Run `pb bugreport --upload` to send the details.
+$ (rcp-w) pb exec rcp-l -- hostname   [exec allowed] 
+rcp-l
+--- 11:04:36 ---
+$ (rcp-w) pb ssh --user tester rcp-l -- hostname   [managed_ssh not in allow] 
+pb: you do not have SSH access to this machine; ask a team admin to grant it. Support reference: support_08009503-369b-4c73-aab9-2717965c9961. Run `pb bugreport --upload` to send the details.
