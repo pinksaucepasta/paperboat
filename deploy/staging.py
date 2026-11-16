@@ -345,9 +345,9 @@ def sealed_credential(credential):
 
 def edge(image):
     """Managed staging edge, authenticated like operatorinfra.MutateNode(enroll).
-    Stable identity and credential survive reruns; only this staging edge is restarted.
-    Limits: no browser access (preview URLs never carry a port, so a browser cannot reach a preview here; the server
-    and curl --resolve use the advertised public HTTPS port) and no HTTP/3 (UDP is closed)."""
+    Unchanged deployments keep their running process and certificate distribution epoch.
+    Managed ingress uses container port 443; host port 18446 is only for external probes.
+    No HTTP/3 (UDP is closed)."""
     from cryptography.hazmat.primitives import serialization
     from cryptography.hazmat.primitives.asymmetric import ed25519
     host = f"{REGION}.{domain()}"
@@ -389,26 +389,33 @@ def edge(image):
             # use the platform wildcard distributed by the control plane (infrastructureTLS).
             "public_https_cert_file": "/state/pub.crt", "public_https_key_file": "/state/pub.key",
             "connector_advertise_host": host, "carrier_tcp_listen_address": f"0.0.0.0:{EDGE_PORT}",
-            "carrier_quic_listen_address": f"0.0.0.0:{EDGE_QUIC_PORT}", "public_https_listen_address": "0.0.0.0:18446",
+            "carrier_quic_listen_address": f"0.0.0.0:{EDGE_QUIC_PORT}", "public_https_listen_address": "0.0.0.0:443",
             "private_https_listen_address": "127.0.0.1:9443", "public_http_listen_address": "0.0.0.0:18447",
             "preview_base_domain": public_base, "tunnel_base_domain": public_base,
             "runtime_base_domain": f"rt.{domain()}",
             "trusted_proxy_cidrs": [], "public_routes": [], "node_capacity": 2048, "control_interval": 5_000_000_000,
             "control_timeout": 5_000_000_000, "max_body_bytes": 52428800, "max_header_bytes": 32768}),
     }
-    remote(f"docker rm -f {EDGE_NAME} >/dev/null 2>&1; mkdir -p -m 700 {EDGE_DIR}")
-    for filename, content in files.items():
-        remote(f"umask 077 && cat > {EDGE_DIR}/{filename}", stdin=content)
-    remote(f"mkdir -p {EDGE_TRUST} && cat > {EDGE_TRUST}/{node}.crt", stdin=cert_pem)
-    remote(f"touch {EDGE_DIR}/managed && chmod 600 {EDGE_DIR}/managed")
+    # Compare only launch inputs in memory; never print credentials or their files.
+    desired = hashlib.sha256((files["deployment.json"] + credential + image).encode()).hexdigest()
+    program = f"""import hashlib,json,subprocess
+from pathlib import Path
+try:
+ c=json.loads(subprocess.check_output(['docker','inspect',{EDGE_NAME!r}]))[0]
+ p=Path({EDGE_DIR!r})
+ digest=hashlib.sha256((p.joinpath('deployment.json').read_text()+p.joinpath('runtime.credential').read_text()+c['Config']['Image']).encode()).hexdigest()
+ print(digest if c['State']['Running'] else '')
+except (OSError,subprocess.CalledProcessError,KeyError):
+ print('')
+"""
+    unchanged = remote('python3 -c ' + shell_quote(program)).strip() == desired
+    if not unchanged:
+        remote(f"docker rm -f {EDGE_NAME} >/dev/null 2>&1; mkdir -p -m 700 {EDGE_DIR}")
+        for filename, content in files.items():
+            remote(f"umask 077 && cat > {EDGE_DIR}/{filename}", stdin=content)
+        remote(f"mkdir -p {EDGE_TRUST} && cat > {EDGE_TRUST}/{node}.crt", stdin=cert_pem)
+        remote(f"touch {EDGE_DIR}/managed && chmod 600 {EDGE_DIR}/managed")
     sealed = sealed_credential(credential)
-    # Drain only this account's replaced fixture before removing its scoped installation.
-    sql("UPDATE control_tunnel_nodes n SET state='draining',registry_expires_at=now() "
-        "WHERE EXISTS(SELECT 1 FROM selfhost_installations i WHERE i.node_id=n.id "
-        "AND i.scope_kind='account' AND i.scope_id='usr_staging' AND i.capability='tunnel')")
-    sql("DELETE FROM selfhost_installations WHERE scope_kind='account' "
-        "AND scope_id='usr_staging' AND capability='tunnel'")
-    address = ssh(HOST, "curl -fsS -m10 https://api.ipify.org").strip()
     sql(f"INSERT INTO operator_regions(id,display_name,enabled) VALUES('{REGION}','Staging',true) "
         "ON CONFLICT(id) DO UPDATE SET enabled=true")
     sql(f"INSERT INTO control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,endpoint_host,endpoint_tcp_port,endpoint_quic_port,carrier_endpoint_host,carrier_endpoint_tcp_port,carrier_endpoint_quic_port,state,region,failure_domain,"
@@ -420,8 +427,6 @@ def edge(image):
     sql(f"INSERT INTO managed_node_authority(node_id,region_id,runtime_hash,runtime_ciphertext,config) "
         f"VALUES('{node}','{REGION}',decode('{hashlib.sha256(credential.encode()).hexdigest()}','hex'),decode('{sealed}','hex'),'{{}}') "
         "ON CONFLICT(node_id) DO UPDATE SET runtime_hash=excluded.runtime_hash,runtime_ciphertext=excluded.runtime_ciphertext")
-    # Non-443 staging cannot pass the normal ingress probe; attest only this fixture.
-    sql(f"UPDATE control_tunnel_nodes SET public_ingress_verified_at=now(),public_ingress_ipv4='{address}'::inet WHERE id='{node}'")
     sql("INSERT INTO selfhost_pool_policies(scope_kind,scope_id,capability,mode,installation_ids) "
         "VALUES('account','usr_staging','tunnel','managed-only','{}') "
         "ON CONFLICT(scope_kind,scope_id,capability) DO UPDATE SET mode=excluded.mode,installation_ids=excluded.installation_ids")
@@ -429,9 +434,32 @@ def edge(image):
         f"VALUES('{usage}','{node}',decode('{raw_pub.hex()}','hex'),now()-interval '1 minute',now()+interval '365 days') "
         "ON CONFLICT(key_id) DO NOTHING")
     args = f"-node-id {node} -edge-pool {install} -relay-id {node} -relay-region {REGION} -relay-name {EDGE_NAME} -health-address 127.0.0.1:9090 -deployment-config /state/deployment.json -state-path /state/state.json"
-    remote(f"docker run -d --name {EDGE_NAME} --restart unless-stopped --user 0:0 -v $PWD/{EDGE_DIR}:/state -p {EDGE_PORT}:{EDGE_PORT} -p {EDGE_QUIC_PORT}:{EDGE_QUIC_PORT}/udp "
-           f"-p 18446:18446 -p 18447:18447 {image} {args}")
-    return {"node": node, "pool": install}
+    network = remote("docker inspect -f '{{range $name, $_ := .NetworkSettings.Networks}}{{$name}}{{end}}' "
+                     "pb-release-staging-server-1").strip()
+    if not network or any(c.isspace() for c in network):
+        raise SystemExit("staging: expected one staging server Docker network")
+    if not unchanged:
+        remote(f"docker run -d --name {EDGE_NAME} --restart unless-stopped --user 0:0 -v $PWD/{EDGE_DIR}:/state -p {EDGE_PORT}:{EDGE_PORT} -p {EDGE_QUIC_PORT}:{EDGE_QUIC_PORT}/udp "
+               f"--network {shell_quote(network)} -p 18446:443 -p 18447:18447 {image} {args}")
+    networks = json.loads(remote(f"docker inspect -f '{{{{json .NetworkSettings.Networks}}}}' {EDGE_NAME}"))
+    if network not in networks:
+        remote(f"docker network connect {shell_quote(network)} {EDGE_NAME}")
+        networks = json.loads(remote(f"docker inspect -f '{{{{json .NetworkSettings.Networks}}}}' {EDGE_NAME}"))
+    address = networks[network]["IPAddress"]
+    # The managed server dialer uses ingress IP:443. Never send staging to host/prod 443.
+    import ipaddress
+    ipaddress.IPv4Address(address)
+    sql(f"UPDATE control_tunnel_nodes SET public_ingress_verified_at=now(),public_ingress_ipv4='{address}'::inet WHERE id='{node}'")
+    end = time.monotonic() + 60
+    while time.monotonic() < end:
+        ready = sql(f"SELECT state='ready' AND ready AND last_heartbeat_at>now()-interval '30 seconds' "
+                    f"FROM control_tunnel_nodes WHERE id='{node}'").strip()
+        if ready == 't':
+            return {"node": node, "pool": install, "ingress_ipv4": address, "unchanged": unchanged}
+        time.sleep(2)
+    print(remote(f"docker logs --tail 40 {EDGE_NAME} 2>&1"), file=sys.stderr)
+    raise SystemExit("staging: managed edge did not become ready with a fresh heartbeat within 60 seconds")
+
 
 
 RELAY_NAME, RELAY_DIR = "pb-stg-relay", "relay"
