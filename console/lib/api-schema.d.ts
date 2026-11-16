@@ -8469,6 +8469,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/machines/{machine_id}/config-rule": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read the workspace policy config_sync rule that picks this machine's config repository */
+        get: operations["get_v1_machines_machine_id_config_rule"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -11809,6 +11826,11 @@ export interface components {
             path_rules?: components["schemas"]["ConfigPathRule"][];
             repository_bindings?: components["schemas"]["ConfigRepositoryBinding"][];
             configuration_revision: string;
+            /**
+             * @description Who chose the repository: the owner for this machine (default) or a workspace policy config_sync rule. A rule-chosen assignment follows the rule on the next apply.
+             * @enum {string}
+             */
+            source?: "machine" | "tag_rule";
         };
         ConfigRepositoryConnectRequest: {
             /** @enum {string} */
@@ -13166,6 +13188,23 @@ export interface components {
                     error?: Record<string, never>;
                 }[];
             };
+        };
+        ConfigMachineRule: {
+            matched: boolean;
+            /** @description Team whose policy has the rule; empty for the personal policy. */
+            team_id?: string;
+            /** @description machine:* or the tag that matched. */
+            target?: string;
+            /** @description Repository URL or absolute path from the rule. */
+            repository?: string;
+            branch?: string;
+            /** @description The owner's connected repository with this URL and branch. */
+            repository_id?: string;
+            /**
+             * @description connect_on_apply: pb config sync apply connects the repository for the owner.
+             * @enum {string}
+             */
+            state: "none" | "connected" | "connect_on_apply";
         };
     };
     responses: {
@@ -15363,7 +15402,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Assignment includes configuration_revision, path_rules with source priority, and repository_bindings. Pending bootstrap metadata may have empty configuration_revision and cannot accept consent or authorize synchronization. */
+            /** @description Assignment includes configuration_revision, path_rules with source priority, repository_bindings, and source (machine or tag_rule). Pending bootstrap metadata may have empty configuration_revision and cannot accept consent or authorize synchronization. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -32733,6 +32772,32 @@ export interface operations {
             400: components["responses"]["Error"];
             401: components["responses"]["Error"];
             403: components["responses"]["Error"];
+        };
+    };
+    get_v1_machines_machine_id_config_rule: {
+        parameters: {
+            query?: {
+                /** @description Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field. */
+                workspace?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["ConfigMachineRule"];
+                    };
+                };
+            };
+            404: components["responses"]["Error"];
         };
     };
 }

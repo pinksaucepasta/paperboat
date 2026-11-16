@@ -18,7 +18,7 @@ SET consent_state = 'accepted', warning_revision = $1, accepted_at = $2,
 WHERE environment_id = $3 AND version = $4
   AND repository_id IS NOT NULL AND consent_state = 'pending' AND configuration_revision <> ''
   AND warning_revision = $1
-RETURNING id, environment_id, repository_id, mode, consent_state, warning_revision, accepted_at, revoked_at, version, created_at, updated_at, machine_id, push_repository_id, automatic_updates, adopted_team_id, adopted_default_version, approved_pull_revision, approved_at, path_rules, repository_bindings, configuration_revision
+RETURNING id, environment_id, repository_id, mode, consent_state, warning_revision, accepted_at, revoked_at, version, created_at, updated_at, machine_id, push_repository_id, automatic_updates, adopted_team_id, adopted_default_version, approved_pull_revision, approved_at, path_rules, repository_bindings, configuration_revision, source
 `
 
 type AcceptControlConfigConsentParams struct {
@@ -58,6 +58,7 @@ func (q *Queries) AcceptControlConfigConsent(ctx context.Context, arg AcceptCont
 		&i.PathRules,
 		&i.RepositoryBindings,
 		&i.ConfigurationRevision,
+		&i.Source,
 	)
 	return i, err
 }
@@ -429,7 +430,7 @@ WHERE a.environment_id=$3 AND a.version=$4
     WHERE s.environment_id=a.environment_id AND s.assignment_id=a.id
       AND s.remote_revision=$1
   )
-RETURNING a.id, a.environment_id, a.repository_id, a.mode, a.consent_state, a.warning_revision, a.accepted_at, a.revoked_at, a.version, a.created_at, a.updated_at, a.machine_id, a.push_repository_id, a.automatic_updates, a.adopted_team_id, a.adopted_default_version, a.approved_pull_revision, a.approved_at, a.path_rules, a.repository_bindings, a.configuration_revision
+RETURNING a.id, a.environment_id, a.repository_id, a.mode, a.consent_state, a.warning_revision, a.accepted_at, a.revoked_at, a.version, a.created_at, a.updated_at, a.machine_id, a.push_repository_id, a.automatic_updates, a.adopted_team_id, a.adopted_default_version, a.approved_pull_revision, a.approved_at, a.path_rules, a.repository_bindings, a.configuration_revision, a.source
 `
 
 type ApproveControlConfigPullRevisionParams struct {
@@ -469,6 +470,7 @@ func (q *Queries) ApproveControlConfigPullRevision(ctx context.Context, arg Appr
 		&i.PathRules,
 		&i.RepositoryBindings,
 		&i.ConfigurationRevision,
+		&i.Source,
 	)
 	return i, err
 }
@@ -523,7 +525,7 @@ UPDATE control_config_assignments
 SET repository_id = NULL, consent_state = 'revoked', warning_revision = NULL, accepted_at = NULL,
     revoked_at = $1, version = version + 1, updated_at = $1
 WHERE environment_id = $2 AND version = $3
-RETURNING id, environment_id, repository_id, mode, consent_state, warning_revision, accepted_at, revoked_at, version, created_at, updated_at, machine_id, push_repository_id, automatic_updates, adopted_team_id, adopted_default_version, approved_pull_revision, approved_at, path_rules, repository_bindings, configuration_revision
+RETURNING id, environment_id, repository_id, mode, consent_state, warning_revision, accepted_at, revoked_at, version, created_at, updated_at, machine_id, push_repository_id, automatic_updates, adopted_team_id, adopted_default_version, approved_pull_revision, approved_at, path_rules, repository_bindings, configuration_revision, source
 `
 
 type ClearControlConfigAssignmentParams struct {
@@ -557,6 +559,7 @@ func (q *Queries) ClearControlConfigAssignment(ctx context.Context, arg ClearCon
 		&i.PathRules,
 		&i.RepositoryBindings,
 		&i.ConfigurationRevision,
+		&i.Source,
 	)
 	return i, err
 }
@@ -1823,7 +1826,7 @@ func (q *Queries) GetConsumedControlHelperEnrollmentForReplay(ctx context.Contex
 }
 
 const getControlConfigAssignment = `-- name: GetControlConfigAssignment :one
-SELECT id, environment_id, repository_id, mode, consent_state, warning_revision, accepted_at, revoked_at, version, created_at, updated_at, machine_id, push_repository_id, automatic_updates, adopted_team_id, adopted_default_version, approved_pull_revision, approved_at, path_rules, repository_bindings, configuration_revision FROM control_config_assignments WHERE environment_id = $1
+SELECT id, environment_id, repository_id, mode, consent_state, warning_revision, accepted_at, revoked_at, version, created_at, updated_at, machine_id, push_repository_id, automatic_updates, adopted_team_id, adopted_default_version, approved_pull_revision, approved_at, path_rules, repository_bindings, configuration_revision, source FROM control_config_assignments WHERE environment_id = $1
 `
 
 func (q *Queries) GetControlConfigAssignment(ctx context.Context, environmentID string) (ControlConfigAssignment, error) {
@@ -1851,6 +1854,7 @@ func (q *Queries) GetControlConfigAssignment(ctx context.Context, environmentID 
 		&i.PathRules,
 		&i.RepositoryBindings,
 		&i.ConfigurationRevision,
+		&i.Source,
 	)
 	return i, err
 }
@@ -2404,7 +2408,7 @@ func (q *Queries) GetControlUsageVerificationKey(ctx context.Context, keyID stri
 }
 
 const getEligibleControlConfigAssignment = `-- name: GetEligibleControlConfigAssignment :one
-SELECT a.id, a.environment_id, a.repository_id, a.mode, a.consent_state, a.warning_revision, a.accepted_at, a.revoked_at, a.version, a.created_at, a.updated_at, a.machine_id, a.push_repository_id, a.automatic_updates, a.adopted_team_id, a.adopted_default_version, a.approved_pull_revision, a.approved_at, a.path_rules, a.repository_bindings, a.configuration_revision FROM control_config_assignments a
+SELECT a.id, a.environment_id, a.repository_id, a.mode, a.consent_state, a.warning_revision, a.accepted_at, a.revoked_at, a.version, a.created_at, a.updated_at, a.machine_id, a.push_repository_id, a.automatic_updates, a.adopted_team_id, a.adopted_default_version, a.approved_pull_revision, a.approved_at, a.path_rules, a.repository_bindings, a.configuration_revision, a.source FROM control_config_assignments a
 JOIN user_machines m ON m.id = a.machine_id
 JOIN control_environments e ON e.id = a.environment_id
 JOIN users u ON u.id = e.owner_user_id
@@ -2458,12 +2462,13 @@ func (q *Queries) GetEligibleControlConfigAssignment(ctx context.Context, arg Ge
 		&i.PathRules,
 		&i.RepositoryBindings,
 		&i.ConfigurationRevision,
+		&i.Source,
 	)
 	return i, err
 }
 
 const getEligibleMachineConfigAssignment = `-- name: GetEligibleMachineConfigAssignment :one
-SELECT a.id, a.environment_id, a.repository_id, a.mode, a.consent_state, a.warning_revision, a.accepted_at, a.revoked_at, a.version, a.created_at, a.updated_at, a.machine_id, a.push_repository_id, a.automatic_updates, a.adopted_team_id, a.adopted_default_version, a.approved_pull_revision, a.approved_at, a.path_rules, a.repository_bindings, a.configuration_revision FROM control_config_assignments a
+SELECT a.id, a.environment_id, a.repository_id, a.mode, a.consent_state, a.warning_revision, a.accepted_at, a.revoked_at, a.version, a.created_at, a.updated_at, a.machine_id, a.push_repository_id, a.automatic_updates, a.adopted_team_id, a.adopted_default_version, a.approved_pull_revision, a.approved_at, a.path_rules, a.repository_bindings, a.configuration_revision, a.source FROM control_config_assignments a
 JOIN user_machines m ON m.id = a.machine_id
 JOIN control_environments e ON e.id = a.environment_id
 JOIN users u ON u.id = e.owner_user_id
@@ -2517,6 +2522,7 @@ func (q *Queries) GetEligibleMachineConfigAssignment(ctx context.Context, arg Ge
 		&i.PathRules,
 		&i.RepositoryBindings,
 		&i.ConfigurationRevision,
+		&i.Source,
 	)
 	return i, err
 }
@@ -4645,7 +4651,7 @@ SET consent_state = 'pending', warning_revision = $1, accepted_at = NULL,
     revoked_at = NULL, version = version + 1, updated_at = $2
 WHERE environment_id = $3 AND version = $4
   AND repository_id IS NOT NULL AND consent_state = 'accepted'
-RETURNING id, environment_id, repository_id, mode, consent_state, warning_revision, accepted_at, revoked_at, version, created_at, updated_at, machine_id, push_repository_id, automatic_updates, adopted_team_id, adopted_default_version, approved_pull_revision, approved_at, path_rules, repository_bindings, configuration_revision
+RETURNING id, environment_id, repository_id, mode, consent_state, warning_revision, accepted_at, revoked_at, version, created_at, updated_at, machine_id, push_repository_id, automatic_updates, adopted_team_id, adopted_default_version, approved_pull_revision, approved_at, path_rules, repository_bindings, configuration_revision, source
 `
 
 type RemoveControlConfigConsentParams struct {
@@ -4685,6 +4691,7 @@ func (q *Queries) RemoveControlConfigConsent(ctx context.Context, arg RemoveCont
 		&i.PathRules,
 		&i.RepositoryBindings,
 		&i.ConfigurationRevision,
+		&i.Source,
 	)
 	return i, err
 }
@@ -5417,9 +5424,9 @@ func (q *Queries) SelectReadyControlTunnelNode(ctx context.Context, arg SelectRe
 }
 
 const setControlConfigAssignment = `-- name: SetControlConfigAssignment :one
-INSERT INTO control_config_assignments (id, machine_id, environment_id, repository_id, push_repository_id, mode, consent_state, warning_revision, automatic_updates, path_rules, repository_bindings, configuration_revision)
+INSERT INTO control_config_assignments (id, machine_id, environment_id, repository_id, push_repository_id, mode, consent_state, warning_revision, automatic_updates, path_rules, repository_bindings, configuration_revision, source)
 SELECT $1, machine.id, $2, $3,
-       $4, $5, $6, $7, $8, $9, $10, $11
+       $4, $5, $6, $7, $8, $9, $10, $11, $12
 FROM user_machines machine
 WHERE machine.environment_id = $2 AND machine.deleted_at IS NULL
 ON CONFLICT (machine_id) DO UPDATE
@@ -5430,12 +5437,12 @@ SET id = CASE WHEN control_config_assignments.revoked_at IS NULL
     repository_id = EXCLUDED.repository_id, push_repository_id = EXCLUDED.push_repository_id,
     mode = EXCLUDED.mode, consent_state = EXCLUDED.consent_state, automatic_updates = EXCLUDED.automatic_updates,
     path_rules = EXCLUDED.path_rules, repository_bindings = EXCLUDED.repository_bindings,
-    configuration_revision = EXCLUDED.configuration_revision,
+    configuration_revision = EXCLUDED.configuration_revision, source = EXCLUDED.source,
     adopted_team_id = NULL, adopted_default_version = NULL, approved_pull_revision = NULL, approved_at = NULL,
     warning_revision = EXCLUDED.warning_revision, accepted_at = NULL, revoked_at = NULL,
-    version = control_config_assignments.version + 1, updated_at = $12
-WHERE control_config_assignments.version = $13
-RETURNING id, environment_id, repository_id, mode, consent_state, warning_revision, accepted_at, revoked_at, version, created_at, updated_at, machine_id, push_repository_id, automatic_updates, adopted_team_id, adopted_default_version, approved_pull_revision, approved_at, path_rules, repository_bindings, configuration_revision
+    version = control_config_assignments.version + 1, updated_at = $13
+WHERE control_config_assignments.version = $14
+RETURNING id, environment_id, repository_id, mode, consent_state, warning_revision, accepted_at, revoked_at, version, created_at, updated_at, machine_id, push_repository_id, automatic_updates, adopted_team_id, adopted_default_version, approved_pull_revision, approved_at, path_rules, repository_bindings, configuration_revision, source
 `
 
 type SetControlConfigAssignmentParams struct {
@@ -5450,6 +5457,7 @@ type SetControlConfigAssignmentParams struct {
 	PathRules             []byte
 	RepositoryBindings    []byte
 	ConfigurationRevision string
+	Source                string
 	Now                   time.Time
 	ExpectedVersion       int64
 }
@@ -5470,6 +5478,7 @@ func (q *Queries) SetControlConfigAssignment(ctx context.Context, arg SetControl
 		arg.PathRules,
 		arg.RepositoryBindings,
 		arg.ConfigurationRevision,
+		arg.Source,
 		arg.Now,
 		arg.ExpectedVersion,
 	)
@@ -5496,6 +5505,7 @@ func (q *Queries) SetControlConfigAssignment(ctx context.Context, arg SetControl
 		&i.PathRules,
 		&i.RepositoryBindings,
 		&i.ConfigurationRevision,
+		&i.Source,
 	)
 	return i, err
 }

@@ -304,7 +304,7 @@ func TestConfigAssignmentRequestsUseBearerAndSnakeCase(t *testing.T) {
 	if err != nil || assignment.Version != 2 || assignment.PullRepositoryID == nil {
 		t.Fatalf("assignment=%+v err=%v", assignment, err)
 	}
-	if _, err := c.ConfigureConfigProjection(context.Background(), "mch_1", "", "cfgrepo_1", "push_only", false, 2, nil, nil, strings.Repeat("a", 64)); err != nil {
+	if _, err := c.ConfigureConfigProjection(context.Background(), "mch_1", "", "cfgrepo_1", "push_only", false, 2, nil, nil, strings.Repeat("a", 64), "machine"); err != nil {
 		t.Fatal(err)
 	}
 	if err := c.UnassignConfig(context.Background(), "mch_1", 3); err != nil {

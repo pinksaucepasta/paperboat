@@ -41,8 +41,10 @@ func Parse(src []byte) (Document, Errors) {
 			d.Rules = parseRules(&c, p, m.value)
 		case "tests":
 			d.Tests = parseTests(&c, p, m.value)
+		case "config_sync":
+			d.ConfigSync = parseConfigSync(&c, p, m.value)
 		default:
-			c.add(p, "unknown_field", "unknown field %q; allowed: $schema, allow_private_access, groups, tags, rules, tests", m.name)
+			c.add(p, "unknown_field", "unknown field %q; allowed: $schema, allow_private_access, groups, tags, rules, tests, config_sync", m.name)
 		}
 	}
 	return d, c.errs.sorted()
@@ -285,4 +287,44 @@ func parsePortRange(s string) (PortRange, bool) {
 	}
 	to, err := strconv.Atoi(b)
 	return PortRange{From: from, To: to}, err == nil
+}
+
+func parseConfigSync(c *collector, path string, v hujson.Value) []ConfigSyncRule {
+	items, ok := array(c, path, v)
+	if !ok {
+		return nil
+	}
+	out := make([]ConfigSyncRule, len(items))
+	for i, item := range items {
+		p := pointer(path, i)
+		o, ok := object(c, p, item)
+		if !ok {
+			continue
+		}
+		var r ConfigSyncRule
+		have := map[string]bool{}
+		for _, m := range members(c, p, o) {
+			fp := pointer(p, m.name)
+			have[m.name] = true
+			switch m.name {
+			case "dst":
+				r.Dst = stringList(c, fp, m.value)
+			case "repository":
+				r.Repository, _ = str(c, fp, m.value)
+			case "branch":
+				r.Branch, _ = str(c, fp, m.value)
+			case "note":
+				r.Note, _ = str(c, fp, m.value)
+			default:
+				c.add(fp, "unknown_field", "unknown field %q; allowed: dst, repository, branch, note", m.name)
+			}
+		}
+		for _, k := range []string{"dst", "repository"} {
+			if !have[k] {
+				c.add(pointer(p, k), "required", "a config_sync rule needs %q", k)
+			}
+		}
+		out[i] = r
+	}
+	return out
 }

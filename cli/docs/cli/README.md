@@ -50,7 +50,7 @@ Read the [CLI guide](../cli.md) for interactive use, scripting, installation of 
 | [pb config local-access show](pb_config_local-access_show.md) | Show the local browser domain |
 | [pb config path](pb_config_path.md) | Print the config file path |
 | [pb config repository](pb_config_repository.md) | Connect custom Git repositories and manage machine credentials |
-| [pb config repository connect](pb_config_repository_connect.md) | Connect an HTTPS, SSH, or local Git repository |
+| [pb config repository connect](pb_config_repository_connect.md) | Check and connect an HTTPS, SSH, or local Git repository |
 | [pb config repository credentials](pb_config_repository_credentials.md) | Store credentials privately on this machine |
 | [pb config repository credentials remove](pb_config_repository_credentials_remove.md) | Remove this machine's saved repository credentials |
 | [pb config repository credentials set](pb_config_repository_credentials_set.md) | Read a credential profile from a private JSON file or stdin |

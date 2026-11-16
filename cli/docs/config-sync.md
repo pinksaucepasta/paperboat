@@ -149,13 +149,39 @@ files before sync can activate. Personal repository choices take precedence.
 ## Custom Git repositories
 
 ```text
-pb config repository connect ssh://git@host/config.git --name configs --branch main --json
+pb config repository connect ssh://git@host/config.git --name configs --branch main --credentials-file /absolute/private-profile.json --json
 pb config repository connect https://host/config.git --name configs --json
 pb config repository connect /absolute/config.git --name local-configs --json
 pb config repository list --json
 pb config repository credentials set <repository-id> --file /absolute/private-profile.json --json
 pb config repository credentials remove <repository-id> --json
 ```
+
+`connect` reads the repository before registering it. Any Git repository works if it has
+the branch with at least one commit; if it has `.paperboat/config-sync.toml`, that file must
+be a valid config sync file. A refused connect names what to fix (missing branch, empty
+repository, the file's error, missing credentials). SSH repositories need
+`--credentials-file`, which is also saved as this machine's credentials.
+
+### Choosing a repository per machine, recipe or tag
+
+A machine uses the repository its owner chose: `pb config sync apply --repository <name>`,
+`[pull]`/`[push]` in the machine file, or a recipe's `[config] repository` (a recipe applies
+the same way). Without such a choice, a `config_sync` rule in the workspace policy picks it by
+tag; team admins edit it with `pb policy` (see `shared/policy/README.md`):
+
+```jsonc
+"config_sync": [
+  {"dst": ["tag:prod"], "repository": "https://git.example.test/acme/prod-config.git", "branch": "main"},
+  {"dst": ["machine:*"], "repository": "https://git.example.test/acme/dotfiles.git"},
+]
+```
+
+Team policies of the teams the machine is shared into are checked before the owner's personal
+policy, and the first matching rule wins. The owner still runs `pb config sync apply`, which
+connects the rule's repository for them if needed and asks for consent as usual;
+`validate`/`apply` print which rule chose the repository. A rule-chosen assignment follows the rule
+on the next apply; `--repository` makes it the owner's choice again.
 
 A custom repository needs no GitHub connection. SSH requires a server providing Git
 upload/receive service, although the Paperboat client needs no system Git. Local writes

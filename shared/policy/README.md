@@ -60,6 +60,7 @@ its creator may do at that moment. No reach: it reaches nothing.
 | `groups` | `group:<name>` → list of `user:<email>`. |
 | `tags` | `tag:<name>` → list of `machine:<alias>`. A machine may carry many tags. |
 | `rules[]` | `src`, `dst`, exactly one of `allow` / `deny`, optional `ports`, optional `note`. |
+| `config_sync[]` | `dst` (`machine:*` or tags), `repository` (Git URL or absolute path), optional `branch` (default `main`), optional `note`. Picks the config sync repository for those machines; the first matching rule wins, team policies before the personal one. A machine's own choice (`pb config sync apply --repository`, its configuration file, a recipe) comes first, and the owner still applies it (`pb config sync apply`), which connects the repository for the owner if needed. |
 | `tests[]` | `src` (one `user:<email>`), `dst` (one machine, preview, tunnel or `env:team`), `allow` and/or `deny` lists of actions; `private_access:<port>` checks one port. A failing test stops the save. |
 
 Names after `group:` and `tag:` use lowercase letters, digits, `.`, `_` and `-` (up to 63).
@@ -126,7 +127,9 @@ are sorted by path, so the same file always gives the same list.
 | `action_not_for_target` | the action does not apply to the rule's targets |
 | `ports_need_private_access` | `ports` on a rule whose actions are not exactly `private_access` |
 | `unknown_subject` | a test's `src` is not a member |
-| `unknown_target` | a test's `dst` is not in this workspace |
+| `unknown_target` | a test's `dst` is not in this workspace, or a `config_sync` target is not `machine:*` or a defined tag |
+| `invalid_repository` | a `config_sync` repository is not a Git URL or absolute path |
+| `invalid_branch` | a `config_sync` branch is not a Git branch name |
 | `test_failed` | a test's expectation does not hold; the message says what the policy decides and why |
 
 ## HTTP API

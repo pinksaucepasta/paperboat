@@ -24,7 +24,7 @@ func RewriteFunc(src []byte, fn func(string) (string, bool)) (out []byte, change
 			switch literal(m.Name) {
 			case "rules":
 				r.dropIncomplete(&m.Value)
-			case "tests":
+			case "tests", "config_sync":
 				r.dropIncomplete(&m.Value)
 			}
 		}
@@ -89,7 +89,7 @@ func (r *rewriter) value(v *hujson.Value, refs bool) bool {
 	case *hujson.Object:
 		for i := range x.Members {
 			name := literal(x.Members[i].Name)
-			inner := refs && name != "note" && name != "$schema" && name != "allow" && name != "deny" && name != "ports"
+			inner := refs && name != "note" && name != "$schema" && name != "allow" && name != "deny" && name != "ports" && name != "repository" && name != "branch"
 			if !r.value(&x.Members[i].Value, inner) {
 				if r.dropped == nil {
 					r.dropped = map[*hujson.Object]bool{}
