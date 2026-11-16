@@ -124,7 +124,8 @@ export function SettingRow({
     <div className="flex items-center justify-between gap-6 border-b border-divider py-3 text-sm">
       <div className="flex min-w-0 flex-col gap-0.5">
         <label htmlFor={htmlFor}>{label}</label>
-        {description && <p className="text-muted-foreground">{description}</p>}
+        {/* a div: descriptions can hold a Skeleton (a div), which a <p> would split during server HTML parsing */}
+        {description && <div className="text-muted-foreground">{description}</div>}
       </div>
       <div className="shrink-0">{children}</div>
     </div>
