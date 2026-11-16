@@ -9,6 +9,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 	"io"
 	"net"
+	"net/url"
 	"os"
 	"os/exec"
 	"os/user"
@@ -452,25 +453,37 @@ func probeDoctorAuthentication(ctx context.Context, command *cobra.Command) doct
 	credential, err := auth.Credential()
 	if err != nil {
 		errorreport.Current().ObserveFailure(ctx, "pb", "doctor", "command", "command_failed", err)
+		// An access token that expired while the network was blocked cannot refresh: that is the server being
+		// unreachable (a captive portal, a proxy), not a broken local credential store.
+		var transport *url.Error
+		if errors.As(err, &transport) {
+			return doctorServerFailure(ctx, cfg.ServerURL, check, err)
+		}
 		return doctorCredentialFailure(check, err)
 	}
 	if _, err := api.New(cfg.ServerURL, credential, nil).Me(ctx); err != nil {
-		if diagnosis, ok := doctorProxyDiagnosis(err); ok {
-			check.Summary = "The Paperboat server is unreachable through the configured proxy."
-			check.Recovery = diagnosis.Recovery
-		} else if outdated := doctorUnsupportedVersion(err); outdated != nil {
-			check.Summary = "This Paperboat version is no longer supported by the server."
-			check.Recovery = "Run `pb update` to install a supported release, then run pb doctor again."
-		} else if api.CaptivePortal(ctx, cfg.ServerURL, nil) {
-			check.Summary = api.CaptivePortalMessage + "."
-			check.Recovery = "Complete the network sign-in in a browser, then run pb doctor again."
-		} else {
-			check.Summary = "The Paperboat server did not accept the authenticated health check."
-			check.Recovery = "Check network access and sign in again if needed, then run pb doctor again."
-		}
-		return check
+		return doctorServerFailure(ctx, cfg.ServerURL, check, err)
 	}
 	return doctorpkg.Check{Category: "control", Code: "authentication", Status: doctorpkg.StatusPass, Summary: "The Paperboat server accepted the current credential."}
+}
+
+// doctorServerFailure says why a request to the Paperboat server failed: the configured proxy, an outdated version,
+// a captive portal answering in the server's place, or a plain network problem.
+func doctorServerFailure(ctx context.Context, serverURL string, check doctorpkg.Check, err error) doctorpkg.Check {
+	if diagnosis, ok := doctorProxyDiagnosis(err); ok {
+		check.Summary = "The Paperboat server is unreachable through the configured proxy."
+		check.Recovery = diagnosis.Recovery
+	} else if outdated := doctorUnsupportedVersion(err); outdated != nil {
+		check.Summary = "This Paperboat version is no longer supported by the server."
+		check.Recovery = "Run `pb update` to install a supported release, then run pb doctor again."
+	} else if api.CaptivePortal(ctx, serverURL, nil) {
+		check.Summary = api.CaptivePortalMessage + "."
+		check.Recovery = "Complete the network sign-in in a browser, then run pb doctor again."
+	} else {
+		check.Summary = "The Paperboat server did not accept the authenticated health check."
+		check.Recovery = "Check network access and sign in again if needed, then run pb doctor again."
+	}
+	return check
 }
 
 func probeDoctorLocalState(ctx context.Context) doctorpkg.Check {
