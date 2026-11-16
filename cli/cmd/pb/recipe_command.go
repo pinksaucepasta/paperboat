@@ -339,27 +339,34 @@ replace PB_RECIPE everywhere the old one is stored.`, Example: "  pb recipe rota
 		if err != nil {
 			return err
 		}
-		current, _, err := client.GetRecipe(command.Context(), workspace, args[0])
+		currentRecipe, _, err := client.GetRecipe(command.Context(), workspace, args[0])
 		if err != nil {
 			return friendlyCommandError(err)
 		}
-		id := recipeTokenID(current.Token)
+		id := recipeTokenID(currentRecipe.Token)
 		token, err := recipe.NewToken(id)
 		if err != nil || !recipe.ValidID(id) {
-			return fmt.Errorf("the server returned recipe token %q, which has no valid id", current.Token)
+			return fmt.Errorf("the server returned recipe token %q, which has no valid id", currentRecipe.Token)
 		}
 		confirm, _ := command.Flags().GetString("confirm")
-		rotated, err := client.RotateRecipe(command.Context(), workspace, args[0], api.RecipeRotate{Auth: token.Auth(), PublicKey: token.PublicKey(), Confirm: confirm})
+		// The recipe's own vault wraps move to the new key; no vault gets a new key.
+		var current recipe.Recipe
+		if err := json.Unmarshal(currentRecipe.Recipe, &current); err != nil {
+			return fmt.Errorf("read recipe %s: %w", args[0], err)
+		}
+		var wraps []api.RecipeVaultWrap
+		if confirm != "" {
+			if wraps, err = recipeVaultWraps(command, args[0], current.Vaults(), token.PublicKey(), token.ID); err != nil {
+				return err
+			}
+		}
+		rotated, err := client.RotateRecipe(command.Context(), workspace, args[0], api.RecipeRotate{Auth: token.Auth(), PublicKey: token.PublicKey(), VaultWraps: wraps, Confirm: confirm})
 		if details, ok := api.RecipeConfirmationDetails(err); ok {
 			if wantsJSON(command) {
 				return writeCLIJSON(command.OutOrStdout(), map[string]any{"state": "confirmation_required", "confirm": details.Confirm, "impact": details.Impact})
 			}
 			out := command.OutOrStdout()
-			keys := ""
-			if len(details.Impact.Vaults) > 0 {
-				keys = " and a new key for vault " + strings.Join(details.Impact.Vaults, ", ")
-			}
-			fmt.Fprintf(out, "Rotating %s gives it a new token%s.\n", args[0], keys)
+			fmt.Fprintf(out, "Rotating %s gives it a new token.\n", args[0])
 			fmt.Fprintf(out, "  The old token stops working at once. Its %d machines keep running.\n", len(details.Impact.Machines))
 			fmt.Fprintf(out, "  Then replace PB_RECIPE everywhere the old token is stored.\nRotate with: pb recipe rotate %s --confirm %s\n", args[0], details.Confirm)
 			return nil
@@ -401,9 +408,6 @@ and keep the machines.`, Example: "  pb recipe revoke ci\n  pb recipe revoke ci 
 			}
 			if len(names) > 0 {
 				fmt.Fprintf(out, "  - its %d machines are removed: %s\n", len(names), strings.Join(names, ", "))
-			}
-			for _, vault := range details.Impact.Vaults {
-				fmt.Fprintf(out, "  - vault %s needs a new key\n", vault)
 			}
 			fmt.Fprintf(out, "Revoke with: pb recipe revoke %s --confirm %s\n", args[0], details.Confirm)
 			return nil

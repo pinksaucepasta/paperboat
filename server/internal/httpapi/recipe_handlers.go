@@ -225,9 +225,10 @@ func recipeRotate(service *recipes.Service) http.HandlerFunc {
 		}
 		limitEnvironmentJSON(w, r, 1<<20)
 		var in struct {
-			Auth        []byte `json:"auth"`
-			PublicKey   []byte `json:"public_key"`
-			Confirm     string `json:"confirm"`
+			Auth        []byte              `json:"auth"`
+			PublicKey   []byte              `json:"public_key"`
+			Wraps       []recipes.VaultWrap `json:"vault_wraps"`
+			Confirm     string              `json:"confirm"`
 			MachineKeys []struct {
 				MachineID string `json:"machine_id"`
 				Sealed    []byte `json:"sealed"`
@@ -240,7 +241,7 @@ func recipeRotate(service *recipes.Service) http.HandlerFunc {
 		for _, k := range in.MachineKeys {
 			keys = append(keys, recipes.MachineKey{MachineID: k.MachineID, Sealed: k.Sealed})
 		}
-		out, err := service.Rotate(r.Context(), account, ws, r.PathValue("name"), in.Auth, in.PublicKey, keys, in.Confirm)
+		out, err := service.Rotate(r.Context(), account, ws, r.PathValue("name"), in.Auth, in.PublicKey, in.Wraps, keys, in.Confirm)
 		if err != nil {
 			writeRecipeError(w, r, err)
 			return
@@ -312,8 +313,6 @@ func writeRecipeError(w http.ResponseWriter, r *http.Request, err error) {
 		writeError(w, r, http.StatusConflict, "vault_name_taken", "A vault with this name already exists in this workspace.")
 	case expectedHTTPErrorOnly(err, recipes.ErrVaultStale):
 		writeError(w, r, http.StatusConflict, "version_conflict", "The vault changed since you read it. Read it again and retry.")
-	case expectedHTTPErrorOnly(err, recipes.ErrVaultRekeyRequired):
-		writeError(w, r, http.StatusConflict, "rotation_required", "A recipe that could read this vault was revoked. Give the vault a new key (pb env vault rekey) before writing values.")
 	case errors.Is(err, recipes.ErrVaultInUse):
 		writeError(w, r, http.StatusConflict, "vault_in_use", "A recipe reads this vault. Remove it from the recipe (pb recipe update) first.")
 	case expectedHTTPErrorOnly(err, workspace.ErrInvalid), expectedHTTPErrorOnly(err, workspace.ErrForbidden):

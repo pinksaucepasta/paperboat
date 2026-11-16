@@ -126,11 +126,7 @@ command on a machine that may read them.`, Args: commandArgs(cobra.NoArgs), RunE
 		writer := tabwriter.NewWriter(command.OutOrStdout(), 0, 4, 3, ' ', 0)
 		fmt.Fprintln(writer, "VAULT\tKEY\tREVISION\tRECIPES")
 		for _, v := range vaults {
-			key := fmt.Sprint(v.KeyEpoch)
-			if v.RekeyRequired {
-				key += " (needs a new key)"
-			}
-			fmt.Fprintf(writer, "%s\t%s\t%d\t%s\n", v.Name, key, v.Revision, firstNonEmpty(strings.Join(v.Recipes, ","), "-"))
+			fmt.Fprintf(writer, "%s\t%d\t%d\t%s\n", v.Name, v.KeyEpoch, v.Revision, firstNonEmpty(strings.Join(v.Recipes, ","), "-"))
 		}
 		return writer.Flush()
 	}}

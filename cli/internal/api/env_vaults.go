@@ -21,13 +21,12 @@ type EnvVaultRecipeWrap struct {
 }
 
 type EnvVault struct {
-	Name          string         `json:"name"`
-	KeyEpoch      int            `json:"key_epoch"`
-	Revision      int64          `json:"revision"`
-	RekeyRequired bool           `json:"rekey_required"`
-	Envelope      []byte         `json:"envelope,omitempty"`
-	Wraps         []EnvVaultWrap `json:"wraps"`
-	Recipes       []string       `json:"recipes"`
+	Name     string         `json:"name"`
+	KeyEpoch int            `json:"key_epoch"`
+	Revision int64          `json:"revision"`
+	Envelope []byte         `json:"envelope,omitempty"`
+	Wraps    []EnvVaultWrap `json:"wraps"`
+	Recipes  []string       `json:"recipes"`
 }
 
 func envVaultPath(ws, name string) string {

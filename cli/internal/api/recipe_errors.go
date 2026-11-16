@@ -21,7 +21,6 @@ var recipeMessages = map[string]string{
 	"recipe_expired":        "This recipe token expired. Get a new token with `pb recipe rotate <recipe>` (its machines keep working), then update PB_RECIPE.",
 	"recipe_replaced":       "This recipe token was replaced (`pb recipe rotate`). Use the new token; update PB_RECIPE where this one is stored.",
 	"recipe_full":           "This recipe has reached its max_machines. A machine leaves the recipe when it is removed; to allow more, raise max_machines and run `pb recipe update`.",
-	"rotation_required":     "A recipe that could read this vault was revoked. Give the vault a new key before writing values.",
 	"vault_in_use":          "A recipe reads this vault. Remove it from the recipe (`pb recipe update`) first.",
 	"vault_name_taken":      "A vault with this name already exists in this workspace.",
 }

@@ -164,10 +164,10 @@ func TestRecipeLifecycle(t *testing.T) {
 	// Rotate needs the shown code; the old token is then "replaced", the new one pairs.
 	next := recipe.Token{ID: tok.ID, Secret: f.token().Secret}
 	var confirm *ConfirmError
-	if _, err := f.service.Rotate(f.ctx, f.account, f.personal, "ci", next.Auth(), next.PublicKey(), nil, ""); !errors.As(err, &confirm) || len(confirm.Impact.Machines) != 1 {
+	if _, err := f.service.Rotate(f.ctx, f.account, f.personal, "ci", next.Auth(), next.PublicKey(), nil, nil, ""); !errors.As(err, &confirm) || len(confirm.Impact.Machines) != 1 {
 		t.Fatalf("rotate without code: %v", err)
 	}
-	if _, err := f.service.Rotate(f.ctx, f.account, f.personal, "ci", next.Auth(), next.PublicKey(), []MachineKey{{MachineID: f.web, Sealed: []byte("sealed")}}, confirm.Code); err != nil {
+	if _, err := f.service.Rotate(f.ctx, f.account, f.personal, "ci", next.Auth(), next.PublicKey(), nil, []MachineKey{{MachineID: f.web, Sealed: []byte("sealed")}}, confirm.Code); err != nil {
 		t.Fatal(err)
 	}
 	refusal(t, func() error { _, err := f.session(tok); return err }(), "recipe_replaced")
@@ -238,7 +238,8 @@ func TestRecipeVaults(t *testing.T) {
 	if err := f.service.DeleteVault(f.ctx, f.account, f.personal, "canary-env"); !errors.Is(err, ErrVaultInUse) {
 		t.Fatalf("delete in use: %v", err)
 	}
-	// Revoking the recipe drops its wrap and requires a new key before new values.
+	// Revoking the recipe drops its wrap; the vault keeps its key and members keep writing (user rule:
+	// removing one recipe never affects anyone else).
 	var confirm *ConfirmError
 	_, _, err = f.service.Revoke(f.ctx, f.account, f.personal, "ci", "")
 	if !errors.As(err, &confirm) {
@@ -247,14 +248,14 @@ func TestRecipeVaults(t *testing.T) {
 	if _, _, err := f.service.Revoke(f.ctx, f.account, f.personal, "ci", confirm.Code); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.service.PutValues(f.ctx, f.account, f.personal, "canary-env", 2, 1, []byte("values-2")); !errors.Is(err, ErrVaultRekeyRequired) {
-		t.Fatalf("write after revoke: %v", err)
+	if v, err := f.service.GetVault(f.ctx, f.account, f.personal, "canary-env"); err != nil || len(v.Recipes) != 0 || v.KeyEpoch != 1 {
+		t.Fatalf("after revoke: %+v %v", v, err)
 	}
 	if _, err := f.service.Rekey(f.ctx, f.account, f.personal, "canary-env", 2, []byte("values-2"), wraps, nil); !errors.Is(err, ErrVaultStale) {
 		t.Fatalf("stale rekey: %v", err)
 	}
 	v, err := f.service.Rekey(f.ctx, f.account, f.personal, "canary-env", 1, []byte("values-2"), wraps, nil)
-	if err != nil || v.KeyEpoch != 2 || v.RekeyRequired || len(v.Recipes) != 0 || string(v.Wraps[0].Wrapped) != "member-wrap" {
+	if err != nil || v.KeyEpoch != 2 || len(v.Recipes) != 0 || string(v.Wraps[0].Wrapped) != "member-wrap" {
 		t.Fatalf("rekey: %+v %v", v, err)
 	}
 	if err := f.service.DeleteVault(f.ctx, f.account, f.personal, "canary-env"); err != nil {

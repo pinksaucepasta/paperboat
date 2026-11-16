@@ -23,9 +23,7 @@ var (
 	ErrVaultTaken    = errors.New("vault name taken")
 	// ErrVaultStale: the expected revision or key epoch is not the current one.
 	ErrVaultStale = errors.New("vault changed; read it again")
-	// ErrVaultRekeyRequired: a recipe that could read the vault was revoked; give it a new key first.
-	ErrVaultRekeyRequired = errors.New("vault needs a new key before new values")
-	ErrVaultInUse         = errors.New("vault is read by a recipe")
+	ErrVaultInUse = errors.New("vault is read by a recipe")
 )
 
 // Wrap is the vault key wrapped for one member (account) or the team.
@@ -42,11 +40,10 @@ type RecipeWrap struct {
 }
 
 type Vault struct {
-	Name          string `json:"name"`
-	KeyEpoch      int    `json:"key_epoch"`
-	Revision      int64  `json:"revision"`
-	RekeyRequired bool   `json:"rekey_required"`
-	Envelope      []byte `json:"envelope,omitempty"`
+	Name     string `json:"name"`
+	KeyEpoch int    `json:"key_epoch"`
+	Revision int64  `json:"revision"`
+	Envelope []byte `json:"envelope,omitempty"`
 	// Wraps are the wraps the caller may use (its own account and the team).
 	Wraps   []Wrap   `json:"wraps"`
 	Recipes []string `json:"recipes"`
@@ -164,9 +161,6 @@ func (s *Service) PutValues(ctx context.Context, actor string, ws workspace.Scop
 		if err != nil {
 			return err
 		}
-		if v.RekeyRequired {
-			return ErrVaultRekeyRequired
-		}
 		if v.Revision != expectedRevision || v.KeyEpoch != keyEpoch {
 			return ErrVaultStale
 		}
@@ -201,7 +195,7 @@ func (s *Service) Rekey(ctx context.Context, actor string, ws workspace.Scope, n
 			return ErrVaultStale
 		}
 		id, epoch := v.id, expectedEpoch+1
-		if _, err := tx.Exec(ctx, `UPDATE environment_named_vaults SET envelope=$2, key_epoch=$3, revision=revision+1, rekey_required=false, updated_at=now() WHERE id=$1`,
+		if _, err := tx.Exec(ctx, `UPDATE environment_named_vaults SET envelope=$2, key_epoch=$3, revision=revision+1, updated_at=now() WHERE id=$1`,
 			id, nullIfEmpty(envelope), epoch); err != nil {
 			return err
 		}
@@ -303,8 +297,8 @@ func (s *Service) MachineKey(ctx context.Context, recipeID, machineID string) ([
 }
 
 // syncRecipeWrapsTx makes the recipe's vault wraps match vaults: a wrap is needed (at the vault's
-// current epoch) for each vault it newly reads; a vault it stops reading loses the wrap and needs
-// a new key, since the recipe's machines hold the old one.
+// current epoch) for each vault it newly reads; a vault it stops reading loses the wrap. No vault
+// gets a new key when a recipe stops reading it (user rule 2026-11-16).
 func syncRecipeWrapsTx(ctx context.Context, tx *db.Tx, recipeID, account string, ws workspace.Scope, vaults []string, wraps []VaultWrap) error {
 	have := map[string]bool{}
 	rows, err := tx.Query(ctx, `SELECT v.name FROM recipe_vault_wraps w JOIN environment_named_vaults v ON v.id=w.vault_id WHERE w.recipe_id=$1`, recipeID)
@@ -318,9 +312,8 @@ func syncRecipeWrapsTx(ctx context.Context, tx *db.Tx, recipeID, account string,
 	for _, n := range names {
 		have[n] = true
 		if !slices.Contains(vaults, n) {
-			if _, err := tx.Exec(ctx, `WITH gone AS (DELETE FROM recipe_vault_wraps w USING environment_named_vaults v
-			 WHERE w.vault_id=v.id AND w.recipe_id=$1 AND v.name=$2 RETURNING v.id)
-			 UPDATE environment_named_vaults SET rekey_required=true WHERE id IN (SELECT id FROM gone)`, recipeID, n); err != nil {
+			if _, err := tx.Exec(ctx, `DELETE FROM recipe_vault_wraps w USING environment_named_vaults v
+			 WHERE w.vault_id=v.id AND w.recipe_id=$1 AND v.name=$2`, recipeID, n); err != nil {
 				return err
 			}
 		}
@@ -371,13 +364,13 @@ func replaceWrapsTx(ctx context.Context, tx *db.Tx, vaultID string, epoch int, w
 }
 
 func vaultTx(ctx context.Context, tx *db.Tx, actor string, ws workspace.Scope, name string, lock bool) (Vault, error) {
-	q := `SELECT id, name, key_epoch, revision, rekey_required, coalesce(envelope,''::bytea) FROM environment_named_vaults
+	q := `SELECT id, name, key_epoch, revision, coalesce(envelope,''::bytea) FROM environment_named_vaults
 	 WHERE deleted_at IS NULL AND name=$1 AND coalesce(team_id,'')=$2 AND (team_id IS NOT NULL OR owner_account=$3)`
 	if lock {
 		q += ` FOR UPDATE`
 	}
 	var v Vault
-	err := tx.QueryRow(ctx, q, name, ws.TeamID, actor).Scan(&v.id, &v.Name, &v.KeyEpoch, &v.Revision, &v.RekeyRequired, &v.Envelope)
+	err := tx.QueryRow(ctx, q, name, ws.TeamID, actor).Scan(&v.id, &v.Name, &v.KeyEpoch, &v.Revision, &v.Envelope)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Vault{}, ErrVaultNotFound
 	}

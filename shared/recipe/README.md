@@ -24,7 +24,7 @@ or the team id. Errors use the server envelope `{"error": {"code", "message", "d
 | `GET /v1/workspaces/{ws}/recipes` | members | — | `{recipes: [Recipe]}` |
 | `GET /v1/workspaces/{ws}/recipes/{name}` | members | — | `{recipe, machines: [Machine]}` |
 | `PUT /v1/workspaces/{ws}/recipes/{name}` | as create | `{source, format, vault_wraps?}` | `{recipe, previous, online_machines}` |
-| `POST /v1/workspaces/{ws}/recipes/{name}/rotate` | as create | `{auth, public_key, confirm, machine_keys?: [{machine_id, sealed}]}` | `{recipe}` |
+| `POST /v1/workspaces/{ws}/recipes/{name}/rotate` | as create | `{auth, public_key, confirm, vault_wraps (one per vault it reads, to the new key), machine_keys?: [{machine_id, sealed}]}` | `{recipe}`; no vault gets a new key |
 | `POST /v1/workspaces/{ws}/recipes/{name}/revoke` | as create | `{confirm}` | `{recipe, impact}` |
 | `GET /v1/workspaces/{ws}/env-vaults` | members | — | `{vaults: [Vault]}` (no envelope) |
 | `POST /v1/workspaces/{ws}/env-vaults` | as create | `{name, wraps: [{recipient_kind: "account"\|"team", recipient_id, wrapped}]}` | 201 `{vault}` |
@@ -42,7 +42,7 @@ Recipe  {id, name, workspace, revision, token ("pbr_<id>_…"), source, format, 
          machines, max_machines?, public_key (Token.PublicKey: pb recipe update and the console wrap
          a newly read vault's key to it without the token)}
 Machine {id, name, online, last_seen_at, applied_revision, apply_state, remove_at}
-Vault   {name, key_epoch, revision, rekey_required, envelope?, wraps, recipes}
+Vault   {name, key_epoch, revision, envelope?, wraps, recipes}
 impact  {machines: [{id, name, online}], vaults: [name]}
 ```
 
@@ -78,7 +78,6 @@ Errors:
 | `recipe_expired` | 401 | `{recipe, at}` |
 | `recipe_replaced` | 401 | an older token after rotate; `{recipe, at}` |
 | `recipe_full` | 409 | `{recipe, max_machines}` (session start and setup) |
-| `rotation_required` | 409 | vault values written after a recipe that read the vault was revoked: rekey first |
 | `vault_in_use` | 409 | deleting a vault a recipe reads |
 
 Machines leave a recipe through the `pb machine revoke` path: revoke removes all of them;
@@ -92,3 +91,7 @@ daemon and the browser's `cli/cmd/environmentvault-wasm`): a vault key is wrappe
 (recipe `public_key`, account ENV sharing key) with HPKE base mode DHKEM(X25519)/HKDF-SHA256/AES-256-GCM
 (`enc || ciphertext`, info `RecipientInfo(vault, "recipe:<token_id>" | "account:<id>")`), or to a
 team's ENV key with AES-256-GCM; values are one JSON object sealed with AES-256-GCM under the vault key.
+
+Removing access never re-keys (user rule 2026-11-16): revoking a recipe stops its token, revokes its
+machines and drops its wraps; rotating moves only the recipe's own wraps to the new key. A vault gets
+a new key only when someone asks for it (`rekey`).

@@ -82,6 +82,7 @@ type RecipeUpdated struct {
 type RecipeRotate struct {
 	Auth        []byte              `json:"auth"`
 	PublicKey   []byte              `json:"public_key"`
+	VaultWraps  []RecipeVaultWrap   `json:"vault_wraps,omitempty"`
 	Confirm     string              `json:"confirm"`
 	MachineKeys []RecipeMachineSeal `json:"machine_keys,omitempty"`
 }

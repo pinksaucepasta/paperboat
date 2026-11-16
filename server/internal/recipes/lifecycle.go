@@ -21,7 +21,7 @@ type MachineKey struct {
 // Rotate gives the recipe a new token (the client made it: same token id, new auth). The old token
 // stops pairing at once; the machines keep running. Without confirm, or with a stale one, it
 // returns *ConfirmError with the impact. Rotating again with the same auth returns the recipe.
-func (s *Service) Rotate(ctx context.Context, actor string, ws workspace.Scope, name string, auth, publicKey []byte, keys []MachineKey, confirm string) (Recipe, error) {
+func (s *Service) Rotate(ctx context.Context, actor string, ws workspace.Scope, name string, auth, publicKey []byte, wraps []VaultWrap, keys []MachineKey, confirm string) (Recipe, error) {
 	if len(auth) != 32 || len(publicKey) != 32 || len(keys) > 1000 {
 		return Recipe{}, ErrInvalidInput
 	}
@@ -53,6 +53,14 @@ func (s *Service) Rotate(ctx context.Context, actor string, ws workspace.Scope, 
 		if _, err := tx.Exec(ctx, `UPDATE recipes SET previous_auth_hash=auth_hash, auth_hash=$2, rotated_at=$3, updated_at=$3,
 		 expires_at=$4, public_key=$5 WHERE id=$1`, r.ID, recipe.AuthHash(auth), now, now.Add(r.Recipe.ExpiresIn()), publicKey); err != nil {
 			return mapInsertError(err)
+		}
+		// The recipe's own vault wraps move to the new key; no vault gets a new key (user rule
+		// 2026-11-16: one recipe never affects anyone else's access).
+		if _, err := tx.Exec(ctx, `DELETE FROM recipe_vault_wraps WHERE recipe_id=$1`, r.ID); err != nil {
+			return err
+		}
+		if err := syncRecipeWrapsTx(ctx, tx, r.ID, r.AccountID, ws, r.Recipe.Vaults(), wraps); err != nil {
+			return err
 		}
 		for _, k := range keys {
 			if len(k.Sealed) == 0 || len(k.Sealed) > 512 {
@@ -108,9 +116,6 @@ func (s *Service) Revoke(ctx context.Context, actor string, ws workspace.Scope, 
 		}
 		if _, err := tx.Exec(ctx, `UPDATE cli_client_sessions SET state='revoked',revoked_at=$2,revocation_reason='recipe_revoked',version=version+1
 		 WHERE recipe_id=$1 AND state='active'`, r.ID, now); err != nil {
-			return err
-		}
-		if _, err := tx.Exec(ctx, `UPDATE environment_named_vaults SET rekey_required=true WHERE id IN (SELECT vault_id FROM recipe_vault_wraps WHERE recipe_id=$1)`, r.ID); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, `DELETE FROM recipe_vault_wraps WHERE recipe_id=$1`, r.ID); err != nil {
