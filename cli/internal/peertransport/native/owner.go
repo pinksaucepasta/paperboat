@@ -26,6 +26,7 @@ import (
 	"net/netip"
 	"reflect"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/mesh"
@@ -199,7 +200,10 @@ type Config struct {
 	TLS              *tls.Config
 	Observe          func(Event)
 	RefreshAuthority func(context.Context) error
-	MeterIncoming    func(net.Conn, MeterBinding) net.Conn
+	// RequestRefresh asks the background renewal to run now (spaced and bounded by its owner); a peer refused for scope
+	// is usually one the next signed network knows.
+	RequestRefresh func()
+	MeterIncoming  func(net.Conn, MeterBinding) net.Conn
 	// AdmitOffline records and gates sessions started without Paperboat; nil refuses them all.
 	AdmitOffline func(context.Context, OfflineAdmission) error
 }
@@ -209,6 +213,8 @@ type Owner struct {
 	tls              *tls.Config
 	observe          func(Event)
 	refreshAuthority func(context.Context) error
+	requestRefresh   func()
+	refreshRequested atomic.Int64 // unix nanoseconds of the last scope-refusal refresh request
 	meterIncoming    func(net.Conn, MeterBinding) net.Conn
 	admitOffline     func(context.Context, OfflineAdmission) error
 	ctx              context.Context
@@ -231,7 +237,7 @@ func NewOwner(config Config) (*Owner, error) {
 		return nil, err
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Owner{authority: config.Authority, tls: config.TLS.Clone(), observe: config.Observe, refreshAuthority: config.RefreshAuthority, meterIncoming: config.MeterIncoming, admitOffline: config.AdmitOffline, ctx: ctx, cancel: cancel, sessions: make(map[*Session]struct{})}, nil
+	return &Owner{authority: config.Authority, tls: config.TLS.Clone(), observe: config.Observe, refreshAuthority: config.RefreshAuthority, requestRefresh: config.RequestRefresh, meterIncoming: config.MeterIncoming, admitOffline: config.AdmitOffline, ctx: ctx, cancel: cancel, sessions: make(map[*Session]struct{})}, nil
 }
 
 func (o *Owner) emit(event Event) {

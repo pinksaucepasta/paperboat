@@ -676,10 +676,26 @@ func (s *Session) authorizeIncoming(ctx context.Context, header streamauth.Heade
 		}
 	}
 	if !s.owner.authority.Allows(s.peerID, resourceID, capability, "accept") {
-		diagnosticlog.TryWarn("native stream admission refused", "reason", "authority_scope")
-		return "", tailnet.ErrAdmission
+		return "", s.refuseScope()
 	}
 	return resourceID, nil
+}
+
+// refuseScope refuses a stream whose peer the signed network does not allow, and asks for a fresh network so the
+// peer's next stream finds it: a machine installed again waited for its idle renewal (up to 49 minutes in X-41) while
+// the peer's streams were refused about thirty times a minute.
+// scopeRefusalRefreshSpacing bounds the requests: one per peer-refusal storm, not one per refused stream.
+const scopeRefusalRefreshSpacing = 10 * time.Second
+
+func (s *Session) refuseScope() error {
+	diagnosticlog.TryWarn("native stream admission refused", "reason", "authority_scope")
+	if s.owner.requestRefresh != nil {
+		now := time.Now().UnixNano()
+		if last := s.owner.refreshRequested.Load(); now-last >= int64(scopeRefusalRefreshSpacing) && s.owner.refreshRequested.CompareAndSwap(last, now) {
+			s.owner.requestRefresh()
+		}
+	}
+	return tailnet.ErrAdmission
 }
 
 // refreshUntilAllowed refreshes the signed state (the first time under ctx; its error is returned), then again every
