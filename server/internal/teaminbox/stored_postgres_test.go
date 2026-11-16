@@ -9,6 +9,7 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -405,5 +406,59 @@ func TestPostgresStoredBucketCannotBeRemovedBeforeCleanup(t *testing.T) {
 	}
 	if err := service.Delete(f.ctx, f.recipient, f.team); err != nil {
 		t.Fatalf("cleaned request still held bucket: %v", err)
+	}
+}
+
+// FIX-TEAMLOCK: a team's stored-transfer calls wait for their own team's writes, never for another team's.
+func TestPostgresStoredWaitsOnlyForItsOwnTeam(t *testing.T) {
+	f := newStoredFixture(t)
+	other := ""
+	for i := 0; other == ""; i++ {
+		if candidate := fmt.Sprintf("stored-other-%d", i); db.TeamWriteFenceBucket(candidate) != db.TeamWriteFenceBucket(f.team) {
+			other = candidate
+		}
+	}
+	hold := func(team string) func() {
+		held, release, done := make(chan struct{}), make(chan struct{}), make(chan error, 1)
+		go func() {
+			done <- f.db.InTx(f.ctx, func(ctx context.Context, tx *db.Tx) error {
+				if err := db.LockTeamWritesFor(ctx, tx, team); err != nil {
+					return err
+				}
+				close(held)
+				<-release
+				return nil
+			})
+		}()
+		<-held
+		return func() {
+			close(release)
+			if err := <-done; err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	r, err := f.create()
+	if err != nil {
+		t.Fatal(err)
+	}
+	release := hold(other)
+	ctx, cancel := context.WithTimeout(f.ctx, 5*time.Second)
+	err = f.s.PutStored(ctx, f.sender, r.RequestID, f.metadata())
+	cancel()
+	if err != nil {
+		t.Fatalf("another team's write held up this team's stored upload: %v", err)
+	}
+	release()
+	release = hold(f.team)
+	ctx, cancel = context.WithTimeout(f.ctx, 500*time.Millisecond)
+	_, err = f.s.StoredUploadURLs(ctx, f.sender, r.RequestID, wire.Range{First: 0, Count: 1})
+	cancel()
+	if err == nil {
+		t.Fatal("a stored upload did not wait for its own team's write")
+	}
+	release()
+	if _, err := f.s.StoredUploadURLs(f.ctx, f.sender, r.RequestID, wire.Range{First: 0, Count: 1}); err != nil {
+		t.Fatal(err)
 	}
 }

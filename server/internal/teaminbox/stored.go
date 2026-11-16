@@ -13,7 +13,6 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/teambucket"
-	"github.com/pinksaucepasta/paperboat/server/internal/teams"
 	wire "github.com/pinksaucepasta/paperboat/shared/storedfiles"
 	bucket "github.com/pinksaucepasta/paperboat/shared/teambucket"
 )
@@ -62,9 +61,29 @@ func storedRecipientsTx(ctx context.Context, tx *db.Tx, account string) ([]wire.
 	return out, rows.Err()
 }
 
+// inStoredTeamTx runs fn ordered against the writes of the request's team only, never other teams' (FIX-TEAMLOCK).
+// A request's team never changes, so it is read before the transaction and its fence lock is the first statement.
+// Shared mode: these transactions write only their own request row, so they do not wait for each other.
+func (s *Service) inStoredTeamTx(ctx context.Context, id string, fn func(context.Context, *db.Tx) error) error {
+	var team string
+	err := s.db.SQL().QueryRowContext(ctx, `SELECT team_id FROM paperboat.team_inbox_requests WHERE request_id=$1`, id).Scan(&team)
+	if noRows(err) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+	return s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+		if err := db.LockTeamReadsFor(ctx, tx, team); err != nil {
+			return err
+		}
+		return fn(ctx, tx)
+	})
+}
+
 func (s *Service) StoredRecipients(ctx context.Context, sender, id string) ([]wire.Recipient, error) {
 	var out []wire.Recipient
-	err := s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+	err := s.db.InReadOnlySnapshot(ctx, func(ctx context.Context, tx *db.Tx) error {
 		r, err := readTx(ctx, tx, id, sender)
 		if err != nil {
 			return err
@@ -95,10 +114,7 @@ func (s *Service) StoredRecipients(ctx context.Context, sender, id string) ([]wi
 // PutStored freezes the ciphertext manifest before any upload URL is issued. A
 // retry must present exactly the same manifest, including every sealed key.
 func (s *Service) PutStored(ctx context.Context, sender, id string, in wire.Metadata) error {
-	return s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-		if err := teams.Lock(ctx, tx); err != nil {
-			return err
-		}
+	return s.inStoredTeamTx(ctx, id, func(ctx context.Context, tx *db.Tx) error {
 		r, err := readTx(ctx, tx, id, sender)
 		if err != nil {
 			return err
@@ -197,10 +213,7 @@ func readStoredTx(ctx context.Context, tx *db.Tx, id string) (wire.Metadata, str
 // is retained so cleanup also removes a late PUT made with an outstanding URL.
 func (s *Service) StoredUploadURLs(ctx context.Context, sender, id string, in wire.Range) (wire.URLs, error) {
 	var out wire.URLs
-	err := s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-		if err := teams.Lock(ctx, tx); err != nil {
-			return err
-		}
+	err := s.inStoredTeamTx(ctx, id, func(ctx context.Context, tx *db.Tx) error {
 		r, err := readTx(ctx, tx, id, sender)
 		if err != nil {
 			return err
@@ -271,7 +284,7 @@ const storedMachineAllowed = `EXISTS(SELECT 1 FROM user_machines m JOIN environm
 
 func (s *Service) StoredDeliverable(ctx context.Context, machine string) (wire.Page, error) {
 	out := wire.Page{Transfers: []wire.Delivery{}}
-	err := s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+	err := s.db.InReadOnlySnapshot(ctx, func(ctx context.Context, tx *db.Tx) error {
 		rows, err := tx.Query(ctx, `SELECT r.request_id,r.manifest_digest,r.manifest,r.stored_metadata,r.source_machine_id,r.sender_account FROM team_inbox_requests r
  WHERE r.stored_uploaded AND r.stored_deleted_at IS NULL AND r.expires_at>$2
  AND (r.status='approved' AND r.stored_machine_id=$1 OR r.status='consumed' AND r.stored_machine_id=$1)
@@ -302,10 +315,7 @@ func (s *Service) StoredDeliverable(ctx context.Context, machine string) (wire.P
 
 func (s *Service) StoredDownloadURLs(ctx context.Context, machine, id string, in wire.Range) (wire.URLs, error) {
 	var out wire.URLs
-	err := s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-		if err := teams.Lock(ctx, tx); err != nil {
-			return err
-		}
+	err := s.inStoredTeamTx(ctx, id, func(ctx context.Context, tx *db.Tx) error {
 		// Accepting named one machine; every retry is fenced to it, so two online hosts
 		// cannot both publish the transfer.
 		var team string
@@ -347,10 +357,7 @@ func (s *Service) StoredDownloadURLs(ctx context.Context, machine, id string, in
 }
 
 func (s *Service) StoredReceived(ctx context.Context, machine, id, digest string) error {
-	err := s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-		if err := teams.Lock(ctx, tx); err != nil {
-			return err
-		}
+	err := s.inStoredTeamTx(ctx, id, func(ctx context.Context, tx *db.Tx) error {
 		tag, err := tx.Exec(ctx, `UPDATE team_inbox_requests r SET status='completed',completed_at=coalesce(completed_at,$4),updated_at=$4,
  decision_generation=decision_generation+CASE WHEN status='consumed' THEN 1 ELSE 0 END,
  committed_bytes=(SELECT sum((f->>'size')::bigint) FROM jsonb_array_elements(r.manifest) f),transfer_state='done',pause_reason=NULL
