@@ -32,7 +32,7 @@ public static void Send(uint pid, ushort vk, ushort ch, uint ctrl, int times) {
   for (int i = 0; i < times; i++) { uint w; WriteConsoleInput(h, b, 2, out w); }
   FreeConsole(); }'
 $script:conPid = 0
-function ConPid { if (-not $script:conPid) { $script:conPid = (Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'cmd.exe' -and $_.CommandLine -like ('*title RX24' + $Client + '*') } | Select-Object -First 1).ProcessId }; $script:conPid }
+function ConPid { if (-not $script:conPid) { $script:conPid = (Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'cmd.exe' -and $_.CommandLine -like ('*title RX24' + $Client + '*') } | Sort-Object CreationDate -Descending | Select-Object -First 1).ProcessId }; $script:conPid }
 function ConChar($c) { [K.C]::Send([uint32](ConPid), 0, [uint16][char]$c, 0, 1); Start-Sleep -Milliseconds 6 }
 Add-Type -Namespace B -Name D -MemberDefinition '
 [DllImport("kernel32.dll", SetLastError=true)] public static extern bool FreeConsole();
@@ -48,7 +48,7 @@ public static string Dump(uint pid) {
   var sb = new System.Text.StringBuilder(); sb.AppendLine("outputCP " + GetConsoleOutputCP() + " inputCP " + GetConsoleCP()); sb.AppendLine("window " + (i.wr - i.wl + 1) + "x" + (i.wb - i.wt + 1) + " buffer " + i.sx + "x" + i.sy);
   for (short y = i.wt; y <= i.wb; y++) { var l = new System.Text.StringBuilder(i.sx + 1); uint r; ReadConsoleOutputCharacter(h, l, (uint)i.sx, (uint)((ushort)y << 16), out r); sb.AppendLine(l.ToString().TrimEnd()); }
   FreeConsole(); return sb.ToString(); }'
-function Dump($n) { Shot $n; [B.D]::Dump([uint32](ConPid)) | Set-Content -Encoding UTF8 "$Out\$n.txt" }
+function Dump($n) { Shot $n; Add-Content "$Out\conpids.txt" "$n pid=$(ConPid)"; [B.D]::Dump([uint32](ConPid)) | Set-Content -Encoding UTF8 "$Out\$n.txt" }
 function Say($s) { if ($true) { foreach ($c in $s.ToCharArray()) { ConChar $c } } else { [S.I]::Unicode($s) } }
 function Line($s) { Say $s; Key '{ENTER}' }
 function Key($k) {
@@ -104,13 +104,15 @@ function Wait-Attached { for ($k = 0; $k -lt 30; $k++) { $d = [B.D]::Dump([uint3
 
 
 $ver = (& $pb version 2>&1 | Out-String); Set-Content "$Out\pb-version.txt" $ver
-Launch "$Target $Extra"
+$named = Test-Path C:\Users\Public\rx24e\named.txt
+$sname = "rx24ew$Client" + (Get-Date -Format HHmmss)
+if ($named) { Launch "$Target new --name $sname $Extra" } else { Launch "$Target $Extra" }
 Wait-Attached
 Line 'clear; echo TERM=$TERM LANG=$LANG; echo REC_TEST_PROMPT'; Start-Sleep 3; Dump '1-attached'
-$rec = & $pb recordings start 2>&1 | Out-String; Set-Content "$Out\rec-start.txt" $rec
+$rec = if ($named) { "terminal_00000000-0000-0000-0000-00000000000x" } else { & $pb recordings start 2>&1 | Out-String }; Set-Content "$Out\rec-start.txt" $rec
 $sid = ([regex]::Match($rec, '(terminal_)?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}')).Value
 if (-not $sid) { $sid = ([regex]::Match($rec, 'terminal_[A-Za-z0-9_-]+')).Value }
-Set-Content "$Out\sid.txt" $sid
+if ($named) { $sid = $sname }; Set-Content "$Out\sid.txt" $sid
 Start-Sleep 4; Dump '2-rec'
 Line 'clear; vim /tmp/rx24e.txt'; Start-Sleep 3; Say 'ihello rec vim '; Start-Sleep 2; Dump '3-vim-insert'
 $r0 = Rect; Set-Content "$Out\rect.txt" $r0

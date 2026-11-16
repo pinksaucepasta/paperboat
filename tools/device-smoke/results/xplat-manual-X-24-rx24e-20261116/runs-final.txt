@@ -1,0 +1,26 @@
+== wt-el4
+  GGGGGGGGGGG   Version dev-485e1f23e
+1-attached pid=18596 2-rec pid=18596 3-vim-insert pid=18596 4-vim-smaller pid=18596 5-vim-larger pid=18596 6-after-vim pid=18596 7-prompt pid=18596 8-reattached pid=20076 9-reattached-prompt pid=20076 
+Recording session terminal_58ad2232-0388-43ae-a68c-e50f98a636f2 (rec_4d6f96d3-3263-4491-9474-2b602b00371d). Everyone att
+title RX24wt & pb connect rx24e-l --no-customization --workspace rx23-team 2>>"C:\Users\Public\rx24e\wt-el4\pb-err.txt" & echo PB_EXIT=%errorlevel% >> "C:\Users\Public\rx24e\wt-el4\exit.txt"
+title RX24wt & pb connect rx24e-l --session terminal_58ad2232-0388-43ae-a68c-e50f98a636f2 --no-customization --workspace rx23-team 2>>"C:\Users\Public\rx24e\wt-el4\pb-err.txt" & echo PB_EXIT=%errorlev
+== ch-el4
+  GGGGGGGGGGG   Version dev-485e1f23e
+1-attached pid=2212 2-rec pid=2212 3-vim-insert pid=2212 4-vim-smaller pid=2212 5-vim-larger pid=2212 6-after-vim pid=2212 7-prompt pid=2212 8-reattached pid=15480 9-reattached-prompt pid=15480 
+Recording session terminal_c976855f-44bc-4e0d-9944-1c64c9ebfb40 (rec_0da19af2-76c3-48a0-9274-c3cadf3264b6). Everyone att
+title RX24conhost & mode con: cols=100 lines=30 & pb connect rx24e-l --no-customization --workspace rx23-team 2>>"C:\Users\Public\rx24e\ch-el4\pb-err.txt" & echo PB_EXIT=%errorlevel% >> "C:\Users\Publ
+title RX24conhost & mode con: cols=100 lines=30 & pb connect rx24e-l --session terminal_c976855f-44bc-4e0d-9944-1c64c9ebfb40 --no-customization --workspace rx23-team 2>>"C:\Users\Public\rx24e\ch-el4\p
+== wt-m4
+  GGGGGGGGGGG   Version dev-485e1f23e
+1-attached pid=9588 2-rec pid=9588 3-vim-insert pid=9588 4-vim-smaller pid=9588 5-vim-larger pid=9588 6-after-vim pid=9588 7-prompt pid=9588 8-reattached pid=19772 9-reattached-prompt pid=19772 
+terminal_00000000-0000-0000-0000-00000000000x
+
+title RX24wt & pb connect lanex2-m new --name rx24ewwt213316 --no-customization 2>>"C:\Users\Public\rx24e\wt-m4\pb-err.txt" & echo PB_EXIT=%errorlevel% >> "C:\Users\Public\rx24e\wt-m4\exit.txt"
+title RX24wt & pb connect lanex2-m --session rx24ewwt213316 --no-customization 2>>"C:\Users\Public\rx24e\wt-m4\pb-err.txt" & echo PB_EXIT=%errorlevel% >> "C:\Users\Public\rx24e\wt-m4\exit.txt"
+== ch-m4
+  GGGGGGGGGGG   Version dev-485e1f23e
+1-attached pid=12304 2-rec pid=12304 3-vim-insert pid=12304 4-vim-smaller pid=12304 5-vim-larger pid=12304 6-after-vim pid=12304 7-prompt pid=12304 8-reattached pid=17112 9-reattached-prompt pid=17112 
+terminal_00000000-0000-0000-0000-00000000000x
+
+title RX24conhost & mode con: cols=100 lines=30 & pb connect lanex2-m new --name rx24ewconhost213500 --no-customization 2>>"C:\Users\Public\rx24e\ch-m4\pb-err.txt" & echo PB_EXIT=%errorlevel% >> "C:\U
+title RX24conhost & mode con: cols=100 lines=30 & pb connect lanex2-m --session rx24ewconhost213500 --no-customization 2>>"C:\Users\Public\rx24e\ch-m4\pb-err.txt" & echo PB_EXIT=%errorlevel% >> "C:\Us
