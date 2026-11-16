@@ -16,22 +16,12 @@ import (
 
 func bootstrapLocalDaemonInstaller(cfg *config.Config) func(context.Context) error {
 	return func(ctx context.Context) error {
-		executable, err := bootstrapDaemonExecutable(systemWorkerExecutable(), os.Executable)
+		executable, err := liveExecutable(os.Executable, systemWorkerExecutable())
 		if err != nil {
 			return err
 		}
 		return localdaemon.InstallCurrentUserService(ctx, executable, cfg.Path(), cfg.ServerURL)
 	}
-}
-
-// bootstrapDaemonExecutable is the installed runtime binary when there is one: `pb login --fresh` reinstalls pb
-// and then pairs in the same process, whose own executable is by then the removed old file (releases/pb.rollback).
-// A pair run from a binary that was never installed uses that binary.
-func bootstrapDaemonExecutable(installed string, running func() (string, error)) (string, error) {
-	if info, err := os.Stat(installed); err == nil && info.Mode().IsRegular() {
-		return installed, nil
-	}
-	return running()
 }
 
 // daemonBindWindow is how long pairing waits for the installed daemon: its service cutover and start,

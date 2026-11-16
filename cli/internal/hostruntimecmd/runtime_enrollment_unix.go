@@ -4,9 +4,12 @@ package hostruntimecmd
 
 import (
 	"context"
+	"errors"
 	"os"
+	"path/filepath"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/bootstrap"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/enrollment"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
@@ -14,7 +17,32 @@ import (
 
 type runtimeEnrollmentCheckpointError struct{ cause error }
 
-var currentInstallSource = installsource.Current
+// currentInstallSource is the binary pairing installs as the runtime: this process's own, see liveExecutable.
+func currentInstallSource() (string, installsource.Source, error) {
+	path, err := liveExecutable(os.Executable, systemWorkerExecutable())
+	if err == nil {
+		path, err = filepath.EvalSymlinks(path)
+	}
+	if err != nil {
+		return "", installsource.Source{}, err
+	}
+	source, err := installsource.Inspect(path, buildinfo.Version, buildinfo.Distribution)
+	return path, source, err
+}
+
+// liveExecutable is this process's executable, or the installed runtime binary once that file is gone:
+// `pb login --fresh` reinstalls pb and then pairs in the same process, and the reinstall moved the running
+// binary to releases/pb.rollback and removed it (F13-02: ENOENT, "host runtime command failed").
+func liveExecutable(running func() (string, error), installed string) (string, error) {
+	path, err := running()
+	if err != nil {
+		return "", err
+	}
+	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+		return installed, nil
+	}
+	return path, nil
+}
 
 func (e *runtimeEnrollmentCheckpointError) Error() string {
 	return "persisting runtime enrollment progress failed; retry machine setup"
