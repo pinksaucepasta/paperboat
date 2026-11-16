@@ -18,9 +18,12 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/machineservices"
 )
 
-// resolveMachineService authorizes one machine service. Its serializable read is replayed after a
-// serialization failure: one conflict at a rollout used to fail the grant and leave a daemon's local
-// machine access down for minutes (2026-10-23 13:41Z).
+// resolveMachineService authorizes one machine service. READ COMMITTED plus a row lock on the CLI session, not
+// SERIALIZABLE: a reconnect storm of grants collided with the machine heartbeats on predicate locks (40001 and
+// 53200 after the retries, 503 native_private_unavailable; same cause as metering.RecordRuntimeObservation,
+// 263462f6e). Authority is re-checked at every use (machine_service_session_allowed compares the source
+// generation and team fence), so a grant that read authority just before a revocation is refused at use.
+// Deadlocks are still replayed.
 func (r *SQLResolver) resolveMachineService(ctx context.Context, in Request) (Target, error) {
 	var out Target
 	err := db.RetrySerializable(ctx, func() (e error) {
@@ -35,13 +38,19 @@ func (r *SQLResolver) resolveMachineServiceAttempt(ctx context.Context, in Reque
 	if e != nil || in.Protocol != "tcp" {
 		return Target{}, ErrInvalid
 	}
-	tx, e := db.BeginSerializable(ctx, r.database)
+	tx, e := r.database.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
 	if e != nil {
 		return Target{}, e
 	}
 	defer func() {
 		returnErr = preserveNativeSQLTransactionCleanup(returnErr, tx.Rollback())
 	}()
+	// Grants of one CLI session queue here, so the existing-session lookup and the insert below cannot both miss
+	// and issue two sessions, and the SDK operation count is read after the previous grant's insert.
+	var locked string
+	if e := tx.QueryRowContext(ctx, `SELECT id FROM paperboat.cli_client_sessions WHERE id=$1 AND user_id=$2 FOR NO KEY UPDATE`, in.CLIClientSessionID, in.UserID).Scan(&locked); e != nil {
+		return Target{}, mapResolveError(e)
+	}
 	if e := auth.AuthorizeAPITokenSession(ctx, tx, in.UserID, in.CLIClientSessionID, in.ResourceID, "private_access", port); e != nil {
 		if e == auth.ErrOutsideTokenScope {
 			return Target{}, ErrDenied
@@ -72,8 +81,7 @@ func (r *SQLResolver) resolveMachineServiceAttempt(ctx context.Context, in Reque
 	}
 	now := r.now()
 	out := Target{AccountID: in.AccountID, UserID: in.UserID, ResourceKind: "machine_service", ResourceID: in.ResourceID, MachineID: in.ResourceID, RouteID: in.RouteID, Protocol: "tcp", TargetScheme: "tcp", PolicyGeneration: authority.Generation}
-	// No FOR SHARE: under SERIALIZABLE a plain read is already protected, while a share lock on rows the machine
-	// heartbeat rewrites fails the grant with 40001 "concurrent update" on every collision.
+	// No FOR SHARE: a share lock on rows the machine heartbeat rewrites would make the grant wait on every heartbeat.
 	var services []byte
 	var snapshotExpiry time.Time
 	e = tx.QueryRowContext(ctx, `SELECT m.environment_id,s.installation_generation,s.boot_id,s.generation,s.services,s.expires_at FROM paperboat.user_machines m JOIN paperboat.machine_service_snapshots s ON s.machine_id=m.id AND s.installation_generation=m.installation_generation JOIN paperboat.control_environments env ON env.id=m.environment_id AND env.owner_user_id=m.user_id AND env.desired_state='active' AND env.revoked_at IS NULL WHERE m.id=$1 AND m.online AND m.state='online' AND s.expires_at>$2 AND EXISTS(SELECT 1 FROM paperboat.cli_client_sessions c WHERE c.id=$3 AND c.user_id=$4 AND c.state='active' AND c.revoked_at IS NULL) `, in.ResourceID, now, in.CLIClientSessionID, in.UserID).Scan(&out.EnvironmentID, &out.InstallationGeneration, &out.BootID, &out.AnnouncementGeneration, &services, &snapshotExpiry)
@@ -123,7 +131,7 @@ func (r *SQLResolver) resolveMachineServiceAttempt(ctx context.Context, in Reque
 		return Target{}, e
 	}
 	if inserted {
-		// Published after the commit, not by a trigger inside the SERIALIZABLE transaction: every session of one
+		// Published after the commit, not by a trigger inside the transaction: every session of one
 		// machine bumps the same topic row (see usermachines.publishAccessSession).
 		if _, e = r.database.ExecContext(ctx, `SELECT paperboat.publish_machine_topic($1::text[],'machine_access')`, "{"+out.MachineID+"}"); e != nil {
 			return Target{}, e

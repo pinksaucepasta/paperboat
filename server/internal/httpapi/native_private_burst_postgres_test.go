@@ -3,6 +3,7 @@ package httpapi
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -29,7 +30,8 @@ func TestNativePrivateGrantBurstSucceedsPostgres(t *testing.T) {
 	if e := db.ValidateIsolatedTestDSN(dsn, os.Getenv("PAPERBOAT_DATABASE_DSN")); e != nil {
 		t.Fatal(e)
 	}
-	store, e := db.Open(config.Database{Driver: "postgres", DSN: dsn})
+	application := fmt.Sprintf("native_burst_%d", time.Now().UnixNano())
+	store, e := db.Open(config.Database{Driver: "postgres", DSN: db.TestDSNWithApplicationName(dsn, application)})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -63,7 +65,30 @@ func TestNativePrivateGrantBurstSucceedsPostgres(t *testing.T) {
 	}
 
 	resolver, _ := nativeprivateaccess.NewSQLResolver(store)
-	const burst = 64
+	// A serializable transaction left open keeps the predicate locks of every serializable transaction that commits
+	// meanwhile; grants take none (the pool exhausted them in a reconnect storm: 53200 and 40001, 503 to daemons).
+	siReadLocks := func() (n int) {
+		if e := store.SQL().QueryRowContext(ctx, `SELECT count(*) FROM pg_locks l JOIN pg_stat_activity a ON a.pid=l.pid WHERE l.mode='SIReadLock' AND a.application_name=$1`, application).Scan(&n); e != nil {
+			t.Fatal(e)
+		}
+		return n
+	}
+	held, e := store.SQL().BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer held.Rollback()
+	if _, e = held.ExecContext(ctx, `SET LOCAL enable_seqscan TO off`); e != nil {
+		t.Fatal(e)
+	}
+	if e = held.QueryRowContext(ctx, `SELECT online FROM paperboat.user_machines WHERE id=$1`, machine).Scan(new(bool)); e != nil {
+		t.Fatal(e)
+	}
+	if siReadLocks() == 0 {
+		t.Fatal("a serializable read took no predicate lock the count can see: the check would pass vacuously")
+	}
+	lockedBefore := siReadLocks()
+	const burst = 300
 	errs := make([]error, burst)
 	var wg sync.WaitGroup
 	// The machine's own heartbeats rewrite the rows the grants read while they run.
@@ -98,6 +123,9 @@ func TestNativePrivateGrantBurstSucceedsPostgres(t *testing.T) {
 		if e != nil {
 			t.Fatalf("grant %d of %d failed: %v", i, burst, e)
 		}
+	}
+	if grown := siReadLocks() - lockedBefore; grown != 0 {
+		t.Fatalf("%d grants kept %d predicate locks (want 0)", burst, grown)
 	}
 	var sessions int
 	if e := store.SQL().QueryRowContext(ctx, `SELECT count(*) FROM paperboat.user_machine_access_sessions WHERE user_machine_id=$1`, machine).Scan(&sessions); e != nil || sessions != 1 {

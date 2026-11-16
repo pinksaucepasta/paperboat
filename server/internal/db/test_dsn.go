@@ -97,3 +97,15 @@ func effectivePort(u *url.URL) string {
 	}
 	return "5432"
 }
+
+// TestDSNWithApplicationName names the connections a test database DSN opens (URL or key=value form), so a test
+// can count its own sessions and locks instead of the whole database's, which other tests and workers share.
+func TestDSNWithApplicationName(dsn, name string) string {
+	if u, err := url.Parse(dsn); err == nil && u.Scheme != "" {
+		q := u.Query()
+		q.Set("application_name", name)
+		u.RawQuery = q.Encode()
+		return u.String()
+	}
+	return dsn + " application_name=" + name
+}
