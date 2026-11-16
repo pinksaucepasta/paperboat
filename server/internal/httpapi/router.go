@@ -695,6 +695,7 @@ func NewRouter(opts Options) http.Handler {
 			mux.Handle("POST /v1/machines/{machine_id}/terminal-sessions", userMachineAuth("machines:connect", requireCSRF(opts.Auth, userMachineTerminalSessionsCreate(opts.Machines))))
 			mux.Handle("PATCH /v1/machines/{machine_id}/terminal-sessions/{session_id}", userMachineAuth("machines:connect", requireCSRF(opts.Auth, userMachineTerminalSessionsRename(opts.Machines))))
 			mux.Handle("POST /v1/machines/{machine_id}/terminal-sessions/{session_id}/close", userMachineAuth("machines:connect", requireCSRF(opts.Auth, userMachineTerminalSessionsClose(opts.Machines))))
+			mux.Handle("POST /v1/machines/{machine_id}/terminal-sessions/{session_id}/adopt", userMachineAuth("machines:connect", requireCSRF(opts.Auth, userMachineTerminalSessionsAdopt(opts.Machines))))
 			mux.Handle("DELETE /v1/machines/{machine_id}/terminal-sessions/{session_id}", userMachineAuth("machines:connect", requireCSRF(opts.Auth, userMachineTerminalSessionsDelete(opts.Machines))))
 			mux.HandleFunc("POST /v1/machines/pairings/installation", userMachineInstallationConsume(opts.Machines))
 			mux.Handle("POST /v1/machines/{machine_id}/disconnect", userMachineAuth("machines:connect", requireCSRF(opts.Auth, userMachineDisconnect(opts.Machines))))

@@ -3158,6 +3158,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/machines/{machine_id}/terminal-sessions/{session_id}/adopt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                machine_id: string;
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Register an offline-created terminal session
+         * @description Registers a terminal session the machine started while the client could not reach Paperboat (id terminal_offline_*). The machine must be online and must know the session. The session is then listed, can be closed and follows the same rules as any other; calling again returns the same session. The host's session name is kept unless the caller already uses it on this machine.
+         */
+        post: operations["post_v1_user_machines_machine_id_terminal_sessions_session_id_adopt"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/runtime-observations": {
         parameters: {
             query?: never;
@@ -20170,6 +20193,36 @@ export interface operations {
                 };
                 content?: never;
             };
+        };
+    };
+    post_v1_user_machines_machine_id_terminal_sessions_session_id_adopt: {
+        parameters: {
+            query?: {
+                /** @description Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field. */
+                workspace?: string;
+            };
+            header?: never;
+            path: {
+                machine_id: string;
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Registered, or already registered. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["TerminalSessionCreated"];
+                    };
+                };
+            };
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
         };
     };
     post_v1_runtime_observations: {

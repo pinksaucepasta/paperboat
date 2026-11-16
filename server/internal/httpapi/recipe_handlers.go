@@ -64,7 +64,7 @@ func recipeRoute(r *http.Request, own string) bool {
 		return true
 	case len(parts) == 3 && parts[0] == "terminal-sessions" && parts[2] == "connection-descriptor":
 		return true
-	case len(parts) == 5 && parts[0] == "machines" && parts[2] == "terminal-sessions" && parts[4] == "close":
+	case len(parts) == 5 && parts[0] == "machines" && parts[2] == "terminal-sessions" && (parts[4] == "close" || parts[4] == "adopt"):
 		return true
 	}
 	return false

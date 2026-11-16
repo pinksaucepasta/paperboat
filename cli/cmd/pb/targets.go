@@ -516,7 +516,7 @@ func resolveTerminalSession(ctx context.Context, client *api.Client, target envi
 	}
 	message := fmt.Sprintf("terminal session %q was not found in the sessions Paperboat lists for this machine", ref)
 	if resolver.IsOfflineTerminalSessionID(ref) {
-		message += "; it was opened without Paperboat, so only `pb connect --session " + ref + "` can attach it"
+		message += "; it was opened without Paperboat and is not registered yet (the next `pb connect --session " + ref + "` while Paperboat answers registers it)"
 	}
 	if len(suggestions) > 0 {
 		message += "; did you mean " + strings.Join(suggestions, ", ") + "?"

@@ -266,7 +266,7 @@ func actionConnectTargetInDirectory(c *command.Context, requested, cwd string) e
 	terminalSessionID := ""
 	terminalSessionName := ""
 	if resolver.IsOfflineTerminalSessionID(sessionRef) {
-		// Opened without Paperboat (the id pb recordings start prints): only its host holds it, so Paperboat's list never has it.
+		// Opened without Paperboat (the id pb recordings start prints): its host holds it until adoptOfflineSession registers it.
 		createSession = &resolver.TerminalSessionCreate{OfflineSessionID: sessionRef, Name: sessionRef, CWD: cwd}
 		terminalSessionName = sessionRef
 	} else if strings.TrimSpace(sessionRef) != "" {
@@ -467,6 +467,9 @@ func actionConnectTargetInDirectory(c *command.Context, requested, cwd string) e
 			observeTransferFailure(transferLease.Close())
 		}
 	}()
+	if info.Terminal != nil && info.Terminal.Auth.Offline && resolver.IsOfflineTerminalSessionID(terminalSessionID) {
+		defer adoptOfflineSession(ctx, backend, info.MachineID, terminalSessionID, adoptFirstRetry)()
+	}
 	if err := rememberWorkspaceEnvironment(c, d.cfg, info.MachineID); err != nil {
 		closeErr := conn.Close()
 		return fmt.Errorf("remember connected environment: %w", errors.Join(err, closeErr))

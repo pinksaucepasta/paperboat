@@ -953,6 +953,22 @@ func userMachineTerminalSessionsCreate(service *usermachines.Service) http.Handl
 	}
 }
 
+// userMachineTerminalSessionsAdopt registers a session the machine started while Paperboat was unreachable.
+func userMachineTerminalSessionsAdopt(service *usermachines.Service) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		p, ok := principalFromContext(r.Context())
+		if !ok {
+			writeError(w, r, http.StatusUnauthorized, "unauthenticated", "Authentication is required.")
+			return
+		}
+		item, err := service.AdoptOfflineTerminalSession(r.Context(), p.User.ID, r.PathValue("machine_id"), r.PathValue("session_id"))
+		if userMachineTerminalSessionError(w, r, err) {
+			return
+		}
+		writeJSON(w, http.StatusOK, SuccessResponse{Data: item})
+	}
+}
+
 func userMachineTerminalSessionsRename(service *usermachines.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		p, ok := principalFromContext(r.Context())

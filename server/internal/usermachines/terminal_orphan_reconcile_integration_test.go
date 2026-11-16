@@ -27,6 +27,7 @@ type hostWithSessions struct {
 	helperruntime.Client
 	has         map[string]bool
 	exited      map[string]bool
+	names       map[string]string // the name each session has on the host (a snapshot carries it)
 	unreachable bool
 	hang        map[string]bool // sessions whose host never answers: the call returns only when its context ends
 	mu          sync.Mutex
@@ -56,7 +57,7 @@ func (h *hostWithSessions) Terminal(ctx context.Context, _, _, operation, sessio
 	if h.exited[session] {
 		return helperruntime.Snapshot{ID: session, State: "exited", Generation: 1}, nil
 	}
-	return helperruntime.Snapshot{ID: session, State: "running", Generation: 1}, nil
+	return helperruntime.Snapshot{ID: session, Name: h.names[session], CWD: "/work", State: "running", Generation: 1}, nil
 }
 
 // terminalOrphanFixture is a machine with a live route to a host, owned by one account.

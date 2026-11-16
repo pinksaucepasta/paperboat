@@ -423,6 +423,15 @@ func (c *Client) CreateUserMachineTerminalSession(ctx context.Context, machineID
 	return out, c.doWithHeaders(ctx, http.MethodPost, path, body, &out, http.Header{"Idempotency-Key": []string{idempotencyKey}})
 }
 
+// AdoptOfflineTerminalSession registers a session the machine started while Paperboat could not be reached
+// (terminal_offline_*) once the machine is online; it is then listed like every other session.
+func (c *Client) AdoptOfflineTerminalSession(ctx context.Context, machineID, sessionID string) (TerminalSession, error) {
+	var out TerminalSession
+	path := "/v1/machines/" + url.PathEscape(machineID) + "/terminal-sessions/" + url.PathEscape(sessionID) + "/adopt"
+	err := c.do(ctx, http.MethodPost, path, nil, &out)
+	return out, err
+}
+
 func (c *Client) RenameUserMachineTerminalSession(ctx context.Context, machineID, sessionID, name string) (TerminalSession, error) {
 	var out TerminalSession
 	path := "/v1/machines/" + url.PathEscape(machineID) + "/terminal-sessions/" + url.PathEscape(sessionID)

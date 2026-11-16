@@ -31582,6 +31582,77 @@
         ]
       }
     },
+    "/v1/machines/{machine_id}/terminal-sessions/{session_id}/adopt": {
+      "parameters": [
+        {
+          "name": "machine_id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "session_id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "summary": "Register an offline-created terminal session",
+        "security": [
+          {
+            "bearerAccess": []
+          }
+        ],
+        "x-required-bearer-scopes": [
+          "machines:connect"
+        ],
+        "responses": {
+          "200": {
+            "description": "Registered, or already registered.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/TerminalSessionCreated"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "operationId": "post_v1_user_machines_machine_id_terminal_sessions_session_id_adopt",
+        "parameters": [
+          {
+            "name": "workspace",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 63
+            },
+            "description": "Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field."
+          }
+        ],
+        "description": "Registers a terminal session the machine started while the client could not reach Paperboat (id terminal_offline_*). The machine must be online and must know the session. The session is then listed, can be closed and follows the same rules as any other; calling again returns the same session. The host's session name is kept unless the caller already uses it on this machine."
+      }
+    },
     "/v1/runtime-observations": {
       "post": {
         "summary": "VM heartbeat callback",

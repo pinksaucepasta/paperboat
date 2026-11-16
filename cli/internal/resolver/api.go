@@ -8,7 +8,6 @@ import (
 	"github.com/pinksaucepasta/paperboat/shared/terminalprotocol"
 	"net/http"
 	"net/url"
-	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -18,6 +17,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/config"
 	"github.com/pinksaucepasta/paperboat/internal/telemetry"
 	"github.com/pinksaucepasta/paperboat/shared/serverclock"
+	"github.com/pinksaucepasta/paperboat/shared/sessionname"
 )
 
 var ErrMachineNotFound = errors.New("machine not found")
@@ -192,13 +192,12 @@ func (r *APIResolver) Resolve(ctx context.Context, req ConnectRequest) (ConnectI
 // exec and ssh streams use the same bound).
 const offlineTerminalLifetime = 12 * time.Hour
 
-// OfflineTerminalPrefix starts the id of a terminal session opened without Paperboat; Paperboat's session list never has it.
-const OfflineTerminalPrefix = "terminal_offline_"
-
-var offlineTerminalIDPattern = regexp.MustCompile(`^` + OfflineTerminalPrefix + `[A-Za-z0-9_-]{1,100}$`)
+// OfflineTerminalPrefix starts the id of a terminal session opened without Paperboat; the daemon registers it with
+// Paperboat once the machine is online again (adoptOfflineSessions).
+const OfflineTerminalPrefix = sessionname.OfflinePrefix
 
 // IsOfflineTerminalSessionID reports whether ref is the id of a session opened without Paperboat.
-func IsOfflineTerminalSessionID(ref string) bool { return offlineTerminalIDPattern.MatchString(ref) }
+func IsOfflineTerminalSessionID(ref string) bool { return sessionname.IsOfflineID(ref) }
 
 // offlineTerminal is a NEW terminal session opened while Paperboat is unreachable (F21-11): the host admits it from its
 // own signed scopes and names the session by the stream's operation, so the session id is made here and the machine

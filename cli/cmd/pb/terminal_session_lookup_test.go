@@ -21,7 +21,7 @@ func TestUnknownTerminalSessionErrorNamesTheLookupAndTheRecovery(t *testing.T) {
 	client := api.New(srv.URL, config.Credential{}, srv.Client())
 	for ref, want := range map[string]string{
 		"nope":                   "not found in the sessions Paperboat lists for this machine",
-		"terminal_offline_ab_12": "opened without Paperboat, so only `pb connect --session terminal_offline_ab_12` can attach it",
+		"terminal_offline_ab_12": "opened without Paperboat and is not registered yet (the next `pb connect --session terminal_offline_ab_12` while Paperboat answers registers it)",
 	} {
 		_, err := resolveTerminalSession(context.Background(), client, environmentTarget{id: "um_1"}, ref)
 		if err == nil {
