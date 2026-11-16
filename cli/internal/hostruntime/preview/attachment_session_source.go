@@ -604,6 +604,18 @@ func normalizeCarrierEndpoint(raw string) (string, string, string, error) {
 	return scheme, net.JoinHostPort(host, strconv.Itoa(portNumber)), host, nil
 }
 
-func logAttachmentFailure(ctx context.Context, _ string, err error) {
+// attachmentFailureInterval spaces the records of one repeating dial failure: the carrier pool re-dials every second
+// while the edge refuses, and each attempt wrote an event (X-41: 10 in 7 s on a revoked machine).
+const attachmentFailureInterval = 30 * time.Second
+
+var attachmentFailureLast sync.Map // failure class -> time of its last record
+
+func logAttachmentFailure(ctx context.Context, kind string, err error) {
+	fault := errorreport.ProjectFault(ctx, "paperboat-daemon", "preview_attachment", "peer_connect", "transport_failed", err)
+	class := fmt.Sprintf("%s|%s|%s|%d|%d", kind, fault.Code, fault.Cause, fault.Errno, fault.HTTPStatus)
+	if last, seen := attachmentFailureLast.Load(class); seen && time.Since(last.(time.Time)) < attachmentFailureInterval {
+		return
+	}
+	attachmentFailureLast.Store(class, time.Now())
 	errorreport.Current().ObserveFailure(ctx, "paperboat-daemon", "preview_attachment", "peer_connect", "transport_failed", err)
 }

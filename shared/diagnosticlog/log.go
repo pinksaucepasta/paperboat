@@ -4,6 +4,7 @@ package diagnosticlog
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"runtime"
 	"strings"
@@ -60,6 +61,13 @@ func TryWarn(message string, args ...any)  { tryLog(slog.LevelWarn, message, arg
 func TryError(message string, args ...any) { tryLog(slog.LevelError, message, args...) }
 
 func tryLog(level slog.Level, message string, args ...any) {
+	// A refusal made locally and already explained (a revoked identity waiting out its backoff) is no record.
+	for _, arg := range args {
+		var quiet interface{ QuietFailure() bool }
+		if err, ok := arg.(error); ok && errors.As(err, &quiet) && quiet.QuietFailure() {
+			return
+		}
+	}
 	ensureWorker()
 	if len(message) > 512 {
 		message = message[:512]
