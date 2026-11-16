@@ -1,4 +1,5 @@
 -- +goose Up
+SET LOCAL lock_timeout = '5s';
 -- The server keeps each endpoint's peer policy document in memory (peersessions/policy_cache.go) and drops it when a
 -- machine_events notification names one of its parties: its endpoint, its machine, its account, or a peer's. The
 -- topic triggers already notify for most writes, but not for every input the document reads (grant and admission
@@ -9,7 +10,6 @@
 -- the team owns or is shared.
 -- Prior art: headscale recompiles on every policy-relevant write (hscontrol/policy/v2/policy.go updateLocked); NetBird
 -- bumps the account network serial on every write (management/server/types/account_components.go).
-SET lock_timeout = '5s';
 
 -- +goose StatementBegin
 CREATE FUNCTION paperboat.publish_peer_policy(keys text[]) RETURNS void LANGUAGE sql AS $$
@@ -163,158 +163,16 @@ BEGIN
 END $$;
 -- +goose StatementEnd
 
--- Team-keyed tables.
+-- One migration per table (the triggers below and in 336 onward): CREATE TRIGGER holds SHARE ROW EXCLUSIVE on its table until
+-- commit, so each table is its own short transaction. This one: the functions (no table locks) and team_members.
 CREATE TRIGGER peer_policy_insert AFTER INSERT ON paperboat.team_members REFERENCING NEW TABLE AS new_rows FOR EACH STATEMENT EXECUTE FUNCTION paperboat.publish_peer_policy_teams();
 CREATE TRIGGER peer_policy_update AFTER UPDATE ON paperboat.team_members FOR EACH ROW
  WHEN ((OLD.team_id, OLD.account_id, OLD.active, OLD.role, OLD.membership_generation) IS DISTINCT FROM (NEW.team_id, NEW.account_id, NEW.active, NEW.role, NEW.membership_generation))
  EXECUTE FUNCTION paperboat.publish_peer_policy_team_row();
 CREATE TRIGGER peer_policy_delete AFTER DELETE ON paperboat.team_members REFERENCING OLD TABLE AS old_rows FOR EACH STATEMENT EXECUTE FUNCTION paperboat.publish_peer_policy_teams();
-CREATE TRIGGER peer_policy_insert AFTER INSERT ON paperboat.team_resource_bindings REFERENCING NEW TABLE AS new_rows FOR EACH STATEMENT EXECUTE FUNCTION paperboat.publish_peer_policy_teams();
-CREATE TRIGGER peer_policy_update AFTER UPDATE ON paperboat.team_resource_bindings REFERENCING NEW TABLE AS new_rows OLD TABLE AS old_rows FOR EACH STATEMENT EXECUTE FUNCTION paperboat.publish_peer_policy_teams();
-CREATE TRIGGER peer_policy_delete AFTER DELETE ON paperboat.team_resource_bindings REFERENCING OLD TABLE AS old_rows FOR EACH STATEMENT EXECUTE FUNCTION paperboat.publish_peer_policy_teams();
-CREATE TRIGGER peer_policy_insert AFTER INSERT ON paperboat.team_resource_grants REFERENCING NEW TABLE AS new_rows FOR EACH STATEMENT EXECUTE FUNCTION paperboat.publish_peer_policy_teams();
-CREATE TRIGGER peer_policy_update AFTER UPDATE ON paperboat.team_resource_grants REFERENCING NEW TABLE AS new_rows OLD TABLE AS old_rows FOR EACH STATEMENT EXECUTE FUNCTION paperboat.publish_peer_policy_teams();
-CREATE TRIGGER peer_policy_delete AFTER DELETE ON paperboat.team_resource_grants REFERENCING OLD TABLE AS old_rows FOR EACH STATEMENT EXECUTE FUNCTION paperboat.publish_peer_policy_teams();
-CREATE TRIGGER peer_policy_insert AFTER INSERT ON paperboat.team_terminal_session_grants REFERENCING NEW TABLE AS new_rows FOR EACH STATEMENT EXECUTE FUNCTION paperboat.publish_peer_policy_teams();
-CREATE TRIGGER peer_policy_update AFTER UPDATE ON paperboat.team_terminal_session_grants REFERENCING NEW TABLE AS new_rows OLD TABLE AS old_rows FOR EACH STATEMENT EXECUTE FUNCTION paperboat.publish_peer_policy_teams();
-CREATE TRIGGER peer_policy_delete AFTER DELETE ON paperboat.team_terminal_session_grants REFERENCING OLD TABLE AS old_rows FOR EACH STATEMENT EXECUTE FUNCTION paperboat.publish_peer_policy_teams();
-CREATE TRIGGER peer_policy AFTER INSERT OR UPDATE OF suspended, deleted_at, owner_account, allow_private_access, generation OR DELETE ON paperboat.teams
- FOR EACH ROW EXECUTE FUNCTION paperboat.publish_peer_policy_team_row();
-CREATE TRIGGER peer_policy AFTER INSERT OR DELETE ON paperboat.billing_workspaces
- FOR EACH ROW EXECUTE FUNCTION paperboat.publish_peer_policy_account_row();
-CREATE TRIGGER peer_policy_update AFTER UPDATE ON paperboat.billing_workspaces FOR EACH ROW
- WHEN ((OLD.team_id, OLD.user_id, OLD.state, OLD.period_start, OLD.period_end, OLD.renewal_grace_until)
-   IS DISTINCT FROM (NEW.team_id, NEW.user_id, NEW.state, NEW.period_start, NEW.period_end, NEW.renewal_grace_until))
- EXECUTE FUNCTION paperboat.publish_peer_policy_account_row();
-CREATE TRIGGER peer_policy AFTER INSERT OR UPDATE OR DELETE ON paperboat.recording_keys
- FOR EACH ROW EXECUTE FUNCTION paperboat.publish_peer_policy_account_row();
-
--- Workspace policies and their rules, tags and groups.
-CREATE TRIGGER peer_policy AFTER INSERT OR UPDATE OR DELETE ON paperboat.workspace_policies
- FOR EACH ROW EXECUTE FUNCTION paperboat.publish_peer_policy_workspace_row();
-CREATE TRIGGER peer_policy_insert AFTER INSERT ON paperboat.workspace_policy_rules REFERENCING NEW TABLE AS new_rows FOR EACH STATEMENT EXECUTE FUNCTION paperboat.publish_peer_policy_workspace();
-CREATE TRIGGER peer_policy_update AFTER UPDATE ON paperboat.workspace_policy_rules REFERENCING NEW TABLE AS new_rows OLD TABLE AS old_rows FOR EACH STATEMENT EXECUTE FUNCTION paperboat.publish_peer_policy_workspace();
-CREATE TRIGGER peer_policy_delete AFTER DELETE ON paperboat.workspace_policy_rules REFERENCING OLD TABLE AS old_rows FOR EACH STATEMENT EXECUTE FUNCTION paperboat.publish_peer_policy_workspace();
-CREATE TRIGGER peer_policy_insert AFTER INSERT ON paperboat.workspace_policy_tags REFERENCING NEW TABLE AS new_rows FOR EACH STATEMENT EXECUTE FUNCTION paperboat.publish_peer_policy_workspace();
-CREATE TRIGGER peer_policy_update AFTER UPDATE ON paperboat.workspace_policy_tags REFERENCING NEW TABLE AS new_rows OLD TABLE AS old_rows FOR EACH STATEMENT EXECUTE FUNCTION paperboat.publish_peer_policy_workspace();
-CREATE TRIGGER peer_policy_delete AFTER DELETE ON paperboat.workspace_policy_tags REFERENCING OLD TABLE AS old_rows FOR EACH STATEMENT EXECUTE FUNCTION paperboat.publish_peer_policy_workspace();
-CREATE TRIGGER peer_policy_insert AFTER INSERT ON paperboat.workspace_policy_groups REFERENCING NEW TABLE AS new_rows FOR EACH STATEMENT EXECUTE FUNCTION paperboat.publish_peer_policy_workspace();
-CREATE TRIGGER peer_policy_update AFTER UPDATE ON paperboat.workspace_policy_groups REFERENCING NEW TABLE AS new_rows OLD TABLE AS old_rows FOR EACH STATEMENT EXECUTE FUNCTION paperboat.publish_peer_policy_workspace();
-CREATE TRIGGER peer_policy_delete AFTER DELETE ON paperboat.workspace_policy_groups REFERENCING OLD TABLE AS old_rows FOR EACH STATEMENT EXECUTE FUNCTION paperboat.publish_peer_policy_workspace();
-
--- Grants and admissions.
-CREATE TRIGGER peer_policy AFTER INSERT OR DELETE ON paperboat.user_machine_access_sessions
- FOR EACH ROW EXECUTE FUNCTION paperboat.publish_peer_policy_account_row();
-CREATE TRIGGER peer_policy_update AFTER UPDATE ON paperboat.user_machine_access_sessions FOR EACH ROW
- WHEN ((OLD.user_machine_id, OLD.user_id, OLD.cli_client_session_id, OLD.state, OLD.revoked_at, OLD.expires_at, OLD.capabilities, OLD.team_id, OLD.terminal_session_id,
-        OLD.terminal_role, OLD.terminal_grant_generation, OLD.terminal_binding_generation, OLD.terminal_membership_generation, OLD.machine_service_port)
-   IS DISTINCT FROM (NEW.user_machine_id, NEW.user_id, NEW.cli_client_session_id, NEW.state, NEW.revoked_at, NEW.expires_at, NEW.capabilities, NEW.team_id, NEW.terminal_session_id,
-        NEW.terminal_role, NEW.terminal_grant_generation, NEW.terminal_binding_generation, NEW.terminal_membership_generation, NEW.machine_service_port))
- EXECUTE FUNCTION paperboat.publish_peer_policy_account_row();
-CREATE TRIGGER peer_policy AFTER INSERT OR UPDATE OR DELETE ON paperboat.inspector_credentials
- FOR EACH ROW EXECUTE FUNCTION paperboat.publish_peer_policy_account_row();
-CREATE TRIGGER peer_policy AFTER INSERT OR UPDATE OR DELETE ON paperboat.config_compare_admissions
- FOR EACH ROW EXECUTE FUNCTION paperboat.publish_peer_policy_account_row();
-CREATE TRIGGER peer_policy AFTER INSERT OR UPDATE OR DELETE ON paperboat.recording_native_admissions
- FOR EACH ROW EXECUTE FUNCTION paperboat.publish_peer_policy_account_row();
-CREATE TRIGGER peer_policy AFTER INSERT OR UPDATE OR DELETE ON paperboat.lazy_access_policies
- FOR EACH ROW EXECUTE FUNCTION paperboat.publish_peer_policy_account_row();
-
--- One account's rows.
-CREATE TRIGGER peer_policy AFTER INSERT OR DELETE ON paperboat.peer_network_identities
- FOR EACH ROW EXECUTE FUNCTION paperboat.publish_peer_policy_account_row();
-CREATE TRIGGER peer_policy_update AFTER UPDATE ON paperboat.peer_network_identities FOR EACH ROW
- WHEN ((OLD.role, OLD.machine_id, OLD.endpoint_generation, OLD.machine_generation, OLD.key_generation, OLD.wireguard_public_key, OLD.disco_public_key,
-        OLD.quic_certificate_fingerprint, OLD.virtual_address, OLD.published_endpoints, OLD.revoked_at)
-   IS DISTINCT FROM (NEW.role, NEW.machine_id, NEW.endpoint_generation, NEW.machine_generation, NEW.key_generation, NEW.wireguard_public_key, NEW.disco_public_key,
-        NEW.quic_certificate_fingerprint, NEW.virtual_address, NEW.published_endpoints, NEW.revoked_at))
- EXECUTE FUNCTION paperboat.publish_peer_policy_account_row();
-CREATE TRIGGER peer_policy AFTER INSERT OR UPDATE OR DELETE ON paperboat.peer_endpoint_certificates
- FOR EACH ROW EXECUTE FUNCTION paperboat.publish_peer_policy_account_row();
-CREATE TRIGGER peer_policy AFTER DELETE ON paperboat.cli_client_sessions
- FOR EACH ROW EXECUTE FUNCTION paperboat.publish_peer_policy_account_row();
-CREATE TRIGGER peer_policy_update AFTER UPDATE ON paperboat.cli_client_sessions FOR EACH ROW
- WHEN ((OLD.state, OLD.revoked_at, OLD.recipe_id, OLD.user_id) IS DISTINCT FROM (NEW.state, NEW.revoked_at, NEW.recipe_id, NEW.user_id))
- EXECUTE FUNCTION paperboat.publish_peer_policy_account_row();
-CREATE TRIGGER peer_policy_update AFTER UPDATE ON paperboat.users FOR EACH ROW
- WHEN (OLD.status IS DISTINCT FROM NEW.status)
- EXECUTE FUNCTION paperboat.publish_peer_policy_account_row();
-CREATE TRIGGER peer_policy AFTER INSERT OR DELETE ON paperboat.control_environments
- FOR EACH ROW EXECUTE FUNCTION paperboat.publish_peer_policy_account_row();
-CREATE TRIGGER peer_policy_update AFTER UPDATE ON paperboat.control_environments FOR EACH ROW
- WHEN ((OLD.desired_state, OLD.revoked_at, OLD.owner_user_id) IS DISTINCT FROM (NEW.desired_state, NEW.revoked_at, NEW.owner_user_id))
- EXECUTE FUNCTION paperboat.publish_peer_policy_account_row();
-CREATE TRIGGER peer_policy AFTER INSERT OR DELETE ON paperboat.user_machine_terminal_sessions
- FOR EACH ROW EXECUTE FUNCTION paperboat.publish_peer_policy_account_row();
-CREATE TRIGGER peer_policy_update AFTER UPDATE ON paperboat.user_machine_terminal_sessions FOR EACH ROW
- WHEN ((OLD.user_machine_id, OLD.owner_account, OLD.owner_team_id, OLD.deleted_at, OLD.desired_state, OLD.closed_at, OLD.transfer_destination_machine_id)
-   IS DISTINCT FROM (NEW.user_machine_id, NEW.owner_account, NEW.owner_team_id, NEW.deleted_at, NEW.desired_state, NEW.closed_at, NEW.transfer_destination_machine_id))
- EXECUTE FUNCTION paperboat.publish_peer_policy_account_row();
-CREATE TRIGGER peer_policy AFTER INSERT OR DELETE ON paperboat.control_config_assignments
- FOR EACH ROW EXECUTE FUNCTION paperboat.publish_peer_policy_account_row();
-CREATE TRIGGER peer_policy_update AFTER UPDATE ON paperboat.control_config_assignments FOR EACH ROW
- WHEN ((OLD.version, OLD.machine_id, OLD.consent_state, OLD.adopted_team_id, OLD.revoked_at) IS DISTINCT FROM (NEW.version, NEW.machine_id, NEW.consent_state, NEW.adopted_team_id, NEW.revoked_at))
- EXECUTE FUNCTION paperboat.publish_peer_policy_account_row();
-CREATE TRIGGER peer_policy AFTER INSERT OR DELETE ON paperboat.control_config_sync_statuses
- FOR EACH ROW EXECUTE FUNCTION paperboat.publish_peer_policy_account_row();
-CREATE TRIGGER peer_policy_update AFTER UPDATE ON paperboat.control_config_sync_statuses FOR EACH ROW
- WHEN ((OLD.installation_generation, OLD.remote_revision, OLD.conflicts) IS DISTINCT FROM (NEW.installation_generation, NEW.remote_revision, NEW.conflicts))
- EXECUTE FUNCTION paperboat.publish_peer_policy_account_row();
-
--- Machines.
-CREATE TRIGGER peer_policy AFTER INSERT OR DELETE ON paperboat.user_machines
- FOR EACH ROW EXECUTE FUNCTION paperboat.publish_peer_policy_machine();
-CREATE TRIGGER peer_policy_update AFTER UPDATE ON paperboat.user_machines FOR EACH ROW
- WHEN ((OLD.state, OLD.online, OLD.seat_state, OLD.revoked_at, OLD.deleted_at, OLD.installation_generation, OLD.environment_id, OLD.owner_team_id, OLD.user_id, OLD.configured_capabilities, OLD.observed_capabilities)
-   IS DISTINCT FROM (NEW.state, NEW.online, NEW.seat_state, NEW.revoked_at, NEW.deleted_at, NEW.installation_generation, NEW.environment_id, NEW.owner_team_id, NEW.user_id, NEW.configured_capabilities, NEW.observed_capabilities))
- EXECUTE FUNCTION paperboat.publish_peer_policy_machine();
 
 -- +goose Down
-DROP TRIGGER peer_policy_update ON paperboat.user_machines;
-DROP TRIGGER peer_policy ON paperboat.user_machines;
-DROP TRIGGER peer_policy_update ON paperboat.control_config_sync_statuses;
-DROP TRIGGER peer_policy ON paperboat.control_config_sync_statuses;
-DROP TRIGGER peer_policy_update ON paperboat.control_config_assignments;
-DROP TRIGGER peer_policy ON paperboat.control_config_assignments;
-DROP TRIGGER peer_policy_update ON paperboat.user_machine_terminal_sessions;
-DROP TRIGGER peer_policy ON paperboat.user_machine_terminal_sessions;
-DROP TRIGGER peer_policy_update ON paperboat.control_environments;
-DROP TRIGGER peer_policy ON paperboat.control_environments;
-DROP TRIGGER peer_policy_update ON paperboat.users;
-DROP TRIGGER peer_policy_update ON paperboat.cli_client_sessions;
-DROP TRIGGER peer_policy ON paperboat.cli_client_sessions;
-DROP TRIGGER peer_policy ON paperboat.peer_endpoint_certificates;
-DROP TRIGGER peer_policy_update ON paperboat.peer_network_identities;
-DROP TRIGGER peer_policy ON paperboat.peer_network_identities;
-DROP TRIGGER peer_policy ON paperboat.lazy_access_policies;
-DROP TRIGGER peer_policy ON paperboat.recording_native_admissions;
-DROP TRIGGER peer_policy ON paperboat.config_compare_admissions;
-DROP TRIGGER peer_policy ON paperboat.inspector_credentials;
-DROP TRIGGER peer_policy_update ON paperboat.user_machine_access_sessions;
-DROP TRIGGER peer_policy ON paperboat.user_machine_access_sessions;
-DROP TRIGGER peer_policy_insert ON paperboat.workspace_policy_groups;
-DROP TRIGGER peer_policy_update ON paperboat.workspace_policy_groups;
-DROP TRIGGER peer_policy_delete ON paperboat.workspace_policy_groups;
-DROP TRIGGER peer_policy_insert ON paperboat.workspace_policy_tags;
-DROP TRIGGER peer_policy_update ON paperboat.workspace_policy_tags;
-DROP TRIGGER peer_policy_delete ON paperboat.workspace_policy_tags;
-DROP TRIGGER peer_policy_insert ON paperboat.workspace_policy_rules;
-DROP TRIGGER peer_policy_update ON paperboat.workspace_policy_rules;
-DROP TRIGGER peer_policy_delete ON paperboat.workspace_policy_rules;
-DROP TRIGGER peer_policy ON paperboat.workspace_policies;
-DROP TRIGGER peer_policy ON paperboat.recording_keys;
-DROP TRIGGER peer_policy_update ON paperboat.billing_workspaces;
-DROP TRIGGER peer_policy ON paperboat.billing_workspaces;
-DROP TRIGGER peer_policy ON paperboat.teams;
-DROP TRIGGER peer_policy_insert ON paperboat.team_terminal_session_grants;
-DROP TRIGGER peer_policy_update ON paperboat.team_terminal_session_grants;
-DROP TRIGGER peer_policy_delete ON paperboat.team_terminal_session_grants;
-DROP TRIGGER peer_policy_insert ON paperboat.team_resource_grants;
-DROP TRIGGER peer_policy_update ON paperboat.team_resource_grants;
-DROP TRIGGER peer_policy_delete ON paperboat.team_resource_grants;
-DROP TRIGGER peer_policy_insert ON paperboat.team_resource_bindings;
-DROP TRIGGER peer_policy_update ON paperboat.team_resource_bindings;
-DROP TRIGGER peer_policy_delete ON paperboat.team_resource_bindings;
+SET LOCAL lock_timeout = '5s';
 DROP TRIGGER peer_policy_insert ON paperboat.team_members;
 DROP TRIGGER peer_policy_update ON paperboat.team_members;
 DROP TRIGGER peer_policy_delete ON paperboat.team_members;

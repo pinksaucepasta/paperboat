@@ -17,9 +17,9 @@ import (
 // pooled and are not checked.
 func TestSessionLocksAndListenUseTheDirectPool(t *testing.T) {
 	sessionState := regexp.MustCompile(`pg_advisory_lock\(|pg_try_advisory_lock\(|pg_advisory_unlock\(|"LISTEN `)
-	direct := regexp.MustCompile(`\.Direct\(\)|\.direct\.Acquire|migrations\.Conn\(|l\.DB\.Acquire`)
+	direct := regexp.MustCompile(`\.Direct\(\)|\.direct\.Acquire|\bdirect\.Acquire\(|migrations\.Conn\(|l\.DB\.Acquire`)
 	// Fields filled from Direct by their wiring (checked below): workers.PostgresLeader.DB (app/lifecycle.go
-	// workerLeader), machineevents.Hub.direct and mintwithdrawal.Watcher.direct (app/app.go).
+	// workerLeader), machineevents.Hub.direct and mintwithdrawal.Watcher.direct (app/app.go); peersessions ListenPolicy takes the pool as a parameter, wired in app/app.go.
 	root := filepath.Join("..")
 	var checked int
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
@@ -50,6 +50,7 @@ func TestSessionLocksAndListenUseTheDirectPool(t *testing.T) {
 		{"../app/lifecycle.go", "DB: store.Direct()"},
 		{"../app/app.go", "machineevents.NewHub(store.Pool(), store.Direct())"},
 		{"../app/app.go", "mintwithdrawal.NewWatcher(store.Pool(), store.Direct(),"},
+		{"../app/app.go", "peerNetworkService.ListenPolicy(ctx, store.Direct(),"},
 	} {
 		raw, err := os.ReadFile(wiring.file)
 		if err != nil || !strings.Contains(string(raw), wiring.want) {

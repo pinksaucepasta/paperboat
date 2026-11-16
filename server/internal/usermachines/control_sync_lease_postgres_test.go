@@ -52,8 +52,19 @@ func newLeaseFixture(t *testing.T) leaseFixture {
 // account makes an active user with n machines <user>_m1..n.
 func (f leaseFixture) account(user string, n int) {
 	f.exec(`INSERT INTO paperboat.users(id,workos_subject,primary_email,status) VALUES($1,$1,$1||'@example.test','active')`, user)
-	f.exec(`INSERT INTO paperboat.user_machines(id,user_id,environment_id,alias,platform,architecture,workspace_root,state,seat_state,online)
+	// Triggers are off for this bulk insert (the exhaustion test makes 65,024 machines in one statement, and the peer
+	// policy row triggers would run for each): only the address leases are under test.
+	err := f.store.InTx(f.ctx, func(ctx context.Context, tx *db.Tx) error {
+		if _, err := tx.Exec(ctx, `SET LOCAL session_replication_role = replica`); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `INSERT INTO paperboat.user_machines(id,user_id,environment_id,alias,platform,architecture,workspace_root,state,seat_state,online)
 SELECT $1||'_m'||g,$1,$1||'_e'||g,'m-'||g,'linux','amd64','/w','online','occupied',true FROM generate_series(1,$2) g`, user, n)
+		return err
+	})
+	if err != nil {
+		f.t.Fatalf("insert machines: %v", err)
+	}
 	// The machines (up to 65,024 in the exhaustion test) would otherwise stay in the shared test database and slow every
 	// later test (the team machine list timed out at 30 s). Triggers and cascades are off for this delete only.
 	f.t.Cleanup(func() {

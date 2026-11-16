@@ -34,7 +34,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/pinksaucepasta/paperboat/server/internal/config"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/mint"
@@ -116,7 +115,7 @@ func TestLoadPeerPolicy(t *testing.T) {
 	service.ConfigureQuota("https://console.example.test/billing")
 	// The in-memory documents keep their own LISTEN session when the build has them (not on main).
 	type policyListener interface {
-		ListenPolicy(context.Context, *pgxpool.Pool, time.Duration) error
+		ListenPolicy(context.Context, policyListenPool, time.Duration) error
 	}
 	runCtx, stop := context.WithCancel(ctx)
 	defer stop()

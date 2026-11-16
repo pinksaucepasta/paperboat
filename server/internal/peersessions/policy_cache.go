@@ -201,11 +201,16 @@ func liveKey(live map[string][]string) string {
 	return b.String()
 }
 
+// policyListenPool is the direct pool (db.DB.Direct): LISTEN is session state and must not run through a pooler.
+type policyListenPool interface {
+	Acquire(context.Context) (*pgxpool.Conn, error)
+}
+
 // ListenPolicy keeps the policy cache's LISTEN session on machine_events for up to d, then returns so the
 // supervising worker sees an iteration. The connection is kept across sessions (a read timeout leaves a pgx
 // connection usable and notifications queue on it meanwhile), so the cache lives across session boundaries. Any
 // failure closes the connection and drops the whole cache; the next session starts empty.
-func (s *NetworkService) ListenPolicy(ctx context.Context, direct *pgxpool.Pool, d time.Duration) error {
+func (s *NetworkService) ListenPolicy(ctx context.Context, direct policyListenPool, d time.Duration) error {
 	s.policyListen.Lock()
 	defer s.policyListen.Unlock()
 	if s.policyConn == nil {
