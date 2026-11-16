@@ -246,7 +246,7 @@ export const clientConfigQuery = queryOptions({
  * `sso_required`/`sso_signed_in` (F19): a team that requires SSO you haven't signed in with lists
  * only its name until you do.
  */
-export type Workspace = Schemas["Workspace"] & Partial<Pick<Schemas["TeamTeam"], "sso_required" | "sso_signed_in">>
+export type Workspace = Schemas["Workspace"]
 
 /** Whether a team waits for an SSO sign-in before it can be opened. */
 export const needsSso = (workspace: Workspace) => workspace.sso_required === true && workspace.sso_signed_in === false

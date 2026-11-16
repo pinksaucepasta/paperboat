@@ -7388,6 +7388,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/workspaces/{ws}/api-tokens": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List API tokens
+         * @description Members see their own tokens, owners and admins all. total counts the tokens the state filter matches; active_total and ended_total count all visible tokens whatever the filter.
+         */
+        get: operations["get_v1_workspace_api_tokens"];
+        put?: never;
+        /**
+         * Create an API token
+         * @description Returns the secret once. The token acts as its creator in this workspace, narrowed by an optional scope.
+         */
+        post: operations["post_v1_workspace_api_tokens"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/api-tokens/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Revoke an API token
+         * @description By its creator or an owner/admin.
+         */
+        delete: operations["delete_v1_workspace_api_token"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/teams/{team_id}/identity": {
         parameters: {
             query?: never;
@@ -7614,6 +7658,26 @@ export interface paths {
          * @description Sends one team.activity_stream_test event now; 502 audit_stream_delivery_failed says why it was refused.
          */
         post: operations["team_audit_stream_test"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/api-token-sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start a CLI session with an API token
+         * @description The bearer is an API token (pbat_…). The session ends when the token is revoked or expires; a scoped token's session is held to the scope.
+         */
+        post: operations["post_v1_auth_api_token_sessions"];
         delete?: never;
         options?: never;
         head?: never;
@@ -11739,6 +11803,10 @@ export interface components {
             role: "owner" | "admin" | "billing" | "auditor" | "member";
             /** @description Team only: machines members add wait for an owner or admin. */
             approve_new_machines?: boolean;
+            /** @description Present (true) for a team whose members need a recent SSO sign-in. */
+            sso_required?: boolean;
+            /** @description With sso_required: whether the viewer's SSO sign-in currently satisfies the team. */
+            sso_signed_in?: boolean;
         };
         ResourceBandwidthHistory: {
             /** Format: date-time */
@@ -12200,11 +12268,13 @@ export interface components {
             action: string;
             actor: {
                 /** @enum {string} */
-                kind: "user" | "recipe" | "directory" | "operator" | "system" | "deleted_user";
+                kind: "user" | "api_token" | "recipe" | "directory" | "operator" | "system" | "deleted_user";
                 id: string;
                 email?: string;
                 /** @description The recipe a machine acted through; kind is recipe. */
                 recipe_id?: string;
+                /** @description The API token a person acted through; kind is api_token. */
+                token_id?: string;
             };
             target: {
                 kind: string;
@@ -12663,6 +12733,7 @@ export interface components {
             /** @enum {string} */
             can_edit: "all" | "own_machines" | "none";
             names: components["schemas"]["PolicyNames"];
+            updated_with_api_token?: string;
         };
         PolicyVersion: {
             version: number;
@@ -12676,6 +12747,7 @@ export interface components {
             lost: number;
             /** @enum {string} */
             kind: "saved" | "restored" | "rewritten" | "migrated";
+            api_token?: string;
         };
         PolicyVersionsPage: {
             versions: components["schemas"]["PolicyVersion"][];
@@ -12949,6 +13021,26 @@ export interface components {
             last_active_at?: string;
             /** Format: date-time */
             expires_at?: string;
+        };
+        ApiTokenScopeEntry: {
+            dst: string[];
+            allow: string[];
+            ports?: unknown[];
+        };
+        ApiToken: {
+            id: string;
+            name: string;
+            workspace: string;
+            created_by: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            expires_at: string;
+            /** Format: date-time */
+            last_used_at?: string;
+            /** Format: date-time */
+            revoked_at?: string;
+            scope?: components["schemas"]["ApiTokenScopeEntry"][];
         };
     };
     responses: {
@@ -30018,6 +30110,115 @@ export interface operations {
             503: components["responses"]["Error"];
         };
     };
+    get_v1_workspace_api_tokens: {
+        parameters: {
+            query?: {
+                /** @description Page size (default 50). */
+                limit?: number;
+                /** @description next_cursor of the previous page. */
+                cursor?: string;
+                /** @description Only live tokens (active) or only revoked and expired ones (ended). Omitted lists every token. A cursor works only with the state it came from. */
+                state?: "active" | "ended";
+            };
+            header?: never;
+            path: {
+                ws: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: {
+                            api_tokens: components["schemas"]["ApiToken"][];
+                            total: number;
+                            active_total: number;
+                            ended_total: number;
+                            next_cursor?: string;
+                        };
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    post_v1_workspace_api_tokens: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ws: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description Created. The secret is shown once. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: {
+                            api_token: components["schemas"]["ApiToken"];
+                            secret: string;
+                        };
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            422: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    delete_v1_workspace_api_token: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ws: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: {
+                            api_token: components["schemas"]["ApiToken"];
+                        };
+                    };
+                };
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
     team_identity_status: {
         parameters: {
             query?: never;
@@ -30705,6 +30906,31 @@ export interface operations {
             404: components["responses"]["Error"];
             409: components["responses"]["Error"];
             502: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    post_v1_auth_api_token_sessions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description CLI token set (access_token, refresh_token, expires_in, scope, cli_client_session_id) for a session of the token's creator that carries the token. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
             503: components["responses"]["Error"];
         };
     };
@@ -32211,7 +32437,11 @@ export interface operations {
     post_v1_admin_managed_ssh_rotate_user_ca: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                "Operator-Target": string;
+                /** @description Opaque incident, ticket, or change reference; do not send prose or secrets. */
+                "Operator-Reason": string;
+            };
             path: {
                 account_id: string;
             };

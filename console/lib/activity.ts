@@ -252,6 +252,9 @@ export function actorName(event: ActivityEvent, meId?: string, memberNames?: Rea
   return event.actor.email ?? memberNames?.get(event.actor.id) ?? "Someone"
 }
 
+/** "with an API token" for events done with one. */
+export const viaToken = (event: ActivityEvent) => event.actor.kind === "api_token" || Boolean(event.actor.token_id)
+
 /** "through a recipe" for events a recipe's machine did. */
 export const viaRecipe = (event: ActivityEvent) => event.actor.kind === "recipe" || Boolean(event.actor.recipe_id)
 

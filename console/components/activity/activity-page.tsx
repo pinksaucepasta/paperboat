@@ -17,6 +17,7 @@ import {
   periodStart,
   targetHref,
   viaRecipe,
+  viaToken,
   type ActivityArea,
   type ActivityFilter,
   type ActivityPeriod,
@@ -195,6 +196,7 @@ export function ActivityPage({ machine: tabMachine }: { machine?: Machine }) {
                       </span>
                       <p className="min-w-0 flex-1 truncate">
                         <span className="font-medium">{actor}</span>
+                        {viaToken(event) && <span className="text-muted-foreground"> with an API token</span>}
                         {viaRecipe(event) && <span className="text-muted-foreground"> through a recipe</span>}{" "}
                         {event.result === "denied" && !describe(event).startsWith("was refused")
                           ? `was refused: ${describe(event)}`

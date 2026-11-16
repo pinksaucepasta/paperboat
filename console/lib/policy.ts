@@ -1,11 +1,10 @@
 "use client"
 
 import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query"
-import { ApiError, checked, confirmSession, idempotencyKey, send, type Schemas } from "@/lib/api"
+import { ApiError, checked, confirmSession, idempotencyKey, send, type Data, type Schemas } from "@/lib/api"
 import { queryKeys } from "@/lib/query-keys"
 
-// Workspace policy (types from the OpenAPI document; contract: shared/policy/README.md "HTTP API") and API tokens.
-// The server no longer serves API tokens (F26: recipes replaced them), so their types stay local.
+// Workspace policy and API tokens: types from the OpenAPI document; contract: shared/policy/README.md "HTTP API".
 
 export type PolicyNames = Schemas["PolicyNames"]
 export type Policy = Schemas["PolicyView"]
@@ -20,19 +19,8 @@ export type Explanation = Schemas["PolicyExplanation"]
 /** `author` is `user:<email>`; absent for versions nobody saved (the first one, written by Paperboat). */
 export type PolicyVersion = Schemas["PolicyVersion"]
 
-export type ScopeEntry = { dst: string[]; allow: string[]; ports?: (number | string)[] }
-
-export type APIToken = {
-  id: string
-  name: string
-  workspace: string
-  created_by: string
-  created_at: string
-  expires_at: string
-  last_used_at?: string
-  revoked_at?: string
-  scope?: ScopeEntry[]
-}
+export type ScopeEntry = Schemas["ApiTokenScopeEntry"]
+export type APIToken = Schemas["ApiToken"]
 
 /** A policy error with the server's `details` (the error list, or the access changes to confirm). */
 export class PolicyError extends ApiError {
@@ -194,13 +182,7 @@ export const apiTokensQuery = (workspace: string, state: "active" | "ended", ena
     queryKey: queryKeys.apiTokens(workspace, state),
     queryFn: async ({ pageParam, signal }) => {
       const query = new URLSearchParams({ limit: "50", state, ...(pageParam && { cursor: pageParam }) })
-      return call<{
-        api_tokens: APIToken[]
-        total: number
-        active_total: number
-        ended_total: number
-        next_cursor?: string
-      }>(
+      return call<Data<"/v1/workspaces/{ws}/api-tokens">>(
         "Loading API tokens",
         `${ws(workspace)}/api-tokens?${query}`,
         { signal },
@@ -216,14 +198,14 @@ export function createApiToken(
   workspace: string,
   fields: { name: string; expires_in_days: number; scope?: ScopeEntry[] },
 ) {
-  return call<{ api_token: APIToken; secret: string }>("Creating the token", `${ws(workspace)}/api-tokens`, {
+  return call<Data<"/v1/workspaces/{ws}/api-tokens", "post">>("Creating the token", `${ws(workspace)}/api-tokens`, {
     method: "POST",
     json: fields,
   })
 }
 
 export function revokeApiToken(workspace: string, id: string) {
-  return call<{ api_token: APIToken }>("Revoking the token", `${ws(workspace)}/api-tokens/${encodeURIComponent(id)}`, {
+  return call<Data<"/v1/workspaces/{ws}/api-tokens/{id}", "delete">>("Revoking the token", `${ws(workspace)}/api-tokens/${encodeURIComponent(id)}`, {
     method: "DELETE",
   })
 }
@@ -366,7 +348,7 @@ export function lineDiff(before: string, after: string): { kind: " " | "-" | "+"
 export function savedBy(policy: Policy) {
   if (!policy.updated_by) return ""
   const who = policy.updated_by.replace(/^user:/, "")
-  return ` by ${who}${policy.updated_with_recipe ? ` with recipe ${policy.updated_with_recipe}` : ""}`
+  return ` by ${who}${policy.updated_with_api_token ? ` with API token ${policy.updated_with_api_token}` : ""}${policy.updated_with_recipe ? ` with recipe ${policy.updated_with_recipe}` : ""}`
 }
 
 /** Shown wherever the signed-in member may look but not change the policy. */

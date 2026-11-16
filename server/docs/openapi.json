@@ -13608,6 +13608,14 @@
           "approve_new_machines": {
             "type": "boolean",
             "description": "Team only: machines members add wait for an owner or admin."
+          },
+          "sso_required": {
+            "type": "boolean",
+            "description": "Present (true) for a team whose members need a recent SSO sign-in."
+          },
+          "sso_signed_in": {
+            "type": "boolean",
+            "description": "With sso_required: whether the viewer's SSO sign-in currently satisfies the team."
           }
         }
       },
@@ -15383,6 +15391,7 @@
                 "type": "string",
                 "enum": [
                   "user",
+                  "api_token",
                   "recipe",
                   "directory",
                   "operator",
@@ -15399,6 +15408,10 @@
               "recipe_id": {
                 "type": "string",
                 "description": "The recipe a machine acted through; kind is recipe."
+              },
+              "token_id": {
+                "type": "string",
+                "description": "The API token a person acted through; kind is api_token."
               }
             },
             "required": [
@@ -17130,6 +17143,9 @@
           },
           "names": {
             "$ref": "#/components/schemas/PolicyNames"
+          },
+          "updated_with_api_token": {
+            "type": "string"
           }
         },
         "required": [
@@ -17180,6 +17196,9 @@
               "rewritten",
               "migrated"
             ]
+          },
+          "api_token": {
+            "type": "string"
           }
         },
         "required": [
@@ -18229,6 +18248,80 @@
           "state",
           "created_at",
           "updated_at"
+        ]
+      },
+      "ApiTokenScopeEntry": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "dst": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "allow": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "ports": {
+            "type": "array",
+            "items": {}
+          }
+        },
+        "required": [
+          "dst",
+          "allow"
+        ]
+      },
+      "ApiToken": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "workspace": {
+            "type": "string"
+          },
+          "created_by": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "last_used_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "revoked_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "scope": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ApiTokenScopeEntry"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "workspace",
+          "created_by",
+          "created_at",
+          "expires_at"
         ]
       }
     },
@@ -51413,7 +51506,49 @@
         ],
         "responses": {
           "200": {
-            "description": "JSON body as documented in shared/policy/README.md."
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "api_tokens": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/components/schemas/ApiToken"
+                          }
+                        },
+                        "total": {
+                          "type": "integer"
+                        },
+                        "active_total": {
+                          "type": "integer"
+                        },
+                        "ended_total": {
+                          "type": "integer"
+                        },
+                        "next_cursor": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "api_tokens",
+                        "total",
+                        "active_total",
+                        "ended_total"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
           },
           "400": {
             "$ref": "#/components/responses/Error"
@@ -51468,8 +51603,36 @@
           }
         },
         "responses": {
-          "200": {
-            "description": "JSON body as documented in shared/policy/README.md."
+          "201": {
+            "description": "Created. The secret is shown once.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "api_token": {
+                          "$ref": "#/components/schemas/ApiToken"
+                        },
+                        "secret": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "api_token",
+                        "secret"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
           },
           "400": {
             "$ref": "#/components/responses/Error"
@@ -51531,7 +51694,31 @@
         ],
         "responses": {
           "200": {
-            "description": "JSON body as documented in shared/policy/README.md."
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "api_token": {
+                          "$ref": "#/components/schemas/ApiToken"
+                        }
+                      },
+                      "required": [
+                        "api_token"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
           },
           "401": {
             "$ref": "#/components/responses/Error"
