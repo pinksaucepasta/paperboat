@@ -117,18 +117,21 @@ func RestartCurrentUserForUpdate(ctx context.Context) error {
 	if err := controller.Stop(ctx, ""); err != nil {
 		return err
 	}
-	return controller.Start(ctx, updateServiceDefinitionPath(runtime.GOOS, home))
+	return controller.Start(ctx, updateServiceDefinitionPath(runtime.GOOS, home, os.Geteuid()))
 }
 
 func updateDaemonController() service.NativeLifecycleController {
 	if runtime.GOOS == "darwin" {
 		return service.LaunchdController{Runner: service.ExecRunner{}, UID: os.Geteuid(), Label: service.DaemonLabel, UserDomain: true}
 	}
-	return service.SystemdController{Runner: service.ExecRunner{}, Unit: "paperboatd.service", User: true}
+	return service.UserSystemdController(service.ExecRunner{}, "paperboatd.service", os.Geteuid())
 }
 
 func updateServiceEnvironment(platform, home string, uid int) (map[string]string, error) {
-	path := updateServiceDefinitionPath(platform, home)
+	return readServiceEnvironment(platform, home, updateServiceDefinitionPath(platform, home, uid), uid)
+}
+
+func readServiceEnvironment(platform, home, path string, uid int) (map[string]string, error) {
 	file, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
 	if err != nil {
 		return nil, err
@@ -188,9 +191,12 @@ func updateServiceEnvironment(platform, home string, uid int) (map[string]string
 	return environment, nil
 }
 
-func updateServiceDefinitionPath(platform, home string) string {
+func updateServiceDefinitionPath(platform, home string, uid int) string {
 	if platform == "darwin" {
 		return filepath.Join(home, "Library", "LaunchAgents", service.DaemonLabel+".plist")
+	}
+	if root := service.UserServiceRoot(platform, home, uid); root != home {
+		return filepath.Join(root, "etc", "systemd", "system", "paperboatd.service")
 	}
 	return filepath.Join(home, ".config", "systemd", "user", "paperboatd.service")
 }

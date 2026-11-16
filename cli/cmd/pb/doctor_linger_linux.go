@@ -47,6 +47,9 @@ func doctorLingerCheck(systemdRuntime, lingerDirectory string, name func() (stri
 	}
 	_, err = os.Lstat(filepath.Join(lingerDirectory, account))
 	switch {
+	case account == "root":
+		// root's daemon is a system unit (service.UserServiceRoot); logout does not stop it.
+		check.Status, check.Summary = doctorpkg.StatusPass, "Paperboat runs as a system service."
 	case err == nil:
 		check.Status, check.Summary = doctorpkg.StatusPass, "Paperboat keeps running after you log out."
 	case errors.Is(err, os.ErrNotExist):

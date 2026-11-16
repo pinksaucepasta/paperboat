@@ -100,7 +100,7 @@ func removeService(ctx context.Context, config serviceConfig) error {
 	if config.Platform == "darwin" {
 		definition.Controller = hostservice.LaunchdController{Runner: config.Runner, UID: config.UID, Label: hostservice.ConfigLabel, UserDomain: true}
 	} else {
-		definition.Controller = hostservice.SystemdController{Runner: config.Runner, Unit: hostservice.ConfigUnit, User: true}
+		definition.Controller = hostservice.UserSystemdController(config.Runner, hostservice.ConfigUnit, config.UID)
 	}
 	return hostservice.Remove(ctx, definition)
 }
@@ -180,12 +180,12 @@ func serviceDefinition(config serviceConfig) (hostservice.Config, error) {
 	case "darwin":
 		controller = hostservice.LaunchdController{Runner: config.Runner, UID: config.UID, Label: hostservice.DaemonLabel, UserDomain: true}
 	case "linux":
-		controller = hostservice.SystemdController{Runner: config.Runner, Unit: "paperboatd.service", User: true}
+		controller = hostservice.UserSystemdController(config.Runner, "paperboatd.service", config.UID)
 	default:
 		return hostservice.Config{}, hostservice.ErrUnsupportedPlatform
 	}
 	return hostservice.Config{
-		Platform: config.Platform, Kind: hostservice.DaemonKind, ConfigRoot: config.Home,
+		Platform: config.Platform, Kind: hostservice.DaemonKind, ConfigRoot: hostservice.UserServiceRoot(config.Platform, config.Home, config.UID),
 		Executable: config.Executable, User: config.Username, Group: config.Group,
 		Arguments: arguments, Environment: config.Environment, Controller: controller,
 	}, nil

@@ -99,6 +99,28 @@ type SystemdController struct {
 	User   bool
 }
 
+// UserServiceRoot is the ConfigRoot of a per-user service (daemon, config sync) of the account with
+// this home and uid. root has no systemd user manager in containers, under cloud-init or in Docker, so
+// on Linux root's per-user services are system units, as tailscaled's is
+// (ref/tailscale/cmd/tailscaled/tailscaled.service, WantedBy=multi-user.target).
+func UserServiceRoot(platform, home string, uid int) string {
+	if platform == "linux" && uid == 0 {
+		return "/"
+	}
+	return home
+}
+
+// UserSystemdController controls a per-user unit of the account with this uid; see UserServiceRoot.
+func UserSystemdController(runner Runner, unit string, uid int) SystemdController {
+	return SystemdController{Runner: runner, Unit: unit, User: uid != 0}
+}
+
+// userUnit is true for a per-user service declared in the account's systemd user manager.
+func userUnit(config Config) bool {
+	controller, ok := config.Controller.(SystemdController)
+	return !ok || controller.User
+}
+
 func (c SystemdController) unit() string {
 	if c.Unit != "" {
 		return c.Unit

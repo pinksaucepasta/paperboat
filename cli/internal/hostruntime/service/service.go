@@ -185,10 +185,14 @@ func newInstaller(config Config, allowMissingExecutable bool) (*Installer, error
 			unit = "paperboat-session-owner.service"
 		} else if config.Kind == UpdaterKind {
 			unit = "paperboat-updated.service"
-		} else if config.Kind == ConfigKind {
-			path = filepath.Join(config.ConfigRoot, ".config", "systemd", "user", ConfigUnit)
-		} else if config.Kind == DaemonKind {
-			path = filepath.Join(config.ConfigRoot, ".config", "systemd", "user", "paperboatd.service")
+		} else if config.Kind == ConfigKind || config.Kind == DaemonKind {
+			unit = ConfigUnit
+			if config.Kind == DaemonKind {
+				unit = "paperboatd.service"
+			}
+			if userUnit(config) {
+				path = filepath.Join(config.ConfigRoot, ".config", "systemd", "user", unit)
+			}
 		} else if config.Kind != WorkerKind && config.Kind != HostdKind && config.Kind != UpdaterKind {
 			return nil, ErrInvalidDefinition
 		}
@@ -641,7 +645,7 @@ func renderSystemd(config Config) ([]byte, error) {
 	}
 	options = append(options, unit.NewUnitOption("Service", "PrivateTmp", privateTmp))
 	wantedBy := "multi-user.target"
-	if config.Kind == ConfigKind || config.Kind == DaemonKind {
+	if (config.Kind == ConfigKind || config.Kind == DaemonKind) && userUnit(config) {
 		wantedBy = "default.target"
 	}
 	options = append(options, unit.NewUnitOption("Install", "WantedBy", wantedBy))

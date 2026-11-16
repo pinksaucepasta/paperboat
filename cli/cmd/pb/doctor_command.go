@@ -885,6 +885,9 @@ func collectLocalDoctor(ctx context.Context) (report localDoctorReport) {
 		}
 	} else if home, homeErr := os.UserHomeDir(); homeErr == nil {
 		definition := filepath.Join(home, ".config", "systemd", "user", service.ConfigUnit)
+		if root := service.UserServiceRoot(runtime.GOOS, home, os.Geteuid()); root != home {
+			definition = filepath.Join(root, "etc", "systemd", "system", service.ConfigUnit)
+		}
 		if runtime.GOOS == "darwin" {
 			definition = filepath.Join(home, "Library", "LaunchAgents", service.ConfigLabel+".plist")
 		}
@@ -911,7 +914,11 @@ func localConfigServiceState() string {
 	defer cancel()
 	if runtime.GOOS == "linux" {
 		// user-console: Linux only.
-		query := exec.CommandContext(ctx, "systemctl", "--user", "is-active", service.ConfigUnit)
+		arguments := []string{"is-active", service.ConfigUnit}
+		if service.UserSystemdController(nil, service.ConfigUnit, os.Geteuid()).User {
+			arguments = append([]string{"--user"}, arguments...)
+		}
+		query := exec.CommandContext(ctx, "systemctl", arguments...)
 		prepareConfigServiceQuery(query)
 		output, err := query.Output()
 		state := strings.TrimSpace(string(output))

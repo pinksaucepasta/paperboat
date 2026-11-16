@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -281,6 +282,51 @@ func TestLocalDaemonDefinitionsUsePerUserDomains(t *testing.T) {
 				}
 			} else if !strings.HasSuffix(installer.DefinitionPath(), "/.config/systemd/user/paperboatd.service") || !strings.Contains(definition, "Description=Paperboat local daemon") || !strings.Contains(definition, "WantedBy=default.target") || strings.Contains(definition, "User=test") {
 				t.Fatalf("path=%s body=%s", installer.DefinitionPath(), body)
+			}
+		})
+	}
+}
+
+// root has no systemd user manager in containers or under cloud-init: its daemon and config sync
+// are system units with the same install and removal paths.
+func TestRootUserServicesAreSystemUnits(t *testing.T) {
+	for _, kind := range []string{DaemonKind, ConfigKind} {
+		t.Run(kind, func(t *testing.T) {
+			unitName := map[string]string{DaemonKind: "paperboatd.service", ConfigKind: ConfigUnit}[kind]
+			root, runner := t.TempDir(), &commandRunner{}
+			if got := UserServiceRoot("linux", "/root", 0); got != "/" {
+				t.Fatalf("root service root = %q", got)
+			}
+			if got := UserServiceRoot("linux", "/home/test", 1000); got != "/home/test" {
+				t.Fatalf("user service root = %q", got)
+			}
+			installer, err := New(Config{Platform: "linux", Kind: kind, ConfigRoot: root, Executable: executable(t), User: "root", Group: "root", Arguments: []string{"daemon"}, Controller: UserSystemdController(runner, unitName, 0)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := installer.Install(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			if want := filepath.Join(root, "etc", "systemd", "system", unitName); installer.DefinitionPath() != want {
+				t.Fatalf("path=%s want %s", installer.DefinitionPath(), want)
+			}
+			body, _ := os.ReadFile(installer.DefinitionPath())
+			if !strings.Contains(string(body), "WantedBy=multi-user.target") || strings.Contains(string(body), "default.target") {
+				t.Fatalf("body=%s", body)
+			}
+			if err := installer.Uninstall(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := os.Lstat(installer.DefinitionPath()); !os.IsNotExist(err) {
+				t.Fatalf("definition remains: %v", err)
+			}
+			for _, call := range runner.calls {
+				if slices.Contains(call, "--user") {
+					t.Fatalf("root used the user manager: %v", runner.calls)
+				}
+			}
+			if len(runner.calls) == 0 {
+				t.Fatal("no systemctl calls")
 			}
 		})
 	}

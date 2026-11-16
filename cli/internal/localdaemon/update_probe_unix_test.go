@@ -25,7 +25,7 @@ func TestUpdateProbeReadsInstalledNamespace(t *testing.T) {
 			if err := os.WriteFile(path, []byte(body), 0600); err != nil {
 				t.Fatal(err)
 			}
-			got, err := updateServiceEnvironment(platform, home, os.Geteuid())
+			got, err := readServiceEnvironment(platform, home, path, os.Geteuid())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -38,11 +38,14 @@ func TestUpdateProbeReadsInstalledNamespace(t *testing.T) {
 
 func TestUpdateServiceDefinitionPath(t *testing.T) {
 	home := filepath.Join(string(filepath.Separator), "Users", "paperboat")
-	if got, want := updateServiceDefinitionPath("darwin", home), filepath.Join(home, "Library", "LaunchAgents", service.DaemonLabel+".plist"); got != want {
+	if got, want := updateServiceDefinitionPath("darwin", home, 501), filepath.Join(home, "Library", "LaunchAgents", service.DaemonLabel+".plist"); got != want {
 		t.Fatalf("darwin definition path = %q, want %q", got, want)
 	}
-	if got, want := updateServiceDefinitionPath("linux", home), filepath.Join(home, ".config", "systemd", "user", "paperboatd.service"); got != want {
+	if got, want := updateServiceDefinitionPath("linux", home, 501), filepath.Join(home, ".config", "systemd", "user", "paperboatd.service"); got != want {
 		t.Fatalf("linux definition path = %q, want %q", got, want)
+	}
+	if got, want := updateServiceDefinitionPath("linux", "/root", 0), "/etc/systemd/system/paperboatd.service"; got != want {
+		t.Fatalf("root linux definition path = %q, want %q", got, want)
 	}
 }
 
@@ -85,7 +88,7 @@ func TestUpdateProbeRejectsUnsafeDeclaration(t *testing.T) {
 					}
 				}
 			}
-			if _, err := updateServiceEnvironment("linux", home, uid); err == nil {
+			if _, err := readServiceEnvironment("linux", home, path, uid); err == nil {
 				t.Fatal("accepted unsafe declaration")
 			}
 		})
@@ -93,7 +96,8 @@ func TestUpdateProbeRejectsUnsafeDeclaration(t *testing.T) {
 }
 
 func TestUpdateProbeMissingDeclaration(t *testing.T) {
-	_, err := updateServiceEnvironment("linux", t.TempDir(), os.Geteuid())
+	home := t.TempDir()
+	_, err := readServiceEnvironment("linux", home, updateServiceDefinitionPath("linux", home, 501), os.Geteuid())
 	if !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("missing declaration: %v", err)
 	}

@@ -292,20 +292,20 @@ func manageConfigService(ctx context.Context, machineID string, install bool) er
 	query := &exec.Cmd{}
 	prepareConfigServiceQuery(query)
 	runner := service.ExecRunner{Environment: query.Env}
+	uid, err := strconv.Atoi(account.Uid)
+	if err != nil {
+		return err
+	}
 	var controller service.Controller
 	switch runtime.GOOS {
 	case "darwin":
-		uid, parseErr := strconv.Atoi(account.Uid)
-		if parseErr != nil {
-			return parseErr
-		}
 		controller = service.LaunchdController{Runner: runner, UID: uid, Label: service.ConfigLabel, UserDomain: true}
 	case "linux":
-		controller = service.SystemdController{Runner: runner, Unit: service.ConfigUnit, User: true}
+		controller = service.UserSystemdController(runner, service.ConfigUnit, uid)
 	default:
 		return service.ErrUnsupportedPlatform
 	}
-	definition := service.Config{Platform: runtime.GOOS, Kind: service.ConfigKind, ConfigRoot: home, Executable: executable, User: account.Username, Group: group.Name, Arguments: []string{"daemon", "__runtime-config", "--state-root", stateRoot}, Environment: map[string]string{"HOME": home}, Controller: controller}
+	definition := service.Config{Platform: runtime.GOOS, Kind: service.ConfigKind, ConfigRoot: service.UserServiceRoot(runtime.GOOS, home, uid), Executable: executable, User: account.Username, Group: group.Name, Arguments: []string{"daemon", "__runtime-config", "--state-root", stateRoot}, Environment: map[string]string{"HOME": home}, Controller: controller}
 	if !install {
 		return service.Remove(ctx, definition)
 	}

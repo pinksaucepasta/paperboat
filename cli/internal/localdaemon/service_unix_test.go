@@ -91,6 +91,17 @@ func TestInstallServiceUsesUserManagerAndExactArguments(t *testing.T) {
 	}
 }
 
+func TestRootDaemonServiceIsSystemUnit(t *testing.T) {
+	runner := &serviceRunner{}
+	installer, err := newServiceInstaller(serviceConfig{Platform: "linux", Home: "/root", Executable: serviceExecutable(t), Username: "root", Group: "root", UID: 0, Environment: map[string]string{"HOME": "/root"}, Runner: runner})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := installer.DefinitionPath(); got != "/etc/systemd/system/paperboatd.service" {
+		t.Fatalf("root daemon definition = %q", got)
+	}
+}
+
 func TestInstallServiceRejectsRelativeConfigAndUnsupportedPlatform(t *testing.T) {
 	base := serviceConfig{Platform: "linux", Home: t.TempDir(), Executable: serviceExecutable(t), ConfigPath: "relative", Username: "test", Group: "staff", UID: 501, Environment: map[string]string{"HOME": "/tmp"}, Runner: &serviceRunner{}}
 	if err := installService(context.Background(), base); err == nil {

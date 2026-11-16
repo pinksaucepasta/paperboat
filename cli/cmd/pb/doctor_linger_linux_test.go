@@ -12,8 +12,8 @@ import (
 )
 
 func TestDoctorWarnsWhenTheDaemonStopsAtLogout(t *testing.T) {
-	root := t.TempDir()
-	systemd, linger := filepath.Join(root, "systemd"), filepath.Join(root, "linger")
+	directory := t.TempDir()
+	systemd, linger := filepath.Join(directory, "systemd"), filepath.Join(directory, "linger")
 	for _, directory := range []string{systemd, linger} {
 		if err := os.MkdirAll(directory, 0o755); err != nil {
 			t.Fatal(err)
@@ -23,6 +23,10 @@ func TestDoctorWarnsWhenTheDaemonStopsAtLogout(t *testing.T) {
 	off := doctorLingerCheck(systemd, linger, name)
 	if off.Status != doctorpkg.StatusWarning || !strings.Contains(off.Summary, "stops when you log out") || !strings.Contains(off.Recovery, "enable-linger tester") {
 		t.Fatalf("lingering off was not explained: %+v", off)
+	}
+	root := func() (string, error) { return "root", nil }
+	if asRoot := doctorLingerCheck(systemd, linger, root); asRoot.Status != doctorpkg.StatusPass {
+		t.Fatalf("root's system daemon reported %+v", asRoot)
 	}
 	if err := os.WriteFile(filepath.Join(linger, "tester"), nil, 0o644); err != nil {
 		t.Fatal(err)
