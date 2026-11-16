@@ -52,7 +52,19 @@ func TestNativeNewResourceRefreshAndRejectedStreamIsolation(t *testing.T) {
 	var refreshMode atomic.Int32
 	var lagUntil atomic.Int32
 	refreshMode.Store(4) // the first-use path below: the refresh adds grant_new at once
-	clientOwner, err := native.NewOwner(native.Config{Authority: clientAuthority, TLS: clientTLS})
+	var clientRefreshes atomic.Int32
+	var clientAdds atomic.Int32 // the client refresh on which grant_client_lag reaches the client's signed state
+	clientOwner, err := native.NewOwner(native.Config{Authority: clientAuthority, TLS: clientTLS, RefreshAuthority: func(context.Context) error {
+		if clientRefreshes.Add(1) != clientAdds.Load() {
+			return nil
+		}
+		clientConfig.Generation++
+		scope := clientConfig.Peers[0].Scopes[0]
+		scope.ResourceID = "grant_client_lag"
+		clientConfig.Peers[0].Scopes = append(clientConfig.Peers[0].Scopes, scope)
+		applyTestConfiguration(t, clientAuthority, signerPrivate, clientConfig)
+		return nil
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -285,6 +297,17 @@ func TestNativeNewResourceRefreshAndRejectedStreamIsolation(t *testing.T) {
 	lagged := open("lagged", "grant_lagged", "grant_lagged")
 	echo(lagged)
 	lagged.Close()
+	// The same on the dialing end: the host already holds grant_client_lag, the client's own signed state gets it only on
+	// its second refresh; the client reads its own write instead of refusing the dial.
+	serverConfig.Generation++
+	hostScope := serverConfig.Peers[0].Scopes[0]
+	hostScope.ResourceID = "grant_client_lag"
+	serverConfig.Peers[0].Scopes = append(serverConfig.Peers[0].Scopes, hostScope)
+	applyTestConfiguration(t, serverAuthority, signerPrivate, serverConfig)
+	clientAdds.Store(clientRefreshes.Load() + 2)
+	clientLag := open("client_lag", "grant_client_lag", "grant_client_lag")
+	echo(clientLag)
+	clientLag.Close()
 	echo(existing)
 	// Invalid or incomplete admission belongs to that stream, not every
 	// authorized application already sharing its QUIC connection.

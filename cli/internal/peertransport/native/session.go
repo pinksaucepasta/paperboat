@@ -229,6 +229,11 @@ func (s *Session) OpenAuthorized(ctx context.Context, header streamauth.Header, 
 		// resume's that left the signed scope) is admitted on the host by its standing rule for this peer
 		// (standingResource); the client dials on the same rule, and only a withdrawn rule refuses it here.
 		resource = s.dialStandingResource(header, capability)
+		// F21-164: 50 viewers joining at once, the client's own signed state lagged the access sessions just issued
+		// and 14 dials were refused here (scope_rejected) before the host was asked. Read-your-writes, as the host does.
+		if resource == "" && s.owner.refreshAuthority != nil && s.refreshUntilAllowed(ctx, accessSessionID, capability, "dial") == nil && s.owner.authority.Allows(s.peerID, accessSessionID, capability, "dial") {
+			resource = accessSessionID
+		}
 		if resource == "" {
 			return nil, tailnet.ErrAdmission
 		}
@@ -665,16 +670,9 @@ func (s *Session) authorizeIncoming(ctx context.Context, header streamauth.Heade
 		return host, nil
 	}
 	if s.owner.refreshAuthority != nil {
-		if err := s.owner.refreshAuthority(ctx); err != nil {
+		if err := s.refreshUntilAllowed(ctx, resourceID, capability, "accept"); err != nil {
 			diagnosticlog.TryWarn("native stream admission refused", "reason", "authority_refresh")
 			return "", errors.Join(tailnet.ErrAdmission, err)
-		}
-		catchUp, cancel := context.WithTimeout(ctx, scopeCatchUp)
-		defer cancel()
-		for !s.owner.authority.Allows(s.peerID, resourceID, capability, "accept") {
-			if reattach.Wait(catchUp, scopeCatchUpInterval) != nil || s.owner.refreshAuthority(catchUp) != nil {
-				break
-			}
 		}
 	}
 	if !s.owner.authority.Allows(s.peerID, resourceID, capability, "accept") {
@@ -684,7 +682,25 @@ func (s *Session) authorizeIncoming(ctx context.Context, header streamauth.Heade
 	return resourceID, nil
 }
 
-// scopeCatchUp bounds how long a valid credential waits for its scope to reach the host's signed state; scopeCatchUpInterval
+// refreshUntilAllowed refreshes the signed state (the first time under ctx; its error is returned), then again every
+// scopeCatchUpInterval for up to scopeCatchUp until it allows resource: read-your-writes for an operation the server has
+// just issued, on either end. Concurrent callers share each refresh (Authority.refresh: one slot, and a request asked
+// before the one in flight is answered by it).
+func (s *Session) refreshUntilAllowed(ctx context.Context, resource, capability, direction string) error {
+	if err := s.owner.refreshAuthority(ctx); err != nil {
+		return err
+	}
+	catchUp, cancel := context.WithTimeout(ctx, scopeCatchUp)
+	defer cancel()
+	for !s.owner.authority.Allows(s.peerID, resource, capability, direction) {
+		if reattach.Wait(catchUp, scopeCatchUpInterval) != nil || s.owner.refreshAuthority(catchUp) != nil {
+			break
+		}
+	}
+	return nil
+}
+
+// scopeCatchUp bounds how long a valid credential waits for its scope to reach the signed state; scopeCatchUpInterval
 // spaces the refreshes it asks for meanwhile.
 const (
 	scopeCatchUp         = 3 * time.Second
