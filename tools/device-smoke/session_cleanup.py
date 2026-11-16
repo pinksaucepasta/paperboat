@@ -89,7 +89,10 @@ def cleanup(pb, target, name):
         raise CleanupError('the session id is invalid')
     if owned[0].get("state") != "closed":
         mutate(pb, "close", target, environment, session)
-        deadline = time.monotonic() + 30
+        # A close the host refuses under load (its 32 operation slots full: retryable) is applied by the server's worker
+        # with 1, 2, 4, 8, 16 s backoff (usermachines retryTerminalSessionOperation), so 30 s was too short on a loaded
+        # host (F21-164: 5 of 91 showed closed ~10 s later). One host close takes at most ~12 s.
+        deadline = time.monotonic() + 120
         while True:
             _, sessions = inventory(pb, target, environment)
             current = [s for s in sessions if s.get("id") == session]
@@ -98,7 +101,7 @@ def cleanup(pb, target, name):
             if current[0].get("state") == "closed":
                 break
             if time.monotonic() >= deadline:
-                raise CleanupError('the session did not show closed within 30 s')
+                raise CleanupError('the session did not show closed within 120 s')
             time.sleep(1)
     mutate(pb, "delete", target, environment, session)
     _, remaining = inventory(pb, target, environment)
