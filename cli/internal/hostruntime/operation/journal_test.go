@@ -268,3 +268,37 @@ func TestPersistentJournalDeletesExpiredRowsDuringNormalOperation(t *testing.T) 
 		t.Fatalf("outcome=%s replay=%v calls=%d err=%v", outcome.Result, replay, calls.Load(), err)
 	}
 }
+
+// A Forget outcome is handed to the caller once and not remembered, in memory or on disk: the same ID runs again,
+// also after the journal is rebuilt from the store.
+func TestPersistentJournalForgetsAnOutcomeMarkedForget(t *testing.T) {
+	durable, err := store.Open(context.Background(), store.Config{Root: filepath.Join(t.TempDir(), "state")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer durable.Close()
+	now := time.Now().UTC()
+	open := func() *Journal {
+		journal, openErr := NewPersistentJournal(context.Background(), 8, durable, time.Hour, func() time.Time { return now })
+		if openErr != nil {
+			t.Fatal(openErr)
+		}
+		return journal
+	}
+	journal := open()
+	request := []byte(`{"a":1}`)
+	busy, _, err := journal.Execute(context.Background(), "op_00000001", request, func(context.Context) Outcome { return Outcome{ErrorCode: "resource_limit", Forget: true} })
+	if err != nil || busy.ErrorCode != "resource_limit" {
+		t.Fatalf("busy=%v err=%v", busy, err)
+	}
+	for _, j := range []*Journal{journal, open()} {
+		calls := 0
+		outcome, replay, runErr := j.Execute(context.Background(), "op_00000001", request, func(context.Context) Outcome { calls++; return Outcome{Result: []byte(`1`)} })
+		if runErr != nil || replay || calls != 1 || string(outcome.Result) != "1" {
+			t.Fatalf("retry: outcome=%s replay=%v calls=%d err=%v", outcome.Result, replay, calls, runErr)
+		}
+		if err := durable.ForgetOperation(context.Background(), "op_00000001"); err != nil {
+			t.Fatal(err)
+		}
+	}
+}

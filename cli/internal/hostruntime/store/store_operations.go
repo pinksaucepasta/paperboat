@@ -151,6 +151,13 @@ func (s *Store) CompleteOperation(ctx context.Context, operation OperationResult
 	return ErrConflict
 }
 
+// ForgetOperation removes an operation's record so the same ID can run again.
+func (s *Store) ForgetOperation(ctx context.Context, operationID string) (resultErr error) {
+	defer protectStoreError(&resultErr)
+	_, err := s.db.ExecContext(ctx, `DELETE FROM operation_results WHERE operation_id=?`, operationID)
+	return err
+}
+
 func (s *Store) DeleteExpiredOperations(ctx context.Context, now time.Time) (resultErr error) {
 	defer protectStoreError(&resultErr)
 	return s.q.DeleteExpiredOperations(ctx, now.UnixNano())

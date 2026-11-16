@@ -40,6 +40,9 @@ func (e invalidCanonicalRequestError) Unwrap() []error {
 type Outcome struct {
 	Result    json.RawMessage
 	ErrorCode string
+	// Forget drops the record once the caller has the outcome: a refusal that the next attempt may not get (a busy
+	// destination) is not replayed to a retry with the same operation ID.
+	Forget bool
 }
 
 type entry struct {
@@ -193,7 +196,9 @@ func (j *Journal) Execute(ctx context.Context, operationID string, request []byt
 
 	outcome := cloneOutcome(run(ctx))
 	var persistenceErr error
-	if j.store != nil {
+	if j.store != nil && outcome.Forget {
+		persistenceErr = j.store.ForgetOperation(context.Background(), operationID)
+	} else if j.store != nil {
 		now := j.now()
 		if len(outcome.Result) > store.MaxOperationResultBytes {
 			persistenceErr = store.ErrResultTooLarge
@@ -206,6 +211,8 @@ func (j *Journal) Execute(ctx context.Context, operationID string, request []byt
 	current.complete = true
 	if persistenceErr != nil {
 		current.err = errors.Join(ErrOperationUncertain, persistenceErr)
+	} else if outcome.Forget {
+		delete(j.entries, operationID)
 	} else {
 		j.order = append(j.order, operationID)
 	}

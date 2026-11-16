@@ -487,3 +487,36 @@ func TestFileTransferHTTPDeleteInterruptsBlockedUpload(t *testing.T) {
 		t.Fatalf("transfer=%#v err=%v", transfer, err)
 	}
 }
+
+// F21-166: a Create refused because the destination is at its transfer limit is not remembered under its operation ID,
+// so the sender's retry (same batch, same ID) gets the slot once one frees instead of the replayed refusal.
+func TestFileTransferHTTPBusyCreateRefusalIsNotReplayedToTheRetry(t *testing.T) {
+	handler, _ := fileTransferTestHandler(t)
+	data := []byte("x")
+	files := []filetransfer.File{{Basename: "x", Size: 1, SHA256: transferDigest(data)}}
+	var held []string
+	for _, batch := range []string{"fb_busy_1", "fb_busy_2"} {
+		created, err := handler.config.Service.Create(context.Background(), filetransfer.CreateRequest{BatchID: batch, SourceMachineID: "machine_client", DestinationMachineID: "machine_host", InitiatingUserID: "user_1", SessionID: "ses_1", Files: files})
+		if err != nil {
+			t.Fatal(err)
+		}
+		held = append(held, created[0].ID)
+	}
+	input, _ := json.Marshal(addressedTransferRequest("fb_busy_3", "ses_1", files))
+	send := func() *httptest.ResponseRecorder {
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, transferRequest(http.MethodPost, "http://helper.test/v1/file-transfers", input))
+		return response
+	}
+	if response := send(); response.Code != http.StatusTooManyRequests || !strings.Contains(response.Body.String(), "resource_limit") {
+		t.Fatalf("a third transfer: status=%d %s", response.Code, response.Body.String())
+	}
+	deleted := httptest.NewRecorder()
+	handler.ServeHTTP(deleted, transferRequest(http.MethodDelete, "http://helper.test/v1/file-transfers/"+held[0], nil))
+	if deleted.Code != http.StatusNoContent {
+		t.Fatalf("delete status=%d %s", deleted.Code, deleted.Body.String())
+	}
+	if response := send(); response.Code != http.StatusCreated || response.Header().Get(HeaderReplayed) != "" {
+		t.Fatalf("the retry after a slot freed: status=%d replayed=%q %s", response.Code, response.Header().Get(HeaderReplayed), response.Body.String())
+	}
+}

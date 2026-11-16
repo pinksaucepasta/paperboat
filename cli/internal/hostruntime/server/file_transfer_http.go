@@ -322,7 +322,8 @@ func (h *FileTransferHandler) serveCollection(writer http.ResponseWriter, reques
 		transfers, createErr := h.config.Service.Create(ctx, create)
 		if createErr != nil {
 			createFailure = createErr
-			return operation.Outcome{ErrorCode: fileTransferErrorCode(createErr)}
+			code := fileTransferErrorCode(createErr)
+			return operation.Outcome{ErrorCode: code, Forget: code == "resource_limit"}
 		}
 		encoded, marshalErr := json.Marshal(createFileTransferResponse{BatchID: input.BatchID, Transfers: transfers})
 		if marshalErr != nil {
