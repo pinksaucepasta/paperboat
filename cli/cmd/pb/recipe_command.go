@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/url"
@@ -28,22 +29,28 @@ sets up a machine with one command and no prompt.`, Args: commandArgs(cobra.NoAr
 	return root
 }
 
+// recipeFileRefusal is a problem in the recipe file: its own message (file:line:col), without the
+// command help, which says nothing about the file.
+func recipeFileRefusal(message string) error {
+	return usageError{err: errors.New(message), publicMessage: message, refusal: true}
+}
+
 // readRecipeFile reads and validates a recipe file on this computer, with file:line:col errors.
 func readRecipeFile(path string) (name, format, source string, parsed recipe.Recipe, err error) {
 	if name, err = recipe.NameFromFile(path); err != nil {
-		return "", "", "", parsed, localArgumentError(err.Error())
+		return "", "", "", parsed, recipeFileRefusal(err.Error())
 	}
 	file, err := os.Open(path)
 	if err != nil {
-		return "", "", "", parsed, localArgumentError(fmt.Sprintf("read the recipe file: %v", err))
+		return "", "", "", parsed, recipeFileRefusal(fmt.Sprintf("read the recipe file: %v", err))
 	}
 	defer file.Close()
 	data, err := io.ReadAll(io.LimitReader(file, recipe.MaxSourceBytes+1))
 	if err != nil {
-		return "", "", "", parsed, localArgumentError(fmt.Sprintf("read the recipe file: %v", err))
+		return "", "", "", parsed, recipeFileRefusal(fmt.Sprintf("read the recipe file: %v", err))
 	}
 	if parsed, err = recipe.Parse(path, data); err != nil {
-		return "", "", "", parsed, localArgumentError(err.Error())
+		return "", "", "", parsed, recipeFileRefusal(err.Error())
 	}
 	return name, strings.TrimPrefix(strings.ToLower(filepath.Ext(path)), "."), string(data), parsed, nil
 }

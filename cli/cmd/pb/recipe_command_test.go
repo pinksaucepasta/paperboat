@@ -67,7 +67,7 @@ func TestRecipeCreateSendsIDAndAuthAndPrintsTheTokenOnce(t *testing.T) {
 func TestRecipeCreateRefusesABadFileLocally(t *testing.T) {
 	_, url := newPolicyFake(t)
 	code, out, errOut := runPolicyCLI(t, url, "recipe", "create", "-f", writeRecipeFile(t, "ci.toml", "tag = [\"ci\"]\n"))
-	if code == 0 || !strings.Contains(out+errOut, `ci.toml:1:1: unknown key "tag". Did you mean "tags"?`) {
+	if code == 0 || !strings.Contains(out+errOut, `ci.toml:1:1: unknown key "tag". Did you mean "tags"?`) || strings.Contains(out+errOut, "Usage:") {
 		t.Fatalf("code=%d out=%s err=%s", code, out, errOut)
 	}
 	code, out, errOut = runPolicyCLI(t, url, "recipe", "create", "-f", writeRecipeFile(t, "Bad Name.toml", "tags = []\n"))
