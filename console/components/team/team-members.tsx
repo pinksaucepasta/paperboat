@@ -31,6 +31,7 @@ import { cn } from "@/lib/utils"
 import { CopyButton } from "@/components/copy-button"
 import { InviteDialog } from "@/components/team/invite-dialog"
 import { TeamConfigDefault } from "@/components/team/team-config-default"
+import { TeamGrants } from "@/components/team/team-grants"
 import { TeamSecurity } from "@/components/team/team-security"
 import { RecordingSettings } from "@/components/recordings/recording-settings"
 import { TeamStorage } from "@/components/team/team-storage"
@@ -221,6 +222,7 @@ export function TeamManage({ workspace }: { workspace: Workspace }) {
         </section>
 
         {admin && <TeamSettings team={team.data} owner={actor === "owner"} />}
+        {admin && <TeamGrants team={team.data} emails={emails} />}
         {admin && <TeamConfigDefault team={team.data.team_id} />}
         <DangerZone team={team.data} owner={actor === "owner"} />
         </>

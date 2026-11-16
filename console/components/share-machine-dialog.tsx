@@ -2,6 +2,7 @@
 
 import { CircleNotchIcon } from "@phosphor-icons/react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
+import { useState } from "react"
 import { toast } from "sonner"
 import {
   api,
@@ -16,7 +17,9 @@ import {
   type Workspace,
 } from "@/lib/api"
 import { useMachineDomains } from "@/lib/machine-domains"
+import { moveMachine } from "@/lib/teams"
 import { StatusDot } from "@/components/machine-status"
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { Skeleton } from "@/components/ui/skeleton"
 
 /**
@@ -25,6 +28,7 @@ import { Skeleton } from "@/components/ui/skeleton"
  */
 export function ShareMachine({ team, onDone }: { team: Workspace; onDone: () => void }) {
   const queryClient = useQueryClient()
+  const [mode, setMode] = useState<"share" | "move">("share")
   const { primary: primaryDomain } = useMachineDomains()
   const { data: me } = useApiQuery(meQuery)
   const { data: workspaces } = useApiQuery(workspacesQuery)
@@ -38,6 +42,7 @@ export function ShareMachine({ team, onDone }: { team: Workspace; onDone: () => 
 
   const share = useMutation({
     mutationFn: async (machine: Machine) => {
+      if (mode === "move") return moveMachine({ team_id: team.id }, machine.id, "transfer_to_team")
       const path = `teams/${encodeURIComponent(team.id)}`
       // Team changes are fenced by the team's generation, read just before the change.
       const current = await api<Team>(path)
@@ -57,9 +62,11 @@ export function ShareMachine({ team, onDone }: { team: Workspace; onDone: () => 
       await queryClient.invalidateQueries({ queryKey: ["team", team.id] })
       const waiting = updated.machine_requests?.some((r) => r.machine_id === machine.id && r.state === "pending")
       toast.success(
-        waiting
-          ? `${machine.alias} is waiting for an owner or admin of ${team.name}`
-          : `${machine.alias} added to ${team.name}`,
+        mode === "move"
+          ? `${machine.alias} moved to ${team.name}`
+          : waiting
+            ? `${machine.alias} is waiting for an owner or admin of ${team.name}`
+            : `${machine.alias} added to ${team.name}`,
       )
       onDone()
     },
@@ -85,6 +92,23 @@ export function ShareMachine({ team, onDone }: { team: Workspace; onDone: () => 
 
   return (
     <div className="flex flex-col gap-3">
+      {(team.role === "owner" || team.role === "admin") && (
+        <ToggleGroup
+          value={[mode]}
+          onValueChange={(value) => value[0] && setMode(value[0] as "share" | "move")}
+          variant="outline"
+          spacing={0}
+          className="self-start"
+        >
+          <ToggleGroupItem value="share">Share</ToggleGroupItem>
+          <ToggleGroupItem value="move">Move</ToggleGroupItem>
+        </ToggleGroup>
+      )}
+      {mode === "move" && (
+        <p className="text-xs text-muted-foreground">
+          {team.name} owns a moved machine. Move it back to Personal from Machine access.
+        </p>
+      )}
       <ul className="-mx-2 flex max-h-80 flex-col overflow-y-auto">
         {yours.map((machine) => (
           <li key={machine.id}>
@@ -106,7 +130,7 @@ export function ShareMachine({ team, onDone }: { team: Workspace; onDone: () => 
               {share.isPending && share.variables?.id === machine.id ? (
                 <CircleNotchIcon className="size-4 animate-spin text-muted-foreground" />
               ) : (
-                <span className="text-sm text-muted-foreground">Add</span>
+                <span className="text-sm text-muted-foreground">{mode === "move" ? "Move" : "Add"}</span>
               )}
             </button>
           </li>

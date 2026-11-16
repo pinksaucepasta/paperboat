@@ -74,7 +74,7 @@ const teamPath = (team: string) => `teams/${encodeURIComponent(team)}`
  * Team changes are fenced by the team's generation. The page's copy can be a moment behind its own
  * previous change, so a change reads the generation just before it is sent.
  */
-const freshGeneration = async (team: TeamSummary) => (await api<TeamSummary>(teamPath(team.team_id))).generation
+const freshGeneration = async (team: Pick<TeamSummary, "team_id">) => (await api<TeamSummary>(teamPath(team.team_id))).generation
 
 /** Every row of a team list (`members`, `grants`, `machines`), 200 per page, bounded at 50 pages. */
 async function teamRows<T>(team: string, list: string, signal: AbortSignal): Promise<T[]> {
@@ -280,3 +280,81 @@ export async function grantMachine(
 
 /** The server's team ID rule: lowercase letters, digits and inner dashes, 1–63. */
 export const teamIdPattern = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/
+
+/**
+ * Moves a machine between Personal and the team: `transfer_to_team` makes the team its owner (its
+ * enroller), `transfer_to_personal` gives it back. The server wants the machine's ID as confirmation.
+ */
+export async function moveMachine(team: Pick<TeamSummary, "team_id">, machineId: string, action: "transfer_to_team" | "transfer_to_personal") {
+  const expected_generation = await freshGeneration(team)
+  return api<TeamSummary>(`${teamPath(team.team_id)}/machines`, {
+    method: "POST",
+    headers: json,
+    body: JSON.stringify({
+      operation_id: idempotencyKey(),
+      expected_generation,
+      machine_id: machineId,
+      action,
+      confirmation: machineId,
+    }),
+  })
+}
+
+/** Attaches one of your previews or tunnels to a team you run, or detaches it; nobody can use it until granted. */
+export async function attachResource(team: Pick<TeamSummary, "team_id">, kind: "preview" | "tunnel", id: string, active: boolean) {
+  const expected_generation = await freshGeneration(team)
+  return api<TeamSummary>(`${teamPath(team.team_id)}/resources`, {
+    method: "POST",
+    headers: json,
+    body: JSON.stringify({
+      operation_id: idempotencyKey(),
+      expected_generation,
+      resource_kind: kind,
+      resource_id: id,
+      active,
+    }),
+  })
+}
+
+export type GrantKind = "env" | "preview" | "tunnel"
+/** What a grant lets a member do, per kind, in plain words (the server's permission names). */
+export const grantPermissions: Record<GrantKind, { id: string; label: string }[]> = {
+  env: [
+    { id: "read", label: "Read names" },
+    { id: "write", label: "Change variables" },
+  ],
+  preview: [
+    { id: "use", label: "Open" },
+    { id: "manage", label: "Manage" },
+    { id: "inspect", label: "Inspect requests" },
+    { id: "replay", label: "Replay requests" },
+  ],
+  tunnel: [
+    { id: "use", label: "Open" },
+    { id: "manage", label: "Manage" },
+    { id: "inspect", label: "Inspect requests" },
+    { id: "replay", label: "Replay requests" },
+  ],
+}
+
+/** Gives a member a permission on an attached resource (the team's ENV is its own ID), or takes it away. */
+export async function setResourceGrant(
+  team: TeamSummary,
+  grant: { account: string; kind: GrantKind; resource: string; permission: string },
+  active: boolean,
+) {
+  const expected_generation = await freshGeneration(team)
+  return api<TeamSummary>(`${teamPath(team.team_id)}/grants`, {
+    method: "POST",
+    headers: json,
+    body: JSON.stringify({
+      operation_id: idempotencyKey(),
+      expected_generation,
+      account_id: grant.account,
+      resource_kind: grant.kind,
+      resource_id: grant.resource,
+      permission: grant.permission,
+      active,
+    }),
+  })
+}

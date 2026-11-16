@@ -2,7 +2,8 @@
 
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
-import { grantMachine, machineCapabilities, teamQuery, type Team } from "@/lib/teams"
+import { grantMachine, machineCapabilities, moveMachine, teamQuery, type Team } from "@/lib/teams"
+import { ConfirmAction } from "@/components/list-toolbar"
 import { Section } from "@/components/section"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -52,7 +53,9 @@ export function MachineAccess({
   accountId: string | undefined
   emails: Map<string, string>
 }) {
+  const queryClient = useQueryClient()
   const [editing, setEditing] = useState<string | null>(null)
+  const [moving, setMoving] = useState<string | null>(null)
   const machines = (team.machines ?? []).filter((m) => m.active && (admin || m.owner_account === accountId))
   if (!machines.length) return null
   const machine = machines.find((m) => m.machine_id === editing)
@@ -82,10 +85,32 @@ export function MachineAccess({
               <Button variant="outline" onClick={() => setEditing(m.machine_id)}>
                 Manage access
               </Button>
+              {admin && m.owner_team_id === team.team_id && (
+                <Button variant="outline" onClick={() => setMoving(m.machine_id)}>
+                  Move to Personal
+                </Button>
+              )}
             </li>
           )
         })}
       </ul>
+      {moving && (
+        <ConfirmAction
+          open
+          onOpenChange={(open) => !open && setMoving(null)}
+          title={`Move ${machines.find((m) => m.machine_id === moving)?.alias ?? "this machine"} to Personal?`}
+          description="It goes back to the member who added it. The team's access to it ends."
+          action="Move to Personal"
+          pending="Moving…"
+          mutation={{
+            mutationFn: () => moveMachine(team, moving, "transfer_to_personal"),
+            onSuccess: async () => {
+              await queryClient.invalidateQueries({ queryKey: teamQuery(team.team_id).queryKey })
+              await queryClient.invalidateQueries({ queryKey: ["machines"] })
+            },
+          }}
+        />
+      )}
       <Dialog open={Boolean(machine)} onOpenChange={(open) => !open && setEditing(null)}>
         <DialogContent className="gap-4 sm:max-w-md">
           {machine && (

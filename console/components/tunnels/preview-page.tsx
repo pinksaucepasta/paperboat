@@ -11,6 +11,7 @@ import { Section, SectionHeading } from "@/components/section"
 import { Time } from "@/components/time"
 import { ended, PreviewStatus } from "@/components/tunnels/preview-list"
 import { IpRules } from "@/components/tunnels/ip-rules"
+import { ShareWithTeam } from "@/components/tunnels/share-with-team"
 import { ResourceHistory } from "@/components/tunnels/resource-history"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -145,6 +146,8 @@ function Loaded({ preview }: { preview: Preview }) {
       </Section>
 
       <IpRules kind="preview" id={preview.id} />
+
+      {!preview.owner_team_id && <ShareWithTeam kind="preview" id={preview.id} />}
 
       <ResourceHistory kind="preview" id={preview.id} />
     </>

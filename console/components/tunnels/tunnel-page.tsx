@@ -23,6 +23,7 @@ import { Time } from "@/components/time"
 import { useTunnelActions } from "@/components/tunnels/tunnel-actions"
 import { TunnelTitle } from "@/components/tunnels/tunnel-rename"
 import { IpRules } from "@/components/tunnels/ip-rules"
+import { ShareWithTeam } from "@/components/tunnels/share-with-team"
 import { ResourceHistory } from "@/components/tunnels/resource-history"
 import { TunnelHostnames } from "@/components/tunnels/tunnel-hostnames"
 import { TunnelStatus, tunnelState } from "@/components/tunnels/tunnel-status"
@@ -205,6 +206,8 @@ function Loaded({ tunnel }: { tunnel: Tunnel }) {
       <TunnelHostnames tunnel={tunnel} />
 
       <IpRules kind="tunnel" id={tunnel.id} />
+
+      {!tunnel.owner_team_id && <ShareWithTeam kind="tunnel" id={tunnel.id} />}
 
       <ResourceHistory kind="tunnel" id={tunnel.id} />
 
