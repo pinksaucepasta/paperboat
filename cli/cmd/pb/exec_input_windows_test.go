@@ -178,3 +178,37 @@ func TestExecInputPrivateConsoleBorrowedReadiness(t *testing.T) {
 		t.Fatalf("borrowed console reader leaked handles over %d reads: before=%d after=%d", reads, baselineHandles, count)
 	}
 }
+
+// A Windows pipe hands over at most its buffer per read (4 KiB for cmd's pipes). Stdin read from one must still fill
+// frame-sized chunks while the writer keeps up, in order, instead of one 4 KiB frame per read.
+func TestExecPipeInputFillsFramesFromASmallPipe(t *testing.T) {
+	var readHandle, writeHandle windows.Handle
+	if err := windows.CreatePipe(&readHandle, &writeHandle, nil, 4096); err != nil {
+		t.Fatal(err)
+	}
+	reader, writer := os.NewFile(uintptr(readHandle), "stdin"), os.NewFile(uintptr(writeHandle), "writer")
+	defer reader.Close()
+	const total = 64 * 4096
+	go func() {
+		defer writer.Close()
+		chunk := make([]byte, 4096)
+		for i := 0; i < total/len(chunk); i++ {
+			for j := range chunk {
+				chunk[j] = byte(i)
+			}
+			if _, err := writer.Write(chunk); err != nil {
+				return
+			}
+		}
+	}()
+	buffer := make([]byte, 256<<10)
+	n, err := readExecInput(context.Background(), reader, buffer)
+	if err != nil || n < 32<<10 {
+		t.Fatalf("one stdin read from a 4 KiB pipe returned %d bytes (err %v), want at least 32 KiB", n, err)
+	}
+	for i := 0; i < n; i++ {
+		if buffer[i] != byte(i/4096) {
+			t.Fatalf("byte %d out of order", i)
+		}
+	}
+}

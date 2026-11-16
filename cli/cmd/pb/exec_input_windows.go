@@ -51,13 +51,9 @@ func readExecInputFile(ctx context.Context, file *os.File, value []byte) (int, e
 		}
 		ready := false
 		if kind == windows.FILE_TYPE_PIPE {
-			var available uint32
-			result, _, err := execPeekPipe.Call(uintptr(handle), 0, 0, 0, uintptr(unsafe.Pointer(&available)), 0)
-			if result == 0 {
-				if errors.Is(err, windows.ERROR_BROKEN_PIPE) {
-					return 0, io.EOF
-				}
-				return 0, execInputNativeError(err)
+			available, err := execPipeAvailable(handle)
+			if err != nil {
+				return 0, err
 			}
 			ready = available > 0
 		} else {
@@ -89,6 +85,9 @@ func readExecInputFile(ctx context.Context, file *os.File, value []byte) (int, e
 			if n > 0 && errors.Is(err, windows.ERROR_MORE_DATA) {
 				err = nil
 			}
+			if n > 0 && err == nil && kind == windows.FILE_TYPE_PIPE {
+				n = execCoalescePipe(handle, file, value, n)
+			}
 			return n, err
 		}
 		select {
@@ -98,6 +97,47 @@ func readExecInputFile(ctx context.Context, file *os.File, value []byte) (int, e
 		}
 	}
 }
+
+// execPipeAvailable is the number of bytes a pipe holds now; a closed writer is io.EOF.
+func execPipeAvailable(handle windows.Handle) (uint32, error) {
+	var available uint32
+	result, _, err := execPeekPipe.Call(uintptr(handle), 0, 0, 0, uintptr(unsafe.Pointer(&available)), 0)
+	if result == 0 {
+		if errors.Is(err, windows.ERROR_BROKEN_PIPE) {
+			return 0, io.EOF
+		}
+		return 0, execInputNativeError(err)
+	}
+	return available, nil
+}
+
+// execCoalescePipe keeps reading what the pipe already holds, or receives within ~2 ms, into value after its first n
+// bytes. A Windows pipe hands over at most its buffer (often 4 KiB) per read, so without this every stdin frame was a
+// few KiB: 10x the packets of file input and little for zstd to work with. It never blocks: it reads only bytes the
+// pipe reports, and an error or EOF is left for the next read.
+func execCoalescePipe(handle windows.Handle, file *os.File, value []byte, n int) int {
+	for idle := 0; n < len(value) && idle < 2; {
+		available, err := execPipeAvailable(handle)
+		if err != nil {
+			break
+		}
+		if available == 0 {
+			idle++
+			time.Sleep(time.Millisecond)
+			continue
+		}
+		idle = 0
+		read, err := file.Read(value[n : n+min(int(available), len(value)-n)])
+		if read > 0 {
+			n += read
+		}
+		if err != nil && !errors.Is(err, windows.ERROR_MORE_DATA) {
+			break
+		}
+	}
+	return n
+}
+
 func execConsoleByteReady(events []execConsoleEvent, mode uint32) bool {
 	highSurrogate := false
 	for _, event := range events {
