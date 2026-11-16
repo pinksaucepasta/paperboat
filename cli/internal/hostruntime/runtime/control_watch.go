@@ -65,8 +65,10 @@ func controlKnownDown(transport http.RoundTripper) bool {
 }
 
 const (
-	// environmentLookupBudget is how long a launch waits for its ENV layers from a control plane known to answer.
-	environmentLookupBudget = 15 * time.Second
+	// environmentLookupBudget is how long a launch waits for its ENV layers from a control plane that answered before. A
+	// healthy lookup takes well under a second; when the path dies silently under a warm host (nothing has failed yet for
+	// controlKnownDown to see) the first exec after the cut waits this long: 10-13 s measured with the old 15 s.
+	environmentLookupBudget = 5 * time.Second
 	// unprovenLookupBudget applies until the first control answer after boot: a host that has not yet heard from Paperboat
 	// cannot know it is down (8-21 s for the first exec after a restart in an outage), and a reachable one answers in well under 2 s.
 	unprovenLookupBudget = 2 * time.Second
