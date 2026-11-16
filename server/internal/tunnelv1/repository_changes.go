@@ -292,6 +292,8 @@ func newRouteID(tunnelID string) string {
 
 // decoratePublicEndpoints changes only API return values. The durable managed
 // endpoint remains the internal identity used by config generation and switching.
+// As for previews (decoratePreviewEndpoints), a self-hosted URL is shown only once
+// its certificate is ready, and a route needs an exact custom domain to have one.
 func (r *SQLRepository) decoratePublicEndpoints(ctx context.Context, tunnels []dbsqlc.Tunnel) error {
 	if len(tunnels) == 0 {
 		return nil
@@ -302,7 +304,7 @@ func (r *SQLRepository) decoratePublicEndpoints(ctx context.Context, tunnels []d
 		ids[i] = t.ID
 		index[t.ID] = i
 	}
-	rows, err := r.db.Pool().Query(ctx, `SELECT t.id,coalesce((SELECT 'https://'||d.hostname FROM paperboat.tunnel_domains d JOIN paperboat.tunnel_routes route ON route.id=d.route_id WHERE d.tunnel_id=t.id AND d.account_id=t.account_id AND d.deleted_at IS NULL AND d.ownership_state='verified' AND d.conflict_state='clear' AND d.match_type='exact' AND route.protocol='http' AND route.desired_state='active' AND route.deleted_at IS NULL ORDER BY d.hostname LIMIT 1),''),EXISTS(SELECT 1 FROM paperboat.tunnel_routes needed WHERE needed.tunnel_id=t.id AND needed.protocol IN('http','tls') AND needed.desired_state='active' AND needed.deleted_at IS NULL AND NOT EXISTS(SELECT 1 FROM paperboat.tunnel_domains d WHERE d.route_id=needed.id AND d.deleted_at IS NULL AND d.ownership_state='verified' AND d.conflict_state='clear')) FROM paperboat.tunnels t WHERE t.id=ANY($1::text[]) AND paperboat.workspace_edge_mode(t.account_id,paperboat.publication_workspace_team('tunnel',t.id))='self-hosted-only'`, ids)
+	rows, err := r.db.Pool().Query(ctx, `SELECT t.id,coalesce((SELECT 'https://'||d.hostname FROM paperboat.tunnel_domains d JOIN paperboat.tunnel_routes route ON route.id=d.route_id WHERE d.tunnel_id=t.id AND d.account_id=t.account_id AND d.deleted_at IS NULL AND d.ownership_state='verified' AND d.conflict_state='clear' AND d.match_type='exact' AND d.certificate_state='ready' AND d.certificate_reference IS NOT NULL AND route.protocol='http' AND route.desired_state='active' AND route.deleted_at IS NULL ORDER BY d.hostname LIMIT 1),''),EXISTS(SELECT 1 FROM paperboat.tunnel_routes needed WHERE needed.tunnel_id=t.id AND needed.protocol IN('http','tls') AND needed.desired_state='active' AND needed.deleted_at IS NULL AND NOT EXISTS(SELECT 1 FROM paperboat.tunnel_domains d WHERE d.route_id=needed.id AND d.deleted_at IS NULL AND d.ownership_state='verified' AND d.conflict_state='clear' AND d.match_type='exact')) FROM paperboat.tunnels t WHERE t.id=ANY($1::text[]) AND paperboat.workspace_edge_mode(t.account_id,paperboat.publication_workspace_team('tunnel',t.id))='self-hosted-only'`, ids)
 	if err != nil {
 		return err
 	}
