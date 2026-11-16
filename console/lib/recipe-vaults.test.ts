@@ -135,7 +135,7 @@ test("a rotate of a recipe that reads a vault sends the new token's public key a
     return Response.json({ data: { recipe: sampleFor("GET /v1/workspaces/{ws}/recipes/{name}").recipe } })
   }) as typeof fetch
   const { rotateRecipe } = await import("@/lib/recipes")
-  const next = { ...token, auth: "YXV0aA==" }
+  const next = { ...token, token: "pbr_abcdefghij_x", auth: "YXV0aA==" }
   await rotateRecipe("personal", "ci", next, "code")
   expect(rotates.map((r) => r.vault_wraps)).toEqual([[], [{ vault: "canary-env", wrapped: "d3JhcHBlZA==" }]])
   expect(rotates[1]).toMatchObject({ auth: "YXV0aA==", public_key: token.publicKey, confirm: "code" })
