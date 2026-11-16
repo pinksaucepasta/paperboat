@@ -272,6 +272,10 @@ func TestWindowsRepairRequestCarriesPersistedReadinessEndpoint(t *testing.T) {
 	if request.OwnerSID != "S-1-5-21-1-2-3-4" || request.StateRoot == "" || request.HelperListenAddress != "127.0.0.1:8080" {
 		t.Fatalf("repair request=%+v", request)
 	}
+	// A restore of a failed update validates this request: an empty Home made it invalid (victus, second admin user).
+	if request.Home != `C:\Users\Pujan\AppData\Local\Paperboat` || !safeAbsolute(request.Home) {
+		t.Fatalf("repair request home = %q", request.Home)
+	}
 }
 
 func TestRunWindowsInstallPhaseReturnsNamedDeadline(t *testing.T) {

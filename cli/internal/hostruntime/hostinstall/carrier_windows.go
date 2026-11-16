@@ -602,6 +602,5 @@ func windowsCarrierInstallRequest(ctx context.Context, c WindowsRuntimeConfig) (
 	r := windowsRepairRequest(c)
 	r.Schema, r.Platform, r.User, r.Executable, r.Artifact = SchemaV1, "windows", c.User, pin, c.Artifact
 	r.WorkspaceRoot, r.ControlURL, r.UserMachineID = c.Workspace, c.ControlURL, c.MachineID
-	r.Home = filepath.Dir(c.StateRoot)
 	return r, nil
 }

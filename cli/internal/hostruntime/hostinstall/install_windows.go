@@ -2368,12 +2368,14 @@ func repairWindows(ctx context.Context, ownerSID string, identity *WindowsRollba
 // windowsRepairRequest carries the persisted values needed to reconstruct the
 // native role boundary. In particular, HelperListenAddress enables the same
 // authenticated Hostd readiness probe used during installation; repair must
-// not silently fall back to SCM running state alone.
+// not silently fall back to SCM running state alone. Home is the state root's parent, as for the
+// carrier: Validate refuses an empty Home, which made every restore of a failed update invalid.
 func windowsRepairRequest(config WindowsRuntimeConfig) Request {
 	return Request{
 		OwnerSID:               config.OwnerSID,
 		SessionOwnerGeneration: config.SessionOwnerGeneration,
 		StateRoot:              config.StateRoot,
+		Home:                   filepath.Dir(config.StateRoot),
 		HelperListenAddress:    config.ListenAddress,
 		Source:                 config.Source,
 	}
