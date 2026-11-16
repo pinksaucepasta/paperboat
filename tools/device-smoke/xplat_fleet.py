@@ -148,6 +148,8 @@ def mac(name=None):
     host = os.environ.get('XPLAT_MAC_SSH')  # a macpool-N runner instead of the Mac VM (its logins run in the GUI session)
     if host:
         return Unix(name or PREFIX + '-m', 'darwin', ['ssh', host], '/Users/runner', '/Users/runner/.local/bin/pb')
+    if os.environ.get('XPLAT_ALLOW_FLEET_MAC') != '1':  # an empty XPLAT_MAC_SSH once sent an X-41 run to the fleet Mac (lanex2-m)
+        raise SystemExit('XPLAT_MAC_SSH is not set: refusing to use the fleet Mac VM (set XPLAT_ALLOW_FLEET_MAC=1 only for the fleet owner)')
     return Unix(name or M_NAME, 'darwin', [MAC_SSH, 'vm'], '/Users/admin', '/Users/admin/.local/bin/pb', pre=mac_unlock())
 
 
