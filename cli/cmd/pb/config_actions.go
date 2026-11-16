@@ -109,7 +109,7 @@ func configUnassign(c *command.Context) error {
 		return err
 	}
 	if err := manageConfigService(c.Context, machineID, false); err != nil {
-		return fmt.Errorf("stop config sync service: %w", err)
+		return err
 	}
 	if err := client.UnassignConfig(c.Context, machineID, assignment.Version); err != nil {
 		repairErr := manageConfigService(c.Context, machineID, true)
@@ -237,7 +237,17 @@ func configTeamDefaultUnadopt(c *command.Context) error {
 	return nil
 }
 
+// manageConfigService installs or removes this machine's config sync worker. A failure names this step: unnamed it ended in the
+// generic "could not finish the command" (a Windows apply whose service step failed, X-36).
 func manageConfigService(ctx context.Context, machineID string, install bool) error {
+	err := changeConfigService(ctx, machineID, install)
+	if err == nil || ctx.Err() != nil {
+		return err
+	}
+	return commandPreparationFailure{step: prepareConfigService, cause: err}
+}
+
+func changeConfigService(ctx context.Context, machineID string, install bool) error {
 	stateRoot := strings.TrimSpace(os.Getenv("PAPERBOAT_RUNTIME_STATE_ROOT"))
 	var err error
 	if stateRoot == "" {

@@ -23,6 +23,7 @@ const (
 	prepareOpenSSH
 	prepareMachineNotAdded
 	prepareDoctorRepair
+	prepareConfigService
 )
 
 // Only finite local phases become public prose. The original error remains
@@ -57,6 +58,14 @@ func (e commandPreparationFailure) Error() string {
 			return "Paperboat could not repair the installation: administrator approval was not given. Run `pb doctor --repair` again and approve the Windows prompt."
 		}
 		return "Paperboat could not repair the installation: the repair did not finish. Run `pb doctor` to see the current state, then retry `pb doctor --repair`."
+	case prepareConfigService:
+		if errors.Is(e.cause, elevation.ErrElevationRestrictedJob) {
+			return "Paperboat could not start or stop the config sync service: this terminal runs inside a restricted job (common in IDEs and CI) that can't start the administrator helper. Open a normal PowerShell window and retry."
+		}
+		if errors.Is(e.cause, elevation.ErrElevationDenied) {
+			return "Paperboat could not start or stop the config sync service: administrator approval was not given. Retry and approve the Windows prompt."
+		}
+		return "Paperboat could not start or stop the config sync service on this machine. Run `pb doctor` to see the current state, then retry."
 	case prepareSelectedFile:
 		return "A selected file or folder is unavailable. Check that it exists and is readable, then select it again."
 	default:
