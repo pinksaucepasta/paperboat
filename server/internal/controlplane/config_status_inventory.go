@@ -50,7 +50,17 @@ SELECT
   status.last_attempt_at,
   status.last_successful_at,
   status.machine_updated_at,
-  status.observed_at
+  status.observed_at,
+  -- Who chose the repository (team default adoption, then the stored source, then a recipe whose
+  -- [config] names it, as recipes.Service.ReadsRepository matches); empty without a live assignment.
+  CASE WHEN assignment.id IS NULL OR assignment.revoked_at IS NOT NULL OR assignment.repository_id IS NULL THEN ''
+       WHEN assignment.adopted_team_id IS NOT NULL THEN 'team_default'
+       WHEN assignment.source = 'tag_rule' THEN 'tag_rule'
+       WHEN EXISTS (SELECT 1 FROM recipe_machines recipe_machine
+         JOIN recipes recipe ON recipe.id = recipe_machine.recipe_id AND recipe.revoked_at IS NULL
+         WHERE recipe_machine.machine_id = machine.id
+           AND recipe.canonical->'config'->>'repository' IN (repository.display_name, nullif(split_part(repository.display_name, '/', 2), ''))) THEN 'recipe'
+       ELSE 'machine' END::text AS source
 FROM control_environments environment
 LEFT JOIN control_config_assignments assignment
   ON assignment.environment_id = environment.id
@@ -221,6 +231,7 @@ func (s *ConfigStatusService) inventoryStatusRows(ctx context.Context, account s
 			&item.LastSuccessfulAt,
 			&item.MachineUpdatedAt,
 			&item.ObservedAt,
+			&item.Source,
 			&state, &key); err != nil {
 			return configStatusPage{}, err
 		}

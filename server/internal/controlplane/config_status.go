@@ -114,6 +114,7 @@ type ConfigAccountEnvironment struct {
 	ApprovedPullRevision   string             `json:"approved_pull_revision,omitempty"`
 	AdoptedTeamID          string             `json:"adopted_team_id,omitempty"`
 	AdoptedDefaultVersion  int64              `json:"adopted_default_version,omitempty"`
+	Source                 string             `json:"source,omitempty"` // machine, tag_rule, recipe or team_default
 	RepositoryName         string             `json:"repository_name,omitempty"`
 	Mode                   string             `json:"mode,omitempty"`
 	ConsentState           string             `json:"consent_state,omitempty"`
@@ -220,6 +221,7 @@ func (s *ConfigStatusService) account(ctx context.Context, userID string, opts *
 			PushRepositoryID: row.PushRepositoryID.String, AutomaticUpdates: row.AutomaticUpdates.Bool,
 			ApprovedPullRevision: row.ApprovedPullRevision.String, AdoptedTeamID: row.AdoptedTeamID.String,
 			AdoptedDefaultVersion: row.AdoptedDefaultVersion.Int64,
+			Source:                row.Source,
 			Mode:                  row.Mode.String,
 			ConsentState:          row.ConsentState.String, WarningRevision: row.WarningRevision.String,
 			InstallationGeneration: row.InstallationGeneration,

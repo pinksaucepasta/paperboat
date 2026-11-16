@@ -80,7 +80,12 @@ func (s *ConfigAssignmentService) SetTeamDefault(ctx context.Context, userID, te
 		if err != nil {
 			return err
 		}
-		if !repository.ExternalRepositoryID.Valid || !repository.DefaultBranch.Valid {
+		// A custom Git repository has no provider id; its URL names it (AdoptTeamConfigDefault matches the same way).
+		externalID := repository.ExternalRepositoryID.String
+		if !repository.ExternalRepositoryID.Valid {
+			externalID = repository.ExternalRef
+		}
+		if externalID == "" || !repository.DefaultBranch.Valid {
 			return ErrAssignmentForbidden
 		}
 		current, currentErr := tx.Queries().GetTeamConfigDefault(ctx, teamID)
@@ -94,7 +99,7 @@ func (s *ConfigAssignmentService) SetTeamDefault(ctx context.Context, userID, te
 			return ErrAssignmentConflict
 		}
 		item, err = tx.Queries().SetTeamConfigDefault(ctx, dbsqlc.SetTeamConfigDefaultParams{
-			TeamID: teamID, Provider: repository.Provider, ExternalRepositoryID: repository.ExternalRepositoryID.String,
+			TeamID: teamID, Provider: repository.Provider, ExternalRepositoryID: externalID,
 			DisplayName: repository.DisplayName, Branch: repository.DefaultBranch.String, UpdatedBy: userID, ExpectedVersion: expectedVersion,
 		})
 		if errors.Is(err, sql.ErrNoRows) {

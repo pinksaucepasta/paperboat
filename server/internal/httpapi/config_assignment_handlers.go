@@ -16,6 +16,9 @@ type configRepositoryResponse struct {
 	ExternalRef string `json:"external_ref"`
 	DisplayName string `json:"display_name"`
 	State       string `json:"state"`
+	// Filled for listed repositories only (GET /v1/config-repositories).
+	MachineCount int  `json:"machine_count"`
+	TeamDefault  bool `json:"team_default"`
 }
 
 type configAssignmentResponse struct {
@@ -95,7 +98,9 @@ func configRepositories(service *controlplane.ConfigAssignmentService) http.Hand
 		}
 		out := make([]configRepositoryResponse, 0, len(items))
 		for _, item := range items {
-			out = append(out, repositoryResponse(item))
+			response := repositoryResponse(item.ControlConfigRepository)
+			response.MachineCount, response.TeamDefault = item.MachineCount, item.TeamDefault
+			out = append(out, response)
 		}
 		writeJSON(w, 200, SuccessResponse{Data: map[string]any{"items": out, "pagination": inventoryPagination(query.Limit, query.Offset, total, len(out))}})
 	}

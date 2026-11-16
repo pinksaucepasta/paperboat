@@ -6031,6 +6031,16 @@
                 "adopted_default_version": {
                   "type": "integer"
                 },
+                "source": {
+                  "type": "string",
+                  "description": "Who chose the repository: machine (the owner, for this machine), tag_rule (a policy config_sync rule), recipe (the machine's recipe [config]) or team_default (the adopted team default). Absent without an assignment.",
+                  "enum": [
+                    "machine",
+                    "tag_rule",
+                    "recipe",
+                    "team_default"
+                  ]
+                },
                 "consent_state": {
                   "type": "string"
                 },
@@ -14050,6 +14060,14 @@
           },
           "state": {
             "type": "string"
+          },
+          "machine_count": {
+            "type": "integer",
+            "description": "Machines whose live config assignment pulls from or pushes to this repository (listed repositories)."
+          },
+          "team_default": {
+            "type": "boolean",
+            "description": "In a team workspace, whether this repository is the team's config default."
           }
         },
         "required": [
@@ -47668,6 +47686,16 @@
                         },
                         "adopted_default_version": {
                           "type": "integer"
+                        },
+                        "source": {
+                          "type": "string",
+                          "description": "Who chose the repository: machine (the owner, for this machine), tag_rule (a policy config_sync rule), recipe (the machine's recipe [config]) or team_default (the adopted team default). Absent without an assignment.",
+                          "enum": [
+                            "machine",
+                            "tag_rule",
+                            "recipe",
+                            "team_default"
+                          ]
                         },
                         "consent_state": {
                           "type": "string"
