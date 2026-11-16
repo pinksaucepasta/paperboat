@@ -1,0 +1,26 @@
+09:47:42 == round early10 (t+10s)
+09:47:43 L ping: sample 1: path=regional_relay connect=206.91ms|sample 2: path=regional_relay connect=0.06ms|sample 3: path=regional_relay connect=0.06ms|summary: sent=3 received=3 loss=0.0% connect min/avg/max=0.06/69.01/206.91ms|
+09:47:45 L exec: ok-l-to-m
+09:47:49 W ping: sample 1: path=regional_relay connect=977.56ms|sample 2: path=regional_relay connect=0.00ms|sample 3: path=regional_relay connect=0.00ms|summary: sent=3 received=3 loss=0.0% connect min/avg/max=0.00/325.85/977.56ms|
+09:47:53 W exec: ok-w-to-m|+ ... 16d1d\bin\pb.exe"; (& $pb exec rx38p-m -- echo ok-w-to-m 2>&1 | Out-S ...|
+09:48:32 == round early60 (t+60s)
+09:48:33 L ping: sample 1: path=regional_relay connect=214.92ms|sample 2: path=regional_relay connect=0.10ms|sample 3: path=regional_relay connect=0.08ms|summary: sent=3 received=3 loss=0.0% connect min/avg/max=0.08/71.70/214.92ms|
+09:48:35 L exec: ok-l-to-m
+09:48:39 W ping: sample 1: path=regional_relay connect=995.22ms|sample 2: path=regional_relay connect=0.54ms|sample 3: path=regional_relay connect=0.00ms|summary: sent=3 received=3 loss=0.0% connect min/avg/max=0.00/331.92/995.22ms|
+09:48:43 W exec: ok-w-to-m|+ ... 16d1d\bin\pb.exe"; (& $pb exec rx38p-m -- echo ok-w-to-m 2>&1 | Out-S ...|
+09:49:32 == round early120 (t+120s)
+09:49:34 L ping: sample 1: path=regional_relay connect=93.57ms|sample 2: path=regional_relay connect=0.08ms|sample 3: path=regional_relay connect=0.08ms|summary: sent=3 received=3 loss=0.0% connect min/avg/max=0.08/31.24/93.57ms|
+09:49:36 L exec: ok-l-to-m
+09:49:39 W ping: sample 1: path=regional_relay connect=488.51ms|sample 2: path=regional_relay connect=0.00ms|sample 3: path=regional_relay connect=0.55ms|summary: sent=3 received=3 loss=0.0% connect min/avg/max=0.55/163.02/488.51ms|
+09:49:43 W exec: ok-w-to-m|+ ... 16d1d\bin\pb.exe"; (& $pb exec rx38p-m -- echo ok-w-to-m 2>&1 | Out-S ...|
+09:50:52 == round settled200 (t+200s)
+09:50:54 L ping: sample 1: path=regional_relay connect=84.45ms|sample 2: path=regional_relay connect=0.09ms|sample 3: path=regional_relay connect=0.11ms|summary: sent=3 received=3 loss=0.0% connect min/avg/max=0.09/28.22/84.45ms|
+09:50:56 L exec: ok-l-to-m
+09:51:00 W ping: sample 1: path=regional_relay connect=1082.50ms|sample 2: path=regional_relay connect=0.00ms|sample 3: path=regional_relay connect=0.00ms|summary: sent=3 received=3 loss=0.0% connect min/avg/max=0.00/360.83/1082.50ms|
+09:51:04 W exec: ok-w-to-m|+ ... 16d1d\bin\pb.exe"; (& $pb exec rx38p-m -- echo ok-w-to-m 2>&1 | Out-S ...|
+09:52:12 == round settled280 (t+280s)
+09:52:14 L ping: sample 1: path=regional_relay connect=93.96ms|sample 2: path=regional_relay connect=0.06ms|sample 3: path=regional_relay connect=0.07ms|summary: sent=3 received=3 loss=0.0% connect min/avg/max=0.06/31.36/93.96ms|
+09:52:16 L exec: ok-l-to-m
+09:52:20 W ping: sample 1: path=regional_relay connect=476.03ms|sample 2: path=regional_relay connect=0.00ms|sample 3: path=regional_relay connect=0.00ms|summary: sent=3 received=3 loss=0.0% connect min/avg/max=0.00/158.68/476.03ms|
+09:52:24 W exec: ok-w-to-m|+ ... 16d1d\bin\pb.exe"; (& $pb exec rx38p-m -- echo ok-w-to-m 2>&1 | Out-S ...|
+09:52:24 DONE

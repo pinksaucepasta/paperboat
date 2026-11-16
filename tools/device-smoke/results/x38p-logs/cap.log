@@ -1,0 +1,8 @@
+09:22:08 baseline: Paperboat doctor: healthy
+09:22:08 version:   ▄▄▝▀▀▀▀▀▘▄▄   Version dev-64faf9466
+09:23:25 WITH PORTAL (75 s): Paperboat doctor: unhealthy|authentication: fail: A captive portal (Wi-Fi sign-in page) is blocking the network; open a browser to sign in.|  Recovery: Complete the network sign-in in a browser, then run pb doctor again.|  Recovery: Check the connection to Paperboat and run `pb doctor` again.|
+09:23:26 status: Daemon: ready  Generation: 35  Observed: 2026-11-16T09:22:21Z||23625f343d54 (machine_82617073-0cfb-44e4-8d7e-e2e30f59bd5d)|  Runtime: offline  Eligible: true  Generation: 1  Last observed: never|  Path: none  Consumers: 0  Transfer: degraded  Preview: degraded  SSH: unavailable|  Health: warning: Machine runtime is offline  Recovery: Check the Paperboat service on the machine|
+09:23:47 PORTAL REMOVED (20 s): Paperboat doctor: healthy
+09:23:47 exec M>L: ok-after-portal
+09:23:50 exec L>M: ok-after-portal
+DONE

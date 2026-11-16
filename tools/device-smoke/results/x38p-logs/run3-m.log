@@ -1,0 +1,38 @@
+09:47:32 T0 v4 off
+09:47:42 == round early10 (t+10s)
+09:47:42 state en0-inet=[] curl4=000 curl6=404
+09:47:43 doctor: Paperboat doctor: healthy
+09:47:43 ping rx38o-a: sample 1: path=regional_relay connect=90.82ms|sample 2: path=regional_relay connect=0.08ms|sample 3: path=regional_relay connect=0.05ms|summary: sent=3 received=3 loss=0.0% connect min/avg/max=0.05/30.32/90.82ms|
+09:47:43 exec rx38o-a: ok-m-to-rx38o-a
+09:47:44 ping rx38p-w: sample 1: path=regional_relay connect=283.62ms|sample 2: path=regional_relay connect=0.31ms|sample 3: path=regional_relay connect=0.18ms|summary: sent=3 received=3 loss=0.0% connect min/avg/max=0.18/94.70/283.62ms|
+09:47:45 exec rx38p-w: ok-m-to-rx38p-w
+09:48:32 == round early60 (t+60s)
+09:48:32 state en0-inet=[] curl4=000 curl6=404
+09:48:34 doctor: Paperboat doctor: healthy
+09:48:34 ping rx38o-a: sample 1: path=regional_relay connect=126.24ms|sample 2: path=regional_relay connect=0.05ms|sample 3: path=regional_relay connect=0.04ms|summary: sent=3 received=3 loss=0.0% connect min/avg/max=0.04/42.11/126.24ms|
+09:48:34 exec rx38o-a: ok-m-to-rx38o-a
+09:48:35 ping rx38p-w: sample 1: path=regional_relay connect=946.46ms|sample 2: path=regional_relay connect=0.29ms|sample 3: path=regional_relay connect=0.19ms|summary: sent=3 received=3 loss=0.0% connect min/avg/max=0.19/315.65/946.46ms|
+09:48:36 exec rx38p-w: ok-m-to-rx38p-w
+09:49:32 == round early120 (t+120s)
+09:49:33 state en0-inet=[] curl4=000 curl6=404
+09:49:34 doctor: Paperboat doctor: healthy
+09:49:34 ping rx38o-a: sample 1: path=regional_relay connect=90.58ms|sample 2: path=regional_relay connect=0.04ms|sample 3: path=regional_relay connect=0.04ms|summary: sent=3 received=3 loss=0.0% connect min/avg/max=0.04/30.22/90.58ms|
+09:49:34 exec rx38o-a: ok-m-to-rx38o-a
+09:49:34 ping rx38p-w: sample 1: path=regional_relay connect=284.99ms|sample 2: path=regional_relay connect=0.16ms|sample 3: path=regional_relay connect=0.17ms|summary: sent=3 received=3 loss=0.0% connect min/avg/max=0.16/95.11/284.99ms|
+09:49:35 exec rx38p-w: ok-m-to-rx38p-w
+09:50:52 == round settled200 (t+200s)
+09:50:53 state en0-inet=[] curl4=000 curl6=404
+09:50:54 doctor: Paperboat doctor: healthy
+09:50:54 ping rx38o-a: sample 1: path=regional_relay connect=91.60ms|sample 2: path=regional_relay connect=0.06ms|sample 3: path=regional_relay connect=0.06ms|summary: sent=3 received=3 loss=0.0% connect min/avg/max=0.06/30.57/91.60ms|
+09:50:54 exec rx38o-a: ok-m-to-rx38o-a
+09:50:54 ping rx38p-w: sample 1: path=regional_relay connect=287.77ms|sample 2: path=regional_relay connect=0.17ms|sample 3: path=regional_relay connect=0.10ms|summary: sent=3 received=3 loss=0.0% connect min/avg/max=0.10/96.01/287.77ms|
+09:50:55 exec rx38p-w: ok-m-to-rx38p-w
+09:52:12 == round settled280 (t+280s)
+09:52:12 state en0-inet=[] curl4=000 curl6=404
+09:52:13 doctor: Paperboat doctor: healthy
+09:52:13 ping rx38o-a: sample 1: path=regional_relay connect=90.08ms|sample 2: path=regional_relay connect=0.08ms|sample 3: path=regional_relay connect=0.05ms|summary: sent=3 received=3 loss=0.0% connect min/avg/max=0.05/30.07/90.08ms|
+09:52:13 exec rx38o-a: ok-m-to-rx38o-a
+09:52:14 ping rx38p-w: sample 1: path=regional_relay connect=290.61ms|sample 2: path=regional_relay connect=0.28ms|sample 3: path=regional_relay connect=0.14ms|summary: sent=3 received=3 loss=0.0% connect min/avg/max=0.14/97.01/290.61ms|
+09:52:14 exec rx38p-w: ok-m-to-rx38p-w
+09:52:14 DONE
+09:52:14 restored
