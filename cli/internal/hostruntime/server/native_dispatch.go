@@ -86,6 +86,8 @@ func (c *dispatchOfflineConn) OfflinePeer() (accountID, endpointID, consumer, op
 
 func (c *dispatchOfflineConn) PaperboatAnswering() bool { return c.peer.PaperboatAnswering }
 
+func (c *dispatchOfflineConn) OfflineWorkspace() string { return c.header.Workspace }
+
 func (c *dispatchOfflineConn) CloseWrite() error {
 	if closer, ok := c.Conn.(interface{ CloseWrite() error }); ok {
 		return closer.CloseWrite()

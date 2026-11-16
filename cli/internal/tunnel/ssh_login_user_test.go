@@ -29,3 +29,24 @@ func TestSSHAuthorizationHeaderCarriesTheLoginUserOnlyForSSH(t *testing.T) {
 		t.Fatalf("terminal header: %+v %v", header, err)
 	}
 }
+
+// `pb --workspace TEAM exec` on a credential-free (standing-rule) stream names the team in the header so the host asks the
+// server for that team's ENV layers; an online stream (its credential names the workspace) never carries one.
+func TestOfflineAuthorizationHeaderCarriesTheRequestedWorkspace(t *testing.T) {
+	now := time.Now()
+	expires := now.Add(time.Minute).UTC().Format(time.RFC3339)
+	application := peerApplication{operationID: "operation_1"}
+	offline := &resolver.TerminalTarget{Workspace: "team-a", Auth: resolver.AuthTarget{Offline: true, ExpiresAt: expires}}
+	header, err := application.authorizationHeader(offline, "exec", "fallback", "stream_1", now)
+	if _, marshalErr := header.MarshalBinary(); err != nil || marshalErr != nil || header.Workspace != "team-a" {
+		t.Fatalf("offline header: %+v %v %v", header, err, marshalErr)
+	}
+	offline.Workspace = ""
+	if header, err = application.authorizationHeader(offline, "exec", "fallback", "stream_1", now); err != nil || header.Workspace != "" {
+		t.Fatalf("offline header without a workspace: %+v %v", header, err)
+	}
+	online := &resolver.TerminalTarget{Workspace: "team-a", Auth: resolver.AuthTarget{Token: "credential", ExpiresAt: expires}}
+	if header, err = application.authorizationHeader(online, "exec", "fallback", "stream_1", now); err != nil || header.Workspace != "" {
+		t.Fatalf("online header: %+v %v", header, err)
+	}
+}

@@ -153,3 +153,34 @@ func TestSSHHeaderCarriesAPortableLoginUserAndOnlyForSSH(t *testing.T) {
 		t.Error("a terminal stream carried a login user")
 	}
 }
+
+// The workspace an offline launch asks its ENV layers from round-trips and is a valid selector only on an offline header.
+func TestOfflineHeaderWorkspaceRoundTripsAndIsValidated(t *testing.T) {
+	deadline := time.Now().Add(time.Minute)
+	header, err := NewOffline("op_1", "exec", "stream_1", deadline, 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	header.Workspace = "team-a"
+	encoded, err := header.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parsed, err := Parse(encoded, time.Now()); err != nil || parsed.Workspace != "team-a" {
+		t.Fatalf("parsed %+v, %v", parsed, err)
+	}
+	for _, bad := range []string{"Team A", "-team", "team/../x", strings.Repeat("a", 64)} {
+		header.Workspace = bad
+		if _, err := header.MarshalBinary(); err == nil {
+			t.Fatalf("workspace %q was accepted", bad)
+		}
+	}
+	online, err := New("op", "exec", "s", "token", deadline, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	online.Workspace = "team-a"
+	if online.Validate(time.Time{}) == nil {
+		t.Fatal("an online header carried a workspace")
+	}
+}

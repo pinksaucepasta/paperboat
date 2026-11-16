@@ -12,6 +12,7 @@ type environmentVaultLayersAPI interface {
 	VaultLayerRecipients(context.Context, string, environment.VaultLayerCoordinate, string, int, int) ([]environment.VaultLayerRecipient, int, error)
 	PutVaultLayer(context.Context, string, string, string, environment.VaultLayerPut) (environment.VaultLayerDelivery, error)
 	VaultLayerContext(context.Context, string, string, string, string) (environment.VaultLayerContext, error)
+	VaultHostLayerContext(context.Context, string, string, string, string) (environment.VaultLayerContext, error)
 }
 
 func vaultLayerWorkspace(w http.ResponseWriter, r *http.Request) (string, bool) {
@@ -130,7 +131,7 @@ func registerEnvironmentVaultLayerRoutes(mux *http.ServeMux, service environment
 			writeEnvironmentError(w, r, environment.ErrProtocolInvalid)
 			return
 		}
-		out, err := service.VaultLayerContext(r.Context(), p.AccountID, p.MachineID, in.ActorAccountID, in.WorkspaceID)
+		out, err := service.VaultHostLayerContext(r.Context(), p.AccountID, p.MachineID, in.ActorAccountID, in.WorkspaceID)
 		writeVaultScopeResult(w, r, out, err)
 	})
 	mux.Handle("POST /v1/environment/hosts/{machine_id}/layers", environmentEnrollmentMachineOrHuman(verifier, denied, machine))

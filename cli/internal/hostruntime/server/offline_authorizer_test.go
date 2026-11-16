@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"net"
 	"net/http"
 	"testing"
@@ -110,5 +111,29 @@ func TestStandingRuleExecHasAValidENVLaunchBinding(t *testing.T) {
 	binding, ok := envinject.LaunchContextFrom(envinject.WithLaunchContext(context.Background(), got.WorkspaceID, got.ActorAccountID))
 	if !ok || binding.WorkspaceID != "" || binding.ActorAccountID != "user_5ae46801-d921-4983-be1c-db50ad886304" {
 		t.Fatalf("launch binding = %+v ok=%v", binding, ok)
+	}
+}
+
+// `pb --workspace TEAM exec`: the workspace the client named survives to the launch binding (the host asks the server for
+// that team's layers, which checks the actor's grant); a malformed one is refused before any request.
+func TestOfflineAuthorizerKeepsTheRequestedWorkspace(t *testing.T) {
+	plain, _ := net.Pipe()
+	defer plain.Close()
+	conn := func(workspace string) *dispatchOfflineConn {
+		return &dispatchOfflineConn{Conn: plain, peer: NativeDispatchOfflinePeer{AccountID: "acct_peer", EndpointID: "cli_peer", PaperboatAnswering: true}, header: streamauth.Header{Consumer: "exec", OperationID: "op-1", Workspace: workspace, DeadlineUnix: time.Now().Add(time.Minute).Unix()}}
+	}
+	authorizer, err := newOfflineAuthorizer(conn("team-a"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := authorizer.Authorize(context.Background(), protocol.Frame{Capability: "exec.v1", OperationID: "op-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if binding, ok := envinject.LaunchContextFrom(envinject.WithLaunchContext(context.Background(), got.WorkspaceID, got.ActorAccountID)); !ok || binding.WorkspaceID != "team-a" {
+		t.Fatalf("launch binding = %+v ok=%v", binding, ok)
+	}
+	if _, err := newOfflineAuthorizer(conn("Team A")); !errors.Is(err, ErrCredentialPolicy) {
+		t.Fatalf("a malformed workspace: %v", err)
 	}
 }

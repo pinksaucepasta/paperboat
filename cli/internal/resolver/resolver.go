@@ -267,7 +267,10 @@ type AuthTarget struct {
 type TerminalTarget struct {
 	// LoginUser is the OS user an SSH stream will log in as (OpenSSH %r); the host checks it against the machine's
 	// Remote Login before sshd does. Empty when unknown.
-	LoginUser     string
+	LoginUser string
+	// Workspace is the team a credential-free (offline/standing-rule) launch asks its ENV layers from; empty means the
+	// machine's own. The server checks the actor's exec grant in it before any layer is delivered.
+	Workspace     string
 	Protocol      string
 	EnvironmentID string
 	QUICEndpoint  string

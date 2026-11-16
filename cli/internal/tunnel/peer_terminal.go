@@ -288,6 +288,7 @@ func (a peerApplication) authorizationHeader(target *resolver.TerminalTarget, co
 	var header streamauth.Header
 	if target.Auth.Offline {
 		header, err = streamauth.NewOffline(operationID, consumer, streamID, deadline, maximum)
+		header.Workspace = target.Workspace
 	} else {
 		header, err = streamauth.New(operationID, consumer, streamID, target.Auth.Token, deadline, maximum)
 	}

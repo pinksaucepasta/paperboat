@@ -421,6 +421,54 @@ func TestPostgresVaultLayersFanoutSignedPublicationAndWorkspaceIsolation(t *test
 	}
 	exec(`INSERT INTO billing_workspaces(id,team_id,state,period_start,period_end) VALUES($1,$2,'active',now()-interval '1 hour',now()+interval '1 hour')`, "billing_"+otherTeam, otherTeam)
 	contextFor(member, memberHost, member, otherTeam, 0)
+	// A host launch that names a team (`pb --workspace TEAM exec` on the owner's own machine shared into it) needs the actor's
+	// active exec or terminal grant on that machine in that team; "personal" and empty keep their meaning.
+	// Exec and terminal access follow the workspace policy rules (team_machine_capability_allowed), not the retired grants table.
+	grant := func(teamID, machine, account, action string) {
+		t.Helper()
+		exec(`INSERT INTO workspace_policies(team_id,version,source,digest) VALUES($1,1,'{}','sha256:test') ON CONFLICT (team_id) WHERE team_id IS NOT NULL DO NOTHING`, teamID)
+		exec(`INSERT INTO workspace_policy_rules(policy_id,rule,deny,subject_kind,subject_id,target_kind,target_id,action,ports)
+SELECT p.id,coalesce((SELECT max(rule)+1 FROM workspace_policy_rules WHERE policy_id=p.id),0),false,'account',$2,'machine',$3,$4,int4range(1,65536) FROM workspace_policies p WHERE p.team_id=$1`, teamID, account, machine, action)
+	}
+	hostContext := func(machineOwner, machine, actor, workspace string) (VaultLayerContext, error) {
+		return service.VaultHostLayerContext(ctx, machineOwner, machine, actor, workspace)
+	}
+	if _, err := hostContext(member, memberHost, member, team); !errors.Is(err, ErrKeyAuthorizationRequired) {
+		t.Fatalf("team launch on a machine never shared into it: %v", err)
+	}
+	exec(`INSERT INTO team_resource_bindings(team_id,resource_kind,resource_id,owner_account) VALUES($1,'machine',$2,$3)`, team, memberHost, member)
+	grant(team, memberHost, member, "exec")
+	if out, err := hostContext(member, memberHost, member, team); err != nil || out.WorkspaceID != team || len(out.Layers) != 3 || out.Layers[0].Source.OwnerKind != "team" {
+		t.Fatalf("granted owner of a shared personal machine got no team layers: %+v %v", out, err)
+	}
+	if _, err := hostContext(member, memberHost, owner, team); !errors.Is(err, ErrKeyAuthorizationRequired) {
+		t.Fatalf("member without a grant on the machine: %v", err)
+	}
+	grant(team, memberHost, owner, "terminal")
+	if out, err := hostContext(member, memberHost, owner, team); err != nil || len(out.Layers) != 1 || out.Layers[0].Source.OwnerKind != "team" {
+		t.Fatalf("terminal-granted member: %+v %v", out, err)
+	}
+	if _, err := hostContext(noVault, noVaultHost, noVault, team); !errors.Is(err, ErrKeyAuthorizationRequired) {
+		t.Fatalf("grant on another machine reached an unshared one: %v", err)
+	}
+	if _, err := hostContext(member, memberHost, member, otherTeam); !errors.Is(err, ErrKeyAuthorizationRequired) {
+		t.Fatalf("a team the machine is not shared into: %v", err)
+	}
+	if _, err := hostContext(member, memberHost, owner, "personal"); !errors.Is(err, ErrKeyAuthorizationRequired) {
+		t.Fatalf("foreign actor Personal host launch: %v", err)
+	}
+	if out, err := hostContext(member, memberHost, member, ""); err != nil || out.WorkspaceID != "personal" || len(out.Layers) != 0 {
+		t.Fatalf("host launch without a workspace: %+v %v", out, err)
+	}
+	exec(`INSERT INTO team_resource_bindings(team_id,resource_kind,resource_id,owner_account) VALUES($1,'machine',$2,$3)`, otherTeam, memberHost, member)
+	grant(otherTeam, memberHost, member, "exec")
+	exec(`UPDATE user_machines SET owner_team_id=$1 WHERE id=$2`, team, memberHost)
+	if _, err := hostContext(member, memberHost, member, otherTeam); !errors.Is(err, ErrKeyAuthorizationRequired) {
+		t.Fatalf("team-owned machine answered another team: %v", err)
+	}
+	exec(`UPDATE user_machines SET owner_team_id=NULL WHERE id=$1`, memberHost)
+	exec(`DELETE FROM workspace_policies WHERE team_id=$1`, otherTeam)
+	exec(`DELETE FROM team_resource_bindings WHERE team_id=$1`, otherTeam)
 	exec(`UPDATE team_members SET active=false WHERE team_id=$1 AND account_id=$2`, team, member)
 	if _, err := service.VaultLayerContext(ctx, member, memberHost, member, team); !errors.Is(err, ErrKeyAuthorizationRequired) {
 		t.Fatalf("revoked membership launch: %v", err)

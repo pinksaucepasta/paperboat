@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	clientapi "github.com/pinksaucepasta/paperboat/shared/client/api"
 	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 	"time"
 
@@ -20,6 +21,7 @@ type OfflinePeerConn interface {
 // sessions, file transfers, previews, ENV) is offline.
 type offlineAuthorizer struct {
 	accountID, endpointID, consumer, operationID string
+	workspace                                    string
 	deadline                                     time.Time
 	offline                                      bool
 }
@@ -34,7 +36,14 @@ func newOfflineAuthorizer(conn OfflinePeerConn) (*offlineAuthorizer, error) {
 	if answering, ok := conn.(interface{ PaperboatAnswering() bool }); ok {
 		offline = !answering.PaperboatAnswering()
 	}
-	return &offlineAuthorizer{accountID: accountID, endpointID: endpointID, consumer: consumer, operationID: operationID, deadline: deadline, offline: offline}, nil
+	// The workspace the client asked for; the server checks the actor's grant in it when the host asks for the layers.
+	workspace := ""
+	if named, ok := conn.(interface{ OfflineWorkspace() string }); ok {
+		if workspace = named.OfflineWorkspace(); workspace != "" && !clientapi.ValidWorkspaceSelector(workspace) {
+			return nil, ErrCredentialPolicy
+		}
+	}
+	return &offlineAuthorizer{accountID: accountID, endpointID: endpointID, consumer: consumer, operationID: operationID, workspace: workspace, deadline: deadline, offline: offline}, nil
 }
 
 func (a *offlineAuthorizer) Authorize(_ context.Context, frame protocol.Frame) (Authorization, error) {
@@ -48,8 +57,9 @@ func (a *offlineAuthorizer) Authorize(_ context.Context, frame protocol.Frame) (
 		UserID:         a.accountID,
 		AccountID:      a.accountID,
 		ActorAccountID: a.accountID,
-		// A stream admitted from the standing rules names no workspace: the launch binds the machine's own, which the server
-		// resolves (and checks the actor against) when the host asks for the layers.
+		// Empty (no --workspace) binds the machine's own workspace, which the server resolves (and checks the actor against)
+		// when the host asks for the layers; a named team is checked there against the actor's grant.
+		WorkspaceID: a.workspace,
 		ClientID:    a.endpointID,
 		OperationID: a.operationID,
 		ExpiresAt:   a.deadline,

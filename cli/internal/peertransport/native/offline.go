@@ -36,6 +36,9 @@ func (c *OfflineConn) OfflinePeer() (accountID, endpointID, consumer, operationI
 	return c.peer.AccountID, c.peer.EndpointID, c.header.Consumer, c.header.OperationID, time.Unix(c.header.DeadlineUnix, 0)
 }
 
+// OfflineWorkspace is the team the client asked the launch's ENV layers from; empty means the machine's own.
+func (c *OfflineConn) OfflineWorkspace() string { return c.header.Workspace }
+
 // CloseWrite keeps half-close working through the wrapper.
 func (c *OfflineConn) CloseWrite() error {
 	if closer, ok := c.Conn.(interface{ CloseWrite() error }); ok {

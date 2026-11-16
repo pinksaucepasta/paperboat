@@ -25,6 +25,10 @@ func (s *vaultLayerRouteStub) VaultLayerRecipients(_ context.Context, account st
 func (*vaultLayerRouteStub) PutVaultLayer(context.Context, string, string, string, environment.VaultLayerPut) (environment.VaultLayerDelivery, error) {
 	return environment.VaultLayerDelivery{}, nil
 }
+func (*vaultLayerRouteStub) VaultHostLayerContext(context.Context, string, string, string, string) (environment.VaultLayerContext, error) {
+	return environment.VaultLayerContext{}, nil
+}
+
 func (*vaultLayerRouteStub) VaultLayerContext(context.Context, string, string, string, string) (environment.VaultLayerContext, error) {
 	return environment.VaultLayerContext{}, nil
 }

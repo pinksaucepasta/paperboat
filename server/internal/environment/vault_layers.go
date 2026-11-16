@@ -296,6 +296,27 @@ func machineWorkspaceTx(ctx context.Context, tx *db.Tx, machineOwner, machine st
 	return workspace, err
 }
 
+// VaultHostLayerContext is VaultLayerContext for a launch the host asks about. A team workspace is the one the client
+// selected (`pb --workspace`) on a launch admitted from the host's standing rule, so it is checked here: the actor needs an
+// active exec or terminal grant on this machine in that team (the grant also fixes which team may own the machine).
+// "personal" and empty keep their meaning in VaultLayerContext.
+func (s *Service) VaultHostLayerContext(ctx context.Context, machineOwner, machine, actor, workspace string) (VaultLayerContext, error) {
+	if workspace == "" || workspace == "personal" || !validIdentifier(actor) || !validIdentifier(workspace) {
+		return s.VaultLayerContext(ctx, machineOwner, machine, actor, workspace)
+	}
+	var granted bool
+	err := s.db.InReadCommittedTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+		return tx.QueryRow(ctx, `SELECT team_machine_capability_allowed($1,$2,$3,'exec') OR team_machine_capability_allowed($1,$2,$3,'terminal')`, actor, workspace, machine).Scan(&granted)
+	})
+	if err == nil && !granted {
+		err = ErrKeyAuthorizationRequired
+	}
+	if err != nil {
+		return VaultLayerContext{WorkspaceID: workspace, ActorAccountID: actor, MachineID: machine, Layers: []VaultLayerDelivery{}}, err
+	}
+	return s.VaultLayerContext(ctx, machineOwner, machine, actor, workspace)
+}
+
 // VaultLayerContext is what a host launch gets for (workspace, actor). An empty workspace means the machine's own (a launch
 // the host admitted from its standing rule names no workspace): the server picks it from the machine record, then applies the
 // same membership checks as for a named one, so personal ENV never reaches a team machine and a non-member gets none.

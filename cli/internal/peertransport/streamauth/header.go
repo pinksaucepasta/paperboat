@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	clientapi "github.com/pinksaucepasta/paperboat/shared/client/api"
 	"github.com/pinksaucepasta/paperboat/shared/peerconsumer"
 	"strings"
 	"time"
@@ -48,6 +49,9 @@ type Header struct {
 	// LoginUser is the OS user an ssh stream logs in as (OpenSSH %r). The host checks it against the machine's Remote
 	// Login before sshd does; empty means unknown and the host leaves the decision to sshd.
 	LoginUser string `json:"login_user,omitempty"`
+	// Workspace is the team an offline (standing-rule) terminal or exec launch asks its ENV layers from (`pb --workspace`).
+	// Empty means the machine's own; the server checks the actor's grant in it when the host asks for the layers.
+	Workspace string `json:"workspace,omitempty"`
 }
 
 func NewOffline(operationID, consumer, streamID string, deadline time.Time, maximumBytes uint64) (Header, error) {
@@ -98,6 +102,9 @@ func (h Header) Validate(now time.Time) error {
 		return ErrInvalid
 	}
 	if h.LoginUser != "" && (h.Consumer != "ssh" || !ValidLoginUser(h.LoginUser)) {
+		return ErrInvalid
+	}
+	if h.Workspace != "" && (!h.Offline || !clientapi.ValidWorkspaceSelector(h.Workspace)) {
 		return ErrInvalid
 	}
 	private := h.Consumer == "private_http" || h.Consumer == "private_tcp" || h.Consumer == "inspector"
