@@ -645,17 +645,7 @@ func (s *DeviceService) RevokeClient(ctx context.Context, userID, sid, reason st
 		if owner != userID {
 			return sql.ErrNoRows
 		}
-		var active bool
-		if err := tx.QueryRow(ctx, `SELECT revoked_at IS NULL FROM cli_client_sessions WHERE id=$1`, sid).Scan(&active); err != nil {
-			return err
-		}
-		if err := s.revokeTx(ctx, tx, sid, reason); err != nil {
-			return err
-		}
-		if active {
-			return db.FenceRemovedMachineVaultTx(ctx, tx, userID, "")
-		}
-		return nil
+		return s.revokeTx(ctx, tx, sid, reason)
 	})
 	return err
 }

@@ -444,18 +444,14 @@ func TestPostgresVaultLayersFanoutSignedPublicationAndWorkspaceIsolation(t *test
 	if _, err := service.GetVaultScope(ctx, noVault, team, "team", team, ""); err != nil {
 		t.Fatal("second survivor read baseline", err)
 	}
-	// Capture a valid publication before removal; it must not cross the
-	// delivery fence even when addressed to the surviving machine.
+	// Removing a machine must leave every other machine's delivery current.
 	before := list(owner, personal, "ready", 20, 0, 2)
-	var survivor, departing VaultLayerRecipient
+	var departing VaultLayerRecipient
 	for _, r := range before {
-		if r.MachineID == ownerA {
-			survivor = r
-		} else {
+		if r.MachineID != ownerA {
 			departing = r
 		}
 	}
-	staleSurvivor := VaultLayerPut{OperationID: nextOperation(), Envelope: b64Vault(signedVaultLayerFixture(t, global, survivor, vaults[owner]))}
 	staleDeparting := VaultLayerPut{OperationID: nextOperation(), Envelope: b64Vault(signedVaultLayerFixture(t, global, departing, vaults[owner]))}
 	currentTeam, err := authority.Get(ctx, owner, team)
 	if err != nil {
@@ -477,14 +473,14 @@ func TestPostgresVaultLayersFanoutSignedPublicationAndWorkspaceIsolation(t *test
 	if err := store.SQL().QueryRowContext(ctx, `SELECT generation FROM environment_vault_layer_fences WHERE workspace_id=$1 AND owner_kind='team' AND owner_id=$1 AND source_machine_id=''`, team).Scan(&fenceAfter); err != nil {
 		t.Fatal(err)
 	}
-	if fenceAfter != fenceBefore+1 || removed.Generation <= transferred.Generation {
-		t.Fatalf("Team removal did not advance delivery authority: fence=%d/%d generation=%d/%d", fenceBefore, fenceAfter, transferred.Generation, removed.Generation)
+	if fenceAfter != fenceBefore || removed.Generation <= transferred.Generation {
+		t.Fatalf("Team machine removal moved the delivery fence or lost its generation: fence=%d/%d generation=%d/%d", fenceBefore, fenceAfter, transferred.Generation, removed.Generation)
 	}
 	if removed.ENVStatus != "ready" {
 		t.Fatalf("Team machine removal ENV status=%s", removed.ENVStatus)
 	}
-	if _, err := service.PutVaultLayer(ctx, owner, "personal", ownerA, staleSurvivor); !errors.Is(err, ErrVersionConflict) {
-		t.Fatalf("pre-removal survivor delivery crossed fence: %v", err)
+	if ready := list(owner, personal, "ready", 20, 0, 1); ready[0].MachineID != ownerA {
+		t.Fatalf("the surviving machine's delivery did not stay ready after the removal: %+v", ready)
 	}
 	if _, err := service.PutVaultLayer(ctx, owner, "personal", ownerB, staleDeparting); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("removed host accepted delivery: %v", err)

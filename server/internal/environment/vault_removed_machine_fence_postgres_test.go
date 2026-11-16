@@ -12,10 +12,9 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 )
 
-// Removing a device must fence only the ENV sources that device could read.
-// A machine that never received a layer must not push every other machine's
-// delivery back to pending.
-func TestRemovingANeverDeliveredMachineLeavesOtherDeliveriesFencedOnlyWhereItReadPostgres(t *testing.T) {
+// Removing a device never moves a delivery fence and never rotates a key: every other
+// machine keeps its ENV and its key.
+func TestRemovingAMachineLeavesEveryDeliveryAndKeyUntouchedPostgres(t *testing.T) {
 	dsn := strings.TrimSpace(os.Getenv("PAPERBOAT_TEST_DATABASE_DSN"))
 	if dsn == "" {
 		t.Skip("set PAPERBOAT_TEST_DATABASE_DSN for isolated vault fence transactions")
@@ -67,7 +66,7 @@ func TestRemovingANeverDeliveredMachineLeavesOtherDeliveriesFencedOnlyWhereItRea
 	remove := func(machine string) {
 		t.Helper()
 		if err := store.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-			return db.FenceRemovedMachineVaultTx(ctx, tx, account, machine)
+			return db.CleanupMachineMachineTx(ctx, tx, account, machine, time.Now().UTC())
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -83,15 +82,13 @@ func TestRemovingANeverDeliveredMachineLeavesOtherDeliveriesFencedOnlyWhereItRea
 		t.Fatalf("removed machine ENV scope lookup: %v", err)
 	}
 	remove(junk)
-	if got := fence(); got != 1 {
-		t.Fatalf("removing a machine that never received ENV advanced the fence to %d", got)
-	}
 	remove(recipient)
-	if got := fence(); got != 2 {
-		t.Fatalf("removing a machine that held a layer left the fence at %d, want 2", got)
+	remove(source)
+	if got := fence(); got != 1 {
+		t.Fatalf("removals advanced the delivery fence to %d, want it untouched", got)
 	}
-	remove("")
-	if got := fence(); got != 3 {
-		t.Fatalf("an account-wide fence (revoked CLI session) left the fence at %d, want 3", got)
+	inventory, err = service.GetVaultPersonalScopes(ctx, account)
+	if err != nil || inventory.RotationRequired || inventory.KeyEpoch != 1 {
+		t.Fatalf("after removals: required=%t epoch=%d err=%v, want no rotation", inventory.RotationRequired, inventory.KeyEpoch, err)
 	}
 }

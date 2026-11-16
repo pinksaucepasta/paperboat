@@ -428,7 +428,7 @@ func envAccessChangedTx(ctx context.Context, tx *db.Tx, team string, changes []p
 	if held {
 		return FenceENVTx(ctx, tx, team)
 	}
-	return InvalidateENVTx(ctx, tx, team)
+	return nil
 }
 
 // tagRowsTx is a policy's stored tags as "machine|tag" entries (neither contains '|').
