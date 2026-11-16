@@ -3416,7 +3416,7 @@ SELECT
 	-- Only a live adoption puts the machine in the team's workspace (unadopt revokes the row, keeps the team).
 	live_assignment.adopted_team_id,
 	-- The team default was dropped: the assignment is revoked but still names the team it came from.
-	assignment.adopted_team_id IS NOT NULL AND assignment.revoked_at IS NOT NULL AS adoption_dropped,
+	coalesce(assignment.adopted_team_id IS NOT NULL AND assignment.revoked_at IS NOT NULL, false)::boolean AS adoption_dropped,
 	assignment.adopted_default_version,
 	assignment.mode,
   assignment.consent_state,
