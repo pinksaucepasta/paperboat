@@ -18,6 +18,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
 	"github.com/pinksaucepasta/paperboat/server/internal/previewtunnelapi"
+	"github.com/pinksaucepasta/paperboat/server/internal/previewtunnelstore"
 	"golang.org/x/net/idna"
 	"golang.org/x/net/publicsuffix"
 )
@@ -36,7 +37,7 @@ var (
 	ErrLeaseNotActive      = errors.New("preview lease is not active")
 	ErrDomainConflict      = errors.New("preview domain hostname is already claimed")
 	ErrGenerationConflict  = errors.New("preview domain generation conflict")
-	ErrIdempotencyConflict = errors.New("preview domain idempotency key conflicts with an earlier operation")
+	ErrIdempotencyConflict = previewtunnelstore.ErrIdempotencyConflict
 	ErrDNSUnavailable      = errors.New("preview domain DNS instructions are unavailable")
 	ErrCertificatePending  = errors.New("preview domain certificate is not ready")
 )

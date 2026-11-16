@@ -1,7 +1,6 @@
 package tunnelv1
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"database/sql"
@@ -662,30 +661,17 @@ type resourceOperationInput struct {
 }
 
 func beginResourceOperation(ctx context.Context, q *dbsqlc.Queries, input resourceOperationInput) (dbsqlc.Operation, bool, error) {
-	op, err := q.CreatePreviewTunnelOperation(ctx, dbsqlc.CreatePreviewTunnelOperationParams{
-		ID: input.ID, AccountID: input.AccountID, IdempotencyKey: input.IdempotencyKey, RequestHash: input.RequestHash[:],
-		OperationType: input.OperationType, ResourceKind: input.ResourceKind, ResourceID: nullableString(input.ResourceID),
-		Phase: "persisting", State: "running", Progress: 20, Outcome: "unchanged", CorrelationID: input.CorrelationID,
-	})
-	if err == nil {
-		return op, false, nil
-	}
-	if !errors.Is(err, pgx.ErrNoRows) {
-		return dbsqlc.Operation{}, false, translate(err)
-	}
-	existing, getErr := q.GetPreviewTunnelOperationByIdempotency(ctx, dbsqlc.GetPreviewTunnelOperationByIdempotencyParams{AccountID: input.AccountID, IdempotencyKey: input.IdempotencyKey})
-	if getErr != nil {
-		return dbsqlc.Operation{}, false, translate(getErr)
-	}
 	// Creation generates a candidate identity on each request. The persisted
 	// operation owns the identity after its first commit; mutation targets
 	// remain exact resource fences. Account lookup, kind, type and request hash
 	// still bind replay, and callers load the result under its original parent.
 	generatedResource := input.OperationType == "route.create" && input.ResourceKind == "route" || input.OperationType == "domain.create" && input.ResourceKind == "domain_binding" || (input.OperationType == "connector.enrollment.issue" || input.OperationType == "connector.enrollment.exchange") && input.ResourceKind == "connector"
-	if existing.OperationType != input.OperationType || existing.ResourceKind != input.ResourceKind || !existing.ResourceID.Valid || (!generatedResource && existing.ResourceID.String != input.ResourceID) || !bytes.Equal(existing.RequestHash, input.RequestHash[:]) {
-		return dbsqlc.Operation{}, false, ErrIdempotencyConflict
-	}
-	return existing, true, nil
+	op, replayed, err := previewtunnelstore.BeginOperation(ctx, q, dbsqlc.CreatePreviewTunnelOperationParams{
+		ID: input.ID, AccountID: input.AccountID, IdempotencyKey: input.IdempotencyKey, RequestHash: input.RequestHash[:],
+		OperationType: input.OperationType, ResourceKind: input.ResourceKind, ResourceID: nullableString(input.ResourceID),
+		Phase: "persisting", State: "running", Progress: 20, Outcome: "unchanged", CorrelationID: input.CorrelationID,
+	}, !generatedResource)
+	return op, replayed, translate(err)
 }
 
 func completeResourceOperation(ctx context.Context, q *dbsqlc.Queries, operationID, resourceID, phase, outcome string, now time.Time) (dbsqlc.Operation, error) {

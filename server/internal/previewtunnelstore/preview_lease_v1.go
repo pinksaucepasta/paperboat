@@ -7,14 +7,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/pinksaucepasta/paperboat/server/internal/endpoints"
-	"github.com/pinksaucepasta/paperboat/server/internal/planlimits"
 	"net"
 	"net/url"
 	"path"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/server/internal/endpoints"
+	"github.com/pinksaucepasta/paperboat/server/internal/planlimits"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -372,26 +373,17 @@ func (s *Store) CreatePreviewLeaseV1(ctx context.Context, input CreatePreviewLea
 			return err
 		}
 		q := tx.Queries()
-		operation, err := q.CreatePreviewTunnelOperation(ctx, dbsqlc.CreatePreviewTunnelOperationParams{
+		operation, replayed, err := BeginOperation(ctx, q, dbsqlc.CreatePreviewTunnelOperationParams{
 			ID: input.OperationID, AccountID: input.AccountID, IdempotencyKey: input.IdempotencyKey,
 			RequestHash: input.RequestHash, OperationType: "preview.create", ResourceKind: "preview_lease",
 			Phase: "persisting", State: "running", Progress: 15, Outcome: "unchanged",
 			CorrelationID: input.CorrelationID,
-		})
-		if errors.Is(err, pgx.ErrNoRows) {
-			existing, getErr := q.GetPreviewTunnelOperationByIdempotency(ctx, dbsqlc.GetPreviewTunnelOperationByIdempotencyParams{
-				AccountID: input.AccountID, IdempotencyKey: input.IdempotencyKey,
-			})
-			if getErr != nil {
-				return translate(getErr)
-			}
-			if existing.OperationType != "preview.create" || existing.ResourceKind != "preview_lease" || !equalBytes(existing.RequestHash, input.RequestHash) {
-				return ErrIdempotencyConflict
-			}
-			if !existing.ResourceID.Valid {
+		}, false)
+		if err == nil && replayed {
+			if !operation.ResourceID.Valid {
 				return ErrPreviewLeaseOperationInProgress
 			}
-			lease, getErr := q.GetPreviewLeaseV1(ctx, dbsqlc.GetPreviewLeaseV1Params{ID: existing.ResourceID.String, AccountID: input.AccountID})
+			lease, getErr := q.GetPreviewLeaseV1(ctx, dbsqlc.GetPreviewLeaseV1Params{ID: operation.ResourceID.String, AccountID: input.AccountID})
 			if getErr != nil {
 				return translate(getErr)
 			}
@@ -401,7 +393,7 @@ func (s *Store) CreatePreviewLeaseV1(ctx context.Context, input CreatePreviewLea
 			if lease.OwnerSessionKind != input.OwnerSessionKind {
 				return ErrIdempotencyConflict
 			}
-			result = CreatePreviewLeaseV1Result{Lease: previewLeaseRecordFromRow(lease), Operation: existing, Replayed: true}
+			result = CreatePreviewLeaseV1Result{Lease: previewLeaseRecordFromRow(lease), Operation: operation, Replayed: true}
 			return nil
 		}
 		if err != nil {
@@ -494,27 +486,18 @@ func (s *Store) RenewPreviewLeaseV1(ctx context.Context, input RenewPreviewLease
 			}
 		}
 		q := tx.Queries()
-		operation, err := q.CreatePreviewTunnelOperation(ctx, dbsqlc.CreatePreviewTunnelOperationParams{
+		operation, replayed, err := BeginOperation(ctx, q, dbsqlc.CreatePreviewTunnelOperationParams{
 			ID: input.OperationID, AccountID: input.AccountID, IdempotencyKey: input.IdempotencyKey,
 			RequestHash: input.RequestHash, OperationType: "preview.renew", ResourceKind: "preview_lease",
 			ResourceID: sql.NullString{String: input.PreviewID, Valid: true}, Phase: "persisting", State: "running",
 			Progress: 20, Outcome: "unchanged", CorrelationID: input.CorrelationID,
-		})
-		if errors.Is(err, pgx.ErrNoRows) {
-			existing, getErr := q.GetPreviewTunnelOperationByIdempotency(ctx, dbsqlc.GetPreviewTunnelOperationByIdempotencyParams{
-				AccountID: input.AccountID, IdempotencyKey: input.IdempotencyKey,
-			})
-			if getErr != nil {
-				return translate(getErr)
-			}
-			if existing.OperationType != "preview.renew" || existing.ResourceKind != "preview_lease" || !existing.ResourceID.Valid || existing.ResourceID.String != input.PreviewID || !equalBytes(existing.RequestHash, input.RequestHash) {
-				return ErrIdempotencyConflict
-			}
+		}, true)
+		if err == nil && replayed {
 			lease, getErr := q.GetPreviewLeaseV1(ctx, dbsqlc.GetPreviewLeaseV1Params{ID: input.PreviewID, AccountID: input.AccountID})
 			if getErr != nil {
 				return translate(getErr)
 			}
-			result = RenewPreviewLeaseV1Result{Lease: previewLeaseRecordFromRow(lease), Operation: existing, Replayed: true}
+			result = RenewPreviewLeaseV1Result{Lease: previewLeaseRecordFromRow(lease), Operation: operation, Replayed: true}
 			return nil
 		}
 		if err != nil {
@@ -628,22 +611,13 @@ func (s *Store) StopPreviewLeaseV1(ctx context.Context, input StopPreviewLeaseV1
 			}
 		}
 		q := tx.Queries()
-		operation, err := q.CreatePreviewTunnelOperation(ctx, dbsqlc.CreatePreviewTunnelOperationParams{
+		operation, replayed, err := BeginOperation(ctx, q, dbsqlc.CreatePreviewTunnelOperationParams{
 			ID: input.OperationID, AccountID: input.AccountID, IdempotencyKey: input.IdempotencyKey,
 			RequestHash: input.RequestHash, OperationType: "preview.stop", ResourceKind: "preview_lease",
 			ResourceID: sql.NullString{String: input.PreviewID, Valid: true}, Phase: "persisting", State: "running",
 			Progress: 50, Outcome: "unchanged", CorrelationID: input.CorrelationID,
-		})
-		if errors.Is(err, pgx.ErrNoRows) {
-			existing, getErr := q.GetPreviewTunnelOperationByIdempotency(ctx, dbsqlc.GetPreviewTunnelOperationByIdempotencyParams{
-				AccountID: input.AccountID, IdempotencyKey: input.IdempotencyKey,
-			})
-			if getErr != nil {
-				return translate(getErr)
-			}
-			if existing.OperationType != "preview.stop" || existing.ResourceKind != "preview_lease" || !existing.ResourceID.Valid || existing.ResourceID.String != input.PreviewID || !equalBytes(existing.RequestHash, input.RequestHash) {
-				return ErrIdempotencyConflict
-			}
+		}, true)
+		if err == nil && replayed {
 			current, getErr := q.GetPreviewLeaseV1(ctx, dbsqlc.GetPreviewLeaseV1Params{ID: input.PreviewID, AccountID: input.AccountID})
 			if getErr != nil {
 				return translate(getErr)
@@ -1239,18 +1213,6 @@ func translatePreviewLeaseCreateError(err error) error {
 		return ErrEndpointConflict
 	}
 	return translate(err)
-}
-
-func equalBytes(a, b []byte) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for index := range a {
-		if a[index] != b[index] {
-			return false
-		}
-	}
-	return true
 }
 
 func previewLeaseAuditID(eventType, resourceID, requestID, correlationID string) string {

@@ -9,11 +9,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/pinksaucepasta/paperboat/server/internal/planlimits"
 	"io"
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/server/internal/planlimits"
 
 	"github.com/jackc/pgx/v5"
 
@@ -32,7 +33,7 @@ var (
 	ErrConflict             = errors.New("tunnel persistence conflict")
 	ErrNameConflict         = errors.New("tunnel name is already in use")
 	ErrGenerationConflict   = errors.New("tunnel generation conflict")
-	ErrIdempotencyConflict  = errors.New("idempotency key was reused with different input")
+	ErrIdempotencyConflict  = previewtunnelstore.ErrIdempotencyConflict
 	ErrInvalidInput         = errors.New("invalid tunnel persistence input")
 	ErrNotFound             = errors.New("tunnel not found")
 	ErrHostNotFound         = errors.New("host is not owned by this account")
@@ -780,27 +781,12 @@ type operationInput struct {
 }
 
 func beginOperation(ctx context.Context, queries *dbsqlc.Queries, input operationInput) (dbsqlc.Operation, bool, error) {
-	operation, err := queries.CreatePreviewTunnelOperation(ctx, dbsqlc.CreatePreviewTunnelOperationParams{
+	operation, replayed, err := previewtunnelstore.BeginOperation(ctx, queries, dbsqlc.CreatePreviewTunnelOperationParams{
 		ID: input.ID, AccountID: input.AccountID, IdempotencyKey: input.IdempotencyKey,
 		RequestHash: input.RequestHash[:], OperationType: input.OperationType, ResourceKind: "tunnel",
 		Phase: "persisting", State: "running", Progress: 20, Outcome: "unchanged", CorrelationID: input.CorrelationID,
-	})
-	if err == nil {
-		return operation, false, nil
-	}
-	if !errors.Is(err, pgx.ErrNoRows) {
-		return dbsqlc.Operation{}, false, translate(err)
-	}
-	existing, getErr := queries.GetPreviewTunnelOperationByIdempotency(ctx, dbsqlc.GetPreviewTunnelOperationByIdempotencyParams{
-		AccountID: input.AccountID, IdempotencyKey: input.IdempotencyKey,
-	})
-	if getErr != nil {
-		return dbsqlc.Operation{}, false, translate(getErr)
-	}
-	if existing.OperationType != input.OperationType || existing.ResourceKind != "tunnel" || !bytes.Equal(existing.RequestHash, input.RequestHash[:]) {
-		return dbsqlc.Operation{}, false, ErrIdempotencyConflict
-	}
-	return existing, true, nil
+	}, false)
+	return operation, replayed, translate(err)
 }
 
 func completeOperation(ctx context.Context, queries *dbsqlc.Queries, operationID, resourceID, phase, outcome string, now time.Time) (dbsqlc.Operation, error) {

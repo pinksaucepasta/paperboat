@@ -1,16 +1,17 @@
 package previewdomain
 
 import (
-	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"reflect"
 	"strings"
 	"time"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
@@ -426,21 +427,11 @@ type operationRecord struct {
 }
 
 func beginOperation(ctx context.Context, q *dbsqlc.Queries, input operationRecord) (dbsqlc.Operation, bool, error) {
-	op, err := q.CreatePreviewTunnelOperation(ctx, dbsqlc.CreatePreviewTunnelOperationParams{ID: input.ID, AccountID: input.AccountID, IdempotencyKey: input.IdempotencyKey, RequestHash: input.RequestHash[:], OperationType: input.OperationType, ResourceKind: Kind, ResourceID: sql.NullString{String: input.ResourceID, Valid: true}, Phase: "persisting", State: "running", Progress: 20, Outcome: "unchanged", CorrelationID: input.CorrelationID})
-	if err == nil {
-		return op, false, nil
+	op, replayed, err := previewtunnelstore.BeginOperation(ctx, q, dbsqlc.CreatePreviewTunnelOperationParams{ID: input.ID, AccountID: input.AccountID, IdempotencyKey: input.IdempotencyKey, RequestHash: input.RequestHash[:], OperationType: input.OperationType, ResourceKind: Kind, ResourceID: sql.NullString{String: input.ResourceID, Valid: true}, Phase: "persisting", State: "running", Progress: 20, Outcome: "unchanged", CorrelationID: input.CorrelationID}, true)
+	if err != nil && !errors.Is(err, ErrIdempotencyConflict) {
+		err = mapDatabaseError(err)
 	}
-	if !isSolePreviewDomainError(err, pgx.ErrNoRows) {
-		return dbsqlc.Operation{}, false, mapDatabaseError(err)
-	}
-	existing, getErr := q.GetPreviewTunnelOperationByIdempotency(ctx, dbsqlc.GetPreviewTunnelOperationByIdempotencyParams{AccountID: input.AccountID, IdempotencyKey: input.IdempotencyKey})
-	if getErr != nil {
-		return dbsqlc.Operation{}, false, translate(getErr)
-	}
-	if existing.OperationType != input.OperationType || existing.ResourceKind != Kind || !existing.ResourceID.Valid || existing.ResourceID.String != input.ResourceID || !bytes.Equal(existing.RequestHash, input.RequestHash[:]) {
-		return dbsqlc.Operation{}, false, ErrIdempotencyConflict
-	}
-	return existing, true, nil
+	return op, replayed, err
 }
 
 func advanceOperation(ctx context.Context, q *dbsqlc.Queries, id, resourceID, phase string, progress int16, now time.Time) (dbsqlc.Operation, error) {

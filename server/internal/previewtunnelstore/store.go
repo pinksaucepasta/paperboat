@@ -301,22 +301,14 @@ func (s *Store) CreateTunnel(ctx context.Context, input CreateTunnelInput) (Crea
 	var result CreateTunnelResult
 	err := s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
 		queries := tx.Queries()
-		operation, err := queries.CreatePreviewTunnelOperation(ctx, dbsqlc.CreatePreviewTunnelOperationParams{
+		operation, replayed, err := BeginOperation(ctx, queries, dbsqlc.CreatePreviewTunnelOperationParams{
 			ID: input.OperationID, AccountID: input.AccountID, IdempotencyKey: input.IdempotencyKey,
 			RequestHash: input.RequestHash[:], OperationType: "tunnel.create", ResourceKind: "tunnel",
 			Phase: "persisting", State: "running", Progress: 20, Outcome: "unchanged",
 			CorrelationID: input.CorrelationID,
-		})
-		if errors.Is(err, pgx.ErrNoRows) {
-			existing, getErr := queries.GetPreviewTunnelOperationByIdempotency(ctx, dbsqlc.GetPreviewTunnelOperationByIdempotencyParams{
-				AccountID: input.AccountID, IdempotencyKey: input.IdempotencyKey,
-			})
-			if getErr != nil {
-				return translate(getErr)
-			}
-			if existing.OperationType != "tunnel.create" || !bytes.Equal(existing.RequestHash, input.RequestHash[:]) {
-				return ErrIdempotencyConflict
-			}
+		}, false)
+		if err == nil && replayed {
+			existing := operation
 			if !existing.ResourceID.Valid {
 				return fmt.Errorf("%w: replayed operation has no resource", ErrConflict)
 			}
