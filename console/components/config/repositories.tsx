@@ -20,6 +20,7 @@ import {
 import { githubStatusQuery } from "@/lib/github"
 import { usePageParam } from "@/lib/use-page-param"
 import { ListPager } from "@/components/list-pager"
+import { ChooseTeamDefault } from "@/components/team/team-config-default"
 import { LoadError } from "@/components/load-error"
 import { ConfirmAction } from "@/components/list-toolbar"
 import { Section } from "@/components/section"
@@ -34,7 +35,8 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 export function ConfigRepositories() {
   const queryClient = useQueryClient()
   const pages = usePageParam("config-repositories")
-  const query = useApiQuery(configRepositoriesQuery(pages.page))
+  const workspace = useWorkspace()?.id
+  const query = useApiQuery(configRepositoriesQuery(pages.page, workspace))
   const [connecting, setConnecting] = useState(false)
   const [removing, setRemoving] = useState<ConfigRepository | null>(null)
   const items = query.data?.items ?? []
@@ -67,9 +69,15 @@ export function ConfigRepositories() {
                 <span className="truncate font-mono text-xs text-muted-foreground">{repository.external_ref}</span>
               )}
             </div>
-            <Button variant="outline" size="sm" onClick={() => setRemoving(repository)}>
-              Disconnect
-            </Button>
+            <div className="flex shrink-0 items-center gap-4">
+              <span className="hidden text-muted-foreground sm:inline">
+                {repository.team_default && "Team default · "}
+                {usedBy(repository.machine_count ?? 0)}
+              </span>
+              <Button variant="outline" size="sm" onClick={() => setRemoving(repository)}>
+                Disconnect
+              </Button>
+            </div>
           </div>
         ))
       )}
@@ -94,6 +102,9 @@ export function ConfigRepositories() {
     </Section>
   )
 }
+
+const usedBy = (count: number) =>
+  count === 0 ? "Not used" : `Used by ${count} ${count === 1 ? "machine" : "machines"}`
 
 function ConnectDialog({ onClose }: { onClose: () => void }) {
   const queryClient = useQueryClient()
@@ -231,7 +242,7 @@ function GitUrlForm({ onDone, onCancel }: { onDone: () => void; onCancel: () => 
 
 /**
  * The selected team's default config repository: members use it on all their machines or stop;
- * owners and admins can remove it. Nothing in a Personal workspace.
+ * owners and admins choose or remove it. Nothing in a Personal workspace.
  */
 export function TeamConfigDefaults() {
   const team = useWorkspace()
@@ -261,13 +272,37 @@ function TeamDefaultRow({
   const query = useQuery(teamConfigDefaultQuery(team.id))
   const [asking, setAsking] = useState(false)
   const [clearing, setClearing] = useState(false)
+  const [choosing, setChoosing] = useState(false)
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["config-sync"] })
+  const manage = team.role === "owner" || team.role === "admin"
   if (query.isPending) return <Skeleton className="my-3 h-4 w-48" />
+  const choose = choosing && (
+    <ChooseTeamDefault
+      team={team.id}
+      version={query.data?.version ?? 0}
+      onClose={() => setChoosing(false)}
+      onDone={() => {
+        setChoosing(false)
+        void refresh()
+      }}
+    />
+  )
+  const chooseButton = manage && (
+    <Button variant="outline" size="sm" onClick={() => setChoosing(true)}>
+      {query.data ? "Change" : "Choose"}
+    </Button>
+  )
   // A team without a default answers "unavailable", the same as one you may not read.
-  if (!query.data) return <p className="border-b border-divider py-3 text-sm text-muted-foreground">No default repository.</p>
+  if (!query.data)
+    return (
+      <div className="flex min-h-12 items-center justify-between gap-4 border-b border-divider text-sm">
+        <span className="text-muted-foreground">No default repository.</span>
+        {chooseButton}
+        {choose}
+      </div>
+    )
   const using = adoptedTeam === team.id
   const stale = using && adoptedVersion !== query.data.version
-  const manage = team.role === "owner" || team.role === "admin"
   return (
     <div className="flex min-h-14 items-center justify-between gap-4 border-b border-divider text-sm">
       <div className="flex min-w-0 flex-col">
@@ -284,12 +319,14 @@ function TeamDefaultRow({
             {stale ? "Update" : "Use"}
           </Button>
         )}
+        {chooseButton}
         {manage && (
           <Button variant="outline" size="sm" onClick={() => setClearing(true)}>
             Remove default
           </Button>
         )}
       </div>
+      {choose}
       {asking && (
         <ConfirmAction
           open

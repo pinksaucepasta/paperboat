@@ -48,7 +48,7 @@ export function TeamConfigDefault({ team }: { team: string }) {
         )}
       </SettingRow>
       {choosing && (
-        <Choose
+        <ChooseTeamDefault
           team={team}
           version={current?.version ?? 0}
           onClose={() => setChoosing(false)}
@@ -73,7 +73,8 @@ export function TeamConfigDefault({ team }: { team: string }) {
   )
 }
 
-function Choose({
+/** Owners and admins pick the team's default from their own connected repositories. */
+export function ChooseTeamDefault({
   team,
   version,
   onClose,
@@ -85,7 +86,7 @@ function Choose({
   onDone: () => void
 }) {
   const [page, setPage] = useState(1)
-  const repositories = useApiQuery(configRepositoriesQuery(page))
+  const repositories = useApiQuery(configRepositoriesQuery(page, team))
   const set = useMutation({ mutationFn: (id: string) => setTeamConfigDefault(team, id, version), onSuccess: onDone })
   return (
     <Dialog open onOpenChange={(open) => !open && !set.isPending && onClose()}>
@@ -103,9 +104,13 @@ function Choose({
                 className="flex min-h-12 items-center justify-between gap-3 border-b border-divider text-sm"
               >
                 <span className="min-w-0 truncate">{repository.display_name || repository.external_ref}</span>
-                <Button variant="outline" size="sm" disabled={set.isPending} onClick={() => set.mutate(repository.id)}>
-                  Use
-                </Button>
+                {repository.team_default ? (
+                  <span className="shrink-0 text-muted-foreground">Current default</span>
+                ) : (
+                  <Button variant="outline" size="sm" disabled={set.isPending} onClick={() => set.mutate(repository.id)}>
+                    Use
+                  </Button>
+                )}
               </div>
             ))
           ) : (

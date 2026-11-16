@@ -1,9 +1,9 @@
 // Browser check for F11-05 (console Config sync screens). READ ONLY: paste into the console of a
 // signed-in tab on /config (the workspace whose machines have config sync). Compares the all-machines
 // table with `GET /v1/config-sync/status` (machine, repository, direction, files, status wording,
-// last synced), then opens the machine page of the most interesting row (conflicts first, then
-// waiting for approval, then the first) and compares its details and its Conflicts / Waiting for
-// approval / Skipped lists with the server. It clicks only table links and Refresh; it never
+// last synced, chosen by) and each repository's "Used by N machines", then opens the machine page of
+// the most interesting row (conflicts first, then waiting for approval, then the first) and compares
+// its details and its Conflicts / Waiting for approval / Skipped lists with the server. It clicks only table links and Refresh; it never
 // resolves, approves, pulls or pushes anything (those are `pb config` commands on the machine).
 // Prints the steps (window.__checkSteps).
 ;(async () => {
@@ -37,6 +37,7 @@
     push_only: "To the repository",
     disabled: "Off",
   }
+  const chosenBy = { machine: "This machine", tag_rule: "Policy rule", recipe: "Recipe", team_default: "Team default" }
   // The wording the console promises for a state; the server's raw state decides which one applies.
   const expectedStatus = (e) => {
     const conflicts = e.conflicts?.length ?? 0
@@ -70,6 +71,14 @@
     pass("Repositories section has a Connect button", /Repositories/.test(pageText) && /Connect/.test(pageText))
     pass("a Personal workspace shows no team default", !/Team default/.test(pageText))
   } else pass("a team workspace shows its team default", /Team default/.test(pageText) && !/GitHub account/.test(pageText))
+  // Each repository says how many machines use it (and, in a team workspace, whether it is the team default).
+  const repositories = (await get(`config-repositories?workspace=${team}&limit=20`))?.items ?? []
+  for (const repository of repositories) {
+    const count = repository.machine_count ?? 0
+    const used = count === 0 ? "Not used" : `Used by ${count} ${count === 1 ? "machine" : "machines"}`
+    const label = (repository.team_default ? "Team default · " : "") + used
+    pass(`repository ${repository.display_name} says "${label}"`, pageText.includes(label))
+  }
 
   // The table lists the machines that sync; the ones that don't are folded under "Not syncing".
   const status = await get("config-sync/status?limit=200&state=configured")
@@ -99,12 +108,13 @@
       Boolean(row) &&
       cells[1] === (environment.repository_name ?? "") &&
       cells[2] === (direction[environment.mode ?? ""] ?? "") &&
-      cells[3] === (environment.repository_name ? String(environment.managed_path_count) : "") &&
-      (wanted ? cells[4] === wanted : cells[4].length > 0) &&
+      cells[3] === (chosenBy[environment.source ?? ""] ?? "") &&
+      cells[4] === (environment.repository_name ? String(environment.managed_path_count) : "") &&
+      (wanted ? cells[5] === wanted : cells[5].length > 0) &&
       (environment.last_successful_sync_at
-        ? cells[5].length > 0 && cells[5] !== "Never"
-        : cells[5] === (environment.repository_name ? "Never" : ""))
-    pass(`row for ${environment.alias} matches the server`, ok, ok ? `${cells[4]}` : JSON.stringify(cells))
+        ? cells[6].length > 0 && cells[6] !== "Never"
+        : cells[6] === (environment.repository_name ? "Never" : ""))
+    pass(`row for ${environment.alias} matches the server`, ok, ok ? `${cells[3]} · ${cells[5]}` : JSON.stringify(cells))
   }
 
   // Refresh re-reads the server without changing anything.
@@ -141,6 +151,7 @@
   pass("details show the repository", pick.repository_name ? detail("Repository") === pick.repository_name : true)
   // A machine that doesn't sync has no direction; the details show a dash for it.
   pass("details show the direction", detail("Direction") === (direction[pick.mode ?? ""] ?? "—"))
+  pass("details show who chose the repository", detail("Chosen by") === (chosenBy[pick.source ?? ""] ?? "—"))
   pass("details show the file count", detail("Files synced") === String(pick.managed_path_count))
   pass(
     "details show how updates apply",

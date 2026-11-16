@@ -11,7 +11,6 @@ import { ListPager } from "@/components/list-pager"
 import {
   actionLabels,
   configRuleQuery,
-  configSourceQuery,
   configStatusQuery,
   directionLabels,
   reasonLabel,
@@ -224,6 +223,7 @@ function MachineTable(props: {
           <col className="w-[20%]" />
           <col className="hidden md:table-column" />
           <col className="hidden w-[18%] lg:table-column" />
+          <col className="hidden w-[12%] xl:table-column" />
           <col className="hidden w-[8%] sm:table-column" />
           <col className="w-[22%]" />
           <col className="hidden w-[14%] sm:table-column" />
@@ -233,6 +233,7 @@ function MachineTable(props: {
             <th>Machine</th>
             <th className="hidden md:table-cell">Repository</th>
             <th className="hidden lg:table-cell">Direction</th>
+            <th className="hidden xl:table-cell">Chosen by</th>
             <th className="hidden text-right sm:table-cell">Files</th>
             <th>Status</th>
             <th className="hidden sm:table-cell">Last synced</th>
@@ -246,6 +247,7 @@ function MachineTable(props: {
                 { bar: "w-28" },
                 { className: "hidden md:table-cell", bar: "w-40" },
                 { className: "hidden lg:table-cell", bar: "w-20" },
+                { className: "hidden xl:table-cell", bar: "w-16" },
                 { className: "hidden text-right sm:table-cell", bar: "w-6" },
                 { bar: "w-14" },
                 { className: "hidden sm:table-cell", bar: "w-20" },
@@ -270,6 +272,9 @@ function MachineTable(props: {
                 <td className="hidden truncate text-muted-foreground md:table-cell">{environment.repository_name}</td>
                 <td className="hidden truncate text-muted-foreground lg:table-cell">
                   {directionLabels[environment.mode ?? ""]}
+                </td>
+                <td className="hidden truncate text-muted-foreground xl:table-cell">
+                  {sourceLabels[environment.source ?? ""]}
                 </td>
                 <td className="hidden text-right text-muted-foreground tabular-nums sm:table-cell">
                   {environment.repository_name && environment.managed_path_count}
@@ -304,7 +309,7 @@ function MachineTable(props: {
 
 function MachineSync({ environment }: { environment: ConfigEnvironment }) {
   const workspace = useWorkspace()?.id ?? "personal"
-  const source = useQuery(configSourceQuery(environment.machine_id, workspace)).data?.source
+  const source = environment.source
   const state = syncState(environment)
   const conflicts = environment.conflicts ?? []
   const review = environment.review ?? []
@@ -331,7 +336,7 @@ function MachineSync({ environment }: { environment: ConfigEnvironment }) {
         <SectionHeading title="Details" />
         <dl className="grid border-t border-divider sm:grid-cols-2 sm:gap-x-10">
           <Detail label="Repository">{environment.repository_name}</Detail>
-          <Detail label="Chosen by">{source ? sourceLabels[source] : undefined}</Detail>
+          <Detail label="Chosen by">{sourceLabels[source ?? ""]}</Detail>
           <Detail label="Direction">{directionLabels[environment.mode ?? ""]}</Detail>
           <Detail label="Files synced">{String(environment.managed_path_count)}</Detail>
           <Detail label="Updates">{environment.automatic_updates ? "Automatic" : "After approval"}</Detail>
@@ -384,6 +389,9 @@ function PolicyRule({ machineId, workspace, source }: { machineId: string; works
       </dl>
       {source === "machine" && (
         <p className="text-sm text-muted-foreground">This machine uses its own choice, which comes before the rule.</p>
+      )}
+      {source === "recipe" && (
+        <p className="text-sm text-muted-foreground">This machine uses its recipe’s repository, which comes before the rule.</p>
       )}
       {rule.state === "connect_on_apply" && (
         <>

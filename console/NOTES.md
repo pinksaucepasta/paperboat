@@ -392,10 +392,11 @@ pickable once linked) are their own list; "Team default" shows only in a team wo
 
 Policy-chosen repositories (FEAT-CONFIGREPOS): `config_sync` rules are edited in the policy file like every other section (Access → Policy file;
 its errors read in plain words, and the hint under the file names the section). A machine's
-Config sync tab shows `GET /v1/machines/{id}/config-rule` as a Policy rule section and "Chosen by" from the
-config assignment's `source` (`machine`, `tag_rule`). Gaps: the status payload has no `source`, so the all-machines
-table cannot show it per row; `ConfigRepository` has no machine count or default state ("used by N machines");
-team-connected repositories (owners and admins can remove a team default but not pick one).
+Config sync tab shows `GET /v1/machines/{id}/config-rule` as a Policy rule section. "Chosen by" (machine
+detail and the all-machines table) is the status row's `source`: `machine`, `tag_rule`, `recipe`,
+`team_default`. Each repository says "Used by N machines" (`machine_count`) and, listed in a team
+workspace, "Team default" (`team_default`); owners and admins choose or change the team default from the
+Config page's Team default row (same dialog as the team page), any connected repository including a Git URL.
 
 ## Domains page
 

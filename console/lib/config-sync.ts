@@ -22,6 +22,8 @@ export type ConfigEnvironment = {
   state: string
   mode?: "bidirectional" | "pull_only" | "push_only" | "disabled" | string
   repository_name?: string
+  /** Who chose the repository: machine, tag_rule, recipe or team_default (sourceLabels). */
+  source?: string
   repository_id?: string
   assignment_version?: number
   consent_state?: string
@@ -224,13 +226,14 @@ export const forceConfig = (environment: ConfigEnvironment, action: ForceAction)
 
 export type ConfigRepository = Schemas["ConfigRepository"]
 export const configRepositoriesPageSize = 20
-export const configRepositoriesQuery = (page: number) =>
+/** Your connected repositories; listed in a team workspace, each says whether it is that team's default. */
+export const configRepositoriesQuery = (page: number, workspace = "personal") =>
   queryOptions({
-    queryKey: ["config-sync", "repositories", page] as const,
+    queryKey: ["config-sync", "repositories", page, workspace] as const,
     queryFn: ({ signal }) =>
       api<Data<"/v1/config-repositories">>(
         `config-repositories?${new URLSearchParams({
-          workspace: "personal",
+          workspace,
           limit: String(configRepositoriesPageSize),
           offset: String((page - 1) * configRepositoriesPageSize),
         })}`,
@@ -307,18 +310,10 @@ export const configRuleQuery = (machineId: string, workspace: string) =>
     retry: false,
   })
 
-/** Who chose a machine's repository: its owner, or a policy rule (`source` of the config assignment). */
+/** Who chose a machine's repository (`source` of its config sync status row). */
 export const sourceLabels: Record<string, string> = {
-  machine: "Chosen on this machine",
-  tag_rule: "Chosen by a policy rule",
+  machine: "This machine",
+  tag_rule: "Policy rule",
+  recipe: "Recipe",
+  team_default: "Team default",
 }
-export const configSourceQuery = (machineId: string, workspace: string) =>
-  queryOptions({
-    queryKey: ["config-sync", "source", machineId, workspace] as const,
-    queryFn: ({ signal }) =>
-      api<{ source?: string }>(
-        `machines/${encodeURIComponent(machineId)}/config-assignment?${new URLSearchParams({ workspace })}`,
-        { signal },
-      ),
-    retry: false,
-  })

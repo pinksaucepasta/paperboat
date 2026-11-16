@@ -10013,6 +10013,11 @@ export interface components {
                 approved_pull_revision?: string;
                 adopted_team_id?: string;
                 adopted_default_version?: number;
+                /**
+                 * @description Who chose the repository: machine (the owner, for this machine), tag_rule (a policy config_sync rule), recipe (the machine's recipe [config]) or team_default (the adopted team default). Absent without an assignment.
+                 * @enum {string}
+                 */
+                source?: "machine" | "tag_rule" | "recipe" | "team_default";
                 consent_state?: string;
                 warning_revision?: string;
                 installation_generation?: number;
@@ -12022,6 +12027,10 @@ export interface components {
             external_ref: string;
             display_name: string;
             state: string;
+            /** @description Machines whose live config assignment pulls from or pushes to this repository (listed repositories). */
+            machine_count?: number;
+            /** @description In a team workspace, whether this repository is the team's config default. */
+            team_default?: boolean;
         };
         ConfigCompareBinding: {
             assignment_id: string;
@@ -28454,6 +28463,11 @@ export interface operations {
                             approved_pull_revision?: string;
                             adopted_team_id?: string;
                             adopted_default_version?: number;
+                            /**
+                             * @description Who chose the repository: machine (the owner, for this machine), tag_rule (a policy config_sync rule), recipe (the machine's recipe [config]) or team_default (the adopted team default). Absent without an assignment.
+                             * @enum {string}
+                             */
+                            source?: "machine" | "tag_rule" | "recipe" | "team_default";
                             consent_state?: string;
                             warning_revision?: string;
                             installation_generation?: number;
