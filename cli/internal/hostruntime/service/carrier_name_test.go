@@ -67,3 +67,19 @@ func TestWindowsHostdGenerationNames(t *testing.T) {
 		t.Fatal("a Windows hostd without a generation was declared")
 	}
 }
+
+// L249: the host service looked up the SCM service "PaperboatUpdated", which never exists (the account's updater is
+// "PaperboatUpdated-<instance>"), so a remote pb doctor read update_health recovery_required on every Windows machine.
+func TestWindowsUpdaterNameIsTheAccountsInstanceService(t *testing.T) {
+	instance, err := WindowsUserInstance("S-1-5-21-1-2-3-1001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	name, err := WindowsUpdaterName(instance)
+	if err != nil || name != "PaperboatUpdated-"+instance {
+		t.Fatalf("name %q err %v", name, err)
+	}
+	if _, err := WindowsUpdaterName(""); err == nil {
+		t.Fatal("an updater without an instance was named")
+	}
+}

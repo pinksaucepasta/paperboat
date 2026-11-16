@@ -201,7 +201,7 @@ func runWindowsHostdService(install hostinstall.WindowsRuntimeConfig, instance w
 		},
 		StartPrivilegedSidecar: func(ctx context.Context) (service.PrivilegedSidecar, error) {
 			sidecarCtx, cancelSidecars := context.WithCancel(ctx)
-			updateDiagnostics, err := hostservice.NewWindowsUpdateDiagnostics(layout.UpdateStateRoot, install.MachineID)
+			updateDiagnostics, err := hostservice.NewWindowsUpdateDiagnostics(layout.UpdateStateRoot, install.MachineID, instance.name)
 			if err != nil {
 				cancelSidecars()
 				return service.PrivilegedSidecar{}, err

@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
 	"golang.org/x/sys/windows/svc"
 	"golang.org/x/sys/windows/svc/mgr"
 )
@@ -25,14 +26,18 @@ type windowsUpdateDiagnostics struct {
 
 // NewWindowsUpdateDiagnostics bridges the independently managed updater into
 // host observations without coupling power-policy success to updater startup.
-func NewWindowsUpdateDiagnostics(stateRoot, machineID string) (UpdateDiagnostics, error) {
+func NewWindowsUpdateDiagnostics(stateRoot, machineID, instance string) (UpdateDiagnostics, error) {
 	if !filepath.IsAbs(stateRoot) || filepath.Clean(stateRoot) != stateRoot || strings.TrimSpace(machineID) == "" {
+		return nil, ErrInvalidConfig
+	}
+	serviceName, err := service.WindowsUpdaterName(instance)
+	if err != nil {
 		return nil, ErrInvalidConfig
 	}
 	return &windowsUpdateDiagnostics{
 		statePath: filepath.Join(stateRoot, "service-state.json"),
 		machineID: machineID,
-		running:   windowsUpdaterRunning,
+		running:   func() bool { return windowsUpdaterRunning(serviceName) },
 	}, nil
 }
 
@@ -61,13 +66,13 @@ func (d *windowsUpdateDiagnostics) validState() bool {
 	return decoder.Decode(&state) == nil && decoder.Decode(&extra) == io.EOF && state.Schema == windowsUpdaterStateSchema && state.MachineID == d.machineID && !state.RecoveredAt.IsZero() && !state.RecoveredAt.After(time.Now().UTC().Add(time.Minute))
 }
 
-func windowsUpdaterRunning() bool {
+func windowsUpdaterRunning(serviceName string) bool {
 	manager, err := mgr.Connect()
 	if err != nil {
 		return false
 	}
 	defer manager.Disconnect()
-	serviceHandle, err := manager.OpenService("PaperboatUpdated")
+	serviceHandle, err := manager.OpenService(serviceName)
 	if err != nil {
 		return false
 	}

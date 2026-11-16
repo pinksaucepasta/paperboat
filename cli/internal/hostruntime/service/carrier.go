@@ -132,6 +132,14 @@ func WindowsHostdName(instance, generation string) (string, error) {
 	return "PaperboatHostd-" + instance + "-" + generation, nil
 }
 
+// WindowsUpdaterName is the SCM identity of an enrolled account's updater service (updated.windowsUpdaterServiceName).
+func WindowsUpdaterName(instance string) (string, error) {
+	if !validWindowsSessionOwnerInstance(instance) {
+		return "", ErrInvalidDefinition
+	}
+	return "PaperboatUpdated-" + instance, nil
+}
+
 // windowsCarrierNameParts splits a carrier generation's SCM name (WindowsCarrierName).
 func windowsCarrierNameParts(name string) (instance, generation string, valid bool) {
 	return windowsGenerationNameParts("PaperboatCarrier-", name)
