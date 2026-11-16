@@ -43,6 +43,16 @@ func TestDialWaitsForAPipeThatAppears(t *testing.T) {
 	}
 }
 
+// An older session owner's pipe is never re-bound in place: absent means stopped. Probing ten of them must not wait
+// AbsentWait each (exec into a Windows machine updated ten times took 20 s, victus 2026-11-16).
+func TestDialAbsentNowDoesNotWait(t *testing.T) {
+	path := fmt.Sprintf(`\\.\pipe\paperboat-winpipe-gone-%d`, os.Getpid())
+	began := time.Now()
+	if _, err := Dial(AbsentNow(context.Background()), path, ""); !errors.Is(err, windows.ERROR_FILE_NOT_FOUND) || time.Since(began) > AbsentWait/4 {
+		t.Fatalf("a missing pipe with AbsentNow: err %v after %v, want ERROR_FILE_NOT_FOUND at once", err, time.Since(began))
+	}
+}
+
 func currentUser(t *testing.T) string {
 	t.Helper()
 	user, err := windows.GetCurrentProcessToken().GetTokenUser()

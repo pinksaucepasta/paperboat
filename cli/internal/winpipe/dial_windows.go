@@ -28,6 +28,9 @@ const AbsentWait = 2 * time.Second
 // byte is sent.
 func Dial(ctx context.Context, path, owner string) (net.Conn, error) {
 	deadline := time.Now().Add(AbsentWait)
+	if absentNow(ctx) {
+		deadline = time.Now()
+	}
 	for {
 		connection, err := winio.DialPipeContext(ctx, path)
 		if err == nil {

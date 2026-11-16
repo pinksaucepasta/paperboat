@@ -10,6 +10,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/execprocess"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/session"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/workloadbridge"
+	"github.com/pinksaucepasta/paperboat/internal/winpipe"
 )
 
 // Executions routes explicit executions to session owners. A command runs in
@@ -84,7 +85,7 @@ func (c *Connections) execOwner(ctx context.Context, id string) *workloadbridge.
 	}
 	probe, _ := json.Marshal(map[string]string{"OperationID": id})
 	for _, generation := range c.liveGenerations(ctx) {
-		client, err := c.execClient(ctx, generation)
+		client, err := c.execClient(c.probeContext(ctx, generation), generation)
 		if err != nil {
 			continue
 		}
@@ -103,7 +104,7 @@ func (c *Connections) execOwner(ctx context.Context, id string) *workloadbridge.
 func (c *Connections) execList(ctx context.Context, body json.RawMessage) (json.RawMessage, error) {
 	var all struct{ Snapshots []execprocess.Snapshot }
 	for _, generation := range c.liveGenerations(ctx) {
-		client, err := c.execClient(ctx, generation)
+		client, err := c.execClient(c.probeContext(ctx, generation), generation)
 		if err != nil {
 			continue
 		}
@@ -155,6 +156,16 @@ func (c *Connections) dropExecClient(generation string, client *workloadbridge.C
 		delete(c.descriptors, generation)
 		client.Close()
 	}
+}
+
+// probeContext dials an older generation's owner without waiting for its pipe: the catalogue keeps every
+// generation an update left behind, and waiting winpipe.AbsentWait on each stopped one made every exec start on a
+// Windows machine updated ten times take 20 s (victus 2026-11-16).
+func (c *Connections) probeContext(ctx context.Context, generation string) context.Context {
+	if generation == c.active.Generation {
+		return ctx
+	}
+	return winpipe.AbsentNow(ctx)
 }
 
 // liveGenerations lists catalogued generations, active first.
