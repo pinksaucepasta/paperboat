@@ -1432,3 +1432,64 @@ func TestInventoryRefreshesWhenTheWorkerReportsTheControlPlaneBack(t *testing.T)
 		time.Sleep(50 * time.Millisecond)
 	}
 }
+
+// outageSource fails every listing while failures is positive.
+type outageSource struct {
+	scriptedMachineSource
+	failures atomic.Int32
+	calls    atomic.Int32
+}
+
+func (s *outageSource) ListUserMachines(context.Context) ([]api.UserMachine, error) {
+	s.calls.Add(1)
+	if s.failures.Add(-1) >= 0 {
+		return nil, apiDown("/v1/machines")
+	}
+	return []api.UserMachine{{ID: "machine_1", Alias: "studio"}}, nil
+}
+
+// The listing right after the stream recovers can still fail (the server is busy coming back). The outage backoff
+// restarts with the stream, so it is retried on the interval, not at the doubled outage delay.
+func TestInventoryRestartsTheOutageBackoffWhenTheStreamRecovers(t *testing.T) {
+	source := &outageSource{}
+	source.failures.Store(1 << 20)
+	store, err := localapi.NewSnapshotStore(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hub := machineevents.NewPushed()
+	interval := time.Second
+	inventory, err := NewInventory(InventoryConfig{Source: source, Store: store, RefreshInterval: interval, RequestTimeout: time.Second, EventRefreshSpacing: 100 * time.Millisecond, Events: hub.Subscribe(machineevents.TopicInventory)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hub.Push(nil, false)
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- inventory.Run(ctx) }()
+	defer func() {
+		cancel()
+		<-done
+	}()
+	// Listings at about 0, 1, 2 and 4 s; the next outage check is 6.4-9.6 s later.
+	deadline := time.Now().Add(10 * time.Second)
+	for source.calls.Load() < 4 {
+		if time.Now().After(deadline) {
+			t.Fatalf("%d listings during the outage", source.calls.Load())
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	source.failures.Store(1) // the refresh the recovery wakes still fails
+	hub.Push(nil, true)
+	deadline = time.Now().Add(2500 * time.Millisecond)
+	for {
+		snapshot, err := store.Snapshot(t.Context())
+		if err == nil && snapshot.DaemonState == "ready" {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("daemon state %q 2.5 s after the stream recovered (%d listings), want ready on the restarted backoff", snapshot.DaemonState, source.calls.Load())
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}

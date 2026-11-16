@@ -257,6 +257,12 @@ func (i *Inventory) Run(ctx context.Context) error {
 			if !i.events.Healthy() {
 				refresh(false)
 			} else {
+				// The stream is back: restart the outage backoff, so a listing that still fails right after the
+				// recovery is retried on the interval, not minutes later (F21-01 W stayed unavailable 3m48s).
+				if failed && outages > 0 {
+					outages = 0
+					timer.Reset(i.refreshInterval)
+				}
 				schedule(i.eventSpacing, false)
 			}
 		case <-pending:
