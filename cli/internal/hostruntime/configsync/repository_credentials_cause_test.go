@@ -121,7 +121,7 @@ func TestSaveRepositoryCredentialProfilePreservesRootFilesystemFailure(t *testin
 
 func TestRepositoryReferenceMissingCauseKeepsCredentialClassification(t *testing.T) {
 	path := filepath.Join(shorttemp.Dir(t), "missing-reference")
-	_, err := readRepositoryReference(path, true)
+	_, err := ReadRepositoryReference(path, true)
 	var pathErr *os.PathError
 	if !errors.Is(err, ErrRepositoryCredentials) || !errors.Is(err, os.ErrNotExist) || !errors.As(err, &pathErr) || strings.Contains(err.Error(), path) {
 		t.Fatalf("missing credential reference lost its typed cause/classification or exposed its path: %v", err)

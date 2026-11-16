@@ -5,10 +5,8 @@ import (
 	"errors"
 	gitssh "github.com/go-git/go-git/v5/plumbing/transport/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
-	"io"
 	"os"
 	"path/filepath"
-	"runtime"
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/configsync"
@@ -82,7 +80,7 @@ func configureRepositoryCredentialsInteractive(command *cobra.Command, repositor
 		profile.Auth = "ssh"
 		profile.SSHAgent = choice.ID == "agent"
 		if !profile.SSHAgent {
-			profile.SSHKeyFile, err = credentialInteractiveText(command, "SSH private key file", "Absolute path to an existing permission-protected private key on this machine.", validateCredentialInteractiveFile)
+			profile.SSHKeyFile, err = credentialInteractiveText(command, "SSH private key file", "Absolute path to an existing permission-protected private key on this machine.", validateCredentialInteractivePrivateFile)
 			if err != nil {
 				return err
 			}
@@ -143,29 +141,20 @@ func credentialInteractiveSecret(command *cobra.Command, title, description stri
 	return string(bytes), nil
 }
 func validateCredentialInteractiveFile(path string) error {
-	if !filepath.IsAbs(path) || filepath.Clean(path) != path {
-		return errors.New("enter an absolute file path on this machine")
-	}
-	resolved, err := filepath.EvalSymlinks(path)
-	if err != nil {
-		return safeCommandFailureFor("choose an existing file through its real absolute path", err)
-	}
-	if resolved != path {
-		return errors.New("choose an existing file through its real absolute path")
-	}
-	info, err := os.Lstat(path)
-	if err != nil {
-		return safeCommandFailureFor("could not inspect the credential reference file", err)
-	}
-	if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 || info.Size() > 1<<20 || (runtime.GOOS != "windows" && info.Mode().Perm()&0022 != 0) {
-		return errors.New("choose a regular file no larger than 1 MiB that other users cannot modify")
-	}
-	return nil
+	data, err := readCredentialInteractiveReference(path, false)
+	clear(data)
+	return err
+}
+
+func validateCredentialInteractivePrivateFile(path string) error {
+	data, err := readCredentialInteractiveReference(path, true)
+	clear(data)
+	return err
 }
 
 func validateCredentialInteractiveProfileReferences(profile configsync.RepositoryCredentialProfile) error {
 	if profile.CAFile != "" {
-		data, err := readCredentialInteractiveReference(profile.CAFile)
+		data, err := readCredentialInteractiveReference(profile.CAFile, false)
 		if err != nil {
 			return err
 		}
@@ -183,14 +172,7 @@ func validateCredentialInteractiveProfileReferences(profile configsync.Repositor
 		}
 	}
 	if profile.SSHKeyFile != "" {
-		info, err := os.Lstat(profile.SSHKeyFile)
-		if err != nil {
-			return safeCommandFailureFor("could not inspect the SSH private key file", err)
-		}
-		if runtime.GOOS != "windows" && info.Mode().Perm()&0077 != 0 {
-			return errors.New("SSH private key must be accessible only to its owner")
-		}
-		data, err := readCredentialInteractiveReference(profile.SSHKeyFile)
+		data, err := readCredentialInteractiveReference(profile.SSHKeyFile, true)
 		if err != nil {
 			return err
 		}
@@ -201,23 +183,19 @@ func validateCredentialInteractiveProfileReferences(profile configsync.Repositor
 	}
 	return nil
 }
-func readCredentialInteractiveReference(path string) ([]byte, error) {
-	if err := validateCredentialInteractiveFile(path); err != nil {
-		return nil, err
+
+// readCredentialInteractiveReference checks a prompted file with the daemon's own reader, so a profile saved here is
+// one the daemon accepts (owner-only for a private key; on Windows the file ACL for every reference).
+func readCredentialInteractiveReference(path string, private bool) ([]byte, error) {
+	if !filepath.IsAbs(path) || filepath.Clean(path) != path {
+		return nil, errors.New("enter an absolute file path on this machine")
 	}
-	file, err := os.Open(path)
-	if err != nil {
-		return nil, safeCommandFailureFor("credential reference file is unavailable", err)
+	data, err := configsync.ReadRepositoryReference(path, private)
+	if err == nil {
+		return data, nil
 	}
-	data, err := io.ReadAll(io.LimitReader(file, (1<<20)+1))
-	closeErr := file.Close()
-	if err != nil || closeErr != nil {
-		clear(data)
-		return nil, safeCommandFailureFor("credential reference file is unavailable", errors.Join(err, closeErr))
+	if private {
+		return nil, safeCommandFailureFor("choose an existing regular file (at most 1 MiB, through its real absolute path) that only you can read", err)
 	}
-	if len(data) > 1<<20 {
-		clear(data)
-		return nil, errors.New("credential reference file exceeds 1 MiB")
-	}
-	return data, nil
+	return nil, safeCommandFailureFor("choose an existing regular file (at most 1 MiB, through its real absolute path) that other users cannot modify", err)
 }

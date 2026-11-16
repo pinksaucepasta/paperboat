@@ -65,7 +65,7 @@ func TestWindowsRepositoryCredentialSaveLoadProtectedReferences(t *testing.T) {
 		if err := writePrivateAtomic(path, []byte("test-only reference\n")); err != nil {
 			t.Fatal("private reference creation stage", err)
 		}
-		if _, err := readRepositoryReference(path, true); err != nil {
+		if _, err := ReadRepositoryReference(path, true); err != nil {
 			t.Fatal("private reference read stage", err)
 		}
 	}
@@ -127,7 +127,7 @@ func TestWindowsRepositoryCredentialSaveLoadProtectedReferences(t *testing.T) {
 	if err := windows.SetNamedSecurityInfo(key, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION, nil, nil, acl, nil); err != nil {
 		t.Fatal("untrusted reference ACL setup stage", err)
 	}
-	if _, err := readRepositoryReference(key, true); err == nil {
+	if _, err := ReadRepositoryReference(key, true); err == nil {
 		t.Fatal("untrusted writable reference accepted")
 	}
 	if err := DeleteRepositoryCredentialProfile(root, id); err != nil {

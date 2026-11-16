@@ -29,6 +29,7 @@ func TestConfigCredentialInteractiveExplicitFileValidation(t *testing.T) {
 	if err := os.WriteFile(file, []byte("reference"), 0600); err != nil {
 		t.Fatal(err)
 	}
+	protectCredentialTestFile(t, file)
 	if err := validateCredentialInteractiveFile(file); err != nil {
 		t.Fatal(err)
 	}
@@ -41,7 +42,7 @@ func TestConfigCredentialInteractiveExplicitFileValidation(t *testing.T) {
 	if err := validateCredentialInteractiveFile(missing); err == nil || !errors.Is(err, os.ErrNotExist) || strings.Contains(err.Error(), missing) {
 		t.Fatalf("missing key reference lost private cause or exposed path: %v", err)
 	}
-	if _, err := readCredentialInteractiveReference(missing); err == nil || !errors.Is(err, os.ErrNotExist) || strings.Contains(err.Error(), missing) {
+	if _, err := readCredentialInteractiveReference(missing, true); err == nil || !errors.Is(err, os.ErrNotExist) || strings.Contains(err.Error(), missing) {
 		t.Fatalf("missing credential reference lost private cause or exposed path: %v", err)
 	}
 	link := filepath.Join(root, "symlink")
@@ -51,6 +52,14 @@ func TestConfigCredentialInteractiveExplicitFileValidation(t *testing.T) {
 		}
 	}
 	if runtime.GOOS != "windows" {
+		// The prompt checked a private key with the reference rule (0022) and let a group-readable key through.
+		os.Chmod(file, 0640)
+		if err := validateCredentialInteractiveFile(file); err != nil {
+			t.Fatal(err)
+		}
+		if err := validateCredentialInteractivePrivateFile(file); err == nil {
+			t.Fatal("group-readable private key accepted")
+		}
 		os.Chmod(file, 0666)
 		if err := validateCredentialInteractiveFile(file); err == nil {
 			t.Fatal("reference writable by others accepted")
@@ -76,6 +85,8 @@ func TestConfigCredentialInteractiveSSHKeyAndPassphraseValidation(t *testing.T) 
 		t.Fatal(err)
 	}
 	os.WriteFile(hostsFile, []byte(knownhosts.Line([]string{"git.example.test"}, host)+"\n"), 0600)
+	protectCredentialTestFile(t, keyFile)
+	protectCredentialTestFile(t, hostsFile)
 	profile := configsync.RepositoryCredentialProfile{Transport: "ssh", Auth: "ssh", SSHKeyFile: keyFile, SSHKeyPassphrase: passphrase, KnownHostsFile: hostsFile}
 	if err := validateCredentialInteractiveProfileReferences(profile); err != nil {
 		t.Fatal(err)
@@ -103,6 +114,7 @@ func TestConfigCredentialInteractiveCACertificateValidation(t *testing.T) {
 	}
 	path := filepath.Join(shorttemp.Dir(t), "ca.pem")
 	os.WriteFile(path, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), 0600)
+	protectCredentialTestFile(t, path)
 	profile := configsync.RepositoryCredentialProfile{Transport: "https", Auth: "anonymous", CAFile: path}
 	if err := validateCredentialInteractiveProfileReferences(profile); err != nil {
 		t.Fatal(err)

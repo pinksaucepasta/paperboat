@@ -204,7 +204,7 @@ func LoadRepositoryCredentialProfile(root, repositoryID string) (RepositoryCrede
 	if !privateControlFile(path, info) || info.Size() > 65536 {
 		return p, ErrRepositoryCredentials
 	}
-	data, err := readRepositoryReference(path, true)
+	data, err := ReadRepositoryReference(path, true)
 	if err != nil {
 		return RepositoryCredentialProfile{}, err
 	}

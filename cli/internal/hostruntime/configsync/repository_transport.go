@@ -155,7 +155,7 @@ func resolveRepositoryTransportAccess(ctx context.Context, credentialRoot string
 		return result, ErrRepositoryCredentials
 	}
 	if p.CAFile != "" {
-		data, err := readRepositoryReference(p.CAFile, false)
+		data, err := ReadRepositoryReference(p.CAFile, false)
 		if err != nil {
 			return result, err
 		}
@@ -171,7 +171,7 @@ func resolveRepositoryTransportAccess(ctx context.Context, credentialRoot string
 			result.auth = &githttp.BasicAuth{Username: p.Username, Password: p.Password}
 		}
 	case "ssh":
-		if _, err := readRepositoryReference(p.KnownHostsFile, false); err != nil {
+		if _, err := ReadRepositoryReference(p.KnownHostsFile, false); err != nil {
 			return result, err
 		}
 		db, err := gitssh.NewKnownHostsDb(p.KnownHostsFile)
@@ -212,7 +212,7 @@ func resolveRepositoryTransportAccess(ctx context.Context, credentialRoot string
 			result.closer = newRepositoryContextCloser(ctx, conn)
 			result.auth = &repositorySSHAuth{AuthMethod: auth, ctx: ctx}
 		} else {
-			key, err := readRepositoryReference(p.SSHKeyFile, true)
+			key, err := ReadRepositoryReference(p.SSHKeyFile, true)
 			if err != nil {
 				return result, err
 			}
@@ -229,7 +229,10 @@ func resolveRepositoryTransportAccess(ctx context.Context, credentialRoot string
 	}
 	return result, nil
 }
-func readRepositoryReference(path string, private bool) ([]byte, error) {
+
+// ReadRepositoryReference reads a user-selected credential reference file (CA bundle, known_hosts, SSH key) the way
+// the daemon will use it; `pb config repository credentials` checks its prompts with the same function.
+func ReadRepositoryReference(path string, private bool) ([]byte, error) {
 	resolved, err := filepath.EvalSymlinks(path)
 	if err != nil {
 		return nil, repositoryCredentialReferenceFailure(err)
