@@ -1,0 +1,13 @@
+{
+ "row": "PR-06",
+ "cells": ["M", "W"],
+ "check": "cli/internal/hostruntime/connector TestQUICCarrierStreamHoldsTheBudgetAtRealRTT",
+ "what_it_covers": "the machine side per OS: the daemon's own dial (quicdial.Dial + defaultQUICConfig on the OS UDP socket) sends one 200 MiB QUIC stream, through a 50 ms UDP delay line, into a receiver with the edge's receive windows (mirrored from edge/internal/datacarrier endpointQUICConfig: 256 KiB initial, 4 MiB maximum stream, 64 MiB connection). Median of three fresh connections must be >= 150 Mbit/s. The edge always runs on Linux and is proven end to end in cell L (e2e.yml throughput, 180-184 Mbit/s).",
+ "why_not_through_the_prod_edge": "a hosted runner is 228-235 ms from both prod edges (India), real devices upload at ~18 Mbit/s from home; the coordinator accepted this check as the M and W tick (2026-11-16)",
+ "binaries": "cross-compiled with go test -c from the committed tree (GOOS=darwin GOARCH=arm64, GOOS=windows GOARCH=amd64) on hermes, run as plain test binaries",
+ "macos": {"machine": "pbmac2 (macOS 26.6.2, 2 vCPU Tart VM on apple), fleet-mac2.lock held", "runs": [[217.3, 167.8, 216.3], [180.3, 231.6, 220.2], [177.2, 178.0, 91.5]], "medians": [216.3, 220.2, 177.2], "status": "PASS 3 of 3 invocations"},
+ "windows": {"machine": "victus (Windows 11 IoT Enterprise LTSC, 12 logical CPUs)", "runs": [[325.2, 224.6, 219.6], [348.1, 219.4, 218.1], [336.6, 219.4, 224.9]], "medians": [224.6, 219.4, 224.9], "status": "PASS 3 of 3 invocations"},
+ "linux": {"machine": "hermes, no -race", "runs": [[323.4, 277.3, 244.6]], "medians": [277.3], "status": "PASS"},
+ "fixture_lessons": "Windows failed (96-140 Mbit/s, 49-176 lost packets in the sender's trace) until the delay relay's UDP sockets got 8 MiB buffers: the OS default (64 KB on Windows) dropped the relay's bursts. The 50 ms must be present at the handshake (a connection that measured ~1 ms first makes quic-go's HyStart leave slow start at once).",
+ "ran_on_runners": "not yet on the GitHub-hosted Windows runner; its queue was hours long. cross-platform.yml runs the test on every push to main (Windows leg, no race)."
+}
