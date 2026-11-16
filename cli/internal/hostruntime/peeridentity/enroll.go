@@ -110,21 +110,9 @@ func (c *Client) Ensure(ctx context.Context) error {
 	}
 	now := c.config.Clock().UTC().Truncate(time.Second)
 	quicPublic := endpoint.QUICPublicKey()
-	serial := uint64(1)
-	registering := len(endpoint.Certificate) == 0
-	if !registering {
-		previous, parseErr := endpointidentity.Parse(endpoint.Certificate)
-		if parseErr != nil || previous.Claims.Serial == ^uint64(0) {
-			return fmt.Errorf("machine endpoint certificate: %w", ErrInvalid)
-		}
-		// Previously approved certificates may still be signed by an old
-		// account key. Renew them with this machine's existing endpoint key;
-		// expiry alone would leave an installed machine unable to restart.
-		_, ownCertificateErr := endpointidentity.Verify(endpoint.Certificate, quicPublic, endpointidentity.Expected{AccountID: registration.AccountID, Role: endpointidentity.RoleMachine, EndpointID: registration.MachineID, Generation: endpoint.Generation}, now)
-		if !previous.Claims.ExpiresAt.After(now.Add(identitybootstrap.CertificateRenewBefore)) || ownCertificateErr != nil {
-			serial = previous.Claims.Serial + 1
-			registering = true
-		}
+	serial, registering, err := nextCertificate(endpoint, registration, now)
+	if err != nil {
+		return err
 	}
 	var status int
 	if registering {
@@ -205,6 +193,42 @@ func (c *Client) Ensure(ctx context.Context) error {
 	// certificate may be issued by one account root while ENV authority
 	// documents are signed by another root in that same approved set.
 	return store.SavePeerEndpointCertificateWithTrustedKeys(key.PublicKey, trusted, certificate, c.config.Clock().UTC())
+}
+
+// nextCertificate says whether the stored endpoint certificate must be (re)registered and the serial the new one takes:
+// registering when none is stored, it is not this machine's own, or it is due for renewal.
+func nextCertificate(endpoint identitystore.PeerEndpoint, registration identitystore.Registration, now time.Time) (serial uint64, registering bool, err error) {
+	if len(endpoint.Certificate) == 0 {
+		return 1, true, nil
+	}
+	previous, parseErr := endpointidentity.Parse(endpoint.Certificate)
+	if parseErr != nil || previous.Claims.Serial == ^uint64(0) {
+		return 0, false, fmt.Errorf("machine endpoint certificate: %w", ErrInvalid)
+	}
+	// Previously approved certificates may still be signed by an old
+	// account key. Renew them with this machine's existing endpoint key;
+	// expiry alone would leave an installed machine unable to restart.
+	_, ownCertificateErr := endpointidentity.Verify(endpoint.Certificate, endpoint.QUICPublicKey(), endpointidentity.Expected{AccountID: registration.AccountID, Role: endpointidentity.RoleMachine, EndpointID: registration.MachineID, Generation: endpoint.Generation}, now)
+	if !previous.Claims.ExpiresAt.After(now.Add(identitybootstrap.CertificateRenewBefore)) || ownCertificateErr != nil {
+		return previous.Claims.Serial + 1, true, nil
+	}
+	return 1, false, nil
+}
+
+// CertificateCurrent reports that the stored endpoint certificate is this machine's own and not due for renewal, so
+// the host can start serving from it without asking Paperboat (Ensure keeps refreshing it in the background).
+func (c *Client) CertificateCurrent() bool {
+	store, err := identitystore.Open(identitystore.Config{StateRoot: c.config.StateRoot})
+	if err != nil {
+		return false
+	}
+	endpoint, endpointErr := store.PeerEndpoint()
+	registration, registrationErr := store.Registration()
+	if endpointErr != nil || registrationErr != nil || registration.InstallationGeneration < 1 || uint64(registration.InstallationGeneration) != endpoint.Generation {
+		return false
+	}
+	_, registering, err := nextCertificate(endpoint, registration, c.config.Clock().UTC().Truncate(time.Second))
+	return err == nil && !registering
 }
 
 func parseCanonicalTime(value string) (time.Time, error) {

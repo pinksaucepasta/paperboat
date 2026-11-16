@@ -687,6 +687,11 @@ func (s *peerEnrollmentRuntimeService) Shutdown(ctx context.Context) error {
 // the enrollment runtime service retries it every few seconds. Exiting on one failed request failed
 // the whole pair at "installing system services".
 func allowPendingPeerEnrollment(ctx context.Context, enrollment peerEnrollmentEnsurer) error {
+	// An enrolled machine starts from its stored certificate; the enrollment runtime service keeps refreshing it, so a
+	// restart does not wait out the control plane's request timeout (10 s each in an outage).
+	if stored, ok := enrollment.(interface{ CertificateCurrent() bool }); ok && stored.CertificateCurrent() {
+		return nil
+	}
 	err := enrollment.Ensure(ctx)
 	if err != nil && ctx.Err() == nil && !errors.Is(err, peeridentityenrollment.ErrPending) && transientNativePeerStart(err) {
 		slog.Warn("machine endpoint registration failed; retrying in the background", "error", err)

@@ -70,6 +70,23 @@ func TestTransientPeerEnrollmentFailureKeepsTheCarrierStarting(t *testing.T) {
 	}
 }
 
+// An enrolled machine starts from its stored certificate: Ensure is a control request (10 s dial timeout in an outage),
+// so a carrier that waited on it served nothing for 10 s after every restart.
+type storedPeerEnrollment struct{ calls int }
+
+func (e *storedPeerEnrollment) Ensure(context.Context) error {
+	e.calls++
+	return errors.New("the control plane must not be asked at start")
+}
+func (*storedPeerEnrollment) CertificateCurrent() bool { return true }
+
+func TestEnrolledMachineStartsWithoutAskingTheControlPlane(t *testing.T) {
+	enrollment := &storedPeerEnrollment{}
+	if err := allowPendingPeerEnrollment(t.Context(), enrollment); err != nil || enrollment.calls != 0 {
+		t.Fatalf("err=%v after %d control requests; want a start without any", err, enrollment.calls)
+	}
+}
+
 type sequencePeerEnrollment struct {
 	results []error
 	calls   int

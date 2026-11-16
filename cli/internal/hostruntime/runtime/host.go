@@ -627,6 +627,22 @@ func NewHost(ctx context.Context, config HostConfig, dependencies HostDependenci
 		// Restartable after a failed Start (native_peer_unix.go Start resets its state), so it is retried.
 		stableComponents = append(stableComponents, stablehostd.Component{Name: "peer_transport", Required: false, Retry: true, Service: nativePeerService})
 	}
+	if dependencies.NetworkMonitor != nil {
+		stableComponents = append(stableComponents, stablehostd.Component{Name: "network_monitor", Required: true, Service: dependencies.NetworkMonitor})
+	}
+	if nativeDispatch != nil {
+		stableComponents = append(stableComponents, stablehostd.Component{Name: "native_dispatch", Required: true, Service: shutdownService{shutdown: nativeDispatch.Close}})
+	}
+	stableComponents = append(stableComponents, stablehostd.Component{Name: "control_plane", Required: true, Service: httpService})
+	if dependencies.RuntimeAttachmentService != nil {
+		stableComponents = append(stableComponents, stablehostd.Component{Name: "runtime_attachment", Required: false, Service: dependencies.RuntimeAttachmentService})
+	}
+	if dependencies.EngineTunnels != nil {
+		stableComponents = append(stableComponents, stablehostd.Component{Name: "engine_tunnels", Required: false, Service: dependencies.EngineTunnels})
+	}
+	// Components that ask the control plane while they start come last: Start waits out their request timeouts when
+	// Paperboat is unreachable (35 s after a restart in an outage), and exec, terminals and files must be served from
+	// the host's cached state meanwhile (offline until revoked).
 	if dependencies.PreviewRecovery != nil {
 		stableComponents = append(stableComponents, stablehostd.Component{Name: "preview_recovery", Required: false, Retry: true, Service: dependencies.PreviewRecovery})
 	}
@@ -651,19 +667,6 @@ func NewHost(ctx context.Context, config HostConfig, dependencies HostDependenci
 	if recordingControl != nil {
 		// Recording is optional: a policy Paperboat cannot serve must not take terminals down.
 		stableComponents = append(stableComponents, stablehostd.Component{Name: "recording_control", Required: false, Service: recordingControl})
-	}
-	if dependencies.NetworkMonitor != nil {
-		stableComponents = append(stableComponents, stablehostd.Component{Name: "network_monitor", Required: true, Service: dependencies.NetworkMonitor})
-	}
-	if nativeDispatch != nil {
-		stableComponents = append(stableComponents, stablehostd.Component{Name: "native_dispatch", Required: true, Service: shutdownService{shutdown: nativeDispatch.Close}})
-	}
-	stableComponents = append(stableComponents, stablehostd.Component{Name: "control_plane", Required: true, Service: httpService})
-	if dependencies.RuntimeAttachmentService != nil {
-		stableComponents = append(stableComponents, stablehostd.Component{Name: "runtime_attachment", Required: false, Service: dependencies.RuntimeAttachmentService})
-	}
-	if dependencies.EngineTunnels != nil {
-		stableComponents = append(stableComponents, stablehostd.Component{Name: "engine_tunnels", Required: false, Service: dependencies.EngineTunnels})
 	}
 	var hostRuntime *Runtime // set below, before the daemon starts
 	daemon, err := stablehostd.New(stablehostd.Config{

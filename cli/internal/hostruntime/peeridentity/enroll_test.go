@@ -100,6 +100,9 @@ func TestEnsureRegistersMachineOwnedMachineKeyWithoutPairedCLI(t *testing.T) {
 	if err != nil || len(stored.Certificate) == 0 || len(stored.TrustedKeys) != 2 || stored.RootKeyID != keyID {
 		t.Fatalf("stored machine identity: cert=%d keys=%d key_id=%s err=%v", len(stored.Certificate), len(stored.TrustedKeys), stored.RootKeyID, err)
 	}
+	if !client.CertificateCurrent() {
+		t.Fatal("a freshly registered certificate is not reported current: a restart would wait on the control plane")
+	}
 	// A state file without its trust directory refreshes through the authenticated
 	// machine status route; it does not need a CLI signer to come online.
 	path := filepath.Join(stateRoot, "peer-endpoint.json")
@@ -134,6 +137,9 @@ func TestEnsureRegistersMachineOwnedMachineKeyWithoutPairedCLI(t *testing.T) {
 	if err := store.SavePeerEndpointCertificateWithTrustedKeys(quicPublic, refreshed.TrustedKeys, soonRaw, now); err != nil {
 		t.Fatal(err)
 	}
+	if client.CertificateCurrent() {
+		t.Fatal("a certificate due for renewal is reported current")
+	}
 	if err := client.Ensure(context.Background()); err != nil {
 		t.Fatalf("renew machine certificate: %v", err)
 	}
@@ -156,6 +162,9 @@ func TestEnsureRegistersMachineOwnedMachineKeyWithoutPairedCLI(t *testing.T) {
 	legacyKey := endpointidentity.TrustedKey{KeyID: "aek_" + hex.EncodeToString(legacyFingerprint[:]), PublicKey: legacyPublic, Fingerprint: legacyFingerprint, Generation: 1}
 	if err := store.SavePeerEndpointCertificateWithTrustedKeys(legacyPublic, append(refreshed.TrustedKeys, legacyKey), legacyRaw, now); err != nil {
 		t.Fatal(err)
+	}
+	if client.CertificateCurrent() {
+		t.Fatal("a certificate signed by an old account key is reported current")
 	}
 	if err := client.Ensure(context.Background()); err != nil {
 		t.Fatalf("renew old account-signed certificate: %v", err)
