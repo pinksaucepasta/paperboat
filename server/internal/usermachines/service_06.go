@@ -118,40 +118,44 @@ func (s *Service) RetryPendingRevocations(ctx context.Context) error {
 			errs = append(errs, err)
 		}
 	}
-	skipped := 0
-	if err := s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-		skipped = 0
-		machines, err := tx.Queries().LockUserMachinesForFinalDeletion(ctx)
-		if err != nil {
-			return fmt.Errorf("final delete removed machines: %w", err)
-		}
-		for _, machine := range machines {
-			// A machine that cannot be deleted is skipped, so one bad row never stalls the rest of the batch.
-			if err := finalDeleteMachine(ctx, tx, s.audit, machine); err != nil {
-				skipped++
-				slog.WarnContext(ctx, "final delete skipped removed machine", "machine_id", machine.ID, "error", err)
+	// One machine per transaction, like headscale's per-node DeleteNode (hscontrol/db/node.go): a serialization
+	// failure dooms the whole transaction, so a shared batch transaction failed every later machine's statements
+	// (2,000 errors for 34 removals on 11-16) and replayed the batch. A machine that still fails is skipped for this
+	// tick, so one bad row never stalls the rest. Non-nil: pgx sends nil as NULL, and NOT (id = ANY(NULL)) is NULL.
+	skipped := []string{}
+	for range finalDeleteBatch {
+		var id string
+		found := false
+		err := s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+			machines, err := tx.Queries().LockUserMachinesForFinalDeletion(ctx, skipped)
+			if err != nil || len(machines) == 0 {
+				found = false
+				return err
 			}
+			found, id = true, machines[0].ID
+			return finalDeleteMachine(ctx, tx, s.audit, machines[0])
+		})
+		if !found {
+			if err != nil {
+				errs = append(errs, fmt.Errorf("final delete removed machines: %w", err))
+			}
+			break
 		}
-		return nil
-	}); err != nil {
-		errs = append(errs, err)
-	} else if skipped > 0 {
-		errs = append(errs, fmt.Errorf("final delete skipped %d removed machines; see the machine_id warnings", skipped))
+		if err != nil {
+			skipped = append(skipped, id)
+			slog.WarnContext(ctx, "final delete skipped removed machine", "machine_id", id, "error", err)
+		}
+	}
+	if len(skipped) > 0 {
+		errs = append(errs, fmt.Errorf("final delete skipped %d removed machines; see the machine_id warnings", len(skipped)))
 	}
 	return errors.Join(errs...)
 }
 
-func finalDeleteMachine(ctx context.Context, tx *db.Tx, writer *audit.Writer, machine dbsqlc.LockUserMachinesForFinalDeletionRow) (err error) {
-	if _, err := tx.Exec(ctx, `SAVEPOINT final_delete_machine`); err != nil {
-		return err
-	}
-	defer func() {
-		if err != nil {
-			if _, rollbackErr := tx.Exec(ctx, `ROLLBACK TO SAVEPOINT final_delete_machine`); rollbackErr != nil {
-				err = errors.Join(err, rollbackErr)
-			}
-		}
-	}()
+// finalDeleteBatch bounds the machines one RetryPendingRevocations tick deletes.
+const finalDeleteBatch = 100
+
+func finalDeleteMachine(ctx context.Context, tx *db.Tx, writer *audit.Writer, machine dbsqlc.LockUserMachinesForFinalDeletionRow) error {
 	if err := writer.WriteTx(ctx, tx, audit.Event{ActorUserID: machine.UserID, ActorType: audit.ActorSystem,
 		EventType: "user_machine.final_deleted", ResourceType: "user_machine", ResourceID: machine.ID,
 		IdempotencyKey: "user_machine.final_deleted:" + machine.ID, Metadata: map[string]any{"alias": machine.Alias}}); err != nil {
@@ -160,8 +164,7 @@ func finalDeleteMachine(ctx context.Context, tx *db.Tx, writer *audit.Writer, ma
 	if _, err := tx.Exec(ctx, `DELETE FROM user_machines WHERE id=$1`, machine.ID); err != nil {
 		return fmt.Errorf("final delete removed machine: %w", err)
 	}
-	_, err = tx.Exec(ctx, `RELEASE SAVEPOINT final_delete_machine`)
-	return err
+	return nil
 }
 
 type machineAccessSession struct {

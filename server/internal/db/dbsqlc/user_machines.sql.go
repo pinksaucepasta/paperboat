@@ -4676,11 +4676,12 @@ func (q *Queries) LockUserMachineTerminalSessionsInWorkspace(ctx context.Context
 
 const lockUserMachinesForFinalDeletion = `-- name: LockUserMachinesForFinalDeletion :many
 SELECT candidate.id,candidate.user_id,candidate.alias FROM user_machines candidate
-WHERE (candidate.deleted_at IS NOT NULL OR candidate.revoked_at IS NOT NULL) AND NOT EXISTS (
+WHERE (candidate.deleted_at IS NOT NULL OR candidate.revoked_at IS NOT NULL)
+AND NOT (candidate.id = ANY($1::text[])) AND NOT EXISTS (
   SELECT 1 FROM user_machine_access_sessions s WHERE s.user_machine_id=candidate.id
     AND (s.state='active' OR (s.state='revoked' AND s.helper_revoked_at IS NULL))
 )
-ORDER BY coalesce(candidate.deleted_at,candidate.revoked_at,candidate.created_at),candidate.id LIMIT 100 FOR UPDATE SKIP LOCKED
+ORDER BY coalesce(candidate.deleted_at,candidate.revoked_at,candidate.created_at),candidate.id LIMIT 1 FOR UPDATE SKIP LOCKED
 `
 
 type LockUserMachinesForFinalDeletionRow struct {
@@ -4689,8 +4690,8 @@ type LockUserMachinesForFinalDeletionRow struct {
 	Alias  string
 }
 
-func (q *Queries) LockUserMachinesForFinalDeletion(ctx context.Context) ([]LockUserMachinesForFinalDeletionRow, error) {
-	rows, err := q.db.Query(ctx, lockUserMachinesForFinalDeletion)
+func (q *Queries) LockUserMachinesForFinalDeletion(ctx context.Context, skipIds []string) ([]LockUserMachinesForFinalDeletionRow, error) {
+	rows, err := q.db.Query(ctx, lockUserMachinesForFinalDeletion, skipIds)
 	if err != nil {
 		return nil, err
 	}

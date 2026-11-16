@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -258,5 +259,109 @@ func TestFinalDeleteSkipsMachineThatCannotBeDeleted(t *testing.T) {
 	first.exec(`DROP TABLE ` + table)
 	if err := finalDeleteTestService(store).RetryPendingRevocations(ctx); err != nil || poison.exists(t) {
 		t.Fatalf("machine not deleted once unblocked: %v", err)
+	}
+}
+
+// TestFinalDeleteUnderConcurrentMachineTraffic is the 11-16 prod storm: 34 removed machines were final-deleted in one
+// serializable transaction while the owner's other machines heartbeat and the machine list is read. The batch became a
+// pivot, PostgreSQL doomed it, and every later machine's statements failed in it (1,993 on InsertAuditEvent) before the
+// batch replayed. Each machine now commits alone, so the tick deletes all of them and retries stay few.
+func TestFinalDeleteUnderConcurrentMachineTraffic(t *testing.T) {
+	store, traffic := testStore(t), testStore(t)
+	ctx := context.Background()
+	owner := "final_traffic_" + fmt.Sprint(time.Now().UnixNano())
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO users(id,workos_subject,primary_email,status) VALUES($1,$1,$1||'@example.test','active')`, owner); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO user_machines(id,user_id,environment_id,alias,platform,architecture,workspace_root,state,seat_state,deleted_at) SELECT $1||n,$1,$1||n,'traffic-'||n,'linux','amd64','/workspace','deleted','released','2000-01-01'::timestamptz FROM generate_series(1,34) n`, owner); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO user_machines(id,user_id,environment_id,alias,platform,architecture,workspace_root,state,seat_state) SELECT $1||'live'||n,$1,$1||'live'||n,'live-'||n,'linux','amd64','/workspace','online','released' FROM generate_series(1,3) n`, owner); err != nil {
+		t.Fatal(err)
+	}
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+	for _, query := range []string{
+		`SELECT count(*) FROM user_machines WHERE user_id=$1`,              // the machine list: reads what final delete deletes
+		`UPDATE user_machines SET last_seen_at=now() WHERE id=$1||'live1'`, // heartbeats of the owner's live machines
+		`UPDATE user_machines SET last_seen_at=now() WHERE id=$1||'live2'`,
+		`UPDATE user_machines SET last_seen_at=now() WHERE id=$1||'live3'`,
+	} {
+		for range 2 {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for {
+					select {
+					case <-stop:
+						return
+					default:
+					}
+					_ = traffic.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+						_, err := tx.Exec(ctx, query, owner)
+						return err
+					})
+					time.Sleep(5 * time.Millisecond) // busy, not saturated: ~1,000 transactions a second
+				}
+			}()
+		}
+	}
+	service := New(store, audit.NewWriter(store), Policy{}, nil)
+	service.ConfigureAccess(&recordingIssuer{}, "https://api.example.test")
+	err := service.RetryPendingRevocations(ctx)
+	close(stop)
+	wg.Wait()
+	stats := store.TransactionStats().Serializable
+	t.Logf("final delete transactions: calls=%d attempts=%d retries=%d exhausted=%d", stats.Calls, stats.Attempts, stats.Retries, stats.Exhausted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var remaining int
+	if err := store.SQL().QueryRowContext(ctx, `SELECT count(*) FROM user_machines WHERE user_id=$1 AND deleted_at IS NOT NULL`, owner).Scan(&remaining); err != nil || remaining != 0 {
+		t.Fatalf("removed machines remaining=%d: %v", remaining, err)
+	}
+	var events int
+	if err := store.SQL().QueryRowContext(ctx, `SELECT count(*) FROM audit_events WHERE actor_user_id=$1 AND event_type='user_machine.final_deleted'`, owner).Scan(&events); err != nil || events != 34 {
+		t.Fatalf("final_deleted events=%d: %v", events, err)
+	}
+}
+
+// TestFinalDeleteTwoWorkersDrain is two replicas ticking at once over 66 removed machines (the 11-16 .32 rollout): the
+// shared batch transaction exceeded max_pred_locks_per_transaction (53200) and failed with 40001 on every tick. Per-row
+// SKIP LOCKED transactions let both workers drain the set with no errors and exactly one final_deleted event each.
+func TestFinalDeleteTwoWorkersDrain(t *testing.T) {
+	ctx := context.Background()
+	owner := "final_workers_" + fmt.Sprint(time.Now().UnixNano())
+	seed := testStore(t)
+	if _, err := seed.SQL().ExecContext(ctx, `INSERT INTO users(id,workos_subject,primary_email,status) VALUES($1,$1,$1||'@example.test','active')`, owner); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := seed.SQL().ExecContext(ctx, `INSERT INTO user_machines(id,user_id,environment_id,alias,platform,architecture,workspace_root,state,seat_state,deleted_at) SELECT $1||n,$1,$1||n,'worker-'||n,'linux','amd64','/workspace','deleted','released','2000-01-01'::timestamptz FROM generate_series(1,66) n`, owner); err != nil {
+		t.Fatal(err)
+	}
+	errs := make([]error, 2)
+	var wg sync.WaitGroup
+	for i := range errs {
+		store := testStore(t)
+		service := New(store, audit.NewWriter(store), Policy{}, nil)
+		service.ConfigureAccess(&recordingIssuer{}, "https://api.example.test")
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errs[i] = service.RetryPendingRevocations(ctx)
+		}()
+	}
+	wg.Wait()
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("worker %d: %v", i, err)
+		}
+	}
+	var remaining, events, distinct int
+	if err := seed.SQL().QueryRowContext(ctx, `SELECT count(*) FROM user_machines WHERE user_id=$1`, owner).Scan(&remaining); err != nil || remaining != 0 {
+		t.Fatalf("removed machines remaining=%d: %v", remaining, err)
+	}
+	if err := seed.SQL().QueryRowContext(ctx, `SELECT count(*),count(DISTINCT resource_id) FROM audit_events WHERE actor_user_id=$1 AND event_type='user_machine.final_deleted'`, owner).Scan(&events, &distinct); err != nil || events != 66 || distinct != 66 {
+		t.Fatalf("final_deleted events=%d distinct=%d: %v", events, distinct, err)
 	}
 }
