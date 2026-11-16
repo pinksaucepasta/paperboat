@@ -361,6 +361,7 @@ func refreshRecipe(ctx context.Context, steps *health.Registry, applier *recipeA
 		if err == nil {
 			err = applyRecipeState(stepCtx, applier, configPath, state, report)
 		}
+		err = recipeStepError(err)
 		cancel()
 		wait := recipeIdleRefresh
 		if err == nil {
@@ -402,4 +403,13 @@ func applyRecipeState(ctx context.Context, applier *recipeApplier, configPath st
 	}
 	sections, err := applier.apply(ctx, state.Revision, r)
 	return errors.Join(err, report(ctx, state.Revision, sections, public))
+}
+
+// recipeStepError names a rejected recipe session in the recipe's terms: its credential comes from the
+// recipe install, not pb login.
+func recipeStepError(err error) error {
+	if errors.Is(err, api.ErrUnauthenticated) {
+		return fmt.Errorf("the server rejected this machine's recipe session (the recipe was revoked or rotated without this machine, or the machine was removed); run the recipe install again: %w", err)
+	}
+	return err
 }

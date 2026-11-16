@@ -30,6 +30,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
 	"github.com/pinksaucepasta/paperboat/internal/localdaemon"
 	"github.com/pinksaucepasta/paperboat/internal/machineguard"
+	"github.com/pinksaucepasta/paperboat/internal/recipekey"
 	"github.com/pinksaucepasta/paperboat/internal/tunnel"
 	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 	"github.com/pinksaucepasta/paperboat/shared/httptransport"
@@ -424,7 +425,8 @@ func localDaemonCommand() *cobra.Command {
 					defer func() { _ = events.Shutdown(context.WithoutCancel(ctx)) }()
 				}
 				go refreshMachineServices(ctx, steps, coordinator, machineServicesFetcher(cfg.ServerURL, authSource, controlTransport), servicesEvents.Changed(), coordinator.ServicesNudge())
-				if source.SourceMachineID != "" {
+				// Only a machine paired from a recipe has a recipe key file; no file, no recipe loop or step.
+				if _, isRecipe, _ := recipekey.Load(cfg.Path()); isRecipe && source.SourceMachineID != "" {
 					host, _ := os.Hostname()
 					fetchRecipe, reportRecipe := recipeClients(cfg.ServerURL, authSource, controlTransport)
 					applier := &recipeApplier{statePath: recipeStatePath(cfg.Path()), machine: strings.ToLower(strings.Split(host, ".")[0]), run: pbRunner(cfg.Path())}

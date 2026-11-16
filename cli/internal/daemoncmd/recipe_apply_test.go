@@ -112,3 +112,13 @@ func TestRecipeStateTakesARotatedKey(t *testing.T) {
 		t.Fatal("a machine without a recipe key file applied a recipe")
 	}
 }
+
+func TestRecipeStepErrorNamesARejectedRecipeSession(t *testing.T) {
+	err := recipeStepError(&api.APIError{Status: http.StatusUnauthorized, Code: "unauthenticated"})
+	if !strings.Contains(err.Error(), "recipe session") || strings.Contains(err.Error(), "pb login") && !strings.Contains(err.Error(), "recipe install") || !errors.Is(err, api.ErrUnauthenticated) {
+		t.Fatalf("err = %v", err)
+	}
+	if other := errors.New("x"); recipeStepError(other) != other {
+		t.Fatal("other errors pass through")
+	}
+}
