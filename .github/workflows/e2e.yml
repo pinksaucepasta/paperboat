@@ -32,10 +32,6 @@ on:
         description: 'PR-06 instead of the core run: one tunnel stream at +50 ms RTT must sustain 150 Mbit/s'
         type: boolean
         default: false
-      throughput_tcp:
-        description: 'throughput only: drop UDP from the origin to the edge so the carrier falls back to TCP'
-        type: boolean
-        default: false
   workflow_call:
     inputs:
       core_only:
@@ -65,7 +61,6 @@ jobs:
       PAPERBOAT_TEST_DATABASE_DSN: postgres://postgres:postgres@localhost:5432/e2e_test?sslmode=disable
       PAPERBOAT_E2E_CORE: '1'
       PAPERBOAT_E2E_THROUGHPUT: ${{ inputs.throughput && '1' || '' }}
-      PAPERBOAT_E2E_THROUGHPUT_TCP: ${{ inputs.throughput_tcp && '1' || '' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5

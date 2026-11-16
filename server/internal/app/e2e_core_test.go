@@ -88,6 +88,9 @@ func TestE2ECore(t *testing.T) {
 	})
 	for _, name := range e.machines {
 		e.step("machine "+name, func() error { return e.startMachine(name) })
+		if os.Getenv("PAPERBOAT_E2E_THROUGHPUT") != "" && name == e.machines[1] {
+			e.step("throughput: +50 ms on the origin's egress", func() error { return e.delayOrigin(name) })
+		}
 		e.step("pair "+name, func() error { return e.pair(name) })
 	}
 	if os.Getenv("PAPERBOAT_E2E_THROUGHPUT") != "" {

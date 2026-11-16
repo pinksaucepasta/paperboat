@@ -6,11 +6,8 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"os"
 	"path/filepath"
 	"sort"
-	"strconv"
-	"strings"
 	"time"
 )
 
@@ -20,29 +17,14 @@ const (
 )
 
 // assertTunnelThroughput is PR-06 on a quiet runner (PAPERBOAT_E2E_THROUGHPUT=1, e2e.yml dispatch input throughput):
-// one tunnel stream through the real edge sustains throughputBudget at 50 ms RTT. The delay is netem on the origin
-// container's egress, applied before the carrier restarts so the carrier measures it (yamux/QUIC windows grow from
-// the RTT they see); limit 100000 because netem's default 1000-packet queue drops the flow's bursts and the loss,
-// not the carrier, then caps the rate. The visitor is this process, on the host next to the edge.
+// one tunnel stream through the real edge sustains throughputBudget at 50 ms RTT. The delay is delayOrigin's netem
+// on the origin container; the visitor is this process, on the host next to the edge.
 func (e *e2eCore) assertTunnelThroughput() {
 	origin := e.machines[1]
 	var hostname string
 	e.step("throughput: origin serves a file", func() error {
 		_, err := e.run(2*time.Minute, "docker", "exec", "-u", "pbt", origin, "bash", "-c", fmt.Sprintf(
 			"mkdir -p /tmp/8082 && head -c %d /dev/urandom >/tmp/8082/big && cd /tmp/8082 && (setsid python3 -m http.server 8082 >/dev/null 2>&1 &)", throughputMiB<<20))
-		return err
-	})
-	e.step("throughput: +50 ms on the origin's egress, carrier restarted", func() error {
-		if _, err := e.docker(origin, "tc", "qdisc", "replace", "dev", "eth0", "root", "netem", "delay", "50ms", "limit", "100000"); err != nil {
-			return err
-		}
-		if os.Getenv("PAPERBOAT_E2E_THROUGHPUT_TCP") != "" { // the TCP carrier: without UDP to the edge the carrier falls back to it (40 s below)
-			if _, err := e.docker(origin, "iptables", "-I", "OUTPUT", "-p", "udp", "-d", e.gateway, "-j", "DROP"); err != nil {
-				return err
-			}
-		}
-		_, err := e.docker(origin, "bash", "-c", "systemctl restart 'paperboat-carrier-u1000-*.service'")
-		time.Sleep(40 * time.Second)
 		return err
 	})
 	e.step("throughput: tunnel published", func() error {
@@ -68,7 +50,6 @@ func (e *e2eCore) assertTunnelThroughput() {
 		return waitFor(2*time.Minute, func() error { return getOK(client, "https://"+hostname+"/") })
 	})
 	var rates []float64
-	before := udpCounters()
 	e.step("throughput: three downloads", func() error {
 		for range 3 {
 			start := time.Now()
@@ -86,47 +67,17 @@ func (e *e2eCore) assertTunnelThroughput() {
 		return nil
 	})
 	sort.Float64s(rates)
-	loss, _ := e.docker(origin, "tc", "-s", "qdisc", "show", "dev", "eth0")
-	e.t.Logf("origin netem after the downloads (dropped > 0 = loss before the edge):\n%s", loss)
-	e.t.Logf("host UDP counters during the downloads: %v (RcvbufErrors > 0 = the edge's UDP receive buffer overflowed)", udpCounters().since(before))
 	e.t.Logf("tunnel throughput at +50 ms: %.1f Mbit/s median of %.1f (budget %.0f)", rates[1], rates, throughputBudget)
 	if rates[1] < throughputBudget {
 		e.t.Fatalf("tunnel throughput at +50 ms is %.1f Mbit/s median (runs %.1f), budget %.0f", rates[1], rates, throughputBudget)
 	}
 }
 
-type udpStats map[string]int
-
-// udpCounters reads the host's UDP counters (/proc/net/snmp): the edge listens on the host.
-func udpCounters() udpStats {
-	raw, err := os.ReadFile("/proc/net/snmp")
-	if err != nil {
-		return nil
-	}
-	var names []string
-	stats := udpStats{}
-	for _, line := range strings.Split(string(raw), "\n") {
-		fields := strings.Fields(line)
-		if len(fields) == 0 || fields[0] != "Udp:" {
-			continue
-		}
-		if names == nil {
-			names = fields[1:]
-			continue
-		}
-		for i, v := range fields[1:] {
-			stats[names[i]], _ = strconv.Atoi(v)
-		}
-	}
-	return stats
-}
-
-func (s udpStats) since(before udpStats) udpStats {
-	delta := udpStats{}
-	for k, v := range s {
-		if v != before[k] {
-			delta[k] = v - before[k]
-		}
-	}
-	return delta
+// delayOrigin puts 50 ms on the origin container's egress before it pairs, so every QUIC connection it makes
+// handshakes at the real RTT. A connection made before the delay keeps its ~1 ms minimum RTT and quic-go's HyStart
+// reads each later 50 ms sample as a delay increase and leaves slow start at once (a 40 KB window, 16 KB/s growth:
+// 88-95 Mbit/s measured instead of 180). limit 100000: netem's default 1000-packet queue drops the flow's bursts.
+func (e *e2eCore) delayOrigin(machine string) error {
+	_, err := e.docker(machine, "tc", "qdisc", "replace", "dev", "eth0", "root", "netem", "delay", "50ms", "limit", "100000")
+	return err
 }
