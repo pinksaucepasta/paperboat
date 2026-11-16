@@ -323,8 +323,15 @@ func (m *PathMapping) SnapshotContext(ctx context.Context, policy RuntimePolicy,
 			skip(name, reason, detail)
 			return nil
 		}
-		if info.Size() > policy.MaxFileBytes || info.Size() > policy.MaxBatchBytes-total {
-			return ErrSnapshotInvalid
+		// Over the bounds a file is reported by its own name and left alone, like every other file the mapping cannot carry,
+		// not an error that stops the whole sync with no file named.
+		if info.Size() > policy.MaxFileBytes {
+			skip(name, "max_file_bytes", "")
+			return nil
+		}
+		if info.Size() > policy.MaxBatchBytes-total {
+			skip(name, "max_batch_bytes", "")
+			return nil
 		}
 		value, opened, err := secureReadFile(source, policy.MaxFileBytes)
 		state := FileState{}

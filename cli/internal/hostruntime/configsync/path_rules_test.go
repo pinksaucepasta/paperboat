@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/fsnotify/fsnotify"
@@ -375,6 +376,44 @@ func TestMappedSnapshotBoundsZeroByteEntriesAndHonorsCancellation(t *testing.T) 
 	cancel()
 	if _, err := m.SnapshotContext(ctx, policy, manifest, home, true); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancellation: %v", err)
+	}
+}
+
+// F21-170: a mapped file over the per-file bound (5 MiB by default) or the batch bound is reported as skipped by name and
+// reason while the files beside it still sync; it used to fail the whole snapshot with a nameless error (status
+// repository_unavailable).
+func TestMappedSnapshotSkipsFilesOverTheBounds(t *testing.T) {
+	home := resolvedTempDir(t)
+	directory := resolvedTempDir(t)
+	writeTestFile(t, filepath.Join(directory, "big"), strings.Repeat("x", 1025))
+	writeTestFile(t, filepath.Join(directory, "a"), strings.Repeat("y", 600))
+	writeTestFile(t, filepath.Join(directory, "b"), strings.Repeat("z", 600))
+	m, err := ResolvePathRules(home, []PathRule{{ID: "directory", RepositoryPath: "configs", LocalPath: directory, Kind: "directory"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := ParseManifest([]byte("configs/\n"), nil, DefaultManifestLimits())
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy := testRuntimeDescriptor().Policy
+	policy.MaxFileBytes, policy.MaxBatchBytes = 1024, 1100
+	snapshot, err := m.Snapshot(policy, manifest, home, true)
+	if err != nil {
+		t.Fatalf("a file over the bounds failed the snapshot: %v", err)
+	}
+	reasons := map[string]string{}
+	for _, skipped := range snapshot.Skipped {
+		reasons[skipped.Path] = skipped.Reason
+	}
+	// One of the two 600-byte files fits the 1100-byte batch, the other is the one over the batch bound.
+	if len(snapshot.Files) != 1 || reasons["configs/big"] != "max_file_bytes" || len(reasons) != 2 {
+		t.Fatalf("files=%v skipped=%v", snapshot.Files, reasons)
+	}
+	for name, reason := range reasons {
+		if name != "configs/big" && reason != "max_batch_bytes" {
+			t.Fatalf("%s skipped for %q, want max_batch_bytes", name, reason)
+		}
 	}
 }
 
