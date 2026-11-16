@@ -1,0 +1,29 @@
+# F21-170 client-side bounds on a Mac (macpool-8, macOS 26.7, arm64) and a Windows runner (winpool-1), both paired to staging
+# (server 58798cd + PAPERBOAT_CONFIG_SYNC_MODE=leased_writes, the production setting). 2026-11-16 IST.
+# pb: ENV on dev-048fa5d22 (has the 129th-variable fix b48daf402), config sync on dev-c77546977 (has the over-5-MiB fix c77546977);
+# the skipped-list dedupe 03c1cec22 is covered by a unit test only. Run by hand with real pb commands.
+
+ENV, device-override scope of the machine itself (pb env set LIMIT_nnn --machine <self>):
+  Mac     128 sets, fail=0 (456 s); 129th: code record_capacity_exceeded, category conflict, outcome_uncertain false, message
+          "This ENV scope is full: it holds at most 128 variables and 256 KiB ... Nothing was changed; unset a variable or run `pb env rotate` ...";
+          pb env list --machine: 128 names; pb env vault resume after the refusal: definite refusal, nothing staged; unlock + next edit works.
+          7 values of 32,767 bytes accepted, the 8th refused with the same code; the next edit after the refusal worked.
+  Windows 128 sets, fail=0 (624 s); 129th: record_capacity_exceeded (same message); list names: 128;
+          7 values of 32,767 bytes (32,765 + CRLF) accepted, the 8th refused; the next edit worked.
+  Bug found and fixed first (b48daf402): before the fix the Mac's 129th set answered env_source_publication_pending (outcome uncertain),
+  pb env vault resume returned the same and every later pb env command refused "publication is pending": the machine's ENV was stuck.
+  One earlier Windows set (3rd of the first run) failed with "connection forcibly closed by the remote host" on GET /v1/machines: not repeated in the 128-set rerun.
+
+Config sync, mapped file of 6 MiB (cfg/big.txt, policy MaxFileBytes 5 MiB) next to a normal file (cfg/value.txt), bidirectional, local bare repository:
+  before the fix (dev-048fa5d22, Mac): state error, error_code repository_unavailable, nothing named; shrinking the file made the sync run (state conflict on the seed).
+  after the fix (dev-c77546977): Mac    "rel170-mac: warning, bidirectional, manifest healthy, 1 managed" + "skipped cfg/big.txt: max file bytes"
+                                 Windows "rel170-win: warning, bidirectional, manifest healthy, 1 managed" + "skipped cfg/big.txt: max file bytes"
+                                 (listed twice, fixed by 03c1cec22: both halves report it).
+  Staging had PAPERBOAT_CONFIG_SYNC_MODE unset (disabled): every /v1/config/credentials answered 401 credential_invalid and a paired machine's config state stayed
+  "disabled"; deploy/staging.py now sets leased_writes like production.
+
+Teams, 128 members (staging team rel170-limit seeded to 128 active members in the staging database, removed afterwards):
+  Mac     pb team invite rel170-limit <email> --generation 1 -> team_limit "Team limit reached: 128 of 128 members. Remove one the team no longer uses, then retry."
+  Windows the same message.
+
+Cleanup: both machine records revoked by exact id, pb uninstalled on both, config repositories/assignments/team/users of this run deleted from staging.
