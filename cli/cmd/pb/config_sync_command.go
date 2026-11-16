@@ -226,6 +226,8 @@ func configRepositoryReadFailure(err error) error {
 		return commandRejection{reason: commandRejectConfigRepositoryCredentials}
 	case errors.Is(err, configsync.ErrRepositoryUnavailable):
 		return commandRejection{reason: commandRejectConfigRepositoryUnavailable}
+	case errors.Is(err, configsync.ErrRepositoryReadLimit):
+		return configSyncRefusal("The repository is larger than config sync reads (64 MiB, 10,000 objects, 16 MiB per file). Use a small repository that holds only your configuration, then retry.")
 	case errors.Is(err, configsync.ErrSourceConfigInvalid):
 		return configSyncRefusal(fmt.Sprintf("The config repository's %s is not a valid config sync file (%v). Fix it in the repository, then retry.", configsync.SharedSourceConfigPath, err))
 	}
