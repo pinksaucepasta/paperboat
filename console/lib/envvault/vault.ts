@@ -24,7 +24,7 @@ type Scope = {
   document_id: string
   envelope: string
 }
-type EnvRecord = {
+export type EnvRecord = {
   workspace_id: string
   owner_kind: string
   owner_id: string
@@ -65,7 +65,7 @@ export class DeliveryPending extends Error {
 }
 
 const json = { "content-type": "application/json" }
-const operationId = () => {
+export const operationId = () => {
   const b = crypto.getRandomValues(new Uint8Array(16))
   b[6] = (b[6] & 0x0f) | 0x40
   b[8] = (b[8] & 0x3f) | 0x80
@@ -147,7 +147,11 @@ async function readScope(scope: EnvScope, signal?: AbortSignal): Promise<Scope |
   }
 }
 
-async function readRecords(scope: EnvScope, signal?: AbortSignal): Promise<EnvRecord[]> {
+/** Every record of a scope as of one sequence number (`sequence`), which a re-encryption must name. */
+export async function readRecords(
+  scope: EnvScope,
+  signal?: AbortSignal,
+): Promise<{ records: EnvRecord[]; sequence: number }> {
   const records: EnvRecord[] = []
   const seen = new Set<string>()
   let through: number | undefined
@@ -168,7 +172,7 @@ async function readRecords(scope: EnvScope, signal?: AbortSignal): Promise<EnvRe
       seen.add(record.record_id)
       records.push(record)
     }
-    if (page.next_cursor === undefined) return records
+    if (page.next_cursor === undefined) return { records, sequence: through }
     if (!page.next_cursor || page.records.length === 0 || page.next_cursor === cursor) {
       throw new Error("ENV record paging did not advance.")
     }
@@ -182,7 +186,7 @@ export async function listNames(scope: EnvScope, signal?: AbortSignal): Promise<
   const vault = await currentVault(signal)
   if (!(await readScope(scope, signal))) return []
   const names: string[] = []
-  for (const record of await readRecords(scope, signal)) {
+  for (const record of (await readRecords(scope, signal)).records) {
     const read = await vaultCrypto<{ name: string; deleted: boolean }>({ action: "record-name", vault, record })
     if (read.deleted !== record.deleted) throw new Error("An ENV record did not match its encrypted contents.")
     if (!read.deleted) names.push(read.name)

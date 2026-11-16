@@ -27,7 +27,7 @@ export async function recoveryEnabled(): Promise<boolean> {
  * Publishes a sealed vault and opens it. A lost response may still have committed it; any other
  * failure drops the browser's keys, so nothing half-changed stays open.
  */
-async function publish(staged: { envelope: string }): Promise<void> {
+export async function publish(staged: { envelope: string }): Promise<void> {
   let state: Vault
   try {
     state = await api<Vault>(path, {
