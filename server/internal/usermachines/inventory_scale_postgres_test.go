@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"testing"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/server/internal/workspace"
 )
 
 // An inventory page loads its machines and their access description in a fixed number of queries, whatever the
@@ -56,6 +58,34 @@ func TestMachineInventoryListsAHundredMachinesWithoutPerRowQueriesOnPostgres(t *
 		if !item.CanManage || len(item.Permissions) == 0 || item.AssignedIP == "" {
 			t.Fatalf("machine %s lost its access description: manage=%v permissions=%v ip=%q", item.ID, item.CanManage, item.Permissions, item.AssignedIP)
 		}
+	}
+	// A team-scoped list takes its candidates from that team only: the account's 100 personal machines ran six
+	// team access functions each there, 4.5-7 s per team list on production (2026-11-16), and every daemon lists
+	// each of its teams on every refresh.
+	team := "inv-scale-team-" + suffix
+	t.Cleanup(func() {
+		for _, q := range []string{`DELETE FROM paperboat.billing_workspaces WHERE team_id=$1`, `DELETE FROM paperboat.team_members WHERE team_id=$1`, `DELETE FROM paperboat.teams WHERE team_id=$1`} {
+			_, _ = store.SQL().ExecContext(t.Context(), q, team)
+		}
+	})
+	for _, step := range []struct {
+		query string
+		args  []any
+	}{
+		{`INSERT INTO paperboat.teams(team_id,owner_account,generation) VALUES($1,$2,1)`, []any{team, owner}},
+		{`INSERT INTO paperboat.billing_workspaces(id,team_id,state,product_code,quantity,period_start,period_end)
+ VALUES('bw_'||$1,$1,'active','team',5,now()-interval '1 hour',now()+interval '1 hour')`, []any{team}},
+		{`INSERT INTO paperboat.team_members(team_id,account_id,membership_generation,role,active) VALUES($1,$2,1,'member',true)`, []any{team, owner}},
+	} {
+		if _, err := store.SQL().ExecContext(ctx, step.query, step.args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	teamCtx := workspace.WithContext(ctx, workspace.Scope{ID: team, TeamID: team})
+	started := time.Now()
+	teamItems, teamTotal, _, err := service.ListInventory(teamCtx, owner, InventoryOptions{Limit: 100})
+	if teamElapsed := time.Since(started); err != nil || teamTotal != 0 || len(teamItems) != 0 || teamElapsed > 100*time.Millisecond {
+		t.Fatalf("team list of an account with 100 personal machines: %d of %d in %v err=%v, want none under 100ms", len(teamItems), teamTotal, teamElapsed, err)
 	}
 }
 

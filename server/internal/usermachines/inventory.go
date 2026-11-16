@@ -241,15 +241,18 @@ func inventoryFilter(ctx context.Context, account string, opts InventoryOptions)
 	// The access functions then decide each candidate. Without candidates they ran for every machine in the database
 	// (28 s at 5k machines); with all of a team's machines as candidates, the ones the account cannot use failed
 	// seven function calls each (1.5-4 s per list on production, the largest database load).
+	// A team-scoped list ($3) takes candidates from that team only: the account's own personal machines failed six
+	// team function calls each there (4.5-7 s per team list on production, 2026-11-16; every daemon lists each team).
 	with = `WITH rules AS (
  SELECT tm.team_id,r.policy_id,r.target_kind,r.target_id FROM team_members tm
  JOIN workspace_policies p ON p.team_id=tm.team_id
  JOIN workspace_policy_rules r ON r.policy_id=p.id AND NOT r.deny AND r.action IN ('terminal','exec','managed_ssh','files','preview_manage','tunnel_manage')
- WHERE tm.account_id=$1 AND tm.active AND (r.subject_kind IN ('all','role') OR (r.subject_kind='account' AND r.subject_id=$1)
+ WHERE tm.account_id=$1 AND tm.active AND ($3::text IS NULL OR tm.team_id=$3) AND (r.subject_kind IN ('all','role') OR (r.subject_kind='account' AND r.subject_id=$1)
   OR (r.subject_kind='group' AND EXISTS(SELECT 1 FROM workspace_policy_groups g WHERE g.policy_id=r.policy_id AND g.group_name=r.subject_id AND g.account_id=$1)))
 ), candidates AS (
- SELECT m.id FROM user_machines m WHERE m.user_id=$1 AND m.owner_team_id IS NULL
+ SELECT m.id FROM user_machines m WHERE $3::text IS NULL AND m.user_id=$1 AND m.owner_team_id IS NULL
  UNION SELECT m.id FROM teams t JOIN team_members tm ON tm.team_id=t.team_id AND tm.account_id=$1 AND tm.active AND (t.owner_account=$1 OR tm.role='admin')
+  AND ($3::text IS NULL OR t.team_id=$3)
   JOIN user_machines m ON m.owner_team_id=t.team_id
  UNION SELECT b.resource_id FROM rules r JOIN team_resource_bindings b ON b.team_id=r.team_id AND b.resource_kind='machine' AND b.active AND b.resource_id=r.target_id WHERE r.target_kind='machine'
  UNION SELECT b.resource_id FROM rules r JOIN workspace_policy_tags tg ON tg.policy_id=r.policy_id AND tg.tag=r.target_id
