@@ -507,14 +507,23 @@ func removeNewEnrollmentCredentials(stateRoot string) error {
 
 var sudoExecutable = "/usr/bin/sudo"
 
+var errRecipeNeedsRoot = errors.New("a recipe install needs root or passwordless sudo")
+
 // approveAdministrator obtains sudo credentials before any bounded privileged
 // step, so a slow password entry cannot consume an installation deadline.
 func approveAdministrator(ctx context.Context, stdin io.Reader, stderr io.Writer) error {
+	if runningAsRoot() {
+		return nil
+	}
 	// A passwordless grant needs no approval. `sudo -v` still asks for a password
 	// when another matching sudoers entry has none (a stock `(ALL:ALL) ALL` rule
 	// beside a later NOPASSWD rule), which blocked pairing on a passwordless host.
 	if exec.CommandContext(ctx, sudoExecutable, "-n", "true").Run() == nil {
 		return nil
+	}
+	// A recipe install (PB_RECIPE) never asks for a password, so it never hangs a CI job (PLAN F26).
+	if os.Getenv("PB_RECIPE") != "" {
+		return runtimeFailure("installing needs root or passwordless sudo, and this shell has neither. Run the installer as root (in Docker the default user is root), or allow passwordless sudo for this user. Recipe installs never ask for a password", errAdministratorApproval, errRecipeNeedsRoot)
 	}
 	command := exec.CommandContext(ctx, sudoExecutable, "-v")
 	command.Stdin = stdin

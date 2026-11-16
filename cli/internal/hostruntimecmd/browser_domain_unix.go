@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"strconv"
 )
 
@@ -24,9 +23,6 @@ func ConfigureBrowserDomain(ctx context.Context, domain string) error {
 	}
 	args := []string{"--", "/usr/bin/env", "PAPERBOAT_INVOKING_UID=" + owner, executable, "__runtime-service", "browser-domain"}
 	command := sudoCommand(ctx, args...)
-	if os.Geteuid() == 0 {
-		command = exec.CommandContext(ctx, "/usr/bin/env", args[2:]...)
-	}
 	command.Stdin = bytes.NewReader(body)
 	command.Stdout = os.Stderr
 	command.Stderr = os.Stderr

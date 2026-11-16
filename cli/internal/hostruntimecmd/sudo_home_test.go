@@ -21,6 +21,9 @@ func TestSudoHomeIsDarwinOnly(t *testing.T) {
 }
 
 func TestSudoCommandKeepsLinuxArgv(t *testing.T) {
+	previous := runningAsRoot
+	runningAsRoot = func() bool { return false }
+	t.Cleanup(func() { runningAsRoot = previous })
 	command := sudoCommand(t.Context(), "--", "/usr/bin/env", "X=1")
 	want := []string{"/usr/bin/sudo", "--", "/usr/bin/env", "X=1"}
 	if runtime.GOOS == "darwin" {
