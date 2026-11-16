@@ -65,6 +65,17 @@ func TestPolicyPostgres(t *testing.T) {
 	if err != nil || pending() != 0 {
 		t.Fatalf("upsert after two forced 40001: err=%v pending=%d", err, pending())
 	}
+	// A policy change wakes the host (machine_services topic) instead of waiting for its heartbeat.
+	topic := func() (n int) {
+		if err := store.SQL().QueryRowContext(ctx, `SELECT coalesce(max(generation),0) FROM paperboat.machine_topic_generations WHERE machine_id=$1 AND topic='machine_services'`, machine).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	afterCreate := topic()
+	if afterCreate < 1 {
+		t.Fatal("creating a lazy policy did not wake the host")
+	}
 	if !regexp.MustCompile(`^[a-z]+-[a-z]+-[a-z]+-[0-9]{4}[.]preview[.]example[.]test$`).MatchString(p.Hostname) || p.InstallationGeneration != 4 || p.Generation != 1 {
 		t.Fatalf("policy=%#v", p)
 	}
@@ -98,8 +109,15 @@ func TestPolicyPostgres(t *testing.T) {
 	if err != nil || reapproved.Generation != 3 || reapproved.InstallationGeneration != 5 || reapproved.Hostname != p.Hostname {
 		t.Fatalf("reapproval=%#v err=%v", reapproved, err)
 	}
+	if topic() <= afterCreate {
+		t.Fatal("updating a lazy policy did not wake the host")
+	}
+	beforeDelete := topic()
 	if err = svc.Delete(ctx, owner, p.ID, 3); err != nil {
 		t.Fatal(err)
+	}
+	if topic() <= beforeDelete {
+		t.Fatal("deleting a lazy policy did not wake the host")
 	}
 	if _, err = svc.Get(ctx, owner, p.ID); !errors.Is(err, ErrDenied) {
 		t.Fatalf("tombstone get err=%v", err)

@@ -199,6 +199,10 @@ func (s *Service) updatePolicyAttempt(ctx context.Context, actor, machine string
 	if e != nil {
 		return wire.Policy{}, e
 	}
+	// The host learns the toggle from the response to its next observation: wake it instead of waiting for the heartbeat.
+	if _, e = tx.ExecContext(ctx, `SELECT paperboat.publish_machine_topic(ARRAY[$1::text],'machine_services')`, machine); e != nil {
+		return wire.Policy{}, e
+	}
 	return p, tx.Commit()
 }
 func (s *Service) RuntimePolicy(ctx context.Context, environment, machine string) (policy wire.RuntimePolicy, resultErr error) {

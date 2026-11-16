@@ -141,9 +141,17 @@ func TestMachineServicePostgresAuthorityLifecycle(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
+	var wakes int
+	if e = store.SQL().QueryRowContext(ctx, `SELECT coalesce(max(generation),0) FROM paperboat.machine_topic_generations WHERE machine_id=$1 AND topic='machine_services'`, machine).Scan(&wakes); e != nil {
+		t.Fatal(e)
+	}
 	_, e = s.UpdatePolicy(ctx, owner, machine, wire.PolicyUpdate{ExpectedGeneration: 2, PersonalAutoEnabled: true})
 	if e != nil {
 		t.Fatal(e)
+	}
+	var after int
+	if e = store.SQL().QueryRowContext(ctx, `SELECT coalesce(max(generation),0) FROM paperboat.machine_topic_generations WHERE machine_id=$1 AND topic='machine_services'`, machine).Scan(&after); e != nil || after <= wakes {
+		t.Fatalf("the automatic-listing toggle did not wake the host: %d -> %d (%v)", wakes, after, e)
 	}
 	if _, e = resolver.MachineServiceCurrent(ctx, request(owner, 22), explicit.AccessSessionID, explicit); e != nil {
 		t.Fatalf("automatic toggle revoked explicit: %v", e)

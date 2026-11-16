@@ -131,10 +131,22 @@ WHERE id=$1 AND user_id=$2 AND revoked_at IS NULL AND deleted_at IS NULL AND sta
 	if err != nil {
 		return Policy{}, err
 	}
+	if err = publishMachineServices(ctx, tx, input.MachineID); err != nil {
+		return Policy{}, err
+	}
 	if err = tx.Commit(); err != nil {
 		return Policy{}, mapWriteError(err)
 	}
 	return policy, nil
+}
+
+// publishMachineServices wakes the host: it reads its explicit ports from the response to its next observation, which
+// otherwise comes with the 4-minute heartbeat (2-6 min after a policy change).
+func publishMachineServices(ctx context.Context, tx *sql.Tx, machine string) error {
+	if _, err := tx.ExecContext(ctx, `SELECT paperboat.publish_machine_topic(ARRAY[$1::text],'machine_services')`, machine); err != nil {
+		return fmt.Errorf("wake the machine for a lazy policy change: %w", err)
+	}
+	return nil
 }
 
 func (s *Service) create(ctx context.Context, tx *sql.Tx, accountID, environmentID string, installationGeneration int64, input UpsertRequest, now time.Time) (Policy, error) {
@@ -228,13 +240,26 @@ func (s *Service) Delete(ctx context.Context, accountID, id string, expectedGene
 		return ErrInvalid
 	}
 	now := s.now().UTC()
-	result, err := s.db.SQL().ExecContext(ctx, `UPDATE paperboat.lazy_access_policies p SET deleted_at=$1,updated_at=$1,generation=generation+1
-FROM paperboat.user_machines m WHERE p.id=$2 AND p.account_id=$3 AND p.generation=$4 AND p.deleted_at IS NULL AND m.id=p.machine_id AND m.environment_id=p.environment_id AND m.user_id=$3 AND m.installation_generation=p.installation_generation AND m.revoked_at IS NULL AND m.deleted_at IS NULL AND m.state NOT IN ('revoked','deleted')`, now, id, accountID, expectedGeneration)
+	tx, err := s.db.SQL().BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin lazy policy delete: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	var machine string
+	err = tx.QueryRowContext(ctx, `UPDATE paperboat.lazy_access_policies p SET deleted_at=$1,updated_at=$1,generation=generation+1
+FROM paperboat.user_machines m WHERE p.id=$2 AND p.account_id=$3 AND p.generation=$4 AND p.deleted_at IS NULL AND m.id=p.machine_id AND m.environment_id=p.environment_id AND m.user_id=$3 AND m.installation_generation=p.installation_generation AND m.revoked_at IS NULL AND m.deleted_at IS NULL AND m.state NOT IN ('revoked','deleted')
+RETURNING p.machine_id`, now, id, accountID, expectedGeneration).Scan(&machine)
+	if err == sql.ErrNoRows {
+		return ErrConflict
+	}
 	if err != nil {
 		return fmt.Errorf("delete lazy policy: %w", err)
 	}
-	if n, _ := result.RowsAffected(); n != 1 {
-		return ErrConflict
+	if err = publishMachineServices(ctx, tx, machine); err != nil {
+		return err
+	}
+	if err = tx.Commit(); err != nil {
+		return fmt.Errorf("commit lazy policy delete: %w", err)
 	}
 	return nil
 }
