@@ -411,7 +411,7 @@ func TestENVScopeLimitRefusalIsClear(t *testing.T) {
 	failure := classifyCommandFailure(err)
 	result := classifyCLIJSONFailure(err, failure)
 	message := userFacingError(err)
-	if failure.kind != commandRejected || result.Code != "record_capacity_exceeded" || result.OutcomeUncertain || result.Retryable ||
+	if failure.kind != commandRejected || result.Code != "record_capacity_exceeded" || result.OutcomeUncertain || result.Retryable || result.StateChanged != false ||
 		!strings.Contains(message, "128 variables and 256 KiB") || !strings.Contains(message, "Nothing was changed") || strings.Contains(message, "resume") {
 		t.Fatalf("kind=%v result=%+v message=%q", failure.kind, result, message)
 	}
