@@ -1,0 +1,5 @@
+check-env-form-and-rotate-error.mjs on the live console (serves 7834aa216, contains dba6f9afc), 2026-11-16 15:55 IST, fresh throwaway account, every step typed once; the same check failed on the build before dba6f9afc (refetch error replaced the setup form)
+PASS  the setup form keeps typed text while the vault answer is late and every refetch fails (429)  (13 s, 5 vault answers)
+PASS  the vault is created in the browser  (5 s)
+PASS  a refused key rotation keeps its dialog with the error, the vault locks and unlocks again  (7 s)
+3/3 passed
