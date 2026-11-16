@@ -26,7 +26,6 @@ func TestMachineGuardReadinessRequiresVersionButNotBrowserTrust(t *testing.T) {
 	}
 	for name, status := range map[string]machineguard.RuntimeStatus{
 		"not ready":   {Version: buildinfo.Version, TrustReady: true, DefaultBrowserDomain: "local.example.test"},
-		"old version": {Version: "old", Ready: true, TrustReady: true, DefaultBrowserDomain: "local.example.test"},
 		"renewal due": {Version: buildinfo.Version, Ready: true, TrustReady: true, RootRenewalRequired: true, DefaultBrowserDomain: "local.example.test"},
 		"no domain":   {Version: buildinfo.Version, Ready: true, TrustReady: true},
 	} {
@@ -91,5 +90,26 @@ func TestMachineInstallPreservesReadyMachineGuardAndValidatesSuppliedBytes(t *te
 	}
 	if probed != 2 || prepared != 1 || installed != 1 {
 		t.Fatal("canceled install touched shared guard")
+	}
+}
+
+// The machine-wide guard is never downgraded by another OS user's older install: a newer release, or a
+// development guard with every feature this build uses, is kept; an older one is replaced (victus).
+func TestMachineGuardIsNotDowngradedByAnOlderInstall(t *testing.T) {
+	all := machineguard.Features()
+	for name, c := range map[string]struct {
+		guard    machineguard.RuntimeStatus
+		version  string
+		notOlder bool
+	}{
+		"same version":                 {machineguard.RuntimeStatus{Version: "2026.11.16.0"}, "2026.11.16.0", true},
+		"newer release kept":           {machineguard.RuntimeStatus{Version: "2026.11.17.2"}, "2026.11.16.0", true},
+		"older release replaced":       {machineguard.RuntimeStatus{Version: "2026.11.13.0"}, "2026.11.16.0", false},
+		"dev guard with every feature": {machineguard.RuntimeStatus{Version: "dev-a344bd52b", Features: all}, "2026.11.16.0", true},
+		"guard missing a feature":      {machineguard.RuntimeStatus{Version: "dev-a344bd52b"}, "dev-de73faa7f", len(all) == 0},
+	} {
+		if got := machineGuardNotOlder(c.guard, c.version); got != c.notOlder {
+			t.Errorf("%s: not older = %v", name, got)
+		}
 	}
 }

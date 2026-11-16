@@ -660,6 +660,9 @@ func (g *guardServer) assignClaim(uid string, in request) (request, error) {
 	return in, g.persist()
 }
 
+// Features names the protocol additions this build's guard serves (and its clients may use).
+func Features() []string { return guardFeatures() }
+
 func guardFeatures() []string {
 	if gatewayRouting {
 		return []string{FeatureAddressClaims, FeatureGatewayRouting}

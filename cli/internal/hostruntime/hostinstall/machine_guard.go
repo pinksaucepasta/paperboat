@@ -6,10 +6,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
 	"github.com/pinksaucepasta/paperboat/internal/machineguard"
+	"github.com/pinksaucepasta/paperboat/internal/selfupdate"
 )
 
 // Per-user installation reuses an authenticated ready machine-wide guard.
@@ -48,10 +49,12 @@ func readMachineGuardDomain(ctx context.Context) string {
 	return status.DefaultBrowserDomain
 }
 
-// readyMachineGuard reports nil when the installed guard is ready and runs exactly version, the build
-// being installed: the guard ships with the daemon and is replaced whenever versions differ, so the
-// two never drift apart (an older ready guard used to stay forever; older code replaced a newer one).
-// Prior art: tailscaled ships its helpers in the same package and version.
+// readyMachineGuard reports nil when the installed guard is ready and not older than version, the build
+// being installed. The guard is one per machine, shared by every OS user's install: a user installing
+// an older build must not downgrade it under another user (victus: a second Windows user's release
+// install replaced the fleet's newer guard). Newer guards stay compatible with older clients, which
+// send a request field only when the guard lists its feature. Prior art: Windows Installer does not
+// downgrade a shared component unless told to (MSI component rules / file versioning rules).
 func readyMachineGuard(ctx context.Context, version string) (resultErr error) {
 	client, err := machineguard.Connect(ctx, machineguard.DefaultSocket)
 	if err != nil {
@@ -67,18 +70,32 @@ func readyMachineGuard(ctx context.Context, version string) (resultErr error) {
 	if err := validateMachineGuardStatus(status); err != nil {
 		return err
 	}
-	if status.Version != version {
-		return fmt.Errorf("machine guard runs %s, this installation is %s", status.Version, version)
+	if !machineGuardNotOlder(status, version) {
+		return fmt.Errorf("machine guard runs %s, older than this installation (%s)", status.Version, version)
 	}
 	return nil
+}
+
+// machineGuardNotOlder: the same version, a release not older, or (for development builds, whose
+// versions do not order) a guard that already has every feature this build uses.
+func machineGuardNotOlder(status machineguard.RuntimeStatus, version string) bool {
+	if status.Version == version {
+		return true
+	}
+	if order, err := selfupdate.CompareVersions(status.Version, version); err == nil {
+		return order >= 0
+	}
+	for _, feature := range machineguard.Features() {
+		if !slices.Contains(status.Features, feature) {
+			return false
+		}
+	}
+	return true
 }
 
 func validateMachineGuardStatus(status machineguard.RuntimeStatus) error {
 	if !status.Ready {
 		return errors.New("machine guard is not ready; retry machine-guard installation")
-	}
-	if status.Version != buildinfo.Version {
-		return fmt.Errorf("machine guard requires upgrade to %s", buildinfo.Version)
 	}
 	if status.RootRenewalRequired {
 		return errors.New("machine guard HTTPS root requires renewal; retry machine-guard installation")
