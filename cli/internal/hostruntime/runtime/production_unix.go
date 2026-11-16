@@ -119,7 +119,8 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 	}
 	// Every control-plane loop shares this transport, so a computer removed from the account asks the
 	// control plane about its identity rarely instead of once per loop iteration.
-	transport = &controlbackoff.Transport{Base: transport, Host: controlURL.Host}
+	// The watch is outermost: the ENV lookup asks the transport it was given whether the control plane is known down.
+	transport = &controlWatch{next: &controlbackoff.Transport{Base: transport, Host: controlURL.Host}}
 	operationID := func() (string, error) {
 		id, err := uuid.NewRandom()
 		if err != nil {
@@ -992,11 +993,7 @@ func productionTransport(caPath string, environ func(string) string) (http.Round
 		Environment:   httptransport.EnvironmentProxySource{},
 		System:        httptransport.NativeSystemProxySource{},
 	}
-	transport, err := httptransport.New(transportConfig)
-	if err != nil {
-		return nil, err
-	}
-	return &controlWatch{next: transport}, nil
+	return httptransport.New(transportConfig)
 }
 func valueOrRuntime(value, fallback string) string {
 	if strings.TrimSpace(value) == "" {

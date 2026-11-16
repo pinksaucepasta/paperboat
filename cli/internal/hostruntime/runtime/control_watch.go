@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"sync"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/controlbackoff"
 )
 
 // controlDownFor is how long one failed control request marks Paperboat unreachable for the commands that would
@@ -32,7 +34,7 @@ func (w *controlWatch) RoundTrip(request *http.Request) (*http.Response, error) 
 	switch {
 	case err == nil:
 		w.failedAt = time.Time{}
-	case !errors.Is(err, context.Canceled): // a caller's own cancel says nothing about the path; a client timeout surfaces as "request canceled"
+	case !errors.Is(err, context.Canceled) && !errors.Is(err, controlbackoff.ErrIdentityRejected): // a refused identity is an answer, not an outage; a caller's own cancel says nothing about the path; a client timeout surfaces as "request canceled"
 		w.failedAt = time.Now()
 	}
 	return response, err

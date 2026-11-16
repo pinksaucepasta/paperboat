@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/controlbackoff"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/envinject"
 )
 
@@ -42,6 +43,14 @@ func TestControlWatchMarksNetworkFailuresAndAnAnswerClearsThem(t *testing.T) {
 			t.Fatalf("%v did not mark the control plane down", failure)
 		}
 	}
+	watch.failedAt = time.Time{}
+	fail = controlbackoff.ErrIdentityRejected
+	_, _ = watch.RoundTrip(request)
+	if watch.ControlDown() {
+		t.Fatal("a refused identity (an answer from the control plane) marked it down")
+	}
+	fail = &net.OpError{Op: "dial", Err: errors.New("i/o timeout")}
+	_, _ = watch.RoundTrip(request)
 	fail = nil
 	if _, err := watch.RoundTrip(request); err != nil || watch.ControlDown() {
 		t.Fatal("an HTTP answer did not clear the mark", err)
