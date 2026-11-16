@@ -46,3 +46,17 @@ func TestEnvironmentLaunchDenialPresentationIsActionableAndPrivate(t *testing.T)
 		t.Fatal("machine code discarded")
 	}
 }
+
+// A session hostd forgot (heartbeat 404/410, or the command's own select) was the one access outcome the classifier
+// did not list, so it ended as an unexpected failure with no guidance.
+func TestAccessTunnelGoneIsOperationalWithGuidance(t *testing.T) {
+	for _, err := range []error{ErrAccessTunnelGone, accessTunnelFailure(ErrAccessTunnelGone, accessTunnelHTTPStatus{status: http.StatusGone})} {
+		failure := classifyCommandFailure(err)
+		if failure.kind != commandOperational {
+			t.Fatalf("%v classified as %v", err, failure.kind)
+		}
+		if text := commandFailureMessage(err, failure); !strings.Contains(text, "Run the command again") {
+			t.Fatalf("message=%q", text)
+		}
+	}
+}

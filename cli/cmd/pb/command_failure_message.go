@@ -151,6 +151,10 @@ func commandFailureMessage(err error, failure commandFailure) string {
 			return rejected.Error()
 		}
 	}
+	// The classifier's owner (a bounded walk; errors.Is never ends on a cyclic join) is the bare or the wrapped form.
+	if gone, ok := failure.owner.(accessTunnelCauseError); failure.kind == commandOperational && (failure.owner == ErrAccessTunnelGone || ok && gone.classification == ErrAccessTunnelGone) {
+		return accessTunnelGoneMessage
+	}
 	switch owned := soleCommandOwner(err).(type) {
 	case accessTunnelCauseError:
 		switch owned.classification {
@@ -418,6 +422,8 @@ func transferSize(bytes int64) string {
 
 // responseLostRecovery is the next step after a change whose answer was lost.
 const responseLostRecovery = "Check the current state with the matching list or status command (for example `pb team list` or `pb machine list`) before retrying."
+
+const accessTunnelGoneMessage = "The private access session ended (its route was removed or the local Paperboat service stopped hearing from this command). Run the command again to open a new one."
 
 // sshFailureMessage is an SSH refusal or dial failure in pb's own words (F5-09). soleCommandOwner bounds the walk.
 func sshFailureMessage(err error) string {

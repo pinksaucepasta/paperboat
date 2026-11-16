@@ -210,7 +210,7 @@ func classifyCommandFailure(err error) (failure commandFailure) {
 			switch owner.classification {
 			case ErrAccessTunnelAuthentication, ErrAccessTunnelForbidden, ErrAccessTunnelRuntimeRPCUnavailable:
 				set(commandRejected, current)
-			case ErrAccessTunnelUnavailable:
+			case ErrAccessTunnelUnavailable, ErrAccessTunnelGone:
 				set(commandOperational, current)
 			default:
 				set(commandUnexpected, current)
@@ -335,7 +335,7 @@ func classifyCommandFailure(err error) (failure commandFailure) {
 		case ErrAccessTunnelAuthentication, ErrAccessTunnelForbidden, ErrAccessTunnelRuntimeRPCUnavailable:
 			set(commandRejected, current)
 			continue
-		case ErrAccessTunnelUnavailable:
+		case ErrAccessTunnelUnavailable, ErrAccessTunnelGone:
 			set(commandOperational, current)
 			continue
 		case syscall.ECONNREFUSED, syscall.ECONNRESET, syscall.ETIMEDOUT, syscall.ENETUNREACH, syscall.EHOSTUNREACH:

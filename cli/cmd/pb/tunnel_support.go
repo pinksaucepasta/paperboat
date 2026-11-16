@@ -435,9 +435,7 @@ func pollTunnelUntil[T any](command *cobra.Command, id string, current T, done f
 		}
 		next, err := retryTunnelRead(deadlineContext, func() (T, error) { return read(deadlineContext) })
 		if err != nil {
-			var apiError *api.APIError
-			var networkError net.Error
-			if errors.As(err, &apiError) && apiError.Retryable() || errors.As(err, &networkError) && networkError.Timeout() {
+			if tunnelRequestRetryable(err) {
 				continue
 			}
 			if errors.Is(err, context.DeadlineExceeded) && command.Context().Err() == nil {
