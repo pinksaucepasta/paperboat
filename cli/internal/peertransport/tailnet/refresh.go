@@ -314,6 +314,13 @@ func (a *Authority) Run(ctx context.Context, client NetworkAPI, report func(erro
 			if failures > 0 { // one retry now; the failure count stays, so a failing server keeps its backoff
 				reset(0)
 			}
+			// The relays answer: dial them now from the last known list, alongside the renewal, not after it.
+			a.relay.mu.Lock()
+			recovery := a.relay.recovery
+			a.relay.mu.Unlock()
+			if recovery != nil {
+				recovery.poke()
+			}
 		case <-a.networkMoved:
 			if failures > 0 { // a working renewal keeps its schedule; a failing one tries the new network now
 				failures = 0

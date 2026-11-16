@@ -472,7 +472,7 @@ func (r *regionalRecovery) snapshot() ([]RegionalNode, map[key.NodePublic]Networ
 	if a.current == nil || a.closed {
 		return nil, nil, 0, ErrExpiredAuthority
 	}
-	nodes, _, err := eligible(a.regional, "relay", "derp_quic", nil, serverclock.Now())
+	nodes, _, err := eligible(a.regional, "relay", "derp_quic", nil, a.relayListJudgedAt(serverclock.Now()))
 	if err != nil {
 		return nil, nil, 0, err
 	}
@@ -514,6 +514,22 @@ func (r *regionalRecovery) snapshot() ([]RegionalNode, map[key.NodePublic]Networ
 	}
 	return eligible, peers, r.authorityGeneration(a.current.Self, peers, serverclock.Now().Unix()), nil
 }
+
+// relayListJudgedAt is the time the signed relay list is judged at. While renewals fail, a list past its expiry is
+// still read as of its last valid second, so the machine can dial its last known relays the moment the network
+// returns instead of after the renewal that brings a fresh list: the list only says where the relays are, and each
+// relay enforces the grant it is shown (valid up to relaylimits.MaxGrantLifetime), which snapshot still requires
+// unexpired against the present. A renewal that lands replaces the list and ends this; a new or changed list is
+// verified (signature, expiry) when it arrives, as before. Tailscale keeps using its last DERP map for as long as
+// control is unreachable (wgengine/magicsock/derp.go: derpMap is replaced only by SetDERPMap from a new netmap).
+// The caller holds a.mu.
+func (a *Authority) relayListJudgedAt(now time.Time) time.Time {
+	if a.regional != nil && a.regional.ExpiresAt <= now.Unix() && a.renewalFailing.Load() {
+		return time.Unix(a.regional.ExpiresAt-1, 0)
+	}
+	return now
+}
+
 func (r *regionalRecovery) receive(ctx context.Context) {
 	for {
 		select {
