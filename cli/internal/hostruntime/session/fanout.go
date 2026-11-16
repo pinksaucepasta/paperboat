@@ -460,7 +460,7 @@ func (f *Fanout) WaitNext(ctx context.Context, attachmentID string) (history.Eve
 
 // WaitNextFrom returns the next output event at or after from without consuming it. from confirms that the caller
 // holds everything before it, which frees that output; a caller whose answer was lost in transit (a poll deadline
-// racing the reply) asks again from the same place and gets the same event, so nothing is skipped.
+// racing the reply) asks again from the same place and gets output from there again, so nothing is skipped.
 func (f *Fanout) WaitNextFrom(ctx context.Context, attachmentID string, from uint64) (history.Event, error) {
 	return f.waitNextFromLease(ctx, attachmentID, from, 0)
 }
@@ -503,8 +503,12 @@ func (f *Fanout) waitNextFromLease(ctx context.Context, attachmentID string, fro
 				f.mu.Unlock()
 				return history.Event{}, ErrOutputOrder
 			}
-			retained := event.Retain()
 			offset := cursor.cursor - event.StartSequence
+			if batch, ok := f.batchLocked(event, offset, cursor.enqueuedEnd); ok {
+				f.mu.Unlock()
+				return batch, nil
+			}
+			retained := event.Retain()
 			retained.StartSequence = cursor.cursor
 			retained.Data = event.Data[offset:]
 			f.mu.Unlock()
@@ -629,6 +633,40 @@ func (f *Fanout) Status(attachmentID string) (AttachmentState, uint64, error) {
 
 func validOutputEvent(event history.Event) bool {
 	return event.EndSequence >= event.StartSequence && event.EndSequence-event.StartSequence == uint64(len(event.Data)) && len(event.Data) != 0
+}
+
+// waitBatchBytes bounds the output one wait returns: every wait is a round trip per viewer (worker -> hostd -> session
+// owner), so a flood returned one PTY read (<= 32 KiB) at a time cost 50 viewers ~7000 double hops for 4 MB (F21-164:
+// 90 s). Like tmux writing a client's whole buffer in one call (~/ref/tmux/tty.c tty_write_callback: evbuffer_write of
+// tty->out) and ttyd joining what is buffered (~/ref/ttyd/src/protocol.c pss->buffer), a wait returns all contiguous
+// queued output of one channel up to this bound,
+// which stays under one terminal frame (protocol.MaxBinaryFrame, 256 KiB).
+const waitBatchBytes = 128 << 10
+
+// batchLocked copies first (from offset) and the contiguous events after it on the same channel, up to waitBatchBytes
+// and end, into one event. It reports false when there is nothing to join, so a lone chunk keeps the zero-copy path.
+func (f *Fanout) batchLocked(first history.Event, offset, end uint64) (history.Event, bool) {
+	size := uint64(len(first.Data)) - offset
+	next := first.EndSequence
+	for next < end && size < waitBatchBytes {
+		event, found := f.eventAtLocked(next)
+		if !found || event.Channel != first.Channel || event.StartSequence != next || size+uint64(len(event.Data)) > waitBatchBytes {
+			break
+		}
+		size += uint64(len(event.Data))
+		next = event.EndSequence
+	}
+	if next == first.EndSequence {
+		return history.Event{}, false
+	}
+	data := make([]byte, 0, size)
+	data = append(data, first.Data[offset:]...)
+	for sequence := first.EndSequence; sequence < next; {
+		event, _ := f.eventAtLocked(sequence)
+		data = append(data, event.Data...)
+		sequence = event.EndSequence
+	}
+	return history.Event{Channel: first.Channel, StartSequence: first.StartSequence + offset, EndSequence: next, Data: data}, true
 }
 
 func (f *Fanout) eventAtLocked(sequence uint64) (history.Event, bool) {

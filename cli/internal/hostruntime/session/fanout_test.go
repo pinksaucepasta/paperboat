@@ -1,9 +1,11 @@
 package session
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"testing"
 	"time"
 
@@ -398,7 +400,6 @@ func TestWaitNextFromRedeliversALostReply(t *testing.T) {
 	f := NewFanout()
 	f.Attach("att", 64)
 	f.Publish(history.Event{StartSequence: 0, EndSequence: 4, Data: []byte("RS33")})
-	f.Publish(history.Event{StartSequence: 4, EndSequence: 8, Data: []byte("RS34")})
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	read := func(from uint64) history.Event {
@@ -411,7 +412,9 @@ func TestWaitNextFromRedeliversALostReply(t *testing.T) {
 		return history.Event{StartSequence: event.StartSequence, EndSequence: event.EndSequence, Data: append([]byte(nil), event.Data...)}
 	}
 	first := read(0)
-	if lost := read(0); string(lost.Data) != "RS33" || lost.StartSequence != first.StartSequence {
+	f.Publish(history.Event{StartSequence: 4, EndSequence: 8, Data: []byte("RS34")})
+	// Asked again from the same place, the reply starts there again (and now carries what arrived since).
+	if lost := read(0); string(lost.Data) != "RS33RS34" || lost.StartSequence != first.StartSequence {
 		t.Fatalf("the lost reply was not delivered again: %q", lost.Data)
 	}
 	if next := read(first.EndSequence); string(next.Data) != "RS34" {
@@ -446,5 +449,43 @@ func TestFanoutControlOnlyAttachmentDoesNotPinRing(t *testing.T) {
 	}
 	if len(f.ring) != 0 {
 		t.Fatalf("control-only attachment pins %d ring events", len(f.ring))
+	}
+}
+
+// F21-164: a wait returns all contiguous queued output of one channel, up to waitBatchBytes, so a flood costs each
+// viewer one round trip per batch instead of one per PTY read; a channel change ends the batch.
+func TestWaitNextFromJoinsQueuedOutputUpToTheBatchBound(t *testing.T) {
+	f := NewFanout()
+	f.Attach("att", 1<<20)
+	chunk := bytes.Repeat([]byte("x"), 32<<10)
+	sequence := uint64(0)
+	publish := func(channel byte, data []byte) {
+		if _, err := f.Publish(history.Event{Channel: channel, StartSequence: sequence, EndSequence: sequence + uint64(len(data)), Data: data}); err != nil {
+			t.Fatal(err)
+		}
+		sequence += uint64(len(data))
+	}
+	for range 5 {
+		publish(1, chunk)
+	}
+	publish(2, []byte("resize"))
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	from := uint64(0)
+	var sizes []int
+	for from < sequence {
+		event, err := f.WaitNextFrom(ctx, "att", from)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if event.StartSequence != from || event.EndSequence != from+uint64(len(event.Data)) {
+			t.Fatalf("batch [%d,%d) of %d bytes after %d", event.StartSequence, event.EndSequence, len(event.Data), from)
+		}
+		sizes = append(sizes, len(event.Data))
+		from = event.EndSequence
+		event.Release()
+	}
+	if want := []int{4 * 32 << 10, 32 << 10, len("resize")}; !slices.Equal(sizes, want) {
+		t.Fatalf("batches=%v, want %v", sizes, want)
 	}
 }
