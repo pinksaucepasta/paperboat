@@ -299,13 +299,15 @@ func (p *Process) Terminate(ctx context.Context, grace time.Duration) (ExitResul
 	// Closing a terminal hangs up its shell, as tmux and ttyd do (ttyd's default close signal is SIGHUP): an interactive
 	// shell ignores SIGTERM, so SIGTERM alone sat out the whole grace before SIGKILL on every close. What ignores SIGHUP
 	// (nohup) gets SIGTERM after hangupWindow, so a child that handles TERM for cleanup is not hit by both at once.
-	signalErr := p.Signal(Hangup)
-	if signalErr == nil {
+	signalErr := p.signalGroup(Hangup)
+	if signalErr == nil || errors.Is(signalErr, syscall.EPERM) {
 		select {
 		case <-p.done:
 		case <-ctx.Done():
 		case <-time.After(min(grace, hangupWindow)):
-			if termErr := p.Signal(Terminate); termErr != nil && !processGone(termErr) {
+			if termErr := p.signalGroup(Terminate); termErr == nil || processGone(termErr) {
+				signalErr = nil
+			} else {
 				signalErr = termErr
 			}
 		}
@@ -335,6 +337,17 @@ func (p *Process) Terminate(ctx context.Context, grace time.Duration) (ExitResul
 		err = errors.Join(err, closeErr)
 	}
 	return result, err
+}
+
+// signalGroup is Signal, tried once more after a moment on EPERM: Darwin refuses a group signal while a member is an
+// unreaped zombie (the shell's own `sleep` between exit and reap; macOS run 43960352441), which lasts milliseconds.
+func (p *Process) signalGroup(signal Signal) error {
+	err := p.Signal(signal)
+	if errors.Is(err, syscall.EPERM) {
+		time.Sleep(20 * time.Millisecond)
+		err = p.Signal(signal)
+	}
+	return err
 }
 
 // processGone reports a signal that found no process: it has exited (its group may already be gone
