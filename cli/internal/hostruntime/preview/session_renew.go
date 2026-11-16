@@ -17,6 +17,9 @@ import (
 // shortcut: fixed 2 min, a revoked machine retries that long.
 var ownerRefusalWindow = 2 * time.Minute
 
+// renewAttemptTimeout bounds one renew request of a foreground session, which has no deadline of its own.
+const renewAttemptTimeout = 30 * time.Second
+
 func ownerRefusal(err error) bool {
 	var refusal *api.APIError
 	return errors.As(err, &refusal) && (refusal.Status == http.StatusUnauthorized ||
@@ -26,16 +29,25 @@ func ownerRefusal(err error) bool {
 // LeaseMutation applies an authenticated projection through the session owner.
 type LeaseMutation func(func(Lease) (Lease, error)) (Lease, error)
 
+// leaseEnd is the earlier of the lease and user deadlines. bounded is false for a foreground lease (no user
+// deadline): it persists for as long as its command runs, however long the machine sleeps, so this machine's
+// wall clock passing LeaseDeadline during a sleep must not end it before the first renew after the wake reaches
+// the server. Only the server's answer (stopped, expired, owner_disconnected, 404 or a refusal that outlasts
+// ownerRefusalWindow) ends it.
+func leaseEnd(lease Lease) (end time.Time, bounded bool) {
+	end = lease.LeaseDeadline
+	if lease.UserDeadline != nil && lease.UserDeadline.Before(end) {
+		end = *lease.UserDeadline
+	}
+	return end, lease.UserDeadline != nil
+}
+
 func (s *Session) renewLoop(ctx context.Context) error {
 	attempt := 0
 	for {
-		lease := s.currentLease()
-		expiresAt := lease.LeaseDeadline
-		if lease.UserDeadline != nil && lease.UserDeadline.Before(expiresAt) {
-			expiresAt = *lease.UserDeadline
-		}
+		expiresAt, bounded := leaseEnd(s.currentLease())
 		remaining := expiresAt.Sub(s.config.Now().UTC())
-		if remaining <= 0 {
+		if bounded && remaining <= 0 {
 			return ErrLeaseExpired
 		}
 		next := s.config.RenewInterval
@@ -43,7 +55,10 @@ func (s *Session) renewLoop(ctx context.Context) error {
 			next = remaining / 2
 		}
 		if next <= 0 {
-			return ErrLeaseExpired
+			if bounded {
+				return ErrLeaseExpired
+			}
+			next = 0 // a foreground lease already past its deadline (a wake): renew at once
 		}
 		timer := time.NewTimer(next)
 		select {
@@ -60,12 +75,8 @@ func (s *Session) renewLoop(ctx context.Context) error {
 		// is running.  Always send the latest lease projection so the renew
 		// CAS is based on the ETag that readiness installed, rather than the
 		// projection captured before the wait.
-		lease = s.currentLease()
-		expiresAt = lease.LeaseDeadline
-		if lease.UserDeadline != nil && lease.UserDeadline.Before(expiresAt) {
-			expiresAt = *lease.UserDeadline
-		}
-		if !expiresAt.After(s.config.Now().UTC()) {
+		expiresAt, bounded = leaseEnd(s.currentLease())
+		if bounded && !expiresAt.After(s.config.Now().UTC()) {
 			return ErrLeaseExpired
 		}
 		renewIdempotencyKey, keyErr := newSessionIdempotencyKey(s.config.Random)
@@ -74,14 +85,18 @@ func (s *Session) renewLoop(ctx context.Context) error {
 		}
 		var refusedSince time.Time
 		for {
-			renewCtx, cancelRenew := context.WithDeadline(ctx, expiresAt)
+			renewCtx, cancelRenew := context.WithTimeout(ctx, renewAttemptTimeout)
+			if bounded {
+				cancelRenew()
+				renewCtx, cancelRenew = context.WithDeadline(ctx, expiresAt)
+			}
 			_, err := s.renewLease(renewCtx, renewIdempotencyKey)
 			cancelRenew()
 			if err != nil {
 				if ctx.Err() != nil {
 					return nil
 				}
-				if errors.Is(err, context.DeadlineExceeded) && !expiresAt.After(s.config.Now().UTC()) {
+				if bounded && errors.Is(err, context.DeadlineExceeded) && !expiresAt.After(s.config.Now().UTC()) {
 					return ErrLeaseExpired
 				}
 				if !retryableLeaseError(err) {
@@ -99,18 +114,20 @@ func (s *Session) renewLoop(ctx context.Context) error {
 						return fmt.Errorf("%w: generate renew idempotency key: %w", ErrLeaseLost, keyErr)
 					}
 				}
-				remaining = expiresAt.Sub(s.config.Now().UTC())
-				if remaining <= 0 {
-					return ErrLeaseExpired
-				}
 				delay := reconnectDelay(s.config.ReconnectBackoff, s.config.MaxReconnectBackoff, attempt)
-				if delay > remaining {
-					delay = remaining
+				if bounded {
+					remaining = expiresAt.Sub(s.config.Now().UTC())
+					if remaining <= 0 {
+						return ErrLeaseExpired
+					}
+					if delay > remaining {
+						delay = remaining
+					}
 				}
 				if err := waitReconnect(ctx, delay); err != nil {
 					return nil
 				}
-				if !expiresAt.After(s.config.Now().UTC()) {
+				if bounded && !expiresAt.After(s.config.Now().UTC()) {
 					return ErrLeaseExpired
 				}
 				attempt++

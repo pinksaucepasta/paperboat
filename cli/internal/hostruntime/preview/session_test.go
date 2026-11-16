@@ -28,16 +28,17 @@ func (sessionTemporaryError) Temporary() bool { return true }
 var _ net.Error = sessionTemporaryError{}
 
 type sessionLeaseClient struct {
-	mu         sync.Mutex
-	created    []LeaseRequest
-	renewed    []Lease
-	renewKeys  []string
-	stopLeases []Lease
-	stopKeys   []string
-	renewErr   error
-	renewErrs  []error // returned one per renew, before renewErr
-	stopErr    error
-	stopDone   chan struct{}
+	mu          sync.Mutex
+	created     []LeaseRequest
+	renewed     []Lease
+	renewKeys   []string
+	stopLeases  []Lease
+	stopKeys    []string
+	renewErr    error
+	renewErrs   []error       // returned one per renew, before renewErr
+	renewExtend time.Duration // a successful renew moves LeaseDeadline this far forward
+	stopErr     error
+	stopDone    chan struct{}
 }
 
 type sessionRenewObservationClient struct {
@@ -76,6 +77,7 @@ func (c *sessionLeaseClient) Renew(_ context.Context, lease Lease, idempotencyKe
 	}
 	renewed.ETag = formatLeaseETag(lease.ID, generation+1)
 	renewed.LastRenewedAt = time.Now().UTC()
+	renewed.LeaseDeadline = lease.LeaseDeadline.Add(c.renewExtend)
 	c.renewed = append(c.renewed, renewed)
 	return renewed, nil
 }
@@ -449,33 +451,66 @@ func TestSessionDurationBecomesMaximumUserDeadline(t *testing.T) {
 	}
 }
 
-func TestSessionExpiryUsesInjectedClock(t *testing.T) {
-	base := time.Now().UTC()
-	var calls atomic.Int32
-	now := func() time.Time {
-		if calls.Add(1) == 1 {
-			return base
-		}
-		return base.Add(2 * time.Hour)
-	}
-	client := &sessionLeaseClient{}
+// startJumpedClockSession starts a ready session on a clock that the test can move forward, as a sleep does.
+func startJumpedClockSession(t *testing.T, client *sessionLeaseClient, userDeadline *time.Time) (*Session, *atomic.Int64) {
+	t.Helper()
+	var jump atomic.Int64
+	now := func() time.Time { return time.Now().UTC().Add(time.Duration(jump.Load())) }
 	carrier := &sessionCarrier{closed: make(chan struct{}), run: func(ctx context.Context, lease Lease, ready func(Lease) error) error {
+		if err := ready(sessionReadyLease(lease)); err != nil {
+			return err
+		}
 		<-ctx.Done()
 		return ctx.Err()
 	}}
 	session, err := Start(context.Background(), SessionConfig{
 		LeaseClient: client, Carrier: carrier, OwnerMachineID: "machine_1", OwnerSessionID: "session_1", OwnerSessionKind: "foreground",
-		Target: LeaseTarget{Scheme: "http", Address: "127.0.0.1:3000"}, Now: now,
-		RenewInterval: time.Hour, ShutdownTimeout: time.Second, DisableParentWatch: true,
+		Target: LeaseTarget{Scheme: "http", Address: "127.0.0.1:3000"}, Now: now, UserDeadline: userDeadline,
+		RenewInterval: 20 * time.Millisecond, ReconnectBackoff: 5 * time.Millisecond, MaxReconnectBackoff: 5 * time.Millisecond,
+		ShutdownTimeout: time.Second, DisableParentWatch: true,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := session.Wait(); !errors.Is(err, ErrLeaseExpired) {
-		t.Fatalf("injected-clock expiry error = %v", err)
+	return session, &jump
+}
+
+// A sleep moves the wall clock past LeaseDeadline before the first renew after the wake reaches the server: a
+// foreground session keeps retrying through failed renews and lives on once one succeeds.
+func TestForegroundSessionSurvivesAClockJumpPastItsLeaseDeadline(t *testing.T) {
+	client := &sessionLeaseClient{renewExtend: 3 * time.Hour, renewErrs: []error{sessionTemporaryError{}, sessionTemporaryError{}}}
+	session, jump := startJumpedClockSession(t, client, nil)
+	jump.Store(int64(2 * time.Hour))
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		client.mu.Lock()
+		renewed := len(client.renewed)
+		client.mu.Unlock()
+		if renewed > 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the foreground session never renewed after the clock jump")
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
-	if calls.Load() < 2 {
-		t.Fatalf("injected clock was not consulted by renew loop: %d calls", calls.Load())
+	client.mu.Lock()
+	if len(client.renewKeys) < 3 {
+		t.Fatalf("renew attempts = %d, want the two failures retried before the success", len(client.renewKeys))
+	}
+	client.mu.Unlock()
+	if err := session.Stop(context.Background()); err != nil {
+		t.Fatalf("the session ended instead of surviving the clock jump: %v", err)
+	}
+}
+
+// A session with a user deadline still ends at it.
+func TestSessionWithUserDeadlineStillExpiresOnAClockJump(t *testing.T) {
+	deadline := time.Now().UTC().Add(time.Hour)
+	session, jump := startJumpedClockSession(t, &sessionLeaseClient{renewExtend: 3 * time.Hour}, &deadline)
+	jump.Store(int64(2 * time.Hour))
+	if err := session.Wait(); !errors.Is(err, ErrLeaseExpired) {
+		t.Fatalf("user-deadline expiry error = %v, want ErrLeaseExpired", err)
 	}
 }
 

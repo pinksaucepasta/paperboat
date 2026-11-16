@@ -434,7 +434,9 @@ func validateSessionLease(lease Lease, config SessionConfig, now time.Time) erro
 	if leaseGenerationForID(lease.ID, lease.ETag) < 1 {
 		return fmt.Errorf("%w: server returned an invalid lease ETag", ErrSessionInvalid)
 	}
-	if lease.LeaseDeadline.IsZero() || !lease.LeaseDeadline.After(now.UTC()) {
+	// A foreground lease (no user deadline) outlives a sleep: after a wake the local clock is past its deadline until
+	// the first renew reaches the server, and only the server decides when it ended.
+	if lease.LeaseDeadline.IsZero() || lease.UserDeadline != nil && !lease.LeaseDeadline.After(now.UTC()) {
 		return fmt.Errorf("%w: lease deadline has already passed", ErrSessionInvalid)
 	}
 	if lease.UserDeadline != nil && !lease.UserDeadline.After(now.UTC()) {
