@@ -120,3 +120,41 @@ func TestRegionalRecoveryIdleFiveMinutes(t *testing.T) {
 		t.Log("idle 300s: sweeps=0 probes=0 map publications=0; first probe answered without refresh; bind wakes recovery with no nil publication")
 	})
 }
+
+// A pair bound by a dial stays while an association to it is live or it was used lately, and is released once it
+// has been idle for regionalPairIdle with no live association: the probe loop then parks (an idle machine that
+// dialed a peer once sent ~5 UDP packets/s to its relays for as long as it ran).
+func TestIdleBoundPairIsReleasedUnlessAnAssociationIsLive(t *testing.T) {
+	a, _, _, _ := networkTestAuthority(t)
+	a.mu.Lock()
+	a.relay.mu.Lock()
+	r := a.newRegionalRecoveryLocked()
+	a.relay.mu.Unlock()
+	a.mu.Unlock()
+	bind := func(age time.Duration) {
+		r.mu.Lock()
+		r.peerID, r.peerAt = "peer_1", time.Now().Add(-age)
+		r.mu.Unlock()
+	}
+	setLive := func(n int) {
+		a.mu.Lock()
+		a.carrierPeers = map[string]int{"peer_1": n}
+		a.mu.Unlock()
+	}
+	bind(regionalPairIdle / 2)
+	r.releaseIdlePair()
+	if r.pair() != "peer_1" {
+		t.Fatal("a pair used a minute ago was released")
+	}
+	bind(2 * regionalPairIdle)
+	setLive(1)
+	r.releaseIdlePair()
+	if r.pair() != "peer_1" {
+		t.Fatal("a pair with a live association was released")
+	}
+	setLive(0)
+	r.releaseIdlePair()
+	if r.pair() != "" {
+		t.Fatal("an idle pair with no live association was kept")
+	}
+}

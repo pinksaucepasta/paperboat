@@ -77,6 +77,7 @@ type regionalRecovery struct {
 	mu        sync.Mutex
 	engine    relayEngine
 	peerID    string
+	peerAt    time.Time // when peerID was last bound or prepared (protected by mu)
 	cancel    context.CancelFunc
 	done      chan struct{}
 	ready     chan struct{}
@@ -196,7 +197,7 @@ func (a *Authority) PrepareRegional(ctx context.Context, peerID string) error {
 	r.mu.Lock()
 	if r.engine == nil {
 		r.engine = engine
-		r.peerID = peerID
+		r.peerID, r.peerAt = peerID, time.Now()
 		lifetime, cancel := context.WithCancel(context.Background())
 		r.cancel = cancel
 		a.recoveryWorkers.Add(1)
@@ -209,7 +210,7 @@ func (a *Authority) PrepareRegional(ctx context.Context, peerID string) error {
 		}
 	}
 	if peerID != "" {
-		r.peerID = peerID
+		r.peerID, r.peerAt = peerID, time.Now()
 		r.poke()
 	}
 	ready := r.ready
@@ -396,6 +397,34 @@ func (r *regionalRecovery) pair() string {
 	return r.peerID
 }
 
+// regionalPairIdle is how long a bound pair is kept after its last dial once no association to it is live. A pair
+// that is never released keeps the probe loop sending to every relay every ~3 s forever (an idle machine that dialed
+// a peer once: ~5 UDP sends/s and 0.6% of a core, PR-03); Tailscale's endpoint.heartbeat stops after
+// sessionActiveTimeout (wgengine/magicsock/endpoint.go) and idle peers leave its active paths.
+const regionalPairIdle = 2 * time.Minute
+
+// releaseIdlePair drops the bound pair when it was last used regionalPairIdle ago and no association to it is live
+// (Authority.carrierPeers), so the loop parks as it does for a listener with no pair.
+func (r *regionalRecovery) releaseIdlePair() {
+	r.mu.Lock()
+	id, at := r.peerID, r.peerAt
+	r.mu.Unlock()
+	if id == "" || time.Since(at) < regionalPairIdle {
+		return
+	}
+	r.authority.mu.Lock()
+	live := r.authority.carrierPeers[id] > 0
+	r.authority.mu.Unlock()
+	if live {
+		return
+	}
+	r.mu.Lock()
+	if r.peerID == id {
+		r.peerID = ""
+	}
+	r.mu.Unlock()
+}
+
 // BindRegionalPeer moves regional recovery to the pair just dialed successfully. It stayed on the first peer
 // ever prepared, so pb status on hp kept warning "No relay is usable" about a machine no longer in use while
 // the pairs that mattered were fine (2026-10-27).
@@ -408,7 +437,7 @@ func (a *Authority) BindRegionalPeer(peerID string) {
 	}
 	r.mu.Lock()
 	if r.engine != nil {
-		r.peerID = peerID
+		r.peerID, r.peerAt = peerID, time.Now()
 		r.poke()
 	}
 	r.mu.Unlock()
@@ -668,6 +697,7 @@ func (r *regionalRecovery) run(ctx context.Context) {
 		// Tailscale's endpoint.heartbeat stops after sessionActiveTimeout
 		// (wgengine/magicsock/endpoint.go). With no pair, park before probes
 		// and map publications. receive still answers inbound relay control.
+		r.releaseIdlePair()
 		if r.pair() == "" && !r.repair.Load() {
 			if !r.relayDown() {
 				timer.Stop()
