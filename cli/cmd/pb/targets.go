@@ -419,12 +419,15 @@ func resolveTerminalSession(ctx context.Context, client *api.Client, target envi
 			}
 		}
 	}
-	message := fmt.Sprintf("terminal session %q was not found", ref)
+	message := fmt.Sprintf("terminal session %q was not found in the sessions Paperboat lists for this machine", ref)
+	if resolver.IsOfflineTerminalSessionID(ref) {
+		message += "; it was opened without Paperboat, so only `pb connect --session " + ref + "` can attach it"
+	}
 	if len(suggestions) > 0 {
 		message += "; did you mean " + strings.Join(suggestions, ", ") + "?"
 	}
-	message += "; create one with `pb <environment> new`"
-	return api.TerminalSession{}, errors.New(message)
+	message += "; list them with `pb session list`, or create one with `pb <environment> new`"
+	return api.TerminalSession{}, localArgumentError(message)
 }
 
 var automaticSessionNamePattern = regexp.MustCompile(`^shell-[0-9]+$`)

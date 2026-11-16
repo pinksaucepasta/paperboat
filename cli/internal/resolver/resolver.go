@@ -209,6 +209,9 @@ type TerminalSessionCreate struct {
 	CWD            string
 	Name           string
 	IdempotencyKey string
+	// OfflineSessionID re-opens a session an earlier offline connect made (OfflineTerminalPrefix): only the host holds
+	// it, so Paperboat is not asked and the host's create-or-get returns the running session.
+	OfflineSessionID string
 }
 
 // ConnectInfo is what the resolver hands back to the tunnel + session layers.

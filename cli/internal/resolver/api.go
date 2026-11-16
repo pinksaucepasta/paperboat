@@ -8,6 +8,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/shared/terminalprotocol"
 	"net/http"
 	"net/url"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -111,6 +112,14 @@ func (r *APIResolver) Resolve(ctx context.Context, req ConnectRequest) (ConnectI
 	var createdSession *TerminalSessionInfo
 	var resp api.ConnectionDescriptor
 	if req.CreateTerminalSession != nil {
+		if req.CreateTerminalSession.OfflineSessionID != "" {
+			offline, ok := r.offlineTerminal(req, target)
+			if !ok {
+				return ConnectInfo{}, fmt.Errorf("attach terminal session %q on %q: the host can open it without Paperboat only on a machine this computer has resolved; run pb status, then try again", req.CreateTerminalSession.OfflineSessionID, req.Machine)
+			}
+			outcome = "offline"
+			return offline, nil
+		}
 		if req.ControlPlaneUnavailable {
 			// The daemon already knows Paperboat is unreachable: asking it would only wait out the request timeout.
 			if offline, ok := r.offlineTerminal(req, target); ok {
@@ -183,6 +192,14 @@ func (r *APIResolver) Resolve(ctx context.Context, req ConnectRequest) (ConnectI
 // exec and ssh streams use the same bound).
 const offlineTerminalLifetime = 12 * time.Hour
 
+// OfflineTerminalPrefix starts the id of a terminal session opened without Paperboat; Paperboat's session list never has it.
+const OfflineTerminalPrefix = "terminal_offline_"
+
+var offlineTerminalIDPattern = regexp.MustCompile(`^` + OfflineTerminalPrefix + `[A-Za-z0-9_-]{1,100}$`)
+
+// IsOfflineTerminalSessionID reports whether ref is the id of a session opened without Paperboat.
+func IsOfflineTerminalSessionID(ref string) bool { return offlineTerminalIDPattern.MatchString(ref) }
+
 // offlineTerminal is a NEW terminal session opened while Paperboat is unreachable (F21-11): the host admits it from its
 // own signed scopes and names the session by the stream's operation, so the session id is made here and the machine
 // is the one the daemon resolved. Attaching to an existing session, or a machine the daemon did not resolve, still
@@ -192,7 +209,13 @@ func (r *APIResolver) offlineTerminal(req ConnectRequest, target target) (Connec
 	if create == nil || req.TerminalSessionID != "" || resolved == nil || resolved.EnvironmentID == "" {
 		return ConnectInfo{}, false
 	}
-	sessionID := "terminal_offline_" + strings.ReplaceAll(uuid.NewString(), "-", "_")
+	sessionID := create.OfflineSessionID
+	if sessionID != "" && !IsOfflineTerminalSessionID(sessionID) {
+		return ConnectInfo{}, false
+	}
+	if sessionID == "" {
+		sessionID = OfflineTerminalPrefix + strings.ReplaceAll(uuid.NewString(), "-", "_")
+	}
 	return ConnectInfo{
 		TargetKind: target.kind, MachineID: target.id, Machine: target.name, MachineState: target.state, MachineGeneration: target.generation,
 		Terminal: &TerminalTarget{

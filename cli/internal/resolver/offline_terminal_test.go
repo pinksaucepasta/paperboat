@@ -77,3 +77,22 @@ func TestResolveOpensANewTerminalOfflineWithoutAskingWhenTheDaemonReportsAnOutag
 		t.Fatalf("attaching to an existing session = %v, want the grant request", err)
 	}
 }
+
+// X-24: `pb recordings start` prints the id of a session opened without Paperboat, and `pb connect --session <id>` must
+// re-open it from the host's own rules, never asking Paperboat (its session list has no such id).
+func TestResolveReopensAnOfflineSessionByIDWithoutAskingPaperboat(t *testing.T) {
+	resolved := &ResolvedMachine{ID: "um_1", Name: "My App", State: "online", Generation: 3, EnvironmentID: "env_1"}
+	id := OfflineTerminalPrefix + "0123_abc"
+	fc := &fakeClient{connectErr: errors.New("the server must not be asked")}
+	info, err := newTestResolver(fc).Resolve(context.Background(), ConnectRequest{Machine: "My App", ResolvedMachine: resolved,
+		CreateTerminalSession: &TerminalSessionCreate{OfflineSessionID: id, Name: id, CWD: "/srv"}})
+	if err != nil || info.Terminal == nil || !info.Terminal.Auth.Offline || info.Terminal.SessionID != id || info.TerminalSession == nil || info.TerminalSession.ID != id {
+		t.Fatalf("info = %+v err = %v, want an offline target for session %s", info, err, id)
+	}
+	for _, bad := range []string{"umts_1", OfflineTerminalPrefix + "a b", OfflineTerminalPrefix, OfflineTerminalPrefix + strings.Repeat("x", 101)} {
+		if _, err := newTestResolver(fc).Resolve(context.Background(), ConnectRequest{Machine: "My App", ResolvedMachine: resolved,
+			CreateTerminalSession: &TerminalSessionCreate{OfflineSessionID: bad}}); err == nil || !strings.Contains(err.Error(), "attach terminal session") {
+			t.Errorf("session id %q: err = %v, want a refusal naming the step", bad, err)
+		}
+	}
+}

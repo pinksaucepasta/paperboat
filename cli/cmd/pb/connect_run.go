@@ -262,7 +262,11 @@ func actionConnectTargetInDirectory(c *command.Context, requested, cwd string) e
 	var createSession *resolver.TerminalSessionCreate
 	terminalSessionID := ""
 	terminalSessionName := ""
-	if strings.TrimSpace(sessionRef) != "" {
+	if resolver.IsOfflineTerminalSessionID(sessionRef) {
+		// Opened without Paperboat (the id pb recordings start prints): only its host holds it, so Paperboat's list never has it.
+		createSession = &resolver.TerminalSessionCreate{OfflineSessionID: sessionRef, Name: sessionRef, CWD: cwd}
+		terminalSessionName = sessionRef
+	} else if strings.TrimSpace(sessionRef) != "" {
 		session, err := resolveTerminalSession(c.Context, backend, target, sessionRef)
 		if err != nil {
 			return friendlyCommandError(err)
