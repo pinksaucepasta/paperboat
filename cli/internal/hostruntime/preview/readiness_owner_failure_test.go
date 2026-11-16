@@ -45,8 +45,8 @@ func TestReadinessOwnerFailuresSurviveMutationAndRetryExhaustion(t *testing.T) {
 				observed := sessionReadyLease(admitted)
 				if scenario.reads > 0 {
 					observed.State, observed.EdgeState = "connecting", "pending"
-				} else {
-					observed.LeaseDeadline = time.Now().UTC().Add(-time.Second)
+				} else { // not a past LeaseDeadline: a foreground lease keeps it across a sleep (634daa4eb)
+					observed.Endpoint = "http://preview.example.test"
 				}
 				w.Header().Set("ETag", formatLeaseETag(admitted.ID, generation))
 				_ = json.NewEncoder(w).Encode(map[string]any{"data": leaseToAPI(observed)})
