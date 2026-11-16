@@ -124,15 +124,22 @@
     paused = Boolean(await until(async () => (await get(base)).desired_state === "paused", 6000))
   }
   pass("paused on the server", paused)
-  const resume = await until(() => button("Resume") ?? button("Resume tunnel"))
-  resume?.click()
-  const confirmResume = await until(() => dialog(), 1500)
-  if (confirmResume) (button("Resume", confirmResume) ?? button("Resume tunnel", confirmResume))?.click()
-  pass("resumed on the server", Boolean(await until(async () => (await get(base)).desired_state === "active")))
+  let resumed = false
+  for (let attempt = 0; attempt < 3 && !resumed; attempt++) {
+    const resume = await until(() => button("Resume") ?? button("Resume tunnel"), 3000)
+    resume?.click()
+    const confirmResume = await until(() => dialog(), 1500)
+    if (confirmResume) (button("Resume", confirmResume) ?? button("Resume tunnel", confirmResume))?.click()
+    resumed = Boolean(await until(async () => (await get(base)).desired_state === "active", 6000))
+  }
+  pass("resumed on the server", resumed)
   pass("healthy again after resume", Boolean(await until(() => /Healthy/.test(text()), 120000)))
 
   // Public hostname route with a path.
   const routesBefore = (await get(`${base}/routes`)).items.length
+  // The route this run adds is the one that was not listed before it: routes left by earlier runs do not count.
+  const knownRoutes = new Set((await get(`${base}/routes`)).items.map((r) => r.id))
+  const addedRoute = async () => (await get(`${base}/routes`)).items.find((r) => !knownRoutes.has(r.id))
   const section = () => text().slice(text().indexOf("Public hostnames"), text().indexOf("Danger zone"))
   button("Add")?.click()
   const pathInput = await until(() => document.getElementById("hostname-path"))
@@ -162,11 +169,7 @@
       type(service, `127.0.0.1:${Number(port) + 1}`)
       await sleep(200)
       button("Save", dialog())?.click()
-      const edited = await until(async () =>
-        (await get(`${base}/routes`)).items.some(
-          (r) => r.origin.address === `127.0.0.1:${Number(port) + 1}` && r.id !== `rte_${mine.id}_default`,
-        ),
-      )
+      const edited = await until(async () => (await addedRoute())?.origin.address === `127.0.0.1:${Number(port) + 1}`)
       pass("service edit saved on the server", Boolean(edited))
     }
     // Turn off, then remove.
@@ -176,29 +179,26 @@
     pass(
       "route turned off on the server",
       Boolean(
-        await until(async () =>
-          (await get(`${base}/routes`)).items.some(
-            (r) => r.desired_state !== "active" && r.id !== `rte_${mine.id}_default`,
-          ),
-        ),
+        await until(async () => {
+          const added = await addedRoute()
+          return added && added.desired_state !== "active"
+        }),
       ),
     )
-    pass("Remove hostname opens", await menuItem("Remove hostname"))
-    const confirmRemove = await until(() => dialog())
-    if (confirmRemove)
-      buttons(confirmRemove)
-        .find((b) => /^Remove/.test(b.textContent.trim()))
-        ?.click()
-    pass(
-      "route removed on the server",
-      Boolean(
-        await until(async () =>
-          (await get(`${base}/routes`)).items.every(
-            (r) => r.desired_state === "deleted" || r.id === `rte_${mine.id}_default` || r.deleted_at,
-          ),
-        ),
-      ),
-    )
+    // A click that lands while the page re-renders is repeated, as for Pause. A deleted route disappears from the list.
+    let opened = false
+    let removed = false
+    for (let attempt = 0; attempt < 3 && !removed; attempt++) {
+      opened = (await menuItem("Remove hostname")) || opened
+      const confirmRemove = await until(() => dialog(), 3000)
+      if (confirmRemove)
+        buttons(confirmRemove)
+          .find((b) => /^Remove/.test(b.textContent.trim()))
+          ?.click()
+      removed = Boolean(await until(async () => !(await addedRoute()), 6000))
+    }
+    pass("Remove hostname opens", opened)
+    pass("route removed on the server", removed)
     pass("route gone from the page", Boolean(await until(() => !section().includes(`${host}${path}`))))
     // The same hostname and path can be added again after removal.
     button("Add")?.click()
