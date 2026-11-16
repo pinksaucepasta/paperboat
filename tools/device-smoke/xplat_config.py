@@ -164,9 +164,11 @@ class Context:
         first = self.unix()
         for stale in [r for r in pbj(first, 'config', 'repository', 'list')['repositories'] if r['display_name'] == NAME]:
             delete_repository(first, stale['id'])
-        self.repository_id = pbj(first, 'config', 'repository', 'connect', self.urls[next(k for k, d in self.devices.items() if d is first)], '--name', NAME)['repository']['id']
         profile = json.dumps({'transport': 'http', 'auth': 'token', 'username': 'cfguser', 'password': self.password,
                               'allow_insecure_http': True})
+        # The repository is private: connect reads it anonymously unless it is given the profile.
+        self.repository_id = pbj(first, 'config', 'repository', 'connect', self.urls[next(k for k, d in self.devices.items() if d is first)],
+                                 '--name', NAME, '--credentials-file', '-', input=profile.encode())['repository']['id']
         for dev in self.devices.values():
             saved = pbj(dev, 'config', 'repository', 'credentials', 'set', self.repository_id, '--file', '-', input=profile.encode())
             assert saved['state'] == 'saved', saved
