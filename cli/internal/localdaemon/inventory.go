@@ -206,13 +206,15 @@ func (i *Inventory) Run(ctx context.Context) error {
 	var pending <-chan time.Time
 	var due time.Time
 	forceReconcile := true
+	requested := false
 	outages := 0
 	failed := false
 	refresh := func(reuse bool) {
 		pending = nil
 		started = time.Now()
-		failed = i.refresh(ctx, reuse, forceReconcile || !reuse) != nil
+		failed = i.refresh(ctx, reuse && !requested, forceReconcile || !reuse) != nil
 		forceReconcile = false
+		requested = false
 		// ApplyMachines can signal its own local-step transition. The completed reconcile already
 		// observed it. Keep the wake when a pending step may have cleared during the refresh.
 		if !i.pendingLocalAccess.Load() {
@@ -239,7 +241,10 @@ func (i *Inventory) Run(ctx context.Context) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-i.wake:
-			schedule(i.eventSpacing, true)
+			// Managed SSH finished starting (or the network changed): refresh its local
+			// projection even if the server's machine inputs are identical.
+			requested = true
+			schedule(max(0, requestedRefreshSpacing-time.Since(started)), true)
 		case <-i.nudge:
 			delay := i.eventSpacing
 			if i.pendingLocalAccess.Load() {

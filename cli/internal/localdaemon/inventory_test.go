@@ -891,7 +891,8 @@ func TestRequestedRefreshesFoldWithinTheSpacing(t *testing.T) {
 	}
 	var mu sync.Mutex
 	var at []time.Time
-	inventory, err := NewInventory(InventoryConfig{Source: source, Store: store, RefreshInterval: time.Hour, RequestTimeout: time.Second, OnRefresh: func(error) {
+	var projections atomic.Int32
+	inventory, err := NewInventory(InventoryConfig{Source: source, Store: store, RefreshInterval: time.Hour, RequestTimeout: time.Second, OnMachines: func(context.Context, []api.UserMachine) { projections.Add(1) }, OnRefresh: func(error) {
 		mu.Lock()
 		at = append(at, time.Now())
 		mu.Unlock()
@@ -906,13 +907,16 @@ func TestRequestedRefreshesFoldWithinTheSpacing(t *testing.T) {
 		inventory.RequestRefresh()
 		time.Sleep(50 * time.Millisecond)
 	}
-	time.Sleep(defaultEventRefreshSpacing)
+	time.Sleep(requestedRefreshSpacing)
 	cancel()
 	<-done
 	mu.Lock()
 	defer mu.Unlock()
 	if len(at) != 2 {
 		t.Fatalf("%d refreshes for the start plus 14 requests within 700 ms, want 2 (the requests folded into one)", len(at))
+	}
+	if got := projections.Load(); got != 2 {
+		t.Fatalf("explicit local refresh ran %d projections, want startup plus local change", got)
 	}
 	if gap := at[1].Sub(at[0]); gap < requestedRefreshSpacing-50*time.Millisecond {
 		t.Fatalf("requested refresh %v after the previous one, want at least %v", gap, requestedRefreshSpacing)
