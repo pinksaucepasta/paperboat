@@ -1,0 +1,11 @@
+{
+ "row": "PR-06",
+ "cell": "L",
+ "build": "main with stock quic-go v0.61.0, built in the job (e2e.yml dispatch input throughput, branch rel-pr-06-final: real server, real edge, two pb daemons in containers on an idle 4-core ubuntu-latest runner)",
+ "method": "50 ms netem (limit 100000) on the origin container's egress BEFORE it pairs, 200 MiB file, 3 downloads through an ephemeral tunnel on the real edge, median vs 150 Mbit/s",
+ "runs_mbit_s": [[180.1, 180.3, 187.3], [180.6, 183.9, 185.2], [177.3, 182.0, 184.1]],
+ "medians": [180.3, 183.9, 182.0],
+ "status": "PASS (3 of 3 runs)",
+ "earlier_failures_explained": "88-95 Mbit/s runs had the 50 ms applied after the origin's QUIC connection existed: its handshake measured 1 ms, so its min RTT stayed ~1 ms and quic-go's HyStart left slow start 50 ms into the transfer at a 40 KB window (qlog trace: zero loss, cwnd 107 KB after 1 s, then Reno growth ~16 KB/s, bytes in flight = cwnd). With the delay present at the handshake (srtt 50, min 50) the same code gives 180+. The old harness restarted the carrier unit but the connection belongs to the user daemon.",
+ "residual": "A connection whose path RTT rises long after the handshake still exits slow start early (quic-go HyStart; quic-go issue 5952 on app-limited marking is open); real machines handshake at their real RTT."
+}
