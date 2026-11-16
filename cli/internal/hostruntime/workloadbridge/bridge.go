@@ -164,17 +164,27 @@ func (s *Server) handler() http.Handler {
 			writeResponse(r.Context(), w, nil, err)
 			return
 		}
-		select {
-		case semaphore <- struct{}{}:
+		pathParts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+		if len(pathParts) == 2 && isLongPoll(pathParts[0], pathParts[1]) {
+			// An attachment's output wait holds its request for up to 25 s. In the request limit, 90 terminals and
+			// ~35 viewers of a shared one filled all 256 slots, and every further create or attach was refused with
+			// the terminal ceiling message (F21-164). Waits are bounded by the attachments themselves (MaxAttachments
+			// per session, the host connection limiter; exec readers by MaxConcurrentOps).
 			s.requests.Add(1)
-			defer func() { s.requests.Add(-1); <-semaphore }()
-		default:
-			if r.URL.Path == "/owner/admission" {
-				w.WriteHeader(http.StatusTooManyRequests)
-			} else {
-				writeResponse(r.Context(), w, nil, session.ErrResourceLimit)
+			defer s.requests.Add(-1)
+		} else {
+			select {
+			case semaphore <- struct{}{}:
+				s.requests.Add(1)
+				defer func() { s.requests.Add(-1); <-semaphore }()
+			default:
+				if r.URL.Path == "/owner/admission" {
+					w.WriteHeader(http.StatusTooManyRequests)
+				} else {
+					writeResponse(r.Context(), w, nil, session.ErrResourceLimit)
+				}
+				return
 			}
-			return
 		}
 		if r.URL.Path == "/owner/admission" {
 			if s.SessionOnly || s.AcquireActive == nil {
@@ -429,11 +439,17 @@ func (c *Client) Call(ctx context.Context, kind, op string, body json.RawMessage
 	for {
 		data, err := c.callOnce(ctx, kind, op, body)
 		// Only the pure remote long-poll deadline authorizes another poll.
-		if err == context.DeadlineExceeded && ctx.Err() == nil && ((kind == "session" && (op == "WaitNext" || op == "WaitNextAttachment")) || (kind == "exec" && (op == "next" || op == "wait" || op == "reader_next"))) {
+		if err == context.DeadlineExceeded && ctx.Err() == nil && isLongPoll(kind, op) {
 			continue
 		}
 		return data, err
 	}
+}
+
+// isLongPoll names the requests that wait for output up to the request deadline and are polled again after it.
+func isLongPoll(kind, op string) bool {
+	return kind == "session" && (op == "WaitNext" || op == "WaitNextAttachment") ||
+		kind == "exec" && (op == "next" || op == "wait" || op == "reader_next")
 }
 
 type ownerTransportFailure struct{ cause error }
