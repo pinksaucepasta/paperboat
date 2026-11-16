@@ -76,6 +76,11 @@ func TestRealSSHDHonoursTheManagedCALines(t *testing.T) {
 	}
 	config := fmt.Sprintf(listen+"RevokedKeys "+krlPath+"\nPort %d\nHostKey %s\nPidFile %s\nAuthorizedKeysFile %s\nStrictModes no\nPasswordAuthentication no\nKbdInteractiveAuthentication no\nUsePAM no\nAllowUsers %s\nLogLevel VERBOSE\n",
 		port, hostKeyPath, filepath.Join(root, "sshd.pid"), filepath.Join(home, ".ssh", "authorized_keys"), current.Username)
+	// OpenSSH 9.8+ penalises a source after failed logins and then drops its connections: the refusals below would
+	// make every later login from 127.0.0.1 fail for the wrong reason. Older sshd does not know the option.
+	if probe := config + "PerSourcePenalties no\n"; os.WriteFile(configPath, []byte(probe), 0o600) == nil && exec.Command(sshdPath, "-t", "-f", configPath).Run() == nil {
+		config = probe
+	}
 	if err := os.WriteFile(configPath, []byte(config), 0o600); err != nil {
 		t.Fatal(err)
 	}
