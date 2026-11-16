@@ -235,7 +235,7 @@ func (r *SQLRepository) Get(ctx context.Context, accountID, tunnelID string) (db
 	return tunnel, translate(err)
 }
 
-// Twin of previewtunnelstore ListPreviewLeasesV1: manageable_tunnel_ids and manageable_preview_ids stay separate (different base tables, same rule CTEs); a filter or policy change lands in both.
+// List is the twin of previewtunnelstore ListPreviewLeasesV1: manageable_tunnel_ids and manageable_preview_ids stay separate (different base tables, same rule CTEs); a filter or policy change lands in both.
 func (r *SQLRepository) List(ctx context.Context, accountID string, after *ListPosition, limit int) ([]dbsqlc.Tunnel, error) {
 	if strings.TrimSpace(accountID) == "" || limit < 1 || limit > previewtunnelapi.MaximumPageLimit+1 {
 		return nil, ErrInvalidInput

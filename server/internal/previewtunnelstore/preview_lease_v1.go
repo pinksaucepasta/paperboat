@@ -289,7 +289,7 @@ type ListPreviewLeasesV1Input struct {
 	Limit          int32
 }
 
-// Twin of tunnelv1 SQLRepository.List: manageable_preview_ids and manageable_tunnel_ids stay separate (different base tables, same rule CTEs); a filter or policy change lands in both.
+// ListPreviewLeasesV1 is the twin of tunnelv1 SQLRepository.List: manageable_preview_ids and manageable_tunnel_ids stay separate (different base tables, same rule CTEs); a filter or policy change lands in both.
 func (s *Store) ListPreviewLeasesV1(ctx context.Context, input ListPreviewLeasesV1Input) ([]PreviewLeaseRecord, error) {
 	if strings.TrimSpace(input.AccountID) == "" || input.Limit < 1 || input.Limit > 201 {
 		return nil, ErrInvalidInput
