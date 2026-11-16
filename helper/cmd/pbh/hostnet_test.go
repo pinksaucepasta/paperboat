@@ -17,12 +17,14 @@ type fakeHost struct {
 	paths     hostPaths
 	answers   map[string]string // command line -> output; a missing key is an error
 	calls     []string
-	sysctlOff bool // a sysctl that does not change the range (something overrides it)
+	sysctlOff bool              // a sysctl that does not change the range (something overrides it)
+	udp       map[string]string // net.core.rmem_max / wmem_max as the kernel holds them
 }
 
 func newFakeHost(t *testing.T, outgoing string) *fakeHost {
 	dir := t.TempDir()
-	f := &fakeHost{paths: hostPaths{sysctl: filepath.Join(dir, "sysctl.conf"), proc: filepath.Join(dir, "range"), record: filepath.Join(dir, "hostnet.json"), guard: filepath.Join(dir, "edge-guard.nft")}, answers: map[string]string{}}
+	f := &fakeHost{paths: hostPaths{sysctl: filepath.Join(dir, "sysctl.conf"), proc: filepath.Join(dir, "range"), record: filepath.Join(dir, "hostnet.json"), guard: filepath.Join(dir, "edge-guard.nft"), udp: filepath.Join(dir, "udp.conf")},
+		answers: map[string]string{}, udp: map[string]string{"net.core.rmem_max": "212992", "net.core.wmem_max": "212992"}}
 	if err := os.WriteFile(f.paths.proc, []byte(outgoing+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -32,9 +34,14 @@ func newFakeHost(t *testing.T, outgoing string) *fakeHost {
 func (f *fakeHost) run(_ context.Context, name string, args ...string) (string, error) {
 	line := strings.Join(append([]string{name}, args...), " ")
 	f.calls = append(f.calls, line)
+	if name == "sysctl" && args[0] == "-n" {
+		return f.udp[args[1]] + "\n", nil
+	}
 	if name == "sysctl" {
-		if !f.sysctlOff {
-			_ = os.WriteFile(f.paths.proc, []byte(strings.TrimPrefix(args[1], "net.ipv4.ip_local_port_range=")+"\n"), 0o644)
+		if key, value, _ := strings.Cut(args[1], "="); strings.HasPrefix(key, "net.core.") {
+			f.udp[key] = value
+		} else if !f.sysctlOff {
+			_ = os.WriteFile(f.paths.proc, []byte(value+"\n"), 0o644)
 		}
 		return "", nil
 	}
@@ -78,10 +85,51 @@ func TestSetupMovesTheOutgoingRangeAndUninstallRestoresIt(t *testing.T) {
 	if got, _ := currentOutgoing(f.paths.proc); got != "32768 60999" {
 		t.Fatalf("outgoing range after uninstall = %q", got)
 	}
-	for _, gone := range []string{f.paths.sysctl, f.paths.record} {
+	for _, gone := range []string{f.paths.sysctl, f.paths.udp, f.paths.record} {
 		if _, err := os.Stat(gone); !errors.Is(err, os.ErrNotExist) {
 			t.Fatalf("%s survived uninstall: %v", gone, err)
 		}
+	}
+}
+
+func TestSetupRaisesTheUDPBuffersForQUICAndUninstallRestoresThem(t *testing.T) {
+	f := newFakeHost(t, "60000 65535")
+	if err := setupHostNetwork(t.Context(), f.run, f.paths, &strings.Builder{}); err != nil {
+		t.Fatal(err)
+	}
+	want := fmt.Sprint(udpBufferBytes)
+	if f.udp["net.core.rmem_max"] != want || f.udp["net.core.wmem_max"] != want {
+		t.Fatalf("limits after setup = %v", f.udp)
+	}
+	if file, _ := os.ReadFile(f.paths.udp); string(file) != "net.core.rmem_max = "+want+"\nnet.core.wmem_max = "+want+"\n" {
+		t.Fatalf("udp sysctl file = %q", file)
+	}
+	// A rerun keeps the original values for uninstall.
+	if err := setupHostNetwork(t.Context(), f.run, f.paths, &strings.Builder{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := removeHostNetwork(t.Context(), f.run, f.paths, &strings.Builder{}); err != nil {
+		t.Fatal(err)
+	}
+	if f.udp["net.core.rmem_max"] != "212992" || f.udp["net.core.wmem_max"] != "212992" {
+		t.Fatalf("limits after uninstall = %v", f.udp)
+	}
+}
+
+func TestSetupNeverLowersAHigherUDPBuffer(t *testing.T) {
+	f := newFakeHost(t, "60000 65535")
+	f.udp["net.core.rmem_max"] = "26214400"
+	if err := setupHostNetwork(t.Context(), f.run, f.paths, &strings.Builder{}); err != nil {
+		t.Fatal(err)
+	}
+	if f.udp["net.core.rmem_max"] != "26214400" || f.udp["net.core.wmem_max"] != fmt.Sprint(udpBufferBytes) {
+		t.Fatalf("limits = %v", f.udp)
+	}
+	if err := removeHostNetwork(t.Context(), f.run, f.paths, &strings.Builder{}); err != nil {
+		t.Fatal(err)
+	}
+	if f.udp["net.core.rmem_max"] != "26214400" {
+		t.Fatalf("a limit pbh never changed was touched: %v", f.udp)
 	}
 }
 
@@ -93,7 +141,7 @@ func TestSetupLeavesACorrectRangeAlone(t *testing.T) {
 	if err := setupHostNetwork(t.Context(), f.run, f.paths, &strings.Builder{}); err != nil {
 		t.Fatal(err)
 	}
-	if f.called("sysctl") != 0 {
+	if f.called("sysctl -w net.ipv4") != 0 {
 		t.Fatalf("sysctl ran for an already correct range: %v", f.calls)
 	}
 }

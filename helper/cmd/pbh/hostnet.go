@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -23,17 +24,23 @@ import (
 
 const (
 	sysctlPath        = "/etc/sysctl.d/90-paperboat-edge.conf"
+	udpSysctlPath     = "/etc/sysctl.d/90-paperboat-edge-udp.conf"
 	outgoingProcPath  = "/proc/sys/net/ipv4/ip_local_port_range"
 	hostnetRecordFile = "hostnet.json"
 	edgeGuardFile     = "edge-guard.nft"
 	firewallComment   = "paperboat-edge"
+	// udpBufferBytes is the socket buffer quic-go asks for (7 MiB); the kernel caps a socket at net.core.rmem_max/wmem_max.
+	udpBufferBytes = 7 << 20
 )
 
+// udpBufferKeys are the host limits behind udpBufferBytes.
+var udpBufferKeys = []string{"net.core.rmem_max", "net.core.wmem_max"}
+
 // hostPaths are the files pbh reads and writes; tests point them at a temp directory.
-type hostPaths struct{ sysctl, proc, record, guard string }
+type hostPaths struct{ sysctl, udp, proc, record, guard string }
 
 func defaultHostPaths(stateDir string) hostPaths {
-	return hostPaths{sysctl: sysctlPath, proc: outgoingProcPath, record: filepath.Join(stateDir, hostnetRecordFile), guard: filepath.Join(stateDir, edgeGuardFile)}
+	return hostPaths{sysctl: sysctlPath, udp: udpSysctlPath, proc: outgoingProcPath, record: filepath.Join(stateDir, hostnetRecordFile), guard: filepath.Join(stateDir, edgeGuardFile)}
 }
 
 // commander runs one host command and returns its combined output.
@@ -52,7 +59,9 @@ type hostnetRecord struct {
 	Added            []string `json:"added,omitempty"`
 	SysctlWritten    bool     `json:"sysctl_written,omitempty"`
 	PreviousOutgoing string   `json:"previous_outgoing,omitempty"`
-	Guard            bool     `json:"guard,omitempty"`
+	// PreviousUDP maps each UDP buffer limit pbh raised to the value it had before.
+	PreviousUDP map[string]string `json:"previous_udp,omitempty"`
+	Guard       bool              `json:"guard,omitempty"`
 }
 
 func readHostnetRecord(path string) (hostnetRecord, error) {
@@ -96,6 +105,10 @@ func setupHostNetwork(ctx context.Context, run commander, paths hostPaths, out i
 		return fmt.Errorf("%w: %w", commandError("read pbh host network record failed"), err)
 	}
 	if err := setOutgoingRange(ctx, run, paths, &record, out); err != nil {
+		_ = writeHostnetRecord(paths.record, record)
+		return err
+	}
+	if err := setUDPBuffers(ctx, run, paths, &record, out); err != nil {
 		_ = writeHostnetRecord(paths.record, record)
 		return err
 	}
@@ -160,6 +173,46 @@ func setOutgoingRange(ctx context.Context, run commander, paths hostPaths, recor
 		return commandError(fmt.Sprintf("the outgoing port range is %q after pbh set %q; another sysctl setting overrides it (check /etc/sysctl.conf and /etc/sysctl.d), and public TCP tunnel ports %d-%d would collide with outgoing connections", after, outgoingRange, edgeports.PublicTCPMin, edgeports.PublicTCPMax))
 	}
 	fmt.Fprintf(out, "Outgoing port range moved from %s to %s so it stays clear of public TCP tunnel ports.\n", current, outgoingRange)
+	return nil
+}
+
+// setUDPBuffers raises net.core.rmem_max and wmem_max to what quic-go asks for, in the running kernel and in a
+// sysctl.d file. The edge's QUIC listeners cannot raise them (the container has no NET_ADMIN) and at the stock
+// 208 KiB a single stream at 50 ms RTT loses packets and stalls (PR-06). A value already higher is left alone.
+// The edge only sees the new limit on sockets it opens afterwards, so the edge is restarted after this runs.
+func setUDPBuffers(ctx context.Context, run commander, paths hostPaths, record *hostnetRecord, out io.Writer) error {
+	var file string
+	for _, key := range udpBufferKeys {
+		raw, err := run(ctx, "sysctl", "-n", key)
+		have, convErr := strconv.Atoi(strings.TrimSpace(raw))
+		if err != nil || convErr != nil {
+			return fmt.Errorf("%w: %w", commandError("could not read "+key+" with sysctl"), errors.Join(err, convErr))
+		}
+		_, ours := record.PreviousUDP[key]
+		if have >= udpBufferBytes && !ours {
+			continue
+		}
+		if !ours {
+			if record.PreviousUDP == nil {
+				record.PreviousUDP = map[string]string{}
+			}
+			record.PreviousUDP[key] = strconv.Itoa(have)
+		}
+		file += fmt.Sprintf("%s = %d\n", key, udpBufferBytes)
+		if have == udpBufferBytes {
+			continue
+		}
+		if _, err := run(ctx, "sysctl", "-w", fmt.Sprintf("%s=%d", key, udpBufferBytes)); err != nil {
+			return fmt.Errorf("%w: %w", commandError("could not raise "+key+" with sysctl; QUIC tunnels would be slow at long distances"), err)
+		}
+		fmt.Fprintf(out, "%s raised from %d to %d for QUIC.\n", key, have, udpBufferBytes)
+	}
+	if file == "" {
+		return nil
+	}
+	if err := os.WriteFile(paths.udp, []byte(file), 0o644); err != nil {
+		return fmt.Errorf("%w: %w", commandError("could not write "+paths.udp+"; run pbh install as root"), err)
+	}
 	return nil
 }
 
@@ -399,6 +452,16 @@ func removeHostNetwork(ctx context.Context, run commander, paths hostPaths, out 
 				errs = append(errs, fmt.Errorf("restore outgoing port range %s: %w", record.PreviousOutgoing, err))
 			} else {
 				fmt.Fprintf(out, "Outgoing port range restored to %s.\n", record.PreviousOutgoing)
+			}
+		}
+	}
+	if len(record.PreviousUDP) > 0 {
+		if err := os.Remove(paths.udp); err != nil && !errors.Is(err, os.ErrNotExist) {
+			errs = append(errs, err)
+		}
+		for key, previous := range record.PreviousUDP {
+			if _, err := run(ctx, "sysctl", "-w", key+"="+previous); err != nil {
+				errs = append(errs, fmt.Errorf("restore %s=%s: %w", key, previous, err))
 			}
 		}
 	}
