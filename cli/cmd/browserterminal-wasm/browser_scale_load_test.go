@@ -112,9 +112,14 @@ func (a *loadAPI) call(method, path string, body any, out any) error {
 	var env struct {
 		Data  json.RawMessage `json:"data"`
 		Error struct{ Code, Message string }
+		// the proxy's own refusals are not wrapped in {"error"}
+		Code, Message string
 	}
 	_ = json.Unmarshal(raw, &env)
 	if resp.StatusCode >= 300 {
+		if env.Error.Code == "" {
+			env.Error.Code, env.Error.Message = env.Code, env.Message
+		}
 		return &apiError{Status: resp.StatusCode, Code: env.Error.Code, Message: env.Error.Message}
 	}
 	if out != nil {
@@ -484,6 +489,11 @@ func TestLoadBrowserTerminalsOverEdge(t *testing.T) {
 		t.Logf("cleanup: %d sessions closed, %d failed", len(created.ids), failed.Load())
 	}()
 
+	// A session made while the account still has room: its ticket is what the full account refuses.
+	spare, err := newSession()
+	if err != nil {
+		t.Fatalf("create spare session: %v", err)
+	}
 	result := map[string]any{"terminals": count}
 	// 1. open: at most 8 in flight (the server admits 8 tickets per browser login at a time).
 	type opened struct {
@@ -580,25 +590,27 @@ func TestLoadBrowserTerminalsOverEdge(t *testing.T) {
 	result["echo_p50_s"], result["echo_p95_s"], result["echo_max_s"] = percentile(echoes, .5), percentile(echoes, .95), percentile(echoes, 1)
 	t.Logf("echo %d ok, %d failed, p95 %.1fs", len(echoes), echoFail, percentile(echoes, .95))
 
-	// 3. the (count+1)th is refused with the plan message, before any socket opens.
-	var refusal apiError
-	extra, err := newSession()
-	if err == nil {
-		_, err = openTerm(api, machine, extra, map[string]time.Duration{})
-	}
+	// 3. the (count+1)th is refused with the plan message, both when the session is created and when an
+	// existing session asks for its ticket (no socket opens in either case).
+	var refusal, createRefusal apiError
 	var ae *apiError
+	if _, err := newSession(); errors.As(err, &ae) {
+		createRefusal = *ae
+	}
+	_, err = openTerm(api, machine, spare, map[string]time.Duration{})
 	if errors.As(err, &ae) {
 		refusal = *ae
 	}
 	result["refusal_status"], result["refusal_code"], result["refusal_message"] = refusal.Status, refusal.Code, refusal.Message
-	t.Logf("terminal %d: %v", count+1, err)
+	result["create_refusal_status"], result["create_refusal_code"] = createRefusal.Status, createRefusal.Code
+	t.Logf("terminal %d: ticket %v; create %v", count+1, err, &createRefusal)
 
-	// 4. closing frees a place: close one attached terminal, the next one opens.
+	// 4. closing frees a place: close one attached terminal, the spare session attaches.
 	if terms[0] != nil {
 		terms[0].close()
 		terms[0] = nil
 		time.Sleep(3 * time.Second)
-		lt, err := openTerm(api, machine, extra, map[string]time.Duration{})
+		lt, err := openTerm(api, machine, spare, map[string]time.Duration{})
 		result["opens_after_close"] = err == nil
 		if err != nil {
 			result["opens_after_close_error"] = err.Error()
@@ -610,7 +622,7 @@ func TestLoadBrowserTerminalsOverEdge(t *testing.T) {
 		raw, _ := json.MarshalIndent(result, "", "  ")
 		_ = os.WriteFile(out, raw, 0o600)
 	}
-	if len(totals) != count || echoFail != 0 || refusal.Code != "browser_terminal_limit_reached" {
+	if len(totals) != count || echoFail != 0 || refusal.Code != "browser_terminal_limit_reached" || createRefusal.Code != "browser_terminal_limit_reached" {
 		t.Fatalf("not clean: attached %d/%d, echo failures %d, refusal %q", len(totals), count, echoFail, refusal.Code)
 	}
 	if opened, _ := result["opens_after_close"].(bool); !opened {
