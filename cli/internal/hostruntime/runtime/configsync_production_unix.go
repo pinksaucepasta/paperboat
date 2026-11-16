@@ -15,10 +15,13 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/configsync"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machinecontrol"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machineevents"
+	"github.com/pinksaucepasta/paperboat/shared/httptransport"
 )
 
 type productionConfigSyncConfig struct {
@@ -31,6 +34,8 @@ type productionConfigSyncConfig struct {
 	Proofs          configsync.ProofSource
 	OperationID     configsync.OperationIDSource
 	Transport       http.RoundTripper
+	// Events, when set, wakes the engine on the config topic; it starts with the first runtime.
+	Events *machineevents.Hub
 }
 
 type ProductionConfigWorkerConfig struct {
@@ -50,14 +55,28 @@ func RunProductionConfigWorker(ctx context.Context, config ProductionConfigWorke
 	if err != nil {
 		return err
 	}
+	eventsTransport := config.Transport
+	if eventsTransport == nil {
+		eventsTransport = httptransport.Default() // the control client's default too
+	}
+	events, err := machineevents.New(machineevents.Config{ControlURL: controlURL.String(), Tokens: identities, Proofs: identities, OperationID: randomProductionOperationID, Transport: eventsTransport})
+	if err != nil {
+		return err
+	}
 	service, err := newProductionConfigSync(productionConfigSyncConfig{
 		ControlURL: controlURL.String(), ControlHost: controlURL.Hostname(), RepositoryHosts: config.RepositoryHosts,
 		HomeRoot: config.HomeRoot, StateRoot: config.StateRoot,
 		Identities: identities, Proofs: identities, OperationID: randomProductionOperationID, Transport: config.Transport,
+		Events: events,
 	})
 	if err != nil {
 		return err
 	}
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = events.Shutdown(shutdownCtx)
+	}()
 	if err := service.Start(ctx); err != nil {
 		return err
 	}
@@ -92,6 +111,12 @@ func newProductionConfigSync(config productionConfigSyncConfig) (*configsync.Sup
 	}
 	loadMachine := func() (configsync.SourceConfig, error) {
 		return configsync.LoadSourceConfig(machinePath, configsync.DefaultSourceConfigLimits())
+	}
+	// Only a machine with a config assignment holds a wait open: the hub starts with the first runtime.
+	var wake <-chan struct{}
+	var startEvents sync.Once
+	if config.Events != nil {
+		wake = config.Events.Subscribe(machineevents.TopicConfig).Changed()
 	}
 	return configsync.NewSupervisor(configsync.SupervisorConfig{
 		Credentials: client,
@@ -160,10 +185,17 @@ func newProductionConfigSync(config productionConfigSyncConfig) (*configsync.Sup
 			if err != nil {
 				return nil, err
 			}
+			if config.Events != nil {
+				var startErr error
+				startEvents.Do(func() { startErr = config.Events.Start(ctx) })
+				if startErr != nil {
+					return nil, startErr
+				}
+			}
 			return configsync.NewEngine(configsync.EngineConfig{
 				HomeRoot: config.HomeRoot, Descriptor: descriptor, Syncer: publisher, Statuses: client,
 				Diagnostics: reconciler, Manifest: reconciler,
-				StatusPath: filepath.Join(assignmentRoot, "status.json"),
+				StatusPath: filepath.Join(assignmentRoot, "status.json"), Wake: wake,
 			})
 		},
 	})

@@ -575,7 +575,9 @@ func Default() Config {
 			ManifestContract: "paperboat-manifest-v1", ManifestMaxBytes: 256 << 10,
 			ManifestMaxLines: 4096, ManifestMaxPatternBytes: 1024,
 			MaxFileBytes: 5 << 20, MaxBatchBytes: 25 << 20,
-			Debounce: 10 * time.Second, MinPushInterval: 5 * time.Minute, MaxDirtyDelay: 5 * time.Minute,
+			// A watched write publishes after Debounce; repeated writes at most every MinPushInterval
+			// (Syncthing: fsWatcherDelayS 10 s, no push floor).
+			Debounce: 2 * time.Second, MinPushInterval: 10 * time.Second, MaxDirtyDelay: time.Minute,
 			RemotePollInterval: time.Minute, RetryLimit: 5, ShutdownFlushTimeout: 30 * time.Second,
 			ShutdownGracePeriod: 2 * time.Second, ShutdownReportTimeout: 10 * time.Second,
 			StaleHeartbeatAfter: 2 * time.Minute, SummaryLimit: 50, PolicyRevision: "1", WarningRevision: "config-sync-warning-v1",
@@ -819,7 +821,7 @@ func (c Config) Validate() error {
 		errs = append(errs, fmt.Errorf("config_sync.home_override must be an absolute path"))
 	}
 	if c.ConfigSync.Debounce < time.Second || c.ConfigSync.Debounce > 5*time.Minute ||
-		c.ConfigSync.MinPushInterval < time.Minute || c.ConfigSync.MinPushInterval > 24*time.Hour ||
+		c.ConfigSync.MinPushInterval < c.ConfigSync.Debounce || c.ConfigSync.MinPushInterval > 24*time.Hour ||
 		c.ConfigSync.MaxDirtyDelay < c.ConfigSync.Debounce || c.ConfigSync.MaxDirtyDelay > 24*time.Hour ||
 		c.ConfigSync.RemotePollInterval < time.Second || c.ConfigSync.RemotePollInterval > time.Hour ||
 		c.ConfigSync.RetryLimit < 1 || c.ConfigSync.RetryLimit > 20 ||

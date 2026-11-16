@@ -79,9 +79,10 @@ func TestEngineRunsInitialSyncAndBoundedShutdownFlush(t *testing.T) {
 		},
 	}
 	syncer := &recordingSyncer{results: make(chan struct{}, 4)}
+	wake := make(chan struct{}, 1)
 	engine, err := NewEngine(EngineConfig{
 		HomeRoot: home, Descriptor: descriptor, Syncer: syncer,
-		StatusPath: filepath.Join(state, "status.json"),
+		StatusPath: filepath.Join(state, "status.json"), Wake: wake,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -95,6 +96,13 @@ func TestEngineRunsInitialSyncAndBoundedShutdownFlush(t *testing.T) {
 	case <-syncer.results:
 	case <-time.After(time.Second):
 		t.Fatal("initial sync did not run")
+	}
+	// Another machine published: the server's config topic wakes a pass long before the hourly poll.
+	wake <- struct{}{}
+	select {
+	case <-syncer.results:
+	case <-time.After(time.Second):
+		t.Fatal("wake did not start a sync")
 	}
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer shutdownCancel()
@@ -363,5 +371,50 @@ func TestEnginePreservesSyncAndWatchResetFailuresTogether(t *testing.T) {
 	got := engine.syncNow(context.Background())
 	if !errors.Is(got, syncFailure) || !errors.Is(got, ErrPathRuleInvalid) {
 		t.Fatalf("combined sync/watch failure lost a cause: %v", got)
+	}
+}
+
+// A write after a quiet period publishes after the debounce, not after the push floor of the last push.
+func TestEngineNextDelayPublishesQuietWriteAfterDebounce(t *testing.T) {
+	now := time.Date(2026, 11, 17, 12, 0, 0, 0, time.UTC)
+	engine := &Engine{clock: func() time.Time { return now }}
+	engine.descriptor.Policy = RuntimePolicy{Debounce: 2 * time.Second, MinimumPushInterval: 10 * time.Second, MaximumDirtyDelay: time.Minute}
+	engine.lastPush = now.Add(-30 * time.Second)
+	if got := engine.nextDelay(); got != 2*time.Second {
+		t.Fatalf("quiet write delay = %v, want 2s", got)
+	}
+	engine.lastPush = now.Add(-3 * time.Second)
+	if got := engine.nextDelay(); got != 7*time.Second {
+		t.Fatalf("write right after a push delay = %v, want 7s", got)
+	}
+}
+
+type publishedDiagnostics struct{ revision string }
+
+func (d *publishedDiagnostics) Diagnostics() ReconciliationDiagnostics {
+	return ReconciliationDiagnostics{LastPublishedRevision: d.revision}
+}
+
+// A clean pass (the 60 s remote poll) lands without a commit and must not start the push floor; a new commit does.
+func TestEngineCleanPassDoesNotStartPushFloor(t *testing.T) {
+	home, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	diagnostics := &publishedDiagnostics{}
+	engine, err := NewEngine(EngineConfig{HomeRoot: home, Descriptor: testEngineDescriptor(1), Syncer: &recordingSyncer{results: make(chan struct{}, 4)}, Diagnostics: diagnostics})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := engine.Apply(context.Background()); err != nil || !engine.lastPush.IsZero() {
+		t.Fatalf("clean pass: err=%v lastPush=%v", err, engine.lastPush)
+	}
+	diagnostics.revision = "commit-1"
+	if err := engine.Apply(context.Background()); err != nil || engine.lastPush.IsZero() {
+		t.Fatalf("publishing pass: err=%v lastPush=%v", err, engine.lastPush)
+	}
+	pushed := engine.lastPush
+	if err := engine.Apply(context.Background()); err != nil || !engine.lastPush.Equal(pushed) {
+		t.Fatalf("clean pass after a publish moved lastPush %v -> %v (err %v)", pushed, engine.lastPush, err)
 	}
 }

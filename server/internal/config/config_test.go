@@ -148,6 +148,7 @@ func TestValidationRejectsConfigSyncPoliciesHelpersCannotConsume(t *testing.T) {
 		"manifest pattern": func(cfg *Config) { cfg.ConfigSync.ManifestMaxPatternBytes = 8193 },
 		"debounce":         func(cfg *Config) { cfg.ConfigSync.Debounce = 5*time.Minute + 1 },
 		"push interval":    func(cfg *Config) { cfg.ConfigSync.MinPushInterval = 24*time.Hour + 1 },
+		"push floor":       func(cfg *Config) { cfg.ConfigSync.MinPushInterval = cfg.ConfigSync.Debounce - 1 },
 		"dirty delay":      func(cfg *Config) { cfg.ConfigSync.MaxDirtyDelay = cfg.ConfigSync.Debounce - 1 },
 		"poll interval":    func(cfg *Config) { cfg.ConfigSync.RemotePollInterval = time.Hour + 1 },
 		"retry limit":      func(cfg *Config) { cfg.ConfigSync.RetryLimit = 21 },

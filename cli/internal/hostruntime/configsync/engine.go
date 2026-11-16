@@ -40,6 +40,8 @@ type EngineConfig struct {
 	Manifest    ManifestSource
 	StatusPath  string
 	Clock       func() time.Time
+	// Wake starts a pass at once: the server announces that another machine published to the repository.
+	Wake <-chan struct{}
 }
 
 type Engine struct {
@@ -52,6 +54,7 @@ type Engine struct {
 	manifest    ManifestSource
 	statusPath  string
 	clock       func() time.Time
+	wake        <-chan struct{}
 
 	syncFailures       configSyncFailureObservation
 	statusFileFailures configSyncFailureObservation
@@ -115,7 +118,7 @@ func NewEngine(config EngineConfig) (*Engine, error) {
 	}
 	return &Engine{
 		mapping: mapping, homeRoot: config.HomeRoot, descriptor: config.Descriptor, syncer: config.Syncer,
-		statuses: config.Statuses, statusPath: config.StatusPath, clock: config.Clock,
+		statuses: config.Statuses, statusPath: config.StatusPath, clock: config.Clock, wake: config.Wake,
 		diagnostics: config.Diagnostics, manifest: config.Manifest, syncRevision: syncRevision,
 		status: Status{
 			State: "restoring", Mode: config.Descriptor.Mode, RepositoryID: config.Descriptor.RepositoryID,
@@ -269,6 +272,8 @@ func (e *Engine) run(ctx context.Context, done chan<- struct{}, watcher *fsnotif
 			e.backgroundSync(ctx)
 		case <-poll.C:
 			e.backgroundSync(ctx)
+		case <-e.wake:
+			e.backgroundSync(ctx)
 		}
 	}
 }
@@ -386,6 +391,8 @@ func (e *Engine) syncNow(ctx context.Context) error {
 	if diagnostics.LastAppliedRevision != "" {
 		e.status.LastAppliedRevision = diagnostics.LastAppliedRevision
 	}
+	// Only a new commit starts the push floor: a clean poll must not delay the next watched write.
+	published := diagnostics.LastPublishedRevision != "" && diagnostics.LastPublishedRevision != e.status.LastPublishedRevision
 	if diagnostics.LastPublishedRevision != "" {
 		e.status.LastPublishedRevision = diagnostics.LastPublishedRevision
 	}
@@ -398,7 +405,9 @@ func (e *Engine) syncNow(ctx context.Context) error {
 	}
 	if result.Landed {
 		// Publication progress survives cleanup/acknowledgement failures.
-		e.lastPush = now
+		if published {
+			e.lastPush = now
+		}
 		e.dirtySince = time.Time{}
 		e.status.LastSuccessfulAt = &now
 	}
@@ -409,8 +418,6 @@ func (e *Engine) syncNow(ctx context.Context) error {
 		e.status.RecoveryActions = []string{"check_status"}
 	case err == nil && result.Landed && len(diagnostics.Conflicts) > 0:
 		e.remoteRevision = result.RemoteRevision
-		e.lastPush = now
-		e.dirtySince = time.Time{}
 		e.status.State = "conflict"
 		e.status.RemoteRevision = result.RemoteRevision
 		e.status.LastSuccessfulAt = &now
@@ -418,8 +425,6 @@ func (e *Engine) syncNow(ctx context.Context) error {
 		e.status.RecoveryActions = []string{"keep_local", "keep_remote"}
 	case err == nil && result.Landed:
 		e.remoteRevision = result.RemoteRevision
-		e.lastPush = now
-		e.dirtySince = time.Time{}
 		e.status.State = "healthy"
 		if len(diagnostics.Skipped) > 0 {
 			e.status.State = "warning"

@@ -40,7 +40,7 @@ func validateRuntimeDescriptor(descriptor RuntimeDescriptor, credential Credenti
 		policy.MaxFileBytes < 1 || policy.MaxFileBytes > 100<<20 ||
 		policy.MaxBatchBytes < policy.MaxFileBytes || policy.MaxBatchBytes > 500<<20 ||
 		policy.Debounce < time.Second || policy.Debounce > 5*time.Minute ||
-		policy.MinimumPushInterval < time.Minute || policy.MinimumPushInterval > 24*time.Hour ||
+		policy.MinimumPushInterval < policy.Debounce || policy.MinimumPushInterval > 24*time.Hour ||
 		policy.MaximumDirtyDelay < policy.Debounce || policy.MaximumDirtyDelay > 24*time.Hour ||
 		policy.RemotePollInterval < time.Second || policy.RemotePollInterval > time.Hour ||
 		policy.RetryLimit < 1 || policy.RetryLimit > 20 ||

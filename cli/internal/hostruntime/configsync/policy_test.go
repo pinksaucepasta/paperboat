@@ -29,6 +29,16 @@ func TestValidateRuntimeDescriptorAcceptsEmptyManifestContract(t *testing.T) {
 	if err := validateRuntimeDescriptor(descriptor, credential); err != nil {
 		t.Fatalf("manifest descriptor rejected: %v", err)
 	}
+	// The server publishes a watched write within seconds: a push floor of a few seconds is valid, one below the debounce is not.
+	descriptor.Policy.MinimumPushInterval = 2 * time.Second
+	if err := validateRuntimeDescriptor(descriptor, credential); err != nil {
+		t.Fatalf("seconds push floor rejected: %v", err)
+	}
+	descriptor.Policy.MinimumPushInterval = descriptor.Policy.Debounce - 1
+	if err := validateRuntimeDescriptor(descriptor, credential); !errors.Is(err, ErrPolicyInvalid) {
+		t.Fatalf("push floor below debounce error = %v", err)
+	}
+	descriptor.Policy.MinimumPushInterval = time.Minute
 	descriptor.Policy.ManifestMaxLines = 0
 	if err := validateRuntimeDescriptor(descriptor, credential); !errors.Is(err, ErrPolicyInvalid) {
 		t.Fatalf("invalid manifest limit error = %v", err)
