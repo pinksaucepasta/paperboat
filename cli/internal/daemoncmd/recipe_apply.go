@@ -29,10 +29,12 @@ import (
 // commands (pb preview, pb tunnel create, pb config sync apply, pb env hook), each an "ensure": what
 // exists and matches is left alone, what is missing is created, what the recipe no longer lists is
 // removed. It re-reads GET /v1/recipe-machine when the server moves the machine's "recipe" topic, on
-// start, and otherwise rarely; a failed section is retried with backoff (1 min doubling to 30 min).
+// start, and otherwise rarely; a failed section is retried with backoff (15 s doubling to 30 min).
 const (
-	recipeIdleRefresh  = 30 * time.Minute
-	recipeFirstRetry   = time.Minute
+	recipeIdleRefresh = 30 * time.Minute
+	// The first apply can race the host runtime starting after pairing (its preview owner files appear
+	// seconds later), so the first retry comes soon.
+	recipeFirstRetry   = 15 * time.Second
 	recipeMaximumRetry = 30 * time.Minute
 	recipeStepTimeout  = 10 * time.Minute
 	recipeRunTimeout   = 3 * time.Minute
@@ -331,13 +333,6 @@ func recipeClients(serverURL string, auth *sessionauth.Source, transport http.Ro
 	return fetch, report
 }
 
-// notRecipeMachine is the server's answer to a session that was not started from a recipe.
-func notRecipeMachine(err error) bool {
-	var apiErr *api.APIError
-	// 403: a session not started from a recipe; 404: a server without recipes.
-	return errors.As(err, &apiErr) && (apiErr.Status == http.StatusForbidden || apiErr.Status == http.StatusNotFound)
-}
-
 // refreshRecipe applies the recipe of a machine paired from one (it runs only where pb pair left a
 // recipe key file). A failing apply is the recipe step, shown by pb doctor until it succeeds.
 func refreshRecipe(ctx context.Context, steps *health.Registry, applier *recipeApplier, configPath string, fetch recipeMachineFetch, report recipeApplyReport, changed <-chan struct{}) {
@@ -353,11 +348,9 @@ func refreshRecipe(ctx context.Context, steps *health.Registry, applier *recipeA
 			stopTimer(timer)
 		}
 		stepCtx, cancel := context.WithTimeout(ctx, recipeStepTimeout)
+		// Only a recipe machine runs this loop (main.go), so a refusal here is a failure to show and
+		// retry, never a reason to stop silently.
 		state, err := fetch(stepCtx)
-		if notRecipeMachine(err) {
-			cancel()
-			return
-		}
 		if err == nil {
 			err = applyRecipeState(stepCtx, applier, configPath, state, report)
 		}

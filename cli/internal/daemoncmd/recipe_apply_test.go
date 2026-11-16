@@ -76,14 +76,6 @@ func TestRecipeApplyReportsAFailedSection(t *testing.T) {
 	}
 }
 
-func TestNotRecipeMachine(t *testing.T) {
-	for status, want := range map[int]bool{http.StatusForbidden: true, http.StatusNotFound: true, http.StatusBadGateway: false} {
-		if got := notRecipeMachine(&api.APIError{Status: status}); got != want {
-			t.Fatalf("%d: %v", status, got)
-		}
-	}
-}
-
 // After a rotate the running machine takes the recipe's new key sealed to it and keeps reporting its
 // own public key, so a later rotate can reach it too (F26: rotate keeps machines working).
 func TestRecipeStateTakesARotatedKey(t *testing.T) {
