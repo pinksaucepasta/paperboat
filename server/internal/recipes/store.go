@@ -122,6 +122,9 @@ func (s *Service) Update(ctx context.Context, actor string, ws workspace.Scope, 
 		if after, err = getTx(ctx, tx, before.ID, false); err != nil {
 			return err
 		}
+		if err := publishRecipeTx(ctx, tx, before.ID); err != nil {
+			return err
+		}
 		return s.audit.WriteTx(ctx, tx, audit.Event{ActorUserID: actor, ActorType: audit.ActorUser, EventType: "recipe.updated",
 			ResourceType: "recipe", ResourceID: before.ID, Metadata: map[string]any{"workspace": ws.ID, "name": in.Name, "revision": after.Revision}})
 	})

@@ -272,8 +272,8 @@ func TestRecipeReachNarrowsItsCreator(t *testing.T) {
 	if d := untagged.DecideRecipe("recipe-agent", "ana", machine("m-ci"), ActionExec, 0); d.Allowed {
 		t.Fatalf("a reach whose tag is gone matches nothing: %+v", d)
 	}
-	if errs := untagged.ValidateScope(inv.Recipes[0].Reach); len(errs) != 1 || errs[0].Code != "unknown_tag" {
-		t.Fatalf("creating a recipe with an unknown tag is refused: %v", errs)
+	if errs := untagged.ValidateScope(inv.Recipes[0].Reach); len(errs) != 0 {
+		t.Fatalf("a recipe may reach a tag no machine carries yet: %v", errs)
 	}
 }
 

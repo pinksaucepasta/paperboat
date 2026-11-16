@@ -173,6 +173,9 @@ func (s *Service) PutValues(ctx context.Context, actor string, ws workspace.Scop
 		if _, err := tx.Exec(ctx, `UPDATE environment_named_vaults SET envelope=$2, revision=revision+1, updated_at=now() WHERE id=$1`, v.id, envelope); err != nil {
 			return err
 		}
+		if err := publishVaultTx(ctx, tx, v.id); err != nil {
+			return err
+		}
 		out, err = vaultTx(ctx, tx, actor, ws, name, false)
 		return err
 	})
@@ -223,6 +226,9 @@ func (s *Service) Rekey(ctx context.Context, actor string, ws workspace.Scope, n
 			}
 		}
 		if out, err = vaultTx(ctx, tx, actor, ws, name, false); err != nil {
+			return err
+		}
+		if err := publishVaultTx(ctx, tx, id); err != nil {
 			return err
 		}
 		return s.audit.WriteTx(ctx, tx, audit.Event{ActorUserID: actor, ActorType: audit.ActorUser, EventType: "environment.vault.rekeyed",

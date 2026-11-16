@@ -113,7 +113,11 @@ func TestScopeRowsAreSymbolic(t *testing.T) {
 	if rows[0].TargetKind != "tag" || rows[0].TargetID != "tag:ci" || rows[1].TargetID != "m-db1" || rows[2].TargetKind != "all_machines" || portsLabel(rows[2].Ports) != "5432" || portsLabel(rows[0].Ports) != "1-65535" {
 		t.Fatalf("%+v", rows)
 	}
-	if _, errs := c.ScopeRows([]ScopeEntry{{Dst: []string{"tag:nope"}, Allow: []string{"exec"}}}); len(errs) != 1 || errs[0].Code != "unknown_tag" {
+	// A tag no machine carries yet is accepted and stored by name (it matches once a machine has it).
+	if rows, errs := c.ScopeRows([]ScopeEntry{{Dst: []string{"tag:later"}, Allow: []string{"exec"}}}); len(errs) != 0 || len(rows) != 1 || rows[0].TargetID != "tag:later" {
+		t.Fatal(errs, rows)
+	}
+	if _, errs := c.ScopeRows([]ScopeEntry{{Dst: []string{"tag:Bad Name"}, Allow: []string{"exec"}}}); len(errs) != 1 || errs[0].Code != "unknown_tag" {
 		t.Fatal(errs)
 	}
 }

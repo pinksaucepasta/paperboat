@@ -45,6 +45,11 @@ Vault   {name, key_epoch, revision, rekey_required, envelope?, wraps, recipes}
 impact  {machines: [{id, name, online}], vaults: [name]}
 ```
 
+A recipe machine waits on the machine-event topic `recipe` (POST /v1/machines/{id}/events/wait) and
+refetches `GET /v1/recipe-machine` when it moves: on update, rotate, and a value change or new key
+of a vault the recipe reads. A `[[reach]]` tag no machine carries yet is accepted and matches once
+a machine has it.
+
 Pairing from a recipe: `POST /v1/auth/recipe-sessions`, then `POST /v1/machines/setup` with that
 session's bearer (as `pb setup` today). Setup makes the machine the recipe's in one transaction:
 counted against `max_machines`, shared into a team recipe's team, tagged with the recipe's tags

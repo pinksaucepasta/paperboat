@@ -66,3 +66,18 @@ func (s *Service) RecordApply(ctx context.Context, recipeID, machineID string, r
 	}
 	return nil
 }
+
+// publishRecipeTx moves the recipe topic of the live machines of the given recipes, so their daemons
+// refetch GET /v1/recipe-machine at once instead of polling.
+func publishRecipeTx(ctx context.Context, tx *db.Tx, recipeIDs ...string) error {
+	_, err := tx.Exec(ctx, `SELECT paperboat.publish_machine_topic(ARRAY(SELECT rm.machine_id FROM recipe_machines rm
+	 JOIN live_user_machines m ON m.id=rm.machine_id WHERE rm.recipe_id=ANY($1::text[])), 'recipe')`, recipeIDs)
+	return err
+}
+
+// publishVaultTx moves the recipe topic of the machines of every recipe that reads the vault.
+func publishVaultTx(ctx context.Context, tx *db.Tx, vaultID string) error {
+	_, err := tx.Exec(ctx, `SELECT paperboat.publish_machine_topic(ARRAY(SELECT rm.machine_id FROM recipe_vault_wraps w
+	 JOIN recipe_machines rm ON rm.recipe_id=w.recipe_id JOIN live_user_machines m ON m.id=rm.machine_id WHERE w.vault_id=$1), 'recipe')`, vaultID)
+	return err
+}

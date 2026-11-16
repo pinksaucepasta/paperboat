@@ -71,6 +71,9 @@ func (s *Service) Rotate(ctx context.Context, actor string, ws workspace.Scope, 
 		if out, err = getTx(ctx, tx, r.ID, false); err != nil {
 			return err
 		}
+		if err := publishRecipeTx(ctx, tx, r.ID); err != nil {
+			return err
+		}
 		return s.audit.WriteTx(ctx, tx, audit.Event{ActorUserID: actor, ActorType: audit.ActorUser, EventType: "recipe.rotated",
 			ResourceType: "recipe", ResourceID: r.ID, Metadata: map[string]any{"workspace": ws.ID, "name": name, "machines": len(impact.Machines)}})
 	})

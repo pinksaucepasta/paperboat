@@ -109,6 +109,11 @@ func refusal(t *testing.T, err error, code string) {
 func TestRecipeLifecycle(t *testing.T) {
 	f := newFixture(t)
 	ci := "# CI\ntags = [\"ci\"]\nmax_machines = 1\nremove_after_offline = \"10m\"\n\n[[reach]]\ndst = [\"machine:web\"]\nallow = [\"exec\"]\n"
+	// An agent recipe may reach tag:ci before any machine carries it (the CI recipe comes later).
+	agent := f.token()
+	if _, err := f.service.Create(f.ctx, f.account, f.personal, Input{Name: "agent", Source: "max_machines = 1\n\n[[reach]]\ndst = [\"tag:ci\"]\nallow = [\"exec\"]\n", Format: "toml", TokenID: agent.ID, Auth: agent.Auth()}); err != nil {
+		t.Fatalf("reach to a tag no machine carries yet: %v", err)
+	}
 	tok := f.token()
 	created, err := f.service.Create(f.ctx, f.account, f.personal, Input{Name: "ci", Source: ci, Format: "toml", TokenID: tok.ID, Auth: tok.Auth()})
 	if err != nil {
@@ -148,11 +153,13 @@ func TestRecipeLifecycle(t *testing.T) {
 	f.exec(`INSERT INTO paperboat.recipe_machines(machine_id,recipe_id) VALUES($1,$2)`, f.web, created.ID)
 	refusal(t, func() error { _, err := f.session(tok); return err }(), "recipe_full")
 
-	// Update raises the revision and keeps the token.
+	// Update raises the revision, keeps the token and tells the recipe's machines at once.
+	moved := f.topicWatch(f.web)
 	before, after, err := f.service.Update(f.ctx, f.account, f.personal, Input{Name: "ci", Source: strings.Replace(ci, "max_machines = 1", "max_machines = 5", 1), Format: "toml"})
 	if err != nil || before.Revision != 1 || after.Revision != 2 || after.TokenID != created.TokenID || after.MaxMachines != 5 {
 		t.Fatalf("update: %+v %v", after, err)
 	}
+	moved()
 
 	// Rotate needs the shown code; the old token is then "replaced", the new one pairs.
 	next := recipe.Token{ID: tok.ID, Secret: f.token().Secret}
@@ -216,9 +223,16 @@ func TestRecipeVaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// A value change moves the recipe topic of the machines that read the vault.
+	f.exec(`INSERT INTO paperboat.recipe_machines(machine_id,recipe_id) VALUES($1,$2)`, f.web, created.ID)
+	moved := f.topicWatch(f.web)
+	if _, err := f.service.PutValues(f.ctx, f.account, f.personal, "canary-env", 1, 1, []byte("values-1b")); err != nil {
+		t.Fatal(err)
+	}
+	moved()
 	// The machine reads the vault with nobody online.
 	state, err := f.service.MachineRecipe(f.ctx, created.ID, "")
-	if err != nil || len(state.Vaults) != 1 || string(state.Vaults[0].Envelope) != "values-1" || string(state.Vaults[0].Wrapped) != "recipe-wrap" {
+	if err != nil || len(state.Vaults) != 1 || string(state.Vaults[0].Envelope) != "values-1b" || string(state.Vaults[0].Wrapped) != "recipe-wrap" {
 		t.Fatalf("machine vaults: %+v %v", state, err)
 	}
 	if err := f.service.DeleteVault(f.ctx, f.account, f.personal, "canary-env"); !errors.Is(err, ErrVaultInUse) {
@@ -233,7 +247,7 @@ func TestRecipeVaults(t *testing.T) {
 	if _, _, err := f.service.Revoke(f.ctx, f.account, f.personal, "ci", confirm.Code); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.service.PutValues(f.ctx, f.account, f.personal, "canary-env", 1, 1, []byte("values-2")); !errors.Is(err, ErrVaultRekeyRequired) {
+	if _, err := f.service.PutValues(f.ctx, f.account, f.personal, "canary-env", 2, 1, []byte("values-2")); !errors.Is(err, ErrVaultRekeyRequired) {
 		t.Fatalf("write after revoke: %v", err)
 	}
 	if _, err := f.service.Rekey(f.ctx, f.account, f.personal, "canary-env", 2, []byte("values-2"), wraps, nil); !errors.Is(err, ErrVaultStale) {
@@ -277,5 +291,24 @@ func TestCollectMachines(t *testing.T) {
 	}
 	if len(f.removed) != 3 || f.removed[2] != f.account+"/"+f.web {
 		t.Fatalf("lifetime removal: %v", f.removed)
+	}
+}
+
+// topicWatch reads machine's recipe topic generation now; the returned check fails unless it moved.
+func (f *fixture) topicWatch(machine string) func() {
+	f.t.Helper()
+	read := func() int64 {
+		var g int64
+		if err := f.store.SQL().QueryRowContext(f.ctx, `SELECT coalesce((SELECT generation FROM paperboat.machine_topic_generations WHERE machine_id=$1 AND topic='recipe'),0)`, machine).Scan(&g); err != nil {
+			f.t.Fatal(err)
+		}
+		return g
+	}
+	before := read()
+	return func() {
+		f.t.Helper()
+		if after := read(); after <= before {
+			f.t.Fatalf("recipe topic of %s did not move (%d -> %d)", machine, before, after)
+		}
 	}
 }

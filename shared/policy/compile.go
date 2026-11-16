@@ -1,6 +1,7 @@
 package policy
 
 import (
+	"maps"
 	"slices"
 	"sort"
 	"strconv"
@@ -109,7 +110,7 @@ func (c Compiled) compileScope(scope []ScopeEntry) ([]Grant, Errors) {
 		if len(s.Dst) == 0 || len(s.Allow) == 0 {
 			e.add(p, "empty", "a scope entry needs dst and allow")
 		}
-		family, targets := ruleTargets(e, c.x, c.tags, pointer(p, "dst"), s.Dst)
+		family, targets := ruleTargets(e, c.x, reachTags(c.tags, s.Dst), pointer(p, "dst"), s.Dst)
 		actions := ruleActions(e, c.x.inv.Team, family, pointer(p, "allow"), s.Allow)
 		ports := rulePorts(e, p, actions, s.Ports, false)
 		if len(e.errs) > before {
@@ -334,4 +335,25 @@ func machineError(c *collector, path string, x *index, name string) string {
 		c.add(path, code, "two machines are called %q; write machine:<owner email>/%s", name, name)
 	}
 	return code
+}
+
+// reachTags is tags plus every well-formed tag a reach names that no machine carries yet: like a
+// tag declared in Tailscale's tagOwners before any node has it, it matches nothing until a
+// machine is tagged (a CI recipe's tag:ci may be created after the agent recipe that reaches it).
+func reachTags(tags map[string][]string, dst []string) map[string][]string {
+	out := tags
+	for _, d := range dst {
+		name, ok := strings.CutPrefix(d, "tag:")
+		if _, known := tags[d]; !ok || known || !ValidName(name) {
+			continue
+		}
+		if len(out) == len(tags) {
+			out = maps.Clone(tags)
+			if out == nil {
+				out = map[string][]string{}
+			}
+		}
+		out[d] = nil
+	}
+	return out
 }
