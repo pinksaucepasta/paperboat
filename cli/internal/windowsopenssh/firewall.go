@@ -256,15 +256,17 @@ func RemovePaperboatState(ctx context.Context, config Config) error {
 	if err := validate(config); err != nil {
 		return err
 	}
-	var result error
-	result = errors.Join(result, RemoveServiceOwned(ctx, config))
+	// Access state (authorized_keys, host keys, config) goes even when the service or a firewall rule
+	// could not be removed: a leftover root made the next install refuse it (victus, second user).
+	result := RemoveServiceOwned(ctx, config)
+	var firewallErr error
 	state, exists, stateErr := readFirewallState(config)
 	if stateErr != nil {
-		result = errors.Join(result, stateErr)
+		firewallErr = errors.Join(firewallErr, stateErr)
 	} else if exists {
 		current, snapshotErr := snapshotFirewall(ctx, config)
 		if snapshotErr != nil {
-			result = errors.Join(result, snapshotErr)
+			firewallErr = errors.Join(firewallErr, snapshotErr)
 		} else {
 			byName := make(map[string]FirewallRule, len(current.OpenSSHInbound))
 			for _, rule := range current.OpenSSHInbound {
@@ -273,18 +275,20 @@ func RemovePaperboatState(ctx context.Context, config Config) error {
 			for _, owned := range state.Owned {
 				if rule, found := byName[strings.ToLower(owned.Rule.Name)]; found {
 					if !sameFirewallRule(rule, owned.Rule) {
-						result = errors.Join(result, ErrFirewallOwnership)
+						firewallErr = errors.Join(firewallErr, ErrFirewallOwnership)
 						continue
 					}
-					result = errors.Join(result, removeOwnedFirewallRule(ctx, config, rule.Name))
+					firewallErr = errors.Join(firewallErr, removeOwnedFirewallRule(ctx, config, rule.Name))
 				}
 			}
 		}
 	}
-	if result != nil {
-		return result
+	result = errors.Join(result, firewallErr)
+	paths := []string{filepath.Join(config.StateRoot, "sshd_config"), filepath.Join(config.StateRoot, "install-state.json")}
+	if firewallErr == nil { // the record of owned rules stays until those rules are removed
+		paths = append(paths, firewallStatePath(config))
 	}
-	for _, path := range []string{filepath.Join(config.StateRoot, "sshd_config"), filepath.Join(config.StateRoot, "install-state.json"), firewallStatePath(config)} {
+	for _, path := range paths {
 		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 			result = errors.Join(result, err)
 		}
@@ -294,5 +298,6 @@ func RemovePaperboatState(ctx context.Context, config Config) error {
 			result = errors.Join(result, err)
 		}
 	}
+	_ = os.Remove(config.StateRoot) // only when empty: generations or a kept firewall record stay
 	return result
 }
