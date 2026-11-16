@@ -60,7 +60,7 @@ func (r request) valid() bool {
 	if r.Schema != schema || !validHash(r.SHA256) {
 		return false
 	}
-	if r.Operation == "disable-ssh" || r.Operation == "enable-ssh" {
+	if r.Operation == "disable-ssh" || r.Operation == "enable-ssh" || r.Operation == "refresh-network" || r.Operation == "recovered" || r.Operation == "events-unhealthy" {
 		return r.SourceSHA256 == "" && validWorkerID(r.WorkerID) && r.WorkerEpoch != 0
 	}
 	if r.WorkerID != "" || r.WorkerEpoch != 0 {
@@ -114,9 +114,11 @@ type Server struct {
 	// WorkerFence admits only the named active worker epoch and reports when
 	// that lease is lost. The release callback remains held through the SSH
 	// policy mutation and its cancellation watcher.
-	WorkerFence   func(context.Context, string, uint64) (release func(), lost <-chan struct{}, err error)
-	RefreshTarget func(context.Context) error
-	Ready         chan error
+	WorkerFence    func(context.Context, string, uint64) (release func(), lost <-chan struct{}, err error)
+	RefreshTarget  func(context.Context) error
+	RefreshNetwork func()
+	EventsHealth   func(bool)
+	Ready          chan error
 }
 
 func (s *Server) handler() http.Handler {
@@ -175,7 +177,7 @@ func (s *Server) handler() http.Handler {
 					_ = s.RefreshTarget(r.Context())
 				}
 				operationErr = s.SSH.CheckSourceRetirement(req.SourceSHA256)
-			case "disable-ssh", "enable-ssh":
+			case "disable-ssh", "enable-ssh", "refresh-network", "recovered", "events-unhealthy":
 				select {
 				case workerOperations <- struct{}{}:
 					defer func() { <-workerOperations }()
@@ -183,7 +185,7 @@ func (s *Server) handler() http.Handler {
 					operationErr = r.Context().Err()
 				}
 				if operationErr == nil {
-					operationErr = s.workerSSHOperation(r.Context(), req)
+					operationErr = s.workerOperation(r.Context(), req)
 				}
 			}
 			switch {
@@ -201,7 +203,7 @@ func (s *Server) handler() http.Handler {
 	})
 }
 
-func (s *Server) workerSSHOperation(ctx context.Context, req request) (resultErr error) {
+func (s *Server) workerOperation(ctx context.Context, req request) (resultErr error) {
 	if s == nil || ctx == nil || s.SSH == nil || s.WorkerFence == nil {
 		return hostdproto.ErrFenced
 	}
@@ -255,10 +257,23 @@ func (s *Server) workerSSHOperation(ctx context.Context, req request) (resultErr
 		return operationCtx.Err()
 	default:
 	}
-	if req.Operation == "disable-ssh" {
+	switch req.Operation {
+	case "disable-ssh":
 		return s.SSH.Disable(operationCtx)
+	case "enable-ssh":
+		return s.SSH.Enable()
+	case "refresh-network":
+		if s.RefreshNetwork == nil {
+			return ErrUnavailable
+		}
+		s.RefreshNetwork()
+	case "recovered", "events-unhealthy":
+		if s.EventsHealth == nil {
+			return ErrUnavailable
+		}
+		s.EventsHealth(req.Operation == "recovered")
 	}
-	return s.SSH.Enable()
+	return nil
 }
 
 func (s *Server) Run(ctx context.Context) (resultErr error) {

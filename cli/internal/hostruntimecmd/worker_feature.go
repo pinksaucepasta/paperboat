@@ -68,6 +68,7 @@ func newWorkerFeature(ctx context.Context, endpoint string, token []byte, worker
 		return nil, err
 	}
 	var reconcileSSH func(context.Context, bool) error
+	var carrierEvents func(context.Context, bool, bool) error
 	if dispatch != nil {
 		instance, err := featureCarrierInstance()
 		if err != nil {
@@ -83,8 +84,28 @@ func newWorkerFeature(ctx context.Context, endpoint string, token []byte, worker
 			},
 		}
 		reconcileSSH = ssh.reconcile
+		carrierEvents = func(ctx context.Context, refresh, healthy bool) error {
+			config, err := hostinstall.ReadCarrierConfig(ctx, instance)
+			if err != nil {
+				return err
+			}
+			if !carrierPairedWithHostd(config, endpoint) {
+				return carriercontrol.ErrFenced
+			}
+			client, err := featureCarrierClient(ctx, config, worker, epoch)
+			if err != nil {
+				return err
+			}
+			if err := client.EventsHealth(ctx, healthy); err != nil {
+				return err
+			}
+			if refresh {
+				return client.RefreshNetwork(ctx)
+			}
+			return nil
+		}
 	}
-	host, err := hostruntime.NewProductionFeatureHost(ctx, version, os.Getenv, sessions, executions, dispatch, reconcileSSH, epoch)
+	host, err := hostruntime.NewProductionFeatureHost(ctx, version, os.Getenv, sessions, executions, dispatch, reconcileSSH, epoch, carrierEvents)
 	if err != nil {
 		return nil, err
 	}
@@ -175,16 +196,7 @@ func (c *carrierSSH) applyWhenPaired(ctx context.Context) {
 }
 
 func applyFeatureCarrierSSH(ctx context.Context, config hostinstall.CarrierConfig, worker string, epoch uint64, enabled bool) error {
-	capability, err := hostinstall.ReadCarrierCapability(ctx, config)
-	if err != nil {
-		return err
-	}
-	defer clear(capability)
-	client, err := carriercontrol.NewClient(config.ControlEndpoint, capability, config.Source.SHA256, config.OwnerSID)
-	if err != nil {
-		return err
-	}
-	bound, err := client.BindWorker(worker, epoch)
+	bound, err := featureCarrierClient(ctx, config, worker, epoch)
 	if err != nil {
 		return err
 	}
@@ -192,6 +204,19 @@ func applyFeatureCarrierSSH(ctx context.Context, config hostinstall.CarrierConfi
 		return bound.EnableSSH(ctx)
 	}
 	return bound.DisableSSH(ctx)
+}
+
+func featureCarrierClient(ctx context.Context, config hostinstall.CarrierConfig, worker string, epoch uint64) (*carriercontrol.Client, error) {
+	capability, err := hostinstall.ReadCarrierCapability(ctx, config)
+	if err != nil {
+		return nil, err
+	}
+	defer clear(capability)
+	client, err := carriercontrol.NewClient(config.ControlEndpoint, capability, config.Source.SHA256, config.OwnerSID)
+	if err != nil {
+		return nil, err
+	}
+	return client.BindWorker(worker, epoch)
 }
 
 func featureNativeDispatch(ctx context.Context, bridge *workloadbridge.Client) (*server.NativeDispatchConfig, error) {

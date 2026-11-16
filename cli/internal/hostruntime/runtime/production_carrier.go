@@ -25,7 +25,8 @@ import (
 // account. It neither boots a feature worker nor owns terminal, exec, or
 // transfer state.
 type ProductionCarrier struct {
-	ssh *managedssh.Host
+	ssh    *managedssh.Host
+	events *machineevents.Hub
 	// assemble opens the state files and builds the serving parts; it runs
 	// only under the role lock, so one carrier at a time owns that state.
 	assemble func() (*servingCarrier, error)
@@ -76,7 +77,7 @@ func NewProductionCarrier(ctx context.Context, version string, environ func(stri
 	if err != nil {
 		return nil, err
 	}
-	carrier := &ProductionCarrier{ssh: ssh}
+	carrier := &ProductionCarrier{ssh: ssh, events: base.events}
 	if generation.Name != "" {
 		active, err := generation.Active(ctx)
 		if err != nil {
@@ -123,7 +124,7 @@ func assembleServing(ctx context.Context, base *carrierIdentity, environ func(st
 	if err != nil {
 		return nil, err
 	}
-	group := serviceGroup{base.events, &jwksRefreshService{cache: keys}, newPeerEnrollmentRuntimeService(base.peerEnrollment, 2*time.Second), newOfflineAuditService(audit, controlURL, base.identity.MachineID, config.StateRoot, transport, base.tokens, base.operationID, base.events.Recovered())}
+	group := serviceGroup{&jwksRefreshService{cache: keys}, newPeerEnrollmentRuntimeService(base.peerEnrollment, 2*time.Second), newOfflineAuditService(audit, controlURL, base.identity.MachineID, config.StateRoot, transport, base.tokens, base.operationID, base.events.Recovered())}
 	return &servingCarrier{peer: peer, authorization: group, usage: usageService}, nil
 }
 
