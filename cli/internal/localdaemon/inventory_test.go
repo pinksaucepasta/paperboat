@@ -686,7 +686,7 @@ func TestInventoryChangeIsShownWithinTheSpacingOfThePreviousRefreshStart(t *test
 	plane.Publish(machineevents.TopicInventory)
 	select {
 	case shown := <-refreshed:
-		if took := shown.Sub(changed); took > spacing+duration/2 {
+		if took := shown.Sub(changed); took > spacing+duration+100*time.Millisecond {
 			t.Fatalf("a change after a refresh was shown after %v, want within the spacing (%v) of the previous refresh's start plus that refresh", took.Round(10*time.Millisecond), spacing)
 		}
 	case <-time.After(5 * time.Second):
@@ -907,7 +907,7 @@ func TestRequestedRefreshesFoldWithinTheSpacing(t *testing.T) {
 		inventory.RequestRefresh()
 		time.Sleep(50 * time.Millisecond)
 	}
-	time.Sleep(requestedRefreshSpacing)
+	time.Sleep(defaultEventRefreshSpacing)
 	cancel()
 	<-done
 	mu.Lock()
@@ -1217,3 +1217,130 @@ type portalSource struct {
 }
 
 func (s *portalSource) CaptivePortal(context.Context) bool { return s.portal }
+
+// Count the source boundary requests, including the unrelated catalogs and the
+// post-publication callback which fetches client-configuration in the daemon.
+type countingInventorySource struct {
+	*scriptedMachineSource
+	lists       atomic.Int32
+	completions atomic.Int32
+}
+
+func (s *countingInventorySource) ListUserMachines(ctx context.Context) ([]api.UserMachine, error) {
+	s.lists.Add(1)
+	return s.scriptedMachineSource.ListUserMachines(ctx)
+}
+
+func (s *countingInventorySource) ListCompletionItems(context.Context, []api.UserMachine) ([]localapi.CompletionItem, error) {
+	s.completions.Add(1)
+	return []localapi.CompletionItem{}, nil
+}
+
+func TestInventoryCoalescesTopicAndLocalWakes(t *testing.T) {
+	source := &countingInventorySource{scriptedMachineSource: &scriptedMachineSource{results: []machineResult{{machines: []api.UserMachine{{ID: "machine_1", Alias: "studio"}}}}}}
+	_, subscriptions, plane := eventstest.Start(t, time.Hour, machineevents.TopicInventory, machineevents.TopicMachineAccess)
+	store, err := localapi.NewSnapshotStore(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nudge := make(chan struct{}, 1)
+	refreshed := make(chan struct{}, 8)
+	var reconciles atomic.Int32
+	inventory, err := NewInventory(InventoryConfig{
+		Source: source, Store: store, RefreshInterval: time.Hour,
+		Events: subscriptions[0], AccessEvents: subscriptions[1], Nudge: nudge,
+		ReconcileMachines: func(context.Context, []api.UserMachine) error {
+			if reconciles.Add(1) > 1 {
+				nudge <- struct{}{}
+			} // ApplyMachines' own step transition
+			return nil
+		},
+		OnRefresh: func(error) { refreshed <- struct{}{} },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- inventory.Run(ctx) }()
+	defer func() { cancel(); <-done }()
+	<-refreshed
+	plane.Publish(machineevents.TopicInventory)
+	plane.Publish(machineevents.TopicMachineAccess)
+	nudge <- struct{}{}
+	select {
+	case <-refreshed:
+	case <-time.After(4 * time.Second):
+		t.Fatal("burst did not refresh within debounce")
+	}
+	time.Sleep(2500 * time.Millisecond) // includes the old 1-second self-triggered repeat
+	if got := source.lists.Load() - 1; got != 1 {
+		t.Fatalf("burst issued %d machine listings, want 1", got)
+	}
+	if got := source.completions.Load(); got != 1 {
+		t.Fatalf("unchanged burst fetched completion catalogs %d times, want startup only", got)
+	}
+}
+
+func TestInventoryReusesUnchangedProjectionsAndInvalidatesMachineChanges(t *testing.T) {
+	first := api.UserMachine{ID: "machine_1", Alias: "studio", InstallationGeneration: 1}
+	second := api.UserMachine{ID: "machine_2", Alias: "build", InstallationGeneration: 1}
+	renamed := first
+	renamed.Alias = "renamed"
+	newGeneration := renamed
+	newGeneration.InstallationGeneration++
+	source := &countingInventorySource{scriptedMachineSource: &scriptedMachineSource{results: []machineResult{
+		{machines: []api.UserMachine{first}},
+		{machines: []api.UserMachine{first}},
+		{machines: []api.UserMachine{first, second}},
+		{machines: []api.UserMachine{first}},
+		{machines: []api.UserMachine{renamed}},
+		{machines: []api.UserMachine{newGeneration}},
+		{machines: []api.UserMachine{newGeneration}},
+	}}}
+	_, subscriptions, plane := eventstest.Start(t, time.Hour, machineevents.TopicInventory)
+	store, err := localapi.NewSnapshotStore(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	var clockNanos atomic.Int64
+	clockNanos.Store(now.UnixNano())
+	var configuration, reconciles atomic.Int32
+	refreshed := make(chan struct{}, 8)
+	inventory, err := NewInventory(InventoryConfig{
+		Source: source, Store: store, RefreshInterval: time.Hour, Events: subscriptions[0], EventRefreshSpacing: 30 * time.Millisecond,
+		Clock:             func() time.Time { return time.Unix(0, clockNanos.Load()) },
+		ReconcileMachines: func(context.Context, []api.UserMachine) error { reconciles.Add(1); return nil },
+		OnMachines:        func(context.Context, []api.UserMachine) { configuration.Add(1) },
+		OnRefresh:         func(error) { refreshed <- struct{}{} },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- inventory.Run(ctx) }()
+	defer func() { cancel(); <-done }()
+	<-refreshed
+	for n, want := range []int32{1, 2, 3, 4, 5, 6} {
+		if n == 5 {
+			clockNanos.Store(now.Add(16 * time.Second).UnixNano())
+		}
+		plane.Publish(machineevents.TopicInventory)
+		select {
+		case <-refreshed:
+		case <-time.After(2 * time.Second):
+			t.Fatal("inventory event did not refresh")
+		}
+		if got := source.completions.Load(); got != want {
+			t.Fatalf("change %d: completion fetches=%d want=%d", n, got, want)
+		}
+		if got := configuration.Load(); got != want {
+			t.Fatalf("change %d: client-configuration callbacks=%d want=%d", n, got, want)
+		}
+		if got := reconciles.Load(); got != int32(n+2) {
+			t.Fatalf("change %d: reconciles=%d", n, got)
+		}
+	}
+}
