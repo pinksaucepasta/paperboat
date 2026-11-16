@@ -75,6 +75,18 @@ owns it.
   `PATCH /v1/machines/{id}` after pairing because the installers cannot carry them.
 - **Docs.** The sidebar Docs button is a placeholder until a docs site exists.
 
+## Gaps found while adding history, config, ENV and team controls (2026-11-16)
+
+- **Preview readiness is machine-only.** `GET /v1/previews/{id}/readiness` needs the owner machine's signed proof, so the
+  console cannot read it; the preview page shows the lease state instead.
+- **Events and logs have no total.** `/events` and `/logs` page forward by cursor (oldest first), so History shows
+  Previous/Next and the range, not "of N".
+- **Attached state is not in the payload.** A preview or tunnel does not say which teams it is attached to
+  (`team_resource_bindings`), so its Team section offers Attach and Detach without a current state.
+- **Team grants on previews and tunnels need an attached resource.** `POST /v1/teams/{id}/grants` refuses one that is not
+  bound; the grant dialog lists the team workspace's resources.
+- **Team default adoption replaces every machine's assignment** with a pull-only one (`AdoptTeamDefault`), so the console asks first.
+
 ## Sections waiting on server APIs
 
 The sidebar has these sections; each needs the listed control-plane support.
