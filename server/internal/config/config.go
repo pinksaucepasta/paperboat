@@ -103,17 +103,20 @@ type Config struct {
 }
 
 type HTTPConfig struct {
-	BrowserLoginOrigin string        `json:"browser_login_origin"`
-	Address            string        `json:"address"`
-	PublicBaseURL      string        `json:"public_base_url"`
-	AllowedOrigins     []string      `json:"allowed_origins"`
-	ReadHeaderTimeout  time.Duration `json:"read_header_timeout"`
-	RequestTimeout     time.Duration `json:"request_timeout"`
-	ShutdownTimeout    time.Duration `json:"shutdown_timeout"`
-	IdleTimeout        time.Duration `json:"idle_timeout"`
-	MaxHeaderBytes     int           `json:"max_header_bytes"`
-	MaxBodyBytes       int64         `json:"max_body_bytes"`
-	TrustedProxyCIDRs  []string      `json:"trusted_proxy_cidrs"`
+	BrowserLoginOrigin string `json:"browser_login_origin"`
+	// BrowserLoginExtraOrigins are further consoles that may sign in (a dev console next to the production one); the primary is
+	// BrowserLoginOrigin, the one clients and links name. PAPERBOAT_BROWSER_LOGIN_ORIGIN takes them as a comma list.
+	BrowserLoginExtraOrigins []string      `json:"browser_login_extra_origins"`
+	Address                  string        `json:"address"`
+	PublicBaseURL            string        `json:"public_base_url"`
+	AllowedOrigins           []string      `json:"allowed_origins"`
+	ReadHeaderTimeout        time.Duration `json:"read_header_timeout"`
+	RequestTimeout           time.Duration `json:"request_timeout"`
+	ShutdownTimeout          time.Duration `json:"shutdown_timeout"`
+	IdleTimeout              time.Duration `json:"idle_timeout"`
+	MaxHeaderBytes           int           `json:"max_header_bytes"`
+	MaxBodyBytes             int64         `json:"max_body_bytes"`
+	TrustedProxyCIDRs        []string      `json:"trusted_proxy_cidrs"`
 }
 
 // NormalizeIssuer returns the canonical server identity used in CLI
@@ -696,8 +699,11 @@ func (c Config) Validate() error {
 	if c.HTTP.MaxHeaderBytes <= 0 {
 		errs = append(errs, fmt.Errorf("http.max_header_bytes must be positive"))
 	}
-	if c.HTTP.BrowserLoginOrigin != "" {
-		origin, e := url.Parse(c.HTTP.BrowserLoginOrigin)
+	for _, loginOrigin := range append([]string{c.HTTP.BrowserLoginOrigin}, c.HTTP.BrowserLoginExtraOrigins...) {
+		if loginOrigin == "" {
+			continue
+		}
+		origin, e := url.Parse(loginOrigin)
 		if e != nil || origin.Host == "" || origin.User != nil || origin.Path != "" || origin.RawQuery != "" || origin.Fragment != "" || (origin.Scheme != "https" && (origin.Scheme != "http" || c.Environment == EnvironmentProduction)) {
 			errs = append(errs, fmt.Errorf("http.browser_login_origin must be an exact trusted origin; production requires HTTPS"))
 		}
@@ -1114,4 +1120,15 @@ func (p FileTransferPolicy) Published() mint.FileTransferPolicy {
 		MaxConcurrentTransfers: p.MaxConcurrentTransfers, RetentionSeconds: int64(p.Retention / time.Second),
 		DeliveryTimeoutSeconds: int64(p.DeliveryTimeout / time.Second), MaxPendingSpoolBytes: p.MaxPendingSpoolBytes,
 	}
+}
+
+// TrustedBrowserOrigins lists every origin allowed to sign in and to send cookie-authenticated unsafe requests, primary first.
+func (h HTTPConfig) TrustedBrowserOrigins() []string {
+	var out []string
+	for _, o := range append([]string{h.BrowserLoginOrigin}, h.BrowserLoginExtraOrigins...) {
+		if o = strings.TrimSuffix(strings.TrimSpace(o), "/"); o != "" {
+			out = append(out, o)
+		}
+	}
+	return out
 }

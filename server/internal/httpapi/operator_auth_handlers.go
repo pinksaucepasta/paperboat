@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -36,7 +37,7 @@ func operatorOriginAllowed(r *http.Request, opts Options) bool {
 			return true
 		}
 	}
-	return origin == opts.Config.HTTP.BrowserLoginOrigin
+	return slices.Contains(opts.Config.HTTP.TrustedBrowserOrigins(), origin)
 }
 func operatorCredentialRequest(w http.ResponseWriter, r *http.Request) (string, string, bool) {
 	var body struct {

@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"github.com/google/uuid"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -99,7 +100,7 @@ type Service struct {
 	verifier              WorkOSVerifier
 	sessionKeys           []string
 	cookieSecure          bool
-	trustedOrigin         string
+	trustedOrigins        []string
 	now                   func() time.Time
 	providerEncryptionKey string
 }
@@ -114,19 +115,21 @@ func NewService(store *db.DB, auditWriter *audit.Writer, verifier WorkOSVerifier
 	if auditWriter == nil && store != nil {
 		auditWriter = audit.NewWriter(store)
 	}
-	origin := ""
-	if len(trustedOrigin) > 0 {
-		origin = strings.TrimSuffix(strings.TrimSpace(trustedOrigin[0]), "/")
+	var origins []string
+	for _, o := range trustedOrigin {
+		if o = strings.TrimSuffix(strings.TrimSpace(o), "/"); o != "" {
+			origins = append(origins, o)
+		}
 	}
 	return &Service{
-		sessionPolicy: config.DefaultBrowserSessions(),
-		db:            store,
-		audit:         auditWriter,
-		verifier:      verifier,
-		sessionKeys:   sessionKeys,
-		cookieSecure:  cookieSecure,
-		trustedOrigin: origin,
-		now:           func() time.Time { return time.Now().UTC() },
+		sessionPolicy:  config.DefaultBrowserSessions(),
+		db:             store,
+		audit:          auditWriter,
+		verifier:       verifier,
+		sessionKeys:    sessionKeys,
+		cookieSecure:   cookieSecure,
+		trustedOrigins: origins,
+		now:            func() time.Time { return time.Now().UTC() },
 	}
 }
 
@@ -420,7 +423,7 @@ func (s *Service) ValidateBrowserRequest(r *http.Request) error {
 		return nil
 	}
 	origins := r.Header.Values("Origin")
-	if s.trustedOrigin == "" || len(origins) != 1 || origins[0] != s.trustedOrigin {
+	if len(origins) != 1 || !slices.Contains(s.trustedOrigins, origins[0]) {
 		return ErrOrigin
 	}
 	for _, name := range []string{SessionCookieName, CSRFCookieName, OAuthStateCookieName, DevSessionCookieName, DevCSRFCookieName, DevOAuthStateCookieName} {

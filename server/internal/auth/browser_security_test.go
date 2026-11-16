@@ -68,3 +68,24 @@ func TestValidateBrowserRequestRequiresExactOriginAndRejectsDuplicateReservedCoo
 		t.Fatalf("safe request rejected: %v", err)
 	}
 }
+
+func TestValidateBrowserRequestTrustsEveryListedConsoleOrigin(t *testing.T) {
+	service := NewService(nil, nil, nil, nil, true, "https://app.example.test", "https://dev.example.test/")
+	for _, origin := range []string{"https://app.example.test", "https://dev.example.test"} {
+		request := httptest.NewRequest(http.MethodPost, "/v1/resource", nil)
+		request.Header.Set("Origin", origin)
+		if err := service.ValidateBrowserRequest(request); err != nil {
+			t.Fatalf("listed origin %q rejected: %v", origin, err)
+		}
+	}
+	for _, origin := range []string{"", "https://paperboat.example.test", "https://dev.example.test.evil.example"} {
+		request := httptest.NewRequest(http.MethodPost, "/v1/resource", nil)
+		request.Header.Set("Origin", origin)
+		if !errors.Is(service.ValidateBrowserRequest(request), ErrOrigin) {
+			t.Fatalf("unlisted origin %q accepted", origin)
+		}
+	}
+	if err := NewService(nil, nil, nil, nil, true).ValidateBrowserRequest(httptest.NewRequest(http.MethodPost, "/v1/resource", nil)); !errors.Is(err, ErrOrigin) {
+		t.Fatalf("an unset origin must fail closed: %v", err)
+	}
+}

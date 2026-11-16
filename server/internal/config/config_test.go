@@ -489,3 +489,21 @@ func TestDefaultScaleBounds(t *testing.T) {
 		t.Fatalf("audit export cap = %d rows, want 1,000,000", cfg.Business.AuditExportMaxRows)
 	}
 }
+
+func TestBrowserLoginOriginTakesAListWithTheFirstAsPrimary(t *testing.T) {
+	cfg := Default()
+	env := map[string]string{"PAPERBOAT_BROWSER_LOGIN_ORIGIN": " https://app.example.test , https://dev.example.test,"}
+	if err := overlayEnv(&cfg, func(k string) (string, bool) { v, ok := env[k]; return v, ok }, nil); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.HTTP.BrowserLoginOrigin != "https://app.example.test" || len(cfg.HTTP.BrowserLoginExtraOrigins) != 1 || cfg.HTTP.BrowserLoginExtraOrigins[0] != "https://dev.example.test" {
+		t.Fatalf("primary %q extras %v", cfg.HTTP.BrowserLoginOrigin, cfg.HTTP.BrowserLoginExtraOrigins)
+	}
+	if got := cfg.HTTP.TrustedBrowserOrigins(); len(got) != 2 || got[0] != "https://app.example.test" || got[1] != "https://dev.example.test" {
+		t.Fatalf("trusted origins %v", got)
+	}
+	cfg.HTTP.BrowserLoginExtraOrigins = []string{"https://dev.example.test/path"}
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "browser_login_origin") {
+		t.Fatalf("an extra origin with a path passed validation: %v", err)
+	}
+}

@@ -139,7 +139,15 @@ func overlayEnv(c *Config, lookup func(string) (string, bool), readFile func(str
 	setString("PAPERBOAT_ENV", (*string)(&c.Environment))
 	setString("PAPERBOAT_HTTP_ADDRESS", &c.HTTP.Address)
 	setString("PAPERBOAT_PUBLIC_BASE_URL", &c.HTTP.PublicBaseURL)
-	setString("PAPERBOAT_BROWSER_LOGIN_ORIGIN", &c.HTTP.BrowserLoginOrigin)
+	if v, ok := lookup("PAPERBOAT_BROWSER_LOGIN_ORIGIN"); ok {
+		origins := strings.Split(v, ",")
+		c.HTTP.BrowserLoginOrigin, c.HTTP.BrowserLoginExtraOrigins = strings.TrimSpace(origins[0]), nil
+		for _, o := range origins[1:] {
+			if o = strings.TrimSpace(o); o != "" {
+				c.HTTP.BrowserLoginExtraOrigins = append(c.HTTP.BrowserLoginExtraOrigins, o)
+			}
+		}
+	}
 	setString("PAPERBOAT_DATABASE_DRIVER", &c.Database.Driver)
 	setString("PAPERBOAT_DATABASE_DSN", &c.Database.DSN)
 	setString("PAPERBOAT_DATABASE_DIRECT_DSN", &c.Database.DirectDSN)

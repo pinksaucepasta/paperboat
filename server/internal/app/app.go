@@ -193,18 +193,18 @@ func New(opts Options) (*App, error) {
 		_ = store.Close()
 		return nil, fmt.Errorf("configure tunnel resource service: %w", err)
 	}
-	trustedLoginOrigin := opts.Config.HTTP.BrowserLoginOrigin
-	if trustedLoginOrigin == "" && len(opts.Config.HTTP.AllowedOrigins) == 1 {
-		trustedLoginOrigin = opts.Config.HTTP.AllowedOrigins[0]
+	trustedLoginOrigins := opts.Config.HTTP.TrustedBrowserOrigins()
+	if len(trustedLoginOrigins) == 0 && len(opts.Config.HTTP.AllowedOrigins) == 1 {
+		trustedLoginOrigins = opts.Config.HTTP.AllowedOrigins
 	}
 	secureAuthCookies := publicURLSecure(opts.Config.HTTP.PublicBaseURL)
-	if trustedLoginOrigin != "" {
-		secureAuthCookies = publicURLSecure(trustedLoginOrigin)
+	if len(trustedLoginOrigins) > 0 {
+		secureAuthCookies = publicURLSecure(trustedLoginOrigins[0])
 	}
 	if opts.Config.Environment == config.EnvironmentProduction {
 		secureAuthCookies = true
 	}
-	authService := auth.NewService(store, auditWriter, workOSVerifier(opts.Config), opts.Config.Secrets.SessionKeys, secureAuthCookies, trustedLoginOrigin)
+	authService := auth.NewService(store, auditWriter, workOSVerifier(opts.Config), opts.Config.Secrets.SessionKeys, secureAuthCookies, trustedLoginOrigins...)
 	authService.RequireWorkOSSessions(opts.Config.Secrets.EncryptionKey)
 	if err := authService.ConfigureSessions(opts.Config.BrowserSessions); err != nil {
 		_ = store.Close()
@@ -533,12 +533,12 @@ func New(opts Options) (*App, error) {
 		}
 		previewEdgeVerifier.SetNodeCredentials(nodeCredentials)
 		runtimeAttachmentHandler = &runtimeattachment.Handler{Service: &runtimeattachment.Service{DB: store, AdmissionLifetime: opts.Config.CLIAuth.MintProofLifetime}, Machine: previewAttachmentMachineVerifier, Edge: previewEdgeVerifier, OriginHealth: tunnelRepository}
-		if trustedLoginOrigin != "" {
+		if len(trustedLoginOrigins) > 0 {
 			newBrowserService := browseraccess.NewService
 			if opts.Config.Environment != config.EnvironmentProduction {
 				newBrowserService = browseraccess.NewDevelopmentService
 			}
-			browserService, browserErr := newBrowserService(store, trustedLoginOrigin)
+			browserService, browserErr := newBrowserService(store, trustedLoginOrigins[0])
 			if browserErr != nil {
 				_ = store.Close()
 				return nil, fmt.Errorf("configure browser authority: %w", browserErr)
