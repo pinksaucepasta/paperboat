@@ -71,9 +71,10 @@ func StartManagedSSH(ctx context.Context, cfg ManagedSSHConfig, machines []api.U
 	}
 	command := strconv.Quote(cfg.Executable)
 	domain := new(string)
+	clientConfiguration := cachedClientConfiguration(client.ClientConfiguration, func() time.Time { return clientConfigurationNow() })
 	install := func(refreshCtx context.Context, machines []api.UserMachine) error {
-		// The alias domain comes from discovery and may change; it is one small request.
-		configuration, err := client.ClientConfiguration(refreshCtx)
+		// The alias domain comes from discovery and may change: read at most every clientConfigurationTTL.
+		configuration, err := clientConfiguration(refreshCtx)
 		if err != nil {
 			return err
 		}

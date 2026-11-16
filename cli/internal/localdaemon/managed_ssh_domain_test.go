@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/config"
@@ -62,8 +63,12 @@ func TestManagedSSHUsesDiscoveredDomainAndRefreshesAliases(t *testing.T) {
 			t.Error(err)
 		}
 	})
+	clock := time.Now()
+	clientConfigurationNow = func() time.Time { return clock }
+	t.Cleanup(func() { clientConfigurationNow = time.Now })
 	for _, current := range []string{"fleet.example.test", "machines.example.test"} {
 		domain.Store(current)
+		clock = clock.Add(clientConfigurationTTL) // the cached domain is asked for again
 		if err := runtime.Refresh(t.Context(), machines); err != nil {
 			t.Fatal(err)
 		}
