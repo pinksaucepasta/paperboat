@@ -34,7 +34,7 @@ type managedSSHService struct {
 }
 
 func newProductionManagedSSH(controlURL string, transport http.RoundTripper, registration runtimeidentity.Registration, identity managedSSHIdentitySource, generation uint64, workerEpoch uint64, gate server.CapabilityGate, keyEvents *machineevents.Subscription, audit managedssh.SessionAudit) (*managedssh.Host, Service, error) {
-	if registration.MachineID == "" || registration.InstallationGeneration < 1 || identity == nil || generation == 0 || gate == nil {
+	if registration.MachineID == "" || registration.InstallationGeneration < 1 || identity == nil || generation == 0 || gate == nil || keyEvents == nil {
 		return nil, nil, ErrProductionInvalid
 	}
 	if registration.SSHUser == "" && registration.SSHPort == 0 {

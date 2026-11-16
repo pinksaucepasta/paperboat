@@ -37,6 +37,13 @@ func TestManagedSSHRequiresMachineAccessSubscription(t *testing.T) {
 // unchanged-key ticks, but cannot postpone an authority refresh past five minutes.
 func TestManagedSSHKeysSafetyRefreshAfterFiveMinutes(t *testing.T) {
 	_, subscriptions, _ := eventstest.Start(t, time.Hour, machineevents.TopicMachineAccess)
+	deadline := time.Now().Add(5 * time.Second)
+	for !subscriptions[0].Healthy() {
+		if time.Now().After(deadline) {
+			t.Fatal("machine access subscription did not become healthy")
+		}
+		time.Sleep(time.Millisecond)
+	}
 	service := &managedSSHKeyReconciler{events: subscriptions[0], publicKeys: []string{"unchanged"}, readPublicKeys: func() ([]string, error) { return []string{"unchanged"}, nil }}
 	last := time.Now()
 	for _, tc := range []struct {

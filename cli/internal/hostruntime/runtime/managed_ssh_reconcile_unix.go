@@ -267,7 +267,7 @@ func hostKeysInUseElsewhere(err error) bool {
 // managedSSHKeyFallback is how often a host still asks for its keys while key changes are delivered. A
 // key also leaves the set without a write when its CLI session goes unused past the active window
 // (days), so this bounds how late such a key is removed.
-const managedSSHKeyFallback = 10 * time.Minute
+const managedSSHKeyFallback = machineevents.DefaultFallbackInterval
 
 // observationGeneration is the worker generation for the keys read at start and, after the host keys
 // changed, a value no worker generation reaches (boot generations count worker starts, far below 2^20),
