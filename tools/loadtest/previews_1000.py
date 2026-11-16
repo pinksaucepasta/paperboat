@@ -2,6 +2,8 @@
 """F21-168: create N managed previews with the real `pb` CLI, P at a time, against one tiny origin, then delete them.
 
   previews_1000.py create N P PORT   create N previews (ttl 3h); prints one JSON line per result and a summary
+  previews_1000.py tunnels N P PORT  create N durable http tunnels named f21168-t<i> instead (same counting)
+  previews_1000.py tunnels-delete P N   delete tunnels f21168-t0..N-1 (parallel P)
   previews_1000.py total             the server's preview count from one list request
   previews_1000.py delete P          delete every live preview of the account (parallel P)
 
@@ -16,10 +18,11 @@ def run(args, timeout=120):
     return subprocess.run([PB, *args], capture_output=True, text=True, timeout=timeout)
 
 
-def create(port):
+def create(port, tunnel=None):
     started = time.time()
+    args = ["tunnel", "create", tunnel, "--from", f"http://127.0.0.1:{port}", "--json"] if tunnel else ["preview", str(port), "--background", "--ttl", "3h", "--json"]
     try:
-        done = run(["preview", str(port), "--background", "--ttl", "3h", "--json"])
+        done = run(args)
     except subprocess.TimeoutExpired:  # a create that never returned is a result, not a crash
         return {"ok": False, "took": round(time.time() - started, 2), "code": "cli_timeout_120s"}
     took = round(time.time() - started, 2)
@@ -30,7 +33,18 @@ def create(port):
     if body.get("ok") is False:
         error = body.get("error", {})
         return {"ok": False, "took": took, "code": error.get("code"), "support": error.get("support_reference"), "message": error.get("message", "")[:200]}
-    return {"ok": True, "took": took, "id": body.get("id"), "state": body.get("state"), "edge_state": body.get("edge_state")}
+    return {"ok": True, "took": took, "id": body.get("id") or (body.get("tunnel") or {}).get("id"), "state": body.get("state"), "edge_state": body.get("edge_state")}
+
+
+def delete_tunnel(i):
+    """pb tunnel delete asks first and prints the code that confirms it: run it twice."""
+    name = f"f21168-t{i}"
+    first = run(["tunnel", "delete", name])
+    text = first.stdout + first.stderr
+    if "--confirm " not in text:
+        return first.returncode or 1
+    code = text.split("--confirm ")[1].split()[0]
+    return run(["tunnel", "delete", name, "--confirm", code]).returncode
 
 
 def pages(state=None):
@@ -76,6 +90,24 @@ def main():
                 codes[r.get("code") or "unparsed"] = codes.get(r.get("code") or "unparsed", 0) + 1
         print(json.dumps({"summary": True, "requested": n, "created": len(ok), "failed": n - len(ok), "failed_by_code": codes, "seconds": round(time.time() - started, 1),
                           "per_second": round(len(ok) / max(time.time() - started, 1), 2)}))
+    elif mode == "tunnels":
+        n, parallel, port = int(sys.argv[2]), int(sys.argv[3]), int(sys.argv[4])
+        started = time.time()
+        results = []
+        with concurrent.futures.ThreadPoolExecutor(parallel) as pool:
+            for result in pool.map(lambda i: create(port, f"f21168-t{i}"), range(n)):
+                results.append(result)
+                print(json.dumps(result), flush=True)
+        codes = {}
+        for r in results:
+            if not r["ok"]:
+                codes[r.get("code") or "unparsed"] = codes.get(r.get("code") or "unparsed", 0) + 1
+        print(json.dumps({"summary": True, "requested": n, "created": sum(r["ok"] for r in results), "failed_by_code": codes, "seconds": round(time.time() - started, 1)}))
+    elif mode == "tunnels-delete":
+        parallel, n = int(sys.argv[2]), int(sys.argv[3])
+        with concurrent.futures.ThreadPoolExecutor(parallel) as pool:
+            failed = [i for i, rc in zip(range(n), pool.map(delete_tunnel, range(n))) if rc]
+        print(json.dumps({"deleted": n - len(failed), "failed": failed[:5]}))
     elif mode == "total":
         print(total())
     elif mode == "delete":
