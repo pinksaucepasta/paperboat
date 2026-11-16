@@ -436,3 +436,27 @@ func TestWorkspaceAPIClientSurvivesAnUnreachableRefresh(t *testing.T) {
 		t.Fatal("signed-out account was let through")
 	}
 }
+
+type countingAuth struct{ calls int }
+
+func (a *countingAuth) Credential() (config.Credential, error) {
+	a.calls++
+	return config.Credential{}, nil
+}
+
+// A caller that already holds the credential (or knows Paperboat is down) builds its client without a second token
+// refresh: with a blackholed API each refresh holds the command for 30 s.
+func TestWorkspaceAPIClientWithACredentialMakesNoRefreshOfItsOwn(t *testing.T) {
+	root := newRootCommand()
+	root.SetContext(context.Background())
+	if err := captureWorkspaceInvocation(root, nil); err != nil {
+		t.Fatal(err)
+	}
+	source := &countingAuth{}
+	if _, err := newWorkspaceAPIClientWith(actionContext(root, nil), "https://api.example.test", source, config.Credential{}); err != nil {
+		t.Fatal(err)
+	}
+	if source.calls != 0 {
+		t.Fatalf("the client asked the credential source %d times, want 0", source.calls)
+	}
+}

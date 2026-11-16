@@ -323,6 +323,12 @@ func newWorkspaceAPIClient(commandContext *command.Context, server string, sourc
 	if err != nil && !api.Unreachable(err) {
 		return nil, err
 	}
+	return newWorkspaceAPIClientWith(commandContext, server, source, credential)
+}
+
+// newWorkspaceAPIClientWith is newWorkspaceAPIClient for a caller that already holds the credential (or knows Paperboat
+// is unreachable and holds none): it makes no token refresh of its own.
+func newWorkspaceAPIClientWith(commandContext *command.Context, server string, source config.AuthSource, credential config.Credential) (*api.Client, error) {
 	client := api.New(server, credential, nil)
 	client.SetCredentialSource(source)
 	selected, err := workspaceForCommandContext(commandContext)

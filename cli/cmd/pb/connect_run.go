@@ -155,7 +155,7 @@ func actionConnectTargetInDirectory(c *command.Context, requested, cwd string) e
 			return err
 		}
 	}
-	backend, err := newWorkspaceAPIClient(c, d.cfg.ServerURL, d.auth)
+	backend, err := newWorkspaceAPIClientWith(c, d.cfg.ServerURL, d.auth, cred)
 	if err != nil {
 		return err
 	}
