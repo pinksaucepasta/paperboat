@@ -159,7 +159,7 @@ const accessorSnapshotReuse = time.Second
 
 // accessorSnapshotFallback is how long a good snapshot is trusted while the private_routes event stream is
 // healthy and has not moved: pushes carry revocation, this only bounds a missed one.
-const accessorSnapshotFallback = 30 * time.Second
+const accessorSnapshotFallback = 5 * time.Minute
 
 func newAccessorDiscoveryClient(controlURL string, auth privateAccessMachineAuth, transport http.RoundTripper) (*accessorDiscoveryClient, error) {
 	u, err := url.Parse(strings.TrimSpace(controlURL))

@@ -47,6 +47,9 @@ type Config struct {
 	WorkerGeneration       uint64
 	InstallationGeneration uint64
 	ListenAddress          string
+	// Wake makes the next poll tick run an attachment round at once: a preview or private route changed (their
+	// machine events). Without it a healthy carrier asks again only every healthyRecheck.
+	Wake <-chan struct{}
 }
 
 type Service struct {
@@ -392,6 +395,11 @@ func (s *Service) run(ctx context.Context) {
 		// unresponsive candidate would then fail the whole check on every poll
 		// and keep the carrier from ever connecting. Each attachment check owns
 		// a bounded context derived from the service lifetime instead.
+		select {
+		case <-s.config.Wake:
+			pacer.wake()
+		default:
+		}
 		if s.leaving.Load() || !pacer.due(time.Now(), carriersReady(lives, publisherKey)) {
 			return nil
 		}

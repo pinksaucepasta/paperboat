@@ -1067,3 +1067,20 @@ func TestDrainEndsTheBrowserTerminalsItHoldsAfterTheHandover(t *testing.T) {
 		t.Fatal("the terminals were not ended")
 	}
 }
+
+// A preview or private-route event wakes a round although the healthy recheck (5 minutes) is far away.
+func TestPacerRunsARoundAtOnceWhenAnEventWakesIt(t *testing.T) {
+	now := time.Now()
+	pacer := roundPacer{}
+	pacer.finished(now, true, now.Add(time.Hour))
+	if pacer.due(now.Add(time.Second), true) {
+		t.Fatal("a healthy carrier asked again after a second")
+	}
+	if healthyRecheck != 5*time.Minute {
+		t.Fatalf("healthyRecheck = %v, want 5 minutes", healthyRecheck)
+	}
+	pacer.wake()
+	if !pacer.due(now.Add(time.Second), true) {
+		t.Fatal("a woken pacer did not run a round at once")
+	}
+}

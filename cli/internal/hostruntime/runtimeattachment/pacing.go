@@ -4,8 +4,10 @@ import "time"
 
 // healthyRecheck bounds how long a healthy runtime carrier goes without asking the control plane
 // for its attachment. The admission poll ticks every second; checking that often while nothing is
-// wrong sent one POST per machine per second and kept the server's attachment rows hot.
-const healthyRecheck = 30 * time.Second
+// wrong sent one POST per machine per second and kept the server's attachment rows hot. A preview or route change
+// wakes a round through Config.Wake; this is the safety re-fetch for what publishes no event (an edge node's heartbeat
+// going stale, server/internal/runtimeattachment/service.go:182), as the idle budget leaves 5 minutes (PR-03).
+const healthyRecheck = 5 * time.Minute
 
 // roundPacer decides which poll ticks run a full attachment round. While the carriers are healthy
 // a round runs every healthyRecheck, or sooner when half of the admission's remaining life has
@@ -40,3 +42,6 @@ func (p *roundPacer) finished(now time.Time, healthy bool, expiresAt time.Time) 
 	}
 	p.next = now.Add(wait)
 }
+
+// wake makes the next tick run a round: a machine event said what the last round fetched has changed.
+func (p *roundPacer) wake() { p.next = time.Time{} }

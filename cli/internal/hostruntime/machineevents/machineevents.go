@@ -54,8 +54,9 @@ const (
 )
 
 const (
-	// DefaultFallbackInterval is how often a subscriber still polls while the wait loop is healthy.
-	DefaultFallbackInterval = time.Minute
+	// DefaultFallbackInterval is how often a subscriber still refreshes while the wait loop is healthy: only the
+	// safety net for a missed event (Tailscale pushes its netmap changes; PR-03 budget, 5 minutes).
+	DefaultFallbackInterval = 5 * time.Minute
 	// requestTimeout exceeds the 55 s the server holds a request (machineevents.MaxWait), with room for the round trip.
 	requestTimeout = 70 * time.Second
 	// WaitTimeout bounds one wait made by a caller's own client; see requestTimeout.
