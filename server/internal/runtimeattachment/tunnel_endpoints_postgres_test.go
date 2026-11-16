@@ -2,11 +2,13 @@ package runtimeattachment
 
 import (
 	"bytes"
+	"context"
 	"crypto/ed25519"
 	"database/sql"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/previewtunnelstore"
 	"os"
 	"path/filepath"
@@ -142,6 +144,50 @@ VALUES($1,1,sha256(convert_to($1::text,'UTF8')),convert_to(json_build_object('ro
 	if endpoint, routes, assignments := state(); !endpoint || len(routes) != 1 || assignments != 2 {
 		t.Fatalf("public again: engine tunnel = %v %v %d", endpoint, routes, assignments)
 	}
+	// A second tunnel moves with the scoped sync a create runs: only that tunnel is synced, to the same state the full
+	// sync gives it. Another tunnel's missing endpoint route (removed by hand here) stays missing until the next full
+	// sync, which proves the scope; the full sync then changes nothing for the new tunnel (F21-168: the machine-wide
+	// sync on every create read every tunnel and reconcile every assignment).
+	tunnelTwo, routeTwo, endpointTwo := tunnel+"_two", route+"_two", uuid.NewString()
+	f.exec(t, `INSERT INTO tunnels(id,account_id,name,desired_state,access_mode,generation,stable_endpoint_id,stable_endpoint,created_by_host_id,created_by_actor_id) VALUES($1,$2,$1,'active','public',1,$3,$4,$5,$2)`,
+		tunnelTwo, f.account, "endpoint_"+endpointTwo, "https://"+endpointTwo+".tunnels.example.test", f.machine)
+	f.exec(t, `INSERT INTO tunnel_routes(id,tunnel_id,name,priority,protocol,match_type,match_hostname,origin_scheme,origin_address,tls_verification,generation,desired_state,created_by_actor_id,updated_by_actor_id,created_at,updated_at) VALUES($1,$2,'web',1,'http','managed',$4,'http','127.0.0.1:3000','not_applicable',3,'active',$3,$3,now(),now())`, routeTwo, tunnelTwo, f.account, endpointTwo+".tunnels.example.test")
+	f.exec(t, `INSERT INTO tunnel_config_generations(tunnel_id,generation,content_hash,snapshot,activation_state,created_by_actor_id,retained_until)
+VALUES($1,1,sha256(convert_to($1::text,'UTF8')),convert_to(json_build_object('routes',json_build_array(json_build_object('id',$2::text)))::text,'UTF8'),'pending',$3,now()+interval '1 day')`, tunnelTwo, routeTwo, f.account)
+	f.exec(t, `DELETE FROM endpoint_routes WHERE endpoint_id=$1`, tunnel)
+	if err := f.database.InTx(f.ctx, func(ctx context.Context, tx *db.Tx) error {
+		return endpoints.SyncAgentTunnelTx(ctx, tx, f.machine, tunnelTwo)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	scoped := func() string {
+		t.Helper()
+		var out string
+		if err := f.database.SQL().QueryRowContext(f.ctx, `SELECT coalesce(string_agg(x.edge_node_id||'/'||x.desired||'/'||x.generation,',' ORDER BY x.edge_node_id),'') FROM endpoint_edge_assignments x WHERE x.endpoint_id=$1`, tunnelTwo).Scan(&out); err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	var routesOne, routesTwo int
+	if err := f.database.SQL().QueryRowContext(f.ctx, `SELECT (SELECT count(*) FROM endpoint_routes WHERE endpoint_id=$1),(SELECT count(*) FROM endpoint_routes WHERE endpoint_id=$2)`, tunnel, tunnelTwo).Scan(&routesOne, &routesTwo); err != nil {
+		t.Fatal(err)
+	}
+	afterScoped := scoped()
+	if routesTwo != 1 || strings.Count(afterScoped, "/active/") != 2 {
+		t.Fatalf("scoped sync of the new tunnel: %d routes, assignments %q; want 1 route on both edges", routesTwo, afterScoped)
+	}
+	if routesOne != 0 {
+		t.Fatalf("the scoped sync of one tunnel also repaired another tunnel (%d routes): it is not scoped", routesOne)
+	}
+	sync()
+	if err := f.database.SQL().QueryRowContext(f.ctx, `SELECT count(*) FROM endpoint_routes WHERE endpoint_id=$1`, tunnel).Scan(&routesOne); err != nil || routesOne != 1 {
+		t.Fatalf("the full sync did not repair the first tunnel's route: %d, %v", routesOne, err)
+	}
+	if afterFull := scoped(); afterFull != afterScoped {
+		t.Fatalf("the full sync changed what the scoped sync assigned: %q then %q", afterScoped, afterFull)
+	}
+	f.exec(t, `UPDATE tunnels SET deleted_at=now() WHERE id=$1`, tunnelTwo)
+	sync()
 	// Each edge gets the route in its tunnel route snapshot, bound to the agent's runtime carrier on
 	// that edge (its identity exactly as the edge admitted the carrier), not to a tunnel connector.
 	control := controlplane.NewEdgeService(f.database, "")

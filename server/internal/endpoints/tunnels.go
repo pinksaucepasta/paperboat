@@ -31,29 +31,48 @@ AND o.protocol<>'http' AND (o.protocol='private_tcp')=(coalesce(v.effective_acce
 // otherwise it has none, and its tunnels run on their connectors. Then it reconciles the agent's
 // edge assignments.
 func SyncAgentTunnelsTx(ctx context.Context, tx *db.Tx, machineID string) error {
+	return syncAgentTunnelsTx(ctx, tx, machineID, "")
+}
+
+// SyncAgentTunnelTx is SyncAgentTunnelsTx for one tunnel (a create, pause, resume or route edit): the same statements,
+// scoped to that tunnel, and the one-endpoint reconcile instead of the machine-wide one.
+func SyncAgentTunnelTx(ctx context.Context, tx *db.Tx, machineID, tunnelID string) error {
+	if tunnelID == "" {
+		return ErrInvalid
+	}
+	return syncAgentTunnelsTx(ctx, tx, machineID, tunnelID)
+}
+
+func syncAgentTunnelsTx(ctx context.Context, tx *db.Tx, machineID, tunnelID string) error {
+	reconcile := func() error {
+		if tunnelID == "" {
+			return ReconcileAgentTx(ctx, tx, machineID)
+		}
+		return ReconcileEndpointTx(ctx, tx, machineID, tunnelID)
+	}
 	var serves bool
 	if err := tx.QueryRow(ctx, `SELECT `+agentServesTunnels, machineID).Scan(&serves); err != nil {
 		return err
 	}
 	if !serves {
-		if _, err := tx.Exec(ctx, `DELETE FROM endpoints WHERE kind='tunnel' AND agent_machine_id=$1`, machineID); err != nil {
+		if _, err := tx.Exec(ctx, `DELETE FROM endpoints WHERE kind='tunnel' AND agent_machine_id=$1 AND ($2='' OR tunnel_id=$2)`, machineID, tunnelID); err != nil {
 			return err
 		}
-		return ReconcileAgentTx(ctx, tx, machineID)
+		return reconcile()
 	}
 	if _, err := tx.Exec(ctx, `DELETE FROM endpoints e WHERE e.kind='tunnel' AND e.agent_machine_id=$1
-AND NOT EXISTS(SELECT 1 FROM tunnels t WHERE t.id=e.tunnel_id AND t.created_by_host_id=$1 AND `+engineTunnel+`)`, machineID); err != nil {
+AND ($2='' OR e.tunnel_id=$2) AND NOT EXISTS(SELECT 1 FROM tunnels t WHERE t.id=e.tunnel_id AND t.created_by_host_id=$1 AND `+engineTunnel+`)`, machineID, tunnelID); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(ctx, `INSERT INTO endpoints(id,kind,account_id,owner_team_id,agent_machine_id,access_mode,lifetime,tunnel_id)
 SELECT t.id,'tunnel',t.account_id,t.owner_team_id,$1,t.access_mode,'persistent',t.id FROM tunnels t
-WHERE t.created_by_host_id=$1 AND `+engineTunnel+`
+WHERE t.created_by_host_id=$1 AND ($2='' OR t.id=$2) AND `+engineTunnel+`
 ON CONFLICT(id) DO UPDATE SET access_mode=EXCLUDED.access_mode,owner_team_id=EXCLUDED.owner_team_id,updated_at=now()
-WHERE endpoints.access_mode IS DISTINCT FROM EXCLUDED.access_mode OR endpoints.owner_team_id IS DISTINCT FROM EXCLUDED.owner_team_id`, machineID); err != nil {
+WHERE endpoints.access_mode IS DISTINCT FROM EXCLUDED.access_mode OR endpoints.owner_team_id IS DISTINCT FROM EXCLUDED.owner_team_id`, machineID, tunnelID); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(ctx, `DELETE FROM endpoint_routes r USING endpoints e WHERE r.endpoint_id=e.id AND e.kind='tunnel' AND e.agent_machine_id=$1
-AND NOT EXISTS(SELECT 1 FROM tunnel_routes tr WHERE tr.id=r.tunnel_route_id AND tr.tunnel_id=e.tunnel_id AND tr.desired_state='active' AND tr.deleted_at IS NULL)`, machineID); err != nil {
+	if _, err := tx.Exec(ctx, `DELETE FROM endpoint_routes r USING endpoints e WHERE r.endpoint_id=e.id AND e.kind='tunnel' AND e.agent_machine_id=$1 AND ($2='' OR e.tunnel_id=$2)
+AND NOT EXISTS(SELECT 1 FROM tunnel_routes tr WHERE tr.id=r.tunnel_route_id AND tr.tunnel_id=e.tunnel_id AND tr.desired_state='active' AND tr.deleted_at IS NULL)`, machineID, tunnelID); err != nil {
 		return err
 	}
 	// An engine tunnel has no connector to acknowledge its config: the agent serves the routes in
@@ -61,13 +80,13 @@ AND NOT EXISTS(SELECT 1 FROM tunnel_routes tr WHERE tr.id=r.tunnel_route_id AND 
 	// projections read the active config).
 	const newest = `SELECT max(h.generation) FROM tunnel_config_generations h WHERE h.tunnel_id=g.tunnel_id AND h.activation_state IN ('pending','active')`
 	if _, err := tx.Exec(ctx, `UPDATE tunnel_config_generations g SET activation_state='superseded',activated_at=NULL
-FROM endpoints e WHERE e.tunnel_id=g.tunnel_id AND e.kind='tunnel' AND e.agent_machine_id=$1
-AND g.activation_state='active' AND g.generation<>(`+newest+`)`, machineID); err != nil {
+FROM endpoints e WHERE e.tunnel_id=g.tunnel_id AND e.kind='tunnel' AND e.agent_machine_id=$1 AND ($2='' OR e.tunnel_id=$2)
+AND g.activation_state='active' AND g.generation<>(`+newest+`)`, machineID, tunnelID); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(ctx, `UPDATE tunnel_config_generations g SET activation_state='active',activated_at=now()
-FROM endpoints e WHERE e.tunnel_id=g.tunnel_id AND e.kind='tunnel' AND e.agent_machine_id=$1
-AND g.activation_state='pending' AND g.generation=(`+newest+`)`, machineID); err != nil {
+FROM endpoints e WHERE e.tunnel_id=g.tunnel_id AND e.kind='tunnel' AND e.agent_machine_id=$1 AND ($2='' OR e.tunnel_id=$2)
+AND g.activation_state='pending' AND g.generation=(`+newest+`)`, machineID, tunnelID); err != nil {
 		return err
 	}
 	// The route's id is the tunnel route's id, so the edge, the agent and accounting name it the same
@@ -75,11 +94,11 @@ AND g.activation_state='pending' AND g.generation=(`+newest+`)`, machineID); err
 	if _, err := tx.Exec(ctx, `INSERT INTO endpoint_routes(id,endpoint_id,hostname,protocol,revision,tunnel_route_id)
 SELECT tr.id,e.id,lower(substring(t.stable_endpoint from 9)),tr.protocol,tr.generation,tr.id
 FROM endpoints e JOIN tunnels t ON t.id=e.tunnel_id JOIN tunnel_routes tr ON tr.tunnel_id=t.id AND tr.desired_state='active' AND tr.deleted_at IS NULL
-WHERE e.kind='tunnel' AND e.agent_machine_id=$1
-ON CONFLICT(id) DO UPDATE SET revision=EXCLUDED.revision WHERE endpoint_routes.revision<>EXCLUDED.revision`, machineID); err != nil {
+WHERE e.kind='tunnel' AND e.agent_machine_id=$1 AND ($2='' OR e.tunnel_id=$2)
+ON CONFLICT(id) DO UPDATE SET revision=EXCLUDED.revision WHERE endpoint_routes.revision<>EXCLUDED.revision`, machineID, tunnelID); err != nil {
 		return err
 	}
-	return ReconcileAgentTx(ctx, tx, machineID)
+	return reconcile()
 }
 
 // SyncTunnelAgents runs SyncAgentTunnelsTx, one transaction each, for every machine whose tunnels

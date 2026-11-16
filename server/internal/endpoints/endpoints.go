@@ -50,23 +50,7 @@ VALUES($1,'preview',$2,$3,$4,$5,'lease',$1)`, p.LeaseID, p.AccountID, team, p.Ag
 	if err != nil {
 		return err
 	}
-	return assignNewPreviewTx(ctx, tx, p.LeaseID)
-}
-
-// assignNewPreviewTx gives a new preview's route the carriers its agent holds, which is what ReconcileAgentTx would
-// derive for it. It touches only this endpoint: a new route has no assignment yet and adding one removes none, so
-// the full reconcile (every live endpoint of the machine, each checked against its lease row) is not needed. That
-// reconcile made every create read all N leases the agent's renewals were writing, so creates and renewals cancelled
-// each other under SERIALIZABLE and one create cost O(N) (F21-168: 12% of creates failed at ~400 live previews).
-func assignNewPreviewTx(ctx context.Context, tx *db.Tx, endpointID string) error {
-	_, err := tx.Exec(ctx, `INSERT INTO endpoint_edge_assignments AS x(route_id,endpoint_id,edge_node_id,edge_process_epoch,carrier_session_id)
-SELECT DISTINCT ON (a.edge_node_id) r.id,e.id,a.edge_node_id,a.edge_process_epoch,a.session_id
-FROM endpoints e JOIN endpoint_routes r ON r.endpoint_id=e.id
-JOIN runtime_carrier_attachments a ON a.machine_id=e.agent_machine_id AND a.agent_capabilities @> ARRAY['endpoints']::text[]
-WHERE e.id=$1
-ORDER BY a.edge_node_id,a.active DESC
-ON CONFLICT(route_id,edge_node_id) DO NOTHING`, endpointID)
-	return err
+	return ReconcileEndpointTx(ctx, tx, p.AgentMachineID, p.LeaseID)
 }
 
 // liveEndpoint is the SQL predicate for an endpoint that should be served now. A preview is live
@@ -82,12 +66,27 @@ const liveTunnel = `t.desired_state='active' AND t.deleted_at IS NULL AND (t.exp
 // carriers it holds that can serve endpoints. A changed carrier session or edge epoch fences the
 // assignment (new generation, not ready until the edge observes it again).
 func ReconcileAgentTx(ctx context.Context, tx *db.Tx, machineID string) error {
+	return reconcileTx(ctx, tx, machineID, "")
+}
+
+// ReconcileEndpointTx is ReconcileAgentTx for one endpoint of the agent: what a new or changed preview or tunnel needs.
+// Reconciling every live endpoint of the machine for each create read all N leases and tunnels the daemon renews
+// and the edge observes, so creates cost O(N) and cancelled each other under SERIALIZABLE (F21-168: 12% of preview
+// creates failed at ~400 live previews). Previews and tunnels use this one statement.
+func ReconcileEndpointTx(ctx context.Context, tx *db.Tx, machineID, endpointID string) error {
+	if endpointID == "" {
+		return ErrInvalid
+	}
+	return reconcileTx(ctx, tx, machineID, endpointID)
+}
+
+func reconcileTx(ctx context.Context, tx *db.Tx, machineID, endpointID string) error {
 	_, err := tx.Exec(ctx, `WITH desired AS (
 SELECT DISTINCT ON (r.id,a.edge_node_id) r.id route_id,e.id endpoint_id,a.edge_node_id,a.edge_process_epoch,a.session_id
 FROM endpoints e JOIN endpoint_routes r ON r.endpoint_id=e.id
 JOIN runtime_carrier_attachments a ON a.machine_id=e.agent_machine_id AND a.agent_capabilities @> CASE WHEN e.kind='tunnel'
  THEN ARRAY['endpoints','tunnel_endpoints'] ELSE ARRAY['endpoints'] END::text[]
-WHERE e.agent_machine_id=$1 AND `+liveEndpoint+`
+WHERE e.agent_machine_id=$1 AND ($2='' OR e.id=$2) AND `+liveEndpoint+`
 ORDER BY r.id,a.edge_node_id,a.active DESC
 ), upserted AS (
 INSERT INTO endpoint_edge_assignments AS x(route_id,endpoint_id,edge_node_id,edge_process_epoch,carrier_session_id)
@@ -103,7 +102,7 @@ ON CONFLICT(route_id,edge_node_id) DO UPDATE SET
 RETURNING x.route_id
 )
 UPDATE endpoint_edge_assignments x SET desired='removed',observed_ready=false
-FROM endpoints e WHERE e.id=x.endpoint_id AND e.agent_machine_id=$1 AND x.desired='active'
-AND NOT EXISTS(SELECT 1 FROM desired d WHERE d.route_id=x.route_id AND d.edge_node_id=x.edge_node_id)`, machineID)
+FROM endpoints e WHERE e.id=x.endpoint_id AND e.agent_machine_id=$1 AND ($2='' OR e.id=$2) AND x.desired='active'
+AND NOT EXISTS(SELECT 1 FROM desired d WHERE d.route_id=x.route_id AND d.edge_node_id=x.edge_node_id)`, machineID, endpointID)
 	return err
 }

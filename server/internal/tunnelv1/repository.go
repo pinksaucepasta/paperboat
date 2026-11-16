@@ -680,7 +680,7 @@ func transitionTx(ctx context.Context, tx *db.Tx, input StateRecord, now time.Ti
 // syncEngine makes the tunnel's change reach the endpoint engine in the same transaction, so a
 // pause, route edit or new tunnel does not wait for the agent's next attachment check.
 func syncEngine(ctx context.Context, tx *db.Tx, tunnel dbsqlc.Tunnel) error {
-	return endpoints.SyncAgentTunnelsTx(ctx, tx, tunnel.CreatedByHostID)
+	return endpoints.SyncAgentTunnelTx(ctx, tx, tunnel.CreatedByHostID, tunnel.ID)
 }
 
 func shortDigest(value string) string {
