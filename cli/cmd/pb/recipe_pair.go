@@ -63,6 +63,19 @@ func recipePair(c *command.Context, tokenText string, setupArgs []string) error 
 		return err
 	}
 	if _, loadErr := store.Load(issuer); machineID != "" && loadErr == nil {
+		// A machine removed since (recipe revoked, lifetime, offline) is not "paired": say how to start over.
+		// The session source refreshes an expired access token, so only a rejected session counts.
+		if source, err := auth.NewSource(cfg); err == nil {
+			if credential, err := source.Credential(); err == nil {
+				client := api.New(issuer, credential, loginHTTPClient())
+				client.SetCredentialSource(source)
+				if _, err := client.Me(c.Context); errors.Is(err, api.ErrUnauthenticated) {
+					return usageError{err: err, publicMessage: recipeMachineRemovedMessage, refusal: true}
+				}
+			} else if errors.Is(err, api.ErrUnauthenticated) {
+				return usageError{err: err, publicMessage: recipeMachineRemovedMessage, refusal: true}
+			}
+		}
 		_, err = fmt.Fprintln(c.Writer, "This machine is already paired; nothing to do.")
 		return err
 	}
@@ -118,6 +131,8 @@ func recipePair(c *command.Context, tokenText string, setupArgs []string) error 
 	}
 	return nil
 }
+
+const recipeMachineRemovedMessage = "This machine was removed from Paperboat (its recipe was revoked, or machine_lifetime or remove_after_offline removed it). Run `pb uninstall`, then the recipe install again."
 
 // recipeSessionStart, recipeInstallPreflight and runRecipeSetup are replaced by tests.
 var recipeInstallPreflight = hostruntimecmd.RecipeInstallPreflight

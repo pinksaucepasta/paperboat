@@ -26,6 +26,7 @@ func TestRecipePairStartsARecipeSessionThenSetup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	removed := false
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/v1/auth/recipe-sessions":
@@ -40,6 +41,12 @@ func TestRecipePairStartsARecipeSessionThenSetup(t *testing.T) {
 			writeAPIData(t, w, map[string]any{"access_token": "rcp-access", "refresh_token": "rcp-refresh", "token_type": "Bearer", "expires_in": 3600, "cli_client_session_id": "cls_recipe",
 				"recipe": map[string]any{"id": "rcp_1", "name": "ci", "revision": 1, "workspace": "personal", "recipe": map[string]any{}}})
 		case "/v1/me":
+			if removed {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusUnauthorized)
+				_, _ = w.Write([]byte(`{"ok":false,"error":{"code":"unauthenticated","message":"x"}}`))
+				return
+			}
 			writeAPIData(t, w, map[string]string{"id": "usr_recipe", "email": "ana@example.test", "status": "active"})
 		case "/v1/e2ee/bootstrap":
 			acceptBrowserPeerEnrollment(t, w, r, "usr_recipe", "cls_recipe")
@@ -112,6 +119,13 @@ func TestRecipePairStartsARecipeSessionThenSetup(t *testing.T) {
 	out, err = runBrowserLogin(t, context.Background(), path, "pair")
 	if err != nil || !strings.Contains(out, "already paired") || setupArgs != nil {
 		t.Fatalf("rerun: %v %s %v", err, out, setupArgs)
+	}
+
+	// The machine was removed since (recipe revoked, lifetime): not "already paired", but how to start over.
+	removed = true
+	out, err = runBrowserLogin(t, context.Background(), path, "pair")
+	if err == nil || !strings.Contains(userFacingError(err), "This machine was removed from Paperboat") || setupArgs != nil {
+		t.Fatalf("removed rerun: %v %s", err, out)
 	}
 }
 
