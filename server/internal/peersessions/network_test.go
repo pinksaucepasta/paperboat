@@ -5,7 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -36,145 +36,6 @@ func TestPersonalNetworkScopeHasReciprocalPairAndNoApplicationCapability(t *test
 		if personalNetworkScope(a, b, expiry.Unix()).ResourceID == first.ResourceID {
 			t.Fatal("pair identifier is not account bound")
 		}
-	}
-}
-
-// Every peer is named in exactly one grant, and every same-account peer's control key rides in the grant that
-// names it, within the per-grant bound released relays and CLIs accept (Lane W: 100-peer accounts got 16).
-func TestRelayGrantsCarryEveryPeerAndItsControlKeyInChunksOfTheRelayBound(t *testing.T) {
-	self := networkBinding{Binding: peernetwork.Binding{AccountID: "account", EndpointID: "self"}}
-	var peers []networkPeer
-	for i := range 100 {
-		account := "account"
-		if i%10 == 0 {
-			account = "other" // a team peer of another account: named, never a control peer
-		}
-		peers = append(peers, networkPeer{Identity: networkBinding{Binding: peernetwork.Binding{AccountID: account, EndpointID: fmt.Sprintf("peer_%03d", i), WireGuardPublicKey: fmt.Sprintf("key_%03d", (i*37)%1000)}},
-			Scopes: []networkScope{{ResourceKind: "machine_network", ResourceID: fmt.Sprintf("network_%03d", i), ResourceGeneration: 1, Capability: "connect", Direction: "dial", Port: 443, ExpiresAt: 1}}})
-	}
-	for _, size := range []int{peernetwork.MaxGrantPeers} {
-		chunks := relayGrantChunks(self, peers, size, 1)
-		if want := (len(peers) + size - 1) / size; len(chunks) != want {
-			t.Fatalf("size %d: chunks = %d, want %d", size, len(chunks), want)
-		}
-		named, control := map[string]bool{}, map[string]bool{}
-		for _, chunk := range chunks {
-			if len(chunk.peers) == 0 || len(chunk.peers) > size || len(chunk.control) > size {
-				t.Fatalf("chunk of %d peers and %d control keys", len(chunk.peers), len(chunk.control))
-			}
-			inChunk := map[string]bool{}
-			for _, entry := range chunk.peers {
-				key := entry.WireGuardPublicKey
-				if named[key] {
-					t.Fatalf("peer %s in two chunks", key)
-				}
-				named[key], inChunk[key] = true, true
-			}
-			for _, key := range chunk.control {
-				if !inChunk[key] || control[key] {
-					t.Fatalf("control key %s outside its peer's chunk or repeated", key)
-				}
-				control[key] = true
-			}
-		}
-		if len(named) != 100 || len(control) != 90 {
-			t.Fatalf("size %d: named %d of 100 peers, %d of 90 control keys", size, len(named), len(control))
-		}
-	}
-	if empty := relayGrantChunks(self, nil, peernetwork.MaxGrantPeers, 1); len(empty) != 1 || len(empty[0].peers) != 0 {
-		t.Fatal("an endpoint without peers still gets one grant per node")
-	}
-}
-
-// A daemon holding peers until revoked gets scopes with expires_at 0; a relay grant (and mint, and released relays)
-// requires an expiry, so inside a grant such a scope ends with the grant. A peer without a WireGuard key is left out
-// instead of failing every other peer's grant (P0 2026-10-26: one bad peer made every until_revoked_v1 config 503).
-func TestRelayGrantsGiveUntilRevokedScopesTheGrantExpiryAndOmitKeylessPeers(t *testing.T) {
-	self := networkBinding{Binding: peernetwork.Binding{AccountID: "account", EndpointID: "self"}}
-	untilRevoked := networkScope{ResourceKind: "machine_network", ResourceID: "network_x", ResourceGeneration: 1, Capability: "connect", Direction: "dial", Port: 443, ExpiresAt: 0}
-	peers := []networkPeer{
-		{Identity: networkBinding{Binding: peernetwork.Binding{AccountID: "account", EndpointID: "keyed", WireGuardPublicKey: "key_a"}}, Scopes: []networkScope{untilRevoked}},
-		{Identity: networkBinding{Binding: peernetwork.Binding{AccountID: "account", EndpointID: "keyless"}}, Scopes: []networkScope{untilRevoked}},
-	}
-	chunks := relayGrantChunks(self, peers, peernetwork.MaxGrantPeers, 1234)
-	if len(chunks) != 1 || len(chunks[0].peers) != 1 || len(chunks[0].control) != 1 || chunks[0].control[0] != "key_a" {
-		t.Fatalf("chunks %+v: want the keyed peer only", chunks)
-	}
-	scopes := chunks[0].peers[0].Scopes
-	if len(scopes) != 1 || scopes[0].ExpiresAt != 1234 {
-		t.Fatalf("grant scopes %+v: want expires_at = grant expiry", scopes)
-	}
-	if peers[0].Scopes[0].ExpiresAt != 0 {
-		t.Fatal("the document's scope was changed in place")
-	}
-}
-
-// P0 2026-10-26: under until_revoked_v1 every CLI peer of a host also carried its offline session rights
-// (machine_access, expires_at 0), so a 64-peer grant went past the relay's 128-scope bound and pairing failed. The
-// account's own peers pair by machine_network, so their session rights stay out; a team member's CLI (another
-// account, no machine_network scope) is paired by its standing machine_access scopes, which a grant carries with the
-// grant expiry (F5-10: a member's ssh to a NAT'd team Mac timed out because no relay grant named the pair).
-// Chunks stay within the relay's 128-scope bound and name each peer once.
-func TestRelayGrantsCarryStandingTeamScopesAndStayWithinTheRelayScopeBound(t *testing.T) {
-	self := networkBinding{Binding: peernetwork.Binding{AccountID: "account", EndpointID: "host"}}
-	var peers []networkPeer
-	for i := range 130 {
-		scopes := []networkScope{
-			{ResourceKind: "machine_network", ResourceID: fmt.Sprintf("network_%03d", i), ResourceGeneration: 1, Capability: "connect", Direction: "dial", Port: 443, ExpiresAt: 0},
-			{ResourceKind: "machine_network", ResourceID: fmt.Sprintf("network_%03d", i), ResourceGeneration: 1, Capability: "connect", Direction: "accept", Port: 443, ExpiresAt: 0},
-		}
-		for _, capability := range []string{"terminal", "exec", "managed_ssh", "file_transfer"} {
-			scopes = append(scopes, networkScope{ResourceKind: "machine_access", ResourceID: "host", ResourceGeneration: 7, Capability: capability, Direction: "accept", Port: 443, ExpiresAt: 0})
-		}
-		identity := networkBinding{Binding: peernetwork.Binding{AccountID: "account", EndpointID: fmt.Sprintf("cli_%03d", i), WireGuardPublicKey: fmt.Sprintf("key_%03d", i)}}
-		peers = append(peers, networkPeer{Identity: identity, Scopes: scopes})
-	}
-	// Team members' CLIs hold only standing session rights on this host (inspector is no relay capability).
-	for i := range 64 {
-		var scopes []networkScope
-		for _, capability := range []string{"terminal", "exec", "managed_ssh", "file_transfer", "inspector"} {
-			scopes = append(scopes, networkScope{ResourceKind: "machine_access", ResourceID: "host", ResourceGeneration: 7, Capability: capability, Direction: "accept", Port: 443, ExpiresAt: 0})
-		}
-		scopes = append(scopes, networkScope{ResourceKind: "machine_access", ResourceID: "host", ResourceGeneration: 7, Capability: "private_access", Direction: "accept", Port: 443, ExpiresAt: 0},
-			networkScope{ResourceKind: "machine_access", ResourceID: "host", ResourceGeneration: 0, Capability: "exec", Direction: "accept", Port: 443, ExpiresAt: 0}, networkScope{ResourceKind: "machine_access", ResourceID: "host", ResourceGeneration: 7, Capability: "exec", Direction: "accept", Port: 80, ExpiresAt: 0})
-		peers = append(peers, networkPeer{Identity: networkBinding{Binding: peernetwork.Binding{AccountID: "other", EndpointID: fmt.Sprintf("member_%03d", i), WireGuardPublicKey: fmt.Sprintf("member_%03d", i)}}, Scopes: scopes})
-	}
-	chunks := relayGrantChunks(self, peers, peernetwork.MaxGrantPeers, 1234)
-	named, members := map[string]bool{}, 0
-	for _, chunk := range chunks {
-		total := 0
-		for _, entry := range chunk.peers {
-			key := entry.WireGuardPublicKey
-			if named[key] {
-				t.Fatalf("peer %s named in two chunks", key)
-			}
-			named[key] = true
-			scopes := entry.Scopes
-			total += len(scopes)
-			if strings.HasPrefix(key, "member_") {
-				members++
-				if len(scopes) != 4 {
-					t.Fatalf("member %s carries %+v, want its 4 relay capabilities", key, scopes)
-				}
-			}
-			for _, scope := range scopes {
-				if scope.ExpiresAt != 1234 {
-					t.Fatalf("grant scope %+v: want an expiry equal to the grant's", scope)
-				}
-				if strings.HasPrefix(key, "key_") && scope.ResourceKind != "machine_network" {
-					t.Fatalf("account peer %s carries session right %+v", key, scope)
-				}
-			}
-		}
-		if total != chunk.scopes || total > peernetwork.MaxGrantScopes || len(chunk.peers) > peernetwork.MaxGrantPeers {
-			t.Fatalf("a grant holds %d scopes (counted %d) for %d peers, the relay accepts 128 scopes", total, chunk.scopes, len(chunk.peers))
-		}
-	}
-	if len(named) != 130+64 || members != 64 {
-		t.Fatalf("%d peers named (%d members), want 130 account peers and 64 members", len(named), members)
-	}
-	if len(chunks) > 32 {
-		t.Fatalf("%d chunks, a credential carries at most 32 parts", len(chunks))
 	}
 }
 
@@ -235,46 +96,96 @@ func TestConfigurationBuildLockHonorsCancellation(t *testing.T) {
 	}
 }
 
-// F21-164: a peer with 300 sessions of three scopes each and 150 more peers: every peer is named once, every grant stays
-// within the relay's scope and peer bounds, and the busy peer keeps its longest-lived session (not cut by id order).
-func TestRelayGrantsNameEveryPeerWhenOnePeerHoldsHundredsOfSessions(t *testing.T) {
+// A relay grant carries memberships, not peers (PLAN 3b "Relay pair authorization by membership"): the account mesh,
+// a per-pair scope per peer in the configuration, is one account network per direction this endpoint holds, with the
+// grant's expiry for the until-revoked scopes; a peer of another account adds its relay scopes once each; a keyless
+// peer adds nothing. 100 peers make 2 + 1 memberships, not 100 entries.
+func TestRelayGrantMembershipsAreTheAccountNetworkAndEachOtherScopeOnce(t *testing.T) {
+	self := networkBinding{Binding: peernetwork.Binding{AccountID: "account", EndpointID: "self"}}
+	var peers []networkPeer
+	for i := range 100 {
+		identity := networkBinding{Binding: peernetwork.Binding{AccountID: "account", EndpointID: fmt.Sprintf("peer_%03d", i), WireGuardPublicKey: fmt.Sprintf("key_%03d", i)}}
+		scope := networkScope{ResourceKind: "machine_network", ResourceID: fmt.Sprintf("network_%03d", i), ResourceGeneration: 1, Capability: "connect", Direction: []string{"dial", "accept"}[i%2], Port: 443}
+		if i%10 == 0 { // a team member of another account, sharing one access grant
+			identity.AccountID = "other"
+			scope = networkScope{ResourceKind: "machine_access", ResourceID: "access_1", ResourceGeneration: 1, Capability: "terminal", Direction: "accept", Port: 443, ExpiresAt: 99}
+		}
+		peers = append(peers, networkPeer{Identity: identity, Scopes: []networkScope{scope}})
+	}
+	peers = append(peers, networkPeer{Identity: networkBinding{Binding: peernetwork.Binding{AccountID: "other", EndpointID: "keyless"}},
+		Scopes: []networkScope{{ResourceKind: "machine_access", ResourceID: "access_keyless", ResourceGeneration: 1, Capability: "terminal", Direction: "accept", Port: 443, ExpiresAt: 99}}})
+	network := peernetwork.AccountNetworkID("account")
+	want := []networkScope{
+		{ResourceKind: "machine_network", ResourceID: network, ResourceGeneration: 1, Capability: "connect", Direction: "accept", Port: 443, ExpiresAt: 1234},
+		{ResourceKind: "machine_network", ResourceID: network, ResourceGeneration: 1, Capability: "connect", Direction: "dial", Port: 443, ExpiresAt: 1234},
+		{ResourceKind: "machine_access", ResourceID: "access_1", ResourceGeneration: 1, Capability: "terminal", Direction: "accept", Port: 443, ExpiresAt: 99},
+	}
+	if got := relayGrantMemberships(self, peers, 1234); fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("memberships %+v, want %+v", got, want)
+	}
+	if peers[1].Scopes[0].ExpiresAt != 0 {
+		t.Fatal("the document's scope was changed in place")
+	}
+	if got := relayGrantMemberships(self, nil, 1234); got == nil || len(got) != 0 {
+		t.Fatalf("an endpoint without peers gets %v, want an empty membership list (one grant per node)", got)
+	}
+}
+
+// Session rights of the account's own peers stay out (the account network pairs them, P0 2026-10-26); standing
+// rights of team members' CLIs (another account, no mesh) are carried once with the grant expiry (F5-10). 130 mesh
+// CLIs with 4 session rights each and 64 members with 4 relay capabilities each make 2 + 4 memberships.
+func TestRelayGrantMembershipsCarryStandingTeamScopesOnce(t *testing.T) {
 	self := networkBinding{Binding: peernetwork.Binding{AccountID: "account", EndpointID: "host"}}
-	var busy []networkScope
-	for i := range 300 {
-		for _, capability := range []string{"terminal", "file_transfer", "private_access"} {
-			expires := int64(1_000 + i%50)
-			if i == 299 {
-				expires = 5_000
-			}
-			busy = append(busy, networkScope{ResourceKind: "machine_access", ResourceID: fmt.Sprintf("session_%04d", i), ResourceGeneration: 1, Capability: capability, Direction: "accept", Port: 443, ExpiresAt: expires})
-		}
-	}
-	peers := []networkPeer{{Identity: networkBinding{Binding: peernetwork.Binding{AccountID: "other", EndpointID: "busy", WireGuardPublicKey: "key_busy"}}, Scopes: busy}}
-	for i := range 150 {
-		peers = append(peers, networkPeer{Identity: networkBinding{Binding: peernetwork.Binding{AccountID: "account", EndpointID: fmt.Sprintf("cli_%03d", i), WireGuardPublicKey: fmt.Sprintf("key_%03d", i)}}, Scopes: []networkScope{
+	var peers []networkPeer
+	for i := range 130 {
+		scopes := []networkScope{
 			{ResourceKind: "machine_network", ResourceID: fmt.Sprintf("network_%03d", i), ResourceGeneration: 1, Capability: "connect", Direction: "accept", Port: 443},
-			{ResourceKind: "machine_access", ResourceID: fmt.Sprintf("s_%03d", i), ResourceGeneration: 1, Capability: "terminal", Direction: "accept", Port: 443, ExpiresAt: 2_000}}})
-	}
-	named, longest := map[string]bool{}, false
-	for _, chunk := range relayGrantChunks(self, peers, peernetwork.MaxGrantPeers, 9_000) {
-		total := 0
-		for _, entry := range chunk.peers {
-			if named[entry.WireGuardPublicKey] {
-				t.Fatalf("peer %s named in two chunks", entry.WireGuardPublicKey)
-			}
-			named[entry.WireGuardPublicKey] = true
-			total += len(entry.Scopes)
-			if entry.WireGuardPublicKey == "key_busy" {
-				for _, scope := range entry.Scopes {
-					longest = longest || scope.ResourceID == "session_0299" && scope.ExpiresAt == 5_000
-				}
-			}
 		}
-		if total > peernetwork.MaxGrantScopes || len(chunk.peers) > peernetwork.MaxGrantPeers {
-			t.Fatalf("a grant holds %d scopes for %d peers", total, len(chunk.peers))
+		for _, capability := range []string{"terminal", "exec", "managed_ssh", "file_transfer"} {
+			scopes = append(scopes, networkScope{ResourceKind: "machine_access", ResourceID: fmt.Sprintf("s_%03d", i), ResourceGeneration: 1, Capability: capability, Direction: "accept", Port: 443, ExpiresAt: 2_000})
+		}
+		peers = append(peers, networkPeer{Identity: networkBinding{Binding: peernetwork.Binding{AccountID: "account", EndpointID: fmt.Sprintf("cli_%03d", i), WireGuardPublicKey: fmt.Sprintf("key_%03d", i)}}, Scopes: scopes})
+	}
+	for i := range 64 {
+		var scopes []networkScope
+		for _, capability := range []string{"terminal", "exec", "managed_ssh", "file_transfer", "inspector"} {
+			scopes = append(scopes, networkScope{ResourceKind: "machine_access", ResourceID: "host", ResourceGeneration: 7, Capability: capability, Direction: "accept", Port: 443})
+		}
+		peers = append(peers, networkPeer{Identity: networkBinding{Binding: peernetwork.Binding{AccountID: "other", EndpointID: fmt.Sprintf("member_%03d", i), WireGuardPublicKey: fmt.Sprintf("member_%03d", i)}}, Scopes: scopes})
+	}
+	got := relayGrantMemberships(self, peers, 1234)
+	if len(got) != 5 || got[0].ResourceID != peernetwork.AccountNetworkID("account") {
+		t.Fatalf("memberships %+v, want the account network (accept) and the 4 standing team capabilities", got)
+	}
+	for _, m := range got[1:] {
+		if m.ResourceID != "host" || m.ExpiresAt != 1234 {
+			t.Fatalf("membership %+v, want a standing team right with the grant expiry", m)
 		}
 	}
-	if len(named) != 151 || !longest {
-		t.Fatalf("%d peers named (want 151), busy peer kept its longest session: %v", len(named), longest)
+}
+
+// Over the relay's merged membership bound the latest-expiring memberships are kept, the account network first
+// (F21-164: a busy host keeps its longest-lived session).
+func TestRelayGrantMembershipsKeepTheLatestWithinTheRelayBound(t *testing.T) {
+	self := networkBinding{Binding: peernetwork.Binding{AccountID: "account", EndpointID: "host"}}
+	// A peer's own sessions are already reduced per peer (RelayGrantScopes); many peers of other accounts are not.
+	var peers []networkPeer
+	for i := range peernetwork.MaxMergedMemberships + 100 {
+		expires := int64(1_000 + i%50)
+		if i == 299 {
+			expires = 5_000
+		}
+		peers = append(peers, networkPeer{Identity: networkBinding{Binding: peernetwork.Binding{AccountID: "other", EndpointID: fmt.Sprintf("member_%04d", i), WireGuardPublicKey: fmt.Sprintf("key_%04d", i)}},
+			Scopes: []networkScope{{ResourceKind: "machine_access", ResourceID: fmt.Sprintf("session_%04d", i), ResourceGeneration: 1, Capability: "terminal", Direction: "accept", Port: 443, ExpiresAt: expires}}})
+	}
+	peers = append(peers, networkPeer{Identity: networkBinding{Binding: peernetwork.Binding{AccountID: "account", EndpointID: "cli", WireGuardPublicKey: "key_cli"}}, Scopes: []networkScope{
+		{ResourceKind: "machine_network", ResourceID: "network_cli", ResourceGeneration: 1, Capability: "connect", Direction: "accept", Port: 443}}})
+	got := relayGrantMemberships(self, peers, 9_000)
+	if len(got) != peernetwork.MaxMergedMemberships || got[0].ResourceKind != "machine_network" {
+		t.Fatalf("%d memberships, first %+v: want %d with the account network first", len(got), got[0], peernetwork.MaxMergedMemberships)
+	}
+	longest := slices.ContainsFunc(got, func(s networkScope) bool { return s.ResourceID == "session_0299" })
+	if !longest {
+		t.Fatal("the busy peer's longest-lived session was cut")
 	}
 }

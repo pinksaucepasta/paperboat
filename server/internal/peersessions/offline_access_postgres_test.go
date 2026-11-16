@@ -253,50 +253,46 @@ func TestOfflineSessionRightsEqualTheDescriptorDecisionOnPostgres(t *testing.T) 
 		t.Errorf("mesh scopes for an until-revoked daemon %v, want all 0", mesh)
 	}
 
-	// relayGrantScopes returns, per peer endpoint, the machine_access scopes the signed relay grants of one endpoint's
-	// document carry (a grant names peers by key; the document maps keys to endpoints).
-	relayGrantScopesOf := func(account, endpoint string) map[string][]map[string]any {
+	// relayMemberships returns the machine_access memberships of the signed relay grants of one endpoint's document
+	// (PLAN 3b "Relay pair authorization by membership": a grant names resources, not peers).
+	relayMemberships := func(account, endpoint string) []map[string]any {
 		t.Helper()
 		result, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "grants_" + suffix + endpoint + fmt.Sprint(time.Now().UnixNano()), UserID: account, EndpointID: endpoint, Authority: AuthorityUntilRevoked})
 		if err != nil {
 			t.Fatal(err)
 		}
-		endpointOf := map[string]string{}
-		for _, raw := range networkClaims(t, result.Configuration)["peers"].([]any) {
-			identity := raw.(map[string]any)["identity"].(map[string]any)
-			endpointOf[identity["wireguard_public_key"].(string)] = identity["endpoint_id"].(string)
-		}
-		out := map[string][]map[string]any{}
+		var out []map[string]any
 		for _, grant := range result.RelayGrants {
-			peers, _ := networkClaims(t, grant)["peers"].([]any)
-			for _, raw := range peers {
-				peer := raw.(map[string]any)
-				for _, rawScope := range peer["scopes"].([]any) {
-					if scope := rawScope.(map[string]any); scope["resource_kind"] == "machine_access" {
-						out[endpointOf[peer["wireguard_public_key"].(string)]] = append(out[endpointOf[peer["wireguard_public_key"].(string)]], scope)
-					}
+			members, _ := networkClaims(t, grant)["memberships"].([]any)
+			for _, raw := range members {
+				if m := raw.(map[string]any); m["resource_kind"] == "machine_access" && m["resource_id"] == host {
+					out = append(out, m)
 				}
 			}
 		}
 		return out
 	}
-	// F5-10: a team member's relayed path to a NAT'd shared host needs both relay grants to name the pair. The standing
-	// machine_access scopes (expires_at 0 in the documents) ride in them with the grant expiry, in opposite directions
-	// at one generation, for the relay capabilities the member holds; inspector is no relay capability.
-	hostGrants := relayGrantScopesOf(owner, host)
-	for _, account := range []string{member, shellMember} {
-		cli := "offline_cli_" + account
-		memberGrants := relayGrantScopesOf(account, cli)[host]
-		hostSide := hostGrants[cli]
-		if len(memberGrants) == 0 || len(memberGrants) != len(hostSide) {
-			t.Fatalf("%s: relay grant scopes member side %v, host side %v, want the same capabilities on both", account, memberGrants, hostSide)
+	// pairs requires every membership of one side to have the relay's reciprocal on the host: same resource,
+	// capability and generation, opposite direction, both with a grant expiry.
+	pairs := func(name string, side, hostSide []map[string]any, direction string) {
+		t.Helper()
+		if len(side) == 0 {
+			t.Fatalf("%s: no relay membership for the host", name)
 		}
-		for i, scope := range memberGrants {
-			other := hostSide[i]
-			if scope["direction"] != "dial" || other["direction"] != "accept" || scope["capability"] != other["capability"] || scope["resource_generation"] != other["resource_generation"] || scope["expires_at"].(float64) <= 0 || other["expires_at"].(float64) <= 0 {
-				t.Fatalf("%s: member scope %v and host scope %v do not pair with a grant expiry", account, scope, other)
+		for _, scope := range side {
+			if scope["direction"] != direction || scope["expires_at"].(float64) <= 0 || !slices.ContainsFunc(hostSide, func(other map[string]any) bool {
+				return other["direction"] != direction && other["capability"] == scope["capability"] && other["resource_generation"] == scope["resource_generation"] && other["expires_at"].(float64) > 0
+			}) {
+				t.Fatalf("%s: membership %v has no reciprocal among the host's %v", name, scope, hostSide)
 			}
 		}
+	}
+	// F5-10: a team member's relayed path to a NAT'd shared host needs both relay grants to hold the pair. The standing
+	// machine_access scopes (expires_at 0 in the documents) ride in them with the grant expiry, in opposite directions
+	// at one generation, for the relay capabilities the member holds; inspector is no relay capability.
+	hostGrants := relayMemberships(owner, host)
+	for _, account := range []string{member, shellMember} {
+		pairs(account, relayMemberships(account, "offline_cli_"+account), hostGrants, "dial")
 	}
 
 	// FIX-TEAMREACH (prod 11-16): the owner of a team-owned machine, a member of its team, dialled it from its CLI and
@@ -306,15 +302,7 @@ func TestOfflineSessionRightsEqualTheDescriptorDecisionOnPostgres(t *testing.T) 
  ON CONFLICT (owner_account) WHERE owner_account IS NOT NULL DO UPDATE SET version=1000`, owner)
 	teamstest.SetMachineAccess(t, store, team, host, owner, "exec")
 	exec(`UPDATE paperboat.user_machines SET owner_team_id=$2 WHERE id=$1`, host, team)
-	ownerSide, hostSide := relayGrantScopesOf(owner, "offline_cli_"+owner)[host], relayGrantScopesOf(owner, host)["offline_cli_"+owner]
-	if len(ownerSide) == 0 || len(ownerSide) != len(hostSide) {
-		t.Fatalf("owner of a team-owned host: relay grant scopes CLI side %v, host side %v, want the same capabilities", ownerSide, hostSide)
-	}
-	for i, scope := range ownerSide {
-		if other := hostSide[i]; scope["capability"] != other["capability"] || scope["resource_generation"] != other["resource_generation"] {
-			t.Fatalf("owner of a team-owned host: CLI scope %v and host scope %v do not pair", scope, other)
-		}
-	}
+	pairs("owner of a team-owned host", relayMemberships(owner, "offline_cli_"+owner), relayMemberships(owner, host), "dial")
 	exec(`UPDATE paperboat.user_machines SET owner_team_id=NULL WHERE id=$1`, host)
 	teamstest.SetMachineAccess(t, store, team, host, owner)
 
@@ -353,11 +341,10 @@ func TestOfflineSessionRightsEqualTheDescriptorDecisionOnPostgres(t *testing.T) 
 		teamstest.SetMachineAccess(t, store, team, host, shellMember)
 	})
 	after, _ := read(AuthorityUntilRevoked)
-	if got := relayGrantScopesOf(shellMember, "offline_cli_"+shellMember)[host]; len(got) != 0 {
-		t.Errorf("relay grant of %s still names the host after its grant was revoked: %v", shellMember, got)
-	}
-	if got := relayGrantScopesOf(owner, host)["offline_cli_"+shellMember]; len(got) != 0 {
-		t.Errorf("the host's relay grant still names %s after its grant was revoked: %v", shellMember, got)
+	// The relay pairs only reciprocal memberships, so the member's side losing the host ends the pair; the host's side
+	// names resources, not members, and is shared with every member still granted.
+	if got := relayMemberships(shellMember, "offline_cli_"+shellMember); len(got) != 0 {
+		t.Errorf("relay grant of %s still holds the host after its grant was revoked: %v", shellMember, got)
 	}
 	for _, account := range []string{revokedMember, shellMember} {
 		if got := cliHostScopes(account, AuthorityUntilRevoked); len(got) != 0 {

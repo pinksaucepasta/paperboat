@@ -2,6 +2,8 @@ package peernetwork
 
 import (
 	"cmp"
+	"crypto/sha256"
+	"encoding/hex"
 	"slices"
 )
 
@@ -151,3 +153,12 @@ func RelayGrantScopes(scopes []Scope, grantExpiry int64) []Scope {
 
 // relayGrantSessionsPerKey is how many sessions of one (kind, capability, direction) a grant keeps over the bound.
 const relayGrantSessionsPerKey = 4
+
+// AccountNetworkID is the resource id of an account's personal mesh in a relay grant's memberships: one membership
+// per direction pairs the endpoint with every endpoint of its account at the relay, instead of one per-pair
+// machine_network scope per peer (PLAN 3b "Relay pair authorization by membership"). The server issues it and the CLI
+// accepts it only while its configuration holds a mesh scope of its own account in that direction.
+func AccountNetworkID(account string) string {
+	sum := sha256.Sum256([]byte("paperboat-account-network\x00" + account))
+	return "network_" + hex.EncodeToString(sum[:])
+}

@@ -234,6 +234,16 @@ func sameGrantAuthority(a, b Grant) bool {
 			}
 		}
 		g.Peers = peers
+		// Memberships are re-stamped with each grant's expiry like peer scopes: a renewal of the same ones is the
+		// same authority, so it keeps the fence and its pairs instead of closing them every renewal.
+		memberships := make([]Scope, 0, len(g.Memberships))
+		for _, m := range g.Memberships {
+			if m.ExpiresAt > now {
+				m.ExpiresAt = 0
+				memberships = append(memberships, m)
+			}
+		}
+		g.Memberships = memberships
 		return g
 	}
 	return reflect.DeepEqual(normalize(a), normalize(b))

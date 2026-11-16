@@ -1,6 +1,7 @@
 package peersessions
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"database/sql"
@@ -12,7 +13,6 @@ import (
 	"log/slog"
 	"slices"
 	"sort"
-	"strings"
 	"sync"
 	"time"
 
@@ -876,27 +876,27 @@ func (s *NetworkService) relayGrants(nodes []relayNodeRow, self networkBinding, 
 		if len(nodePeers) == 0 && len(peers) > 0 {
 			continue
 		}
-		// Relay control rides in every chunk for its own peers, under the shared per-part bound.
 		peerRelayReady := peerRelayEnabled && self.DiscoPublicKey != "" && peersHaveDiscoKeys(nodePeers)
 		// Not capped by the configuration's refresh hint or the relay's registry lease: a grant is bound to this
 		// configuration's generation and to the relay's process epoch, and is withdrawn by a relay fence, not by
 		// running out (relaylimits.MaxGrantLifetime).
 		expires := now.Add(relaylimits.MaxGrantLifetime)
-		chunks := relayGrantChunks(self, nodePeers, peernetwork.MaxGrantPeers, expires.Unix())
 		if peerRelayEnabled && (len(peerRelayWG) != 32 || len(peerRelayDisco) != 32 || !peerRelayAddress.Valid) {
 			slog.Warn("peer network authority unavailable", "site", "network.go:620")
 			return nil, ErrUnavailable
 		}
-		var peerRelay *peernetwork.RelayDescriptor
-		if peerRelayReady {
-			peerRelay = &peernetwork.RelayDescriptor{WireGuardPublicKey: base64.RawURLEncoding.EncodeToString(peerRelayWG),
-				DiscoPublicKey: base64.RawURLEncoding.EncodeToString(peerRelayDisco), VirtualAddress: peerRelayAddress.String}
-		}
-		base := peernetwork.RelayGrant{Version: peernetwork.RelayGrantVersion, Issuer: s.issuer, Audience: peernetwork.RelayGrantAudience, IssuedAt: now.Unix(), ExpiresAt: expires.Unix(),
+		claims := peernetwork.RelayGrant{Version: peernetwork.RelayGrantVersion, Issuer: s.issuer, Audience: peernetwork.RelayGrantAudience, IssuedAt: now.Unix(), ExpiresAt: expires.Unix(),
 			Generation: uint64(generation), AccountID: self.AccountID, EndpointID: self.EndpointID, WireGuardPublicKey: self.WireGuardPublicKey, DiscoPublicKey: self.DiscoPublicKey,
-			CertificateFingerprint: self.QUICCertificateFingerprint, QUICPublicKey: self.QUICPublicKey, NodeID: nodeID, NodeGeneration: uint64(nodeGeneration), ProcessEpoch: processEpoch}
-		for _, claims := range relayGrantParts(base, chunks, peerRelay) {
-			grant, err := s.signer.SignRelayGrant(claims)
+			CertificateFingerprint: self.QUICCertificateFingerprint, QUICPublicKey: self.QUICPublicKey, NodeID: nodeID, NodeGeneration: uint64(nodeGeneration), ProcessEpoch: processEpoch,
+			Peers: []peernetwork.RelayPeer{}}
+		for i, part := range relayGrantMembershipParts(relayGrantMemberships(self, nodePeers, expires.Unix())) {
+			g := claims
+			g.Memberships = part
+			if i == 0 && peerRelayReady { // the relay and the CLI merge the parts; the descriptor rides in the first
+				g.PeerRelay = &peernetwork.RelayDescriptor{WireGuardPublicKey: base64.RawURLEncoding.EncodeToString(peerRelayWG),
+					DiscoPublicKey: base64.RawURLEncoding.EncodeToString(peerRelayDisco), VirtualAddress: peerRelayAddress.String}
+			}
+			grant, err := s.signer.SignRelayGrant(g)
 			if err != nil {
 				return nil, err
 			}
@@ -910,66 +910,71 @@ func (s *NetworkService) relayGrants(nodes []relayNodeRow, self networkBinding, 
 	return grants, nil
 }
 
-// relayGrantParts is one grant per chunk of base's endpoint, each with base's identity, iat, exp and generation;
-// the relay and the CLI merge them. Relay control rides in each chunk for its own peers while the peer relay (nil
-// when not ready) is offered, and the peer relay in the first chunk only.
-func relayGrantParts(base peernetwork.RelayGrant, chunks []relayGrantChunk, peerRelay *peernetwork.RelayDescriptor) []peernetwork.RelayGrant {
-	parts := make([]peernetwork.RelayGrant, 0, len(chunks))
-	for i, chunk := range chunks {
-		g := base
-		g.Peers = chunk.peers
-		if peerRelay != nil && len(chunk.control) != 0 {
-			g.RelayControlPeers = chunk.control
+// relayGrantMembershipParts splits memberships into grant parts of at most peernetwork.MaxGrantMemberships each and
+// within the relay's token bound (the token is the base64 of the claims; identity claims and header take well under
+// 4 KiB). There is always one part, empty for an endpoint without relayable peers.
+func relayGrantMembershipParts(memberships []networkScope) [][]networkScope {
+	budget := peernetwork.MaxGrantBytes*3/4 - 4<<10
+	parts := [][]networkScope{{}}
+	used := 0
+	for _, m := range memberships {
+		raw, _ := json.Marshal(m)
+		last := len(parts) - 1
+		if len(parts[last]) == peernetwork.MaxGrantMemberships || used+len(raw)+1 > budget {
+			parts, last, used = append(parts, nil), last+1, 0
 		}
-		if i == 0 {
-			g.PeerRelay = peerRelay
-		}
-		parts = append(parts, g)
+		parts[last] = append(parts[last], m)
+		used += len(raw) + 1
 	}
 	return parts
 }
 
-// relayGrantChunk is one grant's share of the peers: their entries, and the keys of those among them that
-// may use this endpoint as a peer relay (same account).
-type relayGrantChunk struct {
-	peers   []peernetwork.RelayPeer
-	control []string
-	scopes  int
-}
-
-// relayGrantChunks splits every peer into grants of at most size peers and peernetwork.MaxGrantScopes scopes, sorted by key. Each chunk carries the
-// control keys of its own peers, so the chunks are disjoint (the mesh refuses a duplicate control peer). A grant lives
-// at most relaylimits.MaxGrantLifetime, so a scope held until revoked (expires_at 0, AuthorityUntilRevoked) ends with the grant there
-// (grantExpiry); relays and mint refuse a scope without an expiry. A peer without a WireGuard key cannot be relayed
-// and is left out: one such peer never fails the grants of every other.
-func relayGrantChunks(self networkBinding, peers []networkPeer, size int, grantExpiry int64) []relayGrantChunk {
-	ordered := slices.Clone(peers)
-	slices.SortStableFunc(ordered, func(a, b networkPeer) int {
-		return strings.Compare(a.Identity.WireGuardPublicKey, b.Identity.WireGuardPublicKey)
-	})
-	chunks := []relayGrantChunk{{peers: []peernetwork.RelayPeer{}}}
-	for _, peer := range ordered {
+// relayGrantMemberships is what one relay grant carries for peers: memberships, not a list of peers (PLAN 3b "Relay
+// pair authorization by membership"; Tailscale's DERP server authorizes a node once and keeps no per-peer lists,
+// derp/derpserver/derpserver.go verifyClient). The account mesh, a per-pair machine_network scope per peer in the
+// configuration, becomes the account's one network (peernetwork.AccountNetworkID) in each direction this endpoint
+// holds; the relay pairs two endpoints of one account holding it in opposite directions (derpquic membership.go). A
+// peer without a mesh scope (a team or another account's endpoint) adds its relay scopes (relayGrantScopes), each once.
+// A grant is then O(memberships), not O(peers): a mesh endpoint of any account size carries one or two. Over the
+// relay's bound the memberships with the latest expiry are kept (the mesh's first), the rule RelayGrantScopes applies
+// to one peer's sessions; a session left out reaches its peer directly only.
+func relayGrantMemberships(self networkBinding, peers []networkPeer, grantExpiry int64) []networkScope {
+	network := peernetwork.AccountNetworkID(self.AccountID)
+	seen := map[networkScope]bool{}
+	out := []networkScope{}
+	for _, peer := range peers {
 		if peer.Identity.WireGuardPublicKey == "" {
-			slog.Warn("relay grant omits a peer without a WireGuard key", "site", "network.go:relayGrantChunks")
-			continue
+			continue // cannot be relayed
 		}
-		scopes := relayGrantScopes(peer.Scopes, grantExpiry)
-		if len(scopes) == 0 {
-			continue
+		mesh := slices.ContainsFunc(peer.Scopes, func(s networkScope) bool { return s.ResourceKind == "machine_network" })
+		for _, scope := range relayGrantScopes(peer.Scopes, grantExpiry) {
+			switch {
+			case scope.ResourceKind == "machine_network":
+				scope.ResourceID = network
+			case mesh:
+				continue // the mesh membership already pairs this peer
+			}
+			if !seen[scope] {
+				seen[scope] = true
+				out = append(out, scope)
+			}
 		}
-		last := &chunks[len(chunks)-1]
-		if len(last.peers) == size || len(last.peers) > 0 && last.scopes+len(scopes) > peernetwork.MaxGrantScopes {
-			chunks = append(chunks, relayGrantChunk{})
-			last = &chunks[len(chunks)-1]
-		}
-		last.peers = append(last.peers, peernetwork.RelayPeer{WireGuardPublicKey: peer.Identity.WireGuardPublicKey, DiscoPublicKey: peer.Identity.DiscoPublicKey, Scopes: scopes})
-		last.scopes += len(scopes)
-		if peer.Identity.AccountID != self.AccountID || peer.Identity.EndpointID == self.EndpointID {
-			continue
-		}
-		last.control = append(last.control, peer.Identity.WireGuardPublicKey)
 	}
-	return chunks
+	rank := func(s networkScope) int { // the mesh first
+		if s.ResourceKind == "machine_network" {
+			return 0
+		}
+		return 1
+	}
+	slices.SortFunc(out, func(a, b networkScope) int {
+		return cmp.Or(cmp.Compare(rank(a), rank(b)), cmp.Compare(b.ExpiresAt, a.ExpiresAt), cmp.Compare(a.ResourceKind, b.ResourceKind), cmp.Compare(a.ResourceID, b.ResourceID),
+			cmp.Compare(a.Capability, b.Capability), cmp.Compare(a.Direction, b.Direction), cmp.Compare(a.ResourceGeneration, b.ResourceGeneration))
+	})
+	if len(out) > peernetwork.MaxMergedMemberships {
+		slog.Warn("relay grant keeps the latest memberships within the relay bound", "memberships", len(out), "site", "network.go:relayGrantMemberships")
+		out = out[:peernetwork.MaxMergedMemberships]
+	}
+	return out
 }
 
 // relayGrantScopes is the part of a peer's document scopes a relay grant carries; peernetwork.RelayGrantKeepsStanding

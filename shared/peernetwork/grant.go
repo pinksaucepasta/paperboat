@@ -21,8 +21,11 @@ import (
 const (
 	// MaxClockSkew tolerates issuer clock drift without extending a signed expiry.
 	MaxClockSkew = clockleeway.Leeway
-	// MaxGrantMemberships bounds the memberships one grant carries.
+	// MaxGrantMemberships bounds the memberships one grant part carries.
 	MaxGrantMemberships = 256
+	// MaxMergedMemberships bounds the memberships of all parts of one grant (a team CLI reaching many shared hosts
+	// holds four per host); the relay's index costs 12 bytes per membership.
+	MaxMergedMemberships = 4096
 	// MaxGrantParts covers peer-full chunks plus scope-full chunks. Each pair of
 	// adjacent scope-limited chunks contains more than MaxGrantScopes scopes.
 	MaxGrantParts = (MaxEndpoints+MaxGrantPeers-1)/MaxGrantPeers + 2*((MaxScopes+MaxGrantScopes-1)/MaxGrantScopes)

@@ -222,7 +222,6 @@ func (a *Authority) refresh(ctx context.Context, client NetworkAPI, since time.T
 		}
 		request := api.PeerNetworkConfigurationRequest{OperationID: "operation_" + operation.String(), AdmittedScopes: a.AdmittedScopes()}
 		request.Endpoints = a.endpointReportDue()
-		request.MembershipGrants = a.membershipGrants.Load()
 		request.Authority = api.PeerNetworkAuthorityUntilRevoked
 		if !full {
 			request.BaseGeneration = peernetwork.ConfigurationGeneration(held)
@@ -275,9 +274,6 @@ func (a *Authority) refresh(ctx context.Context, client NetworkAPI, since time.T
 	a.refreshedFrom = started
 	a.saveRelays(result.CandidateSet, result.RelayGrants)
 	a.setRelayDenial(result.RelayDenial())
-	if a.membershipGrants.Swap(result.MembershipGrants) != result.MembershipGrants && result.MembershipGrants {
-		a.RequestRefresh() // ask for membership grants on the next renewal
-	}
 	if result.CandidateSet == "" {
 		a.relay.mu.Lock()
 		a.relay.tokens = nil

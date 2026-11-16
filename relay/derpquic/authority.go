@@ -250,7 +250,7 @@ func mergeGrants(current, next Grant) (Grant, error) {
 		return Grant{}, ErrAdmission
 	}
 	memberships := mergeMemberships(current.Memberships, next.Memberships)
-	if len(memberships) > MaxGrantMemberships {
+	if len(memberships) > peernetwork.MaxMergedMemberships {
 		return Grant{}, ErrAdmission
 	}
 	current.Peers, current.RelayControlPeers = slices.Clone(current.Peers), slices.Clone(current.RelayControlPeers)

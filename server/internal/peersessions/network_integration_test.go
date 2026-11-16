@@ -18,6 +18,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/pinksaucepasta/paperboat/server/internal/teams/teamstest"
 	wire "github.com/pinksaucepasta/paperboat/shared/peeridentity"
+	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
 	"github.com/pinksaucepasta/paperboat/shared/relaylimits"
 	"math/big"
 	"net/http"
@@ -182,8 +183,7 @@ func TestNetworkAuthorityProductionIdentityAndAccessLifecycle(t *testing.T) {
 	if initialScope["resource_kind"] != "machine_network" || initialScope["capability"] != "connect" {
 		t.Fatal("session-free configuration granted application access")
 	}
-	assertRelayGrant(t, initialCLIConfig.RelayGrants, userID, cliID, regionalNodeID, "epoch_"+suffix, 1, cliPublic, cliDisco, cliFingerprint, machinePublic, machineDisco, 1, relayWG, relayDisco)
-	assertRelayControlPeers(t, initialCLIConfig.RelayGrants, machinePublic)
+	assertRelayGrant(t, initialCLIConfig.RelayGrants, userID, cliID, regionalNodeID, "epoch_"+suffix, 1, cliPublic, cliDisco, cliFingerprint, 1, relayWG, relayDisco)
 	// A Paperboat-managed node carries no hosting; the account's own pbh relay is self_hosted, which
 	// is the only relay an Unlimited transfer may use.
 	if hosting, ok := networkClaims(t, initialCLIConfig.CandidateSet)["nodes"].([]any)[0].(map[string]any)["hosting"]; ok {
@@ -257,8 +257,8 @@ func TestNetworkAuthorityProductionIdentityAndAccessLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertRelayGrant(t, cliConfig.RelayGrants, userID, cliID, regionalNodeID, "epoch_"+suffix, 1, cliPublic, cliDisco, cliFingerprint, machinePublic, machineDisco, 4, relayWG, relayDisco)
-	assertRelayControlPeers(t, cliConfig.RelayGrants, machinePublic)
+	// The mesh pairs the CLI and its machine: one account network membership, the session rights stay out.
+	assertRelayGrant(t, cliConfig.RelayGrants, userID, cliID, regionalNodeID, "epoch_"+suffix, 1, cliPublic, cliDisco, cliFingerprint, 1, relayWG, relayDisco)
 	if _, err = store.SQL().ExecContext(ctx, `UPDATE paperboat.peer_network_identities SET disco_public_key=NULL WHERE user_id=$1 AND endpoint_id=$2`, userID, machineID); err != nil {
 		t.Fatal(err)
 	}
@@ -267,7 +267,7 @@ func TestNetworkAuthorityProductionIdentityAndAccessLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	derpClaims := networkClaims(t, derpOnly.RelayGrants[0])
-	if _, ok := derpClaims["peer_relay"]; ok || derpClaims["peers"].([]any)[0].(map[string]any)["disco_public_key"] != nil {
+	if _, ok := derpClaims["peer_relay"]; ok {
 		t.Fatalf("legacy identity received peer-relay authority=%v", derpClaims)
 	}
 	if _, err = store.SQL().ExecContext(ctx, `UPDATE paperboat.peer_network_identities SET disco_public_key=$1 WHERE user_id=$2 AND endpoint_id=$3`, machineDisco, userID, machineID); err != nil {
@@ -281,8 +281,9 @@ func TestNetworkAuthorityProductionIdentityAndAccessLifecycle(t *testing.T) {
 	if descriptor, ok := runtimeRelayClaims["peer_relay"].(map[string]any); !ok || descriptor["wireguard_public_key"] != base64.RawURLEncoding.EncodeToString(relayWG) {
 		t.Fatalf("machine relay grant did not select the dedicated service: %v", runtimeRelayClaims)
 	}
-	if peers, ok := runtimeRelayClaims["relay_control_peers"].([]any); !ok || len(peers) != 1 || peers[0] != base64.RawURLEncoding.EncodeToString(cliPublic) {
-		t.Fatalf("machine relay control peers=%v", runtimeRelayClaims["relay_control_peers"])
+	// Relay control follows the account network membership (derpquic networkMember), not a key list.
+	if members, _ := runtimeRelayClaims["memberships"].([]any); len(members) != 1 || members[0].(map[string]any)["resource_id"] != peernetwork.AccountNetworkID(userID) || runtimeRelayClaims["relay_control_peers"] != nil {
+		t.Fatalf("machine relay memberships=%v control=%v", runtimeRelayClaims["memberships"], runtimeRelayClaims["relay_control_peers"])
 	}
 	assertNetworkConfig(t, cliConfig.Configuration, cliID, machineID, "dial", 4)
 	assertNetworkConfig(t, machineConfig.Configuration, machineID, cliID, "accept", 4)
@@ -796,7 +797,7 @@ func TestNetworkAuthorityProductionIdentityAndAccessLifecycle(t *testing.T) {
 	// The machine is team-owned now and this account has left the team.
 	// Personal-network admission must not survive through its former owner.
 	assertNetworkConfig(t, expired.Configuration, cliID, "", "", 0)
-	assertRelayGrant(t, expired.RelayGrants, userID, cliID, regionalNodeID, "epoch_"+suffix, 1, cliPublic, cliDisco, cliFingerprint, nil, nil, 0, relayWG, relayDisco)
+	assertRelayGrant(t, expired.RelayGrants, userID, cliID, regionalNodeID, "epoch_"+suffix, 1, cliPublic, cliDisco, cliFingerprint, 0, relayWG, relayDisco)
 	if _, err = store.SQL().ExecContext(ctx, `UPDATE paperboat.user_machine_access_sessions SET expires_at=$2,updated_at=$3 WHERE id=$1`, accessID, grantExpiry, now); err != nil {
 		t.Fatal(err)
 	}
@@ -808,7 +809,7 @@ func TestNetworkAuthorityProductionIdentityAndAccessLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertNetworkConfig(t, revoked.Configuration, cliID, "", "", 0)
-	assertRelayGrant(t, revoked.RelayGrants, userID, cliID, regionalNodeID, "epoch_"+suffix, 1, cliPublic, cliDisco, cliFingerprint, nil, nil, 0, relayWG, relayDisco)
+	assertRelayGrant(t, revoked.RelayGrants, userID, cliID, regionalNodeID, "epoch_"+suffix, 1, cliPublic, cliDisco, cliFingerprint, 0, relayWG, relayDisco)
 	if networkGeneration(t, revoked.Configuration) <= networkGeneration(t, cliConfig.Configuration) {
 		t.Fatal("revocation did not advance configuration generation")
 	}
@@ -977,7 +978,7 @@ func assertRegionalCandidates(t *testing.T, token, accountID, endpointID, nodeID
 		t.Fatalf("regional validity=%v", claims)
 	}
 }
-func assertRelayGrant(t *testing.T, tokens []string, accountID, endpointID, nodeID, processEpoch string, nodeGeneration int64, selfKey, selfDisco []byte, fingerprint [32]byte, peerKey, peerDisco []byte, scopeCount int, relayWG, relayDisco []byte) {
+func assertRelayGrant(t *testing.T, tokens []string, accountID, endpointID, nodeID, processEpoch string, nodeGeneration int64, selfKey, selfDisco []byte, fingerprint [32]byte, memberships int, relayWG, relayDisco []byte) {
 	t.Helper()
 	if len(tokens) != 1 {
 		t.Fatalf("relay grants=%d", len(tokens))
@@ -997,30 +998,18 @@ func assertRelayGrant(t *testing.T, tokens []string, accountID, endpointID, node
 	} else if !hasDescriptor || descriptor["wireguard_public_key"] != base64.RawURLEncoding.EncodeToString(relayWG) || descriptor["disco_public_key"] != base64.RawURLEncoding.EncodeToString(relayDisco) || descriptor["virtual_address"] == "" {
 		t.Fatalf("peer relay descriptor=%v", descriptor)
 	}
-	peers := claims["peers"].([]any)
-	if peerKey == nil {
-		if len(peers) != 0 {
-			t.Fatalf("relay peers=%v", peers)
+	// Memberships, never a peer list or control keys (PLAN 3b "Relay pair authorization by membership").
+	if peers, _ := claims["peers"].([]any); len(peers) != 0 || claims["relay_control_peers"] != nil {
+		t.Fatalf("relay peers=%v control=%v", claims["peers"], claims["relay_control_peers"])
+	}
+	got, _ := claims["memberships"].([]any)
+	if len(got) != memberships {
+		t.Fatalf("relay memberships=%v, want %d", got, memberships)
+	}
+	for _, raw := range got {
+		if m := raw.(map[string]any); m["resource_kind"] == "machine_network" && m["resource_id"] != peernetwork.AccountNetworkID(accountID) {
+			t.Fatalf("mesh membership %v is not the account network", m)
 		}
-		return
-	}
-	if len(peers) != 1 {
-		t.Fatalf("relay peers=%v", peers)
-	}
-	peer := peers[0].(map[string]any)
-	if peer["wireguard_public_key"] != base64.RawURLEncoding.EncodeToString(peerKey) || peer["disco_public_key"] != base64.RawURLEncoding.EncodeToString(peerDisco) || len(peer["scopes"].([]any)) != scopeCount {
-		t.Fatalf("relay peer=%v", peer)
-	}
-}
-func assertRelayControlPeers(t *testing.T, tokens []string, peerKey []byte) {
-	t.Helper()
-	if len(tokens) != 1 {
-		t.Fatalf("relay grants=%d", len(tokens))
-	}
-	claims := networkClaims(t, tokens[0])
-	peers, ok := claims["relay_control_peers"].([]any)
-	if !ok || len(peers) != 1 || peers[0] != base64.RawURLEncoding.EncodeToString(peerKey) {
-		t.Fatalf("relay control peers=%v", claims["relay_control_peers"])
 	}
 }
 func assertNetworkConfig(t *testing.T, token, self, peer, direction string, scopeCount int) {

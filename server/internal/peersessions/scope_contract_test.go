@@ -125,44 +125,41 @@ func TestEveryRelayGrantTheServerBuildsIsAcceptedByRelaysAndClients(t *testing.T
 	base := peernetwork.RelayGrant{Version: 1, Issuer: "https://api.example.test", Audience: peernetwork.RelayGrantAudience, IssuedAt: now.Unix(), ExpiresAt: expires.Unix(), Generation: 9, AccountID: self.AccountID, EndpointID: self.EndpointID, WireGuardPublicKey: self.WireGuardPublicKey, DiscoPublicKey: self.DiscoPublicKey, CertificateFingerprint: self.QUICCertificateFingerprint, QUICPublicKey: self.QUICPublicKey, NodeID: "node", NodeGeneration: 1, ProcessEpoch: "epoch"}
 	peerRelay := &peernetwork.RelayDescriptor{WireGuardPublicKey: contractKey(3), DiscoPublicKey: contractKey(4), VirtualAddress: "fd7a:115c:a1e0::9"}
 	for _, relay := range []*peernetwork.RelayDescriptor{nil, peerRelay} {
-		chunks := relayGrantChunks(self, peers, peernetwork.MaxGrantPeers, expires.Unix())
-		if len(chunks) < 2 || len(chunks) > peernetwork.MaxGrantParts {
-			t.Fatalf("%d chunks", len(chunks))
+		g := base
+		g.Peers, g.Memberships, g.PeerRelay = []peernetwork.RelayPeer{}, relayGrantMemberships(self, peers, expires.Unix()), relay
+		token, err := signer.SignRelayGrant(g)
+		if err != nil {
+			t.Fatalf("mint refused a grant the server built: %v", err)
 		}
-		named := 0
-		for _, g := range relayGrantParts(base, chunks, relay) {
-			token, err := signer.SignRelayGrant(g)
-			if err != nil {
-				t.Fatalf("mint refused a grant the server built: %v", err)
-			}
-			if len(token) > peernetwork.MaxGrantBytes {
-				t.Fatalf("grant part of %d bytes", len(token))
-			}
-			body, err := base64.RawURLEncoding.DecodeString(strings.Split(token, ".")[1])
-			if err != nil {
-				t.Fatal(err)
-			}
-			var got peernetwork.RelayGrant
-			if err := peernetwork.DecodeSigned(body, &got); err != nil {
-				t.Fatalf("receivers refuse the signed claims: %v", err)
-			}
-			before := fmt.Sprint(got.Peers, got.Memberships)
-			if got.DropUnknownScopes(); fmt.Sprint(got.Peers, got.Memberships) != before {
-				t.Fatal("receivers drop a scope the server emits")
-			}
-			if err := got.Check(now); err != nil {
-				t.Fatalf("receivers refuse the grant: %v", err)
-			}
-			named += len(got.Peers)
+		if len(token) > peernetwork.MaxGrantBytes {
+			t.Fatalf("grant of %d bytes", len(token))
 		}
-		relayable := 0
+		body, err := base64.RawURLEncoding.DecodeString(strings.Split(token, ".")[1])
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got peernetwork.RelayGrant
+		if err := peernetwork.DecodeSigned(body, &got); err != nil {
+			t.Fatalf("receivers refuse the signed claims: %v", err)
+		}
+		before := fmt.Sprint(got.Peers, got.Memberships)
+		if got.DropUnknownScopes(); fmt.Sprint(got.Peers, got.Memberships) != before {
+			t.Fatal("receivers drop a scope the server emits")
+		}
+		if err := got.Check(now); err != nil {
+			t.Fatalf("receivers refuse the grant: %v", err)
+		}
+		// Every relayable scope kind a peer brings is a membership (the mesh as the account network).
+		kinds := map[string]bool{}
+		for _, m := range got.Memberships {
+			kinds[m.ResourceKind] = true
+		}
 		for _, p := range peers {
-			if len(relayGrantScopes(p.Scopes, expires.Unix())) > 0 {
-				relayable++
+			for _, s := range relayGrantScopes(p.Scopes, expires.Unix()) {
+				if !kinds[s.ResourceKind] {
+					t.Fatalf("relay scope kind %s of peer %s is not in the grant", s.ResourceKind, p.Identity.EndpointID)
+				}
 			}
-		}
-		if named != relayable || relayable < len(peers)/2 {
-			t.Fatalf("grants name %d of %d relayable peers (%d peers)", named, relayable, len(peers))
 		}
 	}
 }

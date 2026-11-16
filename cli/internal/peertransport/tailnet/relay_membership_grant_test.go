@@ -107,3 +107,50 @@ func TestRelayGrantPeerScopeWithoutExpiryTakesTheGrantExpiry(t *testing.T) {
 		}
 	}
 }
+
+// The server's membership grant carries the account mesh as one network (peernetwork.AccountNetworkID), not the
+// per-pair mesh scopes of the configuration. The client accepts it in each direction its configuration holds a mesh
+// scope of its own account, takes the account's peers as relay-control peers, and refuses another direction or
+// another account's network.
+func TestRelayGrantAccountNetworkMembershipFollowsTheConfiguredMesh(t *testing.T) {
+	a, cfg, signer, _ := networkTestAuthority(t)
+	cfg.Self.Role, cfg.Self.MachineID, cfg.Self.MachineGeneration = "machine", cfg.Self.EndpointID, 1
+	a.options.Self = cfg.Self
+	cfg.Peers[0].Identity = networkTestBinding("cli", "cli_peer", "fd7a:115c:a1e0::3", key.NewNode())
+	cfg.Peers[0].Scopes = []NetworkScope{{ResourceKind: "machine_network", ResourceID: "network_pair", ResourceGeneration: 1, Capability: "connect", Direction: "accept", Port: 443, ExpiresAt: 0}}
+	if err := a.Apply(t.Context(), networkToken(t, signer, cfg)); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().Unix()
+	node := RegionalNode{NodeID: "relay_account", NodeGeneration: 1, ProcessEpoch: "epoch_account", Region: "test", FailureDomain: "test", Roles: []string{"relay"}, Transports: []string{"derp_quic"}, EndpointHost: "relay.example.test", EndpointQUICPort: 443, State: "ready", ObservedAt: now, ExpiresAt: now + 60, CapacityLimit: 100, CapacityUsed: 1, CapacityObservedAt: now}
+	candidates := RegionalCandidates{Schema: "paperboat.regional-candidates.v1", Issuer: cfg.Issuer, Audience: "paperboat-regional-candidates", AccountID: cfg.Self.AccountID, EndpointID: cfg.Self.EndpointID, AuthorizationGeneration: cfg.Generation, Generation: 1, IssuedAt: now, ExpiresAt: now + 60, Nodes: []RegionalNode{node}}
+	if err := a.ApplyRegionalCandidates(t.Context(), regionalToken(t, signer, candidates)); err != nil {
+		t.Fatal(err)
+	}
+	sign := func(memberships ...derpquic.Scope) string {
+		grant := peernetwork.RelayGrant{Version: 1, Issuer: cfg.Issuer, Audience: "paperboat-relay", IssuedAt: now, ExpiresAt: now + 60, Generation: cfg.Generation, AccountID: cfg.Self.AccountID, EndpointID: cfg.Self.EndpointID, WireGuardPublicKey: cfg.Self.WireGuardPublicKey, CertificateFingerprint: cfg.Self.QUICCertificateFingerprint, QUICPublicKey: cfg.Self.QUICPublicKey, NodeID: node.NodeID, NodeGeneration: node.NodeGeneration, ProcessEpoch: node.ProcessEpoch, Peers: []peernetwork.RelayPeer{}, Memberships: memberships}
+		header, _ := json.Marshal(map[string]string{"alg": "EdDSA", "typ": "paperboat-relay-grant+jwt", "kid": "network_test"})
+		body, _ := json.Marshal(grant)
+		signed := base64.RawURLEncoding.EncodeToString(header) + "." + base64.RawURLEncoding.EncodeToString(body)
+		return signed + "." + base64.RawURLEncoding.EncodeToString(ed25519.Sign(signer, []byte(signed)))
+	}
+	network := derpquic.Scope{ResourceKind: "machine_network", ResourceID: peernetwork.AccountNetworkID(cfg.Self.AccountID), ResourceGeneration: 1, Capability: "connect", Direction: "accept", Port: 443, ExpiresAt: now + 60}
+	if err := a.ApplyRelayGrants(t.Context(), []string{sign(network)}); err != nil {
+		t.Fatalf("the account network membership in the configured direction was refused: %v", err)
+	}
+	a.relay.mu.Lock()
+	controlPeers := meshControlPeers(a.relay.grants[node.NodeID], cfg)
+	a.relay.mu.Unlock()
+	if len(controlPeers) != 1 {
+		t.Fatalf("the account network membership makes %d relay-control peers, want the configured account peer", len(controlPeers))
+	}
+	dial := network
+	dial.Direction = "dial"
+	foreign := network
+	foreign.ResourceID = peernetwork.AccountNetworkID("account_other")
+	for name, grant := range map[string]string{"unconfigured direction": sign(dial), "another account's network": sign(foreign)} {
+		if err := a.ApplyRelayGrants(t.Context(), []string{grant}); !errors.Is(err, ErrAuthority) {
+			t.Errorf("%s: err = %v, want refused", name, err)
+		}
+	}
+}

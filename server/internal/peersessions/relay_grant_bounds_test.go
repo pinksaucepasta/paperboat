@@ -12,9 +12,9 @@ import (
 	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
 )
 
-// The largest grant the server can chunk, signed by mint, fits the relay's token bound: the chunk bounds (peers,
-// scopes) are the relay's own, and every scope carries a resource id of the longest length a scope may have.
-func TestTheLargestRelayGrantChunkFitsTheRelayTokenBound(t *testing.T) {
+// The largest grant the server builds, signed by mint, fits the relay's token bound: the membership bound is the
+// relay's own, and every membership carries a resource id of the longest length a scope may have.
+func TestTheLargestRelayGrantFitsTheRelayTokenBound(t *testing.T) {
 	seed := make([]byte, ed25519.SeedSize)
 	provider, err := mint.New([]mint.Key{{ID: "k", PrivateKey: ed25519.NewKeyFromSeed(seed)}}, "k", time.Minute)
 	if err != nil {
@@ -22,43 +22,34 @@ func TestTheLargestRelayGrantChunkFitsTheRelayTokenBound(t *testing.T) {
 	}
 	key := func(i int) string { return base64.RawURLEncoding.EncodeToString(fmt.Appendf(nil, "%032d", i)) }
 	self := networkBinding{Binding: peernetwork.Binding{AccountID: strings.Repeat("a", 256), EndpointID: strings.Repeat("e", 256), WireGuardPublicKey: key(0)}}
-	var peers []networkPeer
-	for i := 1; i <= 999; i++ {
-		var scopes []networkScope
-		for c := range 4 {
-			scopes = append(scopes, networkScope{ResourceKind: "machine_access", ResourceID: strings.Repeat(fmt.Sprint(c), peernetwork.MaxResourceIDBytes),
-				ResourceGeneration: 1 << 53, Capability: "file_transfer", Direction: "accept", Port: peernetwork.NetworkPort, ExpiresAt: 1 << 40})
-		}
-		peers = append(peers, networkPeer{Identity: networkBinding{Binding: peernetwork.Binding{AccountID: self.AccountID, EndpointID: fmt.Sprint(i), WireGuardPublicKey: key(i), DiscoPublicKey: key(i)}}, Scopes: scopes})
-	}
 	now := time.Now().Unix()
-	chunks := relayGrantChunks(self, peers, peernetwork.MaxGrantPeers, now+60)
-	// The relay and CLI accept at most peernetwork.MaxGrantParts signed parts. Every peer of a
-	// 1,000-machine account must fit without truncation, even at full scope size.
-	if len(chunks) > peernetwork.MaxGrantParts {
-		t.Fatalf("999 peers require %d parts; relay and CLI accept %d", len(chunks), peernetwork.MaxGrantParts)
+	var peers []networkPeer
+	for i := 1; i <= 999; i++ { // other-account peers, each with a distinct maximal session scope
+		id := fmt.Sprintf("%0*d", peernetwork.MaxResourceIDBytes, i)
+		peers = append(peers, networkPeer{Identity: networkBinding{Binding: peernetwork.Binding{AccountID: "other", EndpointID: fmt.Sprint(i), WireGuardPublicKey: key(i), DiscoPublicKey: key(i)}},
+			Scopes: []networkScope{{ResourceKind: "machine_access", ResourceID: id, ResourceGeneration: 1 << 53, Capability: "file_transfer", Direction: "accept", Port: peernetwork.NetworkPort, ExpiresAt: now + 60}}})
 	}
-	named := map[string]bool{}
-	for _, chunk := range chunks {
-		for _, peer := range chunk.peers {
-			if named[peer.WireGuardPublicKey] {
-				t.Fatal("peer repeated across grant parts")
-			}
-			named[peer.WireGuardPublicKey] = true
-		}
+	memberships := relayGrantMemberships(self, peers, now+60)
+	parts := relayGrantMembershipParts(memberships)
+	if len(memberships) != 999 || len(parts) < 2 || len(parts) >= peernetwork.MaxGrantParts {
+		t.Fatalf("%d memberships in %d parts, want all 999 within %d parts", len(memberships), len(parts), peernetwork.MaxGrantParts)
+	}
+	kept := 0
+	for _, part := range parts {
 		grant := peernetwork.RelayGrant{Version: 1, Issuer: strings.Repeat("i", 256), Audience: peernetwork.RelayGrantAudience, IssuedAt: now, ExpiresAt: now + 60, Generation: 1 << 53,
 			AccountID: self.AccountID, EndpointID: self.EndpointID, WireGuardPublicKey: self.WireGuardPublicKey, DiscoPublicKey: key(0), CertificateFingerprint: strings.Repeat("f", 64),
-			QUICPublicKey: key(0), NodeID: strings.Repeat("n", 256), NodeGeneration: 1 << 53, ProcessEpoch: strings.Repeat("p", 256), Peers: chunk.peers, RelayControlPeers: chunk.control}
+			QUICPublicKey: key(0), NodeID: strings.Repeat("n", 256), NodeGeneration: 1 << 53, ProcessEpoch: strings.Repeat("p", 256), Peers: []peernetwork.RelayPeer{}, Memberships: part}
 		token, err := provider.SignRelayGrant(grant)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if len(token) > peernetwork.MaxGrantBytes {
-			t.Fatalf("a %d-peer grant chunk signs to %d bytes, over the relay's %d", len(chunk.peers), len(token), peernetwork.MaxGrantBytes)
+			t.Fatalf("a part of %d memberships signs to %d bytes, over the relay's %d", len(part), len(token), peernetwork.MaxGrantBytes)
 		}
+		kept += len(part)
 	}
-	if len(named) != 999 {
-		t.Fatalf("grant chunks cover %d peers, want 999", len(named))
+	if kept != 999 {
+		t.Fatalf("parts carry %d memberships, want 999", kept)
 	}
-	t.Logf("999 peers fit %d signed grant parts within %d bytes per part", len(chunks), peernetwork.MaxGrantBytes)
+	t.Logf("999 maximal memberships in %d parts within %d bytes each", len(parts), peernetwork.MaxGrantBytes)
 }

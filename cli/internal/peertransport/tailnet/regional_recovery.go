@@ -589,15 +589,11 @@ func (r *regionalRecovery) receive(ctx context.Context) {
 			reply, _ := r.control.handle(in.peer, node, generation, in.packet, func() error {
 				if server, ok := r.engine.(*mesh.Server); ok {
 					r.authority.relay.mu.Lock()
-					grant := r.authority.relay.grants[node.NodeID]
+					_, granted := r.authority.relay.grants[node.NodeID]
 					r.authority.relay.mu.Unlock()
-					var disco key.DiscoPublic
-					for _, p := range grant.Peers {
-						if p.WireGuardPublicKey == peers[in.peer].Identity.WireGuardPublicKey {
-							disco, _ = derpquic.ParseDiscoKey(p.DiscoPublicKey)
-						}
-					}
-					if disco.IsZero() {
+					// A membership grant names no peers: the peer's disco key is its signed configuration's.
+					disco, _ := derpquic.ParseDiscoKey(peers[in.peer].Identity.DiscoPublicKey)
+					if !granted || disco.IsZero() {
 						return ErrAuthority
 					}
 					if err := server.EnsureRelayPeer(in.peer, disco); err != nil {

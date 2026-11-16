@@ -19,7 +19,7 @@ import (
 
 // An account with 100 peers gets relay grants naming every peer and every peer's relay control key, across
 // chunks that released relays and CLIs accept (Lane W saw grants naming 16 of 44-96 peers).
-func TestRelayGrantsNameEveryPeerOfAHundredPeerAccountOnPostgres(t *testing.T) {
+func TestRelayGrantOfAHundredPeerAccountIsOneMembershipOnPostgres(t *testing.T) {
 	dsn := os.Getenv("PAPERBOAT_TEST_DATABASE_DSN")
 	if dsn == "" {
 		t.Skip("isolated PostgreSQL required")
@@ -81,41 +81,28 @@ func TestRelayGrantsNameEveryPeerOfAHundredPeerAccountOnPostgres(t *testing.T) {
 	}
 	// Other tests' relay nodes in a shared database may admit every account: count this node's grants.
 	var mine []map[string]any
+	size := 0
 	for _, grant := range grants {
 		if claims := networkClaims(t, grant); claims["node_id"] == node {
-			mine = append(mine, claims)
+			mine, size = append(mine, claims), len(grant)
 		}
 	}
-	if len(mine) != (len(peers)+peernetwork.MaxGrantPeers-1)/peernetwork.MaxGrantPeers {
-		t.Fatalf("grants for the node = %d, want bounded chunks of at most %d", len(mine), peernetwork.MaxGrantPeers)
+	// One grant whatever the account size: the account network membership, no peer list or control keys.
+	if len(mine) != 1 {
+		t.Fatalf("grants for the node = %d, want one", len(mine))
 	}
-	named, control := map[string]bool{}, map[string]bool{}
-	for _, claims := range mine {
-		if claims["generation"].(float64) != 7 {
-			t.Fatalf("grant generation = %v", claims["generation"])
-		}
-		inGrant := map[string]bool{}
-		for _, entry := range claims["peers"].([]any) {
-			k := entry.(map[string]any)["wireguard_public_key"].(string)
-			if named[k] || !want[k] {
-				t.Fatalf("peer %s repeated or unknown", k)
-			}
-			named[k], inGrant[k] = true, true
-		}
-		keys, _ := claims["relay_control_peers"].([]any)
-		if len(keys) > peernetwork.MaxGrantPeers {
-			t.Fatalf("grant names %d control peers; the shared contract refuses more than %d", len(keys), peernetwork.MaxGrantPeers)
-		}
-		for _, k := range keys {
-			if !inGrant[k.(string)] || control[k.(string)] {
-				t.Fatalf("control key %v outside its peer's grant or repeated", k)
-			}
-			control[k.(string)] = true
-		}
+	claims := mine[0]
+	memberships, _ := claims["memberships"].([]any)
+	peerList, _ := claims["peers"].([]any)
+	keys, _ := claims["relay_control_peers"].([]any)
+	if claims["generation"].(float64) != 7 || len(peerList) != 0 || len(keys) != 0 || len(memberships) != 1 || claims["peer_relay"] == nil {
+		t.Fatalf("grant %v: want generation 7, the peer relay and one membership, no peers", claims)
 	}
-	if len(named) != 100 || len(control) != 100 {
-		t.Fatalf("grants name %d of 100 peers and %d of 100 control keys", len(named), len(control))
+	m := memberships[0].(map[string]any)
+	if m["resource_id"] != peernetwork.AccountNetworkID(account) || m["direction"] != "dial" {
+		t.Fatalf("membership %v, want the account network (dial)", m)
 	}
+	t.Logf("relay grant for a 100-peer endpoint: %d bytes", size)
 }
 
 func make32() []byte {

@@ -183,3 +183,22 @@ func pairedConnections(keys []key.NodePublic, grants []Grant) (*Server, *peerCon
 	s.peers[p.key], s.peers[q.key] = p, q
 	return s, p, q
 }
+
+// Every renewal re-stamps a membership grant's scopes with the new grant expiry. The relay must see the same
+// memberships as the same authority (keep the fence and its pairs), and a changed membership as new authority.
+func TestMembershipGrantRenewalIsTheSameAuthority(t *testing.T) {
+	now := time.Now()
+	first, later := now.Add(time.Hour).Unix(), now.Add(2*time.Hour).Unix()
+	g := membershipGrant("account_a", "a1", first, scope("machine_network", "network_a", "connect", "dial", first))
+	renewed := g
+	renewed.Generation, renewed.IssuedAt, renewed.ExpiresAt = g.Generation+1, g.IssuedAt+1, later
+	renewed.Memberships = []Scope{scope("machine_network", "network_a", "connect", "dial", later)}
+	if !sameGrantAuthority(g, renewed) {
+		t.Fatal("a renewal of the same memberships is new authority: its fence and pairs would close every renewal")
+	}
+	widened := renewed
+	widened.Memberships = append(widened.Memberships, scope("machine_access", "access_1", "terminal", "accept", later))
+	if sameGrantAuthority(g, widened) {
+		t.Fatal("an added membership is the same authority")
+	}
+}

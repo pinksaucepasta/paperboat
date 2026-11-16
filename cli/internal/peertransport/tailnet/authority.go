@@ -129,20 +129,18 @@ type Authority struct {
 	// clientRelay: the client engine was started with at least one relay region (from a descriptor or configured nodes).
 	clientRelay bool
 	// reportMu guards the endpoint report schedule (endpoint_report.go).
-	// membershipGrants is the server's last membership_grants answer: renewals then ask for them.
-	membershipGrants atomic.Bool
-	reportMu         sync.Mutex
-	reportTimer      *time.Timer
-	lastReport       time.Time
-	startupReported  bool
-	reported         *[]string // the last endpoint set the server accepted; nil before the first
-	clients          map[string]authorizedClient
-	withdrawing      map[string]withdrawnPeer // withdrawal.go
-	clientSlots      chan struct{}
-	regional         *RegionalCandidates
-	relay            relayAuthority
-	recoveryWorkers  sync.WaitGroup
-	refreshSlot      chan struct{}
+	reportMu        sync.Mutex
+	reportTimer     *time.Timer
+	lastReport      time.Time
+	startupReported bool
+	reported        *[]string // the last endpoint set the server accepted; nil before the first
+	clients         map[string]authorizedClient
+	withdrawing     map[string]withdrawnPeer // withdrawal.go
+	clientSlots     chan struct{}
+	regional        *RegionalCandidates
+	relay           relayAuthority
+	recoveryWorkers sync.WaitGroup
+	refreshSlot     chan struct{}
 	// refreshedFrom is when the last applied renewal sent its request (guarded by refreshSlot).
 	refreshedFrom time.Time
 	refreshWake   chan struct{}

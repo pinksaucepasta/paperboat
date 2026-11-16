@@ -262,15 +262,24 @@ func (a *Authority) verifyRelayGrant(ctx context.Context, token string, cfg Netw
 		if len(g.Peers)+len(g.RelayControlPeers) > 0 || !membershipsConfigured(g.Memberships, cfg) {
 			return g, nil, ErrAuthority
 		}
-		if slices.ContainsFunc(g.Memberships, func(m derpquic.Scope) bool { return m.ResourceKind == "machine_network" }) {
-			for _, p := range cfg.Peers {
-				if peer, err := publicKey(p.Identity.WireGuardPublicKey); err == nil && p.Identity.AccountID == cfg.Self.AccountID {
-					control = append(control, peer)
-				}
-			}
-		}
+		control = append(control, meshControlPeers(g, cfg)...)
 	}
 	return g, control, nil
+}
+
+// meshControlPeers are the relay-control peers a membership grant makes: with the account mesh membership, every
+// configured peer of the endpoint's own account, as the relay itself decides (derpquic membership.go networkMember).
+func meshControlPeers(g peernetwork.RelayGrant, cfg NetworkConfiguration) []key.NodePublic {
+	if !slices.ContainsFunc(g.Memberships, func(m derpquic.Scope) bool { return m.ResourceKind == "machine_network" }) {
+		return nil
+	}
+	var control []key.NodePublic
+	for _, p := range cfg.Peers {
+		if peer, err := publicKey(p.Identity.WireGuardPublicKey); err == nil && p.Identity.AccountID == cfg.Self.AccountID {
+			control = append(control, peer)
+		}
+	}
+	return control
 }
 
 // relayGrantPeersConfigured checks a grant part's peers: a bounded subset of this endpoint's configured peers, each
@@ -394,6 +403,11 @@ func (a *Authority) configureRegionalRelays(config *tls.Config, only string) ([]
 			}
 			controlSet[peer] = true
 		}
+		if a.current != nil {
+			for _, peer := range meshControlPeers(g, *a.current) {
+				controlSet[peer] = true
+			}
+		}
 		id := regionalID(node.NodeID)
 		if _, exists := selected[id]; exists {
 			return nil, errors.New("regional node identifier collision")
@@ -497,9 +511,15 @@ func membershipsConfigured(memberships []derpquic.Scope, cfg NetworkConfiguratio
 		port                            uint16
 	}
 	configured := make(map[tuple]bool)
+	network := peernetwork.AccountNetworkID(cfg.Self.AccountID)
 	for _, p := range cfg.Peers {
 		for _, s := range p.Scopes {
 			configured[tuple{s.ResourceKind, s.ResourceID, s.Capability, s.Direction, s.ResourceGeneration, s.Port}] = true
+			// The per-pair mesh scopes of this account are its one network in a grant (the server's
+			// relayGrantMemberships): held in a direction only while some mesh scope holds that direction.
+			if s.ResourceKind == "machine_network" && p.Identity.AccountID == cfg.Self.AccountID {
+				configured[tuple{s.ResourceKind, network, s.Capability, s.Direction, s.ResourceGeneration, s.Port}] = true
+			}
 		}
 	}
 	for _, m := range memberships {
@@ -604,6 +624,9 @@ func relayGrantDiff(previous, next map[string]peernetwork.RelayGrant) (removed, 
 				for _, s := range peer.Scopes {
 					set[fmt.Sprint(node, "|", peer.WireGuardPublicKey, "|", s.ResourceKind, "|", s.ResourceID, "|", s.ResourceGeneration, "|", s.Capability, "|", s.Direction, "|", s.Port)] = true
 				}
+			}
+			for _, s := range g.Memberships {
+				set[fmt.Sprint(node, "|membership|", s.ResourceKind, "|", s.ResourceID, "|", s.ResourceGeneration, "|", s.Capability, "|", s.Direction, "|", s.Port)] = true
 			}
 		}
 		return set
