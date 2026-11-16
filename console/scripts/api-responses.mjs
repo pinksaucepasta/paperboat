@@ -37,11 +37,16 @@ for (const [path, item] of Object.entries(doc.paths)) {
     // Operator and machine-credential endpoints are not called from a browser session.
     const security = op.security ?? doc.security
     if (!security.some((option) => "cookieSession" in option)) continue
-    const response = ["200", "201", "202"].map((code) => op.responses?.[code]).find(Boolean)
-    const schema = response?.content?.["application/json"]?.schema
-    const data = (schema?.$ref ? doc.components.schemas[refName(schema.$ref)] : schema)?.properties?.data
-    // A response documented only as { data: any } says nothing to check.
-    if (!data || !Object.keys(data).some((key) => keep.includes(key) || key === "$ref")) continue
+    // A mutation documented as 200/201 with a resource and 202 with its operation answers with either: accept each shape.
+    const shapes = ["200", "201", "202"]
+      .map((code) => op.responses?.[code]?.content?.["application/json"]?.schema)
+      .filter(Boolean)
+      .map((schema) => (schema.$ref ? doc.components.schemas[refName(schema.$ref)] : schema)?.properties?.data)
+      // A response documented only as { data: any } says nothing to check.
+      .filter((data) => data && Object.keys(data).some((key) => keep.includes(key) || key === "$ref"))
+    const distinct = [...new Map(shapes.map((data) => [JSON.stringify(data), data])).values()]
+    if (!distinct.length) continue
+    const data = distinct.length === 1 ? distinct[0] : { oneOf: distinct }
     ops[`${method.toUpperCase()} ${path}`] = slim(data)
   }
 }

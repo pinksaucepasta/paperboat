@@ -79,6 +79,12 @@ describe("operations", () => {
     expect(operationFor("GET", "machines/machine_1")).toBe("GET /v1/machines/{machine_id}")
     expect(operationFor("GET", "no/such/path")).toBeUndefined()
   })
+  test("a tunnel rename answered 202 with its operation is a documented answer, not an unreadable one", () => {
+    const operation = sample(sharedSchema("PreviewTunnelOperation"))
+    expect(checkResponse("PATCH", "tunnels/tunnel_1", operation)).toBeUndefined()
+    expect(checkResponse("PATCH", "tunnels/tunnel_1", sample(sharedSchema("Tunnel")))).toBeUndefined()
+    expect(checkResponse("PATCH", "tunnels/tunnel_1", { id: 1 })).toContain("matches none of the shapes")
+  })
   test("an undocumented path is not checked", () => expect(checkResponse("GET", "no/such/path", "anything")).toBeUndefined())
 })
 

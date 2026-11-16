@@ -103,7 +103,12 @@
     type(input, to)
     await sleep(200)
     input.form.requestSubmit()
-    return Boolean(await until(async () => (await get(base)).name === to))
+    const saved = Boolean(await until(async () => (await get(base)).name === to))
+    // The page leaves edit mode once it has refetched; a second rename started before that edits stale state.
+    const settled = await until(
+      () => !document.querySelector('input[aria-label="Name"]') && document.querySelector("h1")?.textContent === to,
+    )
+    return saved && Boolean(settled)
   }
   pass("rename saved on the server", await rename(`${name}-renamed`))
   pass("the address did not change with the name", (await get(base)).stable_endpoint === mine.stable_endpoint)
