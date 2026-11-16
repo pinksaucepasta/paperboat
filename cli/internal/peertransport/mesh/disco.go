@@ -33,25 +33,37 @@ func IsMeowPacket(pkt []byte) bool {
 // keys at fixed offsets and ignore trailing bytes, so a ping or meowed without one still parses.
 const meowNonceLen = 8
 
-// EncodeMeowPing encodes a meow ping packet containing the sender's
-// node public key, disco public key and handshake nonce.
-func EncodeMeowPing(nodeKey key.NodePublic, discoKey key.DiscoPublic, nonce [meowNonceLen]byte) []byte {
-	b := make([]byte, 0, 4+1+key.NodePublicRawLen+key.DiscoPublicRawLen+meowNonceLen)
+// EncodeMeowPing encodes a meow ping packet containing the sender's node public key, disco public key, handshake
+// nonce and start id (as on the meowed).
+func EncodeMeowPing(nodeKey key.NodePublic, discoKey key.DiscoPublic, nonce, start [meowNonceLen]byte) []byte {
+	b := make([]byte, 0, 4+1+key.NodePublicRawLen+key.DiscoPublicRawLen+2*meowNonceLen)
 	b = append(b, meowMagic[:]...)
 	b = append(b, meowTypePing)
 	b = nodeKey.AppendTo(b)
 	b = discoKey.AppendTo(b)
-	return append(b, nonce[:]...)
+	b = append(b, nonce[:]...)
+	return append(b, start[:]...)
 }
 
-// EncodeMeowed encodes a meowed (acknowledgment) packet echoing the ping's nonce; a ping without one (zero nonce)
-// gets a bare meowed.
-func EncodeMeowed(nonce [meowNonceLen]byte) []byte {
-	b := make([]byte, 0, 4+1+meowNonceLen)
+// meowPingStart is the sender's start id a parsed meow ping carries (zero when absent).
+func meowPingStart(pkt []byte) (start [meowNonceLen]byte) {
+	const at = 4 + 1 + key.NodePublicRawLen + key.DiscoPublicRawLen + meowNonceLen
+	if len(pkt) > at {
+		copy(start[:], pkt[at:])
+	}
+	return start
+}
+
+// EncodeMeowed encodes a meowed (acknowledgment) packet echoing the ping's nonce, then the answering engine's start
+// id (random per engine start, so a dialer learns the peer restarted with the same keys); a ping without a nonce
+// (zero) gets a bare meowed.
+func EncodeMeowed(nonce, start [meowNonceLen]byte) []byte {
+	b := make([]byte, 0, 4+1+2*meowNonceLen)
 	b = append(b, meowMagic[:]...)
 	b = append(b, meowTypePong)
 	if nonce != ([meowNonceLen]byte{}) {
 		b = append(b, nonce[:]...)
+		b = append(b, start[:]...)
 	}
 	return b
 }
@@ -78,14 +90,15 @@ func ParseMeowPing(pkt []byte) (nodeKey key.NodePublic, discoKey key.DiscoPublic
 	return nodeKey, discoKey, nonce, true
 }
 
-// meowedNonce is the nonce a meowed packet echoes, if it carries one.
-func meowedNonce(pkt []byte) ([meowNonceLen]byte, bool) {
-	var nonce [meowNonceLen]byte
+// meowedNonce is the nonce a meowed packet echoes, if it carries one, and the answering engine's start id (zero
+// when absent).
+func meowedNonce(pkt []byte) (nonce, start [meowNonceLen]byte, ok bool) {
 	if len(pkt) < 5+meowNonceLen {
-		return nonce, false
+		return nonce, start, false
 	}
 	copy(nonce[:], pkt[5:])
-	return nonce, true
+	copy(start[:], pkt[5+meowNonceLen:])
+	return nonce, start, true
 }
 
 // IsMeowedPacket reports whether pkt is a meowed (acknowledgment) packet.

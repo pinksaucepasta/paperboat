@@ -57,7 +57,9 @@ type locoBackend struct {
 	// onLocalEndpoints is Server.OnLocalEndpoints.
 	onLocalEndpoints func()
 	policyMu         sync.Mutex // serializes policy replacement through machine synchronization
-	nextClientID     tailcfg.NodeID
+	// resetting is the peer whose WireGuard device state resetPeerSession is dropping; policyMu and mu held to set it.
+	resetting    key.NodePublic
+	nextClientID tailcfg.NodeID
 
 	// discoPublic returns the node's disco public key, memoized to
 	// avoid redoing the curve25519 derivation for every client that
@@ -156,10 +158,25 @@ func (b *locoBackend) peerConfig(k key.NodePublic) (_ wgcfg.PeerConfig, ok bool)
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	n, ok := b.clients[k]
-	if !ok {
+	if !ok || k == b.resetting {
 		return wgcfg.PeerConfig{}, false
 	}
 	return wgcfg.PeerConfig{AllowedIPs: n.AllowedIPs}, true
+}
+
+// resetPeerSession drops one admitted peer's WireGuard device state (keys, initiation history) and nothing else:
+// peerConfig refuses the peer for the SyncDevicePeer call, which removes the device peer, and the next packet to it
+// re-creates it lazily, which handshakes at once. Discovery state, paths and other peers stay.
+func (b *locoBackend) resetPeerSession(k key.NodePublic) {
+	b.policyMu.Lock()
+	defer b.policyMu.Unlock()
+	b.mu.Lock()
+	b.resetting = k
+	b.mu.Unlock()
+	b.sys.Engine.Get().SyncDevicePeer(k)
+	b.mu.Lock()
+	b.resetting = key.NodePublic{}
+	b.mu.Unlock()
 }
 
 // peerByIP returns the public key of the peer that outbound packets

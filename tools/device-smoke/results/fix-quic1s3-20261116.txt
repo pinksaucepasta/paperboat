@@ -1,0 +1,85 @@
+FIX-QUIC1S-3: first exec right after a target's carrier restarted still lost 1 s in 3 of 28 on 22e3495fd.
+Two containers on pbvm2 (q3-a, q3-b), same account, direct path. Per run: restart the target's paperboatd
+(systemctl --user restart), wait 3 or 6 s, `pb exec <target> -- true`; quic_handshake from the client's
+redial_step diagnostics. Runs 1-15 q3-a -> q3-b, 16-30 q3-b -> q3-a.
+
+Steps (each a branch build, same 30-run script):
+ dev-efe7f0ff4 (start id on meowed + ping; reset only on the answer to this dial's own new nonce):
+   r2 1/30 failed:1008 (run 16), r3 2/30 (runs 1, 16). Cause of both: the first exec of a client that had only
+   been dialed; its first relay send of the handshake failed (relay connect held / in backoff) and the next send
+   came 1 s later, after QUIC's 1 s handshake timeout.
+ dev-8c820f539 (+ failed send retried after the 250 ms connect backoff): r4 1/30 failed:1005 (run 16); the answer
+   now came at +300 ms but q3-b (restarted in run 15) had never heard q3-a's start id, so nothing was reset.
+ dev-fb16dc400 (+ an unknown start id resets too, on the first answer): r5 30/30, but it broke
+   TestPeersMeetOnTheSelectedRelayAndNotTheLowestID: the reset came after a direct answer had released the dial and
+   dropped the packet it had queued. Moving that reset to before the dial (dev-a61e05b2d): r6 2/30 (runs 1, 16);
+   the timeline showed the reset done before the dial, yet the flow's first initiation, sent 4 ms in on the direct
+   answer, was lost and wireguard-go allows the next only 5 s later. The target logged the client's meow 300 ms in.
+ dev-0d4cf5503 (final: a new handshake's dial waits, at most 500 ms, for the relay acknowledgment after a direct
+   answer; the reset for an unheard peer runs before the dial sends):
+   run=1 q3-a->q3-b delay=3s rc=0 wall_ms=3689 quic_handshake=[ready:69]
+   run=2 q3-a->q3-b delay=6s rc=0 wall_ms=1700 quic_handshake=[ready:216]
+   run=3 q3-a->q3-b delay=3s rc=0 wall_ms=1170 quic_handshake=[ready:4]
+   run=4 q3-a->q3-b delay=6s rc=0 wall_ms=895 quic_handshake=[ready:4]
+   run=5 q3-a->q3-b delay=3s rc=0 wall_ms=1158 quic_handshake=[ready:7]
+   run=6 q3-a->q3-b delay=6s rc=0 wall_ms=927 quic_handshake=[ready:15]
+   run=7 q3-a->q3-b delay=3s rc=0 wall_ms=892 quic_handshake=[ready:4]
+   run=8 q3-a->q3-b delay=6s rc=0 wall_ms=884 quic_handshake=[ready:11]
+   run=9 q3-a->q3-b delay=3s rc=0 wall_ms=2663 quic_handshake=[ready:4]
+   run=10 q3-a->q3-b delay=6s rc=0 wall_ms=1151 quic_handshake=[ready:13]
+   run=11 q3-a->q3-b delay=3s rc=0 wall_ms=662 quic_handshake=[ready:3]
+   run=12 q3-a->q3-b delay=6s rc=0 wall_ms=764 quic_handshake=[ready:8]
+   run=13 q3-a->q3-b delay=3s rc=0 wall_ms=654 quic_handshake=[ready:4]
+   run=14 q3-a->q3-b delay=6s rc=0 wall_ms=638 quic_handshake=[ready:7]
+   run=15 q3-a->q3-b delay=3s rc=0 wall_ms=644 quic_handshake=[ready:3]
+   run=16 q3-b->q3-a delay=6s rc=0 wall_ms=2658 quic_handshake=[ready:68]
+   run=17 q3-b->q3-a delay=3s rc=0 wall_ms=885 quic_handshake=[ready:3]
+   run=18 q3-b->q3-a delay=6s rc=0 wall_ms=886 quic_handshake=[ready:3]
+   run=19 q3-b->q3-a delay=3s rc=0 wall_ms=626 quic_handshake=[ready:6]
+   run=20 q3-b->q3-a delay=6s rc=0 wall_ms=1670 quic_handshake=[ready:3]
+   run=21 q3-b->q3-a delay=3s rc=0 wall_ms=625 quic_handshake=[ready:3]
+   run=22 q3-b->q3-a delay=6s rc=0 wall_ms=599 quic_handshake=[ready:6]
+   run=23 q3-b->q3-a delay=3s rc=0 wall_ms=617 quic_handshake=[ready:3]
+   run=24 q3-b->q3-a delay=6s rc=0 wall_ms=1373 quic_handshake=[ready:207]
+   run=25 q3-b->q3-a delay=3s rc=0 wall_ms=616 quic_handshake=[ready:3]
+   run=26 q3-b->q3-a delay=6s rc=0 wall_ms=619 quic_handshake=[ready:5]
+   run=27 q3-b->q3-a delay=3s rc=0 wall_ms=642 quic_handshake=[ready:7]
+   run=28 q3-b->q3-a delay=6s rc=0 wall_ms=711 quic_handshake=[ready:4]
+   run=29 q3-b->q3-a delay=3s rc=0 wall_ms=627 quic_handshake=[ready:9]
+   run=30 q3-b->q3-a delay=6s rc=0 wall_ms=1660 quic_handshake=[ready:3]
+   r7: 30/30 rc=0, 0 at 1001 ms; quic_handshake median 5 ms, max 216 ms, 28 of 30 under 100 ms.
+   run=1 q3-a->q3-b delay=3s rc=0 wall_ms=1598 quic_handshake=[ready:107]
+   run=2 q3-a->q3-b delay=6s rc=0 wall_ms=925 quic_handshake=[ready:208]
+   run=3 q3-a->q3-b delay=3s rc=0 wall_ms=881 quic_handshake=[ready:4]
+   run=4 q3-a->q3-b delay=6s rc=0 wall_ms=880 quic_handshake=[ready:3]
+   run=5 q3-a->q3-b delay=3s rc=0 wall_ms=598 quic_handshake=[ready:5]
+   run=6 q3-a->q3-b delay=6s rc=0 wall_ms=617 quic_handshake=[ready:3]
+   run=7 q3-a->q3-b delay=3s rc=0 wall_ms=613 quic_handshake=[ready:3]
+   run=8 q3-a->q3-b delay=6s rc=0 wall_ms=610 quic_handshake=[ready:5]
+   run=9 q3-a->q3-b delay=3s rc=0 wall_ms=614 quic_handshake=[ready:3]
+   run=10 q3-a->q3-b delay=6s rc=0 wall_ms=612 quic_handshake=[ready:3]
+   run=11 q3-a->q3-b delay=3s rc=0 wall_ms=1112 quic_handshake=[ready:4]
+   run=12 q3-a->q3-b delay=6s rc=0 wall_ms=1899 quic_handshake=[ready:4]
+   run=13 q3-a->q3-b delay=3s rc=0 wall_ms=1607 quic_handshake=[ready:3]
+   run=14 q3-a->q3-b delay=6s rc=0 wall_ms=616 quic_handshake=[ready:5]
+   run=15 q3-a->q3-b delay=3s rc=0 wall_ms=613 quic_handshake=[ready:3]
+   run=16 q3-b->q3-a delay=6s rc=0 wall_ms=6396 quic_handshake=[ready:100]
+   run=17 q3-b->q3-a delay=3s rc=0 wall_ms=3113 quic_handshake=[ready:8]
+   run=18 q3-b->q3-a delay=6s rc=0 wall_ms=1385 quic_handshake=[ready:208]
+   run=19 q3-b->q3-a delay=3s rc=0 wall_ms=849 quic_handshake=[ready:5]
+   run=20 q3-b->q3-a delay=6s rc=0 wall_ms=612 quic_handshake=[ready:5]
+   run=21 q3-b->q3-a delay=3s rc=0 wall_ms=1353 quic_handshake=[ready:3]
+   run=22 q3-b->q3-a delay=6s rc=0 wall_ms=615 quic_handshake=[ready:3]
+   run=23 q3-b->q3-a delay=3s rc=0 wall_ms=621 quic_handshake=[ready:6]
+   run=24 q3-b->q3-a delay=6s rc=0 wall_ms=623 quic_handshake=[ready:7]
+   run=25 q3-b->q3-a delay=3s rc=0 wall_ms=857 quic_handshake=[ready:5]
+   run=26 q3-b->q3-a delay=6s rc=0 wall_ms=1361 quic_handshake=[ready:5]
+   run=27 q3-b->q3-a delay=3s rc=0 wall_ms=887 quic_handshake=[ready:4]
+   run=28 q3-b->q3-a delay=6s rc=0 wall_ms=861 quic_handshake=[ready:3]
+   run=29 q3-b->q3-a delay=3s rc=0 wall_ms=870 quic_handshake=[ready:7]
+   run=30 q3-b->q3-a delay=6s rc=0 wall_ms=600 quic_handshake=[ready:7]
+   r8: 30/30 rc=0, 0 at 1001 ms; quic_handshake median 5 ms, max 208 ms, 26 of 30 under 100 ms.
+   (22e3495fd on q1-a/q1-b: 204-210 ms x16, 606-610 ms x9, 1001 ms + retry x3 of 28.)
+Pair check on dev-0d4cf5503 (`pb version` dev-0d4cf5503 on q3-a and q3-b):
+ pb exec q3-a->q3-b rc=0 (q3-b's hostname), q3-b->q3-a rc=0 (q3-a's hostname);
+ pb connect q3-a->q3-b rc=0 echoed q3-b's hostname, q3-b->q3-a rc=0 echoed q3-a's.

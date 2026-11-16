@@ -146,29 +146,46 @@ func TestOnlyTheAnswerToOurHandshakeRecordsItsRegion(t *testing.T) {
 		}
 	}
 	answer := func(region tailcfg.DERPRegionID, pkt []byte) {
-		nonce, echoed := meowedNonce(pkt)
-		s.meowed(peer, region, nonce, echoed)
+		nonce, start, echoed := meowedNonce(pkt)
+		s.meowed(peer, region, nonce, start, echoed)
 	}
 	if got := s.lb.peerDERPRegion(peer); got != one.RegionID {
 		t.Fatalf("fixture: peer starts on %d, want %d", got, one.RegionID)
 	}
 	w := outstanding(7)
-	answer(two.RegionID, EncodeMeowed([meowNonceLen]byte{6})) // late answer to an earlier handshake
+	answer(two.RegionID, EncodeMeowed([meowNonceLen]byte{6}, testStart)) // late answer to an earlier handshake
 	if answered(w) || s.lb.peerDERPRegion(peer) != one.RegionID {
 		t.Fatal("an answer to another handshake was taken")
 	}
-	answer(two.RegionID, EncodeMeowed(w.nonce))
+	answer(two.RegionID, EncodeMeowed(w.nonce, testStart))
 	if !answered(w) || s.lb.peerDERPRegion(peer) != two.RegionID {
 		t.Fatalf("the answer to our handshake: answered %v, region %d", answered(w), s.lb.peerDERPRegion(peer))
 	}
-	answer(one.RegionID, EncodeMeowed(w.nonce)) // the same answer again, from the peer's other relay
+	answer(one.RegionID, EncodeMeowed(w.nonce, testStart)) // the same answer again, from the peer's other relay
 	if s.lb.peerDERPRegion(peer) != two.RegionID {
 		t.Fatal("a second answer to an answered handshake moved the peer")
 	}
 	bare := outstanding(9)
-	answer(one.RegionID, EncodeMeowed([meowNonceLen]byte{}))
+	answer(one.RegionID, EncodeMeowed([meowNonceLen]byte{}, testStart))
 	if !answered(bare) || s.lb.peerDERPRegion(peer) != two.RegionID {
 		t.Fatal("a bare answer must complete the handshake without moving the peer")
+	}
+	// Only the answer to the latest dial's own probe may report a restart: a late answer from the old process (or to
+	// an earlier ping) carrying another start id never resets a fresh session.
+	if got := s.peerStarts[peer]; got != testStart {
+		t.Fatalf("the answer to our handshake recorded start %v", got)
+	}
+	other := [meowNonceLen]byte{42}
+	w.probe = [meowNonceLen]byte{11}
+	s.peerReady[peer] = w
+	answer(one.RegionID, EncodeMeowed(w.nonce, other))
+	answer(one.RegionID, EncodeMeowed([meowNonceLen]byte{10}, other))
+	if got := s.peerStarts[peer]; got != testStart {
+		t.Fatalf("a stale answer recorded start %v", got)
+	}
+	answer(one.RegionID, EncodeMeowed(w.probe, other))
+	if got := s.peerStarts[peer]; got != other || w.probe != ([meowNonceLen]byte{}) {
+		t.Fatalf("the probe's answer: start %v, probe %v", got, w.probe)
 	}
 }
 
@@ -199,7 +216,7 @@ func TestHandshakeAnswerRacingAContactChangeDoesNotDeadlock(t *testing.T) {
 
 	s.lb.policyMu.Lock() // a contact change is under way
 	answered := make(chan struct{})
-	go func() { s.meowed(peer, two.RegionID, w.nonce, true); close(answered) }()
+	go func() { s.meowed(peer, two.RegionID, w.nonce, testStart, true); close(answered) }()
 	time.Sleep(100 * time.Millisecond) // the answer is now waiting for policyMu inside setPeerRelayRegion
 	invalidated := make(chan struct{})
 	go func() { s.invalidateAuthorizedPeerLocked(peer); close(invalidated) }()

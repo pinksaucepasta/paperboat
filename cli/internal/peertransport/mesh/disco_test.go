@@ -14,7 +14,7 @@ func TestMeowPingRoundTrip(t *testing.T) {
 	nodeKey := key.NewNode().Public()
 	discoKey := key.NewDisco().Public()
 
-	pkt := EncodeMeowPing(nodeKey, discoKey, testNonce)
+	pkt := EncodeMeowPing(nodeKey, discoKey, testNonce, testStart)
 	if !IsMeowPacket(pkt) {
 		t.Fatal("EncodeMeowPing output is not a meow packet")
 	}
@@ -34,7 +34,7 @@ func TestMeowPingRoundTrip(t *testing.T) {
 }
 
 func TestMeowedRoundTrip(t *testing.T) {
-	pkt := EncodeMeowed(testNonce)
+	pkt := EncodeMeowed(testNonce, testStart)
 	if !IsMeowPacket(pkt) {
 		t.Fatal("EncodeMeowed output is not a meow packet")
 	}
@@ -50,7 +50,7 @@ func TestMeowedRoundTrip(t *testing.T) {
 }
 
 func TestIsMeowPacket(t *testing.T) {
-	ping := EncodeMeowPing(key.NewNode().Public(), key.NewDisco().Public(), testNonce)
+	ping := EncodeMeowPing(key.NewNode().Public(), key.NewDisco().Public(), testNonce, testStart)
 	tests := []struct {
 		name string
 		pkt  []byte
@@ -64,7 +64,7 @@ func TestIsMeowPacket(t *testing.T) {
 		{"wireguard_type1", []byte{1, 0, 0, 0}, false},
 		{"disco_magic", []byte("TS\xf0\x9f\x92\xac"), false},
 		{"ping", ping, true},
-		{"meowed", EncodeMeowed(testNonce), true},
+		{"meowed", EncodeMeowed(testNonce, testStart), true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -83,11 +83,11 @@ func TestIsMeowedPacket(t *testing.T) {
 	}{
 		{"nil", nil, false},
 		{"magic_only", []byte("meow"), false},
-		{"meowed", EncodeMeowed(testNonce), true},
+		{"meowed", EncodeMeowed(testNonce, testStart), true},
 		{"ping_type", []byte("meow\x01"), false},
 		{"unknown_type", []byte("meow\x03"), false},
 		{"wrong_magic", []byte("woem\x02"), false},
-		{"meowed_with_trailer", append(EncodeMeowed(testNonce), 0xff), true},
+		{"meowed_with_trailer", append(EncodeMeowed(testNonce, testStart), 0xff), true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -102,10 +102,10 @@ func TestIsMeowedPacket(t *testing.T) {
 // malformed packets rather than panicking or returning partial keys. These
 // packets arrive over DERP from unauthenticated senders.
 func TestParseMeowPingMalformed(t *testing.T) {
-	full := EncodeMeowPing(key.NewNode().Public(), key.NewDisco().Public(), testNonce)
-	zeroDisco := EncodeMeowPing(key.NewNode().Public(), key.DiscoPublic{}, testNonce)
-	if len(zeroDisco) != 77 {
-		t.Fatalf("zero-disco meow is %d bytes; want 77", len(zeroDisco))
+	full := EncodeMeowPing(key.NewNode().Public(), key.NewDisco().Public(), testNonce, testStart)
+	zeroDisco := EncodeMeowPing(key.NewNode().Public(), key.DiscoPublic{}, testNonce, testStart)
+	if len(zeroDisco) != 85 {
+		t.Fatalf("zero-disco meow is %d bytes; want 85", len(zeroDisco))
 	}
 
 	tests := []struct {
@@ -115,10 +115,10 @@ func TestParseMeowPingMalformed(t *testing.T) {
 		{"nil", nil},
 		{"magic_only", []byte("meow")},
 		{"type_only", []byte("meow\x01")},
-		{"meowed", EncodeMeowed(testNonce)},
+		{"meowed", EncodeMeowed(testNonce, testStart)},
 		{"unknown_type", append([]byte("meow\x7f"), full[5:]...)},
 		{"truncated_node_key", full[:5+key.NodePublicRawLen-1]},
-		{"truncated_disco_key", full[:len(full)-meowNonceLen-1]},
+		{"truncated_disco_key", full[:len(full)-2*meowNonceLen-1]},
 		{"zero_disco_key", zeroDisco},
 	}
 	for _, tt := range tests {
@@ -136,7 +136,7 @@ func TestParseMeowPingMalformed(t *testing.T) {
 	}
 
 	// Every truncation of a valid ping must be rejected.
-	for n := range len(full) - meowNonceLen {
+	for n := range len(full) - 2*meowNonceLen {
 		if _, _, _, ok := ParseMeowPing(full[:n]); ok {
 			t.Errorf("ParseMeowPing accepted a %d-byte prefix of a %d-byte ping", n, len(full))
 		}
@@ -148,7 +148,7 @@ func TestParseMeowPingMalformed(t *testing.T) {
 func TestParseMeowPingTrailingBytes(t *testing.T) {
 	nodeKey := key.NewNode().Public()
 	discoKey := key.NewDisco().Public()
-	pkt := append(EncodeMeowPing(nodeKey, discoKey, testNonce), 'x', 'y', 'z')
+	pkt := append(EncodeMeowPing(nodeKey, discoKey, testNonce, testStart), 'x', 'y', 'z')
 
 	gotNode, gotDisco, _, ok := ParseMeowPing(pkt)
 	if !ok {
@@ -163,7 +163,7 @@ func TestParseMeowPingTrailingBytes(t *testing.T) {
 // not collide with WireGuard message types or disco's magic, since all three
 // share the DERP packet path.
 func TestMeowMagicDistinct(t *testing.T) {
-	magic := EncodeMeowed(testNonce)[:4]
+	magic := EncodeMeowed(testNonce, testStart)[:4]
 	for typ := byte(1); typ <= 4; typ++ {
 		// WireGuard messages start with a type byte then three zero bytes.
 		if bytes.Equal(magic, []byte{typ, 0, 0, 0}) {
@@ -177,26 +177,31 @@ func TestMeowMagicDistinct(t *testing.T) {
 
 var testNonce = [meowNonceLen]byte{1, 2, 3, 4, 5, 6, 7, 8}
 
+var testStart = [meowNonceLen]byte{9, 10, 11, 12, 13, 14, 15, 16}
+
 // The handshake nonce goes out on the ping and comes back on the meowed, so the dialer can tell an answer to its own
 // outstanding handshake from a duplicate or a stale one. A ping from a sender without a nonce still parses (zero
 // nonce) and gets a bare meowed, which carries none.
 func TestMeowNonceRoundTrip(t *testing.T) {
-	ping := EncodeMeowPing(key.NewNode().Public(), key.NewDisco().Public(), testNonce)
+	ping := EncodeMeowPing(key.NewNode().Public(), key.NewDisco().Public(), testNonce, testStart)
 	if _, _, nonce, ok := ParseMeowPing(ping); !ok || nonce != testNonce {
 		t.Fatalf("ping nonce %v ok=%v", nonce, ok)
 	}
-	if nonce, ok := meowedNonce(EncodeMeowed(testNonce)); !ok || nonce != testNonce {
-		t.Fatalf("meowed echo %v ok=%v", nonce, ok)
+	if nonce, start, ok := meowedNonce(EncodeMeowed(testNonce, testStart)); !ok || nonce != testNonce || start != testStart {
+		t.Fatalf("meowed echo %v start %v ok=%v", nonce, start, ok)
 	}
-	bare := ping[:len(ping)-meowNonceLen]
+	if start := meowPingStart(ping); start != testStart {
+		t.Fatalf("ping start %v", start)
+	}
+	bare := ping[:len(ping)-2*meowNonceLen]
 	_, _, nonce, ok := ParseMeowPing(bare)
 	if !ok || nonce != ([meowNonceLen]byte{}) {
 		t.Fatalf("ping without a nonce: %v ok=%v", nonce, ok)
 	}
-	if reply := EncodeMeowed(nonce); len(reply) != 5 {
+	if reply := EncodeMeowed(nonce, testStart); len(reply) != 5 {
 		t.Fatalf("answer to a ping without a nonce is %d bytes, want a bare meowed", len(reply))
 	}
-	if _, ok := meowedNonce(EncodeMeowed(nonce)); ok {
+	if _, _, ok := meowedNonce(EncodeMeowed(nonce, testStart)); ok {
 		t.Fatal("a bare meowed reported a nonce")
 	}
 }

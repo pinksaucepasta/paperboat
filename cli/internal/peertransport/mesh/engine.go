@@ -73,6 +73,10 @@ type Server struct {
 	peerReadyMu    sync.Mutex
 	peerReady      map[key.NodePublic]*meowWait
 	relayConnects  relayConnects
+	// startID is random per Start and goes out on every meowed, so a peer learns this engine restarted although its
+	// keys and port stayed (Tailscale's per-start disco key). peerStarts is each peer's last one; peerReadyMu guards it.
+	startID    [meowNonceLen]byte
+	peerStarts map[key.NodePublic][meowNonceLen]byte
 }
 
 // meowWait is the outstanding handshake with one peer, shared by concurrent dials: ready closes on its answer.
@@ -80,6 +84,9 @@ type meowWait struct {
 	ready   chan struct{}
 	nonce   [meowNonceLen]byte
 	claimed bool // an answer is being taken; peerReadyMu guards it
+	// probe is the nonce of the latest dial's ping after the handshake was answered; only its answer may report a
+	// restart, so a late answer (from the old process, or to an earlier ping) never resets a fresh session.
+	probe [meowNonceLen]byte
 }
 
 // Start installs the explicit identity, allocation and peer policy before networking.
@@ -107,6 +114,7 @@ func (s *Server) Start() error {
 		return fmt.Errorf("missing RegionID in %v", logger.AsJSON(reg))
 	}
 
+	_, _ = rand.Read(s.startID[:]) // crypto/rand never fails
 	lb := newLocoBackend(priv)
 	if !s.DiscoPrivate.IsZero() {
 		lb.discoPrivate = s.DiscoPrivate
@@ -164,23 +172,25 @@ func (s *Server) Start() error {
 			return false
 		}
 		if IsMeowedPacket(pkt) {
-			nonce, echoed := meowedNonce(pkt) // pkt is the receiver's buffer: read it before returning
-			go s.meowed(src, regionID, nonce, echoed)
+			nonce, start, echoed := meowedNonce(pkt) // pkt is the receiver's buffer: read it before returning
+			go s.meowed(src, regionID, nonce, start, echoed)
 			return true
 		}
 		if _, discoPub, nonce, ok := ParseMeowPing(pkt); ok {
+			start := meowPingStart(pkt) // pkt is the receiver's buffer: read it before returning
 			mc := lb.sys.MagicSock.Get()
 			go func() {
 				// Only reply once the client is fully added as a peer:
 				// "meowed" is the ack that tells the client it can
 				// start dialing. Disallowed clients get no reply.
 				if lb.onMeow(src, discoPub) {
+					s.recordPeerStart(src, start)
 					// The peer reached us through regionID, so it is a rendezvous both ends hold: answer it there
 					// rather than on the peer's default region, which may be a relay this engine cannot reach
 					// (pbmac 2026-11-05). Tailscale replies on the region it heard a peer from (magicsock
 					// derp.go derpRoute, issue 150).
 					_ = lb.setPeerRelayRegion(src, regionID)
-					if _, err := mc.SendDERPPacketTo(src, regionID, EncodeMeowed(nonce)); err == nil {
+					if _, err := mc.SendDERPPacketTo(src, regionID, EncodeMeowed(nonce, s.startID)); err == nil {
 						// The client's peer map is installed before it sends the meow.
 						// Advertise after the acknowledgment on the same DERP route so
 						// it can process our endpoints before probing directly.
@@ -328,17 +338,30 @@ func (s *Server) prepareAuthorizedPeer(ctx context.Context, peer key.NodePublic,
 // handshake, or a second answer from a peer still on two relays moves nothing. A bare answer (a peer that sends no
 // nonce) completes the handshake without moving the peer. The region is recorded before the dial is released, so
 // its first packets take it.
-func (s *Server) meowed(src key.NodePublic, regionID tailcfg.DERPRegionID, nonce [meowNonceLen]byte, echoed bool) {
+func (s *Server) meowed(src key.NodePublic, regionID tailcfg.DERPRegionID, nonce, start [meowNonceLen]byte, echoed bool) {
 	// The waiter is claimed under peerReadyMu and the region set without it: setPeerRelayRegion takes policyMu, which
 	// SetPeerContacts and InvalidateAuthorizedPeer hold while they take peerReadyMu (ABBA, review of b6eb2018c).
 	s.peerReadyMu.Lock()
 	w := s.peerReady[src]
+	if w != nil && echoed && w.probe != ([meowNonceLen]byte{}) && nonce == w.probe {
+		w.probe = [meowNonceLen]byte{}
+		restarted := s.notePeerStartLocked(src, start)
+		s.peerReadyMu.Unlock()
+		if restarted {
+			s.resetRestartedPeer(src)
+		}
+		return
+	}
 	if w == nil || w.claimed || (echoed && nonce != w.nonce) {
 		s.peerReadyMu.Unlock()
 		return
 	}
 	w.claimed = true
+	restarted := echoed && s.notePeerStartLocked(src, start)
 	s.peerReadyMu.Unlock()
+	if restarted {
+		s.resetRestartedPeer(src) // before the dial is released, so its first packets handshake at once
+	}
 	if echoed {
 		_ = s.lb.setPeerRelayRegion(src, regionID)
 	}
@@ -347,6 +370,45 @@ func (s *Server) meowed(src key.NodePublic, regionID tailcfg.DERPRegionID, nonce
 	if s.peerReady[src] == w { // not invalidated meanwhile
 		close(w.ready)
 	}
+}
+
+// notePeerStartLocked records the start id from an answer to one of our own fresh nonces and reports whether it
+// changed. peerReadyMu must be held.
+func (s *Server) notePeerStartLocked(peer key.NodePublic, start [meowNonceLen]byte) bool {
+	prev, known := s.peerStarts[peer]
+	mak.Set(&s.peerStarts, peer, start)
+	return known && prev != start
+}
+
+// recordPeerStart notes the start id a peer's ping carries, so our own later dial to a peer that only ever dialed us
+// can tell it restarted. It never resets: the peer that pings is about to handshake with us, and dropping our end of
+// that fresh session would strand it.
+func (s *Server) recordPeerStart(peer key.NodePublic, start [meowNonceLen]byte) {
+	if start == ([meowNonceLen]byte{}) {
+		return
+	}
+	s.peerReadyMu.Lock()
+	mak.Set(&s.peerStarts, peer, start)
+	s.peerReadyMu.Unlock()
+}
+
+// resetRestartedPeer drops the WireGuard session held with a peer that restarted with the same keys and port: the
+// session died with the old process, and wireguard-go allows a new initiation only 5 s after the last one, so a
+// flow could lose QUIC's 1 s handshake (pbvm2: 3 of 28 execs right after a target restart lost 1 s with
+// MarkDevicePeerForHandshake alone). The next packet re-creates the peer, which handshakes at once, as Tailscale
+// resets a peer whose per-start disco key changed (ipn/ipnlocal/local.go:2579, magicsock endpoint.go updateFromNode).
+func (s *Server) resetRestartedPeer(peer key.NodePublic) {
+	diagnosticlog.TryInfo("native underlay session", "stage", "peer_restarted")
+	s.lb.resetPeerSession(peer)
+}
+
+// resetUnheardPeer drops the WireGuard session held with a peer whose start id this engine never heard, before a new
+// handshake's dial sends anything: the session (from the peer dialing us) may have died with a restart since, and no
+// answer can tell (pbvm2 q3-b's first exec to a restarted q3-a lost 1 s that way). Resetting later, on the answer,
+// would drop the dial's queued packets once a direct answer released it.
+func (s *Server) resetUnheardPeer(peer key.NodePublic) {
+	diagnosticlog.TryInfo("native underlay session", "stage", "peer_start_unheard")
+	s.lb.resetPeerSession(peer)
 }
 
 // meowNonceRead fills a handshake nonce; tests replace it to fail.
@@ -364,6 +426,8 @@ func (s *Server) awaitMeow(ctx context.Context, peer key.NodePublic) error {
 		s.peerReady = make(map[key.NodePublic]*meowWait)
 	}
 	w := s.peerReady[peer]
+	_, heard := s.peerStarts[peer]
+	unheard := w == nil && !heard
 	if w == nil {
 		w = &meowWait{ready: make(chan struct{})}
 		if _, err := meowNonceRead(w.nonce[:]); err != nil {
@@ -373,11 +437,22 @@ func (s *Server) awaitMeow(ctx context.Context, peer key.NodePublic) error {
 		}
 		s.peerReady[peer] = w
 	}
+	nonce := w.nonce
+	// Answered already: ask again under a new nonce. The dial does not wait for it; its answer carries the peer's
+	// start id, so a restart is noticed within a round trip and only from a process alive now.
+	if w.claimed {
+		if _, err := meowNonceRead(w.probe[:]); err == nil {
+			nonce = w.probe
+		} else {
+			w.probe = [meowNonceLen]byte{} // no probe: a restart is then left to MarkDevicePeerForHandshake
+		}
+	}
 	s.peerReadyMu.Unlock()
+	if unheard {
+		s.resetUnheardPeer(peer)
+	}
 	mc := s.lb.sys.MagicSock.Get()
-	packet := EncodeMeowPing(s.lb.pub, mc.DiscoPublicKey(), w.nonce)
-	ticker := time.NewTicker(time.Second)
-	defer ticker.Stop()
+	packet := EncodeMeowPing(s.lb.pub, mc.DiscoPublicKey(), nonce, s.startID)
 	// send delivers the handshake through region, connecting to it first when this engine has no carrier there: a
 	// peer's home is reached where it is, as magicsock opens a peer's home DERP on demand (derp.go
 	// derpWriteChanForRegion). Connects are shared by every handshake on this engine (relayConnects).
@@ -413,6 +488,14 @@ func (s *Server) awaitMeow(ctx context.Context, peer key.NodePublic) error {
 			probes.Wait() // each send is bounded by relayConnectTimeout
 			diagnosticlog.TryInfo("native underlay session", "stage", "meow_fanout", "attempt", attempt, "regions", probed.Load(), "failed", failed.Load())
 		}
+		// A send that failed (relay connect held, or in its backoff) is retried after the connect backoff, not a
+		// whole second: the dial may already be released by a direct answer, and only this handshake's answer tells
+		// a restarted peer's start id before QUIC's 1 s handshake timeout (pbvm2 q3: a fresh dialer's first send
+		// failed, the answer came 1 s later and the exec lost 1 s).
+		wait := time.Second
+		if lastSendErr != nil {
+			wait = relayConnectBackoff
+		}
 		select {
 		case <-w.ready:
 			diagnosticlog.TryInfo("native underlay session", "stage", "meow_acked")
@@ -428,7 +511,7 @@ func (s *Server) awaitMeow(ctx context.Context, peer key.NodePublic) error {
 			}
 			s.peerReadyMu.Unlock()
 			return errors.Join(ctx.Err(), lastSendErr)
-		case <-ticker.C:
+		case <-time.After(wait):
 		}
 	}
 }

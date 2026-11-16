@@ -145,7 +145,16 @@ func (s *Server) LocalEndpoints() []netip.AddrPort {
 // a disco ping to the endpoints is answered (a direct path is proven), whichever comes first. Returning after an
 // unanswered ping left two machines behind one NAT, whose signed endpoints could not reach each other, without
 // the relay: every attempt idled out (Lane H, support_25a0e3be). With no usable relay the ping alone decides.
+//
+// A new handshake (none answered yet in this engine) is not released by a direct answer alone until the relay
+// handshake is acknowledged or newHandshakeHold passes: a disco answer does not show the peer's WireGuard side is
+// ready for us (pbvm2 q3: after a target restart the direct answer came in 4 ms, the flow's first initiation was
+// lost, and wireguard-go allows the next one only 5 s later, so QUIC's 1 s handshake failed; held until the
+// acknowledgment, 30 of 30 got through).
 func (s *Server) awaitRelayOrDirect(ctx context.Context, peer key.NodePublic) error {
+	s.peerReadyMu.Lock()
+	answered := s.peerReady[peer] != nil && s.peerReady[peer].claimed
+	s.peerReadyMu.Unlock()
 	relay := make(chan error, 1)
 	meowCtx, stopMeow := context.WithTimeout(context.WithoutCancel(ctx), backgroundMeow)
 	go func() {
@@ -153,6 +162,7 @@ func (s *Server) awaitRelayOrDirect(ctx context.Context, peer key.NodePublic) er
 		relay <- s.awaitMeow(meowCtx, peer) // keeps running, bounded, after a direct answer: the peer learns we may connect
 	}()
 	direct := s.pingDirect(ctx, peer)
+	var hold <-chan time.Time // runs once a direct answer is waiting for a new handshake's acknowledgment
 	for {
 		select {
 		case err := <-relay:
@@ -161,7 +171,19 @@ func (s *Server) awaitRelayOrDirect(ctx context.Context, peer key.NodePublic) er
 				return nil
 			}
 			relay = nil // the relay handshake ended without an answer; only a direct answer is left
+			if hold != nil {
+				diagnosticlog.TryInfo("native underlay session", "stage", "ready_by_direct")
+				return nil
+			}
 		case <-direct:
+			direct = nil
+			if !answered && relay != nil {
+				hold = time.After(newHandshakeHold)
+				continue
+			}
+			diagnosticlog.TryInfo("native underlay session", "stage", "ready_by_direct")
+			return nil
+		case <-hold:
 			diagnosticlog.TryInfo("native underlay session", "stage", "ready_by_direct")
 			return nil
 		case <-ctx.Done():
@@ -206,3 +228,7 @@ func (s *Server) pingDirect(ctx context.Context, peer key.NodePublic) <-chan str
 }
 
 const directPingFirstRetry, directPingMaxRetry = 250 * time.Millisecond, 2 * time.Second
+
+// newHandshakeHold bounds how long a direct answer waits for a new handshake's relay acknowledgment, leaving most
+// of QUIC's 1 s handshake budget.
+const newHandshakeHold = 500 * time.Millisecond
