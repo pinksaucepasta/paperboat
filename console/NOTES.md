@@ -388,10 +388,14 @@ their reasons. By decision, conflicts are only reported; they're resolved on the
 shows them humanized (`changed_both_sides` → "Changed both sides").
 
 Layout (2026-11-16): the GitHub block is only the account link; repositories (any Git URL, GitHub ones
-pickable once linked) are their own list; "Team default" shows only in a team workspace. Gaps for
-FEAT-CONFIGREPOS: `ConfigRepository` has no machine count or default/assignment state (so no "used by N
-machines" yet), the machine table's `source` (machine or tag rule), tag → repository rules, and team-connected
-repositories (admins can remove a team default here but not yet pick one).
+pickable once linked) are their own list; "Team default" shows only in a team workspace.
+
+Policy-chosen repositories (FEAT-CONFIGREPOS): Access has a Config sync tab editing the policy's `config_sync`
+rules as rows (same draft and review as Policy file; a file with comments is edited as a file). A machine's
+Config sync tab shows `GET /v1/machines/{id}/config-rule` as a Policy rule section and "Chosen by" from the
+config assignment's `source` (`machine`, `tag_rule`). Gaps: the status payload has no `source`, so the all-machines
+table cannot show it per row; `ConfigRepository` has no machine count or default state ("used by N machines");
+team-connected repositories (owners and admins can remove a team default but not pick one).
 
 ## Domains page
 

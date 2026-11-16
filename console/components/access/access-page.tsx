@@ -5,6 +5,7 @@ import { useState } from "react"
 import { useApiQuery, useWorkspace } from "@/lib/api"
 import { notOnServer, PolicyError, policyQuery } from "@/lib/policy"
 import { cn } from "@/lib/utils"
+import { ConfigSyncRules } from "@/components/access/config-sync-rules"
 import { PolicyEditor } from "@/components/access/policy-editor"
 import { PolicyHistory } from "@/components/access/policy-history"
 import { PolicyTest } from "@/components/access/policy-test"
@@ -13,6 +14,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 
 const tabs = [
   { id: "file", title: "Policy file" },
+  { id: "config", title: "Config sync" },
   { id: "test", title: "Test" },
   { id: "history", title: "History" },
 ] as const
@@ -49,7 +51,7 @@ export function AccessPage() {
                 )}
               >
                 {title}
-                {id === "file" && data && text !== data.policy && (
+                {(id === "file" || id === "config") && data && text !== data.policy && (
                   <span className="ml-1 text-muted-foreground">•</span>
                 )}
               </button>
@@ -61,6 +63,14 @@ export function AccessPage() {
         <Skeleton className="h-[32rem] rounded-lg" />
       ) : tab === "file" ? (
         <PolicyEditor
+          workspace={workspace.id}
+          policy={data}
+          text={text}
+          onChange={(next) => setDraft({ base: data.version, text: next })}
+          onSaved={() => setDraft(null)}
+        />
+      ) : tab === "config" ? (
+        <ConfigSyncRules
           workspace={workspace.id}
           policy={data}
           text={text}

@@ -273,11 +273,15 @@ export type PolicyRule = {
   note?: string
 }
 
+/** Picks the config sync repository for the machines in `dst` (`machine:*` or tags); the first match wins. */
+export type ConfigSyncRule = { dst: string[]; repository: string; branch?: string; note?: string }
+
 export type PolicyFile = {
   allow_private_access?: boolean
   groups?: Record<string, string[]>
   tags?: Record<string, string[]>
   rules?: PolicyRule[]
+  config_sync?: ConfigSyncRule[]
   tests?: unknown[]
 }
 

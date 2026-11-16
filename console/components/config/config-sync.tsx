@@ -4,14 +4,18 @@ import { ArrowsClockwiseIcon, CaretRightIcon, WarningCircleIcon } from "@phospho
 import Link from "next/link"
 import { useDeferredValue, useState } from "react"
 import { useApiQuery, useWorkspace, type Machine } from "@/lib/api"
+import { useQuery } from "@tanstack/react-query"
 import { cursorPageSize } from "@/lib/cursor-pages"
 import { usePageParam } from "@/lib/use-page-param"
 import { ListPager } from "@/components/list-pager"
 import {
   actionLabels,
+  configRuleQuery,
+  configSourceQuery,
   configStatusQuery,
   directionLabels,
   reasonLabel,
+  sourceLabels,
   syncState,
   type ConfigEnvironment,
   type ConfigPath,
@@ -299,6 +303,8 @@ function MachineTable(props: {
 }
 
 function MachineSync({ environment }: { environment: ConfigEnvironment }) {
+  const workspace = useWorkspace()?.id ?? "personal"
+  const source = useQuery(configSourceQuery(environment.machine_id, workspace)).data?.source
   const state = syncState(environment)
   const conflicts = environment.conflicts ?? []
   const review = environment.review ?? []
@@ -325,6 +331,7 @@ function MachineSync({ environment }: { environment: ConfigEnvironment }) {
         <SectionHeading title="Details" />
         <dl className="grid border-t border-divider sm:grid-cols-2 sm:gap-x-10">
           <Detail label="Repository">{environment.repository_name}</Detail>
+          <Detail label="Chosen by">{source ? sourceLabels[source] : undefined}</Detail>
           <Detail label="Direction">{directionLabels[environment.mode ?? ""]}</Detail>
           <Detail label="Files synced">{String(environment.managed_path_count)}</Detail>
           <Detail label="Updates">{environment.automatic_updates ? "Automatic" : "After approval"}</Detail>
@@ -336,6 +343,8 @@ function MachineSync({ environment }: { environment: ConfigEnvironment }) {
           </Detail>
         </dl>
       </section>
+
+      <PolicyRule machineId={environment.machine_id} workspace={workspace} source={source} />
 
       <SyncActions environment={environment} />
 
@@ -357,6 +366,33 @@ function MachineSync({ environment }: { environment: ConfigEnvironment }) {
       )}
       {skipped.length > 0 && <PathList title="Skipped" paths={skipped} />}
     </div>
+  )
+}
+
+/** The policy rule that picks this machine's repository, when one matches. */
+function PolicyRule({ machineId, workspace, source }: { machineId: string; workspace: string; source?: string }) {
+  const rule = useQuery(configRuleQuery(machineId, workspace)).data
+  if (!rule?.matched) return null
+  return (
+    <section className="flex flex-col gap-3">
+      <SectionHeading title="Policy rule" />
+      <dl className="grid border-t border-divider sm:grid-cols-2 sm:gap-x-10">
+        <Detail label="Applies to">{rule.target}</Detail>
+        <Detail label="Repository">{rule.repository}</Detail>
+        <Detail label="Branch">{rule.branch || "main"}</Detail>
+        <Detail label="Policy">{rule.team_id ? "Team policy" : "Your policy"}</Detail>
+      </dl>
+      {source === "machine" && (
+        <p className="text-sm text-muted-foreground">This machine uses its own choice, which comes before the rule.</p>
+      )}
+      {rule.state === "connect_on_apply" && (
+        <>
+          <p className="text-sm text-muted-foreground">The repository isn’t connected yet. Connect it and apply:</p>
+          <CommandBlock command="pb config sync apply" />
+        </>
+      )}
+      {rule.state === "connected" && <p className="text-sm text-muted-foreground">The repository is connected.</p>}
+    </section>
   )
 }
 

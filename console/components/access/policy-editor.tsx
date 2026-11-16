@@ -16,6 +16,26 @@ import { ChangesDialog } from "@/components/access/changes-dialog"
 import { Time } from "@/components/time"
 import { Button } from "@/components/ui/button"
 
+/** The server's check of a draft, a moment after the last keystroke. `validate` checks now. */
+export function usePolicyValidation(workspace: string, text: string) {
+  const [checked, setChecked] = useState(text)
+  useEffect(() => {
+    const timer = setTimeout(() => setChecked(text), 800)
+    return () => clearTimeout(timer)
+  }, [text])
+  const validation = useQuery({
+    queryKey: ["policy-validate", workspace, checked],
+    queryFn: ({ signal }) => validatePolicy(workspace, checked, signal),
+    staleTime: Infinity,
+    retry: false,
+  })
+  return {
+    validation,
+    checking: validation.isFetching || checked !== text,
+    validate: () => (checked === text ? validation.refetch() : setChecked(text)),
+  }
+}
+
 /** The policy as a file: a plain editor with line numbers, checked by the server as you type. */
 export function PolicyEditor({
   workspace,
@@ -31,18 +51,8 @@ export function PolicyEditor({
   onSaved: () => void
 }) {
   const editable = policy.can_edit === "all"
-  const [checked, setChecked] = useState(text)
   const [reviewing, setReviewing] = useState(false)
-  useEffect(() => {
-    const timer = setTimeout(() => setChecked(text), 800)
-    return () => clearTimeout(timer)
-  }, [text])
-  const validation = useQuery({
-    queryKey: ["policy-validate", workspace, checked],
-    queryFn: ({ signal }) => validatePolicy(workspace, checked, signal),
-    staleTime: Infinity,
-    retry: false,
-  })
+  const { validation, checking, validate } = usePolicyValidation(workspace, text)
   const dirty = text !== policy.policy
   const formattable = parsePolicy(text) !== undefined && !hasComments(text)
   const note = readOnlyNote(policy)
@@ -64,7 +74,7 @@ export function PolicyEditor({
             >
               Format
             </Button>
-            <Button variant="outline" onClick={() => (checked === text ? validation.refetch() : setChecked(text))}>
+            <Button variant="outline" onClick={validate}>
               Validate
             </Button>
             <Button variant="outline" disabled={!dirty} onClick={() => onChange(policy.policy)}>
@@ -81,7 +91,7 @@ export function PolicyEditor({
       <ValidationResult
         validation={validation.data}
         error={validation.error}
-        checking={validation.isFetching || checked !== text}
+        checking={checking}
       />
       {reviewing && (
         <ChangesDialog

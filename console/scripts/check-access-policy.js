@@ -1,7 +1,7 @@
 // Browser check for F18-09 (workspace Access page and Settings → API tokens). Paste into the
 // console of a signed-in tab, in the workspace under test (personal or a team you own or admin).
 //
-// On /access: the three tabs (the page opens on Policy file), the
+// On /access: the four tabs (the page opens on Policy file), the
 // editor holding the saved file, a broken draft getting inline errors (path and code) from
 // .../policy/validate and a fixed one getting none, Test answering what POST .../policy/explain
 // answers, and History listing what .../policy/versions lists. With `window.__save = true` it also
@@ -64,7 +64,7 @@
     pass("the page says the policy isn't available yet", Boolean(unavailable))
     return steps
   }
-  for (const name of ["Policy file", "Test", "History"])
+  for (const name of ["Policy file", "Config sync", "Test", "History"])
     pass(`the ${name} tab is on the page`, Boolean(await until(() => tab(name))))
 
   // Policy file: the saved text, and inline errors for a broken draft.
@@ -86,6 +86,12 @@
   }
 
   // Test: the page's answer is the server's.
+  // Config sync: the rules as rows over the same draft (Add rule appears when the file is editable and uncommented).
+  tab("Config sync").click()
+  pass(
+    "the Config sync tab lists the config_sync rules",
+    Boolean(await until(() => /No rules|Machines/.test(document.body.innerText))),
+  )
   tab("Test").click()
   // The Test form is the one holding the "who" field (other forms can come first on the page).
   const form = await until(() => document.querySelector("#test-who")?.closest("form"))

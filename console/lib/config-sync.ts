@@ -293,3 +293,40 @@ export const adoptTeamDefault = (teamId: string, version: number) =>
     body: JSON.stringify({ team_id: teamId, default_version: version }),
   })
 export const unadoptTeamDefault = () => apiAction("config-sync/team-default-adoption?workspace=personal", { method: "DELETE" })
+
+/** The workspace policy `config_sync` rule that picks a machine's repository (none: nothing matched). */
+export type ConfigMachineRule = Schemas["ConfigMachineRule"]
+export const configRuleQuery = (machineId: string, workspace: string) =>
+  queryOptions({
+    queryKey: ["config-sync", "rule", machineId, workspace] as const,
+    queryFn: ({ signal }) =>
+      api<ConfigMachineRule>(
+        `machines/${encodeURIComponent(machineId)}/config-rule?${new URLSearchParams({ workspace })}`,
+        { signal },
+      ),
+    retry: false,
+  })
+
+/** Who chose a machine's repository: its owner, or a policy rule (`source` of the config assignment). */
+export const sourceLabels: Record<string, string> = {
+  machine: "Chosen on this machine",
+  tag_rule: "Chosen by a policy rule",
+}
+export const configSourceQuery = (machineId: string, workspace: string) =>
+  queryOptions({
+    queryKey: ["config-sync", "source", machineId, workspace] as const,
+    queryFn: ({ signal }) =>
+      api<{ source?: string }>(
+        `machines/${encodeURIComponent(machineId)}/config-assignment?${new URLSearchParams({ workspace })}`,
+        { signal },
+      ),
+    retry: false,
+  })
+
+/** What the policy file's `config_sync` errors mean, in plain words, by the server's error code. */
+export const configSyncProblems: Record<string, string> = {
+  required: "Add a target.",
+  unknown_target: "Use machine:* or a tag this policy defines.",
+  invalid_repository: "Use a Git URL (https://, ssh://, user@host:path) or an absolute path.",
+  invalid_branch: "Not a valid Git branch name.",
+}
