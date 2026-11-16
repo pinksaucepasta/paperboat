@@ -20,6 +20,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/shared/backoff"
 	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
+	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
 	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 )
 
@@ -210,39 +211,63 @@ func (a *Authority) refresh(ctx context.Context, client NetworkAPI, since time.T
 		return nil
 	}
 	started := time.Now()
-	operation, err := uuid.NewRandom()
-	if err != nil {
-		return err
-	}
-	request := api.PeerNetworkConfigurationRequest{OperationID: "operation_" + operation.String(), AdmittedScopes: a.AdmittedScopes()}
-	request.Endpoints = a.endpointReportDue()
-	request.MembershipGrants = a.membershipGrants.Load()
-	request.Authority = api.PeerNetworkAuthorityUntilRevoked
-	result, err := client.PeerNetworkConfiguration(ctx, request)
-	a.renewalFailing.Store(err != nil) // every renewal path (Run, Refresh, admission) says whether Paperboat answered
-	diagnosticlog.TryInfo("native packet lifecycle", "stage", "refresh_answered", "failed", err != nil, "duration_ms", time.Since(started).Milliseconds())
-	if err == nil && request.Endpoints != nil {
-		a.endpointsReported(*request.Endpoints)
-	}
-	if err != nil {
-		var apiErr *api.APIError
-		if errors.As(err, &apiErr) && apiErr.Status == http.StatusTooManyRequests {
-			renewalBudget.hold(time.Now(), apiErr.RetryAfter)
+	// The configuration held here is the base of a delta answer (peernetwork.ConfigurationDelta); an answer that does
+	// not rebuild into a configuration this authority accepts is asked again in full, once.
+	held, _ := a.options.Store.LoadPeerNetworkConfiguration(a.options.Issuer, a.options.Self.AccountID, a.options.Self.EndpointID, MaxConfigurationBytes)
+	var result api.PeerNetworkConfigurationResult
+	for full := false; ; full = true {
+		operation, err := uuid.NewRandom()
+		if err != nil {
+			return err
 		}
-		return a.rejectRefusedAuthority(err)
-	}
-	if err := a.knowSigningKeys(ctx, append([]string{result.Configuration, result.CandidateSet}, result.RelayGrants...)); err != nil {
-		return err
-	}
-	if err := a.Apply(ctx, result.Configuration); err != nil {
-		if errors.Is(err, ErrStaleAuthority) {
-			a.refreshedFrom = started
-			return nil
+		request := api.PeerNetworkConfigurationRequest{OperationID: "operation_" + operation.String(), AdmittedScopes: a.AdmittedScopes()}
+		request.Endpoints = a.endpointReportDue()
+		request.MembershipGrants = a.membershipGrants.Load()
+		request.Authority = api.PeerNetworkAuthorityUntilRevoked
+		if !full {
+			request.BaseGeneration = peernetwork.ConfigurationGeneration(held)
 		}
-		if errors.Is(err, ErrAuthority) {
-			a.refusedConfiguration(ctx, client, err)
+		result, err = client.PeerNetworkConfiguration(ctx, request)
+		a.renewalFailing.Store(err != nil) // every renewal path (Run, Refresh, admission) says whether Paperboat answered
+		diagnosticlog.TryInfo("native packet lifecycle", "stage", "refresh_answered", "failed", err != nil, "delta", err == nil && result.ConfigurationDelta != nil, "duration_ms", time.Since(started).Milliseconds())
+		if err == nil && request.Endpoints != nil {
+			a.endpointsReported(*request.Endpoints)
 		}
-		return err
+		if err != nil {
+			var apiErr *api.APIError
+			if errors.As(err, &apiErr) && apiErr.Status == http.StatusTooManyRequests {
+				renewalBudget.hold(time.Now(), apiErr.RetryAfter)
+			}
+			return a.rejectRefusedAuthority(err)
+		}
+		token := result.Configuration
+		if result.ConfigurationDelta != nil {
+			if token, err = result.ConfigurationDelta.Rebuild(held); err != nil {
+				if !full {
+					diagnosticlog.TryInfo("native packet lifecycle", "stage", "refresh_delta_refused", "error", err)
+					continue
+				}
+				return refused("configuration delta does not apply: %v", err)
+			}
+		}
+		if err := a.knowSigningKeys(ctx, append([]string{token, result.CandidateSet}, result.RelayGrants...)); err != nil {
+			return err
+		}
+		if err := a.Apply(ctx, token); err != nil {
+			if errors.Is(err, ErrStaleAuthority) {
+				a.refreshedFrom = started
+				return nil
+			}
+			if errors.Is(err, ErrAuthority) && result.ConfigurationDelta != nil && !full {
+				diagnosticlog.TryInfo("native packet lifecycle", "stage", "refresh_delta_refused", "error", err)
+				continue
+			}
+			if errors.Is(err, ErrAuthority) {
+				a.refusedConfiguration(ctx, client, err)
+			}
+			return err
+		}
+		break
 	}
 	if a.options.OnAuthority != nil {
 		a.options.OnAuthority(nil)

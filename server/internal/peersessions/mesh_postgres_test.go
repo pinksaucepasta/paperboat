@@ -4,6 +4,8 @@ import (
 	"context"
 	"crypto/sha256"
 	"database/sql"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
 	"os"
@@ -15,14 +17,16 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 )
 
-// meshTestSigner signs nothing; it keeps the last configuration's claims.
+// meshTestSigner keeps the last configuration's claims and returns them in a token's shape with a fixed signature,
+// so a delta answer can be rebuilt and compared with the full token.
 type meshTestSigner struct{ claims *peernetwork.Configuration }
 
 func (m meshTestSigner) SignNetworkConfiguration(claims peernetwork.Configuration) (string, error) {
 	if m.claims != nil {
 		*m.claims = claims
 	}
-	return "config", nil
+	payload, err := json.Marshal(claims)
+	return "e30." + base64.RawURLEncoding.EncodeToString(payload) + ".sig", err
 }
 func (meshTestSigner) SignRegionalCandidates(peernetwork.RegionalCandidates) (string, error) {
 	return "candidates", nil
@@ -160,6 +164,47 @@ SELECT 'mesh-revocation-'||$1||'-'||g,$1,sha256(convert_to($1||'_m_'||g,'UTF8'))
 	if n := queries.Load(); n > 40 {
 		t.Fatalf("one configuration build on a 1,000-machine account ran %d queries, want a bounded few (it loaded every peer)", n)
 	}
+	// Delta answers (peernetwork.ConfigurationDelta): an endpoint that holds the last configuration gets only what
+	// changed; one that holds another (a gap, a restart) gets the full configuration. Until-revoked, as every client
+	// asks: mesh scopes then carry no expiry, so a rebuild leaves unchanged peers byte-identical.
+	config := func(base uint64) (NetworkConfigResult, string) {
+		t.Helper()
+		r, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: fmt.Sprintf("mesh_delta_%s_%d", s, time.Now().UnixNano()), UserID: account, EndpointID: account + "_m_1", BaseGeneration: base, Authority: AuthorityUntilRevoked})
+		if err != nil {
+			t.Fatal(err)
+		}
+		full, _ := meshTestSigner{}.SignNetworkConfiguration(signed)
+		return r, full
+	}
+	first, fullFirst := config(0)
+	if first.ConfigurationDelta != nil || first.Configuration != fullFirst {
+		t.Fatal("a request without a base got no full configuration")
+	}
+	held := first.Configuration
+	deltaStep := func(want int, removed ...string) {
+		t.Helper()
+		r, full := config(peernetwork.ConfigurationGeneration(held))
+		d := r.ConfigurationDelta
+		if d == nil || r.Configuration != "" || len(d.Configuration.Peers) != want || fmt.Sprint(d.Removed) != fmt.Sprint(append([]string{}, removed...)) {
+			var ids []string
+			if d != nil {
+				for _, p := range d.Configuration.Peers {
+					ids = append(ids, p.Identity.EndpointID)
+				}
+				t.Fatalf("delta changes %v and removes %v, want %d changed peers and removed %v", ids, d.Removed, want, removed)
+			}
+			t.Fatalf("full answer, want a delta with %d changed peers and removed %v", want, removed)
+		}
+		rebuilt, err := d.Rebuild(held)
+		if err != nil || rebuilt != full {
+			t.Fatalf("rebuilt delta differs from the full configuration (err %v)", err)
+		}
+		wire, _ := json.Marshal(r)
+		t.Logf("delta answer %d bytes, full configuration %d bytes", len(wire), len(full))
+		held = rebuilt
+	}
+	stale := held
+	deltaStep(0) // nothing changed
 
 	join(1000, 1000)
 	started = time.Now()
@@ -172,6 +217,7 @@ SELECT 'mesh-revocation-'||$1||'-'||g,$1,sha256(convert_to($1||'_m_'||g,'UTF8'))
 	if n, last := logRows(); n != 1001 || last != "add "+account+"_m_1000" {
 		t.Fatalf("a join on a 1,000-machine account wrote %d rows (last %q), want exactly one add", n-1000, last)
 	}
+	deltaStep(1) // the joined machine only
 
 	exec(`UPDATE paperboat.user_machines SET revoked_at=now(),state='revoked',seat_state='released' WHERE id=$1`, account+"_m_7")
 	if seq, err = service.refreshMesh(ctx, account); err != nil || seq != 1002 {
@@ -179,5 +225,9 @@ SELECT 'mesh-revocation-'||$1||'-'||g,$1,sha256(convert_to($1||'_m_'||g,'UTF8'))
 	}
 	if n, last := logRows(); n != 1002 || last != "remove "+account+"_m_7" {
 		t.Fatalf("a revoke wrote %d rows (last %q), want exactly one remove", n-1001, last)
+	}
+	deltaStep(0, account+"_m_7") // the revoked machine is removed at once
+	if r, full := config(peernetwork.ConfigurationGeneration(stale)); r.ConfigurationDelta != nil || r.Configuration != full {
+		t.Fatal("an endpoint holding an older configuration got a delta, want the full configuration")
 	}
 }

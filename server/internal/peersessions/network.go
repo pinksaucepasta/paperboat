@@ -57,6 +57,9 @@ type NetworkConfigRequest struct {
 	// Authority is AuthorityUntilRevoked when the daemon keeps verified peer state until it is revoked; empty for
 	// daemons that let every scope end with the document.
 	Authority string
+	// BaseGeneration is the generation of the configuration the endpoint holds (0: none); when this replica sent it,
+	// the answer is a delta from it.
+	BaseGeneration uint64
 }
 
 // AuthorityUntilRevoked is the peer-state contract of PLAN 3b "offline-capable authority". A daemon that asks for it
@@ -67,9 +70,11 @@ type NetworkConfigRequest struct {
 const AuthorityUntilRevoked = "until_revoked_v1"
 
 type NetworkConfigResult struct {
-	Configuration string   `json:"configuration"`
-	CandidateSet  string   `json:"candidate_set"`
-	RelayGrants   []string `json:"relay_grants"`
+	// Exactly one of Configuration (the signed token) and ConfigurationDelta (its changes from BaseGeneration) is set.
+	Configuration      string                          `json:"configuration,omitempty"`
+	ConfigurationDelta *peernetwork.ConfigurationDelta `json:"configuration_delta,omitempty"`
+	CandidateSet       string                          `json:"candidate_set"`
+	RelayGrants        []string                        `json:"relay_grants"`
 	// RelayDenied is set when hosted relay grants were withheld at admission (see
 	// RelayDeniedQuotaExhausted); BillingURL then says where to add bandwidth.
 	RelayDenied string `json:"relay_denied,omitempty"`
@@ -97,6 +102,8 @@ type NetworkService struct {
 	// policySync, when set (tests), runs before a cached document is read: it waits until the listener has seen
 	// every notification committed so far, so a test reads its own writes.
 	policySync func(context.Context) error
+	// What each endpoint was last sent, for delta answers (sent_configurations.go).
+	sent sentConfigurations
 }
 
 func NewNetworkService(store *db.DB, signer interface {
@@ -747,6 +754,9 @@ func (s *NetworkService) signConfiguration(ctx context.Context, in NetworkConfig
 	result := NetworkConfigResult{Configuration: token, CandidateSet: candidates, RelayGrants: relayGrants}
 	if withheld {
 		result.RelayDenied, result.BillingURL = RelayDeniedQuotaExhausted, s.billingURL
+	}
+	if result.ConfigurationDelta = s.sent.answer(in.EndpointID, in.BaseGeneration, token, claims); result.ConfigurationDelta != nil {
+		result.Configuration = ""
 	}
 	return result, nil
 }

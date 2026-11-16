@@ -26,9 +26,12 @@ func (c *Client) RegisterPeerNetwork(ctx context.Context, request PeerNetworkReg
 }
 
 type PeerNetworkConfigurationResult struct {
-	Configuration string   `json:"configuration"`
-	CandidateSet  string   `json:"candidate_set"`
-	RelayGrants   []string `json:"relay_grants"`
+	// Exactly one of Configuration (the signed token) and ConfigurationDelta (its changes from the request's
+	// BaseGeneration; the receiver rebuilds the token with Rebuild and verifies it) is set.
+	Configuration      string                          `json:"configuration"`
+	ConfigurationDelta *peernetwork.ConfigurationDelta `json:"configuration_delta"`
+	CandidateSet       string                          `json:"candidate_set"`
+	RelayGrants        []string                        `json:"relay_grants"`
 	// RelayDenied names why hosted relay grants were withheld ("bandwidth_quota_exhausted");
 	// BillingURL is the console page for adding bandwidth. Direct connections are unaffected.
 	RelayDenied string `json:"relay_denied"`
@@ -50,6 +53,9 @@ type PeerNetworkConfigurationRequest struct {
 	// Authority "until_revoked_v1" asks for machine_network scopes and host session rights without expiry
 	// (expires_at 0): this client keeps its last verified configuration while Paperboat is unreachable (F21-01).
 	Authority string `json:"authority,omitempty"`
+	// BaseGeneration is the generation of the configuration this endpoint holds (0: none), so the answer can be a
+	// delta from it.
+	BaseGeneration uint64 `json:"base_generation,omitempty"`
 }
 
 // PeerNetworkAuthorityUntilRevoked is the authority this client asks for.

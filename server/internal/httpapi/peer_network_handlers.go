@@ -35,6 +35,8 @@ type peerNetworkConfigBody struct {
 	// Authority names the peer-state semantics the daemon understands: "" (every scope expires with the document)
 	// or peersessions.AuthorityUntilRevoked (PLAN 3b offline-capable authority, F21-01/F21-11).
 	Authority string `json:"authority,omitempty"`
+	// BaseGeneration is the generation of the configuration the endpoint holds; the answer may then be a delta.
+	BaseGeneration uint64 `json:"base_generation,omitempty"`
 }
 type peerNetworkService interface {
 	Register(context.Context, peersessions.NetworkRegistration) (peersessions.NetworkRegistrationResult, error)
@@ -100,7 +102,7 @@ func peerNetworkConfig(s peerNetworkService) http.HandlerFunc {
 		if !decodeStrictJSON(w, r, &body) {
 			return
 		}
-		value, err := s.Configuration(r.Context(), peersessions.NetworkConfigRequest{OperationID: body.OperationID, UserID: p.User.ID, EndpointID: p.Client.SessionID, AdmittedScopes: body.AdmittedScopes, Endpoints: body.Endpoints, Authority: body.Authority})
+		value, err := s.Configuration(r.Context(), peersessions.NetworkConfigRequest{OperationID: body.OperationID, UserID: p.User.ID, EndpointID: p.Client.SessionID, AdmittedScopes: body.AdmittedScopes, Endpoints: body.Endpoints, Authority: body.Authority, BaseGeneration: body.BaseGeneration})
 		if err != nil {
 			peerNetworkError(w, r, err)
 			return
@@ -194,7 +196,7 @@ func machinePeerNetwork(s peerNetworkService, v machineEndpointProofVerifier, re
 			writeError(w, r, http.StatusBadRequest, "invalid_request", "Peer network configuration request is invalid.")
 			return
 		}
-		value, e := s.Configuration(r.Context(), peersessions.NetworkConfigRequest{OperationID: body.OperationID, UserID: claims.UserID, EndpointID: claims.MachineID, AdmittedScopes: body.AdmittedScopes, Endpoints: body.Endpoints, Authority: body.Authority})
+		value, e := s.Configuration(r.Context(), peersessions.NetworkConfigRequest{OperationID: body.OperationID, UserID: claims.UserID, EndpointID: claims.MachineID, AdmittedScopes: body.AdmittedScopes, Endpoints: body.Endpoints, Authority: body.Authority, BaseGeneration: body.BaseGeneration})
 		if e != nil {
 			peerNetworkError(w, r, e)
 			return

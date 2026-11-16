@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/netip"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
@@ -116,5 +117,7 @@ func configurationClaims(issuer string, now, expiry time.Time, generation int64,
 		}
 		out.Peers = append(out.Peers, peernetwork.Peer{Identity: p.Identity.Binding, Scopes: p.Scopes, Endpoints: p.Identity.Endpoints})
 	}
+	// Ordered by endpoint id, as a delta's receiver rebuilds it (peernetwork.ConfigurationDelta.Rebuild).
+	slices.SortFunc(out.Peers, func(a, b peernetwork.Peer) int { return strings.Compare(a.Identity.EndpointID, b.Identity.EndpointID) })
 	return out
 }
