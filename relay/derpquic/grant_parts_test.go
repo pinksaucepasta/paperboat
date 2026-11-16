@@ -3,16 +3,16 @@ package derpquic
 import (
 	"context"
 	"crypto/tls"
+	"fmt"
 	"strings"
 	"testing"
 
 	"tailscale.com/types/key"
 )
 
-// An endpoint with more peers than one grant may name (64) sends one grant per chunk of peers; the
-// relay adds them up on its connection, so the last peer of a 1,000-machine
-// account is reachable even when it is named only in the final chunk.
-func TestGrantsOfOneGenerationAddUpBeyondSixtyFourPeers(t *testing.T) {
+// An endpoint with more memberships than one grant may carry (256) sends one grant per chunk; the relay adds them up
+// on its connection, so a membership named only in the final chunk still pairs.
+func TestGrantsOfOneGenerationAddUpBeyondOnePartOfMemberships(t *testing.T) {
 	for _, chunked := range []bool{true, false} {
 		f := newFixture(t)
 		s, address, _ := f.start("127.0.0.1:0")
@@ -20,16 +20,18 @@ func TestGrantsOfOneGenerationAddUpBeyondSixtyFourPeers(t *testing.T) {
 		ca, cb := certificate(t), certificate(t)
 		ga, gb := f.grant(ka, ca, "a"), f.grant(kb, cb, "b")
 		pairScopes(&ga, &gb)
-		toB := ga.Peers[0]
-		var others []Peer
+		pair := ga.Memberships[0]
+		var all []Scope
 		for i := 0; i < 998; i++ {
-			others = append(others, Peer{WireGuardPublicKey: KeyString(key.NewNode().Public()), Scopes: toB.Scopes})
+			other := pair
+			other.ResourceID = fmt.Sprint("other_", i)
+			all = append(all, other)
 		}
-		all := append(others, toB)
+		all = append(all, pair)
 		var parts []string
-		for start := 0; start < len(all); start += MaxGrantPeers {
+		for start := 0; start < len(all); start += MaxGrantMemberships {
 			chunk := ga
-			chunk.Peers = all[start:min(start+MaxGrantPeers, len(all))]
+			chunk.Memberships = all[start:min(start+MaxGrantMemberships, len(all))]
 			parts = append(parts, f.token(chunk))
 		}
 		credential := strings.Join(parts, "\n")
@@ -42,16 +44,16 @@ func TestGrantsOfOneGenerationAddUpBeyondSixtyFourPeers(t *testing.T) {
 		b := f.client(address, cb, gb)
 		connect(t, a)
 		connect(t, b)
-		if err := a.SendControl(kb, []byte("beyond-64")); err != nil {
+		if err := a.SendControl(kb, []byte("beyond-one-part")); err != nil {
 			t.Fatal(err)
 		}
 		if chunked {
-			receive(t, b, ka, []byte("beyond-64"))
+			receive(t, b, ka, []byte("beyond-one-part"))
 			eventually(t, func() bool { return s.Snapshot().Forwarded > 0 })
 		} else {
 			eventually(t, func() bool { return s.Snapshot().Dropped > 0 })
 			if s.Snapshot().Forwarded != 0 {
-				t.Fatal("a peer the endpoint's grant does not name was reachable")
+				t.Fatal("a membership the endpoint's first part does not carry was usable")
 			}
 		}
 	}

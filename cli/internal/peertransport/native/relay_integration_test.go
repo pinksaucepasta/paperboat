@@ -249,7 +249,7 @@ func applyRelayAuthority(t *testing.T, authority *tailnet.Authority, signer ed25
 		scopes[i] = derpquic.Scope{ResourceKind: scope.ResourceKind, ResourceID: scope.ResourceID, ResourceGeneration: scope.ResourceGeneration, Capability: scope.Capability, Direction: scope.Direction, Port: scope.Port, ExpiresAt: scope.ExpiresAt}
 	}
 	fingerprint := sha256.Sum256(endpointTLS.Certificates[0].Certificate[0])
-	grant := peernetwork.RelayGrant{Version: 1, Issuer: config.Issuer, Audience: "paperboat-relay", IssuedAt: now, ExpiresAt: expires, Generation: config.Generation, AccountID: config.Self.AccountID, EndpointID: config.Self.EndpointID, WireGuardPublicKey: config.Self.WireGuardPublicKey, CertificateFingerprint: base16(fingerprint[:]), QUICPublicKey: config.Self.QUICPublicKey, NodeID: node.NodeID, NodeGeneration: node.NodeGeneration, ProcessEpoch: node.ProcessEpoch, Peers: []peernetwork.RelayPeer{{WireGuardPublicKey: config.Peers[0].Identity.WireGuardPublicKey, Scopes: scopes}}}
+	grant := peernetwork.RelayGrant{Version: 1, Issuer: config.Issuer, Audience: "paperboat-relay", IssuedAt: now, ExpiresAt: expires, Generation: config.Generation, AccountID: config.Self.AccountID, EndpointID: config.Self.EndpointID, WireGuardPublicKey: config.Self.WireGuardPublicKey, CertificateFingerprint: base16(fingerprint[:]), QUICPublicKey: config.Self.QUICPublicKey, NodeID: node.NodeID, NodeGeneration: node.NodeGeneration, ProcessEpoch: node.ProcessEpoch, Memberships: scopes}
 	if len(mutate) > 0 {
 		mutate[0](&grant)
 	}

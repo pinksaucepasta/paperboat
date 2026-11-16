@@ -126,7 +126,7 @@ func TestEveryRelayGrantTheServerBuildsIsAcceptedByRelaysAndClients(t *testing.T
 	peerRelay := &peernetwork.RelayDescriptor{WireGuardPublicKey: contractKey(3), DiscoPublicKey: contractKey(4), VirtualAddress: "fd7a:115c:a1e0::9"}
 	for _, relay := range []*peernetwork.RelayDescriptor{nil, peerRelay} {
 		g := base
-		g.Peers, g.Memberships, g.PeerRelay = []peernetwork.RelayPeer{}, relayGrantMemberships(self, peers, expires.Unix()), relay
+		g.Memberships, g.PeerRelay = relayGrantMemberships(self, peers, expires.Unix()), relay
 		token, err := signer.SignRelayGrant(g)
 		if err != nil {
 			t.Fatalf("mint refused a grant the server built: %v", err)
@@ -142,8 +142,8 @@ func TestEveryRelayGrantTheServerBuildsIsAcceptedByRelaysAndClients(t *testing.T
 		if err := peernetwork.DecodeSigned(body, &got); err != nil {
 			t.Fatalf("receivers refuse the signed claims: %v", err)
 		}
-		before := fmt.Sprint(got.Peers, got.Memberships)
-		if got.DropUnknownScopes(); fmt.Sprint(got.Peers, got.Memberships) != before {
+		before := fmt.Sprint(got.Memberships)
+		if got.DropUnknownScopes(); fmt.Sprint(got.Memberships) != before {
 			t.Fatal("receivers drop a scope the server emits")
 		}
 		if err := got.Check(now); err != nil {

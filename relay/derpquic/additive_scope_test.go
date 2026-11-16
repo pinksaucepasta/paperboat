@@ -14,8 +14,8 @@ func TestAdditiveResourceRequiresFreshReciprocalGrant(t *testing.T) {
 	ca, cb := certificate(t), certificate(t)
 	ga, gb := f.grant(ka, ca, "a"), f.grant(kb, cb, "b")
 	pairScopes(&ga, &gb)
-	ga.Peers[0].Scopes[0].ResourceID = "new-access"
-	gb.Peers[0].Scopes[0].ResourceID = "old-access"
+	ga.Memberships[0].ResourceID = "new-access"
+	gb.Memberships[0].ResourceID = "old-access"
 	a, b := f.client(address, ca, ga), f.client(address, cb, gb)
 	connect(t, a)
 	connect(t, b)
@@ -33,9 +33,9 @@ func TestAdditiveResourceRequiresFreshReciprocalGrant(t *testing.T) {
 	cc := b.current
 	b.mu.Unlock()
 	gb.Generation++
-	newScope := gb.Peers[0].Scopes[0]
+	newScope := gb.Memberships[0]
 	newScope.ResourceID = "new-access"
-	gb.Peers[0].Scopes = append(gb.Peers[0].Scopes, newScope)
+	gb.Memberships = append(gb.Memberships, newScope)
 	if err := cc.frame(frameAuth, []byte(f.token(gb))); err != nil {
 		t.Fatal(err)
 	}

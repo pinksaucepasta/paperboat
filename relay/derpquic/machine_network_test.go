@@ -16,9 +16,9 @@ func TestPersonalNetworkAdmissionIsReciprocalAndAccountBound(t *testing.T) {
 	b := f.grant(key.NewNode().Public(), cert, "personal_b")
 	pairScopes(&a, &b)
 	for _, grant := range []*Grant{&a, &b} {
-		grant.Peers[0].Scopes[0].ResourceKind = "machine_network"
-		grant.Peers[0].Scopes[0].ResourceID = "network_pair"
-		grant.Peers[0].Scopes[0].Capability = "connect"
+		grant.Memberships[0].ResourceKind = "machine_network"
+		grant.Memberships[0].ResourceID = "network_pair"
+		grant.Memberships[0].Capability = "connect"
 	}
 	state := tls.ConnectionState{PeerCertificates: []*x509.Certificate{cert.Leaf}}
 	if _, err := f.verifier.Verify(f.token(a), state, time.Now()); err != nil {
@@ -32,7 +32,7 @@ func TestPersonalNetworkAdmissionIsReciprocalAndAccountBound(t *testing.T) {
 		t.Fatal("personal network admission crossed accounts")
 	}
 	b.AccountID = a.AccountID
-	b.Peers[0].Scopes[0].ResourceID = "unrelated_pair"
+	b.Memberships[0].ResourceID = "unrelated_pair"
 	if allowed(a, b, time.Now()) {
 		t.Fatal("unrelated pair admission accepted")
 	}

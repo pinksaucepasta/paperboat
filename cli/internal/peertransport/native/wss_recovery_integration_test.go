@@ -141,8 +141,8 @@ func TestNativeSessionRecoversQUICToWSSAndBack(t *testing.T) {
 	tcpPort, _ := strconv.Atoi(tcpPortText)
 	node := tailnet.RegionalNode{NodeID: nodeID, NodeGeneration: 1, ProcessEpoch: epoch, Region: "test", FailureDomain: "rack-a", Roles: []string{"relay"}, Transports: []string{"derp_quic", "derp_wss"}, EndpointHost: "127.0.0.1", EndpointQUICPort: uint16(udp.LocalAddr().(*net.UDPAddr).Port), EndpointTCPPort: uint16(tcpPort), State: "ready", ObservedAt: now.Unix(), ExpiresAt: now.Add(2 * time.Minute).Unix(), CapacityLimit: 100, CapacityUsed: 1, CapacityObservedAt: now.Unix()}
 	nodes := []tailnet.RegionalNode{node}
-	applyRegionalAuthority(t, clientAuthority, signer, clientConfig, clientTLS, clientDisco, serverDisco, nodes)
-	applyRegionalAuthority(t, serverAuthority, signer, serverConfig, serverTLS, serverDisco, clientDisco, nodes)
+	applyRegionalAuthority(t, clientAuthority, signer, clientConfig, clientTLS, clientDisco, nodes)
+	applyRegionalAuthority(t, serverAuthority, signer, serverConfig, serverTLS, serverDisco, nodes)
 	clientRegions, err := clientAuthority.ConfigureRegionalRelays(regionalTLS(clientTLS, roots))
 	if err != nil {
 		t.Fatal(err)
@@ -177,8 +177,8 @@ func TestNativeSessionRecoversQUICToWSSAndBack(t *testing.T) {
 				applyTestConfiguration(t, clientAuthority, signer, clientConfig)
 				applyTestConfiguration(t, serverAuthority, signer, serverConfig)
 				nodes[0].ObservedAt, nodes[0].CapacityObservedAt, nodes[0].ExpiresAt = tick.Unix(), tick.Unix(), tick.Add(60*time.Second).Unix()
-				applyRegionalAuthority(t, clientAuthority, signer, clientConfig, clientTLS, clientDisco, serverDisco, nodes)
-				applyRegionalAuthority(t, serverAuthority, signer, serverConfig, serverTLS, serverDisco, clientDisco, nodes)
+				applyRegionalAuthority(t, clientAuthority, signer, clientConfig, clientTLS, clientDisco, nodes)
+				applyRegionalAuthority(t, serverAuthority, signer, serverConfig, serverTLS, serverDisco, nodes)
 				nextRefresh = time.Now().Add(5 * time.Second)
 			}
 			s := clientAuthority.RegionalStatus()

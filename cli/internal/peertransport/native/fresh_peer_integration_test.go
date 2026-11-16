@@ -107,8 +107,8 @@ func TestNativeDialToPeerThatHasNotAnsweredRegionalProbesIsFast(t *testing.T) {
 	}()
 	node := tailnet.RegionalNode{NodeID: nodeID, NodeGeneration: 1, ProcessEpoch: epoch, Region: "test", FailureDomain: "rack-a", Roles: []string{"relay"}, Transports: []string{"derp_quic"}, EndpointHost: "127.0.0.1", EndpointQUICPort: uint16(udp.LocalAddr().(*net.UDPAddr).Port), State: "ready", ObservedAt: now.Unix(), ExpiresAt: now.Add(2 * time.Minute).Unix(), CapacityLimit: 100, CapacityUsed: 1, CapacityObservedAt: now.Unix()}
 	nodes := []tailnet.RegionalNode{node}
-	applyRegionalAuthority(t, clientAuthority, signer, clientConfig, clientTLS, clientDisco, serverDisco, nodes)
-	applyRegionalAuthority(t, serverAuthority, signer, serverConfig, serverTLS, serverDisco, clientDisco, nodes)
+	applyRegionalAuthority(t, clientAuthority, signer, clientConfig, clientTLS, clientDisco, nodes)
+	applyRegionalAuthority(t, serverAuthority, signer, serverConfig, serverTLS, serverDisco, nodes)
 	if _, err := clientAuthority.ConfigureRegionalRelays(regionalTLS(clientTLS, roots)); err != nil {
 		t.Fatal(err)
 	}

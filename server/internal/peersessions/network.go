@@ -887,8 +887,7 @@ func (s *NetworkService) relayGrants(nodes []relayNodeRow, self networkBinding, 
 		}
 		claims := peernetwork.RelayGrant{Version: peernetwork.RelayGrantVersion, Issuer: s.issuer, Audience: peernetwork.RelayGrantAudience, IssuedAt: now.Unix(), ExpiresAt: expires.Unix(),
 			Generation: uint64(generation), AccountID: self.AccountID, EndpointID: self.EndpointID, WireGuardPublicKey: self.WireGuardPublicKey, DiscoPublicKey: self.DiscoPublicKey,
-			CertificateFingerprint: self.QUICCertificateFingerprint, QUICPublicKey: self.QUICPublicKey, NodeID: nodeID, NodeGeneration: uint64(nodeGeneration), ProcessEpoch: processEpoch,
-			Peers: []peernetwork.RelayPeer{}}
+			CertificateFingerprint: self.QUICCertificateFingerprint, QUICPublicKey: self.QUICPublicKey, NodeID: nodeID, NodeGeneration: uint64(nodeGeneration), ProcessEpoch: processEpoch}
 		for i, part := range relayGrantMembershipParts(relayGrantMemberships(self, nodePeers, expires.Unix())) {
 			g := claims
 			g.Memberships = part

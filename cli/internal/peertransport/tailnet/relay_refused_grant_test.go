@@ -18,7 +18,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/relay/derpquic"
 )
 
-// A grant the relay would refuse (here: more than its 128 scopes in one grant, as until_revoked
+// A grant the relay would refuse (here: more than its 256 memberships in one grant, as until_revoked
 // session rights produced on prod) makes only that relay unusable: with every relay refused the
 // engine starts direct-only instead of failing the runtime and with it pairing ("relay
 // authorization rejected", pbvm2 2026-10-26). An explicitly requested relay still reports it.
@@ -26,7 +26,7 @@ func TestARefusedRelayGrantLeavesDirectAdmission(t *testing.T) {
 	a, cfg, signer, _ := networkTestAuthority(t)
 	now := time.Now().Unix()
 	base := cfg.Peers[0].Scopes[0]
-	for i := range 130 {
+	for i := range peernetwork.MaxGrantMemberships + 4 {
 		scope := base
 		scope.ResourceID = fmt.Sprintf("grant_%03d", i)
 		cfg.Peers[0].Scopes = append(cfg.Peers[0].Scopes, scope)
@@ -44,11 +44,7 @@ func TestARefusedRelayGrantLeavesDirectAdmission(t *testing.T) {
 	}
 	grant := func(n RegionalNode, scopes int) string {
 		g := peernetwork.RelayGrant{Version: 1, Issuer: cfg.Issuer, Audience: "paperboat-relay", IssuedAt: now, ExpiresAt: now + 60, Generation: cfg.Generation, AccountID: cfg.Self.AccountID, EndpointID: cfg.Self.EndpointID, WireGuardPublicKey: cfg.Self.WireGuardPublicKey, CertificateFingerprint: cfg.Self.QUICCertificateFingerprint, QUICPublicKey: cfg.Self.QUICPublicKey, NodeID: n.NodeID, NodeGeneration: n.NodeGeneration, ProcessEpoch: n.ProcessEpoch}
-		p := peernetwork.RelayPeer{WireGuardPublicKey: cfg.Peers[0].Identity.WireGuardPublicKey}
-		for _, s := range cfg.Peers[0].Scopes[:scopes] {
-			p.Scopes = append(p.Scopes, derpquic.Scope{ResourceKind: s.ResourceKind, ResourceID: s.ResourceID, ResourceGeneration: s.ResourceGeneration, Capability: s.Capability, Direction: s.Direction, Port: s.Port, ExpiresAt: s.ExpiresAt})
-		}
-		g.Peers = []peernetwork.RelayPeer{p}
+		g.Memberships = grantMemberships(cfg.Peers[0].Scopes[:scopes]...)
 		header, _ := json.Marshal(map[string]string{"alg": "EdDSA", "typ": "paperboat-relay-grant+jwt", "kid": "network_test"})
 		body, _ := json.Marshal(g)
 		signed := base64.RawURLEncoding.EncodeToString(header) + "." + base64.RawURLEncoding.EncodeToString(body)
@@ -81,8 +77,8 @@ func TestARefusedRelayGrantLeavesDirectAdmission(t *testing.T) {
 	}
 }
 
-// One grant that does not verify (another relay process, a wrong signature, an unlisted relay, a peer the
-// configuration does not name) drops only its own relay: the other relays' grants still apply. Each used to wipe
+// One grant that does not verify (another relay process, a wrong signature, an unlisted relay, a membership the
+// configuration does not give) drops only its own relay: the other relays' grants still apply. Each used to wipe
 // every relay's grant, leaving the machine direct-only until the next refresh (audit A P1-5).
 func TestOneBadRelayGrantDropsOnlyItsRelay(t *testing.T) {
 	a, cfg, signer, _ := networkTestAuthority(t)
@@ -112,9 +108,10 @@ func TestOneBadRelayGrantDropsOnlyItsRelay(t *testing.T) {
 		"other_process": func() []string { g := grant(bad); g.ProcessEpoch = "epoch_restarted"; return []string{sign(g, signer)} },
 		"signature":     func() []string { return []string{sign(grant(bad), stranger)} },
 		"unlisted":      func() []string { return []string{sign(grant(node("relay_unlisted")), signer)} },
-		"unknown_peer": func() []string {
+		"unconfigured_membership": func() []string {
 			g := grant(bad)
-			g.Peers = []peernetwork.RelayPeer{{WireGuardPublicKey: cfg.Self.WireGuardPublicKey, Scopes: []derpquic.Scope{cfg.Peers[0].Scopes[0]}}}
+			g.Memberships = []derpquic.Scope{cfg.Peers[0].Scopes[0]}
+			g.Memberships[0].ResourceID = "resource_not_configured"
 			return []string{sign(g, signer)}
 		},
 		"malformed":  func() []string { return []string{"not.a.grant"} },

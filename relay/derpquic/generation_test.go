@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
+	"slices"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -112,10 +113,11 @@ func TestCachedMultipartGrantAdmitsGenerationWithoutNarrowingServingAuthority(t 
 	ca, cb := certificate(t), certificate(t)
 	a, b := f.grant(ka, ca, "client"), f.grant(kb, cb, "machine")
 	pairScopes(&a, &b)
-	control := a
-	control.Peers = nil
-	control.RelayControlPeers = []string{KeyString(key.NewNode().Public())}
-	credential := f.token(a) + "\n" + f.token(control)
+	extra := a.Memberships[0]
+	extra.ResourceID, extra.Capability = "extra_files", "file_transfer"
+	second := a
+	second.Memberships = []Scope{extra}
+	credential := f.token(a) + "\n" + f.token(second)
 	open := func(namespace [32]byte) *Client {
 		var calls atomic.Int32
 		c := NewClient(ClientConfig{Address: address, Namespace: namespace, GenerationDisco: key.NewDisco().Public(), TLS: &tls.Config{RootCAs: f.roots, ServerName: "localhost", Certificates: []tls.Certificate{ca}}, Credential: func(context.Context) (string, error) {
@@ -132,7 +134,7 @@ func TestCachedMultipartGrantAdmitsGenerationWithoutNarrowingServingAuthority(t 
 	eventually(t, func() bool {
 		server.mu.Lock()
 		defer server.mu.Unlock()
-		return server.peers[ka] != nil && server.peers[ka].grant.controls(control.RelayControlPeers[0])
+		return server.peers[ka] != nil && slices.Contains(server.peers[ka].grant.Memberships, extra)
 	})
 	oldB := f.client(address, cb, b)
 	connect(t, oldB)
@@ -227,7 +229,8 @@ func TestRelayGenerationAdmitsReissuedGrantOfSameAuthority(t *testing.T) {
 	receive(t, oldB, ka, []byte("serving"))
 	widened := b
 	widened.IssuedAt = b.IssuedAt + 2
-	widened.Peers = append(append([]Peer(nil), b.Peers...), Peer{WireGuardPublicKey: KeyString(key.NewNode().Public()), Scopes: b.Peers[0].Scopes})
+	widened.Memberships = append(slices.Clone(b.Memberships), b.Memberships[0])
+	widened.Memberships[1].ResourceID = "widened"
 	other, _ := dial(certB, widened, sha256.Sum256([]byte("conflicting-generation")))
 	eventually(t, func() bool { return other == nil || other.Send(ka, []byte("x")) != nil })
 }

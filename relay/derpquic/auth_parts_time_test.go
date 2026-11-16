@@ -32,8 +32,8 @@ func TestGrantPartExpiredBeforeAdmissionIsRefused(t *testing.T) {
 	short, fresh := gb, gb
 	short.Generation, fresh.Generation = gb.Generation+1, gb.Generation+1
 	short.IssuedAt, short.ExpiresAt = now-10, now+1
-	short.Peers = []Peer{{WireGuardPublicKey: gb.Peers[0].WireGuardPublicKey, Scopes: []Scope{gb.Peers[0].Scopes[0]}}}
-	short.Peers[0].Scopes[0].ExpiresAt = short.ExpiresAt
+	short.Memberships = []Scope{gb.Memberships[0]} // its own copy: the expiry below must not change gb
+	short.Memberships[0].ExpiresAt = short.ExpiresAt
 	// Hold the write lock throughout so the client's own credential refresh cannot come in between.
 	cc.writeMu.Lock()
 	err := writeFrame(cc.stream, frameAuthBatch, append(binary.BigEndian.AppendUint32(nil, 2), f.token(short)...))

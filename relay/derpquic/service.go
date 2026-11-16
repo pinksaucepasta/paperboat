@@ -130,18 +130,6 @@ func (l *PairLease) capabilityValidLocked() (time.Time, bool) {
 	if !allowed(a, b, now) || a.DiscoPublicKey != DiscoKeyString(l.disco[0]) || b.DiscoPublicKey != DiscoKeyString(l.disco[1]) {
 		return time.Time{}, false
 	}
-	// A per-peer grant binds the other's disco key; a membership grant names no peers, and each disco key
-	// is the one its own signed grant carries (checked against the lease above).
-	match := func(g, other Grant) bool {
-		if len(g.Memberships) > 0 {
-			return true
-		}
-		p, ok := g.peerEntry(other.WireGuardPublicKey)
-		return ok && p.DiscoPublicKey == other.DiscoPublicKey
-	}
-	if !match(a, b) || !match(b, a) {
-		return time.Time{}, false
-	}
 	expires := time.Unix(allowedPairExpiry(a, b, now), 0)
 	if s.draining && s.deadline.Before(expires) {
 		expires = s.deadline
@@ -217,25 +205,9 @@ func sameGrantAuthority(a, b Grant) bool {
 		g.ExpiresAt = 0
 		g.Generation = 0
 		g.signedHash = [32]byte{}
-		g.index = nil // derived from the lists compared below
-		peers := make([]Peer, 0, len(g.Peers))
-		for _, peer := range g.Peers {
-			scopes := make([]Scope, 0, len(peer.Scopes))
-			for _, scope := range peer.Scopes {
-				if scope.ExpiresAt <= now {
-					continue
-				}
-				scope.ExpiresAt = 0
-				scopes = append(scopes, scope)
-			}
-			if len(scopes) != 0 {
-				peer.Scopes = scopes
-				peers = append(peers, peer)
-			}
-		}
-		g.Peers = peers
-		// Memberships are re-stamped with each grant's expiry like peer scopes: a renewal of the same ones is the
-		// same authority, so it keeps the fence and its pairs instead of closing them every renewal.
+		g.index = nil // derived from the memberships compared below
+		// Memberships are re-stamped with each grant's expiry: a renewal of the same ones is the same authority, so
+		// it keeps the fence and its pairs instead of closing them every renewal.
 		memberships := make([]Scope, 0, len(g.Memberships))
 		for _, m := range g.Memberships {
 			if m.ExpiresAt > now {

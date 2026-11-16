@@ -118,8 +118,8 @@ func testDeadRelayFallback(t *testing.T, deadID string, silentPeer bool) {
 	if nodes[0].NodeID > nodes[1].NodeID {
 		nodes[0], nodes[1] = nodes[1], nodes[0]
 	}
-	applyRegionalAuthority(t, clientAuthority, signer, clientConfig, clientTLS, clientDisco, serverDisco, nodes)
-	applyRegionalAuthority(t, serverAuthority, signer, serverConfig, serverTLS, serverDisco, clientDisco, nodes)
+	applyRegionalAuthority(t, clientAuthority, signer, clientConfig, clientTLS, clientDisco, nodes)
+	applyRegionalAuthority(t, serverAuthority, signer, serverConfig, serverTLS, serverDisco, nodes)
 	if _, err := clientAuthority.ConfigureRegionalRelays(regionalTLS(clientTLS, roots)); err != nil {
 		t.Fatal(err)
 	}

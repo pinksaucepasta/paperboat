@@ -5,33 +5,28 @@ package peernetwork
 // restriction, so it refuses the grant. Because all three use this one type, the server cannot emit a claim the
 // relay lacks.
 type RelayGrant struct {
-	Version                int              `json:"version"`
-	Issuer                 string           `json:"iss"`
-	Audience               string           `json:"aud"`
-	IssuedAt               int64            `json:"iat"`
-	ExpiresAt              int64            `json:"exp"`
-	Generation             uint64           `json:"generation"`
-	AccountID              string           `json:"account_id"`
-	EndpointID             string           `json:"endpoint_id"`
-	WireGuardPublicKey     string           `json:"wireguard_public_key"`
-	DiscoPublicKey         string           `json:"disco_public_key,omitempty"`
-	CertificateFingerprint string           `json:"quic_certificate_fingerprint"`
-	QUICPublicKey          string           `json:"quic_public_key"`
-	NodeID                 string           `json:"node_id"`
-	NodeGeneration         uint64           `json:"node_generation"`
-	ProcessEpoch           string           `json:"process_epoch"`
-	Peers                  []RelayPeer      `json:"peers"`
-	PeerRelay              *RelayDescriptor `json:"peer_relay,omitempty"`
-	RelayControlPeers      []string         `json:"relay_control_peers,omitempty"`
-	// Memberships authorize pairs without per-peer lists; a grant has one or the other.
+	Version                int    `json:"version"`
+	Issuer                 string `json:"iss"`
+	Audience               string `json:"aud"`
+	IssuedAt               int64  `json:"iat"`
+	ExpiresAt              int64  `json:"exp"`
+	Generation             uint64 `json:"generation"`
+	AccountID              string `json:"account_id"`
+	EndpointID             string `json:"endpoint_id"`
+	WireGuardPublicKey     string `json:"wireguard_public_key"`
+	DiscoPublicKey         string `json:"disco_public_key,omitempty"`
+	CertificateFingerprint string `json:"quic_certificate_fingerprint"`
+	QUICPublicKey          string `json:"quic_public_key"`
+	NodeID                 string `json:"node_id"`
+	NodeGeneration         uint64 `json:"node_generation"`
+	ProcessEpoch           string `json:"process_epoch"`
+	// Peers is the retired per-peer list. Server .49 still signs `"peers":[]`, so an empty list decodes and a
+	// non-empty one is refused by Check; remove the field once no server emits it. Never emitted.
+	Peers     []struct{}       `json:"peers,omitempty"`
+	PeerRelay *RelayDescriptor `json:"peer_relay,omitempty"`
+	// Memberships authorize pairs without naming peers (PLAN 3b); the relay pairs two endpoints holding one
+	// resource in opposite directions.
 	Memberships []Scope `json:"memberships,omitempty"`
-}
-
-// RelayPeer is one peer a relay grant pairs its endpoint with.
-type RelayPeer struct {
-	WireGuardPublicKey string  `json:"wireguard_public_key"`
-	DiscoPublicKey     string  `json:"disco_public_key,omitempty"`
-	Scopes             []Scope `json:"scopes"`
 }
 
 // RelayDescriptor names a peer relay service.
@@ -42,10 +37,9 @@ type RelayDescriptor struct {
 }
 
 // Bounds of one relay grant (part), shared by the server that chunks and mint that signs (both refuse more) and the
-// relay that verifies. An endpoint with more peers gets more grants of the same generation.
+// relay that verifies. An endpoint with more memberships gets more grants of the same generation.
 const (
-	MaxGrantPeers  = 64
-	MaxGrantScopes = 128 // the scopes of all peers of one grant
+	MaxGrantScopes = 128 // the scopes RelayGrantScopes keeps for one peer
 	// MaxGrantBytes bounds one signed grant token: the relay reads it from one control frame (derpquic.MaxControl).
 	MaxGrantBytes = 128 << 10
 )

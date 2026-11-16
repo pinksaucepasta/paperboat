@@ -16,7 +16,7 @@ import (
 
 // Membership grants (PLAN 3b "Relay pair authorization by membership") name no peers. The client accepts one
 // only if each membership is a scope its own signed configuration gives it (same resource and direction), and
-// never beside per-peer lists; the account mesh membership makes the account's configured peers relay-control
+// the account mesh membership makes the account's configured peers relay-control
 // peers, as the relay decides.
 func TestRelayMembershipGrantsMustMatchTheConfiguration(t *testing.T) {
 	a, cfg, signer, _ := networkTestAuthority(t)
@@ -29,8 +29,8 @@ func TestRelayMembershipGrantsMustMatchTheConfiguration(t *testing.T) {
 	if err := a.ApplyRegionalCandidates(t.Context(), regionalToken(t, signer, candidates)); err != nil {
 		t.Fatal(err)
 	}
-	sign := func(memberships []derpquic.Scope, peers []peernetwork.RelayPeer) string {
-		grant := peernetwork.RelayGrant{Version: 1, Issuer: cfg.Issuer, Audience: "paperboat-relay", IssuedAt: now, ExpiresAt: now + 60, Generation: cfg.Generation, AccountID: cfg.Self.AccountID, EndpointID: cfg.Self.EndpointID, WireGuardPublicKey: cfg.Self.WireGuardPublicKey, CertificateFingerprint: cfg.Self.QUICCertificateFingerprint, QUICPublicKey: cfg.Self.QUICPublicKey, NodeID: node.NodeID, NodeGeneration: node.NodeGeneration, ProcessEpoch: node.ProcessEpoch, Memberships: memberships, Peers: peers}
+	sign := func(memberships []derpquic.Scope) string {
+		grant := peernetwork.RelayGrant{Version: 1, Issuer: cfg.Issuer, Audience: "paperboat-relay", IssuedAt: now, ExpiresAt: now + 60, Generation: cfg.Generation, AccountID: cfg.Self.AccountID, EndpointID: cfg.Self.EndpointID, WireGuardPublicKey: cfg.Self.WireGuardPublicKey, CertificateFingerprint: cfg.Self.QUICCertificateFingerprint, QUICPublicKey: cfg.Self.QUICPublicKey, NodeID: node.NodeID, NodeGeneration: node.NodeGeneration, ProcessEpoch: node.ProcessEpoch, Memberships: memberships}
 		header, _ := json.Marshal(map[string]string{"alg": "EdDSA", "typ": "paperboat-relay-grant+jwt", "kid": "network_test"})
 		body, _ := json.Marshal(grant)
 		signed := base64.RawURLEncoding.EncodeToString(header) + "." + base64.RawURLEncoding.EncodeToString(body)
@@ -38,7 +38,7 @@ func TestRelayMembershipGrantsMustMatchTheConfiguration(t *testing.T) {
 	}
 	configured := cfg.Peers[0].Scopes[0]
 	member := derpquic.Scope{ResourceKind: configured.ResourceKind, ResourceID: configured.ResourceID, ResourceGeneration: configured.ResourceGeneration, Capability: configured.Capability, Direction: configured.Direction, Port: configured.Port, ExpiresAt: configured.ExpiresAt}
-	if err := a.ApplyRelayGrants(t.Context(), []string{sign([]derpquic.Scope{member}, nil)}); err != nil {
+	if err := a.ApplyRelayGrants(t.Context(), []string{sign([]derpquic.Scope{member})}); err != nil {
 		t.Fatalf("a membership the configuration gives was refused: %v", err)
 	}
 	otherDirection := member
@@ -46,9 +46,8 @@ func TestRelayMembershipGrantsMustMatchTheConfiguration(t *testing.T) {
 	otherResource := member
 	otherResource.ResourceID = "resource_not_configured"
 	for name, grant := range map[string]string{
-		"other direction":      sign([]derpquic.Scope{otherDirection}, nil),
-		"unconfigured":         sign([]derpquic.Scope{otherResource}, nil),
-		"beside per-peer list": sign([]derpquic.Scope{member}, []peernetwork.RelayPeer{{WireGuardPublicKey: cfg.Peers[0].Identity.WireGuardPublicKey, Scopes: []derpquic.Scope{member}}}),
+		"other direction": sign([]derpquic.Scope{otherDirection}),
+		"unconfigured":    sign([]derpquic.Scope{otherResource}),
 	} {
 		if err := a.ApplyRelayGrants(t.Context(), []string{grant}); !errors.Is(err, ErrAuthority) {
 			t.Errorf("%s: err = %v", name, err)
@@ -57,8 +56,9 @@ func TestRelayMembershipGrantsMustMatchTheConfiguration(t *testing.T) {
 }
 
 // F21-01: a configured scope without expiry (expires_at 0) appears in a relay grant with the grant's own expiry,
-// because relays and the mint refuse peer scopes without one. That grant is accepted; any other difference is not.
-func TestRelayGrantPeerScopeWithoutExpiryTakesTheGrantExpiry(t *testing.T) {
+// because relays and the mint refuse scopes without one. That grant is accepted; a membership without expiry or for
+// a resource the configuration does not give is not.
+func TestRelayGrantMembershipWithoutExpiryTakesTheGrantExpiry(t *testing.T) {
 	a, cfg, signer, _ := networkTestAuthority(t)
 	cfg.Self.Role, cfg.Self.MachineID, cfg.Self.MachineGeneration = "machine", cfg.Self.EndpointID, 1
 	a.options.Self = cfg.Self
@@ -77,26 +77,19 @@ func TestRelayGrantPeerScopeWithoutExpiryTakesTheGrantExpiry(t *testing.T) {
 		t.Fatal(err)
 	}
 	grantExpiry := now + 60
-	signScopes := func(scopes ...derpquic.Scope) string {
-		grant := peernetwork.RelayGrant{Version: 1, Issuer: cfg.Issuer, Audience: "paperboat-relay", IssuedAt: now, ExpiresAt: grantExpiry, Generation: cfg.Generation, AccountID: cfg.Self.AccountID, EndpointID: cfg.Self.EndpointID, WireGuardPublicKey: cfg.Self.WireGuardPublicKey, CertificateFingerprint: cfg.Self.QUICCertificateFingerprint, QUICPublicKey: cfg.Self.QUICPublicKey, NodeID: node.NodeID, NodeGeneration: node.NodeGeneration, ProcessEpoch: node.ProcessEpoch, Peers: []peernetwork.RelayPeer{{WireGuardPublicKey: cfg.Peers[0].Identity.WireGuardPublicKey, Scopes: scopes}}}
+	sign := func(scope derpquic.Scope) string {
+		scopes := []derpquic.Scope{scope}
+		grant := peernetwork.RelayGrant{Version: 1, Issuer: cfg.Issuer, Audience: "paperboat-relay", IssuedAt: now, ExpiresAt: grantExpiry, Generation: cfg.Generation, AccountID: cfg.Self.AccountID, EndpointID: cfg.Self.EndpointID, WireGuardPublicKey: cfg.Self.WireGuardPublicKey, CertificateFingerprint: cfg.Self.QUICCertificateFingerprint, QUICPublicKey: cfg.Self.QUICPublicKey, NodeID: node.NodeID, NodeGeneration: node.NodeGeneration, ProcessEpoch: node.ProcessEpoch, Memberships: scopes}
 		header, _ := json.Marshal(map[string]string{"alg": "EdDSA", "typ": "paperboat-relay-grant+jwt", "kid": "network_test"})
 		body, _ := json.Marshal(grant)
 		signed := base64.RawURLEncoding.EncodeToString(header) + "." + base64.RawURLEncoding.EncodeToString(body)
 		return signed + "." + base64.RawURLEncoding.EncodeToString(ed25519.Sign(signer, []byte(signed)))
 	}
-	sign := func(scope derpquic.Scope) string { return signScopes(scope) }
 	scope := derpquic.Scope{ResourceKind: "machine_network", ResourceID: "network_pair", ResourceGeneration: 1, Capability: "connect", Direction: "dial", Port: 443, ExpiresAt: grantExpiry}
 	if err := a.ApplyRelayGrants(t.Context(), []string{sign(scope)}); err != nil {
 		t.Fatalf("a grant carrying the grant expiry for an until-revoked scope was refused: %v", err)
 	}
-	// A session right (expires_at 0, not machine_network) authorizes no relay pair: a grant that still carries it,
-	// with any expiry, is not what the server issues and is refused; the one without it was accepted above.
-	right := derpquic.Scope{ResourceKind: "machine_access", ResourceID: "host_self", ResourceGeneration: 5, Capability: "terminal", Direction: "accept", Port: 443, ExpiresAt: grantExpiry}
-	if err := a.ApplyRelayGrants(t.Context(), []string{signScopes(scope, right)}); !errors.Is(err, ErrAuthority) {
-		t.Errorf("a grant still carrying the session right: err = %v, want refused", err)
-	}
 	for name, mutate := range map[string]func(*derpquic.Scope){
-		"other expiry":   func(s *derpquic.Scope) { s.ExpiresAt = grantExpiry - 1 },
 		"zero in grant":  func(s *derpquic.Scope) { s.ExpiresAt = 0 },
 		"other resource": func(s *derpquic.Scope) { s.ResourceID = "network_other" },
 	} {
@@ -128,7 +121,7 @@ func TestRelayGrantAccountNetworkMembershipFollowsTheConfiguredMesh(t *testing.T
 		t.Fatal(err)
 	}
 	sign := func(memberships ...derpquic.Scope) string {
-		grant := peernetwork.RelayGrant{Version: 1, Issuer: cfg.Issuer, Audience: "paperboat-relay", IssuedAt: now, ExpiresAt: now + 60, Generation: cfg.Generation, AccountID: cfg.Self.AccountID, EndpointID: cfg.Self.EndpointID, WireGuardPublicKey: cfg.Self.WireGuardPublicKey, CertificateFingerprint: cfg.Self.QUICCertificateFingerprint, QUICPublicKey: cfg.Self.QUICPublicKey, NodeID: node.NodeID, NodeGeneration: node.NodeGeneration, ProcessEpoch: node.ProcessEpoch, Peers: []peernetwork.RelayPeer{}, Memberships: memberships}
+		grant := peernetwork.RelayGrant{Version: 1, Issuer: cfg.Issuer, Audience: "paperboat-relay", IssuedAt: now, ExpiresAt: now + 60, Generation: cfg.Generation, AccountID: cfg.Self.AccountID, EndpointID: cfg.Self.EndpointID, WireGuardPublicKey: cfg.Self.WireGuardPublicKey, CertificateFingerprint: cfg.Self.QUICCertificateFingerprint, QUICPublicKey: cfg.Self.QUICPublicKey, NodeID: node.NodeID, NodeGeneration: node.NodeGeneration, ProcessEpoch: node.ProcessEpoch, Memberships: memberships}
 		header, _ := json.Marshal(map[string]string{"alg": "EdDSA", "typ": "paperboat-relay-grant+jwt", "kid": "network_test"})
 		body, _ := json.Marshal(grant)
 		signed := base64.RawURLEncoding.EncodeToString(header) + "." + base64.RawURLEncoding.EncodeToString(body)
@@ -177,7 +170,7 @@ func TestPeerRelayDiscoComesFromTheConfigurationUnderAMembershipGrant(t *testing
 		t.Fatal("a peer relay bound a peer on a relay this endpoint holds no grant for")
 	}
 	network := derpquic.Scope{ResourceKind: "machine_network", ResourceID: peernetwork.AccountNetworkID(cfg.Self.AccountID), ResourceGeneration: 1, Capability: "connect", Direction: "accept", Port: 443, ExpiresAt: now + 60}
-	grant := peernetwork.RelayGrant{Version: 1, Issuer: cfg.Issuer, Audience: "paperboat-relay", IssuedAt: now, ExpiresAt: now + 60, Generation: cfg.Generation, AccountID: cfg.Self.AccountID, EndpointID: cfg.Self.EndpointID, WireGuardPublicKey: cfg.Self.WireGuardPublicKey, CertificateFingerprint: cfg.Self.QUICCertificateFingerprint, QUICPublicKey: cfg.Self.QUICPublicKey, NodeID: node.NodeID, NodeGeneration: node.NodeGeneration, ProcessEpoch: node.ProcessEpoch, Peers: []peernetwork.RelayPeer{}, Memberships: []derpquic.Scope{network}}
+	grant := peernetwork.RelayGrant{Version: 1, Issuer: cfg.Issuer, Audience: "paperboat-relay", IssuedAt: now, ExpiresAt: now + 60, Generation: cfg.Generation, AccountID: cfg.Self.AccountID, EndpointID: cfg.Self.EndpointID, WireGuardPublicKey: cfg.Self.WireGuardPublicKey, CertificateFingerprint: cfg.Self.QUICCertificateFingerprint, QUICPublicKey: cfg.Self.QUICPublicKey, NodeID: node.NodeID, NodeGeneration: node.NodeGeneration, ProcessEpoch: node.ProcessEpoch, Memberships: []derpquic.Scope{network}}
 	header, _ := json.Marshal(map[string]string{"alg": "EdDSA", "typ": "paperboat-relay-grant+jwt", "kid": "network_test"})
 	body, _ := json.Marshal(grant)
 	signed := base64.RawURLEncoding.EncodeToString(header) + "." + base64.RawURLEncoding.EncodeToString(body)

@@ -58,7 +58,7 @@ func retainReconnectMetadata(record slog.Record, fields map[string]string) bool 
 		"sessions": true, "path_category": true, "predicate_present": true, "allowed": true,
 		"resource_present": true, "reason": true, "error_type": true, "capability": true,
 		"peer_found": true, "resource_found": true, "capability_found": true, "direction_found": true,
-		"duration_ms": true,
+		"duration_ms": true, "delta": true,
 	}
 	record.Attrs(func(attr slog.Attr) bool {
 		if !keys[attr.Key] {

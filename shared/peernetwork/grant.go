@@ -26,9 +26,8 @@ const (
 	// MaxMergedMemberships bounds the memberships of all parts of one grant (a team CLI reaching many shared hosts
 	// holds four per host); the relay's index costs 12 bytes per membership.
 	MaxMergedMemberships = 4096
-	// MaxGrantParts covers peer-full chunks plus scope-full chunks. Each pair of
-	// adjacent scope-limited chunks contains more than MaxGrantScopes scopes.
-	MaxGrantParts = (MaxEndpoints+MaxGrantPeers-1)/MaxGrantPeers + 2*((MaxScopes+MaxGrantScopes-1)/MaxGrantScopes)
+	// MaxGrantParts is the parts of one grant that hold MaxMergedMemberships memberships.
+	MaxGrantParts = (MaxMergedMemberships + MaxGrantMemberships - 1) / MaxGrantMemberships
 	// MaxGrantIDBytes bounds a grant's account and endpoint ids.
 	MaxGrantIDBytes = 256
 )
@@ -52,21 +51,12 @@ func DecodeSigned(raw []byte, out any) error {
 	return nil
 }
 
-// DropUnknownScopes removes the scopes whose kind or capability this build does not know (a newer server's), and
-// the peers left with none, so they authorize nothing here instead of failing the whole grant; Tailscale clients
-// ignore capabilities they do not know the same way. Receivers call it before Check; the mint never does, so the
-// server cannot sign a scope no receiver of its build knows.
+// DropUnknownScopes removes the memberships whose kind or capability this build does not know (a newer server's), so
+// they authorize nothing here instead of failing the whole grant; Tailscale clients ignore capabilities they do not
+// know the same way. Receivers call it before Check; the mint never does, so the server cannot sign a scope no
+// receiver of its build knows.
 func (g *RelayGrant) DropUnknownScopes() {
 	g.Memberships = knownScopes(g.Memberships)
-	peers := g.Peers[:0:0]
-	for _, p := range g.Peers {
-		if p.Scopes = knownScopes(p.Scopes); len(p.Scopes) > 0 {
-			peers = append(peers, p)
-		}
-	}
-	if g.Peers != nil {
-		g.Peers = peers
-	}
 }
 
 func knownScopes(scopes []Scope) []Scope {
@@ -98,42 +88,15 @@ func (g RelayGrant) Check(now time.Time) error {
 		return invalid("grant key encoding")
 	case !ValidKey(g.WireGuardPublicKey) || g.DiscoPublicKey != "" && !ValidKey(g.DiscoPublicKey):
 		return invalid("grant endpoint keys")
-	case len(g.Peers) > MaxGrantPeers || len(g.RelayControlPeers) > MaxGrantPeers:
-		return invalid("grant peer count")
+	case len(g.Peers) != 0:
+		return invalid("grant per-peer list")
 	case g.PeerRelay != nil && (!g.PeerRelay.Valid() || g.DiscoPublicKey == "" || g.PeerRelay.WireGuardPublicKey == g.WireGuardPublicKey):
 		return invalid("grant peer relay")
-	}
-	seen := map[string]bool{}
-	for _, peer := range g.RelayControlPeers {
-		if !ValidKey(peer) || peer == g.WireGuardPublicKey || seen[peer] {
-			return invalid("grant relay control peer")
-		}
-		seen[peer] = true
-	}
-	clear(seen)
-	scopes := 0
-	for _, p := range g.Peers {
-		switch {
-		case !ValidKey(p.WireGuardPublicKey) || seen[p.WireGuardPublicKey] || p.WireGuardPublicKey == g.WireGuardPublicKey:
-			return invalid("grant peer key")
-		case p.DiscoPublicKey != "" && !ValidKey(p.DiscoPublicKey):
-			return invalid("grant peer disco key")
-		case g.PeerRelay != nil && (p.DiscoPublicKey == "" || p.WireGuardPublicKey == g.PeerRelay.WireGuardPublicKey && p.DiscoPublicKey != g.PeerRelay.DiscoPublicKey):
-			return invalid("grant peer relay disco key")
-		case len(p.Scopes) == 0:
-			return invalid("grant peer without scopes")
-		}
-		seen[p.WireGuardPublicKey] = true
-		for _, s := range p.Scopes {
-			if scopes++; scopes > MaxGrantScopes || !ValidGrantScope(s) {
-				return invalid("grant scope")
-			}
-		}
 	}
 	if len(g.Memberships) == 0 {
 		return nil
 	}
-	if len(g.Memberships) > MaxGrantMemberships || len(g.Peers) != 0 || len(g.RelayControlPeers) != 0 {
+	if len(g.Memberships) > MaxGrantMemberships {
 		return invalid("grant memberships")
 	}
 	members := make(map[Scope]bool, len(g.Memberships))

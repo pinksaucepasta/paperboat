@@ -16,9 +16,9 @@ func TestInspectorOnlyRelayAuthority(t *testing.T) {
 	a.AccountID = "teammate"
 	pairScopes(&a, &b)
 	for _, g := range []*Grant{&a, &b} {
-		g.Peers[0].Scopes[0].ResourceKind = "inspector"
-		g.Peers[0].Scopes[0].ResourceID = "inspector_credential"
-		g.Peers[0].Scopes[0].Capability = "inspector"
+		g.Memberships[0].ResourceKind = "inspector"
+		g.Memberships[0].ResourceID = "inspector_credential"
+		g.Memberships[0].Capability = "inspector"
 	}
 	state := tls.ConnectionState{PeerCertificates: []*x509.Certificate{cert.Leaf}}
 	if _, err := f.verifier.Verify(f.token(a), state, time.Now()); err != nil {
@@ -29,9 +29,9 @@ func TestInspectorOnlyRelayAuthority(t *testing.T) {
 	}
 	// (inspector, terminal) is no scope of the shared list: it authorizes nothing (dropped like a newer
 	// server's scope) and never fails the rest of the grant.
-	a.Peers[0].Scopes[0].Capability = "terminal"
-	if got, err := f.verifier.Verify(f.token(a), state, time.Now()); err != nil || len(got.Peers) != 0 {
-		t.Fatalf("inspector resource kept a terminal capability: %+v, %v", got.Peers, err)
+	a.Memberships[0].Capability = "terminal"
+	if got, err := f.verifier.Verify(f.token(a), state, time.Now()); err != nil || len(got.Memberships) != 0 {
+		t.Fatalf("inspector resource kept a terminal capability: %+v, %v", got.Memberships, err)
 	}
 	if allowed(a, b, time.Now()) {
 		t.Fatal("different capability matched inspector peer")

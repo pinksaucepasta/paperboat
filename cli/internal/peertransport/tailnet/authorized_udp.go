@@ -342,22 +342,6 @@ func (a *Authority) Client(descriptor mesh.Addr, peerID string) (*UDPClient, err
 		if discoErr != nil || info.ServerPublic.NodePublic != pub || info.ServerDiscoPublic.DiscoPublic != disco {
 			return nil, ErrAuthority
 		}
-		a.relay.mu.Lock()
-		grant := a.relay.grants[a.relay.node.NodeID]
-		a.relay.mu.Unlock()
-		if grant.PeerRelay != nil {
-			matched := false
-			for _, relayPeer := range grant.Peers {
-				if relayPeer.WireGuardPublicKey == p.Identity.WireGuardPublicKey {
-					disco, err := derpquic.ParseDiscoKey(relayPeer.DiscoPublicKey)
-					matched = err == nil && disco == info.ServerDiscoPublic.DiscoPublic
-					break
-				}
-			}
-			if !matched {
-				return nil, ErrAuthority
-			}
-		}
 		// Bootstrap hints may change without changing signed peer authority.
 		// Keep live flows until identity, scopes or expiry actually withdraw them.
 		if lease, ok := a.clients[peerID]; ok {

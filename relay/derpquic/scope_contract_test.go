@@ -27,9 +27,7 @@ func TestSignedGrantAdmitsEverySharedScope(t *testing.T) {
 			cert := certificate(t)
 			g := f.grant(key.NewNode().Public(), cert, "endpoint")
 			s := Scope{ResourceKind: kind, ResourceID: "rec_01234567-89ab-cdef-0123-456789abcdef", ResourceGeneration: 1, Capability: capability, Direction: "dial", Port: 443, ExpiresAt: g.ExpiresAt}
-			g.Peers = []Peer{{WireGuardPublicKey: KeyString(key.NewNode().Public()), Scopes: []Scope{s}}}
-			verify(t, g, cert)
-			g.Peers, g.Memberships = nil, []Scope{s}
+			g.Memberships = []Scope{s}
 			verify(t, g, cert)
 		})
 		return true
@@ -40,10 +38,10 @@ func TestSignedGrantAdmitsEverySharedScope(t *testing.T) {
 	// A CLI replay's recording scope beside the account mesh pair, as the server mints it for a viewer's endpoint.
 	cert := certificate(t)
 	g := f.grant(key.NewNode().Public(), cert, "viewer_cli")
-	g.Peers = []Peer{{WireGuardPublicKey: KeyString(key.NewNode().Public()), Scopes: []Scope{
+	g.Memberships = []Scope{
 		{ResourceKind: "machine_network", ResourceID: "network_account", ResourceGeneration: 1, Capability: "connect", Direction: "dial", Port: 443, ExpiresAt: g.ExpiresAt},
 		{ResourceKind: "recording", ResourceID: "rec_01234567-89ab-cdef-0123-456789abcdef", ResourceGeneration: 1, Capability: "recording", Direction: "dial", Port: 443, ExpiresAt: g.ExpiresAt},
-	}}}
+	}
 	verify(t, g, cert)
 }
 

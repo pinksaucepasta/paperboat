@@ -86,9 +86,9 @@ func (f *fixture) grant(k key.NodePublic, cert tls.Certificate, endpoint string)
 }
 func pairScopes(a, b *Grant) {
 	scope := Scope{ResourceKind: "machine_access", ResourceID: "machine", ResourceGeneration: 1, Capability: "terminal", Direction: "dial", Port: 443, ExpiresAt: max(a.ExpiresAt, b.ExpiresAt)}
-	a.Peers = []Peer{{WireGuardPublicKey: b.WireGuardPublicKey, Scopes: []Scope{scope}}}
+	a.Memberships = []Scope{scope}
 	scope.Direction = "accept"
-	b.Peers = []Peer{{WireGuardPublicKey: a.WireGuardPublicKey, Scopes: []Scope{scope}}}
+	b.Memberships = []Scope{scope}
 }
 func (f *fixture) start(address string) (*Server, string, func()) {
 	f.t.Helper()
@@ -249,37 +249,6 @@ func TestCarrierForwardRestartRevoke(t *testing.T) {
 	receive(t, b, ka, control)
 }
 
-func TestRelayControlAuthorityCannotForwardApplicationPackets(t *testing.T) {
-	f := newFixture(t)
-	server, address, _ := f.start("127.0.0.1:0")
-	ka, kb := key.NewNode().Public(), key.NewNode().Public()
-	ca, cb := certificate(t), certificate(t)
-	ga, gb := f.grant(ka, ca, "initiator"), f.grant(kb, cb, "machine-relay")
-	ga.RelayControlPeers = []string{gb.WireGuardPublicKey}
-	gb.RelayControlPeers = []string{ga.WireGuardPublicKey}
-	a, b := f.client(address, ca, ga), f.client(address, cb, gb)
-	connect(t, a)
-	connect(t, b)
-	control := []byte("sealed relay allocation")
-	if err := a.SendControl(kb, control); err != nil {
-		t.Fatal(err)
-	}
-	receive(t, b, ka, control)
-	before := server.Snapshot()
-	packet := append([]byte{4}, make([]byte, 127)...)
-	if err := a.Send(kb, packet); err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-	if err := a.Ping(ctx); err != nil {
-		t.Fatal(err)
-	}
-	time.Sleep(50 * time.Millisecond)
-	if server.Snapshot().Forwarded != before.Forwarded {
-		t.Fatal("control-only relationship forwarded an application packet")
-	}
-}
 func TestAdmissionFailures(t *testing.T) {
 	f := newFixture(t)
 	_, address, _ := f.start("127.0.0.1:0")
@@ -330,9 +299,9 @@ func TestMismatchedScopeDenied(t *testing.T) {
 			pairScopes(&ga, &gb)
 			switch mode {
 			case "scope_generation":
-				gb.Peers[0].Scopes[0].ResourceGeneration++
+				gb.Memberships[0].ResourceGeneration++
 			case "scope_direction":
-				gb.Peers[0].Scopes[0].Direction = "dial"
+				gb.Memberships[0].Direction = "dial"
 			}
 			a, b := f.client(address, ca, ga), f.client(address, cb, gb)
 			connect(t, a)
@@ -623,25 +592,28 @@ func TestRelayReceiptRetainsAdmittedExpiryAndValidatesScopeShape(t *testing.T) {
 			now := time.Now()
 			a.IssuedAt = now.Unix()
 			a.ExpiresAt = a.IssuedAt + 60
-			old := a.Peers[0].Scopes[0]
+			old := a.Memberships[0]
 			old.ExpiresAt = now.Unix() - 1
 			live := old
 			live.ResourceID = "live_files"
 			live.Capability = "file_transfer"
 			live.ExpiresAt = a.ExpiresAt
-			a.Peers[0].Scopes = []Scope{old, live}
-			a.Peers = append(a.Peers, Peer{WireGuardPublicKey: KeyString(key.NewNode().Public()), Scopes: []Scope{old}})
+			a.Memberships = []Scope{old, live}
+			bad := old
+			bad.ResourceID = "old_bad"
 			if invalid == "expired_invalid_shape" {
-				a.Peers[1].Scopes[0].Port = 22
+				bad.Port = 22
+				a.Memberships = append(a.Memberships, bad)
 			}
 			if invalid == "missing_scope_expiry" {
-				a.Peers[1].Scopes[0].ExpiresAt = 0
+				bad.ExpiresAt = 0
+				a.Memberships = append(a.Memberships, bad)
 			}
 			if invalid == "expired_scope_overflow" {
-				for i := 0; i < 129; i++ {
+				for i := 0; i <= MaxGrantMemberships; i++ {
 					scope := old
 					scope.ResourceID = fmt.Sprintf("old_%d", i)
-					a.Peers[1].Scopes = append(a.Peers[1].Scopes, scope)
+					a.Memberships = append(a.Memberships, scope)
 				}
 			}
 			projected, err := f.verifier.Verify(f.token(a), tls.ConnectionState{PeerCertificates: []*x509.Certificate{cert.Leaf}}, now)
@@ -654,7 +626,7 @@ func TestRelayReceiptRetainsAdmittedExpiryAndValidatesScopeShape(t *testing.T) {
 			if err != nil {
 				t.Fatal("delayed valid signed grant rejected", err)
 			}
-			if len(projected.Peers) != 2 || len(projected.Peers[0].Scopes) != 2 || projected.Peers[0].Scopes[0] != old || projected.Peers[0].Scopes[1] != live || projected.Peers[1].Scopes[0] != old {
+			if len(projected.Memberships) != 2 || projected.Memberships[0] != old || projected.Memberships[1] != live {
 				t.Fatal("signed live-operation scopes or original expiry were discarded")
 			}
 			if projected.ExpiresAt != a.ExpiresAt || projected.Generation != a.Generation {

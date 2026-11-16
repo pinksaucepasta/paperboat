@@ -65,7 +65,7 @@ func TestSignRelayGrantPublishesFrozenTypeAndRejectsLongLifetime(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	g := peernetwork.RelayGrant{Version: 1, Issuer: "https://api.example.test", Audience: peernetwork.RelayGrantAudience, IssuedAt: 1_700_000_000, ExpiresAt: 1_700_000_060, Generation: 4, AccountID: "account_1", EndpointID: "endpoint_1", WireGuardPublicKey: testRawKey(1), CertificateFingerprint: strings.Repeat("0", 64), QUICPublicKey: testRawKey(2), NodeID: "node_1", NodeGeneration: 3, ProcessEpoch: "epoch_1", Peers: []peernetwork.RelayPeer{}}
+	g := peernetwork.RelayGrant{Version: 1, Issuer: "https://api.example.test", Audience: peernetwork.RelayGrantAudience, IssuedAt: 1_700_000_000, ExpiresAt: 1_700_000_060, Generation: 4, AccountID: "account_1", EndpointID: "endpoint_1", WireGuardPublicKey: testRawKey(1), CertificateFingerprint: strings.Repeat("0", 64), QUICPublicKey: testRawKey(2), NodeID: "node_1", NodeGeneration: 3, ProcessEpoch: "epoch_1"}
 	token, err := provider.SignRelayGrant(g)
 	if err != nil {
 		t.Fatal(err)
@@ -92,7 +92,7 @@ func TestSignRelayGrantPublishesFrozenTypeAndRejectsLongLifetime(t *testing.T) {
 	scope := peernetwork.Scope{ResourceKind: "machine_access", ResourceID: "access_1", ResourceGeneration: 1, Capability: "file_transfer", Direction: "dial", Port: 443, ExpiresAt: 1_700_000_005}
 	withScope := func(s peernetwork.Scope) peernetwork.RelayGrant {
 		out := g
-		out.Peers = []peernetwork.RelayPeer{{WireGuardPublicKey: testRawKey(6), DiscoPublicKey: testRawKey(7), Scopes: []peernetwork.Scope{s}}}
+		out.Memberships = []peernetwork.Scope{s}
 		return out
 	}
 	token, err = provider.SignRelayGrant(withScope(scope))
@@ -105,7 +105,7 @@ func TestSignRelayGrantPublishesFrozenTypeAndRejectsLongLifetime(t *testing.T) {
 	}
 	// The signed body is the shared type exactly: relays and CLIs decode it with DecodeSigned.
 	var body peernetwork.RelayGrant
-	if err := peernetwork.DecodeSigned(mustDecode(t, parts[1]), &body); err != nil || body.ExpiresAt != 1_700_000_060 || body.Peers[0].Scopes[0].ExpiresAt != 1_700_000_005 {
+	if err := peernetwork.DecodeSigned(mustDecode(t, parts[1]), &body); err != nil || body.ExpiresAt != 1_700_000_060 || body.Memberships[0].ExpiresAt != 1_700_000_005 {
 		t.Fatalf("signed body = %+v, %v", body, err)
 	}
 	for _, expiry := range []int64{1_700_000_000, 1_699_999_999} {

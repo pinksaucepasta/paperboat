@@ -22,7 +22,6 @@ func TestNarrowedRelayGrantWaitsForTheWithdrawalGrace(t *testing.T) {
 	a, cfg, signer, _ := networkTestAuthority(t)
 	now := time.Now().Unix()
 	node := RegionalNode{NodeID: "relay_withdrawal", NodeGeneration: 1, ProcessEpoch: "epoch_withdrawal", Region: "test", FailureDomain: "test", Roles: []string{"relay"}, Transports: []string{"derp_quic"}, EndpointHost: "relay.example.test", EndpointQUICPort: 443, State: "ready", ObservedAt: now, ExpiresAt: now + 60, CapacityLimit: 100, CapacityUsed: 1, CapacityObservedAt: now}
-	peerKey := cfg.Peers[0].Identity.WireGuardPublicKey
 	scope := derpquic.Scope{ResourceKind: "machine_access", ResourceID: "grant_test", ResourceGeneration: 1, Capability: "terminal", Direction: "dial", Port: 443, ExpiresAt: now + 300}
 	apply := func(c NetworkConfiguration, withPeer bool) string {
 		t.Helper()
@@ -35,7 +34,7 @@ func TestNarrowedRelayGrantWaitsForTheWithdrawalGrace(t *testing.T) {
 		}
 		g := peernetwork.RelayGrant{Version: 1, Issuer: c.Issuer, Audience: "paperboat-relay", IssuedAt: now, ExpiresAt: now + 60, Generation: c.Generation, AccountID: c.Self.AccountID, EndpointID: c.Self.EndpointID, WireGuardPublicKey: c.Self.WireGuardPublicKey, CertificateFingerprint: c.Self.QUICCertificateFingerprint, QUICPublicKey: c.Self.QUICPublicKey, NodeID: node.NodeID, NodeGeneration: node.NodeGeneration, ProcessEpoch: node.ProcessEpoch}
 		if withPeer {
-			g.Peers = []peernetwork.RelayPeer{{WireGuardPublicKey: peerKey, Scopes: []derpquic.Scope{scope}}}
+			g.Memberships = []derpquic.Scope{scope}
 		}
 		header, _ := json.Marshal(map[string]string{"alg": "EdDSA", "typ": "paperboat-relay-grant+jwt", "kid": "network_test"})
 		body, _ := json.Marshal(g)

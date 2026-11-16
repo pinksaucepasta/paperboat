@@ -34,8 +34,7 @@ func TestRelayGrantCarriesStandingTeamMachineAccessScopes(t *testing.T) {
 		t.Fatal(err)
 	}
 	grant := func(scopes ...derpquic.Scope) string {
-		g := peernetwork.RelayGrant{Version: 1, Issuer: cfg.Issuer, Audience: "paperboat-relay", IssuedAt: now, ExpiresAt: now + 60, Generation: cfg.Generation, AccountID: cfg.Self.AccountID, EndpointID: cfg.Self.EndpointID, WireGuardPublicKey: cfg.Self.WireGuardPublicKey, CertificateFingerprint: cfg.Self.QUICCertificateFingerprint, QUICPublicKey: cfg.Self.QUICPublicKey, NodeID: node.NodeID, NodeGeneration: node.NodeGeneration, ProcessEpoch: node.ProcessEpoch,
-			Peers: []peernetwork.RelayPeer{{WireGuardPublicKey: cfg.Peers[0].Identity.WireGuardPublicKey, Scopes: scopes}}}
+		g := peernetwork.RelayGrant{Version: 1, Issuer: cfg.Issuer, Audience: "paperboat-relay", IssuedAt: now, ExpiresAt: now + 60, Generation: cfg.Generation, AccountID: cfg.Self.AccountID, EndpointID: cfg.Self.EndpointID, WireGuardPublicKey: cfg.Self.WireGuardPublicKey, CertificateFingerprint: cfg.Self.QUICCertificateFingerprint, QUICPublicKey: cfg.Self.QUICPublicKey, NodeID: node.NodeID, NodeGeneration: node.NodeGeneration, ProcessEpoch: node.ProcessEpoch, Memberships: scopes}
 		header, _ := json.Marshal(map[string]string{"alg": "EdDSA", "typ": "paperboat-relay-grant+jwt", "kid": "network_test"})
 		body, _ := json.Marshal(g)
 		signed := base64.RawURLEncoding.EncodeToString(header) + "." + base64.RawURLEncoding.EncodeToString(body)
@@ -44,7 +43,6 @@ func TestRelayGrantCarriesStandingTeamMachineAccessScopes(t *testing.T) {
 	scope := func(capability string, generation uint64, expiresAt int64) derpquic.Scope {
 		return derpquic.Scope{ResourceKind: "machine_access", ResourceID: "machine_test", ResourceGeneration: generation, Capability: capability, Direction: "dial", Port: 443, ExpiresAt: expiresAt}
 	}
-	// inspector is no relay capability: it stays out of the grant.
 	if err := a.ApplyRelayGrants(t.Context(), []string{grant(scope("exec", 9, now+60), scope("managed_ssh", 9, now+60))}); err != nil {
 		t.Fatalf("grant with the stamped standing scopes refused: %v", err)
 	}
@@ -52,8 +50,6 @@ func TestRelayGrantCarriesStandingTeamMachineAccessScopes(t *testing.T) {
 		"unstamped":        {scope("exec", 9, 0), scope("managed_ssh", 9, 0)},
 		"other generation": {scope("exec", 8, now+60), scope("managed_ssh", 8, now+60)},
 		"other capability": {scope("terminal", 9, now+60), scope("managed_ssh", 9, now+60)},
-		"missing scope":    {scope("exec", 9, now+60)},
-		"inspector kept":   {scope("exec", 9, now+60), scope("managed_ssh", 9, now+60), scope("inspector", 9, now+60)},
 	} {
 		if err := a.ApplyRelayGrants(t.Context(), []string{grant(scopes...)}); !errors.Is(err, ErrAuthority) {
 			t.Fatalf("%s: err = %v, want ErrAuthority", name, err)

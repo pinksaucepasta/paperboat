@@ -152,9 +152,9 @@ func newFixture(t *testing.T, mutate func(*derpquic.Grant, *derpquic.Grant)) *te
 	}
 	f.ga, f.gb = grant(ka, f.da, ca, "a"), grant(kb, f.db, cb, "b")
 	scope := derpquic.Scope{ResourceKind: "machine_access", ResourceID: "machine", ResourceGeneration: 1, Capability: "terminal", Direction: "dial", Port: 443, ExpiresAt: now + 60}
-	f.ga.Peers = []derpquic.Peer{{WireGuardPublicKey: f.gb.WireGuardPublicKey, DiscoPublicKey: f.gb.DiscoPublicKey, Scopes: []derpquic.Scope{scope}}}
+	f.ga.Memberships = []derpquic.Scope{scope}
 	scope.Direction = "accept"
-	f.gb.Peers = []derpquic.Peer{{WireGuardPublicKey: f.ga.WireGuardPublicKey, DiscoPublicKey: f.ga.DiscoPublicKey, Scopes: []derpquic.Scope{scope}}}
+	f.gb.Memberships = []derpquic.Scope{scope}
 	if mutate != nil {
 		mutate(&f.ga, &f.gb)
 	}
@@ -407,17 +407,14 @@ func TestControlToUDPRestart(t *testing.T) {
 	}
 }
 func TestAllocationDeniedSignedBindings(t *testing.T) {
-	for _, mode := range []string{"source_discovery", "peer_discovery", "scope", "service"} {
+	for _, mode := range []string{"source_discovery", "scope", "service"} {
 		t.Run(mode, func(t *testing.T) {
 			f := newFixture(t, func(a, b *derpquic.Grant) {
 				switch mode {
 				case "source_discovery":
 					a.DiscoPublicKey = derpquic.DiscoKeyString(key.NewDisco().Public())
-					b.Peers[0].DiscoPublicKey = a.DiscoPublicKey
-				case "peer_discovery":
-					a.Peers[0].DiscoPublicKey = derpquic.DiscoKeyString(key.NewDisco().Public())
 				case "scope":
-					b.Peers[0].Scopes[0].ResourceGeneration++
+					b.Memberships[0].ResourceGeneration++
 				case "service":
 					copy := *a.PeerRelay
 					copy.VirtualAddress = "fd7a:115c:a1e0::101"
@@ -638,13 +635,13 @@ func TestUDPAllocationFencedByChangedAuthority(t *testing.T) {
 	}
 	f.relay.mu.Unlock()
 	f.ga.Generation = 2
-	f.ga.Peers[0].Scopes[0].ResourceGeneration++
+	f.ga.Memberships[0].ResourceGeneration++
 	f.a = f.reconnectA(f.ga)
 	if _, ok := oldLease.Valid(); ok {
 		t.Fatal("changed resource generation retained old lease")
 	}
 	f.ga.Generation = 3
-	f.ga.Peers[0].Scopes[0].ResourceGeneration--
+	f.ga.Memberships[0].ResourceGeneration--
 	f.a = f.reconnectA(f.ga)
 	if _, ok := oldLease.Valid(); ok {
 		t.Fatal("restoring authority revived old lease")
@@ -658,15 +655,15 @@ func TestUDPAllocationUsesIndependentReciprocalScopeLifetimes(t *testing.T) {
 		t.Run(fmt.Sprintf("other_live_scope_%t", retained), func(t *testing.T) {
 			short := time.Now().Unix() + 3
 			f := newFixture(t, func(a, b *derpquic.Grant) {
-				a.Peers[0].Scopes[0].ExpiresAt = short
-				b.Peers[0].Scopes[0].ExpiresAt = short + 1
+				a.Memberships[0].ExpiresAt = short
+				b.Memberships[0].ExpiresAt = short + 1
 				if retained {
 					for _, g := range []*derpquic.Grant{a, b} {
-						live := g.Peers[0].Scopes[0]
+						live := g.Memberships[0]
 						live.ResourceID = "live_files"
 						live.Capability = "file_transfer"
 						live.ExpiresAt = g.ExpiresAt
-						g.Peers[0].Scopes = append(g.Peers[0].Scopes, live)
+						g.Memberships = append(g.Memberships, live)
 					}
 				}
 			})
@@ -706,7 +703,7 @@ func TestUDPAllocationUsesIndependentReciprocalScopeLifetimes(t *testing.T) {
 					t.Fatal("identical grant retry fenced live allocation")
 				}
 				f.ga.Generation++
-				f.ga.Peers[0].Scopes = f.ga.Peers[0].Scopes[1:]
+				f.ga.Memberships = f.ga.Memberships[1:]
 				f.a = f.reconnectA(f.ga)
 				if _, ok := lease.Valid(); !ok {
 					t.Fatal("expired unrelated scope removal revoked live allocation")
@@ -716,7 +713,7 @@ func TestUDPAllocationUsesIndependentReciprocalScopeLifetimes(t *testing.T) {
 					t.Fatal("live payload changed after unrelated expiry")
 				}
 				f.ga.Generation++
-				f.ga.Peers = nil
+				f.ga.Memberships = nil
 				f.a = f.reconnectA(f.ga)
 				if _, ok := lease.Valid(); ok {
 					t.Fatal("nonexpired withdrawal retained old pair")

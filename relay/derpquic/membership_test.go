@@ -56,11 +56,6 @@ func TestMembershipGrantsAuthorizeExactlyTheReciprocalPairs(t *testing.T) {
 	if allowed(viewer1, viewer2, now) || allowedAdmitted(viewer1, viewer2) {
 		t.Fatal("two viewers of one share were paired with each other")
 	}
-	// The per-peer shape on one side: the viewer names the machine with the same scope.
-	perPeer := Grant{RelayGrant: peernetwork.RelayGrant{AccountID: "account_a", EndpointID: "a_cli_old", WireGuardPublicKey: KeyString(key.NewNode().Public()), ExpiresAt: later, Peers: []Peer{{WireGuardPublicKey: shared.WireGuardPublicKey, Scopes: []Scope{scope("machine_access", "access_1", "terminal", "dial", later)}}}}}.withIndex()
-	if !allowed(perPeer, shared, now) || !allowed(shared, perPeer, now) {
-		t.Fatal("a per-peer grant and a membership grant with reciprocal scopes are not paired")
-	}
 	// The pair ends with its membership.
 	short := membershipGrant("account_a", "a_short", later, scope("machine_access", "access_1", "terminal", "dial", now.Add(5*time.Second).Unix()))
 	if got := allowedPairExpiry(short, shared, now); got != now.Add(5*time.Second).Unix() {

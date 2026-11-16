@@ -39,7 +39,7 @@ type Scope struct {
 	ExpiresAt          int64  `json:"expires_at"`
 }
 
-// ValidGrantScope is the relay's rule for a grant scope, per peer or as a membership: a known kind and capability,
+// ValidGrantScope is the relay's rule for a grant membership: a known kind and capability,
 // a resource id, a generation, NetworkPort, a direction and an expiry (a grant stamps a standing scope with its own,
 // RelayGrantKeepsStanding). The relay refuses a whole grant holding any other scope, so the server's mint and its
 // contract tests check every scope it puts in a grant with this.

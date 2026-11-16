@@ -51,7 +51,7 @@ var allowedFields = map[string]bool{
 	"cause": true, "error_type": true, "error_chain": true, "quic_error": true,
 	"component": true, "service_component": true, "errno": true, "http_status": true,
 	"source_file": true, "source_function": true, "source_line": true,
-	"sdk_submissions_dropped": true, "sdk_http_failures": true,
+	"sdk_submissions_dropped": true, "sdk_http_failures": true, "delta": true,
 }
 
 type Event struct {

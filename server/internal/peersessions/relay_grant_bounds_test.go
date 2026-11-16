@@ -38,7 +38,7 @@ func TestTheLargestRelayGrantFitsTheRelayTokenBound(t *testing.T) {
 	for _, part := range parts {
 		grant := peernetwork.RelayGrant{Version: 1, Issuer: strings.Repeat("i", 256), Audience: peernetwork.RelayGrantAudience, IssuedAt: now, ExpiresAt: now + 60, Generation: 1 << 53,
 			AccountID: self.AccountID, EndpointID: self.EndpointID, WireGuardPublicKey: self.WireGuardPublicKey, DiscoPublicKey: key(0), CertificateFingerprint: strings.Repeat("f", 64),
-			QUICPublicKey: key(0), NodeID: strings.Repeat("n", 256), NodeGeneration: 1 << 53, ProcessEpoch: strings.Repeat("p", 256), Peers: []peernetwork.RelayPeer{}, Memberships: part}
+			QUICPublicKey: key(0), NodeID: strings.Repeat("n", 256), NodeGeneration: 1 << 53, ProcessEpoch: strings.Repeat("p", 256), Memberships: part}
 		token, err := provider.SignRelayGrant(grant)
 		if err != nil {
 			t.Fatal(err)

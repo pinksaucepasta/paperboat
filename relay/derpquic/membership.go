@@ -12,7 +12,7 @@ import (
 // access grant, share or private route. Two admitted grants form a pair when they hold the same resource
 // (kind, id, generation, capability, port) in opposite directions, exactly what per-peer scopes require,
 // without one entry per peer: a mesh endpoint of a 10,000-machine account carries one membership instead
-// of 10,000 peers. A grant uses memberships or per-peer lists, not both.
+// of 10,000 peers. The relay holds no per-peer lists: a grant is its memberships.
 
 // MaxGrantMemberships bounds the memberships one grant carries.
 const MaxGrantMemberships = peernetwork.MaxGrantMemberships
@@ -99,14 +99,6 @@ func reciprocalMemberships(a, b Grant, match func(Scope, Scope)) {
 			}
 		}
 		i--
-	}
-}
-
-// eachMembership calls f with every membership of g whose key hashes to h.
-func (g *Grant) eachMembership(h uint64, f func(Scope)) {
-	ix := &g.index.memberships
-	for i := ix.first(h); i < len(ix.hashes) && ix.hashes[i] == h; i++ {
-		f(g.Memberships[ix.order[i]])
 	}
 }
 

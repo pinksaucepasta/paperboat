@@ -20,6 +20,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -159,7 +160,6 @@ func connectedRegionalTokens(t *testing.T, signer ed25519.PrivateKey, configurat
 	candidates := tailnet.RegionalCandidates{Schema: "paperboat.regional-candidates.v1", Issuer: configuration.Issuer, Audience: "paperboat-regional-candidates", AccountID: configuration.Self.AccountID, EndpointID: configuration.Self.EndpointID, AuthorizationGeneration: configuration.Generation, Generation: configuration.Generation, IssuedAt: now, ExpiresAt: expires, Nodes: []tailnet.RegionalNode{node}}
 	grant := peernetwork.RelayGrant{Version: 1, Issuer: configuration.Issuer, Audience: "paperboat-relay", IssuedAt: now, ExpiresAt: expires, Generation: configuration.Generation, AccountID: configuration.Self.AccountID, EndpointID: configuration.Self.EndpointID, WireGuardPublicKey: configuration.Self.WireGuardPublicKey, DiscoPublicKey: configuration.Self.DiscoPublicKey, CertificateFingerprint: configuration.Self.QUICCertificateFingerprint, QUICPublicKey: configuration.Self.QUICPublicKey, NodeID: node.NodeID, NodeGeneration: node.NodeGeneration, ProcessEpoch: node.ProcessEpoch}
 	for _, peer := range configuration.Peers {
-		entry := peernetwork.RelayPeer{WireGuardPublicKey: peer.Identity.WireGuardPublicKey, DiscoPublicKey: peer.Identity.DiscoPublicKey}
 		for _, scope := range peer.Scopes {
 			stamped := scope.ExpiresAt
 			if stamped == 0 { // a standing scope of another account's peer rides the grant with the grant's expiry
@@ -168,9 +168,11 @@ func connectedRegionalTokens(t *testing.T, signer ed25519.PrivateKey, configurat
 				}
 				stamped = expires
 			}
-			entry.Scopes = append(entry.Scopes, derpquic.Scope{ResourceKind: scope.ResourceKind, ResourceID: scope.ResourceID, ResourceGeneration: scope.ResourceGeneration, Capability: scope.Capability, Direction: scope.Direction, Port: scope.Port, ExpiresAt: stamped})
+			member := derpquic.Scope{ResourceKind: scope.ResourceKind, ResourceID: scope.ResourceID, ResourceGeneration: scope.ResourceGeneration, Capability: scope.Capability, Direction: scope.Direction, Port: scope.Port, ExpiresAt: stamped}
+			if !slices.Contains(grant.Memberships, member) {
+				grant.Memberships = append(grant.Memberships, member)
+			}
 		}
-		grant.Peers = append(grant.Peers, entry)
 	}
 	return connectedSignedJWT(t, signer, "paperboat-regional-candidates+jwt", candidates), connectedSignedJWT(t, signer, "paperboat-relay-grant+jwt", grant)
 }

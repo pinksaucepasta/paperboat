@@ -95,14 +95,14 @@ func teamStandingOverRelay(t *testing.T, paired bool) {
 	})
 	port := relaySocket.LocalAddr().(*net.UDPAddr).Port
 	node := tailnet.RegionalNode{NodeID: nodeID, NodeGeneration: 1, ProcessEpoch: processEpoch, Region: "test", FailureDomain: "test-a", Roles: []string{"relay"}, Transports: []string{"derp_quic"}, EndpointHost: "127.0.0.1", EndpointQUICPort: uint16(port), State: "ready", ObservedAt: now.Unix(), ExpiresAt: now.Add(time.Minute).Unix(), CapacityLimit: 100, CapacityUsed: 1, CapacityObservedAt: now.Unix()}
-	// The grant states each standing scope with the grant's expiry; the unpaired variant names no peer at all.
+	// The grant states each standing scope with the grant's expiry; the unpaired variant carries no membership at all.
 	grantShape := func(g *peernetwork.RelayGrant) {
 		if !paired {
-			g.Peers = nil
+			g.Memberships = nil
 			return
 		}
-		for i := range g.Peers[0].Scopes {
-			g.Peers[0].Scopes[i].ExpiresAt = g.ExpiresAt
+		for i := range g.Memberships {
+			g.Memberships[i].ExpiresAt = g.ExpiresAt
 		}
 	}
 	applyRelayAuthority(t, clientAuthority, signerPrivate, clientConfig, clientTLS, node, grantShape)

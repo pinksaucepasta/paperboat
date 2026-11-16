@@ -73,8 +73,8 @@ func TestNativeDialTriesTheNextRegionalRelayWhenTheFirstRefusesAuthorization(t *
 		return tailnet.RegionalNode{NodeID: id, NodeGeneration: 1, ProcessEpoch: epoch, Region: "test", FailureDomain: "rack-" + id, Roles: []string{"relay"}, Transports: []string{"derp_quic"}, EndpointHost: "127.0.0.1", EndpointQUICPort: uint16(port), State: "ready", ObservedAt: now.Unix(), ExpiresAt: now.Add(90 * time.Second).Unix(), CapacityLimit: 100, CapacityUsed: 1, CapacityObservedAt: now.Unix()}
 	}
 	refusing, healthy := start("a-refusing", otherPub), start("b-healthy", pub)
-	applyRegionalAuthority(t, clientAuthority, signer, clientConfig, clientTLS, clientDisco, serverDisco, []tailnet.RegionalNode{refusing, healthy})
-	applyRegionalAuthority(t, serverAuthority, signer, serverConfig, serverTLS, serverDisco, clientDisco, []tailnet.RegionalNode{healthy})
+	applyRegionalAuthority(t, clientAuthority, signer, clientConfig, clientTLS, clientDisco, []tailnet.RegionalNode{refusing, healthy})
+	applyRegionalAuthority(t, serverAuthority, signer, serverConfig, serverTLS, serverDisco, []tailnet.RegionalNode{healthy})
 	if _, err := clientAuthority.ConfigureRegionalRelays(regionalTLS(clientTLS, roots)); err != nil {
 		t.Fatal(err)
 	}

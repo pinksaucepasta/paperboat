@@ -12,7 +12,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/relay/derpquic"
 	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
 )
 
@@ -75,13 +74,7 @@ func TestEmptyRegionalRegistryPreservesDirectAdmissionAndLaterRelayRecovery(t *t
 		t.Fatal("registry without grant admitted relay", err)
 	}
 	grant := peernetwork.RelayGrant{Version: 1, Issuer: cfg.Issuer, Audience: "paperboat-relay", IssuedAt: now, ExpiresAt: now + 60, Generation: cfg.Generation, AccountID: cfg.Self.AccountID, EndpointID: cfg.Self.EndpointID, WireGuardPublicKey: cfg.Self.WireGuardPublicKey, CertificateFingerprint: cfg.Self.QUICCertificateFingerprint, QUICPublicKey: cfg.Self.QUICPublicKey, NodeID: node.NodeID, NodeGeneration: node.NodeGeneration, ProcessEpoch: node.ProcessEpoch}
-	for _, peer := range cfg.Peers {
-		p := peernetwork.RelayPeer{WireGuardPublicKey: peer.Identity.WireGuardPublicKey}
-		for _, s := range peer.Scopes {
-			p.Scopes = append(p.Scopes, derpquic.Scope{ResourceKind: s.ResourceKind, ResourceID: s.ResourceID, ResourceGeneration: s.ResourceGeneration, Capability: s.Capability, Direction: s.Direction, Port: s.Port, ExpiresAt: s.ExpiresAt})
-		}
-		grant.Peers = append(grant.Peers, p)
-	}
+	grant.Memberships = peerGrantMemberships(cfg)
 	header, _ := json.Marshal(map[string]string{"alg": "EdDSA", "typ": "paperboat-relay-grant+jwt", "kid": "network_test"})
 	body, _ := json.Marshal(grant)
 	signed := base64.RawURLEncoding.EncodeToString(header) + "." + base64.RawURLEncoding.EncodeToString(body)

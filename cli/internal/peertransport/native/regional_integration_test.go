@@ -121,8 +121,8 @@ func testNativeRegionalFailover(t *testing.T, expiry bool) {
 	a, b := start("regional-a", "rack-a", "127.0.0.1:0"), start("regional-b", "rack-b", "127.0.0.1:0")
 	defer func() { a.stop(); b.stop() }()
 	nodes := []tailnet.RegionalNode{a.node, b.node}
-	applyRegionalAuthority(t, clientAuthority, signer, clientConfig, clientTLS, clientDisco, serverDisco, nodes)
-	applyRegionalAuthority(t, serverAuthority, signer, serverConfig, serverTLS, serverDisco, clientDisco, []tailnet.RegionalNode{b.node})
+	applyRegionalAuthority(t, clientAuthority, signer, clientConfig, clientTLS, clientDisco, nodes)
+	applyRegionalAuthority(t, serverAuthority, signer, serverConfig, serverTLS, serverDisco, []tailnet.RegionalNode{b.node})
 	clientRegions, err := clientAuthority.ConfigureRegionalRelays(regionalTLS(clientTLS, roots))
 	if err != nil {
 		t.Fatal(err)
@@ -160,8 +160,8 @@ func testNativeRegionalFailover(t *testing.T, expiry bool) {
 			fresh[i].CapacityObservedAt = tick.Unix()
 			fresh[i].ExpiresAt = tick.Add(60 * time.Second).Unix()
 		}
-		applyRegionalAuthority(t, clientAuthority, signer, clientConfig, clientTLS, clientDisco, serverDisco, fresh)
-		applyRegionalAuthority(t, serverAuthority, signer, serverConfig, serverTLS, serverDisco, clientDisco, fresh)
+		applyRegionalAuthority(t, clientAuthority, signer, clientConfig, clientTLS, clientDisco, fresh)
+		applyRegionalAuthority(t, serverAuthority, signer, serverConfig, serverTLS, serverDisco, fresh)
 	}
 	descriptor := startRelayEchoServer(t, serverOwner, serverAuthority, serverRegions[0])
 	// Establish before the 15-second candidate freshness window expires so
@@ -274,7 +274,7 @@ func regionalTLS(endpoint *tls.Config, roots *x509.CertPool) *tls.Config {
 	return c
 }
 
-func applyRegionalAuthority(t *testing.T, authority *tailnet.Authority, signer ed25519.PrivateKey, config tailnet.NetworkConfiguration, endpointTLS *tls.Config, selfDisco, peerDisco string, nodes []tailnet.RegionalNode) {
+func applyRegionalAuthority(t *testing.T, authority *tailnet.Authority, signer ed25519.PrivateKey, config tailnet.NetworkConfiguration, endpointTLS *tls.Config, selfDisco string, nodes []tailnet.RegionalNode) {
 	t.Helper()
 	// One authorization generation has one stable signed grant, including when
 	// an independent carrier consumes the same cached server response later.
@@ -294,7 +294,7 @@ func applyRegionalAuthority(t *testing.T, authority *tailnet.Authority, signer e
 	fingerprint := sha256.Sum256(endpointTLS.Certificates[0].Certificate[0])
 	tokens := make([]string, 0, len(nodes))
 	for _, n := range nodes {
-		g := peernetwork.RelayGrant{Version: 1, Issuer: config.Issuer, Audience: "paperboat-relay", IssuedAt: now, ExpiresAt: expires, Generation: config.Generation, AccountID: config.Self.AccountID, EndpointID: config.Self.EndpointID, WireGuardPublicKey: config.Self.WireGuardPublicKey, DiscoPublicKey: selfDisco, CertificateFingerprint: base16(fingerprint[:]), QUICPublicKey: config.Self.QUICPublicKey, NodeID: n.NodeID, NodeGeneration: n.NodeGeneration, ProcessEpoch: n.ProcessEpoch, Peers: []peernetwork.RelayPeer{{WireGuardPublicKey: config.Peers[0].Identity.WireGuardPublicKey, DiscoPublicKey: peerDisco, Scopes: scopes}}}
+		g := peernetwork.RelayGrant{Version: 1, Issuer: config.Issuer, Audience: "paperboat-relay", IssuedAt: now, ExpiresAt: expires, Generation: config.Generation, AccountID: config.Self.AccountID, EndpointID: config.Self.EndpointID, WireGuardPublicKey: config.Self.WireGuardPublicKey, DiscoPublicKey: selfDisco, CertificateFingerprint: base16(fingerprint[:]), QUICPublicKey: config.Self.QUICPublicKey, NodeID: n.NodeID, NodeGeneration: n.NodeGeneration, ProcessEpoch: n.ProcessEpoch, Memberships: scopes}
 		tokens = append(tokens, signedRelayTestJWT(t, signer, "paperboat-relay-grant+jwt", g))
 	}
 	if err := authority.ApplyRelayGrants(t.Context(), tokens); err != nil {

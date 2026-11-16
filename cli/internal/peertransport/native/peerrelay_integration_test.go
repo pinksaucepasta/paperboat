@@ -266,16 +266,15 @@ func testAutomaticPeerRelay(t *testing.T) {
 	}
 	defer shutdownRelay()
 	node := tailnet.RegionalNode{NodeID: nodeID, NodeGeneration: 1, ProcessEpoch: epoch, Region: "test", FailureDomain: "test-a", Roles: []string{"relay", "peer_relay"}, Transports: []string{"derp_quic", "peer_relay_udp"}, EndpointHost: "127.0.0.1", EndpointQUICPort: uint16(relaySocket.LocalAddr().(*net.UDPAddr).Port), State: "ready", ObservedAt: now.Unix(), ExpiresAt: now.Add(time.Minute).Unix(), CapacityLimit: 100, CapacityUsed: 1, CapacityObservedAt: now.Unix()}
-	grant := func(selfDisco, peerDisco string) func(*peernetwork.RelayGrant) {
+	grant := func(selfDisco string) func(*peernetwork.RelayGrant) {
 		return func(g *peernetwork.RelayGrant) {
 			g.DiscoPublicKey = selfDisco
-			g.Peers[0].DiscoPublicKey = peerDisco
 			g.PeerRelay = &service
 		}
 	}
-	applyRelayAuthority(t, clientAuthority, signerPrivate, clientConfig, clientTLS, node, grant(clientDisco, serverDisco))
+	applyRelayAuthority(t, clientAuthority, signerPrivate, clientConfig, clientTLS, node, grant(clientDisco))
 	clientRegion := applyConfiguredRelay(t, clientAuthority, clientTLS, roots, node)
-	applyRelayAuthority(t, serverAuthority, signerPrivate, serverConfig, serverTLS, node, grant(serverDisco, clientDisco))
+	applyRelayAuthority(t, serverAuthority, signerPrivate, serverConfig, serverTLS, node, grant(serverDisco))
 	serverRegion := applyConfiguredRelay(t, serverAuthority, serverTLS, roots, node)
 	_ = clientRegion
 
@@ -307,8 +306,8 @@ func testAutomaticPeerRelay(t *testing.T) {
 		applyTestConfiguration(t, clientAuthority, signerPrivate, clientConfig)
 		applyTestConfiguration(t, serverAuthority, signerPrivate, serverConfig)
 		node.ObservedAt, node.CapacityObservedAt, node.ExpiresAt = refreshed.Unix(), refreshed.Unix(), refreshed.Add(time.Minute).Unix()
-		applyRelayAuthority(t, clientAuthority, signerPrivate, clientConfig, clientTLS, node, grant(clientDisco, serverDisco))
-		applyRelayAuthority(t, serverAuthority, signerPrivate, serverConfig, serverTLS, node, grant(serverDisco, clientDisco))
+		applyRelayAuthority(t, clientAuthority, signerPrivate, clientConfig, clientTLS, node, grant(clientDisco))
+		applyRelayAuthority(t, serverAuthority, signerPrivate, serverConfig, serverTLS, node, grant(serverDisco))
 	}
 	renewDone := make(chan struct{})
 	renewCtx, stopRenew := context.WithCancel(ctx)
