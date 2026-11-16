@@ -199,14 +199,20 @@ func (s SQLIngressSource) projectPreviews(ctx context.Context, node, epoch strin
 	if s.ReadOnly {
 		return out, nil
 	}
-	admitted := out[:0]
+	bindings := make([]accountingauthority.Binding, len(out))
 	for i, d := range out {
 		b := d.Binding
 		authority := fmt.Sprintf("public:%s:%d", b.PublicationID, b.PublicationGeneration)
 		if evidence != nil {
 			authority = "grant:" + evidence.Request.Nonce
 		}
-		err := accountingauthority.Record(ctx, s.DB, accountingauthority.Binding{ID: authority, Node: d.EdgeNodeID, Environment: b.EnvironmentID, Route: b.RouteID, Revision: int64(b.RouteGeneration), User: b.AccountID, Team: teams[i], IssuedAt: d.IssuedAt, ExpiresAt: d.ExpiresAt}, s.Quota)
+		bindings[i] = accountingauthority.Binding{ID: authority, Node: d.EdgeNodeID, Environment: b.EnvironmentID, Route: b.RouteID, Revision: int64(b.RouteGeneration), User: b.AccountID, Team: teams[i], IssuedAt: d.IssuedAt, ExpiresAt: d.ExpiresAt}
+	}
+	results := accountingauthority.RecordMany(ctx, s.DB, bindings, s.Quota)
+	admitted := out[:0]
+	for i, d := range out {
+		b := d.Binding
+		err := results[i]
 		if resetsAt, exhausted := quotaExhaustion(err); exhausted {
 			if s.QuotaDenied != nil {
 				*s.QuotaDenied = append(*s.QuotaDenied, wire.IngressQuotaDenial{RouteID: b.RouteID, Hostname: b.Hostname, ResetsAt: resetsAt})

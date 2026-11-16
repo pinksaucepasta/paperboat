@@ -58,60 +58,7 @@ type QuotaChecker interface {
 // Record admits b against its workspace's bandwidth allowance, judged by policy: the one authoritative check, which
 // counts budget segments and top-ups. Without a policy admission cannot be judged, so it fails closed.
 func Record(ctx context.Context, store *db.DB, b Binding, policy QuotaChecker) error {
-	if policy == nil || b.ID == "" || b.Node == "" || b.Environment == "" || b.Route == "" || b.User == "" || len(b.User) > 256 || b.Revision < 1 || b.ExpiresAt.Before(b.IssuedAt) {
-		return ErrUnavailable
-	}
-	// Serialize the node's capacity check and upsert without blocking unrelated nodes. The lock is taken before the
-	// transaction starts: taken inside it, a waiter (an edge's old and new process pulling at once during a switch)
-	// decided on a snapshot from before the wait and failed with 40001 until its retries ran out (503 on the edge's
-	// desired-state pull, 2026-11-12 17:17Z).
-	// Within this process the node's Records queue on a mutex, so only one at a time polls the session lock (its
-	// backoff let a busy node's waiters lose for over a second); the session lock orders processes.
-	nodeLock := nodeLocks[nodeStripe(b.Node)]
-	select {
-	case nodeLock <- struct{}{}:
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-	defer func() { <-nodeLock }()
-	return store.InReadCommittedTxUnderSessionLock(ctx, b.Node, 369197, func(ctx context.Context, tx *db.Tx) error {
-		if _, err := tx.Exec(ctx, `DELETE FROM usage_accounting_authorities WHERE edge_node_id=$1 AND retain_until<=$2`, b.Node, b.IssuedAt); err != nil {
-			return err
-		}
-		workspace := "personal:" + b.User
-		var err error
-		if b.Team != "" {
-			workspace = "team:" + b.Team
-			_, err = tx.Exec(ctx, `INSERT INTO billing_workspaces(id,team_id) VALUES($1,$2) ON CONFLICT DO NOTHING`, workspace, b.Team)
-		} else {
-			_, err = tx.Exec(ctx, `INSERT INTO billing_workspaces(id,user_id) VALUES($1,$2) ON CONFLICT DO NOTHING`, workspace, b.User)
-		}
-		if err != nil {
-			return err
-		}
-		// Payer identity is the unique owning account/team, not the suggested
-		// ID used when creating a workspace for the first time.
-		if err = tx.QueryRow(ctx, `SELECT id FROM billing_workspaces WHERE (team_id=$1 AND $1<>'' AND user_id IS NULL) OR (user_id=$2 AND $1='' AND team_id IS NULL) FOR UPDATE`, b.Team, b.User).Scan(&workspace); err != nil {
-			return err
-		}
-		// Customer-owned transport is observed but never consumes Paperboat's
-		// bandwidth allowance. Classification comes from the registry, not the
-		// caller; globally operated installations remain billable hosted nodes.
-		var customerOwned bool
-		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM selfhost_installations WHERE node_id=$1 AND scope_kind IN ('account','team'))`, b.Node).Scan(&customerOwned); err != nil {
-			return err
-		}
-		if !customerOwned {
-			exhausted, err := policy.CheckWorkspaceBandwidthTx(ctx, tx, workspace, b.IssuedAt)
-			if err != nil {
-				return err
-			}
-			if exhausted {
-				return quotaExhaustedTx(ctx, tx, workspace, b.IssuedAt)
-			}
-		}
-		return retainBindingTx(ctx, tx, b, workspace)
-	})
+	return RecordMany(ctx, store, []Binding{b}, policy)[0]
 }
 
 // nodeLocks stripes the per-node Record lock (a one-slot channel, so a cancelled caller stops waiting); nodes that share
@@ -127,33 +74,4 @@ func nodeStripe(node string) int {
 	h := fnv.New32a()
 	_, _ = h.Write([]byte(node))
 	return int(h.Sum32() % uint32(len(nodeLocks)))
-}
-
-func retainBindingTx(ctx context.Context, tx *db.Tx, b Binding, workspace string) error {
-	var capacity bool
-	if err := tx.QueryRow(ctx, `SELECT count(*) FILTER (WHERE admission_expires_at>$7)<$6 OR coalesce(bool_or(authority_id=$2 AND environment_id=$3 AND route_id=$4 AND route_revision=$5),false) FROM usage_accounting_authorities WHERE edge_node_id=$1`, b.Node, b.ID, b.Environment, b.Route, b.Revision, MaximumPerNode, b.IssuedAt).Scan(&capacity); err != nil {
-		return err
-	}
-	if !capacity {
-		return ErrUnavailable
-	}
-	result, err := tx.Exec(ctx, `INSERT INTO usage_accounting_authorities(
- authority_id,edge_node_id,environment_id,route_id,route_revision,workspace_id,
- admitted_at,admission_expires_at,retain_until,actor_account_id
-) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
-ON CONFLICT(authority_id,edge_node_id,environment_id,route_id,route_revision)
-DO UPDATE SET
- actor_account_id=EXCLUDED.actor_account_id,
- admission_expires_at=greatest(usage_accounting_authorities.admission_expires_at,EXCLUDED.admission_expires_at),
- retain_until=greatest(usage_accounting_authorities.retain_until,EXCLUDED.retain_until)
-WHERE usage_accounting_authorities.workspace_id=EXCLUDED.workspace_id
- AND (usage_accounting_authorities.actor_account_id IS NULL
-      OR usage_accounting_authorities.actor_account_id=EXCLUDED.actor_account_id)`, b.ID, b.Node, b.Environment, b.Route, b.Revision, workspace, b.IssuedAt, b.ExpiresAt, b.ExpiresAt.Add(2*DeliveryWindow), b.User)
-	if err != nil {
-		return err
-	}
-	if result.RowsAffected() != 1 {
-		return ErrUnavailable
-	}
-	return nil
 }

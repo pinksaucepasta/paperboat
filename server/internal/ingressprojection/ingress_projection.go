@@ -204,37 +204,9 @@ func (s SQLIngressSource) project(ctx context.Context, nodeID, epoch, audience, 
 		return nil, err
 	}
 	if audience == "public" {
-		admitted := out[:0]
-		for _, d := range out {
-			b := d.Binding
-			var team string
-			var entitled bool
-			if err = s.DB.SQL().QueryRowContext(ctx, `SELECT coalesce(t.owner_team_id,m.owner_team_id,''),coalesce(t.owner_team_id,m.owner_team_id) IS NULL OR paperboat.team_paid_entitled(coalesce(t.owner_team_id,m.owner_team_id)) FROM user_machines m JOIN tunnel_routes r ON r.id=$4 JOIN tunnels t ON t.id=r.tunnel_id WHERE m.id=$1 AND m.environment_id=$2 AND m.user_id=$3`, b.HostID, b.EnvironmentID, b.AccountID, b.RouteID).Scan(&team, &entitled); err != nil {
-				if err = s.rowFailed(ctx, "entitlement", b.RouteID, err); err != nil {
-					return nil, err
-				}
-				continue
-			}
-			if !entitled {
-				continue
-			}
-			if s.ReadOnly {
-				admitted = append(admitted, d)
-				continue
-			}
-			if err = accountingauthority.Record(ctx, s.DB, accountingauthority.Binding{ID: fmt.Sprintf("public:%s:%d", b.PublicationID, b.PublicationGeneration), Node: d.EdgeNodeID, Environment: b.EnvironmentID, Route: b.RouteID, Revision: int64(b.RouteGeneration), User: b.AccountID, Team: team, IssuedAt: d.IssuedAt, ExpiresAt: d.ExpiresAt}, s.Quota); err != nil {
-				if resetsAt, exhausted := quotaExhaustion(err); exhausted {
-					if s.QuotaDenied != nil {
-						*s.QuotaDenied = append(*s.QuotaDenied, wire.IngressQuotaDenial{RouteID: b.RouteID, Hostname: b.Hostname, ResetsAt: resetsAt})
-					}
-					continue
-				}
-				if err = s.rowFailed(ctx, "accounting", b.RouteID, err); err != nil {
-					return nil, err
-				}
-				continue
-			}
-			admitted = append(admitted, d)
+		admitted, err := s.admitPublic(ctx, out)
+		if err != nil {
+			return nil, err
 		}
 		out = admitted
 	}
@@ -353,4 +325,90 @@ func (s SQLIngressSource) RestrictedRoute(ctx context.Context, nodeID, epoch, au
 	}
 	rows[0].Binding.Audience = audience
 	return rows[0], nil
+}
+
+// admitPublic keeps the decisions whose workspace is paid up and inside its bandwidth allowance, and records each
+// admitted binding with the accounting authority: one lookup of every route's payer and one group admission per pull
+// (a pull re-admits every route the edge serves, and 1,000 of them one by one outlived the decisions: F21-168).
+func (s SQLIngressSource) admitPublic(ctx context.Context, decisions []wire.IngressDecision) ([]wire.IngressDecision, error) {
+	if len(decisions) == 0 {
+		return decisions, nil
+	}
+	hosts, environments, accounts, routes := make([]string, len(decisions)), make([]string, len(decisions)), make([]string, len(decisions)), make([]string, len(decisions))
+	for i, d := range decisions {
+		b := d.Binding
+		hosts[i], environments[i], accounts[i], routes[i] = b.HostID, b.EnvironmentID, b.AccountID, b.RouteID
+	}
+	type payer struct {
+		team     string
+		entitled bool
+	}
+	payers := map[string]payer{}
+	rows, err := s.DB.Pool().Query(ctx, `SELECT r.id,coalesce(t.owner_team_id,m.owner_team_id,''),coalesce(t.owner_team_id,m.owner_team_id) IS NULL OR paperboat.team_paid_entitled(coalesce(t.owner_team_id,m.owner_team_id))
+FROM unnest($1::text[],$2::text[],$3::text[],$4::text[]) AS q(host,environment,account,route)
+JOIN user_machines m ON m.id=q.host AND m.environment_id=q.environment AND m.user_id=q.account
+JOIN tunnel_routes r ON r.id=q.route JOIN tunnels t ON t.id=r.tunnel_id`, hosts, environments, accounts, routes)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var route string
+		var p payer
+		if err = rows.Scan(&route, &p.team, &p.entitled); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		payers[route] = p
+	}
+	rows.Close()
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+	var entitledIdx []int
+	for i, d := range decisions {
+		p, ok := payers[d.Binding.RouteID]
+		if !ok {
+			if err = s.rowFailed(ctx, "entitlement", d.Binding.RouteID, sql.ErrNoRows); err != nil {
+				return nil, err
+			}
+			continue
+		}
+		if !p.entitled {
+			continue
+		}
+		entitledIdx = append(entitledIdx, i)
+	}
+	if s.ReadOnly {
+		admitted := make([]wire.IngressDecision, 0, len(entitledIdx))
+		for _, i := range entitledIdx {
+			admitted = append(admitted, decisions[i])
+		}
+		return admitted, nil
+	}
+	bindings := make([]accountingauthority.Binding, len(entitledIdx))
+	for k, i := range entitledIdx {
+		d := decisions[i]
+		b := d.Binding
+		bindings[k] = accountingauthority.Binding{ID: fmt.Sprintf("public:%s:%d", b.PublicationID, b.PublicationGeneration), Node: d.EdgeNodeID, Environment: b.EnvironmentID, Route: b.RouteID, Revision: int64(b.RouteGeneration), User: b.AccountID, Team: payers[b.RouteID].team, IssuedAt: d.IssuedAt, ExpiresAt: d.ExpiresAt}
+	}
+	results := accountingauthority.RecordMany(ctx, s.DB, bindings, s.Quota)
+	admitted := make([]wire.IngressDecision, 0, len(entitledIdx))
+	for k, i := range entitledIdx {
+		d := decisions[i]
+		b := d.Binding
+		if err = results[k]; err != nil {
+			if resetsAt, exhausted := quotaExhaustion(err); exhausted {
+				if s.QuotaDenied != nil {
+					*s.QuotaDenied = append(*s.QuotaDenied, wire.IngressQuotaDenial{RouteID: b.RouteID, Hostname: b.Hostname, ResetsAt: resetsAt})
+				}
+				continue
+			}
+			if err = s.rowFailed(ctx, "accounting", b.RouteID, err); err != nil {
+				return nil, err
+			}
+			continue
+		}
+		admitted = append(admitted, d)
+	}
+	return admitted, nil
 }
