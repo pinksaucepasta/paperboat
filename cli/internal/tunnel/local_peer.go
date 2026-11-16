@@ -11,6 +11,8 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/shared/terminalprotocol"
 )
 
 const localPeerMaximumFrame = 1 << 20
@@ -803,10 +805,7 @@ func (c *localPeerConn) readLoop() {
 			if event.Stream == "" && event.State != "" && event.State != "started" {
 				result := localPeerWaitResult{}
 				if event.Result != nil {
-					result.code = event.Result.Code
-					if result.code == 0 && event.Result.Signal != "" {
-						result.code = signalExitCode(event.Result.Signal)
-					}
+					result.code = terminalprotocol.ExitCode(event.Result.Code, event.Result.Signal)
 				}
 				if event.State == "failed" || event.State == "canceled" {
 					result.err = &RemoteExecError{Code: firstNonEmptyExec(event.ErrorCode, event.State)}

@@ -23,6 +23,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 	wire "github.com/pinksaucepasta/paperboat/shared/recording"
 	"github.com/pinksaucepasta/paperboat/shared/supportref"
+	"github.com/pinksaucepasta/paperboat/shared/terminalprotocol"
 )
 
 const (
@@ -33,7 +34,6 @@ const (
 	helperInputChunkBytes         = 32 << 10
 	helperOutputQueueDecodedLimit = terminalOutputQueueChunks * protocol.MaxTerminalOutputBytes
 	helperRequestTimeout          = 30 * time.Second
-	helperReplayGapMarker         = "\r\n[paperboat] Earlier terminal output is unavailable; showing retained output.\r\n"
 )
 
 type helperFrame struct {
@@ -366,7 +366,7 @@ func (c *helperTerminalConn) initialize(ctx context.Context) error {
 	frame, err = attach(fromSequence, existingSession && c.target.AfterSequence <= 0)
 	for attempt := 0; err != nil; attempt++ {
 		var remote *helperRemoteError
-		if !errors.As(err, &remote) || remote.Code != "replay_gap" || remote.Details == nil || remote.Details.EarliestSequence > remote.Details.LatestSequence || attempt >= 3 {
+		if !errors.As(err, &remote) || remote.Code != "replay_gap" || remote.Details == nil || remote.Details.EarliestSequence > remote.Details.LatestSequence || attempt >= terminalprotocol.ReplayGapRejoins {
 			if attempt > 0 {
 				return fmt.Errorf("recover helper terminal replay gap: %w", err)
 			}
@@ -383,7 +383,7 @@ func (c *helperTerminalConn) initialize(ctx context.Context) error {
 			if c.target.ReplayGapSink != nil {
 				c.target.ReplayGapSink(remote.Details.RequestedSequence, remote.Details.EarliestSequence, remote.Details.LatestSequence)
 			}
-			c.initial = append(c.initial, helperOutput{data: []byte(helperReplayGapMarker), endSequence: remote.Details.LatestSequence})
+			c.initial = append(c.initial, helperOutput{data: []byte(terminalprotocol.ReplayGapMarker), endSequence: remote.Details.LatestSequence})
 		}
 		frame, err = attach(remote.Details.LatestSequence, true)
 	}
@@ -524,7 +524,7 @@ func (c *helperTerminalConn) nextWrite() (helperWrite, bool) {
 // a heartbeat every 5 s (hostruntime runtime terminalHeartbeatInterval); two missed ones, like ET's 11 s server bound
 // for a 5 s keepalive (~/ref/EternalTerminal/src/base/Headers.hpp:226). The link is kept: it resumes on its own when the network
 // returns, with the input it queued, so a stall only changes what the user sees.
-var helperStallAfter = 10 * time.Second
+var helperStallAfter = terminalprotocol.StallAfter
 
 func (c *helperTerminalConn) ObserveRecording(observer func(recording bool)) {
 	c.recordingState.observe(observer)
@@ -693,10 +693,7 @@ func (c *helperTerminalConn) handleEvent(frame helperFrame) bool {
 	c.flushAck()
 	code := 0
 	if event.Exit != nil {
-		code = event.Exit.Code
-		if code == 0 && event.Exit.Signal != "" {
-			code = signalExitCode(event.Exit.Signal)
-		}
+		code = terminalprotocol.ExitCode(event.Exit.Code, event.Exit.Signal)
 	}
 	c.finish(code, nil)
 	return true
@@ -1021,21 +1018,6 @@ func containsString(values []string, want string) bool {
 		}
 	}
 	return false
-}
-
-func signalExitCode(signal string) int {
-	switch signal {
-	case "SIGHUP":
-		return 129
-	case "SIGINT":
-		return 130
-	case "SIGKILL":
-		return 137
-	case "SIGTERM":
-		return 143
-	default:
-		return 1
-	}
 }
 
 var _ Conn = (*helperTerminalConn)(nil)

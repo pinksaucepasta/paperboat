@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { ApiError, retryAfterMs } from "@/lib/api"
-import { nextReconnectDelay, reconnectWait, terminalCloseCodes, ticketCloseCode, workerCloseCode } from "@/lib/terminal/close-codes"
+import { endedMessage, nextReconnectDelay, reconnectWait, terminalCloseCodes, ticketCloseCode, workerCloseCode } from "@/lib/terminal/close-codes"
 
 const refusal = (status: number, code: string) => new ApiError(status, code, "stub")
 
@@ -32,6 +32,16 @@ describe("terminal close codes", () => {
     spent = false // a successful attach
     expect(close()).toBe(0)
     expect(reconnectWait(terminalCloseCodes.edge_unavailable, false)).toBeUndefined()
+  })
+  test("a stall (10 s without a heartbeat) is shown and replaced at once", () => {
+    expect(workerCloseCode({ state: "reconnecting", code: "connection_stalled" })).toBe("stalled")
+    expect(terminalCloseCodes.stalled).toMatchObject({ phase: "reconnect", immediate: true })
+    expect(terminalCloseCodes.stalled.message).toMatch(/stopped answering/)
+  })
+  test("an ended terminal names its exit status when the machine sent one", () => {
+    expect(endedMessage(terminalCloseCodes.ended, "exited 143 (SIGTERM)")).toBe("This terminal has ended: exited 143 (SIGTERM).")
+    expect(endedMessage(terminalCloseCodes.ended)).toBe("This terminal has ended.")
+    expect(endedMessage(terminalCloseCodes.no_access, "exited 0")).toBe(terminalCloseCodes.no_access.message)
   })
   test("in-channel host codes map onto the table, unknown ones fall back by state", () => {
     expect(workerCloseCode({ state: "reconnecting", code: "credential_expired" })).toBe("expired")

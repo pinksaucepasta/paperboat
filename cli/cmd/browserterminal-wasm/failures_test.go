@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"strings"
@@ -86,6 +87,22 @@ func TestAttachServiceFailureReconnectsWithoutProtocolError(t *testing.T) {
 		var got *terminalConnectError
 		if !errors.As(err, &got) || got.state != tc.state || got.code != tc.code || strings.Contains(got.message, "PRIVATE_TERMINAL_DATA") {
 			t.Fatalf("%s: %#v", tc.remote, got)
+		}
+	}
+}
+
+func TestReplayGapRejoinsAtTheLiveBoundary(t *testing.T) {
+	latest, ok := replayGapRejoin(json.RawMessage(`{"code":"replay_gap","details":{"requested_sequence":5,"earliest_sequence":90,"latest_sequence":120}}`))
+	if !ok || latest != 120 {
+		t.Fatalf("replay gap: latest=%d ok=%v, want rejoin at 120", latest, ok)
+	}
+	for _, payload := range []string{
+		`{"code":"replay_gap"}`,
+		`{"code":"replay_gap","details":{"earliest_sequence":130,"latest_sequence":120}}`,
+		`{"code":"unavailable","details":{"earliest_sequence":1,"latest_sequence":2}}`,
+	} {
+		if _, ok := replayGapRejoin(json.RawMessage(payload)); ok {
+			t.Fatalf("%s must not rejoin", payload)
 		}
 	}
 }

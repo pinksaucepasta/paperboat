@@ -156,6 +156,7 @@ func (connection *browserTerminal) connectAndServe() error {
 	})
 	var (
 		inspector          bool
+		gap                bool // attached at the live boundary after a replay gap
 		attachState        terminalAttachState
 		checkpoint         []byte
 		checkpointSequence uint64
@@ -197,20 +198,38 @@ func (connection *browserTerminal) connectAndServe() error {
 		if err != nil {
 			return err
 		}
-		attachPayload, err := json.Marshal(map[string]any{"action": "attach", "session_id": connection.config.TerminalSessionID, "from_sequence": connection.config.FromSequence, "at_live_boundary": connection.config.AtLiveBoundary})
-		if err != nil {
-			return err
-		}
-		attach := protocol.Frame{Type: "request", RequestID: requestID, Version: protocol.ProtocolVersion, OperationID: operationID, Capability: "terminal.v1", DeadlineMS: 10000, Payload: attachPayload}
-		if err := writeStructuredFrame(clientTLS, attach); err != nil {
-			return &terminalConnectError{state: "transport-error", code: "connection_failed", message: "The terminal attachment could not be requested.", cause: err}
-		}
-		response, err := readStructuredFrame(clientTLS)
-		if err != nil {
-			return &terminalConnectError{state: "transport-error", code: "connection_failed", message: "The terminal attachment response could not be read.", cause: err}
-		}
-		if response.Type == "error" {
-			return attachFailure(response.Payload, connection.config.FromSequence)
+		fromSequence, atLiveBoundary := connection.config.FromSequence, connection.config.AtLiveBoundary
+		var response protocol.Frame
+		for attempt := 0; ; attempt++ {
+			attachPayload, err := json.Marshal(map[string]any{"action": "attach", "session_id": connection.config.TerminalSessionID, "from_sequence": fromSequence, "at_live_boundary": atLiveBoundary})
+			if err != nil {
+				return err
+			}
+			attach := protocol.Frame{Type: "request", RequestID: requestID, Version: protocol.ProtocolVersion, OperationID: operationID, Capability: "terminal.v1", DeadlineMS: 10000, Payload: attachPayload}
+			if err := writeStructuredFrame(clientTLS, attach); err != nil {
+				return &terminalConnectError{state: "transport-error", code: "connection_failed", message: "The terminal attachment could not be requested.", cause: err}
+			}
+			response, err = readStructuredFrame(clientTLS)
+			if err != nil {
+				return &terminalConnectError{state: "transport-error", code: "connection_failed", message: "The terminal attachment response could not be read.", cause: err}
+			}
+			if response.Type != "error" {
+				break
+			}
+			// Output past the cursor was compacted away: rejoin at the live boundary (as pb connect does) and say
+			// so in the terminal, instead of failing it.
+			latest, rejoin := replayGapRejoin(response.Payload)
+			if !rejoin || attempt >= terminalprotocol.ReplayGapRejoins {
+				return attachFailure(response.Payload, connection.config.FromSequence)
+			}
+			gap = true
+			fromSequence, atLiveBoundary = latest, true
+			if requestID, err = randomID("request"); err != nil {
+				return err
+			}
+			if operationID, err = randomID("operation"); err != nil {
+				return err
+			}
 		}
 		if response.Type != "response" || response.RequestID != requestID {
 			return &terminalConnectError{state: "transport-error", code: "invalid_attach_response", message: "The machine returned an invalid terminal attachment."}
@@ -230,6 +249,9 @@ func (connection *browserTerminal) connectAndServe() error {
 		checkpoint, checkpointSequence, err = readScreenCheckpoint(clientTLS, attachState.StreamID)
 		if err != nil {
 			return &terminalConnectError{state: "transport-error", code: "invalid_checkpoint", message: "The machine could not restore the terminal screen.", cause: err}
+		}
+		if gap {
+			checkpoint = append(checkpoint, terminalprotocol.ReplayGapMarker...)
 		}
 		return nil
 	})
@@ -290,9 +312,19 @@ func (connection *browserTerminal) sendHello(writer io.Writer) error {
 
 func (connection *browserTerminal) readTerminalStream(stream io.Reader) error {
 	var resync screenCheckpoint
+	if connection.config.Mode == connectionModeTerminal {
+		done := make(chan struct{})
+		defer close(done)
+		connection.heard.Store(time.Now().UnixNano())
+		go connection.watchSilence(done)
+	}
 	for {
 		kind, payload, err := readApplicationFrame(stream)
+		connection.heard.Store(time.Now().UnixNano())
 		if err != nil {
+			if connection.stalled.Load() {
+				return &terminalConnectError{state: "reconnecting", code: "connection_stalled", message: "The machine stopped answering. Reconnecting."}
+			}
 			lost := &terminalConnectError{state: "reconnecting", code: "connection_lost", message: "The terminal connection was interrupted. Reconnect to resume.", cause: err}
 			// Name why the transport ended when this side ended it (a rejected record, a full queue): those
 			// reasons are fixed strings, never terminal content, and otherwise read as a plain drop.
@@ -406,6 +438,10 @@ func (connection *browserTerminal) readTerminalStream(stream io.Reader) error {
 			var event struct {
 				Event string `json:"event"`
 				State string `json:"state"`
+				Exit  *struct {
+					Code   int    `json:"code"`
+					Signal string `json:"signal"`
+				} `json:"exit"`
 			}
 			_ = json.Unmarshal(frame.Payload, &event)
 			if event.Event == wire.EventStreamEnd && connection.config.Mode == connectionModeRecording && connection.replayContinues() {
@@ -413,7 +449,12 @@ func (connection *browserTerminal) readTerminalStream(stream io.Reader) error {
 			}
 			if event.Event == "terminal_stream_end" {
 				connection.ended.Store(true)
-				connection.emit("state", map[string]any{"state": "closed", "message": "The remote terminal has closed."})
+				values := map[string]any{"state": "closed", "message": "The remote terminal has closed."}
+				if event.Exit != nil {
+					values["exit_code"] = terminalprotocol.ExitCode(event.Exit.Code, event.Exit.Signal)
+					values["exit_status"] = terminalprotocol.ExitStatus(event.Exit.Code, event.Exit.Signal)
+				}
+				connection.emit("state", values)
 				return nil
 			}
 			connection.emit("event", map[string]any{"type": frame.Type, "capability": frame.Capability, "payload": json.RawMessage(frame.Payload)})
@@ -426,6 +467,31 @@ func (connection *browserTerminal) readTerminalStream(stream io.Reader) error {
 			continue
 		}
 		connection.emit("frame", map[string]any{"type": frame.Type, "capability": frame.Capability, "payload": json.RawMessage(frame.Payload)})
+	}
+}
+
+// watchSilence ends a connection whose machine sent nothing, not even its 5 s heartbeat, for
+// terminalprotocol.StallAfter: a black-holed WebSocket stays open until the browser gives up, which looks like a hung
+// terminal. The page shows the stall and reconnects.
+func (connection *browserTerminal) watchSilence(done <-chan struct{}) {
+	ticker := time.NewTicker(stallTick)
+	defer ticker.Stop()
+	previous := time.Now()
+	for {
+		select {
+		case <-done:
+			return
+		case now := <-ticker.C:
+			last := connection.heard.Load()
+			heard, stalled := stallCheck(time.Unix(0, last), previous, now)
+			connection.heard.CompareAndSwap(last, heard.UnixNano()) // a frame read meanwhile wins
+			previous = now
+			if stalled {
+				connection.stalled.Store(true)
+				connection.closeTransport()
+				return
+			}
+		}
 	}
 }
 

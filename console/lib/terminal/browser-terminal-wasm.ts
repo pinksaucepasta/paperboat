@@ -8,6 +8,9 @@ export type BrowserTerminalEvent = {
   /** connection_lost only: why the WASM ended the socket itself; absent when it was closed from outside. */
   transport_cause?: string
   message?: string
+  /** `closed` state at the remote process's end: "exited 143 (SIGTERM)", and the shell-style code. */
+  exit_status?: string
+  exit_code?: number
   owner_account_id?: string
   machine_id?: string
   root_key_id?: string

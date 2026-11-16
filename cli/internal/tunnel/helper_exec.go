@@ -12,6 +12,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
 	"github.com/pinksaucepasta/paperboat/internal/resolver"
+	"github.com/pinksaucepasta/paperboat/shared/terminalprotocol"
 )
 
 type ExecRequest struct {
@@ -296,10 +297,7 @@ func (c *helperExecConn) handleEnd(frame helperFrame) bool {
 	c.emit(ExecEvent{OperationID: event.OperationID, EventSequence: event.Sequence, State: event.State, Result: event.Result, ErrorCode: event.ErrorCode})
 	code := 0
 	if event.Result != nil {
-		code = event.Result.Code
-		if code == 0 && event.Result.Signal != "" {
-			code = signalExitCode(event.Result.Signal)
-		}
+		code = terminalprotocol.ExitCode(event.Result.Code, event.Result.Signal)
 	}
 	if event.State == "failed" || event.State == "canceled" {
 		c.finish(code, &RemoteExecError{Code: firstNonEmptyExec(event.ErrorCode, event.State)})

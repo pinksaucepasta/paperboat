@@ -35,7 +35,7 @@ import {
   type MobileModifiers,
 } from "@/lib/terminal/mobile-keys"
 import { createLivenessProbe } from "@/lib/terminal/liveness-probe"
-import { nextReconnectDelay, reconnectWait, terminalCloseCodes, ticketCloseCode, workerCloseCode } from "@/lib/terminal/close-codes"
+import { endedMessage, nextReconnectDelay, reconnectWait, terminalCloseCodes, ticketCloseCode, workerCloseCode } from "@/lib/terminal/close-codes"
 import { paletteSequence, type TerminalTheme } from "@/lib/terminal/themes"
 
 /**
@@ -809,7 +809,7 @@ export function useTerminalConnection({
         setError(
           outcome.phase === "denied" && accessMethod === "code"
             ? "Your code has stopped working. It may have expired or been replaced; ask for a new one."
-            : outcome.message,
+            : endedMessage(outcome, event.exit_status),
         )
         return
       }

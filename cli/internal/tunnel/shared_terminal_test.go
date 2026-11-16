@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/pinksaucepasta/paperboat/internal/resolver"
+	"github.com/pinksaucepasta/paperboat/shared/terminalprotocol"
 )
 
 type sharedOnlyMessageConnection struct {
@@ -107,8 +108,8 @@ func TestSharedTerminalReconnectGapRetainsOutputButDenialDoesNotRetry(t *testing
 			if err != nil || message.requests != 2 {
 				t.Fatalf("gap recovery err=%v requests=%d", err, message.requests)
 			}
-			output := make([]byte, len(helperReplayGapMarker)+len("early"))
-			if _, err := io.ReadFull(connection, output); err != nil || !strings.HasSuffix(string(output), "early") || !strings.HasPrefix(string(output), helperReplayGapMarker) {
+			output := make([]byte, len(terminalprotocol.ReplayGapMarker)+len("early"))
+			if _, err := io.ReadFull(connection, output); err != nil || !strings.HasSuffix(string(output), "early") || !strings.HasPrefix(string(output), terminalprotocol.ReplayGapMarker) {
 				t.Fatalf("gap notice and retained output not delivered: %v", err)
 			}
 		})

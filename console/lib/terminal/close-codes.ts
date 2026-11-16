@@ -22,6 +22,7 @@ export type CloseCode =
   | "edge_unavailable"
   | "terminal_service_unavailable"
   | "moved"
+  | "stalled"
   | "protocol"
 
 export type CloseOutcome = { phase: TerminalPhase | "reconnect"; message: string; silent?: boolean; immediate?: boolean }
@@ -51,6 +52,9 @@ export const terminalCloseCodes: Readonly<Record<CloseCode, CloseOutcome>> = {
   // 4301: pb update replaced the machine's generation this connection ran on and that one stopped serving it;
   // the new one serves already, so reattach at once (sequence replay keeps the screen).
   moved: { phase: "reconnect", message: "", silent: true, immediate: true },
+  // The machine sent nothing, not even its 5 s heartbeat, for 10 s (shared/terminalprotocol StallAfter, as pb connect):
+  // the socket is black-holed, so the page says so and replaces it at once.
+  stalled: { phase: "reconnect", message: "The machine stopped answering for 10 seconds.", immediate: true },
   protocol: { phase: "transport-error", message: "The machine sent something this page could not use. You can retry." },
 }
 
@@ -61,6 +65,11 @@ export const terminalCloseCodes: Readonly<Record<CloseCode, CloseOutcome>> = {
  */
 export function reconnectWait(outcome: CloseOutcome, immediateSpent: boolean): number | undefined {
   return outcome.immediate && !immediateSpent ? 0 : undefined
+}
+
+/** The words for an ended terminal, with the process's exit status when the machine sent one ("exited 143 (SIGTERM)"). */
+export function endedMessage(outcome: CloseOutcome, exitStatus?: string): string {
+  return outcome.phase === "closed" && exitStatus ? `This terminal has ended: ${exitStatus}.` : outcome.message
 }
 
 function isCloseCode(code: string | undefined): code is CloseCode {
@@ -76,6 +85,7 @@ const workerCodes: Readonly<Record<string, CloseCode>> = {
   connection_lost: "edge_unavailable",
   output_key_lag: "edge_unavailable",
   replay_gap: "edge_unavailable",
+  connection_stalled: "stalled",
   credential_expired: "expired",
   not_found_or_forbidden: "no_access",
   stale_generation: "revoked",

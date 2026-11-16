@@ -73,6 +73,8 @@ type browserTerminal struct {
 	attached        bool
 	stopping        atomic.Bool
 	ended           atomic.Bool
+	heard           atomic.Int64 // unix nanos of the last frame from the machine (watchSilence)
+	stalled         atomic.Bool
 	stopOnce        sync.Once
 	keyEvents       chan browserbroadcast.Epoch
 	writes          *terminalWriterQueue

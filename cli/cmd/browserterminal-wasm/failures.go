@@ -81,6 +81,23 @@ func innermostConnectError(err *terminalConnectError) *terminalConnectError {
 	return err
 }
 
+// replayGapRejoin reads an attach refusal: a replay_gap whose retained range is coherent is rejoined at its live
+// boundary (latest), like pb connect, instead of failing the terminal.
+func replayGapRejoin(payload json.RawMessage) (uint64, bool) {
+	var serverError struct {
+		Code    string `json:"code"`
+		Details *struct {
+			EarliestSequence uint64 `json:"earliest_sequence"`
+			LatestSequence   uint64 `json:"latest_sequence"`
+		} `json:"details"`
+	}
+	if json.Unmarshal(payload, &serverError) != nil || serverError.Code != "replay_gap" || serverError.Details == nil ||
+		serverError.Details.EarliestSequence > serverError.Details.LatestSequence {
+		return 0, false
+	}
+	return serverError.Details.LatestSequence, true
+}
+
 // attachFailure projects an authenticated attach refusal into the worker state event.
 // Only authored codes and cursor values may cross to the page; never remote prose.
 func attachFailure(payload json.RawMessage, fromSequence uint64) error {

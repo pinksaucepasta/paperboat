@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+
+	"github.com/pinksaucepasta/paperboat/shared/terminalprotocol"
 )
 
 var ErrTerminalViewOnly = errors.New("this terminal is view-only; ask the session owner for interactive access")
@@ -26,7 +28,7 @@ func (c *helperTerminalConn) initializeShared(ctx context.Context) error {
 			c.target.ReplayGapSink(remote.Details.RequestedSequence, remote.Details.EarliestSequence, remote.Details.LatestSequence)
 		}
 		// Do not advance the committed cursor past unread retained output.
-		c.initial = append(c.initial, helperOutput{data: []byte(helperReplayGapMarker)})
+		c.initial = append(c.initial, helperOutput{data: []byte(terminalprotocol.ReplayGapMarker)})
 		from = 0
 		frame, err = attach(0)
 	}
