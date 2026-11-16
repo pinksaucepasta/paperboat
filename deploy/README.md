@@ -137,6 +137,8 @@ git archive HEAD -- . ':!console' ':!marketing' ':!tools' | tar x -C "$dir"
 cd "$dir" && docker build --build-arg PAPERBOAT_VERSION=<YYYY.MM.DD.N> -t <name>:<tag> -f <service>/deploy/Dockerfile .
 ```
 
+**Never build or compile on the database host while a deploy gate or watch runs** (2026-11-16: a server image build on coolify slowed `/v1/edge/*` to 2-9 s and failed an edge gate): build the amd64 server image on an x86_64 Docker host (pbvm2) and move it with `docker save <image> | ssh root@<db host> docker load`; build the arm64 edge and relay images on anvit.
+
 The server also needs `--build-arg PAPERBOAT_COMMIT=<40-hex HEAD>`; it is the commit that
 `GET /v1/server-version` reports and the image build refuses anything else. Take a database backup
 (`./backup-database.sh`) and rehearse any new migration against a restored copy in the isolated
