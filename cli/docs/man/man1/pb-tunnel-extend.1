@@ -1,0 +1,62 @@
+.nh
+.TH "PB-TUNNEL-EXTEND" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-tunnel-extend - Move a durable tunnel's expiry to now plus a duration
+
+
+.SH SYNOPSIS
+\fBpb tunnel extend <tunnel> --duration <time> [flags]\fP
+
+
+.SH DESCRIPTION
+Set a durable tunnel's expiry to the current time plus --duration, on the tunnel's current resource version. Use it when \fBpb tunnel status\fR says the tunnel expired; the tunnel serves again once the change is applied.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB--duration\fP=0s
+	new lifetime from now, for example 24h
+
+.PP
+\fB-h\fP, \fB--help\fP[=false]
+	help for extend
+
+.PP
+\fB--json\fP[=false]
+	print canonical JSON
+
+.PP
+\fB--timeout\fP=2m0s
+	maximum time to wait for operation completion
+
+.PP
+\fB--wait\fP[=false]
+	wait for the operation to reach a terminal state
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--ephemeral\fP[=false]
+	use the temporary preview lifecycle
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-tunnel(1)\fP

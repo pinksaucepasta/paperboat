@@ -1,0 +1,56 @@
+.nh
+.TH "PB-TUNNEL-POLICY-LIST" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-tunnel-policy-list - List on-demand port policies (their IDs and generations)
+
+
+.SH SYNOPSIS
+\fBpb tunnel policy list [flags]\fP
+
+
+.SH DESCRIPTION
+List on-demand port policies (their IDs and generations)
+
+.PP
+List this account's on-demand port policies with their IDs, targets, generations and expiry, expired ones included. Use the ID and generation to update or revoke a policy whose ID was lost.
+
+.PP
+An on-demand policy authorizes an exact machine port for private or team access. A policy does not publish a public URL or grant every port on the machine. Revocation fences subsequent activation.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for list
+
+.PP
+\fB--json\fP[=false]
+	print canonical JSON
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--ephemeral\fP[=false]
+	use the temporary preview lifecycle
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-tunnel-policy(1)\fP

@@ -272,6 +272,7 @@ Read the [CLI guide](../cli.md) for interactive use, scripting, installation of 
 | [pb tunnel domain add](pb_tunnel_domain_add.md) | Serve a tunnel route at a hostname under a verified workspace domain (pb domain add) |
 | [pb tunnel domain list](pb_tunnel_domain_list.md) | List tunnel domains |
 | [pb tunnel domain remove](pb_tunnel_domain_remove.md) | Stop serving a tunnel at a hostname |
+| [pb tunnel extend](pb_tunnel_extend.md) | Move a durable tunnel's expiry to now plus a duration |
 | [pb tunnel inspect](pb_tunnel_inspect.md) | Show daemon-local HTTP captures |
 | [pb tunnel ip-rules](pb_tunnel_ip-rules.md) | Show or set which client addresses may open this tunnel |
 | [pb tunnel list](pb_tunnel_list.md) | List durable tunnels |
@@ -280,6 +281,7 @@ Read the [CLI guide](../cli.md) for interactive use, scripting, installation of 
 | [pb tunnel policy](pb_tunnel_policy.md) | Manage permission to activate a private port on demand |
 | [pb tunnel policy allow](pb_tunnel_policy_allow.md) | Allow on-demand access to an exact machine port |
 | [pb tunnel policy get](pb_tunnel_policy_get.md) | Show an on-demand port policy |
+| [pb tunnel policy list](pb_tunnel_policy_list.md) | List on-demand port policies (their IDs and generations) |
 | [pb tunnel policy revoke](pb_tunnel_policy_revoke.md) | Revoke an on-demand port policy |
 | [pb tunnel rename](pb_tunnel_rename.md) | Rename a durable tunnel |
 | [pb tunnel replay](pb_tunnel_replay.md) | Deliberately replay one retained HTTP request to the same origin |

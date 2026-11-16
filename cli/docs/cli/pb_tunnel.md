@@ -44,6 +44,7 @@ pb tunnel [--ephemeral] [<port|url|path>] [flags]
 * [pb tunnel delete](pb_tunnel_delete.md)	 - Delete endpoints and routes while preserving user DNS records
 * [pb tunnel doctor](pb_tunnel_doctor.md)	 - Diagnose tunnel health
 * [pb tunnel domain](pb_tunnel_domain.md)	 - Serve a tunnel at hostnames under your workspace's domains
+* [pb tunnel extend](pb_tunnel_extend.md)	 - Move a durable tunnel's expiry to now plus a duration
 * [pb tunnel inspect](pb_tunnel_inspect.md)	 - Show daemon-local HTTP captures
 * [pb tunnel ip-rules](pb_tunnel_ip-rules.md)	 - Show or set which client addresses may open this tunnel
 * [pb tunnel list](pb_tunnel_list.md)	 - List durable tunnels
