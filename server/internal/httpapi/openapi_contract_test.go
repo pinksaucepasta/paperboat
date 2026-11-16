@@ -327,6 +327,7 @@ func TestOpenAPIFreezesPreviewTunnelV1Endpoints(t *testing.T) {
 		"/v1/previews":                          {"get", "post"},
 		"/v1/previews/{preview_id}":             {"get", "delete"},
 		"/v1/previews/{preview_id}/lease/renew": {"post"},
+		"/v1/preview-lease-renewals":            {"post"},
 		"/v1/previews/{preview_id}/readiness":   {"post"},
 		"/v1/previews/{preview_id}/events":      {"get"},
 		"/v1/tunnels":                           {"get", "post"},

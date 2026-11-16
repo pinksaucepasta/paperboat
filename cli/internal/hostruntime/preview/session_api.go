@@ -11,14 +11,17 @@ import (
 // session lifecycle. Carrier credentials remain inside the host connector and
 // are never copied into the preview lease model.
 type APILeaseClient struct {
-	client *api.Client
+	client  *api.Client
+	renewer *renewBatcher
 }
 
 func NewAPILeaseClient(client *api.Client) (*APILeaseClient, error) {
 	if client == nil {
 		return nil, fmt.Errorf("%w: API client is required", ErrSessionInvalid)
 	}
-	return &APILeaseClient{client: client}, nil
+	c := &APILeaseClient{client: client}
+	c.renewer = newRenewBatcher(client.RenewPreviewLeases)
+	return c, nil
 }
 
 func (c *APILeaseClient) Create(ctx context.Context, request LeaseRequest) (Lease, error) {
@@ -45,7 +48,7 @@ func (c *APILeaseClient) Renew(ctx context.Context, lease Lease, idempotencyKey 
 	if c == nil || c.client == nil {
 		return Lease{}, fmt.Errorf("%w: API client is required", ErrSessionInvalid)
 	}
-	renewed, err := c.client.RenewPreviewLease(ctx, leaseToAPI(lease), lease.OwnerSessionID, idempotencyKey)
+	renewed, err := c.renewer.renew(ctx, api.PreviewLeaseRenewal{Lease: leaseToAPI(lease), OwnerSessionID: lease.OwnerSessionID, IdempotencyKey: idempotencyKey})
 	if err != nil {
 		return Lease{}, err
 	}
