@@ -53,11 +53,8 @@ func recipePair(c *command.Context, tokenText string, setupArgs []string) error 
 		return invocationError(err)
 	}
 	cfg.ServerURL = issuer
-	store, err := config.ProfileStoreFor(cfg)
+	store, err := loginProfileStore(cfg, issuer)
 	if err != nil {
-		return err
-	}
-	if err = store.Recover(issuer); err != nil {
 		return err
 	}
 	machineID, err := loginLocalMachineID(cfg)

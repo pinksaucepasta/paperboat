@@ -58,7 +58,17 @@ func TestRecipePairStartsARecipeSessionThenSetup(t *testing.T) {
 	loginLocalMachineID = func(*config.Config) (string, error) { return machineID, nil }
 	var setupArgs []string
 	runRecipeSetup = func(_ *command.Context, args []string) int { setupArgs = args; return 0 }
-	path, store := browserLoginFixture(t, srv.URL)
+	path, _ := browserLoginFixture(t, srv.URL)
+	// A headless machine or container has no OS credential store: the recipe session goes to owner-only
+	// files, as a browser sign-in does (F26-02 on rcp-l, 2026-11-16: "OS credential store unavailable").
+	headless, _ := config.Load(path)
+	headless.Auth.AllowFileFallback = false
+	if err := headless.Save(); err != nil {
+		t.Fatal(err)
+	}
+	oldStore := authCredentialStoreAvailable
+	t.Cleanup(func() { authCredentialStoreAvailable = oldStore })
+	authCredentialStoreAvailable = func() bool { return false }
 
 	t.Setenv("PB_RECIPE", "")
 	out, err := runBrowserLogin(t, context.Background(), path, "pair", token.String(), "--name", "runner-1")
@@ -67,6 +77,11 @@ func TestRecipePairStartsARecipeSessionThenSetup(t *testing.T) {
 	}
 	if strings.Join(setupArgs, " ") != "--config "+path+" setup --name runner-1" {
 		t.Fatalf("setup args = %v", setupArgs)
+	}
+	saved, _ := config.Load(path)
+	store, _ := config.ProfileStoreFor(saved)
+	if !saved.Auth.AllowFileFallback {
+		t.Fatal("a headless pairing did not switch to owner-only files")
 	}
 	profile, err := store.Load(srv.URL)
 	if err != nil || profile.CLIClientSessionID != "cls_recipe" || profile.Account.ID != "usr_recipe" {

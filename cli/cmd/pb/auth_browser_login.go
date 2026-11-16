@@ -87,26 +87,8 @@ func browserLogin(c *command.Context, resume *config.BrowserLoginState) error {
 		return invocationError(err)
 	}
 	cfg.ServerURL = issuer
-	store, err := config.ProfileStoreFor(cfg)
+	store, err := loginProfileStore(cfg, issuer)
 	if err != nil {
-		return err
-	}
-	if !cfg.Auth.AllowFileFallback && !authCredentialStoreAvailable() {
-		if _, e := store.Load(issuer); e == nil {
-			return errors.New("saved credentials require the configured credential store; unlock it before signing in again")
-		} else if !errors.Is(e, config.ErrNoCredentials) {
-			return e
-		}
-		cfg.Auth.AllowFileFallback = true
-		if err = cfg.Save(); err != nil {
-			return err
-		}
-		store, err = config.ProfileStoreFor(cfg)
-		if err != nil {
-			return err
-		}
-	}
-	if err = store.Recover(issuer); err != nil {
 		return err
 	}
 	if c.Bool("reauth") && c.Bool("change-account") {
@@ -374,4 +356,29 @@ func daemonRefreshFailureMessage(err error) string {
 		return "Sign-in is saved, but this computer's Paperboat service is not enrolled any more. Run pb login --fresh to remove this computer's setup and add it again."
 	}
 	return "Sign-in is saved, but the installed daemon could not refresh. Run pb login again to finish, or pb doctor to check recovery."
+}
+
+// loginProfileStore is the credential store a sign-in saves to. Without an OS credential store
+// (a headless Linux machine or container) the first sign-in uses owner-only files, as recorded in the
+// config; saved credentials that need the configured store are never replaced silently.
+func loginProfileStore(cfg *config.Config, issuer string) (config.ProfileStore, error) {
+	store, err := config.ProfileStoreFor(cfg)
+	if err != nil {
+		return store, err
+	}
+	if !cfg.Auth.AllowFileFallback && !authCredentialStoreAvailable() {
+		if _, e := store.Load(issuer); e == nil {
+			return store, errors.New("saved credentials require the configured credential store; unlock it before signing in again")
+		} else if !errors.Is(e, config.ErrNoCredentials) {
+			return store, e
+		}
+		cfg.Auth.AllowFileFallback = true
+		if err = cfg.Save(); err != nil {
+			return store, err
+		}
+		if store, err = config.ProfileStoreFor(cfg); err != nil {
+			return store, err
+		}
+	}
+	return store, store.Recover(issuer)
 }
