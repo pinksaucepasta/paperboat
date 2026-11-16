@@ -112,3 +112,15 @@ func vaultKeychainError(err error) error {
 	}
 	return credentialStoreFailure("macOS Keychain request failed", err)
 }
+
+// CredentialStoreAvailable writes and removes a probe item: an SSH or CI session without an unlocked
+// login keychain refuses writes (exit 36), so sign-in falls back to files there instead of failing
+// half-way (F26 device check: pb pair from a recipe on a headless Mac).
+func CredentialStoreAvailable() bool {
+	const probe = "availability-probe"
+	if err := keychainSet(probe, "1"); err != nil {
+		return false
+	}
+	_ = keychainDelete(probe)
+	return true
+}
