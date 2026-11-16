@@ -214,6 +214,10 @@ type pipelinedWelcome struct {
 	err     error
 }
 
+// Abort resets the wrapped connection (abortMessage): without it the embedded interface hides Abort and a detached exec
+// closed its stream with a FIN behind unread stdin instead.
+func (c *pipelinedWelcome) Abort() { _ = abortMessage(c.helperMessageConnection) }
+
 // errNotAdmitted marks a refusal of the stream itself (admission or hello) read in place of the welcome.
 type errNotAdmitted struct{ cause error }
 
