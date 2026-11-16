@@ -3291,24 +3291,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/ssh/client-keys/{fingerprint}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        /** Register the current CLI session managed SSH public key */
-        put: operations["put_v1_ssh_client_key"];
-        post?: never;
-        /** Revoke a managed SSH client public key */
-        delete: operations["delete_v1_ssh_client_key"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/v1/machines/{machine_id}/ssh-target": {
         parameters: {
             query?: never;
@@ -3342,28 +3324,6 @@ export interface paths {
          */
         put: operations["put_v1_machine_ssh_host_keys"];
         post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/machines/{machine_id}/ssh-authorized-keys": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                machine_id: string;
-            };
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Read active managed SSH client keys for a machine
-         * @description Machine-proof authenticated, generation-bound key inventory used only for authorized_keys reconciliation.
-         */
-        post: operations["post_v1_machines_machine_id_ssh_authorized_keys"];
         delete?: never;
         options?: never;
         head?: never;
@@ -8300,6 +8260,69 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/machines/{machine_id}/ssh-user-cas": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                machine_id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Read the managed SSH user CAs and revocation principal a machine trusts
+         * @description Machine-proof authenticated, generation-bound trust set used only for the managed CA lines (cert-authority) of the machine.
+         */
+        post: operations["post_v1_machines_machine_id_ssh_authorized_keys"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/machines/{machine_id}/ssh-certificate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                machine_id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Issue a short-lived managed SSH certificate for this CLI session's key on one machine */
+        post: operations["post_v1_machine_ssh_certificate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/managed-ssh/accounts/{account_id}/rotate-user-ca": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                account_id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Advance one account's managed SSH user CA rotation by one step
+         * @description Adds a pending CA (trusted by hosts, not signing), promotes it after 15 minutes, then removes the retiring CA once every certificate it signed has expired. Returns the account's CAs.
+         */
+        post: operations["post_v1_admin_managed_ssh_rotate_user_ca"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -9927,7 +9950,7 @@ export interface components {
         UserMachineRuntimeDiagnostics: {
             /** Format: int64 */
             worker_generation: number;
-            os_boot_id: string;
+            os_boot_id?: string;
             /** @enum {string} */
             worker_service_scope: "unknown" | "user" | "system";
             /** @enum {string} */
@@ -9935,7 +9958,7 @@ export interface components {
             /** Format: int64 */
             connector_generation: number;
             /** Format: date-time */
-            observed_at: string;
+            observed_at?: string;
             capabilities?: ("file_receive" | "preview_launch" | "terminal_host" | "session_host" | "keep_awake" | "environment_injection")[];
         };
         MachineCapabilityAvailability: {
@@ -12136,6 +12159,8 @@ export interface components {
             };
             /** @description The machine's latest update observation (as in GET /v1/machines/update-summary), null before its first report. */
             update?: components["schemas"]["UpdateObservation"] | null;
+            /** @description The machine's tags (tag:<name>) in the selected workspace's policy file; empty when it has none. */
+            tags?: string[];
         };
         MeResponse: {
             data: components["schemas"]["Me"];
@@ -19784,76 +19809,6 @@ export interface operations {
             503: components["responses"]["Error"];
         };
     };
-    put_v1_ssh_client_key: {
-        parameters: {
-            query?: never;
-            header: {
-                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
-            };
-            path: {
-                fingerprint: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    public_key: string;
-                };
-            };
-        };
-        responses: {
-            /** @description Client key registered. */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SuccessResponse"];
-                };
-            };
-            400: components["responses"]["Error"];
-            401: components["responses"]["Error"];
-            403: components["responses"]["Error"];
-            409: components["responses"]["Error"];
-        };
-    };
-    delete_v1_ssh_client_key: {
-        parameters: {
-            query?: never;
-            header: {
-                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
-            };
-            path: {
-                fingerprint: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    /** @enum {string} */
-                    reason: "client_revoked" | "client_logout" | "account_revoked" | "key_rotated" | "key_compromise";
-                };
-            };
-        };
-        responses: {
-            /** @description Client key revoked. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SuccessResponse"];
-                };
-            };
-            400: components["responses"]["Error"];
-            401: components["responses"]["Error"];
-            403: components["responses"]["Error"];
-            404: components["responses"]["Error"];
-            409: components["responses"]["Error"];
-        };
-    };
     get_v1_machine_ssh_target: {
         parameters: {
             query: {
@@ -19988,36 +19943,6 @@ export interface operations {
             400: components["responses"]["Error"];
             401: components["responses"]["Error"];
             409: components["responses"]["Error"];
-        };
-    };
-    post_v1_machines_machine_id_ssh_authorized_keys: {
-        parameters: {
-            query?: {
-                /** @description Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field. */
-                workspace?: string;
-            };
-            header?: never;
-            path: {
-                machine_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": Record<string, never>;
-            };
-        };
-        responses: {
-            /** @description Current active managed SSH public keys. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            400: components["responses"]["Error"];
-            401: components["responses"]["Error"];
-            404: components["responses"]["Error"];
         };
     };
     post_v1_machine_ssh_host_keys_promote: {
@@ -31751,6 +31676,90 @@ export interface operations {
             403: components["responses"]["Error"];
             404: components["responses"]["Error"];
             503: components["responses"]["Error"];
+        };
+    };
+    post_v1_machines_machine_id_ssh_authorized_keys: {
+        parameters: {
+            query?: {
+                /** @description Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field. */
+                workspace?: string;
+            };
+            header?: never;
+            path: {
+                machine_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description The user CA public keys (at most 3, during a rotation) and the principal every certificate must carry. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    post_v1_machine_ssh_certificate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                machine_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    machine_generation: number;
+                    public_key: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The certificate (principals: the machine's OS user and revocation principal), its OS user and expiry. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    post_v1_admin_managed_ssh_rotate_user_ca: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                account_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The account's CAs: id, state (pending, active, retiring), public key, state change time. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
         };
     };
 }

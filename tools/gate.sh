@@ -51,7 +51,7 @@ step "managed deployment lifecycle tests"
 python3 -m unittest discover -s deploy -p 'test_*.py' || { echo "FAIL: deployment"; fail=1; }
 
 step "console lint + build"
-(cd console && bun install --frozen-lockfile >/dev/null && bun run lint && bun run build) || { echo "FAIL: console"; fail=1; }
+(cd console && bun install --frozen-lockfile >/dev/null && bun run api:check && bun run lint && bun run build) || { echo "FAIL: console"; fail=1; }
 
 base=$(git merge-base HEAD origin/main 2>/dev/null || git rev-list --max-parents=0 HEAD | tail -1)
 changed=$( { git diff --name-only "$base" HEAD; git diff --name-only; } | grep -E '^(cli|relay|shared)/' | head -1)

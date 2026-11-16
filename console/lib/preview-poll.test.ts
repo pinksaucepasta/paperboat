@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, jest, test } from "bun:test"
 
 import { QueryClient, QueryObserver } from "@tanstack/react-query"
+import { sampleFor } from "@/lib/api-sample"
 import { previewPoll, previewQuery } from "@/lib/tunnels"
 
 type Body = { state: string; allocation_state: string }
@@ -13,7 +14,7 @@ beforeEach(() => {
   jest.useFakeTimers()
   globalThis.fetch = (async () => {
     polls++
-    return Response.json({ data: body })
+    return Response.json({ data: sampleFor("GET /v1/previews/{preview_id}", body) })
   }) as unknown as typeof fetch
 })
 afterEach(() => {

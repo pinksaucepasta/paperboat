@@ -1,7 +1,7 @@
 "use client"
 
 import { queryOptions } from "@tanstack/react-query"
-import { api, ApiError, send } from "@/lib/api"
+import { api, ApiError, checked, send } from "@/lib/api"
 import { queryKeys } from "@/lib/query-keys"
 
 /*
@@ -92,7 +92,7 @@ export async function finishConnect(code: string, state: string) {
       body?.error?.message ?? "GitHub is unavailable.",
     )
   }
-  return body.data
+  return checked("POST", "github/oauth/callback", body.data)
 }
 
 export const disconnectGitHub = () => api<GitHubStatus>("github/connection", { method: "DELETE" })

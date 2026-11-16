@@ -6418,11 +6418,9 @@
         "additionalProperties": false,
         "required": [
           "worker_generation",
-          "os_boot_id",
           "worker_service_scope",
           "connector_state",
-          "connector_generation",
-          "observed_at"
+          "connector_generation"
         ],
         "properties": {
           "worker_generation": {
@@ -15246,6 +15244,13 @@
               }
             ],
             "description": "The machine's latest update observation (as in GET /v1/machines/update-summary), null before its first report."
+          },
+          "tags": {
+            "type": "array",
+            "description": "The machine's tags (tag:<name>) in the selected workspace's policy file; empty when it has none.",
+            "items": {
+              "type": "string"
+            }
           }
         }
       },

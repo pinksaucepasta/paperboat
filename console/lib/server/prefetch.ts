@@ -6,6 +6,7 @@ import { connection } from "next/server"
 import { cache } from "react"
 import { viewerFrom, type Viewer } from "@/lib/format"
 import { queryKeys } from "@/lib/query-keys"
+import { checkResponse } from "@/lib/api-validate"
 import { controlPlaneFetch } from "@/lib/server/control-plane"
 
 const workspacePattern = /^[a-z0-9-]{1,63}$/
@@ -33,7 +34,8 @@ const request = cache(async () => {
       if (response.status === 401) state.ended = true
       if (!response.ok) return
       const body = (await response.json()) as { data?: T }
-      return body.data
+      // A wrong shape is left out like any failure: the browser asks again and shows the named error.
+      return checkResponse("GET", path, body.data) ? undefined : body.data
     } catch {
       return
     }

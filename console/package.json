@@ -11,11 +11,13 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "check": "next typegen && tsc --noEmit && eslint && bun run terminal:wasm && bun run vault:wasm && bun test lib && next build",
+    "check": "bun run api:check && next typegen && tsc --noEmit && eslint && bun run terminal:wasm && bun run vault:wasm && bun test lib && next build",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "api:types": "openapi-typescript ../server/docs/openapi.json -o lib/api-schema.d.ts",
-    "test": "bun test lib"
+    "test": "bun test lib",
+    "api:responses": "node scripts/api-responses.mjs",
+    "api:check": "openapi-typescript ../server/docs/openapi.json -o lib/api-schema.d.ts && node scripts/api-responses.mjs && git diff --exit-code -- lib/api-schema.d.ts lib/api-responses.generated.json"
   },
   "dependencies": {
     "@base-ui/react": "^1.9.0",

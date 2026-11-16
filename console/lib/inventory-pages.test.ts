@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
+import { sampleFor } from "@/lib/api-sample"
 import { installationsQuery, poolServersQuery, scopeOf } from "@/lib/network"
 
 const realFetch = globalThis.fetch
@@ -15,9 +16,12 @@ beforeEach(() => {
     const start = Number(url.searchParams.get("cursor") ?? "0")
     const ids = Array.from({ length: Math.max(0, Math.min(limit, count - start)) }, (_, i) => start + i + 1)
     const next = start + limit < count ? String(start + limit) : undefined
+    const base = sampleFor("GET /v1/selfhost/installations")
+    const item = (base.installations as object[])[0]
     const data = {
-      pagination: { limit, offset: 0, total: count, ...(next && { next_cursor: next }) },
-      installations: ids.map((n) => ({ installation_id: `i${n}`, node_id: `n${n}`, capability: "relay" })),
+      ...base,
+      pagination: { limit, offset: 0, total: count, next_offset: null, ...(next && { next_cursor: next }) },
+      installations: ids.map((n) => ({ ...item, installation_id: `i${n}`, node_id: `n${n}`, capability: "relay" })),
     }
     return Response.json({ data })
   }) as unknown as typeof fetch

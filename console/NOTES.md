@@ -26,11 +26,15 @@ owns it.
   (`unauthenticated`). The console now confirms with `/v1/me` before sending anyone to sign in
   (`lib/api.ts`); unknown routes should return 404 `not_found`.
 
-- **OpenAPI is missing response schemas** for `GET /v1/me`, `GET /v1/machines` and
-  `GET`/`PATCH /v1/machines/{machine_id}` (only a description), and `/v1/me` returns a generic
-  `SuccessResponse`. The console's `Me` and `Machine` types are therefore hand-written in
-  `lib/api.ts`; everything else comes from `lib/api-schema.d.ts`. Adding these schemas on the
-  server lets the console drop its copies.
+- **API answers are checked at the boundary** (W-08). `lib/api-schema.d.ts` (types) and
+  `lib/api-responses.generated.json` (the shape of each answer's `data`) are generated from
+  `server/docs/openapi.json` (`bun run api:types`, `bun run api:responses`); `bun run api:check` in `check` fails when
+  either is stale. `api()` and the other readers call `checked()` (`lib/api-validate.ts`): unknown fields are ignored,
+  a wrong type or a missing required field throws `ApiError` `invalid_response` naming the operation and field (the
+  server prefetch drops such an answer so the browser shows the same error). Enums and limits are not checked, so
+  new server values do not break pages. `scripts/check-api-shapes.ts` reads every documented parameterless GET through
+  the live console and validates it: it found `os_boot_id` and `tags` wrong in the document on 2026-11-16. Answers
+  with no documented shape (`data` typed as anything) are not checked.
 
 - **No bandwidth limit.** `GET /v1/usage` reports bytes but no plan cap exists, so the
   Bandwidth card shows usage only.

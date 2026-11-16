@@ -1,7 +1,7 @@
 "use client"
 
 import { queryOptions } from "@tanstack/react-query"
-import { api, apiAction, ApiError, idempotencyKey, retryAfterMs, send, type Data } from "@/lib/api"
+import { api, apiAction, ApiError, checked, idempotencyKey, retryAfterMs, send, type Data } from "@/lib/api"
 import { queryKeys } from "@/lib/query-keys"
 import type { TerminalSession } from "@/lib/terminal/use-terminal-connection"
 
@@ -201,7 +201,7 @@ export async function guestApi<T>(path: string, init?: RequestInit): Promise<T> 
       retryAfterMs(response),
     )
   }
-  return body.data
+  return checked(init?.method, path, body.data)
 }
 
 export type BrowserSession = { session: TerminalSession; access_method: "account" | "code" }

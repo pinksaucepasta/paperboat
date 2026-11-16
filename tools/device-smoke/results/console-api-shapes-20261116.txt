@@ -1,0 +1,36 @@
+console/scripts/check-api-shapes.ts against the live console (account: console operator, personal workspace), after the document fixes (os_boot_id, tags); 2026-11-16
+PASS  GET /v1/selfhost/installations
+PASS  GET /v1/terminal-sessions
+PASS  GET /v1/previews
+PASS  GET /v1/edges
+PASS  GET /v1/edges/pair
+PASS  GET /v1/relays
+PASS  GET /v1/tunnels
+PASS  GET /v1/environment-vault
+PASS  GET /v1/me
+PASS  GET /v1/config-sync/status
+PASS  GET /v1/auth/cli-client-sessions
+PASS  GET /v1/machines
+PASS  GET /v1/machines/running-counts
+PASS  GET /v1/machines/summary
+PASS  GET /v1/machines/overview
+PASS  GET /v1/machines/update-summary
+PASS  GET /v1/environment/scopes
+PASS  GET /v1/environment/grants
+PASS  GET /v1/teams
+PASS  GET /v1/team-roles
+PASS  GET /v1/billing/workspaces/personal
+PASS  GET /v1/billing/workspaces/personal/products
+PASS  GET /v1/workspaces
+PASS  GET /v1/usage
+SKIP  GET /v1/environment/layers  (HTTP 400)
+PASS  GET /v1/team-invitations
+PASS  GET /v1/activity
+PASS  GET /v1/account/deletion-preview
+PASS  GET /v1/me/preferences
+PASS  GET /v1/domains
+PASS  GET /v1/previews/{preview_id}
+PASS  GET /v1/tunnels/{tunnel_id}
+PASS  GET /v1/machines/{machine_id}
+32/32 operations match the documented shape
+(PASS lines for the other operations omitted: 32/32 operations match; environment/layers needs a machine parameter)

@@ -10,6 +10,7 @@ import { useWorkspaceId } from "@/lib/workspace"
 import { withDeadline } from "@/lib/deadline"
 import { sessionVerdict } from "@/lib/session-verdict"
 import { fetchAllPages, type MachinePages } from "@/lib/machine-pages"
+import { checkResponse } from "@/lib/api-validate"
 
 /** Error envelope returned by the control plane: `{ error: { code, message } }`. */
 export class ApiError extends Error {
@@ -109,7 +110,22 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
       retryAfterMs(response),
     )
   }
-  return body.data
+  return checked(init?.method, path, body.data)
+}
+
+/**
+ * The boundary: `data` that does not match what the OpenAPI document says this operation answers fails here, named
+ * (unknown fields are ignored), instead of breaking a page later. Every reader of a control-plane answer calls it.
+ */
+export function checked<T>(method: string | undefined, path: string, data: T): T {
+  const wrong = checkResponse((method ?? "GET").toUpperCase(), path, data)
+  if (wrong)
+    throw new ApiError(
+      502,
+      "invalid_response",
+      `Paperboat sent an answer this console cannot read (${wrong}). Reload the page; if it stays, update the console.`,
+    )
+  return data
 }
 
 /** Errors the console words itself, because it knows what the person can do next. */
@@ -196,55 +212,10 @@ export type Data<P extends keyof paths, M extends "get" | "post" | "put" | "patc
   ? NonNullable<T>
   : never
 
-// Hand-written until the server types `runtime_versions` (PLAN.md Log, S1-14 Lane C request);
-// then these become Schemas["Me"] and Schemas["Machine"].
-export type Me = {
-  id: string
-  email: string
-  display_name: string
-  role: string
-}
+export type Me = Data<"/v1/me">
 
-export type MachineState = "online" | "offline" | "disconnected" | "revoked" | "pending"
-
-export type Machine = {
-  id: string
-  alias: string
-  platform: string
-  architecture: string
-  workspace_root: string
-  state: MachineState
-  online: boolean
-  ownership: string
-  owner_account?: string
-  owner_team_id?: string
-  shared: boolean
-  can_manage: boolean
-  /** What you may do on this machine, such as "terminal". */
-  permissions?: string[]
-  assigned_ip?: string
-  public_identity_key: string
-  runtime_versions: Record<string, string> | null
-  enrolled_at?: string
-  last_seen_at?: string
-  /** Per feature: turned on for this machine, and whether the machine reports it running. */
-  capabilities?: Record<string, { configured: boolean; observed: boolean }>
-  availability?: {
-    desired_mode: string
-    desired_version: number
-    observed_mode?: string
-    status: string
-    host_service_version?: string
-    host_service_scope?: string
-    update_health: string
-    update_rollbacks: number
-  }
-  runtime_diagnostics?: { connector_state: string; observed_at?: string }
-  /** `tag:<name>` from the selected workspace's policy (absent on servers before machine tags). */
-  tags?: string[]
-  /** The machine's last update report (Lane Q, C4); null when it has reported none. */
-  update?: UpdateObservation | null
-}
+export type Machine = Schemas["Machine"]
+export type MachineState = Machine["state"]
 
 export type MachineOverview = Data<"/v1/machines/overview">
 

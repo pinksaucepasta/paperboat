@@ -1,7 +1,7 @@
 "use client"
 
 import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query"
-import { ApiError, confirmSession, idempotencyKey, send } from "@/lib/api"
+import { ApiError, checked, confirmSession, idempotencyKey, send } from "@/lib/api"
 import { queryKeys } from "@/lib/query-keys"
 
 // Workspace policy and API tokens. Contract: shared/policy/README.md ("HTTP API", "API tokens").
@@ -133,7 +133,7 @@ async function call<T>(step: string, path: string, init?: RequestInit & { json?:
     data?: T
     error?: { code?: string; message?: string; details?: PolicyError["details"] }
   } | null
-  if (response.ok && body?.data !== undefined) return body.data
+  if (response.ok && body?.data !== undefined) return checked(rest.method, path, body.data)
   const unknownPath = response.status === 401 || (response.status === 404 && !body?.error?.code)
   const code = unknownPath || response.status === 404 ? notOnServer : (body?.error?.code ?? "unavailable")
   const message = sentences[code] ?? body?.error?.message ?? (response.status === 403 ? sentences.forbidden : undefined)

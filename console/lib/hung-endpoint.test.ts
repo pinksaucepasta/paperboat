@@ -11,6 +11,7 @@ const { prefetchMachinesPage } = await import("@/lib/server/prefetch")
 const { api, machinesQuery } = await import("@/lib/api")
 const { validatePolicy } = await import("@/lib/policy")
 const { cursorPage } = await import("@/lib/cursor-pages")
+const { sampleFor } = await import("@/lib/api-sample")
 
 const realFetch = globalThis.fetch
 let aborted: string[] = []
@@ -20,7 +21,7 @@ beforeEach(() => {
   aborted = []
   globalThis.fetch = ((input: string | URL, init?: RequestInit) => {
     const url = String(input)
-    if (url.endsWith("/v1/me")) return Promise.resolve(Response.json({ data: { id: "u1" } }))
+    if (url.endsWith("/v1/me")) return Promise.resolve(Response.json({ data: sampleFor("GET /v1/me", { id: "u1" }) }))
     return new Promise((_, reject) =>
       init?.signal?.addEventListener("abort", () => {
         aborted.push(url)
