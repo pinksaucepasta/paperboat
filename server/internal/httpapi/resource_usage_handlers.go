@@ -137,10 +137,15 @@ func resourceUsageNative(identities machineRequestVerifier, service *resourceusa
 
 // machineAuditBacklog accepts a host's offline session events (PLAN 3b offline-capable authority, F21-11). The
 // machine proof signs the whole body; the path names the same machine.
+// offlineTerminalAdopter is what the host's registration needs from the machines service.
+type offlineTerminalAdopter interface {
+	AdoptOfflineTerminalSession(ctx context.Context, userID, userMachineID, sessionID string) (usermachines.TerminalSession, error)
+}
+
 // machineOfflineTerminalSession registers a terminal session the machine itself opened while Paperboat was unreachable
 // (the host owns its sessions): signed with the machine's own credential, it names the session and the account that
 // opened it. The account must have terminal access to the machine; the host must confirm the session.
-func machineOfflineTerminalSession(identities machineRequestVerifier, machines *usermachines.Service) http.HandlerFunc {
+func machineOfflineTerminalSession(identities machineRequestVerifier, machines offlineTerminalAdopter) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		noStore(w)
 		body, err := io.ReadAll(io.LimitReader(r.Body, 4<<10+1))
