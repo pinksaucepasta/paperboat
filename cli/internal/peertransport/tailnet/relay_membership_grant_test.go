@@ -154,3 +154,41 @@ func TestRelayGrantAccountNetworkMembershipFollowsTheConfiguredMesh(t *testing.T
 		}
 	}
 }
+
+// A peer relay binds a peer to its disco key when the peer asks to be relayed through this endpoint (regional
+// recovery). A membership grant names no peers, so the key comes from the peer's signed configuration: looked up in
+// the grant's peer list it was never found and every peer-relay promotion was refused.
+func TestPeerRelayDiscoComesFromTheConfigurationUnderAMembershipGrant(t *testing.T) {
+	a, cfg, signer, _ := networkTestAuthority(t)
+	cfg.Self.Role, cfg.Self.MachineID, cfg.Self.MachineGeneration = "machine", cfg.Self.EndpointID, 1
+	a.options.Self = cfg.Self
+	cfg.Peers[0].Identity = networkTestBinding("cli", "cli_peer", "fd7a:115c:a1e0::3", key.NewNode())
+	cfg.Peers[0].Scopes = []NetworkScope{{ResourceKind: "machine_network", ResourceID: "network_pair", ResourceGeneration: 1, Capability: "connect", Direction: "accept", Port: 443, ExpiresAt: 0}}
+	if err := a.Apply(t.Context(), networkToken(t, signer, cfg)); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().Unix()
+	node := RegionalNode{NodeID: "relay_disco", NodeGeneration: 1, ProcessEpoch: "epoch_disco", Region: "test", FailureDomain: "test", Roles: []string{"relay"}, Transports: []string{"derp_quic"}, EndpointHost: "relay.example.test", EndpointQUICPort: 443, State: "ready", ObservedAt: now, ExpiresAt: now + 60, CapacityLimit: 100, CapacityUsed: 1, CapacityObservedAt: now}
+	candidates := RegionalCandidates{Schema: "paperboat.regional-candidates.v1", Issuer: cfg.Issuer, Audience: "paperboat-regional-candidates", AccountID: cfg.Self.AccountID, EndpointID: cfg.Self.EndpointID, AuthorizationGeneration: cfg.Generation, Generation: 1, IssuedAt: now, ExpiresAt: now + 60, Nodes: []RegionalNode{node}}
+	if err := a.ApplyRegionalCandidates(t.Context(), regionalToken(t, signer, candidates)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.peerRelayDisco(node.NodeID, cfg.Peers[0]); err == nil {
+		t.Fatal("a peer relay bound a peer on a relay this endpoint holds no grant for")
+	}
+	network := derpquic.Scope{ResourceKind: "machine_network", ResourceID: peernetwork.AccountNetworkID(cfg.Self.AccountID), ResourceGeneration: 1, Capability: "connect", Direction: "accept", Port: 443, ExpiresAt: now + 60}
+	grant := peernetwork.RelayGrant{Version: 1, Issuer: cfg.Issuer, Audience: "paperboat-relay", IssuedAt: now, ExpiresAt: now + 60, Generation: cfg.Generation, AccountID: cfg.Self.AccountID, EndpointID: cfg.Self.EndpointID, WireGuardPublicKey: cfg.Self.WireGuardPublicKey, CertificateFingerprint: cfg.Self.QUICCertificateFingerprint, QUICPublicKey: cfg.Self.QUICPublicKey, NodeID: node.NodeID, NodeGeneration: node.NodeGeneration, ProcessEpoch: node.ProcessEpoch, Peers: []peernetwork.RelayPeer{}, Memberships: []derpquic.Scope{network}}
+	header, _ := json.Marshal(map[string]string{"alg": "EdDSA", "typ": "paperboat-relay-grant+jwt", "kid": "network_test"})
+	body, _ := json.Marshal(grant)
+	signed := base64.RawURLEncoding.EncodeToString(header) + "." + base64.RawURLEncoding.EncodeToString(body)
+	if err := a.ApplyRelayGrants(t.Context(), []string{signed + "." + base64.RawURLEncoding.EncodeToString(ed25519.Sign(signer, []byte(signed)))}); err != nil {
+		t.Fatal(err)
+	}
+	disco, err := a.peerRelayDisco(node.NodeID, cfg.Peers[0])
+	if err != nil {
+		t.Fatalf("a peer of a membership grant has no peer-relay disco key: %v", err)
+	}
+	if want, _ := derpquic.ParseDiscoKey(cfg.Peers[0].Identity.DiscoPublicKey); disco != want {
+		t.Fatalf("peer-relay disco key %v, want the configured %v", disco, want)
+	}
+}

@@ -588,13 +588,9 @@ func (r *regionalRecovery) receive(ctx context.Context) {
 			}
 			reply, _ := r.control.handle(in.peer, node, generation, in.packet, func() error {
 				if server, ok := r.engine.(*mesh.Server); ok {
-					r.authority.relay.mu.Lock()
-					_, granted := r.authority.relay.grants[node.NodeID]
-					r.authority.relay.mu.Unlock()
-					// A membership grant names no peers: the peer's disco key is its signed configuration's.
-					disco, _ := derpquic.ParseDiscoKey(peers[in.peer].Identity.DiscoPublicKey)
-					if !granted || disco.IsZero() {
-						return ErrAuthority
+					disco, err := r.authority.peerRelayDisco(node.NodeID, peers[in.peer])
+					if err != nil {
+						return err
 					}
 					if err := server.EnsureRelayPeer(in.peer, disco); err != nil {
 						return err
@@ -1113,4 +1109,18 @@ func relayRegionsSelectedFirst(nodes []RegionalNode, selected string) []*tailcfg
 		}
 	}
 	return regions
+}
+
+// peerRelayDisco is the disco key a peer relay binds to peer on node: only with a grant for node, and from the peer's
+// signed configuration, because a membership grant names no peers (a lookup in the grant's peer list refused every
+// peer once grants carried memberships).
+func (a *Authority) peerRelayDisco(nodeID string, peer NetworkPeer) (key.DiscoPublic, error) {
+	a.relay.mu.Lock()
+	_, granted := a.relay.grants[nodeID]
+	a.relay.mu.Unlock()
+	disco, _ := derpquic.ParseDiscoKey(peer.Identity.DiscoPublicKey)
+	if !granted || disco.IsZero() {
+		return key.DiscoPublic{}, ErrAuthority
+	}
+	return disco, nil
 }
