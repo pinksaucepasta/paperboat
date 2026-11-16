@@ -32,17 +32,3 @@ alternating, fresh database per run:
   idle machines / server core 589     433       7762      7221
 TestValidWireGuardKeyMatchesX25519 (shared/peernetwork): blacklist == X25519 zero-output check for every listed point and
 its bit-255 twin, u = 0..63, p-40..p+23, 2000 random keys.
-
-Pair check, build dev-174d967ce (f0a1209d3's change): fixpc-a (hp container, linux-amd64) and fixpc-b (anvit container,
-linux-arm64), both `pb version` dev-174d967ce, same test account.
-  pb exec fixpc-b from fixpc-a: output from B, rc=7 kept         PASS
-  pb exec fixpc-a from fixpc-b: output from A, rc=3 kept         PASS
-  pb connect fixpc-b from fixpc-a (pty via script): marker echoed PASS
-  pb connect fixpc-a from fixpc-b: marker echoed                  PASS
-Both machine records revoked by exact id, containers removed.
-
-Stale-document report (Spark: inputs "covered by nothing"): checked against the triggers on a migrated database and
-the app's writes; no gap. The cache honours bare topic notifications too. Contract cases added to
-TestPeerPolicyInvalidationCoversEveryMutationPathOnPostgres: certificate revocation record (account topic),
-machine-service toggle as machineservices writes it (machine topic), private tunnel route edit as UpdateTunnelRouteV1
-writes it (private_routes topic to the host's account). PASS on anvit.

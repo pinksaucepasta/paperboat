@@ -1,0 +1,12 @@
+{
+ "row": "PR-06",
+ "build": "branch rel-pr-06-e2e on main 2026-11-16, built in the job (e2e.yml dispatch input throughput: real server, real edge, two pb daemons in containers on one idle 4-core ubuntu-latest runner)",
+ "method": "origin container: 200 MiB file, tc netem delay 50ms limit 100000 on eth0 egress, carrier restarted; the visitor is the test process on the host next to the edge; 3 downloads through an ephemeral tunnel, median",
+ "quic_carrier_default": {
+  "runs_mbit_s": [[45.0, 87.9, 88.7], [48.3, 88.3, 95.2], [53.4, 95.1, 107.4], [42.7, 92.2, 104.9], [44.5, 81.2, 91.8]],
+  "notes": "run 2 default rmem_max 1 MiB, run 3 raised to 7 MiB, run 4 edge QUIC initial stream window 4 MiB (instead of 256 KiB): no change; netem dropped 0 packets, eth0 and docker0 errors 0, host UDP RcvbufErrors 0"
+ },
+ "tcp_carrier_udp_blocked": {"runs_mbit_s": [151.1, 157.8, 158.0], "median": 157.8, "status": "PASS"},
+ "finding": "No loss, buffer or stream-window limit on the QUIC carrier: it holds 80-107 Mbit/s at 50 ms and climbs slowly over the connection's life (44 -> 88 -> 95), the signature of the congestion window (quic-go cubic: HyStart exits slow start when 8 samples of a round exceed minRTT + 6.25 ms at 50 ms, any scheduling jitter does that; quic-go v0.61 has no congestion-control setting). The TCP/yamux carrier (the fallback) gives 152-158. Decision needed: prefer the TCP carrier (connector Preferred: QUIC at cli/internal/hostruntime/connector/data_carrier_pool_types.go:76), or keep QUIC and accept the row's budget as not met.",
+ "status": "not ticked: default (QUIC) carrier fails; forced TCP carrier passes"
+}

@@ -90,6 +90,10 @@ func TestE2ECore(t *testing.T) {
 		e.step("machine "+name, func() error { return e.startMachine(name) })
 		e.step("pair "+name, func() error { return e.pair(name) })
 	}
+	if os.Getenv("PAPERBOAT_E2E_THROUGHPUT") != "" {
+		e.assertTunnelThroughput()
+		return
+	}
 	e.assertAll("first run")
 	e.step("server restart (deploy)", e.restartServer)
 	e.assertAll("after server restart")
