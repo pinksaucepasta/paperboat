@@ -197,7 +197,11 @@ class Peer:
 
     def __init__(self, host, ct, direct=False, user=None):
         self.host, self.ct = host, ct
-        self.prefix = f"sudo -n -u {user} env HOME=/home/{user} XDG_RUNTIME_DIR=/run/user/$(id -u {user})" if user else "" if direct else f"sudo -n docker exec -u pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000 -w /home/pbt {ct}"
+        if direct:
+            self.prefix = f"sudo -n -u {user} env HOME=/home/{user} XDG_RUNTIME_DIR=/run/user/$(id -u {user})" if user else ""
+        else:  # a container; --peer-user names its user (the fleet's lanex2-l2 runs pb as tester), default pbt
+            user = user or "pbt"
+            self.prefix = f"sudo -n docker exec -u {user} -e HOME=/home/{user} -e XDG_RUNTIME_DIR=/run/user/$(sudo -n docker exec {ct} id -u {user}) -w /home/{user} {ct}"
 
     def run(self, command, timeout=60):
         return ssh(self.host, f"{self.prefix} sh -c {shlex.quote(f'timeout {timeout} {command}')}", timeout + 20)
@@ -333,7 +337,7 @@ def main():
     parser.add_argument("--name", required=True, help="the target's machine name")
     parser.add_argument("--peer", required=True, help="container of the Linux peer (also its machine name)")
     parser.add_argument("--peer-ssh", help="the peer is this Linux machine itself (--peer is its machine name), not a container on --host")
-    parser.add_argument("--peer-user", help="with --peer-ssh: the peer is this OS user's machine on that host")
+    parser.add_argument("--peer-user", help="the OS user that runs pb: with --peer-ssh on that host, else in the --peer container (default pbt)")
     parser.add_argument("--peer-address", help="the address the target reaches the peer at (default: the peer's public address)")
     parser.add_argument("--outage-seconds", type=int, default=120)
     parser.add_argument("--limit", type=float, default=10.0)
