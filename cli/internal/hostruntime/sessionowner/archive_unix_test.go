@@ -350,6 +350,7 @@ func TestArchivedHistoryAdmitsNewTerminalWithoutNativeStartup(t *testing.T) {
 type absentOwnerRunner struct {
 	starts, removals int
 	failRemoval      bool
+	stopped          bool // the unit stays loaded but inactive until it is disabled
 }
 
 func (r *absentOwnerRunner) Run(_ context.Context, name string, args ...string) error {
@@ -377,7 +378,106 @@ func (r *absentOwnerRunner) Output(_ context.Context, name string, args ...strin
 	if strings.Contains(strings.Join(args, " "), "start") {
 		return "", errors.New("unexpected native start")
 	}
+	if r.stopped && r.removals == 0 {
+		return "LoadState=loaded\nUnitFileState=disabled\nActiveState=inactive\nSubState=dead\n", nil
+	}
 	return "LoadState=not-found\n", nil
+}
+
+// victus: an update's retirement stopped and disabled an old owner that had never opened its store, but did not
+// finish removing it. Reconcile took the running path for the still-registered owner, failed to connect every pass
+// and kept it catalogued forever; every exec start then probed it. A stopped owner with no history is now removed
+// and forgotten.
+func TestReconcileForgetsAStoppedOwnerThatNeverStarted(t *testing.T) {
+	if os.Geteuid() != 0 {
+		t.Skip("requires root-owned catalog fixture")
+	}
+	root, err := os.MkdirTemp("/var/lib", "pb-stopped-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(root)
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	image, err := os.ReadFile(self)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pin := filepath.Join(root, "pb")
+	if err = os.WriteFile(pin, image, 0755); err != nil {
+		t.Fatal(err)
+	}
+	source, err := installsource.Inspect(pin, "qualification", installsource.Custom)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtimeRoot := filepath.Join(root, "runtime")
+	if err = os.Mkdir(runtimeRoot, 0700); err != nil {
+		t.Fatal(err)
+	}
+	runner := &absentOwnerRunner{stopped: true}
+	catalog := Catalog{Root: filepath.Join(root, "catalog"), ConfigRoot: root, User: "root", Group: "root", Maximum: 4, Runner: runner}
+	old := Descriptor{Schema: Schema, Generation: generation(1), Instance: "stopped-test", Source: source, Executable: pin, RuntimeRoot: runtimeRoot, InitialStore: true, Endpoint: filepath.Join(root, "old-run", "control.sock"), UID: 0, GID: os.Getgid(), Workspace: root, Shell: "/bin/sh"}
+	active := old
+	active.Generation, active.InitialStore, active.Endpoint = generation(2), false, filepath.Join(root, "active.sock")
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	for _, d := range []Descriptor{old, active} {
+		if err = catalog.Publish(ctx, d); err != nil {
+			t.Fatal(err)
+		}
+	}
+	backdate(t, catalog, old)
+	installer, err := catalog.Installer(old)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = installer.PublishDefinition(ctx); err != nil {
+		t.Fatal(err)
+	}
+	reader, err := NewArchiveReader(catalog.Root, active, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	token, err := ReadCapability(active)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager, _, _ := newRouterTestManager(t)
+	server := &workloadbridge.Server{Endpoint: active.Endpoint, Token: token, Sessions: manager, SessionOnly: true, ArchiveMetadata: reader,
+		Identity:          &workloadbridge.OwnerIdentity{Schema: Schema, Generation: active.Generation, ExecutableSHA256: source.SHA256},
+		MaximumConcurrent: 8, Ready: make(chan error, 1),
+		Fence: func() hostdproto.Status {
+			return hostdproto.Status{State: hostdproto.StateActive, WorkerID: active.Generation, Epoch: 1}
+		},
+		AcquireActive: func(string, uint64) (func(), error) { return func() {}, nil }}
+	serverCtx, stopServer := context.WithCancel(ctx)
+	done := make(chan error, 1)
+	go func() { done <- server.Run(serverCtx) }()
+	if err = <-server.Ready; err != nil {
+		t.Fatal(err)
+	}
+	defer func() { stopServer(); <-done }()
+
+	if err = (Coordinator{Catalog: catalog, Active: active}).Reconcile(ctx); err != nil {
+		t.Fatalf("reconcile of a stopped owner with no history: %v", err)
+	}
+	if runner.removals != 1 || runner.starts != 0 {
+		t.Fatalf("stopped owner: %d removals, %d starts; want it removed once and never started", runner.removals, runner.starts)
+	}
+	catalogued := func(d Descriptor) bool {
+		path, err := Find(catalog.Root, d.Generation)
+		_, statErr := os.Lstat(path)
+		return err == nil && statErr == nil
+	}
+	if catalogued(old) {
+		t.Fatal("a stopped owner with no history stayed catalogued")
+	}
+	if !catalogued(active) {
+		t.Fatal("the active owner left the catalogue")
+	}
 }
 
 // backdate makes a published descriptor clearly older than the active one.

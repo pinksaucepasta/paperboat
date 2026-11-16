@@ -3,6 +3,7 @@ package sessionowner
 import (
 	"context"
 	"errors"
+	"io/fs"
 	"path/filepath"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/session"
@@ -49,6 +50,11 @@ func NewArchiveReader(root string, active Descriptor, maximum int) (func(context
 		}
 		defer func() { resultErr = errors.Join(resultErr, unlock()) }()
 		durable, err := store.OpenReadOnly(ctx, d.StoreRoot())
+		if errors.Is(err, fs.ErrNotExist) {
+			// An owner that never started has no store and so no history.
+			out.Available, out.Snapshots = true, []session.Snapshot{}
+			return out, nil
+		}
 		if err != nil {
 			return out, err
 		}
