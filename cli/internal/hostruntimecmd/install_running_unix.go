@@ -280,8 +280,12 @@ var privilegedInstallCommand = func(ctx context.Context, effectiveUID int, rootH
 		args = append([]string{"HOME=" + rootHome, "USER=root", "LOGNAME=root"}, args...)
 		return exec.CommandContext(ctx, "/usr/bin/env", args...)
 	}
-	args = append([]string{"-H", "--", "/usr/bin/env"}, args...)
-	return exec.CommandContext(ctx, "/usr/bin/sudo", args...)
+	sudo := []string{"-H", "--", "/usr/bin/env"}
+	if os.Getenv("PB_RECIPE") != "" {
+		// A recipe install never asks for a password (PLAN F26): without passwordless sudo it fails at once.
+		sudo = append([]string{"-n"}, sudo...)
+	}
+	return exec.CommandContext(ctx, "/usr/bin/sudo", append(sudo, args...)...)
 }
 
 // installControlURL is the server the privileged install asks for the local access domain: the one

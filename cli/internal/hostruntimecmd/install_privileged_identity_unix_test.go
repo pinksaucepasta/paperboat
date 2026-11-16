@@ -51,3 +51,12 @@ func TestPrivilegedInstallDirectRootChildOverridesInheritedUserHome(t *testing.T
 		t.Fatal("privileged child changed parent identity")
 	}
 }
+
+// F26: during a recipe install (PB_RECIPE set) pb install never asks for a sudo password.
+func TestPrivilegedInstallUsesNonInteractiveSudoForARecipe(t *testing.T) {
+	t.Setenv("PB_RECIPE", "pbr_x")
+	command := privilegedInstallCommand(context.Background(), 501, "/var/root", "501", "/protected/pb", "__runtime-service", "install-supplied")
+	if len(command.Args) < 3 || command.Args[0] != "/usr/bin/sudo" || command.Args[1] != "-n" {
+		t.Fatalf("args = %q", command.Args)
+	}
+}
