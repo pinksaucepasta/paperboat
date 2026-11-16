@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	clientapi "github.com/pinksaucepasta/paperboat/shared/client/api"
 	"github.com/pinksaucepasta/paperboat/shared/remotepath"
 )
 
@@ -393,11 +394,11 @@ func (c *Client) ListUserMachineTerminalSessions(ctx context.Context, machineID 
 
 // ListUserMachineTerminalSessionsPage reads at most maxItems sessions and the server's total (PQ-04).
 func (c *Client) ListUserMachineTerminalSessionsPage(ctx context.Context, machineID string, filters url.Values, maxItems int) ([]TerminalSession, int, error) {
-	return collectOffsetInventoryPage[TerminalSession](ctx, c, "/v1/machines/"+url.PathEscape(machineID)+"/terminal-sessions", "items", filters, maxItems)
+	return clientapi.CollectOffsetInventoryPage[TerminalSession](ctx, c.retryingInventoryRequest(), "/v1/machines/"+url.PathEscape(machineID)+"/terminal-sessions", "items", filters, maxItems)
 }
 
 func (c *Client) ListUserMachineTerminalSessionsFiltered(ctx context.Context, machineID string, filters url.Values) ([]TerminalSession, error) {
-	return collectOffsetInventory[TerminalSession](ctx, c, "/v1/machines/"+url.PathEscape(machineID)+"/terminal-sessions", "items", filters)
+	return clientapi.CollectOffsetInventory[TerminalSession](ctx, c.retryingInventoryRequest(), "/v1/machines/"+url.PathEscape(machineID)+"/terminal-sessions", "items", filters)
 }
 
 func (c *Client) CreateUserMachineTerminalSession(ctx context.Context, machineID, name, idempotencyKey string) (TerminalSession, error) {
