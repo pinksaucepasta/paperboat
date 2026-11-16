@@ -176,9 +176,10 @@ func (i *Inventory) RequestRefresh() {
 }
 
 // SignedOut classifies a failed local operation from current authentication state.
-// Refresh belongs to the inventory loop, never to the failure response path.
+// Refresh belongs to the inventory loop, never to the failure response path: a client retrying an unreachable
+// peer re-listed every machine back to back (2026-11-16). Revocation reaches the loop by the change stream's
+// refused wait, which wakes every consumer at once.
 func (i *Inventory) SignedOut(ctx context.Context) bool {
-	i.RequestRefresh()
 	snapshot, err := i.store.Snapshot(context.WithoutCancel(ctx))
 	return err == nil && snapshot.DaemonState == "awaiting_enrollment"
 }

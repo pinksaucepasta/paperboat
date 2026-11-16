@@ -43,3 +43,19 @@ func TestSignedOutCanceledRequestStillChecksCurrentAuthentication(t *testing.T) 
 		t.Fatal("canceled caller hid a current authentication rejection")
 	}
 }
+
+// A failed peer stream open reads the authentication state and never queues an inventory refresh: a client
+// retrying an unreachable peer kept a daemon re-listing every machine back to back (2026-11-16).
+func TestSignedOutQueuesNoInventoryRefresh(t *testing.T) {
+	inventory, _ := newTestInventory(t, &scriptedMachineSource{results: []machineResult{{machines: []api.UserMachine{{ID: "machine_1", Alias: "studio"}}}}}, time.Now)
+	for range 5 {
+		if inventory.SignedOut(t.Context()) {
+			t.Fatal("enrolled machine reported signed out")
+		}
+	}
+	select {
+	case <-inventory.wake:
+		t.Fatal("a failed stream open queued an inventory refresh")
+	default:
+	}
+}
