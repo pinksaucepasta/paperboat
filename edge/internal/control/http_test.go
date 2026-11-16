@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -489,5 +490,102 @@ func TestControlFailureIsReportedOnlyByTheReportingProcess(t *testing.T) {
 	_, _ = client.IngressDecisions(ctx, "edge_01", "epoch_0001", "")
 	if reported.Load() != 1 || !client.Silent() {
 		t.Fatalf("a failure on a silent process was reported (%d reports)", reported.Load())
+	}
+}
+
+// F21-168: an edge's route snapshot is every route of that node across all accounts, so it arrives in pages of the
+// server's size. One answer of 1,000 tunnels was 1.1 MB, over the 1 MiB of a control document, and the edge dropped it whole.
+func TestHTTPClientReadsARouteSnapshotPageByPage(t *testing.T) {
+	const routes, pageSize = 1000, 256
+	route := func(i int) string {
+		return `{"assignment_id":"assignment_` + strconv.Itoa(i) + `","route_id":"route_` + strconv.Itoa(i) + `","kind":"tunnel_http_wss","padding":"` + strings.Repeat("p", 1500) + `"}`
+	}
+	var cursors []string
+	client := controlClient(t, func(r *http.Request) (*http.Response, error) {
+		var input struct {
+			Version string `json:"version"`
+			Cursor  string `json:"cursor"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+			t.Fatal(err)
+		}
+		cursors = append(cursors, input.Cursor)
+		start := 0
+		if input.Cursor != "" {
+			start, _ = strconv.Atoi(input.Cursor)
+		} else if input.Version != "" {
+			t.Fatalf("a first page asked with held version %q", input.Version)
+		}
+		end := min(start+pageSize, routes)
+		var body strings.Builder
+		for i := start; i < end; i++ {
+			if i > start {
+				body.WriteString(",")
+			}
+			body.WriteString(route(i))
+		}
+		next := ""
+		if end < routes {
+			next = `,"next_cursor":"` + strconv.Itoa(end) + `"`
+		}
+		answer := `{"complete":` + strconv.FormatBool(end == routes) + `,"version":"v1"` + next + `,"routes":[` + body.String() + `]}`
+		if len(answer) > maxControlDocument {
+			t.Fatalf("a page is %d bytes, over the control document limit", len(answer))
+		}
+		return response(http.StatusOK, answer), nil
+	})
+	snapshot, err := client.DesiredRouteSnapshot(context.Background(), "edge_1", "epoch_1")
+	if err != nil || !snapshot.Complete || len(snapshot.Routes) != routes {
+		t.Fatalf("snapshot of %d routes in pages: %d routes, complete %v, %v", routes, len(snapshot.Routes), snapshot.Complete, err)
+	}
+	seen := map[string]bool{}
+	for _, r := range snapshot.Routes {
+		seen[r.RouteID] = true
+	}
+	if len(seen) != routes || !seen["route_0"] || !seen["route_999"] || len(cursors) != 4 {
+		t.Fatalf("%d distinct routes, cursors %v", len(seen), cursors)
+	}
+}
+
+func TestHTTPClientRefusesARouteSnapshotThatChangedBetweenPages(t *testing.T) {
+	calls := 0
+	client := controlClient(t, func(r *http.Request) (*http.Response, error) {
+		calls++
+		if calls == 1 {
+			return response(http.StatusOK, `{"complete":false,"version":"v1","next_cursor":"1","routes":[{"assignment_id":"a1","route_id":"r1","kind":"tunnel_http_wss"}]}`), nil
+		}
+		return response(http.StatusOK, `{"complete":true,"version":"v2","routes":[{"assignment_id":"a2","route_id":"r2","kind":"tunnel_http_wss"}]}`), nil
+	})
+	if snapshot, err := client.DesiredRouteSnapshot(context.Background(), "edge_1", "epoch_1"); !errors.Is(err, ErrControlUnavailable) || len(snapshot.Routes) != 0 {
+		t.Fatalf("pages of two versions were joined: %d routes, %v", len(snapshot.Routes), err)
+	}
+}
+
+// F21-168: a node reports every route it serves. One request of 1,000 took longer than the edge's control timeout, was
+// cancelled and rolled back each time, and no route was ever reported ready; reports go in batches that commit on their own.
+func TestHTTPClientReportsRouteObservationsInBatches(t *testing.T) {
+	var sizes []int
+	client := controlClient(t, func(r *http.Request) (*http.Response, error) {
+		var input struct {
+			Routes []RouteObservation `json:"routes"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+			t.Fatal(err)
+		}
+		sizes = append(sizes, len(input.Routes))
+		return response(http.StatusNoContent, ""), nil
+	})
+	observations := make([]RouteObservation, 1050)
+	for i := range observations {
+		observations[i] = RouteObservation{RouteID: "route_" + strconv.Itoa(i), RouteRevision: 1, EdgeNodeID: "edge", ConnectorGeneration: 1}
+	}
+	if err := client.ObserveRoutes(context.Background(), "edge", observations); err != nil {
+		t.Fatal(err)
+	}
+	if len(sizes) != 11 || sizes[0] != routeObservationBatch || sizes[10] != 50 {
+		t.Fatalf("batches = %v, want 10 of %d and one of 50", sizes, routeObservationBatch)
+	}
+	if err := client.ObserveRoutes(context.Background(), "edge", make([]RouteObservation, maxCanonicalRouteAssignments+1)); !errors.Is(err, ErrControlInvalid) {
+		t.Fatalf("more routes than a node holds = %v", err)
 	}
 }

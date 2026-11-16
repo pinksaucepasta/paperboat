@@ -17,6 +17,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -1059,6 +1060,8 @@ func (s *EdgeService) handleRoutes(w http.ResponseWriter, r *http.Request) {
 		ProcessEpoch string `json:"process_epoch,omitempty"`
 		// Version is the version of the canonical answer the edge holds (F21-38).
 		Version string `json:"version,omitempty"`
+		// Cursor continues a snapshot the edge is reading page by page ("" is the first page).
+		Cursor string `json:"cursor,omitempty"`
 	}
 	if !s.decode(w, r, &input) {
 		return
@@ -1084,11 +1087,20 @@ func (s *EdgeService) handleRoutes(w http.ResponseWriter, r *http.Request) {
 		}
 		sum := sha256.Sum256(encoded)
 		version := hex.EncodeToString(sum[:])
-		if input.Version == version {
+		if input.Version == version && input.Cursor == "" {
 			writeEdgeJSON(w, http.StatusOK, map[string]any{"complete": true, "unchanged": true, "version": version})
 			return
 		}
-		writeEdgeJSON(w, http.StatusOK, map[string]any{"complete": true, "version": version, "routes": items})
+		page, next, err := routeSnapshotPage(items, input.Cursor)
+		if err != nil {
+			writeEdgeError(w, r, http.StatusBadRequest, "invalid_request", false, 0, err)
+			return
+		}
+		body := map[string]any{"complete": next == "", "version": version, "routes": page}
+		if next != "" {
+			body["next_cursor"] = next
+		}
+		writeEdgeJSON(w, http.StatusOK, body)
 		return
 	}
 	rows, err := s.Routes(r.Context(), input.NodeID)
@@ -1242,4 +1254,29 @@ func observeEngineTunnelRoute(ctx context.Context, tx *db.Tx, nodeID string, obs
 		return err
 	}
 	return tunnelv1.RefreshHealth(ctx, tx, accountID, []string{tunnelID}, now)
+}
+
+// routeSnapshotPageSize is how many routes one answer carries. An edge's snapshot is every route assigned to that node,
+// across all accounts: one answer of 1,000 tunnels was 1.1 MB, over the edge's 1 MiB limit for a control document, and the
+// edge dropped it whole. Paged, the size of an answer no longer grows with the node's routes.
+const routeSnapshotPageSize = 256
+
+// routeSnapshotPage is the page of items the cursor names and the cursor of the next page ("" after the last). The cursor is
+// the index of the page's first item in the snapshot; the edge checks every page carries the same version, so a snapshot
+// that changed between pages is read again, never joined.
+func routeSnapshotPage(items []map[string]any, cursor string) ([]map[string]any, string, error) {
+	start := 0
+	if cursor != "" {
+		n, err := strconv.Atoi(cursor)
+		if err != nil || n < 0 || n > len(items) {
+			return nil, "", errors.New("invalid route snapshot cursor")
+		}
+		start = n
+	}
+	end := min(start+routeSnapshotPageSize, len(items))
+	next := ""
+	if end < len(items) {
+		next = strconv.Itoa(end)
+	}
+	return items[start:end], next, nil
 }

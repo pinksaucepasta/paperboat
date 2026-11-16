@@ -26,6 +26,10 @@ import (
 
 const maxControlDocument = 1 << 20
 
+// maxRouteSnapshotPages bounds how many pages one route snapshot may take: the server's 256 routes a page make 4,096
+// routes 16 pages, and a node holds no more than maxCanonicalRouteAssignments.
+const maxRouteSnapshotPages = 64
+
 const maxCanonicalRouteAssignments = 4096
 
 var (
@@ -330,15 +334,17 @@ func (c *HTTPClient) DesiredRouteSnapshot(ctx context.Context, nodeID, processEp
 		return RouteSnapshot{}, ErrControlInvalid
 	}
 	var result struct {
-		Complete  *bool                 `json:"complete"`
-		Unchanged bool                  `json:"unchanged"`
-		Version   string                `json:"version"`
-		Routes    []routeAssignmentWire `json:"routes"`
+		Complete   *bool                 `json:"complete"`
+		Unchanged  bool                  `json:"unchanged"`
+		Version    string                `json:"version"`
+		NextCursor string                `json:"next_cursor"`
+		Routes     []routeAssignmentWire `json:"routes"`
 	}
 	request := struct {
 		NodeID       string `json:"edge_node_id"`
 		ProcessEpoch string `json:"process_epoch,omitempty"`
 		Version      string `json:"version,omitempty"`
+		Cursor       string `json:"cursor,omitempty"`
 	}{NodeID: nodeID, ProcessEpoch: processEpoch}
 	if processEpoch != "" {
 		c.routesMu.Lock()
@@ -351,9 +357,38 @@ func (c *HTTPClient) DesiredRouteSnapshot(ctx context.Context, nodeID, processEp
 		}
 		c.routesMu.Unlock()
 	}
-	if err := c.post(ctx, "/v1/edge/routes/desired-state", request, &result); err != nil {
-		return RouteSnapshot{}, err
+	// The snapshot is every route of this node across all accounts, so it arrives in pages; every page must carry the
+	// first page's version (a snapshot that changed in between is read again by the next reconcile, never joined).
+	heldVersion := request.Version
+	var firstVersion string
+	var pages [][]routeAssignmentWire
+	total := 0
+	for page := 0; ; page++ {
+		if page == maxRouteSnapshotPages {
+			return RouteSnapshot{}, ErrControlUnavailable
+		}
+		result.Routes, result.NextCursor = nil, ""
+		if err := c.post(ctx, "/v1/edge/routes/desired-state", request, &result); err != nil {
+			return RouteSnapshot{}, err
+		}
+		if page == 0 {
+			firstVersion = result.Version
+		} else if result.Unchanged || result.Version != firstVersion {
+			return RouteSnapshot{}, ErrControlUnavailable
+		}
+		if result.Unchanged {
+			break
+		}
+		pages = append(pages, result.Routes)
+		if total += len(result.Routes); total > maxCanonicalRouteAssignments {
+			return RouteSnapshot{}, ErrControlUnavailable
+		}
+		if result.NextCursor == "" {
+			break
+		}
+		request.Version, request.Cursor = "", result.NextCursor
 	}
+	request.Version = heldVersion
 	if result.Unchanged {
 		c.routesMu.Lock()
 		defer c.routesMu.Unlock()
@@ -365,6 +400,11 @@ func (c *HTTPClient) DesiredRouteSnapshot(ctx context.Context, nodeID, processEp
 		held.Routes = append([]RouteAssignment(nil), held.Routes...)
 		return held, nil
 	}
+	joined := make([]routeAssignmentWire, 0, total)
+	for _, page := range pages {
+		joined = append(joined, page...)
+	}
+	result.Routes = joined
 	if len(result.Routes) > maxCanonicalRouteAssignments {
 		return RouteSnapshot{}, ErrControlUnavailable
 	}
@@ -478,17 +518,29 @@ func (c *HTTPClient) trustDocument(ctx context.Context, path string) (data []byt
 	return data, nil
 }
 
+// routeObservationBatch is how many routes one observation request reports. The server applies a request in one
+// transaction (several statements per route): 1,000 routes in one request took over 5 s, the edge's control timeout, so
+// the request was cancelled, rolled back and sent again, and no route was ever reported ready (F21-168). Batches are
+// independent and idempotent: each commits on its own, so a failure loses only the batches after it.
+const routeObservationBatch = 100
+
 func (c *HTTPClient) ObserveRoutes(ctx context.Context, nodeID string, routes []RouteObservation) error {
-	if len(routes) > 1000 {
+	if len(routes) > maxCanonicalRouteAssignments {
 		return ErrControlInvalid
 	}
 	if c.silent.Load() {
 		return nil
 	}
-	return c.post(ctx, "/v1/edge/routes/observations", struct {
-		NodeID string             `json:"edge_node_id"`
-		Routes []RouteObservation `json:"routes"`
-	}{NodeID: nodeID, Routes: routes}, nil)
+	for start := 0; start < len(routes) || start == 0; start += routeObservationBatch {
+		end := min(start+routeObservationBatch, len(routes))
+		if err := c.post(ctx, "/v1/edge/routes/observations", struct {
+			NodeID string             `json:"edge_node_id"`
+			Routes []RouteObservation `json:"routes"`
+		}{NodeID: nodeID, Routes: routes[start:end]}, nil); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (c *HTTPClient) post(ctx context.Context, path string, input, output any) error {
