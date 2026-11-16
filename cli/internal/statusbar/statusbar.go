@@ -260,6 +260,20 @@ func (b *Bar) clearMarginBeforeFullscreen(data []byte) {
 	}
 }
 
+// eraseBarRowBeforeClear erases the bar row before a chunk that clears the main screen is written. A VTE terminal (gnome-terminal) pushes
+// the cleared screen into its scrollback, the bar row with it, and pulls those rows back into view when the window grows: a stale
+// copy of an earlier bar stood in the middle of the screen after the window was resized inside vim (X-24). Erased first, the
+// row that goes into history is blank; the clear invalidates the bar, which is painted again. shortcut: a sequence split across two
+// writes is not seen.
+func (b *Bar) eraseBarRowBeforeClear(data []byte) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if !b.alternate && bytes.Contains(data, []byte("\x1b[2J")) && b.activeLocked() && b.lastRows > 0 {
+		_, _ = fmt.Fprintf(b.serializedOut, b.cursorSave+"\x1b[%d;1H\x1b[2K"+b.cursorRestore, b.lastRows)
+		b.redrawPending = true
+	}
+}
+
 // afterRemoteWriteLocked asks for a bar redraw once the remote output has left the parser between sequences. An erase seen
 // in a chunk that ends inside an escape sequence (vim's clear in the first half of a split redraw) stays pending until then,
 // or the bar was never painted again (X-24, macOS vim in insert mode).
@@ -280,6 +294,7 @@ func (b *Bar) runOutputOwner() {
 		select {
 		case request := <-b.remoteWrites:
 			b.clearMarginBeforeFullscreen(request.data)
+			b.eraseBarRowBeforeClear(request.data)
 			n, err := b.serializedOut.Write(request.data)
 			if n > 0 {
 				b.mu.Lock()
@@ -293,6 +308,7 @@ func (b *Bar) runOutputOwner() {
 		select {
 		case request := <-b.remoteWrites:
 			b.clearMarginBeforeFullscreen(request.data)
+			b.eraseBarRowBeforeClear(request.data)
 			n, err := b.serializedOut.Write(request.data)
 			if n > 0 {
 				b.mu.Lock()

@@ -951,3 +951,72 @@ func TestBarRowLeavesTheMainScreenBeforeTheAlternateScreenIsEntered(t *testing.T
 		})
 	}
 }
+
+// X-24 in gnome-terminal: VTE pushes a cleared screen into its scrollback, the bar row with it, and pulls the row back into view
+// when the window grows, so a stale bar stood in the middle of the screen after a resize inside vim. Every clear of the main
+// screen (the remote's, the attach's, the exit's) erases the bar row first; inside the alternate screen nothing goes to history.
+func TestBarRowIsErasedBeforeAClearOfTheMainScreen(t *testing.T) {
+	row := "\x1b[24;1H\x1b[2K"
+	t.Run("remote clear", func(t *testing.T) {
+		bar, reader := newTestBar(t, ModeAuto, "xterm-256color", 80, 24, true, time.Second)
+		bar.RemoteSize()
+		time.Sleep(200 * time.Millisecond)
+		readPipe(reader)
+		_, _ = bar.Write([]byte("\x1b[H\x1b[2Jprompt"))
+		time.Sleep(300 * time.Millisecond)
+		out := readPipe(reader)
+		erase, clear := strings.Index(out, row), strings.Index(out, "\x1b[2J")
+		if erase < 0 || clear < 0 || erase > clear || strings.LastIndex(out, row) < clear {
+			t.Fatalf("bar row not erased before the clear and painted again after it: %q", out)
+		}
+		_, _ = bar.Write([]byte("\x1b[?1049h"))
+		time.Sleep(300 * time.Millisecond)
+		readPipe(reader)
+		_, _ = bar.Write([]byte("\x1b[H\x1b[2J"))
+		time.Sleep(300 * time.Millisecond)
+		if out := readPipe(reader); strings.Contains(out[:strings.Index(out, "\x1b[2J")], row) {
+			t.Fatalf("bar row erased before a clear of the alternate screen: %q", out)
+		}
+	})
+	t.Run("attach and exit", func(t *testing.T) {
+		bar, reader := newTestBar(t, ModeAuto, "xterm-256color", 80, 24, true, time.Second)
+		bar.RemoteSize()
+		time.Sleep(200 * time.Millisecond)
+		readPipe(reader)
+		bar.ClearRemoteViewport()
+		if out := readPipe(reader); strings.Index(out, row) < 0 || strings.Index(out, row) > strings.Index(out, "\x1b[2J") {
+			t.Fatalf("attach clear does not erase the bar row first: %q", out)
+		}
+		bar.ClearForExit()
+		if out := readPipe(reader); strings.Index(out, row) < 0 || strings.Index(out, row) > strings.Index(out, "\x1b[2J") {
+			t.Fatalf("exit clear does not erase the bar row first: %q", out)
+		}
+	})
+}
+
+// X-24: a taller window inside vim (recorded session, the bar keeps its row) left a blank row in vim's screen: the old bar row was
+// erased after vim had repainted it. Nothing is erased on the alternate screen; the main screen's row went before it was entered.
+func TestTallerWindowInsideAFullscreenApplicationErasesNothingOnTheAlternateScreen(t *testing.T) {
+	rows := 24
+	input, _, _ := os.Pipe()
+	reader, output, _ := os.Pipe()
+	defer input.Close()
+	defer reader.Close()
+	bar := New(Options{
+		Mode: ModeAuto, Term: "xterm-256color", Input: input, Output: output,
+		IsTerminal: func(int) bool { return true }, GetSize: func(int) (int, int, error) { return 80, rows, nil },
+	})
+	bar.SetRecording(true)
+	bar.RemoteSize()
+	_, _ = bar.Write([]byte("\x1b[?1049h"))
+	time.Sleep(300 * time.Millisecond)
+	readPipe(reader)
+	rows = 30
+	bar.RemoteSize()
+	time.Sleep(300 * time.Millisecond)
+	out := readPipe(reader)
+	_ = bar.Close()
+	if strings.Contains(out, "\x1b[24;1H\x1b[2K") || !strings.Contains(out, "\x1b[30;1H\x1b[2K") {
+		t.Fatalf("old bar row erased on the alternate screen, or the new row not painted: %q", out)
+	}
+}

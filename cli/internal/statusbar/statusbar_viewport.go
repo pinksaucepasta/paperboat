@@ -55,6 +55,9 @@ func (b *Bar) ClearRemoteViewport() {
 	if b.closed {
 		return
 	}
+	if b.activeLocked() && b.lastRows > 0 { // the clear pushes the screen into the scrollback: not the connecting bar with it
+		_, _ = fmt.Fprintf(b.serializedOut, "\x1b[%d;1H\x1b[2K", b.lastRows)
+	}
 	_, _ = fmt.Fprint(b.serializedOut, "\x1b[2J\x1b[H")
 	_, h := b.refreshViewportLocked()
 	if !b.activeLocked() || h < 2 {
@@ -80,6 +83,9 @@ func (b *Bar) ClearForExit() {
 	b.stopSpinnerLocked()
 	b.scrollRows = 0
 	b.scrollDirty = true
+	if b.activeLocked() && b.lastRows > 0 { // the clear pushes the screen into the scrollback: not the bar with it
+		_, _ = fmt.Fprintf(b.serializedOut, "\x1b[%d;1H\x1b[2K", b.lastRows)
+	}
 	b.enabled = false
 	b.closed = true
 	_, _ = fmt.Fprint(b.serializedOut, "\x1b[r\x1b[2J\x1b[H")
@@ -159,7 +165,9 @@ func (b *Bar) drawNowLocked() {
 	text := b.layoutLocked(w - b.lastColumnFree)
 	b.ensureScrollRegionLocked(h - 1)
 	for _, row := range b.staleRows {
-		_, _ = fmt.Fprintf(b.serializedOut, b.cursorSave+"\x1b[%d;1H\x1b[2K"+b.cursorRestore, row)
+		if !b.alternate { // the bar row was erased from the main screen on entering the alternate one, which the application repaints whole
+			_, _ = fmt.Fprintf(b.serializedOut, b.cursorSave+"\x1b[%d;1H\x1b[2K"+b.cursorRestore, row)
+		}
 	}
 	b.staleRows = b.staleRows[:0]
 	style, restore := b.barStyleLocked()
