@@ -232,7 +232,7 @@ def main():
         end_token = b'PB_FLOODEND_' + run.encode()
         owner.send("head -c %d /dev/zero | base64;" % (args.flood_mb << 20) + " printf '\\nPB_%s_%s\\n' FLOODEND " + run + '\r')
         flood_started = time.monotonic()
-        survivors = [owner, *viewers[1:]]
+        survivors = [owner, *viewers] if args.no_stall else [owner, *viewers[1:]]  # the control run reads every viewer
         done_at = {}
         timeline = []
         while time.monotonic() - flood_started < args.flood_timeout and len(done_at) < len(survivors):
