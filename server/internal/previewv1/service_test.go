@@ -25,6 +25,7 @@ import (
 
 type previewLeaseFake struct {
 	owners         map[string]bool
+	offline        map[string]bool // owner is known but not online: create refuses, renew of an existing lease accepts
 	shared         map[string]bool
 	issuers        map[string]string
 	leases         map[string]previewtunnelstore.PreviewLeaseRecord
@@ -43,13 +44,20 @@ type previewLeaseFake struct {
 
 func newPreviewLeaseFake() *previewLeaseFake {
 	return &previewLeaseFake{
-		owners: make(map[string]bool), shared: make(map[string]bool), issuers: make(map[string]string), leases: make(map[string]previewtunnelstore.PreviewLeaseRecord),
+		owners: make(map[string]bool), offline: make(map[string]bool), shared: make(map[string]bool), issuers: make(map[string]string), leases: make(map[string]previewtunnelstore.PreviewLeaseRecord),
 		operations: make(map[string]dbsqlc.Operation), createKeys: make(map[string]string), createHashes: make(map[string]string),
 		renewKeys: make(map[string]previewtunnelstore.RenewPreviewLeaseV1Result),
 	}
 }
 
-func (f *previewLeaseFake) VerifyPreviewLeaseOwnerV1(_ context.Context, accountID, ownerMachineID, accessMode string) (bool, error) {
+func (f *previewLeaseFake) VerifyPreviewLeaseOwnerV1(ctx context.Context, accountID, ownerMachineID, accessMode string) (bool, error) {
+	if f.offline[accountID+":"+ownerMachineID] {
+		return false, previewtunnelstore.ErrOwnerNotFound
+	}
+	return f.VerifyPreviewLeaseRenewOwnerV1(ctx, accountID, ownerMachineID, accessMode)
+}
+
+func (f *previewLeaseFake) VerifyPreviewLeaseRenewOwnerV1(_ context.Context, accountID, ownerMachineID, accessMode string) (bool, error) {
 	if len(f.owners) > 0 && !f.owners[accountID+":"+ownerMachineID] {
 		return false, previewtunnelstore.ErrOwnerNotFound
 	}
@@ -1230,5 +1238,47 @@ func TestHostReportsItsLocalAppDownAndBack(t *testing.T) {
 		if _, err := service.ObserveMachineReadiness(context.Background(), machineRequest("machine_1"), created.Preview.ID, created.Operation.ID, "machine_1", "session_1", back.ETag, generationFromETag(back.ETag), "ready", "ready", invalid); !errors.Is(err, ErrInvalidInput) {
 			t.Fatalf("origin %q accepted from the host: %v", invalid, err)
 		}
+	}
+}
+
+// The first renew after a wake can reach the server before the machine's heartbeat marks it online again.
+func TestForegroundRenewIsAcceptedWhileTheOwnerIsNotYetOnline(t *testing.T) {
+	now := time.Date(2026, 8, 30, 12, 0, 0, 0, time.UTC)
+	fake := newPreviewLeaseFake()
+	fake.owners["acct_1:machine_1"] = true
+	service := testPreviewLeaseService(t, fake, now)
+	created, err := service.Create(context.Background(), browserRequest(), createInput("machine_1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake.offline["acct_1:machine_1"] = true
+	renewed, err := service.Renew(context.Background(), machineRequest("machine_1"), created.Preview.ID, MutationRequest{ExpectedGeneration: 1, OwnerSessionID: "session_1", IdempotencyKey: "renew_wake"})
+	if err != nil || !renewed.Preview.LeaseDeadline.After(created.Preview.LeaseDeadline.Add(-time.Second)) {
+		t.Fatalf("foreground renew with an owner that is not online yet = %#v, %v", renewed.Preview, err)
+	}
+	delete(fake.owners, "acct_1:machine_1")
+	fake.owners["acct_1:other"] = true
+	if _, err = service.Renew(context.Background(), machineRequest("machine_1"), created.Preview.ID, MutationRequest{ExpectedGeneration: 2, OwnerSessionID: "session_1", IdempotencyKey: "renew_revoked"}); !errors.Is(err, previewtunnelstore.ErrOwnerNotFound) {
+		t.Fatalf("renew by a revoked owner = %v, want ErrOwnerNotFound", err)
+	}
+}
+
+// A background preview (user deadline) keeps today's strict owner check on renew.
+func TestBackgroundRenewStillNeedsTheOwnerOnline(t *testing.T) {
+	now := time.Date(2026, 8, 30, 12, 0, 0, 0, time.UTC)
+	fake := newPreviewLeaseFake()
+	fake.owners["acct_1:machine_1"] = true
+	service := testPreviewLeaseService(t, fake, now)
+	input := createInput("machine_1")
+	input.OwnerSessionKind = "local_lease"
+	deadline := now.Add(45 * time.Minute)
+	input.ExpiresAt = &deadline
+	created, err := service.Create(context.Background(), browserRequest(), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake.offline["acct_1:machine_1"] = true
+	if _, err = service.Renew(context.Background(), machineRequest("machine_1"), created.Preview.ID, MutationRequest{ExpectedGeneration: 1, OwnerSessionID: "session_1", IdempotencyKey: "renew_bg"}); !errors.Is(err, previewtunnelstore.ErrOwnerNotFound) {
+		t.Fatalf("background renew with an offline owner = %v, want ErrOwnerNotFound", err)
 	}
 }

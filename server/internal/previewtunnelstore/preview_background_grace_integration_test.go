@@ -42,7 +42,7 @@ func TestBackgroundPreviewKeepsItsURLThroughALongerOwnerGraceOnPostgres(t *testi
 		t.Fatal(err)
 	}
 	machine := "machine_bg_" + suffix
-	if _, err := database.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines(id,user_id,environment_id,platform,architecture,workspace_root,state,online,configured_capabilities) VALUES ($1,$2,$3,'linux','amd64','/workspace','online',true,ARRAY['preview_launch']::text[])`, machine, accountID, "env_"+machine); err != nil {
+	if _, err := database.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines(id,user_id,environment_id,platform,architecture,workspace_root,state,online,configured_capabilities,updated_at) VALUES ($1,$2,$3,'linux','amd64','/workspace','online',true,ARRAY['preview_launch']::text[],now()-interval '1 hour')`, machine, accountID, "env_"+machine); err != nil {
 		t.Fatal(err)
 	}
 	defer func() {
@@ -74,6 +74,10 @@ func TestBackgroundPreviewKeepsItsURLThroughALongerOwnerGraceOnPostgres(t *testi
 	foreground := create("foreground", "foreground", nil)
 	background := create("background", "local_lease", &deadline)
 	stale := create("stale", "local_lease", &deadline)
+	// A foreground owner that is online is judged on the long grace too (its machine may only be asleep).
+	if _, err := database.SQL().ExecContext(ctx, `UPDATE paperboat.preview_leases SET owner_last_seen_at=$2 WHERE id=$1`, foreground.ID, now.Add(-10*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := database.SQL().ExecContext(ctx, `UPDATE paperboat.preview_leases SET owner_last_seen_at=$2 WHERE id=$1`, stale.ID, now.Add(-10*time.Minute)); err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +93,7 @@ func TestBackgroundPreviewKeepsItsURLThroughALongerOwnerGraceOnPostgres(t *testi
 		lost[record.ID] = true
 	}
 	if !lost[foreground.ID] {
-		t.Fatal("a foreground preview with a two-minute-old owner heartbeat stayed active")
+		t.Fatal("a foreground preview whose online owner stopped renewing 10 minutes ago stayed active")
 	}
 	if lost[background.ID] {
 		t.Fatal("a background preview was lost 2 minutes after its host stopped, inside the longer background grace")

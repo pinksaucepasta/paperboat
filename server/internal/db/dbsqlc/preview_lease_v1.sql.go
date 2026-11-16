@@ -177,8 +177,14 @@ WITH candidates AS (
   FROM preview_leases AS source
   WHERE source.terminal_state = 'active'
     AND LEAST(source.lease_deadline, COALESCE(source.user_deadline, source.lease_deadline)) <= $1
+    -- A foreground preview lives as long as its command runs, however long the owner machine is
+    -- offline or asleep: a lapsed lease_deadline only ends it once its owner has been online for a
+    -- grace and still did not renew. An explicit user_deadline ends any lease.
+    AND (source.user_deadline <= $1 OR NOT (source.owner_session_kind='foreground' OR (source.owner_session_kind='local_lease' AND source.user_deadline IS NULL))
+      OR EXISTS (SELECT 1 FROM user_machines m WHERE m.id=source.owner_machine_id AND m.state='online' AND m.online
+      AND m.deleted_at IS NULL AND m.revoked_at IS NULL AND m.updated_at <= $2))
   ORDER BY LEAST(source.lease_deadline, COALESCE(source.user_deadline, source.lease_deadline)), source.id
-  LIMIT $2
+  LIMIT $3
 )
 UPDATE preview_leases AS p
 SET allocation_state = 'released',
@@ -192,12 +198,13 @@ RETURNING p.id
 `
 
 type ExpirePreviewLeasesV1Params struct {
-	Now      sql.NullTime
-	RowLimit int32
+	Now         sql.NullTime
+	OwnerCutoff time.Time
+	RowLimit    int32
 }
 
 func (q *Queries) ExpirePreviewLeasesV1(ctx context.Context, arg ExpirePreviewLeasesV1Params) ([]string, error) {
-	rows, err := q.db.Query(ctx, expirePreviewLeasesV1, arg.Now, arg.RowLimit)
+	rows, err := q.db.Query(ctx, expirePreviewLeasesV1, arg.Now, arg.OwnerCutoff, arg.RowLimit)
 	if err != nil {
 		return nil, err
 	}
@@ -492,9 +499,16 @@ WITH candidates AS (
   SELECT source.id
   FROM preview_leases AS source
   WHERE source.terminal_state = 'active'
-    AND source.lease_deadline > $1
-    AND ((source.owner_last_seen_at <= $2
-        AND NOT (source.owner_session_kind='local_lease' AND source.user_deadline IS NOT NULL))
+    AND ((source.lease_deadline > $1 AND (
+      (source.owner_last_seen_at <= $2
+        AND NOT (source.owner_session_kind='local_lease' AND source.user_deadline IS NOT NULL) AND NOT (source.owner_session_kind='foreground' OR (source.owner_session_kind='local_lease' AND source.user_deadline IS NULL)))
+      -- A foreground preview is kept while its owner machine is offline or asleep (the machine goes
+      -- offline 90 s after its last heartbeat, so the grace is the long one), and a machine that just
+      -- woke has the owner cutoff to renew first. It is lost only when its owner has been online and
+      -- settled and the command still does not renew: the command died.
+      OR ((source.owner_session_kind='foreground' OR (source.owner_session_kind='local_lease' AND source.user_deadline IS NULL)) AND source.owner_last_seen_at <= $3
+        AND EXISTS (SELECT 1 FROM user_machines m WHERE m.id=source.owner_machine_id AND m.state='online' AND m.online
+      AND m.deleted_at IS NULL AND m.revoked_at IS NULL AND m.updated_at <= $2))
       -- A background preview is owned by the host runtime, which may be restarting (an update);
       -- it keeps its URL for a longer grace so the runtime can resume it.
       OR (source.owner_last_seen_at <= $3
@@ -518,7 +532,10 @@ WITH candidates AS (
           AND machine.installation_generation=policy.installation_generation
           AND machine.environment_id=policy.environment_id AND machine.seat_state = 'occupied' AND machine.state NOT IN ('revoked','deleted')
           AND machine.user_id=policy.account_id AND machine.deleted_at IS NULL AND machine.revoked_at IS NULL
-      )))
+      ))))
+      -- The owner machine was revoked or removed: nothing can renew the lease.
+      OR ((source.owner_session_kind='foreground' OR (source.owner_session_kind='local_lease' AND source.user_deadline IS NULL)) AND EXISTS (SELECT 1 FROM user_machines m WHERE m.id=source.owner_machine_id
+        AND (m.revoked_at IS NOT NULL OR m.deleted_at IS NOT NULL))))
   ORDER BY source.owner_last_seen_at, source.id
   LIMIT $4
 )

@@ -70,6 +70,7 @@ type AttachmentReadiness interface {
 type Repository interface {
 	ResolvePreviewManagementAccountV1(context.Context, string, string) (string, error)
 	VerifyPreviewLeaseOwnerV1(context.Context, string, string, string) (bool, error)
+	VerifyPreviewLeaseRenewOwnerV1(context.Context, string, string, string) (bool, error)
 	ResolvePreviewLeaseMachineAccountV1(context.Context, string, string, string) (string, error)
 	GetPreviewLeaseV1(context.Context, string, string) (previewtunnelstore.PreviewLeaseRecord, error)
 	GetPreviewLeaseCreateOperationV1(context.Context, string, string) (dbsqlc.Operation, error)
@@ -666,7 +667,7 @@ func (s *Service) Renew(ctx context.Context, request previewtunnelapi.RequestCon
 	if err := ensureRenewCanManage(request, current, mutation.OwnerSessionID); err != nil {
 		return RenewResult{}, err
 	}
-	shared, authorityErr := s.verifyOwner(ctx, lazyLeaseRecordAuthority(current), current.AccessMode)
+	shared, authorityErr := s.verifyRenewOwner(ctx, current)
 	if authorityErr != nil {
 		return RenewResult{}, authorityErr
 	}
@@ -1449,6 +1450,17 @@ func (s *Service) machineLeaseRequest(ctx context.Context, request previewtunnel
 func lazyLeaseRecordAuthority(current previewtunnelstore.PreviewLeaseRecord) previewtunnelstore.LazyLeaseAuthority {
 	return previewtunnelstore.LazyLeaseAuthority{AccountID: current.AccountID, MachineID: current.OwnerMachineID, OwnerSessionID: current.OwnerSessionID, OwnerSessionKind: current.OwnerSessionKind, TargetScheme: current.TargetScheme, TargetAddress: current.TargetAddress, Endpoint: current.Endpoint, PreviewID: current.ID}
 }
+
+// verifyRenewOwner lets a foreground lease (kept while its machine sleeps) renew before the machine's
+// first heartbeat after a wake marks it online; the session id and generation still authorize the renew.
+func (s *Service) verifyRenewOwner(ctx context.Context, current previewtunnelstore.PreviewLeaseRecord) (bool, error) {
+	foreground := current.OwnerSessionKind == "foreground" || (current.OwnerSessionKind == "local_lease" && !current.UserDeadline.Valid)
+	if !foreground {
+		return s.verifyOwner(ctx, lazyLeaseRecordAuthority(current), current.AccessMode)
+	}
+	return s.repository.VerifyPreviewLeaseRenewOwnerV1(ctx, current.AccountID, current.OwnerMachineID, current.AccessMode)
+}
+
 func (s *Service) verifyOwner(ctx context.Context, b previewtunnelstore.LazyLeaseAuthority, mode string) (bool, error) {
 	if b.OwnerSessionKind != "lazy_runtime" {
 		return s.repository.VerifyPreviewLeaseOwnerV1(ctx, b.AccountID, b.MachineID, mode)

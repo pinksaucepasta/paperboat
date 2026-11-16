@@ -45,9 +45,10 @@ INSERT INTO paperboat.users (id, workos_subject, primary_email, status)
 VALUES ($1, $2, $3, 'active')`, accountID, "workos_preview_"+suffix, "preview-"+suffix+"@example.test"); err != nil {
 		t.Fatal(err)
 	}
+	// The owners have been online for long: a foreground owner that just came back gets a grace to renew first.
 	machineIDs := []string{"machine_" + suffix, "machine_expire_" + suffix, "machine_owner_" + suffix}
 	for _, id := range machineIDs {
-		if _, err := database.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines(id,user_id,environment_id,platform,architecture,workspace_root,state,online,configured_capabilities) VALUES($1,$2,$1,'linux','amd64','/workspace','online',true,ARRAY['preview_launch']::text[])`, id, accountID); err != nil {
+		if _, err := database.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines(id,user_id,environment_id,platform,architecture,workspace_root,state,online,configured_capabilities,updated_at) VALUES($1,$2,$1,'linux','amd64','/workspace','online',true,ARRAY['preview_launch']::text[],now()-interval '1 hour')`, id, accountID); err != nil {
 			t.Fatal(err)
 		}
 	}

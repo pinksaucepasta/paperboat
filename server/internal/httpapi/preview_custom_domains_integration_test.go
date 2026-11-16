@@ -422,6 +422,10 @@ func newPreviewCustomDomainsRepository(now time.Time, account, otherAccount, mac
 	}
 }
 
+func (f *previewCustomDomainsRepository) VerifyPreviewLeaseRenewOwnerV1(ctx context.Context, accountID, ownerMachineID, accessMode string) (bool, error) {
+	return f.VerifyPreviewLeaseOwnerV1(ctx, accountID, ownerMachineID, accessMode)
+}
+
 func (f *previewCustomDomainsRepository) VerifyPreviewLeaseOwnerV1(_ context.Context, accountID, ownerMachineID, accessMode string) (bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

@@ -192,7 +192,7 @@ type ReconcilePreviewLeasesV1Result struct {
 var ErrPreviewPublicationDenied = errors.New("machine management does not authorize public publication")
 
 const previewMachineAuthoritySQL = `SELECT m.user_id<>$1 OR m.owner_team_id IS NOT NULL
- FROM paperboat.user_machines m WHERE m.id=$2 AND m.state='online' AND m.online
+ FROM paperboat.user_machines m WHERE m.id=$2 AND (NOT $3::boolean OR (m.state='online' AND m.online))
  AND m.deleted_at IS NULL AND m.revoked_at IS NULL
  AND m.configured_capabilities @> ARRAY['preview_launch']::text[]
  AND paperboat.machine_capability_allowed($1,m.id,'preview_manage')`
@@ -214,7 +214,17 @@ func (s *Store) VerifyPreviewLeaseOwnerV1(ctx context.Context, accountID, ownerM
 	if strings.TrimSpace(accountID) == "" || strings.TrimSpace(ownerMachineID) == "" {
 		return false, ErrInvalidInput
 	}
-	return s.verifyWorkspacePreviewMachine(ctx, accountID, ownerMachineID, accessMode)
+	return s.verifyWorkspacePreviewMachine(ctx, accountID, ownerMachineID, accessMode, true)
+}
+
+// VerifyPreviewLeaseRenewOwnerV1 is the renewal check for a lease that already exists: the owner machine
+// may be offline (asleep) and not yet back online when its first renew after a wake arrives; revoked,
+// deleted or unauthorized owners are still refused.
+func (s *Store) VerifyPreviewLeaseRenewOwnerV1(ctx context.Context, accountID, ownerMachineID, accessMode string) (bool, error) {
+	if strings.TrimSpace(accountID) == "" || strings.TrimSpace(ownerMachineID) == "" {
+		return false, ErrInvalidInput
+	}
+	return s.verifyWorkspacePreviewMachine(ctx, accountID, ownerMachineID, accessMode, false)
 }
 
 // ResolvePreviewLeaseMachineAccountV1 proves the enrollment issuer and exact
@@ -357,7 +367,7 @@ func (s *Store) CreatePreviewLeaseV1(ctx context.Context, input CreatePreviewLea
 			if _, err := VerifyLazyPreviewLeaseTx(ctx, tx, LazyLeaseAuthority{AccountID: input.AccountID, MachineID: input.OwnerMachineID, OwnerSessionID: input.OwnerSessionID, OwnerSessionKind: input.OwnerSessionKind, TargetScheme: input.TargetScheme, TargetAddress: input.TargetAddress, Endpoint: input.Endpoint, ActivationID: input.IdempotencyKey}); err != nil {
 				return err
 			}
-		} else if _, err := verifyPreviewMachineAuthority(tx.QueryRow(ctx, previewMachineAuthoritySQL, input.AccountID, input.OwnerMachineID), input.AccessMode); err != nil {
+		} else if _, err := verifyPreviewMachineAuthority(tx.QueryRow(ctx, previewMachineAuthoritySQL, input.AccountID, input.OwnerMachineID, true), input.AccessMode); err != nil {
 			return err
 		}
 		q := tx.Queries()
@@ -841,7 +851,7 @@ func (s *Store) ReconcilePreviewLeasesV1(ctx context.Context, input ReconcilePre
 	var result ReconcilePreviewLeasesV1Result
 	err := s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
 		q := tx.Queries()
-		expiredIDs, err := q.ExpirePreviewLeasesV1(ctx, dbsqlc.ExpirePreviewLeasesV1Params{Now: sql.NullTime{Time: now, Valid: true}, RowLimit: input.Limit})
+		expiredIDs, err := q.ExpirePreviewLeasesV1(ctx, dbsqlc.ExpirePreviewLeasesV1Params{Now: sql.NullTime{Time: now, Valid: true}, OwnerCutoff: now.Add(-input.OwnerGrace), RowLimit: input.Limit})
 		if err != nil {
 			return translate(err)
 		}

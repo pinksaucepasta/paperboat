@@ -48,12 +48,12 @@ func BindWorkspacePublisherTx(ctx context.Context, tx *db.Tx, team, kind, id, ac
 	return err
 }
 
-func (s *Store) verifyWorkspacePreviewMachine(ctx context.Context, actor, machine, mode string) (bool, error) {
+func (s *Store) verifyWorkspacePreviewMachine(ctx context.Context, actor, machine, mode string, requireOnline bool) (bool, error) {
 	ws, selected := workspace.FromContext(ctx)
 	if !selected {
-		return verifyPreviewMachineAuthority(s.db.Pool().QueryRow(ctx, previewMachineAuthoritySQL, actor, machine), mode)
+		return verifyPreviewMachineAuthority(s.db.Pool().QueryRow(ctx, previewMachineAuthoritySQL, actor, machine, requireOnline), mode)
 	}
-	return verifyPreviewMachineAuthority(s.db.Pool().QueryRow(ctx, `SELECT m.user_id<>$1 OR m.owner_team_id IS NOT NULL FROM paperboat.user_machines m WHERE m.id=$3 AND m.state='online' AND m.online AND m.deleted_at IS NULL AND m.revoked_at IS NULL AND m.configured_capabilities @> ARRAY['preview_launch']::text[] AND paperboat.workspace_publisher_host_capability_allowed($1,$2,m.id,'preview_manage')`, actor, nullableText(ws.TeamID), machine), mode)
+	return verifyPreviewMachineAuthority(s.db.Pool().QueryRow(ctx, `SELECT m.user_id<>$1 OR m.owner_team_id IS NOT NULL FROM paperboat.user_machines m WHERE m.id=$3 AND (NOT $4::boolean OR (m.state='online' AND m.online)) AND m.deleted_at IS NULL AND m.revoked_at IS NULL AND m.configured_capabilities @> ARRAY['preview_launch']::text[] AND paperboat.workspace_publisher_host_capability_allowed($1,$2,m.id,'preview_manage')`, actor, nullableText(ws.TeamID), machine, requireOnline), mode)
 }
 
 // ResolveWorkspaceResourceAccount authorizes the exact selected resource before
