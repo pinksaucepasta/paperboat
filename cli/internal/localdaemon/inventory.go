@@ -55,7 +55,8 @@ func outageRefreshDelay(interval time.Duration, outages int) time.Duration {
 		return interval
 	}
 	delay := outageMaximumRefresh
-	if outages < 32 && interval<<(outages-1) < outageMaximumRefresh {
+	// Compared by shifting the maximum down: interval<<(outages-1) overflowed to a negative delay and Int64N panicked.
+	if outages < 32 && interval < outageMaximumRefresh>>(outages-1) {
 		delay = interval << (outages - 1)
 	}
 	return delay - delay/5 + time.Duration(rand.Int64N(int64(delay/5)*2+1))
