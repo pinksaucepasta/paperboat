@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"sync"
 	"time"
 
@@ -16,6 +17,19 @@ import (
 )
 
 const refreshBefore = 60 * time.Second
+
+// nextRefreshDelay is how long a failed refresh is remembered: doubling from 15 s to 5 min while the server answers
+// badly, but only to 30 s (the machine event stream's own cap) when the request never reached it. The latch gates the
+// daemon's inventory refresh and its event stream, so a 5 min window left `pb status` on "Control plane is
+// unavailable" for up to 3m48s after a 14 min outage ended (Windows drill, F21-01 W).
+func nextRefreshDelay(previous time.Duration, err error) time.Duration {
+	limit := 5 * time.Minute
+	var transport *url.Error
+	if errors.As(err, &transport) {
+		limit = 30 * time.Second
+	}
+	return min(max(previous*2, 15*time.Second), limit)
+}
 
 // CredentialFailure identifies account-token custody, distinct from private
 // pairing custody. Its cause remains available for complete classification.
@@ -122,7 +136,7 @@ func (s *Source) credential(refreshWindow time.Duration) (result config.Credenti
 			}
 			s.retry.failure = failure
 			resultErr = failure
-			s.retry.delay = min(max(s.retry.delay*2, 15*time.Second), 5*time.Minute)
+			s.retry.delay = nextRefreshDelay(s.retry.delay, err)
 			s.retry.next = time.Now().Add(s.retry.delay)
 		}()
 	}
