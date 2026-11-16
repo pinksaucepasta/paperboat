@@ -33,6 +33,9 @@ type WorkspaceReconcilerConfig struct {
 	// PushBaselinePath is the push half's baseline of a split assignment. The pull half reads it as a merge ancestor for a
 	// file its own baseline has not recorded yet (see adoptPushBaselineAncestors).
 	PushBaselinePath string
+	// PullBaselinePath is the pull half's baseline of a split assignment. The push half reads it as a merge ancestor for a
+	// file the pull half brought in that its own baseline has not recorded yet (see adoptPullBaselineAncestors).
+	PullBaselinePath string
 }
 
 type pendingBaseline struct {
@@ -113,6 +116,7 @@ type PlaintextWorkspaceReconciler struct {
 	clock                 func() time.Time
 	mergeConcurrentEdits  bool
 	pushBaselinePath      string
+	pullBaselinePath      string
 
 	mu          sync.Mutex
 	pending     *pendingBaseline
@@ -157,6 +161,7 @@ func NewPlaintextWorkspaceReconciler(config WorkspaceReconcilerConfig) (*Plainte
 		baselinePath: filepath.Join(config.StateRoot, "baseline.json"),
 		descriptor:   config.Descriptor, machineSource: config.MachineSource, resolutions: config.Resolutions,
 		clock: config.Clock, mergeConcurrentEdits: config.MergeConcurrentEdits, pushBaselinePath: config.PushBaselinePath,
+		pullBaselinePath: config.PullBaselinePath,
 	}
 	return reconciler, nil
 }
@@ -303,6 +308,7 @@ func (r *PlaintextWorkspaceReconciler) Reconcile(ctx context.Context, repository
 		}
 	}
 	r.adoptPushBaselineAncestors(baselineFiles, localFiles.Files, remoteFiles.Files)
+	pulledAncestors := r.adoptPullBaselineAncestors(baselineFiles, localFiles.Files, remoteFiles.Files)
 	effectiveMode := r.descriptor.Mode
 	writesEnabled := r.descriptor.WriteMode == "leased_writes"
 	if !writesEnabled && effectiveMode == ModeBidirectional {
@@ -320,6 +326,11 @@ func (r *PlaintextWorkspaceReconciler) Reconcile(ctx context.Context, repository
 		localFiles.Files, remoteFiles.Files, plan.Conflicts,
 	)
 	mergeCandidates, frozenConflicts, ancestors := partitionFrozenConflicts(plan.Conflicts, baselineFrozen)
+	for name, revision := range pulledAncestors {
+		if _, released := ancestors[name]; !released {
+			ancestors[name] = revision
+		}
+	}
 	run := mergeRun{
 		repositoryRoot: repositoryRoot, worktree: worktree, remoteHash: remoteHash, remoteHome: remoteHome,
 		baselineRevision: baselineRevision, mode: effectiveMode, writesEnabled: writesEnabled,
@@ -636,4 +647,30 @@ func (r *PlaintextWorkspaceReconciler) adoptPushBaselineAncestors(baseline, loca
 			baseline[name] = state
 		}
 	}
+}
+
+// adoptPullBaselineAncestors gives the push half an ancestor for a file the pull half brought in: the pull half recorded it
+// when it wrote it here, so it is what this machine and the remote last shared. Without it, a file the other machine created
+// and both machines edited before this half's next pass has no ancestor and the two edits conflict forever (X-03 M>L). It
+// returns the revision each adopted file is read from; the merge verifies the content against the recorded hash.
+func (r *PlaintextWorkspaceReconciler) adoptPullBaselineAncestors(baseline, local, remote map[string]FileState) map[string]string {
+	if r.pullBaselinePath == "" {
+		return nil
+	}
+	pulled, err := ReadBaseline(r.pullBaselinePath)
+	// A pull half reading another repository says nothing about the one this half publishes to.
+	if err != nil || pulled.AssignmentID != r.descriptor.AssignmentID || pulled.RepositoryID != r.descriptor.RepositoryID {
+		return nil
+	}
+	ancestors := map[string]string{}
+	for name, state := range pulled.Files {
+		_, known := baseline[name]
+		_, localOK := local[name]
+		_, remoteOK := remote[name]
+		if !known && localOK && remoteOK {
+			baseline[name] = state
+			ancestors[name] = pulled.RemoteRevision
+		}
+	}
+	return ancestors
 }
