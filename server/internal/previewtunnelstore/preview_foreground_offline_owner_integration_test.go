@@ -94,7 +94,7 @@ func TestForegroundPreviewSurvivesAnOfflineOwnerOnPostgres(t *testing.T) {
 		return fixture{machine: machine, lease: created.Lease}
 	}
 	lapse := func(f fixture) {
-		if _, err := database.SQL().ExecContext(ctx, `UPDATE paperboat.preview_leases SET lease_deadline=$2 WHERE id=$1`, f.lease.ID, now.Add(-time.Minute)); err != nil {
+		if _, err := database.SQL().ExecContext(ctx, `UPDATE paperboat.preview_leases SET created_at=$2::timestamptz-interval '2 hours', lease_deadline=$2 WHERE id=$1`, f.lease.ID, now.Add(-time.Minute)); err != nil {
 			t.Fatal(err)
 		}
 	}

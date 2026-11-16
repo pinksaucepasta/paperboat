@@ -2,6 +2,7 @@ package previewtunnelstore
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"os"
@@ -69,7 +70,7 @@ func TestPreviewFileTargetOnPostgres(t *testing.T) {
 			OperationID: "op_" + name + suffix, LeaseID: "prv_" + name + suffix, AuditEventID: "aud_" + name + suffix,
 			AccountID: owner, ActorID: owner, ActorType: "user", OwnerMachineID: machine, OwnerSessionID: "console_" + name + suffix, OwnerSessionKind: "foreground",
 			TargetScheme: "file", TargetAddress: address, AccessMode: "public", Endpoint: "https://" + name + suffix + ".preview.example.test",
-			LeaseDeadline: deadline, RequestHash: sha256Bytes(name + suffix), IdempotencyKey: name + suffix,
+			LeaseDeadline: deadline, UserDeadline: sql.NullTime{Time: deadline, Valid: true}, RequestHash: sha256Bytes(name + suffix), IdempotencyKey: name + suffix,
 			CorrelationID: "cor_" + name + suffix, RequestID: "req_" + name + suffix, Now: now,
 		}
 	}

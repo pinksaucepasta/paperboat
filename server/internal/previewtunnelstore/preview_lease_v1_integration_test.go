@@ -362,7 +362,7 @@ INSERT INTO paperboat.workspace_policy_rules(policy_id,rule,deny,subject_kind,su
 	}
 	check := func(actor, mode string, wantShared bool, wantErr error) {
 		t.Helper()
-		shared, e := verifyPreviewMachineAuthority(tx.QueryRow(ctx, previewMachineAuthoritySQL, actor, machine), mode)
+		shared, e := verifyPreviewMachineAuthority(tx.QueryRow(ctx, previewMachineAuthoritySQL, actor, machine, true), mode)
 		if shared != wantShared || !errors.Is(e, wantErr) {
 			t.Fatalf("%s %s shared=%v err=%v", actor, mode, shared, e)
 		}
