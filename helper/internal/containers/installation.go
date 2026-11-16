@@ -3,6 +3,7 @@ package containers
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"time"
 
@@ -72,25 +73,45 @@ func WaitInstallationReady(ctx context.Context, dir string, previous map[string]
 		}
 	}
 	owner := installationOwner(dir)
+	probes := map[string]func(context.Context) (NodeReadiness, error){}
+	for role, client := range clients {
+		probes[role] = client.readiness
+	}
+	return pollInstallationReady(ctx, owner, want, previous, inspectContainer, probes)
+}
+
+var errForeignContainer = errors.New("runtime container belongs to another installation")
+
+// pollInstallationReady retries every inspect or readiness failure until ctx ends: during a
+// handover the old process resets connections and a loaded host answers slowly, and one failed
+// poll must not roll the upgrade back (prior art: Kubernetes readiness probes only mark a pod
+// not ready until failureThreshold, Docker HEALTHCHECK --retries). Only a foreign container is
+// final. On timeout the last failure is returned with ctx.Err().
+func pollInstallationReady(ctx context.Context, owner string, want, previous map[string]string,
+	inspect func(context.Context, string) (containerInfo, bool, error),
+	probes map[string]func(context.Context) (NodeReadiness, error)) error {
 	ticker := time.NewTicker(250 * time.Millisecond)
 	defer ticker.Stop()
+	var last error
 	for {
 		ready := true
-		for role, client := range clients {
-			info, exists, err := inspectContainer(ctx, containerName(owner, role))
-			if err != nil {
-				return err
+		for role, probe := range probes {
+			info, exists, err := inspect(ctx, containerName(owner, role))
+			if err == nil && exists && info.Owner != owner {
+				return errForeignContainer
 			}
-			if exists && info.Owner != owner {
-				return errors.New("runtime container belongs to another installation")
+			if err != nil {
+				last, ready = fmt.Errorf("%s: %w", role, err), false
+				continue
 			}
 			if !exists || !info.Running || info.ImageID != want[role] {
 				ready = false
 				continue
 			}
-			state, err := client.readiness(ctx)
+			state, err := probe(ctx)
 			if err != nil {
-				return err
+				last, ready = fmt.Errorf("%s readiness: %w", role, err), false
+				continue
 			}
 			if !state.Ready || state.ProcessEpoch == previous[role] {
 				ready = false
@@ -101,6 +122,9 @@ func WaitInstallationReady(ctx context.Context, dir string, previous map[string]
 		}
 		select {
 		case <-ctx.Done():
+			if last != nil {
+				return fmt.Errorf("installation not ready: %w (last failure: %w)", ctx.Err(), last)
+			}
 			return ctx.Err()
 		case <-ticker.C:
 		}
