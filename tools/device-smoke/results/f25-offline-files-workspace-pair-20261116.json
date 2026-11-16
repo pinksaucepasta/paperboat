@@ -36,7 +36,16 @@
       "TestPostgresStoredApprovalClaimsOneMachineAndDeletesOnReceipt",
       "TestPostgresStoredDeclineExpiryAndRevocationCleanLateUploads",
       "TestPostgresStoredBucketCannotBeRemovedBeforeCleanup"
-    ]
+    ],
+    "post_rebase": {
+      "commit": "1113462b7",
+      "ci": "https://github.com/pinksaucepasta/paperboat/actions/runs/43777054892",
+      "cli": "PASS",
+      "shared": "PASS",
+      "existing_env_grants": "PASS",
+      "client_seconds": 443,
+      "shared_seconds": 50
+    }
   },
   "build": {
     "version": "dev-fa2d62d5c",
@@ -54,12 +63,14 @@
     "a": {
       "name": "offline-files-a",
       "id": "machine_4e6febf9-9b1e-48ab-8b02-c1bf69175e71",
-      "pb_version": "dev-fa2d62d5c"
+      "pb_version": "dev-fa2d62d5c",
+      "current_alias": "offlinefiles-a"
     },
     "b": {
       "name": "offline-files-b",
       "id": "machine_36cd0f64-f096-490e-a513-284d66d6b3be",
-      "pb_version": "dev-fa2d62d5c"
+      "pb_version": "dev-fa2d62d5c",
+      "current_alias": "offlinefiles-b"
     },
     "exec_a_to_b": "PASS",
     "exec_b_to_a": "PASS",
@@ -83,7 +94,13 @@
       "One automatic reconnect and an Inbox-stop warning during refresh; direct online file delivery subsequently passed once.",
       "One reverse exec reported managed ENV was not applied; the requested exact command passed."
     ],
-    "fixture_state": "paired and retained for the post-deploy offline-recipient check"
+    "fixture_state": "paired and retained for the post-deploy offline-recipient check",
+    "stale_cleanup": {
+      "prefix": "offlinefiles-",
+      "status": "PASS",
+      "revoked": 0,
+      "retained_recent_pair": true
+    }
   },
   "offline_bucket_main_path": {
     "status": "NOT_RUN",
