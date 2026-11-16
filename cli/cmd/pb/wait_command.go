@@ -42,12 +42,7 @@ func waitCommand() *cobra.Command {
 			defer cancel()
 			// Presence changes no longer wake every daemon of the account; while waiting, ask our own daemon.
 			go localwait.KeepInventoryFresh(waitCtx, client.RefreshInventory, localwait.InventoryRefreshEvery, localwait.InventoryRefreshMaximum)
-			var result localwait.Result
-			if condition == "runtime" {
-				result, err = localwait.WaitTargetFromSnapshot(waitCtx, client, snapshot, args[0], condition)
-			} else {
-				result, err = waitForAuthenticatedTransport(waitCtx, command, client, snapshot, args[0], condition)
-			}
+			result, err := waitForTarget(waitCtx, command, client, snapshot, args[0], condition)
 			if err != nil {
 				return fmt.Errorf("wait for local Paperboat status: %w", err)
 			}
@@ -71,6 +66,27 @@ func waitCommand() *cobra.Command {
 	command.Flags().Duration("timeout", 5*time.Minute, "maximum time to wait")
 	command.Flags().Bool("json", false, "print JSON")
 	return command
+}
+
+// waitForTarget waits on a machine the way exec names it: one the daemon's snapshot lists (the personal
+// machines) is waited on there, any other (a team machine) is resolved on the server first.
+func waitForTarget(ctx context.Context, command *cobra.Command, client *localapi.Client, snapshot localapi.Snapshot, target, condition string) (localwait.Result, error) {
+	if _, err := localwait.ResolveMachine(snapshot.Machines, target); errors.Is(err, localwait.ErrMachineNotFound) {
+		machine, backend, err := resolveWaitMachine(ctx, command, target)
+		if err != nil {
+			return localwait.Result{}, err
+		}
+		if backend != nil {
+			if _, inSnapshot := localwait.ResolveMachine(snapshot.Machines, machine.ID); inSnapshot != nil {
+				return waitForServerMachine(ctx, client, backend, snapshot, machine, condition)
+			}
+			target = machine.ID
+		}
+	}
+	if condition == "runtime" {
+		return localwait.WaitTargetFromSnapshot(ctx, client, snapshot, target, condition)
+	}
+	return waitForAuthenticatedTransport(ctx, command, client, snapshot, target, condition)
 }
 
 func waitForAuthenticatedTransport(ctx context.Context, command *cobra.Command, client *localapi.Client, snapshot localapi.Snapshot, target, condition string) (localwait.Result, error) {
