@@ -146,7 +146,7 @@ export async function acceptTeamKeys(): Promise<number> {
   for (const grant of grants.filter((entry) => !entry.acknowledged)) {
     const [vault, state] = await Promise.all([currentVault(), readTeamVault(grant.team_id)])
     if (!state) continue
-    const result = await vaultCrypto<{ envelope?: string; document_id: string; already_current?: boolean }>({
+    const result = await vaultCrypto<{ envelope?: string; already_current?: boolean }>({
       action: "team-accept",
       vault,
       team: state,
@@ -162,8 +162,9 @@ export async function acceptTeamKeys(): Promise<number> {
       },
     })
     if (result.envelope) await publish({ envelope: result.envelope })
+    // The acknowledgement names the vault that now holds the key (the engine's document_id is the grant's).
     await post(`environment/grants/${encodeURIComponent(grant.document_id)}/ack?workspace=personal`, {
-      vault_document_id: result.document_id,
+      vault_document_id: (await currentVault()).document_id,
     })
     accepted++
   }
