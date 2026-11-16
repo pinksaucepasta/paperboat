@@ -94,19 +94,21 @@ func TestMachineInstallPreservesReadyMachineGuardAndValidatesSuppliedBytes(t *te
 }
 
 // The machine-wide guard is never downgraded by another OS user's older install: a newer release, or a
-// development guard with every feature this build uses, is kept; an older one is replaced (victus).
+// development guard whose revision is not lower, is kept; an older one is replaced (victus). A guard fix
+// that adds no feature still reaches machines through its higher revision (FIX-MULTIINST 2a602424f).
 func TestMachineGuardIsNotDowngradedByAnOlderInstall(t *testing.T) {
-	all := machineguard.Features()
+	r := machineguard.Revision
 	for name, c := range map[string]struct {
 		guard    machineguard.RuntimeStatus
 		version  string
 		notOlder bool
 	}{
-		"same version":                 {machineguard.RuntimeStatus{Version: "2026.11.16.0"}, "2026.11.16.0", true},
-		"newer release kept":           {machineguard.RuntimeStatus{Version: "2026.11.17.2"}, "2026.11.16.0", true},
-		"older release replaced":       {machineguard.RuntimeStatus{Version: "2026.11.13.0"}, "2026.11.16.0", false},
-		"dev guard with every feature": {machineguard.RuntimeStatus{Version: "dev-a344bd52b", Features: all}, "2026.11.16.0", true},
-		"guard missing a feature":      {machineguard.RuntimeStatus{Version: "dev-a344bd52b"}, "dev-de73faa7f", len(all) == 0},
+		"same version":                   {machineguard.RuntimeStatus{Version: "2026.11.16.0"}, "2026.11.16.0", true},
+		"newer release kept":             {machineguard.RuntimeStatus{Version: "2026.11.17.2"}, "2026.11.16.0", true},
+		"older release replaced":         {machineguard.RuntimeStatus{Version: "2026.11.13.0"}, "2026.11.16.0", false},
+		"dev guard of the same revision": {machineguard.RuntimeStatus{Version: "dev-a344bd52b", Revision: r}, "dev-de73faa7f", true},
+		"dev guard of a higher revision": {machineguard.RuntimeStatus{Version: "dev-a344bd52b", Revision: r + 1}, "2026.11.16.0", true},
+		"dev guard of a lower revision":  {machineguard.RuntimeStatus{Version: "dev-a344bd52b", Revision: r - 1, Features: machineguard.Features()}, "dev-de73faa7f", false},
 	} {
 		if got := machineGuardNotOlder(c.guard, c.version); got != c.notOlder {
 			t.Errorf("%s: not older = %v", name, got)

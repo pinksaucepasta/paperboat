@@ -92,9 +92,11 @@ type RuntimeStatus struct {
 	RootRenewalRequired  bool   `json:"root_renewal_required"`
 	TrustReady           bool   `json:"trust_ready"`
 	Version              string `json:"version"`
-	LoopbackCIDR         string `json:"loopback_cidr"`
-	Ready                bool   `json:"ready"`
-	ActiveLeases         int    `json:"active_leases"`
+	// Revision is the guard code's Revision; a guard without one (older) reports 0.
+	Revision     int    `json:"revision,omitempty"`
+	LoopbackCIDR string `json:"loopback_cidr"`
+	Ready        bool   `json:"ready"`
+	ActiveLeases int    `json:"active_leases"`
 	// GatewayRefusals counts gateway connections not handed to a daemon, by reason (a fixed set).
 	GatewayRefusals map[string]uint64 `json:"gateway_refusals,omitempty"`
 	// Features names the protocol additions this guard understands; a client sends a request field only when

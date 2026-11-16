@@ -6,7 +6,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/machineguard"
@@ -77,7 +76,7 @@ func readyMachineGuard(ctx context.Context, version string) (resultErr error) {
 }
 
 // machineGuardNotOlder: the same version, a release not older, or (for development builds, whose
-// versions do not order) a guard that already has every feature this build uses.
+// versions do not order) a guard whose code revision is not lower than this build's.
 func machineGuardNotOlder(status machineguard.RuntimeStatus, version string) bool {
 	if status.Version == version {
 		return true
@@ -85,12 +84,7 @@ func machineGuardNotOlder(status machineguard.RuntimeStatus, version string) boo
 	if order, err := selfupdate.CompareVersions(status.Version, version); err == nil {
 		return order >= 0
 	}
-	for _, feature := range machineguard.Features() {
-		if !slices.Contains(status.Features, feature) {
-			return false
-		}
-	}
-	return true
+	return status.Revision >= machineguard.Revision
 }
 
 func validateMachineGuardStatus(status machineguard.RuntimeStatus) error {

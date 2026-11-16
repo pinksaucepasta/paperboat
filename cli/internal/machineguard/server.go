@@ -326,7 +326,7 @@ func (g *guardServer) runtimeStatus(owner ...string) *RuntimeStatus {
 			}
 		}
 	}
-	return &RuntimeStatus{BrowserDomain: domain, DefaultBrowserDomain: domains.Default, RootRenewalRequired: renewal, TrustReady: trustReady, Version: buildinfo.Version, LoopbackCIDR: g.cfg.LoopbackCIDR, Ready: true, ActiveLeases: len(g.leases), Features: guardFeatures(), GatewayRefusals: gatewayRefusalSnapshot()}
+	return &RuntimeStatus{BrowserDomain: domain, DefaultBrowserDomain: domains.Default, RootRenewalRequired: renewal, TrustReady: trustReady, Version: buildinfo.Version, Revision: Revision, LoopbackCIDR: g.cfg.LoopbackCIDR, Ready: true, ActiveLeases: len(g.leases), Features: guardFeatures(), GatewayRefusals: gatewayRefusalSnapshot()}
 }
 
 // validName admits exactly one machine label beneath the owner's local access
