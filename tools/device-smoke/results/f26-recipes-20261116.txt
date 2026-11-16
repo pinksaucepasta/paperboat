@@ -943,3 +943,32 @@ $ pb api-token list
 NAME       ID                                       CREATED 
 rcp-ctl5   apitok_9c9eecc47ab4bca16d1e98ebb992ab0d  user:<email>
 rcp-ctl4   apitok_e208e8b22c097e8668672b5f49f9e4bf  user:<email>
+
+################ f26-05-W.txt
+=== F26-05 on rcp-w (victus), server .31, client dev-3ec969af2, 2026-11-16T11:17:13Z ===
+$ sc stop PaperboatLocalDaemon-ub503373082c29cefb8b8de5c & sc start PaperboatLocalDaemon-ub503373082c29cefb8b8de5c 
+        STATE              : 4  RUNNING 
+        STATE              : 2  START_PENDING 
+$ pb recipe show rcpx (rcp-w line) 
+  rcp-w   online    applied revision 2   now
+$ pb preview list --json (rcp-w, ready) 
+
+################ f26-06-W.txt
+=== F26-06 on victus (Windows 11), throwaway OS user rcpw2, server .31, client dev-dd317c2af, 2026-11-16T11:15:00Z ===
+The system cannot find the file install.
+  ▄▄▝▀▀▀▀▀▘▄▄   Version dev-dd317c2af
+$ PB_RECIPE=<rcptw token: max_machines=1, machine_lifetime=5m> pb pair --name rcp-w6 
+Pairing this machine from recipe rcptw.
+Resuming one-shot machine enrollment...
+Requesting administrator approval to install Paperboat Windows services...
+Still working on the administrator step (30s)...
+Paperboat Windows machine runtime is installed. It will resume after reboot.
+Set up rcp-w6 (machine_194785ee-88de-4069-aa88-1b05fc58ef02)
+paired at 16:45:35.07
+--- 11:21:32 (creator) pb machine list (rcp-w6, paired 11:15:35, machine_lifetime=5m) / pb recipe list ---
+rcp-w   personal   online                      terminal,exec
+rcp-w6  personal   online                      terminal,exec
+rcptw   rcptw   1 / 1      2027-02-14   5m ago
+--- 11:24:43 (creator) pb machine list / pb recipe list ---
+rcp-w  personal   online                      terminal,exec,
+rcptw   rcptw   0 / 1      2027-02-14   9m ago
