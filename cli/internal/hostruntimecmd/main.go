@@ -226,6 +226,10 @@ func runtimeFailureMessage(err error) string {
 	if message, ok := hostinstall.FailureMessage(err); ok {
 		return "Paperboat installation failed: " + message + ". Run pb doctor, then retry."
 	}
+	// A step's authored failure wrapped by its caller ("initialize Paperboat CLI session: %w") still names the step.
+	if message, ok := FailureMessage(err); ok {
+		return message
+	}
 	return genericRuntimeFailure
 }
 

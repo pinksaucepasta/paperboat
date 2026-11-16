@@ -87,3 +87,11 @@ func TestPrivilegedInstallStepPrintsUnclassifiedCause(t *testing.T) {
 		t.Fatalf("non-service command exposed its cause: %q", out.String())
 	}
 }
+
+// F13-02: `pb login --fresh` printed only the generic runtime failure because bootstrap wrapped the authored step.
+func TestRuntimeFailureMessageNamesAWrappedStep(t *testing.T) {
+	err := fmt.Errorf("initialize Paperboat CLI session: %w", runtimeFailure("Paperboat could not start its CLI session", errors.New("private cause")))
+	if got := runtimeFailureMessage(err); got != "Paperboat could not start its CLI session" {
+		t.Fatalf("message = %q", got)
+	}
+}
