@@ -892,7 +892,8 @@ func validBaseEnvironment(values []string) bool {
 		total += len(entry)
 		key, value, ok := strings.Cut(entry, "=")
 		folded := envinject.FoldName(key)
-		if !ok || !environmentKey.MatchString(key) || len(entry) > maximumProcessEnvironmentEntryBytes || total > maximumProcessEnvironmentBytes || strings.ContainsRune(value, '\x00') || seen[folded] {
+		// Base names come from the owner's own environment block, which holds names such as ProgramFiles(x86).
+		if !ok || key == "" || strings.ContainsAny(key, "\x00\r\n") || len(entry) > maximumProcessEnvironmentEntryBytes || total > maximumProcessEnvironmentBytes || strings.ContainsRune(value, '\x00') || seen[folded] {
 			return false
 		}
 		seen[folded] = true

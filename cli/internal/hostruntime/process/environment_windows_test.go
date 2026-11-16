@@ -86,3 +86,51 @@ func TestWindowsBaseEnvironmentPreservesProfileAndExecutablePath(t *testing.T) {
 		t.Fatalf("current installed executable directory missing from PATH: executable=%q output=%q", executable, output)
 	}
 }
+
+// A terminal or exec session gets the environment Windows gives a logged-on user, not a short allowlist:
+// `echo %OS%`, ProgramFiles, SystemDrive and COMPUTERNAME must resolve in scripts and tools.
+func TestWindowsBaseEnvironmentHasStandardVariables(t *testing.T) {
+	system, err := windows.GetSystemDirectory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PAPERBOAT_HOSTD_TOKEN_FILE", "private-control-token-file")
+	environment, err := BaseEnvironment(filepath.Join(system, "cmd.exe"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"OS", "SystemDrive", "SystemRoot", "windir", "ComSpec", "ProgramFiles", "ProgramFiles(x86)", "ProgramW6432",
+		"CommonProgramFiles", "ProgramData", "COMPUTERNAME", "NUMBER_OF_PROCESSORS", "PROCESSOR_ARCHITECTURE", "USERNAME", "TEMP", "PATHEXT", "Path"} {
+		if environmentValueFold(environment, key) == "" {
+			t.Errorf("standard variable %s missing from the session environment", key)
+		}
+	}
+	for _, entry := range environment {
+		if strings.HasPrefix(strings.ToUpper(entry), "PAPERBOAT_") {
+			t.Errorf("hostd variable reached the session: %s", strings.SplitN(entry, "=", 2)[0])
+		}
+	}
+	manager := &sessions{}
+	launcher, err := NewShellLauncher(filepath.Join(system, "cmd.exe"), environment, manager)
+	if err != nil {
+		t.Fatalf("full environment rejected by the launcher: %v", err)
+	}
+	if _, err := launcher.Launch(context.Background(), LaunchRequest{ID: "ses_env", Dimensions: pty.Dimensions{Columns: 80, Rows: 24}}); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(filepath.Join(system, "cmd.exe"), "/d", "/c", "echo %OS%|%ProgramFiles(x86)%|%SystemDrive%|%COMPUTERNAME%")
+	cmd.Env = environment
+	output, err := cmd.Output()
+	if err != nil || strings.Contains(string(output), "%") {
+		t.Fatalf("variables did not expand: %q %v", output, err)
+	}
+}
+
+func environmentValueFold(environment []string, key string) string {
+	for _, entry := range environment {
+		if name, value, ok := strings.Cut(entry, "="); ok && strings.EqualFold(name, key) {
+			return value
+		}
+	}
+	return ""
+}

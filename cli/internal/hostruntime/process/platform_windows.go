@@ -6,7 +6,9 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 
 	"golang.org/x/sys/windows"
@@ -31,26 +33,36 @@ func platformShellArguments(path string) []string {
 	}
 }
 
-// These values describe the enrolled owner's native Windows process context.
-// They are not client overrides and never include service/control credentials.
-var windowsEnvironmentKeys = map[string]bool{
-	"USERPROFILE": true, "APPDATA": true, "LOCALAPPDATA": true,
-	"HOMEDRIVE": true, "HOMEPATH": true, "USERNAME": true, "USERDOMAIN": true,
-	"SYSTEMROOT": true, "WINDIR": true, "COMSPEC": true, "TEMP": true, "TMP": true,
-	"PROMPT": true, "PATHEXT": true, "PROGRAMDATA": true, "ALLUSERSPROFILE": true,
-	// Where a machine keeps PowerShell's module analysis cache. Without it PowerShell analyses every installed
-	// module before its first prompt when the per-user cache is cold (18-28 s on a CI image).
-	"PSMODULEANALYSISCACHEPATH": true,
+// Environment names the owner context owns: a client can never override them, and hostd's own PAPERBOAT_*
+// variables (service/control credential references) never reach a session. Everything else in the owner's
+// environment block is passed through, as Windows does for a logged-on user.
+func platformEnvironmentKey(key string) bool {
+	return key != "" && !strings.HasPrefix(strings.ToUpper(key), "PAPERBOAT_")
 }
 
-func platformEnvironmentKey(key string) bool { return windowsEnvironmentKeys[key] }
-
+// BaseEnvironment is the owner's environment the way Windows builds it at logon: CreateEnvironmentBlock for the
+// process token without inheriting hostd's own variables (the same call Win32-OpenSSH and runas use), plus the
+// standard variables an S4U/service-created token does not receive from it.
 func BaseEnvironment(shell string) ([]string, error) {
-	token := windows.GetCurrentProcessToken()
-	values := map[string]string{"SHELL": shell, "TERM": "xterm-256color"}
-	for key := range windowsEnvironmentKeys {
-		if value := os.Getenv(key); value != "" {
-			values[key] = value
+	token, err := windows.OpenCurrentProcessToken()
+	if err != nil {
+		return nil, ErrLaunchRejected
+	}
+	defer token.Close()
+	block, err := token.Environ(false)
+	if err != nil {
+		return nil, ErrLaunchRejected
+	}
+	values := map[string]string{} // upper-cased name -> "Name=value", Windows names are case-insensitive
+	set := func(name, value string) { values[strings.ToUpper(name)] = name + "=" + value }
+	setDefault := func(name, value string) {
+		if _, ok := values[strings.ToUpper(name)]; !ok && value != "" {
+			set(name, value)
+		}
+	}
+	for _, entry := range block {
+		if name, _, ok := strings.Cut(entry, "="); ok && name != "" {
+			values[strings.ToUpper(name)] = entry
 		}
 	}
 	for _, folder := range []struct {
@@ -63,19 +75,28 @@ func BaseEnvironment(shell string) ([]string, error) {
 		if err != nil || !filepath.IsAbs(value) {
 			return nil, ErrLaunchRejected
 		}
-		values[folder.key] = value
+		set(folder.key, value)
 	}
-	values["HOME"] = values["USERPROFILE"]
-	values["HOMEDRIVE"] = filepath.VolumeName(values["USERPROFILE"])
-	values["HOMEPATH"] = strings.TrimPrefix(values["USERPROFILE"], values["HOMEDRIVE"])
+	home := strings.SplitN(values["USERPROFILE"], "=", 2)[1]
+	set("HOME", home)
+	set("HOMEDRIVE", filepath.VolumeName(home))
+	set("HOMEPATH", strings.TrimPrefix(home, filepath.VolumeName(home)))
+	set("SHELL", shell)
+	set("TERM", "xterm-256color")
+	for key, value := range standardWindowsEnvironment(token) {
+		setDefault(key, value)
+	}
 	executable, err := os.Executable()
 	if err != nil || !filepath.IsAbs(executable) {
 		return nil, ErrLaunchRejected
 	}
-	// The installed per-user executable is not necessarily on the SCM-created
-	// token's PATH. Expose this same trusted runtime binary to its owner's shell.
+	// The installed per-user executable is not necessarily on the owner's PATH. Expose this same trusted
+	// runtime binary to its owner's shell.
 	binaryDirectory := filepath.Dir(executable)
-	path := os.Getenv("PATH")
+	path := ""
+	if entry, ok := values["PATH"]; ok {
+		path = strings.SplitN(entry, "=", 2)[1]
+	}
 	found := false
 	for _, directory := range filepath.SplitList(path) {
 		if strings.EqualFold(filepath.Clean(directory), binaryDirectory) {
@@ -89,20 +110,54 @@ func BaseEnvironment(shell string) ([]string, error) {
 		}
 		path += binaryDirectory
 	}
-	values["PATH"] = path
-	keys := make([]string, 0, len(values))
-	for key := range values {
-		keys = append(keys, key)
+	setPath := "Path"
+	if entry, ok := values["PATH"]; ok {
+		setPath = strings.SplitN(entry, "=", 2)[0]
 	}
-	sort.Strings(keys)
+	set(setPath, path)
 	result := make([]string, 0, len(values))
-	for _, key := range keys {
-		result = append(result, key+"="+values[key])
+	for _, entry := range values {
+		result = append(result, entry)
 	}
+	sort.Strings(result)
 	if !validEnvironment(result) {
 		return nil, ErrLaunchRejected
 	}
 	return result, nil
+}
+
+// standardWindowsEnvironment returns the variables winlogon puts in an interactive session's environment that
+// CreateEnvironmentBlock does not guarantee for an S4U or service-created token.
+func standardWindowsEnvironment(token windows.Token) map[string]string {
+	values := map[string]string{"OS": "Windows_NT", "NUMBER_OF_PROCESSORS": strconv.Itoa(runtime.NumCPU())}
+	switch runtime.GOARCH {
+	case "amd64":
+		values["PROCESSOR_ARCHITECTURE"] = "AMD64"
+	case "arm64":
+		values["PROCESSOR_ARCHITECTURE"] = "ARM64"
+	}
+	if directory, err := windows.GetSystemDirectory(); err == nil {
+		values["SystemDrive"] = filepath.VolumeName(directory)
+	}
+	if name, err := windows.ComputerName(); err == nil {
+		values["COMPUTERNAME"] = name
+	}
+	for _, folder := range []struct {
+		key string
+		id  *windows.KNOWNFOLDERID
+	}{
+		{"ProgramFiles", windows.FOLDERID_ProgramFiles}, {"ProgramW6432", windows.FOLDERID_ProgramFiles},
+		{"ProgramFiles(x86)", windows.FOLDERID_ProgramFilesX86},
+		{"CommonProgramFiles", windows.FOLDERID_ProgramFilesCommon}, {"CommonProgramW6432", windows.FOLDERID_ProgramFilesCommon},
+		{"CommonProgramFiles(x86)", windows.FOLDERID_ProgramFilesCommonX86},
+		{"ProgramData", windows.FOLDERID_ProgramData}, {"PUBLIC", windows.FOLDERID_Public},
+		{"SystemRoot", windows.FOLDERID_Windows}, {"windir", windows.FOLDERID_Windows},
+	} {
+		if value, err := token.KnownFolderPath(folder.id, windows.KF_FLAG_DEFAULT); err == nil && filepath.IsAbs(value) {
+			values[folder.key] = value
+		}
+	}
+	return values
 }
 
 // Install a session-local prompt after normal profiles have loaded. Preserve the
