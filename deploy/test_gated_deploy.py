@@ -71,11 +71,11 @@ class Fake:
         return status(self.after.pop(0) if self.after else False, self.clock)
 
 
-def gate(fake, status_file, force='', wait=300, stage=None, e2e=lambda: 0):
+def gate(fake, status_file, force='', wait=300, stage=None):
     args = SimpleNamespace(what='W4 server 2', server_host='root@control', directory='/opt/paperboat',
                            edge=['local'], wait=wait, force=force, canary_status=status_file)
     out = []
-    g = gated.Gate(args, fake.sh, fake.deploy, fake.canary, e2e, wall=lambda: fake.clock, mono=lambda: fake.clock,
+    g = gated.Gate(args, fake.sh, fake.deploy, fake.canary, wall=lambda: fake.clock, mono=lambda: fake.clock,
                    say=out.append, stage=stage)
     return g.run(), out
 
@@ -108,7 +108,7 @@ class GatedDeployTest(unittest.TestCase):
             result['red'] = True
             return result
         args = SimpleNamespace(wait=300)
-        g = gated.Gate(args, fake.sh, fake.deploy, mixed_status, lambda: 0,
+        g = gated.Gate(args, fake.sh, fake.deploy, mixed_status,
                        wall=lambda: fake.clock, mono=lambda: fake.clock)
         green, _ = g.wait_green(T0)
         self.assertFalse(green)
@@ -161,26 +161,6 @@ class GatedDeployTest(unittest.TestCase):
         self.assertEqual(code, 5)
         self.assertEqual((fake.calls, fake.deployed), ([], False))
         self.assertIn('staging step failed (exit 7)', out[0])
-
-    def test_failed_e2e_refuses_before_staging_prod_or_the_lock(self):
-        fake, staged = Fake([True]), []
-        code, out = gate(fake, self.status, stage=lambda: staged.append(1) or 0, e2e=lambda: 1)
-        self.assertEqual(code, 6)
-        self.assertEqual((fake.calls, fake.deployed, staged), ([], False, []))
-        self.assertIn('end-to-end check of the candidate commit failed (exit 1)', out[0])
-
-    def test_run_e2e_tests_the_candidate_commit_and_removes_its_worktree(self):
-        calls = []
-
-        def run(cmd, cwd=None):
-            calls.append((cmd, cwd))
-            return SimpleNamespace(returncode=3 if cmd[0] == 'tools/ci-test.sh' else 0)
-        self.assertEqual(gated.run_e2e('abc123def4567890', run=run), 3)
-        add = next(c for c, _ in calls if 'add' in c)
-        self.assertEqual(add[-1], 'abc123def4567890')
-        self.assertEqual(calls[2], (['tools/ci-test.sh', 'e2e'], add[-2]))
-        self.assertIn(add[-2], calls[3][0])
-        self.assertIn('remove', calls[3][0])
 
     def test_green_staging_lets_the_prod_deploy_run(self):
         fake = Fake([True])
