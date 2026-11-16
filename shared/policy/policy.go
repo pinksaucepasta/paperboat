@@ -51,9 +51,9 @@ var RecordingActions = []string{ActionRecord, ActionRecordingView}
 // ENVActions apply to the env:team target.
 var ENVActions = []string{ActionENVRead, ActionENVWrite}
 
-// DefaultPrivatePorts is the port range private_access covers when a rule names no ports
-// (the server's automatic private access is ports 1024 and above).
-var DefaultPrivatePorts = PortRange{From: 1024, To: 65535}
+// DefaultPrivatePorts are the ports private_access covers when a rule names no ports: the server's
+// automatic private access (80, 443 and 1024 and above; shared/machineservices.AutomaticPort).
+var DefaultPrivatePorts = []PortRange{{From: 80, To: 80}, {From: 443, To: 443}, {From: 1024, To: 65535}}
 
 // Document is one parsed policy file. Order of rules carries no meaning; it is kept so that
 // errors and explanations can name a rule by its index.

@@ -45,3 +45,11 @@ func TestPortNameAndFrontDeskRules(t *testing.T) {
 		}
 	}
 }
+
+func TestAutomaticPort(t *testing.T) {
+	for port, want := range map[int]bool{0: false, 22: false, 79: false, 80: true, 81: false, 442: false, 443: true, 444: false, 1023: false, 1024: true, 65535: true, 65536: false} {
+		if got := AutomaticPort(port); got != want {
+			t.Errorf("AutomaticPort(%d) = %v, want %v", port, got, want)
+		}
+	}
+}

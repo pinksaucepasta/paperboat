@@ -83,7 +83,7 @@ are all machines/tags, all previews/tunnels, or `env:team`.
 | `files` | machines | send files to the machine's Inbox |
 | `preview_manage` | machines | start and stop previews on the machine |
 | `tunnel_manage` | machines | create and change tunnels on the machine |
-| `private_access` | machines | reach the machine's ports privately; `ports` narrows it (an allow defaults to 1024-65535, a deny to every port) |
+| `private_access` | machines | reach the machine's ports privately; `ports` narrows it (an allow defaults to 80, 443 and 1024-65535, a deny to every port) |
 | `inspect` | machines, previews, tunnels | read captured requests (on a machine: every preview and tunnel it publishes) |
 | `replay` | machines, previews, tunnels | replay a captured request; `inspect` does not imply it |
 | `record` | machines (team, Teams plan) | the subject's Paperboat terminal sessions there are recorded (not ssh, scp, sftp or exec); not part of `*` |

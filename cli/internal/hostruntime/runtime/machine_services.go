@@ -11,6 +11,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/machineservices"
+	wire "github.com/pinksaucepasta/paperboat/shared/machineservices"
 )
 
 func (s *runtimeObservationSender) machineServicesObservation(ctx context.Context) *api.MachineServicesSnapshot {
@@ -57,7 +58,7 @@ func (s *runtimeObservationSender) machineServicesObservationWithin(ctx context.
 				family = "ipv6"
 			}
 			port := api.MachineServicePort{Port: int(service.Port), AddressFamily: family}
-			allowed := policy.AutomaticDiscoveryEnabled && port.Port >= 1024
+			allowed := policy.AutomaticDiscoveryEnabled && wire.AutomaticPort(port.Port)
 			for _, explicit := range policy.ExplicitPorts {
 				if explicit.Port == port.Port && explicit.AddressFamily == family {
 					allowed = true

@@ -36,14 +36,14 @@ func compileRule(c *collector, allow, deny *builder, x *index, groups map[string
 	}
 }
 
-// rulePorts checks a rule's ports. Without ports, an allow covers ports 1024 and above (as
-// automatic private access does today) and a deny covers every port.
+// rulePorts checks a rule's ports. Without ports, an allow covers 80, 443 and 1024 and above (as
+// automatic private access does) and a deny covers every port.
 func rulePorts(c *collector, p string, actions []string, ports []PortRange, deny bool) []PortRange {
 	if ports == nil {
 		if deny {
 			return allPorts
 		}
-		return []PortRange{DefaultPrivatePorts}
+		return slices.Clone(DefaultPrivatePorts)
 	}
 	if !slices.Equal(actions, []string{ActionPrivateAccess}) {
 		c.add(pointer(p, "ports"), "ports_need_private_access", "ports apply only when the actions are exactly [\"private_access\"]")

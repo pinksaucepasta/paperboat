@@ -379,7 +379,7 @@ and the team setting `allow_private_access` is on (default off; a team owner or 
 with the `private_access` team mutation, which moves the team generation and so ends the sessions
 already admitted). With the setting off the admission request answers 403 `team_private_access_off`.
 Administrative membership alone never grants use. Explicit lazy-port policies
-and private TCP routes remain independent allowances, including ports below 1024.
+and private TCP routes remain independent allowances, including ports below 1024. Default (automatic) private access covers ports 80, 443 and 1024 and above.
 
 The returned discovery-policy generation is persisted independently of native source
 policy generations. It advances when the derived enablement or explicit-port set

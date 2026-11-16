@@ -8,7 +8,7 @@ type Access struct {
 	Subject string   `json:"subject"` // "user:ana@example.test"
 	Target  string   `json:"target"`  // "machine:db1"
 	Action  string   `json:"action"`
-	Ports   string   `json:"ports,omitempty"` // "1024-65535", "22,5432"
+	Ports   string   `json:"ports,omitempty"` // "80,443,1024-65535", "22,5432"
 	Reason  string   `json:"reason"`          // owner or rule
 	Rules   []string `json:"rules,omitempty"`
 }

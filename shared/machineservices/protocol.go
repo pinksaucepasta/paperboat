@@ -55,6 +55,13 @@ func (p Port) Address() string {
 	}
 	return net.JoinHostPort(h, strconv.Itoa(p.Port))
 }
+
+// AutomaticPort reports whether default private access (automatic discovery) covers a port: 80, 443 and 1024
+// and above. Other ports below 1024 (22, 5432, ...) need an explicit allow. shared/policy.DefaultPrivatePorts
+// and the SQL function machine_service_authorities state the same set.
+func AutomaticPort(port int) bool {
+	return port == 80 || port == 443 || (port >= 1024 && port <= 65535)
+}
 func ValidPort(p Port) bool {
 	return p.Port > 0 && p.Port <= 65535 && (p.AddressFamily == "ipv4" || p.AddressFamily == "ipv6")
 }

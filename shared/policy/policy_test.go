@@ -241,13 +241,13 @@ func TestPrivateAccessPortsAndTeamSwitch(t *testing.T) {
 		t.Fatalf("enforced grants must drop private_access when the team switch is off: %v", off.Enforced())
 	}
 	on := mustCompile(t, strings.Replace(src, "%s", `"allow_private_access": true,`, 1), team())
-	for port, want := range map[int]string{22: "rule", 80: "port_not_allowed", 3500: "denied_by_rule", 8080: "rule"} {
+	for port, want := range map[int]string{22: "rule", 80: "rule", 443: "rule", 500: "port_not_allowed", 3500: "denied_by_rule", 8080: "rule"} {
 		if d := on.Decide("cy", machine("m-db1"), ActionPrivateAccess, port); d.Reason != want {
 			t.Fatalf("port %d: got %+v, want %s", port, d, want)
 		}
 	}
 	g := on.Enforced()[0]
-	if got := portsLabel(g.Ports); got != "22,1024-2999,4000-65535" {
+	if got := portsLabel(g.Ports); got != "22,80,443,1024-2999,4000-65535" {
 		t.Fatalf("ports %s", got)
 	}
 }

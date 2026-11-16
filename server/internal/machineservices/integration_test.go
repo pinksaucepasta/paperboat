@@ -148,6 +148,21 @@ func TestMachineServicePostgresAuthorityLifecycle(t *testing.T) {
 	if _, e = resolver.MachineServiceCurrent(ctx, request(owner, 22), explicit.AccessSessionID, explicit); e != nil {
 		t.Fatalf("automatic toggle revoked explicit: %v", e)
 	}
+	// Default private access covers 80 and 443 as well as 1024 and above; another low port needs an explicit allow.
+	snapshot.Generation++
+	snapshot.Services = []wire.Port{{Port: 22, AddressFamily: "ipv4"}, {Port: 80, AddressFamily: "ipv4"}, {Port: 443, AddressFamily: "ipv4"}}
+	announce()
+	for _, port := range []int{80, 443} {
+		if _, e = resolver.ResolveNativePrivate(ctx, request(owner, port)); e != nil {
+			t.Fatalf("default private access refused port %d: %v", port, e)
+		}
+	}
+	lowPort := snapshot
+	lowPort.Generation++
+	lowPort.Services = []wire.Port{{Port: 22, AddressFamily: "ipv4"}, {Port: 53, AddressFamily: "ipv4"}}
+	if e = s.RecordMachineServices(ctx, environment, machine, lowPort, time.Now()); !errors.Is(e, machineservices.ErrDenied) {
+		t.Fatalf("an announced low port without an explicit allow was accepted: %v", e)
+	}
 	// An unrelated service starting advances the announcement generation (for access to a machine's own
 	// service, `pb access`'s own listener does). Access to a service that is still announced survives
 	// it, and ends when that very service is withdrawn.

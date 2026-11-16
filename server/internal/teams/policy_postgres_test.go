@@ -169,7 +169,7 @@ func TestPolicySQLMatchesGo(t *testing.T) {
 						t.Errorf("policy %d: %s %s %s: SQL %v, Go %v", i, actor, machine, capability, got, want)
 					}
 				}
-				for _, port := range []int{22, 1023, 1024, 5432, 5500, 65535} {
+				for _, port := range []int{22, 79, 80, 81, 442, 443, 444, 1023, 1024, 5432, 5500, 65535} {
 					want := c.Decide(actor, target, policy.ActionPrivateAccess, port).Allowed
 					if got := f.sqlAllowed(actor, machine, "", port); got != want {
 						t.Errorf("policy %d: %s %s port %d: SQL %v, Go %v", i, actor, machine, port, got, want)

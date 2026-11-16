@@ -305,7 +305,7 @@ func (s *Service) RecordMachineServices(ctx context.Context, environment, machin
 		return e
 	}
 	for _, p := range in.Services {
-		if !(p.Port >= 1024 && policy.AutomaticDiscoveryEnabled) && !slices.Contains(policy.ExplicitPorts, p) {
+		if !(wire.AutomaticPort(p.Port) && policy.AutomaticDiscoveryEnabled) && !slices.Contains(policy.ExplicitPorts, p) {
 			return ErrDenied
 		}
 	}
@@ -389,7 +389,7 @@ SELECT m.id,m.alias,s.installation_generation,s.boot_id,m.machine_service_policy
 	}()
 	var candidates []wire.Item
 	// automaticPersonal[i]: candidate i is the actor's own personal machine with automatic discovery on, so
-	// machine_service_authorities' automatic branch allows every port from 1024 without being called.
+	// machine_service_authorities' automatic branch allows 80, 443 and every port from 1024 without being called.
 	var automaticPersonal []bool
 	for rows.Next() {
 		var i wire.Item
@@ -421,7 +421,7 @@ SELECT m.id,m.alias,s.installation_generation,s.boot_id,m.machine_service_policy
 		allowed := []wire.PublishedPort{}
 		for _, p := range i.Services {
 			var e error
-			if !automaticPersonal[index] || p.Port < 1024 {
+			if !automaticPersonal[index] || !wire.AutomaticPort(p.Port) {
 				_, e = ResolveTx(ctx, tx, actor, i.MachineID, p.Port)
 			}
 			if e == nil {

@@ -680,7 +680,7 @@ parts (no per-role login lists, no conditions language).
   publishes; exact-match as today: nothing implies them and `inspect` does not imply
   `replay`); `env_read`, `env_write` on `env:team`. `"*"` = every machine action.
   `private_access` takes optional `ports` (`[5432, "8000-8100"]`): an allow without ports
-  covers 1024-65535 (today's automatic private access), a deny without ports every port.
+  covers 80, 443 and 1024-65535 (the automatic private access), a deny without ports every port.
 - **Tags** are assigned in the file: `"tags": {"tag:prod": ["machine:db1", "machine:web1"]}`.
   A machine can carry many tags.
 - **API tokens** (one concept, one name). `pb api-token create <name> [--expires 30d]

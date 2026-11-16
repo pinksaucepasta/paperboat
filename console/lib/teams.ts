@@ -244,7 +244,7 @@ export const machineCapabilities = [
   {
     id: "private_access",
     label: "Private network access",
-    hint: "Reach its services (ports 1024 and up) over the private network, encrypted end to end.",
+    hint: "Reach its services (ports 80, 443 and 1024 and up) over the private network, encrypted end to end.",
   },
 ] as const
 

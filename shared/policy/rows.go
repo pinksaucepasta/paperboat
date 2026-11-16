@@ -1,6 +1,7 @@
 package policy
 
 import (
+	"slices"
 	"sort"
 	"strings"
 )
@@ -44,7 +45,7 @@ func symbolicRows(x *index, idx int, r Rule) []Row {
 			actions = append(actions, a)
 		}
 	}
-	ports := []PortRange{DefaultPrivatePorts}
+	ports := slices.Clone(DefaultPrivatePorts)
 	if r.Ports != nil {
 		ports = mergePorts(r.Ports)
 	} else if deny {

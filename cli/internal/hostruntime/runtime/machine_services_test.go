@@ -33,7 +33,7 @@ func TestMachineServiceAnnouncementPolicyAndWithdrawal(t *testing.T) {
 		if fail {
 			return nil, errors.New("socket table unavailable")
 		}
-		out := []machineservices.Service{{Port: 22, Loopback: "127.0.0.1"}}
+		out := []machineservices.Service{{Port: 22, Loopback: "127.0.0.1"}, {Port: 80, Loopback: "127.0.0.1"}, {Port: 443, Loopback: "127.0.0.1"}}
 		for p := 1100; p >= 1024; p-- {
 			out = append(out, machineservices.Service{Port: uint16(p), Loopback: "127.0.0.1"})
 		}
@@ -45,11 +45,11 @@ func TestMachineServiceAnnouncementPolicyAndWithdrawal(t *testing.T) {
 	}
 	s.applyMachineServicesPolicy([]byte(`{"data":{"machine_services_policy":{"generation":1,"automatic_discovery_enabled":true}}}`))
 	active := s.machineServicesObservation(context.Background())
-	if active.Generation != 2 || len(active.Services) != 64 || active.Services[0].Port != 1024 || active.Services[63].Port != 1087 {
+	if active.Generation != 2 || len(active.Services) != 64 || active.Services[0].Port != 80 || active.Services[1].Port != 443 || active.Services[2].Port != 1024 || active.Services[63].Port != 1085 {
 		t.Fatalf("wrong bounded snapshot: %+v", active)
 	}
 	active.Services[0].Port = 9
-	if got := s.machineServicesObservation(context.Background()); got.Generation != 2 || got.Services[0].Port != 1024 {
+	if got := s.machineServicesObservation(context.Background()); got.Generation != 2 || got.Services[0].Port != 80 {
 		t.Fatal("snapshot alias or unstable generation", got)
 	}
 	fail = true

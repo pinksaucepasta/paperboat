@@ -11,7 +11,7 @@ export type PolicyNames = Schemas["PolicyNames"]
 export type Policy = Schemas["PolicyView"]
 export type CanEdit = Policy["can_edit"]
 export type PolicyProblem = Schemas["PolicyProblem"]
-/** `ports` is private_access only, e.g. "22,1024-65535". */
+/** `ports` is private_access only, e.g. "22,80,443,1024-65535". */
 export type AccessChange = Schemas["PolicyChange"]
 export type Validation = Schemas["PolicyValidation"]
 /** `key_delivered: false`: env_read is allowed but no key holder has delivered the team ENV key yet. */
