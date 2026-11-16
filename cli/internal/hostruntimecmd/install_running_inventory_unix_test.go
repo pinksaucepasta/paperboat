@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
+	"github.com/pinksaucepasta/paperboat/internal/causetext"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
@@ -240,5 +241,37 @@ func TestFailedStepAfterACommittedUpdateKeepsTheNewVersionAndNamesTheStep(t *tes
 	}
 	if target, err := os.Readlink(filepath.Join(directory, "pb")); err != nil || target == previous {
 		t.Fatalf("pb command points at %q (%v) after a committed update, want the new version", target, err)
+	}
+}
+
+// L337: a privileged install step that failed printed its reason to the terminal only; the local failure record held
+// "exit status 1". The step's last stderr is kept in the error's causes.
+func TestFailedInstallStepKeepsItsPrintedReasonInTheCause(t *testing.T) {
+	executable, source, home := suppliedInstallFixture(t)
+	layout, err := service.UserLayout(runtime.GOOS, os.Getuid())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(layout.Binary); err == nil {
+		t.Skip("a Paperboat installation exists on this machine; the test must not touch its services")
+	}
+	directory := filepath.Join(home, "bin")
+	if err := os.Mkdir(directory, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	original := privilegedInstallCommand
+	t.Cleanup(func() { privilegedInstallCommand = original })
+	privilegedInstallCommand = func(ctx context.Context, _ int, _, _, _ string, arguments ...string) *exec.Cmd {
+		switch arguments[len(arguments)-1] {
+		case "install-supplied":
+			return exec.CommandContext(ctx, "/bin/sh", "-c", "cat >/dev/null; echo 'the daemon did not become ready on the new version' >&2; exit 1")
+		case "inventory":
+			return exec.CommandContext(ctx, "/bin/false")
+		}
+		return exec.CommandContext(ctx, "/bin/sh", "-c", "cat >/dev/null")
+	}
+	_, err = InstallRunningBinary(t.Context(), executable, source, directory, "")
+	if err == nil || !strings.Contains(causetext.Text(err), "the daemon did not become ready on the new version") {
+		t.Fatalf("cause text of a failed install step = %q (err %v), want the step's printed reason", causetext.Text(err), err)
 	}
 }

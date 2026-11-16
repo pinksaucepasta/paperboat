@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"os/user"
@@ -126,7 +127,10 @@ func installUpdateSource(ctx context.Context, executable string, source installs
 		}
 		command := privilegedInstallCommand(callCtx, os.Geteuid(), rootHome, account.Uid, installerExecutable, "__runtime-service", operation)
 		command.Stdin = bytes.NewReader(body)
-		command.Stdout, command.Stderr = os.Stderr, os.Stderr
+		// Its reason is also kept (bounded) in the error: scrollback was the only copy, and the local failure record
+		// held just "exit status 1" (macOS in-place upgrade, L337).
+		reason := &tailBuffer{limit: 2048}
+		command.Stdout, command.Stderr = os.Stderr, io.MultiWriter(os.Stderr, reason)
 		if err = command.Run(); err != nil {
 			var exitErr *exec.ExitError
 			if errors.As(err, &exitErr) {
@@ -146,7 +150,7 @@ func installUpdateSource(ctx context.Context, executable string, source installs
 				}
 			}
 			// The privileged step prints its own reason first; administrator approval is only one cause.
-			return runtimeFailure("installing the supplied Paperboat executable failed (its reason is printed above); if administrator access was declined, approve it and rerun `pb install`", err, runtimeContextFailure(callCtx))
+			return runtimeFailure("installing the supplied Paperboat executable failed (its reason is printed above); if administrator access was declined, approve it and rerun `pb install`", err, stderrReason(reason), runtimeContextFailure(callCtx))
 		}
 		return nil
 	}
@@ -320,4 +324,12 @@ func KeepInstallFailureOwner(installErr, inventoryErr error) error {
 		return &CommandFailure{message: message, causes: append(append([]error(nil), failure.causes...), inventoryErr)}
 	}
 	return errors.Join(installErr, inventoryErr)
+}
+
+// stderrReason is what the privileged step printed last, as a cause (nil when it printed nothing).
+func stderrReason(reason *tailBuffer) error {
+	if text := reason.String(); text != "" {
+		return errors.New("privileged step: " + text)
+	}
+	return nil
 }
