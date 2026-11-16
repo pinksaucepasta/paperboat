@@ -5,8 +5,6 @@ import (
 	"crypto/ed25519"
 	"testing"
 	"time"
-
-	"github.com/pinksaucepasta/paperboat/shared/relaylimits"
 )
 
 // Relays went unusable for ~2 s every ~20 s on hp: recovery renewed 9.2-9.8 s after the last
@@ -54,7 +52,6 @@ func TestRegionalRecoveryRenewalSurvivesTheAppliedConfigurationWake(t *testing.T
 	a.relay.mu.Lock()
 	a.relay.recovery = a.newRegionalRecoveryLocked()
 	a.relay.recovery.peerID = c.Peers[0].Identity.EndpointID
-	a.relay.recovery.repair.Store(true) // a lost path: only then do renewals follow the observations
 	a.relay.mu.Unlock()
 	a.mu.Unlock()
 	refreshed := make(chan struct{}, 8)
@@ -149,41 +146,5 @@ func TestRenewalsBackOffWhileNoRelayIsUsable(t *testing.T) {
 		if got := a.nextRefresh(nil, 0, 10); got < regionalUnusableRetryMaximum/2 {
 			t.Fatalf("renewal after ten without a usable relay came after %v, want about five minutes", got)
 		}
-	}
-}
-
-// F21-18: on staging two machines holding one open native stream and one private TCP session made 34 + 56 signed
-// configuration fetches per machine in 10 minutes (one per 4-12 s): a bound pair with a working path renewed before each
-// relay observation ended. A set stays usable until it expires, so only a lost path (repair) renews that fast; relay
-// health changes arrive as peer_network events.
-func TestBoundPairWithAWorkingPathRenewsOnTheIdleCadence(t *testing.T) {
-	a, c, signer, _ := networkTestAuthority(t)
-	now := time.Now()
-	c.IssuedAt = now.Unix()
-	c.ExpiresAt = c.IssuedAt + int64(relaylimits.MaxGrantLifetime/time.Second)
-	c.Peers[0].Scopes[0].ExpiresAt = c.ExpiresAt
-	if err := a.Apply(t.Context(), networkToken(t, signer, c)); err != nil {
-		t.Fatal(err)
-	}
-	a.regional = &RegionalCandidates{IssuedAt: now.Unix(), ExpiresAt: now.Add(time.Hour).Unix(), Nodes: []RegionalNode{{
-		NodeID: "relay_bound", NodeGeneration: 1, ProcessEpoch: "epoch_bound", Region: "test", FailureDomain: "rack",
-		Roles: []string{"relay"}, Transports: []string{"derp_quic"}, EndpointHost: "relay.example.test", EndpointQUICPort: 443,
-		State: "ready", ObservedAt: now.Unix(), CapacityObservedAt: now.Unix(), ExpiresAt: now.Add(time.Hour).Unix(), CapacityLimit: 10,
-	}}}
-	a.mu.Lock()
-	a.relay.mu.Lock()
-	r := a.newRegionalRecoveryLocked()
-	r.peerID = c.Peers[0].Identity.EndpointID
-	a.relay.recovery = r
-	a.relay.mu.Unlock()
-	a.mu.Unlock()
-	for range 64 {
-		if got := a.nextRefresh(nil, 0, 0); got < 15*time.Minute {
-			t.Fatalf("a bound pair with a working path renewed after %v, want the 15-25 minute idle cadence", got)
-		}
-	}
-	r.repair.Store(true)
-	if got := a.nextRefresh(nil, 0, 0); got > 12*time.Second {
-		t.Fatalf("a lost path renewed after %v, want before the relay observation ends", got)
 	}
 }

@@ -51,6 +51,7 @@ type Source struct {
 	Size     int64
 	SHA256   [sha256.Size]byte
 	Reader   io.ReadSeeker
+	Folder   *Folder // set when the source is a folder: Reader streams its tar
 }
 type Manifest struct {
 	TransferID           string    `json:"transfer_id"`
@@ -243,6 +244,9 @@ func (c *Client) sendBatchPlaintext(ctx context.Context, batchID, sessionID stri
 			return Batch{}, errors.New("invalid file transfer source")
 		}
 		files[i] = map[string]any{"basename": source.Basename, "size": source.Size, "sha256": hex.EncodeToString(source.SHA256[:])}
+		if source.Folder != nil {
+			files[i]["directory"] = true
+		}
 	}
 	payload, _ := json.Marshal(map[string]any{"batch_id": batchID, "source_machine_id": c.binding.SourceMachineID, "destination_machine_id": c.binding.DestinationMachineID, "initiating_user_id": c.binding.InitiatingUserID, "session_id": sessionID, "files": files})
 	var batch Batch

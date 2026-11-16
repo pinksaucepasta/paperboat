@@ -35,7 +35,7 @@ pb send destination [flags]
 
 ### SEE ALSO
 
-* [pb send](pb_send.md)	 - Send files to a machine's Paperboat Inbox
+* [pb send](pb_send.md)	 - Send files or folders to a machine's Paperboat Inbox
 * [pb send destination clear](pb_send_destination_clear.md)	 - Clear the default transfer destination
 * [pb send destination set](pb_send_destination_set.md)	 - Set the default transfer destination
 

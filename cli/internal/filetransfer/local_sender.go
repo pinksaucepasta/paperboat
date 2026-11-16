@@ -31,11 +31,18 @@ func (s *LocalSender) SendNativeBatch(ctx context.Context, batchID, sourceMachin
 	return s.sendBatch(lease.Context(), batchID, sourceMachineID, destinationMachineID, initiatingUserID, sessionID, sources, expiresAt)
 }
 
+// ErrFolderFromHostSession is a folder sent through the host-local runtime of a terminal session, which delivers through
+// the destination's session inbox and has no folder form.
+var ErrFolderFromHostSession = errors.New("a folder cannot be sent from inside a Paperboat terminal session on the host; send it from a normal shell")
+
 func (s *LocalSender) sendBatch(ctx context.Context, batchID, sourceMachineID, destinationMachineID, initiatingUserID, sessionID string, sources []Source, expiresAt time.Time) (result Batch, resultErr error) {
 	files := make([]map[string]any, len(sources))
 	for index, source := range sources {
 		if source.Reader == nil || source.Basename == "" || source.Size < 0 {
 			return Batch{}, errors.New("invalid local file source")
+		}
+		if source.Folder != nil {
+			return Batch{}, ErrFolderFromHostSession
 		}
 		files[index] = map[string]any{"basename": source.Basename, "size": source.Size, "sha256": hex.EncodeToString(source.SHA256[:])}
 	}

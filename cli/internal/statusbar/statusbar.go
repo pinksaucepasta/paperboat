@@ -110,7 +110,6 @@ type Bar struct {
 	appCursorSaved  bool
 	cursorSave      string // how the bar saves and restores the cursor around its own writes: see cursorSaveSequences
 	cursorRestore   string
-	lastColumnFree  int // columns the bar leaves unwritten at the right edge: see lastColumnFreeFor
 	appInverse      bool
 	appSGR          []byte
 	appSGROverflow  bool
@@ -205,7 +204,6 @@ func New(options Options) *Bar {
 	b := &Bar{
 		cursorSave:      save,
 		cursorRestore:   restore,
-		lastColumnFree:  lastColumnFreeFor(os.Getenv("TERM_PROGRAM")),
 		out:             output,
 		serializedOut:   serializedOut,
 		outputFD:        int(output.Fd()),

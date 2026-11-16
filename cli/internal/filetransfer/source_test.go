@@ -56,7 +56,7 @@ func TestPrepareRejectsRelativeTraversalSymlinkMachineAndLimits(t *testing.T) {
 		paths  []string
 		limits Limits
 	}{
-		{"relative", []string{"regular"}, Limits{}}, {"traversal", []string{root + string(filepath.Separator) + "x" + string(filepath.Separator) + ".." + string(filepath.Separator) + "regular"}, Limits{}}, {"symlink", []string{symlink}, Limits{}}, {"directory", []string{root}, Limits{}}, {"size", []string{regular}, Limits{MaxFileBytes: 3}}, {"count", []string{regular, regular}, Limits{MaxBatchFiles: 1}}, {"batch", []string{regular}, Limits{MaxBatchBytes: 3}},
+		{"relative", []string{"regular"}, Limits{}}, {"traversal", []string{root + string(filepath.Separator) + "x" + string(filepath.Separator) + ".." + string(filepath.Separator) + "regular"}, Limits{}}, {"symlink", []string{symlink}, Limits{}}, {"size", []string{regular}, Limits{MaxFileBytes: 3}}, {"count", []string{regular, regular}, Limits{MaxBatchFiles: 1}}, {"batch", []string{regular}, Limits{MaxBatchBytes: 3}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			if batch, err := Prepare(test.paths, test.limits); err == nil {

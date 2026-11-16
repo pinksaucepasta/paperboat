@@ -117,17 +117,6 @@ func cursorSaveSequences(termProgram string) (save, restore string) {
 	return "\x1b[s", "\x1b[u"
 }
 
-// lastColumnFreeFor is 1 in Terminal.app: a bar that fills the last column leaves the cursor in the pending-wrap state, and Terminal.app then
-// scrolls the whole screen up one line when the remote enters or leaves the alternate screen (X-24: after vim the old bar row stayed one row
-// up, a second bar below it, and the prompt landed a row below its text). Measured with the captured bytes of a vim session replayed into a
-// Terminal.app window: a 100-column bar scrolls, a 99-column bar (with or without ESC[K) does not.
-func lastColumnFreeFor(termProgram string) int {
-	if termProgram == "Apple_Terminal" {
-		return 1
-	}
-	return 0
-}
-
 func (b *Bar) trackRemoteCursorSave(sequence []byte) {
 	switch s := string(sequence); {
 	case s == "\x1b[s" || (s == "\x1b7" && b.cursorSave == "\x1b7"):

@@ -191,7 +191,7 @@ func (s *Service) Create(ctx context.Context, request CreateRequest) ([]store.Fi
 		platform = s.config.Platform
 	}
 	for i, file := range request.Files {
-		if !validBasename(platform, file.Basename) {
+		if !validBasename(platform, file.Basename) || file.Directory && request.DestinationMachineID != s.config.LocalMachineID {
 			return nil, &Error{Code: InvalidPath}
 		}
 		if file.Size < 0 || file.Size > maxFile {
@@ -227,16 +227,22 @@ func (s *Service) Create(ctx context.Context, request CreateRequest) ([]store.Fi
 		}
 		return nil, storageFailure(err)
 	}
-	for _, transfer := range transfers {
+	for i, transfer := range transfers {
 		s.cancelSignal(transfer.ID)
-		file, err := os.OpenFile(s.partialPath(transfer.ID), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
-		if err != nil {
-			_ = s.cancelBatch(context.Background(), transfers)
-			return nil, storageFailure(err)
+		spool := []string{s.partialPath(transfer.ID)}
+		if request.Files[i].Directory {
+			spool = append(spool, s.directoryMarker(transfer.ID))
 		}
-		if err := file.Close(); err != nil {
-			_ = s.cancelBatch(context.Background(), transfers)
-			return nil, storageFailure(err)
+		for _, path := range spool {
+			file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+			if err != nil {
+				_ = s.cancelBatch(context.Background(), transfers)
+				return nil, storageFailure(err)
+			}
+			if err := file.Close(); err != nil {
+				_ = s.cancelBatch(context.Background(), transfers)
+				return nil, storageFailure(err)
+			}
 		}
 	}
 	if err := syncDir(s.config.Root); err != nil {
@@ -453,6 +459,12 @@ func (s *Service) Complete(ctx context.Context, id string) (store.FileTransfer, 
 			_ = s.cancelBatchLocked(context.Background(), transfers)
 			return requested, &Error{Code: DigestMismatch}
 		}
+		if s.isDirectory(transfer.ID) {
+			if folderErr := s.checkFolder(contentPath); folderErr != nil {
+				_ = s.cancelBatchLocked(context.Background(), transfers)
+				return requested, folderErr
+			}
+		}
 	}
 	var renamed []store.FileTransfer
 	rollback := func() {
@@ -571,11 +583,7 @@ func (s *Service) cancelBatchLocked(ctx context.Context, transfers []store.FileT
 		return errors.Join(result, storageFailure(err))
 	}
 	for _, transfer := range transfers {
-		for _, path := range s.spoolFiles(transfer) {
-			if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
-				result = errors.Join(result, err)
-			}
-		}
+		result = errors.Join(result, s.removeSpoolFiles(transfer))
 		s.cancels.Delete(transfer.ID)
 	}
 	return errors.Join(result, syncDir(s.config.Root))
@@ -590,11 +598,28 @@ func (s *Service) publishedPath(transfer store.FileTransfer) string {
 // published into the spool itself (no Inbox), the published copy under the name it was pinned to (a collision pins
 // 'name (2)', not the reconstructed name).
 func (s *Service) spoolFiles(transfer store.FileTransfer) []string {
-	files := []string{s.partialPath(transfer.ID), s.contentPath(transfer.ID), s.markerPath(transfer.ID), s.publishedPath(transfer)}
+	files := []string{s.partialPath(transfer.ID), s.contentPath(transfer.ID), s.markerPath(transfer.ID), s.directoryMarker(transfer.ID), s.publishedPath(transfer)}
 	if transfer.ReceiptPath != "" && filepath.Dir(transfer.ReceiptPath) == s.config.Root {
 		files = append(files, transfer.ReceiptPath)
 	}
 	return files
+}
+
+// removeSpoolFiles removes what a transfer owns in the spool. The published copy of a folder transfer (kept in the spool
+// when there is no Inbox) is a tree; everything else is a file, and a directory in a file's place is an error, not removed.
+func (s *Service) removeSpoolFiles(transfer store.FileTransfer) error {
+	directory := s.isDirectory(transfer.ID)
+	var result error
+	for _, path := range s.spoolFiles(transfer) {
+		remove := os.Remove
+		if directory && (path == s.publishedPath(transfer) || path == transfer.ReceiptPath) {
+			remove = os.RemoveAll
+		}
+		if err := remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			result = errors.Join(result, err)
+		}
+	}
+	return result
 }
 func (s *Service) lock(id string) *sync.Mutex {
 	value, _ := s.locks.LoadOrStore(id, &sync.Mutex{})

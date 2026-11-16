@@ -18,11 +18,27 @@ func receiverNameRefusal(alias, platform string, sources []filetransfer.Source) 
 		if reason := transfername.Refusal(platform, source.Basename); reason != "" {
 			reasons = append(reasons, fmt.Sprintf("%q: %s", source.Basename, reason))
 		}
+		if source.Folder == nil {
+			continue
+		}
+		// A folder is held to the same rules, every file and folder inside it by its path.
+		for _, rel := range source.Folder.Paths {
+			if reason := transfername.FolderPathRefusal(platform, rel); reason != "" {
+				reasons = append(reasons, fmt.Sprintf("%q: %s", source.Basename+"/"+rel, reason))
+			}
+		}
+		if reason := transfername.FolderCollision(platform, source.Folder.Paths); reason != "" {
+			reasons = append(reasons, fmt.Sprintf("in %q: %s", source.Basename, reason))
+		}
 	}
 	if len(reasons) == 0 {
 		return nil
 	}
-	message := fmt.Sprintf("Nothing was sent: %s cannot store %s. Rename the file%s and send again.", alias, strings.Join(reasons, "; "), plural(len(reasons)))
+	many := plural(len(reasons))
+	if len(reasons) > 5 {
+		reasons = append(reasons[:5], fmt.Sprintf("and %d more", len(reasons)-5))
+	}
+	message := fmt.Sprintf("Nothing was sent: %s cannot store %s. Rename the file%s and send again.", alias, strings.Join(reasons, "; "), many)
 	return usageError{err: errors.New(message), publicMessage: message, refusal: true} // the arguments are right, the name is not: no command help
 }
 

@@ -26,7 +26,7 @@ import (
 func sendCommand() *cobra.Command {
 	command := &cobra.Command{
 		Use:   "send <path>... --to <machine>",
-		Short: "Send files to a machine's Paperboat Inbox",
+		Short: "Send files or folders to a machine's Paperboat Inbox",
 		Args:  commandArgs(cobra.MinimumNArgs(1)),
 		RunE:  runSendCommand,
 	}
@@ -133,6 +133,14 @@ func runSendCommand(cobraCommand *cobra.Command, paths []string) error {
 	defer prepared.Close()
 	if err := receiverNameRefusal(destination.Alias, destination.Platform, prepared.Sources); err != nil {
 		return err
+	}
+	if destination.ID == sourceMachineID {
+		if err := folderToThisComputer(prepared.Sources); err != nil {
+			return err
+		}
+	}
+	if !jsonOutput {
+		folderNotice(cobraCommand.ErrOrStderr(), prepared.Sources)
 	}
 	batchID, err := filetransfer.NewBatchID()
 	if err != nil {
@@ -281,7 +289,7 @@ func runSendCommand(cobraCommand *cobra.Command, paths []string) error {
 					progress.finish("done", declared.Bytes)
 				}
 			}
-			err = destinationBusy(destination.Alias, destinationFileTooLarge(destination.Alias, destinationStorageFull(destination.Alias, destinationGone(destination.Alias, err))))
+			err = folderChanged(destinationBusy(destination.Alias, destinationFileTooLarge(destination.Alias, destinationStorageFull(destination.Alias, destinationGone(destination.Alias, err)))))
 			if closeErr := nativeClient.Close(); closeErr != nil {
 				err = errors.Join(err, closeErr)
 			}
@@ -303,7 +311,11 @@ func runSendCommand(cobraCommand *cobra.Command, paths []string) error {
 		if i < len(batch.Paths) && batch.Paths[i] != "" {
 			path = batch.Paths[i]
 		}
-		fmt.Fprintf(cobraCommand.OutOrStdout(), "%s: delivered to %s on %s\n", item.Basename, path, destination.Alias)
+		note := ""
+		if i < len(prepared.Sources) {
+			note = folderSuffix(prepared.Sources[i])
+		}
+		fmt.Fprintf(cobraCommand.OutOrStdout(), "%s: delivered to %s on %s%s\n", item.Basename, path, destination.Alias, note)
 	}
 	return nil
 }
@@ -367,18 +379,20 @@ func declaredTransferLimits(policy filetransfer.Limits, declared api.TransferDec
 	return policy
 }
 
-// missingSendSource names a source the user gave that does not exist or is not a regular file (a folder, a link); other preparation errors pass through.
+// missingSendSource names a source the user gave that does not exist or is neither a regular file nor a folder (a link); other preparation errors pass through.
 // Only a path from the command line is echoed, never one Paperboat opened itself.
 func missingSendSource(err error, sources []string) error {
 	var notRegular *filetransfer.NotRegularError
 	if errors.As(err, &notRegular) && slices.Contains(sources, notRegular.Path) {
-		message := notRegular.Path + " is not a regular file. Paperboat sends regular files only: send the file it points to, or its files (up to 10 at once)."
-		switch {
-		case notRegular.Directory:
-			message = notRegular.Path + " is a folder, and Paperboat sends files, not folders. Send its files (up to 10 at once) or archive the folder first (for example with tar or zip), then send the archive."
-		case notRegular.Symlink:
-			message = notRegular.Path + " is a symbolic link, and Paperboat does not send links. Send the file it points to instead."
+		message := notRegular.Path + " is not a regular file or a folder. Paperboat sends files and folders only: send the file it points to."
+		if notRegular.Symlink {
+			message = notRegular.Path + " is a symbolic link, and Paperboat does not send links. Send the file or folder it points to instead."
 		}
+		return usageError{err: err, publicMessage: message, refusal: true}
+	}
+	var tooMany *filetransfer.FolderEntriesError
+	if errors.As(err, &tooMany) {
+		message := fmt.Sprintf("%s holds more than %d files and folders, more than one send carries. Send part of it, or archive it first (for example with tar or zip) and send the archive. Nothing was sent.", tooMany.Path, tooMany.Limit)
 		return usageError{err: err, publicMessage: message, refusal: true}
 	}
 	var pathErr *os.PathError

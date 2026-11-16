@@ -36,5 +36,5 @@ pb send cancel <transfer-id> [flags]
 
 ### SEE ALSO
 
-* [pb send](pb_send.md)	 - Send files to a machine's Paperboat Inbox
+* [pb send](pb_send.md)	 - Send files or folders to a machine's Paperboat Inbox
 

@@ -18,6 +18,7 @@ type Limits struct {
 type PreparedBatch struct {
 	Sources []Source
 	files   []*os.File
+	streams []io.Closer // folder streams
 }
 
 // Scopes of a transfer limit.
@@ -79,14 +80,17 @@ func (b *PreparedBatch) Close() error {
 	for _, file := range b.files {
 		result = errors.Join(result, file.Close())
 	}
-	b.files = nil
+	for _, stream := range b.streams {
+		result = errors.Join(result, stream.Close())
+	}
+	b.files, b.streams = nil, nil
 	return result
 }
 
-// NotRegularError is a source that is not a regular file: only regular files are sent (no folders, no symbolic links).
+// NotRegularError is a source that is neither a regular file nor a folder: no symbolic links, no special files.
 type NotRegularError struct {
-	Path               string
-	Directory, Symlink bool
+	Path    string
+	Symlink bool
 }
 
 func (e *NotRegularError) Error() string { return e.Path + " is not a regular file" }
@@ -120,8 +124,21 @@ func Prepare(paths []string, limits Limits) (*PreparedBatch, error) {
 		if err != nil {
 			return nil, fmt.Errorf("inspect file: %w", err)
 		}
+		if before.IsDir() {
+			source, err := prepareFolder(path, limits)
+			if err != nil {
+				return nil, err
+			}
+			batch.streams = append(batch.streams, source.Reader.(io.Closer))
+			total += source.Size
+			if total > limits.MaxBatchBytes {
+				return nil, &LimitError{Scope: LimitBatchBytes, Value: total, Limit: limits.MaxBatchBytes}
+			}
+			batch.Sources = append(batch.Sources, source)
+			continue
+		}
 		if before.Mode()&os.ModeSymlink != 0 || !before.Mode().IsRegular() {
-			return nil, &NotRegularError{Path: path, Directory: before.IsDir(), Symlink: before.Mode()&os.ModeSymlink != 0}
+			return nil, &NotRegularError{Path: path, Symlink: before.Mode()&os.ModeSymlink != 0}
 		}
 		file, err := openSourceFile(path)
 		if err != nil {

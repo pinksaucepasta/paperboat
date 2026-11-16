@@ -96,7 +96,7 @@ pb [environment] [new] [flags]
 * [pb resolve](pb_resolve.md)	 - Resolve a peer machine IP, port forwardings over gRPC IPC
 * [pb rsync](pb_rsync.md)	 - Run rsync with Paperboat machine resolution
 * [pb scp](pb_scp.md)	 - Run scp with Paperboat machine resolution
-* [pb send](pb_send.md)	 - Send files to a machine's Paperboat Inbox
+* [pb send](pb_send.md)	 - Send files or folders to a machine's Paperboat Inbox
 * [pb service](pb_service.md)	 - Manage the Paperboat background daemon service
 * [pb session](pb_session.md)	 - Manage environment terminal sessions
 * [pb setup](pb_setup.md)	 - Set up this machine for Paperboat

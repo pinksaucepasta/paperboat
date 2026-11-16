@@ -405,11 +405,10 @@ func (a *Authority) nextRefresh(err error, failures, unusable int) time.Duration
 	a.relay.mu.Lock()
 	recovery := a.relay.recovery
 	a.relay.mu.Unlock()
-	// Signed health observations are judged as of signing and a set stays usable until it expires (eligible), so a
-	// bound pair with a working path renews on the idle cadence: relay health changes arrive as peer_network events.
-	// Only a lost path (repair) renews before the earliest observation ends, so its relays are not withdrawn.
-	// F21-18: the bound pair alone kept every engine with an open stream renewing every 4-12 s.
-	recovering := recovery != nil && recovery.repair.Load()
+	// Signed health observations expire regionalObservationMaxAge after they were
+	// made, not after they were issued. Active regional recovery renews before the
+	// earliest one ends, so its relays are not withdrawn between renewals.
+	recovering := recovery != nil && (recovery.pair() != "" || recovery.repair.Load())
 	switch {
 	case recovering:
 		delay = backoff.Retry(unusable, regionalUnusableRetry, regionalUnusableRetryMaximum)

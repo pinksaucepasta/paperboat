@@ -506,34 +506,6 @@ func TestAppleTerminalSavesTheCursorWithDECSCAndDefersToTheRemotesSave(t *testin
 	}
 }
 
-// X-24: Terminal.app scrolls the screen one line at the alternate-screen swap when the bar filled the last column.
-func TestAppleTerminalBarLeavesTheLastColumnFree(t *testing.T) {
-	for program, want := range map[string]int{"Apple_Terminal": 39, "iTerm.app": 40} {
-		t.Run(program, func(t *testing.T) {
-			t.Setenv("TERM_PROGRAM", program)
-			bar, reader := newTestBar(t, ModeAuto, "xterm-256color", 40, 3, true, time.Second)
-			_ = bar.Close()
-			if output, ok := bar.out.(*os.File); ok {
-				_ = output.Close()
-			}
-			raw, err := io.ReadAll(reader)
-			if err != nil {
-				t.Fatal(err)
-			}
-			s := string(raw)
-			start := strings.Index(s, "\x1b[3;1H\x1b[2K")
-			if start < 0 {
-				t.Fatalf("no bar draw: %q", s)
-			}
-			row := s[start+len("\x1b[3;1H\x1b[2K"):]
-			row = row[:strings.Index(row, "\x1b[27m")]
-			if got := ansi.StringWidth(row); got != want {
-				t.Fatalf("%s: bar row is %d columns, want %d: %q", program, got, want, row)
-			}
-		})
-	}
-}
-
 func TestDefersRedrawDuringSynchronizedOutput(t *testing.T) {
 	bar, reader := newTestBar(t, ModeAuto, "xterm-256color", 40, 3, true, time.Second)
 	if _, err := bar.Write([]byte("\x1b[?2026hframe-a")); err != nil {

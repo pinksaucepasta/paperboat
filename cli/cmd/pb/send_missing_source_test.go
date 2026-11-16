@@ -26,7 +26,7 @@ func TestSendNamesAMissingSource(t *testing.T) {
 	}
 }
 
-func TestSendRefusesAFolderAndALinkNamingThePathAndWhatToDo(t *testing.T) {
+func TestSendTakesAFolderAndRefusesALinkNamingThePathAndWhatToDo(t *testing.T) {
 	dir := t.TempDir()
 	folder := filepath.Join(dir, "tree")
 	if err := os.Mkdir(folder, 0o755); err != nil {
@@ -36,18 +36,18 @@ func TestSendRefusesAFolderAndALinkNamingThePathAndWhatToDo(t *testing.T) {
 	if err := os.WriteFile(target, []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	batch, err := filetransfer.Prepare([]string{folder, target}, automaticTransferLimits)
+	if err != nil || batch.Sources[0].Folder == nil || batch.Sources[1].Folder != nil {
+		t.Fatalf("a folder and a file are both sent: %+v, %v", batch, err)
+	}
+	batch.Close()
 	link := filepath.Join(dir, "link.txt")
 	if err := os.Symlink(target, link); err != nil {
 		t.Skip("no symbolic links here: ", err)
 	}
-	for path, want := range map[string]string{folder: "is a folder", link: "is a symbolic link"} {
-		_, err := filetransfer.Prepare([]string{path}, automaticTransferLimits)
-		got := missingSendSource(err, []string{path})
-		if !errors.Is(got, errUsage) || !strings.Contains(got.Error(), path+" "+want) || strings.Contains(got.Error(), "could not finish") {
-			t.Fatalf("%s: %v", path, got)
-		}
-	}
-	if _, err := filetransfer.Prepare([]string{target}, automaticTransferLimits); err != nil {
-		t.Fatalf("a regular file is still sent: %v", err)
+	_, err = filetransfer.Prepare([]string{link}, automaticTransferLimits)
+	got := missingSendSource(err, []string{link})
+	if !errors.Is(got, errUsage) || !strings.Contains(got.Error(), link+" is a symbolic link") || strings.Contains(got.Error(), "could not finish") {
+		t.Fatalf("%s: %v", link, got)
 	}
 }

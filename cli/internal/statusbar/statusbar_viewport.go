@@ -153,7 +153,7 @@ func (b *Bar) drawNowLocked() {
 		b.redrawPending = true
 		return
 	}
-	text := b.layoutLocked(w - b.lastColumnFree)
+	text := b.layoutLocked(w)
 	b.ensureScrollRegionLocked(h - 1)
 	style, restore := b.barStyleLocked()
 	_, _ = fmt.Fprintf(b.serializedOut, b.cursorSave+"\x1b[%d;1H\x1b[2K%s%s%s"+b.cursorRestore, h, style, text, restore)

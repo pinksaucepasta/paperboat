@@ -83,6 +83,8 @@ type File struct {
 	Basename string `json:"basename"`
 	Size     int64  `json:"size"`
 	SHA256   string `json:"sha256"`
+	// Directory says the bytes are the tar of a folder, which the receiver unpacks into a folder named Basename.
+	Directory bool `json:"directory,omitempty"`
 }
 
 type CreateRequest struct {

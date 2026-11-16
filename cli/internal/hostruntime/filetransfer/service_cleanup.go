@@ -3,7 +3,6 @@ package filetransfer
 import (
 	"context"
 	"errors"
-	"os"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
@@ -63,13 +62,7 @@ func (s *Service) CleanupExpired(ctx context.Context) error {
 			batchLock.Unlock()
 			continue
 		}
-		var removeErr error
-		for _, path := range s.spoolFiles(current) {
-			if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
-				removeErr = errors.Join(removeErr, err)
-			}
-		}
-		if removeErr != nil {
+		if removeErr := s.removeSpoolFiles(current); removeErr != nil {
 			result = errors.Join(result, removeErr)
 			transferLock.Unlock()
 			batchLock.Unlock()

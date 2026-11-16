@@ -245,10 +245,6 @@ start go out in one flight, and the peer association lingers 5 s after its last 
 
 - Socket-based agent that Git-for-Windows ssh can reach (after launch): the managed agent is a Windows named pipe, which MSYS OpenSSH cannot use; until then Git runs through `git config --global core.sshCommand C:/Windows/System32/OpenSSH/ssh.exe` (pb ssh doctor prints it).
 
-## Folder send (tree, empty dirs) — after launch
-`pb send` takes regular files only today; a folder or symbolic link is refused with a clear message.
-- X-15 folder trees and symlinks in folders across OSes (moved from CHECKLIST X-15 with this line, 8e4412fe8): a folder keeps its structure on the receiver (nested folders, empty directories), symlinks inside a folder are refused or skipped the same way on every OS, plus the F6-01 folder case.
-
 ## In-memory peer policy, computed on change — after launch (user decision 2026-11-13)
 
 Today every machine config fetch (~6/s on the dev server; each machine about once per 52 s idle plus on every access change) evaluates workspace/team policy in SQL. 6b2335256 cut it to once per account per request (team-shared host 1.5–1.8 s → 60–80 ms, plain host ~40 ms → ~9 ms). Rough ceiling on the 4-core server+Postgres box: ~10k personal or ~1.4k team machines on config alone.

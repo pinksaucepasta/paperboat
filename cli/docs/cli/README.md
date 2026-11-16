@@ -178,7 +178,7 @@ Read the [CLI guide](../cli.md) for interactive use, scripting, installation of 
 | [pb resolve](pb_resolve.md) | Resolve a peer machine IP, port forwardings over gRPC IPC |
 | [pb rsync](pb_rsync.md) | Run rsync with Paperboat machine resolution |
 | [pb scp](pb_scp.md) | Run scp with Paperboat machine resolution |
-| [pb send](pb_send.md) | Send files to a machine's Paperboat Inbox |
+| [pb send](pb_send.md) | Send files or folders to a machine's Paperboat Inbox |
 | [pb send cancel](pb_send_cancel.md) | Cancel a file transfer batch |
 | [pb send destination](pb_send_destination.md) | Show the default transfer destination |
 | [pb send destination clear](pb_send_destination_clear.md) | Clear the default transfer destination |

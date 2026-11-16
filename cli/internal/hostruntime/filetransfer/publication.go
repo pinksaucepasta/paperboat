@@ -62,13 +62,25 @@ func (s *Service) ExistingPublishedPath(ctx context.Context, id string) (string,
 		return "", &Error{Code: InvalidPath}
 	}
 	info, err := os.Lstat(transfer.ReceiptPath)
-	if errors.Is(err, os.ErrNotExist) || err == nil && (!info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0) {
+	if errors.Is(err, os.ErrNotExist) || err == nil && !s.publishedKind(transfer.ID, info) {
 		return "", &Error{Code: InvalidPath}
 	}
 	if err != nil {
 		return "", &Error{Code: StorageUnavailable, Cause: err}
 	}
 	return transfer.ReceiptPath, nil
+}
+
+// publishedKind is whether info is what a published transfer leaves: a regular file, or for a folder transfer a folder
+// (never a link).
+func (s *Service) publishedKind(id string, info os.FileInfo) bool {
+	if info.Mode()&os.ModeSymlink != 0 {
+		return false
+	}
+	if s.isDirectory(id) {
+		return info.IsDir()
+	}
+	return info.Mode().IsRegular()
 }
 
 // The published file is a copy, not a second name for the spool content: a hard link would leave a second link inside
@@ -222,7 +234,7 @@ func (s *Service) publishToRoot(ctx context.Context, transfer store.FileTransfer
 		info, statErr := os.Lstat(path)
 		if statErr == nil {
 			// Ours only when it is the pinned receipt and its copy was completed; anything else is someone's file.
-			if path == transfer.ReceiptPath && info.Mode().IsRegular() && info.Mode()&os.ModeSymlink == 0 && s.publishedMarked(transfer.ID) {
+			if path == transfer.ReceiptPath && s.publishedKind(transfer.ID, info) && s.publishedMarked(transfer.ID) {
 				return path, nil
 			}
 			continue
@@ -245,13 +257,21 @@ func (s *Service) publishToRoot(ctx context.Context, transfer store.FileTransfer
 		if err := errors.Join(marker.Sync(), marker.Close(), syncDir(s.config.Root)); err != nil {
 			return "", &Error{Code: StorageUnavailable, Cause: err}
 		}
-		if err := s.copyToInbox(content, root, path, transfer.ID); err != nil {
+		publish := s.copyToInbox
+		if s.isDirectory(transfer.ID) {
+			publish = s.unpackToInbox
+		}
+		if err := publish(content, root, path, transfer.ID); err != nil {
 			if errors.Is(err, os.ErrExist) {
 				_ = os.Remove(s.markerPath(transfer.ID)) // the marker says the pinned name is ours; someone's file is there
 				continue
 			}
 			if _, statErr := os.Lstat(path); errors.Is(statErr, os.ErrNotExist) {
 				_ = os.Remove(s.markerPath(transfer.ID)) // nothing was linked: the marker must not claim the pinned name
+			}
+			var refusal *Error
+			if errors.As(err, &refusal) {
+				return "", refusal
 			}
 			return "", storageFailure(err) // a full disk is its own permanent code
 		}

@@ -1,12 +1,12 @@
 ## pb send
 
-Send files to a machine's Paperboat Inbox
+Send files or folders to a machine's Paperboat Inbox
 
 ### Synopsis
 
-Send files to a machine's Paperboat Inbox
+Send files or folders to a machine's Paperboat Inbox
 
-Send one or more paths to the selected machine's Inbox. The command succeeds only after receiver verification and a durable receipt; --session associates the transfer with a terminal session. Sending to the computer you are on copies the files into its own Inbox without a transfer.
+Send one or more paths to the selected machine's Inbox. The command succeeds only after receiver verification and a durable receipt; --session associates the transfer with a terminal session. Sending to the computer you are on copies the files into its own Inbox without a transfer. A folder arrives as a folder of the same name, empty folders included; links and special files inside it are not sent, and the command lists them.
 
 JSON output is supported with --json.
 
