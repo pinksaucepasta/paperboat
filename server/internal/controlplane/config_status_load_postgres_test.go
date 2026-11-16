@@ -51,7 +51,7 @@ type loadConfigFixture struct {
 // loadConfigTeam makes one team whose member owns `count` machines, all adopting the team's default.
 func (f *loadConfigFixture) team(enrollment *EnrollmentService, assignments *ConfigAssignmentService, tag string, count int) []*loadConfigMachine {
 	t, ctx := f.t, f.ctx
-	owner, member, team := "loadcfg_"+tag+"_o", "loadcfg_"+tag+"_m", "loadcfg_"+tag+"_t"
+	owner, member, team := "loadcfg_"+tag+"_o", "loadcfg_"+tag+"_m", "loadcfg-"+tag+"-t" // a team id is a lowercase slug
 	envs, machines := make([]string, count), make([]string, count)
 	for i := range count {
 		envs[i], machines[i] = fmt.Sprintf("loadcfg_%s_e%03d", tag, i), fmt.Sprintf("loadcfg_%s_u%03d", tag, i)
