@@ -21,6 +21,8 @@ SELECT
 	assignment.approved_pull_revision,
 	-- Only a live adoption puts the machine in the team's workspace (unadopt revokes the row, keeps the team).
 	live_assignment.adopted_team_id,
+	-- The team default was dropped: the assignment is revoked but still names the team it came from.
+	assignment.adopted_team_id IS NOT NULL AND assignment.revoked_at IS NOT NULL AS adoption_dropped,
 	assignment.adopted_default_version,
 	assignment.mode,
   assignment.consent_state,
@@ -137,7 +139,7 @@ func (s *ConfigStatusService) inventoryStatusRows(ctx context.Context, account s
  WHEN $7::boolean THEN 'disabled'
  WHEN assignment_id IS NULL OR repository_id IS NULL THEN 'disabled'
  WHEN repository_state<>'active' OR environment_state<>'active' THEN 'revoked'
- WHEN consent_state='revoked' THEN 'disabled'
+ WHEN consent_state='revoked' AND adoption_dropped THEN 'disabled'
  WHEN consent_state<>'accepted' THEN 'consent_required'
  WHEN machine_id IS NULL OR machine_id='' OR sync_state IS NULL OR coalesce(policy_revision,'')='' OR status_assignment_id IS DISTINCT FROM assignment_id OR status_repository_id IS DISTINCT FROM repository_id OR status_machine_id IS DISTINCT FROM machine_id OR status_installation_generation IS DISTINCT FROM installation_generation THEN 'pending'
  WHEN $8::bigint>0 AND (observed_at IS NULL OR observed_at<$9::timestamptz) THEN 'offline'
@@ -204,6 +206,7 @@ func (s *ConfigStatusService) inventoryStatusRows(ctx context.Context, account s
 			&item.AutomaticUpdates,
 			&item.ApprovedPullRevision,
 			&item.AdoptedTeamID,
+			&item.AdoptionDropped,
 			&item.AdoptedDefaultVersion,
 			&item.Mode,
 			&item.ConsentState,

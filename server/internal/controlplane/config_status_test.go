@@ -311,6 +311,11 @@ func TestEveryMachineStatusRequiresConsentAndOmitsCategory(t *testing.T) {
 			t.Fatalf("consent %q state = %q", state, got)
 		}
 	}
+	row.ConsentState = sql.NullString{String: "revoked", Valid: true}
+	row.AdoptionDropped = true
+	if got := canonicalAccountState(row, time.Now(), time.Minute); got != "disabled" {
+		t.Fatalf("dropped team default state = %q, want disabled", got)
+	}
 	encoded, err := json.Marshal(ConfigAccountStatus{Policy: ConfigAccountPolicy{Mode: "read_only"}, Environments: []ConfigAccountEnvironment{{MachineID: "m"}}})
 	if err != nil {
 		t.Fatal(err)

@@ -269,8 +269,8 @@ func canonicalAccountState(row dbsqlc.ListOwnedControlConfigSyncStatusRow, now t
 	if row.RepositoryState.String != "active" || row.EnvironmentState != "active" {
 		return "revoked"
 	}
-	// A revoked assignment on a live repository (team default unadopted) is no assignment: the machine is Off.
-	if row.ConsentState.String == "revoked" {
+	// A dropped team default is no assignment: the machine is Off. A consent the owner revoked still reads as consent_required.
+	if row.ConsentState.String == "revoked" && row.AdoptionDropped {
 		return "disabled"
 	}
 	if row.ConsentState.String != "accepted" {
