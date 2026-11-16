@@ -207,17 +207,20 @@ func TestLoadConfigStatus(t *testing.T) {
 	}
 
 	// The neighbor reports its status and reads its status list every 10 ms; it reports its own latencies.
+	var probeError atomic.Value // the neighbor's first failure
 	probe := func(until time.Time) (writes, reads []time.Duration, failures int) {
 		scope := workspace.WithContext(ctx, workspace.Scope{ID: neighbor.team, TeamID: neighbor.team})
 		for time.Now().Before(until) {
 			start := time.Now()
 			if err := f.send(neighbor, false); err != nil {
 				failures++
+				probeError.CompareAndSwap(nil, "report: "+err.Error())
 			}
 			writes = append(writes, time.Since(start))
 			start = time.Now()
 			if _, err := f.statuses.AccountInventory(scope, neighbor.member, ConfigStatusInventoryOptions{Limit: 50}); err != nil {
 				failures++
+				probeError.CompareAndSwap(nil, "status list: "+err.Error())
 			}
 			reads = append(reads, time.Since(start))
 			time.Sleep(10 * time.Millisecond)
@@ -226,7 +229,7 @@ func TestLoadConfigStatus(t *testing.T) {
 	}
 	baseWrites, baseReads, baseFailures := probe(time.Now().Add(5 * time.Second))
 	if baseFailures != 0 {
-		t.Fatalf("the neighbor alone failed %d times", baseFailures)
+		t.Fatalf("the neighbor alone failed %d times (first: %v)", baseFailures, probeError.Load())
 	}
 	t.Logf("neighbor alone: report p99 %v, status list p99 %v", loadP99(baseWrites), loadP99(baseReads))
 
@@ -304,7 +307,7 @@ func TestLoadConfigStatus(t *testing.T) {
 		t.Logf("%s: %d machines in %d teams, a report every %v for %d s: %d reports (%.1f/s), %d full status-list pages of 200 machines, %d worker errors (first: %v)", name, machinesN, len(teams), pause, seconds, reports.Load(), float64(reports.Load())/float64(seconds), pages.Load(), errorsTotal.Load(), firstError.Load())
 		t.Logf("%s: neighbor report p99 %v (%d samples), status list p99 %v (%d samples), %d failures; database: max idle-in-transaction %d, max sessions waiting on a lock %d", name, loadP99(loadWrites), len(loadWrites), loadP99(loadReads), len(loadReads), loadFailures, maxIdleInTx.Load(), maxLockWait.Load())
 		if errorsTotal.Load() != 0 || loadFailures != 0 {
-			t.Errorf("%s: failures under load: workers %d (%v), neighbor %d", name, errorsTotal.Load(), firstError.Load(), loadFailures)
+			t.Errorf("%s: failures under load: workers %d (%v), neighbor %d (first: %v)", name, errorsTotal.Load(), firstError.Load(), loadFailures, probeError.Load())
 		}
 		if int(maxIdleInTx.Load()) > machinesN+8 {
 			t.Errorf("%s: idle-in-transaction sessions: %d for %d machines", name, maxIdleInTx.Load(), machinesN)
