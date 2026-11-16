@@ -23,6 +23,7 @@ import { Time } from "@/components/time"
 import { useTunnelActions } from "@/components/tunnels/tunnel-actions"
 import { TunnelTitle } from "@/components/tunnels/tunnel-rename"
 import { IpRules } from "@/components/tunnels/ip-rules"
+import { ResourceHistory } from "@/components/tunnels/resource-history"
 import { TunnelHostnames } from "@/components/tunnels/tunnel-hostnames"
 import { TunnelStatus, tunnelState } from "@/components/tunnels/tunnel-status"
 import {
@@ -204,6 +205,8 @@ function Loaded({ tunnel }: { tunnel: Tunnel }) {
       <TunnelHostnames tunnel={tunnel} />
 
       <IpRules kind="tunnel" id={tunnel.id} />
+
+      <ResourceHistory kind="tunnel" id={tunnel.id} />
 
       <DangerZone
         title="Delete tunnel"

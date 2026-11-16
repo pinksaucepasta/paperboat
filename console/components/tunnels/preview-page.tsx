@@ -11,6 +11,7 @@ import { Section, SectionHeading } from "@/components/section"
 import { Time } from "@/components/time"
 import { ended, PreviewStatus } from "@/components/tunnels/preview-list"
 import { IpRules } from "@/components/tunnels/ip-rules"
+import { ResourceHistory } from "@/components/tunnels/resource-history"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useNow } from "@/lib/use-now"
@@ -144,6 +145,8 @@ function Loaded({ preview }: { preview: Preview }) {
       </Section>
 
       <IpRules kind="preview" id={preview.id} />
+
+      <ResourceHistory kind="preview" id={preview.id} />
     </>
   )
 }

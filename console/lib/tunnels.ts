@@ -327,3 +327,46 @@ export const saveIpRules = (kind: "tunnel" | "preview", id: string, rules: IPRul
     headers: { "content-type": "application/json" },
     body: JSON.stringify(rules),
   })
+
+export type HistoryPart = "events" | "logs"
+export type HistoryEvent = Data<"/v1/tunnels/{tunnel_id}/events">["items"][number]
+export type HistoryLog = Data<"/v1/tunnels/{tunnel_id}/logs">["items"][number]
+export type HistoryPage = { items: (HistoryEvent | HistoryLog)[]; next_cursor?: string }
+export const historyPageSize = 20
+
+/** One page of a tunnel's or preview's events or logs. The server pages forward by cursor and sends no total. */
+export const historyQuery = (kind: "tunnel" | "preview", id: string, part: HistoryPart, cursor: string) =>
+  queryOptions({
+    queryKey: ["history", kind, id, part, cursor] as const,
+    queryFn: ({ signal }) =>
+      api<HistoryPage>(
+        `${kind === "tunnel" ? tunnelPath(id) : previewPath(id)}/${part}?${new URLSearchParams({
+          limit: String(historyPageSize),
+          ...(cursor && { cursor }),
+        })}`,
+        { signal },
+      ),
+    refetchInterval: cursor ? false : 15_000,
+  })
+
+const eventWords: Record<string, string> = {
+  "tunnel.created": "Tunnel created",
+  "tunnel.updated": "Tunnel changed",
+  "preview.created": "Preview started",
+  "preview.ready": "Preview ready",
+  "preview.failed": "Preview failed to start",
+  "preview.lease_renewed": "Preview extended",
+  "preview.stopped": "Preview stopped",
+  "preview.expired": "Preview ended",
+  "preview.owner_lost": "Machine went away",
+  "preview.dispatch_uncertain": "Start not confirmed",
+  "operation.cancelled": "Change canceled",
+}
+
+/** An event type in plain words; unlisted ones read as their last part ("domain.bound" → "Bound"). */
+export function eventLabel(type: string) {
+  const known = eventWords[type]
+  if (known) return known
+  const last = (type.split(".").pop() ?? type).replace(/_/g, " ")
+  return last.charAt(0).toUpperCase() + last.slice(1)
+}
