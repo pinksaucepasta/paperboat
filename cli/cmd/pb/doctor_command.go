@@ -416,6 +416,11 @@ func doctorCredentialFailure(check doctorpkg.Check, err error) doctorpkg.Check {
 		check.Recovery = dashboardEnrollmentGuidance + " That signs in again and adds this computer back. Then run `pb doctor` again."
 		return check
 	}
+	if errors.Is(err, config.ErrCredentialStoreUnavailable) {
+		check.Summary = "This session cannot read the operating system's credential store."
+		check.Recovery = "On macOS over SSH the login keychain is locked: run `security unlock-keychain`, or run `pb doctor` in the Mac's own Terminal. Then run `pb doctor` again."
+		return check
+	}
 	if onlyEnvironmentFailureLeaves(err, func(leaf error) bool {
 		return leaf == config.ErrNoCredentials || leaf == config.ErrSecretNotFound || leaf == api.ErrUnauthenticated
 	}) {

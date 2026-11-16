@@ -10,6 +10,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	sessionauth "github.com/pinksaucepasta/paperboat/internal/auth"
+	"github.com/pinksaucepasta/paperboat/internal/config"
 	doctorpkg "github.com/pinksaucepasta/paperboat/internal/doctor"
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
 	"github.com/spf13/cobra"
@@ -28,6 +29,11 @@ func TestDoctorNamesARemovedComputerAndTheStepToAddItAgain(t *testing.T) {
 	refused := fmt.Errorf("account credentials: %w", errors.Join(fmt.Errorf("refresh Paperboat session"), &api.APIError{Status: 401, Code: "unauthenticated"}))
 	if got := doctorCredentialFailure(base, refused); !strings.Contains(got.Summary, "removed from the account") || !strings.Contains(got.Recovery, "pb login") {
 		t.Fatalf("a rejected refresh was not explained as a removed computer: %+v", got)
+	}
+	// X-38 (fleet Mac, 2026-11-16): a locked login keychain (SSH session) is named, not "check local credential storage".
+	locked := doctorCredentialFailure(base, fmt.Errorf("account credentials: %w", config.ErrCredentialStoreUnavailable))
+	if !strings.Contains(locked.Summary, "credential store") || !strings.Contains(locked.Recovery, "unlock-keychain") || strings.Contains(locked.Recovery, "pb login") {
+		t.Fatalf("a locked credential store was not named: %+v", locked)
 	}
 	// An unrelated credential failure keeps the generic guidance.
 	other := doctorCredentialFailure(base, errors.New("keyring unavailable"))
