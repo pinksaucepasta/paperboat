@@ -23,8 +23,10 @@ case "$s" in *"pb preview "*"--json"*) echo '{"data":{"id":"preview_1","url":"ht
 s=$(cat)
 case "$s" in *default_transaction_read_only*) echo SET ;; esac
 case "$s" in
-*"state = 'online'"*) printf 'machine_1\\nmachine_2\\n' ;;
-*"not online"*) cat "$T/offline" 2>/dev/null ;;
+*"state = 'online'"*"interval '30 minutes'"*) printf 'machine_1\\nmachine_2\\n' ;;  # machine_new enrolled minutes ago
+*"state = 'online'"*) printf 'machine_1\\nmachine_2\\nmachine_new\\n' ;;
+*"updated_at >="*"not online"*) printf 'machine_2\\n' ;;  # machine_2 blipped offline during the deploy
+*"not online"*"deleted_at is null"*) cat "$T/offline" 2>/dev/null ;;
 *support_reports*"code <> 'edge_error_page'"*) cat "$T/server5xx" ;;
 *"select support_reference"*"code = 'edge_error_page'"*) echo support_aaaa ;;  # only support_aaaa is a visitor app error page
 *support_reports*) echo 99 ;;  # a count that includes visitors' edge error pages fails every case
@@ -118,11 +120,17 @@ class CheckEdgesTest(unittest.TestCase):
         self.assertEqual(code, 1, out)
         self.assertIn('server: 5xx=2', out)
 
-    def test_machine_going_offline_fails_and_others_do_not_count(self):
+    def test_machine_still_offline_after_the_deploy_fails_and_others_do_not_count(self):
         code, out = self.run_gate(offline='machine_2\nmachine_never_online\n')
         self.assertEqual(code, 1, out)
-        self.assertIn('offline during the deploy=1', out)
+        self.assertIn('still offline after the deploy=1', out)
         self.assertNotIn('machine_never_online', out)
+
+    def test_fresh_or_blipping_machine_does_not_fail_the_gate(self):
+        # prod 2026-11-16 22:53: a lane's container enrolled at 22:39 went offline in the window and blocked edge .30
+        code, out = self.run_gate(offline='machine_new\n')
+        self.assertEqual(code, 0, out)
+        self.assertIn('still offline after the deploy=0', out)
 
     def test_log_follower_is_bounded_and_killed_on_exit(self):
         code, out = self.run_gate()

@@ -9,7 +9,9 @@
 #   attach    host route attach refusals (runtime_route_attach_refused)
 #   edge5xx   5xx pages the edge answered itself, dispatch failures included (edge_http_5xx)
 #   server5xx support_reports rows with HTTP status >= 500 (every server component)
-#   offline   machines online before the deploy that went offline during it
+#   offline   machines enrolled STABLE_MIN (30) minutes before the deploy, online at its start and still offline
+#             SETTLE seconds after it (a lane's fresh throwaway or a machine that blips and comes back does not count;
+#             presence has no history, so 'still offline at the end' is what separates a blip from a stranded host)
 # Edge logs are followed from every edge container that runs in the window, the replaced one included.
 # Usage: PROBE='<runs a shell on the paired probe machine>' SQL='<runs read-only psql on the production
 #   database, SQL on stdin, -At output>' check-edges.sh [--deploy '<deploy command>'] <ssh-target>=<ip> ...
@@ -21,7 +23,7 @@ if [ "${1:-}" = --deploy ]; then deploy=$2; shift 2; fi
 	echo "usage: PROBE='<cmd>' SQL='<cmd>' $0 [--deploy '<cmd>'] <ssh-target>=<public-ip> ..." >&2
 	exit 2
 }
-SETTLE=${SETTLE:-30} OBSERVE=${OBSERVE:-30} INTERVAL=${INTERVAL:-1}
+SETTLE=${SETTLE:-30} OBSERVE=${OBSERVE:-30} INTERVAL=${INTERVAL:-1} STABLE_MIN=${STABLE_MIN:-30}
 # Scripts go over stdin, so ssh and docker exec -i never re-split them.
 probe() { printf '%s\n' "$1" | $PROBE sh; }
 sql() { printf 'set default_transaction_read_only = on;\n%s\n' "$1" | $SQL | grep -v '^SET$' || true; }
@@ -81,22 +83,16 @@ for edge in "$@"; do # the new route reaches each edge within a few seconds
 done
 [ $fail = 0 ] || { echo "edge gate: FAIL (the preview never served; nothing deployed)"; exit 1; }
 
-sql "select id from paperboat.user_machines where state = 'online' and online and deleted_at is null and revoked_at is null;" >"$work/online-before"
+sql "select id from paperboat.user_machines where state = 'online' and online and deleted_at is null and revoked_at is null and coalesce(enrolled_at, created_at) < now() - interval '$STABLE_MIN minutes';" >"$work/online-before"
 [ -s "$work/online-before" ] || { echo "edge gate: FAIL (could not read the machines online before the deploy)"; exit 1; }
 : >"$work/probe-failed"; : >"$work/offline"
 (
-	n=0
 	while [ ! -e "$work/stop" ]; do
 		for edge in "$@"; do
 			at=$(date -u +%T.%N | cut -c1-12)
 			got=$(get "${edge#*=}"); code=${got%% *}; code=${code:-000}
 			[ "$code" = 200 ] || echo "$at ${edge%%=*} $code ${got#* }s GET $host/" >>"$work/probe-failed"
 		done
-		n=$((n + 1))
-		if [ $((n % 5)) = 0 ]; then
-			sql "select id from paperboat.user_machines where updated_at >= '$start' and not online;" |
-				grep -Fxf "$work/online-before" >>"$work/offline" || true
-		fi
 		sleep "$INTERVAL"
 	done
 ) &
@@ -109,7 +105,7 @@ if [ -n "$deploy" ]; then
 else
 	sleep "$OBSERVE"
 fi
-sql "select id from paperboat.user_machines where updated_at >= '$start' and not online;" | grep -Fxf "$work/online-before" >>"$work/offline" || true
+sql "select id from paperboat.user_machines where not online and deleted_at is null and revoked_at is null;" | grep -Fxf "$work/online-before" >>"$work/offline" || true
 touch "$work/stop"
 for edge in "$@"; do on "${edge%%=*}" "touch $stopfile" >/dev/null 2>&1 || true; done
 wait
@@ -137,7 +133,7 @@ done
 # Edge error pages (a visitor's app refused/timed out) are counted from the edge logs above, not as server failures.
 server5xx=$(sql "select count(*) from paperboat.support_reports where created_at >= '$start' and http_status >= 500 and code <> 'edge_error_page';")
 offline=$(sort -u "$work/offline" | grep -c . || true)
-echo "server: 5xx=$server5xx; machines online before and offline during the deploy=$offline"
+echo "server: 5xx=$server5xx; machines online before and still offline after the deploy=$offline"
 sort -u "$work/offline" | sed 's/^/  offline: /'
 [ "$server5xx" = 0 ] && [ "$offline" = 0 ] || fail=1
 sed 's/^/  failed request: /' "$work/probe-failed"
