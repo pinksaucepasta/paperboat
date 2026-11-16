@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	wire "github.com/pinksaucepasta/paperboat/shared/managedssh"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -22,11 +23,38 @@ func testCertificate(t *testing.T, ca ssh.Signer, key ssh.PublicKey, principals 
 	t.Helper()
 	certificate := &ssh.Certificate{Key: key, CertType: ssh.UserCert, KeyId: "paperboat:user_1:" + testSession + ":machine_1", ValidPrincipals: principals,
 		ValidAfter: uint64(issued.Add(-time.Minute).Unix()), ValidBefore: uint64(issued.Add(validity).Unix()),
-		Permissions: ssh.Permissions{Extensions: map[string]string{"permit-pty": ""}}}
+		Permissions: ssh.Permissions{CriticalOptions: map[string]string{"source-address": testSourceAddress}, Extensions: map[string]string{"permit-pty": ""}}}
 	if err := certificate.SignCert(rand.Reader, ca); err != nil {
 		t.Fatal(err)
 	}
 	return strings.TrimSpace(string(ssh.MarshalAuthorizedKey(certificate)))
+}
+
+// testSourceAddress is the source-address testCertificate issues, as the server does.
+var testSourceAddress = wire.CertificateSourceAddress
+
+// A certificate an earlier server issued for 127.0.0.1 only is not reused: sshd refuses it from the bridge's per-user
+// loopback source, so a new one is asked for.
+func TestEnsureCertificateIsNotReusedWhenItsSourceAddressIsOutdated(t *testing.T) {
+	home := t.TempDir()
+	ca, client := testSignerKey(t), testSignerKey(t)
+	publicKey := ssh.MarshalAuthorizedKey(client.PublicKey())
+	testSession = "session_1"
+	defer func() { testSourceAddress = wire.CertificateSourceAddress }()
+	start := time.Unix(1_800_000_000, 0)
+	issue := func(context.Context) (string, error) {
+		return testCertificate(t, ca, client.PublicKey(), []string{"alice", "pb:machine_1"}, start, 12*time.Hour), nil
+	}
+	target := CertificateTarget{Home: home, Alias: "studio", OSUser: "alice", Session: "session_1", MachineID: "machine_1"}
+	testSourceAddress = "127.0.0.1/32,::1/128"
+	if _, err := EnsureCertificate(t.Context(), target, publicKey, issue, start, time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	testSourceAddress = wire.CertificateSourceAddress
+	value, err := EnsureCertificate(t.Context(), target, publicKey, issue, start.Add(time.Minute), time.Hour)
+	if err != nil || !certificateOfSources(value) {
+		t.Fatalf("the outdated certificate was reused: %v", err)
+	}
 }
 
 func testSignerKey(t *testing.T) ssh.Signer {

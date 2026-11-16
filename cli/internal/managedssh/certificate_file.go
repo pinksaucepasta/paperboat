@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/atomicfile"
+	wire "github.com/pinksaucepasta/paperboat/shared/managedssh"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -30,7 +31,7 @@ type CertificateTarget struct {
 func EnsureCertificate(ctx context.Context, target CertificateTarget, publicKey []byte, issue func(context.Context) (string, error), now time.Time, renewWithin time.Duration) ([]byte, error) {
 	path := ManagedCertificatePath(target.Home, target.Alias)
 	existing, readErr := os.ReadFile(path)
-	usable := readErr == nil && UsableCertificate(existing, publicKey, target.OSUser, now, 0) && certificateOfSession(existing, target.Session) && certificateOfMachine(existing, target.MachineID)
+	usable := readErr == nil && UsableCertificate(existing, publicKey, target.OSUser, now, 0) && certificateOfSession(existing, target.Session) && certificateOfMachine(existing, target.MachineID) && certificateOfSources(existing)
 	if usable && UsableCertificate(existing, publicKey, target.OSUser, now, renewWithin) {
 		return existing, nil
 	}
@@ -66,6 +67,13 @@ func UsableCertificate(value, publicKey []byte, principal string, now time.Time,
 func certificateOfMachine(value []byte, machineID string) bool {
 	certificate, ok := parseCertificate(value)
 	return ok && machineID != "" && slices.Contains(certificate.ValidPrincipals, "pb:"+machineID)
+}
+
+// certificateOfSources: the certificate admits the loopback sources the host bridge connects from
+// (wire.CertificateSourceAddress); one an earlier server issued for 127.0.0.1 only is refused by sshd.
+func certificateOfSources(value []byte) bool {
+	certificate, ok := parseCertificate(value)
+	return ok && certificate.CriticalOptions["source-address"] == wire.CertificateSourceAddress
 }
 
 // certificateOfSession: the certificate's key ID ("paperboat:<user>:<session>:<machine>") names session.
