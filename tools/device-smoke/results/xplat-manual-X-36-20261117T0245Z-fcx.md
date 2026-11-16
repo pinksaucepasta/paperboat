@@ -9,3 +9,8 @@ Throwaway containers `fcx-old` (dev-3c91531a7, built before 6232eebec) and `fcx-
 - Control: NEW -> NEW with `--workspace <team>` worked.
 - Release versions order, so the message says "older than this pb"; dev builds do not order, so it names both builds.
 Unit: TestRefusedStreamNamesAnOlderMachine (cmd/pb, -race, pbvm2).
+
+## pb connect and pb ssh against the old-build container (second run, same day)
+Containers recreated from `dev-3c91531a7` (old) and the pre-hold builds `dev-b638b28dd` / `dev-9156ba16b` (new); both machines shared into the team with exec, terminal, managed_ssh grants; revoked by exact id afterwards.
+- `pb connect fcx-old` (default and `--workspace <team>`): worked (online terminal streams carry no workspace in the header). A refused terminal can only occur on the offline path, which needs Paperboat unreachable and a warm cache; with the control plane blocked pb refuses before dialing ("Paperboat is unreachable"), so that path is covered by TestVersionSkewRefusalIsNotRetried only.
+- `pb ssh fcx-old -- echo` default: worked. `pb --workspace <team> ssh fcx-old -- echo` NEW->OLD: failed before the fix with only OpenSSH's "Connection closed"; with dev-9156ba16b it ends with `pb: fcx-old runs pb dev-3c91531a7 and this pb is dev-9156ba16b; a build older than the other can refuse its connections. Update the older one (pb update on that machine), then retry.` (an earlier "SSH server closed the connection" line from the existing explainer still prints first). Control NEW->NEW with the same workspace: worked.
