@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation"
 import { meQuery, useApiQuery } from "@/lib/api"
 import { accountDeletionLive } from "@/lib/account-deletion"
 import { setAnalyticsOff, setHideEmail, useAnalyticsOff, useHideEmail } from "@/lib/privacy"
+import { CliSessions } from "@/components/cli-sessions"
 import { Email } from "@/components/email"
 import { TransferModeSection } from "@/components/transfer-mode"
 import { DangerZone, Section, SettingRow } from "@/components/section"
@@ -38,6 +39,7 @@ export function Account() {
         </SettingRow>
       </Section>
       <TransferModeSection />
+      <CliSessions />
       {accountDeletionLive && (
         <DangerZone
           title="Delete account"
