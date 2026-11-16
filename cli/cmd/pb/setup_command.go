@@ -272,6 +272,7 @@ func setupCommand() *cobra.Command {
 				if err != nil || strings.TrimSpace(name) == "" {
 					return commandPreparationFailure{step: prepareMachineName, cause: err}
 				}
+				name = hostMachineName(name)
 			}
 			key := identityStore.Current()
 			publicIdentityKey := base64.RawURLEncoding.EncodeToString(key.Public())
@@ -585,4 +586,14 @@ func registeredSSHTarget(machine api.UserMachine, generation int64) api.MachineS
 		return *machine.SSH
 	}
 	return api.MachineSSH{}
+}
+
+// hostMachineName is the machine name a hostname gives: its first label, as bootstrap does (macOS
+// reports Name.local; machine names are single DNS labels, so the whole name was refused, F26-02 Mac).
+func hostMachineName(host string) string {
+	host = strings.TrimSpace(host)
+	if dot := strings.IndexByte(host, '.'); dot > 0 {
+		host = host[:dot]
+	}
+	return host
 }

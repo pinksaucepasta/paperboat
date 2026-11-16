@@ -131,3 +131,11 @@ func TestRecipePairRefusesBadInputAtOnce(t *testing.T) {
 		t.Fatalf("PB_RECIPE malformed: %v", err)
 	}
 }
+
+func TestHostMachineNameKeepsTheFirstLabel(t *testing.T) {
+	for host, want := range map[string]string{"Manageds-Virtual-Machine.local": "Manageds-Virtual-Machine", "rcp-l": "rcp-l", " apple.lan ": "apple"} {
+		if got := hostMachineName(host); got != want {
+			t.Fatalf("%q -> %q, want %q", host, got, want)
+		}
+	}
+}
