@@ -226,7 +226,7 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 	}
 	revocationRefresh.events = machineEvents.Subscribe(machineevents.TopicMachineAccess)
 	reachable := machineEvents.Recovered()
-	authorizationRefresh := serviceGroup{machineEvents, &jwksRefreshService{cache: cache}, revocationRefresh}
+	authorizationRefresh := serviceGroup{machineEvents, newDaemonEventForwarder(machineEvents, machineID, pushDaemonEvents), &jwksRefreshService{cache: cache}, revocationRefresh}
 	if len(ownerDependencies) != 0 && ownerDependencies[0].CarrierEvents != nil {
 		forwarder := newCarrierEventForwarder(machineEvents, ownerDependencies[0].CarrierEvents)
 		reachable = forwarder.recovered

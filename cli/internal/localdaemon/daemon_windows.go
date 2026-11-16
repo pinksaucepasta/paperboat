@@ -167,6 +167,7 @@ func runWindowsDaemon(ctx context.Context, config DaemonConfig) (runErr error) {
 	vaultCustody := localapi.NewVaultCustodyStore()
 	defer func() { runErr = daemonCleanupFailure(runErr, vaultCustody.Close()) }()
 	server, err := localapi.NewServer(localapi.ServerConfig{
+		MachineEvents:        config.MachineEvents,
 		SocketPath:           config.Paths.SocketPath,
 		OwnerUID:             -1,
 		OwnerGID:             -1,
