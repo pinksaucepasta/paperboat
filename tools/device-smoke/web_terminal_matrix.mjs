@@ -20,7 +20,7 @@ const machine = arg("machine")
 const ownerState = arg("owner-state")
 const memberState = arg("member-state")
 const memberEmail = arg("member-email")
-const only = arg("only", "w2,w4,w4b,w5,w6,w7,w9,w10,w11,w12,w13,w1,w3").split(",")
+const only = arg("only", "w2,w4,w4b,w5,w6,w7,w9,w10,w11,w14,w12,w13,w1,w3").split(",")
 const hiddenMinutes = Number(arg("hidden-minutes", "5"))
 if (!machine || !ownerState) throw new Error("--machine and --owner-state are required")
 
@@ -335,6 +335,60 @@ const rows = {
     }, body)
     const out = (await run(page, `{ command -v sha256sum >/dev/null && sha256sum ${path} || shasum -a 256 ${path}; }; rm -f ${path}`, 120_000)) ?? ""
     row("W11 64 KiB paste reaches the shell byte for byte", out.includes(want), id)
+    await page.close()
+    await closeTerminal(ctx, id)
+  },
+
+  // W14: a multi-line paste into a Windows target asks first (the target is a Linux machine here; its platform is
+  // rewritten to windows in the machine API answers the page reads). Cancel types nothing, "Paste as one line" joins
+  // the lines with spaces, Paste runs each line.
+  async w14(ctx) {
+    await ctx.route(
+      (url) => /machines/.test(url.pathname),
+      async (route) => {
+        const response = await route.fetch()
+        const body = await response.text()
+        const patched = (() => {
+          try {
+            const walk = (v) => {
+              if (Array.isArray(v)) v.forEach(walk)
+              else if (v && typeof v === "object") {
+                if (v.id === machine && "platform" in v) v.platform = "windows"
+                Object.values(v).forEach(walk)
+              }
+            }
+            const json = JSON.parse(body)
+            walk(json)
+            return JSON.stringify(json)
+          } catch {
+            return body
+          }
+        })()
+        await route.fulfill({ response, body: patched })
+      },
+    )
+    const { page, id } = await newTerminal(ctx)
+    const paste = async (choice) => {
+      await page.evaluate(() => {
+        const data = new DataTransfer()
+        data.setData("text/plain", "echo $((10+1))\necho $((20+2))\n")
+        const target = document.querySelector(".terminal-host textarea") ?? document.activeElement
+        target.dispatchEvent(new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true }))
+      })
+      const dialog = page.locator("[data-terminal-paste-confirm]")
+      const asked = await dialog.waitFor({ timeout: 5_000 }).then(() => true, () => false)
+      const lines = asked ? await dialog.getAttribute("data-terminal-paste-confirm") : null
+      if (asked) await page.getByRole("button", { name: choice, exact: true }).click()
+      await sleep(2500)
+      const text = (await screen(page)).split("\n").map((l) => l.trim())
+      return { asked, lines, text }
+    }
+    const cancel = await paste("Cancel")
+    row("W14 Windows target: the paste asks 'Paste 2 lines?' and Cancel types nothing", cancel.asked && cancel.lines === "2" && !cancel.text.some((l) => l === "11" || l === "22" || l.includes("echo $((")), id)
+    const one = await paste("Paste as one line")
+    row("W14 Windows target: Paste as one line joins the lines with a space", one.asked && one.text.includes("11 echo 22"), id)
+    const both = await paste("Paste")
+    row("W14 Windows target: Paste runs each line", both.asked && both.text.includes("11") && both.text.includes("22"), id)
     await page.close()
     await closeTerminal(ctx, id)
   },
