@@ -47,6 +47,9 @@ func (e staticFailure) Error() string { return e.message }
 
 func (e staticFailure) Unwrap() error { return e.cause }
 
+// DefaultAdmissionLifetime bounds carrier dial handshakes, independently of signed credentials.
+const DefaultAdmissionLifetime = 10 * time.Minute
+
 type Service struct {
 	DB                *db.DB
 	AdmissionLifetime time.Duration
@@ -56,10 +59,10 @@ func validRequest(p previewattachment.MachineProof, r runtimewire.Request) bool 
 	return p.Validate() == nil && runtimewire.ValidCapabilities(r.Capabilities) && r.OperationID == p.OperationID && connectorprotocol.ValidateOpaqueEpoch(r.ProcessID) == nil && r.WorkerGeneration > 0 && r.WorkerGeneration <= 1<<62 && r.InstallationGeneration == p.InstallationGeneration && r.RuntimeListenPort >= 1024 && r.RuntimeListenPort <= 65535 && ((r.ActiveEdgeNodeID == "" && r.ActiveEdgeProcessEpoch == "") || (connectorprotocol.ValidateIdentifier(r.ActiveEdgeNodeID) == nil && connectorprotocol.ValidateOpaqueEpoch(r.ActiveEdgeProcessEpoch) == nil))
 }
 
-// admissionLifetime is the signed admission's lifetime, as admission.Deadline applies it.
+// admissionLifetime is the unsigned carrier admission's lifetime.
 func (s *Service) admissionLifetime() time.Duration {
 	if s.AdmissionLifetime == 0 {
-		return admission.DefaultLifetime
+		return DefaultAdmissionLifetime
 	}
 	return s.AdmissionLifetime
 }
@@ -272,12 +275,12 @@ WHEN n.id=$2 THEN 2 ELSE 3 END,n.id LIMIT 32 FOR SHARE OF n`, proof.UserID, acti
 			binding := runtimewire.Binding{AccountID: proof.UserID, HostID: proof.MachineID, TunnelID: route, ConnectorID: proof.MachineID, SessionID: sessionID, ProcessGeneration: request.WorkerGeneration, ConfigGeneration: uint64(revision), RouteID: route, RouteGeneration: uint64(revision), InstallationGeneration: request.InstallationGeneration, EdgeNodeID: edge.node, EdgeProcessEpoch: edge.epoch, EdgeCarrierServerSPKISHA256: edge.pin, EdgeCarrierServerCertificateChainPEM: edge.chain, MachineIdentityPublicKey: publicKey, MachineIdentityThumbprint: thumb}
 			encoded, _ := json.Marshal(binding)
 			hash := sha256.Sum256(encoded)
-			admission := runtimewire.Admission{Schema: runtimewire.Schema, Binding: binding, AttachmentGeneration: rowGeneration, ConfigContentHash: "sha256:" + hex.EncodeToString(hash[:]), EdgeEndpoints: []string{"h2://" + net.JoinHostPort(edge.endpoint, fmt.Sprint(edge.tcp)), "h3://" + net.JoinHostPort(edge.endpoint, fmt.Sprint(edge.quic))}, Hostname: host, RouteKind: "runtime_https_wss", RouteRevision: uint64(revision), ExpiresAt: admission.Deadline(time.Now(), s.AdmissionLifetime)}
+			admission := runtimewire.Admission{Schema: runtimewire.Schema, Binding: binding, AttachmentGeneration: rowGeneration, ConfigContentHash: "sha256:" + hex.EncodeToString(hash[:]), EdgeEndpoints: []string{"h2://" + net.JoinHostPort(edge.endpoint, fmt.Sprint(edge.tcp)), "h3://" + net.JoinHostPort(edge.endpoint, fmt.Sprint(edge.quic))}, Hostname: host, RouteKind: "runtime_https_wss", RouteRevision: uint64(revision), ExpiresAt: admission.Deadline(time.Now(), s.admissionLifetime())}
 			encoded, err = json.Marshal(admission)
 			if err != nil {
 				return err
 			}
-			// A machine re-attaches every ~25 s. While the stored admission is the same apart from its deadline
+			// While the stored admission is the same apart from its deadline
 			// and has more than half its lifetime left, return it and write nothing.
 			if same && slices.Equal(previousCapabilities[edge.node], capabilities) && prior.ExpiresAt.After(time.Now().Add(s.admissionLifetime()/2)) {
 				kept := admission
@@ -443,7 +446,7 @@ func (s *Service) Pull(ctx context.Context, edge previewattachment.PreviewEdgeId
 		if err := json.Unmarshal(raw, &a); err != nil {
 			return nil, err
 		}
-		a.ExpiresAt = admission.Deadline(time.Now(), s.AdmissionLifetime)
+		a.ExpiresAt = admission.Deadline(time.Now(), s.admissionLifetime())
 		out = append(out, a)
 		if len(out) > runtimewire.MaximumAdmissions {
 			return nil, ErrUnavailable
@@ -453,7 +456,7 @@ func (s *Service) Pull(ctx context.Context, edge previewattachment.PreviewEdgeId
 	if err := rows.Err(); err != nil || len(capabilities) == 0 || runtimewire.HasCapability(capabilities, runtimewire.CapabilityEndpointDeltas) {
 		return out, err
 	}
-	routes, err := endpoints.EdgeAdmissions(ctx, s.DB.Pool(), edge.NodeID, edge.ProcessEpoch, admission.Deadline(time.Now(), s.AdmissionLifetime), runtimewire.MaximumAdmissions-len(out))
+	routes, err := endpoints.EdgeAdmissions(ctx, s.DB.Pool(), edge.NodeID, edge.ProcessEpoch, admission.Deadline(time.Now(), s.admissionLifetime()), runtimewire.MaximumAdmissions-len(out))
 	if err != nil {
 		return nil, err
 	}
@@ -480,7 +483,7 @@ func (s *Service) PullEndpoints(ctx context.Context, edge previewattachment.Prev
 	if !runtimewire.HasCapability(capabilities, runtimewire.CapabilityEndpoints) || !runtimewire.ValidEdgeCapabilities(capabilities) {
 		return runtimewire.Snapshot{}, ErrInvalid
 	}
-	expires := admission.Deadline(time.Now(), s.AdmissionLifetime)
+	expires := admission.Deadline(time.Now(), s.admissionLifetime())
 	out := runtimewire.Snapshot{Schema: runtimewire.Schema}
 	if !runtimewire.HasCapability(capabilities, runtimewire.CapabilityEndpointDeltas) {
 		if page != "" {

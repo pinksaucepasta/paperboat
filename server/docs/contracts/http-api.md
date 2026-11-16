@@ -551,9 +551,12 @@ carry probe addresses only; the carrier still authenticates its exact edge.
 installation/process/config/route generations, current edge process, pinned edge
 certificate and current machine public key/thumbprint. Existing wire fields
 `machine_identity_public_key` and `machine_identity_thumbprint` remain explicit.
-The host renews before the admission expires (`cli_auth.mint_proof_lifetime`, 2 minutes by
-default); unchanged bindings retain
-their carrier sessions. It connects both admitted edges but opens terminal output
+The unsigned carrier admission has a dedicated 10-minute default lifetime, independent
+of `cli_auth.mint_proof_lifetime`. A healthy host rechecks at most every 5 minutes
+(or half the remaining admission lifetime, whichever is sooner). Unchanged bindings
+reuse the stored admission until half its lifetime remains, then renew it while retaining
+their carrier sessions. This expiry bounds the dial handshake; machine, route and edge
+liveness checks continue to withdraw eligibility independently of it. It connects both admitted edges but opens terminal output
 only on the server-confirmed active edge. An active change requires a fresh ready
 observation for the requested exact node and process epoch. The previous output
 publication closes, so browser clients obtain a new ticket and screen checkpoint.

@@ -8,7 +8,7 @@ import (
 	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
 )
 
-// A machine re-attaches every ~25 s with the same request. Before, every attachment rewrote its two carrier
+// Before, every attachment rewrote its two carrier
 // attachments (a new admission deadline), its edge placement and its latency samples (~1,500 row versions an
 // hour per idle machine on staging, PLAN 3b). Now an unchanged attachment returns the stored admission while it
 // has more than half its lifetime left, and a similar latency or the same placement is not rewritten; a
@@ -29,10 +29,28 @@ func TestUnchangedAttachmentWritesNoRowsOnPostgres(t *testing.T) {
 	request := f.request
 	request.EdgePreference = &runtimewire.EdgePreference{PrimaryNodeID: f.node, PrimaryProcessEpoch: f.edge.ProcessEpoch, SecondaryNodeID: f.backupNode, SecondaryProcessEpoch: f.backupEdge.ProcessEpoch}
 	request.EdgeLatency = []runtimewire.EdgeLatency{{NodeID: f.node, ProcessEpoch: f.edge.ProcessEpoch, RTTMilliseconds: 40}}
+	before := time.Now()
 	first, err := f.service.Attach(f.ctx, f.proof, request)
 	if err != nil {
 		t.Fatal(err)
 	}
+	assertLifetime := func(a runtimewire.Admission, before time.Time) {
+		t.Helper()
+		// Deadlines have second precision; include that truncation in the lower bound.
+		if a.ExpiresAt.Before(before.Truncate(time.Second).Add(10*time.Minute)) || a.ExpiresAt.After(time.Now().Add(10*time.Minute)) {
+			t.Fatalf("carrier admission deadline = %s; want a ten-minute lifetime", a.ExpiresAt)
+		}
+	}
+	assertLifetime(first.Admission, before)
+	if first.Backup == nil {
+		t.Fatal("missing backup admission")
+	}
+	assertLifetime(*first.Backup, before)
+	pulled, err := f.service.Pull(f.ctx, f.edge, nil)
+	if err != nil || len(pulled) != 1 {
+		t.Fatalf("pull admissions = %d, err = %v", len(pulled), err)
+	}
+	assertLifetime(pulled[0], before)
 	// The first attachment learns the candidates; the second one reports against them.
 	second, err := f.service.Attach(f.ctx, f.proof, request)
 	if err != nil {
@@ -64,11 +82,18 @@ func TestUnchangedAttachmentWritesNoRowsOnPostgres(t *testing.T) {
 		t.Fatal("a changed latency sample was not written")
 	}
 
-	// Past half its lifetime the admission is renewed: with a 10 min lifetime the stored 2 min one is.
-	longer := &Service{DB: f.database, AdmissionLifetime: 10 * time.Minute}
+	// Age the stored admissions to two minutes remaining: past the default half-life.
+	f.exec(t, `UPDATE runtime_carrier_attachments SET expires_at=date_trunc('second',now())+interval '2 minutes',
+ admission=jsonb_set(admission,'{expires_at}',to_jsonb(date_trunc('second',now())+interval '2 minutes')) WHERE route_id=$1`, f.route)
 	renewable := xmins()
-	if _, err := longer.Attach(f.ctx, f.proof, request); err != nil {
+	before = time.Now()
+	renewed, err := f.service.Attach(f.ctx, f.proof, request)
+	if err != nil {
 		t.Fatal(err)
+	}
+	assertLifetime(renewed.Admission, before)
+	if renewed.Admission.Binding.SessionID != second.Admission.Binding.SessionID || renewed.Admission.AttachmentGeneration != second.Admission.AttachmentGeneration {
+		t.Fatal("renewing an unchanged binding replaced its carrier session or generation")
 	}
 	if after := xmins(); after == renewable {
 		t.Fatal("an admission past half its lifetime was not renewed")
