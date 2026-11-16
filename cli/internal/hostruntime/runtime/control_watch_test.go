@@ -76,6 +76,20 @@ func TestLayerEnvironmentDoesNotWaitOnAControlPlaneKnownDown(t *testing.T) {
 	}
 }
 
+// The host's own boot-time key registration holds the lock for its whole 15 s request when Paperboat is unreachable; a
+// launch's ENV lookup queued behind it for all of that (15 s measured on the first exec after a restart in an outage).
+func TestLayerRegistrationWaitIsBoundedByTheCallersContext(t *testing.T) {
+	base, _ := url.Parse("https://control.example.test")
+	service := newLayerEnvironmentService(t.TempDir(), base, nil, layerRegistration(t), nil, nil)
+	service.refresh <- struct{}{} // the boot-time registration is in flight
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	started := time.Now()
+	if err := service.registerLayerRecipient(ctx); !errors.Is(err, context.DeadlineExceeded) || time.Since(started) > 2*time.Second {
+		t.Fatalf("err=%v after %v; want the caller's deadline", err, time.Since(started))
+	}
+}
+
 func layerRegistration(t *testing.T) runtimeidentity.Registration {
 	t.Helper()
 	return runtimeidentity.Registration{MachineID: "machine_1", InstallationGeneration: 11}

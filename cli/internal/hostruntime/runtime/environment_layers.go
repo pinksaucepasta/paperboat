@@ -316,8 +316,14 @@ func (s *layerEnvironmentService) sendLayerObservationBatch(ctx context.Context,
 // registerLayerRecipient enrolls only the installation recipient key. It neither
 // requires a Personal vault nor downloads an account-wide plaintext projection.
 func (s *layerEnvironmentService) registerLayerRecipient(ctx context.Context) error {
-	s.refresh.Lock()
-	defer s.refresh.Unlock()
+	// The boot-time registration loop holds this for its whole request (15 s on an unreachable control plane): a launch
+	// waits only as long as its own budget instead of queueing behind it.
+	select {
+	case s.refresh <- struct{}{}:
+		defer func() { <-s.refresh }()
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 	s.mu.RLock()
 	registered := s.layerRegistered
 	s.mu.RUnlock()

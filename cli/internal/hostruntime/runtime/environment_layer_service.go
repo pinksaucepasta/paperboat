@@ -32,12 +32,12 @@ type layerEnvironmentService struct {
 	observationCredentials managedSSHIdentitySource
 	cancel                 context.CancelFunc
 	done                   chan struct{}
-	refresh                sync.Mutex
+	refresh                chan struct{} // one key registration at a time; a launch gives up on it with its context
 	closed                 bool
 }
 
 func newLayerEnvironmentService(stateRoot string, base *url.URL, transport http.RoundTripper, registration runtimeidentity.Registration, credentials, observationCredentials managedSSHIdentitySource) *layerEnvironmentService {
-	return &layerEnvironmentService{stateRoot: stateRoot, base: base, transport: transport, registration: registration, credentials: credentials, observationCredentials: observationCredentials, done: make(chan struct{})}
+	return &layerEnvironmentService{stateRoot: stateRoot, base: base, transport: transport, registration: registration, credentials: credentials, observationCredentials: observationCredentials, done: make(chan struct{}), refresh: make(chan struct{}, 1)}
 }
 func (s *layerEnvironmentService) Start(ctx context.Context) error {
 	if ctx == nil || s == nil || s.credentials == nil || s.observationCredentials == nil {
