@@ -4,7 +4,10 @@ Run this stack only on the managed VPS. Set immutable image references in the
 owner-only `.env`: `PAPERBOAT_POSTGRES_IMAGE` (PostgreSQL 17),
 `PAPERBOAT_SERVER_IMAGE`, `PAPERBOAT_DIAGNOSTICS_IMAGE` (MinIO), and
 `PAPERBOAT_PROXY_IMAGE` (Caddy). Configure `PAPERBOAT_API_HOST`,
-`PAPERBOAT_DOWNLOAD_HOST`, and `PAPERBOAT_DIAGNOSTICS_HOST` there too.
+`PAPERBOAT_DOWNLOAD_HOST`, `PAPERBOAT_DIAGNOSTICS_HOST` and `PAPERBOAT_CONSOLE_HOST` (the production console, proxied to
+the host's `paperboat-console` unit on 172.18.0.1:3100) there too. The proxy container reads these names when it is created: adding
+one to a running stack means recreating the proxy (`docker compose up -d --no-deps proxy`), a short cut of every long-lived
+stream, so do it in a quiet window and not as part of a server rollout.
 
 Restore owner-only secret files into `secrets/`; keep `server.env` owner-only.
 Configure the server's database DSN with the `postgres` service hostname and

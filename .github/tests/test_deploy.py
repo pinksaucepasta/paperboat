@@ -25,7 +25,7 @@ class DeploymentCompositionTest(unittest.TestCase):
                 "PAPERBOAT_POSTGRES_IMAGE=postgres:17", "PAPERBOAT_SERVER_IMAGE=paperboat-server:test",
                 "PAPERBOAT_DIAGNOSTICS_IMAGE=minio/minio:test", "PAPERBOAT_PROXY_IMAGE=caddy:2",
                 "PAPERBOAT_API_HOST=api.example.test", "PAPERBOAT_DOWNLOAD_HOST=get.example.test",
-                "PAPERBOAT_DIAGNOSTICS_HOST=diagnostics.example.test",
+                "PAPERBOAT_DIAGNOSTICS_HOST=diagnostics.example.test", "PAPERBOAT_CONSOLE_HOST=console.example.test",
             ]) + "\n")
             command = docker + ["compose", "--project-directory", str(root), "--env-file", str(root / ".env"),
                                 "-f", str(ROOT / "deploy/compose.yaml"), "config", "--format", "json"]
@@ -39,6 +39,7 @@ class DeploymentCompositionTest(unittest.TestCase):
             secret_mount = next(v for v in services["server"]["volumes"] if v["target"] == "/run/secrets")
             self.assertTrue(secret_mount["read_only"])
             self.assertEqual(services["proxy"]["environment"]["PAPERBOAT_API_HOST"], "api.example.test")
+            self.assertEqual(services["proxy"]["environment"]["PAPERBOAT_CONSOLE_HOST"], "console.example.test")
             release_mount = next(v for v in services["proxy"]["volumes"] if v["target"] == "/srv/paperboat-releases")
             self.assertTrue(release_mount["read_only"])
 

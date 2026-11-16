@@ -27,6 +27,6 @@
 	reverse_proxy diagnostics:9000
 }
 # Production console (tools/console-prod.sh; systemd unit paperboat-console on the host).
-app.paperboat.cloud {
+{$PAPERBOAT_CONSOLE_HOST} {
 	reverse_proxy 172.18.0.1:3100
 }
