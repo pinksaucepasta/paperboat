@@ -102,6 +102,11 @@ func (b *Bar) SetUsage(credits, storage string) {
 func (b *Bar) SetRecording(recording bool) {
 	b.mu.Lock()
 	b.recording = recording
+	if recording && b.suspended { // recording started inside a full-screen application: take the bar's row back
+		b.suspended = false
+		b.scrollDirty = true
+		b.notifyViewportLocked()
+	}
 	b.updateTitleLocked()
 	// Painted now, not at the next coalesced redraw: the host sends REC ahead of the session's first output, and the
 	// mark must not land after the history that follows.

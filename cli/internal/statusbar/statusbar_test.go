@@ -821,3 +821,29 @@ func TestTerminalNameWindowsHasNoTERM(t *testing.T) {
 		}
 	}
 }
+
+// X-24 in a real GUI terminal: vim hid the whole bar, REC with it. While the session is recorded the bar keeps its row in
+// full-screen applications, whether the recording began before or inside them.
+func TestRecordingKeepsTheBarInFullscreenApplications(t *testing.T) {
+	bar, _ := newTestBar(t, ModeAuto, "xterm-256color", 80, 24, true, time.Second)
+	bar.SetRecording(true)
+	_, _ = bar.Write([]byte("\x1b[?1049h"))
+	if _, rows := bar.RemoteSize(); rows != 23 || bar.suspended {
+		t.Fatalf("recorded, entering: rows = %d suspended=%t", rows, bar.suspended)
+	}
+	bar.SetRecording(false)
+	_, _ = bar.Write([]byte("\x1b[?1049l"))
+	_, _ = bar.Write([]byte("\x1b[?1049h"))
+	if _, rows := bar.RemoteSize(); rows != 24 || !bar.suspended {
+		t.Fatalf("not recorded, entering: rows = %d suspended=%t", rows, bar.suspended)
+	}
+	bar.SetRecording(true)
+	if _, rows := bar.RemoteSize(); rows != 23 || bar.suspended {
+		t.Fatalf("recording started inside: rows = %d suspended=%t", rows, bar.suspended)
+	}
+	_, _ = bar.Write([]byte("\x1b[?1049l"))
+	_, _ = bar.Write([]byte("\x1b[?1049h"))
+	if _, rows := bar.RemoteSize(); rows != 23 || bar.suspended {
+		t.Fatalf("re-entering while recorded: rows = %d suspended=%t", rows, bar.suspended)
+	}
+}

@@ -84,6 +84,9 @@ func (b *Bar) trackAlternateScreen(sequence []byte) bool {
 		return false
 	}
 	b.alternate = entering
+	if entering && b.recording {
+		return false // REC stays on screen in full-screen applications: the bar keeps its row, as with FullscreenShow
+	}
 	if entering {
 		_, _ = fmt.Fprint(b.serializedOut, "\x1b[r")
 		b.scrollRows = 0
