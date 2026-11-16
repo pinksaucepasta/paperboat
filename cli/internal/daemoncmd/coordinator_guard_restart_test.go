@@ -5,6 +5,8 @@ import (
 	"crypto/tls"
 	"errors"
 	"net"
+	"net/netip"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -17,7 +19,29 @@ import (
 // A guard connection that stops answering because the guard restarted.
 type restartableGuardClient struct {
 	*coordinatorNameClient
-	dead atomic.Bool
+	dead      atomic.Bool
+	mu        sync.Mutex
+	listeners []net.Listener
+}
+
+func (c *restartableGuardClient) AcquireMachine(ctx context.Context, account, machine, hostname string, ip netip.Addr, port int) (net.Listener, netip.Addr, error) {
+	listener, assigned, err := c.coordinatorNameClient.AcquireMachine(ctx, account, machine, hostname, ip, port)
+	if err == nil {
+		c.mu.Lock()
+		c.listeners = append(c.listeners, listener)
+		c.mu.Unlock()
+	}
+	return listener, assigned, err
+}
+
+// restart is what a replaced root guard does to this connection: the answers stop and every listener it held closes.
+func (c *restartableGuardClient) restart() {
+	c.dead.Store(true)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, listener := range c.listeners {
+		_ = listener.Close()
+	}
 }
 
 func (c *restartableGuardClient) Status(ctx context.Context) (machineguard.RuntimeStatus, error) {
@@ -30,9 +54,22 @@ func (c *restartableGuardClient) Status(ctx context.Context) (machineguard.Runti
 // After the root guard restarts, a daemon whose reconcile had succeeded reconnects and re-acquires its routes
 // by itself within a bound: no restart of the daemon and no new topology snapshot.
 func TestCoordinatorReconnectsToARestartedGuardWithoutANewSnapshot(t *testing.T) {
+	reconnectsToARestartedGuard(t, 10*time.Millisecond, func(c *restartableGuardClient) { c.dead.Store(true) })
+}
+
+// The listeners a restarting guard closes tell the daemon at once: with the periodic watch effectively off, the
+// failed listener alone makes it reconnect, so another OS user's install does not leave this one without access.
+func TestCoordinatorReconnectsAtOnceWhenARestartedGuardClosesItsListeners(t *testing.T) {
+	reconnectsToARestartedGuard(t, time.Hour, (*restartableGuardClient).restart)
+}
+
+func reconnectsToARestartedGuard(t *testing.T, watch time.Duration, kill func(*restartableGuardClient)) {
+	t.Helper()
 	restoreBase, restoreMax, restoreWatch := reconcileRetryBase, reconcileRetryMax, guardWatchInterval
-	reconcileRetryBase, reconcileRetryMax, guardWatchInterval = 10*time.Millisecond, 50*time.Millisecond, 10*time.Millisecond
-	t.Cleanup(func() { reconcileRetryBase, reconcileRetryMax, guardWatchInterval = restoreBase, restoreMax, restoreWatch })
+	reconcileRetryBase, reconcileRetryMax, guardWatchInterval = 10*time.Millisecond, 50*time.Millisecond, watch
+	t.Cleanup(func() {
+		reconcileRetryBase, reconcileRetryMax, guardWatchInterval = restoreBase, restoreMax, restoreWatch
+	})
 	ca, err := testcert.New()
 	if err != nil {
 		t.Fatal(err)
@@ -69,7 +106,7 @@ func TestCoordinatorReconnectsToARestartedGuardWithoutANewSnapshot(t *testing.T)
 		t.Fatalf("setup: pending step %q, %d guard connections; want a clean first reconcile on one", step, len(clients))
 	}
 	first := clients[len(clients)-1]
-	first.dead.Store(true)
+	kill(first)
 	deadline := time.Now().Add(5 * time.Second)
 	for {
 		c.mu.Lock()
