@@ -55,6 +55,7 @@ func tunnelListCommand() *cobra.Command {
 	command.Flags().String("cursor", "", "continue a previous page")
 	command.Flags().Int("limit", 100, "maximum results (1-200)")
 	inventoryFilterFlags(command)
+	command.Flags().Bool("all", false, "with --ephemeral, include ended previews (kept 30 days after they end)")
 	tunnelJSONFlag(command)
 	return command
 }

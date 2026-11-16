@@ -38,6 +38,9 @@ func writeInventoryContinuation(command *cobra.Command, operands []string, curso
 			args = append(args, "--"+key, value)
 		}
 	}
+	if all, _ := command.Flags().GetBool("all"); all {
+		args = append(args, "--all")
+	}
 	_, err := fmt.Fprintf(command.OutOrStdout(), "Next page: %s %s\n", command.CommandPath(), formatPreferenceArgs(args))
 	return err
 }

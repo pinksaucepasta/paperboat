@@ -692,6 +692,36 @@ func TestPreviewListAndStopUseCanonicalLeaseClient(t *testing.T) {
 	}
 }
 
+// pb preview list shows active previews; --all adds the ended ones the server keeps for 30 days; an explicit
+// --state wins.
+func TestPreviewListShowsActiveUnlessAll(t *testing.T) {
+	var states []string
+	server := newPreviewCommandServer(t, func(r *http.Request, _ map[string]any) (any, string, int) {
+		if r.Method+" "+r.URL.Path != http.MethodGet+" /v1/previews" {
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+		states = append(states, r.URL.Query().Get("state"))
+		return map[string]any{"items": []any{}, "next_cursor": ""}, "", http.StatusOK
+	})
+	defer server.Close()
+	client := api.New(server.URL, config.Credential{AccessToken: "test-token"}, server.Client())
+	previous := previewClientForCommand
+	t.Cleanup(func() { previewClientForCommand = previous })
+	previewClientForCommand = func(*cobra.Command) (*api.Client, error) { return client, nil }
+	for _, args := range [][]string{{"list", "--json"}, {"list", "--all", "--json"}, {"list", "--state", "stopped", "--json"}} {
+		list := previewCobraCommandV1()
+		list.SetOut(io.Discard)
+		list.SetErr(io.Discard)
+		list.SetArgs(args)
+		if err := list.ExecuteContext(context.Background()); err != nil {
+			t.Fatal(args, err)
+		}
+	}
+	if strings.Join(states, ",") != "active,,stopped" {
+		t.Fatalf("state filters = %q", states)
+	}
+}
+
 type cliPreviewCarrier struct {
 	ready chan struct{}
 	once  sync.Once

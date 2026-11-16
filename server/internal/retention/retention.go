@@ -78,6 +78,22 @@ var policies = []policy{
 		seconds(func(c config.Retention) time.Duration { return c.ExpiredCredentials })},
 	{"managed_ssh_operations", batchOf("managed_ssh_operations", `created_at < now()-make_interval(secs=>$2)`),
 		seconds(func(c config.Retention) time.Duration { return c.IdempotencyRecords })},
+	// An ended preview; its create operation record, endpoint, domains, logs and lazy activations cascade, so it runs
+	// before operations.
+	{"preview_leases", batchOf("preview_leases", `terminal_state <> 'active' AND stopped_at < now()-make_interval(secs=>$2)`),
+		seconds(func(c config.Retention) time.Duration { return c.EndedPublications })},
+	// A deleted tunnel (routes, domains, generations and logs cascade), a deleted route of a live tunnel, and a deleted
+	// domain once its hostname quarantine is over.
+	{"tunnels", batchOf("tunnels", `desired_state = 'deleted' AND deleted_at < now()-make_interval(secs=>$2)`),
+		seconds(func(c config.Retention) time.Duration { return c.EndedPublications })},
+	{"tunnel_routes", batchOf("tunnel_routes", `desired_state = 'deleted' AND deleted_at < now()-make_interval(secs=>$2)`),
+		seconds(func(c config.Retention) time.Duration { return c.EndedPublications })},
+	{"tunnel_domains", batchOf("tunnel_domains",
+		`deleted_at < now()-make_interval(secs=>$2) AND (quarantine_until IS NULL OR quarantine_until < now())`),
+		seconds(func(c config.Retention) time.Duration { return c.EndedPublications })},
+	{"preview_domains", batchOf("preview_domains",
+		`deleted_at < now()-make_interval(secs=>$2) AND (quarantine_until IS NULL OR quarantine_until < now())`),
+		seconds(func(c config.Retention) time.Duration { return c.EndedPublications })},
 	// A finished operation still referenced stays until its referrer goes.
 	{"operations", batchOf("operations", `completed_at < now()-make_interval(secs=>$2)
  AND NOT EXISTS(SELECT 1 FROM paperboat.preview_lease_create_operations x WHERE x.account_id=operations.account_id AND x.operation_id=operations.id)`),

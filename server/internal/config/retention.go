@@ -18,6 +18,9 @@ type Retention struct {
 	// EndedSessions: access, CLI and browser sessions and device grants after they end. At least
 	// UserMachines.ExpiredAccessSessionRetention, during which daemons may still name an ended access session.
 	EndedSessions time.Duration `json:"ended_sessions"`
+	// EndedPublications: a preview after it ended (`pb preview list --all` and the console's ended filter show it
+	// until then), and a tunnel, tunnel route or preview/tunnel domain after it was deleted (past its quarantine).
+	EndedPublications time.Duration `json:"ended_publications"`
 	// AcknowledgedUsageReceipts: edge usage receipts after the server acknowledged them.
 	AcknowledgedUsageReceipts time.Duration `json:"acknowledged_usage_receipts"`
 	TunnelLogs                time.Duration `json:"tunnel_logs"`
@@ -42,7 +45,7 @@ type Retention struct {
 
 func defaultRetention() Retention {
 	return Retention{
-		ExpiredCredentials: time.Hour, IdempotencyRecords: day, FinishedOperations: 7 * day, EndedSessions: 30 * day,
+		ExpiredCredentials: time.Hour, IdempotencyRecords: day, FinishedOperations: 7 * day, EndedSessions: 30 * day, EndedPublications: 30 * day,
 		AcknowledgedUsageReceipts: 2 * day, TunnelLogs: 7 * day, DecidedMachineRequests: 90 * day, InboxRequests: 30 * day, StripeEvents: 30 * day,
 		SupersededMeshEntries: time.Hour, Recordings: 90 * day, SupportReportsPerAccount: 1000, Batch: 500, Budget: 20 * time.Second,
 	}
@@ -50,7 +53,7 @@ func defaultRetention() Retention {
 
 func (r Retention) validate(accessSessionRetention time.Duration) error {
 	switch {
-	case r.ExpiredCredentials < time.Minute, r.IdempotencyRecords < time.Hour, r.FinishedOperations < day,
+	case r.ExpiredCredentials < time.Minute, r.IdempotencyRecords < time.Hour, r.FinishedOperations < day, r.EndedPublications < day,
 		r.AcknowledgedUsageReceipts < time.Hour, r.TunnelLogs < time.Hour, r.DecidedMachineRequests < day, r.InboxRequests < day, r.StripeEvents < 4*day,
 		r.SupersededMeshEntries < time.Minute:
 		return fmt.Errorf("retention: a window is below its minimum")

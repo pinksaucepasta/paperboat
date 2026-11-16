@@ -51,6 +51,7 @@ func ephemeralTunnelCommand(use, short string) *cobra.Command {
 	list.Flags().Bool("json", false, "print canonical preview resources as JSON")
 	tunnelPageFlag(list)
 	inventoryFilterFlags(list)
+	previewAllFlag(list)
 
 	stop := &cobra.Command{
 		Use:           "stop <preview>",
@@ -506,6 +507,10 @@ func runPreviewStatusCobra(command *cobra.Command, args []string) error {
 	return writePreviewLeaseTable(command.OutOrStdout(), []api.PreviewLease{lease})
 }
 
+func previewAllFlag(command *cobra.Command) {
+	command.Flags().Bool("all", false, "include ended previews (kept 30 days after they end)")
+}
+
 func runPreviewListCobra(command *cobra.Command, _ []string) error {
 	client, err := previewClientForCommand(command)
 	if err != nil {
@@ -515,7 +520,12 @@ func runPreviewListCobra(command *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	page, err := client.ListPreviewLeasesFiltered(command.Context(), cursor, limit, inventoryFilters(command))
+	filters := inventoryFilters(command)
+	// Ended previews stay listable for their 30 days of retention, but only on request.
+	if all, _ := command.Flags().GetBool("all"); !all && filters.Get("state") == "" {
+		filters.Set("state", "active")
+	}
+	page, err := client.ListPreviewLeasesFiltered(command.Context(), cursor, limit, filters)
 	if err != nil {
 		return err
 	}

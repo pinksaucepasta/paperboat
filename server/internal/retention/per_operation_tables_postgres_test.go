@@ -11,7 +11,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 )
 
-// Every per-operation table is bounded (F21-23): for each table that had no retention, one pass deletes a row past
+// Every per-operation table is bounded (F21-23); ended previews and deleted tunnels and routes go 30 days later: for each table that had no retention, one pass deletes a row past
 // its window and keeps a live one (the connector enrollment policy, whose rows need a whole tunnel, runs on the
 // schema in TestRetentionDrainsBacklogsAndKeepsLiveRowsOnPostgres). Fixtures are ordinary rows, so the test runs as
 // a non-superuser app role too. A long-expired peer certificate goes with its revocation, unless an identity
@@ -78,6 +78,24 @@ VALUES($1,$1||'_named','cli',NULL,1,0,1,sha256(convert_to('w'||$1,'UTF8')),sha25
  ($1,1,'a','add','{}',now()-interval '3 hours'),($1,2,'a','update','{}',now()-interval '2 hours'),
  ($1,3,'b','add','{}',now()-interval '40 days'),($1,4,'b','remove',NULL,now()-interval '31 days'),
  ($1,5,'c','add','{}',now()-interval '40 days'),($1,6,'c','update','{}',now())`, user)
+	// Previews: one ended 31 days ago, one ended now, one still active.
+	exec(`INSERT INTO paperboat.user_machines(id,user_id,environment_id,alias,platform,architecture,workspace_root,state,seat_state)
+VALUES($1||'_host',$1,'env_'||$1,'host','linux','amd64','/workspace','offline','released')`, user)
+	exec(`INSERT INTO paperboat.preview_leases(owner_session_kind,id,endpoint,account_id,actor_id,owner_machine_id,owner_session_id,target_scheme,
+target_address,lease_deadline,created_at,terminal_state,stopped_at)
+SELECT 'foreground',$1||k,'https://'||replace($1||k,'_','-')||'.preview.example.test',$1,$1,$1||'_host','s','http','127.0.0.1:3000',c+interval '1 hour',c,st,e
+FROM (VALUES('_old',now()-interval '40 days','stopped',now()-interval '31 days'),('_recent',now()-interval '1 hour','expired',now()),
+ ('_active',now(),'active',NULL::timestamptz)) v(k,c,st,e)`, user)
+	// Tunnels: one deleted 31 days ago, one deleted now, one live with a route deleted 31 days ago and a live route.
+	exec(`INSERT INTO paperboat.tunnels(id,account_id,name,desired_state,access_mode,generation,stable_endpoint_id,stable_endpoint,created_by_host_id,
+created_by_actor_id,created_at,updated_at,deleted_at)
+SELECT $1||k,$1,k,st,'private',1,'endpoint_'||u,'https://'||u||'.tunnels.example.test',$1||'_host',$1,now()-interval '40 days',now(),d
+FROM (SELECT gen_random_uuid()::text u,* FROM (VALUES('_t_old','deleted',now()-interval '31 days'),('_t_recent','deleted',now()),('_t_live','active',NULL::timestamptz)) v(k,st,d)) w`, user)
+	exec(`INSERT INTO paperboat.tunnel_routes(id,tunnel_id,name,protocol,match_type,origin_scheme,origin_address,generation,desired_state,
+created_by_actor_id,updated_by_actor_id,created_at,updated_at,deleted_at)
+SELECT $1||k,$1||t,k,'http','catch_all','http','127.0.0.1:3000',1,st,$1,$1,now()-interval '40 days',now(),d
+FROM (VALUES('_r_old','_t_live','deleted',now()-interval '31 days'),('_r_live','_t_live','active',NULL::timestamptz),
+ ('_r_of_old','_t_old','active',NULL::timestamptz)) v(k,t,st,d)`, user)
 	if err := fixture.Commit(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -101,6 +119,9 @@ VALUES($1,$1||'_named','cli',NULL,1,0,1,sha256(convert_to('w'||$1,'UTF8')),sha25
 		"managed_ssh_client_keys":     {`SELECT count(*)::text FROM paperboat.managed_ssh_client_keys WHERE user_id=$1`, "2"},
 		"peer_endpoint_certificates":  {`SELECT string_agg(replace(endpoint_id,$1,''),',' ORDER BY endpoint_id) FROM paperboat.peer_endpoint_certificates WHERE user_id=$1`, "_live,_named"},
 		"revocations":                 {`SELECT count(*)::text FROM paperboat.peer_endpoint_certificate_revocations WHERE user_id=$1`, "0"},
+		"preview_leases":              {`SELECT string_agg(replace(id,$1,''),',' ORDER BY id) FROM paperboat.preview_leases WHERE account_id=$1`, "_active,_recent"},
+		"tunnels":                     {`SELECT string_agg(replace(id,$1,''),',' ORDER BY id) FROM paperboat.tunnels WHERE account_id=$1`, "_t_live,_t_recent"},
+		"tunnel_routes":               {`SELECT string_agg(replace(id,$1,''),',' ORDER BY id) FROM paperboat.tunnel_routes WHERE id LIKE $1||'%'`, "_r_live"},
 		"peer_mesh_log":               {`SELECT string_agg(mesh_seq::text,',' ORDER BY mesh_seq) FROM paperboat.peer_mesh_log WHERE account_id=$1`, "2,5,6"},
 	} {
 		if got := left(test.query); got != test.want {
