@@ -149,7 +149,7 @@ func initializeProductionManagedSSH(ctx context.Context, host *managedssh.Host, 
 		return watchHostKeyFiles(ctx, hostKeyDir, sshHostKeyQuiet)
 	}
 	client := api.New(controlURL, config.Credential{}, &http.Client{Transport: transport, Timeout: 15 * time.Second})
-	return &managedSSHKeyReconciler{client: client, identity: identity, registration: registration, workerGeneration: generation, publicKeys: publicKeys, readPublicKeys: readPublicKeys, watchHostKeys: watchHostKeys, home: sshStateRoot, interval: 30 * time.Second, timeout: 10 * time.Second, events: keyEvents}, nil
+	return &managedSSHKeyReconciler{host: host, client: client, identity: identity, registration: registration, workerGeneration: generation, publicKeys: publicKeys, readPublicKeys: readPublicKeys, watchHostKeys: watchHostKeys, home: sshStateRoot, interval: 30 * time.Second, timeout: 10 * time.Second, events: keyEvents}, nil
 }
 
 // windowsHostPublicKeys reads the managed sshd's host public key from dir, at every call.
@@ -224,7 +224,7 @@ func cleanupProductionManagedSSH(ctx context.Context, _ runtimeidentity.Registra
 	if err != nil {
 		return err
 	}
-	_, err = reconcilePlatformAuthorizedKeys(filepath.Join(root, "ssh"), 0, nil, "")
+	_, err = reconcilePlatformAuthorizedKeys(filepath.Join(root, "ssh"), 0, nil, "", nil)
 	return err
 }
 

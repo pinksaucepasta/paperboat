@@ -66,8 +66,8 @@ var policies = []policy{
 	// Its native admissions cascade with it.
 	{"inspector_credentials", batchOf("inspector_credentials", `expires_at < now()-make_interval(secs=>$2)`),
 		seconds(func(c config.Retention) time.Duration { return c.ExpiredCredentials })},
-	// Only after the certificate expired: a holder that lost access keeps changing its machines' revocation principal
-	// until then (managedssh.RevocationPrincipal), so deleting it earlier would let its certificate in again.
+	// Only after the certificate expired: a holder that lost access stays on its machines' revoked lists
+	// until then (managedssh.TrustedUserCAs revoked key IDs), so deleting it earlier would let its certificate in again.
 	{"managed_ssh_certificate_holders", batchOf("managed_ssh_certificate_holders", `valid_before < now()-make_interval(secs=>$2)`),
 		seconds(func(c config.Retention) time.Duration { return c.ExpiredCredentials })},
 	{"managed_ssh_operations", batchOf("managed_ssh_operations", `created_at < now()-make_interval(secs=>$2)`),

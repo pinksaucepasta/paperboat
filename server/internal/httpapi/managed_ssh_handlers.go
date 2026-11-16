@@ -199,7 +199,7 @@ func managedSSHUserCAs(service managedSSHService, identities machineRequestVerif
 		if managedSSHError(w, r, err) {
 			return
 		}
-		writeJSON(w, http.StatusOK, SuccessResponse{Data: wire.UserCAsDocument{Type: "ssh_user_ca_set", Version: 1, MachineID: claims.MachineID, MachineGeneration: uint64(claims.InstallationGeneration), Keys: set.Keys, Principal: set.Principal}})
+		writeJSON(w, http.StatusOK, SuccessResponse{Data: wire.UserCAsDocument{Type: "ssh_user_ca_set", Version: 1, MachineID: claims.MachineID, MachineGeneration: uint64(claims.InstallationGeneration), Keys: set.Keys, Principal: set.Principal, RevokedKeyIDs: set.RevokedKeyIDs}})
 	}
 }
 

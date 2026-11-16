@@ -62,6 +62,8 @@ func WriteServiceConfig(config ServiceConfig) (string, error) {
 		"PermitEmptyPasswords no",
 		"PubkeyAuthentication yes",
 		"AuthorizedKeysFile .ssh/authorized_keys",
+		// Managed certificates of a revoked CLI session (key IDs, kept by ReconcileAuthorizedKeys; created empty at setup).
+		"RevokedKeys " + quote(filepath.Join(filepath.Dir(config.AuthorizedKeys), "revoked.krl")),
 		"HostKey " + quote(config.HostKey),
 		// Port and agent forwarding follow OpenSSH's defaults, as on Linux and macOS; X11 stays off.
 		"GatewayPorts no",

@@ -29,13 +29,13 @@ func TestWindowsAuthorizedKeysOwnsFixedDedicatedFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	line := strings.TrimSpace(string(ssh.MarshalAuthorizedKey(key)))
-	changed, err := reconciler.ReconcileAuthorizedKeys(context.Background(), []string{line}, "pb:machine_1:0")
+	changed, err := reconciler.ReconcileAuthorizedKeys(context.Background(), []string{line}, "pb:machine_1", nil)
 	if err != nil || !changed {
 		t.Fatalf("changed=%t err=%v", changed, err)
 	}
 	path := filepath.Join(root, "authorized_keys", "paperboat")
 	body, err := os.ReadFile(path)
-	if err != nil || string(body) != `cert-authority,principals="pb:machine_1:0",from="127.0.0.1,::1" `+line+"\n" {
+	if err != nil || string(body) != `cert-authority,principals="pb:machine_1",from="127.0.0.1,::1" `+line+"\n" {
 		t.Fatalf("authorized keys=%q err=%v", body, err)
 	}
 	if _, err := os.Stat(filepath.Join(root, ".ssh")); !os.IsNotExist(err) {

@@ -2,16 +2,18 @@ package managedssh
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/audit"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
+	wire "github.com/pinksaucepasta/paperboat/shared/managedssh"
 )
 
 // CertificateAuthority authorizes issuing for the exact machine (live CLI session, managed SSH allowed, target set),
-// records the session as a holder until request.ValidBefore, and returns the target OS user, the account's signing CA
-// and the machine's revocation principal.
+// records the session as a holder until request.ValidBefore, and returns the target OS user and the account's signing CA
+// (the holder record is what lets the host refuse its key ID if the session later loses access).
 func (r *SQLRepository) CertificateAuthority(ctx context.Context, request IssueCertificateRequest, candidate NewUserCA) (CertificateAuthorization, error) {
 	var result CertificateAuthorization
 	err := r.store.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
@@ -32,25 +34,32 @@ func (r *SQLRepository) CertificateAuthority(ctx context.Context, request IssueC
 		if err := q.RecordManagedSSHCertificateHolder(ctx, dbsqlc.RecordManagedSSHCertificateHolderParams{MachineID: request.UserMachineID, CLIClientSessionID: request.CLIClientSessionID, UserID: request.UserID, ValidBefore: request.ValidBefore}); err != nil {
 			return err
 		}
-		result.Principal, err = revocationPrincipal(ctx, q, request.UserMachineID, request.Now)
-		return err
+		return nil
 	})
 	return result, err
 }
 
-func revocationPrincipal(ctx context.Context, q *dbsqlc.Queries, machineID string, now time.Time) (string, error) {
-	revoked, err := q.ListRevokedManagedSSHCertificateHolders(ctx, dbsqlc.ListRevokedManagedSSHCertificateHoldersParams{MachineID: machineID, Now: now})
+// revokedKeyIDs are the key IDs of still-valid certificates for the machine whose holders may no longer log in to it.
+func revokedKeyIDs(ctx context.Context, q *dbsqlc.Queries, machineID string, now time.Time) ([]string, error) {
+	rows, err := q.ListRevokedManagedSSHCertificateHolders(ctx, dbsqlc.ListRevokedManagedSSHCertificateHoldersParams{MachineID: machineID, Now: now, Limit: int32(wire.MaxRevokedKeyIDs + 1)})
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	return RevocationPrincipal(machineID, revoked), nil
+	if len(rows) > wire.MaxRevokedKeyIDs {
+		return nil, errors.Join(ErrUnavailable, errors.New("more revoked managed SSH certificates than a machine can hold"))
+	}
+	ids := make([]string, len(rows))
+	for index, row := range rows {
+		ids[index] = CertificateKeyID(row.UserID, row.CLIClientSessionID, machineID)
+	}
+	return ids, nil
 }
 
 // UserCAs authorizes the machine itself (its owner account and generation) and returns every CA it must trust and
-// its revocation principal. Holders whose certificates expired are dropped here (the table stays bounded).
-func (r *SQLRepository) UserCAs(ctx context.Context, request UserCAsRequest, candidate NewUserCA) ([]UserCA, string, error) {
+// the key IDs it must refuse. Holders whose certificates expired are dropped here (the table stays bounded).
+func (r *SQLRepository) UserCAs(ctx context.Context, request UserCAsRequest, candidate NewUserCA) ([]UserCA, []string, error) {
 	var result []UserCA
-	var principal string
+	var revoked []string
 	err := r.store.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
 		q := tx.Queries()
 		machine, err := q.ResolveMachineSSHHostKeyAuthorityForUpdate(ctx, dbsqlc.ResolveMachineSSHHostKeyAuthorityForUpdateParams{UserMachineID: request.UserMachineID, UserID: request.ActorUserID, MachineGeneration: int64(request.MachineGeneration)})
@@ -66,10 +75,10 @@ func (r *SQLRepository) UserCAs(ctx context.Context, request UserCAsRequest, can
 		if err := q.DeleteExpiredManagedSSHCertificateHolders(ctx, dbsqlc.DeleteExpiredManagedSSHCertificateHoldersParams{MachineID: request.UserMachineID, Now: request.Now}); err != nil {
 			return err
 		}
-		principal, err = revocationPrincipal(ctx, q, request.UserMachineID, request.Now)
+		revoked, err = revokedKeyIDs(ctx, q, request.UserMachineID, request.Now)
 		return err
 	})
-	return result, principal, err
+	return result, revoked, err
 }
 
 func (r *SQLRepository) RotateUserCA(ctx context.Context, request RotateUserCARequest, candidate NewUserCA) ([]UserCA, error) {

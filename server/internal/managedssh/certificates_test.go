@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"errors"
 	"net"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -20,6 +21,11 @@ var testCertificates = CertificateConfig{EncryptionKey: "test-encryption-key-012
 
 func issueTestCertificate(t *testing.T, service *Service, now time.Time) (*ssh.Certificate, ssh.Signer) {
 	t.Helper()
+	return issueSessionCertificate(t, service, now, "client_01")
+}
+
+func issueSessionCertificate(t *testing.T, service *Service, now time.Time, session string) (*ssh.Certificate, ssh.Signer) {
+	t.Helper()
 	_, private, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatal(err)
@@ -28,7 +34,7 @@ func issueTestCertificate(t *testing.T, service *Service, now time.Time) (*ssh.C
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := service.IssueCertificate(context.Background(), IssueCertificateRequest{UserID: "user_01", CLIClientSessionID: "client_01", UserMachineID: "machine_01", MachineGeneration: 2, PublicKey: string(ssh.MarshalAuthorizedKey(signer.PublicKey())), Now: now})
+	result, err := service.IssueCertificate(context.Background(), IssueCertificateRequest{UserID: "user_01", CLIClientSessionID: session, UserMachineID: "machine_01", MachineGeneration: 2, PublicKey: string(ssh.MarshalAuthorizedKey(signer.PublicKey())), Now: now})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,10 +92,10 @@ func TestIssuedCertificateIsAcceptedOnlyForItsUserCAWindowAndLoopback(t *testing
 	certificate, _ := issueTestCertificate(t, service, now)
 	set, err := service.TrustedUserCAs(context.Background(), UserCAsRequest{ActorUserID: "owner_01", UserMachineID: "machine_01", MachineGeneration: 2, Now: now})
 	trusted, principal := set.Keys, set.Principal
-	if err != nil || len(trusted) != 1 || principal != "pb:machine_01:0" {
+	if err != nil || len(trusted) != 1 || principal != "pb:machine_01" {
 		t.Fatalf("trusted=%+v err=%v", set, err)
 	}
-	if certificate.CertType != ssh.UserCert || strings.Join(certificate.ValidPrincipals, ",") != "alice,pb:machine_01:0" || !strings.HasPrefix(certificate.KeyId, "paperboat:user_01:client_01:machine_01") {
+	if certificate.CertType != ssh.UserCert || strings.Join(certificate.ValidPrincipals, ",") != "alice,pb:machine_01" || !strings.HasPrefix(certificate.KeyId, "paperboat:user_01:client_01:machine_01") {
 		t.Fatalf("certificate=%+v", certificate)
 	}
 	if err := checkCertificate(certificate, principal, trusted, now, "127.0.0.1"); err != nil {
@@ -118,30 +124,29 @@ func TestIssuedCertificateIsAcceptedOnlyForItsUserCAWindowAndLoopback(t *testing
 	}
 }
 
-func TestRevocationRefusesEarlierCertificatesAndNewOnesWork(t *testing.T) {
+// Revoking user A lists only A's key ID for the machine; the principal stays, so B's existing certificate keeps
+// working with no renewal, and a host refusing the listed key IDs refuses only A.
+func TestRevocationListsOnlyTheRevokedHolderAndLeavesOthersAlone(t *testing.T) {
 	repository := &fakeRepository{osUser: "alice"}
 	service, _ := NewService(repository, testCertificates)
 	now := time.Unix(1_800_000_000, 0).UTC()
 	request := UserCAsRequest{ActorUserID: "owner_01", UserMachineID: "machine_01", MachineGeneration: 2, Now: now}
-	revokedHolder, _ := issueTestCertificate(t, service, now)
-	otherHolder, _ := issueTestCertificate(t, service, now)
+	userA, _ := issueSessionCertificate(t, service, now, "client_a")
+	userB, _ := issueSessionCertificate(t, service, now, "client_b")
 	before, _ := service.TrustedUserCAs(context.Background(), request)
-	repository.revoked = []string{"client_revoked"}
+	repository.revoked = []string{CertificateKeyID("user_01", "client_a", "machine_01")}
 	after, _ := service.TrustedUserCAs(context.Background(), request)
-	if after.Principal == before.Principal || !strings.HasPrefix(after.Principal, "pb:machine_01:") {
-		t.Fatalf("revocation did not change the principal: %q -> %q", before.Principal, after.Principal)
+	if after.Principal != before.Principal || after.Principal != MachinePrincipal("machine_01") {
+		t.Fatalf("the principal changed on a revocation: %q -> %q", before.Principal, after.Principal)
 	}
-	for name, certificate := range map[string]*ssh.Certificate{"revoked holder": revokedHolder, "other holder before renewal": otherHolder} {
-		if err := checkCertificate(certificate, after.Principal, after.Keys, now.Add(time.Minute), "127.0.0.1"); err == nil {
-			t.Fatalf("%s certificate accepted after the revocation push", name)
-		}
+	refused := func(certificate *ssh.Certificate) bool {
+		return slices.Contains(after.RevokedKeyIDs, certificate.KeyId)
 	}
-	renewed, _ := issueTestCertificate(t, service, now.Add(time.Minute))
-	if err := checkCertificate(renewed, after.Principal, after.Keys, now.Add(time.Minute), "127.0.0.1"); err != nil {
-		t.Fatalf("renewed certificate refused: %v", err)
+	if !refused(userA) || refused(userB) || len(after.RevokedKeyIDs) != 1 {
+		t.Fatalf("revoked=%v A=%q B=%q", after.RevokedKeyIDs, userA.KeyId, userB.KeyId)
 	}
-	if RevocationPrincipal("machine_01", []string{"a", "b"}) == RevocationPrincipal("machine_01", []string{"a"}) || RevocationPrincipal("machine_01", nil) == RevocationPrincipal("machine_02", nil) {
-		t.Fatal("revocation principals collide")
+	if err := checkCertificate(userB, after.Principal, after.Keys, now.Add(time.Hour), "127.0.0.1"); err != nil {
+		t.Fatalf("B's existing certificate stopped working after A's revocation: %v", err)
 	}
 }
 

@@ -10,8 +10,8 @@ import (
 )
 
 // renewManagedSSHCertificates keeps the certificates of machines a connection used in the last day under an hour
-// old, so a control-plane outage leaves new logins working for most of the certificate validity (F5-08). A failure
-// is retried at the next refresh; the connection itself asks again anyway.
+// old (valid for 11 of their 12 hours), so a control-plane outage leaves new logins working for most of the
+// certificate validity (F5-08) and connections never wait on a renewal. A failure is retried at the next refresh.
 func renewManagedSSHCertificates(ctx context.Context, client *api.Client, home, publicKey string, machines []api.UserMachine) {
 	used := managedssh.RecentlyUsedCertificates(home, time.Now().Add(-24*time.Hour))
 	for _, machine := range machines {
@@ -23,7 +23,7 @@ func renewManagedSSHCertificates(ctx context.Context, client *api.Client, home, 
 			return issued.Certificate, err
 		}
 		issueCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-		_, _ = managedssh.EnsureCertificate(issueCtx, managedssh.CertificateTarget{Home: home, Alias: machine.Alias, OSUser: machine.SSH.OSUser}, []byte(publicKey), issue, time.Now(), time.Hour)
+		_, _ = managedssh.EnsureCertificate(issueCtx, managedssh.CertificateTarget{Home: home, Alias: machine.Alias, OSUser: machine.SSH.OSUser}, []byte(publicKey), issue, time.Now(), 11*time.Hour)
 		cancel()
 	}
 }

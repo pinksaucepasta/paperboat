@@ -34,7 +34,7 @@ func newWindowsAuthorizedKeys(stateRoot string) (*WindowsAuthorizedKeys, error) 
 	return &WindowsAuthorizedKeys{stateRoot: stateRoot}, nil
 }
 
-func (r *WindowsAuthorizedKeys) ReconcileAuthorizedKeys(ctx context.Context, keys []string, principal string) (bool, error) {
+func (r *WindowsAuthorizedKeys) ReconcileAuthorizedKeys(ctx context.Context, keys []string, principal string, revoked []string) (bool, error) {
 	if r == nil || ctx == nil {
 		return false, ErrInvalidConfig
 	}
@@ -45,5 +45,5 @@ func (r *WindowsAuthorizedKeys) ReconcileAuthorizedKeys(ctx context.Context, key
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return windowsopenssh.ReconcileAuthorizedKeysContext(ctx, r.stateRoot, keys, principal)
+	return windowsopenssh.ReconcileAuthorizedKeysContext(ctx, r.stateRoot, keys, principal, revoked)
 }

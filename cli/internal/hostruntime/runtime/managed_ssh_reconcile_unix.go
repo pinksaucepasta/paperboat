@@ -5,7 +5,6 @@ package runtime
 import (
 	"context"
 	"errors"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machineevents"
 	"log/slog"
 	"net"
 	"net/http"
@@ -15,12 +14,17 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machineevents"
+	"github.com/pinksaucepasta/paperboat/internal/managedssh"
+
 	clientapi "github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/health"
 	runtimeidentity "github.com/pinksaucepasta/paperboat/internal/hostruntime/identity"
 )
 
 type managedSSHKeyReconciler struct {
+	// host refuses the revoked certificates' sessions in its bridge (managedssh.Host.SetRevoked).
+	host             *managedssh.Host
 	client           managedSSHControlClient
 	identity         managedSSHIdentitySource
 	registration     runtimeidentity.Registration
@@ -153,14 +157,15 @@ func (s *managedSSHKeyReconciler) reconcile(ctx context.Context) error {
 		if !s.hostKeyInUse.Load() && retryableManagedSSHAuthorityError(err) {
 			return &managedSSHAuthorityUnavailable{cause: err}
 		}
-		_, cleanupErr := reconcilePlatformAuthorizedKeys(s.home, s.ownerUID, nil, "")
+		_, cleanupErr := reconcilePlatformAuthorizedKeys(s.home, s.ownerUID, nil, "", nil)
 		if cleanupErr == nil && s.hostKeyInUse.Load() {
 			return &managedSSHHostKeyInUse{cause: err}
 		}
 		return errors.Join(err, cleanupErr)
 	}
 	// Not active (pending): the keys are the server's current client keys, kept so trust-host works at once.
-	_, err = reconcilePlatformAuthorizedKeys(s.home, s.ownerUID, keys.Keys, keys.Principal)
+	s.host.SetRevoked(keys.RevokedKeyIDs)
+	_, err = reconcilePlatformAuthorizedKeys(s.home, s.ownerUID, keys.Keys, keys.Principal, keys.RevokedKeyIDs)
 	s.ready.Store(err == nil && active)
 	return err
 }

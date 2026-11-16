@@ -93,7 +93,7 @@ func TestSQLRepositoryManagedSSHAuthorityLifecycle(t *testing.T) {
 	}
 	set, err := service.TrustedUserCAs(ctx, UserCAsRequest{ActorUserID: userA, UserMachineID: machineA, MachineGeneration: 1, Now: now})
 	trusted := set.Keys
-	if err != nil || len(trusted) != 1 || set.Principal != "pb:"+machineA+":0" {
+	if err != nil || len(trusted) != 1 || set.Principal != "pb:"+machineA || len(set.RevokedKeyIDs) != 0 {
 		t.Fatalf("trusted=%+v error=%v", set, err)
 	}
 	issuedCertificate := func(value Certificate) *ssh.Certificate {
@@ -134,8 +134,17 @@ func TestSQLRepositoryManagedSSHAuthorityLifecycle(t *testing.T) {
 	if err != nil || len(rotated.Keys) != 2 || slices.Contains(rotated.Keys, trusted[0]) {
 		t.Fatalf("after a full rotation the first CA is still trusted: %v %v", rotated, err)
 	}
-	// Revoking the CLI session stops issuing and changes the machine's principal, so its certificate is refused.
+	// Revoking session A stops issuing to it and lists only A's key ID for the machine; session B of the same machine
+	// keeps its certificate and the principal stays.
+	clientB2 := "ssh_cli_b2_" + suffix
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.cli_client_sessions (id,user_id,client_id,client_label,device_type,os,scopes,state,created_at,approved_at) VALUES ($1,$2,$3,'SSH test','desktop','test',ARRAY['account:read'],'active',$4,$4)`, clientB2, userA, "client_"+clientB2, now); err != nil {
+		t.Fatal(err)
+	}
 	held, err := issue(userA, clientA, machineA, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	kept, err := issue(userA, clientB2, machineA, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -146,13 +155,16 @@ func TestSQLRepositoryManagedSSHAuthorityLifecycle(t *testing.T) {
 		t.Fatalf("revoked CLI session still gets certificates: %v", err)
 	}
 	revoked, err := service.TrustedUserCAs(ctx, UserCAsRequest{ActorUserID: userA, UserMachineID: machineA, MachineGeneration: 1, Now: now})
-	if err != nil || revoked.Principal == set.Principal || checkCertificate(issuedCertificate(held), revoked.Principal, revoked.Keys, now, "127.0.0.1") == nil {
-		t.Fatalf("revoked session's certificate is still trusted: principal %q -> %q err=%v", set.Principal, revoked.Principal, err)
+	if err != nil || revoked.Principal != set.Principal || len(revoked.RevokedKeyIDs) != 1 || revoked.RevokedKeyIDs[0] != issuedCertificate(held).KeyId {
+		t.Fatalf("revoked list=%v principal %q -> %q err=%v", revoked.RevokedKeyIDs, set.Principal, revoked.Principal, err)
 	}
-	// Expired holders are dropped at the next fetch; the principal returns to the empty set only after expiry.
+	if slices.Contains(revoked.RevokedKeyIDs, issuedCertificate(kept).KeyId) || checkCertificate(issuedCertificate(kept), revoked.Principal, revoked.Keys, now, "127.0.0.1") != nil {
+		t.Fatal("session B's certificate stopped working when session A was revoked")
+	}
+	// Expired holders are dropped at the next fetch: the list empties once the revoked certificates expired.
 	expired, err := service.TrustedUserCAs(ctx, UserCAsRequest{ActorUserID: userA, UserMachineID: machineA, MachineGeneration: 1, Now: now.Add(testCertificates.Validity + time.Second)})
-	if err != nil || expired.Principal != "pb:"+machineA+":0" {
-		t.Fatalf("principal after the revoked certificates expired=%q err=%v", expired.Principal, err)
+	if err != nil || len(expired.RevokedKeyIDs) != 0 {
+		t.Fatalf("revoked list after the certificates expired=%v err=%v", expired.RevokedKeyIDs, err)
 	}
 
 	hostOne, hostTwo := publicLine(t, "ed25519"), publicLine(t, "ed25519")

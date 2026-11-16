@@ -31,21 +31,21 @@ func (r *fakeRepository) ensureCA(candidate NewUserCA) {
 		r.cas = append(r.cas, UserCA{ID: candidate.ID, State: "active", PublicKey: candidate.PublicKey, PrivateKeyCiphertext: candidate.PrivateKeyCiphertext})
 	}
 }
-func (r *fakeRepository) CertificateAuthority(_ context.Context, request IssueCertificateRequest, candidate NewUserCA) (CertificateAuthorization, error) {
+func (r *fakeRepository) CertificateAuthority(_ context.Context, _ IssueCertificateRequest, candidate NewUserCA) (CertificateAuthorization, error) {
 	if r.err != nil {
 		return CertificateAuthorization{}, r.err
 	}
 	r.ensureCA(candidate)
 	for _, ca := range r.cas {
 		if ca.State == "active" {
-			return CertificateAuthorization{OSUser: r.osUser, CA: ca, Principal: RevocationPrincipal(request.UserMachineID, r.revoked)}, nil
+			return CertificateAuthorization{OSUser: r.osUser, CA: ca}, nil
 		}
 	}
 	return CertificateAuthorization{}, ErrUnavailable
 }
-func (r *fakeRepository) UserCAs(_ context.Context, request UserCAsRequest, candidate NewUserCA) ([]UserCA, string, error) {
+func (r *fakeRepository) UserCAs(_ context.Context, _ UserCAsRequest, candidate NewUserCA) ([]UserCA, []string, error) {
 	r.ensureCA(candidate)
-	return r.cas, RevocationPrincipal(request.UserMachineID, r.revoked), r.err
+	return r.cas, r.revoked, r.err
 }
 func (r *fakeRepository) RotateUserCA(_ context.Context, _ RotateUserCARequest, candidate NewUserCA) ([]UserCA, error) {
 	r.cas = append(r.cas, UserCA{ID: candidate.ID, State: "pending", PublicKey: candidate.PublicKey, PrivateKeyCiphertext: candidate.PrivateKeyCiphertext})

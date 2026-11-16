@@ -679,7 +679,7 @@ func (q *Queries) ListManagedSSHUserCAs(ctx context.Context, accountID string) (
 }
 
 const listRevokedManagedSSHCertificateHolders = `-- name: ListRevokedManagedSSHCertificateHolders :many
-SELECT h.cli_client_session_id FROM managed_ssh_certificate_holders h
+SELECT h.user_id, h.cli_client_session_id FROM managed_ssh_certificate_holders h
 JOIN user_machines m ON m.id = h.machine_id
 LEFT JOIN cli_client_sessions session ON session.id = h.cli_client_session_id AND session.user_id = h.user_id
   AND session.state = 'active' AND session.revoked_at IS NULL
@@ -687,28 +687,35 @@ WHERE h.machine_id = $1 AND h.valid_before > $2
 AND (session.id IS NULL OR NOT ((m.owner_team_id IS NULL AND m.user_id = h.user_id AND m.deleted_at IS NULL)
   OR machine_capability_allowed(h.user_id, m.id, 'managed_ssh') OR machine_management_allowed(h.user_id, m.id)))
 ORDER BY h.cli_client_session_id
+LIMIT $3
 `
 
 type ListRevokedManagedSSHCertificateHoldersParams struct {
 	MachineID string
 	Now       time.Time
+	Limit     int32
 }
 
-// Holders of a still-valid certificate for the machine that may no longer log in to it: the machine's revocation
-// token is derived from them (bounded: one row per CLI session that got a certificate within the validity).
-func (q *Queries) ListRevokedManagedSSHCertificateHolders(ctx context.Context, arg ListRevokedManagedSSHCertificateHoldersParams) ([]string, error) {
-	rows, err := q.db.Query(ctx, listRevokedManagedSSHCertificateHolders, arg.MachineID, arg.Now)
+type ListRevokedManagedSSHCertificateHoldersRow struct {
+	UserID             string
+	CLIClientSessionID string
+}
+
+// Holders of a still-valid certificate for the machine that may no longer log in to it: the host refuses their key IDs
+// (bounded: one row per CLI session that got a certificate within the validity; the caller caps it).
+func (q *Queries) ListRevokedManagedSSHCertificateHolders(ctx context.Context, arg ListRevokedManagedSSHCertificateHoldersParams) ([]ListRevokedManagedSSHCertificateHoldersRow, error) {
+	rows, err := q.db.Query(ctx, listRevokedManagedSSHCertificateHolders, arg.MachineID, arg.Now, arg.Limit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []string
+	var items []ListRevokedManagedSSHCertificateHoldersRow
 	for rows.Next() {
-		var cli_client_session_id string
-		if err := rows.Scan(&cli_client_session_id); err != nil {
+		var i ListRevokedManagedSSHCertificateHoldersRow
+		if err := rows.Scan(&i.UserID, &i.CLIClientSessionID); err != nil {
 			return nil, err
 		}
-		items = append(items, cli_client_session_id)
+		items = append(items, i)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

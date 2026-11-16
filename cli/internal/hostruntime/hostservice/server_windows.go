@@ -48,6 +48,7 @@ type Request struct {
 	Artifact       *bootstrap.ArtifactTarget `json:"artifact,omitempty"`
 	AuthorizedKeys *[]string                 `json:"authorized_keys,omitempty"`
 	SSHPrincipal   string                    `json:"ssh_principal,omitempty"`
+	SSHRevoked     []string                  `json:"ssh_revoked_key_ids,omitempty"`
 }
 type Response struct {
 	Schema                   string    `json:"schema"`
@@ -88,7 +89,7 @@ type UpdateDiagnostics interface {
 	UpdateHealth() string
 }
 type AuthorizedKeysReconciler interface {
-	ReconcileAuthorizedKeys(context.Context, []string, string) (bool, error)
+	ReconcileAuthorizedKeys(context.Context, []string, string, []string) (bool, error)
 }
 type Config struct {
 	SocketPath        string
@@ -241,10 +242,10 @@ func (s *Server) serveContext(ctx context.Context, connection net.Conn) error {
 		return s.respond(connection, response)
 	}
 	if request.Operation == "reconcile_ssh_authorized_keys" {
-		if request.Mode != "" || request.Version != 0 || request.Artifact != nil || request.AuthorizedKeys == nil || len(*request.AuthorizedKeys) > maxAuthorizedKeys || s.config.AuthorizedKeys == nil {
+		if request.Mode != "" || request.Version != 0 || request.Artifact != nil || request.AuthorizedKeys == nil || len(*request.AuthorizedKeys) > maxAuthorizedKeys || len(request.SSHRevoked) > wire.MaxRevokedKeyIDs || s.config.AuthorizedKeys == nil {
 			return s.respond(connection, s.errorResponse("invalid_request"))
 		}
-		changed, reconcileErr := s.config.AuthorizedKeys.ReconcileAuthorizedKeys(requestCtx, append([]string(nil), (*request.AuthorizedKeys)...), request.SSHPrincipal)
+		changed, reconcileErr := s.config.AuthorizedKeys.ReconcileAuthorizedKeys(requestCtx, append([]string(nil), (*request.AuthorizedKeys)...), request.SSHPrincipal, append([]string(nil), request.SSHRevoked...))
 		if reconcileErr != nil {
 			if !allErrorLeavesMatch(reconcileErr, func(leaf error) bool {
 				return leaf == windowsopenssh.ErrQualificationEnrollment || normalRequestLeaf(leaf)

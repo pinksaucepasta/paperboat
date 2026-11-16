@@ -23,7 +23,7 @@ import (
 func TestManagedSSHKeepsLastKeysDuringHTTPOutageAndRecovers(t *testing.T) {
 	key := managedSSHTestPublicKey(t)
 	home := managedSSHRuntimeTestHome(t)
-	if _, err := reconcilePlatformAuthorizedKeys(home, uint32(os.Getuid()), []string{key}, "pb:machine_1:0"); err != nil {
+	if _, err := reconcilePlatformAuthorizedKeys(home, uint32(os.Getuid()), []string{key}, "pb:machine_1", nil); err != nil {
 		t.Fatal(err)
 	}
 	var available atomic.Bool
@@ -49,7 +49,7 @@ func TestManagedSSHKeepsLastKeysDuringHTTPOutageAndRecovers(t *testing.T) {
 				w.WriteHeader(405)
 				return
 			}
-			value = clientapi.ManagedSSHUserCAs{Type: "ssh_user_ca_set", Version: 1, MachineID: "machine_1", MachineGeneration: 4, Keys: []string{key}, Principal: "pb:machine_1:0"}
+			value = clientapi.ManagedSSHUserCAs{Type: "ssh_user_ca_set", Version: 1, MachineID: "machine_1", MachineGeneration: 4, Keys: []string{key}, Principal: "pb:machine_1"}
 		default:
 			w.WriteHeader(404)
 			return
@@ -103,7 +103,7 @@ func TestManagedSSHInitialAuthorityPolicyAndLocalFailure(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			home := managedSSHRuntimeTestHome(t)
 			key := managedSSHTestPublicKey(t)
-			if _, err := reconcilePlatformAuthorizedKeys(home, uint32(os.Getuid()), []string{key}, "pb:machine_1:0"); err != nil {
+			if _, err := reconcilePlatformAuthorizedKeys(home, uint32(os.Getuid()), []string{key}, "pb:machine_1", nil); err != nil {
 				t.Fatal(err)
 			}
 			service := &managedSSHKeyReconciler{client: &rotatingManagedSSHClient{observeErrors: []error{tc.err}, keys: [][]string{{key}}}, identity: &refreshingManagedSSHIdentity{}, registration: runtimeidentity.Registration{MachineID: "machine_1", InstallationGeneration: 4}, workerGeneration: 9, publicKeys: []string{key}, home: home, ownerUID: uint32(os.Getuid()), interval: time.Hour, timeout: time.Second}

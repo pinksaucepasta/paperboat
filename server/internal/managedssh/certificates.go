@@ -3,9 +3,7 @@ package managedssh
 import (
 	"context"
 	"crypto/ed25519"
-	"crypto/sha256"
 	"encoding/binary"
-	"encoding/hex"
 	"errors"
 	"math"
 	"strings"
@@ -19,7 +17,7 @@ import (
 
 // CertificateConfig configures certificates. EncryptionKey seals CA private keys at rest; Validity is how long a certificate lets a client log
 // in, so how long clients keep starting sessions while the control plane is unreachable. Revocation does not wait
-// for it (RevocationPrincipal).
+// for it (TrustedUserCASet.RevokedKeyIDs).
 type CertificateConfig struct {
 	EncryptionKey string
 	Validity      time.Duration
@@ -64,28 +62,26 @@ type IssueCertificateRequest struct {
 type CertificateAuthorization struct {
 	OSUser string
 	CA     UserCA
-	// Principal is the machine's revocation principal (RevocationPrincipal) the certificate must carry.
-	Principal string
 }
 
-// TrustedUserCASet is what a host trusts: the CA keys and the principal a certificate must carry.
+// TrustedUserCASet is what a host trusts: the CA keys, the principal a certificate must carry, and the key IDs of
+// still-valid certificates it must refuse.
 type TrustedUserCASet struct {
-	Keys      []string
-	Principal string
+	Keys          []string
+	Principal     string
+	RevokedKeyIDs []string
 }
 
-// RevocationPrincipal is the principal a machine's CA line requires (`cert-authority,principals=`): the machine and a
-// token of the holders of still-valid certificates for it who may no longer log in. Revoking a session, grant or
-// membership adds a holder, which changes the token, so every certificate issued before is refused once the host
-// fetched it, while online clients simply get a new certificate on their next connection. A revoked holder stays in
-// the set until its certificates expire, so a token never returns to a value a revoked certificate carries.
-// OpenSSH KRLs (RevokedKeys) would need sshd_config, which a macOS host running as the user cannot change.
-func RevocationPrincipal(machineID string, revokedSessions []string) string {
-	if len(revokedSessions) == 0 {
-		return "pb:" + machineID + ":0"
-	}
-	sum := sha256.Sum256([]byte(strings.Join(revokedSessions, "\n")))
-	return "pb:" + machineID + ":" + hex.EncodeToString(sum[:8])
+// MachinePrincipal is the principal a machine's CA line requires (`cert-authority,principals=`): a certificate for
+// one machine is refused by every other. It never changes, so revoking one user touches no one else's certificate.
+func MachinePrincipal(machineID string) string { return "pb:" + machineID }
+
+// CertificateKeyID is the key ID of every certificate one CLI session gets for one machine. Revocation names it: the
+// host refuses it in its bridge and in an OpenSSH KRL (RevokedKeys, `ssh-keygen -k`), like a Teleport lock on a
+// session (~/ref/teleport lib/services/lock.go LockTargetsFromTLSIdentity, enforced by lib/services/watcher.go
+// LockWatcher), until the certificates expire.
+func CertificateKeyID(userID, sessionID, machineID string) string {
+	return "paperboat:" + userID + ":" + sessionID + ":" + machineID
 }
 
 type Certificate struct {
@@ -110,7 +106,7 @@ type RotateUserCARequest struct {
 }
 
 // IssueCertificate signs the client's public key for the exact machine: principals = the machine's target OS user and
-// its revocation principal, usable only through the host's loopback bridge (source-address), valid for the
+// its machine principal, usable only through the host's loopback bridge (source-address), valid for the
 // configured hours. Like
 // Teleport's keygen.GenerateUserCertWithoutValidation (~/ref/teleport lib/auth/keygen/keygen.go), ValidAfter is a
 // minute in the past for clock skew.
@@ -149,8 +145,8 @@ func (s *Service) IssueCertificate(ctx context.Context, request IssueCertificate
 		Key:             public,
 		Serial:          binary.BigEndian.Uint64(serial[:]),
 		CertType:        ssh.UserCert,
-		KeyId:           "paperboat:" + request.UserID + ":" + request.CLIClientSessionID + ":" + request.UserMachineID,
-		ValidPrincipals: []string{authorization.OSUser, authorization.Principal},
+		KeyId:           CertificateKeyID(request.UserID, request.CLIClientSessionID, request.UserMachineID),
+		ValidPrincipals: []string{authorization.OSUser, MachinePrincipal(request.UserMachineID)},
 		ValidAfter:      uint64(now.Add(-time.Minute).Unix()),
 		ValidBefore:     uint64(validBefore.Unix()),
 		Permissions: ssh.Permissions{
@@ -166,7 +162,7 @@ func (s *Service) IssueCertificate(ctx context.Context, request IssueCertificate
 }
 
 // TrustedUserCAs are what a host trusts: every CA of the machine's owner account (pending, active and retiring),
-// created on first use, and the machine's current revocation principal.
+// created on first use, the machine's principal and the key IDs of still-valid certificates whose holders lost access.
 func (s *Service) TrustedUserCAs(ctx context.Context, request UserCAsRequest) (TrustedUserCASet, error) {
 	if s == nil || s.repository == nil || ctx == nil || !bounded(request.ActorUserID) || !bounded(request.UserMachineID) || request.MachineGeneration == 0 || request.MachineGeneration > math.MaxInt64 || request.Now.IsZero() {
 		return TrustedUserCASet{}, wire.ErrInvalid
@@ -175,11 +171,11 @@ func (s *Service) TrustedUserCAs(ctx context.Context, request UserCAsRequest) (T
 	if err != nil {
 		return TrustedUserCASet{}, err
 	}
-	cas, principal, err := s.repository.UserCAs(ctx, request, candidate)
+	cas, revoked, err := s.repository.UserCAs(ctx, request, candidate)
 	if err != nil {
 		return TrustedUserCASet{}, err
 	}
-	set := TrustedUserCASet{Keys: make([]string, len(cas)), Principal: principal}
+	set := TrustedUserCASet{Keys: make([]string, len(cas)), Principal: MachinePrincipal(request.UserMachineID), RevokedKeyIDs: revoked}
 	for index, ca := range cas {
 		set.Keys[index] = ca.PublicKey
 	}

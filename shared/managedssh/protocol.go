@@ -39,8 +39,9 @@ type CertificateDocument struct {
 	ValidBefore       string `json:"valid_before"`
 }
 
-// UserCAsDocument lists the user CA public keys a machine trusts for managed SSH (at most MaxUserCAs) and the
-// revocation principal every certificate must carry (the CA lines' principals= option).
+// UserCAsDocument lists the user CA public keys a machine trusts for managed SSH (at most MaxUserCAs), the principal
+// every certificate must carry (the CA lines' principals= option) and the key IDs of still-valid certificates it must
+// refuse (at most MaxRevokedKeyIDs).
 type UserCAsDocument struct {
 	Type              string   `json:"type"`
 	Version           int      `json:"version"`
@@ -48,4 +49,5 @@ type UserCAsDocument struct {
 	MachineGeneration uint64   `json:"machine_generation"`
 	Keys              []string `json:"keys"`
 	Principal         string   `json:"principal"`
+	RevokedKeyIDs     []string `json:"revoked_key_ids"`
 }

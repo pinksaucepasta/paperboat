@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -12,6 +13,8 @@ import (
 var (
 	ErrSSHHostInvalid = errors.New("managed SSH host service is invalid")
 	ErrSSHHostStale   = errors.New("managed SSH host target generation is stale")
+	// ErrSSHAccessRevoked refuses a stream whose CLI session lost access to this machine (Host.SetRevoked).
+	ErrSSHAccessRevoked = errors.New("managed SSH access to this machine was revoked")
 	// ErrSSHSessionsOpen refuses retiring a host or source while SSH sessions it accepted are still open.
 	ErrSSHSessionsOpen = errors.New("managed SSH sessions are still open")
 )
@@ -49,7 +52,11 @@ type Host struct {
 	flows          map[*hostFlow]struct{}
 	changed        chan struct{}
 	loginDenied    *loginDenied
+	// revoked are the (account, CLI session) peers whose certificates this machine refuses (SetRevoked).
+	revoked map[revokedPeer]struct{}
 }
+
+type revokedPeer struct{ account, session string }
 
 // SetAudit installs the audit for a Host built before its queue exists (the carrier's). Call it before the
 // host serves a stream.
@@ -57,6 +64,7 @@ func (h *Host) SetAudit(audit SessionAudit) { h.config.Audit = audit }
 
 type hostFlow struct {
 	cancel context.CancelFunc
+	peer   revokedPeer
 	// revoked is set when Disable cancels the flow, so the session ends as revoked, not closed.
 	revoked atomic.Bool
 }
@@ -203,6 +211,33 @@ func (h *Host) Disable(ctx context.Context) error {
 	}
 }
 
+// SetRevoked replaces the revoked certificate key IDs of this machine ("paperboat:<account>:<session>:<machine>",
+// the server's revoked list): a stream from such an (account, CLI session) is refused before sshd, and its open
+// sessions end now. sshd checks only at login, and every managed certificate is bound to this bridge's loopback
+// connection (source-address), so this check is the revocation on every OS; Windows' sshd also reads them as a KRL.
+// Like Teleport's LockWatcher (~/ref/teleport lib/services/watcher.go) it touches no other user's session.
+func (h *Host) SetRevoked(keyIDs []string) {
+	if h == nil {
+		return
+	}
+	revoked := make(map[revokedPeer]struct{}, len(keyIDs))
+	for _, id := range keyIDs {
+		parts := strings.Split(id, ":")
+		if len(parts) == 4 && parts[0] == "paperboat" && parts[1] != "" && parts[2] != "" {
+			revoked[revokedPeer{account: parts[1], session: parts[2]}] = struct{}{}
+		}
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.revoked = revoked
+	for flow := range h.flows {
+		if _, ok := revoked[flow.peer]; ok && flow.peer.session != "" {
+			flow.revoked.Store(true)
+			flow.cancel()
+		}
+	}
+}
+
 // Enable restores admission after the current worker applies an enabled policy.
 // An in-progress native retirement fence remains closed.
 func (h *Host) Enable() error {
@@ -245,6 +280,13 @@ func (h *Host) Serve(ctx context.Context, generation uint64, stream io.ReadWrite
 		h.Refused(ctx, stream, generation, RefusedNotSetUp)
 		return BridgeResult{}, ErrSSHHostStale
 	}
+	peer, _ := peerFrom(ctx)
+	key := revokedPeer{account: peer.AccountID, session: peer.EndpointID}
+	if _, revoked := h.revoked[key]; revoked && key.session != "" {
+		h.mu.Unlock()
+		h.Refused(ctx, stream, generation, RefusedNoAccess)
+		return BridgeResult{}, ErrSSHAccessRevoked
+	}
 	if user := loginUserFrom(ctx); user != "" && h.config.LoginDenied != nil && h.loginDenied.get(user, h.config.LoginDenied) {
 		h.mu.Unlock()
 		h.refuse(ctx, stream, generation, RefusedLoginNotAllowed+":"+user, RefusedLoginNotAllowed)
@@ -253,7 +295,7 @@ func (h *Host) Serve(ctx context.Context, generation uint64, stream io.ReadWrite
 	h.active[generation]++
 	h.activeBySource[target.SourceSHA256]++
 	bridgeCtx, cancel := context.WithCancel(ctx)
-	flow := &hostFlow{cancel: cancel}
+	flow := &hostFlow{cancel: cancel, peer: key}
 	h.flows[flow] = struct{}{}
 	h.mu.Unlock()
 	defer func() {

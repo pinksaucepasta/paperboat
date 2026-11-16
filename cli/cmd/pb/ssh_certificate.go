@@ -14,9 +14,9 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-// sshCertificateReuse: a connection asks for a new certificate unless the last one is younger than this (scp and
-// rsync open several connections at once). Hosts refuse certificates issued before a revocation.
-const sshCertificateReuse = 30 * time.Second
+// sshCertificateRenewal: a connection renews its certificate only when less than this is left; the daemon renews the
+// certificates of machines in use long before (renewManagedSSHCertificates), so connections normally ask nothing.
+const sshCertificateRenewal = time.Hour
 
 // actionSSHCertificate keeps one machine's managed SSH certificate fresh. OpenSSH runs it from the managed
 // fragment's `Match ... exec` before it loads CertificateFile. It always succeeds: a failure is printed and the
@@ -68,7 +68,7 @@ func ensureSSHCertificate(ctx *command.Context, client *api.Client, machine api.
 		issued, err := client.IssueManagedSSHCertificate(issueCtx, machine.ID, target.MachineGeneration, string(publicKey))
 		return issued.Certificate, err
 	}
-	certificate, err := managedssh.EnsureCertificate(ctx.Context, managedssh.CertificateTarget{Home: home, Alias: machine.Alias, OSUser: target.OSUser}, publicKey, issue, time.Now(), sshCertificateReuse)
+	certificate, err := managedssh.EnsureCertificate(ctx.Context, managedssh.CertificateTarget{Home: home, Alias: machine.Alias, OSUser: target.OSUser}, publicKey, issue, time.Now(), sshCertificateRenewal)
 	if err != nil {
 		return nil, err
 	}

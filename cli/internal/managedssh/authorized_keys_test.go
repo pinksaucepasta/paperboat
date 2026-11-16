@@ -177,7 +177,7 @@ func TestReconcileAuthorizedKeysTrustsTheCAOnlyOnLoopback(t *testing.T) {
 	}
 }
 
-const testPrincipal = "pb:machine_1:0"
+const testPrincipal = "pb:machine_1"
 
 func mustParseKey(t *testing.T, line string) ssh.PublicKey {
 	t.Helper()

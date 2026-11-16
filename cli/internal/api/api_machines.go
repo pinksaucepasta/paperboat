@@ -145,6 +145,7 @@ type ManagedSSHUserCAs struct {
 	MachineGeneration uint64   `json:"machine_generation"`
 	Keys              []string `json:"keys"`
 	Principal         string   `json:"principal"`
+	RevokedKeyIDs     []string `json:"revoked_key_ids"`
 }
 
 // ManagedSSHCertificate is a short-lived user certificate for one machine.

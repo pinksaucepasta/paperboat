@@ -534,7 +534,7 @@ func initializeProductionManagedSSHUnix(ctx context.Context, host *managedssh.Ho
 		return nil, errors.Join(ErrManagedSSHUnavailable, errors.New("managed SSH operating-system user identifier is invalid"), err)
 	}
 	reconciler := &managedSSHKeyReconciler{
-		client: client, identity: identitySource, registration: registration,
+		host: host, client: client, identity: identitySource, registration: registration,
 		workerGeneration: observationGeneration, publicKeys: publicKeys, readPublicKeys: readSSHHostPublicKeysUnix, watchHostKeys: watchSSHHostKeys,
 		home: account.HomeDir, ownerUID: uint32(uid), interval: 30 * time.Second, timeout: 10 * time.Second, events: keyEvents,
 	}

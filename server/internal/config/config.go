@@ -278,7 +278,7 @@ func (l PlanLimit) valid() bool {
 
 // ManagedSSH configures managed SSH. CertificateValidity is how long a managed SSH user certificate lets a client log in, so how long
 // clients keep starting new sessions while the control plane is unreachable. Revocation reaches hosts at once
-// (managedssh.RevocationPrincipal), not at expiry.
+// (the machine refuses revoked certificates by key ID), not at expiry.
 type ManagedSSH struct {
 	CertificateValidity time.Duration `json:"certificate_validity"`
 }

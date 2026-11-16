@@ -102,7 +102,7 @@ type GetHostKeySetRequest struct {
 
 type Repository interface {
 	CertificateAuthority(context.Context, IssueCertificateRequest, NewUserCA) (CertificateAuthorization, error)
-	UserCAs(context.Context, UserCAsRequest, NewUserCA) ([]UserCA, string, error)
+	UserCAs(context.Context, UserCAsRequest, NewUserCA) ([]UserCA, []string, error)
 	RotateUserCA(context.Context, RotateUserCARequest, NewUserCA) ([]UserCA, error)
 	ObserveHost(context.Context, ObserveHostRequest, HostKeySet) (HostKeySet, error)
 	PromoteHost(context.Context, PromoteHostRequest) (HostKeySet, error)

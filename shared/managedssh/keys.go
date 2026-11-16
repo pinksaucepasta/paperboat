@@ -12,14 +12,14 @@ import (
 const MaxHostKeys = 8
 
 // CATrustOptions are the options of a host's line trusting a user CA: certificates carrying principal (the machine's
-// revocation principal), and only on the loopback connections the host's own bridge makes (BridgeSSH dials 127.0.0.1
+// principal "pb:<machine>"), and only on the loopback connections the host's own bridge makes (BridgeSSH dials 127.0.0.1
 // or ::1), so a certificate never opens a session that bypasses the stream (direct sshd over LAN or tailnet is
 // refused at login). Callers check ValidCAPrincipal first.
 func CATrustOptions(principal string) string {
 	return `cert-authority,principals="` + principal + `",from="127.0.0.1,::1"`
 }
 
-// ValidCAPrincipal: a revocation principal as the server makes it ("pb:<machine>:<token>"), safe inside principals="".
+// ValidCAPrincipal: a machine principal as the server makes it ("pb:<machine>"), safe inside principals="".
 func ValidCAPrincipal(value string) bool {
 	return strings.HasPrefix(value, "pb:") && len(value) <= 200 && !strings.ContainsAny(value, "\",\r\n\t\x00 *?!")
 }

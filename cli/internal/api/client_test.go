@@ -1021,3 +1021,25 @@ func TestConfigTeamDefaultCallsUseTheNamedTeamWorkspace(t *testing.T) {
 		t.Fatal("a team default call changed the command's workspace")
 	}
 }
+
+// The machine's CA set must name this machine's principal and revoke only key IDs for this machine.
+func TestManagedSSHUserCAsChecksPrincipalAndRevokedList(t *testing.T) {
+	answer := ManagedSSHUserCAs{Type: "ssh_user_ca_set", Version: 1, MachineID: "machine_1", MachineGeneration: 1, Keys: []string{"ssh-ed25519 AAAA ca"}, Principal: "pb:machine_1", RevokedKeyIDs: []string{"paperboat:user_a:session_a:machine_1"}}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { writeData(w, http.StatusOK, answer) }))
+	defer server.Close()
+	client := New(server.URL, config.Credential{}, server.Client())
+	if set, err := client.ManagedSSHUserCAs(t.Context(), "machine_1", "credential_1", 1, []byte("proof")); err != nil || len(set.RevokedKeyIDs) != 1 {
+		t.Fatalf("set=%+v err=%v", set, err)
+	}
+	for name, change := range map[string]func(*ManagedSSHUserCAs){
+		"another machine's principal":      func(a *ManagedSSHUserCAs) { a.Principal = "pb:machine_2" },
+		"another machine's key ID":         func(a *ManagedSSHUserCAs) { a.RevokedKeyIDs = []string{"paperboat:user_a:session_a:machine_2"} },
+		"a key ID the server never issues": func(a *ManagedSSHUserCAs) { a.RevokedKeyIDs = []string{"evil\nline:machine_1"} },
+	} {
+		answer = ManagedSSHUserCAs{Type: "ssh_user_ca_set", Version: 1, MachineID: "machine_1", MachineGeneration: 1, Keys: []string{"ssh-ed25519 AAAA ca"}, Principal: "pb:machine_1"}
+		change(&answer)
+		if _, err := client.ManagedSSHUserCAs(t.Context(), "machine_1", "credential_1", 1, []byte("proof")); err == nil {
+			t.Errorf("%s was accepted", name)
+		}
+	}
+}

@@ -21,7 +21,7 @@ type recordingWindowsAuthorizedKeysClient struct {
 	err      error
 }
 
-func (c *recordingWindowsAuthorizedKeysClient) ReconcileAuthorizedKeys(ctx context.Context, keys []string, _ string) (bool, error) {
+func (c *recordingWindowsAuthorizedKeysClient) ReconcileAuthorizedKeys(ctx context.Context, keys []string, _ string, _ []string) (bool, error) {
 	_, c.deadline = ctx.Deadline()
 	c.keys = make([]string, len(keys))
 	copy(c.keys, keys)
@@ -52,11 +52,11 @@ func TestWindowsManagedSSHDelegatesAuthorizedKeysToPrivilegedHostService(t *test
 		t.Fatal(err)
 	}
 	root := filepath.Join(instanceRoot, "ssh") // the enrolled user's instance, not the machine-wide root
-	changed, err := reconcilePlatformAuthorizedKeys(root, 0, keys, "pb:machine_1:0")
+	changed, err := reconcilePlatformAuthorizedKeys(root, 0, keys, "pb:machine_1", nil)
 	if err != nil || !changed || !recorder.deadline || !reflect.DeepEqual(recorder.keys, keys) {
 		t.Fatalf("changed=%t deadline=%t keys=%v err=%v", changed, recorder.deadline, recorder.keys, err)
 	}
-	if _, err := reconcilePlatformAuthorizedKeys(`C:\Users\Pujan\.ssh`, 0, keys, "pb:machine_1:0"); err == nil {
+	if _, err := reconcilePlatformAuthorizedKeys(`C:\Users\Pujan\.ssh`, 0, keys, "pb:machine_1", nil); err == nil {
 		t.Fatal("owner-selected authorized-keys root was accepted")
 	}
 }

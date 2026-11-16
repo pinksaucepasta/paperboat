@@ -81,7 +81,7 @@ func (c *Client) ManagedSSHUserCAs(ctx context.Context, machineID, keyID string,
 	if err != nil {
 		return ManagedSSHUserCAs{}, err
 	}
-	if set.Type != "ssh_user_ca_set" || set.Version != 1 || set.MachineID != machineID || set.MachineGeneration != generation || len(set.Keys) == 0 || len(set.Keys) > wire.MaxUserCAs || !wire.ValidCAPrincipal(set.Principal) || !strings.HasPrefix(set.Principal, "pb:"+machineID+":") {
+	if set.Type != "ssh_user_ca_set" || set.Version != 1 || set.MachineID != machineID || set.MachineGeneration != generation || len(set.Keys) == 0 || len(set.Keys) > wire.MaxUserCAs || set.Principal != "pb:"+machineID || !wire.ValidCAPrincipal(set.Principal) || !validRevokedKeyIDs(set.RevokedKeyIDs, machineID) {
 		return ManagedSSHUserCAs{}, errors.New("paperboat-server returned an invalid managed SSH user CA set")
 	}
 	return set, nil
@@ -139,4 +139,17 @@ func (c *Client) PromoteManagedSSHHostKeys(ctx context.Context, machineID, setID
 		return ManagedSSHHostKeySet{}, errors.New("paperboat-server returned an invalid managed SSH host-key promotion")
 	}
 	return set, nil
+}
+
+// validRevokedKeyIDs: at most wire.MaxRevokedKeyIDs key IDs the server issues, each for this machine.
+func validRevokedKeyIDs(ids []string, machineID string) bool {
+	if len(ids) > wire.MaxRevokedKeyIDs {
+		return false
+	}
+	for _, id := range ids {
+		if !wire.ValidRevokedKeyID(id) || !strings.HasSuffix(id, ":"+machineID) {
+			return false
+		}
+	}
+	return true
 }

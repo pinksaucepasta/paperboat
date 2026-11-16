@@ -225,3 +225,67 @@ func pipeStream(t *testing.T) io.ReadWriteCloser {
 	t.Cleanup(func() { _ = left.Close(); _ = right.Close() })
 	return left
 }
+
+// Revoking user A's session refuses A's next stream and ends A's open session, while user B on the same machine
+// keeps working: one user's revocation touches no one else.
+func TestHostSetRevokedRefusesOnlyTheRevokedSession(t *testing.T) {
+	listener := loopbackListener(t)
+	defer listener.Close()
+	go echoConnections(listener)
+	port := uint16(listener.Addr().(*net.TCPAddr).Port)
+	host, _ := NewHost(HostConfig{ProbeTimeout: time.Second, DialTimeout: time.Second})
+	if _, err := host.ReconcileTarget(context.Background(), 1, port); err != nil {
+		t.Fatal(err)
+	}
+	userA := WithPeer(context.Background(), Peer{AccountID: "user_a", EndpointID: "session_a"})
+	userB := WithPeer(context.Background(), Peer{AccountID: "user_b", EndpointID: "session_b"})
+	serve := func(ctx context.Context) (net.Conn, chan error) {
+		client, server := net.Pipe()
+		done := make(chan error, 1)
+		go func() { _, err := host.Serve(ctx, 1, server); done <- err }()
+		return client, done
+	}
+	openA, doneA := serve(userA)
+	defer openA.Close()
+	openB, doneB := serve(userB)
+	defer openB.Close()
+	deadline := time.Now().Add(time.Second)
+	for host.OpenStreams() != 2 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	host.SetRevoked([]string{"paperboat:user_a:session_a:machine_1", "not-a-key-id"})
+	select {
+	case err := <-doneA:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("A's open session ended with %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("A's open session did not end on revocation")
+	}
+	if _, err := openB.Write([]byte("b")); err != nil {
+		t.Fatalf("B's open session ended with A's revocation: %v", err)
+	}
+	echo := make([]byte, 1)
+	if _, err := io.ReadFull(openB, echo); err != nil || echo[0] != 'b' {
+		t.Fatalf("B's session stopped echoing: %v", err)
+	}
+	refusedA, doneNewA := serve(userA)
+	defer refusedA.Close()
+	go io.Copy(io.Discard, refusedA)
+	if err := <-doneNewA; !errors.Is(err, ErrSSHAccessRevoked) {
+		t.Fatalf("A's new stream after revocation: %v", err)
+	}
+	newB, _ := serve(userB)
+	defer newB.Close()
+	if _, err := newB.Write([]byte("n")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.ReadFull(newB, echo); err != nil || echo[0] != 'n' {
+		t.Fatalf("B's new stream was refused: %v", err)
+	}
+	host.SetRevoked(nil)
+	if _, ok := host.revoked[revokedPeer{"user_a", "session_a"}]; ok {
+		t.Fatal("an emptied revoked list kept A refused")
+	}
+	_ = doneB
+}

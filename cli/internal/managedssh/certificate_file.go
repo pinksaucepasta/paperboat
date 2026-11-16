@@ -19,15 +19,16 @@ type CertificateTarget struct {
 	Home, Alias, OSUser string
 }
 
-// EnsureCertificate returns this computer's certificate for target: the one in its file when it was issued less than
-// reuseFor ago, else a new one from issue, written to the file. A host refuses certificates issued before a
-// revocation, so a client asks for a new one whenever it can; when issue fails (the control plane is unreachable),
-// the file's certificate is used for as long as it is valid (F5-08).
-func EnsureCertificate(ctx context.Context, target CertificateTarget, publicKey []byte, issue func(context.Context) (string, error), now time.Time, reuseFor time.Duration) ([]byte, error) {
+// EnsureCertificate returns this computer's certificate for target: the one in its file while it is valid for at
+// least renewWithin more, else a new one from issue, written to the file. A certificate lives to its expiry
+// (revocation refuses its key ID on the host, touching no one else's), so a connection asks the control plane
+// nothing while it has one (F5-07). When issue fails (the control plane is unreachable), the file's certificate is
+// used for as long as it is valid (F5-08).
+func EnsureCertificate(ctx context.Context, target CertificateTarget, publicKey []byte, issue func(context.Context) (string, error), now time.Time, renewWithin time.Duration) ([]byte, error) {
 	path := ManagedCertificatePath(target.Home, target.Alias)
 	existing, readErr := os.ReadFile(path)
 	usable := readErr == nil && UsableCertificate(existing, publicKey, target.OSUser, now, 0)
-	if usable && now.Sub(certificateIssuedAt(existing)) < reuseFor {
+	if usable && UsableCertificate(existing, publicKey, target.OSUser, now, renewWithin) {
 		return existing, nil
 	}
 	issued, err := issue(ctx)
@@ -56,15 +57,6 @@ func UsableCertificate(value, publicKey []byte, principal string, now time.Time,
 		return false
 	}
 	return uint64(now.Unix()) >= certificate.ValidAfter && uint64(now.Add(margin).Unix()) < certificate.ValidBefore
-}
-
-// certificateIssuedAt: the server backdates ValidAfter by one minute for clock skew.
-func certificateIssuedAt(value []byte) time.Time {
-	certificate, ok := parseCertificate(value)
-	if !ok {
-		return time.Time{}
-	}
-	return time.Unix(int64(certificate.ValidAfter), 0).Add(time.Minute)
 }
 
 func parseCertificate(value []byte) (*ssh.Certificate, bool) {

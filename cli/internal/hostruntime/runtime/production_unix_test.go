@@ -110,7 +110,7 @@ func (c *managedSSHTestClient) ManagedSSHUserCAs(_ context.Context, machineID, i
 		return clientapi.ManagedSSHUserCAs{}, errors.New("wrong authorized-key request")
 	}
 	c.keysIdentity, c.keysProof = identity, append([]byte(nil), proof...)
-	return clientapi.ManagedSSHUserCAs{Keys: []string{"ssh-ed25519 AAAA managed"}, Principal: "pb:machine_1:0"}, nil
+	return clientapi.ManagedSSHUserCAs{Keys: []string{"ssh-ed25519 AAAA managed"}, Principal: "pb:machine_1"}, nil
 }
 
 func TestManagedSSHAuthorityUsesCurrentCredentialAndExactProofBodies(t *testing.T) {
@@ -238,7 +238,7 @@ func (c *rotatingManagedSSHClient) ManagedSSHUserCAs(context.Context, string, st
 		index = len(c.keys) - 1
 	}
 	c.calls++
-	return clientapi.ManagedSSHUserCAs{Keys: append([]string(nil), c.keys[index]...), Principal: "pb:machine_1:0"}, nil
+	return clientapi.ManagedSSHUserCAs{Keys: append([]string(nil), c.keys[index]...), Principal: "pb:machine_1"}, nil
 }
 
 type refreshingManagedSSHIdentity struct {

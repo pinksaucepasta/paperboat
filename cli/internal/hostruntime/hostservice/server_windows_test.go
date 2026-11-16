@@ -28,7 +28,7 @@ type windowsTestAuthorizedKeys struct {
 	err     error
 }
 
-func (r *windowsTestAuthorizedKeys) ReconcileAuthorizedKeys(ctx context.Context, keys []string, _ string) (bool, error) {
+func (r *windowsTestAuthorizedKeys) ReconcileAuthorizedKeys(ctx context.Context, keys []string, _ string, _ []string) (bool, error) {
 	if err := ctx.Err(); err != nil {
 		return false, err
 	}
@@ -111,13 +111,13 @@ func TestWindowsAuthorizedKeysRequestUsesSIDRestrictedHostService(t *testing.T) 
 	for index := range keys {
 		keys[index] = "ssh-ed25519 " + strings.Repeat("a", 100) + strconv.Itoa(index)
 	}
-	changed, err := client.ReconcileAuthorizedKeys(context.Background(), keys, "pb:machine_1:0")
+	changed, err := client.ReconcileAuthorizedKeys(context.Background(), keys, "pb:machine_1", nil)
 	if err != nil || !changed || !reflect.DeepEqual(reconciler.keys, keys) {
 		cancel()
 		t.Fatalf("changed=%t keys=%d err=%v", changed, len(reconciler.keys), err)
 	}
 	reconciler.changed = false
-	changed, err = client.ReconcileAuthorizedKeys(context.Background(), nil, "")
+	changed, err = client.ReconcileAuthorizedKeys(context.Background(), nil, "", nil)
 	if err != nil || changed || reconciler.keys == nil || len(reconciler.keys) != 0 {
 		cancel()
 		t.Fatalf("clear changed=%t keys=%v err=%v", changed, reconciler.keys, err)
@@ -133,7 +133,7 @@ func TestWindowsAuthorizedKeysClientRejectsMoreThanProtocolMaximum(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := client.ReconcileAuthorizedKeys(context.Background(), make([]string, maxAuthorizedKeys+1), ""); !errors.Is(err, ErrInvalidRequest) {
+	if _, err := client.ReconcileAuthorizedKeys(context.Background(), make([]string, maxAuthorizedKeys+1), "", nil); !errors.Is(err, ErrInvalidRequest) {
 		t.Fatalf("error=%v, want invalid request", err)
 	}
 }

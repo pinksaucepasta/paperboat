@@ -46,13 +46,13 @@ func NewClient(socketPath string, timeout time.Duration) (*Client, error) {
 }
 func DefaultSocketPath() string { return defaultSocketPath }
 
-func (c *Client) ReconcileAuthorizedKeys(ctx context.Context, keys []string, principal string) (bool, error) {
+func (c *Client) ReconcileAuthorizedKeys(ctx context.Context, keys []string, principal string, revoked []string) (bool, error) {
 	if len(keys) > maxAuthorizedKeys {
 		return false, ErrInvalidRequest
 	}
 	requestKeys := make([]string, len(keys))
 	copy(requestKeys, keys)
-	response, err := c.call(ctx, Request{Schema: ProtocolV1, Operation: "reconcile_ssh_authorized_keys", AuthorizedKeys: &requestKeys, SSHPrincipal: principal})
+	response, err := c.call(ctx, Request{Schema: ProtocolV1, Operation: "reconcile_ssh_authorized_keys", AuthorizedKeys: &requestKeys, SSHPrincipal: principal, SSHRevoked: revoked})
 	if err != nil {
 		return false, err
 	}
