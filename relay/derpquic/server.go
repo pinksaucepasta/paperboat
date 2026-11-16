@@ -31,6 +31,22 @@ const MaxConnections = relaylimits.MaxConnectionsPerNode
 // small count refused the 17th machine of an account (relay capacity exhausted on first contact).
 func (s *Server) accountShareLocked() int { return max(1, s.connectionLimit-s.connectionLimit/10) }
 
+// overFairShareLocked refuses an account's new connection once the node is half full and the account already holds
+// its equal share (limit / accounts connected, itself included): the 90% cap alone let two busy accounts starve a
+// third, and a second account arriving beside one holding 90% found 10%. Nothing is evicted; a node that was lopsided
+// evens out as the larger account's connections turn over. An idle node never applies it, so a lone account's 17th
+// machine still connects. A replacement of the account's own route (old != nil) takes no new slot and is never refused by it. Prior art: Teleport caps connections per user (role max_connections, lib/srv/authhandlers.go:1056), not per node alone.
+func (s *Server) overFairShareLocked(account string, count int) bool {
+	if len(s.peers) < s.connectionLimit/2 {
+		return false
+	}
+	active := map[string]struct{}{account: {}}
+	for _, q := range s.peers {
+		active[q.grant.AccountID] = struct{}{}
+	}
+	return count >= max(1, s.connectionLimit/len(active))
+}
+
 type Stats struct {
 	Accepted, Denied, Forwarded, Dropped uint64
 	Connections                          int
@@ -379,7 +395,7 @@ func (s *Server) admit(p *peerConn, g Grant, now time.Time) error {
 		}
 		count--
 	}
-	if p.key.IsZero() && (count >= s.accountShareLocked() || len(s.fences) >= MaxConnections && s.fences[id] == nil) {
+	if p.key.IsZero() && (count >= s.accountShareLocked() || old == nil && s.overFairShareLocked(g.AccountID, count) || len(s.fences) >= MaxConnections && s.fences[id] == nil) {
 		return ErrOverload
 	}
 	if old != nil && old != p {
