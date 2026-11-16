@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"net"
+	"sort"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -69,15 +70,31 @@ func delayedUDPRelay(t *testing.T, target *net.UDPAddr, delay time.Duration) str
 	return front.LocalAddr().String()
 }
 
-// One QUIC stream, sent the way the daemon dials (quicdial.Dial with defaultQUICConfig on the OS socket), into the edge's receive windows (256 KiB initial, 4 MiB
-// maximum, as edge/internal/datacarrier endpointQUICConfig) must hold the budget at 50 ms RTT. The connection is made
-// through the delay, so its handshake measures the real RTT: a connection that measured ~1 ms before the delay
-// appeared makes quic-go's HyStart leave slow start at once (40 KB window, 88-95 Mbit/s on Linux). This is the sender
-// side on each OS: Linux sends in GSO batches, macOS and Windows one datagram at a time.
+// One QUIC stream, sent the way the daemon dials (quicdial.Dial with defaultQUICConfig on the OS socket), into the
+// edge's receive windows (256 KiB initial, 4 MiB maximum, as edge/internal/datacarrier endpointQUICConfig) must hold the
+// budget at 50 ms RTT: the median of three fresh connections (the sender, the receiver and the delay line share this
+// machine's cores, so one run can dip). Each connection is made through the delay, so its handshake measures the
+// real RTT: a connection that measured ~1 ms before the delay appeared makes quic-go's HyStart leave slow start at
+// once (40 KB window, 88-95 Mbit/s on Linux). This is the sender side on each OS: Linux sends in GSO batches, macOS
+// and Windows one datagram at a time.
 func TestQUICCarrierStreamHoldsTheBudgetAtRealRTT(t *testing.T) {
 	if raceEnabled {
 		t.Skip("throughput measurement: race instrumentation, not the carrier, bounds it")
 	}
+	var rates []float64
+	for range 3 {
+		rates = append(rates, quicStreamMbit(t))
+	}
+	sort.Float64s(rates)
+	t.Logf("one QUIC stream at 50 ms RTT: %.1f Mbit/s median of %.1f (budget %.0f)", rates[1], rates, throughputBudget)
+	if rates[1] < throughputBudget {
+		t.Fatalf("one QUIC stream at 50 ms RTT sustains %.1f Mbit/s median (runs %.1f), budget %.0f", rates[1], rates, throughputBudget)
+	}
+}
+
+// quicStreamMbit sends throughputBytes on one stream of a new connection through the 50 ms delay line.
+func quicStreamMbit(t *testing.T) float64 {
+	t.Helper()
 	clientTLS, serverTLS, _ := testDataCarrierCertificates(t)
 	ctx, cancel := context.WithTimeout(t.Context(), 90*time.Second)
 	defer cancel()
@@ -133,9 +150,5 @@ func TestQUICCarrierStreamHoldsTheBudgetAtRealRTT(t *testing.T) {
 	if err := <-received; err != nil {
 		t.Fatalf("receive: %v", err)
 	}
-	rate := float64(throughputBytes) * 8 / time.Since(started).Seconds() / 1e6
-	t.Logf("one QUIC stream at 50 ms RTT: %.1f Mbit/s (budget %.0f)", rate, throughputBudget)
-	if rate < throughputBudget {
-		t.Fatalf("one QUIC stream at 50 ms RTT sustains %.1f Mbit/s, budget %.0f", rate, throughputBudget)
-	}
+	return float64(throughputBytes) * 8 / time.Since(started).Seconds() / 1e6
 }
