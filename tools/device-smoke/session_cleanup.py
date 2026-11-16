@@ -46,7 +46,7 @@ def inventory(pb, target, environment=None):
     sessions = receipt.get("sessions")
     if code or receipt.get("version") != "1" or not isinstance(actual, str) or not actual:
         error = receipt.get("error") if isinstance(receipt.get("error"), dict) else {}
-        raise CleanupError('pb session list failed or gave an invalid receipt (exit %s, code %s)' % (code, error.get("code")))
+        raise CleanupError('pb session list failed or gave an invalid receipt (exit %s, code %s, %s)' % (code, error.get("code"), error.get("support_reference")))
     if environment is not None and actual != environment:
         raise CleanupError('pb session list answered for another environment')
     if not isinstance(sessions, list) or any(not isinstance(s, dict) for s in sessions):
