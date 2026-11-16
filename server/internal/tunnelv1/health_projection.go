@@ -15,9 +15,10 @@ type healthExecutor interface {
 // RefreshHealth projects current, exact edge-probed route readiness. A connected
 // connector alone is insufficient, and a completed operation stays historical
 // when a later outage makes the current health pending again. A route is ready
-// only when every live edge holding its active assignment has observed it ready:
-// a tunnel hostname can resolve to any of those edges (the managed wildcard), so
-// "ready on one edge" sent first requests to an edge without the route (F8-06). The expiry
+// only when every live edge holding its active assignment has observed it ready
+// (paperboat.endpoint_route_ready, shared with preview readiness): a tunnel hostname
+// can resolve to any of those edges (the managed wildcard), so "ready on one edge"
+// sent first requests to an edge without the route (F8-06). The expiry
 // reconciler retains ownership of persisting expired summary/audit state.
 func RefreshHealth(ctx context.Context, executor healthExecutor, accountID string, tunnelIDs []string, now time.Time) error {
 	_, err := executor.Exec(ctx, `WITH health AS (
@@ -33,20 +34,9 @@ func RefreshHealth(ctx context.Context, executor healthExecutor, accountID strin
  WHEN bool_or(coalesce(probe.failed,false)) THEN 'route_unavailable'
  ELSE 'pending' END AS code
  FROM tunnels t LEFT JOIN tunnel_routes r ON r.tunnel_id=t.id AND r.desired_state='active' AND r.deleted_at IS NULL
- LEFT JOIN LATERAL (SELECT bool_and(ok) AS ready, bool_or(bad) AS failed FROM (
- -- A tunnel's route on each edge where the agent's runtime carrier holds it, observed ready by that edge.
- SELECT x.observed_ready AND x.observed_at>$3::timestamptz-interval '2 minutes' AS ok, false AS bad
- FROM endpoint_edge_assignments x
- JOIN endpoints e ON e.id=x.endpoint_id AND e.kind='tunnel' AND e.tunnel_id=t.id AND e.desired_state='active'
- JOIN endpoint_routes er ON er.id=x.route_id AND er.tunnel_route_id=r.id
- JOIN runtime_carrier_attachments ra ON ra.machine_id=e.agent_machine_id AND ra.edge_node_id=x.edge_node_id
- AND ra.edge_process_epoch=x.edge_process_epoch AND ra.session_id=x.carrier_session_id
- JOIN control_tunnel_nodes n ON n.id=x.edge_node_id AND n.process_epoch=x.edge_process_epoch
- WHERE x.desired='active' AND ra.expires_at>$3
- AND n.state='ready' AND n.ready AND n.roles @> ARRAY['edge']::text[]
- AND n.registry_expires_at>$3 AND n.last_heartbeat_at>$3::timestamptz-interval '15 seconds'
- AND n.drain_deadline IS NULL AND paperboat.node_route_eligible(n.id,t.account_id,r.id)
- ) probes) probe ON true
+ LEFT JOIN LATERAL (SELECT bool_and(paperboat.endpoint_route_ready(er.id,$3)) AS ready, false AS failed
+ FROM endpoint_routes er JOIN endpoints e ON e.id=er.endpoint_id AND e.kind='tunnel' AND e.tunnel_id=t.id AND e.desired_state='active'
+ WHERE er.tunnel_route_id=r.id) probe ON true
  WHERE t.account_id=$1 AND t.id=ANY($2::text[]) GROUP BY t.id
  ), updated AS (
  -- Edges report every few seconds; only a changed summary is written. Pending operations are settled from the

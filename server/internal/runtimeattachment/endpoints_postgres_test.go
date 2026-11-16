@@ -319,9 +319,21 @@ VALUES($1,$2,$3,$3,$4,'owner_session_endpoint','foreground','http','127.0.0.1:30
 	if got := served(); len(got) != 1 || got[0] != node+"/edge_ready" {
 		t.Fatalf("preview_routes = %v, want only %s/edge_ready", got, node)
 	}
-	if err := gate(); err != nil {
-		t.Fatalf("readiness with one serving edge = %v", err)
+	// Ready means every live edge holding the route serves it (paperboat.endpoint_route_ready, the tunnels' rule):
+	// both edges answer the wildcard name and do not forward, so one serving edge is not ready.
+	if err := gate(); !errors.Is(err, endpoints.ErrNotServing) {
+		t.Fatalf("readiness with one of two live edges serving = %v, want not serving", err)
 	}
+	exec(`UPDATE control_tunnel_nodes SET drain_deadline=now()+interval '1 hour' WHERE id=$1`, backupNode)
+	if err := gate(); err != nil {
+		t.Fatalf("readiness waited for a draining edge: %v", err)
+	}
+	exec(`UPDATE control_tunnel_nodes SET drain_deadline=NULL WHERE id=$1`, backupNode)
+	exec(`UPDATE endpoint_edge_assignments SET observed_ready=true,observed_at=now() WHERE endpoint_id=$1 AND edge_node_id=$2`, lease, backupNode)
+	if err := gate(); err != nil {
+		t.Fatalf("readiness with every live edge serving = %v", err)
+	}
+	exec(`UPDATE endpoint_edge_assignments SET observed_ready=false WHERE endpoint_id=$1 AND edge_node_id=$2`, lease, backupNode)
 	exec(`UPDATE preview_leases SET origin_state='ready',ready_at=now() WHERE id=$1`, lease)
 	if got := served(); len(got) != 1 || got[0] != node+"/ready" {
 		t.Fatalf("preview_routes after origin ready = %v", got)
@@ -349,13 +361,19 @@ VALUES($1,$2,$3,$3,$4,'owner_session_endpoint','foreground','http','127.0.0.1:30
 		}
 		return record.ManagedRoutePending
 	}
-	if !pending() {
-		t.Fatal("a preview served by one of two live edges is not pending")
+	// The list's pending flag and the readiness gate read one rule (paperboat.endpoint_route_ready): they must agree.
+	agree := func(want bool, why string) {
+		t.Helper()
+		if got := pending(); got != want {
+			t.Fatalf("%s: pending = %v, want %v", why, got, want)
+		}
+		if err := gate(); (err == nil) == want {
+			t.Fatalf("%s: readiness gate = %v disagrees with pending = %v", why, err, want)
+		}
 	}
+	agree(true, "a preview served by one of two live edges")
 	exec(`UPDATE endpoint_edge_assignments SET observed_ready=true,observed_at=now() WHERE endpoint_id=$1 AND edge_node_id=$2`, lease, backupNode)
-	if pending() {
-		t.Fatal("a preview served by every live edge is still pending")
-	}
+	agree(false, "a preview served by every live edge")
 	// A private preview served by both edges has one preview_routes row per edge; the grant for the edge the
 	// agent's carrier is on must bind that edge's row, never the other one (macOS: wrong_route, 2026-11-05).
 	resolver, err := privateaccess.NewPreviewRouteResolver(database)
@@ -373,20 +391,14 @@ VALUES($1,$2,$3,$3,$4,'owner_session_endpoint','foreground','http','127.0.0.1:30
 	}
 	exec(`UPDATE endpoint_edge_assignments SET observed_ready=false WHERE endpoint_id=$1 AND edge_node_id=$2`, lease, backupNode)
 	exec(`UPDATE control_tunnel_nodes SET drain_deadline=now()+interval '1 hour' WHERE id=$1`, backupNode)
-	if pending() {
-		t.Fatal("a drained edge was waited for")
-	}
+	agree(false, "a drained edge")
 	exec(`UPDATE control_tunnel_nodes SET drain_deadline=NULL WHERE id=$1`, backupNode)
 	// A customer's own edge never serves a managed preview, so it is not waited for: a self-hosted edge that is
 	// live and does not hold the route must not keep every managed preview "connecting" (staging 2026-11-16,
 	// F21-168: two live edges of another account's pool held a managed preview pending forever).
-	if !pending() {
-		t.Fatal("setup: the unserved live edge should hold the preview pending")
-	}
+	agree(true, "setup: the unserved live edge")
 	exec(`INSERT INTO selfhost_installations(id,node_id,installation_public_key,runtime_hash,runtime_ciphertext,name,capability,scope_kind,scope_id,claim_id,claim_complete) VALUES($1,$2,$3,$3,'fixture','customer edge','tunnel','account',$4,$1,true)`, prefix+"_customer_edge", backupNode, []byte(strings.Repeat("k", 32)), prefix+"_other_account")
-	if pending() {
-		t.Fatal("a customer's self-hosted edge that does not serve the route holds a managed preview pending")
-	}
+	agree(false, "a customer's self-hosted edge that does not serve the route")
 	exec(`DELETE FROM selfhost_installations WHERE id=$1`, prefix+"_customer_edge")
 	// The owner's native `pb preview inspect` gets its inspector network scope from a preview served
 	// as an endpoint route (it read only the legacy attachments, so the dial was refused).
