@@ -8,10 +8,13 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
 	"golang.org/x/sys/unix"
+
+	"github.com/pinksaucepasta/paperboat/internal/splitdns"
 )
 
 func TestLeaseFDNameRoundTripAndRefusals(t *testing.T) {
@@ -154,5 +157,103 @@ func TestGuardInstallKeepsTheDescriptorStore(t *testing.T) {
 	}
 	if last := guardInstallCommands[len(guardInstallCommands)-1]; last[0] != "restart" {
 		t.Fatalf("install ends with %v, want a restart that passes the stored descriptors on", last)
+	}
+}
+
+func inheritedGatewayFixture(t *testing.T) (*guardServer, int, *os.File) {
+	t.Helper()
+	listener, err := net.Listen("tcp4", net.JoinHostPort(splitdns.BrowserGatewayIP, "0"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := listener.Addr().(*net.TCPAddr).Port
+	file, err := listener.(*net.TCPListener).File()
+	if err != nil {
+		t.Fatal(err)
+	}
+	listener.Close() // the old guard exits; the descriptor store keeps the socket
+	g := &guardServer{cfg: Config{LoopbackCIDR: "127.100.0.0/16"}, failures: make(chan error, 1), leases: map[string]*guardedLease{}, names: map[controlConn]map[string]string{}, connections: map[controlConn]string{}}
+	g.restoreFrom([]*os.File{file}, []string{"pbg|" + strconv.Itoa(port) + "|" + strconv.Itoa(port)})
+	return g, port, file
+}
+
+// The browser gateway's shared socket survives a guard replacement: its connects queue while no daemon has
+// registered a route, its nft rule is kept by a placeholder lease, and the first route starts the accepting.
+func TestInheritedGatewayHoldsItsBacklogUntilADaemonRegisters(t *testing.T) {
+	g, port, _ := inheritedGatewayFixture(t)
+	gateway := g.gateways[port]
+	if gateway == nil || gateway.serving || len(g.leases) != 1 {
+		t.Fatalf("restored gateway %v, %d leases", gateway, len(g.leases))
+	}
+	leases := make([]*guardedLease, 0, 1)
+	for _, lease := range g.leases {
+		leases = append(leases, lease)
+	}
+	rules, err := protectionRules(leases)
+	if err != nil || !strings.Contains(rules, "ip daddr "+splitdns.BrowserGatewayIP+" tcp dport "+strconv.Itoa(port)+" accept") {
+		t.Fatalf("the inherited gateway's rule is missing: %v\n%s", err, rules)
+	}
+	address := net.JoinHostPort(splitdns.BrowserGatewayIP, strconv.Itoa(port))
+	conn, err := net.DialTimeout("tcp4", address, time.Second)
+	if err != nil {
+		t.Fatalf("connect while no daemon has registered: %v", err)
+	}
+	defer conn.Close()
+	daemon := &namesTestConn{id: 1}
+	route, err := g.acquireGatewayRoute(t.Context(), daemon, "1000", request{Operation: "acquire", Hostname: splitdns.BrowserGatewayHostname, IP: splitdns.BrowserGatewayIP, Port: port, Handoff: true})
+	if err != nil || route == nil {
+		t.Fatalf("daemon registration: %v", err)
+	}
+	if !gateway.serving || len(g.leases) != 1 {
+		t.Fatalf("serving=%v, leases %d: the placeholder must give way to the daemon's lease", gateway.serving, len(g.leases))
+	}
+	for key, lease := range g.leases {
+		if lease.owner != controlConn(daemon) || lease.uid != "1000" {
+			t.Fatalf("lease %s is %+v", key, lease)
+		}
+	}
+	_ = route.(*gatewayRoute).release()
+}
+
+func TestUnclaimedInheritedGatewayIsReleased(t *testing.T) {
+	previous := applyPolicy
+	applyPolicy = func(context.Context, Config, []*guardedLease) error { return nil }
+	t.Cleanup(func() { applyPolicy = previous })
+	g, port, _ := inheritedGatewayFixture(t)
+	g.releaseUnclaimed()
+	if len(g.leases) != 0 || g.gateways[port] != nil {
+		t.Fatalf("leases %d, gateway %v after the adoption window", len(g.leases), g.gateways[port])
+	}
+	if conn, err := net.DialTimeout("tcp4", net.JoinHostPort(splitdns.BrowserGatewayIP, strconv.Itoa(port)), time.Second); err == nil {
+		conn.Close()
+		t.Fatal("the released gateway still accepts connects")
+	}
+}
+
+func TestStoreGatewaySendsTheSharedSocketToSystemd(t *testing.T) {
+	notify := filepath.Join(t.TempDir(), "notify")
+	server, err := net.ListenPacket("unixgram", notify)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer server.Close()
+	t.Setenv("NOTIFY_SOCKET", notify)
+	listener, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	gateway := &sharedGateway{port: 443, listener: listener}
+	if err := storeGateway(gateway); err != nil {
+		t.Fatal(err)
+	}
+	buf, oob := make([]byte, 512), make([]byte, unix.CmsgSpace(4))
+	n, oobn, _, _, err := server.(*net.UnixConn).ReadMsgUnix(buf, oob)
+	if err != nil || oobn == 0 {
+		t.Fatalf("datagram: %v (%d control bytes)", err, oobn)
+	}
+	want := "FDSTORE=1\nFDNAME=pbg|443|" + strconv.Itoa(listener.Addr().(*net.TCPAddr).Port)
+	if string(buf[:n]) != want {
+		t.Fatalf("datagram %q, want %q", buf[:n], want)
 	}
 }

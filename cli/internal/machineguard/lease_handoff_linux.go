@@ -10,6 +10,8 @@ import (
 	"strings"
 
 	"golang.org/x/sys/unix"
+
+	"github.com/pinksaucepasta/paperboat/internal/splitdns"
 )
 
 // A replaced guard (every pb update) must not drop the listeners it holds. Each machine lease's listening socket
@@ -93,15 +95,95 @@ func forgetLease(l *guardedLease) {
 
 // preservable reports whether stopping the guard leaves this lease's socket serving.
 func preservable(l *guardedLease) bool {
+	if route, ok := l.listener.(*gatewayRoute); ok {
+		_, ok = route.gateway.listener.(*net.TCPListener)
+		return ok && leaseHandoff()
+	}
 	_, ok := l.listener.(*net.TCPListener)
 	return ok && leaseHandoff()
 }
 
-// inheritedLeases returns the leases whose sockets the previous guard stored (sd_listen_fds); each has no owner
-// until its daemon re-acquires it.
-func inheritedLeases() []*guardedLease {
-	if os.Getenv("LISTEN_PID") != strconv.Itoa(os.Getpid()) {
+const gatewayFDPrefix = "pbg"
+
+// gatewayFDName carries the browser port and the port the shared socket really listens on.
+func gatewayFDName(s *sharedGateway) string {
+	return strings.Join([]string{gatewayFDPrefix, strconv.Itoa(s.port), strconv.Itoa(s.listenPort())}, "|")
+}
+
+// storeGateway keeps a gateway port's shared listening socket in the descriptor store.
+func storeGateway(s *sharedGateway) error {
+	tcp, ok := s.listener.(*net.TCPListener)
+	if !ok || !leaseHandoff() {
 		return nil
+	}
+	file, err := tcp.File()
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	return notifyDescriptors("FDSTORE=1\nFDNAME="+gatewayFDName(s), file)
+}
+
+func forgetGateway(s *sharedGateway) {
+	if _, ok := s.listener.(*net.TCPListener); ok && leaseHandoff() {
+		_ = notifyDescriptors("FDSTOREREMOVE=1\nFDNAME=" + gatewayFDName(s))
+	}
+}
+
+// restoreGateway rebuilds a gateway port from its stored socket. Nobody accepts on it until a daemon registers a
+// route (connects queue in its backlog); a placeholder lease keeps its nft rule meanwhile.
+func (g *guardServer) restoreGateway(file *os.File, name string) {
+	defer file.Close()
+	parts := strings.Split(name, "|")
+	if len(parts) != 3 {
+		return
+	}
+	port, err1 := strconv.Atoi(parts[1])
+	listenPort, err2 := strconv.Atoi(parts[2])
+	if err1 != nil || err2 != nil || !gatewayPortAllowed(port) || listenPort < 1 || listenPort > 65535 {
+		return
+	}
+	listener, err := net.FileListener(file)
+	if err != nil {
+		return
+	}
+	if addr, ok := listener.Addr().(*net.TCPAddr); !ok || addr.Port != listenPort || !addr.IP.Equal(net.ParseIP(splitdns.BrowserGatewayIP)) || g.gateways[port] != nil {
+		listener.Close()
+		return
+	}
+	gateway := g.newSharedGateway(port, listener, true)
+	key := net.JoinHostPort(splitdns.BrowserGatewayIP, strconv.Itoa(port))
+	g.leases[gatewayRouteKey(key, inheritedGatewayKey)] = &guardedLease{hostname: splitdns.BrowserGatewayHostname, ip: splitdns.BrowserGatewayIP, port: port, uid: "0", listener: &gatewayRoute{gateway: gateway}}
+}
+
+// restoreInherited rebuilds the leases and gateway ports whose sockets the previous guard stored
+// (sd_listen_fds); each has no owner until its daemon re-acquires it.
+func (g *guardServer) restoreInherited() {
+	files, names := inheritedDescriptors()
+	g.restoreFrom(files, names)
+}
+
+func (g *guardServer) restoreFrom(files []*os.File, names []string) {
+	var machineFiles []*os.File
+	var machineNames []string
+	for i, file := range files {
+		switch {
+		case i >= len(names):
+			file.Close()
+		case strings.HasPrefix(names[i], gatewayFDPrefix+"|"):
+			g.restoreGateway(file, names[i])
+		default:
+			machineFiles, machineNames = append(machineFiles, file), append(machineNames, names[i])
+		}
+	}
+	for _, lease := range leasesFromFiles(machineFiles, machineNames) {
+		g.leases[net.JoinHostPort(lease.ip, strconv.Itoa(lease.port))] = lease
+	}
+}
+
+func inheritedDescriptors() ([]*os.File, []string) {
+	if os.Getenv("LISTEN_PID") != strconv.Itoa(os.Getpid()) {
+		return nil, nil
 	}
 	count, err := strconv.Atoi(os.Getenv("LISTEN_FDS"))
 	names := strings.Split(os.Getenv("LISTEN_FDNAMES"), ":")
@@ -109,7 +191,7 @@ func inheritedLeases() []*guardedLease {
 	os.Unsetenv("LISTEN_FDS")
 	os.Unsetenv("LISTEN_FDNAMES")
 	if err != nil || count < 1 {
-		return nil
+		return nil, nil
 	}
 	files := make([]*os.File, count)
 	for i := range files {
@@ -117,7 +199,7 @@ func inheritedLeases() []*guardedLease {
 		unix.CloseOnExec(fd)
 		files[i] = os.NewFile(uintptr(fd), "inherited-lease")
 	}
-	return leasesFromFiles(files, names)
+	return files, names
 }
 
 // leasesFromFiles rebuilds a lease from each stored socket and its name; it closes the files.

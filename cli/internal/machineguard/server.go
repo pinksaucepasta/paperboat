@@ -114,9 +114,7 @@ func Serve(ctx context.Context, cfg Config) (resultErr error) {
 		g.reserved.Claims = map[string]claim{}
 	}
 	g.claims = &claimBook{Claims: g.reserved.Claims}
-	for _, lease := range inheritedLeases() {
-		g.leases[net.JoinHostPort(lease.ip, strconv.Itoa(lease.port))] = lease
-	}
+	g.restoreInherited()
 	defer retirePlatform(cfg)
 	defer g.startPreviewPAC(ctx)()
 	if err = g.applyRules(ctx); err != nil {

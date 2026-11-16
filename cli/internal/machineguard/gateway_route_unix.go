@@ -31,6 +31,7 @@ type sharedGateway struct {
 	slots    chan struct{}
 	lookup   lookupOwners
 	release  func(*sharedGateway) // called once the last route is closed, under the guard lock
+	serving  bool                 // the accept loop runs; an inherited gateway waits for its first route
 }
 
 // listenPort is the port the listener really holds: port, or the free high port a nat rule redirects it to.
@@ -67,15 +68,13 @@ func (g *guardServer) routeGateway(ctx context.Context, uid string, port int) (*
 		if err != nil {
 			return nil, err
 		}
-		gateway = &sharedGateway{port: port, listener: listener, routes: map[uint32]*gatewayRoute{}, slots: make(chan struct{}, maxGatewayAttributions), lookup: platformLookupOwners, release: func(s *sharedGateway) {
-			if g.gateways[s.port] == s {
-				delete(g.gateways, s.port)
-			}
-		}}
-		if g.gateways == nil {
-			g.gateways = map[int]*sharedGateway{}
-		}
-		g.gateways[port] = gateway
+		gateway = g.newSharedGateway(port, listener, false)
+	}
+	if !gateway.serving {
+		// An inherited gateway held its backlog until a daemon registered: start accepting, and drop the
+		// placeholder lease that kept its rule while nobody owned it.
+		gateway.serving = true
+		delete(g.leases, gatewayRouteKey(net.JoinHostPort(splitdns.BrowserGatewayIP, strconv.Itoa(port)), inheritedGatewayKey))
 		go gateway.serve()
 	}
 	route, err := gateway.addRoute(uint32(owner))
@@ -84,6 +83,29 @@ func (g *guardServer) routeGateway(ctx context.Context, uid string, port int) (*
 		return nil, err
 	}
 	return route, nil
+}
+
+// inheritedGatewayKey is the lease key suffix of the placeholder for a gateway inherited from the previous guard
+// process (the placeholder itself is owned by uid 0, only for the rule parser; it is never routed).
+const inheritedGatewayKey = "inherited"
+
+// newSharedGateway registers the shared listener of a gateway port and keeps it for the next guard process.
+func (g *guardServer) newSharedGateway(port int, listener net.Listener, inherited bool) *sharedGateway {
+	gateway := &sharedGateway{port: port, listener: listener, routes: map[uint32]*gatewayRoute{}, slots: make(chan struct{}, maxGatewayAttributions), lookup: platformLookupOwners, release: func(s *sharedGateway) {
+		if g.gateways[s.port] == s {
+			delete(g.gateways, s.port)
+		}
+		forgetGateway(s)
+	}}
+	if g.gateways == nil {
+		g.gateways = map[int]*sharedGateway{}
+	}
+	g.gateways[port] = gateway
+	if !inherited { // an inherited socket is in the store already
+		// shortcut: a gateway that cannot be stored still serves; it only is not kept across a guard replacement.
+		_ = storeGateway(gateway)
+	}
+	return gateway
 }
 
 // addRoute registers uid on the gateway with a new socket pair.
@@ -174,7 +196,9 @@ func (r *gatewayRoute) Close() error {
 			delete(r.gateway.routes, r.uid)
 		}
 		r.gateway.mu.Unlock()
-		_ = r.conn.Close()
+		if r.conn != nil { // nil: the placeholder of an inherited gateway
+			_ = r.conn.Close()
+		}
 		if r.daemonEnd != nil {
 			_ = r.daemonEnd.Close()
 		}
