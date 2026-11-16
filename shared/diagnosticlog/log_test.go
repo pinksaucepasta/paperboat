@@ -141,8 +141,17 @@ func TestWarnAboutAQuietRefusalIsNotQueued(t *testing.T) {
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if len(h.messages) != 1 || h.messages[0] != "loud" {
-		t.Fatalf("records = %q", h.messages)
+	var quiet, loud int // earlier tests may still be draining their own records through the shared worker
+	for _, message := range h.messages {
+		switch message {
+		case "quiet":
+			quiet++
+		case "loud":
+			loud++
+		}
+	}
+	if quiet != 0 || loud != 1 {
+		t.Fatalf("quiet=%d loud=%d", quiet, loud)
 	}
 }
 
