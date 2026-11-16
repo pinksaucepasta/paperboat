@@ -399,7 +399,7 @@ func (e *e2eCore) pebbleRoots() error {
 func (e *e2eCore) blockDirect() error {
 	addresses := map[string]string{}
 	for _, name := range e.machines {
-		out, err := e.run(time.Minute, "docker", "inspect", "-f", "{{.NetworkSettings.IPAddress}}", name)
+		out, err := e.run(time.Minute, "docker", "inspect", "-f", "{{.NetworkSettings.Networks.bridge.IPAddress}}", name) // Docker 29 dropped the top-level field
 		if err != nil {
 			return err
 		}
