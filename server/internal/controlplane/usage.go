@@ -138,8 +138,11 @@ VALUES ($1,$2,$3,$4,$5,$6,$7,0,$8) ON CONFLICT (edge_node_id, counter_epoch, env
 			if report.AuthorityID == "" || len(report.AuthorityID) > 512 || report.IntervalEnd.After(now) {
 				return invalidUsage("usage.go:116")
 			}
-			if err := tx.QueryRow(ctx, `SELECT workspace_id,actor_account_id FROM usage_accounting_authorities WHERE authority_id=$1 AND edge_node_id=$2 AND environment_id=$3 AND route_id=$4 AND route_revision=$5 AND admitted_at<=$6 AND retain_until>$7`, report.AuthorityID, report.EdgeNodeID, report.EnvironmentID, report.RouteID, report.RouteRevision, report.IntervalEnd, now).Scan(&workspace, &actor); err != nil {
+			if err := tx.QueryRow(ctx, `SELECT workspace_id,actor_account_id FROM usage_accounting_authorities WHERE authority_id=$1 AND edge_node_id=$2 AND environment_id=$3 AND route_id=$4 AND route_revision=$5 AND admitted_at<=$6 AND retain_until>$7`, report.AuthorityID, report.EdgeNodeID, report.EnvironmentID, report.RouteID, report.RouteRevision, report.IntervalEnd, now).Scan(&workspace, &actor); errors.Is(err, sql.ErrNoRows) {
 				return invalidUsage("usage.go:119")
+			} else if err != nil {
+				// A failed lookup (deadline, pool) is retryable, never the permanent 400 the edge dead-letters.
+				return fmt.Errorf("look up the usage accounting authority: %w", err)
 			}
 			if _, err := tx.Exec(ctx, `UPDATE control_usage_receipts SET workspace_id=$2,actor_account_id=$3 WHERE operation_id=$1`, report.OperationID, workspace, actor); err != nil {
 				return err

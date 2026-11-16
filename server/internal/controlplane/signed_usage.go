@@ -13,6 +13,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
 )
 
@@ -52,10 +54,22 @@ func (s *EdgeService) verifyUsage(ctx context.Context, request edgeUsageRequest)
 		return usageSignatureError("envelope invalid")
 	}
 	publicKey, err := s.store.Queries().GetActiveControlUsageVerificationKey(ctx, dbsqlc.GetActiveControlUsageVerificationKeyParams{KeyID: envelope.KeyID, EdgeNodeID: request.Node, Now: s.clock()})
-	if err != nil || len(publicKey) != ed25519.PublicKeySize {
-		return usageSignatureError("no active verification key for this key id and edge node")
+	if err := verificationKeyLookupError(publicKey, err); err != nil {
+		return err
 	}
 	return verifySignedUsageEnvelope(ed25519.PublicKey(publicKey), envelope, request)
+}
+
+// verificationKeyLookupError refuses the report (a permanent 400 the edge dead-letters) only when no active key
+// exists; a failed lookup (deadline, pool, connection) is returned as is and answered 503, so the edge retries it.
+func verificationKeyLookupError(publicKey []byte, err error) error {
+	if errors.Is(err, pgx.ErrNoRows) || err == nil && len(publicKey) != ed25519.PublicKeySize {
+		return usageSignatureError("no active verification key for this key id and edge node")
+	}
+	if err != nil {
+		return fmt.Errorf("look up the usage verification key: %w", err)
+	}
+	return nil
 }
 
 func verifySignedUsageEnvelope(publicKey ed25519.PublicKey, envelope signedUsageEnvelope, request edgeUsageRequest) error {

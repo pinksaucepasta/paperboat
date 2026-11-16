@@ -1,13 +1,17 @@
 package controlplane
 
 import (
+	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 )
 
 func TestVerifySignedUsageEnvelope(t *testing.T) {
@@ -52,5 +56,29 @@ func TestVerifySignedUsageEnvelopeRejectsUnknownFields(t *testing.T) {
 	envelope := signedUsageEnvelope{Algorithm: "EdDSA", KeyID: "key", Payload: base64.RawURLEncoding.EncodeToString(payload), Signature: base64.RawURLEncoding.EncodeToString(ed25519.Sign(privateKey, payload))}
 	if err := verifySignedUsageEnvelope(publicKey, envelope, edgeUsageRequest{}); !errors.Is(err, ErrUsageSignature) {
 		t.Fatalf("unknown field error = %v", err)
+	}
+}
+
+// A verification key lookup that failed (the server was at deadline_exceeded when the prod edge got its usage 400 at
+// 2026-11-16 04:33:22Z) is a retryable 503, never the permanent 400 the edge dead-letters; only a missing key refuses.
+func TestUsageVerificationKeyLookupFailureIsRetryable(t *testing.T) {
+	key := make([]byte, ed25519.PublicKeySize)
+	for _, tc := range []struct {
+		name   string
+		key    []byte
+		err    error
+		status int
+	}{
+		{"deadline", nil, context.DeadlineExceeded, http.StatusServiceUnavailable},
+		{"no key", nil, pgx.ErrNoRows, http.StatusBadRequest},
+		{"short key", key[:5], nil, http.StatusBadRequest},
+	} {
+		err := verificationKeyLookupError(tc.key, tc.err)
+		if status, _, _, _ := usageErrorResponse(err); status != tc.status {
+			t.Errorf("%s: status %d (%v), want %d", tc.name, status, err, tc.status)
+		}
+	}
+	if err := verificationKeyLookupError(key, nil); err != nil {
+		t.Fatalf("active key refused: %v", err)
 	}
 }
