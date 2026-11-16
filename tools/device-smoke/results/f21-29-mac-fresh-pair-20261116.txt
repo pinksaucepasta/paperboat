@@ -1,0 +1,14 @@
+F21-29 M (2026-11-16 IST evening), REL-F21-29M
+First contact on a fresh Mac pair: pbmac2 (macOS 26.6.2, bridged, India), Linux peer rel29m-p (container on pbvm2, India); both
+pb dev-03c7d234f, production account. The Mac's pb was uninstalled, installed (the build's own `pb install`) and paired as rel29m-m
+(pair took 53.1 s incl. install-time keychain/token), then the first exec each way, nothing warmed up:
+  FIRST exec peer->mac: 1.6 s, marker "peer-to-mac-ok" seen
+  FIRST exec mac->peer: 1.9 s, marker "mac-to-peer-ok" seen
+(a first run of the same sequence, output not marker-checked: 2.2 s / 3.7 s.) The Mac's record was removed by `pb uninstall`
+(machine list on the peer: 0 records named rel29m-m). Linux fresh pair for comparison (F21-29 L): 1.6 s and 1.9 s.
+Rebind part: tools/device-smoke/results/rebind-mac-20261116T092242Z.json, fleet Mac lanex2-m (macOS, India) against
+lanex2-l2 (Linux container on anvit), both pb dev-64faf9466, after FLEET4 re-logged the Mac in: 8 of 8 PASS (120 s cut + UDP
+source ports moved while the daemon runs; first inbound exec 1.6 s, limit 10 s; next three inbound execs and the outbound exec
+mac->peer 1.5 s PASS). STUN only from relays on the Mac: results/stun-relays-only-mac-20261116.txt.
+Main since: 5cf648eb9 (restart-while-unreachable cache) changes daemon start/restore only; neither the rebind (daemon running)
+nor a fresh pair (no cache) goes through it.
