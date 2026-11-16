@@ -17,7 +17,7 @@ type tunnelManagementRepository interface {
 	ResolveManagementAccount(context.Context, string, string) (string, bool, error)
 }
 type tunnelManagementKey struct{}
-type tunnelManagementScope struct{ actor, owner, tunnel string }
+type tunnelManagementScope struct{ actor, owner, tunnel, host string }
 
 func (r *SQLRepository) ResolveManagementAccount(ctx context.Context, actor, tunnel string) (string, bool, error) {
 	var owner string
@@ -38,7 +38,7 @@ func scopeTunnelManagement(ctx context.Context, repository tunnelManagementRepos
 	// AccountID addresses the persisted resource; ActorID continues to name the
 	// authenticated actor for authorization and audit. Neither is a client field.
 	request.Actor.AccountID = owner
-	return context.WithValue(ctx, tunnelManagementKey{}, tunnelManagementScope{actor: actor, owner: owner, tunnel: tunnel}), request, shared, nil
+	return context.WithValue(ctx, tunnelManagementKey{}, tunnelManagementScope{actor: actor, owner: owner, tunnel: tunnel, host: request.Actor.HostID}), request, shared, nil
 }
 func authorizeTunnelManagementTx(ctx context.Context, tx *db.Tx) error {
 	scope, ok := ctx.Value(tunnelManagementKey{}).(tunnelManagementScope)
@@ -50,7 +50,7 @@ func authorizeTunnelManagementTx(ctx context.Context, tx *db.Tx) error {
 	}
 	var allowed bool
 	ws, selected := workspace.FromContext(ctx)
-	err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM tunnels WHERE id=$1 AND account_id=$2 AND tunnel_management_allowed($3,id) AND (NOT $4 OR workspace_tunnel_management_allowed($3,$5,id)))`, scope.tunnel, scope.owner, scope.actor, selected, nullableString(ws.TeamID)).Scan(&allowed)
+	err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM tunnels WHERE id=$1 AND account_id=$2 AND tunnel_management_allowed($3,id) AND (NOT $4 OR workspace_tunnel_management_allowed($3,$5,id)) AND ($6='' OR created_by_host_id=$6))`, scope.tunnel, scope.owner, scope.actor, selected, nullableString(ws.TeamID), scope.host).Scan(&allowed)
 	if err != nil {
 		return err
 	}

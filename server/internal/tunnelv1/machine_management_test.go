@@ -161,3 +161,27 @@ func TestSharedTunnelManagementKeepsActorAndDeniesPublication(t *testing.T) {
 		t.Fatalf("revoked management: %v", err)
 	}
 }
+
+// TestMachineActorManagesOnlyItsOwnTunnels: a host actor (machine proof, e.g. a recipe machine) may patch, pause,
+// resume and delete a tunnel only when it created it; another host of the same account gets not found.
+func TestMachineActorManagesOnlyItsOwnTunnels(t *testing.T) {
+	f := newTRK07PostgresFixture(t)
+	ctx := context.Background()
+	owner, host := f.addAccount(t, "tunnel_host_owner")
+	tunnel := "tun_host_" + f.suffix
+	f.createTunnel(t, owner, host, tunnel, "host-tunnel")
+	for _, test := range []struct {
+		host string
+		want error
+	}{{host, nil}, {"mch_other_" + f.suffix, ErrNotFound}, {"", nil}} {
+		request := testRequest(false)
+		request.Actor.AccountID, request.Actor.ActorID, request.Actor.MachineID, request.Actor.HostID = owner, owner, test.host, test.host
+		scoped, _, _, err := scopeTunnelManagement(ctx, f.repository, request, tunnel)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := f.database.InTx(scoped, authorizeTunnelManagementTx); !errors.Is(err, test.want) {
+			t.Fatalf("host %q: got %v, want %v", test.host, err, test.want)
+		}
+	}
+}

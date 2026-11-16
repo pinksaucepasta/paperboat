@@ -171,10 +171,10 @@ type Options struct {
 	TelemetryDiagnostics   *telemetry.Diagnostics
 }
 
-// tunnelCreateAuth mirrors the preview machine-auth boundary: machine
+// tunnelMachineAuth mirrors the preview machine-auth boundary: machine
 // requests reach the handler for exact proof verification, while ordinary
 // browser and client-session requests retain bearer scope and CSRF checks.
-func tunnelCreateAuth(user *auth.Service, machines *auth.DeviceService, next http.Handler) http.Handler {
+func tunnelMachineAuth(user *auth.Service, machines *auth.DeviceService, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if tunnelMachineHeadersPresent(r) {
 			next.ServeHTTP(w, r)
@@ -291,11 +291,13 @@ func NewRouter(opts Options) http.Handler {
 			tunnelWrite := func(next http.Handler) http.Handler {
 				return requireAnyAuth(opts.Auth, opts.DeviceAuth, requireScope("tunnels:write", requireCSRF(opts.Auth, next)))
 			}
-			// Tunnel creation is the one host-only tunnel mutation. A production
-			// host has a renewable machine-control credential, not a DeviceService
-			// client session, so let the handler verify its exact machine proof
-			// before constructing the host actor.
-			mux.Handle("POST /v1/tunnels", tunnelCreateAuth(opts.Auth, opts.DeviceAuth, tunnelCreate(opts.Tunnels, opts.Enrollment)))
+			// Creation is host-only; patch, pause, resume and delete also accept the host
+			// that created the tunnel. A production host (and a recipe machine) has a
+			// renewable machine-control credential, not a DeviceService client session,
+			// so the handler verifies its exact machine proof before constructing the
+			// host actor.
+			machine := func(next http.Handler) http.Handler { return tunnelMachineAuth(opts.Auth, opts.DeviceAuth, next) }
+			mux.Handle("POST /v1/tunnels", machine(tunnelCreate(opts.Tunnels, opts.Enrollment)))
 			mux.Handle("GET /v1/tunnels", tunnelRead(requireWorkspaceSelection(opts.Workspaces, tunnelList(opts.Tunnels))))
 			if opts.Domains != nil {
 				// Workspace domains: tunnel and preview hostnames live under them, so reads need both read scopes.
@@ -312,10 +314,10 @@ func NewRouter(opts Options) http.Handler {
 				mux.Handle("DELETE /v1/domains/{domain_id}", domainWrite("remove"))
 			}
 			mux.Handle("GET /v1/tunnels/{tunnel_id}", tunnelRead(tunnelGet(opts.Tunnels)))
-			mux.Handle("PATCH /v1/tunnels/{tunnel_id}", tunnelWrite(tunnelPatch(opts.Tunnels)))
-			mux.Handle("DELETE /v1/tunnels/{tunnel_id}", tunnelWrite(tunnelDelete(opts.Tunnels)))
-			mux.Handle("POST /v1/tunnels/{tunnel_id}/pause", tunnelWrite(tunnelPause(opts.Tunnels)))
-			mux.Handle("POST /v1/tunnels/{tunnel_id}/resume", tunnelWrite(tunnelResume(opts.Tunnels)))
+			mux.Handle("PATCH /v1/tunnels/{tunnel_id}", machine(tunnelPatch(opts.Tunnels, opts.Enrollment)))
+			mux.Handle("DELETE /v1/tunnels/{tunnel_id}", machine(tunnelDelete(opts.Tunnels, opts.Enrollment)))
+			mux.Handle("POST /v1/tunnels/{tunnel_id}/pause", machine(tunnelPause(opts.Tunnels, opts.Enrollment)))
+			mux.Handle("POST /v1/tunnels/{tunnel_id}/resume", machine(tunnelResume(opts.Tunnels, opts.Enrollment)))
 			mux.Handle("GET /v1/tunnels/{tunnel_id}/status", tunnelRead(tunnelStatus(opts.Tunnels)))
 			if opts.IPRules != nil {
 				mux.Handle("GET /v1/tunnels/{tunnel_id}/ip-rules", tunnelRead(ipRules(opts.IPRules, "tunnel", "tunnel_id", false)))

@@ -189,7 +189,7 @@ func tunnelGet(service tunnelv1.API) http.HandlerFunc {
 	}
 }
 
-func tunnelPatch(service tunnelv1.API) http.HandlerFunc {
+func tunnelPatch(service tunnelv1.API, identities machineRequestVerifier) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		body, ok := readTunnelRequestBody(w, r)
 		if !ok {
@@ -220,7 +220,7 @@ func tunnelPatch(service tunnelv1.API) http.HandlerFunc {
 			writeTunnelError(w, r, err)
 			return
 		}
-		request, ok := tunnelRequestFromHTTP(w, r)
+		request, ok := tunnelMutationRequest(w, r, body, idempotencyKey, identities)
 		if !ok {
 			return
 		}
@@ -234,26 +234,36 @@ func tunnelPatch(service tunnelv1.API) http.HandlerFunc {
 	}
 }
 
-func tunnelPause(service tunnelv1.API) http.HandlerFunc {
-	return tunnelStateMutationHandler(service, service.PauseTunnel)
+func tunnelPause(service tunnelv1.API, identities machineRequestVerifier) http.HandlerFunc {
+	return tunnelStateMutationHandler(identities, service.PauseTunnel)
 }
 
-func tunnelResume(service tunnelv1.API) http.HandlerFunc {
-	return tunnelStateMutationHandler(service, service.ResumeTunnel)
+func tunnelResume(service tunnelv1.API, identities machineRequestVerifier) http.HandlerFunc {
+	return tunnelStateMutationHandler(identities, service.ResumeTunnel)
 }
 
-func tunnelDelete(service tunnelv1.API) http.HandlerFunc {
-	return tunnelStateMutationHandler(service, service.DeleteTunnel)
+func tunnelDelete(service tunnelv1.API, identities machineRequestVerifier) http.HandlerFunc {
+	return tunnelStateMutationHandler(identities, service.DeleteTunnel)
+}
+
+// tunnelMutationRequest takes the host actor from a verified machine proof when the request carries one (the
+// service then allows only tunnels that host created), else the authenticated account principal.
+func tunnelMutationRequest(w http.ResponseWriter, r *http.Request, body []byte, idempotencyKey string, identities machineRequestVerifier) (previewtunnelapi.RequestContext, bool) {
+	if tunnelMachineHeadersPresent(r) {
+		return tunnelMachineRequestContext(w, r, body, idempotencyKey, identities)
+	}
+	return tunnelRequestFromHTTP(w, r)
 }
 
 type tunnelStateMutationFunc func(context.Context, previewtunnelapi.RequestContext, string, tunnelv1.MutationInput) (tunnelv1.MutationResult, error)
 
-func tunnelStateMutationHandler(service tunnelv1.API, mutate tunnelStateMutationFunc) http.HandlerFunc {
+func tunnelStateMutationHandler(identities machineRequestVerifier, mutate tunnelStateMutationFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		body, ok := readTunnelRequestBody(w, r)
 		if !ok {
 			return
 		}
+		signed := body // the machine proof covers the bytes sent, before the empty-body default
 		if len(bytes.TrimSpace(body)) == 0 {
 			body = []byte("{}")
 		}
@@ -276,7 +286,7 @@ func tunnelStateMutationHandler(service tunnelv1.API, mutate tunnelStateMutation
 			writeTunnelError(w, r, err)
 			return
 		}
-		request, ok := tunnelRequestFromHTTP(w, r)
+		request, ok := tunnelMutationRequest(w, r, signed, idempotencyKey, identities)
 		if !ok {
 			return
 		}

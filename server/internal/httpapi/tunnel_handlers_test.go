@@ -31,6 +31,7 @@ type tunnelAPIStub struct {
 	createWorkspace workspace.Scope
 	createSelected  bool
 	patchReq        tunnelv1.PatchTunnelRequest
+	mutationReq     previewtunnelapi.RequestContext
 	listCalls       int
 	listFilters     workspace.InventoryFilters
 }
@@ -57,19 +58,22 @@ func (s *tunnelAPIStub) PatchTunnel(_ context.Context, request previewtunnelapi.
 	s.patchReq.Name = input.Name
 	s.patchReq.AccessMode = input.AccessMode
 	s.patchReq.ExpiresAt = input.ExpiresAt
-	_ = request
+	s.mutationReq = request
 	return s.patchResult, s.patchErr
 }
 
-func (s *tunnelAPIStub) PauseTunnel(context.Context, previewtunnelapi.RequestContext, string, tunnelv1.MutationInput) (tunnelv1.MutationResult, error) {
+func (s *tunnelAPIStub) PauseTunnel(_ context.Context, request previewtunnelapi.RequestContext, _ string, _ tunnelv1.MutationInput) (tunnelv1.MutationResult, error) {
+	s.mutationReq = request
 	return s.stateResult, s.stateErr
 }
 
-func (s *tunnelAPIStub) ResumeTunnel(context.Context, previewtunnelapi.RequestContext, string, tunnelv1.MutationInput) (tunnelv1.MutationResult, error) {
+func (s *tunnelAPIStub) ResumeTunnel(_ context.Context, request previewtunnelapi.RequestContext, _ string, _ tunnelv1.MutationInput) (tunnelv1.MutationResult, error) {
+	s.mutationReq = request
 	return s.stateResult, s.stateErr
 }
 
-func (s *tunnelAPIStub) DeleteTunnel(context.Context, previewtunnelapi.RequestContext, string, tunnelv1.MutationInput) (tunnelv1.MutationResult, error) {
+func (s *tunnelAPIStub) DeleteTunnel(_ context.Context, request previewtunnelapi.RequestContext, _ string, _ tunnelv1.MutationInput) (tunnelv1.MutationResult, error) {
+	s.mutationReq = request
 	return s.stateResult, s.stateErr
 }
 
@@ -78,14 +82,21 @@ func (s *tunnelAPIStub) Status(context.Context, previewtunnelapi.RequestContext,
 }
 
 type tunnelIdentityVerifier struct {
-	claims controlplane.MachineRequestClaims
-	err    error
-	called bool
+	claims       controlplane.MachineRequestClaims
+	err          error
+	called       bool
+	method, path string // the signed request; default POST /v1/tunnels
+	body         []byte
 }
 
 func (v *tunnelIdentityVerifier) VerifyMachineRequest(_ context.Context, identity string, proof []byte, method, path string, body []byte) (controlplane.MachineRequestClaims, error) {
 	v.called = true
-	if identity != "signed-machine-identity" || string(proof) != "signed-proof" || method != http.MethodPost || path != "/v1/tunnels" || len(body) == 0 {
+	wantMethod, wantPath := http.MethodPost, "/v1/tunnels"
+	if v.method != "" {
+		wantMethod, wantPath = v.method, v.path
+	}
+	v.body = body
+	if identity != "signed-machine-identity" || string(proof) != "signed-proof" || method != wantMethod || path != wantPath || (v.method == "" && len(body) == 0) {
 		return controlplane.MachineRequestClaims{}, errors.New("unexpected verifier input")
 	}
 	return v.claims, v.err
@@ -250,8 +261,8 @@ func TestTunnelMalformedDocumentsReturnTypedBadRequest(t *testing.T) {
 		body    string
 	}{
 		{name: "create unknown field", handler: tunnelCreate(service, &tunnelIdentityVerifier{}), path: "/v1/tunnels", body: `{"name":"demo","unexpected":true}`},
-		{name: "patch unknown field", handler: tunnelPatch(service), path: "/v1/tunnels/tun_1", body: `{"unexpected":true}`},
-		{name: "state nonempty", handler: tunnelPause(service), path: "/v1/tunnels/tun_1/pause", body: `{"unexpected":true}`},
+		{name: "patch unknown field", handler: tunnelPatch(service, &tunnelIdentityVerifier{}), path: "/v1/tunnels/tun_1", body: `{"unexpected":true}`},
+		{name: "state nonempty", handler: tunnelPause(service, &tunnelIdentityVerifier{}), path: "/v1/tunnels/tun_1/pause", body: `{"unexpected":true}`},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			request := tunnelHandlerRequest(http.MethodPost, test.path, []byte(test.body))
@@ -278,7 +289,7 @@ func TestTunnelPatchDistinguishesExplicitExpiryRemovalAndReturnsCanonicalOperati
 	request.Header.Set("If-Match", previewtunnelapi.ETag("tunnel", "tun_1", 1))
 	request.Header.Set("Idempotency-Key", "op_patch_1")
 	response := httptest.NewRecorder()
-	tunnelPatch(service).ServeHTTP(response, request)
+	tunnelPatch(service, &tunnelIdentityVerifier{}).ServeHTTP(response, request)
 	if response.Code != http.StatusAccepted || !service.patchReq.ExpirySet || service.patchReq.ExpiresAt != nil {
 		t.Fatalf("status=%d patch=%+v body=%s", response.Code, service.patchReq, response.Body.String())
 	}
@@ -370,6 +381,52 @@ func TestTunnelListDesiredStateFilter(t *testing.T) {
 				}
 			} else if service.listCalls != 0 {
 				t.Fatal("invalid state reached service")
+			}
+		})
+	}
+}
+
+// TestTunnelMutationsAcceptHostMachineProof: a recipe machine has no bearer client session, so patch, pause, resume
+// and delete take the host actor from its signed proof (the service then limits it to tunnels that host created),
+// and a bad proof fails closed.
+func TestTunnelMutationsAcceptHostMachineProof(t *testing.T) {
+	for _, test := range []struct {
+		method, path, body string
+		handler            func(tunnelv1.API, machineRequestVerifier) http.HandlerFunc
+	}{
+		{http.MethodPatch, "/v1/tunnels/tun_1", `{"name":"renamed"}`, tunnelPatch},
+		{http.MethodPost, "/v1/tunnels/tun_1/pause", ``, tunnelPause},
+		{http.MethodPost, "/v1/tunnels/tun_1/resume", `{}`, tunnelResume},
+		{http.MethodDelete, "/v1/tunnels/tun_1", ``, tunnelDelete},
+	} {
+		t.Run(test.method+" "+test.path, func(t *testing.T) {
+			for _, operation := range []string{"op_mutate_1", "op_other"} { // op_other: a proof replayed under another key
+				service := &tunnelAPIStub{patchResult: tunnelMutationResult("running", "connecting"), stateResult: tunnelMutationResult("running", "connecting")}
+				verifier := &tunnelIdentityVerifier{method: test.method, path: test.path, claims: controlplane.MachineRequestClaims{
+					UserID: "acct_1", MachineID: "machine_1", InstallationGeneration: 3, OperationID: operation,
+				}}
+				request := tunnelMachineHandlerRequest(test.method, test.path, []byte(test.body))
+				request.SetPathValue("tunnel_id", "tun_1")
+				request.Header.Set("If-Match", previewtunnelapi.ETag("tunnel", "tun_1", 1))
+				request.Header.Set("Idempotency-Key", "op_mutate_1")
+				request.Header.Set("Authorization", "Bearer signed-machine-identity")
+				request.Header.Set("X-Paperboat-Machine-Identity", "signed-machine-identity")
+				request.Header.Set("X-Paperboat-Machine-Proof", base64.RawURLEncoding.EncodeToString([]byte("signed-proof")))
+				response := httptest.NewRecorder()
+				test.handler(service, verifier).ServeHTTP(response, request)
+				if !verifier.called || string(verifier.body) != test.body {
+					t.Fatalf("proof not verified over the sent body: called=%v body=%q", verifier.called, verifier.body)
+				}
+				if operation != "op_mutate_1" {
+					if response.Code != http.StatusUnauthorized || service.mutationReq.Actor.HostID != "" {
+						t.Fatalf("bad proof: status=%d actor=%+v body=%s", response.Code, service.mutationReq.Actor, response.Body.String())
+					}
+					continue
+				}
+				actor := service.mutationReq.Actor
+				if response.Code != http.StatusAccepted || actor.AccountID != "acct_1" || actor.HostID != "machine_1" || actor.MachineID != "machine_1" {
+					t.Fatalf("status=%d actor=%+v body=%s", response.Code, actor, response.Body.String())
+				}
 			}
 		})
 	}

@@ -35,7 +35,7 @@ func TestTunnelCreateAuthBypassesClientAuthForMachineRequest(t *testing.T) {
 	request.Header.Set("X-Paperboat-Machine-Identity", "machine-control")
 	request.Header.Set("X-Paperboat-Machine-Proof", "proof")
 	recorder := httptest.NewRecorder()
-	tunnelCreateAuth(nil, nil, next).ServeHTTP(recorder, request)
+	tunnelMachineAuth(nil, nil, next).ServeHTTP(recorder, request)
 	if !called || recorder.Code != http.StatusNoContent {
 		t.Fatalf("machine create wrapper status=%d called=%v", recorder.Code, called)
 	}
