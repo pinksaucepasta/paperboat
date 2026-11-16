@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sync"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/previewtunnelapi"
 	"github.com/pinksaucepasta/paperboat/server/internal/previewv1"
@@ -14,6 +15,9 @@ import (
 // MaxPreviewLeaseRenewals bounds one batch: a machine renews all of its previews in
 // ceil(N/100) requests instead of N (F21-168).
 const MaxPreviewLeaseRenewals = 100
+
+// previewLeaseRenewalWorkers is how many items of one batch run at once.
+const previewLeaseRenewalWorkers = 8
 
 type previewLeaseRenewalItem struct {
 	PreviewID      string `json:"preview_id"`
@@ -60,10 +64,21 @@ func previewLeaseRenewBatch(service PreviewLeaseAPI, machineIdentities ...machin
 		if !ok {
 			return
 		}
-		results := make([]previewLeaseRenewalResult, 0, len(body.Renewals))
-		for _, item := range body.Renewals {
-			results = append(results, renewPreviewLeaseItem(r, service, requestContext, item))
+		// Items are independent single renewals, each in its own transaction. Run in turn, 100 of them took the whole
+		// 15 s request timeout on staging (about 150 ms each), so batches ended with timed-out items and previews
+		// lost their owner (F21-168); a few at a time they finish in seconds.
+		results := make([]previewLeaseRenewalResult, len(body.Renewals))
+		var wg sync.WaitGroup
+		slots := make(chan struct{}, previewLeaseRenewalWorkers)
+		for i, item := range body.Renewals {
+			slots <- struct{}{}
+			wg.Add(1)
+			go func() {
+				defer func() { <-slots; wg.Done() }()
+				results[i] = renewPreviewLeaseItem(r, service, requestContext, item)
+			}()
 		}
+		wg.Wait()
 		w.Header().Set("Cache-Control", "no-store, no-transform")
 		writeJSON(w, http.StatusOK, SuccessResponse{Data: struct {
 			Results []previewLeaseRenewalResult `json:"results"`
