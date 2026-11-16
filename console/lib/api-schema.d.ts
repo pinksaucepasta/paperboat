@@ -13096,7 +13096,6 @@ export interface components {
             name: string;
             key_epoch: number;
             revision: number;
-            rekey_required: boolean;
             /** Format: byte */
             envelope?: string;
             wraps: components["schemas"]["EnvVaultWrap"][];

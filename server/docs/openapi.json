@@ -18358,9 +18358,6 @@
           "revision": {
             "type": "integer"
           },
-          "rekey_required": {
-            "type": "boolean"
-          },
           "envelope": {
             "type": "string",
             "format": "byte"
@@ -18382,7 +18379,6 @@
           "name",
           "key_epoch",
           "revision",
-          "rekey_required",
           "wraps",
           "recipes"
         ]
