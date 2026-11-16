@@ -58,7 +58,10 @@ type recipeRunner func(ctx context.Context, args ...string) ([]byte, error)
 type recipeApplier struct {
 	statePath string
 	machine   func() string // tunnel name when the recipe gives none: this machine's name
-	run       recipeRunner
+	// machineSource is this machine's config sync file: a recipe's [config] pulls only (PLAN F26), so the
+	// file is created with mode = "pull_only" when there is none; an existing file is the user's.
+	machineSource string
+	run           recipeRunner
 }
 
 func pbRunner(configPath string) recipeRunner {
@@ -107,6 +110,25 @@ func recipeCommandError(args []string, stdout, stderr []byte, err error) error {
 		return fmt.Errorf("pb %s: %w", name, err)
 	}
 	return fmt.Errorf("pb %s: %s", name, reason)
+}
+
+// ensurePullOnlySource creates the machine's config sync file with mode = "pull_only" unless it exists.
+func ensurePullOnlySource(path string) error {
+	if path == "" {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return fmt.Errorf("prepare the config sync file: %w", err)
+	}
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if errors.Is(err, os.ErrExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("create the config sync file: %w", err)
+	}
+	_, err = file.WriteString("# Written by pb for this machine's recipe: its [config] repository is pulled, never pushed.\nmode = \"pull_only\"\n")
+	return errors.Join(err, file.Close())
 }
 
 func (a *recipeApplier) machineName() string {
@@ -191,7 +213,10 @@ func (a *recipeApplier) apply(ctx context.Context, revision int64, r recipe.Reci
 		note("tunnel", a.ensure(ctx, state.Tunnels, tunnelSpecs(r.Tunnel, a.machineName()), "tunnel", func(name string) []string { return []string{"tunnel", "delete", name, "--json"} }))
 	}
 	if r.Config != nil && state.Config != r.Config.Repository {
-		_, err := a.confirmed(ctx, "config", "sync", "apply", "--repository", r.Config.Repository, "--json")
+		err := ensurePullOnlySource(a.machineSource)
+		if err == nil {
+			_, err = a.confirmed(ctx, "config", "sync", "apply", "--repository", r.Config.Repository, "--json")
+		}
 		if err == nil {
 			state.Config = r.Config.Repository
 		}

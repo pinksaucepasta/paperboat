@@ -19,6 +19,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/endpointbinary"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	helperconfig "github.com/pinksaucepasta/paperboat/internal/hostruntime/config"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/configsync"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/controlbackoff"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/health"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/identity"
@@ -425,7 +426,8 @@ func localDaemonCommand() *cobra.Command {
 				if _, isRecipe, _ := recipekey.Load(cfg.Path()); isRecipe && source.SourceMachineID != "" {
 					fetchRecipe, reportRecipe := recipeClients(cfg.ServerURL, authSource, controlTransport)
 					machineID := source.SourceMachineID
-					applier := &recipeApplier{statePath: recipeStatePath(cfg.Path()), machine: func() string { return recipeMachineName(paths.StateRoot, machineID) }, run: pbRunner(cfg.Path())}
+					machineSource, _ := configsync.DefaultMachineSourcePath()
+					applier := &recipeApplier{statePath: recipeStatePath(cfg.Path()), machine: func() string { return recipeMachineName(paths.StateRoot, machineID) }, machineSource: machineSource, run: pbRunner(cfg.Path())}
 					go refreshRecipe(ctx, steps, applier, cfg.Path(), fetchRecipe, reportRecipe, recipeEvents.Changed())
 				}
 				teamShared := &teamSharedMachines{}

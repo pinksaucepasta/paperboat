@@ -35,7 +35,8 @@ func TestRecipeApplyEnsuresSectionsWithPBCommands(t *testing.T) {
 		}
 		return []byte(`{"ok":true,"data":{}}`), nil
 	}
-	a := &recipeApplier{statePath: filepath.Join(t.TempDir(), "recipe-apply.json"), machine: func() string { return "runner-7" }, run: run}
+	source := filepath.Join(t.TempDir(), "paperboat", "config-sync.toml")
+	a := &recipeApplier{statePath: filepath.Join(t.TempDir(), "recipe-apply.json"), machine: func() string { return "runner-7" }, machineSource: source, run: run}
 	r := recipe.Recipe{Preview: []recipe.Preview{{Port: 3000, TTL: "2h"}}, Tunnel: []recipe.Tunnel{{Port: 8123, Private: true}},
 		Config: &recipe.Config{Repository: "dotfiles"}, Env: &recipe.Env{Vaults: []string{"canary-env"}, Shell: true}}
 	sections, err := a.apply(context.Background(), 1, r)
@@ -51,6 +52,17 @@ func TestRecipeApplyEnsuresSectionsWithPBCommands(t *testing.T) {
 		if v, ok := sections[s].(map[string]any); !ok || v["ok"] != true {
 			t.Fatalf("section %s = %v", s, sections[s])
 		}
+	}
+
+	// The recipe's [config] pulls only: the machine file is created so (PLAN F26), and a user's file stays.
+	if data, err := os.ReadFile(source); err != nil || !strings.Contains(string(data), `mode = "pull_only"`) {
+		t.Fatalf("machine source %q %v", data, err)
+	}
+	if err := os.WriteFile(source, []byte("mode = \"push_only\"\n"), 0o600); err != nil || ensurePullOnlySource(source) != nil {
+		t.Fatal(err)
+	}
+	if data, _ := os.ReadFile(source); string(data) != "mode = \"push_only\"\n" {
+		t.Fatalf("an existing machine file was replaced: %q", data)
 	}
 
 	ran = nil
