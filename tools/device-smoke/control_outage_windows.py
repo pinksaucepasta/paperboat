@@ -8,6 +8,7 @@ another program), the containers an iptables DROP to the API address and port; o
 (the path between the machines) answers on the same address; the shared staging server is never touched.
 
   control_outage_windows.py drill  [--outage-seconds 660]   long execs both ways, cut, checks at 30 s / 5 min / end, restore, recovery
+  control_outage_windows.py revoked                         after `revoke`: cut again; W still refuses R and L still reaches W
   control_outage_windows.py revoke                          L revokes R while W and R are cut off; R still reaches W; after the
                                                             connection returns R is refused (host-side removal on Windows)
 """
@@ -36,7 +37,7 @@ class Env:
         self.ips = sorted({info[4][0] for info in socket.getaddrinfo(self.api, None, socket.AF_INET)})
 
     stem, echo, enter = "windows", "cmd /c echo", "r"  # what runs and presses Enter on this target (a Mac overrides them)
-    probe, answer = "%%OS%%", "Windows_NT"  # typed into the terminal's shell (cmd.exe: %OS%, doubled for printf) and what only that shell prints
+    probe, answer = "%%SystemRoot%%", "C:\\Windows"  # typed into the terminal's shell (cmd.exe: doubled for printf) and what only that shell prints; the terminal session has no %OS%
 
     def long_command(self, seconds):
         return f"cmd /c 'echo started & ping -n {seconds} 127.0.0.1 >nul & echo long-lw-done'"
@@ -45,7 +46,7 @@ class Env:
         return self.device.temp_dir("pb-outage")
 
     def spawn_wl(self, seconds, directory):
-        return self.device.spawn([str(self.pb), "exec", L, "--", "sh", "-c", f"echo started; sleep {seconds}; echo long-wl-done"], directory)
+        return self.device.spawn([str(self.pb), "--server", self.server, "exec", L, "--", "sh", "-c", f"echo started; sleep {seconds}; echo long-wl-done"], directory)
 
     def ct(self, name, command, timeout=120):
         return c.in_ct(self.host, name, command, timeout)
@@ -92,7 +93,7 @@ def refused_rw(env):
 
 def terminal_lw(env, marker):
     """A new `pb connect` to the Windows machine: type a command and look for its result (the terminal shell is cmd.exe:
-    the typed text shows %OS%, only the shell on the machine prints Windows_NT)."""
+    the typed text shows %SystemRoot%, only the shell on the machine prints C:\\Windows)."""
     script = f"""#!/bin/bash
 (sleep 15; printf 'echo {marker}-{env.probe}\\{env.enter}'; sleep 4; printf 'exit\\{env.enter}'; sleep 4) | timeout 90 script -qec '{PB} connect {W}' /dev/null 2>&1 | tr -d '\\r'
 """
@@ -207,6 +208,25 @@ def revoke(env, args):
     return write(res, f"control-outage-revoke-{env.stem}", {})
 
 
+def revoked(env, args):
+    """After `revoke` R is revoked and signed out: with the control plane cut again, W still refuses R and L still reaches W."""
+    res = c.Result(args.redact)
+    ok, detail = c.eventually(lambda: exec_lw(env, "prerevoked-baseline"), 240, 10)
+    res.add("L reaches W before the second cut", ok, detail)
+    block, routes = env.cut([L], 300)
+    try:
+        res.add("W and L cut off from the control plane", routes[0] == 0, routes[1].strip()[-120:])
+        time.sleep(20)
+        ok, detail = c.eventually(lambda: refused_rw(env), 90, 10)
+        res.add("a user revoked before the outage (R) is refused by W", ok, detail)
+        ok, detail = c.eventually(lambda: exec_lw(env, "prerevoked-LW"), 90, 10)
+        res.add("a user that was not revoked (L) still reaches W", ok, detail)
+    finally:
+        restored = env.restore(block, [L])
+    res.add("control plane reachable again", restored[0] == 0, restored[1].strip()[-120:])
+    return write(res, f"control-outage-revoked-{env.stem}", {})
+
+
 def write(res, stem, extra):
     path = HERE / "results" / f"{stem}-{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}.json"
     path.parent.mkdir(exist_ok=True)
@@ -219,7 +239,7 @@ def write(res, stem, extra):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("phase", choices=["drill", "revoke"])
+    parser.add_argument("phase", choices=["drill", "revoke", "revoked"])
     parser.add_argument("--host", default="ubuntu@anvit")
     parser.add_argument("--server", required=True, help="the staging API base URL the machines are paired to")
     parser.add_argument("--outage-seconds", type=int, default=660)
@@ -227,7 +247,7 @@ def main():
     parser.add_argument("--redact", action="append", default=[], help="host names to replace with example.test in the result")
     args = parser.parse_args()
     env = Env(args)
-    sys.exit(drill(env, args) if args.phase == "drill" else revoke(env, args))
+    sys.exit({"drill": drill, "revoke": revoke, "revoked": revoked}[args.phase](env, args))
 
 
 if __name__ == "__main__":
