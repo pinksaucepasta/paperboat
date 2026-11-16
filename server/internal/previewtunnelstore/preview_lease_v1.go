@@ -193,6 +193,7 @@ type ReconcilePreviewLeasesV1Result struct {
 
 var ErrPreviewPublicationDenied = errors.New("machine management does not authorize public publication")
 
+// Twin of tunnelv1 verifyHostWithQueries, kept separate: a preview host must be online, a tunnel host needs an identity key; no row lock here because SERIALIZABLE covers the revoke race and a lock would serialize preview creates per machine.
 const previewMachineAuthoritySQL = `SELECT m.user_id<>$1 OR m.owner_team_id IS NOT NULL
  FROM paperboat.user_machines m WHERE m.id=$2 AND (NOT $3::boolean OR (m.state='online' AND m.online))
  AND m.deleted_at IS NULL AND m.revoked_at IS NULL
@@ -288,6 +289,7 @@ type ListPreviewLeasesV1Input struct {
 	Limit          int32
 }
 
+// Twin of tunnelv1 SQLRepository.List: manageable_preview_ids and manageable_tunnel_ids stay separate (different base tables, same rule CTEs); a filter or policy change lands in both.
 func (s *Store) ListPreviewLeasesV1(ctx context.Context, input ListPreviewLeasesV1Input) ([]PreviewLeaseRecord, error) {
 	if strings.TrimSpace(input.AccountID) == "" || input.Limit < 1 || input.Limit > 201 {
 		return nil, ErrInvalidInput

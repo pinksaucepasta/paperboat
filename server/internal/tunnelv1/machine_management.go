@@ -40,6 +40,8 @@ func scopeTunnelManagement(ctx context.Context, repository tunnelManagementRepos
 	request.Actor.AccountID = owner
 	return context.WithValue(ctx, tunnelManagementKey{}, tunnelManagementScope{actor: actor, owner: owner, tunnel: tunnel, host: request.Actor.HostID}), request, shared, nil
 }
+
+// Twin of previewtunnelstore authorizeWorkspacePreviewTx: the tunnel and preview management decisions stay separate (different tables, no divergence); a policy change lands in both.
 func authorizeTunnelManagementTx(ctx context.Context, tx *db.Tx) error {
 	scope, ok := ctx.Value(tunnelManagementKey{}).(tunnelManagementScope)
 	if !ok {
