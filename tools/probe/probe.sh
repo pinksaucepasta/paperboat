@@ -10,6 +10,8 @@
 #   PROBE_STEP_TIMEOUT   seconds per step (default 45)
 #   PROBE_STEPS          only these steps, space separated (default: all); staging has no edge, so it runs
 #                        exec_a_to_b exec_b_to_a ssh_a_to_b (deploy/staging-canary.sh)
+#   CANARY_ENV_NAME / CANARY_ENV_VALUE  one ENV value set once in the canary pair's workspace; the env_exec step needs both
+#   CANARY_ENV_NAME/_VALUE  one managed ENV value set once for the pair's workspace (fixture); the env_exec step needs both
 #   CANARY_EDGES         every managed edge address (space separated); each must serve the canary tunnel
 #                        directly, so an edge that dropped out of DNS or was null-routed still fails a step
 set -uo pipefail
@@ -49,6 +51,11 @@ fetch_all() { # url: every edge address in DNS must serve the run marker (DNS al
 origin() { on A "mkdir -p canary-www && echo $marker >canary-www/index.html && curl -fsS --max-time 5 http://127.0.0.1:$port/" >"$tmp/got" && want; }
 exec_ab() { on A "$pb exec $b -- echo $marker" >"$tmp/got" && want; }
 exec_ba() { on B "$pb exec $a -- echo $marker" >"$tmp/got" && want; }
+env_exec() { # A runs a command on B: the managed ENV value must arrive (never printed)
+  : "${CANARY_ENV_NAME:?}" "${CANARY_ENV_VALUE:?}"
+  on A "$pb exec $b -- printenv $CANARY_ENV_NAME" >"$tmp/got" 2>"$tmp/execerr" || { tail -c 200 "$tmp/execerr" >&2; return 1; }
+  [ "$(cat "$tmp/got")" = "$CANARY_ENV_VALUE" ] || { echo "$CANARY_ENV_NAME did not arrive on $b" >&2; tail -c 200 "$tmp/execerr" >&2; return 1; }
+}
 ssh_ab() { on A "$pb ssh $b -- echo $marker" >"$tmp/got" && want; }
 send_ab() { # A sends a file, B finds it in its Inbox with the marker inside, then removes it
   on A "echo $marker >/tmp/$marker.txt && $pb send /tmp/$marker.txt --to $b >/dev/null; rc=\$?; rm -f /tmp/$marker.txt; exit \$rc" &&
@@ -82,6 +89,7 @@ step origin origin
 step exec_a_to_b exec_ab
 step exec_b_to_a exec_ba
 step ssh_a_to_b ssh_ab
+step env_exec env_exec
 step send_a_to_b send_ab
 step preview preview
 step tunnel tunnel

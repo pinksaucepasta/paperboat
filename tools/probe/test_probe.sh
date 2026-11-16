@@ -19,11 +19,14 @@ esac
 FAKE
 chmod +x "$d/bin/pb"
 for _ in $(seq 50); do curl -fs "http://127.0.0.1:$port/" >/dev/null 2>&1 && break; sleep 0.1; done
-export RUN_A="env PATH=$d/bin:$PATH HOME=$d/home" RUN_B="env PATH=$d/bin:$PATH HOME=$d/home" PB=pb
-export CANARY_A=a CANARY_B=b CANARY_PORT=$port CANARY_TUNNEL_URL=http://127.0.0.1:$port PROBE_STEP_TIMEOUT=10
+export RUN_A="env PATH=$d/bin:$PATH HOME=$d/home CANARY_T=fixture" RUN_B="env PATH=$d/bin:$PATH HOME=$d/home CANARY_T=fixture" PB=pb
+export CANARY_A=a CANARY_B=b CANARY_PORT=$port CANARY_TUNNEL_URL=http://127.0.0.1:$port PROBE_STEP_TIMEOUT=10 CANARY_ENV_NAME=CANARY_T CANARY_ENV_VALUE=fixture
 out=$("$here/probe.sh") || { echo "healthy run failed: $out"; exit 1; }
-[ "$(grep -c '"ok":true' <<<"$out")" = 7 ] || { echo "healthy run: $out"; exit 1; }
+[ "$(grep -c '"ok":true' <<<"$out")" = 8 ] || { echo "healthy run: $out"; exit 1; }
 [ -z "$(ls "$d/home/inbox")" ] || { echo "received file left in the Inbox"; exit 1; }
+# A value that did not arrive fails the env_exec step only (and never prints the expected value).
+if out=$(CANARY_ENV_VALUE=other "$here/probe.sh"); then echo "wrong ENV value passed: $out"; exit 1; fi
+grep -q '"step":"env_exec","ok":false' <<<"$out" && [ "$(grep -c '"ok":false' <<<"$out")" = 1 ] && ! grep -q other <<<"$out" || { echo "env_exec: $out"; exit 1; }
 if out=$(FAKE_FAIL=1 "$here/probe.sh"); then echo "broken exec passed: $out"; exit 1; fi
 grep -q '"step":"exec_a_to_b","ok":false,"seconds":[0-9]*,"error":"machine unreachable"' <<<"$out"
 grep -q '"step":"exec_b_to_a","ok":false' <<<"$out"

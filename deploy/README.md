@@ -255,7 +255,7 @@ rollback step failed; 0 kept). Previous images stay on the hosts; never prune th
 ## Production canary
 
 A user unit on oracle (`deploy/paperboat-canary.{service,timer}` in `~/.config/systemd/user/`) runs
-`tools/probe/canary.py` every minute: `pb exec` both ways, `pb ssh` with a command, a file send checked in
+`tools/probe/canary.py` every minute: `pb exec` both ways, `pb ssh` with a command, one managed ENV value delivered to the peer's exec (`env_exec`; `CANARY_ENV_NAME`/`CANARY_ENV_VALUE` in the env file name the value set once in the pair's workspace), a file send checked in
 the receiver's Inbox, a new preview and the permanent canary tunnel, each fetched through every edge
 address in DNS, between two dedicated machines: `canary-a` (container `pb-canary-a` on oracle, also the
 origin) and `canary-b` (container `pb-canary-b` on anvit). Oracle because the deploys are run from it and
