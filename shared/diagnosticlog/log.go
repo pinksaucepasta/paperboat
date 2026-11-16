@@ -86,12 +86,20 @@ func TryInfo(message string, args ...any) {
 func TryWarn(message string, args ...any)  { tryLog(slog.LevelWarn, message, args...) }
 func TryError(message string, args ...any) { tryLog(slog.LevelError, message, args...) }
 
-func tryLog(level slog.Level, message string, args ...any) {
-	// A refusal made locally and already explained (a revoked identity waiting out its backoff) is no record.
+// carriesQuietFailure reports a record about a refusal made locally and already explained (a revoked identity waiting
+// out its backoff): it is no record.
+func carriesQuietFailure(args []any) bool {
 	for _, arg := range args {
 		if err, ok := arg.(error); ok && QuietFailure(err) {
-			return
+			return true
 		}
+	}
+	return false
+}
+
+func tryLog(level slog.Level, message string, args ...any) {
+	if carriesQuietFailure(args) {
+		return
 	}
 	ensureWorker()
 	if len(message) > 512 {

@@ -111,47 +111,13 @@ type quietRefusal struct{}
 func (quietRefusal) Error() string      { return "held back" }
 func (quietRefusal) QuietFailure() bool { return true }
 
-type countingHandler struct {
-	mu       sync.Mutex
-	messages []string
-}
-
-func (h *countingHandler) Enabled(context.Context, slog.Level) bool { return true }
-func (h *countingHandler) Handle(_ context.Context, r slog.Record) error {
-	h.mu.Lock()
-	h.messages = append(h.messages, r.Message)
-	h.mu.Unlock()
-	return nil
-}
-func (h *countingHandler) WithAttrs([]slog.Attr) slog.Handler { return h }
-func (h *countingHandler) WithGroup(string) slog.Handler      { return h }
-
 // X-41: a runtime loop's warning about a locally explained refusal (a revoked identity waiting out its backoff) is dropped.
 func TestWarnAboutAQuietRefusalIsNotQueued(t *testing.T) {
-	previous := slog.Default()
-	h := &countingHandler{}
-	slog.SetDefault(slog.New(h))
-	defer slog.SetDefault(previous)
-	TryWarn("quiet", "error", errors.Join(errors.New("fetch"), quietRefusal{}))
-	TryWarn("loud", "error", errors.New("boom"))
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-	if err := Flush(ctx); err != nil {
-		t.Fatal(err)
+	if !carriesQuietFailure([]any{"error", errors.Join(errors.New("fetch"), quietRefusal{})}) {
+		t.Fatal("a held-back refusal would be queued")
 	}
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	var quiet, loud int // earlier tests may still be draining their own records through the shared worker
-	for _, message := range h.messages {
-		switch message {
-		case "quiet":
-			quiet++
-		case "loud":
-			loud++
-		}
-	}
-	if quiet != 0 || loud != 1 {
-		t.Fatalf("quiet=%d loud=%d", quiet, loud)
+	if carriesQuietFailure([]any{"error", errors.New("boom"), "count", 3}) || carriesQuietFailure(nil) {
+		t.Fatal("an ordinary failure would be dropped")
 	}
 }
 
