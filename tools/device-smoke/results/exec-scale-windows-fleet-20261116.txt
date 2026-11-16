@@ -1,0 +1,10 @@
+F21-166 Windows, 2026-11-16 IST: lanex2-w (the real Victus PC, Windows 11) as target, client = fleet Linux lanex2-l2 (anvit container), prod.
+Build dev-d9d082603 (contains 8ba63e1c4, the ~20 s Windows exec start fix) on both for the exec parts; dev-f8e8ed1f9 (contains 638f9397c) for the send queue.
+
+Before 8ba63e1c4 (dev-f8e8ed1f9): every exec to lanex2-w took 19-23 s (also from victus to itself); 8 concurrent ok (21-22 s), 32 concurrent all failed after 12-13 s ('could not reach the target machine').
+
+On dev-d9d082603:
+- 32 concurrent 'pb exec lanex2-w -- cmd /c ping -n 21 127.0.0.1' (about 20 s each): 32 of 32 rc 0, fastest 23.3 s, slowest 28.8 s, budget 30 s (8 and 16 concurrent: all rc 0, 21.3-23.6 s).
+  An earlier 32 run in the same hour gave 31 ok and 1 refused after 6 s with the clear text 'The target is already running as many commands as it accepts at once.' (another lane's command held a slot on the shared machine), i.e. the 'clear resource_limit error' on Windows.
+- 2,000 short execs ('cmd /c exit 0', 8 at a time): 2000 ok, 0 failed, 421 s. pb processes on lanex2-w 14 before, 15 after; per-process handle counts of the long-lived processes 614->636, 259->319, 281->293, 270->266 (other lanes use the machine, not a clean room); the Windows unit test (results/windows-unit-tests-20261112.txt) measured 609 handles before and after 2,000 executions.
+Transfer queue (dev-f8e8ed1f9): 6 parallel 10 MiB sends to lanex2-w: 6 of 6 delivered (4 printed the waiting line first; 11, 11, 28, 29, 62, 63 s).
