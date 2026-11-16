@@ -45,4 +45,7 @@ export const footerColumns: { title: string; links: NavLink[] }[] = [
 ]
 
 /** The legal pages, in the footer's bottom row. */
-export const legalLinks: NavLink[] = legalPages.map((page) => ({ href: `/legal/${page.slug}/`, label: page.short }))
+export const legalLinks: NavLink[] = [
+  ...legalPages.map((page) => ({ href: `/legal/${page.slug}/`, label: page.short })),
+  { href: "/report-abuse/", label: "Report abuse" },
+]

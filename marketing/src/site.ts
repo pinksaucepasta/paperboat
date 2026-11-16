@@ -14,8 +14,12 @@ const config = (await response.json()).data as {
   local_access_base_domain: string
   preview_base_domain: string
   tunnel_base_domain: string
+  abuse_mailbox?: string
 }
 
+export const apiBaseUrl = apiUrl
+/** Where abuse is reported by email; undefined when the server publishes none. */
+export const abuseMailbox = config.abuse_mailbox
 export const consoleUrl = config.console_url
 export const installUrl = `${config.installer_base_url}/install`
 export const selfhostInstallUrl = `${config.installer_base_url}/selfhost/install`

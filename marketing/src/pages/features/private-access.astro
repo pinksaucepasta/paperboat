@@ -18,7 +18,7 @@ const reach = [
 ]
 
 const names = [
-  { lines: ["$ pb config local-access alias set studio grafana 3000"], note: `Now <code>https://grafana.studio.${localDomain}</code> opens port 3000.` },
+  { lines: ["$ pb port name set grafana 3000 --machine studio"], note: `Now <code>https://grafana.studio.${localDomain}</code> opens port 3000.` },
   { lines: ["$ pb resolve studio"], note: "Shows the local address this computer uses for studio, and which ports are open to you." },
   { lines: ["$ pb ping studio", "sample 1: path=direct connect=18.42ms", "sample 2: path=direct connect=11.07ms", "sample 3: path=direct connect=10.88ms", "sample 4: path=direct connect=11.31ms", "summary: sent=4 received=4 loss=0.0% connect min/avg/max=10.88/12.92/18.42ms"], note: "Direct or relayed, and how long a connection takes." },
 ]
@@ -46,7 +46,7 @@ const faq = [
   },
   {
     q: "How do I reach a service behind a reverse proxy such as Coolify?",
-    a: `Set the app's domain to a name like <code>jellyfin.homelab.${localDomain}</code>. pb sends the request to the proxy on port 80 with that host name, and the proxy picks the app. <code>pb config local-access proxy set</code> changes the port.`,
+    a: `Set the app's domain to a name like <code>jellyfin.homelab.${localDomain}</code>. pb sends the request to the proxy on port 80 with that host name, and the proxy picks the app. <code>pb port front-desk homelab 443 https</code> changes the port and scheme.`,
   },
 ]
 ---

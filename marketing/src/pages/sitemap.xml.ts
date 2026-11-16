@@ -13,6 +13,7 @@ export const paths = [
   "/pricing/",
   "/security/",
   "/docs/",
+  "/report-abuse/",
 ]
 
 export const GET: APIRoute = ({ site }) => {
