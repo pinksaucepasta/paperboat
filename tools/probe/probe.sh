@@ -10,8 +10,9 @@
 #   PROBE_STEP_TIMEOUT   seconds per step (default 45)
 #   PROBE_STEPS          only these steps, space separated (default: all); staging has no edge, so it runs
 #                        exec_a_to_b exec_b_to_a ssh_a_to_b (deploy/staging-canary.sh)
-#   CANARY_ENV_NAME / CANARY_ENV_VALUE  one ENV value set once in the canary pair's workspace; the env_exec step needs both
 #   CANARY_ENV_NAME/_VALUE  one managed ENV value set once for the pair's workspace (fixture); the env_exec step needs both
+#   CANARY_TEAM / CANARY_TEAM_MACHINE  a team the canary account owns and a machine shared into it with an exact exec
+#                        grant to that account (fixture); when set, team_exec runs A -> that machine in the team workspace
 #   CANARY_EDGES         every managed edge address (space separated); each must serve the canary tunnel
 #                        directly, so an edge that dropped out of DNS or was null-routed still fails a step
 set -uo pipefail
@@ -56,6 +57,7 @@ env_exec() { # A runs a command on B: the managed ENV value must arrive (never p
   on A "$pb exec $b -- printenv $CANARY_ENV_NAME" >"$tmp/got" 2>"$tmp/execerr" || { tail -c 200 "$tmp/execerr" >&2; return 1; }
   [ "$(cat "$tmp/got")" = "$CANARY_ENV_VALUE" ] || { echo "$CANARY_ENV_NAME did not arrive on $b" >&2; tail -c 200 "$tmp/execerr" >&2; return 1; }
 }
+team_exec() { on A "$pb --workspace ${CANARY_TEAM:?} exec $CANARY_TEAM_MACHINE -- echo $marker" >"$tmp/got" && want; }
 ssh_ab() { on A "$pb ssh $b -- echo $marker" >"$tmp/got" && want; }
 send_ab() { # A sends a file, B finds it in its Inbox with the marker inside, then removes it
   on A "echo $marker >/tmp/$marker.txt && $pb send /tmp/$marker.txt --to $b >/dev/null; rc=\$?; rm -f /tmp/$marker.txt; exit \$rc" &&
@@ -90,6 +92,7 @@ step exec_a_to_b exec_ab
 step exec_b_to_a exec_ba
 step ssh_a_to_b ssh_ab
 step env_exec env_exec
+[ -z "${CANARY_TEAM_MACHINE:-}" ] || step team_exec team_exec
 step send_a_to_b send_ab
 step preview preview
 step tunnel tunnel
