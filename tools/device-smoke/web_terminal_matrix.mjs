@@ -386,9 +386,20 @@ const rows = {
     const cancel = await paste("Cancel")
     row("W14 Windows target: the paste asks 'Paste 2 lines?' and Cancel types nothing", cancel.asked && cancel.lines === "2" && !cancel.text.some((l) => l === "11" || l === "22" || l.includes("echo $((")), id)
     const one = await paste("Paste as one line")
-    row("W14 Windows target: Paste as one line joins the lines with a space", one.asked && one.text.includes("11 echo 22"), id)
+    // Nothing ran yet: the joined line waits at the prompt for Enter.
+    const joined = one.text.some((l) => l.endsWith("echo $((10+1)) echo $((20+2))")) && !one.text.includes("11 echo 22")
+    await page.keyboard.press("Enter")
+    await sleep(2000)
+    const ran = (await screen(page)).split("\n").map((l) => l.trim()).includes("11 echo 22")
+    row("W14 Windows target: Paste as one line joins the lines with a space and waits for Enter", one.asked && joined && ran, id)
     const both = await paste("Paste")
-    row("W14 Windows target: Paste runs each line", both.asked && both.text.includes("11") && both.text.includes("22"), id)
+    // The Linux target takes the lines bracketed (a Windows shell would run them as they arrive): both arrive as separate
+    // lines, in order, none doubled; Enter then runs both.
+    const lines = both.text.filter((l) => l.endsWith("echo $((10+1))") || l === "echo $((20+2))")
+    await page.keyboard.press("Enter")
+    await sleep(2000)
+    const out = (await screen(page)).split("\n").map((l) => l.trim())
+    row("W14 Windows target: Paste sends each line, in order and once", both.asked && lines.length === 2 && out.filter((l) => l === "11").length === 1 && out.filter((l) => l === "22").length === 1, id)
     await page.close()
     await closeTerminal(ctx, id)
   },
