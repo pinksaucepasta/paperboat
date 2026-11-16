@@ -54,7 +54,7 @@ func TestListShowsTeamSharedMachinesOnlyWithPrivateAccessOnPostgres(t *testing.T
 	exec(`INSERT INTO paperboat.user_machines(id,user_id,environment_id,alias,platform,architecture,workspace_root,state,seat_state,online,installation_generation) VALUES($1,$2,$3,'office','linux','amd64','/workspace','online','occupied',true,1)`, machine, owner, environment)
 	s := machineservices.New(store, "local.example.test")
 	snapshot := wire.Snapshot{Schema: "paperboat.machine-services/v1", InstallationGeneration: 1, BootID: "boot-012345678901", StartedAt: time.Now().UTC().Add(-time.Minute), Generation: 1, Services: []wire.Port{{Port: 5432, AddressFamily: "ipv4"}}}
-	if e = s.RecordMachineServices(ctx, environment, machine, snapshot, time.Now().UTC()); e != nil {
+	if _, e = s.RecordMachineServices(ctx, environment, machine, snapshot, time.Now().UTC()); e != nil {
 		t.Fatal(e)
 	}
 	// The announcement must not expire mid-test whatever the database latency.

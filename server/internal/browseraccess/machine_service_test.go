@@ -96,7 +96,7 @@ func TestAutomaticBrowserDormantAuthorityPostgres(t *testing.T) {
 	}
 	snapshot := wire.Snapshot{Schema: "paperboat.machine-services/v1", InstallationGeneration: 1, BootID: "boot-browser-family-0123", StartedAt: time.Now().UTC(), Generation: 1, Services: []wire.Port{{Port: 3000, AddressFamily: "ipv6"}, {Port: 3001, AddressFamily: "ipv6"}}}
 	discovery := machineservices.New(store, "local.example.test")
-	if e = discovery.RecordMachineServices(ctx, environment, machine, snapshot, time.Now().UTC()); e != nil {
+	if _, e = discovery.RecordMachineServices(ctx, environment, machine, snapshot, time.Now().UTC()); e != nil {
 		t.Fatal(e)
 	}
 	var address string
@@ -113,7 +113,7 @@ func TestAutomaticBrowserDormantAuthorityPostgres(t *testing.T) {
 	}
 	exec(`UPDATE paperboat.lazy_access_policies SET authorization_source='explicit',target_address='127.0.0.1:3000' WHERE id=$1`, a.id)
 	snapshot.Generation++
-	if e = discovery.RecordMachineServices(ctx, environment, machine, snapshot, time.Now().UTC()); e != nil {
+	if _, e = discovery.RecordMachineServices(ctx, environment, machine, snapshot, time.Now().UTC()); e != nil {
 		t.Fatal(e)
 	}
 	if e = store.SQL().QueryRowContext(ctx, `SELECT target_address FROM paperboat.lazy_access_policies WHERE id=$1`, a.id).Scan(&address); e != nil || address != "127.0.0.1:3000" {

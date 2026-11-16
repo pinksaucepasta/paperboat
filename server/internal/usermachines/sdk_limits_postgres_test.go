@@ -66,7 +66,7 @@ func TestSDKSessionRateLimits(t *testing.T) {
 	limited(fileErr, "operations")
 	now := time.Now().UTC()
 	services := machineservices.New(f.store, "local.example.test")
-	if err := services.RecordMachineServices(ctx, "env_"+f.suffix, f.machine, wire.Snapshot{Schema: "paperboat.machine-services/v1", InstallationGeneration: 1, BootID: "sdk-limit-0123456789", StartedAt: now, Generation: 1, Services: []wire.Port{{Port: 5432, AddressFamily: "ipv4"}}}, now); err != nil {
+	if _, err := services.RecordMachineServices(ctx, "env_"+f.suffix, f.machine, wire.Snapshot{Schema: "paperboat.machine-services/v1", InstallationGeneration: 1, BootID: "sdk-limit-0123456789", StartedAt: now, Generation: 1, Services: []wire.Port{{Port: 5432, AddressFamily: "ipv4"}}}, now); err != nil {
 		t.Fatal(err)
 	}
 	resolver, _ := nativeprivateaccess.NewSQLResolver(f.store)

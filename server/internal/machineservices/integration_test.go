@@ -58,7 +58,7 @@ func TestMachineServicePostgresAuthorityLifecycle(t *testing.T) {
 	snapshot := wire.Snapshot{Schema: "paperboat.machine-services/v1", InstallationGeneration: 1, BootID: "boot-012345678901", StartedAt: now.Add(-time.Minute), Generation: 1, Services: []wire.Port{{Port: 5432, AddressFamily: "ipv4"}}}
 	announce := func() {
 		t.Helper()
-		if e := s.RecordMachineServices(ctx, environment, machine, snapshot, time.Now().UTC()); e != nil {
+		if _, e := s.RecordMachineServices(ctx, environment, machine, snapshot, time.Now().UTC()); e != nil {
 			t.Fatal(e)
 		}
 	}
@@ -168,7 +168,7 @@ func TestMachineServicePostgresAuthorityLifecycle(t *testing.T) {
 	lowPort := snapshot
 	lowPort.Generation++
 	lowPort.Services = []wire.Port{{Port: 22, AddressFamily: "ipv4"}, {Port: 53, AddressFamily: "ipv4"}}
-	if e = s.RecordMachineServices(ctx, environment, machine, lowPort, time.Now()); !errors.Is(e, machineservices.ErrDenied) {
+	if _, e = s.RecordMachineServices(ctx, environment, machine, lowPort, time.Now()); !errors.Is(e, machineservices.ErrDenied) {
 		t.Fatalf("an announced low port without an explicit allow was accepted: %v", e)
 	}
 	// An unrelated service starting advances the announcement generation (for access to a machine's own
@@ -193,10 +193,10 @@ func TestMachineServicePostgresAuthorityLifecycle(t *testing.T) {
 	// and signed observation replay cannot extend the current announcement.
 	bad := snapshot
 	bad.Services = []wire.Port{{Port: 5432, AddressFamily: "ipv4"}}
-	if e = s.RecordMachineServices(ctx, environment, machine, bad, time.Now()); !errors.Is(e, machineservices.ErrConflict) {
+	if _, e = s.RecordMachineServices(ctx, environment, machine, bad, time.Now()); !errors.Is(e, machineservices.ErrConflict) {
 		t.Fatalf("same generation changed set %v", e)
 	}
-	if e = s.RecordMachineServices(ctx, environment, machine, snapshot, time.Now().Add(-31*time.Second)); !errors.Is(e, wire.ErrInvalid) {
+	if _, e = s.RecordMachineServices(ctx, environment, machine, snapshot, time.Now().Add(-31*time.Second)); !errors.Is(e, wire.ErrInvalid) {
 		t.Fatalf("signed replay %v", e)
 	}
 	snapshot.BootID = "boot-112345678901"

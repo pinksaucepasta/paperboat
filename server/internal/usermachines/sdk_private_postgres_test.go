@@ -14,7 +14,7 @@ func TestSDKSessionPrivatePortAuthorization(t *testing.T) {
 	ctx, token, session := sdkSession(t, f, "private_access")
 	services := machineservices.New(f.store, "local.example.test")
 	now := time.Now().UTC()
-	err := services.RecordMachineServices(ctx, "env_"+f.suffix, f.machine, wire.Snapshot{Schema: "paperboat.machine-services/v1", InstallationGeneration: 1, BootID: "sdk-boot-0123456789", StartedAt: now, Generation: 1, Services: []wire.Port{{Port: 5432, AddressFamily: "ipv4"}, {Port: 5433, AddressFamily: "ipv4"}}}, now)
+	_, err := services.RecordMachineServices(ctx, "env_"+f.suffix, f.machine, wire.Snapshot{Schema: "paperboat.machine-services/v1", InstallationGeneration: 1, BootID: "sdk-boot-0123456789", StartedAt: now, Generation: 1, Services: []wire.Port{{Port: 5432, AddressFamily: "ipv4"}, {Port: 5433, AddressFamily: "ipv4"}}}, now)
 	if err != nil {
 		t.Fatal(err)
 	}

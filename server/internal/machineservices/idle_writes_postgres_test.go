@@ -76,7 +76,8 @@ func TestUnchangedServicePolicyAndSnapshotWriteNoRowsOnPostgres(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	snapshot := wire.Snapshot{Schema: "paperboat.machine-services/v1", InstallationGeneration: 1, BootID: "boot-012345678901", StartedAt: now.Add(-time.Minute), Generation: 1, Services: []wire.Port{{Port: 5432, AddressFamily: "ipv4"}}}
 	report := func(svc *machineservices.Service) error {
-		return svc.RecordMachineServices(ctx, environment, machine, snapshot, time.Now().UTC())
+		_, err := svc.RecordMachineServices(ctx, environment, machine, snapshot, time.Now().UTC())
+		return err
 	}
 	if e = report(s); e != nil {
 		t.Fatal(e)

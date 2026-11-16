@@ -291,10 +291,10 @@ func (s *Service) RuntimePolicy(ctx context.Context, environment, machine string
 	}
 	return p, tx.Commit()
 }
-func (s *Service) RecordMachineServices(ctx context.Context, environment, machine string, in wire.Snapshot, observedAt time.Time) (resultErr error) {
+func (s *Service) RecordMachineServices(ctx context.Context, environment, machine string, in wire.Snapshot, observedAt time.Time) (policy wire.RuntimePolicy, resultErr error) {
 	now := s.now()
 	if observedAt.IsZero() || observedAt.After(now.Add(serverclock.Threshold)) || !observedAt.Add(SnapshotLifetime).After(now) {
-		return wire.ErrInvalid
+		return policy, wire.ErrInvalid
 	}
 	lease := s.lease()
 	expiry := observedAt.Add(lease)
@@ -302,27 +302,27 @@ func (s *Service) RecordMachineServices(ctx context.Context, environment, machin
 		expiry = now.Add(lease)
 	}
 	if e := wire.ValidateSnapshot(in, now); e != nil {
-		return e
+		return policy, e
 	}
 	policy, e := s.RuntimePolicy(ctx, environment, machine)
 	if e != nil {
-		return e
+		return policy, e
 	}
 	for _, p := range in.Services {
 		if !(wire.AutomaticPort(p.Port) && policy.AutomaticDiscoveryEnabled) && !slices.Contains(policy.ExplicitPorts, p) {
-			return ErrDenied
+			return policy, ErrDenied
 		}
 	}
 	data, e := json.Marshal(in.Services)
 	if e != nil {
-		return e
+		return policy, e
 	}
 	if in.Services == nil {
 		data = []byte("[]")
 	}
 	tx, e := s.DB.BeginTx(ctx, nil)
 	if e != nil {
-		return e
+		return policy, e
 	}
 	defer captureServiceRollback(tx, &resultErr)
 	result, e := tx.ExecContext(ctx, `INSERT INTO paperboat.machine_service_snapshots(machine_id,installation_generation,boot_id,started_at,generation,services,expires_at,updated_at)
@@ -330,11 +330,11 @@ func (s *Service) RecordMachineServices(ctx context.Context, environment, machin
  ON CONFLICT(machine_id) DO UPDATE SET installation_generation=EXCLUDED.installation_generation,boot_id=EXCLUDED.boot_id,started_at=EXCLUDED.started_at,generation=EXCLUDED.generation,services=EXCLUDED.services,expires_at=EXCLUDED.expires_at,updated_at=EXCLUDED.updated_at
  WHERE EXCLUDED.installation_generation>machine_service_snapshots.installation_generation OR (EXCLUDED.installation_generation=machine_service_snapshots.installation_generation AND ((EXCLUDED.boot_id=machine_service_snapshots.boot_id AND EXCLUDED.started_at=machine_service_snapshots.started_at AND (EXCLUDED.generation>machine_service_snapshots.generation OR (EXCLUDED.generation=machine_service_snapshots.generation AND EXCLUDED.services=machine_service_snapshots.services AND EXCLUDED.expires_at>=machine_service_snapshots.expires_at AND machine_service_snapshots.expires_at<$10))) OR (EXCLUDED.boot_id<>machine_service_snapshots.boot_id AND EXCLUDED.started_at>machine_service_snapshots.started_at)))`, machine, environment, in.InstallationGeneration, in.BootID, in.StartedAt, in.Generation, data, expiry, now, now.Add(lease/2))
 	if e != nil {
-		return fmt.Errorf("record machine services: %w", e)
+		return policy, fmt.Errorf("record machine services: %w", e)
 	}
 	n, e := result.RowsAffected()
 	if e != nil {
-		return e
+		return policy, e
 	}
 	if n == 0 {
 		// An unchanged report while more than half the stored lease is left writes nothing; anything else that
@@ -343,12 +343,12 @@ func (s *Service) RecordMachineServices(ctx context.Context, environment, machin
 		if e = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM paperboat.machine_service_snapshots s JOIN paperboat.user_machines m ON m.id=s.machine_id
  WHERE s.machine_id=$1 AND m.environment_id=$8 AND m.installation_generation=$2 AND m.revoked_at IS NULL AND m.deleted_at IS NULL
  AND s.installation_generation=$2 AND s.boot_id=$3 AND s.started_at=$4 AND s.generation=$5 AND s.services=$6 AND s.expires_at>=$7)`, machine, in.InstallationGeneration, in.BootID, in.StartedAt, in.Generation, data, now.Add(lease/2), environment).Scan(&fresh); e != nil {
-			return e
+			return policy, e
 		}
 		if !fresh {
-			return ErrConflict
+			return policy, ErrConflict
 		}
-		return tx.Commit()
+		return policy, tx.Commit()
 	}
 	// A family replacement changes the exact browser target and therefore its
 	// policy generation; explicit port policies retain their selected address.
@@ -358,9 +358,9 @@ func (s *Service) RecordMachineServices(ctx context.Context, environment, machin
  AND p.target_address IN ('127.0.0.1:'||(service->>'port'),'[::1]:'||(service->>'port'))
  AND p.target_address<>CASE WHEN service->>'address_family'='ipv6' THEN '[::1]:' ELSE '127.0.0.1:' END||(service->>'port')`, machine, data, now)
 	if e != nil {
-		return e
+		return policy, e
 	}
-	return tx.Commit()
+	return policy, tx.Commit()
 }
 
 func (s *Service) List(ctx context.Context, actor string) (items []wire.Item, resultErr error) {

@@ -55,7 +55,7 @@ func TestPortNamesOnPostgres(t *testing.T) {
 	exec(`INSERT INTO paperboat.team_members(team_id,account_id,membership_generation,role,active) VALUES($1,$2,1,'admin',true),($1,$3,1,'member',true)`, team, owner, member)
 	s := machineservices.New(store, "local.example.test")
 	snapshot := wire.Snapshot{Schema: "paperboat.machine-services/v1", InstallationGeneration: 1, BootID: "boot-012345678901", StartedAt: time.Now().UTC().Add(-time.Minute), Generation: 1, Services: []wire.Port{{Port: 3000, AddressFamily: "ipv4"}, {Port: 8080, AddressFamily: "ipv4"}}}
-	if e = s.RecordMachineServices(ctx, environment, machine, snapshot, time.Now().UTC()); e != nil {
+	if _, e = s.RecordMachineServices(ctx, environment, machine, snapshot, time.Now().UTC()); e != nil {
 		t.Fatal(e)
 	}
 	exec(`UPDATE paperboat.machine_service_snapshots SET expires_at=now()+interval '1 hour' WHERE machine_id=$1`, machine)

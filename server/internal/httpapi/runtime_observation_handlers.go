@@ -47,7 +47,7 @@ type machineCapabilitiesRepository interface {
 }
 
 type machineServicesRepository interface {
-	RecordMachineServices(context.Context, string, string, wire.Snapshot, time.Time) error
+	RecordMachineServices(context.Context, string, string, wire.Snapshot, time.Time) (wire.RuntimePolicy, error)
 	RuntimePolicy(context.Context, string, string) (wire.RuntimePolicy, error)
 }
 
@@ -201,12 +201,16 @@ func runtimeObservation(repo runtimeObservationRepository, identities runtimeIde
 				return
 			}
 		}
+		// A snapshot projects the runtime policy while it is recorded; the response reuses it instead of a second
+		// locked projection.
+		var servicesPolicy *wire.RuntimePolicy
 		if req.MachineServices != nil {
 			if machineServices == nil {
 				writeError(w, r, http.StatusServiceUnavailable, "machine_services_unavailable", "Machine service observation storage is unavailable.")
 				return
 			}
-			if err := machineServices.RecordMachineServices(r.Context(), req.EnvironmentID, req.ResourceID, *req.MachineServices, req.SampledAt); err != nil {
+			policy, err := machineServices.RecordMachineServices(r.Context(), req.EnvironmentID, req.ResourceID, *req.MachineServices, req.SampledAt)
+			if err != nil {
 				switch {
 				case expectedHTTPErrorOnly(err, wire.ErrInvalid):
 					writeError(w, r, 400, "invalid_request", "Machine service snapshot is invalid.")
@@ -219,6 +223,7 @@ func runtimeObservation(repo runtimeObservationRepository, identities runtimeIde
 				}
 				return
 			}
+			servicesPolicy = &policy
 		}
 		observation := metering.RuntimeObservation{
 			EnvironmentID:   req.EnvironmentID,
@@ -317,7 +322,9 @@ func runtimeObservation(repo runtimeObservationRepository, identities runtimeIde
 			}
 		}
 		response := map[string]any{"accepted": true, "update_observation_recorded": updateRecorded}
-		if machineServices != nil {
+		if servicesPolicy != nil {
+			response["machine_services_policy"] = *servicesPolicy
+		} else if machineServices != nil {
 			policy, err := machineServices.RuntimePolicy(r.Context(), req.EnvironmentID, req.ResourceID)
 			if err != nil {
 				writeError(w, r, 503, "machine_services_unavailable", "Machine service policy is unavailable; retry.", err)

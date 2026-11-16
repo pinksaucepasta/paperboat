@@ -181,6 +181,9 @@ func TestMachineServiceObservationRecordsSignedSnapshotAndReturnsPolicy(t *testi
 	if response.Data.Policy.Generation != policy.Generation || !response.Data.Policy.AutomaticDiscoveryEnabled || len(response.Data.Policy.ExplicitPorts) != 1 || response.Data.Policy.ExplicitPorts[0] != policy.ExplicitPorts[0] {
 		t.Fatalf("response policy=%#v want=%#v", response.Data.Policy, policy)
 	}
+	if sink.policyCalls != 0 {
+		t.Fatalf("RuntimePolicy called %d times after the snapshot projected it; want 0", sink.policyCalls)
+	}
 }
 
 func TestMachineServiceObservationRejectedSnapshotIsNotStoredOrMetered(t *testing.T) {
@@ -269,13 +272,13 @@ type fakeMachineServicesRepository struct {
 	policyCalls          int
 }
 
-func (f *fakeMachineServicesRepository) RecordMachineServices(_ context.Context, environment, machine string, snapshot wire.Snapshot, observedAt time.Time) error {
+func (f *fakeMachineServicesRepository) RecordMachineServices(_ context.Context, environment, machine string, snapshot wire.Snapshot, observedAt time.Time) (wire.RuntimePolicy, error) {
 	if f.recordErr != nil {
-		return f.recordErr
+		return wire.RuntimePolicy{}, f.recordErr
 	}
 	f.environment, f.machine, f.observedAt = environment, machine, observedAt
 	f.recorded = &snapshot
-	return nil
+	return f.policy, nil
 }
 
 func (f *fakeMachineServicesRepository) RuntimePolicy(context.Context, string, string) (wire.RuntimePolicy, error) {
