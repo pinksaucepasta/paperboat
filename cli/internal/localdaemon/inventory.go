@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machineevents"
@@ -96,6 +97,7 @@ type InventoryConfig struct {
 }
 
 type Inventory struct {
+	captive           atomic.Bool // the last control-plane failure was a captive portal
 	source            MachineSource
 	store             *localapi.SnapshotStore
 	refreshInterval   time.Duration
@@ -310,6 +312,8 @@ func (i *Inventory) Refresh(ctx context.Context) (refreshErr error) {
 		refreshErr = errors.Join(refreshErr, api.ErrUnauthenticated)
 	}
 
+	portal := i.captivePortalBlocks(ctx, sourceErr, reconcileErr)
+	i.captive.Store(portal)
 	now := i.clock().UTC()
 	if _, err := i.store.Update(now, func(current *localapi.Snapshot) (localapi.Snapshot, error) {
 		desired := localapi.Snapshot{DaemonState: "ready", DaemonVersion: buildinfo.Version}
@@ -352,7 +356,7 @@ func (i *Inventory) Refresh(ctx context.Context) (refreshErr error) {
 					// broken installation: "repair the installation" cannot fix it (pbvm2, 2026-11-09).
 					signedOutSnapshot(&desired)
 				case controlPlaneUnreachable(reconcileErr, i.apiHost()):
-					desired.Health = controlPlaneUnavailableHealth(current, now, reconcileErr)
+					desired.Health = controlPlaneUnavailableHealth(current, now, reconcileErr, portal)
 				default:
 					item := healthSince(current, now, localapi.HealthItem{
 						Code:     "local_access_unavailable",
@@ -369,7 +373,7 @@ func (i *Inventory) Refresh(ctx context.Context) (refreshErr error) {
 			}
 		} else {
 			desired.DaemonState = "degraded"
-			desired.Health = controlPlaneUnavailableHealth(current, now, sourceErr)
+			desired.Health = controlPlaneUnavailableHealth(current, now, sourceErr, portal)
 			if !controlPlaneUnreachable(sourceErr, i.apiHost()) {
 				// A local step of the listing failed (configuration, credentials, alias validation), not the server.
 				desired.Health = []localapi.HealthItem{healthSince(current, now, localapi.HealthItem{
@@ -422,12 +426,32 @@ func (i *Inventory) apiHost() string {
 	return ""
 }
 
-func controlPlaneUnavailableHealth(current *localapi.Snapshot, now time.Time, cause error) []localapi.HealthItem {
+// captivePortalBlocks probes for a captive portal only when the control plane just failed to answer.
+func (i *Inventory) captivePortalBlocks(ctx context.Context, causes ...error) bool {
+	source, ok := i.source.(interface{ CaptivePortal(context.Context) bool })
+	if !ok {
+		return false
+	}
+	for _, cause := range causes {
+		if cause != nil && controlPlaneUnreachable(cause, i.apiHost()) {
+			probeCtx, cancel := context.WithTimeout(ctx, i.requestTimeout)
+			defer cancel()
+			return source.CaptivePortal(probeCtx)
+		}
+	}
+	return false
+}
+
+func controlPlaneUnavailableHealth(current *localapi.Snapshot, now time.Time, cause error, portal bool) []localapi.HealthItem {
 	item := localapi.HealthItem{
 		Code:     "control_plane_unavailable",
 		Severity: "error",
 		Title:    "Control plane is unavailable",
 		Recovery: "Check network access and Paperboat authentication",
+	}
+	if portal { // same item (the updater and local access gates key on its code), named cause
+		item.Title, item.Recovery = api.CaptivePortalMessage, "Sign in to the network in a browser; Paperboat reconnects on its own once the network is open."
+		return []localapi.HealthItem{healthSince(current, now, item)}
 	}
 	var proxy *httptransport.ProxyError
 	if errors.As(cause, &proxy) && proxy.Failure == httptransport.ProxyUnreachable {

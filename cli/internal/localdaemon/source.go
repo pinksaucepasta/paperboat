@@ -28,6 +28,11 @@ func (s AuthenticatedMachineSource) APIHost() string {
 	return target.Host
 }
 
+// CaptivePortal asks whether a Wi-Fi sign-in page answers in place of the server (api.CaptivePortal).
+func (s AuthenticatedMachineSource) CaptivePortal(ctx context.Context) bool {
+	return api.CaptivePortal(ctx, s.ServerURL, s.HTTPClient)
+}
+
 type AuthenticatedMachineSource struct {
 	ServerURL       string
 	Auth            config.AuthSource

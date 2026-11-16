@@ -96,6 +96,11 @@ func (s snapshotSource) Watch(ctx context.Context, after uint64) (localapi.Snaps
 }
 
 func (s snapshotSource) decorate(snapshot localapi.Snapshot) localapi.Snapshot {
+	if s.captive.Load() {
+		for index := range snapshot.Machines {
+			snapshot.Machines[index].CaptivePortal = "suspected"
+		}
+	}
 	if s.transport != nil {
 		applyNativeTransport(&snapshot, s.transport())
 	}

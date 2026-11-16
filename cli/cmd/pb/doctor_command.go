@@ -461,6 +461,9 @@ func probeDoctorAuthentication(ctx context.Context, command *cobra.Command) doct
 		} else if outdated := doctorUnsupportedVersion(err); outdated != nil {
 			check.Summary = "This Paperboat version is no longer supported by the server."
 			check.Recovery = "Run `pb update` to install a supported release, then run pb doctor again."
+		} else if api.CaptivePortal(ctx, cfg.ServerURL, nil) {
+			check.Summary = api.CaptivePortalMessage + "."
+			check.Recovery = "Complete the network sign-in in a browser, then run pb doctor again."
 		} else {
 			check.Summary = "The Paperboat server did not accept the authenticated health check."
 			check.Recovery = "Check network access and sign in again if needed, then run pb doctor again."
@@ -652,7 +655,7 @@ func doctorCaptivePortalCheck(value string) doctorpkg.Check {
 		check.Summary = "No captive portal was observed."
 	case "suspected":
 		check.Status = doctorpkg.StatusWarning
-		check.Summary = "This network may require captive portal sign-in."
+		check.Summary = api.CaptivePortalMessage + "."
 		check.Recovery = "Complete the network sign-in, then run pb doctor again."
 	default:
 		check.Status = doctorpkg.StatusUnavailable

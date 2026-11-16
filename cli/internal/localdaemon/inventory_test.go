@@ -742,8 +742,8 @@ func TestInventoryReconcileDoesNotInheritTheListingsTimeBudget(t *testing.T) {
 // failure stays local.
 func TestControlPlaneUnavailableNamesAnUnreachableProxy(t *testing.T) {
 	proxy := &url.Error{Op: "Get", URL: "https://api.example.test/v1/me", Err: &httptransport.ProxyError{Failure: httptransport.ProxyUnreachable}}
-	named := controlPlaneUnavailableHealth(nil, time.Unix(1, 0), fmt.Errorf("refresh: %w", proxy))[0]
-	plain := controlPlaneUnavailableHealth(nil, time.Unix(1, 0), &url.Error{Op: "Get", URL: "https://api.example.test/v1/me", Err: context.DeadlineExceeded})[0]
+	named := controlPlaneUnavailableHealth(nil, time.Unix(1, 0), fmt.Errorf("refresh: %w", proxy), false)[0]
+	plain := controlPlaneUnavailableHealth(nil, time.Unix(1, 0), &url.Error{Op: "Get", URL: "https://api.example.test/v1/me", Err: context.DeadlineExceeded}, false)[0]
 	if named.Code != "control_plane_unavailable" || !strings.Contains(named.Title, "proxy") || !strings.Contains(named.Recovery, "PAPERBOAT_HTTPS_PROXY") {
 		t.Fatalf("an unreachable proxy is not named: %+v", named)
 	}
@@ -1162,3 +1162,37 @@ func TestInventoryListingFailureNamesTheControlPlaneOnlyForTheAPI(t *testing.T) 
 		})
 	}
 }
+
+// A Wi-Fi sign-in page blocks the control plane: the same health item (the updater and local-access gates key on
+// its code) names the portal, every machine reads "suspected", and both clear when the server answers again.
+func TestCaptivePortalIsNamedWhileItBlocksTheControlPlaneAndClears(t *testing.T) {
+	up := machineResult{machines: []api.UserMachine{{ID: "machine_1", Alias: "studio"}}}
+	down := machineResult{err: apiDown("/v1/machines")}
+	source := &portalSource{scriptedMachineSource: &scriptedMachineSource{results: []machineResult{up, down, down, up}}}
+	inventory, store := newTestInventory(t, source, time.Now)
+	view := snapshotSource{Inventory: inventory}
+	refresh := func() localapi.Snapshot {
+		_ = inventory.Refresh(context.Background())
+		snapshot, _ := store.Snapshot(context.Background())
+		return view.decorate(snapshot)
+	}
+	refresh()
+	if plain := refresh(); len(plain.Health) != 1 || plain.Health[0].Title != "Control plane is unavailable" || plain.Machines[0].CaptivePortal == "suspected" {
+		t.Fatalf("a plain outage named a portal: %+v", plain)
+	}
+	source.portal = true
+	blocked := refresh()
+	if len(blocked.Health) != 1 || blocked.Health[0].Code != "control_plane_unavailable" || blocked.Health[0].Title != api.CaptivePortalMessage || blocked.Machines[0].CaptivePortal != "suspected" {
+		t.Fatalf("the portal is not named: %+v", blocked)
+	}
+	if cleared := refresh(); len(cleared.Health) != 0 || cleared.Machines[0].CaptivePortal == "suspected" {
+		t.Fatalf("the portal warning stayed after the server answered: %+v", cleared)
+	}
+}
+
+type portalSource struct {
+	*scriptedMachineSource
+	portal bool
+}
+
+func (s *portalSource) CaptivePortal(context.Context) bool { return s.portal }
