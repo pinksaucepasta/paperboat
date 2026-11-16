@@ -636,7 +636,7 @@ func (f *previewCustomDomainsRepository) StopPreviewLeaseV1(_ context.Context, i
 			continue
 		}
 		row.OwnershipState, row.CertificateState, row.ConflictState = "expired", "revoked", "quarantined"
-		row.QuarantineUntil = sql.NullTime{Time: input.Now.Add(previewdomain.Quarantine), Valid: true}
+		row.QuarantineUntil = sql.NullTime{Time: input.Now.Add(previewtunnelstore.DomainQuarantine), Valid: true}
 		row.DeletedAt = sql.NullTime{Time: input.Now, Valid: true}
 		row.Generation++
 		row.UpdatedAt = input.Now
@@ -814,7 +814,7 @@ func (f *previewCustomDomainsRepository) mutateDomain(input previewdomain.Mutati
 	row.UpdatedAt = input.Now
 	row.OwnershipState, row.CertificateState, row.ConflictState = "revoked", "revoked", "quarantined"
 	row.DeletedAt = sql.NullTime{Time: input.Now, Valid: true}
-	row.QuarantineUntil = sql.NullTime{Time: input.Now.Add(previewdomain.Quarantine), Valid: true}
+	row.QuarantineUntil = sql.NullTime{Time: input.Now.Add(previewtunnelstore.DomainQuarantine), Valid: true}
 	phase, state, progress := "ready", "succeeded", int16(100)
 	f.domains[domainKey] = row
 	op := previewCustomDomainOperation(input.OperationID, input.AccountID, input.IdempotencyKey, "preview.domain."+opType, input.DomainID, phase, state, progress, input.Now)
