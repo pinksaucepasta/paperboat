@@ -1,6 +1,7 @@
 "use client"
 
 import { queryOptions } from "@tanstack/react-query"
+import { api, apiAction } from "@/lib/api"
 import { cursorPage } from "@/lib/cursor-pages"
 import { queryKeys } from "@/lib/query-keys"
 
@@ -22,6 +23,10 @@ export type ConfigEnvironment = {
   mode?: "bidirectional" | "pull_only" | "push_only" | "disabled" | string
   repository_name?: string
   repository_id?: string
+  assignment_version?: number
+  consent_state?: string
+  remote_revision?: string
+  adopted_team_id?: string
   automatic_updates: boolean
   managed_path_count: number
   conflicts: ConfigPath[] | null
@@ -171,3 +176,134 @@ export function syncState(environment: ConfigEnvironment): {
       }
   }
 }
+
+const json = { "content-type": "application/json" }
+const post = <T>(path: string, body: unknown) =>
+  api<T>(path, { method: "POST", headers: json, body: JSON.stringify(body) })
+const machinePath = (machineId: string) => `machines/${encodeURIComponent(machineId)}/config-assignment`
+
+/** What the person agrees to before a machine syncs; the sentences are the server's. */
+export type ConfigWarning = {
+  revision: string
+  repository_visibility: string
+  history_retention: string
+  access_consequence: string
+  offline_behavior: string
+  conflict_behavior: string
+  disable_action: string
+}
+export const configWarningQuery = (machineId: string) =>
+  queryOptions({
+    queryKey: ["config-sync", "warning", machineId] as const,
+    queryFn: ({ signal }) => api<ConfigWarning>(`${machinePath(machineId)}/warning?workspace=personal`, { signal }),
+  })
+
+/** The fences (`assignment_version`, `warning_revision`, `remote_revision`) come from the machine's status row. */
+export const acceptConfigConsent = (environment: ConfigEnvironment, warningRevision: string) =>
+  post(`${machinePath(environment.machine_id)}/consent?workspace=personal`, {
+    warning_revision: warningRevision,
+    expected_version: environment.assignment_version,
+  })
+export const approveConfigRevision = (environment: ConfigEnvironment) =>
+  post(`${machinePath(environment.machine_id)}/approve?workspace=personal`, {
+    remote_revision: environment.remote_revision,
+    expected_version: environment.assignment_version,
+  })
+export const removeConfigConsent = (environment: ConfigEnvironment) =>
+  apiAction(
+    `${machinePath(environment.machine_id)}/consent?${new URLSearchParams({
+      workspace: "personal",
+      expected_version: String(environment.assignment_version),
+    })}`,
+    { method: "DELETE" },
+  )
+
+export type ForceAction = "force_pull" | "force_push"
+export const forceWords: Record<ForceAction, string> = { force_pull: "FORCE PULL", force_push: "FORCE PUSH" }
+/** Replaces the machine's files with the repository's (pull) or the repository's with the machine's (push). */
+export const forceConfig = (environment: ConfigEnvironment, action: ForceAction) =>
+  post(`config-sync/environments/${encodeURIComponent(environment.environment_id)}/force?workspace=personal`, {
+    scope: "config",
+    action,
+    confirmation: forceWords[action],
+    expected_remote_revision: environment.remote_revision,
+    expected_assignment_version: environment.assignment_version,
+  })
+
+export type ConfigRepository = { id: string; provider: string; external_ref: string; display_name: string; state: string }
+export const configRepositoriesPageSize = 20
+export const configRepositoriesQuery = (page: number) =>
+  queryOptions({
+    queryKey: ["config-sync", "repositories", page] as const,
+    queryFn: ({ signal }) =>
+      api<{ items: ConfigRepository[] | null; pagination: { total: number } }>(
+        `config-repositories?${new URLSearchParams({
+          workspace: "personal",
+          limit: String(configRepositoriesPageSize),
+          offset: String((page - 1) * configRepositoriesPageSize),
+        })}`,
+        { signal },
+      ),
+    placeholderData: (previous) => previous,
+  })
+export type RepositoryCandidate = { provider: string; external_id: string; display_name: string; default_branch: string }
+/** One page of the GitHub repositories you could connect, by cursor (the list has no total). */
+export const repositoryCandidatesQuery = (cursor: string) =>
+  queryOptions({
+    queryKey: ["config-sync", "candidates", cursor] as const,
+    queryFn: ({ signal }) =>
+      api<{ items: RepositoryCandidate[] | null; next_cursor?: string }>(
+        `config-repositories/candidates?${new URLSearchParams({ workspace: "personal", limit: "20", ...(cursor && { cursor }) })}`,
+        { signal },
+      ),
+  })
+export const connectRepository = (body: {
+  provider: "github" | "git"
+  external_ref: string
+  display_name?: string
+  branch: string
+}) => post<ConfigRepository>("config-repositories?workspace=personal", body)
+export const disconnectRepository = (id: string) =>
+  apiAction(`config-repositories/${encodeURIComponent(id)}?workspace=personal`, { method: "DELETE" })
+
+/** A team's default repository (admins set it) and this account's adoption of it. */
+export type TeamConfigDefault = {
+  team_id: string
+  display_name: string
+  external_repository_id: string
+  branch: string
+  version: number
+}
+export type ConfigAdoption = TeamConfigDefault & { repository_id: string; adopted_version: number; update_pending: boolean }
+export const teamConfigDefaultQuery = (teamId: string) =>
+  queryOptions({
+    queryKey: ["config-sync", "team-default", teamId] as const,
+    queryFn: ({ signal }) =>
+      api<TeamConfigDefault>(`teams/${encodeURIComponent(teamId)}/config-default?workspace=${encodeURIComponent(teamId)}`, {
+        signal,
+      }),
+    retry: false,
+  })
+export const setTeamConfigDefault = (teamId: string, repositoryId: string, expectedVersion: number) =>
+  api<TeamConfigDefault>(`teams/${encodeURIComponent(teamId)}/config-default?workspace=${encodeURIComponent(teamId)}`, {
+    method: "PUT",
+    headers: json,
+    body: JSON.stringify({ repository_id: repositoryId, expected_version: expectedVersion }),
+  })
+export const clearTeamConfigDefault = (teamId: string, expectedVersion: number) =>
+  apiAction(
+    `teams/${encodeURIComponent(teamId)}/config-default?${new URLSearchParams({ workspace: teamId, expected_version: String(expectedVersion) })}`,
+    { method: "DELETE" },
+  )
+export const configAdoptionQuery = queryOptions({
+  queryKey: ["config-sync", "adoption"] as const,
+  queryFn: ({ signal }) => api<ConfigAdoption>("config-sync/team-default-adoption?workspace=personal", { signal }),
+  retry: false,
+})
+export const adoptTeamDefault = (teamId: string, version: number) =>
+  api<ConfigAdoption>(`config-sync/team-default-adoption?workspace=${encodeURIComponent(teamId)}`, {
+    method: "PUT",
+    headers: json,
+    body: JSON.stringify({ team_id: teamId, default_version: version }),
+  })
+export const unadoptTeamDefault = () => apiAction("config-sync/team-default-adoption?workspace=personal", { method: "DELETE" })

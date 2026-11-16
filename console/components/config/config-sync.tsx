@@ -19,6 +19,8 @@ import {
 import { formatBytes } from "@/lib/format"
 import { useLastCount } from "@/lib/last-count"
 import { GitHubConnection } from "@/components/config/github-connection"
+import { ConfigRepositories, TeamConfigDefaults } from "@/components/config/repositories"
+import { SyncActions } from "@/components/config/sync-actions"
 import { SearchField, useListScope } from "@/components/list-toolbar"
 import { Detail } from "@/components/machine-overview"
 import { useCurrentMachine } from "@/components/machine-shell"
@@ -75,6 +77,8 @@ export function ConfigSync({ machine: tabMachine }: { machine?: Machine }) {
   return (
     <div className="flex flex-col gap-10">
       <GitHubConnection />
+      <ConfigRepositories />
+      <TeamConfigDefaults />
       {status.isPending || status.data.total || q || idle.data?.total ? (
         <AllMachines
           loading={status.isPending}
@@ -326,6 +330,8 @@ function MachineSync({ environment }: { environment: ConfigEnvironment }) {
           </Detail>
         </dl>
       </section>
+
+      <SyncActions environment={environment} />
 
       {conflicts.length > 0 && (
         <PathList
