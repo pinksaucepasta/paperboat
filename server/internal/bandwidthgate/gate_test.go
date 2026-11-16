@@ -81,3 +81,47 @@ func TestFullCacheEvictsOnlyOneEntry(t *testing.T) {
 		t.Fatalf("cache holds %d entries, denied kept: %v", len(g.cache), g.cache["denied"].denied)
 	}
 }
+
+// A full cache of recent denials keeps every one of them: a non-denied answer goes uncached, and a new denial
+// replaces only the one confirmed longest ago.
+func TestFullCacheOfDenialsEvictsNoneForAnAllowedAccount(t *testing.T) {
+	g := &Gate{}
+	now := time.Now()
+	for i := 0; i < cacheMax; i++ {
+		g.put(fmt.Sprint(i), entry{denied: true, until: now.Add(time.Hour), deniedAt: now.Add(time.Duration(i) * time.Millisecond)}, now)
+	}
+	g.put("allowed", entry{until: now.Add(time.Hour)}, now)
+	if _, ok := g.cache["allowed"]; ok || len(g.cache) != cacheMax {
+		t.Fatalf("an allowed account displaced a denial: cached=%v size=%d", ok, len(g.cache))
+	}
+	for i := 0; i < cacheMax; i++ {
+		if !g.cache[fmt.Sprint(i)].denied {
+			t.Fatalf("denial %d was evicted", i)
+		}
+	}
+	g.put("newly_denied", entry{denied: true, until: now.Add(time.Hour), deniedAt: now.Add(time.Hour)}, now)
+	if _, ok := g.cache["0"]; ok || !g.cache["newly_denied"].denied || len(g.cache) != cacheMax {
+		t.Fatal("a new denial did not replace the denial confirmed longest ago")
+	}
+}
+
+// Each account of a batch gets its own lookup timeout: with 64 fresh accounts and 16 lookups at a time, the later
+// waves are looked up in full, not failed open because the earlier waves used up one shared deadline.
+func TestDeniedAmongGivesEveryAccountItsOwnTimeout(t *testing.T) {
+	g := &Gate{timeout: 150 * time.Millisecond}
+	g.lookup = func(ctx context.Context, _ string, _ time.Time) (bool, error) {
+		select {
+		case <-time.After(100 * time.Millisecond):
+			return true, nil
+		case <-ctx.Done():
+			return false, ctx.Err()
+		}
+	}
+	accounts := make([]string, 64)
+	for i := range accounts {
+		accounts[i] = fmt.Sprintf("usr_%02d", i)
+	}
+	if got := g.DeniedAmong(context.Background(), accounts, time.Now(), 64); len(got) != 64 {
+		t.Fatalf("%d of 64 over-allowance accounts denied: the rest failed open on a shared deadline", len(got))
+	}
+}

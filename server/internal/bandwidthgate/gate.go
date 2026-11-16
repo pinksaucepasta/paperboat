@@ -99,8 +99,9 @@ func (g *Gate) Denied(ctx context.Context, account string, at time.Time) bool {
 	return denied
 }
 
-// put stores an entry with g.mu held. A full cache drops expired entries, then entries never
-// denied, then any entry: it is never wiped, so a recent denial survives other accounts' churn.
+// put stores an entry with g.mu held. A full cache drops expired entries, then entries without a recent denial. If
+// only recent denials remain, an answer that is not a denial goes uncached (the next call looks it up again) rather
+// than reopening another account, and a new denial replaces the one confirmed longest ago. It is never wiped.
 func (g *Gate) put(account string, e entry, now time.Time) {
 	if g.cache == nil {
 		g.cache = make(map[string]entry)
@@ -109,7 +110,6 @@ func (g *Gate) put(account string, e entry, now time.Time) {
 		for _, pass := range []func(entry) bool{
 			func(o entry) bool { return !now.Before(o.until) && now.Sub(o.deniedAt) >= knownDeniedHold },
 			func(o entry) bool { return now.Sub(o.deniedAt) >= knownDeniedHold },
-			func(entry) bool { return true },
 		} {
 			for k, o := range g.cache {
 				if pass(o) {
@@ -120,6 +120,18 @@ func (g *Gate) put(account string, e entry, now time.Time) {
 			if len(g.cache) < cacheMax {
 				break
 			}
+		}
+		if len(g.cache) >= cacheMax {
+			if !e.denied {
+				return
+			}
+			oldest := ""
+			for k, o := range g.cache {
+				if oldest == "" || o.deniedAt.Before(g.cache[oldest].deniedAt) {
+					oldest = k
+				}
+			}
+			delete(g.cache, oldest)
 		}
 	}
 	g.cache[account] = e
@@ -158,9 +170,11 @@ func (g *Gate) refreshInBackground(account string, at time.Time) {
 }
 
 // DeniedAmong answers for many accounts at once (a relay's connected accounts). Cached answers
-// are free; at most maxFresh uncached accounts are looked up, concurrently (16 at a time) and
-// within one overall deadline, and any account not answered in time counts as not denied this
-// round (it is looked up on a later one). The result lists the denied accounts, sorted.
+// are free; at most maxFresh uncached accounts are looked up, concurrently (16 at a time), each
+// under its own lookup timeout (Denied's), so an account later in the batch is never failed open
+// by the time earlier ones took; the call lasts at most maxFresh/16 timeouts. An account whose
+// lookup fails counts as not denied this round (it is looked up on a later one). The result lists
+// the denied accounts, sorted.
 func (g *Gate) DeniedAmong(ctx context.Context, accounts []string, at time.Time, maxFresh int) []string {
 	if g == nil || len(accounts) == 0 {
 		return nil
@@ -176,8 +190,6 @@ func (g *Gate) DeniedAmong(ctx context.Context, accounts []string, at time.Time,
 		}
 	}
 	if len(fresh) > 0 {
-		ctx, cancel := context.WithTimeout(ctx, 2*g.timeout)
-		defer cancel()
 		var mu sync.Mutex
 		var wg sync.WaitGroup
 		slots := make(chan struct{}, 16)
