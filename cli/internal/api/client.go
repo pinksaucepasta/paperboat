@@ -118,6 +118,19 @@ func machineAuthorizedRequest(method, path string) bool {
 	return false
 }
 
+type hostProofKey struct{}
+
+// WithHostProof marks a tunnel mutation as this machine's own: the request carries the machine proof, and the
+// server allows it only for a tunnel this machine created (a recipe machine has no account session for it).
+func WithHostProof(ctx context.Context) context.Context {
+	return context.WithValue(ctx, hostProofKey{}, true)
+}
+
+func hostProofRequested(ctx context.Context) bool { v, _ := ctx.Value(hostProofKey{}).(bool); return v }
+
+// SourceMachineID is the enrolled machine this client signs machine proofs for, or "".
+func (c *Client) SourceMachineID() string { return c.sourceMachineID }
+
 func (c *Client) SetSourceMachineID(machineID string) {
 	c.sourceMachineID = strings.TrimSpace(machineID)
 }

@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"path"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -53,7 +54,17 @@ func productionTunnelClientForCommand(command *cobra.Command) (*api.Client, erro
 	if err != nil {
 		return nil, err
 	}
-	if command == nil || command.Name() != "create" {
+	if command == nil {
+		return client, nil
+	}
+	if command.Name() != "create" {
+		// A tunnel this machine created is changed with its machine proof (tunnelHostProof): a recipe machine
+		// has no account session for it. Elsewhere (no enrollment) the account session is used as before.
+		if slices.Contains([]string{"delete", "pause", "resume", "rename"}, command.Name()) {
+			if stateRoot, err := previewRuntimeStateRoot(); err == nil {
+				attachTunnelMachineAuth(command, client, stateRoot)
+			}
+		}
 		return client, nil
 	}
 	stateRoot, err := previewRuntimeStateRoot()
@@ -329,4 +340,38 @@ func walkJSONValue(decoder *json.Decoder, depth int) error {
 		return errors.New("diagnostics JSON has an unexpected closing delimiter")
 	}
 	return nil
+}
+
+// attachTunnelMachineAuth gives client this enrolled machine's renewable credential when the machine is enrolled
+// on the configured server; otherwise it leaves the client as it is.
+func attachTunnelMachineAuth(command *cobra.Command, client *api.Client, stateRoot string) {
+	store, err := runtimeIdentityStore()
+	if err != nil {
+		return
+	}
+	registration, err := store.Registration()
+	if err != nil || registration.InstallationGeneration < 1 {
+		return
+	}
+	configured, err := configuredTunnelServer(command)
+	if err != nil {
+		return
+	}
+	if registered, err := config.NormalizeServerURL(registration.ServerURL); err != nil || registered != configured {
+		return
+	}
+	auth, err := machinecontrol.NewSource(machinecontrol.Config{ControlURL: configured, StateRoot: stateRoot})
+	if err != nil {
+		return
+	}
+	client.SetSourceMachineID(registration.MachineID)
+	client.SetMachineAuth(auth)
+}
+
+// tunnelHostProof marks the mutation of a tunnel this machine created to carry its machine proof.
+func tunnelHostProof(ctx context.Context, client *api.Client, tunnel api.Tunnel) context.Context {
+	if own := client.SourceMachineID(); own != "" && tunnel.CreatedByHostID == own {
+		return api.WithHostProof(ctx)
+	}
+	return ctx
 }

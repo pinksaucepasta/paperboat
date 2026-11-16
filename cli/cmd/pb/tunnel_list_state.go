@@ -122,7 +122,7 @@ func tunnelStateCommand(action string) *cobra.Command {
 			return err
 		}
 		out, err := retryTunnelRead(ctx, func() (api.TunnelMutation, error) {
-			return client.ChangeTunnelStateV1(ctx, tunnelID, action, current.ETag, key)
+			return client.ChangeTunnelStateV1(tunnelHostProof(ctx, client, current), tunnelID, action, current.ETag, key)
 		})
 		if err != nil {
 			return err

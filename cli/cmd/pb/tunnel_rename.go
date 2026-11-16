@@ -29,7 +29,7 @@ func tunnelRenameCommand() *cobra.Command {
 			return err
 		}
 		out, err := retryTunnelRead(ctx, func() (api.TunnelMutation, error) {
-			return client.PatchTunnelV1(ctx, id, current.ETag, key, api.TunnelPatchInput{Name: &args[1]})
+			return client.PatchTunnelV1(tunnelHostProof(ctx, client, current), id, current.ETag, key, api.TunnelPatchInput{Name: &args[1]})
 		})
 		if err != nil {
 			return err

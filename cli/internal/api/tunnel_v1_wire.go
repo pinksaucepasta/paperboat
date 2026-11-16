@@ -278,7 +278,7 @@ func (c *Client) doTunnelRequest(ctx context.Context, method, requestPath string
 		}
 	}
 	machineToken := ""
-	if c.machineAuth != nil && machineAuthorizedRequest(method, req.URL.Path) {
+	if c.machineAuth != nil && (machineAuthorizedRequest(method, req.URL.Path) || hostProofRequested(ctx)) {
 		token, tokenErr := c.machineAuth.Token(ctx)
 		machineToken = token
 		if tokenErr != nil {

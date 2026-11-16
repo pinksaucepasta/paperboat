@@ -629,3 +629,26 @@ func TestTunnelPrivateAccessDiscoveryShowsClockSkewGuidance(t *testing.T) {
 		t.Fatalf("clock skew error = %#v (%v)", apiErr, err)
 	}
 }
+
+// A recipe machine deletes the tunnel it created with its machine proof (it has no account session for it);
+// without the mark the account session is used, so a tunnel of another machine stays the account's to manage.
+func TestTunnelDeleteCarriesTheMachineProofOnlyForThisMachinesTunnel(t *testing.T) {
+	var auths []string
+	tunnel := validTunnelTestValue()
+	client := tunnelTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodDelete {
+			auths = append(auths, r.Header.Get("Authorization"))
+		}
+		writeTunnelTestData(t, w, TunnelMutation{Tunnel: tunnel})
+	})
+	client.SetMachineAuth(machineAuthTestSource{})
+	if _, err := client.ChangeTunnelStateV1(context.Background(), "tun_1", "delete", tunnel.ETag, "idem_1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.ChangeTunnelStateV1(WithHostProof(context.Background()), "tun_1", "delete", tunnel.ETag, "idem_2"); err != nil {
+		t.Fatal(err)
+	}
+	if len(auths) != 2 || auths[0] != "Bearer client-token" || auths[1] == "Bearer client-token" || auths[1] == "" {
+		t.Fatalf("authorization = %q", auths)
+	}
+}
