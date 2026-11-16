@@ -202,7 +202,9 @@ func runAccessMachine(command *cobra.Command, args []string) error {
 }
 
 // A just-started service is reachable only once the daemon publishes its forward. Wait on the
-// daemon's own listing of the machine; a machine it does not list is offline or not approved.
+// daemon's own listing of the machine. The server has already listed it, so a machine the daemon does not
+// list yet (a grant made a moment ago, before its next inventory refresh) is waited for like a port;
+// still unlisted at the deadline, it is offline or not approved.
 func waitForMachineService(ctx context.Context, locator machineLocator, machine string, port int) error {
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(config.PeerConnectTimeoutMilliseconds)*time.Millisecond)
 	defer cancel()
@@ -210,11 +212,11 @@ func waitForMachineService(ctx context.Context, locator machineLocator, machine 
 	defer ticker.Stop()
 	for {
 		address, err := locator.ResolveMachine(ctx, machine)
+		unknown := status.Code(err) == codes.NotFound
 		switch {
 		case status.Code(err) == codes.PermissionDenied:
 			return daemoncmd.DaemonRequestFailure(err)
-		case status.Code(err) == codes.NotFound:
-			return fmt.Errorf("%w: %q", resolver.ErrMachineNotFound, machine)
+		case unknown:
 		case err != nil && ctx.Err() == nil && status.Code(err) != codes.DeadlineExceeded:
 			return &accessMachineStepError{step: "reading the machine from the local Paperboat service", action: "Run `pb status` and `pb doctor`, then retry.", cause: err}
 		case err == nil && slices.Contains(address.GetForwardedPorts(), int32(port)):
@@ -222,6 +224,9 @@ func waitForMachineService(ctx context.Context, locator machineLocator, machine 
 		}
 		select {
 		case <-ctx.Done():
+			if unknown {
+				return fmt.Errorf("%w: %q", resolver.ErrMachineNotFound, machine)
+			}
 			return &accessMachineStepError{step: fmt.Sprintf("waiting for the machine to offer port %d", port), action: "Start the service on that machine and check automatic discovery with `pb doctor`.", cause: ctx.Err()}
 		case <-ticker.C:
 		}

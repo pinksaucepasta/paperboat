@@ -267,13 +267,28 @@ func TestMachineServiceWaitReturnsOncetheDaemonPublishesTheExactPort(t *testing.
 	}
 }
 
+// A team grant made a moment ago: the server lists the target but the daemon's inventory has not refreshed yet, so
+// its first answer is NotFound. pb access waits for the daemon instead of failing (X-19 L>W).
+func TestMachineServiceWaitWaitsForAMachineTheDaemonHasNotListedYet(t *testing.T) {
+	locator := &fakeMachineLocator{answers: []func() (*daemonpb.MachineAddress, error){
+		func() (*daemonpb.MachineAddress, error) {
+			return nil, status.Error(codes.NotFound, "machine not found")
+		},
+		machineAnswer(4321)}}
+	if err := waitForMachineService(t.Context(), locator, "machine_target", 4321); err != nil || locator.calls != 2 {
+		t.Fatalf("calls=%d err=%v, want the second answer to open access", locator.calls, err)
+	}
+}
+
 func TestMachineServiceWaitStopsOnUnknownMachineOrCancellation(t *testing.T) {
 	unknown := &fakeMachineLocator{answers: []func() (*daemonpb.MachineAddress, error){
 		func() (*daemonpb.MachineAddress, error) {
 			return nil, status.Error(codes.NotFound, "machine not found")
 		}}}
-	if err := waitForMachineService(t.Context(), unknown, "machine_target", 4321); !errors.Is(err, resolver.ErrMachineNotFound) || unknown.calls != 1 {
-		t.Fatalf("unknown machine: calls=%d err=%v", unknown.calls, err)
+	short, stop := context.WithTimeout(t.Context(), 1500*time.Millisecond)
+	defer stop()
+	if err := waitForMachineService(short, unknown, "machine_target", 4321); !errors.Is(err, resolver.ErrMachineNotFound) || unknown.calls < 2 {
+		t.Fatalf("unknown machine: calls=%d err=%v, want polled until the deadline", unknown.calls, err)
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	locator := &fakeMachineLocator{answers: []func() (*daemonpb.MachineAddress, error){func() (*daemonpb.MachineAddress, error) {
