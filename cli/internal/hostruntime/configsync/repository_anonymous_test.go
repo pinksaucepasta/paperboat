@@ -3,13 +3,17 @@ package configsync
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"testing"
 )
 
 // With no saved credential profile an HTTPS repository is read anonymously (a public repository named by a
 // recipe's [config] needs no per-machine setup); plain HTTP and SSH still need a saved profile.
 func TestHTTPSWithoutAProfileIsReadAnonymously(t *testing.T) {
-	root := t.TempDir()
+	root, err := filepath.EvalSymlinks(t.TempDir()) // macOS: /var is a symlink, and the credential root must be canonical
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := EnsureRepositoryCredentialRoot(root); err != nil {
 		t.Fatal(err)
 	}

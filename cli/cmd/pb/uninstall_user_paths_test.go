@@ -11,6 +11,7 @@ import (
 func TestUninstallRemovesTheDaemonLogFolder(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home) // Windows: os.UserHomeDir reads USERPROFILE
 	command := &cobra.Command{}
 	command.Flags().String("config", "", "")
 	command.Flags().String("state-root", "", "")
