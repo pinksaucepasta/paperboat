@@ -138,6 +138,8 @@ Restart=on-failure
 RestartSec=1
 TimeoutStopSec=10
 UMask=0077
+FileDescriptorStoreMax=4096
+FileDescriptorStorePreserve=yes
 
 [Install]
 WantedBy=multi-user.target
@@ -151,7 +153,7 @@ WantedBy=multi-user.target
 			return err
 		}
 	}
-	for _, args := range [][]string{{"daemon-reload"}, {"disable", "paperboat-machineguard.service"}, {"enable", "paperboat-machineguard-deny.service", "paperboat-machineguard.service"}, {"start", "paperboat-machineguard-deny.service"}, {"restart", "paperboat-machineguard.service"}} {
+	for _, args := range guardInstallCommands {
 		if args[0] == "restart" {
 			candidateStarted = true
 		}
@@ -161,6 +163,10 @@ WantedBy=multi-user.target
 	}
 	return trustErr
 }
+
+// guardInstallCommands never disables the guard unit: that empties systemd's descriptor store, and with it the
+// listeners the replaced guard hands to the next one (lease_handoff_linux.go).
+var guardInstallCommands = [][]string{{"daemon-reload"}, {"enable", "paperboat-machineguard-deny.service", "paperboat-machineguard.service"}, {"start", "paperboat-machineguard-deny.service"}, {"restart", "paperboat-machineguard.service"}}
 
 const guardUnitMarker = "# Managed by Paperboat machineguard v1\n"
 

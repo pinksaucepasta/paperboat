@@ -41,7 +41,7 @@ type guardedLease struct {
 	hostname, ip string
 	port         int
 	uid          string
-	owner        controlConn
+	owner        controlConn // nil: inherited from the previous guard process, until its daemon re-acquires it
 	listener     net.Listener
 }
 type guardServer struct {
@@ -114,6 +114,9 @@ func Serve(ctx context.Context, cfg Config) (resultErr error) {
 		g.reserved.Claims = map[string]claim{}
 	}
 	g.claims = &claimBook{Claims: g.reserved.Claims}
+	for _, lease := range inheritedLeases() {
+		g.leases[net.JoinHostPort(lease.ip, strconv.Itoa(lease.port))] = lease
+	}
 	defer retirePlatform(cfg)
 	defer g.startPreviewPAC(ctx)()
 	if err = g.applyRules(ctx); err != nil {
@@ -135,6 +138,9 @@ func Serve(ctx context.Context, cfg Config) (resultErr error) {
 		return err
 	}
 	defer func() { resultErr = errors.Join(resultErr, listener.Close(), g.closeOwned()) }()
+	if len(g.leases) > 0 {
+		defer time.AfterFunc(leaseAdoptionWindow, g.releaseUnclaimed).Stop()
+	}
 	acceptErrors := make(chan error, 1)
 	go func() {
 		for {
@@ -167,14 +173,50 @@ func Serve(ctx context.Context, cfg Config) (resultErr error) {
 	return err
 }
 
+// leaseAdoptionWindow is how long an inherited lease waits for its daemon to re-acquire it.
+var leaseAdoptionWindow = time.Minute
+
+// releaseUnclaimed closes the inherited leases no daemon re-acquired (the machine left, or its daemon is gone).
+func (g *guardServer) releaseUnclaimed() {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.closing {
+		return
+	}
+	changed := false
+	for key, lease := range g.leases {
+		if lease.owner == nil {
+			delete(g.leases, key)
+			forgetLease(lease)
+			if err := shutdownListener(lease.listener); err != nil {
+				g.fail(err)
+			}
+			changed = true
+		}
+	}
+	if changed {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := g.applyRules(ctx); err != nil {
+			g.fail(err)
+		}
+	}
+}
+
 func (g *guardServer) closeOwned() error {
 	g.mu.Lock()
 	g.closing = true
 	var closeErr error
-	for _, lease := range g.leases {
+	kept := map[string]*guardedLease{}
+	for key, lease := range g.leases {
+		if preservable(lease) {
+			// Left open and in the kernel's rules: the next guard process inherits the socket.
+			kept[key] = lease
+			continue
+		}
 		closeErr = errors.Join(closeErr, shutdownListener(lease.listener))
 	}
-	g.leases = map[string]*guardedLease{}
+	g.leases = kept
 	g.names = map[controlConn]map[string]string{}
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	closeErr = errors.Join(closeErr, g.applyRules(shutdownCtx))
@@ -382,8 +424,12 @@ func (g *guardServer) handle(ctx context.Context, conn controlConn, uid string, 
 				return nil, errors.New("machine name conflicts with an active browser alias")
 			}
 		}
-		if _, exists := g.leases[key]; exists {
-			return nil, listenerRefusal{reason: "protected listener is already owned by another connection"}
+		if lease, exists := g.leases[key]; exists {
+			if lease.owner != nil || lease.uid != uid || lease.hostname != in.Hostname {
+				return nil, listenerRefusal{reason: "protected listener is already owned by another connection"}
+			}
+			lease.owner = conn // the previous guard's socket, still bound and in the rules
+			return lease.listener, nil
 		}
 		if err := g.reserveName(uid, in.Hostname); err != nil {
 			return nil, err
@@ -395,7 +441,10 @@ func (g *guardServer) handle(ctx context.Context, conn controlConn, uid string, 
 		if err != nil {
 			return nil, fmt.Errorf("create protected listener: %w", err)
 		}
-		g.leases[key] = &guardedLease{hostname: in.Hostname, ip: in.IP, port: in.Port, uid: uid, owner: conn, listener: listener}
+		lease := &guardedLease{hostname: in.Hostname, ip: in.IP, port: in.Port, uid: uid, owner: conn, listener: listener}
+		g.leases[key] = lease
+		// shortcut: a lease that cannot be stored still serves; it only is not kept across a guard replacement.
+		_ = storeLease(lease)
 		g.policyPending = true
 		return listener, nil
 	case "apply":
@@ -416,6 +465,7 @@ func (g *guardServer) handle(ctx context.Context, conn controlConn, uid string, 
 		}
 
 		delete(g.leases, key)
+		forgetLease(lease)
 		g.removeUnservedNames(conn)
 		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
@@ -522,7 +572,11 @@ func (g *guardServer) withdraw(ctx context.Context, conn controlConn) {
 	var retired []net.Listener
 	for key, lease := range g.leases {
 		if lease.owner == conn {
+			if g.closing && preservable(lease) {
+				continue // the guard is being replaced: the socket outlives its connection
+			}
 			delete(g.leases, key)
+			forgetLease(lease)
 			if err := shutdownListener(lease.listener); err != nil {
 				g.fail(err)
 			}
