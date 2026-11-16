@@ -1086,11 +1086,34 @@ func TestSelfhostTunnelCreateBootstrapsCustomDomainOnPostgres(t *testing.T) {
 	if _, err := f.database.SQL().ExecContext(ctx, `UPDATE paperboat.selfhost_pool_policies SET installation_ids=ARRAY[$2] WHERE scope_kind='account' AND scope_id=$1`, account, installation); err != nil {
 		t.Fatal(err)
 	}
+	// A verified wildcard alone gives the route no URL: the tunnel still needs a custom domain.
+	wildcard := "*.bootstrap-" + testutil.EndpointLabel(created.Tunnel.StableEndpointID) + ".example.test"
+	if _, err := f.database.SQL().ExecContext(ctx, `INSERT INTO paperboat.tunnel_domains(id,account_id,tunnel_id,route_id,hostname,match_type,ownership_challenge_reference,ownership_state,dns_target,certificate_strategy,certificate_state,caa_state,conflict_state) VALUES($1,$2,$3,$4,$5,'one_label_wildcard','dns:bootstrap-wildcard','verified','140.245.11.41','managed','ready','ready','clear')`, "dom_bootstrap_wild_"+f.suffix, account, created.Tunnel.ID, newRouteID(created.Tunnel.ID), wildcard); err != nil {
+		t.Fatal(err)
+	}
+	wildOnly, err := f.repository.Get(ctx, account, created.Tunnel.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if wildOnly.StableEndpoint != "" || wildOnly.SummaryCode != "custom_domain_required" {
+		t.Fatalf("wildcard-only selfhost tunnel = %+v", wildOnly)
+	}
 	hostname := "bootstrap-" + testutil.EndpointLabel(created.Tunnel.StableEndpointID) + ".example.test"
-	if _, err := f.database.SQL().ExecContext(ctx, `INSERT INTO paperboat.tunnel_domains(id,account_id,tunnel_id,route_id,hostname,match_type,ownership_challenge_reference,ownership_state,dns_target,certificate_strategy,certificate_state,caa_state,conflict_state) VALUES($1,$2,$3,$4,$5,'exact','dns:bootstrap','verified','140.245.11.41','managed','ready','ready','clear')`, "dom_bootstrap_"+f.suffix, account, created.Tunnel.ID, newRouteID(created.Tunnel.ID), hostname); err != nil {
+	if _, err := f.database.SQL().ExecContext(ctx, `INSERT INTO paperboat.tunnel_domains(id,account_id,tunnel_id,route_id,hostname,match_type,ownership_challenge_reference,ownership_state,dns_target,certificate_strategy,certificate_state,caa_state,conflict_state) VALUES($1,$2,$3,$4,$5,'exact','dns:bootstrap','verified','140.245.11.41','managed','issuing','ready','clear')`, "dom_bootstrap_"+f.suffix, account, created.Tunnel.ID, newRouteID(created.Tunnel.ID), hostname); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := f.database.SQL().ExecContext(ctx, `UPDATE paperboat.tunnel_domains SET expected_records=$2::jsonb WHERE id=$1`, "dom_bootstrap_"+f.suffix, fmt.Sprintf(`[{"name":%q,"type":"A","value":"140.245.11.41","ttl":300}]`, hostname)); err != nil {
+		t.Fatal(err)
+	}
+	// The custom URL stays hidden until its certificate is ready, so it never fails TLS.
+	issuing, err := f.repository.Get(ctx, account, created.Tunnel.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if issuing.StableEndpoint != "" {
+		t.Fatalf("selfhost endpoint shown before its certificate is ready: %q", issuing.StableEndpoint)
+	}
+	if _, err := f.database.SQL().ExecContext(ctx, `UPDATE paperboat.tunnel_domains SET certificate_state='ready',certificate_reference='tcert_bootstrap' WHERE id=$1`, "dom_bootstrap_"+f.suffix); err != nil {
 		t.Fatal(err)
 	}
 	configured, err := f.repository.Get(ctx, account, created.Tunnel.ID)
