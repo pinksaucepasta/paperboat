@@ -29,6 +29,7 @@ type ManagedSSHConfig struct {
 }
 
 type DaemonConfig struct {
+	MachineEvents    func(context.Context, localapi.MachineEventPush) error
 	Paths            localapi.Paths
 	Source           MachineSource
 	OwnerUID         int

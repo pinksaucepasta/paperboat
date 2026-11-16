@@ -389,41 +389,37 @@ func localDaemonCommand() *cobra.Command {
 				go newRelayLatencyReporter(cfg.ServerURL, source.SourceMachineID, controlTransport, func(ctx context.Context) (config.Credential, error) {
 					return authSource.WithContext(ctx).Credential()
 				}, peerTunnel.NativeRelayCandidates).Run(ctx)
-				// The server tells the daemon when the machine list changed, so inventory refreshes at
-				// once; without a machine id (never enrolled) or while the wait fails it polls as before.
-				var inventoryEvents, accessEvents, servicesEvents, recipeEvents *machineevents.Subscription
-				if source.SourceMachineID != "" {
-					events, eventsErr := machineevents.NewWithWaiter(machineevents.UserWaiter(func(waitCtx context.Context, known map[string]int64) (map[string]int64, error) {
-						credential, credentialErr := authSource.WithContext(waitCtx).Credential()
-						if credentialErr != nil {
-							return nil, credentialErr
-						}
-						return api.New(cfg.ServerURL, credential, &http.Client{Transport: controlTransport}).WaitMachineEvents(waitCtx, source.SourceMachineID, known)
-					}), 0)
-					if eventsErr != nil {
-						return eventsErr
+				// A paired worker forwards invalidations over the existing local socket.
+				// User-only installations retain the credential wait; no machine id polls.
+				events, eventsErr := newDaemonMachineEvents(source.SourceMachineID, daemonHasWorker(), machineevents.UserWaiter(func(waitCtx context.Context, known map[string]int64) (map[string]int64, error) {
+					credential, err := authSource.WithContext(waitCtx).Credential()
+					if err != nil {
+						return nil, err
 					}
-					inventoryEvents = events.Subscribe(machineevents.TopicInventory)
-					accessEvents = events.Subscribe(machineevents.TopicMachineAccess)
-					servicesEvents = events.Subscribe(machineevents.TopicMachineServices)
-					recipeEvents = events.Subscribe(machineevents.TopicRecipe)
-					// A newly paired machine enters the mesh when it first comes online, which moves only inventory.
-					networkEvents := events.Subscribe(machineevents.TopicPeerNetwork, machineevents.TopicInventory)
-					go func() {
-						for {
-							select {
-							case <-ctx.Done():
-								return
-							case <-networkEvents.Changed():
-								peerTunnel.RefreshNetwork()
-							}
-						}
-					}()
-					if eventsErr = events.Start(ctx); eventsErr != nil {
-						return eventsErr
-					}
-					defer func() { _ = events.Shutdown(context.WithoutCancel(ctx)) }()
+					return api.New(cfg.ServerURL, credential, &http.Client{Transport: controlTransport}).WaitMachineEvents(waitCtx, source.SourceMachineID, known)
+				}))
+				if eventsErr != nil {
+					return eventsErr
 				}
+				inventoryEvents := events.hub.Subscribe(machineevents.TopicInventory)
+				accessEvents := events.hub.Subscribe(machineevents.TopicMachineAccess)
+				servicesEvents := events.hub.Subscribe(machineevents.TopicMachineServices)
+				recipeEvents := events.hub.Subscribe(machineevents.TopicRecipe)
+				networkEvents := events.hub.Subscribe(machineevents.TopicPeerNetwork, machineevents.TopicInventory)
+				go func() {
+					for {
+						select {
+						case <-ctx.Done():
+							return
+						case <-networkEvents.Changed():
+							peerTunnel.RefreshNetwork()
+						}
+					}
+				}()
+				if err := events.start(ctx); err != nil {
+					return err
+				}
+				defer events.stop(context.WithoutCancel(ctx))
 				go refreshMachineServices(ctx, steps, coordinator, machineServicesFetcher(cfg.ServerURL, authSource, controlTransport), servicesEvents.Changed(), coordinator.ServicesNudge())
 				// Only a machine paired from a recipe has a recipe key file; no file, no recipe loop or step.
 				if _, isRecipe, _ := recipekey.Load(cfg.Path()); isRecipe && source.SourceMachineID != "" {
@@ -434,7 +430,7 @@ func localDaemonCommand() *cobra.Command {
 				}
 				teamShared := &teamSharedMachines{}
 				return runLocalDaemon(ctx, localdaemon.DaemonConfig{
-					InventoryEvents: inventoryEvents, AccessEvents: accessEvents, LocalAccessChanged: coordinator.LocalAccessChanged(), Steps: steps,
+					MachineEvents: events.receive, InventoryEvents: inventoryEvents, AccessEvents: accessEvents, LocalAccessChanged: coordinator.LocalAccessChanged(), Steps: steps,
 					CredentialsEnded: func() bool {
 						_, err := authSource.Credential()
 						ended := localdaemon.AuthenticationRequired(err)

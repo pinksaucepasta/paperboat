@@ -117,6 +117,7 @@ type ServerConfig struct {
 	// /v1/connections also reports them (an update ends those too); the Unix updater service asks the worker itself. A
 	// worker that cannot answer adds zero. Optional.
 	WorkerOpenSSH func(context.Context) (int, error)
+	MachineEvents func(context.Context, MachineEventPush) error
 }
 
 type Server struct {
@@ -250,6 +251,14 @@ func (s *Server) handler() http.Handler {
 		writer.Header().Set("X-Paperboat-Request-ID", requestID)
 		writer.Header().Set("Cache-Control", "no-store")
 		peer, ok := request.Context().Value(peerContextKey{}).(Peer)
+		if request.URL.Path == "/v1/machine-events" {
+			if !ok || !s.ownsPeer(peer) {
+				writeError(writer, http.StatusForbidden, requestID, "permission_denied", "local API access denied")
+				return
+			}
+			s.machineEvents(writer, request, requestID)
+			return
+		}
 		if request.URL.Path == "/v1/vault-custody" {
 			if !ok || !s.ownsPeer(peer) {
 				writeError(writer, http.StatusForbidden, requestID, "permission_denied", "local API access denied")

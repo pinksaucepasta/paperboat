@@ -36,3 +36,9 @@ func (h *Hub) Push(topics []Topic, healthy bool) {
 		}
 	}
 }
+
+// Generations snapshots the worker's observed topic cursors for local fan-out.
+func (h *Hub) Generations() map[Topic]int64 {
+	known, _ := h.snapshot()
+	return known
+}

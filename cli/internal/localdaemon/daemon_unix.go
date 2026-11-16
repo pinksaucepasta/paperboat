@@ -24,6 +24,7 @@ import (
 )
 
 type DaemonConfig struct {
+	MachineEvents    func(context.Context, localapi.MachineEventPush) error
 	Paths            localapi.Paths
 	Source           MachineSource
 	OwnerUID         int
@@ -176,6 +177,7 @@ func Run(ctx context.Context, config DaemonConfig) (runErr error) {
 	vaultCustody := localapi.NewVaultCustodyStore()
 	defer func() { runErr = daemonCleanupFailure(runErr, vaultCustody.Close()) }()
 	server, err := localapi.NewServer(localapi.ServerConfig{
+		MachineEvents: config.MachineEvents,
 		RecordCause: func(operation, supportReference string, causeErr error) {
 			_ = causetext.Record(filepath.Join(config.Paths.StateRoot, "diagnostics"), "last-daemon-failure.txt", operation, supportReference, causeErr)
 		},
