@@ -1331,6 +1331,37 @@ func TestAdmittedPreviewWithNoRouteMatchIsReconnectingNotNotFound(t *testing.T) 
 	}
 }
 
+// A preview whose owner machine sleeps keeps its lease: with no carrier its URL answers the branded "machine offline"
+// page (503), not a 404 or a 502, and a name that is not listed stays a 404.
+func TestOwnerOfflinePreviewWithNoCarrierAnswersTheOfflinePage(t *testing.T) {
+	registry, err := NewDataCarrierPreviewRegistry(DataCarrierPreviewRegistryConfig{BaseDomain: "runtime.example.test", ProcessEpoch: "edge_epoch_1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer registry.Close()
+	policy, err := New(Config{PreviewBaseDomain: "preview.example.test", TunnelBaseDomain: "tunnels.example.test", RuntimeBaseDomain: "runtime.example.test",
+		MaxHeaderBytes: 4096, MaxBodyBytes: 1024, Routes: NewPreviewCarrierRouteMatcher(registry),
+		PreviewOwnerOffline: func(host string) bool { return host == "app.preview.example.test" },
+	}, http.NotFoundHandler())
+	if err != nil {
+		t.Fatal(err)
+	}
+	serve := func(host string) *httptest.ResponseRecorder {
+		recorder := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodGet, "/", nil)
+		request.Host = host
+		policy.ServeHTTP(recorder, request)
+		return recorder
+	}
+	got := serve("app.preview.example.test")
+	if got.Code != http.StatusServiceUnavailable || got.Header().Get("X-Paperboat-Error") != "preview_owner_offline" || !strings.Contains(got.Body.String(), "offline or asleep") || !strings.Contains(got.Body.String(), "same URL") {
+		t.Fatalf("owner-offline preview: status %d %q body %q", got.Code, got.Header().Get("X-Paperboat-Error"), got.Body.String())
+	}
+	if unknown := serve("gone.preview.example.test"); unknown.Code != http.StatusNotFound {
+		t.Fatalf("a name that is not listed: status %d", unknown.Code)
+	}
+}
+
 // Waiting for an admitted preview's route is bounded per name and overall: past the bound a request is answered with
 // its 503 at once instead of holding a connection for previewStartingWait.
 func TestAdmittedPreviewWaitsAreBounded(t *testing.T) {

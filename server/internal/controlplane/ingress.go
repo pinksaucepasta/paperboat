@@ -49,7 +49,7 @@ func (s *EdgeService) handleIngress(w http.ResponseWriter, r *http.Request) {
 		writeEdgeError(w, r, http.StatusConflict, state, false, 0)
 		return
 	}
-	decisions, denied, blocked, ipRules, err := s.ingressProjection(r.Context(), input.NodeID, input.ProcessEpoch, false)
+	decisions, denied, blocked, ipRules, offline, err := s.ingressProjection(r.Context(), input.NodeID, input.ProcessEpoch, false)
 	if err != nil {
 		writeEdgeError(w, r, http.StatusServiceUnavailable, "control_unavailable", true, 1000, err)
 		return
@@ -63,7 +63,7 @@ func (s *EdgeService) handleIngress(w http.ResponseWriter, r *http.Request) {
 	if s.http01 != nil {
 		responses = s.http01.ForEdge(input.NodeID)
 	}
-	version := wire.IngressVersion(decisions, denied, blocked, ipRules, responses)
+	version := wire.IngressVersion(decisions, denied, blocked, ipRules, offline, responses)
 	if input.Version == version {
 		expires := make([]time.Time, len(decisions))
 		for i, d := range decisions {
@@ -72,7 +72,7 @@ func (s *EdgeService) handleIngress(w http.ResponseWriter, r *http.Request) {
 		writeEdgeJSON(w, http.StatusOK, map[string]any{"complete": true, "unchanged": true, "version": version, "issued_at": latestIssuedAt(decisions), "expires_at": expires})
 		return
 	}
-	snapshotBody := map[string]any{"complete": true, "version": version, "decisions": decisions, "quota_denied": denied, "blocked": blocked, "ip_rules": ipRules}
+	snapshotBody := map[string]any{"complete": true, "version": version, "decisions": decisions, "quota_denied": denied, "blocked": blocked, "ip_rules": ipRules, "offline": offline}
 	if s.http01 != nil {
 		snapshotBody["http01_responses"] = responses
 	}
@@ -80,18 +80,49 @@ func (s *EdgeService) handleIngress(w http.ResponseWriter, r *http.Request) {
 }
 
 // ingressProjection is the database work behind one desired-state answer: the node's decisions, the quota
-// denials and takedowns that withhold some of them, and the owners' IP rules.
-func (s *EdgeService) ingressProjection(ctx context.Context, nodeID, epoch string, readOnly bool) (decisions []wire.IngressDecision, denied []wire.IngressQuotaDenial, blocked []wire.IngressBlock, ipRules []wire.IngressIPRule, err error) {
+// denials and takedowns that withhold some of them, the owners' IP rules and the previews whose owner is offline.
+func (s *EdgeService) ingressProjection(ctx context.Context, nodeID, epoch string, readOnly bool) (decisions []wire.IngressDecision, denied []wire.IngressQuotaDenial, blocked []wire.IngressBlock, ipRules []wire.IngressIPRule, offline []wire.IngressOffline, err error) {
 	quota, _ := s.scopedBandwidth.(accountingauthority.QuotaChecker)
 	decisions, err = (ingressprojection.SQLIngressSource{DB: s.store, Quota: quota, QuotaDenied: &denied, ReadOnly: readOnly}).Edge(ctx, nodeID, epoch)
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, err
 	}
 	if blocked, err = withholdBlocked(ctx, s.store, &decisions, &denied); err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, err
 	}
-	ipRules, err = ownerIPRules(ctx, s.store, decisions)
-	return decisions, denied, blocked, ipRules, err
+	if ipRules, err = ownerIPRules(ctx, s.store, decisions); err != nil {
+		return nil, nil, nil, nil, nil, err
+	}
+	offline, err = offlineOwnerPreviews(ctx, s.store, nodeID)
+	return decisions, denied, blocked, ipRules, offline, err
+}
+
+// offlineOwnerPreviews lists the hostnames of active foreground previews whose owner machine is offline or
+// asleep (not revoked or deleted), for the edge this node is: their lease persists (it ends only when the
+// command stops or the machine is removed), so the edge answers their URL with the "machine offline" page
+// instead of a 404. It grants no authority. A background or lazy preview keeps its own rules and is not listed.
+func offlineOwnerPreviews(ctx context.Context, store *db.DB, nodeID string) ([]wire.IngressOffline, error) {
+	rows, err := store.Pool().Query(ctx, `SELECT substring(p.endpoint from 9) FROM preview_leases p
+JOIN user_machines m ON m.id=p.owner_machine_id
+WHERE p.terminal_state='active'
+ AND (p.owner_session_kind='foreground' OR (p.owner_session_kind='local_lease' AND p.user_deadline IS NULL))
+ AND m.revoked_at IS NULL AND m.deleted_at IS NULL AND NOT (m.state='online' AND m.online)
+ AND paperboat.workspace_edge_mode(p.account_id,p.owner_team_id)='managed-only'
+ AND paperboat.node_preview_eligible($1,p.account_id,p.id)
+ORDER BY p.id LIMIT 4096`, nodeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	offline := []wire.IngressOffline{}
+	for rows.Next() {
+		var o wire.IngressOffline
+		if err := rows.Scan(&o.Hostname); err != nil {
+			return nil, err
+		}
+		offline = append(offline, o)
+	}
+	return offline, rows.Err()
 }
 
 // Warm answers the desired-state projection internally for the verified edges, parallel times at once, so
@@ -122,7 +153,7 @@ func (s *EdgeService) Warm(ctx context.Context, parallel int) error {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				if _, _, _, _, err := s.ingressProjection(ctx, n.id, n.epoch, true); err != nil {
+				if _, _, _, _, _, err := s.ingressProjection(ctx, n.id, n.epoch, true); err != nil {
 					failures <- err
 				}
 			}()

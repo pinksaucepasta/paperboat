@@ -130,6 +130,40 @@ func TestIngressAuthorityRefusesBlockedHostname(t *testing.T) {
 	}
 }
 
+// A preview whose owner machine sleeps is listed by the server without a decision: the edge reports it
+// owner-offline (the "machine offline" page, and TLS for it), and a name no longer listed is not.
+func TestIngressAuthorityListsOwnerOfflinePreviews(t *testing.T) {
+	decision := ingressAuthorityTestDecision(time.Now().UTC())
+	var listed atomic.Bool
+	listed.Store(true)
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		offline := []connectorprotocol.IngressOffline{}
+		if listed.Load() {
+			offline = append(offline, connectorprotocol.IngressOffline{Hostname: "asleep.preview.test"})
+		}
+		json.NewEncoder(w).Encode(map[string]any{"complete": true, "decisions": []connectorprotocol.IngressDecision{decision}, "offline": offline})
+	}))
+	defer server.Close()
+	client, err := NewHTTPClient(HTTPConfig{BaseURL: server.URL, Client: server.Client(), Credential: strings.Repeat("x", 32), Timeout: time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	authority := &IngressAuthority{Client: client, NodeID: decision.EdgeNodeID, ProcessEpoch: decision.EdgeProcessEpoch}
+	if _, err := authority.Snapshot(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !authority.OwnerOffline("asleep.preview.test") || authority.OwnerOffline("other.preview.test") || authority.AdmitsPreview("asleep.preview.test") {
+		t.Fatal("owner-offline set wrong: it must list only the named preview and grant no carrier decision")
+	}
+	listed.Store(false)
+	if _, err := authority.snapshot(t.Context(), true); err != nil {
+		t.Fatal(err)
+	}
+	if authority.OwnerOffline("asleep.preview.test") {
+		t.Fatal("a preview the server no longer lists as owner-offline is still reported so")
+	}
+}
+
 // The owner's IP lists from the snapshot: deny wins, a non-empty allow list admits only its entries,
 // IPv4-mapped addresses match IPv4 entries, and a hostname without lists admits everyone.
 func TestIngressAuthorityAppliesOwnerIPRules(t *testing.T) {

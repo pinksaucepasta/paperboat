@@ -262,6 +262,10 @@ func (l *SharedTLSListener) dispatch(conn net.Conn) {
 		if denied, ok := l.authority.(interface{ QuotaDenied(string) bool }); ok && denied.QuotaDenied(host) {
 			authorizedHTTPS = true
 		}
+		// A preview whose owner machine is asleep gets TLS too, for its "machine offline" page.
+		if offline, ok := l.authority.(interface{ OwnerOffline(string) bool }); ok && offline.OwnerOffline(host) {
+			authorizedHTTPS = true
+		}
 	}
 	// The locally admitted public preview may become ready after the cached
 	// complete snapshot was fetched. Refresh its exact authority before any TLS

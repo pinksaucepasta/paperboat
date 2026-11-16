@@ -31,6 +31,7 @@ type IngressAuthority struct {
 	quotaDenied   map[string]time.Time                        // hostnames withheld only for bandwidth quota (to their reset time), from the same fetch
 	blocked       map[string]bool                             // hostnames taken down by an operator (to whether the takedown is legal), from the same fetch
 	ipRules       map[string]addressRule                      // owner IP allow/deny lists per hostname, from the same fetch
+	offline       map[string]bool                             // preview hostnames whose owner machine is asleep, from the same fetch
 	http01        map[string]connectorprotocol.HTTP01Response // by token, from the same fetch
 	fetched       time.Time
 	invalidated   bool
@@ -339,6 +340,10 @@ func (a *IngressAuthority) recordLocked(now time.Time, snapshot IngressSnapshot,
 	for _, b := range snapshot.Blocked {
 		a.blocked[b.Hostname] = b.Legal
 	}
+	a.offline = make(map[string]bool, len(snapshot.Offline))
+	for _, o := range snapshot.Offline {
+		a.offline[o.Hostname] = true
+	}
 	a.ipRules = make(map[string]addressRule, len(snapshot.IPRules))
 	for _, r := range snapshot.IPRules {
 		a.ipRules[r.Hostname] = compileAddressRule(r)
@@ -474,6 +479,18 @@ func (a *IngressAuthority) previewDecision(hostname string) (connectorprotocol.I
 		}
 	}
 	return connectorprotocol.IngressDecision{}, false
+}
+
+// OwnerOffline reports whether the last server snapshot lists the preview hostname as active with its owner
+// machine offline or asleep: its lease persists and it returns on the same URL, so the request gets the
+// "machine offline" page (503) instead of a 404.
+func (a *IngressAuthority) OwnerOffline(hostname string) bool {
+	if a == nil {
+		return false
+	}
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.offline[hostname]
 }
 
 // QuotaDenied reports whether the last server snapshot withheld the hostname with a typed refusal: its

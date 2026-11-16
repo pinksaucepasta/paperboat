@@ -106,6 +106,13 @@ type IngressBlock struct {
 	Legal    bool   `json:"legal,omitempty"`
 }
 
+// IngressOffline names the hostname of an active foreground preview whose owner machine is offline or
+// asleep. Its lease persists and it comes back on the same URL, so the edge answers a request for it with the
+// "machine offline" page (503) instead of a 404. It grants no authority.
+type IngressOffline struct {
+	Hostname string `json:"hostname"`
+}
+
 // IngressIPRule is the owner's IP allow and deny lists (CIDRs) for one hostname. The edge refuses a
 // client address a deny entry matches, or that no allow entry matches when allow is not empty, before
 // opening the origin. It grants no authority.
@@ -373,7 +380,7 @@ func sameNativeAuthorization(a, b *PrivateAccessOpen) bool {
 // decision id and its issue and expiry times are per-answer values) and returns a version of the
 // whole answer. An edge that sends the version it holds gets only fresh times when nothing else
 // changed (F21-38). Prior art: cloudflared applies remote config only on a version change.
-func IngressVersion(decisions []IngressDecision, denied []IngressQuotaDenial, blocked []IngressBlock, ipRules []IngressIPRule, http01 []HTTP01Response) string {
+func IngressVersion(decisions []IngressDecision, denied []IngressQuotaDenial, blocked []IngressBlock, ipRules []IngressIPRule, offline []IngressOffline, http01 []HTTP01Response) string {
 	stable := make([][]byte, len(decisions))
 	order := make([]int, len(decisions))
 	for i, d := range decisions {
@@ -395,8 +402,9 @@ func IngressVersion(decisions []IngressDecision, denied []IngressQuotaDenial, bl
 	})
 	sort.Slice(blocked, func(a, b int) bool { return blocked[a].Hostname < blocked[b].Hostname })
 	sort.Slice(ipRules, func(a, b int) bool { return ipRules[a].Hostname < ipRules[b].Hostname })
+	sort.Slice(offline, func(a, b int) bool { return offline[a].Hostname < offline[b].Hostname })
 	sort.Slice(http01, func(a, b int) bool { return http01[a].Token < http01[b].Token })
-	rest, _ := json.Marshal([]any{denied, blocked, ipRules, http01})
+	rest, _ := json.Marshal([]any{denied, blocked, ipRules, offline, http01})
 	hash.Write(rest)
 	return hex.EncodeToString(hash.Sum(nil))
 }

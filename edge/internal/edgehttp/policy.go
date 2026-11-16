@@ -70,6 +70,9 @@ type Config struct {
 	// PreviewAdmitted, when set, reports a preview host the edge's held ingress snapshot still admits. Without its
 	// carrier the request waits like a pending one and then gets 503 preview_reconnecting (never a 404).
 	PreviewAdmitted func(host string) bool
+	// PreviewOwnerOffline, when set, reports a preview host whose lease is active while its owner machine is
+	// offline or asleep: without a carrier its requests get the "machine offline" page (503), never a 404.
+	PreviewOwnerOffline func(host string) bool
 	// RouteUnavailable, when set, reports a host whose route is known but failed its probe: it gets the
 	// "could not reach the app" page (502) instead of a 404.
 	RouteUnavailable func(host string) bool
@@ -429,6 +432,7 @@ const originRedirectLoopMessage = "This app redirects to HTTPS, but Paperboat al
 
 const previewStartingMessage = "This preview is starting. Retry in a moment."
 const previewReconnectingMessage = "This app lost its connection to Paperboat for a moment and is reconnecting. Retry in a few seconds."
+const previewOwnerOfflineMessage = "The machine serving this preview is offline or asleep. This link comes back on the same URL when the machine wakes."
 const requestBodyIdleMessage = "The upload stopped sending data, so Paperboat ended the request. Check your connection and try again."
 
 // previewStartingWait bounds how long a request to an admitted preview waits for its route.
@@ -651,6 +655,13 @@ func (p *Policy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 			if !hasSession && r.Header.Get("Paperboat-Access-Token") == "" && p.config.BrowserAccess != nil && p.config.BrowserAccess.validate() && browserNavigation(r) {
 				p.config.BrowserAccess.begin(w, r, candidateHost)
+				return
+			}
+			// The preview's lease persists while its owner machine sleeps (the server lists it as owner-offline).
+			if errors.Is(acquireErr, route.ErrNoMatch) && p.config.PreviewOwnerOffline != nil && p.config.PreviewOwnerOffline(candidateHost) {
+				w.Header().Set("X-Paperboat-Error", "preview_owner_offline")
+				w.Header().Set("Retry-After", "30")
+				writeErrorPage(w, http.StatusServiceUnavailable, previewOwnerOfflineMessage)
 				return
 			}
 			// The held ingress snapshot still admits this preview but its carrier is gone: an app that is
