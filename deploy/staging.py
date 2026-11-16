@@ -6,9 +6,11 @@ Run from oracle; every remote step is `ssh ubuntu@anvit` (STAGING_HOST). Subcomm
   init                 write the stack's files and secrets (kept on rerun); WorkOS ids and the Cloudflare DNS token
                        are read from the production server env over ssh and never printed
   up <image>           start the stack on that image (migrate first), wait for /readyz
+  grant                give usr_staging a paid Pro workspace (test data)
+  dns                  ensure regional and public wildcard DNS
   seed                 account, paid entitlement and a console session for the staging test account (idempotent)
   enroll <name>        print one machine enrollment token on stdout only (TOKEN_CMD for tools/probe/canary-setup.sh)
-  edge <image>           register and run a staging edge (tunnel container, carrier on TCP 18445) for the staging account
+  edge <image>         register and run the managed staging edge (carrier on TCP 18445)
   relay <image>          register and run a staging relay (DERP/WSS on TCP 18444, reachable from outside anvit) for the staging account
   reset                new empty database; the regional certificate is kept (Let's Encrypt limits duplicates)
   status | down | logs
@@ -180,19 +182,36 @@ def init():
 
 
 def ensure_dns(prod):
-    """One A record <region>.<domain> -> anvit's public address (a lone node has no enrolled addresses for the DNS worker)."""
+    """Regional and shared public wildcard A records; never per-publication DNS."""
     address = ssh(HOST, "curl -s -m10 https://api.ipify.org").strip()
     zone, name = prod["PAPERBOAT_CERTIFICATES_DNS_ZONE_ID"], f"{REGION}.{domain()}"
     def api(method, path, body=None):
         request = urllib.request.Request("https://api.cloudflare.com/client/v4" + path, method=method, headers={
             "Authorization": "Bearer " + prod[DNS_ENV], "Content-Type": "application/json"}, data=json.dumps(body).encode() if body else None)
         return json.load(urllib.request.urlopen(request, timeout=20))["result"]
-    have = api("GET", f"/zones/{zone}/dns_records?type=A&name={name}")
-    if have and have[0]["content"] == address:
-        return f"{name} {address}"
-    record = {"type": "A", "name": name, "content": address, "ttl": 60, "proxied": False}
-    api("PUT", f"/zones/{zone}/dns_records/{have[0]['id']}", record) if have else api("POST", f"/zones/{zone}/dns_records", record)
-    return f"{name} {address}"
+    names = [name, f"*.{PUBLIC_LABEL}.{domain()}"]
+    for name in names:
+        have = api("GET", f"/zones/{zone}/dns_records?type=A&name={name}")
+        if have and have[0]["content"] == address and not have[0]["proxied"]:
+            continue
+        record = {"type": "A", "name": name, "content": address, "ttl": 60, "proxied": False}
+        if have:
+            api("PUT", f"/zones/{zone}/dns_records/{have[0]['id']}", record)
+        else:
+            api("POST", f"/zones/{zone}/dns_records", record)
+    return {name: address for name in names}
+
+
+def dns():
+    print(json.dumps(ensure_dns(read_remote_env(PROD, "/opt/paperboat/server.env"))))
+
+
+def grant():
+    sql("INSERT INTO billing_workspaces(id,user_id,product_code,state,quantity,period_start,period_end) "
+        "VALUES('bw_staging','usr_staging','pro-monthly','active',1,now(),now()+interval '30 days') "
+        "ON CONFLICT(user_id) DO UPDATE SET product_code=excluded.product_code,state='active',"
+        "quantity=1,period_start=excluded.period_start,period_end=excluded.period_end,updated_at=now()")
+    print("usr_staging: paid Pro test grant, 1000 live publications, 30 days")
 
 
 def existing_image():
@@ -325,8 +344,8 @@ def sealed_credential(credential):
 
 
 def edge(image):
-    """Account-scoped self-hosted edge for usr_staging, as plain `docker run` (no pbh, no host firewall or nft change).
-    Registration mirrors server/internal/controlplane/selfhost_tunnel_process_test.go: what the claim flow would store.
+    """Managed staging edge, authenticated like operatorinfra.MutateNode(enroll).
+    Stable identity and credential survive reruns; only this staging edge is restarted.
     Limits: no browser access (preview URLs never carry a port, so a browser cannot reach a preview here; the server
     and curl --resolve use the advertised public HTTPS port) and no HTTP/3 (UDP is closed)."""
     from cryptography.hazmat.primitives import serialization
@@ -339,8 +358,21 @@ def edge(image):
     raw_seed = seed.private_bytes(serialization.Encoding.Raw, serialization.PrivateFormat.Raw, serialization.NoEncryption())
     raw_pub = seed.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
     cert_pem, key_pem, pin = carrier_certificate(host)
-    suffix = secrets.token_hex(6)
-    install, node, credential, usage = f"stg_install_{suffix}", f"stg_node_{suffix}", secrets.token_urlsafe(32), f"stg_usage_{suffix}"
+    node, install = "stg_managed_edge", "stg_managed_pool"
+    credential, usage = secrets.token_urlsafe(32), "managed:" + node
+    # Keep the carrier pin and runtime authority stable across edge() reruns.
+    existing = remote(f"test -f {EDGE_DIR}/managed && echo yes", check=False).strip() == "yes"
+    if existing:
+        credential = read_remote_secret(HOST, f"~/{DIR}/{EDGE_DIR}/runtime.credential")
+        key = json.loads(read_remote_secret(HOST, f"~/{DIR}/{EDGE_DIR}/usage.key"))
+        signing = base64.urlsafe_b64decode(key["private_key"] + "==")
+        raw_seed, raw_pub = signing[:32], signing[32:]
+        cert_pem = read_remote_secret(HOST, f"~/{DIR}/{EDGE_DIR}/tls.crt") + "\n"
+        key_pem = read_remote_secret(HOST, f"~/{DIR}/{EDGE_DIR}/tls.key") + "\n"
+        from cryptography import x509
+        public = x509.load_pem_x509_certificate(cert_pem.encode()).public_key()
+        pin = hashlib.sha256(public.public_bytes(serialization.Encoding.DER,
+            serialization.PublicFormat.SubjectPublicKeyInfo)).hexdigest()
     jwks = remote(f"curl -sf -m10 http://127.0.0.1:{LOOPBACK}/.well-known/jwks.json")
     files = {
         "runtime.credential": credential, "jwks.json": jwks,
@@ -349,45 +381,57 @@ def edge(image):
         "tls.crt": cert_pem, "tls.key": key_pem,
         "pub.crt": cert_pem, "pub.key": key_pem,  # the edge refuses the carrier certificate files as the public ones
         "deployment.json": json.dumps({
-            "self_hosted": True, "browser_access_enabled": False, "browser_login_origin": "", "control_url": api, "credential_issuer": api,
+            "self_hosted": False, "browser_access_enabled": False, "browser_login_origin": "", "control_url": api, "credential_issuer": api,
             "control_credential_file": "/state/runtime.credential", "control_ca_file": "", "jwks_file": "/state/jwks.json",
             "revocations_file": "/state/revocations.json", "usage_signing_key_file": "/state/usage.key",
             "infrastructure_tls_cert_file": "/state/tls.crt", "infrastructure_tls_key_file": "/state/tls.key",
-            # staging has no browser certificate for the infrastructure name: the public listener presents the same self-signed
-            # certificate (own copy), and the server trusts it from EDGE_TRUST (compose mounts it; SSL_CERT_DIR) to dispatch previews there
+            # The infrastructure hostname uses this fixture certificate; publication SNI names
+            # use the platform wildcard distributed by the control plane (infrastructureTLS).
             "public_https_cert_file": "/state/pub.crt", "public_https_key_file": "/state/pub.key",
             "connector_advertise_host": host, "carrier_tcp_listen_address": f"0.0.0.0:{EDGE_PORT}",
             "carrier_quic_listen_address": f"0.0.0.0:{EDGE_QUIC_PORT}", "public_https_listen_address": "0.0.0.0:18446",
             "private_https_listen_address": "127.0.0.1:9443", "public_http_listen_address": "0.0.0.0:18447",
-            # a self-hosted edge has no platform base domains (previews and tunnels use the customer's own domains), as pbh writes it
-            "preview_base_domain": "", "tunnel_base_domain": "", "runtime_base_domain": "",
-            "trusted_proxy_cidrs": [], "public_routes": [], "node_capacity": 32, "control_interval": 5_000_000_000,
+            "preview_base_domain": public_base, "tunnel_base_domain": public_base,
+            "runtime_base_domain": f"rt.{domain()}",
+            "trusted_proxy_cidrs": [], "public_routes": [], "node_capacity": 2048, "control_interval": 5_000_000_000,
             "control_timeout": 5_000_000_000, "max_body_bytes": 52428800, "max_header_bytes": 32768}),
     }
-    remote(f"docker rm -f {EDGE_NAME} >/dev/null 2>&1; rm -rf {EDGE_DIR}; mkdir -m 700 {EDGE_DIR}")
+    remote(f"docker rm -f {EDGE_NAME} >/dev/null 2>&1; mkdir -p -m 700 {EDGE_DIR}")
     for filename, content in files.items():
         remote(f"umask 077 && cat > {EDGE_DIR}/{filename}", stdin=content)
     remote(f"mkdir -p {EDGE_TRUST} && cat > {EDGE_TRUST}/{node}.crt", stdin=cert_pem)
+    remote(f"touch {EDGE_DIR}/managed && chmod 600 {EDGE_DIR}/managed")
     sealed = sealed_credential(credential)
-    sql("DELETE FROM paperboat.selfhost_installations WHERE scope_id='usr_staging' AND capability='tunnel'")
-    # Replaced fixture nodes still have route/carrier/audit FKs. Drain them; the isolated DB reset owns their teardown.
-    sql("UPDATE paperboat.control_tunnel_nodes SET state='draining',registry_expires_at=now() WHERE id LIKE 'stg_node_%'")
-    sql(f"INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,endpoint_host,endpoint_tcp_port,endpoint_quic_port,state,region,failure_domain,"
-        f"roles,transports,capacity_limit,capacity_observed_at,registry_expires_at,tls_spki_sha256) VALUES('{node}','{install}','1.0','initial_fixture','{host}',{EDGE_PORT},{EDGE_QUIC_PORT},"
-        f"'registered','{REGION}','{REGION}',ARRAY['edge'],ARRAY['http2','http3'],32,now(),now()+interval '1 hour',decode('{pin}','hex'))")
-    sql(f"INSERT INTO paperboat.selfhost_installations(id,node_id,installation_public_key,runtime_hash,runtime_ciphertext,name,capability,scope_kind,scope_id,claim_id,claim_complete) "
-        f"VALUES('{install}','{node}',decode('{raw_pub.hex()}','hex'),decode('{hashlib.sha256(credential.encode()).hexdigest()}','hex'),decode('{sealed}','hex'),"
-        f"'{EDGE_NAME}','tunnel','account','usr_staging','{install}',true)")
-    # Staging cannot pass the 443 ingress probe, so its edge is marked verified by hand, and the account is pinned to its own pool
-    # (a self-hosted edge serves only accounts whose pool policy is self-hosted-only).
-    sql(f"UPDATE paperboat.control_tunnel_nodes SET public_ingress_verified_at=now() WHERE id='{node}'")
-    sql(f"INSERT INTO paperboat.selfhost_pool_policies(scope_kind,scope_id,capability,mode,installation_ids) VALUES('account','usr_staging','tunnel','self-hosted-only',ARRAY['{install}']) "
-        "ON CONFLICT (scope_kind,scope_id,capability) DO UPDATE SET mode=excluded.mode, installation_ids=excluded.installation_ids")
-    sql(f"INSERT INTO paperboat.control_usage_verification_keys(key_id,edge_node_id,public_key,not_before,expires_at) VALUES('{usage}','{node}',decode('{raw_pub.hex()}','hex'),now()-interval '1 minute',now()+interval '365 days')")
+    # Drain only this account's replaced fixture before removing its scoped installation.
+    sql("UPDATE control_tunnel_nodes n SET state='draining',registry_expires_at=now() "
+        "WHERE EXISTS(SELECT 1 FROM selfhost_installations i WHERE i.node_id=n.id "
+        "AND i.scope_kind='account' AND i.scope_id='usr_staging' AND i.capability='tunnel')")
+    sql("DELETE FROM selfhost_installations WHERE scope_kind='account' "
+        "AND scope_id='usr_staging' AND capability='tunnel'")
+    address = ssh(HOST, "curl -fsS -m10 https://api.ipify.org").strip()
+    sql(f"INSERT INTO operator_regions(id,display_name,enabled) VALUES('{REGION}','Staging',true) "
+        "ON CONFLICT(id) DO UPDATE SET enabled=true")
+    sql(f"INSERT INTO control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,endpoint_host,endpoint_tcp_port,endpoint_quic_port,carrier_endpoint_host,carrier_endpoint_tcp_port,carrier_endpoint_quic_port,state,region,failure_domain,"
+        f"roles,transports,capacity_limit,capacity_observed_at,registry_expires_at,tls_spki_sha256) VALUES('{node}','{install}','1.0','initial_fixture','{host}',{EDGE_PORT},{EDGE_QUIC_PORT},'{host}',{EDGE_PORT},{EDGE_QUIC_PORT},"
+        f"'registered','{REGION}','{REGION}',ARRAY['edge'],ARRAY['http2','http3'],2048,now(),now()+interval '1 hour',decode('{pin}','hex')) "
+        "ON CONFLICT(id) DO UPDATE SET capacity_limit=excluded.capacity_limit,"
+        "carrier_endpoint_host=excluded.carrier_endpoint_host,carrier_endpoint_tcp_port=excluded.carrier_endpoint_tcp_port,"
+        "carrier_endpoint_quic_port=excluded.carrier_endpoint_quic_port")
+    sql(f"INSERT INTO managed_node_authority(node_id,region_id,runtime_hash,runtime_ciphertext,config) "
+        f"VALUES('{node}','{REGION}',decode('{hashlib.sha256(credential.encode()).hexdigest()}','hex'),decode('{sealed}','hex'),'{{}}') "
+        "ON CONFLICT(node_id) DO UPDATE SET runtime_hash=excluded.runtime_hash,runtime_ciphertext=excluded.runtime_ciphertext")
+    # Non-443 staging cannot pass the normal ingress probe; attest only this fixture.
+    sql(f"UPDATE control_tunnel_nodes SET public_ingress_verified_at=now(),public_ingress_ipv4='{address}'::inet WHERE id='{node}'")
+    sql("INSERT INTO selfhost_pool_policies(scope_kind,scope_id,capability,mode,installation_ids) "
+        "VALUES('account','usr_staging','tunnel','managed-only','{}') "
+        "ON CONFLICT(scope_kind,scope_id,capability) DO UPDATE SET mode=excluded.mode,installation_ids=excluded.installation_ids")
+    sql(f"INSERT INTO control_usage_verification_keys(key_id,edge_node_id,public_key,not_before,expires_at) "
+        f"VALUES('{usage}','{node}',decode('{raw_pub.hex()}','hex'),now()-interval '1 minute',now()+interval '365 days') "
+        "ON CONFLICT(key_id) DO NOTHING")
     args = f"-node-id {node} -edge-pool {install} -relay-id {node} -relay-region {REGION} -relay-name {EDGE_NAME} -health-address 127.0.0.1:9090 -deployment-config /state/deployment.json -state-path /state/state.json"
     remote(f"docker run -d --name {EDGE_NAME} --restart unless-stopped --user 0:0 -v $PWD/{EDGE_DIR}:/state -p {EDGE_PORT}:{EDGE_PORT} -p {EDGE_QUIC_PORT}:{EDGE_QUIC_PORT}/udp "
            f"-p 18446:18446 -p 18447:18447 {image} {args}")
-    return {"node": node, "installation": install}
+    return {"node": node, "pool": install}
 
 
 RELAY_NAME, RELAY_DIR = "pb-stg-relay", "relay"
@@ -440,7 +484,7 @@ def reset():
     seed()
 
 
-COMMANDS = {"init": (init, 0), "build": (build, 1), "up": (up, 1), "seed": (seed, 0), "enroll": (enroll, 1), "reset": (reset, 0),
+COMMANDS = {"dns": (dns, 0), "grant": (grant, 0), "init": (init, 0), "build": (build, 1), "up": (up, 1), "seed": (seed, 0), "enroll": (enroll, 1), "reset": (reset, 0),
             "status": (lambda: print(json.dumps(status())), 0), "edge": (lambda image: print(json.dumps(edge(image))), 1), "relay": (lambda image: print(json.dumps(relay(image))), 1), "down": (lambda: remote("docker compose down"), 0),
             "logs": (lambda: print(remote("docker compose logs --no-color --tail 80 server")), 0)}
 
