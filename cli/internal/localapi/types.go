@@ -333,12 +333,16 @@ type MachineStatus struct {
 	Ownership    string `json:"ownership,omitempty"`
 	OwnerAccount string `json:"owner_account,omitempty"`
 	// Tags are the machine's tags in the account's policy (tag:<name>), for pb status.
-	Tags            []string   `json:"tags,omitempty"`
-	Platform        string     `json:"platform,omitempty"`
-	Eligible        bool       `json:"eligible"`
-	RuntimeState    string     `json:"runtime_state"`
-	Generation      uint64     `json:"generation"`
-	LastObservedAt  *time.Time `json:"last_observed_at,omitempty"`
+	Tags           []string   `json:"tags,omitempty"`
+	Platform       string     `json:"platform,omitempty"`
+	Eligible       bool       `json:"eligible"`
+	RuntimeState   string     `json:"runtime_state"`
+	Generation     uint64     `json:"generation"`
+	LastObservedAt *time.Time `json:"last_observed_at,omitempty"`
+	// LastReachedAt and LastFailedAt are when this computer last connected to the machine, and last failed to (the
+	// daemon's passive record; no probing).
+	LastReachedAt   *time.Time `json:"last_reached_at,omitempty"`
+	LastFailedAt    *time.Time `json:"last_failed_at,omitempty"`
 	ActiveConsumers uint64     `json:"active_consumers"`
 	SelectedPath    string     `json:"selected_path"`
 	// TransportConsumers reports every active path for this machine. The

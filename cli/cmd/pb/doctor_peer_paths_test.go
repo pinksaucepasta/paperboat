@@ -42,7 +42,7 @@ func TestDoctorReportsNoPathToAPeerAsUnhealthy(t *testing.T) {
 	}
 	// With a path, it is named and healthy.
 	snapshot.Machines[0] = localapi.MachineStatus{ID: "machine_macl", Alias: "macl", SelectedPath: "relay", RelayRegion: "india"}
-	if check = doctorPeerPathsCheck(snapshot.Machines); check.Status != doctor.StatusPass || check.Summary != "Paths: macl relay, hp direct." {
+	if check = doctorPeerPathsCheck(snapshot.Machines, time.Now()); check.Status != doctor.StatusPass || check.Summary != "Paths: macl relay, hp direct." {
 		t.Fatalf("peer paths check = %+v", check)
 	}
 	// Selecting the machine fails its selected_path check the same way.
@@ -71,4 +71,35 @@ func TestDoctorSelectedPathNamesMixedPaths(t *testing.T) {
 		return
 	}
 	t.Fatal("no selected_path probe")
+}
+
+// L149 (fleet outage 11-12): pb doctor said healthy on every machine while every peer was unreachable, because a path
+// was "selected". From the passive record only: online machines tried inside the window and none reached is a warning
+// naming one machine; a recent success, no attempt at all, or an old failure is not.
+func TestDoctorWarnsWhenNoOnlinePeerWasReachedRecently(t *testing.T) {
+	now := time.Date(2026, 11, 17, 9, 0, 0, 0, time.UTC)
+	at := func(ago time.Duration) *time.Time { value := now.Add(-ago); return &value }
+	machine := func(alias string, reached, failed *time.Time, path string) localapi.MachineStatus {
+		return localapi.MachineStatus{ID: "id_" + alias, Alias: alias, Eligible: true, RuntimeState: "ready", SelectedPath: path, LastReachedAt: reached, LastFailedAt: failed}
+	}
+	for name, test := range map[string]struct {
+		machines []localapi.MachineStatus
+		want     string
+	}{
+		"tried, none reached, a relay path selected": {[]localapi.MachineStatus{machine("w", nil, at(time.Minute), "relay"), machine("m", at(time.Hour), at(5*time.Minute), "none")}, doctor.StatusWarning},
+		"one reached recently":                       {[]localapi.MachineStatus{machine("w", nil, at(time.Minute), "relay"), machine("m", at(time.Minute), nil, "none")}, doctor.StatusPass},
+		"no attempt at all":                          {[]localapi.MachineStatus{machine("w", nil, nil, "none"), machine("m", nil, nil, "none")}, doctor.StatusPass},
+		"failure older than the window":              {[]localapi.MachineStatus{machine("w", nil, at(time.Hour), "none")}, doctor.StatusPass},
+		"offline machine does not count":             {[]localapi.MachineStatus{{ID: "id_o", Alias: "o", Eligible: true, RuntimeState: "offline", SelectedPath: "none", LastFailedAt: at(time.Minute)}}, doctor.StatusPass},
+	} {
+		t.Run(name, func(t *testing.T) {
+			check := doctorPeerPathsCheck(test.machines, now)
+			if check.Status != test.want {
+				t.Fatalf("status = %v (%s), want %v", check.Status, check.Summary, test.want)
+			}
+			if test.want == doctor.StatusWarning && (!strings.Contains(check.Summary, "last 10 minutes") || !strings.Contains(check.Summary, "to w ") || !strings.Contains(check.Recovery, "pb doctor w")) {
+				t.Fatalf("warning = %q / %q, want the window and one example machine", check.Summary, check.Recovery)
+			}
+		})
+	}
 }

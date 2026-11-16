@@ -78,7 +78,8 @@ type cliNativeRuntime struct {
 	done                  chan struct{}
 	once                  sync.Once
 	waking                sync.Map // machine IDs with a WakePeer connection in flight
-	failedDials           sync.Map // machine ID -> time.Time of its last failed dial; a successful dial deletes it
+	failedDials           sync.Map // machine ID -> time.Time of its last failed dial
+	reachedDials          sync.Map // machine ID -> time.Time of its last successful dial
 }
 
 // NativeProbe reports an authenticated connection to one admitted machine.
@@ -767,7 +768,7 @@ func (r *cliNativeRuntime) Dial(ctx context.Context, machineID string, class pee
 	session, err := r.owner.DialShared(ctx, descriptor, machineID, class)
 	switch {
 	case err == nil:
-		r.failedDials.Delete(machineID)
+		r.reachedDials.Store(machineID, time.Now())
 	case !errors.Is(err, context.Canceled):
 		r.failedDials.Store(machineID, time.Now())
 	}
@@ -809,8 +810,10 @@ func (t *PeerTerminalTunnel) RelayDenial() *api.APIError {
 type NativeTransport struct {
 	Paths map[string]string
 	Relay tailnet.RegionalStatus
-	// NoPath lists the machines whose last dial failed within noPathWindow, with when it failed.
+	// NoPath lists the machines whose last dial failed within noPathWindow (and after their last success), with when it failed.
 	NoPath map[string]time.Time
+	// Reached and Failed are when each machine was last dialed successfully and unsuccessfully, kept for the process's life.
+	Reached, Failed map[string]time.Time
 }
 
 // noPathWindow is how long a failed dial keeps its machine reported as having no path: longer than the gap
@@ -827,12 +830,15 @@ func (t *PeerTerminalTunnel) NativeTransport() NativeTransport {
 	if runtime == nil || runtime.authority == nil {
 		return NativeTransport{}
 	}
-	noPath := map[string]time.Time{}
-	runtime.failedDials.Range(func(machineID, failed any) bool {
-		if at := failed.(time.Time); time.Since(at) < noPathWindow {
-			noPath[machineID.(string)] = at
+	reached, failed, noPath := map[string]time.Time{}, map[string]time.Time{}, map[string]time.Time{}
+	runtime.reachedDials.Range(func(machineID, at any) bool { reached[machineID.(string)] = at.(time.Time); return true })
+	runtime.failedDials.Range(func(machineID, at any) bool {
+		id, failedAt := machineID.(string), at.(time.Time)
+		failed[id] = failedAt
+		if time.Since(failedAt) < noPathWindow && failedAt.After(reached[id]) {
+			noPath[id] = failedAt
 		}
 		return true
 	})
-	return NativeTransport{Paths: runtime.authority.PeerPaths(), Relay: runtime.authority.RegionalStatus(), NoPath: noPath}
+	return NativeTransport{Paths: runtime.authority.PeerPaths(), Relay: runtime.authority.RegionalStatus(), NoPath: noPath, Reached: reached, Failed: failed}
 }

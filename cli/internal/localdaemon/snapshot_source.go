@@ -135,6 +135,12 @@ func applyNativeTransport(snapshot *localapi.Snapshot, native tunnel.NativeTrans
 	}
 	for index := range snapshot.Machines {
 		machine := &snapshot.Machines[index]
+		if at, ok := native.Reached[machine.ID]; ok {
+			machine.LastReachedAt = &at
+		}
+		if at, ok := native.Failed[machine.ID]; ok {
+			machine.LastFailedAt = &at
+		}
 		if machine.SelectedPath != "none" || machine.ActiveConsumers != 0 {
 			continue
 		}

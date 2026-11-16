@@ -219,6 +219,16 @@ func TestFailedDialMakesANoPathHealthItem(t *testing.T) {
 			}
 		}
 	}
+	// The passive record reaches the snapshot (pb doctor's peer_paths reads it).
+	reached := now.Add(-time.Minute)
+	native.Reached = map[string]time.Time{"machine_idle": reached}
+	native.Failed = map[string]time.Time{"machine_failed": now.Add(-time.Second)}
+	snapshot, _ = source.Snapshot(context.Background())
+	for _, m := range snapshot.Machines {
+		if (m.ID == "machine_idle") != (m.LastReachedAt != nil && m.LastReachedAt.Equal(reached)) || (m.ID == "machine_failed") != (m.LastFailedAt != nil) {
+			t.Fatalf("%s reached=%v failed=%v", m.ID, m.LastReachedAt, m.LastFailedAt)
+		}
+	}
 	// A path in use wins over an older failure.
 	native.Paths = map[string]string{"machine_failed": "direct"}
 	snapshot, _ = source.Snapshot(context.Background())

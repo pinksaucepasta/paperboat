@@ -183,6 +183,14 @@ func cloneSnapshot(snapshot Snapshot) Snapshot {
 			observed := *snapshot.Machines[index].LastObservedAt
 			copy.Machines[index].LastObservedAt = &observed
 		}
+		if snapshot.Machines[index].LastReachedAt != nil {
+			reached := *snapshot.Machines[index].LastReachedAt
+			copy.Machines[index].LastReachedAt = &reached
+		}
+		if snapshot.Machines[index].LastFailedAt != nil {
+			failed := *snapshot.Machines[index].LastFailedAt
+			copy.Machines[index].LastFailedAt = &failed
+		}
 	}
 	return copy
 }

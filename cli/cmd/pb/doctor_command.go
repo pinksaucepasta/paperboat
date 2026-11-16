@@ -93,7 +93,7 @@ func machineNoPath(machine localapi.MachineStatus) (localapi.HealthItem, bool) {
 // doctorPeerPathsCheck reports, with no machine selected, the path to every machine in use: a machine this
 // computer failed to reach is a failure (pbmac 2026-11-05: pb doctor said healthy while pb status said
 // Path none and every connection failed).
-func doctorPeerPathsCheck(machines []localapi.MachineStatus) doctorpkg.Check {
+func doctorPeerPathsCheck(machines []localapi.MachineStatus, now time.Time) doctorpkg.Check {
 	check := doctorpkg.Check{Category: "transport", Code: "peer_paths", Status: doctorpkg.StatusPass}
 	var unreachable, paths []string
 	recovery := ""
@@ -116,10 +116,36 @@ func doctorPeerPathsCheck(machines []localapi.MachineStatus) doctorpkg.Check {
 	default:
 		check.Summary = "Paths: " + strings.Join(paths, ", ") + "."
 	}
+	if example, stale := peersNotReached(machines, now); check.Status == doctorpkg.StatusPass && stale {
+		check.Status = doctorpkg.StatusWarning
+		check.Summary = fmt.Sprintf("No online machine was reached in the last %d minutes; the last attempt to %s failed.", config.PeerReachWindowMinutes, example)
+		check.Recovery = "Run pb doctor " + example + " for a live check of that machine, and pb doctor <machine> for any other."
+	}
 	if len(check.Summary) > 512 {
 		check.Summary = check.Summary[:509] + "..."
 	}
 	return check
+}
+
+// peersNotReached reports, from the daemon's passive record only (no probing), that this computer tried to connect to
+// online machines inside the window and reached none of them, with one machine it failed to reach. An idle computer
+// that has not tried is not stale. Prior art: Tailscale's health warnings report a lost connection from the last
+// handshake, not from a probe (health/warnings.go).
+func peersNotReached(machines []localapi.MachineStatus, now time.Time) (string, bool) {
+	window := time.Duration(config.PeerReachWindowMinutes) * time.Minute
+	example := ""
+	for _, machine := range machines {
+		if !machine.Eligible || machine.RuntimeState != "ready" {
+			continue
+		}
+		if machine.LastReachedAt != nil && now.Sub(*machine.LastReachedAt) < window {
+			return "", false
+		}
+		if example == "" && machine.LastFailedAt != nil && now.Sub(*machine.LastFailedAt) < window {
+			example = machine.Alias
+		}
+	}
+	return example, example != ""
 }
 
 func transportConsumerSummary(consumers []localapi.TransportConsumer) string {
@@ -295,7 +321,7 @@ func doctorProbes(command *cobra.Command, snapshot localapi.Snapshot, machine *l
 		probes = append(probes, doctorMachineProbes(*machine)...)
 		probes = append(probes, doctorPathReachabilityProbes(command, machine.ID)...)
 	} else {
-		probes = append(probes, doctorpkg.Probe{Code: "peer_paths", Run: func(context.Context) doctorpkg.Check { return doctorPeerPathsCheck(snapshot.Machines) }})
+		probes = append(probes, doctorpkg.Probe{Code: "peer_paths", Run: func(context.Context) doctorpkg.Check { return doctorPeerPathsCheck(snapshot.Machines, time.Now()) }})
 	}
 	return probes
 }

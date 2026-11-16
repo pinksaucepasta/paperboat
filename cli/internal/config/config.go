@@ -158,10 +158,12 @@ const (
 	DefaultTerminalOutputBufferBytes       = 128 * 1024
 	DefaultInputPartialFlushMilliseconds   = 1
 	PeerConnectTimeoutMilliseconds         = 20000
-	DefaultStatusBarMode                   = "auto"
-	DefaultStatusBarFullscreen             = "hide"
-	DefaultStatusBarTheme                  = "terminal"
-	DefaultStatusBarNoticeSeconds          = 5
+	// PeerReachWindowMinutes is how long pb doctor accepts a peer's last successful connection as proof that peers are reachable.
+	PeerReachWindowMinutes        = 10
+	DefaultStatusBarMode          = "auto"
+	DefaultStatusBarFullscreen    = "hide"
+	DefaultStatusBarTheme         = "terminal"
+	DefaultStatusBarNoticeSeconds = 5
 )
 
 var (
