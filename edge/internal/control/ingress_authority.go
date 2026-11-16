@@ -559,10 +559,15 @@ func (a *IngressAuthority) ResolvePreview(ctx context.Context, publication, host
 	if err != nil {
 		return connectorprotocol.IngressDecision{}, err
 	}
+	// Like Resolve: a route update publishes the newer decision before the carrier reports the new revision,
+	// so the exact one wins and a newer one of the same publication serves meanwhile (never an older one).
 	selectDecision := func(decisions []connectorprotocol.IngressDecision) (connectorprotocol.IngressDecision, bool) {
-		for _, d := range decisions {
-			if d.Binding.Lifecycle == connectorprotocol.TunnelEphemeral && d.Binding.Audience == "public" && d.Binding.PublicationID == publication && d.Binding.Hostname == hostname && d.Binding.RouteGeneration == revision && d.Authorize(d, open, a.NodeID, a.ProcessEpoch, time.Now().UTC()) == nil {
-				return d, true
+		for _, newer := range []bool{false, true} {
+			for _, d := range decisions {
+				generation := d.Binding.RouteGeneration == revision || newer && d.Binding.RouteGeneration > revision
+				if d.Binding.Lifecycle == connectorprotocol.TunnelEphemeral && d.Binding.Audience == "public" && d.Binding.PublicationID == publication && d.Binding.Hostname == hostname && generation && d.Authorize(d, open, a.NodeID, a.ProcessEpoch, time.Now().UTC()) == nil {
+					return d, true
+				}
 			}
 		}
 		return connectorprotocol.IngressDecision{}, false

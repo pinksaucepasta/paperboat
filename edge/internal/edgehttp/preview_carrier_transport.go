@@ -651,7 +651,7 @@ func (t *DataCarrierPreviewTransport) roundTripRoute(request *http.Request, host
 		return nil, sent, ErrDataCarrierPreviewTransport
 	}
 	restricted := route.AccessMode == "private" || route.AccessMode == "team"
-	if restricted && !private && (!browser || decision.Binding.Audience != route.AccessMode || decision.Binding.PublicationID != route.PreviewID || decision.Binding.Hostname != route.Hostname || decision.Binding.RouteGeneration != route.Revision) {
+	if restricted && !private && (!browser || decision.Binding.Audience != route.AccessMode || decision.Binding.PublicationID != route.PreviewID || decision.Binding.Hostname != route.Hostname || decision.Binding.RouteGeneration < route.Revision) {
 		return nil, sent, ErrDataCarrierPreviewTransport
 	}
 	if !restricted && (browser || private) || browser && private {
@@ -718,7 +718,7 @@ func (t *DataCarrierPreviewTransport) roundTripRoute(request *http.Request, host
 	if !restricted && t.publicAuthority != nil {
 		var err error
 		decision, err = t.publicAuthority(openContext, route)
-		if err != nil || decision.Binding.PublicationID != route.PreviewID || decision.Binding.Hostname != route.Hostname || decision.Binding.RouteGeneration != route.Revision || decision.Binding.Audience != "public" || decision.Authorize(decision, open, route.EdgeNodeID, route.EdgeProcessEpoch, time.Now().UTC()) != nil {
+		if err != nil || decision.Binding.PublicationID != route.PreviewID || decision.Binding.Hostname != route.Hostname || decision.Binding.RouteGeneration < route.Revision || decision.Binding.Audience != "public" || decision.Authorize(decision, open, route.EdgeNodeID, route.EdgeProcessEpoch, time.Now().UTC()) != nil {
 			cancelOpen()
 			stopPreviewStreamLifetime(lifetimeCancel)
 			return nil, sent, errors.Join(ErrDataCarrierPreviewTransport, err)

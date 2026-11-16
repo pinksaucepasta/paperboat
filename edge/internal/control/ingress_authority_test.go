@@ -699,3 +699,28 @@ func TestIngressAuthorityServesAnOlderRuleOnTheNewerDecisionOfTheSameRoute(t *te
 		}
 	}
 }
+
+func TestIngressAuthorityPreviewServesTheNewerRouteGenerationNeverTheOlder(t *testing.T) {
+	now := time.Now().UTC()
+	d := ingressAuthorityTestDecision(now)
+	d.Binding.Lifecycle = connectorprotocol.TunnelEphemeral
+	d.Binding.RouteGeneration = 5
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{"complete": true, "decisions": []connectorprotocol.IngressDecision{d}})
+	}))
+	defer server.Close()
+	client, err := NewHTTPClient(HTTPConfig{BaseURL: server.URL, Client: server.Client(), Credential: strings.Repeat("x", 32), Timeout: time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := &IngressAuthority{Client: client, NodeID: d.EdgeNodeID, ProcessEpoch: d.EdgeProcessEpoch, fetched: now}
+	open := connectorprotocol.StreamOpen{Protocol: connectorprotocol.ProtocolName, Version: connectorprotocol.ProtocolVersion, AccountID: d.Binding.AccountID, TunnelID: d.Binding.TunnelID, ConnectorID: d.ConnectorID, SessionID: d.SessionID, ProcessGeneration: d.ProcessGeneration, Generation: d.ConfigGeneration, RouteID: d.Binding.RouteID, RequestID: "preview-authority", Kind: "http"}
+	for _, revision := range []uint64{5, 4} { // carrier still on the older revision while the server published 5
+		if got, err := a.ResolvePreview(context.Background(), d.Binding.PublicationID, d.Binding.Hostname, revision, open); err != nil || got.Binding.RouteGeneration != 5 {
+			t.Fatalf("carrier revision %d: %v", revision, err)
+		}
+	}
+	if _, err := a.ResolvePreview(context.Background(), d.Binding.PublicationID, d.Binding.Hostname, 6, open); !errors.Is(err, connectorprotocol.ErrIngressDenied) {
+		t.Fatalf("an older decision served a newer carrier revision: %v", err)
+	}
+}
