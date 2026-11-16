@@ -1,16 +1,14 @@
 #!/usr/bin/env python3
-"""F10-05: after a machine is revoked, ENV is re-sealed for the others and host show tells the truth.
+"""F10-05: a revoke never withholds ENV from the others; the owner's explicit rotation re-seals and host show tells the truth.
 
   env_revoke_rotation.py SURVIVOR --revoke MACHINE_ID --password-file ABSOLUTE_OWNER_ONLY_FILE
 
 Run on a machine with an unlocked ENV vault. SURVIVOR is another machine of the same account that
 stays; MACHINE_ID is a throwaway machine of the account that is revoked (never a shared machine).
   1. a personal variable is set and delivered to SURVIVOR (host show: published and applied)
-  2. MACHINE_ID is revoked
-  3. SURVIVOR's delivery turns pending (host show says not published, not applied) and a command
-     there still runs and says so; unlocking the vault from this machine (the documented recovery)
-     re-seals it at a newer fence generation, it is applied again, and a new command on SURVIVOR
-     sees the value
+  2. MACHINE_ID is revoked: SURVIVOR's delivery stays published and applied at the same fence, a command
+     there sees the value and says nothing about ENV (FIX-ENVRESEAL bbb8f2bb2: no pending state, no unlock)
+  3. `pb env rotate` (the owner's explicit rotation) re-seals SURVIVOR at a newer fence, applied, value still seen
   4. the revoked machine is not given the rotated delivery (host show: nothing published at the new fence)
 """
 import argparse
@@ -47,6 +45,22 @@ def fence(show):
     return max([layer['fence_generation'] for layer in show['layers']] or [0])
 
 
+def sees(machine, name, value='rotation-value', check=True):
+    code, out, err = run('exec', machine, '--', *windows_target.target_argv(
+        PB, machine, ['sh', '-c', 'echo "[$%s]"' % name], windows_target.bracket_env_script(name)))
+    ok = not code and '[%s]' % value in out and 'ENV not applied' not in err
+    if check and not ok:
+        raise RuntimeError('the surviving machine does not see the value or says ENV was not applied')
+    return ok
+
+
+def unset(name):
+    challenge = json.loads(run('env', 'unset', name, '--json')[1] or '{}')
+    token = challenge.get('data', {}).get('confirmation_token')
+    if token:
+        run('env', 'unset', name, '--json', '--confirm', token)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('survivor')
@@ -57,7 +71,7 @@ def main():
     code, _, err = run('env', 'set', name, '--value-stdin', '--json', stdin='rotation-value')
     if code:
         raise RuntimeError('could not set the probe variable: ' + err[:120])
-    result = {'check': 'env-revoke-rotation', 'status': 'PASS', 'pending_observed': False}
+    result = {'check': 'env-revoke-rotation', 'status': 'PASS', 'survivor_untouched_by_revoke': True}
     try:
         deadline = time.monotonic() + WAIT_SECONDS
         while True:
@@ -70,23 +84,39 @@ def main():
             time.sleep(3)
         before = fence(show)
         confirmed_command(PB, 'machine', 'revoke', args.revoked)
-        deadline = time.monotonic() + WAIT_SECONDS
-        while True:
+        # A removal never withholds ENV from the others (bbb8f2bb2): the delivery stays published and applied at the same fence.
+        time.sleep(10)
+        launch(args.survivor)
+        code, show = host(args.survivor)
+        if code or not (show['published'] and show['applied']) or fence(show) != before:
+            raise RuntimeError('the revoke changed the surviving machine delivery: %s' % (
+                json.dumps({'published': show['published'], 'applied': show['applied'], 'fence': fence(show), 'before': before}) if code == 0 else 'unreadable'))
+        sees(args.survivor, name)
+        # A value set after the revoke reaches SURVIVOR; the revoked machine is no recipient and gets no layer at that fence.
+        after = name + '_AFTER'
+        code, _, err = run('env', 'set', after, '--value-stdin', '--json', stdin='after-value')
+        if code:
+            raise RuntimeError('could not set the after-revoke variable: ' + err[:120])
+        try:
+            deadline = time.monotonic() + WAIT_SECONDS
+            while sees(args.survivor, after, 'after-value', check=False) is False:
+                if time.monotonic() > deadline:
+                    raise RuntimeError('the surviving machine never received the value set after the revoke')
+                time.sleep(3)
             launch(args.survivor)
             code, show = host(args.survivor)
-            if code == 0 and not show['published'] and not show['applied'] and fence(show) > before:
-                result['pending_observed'] = True
-                break
-            if time.monotonic() > deadline:
-                raise RuntimeError('the surviving machine never showed a pending delivery after the revoke: %s' % (
-                    json.dumps({'published': show['published'], 'applied': show['applied'], 'fence': fence(show)}) if code == 0 else 'unreadable'))
-            time.sleep(3)
-        code, out, err = run('exec', args.survivor, '--', *windows_target.true_argv(PB, args.survivor))
-        if code or 'ENV not applied' not in err:
-            raise RuntimeError('a command on the pending machine did not run and say that ENV was not applied')
-        code, _, _ = run('env', 'unlock', '--password-file', args.password_file, '--json')
+            code2, revoked = host(args.revoked)
+            if code2 == 0 and any(layer['published'] and layer['fence_generation'] >= fence(show) for layer in revoked['layers']):
+                raise RuntimeError('the revoked machine was given a delivery made after its revoke')
+        finally:
+            unset(after)
+        # The owner's explicit rotation re-seals for the survivors at a newer fence; the revoked machine is not a recipient.
+        code, _, err = run('env', 'unlock', '--password-file', args.password_file, '--json')
         if code:
             raise RuntimeError('unlocking the vault failed')
+        code, _, err = run('env', 'rotate', '--json', timeout=180)
+        if code:
+            raise RuntimeError('pb env rotate failed: ' + err[:120])
         deadline = time.monotonic() + WAIT_SECONDS
         while True:
             launch(args.survivor)
@@ -94,23 +124,17 @@ def main():
             if code == 0 and show['published'] and show['applied'] and fence(show) > before:
                 break
             if time.monotonic() > deadline:
-                raise RuntimeError('delivery was not re-sealed after unlocking: before=%s now=%s' % (
+                raise RuntimeError('delivery was not re-sealed after the rotation: before=%s now=%s' % (
                     before, json.dumps({'published': show['published'], 'applied': show['applied'], 'fence': fence(show)}) if code == 0 else 'unreadable'))
             time.sleep(3)
-        code, out, _ = run('exec', args.survivor, '--', *windows_target.target_argv(
-            PB, args.survivor, ['sh', '-c', 'echo "[$%s]"' % name], windows_target.bracket_env_script(name)))
-        if code or '[rotation-value]' not in out:
-            raise RuntimeError('the surviving machine does not see the value after rotation')
+        sees(args.survivor, name)
         code, revoked = host(args.revoked)
         if code == 0 and any(layer['published'] and layer['fence_generation'] >= fence(show) for layer in revoked['layers']):
             raise RuntimeError('the revoked machine was given the rotated delivery: %s' % json.dumps(
                 [(layer['state'], layer['fence_generation']) for layer in revoked['layers']]))
         result['fence_before'], result['fence_after'] = before, fence(show)
     finally:
-        challenge = json.loads(run('env', 'unset', name, '--json')[1] or '{}')
-        token = challenge.get('data', {}).get('confirmation_token')
-        if token:
-            run('env', 'unset', name, '--json', '--confirm', token)
+        unset(name)
     print(json.dumps(result), flush=True)
 
 

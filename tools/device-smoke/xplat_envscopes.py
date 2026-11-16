@@ -10,9 +10,9 @@ printed). Values are random per run and never printed. Results: results/xplat-en
   case       personal `Name` plus an override `NAME` for the same machine: Windows has ONE variable (the override wins),
              Linux and macOS keep two variables with their own values
   hoststate  `pb env host show` says published + applied on each device once it applied, and `pb env names` names the variable
-  rotation   a throwaway Linux machine is revoked: every survivor shows a pending delivery (not published, not applied), says
-             so on a command, is re-sealed by unlocking the vault, applied again at a newer fence, and sees the value; the
-             revoked machine is not given the rotated delivery
+  rotation   a throwaway Linux machine is revoked: every survivor stays published + applied at the same fence and sees the value
+             (a removal never withholds ENV); the owner's `pb env rotate` re-seals every survivor at a newer fence; the revoked
+             machine is not given the rotated delivery
 """
 import base64
 import json
@@ -201,28 +201,33 @@ def t_rotation(ctl, devices):
             assert until(ctl, dev, {name: value}) == {name: value}, '%s never received the value before the revoke' % dev.name
             before[dev.name] = fence(host(ctl, dev.alias))
         revoke(ctl, machine_id)
-        pending = {}
+        # A removal never withholds ENV from the others (bbb8f2bb2): delivery stays published and applied at the same fence.
+        time.sleep(10)
         for dev in devices.values():
-            end = time.time() + WAIT
-            while time.time() < end:
-                ctl.pb('exec', dev.alias, '--', *true_argv(dev), timeout=120)  # a launch makes the host report its state
-                show = host(ctl, dev.alias)
-                if show and not show['published'] and not show['applied'] and fence(show) > before[dev.name]:
-                    pending[dev.name] = True
-                    break
-                time.sleep(4)
-            assert pending.get(dev.name), '%s never showed a pending delivery after the revoke' % dev.name
-            done = ctl.pb('exec', dev.alias, '--', *true_argv(dev), timeout=120)
-            assert done.rc == 0 and 'ENV not applied' in done.errtext, '%s: a command while pending did not run and say that ENV was not applied: %s' % (dev.name, done.errtext[-150:])
-        unlock = ctl.pb('env', 'unlock', '--password-file', PASSWORD_REMOTE(ctl), '--json', timeout=120)
-        assert unlock.rc == 0, 'unlock failed: ' + (unlock.text + unlock.errtext)[-150:]
+            ctl.pb('exec', dev.alias, '--', *true_argv(dev), timeout=120)
+            show = host(ctl, dev.alias)
+            assert show and show['published'] and show['applied'] and fence(show) == before[dev.name], '%s: the revoke changed its delivery (%s -> %s)' % (dev.name, before[dev.name], show and fence(show))
+            assert until(ctl, dev, {name: value}) == {name: value}, '%s does not see the value after the revoke' % dev.name
+        # a value set after the revoke reaches the survivors and never the revoked machine (it left the recipient list)
+        post, post_value = 'XS_POST_' + TAG, 'post-' + TAG
+        setv(ctl, post, post_value)
+        both = {name: value, post: post_value}
         for dev in devices.values():
-            assert until(ctl, dev, {name: value}) == {name: value}, '%s does not see the value after the rotation' % dev.name
+            assert until(ctl, dev, both) == both, '%s never received the value set after the revoke' % dev.name
+        time.sleep(15)
+        _, leaked = observe(ctl, revoked)
+        local = revoked.pb('env', 'names', timeout=60)
+        assert post not in (leaked or {}) and post not in local.text + local.errtext, 'the revoked machine received a value set after its revoke'
+        # the owner's explicit rotation re-seals every survivor at a newer fence
+        rotate = ctl.pb('env', 'rotate', '--json', timeout=180)
+        assert rotate.rc == 0, 'pb env rotate failed: ' + (rotate.text + rotate.errtext)[-150:]
+        for dev in devices.values():
+            assert until(ctl, dev, both) == both, '%s does not see its values after the rotation' % dev.name
             show = host(ctl, dev.alias)
             assert show['published'] and show['applied'] and fence(show) > before[dev.name], '%s: not re-sealed at a newer fence (%s -> %s)' % (dev.name, before[dev.name], fence(show))
         gone = host(ctl, machine_id)
         assert not gone or not any(layer['published'] and layer['fence_generation'] >= max(fence(host(ctl, d.alias)) for d in devices.values()) for layer in gone.get('layers', [])), 'the revoked machine was given the rotated delivery'
-        return 'revoke: pending on %s, re-sealed by unlock at newer fences, value delivered, revoked machine not given the rotation' % ', '.join(devices)
+        return 'revoke leaves %s delivered at the same fence; pb env rotate re-seals at newer fences; revoked machine not given the rotation' % ', '.join(devices)
     finally:
         unset(ctl, name)
         if machine_id:
