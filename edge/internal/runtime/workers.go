@@ -18,6 +18,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/edge/internal/control"
@@ -378,6 +379,8 @@ type RouteWorker struct {
 	routesAdmitted                 bool
 	accessorAdmitted               bool
 	starting                       bool
+	probePending                   bool         // this reconcile found a carrier that does not serve its route yet
+	reconciles                     atomic.Int64 // reconciles run (route_probe_retry log; tests)
 	lastErr                        error
 	canonicalSet                   bool
 	canonicalHash                  [sha256.Size]byte
@@ -480,6 +483,41 @@ func (w *RouteWorker) run(ctx context.Context) {
 		tick = ticker.C
 	}
 	nodeReady := w.NodeReady
+	// A new tunnel's wake reaches every edge before its machine serves the route, so that reconcile finds the route
+	// carrier-pending and, without a retry, waits a whole control tick (`pb tunnel create --wait` 7-16 s). Only a
+	// TunnelWake starts a re-probe series (250 ms, 500 ms, ... while the route stays pending, up to Interval); a
+	// TunnelWake during a series, or within one Interval after a series ended still pending (the tick covers it), is
+	// absorbed. Carrier connects (Wake, ~40 after an edge restart) never start or restart a series: doing that kept a
+	// restarted edge reconciling every 250-500 ms and timed out its observations (edge .23 gate, e6f0122a4).
+	var retry <-chan time.Time
+	var retryDelay time.Duration
+	var cooldownUntil time.Time
+	retryCap := w.Interval
+	if retryCap <= 0 {
+		retryCap = 2 * time.Second
+	}
+	settle := func() { // after any reconcile: a route no longer pending ends the series
+		if !w.probePending {
+			retry, retryDelay, cooldownUntil = nil, 0, time.Time{}
+		}
+	}
+	arm := func(start bool) {
+		retry = nil
+		if start {
+			retryDelay = 0
+		}
+		if !w.probePending {
+			retryDelay, cooldownUntil = 0, time.Time{}
+			return
+		}
+		retryDelay = max(routeProbeRetry, 2*retryDelay)
+		if retryDelay > retryCap {
+			retryDelay, cooldownUntil = 0, time.Now().Add(retryCap)
+			return
+		}
+		retry = time.After(retryDelay)
+		slog.Info("route_probe_retry", "delay", retryDelay.String(), "reconciles", w.reconciles.Load())
+	}
 	for {
 		select {
 		case <-ctx.Done():
@@ -487,22 +525,35 @@ func (w *RouteWorker) run(ctx context.Context) {
 		case <-nodeReady:
 			nodeReady = nil
 			w.recordReconcile(ctx, w.reconcile(ctx))
+			settle()
 		case _, ok := <-tick:
 			if !ok {
 				return
 			}
 			w.recordReconcile(ctx, w.reconcile(ctx))
+			settle()
+		case <-retry:
+			w.recordReconcile(ctx, w.reconcile(ctx))
+			arm(false)
 		case <-w.Wake:
 			if !w.wakeReconcile(ctx) {
 				return
 			}
+			settle()
 		case <-w.TunnelWake:
+			if retry != nil || time.Now().Before(cooldownUntil) {
+				continue // the scheduled re-probe or the next tick pulls this change
+			}
 			if !w.wakeReconcile(ctx) {
 				return
 			}
+			arm(true)
 		}
 	}
 }
+
+// routeProbeRetry is the first re-probe of a route a TunnelWake found carrier-pending.
+const routeProbeRetry = 250 * time.Millisecond
 
 // wakeReconcile reconciles now and holds off the next wake for routeWakeGap; false once ctx is done.
 func (w *RouteWorker) wakeReconcile(ctx context.Context) bool {
@@ -645,6 +696,8 @@ func (w *RouteWorker) reconcile(ctx context.Context) error {
 		}
 	}
 
+	w.reconciles.Add(1)
+	w.probePending = false
 	routeErr := w.reconcileRoutes(ctx)
 	accessorErr := w.reconcileAccessor(ctx)
 	if routeErr == nil {
@@ -1307,6 +1360,7 @@ func (w *RouteWorker) resolveCanonicalGroups(ctx context.Context, candidates, pr
 	}
 	for _, group := range canonicalAssignmentGroups(candidates) {
 		if err := w.probeCanonicalGroup(ctx, group.assignments); err != nil {
+			w.probePending = w.probePending || errors.Is(err, edgehttp.ErrDataCarrierRouteUnavailable)
 			failures = append(failures, err)
 			failedAssignments = append(failedAssignments, group.assignments...)
 			if lkg, ok := previousByKey[group.key]; ok {
