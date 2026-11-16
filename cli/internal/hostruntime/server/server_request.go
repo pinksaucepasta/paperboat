@@ -163,6 +163,9 @@ func (s *Server) startRequest(frame protocol.Frame, writer *lockedWriter, author
 			Replay bool            `json:"replay"`
 		}{Result: outcome.Result, Replay: replay})
 		if err := respond(protocol.Frame{Type: "response", RequestID: frame.RequestID, Version: protocol.ProtocolVersion, OperationID: frame.OperationID, Payload: responsePayload}); err != nil {
+			if sessionID, ok := freshTerminalCreate(frame, outcome, replay); ok {
+				s.closeUndeliveredCreate(sessionID, authorization)
+			}
 			if hasStream {
 				terminalState.remove(streamID)
 				reportStreamCloseFailure(connectionCtx, frame.Capability, stream.Close())
