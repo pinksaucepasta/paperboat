@@ -874,3 +874,32 @@ func TestTallerWindowErasesTheOldBarRow(t *testing.T) {
 		t.Fatalf("old row 24 not erased before the bar is painted on row 30: erase=%d paint=%d in %q", erase, paint, raw)
 	}
 }
+
+// X-24 in gnome-terminal against a macOS target: vim's clear (ESC[2J) arrived in a chunk that ended inside the next escape
+// sequence, the erase was forgotten and the bar (REC with it) stayed blank until the window was resized.
+func TestEraseInAChunkEndingMidSequenceStillRepaintsTheBar(t *testing.T) {
+	bar, reader := newTestBar(t, ModeAuto, "xterm-256color", 98, 28, true, time.Second)
+	bar.SetIdentity("rx24c-m", "s")
+	bar.SetConnection("connected")
+	bar.SetRecording(true)
+	readPipe(reader)
+	_, _ = bar.Write([]byte("\x1b[H\x1b[2J\x1b[2;1H~\x1b[11;"))
+	_, _ = bar.Write([]byte("1H~\x1b[27;1H-- INSERT --"))
+	time.Sleep(300 * time.Millisecond)
+	if out := readPipe(reader); !strings.Contains(out, "\x1b[28;1H\x1b[2K") {
+		t.Fatalf("bar not repainted after a clear split across chunks: %q", out)
+	}
+}
+
+func readPipe(r *os.File) string {
+	var sb strings.Builder
+	buf := make([]byte, 65536)
+	for {
+		_ = r.SetReadDeadline(time.Now().Add(50 * time.Millisecond))
+		n, err := r.Read(buf)
+		sb.Write(buf[:n])
+		if err != nil || n == 0 {
+			return sb.String()
+		}
+	}
+}

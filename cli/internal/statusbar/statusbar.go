@@ -253,6 +253,18 @@ func (b *Bar) clearMarginBeforeFullscreen(data []byte) {
 	}
 }
 
+// afterRemoteWriteLocked asks for a bar redraw once the remote output has left the parser between sequences. An erase seen
+// in a chunk that ends inside an escape sequence (vim's clear in the first half of a split redraw) stays pending until then,
+// or the bar was never painted again (X-24, macOS vim in insert mode).
+func (b *Bar) afterRemoteWriteLocked(data []byte) {
+	if b.consumeANSI(data) {
+		b.redrawPending = true
+	}
+	if !b.closed && b.ansiState == byte(parser.GroundState) && b.redrawPending {
+		b.drawLocked()
+	}
+}
+
 func (b *Bar) runOutputOwner() {
 	defer close(b.ownerDone)
 	var redrawTimer *time.Timer
@@ -264,10 +276,7 @@ func (b *Bar) runOutputOwner() {
 			n, err := b.serializedOut.Write(request.data)
 			if n > 0 {
 				b.mu.Lock()
-				invalidated := b.consumeANSI(request.data[:n])
-				if !b.closed && b.ansiState == byte(parser.GroundState) && (invalidated || b.redrawPending) {
-					b.drawLocked()
-				}
+				b.afterRemoteWriteLocked(request.data[:n])
 				b.mu.Unlock()
 			}
 			request.result <- outputResult{n: n, err: err}
@@ -280,10 +289,7 @@ func (b *Bar) runOutputOwner() {
 			n, err := b.serializedOut.Write(request.data)
 			if n > 0 {
 				b.mu.Lock()
-				invalidated := b.consumeANSI(request.data[:n])
-				if !b.closed && b.ansiState == byte(parser.GroundState) && (invalidated || b.redrawPending) {
-					b.drawLocked()
-				}
+				b.afterRemoteWriteLocked(request.data[:n])
 				b.mu.Unlock()
 			}
 			request.result <- outputResult{n: n, err: err}
