@@ -32,6 +32,12 @@ func delayedUDPRelay(t *testing.T, target *net.UDPAddr, delay time.Duration) str
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = front.Close(); _ = back.Close() })
+	// A burst of a 50 ms flight (~2 MB) must fit: Windows' default UDP receive buffer is 64 KB, and the relay's drops
+	// then show up as the sender's loss (3 connections, 49-176 lost packets, 100-140 Mbit/s instead of 300).
+	for _, conn := range []*net.UDPConn{front, back} {
+		_ = conn.SetReadBuffer(8 << 20)
+		_ = conn.SetWriteBuffer(8 << 20)
+	}
 	type delayed struct {
 		packet []byte
 		due    time.Time
@@ -84,6 +90,7 @@ func TestQUICCarrierStreamHoldsTheBudgetAtRealRTT(t *testing.T) {
 	var rates []float64
 	for range 3 {
 		rates = append(rates, quicStreamMbit(t))
+		t.Logf("connection %d: %.1f Mbit/s", len(rates), rates[len(rates)-1])
 	}
 	sort.Float64s(rates)
 	t.Logf("one QUIC stream at 50 ms RTT: %.1f Mbit/s median of %.1f (budget %.0f)", rates[1], rates, throughputBudget)
@@ -110,6 +117,7 @@ func quicStreamMbit(t *testing.T) float64 {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer packetConn.Close() // quic.Listen leaves a socket it was given open
 	defer listener.Close()
 	received := make(chan error, 1)
 	go func() {
