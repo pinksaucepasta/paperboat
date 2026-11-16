@@ -923,3 +923,23 @@ rcp-l
 --- 11:04:36 ---
 $ (rcp-w) pb ssh --user tester rcp-l -- hostname   [managed_ssh not in allow] 
 pb: you do not have SSH access to this machine; ask a team admin to grant it. Support reference: support_08009503-369b-4c73-aab9-2717965c9961. Run `pb bugreport --upload` to send the details.
+
+################ f26-08-L.txt (env unlock/lock on Linux)
+$ pb version
+  ▄▄▝▀▀▀▀▀▘▄▄   Version dev-dd317c2af
+$ pb login --api-token-file <file>
+Signed in as <email> with an API token. This computer can do only what the token allows.
+$ pb env vault list   [locked]
+VAULT     KEY   REVISION   RECIPES
+rcp-env   1     1          rcpx
+$ pb env unlock --password-stdin   [the password as created through a PowerShell pipe]
+ENV vault operation completed.
+$ pb env vault list
+VAULT     KEY   REVISION   RECIPES
+rcp-env   1     1          rcpx
+$ pb env lock
+ENV vault operation completed.
+$ pb api-token list
+NAME       ID                                       CREATED 
+rcp-ctl5   apitok_9c9eecc47ab4bca16d1e98ebb992ab0d  user:<email>
+rcp-ctl4   apitok_e208e8b22c097e8668672b5f49f9e4bf  user:<email>
