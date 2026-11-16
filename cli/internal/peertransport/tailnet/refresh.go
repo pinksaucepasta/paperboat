@@ -116,12 +116,25 @@ func (a *Authority) RestoreOrRegister(ctx context.Context, client NetworkAPI) er
 	return a.Register(ctx, client, false)
 }
 
+// registerBeforeRestore is how long RegisterOrRestore waits for Paperboat before it restores the configuration last
+// verified on this machine; a reachable control plane answers well within it.
+const registerBeforeRestore = 2 * time.Second
+
 // RegisterOrRestore registers and refreshes; when Paperboat cannot be reached (no answer, or a 5xx), it
 // restores the configuration last verified on this machine instead, so a restart during an outage keeps the
 // peers (F21-01). An answer refusing the machine (4xx) is returned: refused authority is never restored.
 // Run keeps refreshing either way.
 func (a *Authority) RegisterOrRestore(ctx context.Context, client NetworkAPI, rotate bool) error {
-	err := a.Register(ctx, client, rotate)
+	// With a verified configuration on disk, a control plane that has not answered within registerBeforeRestore is
+	// treated as unreachable: a blackholed one would otherwise hold the first command after every restart for its full
+	// 10-15 s request timeout (first pb exec from a just-restarted machine in an outage failed at the 10 s open limit).
+	registerCtx := ctx
+	if cached, loadErr := a.options.Store.LoadPeerNetworkConfiguration(a.options.Issuer, a.options.Self.AccountID, a.options.Self.EndpointID, MaxConfigurationBytes); loadErr == nil && cached != "" {
+		var cancel context.CancelFunc
+		registerCtx, cancel = context.WithTimeout(ctx, registerBeforeRestore)
+		defer cancel()
+	}
+	err := a.Register(registerCtx, client, rotate)
 	var answered *api.APIError
 	if err == nil || errors.As(err, &answered) && answered.Status < 500 {
 		return err

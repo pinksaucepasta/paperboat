@@ -189,6 +189,39 @@ func TestRestartWithoutPaperboatRestoresTheLastVerifiedPeers(t *testing.T) {
 
 }
 
+// A control plane that blackholes the request (no refusal, no answer) held the first command after a restart for the
+// whole request timeout (10 s, then the open limit failed it); with a verified configuration on disk the restart waits
+// registerBeforeRestore and restores.
+func TestRestartAgainstABlackholedPaperboatRestoresWithinTheRegisterBudget(t *testing.T) {
+	a, cfg, signer, _ := networkTestAuthority(t)
+	cfg.Self.Role, cfg.Self.MachineID, cfg.Self.MachineGeneration = "machine", cfg.Self.EndpointID, 1
+	a.options.Self = cfg.Self
+	cfg.Peers[0].Scopes = []NetworkScope{{ResourceKind: "machine_network", ResourceID: "network_pair", ResourceGeneration: 1, Capability: "connect", Direction: "dial", Port: 443, ExpiresAt: 0}}
+	if err := a.Apply(t.Context(), networkToken(t, signer, cfg)); err != nil {
+		t.Fatal(err)
+	}
+	_ = a.Close()
+	next, err := NewAuthority(AuthorityOptions{Store: a.options.Store, Issuer: a.options.Issuer, Self: cfg.Self, Keys: unreachableKeys{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = next.Close() })
+	blackholed := networkAPIFunc{register: func(ctx context.Context, _ api.PeerNetworkRegistration) (api.PeerNetworkRegistrationResult, error) {
+		<-ctx.Done()
+		return api.PeerNetworkRegistrationResult{}, ctx.Err()
+	}}
+	started := time.Now()
+	if err := next.RegisterOrRestore(t.Context(), blackholed, false); err != nil {
+		t.Fatal("restart against a blackholed Paperboat lost the verified configuration:", err)
+	}
+	if waited := time.Since(started); waited > registerBeforeRestore+2*time.Second {
+		t.Fatalf("restore took %v; want about %v", waited, registerBeforeRestore)
+	}
+	if _, err := next.Peer("machine_test"); err != nil {
+		t.Fatal("restart against a blackholed Paperboat dropped the peer:", err)
+	}
+}
+
 // The daemon asks for until-revoked authority on every configuration request (server 2026.10.23.94+).
 func TestConfigurationRequestsAskForUntilRevokedAuthority(t *testing.T) {
 	a, cfg, signer, _ := networkTestAuthority(t)
