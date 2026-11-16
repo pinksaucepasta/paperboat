@@ -32,7 +32,7 @@ func grantAdministratorAdvice() string {
 	if runtime.GOOS == "darwin" {
 		grant = "ask an administrator to turn on \"Allow this user to administer this computer\" for " + name + " in System Settings > Users & Groups"
 	}
-	return "Run it as a user with sudo rights, or as root; to grant them, " + grant + ". Then rerun the command."
+	return "Run it as a user with sudo rights, or as root; to grant them, " + grant + ". Then rerun the command"
 }
 
 // sudoRefusalReasons are the sudo diagnostics that mean the privileged step never ran, in the order they are tried.
