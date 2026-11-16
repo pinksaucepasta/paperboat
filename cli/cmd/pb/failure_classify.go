@@ -343,7 +343,9 @@ func classifyCommandFailure(err error) (failure commandFailure) {
 			continue
 		}
 		// net wraps a cancelled dial/read in the unexported net.canceledError, a leaf that matches by Is, not identity.
-		if _, unary := current.(interface{ Unwrap() error }); !unary && errors.Is(current, context.Canceled) {
+		_, unary := current.(interface{ Unwrap() error })
+		_, joined := current.(interface{ Unwrap() []error })
+		if !unary && !joined && errors.Is(current, context.Canceled) {
 			set(commandCanceled, current)
 			continue
 		}
