@@ -9,8 +9,9 @@ import (
 )
 
 // The edge answers "machine offline" for a preview whose owner machine sleeps, so the snapshot lists exactly the
-// active foreground previews of an offline, not removed, owner; an online owner, a background preview, an ended
-// lease and a removed owner stay out (they keep their 502/404 answers).
+// active foreground previews of an offline, not removed, owner, or of an online owner whose carrier dropped (no
+// live route on this edge yet before the 90 s offline mark); a served preview, a background preview, an ended lease
+// and a removed owner stay out (they keep their 502/404 answers).
 func TestOfflineOwnerPreviewsListOnlyActiveForegroundWithAnOfflineOwner(t *testing.T) {
 	store := openControlPlaneTestDB(t)
 	ctx := context.Background()
@@ -23,7 +24,7 @@ func TestOfflineOwnerPreviewsListOnlyActiveForegroundWithAnOfflineOwner(t *testi
 			t.Fatal(err)
 		}
 	}
-	machines := map[string]string{"asleep": "off_asleep_" + suffix, "online": "off_online_" + suffix, "revoked": "off_revoked_" + suffix}
+	machines := map[string]string{"asleep": "off_asleep_" + suffix, "online": "off_online_" + suffix, "revoked": "off_revoked_" + suffix, "dropped": "off_dropped_" + suffix}
 	t.Cleanup(func() {
 		cleanup, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
@@ -37,7 +38,7 @@ func TestOfflineOwnerPreviewsListOnlyActiveForegroundWithAnOfflineOwner(t *testi
 	exec(`INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,state,ready,last_heartbeat_at,region,failure_domain,roles,transports,capacity_limit,capacity_used,capacity_observed_at,registry_expires_at,public_ingress_verified_at) VALUES($1,'default','1.0','epoch','ready',true,now(),'region','domain-'||$1,ARRAY['edge']::text[],ARRAY['http3','http2'],100,0,now(),now()+interval '1 hour',now())`, node)
 	for name, id := range machines {
 		state, online := "offline", false
-		if name == "online" {
+		if name == "online" || name == "dropped" {
 			state, online = "online", true
 		}
 		exec(`INSERT INTO paperboat.user_machines(id,user_id,environment_id,alias,platform,architecture,workspace_root,state,online,seat_state) VALUES($1,$2,$3,$6,'linux','amd64','/workspace',$4,$5,'occupied')`, id, owner, "env_"+id, state, online, strings.ReplaceAll(id, "_", "-"))
@@ -56,7 +57,13 @@ func TestOfflineOwnerPreviewsListOnlyActiveForegroundWithAnOfflineOwner(t *testi
 	deadline := now.Add(time.Hour)
 	want := lease("asleep", machines["asleep"], "foreground", "active", nil)
 	wantLocal := lease("local", machines["asleep"], "local_lease", "active", nil)
-	lease("online", machines["online"], "foreground", "active", nil)
+	serving := lease("online", machines["online"], "foreground", "active", nil)
+	// Online, but its carrier dropped (no live route on this edge): listed before the machine is marked offline.
+	wantDropped := lease("dropped", machines["dropped"], "foreground", "active", nil)
+	// The online owner's preview this edge serves (a live, observed route) stays out.
+	exec(`INSERT INTO paperboat.endpoints(id,kind,account_id,agent_machine_id,access_mode,lifetime,preview_lease_id) VALUES($1,'preview',$2,$3,'public','lease',$1)`, "prv_online_"+suffix, owner, machines["online"])
+	exec(`INSERT INTO paperboat.endpoint_routes(id,endpoint_id,hostname,protocol) VALUES($1,$2,$3,'http')`, "route_online_"+suffix, "prv_online_"+suffix, serving)
+	exec(`INSERT INTO paperboat.endpoint_edge_assignments(route_id,endpoint_id,edge_node_id,edge_process_epoch,carrier_session_id,observed_ready,observed_at) VALUES($1,$2,$3,'epoch','session_online',true,now())`, "route_online_"+suffix, "prv_online_"+suffix, node)
 	lease("background", machines["asleep"], "local_lease", "active", &deadline)
 	lease("stopped", machines["asleep"], "foreground", "stopped", nil)
 	lease("revoked", machines["revoked"], "foreground", "active", nil)
@@ -73,7 +80,7 @@ func TestOfflineOwnerPreviewsListOnlyActiveForegroundWithAnOfflineOwner(t *testi
 			listed[o.Hostname] = true
 		}
 	}
-	if len(listed) != 3 || !listed[want] || !listed[wantLocal] || !listed[wantCustom] {
-		t.Fatalf("offline owner previews = %v, want exactly %s, %s and %s", got, want, wantLocal, wantCustom)
+	if len(listed) != 4 || !listed[want] || !listed[wantLocal] || !listed[wantCustom] || !listed[wantDropped] {
+		t.Fatalf("offline owner previews = %v, want exactly %s, %s, %s and %s", got, want, wantLocal, wantCustom, wantDropped)
 	}
 }

@@ -98,9 +98,10 @@ func (s *EdgeService) ingressProjection(ctx context.Context, nodeID, epoch strin
 }
 
 // offlineOwnerPreviews lists the hostnames of active foreground previews whose owner machine is offline or
-// asleep (not revoked or deleted), for the edge this node is: their lease persists (it ends only when the
-// command stops or the machine is removed), so the edge answers their URL with the "machine offline" page
-// instead of a 404. It grants no authority. A background or lazy preview keeps its own rules and is not listed.
+// asleep (not revoked or deleted), or that this edge holds no live route for (the carrier dropped, ~30 s, long
+// before the machine is marked offline at 90 s): their lease persists (it ends only when the command stops or
+// the machine is removed), so the edge answers their URL with the "machine offline" page instead of a 404. It
+// grants no authority. A background or lazy preview keeps its own rules and is not listed.
 func offlineOwnerPreviews(ctx context.Context, store *db.DB, nodeID string) ([]wire.IngressOffline, error) {
 	rows, err := store.Pool().Query(ctx, `SELECT publication.hostname FROM preview_leases p
 JOIN users owner ON owner.id=p.account_id AND owner.status='active'
@@ -114,7 +115,9 @@ JOIN LATERAL (
 ) publication ON true
 WHERE p.terminal_state='active'
  AND (p.owner_session_kind='foreground' OR (p.owner_session_kind='local_lease' AND p.user_deadline IS NULL))
- AND m.revoked_at IS NULL AND m.deleted_at IS NULL AND NOT (m.state='online' AND m.online)
+ AND m.revoked_at IS NULL AND m.deleted_at IS NULL
+ AND (NOT (m.state='online' AND m.online) OR NOT EXISTS (SELECT 1 FROM endpoint_edge_assignments x
+  WHERE x.endpoint_id=p.id AND x.edge_node_id=$1 AND x.observed_ready AND x.observed_at>now()-interval '2 minutes'))
  AND paperboat.node_preview_eligible($1,p.account_id,p.id)
 ORDER BY p.id,publication.hostname LIMIT 4096`, nodeID)
 	if err != nil {
