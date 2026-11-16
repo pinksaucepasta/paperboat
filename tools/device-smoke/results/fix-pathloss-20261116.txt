@@ -53,3 +53,22 @@ pick [::1]; now -race -count=20 PASS) and TestConn_receiveIP (fixture without lo
 changes tests only), relay ./... PASS (pbvm2).
 Pair check (dev-619d8dd6a, plos-c <-> plos-b): pb exec plos-b -- hostname and pb exec plos-c -- hostname answer with
 the other container's hostname; pb connect plos-b echoes PLOSMARK42 computed by the remote shell.
+
+Windows runner -> hp (2026-11-16 ~18:00-19:30 IST): winpool-2 (GitHub Windows, Azure 52.240.168.193) -> plos-h
+(container on hp Wi-Fi, 10.0.0.2), one throwaway account. 8 MB random stdin via `pb exec plos-h -- sh -c 'cat
+>/dev/null'`; KB into plos-h per source (tcpdump on hp); Windows UDP datagrams sent (netstat -s). Builds: before
+dev-caf37d9c6 (main without the fix), after dev-2487f480d (main with 6bf5d916e); `pb install` on both sides each time.
+Loss = hp host DOCKER-USER rule dropping 40% of UDP from 52.240.168.193 to 10.0.0.2 (relay traffic untouched).
+- Today the real direct path is clean: before 1.32-1.36 MB/s direct, 8.6 MB received for ~8.7 MB sent; the
+  16-61% Azure->hp loss of the FIX-EXECSTDIN run did not recur, so the loss is emulated.
+- after, clean: 1.34, 1.37 MB/s direct (first run after install 0.66, moved relay -> direct) -> stays direct.
+- after, 40% loss (60 s after the rule): 0.21, 0.12, 0.07, 0.14, 0.19 MB/s; direct 39-530 KB per run, rest relay.
+  relay-only in the same windows (direct fully dropped): 0.63, 0.66, 0.67, 0.69 MB/s.
+- after, loss removed, 150 s later: 1.4, 1.42 MB/s direct.
+- before, 40% loss (later window, link slower: clean 0.42, relay-only 0.13-0.14): 0.02 (timed out at 360 s), 0.04
+  MB/s; 3.0 / 1.5 MB went over the lossy direct path.
+Result: the fix keeps data off the lossy path (1.5-3 MB -> 60-530 KB per 8 MB) and returns to direct when clean, but
+NOT the throughput gain: with the direct path half-working, both builds run 3-7x below relay-only (after 0.07-0.21
+vs 0.63-0.69). Open item: a second cost exists while the demoted direct path still answers some disco pings
+(candidates: send() re-pings every endpoint and sends CallMeMaybe over DERP on every untrusted send, endpoint.go
+send()/sendDiscoPingsLocked; handleCallMeMaybe re-creating endpointState). Not fixed here.
