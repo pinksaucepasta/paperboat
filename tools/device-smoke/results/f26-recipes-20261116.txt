@@ -1151,3 +1151,87 @@ $ (default) pb auth status / pb exec rcp-l
 Session: session_44e976d5-e52a-419a-8e33-bdcef38d2068
 rcp-l
 === F26-01/07 on pbmac2 (macOS 26.6.2, creator = a second --config on user admin over SSH), server .31, client dev-c6d670f93, 2026-11-16T12:49:19Z ===
+
+################ f26-01-M2.txt + f26-08-M.txt (macOS creator on dev-c6d670f93)
+=== F26-01/07 on pbmac2 (macOS 26.6.2, recipe machine rcp-mu; creator = a second --config on user admin over SSH), server .31, client dev-c6d670f93, 2026-11-16T12:53:30Z ===
+$ (default, the recipe machine) pb auth status
+Session: session_7e110c32-2352-49ac-8c1c-62ea2109aa5b
+$ pb --config ~/rcpctl/config.json login --api-token-file <file>
+Signed in as <email> with an API token. This computer can do only what the token allows.
+$ (default) pb auth status   [must be unchanged]
+Session: session_7e110c32-2352-49ac-8c1c-62ea2109aa5b
+$ pb recipe create -f rcpbad.toml
+pb: rcpbad.toml:1:1: unknown key "tag". Did you mean "tags"?
+$ pb recipe create -f rcpt4.toml
+pb: recipe rcpt4 reads vault rcp-env, and your ENV keys are locked on this computer. Unlock them with pb env unlock, then run the command again. The vault key is wrapped here, on your computer; Paperboat never sees it.
+  pb recipe create -f <file> [flags]
+  pb recipe create -f ci.toml
+$ pb recipe create -f rcpt3.toml
+Recipe rcpt3 created in workspace personal.
+  Tags        rcpt3
+  Reach       nothing (machines from this recipe cannot use other machines)
+  Machines    up to 2
+  Expires     2027-02-14 (90d)
+Token (shown once; save it as the secret PB_RECIPE):
+  pbr_<redacted>
+Install, with PB_RECIPE set:
+  Linux, macOS  curl -fsSL https://get.pprbt.dev/recipe | bash
+  Windows       irm https://get.pprbt.dev/recipe.ps1 | iex
+  pb installed  pb pair
+$ pb recipe list
+NAME    TAGS    MACHINES   EXPIRES      LAST USED
+rcpt3   rcpt3   0 / 2      2027-02-14   never
+rcpt6   rcpt6   0 / 1      2027-02-14   44m ago
+rcpt7   rcpt7   0          2027-02-14   2h ago
+rcptm   rcptm   0 / 1      2027-02-14   13m ago
+rcptw   rcptw   0 / 1      2027-02-14   1h ago
+rcpu    rcpu    1 / 2      2027-02-14   now
+$ pb recipe show rcpt3
+Recipe rcpt3, revision 1, token pbr_axzn7idxel_…, expires 2027-02-14, created by <email>
+# F26-01 lifecycle check (macOS)
+tags = ["rcpt3"]
+max_machines = 2
+Machines (0 of 2)
+$ pb recipe update -f u/rcpt3.toml
+Recipe rcpt3 updated to revision 2: max_machines changed. 0 online machines will apply it now.
+$ pb recipe update -f u/rcpt3.toml
+Recipe rcpt3 is unchanged (revision 2).
+$ pb recipe rotate rcpt3 --confirm <code>
+Recipe rcpt3 rotated. New token (shown once):
+  pbr_<redacted>
+$ pb recipe revoke rcpt3 --confirm <code>
+Recipe rcpt3 revoked. 0 machines removed.
+$ pb recipe list
+NAME    TAGS    MACHINES   EXPIRES      LAST USED
+rcpt6   rcpt6   0 / 1      2027-02-14   44m ago
+rcpt7   rcpt7   0          2027-02-14   2h ago
+rcptm   rcptm   0 / 1      2027-02-14   14m ago
+rcptw   rcptw   0 / 1      2027-02-14   1h ago
+rcpu    rcpu    1 / 2      2027-02-14   1m ago
+$ pb env unlock --password-stdin   [SSH session, no unlocked Keychain]
+pb: That password or recovery code does not open this account's ENV vault; nothing was changed. Retry with the right one, or run `pb env recover` with your recovery code. Support reference: support_1af18654-3210-479b-812a-2a00a76e4aee. Run `pb bugreport --upload` to send the details.
+$ PB_RECIPE=pbr_short pb pair   [malformed]
+pb: this is not a recipe token. A token starts with pbr_ and is 67 characters; this value is 9.
+$ pb --config ~/rcpctl/config.json logout
+Signed out
+$ (default) pb auth status / pb exec rcp-l
+Session: session_7e110c32-2352-49ac-8c1c-62ea2109aa5b
+pb: No machine has that name or ID. Run `pb machine list` to see your machines. Support reference: support_a4790a29-8c9b-4bb4-b3f0-1ba31964ba5e. Run `pb bugreport --upload` to send the details.
+=== F26-08 on pbmac2 (macOS, over SSH), server .31, client dev-c6d670f93, 2026-11-16T12:54:08Z ===
+$ pb --config ~/rcpctl/config.json login --api-token-file <file>
+Signed in as <email> with an API token. This computer can do only what the token allows.
+$ pb env vault list   [locked]
+VAULT     KEY   REVISION   RECIPES
+rcp-env   1     1          -
+$ pb env unlock --password-stdin
+ENV vault operation completed.
+$ pb env vault list
+VAULT     KEY   REVISION   RECIPES
+rcp-env   1     1          -
+$ pb env lock
+ENV vault operation completed.
+$ pb api-token list
+NAME       ID                                     
+rcp-ctlm4  apitok_bfae040c6866f9ddb5aea32c36e1f507
+$ pb --config ~/rcpctl/config.json logout
+Signed out
