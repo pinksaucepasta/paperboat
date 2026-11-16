@@ -81,3 +81,23 @@ func TestSessionCreateDescriptorRetriesServiceUnavailable(t *testing.T) {
 		t.Fatalf("calls=%d keys=%v err=%v", calls.Load(), keys, err)
 	}
 }
+
+// F21-164: a session list answered 503 by a busy server is read again, not failed (14 of 91 cleanups failed on it).
+func TestInventoryListRetriesServiceUnavailable(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if calls.Add(1) < 3 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte(`{"error":{"code":"service_busy","message":"x"}}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"data":{"items":[{"id":"pts_1","name":"api","state":"running","created_at":"2026-01-01T00:00:00Z","updated_at":"2026-01-01T00:00:00Z"}],"pagination":{"limit":200,"offset":0,"total":1,"next_offset":null}}}`))
+	}))
+	defer server.Close()
+	client := New(server.URL, config.Credential{AccessToken: "token"}, server.Client())
+	sessions, err := client.ListUserMachineTerminalSessions(context.Background(), "um_1")
+	if err != nil || len(sessions) != 1 || calls.Load() != 3 {
+		t.Fatalf("calls=%d sessions=%d err=%v", calls.Load(), len(sessions), err)
+	}
+}

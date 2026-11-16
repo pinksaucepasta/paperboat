@@ -6,8 +6,13 @@ import (
 	"net/url"
 )
 
+// inventoryRequest reads list pages. They are GETs, so a 503/429 or a lost answer is asked again with bounded backoff
+// (F21-164: 14 of 91 session cleanups failed on one `pb session list` 503 while the server was busy).
 func (c *Client) inventoryRequest() clientapi.Request {
-	return clientapi.Request{Do: c.do, InvalidResponse: func(err error) error { return &ResponseDecodeError{Err: err} }}
+	do := func(ctx context.Context, method, path string, body, out any) error {
+		return c.doIssuance(ctx, method, path, body, out, false)
+	}
+	return clientapi.Request{Do: do, InvalidResponse: func(err error) error { return &ResponseDecodeError{Err: err} }}
 }
 func collectOffsetInventory[T any](ctx context.Context, c *Client, path, field string, filters url.Values) ([]T, error) {
 	return clientapi.CollectOffsetInventory[T](ctx, c.inventoryRequest(), path, field, filters)
