@@ -192,6 +192,7 @@ func writePanicError(w http.ResponseWriter, r *http.Request, logger *slog.Logger
 type statusRecorder struct {
 	http.ResponseWriter
 	status int
+	bytes  int64 // response body bytes written, for the access log
 	// ctx is the request's: a server error written after the client hung up is that, not an outage.
 	ctx context.Context
 }
@@ -202,6 +203,12 @@ func (r *statusRecorder) WriteHeader(status int) {
 	}
 	r.status = status
 	r.ResponseWriter.WriteHeader(status)
+}
+
+func (r *statusRecorder) Write(p []byte) (int, error) {
+	n, err := r.ResponseWriter.Write(p)
+	r.bytes += int64(n)
+	return n, err
 }
 
 func (r *statusRecorder) Flush() {

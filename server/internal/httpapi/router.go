@@ -1033,6 +1033,9 @@ func accessLog(logger *slog.Logger, next http.Handler) http.Handler {
 			"path", safeLogPath(r.URL.Path),
 			"status", rec.status,
 			"duration_ms", time.Since(start).Milliseconds(),
+			// Body bytes only (no headers or TLS): the per-client API byte budget is summed from these.
+			"request_bytes", max(r.ContentLength, 0),
+			"response_bytes", rec.bytes,
 			"client", logClient(r.UserAgent()),
 		)
 	})

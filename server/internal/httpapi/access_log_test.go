@@ -35,3 +35,15 @@ func TestAccessLogRecordsAHungUpClientAs499(t *testing.T) {
 		}
 	}
 }
+
+func TestAccessLogRecordsRequestAndResponseBytes(t *testing.T) {
+	var logs bytes.Buffer
+	handler := accessLog(slog.New(slog.NewTextHandler(&logs, nil)), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("0123456789"))
+		_, _ = w.Write([]byte("abc"))
+	}))
+	handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/v1/machines", strings.NewReader("12345")))
+	if !strings.Contains(logs.String(), "request_bytes=5") || !strings.Contains(logs.String(), "response_bytes=13") {
+		t.Fatalf("log %q lacks request_bytes=5 response_bytes=13", logs.String())
+	}
+}
