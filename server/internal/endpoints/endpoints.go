@@ -50,7 +50,23 @@ VALUES($1,'preview',$2,$3,$4,$5,'lease',$1)`, p.LeaseID, p.AccountID, team, p.Ag
 	if err != nil {
 		return err
 	}
-	return ReconcileAgentTx(ctx, tx, p.AgentMachineID)
+	return assignNewPreviewTx(ctx, tx, p.LeaseID)
+}
+
+// assignNewPreviewTx gives a new preview's route the carriers its agent holds, which is what ReconcileAgentTx would
+// derive for it. It touches only this endpoint: a new route has no assignment yet and adding one removes none, so
+// the full reconcile (every live endpoint of the machine, each checked against its lease row) is not needed. That
+// reconcile made every create read all N leases the agent's renewals were writing, so creates and renewals cancelled
+// each other under SERIALIZABLE and one create cost O(N) (F21-168: 12% of creates failed at ~400 live previews).
+func assignNewPreviewTx(ctx context.Context, tx *db.Tx, endpointID string) error {
+	_, err := tx.Exec(ctx, `INSERT INTO endpoint_edge_assignments AS x(route_id,endpoint_id,edge_node_id,edge_process_epoch,carrier_session_id)
+SELECT DISTINCT ON (a.edge_node_id) r.id,e.id,a.edge_node_id,a.edge_process_epoch,a.session_id
+FROM endpoints e JOIN endpoint_routes r ON r.endpoint_id=e.id
+JOIN runtime_carrier_attachments a ON a.machine_id=e.agent_machine_id AND a.agent_capabilities @> ARRAY['endpoints']::text[]
+WHERE e.id=$1
+ORDER BY a.edge_node_id,a.active DESC
+ON CONFLICT(route_id,edge_node_id) DO NOTHING`, endpointID)
+	return err
 }
 
 // liveEndpoint is the SQL predicate for an endpoint that should be served now. A preview is live

@@ -177,6 +177,38 @@ VALUES($1,$2,$3,$3,$4,'owner_session_endpoint','foreground','http','127.0.0.1:30
 	if got := assignments(); len(got) != 2 || got[node] != "active/false" || got[backupNode] != "active/false" {
 		t.Fatalf("assignments after capable attach = %v, want both edges active and unobserved", got)
 	}
+	// A preview created while the agent already holds both carriers is assigned to both, the same assignments the full
+	// reconcile derives, without running it (it read every live lease of the agent: F21-168).
+	lease2, host2 := prefix+"_lease2", strings.ReplaceAll(prefix, "_", "-")+"-two.preview.example.test"
+	exec(`INSERT INTO preview_leases(id,endpoint,account_id,actor_id,owner_machine_id,owner_session_id,owner_session_kind,target_scheme,target_address,access_mode,lease_deadline)
+VALUES($1,$2,$3,$3,$4,'owner_session_endpoint','foreground','http','127.0.0.1:3001','team',now()+interval '10 minutes')`, lease2, "https://"+host2, account, machine)
+	if err := database.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+		return endpoints.RegisterPreviewTx(ctx, tx, endpoints.Preview{LeaseID: lease2, AccountID: account, AgentMachineID: machine, AccessMode: "team", Endpoint: "https://" + host2})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	generations := func() string {
+		t.Helper()
+		var out string
+		if err := database.SQL().QueryRowContext(ctx, `SELECT coalesce(string_agg(endpoint_id||'/'||edge_node_id||'/'||desired||'/'||observed_ready||'/'||generation,',' ORDER BY endpoint_id,edge_node_id),'') FROM endpoint_edge_assignments WHERE endpoint_id IN ($1,$2)`, lease, lease2).Scan(&out); err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	afterCreate := generations()
+	if want := 4; strings.Count(afterCreate, ",")+1 != want || !strings.Contains(afterCreate, lease2+"/"+node+"/active/false/") || !strings.Contains(afterCreate, lease2+"/"+backupNode+"/active/false/") {
+		t.Fatalf("assignments after creating a preview on a machine with two carriers = %s", afterCreate)
+	}
+	if err := database.InTx(ctx, func(ctx context.Context, tx *db.Tx) error { return endpoints.ReconcileAgentTx(ctx, tx, machine) }); err != nil {
+		t.Fatal(err)
+	}
+	if afterReconcile := generations(); afterReconcile != afterCreate {
+		t.Fatalf("the full reconcile changed what creating the preview assigned:\n%s\n%s", afterCreate, afterReconcile)
+	}
+	exec(`DELETE FROM endpoint_edge_assignments WHERE endpoint_id=$1`, lease2)
+	exec(`DELETE FROM endpoint_routes WHERE endpoint_id=$1`, lease2)
+	exec(`DELETE FROM endpoints WHERE id=$1`, lease2)
+	exec(`DELETE FROM preview_leases WHERE id=$1`, lease2)
 	// No edge has advertised endpoints yet: nothing is served.
 	if a.EndpointsServed {
 		t.Fatal("endpoints served before any edge admitted them")
