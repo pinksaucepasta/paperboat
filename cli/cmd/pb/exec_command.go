@@ -104,7 +104,11 @@ func actionRemoteExec(c *command.Context, requested string, request tunnel.ExecR
 	// The daemon owns operation-descriptor issuance. This placeholder carries
 	// only inventory authority and is replaced with fresh endpoints/credentials
 	// inside the authenticated local API broker.
-	descriptor := api.ExecDescriptor{OperationID: request.OperationID, ExpiresAt: time.Now().Add(2 * time.Minute), Auth: api.AuthMaterial{ExpiresAt: time.Now().Add(2 * time.Minute)}, Environment: &api.Environment{ID: machine.EnvironmentID, Kind: "machine", ResourceID: machine.ID, Root: machine.WorkspaceRoot}}
+	// Reattach and cancel dial with a fresh placeholder too, so the broker decides each attachment's authority.
+	placeholder := func() api.ExecDescriptor {
+		return api.ExecDescriptor{OperationID: request.OperationID, ExpiresAt: time.Now().Add(2 * time.Minute), Auth: api.AuthMaterial{ExpiresAt: time.Now().Add(2 * time.Minute)}, Environment: &api.Environment{ID: machine.EnvironmentID, Kind: "machine", ResourceID: machine.ID, Root: machine.WorkspaceRoot}}
+	}
+	descriptor := placeholder()
 	if request.CWD == "" {
 		request.CWD = machine.WorkspaceRoot
 	}
@@ -170,11 +174,7 @@ func actionRemoteExec(c *command.Context, requested string, request tunnel.ExecR
 		defer cancel()
 		var failures []error
 		for attempt := 0; attempt < 2; attempt++ {
-			retryDescriptor, descriptorErr := client.MachineExecDescriptor(ctx, machine.ID, request.OperationID)
-			if descriptorErr != nil {
-				return execCancelOutcome{err: errors.Join(append(failures, descriptorErr)...)}
-			}
-			replacement, dialErr := d.peerApplications.DialExec(ctx, execConnectInfo(machine, retryDescriptor, client.Workspace()), request)
+			replacement, dialErr := d.peerApplications.DialExec(ctx, execConnectInfo(machine, placeholder(), client.Workspace()), request)
 			if dialErr != nil {
 				failures = append(failures, dialErr)
 				observeExecFailure(ctx, dialErr)
@@ -362,9 +362,7 @@ func actionRemoteExec(c *command.Context, requested string, request tunnel.ExecR
 		var replacement tunnel.ExecConn
 		replacement, err = recoverExecConnection(c.Context, recovery, func(ctx context.Context) (tunnel.ExecConn, error) {
 			return reattachExecConnection(ctx, connectionRef, &request,
-				func(ctx context.Context) (api.ExecDescriptor, error) {
-					return client.MachineExecDescriptor(ctx, machine.ID, request.OperationID)
-				}, dial)
+				func(context.Context) (api.ExecDescriptor, error) { return placeholder(), nil }, dial)
 		})
 		if err != nil || replacement == nil {
 			connectionRef.AbortReattach()

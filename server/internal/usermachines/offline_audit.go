@@ -43,6 +43,9 @@ type OfflineAuditEvent struct {
 	Outcome    string `json:"outcome,omitempty"`
 	BytesIn    int64  `json:"bytes_in,omitempty"`
 	BytesOut   int64  `json:"bytes_out,omitempty"`
+	// ExitCode and DurationMS belong to an exec's offline_session_ended.
+	ExitCode   *int  `json:"exit_code,omitempty"`
+	DurationMS int64 `json:"duration_ms,omitempty"`
 	// Recording belongs to the recording_* kinds (shared/recording); it also feeds the recording index.
 	Recording *recording.Report `json:"recording,omitempty"`
 }
@@ -61,6 +64,9 @@ var offlineRefusalReasons = map[string]bool{"no_scope": true, "backlog_full": tr
 var sshRefusalReasons = map[string]bool{"busy": true, "no_access": true, "wrong_user": true, "not_set_up": true, "login_not_allowed": true}
 var sshEndOutcomes = map[string]bool{"closed": true, "revoked": true, "failed": true}
 
+// execEndOutcomes are an exec's final states (cli execprocess): its offline_session_ended outcome.
+var execEndOutcomes = map[string]bool{"exited": true, "signaled": true, "canceled": true, "failed": true}
+
 const sshCapability = "managed_ssh"
 
 func isSSHKind(kind string) bool {
@@ -70,7 +76,7 @@ func isSSHKind(kind string) bool {
 // validSSHAuditEvent checks the ssh_session_* kinds: capability is implied, the operation id is optional, and an
 // end names the started event it closes.
 func validSSHAuditEvent(e OfflineAuditEvent) bool {
-	if e.Capability != "" && e.Capability != sshCapability || e.Generation < 0 || e.BytesIn < 0 || e.BytesOut < 0 {
+	if e.Capability != "" && e.Capability != sshCapability || e.Generation < 0 || e.BytesIn < 0 || e.BytesOut < 0 || e.ExitCode != nil || e.DurationMS != 0 {
 		return false
 	}
 	if e.Origin != "online" && e.Origin != "offline" || e.OperationID != "" && !offlineAuditIdentifier.MatchString(e.OperationID) {
@@ -112,7 +118,11 @@ func validOfflineAuditEvent(e OfflineAuditEvent, now time.Time) bool {
 	if e.Kind == "sdk_operation_ended" {
 		return validSDKOperationEnd(e)
 	}
-	if _, ok := offlinePolicyCapability[e.Capability]; !ok || !offlineAuditIdentifier.MatchString(e.OperationID) || e.Origin != "" {
+	// Origin: every exec is admitted from the host's standing rules, online too (no per-command access session).
+	if _, ok := offlinePolicyCapability[e.Capability]; !ok || !offlineAuditIdentifier.MatchString(e.OperationID) || e.Origin != "online" && e.Origin != "offline" {
+		return false
+	}
+	if e.Kind != "offline_session_ended" && (e.Outcome != "" || e.ExitCode != nil || e.DurationMS != 0) {
 		return false
 	}
 	switch e.Kind {
@@ -120,6 +130,8 @@ func validOfflineAuditEvent(e OfflineAuditEvent, now time.Time) bool {
 		return e.Reason == ""
 	case "offline_session_refused":
 		return offlineRefusalReasons[e.Reason]
+	case "offline_session_ended":
+		return e.Capability == "exec" && e.Reason == "" && execEndOutcomes[e.Outcome] && e.DurationMS >= 0
 	}
 	return false
 }
@@ -214,9 +226,9 @@ func (s *Service) RecordOfflineAuditBacklog(ctx context.Context, machineID strin
 
 // auditEventFor maps a host event to its audit event type, result and metadata.
 func auditEventFor(e OfflineAuditEvent, installationGeneration int64) (string, string, map[string]any) {
-	capability, origin := offlinePolicyCapability[e.Capability], "offline"
+	capability, origin := offlinePolicyCapability[e.Capability], e.Origin
 	if isSSHKind(e.Kind) {
-		capability, origin = sshCapability, e.Origin
+		capability = sshCapability
 	}
 	metadata := map[string]any{"capability": capability, "scope_set": false, "origin": origin,
 		"peer_endpoint_id": e.PeerEndpointID, "peer_account_id": e.PeerAccountID,
@@ -231,6 +243,12 @@ func auditEventFor(e OfflineAuditEvent, installationGeneration int64) (string, s
 		metadata["session_id"] = e.EventID // an end names it, so the log pairs them
 	}
 	switch e.Kind {
+	case "offline_session_ended":
+		metadata["outcome"], metadata["duration_ms"] = e.Outcome, e.DurationMS
+		if e.ExitCode != nil {
+			metadata["exit_code"] = *e.ExitCode
+		}
+		return accessEndedEvent, audit.ResultSuccess, metadata
 	case "ssh_session_ended":
 		metadata["session_id"], metadata["outcome"], metadata["bytes_in"], metadata["bytes_out"] = e.SessionID, e.Outcome, e.BytesIn, e.BytesOut
 		return accessEndedEvent, audit.ResultSuccess, metadata

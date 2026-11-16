@@ -43,10 +43,13 @@ type Account struct {
 }
 
 type Profile struct {
-	Version            int       `json:"version"`
-	Issuer             string    `json:"issuer"`
-	Account            Account   `json:"account,omitempty"`
-	CLIClientSessionID string    `json:"cli_client_session_id"`
+	Version            int     `json:"version"`
+	Issuer             string  `json:"issuer"`
+	Account            Account `json:"account,omitempty"`
+	CLIClientSessionID string  `json:"cli_client_session_id"`
+	// ServerAuthorized marks a session the server authorizes per operation (an API token or recipe login): hosts hold no
+	// standing rules for it, so its exec asks Paperboat for each operation instead of the host's signed rules.
+	ServerAuthorized   bool      `json:"server_authorized,omitempty"`
 	AccessExpiresAt    time.Time `json:"access_expires_at"`
 	AccessSecretRef    string    `json:"access_secret_ref"`
 	RefreshSecretRef   string    `json:"refresh_secret_ref"`

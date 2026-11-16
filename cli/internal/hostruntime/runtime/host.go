@@ -76,6 +76,7 @@ type HostDependencies struct {
 	ReuseAgentToken           bool
 	Bandwidth                 *bandwidth.Recorder
 	RecordTerminalJoin        server.TerminalJoinRecorder
+	RecordExecEnd             server.ExecEndRecorder
 	Authorizer                server.AuthorizerFactory
 	BrowserTerminalAuthorizer server.AuthorizerFactory
 	BrowserTerminalIdentity   server.BrowserTerminalIdentityProvider
@@ -349,6 +350,7 @@ func NewHost(ctx context.Context, config HostConfig, dependencies HostDependenci
 		Recordings:         recordingDecisions,
 		Diagnostics:        diagnostics.FromContext(ctx),
 		RecordTerminalJoin: dependencies.RecordTerminalJoin,
+		RecordExecEnd:      dependencies.RecordExecEnd,
 		BrowserOutput:      browserOutput,
 		Sessions:           sessions, Health: healthSource, SessionLauncher: sessionLauncher,
 		WorkspaceRoot: config.WorkspaceRoot, Random: random,

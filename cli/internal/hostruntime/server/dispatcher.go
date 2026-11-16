@@ -41,6 +41,7 @@ type CapabilityGate interface{ Enabled(string) bool }
 type DispatcherConfig struct {
 	Diagnostics        *diagnostics.Recorder
 	RecordTerminalJoin TerminalJoinRecorder
+	RecordExecEnd      ExecEndRecorder
 	BrowserOutput      *browserbroadcastserver.Registry
 	Sessions           session.Service
 	Recordings         RecordingControl
@@ -156,7 +157,7 @@ func (d *Dispatcher) handle(ctx context.Context, authorization Authorization, ca
 	case "config.apply.v1":
 		return d.configApply(ctx, authorization, payload)
 	case "exec.v1":
-		return d.exec(ctx, payload)
+		return d.exec(ctx, authorization, payload)
 	case "ssh.v1":
 		return d.sshRequest(payload)
 	case "inspector.v1":

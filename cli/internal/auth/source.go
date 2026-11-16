@@ -86,6 +86,13 @@ func (s *Source) WithContext(ctx context.Context) *Source {
 	return &copy
 }
 
+// ServerAuthorized reports whether the signed-in session is authorized by the server per operation
+// (config.Profile.ServerAuthorized).
+func (s *Source) ServerAuthorized() (bool, error) {
+	profile, err := s.Store.Load(s.Issuer)
+	return profile.ServerAuthorized, err
+}
+
 func (s *Source) Credential() (config.Credential, error) {
 	return s.credential(refreshBefore)
 }

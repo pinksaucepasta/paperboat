@@ -27,6 +27,8 @@ const (
 
 	KindStarted = "offline_session_started"
 	KindRefused = "offline_session_refused"
+	// KindEnded is a peer-started exec's end: Outcome is its final state, with ExitCode and DurationMS.
+	KindEnded = "offline_session_ended"
 
 	KindSSHStarted = "ssh_session_started"
 	KindSSHRefused = "ssh_session_refused"
@@ -60,6 +62,9 @@ type Event struct {
 	Outcome    string `json:"outcome,omitempty"`
 	BytesIn    int64  `json:"bytes_in,omitempty"`
 	BytesOut   int64  `json:"bytes_out,omitempty"`
+	// ExitCode and DurationMS belong to an exec's offline_session_ended.
+	ExitCode   *int  `json:"exit_code,omitempty"`
+	DurationMS int64 `json:"duration_ms,omitempty"`
 	// Recording belongs to the recording_* kinds, which carry nothing else but the event id, kind
 	// and time.
 	Recording *recording.Report `json:"recording,omitempty"`

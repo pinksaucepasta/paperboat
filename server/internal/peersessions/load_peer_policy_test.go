@@ -9,8 +9,9 @@ package peersessions
 //
 // Idle profile (cli/internal/hostruntime/runtime/production_carrier.go carrierIdleRenewal, peertransport/tailnet
 // authority.go IdleRefresh): a machine renews about once a minute, a CLI endpoint every 20 minutes. An active user's
-// exec cycle: an access session is created, the CLI and the machine fetch their configuration, the session is revoked,
-// both fetch again (four configurations and two writes).
+// exec: admitted by the host's standing rule with no control-plane request; the host uploads its queued audit events
+// every 30 s in one request (FIX-EXECDB). Before, each exec created an access session, both endpoints fetched their
+// configuration, the session was revoked and both fetched again (four configurations and two writes).
 //
 // Never against production: PAPERBOAT_PERF_DATABASE_DSN must name an isolated *_test database.
 //
@@ -34,10 +35,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/server/internal/audit"
 	"github.com/pinksaucepasta/paperboat/server/internal/config"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/mint"
 	"github.com/pinksaucepasta/paperboat/server/internal/teams/teamstest"
+	"github.com/pinksaucepasta/paperboat/server/internal/usermachines"
 	wire "github.com/pinksaucepasta/paperboat/shared/peeridentity"
 )
 
@@ -305,7 +308,10 @@ func TestLoadPeerPolicy(t *testing.T) {
 	dbPerReq := idleDB.Seconds() / float64(max(idleN, 1))
 	perMachine := 1/machineEvery.Seconds() + 1/cliEvery.Seconds()/float64(perAccount) // a machine plus its share of the account's CLI
 
-	// Active users on top of the idle fleet: each exec cycle on one of the user's own machines.
+	// Active users on top of the idle fleet: each exec on one of the user's own machines. The host admits it from its
+	// standing rule (no access session, no configuration fetch), queues the start for audit and uploads its queue every
+	// offlineaudit.UploadInterval (30 s) in one request, as cli/internal/hostruntime/offlineaudit does.
+	audits := usermachines.New(store, audit.NewWriter(store), usermachines.Policy{}, nil)
 	var cycles atomic.Int64
 	for i := range min(active, len(clis)) {
 		c := clis[i]
@@ -316,23 +322,18 @@ func TestLoadPeerPolicy(t *testing.T) {
 				return
 			case <-time.After(time.Duration(i) * activeEvery / time.Duration(active)):
 			}
+			upload := time.Now().Add(30 * time.Second)
+			var queued []usermachines.OfflineAuditEvent
 			for n := 0; runCtx.Err() == nil; n++ {
 				next := time.Now().Add(activeEvery)
-				access := fmt.Sprintf("load_access_%s_%d", c.id, n)
-				if _, err := store.SQL().ExecContext(runCtx, `INSERT INTO paperboat.user_machine_access_sessions(credential_kind,id,user_machine_id,user_id,environment_id,cli_client_session_id,http_base_url,helper_terminal_session_id,helper_file_session_id,capabilities,operation_id,expires_at) VALUES('external_issuer',$1,$2,$3,$4,$5,'https://machine.example.test',$6,$7,ARRAY['exec'],$8,now()+interval '5 minutes')`,
-					access, host.id, c.account, "env_"+host.id, c.id, "t_"+access, "f_"+access, "op_"+access); err != nil {
-					if runCtx.Err() == nil {
-						t.Logf("access session: %v", err)
-					}
-					return
-				}
-				live := []AdmittedScope{{ResourceKind: "machine_access", ResourceID: access}}
-				configure(c, nil)
-				configure(host, nil)
-				_, _ = store.SQL().ExecContext(runCtx, `UPDATE paperboat.user_machine_access_sessions SET state='revoked',revoked_at=now(),revocation_reason='load_cycle_done' WHERE id=$1`, access)
-				configure(c, live)
-				configure(host, live)
+				queued = append(queued, usermachines.OfflineAuditEvent{EventID: fmt.Sprintf("load_%s_%d", c.id, n), Kind: "offline_session_started", Capability: "exec", PeerEndpointID: c.id, PeerAccountID: c.account, OperationID: fmt.Sprintf("op_%s_%d", c.id, n), OccurredAt: time.Now().UTC().Truncate(time.Second), Origin: "online"})
 				cycles.Add(1)
+				if !time.Now().Before(upload) {
+					if _, err := audits.RecordOfflineAuditBacklog(runCtx, host.id, 1, queued); err != nil && runCtx.Err() == nil {
+						t.Logf("audit upload: %v", err)
+					}
+					queued, upload = queued[:0], time.Now().Add(30*time.Second)
+				}
 				select {
 				case <-runCtx.Done():
 				case <-time.After(time.Until(next)):

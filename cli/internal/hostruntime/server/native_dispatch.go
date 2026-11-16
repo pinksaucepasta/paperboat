@@ -68,6 +68,8 @@ type nativeDispatchEnvelope struct {
 type NativeDispatchOfflinePeer struct {
 	AccountID  string `json:"account_id"`
 	EndpointID string `json:"endpoint_id"`
+	// PaperboatAnswering is the carrier's view at admission: a standing-rule exec while Paperboat answers is not offline.
+	PaperboatAnswering bool `json:"paperboat_answering,omitempty"`
 }
 
 // dispatchOfflineConn is a worker-side stream for one offline session of the carrier-admitted peer: the terminal and
@@ -81,6 +83,8 @@ type dispatchOfflineConn struct {
 func (c *dispatchOfflineConn) OfflinePeer() (accountID, endpointID, consumer, operationID string, deadline time.Time) {
 	return c.peer.AccountID, c.peer.EndpointID, c.header.Consumer, c.header.OperationID, time.Unix(c.header.DeadlineUnix, 0)
 }
+
+func (c *dispatchOfflineConn) PaperboatAnswering() bool { return c.peer.PaperboatAnswering }
 
 func (c *dispatchOfflineConn) CloseWrite() error {
 	if closer, ok := c.Conn.(interface{ CloseWrite() error }); ok {

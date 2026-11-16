@@ -454,6 +454,35 @@ func TestExecAttachReusesExistingExecution(t *testing.T) {
 	}
 }
 
+// A standing-rule exec makes no control-plane request, so the host records its end (outcome, exit code) once, for the
+// attachment that started it; a replayed start or a reattach names the same execution and records nothing more.
+func TestExecEndIsRecordedOnceForTheStartingAttachment(t *testing.T) {
+	dispatcher, root := execDispatcher(t)
+	ends := make(chan ExecEnd, 4)
+	dispatcher.config.RecordExecEnd = func(end ExecEnd) { ends <- end }
+	operationID := "operation_end"
+	startPayload, _ := json.Marshal(map[string]any{"action": "start", "operation_id": operationID, "argv": []string{"/bin/sh", "-c", "exit 3"}, "cwd": root})
+	peer := Authorization{ClientID: "cli_1", UserID: "acct_1", Offline: true}
+	for range 2 {
+		if outcome := dispatcher.HandleOperation(context.Background(), peer, "exec.v1", operationID, startPayload); outcome.ErrorCode != "" {
+			t.Fatalf("start outcome=%#v", outcome)
+		}
+	}
+	select {
+	case end := <-ends:
+		if end.AccountID != "acct_1" || end.EndpointID != "cli_1" || end.OperationID != operationID || !end.Offline || end.Snapshot.State != execprocess.StateExited || end.Snapshot.Result == nil || end.Snapshot.Result.Code != 3 {
+			t.Fatalf("exec end = %+v result=%+v", end, end.Snapshot.Result)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("exec end was not recorded")
+	}
+	select {
+	case end := <-ends:
+		t.Fatalf("a replayed start recorded a second end: %+v", end)
+	case <-time.After(200 * time.Millisecond):
+	}
+}
+
 func (l testSessionLauncher) Launch(ctx context.Context, request process.LaunchRequest) (session.Snapshot, error) {
 	return l.sessions.Create(ctx, session.CreateRequest{ID: request.ID, Name: request.Name, Command: pty.Command{Path: "/bin/sh", Args: append([]string(nil), l.args...), Env: []string{"PATH=/usr/bin:/bin", "TERM=xterm"}, CWD: request.CWD, Dimensions: request.Dimensions}})
 }

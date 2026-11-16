@@ -376,7 +376,7 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 			return server.BrowserTerminalIdentity{}, err
 		}
 		return productionBrowserTerminalIdentity(runtimeConfig.StateRoot, machineID, uint64(machineRegistration.InstallationGeneration))
-	}, AuthorizationService: authorizationRefresh, NetworkMonitor: networkChanges, PreviewDispatcher: previewAssembly, PreviewRecovery: previewAssembly, PreviewOwnerSessions: previewAssembly.OwnerSessionLeases(), RuntimeObservationService: runtimeService, RecordTerminalJoin: runtimeObservation.sender.RecordTerminalJoin, ManagedEnvironment: managedEnvironment, Metrics: metrics, HealthTracker: healthTracker, LocalControlToken: localControlToken, Inspector: inspectorService, ManagedSSH: managedSSHHost, ManagedSSHService: managedSSHService, Capabilities: capabilityController}
+	}, AuthorizationService: authorizationRefresh, NetworkMonitor: networkChanges, PreviewDispatcher: previewAssembly, PreviewRecovery: previewAssembly, PreviewOwnerSessions: previewAssembly.OwnerSessionLeases(), RuntimeObservationService: runtimeService, RecordTerminalJoin: runtimeObservation.sender.RecordTerminalJoin, RecordExecEnd: ExecEndAudit(offlineAudit), ManagedEnvironment: managedEnvironment, Metrics: metrics, HealthTracker: healthTracker, LocalControlToken: localControlToken, Inspector: inspectorService, ManagedSSH: managedSSHHost, ManagedSSHService: managedSSHService, Capabilities: capabilityController}
 	if descriptor := environ("PAPERBOAT_RUNTIME_LISTEN_FD"); descriptor != "" {
 		dependencies.Listener = inheritedRuntimeListener(descriptor, listen)
 	}

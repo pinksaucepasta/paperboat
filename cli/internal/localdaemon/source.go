@@ -77,6 +77,18 @@ func (s AuthenticatedMachineSource) IssuePeerStream(ctx context.Context, request
 	if request.Consumer != "exec" {
 		return request, errors.New("daemon descriptor issuance is unavailable for this consumer")
 	}
+	// An exec is admitted by the host's signed standing rule for this endpoint, like SSH (Tailscale tailssh, NetBird):
+	// no control-plane request, access session or peer-configuration change per command. The host queues the audit
+	// event. Only a session the server authorizes per operation (API token, recipe) asks Paperboat for each exec.
+	if authorized, ok := s.Auth.(interface{ ServerAuthorized() (bool, error) }); ok {
+		perOperation, err := authorized.ServerAuthorized()
+		if err != nil {
+			return request, err
+		}
+		if !perOperation {
+			return hostRulesPeerStream(request)
+		}
+	}
 	var descriptor api.ExecDescriptor
 	for attempt := 0; attempt < 2; attempt++ {
 		credential, err := s.Auth.Credential()
@@ -323,8 +335,8 @@ func applyListedSSH(machines []api.UserMachine) []api.UserMachine {
 // received from the host's signed state still ends it at once.
 const offlineStreamLifetime = 12 * time.Hour
 
-// hostRulesPeerStream asks the host to admit the stream from its own signed scopes (F21-11): every SSH stream,
-// and exec or terminal streams while Paperboat is unreachable.
+// hostRulesPeerStream asks the host to admit the stream from its own signed scopes (F21-11): every SSH stream, every
+// exec of a session with standing rules, and exec or terminal streams while Paperboat is unreachable.
 func hostRulesPeerStream(request localapi.PeerStreamRequest) (localapi.PeerStreamRequest, error) {
 	if !peerconsumer.Offline(request.Consumer) {
 		return request, errors.New("this session needs Paperboat online")

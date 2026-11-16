@@ -628,7 +628,7 @@ func (s *productionNativePeerService) serveStream(ctx context.Context, header st
 			// An offline session carries no credential for the worker to verify: forward the peer this carrier admitted from
 			// its signed scopes (F21-11).
 			accountID, endpointID, _, _, _ := offline.OfflinePeer()
-			remote, err = s.config.dispatch.OpenOffline(ctx, header, server.NativeDispatchOfflinePeer{AccountID: accountID, EndpointID: endpointID})
+			remote, err = s.config.dispatch.OpenOffline(ctx, header, server.NativeDispatchOfflinePeer{AccountID: accountID, EndpointID: endpointID, PaperboatAnswering: s.paperboatAnswering()})
 		} else if resume, ok := stream.(server.ResumePeerConn); ok {
 			// A resume has no credential for the worker to verify: forward the peer this carrier admitted.
 			accountID, endpointID, _, _, standing := resume.ResumePeer()

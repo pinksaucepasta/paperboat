@@ -21,6 +21,7 @@ type OfflinePeerConn interface {
 type offlineAuthorizer struct {
 	accountID, endpointID, consumer, operationID string
 	deadline                                     time.Time
+	offline                                      bool
 }
 
 func newOfflineAuthorizer(conn OfflinePeerConn) (*offlineAuthorizer, error) {
@@ -28,7 +29,12 @@ func newOfflineAuthorizer(conn OfflinePeerConn) (*offlineAuthorizer, error) {
 	if accountID == "" || endpointID == "" || operationID == "" || consumer != "terminal" && consumer != "exec" {
 		return nil, ErrCredentialPolicy
 	}
-	return &offlineAuthorizer{accountID: accountID, endpointID: endpointID, consumer: consumer, operationID: operationID, deadline: deadline}, nil
+	// A stream admitted from the host's standing rules while Paperboat answers (every exec, F21-11) is not offline.
+	offline := true
+	if answering, ok := conn.(interface{ PaperboatAnswering() bool }); ok {
+		offline = !answering.PaperboatAnswering()
+	}
+	return &offlineAuthorizer{accountID: accountID, endpointID: endpointID, consumer: consumer, operationID: operationID, deadline: deadline, offline: offline}, nil
 }
 
 func (a *offlineAuthorizer) Authorize(_ context.Context, frame protocol.Frame) (Authorization, error) {
@@ -45,7 +51,7 @@ func (a *offlineAuthorizer) Authorize(_ context.Context, frame protocol.Frame) (
 		ClientID:       a.endpointID,
 		OperationID:    a.operationID,
 		ExpiresAt:      a.deadline,
-		Offline:        true,
+		Offline:        a.offline,
 	}
 	if a.consumer == "terminal" {
 		authorization.SessionID = a.operationID

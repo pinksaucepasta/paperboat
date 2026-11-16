@@ -324,6 +324,42 @@ func TestIssuePeerStreamGoesOfflineOnlyWhenPaperboatIsUnreachable(t *testing.T) 
 	}
 }
 
+type standingAuthSource struct {
+	rotatingAuthSource
+	perOperation bool
+}
+
+func (s *standingAuthSource) ServerAuthorized() (bool, error) { return s.perOperation, nil }
+
+// FIX-EXECDB: an exec of a session with standing host rules asks Paperboat nothing (no access session, no peer
+// configuration change per command); only an API token or recipe session asks for a descriptor per exec.
+func TestIssuePeerStreamSendsExecToTheHostRulesUnlessServerAuthorized(t *testing.T) {
+	var requests int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests++
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"error":{"code":"forbidden","message":"no"}}`))
+	}))
+	defer server.Close()
+	request := localapi.PeerStreamRequest{Workspace: "personal", Schema: localapi.PeerStreamSchemaV1, Consumer: "exec", MachineID: "machine_1", EnvironmentID: "environment_1", MachineGeneration: 1, OperationID: "operation_1", Deadline: time.Now().UTC().Add(time.Minute), MaximumBytes: 1024, Payload: json.RawMessage(`{"operation_id":"operation_1"}`)}
+	auth := &standingAuthSource{}
+	source := AuthenticatedMachineSource{ServerURL: server.URL, Auth: auth, SourceMachineID: "source_1"}
+	for range 3 {
+		result, err := source.IssuePeerStream(context.Background(), request)
+		if err != nil || !result.Offline || result.Credential != "" || result.AccessSessionID != "" {
+			t.Fatalf("standing exec: result=%+v err=%v", result, err)
+		}
+	}
+	if requests != 0 {
+		t.Fatalf("three standing execs made %d control requests", requests)
+	}
+	auth.perOperation = true
+	if result, err := source.IssuePeerStream(context.Background(), request); err == nil || result.Offline || requests != 1 {
+		t.Fatalf("an API token exec did not ask Paperboat: result=%+v err=%v requests=%d", result, err, requests)
+	}
+}
+
 // D1 (F5-07): an SSH stream asks Paperboat nothing; the host admits it from its own signed rules.
 func TestIssuePeerStreamSendsSSHToTheHostRulesWithoutARequest(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

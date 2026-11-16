@@ -231,6 +231,20 @@ func TestNetworkApplicationExpiryOnPostgres(t *testing.T) {
 	}
 	service.now = func() time.Time { return now.Add(250 * time.Millisecond) }
 
+	// Inspector access ends with its tunnel: a tunnel expiring before the credential bounds the grant (and so the
+	// cached document), instead of the grant lingering until the credential's own expiry.
+	// The credential lives its longest (issued_at + 5 min, inspector_credentials_check); the tunnel ends first.
+	tunnelEnds := now.Add(4 * time.Minute)
+	execute(`UPDATE inspector_credentials SET expires_at=issued_at+interval '5 minutes' WHERE credential_id=$1`, inspector)
+	execute(`UPDATE tunnels SET expires_at=$2 WHERE id=$1`, "expiry_tunnel_"+suffix, tunnelEnds)
+	var grantEnds time.Time
+	if err := store.SQL().QueryRowContext(ctx, `SELECT expires_at FROM paperboat.peer_network_inspector_admissions($1,$2,$3,$4)`, cli, account, time.Now(), []string{}).Scan(&grantEnds); err != nil {
+		t.Fatal(err)
+	}
+	if !grantEnds.Equal(tunnelEnds) {
+		t.Fatalf("inspector grant ends at %v, want the tunnel's expiry %v", grantEnds, tunnelEnds)
+	}
+
 	execute(`UPDATE inspector_credentials SET revoked_at=now() WHERE credential_id=$1`, inspector)
 	execute(`UPDATE control_config_assignments SET version=version+1 WHERE id=$1`, assignment)
 	// Explicit withdrawal reaches both the caller and the machine even after TTL.

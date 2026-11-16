@@ -13,7 +13,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/execprocess"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/offlineaudit"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/server"
 	"github.com/pinksaucepasta/paperboat/internal/managedssh"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/native"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/streamauth"
@@ -46,9 +48,16 @@ func TestOfflineAdmissionRecordsEveryDecisionFirst(t *testing.T) {
 		t.Fatalf("recorded %+v", events)
 	}
 	for i, w := range want {
-		if events[i].Kind != w.kind || events[i].Reason != w.reason || events[i].PeerAccountID != "acct" || events[i].OperationID != "op_1" {
+		if events[i].Kind != w.kind || events[i].Reason != w.reason || events[i].PeerAccountID != "acct" || events[i].OperationID != "op_1" || events[i].Origin != offlineaudit.OriginOffline {
 			t.Fatalf("event %d = %+v, want %s/%s", i, events[i], w.kind, w.reason)
 		}
+	}
+	// Every exec is admitted from the standing rules, online too: its start says so.
+	if err := offlineAdmission(queue, func() bool { return true })(context.Background(), request(true)); err != nil {
+		t.Fatalf("an online standing-rule exec was refused: %v", err)
+	}
+	if online := queue.Oldest(10)[2]; online.Kind != offlineaudit.KindStarted || online.Origin != offlineaudit.OriginOnline {
+		t.Fatalf("online exec recorded as %+v", online)
 	}
 }
 
@@ -203,5 +212,30 @@ func TestOfflineAdmissionRefusesAScopedStartWhenTheBacklogIsFull(t *testing.T) {
 	request := native.OfflineAdmission{Peer: tailnet.NetworkBinding{AccountID: "acct", EndpointID: "cli_1"}, Header: streamauth.Header{OperationID: "op_full"}, Capability: "exec", Allowed: true}
 	if err := offlineAdmission(queue, offlineHost)(context.Background(), request); !errors.Is(err, offlineaudit.ErrFull) {
 		t.Fatalf("a scoped offline start with a full backlog: %v, want it refused with ErrFull", err)
+	}
+}
+
+// Every exec's end is queued for audit with its outcome, exit code and duration, origin online or offline.
+func TestExecEndAuditQueuesOutcomeExitCodeAndDuration(t *testing.T) {
+	queue, err := offlineaudit.Open(filepath.Join(t.TempDir(), "offline-audit.json"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	started := time.Now().Add(-1500 * time.Millisecond)
+	record := ExecEndAudit(queue)
+	record(server.ExecEnd{AccountID: "acct", EndpointID: "cli_1", OperationID: "op_1", Snapshot: execprocess.Snapshot{State: execprocess.StateExited, StartedAt: &started, Result: &execprocess.Result{Code: 3, ExitedAt: started.Add(1500 * time.Millisecond)}}})
+	record(server.ExecEnd{AccountID: "acct", EndpointID: "cli_1", OperationID: "op_2", Offline: true, Snapshot: execprocess.Snapshot{State: execprocess.StateFailed}})
+	events := queue.Oldest(10)
+	if len(events) != 2 {
+		t.Fatalf("queued %+v", events)
+	}
+	if e := events[0]; e.Kind != offlineaudit.KindEnded || e.Capability != "exec" || e.Origin != offlineaudit.OriginOnline || e.Outcome != "exited" || e.ExitCode == nil || *e.ExitCode != 3 || e.DurationMS != 1500 || e.OperationID != "op_1" || e.PeerAccountID != "acct" {
+		t.Fatalf("exited exec end = %+v", e)
+	}
+	if e := events[1]; e.Origin != offlineaudit.OriginOffline || e.Outcome != "failed" || e.ExitCode != nil || e.DurationMS != 0 {
+		t.Fatalf("failed exec end = %+v", e)
+	}
+	if ExecEndAudit(nil) != nil {
+		t.Fatal("a host without an audit queue got an exec end recorder")
 	}
 }

@@ -24,7 +24,18 @@ type execRequest struct {
 	Signal       string            `json:"signal,omitempty"`
 }
 
-func (d *Dispatcher) exec(ctx context.Context, payload json.RawMessage) operation.Outcome {
+// ExecEnd is one finished execution a peer started. A standing-rule exec makes no control-plane request, so the host
+// queues its end (outcome, exit code, duration) for the audit log, as it does an SSH session's (Teleport's session.end).
+type ExecEnd struct {
+	AccountID, EndpointID, OperationID string
+	Offline                            bool
+	Snapshot                           execprocess.Snapshot
+}
+
+// ExecEndRecorder queues an ExecEnd; it must not block for long.
+type ExecEndRecorder func(ExecEnd)
+
+func (d *Dispatcher) exec(ctx context.Context, authorization Authorization, payload json.RawMessage) operation.Outcome {
 	if d.config.Exec == nil {
 		return failure("capability_required")
 	}
@@ -37,6 +48,17 @@ func (d *Dispatcher) exec(ctx context.Context, payload json.RawMessage) operatio
 		execution, replay, err := d.config.Exec.Start(ctx, execprocess.Request{OperationID: request.OperationID, Argv: request.Argv, CWD: request.CWD, Environment: request.Environment, Timeout: time.Duration(request.TimeoutMS) * time.Millisecond, PTY: request.PTY, Dimensions: pty.Dimensions{Columns: request.Columns, Rows: request.Rows}})
 		if err != nil {
 			return execResult(nil, err)
+		}
+		if !replay && d.config.RecordExecEnd != nil {
+			// Only the attachment that started it records the end; reattaches and replays name the same execution.
+			end := ExecEnd{AccountID: authorization.AccountID, EndpointID: authorization.ClientID, OperationID: request.OperationID, Offline: authorization.Offline}
+			if end.AccountID == "" {
+				end.AccountID = authorization.UserID
+			}
+			go func() {
+				end.Snapshot, _ = execution.Wait(context.Background()) // an execution always ends (exit, timeout, linger, shutdown)
+				d.config.RecordExecEnd(end)
+			}()
 		}
 		return execAttachmentResult(ctx, execution, replay)
 	case "attach":

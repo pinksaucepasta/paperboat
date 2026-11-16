@@ -10,8 +10,10 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/enrollment"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/offlineaudit"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/server"
 	"github.com/pinksaucepasta/paperboat/internal/managedssh"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/native"
+	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 )
 
 // offlineAdmission records every offline session decision before the host acts on it (F21-11):
@@ -25,7 +27,12 @@ func offlineAdmission(queue *offlineaudit.Queue, online func() bool) func(contex
 		if request.Capability == sshCapability {
 			return admitOfflineSSH(queue, request, online())
 		}
-		event := offlineaudit.Event{Kind: offlineaudit.KindStarted, Capability: request.Capability, PeerEndpointID: request.Peer.EndpointID, PeerAccountID: request.Peer.AccountID, OperationID: request.Header.OperationID}
+		// Every exec is admitted here, online too (no per-command access session); Origin says which.
+		origin := offlineaudit.OriginOffline
+		if online() {
+			origin = offlineaudit.OriginOnline
+		}
+		event := offlineaudit.Event{Kind: offlineaudit.KindStarted, Capability: request.Capability, PeerEndpointID: request.Peer.EndpointID, PeerAccountID: request.Peer.AccountID, OperationID: request.Header.OperationID, Origin: origin}
 		var refusal error
 		if !request.Allowed {
 			refusal, event.Reason = errors.New("no signed scope allows this session"), offlineaudit.ReasonNoScope
@@ -119,5 +126,30 @@ func SSHSessionAudit(queue *offlineaudit.Queue) managedssh.SessionAudit {
 			return errors.New("unknown managed SSH session event")
 		}
 		return queue.Record(event)
+	}
+}
+
+// ExecEndAudit queues the end of every peer-started exec (outcome, exit code, duration) for upload with the starts the
+// carrier records. The start and end pair by operation id. A full queue drops the end: the start is on record already.
+func ExecEndAudit(queue *offlineaudit.Queue) server.ExecEndRecorder {
+	if queue == nil {
+		return nil
+	}
+	return func(end server.ExecEnd) {
+		origin := offlineaudit.OriginOnline
+		if end.Offline {
+			origin = offlineaudit.OriginOffline
+		}
+		event := offlineaudit.Event{Kind: offlineaudit.KindEnded, Capability: "exec", PeerEndpointID: end.EndpointID, PeerAccountID: end.AccountID, OperationID: end.OperationID, Origin: origin, Outcome: string(end.Snapshot.State)}
+		if r := end.Snapshot.Result; r != nil {
+			code := r.Code
+			event.ExitCode = &code
+			if started := end.Snapshot.StartedAt; started != nil && r.ExitedAt.After(*started) {
+				event.DurationMS = r.ExitedAt.Sub(*started).Milliseconds()
+			}
+		}
+		if err := queue.Record(event); err != nil {
+			diagnosticlog.TryWarn("exec end could not be queued for audit", "error", err)
+		}
 	}
 }

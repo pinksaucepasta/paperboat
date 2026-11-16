@@ -9,6 +9,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/nativeproto"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
+	"github.com/pinksaucepasta/paperboat/internal/peertransport/streamauth"
 	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 )
 
@@ -41,8 +42,16 @@ func TestOfflineStreamsAuthorizeOnlyTheirOwnSession(t *testing.T) {
 	}
 	ctx := context.Background()
 	got, err := execAuth.Authorize(ctx, protocol.Frame{Capability: "exec.v1", OperationID: "offline-op-1"})
-	if err != nil || got.AccountID != "acct_peer" || got.ClientID != "cli_peer" || got.JournalBinding == "" {
+	if err != nil || got.AccountID != "acct_peer" || got.ClientID != "cli_peer" || got.JournalBinding == "" || !got.Offline {
 		t.Fatalf("offline exec authorization = %+v, %v", got, err)
+	}
+	// Every exec is admitted from the standing rules; while Paperboat answers it is not offline (no ENV offline notice).
+	online, err := newOfflineAuthorizer(&dispatchOfflineConn{Conn: plain, peer: NativeDispatchOfflinePeer{AccountID: "acct_peer", EndpointID: "cli_peer", PaperboatAnswering: true}, header: streamauth.Header{Consumer: "exec", OperationID: "offline-op-1", DeadlineUnix: time.Now().Add(time.Minute).Unix()}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := online.Authorize(ctx, protocol.Frame{Capability: "exec.v1", OperationID: "offline-op-1"}); err != nil || got.Offline {
+		t.Fatalf("online standing-rule exec authorization = %+v, %v", got, err)
 	}
 	for _, frame := range []protocol.Frame{{Capability: "exec.v1", OperationID: "other-op"}, {Capability: "terminal.v1"}, {Capability: "file-transfer.v1"}, {Capability: "preview.launch.v1"}} {
 		if _, err := execAuth.Authorize(ctx, frame); err == nil {
