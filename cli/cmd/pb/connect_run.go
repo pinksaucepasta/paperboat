@@ -137,6 +137,9 @@ func actionConnectTargetInDirectory(c *command.Context, requested, cwd string) e
 	ownedCommand := *c
 	ownedCommand.Context = ctx
 	c = &ownedCommand
+	// Keys typed while the connection is made (including the control-plane lookups below) are held raw, so Enter stays
+	// CR; session.Run delivers them once the shell attaches. A cooked tty turned the early ones into LF (X-26).
+	defer session.HoldInput()()
 	d, err := buildDeps(c)
 	if err != nil {
 		return err
@@ -315,8 +318,6 @@ func actionConnectTargetInDirectory(c *command.Context, requested, cwd string) e
 		return localTerminalSize()
 	}
 
-	// Keys typed while the connection is made are held raw; session.Run delivers them once the shell attaches.
-	defer session.HoldInput()()
 	var conn tunnel.Conn
 	var lastTerminalSequence atomic.Int64
 	inputOwner := "owner_" + uuid.NewString() // one pb connect across redials: the daemon keeps its unanswered input
