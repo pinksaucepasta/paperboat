@@ -21,7 +21,8 @@ const log = (ok, step, detail = "") => {
   console.log(`${ok ? "PASS" : "FAIL"}  ${step}${detail ? `  (${detail})` : ""}`)
 }
 const api = async (path, init) => {
-  const response = await ctx.request.fetch(`${origin}/api/v1/${path}`, init)
+  // The console's relay refuses a write without its own origin (isSameOrigin).
+  const response = await ctx.request.fetch(`${origin}/api/v1/${path}`, { ...init, headers: { origin, ...init?.headers } })
   const json = await response.json().catch(() => ({}))
   return { status: response.status(), data: json.data, error: json.error }
 }
