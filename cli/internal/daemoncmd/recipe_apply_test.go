@@ -26,7 +26,8 @@ func TestRecipeApplyEnsuresSectionsWithPBCommands(t *testing.T) {
 			// pb preview --json prints the bare preview resource (F26-05 device check, rcp-l).
 			return []byte(`{"schema":"paperboat.preview-tunnel/v1","kind":"preview_lease","id":"calm-summer-beach","state":"ready"}`), nil
 		case args[0] == "tunnel" && args[1] == "create":
-			return []byte(`{"ok":true,"data":{"name":"` + args[2] + `"}}`), nil
+			// pb tunnel create --json prints the resource under "tunnel" (F26-05 device check, pbmac2).
+			return []byte(`{"schema":"paperboat.preview-tunnel/v1","kind":"tunnel_create","tunnel":{"kind":"tunnel","id":"tunnel_1","name":"` + args[2] + `"}}`), nil
 		case args[0] == "config" && !strings.Contains(line, "--confirm"):
 			return []byte(`{"ok":false,"data":{"outcome":"confirmation_required","confirmation_token":"K3M9QX"}}`), errors.New("exit status 2")
 		}

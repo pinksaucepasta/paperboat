@@ -194,6 +194,10 @@ func (a *recipeApplier) ensure(ctx context.Context, created map[string]string, w
 			continue
 		}
 		data := jsonData(out)
+		// pb tunnel create --json nests the resource under its kind: {"kind":"tunnel_create","tunnel":{...}}.
+		if nested, ok := data[kind].(map[string]any); ok {
+			data = nested
+		}
 		name, _ := data["name"].(string)
 		if name == "" {
 			name, _ = data["id"].(string)
