@@ -11,9 +11,13 @@ Windows host mode: `PB_SMOKE_WINDOWS_PB` set, the scripts run on the controller,
 | https_front_desk.py pnfw-hv (web server holding 0.0.0.0:80/443, IIS stopped) | PASS: front_desk_https, port_443_label, host_opens_own_address, redirect_gets_explanation |
 | https_front_desk.py pnfw-hv --high-ports (dev-729ce3c0e) | PASS |
 
-## Windows host, Mac viewer
-- dev-729ce3c0e, macpool-2: port_names.py all steps PASS except late machine (the third machine, on a VM that was down, was offline); https_front_desk.py PASS in both modes (80/443 and --high-ports).
-- dev-f3f5481be, macpool-3: FAIL on the first fetch in 4 runs: that runner turned out to carry another lane's pb and account (its `pb machine list` showed machines of a second account), so those runs do not count. Released and revoked; M<->W stays [~] until a clean Mac runner passes.
+## Windows host, Mac viewer (dev-a46d68d22, server .30, clean macpool-8): PASS
+| script | result |
+|---|---|
+| port_names.py macpool-pnfw-8 --shadow-machine pnfw-hv --late-machine pnfw-hv | PASS, all 9 steps (pnC) |
+| https_front_desk.py macpool-pnfw-8 (web server holding 80/443) | PASS: front desk https, 443 label, own address, redirect explanation (fdC) |
+Earlier on dev-729ce3c0e (macpool-2) the same checks passed too. Runs on macpool-3 (dev-f3f5481be) failed on the first fetch because that runner
+carried another lane's pb and account; released and revoked, they do not count.
 
 ## Found: policy changes reach the host only with its next heartbeat (fixed in da5f27961)
 `pb tunnel policy allow <machine> 81` (a port below 1024) to the port opening on a viewer, measured with a host-side origin on 127.0.0.1:81:
@@ -22,7 +26,15 @@ Windows host mode: `PB_SMOKE_WINDOWS_PB` set, the scripts run on the controller,
 | Linux (pnfw-hv) | Mac | 17 s | 28 s |
 | Windows | Linux | 91 s | 41 s |
 | Mac | Linux | 178 s | 86 s |
-Cause: lazyaccess upsert/delete and machineservices.UpdatePolicy changed what the host reads in the reply to its next observation but published no machine topic, so the host waited for its jittered 4-minute heartbeat. Fix: they publish `machine_services` for the machine in their transaction (TestPolicyPostgres, TestMachineServicePostgresAuthorityLifecycle, CI run 43814899163). Re-measurement after the deploy: see the Log.
+Cause: lazyaccess upsert/delete and machineservices.UpdatePolicy changed what the host reads in the reply to its next observation but published no machine topic, so the host waited for its jittered 4-minute heartbeat. Fix: they publish `machine_services` for the machine in their transaction (TestPolicyPostgres, TestMachineServicePostgresAuthorityLifecycle, CI run 43814899163). Server .30 (push fix) cut it to 6-16 s (Linux 10-15, Windows 6-16): the observation a policy wake sends carries the old policy, and the port the policy lists was announced
+only at the next port-watch tick (2 s Linux, 5 s Windows, 10 s macOS). Fix 2decdc2f2 (cli, TestRuntimeObservationAnnouncesAPortAPolicyListsRightAfterTheWake): the loop re-reads the services after a wake and sends again at once.
+Measured on dev-a46d68d22 on all three hosts (allow -> open on a viewer, probe every 1-4 s, 2-3 runs; the first run of a pair is warm-up):
+| host | viewer | seconds |
+|---|---|---|
+| Linux (pnfw-hv) | Windows | 9, 6, 5 |
+| Linux | Mac | 5, 5 |
+| Windows | Linux | 13, 4, 5 |
+| Mac (macpool-8) | Linux | 4, 4 |
 
 ## Notes
 - Windows port discovery polls every 5 s (machine_services_watch_windows.go), Linux 2 s, macOS 10 s: not the cause.
