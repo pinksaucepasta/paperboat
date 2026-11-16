@@ -246,13 +246,24 @@ func (s *NetworkService) Configuration(ctx context.Context, in NetworkConfigRequ
 	// Wake bursts send several configuration requests for one endpoint at once;
 	// built concurrently they all bump the same generation row and abort each
 	// other past the retry budget. One build per endpoint at a time instead.
+	started := time.Now()
 	unlock, err := s.endpointBuilds.lock(ctx, in.EndpointID)
 	if err != nil {
 		return NetworkConfigResult{}, err
 	}
 	defer unlock()
+	trace := configTrace{lockWait: time.Since(started)}
+	defer func() {
+		// A slow request names its slow step (prod .37: >100 KB configurations averaged 700 ms; which step is unknown).
+		if total := time.Since(started); total >= slowConfigLog {
+			slog.Info("peer network configuration slow", "total_ms", total.Milliseconds(), "lock_wait_ms", trace.lockWait.Milliseconds(),
+				"generation_ms", trace.generation.Milliseconds(), "cache_hit", trace.hit, "build_ms", trace.build.Milliseconds(),
+				"sign_ms", trace.sign.Milliseconds(), "attempts", trace.attempts, "peers", trace.peers)
+		}
+	}()
 	for attempt := 1; ; attempt++ {
-		result, err := s.configuration(ctx, in)
+		trace.attempts = attempt
+		result, err := s.configuration(ctx, in, &trace)
 		var pg *pgconn.PgError
 		if err == nil || attempt >= 10 || !errors.As(err, &pg) || pg.Code != "40001" && pg.Code != "40P01" {
 			return result, err
@@ -269,7 +280,17 @@ func (s *NetworkService) Configuration(ctx context.Context, in NetworkConfigRequ
 	}
 }
 
-func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequest) (NetworkConfigResult, error) {
+// slowConfigLog is the duration past which a configuration request logs its steps.
+const slowConfigLog = 250 * time.Millisecond
+
+// configTrace is where one configuration request spent its time.
+type configTrace struct {
+	lockWait, generation, build, sign time.Duration
+	hit                               bool
+	attempts, peers                   int
+}
+
+func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequest, trace *configTrace) (NetworkConfigResult, error) {
 	if ctx == nil || !bounded(in.OperationID, 8, 128) || !bounded(in.UserID, 1, 256) || !bounded(in.EndpointID, 1, 128) || in.Authority != "" && in.Authority != AuthorityUntilRevoked {
 		return NetworkConfigResult{}, ErrInvalid
 	}
@@ -293,8 +314,10 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
 		return NetworkConfigResult{}, err
 	}
 	start, cacheable := s.cache.begin()
+	step := time.Now()
 	err = s.store.SQL().QueryRowContext(ctx, endpointsUpdate, now, in.UserID, in.EndpointID, endpoints, endpointPublishInterval.Seconds()).
 		Scan(&generation)
+	trace.generation = time.Since(step)
 	if err == sql.ErrNoRows {
 		return NetworkConfigResult{}, ErrDenied
 	}
@@ -309,15 +332,21 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
 		}
 	}
 	doc := s.cache.get(in.EndpointID, key, now)
+	trace.hit = doc != nil
 	if doc == nil {
+		step = time.Now()
 		if doc, err = s.buildPolicy(ctx, in, live, now); err != nil {
 			return NetworkConfigResult{}, err
 		}
+		trace.build = time.Since(step)
 		doc.liveKey = key
 		if cacheable {
 			s.cache.put(in.EndpointID, doc, start)
 		}
 	}
+	trace.peers = len(doc.peers)
+	step = time.Now()
+	defer func() { trace.sign = time.Since(step) }()
 	return s.signConfiguration(ctx, in, doc, generation, now)
 }
 
