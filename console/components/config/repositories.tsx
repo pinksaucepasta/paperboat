@@ -59,7 +59,9 @@ export function ConfigRepositories() {
           <div key={repository.id} className="flex min-h-12 items-center justify-between gap-4 border-b border-divider text-sm">
             <div className="flex min-w-0 flex-col">
               <span className="truncate font-medium">{repository.display_name || repository.external_ref}</span>
-              <span className="truncate font-mono text-xs text-muted-foreground">{repository.external_ref}</span>
+              {repository.provider !== "github" && (
+                <span className="truncate font-mono text-xs text-muted-foreground">{repository.external_ref}</span>
+              )}
             </div>
             <Button variant="outline" size="sm" onClick={() => setRemoving(repository)}>
               Disconnect

@@ -15,6 +15,7 @@ import { Dialog, DialogContent, DialogFooter, DialogTitle } from "@/components/u
 import { Field, FieldLabel } from "@/components/ui/field"
 
 type Grant = Team["grants"][number]
+const pageSize = 20
 const kindLabels: Record<string, string> = { env: "ENV", preview: "Preview", tunnel: "Tunnel" }
 const select =
   "h-9 rounded-md border border-input bg-transparent px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
@@ -24,7 +25,9 @@ export function TeamGrants({ team, emails }: { team: Team; emails: Map<string, s
   const queryClient = useQueryClient()
   const [adding, setAdding] = useState(false)
   const [revoking, setRevoking] = useState<Grant | null>(null)
-  const grants = team.grants.filter((grant) => grant.active && kindLabels[grant.resource_kind])
+  const [page, setPage] = useState(1)
+  const all = team.grants.filter((grant) => grant.active && kindLabels[grant.resource_kind])
+  const grants = all.slice((page - 1) * pageSize, page * pageSize)
   const refresh = () => queryClient.invalidateQueries({ queryKey: teamQuery(team.team_id).queryKey })
   const words = (grant: Grant) =>
     grantPermissions[grant.resource_kind as GrantKind]?.find((entry) => entry.id === grant.permission)?.label ??
@@ -39,7 +42,7 @@ export function TeamGrants({ team, emails }: { team: Team; emails: Map<string, s
         </Button>
       }
     >
-      {grants.length === 0 ? (
+      {all.length === 0 ? (
         <p className="border-b border-divider py-3 text-sm text-muted-foreground">No grants yet.</p>
       ) : (
         grants.map((grant) => (
@@ -60,6 +63,7 @@ export function TeamGrants({ team, emails }: { team: Team; emails: Map<string, s
           </div>
         ))
       )}
+      <ListPager page={page} size={pageSize} total={all.length} go={setPage} />
       {adding && <AddGrant team={team} emails={emails} onClose={() => setAdding(false)} onDone={refresh} />}
       {revoking && (
         <ConfirmAction
