@@ -1021,3 +1021,33 @@ func TestFormatPreviewTargetShowsTheHostHeader(t *testing.T) {
 		t.Fatalf("plain target = %q", got)
 	}
 }
+
+// Stop completion asks the server for the previews matching what was typed (q), like the tunnel selector, instead of
+// reading every preview of the account inside the 200 ms completion deadline.
+func TestPreviewStopCompletionFiltersOnServer(t *testing.T) {
+	var queries []string
+	server := newPreviewCommandServer(t, func(r *http.Request, _ map[string]any) (any, string, int) {
+		if r.Method+" "+r.URL.Path != http.MethodGet+" /v1/previews" {
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+		queries = append(queries, r.URL.Query().Get("q"))
+		lease := previewCommandLease("prv_cli_3", "machine_cli", "session_cli", "foreground", "https", "localhost:8443", "ready")
+		return map[string]any{"items": []any{lease}, "next_cursor": ""}, "", http.StatusOK
+	})
+	defer server.Close()
+	client := api.New(server.URL, config.Credential{AccessToken: "test-token"}, server.Client())
+	previous := previewClientForCommand
+	t.Cleanup(func() { previewClientForCommand = previous })
+	previewClientForCommand = func(*cobra.Command) (*api.Client, error) { return client, nil }
+
+	command := &cobra.Command{}
+	command.SetContext(context.Background())
+	values, _ := previewStopCompletion(command, nil, "prv_cli")
+	if len(values) != 1 || !strings.HasPrefix(values[0], "prv_cli_3\t") {
+		t.Fatalf("completion = %q", values)
+	}
+	values, _ = previewStopCompletion(command, nil, "")
+	if len(values) != 1 || strings.Join(queries, ",") != "prv_cli," {
+		t.Fatalf("completion = %q, server q = %q", values, queries)
+	}
+}

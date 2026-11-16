@@ -21,7 +21,7 @@ func findTunnelByExactName(ctx context.Context, client *api.Client, name string)
 	seen := make(map[string]struct{})
 	for pageNumber := 0; pageNumber < 10; pageNumber++ {
 		page, err := retryTunnelRead(ctx, func() (api.TunnelPage, error) {
-			return client.ListTunnelsV1Filtered(ctx, cursor, 200, tunnelSelectorFilter(name))
+			return client.ListTunnelsV1Filtered(ctx, cursor, 200, selectorFilter(name))
 		})
 		if err != nil {
 			return api.Tunnel{}, err
@@ -43,11 +43,11 @@ func findTunnelByExactName(ctx context.Context, client *api.Client, name string)
 	return api.Tunnel{}, api.ErrUnsafeTunnelResponse
 }
 
-// tunnelSelectorFilter asks the server for the tunnels whose id, name, address or host contain the selector, so one
-// command reads the few tunnels that can match instead of every tunnel of the account (each list page costs the server
-// a permission decision per tunnel: with ~240 tunnels every `pb tunnel delete` made two 4 s lists). A selector is
+// selectorFilter asks the server for the tunnels or previews whose id, name, address or host contain the selector, so
+// one command reads the few that can match instead of every one of the account (each list page costs the server
+// a permission decision per row: with ~240 tunnels every `pb tunnel delete` made two 4 s lists). A selector is
 // matched exactly (id or name) on what comes back, as before.
-func tunnelSelectorFilter(selector string) url.Values {
+func selectorFilter(selector string) url.Values {
 	return url.Values{"q": {selector}}
 }
 
@@ -61,7 +61,7 @@ func resolveTunnelSelector(ctx context.Context, client *api.Client, value string
 	matches := make(map[string]struct{})
 	for pageNumber := 0; pageNumber < 10; pageNumber++ {
 		page, err := retryTunnelRead(ctx, func() (api.TunnelPage, error) {
-			return client.ListTunnelsV1Filtered(ctx, cursor, 200, tunnelSelectorFilter(value))
+			return client.ListTunnelsV1Filtered(ctx, cursor, 200, selectorFilter(value))
 		})
 		if err != nil {
 			return "", err

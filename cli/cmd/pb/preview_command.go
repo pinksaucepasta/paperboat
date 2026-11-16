@@ -576,7 +576,7 @@ func previewStopCompletion(command *cobra.Command, args []string, toComplete str
 	cursor := ""
 	seen := map[string]bool{"": true}
 	for {
-		page, err := client.ListPreviewLeases(ctx, cursor, 200)
+		page, err := client.ListPreviewLeasesFiltered(ctx, cursor, 200, selectorFilter(toComplete))
 		if err != nil {
 			return nil, cobra.ShellCompDirectiveNoFileComp
 		}
