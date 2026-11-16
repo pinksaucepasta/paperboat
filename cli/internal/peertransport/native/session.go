@@ -525,6 +525,26 @@ func (c *streamConn) CloseWrite() error { return closeSendSide(c.Stream) }
 // other terminal and new viewer on that peer stalled (F21-164). CancelRead returns that credit and stops the sender.
 func (c *streamConn) Close() error { c.Stream.CancelRead(0); return closeSendSide(c.Stream) }
 
+// Abort resets the stream in both directions. Close sends a FIN behind the queued data, and a peer that never reads it
+// (a command that ignores stdin) keeps that data in the connection's flow-control window, so no new stream on the shared
+// association can open until the peer reads it; a reset drops the data and returns the credit (quic-go
+// handleResetStreamFrame).
+func (c *streamConn) Abort() {
+	c.Stream.CancelWrite(StreamAborted)
+	c.Stream.CancelRead(StreamAborted)
+}
+
+// abortConn resets conn when it is (or wraps) a stream, else closes it.
+func abortConn(conn net.Conn) {
+	if stream, ok := conn.(interface{ Abort() }); ok {
+		stream.Abort()
+		return
+	}
+	_ = conn.Close()
+}
+
+func (c *limitedConn) Abort() { abortConn(c.Conn) }
+
 type routedConn struct {
 	*peerquic.RoutedStream
 	session       *Session

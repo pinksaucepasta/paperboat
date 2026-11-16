@@ -66,6 +66,8 @@ type initialOutputConnection struct {
 	frames [][]byte
 }
 
+func (c *initialOutputConnection) Abort() { _ = abortMessage(c.helperMessageConnection) }
+
 func (c *initialOutputConnection) ReadMessage(ctx context.Context) (helperMessageType, []byte, error) {
 	if err := ctx.Err(); err != nil {
 		return 0, nil, err
