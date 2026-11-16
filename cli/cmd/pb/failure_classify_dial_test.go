@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -22,5 +23,19 @@ func TestADaemonThatIsNotListeningStaysOperational(t *testing.T) {
 		if kind := classifyCommandFailure(err).kind; kind != commandOperational {
 			t.Fatalf("%s: kind = %v, want commandOperational (%v)", name, kind, commandOperational)
 		}
+	}
+}
+
+// A dial on a cancelled context fails with net.canceledError (wrapped by OpError); it is a cancel (exit 130), not a
+// generic operational failure, and an initial connect must not retry it.
+func TestACancelledDialIsACancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, dialErr := (&net.Dialer{}).DialContext(ctx, "tcp", "127.0.0.1:1")
+	if dialErr == nil {
+		t.Fatal("dial on a cancelled context succeeded")
+	}
+	if kind := classifyCommandFailure(fmt.Errorf("connect: %w", dialErr)).kind; kind != commandCanceled {
+		t.Fatalf("kind = %v, want commandCanceled (%v) for %v", kind, commandCanceled, dialErr)
 	}
 }

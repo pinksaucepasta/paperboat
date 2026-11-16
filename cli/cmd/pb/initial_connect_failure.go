@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -61,6 +62,12 @@ func retryableInitialConnectFailure(err error) (retryable bool) {
 			if call, ok := op.Err.(*os.SyscallError); ok && call.Err == syscall.ENOENT {
 				return true
 			}
+		}
+		// A leaf only: errors.Is on a wrapper would walk a cyclic chain forever (net.canceledError matches by Is).
+		_, unary := current.(interface{ Unwrap() error })
+		_, joined := current.(interface{ Unwrap() []error })
+		if !unary && !joined && errors.Is(current, context.Canceled) {
+			return false
 		}
 		switch current {
 		case context.Canceled, context.DeadlineExceeded:

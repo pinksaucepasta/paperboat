@@ -124,3 +124,12 @@ func (r connectProofRoundTripper) RoundTrip(request *http.Request) (*http.Respon
 type connectProofReadFailure struct{}
 
 func (connectProofReadFailure) Read([]byte) (int, error) { return 0, syscall.EIO }
+
+func TestACancelledDialIsNotRetriedAsInitialConnect(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := (&net.Dialer{}).DialContext(ctx, "tcp", "127.0.0.1:1")
+	if err == nil || retryableInitialConnectFailure(err) {
+		t.Fatalf("a cancelled dial must not be retried: %v", err)
+	}
+}
