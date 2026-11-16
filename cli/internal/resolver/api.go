@@ -336,7 +336,15 @@ func (r *APIResolver) waitConnectable(ctx context.Context, target target, termin
 	pollCtx, cancel := context.WithDeadline(ctx, deadline)
 	defer cancel()
 	startupInterval := 100 * time.Millisecond
+	var pendingSince time.Time
 	for {
+		if resp.Reason != terminalOperationPending {
+			pendingSince = time.Time{}
+		} else if pendingSince.IsZero() {
+			pendingSince = time.Now()
+		} else if time.Since(pendingSince) >= pendingOperationBound {
+			return api.ConnectionDescriptor{}, machineUnreachable(target)
+		}
 		if time.Now().After(deadline) {
 			return api.ConnectionDescriptor{}, fmt.Errorf("timed out waiting for the machine to become ready: %w", context.DeadlineExceeded)
 		}
@@ -392,6 +400,26 @@ func (r *APIResolver) waitConnectable(ctx context.Context, target target, termin
 		}
 		resp = next
 	}
+}
+
+// terminalOperationPending is the server's reason while a queued terminal operation (a session create) waits for
+// the target machine to apply it; the target applies it by asking the server, so a target cut off from the API never does.
+const terminalOperationPending = "terminal_session_operation_pending"
+
+// pendingOperationBound is how long connect waits for the target to apply that operation before saying it is not
+// reachable (the same grace exec gives a machine the server calls offline, machineBlipGrace).
+var pendingOperationBound = 15 * time.Second
+
+// MachineUnreachableCode is the code of the refusal for a target the server lists online but that never confirmed.
+const MachineUnreachableCode = "machine_unreachable"
+
+func machineUnreachable(target target) error {
+	name := target.name
+	if name == "" {
+		name = target.id
+	}
+	return &api.APIError{Status: http.StatusConflict, Code: MachineUnreachableCode, Message: fmt.Sprintf(
+		"%s is not reachable from Paperboat right now: it may be offline, or cut off from the Paperboat service. Check it with `pb status` and `pb doctor %s`, then retry", name, name)}
 }
 
 func terminalConnectionError(resp api.ConnectionDescriptor) error {

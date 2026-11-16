@@ -787,3 +787,24 @@ func TestValidateFileTransferSelfHostedEndpointHasNoEdgePrefix(t *testing.T) {
 		t.Fatal("accepted the edge-prefixed endpoint")
 	}
 }
+
+// A target the server lists online but that never applies the queued terminal operation (it is cut off from the API)
+// ended in a 180 s wait and a generic "could not finish"; it is named, within a bound.
+func TestResolveNamesATargetThatNeverConfirmsTheQueuedOperation(t *testing.T) {
+	pending := api.ConnectionDescriptor{UserMachineID: "um_1", Status: "helper_starting", Reason: terminalOperationPending}
+	fc := &fakeClient{machines: []api.UserMachine{terminalHost("um_1", "studio-mac", "online")}, connectSeq: []api.ConnectionDescriptor{pending}, statusSeq: []api.ConnectionDescriptor{pending}}
+	old := pendingOperationBound
+	pendingOperationBound = 30 * time.Millisecond
+	defer func() { pendingOperationBound = old }()
+	r := newTestResolver(fc)
+	r.sleep = func(context.Context, time.Duration) error { time.Sleep(10 * time.Millisecond); return nil }
+	started := time.Now()
+	_, err := r.Resolve(context.Background(), ConnectRequest{Machine: "um_1"})
+	var refusal *api.APIError
+	if !errors.As(err, &refusal) || refusal.Code != MachineUnreachableCode || !strings.Contains(refusal.Message, "studio-mac is not reachable from Paperboat") || !strings.Contains(refusal.Message, "may be offline") {
+		t.Fatalf("err = %v", err)
+	}
+	if time.Since(started) > 5*time.Second {
+		t.Fatalf("took %s", time.Since(started))
+	}
+}

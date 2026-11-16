@@ -946,6 +946,8 @@ func friendlyAPIError(err error) string {
 		return "the secure tunnel is not available yet; retry in a moment"
 	case "machine_not_ready":
 		return "the machine is not ready yet; retry in a moment"
+	case resolver.MachineUnreachableCode:
+		return apiErr.Message
 	case "machine_offline":
 		return "the machine is offline; start or repair Paperboat on it (`pb doctor`), then retry"
 	case "machine_revoked":
