@@ -97,6 +97,24 @@ func TestConfigRepositoryUsageSourceAndGitTeamDefault(t *testing.T) {
 	if err := service.UnadoptTeamDefault(ctx, member); err != nil {
 		t.Fatal(err)
 	}
+	// Unadopting revokes the machine's assignment: it is Off (not "needs consent") and back in the personal
+	// workspace, on both status paths (11-17: 18 unadopted machines still showed consent_required in the team).
+	for _, scope := range []struct {
+		ctx  context.Context
+		rows int
+	}{{teamContext, 0}, {workspace.WithContext(ctx, workspace.Scope{ID: "personal"}), 1}} {
+		full, err := statuses.Account(scope.ctx, member)
+		if err != nil || len(full.Environments) != scope.rows {
+			t.Fatalf("unadopted full status=%+v err=%v want %d rows", full.Environments, err, scope.rows)
+		}
+		page, err := statuses.AccountInventory(scope.ctx, member, ConfigStatusInventoryOptions{Limit: 50})
+		if err != nil || len(page.Environments) != scope.rows {
+			t.Fatalf("unadopted inventory=%+v err=%v want %d rows", page.Environments, err, scope.rows)
+		}
+		if scope.rows == 1 && (full.Environments[0].State != "disabled" || page.Environments[0].State != "disabled") {
+			t.Fatalf("unadopted machine state full=%q inventory=%q, want disabled", full.Environments[0].State, page.Environments[0].State)
+		}
+	}
 	current, err := service.Assignment(ctx, member, machineID)
 	if err != nil {
 		t.Fatal(err)

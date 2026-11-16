@@ -543,7 +543,8 @@ SELECT
 	assignment.push_repository_id,
 	assignment.automatic_updates,
 	assignment.approved_pull_revision,
-	assignment.adopted_team_id,
+	-- Only a live adoption puts the machine in the team's workspace (unadopt revokes the row, keeps the team).
+	live_assignment.adopted_team_id,
 	assignment.adopted_default_version,
 	assignment.mode,
   assignment.consent_state,
@@ -588,6 +589,8 @@ SELECT
 FROM control_environments environment
 LEFT JOIN control_config_assignments assignment
   ON assignment.environment_id = environment.id
+LEFT JOIN control_config_assignments live_assignment
+  ON live_assignment.id = assignment.id AND live_assignment.revoked_at IS NULL
 LEFT JOIN control_config_repositories repository
   ON repository.id = assignment.repository_id
 LEFT JOIN control_config_sync_statuses status
