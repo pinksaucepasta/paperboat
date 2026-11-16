@@ -22,6 +22,17 @@ Same flow on `a1ac14b797da`: key from the console, `pb connect` + `pb recordings
 ## Unit and integration tests
 `TestPostgresPersonalRecordings`, `TestPostgresRecordingsEndToEnd`, `TestPostgresRecordingsOnASharedPersonalMachine`, `TestRecordingReplayAdmissionReachesBothEndpointsOnPostgres`, `TestPostgresRecordingsArchive` (CI run for f24ee62dd), `TestPersonalScope`, console `bun run check`.
 
+## Teams: recording by rule, upload to the team's own bucket, replay from it (same build, server .29, 2026-11-16 ~13:25-13:40 IST)
+hp container `61a8e7e58eaf` = `machine_decee851-5917-4f7e-ae91-4400186a1ed4` (operator account), shared into the paid test team `paperboat-smoke-9a46fcdb0b09`; its own S3 = versitygw 1.11.0 (posix) inside the container on :9300, published through a durable tunnel (`https://<name>.pprbt.app`, TLS at the edge), access keys random and never printed.
+| Step | Result |
+|---|---|
+| `pb team bucket set <team> --endpoint https://... --bucket recbucket --path-style --secret-access-key-stdin` | server write/read/delete check passed, bucket saved (PASS) |
+| team policy rule `record` + `recording_view` for the operator on the machine; team recording key set up in the console (Team > Recordings > Set up) | key Ready (PASS) |
+| `pb connect 61a8e7e58eaf`, two echoed markers, `exit` | `rec_42e564c9-2613-477f-8e6a-df3571940c43`, trigger rule, 31 s, ended (PASS) |
+| upload | `list --json`: segments 1, archived_segments 1; the bucket holds `v1/recordings/rec_42e564c9-.../000000.seg` (771 bytes) and `grep TEAM-REC` finds nothing in it: ciphertext only (PASS) |
+| `pb recordings play --archive` and `export --archive` | both replay TEAM-REC-ONE and TEAM-REC-TWO read from the bucket (PASS) |
+Then removed: bucket disconnected, policy restored (versions 9, 10), tunnel deleted, container and its S3 data removed. The team's recording key stays Ready.
+
 ## Not covered here
-Mac and Windows (M and W cells stay open). Team recordings and the bucket upload were not re-run on devices (unchanged code paths; their PostgreSQL tests pass).
+Mac and Windows (M and W cells stay open).
 Observed, not part of this row: right after `pb login` the first `pb recordings export` answered "credential secret not found" until `pb env unlock` was run again (the host service restarted and dropped the daemon's vault custody).
