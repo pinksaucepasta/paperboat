@@ -373,7 +373,6 @@ type RouteWorker struct {
 	routesAdmitted                 bool
 	accessorAdmitted               bool
 	starting                       bool
-	probePending                   bool // the last route probe found a carrier that does not serve its route yet
 	lastErr                        error
 	canonicalSet                   bool
 	canonicalHash                  [sha256.Size]byte
@@ -476,29 +475,6 @@ func (w *RouteWorker) run(ctx context.Context) {
 		tick = ticker.C
 	}
 	nodeReady := w.NodeReady
-	// A route whose machine has not started serving it yet (the wake for a new tunnel reaches every edge before
-	// the machine fetched it) is probed again after 250 ms, 500 ms, ... up to the interval, then waits for the
-	// tick: a miss cost each edge a whole control tick (`pb tunnel create --wait` 7-16 s). Only a wake restarts it,
-	// so a machine that stays offline adds no pulls.
-	var retry <-chan time.Time
-	var retryDelay time.Duration
-	retryCap := w.Interval
-	if retryCap <= 0 {
-		retryCap = 2 * time.Second
-	}
-	scheduleRetry := func(woken bool) {
-		retry = nil
-		if woken {
-			retryDelay = 0
-		}
-		if !w.probePending || retryDelay >= retryCap {
-			return
-		}
-		retryDelay = max(routeProbeRetry, 2*retryDelay)
-		if retryDelay < retryCap {
-			retry = time.After(retryDelay)
-		}
-	}
 	for {
 		select {
 		case <-ctx.Done():
@@ -506,32 +482,22 @@ func (w *RouteWorker) run(ctx context.Context) {
 		case <-nodeReady:
 			nodeReady = nil
 			w.recordReconcile(ctx, w.reconcile(ctx))
-			scheduleRetry(true)
 		case _, ok := <-tick:
 			if !ok {
 				return
 			}
 			w.recordReconcile(ctx, w.reconcile(ctx))
-			scheduleRetry(false)
-		case <-retry:
-			w.recordReconcile(ctx, w.reconcile(ctx))
-			scheduleRetry(false)
 		case <-w.Wake:
 			if !w.wakeReconcile(ctx) {
 				return
 			}
-			scheduleRetry(true)
 		case <-w.TunnelWake:
 			if !w.wakeReconcile(ctx) {
 				return
 			}
-			scheduleRetry(true)
 		}
 	}
 }
-
-// routeProbeRetry is the first re-probe of a route whose carrier does not serve it yet.
-const routeProbeRetry = 250 * time.Millisecond
 
 // wakeReconcile reconciles now and holds off the next wake for routeWakeGap; false once ctx is done.
 func (w *RouteWorker) wakeReconcile(ctx context.Context) bool {
@@ -1334,10 +1300,8 @@ func (w *RouteWorker) resolveCanonicalGroups(ctx context.Context, candidates, pr
 	for _, group := range canonicalAssignmentGroups(previous) {
 		previousByKey[group.key] = group.assignments
 	}
-	w.probePending = false
 	for _, group := range canonicalAssignmentGroups(candidates) {
 		if err := w.probeCanonicalGroup(ctx, group.assignments); err != nil {
-			w.probePending = w.probePending || errors.Is(err, edgehttp.ErrDataCarrierRouteUnavailable)
 			failures = append(failures, err)
 			failedAssignments = append(failedAssignments, group.assignments...)
 			if lkg, ok := previousByKey[group.key]; ok {
