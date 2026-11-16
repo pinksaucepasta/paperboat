@@ -33,9 +33,9 @@ describe("terminal close codes", () => {
     expect(close()).toBe(0)
     expect(reconnectWait(terminalCloseCodes.edge_unavailable, false)).toBeUndefined()
   })
-  test("a stall (10 s without a heartbeat) is shown and replaced at once", () => {
+  test("a stall (10 s without a heartbeat) is shown, then reconnects", () => {
     expect(workerCloseCode({ state: "reconnecting", code: "connection_stalled" })).toBe("stalled")
-    expect(terminalCloseCodes.stalled).toMatchObject({ phase: "reconnect", immediate: true })
+    expect(terminalCloseCodes.stalled.phase).toBe("reconnect")
     expect(terminalCloseCodes.stalled.message).toMatch(/stopped answering/)
   })
   test("an ended terminal names its exit status when the machine sent one", () => {

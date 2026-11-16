@@ -2,12 +2,14 @@
 //
 // node web_terminal_matrix.mjs --machine <id> --owner-state <file>
 //   [--member-state <file> --member-email <addr>] [--only w2,w4,...] [--hidden-minutes 5]
+//   [--freeze-cmd '<freezes the machine, e.g. docker pause>' --thaw-cmd '<undoes it>'] (W16)
 // Env: PB_CONSOLE_ORIGIN (the console origin), PW_CHROMIUM (headless Chromium path).
 // Storage states are signed-in console sessions of throwaway accounts (0600 files, never printed).
 // Rows print PASS/FAIL/SKIP with terminal IDs and UTC times; terminal contents are never printed.
 // Every terminal this check opens is closed again. Needs playwright-core on NODE_PATH.
 import { chromium, devices } from "playwright-core"
 import { createHash, randomBytes } from "node:crypto"
+import { execSync } from "node:child_process"
 
 const arg = (name, fallback = "") => {
   const i = process.argv.indexOf(`--${name}`)
@@ -22,6 +24,8 @@ const memberState = arg("member-state")
 const memberEmail = arg("member-email")
 const only = arg("only", "w2,w4,w4b,w5,w6,w7,w9,w10,w11,w14,w12,w13,w1,w3").split(",")
 const hiddenMinutes = Number(arg("hidden-minutes", "5"))
+const freezeCmd = arg("freeze-cmd")
+const thawCmd = arg("thaw-cmd")
 if (!machine || !ownerState) throw new Error("--machine and --owner-state are required")
 
 const results = []
@@ -487,6 +491,57 @@ const rows = {
       await page.close()
       await closeTerminal(ctx, id)
     }
+  },
+
+  // W15: the remote process ends; the page names its exit status like pb connect does ("exited 137 (SIGKILL)").
+  async w15(ctx) {
+    const { page, id } = await newTerminal(ctx)
+    await type(page, "kill -KILL $$")
+    const t0 = Date.now()
+    let text = ""
+    while (Date.now() - t0 < 30_000 && !/exited \d+/.test(text)) {
+      await sleep(500)
+      text = await page.evaluate(() => document.body.innerText)
+    }
+    const status = text.match(/exited \d+( \(SIG\w+\))?/)?.[0] ?? "-"
+    row("W15 shell killed: the closed terminal shows its exit status", status === "exited 137 (SIGKILL)", `${id} ${status} phase ${await phase(page)}`)
+    opened.delete(id) // the session ended with its process
+    await page.close()
+  },
+
+  // W16: the machine goes silent with its connections still open (frozen, a black hole): after 10 s without a
+  // heartbeat the page flags the stall (data-terminal-close connection_stalled), says so, reconnects, and is live
+  // again once the machine answers.
+  async w16(ctx) {
+    if (!freezeCmd || !thawCmd) return row("W16 frozen machine", null, "needs --freeze-cmd and --thaw-cmd")
+    const { page, id } = await newTerminal(ctx)
+    let close = ""
+    let shown = false
+    const t0 = Date.now()
+    execSync(freezeCmd, { stdio: "ignore", timeout: 30_000 })
+    try {
+      while (Date.now() - t0 < 40_000 && !close.includes("connection_stalled")) {
+        await sleep(200)
+        close = await page.evaluate(() => document.querySelector("[data-terminal-close]")?.getAttribute("data-terminal-close") ?? "")
+        shown ||= /stopped answering/.test(await page.evaluate(() => document.body.innerText))
+      }
+      const flagged = (Date.now() - t0) / 1000
+      for (let i = 0; i < 10 && !shown; i++) {
+        await sleep(200)
+        shown = /stopped answering/.test(await page.evaluate(() => document.body.innerText))
+      }
+      row("W16 frozen machine: stall flagged at 10 s and shown", close.includes("connection_stalled") && flagged >= 10 && shown,
+        `${id} ${flagged.toFixed(1)} s, close '${close}', shown ${shown}`)
+      await sleep(20_000)
+    } finally {
+      execSync(thawCmd, { stdio: "ignore", timeout: 30_000 })
+    }
+    const t1 = Date.now()
+    const back = await attached(page, 120_000)
+    const out = back === null ? null : await run(page, "true")
+    row("W16 machine thawed: terminal live again on its own", out !== null, `${id} ${back === null ? "-" : ((Date.now() - t1) / 1000).toFixed(1)} s, phase ${await phase(page)}, close '${await page.evaluate(() => document.querySelector("[data-terminal-close]")?.getAttribute("data-terminal-close") ?? "")}'`)
+    await page.close()
+    await closeTerminal(ctx, id)
   },
 }
 rows.w3 = async () => {} // W3 runs inside w1

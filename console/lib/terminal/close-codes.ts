@@ -53,8 +53,9 @@ export const terminalCloseCodes: Readonly<Record<CloseCode, CloseOutcome>> = {
   // the new one serves already, so reattach at once (sequence replay keeps the screen).
   moved: { phase: "reconnect", message: "", silent: true, immediate: true },
   // The machine sent nothing, not even its 5 s heartbeat, for 10 s (shared/terminalprotocol StallAfter, as pb connect):
-  // the socket is black-holed, so the page says so and replaces it at once.
-  stalled: { phase: "reconnect", message: "The machine stopped answering for 10 seconds.", immediate: true },
+  // the socket is black-holed, so the page says so and replaces it after the first backoff step (the reason stays
+  // readable meanwhile; the 10 s were the wait already).
+  stalled: { phase: "reconnect", message: "The machine stopped answering for 10 seconds." },
   protocol: { phase: "transport-error", message: "The machine sent something this page could not use. You can retry." },
 }
 
