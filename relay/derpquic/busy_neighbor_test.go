@@ -1,9 +1,8 @@
 package derpquic
 
 import (
-	"context"
-	"errors"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -31,6 +30,15 @@ func TestBusyAccountDoesNotSlowANeighbor(t *testing.T) {
 	data := make([]byte, 1312)
 	data[0] = 4
 
+	var delivered atomic.Int64
+	go func() {
+		for {
+			if _, _, err := busyB.RecvDetail(); err != nil {
+				return
+			}
+			delivered.Add(1)
+		}
+	}()
 	// Neighbor round trips while the busy account floods its carrier at full speed.
 	stop := make(chan struct{})
 	var flood sync.WaitGroup
@@ -62,7 +70,6 @@ func TestBusyAccountDoesNotSlowANeighbor(t *testing.T) {
 	if worst > time.Second {
 		t.Fatalf("a neighbor flooding its carrier delayed a quiet account's packet by %v", worst)
 	}
-	_ = busyB
 
 	// The busy account's budget runs out: its carriers are refused, the neighbor is untouched.
 	s.mu.Lock()
@@ -74,17 +81,18 @@ func TestBusyAccountDoesNotSlowANeighbor(t *testing.T) {
 	budget.mu.Lock()
 	budget.tokens, budget.at = 0, time.Now().Add(time.Minute) // no refill: the account is out of bytes
 	budget.mu.Unlock()
-	_ = busyA.Send(busyKeyB, data) // may already be closed by the flood; either way the carrier must end
-	busyA.mu.Lock()
-	cc := busyA.current
-	busyA.mu.Unlock()
-	select {
-	case <-cc.conn.Context().Done():
-		if err := classify(context.Cause(cc.conn.Context())); !errors.Is(err, ErrOverload) {
-			t.Fatalf("budget-exhausted carrier closed with %v, want overload", err)
+	// Data over the exhausted budget is dropped and counted, not forwarded; the carrier itself stays up.
+	time.Sleep(300 * time.Millisecond) // let the flood's last packets arrive
+	dropped, before := s.dropped.Load(), delivered.Load()
+	for range 20 {
+		if err := busyA.Send(busyKeyB, data); err != nil {
+			t.Fatal(err)
 		}
-	case <-time.After(3 * time.Second):
-		t.Fatal("budget-exhausted carrier stayed open")
+	}
+	eventually(t, func() bool { return s.dropped.Load() >= dropped+20 })
+	time.Sleep(300 * time.Millisecond)
+	if delivered.Load() != before {
+		t.Fatal("a packet over the account budget was forwarded")
 	}
 	if err := quietA.Send(quietKeyB, data); err != nil {
 		t.Fatal(err)
