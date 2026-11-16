@@ -668,6 +668,11 @@ func (s *Service) provisionRecoveredUserMachine(ctx context.Context, userID stri
 		}
 		if materialSessionID != "" {
 			identity, identityErr := tx.Queries().GetClientSessionForInstallationRecovery(ctx, materialSessionID)
+			if identityErr != nil && !errors.Is(identityErr, sql.ErrNoRows) {
+				// A concurrent recovery's commit fails this lock with 40001: InTx replays it, and this request then
+				// loses at Complete and returns the winner's material.
+				return identityErr
+			}
 			if identityErr != nil || identity.UserID != userID || identity.ClientID != s.cliClientID {
 				return ErrInstallationUnavailable
 			}
