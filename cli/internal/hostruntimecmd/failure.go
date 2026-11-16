@@ -300,7 +300,7 @@ var errAdministratorApproval = errors.New("administrator approval was not grante
 // asks for a password, so it names both ways out (PLAN F26).
 var errRecipeNeedsRoot = errors.New("a recipe install needs root or passwordless sudo")
 
-const recipeNeedsRootMessage = "Paperboat: installing needs root or passwordless sudo, and this shell has neither. Run the installer as root (in Docker the default user is root), or allow passwordless sudo for this user. Recipe installs never ask for a password, so they never hang a CI job."
+const recipeNeedsRootMessage = "Installing needs root or passwordless sudo, and this shell has neither. Run the installer as root (in Docker the default user is root), or allow passwordless sudo for this user. Recipe installs never ask for a password, so they never hang a CI job."
 
 type installationStageError struct {
 	Stage string
