@@ -13,8 +13,9 @@ func TestRepeatedFailureFromOneCallSiteIsRecordedOncePerWindow(t *testing.T) {
 	fields := func(site string) map[string]string {
 		return map[string]string{"component": "paperboat-daemon", "operation": "engine_tunnels", "cause": "permission_denied", "source_function": site}
 	}
-	for range 10 {
-		if err := recorder.RecordWithSupportReference("control_request", "control_request_failed", "warning", "support_"+now.String(), fields("a.refresh")); err != nil {
+	references := []string{"support_87bcdf65-acb6-41d1-af28-28dd0b23a78f", "support_3b36870e-733f-4cba-b5e9-a99af850613b"}
+	for i := range 10 {
+		if err := recorder.RecordWithSupportReference("control_request", "control_request_failed", "warning", references[i%2], fields("a.refresh")); err != nil {
 			t.Fatal(err)
 		}
 	}
