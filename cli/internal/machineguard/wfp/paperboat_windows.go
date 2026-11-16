@@ -10,6 +10,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/netip"
 	"runtime"
 	"slices"
@@ -109,14 +110,20 @@ func Apply(leases []Lease, loopbackCIDR string, protectedValues ...string) error
 				continue
 			}
 			seen[key] = true
+			// An invalid lease is skipped, not fatal: one bad lease failed the whole transaction, and with it the
+			// policy of every OS user on the machine, on every later apply too. Skipped, it fails closed for that
+			// lease alone (the range's connect block stays in force for its address). A failing filter add stays
+			// fatal: it is not specific to the lease.
 			ip, parseErr := netip.ParseAddr(lease.IP)
 			sid, sidErr := windows.StringToSid(lease.SID)
 			if parseErr != nil || !ip.Is4() || sidErr != nil {
-				return errors.New("invalid Paperboat WFP lease")
+				slog.Warn("machine guard skipped an invalid lease", "ip", lease.IP, "error", errors.Join(parseErr, sidErr))
+				continue
 			}
 			sd, sdErr := sidDescriptor(sid)
 			if sdErr != nil {
-				return sdErr
+				slog.Warn("machine guard skipped a lease it cannot build a descriptor for", "ip", lease.IP, "error", sdErr)
+				continue
 			}
 			address := binary.BigEndian.Uint32(ip.AsSlice())
 			sdBlob := wtFwpByteBlob{size: sd.Length(), data: (*byte)(unsafe.Pointer(sd))}

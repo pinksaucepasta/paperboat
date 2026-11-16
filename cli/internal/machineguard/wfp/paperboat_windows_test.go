@@ -216,3 +216,38 @@ func installedIn(t *testing.T, sublayer windows.GUID) []windows.GUID {
 	}
 	return keys
 }
+
+// One invalid lease must not fail the transaction for the valid ones: the valid lease keeps its filter, the invalid
+// ones (bad address, bad SID) get none, and Apply succeeds.
+func TestApplySkipsAnInvalidLeaseAndInstallsTheRest(t *testing.T) {
+	token := windows.GetCurrentProcessToken()
+	if !token.IsElevated() {
+		t.Skip("requires elevated native WFP access")
+	}
+	user, err := token.GetTokenUser()
+	if err != nil {
+		t.Fatal(err)
+	}
+	prior := sublayerKey
+	sublayerKey = guidFor(fmt.Sprintf("paperboat-skip-test-%d", os.Getpid()))
+	t.Cleanup(func() {
+		if err := Remove(context.Background()); err != nil {
+			t.Error(err)
+		}
+		sublayerKey = prior
+	})
+	sid := user.User.Sid.String()
+	good := Lease{IP: "127.100.254.81", SID: sid}
+	badIP, badSID := Lease{IP: "not-an-address", SID: sid}, Lease{IP: "127.100.254.82", SID: "not-a-sid"}
+	if err := Apply([]Lease{badIP, good, badSID}, "127.100.0.0/16"); err != nil {
+		t.Fatalf("one invalid lease failed the whole policy: %v", err)
+	}
+	keys := installedIn(t, sublayerKey)
+	key := func(l Lease) windows.GUID { return guidFor(l.IP + "\x00" + l.SID) }
+	if !slices.Contains(keys, key(good)) {
+		t.Fatal("the valid lease has no filter")
+	}
+	if slices.Contains(keys, key(badIP)) || slices.Contains(keys, key(badSID)) {
+		t.Fatal("an invalid lease got a filter")
+	}
+}
