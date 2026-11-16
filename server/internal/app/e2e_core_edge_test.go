@@ -339,9 +339,10 @@ func (e *e2eCore) publish(phase, machine, kind, port string, gated bool, args ..
 	return e.fetchThroughEdge(kind, out, marker, gated)
 }
 
-// serveMarker serves marker over HTTP on port in machine.
+// serveMarker serves marker over HTTP on port in machine. It binds 127.0.0.1, the preview's target: pb's own local-name listeners hold 127.100.0.x on the same port
+// (another machine's preview of that port), and a wildcard bind then fails with EADDRINUSE in the background.
 func (e *e2eCore) serveMarker(machine, port, marker string) error {
-	serve := fmt.Sprintf("mkdir -p /tmp/%[1]s && printf %%s %[2]q >/tmp/%[1]s/index.html && cd /tmp/%[1]s && (setsid python3 -m http.server %[1]s >/dev/null 2>&1 &)", port, marker)
+	serve := fmt.Sprintf("mkdir -p /tmp/%[1]s && printf %%s %[2]q >/tmp/%[1]s/index.html && cd /tmp/%[1]s && (setsid python3 -m http.server %[1]s --bind 127.0.0.1 >/dev/null 2>&1 &)", port, marker)
 	_, err := e.run(time.Minute, "docker", "exec", "-u", "pbt", machine, "bash", "-c", serve)
 	return err
 }
