@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"math/rand"
 	"net"
 	"sync"
 	"testing"
@@ -357,5 +358,41 @@ func TestHelperFrameIgnoresUnknownFields(t *testing.T) {
 	}
 	if _, err := decodeHelperFrame([]byte(`{"type":"response","request_id":"request_1","version":"` + helperProtocolVersion + `"}{}`)); err == nil {
 		t.Fatal("trailing data accepted")
+	}
+}
+
+// Stdin goes out in frames of up to the frame limit (not 32 KiB), compressed when that pays, with each frame's
+// sequence the stdin offset of its first byte + 1, so 600 KiB is 3 frames whatever the data.
+func TestHelperExecStdinUsesFullFramesAndCompression(t *testing.T) {
+	random := make([]byte, 300<<10)
+	rand.New(rand.NewSource(1)).Read(random)
+	compressible := bytes.Repeat([]byte("exec stdin\n"), (300<<10)/11)
+	input := &inputOrderStream{}
+	message := &nativeMessageConnection{control: &inputOrderStream{}, input: input, ctx: context.Background()}
+	connection := &helperExecConn{message: message, streamID: 7, request: ExecRequest{OperationID: "operation_exec_1", InputOffset: 10}}
+	stdin := append(append([]byte{}, compressible...), random...)
+	if n, err := connection.Write(stdin); err != nil || n != len(stdin) {
+		t.Fatal("stdin write failed", n, err)
+	}
+	var got []byte
+	frames, compressed := 0, 0
+	for input.Len() > 0 {
+		_, data, err := readNativeRecord(input, false)
+		if err != nil || len(data) > protocol.MaxBinaryFrame {
+			t.Fatal("bad input record", err, len(data))
+		}
+		if data[0] == protocol.TerminalInputZstdOpcode {
+			compressed++
+		}
+		frame, err := protocol.DecodeTerminalInput(data)
+		if err != nil || frame.StreamID != 7 || frame.Sequence != uint64(10+len(got)+1) {
+			t.Fatal("stdin frame lost its offset", err)
+		}
+		got = append(got, frame.Data...)
+		frames++
+	}
+	want := (len(stdin) + ExecInputChunkBytes - 1) / ExecInputChunkBytes
+	if !bytes.Equal(got, stdin) || frames != want || compressed == 0 || compressed == frames {
+		t.Fatalf("frames=%d want %d compressed=%d bytes equal=%v", frames, want, compressed, bytes.Equal(got, stdin))
 	}
 }

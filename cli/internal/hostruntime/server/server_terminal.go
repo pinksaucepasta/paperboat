@@ -25,7 +25,7 @@ func (s *Server) handleTerminalDataWithWriter(ctx context.Context, message []byt
 	}
 	var streamID uint32
 	switch opcode {
-	case protocol.TerminalInputOpcode:
+	case protocol.TerminalInputOpcode, protocol.TerminalInputZstdOpcode:
 		started := time.Now()
 		frame, decodeErr := protocol.DecodeTerminalInput(message)
 		if decodeErr != nil {

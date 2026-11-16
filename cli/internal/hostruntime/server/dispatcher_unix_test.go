@@ -25,6 +25,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -842,5 +843,40 @@ func TestExecDispatcherPreservesEnvironmentNotReady(t *testing.T) {
 		if outcome := domainResult(nil, cause); outcome.ErrorCode != "environment_unavailable" {
 			t.Fatalf("terminal launch denial=%s", outcome.ErrorCode)
 		}
+	}
+}
+
+// A compressed exec stdin frame (what the client sends for compressible data) reaches the process as the exact bytes,
+// in one write, at its stdin offset.
+func TestExecStreamBindingDeliversCompressedInput(t *testing.T) {
+	dispatcher, root := execDispatcher(t)
+	authorization := Authorization{ClientID: "cli_1"}
+	stdin := bytes.Repeat([]byte("compressed stdin\n"), protocol.MaxTerminalInputBytes/17)
+	payload, _ := json.Marshal(map[string]any{"action": "start", "operation_id": "operation_zstd_input", "argv": []string{"/bin/sh", "-c", "head -c " + strconv.Itoa(len(stdin)) + " > got"}, "cwd": root})
+	outcome := dispatcher.Handle(context.Background(), authorization, "exec.v1", payload)
+	state := newTerminalConnectionState()
+	streamID, err := state.bind(authorization, protocol.Frame{Capability: "exec.v1", Payload: payload}, outcome)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wire, _ := protocol.EncodeTerminalInputAdaptive(protocol.TerminalInputFrame{StreamID: streamID, Sequence: 1, Data: stdin}, nil)
+	if wire[0] != protocol.TerminalInputZstdOpcode {
+		t.Fatal("test input was not compressed")
+	}
+	server := &Server{config: Config{Handler: dispatcher}}
+	if err := server.handleTerminalData(context.Background(), wire, state); err != nil {
+		t.Fatal(err)
+	}
+	execution, err := dispatcher.config.Exec.Get("operation_zstd_input")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if snapshot, err := execution.Wait(ctx); err != nil || snapshot.Result == nil || snapshot.Result.Code != 0 {
+		t.Fatalf("exec did not finish: %v", err)
+	}
+	if got, err := os.ReadFile(filepath.Join(root, "got")); err != nil || !bytes.Equal(got, stdin) {
+		t.Fatalf("process got %d bytes, want %d: %v", len(got), len(stdin), err)
 	}
 }

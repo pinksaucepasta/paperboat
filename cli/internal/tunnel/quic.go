@@ -354,7 +354,7 @@ func (c *nativeMessageConnection) WriteMessage(ctx context.Context, kind helperM
 	recordKind := nativeStructured
 	if kind == helperBinaryMessage {
 		recordKind = nativeBinary
-		if !c.unified && len(data) > 0 && (data[0] == protocol.TerminalInputOpcode || data[0] == protocol.TerminalEOFOpcode) {
+		if !c.unified && len(data) > 0 && (data[0] == protocol.TerminalInputOpcode || data[0] == protocol.TerminalInputZstdOpcode || data[0] == protocol.TerminalEOFOpcode) {
 			if c.input == nil {
 				return errors.New("native input stream unavailable")
 			}

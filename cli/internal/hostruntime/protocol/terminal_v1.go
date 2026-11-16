@@ -70,6 +70,9 @@ const (
 	// TerminalActivityOpcode says the sending window is in use (it gained focus); the PTY size follows the window that
 	// was last active. Typing says the same without a frame.
 	TerminalActivityOpcode byte = 6
+	// TerminalInputZstdOpcode is input whose data is one zstd frame: the input header, then the uncompressed length
+	// (uint32). Exec stdin uses it when compression pays, like output (EncodeTerminalInputAdaptive).
+	TerminalInputZstdOpcode byte = 7
 
 	TerminalStdout byte = 1
 	TerminalStderr byte = 2
@@ -81,6 +84,8 @@ const (
 	TerminalBroadcastKey byte = 4
 
 	terminalInputHeaderLen                = 13
+	terminalInputZstdHeaderLen            = 17
+	MaxTerminalInputBytes                 = MaxBinaryFrame - terminalInputHeaderLen
 	terminalOutputHeaderLen               = 19
 	TerminalOutputHeaderBytes             = terminalOutputHeaderLen
 	TerminalOutputRaw                byte = 0
@@ -175,6 +180,9 @@ func EncodeTerminalInput(frame TerminalInputFrame, dst []byte) ([]byte, error) {
 }
 
 func DecodeTerminalInput(message []byte) (TerminalInputFrame, error) {
+	if len(message) > 0 && message[0] == TerminalInputZstdOpcode {
+		return decodeTerminalInputZstd(message)
+	}
 	if len(message) <= terminalInputHeaderLen || len(message) > MaxBinaryFrame || message[0] != TerminalInputOpcode {
 		return TerminalInputFrame{}, &Error{Code: InvalidFrame}
 	}
@@ -183,6 +191,62 @@ func DecodeTerminalInput(message []byte) (TerminalInputFrame, error) {
 		return TerminalInputFrame{}, &Error{Code: InvalidFrame}
 	}
 	return frame, nil
+}
+
+func decodeTerminalInputZstd(message []byte) (TerminalInputFrame, error) {
+	if len(message) <= terminalInputZstdHeaderLen || len(message) > MaxBinaryFrame || message[0] != TerminalInputZstdOpcode {
+		return TerminalInputFrame{}, &Error{Code: InvalidFrame}
+	}
+	frame := TerminalInputFrame{StreamID: binary.BigEndian.Uint32(message[1:5]), Sequence: binary.BigEndian.Uint64(message[5:13])}
+	declared := binary.BigEndian.Uint32(message[13:17])
+	if frame.StreamID == 0 || frame.Sequence == 0 || declared == 0 || declared > MaxTerminalInputBytes {
+		return TerminalInputFrame{}, &Error{Code: InvalidFrame}
+	}
+	data, err := zstdDecode(message[17:], int(declared))
+	if err != nil {
+		return TerminalInputFrame{}, &Error{Code: InvalidFrame, Cause: err}
+	}
+	frame.Data = data
+	return frame, nil
+}
+
+// EncodeTerminalInputAdaptive sends data zstd-compressed (TerminalInputZstdOpcode) when that saves as much as output
+// compression requires, else as plain input. Data is at most MaxTerminalInputBytes.
+func EncodeTerminalInputAdaptive(frame TerminalInputFrame, dst []byte) ([]byte, error) {
+	compressed, err := compressTerminal(frame.Data)
+	if err != nil {
+		return nil, err
+	}
+	if compressed == nil || frame.StreamID == 0 || frame.Sequence == 0 || len(frame.Data) > MaxTerminalInputBytes {
+		return EncodeTerminalInput(frame, dst)
+	}
+	dst = growFrame(dst, terminalInputZstdHeaderLen+len(compressed))
+	dst[0] = TerminalInputZstdOpcode
+	binary.BigEndian.PutUint32(dst[1:5], frame.StreamID)
+	binary.BigEndian.PutUint64(dst[5:13], frame.Sequence)
+	binary.BigEndian.PutUint32(dst[13:17], uint32(len(frame.Data)))
+	copy(dst[17:], compressed)
+	return dst, nil
+}
+
+// compressTerminal returns data as one zstd frame when that saves TerminalOutputMinSavingsBytes and
+// TerminalOutputMinSavingsPercent, or nil when data is small or does not compress enough.
+func compressTerminal(data []byte) ([]byte, error) {
+	if len(data) < TerminalOutputMinCompress {
+		return nil, nil
+	}
+	terminalCodecSlots <- struct{}{}
+	defer func() { <-terminalCodecSlots }()
+	enc, err := takeTerminalEncoder()
+	if err != nil {
+		return nil, err
+	}
+	compressed := enc.EncodeAll(data, nil)
+	terminalEncoderPool.Put(enc)
+	if len(compressed)+TerminalOutputMinSavingsBytes <= len(data) && len(compressed)*100 <= len(data)*(100-TerminalOutputMinSavingsPercent) {
+		return compressed, nil
+	}
+	return nil, nil
 }
 
 func EncodeTerminalOutput(frame TerminalOutputFrame, dst []byte) ([]byte, error) {
@@ -241,17 +305,12 @@ func EncodeTerminalOutputAdaptive(frame TerminalOutputFrame, dst []byte) ([]byte
 	decision := &terminalCompressionCounters.smallFrames
 	if len(frame.Data) >= TerminalOutputMinCompress {
 		decision = &terminalCompressionCounters.insufficientFrames
-		terminalCodecSlots <- struct{}{}
-		enc, err := takeTerminalEncoder()
+		compressed, err := compressTerminal(frame.Data)
 		if err != nil {
-			<-terminalCodecSlots
 			terminalCompressionCounters.encodeFailures.Add(1)
 			return nil, &Error{Code: InvalidFrame, Cause: err}
 		}
-		compressed := enc.EncodeAll(frame.Data, nil)
-		terminalEncoderPool.Put(enc)
-		<-terminalCodecSlots
-		if len(compressed)+TerminalOutputMinSavingsBytes <= len(frame.Data) && len(compressed)*100 <= len(frame.Data)*(100-TerminalOutputMinSavingsPercent) {
+		if compressed != nil {
 			frame.Encoding, frame.Data = TerminalOutputZstd, compressed
 			decision = &terminalCompressionCounters.compressedFrames
 		}
@@ -431,7 +490,7 @@ func TerminalOpcode(message []byte) (byte, error) {
 	if len(message) == 0 {
 		return 0, &Error{Code: InvalidFrame, Cause: errors.New("terminal frame is empty")}
 	}
-	if message[0] < TerminalInputOpcode || message[0] > TerminalActivityOpcode {
+	if message[0] < TerminalInputOpcode || message[0] > TerminalInputZstdOpcode {
 		return 0, &Error{Code: UnsupportedChannel}
 	}
 	return message[0], nil

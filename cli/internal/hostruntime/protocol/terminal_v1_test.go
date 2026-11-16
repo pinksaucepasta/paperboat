@@ -330,3 +330,38 @@ func TestTerminalActivityFrameRoundTrip(t *testing.T) {
 		t.Fatal("a frame with a trailing byte was accepted")
 	}
 }
+
+// Exec stdin compresses like output: a compressible full-size chunk travels as one zstd input frame and decodes to the
+// exact bytes; random data stays plain input; a frame whose declared length lies is refused.
+func TestTerminalInputAdaptiveCompression(t *testing.T) {
+	compressible := bytes.Repeat([]byte("stdin line 0123456789\n"), MaxTerminalInputBytes/22)
+	wire, err := EncodeTerminalInputAdaptive(TerminalInputFrame{StreamID: 9, Sequence: 1 << 33, Data: compressible}, nil)
+	if err != nil || wire[0] != TerminalInputZstdOpcode || len(wire) >= len(compressible)/10 || len(wire) > MaxBinaryFrame {
+		t.Fatalf("compressible input was not sent compressed: err=%v opcode=%d wire=%d", err, wire[0], len(wire))
+	}
+	frame, err := DecodeTerminalInput(wire)
+	if err != nil || frame.StreamID != 9 || frame.Sequence != 1<<33 || !bytes.Equal(frame.Data, compressible) {
+		t.Fatalf("compressed input did not decode to its bytes: %v", err)
+	}
+	random := make([]byte, MaxTerminalInputBytes)
+	rand.New(rand.NewSource(1)).Read(random)
+	wire, err = EncodeTerminalInputAdaptive(TerminalInputFrame{StreamID: 9, Sequence: 1, Data: random}, nil)
+	if err != nil || wire[0] != TerminalInputOpcode || len(wire) != MaxBinaryFrame {
+		t.Fatalf("incompressible input was not sent plain: err=%v", err)
+	}
+	if frame, err = DecodeTerminalInput(wire); err != nil || !bytes.Equal(frame.Data, random) {
+		t.Fatalf("plain input did not decode: %v", err)
+	}
+	if opcode, err := TerminalOpcode([]byte{TerminalInputZstdOpcode}); err != nil || opcode != TerminalInputZstdOpcode {
+		t.Fatalf("compressed input opcode refused: %v", err)
+	}
+	lying, _ := EncodeTerminalInputAdaptive(TerminalInputFrame{StreamID: 9, Sequence: 1, Data: compressible[:4096]}, nil)
+	binary.BigEndian.PutUint32(lying[13:17], 4095)
+	if _, err := DecodeTerminalInput(lying); err == nil {
+		t.Fatal("compressed input with a wrong declared length was accepted")
+	}
+	binary.BigEndian.PutUint32(lying[13:17], MaxTerminalInputBytes+1)
+	if _, err := DecodeTerminalInput(lying); err == nil {
+		t.Fatal("compressed input declaring more than a frame was accepted")
+	}
+}

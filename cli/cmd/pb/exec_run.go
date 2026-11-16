@@ -510,7 +510,7 @@ func (r *execConnectionRef) CloseInput() error {
 }
 
 func forwardExecInput(ctx context.Context, reader io.Reader, connections *execConnectionRef) error {
-	buffer := make([]byte, 32<<10)
+	buffer := make([]byte, tunnel.ExecInputChunkBytes)
 	for {
 		n, readErr := readExecInput(ctx, reader, buffer)
 		if n < 0 || n > len(buffer) {

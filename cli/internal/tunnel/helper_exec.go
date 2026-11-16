@@ -389,21 +389,22 @@ func (c *helperExecConn) Read(p []byte) (int, error) {
 	return n, nil
 }
 
+// ExecInputChunkBytes is the most stdin one exec input frame carries (the frame limit).
+const ExecInputChunkBytes = protocol.MaxTerminalInputBytes
+
+// Write sends p in frames of up to ExecInputChunkBytes, each zstd-compressed when that pays (as output is). The
+// frames are not acknowledged: QUIC flow control bounds what is in flight.
 func (c *helperExecConn) Write(p []byte) (int, error) {
-	if len(p) == 0 {
-		return 0, nil
-	}
 	written := 0
 	for len(p) > 0 {
-		size := min(len(p), helperInputChunkBytes)
-		message := make([]byte, 13+size)
-		message[0] = 1
-		binary.BigEndian.PutUint32(message[1:5], c.streamID)
-		copy(message[13:], p[:size])
+		size := min(len(p), ExecInputChunkBytes)
 		c.writeMu.Lock()
 		// The frame sequence is the stdin byte offset of the chunk + 1 (the host drops what it already received).
-		binary.BigEndian.PutUint64(message[5:13], c.request.InputOffset+c.inputOffset.Load()+1)
-		err := c.message.WriteMessage(context.Background(), helperBinaryMessage, message)
+		sequence := c.request.InputOffset + c.inputOffset.Load() + 1
+		message, err := protocol.EncodeTerminalInputAdaptive(protocol.TerminalInputFrame{StreamID: c.streamID, Sequence: sequence, Data: p[:size]}, nil)
+		if err == nil {
+			err = c.message.WriteMessage(context.Background(), helperBinaryMessage, message)
+		}
 		if err == nil {
 			c.inputOffset.Add(uint64(size))
 		}
