@@ -122,10 +122,10 @@ func TestFailureMakesPollsNormalAndReconnectCatchesUp(t *testing.T) {
 	}
 	select {
 	case elapsed := <-waitReturns(subs[0], time.Hour):
-		if elapsed > 4*time.Second {
+		if elapsed > 7*time.Second { // the first retry is spread over 1-6 s
 			t.Fatalf("catch-up took %v", elapsed)
 		}
-	case <-time.After(5 * time.Second):
+	case <-time.After(10 * time.Second):
 		t.Fatal("the change that moved during the outage was never delivered")
 	}
 }

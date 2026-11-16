@@ -926,12 +926,11 @@ func localConfigServiceState() string {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	if runtime.GOOS == "linux" {
-		// user-console: Linux only.
 		arguments := []string{"is-active", service.ConfigUnit}
 		if service.UserSystemdController(nil, service.ConfigUnit, os.Geteuid()).User {
 			arguments = append([]string{"--user"}, arguments...)
 		}
-		query := exec.CommandContext(ctx, "systemctl", arguments...)
+		query := exec.CommandContext(ctx, "systemctl", arguments...) // other-os: Linux only.
 		prepareConfigServiceQuery(query)
 		output, err := query.Output()
 		state := strings.TrimSpace(string(output))

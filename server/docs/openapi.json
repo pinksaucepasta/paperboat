@@ -18382,6 +18382,95 @@
           "wraps",
           "recipes"
         ]
+      },
+      "PreviewLeaseRenewalRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "renewals"
+        ],
+        "properties": {
+          "renewals": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 100,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "preview_id",
+                "etag",
+                "idempotency_key",
+                "owner_session_id"
+              ],
+              "properties": {
+                "preview_id": {
+                  "type": "string"
+                },
+                "etag": {
+                  "type": "string",
+                  "description": "The lease's strong ETag, the same precondition the single renew sends as If-Match."
+                },
+                "idempotency_key": {
+                  "type": "string",
+                  "maxLength": 256,
+                  "description": "Per-lease key, interchangeable with the single renew endpoint's."
+                },
+                "owner_session_id": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "PreviewLeaseRenewalResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "results"
+            ],
+            "properties": {
+              "results": {
+                "type": "array",
+                "description": "One result per request item, in request order. A failing item never fails the others.",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "preview_id",
+                    "status"
+                  ],
+                  "properties": {
+                    "preview_id": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "description": "HTTP status the single renew endpoint would have returned for this lease."
+                    },
+                    "etag": {
+                      "type": "string"
+                    },
+                    "preview": {
+                      "$ref": "#/components/schemas/PreviewLease"
+                    },
+                    "error": {
+                      "type": "object",
+                      "description": "The error object the single renew endpoint would have returned."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
       }
     },
     "responses": {
@@ -31211,16 +31300,6 @@
             "required": false,
             "schema": {
               "type": "boolean"
-            }
-          },
-          {
-            "name": "live",
-            "in": "query",
-            "required": false,
-            "description": "false returns the stored sessions without probing each host for live metadata (current directory, foreground process, participants). Authorization is unchanged.",
-            "schema": {
-              "type": "boolean",
-              "default": true
             }
           }
         ]
@@ -56366,6 +56445,61 @@
             "description": "Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field."
           }
         ]
+      }
+    },
+    "/v1/preview-lease-renewals": {
+      "post": {
+        "summary": "Renew many preview leases of one machine",
+        "description": "Renews up to 100 leases in one request, so a machine with N previews sends ceil(N/100) requests per renewal interval instead of N. Each item is exactly one single-lease renewal (own ETag precondition and idempotency key). The Idempotency-Key header identifies the batch and is the machine proof's operation id.",
+        "security": [
+          {
+            "cookieSession": [],
+            "csrfHeader": []
+          },
+          {
+            "bearerAccess": []
+          }
+        ],
+        "x-required-bearer-scopes": [
+          "previews:write"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PreviewLeaseRenewalRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "One result per item.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PreviewLeaseRenewalResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "operationId": "post_v1_preview_lease_renewals"
       }
     }
   }

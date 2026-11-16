@@ -53,7 +53,9 @@ func (previewOriginConnectFailure) DiagnosticCode() string  { return "transport_
 func (e previewOriginConnectFailure) Unwrap() error         { return e.cause }
 
 const (
-	defaultDataCarrierPreviewQueue        = 16
+	// One route can receive a burst as large as the carrier takes at once (F21-168: 1,000 simultaneous
+	// connections lost ~1% to a queue of 16, closed silently).
+	defaultDataCarrierPreviewQueue        = 1024
 	defaultDataCarrierPreviewStreams      = 1024
 	defaultDataCarrierPreviewDialTimeout  = 10 * time.Second
 	defaultDataCarrierPreviewCloseTimeout = 5 * time.Second
@@ -135,7 +137,7 @@ func (h *DataCarrierPreviewHub) Register(routeID string) (*DataCarrierPreviewReg
 	if _, exists := h.byRoute[routeID]; exists {
 		return nil, ErrDataCarrierPreviewRegistration
 	}
-	registration := &dataCarrierPreviewRegistration{hub: h, routeID: routeID, queue: make(chan dataCarrierPreviewStream, h.queue), done: make(chan struct{})}
+	registration := &dataCarrierPreviewRegistration{hub: h, routeID: routeID, queue: make(chan *dataCarrierPreviewStream, h.queue), done: make(chan struct{})}
 	h.byRoute[routeID] = registration
 	return &DataCarrierPreviewRegistration{registration: registration}, nil
 }
@@ -236,7 +238,7 @@ func (h *DataCarrierPreviewHub) Close() error {
 type dataCarrierPreviewRegistration struct {
 	hub     *DataCarrierPreviewHub
 	routeID string
-	queue   chan dataCarrierPreviewStream
+	queue   chan *dataCarrierPreviewStream // pointers: a deep queue per route stays 8 bytes a slot
 	done    chan struct{}
 
 	mu        sync.Mutex
@@ -304,7 +306,7 @@ func (r *dataCarrierPreviewRegistration) enqueue(accepted dataCarrierPreviewStre
 		return false
 	}
 	select {
-	case r.queue <- accepted:
+	case r.queue <- &accepted:
 		return true
 	default:
 		return false

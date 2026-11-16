@@ -1,0 +1,28 @@
+== wt-el
+  GGGGGGGGGGG   Version dev-d9d082603
+949x635
+Recording session terminal_fafb6f10-c245-406c-a272-d01d3c312600 (rec_df179cfb-ea9b-409a-accc-a513911ed969). Everyone att
+
+title RX24wt & "C:\Program Files\Paperboat\users\<fleet>\bin\pb.exe" connect rx24e-l --no-customization --workspace rx23-team 2>>"C:\Users\Public\rx24e\wt-el\pb-err.txt"
+title RX24wt & "C:\Program Files\Paperboat\users\<fleet>\bin\pb.exe" connect rx24e-l --session terminal_fafb6f10-c245-406c-a272-d01d3c312600 --no-customization --workspace rx23-team 2>>"C:\Users\Publi
+== ch-el
+  GGGGGGGGGGG   Version dev-d9d082603
+816x519
+Recording session terminal_ee742e23-2206-4658-b412-b8f963fb5f54 (rec_8679b846-d1b4-45ab-b3d8-e94da646ac94). Everyone att
+
+title RX24conhost & mode con: cols=100 lines=30 & "C:\Program Files\Paperboat\users\<fleet>\bin\pb.exe" connect rx24e-l --no-customization --workspace rx23-team 2>>"C:\Users\Public\rx24e\ch-el\pb-err.
+title RX24conhost & mode con: cols=100 lines=30 & "C:\Program Files\Paperboat\users\<fleet>\bin\pb.exe" connect rx24e-l --session terminal_ee742e23-2206-4658-b412-b8f963fb5f54 --no-customization --wor
+== wt-em
+  GGGGGGGGGGG   Version dev-d9d082603
+949x635
+Recording session terminal_cec9698c-48c3-4783-a1d3-7e1a9fa0da14 (rec_07a41b52-323a-4b85-ac64-ac514525257d). Everyone att
+
+title RX24wt & "C:\Program Files\Paperboat\users\<fleet>\bin\pb.exe" connect rx24e-m --no-customization --workspace rx23-team 2>>"C:\Users\Public\rx24e\wt-em\pb-err.txt"
+title RX24wt & "C:\Program Files\Paperboat\users\<fleet>\bin\pb.exe" connect rx24e-m --session terminal_cec9698c-48c3-4783-a1d3-7e1a9fa0da14 --no-customization --workspace rx23-team 2>>"C:\Users\Publi
+== ch-em
+  GGGGGGGGGGG   Version dev-d9d082603
+816x519
+Recording session terminal_6cb55aa9-11a9-46fd-a108-5d7f83c91832 (rec_8bdea17b-33ac-4ca6-9b4f-3f9fc7de4e17). Everyone att
+
+title RX24conhost & mode con: cols=100 lines=30 & "C:\Program Files\Paperboat\users\<fleet>\bin\pb.exe" connect rx24e-m --no-customization --workspace rx23-team 2>>"C:\Users\Public\rx24e\ch-em\pb-err.
+title RX24conhost & mode con: cols=100 lines=30 & "C:\Program Files\Paperboat\users\<fleet>\bin\pb.exe" connect rx24e-m --session terminal_6cb55aa9-11a9-46fd-a108-5d7f83c91832 --no-customization --wor

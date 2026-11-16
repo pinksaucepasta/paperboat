@@ -5,6 +5,7 @@ package runtime
 import (
 	"context"
 	"os"
+	goruntime "runtime"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machineevents"
@@ -24,8 +25,17 @@ func newDaemonEventForwarder(hub *machineevents.Hub, machine string, push func(c
 	return &daemonEventForwarder{hub: hub, events: hub.Subscribe(machineevents.DaemonTopics...), machine: machine, push: push}
 }
 
+// daemonPushUID: Windows has no euid (os.Geteuid is -1); the worker runs as the enrolled owner, so
+// CurrentPaths resolves that owner's pipe from the process token.
+func daemonPushUID() int {
+	if goruntime.GOOS == "windows" {
+		return 0
+	}
+	return os.Geteuid()
+}
+
 func pushDaemonEvents(ctx context.Context, push localapi.MachineEventPush) error {
-	paths, err := localapi.CurrentPaths(os.Geteuid())
+	paths, err := localapi.CurrentPaths(daemonPushUID())
 	if err != nil {
 		return err
 	}

@@ -30,7 +30,7 @@ func TestWorkerForwardsCarrierRefreshAndRecovery(t *testing.T) {
 		t.Helper()
 		select {
 		case <-ch:
-		case <-time.After(3 * time.Second):
+		case <-time.After(10 * time.Second): // a first retry is spread over up to 6 s
 			t.Fatal("forwarded event not delivered")
 		}
 	}

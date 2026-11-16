@@ -10,6 +10,7 @@ server=$!; trap 'kill $server; rm -rf "$d"' EXIT
 cat >"$d/bin/pb" <<FAKE
 #!/usr/bin/env bash
 case \$1 in
+  --workspace) [ -z "\${FAKE_TEAM_FAIL:-}" ] || { echo 'team machine unreachable' >&2; exit 1; }; shift 2; exec "\$0" "\$@" ;;
   exec) [ -z "\${FAKE_FAIL:-}" ] || { echo 'machine unreachable' >&2; exit 1; }; shift 3; "\$@" ;;
   ssh) shift 3; "\$@" ;;
   send) cp "\$2" "\$HOME/inbox/" ;;
@@ -31,6 +32,11 @@ if out=$(FAKE_FAIL=1 "$here/probe.sh"); then echo "broken exec passed: $out"; ex
 grep -q '"step":"exec_a_to_b","ok":false,"seconds":[0-9]*,"error":"machine unreachable"' <<<"$out"
 grep -q '"step":"exec_b_to_a","ok":false' <<<"$out"
 [ "$(grep -c '"ok":true' <<<"$out")" = 5 ] || { echo "broken exec run: $out"; exit 1; }
+# A team machine is probed in the team workspace when configured; its failure fails team_exec only.
+out=$(CANARY_TEAM=t CANARY_TEAM_MACHINE=c "$here/probe.sh") || { echo "team run failed: $out"; exit 1; }
+grep -q '"step":"team_exec","ok":true' <<<"$out" || { echo "team step missing: $out"; exit 1; }
+if out=$(FAKE_TEAM_FAIL=1 CANARY_TEAM=t CANARY_TEAM_MACHINE=c "$here/probe.sh"); then echo "broken team exec passed: $out"; exit 1; fi
+grep -q '"step":"team_exec","ok":false,"seconds":[0-9]*,"error":"team machine unreachable"' <<<"$out" && [ "$(grep -c '"ok":false' <<<"$out")" = 1 ] || { echo "team_exec: $out"; exit 1; }
 # Every configured edge is fetched directly; one that does not answer fails the edges step only.
 out=$(CANARY_EDGES="127.0.0.1" "$here/probe.sh") || { echo "edges run failed: $out"; exit 1; }
 grep -q '"step":"edges","ok":true' <<<"$out" || { echo "edges step missing: $out"; exit 1; }
