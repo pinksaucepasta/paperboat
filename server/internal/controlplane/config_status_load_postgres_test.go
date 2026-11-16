@@ -3,8 +3,8 @@
 package controlplane
 
 // F21-170: config sync under load, no storm and no slow neighbor. Machines of many teams report their sync status
-// (Record: a machine proof, the assignment re-read, and, for a team-adopted assignment that has published, the global
-// team write lock and an audit row) while one unrelated machine reports and its owner reads the status list; the
+// (Record: a machine proof, the assignment re-read, and, for a team-adopted assignment that has published, its team's
+// shared read lock and an audit row) while one unrelated machine reports and its owner reads the status list; the
 // neighbor's latency under that load against its latency alone is the slow-neighbor check, the database's
 // idle-in-transaction and lock-wait samples are the storm check, and the status list of a 200-machine account must
 // page from the server's total (every machine once, no page over 200 rows) while the load runs.

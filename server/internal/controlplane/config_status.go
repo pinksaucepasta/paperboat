@@ -364,7 +364,18 @@ func (s *ConfigStatusService) Record(ctx context.Context, identityToken string, 
 		return errors.Join(ErrConfigStatusInvalid, errConfigStatusReport)
 	}
 	now := s.clock().UTC()
-	err = s.store.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+	// A publishing report of a team-adopted repository audits into the team, so it is ordered against that team's
+	// writes (membership), but never against other teams or other reports (FIX-TEAMLOCK). READ COMMITTED: every
+	// report reads and rewrites its own row of a small hot table, and serializable page-level predicate locks made
+	// reports of different machines abort each other (40001); the status row is locked FOR UPDATE, the upsert is
+	// gated on the assignment in one statement, and the audit row is idempotent, so nothing relies on a snapshot.
+	lockTeam := configStatusLockTeam(assignment, report)
+	err = s.store.InReadCommittedTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+		if lockTeam != "" {
+			if err := db.LockTeamReadsFor(ctx, tx, lockTeam); err != nil {
+				return err
+			}
+		}
 		currentAssignment, err := tx.Queries().GetControlConfigAssignment(ctx, identity.EnvironmentID)
 		if err != nil {
 			if !errors.Is(err, sql.ErrNoRows) {
@@ -374,25 +385,9 @@ func (s *ConfigStatusService) Record(ctx context.Context, identityToken string, 
 		}
 		if currentAssignment.ID != report.AssignmentID || !currentAssignment.RepositoryID.Valid ||
 			currentAssignment.RepositoryID.String != report.RepositoryID || !currentAssignment.WarningRevision.Valid ||
-			currentAssignment.WarningRevision.String != report.WarningRevision || currentAssignment.Mode != report.Mode {
+			currentAssignment.WarningRevision.String != report.WarningRevision || currentAssignment.Mode != report.Mode ||
+			configStatusLockTeam(currentAssignment, report) != lockTeam {
 			return errors.Join(ErrConfigStatusInvalid, errConfigStatusAssign)
-		}
-		if currentAssignment.AdoptedTeamID.Valid && strings.TrimSpace(report.LastPublishedRevision) != "" {
-			if err := teams.Lock(ctx, tx); err != nil {
-				return err
-			}
-			currentAssignment, err = tx.Queries().GetControlConfigAssignment(ctx, identity.EnvironmentID)
-			if err != nil {
-				if !errors.Is(err, sql.ErrNoRows) {
-					return err
-				}
-				return errors.Join(ErrConfigStatusInvalid, errConfigStatusAssign)
-			}
-			if currentAssignment.ID != report.AssignmentID || !currentAssignment.RepositoryID.Valid ||
-				currentAssignment.RepositoryID.String != report.RepositoryID || !currentAssignment.WarningRevision.Valid ||
-				currentAssignment.WarningRevision.String != report.WarningRevision || currentAssignment.Mode != report.Mode {
-				return errors.Join(ErrConfigStatusInvalid, errConfigStatusAssign)
-			}
 		}
 		var previousPublished sql.NullString
 		previousErr := tx.QueryRow(ctx, `SELECT last_published_revision FROM control_config_sync_statuses WHERE environment_id=$1 FOR UPDATE`, report.EnvironmentID).Scan(&previousPublished)
@@ -438,6 +433,14 @@ func (s *ConfigStatusService) Record(ctx context.Context, identityToken string, 
 		return errors.Join(err, errConfigStatusPersist)
 	}
 	return err
+}
+
+// configStatusLockTeam is the team a report must be ordered against: the adopting team when it publishes.
+func configStatusLockTeam(assignment dbsqlc.ControlConfigAssignment, report ConfigStatusReport) string {
+	if assignment.AdoptedTeamID.Valid && strings.TrimSpace(report.LastPublishedRevision) != "" {
+		return assignment.AdoptedTeamID.String
+	}
+	return ""
 }
 
 func newlyPublishedRevision(previous sql.NullString, reported string) (string, bool) {

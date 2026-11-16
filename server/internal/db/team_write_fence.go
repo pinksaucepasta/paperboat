@@ -36,3 +36,11 @@ func LockTeamWritesFor(ctx context.Context, tx *Tx, team string) error {
 	_, err := tx.Exec(ctx, fmt.Sprintf(`LOCK TABLE paperboat.team_write_fence_%02d IN EXCLUSIVE MODE`, TeamWriteFenceBucket(team)))
 	return err
 }
+
+// LockTeamReadsFor orders a transaction that reads this team's state (membership, policy) and writes only rows
+// of its own against the team's writers, but not against other such readers of any team: ROW SHARE conflicts
+// only with the global lock and the team's bucket writers. It must be the first statement of the transaction.
+func LockTeamReadsFor(ctx context.Context, tx *Tx, team string) error {
+	_, err := tx.Exec(ctx, fmt.Sprintf(`LOCK TABLE paperboat.team_write_fence, paperboat.team_write_fence_%02d IN ROW SHARE MODE`, TeamWriteFenceBucket(team)))
+	return err
+}

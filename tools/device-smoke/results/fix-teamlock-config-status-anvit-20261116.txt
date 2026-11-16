@@ -1,0 +1,34 @@
+# FIX-TEAMLOCK: TestLoadConfigStatus on anvit PostgreSQL, before (main bbb8f2bb2, host load ~17) and after (86506501b, host load ~45)
+## before
+    config_status_load_postgres_test.go:234: neighbor alone: report p99 76.445127ms, status list p99 38.555306ms
+    config_status_load_postgres_test.go:307: daily: 100 machines in 20 teams, a report every 1s for 20 s: 609 reports (30.4/s), 16 full status-list pages of 200 machines, 61 worker errors (first: ERROR: could not serialize access due to read/write dependencies among transactions (SQLSTATE 40001)
+    config_status_load_postgres_test.go:308: daily: neighbor report p99 3.628464175s (8 samples), status list p99 1.414059507s (8 samples), 0 failures; database: max idle-in-transaction 15, max sessions waiting on a lock 0
+    config_status_load_postgres_test.go:310: daily: failures under load: workers 61 (ERROR: could not serialize access due to read/write dependencies among transactions (SQLSTATE 40001)
+    config_status_load_postgres_test.go:317: daily: slow neighbor: report p99 3.628464175s under load against 76.445127ms alone (bound 1.52890254s)
+    config_status_load_postgres_test.go:320: daily: slow neighbor: status list p99 1.414059507s under load against 38.555306ms alone (bound 1s)
+    config_status_load_postgres_test.go:307: saturating: 20 machines in 4 teams, a report every 0s for 20 s: 478 reports (23.9/s), 32 full status-list pages of 200 machines, 63 worker errors (first: ERROR: could not serialize access due to read/write dependencies among transactions (SQLSTATE 40001)
+    config_status_load_postgres_test.go:308: saturating: neighbor report p99 1.476819927s (27 samples), status list p99 387.969395ms (27 samples), 0 failures; database: max idle-in-transaction 16, max sessions waiting on a lock 0
+    config_status_load_postgres_test.go:310: saturating: failures under load: workers 63 (ERROR: could not serialize access due to read/write dependencies among transactions (SQLSTATE 40001)
+--- FAIL: TestLoadConfigStatus (80.11s)
+FAIL
+FAIL	github.com/pinksaucepasta/paperboat/server/internal/controlplane	80.331s
+FAIL
+## after
+    config_status_load_postgres_test.go:234: neighbor alone: report p99 157.190871ms, status list p99 67.119565ms
+    config_status_load_postgres_test.go:307: daily: 100 machines in 20 teams, a report every 1s for 20 s: 1167 reports (58.4/s), 16 full status-list pages of 200 machines, 0 worker errors (first: <nil>)
+    config_status_load_postgres_test.go:308: daily: neighbor report p99 2.68149539s (25 samples), status list p99 978.61766ms (25 samples), 0 failures; database: max idle-in-transaction 13, max sessions waiting on a lock 0
+    config_status_load_postgres_test.go:307: saturating: 20 machines in 4 teams, a report every 0s for 20 s: 1279 reports (64.0/s), 27 full status-list pages of 200 machines, 0 worker errors (first: <nil>)
+    config_status_load_postgres_test.go:308: saturating: neighbor report p99 580.899308ms (37 samples), status list p99 527.002087ms (37 samples), 0 failures; database: max idle-in-transaction 14, max sessions waiting on a lock 0
+--- PASS: TestLoadConfigStatus (83.16s)
+ok  	github.com/pinksaucepasta/paperboat/server/internal/controlplane	83.416s
+## unit (anvit PG): TestTeamReadsDoNotSerializePostgres, TestTeamWritesForDifferentTeamsDoNotSerializePostgres, ConfigStatus/ConfigSync suites
+--- PASS: TestTeamWritesForDifferentTeamsDoNotSerializePostgres (15.50s)
+--- PASS: TestTeamReadsDoNotSerializePostgres (2.31s)
+ok  	github.com/pinksaucepasta/paperboat/server/internal/db	17.892s
+--- PASS: TestConfigSyncAccountSuspensionRevokesAndPreventsAuthority (13.36s)
+--- PASS: TestMarshalConfigStatusListCanonicalizesNilAsArray (0.00s)
+--- PASS: TestConfigStatusValidationRejectsStaleLeakingAndInconsistentReports (0.00s)
+--- PASS: TestConfigStatusValidationAcceptsHelperWarningWithSafeSkippedSpecialFiles (0.00s)
+--- PASS: TestConfigStatusRejectionClassIsBoundedAndNonSecret (0.00s)
+--- PASS: TestTeamConfigPublicationAuditUsesAuthoritativeAdoptionAndCommitsAtomically (1.31s)
+ok  	github.com/pinksaucepasta/paperboat/server/internal/controlplane	14.991s

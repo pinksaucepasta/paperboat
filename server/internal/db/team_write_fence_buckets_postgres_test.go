@@ -13,6 +13,29 @@ import (
 
 // Two teams in different buckets write at the same time; the same team, or a global writer, waits.
 func TestTeamWritesForDifferentTeamsDoNotSerializePostgres(t *testing.T) {
+	store := openFenceStore(t)
+	teamA := "fence-a"
+	teamB := ""
+	for i := 0; teamB == ""; i++ {
+		if candidate := fmt.Sprintf("fence-b-%d", i); db.TeamWriteFenceBucket(candidate) != db.TeamWriteFenceBucket(teamA) {
+			teamB = candidate
+		}
+	}
+	release := holdFence(t, store, func(ctx context.Context, tx *db.Tx) error { return db.LockTeamWritesFor(ctx, tx, teamA) })
+	start := time.Now()
+	if err := tryFence(store, func(ctx context.Context, tx *db.Tx) error { return db.LockTeamWritesFor(ctx, tx, teamB) }); err != nil || time.Since(start) > 400*time.Millisecond {
+		t.Fatalf("another team's write waited for team A: %v after %v", err, time.Since(start))
+	}
+	if err := tryFence(store, func(ctx context.Context, tx *db.Tx) error { return db.LockTeamWritesFor(ctx, tx, teamA) }); err == nil {
+		t.Fatal("a second write for team A did not wait for the first")
+	}
+	if err := tryFence(store, db.LockTeamWrites); err == nil {
+		t.Fatal("a global team write did not wait for a team's write")
+	}
+	release()
+}
+
+func openFenceStore(t *testing.T) *db.DB {
 	dsn := os.Getenv("PAPERBOAT_TEST_DATABASE_DSN")
 	if dsn == "" {
 		t.Skip("set PAPERBOAT_TEST_DATABASE_DSN")
@@ -29,17 +52,15 @@ func TestTeamWritesForDifferentTeamsDoNotSerializePostgres(t *testing.T) {
 	if err := db.Migrate(ctx, store); err != nil {
 		t.Fatal(err)
 	}
-	teamA := "fence-a"
-	teamB := ""
-	for i := 0; teamB == ""; i++ {
-		if candidate := fmt.Sprintf("fence-b-%d", i); db.TeamWriteFenceBucket(candidate) != db.TeamWriteFenceBucket(teamA) {
-			teamB = candidate
-		}
-	}
+	return store
+}
+
+// holdFence holds lock in one transaction until the returned release is called.
+func holdFence(t *testing.T, store *db.DB, lock func(context.Context, *db.Tx) error) func() {
 	held, release, done := make(chan struct{}), make(chan struct{}), make(chan error, 1)
 	go func() {
-		done <- store.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-			if err := db.LockTeamWritesFor(ctx, tx, teamA); err != nil {
+		done <- store.InTx(context.Background(), func(ctx context.Context, tx *db.Tx) error {
+			if err := lock(ctx, tx); err != nil {
 				return err
 			}
 			close(held)
@@ -48,27 +69,62 @@ func TestTeamWritesForDifferentTeamsDoNotSerializePostgres(t *testing.T) {
 		})
 	}()
 	<-held
-	// try runs one transaction that must take its lock within 500 ms (lock_timeout).
-	try := func(lock func(context.Context, *db.Tx) error) error {
-		return store.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-			if _, err := tx.Exec(ctx, `SET LOCAL lock_timeout = '500ms'`); err != nil {
-				return err
-			}
-			return lock(ctx, tx)
-		})
+	return func() {
+		close(release)
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
 	}
-	start := time.Now()
-	if err := try(func(ctx context.Context, tx *db.Tx) error { return db.LockTeamWritesFor(ctx, tx, teamB) }); err != nil || time.Since(start) > 400*time.Millisecond {
-		t.Fatalf("another team's write waited for team A: %v after %v", err, time.Since(start))
+}
+
+// tryFence runs one transaction that must take its lock within 500 ms (lock_timeout).
+func tryFence(store *db.DB, lock func(context.Context, *db.Tx) error) error {
+	return store.InTx(context.Background(), func(ctx context.Context, tx *db.Tx) error {
+		if _, err := tx.Exec(ctx, `SET LOCAL lock_timeout = '500ms'`); err != nil {
+			return err
+		}
+		return lock(ctx, tx)
+	})
+}
+
+// Team readers (config status reports) never wait for each other, even in the same bucket, but do wait for the
+// team's writers and the global lock, and the team's writers wait for them (FIX-TEAMLOCK).
+func TestTeamReadsDoNotSerializePostgres(t *testing.T) {
+	store := openFenceStore(t)
+	teamA := "fence-read-a"
+	sameBucket := ""
+	for i := 0; sameBucket == ""; i++ {
+		if candidate := fmt.Sprintf("fence-read-b-%d", i); db.TeamWriteFenceBucket(candidate) == db.TeamWriteFenceBucket(teamA) {
+			sameBucket = candidate
+		}
 	}
-	if err := try(func(ctx context.Context, tx *db.Tx) error { return db.LockTeamWritesFor(ctx, tx, teamA) }); err == nil {
-		t.Fatal("a second write for team A did not wait for the first")
+	readsFor := func(team string) func(context.Context, *db.Tx) error {
+		return func(ctx context.Context, tx *db.Tx) error { return db.LockTeamReadsFor(ctx, tx, team) }
 	}
-	if err := try(db.LockTeamWrites); err == nil {
-		t.Fatal("a global team write did not wait for a team's write")
+	writesFor := func(team string) func(context.Context, *db.Tx) error {
+		return func(ctx context.Context, tx *db.Tx) error { return db.LockTeamWritesFor(ctx, tx, team) }
 	}
-	close(release)
-	if err := <-done; err != nil {
-		t.Fatal(err)
+	release := holdFence(t, store, readsFor(teamA))
+	for _, team := range []string{teamA, sameBucket} {
+		if err := tryFence(store, readsFor(team)); err != nil {
+			t.Fatalf("a read for %s waited for a read of %s: %v", team, teamA, err)
+		}
 	}
+	if err := tryFence(store, writesFor(teamA)); err == nil {
+		t.Fatal("a team write did not wait for the team's read")
+	}
+	if err := tryFence(store, db.LockTeamWrites); err == nil {
+		t.Fatal("a global team write did not wait for a team's read")
+	}
+	release()
+	release = holdFence(t, store, writesFor(teamA))
+	if err := tryFence(store, readsFor(teamA)); err == nil {
+		t.Fatal("a team read did not wait for the team's write")
+	}
+	release()
+	release = holdFence(t, store, db.LockTeamWrites)
+	if err := tryFence(store, readsFor(teamA)); err == nil {
+		t.Fatal("a team read did not wait for the global write")
+	}
+	release()
 }
