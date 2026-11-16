@@ -1,0 +1,44 @@
+{
+ "checks": [
+  {
+   "check": "baseline exec peer->mac",
+   "status": "PASS",
+   "detail": "3.9 s pending. The command ran without your managed values; run `pb env unlock` on any of your devices, or run it again once `pb status` shows Paperboat is reachable."
+  },
+  {
+   "check": "baseline exec mac->peer",
+   "status": "FAIL",
+   "detail": "1.1 s er device when this machine has no browser. Then retry. Support reference: support_b87b04dc-273d-4c3f-b38f-7210d3956060."
+  },
+  {
+   "check": "network of the mac machine cut",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "check": "UDP source ports of the mac machine rebound",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "check": "first inbound exec peer->mac after the network returned",
+   "status": "PASS",
+   "detail": "1.2 s (limit 10 s)"
+  },
+  {
+   "check": "after the return the machine's UDP traffic uses rebound ports",
+   "status": "PASS",
+   "detail": "9 rebound UDP ports/flows"
+  },
+  {
+   "check": "the next three inbound execs succeed",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "check": "outbound exec mac->peer",
+   "status": "FAIL",
+   "detail": "0.8 s er device when this machine has no browser. Then retry. Support reference: support_3bbb3aeb-0a25-4453-ba92-f96b2f1bf3cb."
+  }
+ ]
+}
