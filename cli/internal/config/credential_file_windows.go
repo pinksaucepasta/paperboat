@@ -124,6 +124,17 @@ func unprotectWindowsFileSecretV2(path string, protected []byte) ([]byte, error)
 	return append([]byte(nil), value...), nil
 }
 
+// createCredentialDirectory creates the folder owner-only for the current user. os.MkdirAll from an elevated
+// administrator token leaves it owned by Administrators with an inherited ACL, which writeCredentialFile then
+// refuses as foreign-owned (pb login with auth.allow_file_fallback in an isolated profile, X-35).
+func createCredentialDirectory(path string) error {
+	sddl, err := currentUserCredentialSDDL()
+	if err != nil {
+		return err
+	}
+	return ensureDPAPIDirectory(path, sddl)
+}
+
 func validateCredentialDirectory(path string) error {
 	info, err := os.Lstat(path)
 	if err != nil {

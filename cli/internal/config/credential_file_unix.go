@@ -11,6 +11,8 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+func createCredentialDirectory(path string) error { return os.MkdirAll(path, 0o700) }
+
 func writeCredentialFile(path string, value []byte) error { return atomicWrite(path, value, 0o600) }
 
 func validateCredentialDirectory(path string) error {

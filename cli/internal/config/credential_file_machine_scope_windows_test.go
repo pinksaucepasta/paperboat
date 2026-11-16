@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -64,5 +65,28 @@ func TestWindowsFileSecretRejectsNonRegularCredentialObject(t *testing.T) {
 	value, err := store.Get(ref)
 	if value != "" || !errors.Is(err, ErrCredentialStoreUnavailable) {
 		t.Fatal("directory credential returned a value or lost its invalid-store error")
+	}
+}
+
+// An elevated administrator token gives new folders to Administrators with its default DACL (Administrators, SYSTEM,
+// the logon session) when the parent passes nothing down, as the credentials folder login's profile save secured
+// first does. The file store must still create its folder owner-only for the user (pb login --api-token-file with
+// auth.allow_file_fallback in an isolated profile, X-35).
+func TestFileSecretStoreCreatedFromElevatedTokenIsOwnedByTheUser(t *testing.T) {
+	setFixtureDefaultOwnerToAdministrators(t)
+	sddl, err := currentUserCredentialSDDL()
+	if err != nil {
+		t.Fatal(err)
+	}
+	credentials := filepath.Join(t.TempDir(), "credentials")
+	if err := ensureDPAPIDirectory(filepath.Join(credentials, "profiles"), sddl); err != nil {
+		t.Fatal(err)
+	}
+	store := FileSecretStore{Dir: filepath.Join(credentials, "secrets")}
+	if err := store.Set("elevated-file-secret", "value"); err != nil {
+		t.Fatalf("store a secret from an elevated token: %v", err)
+	}
+	if got, err := store.Get("elevated-file-secret"); err != nil || got != "value" {
+		t.Fatalf("round trip value=%q err=%v", got, err)
 	}
 }

@@ -22,7 +22,10 @@ type FileSecretStore struct{ Dir string }
 func (s FileSecretStore) path(ref string) string { return filepath.Join(s.Dir, ref+".secret") }
 
 func (s FileSecretStore) Set(ref, value string) error {
-	if err := os.MkdirAll(s.Dir, 0o700); err != nil {
+	if err := createCredentialDirectory(s.Dir); err != nil {
+		if isSafeConfigError(err) {
+			return err
+		}
 		return safeConfigCause("credential storage directory could not be created", err)
 	}
 	if err := validateCredentialDirectory(s.Dir); err != nil {
