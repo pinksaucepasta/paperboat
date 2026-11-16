@@ -23,7 +23,10 @@ import (
 )
 
 const (
-	defaultRefreshInterval = 15 * time.Second
+	// The periodic check while there is no healthy change stream, and the first step of its outage backoff: a
+	// stream that flapped under server load reset the backoff and kept ~300 daemons re-listing every 15 s
+	// (2026-11-16, Postgres at 200% CPU). Prior art: Tailscale's map poll backs off, never re-polls on a short timer.
+	defaultRefreshInterval = time.Minute
 	defaultRequestTimeout  = 10 * time.Second
 	minimumRefreshInterval = time.Second
 	// One machine change bumps the inventory topic of every machine in its audience, so on a busy account

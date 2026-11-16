@@ -861,6 +861,27 @@ func TestInventoryOutageRefreshBacksOffWithJitter(t *testing.T) {
 	}
 }
 
+// Without a healthy change stream a daemon checks no more often than once a minute, so a fleet whose
+// stream flaps under server load does not re-list every 15 s (2026-11-16).
+func TestInventoryDefaultPeriodicCheckIsAtLeastAMinute(t *testing.T) {
+	store, err := localapi.NewSnapshotStore(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inventory, err := NewInventory(InventoryConfig{Source: &scriptedMachineSource{}, Store: store})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inventory.refreshInterval < time.Minute {
+		t.Fatalf("default periodic check %v, want at least a minute", inventory.refreshInterval)
+	}
+	for outages := range 33 {
+		if got := outageRefreshDelay(inventory.refreshInterval, outages); got < time.Minute-time.Minute/5 {
+			t.Fatalf("outage %d: delay %v below the one-minute floor", outages, got)
+		}
+	}
+}
+
 // pb wait asks its daemon for a refresh every few seconds; requests from local commands are spaced so
 // a loop of them cannot turn into a full account listing each time.
 func TestRequestedRefreshesFoldWithinTheSpacing(t *testing.T) {
