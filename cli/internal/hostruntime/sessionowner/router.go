@@ -417,7 +417,8 @@ func (r *Router) create(ctx context.Context, body json.RawMessage) (json.RawMess
 	image.byID[out.V0.ID] = routedSession{generation: active, name: out.V0.Name, state: out.V0.State}
 	image.snapshots = append(image.snapshots, out.V0)
 	if err := r.installIndex(image); err != nil {
-		return nil, err
+		// The owner already runs the shell: without its record in the index nobody can list, attach or close it.
+		return nil, errors.Join(err, deleteCreated(ctx, owner.Call, out.V0.ID))
 	}
 	return response, nil
 }

@@ -370,9 +370,13 @@ func (m *Manager) Create(ctx context.Context, request CreateRequest) (Snapshot, 
 		return Snapshot{}, err
 	}
 	if err := session.lifecycle.Transition(Running); err != nil {
-		closeErr := process.CloseIO()
-		observeSessionFailure(session, "lifecycle", closeErr)
-		return Snapshot{}, classifySessionFailure("lifecycle", errors.Join(err, closeErr))
+		// CloseIO alone leaves a shell that ignores the hangup running with no record; end it like a failed persist.
+		terminateCtx, cancel := context.WithTimeout(context.Background(), m.config.TerminationTimeout)
+		_, terminateErr := process.Terminate(terminateCtx, 0)
+		cancel()
+		cleanupErr := m.discardFailedCreate(context.Background(), session, Creating)
+		observeSessionFailure(session, "lifecycle", errors.Join(terminateErr, cleanupErr))
+		return Snapshot{}, errors.Join(err, classifySessionFailure("lifecycle", errors.Join(terminateErr, cleanupErr)))
 	}
 	_, generation := session.lifecycle.Snapshot()
 	if err := m.persist(ctx, session); err != nil {

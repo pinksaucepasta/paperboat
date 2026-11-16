@@ -661,3 +661,38 @@ func TestRouterHungOwnerDoesNotBlockFreshTerminals(t *testing.T) {
 		})
 	}
 }
+
+// A terminal created right after pair/boot left a running shell with no record (R-F21-164B): the owner had already
+// started it when a concurrent owner change moved the router's revision, installIndex refused the new session, and the
+// router returned the error without deleting what the owner now ran, so nobody could list, attach to or close it.
+func TestCreateRefusedByTheIndexDeletesTheShellTheOwnerStarted(t *testing.T) {
+	manager, workspace, shell := newRouterTestManager(t)
+	gen := generation(1)
+	owner := authenticatedRouterOwner(t, gen, manager, workspace, shell)
+	var router *Router
+	call := owner.Call
+	owner.Call = func(ctx context.Context, op string, body json.RawMessage) (json.RawMessage, error) {
+		response, err := call(ctx, op, body)
+		if op == "Create" { // an owner change lands while the owner starts the shell
+			router.mu.Lock()
+			router.revision++
+			router.mu.Unlock()
+		}
+		return response, err
+	}
+	available := map[string]Owner{gen: owner}
+	router, err := NewRouter(gen, map[string]Owner{gen: {Descriptor: owner.Descriptor}}, 2, ensureRouterOwner(available))
+	if err != nil {
+		t.Fatal(err)
+	}
+	remote, err := router.Service()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := remote.Create(context.Background(), session.CreateRequest{Name: "orphan-check", Command: routerShellCommand(shell, workspace, "exec sleep 60")}); !errors.Is(err, session.ErrOwnerUnavailable) {
+		t.Fatalf("create refused by the index = %v, want %v", err, session.ErrOwnerUnavailable)
+	}
+	if left := manager.List(); len(left) != 0 {
+		t.Fatalf("the owner still holds %d session(s) the router refused: %#v", len(left), left)
+	}
+}
