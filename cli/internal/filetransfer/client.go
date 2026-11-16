@@ -688,9 +688,11 @@ func (c *Client) retryJSONRequest(ctx context.Context, method, url, operation, m
 	}
 }
 
+// 499 is the daemon answering "canceled": its own context ended when its peer stream died (a peer asleep or a
+// path that dropped), not a refusal. A resumable transfer waits it out (X-26); a user cancel ends it on the next try.
 func transientHTTPStatus(status int) bool {
 	switch status {
-	case http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+	case http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout, 499:
 		return true
 	default:
 		return false

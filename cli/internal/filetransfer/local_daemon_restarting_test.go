@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net/http"
 	"os"
 	"testing"
 
@@ -45,5 +46,16 @@ func TestUnknownLeaseHandleIsNotARestartingDaemon(t *testing.T) {
 	}
 	if !retryableTransferFailure(&transferLeaseLost{unknown}) {
 		t.Fatal("a lost lease is not retried with a new lease")
+	}
+}
+
+// X-26: the daemon answers a transfer request 499 "canceled" when its peer stream died (the peer machine went to
+// sleep); the send resumes from the committed offset instead of failing.
+func TestCanceledAnswerFromTheDaemonIsRetried(t *testing.T) {
+	if !retryableTransferFailure(&Error{Code: "canceled", StatusCode: 499}) {
+		t.Fatal("a 499 canceled answer ended the transfer instead of waiting for the peer")
+	}
+	if retryableTransferFailure(&Error{Code: "forbidden", StatusCode: http.StatusForbidden}) {
+		t.Fatal("a refusal was retried")
 	}
 }
