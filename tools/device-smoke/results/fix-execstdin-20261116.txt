@@ -30,3 +30,15 @@ M relay random stdin is within the run-to-run spread before and after (0.17-0.80
 same way), so no regression; compressible stdin gains everywhere (L relay 0.97 -> 4.2-5.3, W>L 0.19-0.23 -> 4.1).
 Summary: on the direct Linux path stdin now equals stdout (random ~10 MB/s both); over the relay random stdin is
 link-limited like stdout, and compressible stdin is 2-20x faster.
+
+Windows -> Linux follow-up (2026-11-16, winpool-5 xstd-w5 -> hp container xstd-hb, 8 MB, counters: Windows `netstat -s`
+UDP datagrams sent + Get-NetAdapterStatistics, Linux iptables UDP counters in the container netns):
+- pipe stdin from Windows: before (dev-bd6620efe) txt 1.15 MB/s in 885 datagrams, rnd 0.43; after the pipe fix
+  (dev-d6a841f62) txt 3.03 MB/s in 94 datagrams (file redirect: 2.73 MB/s, 81 datagrams). The Windows pipe handed over
+  <= 8 KiB per read, so frames were tiny; TestExecPipeInputFillsFramesFromASmallPipe fails on the old reader (8192
+  bytes) and passes 20/20 on the fix (run on winpool-5).
+- random stdin 0.06-0.31 MB/s vs stdout ~2 MB/s is the PATH, not exec or the Windows stack: on the direct UDP path
+  Windows -> hp loses 16-61% of datagrams (e.g. 9205 sent, 4380 reached the container; NIC discards 0, errors 0),
+  and stdout's ACKs from Windows are lost the same way (61%); when the session runs over the relay, random stdin is
+  2.05-2.08 MB/s = stdout 2.07-2.78 MB/s with 0 QUIC loss. Open transport item: a direct path that loses half its
+  packets is still used instead of a clean relay.
