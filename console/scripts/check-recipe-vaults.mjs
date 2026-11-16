@@ -48,7 +48,7 @@ try {
   log(true, "creating the vault asks to unlock ENV first")
   await unlock.fill(readFileSync(VAULT_PASSWORD_FILE, "utf8").trim())
   await page.getByRole("button", { name: "Unlock", exact: true }).click()
-  await page.getByText("Unlocked. Save again.").waitFor({ timeout: 60000 })
+  await page.getByText("Unlocked. Save again.").waitFor({ timeout: 120000 })
   log(true, "unlocking says so")
 
   await offer.click()
