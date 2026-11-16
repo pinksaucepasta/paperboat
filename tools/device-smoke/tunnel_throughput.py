@@ -34,7 +34,9 @@ def netem(rtt_ms):
     interface = sh('sh', '-c', "ip -o route get 1.1.1.1 | sed -n 's/.* dev \\([^ ]*\\).*/\\1/p'").stdout.strip()
     assert interface, 'no default interface'
     sh('sudo', '-n', 'systemd-run', '--quiet', '--on-active=600', 'tc', 'qdisc', 'del', 'dev', interface, 'root')
-    done = sh('sudo', '-n', 'tc', 'qdisc', 'replace', 'dev', interface, 'root', 'netem', 'delay', f'{rtt_ms}ms')
+    # limit: netem's default 1000-packet queue drops the bursts of a 150 Mbit/s flow at 50 ms (BDP ~625 packets plus slow-start
+    # overshoot), and the loss, not the carrier, then caps the rate (oracle 2026-11-16: 26-108 Mbit/s default, 97-102 with 100000).
+    done = sh('sudo', '-n', 'tc', 'qdisc', 'replace', 'dev', interface, 'root', 'netem', 'delay', f'{rtt_ms}ms', 'limit', '100000')
     assert done.returncode == 0, 'netem failed: ' + done.stderr[-200:]
     try:
         yield interface
