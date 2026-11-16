@@ -68,15 +68,7 @@ func (s *layerEnvironmentService) layerEnvironment(ctx context.Context, names *l
 	if !ok || s == nil || s.isClosed() {
 		return nil, envinject.ErrNotReady
 	}
-	if controlKnownDown(s.transport) {
-		return nil, controlDownError{} // no ENV lookup waits out a control plane the host's own requests just failed to reach
-	}
-	ctx, cancel := context.WithTimeout(ctx, environmentBudget(s.transport))
-	defer cancel()
-	if err := s.registerLayerRecipient(ctx); err != nil {
-		return nil, err
-	}
-	bundle, err := s.fetchLayerContext(ctx, binding)
+	bundle, fresh, err := s.currentLayerContext(ctx, binding)
 	if err != nil {
 		return nil, err
 	}
@@ -125,10 +117,103 @@ func (s *layerEnvironmentService) layerEnvironment(ctx context.Context, names *l
 	if names != nil {
 		names.Scopes = scopes
 	}
+	if !fresh { // Paperboat did not answer this lookup: observations stay durable for the next one that it does
+		return values, err
+	}
 	if flushErr := s.flushLayerObservationsLocked(ctx); flushErr != nil && !errorreport.HTTPAttemptObserved(flushErr) {
 		errorreport.Current().ObserveFailure(ctx, "paperboat-daemon", "environment_observation", "control_request", "control_request_failed", flushErr)
 	}
 	return values, err
+}
+
+// cachedLookupBudget is how long a launch waits for a fresh layer context when the host already holds the last one
+// Paperboat sent for that launch context; a healthy lookup takes well under a second.
+const cachedLookupBudget = time.Second
+
+// layerAnswer is what Paperboat last answered for a launch context: a layer context, or a refusal (pending delivery).
+type layerAnswer struct {
+	bundle api.VaultLayerContext
+	err    error
+}
+
+// layerLookup is one in-flight layer-context request, shared by every launch of the same launch context.
+type layerLookup struct {
+	done   chan struct{}
+	bundle api.VaultLayerContext
+	err    error
+}
+
+// currentLayerContext returns the layer context for a launch and whether Paperboat answered it now. When Paperboat
+// does not answer in time (known down, or a silently dead connection) the launch gets Paperboat's last answer for the
+// same launch context (its layer context, or its refusal), and the request keeps running to refresh it. Prior art:
+// tailscale keeps running on its last network map while control is unreachable
+// (ipn/ipnlocal/netmapcache/netmapcache.go). Only a network failure falls back to the last answer.
+// shortcut: kept in memory only, so a restarted host process waits its unproven budget; persist it if that case matters.
+func (s *layerEnvironmentService) currentLayerContext(ctx context.Context, binding envinject.LaunchContext) (api.VaultLayerContext, bool, error) {
+	s.lookupMu.Lock()
+	last, cached := s.lastLayers[binding]
+	if controlKnownDown(s.transport) { // no ENV lookup waits out a control plane the host's own requests just failed to reach
+		s.lookupMu.Unlock()
+		if cached {
+			return last.bundle, false, last.err
+		}
+		return api.VaultLayerContext{}, false, controlDownError{}
+	}
+	budget := environmentBudget(s.transport)
+	lookup := s.lookups[binding]
+	if lookup == nil {
+		lookup = &layerLookup{done: make(chan struct{})}
+		if s.lookups == nil {
+			s.lookups = map[envinject.LaunchContext]*layerLookup{}
+		}
+		s.lookups[binding] = lookup
+		go s.runLayerLookup(context.WithoutCancel(ctx), budget, binding, lookup)
+	}
+	s.lookupMu.Unlock()
+	if cached {
+		budget = min(budget, cachedLookupBudget)
+	}
+	timer := time.NewTimer(budget)
+	defer timer.Stop()
+	select {
+	case <-lookup.done:
+		if lookup.err == nil {
+			return lookup.bundle, true, nil
+		}
+		if cached && envinject.LaunchNoticeFor(lookup.err) == envinject.LaunchNoticeOffline {
+			return last.bundle, false, last.err
+		}
+		return api.VaultLayerContext{}, false, lookup.err
+	case <-timer.C:
+		if cached {
+			return last.bundle, false, last.err
+		}
+		return api.VaultLayerContext{}, false, context.DeadlineExceeded
+	case <-ctx.Done():
+		return api.VaultLayerContext{}, false, ctx.Err()
+	}
+}
+
+// runLayerLookup registers the recipient when needed and fetches the layer context, bounded by budget, then records
+// Paperboat's answer for binding.
+func (s *layerEnvironmentService) runLayerLookup(ctx context.Context, budget time.Duration, binding envinject.LaunchContext, lookup *layerLookup) {
+	ctx, cancel := context.WithTimeout(ctx, budget)
+	defer cancel()
+	lookup.err = s.registerLayerRecipient(ctx)
+	if lookup.err == nil {
+		lookup.bundle, lookup.err = s.fetchLayerContext(ctx, binding)
+	}
+	s.lookupMu.Lock()
+	defer s.lookupMu.Unlock()
+	delete(s.lookups, binding)
+	// a refusal (pending) is an answer; a failure to read or verify one is not, and must not replace a good answer
+	if lookup.err == nil || envinject.LaunchNoticeFor(lookup.err) == envinject.LaunchNoticePending {
+		if s.lastLayers == nil {
+			s.lastLayers = map[envinject.LaunchContext]layerAnswer{}
+		}
+		s.lastLayers[binding] = layerAnswer{lookup.bundle, lookup.err}
+	}
+	close(lookup.done)
 }
 
 // fetchLayerContext asks the control plane what this launch's layers are. It holds no lock: one round

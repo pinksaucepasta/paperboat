@@ -34,6 +34,9 @@ type layerEnvironmentService struct {
 	done                   chan struct{}
 	refresh                chan struct{} // one key registration at a time; a launch gives up on it with its context
 	closed                 bool
+	lookupMu               sync.Mutex
+	lookups                map[envinject.LaunchContext]*layerLookup // in-flight layer-context requests
+	lastLayers             map[envinject.LaunchContext]layerAnswer  // Paperboat's last answer, per launch context
 }
 
 func newLayerEnvironmentService(stateRoot string, base *url.URL, transport http.RoundTripper, registration runtimeidentity.Registration, credentials, observationCredentials managedSSHIdentitySource) *layerEnvironmentService {
