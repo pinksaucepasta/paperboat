@@ -93,9 +93,9 @@ func TestOfflineAuthorizerJudgesTheDeadlineOnTheServerClock(t *testing.T) {
 	}
 }
 
-// Managed ENV needs a valid launch binding: an exec admitted from the standing rules carries the actor and the personal
-// workspace, so the host fetches the owner's layers instead of saying delivery is pending (the launch context was
-// invalid and no pb exec ever got its ENV).
+// Managed ENV needs a valid launch binding: an exec admitted from the standing rules carries the actor and no
+// workspace (the machine's own, which the server resolves), so the host fetches the layers instead of saying delivery is
+// pending (the launch context was invalid and no pb exec ever got its ENV).
 func TestStandingRuleExecHasAValidENVLaunchBinding(t *testing.T) {
 	plain, _ := net.Pipe()
 	defer plain.Close()
@@ -108,7 +108,7 @@ func TestStandingRuleExecHasAValidENVLaunchBinding(t *testing.T) {
 		t.Fatal(err)
 	}
 	binding, ok := envinject.LaunchContextFrom(envinject.WithLaunchContext(context.Background(), got.WorkspaceID, got.ActorAccountID))
-	if !ok || binding.WorkspaceID != "personal" || binding.ActorAccountID != "user_5ae46801-d921-4983-be1c-db50ad886304" {
+	if !ok || binding.WorkspaceID != "" || binding.ActorAccountID != "user_5ae46801-d921-4983-be1c-db50ad886304" {
 		t.Fatalf("launch binding = %+v ok=%v", binding, ok)
 	}
 }

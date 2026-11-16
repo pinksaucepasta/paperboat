@@ -18,5 +18,6 @@ func LaunchContextFrom(ctx context.Context) (LaunchContext, bool) {
 		return LaunchContext{}, false
 	}
 	binding, ok := ctx.Value(launchContextKey{}).(LaunchContext)
-	return binding, ok && validIdentifier(binding.WorkspaceID) && validIdentifier(binding.ActorAccountID)
+	// An empty workspace is the machine's own: the server resolves it and the host takes the one it names.
+	return binding, ok && (binding.WorkspaceID == "" || validIdentifier(binding.WorkspaceID)) && validIdentifier(binding.ActorAccountID)
 }

@@ -374,6 +374,23 @@ func TestPostgresVaultLayersFanoutSignedPublicationAndWorkspaceIsolation(t *test
 	if _, err := service.VaultLayerContext(ctx, member, memberHost, outsider, team); !errors.Is(err, ErrKeyAuthorizationRequired) {
 		t.Fatalf("nonmember Team launch: %v", err)
 	}
+	// A launch that names no workspace (the host admitted it from its standing rule) gets the machine's own, resolved here,
+	// under the same membership checks: a personal machine gets the personal workspace, a team machine its team's (and never
+	// the owner's personal ENV), a non-member nothing.
+	if resolved, err := service.VaultLayerContext(ctx, member, memberHost, member, ""); err != nil || resolved.WorkspaceID != "personal" || len(resolved.Layers) != 0 {
+		t.Fatalf("personal machine launch without a workspace: %+v %v", resolved, err)
+	}
+	exec(`UPDATE user_machines SET owner_team_id=$1 WHERE id=$2`, team, memberHost)
+	if resolved, err := service.VaultLayerContext(ctx, member, memberHost, member, ""); err != nil || resolved.WorkspaceID != team || len(resolved.Layers) != 3 {
+		t.Fatalf("team machine launch without a workspace: %+v %v", resolved, err)
+	}
+	if _, err := service.VaultLayerContext(ctx, member, memberHost, outsider, ""); !errors.Is(err, ErrKeyAuthorizationRequired) {
+		t.Fatalf("nonmember launch on a team machine: %v", err)
+	}
+	if _, err := service.VaultLayerContext(ctx, outsider, memberHost, outsider, ""); !errors.Is(err, ErrMachineNotFound) {
+		t.Fatalf("another account's machine id resolved a workspace: %v", err)
+	}
+	exec(`UPDATE user_machines SET owner_team_id=NULL WHERE id=$1`, memberHost)
 	// "Commands on machines can list ENV names" is on by default and is read per workspace.
 	listable := func(workspace string) bool {
 		t.Helper()

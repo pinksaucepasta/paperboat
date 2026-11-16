@@ -471,3 +471,60 @@ func TestLayerObservationFlushTraverses129ContextsAndKeepsRejectedWorkspace(t *t
 		}
 	}
 }
+
+// A launch the host admitted from its standing rule names no workspace: the host sends none, takes the one the server
+// picked for the machine, and refuses a malformed pick.
+func TestLayerEnvironmentTakesTheWorkspaceTheServerPicks(t *testing.T) {
+	t.Setenv("DBUS_SESSION_BUS_ADDRESS", "")
+	registration := layerRegistration(t)
+	registration.AccountID = "account_1"
+	root := filepath.Join(t.TempDir(), "runtime")
+	source, err := productionEnvironmentKeySourceForState(root, registration)
+	if err != nil {
+		t.Fatal(err)
+	}
+	material, err := source.Load(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer material.Destroy()
+	public, err := material.Public()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := source.(environmentkey.LayerGenesisMarker).EstablishLayerGenesis(); err != nil {
+		t.Fatal(err)
+	}
+	credentials := &layerTestCredentials{token: "test-token", proof: []byte("machine-proof")}
+	picked := "team_1"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/environment/hosts/machine_1/key" {
+			writeLayerRecipientRegistrationResponse(t, w, r, credentials, registration, material.Generation, public[:])
+			return
+		}
+		var asked struct {
+			WorkspaceID    string `json:"workspace_id"`
+			ActorAccountID string `json:"actor_account_id"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&asked); err != nil || asked.WorkspaceID != "" {
+			t.Errorf("the host named a workspace (%q) for a launch that has none: %v", asked.WorkspaceID, err)
+		}
+		bundle := api.VaultLayerContext{WorkspaceID: picked, ActorAccountID: asked.ActorAccountID, MachineID: registration.MachineID, Layers: []api.VaultLayerDelivery{}, Recipient: api.VaultLayerRecipient{RecipientAccount: registration.AccountID, MachineID: registration.MachineID, InstallationGeneration: uint64(registration.InstallationGeneration), HostKeyGeneration: material.Generation, HostPublic: base64.RawURLEncoding.EncodeToString(public[:])}}
+		w.Header().Set("Cache-Control", "no-store")
+		json.NewEncoder(w).Encode(map[string]any{"data": bundle})
+	}))
+	defer server.Close()
+	service := newLayerEnvironmentService(root, layerServiceURL(t, server.URL), server.Client().Transport, registration, credentials, credentials)
+	ctx := envinject.WithLaunchContext(context.Background(), "", "account_1")
+	if _, err := service.EnvironmentForLaunch(ctx); err != nil {
+		t.Fatalf("the server's workspace pick was not accepted: %v", err)
+	}
+	picked = "not a workspace id"
+	if _, err := service.EnvironmentForLaunch(ctx); err == nil {
+		t.Fatal("a malformed workspace pick was accepted")
+	}
+	picked = ""
+	if _, err := service.EnvironmentForLaunch(ctx); err == nil {
+		t.Fatal("an empty workspace pick was accepted")
+	}
+}

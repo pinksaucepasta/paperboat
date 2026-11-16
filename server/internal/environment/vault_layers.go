@@ -286,7 +286,29 @@ func (s *Service) VaultLayerRecipients(ctx context.Context, account string, sour
 	return items, total, err
 }
 
+// machineWorkspaceTx is the workspace a machine's ENV belongs to: its team, or "personal" when no team owns it.
+func machineWorkspaceTx(ctx context.Context, tx *db.Tx, machineOwner, machine string) (string, error) {
+	var workspace string
+	err := tx.QueryRow(ctx, `SELECT coalesce(owner_team_id,'personal') FROM user_machines WHERE id=$1 AND user_id=$2 AND deleted_at IS NULL AND revoked_at IS NULL`, machine, machineOwner).Scan(&workspace)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", ErrMachineNotFound
+	}
+	return workspace, err
+}
+
+// VaultLayerContext is what a host launch gets for (workspace, actor). An empty workspace means the machine's own (a launch
+// the host admitted from its standing rule names no workspace): the server picks it from the machine record, then applies the
+// same membership checks as for a named one, so personal ENV never reaches a team machine and a non-member gets none.
 func (s *Service) VaultLayerContext(ctx context.Context, machineOwner, machine, actor, workspace string) (VaultLayerContext, error) {
+	if workspace == "" {
+		err := s.db.InReadCommittedTx(ctx, func(ctx context.Context, tx *db.Tx) (err error) {
+			workspace, err = machineWorkspaceTx(ctx, tx, machineOwner, machine)
+			return err
+		})
+		if err != nil {
+			return VaultLayerContext{}, err
+		}
+	}
 	out := VaultLayerContext{WorkspaceID: workspace, ActorAccountID: actor, MachineID: machine, Layers: []VaultLayerDelivery{}}
 	if !validIdentifier(actor) || !validIdentifier(workspace) {
 		return out, ErrInvalidScope

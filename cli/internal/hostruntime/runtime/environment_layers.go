@@ -80,6 +80,13 @@ func (s *layerEnvironmentService) layerEnvironment(ctx context.Context, names *l
 	if err != nil {
 		return nil, err
 	}
+	if binding.WorkspaceID == "" { // the machine's own workspace: take what the server picked, and nothing malformed
+		resolved, ok := envinject.LaunchContextFrom(envinject.WithLaunchContext(ctx, bundle.WorkspaceID, binding.ActorAccountID))
+		if !ok || resolved.WorkspaceID == "" {
+			return nil, envinject.ErrInvalidSnapshot
+		}
+		binding = resolved
+	}
 	s.layerMu.Lock()
 	defer s.layerMu.Unlock()
 	if s.isClosed() {

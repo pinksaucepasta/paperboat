@@ -186,7 +186,7 @@ func decodeShellEnvironmentRequest(body io.Reader) (shellEnvironmentRequest, err
 	if err := decoder.Decode(&in); err != nil || decoder.More() {
 		return in, envinject.ErrInvalidSnapshot
 	}
-	if _, ok := envinject.LaunchContextFrom(envinject.WithLaunchContext(context.Background(), in.WorkspaceID, in.AccountID)); !ok {
+	if _, ok := envinject.LaunchContextFrom(envinject.WithLaunchContext(context.Background(), in.WorkspaceID, in.AccountID)); !ok || in.WorkspaceID == "" { // this loopback request names its workspace
 		return in, envinject.ErrInvalidSnapshot
 	}
 	return in, nil

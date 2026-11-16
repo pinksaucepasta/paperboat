@@ -48,11 +48,8 @@ func (a *offlineAuthorizer) Authorize(_ context.Context, frame protocol.Frame) (
 		UserID:         a.accountID,
 		AccountID:      a.accountID,
 		ActorAccountID: a.accountID,
-		// A stream admitted from the standing rules carries no workspace, so without one no launch had a valid ENV binding
-		// and managed ENV was never delivered. The server (and the host) refuse a personal binding unless the actor owns
-		// the machine, so another account's exec still gets none. shortcut: a team-owned machine gets its owner's personal
-		// ENV, not the team's, until the CLI's team id travels in the stream header.
-		WorkspaceID: "personal",
+		// A stream admitted from the standing rules names no workspace: the launch binds the machine's own, which the server
+		// resolves (and checks the actor against) when the host asks for the layers.
 		ClientID:    a.endpointID,
 		OperationID: a.operationID,
 		ExpiresAt:   a.deadline,
