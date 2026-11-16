@@ -331,3 +331,16 @@ func TestCLIJSONServerValidationRefusalIsNotLocalIO(t *testing.T) {
 		}
 	}
 }
+
+// A hostname that differs only in case is refused and the message names the exact hostname.
+func TestUninstallNamesTheExactHostnameOnAMismatch(t *testing.T) {
+	hostname, err := os.Hostname()
+	if err != nil {
+		t.Skip(err)
+	}
+	var stdout, stderr bytes.Buffer
+	code := run(context.Background(), []string{"uninstall", "--confirmation", "UNINSTALL PAPERBOAT", "--hostname", strings.ToUpper(hostname) + "x"}, &stdout, &stderr)
+	if code != 2 || !strings.Contains(stderr.String(), "exact hostname: "+hostname) {
+		t.Fatalf("exit=%d stderr=%q", code, stderr.String())
+	}
+}
