@@ -473,5 +473,11 @@ Nothing runs in apps behind previews or tunnels.
 | `invitation_accepted` | the server accepted a team invitation | `role` |
 | `checkout_completed` | billing shows the plan after the page waited for Stripe's webhook | `workspace_kind`, `product` |
 
+Verified end to end on 2026-11-16: `scripts/check-analytics.mjs` pairs a machine through the Add machine dialog and creates a
+preview through the New preview dialog on the live console, and records that the browser sent `add_machine_started`,
+`machine_paired` and `preview_created` and that the analytics host answered each with HTTP 200
+(`tools/device-smoke/results/console-analytics-20261116.txt`). The check cannot read PostHog's own event list (no personal
+API key is kept here), so "arrived" means accepted by its capture endpoint.
+
 Tunnels are created by `pb tunnel`, not the console, so there is no console tunnel event.
 The marketing site sends `pageview` (path only), `install_command_copied` and `signup_clicked` (see its `.env.example`).

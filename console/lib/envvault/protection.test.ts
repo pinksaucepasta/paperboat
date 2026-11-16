@@ -1,5 +1,6 @@
 import { afterEach, beforeAll, beforeEach, expect, test } from "bun:test"
 import { createHash } from "node:crypto"
+import { sampleFor } from "@/lib/api-sample"
 import { lockVault, vaultUnlocked } from "@/lib/envvault/crypto"
 import {
   changePassword,
@@ -36,7 +37,7 @@ beforeEach(() => {
   globalThis.fetch = (async (input: string | URL, init?: RequestInit) => {
     const url = new URL(String(input), "http://console.example.test")
     sent.push(`${init?.method ?? "GET"} ${url.pathname} ${typeof init?.body === "string" ? init.body : ""}`)
-    if (url.pathname === "/api/v1/me") return Response.json({ data: { id: account } })
+    if (url.pathname === "/api/v1/me") return Response.json({ data: sampleFor("GET /v1/me", { id: account }) })
     if (url.pathname !== "/api/v1/environment-vault") return new Response(null, { status: 404 })
     if (init?.method === "PUT") {
       if (putFails === "before") return Response.json({ error: { code: "unavailable" } }, { status: 500 })
