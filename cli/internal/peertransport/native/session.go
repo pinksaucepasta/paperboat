@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
 	"github.com/pinksaucepasta/paperboat/shared/peerconsumer"
+	"github.com/pinksaucepasta/paperboat/shared/reattach"
 	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 	"io"
 	"net"
@@ -646,8 +647,11 @@ var _ interface{ CloseWrite() error } = (*streamConn)(nil)
 
 // authorizeIncoming validates the operation credential, then returns the resource whose signed scope admits the stream:
 // the credential's access session when the host already holds its scope, else the host itself when its standing rule
-// admits the peer (terminal and exec), else the access session after one on-demand refresh of the host's signed state (a new, valid operation may have
-// committed after the host's last signed network snapshot).
+// admits the peer (terminal and exec), else the access session after an on-demand refresh of the host's signed state (a new, valid operation may have
+// committed after the host's last signed network snapshot). A valid credential whose scope a successful refresh still
+// lacks reads its own write: the host refreshes again for up to scopeCatchUp before it denies (F21-164: 50 viewers joining
+// at once, the signed state lagged the access sessions just issued and 14 joins were denied for good). Concurrent joins
+// share each refresh (Authority.refresh coalesces requests asked before the one in flight).
 func (s *Session) authorizeIncoming(ctx context.Context, header streamauth.Header, capability string, authorize func(context.Context, streamauth.Header) (string, error)) (string, error) {
 	resourceID, err := authorize(ctx, header)
 	if err != nil {
@@ -665,6 +669,13 @@ func (s *Session) authorizeIncoming(ctx context.Context, header streamauth.Heade
 			diagnosticlog.TryWarn("native stream admission refused", "reason", "authority_refresh")
 			return "", errors.Join(tailnet.ErrAdmission, err)
 		}
+		catchUp, cancel := context.WithTimeout(ctx, scopeCatchUp)
+		defer cancel()
+		for !s.owner.authority.Allows(s.peerID, resourceID, capability, "accept") {
+			if reattach.Wait(catchUp, scopeCatchUpInterval) != nil || s.owner.refreshAuthority(catchUp) != nil {
+				break
+			}
+		}
 	}
 	if !s.owner.authority.Allows(s.peerID, resourceID, capability, "accept") {
 		diagnosticlog.TryWarn("native stream admission refused", "reason", "authority_scope")
@@ -672,6 +683,13 @@ func (s *Session) authorizeIncoming(ctx context.Context, header streamauth.Heade
 	}
 	return resourceID, nil
 }
+
+// scopeCatchUp bounds how long a valid credential waits for its scope to reach the host's signed state; scopeCatchUpInterval
+// spaces the refreshes it asks for meanwhile.
+const (
+	scopeCatchUp         = 3 * time.Second
+	scopeCatchUpInterval = 250 * time.Millisecond
+)
 
 // standingResource is the host's own machine id when its signed rules already let this peer start capability here (the
 // server publishes one standing rule per capability the peer's account may use, until revoked; inspector only for the

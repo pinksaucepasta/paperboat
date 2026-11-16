@@ -50,22 +50,33 @@ func TestNativeNewResourceRefreshAndRejectedStreamIsolation(t *testing.T) {
 	applyTestConfiguration(t, clientAuthority, signerPrivate, clientConfig)
 	var refreshes atomic.Int32
 	var refreshMode atomic.Int32
+	var lagUntil atomic.Int32
+	refreshMode.Store(4) // the first-use path below: the refresh adds grant_new at once
 	clientOwner, err := native.NewOwner(native.Config{Authority: clientAuthority, TLS: clientTLS})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer clientOwner.Close()
 	serverOwner, err := native.NewOwner(native.Config{Authority: serverAuthority, TLS: serverTLS, RefreshAuthority: func(ctx context.Context) error {
-		refreshes.Add(1)
+		attempt := refreshes.Add(1)
 		if refreshMode.Load() == 1 {
 			return errors.New("refresh failed")
 		}
 		if refreshMode.Load() == 2 {
 			return context.Canceled
 		}
+		if refreshMode.Load() == 3 && attempt == lagUntil.Load() {
+			return nil // the signed state lags the operation the server just issued
+		}
+		if refreshMode.Load() == 0 {
+			return nil // the server never adds this scope
+		}
 		serverConfig.Generation++
 		scope := serverConfig.Peers[0].Scopes[0]
 		scope.ResourceID = "grant_new"
+		if refreshMode.Load() == 3 {
+			scope.ResourceID = "grant_lagged"
+		}
 		present := false
 		for _, existing := range serverConfig.Peers[0].Scopes {
 			present = present || existing.ResourceID == scope.ResourceID
@@ -251,14 +262,29 @@ func TestNativeNewResourceRefreshAndRejectedStreamIsolation(t *testing.T) {
 	if refreshes.Load() != 1 {
 		t.Fatalf("refreshes=%d", refreshes.Load())
 	}
+	// A valid credential whose scope never arrives is denied after the catch-up window, with more than one refresh;
+	// a refresh that fails denies at once with one.
 	for _, mode := range []int32{0, 1, 2} {
 		refreshMode.Store(mode)
+		before := refreshes.Load()
 		deny("denied", "not_in_current_scope", "grant_test")
 		echo(existing)
+		if got := refreshes.Load() - before; mode == 0 && got < 2 || mode != 0 && got != 1 {
+			t.Fatalf("mode %d: refresh attempts=%d", mode, got)
+		}
 	}
-	if refreshes.Load() != 4 {
-		t.Fatalf("refresh attempts=%d", refreshes.Load())
-	}
+	// F21-164: the first refresh answers before the server's signed state holds the operation it just issued; the host
+	// reads its own write on the next refresh and admits instead of denying for good.
+	clientConfig.Generation++
+	laggedScope := clientConfig.Peers[0].Scopes[0]
+	laggedScope.ResourceID = "grant_lagged"
+	clientConfig.Peers[0].Scopes = append(clientConfig.Peers[0].Scopes, laggedScope)
+	applyTestConfiguration(t, clientAuthority, signerPrivate, clientConfig)
+	refreshMode.Store(3)
+	lagUntil.Store(refreshes.Load() + 1)
+	lagged := open("lagged", "grant_lagged", "grant_lagged")
+	echo(lagged)
+	lagged.Close()
 	echo(existing)
 	// Invalid or incomplete admission belongs to that stream, not every
 	// authorized application already sharing its QUIC connection.
