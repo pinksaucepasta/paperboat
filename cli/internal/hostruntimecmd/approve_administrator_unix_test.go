@@ -63,6 +63,10 @@ func TestRecipeInstallNeverPromptsAndRootSkipsSudo(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "root or passwordless sudo") || strings.Contains(stderr.String(), "prompted") {
 		t.Fatalf("err=%v stderr=%q", err, stderr.String())
 	}
+	// The user sees the recipe text, not the interactive "run pair from a terminal" one (device check, rcp-l8).
+	if message := (&installationStageError{Stage: "service_install", Cause: err}).Error(); message != recipeNeedsRootMessage {
+		t.Fatalf("pairing message = %q", message)
+	}
 	runningAsRoot = func() bool { return true }
 	if err := approveAdministrator(t.Context(), bytes.NewReader(nil), &stderr); err != nil {
 		t.Fatalf("root needs no approval: %v", err)

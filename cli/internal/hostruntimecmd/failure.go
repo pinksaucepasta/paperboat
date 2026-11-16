@@ -296,12 +296,21 @@ func withCleanup(message string, primary error, cleanups ...error) error {
 // when there is no terminal to ask for a password.
 var errAdministratorApproval = errors.New("administrator approval was not granted")
 
+// errRecipeNeedsRoot marks a recipe install (PB_RECIPE) without root or passwordless sudo: it never
+// asks for a password, so it names both ways out (PLAN F26).
+var errRecipeNeedsRoot = errors.New("a recipe install needs root or passwordless sudo")
+
+const recipeNeedsRootMessage = "Paperboat: installing needs root or passwordless sudo, and this shell has neither. Run the installer as root (in Docker the default user is root), or allow passwordless sudo for this user. Recipe installs never ask for a password, so they never hang a CI job."
+
 type installationStageError struct {
 	Stage string
 	Cause error
 }
 
 func (e *installationStageError) Error() string {
+	if e != nil && errors.Is(e.Cause, errRecipeNeedsRoot) {
+		return recipeNeedsRootMessage
+	}
 	if e != nil && e.Stage == "service_install" && errors.Is(e.Cause, errAdministratorApproval) {
 		return "Machine pairing needs administrator approval (sudo) to install its system service, and sudo could not get it. Run pair from a terminal where sudo can ask for your password, or allow passwordless sudo for this account, then retry pairing with the same enrollment token file."
 	}
