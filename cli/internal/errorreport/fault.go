@@ -2,6 +2,7 @@ package errorreport
 
 import (
 	"context"
+	"errors"
 	"github.com/pinksaucepasta/paperboat/shared/reporting"
 	"path/filepath"
 	"runtime"
@@ -147,7 +148,15 @@ func (r *Reporter) ObserveFailure(ctx context.Context, component, operation, sta
 			ctx = supportref.WithContext(ctx, *reference)
 		}
 	}
-	return r.captureFault(ctx, ProjectFault(ctx, component, operation, stage, code, err), false)
+	fault := ProjectFault(ctx, component, operation, stage, code, err)
+	// A refusal made locally and already explained (a revoked identity waiting out its backoff, controlbackoff) is
+	// not a new failure: recording each held-back retry of every runtime loop is the burst this prevents (X-41: 84
+	// events in the minute after a revoke on Windows, bound 45).
+	var quiet interface{ QuietFailure() bool }
+	if errors.As(err, &quiet) && quiet.QuietFailure() {
+		return fault
+	}
+	return r.captureFault(ctx, fault, false)
 }
 
 func (r *Reporter) captureFault(ctx context.Context, f Fault, capture bool) Fault {

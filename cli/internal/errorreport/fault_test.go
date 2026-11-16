@@ -382,3 +382,23 @@ func TestFaultRejectionCannotHideOperationalBranches(t *testing.T) {
 		})
 	}
 }
+
+type quietRefusal struct{}
+
+func (quietRefusal) Error() string      { return "held back" }
+func (quietRefusal) QuietFailure() bool { return true }
+
+// X-41: every runtime loop of a revoked machine reported each held-back retry; a locally explained refusal is no event.
+func TestObserveFailureSkipsLocallyExplainedRefusals(t *testing.T) {
+	var seen int
+	defer InstallFaultObserver(func(context.Context, Fault) { seen++ })()
+	r := newSignalReporter("https://public@example.invalid/1", "test", &sentry.MockTransport{}, true, true, 1)
+	r.ObserveFailure(context.Background(), "paperboat-daemon", "engine_tunnels", "fetch", "service_failed", fmt.Errorf("fetch: %w", quietRefusal{}))
+	if seen != 0 {
+		t.Fatalf("a held-back refusal was recorded %d times", seen)
+	}
+	r.ObserveFailure(context.Background(), "paperboat-daemon", "engine_tunnels", "fetch", "service_failed", errors.New("boom"))
+	if seen != 1 {
+		t.Fatalf("an ordinary failure was recorded %d times", seen)
+	}
+}
