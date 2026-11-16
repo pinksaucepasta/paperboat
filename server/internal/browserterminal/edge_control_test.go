@@ -181,7 +181,7 @@ func TestEdgeControlAdmitsExactNodeAndRevokesLiveAttachment(t *testing.T) {
 	deadline := time.Now().Add(time.Second)
 	for time.Now().Before(deadline) {
 		gateway.mu.Lock()
-		active := gateway.activeTotal
+		active := len(gateway.active)
 		gateway.mu.Unlock()
 		if active == 0 {
 			return

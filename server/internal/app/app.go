@@ -693,6 +693,7 @@ func New(opts Options) (*App, error) {
 	teamInboxService.SetBuckets(teamBuckets)
 	browserTerminalGateway := &browserterminal.Gateway{
 		AdmissionLifetime: opts.Config.CLIAuth.MintProofLifetime,
+		MaxPerSession:     opts.Config.Billing.Limits.BrowserTerminals.TeamCeiling,
 		RecordUsageAdmission: func(ctx context.Context, attachment, machine, terminal, node, actor string, expires time.Time) error {
 			if err := userMachineService.AdmitBrowserTerminalIngress(ctx, attachment, machine, actor, node, expires); err != nil {
 				return err

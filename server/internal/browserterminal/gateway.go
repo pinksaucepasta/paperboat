@@ -89,9 +89,11 @@ type Gateway struct {
 	Signer              *mint.Provider
 	Issuer              string
 	AllowedOrigins      []string
-	mu                  sync.Mutex
-	active              map[string]int
-	activeTotal         int
+	// MaxPerSession bounds the live attachments one browser login holds (inspector and recording channels
+	// included); 0 is unbounded. It is the plan ceiling: the plan limit itself is CheckBrowserTerminalLimit.
+	MaxPerSession int
+	mu            sync.Mutex
+	active        map[string]int
 }
 
 func (g *Gateway) Issue(ctx context.Context, userID, browserSessionID, terminalSessionID, origin, browserPublicKeySHA256 string) (Ticket, string, Decision, error) {
@@ -200,14 +202,13 @@ func secureID(prefix string) (string, error) {
 func (g *Gateway) acquire(browserSessionID string) bool {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	if browserSessionID == "" || g.activeTotal >= 256 || g.active[browserSessionID] >= 8 {
+	if browserSessionID == "" || g.MaxPerSession > 0 && g.active[browserSessionID] >= g.MaxPerSession {
 		return false
 	}
 	if g.active == nil {
 		g.active = make(map[string]int)
 	}
 	g.active[browserSessionID]++
-	g.activeTotal++
 	return true
 }
 
@@ -216,7 +217,6 @@ func (g *Gateway) release(browserSessionID string) {
 	defer g.mu.Unlock()
 	if g.active[browserSessionID] > 0 {
 		g.active[browserSessionID]--
-		g.activeTotal--
 		if g.active[browserSessionID] == 0 {
 			delete(g.active, browserSessionID)
 		}
