@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """Port names (`pb port name`, `pb port front-desk`): run on the HOST machine; VIEWER is another machine of the account.
 
-  python3 port_names.py VIEWER [--shadow-machine NAME]
+  python3 port_names.py VIEWER [--shadow-machine NAME] [--late-machine NAME]
 
 The host serves two synthetic pages, names them from the host, and the viewer (nothing configured there) fetches each
 address over HTTPS with normal certificate verification through `pb exec VIEWER -- curl`. Unix hosts and viewers only
 (the host starts python3 servers, the viewer needs curl). --shadow-machine NAME (an existing machine of the account) also
-checks that a top-level name equal to a machine is refused and that a machine taking an existing top-level name shadows it.
+checks that a top-level name equal to a machine is refused. --late-machine NAME (a spare machine of the account, not the
+host or the viewer) is renamed to an existing top-level name for the check and renamed back: the name must show shadowed
+and the viewer must reach that machine's own page, not the named port.
 """
 import argparse
 import contextlib
@@ -68,14 +70,16 @@ def page(root, marker):
             server.kill()
 
 
-def fetch(viewer, address, expected, wait=90):
-    """curl on the viewer until the address answers `expected` (the guard publishes new names within seconds)."""
+def fetch(viewer, address, expected, wait=90, path='/who', curl=('-fsS',)):
+    """curl on the viewer until the address answers `expected` (a string, or a function of the body); the guard
+    publishes new names within seconds."""
+    matches = expected if callable(expected) else (lambda body: body == expected)
     deadline, last = time.monotonic() + wait, ''
     while True:
-        result = command_result(BINARY, 'exec', viewer, '--timeout', '30s', '--', 'curl', '-fsS', '--noproxy', '*',
-                                '--max-time', '10', 'https://' + address + '/who', timeout=60)
+        result = command_result(BINARY, 'exec', viewer, '--timeout', '30s', '--', 'curl', *curl, '--noproxy', '*',
+                                '--max-time', '10', 'https://' + address + path, timeout=60)
         last = result.stdout.strip() or result.stderr.strip()[-200:]
-        if result.returncode == 0 and result.stdout.strip() == expected:
+        if result.returncode == 0 and matches(result.stdout.strip()):
             return
         if time.monotonic() >= deadline:
             raise RuntimeError('%s answered %r, wanted %r' % (address, last, expected))
@@ -95,6 +99,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('viewer')
     parser.add_argument('--shadow-machine')
+    parser.add_argument('--late-machine')
     args = parser.parse_args()
     before = registration()
     machines = pb_ok('machine', 'list', '--all', '--json')
@@ -103,7 +108,7 @@ def main():
     assert any(m['alias'] == args.viewer for m in machines), 'the viewer is not a machine of this account'
     domain = pb_ok('config', 'local-access', 'show', '--json')['domain']
     prefix = 'pn' + uuid.uuid4().hex[:6]
-    steps, created, failure = {}, [], None
+    steps, created, failure, renamed = {}, [], None, None
     root = tempfile.mkdtemp(prefix='pb-port-names-')
 
     def step(name, action):
@@ -154,6 +159,20 @@ def main():
                         created.append((name, ('--top-level',)))
                     assert status != 0 and code == 'name_is_machine', 'a machine-named top-level name was accepted'
                 step('shadow_refused', shadow)
+            if args.late_machine:
+                def late():
+                    nonlocal renamed
+                    spare = next((m for m in machines if m['alias'] == args.late_machine), None)
+                    assert spare and args.late_machine not in (host, args.viewer), 'the late machine must be a third machine'
+                    name = prefix + 'top'
+                    pb_ok('machine', 'rename', spare['id'], name, '--json')
+                    renamed = spare
+                    records = pb_ok('port', 'name', 'list', '--json')
+                    records = records.get('names', records) if isinstance(records, dict) else records
+                    top = [r for r in records if r['name'] == name]
+                    assert len(top) == 1 and top[0]['shadowed'] is True, 'the top-level record is not shadowed by the machine'
+                    fetch(args.viewer, '%s.%s' % (name, domain), lambda body: name in body and 'portA' not in body, path='/')
+                step('late_machine_takes_address', late)
     except Exception as error:
         failure = error
     finally:
@@ -163,6 +182,10 @@ def main():
             status, _, _, _ = pb('port', 'name', 'unset', name, *where)
             if status:
                 cleanup.append(name)
+        if renamed:
+            status, _, _, _ = pb('machine', 'rename', renamed['id'], renamed['alias'], '--json')
+            if status:
+                cleanup.append('rename of ' + renamed['alias'])
         status, _, _, _ = pb('port', 'front-desk', host, '80', 'http', '--json')
         if status:
             cleanup.append('front-desk')
