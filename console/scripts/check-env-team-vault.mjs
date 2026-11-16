@@ -155,7 +155,10 @@ try {
     await setUp(member, pwB, Boolean(kept))
   })
 
+  // RESUME=1 continues a run on accounts whose team vault a failed run already created (the evidence run is never resumed).
+  const resumed = process.env.RESUME === "1"
   await step("the owner's Team vaults section offers Create and the member cannot create", async () => {
+    if (resumed) return "skipped: resumed"
     await owner.open()
     await owner.unlock(pwA).catch(() => {})
     await owner.unlocked().catch(() => {})
@@ -167,6 +170,7 @@ try {
   })
 
   await step("the owner creates the team vault: key in use", async () => {
+    if (resumed) return "skipped: resumed"
     await rowOf(owner).getByRole("button", { name: "Create…" }).click()
     await owner.dialog().getByRole("button", { name: "Create", exact: true }).click()
     await rowOf(owner).getByRole("button", { name: "Give key…" }).waitFor(long)
@@ -179,12 +183,16 @@ try {
       const current = (await (await fetch(url)).json()).data
       const file = JSON.parse(current.policy.replace(/\/\/.*$/gm, "").replace(/,(\s*[}\]])/g, "$1"))
       file.rules = [...(file.rules ?? []), { src: ["role:member"], dst: ["env:team"], allow: ["env_read"] }]
-      const saved = await fetch(url, {
-        method: "PUT",
-        headers: { "content-type": "application/json", "idempotency-key": crypto.randomUUID() },
-        body: JSON.stringify({ policy: JSON.stringify(file), expected_version: current.version }),
-      })
-      if (!saved.ok) throw new Error(`policy save answered ${saved.status}`)
+      // A save that changes who can do what is answered 412 with a confirm token; it is sent back, as the console's dialog does.
+      const save = (confirm) =>
+        fetch(url, {
+          method: "PUT",
+          headers: { "content-type": "application/json", "idempotency-key": crypto.randomUUID() },
+          body: JSON.stringify({ policy: JSON.stringify(file), expected_version: current.version, ...(confirm && { confirm }) }),
+        })
+      let saved = await save()
+      if (saved.status === 412) saved = await save((await saved.json()).error.details.confirm)
+      if (!saved.ok) throw new Error(`policy save answered ${saved.status} ${(await saved.text()).slice(0, 160)}`)
     }, team.id)
     await owner.open()
     await owner.unlocked().catch(async () => {
@@ -206,7 +214,10 @@ try {
   await step("the owner adds a team variable in the team workspace", async () => {
     await owner.context.addCookies([{ name: "pb-workspace", value: team.id, url: origin }])
     await owner.open()
-    await owner.unlocked()
+    await owner.unlocked().catch(async () => {
+      await owner.unlock(pwA)
+      await owner.unlocked()
+    })
     await addVariable(owner, teamVar, `value-${randomBytes(6).toString("hex")}`)
   })
 
