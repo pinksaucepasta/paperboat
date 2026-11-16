@@ -122,7 +122,7 @@ func TestWorkspaceListSaysWhenATeamNeedsSSOPostgres(t *testing.T) {
 		}
 	}()
 	execute(`INSERT INTO users(id,workos_subject,primary_email,status) SELECT x,x,x||'@workspace.test','active' FROM unnest($1::text[]) x`, []string{owner, member, exempt, fresh})
-	execute(`INSERT INTO teams(team_id,owner_account,generation,display_name,sso_required) VALUES($1,$3,1,'Needs SSO',true),($2,$3,1,'Plain',false)`, needs, plain, owner)
+	execute(`INSERT INTO teams(team_id,owner_account,generation,display_name,sso_required,sso_session_seconds) VALUES($1,$3,1,'Needs SSO',true,3600),($2,$3,1,'Plain',false,NULL)`, needs, plain, owner)
 	execute(`INSERT INTO team_members(team_id,account_id,membership_generation,role,active,sso_exempt,sso_verified_at) VALUES
 		($1,$2,1,'admin',true,false,NULL),($1,$3,1,'member',true,false,NULL),($1,$4,1,'member',true,true,NULL),($1,$5,1,'member',true,false,now()),($6,$3,1,'member',true,false,NULL)`,
 		needs, owner, member, exempt, fresh, plain)
