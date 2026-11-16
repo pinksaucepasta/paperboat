@@ -286,6 +286,10 @@ func TestCORSAllowsConfiguredOrigins(t *testing.T) {
 	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "https://dashboard.example" {
 		t.Fatalf("allow origin = %q", got)
 	}
+	// A browser page on an allowed origin (the abuse form) can read how long a 429 asks it to wait.
+	if got := rec.Header().Get("Access-Control-Expose-Headers"); !strings.Contains(got, "Retry-After") {
+		t.Fatalf("expose headers = %q, want Retry-After", got)
+	}
 }
 
 func TestUnknownEndpointIsStructuredError(t *testing.T) {
