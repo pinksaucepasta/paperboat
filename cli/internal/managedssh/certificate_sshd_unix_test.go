@@ -76,22 +76,10 @@ func TestRealSSHDHonoursTheManagedCALines(t *testing.T) {
 	}
 	config := fmt.Sprintf(listen+"RevokedKeys "+krlPath+"\nPort %d\nHostKey %s\nPidFile %s\nAuthorizedKeysFile %s\nStrictModes no\nPasswordAuthentication no\nKbdInteractiveAuthentication no\nUsePAM no\nAllowUsers %s\nLogLevel VERBOSE\n",
 		port, hostKeyPath, filepath.Join(root, "sshd.pid"), filepath.Join(home, ".ssh", "authorized_keys"), current.Username)
-	// OpenSSH 9.8+ penalises a source address after failed logins and then drops its connections. The bridge connects
-	// from one address per user (wire.LoopbackSource), so user A's refusals below must not lock user B out. Where those
-	// addresses cannot be bound (macOS without the machine guard's aliases) both users share 127.0.0.1, so penalties
-	// are switched off there instead. Older sshd does not know the option.
-	sourceA, sourceB := wire.LoopbackSource("user_a").String(), wire.LoopbackSource("user_b").String()
-	if sourceA == sourceB {
-		t.Fatal("users a and b share a loopback source")
-	}
-	probe := config + "PerSourcePenalties no\n"
-	supported := os.WriteFile(configPath, []byte(probe), 0o600) == nil && exec.Command(sshdPath, "-t", "-f", configPath).Run() == nil
-	penalties := supported && bindableLoopback(sourceA) && bindableLoopback(sourceB)
-	if !bindableLoopback(sourceA) || !bindableLoopback(sourceB) {
-		sourceA, sourceB = "", ""
-		if supported {
-			config = probe
-		}
+	// OpenSSH 9.8+ penalises a source after failed logins and then drops its connections: the refusals below would
+	// make every later login from 127.0.0.1 fail for the wrong reason. Older sshd does not know the option.
+	if probe := config + "PerSourcePenalties no\n"; os.WriteFile(configPath, []byte(probe), 0o600) == nil && exec.Command(sshdPath, "-t", "-f", configPath).Run() == nil {
+		config = probe
 	}
 	if err := os.WriteFile(configPath, []byte(config), 0o600); err != nil {
 		t.Fatal(err)
@@ -130,10 +118,9 @@ func TestRealSSHDHonoursTheManagedCALines(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	var loginFrom func(certificate, address, source string) error
-	loginA := func(certificate string) error { return loginFrom(certificate, "127.0.0.1", sourceA) }
-	loginB := func(certificate string) error { return loginFrom(certificate, "127.0.0.1", sourceB) }
-	loginFrom = func(certificate, address, source string) error {
+	var loginFrom func(certificate, address string) error
+	login := func(certificate string) error { return loginFrom(certificate, "127.0.0.1") }
+	loginFrom = func(certificate, address string) error {
 		t.Helper()
 		certificatePath := filepath.Join(root, "client-cert.pub")
 		if err := os.WriteFile(certificatePath, []byte(certificate+"\n"), 0o600); err != nil {
@@ -141,15 +128,11 @@ func TestRealSSHDHonoursTheManagedCALines(t *testing.T) {
 		}
 		runCtx, stop := context.WithTimeout(t.Context(), 10*time.Second)
 		defer stop()
-		bind := []string{}
-		if source != "" {
-			bind = []string{"-b", source}
-		}
-		command := exec.CommandContext(runCtx, sshPath, append(bind, "-F", "/dev/null", "-p", strconv.Itoa(port),
+		command := exec.CommandContext(runCtx, sshPath, "-F", "/dev/null", "-p", strconv.Itoa(port),
 			"-o", "IdentityFile="+clientKeyPath, "-o", "CertificateFile="+certificatePath, "-o", "IdentitiesOnly=yes",
 			"-o", "IdentityAgent=none", "-o", "BatchMode=yes", "-o", "PreferredAuthentications=publickey",
 			"-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null", "-o", "LogLevel=ERROR",
-			current.Username+"@"+address, "echo managed-cert-ok")...)
+			current.Username+"@"+address, "echo managed-cert-ok")
 		output, err := command.CombinedOutput()
 		if err == nil && !bytes.Contains(output, []byte("managed-cert-ok")) {
 			err = fmt.Errorf("unexpected output %q", output)
@@ -164,7 +147,7 @@ func TestRealSSHDHonoursTheManagedCALines(t *testing.T) {
 	}
 	valid := issue(caOne, keyA, []string{user, principal}, now)
 	trust(principal, caOne)
-	if err := loginA(valid); err != nil {
+	if err := login(valid); err != nil {
 		t.Fatalf("valid certificate refused: %v\n%s", err, sshdLog.String())
 	}
 	refused := map[string]string{
@@ -173,12 +156,12 @@ func TestRealSSHDHonoursTheManagedCALines(t *testing.T) {
 		"wrong CA":        issue(caTwo, keyA, []string{user, principal}, now),
 	}
 	for name, certificate := range refused {
-		if err := loginA(certificate); err == nil {
+		if err := login(certificate); err == nil {
 			t.Errorf("%s certificate logged in", name)
 		}
 	}
 	if external != "" {
-		if err := loginFrom(valid, external, ""); err == nil {
+		if err := loginFrom(valid, external); err == nil {
 			t.Fatal("a managed certificate logged in from a non-loopback address, bypassing the bridge")
 		}
 	} else {
@@ -187,15 +170,11 @@ func TestRealSSHDHonoursTheManagedCALines(t *testing.T) {
 	// Revoking user A (the KRL sshd reads) refuses A's certificate; B's, from the same CA, keeps logging in.
 	certificateB := issue(caOne, keyB, []string{user, principal}, now)
 	writeKRL([]ssh.Signer{caOne}, keyA)
-	if err := loginA(valid); err == nil {
+	if err := login(valid); err == nil {
 		t.Fatal("user A's revoked certificate logged in")
 	}
-	// A failed five times by now: sshd 9.8+ penalises A's source, and B (another source) still logs in.
-	if err := loginB(certificateB); err != nil {
-		t.Fatalf("user B's certificate stopped working when A was revoked and penalised: %v\n%s", err, sshdLog.String())
-	}
-	if penalties && !strings.Contains(sshdLog.String(), "penalty") {
-		t.Fatalf("sshd did not penalise user A's source %s, so B's login proves nothing:\n%s", sourceA, sshdLog.String())
+	if err := login(certificateB); err != nil {
+		t.Fatalf("user B's certificate stopped working when A was revoked: %v\n%s", err, sshdLog.String())
 	}
 	if !strings.Contains(sshdLog.String(), "revoked by file") {
 		t.Fatalf("sshd did not refuse A by the KRL:\n%s", sshdLog.String())
@@ -204,24 +183,14 @@ func TestRealSSHDHonoursTheManagedCALines(t *testing.T) {
 	// Rotation: both CAs are trusted while the new one is pending/active, then only the new one.
 	trust(principal, caOne, caTwo)
 	for name, ca := range map[string]ssh.Signer{"old CA": caOne, "new CA": caTwo} {
-		if err := loginB(issue(ca, keyB, []string{user, principal}, now)); err != nil {
+		if err := login(issue(ca, keyB, []string{user, principal}, now)); err != nil {
 			t.Fatalf("%s certificate refused during rotation: %v", name, err)
 		}
 	}
 	trust(principal, caTwo)
-	if err := loginB(issue(caOne, keyB, []string{user, principal}, now)); err == nil {
+	if err := login(issue(caOne, keyB, []string{user, principal}, now)); err == nil {
 		t.Fatal("the retired CA's certificate logged in")
 	}
-}
-
-// bindableLoopback: this machine routes the loopback address (Linux routes all of 127/8; macOS only aliased ones).
-func bindableLoopback(address string) bool {
-	listener, err := net.Listen("tcp", net.JoinHostPort(address, "0"))
-	if err != nil {
-		return false
-	}
-	_ = listener.Close()
-	return true
 }
 
 // lockedBuffer is sshd's stderr, read by the test while sshd still writes it.
@@ -242,7 +211,7 @@ func sshdTestCertificate(t *testing.T, ca ssh.Signer, key ssh.PublicKey, keyID s
 	t.Helper()
 	certificate := &ssh.Certificate{Key: key, CertType: ssh.UserCert, KeyId: keyID, ValidPrincipals: principals,
 		ValidAfter: uint64(issued.Add(-time.Minute).Unix()), ValidBefore: uint64(issued.Add(12 * time.Hour).Unix()),
-		Permissions: ssh.Permissions{CriticalOptions: map[string]string{"source-address": wire.CertificateSourceAddress}, Extensions: map[string]string{"permit-pty": ""}}}
+		Permissions: ssh.Permissions{CriticalOptions: map[string]string{"source-address": "127.0.0.1/32,::1/128"}, Extensions: map[string]string{"permit-pty": ""}}}
 	if err := certificate.SignCert(rand.Reader, ca); err != nil {
 		t.Fatal(err)
 	}

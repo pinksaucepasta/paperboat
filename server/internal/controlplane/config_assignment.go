@@ -263,25 +263,18 @@ func (s *ConfigAssignmentService) Assign(ctx context.Context, userID, machineID,
 }
 
 func (s *ConfigAssignmentService) AssignTargets(ctx context.Context, userID, machineID, pullRepositoryID, pushRepositoryID, mode string, automaticUpdates bool, warningRevision string, expectedVersion int64) (dbsqlc.ControlConfigAssignment, error) {
-	return s.assignProjection(ctx, userID, machineID, pullRepositoryID, pushRepositoryID, mode, automaticUpdates, warningRevision, expectedVersion, nil, nil, "", ConfigSourceMachine)
+	return s.assignProjection(ctx, userID, machineID, pullRepositoryID, pushRepositoryID, mode, automaticUpdates, warningRevision, expectedVersion, nil, nil, "")
 }
-
-// Who chose an assignment's repository: the owner for this machine, or a workspace policy
-// config_sync rule (a rule-chosen assignment follows the rule on the next apply).
-const (
-	ConfigSourceMachine = "machine"
-	ConfigSourceTagRule = "tag_rule"
-)
 
 // ConfigureProjection approves the effective file configuration supplied by the owner.
-func (s *ConfigAssignmentService) ConfigureProjection(ctx context.Context, userID, machineID, pullRepositoryID, pushRepositoryID, mode string, automaticUpdates bool, warningRevision string, expectedVersion int64, rules []ConfigPathRule, bindings []ConfigRepositoryBinding, configurationRevision, source string) (dbsqlc.ControlConfigAssignment, error) {
-	if !validConfigurationRevision(configurationRevision) || source != ConfigSourceMachine && source != ConfigSourceTagRule {
+func (s *ConfigAssignmentService) ConfigureProjection(ctx context.Context, userID, machineID, pullRepositoryID, pushRepositoryID, mode string, automaticUpdates bool, warningRevision string, expectedVersion int64, rules []ConfigPathRule, bindings []ConfigRepositoryBinding, configurationRevision string) (dbsqlc.ControlConfigAssignment, error) {
+	if !validConfigurationRevision(configurationRevision) {
 		return dbsqlc.ControlConfigAssignment{}, ErrAssignmentInvalid
 	}
-	return s.assignProjection(ctx, userID, machineID, pullRepositoryID, pushRepositoryID, mode, automaticUpdates, warningRevision, expectedVersion, rules, bindings, configurationRevision, source)
+	return s.assignProjection(ctx, userID, machineID, pullRepositoryID, pushRepositoryID, mode, automaticUpdates, warningRevision, expectedVersion, rules, bindings, configurationRevision)
 }
 
-func (s *ConfigAssignmentService) assignProjection(ctx context.Context, userID, machineID, pullRepositoryID, pushRepositoryID, mode string, automaticUpdates bool, warningRevision string, expectedVersion int64, rules []ConfigPathRule, bindings []ConfigRepositoryBinding, configurationRevision, source string) (dbsqlc.ControlConfigAssignment, error) {
+func (s *ConfigAssignmentService) assignProjection(ctx context.Context, userID, machineID, pullRepositoryID, pushRepositoryID, mode string, automaticUpdates bool, warningRevision string, expectedVersion int64, rules []ConfigPathRule, bindings []ConfigRepositoryBinding, configurationRevision string) (dbsqlc.ControlConfigAssignment, error) {
 	mode = strings.TrimSpace(mode)
 	if mode == "" {
 		mode = ConfigModePullOnly
@@ -370,7 +363,7 @@ func (s *ConfigAssignmentService) assignProjection(ctx context.Context, userID, 
 			RepositoryID:     sql.NullString{String: primaryRepositoryID, Valid: true},
 			PushRepositoryID: sql.NullString{String: pushRepositoryID, Valid: pushRepositoryID != ""},
 			Mode:             mode, ConsentState: consent, WarningRevision: sql.NullString{String: warningRevision, Valid: true},
-			AutomaticUpdates: automaticUpdates, ExpectedVersion: expectedVersion, Now: now, PathRules: rulesJSON, RepositoryBindings: bindingsJSON, ConfigurationRevision: configurationRevision, Source: source,
+			AutomaticUpdates: automaticUpdates, ExpectedVersion: expectedVersion, Now: now, PathRules: rulesJSON, RepositoryBindings: bindingsJSON, ConfigurationRevision: configurationRevision,
 		})
 		if err != nil {
 			return err
@@ -384,7 +377,7 @@ func (s *ConfigAssignmentService) assignProjection(ctx context.Context, userID, 
 		if _, err = tx.Queries().RevokeControlConfigRepositoryLeasesForEnvironment(ctx, dbsqlc.RevokeControlConfigRepositoryLeasesForEnvironmentParams{EnvironmentID: sql.NullString{String: environmentID, Valid: true}, Now: sql.NullTime{Time: now, Valid: true}}); err != nil {
 			return err
 		}
-		return s.audit.WriteTx(ctx, tx, audit.Event{ActorUserID: userID, ActorType: audit.ActorUser, EventType: "config.assignment_set", ResourceType: "environment", ResourceID: environmentID, IdempotencyKey: "config.assignment:" + environmentID + ":" + strconv.FormatInt(assignment.Version, 10), Metadata: map[string]any{"pull_repository_id": pullRepositoryID, "push_repository_id": pushRepositoryID, "mode": mode, "automatic_updates": automaticUpdates, "consent_state": consent, "source": source}})
+		return s.audit.WriteTx(ctx, tx, audit.Event{ActorUserID: userID, ActorType: audit.ActorUser, EventType: "config.assignment_set", ResourceType: "environment", ResourceID: environmentID, IdempotencyKey: "config.assignment:" + environmentID + ":" + strconv.FormatInt(assignment.Version, 10), Metadata: map[string]any{"pull_repository_id": pullRepositoryID, "push_repository_id": pushRepositoryID, "mode": mode, "automatic_updates": automaticUpdates, "consent_state": consent}})
 	})
 	if errors.Is(err, sql.ErrNoRows) {
 		return dbsqlc.ControlConfigAssignment{}, ErrAssignmentConflict

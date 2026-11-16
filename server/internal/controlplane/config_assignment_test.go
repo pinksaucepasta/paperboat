@@ -114,7 +114,7 @@ func TestConfigAssignmentPreservesDatabaseFailuresInsteadOfForbidden(t *testing.
 		{"repository disconnect", func() error { return service.DisconnectRepository(ctx, "user", "repository") }},
 		{"assignment read", func() error { _, err := service.Assignment(ctx, "user", "machine"); return err }},
 		{"assignment write", func() error {
-			_, err := service.ConfigureProjection(ctx, "user", "machine", "repository", "", ConfigModePullOnly, false, "warning-1", 1, nil, nil, testConfigurationRevision, ConfigSourceMachine)
+			_, err := service.ConfigureProjection(ctx, "user", "machine", "repository", "", ConfigModePullOnly, false, "warning-1", 1, nil, nil, testConfigurationRevision)
 			return err
 		}},
 		{"consent accept", func() error { _, err := service.AcceptConsent(ctx, "user", "machine", "warning-1", 1); return err }},
@@ -640,10 +640,10 @@ func TestConfigPendingBootstrapCannotConsentAndProjectionDigestFencesIdentity(t 
 	if _, err := service.AcceptConsent(ctx, user, machine, "warning-1", pending.Version); !errors.Is(err, ErrAssignmentConflict) {
 		t.Fatal("bootstrap metadata accepted consent")
 	}
-	if _, err := service.ConfigureProjection(ctx, user, machine, repository.ID, "", ConfigModePullOnly, false, "warning-1", pending.Version, nil, nil, "", ConfigSourceMachine); !errors.Is(err, ErrAssignmentInvalid) {
+	if _, err := service.ConfigureProjection(ctx, user, machine, repository.ID, "", ConfigModePullOnly, false, "warning-1", pending.Version, nil, nil, ""); !errors.Is(err, ErrAssignmentInvalid) {
 		t.Fatal("empty projection revision accepted")
 	}
-	approved, err := service.ConfigureProjection(ctx, user, machine, repository.ID, "", ConfigModePullOnly, false, "warning-1", pending.Version, nil, nil, testConfigurationRevision, ConfigSourceMachine)
+	approved, err := service.ConfigureProjection(ctx, user, machine, repository.ID, "", ConfigModePullOnly, false, "warning-1", pending.Version, nil, nil, testConfigurationRevision)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -651,7 +651,7 @@ func TestConfigPendingBootstrapCannotConsentAndProjectionDigestFencesIdentity(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	changed, err := service.ConfigureProjection(ctx, user, machine, repository.ID, "", ConfigModePullOnly, false, "warning-1", accepted.Version, nil, nil, strings.Repeat("b", 64), ConfigSourceMachine)
+	changed, err := service.ConfigureProjection(ctx, user, machine, repository.ID, "", ConfigModePullOnly, false, "warning-1", accepted.Version, nil, nil, strings.Repeat("b", 64))
 	if err != nil || changed.ID != accepted.ID || changed.Version != accepted.Version+1 || changed.ConsentState != "pending" || changed.AcceptedAt.Valid || changed.ConfigurationRevision != strings.Repeat("b", 64) {
 		t.Fatal("file configuration digest change failed authority fence")
 	}

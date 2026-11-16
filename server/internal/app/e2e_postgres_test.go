@@ -141,15 +141,29 @@ func TestE2EServe(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if _, err := application.db.SQL().ExecContext(ctx, `INSERT INTO paperboat.sessions(id,user_id,session_hash,csrf_hash,expires_at,workos_session_id,workos_access_expires_at) VALUES('session_e2e',$1,$2,$3,now()+interval '1 day','session_e2e',now()+interval '1 day')`, account, hash(session), hash(csrf)); err != nil {
-		t.Fatal(err)
+	// TestE2ECore's team: usr_e2e owns the paid team e2e-team (machine e2e-t); usr_e2e2 is a member with a personal machine (e2e-d).
+	for _, statement := range []string{
+		`INSERT INTO paperboat.users(id,workos_subject,primary_email,status) VALUES('usr_e2e2','workos_e2e2','e2e2@example.test','active')`,
+		`INSERT INTO paperboat.user_machine_entitlements (id,user_id,provider_subscription_id,product_code,state,seat_quantity,allowance_bytes,current_period_start,current_period_end) VALUES ('ume_e2e2','usr_e2e2','sub_e2e2','connected-test','active',3,1073741824,now()-interval '1 hour',now()+interval '1 day')`,
+		`INSERT INTO paperboat.teams(team_id,owner_account,generation) VALUES('` + e2eTeam + `','usr_e2e',1)`,
+		`INSERT INTO paperboat.team_members(team_id,account_id,membership_generation,role,active) VALUES('` + e2eTeam + `','usr_e2e',1,'admin',true),('` + e2eTeam + `','usr_e2e2',1,'member',true)`,
+		`INSERT INTO paperboat.billing_workspaces(id,team_id,state,quantity,period_start,period_end) VALUES('team:` + e2eTeam + `','` + e2eTeam + `','active',5,now()-interval '1 hour',now()+interval '1 day')`,
+	} {
+		if _, err := application.db.SQL().ExecContext(ctx, statement); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, s := range []struct{ id, user, session, csrf string }{{"session_e2e", account, session, csrf}, {"session_e2e2", "usr_e2e2", session + "-2", csrf + "-2"}} {
+		if _, err := application.db.SQL().ExecContext(ctx, `INSERT INTO paperboat.sessions(id,user_id,session_hash,csrf_hash,expires_at,workos_session_id,workos_access_expires_at) VALUES($4,$1,$2,$3,now()+interval '1 day',$4,now()+interval '1 day')`, s.user, hash(s.session), hash(s.csrf), s.id); err != nil {
+			t.Fatal(err)
+		}
 	}
 	// A signed-in operator (e2eOperatorSession) claims TestE2ECore's edge as a managed one.
 	if _, err := application.db.SQL().ExecContext(ctx, `WITH a AS (INSERT INTO paperboat.operator_accounts(id,email,password_hash) VALUES('opr_`+strings.Repeat("e2", 16)+`','operator@example.test','unused') RETURNING id)
 		INSERT INTO paperboat.operator_sessions(token_hash,operator_id,csrf_hash,expires_at) SELECT $1,id,$2,now()+interval '1 day' FROM a`, hashBytes(e2eOperatorSession), hashBytes(e2eOperatorCSRF)); err != nil {
 		t.Fatal(err)
 	}
-	post := func(path, body string) map[string]any {
+	post := func(session, csrf, path, body string) map[string]any {
 		t.Helper()
 		var response *http.Response
 		for deadline := time.Now().Add(60 * time.Second); ; time.Sleep(time.Second) {
@@ -177,8 +191,11 @@ func TestE2EServe(t *testing.T) {
 	}
 	tokens := map[string]string{}
 	for _, name := range []string{"e2e-a", "e2e-b", "e2e-c"} {
-		tokens[name], _ = post("/v1/machine-enrollments", `{}`)["bootstrap_token"].(string)
+		tokens[name], _ = post(session, csrf, "/v1/machine-enrollments", `{}`)["bootstrap_token"].(string)
 	}
+	// e2e-t: the owner's (TestE2ECore transfers it to the team); e2e-d: the member's personal machine
+	tokens["e2e-t"], _ = post(session, csrf, "/v1/machine-enrollments", `{}`)["bootstrap_token"].(string)
+	tokens["e2e-d"], _ = post(session+"-2", csrf+"-2", "/v1/machine-enrollments", `{}`)["bootstrap_token"].(string)
 	for name, value := range tokens {
 		if value == "" {
 			t.Fatalf("no %s issued", name)
@@ -190,6 +207,9 @@ func TestE2EServe(t *testing.T) {
 	}
 	waitForStop()
 }
+
+// e2eTeam is the seeded paid team TestE2ECore transfers e2e-t to (a team-owned machine).
+const e2eTeam = "e2e-team"
 
 // The seeded operator's session cookie and CSRF token (fixtures of a throwaway database).
 const e2eOperatorSession, e2eOperatorCSRF = "e2e-operator-session", "e2e-operator-csrf"

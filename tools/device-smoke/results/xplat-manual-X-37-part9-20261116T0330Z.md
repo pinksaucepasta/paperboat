@@ -21,17 +21,3 @@ documented 32 min wait, and the wait can last 20+ minutes with `pb ping` showing
 the code): `pb ping` reports each fresh dial's path while the Unlimited gate (`peertransport/tailnet/path_eligibility.go`,
 `usage_carrier.go` hostedRelayRecent, 1 s) reads `hosted_relay` whenever any WireGuard data crossed a hosted relay in the last
 second, polled by `uploadNative` (`filetransfer/native_client.go`). Not verified on a device.
-
-## Re-run on dev-6e1e23255 (2026-11-16 IST evening): two clean passes, LAN speed
-Sender: fleet Mac lanex2-m (pbmac VM) `pb version` dev-6e1e23255. Receiver: `rx37g-v`, a throwaway OS user on pbvm2
-(Linux VM on victus, 192.168.31.146, same LAN as the Mac VM's host), `pb version` dev-6e1e23255 (contains b80b8e3f1,
-46de6c262 and the renewal fix 760535bfa). `pb send big.bin --to rx37g-v --unlimited`, 4,718,592,000 B generated on the Mac
-(sha256 5e2ba5c4...880f).
-- Pass 1: ping path=direct, delivered rc=0 after 326 s (13:59-14:04 UTC), receiver file size 4718592000, sha256 equal, no spool
-  copy (only the .published record).
-- Pass 2: delivered rc=0 after 294 s (15:36-15:41 UTC), sha256 equal, no spool copy. An attempt just before it ended in 0 s with
-  "session is no longer valid. Run `pb login`" (a fleet-account session change by another lane; the retry after a ping passed).
-- Earlier on hp (Wi-Fi) the same build waited 61 min for a direct path (path stayed regional_relay) and was cancelled: hp is not
-  a LAN-speed target. On dev-64faf9466 one hp run passed (65 min) and one failed with sdk_limit_reached (fixed in 760535bfa,
-  3 tests).
-- Cleanup: file removed from the Inbox after each pass.

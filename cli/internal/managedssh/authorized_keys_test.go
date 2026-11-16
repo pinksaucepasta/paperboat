@@ -165,7 +165,7 @@ func TestReconcileAuthorizedKeysTrustsTheCAOnlyOnLoopback(t *testing.T) {
 		t.Fatalf("replay=%+v error=%v", replay, err)
 	}
 	// Any other option on a managed line is a conflict, never rewritten silently.
-	widened := strings.Replace(lines[1], wire.CATrustFrom, `from="*"`, 1) + "\n"
+	widened := strings.Replace(lines[1], `from="127.0.0.1,::1"`, `from="*"`, 1) + "\n"
 	if err := os.WriteFile(path, []byte(widened), 0o600); err != nil {
 		t.Fatal(err)
 	}

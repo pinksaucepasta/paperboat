@@ -1,12 +1,12 @@
 ## pb config repository connect
 
-Check and connect an HTTPS, SSH, or local Git repository
+Connect an HTTPS, SSH, or local Git repository
 
 ### Synopsis
 
-Check and connect an HTTPS, SSH, or local Git repository
+Connect an HTTPS, SSH, or local Git repository
 
-Check, then register an HTTPS, HTTP, SSH URL or absolute local Git path without embedded credentials. The repository is read first: it must have the branch with a commit, and a .paperboat/config-sync.toml on it, if present, must be valid. HTTP(S) and local repositories are read anonymously unless --credentials-file gives a profile (required for SSH); that profile is then saved on this machine. Use --name and --branch to select its display name and branch.
+Register an HTTPS, HTTP, SSH URL or absolute local Git path without embedded credentials. Use --name and --branch to select its display name and branch. Machine authentication and explicit file mappings are configured separately.
 
 Configuration commands distinguish local CLI settings from synchronized repository content. Inspect current state before changing it; synchronization reports conflicts instead of silently overwriting one side. The --json option provides structured output for scripts where supported.
 
@@ -19,11 +19,10 @@ pb config repository connect <url-or-absolute-path> [flags]
 ### Options
 
 ```
-      --branch string             Git branch (default "main")
-      --credentials-file string   private credential profile used to check the repository and saved on this machine; - for stdin (required for SSH)
-  -h, --help                      help for connect
-      --json                      print JSON
-      --name string               display name
+      --branch string   Git branch (default "main")
+  -h, --help            help for connect
+      --json            print JSON
+      --name string     display name
 ```
 
 ### Options inherited from parent commands

@@ -102,7 +102,7 @@ func TestIssuedCertificateIsAcceptedOnlyForItsUserCAWindowAndLoopback(t *testing
 		t.Fatalf("valid certificate refused: %v", err)
 	}
 	// sshd refuses a login from any other address (x/crypto's CertChecker leaves source-address to its server).
-	if certificate.CriticalOptions["source-address"] != "127.0.0.0/8,::1/128" {
+	if certificate.CriticalOptions["source-address"] != "127.0.0.1/32,::1/128" {
 		t.Fatalf("critical options=%v", certificate.CriticalOptions)
 	}
 	// An outage longer than 10 minutes (here 11 minutes and 11 hours) keeps the certificate usable: no renewal needed.

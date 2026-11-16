@@ -35,7 +35,7 @@ pb config repository [flags]
 ### SEE ALSO
 
 * [pb config](pb_config.md)	 - Inspect the local CLI config
-* [pb config repository connect](pb_config_repository_connect.md)	 - Check and connect an HTTPS, SSH, or local Git repository
+* [pb config repository connect](pb_config_repository_connect.md)	 - Connect an HTTPS, SSH, or local Git repository
 * [pb config repository credentials](pb_config_repository_credentials.md)	 - Store credentials privately on this machine
 * [pb config repository list](pb_config_repository_list.md)	 - List connected repositories
 

@@ -32,7 +32,7 @@ import (
 // TestE2ECore is the core end-to-end check (e2e.yml "End-to-end core"; before a push: tools/ci-test.sh e2e).
 // The real server (this test binary run again as TestE2EServe, on PostgreSQL, behind TLS) and two real `pb`
 // daemons, each in its own systemd container with its own state, paired like a user pairs them. It asserts
-// exec both ways and managed SSH with a command; then restarts the server like a deploy (SIGTERM, start again
+// exec both ways and managed SSH with a command, a team-owned machine (e2e_core_team_test.go); then restarts the server like a deploy (SIGTERM, start again
 // on the same database) and asserts all of it again. (A file send needs the edge's runtime route.) A failure names the step and prints the
 // server's and both daemons' logs.
 //
@@ -40,7 +40,7 @@ import (
 // TestEnv runs control; TestNode.StartDaemon and AwaitRunning drive real daemons; tstest.WaitFor bounds every
 // wait) and headscale integration/tsic/tsic.go + dockertestutil/execute.go (real clients in docker containers,
 // commands run with docker exec under a bound). Its server and edge children stop with it (Pdeathsig); after a
-// killed run, `docker rm -f e2e-a e2e-b e2e-pebble` removes what it started.
+// killed run, `docker rm -f e2e-a e2e-b e2e-t e2e-d e2e-pebble` removes what it started.
 func TestE2ECore(t *testing.T) {
 	if os.Getenv("PAPERBOAT_E2E_CORE") == "" {
 		t.Skip("core end-to-end only: e2e.yml End-to-end core (PAPERBOAT_E2E_CORE=1, docker, PostgreSQL)")
@@ -62,6 +62,9 @@ func TestE2ECore(t *testing.T) {
 	}
 	e := &e2eCore{t: t, root: root, work: t.TempDir(), host: "e2e-server.example.test", port: port,
 		internal: "127.0.0.1:" + internal, mintKey: "e2e:" + base64.RawURLEncoding.EncodeToString(seed), machines: []string{"e2e-a", "e2e-b"}}
+	if os.Getenv("PAPERBOAT_E2E_THROUGHPUT") == "" { // e2e-t: the owner's, transferred to the team; e2e-d: the member's
+		e.machines = append(e.machines, "e2e-t", "e2e-d")
+	}
 	e.ports = allocateE2EPorts(t, "127.0.0.1", port, internal)
 	t.Cleanup(e.cleanup)
 
@@ -97,7 +100,14 @@ func TestE2ECore(t *testing.T) {
 		e.assertTunnelThroughput()
 		return
 	}
+	e.setupTeam()
 	e.assertAll("first run")
+	// Relayed before any restart too: a relay restart must not hide a broken relayed pair (c3c381c35: a team-owned
+	// host's scopes at two generations, every relayed packet dropped).
+	e.step("block the direct path (before the restarts)", e.blockDirect)
+	e.assertCore("relayed first")
+	e.assertTeamExec("relayed first")
+	e.step("unblock the direct path", e.unblockDirect)
 	e.step("server restart (deploy)", e.restartServer)
 	e.assertAll("after server restart")
 	e.step("edge restart (deploy)", func() error {
@@ -118,11 +128,13 @@ func TestE2ECore(t *testing.T) {
 	e.assertAll("after edge restart")
 	e.step("block the direct path between the machines", e.blockDirect)
 	e.assertCore("relayed")
+	e.assertTeamExec("relayed")
 }
 
 func (e *e2eCore) assertAll(phase string) {
 	e.assertCore(phase)
 	e.assertEdge(phase)
+	e.assertTeam(phase)
 }
 
 // checkHost finds the docker bridge gateway (where the machines reach the server and the edge) and checks the

@@ -747,11 +747,9 @@ func TestRenewalRetriesNetworkFailuresThatAreNotTimeouts(t *testing.T) {
 	}
 }
 
-// X-26: a host just back from sleep is refused (401 expired credential, 403 presence, 412 generation) for a few
-// seconds; the lease survives it.
+// X-26: a host just back from sleep is refused (403 presence, 412 generation) for a few seconds; the lease survives it.
 func TestRenewalSurvivesOwnerRefusalsUntilThePresenceReturns(t *testing.T) {
-	client := &sessionLeaseClient{renewErrs: []error{&api.APIError{Status: http.StatusUnauthorized},
-		&api.APIError{Status: http.StatusForbidden}, &api.APIError{Status: http.StatusPreconditionFailed}}}
+	client := &sessionLeaseClient{renewErrs: []error{&api.APIError{Status: http.StatusForbidden}, &api.APIError{Status: http.StatusPreconditionFailed}}}
 	session := startRenewalSession(t, client)
 	defer session.Stop(context.Background())
 	errc := make(chan error, 1)

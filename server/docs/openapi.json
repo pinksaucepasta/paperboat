@@ -13334,14 +13334,6 @@
           "configuration_revision": {
             "type": "string",
             "pattern": "^[a-f0-9]{64}$"
-          },
-          "source": {
-            "type": "string",
-            "enum": [
-              "machine",
-              "tag_rule"
-            ],
-            "description": "Who chose the repository: the owner for this machine (default) or a workspace policy config_sync rule. A rule-chosen assignment follows the rule on the next apply."
           }
         }
       },
@@ -18479,47 +18471,6 @@
             }
           }
         }
-      },
-      "ConfigMachineRule": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "matched",
-          "state"
-        ],
-        "properties": {
-          "matched": {
-            "type": "boolean"
-          },
-          "team_id": {
-            "type": "string",
-            "description": "Team whose policy has the rule; empty for the personal policy."
-          },
-          "target": {
-            "type": "string",
-            "description": "machine:* or the tag that matched."
-          },
-          "repository": {
-            "type": "string",
-            "description": "Repository URL or absolute path from the rule."
-          },
-          "branch": {
-            "type": "string"
-          },
-          "repository_id": {
-            "type": "string",
-            "description": "The owner's connected repository with this URL and branch."
-          },
-          "state": {
-            "type": "string",
-            "enum": [
-              "none",
-              "connected",
-              "connect_on_apply"
-            ],
-            "description": "connect_on_apply: pb config sync apply connects the repository for the owner."
-          }
-        }
       }
     },
     "responses": {
@@ -22278,7 +22229,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Assignment includes configuration_revision, path_rules with source priority, repository_bindings, and source (machine or tag_rule). Pending bootstrap metadata may have empty configuration_revision and cannot accept consent or authorize synchronization."
+            "description": "Assignment includes configuration_revision, path_rules with source priority, and repository_bindings. Pending bootstrap metadata may have empty configuration_revision and cannot accept consent or authorize synchronization."
           },
           "404": {
             "$ref": "#/components/responses/Error"
@@ -56549,58 +56500,6 @@
           }
         },
         "operationId": "post_v1_preview_lease_renewals"
-      }
-    },
-    "/v1/machines/{machine_id}/config-rule": {
-      "get": {
-        "summary": "Read the workspace policy config_sync rule that picks this machine's config repository",
-        "security": [
-          {
-            "cookieSession": []
-          },
-          {
-            "bearerAccess": []
-          }
-        ],
-        "x-required-bearer-scopes": [
-          "machines:read"
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": [
-                    "data"
-                  ],
-                  "properties": {
-                    "data": {
-                      "$ref": "#/components/schemas/ConfigMachineRule"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "404": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "operationId": "get_v1_machines_machine_id_config_rule",
-        "parameters": [
-          {
-            "name": "workspace",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "maxLength": 63
-            },
-            "description": "Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field."
-          }
-        ]
       }
     }
   }

@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"golang.org/x/crypto/ssh"
-	"net/netip"
 	"slices"
 	"strings"
 )
@@ -13,39 +12,11 @@ import (
 const MaxHostKeys = 8
 
 // CATrustOptions are the options of a host's line trusting a user CA: certificates carrying principal (the machine's
-// principal "pb:<machine>"), and only on the loopback connections the host's own bridge makes (BridgeSSH dials from
-// LoopbackSource or ::1), so a certificate never opens a session that bypasses the stream (direct sshd over LAN or
-// tailnet is refused at login). Callers check ValidCAPrincipal first.
+// principal "pb:<machine>"), and only on the loopback connections the host's own bridge makes (BridgeSSH dials 127.0.0.1
+// or ::1), so a certificate never opens a session that bypasses the stream (direct sshd over LAN or tailnet is
+// refused at login). Callers check ValidCAPrincipal first.
 func CATrustOptions(principal string) string {
-	return `cert-authority,principals="` + principal + `",` + CATrustFrom
-}
-
-// CATrustFrom is the from= option of CATrustOptions; CertificateSourceAddress is the same range in every certificate.
-const (
-	CATrustFrom              = `from="127.0.0.0/8,::1"`
-	CertificateSourceAddress = "127.0.0.0/8,::1/128"
-)
-
-// loopbackSourceSlots is how many source addresses the bridge spreads users over: macOS routes only aliased 127/8
-// addresses, so its machine guard aliases each of LoopbackSources.
-const loopbackSourceSlots = 64
-
-// LoopbackSource is the IPv4 address the host's bridge connects to sshd from for one user (account ID). OpenSSH 9.8+
-// PerSourcePenalties throttle a source address after failed logins; with one source per user, one user's failures
-// never lock the others out of the machine's sshd. One /24 per slot keeps users apart even under
-// PerSourceNetBlockSize 24. Users whose hashes collide share a slot (as all shared 127.0.0.1 before).
-func LoopbackSource(accountID string) netip.Addr {
-	sum := sha256.Sum256([]byte(accountID))
-	return netip.AddrFrom4([4]byte{127, 0, sum[0] % loopbackSourceSlots, 200})
-}
-
-// LoopbackSources are every address LoopbackSource returns.
-func LoopbackSources() []netip.Addr {
-	out := make([]netip.Addr, loopbackSourceSlots)
-	for slot := range out {
-		out[slot] = netip.AddrFrom4([4]byte{127, 0, byte(slot), 200})
-	}
-	return out
+	return `cert-authority,principals="` + principal + `",from="127.0.0.1,::1"`
 }
 
 // ValidCAPrincipal: a machine principal as the server makes it ("pb:<machine>"), safe inside principals="".

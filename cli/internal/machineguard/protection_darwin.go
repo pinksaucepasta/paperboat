@@ -8,12 +8,9 @@ import (
 	"errors"
 	"fmt"
 	"github.com/pinksaucepasta/paperboat/internal/splitdns"
-	wire "github.com/pinksaucepasta/paperboat/shared/managedssh"
-	"net/netip"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -42,7 +39,7 @@ func darwinLoadAliases(cfg Config) error {
 		return errors.New("invalid Paperboat alias journal")
 	}
 	for address := range darwinPlatform.aliases {
-		if !validOwnedLoopbackAddress(address) && address != splitdns.BrowserGatewayIP && !sshSourceAddress(address) {
+		if !validOwnedLoopbackAddress(address) && address != splitdns.BrowserGatewayIP {
 			return errors.New("invalid protected alias journal address")
 		}
 	}
@@ -145,9 +142,6 @@ func applyProtection(ctx context.Context, cfg Config, leases []*guardedLease) er
 	for _, lease := range leases {
 		active[lease.ip] = true
 	}
-	if err = darwinEnsureSSHSourcesLocked(ctx, active); err != nil {
-		return darwinStep("add the managed SSH source addresses", err)
-	}
 	for address := range darwinPlatform.aliases {
 		if active[address] {
 			continue
@@ -169,42 +163,6 @@ func applyProtection(ctx context.Context, cfg Config, leases []*guardedLease) er
 		delete(darwinPlatform.aliases, address)
 	}
 	return darwinSaveAliases()
-}
-
-// darwinEnsureSSHSourcesLocked aliases every managed SSH source address (wire.LoopbackSources) on lo0 with one
-// ifconfig read, and marks them active: macOS routes only aliased 127/8 addresses, and the user's carrier binds them
-// to reach sshd from one address per user.
-func darwinEnsureSSHSourcesLocked(ctx context.Context, active map[string]bool) error {
-	output, err := darwinRun(ctx, "", "/sbin/ifconfig", "lo0")
-	if err != nil {
-		return err
-	}
-	present := map[string]bool{}
-	for _, line := range strings.Split(string(output), "\n") {
-		if fields := strings.Fields(line); len(fields) >= 2 && fields[0] == "inet" {
-			present[fields[1]] = true
-		}
-	}
-	for _, source := range wire.LoopbackSources() {
-		address := source.String()
-		active[address] = true
-		if present[address] {
-			continue // ours from an earlier apply, or another owner's: either way it routes
-		}
-		darwinPlatform.aliases[address] = true
-		if err := darwinSaveAliases(); err != nil {
-			return err
-		}
-		if _, err := darwinRun(ctx, "", "/sbin/ifconfig", "lo0", "alias", address, "netmask", "255.255.255.255"); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func sshSourceAddress(address string) bool {
-	parsed, err := netip.ParseAddr(address)
-	return err == nil && slices.Contains(wire.LoopbackSources(), parsed)
 }
 
 func darwinStep(step string, err error) error {

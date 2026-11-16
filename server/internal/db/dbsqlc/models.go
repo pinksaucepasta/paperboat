@@ -572,7 +572,6 @@ type ControlConfigAssignment struct {
 	PathRules             []byte
 	RepositoryBindings    []byte
 	ConfigurationRevision string
-	Source                string
 }
 
 type ControlConfigConflictResolution struct {

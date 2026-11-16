@@ -322,15 +322,32 @@ func (e *e2eCore) assertEdge(phase string) {
 // publication serves a marker over HTTP on port in machine, publishes it with pb <kind> and fetches it through
 // the edge's public HTTPS listener with the name the server assigned.
 func (e *e2eCore) publication(phase, machine, kind, port string, args ...string) error {
+	return e.publish(phase, machine, kind, port, false, args...)
+}
+
+// publish is publication; gated (a --team publication) wants the edge's sign-in gate for the name (a redirect or
+// 401/403, never the page), which proves the server routed the name to that machine's publication.
+func (e *e2eCore) publish(phase, machine, kind, port string, gated bool, args ...string) error {
 	marker := kind + "-ok " + phase
-	serve := fmt.Sprintf("mkdir -p /tmp/%[1]s && printf %%s %[2]q >/tmp/%[1]s/index.html && cd /tmp/%[1]s && (setsid python3 -m http.server %[1]s >/dev/null 2>&1 &)", port, marker)
-	if _, err := e.run(time.Minute, "docker", "exec", "-u", "pbt", machine, "bash", "-c", serve); err != nil {
+	if err := e.serveMarker(machine, port, marker); err != nil {
 		return err
 	}
 	out, err := e.pb(machine, append([]string{kind, port}, args...)...)
 	if err != nil {
 		return err
 	}
+	return e.fetchThroughEdge(kind, out, marker, gated)
+}
+
+// serveMarker serves marker over HTTP on port in machine.
+func (e *e2eCore) serveMarker(machine, port, marker string) error {
+	serve := fmt.Sprintf("mkdir -p /tmp/%[1]s && printf %%s %[2]q >/tmp/%[1]s/index.html && cd /tmp/%[1]s && (setsid python3 -m http.server %[1]s >/dev/null 2>&1 &)", port, marker)
+	_, err := e.run(time.Minute, "docker", "exec", "-u", "pbt", machine, "bash", "-c", serve)
+	return err
+}
+
+// fetchThroughEdge fetches the public name in pb's output through the edge's HTTPS listener.
+func (e *e2eCore) fetchThroughEdge(kind, out, marker string, gated bool) error {
 	hostname := publicHostname(out)
 	if hostname == "" {
 		return fmt.Errorf("pb %s printed no public URL: %s", kind, lastBytes(out, 400))
@@ -341,6 +358,9 @@ func (e *e2eCore) publication(phase, machine, kind, port string, args ...string)
 	if err != nil {
 		return err
 	}
+	if gated {
+		client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	}
 	return waitFor(2*time.Minute, func() error {
 		response, err := client.Get("https://" + hostname + "/")
 		if err != nil {
@@ -348,6 +368,12 @@ func (e *e2eCore) publication(phase, machine, kind, port string, args ...string)
 		}
 		defer response.Body.Close()
 		raw, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
+		if gated {
+			if s := response.StatusCode; strings.Contains(string(raw), marker) || !(s >= 300 && s < 400 || s == http.StatusUnauthorized || s == http.StatusForbidden) {
+				return fmt.Errorf("GET https://%s/ without a sign-in: %s, want the sign-in gate: %s", hostname, response.Status, lastBytes(string(raw), 200))
+			}
+			return nil
+		}
 		if response.StatusCode != http.StatusOK || !strings.Contains(string(raw), marker) {
 			return fmt.Errorf("GET https://%s/: %s: %s", hostname, response.Status, lastBytes(string(raw), 200))
 		}
@@ -355,10 +381,11 @@ func (e *e2eCore) publication(phase, machine, kind, port string, args ...string)
 	})
 }
 
-// publicHostname finds the first https URL under the test domains in pb's JSON output.
+// publicHostname finds the first https URL (or bare hostname, as tunnel create prints) under the test domains in
+// pb's JSON output.
 func publicHostname(out string) string {
 	for _, field := range strings.FieldsFunc(out, func(r rune) bool { return r == '"' || r == ' ' || r == '\n' }) {
-		if host, ok := strings.CutPrefix(field, "https://"); ok && (strings.Contains(host, ".public.example.test")) {
+		if host := strings.TrimPrefix(field, "https://"); strings.Contains(host, ".public.example.test") {
 			return strings.TrimRight(strings.SplitN(host, "/", 2)[0], ",")
 		}
 	}
@@ -395,8 +422,13 @@ func (e *e2eCore) pebbleRoots() error {
 	return os.WriteFile(filepath.Join(e.work, "server-roots.pem"), roots, 0o600)
 }
 
-// blockDirect drops traffic between the two machines, so native connections must go through the relay.
-func (e *e2eCore) blockDirect() error {
+// blockDirect drops traffic between every pair of machines, so native connections must go through the relay.
+func (e *e2eCore) blockDirect() error { return e.directRules("-I") }
+
+// unblockDirect removes blockDirect's rules.
+func (e *e2eCore) unblockDirect() error { return e.directRules("-D") }
+
+func (e *e2eCore) directRules(action string) error {
 	addresses := map[string]string{}
 	for _, name := range e.machines {
 		out, err := e.run(time.Minute, "docker", "inspect", "-f", "{{.NetworkSettings.Networks.bridge.IPAddress}}", name) // Docker 29 dropped the top-level field
@@ -405,10 +437,14 @@ func (e *e2eCore) blockDirect() error {
 		}
 		addresses[name] = strings.TrimSpace(out)
 	}
-	a, b := e.machines[0], e.machines[1]
-	for machine, other := range map[string]string{a: addresses[b], b: addresses[a]} {
-		if _, err := e.docker(machine, "iptables", "-I", "OUTPUT", "-d", other, "-j", "DROP"); err != nil {
-			return err
+	for _, machine := range e.machines {
+		for _, other := range e.machines {
+			if other == machine {
+				continue
+			}
+			if _, err := e.docker(machine, "iptables", action, "OUTPUT", "-d", addresses[other], "-j", "DROP"); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

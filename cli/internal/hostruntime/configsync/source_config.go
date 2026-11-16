@@ -3,7 +3,6 @@ package configsync
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"github.com/BurntSushi/toml"
 	"github.com/bmatcuk/doublestar/v4"
 	"os"
@@ -82,11 +81,8 @@ func ParseSourceConfig(data []byte, limits SourceConfigLimits) (SourceConfig, er
 	}
 	var config SourceConfig
 	metadata, err := toml.Decode(string(data), &config)
-	if err != nil {
-		return SourceConfig{}, fmt.Errorf("%w: %v", ErrSourceConfigInvalid, err)
-	}
-	if undecoded := metadata.Undecoded(); len(undecoded) != 0 {
-		return SourceConfig{}, fmt.Errorf("%w: unknown key %q", ErrSourceConfigInvalid, undecoded[0].String())
+	if err != nil || len(metadata.Undecoded()) != 0 {
+		return SourceConfig{}, ErrSourceConfigInvalid
 	}
 	for _, key := range metadata.Keys() {
 		parts := []string(key)

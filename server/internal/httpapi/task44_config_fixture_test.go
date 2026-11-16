@@ -125,7 +125,7 @@ func task44QualifyConfigWorker(t *testing.T, ctx context.Context, store *db.DB, 
 	if err != nil || assignment.AdoptedTeamID.String != team {
 		t.Fatal("member adopted config assignment missing")
 	}
-	assignment, err = assignments.ConfigureProjection(ctx, member, machine, assignment.RepositoryID.String, assignment.PushRepositoryID.String, assignment.Mode, assignment.AutomaticUpdates, "task44", assignment.Version, nil, nil, strings.Repeat("a", 64), controlplane.ConfigSourceMachine)
+	assignment, err = assignments.ConfigureProjection(ctx, member, machine, assignment.RepositoryID.String, assignment.PushRepositoryID.String, assignment.Mode, assignment.AutomaticUpdates, "task44", assignment.Version, nil, nil, strings.Repeat("a", 64))
 	if err != nil {
 		t.Fatal("fixture file projection approval failed")
 	}
@@ -189,7 +189,7 @@ func task44QualifyConfigWorker(t *testing.T, ctx context.Context, store *db.DB, 
 	if err != nil {
 		t.Fatal(err)
 	}
-	assignment, err = assignments.ConfigureProjection(ctx, member, machine, "", repository, controlplane.ConfigModePushOnly, false, "task44", assignment.Version, nil, nil, strings.Repeat("b", 64), controlplane.ConfigSourceMachine)
+	assignment, err = assignments.ConfigureProjection(ctx, member, machine, "", repository, controlplane.ConfigModePushOnly, false, "task44", assignment.Version, nil, nil, strings.Repeat("b", 64))
 	if err != nil {
 		t.Fatal("explicit personal pull/push assignment failed")
 	}

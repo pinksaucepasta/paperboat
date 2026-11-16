@@ -2,7 +2,7 @@
 .TH "PB-CONFIG-REPOSITORY-CONNECT" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
 
 .SH NAME
-pb-config-repository-connect - Check and connect an HTTPS, SSH, or local Git repository
+pb-config-repository-connect - Connect an HTTPS, SSH, or local Git repository
 
 
 .SH SYNOPSIS
@@ -10,10 +10,10 @@ pb-config-repository-connect - Check and connect an HTTPS, SSH, or local Git rep
 
 
 .SH DESCRIPTION
-Check and connect an HTTPS, SSH, or local Git repository
+Connect an HTTPS, SSH, or local Git repository
 
 .PP
-Check, then register an HTTPS, HTTP, SSH URL or absolute local Git path without embedded credentials. The repository is read first: it must have the branch with a commit, and a .paperboat/config-sync.toml on it, if present, must be valid. HTTP(S) and local repositories are read anonymously unless --credentials-file gives a profile (required for SSH); that profile is then saved on this machine. Use --name and --branch to select its display name and branch.
+Register an HTTPS, HTTP, SSH URL or absolute local Git path without embedded credentials. Use --name and --branch to select its display name and branch. Machine authentication and explicit file mappings are configured separately.
 
 .PP
 Configuration commands distinguish local CLI settings from synchronized repository content. Inspect current state before changing it; synchronization reports conflicts instead of silently overwriting one side. The --json option provides structured output for scripts where supported.
@@ -25,10 +25,6 @@ JSON output is supported with --json.
 .SH OPTIONS
 \fB--branch\fP="main"
 	Git branch
-
-.PP
-\fB--credentials-file\fP=""
-	private credential profile used to check the repository and saved on this machine; - for stdin (required for SSH)
 
 .PP
 \fB-h\fP, \fB--help\fP[=false]

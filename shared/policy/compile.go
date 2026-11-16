@@ -2,12 +2,10 @@ package policy
 
 import (
 	"maps"
-	"regexp"
 	"slices"
 	"sort"
 	"strconv"
 	"strings"
-	"unicode"
 )
 
 // Grant is one compiled permission: an account may perform an action on a target. Rules
@@ -75,7 +73,6 @@ func Compile(d Document, inv Inventory, limits Limits) (Compiled, Errors) {
 	for i, r := range d.Rules {
 		compileRule(c, allow, deny, x, groups, tags, pointer("/rules", i), i, r)
 	}
-	compileConfigSync(c, d, tags)
 	if len(c.errs) > 0 {
 		return Compiled{x: x}, c.errs.sorted()
 	}
@@ -163,7 +160,6 @@ func checkLimits(c *collector, d Document, l Limits) {
 	over("/tags", len(d.Tags), l.MaxTags, "tags")
 	over("/groups", len(d.Groups), l.MaxGroups, "groups")
 	over("/tests", len(d.Tests), l.MaxTests, "tests")
-	over("/config_sync", len(d.ConfigSync), l.MaxRules, "config_sync rules")
 	for name, entries := range d.Groups {
 		over(pointer("/groups", name), len(entries), l.MaxEntriesPerList, "entries")
 	}
@@ -378,30 +374,4 @@ func reachTags(tags map[string][]string, dst []string) map[string][]string {
 		out[d] = nil
 	}
 	return out
-}
-
-var configSyncBranch = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/-]{0,254}$`)
-
-// compileConfigSync checks config_sync targets (machine:* or a defined tag) and the repository
-// shape. The URL is matched against connected repositories when a machine applies config sync.
-func compileConfigSync(c *collector, d Document, tags map[string][]string) {
-	for i, r := range d.ConfigSync {
-		p := pointer("/config_sync", i)
-		if len(r.Dst) == 0 {
-			c.add(pointer(p, "dst"), "required", "a config_sync rule needs at least one target")
-		}
-		for j, t := range r.Dst {
-			if _, ok := tags[t]; t != "machine:*" && !ok {
-				c.add(pointer(p, "dst", j), "unknown_target", "config_sync targets are machine:* or a tag defined in \"tags\", not %q", t)
-			}
-		}
-		u := r.Repository
-		if u == "" || len(u) > 4096 || strings.ContainsFunc(u, unicode.IsSpace) || strings.ContainsFunc(u, unicode.IsControl) ||
-			!(strings.HasPrefix(u, "https://") || strings.HasPrefix(u, "http://") || strings.HasPrefix(u, "ssh://") || strings.HasPrefix(u, "/") || strings.Contains(u, "@")) {
-			c.add(pointer(p, "repository"), "invalid_repository", "repository is the Git URL (https://, ssh:// or user@host:path) or absolute path of a config sync repository")
-		}
-		if r.Branch != "" && (!configSyncBranch.MatchString(r.Branch) || strings.Contains(r.Branch, "..") || strings.HasSuffix(r.Branch, "/") || strings.HasSuffix(r.Branch, ".lock")) {
-			c.add(pointer(p, "branch"), "invalid_branch", "branch is a Git branch name")
-		}
-	}
 }

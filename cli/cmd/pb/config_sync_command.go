@@ -10,7 +10,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/configsync"
@@ -125,9 +124,6 @@ type configSyncProjection struct {
 	AutomaticUpdates   bool                          `json:"automatic_updates"`
 	PathRules          []api.ConfigPathRule          `json:"path_rules"`
 	RepositoryBindings []api.ConfigRepositoryBinding `json:"repository_bindings"`
-	// Source says who chose the repository: "machine" (--repository, the machine file, an
-	// earlier machine choice, a recipe) or "tag_rule" (a workspace policy config_sync rule).
-	Source string `json:"source"`
 	// Warnings are advice about the source files, not part of the approved
 	// configuration, so they are left out of the confirmation scope.
 	Warnings []string `json:"warnings,omitempty"`
@@ -226,8 +222,6 @@ func configRepositoryReadFailure(err error) error {
 		return commandRejection{reason: commandRejectConfigRepositoryCredentials}
 	case errors.Is(err, configsync.ErrRepositoryUnavailable):
 		return commandRejection{reason: commandRejectConfigRepositoryUnavailable}
-	case errors.Is(err, configsync.ErrSourceConfigInvalid):
-		return configSyncRefusal(fmt.Sprintf("The config repository's %s is not a valid config sync file (%v). Fix it in the repository, then retry.", configsync.SharedSourceConfigPath, err))
 	}
 	return err
 }
@@ -453,17 +447,9 @@ func runConfigSyncSourceCommandWithService(cmd *cobra.Command, args []string, ap
 		return err
 	}
 	requested, _ := cmd.Flags().GetString("repository")
-	requested, rule, err := configSyncRuleChoice(cmd.Context(), client, registration.MachineID, machine, requested, current)
-	if err != nil {
-		return err
-	}
 	projection, err := buildConfigSyncProjection(cmd.Context(), client, machine, requested, current, configSyncMachineNamesFor(machines, registration.MachineID), filepath.Join(stateRoot, "config-sync", "repository-read"), credentialRoot, home)
 	if err != nil {
 		return err
-	}
-	projection.Source = "machine"
-	if rule.RepositoryID != "" {
-		projection.Source = "tag_rule"
 	}
 	if apply {
 		c := actionContext(cmd, args)
@@ -483,7 +469,7 @@ func runConfigSyncSourceCommandWithService(cmd *cobra.Command, args []string, ap
 				}
 			}
 		} else {
-			assignment, err := client.ConfigureConfigProjection(cmd.Context(), registration.MachineID, projection.PullRepositoryID, projection.PushRepositoryID, projection.Mode, projection.AutomaticUpdates, current.Version, projection.PathRules, projection.RepositoryBindings, projection.Revision, projection.Source)
+			assignment, err := client.ConfigureConfigProjection(cmd.Context(), registration.MachineID, projection.PullRepositoryID, projection.PushRepositoryID, projection.Mode, projection.AutomaticUpdates, current.Version, projection.PathRules, projection.RepositoryBindings, projection.Revision)
 			if err != nil {
 				return friendlyCommandError(err)
 			}
@@ -509,13 +495,6 @@ func runConfigSyncSourceCommandWithService(cmd *cobra.Command, args []string, ap
 		return writeCLIJSON(cmd.OutOrStdout(), projection)
 	}
 	fmt.Fprintf(cmd.OutOrStdout(), "Machine configuration: %s\nRevision: %s\nEnabled: %t · %s · %d path rules\n", path, projection.Revision, projection.Enabled, projection.Mode, len(projection.PathRules))
-	if rule.RepositoryID != "" {
-		workspace := "your personal policy"
-		if rule.TeamID != "" {
-			workspace = "the policy of team " + rule.TeamID
-		}
-		fmt.Fprintf(cmd.OutOrStdout(), "Repository: %s (chosen by %s rule for %s; choose another with --repository)\n", rule.Repository, workspace, rule.Target)
-	}
 	for _, warning := range projection.Warnings {
 		fmt.Fprintln(cmd.OutOrStdout(), "Warning: "+warning)
 	}
@@ -523,44 +502,6 @@ func runConfigSyncSourceCommandWithService(cmd *cobra.Command, args []string, ap
 		fmt.Fprintln(cmd.OutOrStdout(), "Configuration applied to this machine.")
 	}
 	return nil
-}
-
-// configSyncRuleChoice returns the repository a workspace policy config_sync rule picks when the
-// owner made no choice for this machine (--repository, pull/push in the machine file, or a
-// machine-chosen assignment): precedence is machine choice > rule > none. A rule repository the
-// owner has not connected yet is connected now (registration only; files sync after consent).
-func configSyncRuleChoice(ctx context.Context, client *api.Client, machineID string, machine configsync.SourceConfig, requested string, current api.ConfigAssignment) (string, api.ConfigMachineRule, error) {
-	if requested != "" || machine.Pull != nil || machine.Push != nil || current.ID != "" && current.ConsentState != "revoked" && current.Source != "tag_rule" {
-		return requested, api.ConfigMachineRule{}, nil
-	}
-	rule, err := client.ConfigMachineRule(ctx, machineID)
-	if err != nil {
-		return "", api.ConfigMachineRule{}, friendlyCommandError(err)
-	}
-	if !rule.Matched {
-		return "", api.ConfigMachineRule{}, nil
-	}
-	if rule.RepositoryID == "" {
-		repository, err := client.ConnectCustomConfigRepository(ctx, rule.Repository, configRuleRepositoryName(rule.Repository), rule.Branch)
-		if err != nil {
-			return "", api.ConfigMachineRule{}, friendlyCommandError(err)
-		}
-		rule.RepositoryID = repository.ID
-	}
-	return rule.RepositoryID, rule, nil
-}
-
-// configRuleRepositoryName is the display name a rule repository gets when it is connected for
-// the owner: the last path element without .git.
-func configRuleRepositoryName(endpoint string) string {
-	name := strings.TrimSuffix(strings.TrimRight(endpoint, "/"), ".git")
-	if i := strings.LastIndexAny(name, "/:\\"); i >= 0 {
-		name = name[i+1:]
-	}
-	if name == "" || len(name) > 128 {
-		return "config"
-	}
-	return name
 }
 
 func configSyncProjectionConfirmationScope(machineID string, version int64, projection configSyncProjection) string {

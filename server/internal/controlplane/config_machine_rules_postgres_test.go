@@ -56,7 +56,7 @@ func TestConfigCustomRepositoryRulesAccessAndRevocation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assignment, err := assignments.ConfigureProjection(ctx, user, identity.MachineID, repository.ID, pushRepository.ID, ConfigModeBidirectional, false, "warning-7", 0, []ConfigPathRule{{Source: "machine", ID: "settings", RepositoryPath: "editor/settings.json", LocalPath: "/home/owner/settings.json", Kind: "file"}}, []ConfigRepositoryBinding{{RepositoryID: repository.ID, URL: "ssh://git@lan/config-test.git"}, {RepositoryID: pushRepository.ID, URL: "ssh://git@lan/publish-test.git"}}, testConfigurationRevision, ConfigSourceMachine)
+	assignment, err := assignments.ConfigureProjection(ctx, user, identity.MachineID, repository.ID, pushRepository.ID, ConfigModeBidirectional, false, "warning-7", 0, []ConfigPathRule{{Source: "machine", ID: "settings", RepositoryPath: "editor/settings.json", LocalPath: "/home/owner/settings.json", Kind: "file"}}, []ConfigRepositoryBinding{{RepositoryID: repository.ID, URL: "ssh://git@lan/config-test.git"}, {RepositoryID: pushRepository.ID, URL: "ssh://git@lan/publish-test.git"}}, testConfigurationRevision)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,7 +143,7 @@ func TestConfigCustomRepositoryRulesAccessAndRevocation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	replacement, err := assignments.ConfigureProjection(ctx, user, identity.MachineID, repository.ID, pushRepository.ID, ConfigModeBidirectional, false, "warning-7", assignment.Version, []ConfigPathRule{{Source: "machine", ID: "settings", RepositoryPath: "editor/settings.json", LocalPath: "/home/owner/renamed.json", Kind: "file"}}, nil, testConfigurationRevision, ConfigSourceMachine)
+	replacement, err := assignments.ConfigureProjection(ctx, user, identity.MachineID, repository.ID, pushRepository.ID, ConfigModeBidirectional, false, "warning-7", assignment.Version, []ConfigPathRule{{Source: "machine", ID: "settings", RepositoryPath: "editor/settings.json", LocalPath: "/home/owner/renamed.json", Kind: "file"}}, nil, testConfigurationRevision)
 	if err != nil || replacement.ID != assignment.ID || replacement.Version != assignment.Version+1 || replacement.ApprovedPullRevision.Valid || replacement.ConsentState != "pending" {
 		t.Fatalf("mapping change failed fence: %+v %v", replacement, err)
 	}
@@ -153,14 +153,14 @@ func TestConfigCustomRepositoryRulesAccessAndRevocation(t *testing.T) {
 	if _, err = leases.Renew(ctx, "old-custom-lease", holder, lease.LeaseID, lease.FencingToken, 30*time.Second); !errors.Is(err, ErrConfigLeaseLost) {
 		t.Fatalf("old lease retained authority: %v", err)
 	}
-	if _, err = assignments.ConfigureProjection(ctx, user, identity.MachineID, repository.ID, pushRepository.ID, ConfigModeBidirectional, false, "warning-7", assignment.Version, nil, nil, testConfigurationRevision, ConfigSourceMachine); !errors.Is(err, ErrAssignmentConflict) {
+	if _, err = assignments.ConfigureProjection(ctx, user, identity.MachineID, repository.ID, pushRepository.ID, ConfigModeBidirectional, false, "warning-7", assignment.Version, nil, nil, testConfigurationRevision); !errors.Is(err, ErrAssignmentConflict) {
 		t.Fatalf("stale version accepted: %v", err)
 	}
 	replacement, err = assignments.AcceptConsent(ctx, user, identity.MachineID, "warning-7", replacement.Version)
 	if err != nil {
 		t.Fatal(err)
 	}
-	empty, err := assignments.ConfigureProjection(ctx, user, identity.MachineID, repository.ID, pushRepository.ID, ConfigModeBidirectional, false, "warning-7", replacement.Version, nil, nil, testConfigurationRevision, ConfigSourceMachine)
+	empty, err := assignments.ConfigureProjection(ctx, user, identity.MachineID, repository.ID, pushRepository.ID, ConfigModeBidirectional, false, "warning-7", replacement.Version, nil, nil, testConfigurationRevision)
 	if err != nil || string(empty.PathRules) != "[]" || string(empty.RepositoryBindings) != "[]" {
 		t.Fatalf("empty rules must remain explicit no-op: %+v %v", empty, err)
 	}

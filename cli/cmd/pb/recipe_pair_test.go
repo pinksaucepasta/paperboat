@@ -15,7 +15,6 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/command"
 	"github.com/pinksaucepasta/paperboat/internal/config"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntimecmd"
 	"github.com/pinksaucepasta/paperboat/internal/recipekey"
 	"github.com/pinksaucepasta/paperboat/shared/recipe"
 )
@@ -190,14 +189,12 @@ func TestRecipePairChecksRootBeforeTheSession(t *testing.T) {
 		loginHTTPClient, loginLocalMachineID, recipeInstallPreflight = oldClient, oldMachine, oldPreflight
 	})
 	loginHTTPClient = srv.Client
-	// The identity is unreadable too (a standard Windows user): the refusal still names the rights.
-	loginLocalMachineID = func(*config.Config) (string, error) { return "", errors.New("chmod runtime: Access is denied") }
+	loginLocalMachineID = func(*config.Config) (string, error) { return "", nil }
 	recipeInstallPreflight = func(context.Context) error { return errors.New("no root") }
 	path, _ := browserLoginFixture(t, srv.URL)
 	t.Setenv("PB_RECIPE", "")
 	_, err := runBrowserLogin(t, context.Background(), path, "pair", token.String())
-	var refusal usageError
-	if !errors.As(err, &refusal) || refusal.publicMessage != hostruntimecmd.RecipeNeedsRootMessage || os.Getenv("PB_RECIPE") != token.String() {
+	if err == nil || os.Getenv("PB_RECIPE") != token.String() {
 		t.Fatalf("err=%v", err)
 	}
 }

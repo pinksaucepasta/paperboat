@@ -64,30 +64,6 @@ type Document struct {
 	Tags               map[string][]string `json:"tags,omitempty"`
 	Rules              []Rule              `json:"rules,omitempty"`
 	Tests              []Test              `json:"tests,omitempty"`
-	ConfigSync         []ConfigSyncRule    `json:"config_sync,omitempty"`
-}
-
-// ConfigSyncFor returns the first config_sync rule whose targets include machine:* or one of
-// the machine's tags, and the target that matched.
-func (d Document) ConfigSyncFor(machineTags []string) (ConfigSyncRule, string, bool) {
-	for _, r := range d.ConfigSync {
-		for _, t := range r.Dst {
-			if t == "machine:*" || slices.Contains(machineTags, t) {
-				return r, t, true
-			}
-		}
-	}
-	return ConfigSyncRule{}, "", false
-}
-
-// ConfigSyncRule picks the config sync repository for the machines in Dst (tag:<name> or
-// machine:*). The first matching rule wins. It only chooses the repository: the machine owner
-// still applies it, and an explicit per-machine choice comes first.
-type ConfigSyncRule struct {
-	Dst        []string `json:"dst"`
-	Repository string   `json:"repository"`
-	Branch     string   `json:"branch,omitempty"`
-	Note       string   `json:"note,omitempty"`
 }
 
 // Rule allows or denies actions: it has exactly one of Allow and Deny. A deny always wins

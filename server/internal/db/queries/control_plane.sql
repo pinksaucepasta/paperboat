@@ -141,9 +141,9 @@ SELECT * FROM control_config_repository_lease_operations WHERE operation_id = sq
 SELECT * FROM control_config_assignments WHERE environment_id = $1;
 
 -- name: SetControlConfigAssignment :one
-INSERT INTO control_config_assignments (id, machine_id, environment_id, repository_id, push_repository_id, mode, consent_state, warning_revision, automatic_updates, path_rules, repository_bindings, configuration_revision, source)
+INSERT INTO control_config_assignments (id, machine_id, environment_id, repository_id, push_repository_id, mode, consent_state, warning_revision, automatic_updates, path_rules, repository_bindings, configuration_revision)
 SELECT sqlc.arg(assignment_id), machine.id, sqlc.arg(environment_id), sqlc.arg(repository_id),
-       sqlc.narg(push_repository_id), sqlc.arg(mode), sqlc.arg(consent_state), sqlc.narg(warning_revision), sqlc.arg(automatic_updates), sqlc.arg(path_rules), sqlc.arg(repository_bindings), sqlc.arg(configuration_revision), sqlc.arg(source)
+       sqlc.narg(push_repository_id), sqlc.arg(mode), sqlc.arg(consent_state), sqlc.narg(warning_revision), sqlc.arg(automatic_updates), sqlc.arg(path_rules), sqlc.arg(repository_bindings), sqlc.arg(configuration_revision)
 FROM user_machines machine
 WHERE machine.environment_id = sqlc.arg(environment_id) AND machine.deleted_at IS NULL
 ON CONFLICT (machine_id) DO UPDATE
@@ -157,7 +157,7 @@ SET id = CASE WHEN control_config_assignments.revoked_at IS NULL
     repository_id = EXCLUDED.repository_id, push_repository_id = EXCLUDED.push_repository_id,
     mode = EXCLUDED.mode, consent_state = EXCLUDED.consent_state, automatic_updates = EXCLUDED.automatic_updates,
     path_rules = EXCLUDED.path_rules, repository_bindings = EXCLUDED.repository_bindings,
-    configuration_revision = EXCLUDED.configuration_revision, source = EXCLUDED.source,
+    configuration_revision = EXCLUDED.configuration_revision,
     adopted_team_id = NULL, adopted_default_version = NULL, approved_pull_revision = NULL, approved_at = NULL,
     warning_revision = EXCLUDED.warning_revision, accepted_at = NULL, revoked_at = NULL,
     version = control_config_assignments.version + 1, updated_at = sqlc.arg(now)

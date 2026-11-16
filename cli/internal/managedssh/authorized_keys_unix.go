@@ -183,7 +183,7 @@ func managedOptions(options []string) bool {
 		kind := option
 		if principal, ok := strings.CutPrefix(option, `principals="`); ok && strings.HasSuffix(principal, `"`) && wire.ValidCAPrincipal(strings.TrimSuffix(principal, `"`)) {
 			kind = "principals"
-		} else if option != "cert-authority" && option != wire.CATrustFrom {
+		} else if option != "cert-authority" && option != `from="127.0.0.1,::1"` {
 			return false
 		}
 		if seen[kind] {
