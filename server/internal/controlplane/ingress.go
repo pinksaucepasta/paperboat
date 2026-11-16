@@ -102,14 +102,21 @@ func (s *EdgeService) ingressProjection(ctx context.Context, nodeID, epoch strin
 // command stops or the machine is removed), so the edge answers their URL with the "machine offline" page
 // instead of a 404. It grants no authority. A background or lazy preview keeps its own rules and is not listed.
 func offlineOwnerPreviews(ctx context.Context, store *db.DB, nodeID string) ([]wire.IngressOffline, error) {
-	rows, err := store.Pool().Query(ctx, `SELECT substring(p.endpoint from 9) FROM preview_leases p
+	rows, err := store.Pool().Query(ctx, `SELECT publication.hostname FROM preview_leases p
+JOIN users owner ON owner.id=p.account_id AND owner.status='active'
 JOIN user_machines m ON m.id=p.owner_machine_id
+JOIN LATERAL (
+ SELECT substring(p.endpoint from 9) hostname WHERE paperboat.workspace_edge_mode(p.account_id,p.owner_team_id)='managed-only'
+ UNION ALL
+ SELECT d.hostname FROM preview_domains d WHERE d.preview_id=p.id AND d.account_id=p.account_id
+ AND d.deleted_at IS NULL AND d.ownership_state='verified' AND d.conflict_state='clear'
+ AND d.certificate_state='ready' AND d.certificate_reference IS NOT NULL AND d.preview_generation=p.generation
+) publication ON true
 WHERE p.terminal_state='active'
  AND (p.owner_session_kind='foreground' OR (p.owner_session_kind='local_lease' AND p.user_deadline IS NULL))
  AND m.revoked_at IS NULL AND m.deleted_at IS NULL AND NOT (m.state='online' AND m.online)
- AND paperboat.workspace_edge_mode(p.account_id,p.owner_team_id)='managed-only'
  AND paperboat.node_preview_eligible($1,p.account_id,p.id)
-ORDER BY p.id LIMIT 4096`, nodeID)
+ORDER BY p.id,publication.hostname LIMIT 4096`, nodeID)
 	if err != nil {
 		return nil, err
 	}

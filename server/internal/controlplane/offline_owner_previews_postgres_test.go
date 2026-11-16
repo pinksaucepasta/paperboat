@@ -27,6 +27,7 @@ func TestOfflineOwnerPreviewsListOnlyActiveForegroundWithAnOfflineOwner(t *testi
 	t.Cleanup(func() {
 		cleanup, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
+		_, _ = store.SQL().ExecContext(cleanup, `DELETE FROM paperboat.preview_domains WHERE account_id=$1`, owner)
 		_, _ = store.SQL().ExecContext(cleanup, `DELETE FROM paperboat.preview_leases WHERE account_id=$1`, owner)
 		_, _ = store.SQL().ExecContext(cleanup, `DELETE FROM paperboat.user_machines WHERE user_id=$1`, owner)
 		_, _ = store.SQL().ExecContext(cleanup, `DELETE FROM paperboat.users WHERE id=$1`, owner)
@@ -60,6 +61,8 @@ func TestOfflineOwnerPreviewsListOnlyActiveForegroundWithAnOfflineOwner(t *testi
 	lease("stopped", machines["asleep"], "foreground", "stopped", nil)
 	lease("revoked", machines["revoked"], "foreground", "active", nil)
 
+	exec(`INSERT INTO paperboat.preview_domains(id,account_id,preview_id,preview_generation,hostname,match_type,ownership_challenge_reference,ownership_state,dns_target,certificate_strategy,certificate_reference,certificate_state,caa_state,conflict_state) VALUES($1,$2,$3,1,$4,'exact','dns:test','verified','edge.example.test','managed','cert_ref','ready','ready','clear')`, "pd_off_"+suffix, owner, "prv_asleep_"+suffix, "custom-"+suffix+".example.test")
+	wantCustom := "custom-" + suffix + ".example.test"
 	got, err := offlineOwnerPreviews(ctx, store, node)
 	if err != nil {
 		t.Fatal(err)
@@ -70,7 +73,7 @@ func TestOfflineOwnerPreviewsListOnlyActiveForegroundWithAnOfflineOwner(t *testi
 			listed[o.Hostname] = true
 		}
 	}
-	if len(listed) != 2 || !listed[want] || !listed[wantLocal] {
-		t.Fatalf("offline owner previews = %v, want exactly %s and %s", got, want, wantLocal)
+	if len(listed) != 3 || !listed[want] || !listed[wantLocal] || !listed[wantCustom] {
+		t.Fatalf("offline owner previews = %v, want exactly %s, %s and %s", got, want, wantLocal, wantCustom)
 	}
 }
