@@ -1,32 +1,13 @@
 "use client"
 
 import { queryOptions } from "@tanstack/react-query"
-import { api, idempotencyKey, send } from "@/lib/api"
+import { api, idempotencyKey, send, type Data } from "@/lib/api"
 
 /** Account deletion (F2-09, server 2026.10.23.71). */
 export const accountDeletionLive = true
 
-type Team = { slug: string; name: string }
-
-/** What deleting the account removes, from GET /v1/account/deletion-preview (Lane B's contract). */
-export type DeletionPreview = {
-  account_email: string
-  machines: number
-  env_vaults: number
-  previews: number
-  tunnels: number
-  config_sync: boolean
-  inbox_items: number
-  recipes: number
-  subscription: { plan: string; period_end: string | null } | null
-  /** Teams where you are the only member: deleted with the account. */
-  teams_deleted: Team[]
-  /** Teams you own that have other members: they block the deletion. */
-  teams_blocking: (Team & { members: number })[]
-  reauthenticated_at: string | null
-  /** The last sign-in is more than five minutes old: sign in again before deleting. */
-  reauthentication_required: boolean
-}
+/** What deleting the account removes, from GET /v1/account/deletion-preview. */
+export type DeletionPreview = Data<"/v1/account/deletion-preview">
 
 export const deletionPreviewQuery = queryOptions({
   queryKey: ["account", "deletion-preview"],

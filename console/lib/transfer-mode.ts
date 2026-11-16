@@ -1,7 +1,7 @@
 "use client"
 
 import { queryOptions } from "@tanstack/react-query"
-import { api } from "@/lib/api"
+import { api, type Schemas } from "@/lib/api"
 
 /**
  * File transfer modes (PLAN 3b), turned on as Lane O's parts deploy: the account preference
@@ -30,7 +30,7 @@ export const pauseReasons: Record<string, string> = {
   relay_quota_exhausted: "This workspace’s hosted bandwidth is used up.",
 }
 
-type Preferences = { file_transfer_mode: TransferMode; env_names_listable: boolean }
+type Preferences = Schemas["AccountPreferences"]
 
 /** The account's preferences (GET /v1/me/preferences); the CLI's transfers.mode is the same field. */
 export const preferencesQuery = queryOptions({

@@ -1,7 +1,7 @@
 "use client"
 
 import { queryOptions } from "@tanstack/react-query"
-import { api, idempotencyKey } from "@/lib/api"
+import { api, idempotencyKey, type Schemas } from "@/lib/api"
 
 /*
  * Team SSO and directory sync (F19, server/docs/teams-business.md). The shape is OpenAPI's
@@ -11,39 +11,11 @@ import { api, idempotencyKey } from "@/lib/api"
  */
 
 /** `type` is WorkOS's connection type, e.g. OktaSAML, AzureSAML, GoogleOAuth, GenericOIDC. */
-export type SsoConnection = { id: string; type: string; state: "active" | "inactive" | "validating" }
-export type SsoDomain = { domain: string; state: "verified" | "pending" | "failed" }
+export type TeamIdentity = Schemas["TeamIdentityStatus"]
+export type SsoConnection = TeamIdentity["sso"]["connections"][number]
+export type SsoDomain = TeamIdentity["sso"]["domains"][number]
 /** `role` "" means the group gives no role. */
-export type DirectoryGroup = { id: string; name: string; role: string }
-
-export type TeamIdentity = {
-  eligible: boolean
-  min_seats: number
-  seats: number
-  /** Whether the team has an identity organization yet (created on first Admin Portal use). */
-  organization: boolean
-  can_manage: boolean
-  sso: {
-    connections: SsoConnection[]
-    domains: SsoDomain[]
-    required: boolean
-    session_seconds: number
-    session_min_seconds: number
-    session_max_seconds: number
-    jit: boolean
-    /** Account IDs that may sign in without SSO while it is required. */
-    exempt: string[]
-    exempt_max: number
-  }
-  directory: {
-    directory: { id: string; type: string; state: string } | null
-    users: number
-    groups: DirectoryGroup[]
-    mapped_only: boolean
-    synced_at?: string
-    error?: string
-  }
-}
+export type DirectoryGroup = TeamIdentity["directory"]["groups"][number]
 
 /** What the WorkOS Admin Portal opens for: verify a domain, set up SSO, connect a directory. */
 export type PortalIntent = "domain_verification" | "sso" | "dsync"

@@ -1,7 +1,7 @@
 "use client"
 
 import { infiniteQueryOptions, keepPreviousData, queryOptions } from "@tanstack/react-query"
-import { api, ApiError, idempotencyKey, type Data, type Workspace } from "@/lib/api"
+import { api, ApiError, idempotencyKey, type Data, type Schemas, type Workspace } from "@/lib/api"
 import { cursorPage, cursorPageSize } from "@/lib/cursor-pages"
 
 /*
@@ -15,28 +15,10 @@ import { cursorPage, cursorPageSize } from "@/lib/cursor-pages"
 
 export type Capability = "relay" | "tunnel"
 
-/** selfhost.Installation */
-export type Installation = {
-  installation_id: string
-  node_id: string
-  endpoint_host: string
-  name: string
-  capability: Capability
-  ready: boolean
-  scope_kind: "account" | "team" | "global"
-  scope_id: string
-  trust_notice: string
-  enrollment_state: "pending" | "enrolled"
-  last_heartbeat_at?: string
-}
+export type Installation = Schemas["SelfhostInstallation"]
 
 /** selfhost.Policy: relay `mixed | self-hosted-only`, tunnel `managed-only | self-hosted-only`. */
-export type Pool = {
-  mode: "mixed" | "managed-only" | "self-hosted-only"
-  installation_ids: string[]
-  /** The saved pool's servers, named (read only; not sent back when saving). */
-  members?: { installation_id: string; name: string; endpoint_host: string }[]
-}
+export type Pool = Schemas["SelfhostPolicy"]
 
 /** The scope a workspace's nodes and tunnel pool belong to. */
 export function scopeOf(workspace: Workspace | undefined) {
@@ -53,7 +35,7 @@ export const networkKeys = {
   pool: (capability: Capability, scope: string) => ["selfhost", "pool", capability, scope] as const,
 }
 
-type InstallationsWire = { installations: Installation[] | null; pagination: { total: number; next_cursor?: string } }
+type InstallationsWire = Data<"/v1/selfhost/installations">
 
 const readInstallations = (raw: InstallationsWire) => ({
   items: raw.installations,

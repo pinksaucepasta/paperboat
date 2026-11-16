@@ -36,6 +36,11 @@ owns it.
   the live console and validates it: it found `os_boot_id` and `tags` wrong in the document on 2026-11-16. Answers
   with no documented shape (`data` typed as anything) are not checked.
 
+- **The workspace list never says a team needs SSO.** `GET /v1/workspaces` items (`workspace.Item`) carry no
+  `sso_required`/`sso_signed_in` (only `GET /v1/teams` does), so the switcher's "Needs SSO sign-in" label
+  (`needsSso(workspace)`, found by typing the answers from the OpenAPI document) never shows. Server follow-up: add the
+  two fields to the workspace list, or drop the label.
+
 - **No bandwidth limit.** `GET /v1/usage` reports bytes but no plan cap exists, so the
   Bandwidth card shows usage only.
 - **Machine limit is not shown.** Free accounts allow 100 machines, so the home card shows the

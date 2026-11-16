@@ -1,6 +1,6 @@
 "use client"
 
-import { api, ApiError, type Me } from "@/lib/api"
+import { api, ApiError, type Data, type Me, type Schemas } from "@/lib/api"
 import { lockVault, vaultCrypto } from "@/lib/envvault/crypto"
 
 /*
@@ -10,50 +10,15 @@ import { lockVault, vaultCrypto } from "@/lib/envvault/crypto"
  * function here can return a value.
  */
 
-export type Vault = { issuer: string; account_id: string; generation: number; document_id: string; envelope: string }
+export type Vault = Schemas["EnvironmentPasswordVault"]
 /** Where variables live. `kind` "team" is the workspace's shared set; "personal" with a `machine` is a device override. */
 export type EnvScope = { kind: "personal" | "team"; owner: string; machine: string; workspace: string }
-type Scope = {
-  workspace_id: string
-  writer_public: string
-  owner_kind: string
-  owner_id: string
-  machine_id: string
-  key_epoch: number
-  revision: number
-  document_id: string
-  envelope: string
-}
-export type EnvRecord = {
-  workspace_id: string
-  owner_kind: string
-  owner_id: string
-  machine_id: string
-  key_epoch: number
-  record_id: string
-  revision: number
-  deleted: boolean
-  sequence: number
-  document_id: string
-  writer_public: string
-  envelope: string
-}
-type RecordsPage = { records: EnvRecord[]; sequence: number; after_sequence: number; next_cursor?: string }
-type Recipient = {
-  recipient_account: string
-  machine_id: string
-  installation_generation: number
-  host_key_generation: number
-  host_public: string
-  delivery_generation: number
-  document_id: string
-  fence_generation: number
-}
-type RecipientsPage = {
-  items: Recipient[]
-  pagination: { limit: number; offset: number; total: number; next_offset: number | null }
-}
-type Team = { entitled?: boolean; team_id: string } & Record<string, unknown>
+type Scope = Schemas["EnvironmentVaultScope"]
+export type EnvRecord = Schemas["VaultRecordState"]
+type RecordsPage = Data<"/v1/environment/scopes/{owner_kind}/{owner_id}/records">
+type Recipient = Schemas["EnvironmentVaultLayerRecipient"]
+type RecipientsPage = Data<"/v1/environment/layers">
+type Team = Data<"/v1/environment/teams/{team_id}">
 
 /** Some devices still need their key for this scope; the saved change reaches them after a retry. */
 export class DeliveryPending extends Error {

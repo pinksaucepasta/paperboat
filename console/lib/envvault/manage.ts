@@ -1,6 +1,6 @@
 "use client"
 
-import { api, ApiError, type Me } from "@/lib/api"
+import { api, ApiError, type Data, type Me, type Schemas } from "@/lib/api"
 import { lockVault, vaultCrypto } from "@/lib/envvault/crypto"
 import { publish } from "@/lib/envvault/protection"
 import {
@@ -20,40 +20,11 @@ import {
  * reset of a vault whose password is lost.
  */
 
-export type TeamMember = {
-  account_id: string
-  membership_generation: number
-  role: string
-  active: boolean
-  grant_epoch: number
-  env_permission: string
-}
-export type VaultTeam = {
-  team_id: string
-  owner_account: string
-  generation: number
-  key_epoch: number
-  members: TeamMember[]
-  rotation_required: boolean
-  entitled: boolean
-  record_sequence: number
-}
-type Sharing = { account_id: string; vault_generation: number; sharing_public: string }
-type Grant = {
-  team_id: string
-  membership_generation: number
-  team_epoch: number
-  document_id: string
-  envelope: string
-  sender_writer_public: string
-  acknowledged: boolean
-}
-type PersonalScope = {
-  workspace_id: string
-  machine_id: string
-  document_id: string
-  [key: string]: unknown
-}
+export type VaultTeam = Data<"/v1/environment/teams/{team_id}">
+export type TeamMember = VaultTeam["members"][number]
+type Sharing = Data<"/v1/environment/users/{account_id}/sharing">
+type Grant = Schemas["EnvironmentVaultGrant"]
+type PersonalScope = Schemas["EnvironmentVaultPersonalScopeHead"]
 
 const json = { "content-type": "application/json" }
 const post = <T>(path: string, body: unknown) =>
@@ -213,7 +184,7 @@ export async function rotateTeamVault(team: string, options: { remove?: string[]
   )
 }
 
-type Inventory = { rotation_required: boolean; key_epoch: number; scopes: PersonalScope[] }
+type Inventory = Data<"/v1/environment/scopes">
 const readInventory = () => api<Inventory>("environment/scopes?workspace=personal")
 
 /** Replaces the account's personal key and re-encrypts every variable with it; credentials stay. */

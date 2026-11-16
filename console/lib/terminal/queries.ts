@@ -26,7 +26,7 @@ export const terminalKeys = {
 /** A page of the terminals you own or that are shared with you, newest activity first. */
 export const terminalPageSize = 50
 
-type TerminalPage = { sessions: TerminalSession[]; pagination: { total: number } }
+type TerminalPage = Data<"/v1/terminal-sessions">
 
 function terminalsPath(params: Record<string, string>) {
   return `terminal-sessions?${new URLSearchParams(params)}`

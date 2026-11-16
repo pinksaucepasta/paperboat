@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import { api, ApiError } from "@/lib/api"
+import { api, ApiError, type Data } from "@/lib/api"
 import { verifyTicketKey } from "@/lib/terminal/browser-root-key"
 import { validTicketSubprotocols } from "@/lib/terminal/browser-ticket"
 import { loadBrowserTerminal, type BrowserTerminalAPI, type BrowserTerminalEvent } from "@/lib/terminal/browser-terminal-wasm"
@@ -37,20 +37,10 @@ export class InspectorError extends Error {
   }
 }
 
-type Grant = { credential_id: string; token: string; expires_at: string }
+type Grant = Data<"/v1/inspector/credentials", "post">
 type Grants = { inspect: Grant; replay?: Grant }
 
-type Ticket = {
-  stream_url: string
-  subprotocols: string[]
-  expires_at: string
-  role: string
-  machine_id: string
-  owner_account_id: string
-  root_key_id: string
-  root_public_key: string
-  root_fingerprint: string
-}
+type Ticket = Data<"/v1/inspector/browser-ticket", "post">
 
 const GRANT_TTL = 300
 const json = (body: unknown): RequestInit => ({

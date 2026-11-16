@@ -8775,6 +8775,7 @@ export interface components {
         SharedTerminalCatalogResponse: {
             data: {
                 sessions: components["schemas"]["SharedTerminalSession"][];
+                pagination: components["schemas"]["InventoryOffsetPagination"];
             };
         };
         SharedTerminalDescriptorRequest: {
@@ -12202,10 +12203,11 @@ export interface components {
             action: string;
             actor: {
                 /** @enum {string} */
-                kind: "user" | "api_token" | "directory" | "operator" | "system" | "deleted_user";
+                kind: "user" | "recipe" | "directory" | "operator" | "system" | "deleted_user";
                 id: string;
                 email?: string;
-                token_id?: string;
+                /** @description The recipe a machine acted through; kind is recipe. */
+                recipe_id?: string;
             };
             target: {
                 kind: string;

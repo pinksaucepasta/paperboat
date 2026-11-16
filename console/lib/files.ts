@@ -2,7 +2,7 @@
 
 import { queryOptions } from "@tanstack/react-query"
 import { queryKeys } from "@/lib/query-keys"
-import { api, apiAction, idempotencyKey } from "@/lib/api"
+import { api, apiAction, idempotencyKey, type Data } from "@/lib/api"
 import { inboxBasename, uploadToInbox } from "@/lib/terminal/inbox-upload"
 import { resourceId, type OperationOrResource } from "@/lib/tunnels"
 
@@ -17,19 +17,9 @@ import { resourceId, type OperationOrResource } from "@/lib/tunnels"
 /** Which Inbox endpoints the deployed server answers. Flip one when its deploy is logged. */
 export const inboxLive = { content: true, remove: true, send: false, share: true } as const
 
-export type InboxFile = {
-  id: string
-  name: string
-  size: number
-  received_at: string
-}
-
-/** `GET /v1/machines/{id}/inbox`: the machine's Inbox right now, newest first. */
-export type InboxListing = {
-  /** Files in the Inbox; the list holds the newest 200. */
-  total: number
-  items: InboxFile[]
-}
+/** `GET /v1/machines/{id}/inbox`: the machine's Inbox right now, newest first (`total`; the list holds the newest 200). */
+export type InboxListing = Data<"/v1/machines/{machine_id}/inbox">
+export type InboxFile = InboxListing["items"][number]
 
 /** A Team Inbox request as `GET /v1/team-inbox/requests` lists it (teaminbox.Request). */
 export type InboxRequest = {

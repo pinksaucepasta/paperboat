@@ -2,7 +2,7 @@
 
 import { queryOptions } from "@tanstack/react-query"
 import { queryKeys } from "@/lib/query-keys"
-import { api, idempotencyKey, type Workspace } from "@/lib/api"
+import { api, idempotencyKey, type Schemas, type Workspace } from "@/lib/api"
 import type { components } from "@/lib/api-schema"
 
 /** `limit` is null where the plan is unlimited (public_tcp: only on your own tunnel edge). */
@@ -32,12 +32,7 @@ export const billingLive = {
 export const notLiveTitle = "Not available yet"
 
 /** What a change costs now and from the next invoice; Stripe prorates to the fixed billing date. */
-export type ChangePreview = {
-  amount_due_now: number
-  currency: string
-  next_invoice_amount: number
-  next_invoice_at: string
-}
+export type ChangePreview = Schemas["SeatPreview"]
 
 const minute = 60_000
 

@@ -1515,7 +1515,8 @@
           "data": {
             "type": "object",
             "required": [
-              "sessions"
+              "sessions",
+              "pagination"
             ],
             "properties": {
               "sessions": {
@@ -1524,6 +1525,9 @@
                 "items": {
                   "$ref": "#/components/schemas/SharedTerminalSession"
                 }
+              },
+              "pagination": {
+                "$ref": "#/components/schemas/InventoryOffsetPagination"
               }
             }
           }
@@ -15392,7 +15396,7 @@
                 "type": "string",
                 "enum": [
                   "user",
-                  "api_token",
+                  "recipe",
                   "directory",
                   "operator",
                   "system",
@@ -15405,8 +15409,9 @@
               "email": {
                 "type": "string"
               },
-              "token_id": {
-                "type": "string"
+              "recipe_id": {
+                "type": "string",
+                "description": "The recipe a machine acted through; kind is recipe."
               }
             },
             "required": [

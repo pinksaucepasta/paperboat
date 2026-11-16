@@ -4,7 +4,7 @@ import { CircleNotchIcon, XCircleIcon } from "@phosphor-icons/react"
 import { useQuery } from "@tanstack/react-query"
 import { useSearchParams } from "next/navigation"
 import { useEffect, useRef } from "react"
-import { api, ApiError } from "@/lib/api"
+import { api, ApiError, type Data } from "@/lib/api"
 import { BrandScreen, Heading, Outcome, brandPrimary } from "@/components/brand-screen"
 import { Button } from "@/components/ui/button"
 
@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/button"
  * POST /v1/browser-access/issue: a one-use handoff for the preview or tunnel host. `denied`: the account
  * has no access; the handoff is posted all the same and the edge answers 403 with its own page.
  */
-type Issue = { transaction_id: string; handoff: string; callback_origin: string; expires_at: string; denied?: boolean }
+type Issue = Data<"/v1/browser-access/issue", "post">
 
 /**
  * Sign-in for a private or team preview or tunnel in the browser (F7-03). The edge sends a

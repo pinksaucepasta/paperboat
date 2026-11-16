@@ -5,10 +5,9 @@ import { api, idempotencyKey } from "@/lib/api"
 import type { components } from "@/lib/api-schema"
 
 type Schemas = components["schemas"]
-/** F19 adds `directory_managed` and `sso_exempt` (until the OpenAPI document carries them). */
-export type TeamMember = Schemas["TeamMember"] & { directory_managed?: boolean; sso_exempt?: boolean }
+export type TeamMember = Schemas["TeamMember"]
 /** What the server sends for a team: counts, never the member, grant and machine rows (they are paged). */
-export type TeamSummary = Schemas["TeamTeam"] & { suspended?: boolean }
+export type TeamSummary = Schemas["TeamTeam"]
 /** A team with its rows read from the paged lists (`teamQuery`). */
 export type Team = TeamSummary & {
   members: TeamMember[]

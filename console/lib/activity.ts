@@ -1,7 +1,7 @@
 "use client"
 
 import { infiniteQueryOptions } from "@tanstack/react-query"
-import { api } from "@/lib/api"
+import { api, type Schemas } from "@/lib/api"
 import { queryKeys } from "@/lib/query-keys"
 
 /*
@@ -9,35 +9,7 @@ import { queryKeys } from "@/lib/query-keys"
  * (the server's audit events).
  */
 
-export type ActivityEvent = {
-  id: string
-  occurred_at: string
-  /** The audit event type, e.g. `auth.login`, `tunnel.created`, `user_machine.renamed`. */
-  action: string
-  /**
-   * `api_token`: a person acting through one of their API tokens (`token_id`); `directory`: the
-   * company directory (SSO directory sync); `operator`: Paperboat support.
-   */
-  actor: {
-    /** `deleted_user`: someone who deleted their account; the event keeps no name or email. */
-    kind: "user" | "api_token" | "recipe" | "directory" | "operator" | "machine" | "system" | "deleted_user"
-    id: string
-    name?: string
-    email?: string
-    token_id?: string
-    recipe_id?: string
-  }
-  /** `denied` with a stable `reason` code for refused requests (F19 audit log). */
-  result?: "success" | "denied"
-  reason?: string
-  ip?: string
-  request_id?: string
-  /** What it happened to; its name as it was then. */
-  target?: { kind: string; id: string; name?: string }
-  machine?: { id: string; name: string }
-  /** Where it came from: the console, the CLI, a machine. */
-  source?: "console" | "cli" | "machine" | "api"
-}
+export type ActivityEvent = Schemas["ActivityEvent"]
 
 export const activityAreas = {
   all: "All activity",
@@ -277,19 +249,11 @@ export function actorName(event: ActivityEvent, meId?: string, memberNames?: Rea
   if (event.actor.kind === "directory") return "Directory sync"
   if (event.actor.kind === "operator") return "Paperboat support"
   if (event.actor.kind === "deleted_user") return "Deleted user"
-  return (
-    event.actor.name ??
-    event.actor.email ??
-    memberNames?.get(event.actor.id) ??
-    (event.actor.kind === "machine" ? "A machine" : "Someone")
-  )
+  return event.actor.email ?? memberNames?.get(event.actor.id) ?? "Someone"
 }
 
-/** "through an API token" for events done with one. */
 /** "through a recipe" for events a recipe's machine did. */
 export const viaRecipe = (event: ActivityEvent) => event.actor.kind === "recipe" || Boolean(event.actor.recipe_id)
-
-export const viaToken = (event: ActivityEvent) => event.actor.kind === "api_token" || Boolean(event.actor.token_id)
 
 /** Where a target opens in the console, when it has a page. */
 export function targetHref(event: ActivityEvent): string | undefined {

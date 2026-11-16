@@ -203,7 +203,7 @@ export function useApiQuery<TQueryFnData, TError = Error, TData = TQueryFnData, 
 }
 
 /** Server schemas, generated from server/docs/openapi.json (`bun run api:types`). */
-type Schemas = components["schemas"]
+export type Schemas = components["schemas"]
 
 /** The `data` of a path's successful JSON response, as the server documents it. */
 export type Data<P extends keyof paths, M extends "get" | "post" | "put" | "patch" = "get"> = paths[P][M] extends {
@@ -242,7 +242,7 @@ export const clientConfigQuery = queryOptions({
  * `sso_required`/`sso_signed_in` (F19): a team that requires SSO you haven't signed in with lists
  * only its name until you do.
  */
-export type Workspace = Schemas["Workspace"] & { sso_required?: boolean; sso_signed_in?: boolean }
+export type Workspace = Schemas["Workspace"] & Partial<Pick<Schemas["TeamTeam"], "sso_required" | "sso_signed_in">>
 
 /** Whether a team waits for an SSO sign-in before it can be opened. */
 export const needsSso = (workspace: Workspace) => workspace.sso_required === true && workspace.sso_signed_in === false
@@ -277,13 +277,8 @@ export const machinesQuery = (workspace: string) =>
     refetchInterval: 15_000,
   })
 
-export type MachineSummary = {
-  /** Machines in use (revoked and disconnected ones are left out). */
-  total: number
-  by_state: { online: number; offline: number; pending: number; revoked: number } & Record<string, number>
-  /** Machines in use per platform: linux, macos, windows, and any other the server reports. */
-  by_platform: Record<string, number>
-}
+/** Machines in use (revoked and disconnected ones are left out), by state and platform. */
+export type MachineSummary = Data<"/v1/machines/summary">
 
 /** Workspace totals from the server (GET /v1/machines/summary), never counted from a loaded list. */
 export const machineSummaryQuery = (workspace: string) =>
@@ -468,7 +463,7 @@ export function useMachine(id: string | null | undefined) {
 /** A team as `GET /v1/teams/{team_id}` returns it. */
 export type Team = Data<"/v1/teams/{team_id}">
 
-export type RunningCounts = { terminals: number; tunnels: number; previews: number }
+export type RunningCounts = Omit<Data<"/v1/machines/running-counts">["items"][number], "machine_id">
 
 /** Every page of a cursor collection, bounded so one huge account cannot stall the table. */
 /** A cursor-paged list: `complete` is false when the bound below stopped it short. */

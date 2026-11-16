@@ -127,9 +127,8 @@ function Machines({ summary }: { summary: MachineSummary }) {
   }
   const online = summary.by_state.online
   const offline = summary.total - online
-  // The three supported platforms always show, in a fixed order, even at 0; others the server
-  // reports follow.
-  const platforms = { linux: 0, macos: 0, windows: 0, ...summary.by_platform }
+  // The server always reports the three supported platforms first, even at 0; others follow.
+  const platforms = summary.by_platform
   return (
     <div className="flex flex-1 flex-col justify-between gap-4">
       <div className="grid grid-cols-2 gap-4">
