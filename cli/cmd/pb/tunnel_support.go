@@ -381,49 +381,59 @@ func waitForTunnelOperation(command *cobra.Command, client *api.Client, initial 
 			return api.TunnelOperation{}, api.ErrUnsafeTunnelResponse
 		}
 	}
-	timeout, _ := command.Flags().GetDuration("timeout")
-	if timeout < time.Second || timeout > tunnelOperationWaitMaximum {
-		return api.TunnelOperation{}, fmt.Errorf("timeout must be between 1s and %s", tunnelOperationWaitMaximum)
-	}
 	if client == nil {
 		return api.TunnelOperation{}, errors.New("tunnel operation client is unavailable")
 	}
-	current := initial
+	return pollTunnelUntil(command, initial.ID, initial, func(current api.TunnelOperation) (bool, error) {
+		switch current.State {
+		case "succeeded":
+			return true, nil
+		case "failed", "canceled":
+			return false, &TunnelOperationOutcomeError{Operation: current}
+		case "pending", "running":
+			return false, nil
+		default:
+			return false, api.ErrUnsafeTunnelResponse
+		}
+	}, func(ctx context.Context) (api.TunnelOperation, error) {
+		next, err := client.GetTunnelOperationV1(ctx, initial.ID)
+		if err == nil && (next.ID != initial.ID || next.ResourceKind != initial.ResourceKind || next.ResourceID != initial.ResourceID) {
+			return api.TunnelOperation{}, api.ErrUnsafeTunnelResponse
+		}
+		return next, err
+	})
+}
+
+// pollTunnelUntil is the one --wait loop for tunnel operations and domains: it reads every
+// tunnelOperationPollInterval until done reports true, keeps polling through retryable reads (408/429/5xx, network
+// timeouts), and reports --timeout as TunnelOperationWaitTimeoutError, since the server-side change stays active.
+func pollTunnelUntil[T any](command *cobra.Command, id string, current T, done func(T) (bool, error), read func(context.Context) (T, error)) (T, error) {
+	var zero T
+	timeout, _ := command.Flags().GetDuration("timeout")
+	if timeout < time.Second || timeout > tunnelOperationWaitMaximum {
+		return zero, fmt.Errorf("timeout must be between 1s and %s", tunnelOperationWaitMaximum)
+	}
 	deadlineContext, cancel := context.WithTimeout(command.Context(), timeout)
 	defer cancel()
 	for {
-		switch current.State {
-		case "succeeded":
+		finished, err := done(current)
+		if err != nil {
+			return zero, err
+		}
+		if finished {
 			return current, nil
-		case "failed", "canceled":
-			return api.TunnelOperation{}, &TunnelOperationOutcomeError{Operation: current}
-		case "pending", "running":
-		default:
-			return api.TunnelOperation{}, api.ErrUnsafeTunnelResponse
 		}
 		timer := time.NewTimer(tunnelOperationPollInterval)
 		select {
 		case <-command.Context().Done():
-			if !timer.Stop() {
-				select {
-				case <-timer.C:
-				default:
-				}
-			}
-			return api.TunnelOperation{}, command.Context().Err()
+			timer.Stop()
+			return zero, command.Context().Err()
 		case <-deadlineContext.Done():
-			if !timer.Stop() {
-				select {
-				case <-timer.C:
-				default:
-				}
-			}
-			return api.TunnelOperation{}, &TunnelOperationWaitTimeoutError{OperationID: initial.ID, Timeout: timeout}
+			timer.Stop()
+			return zero, &TunnelOperationWaitTimeoutError{OperationID: id, Timeout: timeout}
 		case <-timer.C:
 		}
-		next, err := retryTunnelRead(deadlineContext, func() (api.TunnelOperation, error) {
-			return client.GetTunnelOperationV1(deadlineContext, initial.ID)
-		})
+		next, err := retryTunnelRead(deadlineContext, func() (T, error) { return read(deadlineContext) })
 		if err != nil {
 			var apiError *api.APIError
 			var networkError net.Error
@@ -431,12 +441,9 @@ func waitForTunnelOperation(command *cobra.Command, client *api.Client, initial 
 				continue
 			}
 			if errors.Is(err, context.DeadlineExceeded) && command.Context().Err() == nil {
-				return api.TunnelOperation{}, &TunnelOperationWaitTimeoutError{OperationID: initial.ID, Timeout: timeout}
+				return zero, &TunnelOperationWaitTimeoutError{OperationID: id, Timeout: timeout}
 			}
-			return api.TunnelOperation{}, err
-		}
-		if next.ID != initial.ID || next.ResourceKind != initial.ResourceKind || next.ResourceID != initial.ResourceID {
-			return api.TunnelOperation{}, api.ErrUnsafeTunnelResponse
+			return zero, err
 		}
 		current = next
 	}

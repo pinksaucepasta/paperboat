@@ -324,3 +324,51 @@ func TestTunnelRouteAddPublicHTTPWithoutManagedHostnameExplainsTheDomainStep(t *
 		t.Fatalf("error = %v", err)
 	}
 }
+
+// The domain wait once had its own loop: a 503 burst longer than one read's retries aborted `pb tunnel create
+// --domain --wait`, and --timeout surfaced as a bare context deadline. It now shares the operation wait loop.
+func TestTunnelCreateDomainWaitSurvivesUnavailableAndTimesOutTyped(t *testing.T) {
+	oldDelay := tunnelRequestRetryDelay
+	tunnelRequestRetryDelay = func(int) time.Duration { return 0 }
+	t.Cleanup(func() { tunnelRequestRetryDelay = oldDelay })
+	for _, neverReady := range []bool{false, true} {
+		t.Run(fmt.Sprintf("never_ready=%v", neverReady), func(t *testing.T) {
+			initial := validCommandDomain("domain_wait", "app.example.test")
+			initial.State = "issuing_tls"
+			initial.Certificate.State = "issuing"
+			calls := 0
+			withTunnelCommandClient(t, func(w http.ResponseWriter, r *http.Request) {
+				calls++
+				if calls <= 6 {
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusServiceUnavailable)
+					_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]string{"code": "temporarily_unavailable", "message": "control plane is retrying"}})
+					return
+				}
+				next := validCommandDomain(initial.ID, initial.Hostname)
+				if neverReady {
+					next = initial
+				}
+				w.Header().Set("ETag", next.ETag)
+				_ = json.NewEncoder(w).Encode(map[string]any{"data": next})
+			})
+			command := tunnelCreateCommand()
+			command.SetContext(context.Background())
+			_ = command.Flags().Set("wait", "true")
+			_ = command.Flags().Set("timeout", "3s")
+			client, _, err := tunnelClient(command)
+			if err != nil {
+				t.Fatal(err)
+			}
+			result, err := waitForCreatedTunnelDomain(command, client, initial)
+			var timeout *TunnelOperationWaitTimeoutError
+			if neverReady {
+				if !errors.As(err, &timeout) {
+					t.Fatalf("never-ready domain err=%v", err)
+				}
+			} else if err != nil || result.State != "ready" || calls != 7 {
+				t.Fatalf("readiness state=%s err=%v calls=%d", result.State, err, calls)
+			}
+		})
+	}
+}

@@ -348,36 +348,21 @@ func waitForCreatedTunnelDomain(command *cobra.Command, client *api.Client, init
 	if !wait || initial.State == "ready" {
 		return initial, nil
 	}
-	timeout, _ := command.Flags().GetDuration("timeout")
-	if timeout < time.Second || timeout > tunnelOperationWaitMaximum {
-		return api.TunnelDomain{}, fmt.Errorf("timeout must be between 1s and %s", tunnelOperationWaitMaximum)
-	}
-	ctx, cancel := context.WithTimeout(command.Context(), timeout)
-	defer cancel()
-	current := initial
-	for {
+	return pollTunnelUntil(command, initial.ID, initial, func(current api.TunnelDomain) (bool, error) {
 		switch current.State {
 		case "ready":
-			return current, nil
+			return true, nil
 		case "conflict", "dns_error", "tls_error", "expired", "quarantined":
-			return api.TunnelDomain{}, fmt.Errorf("customer domain is %s; inspect it with pb tunnel domain show", current.State)
+			return false, fmt.Errorf("customer domain is %s; inspect it with pb tunnel domain show", current.State)
 		}
-		timer := time.NewTimer(tunnelOperationPollInterval)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			return api.TunnelDomain{}, ctx.Err()
-		case <-timer.C:
-		}
-		next, err := retryTunnelRead(ctx, func() (api.TunnelDomain, error) { return client.GetTunnelDomainV1(ctx, initial.TunnelID, initial.ID) })
-		if err != nil {
-			return api.TunnelDomain{}, err
-		}
-		if next.ID != initial.ID || next.RouteID != initial.RouteID || next.Hostname != initial.Hostname {
+		return false, nil
+	}, func(ctx context.Context) (api.TunnelDomain, error) {
+		next, err := client.GetTunnelDomainV1(ctx, initial.TunnelID, initial.ID)
+		if err == nil && (next.ID != initial.ID || next.RouteID != initial.RouteID || next.Hostname != initial.Hostname) {
 			return api.TunnelDomain{}, api.ErrUnsafeTunnelResponse
 		}
-		current = next
-	}
+		return next, err
+	})
 }
 
 func tunnelCreatePendingRecovery(result tunnelCreateOutput) string {
