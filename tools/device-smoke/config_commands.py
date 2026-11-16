@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Main/error paths for C127–C138, C169/C172/C177/C179–C181 on an enrolled Linux or macOS fixture.
+"""Main/error paths for C127, C132–C134, C138, C169/C172/C177/C179–C181 on an enrolled Linux or macOS fixture.
 
 Requires a signed-in pb account (also used by config_sync_lifecycle.py to delete the exact test repository),
 an unassigned machine without config-sync.toml, Git, and sudo access (password on stdin if needed).
@@ -24,9 +24,9 @@ from pairing_lifecycle import command_result, confirmed_command, runtime_root
 from tunnel_command_rows import redacted
 import winhost
 
-ROWS = [f'C{i:03d}' for i in range(127, 139)] + ['C169', 'C172', 'C177', 'C179', 'C180', 'C181']
-GROUPS = {'C127': [], 'C128': ['alias'], 'C132': ['domain'], 'C135': ['proxy']}
-SETTINGS = {'C129', 'C130', 'C131', 'C133', 'C134', 'C136', 'C137', 'C138'}
+ROWS = ['C127', 'C132', 'C133', 'C134', 'C138'] + ['C169', 'C172', 'C177', 'C179', 'C180', 'C181']
+GROUPS = {'C127': [], 'C132': ['domain']}
+SETTINGS = {'C133', 'C134', 'C138'}
 REPOSITORIES = {'C169', 'C172', 'C177', 'C179', 'C180', 'C181'}
 
 
@@ -81,12 +81,9 @@ class Suite:
 
     def error_paths(self):
         commands = {
-            'C127': ['local-access'], 'C128': ['local-access', 'alias'],
-            'C129': ['local-access', 'alias', 'set'], 'C130': ['local-access', 'alias', 'unset'],
-            'C131': ['local-access', 'apply'], 'C132': ['local-access', 'domain'],
+            'C127': ['local-access'], 'C132': ['local-access', 'domain'],
             'C133': ['local-access', 'domain', 'reset'], 'C134': ['local-access', 'domain', 'set'],
-            'C135': ['local-access', 'proxy'], 'C136': ['local-access', 'proxy', 'set'],
-            'C137': ['local-access', 'proxy', 'unset'], 'C138': ['local-access', 'show'],
+            'C138': ['local-access', 'show'],
             'C169': ['approve'], 'C172': ['conflict', 'list'],
             'C177': ['repository', 'connect'], 'C179': ['repository', 'credentials', 'remove'],
             'C180': ['repository', 'credentials', 'set'], 'C181': ['repository', 'list'],
@@ -117,10 +114,9 @@ class Suite:
         lines = [line for line in result.stdout.splitlines() if line.startswith('{')]
         receipt = json.loads(lines[-1]) if lines else {}
         require(result.returncode == 0 and receipt.get('status') == 'PASS'
-                and receipt.get('alias_proxy_apply_reset') and receipt.get('enrollment_preserved'),
+                and receipt.get('domain_set_reset') and receipt.get('enrollment_preserved'),
                 'local-access lifecycle failed; inspect its private command diagnostic')
-        # The existing lifecycle asserts each set/apply/reset receipt against effective settings and, after
-        # alias/proxy unset, asserts both lists and the domain match the originals. Do not duplicate that owner.
+        # The existing lifecycle asserts domain reset/set against the shown domain and restores the original.
         for row in SETTINGS:
             self.rows[row]['main'] = True
 
