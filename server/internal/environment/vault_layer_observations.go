@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"slices"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -62,8 +63,19 @@ func (s *Service) RecordVaultLayerObservations(ctx context.Context, account, mac
 		}
 		seen[o.coordinate()] = true
 	}
-	err := s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-		if err := lockVaultScopes(ctx, tx); err != nil {
+	err := s.db.InReadCommittedTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+		// Observations update only this host's layer rows: they wait for the writers of each team they name and
+		// for the host's own account, never for other hosts' observations.
+		var teams []string
+		for c := range seen {
+			if c.WorkspaceID != "personal" && !slices.Contains(teams, c.WorkspaceID) {
+				teams = append(teams, c.WorkspaceID)
+			}
+		}
+		if err := lockVaultTeams(ctx, tx, false, teams...); err != nil {
+			return err
+		}
+		if err := lockVaultAccounts(ctx, tx, true, account); err != nil {
 			return err
 		}
 		if _, err := authorizeVaultHostTx(ctx, tx, account, machine); err != nil {

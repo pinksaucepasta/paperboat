@@ -22,7 +22,6 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
 	serverdiagnostics "github.com/pinksaucepasta/paperboat/server/internal/diagnostics"
-	"github.com/pinksaucepasta/paperboat/server/internal/environment"
 	"github.com/pinksaucepasta/paperboat/server/internal/secrets"
 	"github.com/pinksaucepasta/paperboat/server/internal/supportreport"
 )
@@ -635,9 +634,6 @@ func (s *DeviceService) revokeTx(ctx context.Context, tx *db.Tx, sid, reason str
 
 func (s *DeviceService) RevokeClient(ctx context.Context, userID, sid, reason string) error {
 	err := s.inTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-		if err := environment.LockVaultMutationsTx(ctx, tx); err != nil {
-			return err
-		}
 		owner, err := tx.Queries().GetClientSessionOwnerForUpdate(ctx, sid)
 		if err != nil {
 			return err

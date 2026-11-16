@@ -88,7 +88,8 @@ func tryFence(store *db.DB, lock func(context.Context, *db.Tx) error) error {
 }
 
 // Team readers (config status reports) never wait for each other, even in the same bucket, but do wait for the
-// team's writers and the global lock, and the team's writers wait for them (FIX-TEAMLOCK).
+// team's writers and the global lock, and the team's writers wait for them; writes outside teams wait only for
+// the global lock (FIX-TEAMLOCK).
 func TestTeamReadsDoNotSerializePostgres(t *testing.T) {
 	store := openFenceStore(t)
 	teamA := "fence-read-a"
@@ -116,15 +117,23 @@ func TestTeamReadsDoNotSerializePostgres(t *testing.T) {
 	if err := tryFence(store, db.LockTeamWrites); err == nil {
 		t.Fatal("a global team write did not wait for a team's read")
 	}
+	if err := tryFence(store, db.LockOutsideTeams); err != nil {
+		t.Fatalf("a write outside teams waited for a team read: %v", err)
+	}
 	release()
 	release = holdFence(t, store, writesFor(teamA))
+	if err := tryFence(store, db.LockOutsideTeams); err != nil {
+		t.Fatalf("a write outside teams waited for a team write: %v", err)
+	}
 	if err := tryFence(store, readsFor(teamA)); err == nil {
 		t.Fatal("a team read did not wait for the team's write")
 	}
 	release()
 	release = holdFence(t, store, db.LockTeamWrites)
-	if err := tryFence(store, readsFor(teamA)); err == nil {
-		t.Fatal("a team read did not wait for the global write")
+	for name, lock := range map[string]func(context.Context, *db.Tx) error{"team read": readsFor(teamA), "write outside teams": db.LockOutsideTeams} {
+		if err := tryFence(store, lock); err == nil {
+			t.Fatalf("a %s did not wait for the global write", name)
+		}
 	}
 	release()
 }

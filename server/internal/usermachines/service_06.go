@@ -16,7 +16,6 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/auth"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
-	"github.com/pinksaucepasta/paperboat/server/internal/environment"
 	"github.com/pinksaucepasta/paperboat/server/internal/machinealias"
 	"log/slog"
 	"path/filepath"
@@ -35,9 +34,6 @@ func (s *Service) ReconcileUserMachineEntitlement(ctx context.Context, userID st
 	var revokedMachineIDs []string
 	active := false
 	if err := s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-		if err := environment.LockVaultMutationsTx(ctx, tx); err != nil {
-			return err
-		}
 		seatQuantity, err := tx.Queries().GetActiveUserMachineSeatQuantity(ctx, userID)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return err

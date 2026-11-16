@@ -9,7 +9,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
-	"github.com/pinksaucepasta/paperboat/server/internal/environment"
 	"github.com/pinksaucepasta/paperboat/server/internal/teams"
 )
 
@@ -104,12 +103,9 @@ var eraseSteps = []struct{ name, query string }{
 // eraseTx performs the whole deletion. It returns OwnedTeamsError before changing anything when the
 // account owns a team with other members; any other error rolls the whole deletion back.
 func (s *Service) eraseTx(ctx context.Context, tx *db.Tx, userID string) error {
-	// Team mutations take the team lock before the vault lock; keep that order.
+	// The global team lock also excludes every ENV vault transaction (they hold ROW SHARE on the same fence).
 	if err := teams.Lock(ctx, tx); err != nil {
 		return fmt.Errorf("account deletion: lock teams: %w", err)
-	}
-	if err := environment.LockVaultMutationsTx(ctx, tx); err != nil {
-		return fmt.Errorf("account deletion: lock vaults: %w", err)
 	}
 	subject, email, err := lockActiveUserTx(ctx, tx, userID)
 	if err != nil {

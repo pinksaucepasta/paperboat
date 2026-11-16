@@ -11,7 +11,6 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/audit"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
-	"github.com/pinksaucepasta/paperboat/server/internal/environment"
 	"github.com/pinksaucepasta/paperboat/server/internal/helperruntime"
 	"github.com/pinksaucepasta/paperboat/server/internal/mint"
 	"github.com/pinksaucepasta/paperboat/server/internal/naming"
@@ -878,17 +877,14 @@ func (s *Service) Delete(ctx context.Context, userID, userMachineID string) erro
 
 // DeleteMachineTx deletes a machine inside the caller's transaction with the same fences, credential
 // cleanup and access-session records as Delete. Host notification stays with RetryPendingRevocations,
-// which picks up the sessions this records as revoked. The caller holds the vault mutation lock
-// (environment.LockVaultMutationsTx) and has read the machine with GetUserMachineForUpdate.
+// which picks up the sessions this records as revoked. The caller has read the machine with
+// GetUserMachineForUpdate, which orders it against ENV transactions (they lock the row FOR SHARE).
 func (s *Service) DeleteMachineTx(ctx context.Context, tx *db.Tx, userID string, machine dbsqlc.UserMachine) error {
 	return s.revokeUserMachineControlTx(ctx, tx, userID, machine, true)
 }
 
 func (s *Service) revokeUserMachineControl(ctx context.Context, userID, userMachineID string, deleted bool) error {
 	return s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-		if err := environment.LockVaultMutationsTx(ctx, tx); err != nil {
-			return err
-		}
 		machine, err := tx.Queries().GetUserMachineForUpdate(ctx, dbsqlc.GetUserMachineForUpdateParams{ID: userMachineID, UserID: userID})
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrNotFound

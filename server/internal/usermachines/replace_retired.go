@@ -11,7 +11,6 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/audit"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
-	"github.com/pinksaucepasta/paperboat/server/internal/environment"
 	"github.com/pinksaucepasta/paperboat/server/internal/machinealias"
 	"github.com/pinksaucepasta/paperboat/server/internal/machineevents"
 )
@@ -65,9 +64,6 @@ func (s *Service) ReplaceMachine(ctx context.Context, userID, retiredID, replace
 func (s *Service) replaceMachineTx(ctx context.Context, tx *db.Tx, userID, retiredID, replacementID string, onlyRetired bool) (bool, error) {
 	if retiredID == "" || replacementID == "" || retiredID == replacementID {
 		return false, nil
-	}
-	if err := environment.LockVaultMutationsTx(ctx, tx); err != nil {
-		return false, err
 	}
 	if err := tx.Queries().LockUserMachineAliases(ctx, userID); err != nil {
 		return false, err
@@ -211,9 +207,6 @@ func (s *Service) retireForFreshEnrollmentTx(ctx context.Context, tx *db.Tx, use
 	}
 	if state != "disconnected" && state != "revoked" {
 		return "", nil
-	}
-	if err := environment.LockVaultMutationsTx(ctx, tx); err != nil {
-		return "", err
 	}
 	if err := tx.Queries().LockUserMachineAliases(ctx, userID); err != nil {
 		return "", err

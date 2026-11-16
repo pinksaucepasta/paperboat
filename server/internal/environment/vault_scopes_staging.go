@@ -19,8 +19,8 @@ func (s *Service) StagePersonalVaultScope(ctx context.Context, account, operatio
 	if err != nil {
 		return out, err
 	}
-	err = s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-		if err := lockVaultScopes(ctx, tx); err != nil {
+	err = s.db.InReadCommittedTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+		if err := lockVaultWorkspace(ctx, tx, true, "personal", account); err != nil {
 			return err
 		}
 		current, err := s.vaultMetadataTx(ctx, tx, account)
@@ -132,8 +132,8 @@ func (s *Service) AbortPersonalVaultRotation(ctx context.Context, account, opera
 	if !validIdentifier(operation) {
 		return ErrProtocolInvalid
 	}
-	return s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-		if err := lockVaultScopes(ctx, tx); err != nil {
+	return s.db.InReadCommittedTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+		if err := lockVaultWorkspace(ctx, tx, true, "personal", account); err != nil {
 			return err
 		}
 		_, err := tx.Exec(ctx, `DELETE FROM environment_vault_personal_rotations WHERE account_id=$1 AND operation_id=$2`, account, operation)

@@ -31,7 +31,7 @@ func vaultHostKeyID(public []byte) string {
 func authorizeVaultHostTx(ctx context.Context, tx *db.Tx, account, machine string) (uint64, error) {
 	var generation uint64
 	var capabilities []string
-	err := tx.QueryRow(ctx, `SELECT installation_generation,configured_capabilities FROM user_machines WHERE id=$1 AND user_id=$2 AND deleted_at IS NULL AND revoked_at IS NULL AND state NOT IN('revoked','deleted','disconnected')`, machine, account).Scan(&generation, &capabilities)
+	err := tx.QueryRow(ctx, `SELECT installation_generation,configured_capabilities FROM user_machines WHERE id=$1 AND user_id=$2 AND deleted_at IS NULL AND revoked_at IS NULL AND state NOT IN('revoked','deleted','disconnected') FOR SHARE`, machine, account).Scan(&generation, &capabilities)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return 0, ErrMachineNotFound
 	}
@@ -74,8 +74,8 @@ func (s *Service) RegisterVaultHostKey(ctx context.Context, account, machine str
 	if err != nil || !validX25519Public(public) || !validCounter(request.InstallationGeneration) || !validCounter(request.HostKeyGeneration) || !validIdentifier(request.OperationID) {
 		return out, ErrProtocolInvalid
 	}
-	err = s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-		if err := lockVaultScopes(ctx, tx); err != nil {
+	err = s.db.InReadCommittedTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+		if err := lockVaultWorkspace(ctx, tx, true, "personal", account); err != nil {
 			return err
 		}
 		generation, err := authorizeVaultHostTx(ctx, tx, account, machine)

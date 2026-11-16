@@ -1,0 +1,20 @@
+# FIX-ENVLOCK: TestLoadVaultRecords on anvit PostgreSQL (host load ~16-23), before = main 2d304cd05 (global ENV lock), after = this commit
+## before
+    vault_records_load_postgres_test.go:142: neighbor alone: read p99 49.794591ms, write p99 69.587307ms
+    vault_records_load_postgres_test.go:203: daily: 20 accounts, 8-record batches every 1s for 20 s: 293 batches (14.7/s), 293 scope reads, 0 worker errors (first: <nil>)
+    vault_records_load_postgres_test.go:204: daily: neighbor read p99 252.1237ms (331 samples), write p99 409.153893ms (331 samples), 0 failures; database: max idle-in-transaction 2, max sessions waiting on a lock 18
+    vault_records_load_postgres_test.go:203: full-batches: 8 accounts, 128-record batches every 0s for 20 s: 160 batches (8.0/s), 160 scope reads, 0 worker errors (first: <nil>)
+    vault_records_load_postgres_test.go:204: full-batches: neighbor read p99 795.342085ms (23 samples), write p99 1.334763161s (23 samples), 0 failures; database: max idle-in-transaction 3, max sessions waiting on a lock 8
+--- PASS: TestLoadVaultRecords (55.43s)
+ok  	github.com/pinksaucepasta/paperboat/server/internal/environment	55.483s
+## after (first after-run failed only the idle-in-transaction bound: 9 = 8 workers + the neighbor, one open tx per client; bound now counts the neighbor)
+    vault_records_load_postgres_test.go:142: neighbor alone: read p99 38.034658ms, write p99 70.358793ms
+    vault_records_load_postgres_test.go:203: daily: 20 accounts, 8-record batches every 1s for 20 s: 375 batches (18.8/s), 375 scope reads, 0 worker errors (first: <nil>)
+    vault_records_load_postgres_test.go:204: daily: neighbor read p99 45.660273ms (545 samples), write p99 76.625167ms (545 samples), 0 failures; database: max idle-in-transaction 17, max sessions waiting on a lock 0
+    vault_records_load_postgres_test.go:203: full-batches: 8 accounts, 128-record batches every 0s for 20 s: 255 batches (12.8/s), 255 scope reads, 0 worker errors (first: <nil>)
+    vault_records_load_postgres_test.go:204: full-batches: neighbor read p99 175.106814ms (86 samples), write p99 346.446114ms (86 samples), 0 failures; database: max idle-in-transaction 9, max sessions waiting on a lock 1
+--- PASS: TestLoadVaultRecords (51.83s)
+ok  	github.com/pinksaucepasta/paperboat/server/internal/environment	51.876s
+## TestPostgresVaultOtherAccountsDoNotSlowAnAccount (new)
+before (2d304cd05 + test, anvit): probe p99 alone 132.99059ms, with 4 accounts flooding 2.29451166s -> FAIL
+after (GitHub run 43820904886): probe p99 alone 14.226554ms, with 4 accounts flooding 189.010329ms, 0 retries -> PASS

@@ -152,8 +152,8 @@ func TestPostgresVaultRecordsCASAtomicSnapshotAndDeletion(t *testing.T) {
 		t.Fatal(err)
 	}
 	rotate := func(expected, epoch uint64, documents, envelopes []string, loss bool) error {
-		return store.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-			if err := lockVaultScopes(ctx, tx); err != nil {
+		return store.InReadCommittedTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+			if err := lockVaultWorkspace(ctx, tx, true, c.WorkspaceID, account); err != nil {
 				return err
 			}
 			writer, err := service.vaultMetadataTx(ctx, tx, account)

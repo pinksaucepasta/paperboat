@@ -2,11 +2,13 @@ package environment
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"slices"
 	"sort"
 
 	"github.com/jackc/pgx/v5"
@@ -15,10 +17,61 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/teams"
 )
 
-// All vault scope writes take the team write lock before row locks. This small bounded subsystem avoids
-// cross-account grant/reset deadlocks; password-only writes take an account lock and never wait for it.
-func lockVaultScopes(ctx context.Context, tx *db.Tx) error {
-	return db.LockTeamWrites(ctx, tx)
+// ENV vault transactions run at READ COMMITTED and lock exactly what they touch, as their first statements and
+// in one order (FIX-ENVLOCK): ROW SHARE on the team write fence, so team-wide writers (teams.Lock, account
+// deletion) still exclude them; each named team's fence bucket, in bucket order (EXCLUSIVE to write, ROW SHARE to
+// read); then each account's users row, in id order (FOR UPDATE to write, FOR SHARE to read). Every writer of an
+// account's or a team's ENV state holds that account's or team's lock, so one account's ENV never waits for
+// another's, and every read after the locks sees one committed state. Machine liveness is ordered by a FOR SHARE
+// lock on the user_machines row (authorizeVaultHostTx, authorizeVaultScopeTx, readVaultLayerTx), which machine
+// revocation updates.
+func lockVaultTeams(ctx context.Context, tx *db.Tx, write bool, ids ...string) error {
+	if err := db.LockOutsideTeams(ctx, tx); err != nil {
+		return err
+	}
+	ids = slices.Clone(ids)
+	slices.SortFunc(ids, func(a, b string) int {
+		return cmp.Or(cmp.Compare(db.TeamWriteFenceBucket(a), db.TeamWriteFenceBucket(b)), cmp.Compare(a, b))
+	})
+	for _, team := range ids {
+		lock := db.LockTeamReadsFor
+		if write {
+			lock = db.LockTeamWritesFor
+		}
+		if err := lock(ctx, tx, team); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+func lockVaultAccounts(ctx context.Context, tx *db.Tx, write bool, accounts ...string) error {
+	mode := "SHARE"
+	if write {
+		mode = "UPDATE"
+	}
+	_, err := tx.Exec(ctx, `SELECT id FROM users WHERE id=ANY($1::text[]) ORDER BY id FOR `+mode, accounts)
+	return err
+}
+
+// lockVaultWorkspace locks a vault workspace ("personal" or a team id) and the accounts whose ENV state the
+// transaction reads or writes.
+func lockVaultWorkspace(ctx context.Context, tx *db.Tx, write bool, workspace string, accounts ...string) error {
+	var ids []string
+	if workspace != "personal" {
+		ids = []string{workspace}
+	}
+	if err := lockVaultTeams(ctx, tx, write, ids...); err != nil {
+		return err
+	}
+	return lockVaultAccounts(ctx, tx, write, accounts...)
+}
+
+// personalOwner is the account that owns a coordinate's ENV state; a team coordinate is owned by its team.
+func personalOwner(kind, owner string) []string {
+	if kind == "personal" {
+		return []string{owner}
+	}
+	return nil
 }
 func (s *Service) vaultMetadataTx(ctx context.Context, tx *db.Tx, account string) (PasswordVaultMetadata, error) {
 	// Match password publication lock order before reading custody or inserting user FKs.
@@ -161,7 +214,7 @@ func authorizeVaultScopeTx(ctx context.Context, tx *db.Tx, account, kind, owner,
 		}
 		if machine != "" {
 			var id string
-			if err := tx.QueryRow(ctx, `SELECT id FROM user_machines WHERE id=$1 AND user_id=$2 AND deleted_at IS NULL`, machine, account).Scan(&id); errors.Is(err, pgx.ErrNoRows) {
+			if err := tx.QueryRow(ctx, `SELECT id FROM user_machines WHERE id=$1 AND user_id=$2 AND deleted_at IS NULL FOR SHARE`, machine, account).Scan(&id); errors.Is(err, pgx.ErrNoRows) {
 				return 0, ErrMachineNotFound
 			} else if err != nil {
 				return 0, err
@@ -217,8 +270,8 @@ func scopeSuccessor(current VaultScopeState, exists bool, incoming parsedVaultSc
 }
 func (s *Service) GetVaultScope(ctx context.Context, account, workspace, kind, owner, machine string) (VaultScopeState, error) {
 	var out VaultScopeState
-	err := s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-		if err := lockVaultScopes(ctx, tx); err != nil {
+	err := s.db.InReadCommittedTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+		if err := lockVaultWorkspace(ctx, tx, false, workspace, personalOwner(kind, owner)...); err != nil {
 			return err
 		}
 		if _, err := authorizeVaultScopeWorkspaceTx(ctx, tx, account, workspace, kind, owner, machine); err != nil {
@@ -236,8 +289,8 @@ func (s *Service) PutVaultScope(ctx context.Context, account, workspace, kind, o
 	if err != nil {
 		return out, err
 	}
-	err = s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-		if err := lockVaultScopes(ctx, tx); err != nil {
+	err = s.db.InReadCommittedTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+		if err := lockVaultWorkspace(ctx, tx, true, workspace, account); err != nil {
 			return err
 		}
 		if kind == "team" {
@@ -316,8 +369,8 @@ func (s *Service) GetVaultSharing(ctx context.Context, account, target string) (
 }
 func (s *Service) GetVaultTeam(ctx context.Context, account, team string) (VaultTeamState, error) {
 	var out VaultTeamState
-	err := s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-		if err := lockVaultScopes(ctx, tx); err != nil {
+	err := s.db.InReadCommittedTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+		if err := lockVaultWorkspace(ctx, tx, false, team); err != nil {
 			return err
 		}
 		var err error
@@ -382,8 +435,8 @@ func (s *Service) GrantVaultTeamMember(ctx context.Context, account, teamID stri
 	if !validIdentifier(request.AccountID) {
 		return out, ErrProtocolInvalid
 	}
-	err = s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-		if err := lockVaultScopes(ctx, tx); err != nil {
+	err = s.db.InReadCommittedTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+		if err := lockVaultWorkspace(ctx, tx, true, teamID, account, request.AccountID); err != nil {
 			return err
 		}
 		team, err := readVaultTeamTx(ctx, tx, teamID)
@@ -467,8 +520,8 @@ func (s *Service) RotateVaultTeam(ctx context.Context, account, teamID string, r
 	if err != nil {
 		return out, err
 	}
-	err = s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-		if err := lockVaultScopes(ctx, tx); err != nil {
+	err = s.db.InReadCommittedTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+		if err := lockVaultWorkspace(ctx, tx, true, teamID, account); err != nil {
 			return err
 		}
 		team, err := readVaultTeamTx(ctx, tx, teamID)
@@ -664,8 +717,8 @@ func (s *Service) AcknowledgeVaultGrant(ctx context.Context, account, documentID
 	if !digestExpression.MatchString(documentID) || !digestExpression.MatchString(vaultID) {
 		return ErrProtocolInvalid
 	}
-	return s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-		if err := lockVaultScopes(ctx, tx); err != nil {
+	return s.db.InReadCommittedTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+		if err := lockVaultWorkspace(ctx, tx, true, "personal", account); err != nil {
 			return err
 		}
 		current, err := s.vaultMetadataTx(ctx, tx, account)
@@ -705,11 +758,33 @@ func (s *Service) mutatePersonalVault(ctx context.Context, account string, reque
 	if err != nil {
 		return out, err
 	}
-	err = s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-		if err := lockVaultScopes(ctx, tx); err != nil {
+	err = s.db.InReadCommittedTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+		// A reset also writes the account's state in each of its teams, so it locks those teams first; a team
+		// joined between the read and the account lock is locked after it (a deadlock there is retried).
+		var locked []string
+		lockTeams := func() error {
+			var ids []string
+			if reset {
+				rows, err := tx.Query(ctx, `SELECT team_id FROM team_members WHERE account_id=$1 UNION SELECT team_id FROM environment_vault_team_members WHERE account_id=$1 UNION SELECT team_id FROM environment_vault_team_grants WHERE account_id=$1`, account)
+				if err != nil {
+					return err
+				}
+				ids, err = pgx.CollectRows(rows, pgx.RowTo[string])
+				if err != nil {
+					return err
+				}
+			}
+			ids = slices.DeleteFunc(ids, func(id string) bool { return slices.Contains(locked, id) })
+			locked = append(locked, ids...)
+			return lockVaultTeams(ctx, tx, true, ids...)
+		}
+		if err := lockTeams(); err != nil {
 			return err
 		}
-		if err := lockAccountTx(ctx, tx, account); err != nil {
+		if err := lockVaultAccounts(ctx, tx, true, account); err != nil {
+			return err
+		}
+		if err := lockTeams(); err != nil {
 			return err
 		}
 		replay, digest, err := vaultOperationTx(ctx, tx, account, request.OperationID, map[bool]string{true: "personal-reset", false: "personal-rotate"}[reset], []any{request, documents}, &out)
@@ -894,8 +969,8 @@ func (s *Service) GetVaultPersonalScopes(ctx context.Context, account string) (V
 	if !validIdentifier(account) {
 		return out, ErrProtocolInvalid
 	}
-	err := s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-		if err := lockVaultScopes(ctx, tx); err != nil {
+	err := s.db.InReadCommittedTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+		if err := lockVaultWorkspace(ctx, tx, false, "personal", account); err != nil {
 			return err
 		}
 		var err error
@@ -927,9 +1002,6 @@ func (s *Service) GetVaultPersonalScopes(ctx context.Context, account string) (V
 
 var ErrVaultRotationRequired = errors.New("ENV key rotation is required")
 
-// LockVaultMutationsTx coordinates explicit machine revocation with ENV publication.
-// Call before acquiring session/machine locks in the owning revocation transaction.
-func LockVaultMutationsTx(ctx context.Context, tx *db.Tx) error { return lockVaultScopes(ctx, tx) }
 func vaultTeamRotationAllowed(team VaultTeamState, account string, request VaultTeamRotate) bool {
 	member, exists := vaultMember(team, account)
 	if !exists || !member.Active || (member.Role != "owner" && member.Role != "admin") {

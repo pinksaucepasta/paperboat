@@ -44,3 +44,11 @@ func LockTeamReadsFor(ctx context.Context, tx *Tx, team string) error {
 	_, err := tx.Exec(ctx, fmt.Sprintf(`LOCK TABLE paperboat.team_write_fence, paperboat.team_write_fence_%02d IN ROW SHARE MODE`, TeamWriteFenceBucket(team)))
 	return err
 }
+
+// LockOutsideTeams orders a transaction that touches no team's state (an account's own vault rows) against the
+// global lock only: it waits for LockTeamWrites, never for team writers or other such transactions. It must be
+// the first statement of the transaction.
+func LockOutsideTeams(ctx context.Context, tx *Tx) error {
+	_, err := tx.Exec(ctx, `LOCK TABLE paperboat.team_write_fence IN ROW SHARE MODE`)
+	return err
+}

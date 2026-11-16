@@ -157,7 +157,7 @@ func readVaultLayerTx(ctx context.Context, tx *db.Tx, machine string, c VaultLay
 	var public, writer, raw []byte
 	var generation, hostGeneration uint64
 	var current bool
-	err := tx.QueryRow(ctx, `SELECT m.user_id,m.installation_generation,h.host_key_generation,h.host_public,s.key_epoch,s.revision,s.document_id,f.generation,coalesce(l.delivery_generation,0),coalesce(l.document_id,''),coalesce(l.writer_account,''),coalesce(l.writer_public,''::bytea),coalesce(l.envelope,''::bytea),coalesce(l.installation_generation,0),coalesce(l.host_key_generation,0),coalesce(l.applied_fence_generation,0)=f.generation FROM user_machines m JOIN environment_vault_hosts h ON h.machine_id=m.id JOIN environment_vault_scopes s ON s.workspace_id=$2 AND s.owner_kind=$3 AND s.owner_id=$4 AND s.machine_id=$5 JOIN environment_vault_layer_fences f ON f.workspace_id=s.workspace_id AND f.owner_kind=s.owner_kind AND f.owner_id=s.owner_id AND f.source_machine_id=s.machine_id LEFT JOIN environment_vault_layers l ON l.machine_id=m.id AND l.workspace_id=s.workspace_id AND l.owner_kind=s.owner_kind AND l.owner_id=s.owner_id AND l.source_machine_id=s.machine_id WHERE m.id=$1 AND m.deleted_at IS NULL AND m.revoked_at IS NULL AND m.state NOT IN('deleted','revoked','disconnected') AND h.installation_generation=m.installation_generation AND 'environment_injection'=ANY(m.configured_capabilities)`, machine, c.WorkspaceID, c.OwnerKind, c.OwnerID, c.MachineID).Scan(&out.Recipient.RecipientAccount, &out.Recipient.InstallationGeneration, &out.Recipient.HostKeyGeneration, &public, &out.Source.KeyEpoch, &out.Source.Revision, &out.Source.DocumentID, &out.Recipient.FenceGeneration, &out.Recipient.DeliveryGeneration, &out.Recipient.DocumentID, &out.WriterAccount, &writer, &raw, &generation, &hostGeneration, &current)
+	err := tx.QueryRow(ctx, `SELECT m.user_id,m.installation_generation,h.host_key_generation,h.host_public,s.key_epoch,s.revision,s.document_id,f.generation,coalesce(l.delivery_generation,0),coalesce(l.document_id,''),coalesce(l.writer_account,''),coalesce(l.writer_public,''::bytea),coalesce(l.envelope,''::bytea),coalesce(l.installation_generation,0),coalesce(l.host_key_generation,0),coalesce(l.applied_fence_generation,0)=f.generation FROM user_machines m JOIN environment_vault_hosts h ON h.machine_id=m.id JOIN environment_vault_scopes s ON s.workspace_id=$2 AND s.owner_kind=$3 AND s.owner_id=$4 AND s.machine_id=$5 JOIN environment_vault_layer_fences f ON f.workspace_id=s.workspace_id AND f.owner_kind=s.owner_kind AND f.owner_id=s.owner_id AND f.source_machine_id=s.machine_id LEFT JOIN environment_vault_layers l ON l.machine_id=m.id AND l.workspace_id=s.workspace_id AND l.owner_kind=s.owner_kind AND l.owner_id=s.owner_id AND l.source_machine_id=s.machine_id WHERE m.id=$1 AND m.deleted_at IS NULL AND m.revoked_at IS NULL AND m.state NOT IN('deleted','revoked','disconnected') AND h.installation_generation=m.installation_generation AND 'environment_injection'=ANY(m.configured_capabilities) FOR SHARE OF m`, machine, c.WorkspaceID, c.OwnerKind, c.OwnerID, c.MachineID).Scan(&out.Recipient.RecipientAccount, &out.Recipient.InstallationGeneration, &out.Recipient.HostKeyGeneration, &public, &out.Source.KeyEpoch, &out.Source.Revision, &out.Source.DocumentID, &out.Recipient.FenceGeneration, &out.Recipient.DeliveryGeneration, &out.Recipient.DocumentID, &out.WriterAccount, &writer, &raw, &generation, &hostGeneration, &current)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return out, ErrNotFound
 	}
@@ -185,8 +185,8 @@ func (s *Service) PutVaultLayer(ctx context.Context, account, workspace, machine
 	if err != nil {
 		return out, err
 	}
-	err = s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-		if err := lockVaultScopes(ctx, tx); err != nil {
+	err = s.db.InReadCommittedTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+		if err := lockVaultWorkspace(ctx, tx, true, workspace, account); err != nil {
 			return err
 		}
 		writer, err := s.vaultMetadataTx(ctx, tx, account)
@@ -248,8 +248,8 @@ func (s *Service) VaultLayerRecipients(ctx context.Context, account string, sour
 	if limit < 1 || limit > 200 || offset < 0 || offset > 2147483647 || state != "pending" && state != "ready" && state != "" {
 		return items, 0, ErrProtocolInvalid
 	}
-	err := s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-		if err := lockVaultScopes(ctx, tx); err != nil {
+	err := s.db.InReadCommittedTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+		if err := lockVaultWorkspace(ctx, tx, false, source.WorkspaceID, personalOwner(source.OwnerKind, source.OwnerID)...); err != nil {
 			return err
 		}
 		writable, err := vaultLayerWriterTx(ctx, tx, account, source)
@@ -291,8 +291,8 @@ func (s *Service) VaultLayerContext(ctx context.Context, machineOwner, machine, 
 	if !validIdentifier(actor) || !validIdentifier(workspace) {
 		return out, ErrInvalidScope
 	}
-	err := s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-		if err := lockVaultScopes(ctx, tx); err != nil {
+	err := s.db.InReadCommittedTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+		if err := lockVaultWorkspace(ctx, tx, false, workspace, machineOwner, actor); err != nil {
 			return err
 		}
 		if _, err := authorizeVaultHostTx(ctx, tx, machineOwner, machine); err != nil {

@@ -18,7 +18,6 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/audit"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
-	"github.com/pinksaucepasta/paperboat/server/internal/environment"
 )
 
 var (
@@ -61,10 +60,6 @@ func (s *Service) ResetPairing(ctx context.Context, in PairingResetInput) (Pairi
 	tokenHash := enrollmentTokenHash(in.EnrollmentToken)
 	var out PairingReset
 	err = s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-		// Match the deletion owner's lock order before acquiring enrollment or machine locks.
-		if err := environment.LockVaultMutationsTx(ctx, tx); err != nil {
-			return err
-		}
 		enrollment, err := tx.Queries().GetBootstrapPairingForTokenUpdate(ctx, tokenHash[:])
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrEnrollmentTokenInvalid

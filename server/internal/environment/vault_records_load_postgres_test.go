@@ -143,8 +143,8 @@ func TestLoadVaultRecords(t *testing.T) {
 
 	// phase runs `workers` accounts, each writing `batch` records per batch then reading its scope, pausing `pause` between
 	// batches, for `seconds`, with the neighbor probing at the same time and the database sampled for idle-in-transaction
-	// sessions and lock waits. Every ENV write and read takes the global team write lock (lockVaultScopes), so a phase at
-	// full batches measures that queue; "daily" is an account editing a few variables per second.
+	// sessions and lock waits. Each ENV transaction locks only its own account (lockVaultWorkspace), so a phase at
+	// full batches measures the database, not a shared queue; "daily" is an account editing a few variables per second.
 	phase := func(name string, workers []loadAccount, batch int, pause time.Duration, assertNeighbor bool) {
 		var maxIdleInTx, maxLockWait atomic.Int64
 		stopSampling := make(chan struct{})
@@ -205,8 +205,9 @@ func TestLoadVaultRecords(t *testing.T) {
 		if errorsTotal.Load() != 0 || loadFailures != 0 {
 			t.Errorf("%s: failures under load: workers %d (%v), neighbor %d", name, errorsTotal.Load(), firstError.Load(), loadFailures)
 		}
-		if int(maxIdleInTx.Load()) > len(workers) {
-			t.Errorf("%s: idle-in-transaction sessions: %d for %d workers", name, maxIdleInTx.Load(), len(workers))
+		// At most one open transaction per client (the workers and the neighbor): more means a leaked transaction.
+		if int(maxIdleInTx.Load()) > len(workers)+1 {
+			t.Errorf("%s: idle-in-transaction sessions: %d for %d workers and the neighbor", name, maxIdleInTx.Load(), len(workers))
 		}
 		if assertNeighbor {
 			if got, bound := p99(loadWrites), max(20*p99(baseWrites), time.Second); got > bound {

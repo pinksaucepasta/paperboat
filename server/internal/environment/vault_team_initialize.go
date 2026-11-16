@@ -23,8 +23,8 @@ func (s *Service) CreateVaultTeam(ctx context.Context, account string, request V
 	if err != nil {
 		return out, err
 	}
-	err = s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-		if err := lockVaultScopes(ctx, tx); err != nil {
+	err = s.db.InReadCommittedTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+		if err := lockVaultWorkspace(ctx, tx, true, request.TeamID, account); err != nil {
 			return err
 		}
 		authority, err := teams.ReadTx(ctx, tx, request.TeamID)

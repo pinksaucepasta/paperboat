@@ -72,8 +72,8 @@ func (s *Service) PutVaultRecords(ctx context.Context, account string, c VaultLa
 	if !validLayerCoordinate(c) || len(in.Records) == 0 || len(in.Records) > MaximumVaultRecordBatch {
 		return out, ErrProtocolInvalid
 	}
-	err := s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-		if err := lockVaultScopes(ctx, tx); err != nil {
+	err := s.db.InReadCommittedTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+		if err := lockVaultWorkspace(ctx, tx, true, c.WorkspaceID, account); err != nil {
 			return err
 		}
 		epoch, err := authorizeVaultRecordsTx(ctx, tx, account, c, true)
@@ -318,8 +318,8 @@ func readVaultRecordsPageTx(ctx context.Context, tx *db.Tx, account string, c Va
 }
 func (s *Service) ListVaultRecords(ctx context.Context, account string, c VaultLayerCoordinate, q VaultRecordsQuery) (VaultRecordsPage, error) {
 	var out VaultRecordsPage
-	err := s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-		if err := lockVaultScopes(ctx, tx); err != nil {
+	err := s.db.InReadCommittedTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+		if err := lockVaultWorkspace(ctx, tx, false, c.WorkspaceID, personalOwner(c.OwnerKind, c.OwnerID)...); err != nil {
 			return err
 		}
 		epoch, err := authorizeVaultRecordsTx(ctx, tx, account, c, false)
@@ -336,8 +336,8 @@ func (s *Service) GetVaultRecord(ctx context.Context, account string, c VaultLay
 	if !validVaultRecordID(id) {
 		return out, ErrProtocolInvalid
 	}
-	err := s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-		if err := lockVaultScopes(ctx, tx); err != nil {
+	err := s.db.InReadCommittedTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+		if err := lockVaultWorkspace(ctx, tx, false, c.WorkspaceID, personalOwner(c.OwnerKind, c.OwnerID)...); err != nil {
 			return err
 		}
 		epoch, err := authorizeVaultRecordsTx(ctx, tx, account, c, false)
@@ -380,8 +380,8 @@ func (s *Service) ListVaultHostRecords(ctx context.Context, machineOwner, machin
 	}
 	// Reauthorize and read under one scope lock so revocation between context and
 	// record read cannot disclose another actor's private source.
-	err = s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-		if err := lockVaultScopes(ctx, tx); err != nil {
+	err = s.db.InReadCommittedTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+		if err := lockVaultWorkspace(ctx, tx, false, workspace, machineOwner, actor); err != nil {
 			return err
 		}
 		if _, err := authorizeVaultHostTx(ctx, tx, machineOwner, machine); err != nil {
