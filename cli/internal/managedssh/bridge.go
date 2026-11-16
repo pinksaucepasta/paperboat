@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net"
+	"net/netip"
 	"os"
 	"strconv"
 	"sync"
@@ -21,6 +22,9 @@ var (
 type LoopbackTarget struct {
 	Host string
 	Port uint16
+	// Source is the address an IPv4 connection to sshd is made from (wire.LoopbackSource of the user); zero lets the
+	// system choose.
+	Source netip.Addr
 }
 
 type SSHReadiness struct {
@@ -99,7 +103,7 @@ func BridgeSSH(ctx context.Context, stream io.ReadWriteCloser, target LoopbackTa
 		return BridgeResult{}, err
 	}
 	dialCtx, cancelDial := context.WithTimeout(ctx, dialTimeout)
-	sshd, err := dialSSHD(dialCtx, net.JoinHostPort(target.Host, strconv.Itoa(int(target.Port))))
+	sshd, err := dialSSHD(dialCtx, net.JoinHostPort(target.Host, strconv.Itoa(int(target.Port))), target.Source)
 	cancelDial()
 	if err != nil {
 		if ctx.Err() != nil {

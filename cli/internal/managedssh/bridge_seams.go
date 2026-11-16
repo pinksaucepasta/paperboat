@@ -2,8 +2,12 @@ package managedssh
 
 import (
 	"context"
+	"errors"
 	"net"
+	"net/netip"
+	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -22,14 +26,23 @@ var seams struct {
 const defaultResetGrace = 2 * time.Second
 
 // dialSSHD opens the connection to the loopback sshd.
-func dialSSHD(ctx context.Context, address string) (net.Conn, error) {
+func dialSSHD(ctx context.Context, address string, source netip.Addr) (net.Conn, error) {
 	seams.mu.RLock()
 	dial := seams.dial
 	seams.mu.RUnlock()
 	if dial != nil {
 		return dial(ctx, address)
 	}
-	return (&net.Dialer{}).DialContext(ctx, "tcp", address)
+	if !source.Is4() || !strings.HasPrefix(address, "127.") {
+		return (&net.Dialer{}).DialContext(ctx, "tcp", address)
+	}
+	connection, err := (&net.Dialer{LocalAddr: &net.TCPAddr{IP: source.AsSlice()}}).DialContext(ctx, "tcp", address)
+	if errors.Is(err, syscall.EADDRNOTAVAIL) {
+		// shortcut: macOS routes only the 127/8 addresses its machine guard aliased; without the guard the user shares
+		// 127.0.0.1's penalty bucket again instead of losing SSH. Upgrade: report it in pb ssh doctor.
+		return (&net.Dialer{}).DialContext(ctx, "tcp", address)
+	}
+	return connection, err
 }
 
 // resetGrace bounds how long a connection reset waits for the other direction to show a plain EOF.

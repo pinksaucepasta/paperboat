@@ -150,7 +150,7 @@ func (s *Service) IssueCertificate(ctx context.Context, request IssueCertificate
 		ValidAfter:      uint64(now.Add(-time.Minute).Unix()),
 		ValidBefore:     uint64(validBefore.Unix()),
 		Permissions: ssh.Permissions{
-			CriticalOptions: map[string]string{"source-address": "127.0.0.1/32,::1/128"},
+			CriticalOptions: map[string]string{"source-address": wire.CertificateSourceAddress},
 			// The extensions ssh-keygen grants by default: a plain authorized key allowed all of these.
 			Extensions: map[string]string{"permit-X11-forwarding": "", "permit-agent-forwarding": "", "permit-port-forwarding": "", "permit-pty": "", "permit-user-rc": ""},
 		},

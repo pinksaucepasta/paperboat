@@ -8,6 +8,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	wire "github.com/pinksaucepasta/paperboat/shared/managedssh"
 )
 
 var (
@@ -320,7 +322,11 @@ func (h *Host) Serve(ctx context.Context, generation uint64, stream io.ReadWrite
 	if err != nil {
 		return BridgeResult{}, err
 	}
-	result, bridgeErr := BridgeSSH(bridgeCtx, stream, target.Readiness.Target, h.config.DialTimeout)
+	loopback := target.Readiness.Target
+	if peer.AccountID != "" {
+		loopback.Source = wire.LoopbackSource(peer.AccountID)
+	}
+	result, bridgeErr := BridgeSSH(bridgeCtx, stream, loopback, h.config.DialTimeout)
 	if audited {
 		h.end(peer, generation, sessionID, sessionOutcome(flow, bridgeCtx, bridgeErr), result)
 	}

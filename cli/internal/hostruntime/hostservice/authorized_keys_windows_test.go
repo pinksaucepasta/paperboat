@@ -35,7 +35,7 @@ func TestWindowsAuthorizedKeysOwnsFixedDedicatedFile(t *testing.T) {
 	}
 	path := filepath.Join(root, "authorized_keys", "paperboat")
 	body, err := os.ReadFile(path)
-	if err != nil || string(body) != `cert-authority,principals="pb:machine_1",from="127.0.0.1,::1" `+line+"\n" {
+	if err != nil || string(body) != `cert-authority,principals="pb:machine_1",from="127.0.0.0/8,::1" `+line+"\n" {
 		t.Fatalf("authorized keys=%q err=%v", body, err)
 	}
 	if _, err := os.Stat(filepath.Join(root, ".ssh")); !os.IsNotExist(err) {
