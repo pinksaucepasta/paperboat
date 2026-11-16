@@ -12730,7 +12730,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description team_plan_required: session recordings are part of the Teams plan. */
+            /** @description team_plan_required: the team is not on the Teams plan (the workspace `personal` needs no plan). */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -12799,7 +12799,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description team_plan_required: session recordings are part of the Teams plan. */
+            /** @description team_plan_required: the team is not on the Teams plan (the workspace `personal` needs no plan). */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -12881,7 +12881,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description team_plan_required: session recordings are part of the Teams plan. recording_key_conflict: the generation is not current+1, the rotation signature is invalid, or a viewer's vault changed; reload and retry. */
+            /** @description team_plan_required: the team is not on the Teams plan (the workspace `personal` needs no plan). recording_key_conflict: the generation is not current+1, the rotation signature is invalid, or a viewer's vault changed; reload and retry. */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -12963,7 +12963,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description team_plan_required: session recordings are part of the Teams plan. recording_key_unavailable: no key yet. recording_key_conflict: the generation is not current or a viewer's vault changed; reload and retry. */
+            /** @description team_plan_required: the team is not on the Teams plan (the workspace `personal` needs no plan). recording_key_unavailable: no key yet. recording_key_conflict: the generation is not current or a viewer's vault changed; reload and retry. */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -13045,7 +13045,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description team_plan_required: session recordings are part of the Teams plan. */
+            /** @description team_plan_required: the team is not on the Teams plan (the workspace `personal` needs no plan). */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -13127,7 +13127,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description team_plan_required: session recordings are part of the Teams plan. recording_key_unavailable: the team has no key. recording_key_pending: you may replay but hold no key copy yet. machine_unavailable: the recording's machine is offline (browser form). */
+            /** @description team_plan_required: the team is not on the Teams plan (the workspace `personal` needs no plan). recording_key_unavailable: the team has no key. recording_key_pending: you may replay but hold no key copy yet. machine_unavailable: the recording's machine is offline (browser form). */
             409: {
                 headers: {
                     [name: string]: unknown;

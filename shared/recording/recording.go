@@ -11,6 +11,7 @@ import (
 	"errors"
 	"regexp"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/shared/teambucket"
@@ -403,4 +404,26 @@ func (k Key) ValidKey() bool {
 func VerifyRotation(teamID string, previous, next Key) bool {
 	return previous.ValidKey() && next.ValidKey() && next.Generation == previous.Generation+1 &&
 		ed25519.Verify(previous.SigningPublicKey, RotationMessage(teamID, next.Generation, next.PublicKey, next.SigningPublicKey), next.RotationSignature)
+}
+
+// A personal workspace (Free and Pro) records under the scope "personal:<account>" wherever a team's id would
+// stand (Policy.TeamID, Replay.TeamID, the aad of its key copies): a team id never holds ':'. The API and
+// credentials name that workspace "personal".
+const (
+	PersonalWorkspace = "personal"
+	personalPrefix    = PersonalWorkspace + ":"
+)
+
+// PersonalScope is the recording scope of account's personal workspace.
+func PersonalScope(account string) string { return personalPrefix + account }
+
+// IsPersonalScope reports whether scope is a personal workspace's.
+func IsPersonalScope(scope string) bool { return strings.HasPrefix(scope, personalPrefix) }
+
+// WorkspaceOf is the workspace a recording scope belongs to: "personal", or the team id itself.
+func WorkspaceOf(scope string) string {
+	if IsPersonalScope(scope) {
+		return PersonalWorkspace
+	}
+	return scope
 }

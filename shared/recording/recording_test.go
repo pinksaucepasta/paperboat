@@ -117,3 +117,13 @@ func TestStateAndPolicyValidate(t *testing.T) {
 		t.Fatal("ValidSealed bounds")
 	}
 }
+
+func TestPersonalScope(t *testing.T) {
+	scope := PersonalScope("user_1")
+	if scope != "personal:user_1" || !IsPersonalScope(scope) || IsPersonalScope("personal") || IsPersonalScope("acme") {
+		t.Fatalf("scope %q", scope)
+	}
+	if WorkspaceOf(scope) != PersonalWorkspace || WorkspaceOf("acme") != "acme" || !idPattern.MatchString(scope) {
+		t.Fatal("WorkspaceOf or the id pattern does not accept a personal scope")
+	}
+}

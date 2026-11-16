@@ -28,7 +28,7 @@ func (s *EdgeService) OperationRevocations(ctx context.Context, environment stri
  WHERE m.environment_id=$1 AND m.revoked_at IS NOT NULL AND m.helper_file_session_id IS NOT NULL
  AND (m.expires_at>$3 OR m.helper_file_session_id=ANY($2::text[]))
  UNION
- -- A CLI recording replay ticket whose viewer may no longer replay there (recording_view, team membership, CLI
+ -- A CLI recording replay ticket whose viewer may no longer replay there (recording_view, team membership, a personal machine's owner, CLI
  -- session, account or machine): the host ends the running stream, which the ticket's expiry no longer bounds.
  -- Every host polls this: the machine is resolved once (environment_id is unique) so the admissions are read
  -- through their machine_id index, never a scan of every machine's admissions.
@@ -37,10 +37,10 @@ func (s *EdgeService) OperationRevocations(ctx context.Context, environment stri
  WHERE a.machine_id=(SELECT id FROM paperboat.user_machines WHERE environment_id=$1) AND (a.expires_at>$3 OR a.id=ANY($2::text[]))
  AND NOT EXISTS(SELECT 1 FROM paperboat.cli_client_sessions c
   JOIN paperboat.users u ON u.id=c.user_id AND u.status='active'
-  JOIN paperboat.teams t ON t.team_id=paperboat.recording_team(m.id) AND t.deleted_at IS NULL AND NOT t.suspended
+  LEFT JOIN paperboat.teams t ON t.team_id=paperboat.recording_team(m.id) AND t.deleted_at IS NULL AND NOT t.suspended
   WHERE c.id=a.native_cli_session_id AND c.user_id=a.account_id AND c.state='active' AND c.revoked_at IS NULL
   AND m.revoked_at IS NULL AND m.deleted_at IS NULL
-  AND NOT isempty(paperboat.workspace_policy_rule_ports(a.account_id, t.team_id, a.machine_id, 'recording_view')))) revoked ORDER BY jti LIMIT $4`, environment, live, s.clock().UTC(), operationrevocation.MaxLiveJTIs+1)
+  AND ((paperboat.recording_team(m.id) IS NULL AND m.user_id=a.account_id) OR NOT isempty(paperboat.workspace_policy_rule_ports(a.account_id, t.team_id, a.machine_id, 'recording_view'))))) revoked ORDER BY jti LIMIT $4`, environment, live, s.clock().UTC(), operationrevocation.MaxLiveJTIs+1)
 	if err != nil {
 		return nil, err
 	}

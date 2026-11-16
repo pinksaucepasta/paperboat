@@ -6,8 +6,9 @@ import { vaultCrypto } from "@/lib/envvault/crypto"
 import { hasComments, parsePolicy, type PolicyRule } from "@/lib/policy"
 import type { components } from "@/lib/api-schema"
 
-// Teams session recordings (contract: shared/recording). Recordings stay on their machine, encrypted to the team
-// recording key; the server lists them and hands each permitted viewer their sealed copy of that key.
+// Session recordings (contract: shared/recording). Recordings stay on their machine, encrypted to a recording key
+// (a team's, on the Teams plan, or the person's own in their personal workspace, on every plan); the server lists them
+// and hands each permitted viewer their sealed copy of that key.
 
 type Schemas = components["schemas"]
 export type Recording = Schemas["Recording"]
@@ -25,16 +26,16 @@ const json = { "content-type": "application/json" }
 
 /** Server refusals worded for what the person can do next. */
 export const recordingSentences: Record<string, string> = {
-  team_plan_required: "Session recordings are part of the Teams plan.",
-  recording_forbidden: "You can't replay recordings on this machine. Ask a team admin for replay access.",
-  recording_key_unavailable: "The team has no recording key yet. A team admin sets it up under Team, Recordings.",
+  team_plan_required: "This team needs the Teams plan to record. Your personal recordings are free.",
+  recording_forbidden: "You can't replay recordings on this machine. In a team, ask an admin for replay access.",
+  recording_key_unavailable: "There is no recording key yet. Set it up under Terminals, Recordings (in a team, an admin does it under Team, Recordings).",
   recording_key_pending:
     "You can replay here, but nobody has given you a copy of the recording key yet. Ask a team member who can replay to open Recordings.",
   recording_key_conflict: "The recording key or a viewer's vault changed. Reload and try again.",
   recording_not_found: "This recording doesn't exist or isn't shared with you.",
   recording_deleted: "This recording was deleted from its machine.",
   machine_unavailable: "The recording's machine is offline. Replay works again once it's back online.",
-  recording_unavailable: "Recording isn't available for this terminal. A team admin turns it on under Team, Recordings.",
+  recording_unavailable: "Recording isn't available for this terminal. Set up the recording key under Terminals, Recordings (in a team, an admin does it under Team, Recordings).",
   recording_active: "This terminal is already being recorded.",
   recording_inactive: "This terminal isn't being recorded.",
   credential_expired: "The replay link expired. Open the recording again.",
@@ -60,6 +61,16 @@ export const recordingsQuery = (teamId: string, machine: string | undefined, pag
     placeholderData: keepPreviousData,
     retry: (count, error) => !(error instanceof ApiError && error.status >= 400 && error.status < 500) && count < 2,
   })
+
+/** The workspace id the recording routes take: a team's id, or "personal". */
+export const personalWorkspace = "personal"
+
+/**
+ * What the recording key is sealed under (shared/recording PersonalScope): the team id, or "personal:<account>" in
+ * the personal workspace, whose only viewer is its owner.
+ */
+export const recordingScope = (workspaceId: string, viewers: { account_id: string }[]) =>
+  workspaceId === personalWorkspace && viewers[0] ? `${personalWorkspace}:${viewers[0].account_id}` : workspaceId
 
 export const recordingKeyQuery = (teamId: string) =>
   queryOptions({
@@ -118,7 +129,7 @@ export const waitingViewers = (state: RecordingKeyState) =>
 export async function createRecordingKey(teamId: string, viewers: Required<RecordingViewer>[]) {
   const made = await recordingVault<{ key: RecordingKey; grants: RecordingGrant[] }>({
     action: "recording-key-create",
-    team_id: teamId,
+    team_id: recordingScope(teamId, viewers),
     viewers: viewers.map(({ account_id, sharing_public_key }) => ({ account_id, sharing_public_key })),
   })
   return api<RecordingKey>(`${team(teamId)}/recording-key`, {
@@ -134,7 +145,7 @@ export async function grantRecordingKey(teamId: string, state: RecordingKeyState
   const viewers = waitingViewers(state)
   const sealed = await recordingVault<{ grants: RecordingGrant[] }>({
     action: "recording-key-grant",
-    team_id: teamId,
+    team_id: recordingScope(teamId, state.viewers),
     generation: state.my_key.generation,
     sealed: state.my_key.sealed,
     viewers: viewers.map(({ account_id, sharing_public_key }) => ({ account_id, sharing_public_key })),

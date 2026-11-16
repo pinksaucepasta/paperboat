@@ -31,7 +31,7 @@ import { Switch } from "@/components/ui/switch"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 
 /**
- * Team → Recordings: the team recording key, who may start recordings by hand, and the policy rules that record
+ * Team → Recordings (the personal workspace's key is set up in PersonalRecordingSetup): the team recording key, who may start recordings by hand, and the policy rules that record
  * sessions or allow replay. Owners and admins change them; auditors see them.
  */
 export function RecordingSettings({ team, emails, admin }: { team: Team; emails: Map<string, string>; admin: boolean }) {
@@ -40,7 +40,7 @@ export function RecordingSettings({ team, emails, admin }: { team: Team; emails:
   if (key.error instanceof ApiError && key.error.code === "team_plan_required")
     return (
       <p className="rounded-lg bg-surface px-4 py-3 text-sm text-muted-foreground" data-recordings-upgrade>
-        Session recordings are part of the Teams plan.{" "}
+        This team needs the Teams plan to record.{" "}
         <Link href="/billing" className="text-foreground underline underline-offset-4">
           Upgrade
         </Link>

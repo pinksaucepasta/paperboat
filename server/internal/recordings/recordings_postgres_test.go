@@ -88,6 +88,9 @@ func newFixture(t *testing.T) *fixture {
 		c, done := context.WithTimeout(context.Background(), 20*time.Second)
 		defer done()
 		_, _ = store.SQL().ExecContext(c, `DELETE FROM paperboat.team_resource_bindings WHERE team_id=$1`, f.team)
+		for _, table := range []string{"session_recordings", "recording_key_grants", "recording_keys"} { // no cascade from teams: a scope is a text
+			_, _ = store.SQL().ExecContext(c, `DELETE FROM paperboat.`+table+` WHERE team_id=$1`, f.team)
+		}
 		_, _ = store.SQL().ExecContext(c, `DELETE FROM paperboat.user_machines WHERE id=ANY($1)`, []string{f.prod, f.dev})
 		_, _ = store.SQL().ExecContext(c, `DELETE FROM paperboat.teams WHERE team_id=$1`, f.team)
 		_, _ = store.SQL().ExecContext(c, `DELETE FROM paperboat.cli_client_sessions WHERE user_id=ANY($1)`, users)
@@ -399,7 +402,7 @@ func sorted(s []string) []string {
 	return out
 }
 
-// A personal machine shared into a team records under that team's policy, key and index; unshared it records nothing,
+// A personal machine shared into a team records under that team's policy, key and index; unshared it records for its owner,
 // and sharing or unsharing moves the machine's recording_policy topic. Several teams: the lowest team id decides.
 func TestPostgresRecordingsOnASharedPersonalMachine(t *testing.T) {
 	f := newFixture(t)
@@ -415,8 +418,8 @@ func TestPostgresRecordingsOnASharedPersonalMachine(t *testing.T) {
 		_, _ = f.store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.teams WHERE team_id=$1`, other)
 	})
 	f.paid()
-	if p := f.machinePolicy(shared); p.Enabled || p.TeamID != "" {
-		t.Fatalf("a personal machine shared with no team records: %+v", p)
+	if p := f.machinePolicy(shared); !p.Enabled || p.TeamID != personalScope(f.member) {
+		t.Fatalf("a personal machine shared with no team records under its owner's scope: %+v", p)
 	}
 	before := f.topic(shared)
 	f.exec(`INSERT INTO paperboat.team_resource_bindings(team_id,resource_kind,resource_id,owner_account) VALUES($1,'machine',$2,$3)`, f.team, shared, f.member)
@@ -439,7 +442,7 @@ func TestPostgresRecordingsOnASharedPersonalMachine(t *testing.T) {
 	if err := report.Validate(recording.KindStarted, now); err != nil {
 		t.Fatal(err)
 	}
-	for machine, want := range map[string]int{shared: 1, loose: 0} {
+	for machine, want := range map[string]int{shared: 1, loose: 0} { // loose is indexed under its owner's scope, not the team's
 		if err := f.store.InTx(f.ctx, func(ctx context.Context, tx *db.Tx) error {
 			return ApplyReportTx(ctx, tx, machine, recording.KindStarted, report)
 		}); err != nil {
@@ -459,7 +462,81 @@ func TestPostgresRecordingsOnASharedPersonalMachine(t *testing.T) {
 	}
 	f.exec(`UPDATE paperboat.team_resource_bindings SET active=false WHERE team_id=$1 AND resource_id=$2`, other, shared)
 	f.exec(`UPDATE paperboat.team_resource_bindings SET active=false WHERE team_id=$1 AND resource_id=$2`, f.team, shared)
-	if p := f.machinePolicy(shared); p.Enabled || p.TeamID != "" {
-		t.Fatalf("an unshared machine still records: %+v", p)
+	if p := f.machinePolicy(shared); p.TeamID != personalScope(f.member) {
+		t.Fatalf("an unshared machine did not go back to its owner's scope: %+v", p)
+	}
+}
+
+// Free and Pro (no Teams plan): the owner's own key ring records and replays a personal machine, nobody else sees it.
+func TestPostgresPersonalRecordings(t *testing.T) {
+	f := newFixture(t)
+	mine := "mmine_" + f.team
+	f.exec(`INSERT INTO paperboat.user_machines(id,user_id,environment_id,alias,platform,architecture,workspace_root,state,seat_state,online) VALUES($1,$2,$1,'mine','linux','amd64','/w','online','occupied',true)`, mine, f.member)
+	t.Cleanup(func() {
+		c := context.Background()
+		_, _ = f.store.SQL().ExecContext(c, `DELETE FROM paperboat.session_recordings WHERE machine_id=$1`, mine)
+		_, _ = f.store.SQL().ExecContext(c, `DELETE FROM paperboat.recording_key_grants WHERE team_id=$1`, personalScope(f.member))
+		_, _ = f.store.SQL().ExecContext(c, `DELETE FROM paperboat.recording_keys WHERE team_id=$1`, personalScope(f.member))
+		_, _ = f.store.SQL().ExecContext(c, `DELETE FROM paperboat.user_machines WHERE id=$1`, mine)
+	})
+	scope := personalScope(f.member)
+	if ks, err := f.s.KeyState(f.ctx, f.member, personalWorkspace); err != nil || ks.Key != nil || ks.ManualStart != recording.ManualStartAdmins || len(ks.Viewers) != 1 || ks.Viewers[0].AccountID != f.member {
+		t.Fatalf("personal KeyState before a key = %+v, %v", ks, err)
+	}
+	before := f.topic(mine)
+	k1, _ := newKey(t, scope, 1, nil)
+	if _, err := f.s.CreateKey(f.ctx, f.member, personalWorkspace, recording.KeyCreate{Key: k1, Grants: []recording.Grant{f.grant(f.bo)}}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("a copy for someone else's vault = %v, want ErrInvalid", err)
+	}
+	if _, err := f.s.CreateKey(f.ctx, f.member, personalWorkspace, recording.KeyCreate{Key: k1, Grants: []recording.Grant{f.grant(f.member)}}); err != nil {
+		t.Fatal(err)
+	}
+	if f.topic(mine) <= before {
+		t.Fatal("creating the personal key did not move the machine's recording_policy topic")
+	}
+	p := f.machinePolicy(mine)
+	if !p.Valid() || !p.Enabled || p.TeamID != scope || len(p.Keys) != 1 || p.ManualStart != recording.ManualStartAdmins || !slices.Equal(p.AdminAccounts, []string{f.member}) || len(p.RecordAccounts) != 0 {
+		t.Fatalf("personal machine policy = %+v", p)
+	}
+	if ks, err := f.s.KeyState(f.ctx, f.member, personalWorkspace); err != nil || ks.MyKey == nil || !ks.Viewers[0].HasGrant {
+		t.Fatalf("personal KeyState = %+v, %v", ks, err)
+	}
+	if err := f.s.PutSettings(f.ctx, f.member, personalWorkspace, recording.Settings{ManualStart: recording.ManualStartAnyone}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("personal settings = %v, want ErrInvalid", err)
+	}
+
+	now := time.Now().UTC()
+	report := recording.Report{RecordingID: recID, SessionID: "sess_p", Trigger: recording.TriggerManual, KeyGeneration: 1, ActorAccountID: f.member, Accounts: []string{f.member}, StartedAt: now}
+	if err := report.Validate(recording.KindStarted, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.InTx(f.ctx, func(ctx context.Context, tx *db.Tx) error {
+		return ApplyReportTx(ctx, tx, mine, recording.KindStarted, report)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if l, err := f.s.List(f.ctx, f.member, personalWorkspace, Filter{}); err != nil || l.Total != 1 || l.Recordings[0].ID != recID {
+		t.Fatalf("owner list = %+v, %v", l, err)
+	}
+	if l, err := f.s.List(f.ctx, f.bo, personalWorkspace, Filter{}); err != nil || l.Total != 0 {
+		t.Fatalf("another account listed the owner's recordings: %+v, %v", l, err)
+	}
+	if _, err := f.s.Replay(f.ctx, f.bo, recID, recording.ReplayRequest{CLIClientSessionID: "cli_" + f.bo}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("another account's replay = %v, want ErrNotFound", err)
+	}
+	out, err := f.s.Replay(f.ctx, f.member, recID, f.native())
+	if err != nil {
+		t.Fatal(err)
+	}
+	claims, err := f.signer.VerifyCredential(out.Ticket, testIssuer, recording.CredentialClass, time.Now())
+	if out.TeamID != scope || out.MachineID != mine || out.ViewerKey.Generation != 1 || err != nil || claims.WorkspaceID != personalWorkspace || claims.AccountID != f.member {
+		t.Fatalf("personal replay = %+v, claims %+v, %v", out, claims, err)
+	}
+	var audited int
+	if err := f.store.SQL().QueryRowContext(f.ctx, `SELECT count(*) FROM paperboat.audit_events WHERE event_type='personal.recording_replayed' AND resource_id=$1 AND actor_user_id=$1 AND metadata->>'recording_id'=$2`, f.member, recID).Scan(&audited); err != nil || audited != 1 {
+		t.Fatalf("personal replay audit events = %d, %v", audited, err)
+	}
+	if _, err := f.s.Replay(f.ctx, f.member, recID, recording.ReplayRequest{Source: recording.SourceBucket}); !errors.Is(err, ErrNoBucket) && !errors.Is(err, ErrNotArchived) {
+		t.Fatalf("bucket replay of a personal recording = %v, want no bucket", err)
 	}
 }

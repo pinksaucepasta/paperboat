@@ -17,7 +17,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/shared/recording"
 )
 
-// Teams session recordings (shared/recording). Team routes use the team route guards; the machine policy is read with
+// Session recordings (shared/recording): a team's (Teams plan) or, for the workspace "personal", the caller's own on every plan. Team routes use the team route guards; the machine policy is read with
 // the machine's runtime credential and proof, like the audit backlog.
 func registerRecordingRoutes(mux *http.ServeMux, s *recordings.Service, gateway *browserterminal.Gateway, signer browserMachineSignerReader, read, write func(http.Handler) http.Handler) {
 	mux.Handle("GET /v1/teams/{team_id}/recordings", read(recordingHandler(s, "list")))
@@ -145,7 +145,7 @@ func writeRecordingResult(w http.ResponseWriter, r *http.Request, out any, err e
 	case errors.Is(err, recordings.ErrForbidden):
 		writeError(w, r, 403, recording.ErrorForbidden, "The team's policy does not let you do this. Ask a team admin for a recording_view rule on this machine.")
 	case errors.Is(err, recordings.ErrNeedsTeam):
-		writeError(w, r, 409, recording.ErrorTeamPlanRequired, "Session recordings are part of the Teams plan.")
+		writeError(w, r, 409, recording.ErrorTeamPlanRequired, "Recordings of a team's terminals need the Teams plan. Your personal recordings are free.")
 	case errors.Is(err, recordings.ErrKeyUnavailable):
 		writeError(w, r, 409, recording.ErrorKeyUnavailable, "The team has no recording key yet. A team admin sets it up in Settings.")
 	case errors.Is(err, recordings.ErrKeyPending):

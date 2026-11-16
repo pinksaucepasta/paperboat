@@ -760,7 +760,7 @@ export const products: Product[] = [
         title: "Audit and compliance",
         body: [
           "Teleport's session recording, access requests and audit export are mature and made for regulated companies.",
-          "Paperboat has roles, single sign-on, directory sync and an audit log you can export or stream. On Team, Paperboat terminals can be recorded by rule or by hand, encrypted and archived to your own S3-compatible bucket, with every replay audited; plain SSH and remote commands are not recorded. It has no access-request workflow, so if you need approvals, or recording of every protocol, Teleport is the better fit.",
+          "Paperboat has roles, single sign-on, directory sync and an audit log you can export or stream. Paperboat terminals can be recorded by hand on every plan, kept encrypted on the machine; on Team they can also be recorded by rule and archived to your own S3-compatible bucket, with every replay audited; plain SSH and remote commands are not recorded. It has no access-request workflow, so if you need approvals, or recording of every protocol, Teleport is the better fit.",
         ],
       },
     ],

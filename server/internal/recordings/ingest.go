@@ -18,8 +18,8 @@ func ApplyReportTx(ctx context.Context, tx *db.Tx, machineID, kind string, r rec
 	switch kind {
 	case recording.KindStarted:
 		var team, name string
-		err := tx.QueryRow(ctx, `SELECT paperboat.recording_team(m.id), m.alias FROM user_machines m JOIN teams t ON t.team_id = paperboat.recording_team(m.id)
- WHERE m.id = $1 AND t.deleted_at IS NULL AND team_paid_entitled(t.team_id)`, machineID).Scan(&team, &name)
+		err := tx.QueryRow(ctx, `SELECT coalesce(paperboat.recording_team(m.id), $2 || m.user_id), m.alias FROM user_machines m LEFT JOIN teams t ON t.team_id = paperboat.recording_team(m.id)
+ WHERE m.id = $1 AND (t.team_id IS NULL OR t.deleted_at IS NULL AND team_paid_entitled(t.team_id))`, machineID, personalPrefix).Scan(&team, &name)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil
 		}

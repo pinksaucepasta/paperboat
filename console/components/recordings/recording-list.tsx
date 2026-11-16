@@ -4,7 +4,7 @@ import { RecordIcon, UsersThreeIcon } from "@phosphor-icons/react"
 import Link from "next/link"
 import { ApiError, useApiQuery, useWorkspace, type Machine } from "@/lib/api"
 import { formatBytes } from "@/lib/format"
-import { formatDuration, recordingPageSize, recordingsQuery, recordingSentences, type Recording } from "@/lib/recordings"
+import { formatDuration, personalWorkspace, recordingKeyQuery, recordingPageSize, recordingsQuery, recordingSentences, type Recording } from "@/lib/recordings"
 import { teamQuery } from "@/lib/teams"
 import { usePageParam } from "@/lib/use-page-param"
 import { useTimeFormat } from "@/lib/use-time-format"
@@ -14,6 +14,7 @@ import { LoadError } from "@/components/load-error"
 import { useCurrentMachine } from "@/components/machine-shell"
 import { StatusDot } from "@/components/machine-status"
 import { RecordingAccess } from "@/components/recordings/recording-access"
+import { PersonalRecordingSetup } from "@/components/recordings/personal-recording-setup"
 import { TableRowsSkeleton } from "@/components/skeletons"
 import { Button } from "@/components/ui/button"
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
@@ -23,18 +24,20 @@ export function MachineRecordings() {
   return <RecordingList machine={useCurrentMachine()} />
 }
 
-/** The team's recordings, newest first, or one machine's (its tab, or the machine picked in the header). */
+/** The workspace's recordings (a team's, or your own), newest first, or one machine's (its tab, or the machine picked in the header). */
 export function RecordingList({ machine: tabMachine }: { machine?: Machine }) {
   const workspace = useWorkspace()
   const { scope } = useListScope(tabMachine)
-  const teamId = workspace?.kind === "team" ? workspace.id : ""
+  const personal = workspace?.kind === "personal"
+  const teamId = personal ? personalWorkspace : workspace?.kind === "team" ? workspace.id : ""
   const pages = usePageParam(`${teamId}|${scope ?? ""}`)
   const query = useApiQuery(recordingsQuery(teamId, scope ?? undefined, pages.page))
   const team = useApiQuery({ ...teamQuery(teamId), enabled: Boolean(teamId) })
   const emails = new Map(team.data?.members.map((member) => [member.account_id, member.email ?? member.account_id]))
 
-  if (workspace && workspace.kind !== "team") return <TeamsOnly />
-  if (query.error instanceof ApiError && query.error.code === "team_plan_required") return <TeamsOnly upgrade />
+  const key = useApiQuery({ ...recordingKeyQuery(teamId), enabled: personal })
+  if (query.error instanceof ApiError && query.error.code === "team_plan_required") return <TeamsOnly />
+  if (personal && key.isSuccess && !key.data.key) return <PersonalRecordingSetup state={key.data} />
   const rows = query.data?.recordings ?? []
   if (query.isSuccess && query.data.total === 0)
     return (
@@ -47,10 +50,12 @@ export function RecordingList({ machine: tabMachine }: { machine?: Machine }) {
             </EmptyMedia>
             <EmptyTitle>No recordings yet</EmptyTitle>
             <EmptyDescription>
-              Terminals are recorded by the team&apos;s rules, or when their owner starts recording.
+              {personal
+                ? "Start recording from a terminal's Record button, or with pb recordings start."
+                : "Terminals are recorded by the team's rules, or when their owner starts recording."}
             </EmptyDescription>
           </EmptyHeader>
-          {["owner", "admin", "auditor"].includes(workspace?.role ?? "") && (
+          {!personal && ["owner", "admin", "auditor"].includes(workspace?.role ?? "") && (
             <EmptyContent>
               <Button variant="outline" size="lg" nativeButton={false} render={<Link href="/team?tab=recordings" />}>
                 Recording settings
@@ -157,24 +162,20 @@ function Row({ recording, showMachine, emails }: { recording: Recording; showMac
   )
 }
 
-/** Personal workspaces and teams without the Teams plan. */
-function TeamsOnly({ upgrade }: { upgrade?: boolean }) {
+/** A team without the Teams plan: its recordings need it (the personal workspace's never do). */
+function TeamsOnly() {
   return (
     <Empty className="py-16" data-recordings-upgrade>
       <EmptyHeader>
         <EmptyMedia variant="icon">
           <UsersThreeIcon />
         </EmptyMedia>
-        <EmptyTitle>Session recordings are part of Teams</EmptyTitle>
-        <EmptyDescription>
-          {upgrade
-            ? "Upgrade this team to record terminal sessions and replay them here."
-            : "Record your team's terminal sessions and replay them here."}
-        </EmptyDescription>
+        <EmptyTitle>Team recordings are part of Teams</EmptyTitle>
+        <EmptyDescription>Upgrade this team to record its terminal sessions and replay them here.</EmptyDescription>
       </EmptyHeader>
       <EmptyContent>
-        <Button size="lg" nativeButton={false} render={<Link href={upgrade ? "/billing" : "/team?create=1"} />}>
-          {upgrade ? "Upgrade" : "Create team"}
+        <Button size="lg" nativeButton={false} render={<Link href="/billing" />}>
+          Upgrade
         </Button>
       </EmptyContent>
     </Empty>

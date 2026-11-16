@@ -28,12 +28,12 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// recordingsCobraCommand declares `pb recordings`: list a team's terminal recordings and replay or export
+// recordingsCobraCommand declares `pb recordings`: list terminal recordings (yours, or a team's) and replay or export
 // one from its machine over the end-to-end encrypted machine connection.
 func recordingsCobraCommand() *cobra.Command {
-	group := &cobra.Command{Use: "recordings", Short: "List and replay team terminal recordings", Args: commandArgs(cobra.NoArgs), RunE: func(command *cobra.Command, _ []string) error { return command.Help() }}
+	group := &cobra.Command{Use: "recordings", Short: "List and replay terminal recordings", Args: commandArgs(cobra.NoArgs), RunE: func(command *cobra.Command, _ []string) error { return command.Help() }}
 	list := &cobra.Command{Use: "list", Short: "List the recordings you may see", Args: commandArgs(cobra.NoArgs), RunE: actionRun(recordingsList)}
-	list.Flags().String("team", "", "team whose recordings to list; defaults to the active team workspace")
+	list.Flags().String("team", "", "team whose recordings to list; defaults to the active workspace (personal: your own)")
 	list.Flags().String("machine", "", "only this machine's recordings (machine id)")
 	list.Flags().Bool("json", false, "print JSON")
 	addListPaging(list)
@@ -66,8 +66,8 @@ func recordingsList(c *command.Context) error {
 	if team == "" {
 		team = client.Workspace()
 	}
-	if team == "" || team == "personal" {
-		return localArgumentError("recordings belong to a team: pass --team or switch to a team workspace")
+	if team == "" {
+		team = wire.PersonalWorkspace
 	}
 	limit, err := commandListPagingMax(c)
 	if err != nil {
@@ -133,8 +133,8 @@ func recordingsControl(c *command.Context, action string) error {
 }
 
 var recordingRefusals = map[string]string{
-	wire.ErrorUnavailable:    "recording is not available on this machine: the team needs the Teams plan and a recording key, and the machine must be able to record",
-	wire.ErrorForbidden:      "you may not do that: the team lets only admins start recordings, or a rule started this one and only an admin can stop it",
+	wire.ErrorUnavailable:    "recording is not available on this machine: it needs a recording key (set it up in the console under Terminals > Recordings; a team also needs the Teams plan) and the machine must be able to record",
+	wire.ErrorForbidden:      "you may not do that: only admins (on a personal machine, its owner) start recordings here, or a rule started this one and only an admin can stop it",
 	wire.ErrorActive:         "this session is already being recorded",
 	wire.ErrorInactive:       "this session is not being recorded",
 	"not_found_or_forbidden": "the session is gone or you are no longer attached to it",
@@ -206,8 +206,8 @@ func readRecording(c *command.Context, id string, emit func([]byte) error) (resu
 		return err
 	}
 	defer clear(teamKey)
-	// The recording's machine is a team machine: only its team's workspace shows it.
-	teamClient, err := client.ForWorkspace(replay.TeamID)
+	// The recording's machine shows only in the workspace that owns the recording: its team's, or personal.
+	teamClient, err := client.ForWorkspace(wire.WorkspaceOf(replay.TeamID))
 	if err != nil {
 		return err
 	}

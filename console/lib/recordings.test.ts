@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { convertBytes, editRecordingRules, formatClock, formatDuration, parseCast, playerClock, recordingRules, SegmentFramer, toBase64 } from "@/lib/recordings"
+import { convertBytes, editRecordingRules, formatClock, formatDuration, parseCast, playerClock, recordingRules, recordingScope, SegmentFramer, toBase64 } from "@/lib/recordings"
 
 const policy = `{
   "tags": { "tag:prod": [] },
@@ -90,4 +90,9 @@ test("byte fields convert between the server's base64 and the vault's base64url,
   const vault = convertBytes(server, "url")
   expect(vault).toEqual({ team_id: "t+/", viewers: [{ account_id: "a", sharing_public_key: "-_8" }], viewer_key: { generation: 1, sealed: "ab-_" } })
   expect(convertBytes(vault, "std")).toEqual(server)
+})
+
+test("the personal workspace's key is sealed under its owner's scope, a team's under its id", () => {
+  expect(recordingScope("personal", [{ account_id: "user_1" }])).toBe("personal:user_1")
+  expect(recordingScope("acme", [{ account_id: "user_1" }])).toBe("acme")
 })

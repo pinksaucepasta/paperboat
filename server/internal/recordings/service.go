@@ -1,4 +1,5 @@
-// Package recordings is the server side of Teams session recordings (shared/recording): each team machine's
+// Package recordings is the server side of session recordings (shared/recording), a team's (Teams plan) or a person's
+// own (every plan, scope.go): each machine's
 // recording policy, the recording index fed by the machines' audit backlog, the team recording key with every
 // viewer's sealed copy, and replay tickets issued only after the replay audit event is written. Recording bytes
 // never reach the server.
@@ -22,7 +23,7 @@ import (
 var (
 	ErrNotFound       = errors.New("recording not found")
 	ErrForbidden      = errors.New("recording access is not allowed")
-	ErrNeedsTeam      = errors.New("session recordings are part of the Teams plan")
+	ErrNeedsTeam      = errors.New("team session recordings are part of the Teams plan")
 	ErrInvalid        = errors.New("recording request is invalid")
 	ErrKeyUnavailable = errors.New("the team has no recording key")
 	ErrKeyPending     = errors.New("no sealed copy of the recording key for this viewer yet")
@@ -81,14 +82,23 @@ func (s *Service) MachinePolicy(ctx context.Context, machineID string) (recordin
 		RetentionDays: s.cfg.MachineRetentionDays, DiskQuotaMB: s.cfg.DiskQuotaMB}
 	err := s.db.InReadOnlySnapshot(ctx, func(ctx context.Context, tx *db.Tx) error {
 		var team *string
+		var owner string
 		var enabled, adminsOnly bool
-		err := tx.QueryRow(ctx, `SELECT paperboat.recording_team(m.id), coalesce(t.deleted_at IS NULL AND NOT t.suspended AND team_paid_entitled(t.team_id), false), coalesce(t.recording_admins_only, false)
- FROM user_machines m LEFT JOIN teams t ON t.team_id = paperboat.recording_team(m.id) WHERE m.id = $1 AND m.deleted_at IS NULL AND m.revoked_at IS NULL`, machineID).Scan(&team, &enabled, &adminsOnly)
+		err := tx.QueryRow(ctx, `SELECT paperboat.recording_team(m.id), m.user_id, coalesce(t.deleted_at IS NULL AND NOT t.suspended AND team_paid_entitled(t.team_id), false), coalesce(t.recording_admins_only, false)
+ FROM user_machines m LEFT JOIN teams t ON t.team_id = paperboat.recording_team(m.id) WHERE m.id = $1 AND m.deleted_at IS NULL AND m.revoked_at IS NULL`, machineID).Scan(&team, &owner, &enabled, &adminsOnly)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrMachineGone
 		}
-		if err != nil || team == nil || !enabled {
+		if err != nil {
 			return err
+		}
+		if team == nil { // a personal machine records for its owner, who alone starts and replays
+			scope := personalScope(owner)
+			team, enabled, adminsOnly = &scope, true, true
+			out.AdminAccounts = []string{owner}
+		}
+		if !enabled {
+			return nil
 		}
 		out.Enabled, out.TeamID = true, *team
 		if adminsOnly {
@@ -96,6 +106,9 @@ func (s *Service) MachinePolicy(ctx context.Context, machineID string) (recordin
 		}
 		if out.Keys, err = keysTx(ctx, tx, *team); err != nil {
 			return err
+		}
+		if isPersonalScope(*team) {
+			return nil
 		}
 		if out.RecordAccounts, err = textColumn(ctx, tx, recordedSQL, *team, machineID); err != nil {
 			return err

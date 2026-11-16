@@ -433,16 +433,16 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
 	}
 	// A session recording replay from the CLI (recordings.admitNativeTx): the viewer's endpoint reaches the machine
 	// for capability recording until its latest ticket for the recording expires, while the account may still replay
-	// there. The scope's resource is the recording (the ticket's resource_id), as config_compare's is its assignment.
+	// there (a personal machine's owner always may). The scope's resource is the recording (the ticket's resource_id), as config_compare's is its assignment.
 	recordingRows, err := tx.QueryContext(ctx, `SELECT DISTINCT ON (a.recording_id, a.native_cli_session_id, a.machine_id) a.recording_id, a.native_cli_session_id, a.machine_id, a.account_id, m.user_id, a.expires_at
  FROM recording_native_admissions a
  JOIN cli_client_sessions c ON c.id = a.native_cli_session_id AND c.user_id = a.account_id AND c.state = 'active' AND c.revoked_at IS NULL
  JOIN users u ON u.id = a.account_id AND u.status = 'active'
  JOIN user_machines m ON m.id = a.machine_id AND m.revoked_at IS NULL AND m.deleted_at IS NULL
- JOIN teams t ON t.team_id = paperboat.recording_team(m.id) AND t.deleted_at IS NULL AND NOT t.suspended
+ LEFT JOIN teams t ON t.team_id = paperboat.recording_team(m.id) AND t.deleted_at IS NULL AND NOT t.suspended
  WHERE ((a.native_cli_session_id = $1 AND a.account_id = $2) OR (a.machine_id = $1 AND m.user_id = $2))
  AND (a.expires_at > $3 OR a.recording_id = ANY($4::text[]))
- AND NOT isempty(paperboat.workspace_policy_rule_ports(a.account_id, t.team_id, a.machine_id, 'recording_view'))
+ AND ((paperboat.recording_team(m.id) IS NULL AND m.user_id = a.account_id) OR NOT isempty(paperboat.workspace_policy_rule_ports(a.account_id, t.team_id, a.machine_id, 'recording_view')))
  ORDER BY a.recording_id, a.native_cli_session_id, a.machine_id, a.expires_at DESC LIMIT 257`, in.EndpointID, in.UserID, now, live["recording"])
 	if err != nil {
 		return NetworkConfigResult{}, err

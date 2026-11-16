@@ -74,15 +74,19 @@ func currentKeyTx(ctx context.Context, tx *db.Tx, team string) (*recording.Key, 
 }
 
 // KeyState is GET /v1/teams/{team}/recording-key: any member reads it (holders seal for the pending viewers).
-func (s *Service) KeyState(ctx context.Context, account, team string) (recording.KeyState, error) {
+func (s *Service) KeyState(ctx context.Context, account, workspace string) (recording.KeyState, error) {
 	out := recording.KeyState{Viewers: []recording.Viewer{}, ManualStart: recording.ManualStartAnyone}
 	err := s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-		if _, err := memberTx(ctx, tx, account, team, teams.PermissionTeamRead); err != nil {
+		team, _, err := scopeTx(ctx, tx, account, workspace, teams.PermissionTeamRead)
+		if err != nil {
 			return err
 		}
-		var adminsOnly bool
-		if err := tx.QueryRow(ctx, `SELECT recording_admins_only FROM teams WHERE team_id = $1`, team).Scan(&adminsOnly); err != nil {
-			return err
+		// Only the owner starts a recording on a personal machine.
+		adminsOnly := isPersonalScope(team)
+		if !adminsOnly {
+			if err := tx.QueryRow(ctx, `SELECT recording_admins_only FROM teams WHERE team_id = $1`, team).Scan(&adminsOnly); err != nil {
+				return err
+			}
 		}
 		if adminsOnly {
 			out.ManualStart = recording.ManualStartAdmins
@@ -92,7 +96,7 @@ func (s *Service) KeyState(ctx context.Context, account, team string) (recording
 			return err
 		}
 		out.Key = key
-		viewers, err := textColumn(ctx, tx, `SELECT paperboat.recording_viewers($1) ORDER BY 1`, team)
+		viewers, err := viewersTx(ctx, tx, team)
 		if err != nil {
 			return err
 		}
@@ -141,17 +145,18 @@ func (s *Service) KeyState(ctx context.Context, account, team string) (recording
 // CreateKey is POST /v1/teams/{team}/recording-key (security admins): generation 1, or a rotation signed by the
 // current generation's signing key that carries the current private bundle sealed to the new key. It must seal
 // for at least one viewer, so the key is never created with nobody holding it.
-func (s *Service) CreateKey(ctx context.Context, account, team string, in recording.KeyCreate) (recording.Key, error) {
+func (s *Service) CreateKey(ctx context.Context, account, workspace string, in recording.KeyCreate) (recording.Key, error) {
 	k := in.Key
 	if !k.ValidKey() || k.Generation > s.cfg.MaxKeyGenerations || len(in.Grants) == 0 || len(in.Grants) > 1000 ||
 		(k.Generation == 1) != (len(in.SealedPrevious) == 0) || (k.Generation > 1 && !recording.ValidSealed(in.SealedPrevious)) {
 		return recording.Key{}, ErrInvalid
 	}
 	err := s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-		if err := teams.LockTeam(ctx, tx, team); err != nil {
+		team, _, err := scopeTx(ctx, tx, account, workspace, teams.PermissionSecurityManage)
+		if err != nil {
 			return err
 		}
-		if _, err := memberTx(ctx, tx, account, team, teams.PermissionSecurityManage); err != nil {
+		if err := teams.LockTeam(ctx, tx, team); err != nil {
 			return err
 		}
 		current, err := currentKeyTx(ctx, tx, team)
@@ -173,25 +178,26 @@ func (s *Service) CreateKey(ctx context.Context, account, team string, in record
 			return err
 		}
 		action := map[bool]string{true: "recording_key_created", false: "recording_key_rotated"}[k.Generation == 1]
-		if err := teams.AuditTx(ctx, tx, account, team, action, "recording-key-"+strconv.FormatInt(k.Generation, 10), map[string]any{"generation": k.Generation, "rows": len(in.Grants)}); err != nil {
+		if err := auditTx(ctx, tx, account, team, action, "recording-key-"+strconv.FormatInt(k.Generation, 10), map[string]any{"generation": k.Generation, "rows": len(in.Grants)}); err != nil {
 			return err
 		}
-		return publishTx(ctx, tx, team)
+		return publishPolicyTx(ctx, tx, team)
 	})
 	return k, err
 }
 
 // PutGrants is PUT /v1/teams/{team}/recording-key/grants: a viewer holding the current generation seals it for
 // viewers who have none (or whose vault changed). A viewer's valid copy is never replaced.
-func (s *Service) PutGrants(ctx context.Context, account, team string, in recording.GrantsPut) error {
+func (s *Service) PutGrants(ctx context.Context, account, workspace string, in recording.GrantsPut) error {
 	if len(in.Grants) == 0 || len(in.Grants) > 1000 {
 		return ErrInvalid
 	}
 	return s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-		if err := teams.LockTeam(ctx, tx, team); err != nil {
+		team, _, err := scopeTx(ctx, tx, account, workspace, teams.PermissionTeamRead)
+		if err != nil {
 			return err
 		}
-		if _, err := memberTx(ctx, tx, account, team, teams.PermissionTeamRead); err != nil {
+		if err := teams.LockTeam(ctx, tx, team); err != nil {
 			return err
 		}
 		current, err := currentKeyTx(ctx, tx, team)
@@ -205,24 +211,27 @@ func (s *Service) PutGrants(ctx context.Context, account, team string, in record
 			return ErrKeyConflict
 		}
 		var holds bool
-		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM recording_key_grants WHERE team_id = $1 AND account_id = $2 AND generation = $3)
- AND $2 IN (SELECT paperboat.recording_viewers($1))`, team, account, in.Generation).Scan(&holds); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM recording_key_grants WHERE team_id = $1 AND account_id = $2 AND generation = $3)`, team, account, in.Generation).Scan(&holds); err != nil {
 			return err
 		}
-		if !holds {
+		viewers, err := viewersTx(ctx, tx, team)
+		if err != nil {
+			return err
+		}
+		if !holds || !slices.Contains(viewers, account) {
 			return ErrForbidden
 		}
 		if err := s.grantTx(ctx, tx, account, team, in.Generation, in.Grants, false); err != nil {
 			return err
 		}
-		return teams.AuditTx(ctx, tx, account, team, "recording_key_granted", "recording-grants-"+strconv.FormatInt(s.now().UnixNano(), 10), map[string]any{"generation": in.Generation, "rows": len(in.Grants)})
+		return auditTx(ctx, tx, account, team, "recording_key_granted", "recording-grants-"+strconv.FormatInt(s.now().UnixNano(), 10), map[string]any{"generation": in.Generation, "rows": len(in.Grants)})
 	})
 }
 
 // grantTx stores sealed copies for viewers. Each recipient must be a viewer and each copy sealed to their current
 // vault sharing key. replace also overwrites valid copies (a new generation replaces every copy it seals).
 func (s *Service) grantTx(ctx context.Context, tx *db.Tx, account, team string, generation int64, grants []recording.Grant, replace bool) error {
-	viewers, err := textColumn(ctx, tx, `SELECT paperboat.recording_viewers($1)`, team)
+	viewers, err := viewersTx(ctx, tx, team)
 	if err != nil {
 		return err
 	}
@@ -253,31 +262,30 @@ func (s *Service) grantTx(ctx context.Context, tx *db.Tx, account, team string, 
 }
 
 // PutSettings is PUT /v1/teams/{team}/recording-settings (settings admins).
-func (s *Service) PutSettings(ctx context.Context, account, team string, in recording.Settings) error {
+func (s *Service) PutSettings(ctx context.Context, account, workspace string, in recording.Settings) error {
 	if !recording.ValidManualStart(in.ManualStart) {
 		return ErrInvalid
 	}
 	return s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-		if err := teams.LockTeam(ctx, tx, team); err != nil {
+		team, _, err := scopeTx(ctx, tx, account, workspace, teams.PermissionSettingsManage)
+		if err != nil {
 			return err
 		}
-		if _, err := memberTx(ctx, tx, account, team, teams.PermissionSettingsManage); err != nil {
+		if isPersonalScope(team) {
+			return ErrInvalid // nothing to set: only the owner starts a personal recording
+		}
+		if err := teams.LockTeam(ctx, tx, team); err != nil {
 			return err
 		}
 		tag, err := tx.Exec(ctx, `UPDATE teams SET recording_admins_only = $2 WHERE team_id = $1 AND recording_admins_only <> $2`, team, in.ManualStart == recording.ManualStartAdmins)
 		if err != nil || tag.RowsAffected() == 0 {
 			return err
 		}
-		if err := teams.AuditTx(ctx, tx, account, team, "recording_settings_changed", "recording-settings-"+strconv.FormatInt(s.now().UnixNano(), 10), map[string]any{"manual_start": in.ManualStart}); err != nil {
+		if err := auditTx(ctx, tx, account, team, "recording_settings_changed", "recording-settings-"+strconv.FormatInt(s.now().UnixNano(), 10), map[string]any{"manual_start": in.ManualStart}); err != nil {
 			return err
 		}
-		return publishTx(ctx, tx, team)
+		return publishPolicyTx(ctx, tx, team)
 	})
-}
-
-func publishTx(ctx context.Context, tx *db.Tx, team string) error {
-	_, err := tx.Exec(ctx, `SELECT paperboat.publish_team_recording_policy(ARRAY[$1::text])`, team)
-	return err
 }
 
 func nilIfEmpty(b []byte) []byte {

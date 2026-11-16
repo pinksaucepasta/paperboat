@@ -35,7 +35,7 @@ type recordingLink struct {
 	SealedPrevious string `json:"sealed_previous"`
 }
 
-var errRecordingLocked = errors.New("Unlock ENV to use team recordings.")
+var errRecordingLocked = errors.New("Unlock ENV to use recordings.")
 
 // maxRecordingViewers bounds one grant request; maxRecordingHandles the replays open at once.
 const (

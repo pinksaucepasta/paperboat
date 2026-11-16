@@ -28,7 +28,7 @@ const maxListLimit = 200
 
 // List is GET /v1/teams/{team}/recordings: owners and admins see every recording of the team, other members those
 // on machines where they may replay.
-func (s *Service) List(ctx context.Context, account, team string, f Filter) (recording.List, error) {
+func (s *Service) List(ctx context.Context, account, workspace string, f Filter) (recording.List, error) {
 	if f.Limit == 0 {
 		f.Limit = 50
 	}
@@ -37,7 +37,7 @@ func (s *Service) List(ctx context.Context, account, team string, f Filter) (rec
 	}
 	out := recording.List{Recordings: []recording.Recording{}}
 	err := s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-		role, err := memberTx(ctx, tx, account, team, teams.PermissionTeamRead)
+		team, role, err := scopeTx(ctx, tx, account, workspace, teams.PermissionTeamRead)
 		if err != nil {
 			return err
 		}
@@ -78,8 +78,8 @@ type target struct {
 	keyGeneration                       int64
 }
 
-// authorizeTx checks, in order: the recording exists, the account is a member of its team on the Teams plan, an
-// explicit recording_view rule covers its machine, it is not deleted and its machine still exists.
+// authorizeTx checks, in order: the recording exists, the account is the owner of its personal scope or a member of its team on
+// the Teams plan with a recording_view rule covering its machine, it is not deleted and its machine still exists.
 func authorizeTx(ctx context.Context, tx *db.Tx, account, id string, archive bool) (target, error) {
 	var t target
 	var state string
@@ -93,18 +93,24 @@ func authorizeTx(ctx context.Context, tx *db.Tx, account, id string, archive boo
 	if err != nil {
 		return t, err
 	}
-	if _, err := memberTx(ctx, tx, account, t.team, teams.PermissionTeamRead); err != nil {
-		if errors.Is(err, ErrForbidden) {
+	if isPersonalScope(t.team) {
+		if t.team != personalScope(account) {
 			return t, ErrNotFound
 		}
-		return t, err
-	}
-	var allowed bool
-	if err := tx.QueryRow(ctx, `SELECT NOT isempty(paperboat.workspace_policy_rule_ports($1, $2, $3, 'recording_view'))`, account, t.team, t.machine).Scan(&allowed); err != nil {
-		return t, err
-	}
-	if !allowed {
-		return t, ErrForbidden
+	} else {
+		if _, err := memberTx(ctx, tx, account, t.team, teams.PermissionTeamRead); err != nil {
+			if errors.Is(err, ErrForbidden) {
+				return t, ErrNotFound
+			}
+			return t, err
+		}
+		var allowed bool
+		if err := tx.QueryRow(ctx, `SELECT NOT isempty(paperboat.workspace_policy_rule_ports($1, $2, $3, 'recording_view'))`, account, t.team, t.machine).Scan(&allowed); err != nil {
+			return t, err
+		}
+		if !allowed {
+			return t, ErrForbidden
+		}
 	}
 	if state == recording.StateDeleted && !archive {
 		return t, ErrDeleted
@@ -126,7 +132,7 @@ func (s *Service) ResolveReplay(ctx context.Context, account, id string) (team, 
 		t, err = authorizeTx(ctx, tx, account, id, false)
 		return err
 	})
-	return t.team, t.machine, t.owner, err
+	return recording.WorkspaceOf(t.team), t.machine, t.owner, err
 }
 
 // Replay is POST /v1/recordings/{id}/replay. In one transaction: authorizeTx, the viewer's sealed copy, the replay
@@ -154,7 +160,7 @@ func (s *Service) Replay(ctx context.Context, account, id string, in recording.R
 			return err
 		}
 		jti := "token_" + uuid.NewString()
-		if err := teams.AuditTx(ctx, tx, account, t.team, "recording_replayed", jti, map[string]any{"recording_id": id, "machine_id": t.machine, "session_id": t.session, "generation": t.keyGeneration, "source": sourceName(archive)}); err != nil {
+		if err := auditTx(ctx, tx, account, t.team, "recording_replayed", jti, map[string]any{"recording_id": id, "machine_id": t.machine, "session_id": t.session, "generation": t.keyGeneration, "source": sourceName(archive)}); err != nil {
 			return err
 		}
 		if archive {
@@ -173,7 +179,7 @@ func (s *Service) Replay(ctx context.Context, account, id string, in recording.R
 			return err
 		}
 		credential, err := issuer.Issue(mint.CredentialInput{Issuer: s.issuer, Audience: "paperboat-machine", Subject: account, JTI: jti, IssuedAt: now, ExpiresAt: expires,
-			CredentialClass: recording.CredentialClass, Scopes: []string{recording.Scope}, EnvironmentID: t.environment, AccountID: account, UserID: account, WorkspaceID: t.team,
+			CredentialClass: recording.CredentialClass, Scopes: []string{recording.Scope}, EnvironmentID: t.environment, AccountID: account, UserID: account, WorkspaceID: recording.WorkspaceOf(t.team),
 			MachineID: t.machine, ResourceKind: recording.ResourceKind, ResourceID: id, CLIClientSessionID: in.CLIClientSessionID})
 		if err != nil {
 			return err

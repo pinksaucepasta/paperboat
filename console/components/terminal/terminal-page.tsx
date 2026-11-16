@@ -199,8 +199,8 @@ export function TerminalRoom({
         actions={
           <div className="flex items-center gap-1">
             {connection.recording && <RecChip className="mr-1" />}
-            {/* Recording by hand is for the owner of a team terminal; the machine applies the team's rules. */}
-            {isOwner && session.owner_team_id && (
+            {/* Recording by hand is for the terminal's owner; the machine applies the team's rules, or your own key. */}
+            {isOwner && (
               <Action
                 label={connection.recording ? "Stop recording" : "Start recording"}
                 disabled={connection.phase !== "attached"}
