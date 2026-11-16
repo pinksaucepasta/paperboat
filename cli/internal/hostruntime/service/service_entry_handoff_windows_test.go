@@ -51,7 +51,5 @@ func TestSystemServiceEntryTreatsHandoffDuringStopAsCleanStop(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("service entry did not stop")
 	}
-	if status := <-statuses; status.State != svc.Stopped || status.Win32ExitCode != 0 {
-		t.Fatalf("handoff service status=%+v want clean stop", status)
-	}
+	noStoppedStatus(t, statuses)
 }
