@@ -26,13 +26,19 @@ type controlDialer struct {
 	backoff []time.Duration
 }
 
+// freshLookup asks with a resolver of its own: the shared one joins a lookup of the same name already in flight, so
+// after an outage every dial waited for a query sent while the network was down (its 5 s timeout, F21-49).
+func freshLookup(ctx context.Context, host string) ([]net.IPAddr, error) {
+	return (&net.Resolver{}).LookupIPAddr(ctx, host)
+}
+
 func newControlDialer(stateRoot string) *controlDialer {
 	d := &net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}
 	cache := ""
 	if filepath.IsAbs(stateRoot) {
 		cache = filepath.Join(stateRoot, "runtime", "control-addresses.json")
 	}
-	return &controlDialer{cache: cache, lookup: net.DefaultResolver.LookupIPAddr, dial: d.DialContext, backoff: []time.Duration{200 * time.Millisecond, 600 * time.Millisecond}}
+	return &controlDialer{cache: cache, lookup: freshLookup, dial: d.DialContext, backoff: []time.Duration{200 * time.Millisecond, 600 * time.Millisecond}}
 }
 
 func (c *controlDialer) DialContext(ctx context.Context, network, address string) (net.Conn, error) {

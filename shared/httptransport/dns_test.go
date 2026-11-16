@@ -152,3 +152,47 @@ func TestReplayableRequestsRetryOnceAfterALookupOrConnectFailure(t *testing.T) {
 		})
 	}
 }
+
+// After an outage the first query of a lookup is often lost. A request made once the network is back must ask again,
+// not join that lookup and wait for its retry (Go's resolver merges lookups of one name; F21-49: 5-7 s to reconnect).
+func TestARequestDoesNotWaitForALookupStartedBeforeIt(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { io.WriteString(w, "ok") }))
+	defer server.Close()
+	_, port, _ := net.SplitHostPort(server.Listener.Addr().String())
+	dns, dropped := lossyDNS(t)
+	config := DevelopmentConfig()
+	config.ProxySource = noProxy{}
+	config.Resolver = &net.Resolver{PreferGo: true, Dial: func(ctx context.Context, _, _ string) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, "udp", dns)
+	}}
+	transport, err := New(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &http.Client{Transport: transport}
+	get := func() error {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		request, _ := http.NewRequestWithContext(ctx, http.MethodGet, "http://api.example.test:"+port+"/", nil)
+		response, err := client.Do(request)
+		if err == nil {
+			response.Body.Close()
+		}
+		return err
+	}
+	first := make(chan error, 1)
+	go func() { first <- get() }() // its first query is the one dropped
+	for dropped.Load() == 0 {
+		time.Sleep(10 * time.Millisecond)
+	}
+	start := time.Now()
+	if err := get(); err != nil {
+		t.Fatal(err)
+	}
+	if took := time.Since(start); took > 2*time.Second {
+		t.Fatalf("the second request waited %v for the first one's lost query", took)
+	}
+	if err := <-first; err != nil {
+		t.Fatal(err)
+	}
+}

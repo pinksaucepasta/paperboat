@@ -66,8 +66,11 @@ func Dial(ctx context.Context, address string, tlsConf *tls.Config, conf *quic.C
 	return connection, nil
 }
 
-// lookup is the system resolver; tests replace it.
-var lookup = net.DefaultResolver.LookupIPAddr
+// lookup is the system resolver, a fresh one per call: the shared one joins a lookup of the same name already in
+// flight, so a relay redial after an outage waited for a query sent while the network was down. Tests replace it.
+var lookup = func(ctx context.Context, host string) ([]net.IPAddr, error) {
+	return (&net.Resolver{}).LookupIPAddr(ctx, host)
+}
 
 // resolve returns the first address of host that a UDP socket can be connected to (a route exists), else the first.
 func resolve(ctx context.Context, host string, port int) (*net.UDPAddr, error) {

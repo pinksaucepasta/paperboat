@@ -219,7 +219,17 @@ func (t *Transport) transport(snapshot ProxySnapshot) (*http.Transport, *http.Tr
 	}
 	dialContext := t.config.DialContext
 	if dialContext == nil {
-		dialContext = (&net.Dialer{Timeout: t.config.DialTimeout, KeepAlive: t.config.KeepAlive, Resolver: t.config.Resolver}).DialContext
+		timeout, keepAlive, template := t.config.DialTimeout, t.config.KeepAlive, t.config.Resolver
+		dialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
+			// A resolver of its own per dial: Go's resolver joins a lookup of the same name already in flight, so after
+			// an outage every new request waited for a query sent while the network was down (its 5 s timeout) instead
+			// of asking again. Tailscale's control client does not go through that path either (net/dnscache).
+			resolver := &net.Resolver{}
+			if template != nil {
+				resolver = &net.Resolver{PreferGo: template.PreferGo, StrictErrors: template.StrictErrors, Dial: template.Dial}
+			}
+			return (&net.Dialer{Timeout: timeout, KeepAlive: keepAlive, Resolver: resolver}).DialContext(ctx, network, address)
+		}
 	}
 	base := &http.Transport{Proxy: proxy, DialContext: dialContext, DialTLSContext: t.config.DialTLSContext, ForceAttemptHTTP2: t.config.ForceAttemptHTTP2, TLSClientConfig: t.config.TLSConfig.Clone(), TLSHandshakeTimeout: t.config.TLSHandshakeTimeout, ResponseHeaderTimeout: t.config.ResponseHeaderTimeout, ExpectContinueTimeout: t.config.ExpectContinueTimeout, IdleConnTimeout: t.config.IdleConnTimeout, MaxIdleConns: t.config.MaxIdleConns, MaxConnsPerHost: t.config.MaxConnsPerHost, MaxIdleConnsPerHost: t.config.MaxIdleConnsPerHost, MaxResponseHeaderBytes: t.config.MaxResponseHeaderBytes,
 		HTTP2: &http.HTTP2Config{SendPingTimeout: t.config.HealthCheckInterval, PingTimeout: t.config.HealthCheckTimeout},

@@ -146,6 +146,8 @@ type Authority struct {
 	refreshWake   chan struct{}
 	refreshUrgent chan struct{}
 	refreshNow    chan struct{}
+	networkMoved  chan struct{}
+	relayAnswered chan struct{}
 }
 
 type authorizedClient struct {
@@ -174,6 +176,15 @@ func (a *Authority) RequestRefresh() {
 	}
 }
 
+// NetworkChanged tells Run the local network changed (a link, route or address change): a failing renewal stops
+// backing off and runs at once, as Tailscale's control client and DERP redial do on a link change.
+func (a *Authority) NetworkChanged() {
+	select {
+	case a.networkMoved <- struct{}{}:
+	default:
+	}
+}
+
 // RequestUrgentRefresh asks Run to renew now for a change the server announced (a machine event: an access
 // revocation, a peer change). Unlike RequestRefresh it does not wait for the renewal budget; such renewals
 // are spaced by urgentRefreshSpacing instead.
@@ -189,7 +200,7 @@ func NewAuthority(options AuthorityOptions) (*Authority, error) {
 	if err != nil || issuer != options.Issuer || options.Keys == nil || !options.Self.ValidLocal() {
 		return nil, ErrAuthority
 	}
-	return &Authority{options: options, done: make(chan struct{}), refreshSlot: make(chan struct{}, 1), refreshWake: make(chan struct{}, 1), refreshNow: make(chan struct{}, 1), refreshUrgent: make(chan struct{}, 1)}, nil
+	return &Authority{options: options, done: make(chan struct{}), refreshSlot: make(chan struct{}, 1), refreshWake: make(chan struct{}, 1), refreshNow: make(chan struct{}, 1), networkMoved: make(chan struct{}, 1), relayAnswered: make(chan struct{}, 1), refreshUrgent: make(chan struct{}, 1)}, nil
 }
 
 // publicKeyCacheLimit bounds the validated peer keys remembered: an account holds at most a thousand machines.

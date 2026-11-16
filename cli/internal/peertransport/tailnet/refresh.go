@@ -11,8 +11,10 @@ import (
 	"errors"
 	"github.com/google/uuid"
 	"net/http"
+	"net/http/httptrace"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
@@ -296,6 +298,9 @@ func (a *Authority) Run(ctx context.Context, client NetworkAPI, report func(erro
 		}
 	}
 	var lastRefresh, lastUrgent time.Time
+	unreached := false // the last renewal failed before it reached any server
+	stopProbe := func() {}
+	defer func() { stopProbe() }()
 	urgent := false // the pending renewal was announced by the server: it skips the budget's wait
 	failures := 0
 	unusable := 0 // consecutive successful renewals that brought no usable relay
@@ -305,6 +310,15 @@ func (a *Authority) Run(ctx context.Context, client NetworkAPI, report func(erro
 			return nil
 		case <-ctx.Done():
 			return ctx.Err()
+		case <-a.relayAnswered:
+			if failures > 0 { // one retry now; the failure count stays, so a failing server keeps its backoff
+				reset(0)
+			}
+		case <-a.networkMoved:
+			if failures > 0 { // a working renewal keeps its schedule; a failing one tries the new network now
+				failures = 0
+				reset(0)
+			}
 		case <-a.refreshNow:
 			if failures > 0 {
 				// The server is failing: the backoff schedule already decides when to retry.
@@ -332,14 +346,28 @@ func (a *Authority) Run(ctx context.Context, client NetworkAPI, report func(erro
 				}
 			}
 			urgent = false
-			request, cancel := context.WithTimeout(ctx, 10*time.Second)
+			bound := 10 * time.Second
+			if unreached {
+				bound = unreachedAttempt
+			}
+			var connected atomic.Bool
+			request, cancel := context.WithTimeout(httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{
+				GotConn: func(httptrace.GotConnInfo) { connected.Store(true) },
+			}), bound)
 			err := a.refresh(request, client, time.Time{})
 			lastRefresh = time.Now()
 			cancel()
+			unreached = err != nil && !connected.Load() && ctx.Err() == nil
 			if err != nil {
 				failures++
+				if failures == 1 {
+					// Once per failure streak: the first relay answer proves the network is back and ends the backoff;
+					// a server that is down while relays answer gets one extra renewal, not one per answer.
+					stopProbe = a.startRelayProbe(ctx)
+				}
 			} else {
 				failures = 0
+				stopProbe()
 			}
 			if err != nil && report != nil {
 				report(err)
@@ -472,6 +500,12 @@ func regionalRenewalAfter(nodes []RegionalNode, now time.Time) time.Duration {
 func refreshRetryDelay(failures int) time.Duration {
 	return backoff.Retry(failures, time.Second, time.Minute)
 }
+
+// unreachedAttempt bounds a renewal after one that reached no server (no connection: the network drops everything,
+// or nothing listens). Such an attempt waits for a lookup or connect sent into the outage, and the full 10 s bound
+// kept a returned network unused that long (F21-49). The retry schedule stays the failure backoff, so a server that is
+// down is not asked more often; a local network change ends the backoff (NetworkChanged).
+const unreachedAttempt = 3 * time.Second
 
 // urgentRefreshSpacing bounds the renewals server-announced changes start outside the renewal budget. A revoked
 // CLI session must end its running exec and terminal within about 2 s, so a revoke that follows another

@@ -646,6 +646,8 @@ func (r *regionalRecovery) run(ctx context.Context) {
 			clear(retries)
 		case <-r.wake: // a new network: refused relays get a fresh try now, as Tailscale re-dials DERP on a link change
 			fence.networkChanged()
+			clear(retries)
+			r.authority.NetworkChanged()
 		}
 		// Tailscale's endpoint.heartbeat stops after sessionActiveTimeout
 		// (wgengine/magicsock/endpoint.go). With no pair, park before probes

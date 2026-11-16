@@ -3,6 +3,7 @@ package tailnet
 import (
 	"context"
 	"errors"
+	"net/http/httptrace"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -50,8 +51,9 @@ func TestFailingRefreshBacksOffInsteadOfRetryingEverySecond(t *testing.T) {
 		t.Fatal(err)
 	}
 	var calls atomic.Int32
-	client := networkAPIFunc{configuration: func(context.Context, string) (string, error) {
+	client := networkAPIFunc{configuration: func(ctx context.Context, _ string) (string, error) {
 		calls.Add(1)
+		reached(ctx)
 		return "", errors.New("service unavailable")
 	}}
 	ctx, cancel := context.WithCancel(t.Context())
@@ -65,6 +67,74 @@ func TestFailingRefreshBacksOffInsteadOfRetryingEverySecond(t *testing.T) {
 	if got := calls.Load(); got > 5 {
 		t.Fatalf("%d refresh attempts in 8.5 s against a failing server", got)
 	}
+}
+
+// reached tells the renewal's trace that its request got a connection, as a real server that answers does.
+func reached(ctx context.Context) {
+	if trace := httptrace.ContextClientTrace(ctx); trace != nil && trace.GotConn != nil {
+		trace.GotConn(httptrace.GotConnInfo{})
+	}
+}
+
+// F21-49: a renewal after one that reached no server is bounded short (it waits on a lookup or connect sent into the
+// outage) but keeps the failure backoff; a local network change ends the backoff and renews at once.
+func TestUnreachedRenewalIsBoundedShortAndANetworkChangeRenewsAtOnce(t *testing.T) {
+	a, c, signer, _ := networkTestAuthority(t)
+	if err := a.Apply(t.Context(), networkToken(t, signer, c)); err != nil {
+		t.Fatal(err)
+	}
+	var calls, renewed atomic.Int32
+	var back atomic.Bool
+	var longest atomic.Int64
+	client := networkAPIFunc{configuration: func(ctx context.Context, _ string) (string, error) {
+		n := calls.Add(1)
+		if !back.Load() {
+			started := time.Now()
+			<-ctx.Done() // sent into the outage: no connection, nothing comes back
+			// The first attempt still had the long bound.
+			if took := int64(time.Since(started)); n > 1 && took > longest.Load() {
+				longest.Store(took)
+			}
+			return "", ctx.Err()
+		}
+		reached(ctx)
+		renewed.Add(1)
+		c.Generation++
+		return networkToken(t, signer, c), nil
+	}}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- a.Run(ctx, client, nil) }()
+	defer func() { cancel(); <-done }()
+	waitFor(t, 30*time.Second, "three renewals into the outage", func() bool { return calls.Load() >= 3 })
+	if bound := time.Duration(longest.Load()); bound > unreachedAttempt+time.Second {
+		t.Fatalf("an unreached renewal waited %v", bound)
+	}
+	time.Sleep(unreachedAttempt + 500*time.Millisecond) // let the attempt in flight end; the next waits on the backoff
+	back.Store(true)
+	start := time.Now()
+	a.NetworkChanged()
+	waitFor(t, unreachedAttempt+time.Second, "a renewal right after the network changed", func() bool { return renewed.Load() >= 1 })
+	t.Logf("renewed %v after the network changed", time.Since(start).Round(time.Millisecond))
+}
+
+// A server that cannot be reached at all (its host down) is asked on the failure backoff, not every second: over ten
+// minutes one engine makes a bounded number of attempts, so a fleet does not pile onto it when it returns.
+func TestUnreachedServerIsAskedOnTheBackoffForTenMinutes(t *testing.T) {
+	a, c, signer, _ := networkTestAuthority(t)
+	if err := a.Apply(t.Context(), networkToken(t, signer, c)); err != nil {
+		t.Fatal(err)
+	}
+	unreached := errors.New("dial tcp: i/o timeout")
+	attempts, elapsed := 0, time.Duration(0)
+	for failures := 1; elapsed < 10*time.Minute; failures++ {
+		elapsed += unreachedAttempt + a.nextRefresh(unreached, failures, 0)
+		attempts++
+	}
+	if attempts > 30 {
+		t.Fatalf("%d attempts in ten minutes against an unreachable server", attempts)
+	}
+	t.Logf("%d attempts in ten minutes", attempts)
 }
 
 func waitFor(t *testing.T, limit time.Duration, what string, ok func() bool) {
