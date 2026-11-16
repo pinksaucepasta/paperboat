@@ -1,7 +1,10 @@
 package controlplane
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -46,5 +49,18 @@ func TestRouteSnapshotPagesCoverTheSnapshotOnceInOrder(t *testing.T) {
 	}
 	if page, next, err := routeSnapshotPage(nil, ""); err != nil || len(page) != 0 || next != "" {
 		t.Fatalf("empty snapshot: %v %q %v", page, next, err)
+	}
+}
+
+// F21-168: a route observation request over the limit is refused with a typed 413 the edge can read, never answered with
+// an empty reply that looks like success.
+func TestObservedRoutesOverTheLimitAreRefusedNotDropped(t *testing.T) {
+	routes := strings.Repeat(`{},`, maxRouteObservationsPerRequest) + `{}`
+	request := httptest.NewRequest(http.MethodPost, "/v1/edge/routes/observations", strings.NewReader(`{"edge_node_id":"node_a","routes":[`+routes+`]}`))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	NewEdgeService(nil, "edge-control-credential-01234567890123456789").handleObservedRoutes(response, request)
+	if response.Code != http.StatusRequestEntityTooLarge || !strings.Contains(response.Body.String(), "too_many_routes") {
+		t.Fatalf("answer = %d %q", response.Code, response.Body.String())
 	}
 }

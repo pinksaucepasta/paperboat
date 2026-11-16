@@ -844,12 +844,20 @@ func (s *EdgeService) Handler() http.Handler {
 	})
 }
 
+// maxRouteObservationsPerRequest bounds one observation request: the server applies it in a single transaction,
+// and the edge sends routeObservationBatch (100) per request, so a larger one is a client fault to refuse, never to drop.
+const maxRouteObservationsPerRequest = 1000
+
 func (s *EdgeService) handleObservedRoutes(w http.ResponseWriter, r *http.Request) {
 	var input struct {
 		NodeID string             `json:"edge_node_id"`
 		Routes []RouteObservation `json:"routes"`
 	}
-	if !s.decode(w, r, &input) || len(input.Routes) > 1000 {
+	if !s.decode(w, r, &input) {
+		return
+	}
+	if len(input.Routes) > maxRouteObservationsPerRequest {
+		writeEdgeError(w, r, http.StatusRequestEntityTooLarge, "too_many_routes", false, 0, ErrInvalidUsageReport)
 		return
 	}
 	if err := s.ObserveRoutes(r.Context(), input.NodeID, input.Routes); err != nil {
