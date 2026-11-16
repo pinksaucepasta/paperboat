@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/envinject"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/nativeproto"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/streamauth"
@@ -89,5 +90,25 @@ func TestOfflineAuthorizerJudgesTheDeadlineOnTheServerClock(t *testing.T) {
 	closed := &offlineAuthorizer{consumer: "exec", operationID: "op", accountID: "a", endpointID: "e", deadline: serverNow.Add(-time.Minute)}
 	if _, err := closed.Authorize(context.Background(), frame); err == nil {
 		t.Fatal("a deadline one minute gone on the server was accepted")
+	}
+}
+
+// Managed ENV needs a valid launch binding: an exec admitted from the standing rules carries the actor and the personal
+// workspace, so the host fetches the owner's layers instead of saying delivery is pending (the launch context was
+// invalid and no pb exec ever got its ENV).
+func TestStandingRuleExecHasAValidENVLaunchBinding(t *testing.T) {
+	plain, _ := net.Pipe()
+	defer plain.Close()
+	authorizer, err := newOfflineAuthorizer(&dispatchOfflineConn{Conn: plain, peer: NativeDispatchOfflinePeer{AccountID: "user_5ae46801-d921-4983-be1c-db50ad886304", EndpointID: "cli_peer", PaperboatAnswering: true}, header: streamauth.Header{Consumer: "exec", OperationID: "op-1", DeadlineUnix: time.Now().Add(time.Minute).Unix()}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := authorizer.Authorize(context.Background(), protocol.Frame{Capability: "exec.v1", OperationID: "op-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	binding, ok := envinject.LaunchContextFrom(envinject.WithLaunchContext(context.Background(), got.WorkspaceID, got.ActorAccountID))
+	if !ok || binding.WorkspaceID != "personal" || binding.ActorAccountID != "user_5ae46801-d921-4983-be1c-db50ad886304" {
+		t.Fatalf("launch binding = %+v ok=%v", binding, ok)
 	}
 }
