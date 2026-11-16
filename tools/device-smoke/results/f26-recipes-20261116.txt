@@ -1547,3 +1547,69 @@ $ pb config repository connect https://github.com/octocat/octocat.github.io.git 
 {"repository":{"state":"active","id":"repository_22f76293-f1b3-458b-90de-4cdeb4ceed0b","provider":"git","external_ref":"https://github.com/octocat/octocat.github.io.git","display_name":"rcp-oc"},"version":"1"}
 rc=0
 repository_22f76293-f1b3-458b-90de-4cdeb4ceed0b	rcp-oc	git
+
+################ f11-06 connect (macOS, pbmac2)
+=== F11-06 connect checks on pbmac2 (macOS 26.6.2, creator as a second --config over SSH), server .39, client dev-c688afd25, 2026-11-16T17:04:31Z ===
+== valid-https
+{"schema_version":"1.0","ok":false,"error":{"code":"operation_failed","category":"local_io","message":"Paperboat could not finish the command. Check the current state before retrying; run `pb doctor` if this continues.","retryable":false,"state_changed":"unknown","outcome_uncertain":false,"support_reference":"support_<ref>
+rc=1
+== missing-branch
+pb: The config repository does not have the sync branch. Create that branch (or pick the repository's existing branch in the machine configuration), then retry. Support reference: support_<ref>. Run `pb bugreport --upload` to send the details.
+rc=1
+== not-found
+pb: The repository was not found or refused these credentials. Check the URL, or pass --credentials-file <profile> (the JSON `pb config repository credentials set` reads) for a private repository.
+rc=2
+== bad-manifest
+pb: The config repository's .paperboat/config-sync.toml is not a valid config sync file (invalid config sync source configuration: toml: line 1 (last key "mode"): unexpected EOF; expected value). Fix it in the repository, then retry.
+rc=2
+== ssh-no-creds
+pb: Checking an SSH repository needs its credentials: pass --credentials-file <profile> (the JSON `pb config repository credentials set` reads).
+rc=2
+=== F11-06 Mac valid-HTTPS connect re-run with a small repository (pbmac2, dev-c688afd25, server .39, 2026-11-16T17:25:12Z); github/gitignore above is over the read limit (64 MiB/10,000 objects), whose message is fixed in 196984e22 ===
+$ pb config repository connect https://github.com/octocat/octocat.github.io.git --branch master --name rcp-oc --json
+{"repository":{"state":"active","id":"repository_22f76293-f1b3-458b-90de-4cdeb4ceed0b","provider":"git","external_ref":"https://github.com/octocat/octocat.github.io.git","display_name":"rcp-oc"},"version":"1"}
+rc=0
+repository_22f76293-f1b3-458b-90de-4cdeb4ceed0b	rcp-oc	git
+
+################ f11-06 tag rule (L/M/W)
+=== F11-06 tag rule, server .42 (bc0cb7a0d, with b4c1c1735), creator CLI on Linux, 2026-11-16T18:33:16Z ===
+$ pb recipe update -f rcpz.toml   [drops [config]]
+Recipe rcpz updated to revision 7: config changed. 3 online machines will apply it now.
+$ pb policy get (config_sync)
+[{"dst": ["tag:rcpz"], "repository": "https://github.com/octocat/Spoon-Knife.git", "note": "F11-06 device check"}]
+$ pb config unassign rcp-l13 --confirm <code>
+Removed config assignment from rcp-l13.
+$ pb config unassign managedlmachine --confirm <code>
+Removed config assignment from managedlmachine.
+$ pb config unassign rcp-wz --confirm <code>
+Removed config assignment from rcp-wz.
+--- rcp-l13 (Linux container on hp, user tester) ---
+$ pb --version
+  ▄▄▝▀▀▀▀▀▘▄▄   Version dev-c688afd25
+$ pb config sync validate
+Machine configuration: /home/tester/.config/paperboat/config-sync.toml
+Revision: 659392952dd39da3de96a47bcd25f2e3fab5ffa97d83a89ded329fce8f5e478b
+Enabled: true · pull_only · 0 path rules
+Repository: https://github.com/octocat/Spoon-Knife.git (chosen by your personal policy rule for tag:rcpz; choose another with --repository)
+$ pb config sync apply --confirm <code>
+{"schema_version":"1.0","ok":true,"data":{"shared_revision":"d0dd1f61b33d64e29d8bc1372a94ef6a2fee76a9","revision":"659392952dd39da3de96a47bcd25f2e3fab5ffa97d83a89ded329fce8f5e478b","enabled":true,"pull_repository_id":"repository_67644abf-60a5-497f-9644-b7d15455e086","push_repository_id":"","mode":"pull_only","automatic_updates":false,"path_rules":[],"repository_bindings":[],"source":"tag_rule"}}
+--- managedlmachine (macOS, pbmac2 user admin) ---
+$ pb --version
+  ▄▄▝▀▀▀▀▀▘▄▄   Version dev-c688afd25
+$ pb config sync validate
+Machine configuration: /Users/admin/Library/Application Support/Paperboat/config-sync.toml
+Revision: 659392952dd39da3de96a47bcd25f2e3fab5ffa97d83a89ded329fce8f5e478b
+Enabled: true · pull_only · 0 path rules
+Repository: https://github.com/octocat/Spoon-Knife.git (chosen by your personal policy rule for tag:rcpz; choose another with --repository)
+$ pb config sync apply --confirm <code>
+{"schema_version":"1.0","ok":true,"data":{"shared_revision":"d0dd1f61b33d64e29d8bc1372a94ef6a2fee76a9","revision":"659392952dd39da3de96a47bcd25f2e3fab5ffa97d83a89ded329fce8f5e478b","enabled":true,"pull_repository_id":"repository_67644abf-60a5-497f-9644-b7d15455e086","push_repository_id":"","mode":"pull_only","automatic_updates":false,"path_rules":[],"repository_bindings":[],"source":"tag_rule"}}
+--- rcp-wz (Windows, victus user rcpw3) ---
+$ pb --version
+  ▄▄▝▀▀▀▀▀▘▄▄   Version dev-2e3cad1f5
+$ pb config sync validate
+Machine configuration: C:\Users\rcpw3\AppData\Local\Paperboat\config-sync.toml
+Revision: 659392952dd39da3de96a47bcd25f2e3fab5ffa97d83a89ded329fce8f5e478b
+Enabled: true · pull_only · 0 path rules
+Repository: https://github.com/octocat/Spoon-Knife.git (chosen by your personal policy rule for tag:rcpz; choose another with --repository)
+$ pb config sync apply --confirm <code>
+{"schema_version":"1.0","ok":true,"data":{"shared_revision":"d0dd1f61b33d64e29d8bc1372a94ef6a2fee76a9","revision":"659392952dd39da3de96a47bcd25f2e3fab5ffa97d83a89ded329fce8f5e478b","enabled":true,"pull_repository_id":"repository_67644abf-60a5-497f-9644-b7d15455e086","push_repository_id":"","mode":"pull_only","automatic_updates":false,"path_rules":[],"repository_bindings":[],"source":"tag_rule"}}
