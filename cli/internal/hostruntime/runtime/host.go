@@ -113,6 +113,7 @@ type HostDependencies struct {
 	NativeDispatch      *server.NativeDispatchConfig
 	NativeWorkerEpoch   uint64
 	ReconcileCarrierSSH func(context.Context, bool) error
+	CarrierEvents       func(context.Context, bool, bool) error
 	Capabilities        server.CapabilityGate
 	// RecordingControl builds the team recordings controller over the host's sessions.
 	StoredFiles      func(*filetransfer.Service) (Service, error)

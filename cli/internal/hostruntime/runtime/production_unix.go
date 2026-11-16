@@ -225,7 +225,13 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 		return nil, err
 	}
 	revocationRefresh.events = machineEvents.Subscribe(machineevents.TopicMachineAccess)
+	reachable := machineEvents.Recovered()
 	authorizationRefresh := serviceGroup{machineEvents, &jwksRefreshService{cache: cache}, revocationRefresh}
+	if len(ownerDependencies) != 0 && ownerDependencies[0].CarrierEvents != nil {
+		forwarder := newCarrierEventForwarder(machineEvents, ownerDependencies[0].CarrierEvents)
+		reachable = forwarder.recovered
+		authorizationRefresh = append(authorizationRefresh, forwarder)
+	}
 	if nativeDispatch == nil {
 		authorizationRefresh = append(authorizationRefresh, newPeerEnrollmentRuntimeService(peerEnrollment, 2*time.Second))
 	}
@@ -344,7 +350,7 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 	if err != nil {
 		return nil, errors.Join(ErrProductionInvalid, err)
 	}
-	offlineAuditUploads := newOfflineAuditService(offlineAudit, controlURL, machineID, runtimeConfig.StateRoot, transport, renewingTokens, operationID, machineEvents.Recovered())
+	offlineAuditUploads := newOfflineAuditService(offlineAudit, controlURL, machineID, runtimeConfig.StateRoot, transport, renewingTokens, operationID, reachable)
 	runtimeService := serviceGroup{availabilityService, runtimeObservation, offlineAuditUploads}
 	previewAssembly, err := newProductionPreviewAssembly(productionPreviewAssemblyConfig{
 		ControlURL: controlURL.String(), StateRoot: runtimeConfig.StateRoot, MachineID: machineID, InstallationGeneration: machineRegistration.InstallationGeneration, BootID: lazyBootID, OSBootID: bootState.OSBootID,

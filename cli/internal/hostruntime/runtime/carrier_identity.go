@@ -70,19 +70,9 @@ func loadCarrierIdentity(ctx context.Context, version string, environ func(strin
 		return nil, err
 	}
 	machineIdentity := renewingMachineIdentity{tokens: tokens, proofs: enrollment.ProofSource{StateRoot: config.StateRoot}}
-	// The carrier serves SSH under the signed network, so a withdrawn peer must reach it at once (F5-10): an access
-	// change wakes its renewal (carrierRenewalTopics). The 30 s wait gets its own identity source.
-	eventTokens, err := enrollment.NewRenewingTokenSource(enrollment.RenewingTokenConfig{ControlURL: controlURL.String(), StateRoot: config.StateRoot, Transport: transport, RenewBefore: 10 * time.Minute, Timeout: 15 * time.Second, OperationID: operationID})
-	if err != nil {
-		return nil, err
-	}
-	events, err := machineevents.New(machineevents.Config{ControlURL: controlURL.String(), Tokens: eventTokens, Proofs: enrollment.ProofSource{StateRoot: config.StateRoot}, OperationID: operationID, Transport: transport})
-	if err != nil {
-		return nil, err
-	}
 	peerEnrollment, err := peeridentityenrollment.New(peeridentityenrollment.Config{ControlURL: controlURL.String(), StateRoot: config.StateRoot, Transport: transport, Timeout: 15 * time.Second}, machineIdentity)
 	if err != nil {
 		return nil, err
 	}
-	return &carrierIdentity{config, controlURL, transport, identity, registration.InstallationGeneration, tokens, machineIdentity, events, peerEnrollment, operationID}, nil
+	return &carrierIdentity{config, controlURL, transport, identity, registration.InstallationGeneration, tokens, machineIdentity, machineevents.NewPushed(), peerEnrollment, operationID}, nil
 }

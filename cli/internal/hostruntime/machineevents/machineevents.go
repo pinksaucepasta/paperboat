@@ -1,5 +1,5 @@
 // Package machineevents lets a machine learn about server-side changes to what it caches without
-// polling at a short interval. One Hub per process holds a single long request to the control plane
+// polling at a short interval. One worker Hub per machine holds a single long request to the control plane
 // (POST /v1/machine-events/wait). The server answers with the generation of every topic that moved
 // past the generation the machine last saw, or with 204 after about 55 seconds. Generations carry no
 // data: a woken subscriber refreshes through its own endpoint.
@@ -95,11 +95,12 @@ type Hub struct {
 	wait     WaitFunc
 	fallback time.Duration
 
-	mu      sync.Mutex
-	subs    map[Topic][]*Subscription
-	known   map[Topic]int64
-	healthy bool
-	changed chan struct{} // closed and replaced when a topic is first subscribed
+	mu       sync.Mutex
+	subs     map[Topic][]*Subscription
+	known    map[Topic]int64
+	healthy  bool
+	lastPush time.Time     // nonzero for locally forwarded events; health expires if the worker stops
+	changed  chan struct{} // closed and replaced when a topic is first subscribed
 	// recovered gets one token each time the wait loop succeeds again after failing: the control plane is
 	// reachable again. One consumer: the offline audit uploader.
 	recovered chan struct{}
@@ -183,12 +184,12 @@ func (h *Hub) Subscribe(topics ...Topic) *Subscription {
 func (h *Hub) Healthy() bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	return h.healthy
+	return h.healthy && (h.lastPush.IsZero() || time.Since(h.lastPush) < PushHealthLifetime)
 }
 
 // Start runs the wait loop until Shutdown or ctx ends.
 func (h *Hub) Start(ctx context.Context) error {
-	if h == nil || ctx == nil {
+	if h == nil || ctx == nil || h.wait == nil {
 		return ErrInvalid
 	}
 	h.mu.Lock()

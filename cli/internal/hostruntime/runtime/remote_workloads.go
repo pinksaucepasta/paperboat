@@ -13,7 +13,7 @@ import (
 
 // NewProductionFeatureHost constructs the actual replaceable feature runtime.
 // Durable terminals have independent owners; hostd owns explicit executions.
-func NewProductionFeatureHost(ctx context.Context, version string, environ func(string) string, sessions session.Service, executions execprocess.Service, dispatch *server.NativeDispatchConfig, reconcileSSH func(context.Context, bool) error, workerEpoch uint64) (*Host, error) {
+func NewProductionFeatureHost(ctx context.Context, version string, environ func(string) string, sessions session.Service, executions execprocess.Service, dispatch *server.NativeDispatchConfig, reconcileSSH func(context.Context, bool) error, workerEpoch uint64, carrierEvents func(context.Context, bool, bool) error) (*Host, error) {
 	if sessions == nil || executions == nil {
 		return nil, ErrHostInvalid
 	}
@@ -22,7 +22,7 @@ func NewProductionFeatureHost(ctx context.Context, version string, environ func(
 	} else if workerEpoch == 0 {
 		return nil, ErrHostInvalid
 	}
-	return newProductionHost(ctx, version, environ, HostDependencies{Sessions: sessions, Executions: executions, ReuseAgentToken: true, NativeDispatch: dispatch, ReconcileCarrierSSH: reconcileSSH, NativeWorkerEpoch: workerEpoch})
+	return newProductionHost(ctx, version, environ, HostDependencies{Sessions: sessions, Executions: executions, ReuseAgentToken: true, NativeDispatch: dispatch, ReconcileCarrierSSH: reconcileSSH, NativeWorkerEpoch: workerEpoch, CarrierEvents: carrierEvents})
 }
 
 type launchSessions struct {
