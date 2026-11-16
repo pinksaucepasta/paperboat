@@ -7,7 +7,7 @@ the target. TARGET is a hosted runner paired to the production account (macpool 
   device_paths.py relay      --windows (PB_SMOKE_WINDOWS_PB, SMOKE_WINDOWS_SSH) --name relmw-win --peer relmw-p1 --relay IP --relay IP
 
 rebind: the target loses its network for --outage-seconds (everything except the SSH that drives it), and while it is away
-its UDP source ports move (macOS: the daemon restarts, pf's nat does not translate the host's own traffic; Windows: a WinDivert
+its UDP source ports move (macOS: a userspace NAT behind a utun, mac_udp_nat.py, changes every flow's outbound port while the daemon runs; Windows: a WinDivert
 filter that rewrites the source port, pydivert),
 then the peer execs INTO it: the first exec must succeed within --limit s of the network returning, the next three too,
 and the outbound exec from the target works.
@@ -23,6 +23,8 @@ SSH = shlex.split(os.environ.get("PB_MAC_SSH", "ssh -o BatchMode=yes"))  # PB_MA
 sys.path.insert(0, str(HERE))
 RANGE = "41000-41999"
 PF_CUT = "com.apple/pbsmoke-cut"
+PF_NAT = "com.apple/pbsmoke-nat"  # a separate anchor: the cut rules are loaded and flushed on their own
+NAT_LOG, NAT_PID = "/tmp/nat.log", "/tmp/nat.pid"
 
 
 def ssh(host, script, timeout=120, command=("ssh", "-o", "BatchMode=yes")):
@@ -88,13 +90,34 @@ class Mac:
         return set(msh(self.host, "sudo -n lsof -nP -iUDP 2>/dev/null | awk '$1==\"pb\" {print $9}' | sort -u")[1].split())
 
     @contextlib.contextmanager
+    def nat_front(self, seconds):
+        """pf's nat does not translate the Mac's own traffic (its state table keeps the source port, checked on macOS 26), so
+        pf routes the daemon's UDP to the cut addresses into a utun device and mac_udp_nat.py is the NAT behind it: every flow
+        leaves from a port of the script's own (41000-41999), and rebind() changes all of them while the daemon runs."""
+        rc, host_ip = msh(self.host, "ipconfig getifaddr $(route -n get default | awk '/interface:/ {print $2}')")
+        if rc or not re.fullmatch(r"[0-9.]+", host_ip):
+            raise RuntimeError(f"no primary address on the Mac: {host_ip[-100:]}")
+        far = " ".join(f"--far {ip}" for ip in self.cut_ips)
+        subprocess.run([*SSH, self.host, "cat >/tmp/mac_udp_nat.py"], input=(HERE / "mac_udp_nat.py").read_text(), text=True, check=True, timeout=60)
+        rc, out = msh(self.host, f"sudo -n rm -f {NAT_LOG}; sudo -n sh -c 'python3 /tmp/mac_udp_nat.py 10.99.0.1 {host_ip} {NAT_LOG} {far} --seconds {seconds} >/tmp/nat.out 2>&1 </dev/null & echo $! >{NAT_PID}'; sleep 3; cat /tmp/nat.out", 60)
+        utun = out.split()[-1] if out.startswith("ready") else ""
+        if not utun:
+            raise RuntimeError(f"the NAT did not start: {out[-200:]}")
+        ips = " ".join(self.cut_ips)
+        rules = f"pass out quick route-to ({utun} 10.99.0.2) inet proto udp from {host_ip} port {{ 1:40999 42000:65535 }} to {{ {ips} }}\n"
+        with self.rules(PF_NAT, rules, seconds, self.cut_ips):  # states of the flows made before the rule would bypass it
+            try:
+                yield
+            finally:
+                msh(self.host, f"sudo -n kill $(cat {NAT_PID}) 2>/dev/null; sudo -n pfctl -a {PF_NAT} -F rules >/dev/null 2>&1; sudo -n rm -f {NAT_PID}", 60)
+
+    @contextlib.contextmanager
     def rebind(self, seconds):
-        """pf's nat does not translate the Mac's own traffic (its state table keeps the source port, checked on macOS 26),
-        so the ports move by restarting the daemon while the network is cut: new sockets, new source ports."""
-        before = self.udp_ports()
-        self.restart_daemon()
-        time.sleep(5)
-        yield lambda: len(self.udp_ports() - before)  # daemon UDP endpoints that did not exist before
+        """The NAT changes the outbound port of every flow (SIGUSR1); the daemon is not restarted and is told nothing."""
+        rc, out = msh(self.host, f"sudo -n kill -USR1 $(cat {NAT_PID}); sleep 1; grep -c rebind {NAT_LOG}")
+        if rc or not out.strip().isdigit() or int(out.strip()) == 0:
+            raise RuntimeError(f"the NAT did not rebind any flow: {out[-200:]}")
+        yield lambda: int(msh(self.host, f"grep -c rebind {NAT_LOG}")[1] or 0)  # flows that moved to a new outbound port
 
 
 class Windows:
@@ -113,6 +136,9 @@ class Windows:
 
     def restart_daemon(self):
         return self.pb("service", "restart")
+
+    def nat_front(self, seconds):
+        return contextlib.nullcontext()  # the WinDivert NAT of rebind() starts during the cut
 
     def cut_all(self, seconds):
         return self.device.cut_network(seconds)
@@ -208,12 +234,15 @@ class Report:
 
 def rebind(args, target, peer):
     report = Report(f"rebind-{target.kind}")
+    total = args.outage_seconds + 60
+    front = contextlib.ExitStack()
+    front.enter_context(target.nat_front(total + 600))  # the NAT is in place before the baseline: the mapping that changes is one both sides used
+    time.sleep(10)
     ok, took, out = peer.exec_into(target, 60)
     report.add(f"baseline exec peer->{target.kind}", ok, f"{took:.1f} s {out}")
     start = time.time()
     rc, out = target.pb("exec", peer.ct, "--", "true", timeout=60)
     report.add(f"baseline exec {target.kind}->peer", rc == 0, f"{time.time() - start:.1f} s {out[-120:]}")
-    total = args.outage_seconds + 60
     cut = contextlib.ExitStack()
     try:
         cut.enter_context(target.cut_all(total))
@@ -238,6 +267,7 @@ def rebind(args, target, peer):
             report.add(f"outbound exec {target.kind}->peer", rc == 0, f"{time.time() - start:.1f} s {out[-120:]}")
     finally:
         cut.close()
+        front.close()
     return report.finish()
 
 
