@@ -527,7 +527,7 @@ func TestSQLRepositoryTRK07ConfigChainScopeAndConflictsOnPostgres(t *testing.T) 
 	// ordering when a second account is added below.
 	hostID := "mch_trk07_primary_" + fixture.suffix
 	tunnelID := "tun_trk07_chain_" + fixture.suffix
-	fixture.createTunnel(t, accountID, hostID, tunnelID, "chain-"+fixture.suffix)
+	created := fixture.createTunnel(t, accountID, hostID, tunnelID, "chain-"+fixture.suffix)
 
 	name := "chain-renamed"
 	patchHash := sha256.Sum256([]byte("patch:" + tunnelID))
@@ -542,6 +542,10 @@ func TestSQLRepositoryTRK07ConfigChainScopeAndConflictsOnPostgres(t *testing.T) 
 	}
 	if patched.Tunnel.Generation != 2 {
 		t.Fatalf("patch generation = %d, want 2", patched.Tunnel.Generation)
+	}
+	// A rename changes the label only: the generated address never follows the name.
+	if patched.Tunnel.StableEndpoint != created.Tunnel.StableEndpoint || patched.Tunnel.StableEndpointID != created.Tunnel.StableEndpointID {
+		t.Fatalf("rename changed the address: %q -> %q", created.Tunnel.StableEndpoint, patched.Tunnel.StableEndpoint)
 	}
 
 	pausedHash := sha256.Sum256([]byte("pause:" + tunnelID))
