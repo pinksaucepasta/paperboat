@@ -1,0 +1,14 @@
+{
+ "check": "xplat-envscopes",
+ "devices": [
+  "L",
+  "W"
+ ],
+ "results": [
+  {
+   "id": "X-12:personal:L+W",
+   "status": "PASS",
+   "detail": "the personal value reaches envrerun-l, envrerun-w"
+  }
+ ]
+}

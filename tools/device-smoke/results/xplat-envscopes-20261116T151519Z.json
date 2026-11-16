@@ -1,0 +1,13 @@
+{
+ "check": "xplat-envscopes",
+ "devices": [
+  "L"
+ ],
+ "results": [
+  {
+   "id": "X-12:personal:L",
+   "status": "FAIL",
+   "detail": "the personal value did not reach: ['envrerun-l']"
+  }
+ ]
+}

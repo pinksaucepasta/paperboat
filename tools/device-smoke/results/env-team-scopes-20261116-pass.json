@@ -1,0 +1,1 @@
+{"check": "env-team-scopes", "status": "PASS", "reset_creates_an_empty_scope": true, "no_access_before_grant": true, "grant_and_sync_give_access": true, "roles_are_enforced": true, "rotate_preserves_values": true, "revoke_fences_the_member": true, "reset_discards_values": true, "cleanup_ok": true}
