@@ -8,6 +8,7 @@ import {
   LaptopIcon,
   LockKeyIcon,
   PlugsIcon,
+  ScrollIcon,
   ShareNetworkIcon,
   ShieldCheckIcon,
   SwapIcon,
@@ -39,6 +40,7 @@ export const sections = {
   usage: { href: "/usage", title: "Usage", icon: ChartBarIcon, machineScoped: true },
   activity: { href: "/activity", title: "Activity", icon: ClockCounterClockwiseIcon, machineScoped: true },
   access: { href: "/access", title: "Access", icon: ShieldCheckIcon, machineScoped: false },
+  recipes: { href: "/settings/recipes", title: "Recipes", icon: ScrollIcon, machineScoped: false },
   apiTokens: { href: "/settings/api-tokens", title: "API tokens", icon: LockKeyIcon, machineScoped: false },
   team: { href: "/team", title: "Team", icon: UsersThreeIcon, machineScoped: false },
   billing: { href: "/billing", title: "Billing", icon: CreditCardIcon, machineScoped: false },
@@ -53,7 +55,7 @@ export const navigationGroups: { label?: string; items: Section[] }[] = [
   { label: "Connect", items: [sections.terminals, sections.previews, sections.tunnels, sections.files] },
   { label: "Configure", items: [sections.environment, sections.config, sections.network] },
   { label: "Monitor", items: [sections.usage, sections.activity] },
-  { label: "Workspace", items: [sections.team, sections.access, sections.apiTokens, sections.billing] },
+  { label: "Workspace", items: [sections.team, sections.access, sections.recipes, sections.apiTokens, sections.billing] },
 ]
 
 /** Machine tabs, in the sidebar's order. Each is a route under /machines/<id>, so the list can grow without crowding the page. */

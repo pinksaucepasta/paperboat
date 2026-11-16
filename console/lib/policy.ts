@@ -27,6 +27,8 @@ export type Policy = {
   /** Absent when the server itself saved it ("Removed machines or members that left the workspace"). */
   updated_by?: string
   updated_with_api_token?: string
+  /** The recipe that saved it (machine tags at pairing). */
+  updated_with_recipe?: string
   message: string
   can_edit: CanEdit
   names: PolicyNames
@@ -69,6 +71,7 @@ export type PolicyVersion = {
   /** `user:<email>`; absent for versions nobody saved (the first one, written by Paperboat). */
   author?: string
   api_token?: string
+  recipe?: string
   message: string
   gained: number
   lost: number
@@ -239,7 +242,7 @@ export function restorePolicy(
 
 export function explainPolicy(
   workspace: string,
-  fields: { policy?: string; src?: string; dst?: string; action?: string; port?: number; api_token?: string },
+  fields: { policy?: string; src?: string; dst?: string; action?: string; port?: number; api_token?: string; recipe?: string },
 ) {
   return call<Explanation>("Testing access", `${ws(workspace)}/policy/explain`, { method: "POST", json: fields })
 }
@@ -325,6 +328,7 @@ export const reasonLabels: Record<string, string> = {
   port_not_allowed: "The rule does not cover this port",
   private_access_off: "Private access is off for this team",
   outside_token_scope: "Outside the API token's scope",
+  outside_recipe_reach: "Outside the recipe’s reach",
 }
 
 export const guardrailLabels: Record<string, string> = {
@@ -424,7 +428,7 @@ export function lineDiff(before: string, after: string): { kind: " " | "-" | "+"
 export function savedBy(policy: Policy) {
   if (!policy.updated_by) return ""
   const who = policy.updated_by.replace(/^user:/, "")
-  return ` by ${who}${policy.updated_with_api_token ? ` with API token ${policy.updated_with_api_token}` : ""}`
+  return ` by ${who}${policy.updated_with_api_token ? ` with API token ${policy.updated_with_api_token}` : ""}${policy.updated_with_recipe ? ` with recipe ${policy.updated_with_recipe}` : ""}`
 }
 
 /** Shown wherever the signed-in member may look but not change the policy. */

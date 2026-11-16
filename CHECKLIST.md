@@ -1103,7 +1103,7 @@ and the open review lows; Windows-only and macOS-only findings have `n/a` on the
 
 | ID | Scenario | L | M | W | Evidence |
 |---|---|---|---|---|---|
-| F26-01 | `pb recipe create`, `list`, `show`, `update`, `rotate`, `revoke` and the console Recipes page work with the texts in PLAN F26; the token is shown once, stored hashed. | [ ] | [ ] | [ ] | Added 2026-11-16 (user decision, PLAN Log 2026-11-16). |
+| F26-01 | `pb recipe create`, `list`, `show`, `update`, `rotate`, `revoke` and the console Recipes page work with the texts in PLAN F26; the token is shown once, stored hashed. | [ ] | [ ] | [ ] | Added 2026-11-16 (user decision, PLAN Log 2026-11-16). Console part written 2026-11-16 (list, create/upload with line:col errors, token once, show, update, rotate, revoke; the API tokens page stays for now, user 2026-11-16); waits for the combined server deploy and console/scripts/check-recipes.js on the live console. |
 | F26-02 | `get.<domain>/recipe` with PB_RECIPE (and recipe.ps1, `pb pair pbr_…`) installs, pairs and applies a recipe with no prompt on Linux, macOS, Windows and a container; a missing or malformed PB_RECIPE stops at once with a clear message; a rerun is a no-op. | [ ] | [ ] | [ ] | Added 2026-11-16 (user decision, PLAN Log 2026-11-16). |
 | F26-03 | Recipe machines get the recipe's tags at pairing and are refused outside `[[reach]]`. | [ ] | [ ] | [ ] | Added 2026-11-16 (user decision, PLAN Log 2026-11-16). |
 | F26-04 | Named ENV vaults: a recipe machine reads its vaults with nobody online; revoke and rotate re-key the vault; values never reach the server in plaintext. | [ ] | [ ] | [ ] | Added 2026-11-16 (user decision, PLAN Log 2026-11-16). |

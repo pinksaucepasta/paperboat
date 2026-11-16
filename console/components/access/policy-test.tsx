@@ -13,6 +13,7 @@ import {
   validatePolicy,
   type Policy,
 } from "@/lib/policy"
+import { recipesQuery } from "@/lib/recipes"
 import { Section } from "@/components/section"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -27,6 +28,7 @@ export function PolicyTest({ workspace, policy, draft }: { workspace: string; po
   const role = useWorkspace()?.role
   const me = useApiQuery(meQuery).data
   const tokens = useInfiniteQuery(apiTokensQuery(workspace, "active"))
+  const recipes = useQuery(recipesQuery(workspace)).data ?? []
   const live = tokens.data?.pages.flatMap((page) => page.api_tokens) ?? []
   const admin = role === "owner" || role === "admin"
   const users = admin ? policy.names.users : me ? [me.email] : []
@@ -42,6 +44,7 @@ export function PolicyTest({ workspace, policy, draft }: { workspace: string; po
   const [action, setAction] = useState("terminal")
   const [port, setPort] = useState("")
   const [token, setToken] = useState("")
+  const [recipe, setRecipe] = useState("")
   const [useDraft, setUseDraft] = useState(Boolean(draft))
   const who = src || users[0] || ""
   const where = dst || targets[0] || ""
@@ -68,6 +71,7 @@ export function PolicyTest({ workspace, policy, draft }: { workspace: string; po
         action: chosen,
         ...(chosen === "private_access" && port ? { port: portNumber } : {}),
         ...(token ? { api_token: token } : {}),
+        ...(recipe ? { recipe } : {}),
       }),
   })
   const tests = useQuery({
@@ -172,6 +176,26 @@ export function PolicyTest({ workspace, policy, draft }: { workspace: string; po
                 {tokens.isFetchingNextPage ? "Loading…" : "Load more tokens"}
               </Button>
             )}
+          </Field>
+        )}
+        {recipes.length > 0 && (
+          <Field className="gap-1.5">
+            <FieldLabel htmlFor="test-recipe" className="flex justify-between">
+              Recipe <span className="font-normal text-muted-foreground">Optional</span>
+            </FieldLabel>
+            <select
+              id="test-recipe"
+              className={selectClass}
+              value={recipe}
+              onChange={(event) => setRecipe(event.target.value)}
+            >
+              <option value="">None</option>
+              {recipes.map((r) => (
+                <option key={r.id} value={r.name}>
+                  {r.name}
+                </option>
+              ))}
+            </select>
           </Field>
         )}
         <div className="flex flex-wrap items-center gap-3 sm:col-span-2">

@@ -20,11 +20,12 @@ export type ActivityEvent = {
    */
   actor: {
     /** `deleted_user`: someone who deleted their account; the event keeps no name or email. */
-    kind: "user" | "api_token" | "directory" | "operator" | "machine" | "system" | "deleted_user"
+    kind: "user" | "api_token" | "recipe" | "directory" | "operator" | "machine" | "system" | "deleted_user"
     id: string
     name?: string
     email?: string
     token_id?: string
+    recipe_id?: string
   }
   /** `denied` with a stable `reason` code for refused requests (F19 audit log). */
   result?: "success" | "denied"
@@ -285,6 +286,9 @@ export function actorName(event: ActivityEvent, meId?: string, memberNames?: Rea
 }
 
 /** "through an API token" for events done with one. */
+/** "through a recipe" for events a recipe's machine did. */
+export const viaRecipe = (event: ActivityEvent) => event.actor.kind === "recipe" || Boolean(event.actor.recipe_id)
+
 export const viaToken = (event: ActivityEvent) => event.actor.kind === "api_token" || Boolean(event.actor.token_id)
 
 /** Where a target opens in the console, when it has a page. */

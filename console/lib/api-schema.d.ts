@@ -7428,50 +7428,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/workspaces/{ws}/api-tokens": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List API tokens
-         * @description Members see their own tokens, owners and admins all. total counts the tokens the state filter matches; active_total and ended_total count all visible tokens whatever the filter.
-         */
-        get: operations["get_v1_workspace_api_tokens"];
-        put?: never;
-        /**
-         * Create an API token
-         * @description Returns the secret once. The token acts as its creator in this workspace, narrowed by an optional scope.
-         */
-        post: operations["post_v1_workspace_api_tokens"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/workspaces/{ws}/api-tokens/{id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        /**
-         * Revoke an API token
-         * @description By its creator or an owner/admin.
-         */
-        delete: operations["delete_v1_workspace_api_token"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/v1/teams/{team_id}/identity": {
         parameters: {
             query?: never;
@@ -7698,26 +7654,6 @@ export interface paths {
          * @description Sends one team.activity_stream_test event now; 502 audit_stream_delivery_failed says why it was refused.
          */
         post: operations["team_audit_stream_test"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/auth/api-token-sessions": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Start a CLI session with an API token
-         * @description The bearer is an API token (pbat_…). The session ends when the token is revoked or expires; a scoped token's session is held to the scope.
-         */
-        post: operations["post_v1_auth_api_token_sessions"];
         delete?: never;
         options?: never;
         head?: never;
@@ -8154,6 +8090,209 @@ export interface paths {
          * @description Requires machine management. Where an unmatched <name>.<machine>.<domain> goes.
          */
         put: operations["put_v1_machines_machine_id_front_desk"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/recipes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List recipes */
+        get: operations["get_v1_workspace_recipes"];
+        put?: never;
+        /**
+         * Create a recipe
+         * @description The token is made on the creator's computer (shared/recipe); the server stores sha256(auth) only.
+         */
+        post: operations["post_v1_workspace_recipes"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/recipes/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Show a recipe with its machines */
+        get: operations["get_v1_workspace_recipe"];
+        /** Update a recipe (new revision, same token) */
+        put: operations["put_v1_workspace_recipe"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/recipes/{name}/rotate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Rotate a recipe's token
+         * @description Without the right confirm: 409 confirmation_required with {confirm, impact}.
+         */
+        post: operations["post_v1_workspace_recipe_rotate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/recipes/{name}/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Revoke a recipe and remove its machines
+         * @description Without the right confirm: 409 confirmation_required with {confirm, impact}.
+         */
+        post: operations["post_v1_workspace_recipe_revoke"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/env-vaults": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List named ENV vaults */
+        get: operations["get_v1_workspace_env_vaults"];
+        put?: never;
+        /** Create a named ENV vault */
+        post: operations["post_v1_workspace_env_vaults"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/env-vaults/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read a named ENV vault (ciphertext and the caller's wraps) */
+        get: operations["get_v1_workspace_env_vault"];
+        put?: never;
+        post?: never;
+        /** Delete a named ENV vault no recipe reads */
+        delete: operations["delete_v1_workspace_env_vault"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/env-vaults/{name}/values": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Replace a vault's values envelope */
+        put: operations["put_v1_workspace_env_vault_values"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/env-vaults/{name}/rekey": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Give a vault a new key */
+        post: operations["post_v1_workspace_env_vault_rekey"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/recipe-sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start a CLI session from a recipe token
+         * @description Refusals: recipe_invalid, recipe_expired, recipe_replaced (401), recipe_full (409).
+         */
+        post: operations["post_v1_auth_recipe_sessions"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/recipe-machine": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** What a recipe machine applies */
+        get: operations["get_v1_recipe_machine"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/recipe-machine/apply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Record what a recipe machine applied */
+        put: operations["put_v1_recipe_machine_apply"];
         post?: never;
         delete?: never;
         options?: never;
@@ -29547,92 +29686,6 @@ export interface operations {
             503: components["responses"]["Error"];
         };
     };
-    get_v1_workspace_api_tokens: {
-        parameters: {
-            query?: {
-                /** @description Page size (default 50). */
-                limit?: number;
-                /** @description next_cursor of the previous page. */
-                cursor?: string;
-                /** @description Only live tokens (active) or only revoked and expired ones (ended). Omitted lists every token. A cursor works only with the state it came from. */
-                state?: "active" | "ended";
-            };
-            header?: never;
-            path: {
-                ws: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description JSON body as documented in shared/policy/README.md. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            400: components["responses"]["Error"];
-            401: components["responses"]["Error"];
-            403: components["responses"]["Error"];
-            503: components["responses"]["Error"];
-        };
-    };
-    post_v1_workspace_api_tokens: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                ws: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": Record<string, never>;
-            };
-        };
-        responses: {
-            /** @description JSON body as documented in shared/policy/README.md. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            400: components["responses"]["Error"];
-            401: components["responses"]["Error"];
-            403: components["responses"]["Error"];
-            409: components["responses"]["Error"];
-            422: components["responses"]["Error"];
-            503: components["responses"]["Error"];
-        };
-    };
-    delete_v1_workspace_api_token: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                ws: string;
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description JSON body as documented in shared/policy/README.md. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            401: components["responses"]["Error"];
-            403: components["responses"]["Error"];
-            404: components["responses"]["Error"];
-            503: components["responses"]["Error"];
-        };
-    };
     team_identity_status: {
         parameters: {
             query?: never;
@@ -30320,31 +30373,6 @@ export interface operations {
             404: components["responses"]["Error"];
             409: components["responses"]["Error"];
             502: components["responses"]["Error"];
-            503: components["responses"]["Error"];
-        };
-    };
-    post_v1_auth_api_token_sessions: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": Record<string, never>;
-            };
-        };
-        responses: {
-            /** @description CLI token set (access_token, refresh_token, expires_in, scope, cli_client_session_id) for a session of the token's creator that carries the token. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            400: components["responses"]["Error"];
-            401: components["responses"]["Error"];
             503: components["responses"]["Error"];
         };
     };
@@ -31287,6 +31315,442 @@ export interface operations {
                 };
                 content?: never;
             };
+        };
+    };
+    get_v1_workspace_recipes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ws: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description JSON body as documented in shared/recipe/README.md. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            422: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    post_v1_workspace_recipes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ws: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description JSON body as documented in shared/recipe/README.md. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            422: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    get_v1_workspace_recipe: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ws: string;
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description JSON body as documented in shared/recipe/README.md. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            422: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    put_v1_workspace_recipe: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ws: string;
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description JSON body as documented in shared/recipe/README.md. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            422: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    post_v1_workspace_recipe_rotate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ws: string;
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description JSON body as documented in shared/recipe/README.md. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            422: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    post_v1_workspace_recipe_revoke: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ws: string;
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description JSON body as documented in shared/recipe/README.md. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            422: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    get_v1_workspace_env_vaults: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ws: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description JSON body as documented in shared/recipe/README.md. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            422: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    post_v1_workspace_env_vaults: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ws: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description JSON body as documented in shared/recipe/README.md. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            422: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    get_v1_workspace_env_vault: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ws: string;
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description JSON body as documented in shared/recipe/README.md. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            422: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    delete_v1_workspace_env_vault: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ws: string;
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description JSON body as documented in shared/recipe/README.md. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            422: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    put_v1_workspace_env_vault_values: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ws: string;
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description JSON body as documented in shared/recipe/README.md. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            422: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    post_v1_workspace_env_vault_rekey: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ws: string;
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description JSON body as documented in shared/recipe/README.md. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            422: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    post_v1_auth_recipe_sessions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description JSON body as documented in shared/recipe/README.md. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            429: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    get_v1_recipe_machine: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description JSON body as documented in shared/recipe/README.md. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    put_v1_recipe_machine_apply: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description JSON body as documented in shared/recipe/README.md. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            503: components["responses"]["Error"];
         };
     };
 }

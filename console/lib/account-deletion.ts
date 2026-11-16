@@ -17,7 +17,7 @@ export type DeletionPreview = {
   tunnels: number
   config_sync: boolean
   inbox_items: number
-  api_tokens: number
+  recipes: number
   subscription: { plan: string; period_end: string | null } | null
   /** Teams where you are the only member: deleted with the account. */
   teams_deleted: Team[]

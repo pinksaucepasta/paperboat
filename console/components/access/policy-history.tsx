@@ -45,6 +45,7 @@ export function PolicyHistory({ workspace, policy }: { workspace: string; policy
               <span className="block text-muted-foreground">
                 <Time iso={version.created_at} relative /> · {version.author?.replace(/^user:/, "") ?? "Paperboat"}
                 {version.api_token && ` with API token ${version.api_token}`}
+                {version.recipe && ` with recipe ${version.recipe}`}
                 {(version.gained > 0 || version.lost > 0) && ` · ${version.gained} gained, ${version.lost} lost`}
               </span>
             </span>

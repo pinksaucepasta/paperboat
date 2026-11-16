@@ -54,7 +54,7 @@ function WhatGoes({ preview }: { preview: DeletionPreview }) {
       </Row>
       <Row label="Config sync">{preview.config_sync ? "Your config sync setup" : "Not set up"}</Row>
       <Row label="Inbox">{count(preview.inbox_items, "item", "items")}</Row>
-      <Row label="API tokens">{count(preview.api_tokens, "token", "tokens")}</Row>
+      <Row label="Recipes">{count(preview.recipes, "recipe", "recipes")}</Row>
       <Row label="Subscription">
         {preview.subscription
           ? `${planLabel(preview.subscription.plan)} ends now${preview.subscription.period_end ? `, not at ${date(preview.subscription.period_end, "date")}` : ""}`
