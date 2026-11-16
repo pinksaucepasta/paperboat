@@ -5,11 +5,14 @@ import (
 	"errors"
 	"io"
 	"net"
+	"net/http"
 	"net/url"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/internal/api"
 )
 
 type sessionReaderFunc func([]byte) (int, error)
@@ -32,6 +35,7 @@ type sessionLeaseClient struct {
 	stopLeases []Lease
 	stopKeys   []string
 	renewErr   error
+	renewErrs  []error // returned one per renew, before renewErr
 	stopErr    error
 	stopDone   chan struct{}
 }
@@ -57,6 +61,11 @@ func (c *sessionLeaseClient) Renew(_ context.Context, lease Lease, idempotencyKe
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.renewKeys = append(c.renewKeys, idempotencyKey)
+	if len(c.renewErrs) > 0 {
+		err := c.renewErrs[0]
+		c.renewErrs = c.renewErrs[1:]
+		return Lease{}, err
+	}
 	if c.renewErr != nil {
 		return Lease{}, c.renewErr
 	}
@@ -736,4 +745,74 @@ func TestRenewalRetriesNetworkFailuresThatAreNotTimeouts(t *testing.T) {
 	if retryableLeaseError(errors.New("lease is terminal")) {
 		t.Fatal("a non-network renewal failure was retried")
 	}
+}
+
+// X-26: a host just back from sleep is refused (403 presence, 412 generation) for a few seconds; the lease survives it.
+func TestRenewalSurvivesOwnerRefusalsUntilThePresenceReturns(t *testing.T) {
+	client := &sessionLeaseClient{renewErrs: []error{&api.APIError{Status: http.StatusForbidden}, &api.APIError{Status: http.StatusPreconditionFailed}}}
+	session := startRenewalSession(t, client)
+	defer session.Stop(context.Background())
+	errc := make(chan error, 1)
+	go func() { errc <- session.Wait() }()
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		client.mu.Lock()
+		done, keys := len(client.renewed) > 0, append([]string(nil), client.renewKeys...)
+		client.mu.Unlock()
+		if done {
+			if len(keys) < 3 || keys[0] == keys[1] || keys[1] == keys[2] {
+				t.Fatalf("a refused renewal was replayed with the same idempotency key: %v", keys)
+			}
+			return
+		}
+		select {
+		case err := <-errc:
+			t.Fatalf("lease lost on a refusal that clears: %v", err)
+		default:
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("no renewal succeeded after the refusals")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func TestRenewalGivesUpOnARefusalThatNeverClears(t *testing.T) {
+	old := ownerRefusalWindow
+	ownerRefusalWindow = 100 * time.Millisecond
+	defer func() { ownerRefusalWindow = old }()
+	client := &sessionLeaseClient{renewErr: &api.APIError{Status: http.StatusForbidden}}
+	session := startRenewalSession(t, client)
+	defer session.Stop(context.Background())
+	errc := make(chan error, 1)
+	go func() { errc <- session.Wait() }()
+	select {
+	case err := <-errc:
+		if !errors.Is(err, ErrLeaseLost) {
+			t.Fatalf("error = %v, want ErrLeaseLost", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("a refusal that never clears was retried forever")
+	}
+}
+
+func startRenewalSession(t *testing.T, client *sessionLeaseClient) *Session {
+	t.Helper()
+	carrier := &sessionCarrier{closed: make(chan struct{}), run: func(ctx context.Context, lease Lease, ready func(Lease) error) error {
+		if err := ready(sessionReadyLease(lease)); err != nil {
+			return err
+		}
+		<-ctx.Done()
+		return ctx.Err()
+	}}
+	session, err := Start(context.Background(), SessionConfig{
+		LeaseClient: client, Carrier: carrier, OwnerMachineID: "machine_1", OwnerSessionID: "session_1", OwnerSessionKind: "foreground",
+		Target:        LeaseTarget{Scheme: "http", Address: "127.0.0.1:3000"},
+		RenewInterval: 20 * time.Millisecond, ReconnectBackoff: 10 * time.Millisecond, MaxReconnectBackoff: 10 * time.Millisecond,
+		ShutdownTimeout: time.Second, DisableParentWatch: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return session
 }

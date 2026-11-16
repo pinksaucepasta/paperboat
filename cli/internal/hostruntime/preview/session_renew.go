@@ -4,8 +4,21 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/internal/api"
 )
+
+// ownerRefusalWindow is how long renewals that the server refuses with 403 or 412 are retried. A host just back
+// from sleep is refused (403: its presence is not yet re-established; 412: a readiness step moved the generation)
+// until it is online again, a few seconds later (X-26). shortcut: fixed 2 min, a revoked machine retries that long.
+var ownerRefusalWindow = 2 * time.Minute
+
+func ownerRefusal(err error) bool {
+	var refusal *api.APIError
+	return errors.As(err, &refusal) && (refusal.Status == http.StatusForbidden || refusal.Status == http.StatusPreconditionFailed)
+}
 
 // LeaseMutation applies an authenticated projection through the session owner.
 type LeaseMutation func(func(Lease) (Lease, error)) (Lease, error)
@@ -56,6 +69,7 @@ func (s *Session) renewLoop(ctx context.Context) error {
 		if keyErr != nil {
 			return fmt.Errorf("%w: generate renew idempotency key: %w", ErrLeaseLost, keyErr)
 		}
+		var refusedSince time.Time
 		for {
 			renewCtx, cancelRenew := context.WithDeadline(ctx, expiresAt)
 			_, err := s.renewLease(renewCtx, renewIdempotencyKey)
@@ -68,7 +82,19 @@ func (s *Session) renewLoop(ctx context.Context) error {
 					return ErrLeaseExpired
 				}
 				if !retryableLeaseError(err) {
-					return errors.Join(ErrLeaseLost, err)
+					if !ownerRefusal(err) {
+						return errors.Join(ErrLeaseLost, err)
+					}
+					if refusedSince.IsZero() {
+						refusedSince = s.config.Now()
+					}
+					if s.config.Now().Sub(refusedSince) >= ownerRefusalWindow {
+						return errors.Join(ErrLeaseLost, err)
+					}
+					// The refused request changed nothing, so the retry is a new request, not a replay.
+					if renewIdempotencyKey, keyErr = newSessionIdempotencyKey(s.config.Random); keyErr != nil {
+						return fmt.Errorf("%w: generate renew idempotency key: %w", ErrLeaseLost, keyErr)
+					}
 				}
 				remaining = expiresAt.Sub(s.config.Now().UTC())
 				if remaining <= 0 {
