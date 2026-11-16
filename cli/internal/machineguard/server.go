@@ -65,7 +65,7 @@ type guardServer struct {
 	// policyPending marks leases acquired since the last installed policy: an acquire only binds, and the
 	// daemon's one "apply" per reconcile installs the policy of all of them in one transaction (one WFP Apply
 	// for N peers, not N). Until then the new addresses stay denied (fail closed). One flag for the whole guard:
-	// any connection's apply or release installs every pending lease, each already validated and bound.
+	// any connection's apply (or, where revocation needs the rules, release) installs every pending lease.
 	policyPending bool
 }
 
@@ -465,9 +465,17 @@ func (g *guardServer) handle(ctx context.Context, conn controlConn, uid string, 
 		delete(g.leases, key)
 		forgetLease(lease)
 		g.removeUnservedNames(conn)
+		shutdownErr := shutdownListener(lease.listener)
+		if releaseDefersPolicy {
+			if shutdownErr != nil {
+				g.fail(shutdownErr)
+				return nil, shutdownErr
+			}
+			g.policyPending = true // the next apply, from any connection, retires the lease's rule
+			return nil, nil
+		}
 		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
-		shutdownErr := shutdownListener(lease.listener)
 		updateErr := g.applyRules(cleanupCtx)
 		if err := errors.Join(shutdownErr, updateErr); err != nil {
 			g.fail(err)

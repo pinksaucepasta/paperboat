@@ -75,13 +75,18 @@ func newPolicyTestGuard(t *testing.T) (*guardServer, *testControlConn, *policyRe
 // call runs one request the way serveConnection does: under the guard lock.
 func (g *guardServer) call(t *testing.T, conn controlConn, in request) (net.Listener, error) {
 	t.Helper()
+	return g.callAs(t, conn, policyTestUID, in)
+}
+
+func (g *guardServer) callAs(t *testing.T, conn controlConn, uid string, in request) (net.Listener, error) {
+	t.Helper()
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	in, err := g.assignClaim(policyTestUID, in)
+	in, err := g.assignClaim(uid, in)
 	if err != nil {
 		return nil, err
 	}
-	return g.handle(t.Context(), conn, policyTestUID, in)
+	return g.handle(t.Context(), conn, uid, in)
 }
 
 func machineRequest(i int) request {
@@ -177,22 +182,81 @@ func TestGuardConcurrentAcquiresNeverWaitForAPolicyTransaction(t *testing.T) {
 	}
 }
 
-// Revocation is never deferred: a release while other leases wait for their apply installs at once a policy
-// without the released lease.
-func TestGuardReleaseWhilePolicyIsPendingRemovesTheLeaseAtOnce(t *testing.T) {
+// A release shuts the guard's socket at once and leaves the WFP transaction to the next apply: the rule left
+// behind only lets the same OS user connect to its own claimed address, where nothing listens any more.
+func TestGuardReleaseDefersPolicy(t *testing.T) {
 	g, conn, recorder := newPolicyTestGuard(t)
-	acquireMachine(t, g, conn, 0)
+	listener, err := g.call(t, conn, machineRequest(0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = listener.Close() })
 	acquireMachine(t, g, conn, 1)
 	if _, err := g.call(t, conn, request{Operation: "apply"}); err != nil {
 		t.Fatal(err)
 	}
-	acquireMachine(t, g, conn, 2) // pending
 	if _, err := g.call(t, conn, request{Operation: "release", IP: "127.100.1.2", Port: 41000}); err != nil {
 		t.Fatal(err)
 	}
-	calls, installed := recorder.snapshot()
-	if calls != 2 || slices.Contains(installed, "127.100.1.2:41000") {
-		t.Fatalf("release: calls=%d installed=%v, want a synchronous transaction without 127.100.1.2:41000", calls, installed)
+	if calls, _ := recorder.snapshot(); calls != 1 {
+		t.Fatalf("release ran a policy transaction: calls=%d, want 1 (the apply)", calls)
+	}
+	if dialed, err := net.DialTimeout("tcp", "127.100.1.2:41000", time.Second); err == nil {
+		dialed.Close()
+		t.Fatal("the released listener still accepts connections")
+	}
+	if _, err := g.call(t, conn, request{Operation: "apply"}); err != nil {
+		t.Fatal(err)
+	}
+	if calls, installed := recorder.snapshot(); calls != 2 || slices.Contains(installed, "127.100.1.2:41000") || len(installed) != 1 {
+		t.Fatalf("apply after release: calls=%d installed=%v, want the released lease gone", calls, installed)
+	}
+}
+
+// victus, 2026-11-16: three OS users' daemons share one guard. When one daemon's routes went away, each release
+// ran a full WFP transaction under the guard lock; the other users' guard calls waited past their 5 s pipe deadline
+// and their local access went degraded (deadline_exceeded) until the daemon was restarted.
+func TestGuardReleaseSparesOtherUsers(t *testing.T) {
+	g, alice, recorder := newPolicyTestGuard(t)
+	const bobUID = "S-1-5-21-1-2-3-1002"
+	bob := &testControlConn{identity: bobUID}
+	g.connections[bob] = bobUID
+	for i := range 20 {
+		acquireMachine(t, g, alice, i)
+	}
+	if _, err := g.call(t, alice, request{Operation: "apply"}); err != nil {
+		t.Fatal(err)
+	}
+	recorder.block = make(chan struct{}) // WFP takes as long as it likes
+	defer close(recorder.block)
+	done := make(chan error, 2)
+	go func() {
+		for i := range 20 {
+			in := machineRequest(i)
+			if _, err := g.call(t, alice, request{Operation: "release", IP: in.IP, Port: in.Port}); err != nil {
+				done <- err
+				return
+			}
+		}
+		done <- nil
+	}()
+	go func() {
+		in := request{Operation: "acquire", Account: "acct-b", Machine: "b0", Hostname: "b0." + testBrowserDomain, IP: "127.100.2.2", Port: 42000}
+		listener, err := g.callAs(t, bob, bobUID, in)
+		if err == nil {
+			t.Cleanup(func() { _ = listener.Close() })
+		}
+		done <- err
+	}()
+	for range 2 {
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Fatal(err)
+			}
+		case <-time.After(5 * time.Second): // the daemon's per-call pipe deadline
+			t.Fatal("one user's releases held another user's guard call past its deadline")
+		}
 	}
 }
 

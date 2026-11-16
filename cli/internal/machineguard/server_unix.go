@@ -17,6 +17,10 @@ import (
 	"time"
 )
 
+// releaseDefersPolicy is false: the daemon keeps a descriptor of the listening socket, so only the per-port rule
+// removed by the release stops it from accepting.
+const releaseDefersPolicy = false
+
 func requirePrivilege() error {
 	if os.Geteuid() != 0 {
 		return errors.New("machine guard must run as root")
