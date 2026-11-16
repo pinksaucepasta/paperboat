@@ -72,10 +72,29 @@ configured_capabilities,observed_capabilities) VALUES($1,$2,$1,'pt-host','linux'
 	exec(`INSERT INTO paperboat.workspace_policies(team_id,version,source,digest) VALUES($1,1,'{}','sha256:test')`, team)
 	exec(`INSERT INTO paperboat.workspace_policy_rules(policy_id,rule,deny,subject_kind,subject_id,target_kind,target_id,action,ports)
 SELECT id,0,false,'role','member','machine',$2,'preview_manage',int4range(1,65536) FROM paperboat.workspace_policies WHERE team_id=$1`, team, host)
+	// The insert triggers (hostname reservation, topic publish with its audience query, NOTIFY) cost about 6 ms per row,
+	// so 5,000 rows hit the 30 s statement_timeout on a loaded host; they are not what this test measures. The
+	// transaction restores them on commit and on rollback.
+	tx, err := store.SQL().BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err = tx.ExecContext(ctx, `ALTER TABLE paperboat.preview_leases DISABLE TRIGGER USER`); err != nil {
+		t.Fatal(err)
+	}
 	for from := 0; from < 20000; from += 5000 {
-		exec(`INSERT INTO paperboat.preview_leases(id,endpoint,account_id,actor_id,owner_machine_id,owner_session_id,target_scheme,target_address,access_mode,
+		if _, err = tx.ExecContext(ctx, `INSERT INTO paperboat.preview_leases(id,endpoint,account_id,actor_id,owner_machine_id,owner_session_id,target_scheme,target_address,access_mode,
 lease_deadline,owner_session_kind) SELECT 'pt_preview_'||g||'_'||$1,'https://pt'||g||'-'||$1||'.example.test',$2,$2,$3,'session','http','127.0.0.1:3000','team',
-now()+interval '1 hour','local_lease' FROM generate_series($4::int,$4::int+4999) g`, s, owner, host, from)
+now()+interval '1 hour','local_lease' FROM generate_series($4::int,$4::int+4999) g`, s, owner, host, from); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err = tx.ExecContext(ctx, `ALTER TABLE paperboat.preview_leases ENABLE TRIGGER USER`); err != nil {
+		t.Fatal(err)
+	}
+	if err = tx.Commit(); err != nil {
+		t.Fatal(err)
 	}
 	exec(`ANALYZE paperboat.preview_leases`)
 
