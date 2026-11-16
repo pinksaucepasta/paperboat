@@ -58,11 +58,10 @@ func recipePair(c *command.Context, tokenText string, setupArgs []string) error 
 	if err != nil {
 		return err
 	}
-	machineID, err := loginLocalMachineID(cfg)
-	if err != nil {
-		return err
-	}
-	if _, loadErr := store.Load(issuer); machineID != "" && loadErr == nil {
+	// A machine identity that cannot be read is not "paired": the preflight below then names the missing
+	// administrator rights, which is why it is unreadable for a standard Windows user (victus, rcpwn).
+	machineID, identityErr := loginLocalMachineID(cfg)
+	if _, loadErr := store.Load(issuer); identityErr == nil && machineID != "" && loadErr == nil {
 		// A machine removed since (recipe revoked, lifetime, offline) is not "paired": say how to start over.
 		// The session source refreshes an expired access token, so only a rejected session counts.
 		if source, err := auth.NewSource(cfg); err == nil {
@@ -85,6 +84,9 @@ func recipePair(c *command.Context, tokenText string, setupArgs []string) error 
 	}
 	if err := recipeInstallPreflight(c.Context); err != nil {
 		return usageError{err: err, publicMessage: hostruntimecmd.RecipeNeedsRootMessage, refusal: true}
+	}
+	if identityErr != nil {
+		return identityErr
 	}
 	label := "Recipe on " + firstNonEmpty(loginDeviceName(), runtime.GOOS)
 	started, err := recipeSessionStart(c, issuer, token, label)
