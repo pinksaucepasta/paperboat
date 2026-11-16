@@ -175,6 +175,7 @@ func (r *SQLRepository) VerifyHost(ctx context.Context, accountID, hostID string
 	return verifyHostWithQueries(ctx, r.db.Queries(), accountID, hostID)
 }
 
+// Twin of previewtunnelstore previewMachineAuthoritySQL, kept separate: a tunnel host needs an identity key, a preview host must be online.
 func verifyHostWithQueries(ctx context.Context, queries *dbsqlc.Queries, accountID, hostID string) error {
 	_, err := queries.GetOwnedActivePreviewTunnelHostV1(ctx, dbsqlc.GetOwnedActivePreviewTunnelHostV1Params{
 		HostID: hostID, AccountID: accountID,
@@ -234,6 +235,7 @@ func (r *SQLRepository) Get(ctx context.Context, accountID, tunnelID string) (db
 	return tunnel, translate(err)
 }
 
+// Twin of previewtunnelstore ListPreviewLeasesV1: manageable_tunnel_ids and manageable_preview_ids stay separate (different base tables, same rule CTEs); a filter or policy change lands in both.
 func (r *SQLRepository) List(ctx context.Context, accountID string, after *ListPosition, limit int) ([]dbsqlc.Tunnel, error) {
 	if strings.TrimSpace(accountID) == "" || limit < 1 || limit > previewtunnelapi.MaximumPageLimit+1 {
 		return nil, ErrInvalidInput

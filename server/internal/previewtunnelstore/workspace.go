@@ -94,6 +94,7 @@ func resolveWorkspaceResourceAccount(ctx context.Context, q workspaceQuerier, ac
 	return account, err
 }
 
+// Twin of tunnelv1 authorizeTunnelManagementTx: the preview and tunnel management decisions stay separate (different tables, no divergence); a policy change lands in both.
 func (s *Store) authorizeWorkspacePreviewTx(ctx context.Context, tx *db.Tx, actor, preview string) error {
 	ws, selected := workspace.FromContext(ctx)
 	if !selected {
