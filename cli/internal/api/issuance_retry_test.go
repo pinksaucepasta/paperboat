@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -53,5 +54,30 @@ func TestDescriptorIssuanceRetriesServiceUnavailable(t *testing.T) {
 				t.Fatalf("calls=%d err=%v", calls.Load(), err)
 			}
 		})
+	}
+}
+
+// F21-164: one open in 100 failed on a 503 from the create-and-connect request under a burst of opens. It is asked
+// again with the same idempotency key, so a repeat resolves the same session.
+func TestSessionCreateDescriptorRetriesServiceUnavailable(t *testing.T) {
+	var calls atomic.Int32
+	keys := map[string]bool{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		var body struct {
+			CreateSession map[string]string `json:"create_session"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		keys[body.CreateSession["idempotency_key"]] = true
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"error":{"code":"service_busy","message":"x"}}`))
+	}))
+	defer server.Close()
+	client := New(server.URL, config.Credential{AccessToken: "token"}, server.Client())
+	client.SetSourceMachineID("machine_local")
+	_, _, err := client.UserMachineConnectionDescriptorWithSessionCreate(context.Background(), "machine_target", "fresh", "create-key", "")
+	if err == nil || calls.Load() != issuanceAttempts || len(keys) != 1 || !keys["create-key"] {
+		t.Fatalf("calls=%d keys=%v err=%v", calls.Load(), keys, err)
 	}
 }

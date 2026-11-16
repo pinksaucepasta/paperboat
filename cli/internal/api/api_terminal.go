@@ -243,10 +243,12 @@ func (c *Client) UserMachineConnectionDescriptorWithSessionCreate(ctx context.Co
 	if cwd != "" {
 		create["cwd"] = cwd
 	}
-	err := c.do(ctx, http.MethodPost, "/v1/machines/"+url.PathEscape(machineID)+"/connection-descriptor", map[string]any{
+	// A 503 under a burst of opens (F21-164: 1 in 100 printed "temporarily unavailable") is asked again: the
+	// idempotency key resolves a repeat to the same session.
+	err := c.doIssuance(ctx, http.MethodPost, "/v1/machines/"+url.PathEscape(machineID)+"/connection-descriptor", map[string]any{
 		"source_machine_id": c.sourceMachineID,
 		"create_session":    create,
-	}, &out)
+	}, &out, false)
 	if err == nil {
 		err = out.Descriptor.NormalizeConnectionDescriptor()
 	}
