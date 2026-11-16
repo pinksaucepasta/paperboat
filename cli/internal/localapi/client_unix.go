@@ -459,7 +459,7 @@ func (c *Client) RecordBugreportMarker(ctx context.Context, phase string) error 
 }
 
 func (c *Client) CreateBugreport(ctx context.Context) (diagnostics.Bundle, error) {
-	requestCtx, cancel := context.WithTimeout(ctx, c.timeout)
+	requestCtx, cancel := context.WithTimeout(ctx, bugreportTimeout)
 	defer cancel()
 	request, err := http.NewRequestWithContext(requestCtx, http.MethodPost, "http://paperboat.local/v1/bugreports", nil)
 	if err != nil {

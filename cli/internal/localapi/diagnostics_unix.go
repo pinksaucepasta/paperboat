@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 )
@@ -14,7 +15,11 @@ func (s *Server) serveDiagnostics(writer http.ResponseWriter, request *http.Requ
 		writeError(writer, http.StatusNotImplemented, requestID, "capability_required", "diagnostics are unavailable")
 		return
 	}
-	requestCtx, cancel := context.WithTimeout(request.Context(), s.config.Timeout)
+	timeout := s.config.Timeout
+	if request.URL.Path == "/v1/bugreports" {
+		timeout = bugreportTimeout
+	}
+	requestCtx, cancel := context.WithTimeout(request.Context(), timeout)
 	defer cancel()
 	request = request.WithContext(requestCtx)
 	switch request.URL.Path {
@@ -95,3 +100,8 @@ func writeDiagnosticJSON(writer http.ResponseWriter, requestID string, value any
 	writer.Header().Set("X-Paperboat-Protocol", ProtocolV1)
 	_, _ = writer.Write(append(encoded, '\n'))
 }
+
+// bugreportTimeout bounds creating a bundle: it reads up to the whole disk event ring (50 MB), zips and verifies it, which
+// the generic local API timeout (5 s) did not cover on a loaded host (F21-164: fts-t wrote the 1 MB bundle after the
+// command had already failed "create local bundle" on deadline_exceeded).
+const bugreportTimeout = time.Minute

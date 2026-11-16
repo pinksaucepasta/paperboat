@@ -616,6 +616,7 @@ type diagnosticServiceFake struct {
 	snapshot DiagnosticSnapshot
 	marker   string
 	bundle   diagnostics.Bundle
+	delay    time.Duration // how long creating the bundle takes
 }
 
 func (s *diagnosticServiceFake) Diagnostics(context.Context) (DiagnosticSnapshot, error) {
@@ -625,8 +626,13 @@ func (s *diagnosticServiceFake) RecordBugreportMarker(_ context.Context, phase s
 	s.marker = phase
 	return nil
 }
-func (s *diagnosticServiceFake) CreateBugreport(context.Context) (diagnostics.Bundle, error) {
-	return s.bundle, nil
+func (s *diagnosticServiceFake) CreateBugreport(ctx context.Context) (diagnostics.Bundle, error) {
+	select {
+	case <-time.After(s.delay):
+		return s.bundle, nil
+	case <-ctx.Done():
+		return diagnostics.Bundle{}, ctx.Err()
+	}
 }
 
 type staleAuthority bool
@@ -722,7 +728,9 @@ func TestLocalAPIDiagnosticOperationsUseSeparateAuthorization(t *testing.T) {
 	now := time.Now().UTC()
 	event, _ := diagnostics.NewEvent(now, "daemon", "lifecycle", "info", map[string]string{"state": "ready"})
 	service := &diagnosticServiceFake{snapshot: DiagnosticSnapshot{Schema: DiagnosticSnapshotSchemaV1, ObservedAt: now, Recent: []diagnostics.Event{event}}, bundle: diagnostics.Bundle{Schema: diagnostics.BundleSchemaV1, Correlation: "support_01234567-89ab-4def-8123-456789abcdef", CreatedAt: now, Path: "/tmp/bugreport.zip", Bytes: 100, Categories: []string{"manifest", "recent_events", "redacted_events", "status"}}}
-	server, err := NewServer(ServerConfig{SocketPath: filepath.Join(localAPITestDir(t), "api.sock"), OwnerUID: os.Geteuid(), OwnerGID: os.Getegid(), Source: snapshotSourceFunc(func(context.Context) (Snapshot, error) { return validSnapshot(), nil }), Diagnostics: service, AuthorizeDiagnostics: func(peer Peer) bool { return peer.PID == 42 }})
+	// F21-164: creating a bundle may outlast the generic request timeout on a loaded host; it has its own budget.
+	service.delay = 300 * time.Millisecond
+	server, err := NewServer(ServerConfig{SocketPath: filepath.Join(localAPITestDir(t), "api.sock"), OwnerUID: os.Geteuid(), OwnerGID: os.Getegid(), Timeout: 100 * time.Millisecond, Source: snapshotSourceFunc(func(context.Context) (Snapshot, error) { return validSnapshot(), nil }), Diagnostics: service, AuthorizeDiagnostics: func(peer Peer) bool { return peer.PID == 42 }})
 	if err != nil {
 		t.Fatal(err)
 	}
