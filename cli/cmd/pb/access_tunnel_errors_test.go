@@ -81,3 +81,30 @@ func TestAccessTunnelRefusalsNameTheirCause(t *testing.T) {
 		}
 	}
 }
+
+// Scripts branch on the --json code: a hostd refusal was operation_failed/local_io whatever hostd answered.
+func TestAccessTunnelRefusalsHaveTypedJSONCodes(t *testing.T) {
+	for _, test := range []struct {
+		err       error
+		code      string
+		category  string
+		retryable bool
+	}{
+		{accessTunnelHTTPError(http.StatusUnauthorized), "authentication_required", "authentication", false},
+		{accessTunnelHTTPError(http.StatusForbidden), "access_forbidden", "authorization_or_entitlement", false},
+		{accessTunnelHTTPError(http.StatusNotFound), "access_tunnel_unsupported", "usage", false},
+		{accessTunnelHTTPError(http.StatusServiceUnavailable), "access_tunnel_unavailable", "unavailable_retryable", true},
+		{accessTunnelHTTPError(http.StatusTooManyRequests), "access_tunnel_unavailable", "unavailable_retryable", true},
+		{accessTunnelHTTPError(http.StatusBadGateway), "access_tunnel_unavailable", "unavailable_retryable", true},
+		{accessTunnelFailure(ErrAccessTunnelGone, accessTunnelHTTPStatus{status: http.StatusGone}), "access_tunnel_session_gone", "unavailable_retryable", true},
+		{accessTunnelHTTPError(http.StatusConflict), "access_tunnel_unexpected_response", "local_io", false},
+	} {
+		got := classifyCLIJSONError(test.err)
+		if got.Code != test.code || got.Category != test.category || got.Retryable != test.retryable {
+			t.Fatalf("%v: code=%q category=%q retryable=%v, want %q %q %v", test.err, got.Code, got.Category, got.Retryable, test.code, test.category, test.retryable)
+		}
+	}
+	if got := classifyCLIJSONError(errors.Join(accessTunnelHTTPError(http.StatusForbidden), syscall.EIO)); got.Code != "operation_failed" {
+		t.Fatalf("an independent failure joined to a refusal was labelled %q", got.Code)
+	}
+}

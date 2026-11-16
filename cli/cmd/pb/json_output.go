@@ -378,6 +378,9 @@ func classifyCLIJSONFailure(err error, failure commandFailure) cliJSONError {
 		result.Code, result.Category, result.StateChanged = "tunnel_operation_wait_timeout", "unavailable_retryable", true
 		result.Retryable, result.OutcomeUncertain = true, true
 	}
+	if code, category, retryable, ok := accessTunnelJSONFailure(err); ok && result.Code == "operation_failed" && failure.kind != commandCanceled && failure.kind != commandDeadline {
+		result.Code, result.Category, result.Retryable = code, category, retryable
+	}
 	switch failure.kind {
 	case commandUsage:
 		if result.Code == "operation_failed" {
