@@ -58,12 +58,16 @@ func (r *RuntimeRepository) RecordRuntimeObservation(ctx context.Context, observ
 	if observation.ObservedAt.IsZero() {
 		observation.ObservedAt = time.Now().UTC()
 	}
-	return r.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+	// Read committed plus the machine row lock taken first: every later statement reads and writes a row no one
+	// else can change until commit, which is all this transaction needs. Under SERIALIZABLE each heartbeat (and the
+	// triggers its writes fire) took predicate locks; ~300 daemons reconnecting after a deploy exhausted the shared
+	// predicate lock table (SQLSTATE 53200, max_pred_locks_per_transaction) and failed every serializable caller.
+	return r.db.InReadCommittedTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+		instance, err := tx.Queries().GetUserMachineRuntimeInstanceForUpdate(ctx, dbsqlc.GetUserMachineRuntimeInstanceForUpdateParams{ID: observation.MachineID, EnvironmentID: observation.EnvironmentID})
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
 		if observation.WorkerGeneration > 0 && observation.OSBootID != "" {
-			instance, err := tx.Queries().GetUserMachineRuntimeInstanceForUpdate(ctx, dbsqlc.GetUserMachineRuntimeInstanceForUpdateParams{ID: observation.MachineID, EnvironmentID: observation.EnvironmentID})
-			if err != nil && !errors.Is(err, sql.ErrNoRows) {
-				return err
-			}
 			if err == nil && instance.Online && instance.LastSeenAt.Valid && instance.LastSeenAt.Time.After(time.Now().UTC().Add(-r.identityConflictWindow)) && instance.OsBootID.Valid && instance.OsBootID.String != observation.OSBootID && observation.WorkerGeneration <= uint64(instance.WorkerGeneration) {
 				return ErrDuplicateMachineIdentity
 			}

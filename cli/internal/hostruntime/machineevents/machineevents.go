@@ -251,12 +251,13 @@ func (h *Hub) run(ctx context.Context) {
 			if errorreport.ProjectFault(ctx, "paperboat-daemon", "machine_events", "delivery", "control_request_failed", err).HTTPStatus == http.StatusUnauthorized {
 				h.wakeAll()
 			}
-			if !failing {
+			first := !failing
+			if first {
 				failing = true
 				errorreport.Current().ObserveFailure(ctx, "paperboat-daemon", "machine_events", "delivery", "control_request_failed", err)
 			}
 			backoff = min(max(backoff*2, minBackoff), maxBackoff)
-			timer := time.NewTimer(backoff + time.Duration(jitterrand.Int64N(int64(backoff/2)+1)))
+			timer := time.NewTimer(retryDelay(backoff, first))
 			select {
 			case <-ctx.Done():
 				timer.Stop()
@@ -278,6 +279,21 @@ func (h *Hub) run(ctx context.Context) {
 		}
 		h.deliver(moved)
 	}
+}
+
+// reconnectSpread is the window a first retry is spread over. A server rollout ends every held wait at once; with
+// the old 1-1.5 s retry ~300 daemons came back in the same half second, each followed by its consumers' refreshes
+// (68 req/s against 20 steady, 2026-11-16). Tailscale jitters its control client retries the same way
+// (util/backoff/backoff.go, used by control/controlclient/auto.go).
+const reconnectSpread = 5 * time.Second
+
+// retryDelay is how long the wait loop sleeps after a failed wait: the first failure after a healthy stream is
+// spread uniformly over [minBackoff, minBackoff+reconnectSpread), later ones are backoff plus up to half again.
+func retryDelay(backoff time.Duration, first bool) time.Duration {
+	if first {
+		return minBackoff + time.Duration(jitterrand.Int64N(int64(reconnectSpread)))
+	}
+	return backoff + time.Duration(jitterrand.Int64N(int64(backoff/2)+1))
 }
 
 func (h *Hub) snapshot() (map[Topic]int64, <-chan struct{}) {
