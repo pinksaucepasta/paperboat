@@ -124,6 +124,8 @@ def build_env(existing, prod):
         "PAPERBOAT_LOCAL_ACCESS_BASE_DOMAIN": sub("loc"), "PAPERBOAT_PREVIEW_BASE_DOMAIN": public_base,
         "PAPERBOAT_TUNNEL_BASE_DOMAIN": public_base, "PAPERBOAT_RUNTIME_BASE_DOMAIN": sub("rt"),
         "PAPERBOAT_SELFHOST_ALLOW_PRIVATE_INGRESS": "true",
+        # production's setting; the default (disabled) refuses every config sync credential with 401 credential_invalid
+        "PAPERBOAT_CONFIG_SYNC_MODE": "leased_writes",
         "PAPERBOAT_SENTRY_REGION": REGION, "PAPERBOAT_SENTRY_INSTANCE": INSTANCE,
         "PAPERBOAT_REGIONAL_DOMAIN": DOMAIN, "PAPERBOAT_REGIONAL_DNS_ZONE_ID": prod["PAPERBOAT_CERTIFICATES_DNS_ZONE_ID"],
         "PAPERBOAT_REGIONAL_HTTPS_ADDRESS": f":{PORT}",
