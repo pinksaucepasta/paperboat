@@ -828,3 +828,32 @@ rcp-w2    apitok_71d5521beedeabe24d9cc122b85015a4  user:<email>  2026-11-17  202
 rcp-ctl2  apitok_0195bc2e0eefd9d45e785947e532ec82  user:<email>  2026-11-17  2026-11-16 12:01  active  no
 rcp-ctl   apitok_30ad6e6399b998af43f7897389fb11cd  user:<email>  2026-11-17  2026-11-16 12:00  active  no
 
+
+################ f26-04.txt (rotate + revoke without re-key, appended 11:03:39)
+=== F26-04 revoke without re-key, 11:02:03, client dev-dd317c2af ===
+$ (creator, profile_dir set) pb login --api-token-file <file>
+Signed in as <email> with an API token. This computer can do only what the token allows.
+$ (rcp-w default) pb auth status   [must still be the recipe session]
+Session: session_9a9b537f-d0fb-4ea2-b3c3-50948ea1ed23
+$ (creator) pb env unlock --password-stdin
+ENV vault operation completed.
+$ (creator) pb recipe create -f rcpv.toml
+True
+$ (creator) pb env vault list
+VAULT     KEY   REVISION   RECIPES
+rcp-env   1     1          rcpv,rcpx
+$ (creator) pb env lock
+ENV vault operation completed.
+$ (rcp-l8) PB_RECIPE=<rcpv token> pb pair --name rcp-l8
+Set up rcp-l8 (machine_623b85c0-8de7-4efd-8e46-1aa1fa49a3fe)
+$ (rcp-l8) pb env run -- sh -c echo RCP_SECRET
+RCP_SECRET=vault-value-1
+$ (creator, Windows) pb recipe revoke rcpv --confirm <code>
+Recipe rcpv revoked. 1 machines removed.
+$ (creator) pb env vault list 
+VAULT     KEY   REVISION   RECIPES
+rcp-env   1     1          rcpx
+$ (rcp-l, rcpx) pb env run -- sh -c echo RCP_SECRET
+RCP_SECRET=vault-value-1
+$ (rcp-l8, rcpv revoked) pb env run -- sh -c echo RCP_SECRET
+pb: Paperboat ENV not loaded: Paperboat account credentials are unavailable; the command did not run. Support reference: support_645a67f7-d4f0-4419-b3fe-75806150b20e. Run `pb bugreport --upload` to se
