@@ -1,0 +1,10 @@
+{
+ "check": "xplat-removal-names",
+ "results": [
+  {
+   "id": "X-41-NAMES:W",
+   "status": "PASS",
+   "detail": "rx41n-w.ppr.boats: 200 before, not 200 1/2 s after the revoke, 200 again 2/2 s after enrolling again"
+  }
+ ]
+}
