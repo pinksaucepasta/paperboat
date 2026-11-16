@@ -171,15 +171,21 @@ func installUpdateSource(ctx context.Context, executable string, source installs
 	rollback := func(cause error) (string, error) {
 		recovery, cancel := context.WithTimeout(context.WithoutCancel(ctx), 45*time.Second)
 		defer cancel()
+		binaryErr := invoke(recovery, "rollback-supplied")
+		if errors.Is(binaryErr, hostinstall.ErrNoPendingInstallation) {
+			// A bound update commits inside install-supplied, so there is no journal to undo and the new
+			// version stays installed: keep its command link and service, and report the step that failed
+			// instead of a rollback that never ran.
+			var linkErr error
+			if link != nil {
+				linkErr = link.Commit()
+			}
+			failure := runtimeFailure("the new Paperboat version is installed, but a later step failed; run pb doctor to see why, then rerun pb install", cause)
+			return "", errors.Join(failure, linkErr, inventory(recovery))
+		}
 		var linkErr error
 		if link != nil {
 			linkErr = link.Rollback()
-		}
-		binaryErr := invoke(recovery, "rollback-supplied")
-		if binaryErr != nil {
-			// The installation was already committed (a bound update commits inside install-supplied), so
-			// there is no journal to undo it with: say what state the machine is in instead.
-			binaryErr = runtimeFailure("the update is installed but its background service did not start; run pb doctor to see why, then try the update again or reinstall the previous version", binaryErr)
 		}
 		var serviceErr error
 		if restoreService != nil {

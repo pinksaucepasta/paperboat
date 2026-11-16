@@ -192,3 +192,53 @@ func TestFailedServiceReplacementRollsTheUpdateBackToThePreviousCommand(t *testi
 		t.Fatalf("pb command points at %q (%v) after the rollback, want the previous version %q", target, err, previous)
 	}
 }
+
+// An update the privileged step already committed has no journal (rollback-supplied exits NoPendingInstallationExitCode):
+// nothing is rolled back, the new pb command stays, and the error names the failed step. Same fixture as above.
+func TestFailedStepAfterACommittedUpdateKeepsTheNewVersionAndNamesTheStep(t *testing.T) {
+	executable, source, home := suppliedInstallFixture(t)
+	layout, err := service.UserLayout(runtime.GOOS, os.Getuid())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(layout.Binary); err == nil {
+		t.Skip("a Paperboat installation exists on this machine; the test must not touch its services")
+	}
+	directory := filepath.Join(home, "bin")
+	previous := filepath.Join(home, "previous-pb")
+	if err := os.WriteFile(previous, []byte("previous version"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(directory, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(previous, filepath.Join(directory, "pb")); err != nil {
+		t.Fatal(err)
+	}
+	original := privilegedInstallCommand
+	t.Cleanup(func() { privilegedInstallCommand = original })
+	var operations []string
+	privilegedInstallCommand = func(ctx context.Context, _ int, _, _, _ string, arguments ...string) *exec.Cmd {
+		operation := arguments[len(arguments)-1]
+		operations = append(operations, operation)
+		switch operation {
+		case "inventory":
+			return exec.CommandContext(ctx, "/bin/false")
+		case "rollback-supplied":
+			return exec.CommandContext(ctx, "/bin/sh", "-c", "exit "+strconv.Itoa(NoPendingInstallationExitCode))
+		}
+		// A step that succeeds reads its request first, as the real service does: /bin/true exits before the
+		// request is written, and on macOS that write fails with something other than the EPIPE exec ignores.
+		return exec.CommandContext(ctx, "/bin/sh", "-c", "cat >/dev/null")
+	}
+	_, err = InstallRunningBinary(t.Context(), executable, source, directory, "")
+	if err == nil || !strings.Contains(err.Error(), "new Paperboat version is installed") || errors.Is(err, hostinstall.ErrNoPendingInstallation) {
+		t.Fatalf("update failing after its commit = %v, want the installed version and no rollback error", err)
+	}
+	if want := []string{"install-supplied", "rollback-supplied", "inventory"}; !reflect.DeepEqual(operations, want) {
+		t.Fatalf("privileged steps = %v, want %v", operations, want)
+	}
+	if target, err := os.Readlink(filepath.Join(directory, "pb")); err != nil || target == previous {
+		t.Fatalf("pb command points at %q (%v) after a committed update, want the new version", target, err)
+	}
+}
