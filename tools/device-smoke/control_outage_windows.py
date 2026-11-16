@@ -37,6 +37,7 @@ class Env:
         self.ips = sorted({info[4][0] for info in socket.getaddrinfo(self.api, None, socket.AF_INET)})
 
     stem, echo, enter = "windows", "cmd /c echo", "r"  # what runs and presses Enter on this target (a Mac overrides them)
+    prompt = r"[A-Za-z]:\\[^\r\n]*>"  # the cmd.exe prompt: the terminal takes 30-60 s to attach in an outage, typing earlier loses Enter
     probe, answer = "%%SystemRoot%%", "C:\\Windows"  # typed into the terminal's shell (cmd.exe: doubled for printf) and what only that shell prints; the terminal session has no %OS%
 
     def long_command(self, seconds):
@@ -91,16 +92,46 @@ def refused_rw(env):
     return rc != 0 and "should-not-run" not in out, out.strip()[-200:]
 
 
+TERMINAL_PROBE = r'''import os, pty, re, select, sys, time
+name, tag, probe, answer, prompt = sys.argv[1:6]
+pid, fd = pty.fork()
+if pid == 0:
+    os.execv("/home/pbt/.local/bin/pb", ["pb", "connect", name])
+buf = b""
+def until(pattern, limit):
+    global buf
+    end = time.time() + limit
+    while time.time() < end:
+        if re.search(pattern, buf):
+            return True
+        if select.select([fd], [], [], 0.5)[0]:
+            try:
+                data = os.read(fd, 4096)
+            except OSError:
+                return False
+            buf += data
+    return bool(re.search(pattern, buf))
+if until(prompt.encode(), 120):
+    time.sleep(1)
+    os.write(fd, f"echo {tag}-{probe}\r".encode())
+    ok = until(re.escape(f"{tag}-{answer}").encode(), 20)
+    os.write(fd, b"exit\r")
+    until(b"@@never@@", 3)
+else:
+    ok = False
+print("PASS" if ok else "FAIL", buf[-120:])
+'''
+
+
 def terminal_lw(env, marker):
-    """A new `pb connect` to the Windows machine: type a command and look for its result (the terminal shell is cmd.exe:
-    the typed text shows %SystemRoot%, only the shell on the machine prints C:\\Windows)."""
-    script = f"""#!/bin/bash
-(sleep 15; printf 'echo {marker}-{env.probe}\\{env.enter}'; sleep 4; printf 'exit\\{env.enter}'; sleep 4) | timeout 90 script -qec '{PB} connect {W}' /dev/null 2>&1 | tr -d '\\r'
-"""
-    encoded = base64.b64encode(script.encode()).decode()
-    env.ct(L, f"echo {encoded} | base64 -d > /tmp/term-{marker}.sh", 30)
-    rc, out = env.ct(L, f"bash /tmp/term-{marker}.sh", 110)
-    return f"{marker}-{env.answer}" in out, out.strip()[-160:]
+    """A new `pb connect` to the Windows machine: wait for its prompt (the terminal takes 30-60 s to attach in an outage; typing
+    earlier reaches a not yet raw tty and Enter is lost), type a command and look for its result (the terminal shell is cmd.exe: the
+    typed text shows %SystemRoot%, only the shell on the machine prints C:\\Windows)."""
+    encoded = base64.b64encode(TERMINAL_PROBE.encode()).decode()
+    env.ct(L, f"echo {encoded} | base64 -d > /tmp/term-probe.py", 30)
+    probe = env.probe.replace("%%", "%")
+    rc, out = env.ct(L, f"python3 /tmp/term-probe.py {W} {marker} '{probe}' '{env.answer}' '{getattr(env, 'prompt', '.')}'", 170)
+    return out.strip().startswith("PASS"), out.strip()[-160:]
 
 
 def status_unavailable(env):
@@ -152,7 +183,7 @@ def drill(env, args):
                 for name, fn in (("L->W", exec_lw), ("W->L", exec_wl)):
                     ok, detail = c.eventually(lambda: fn(env, f"outage-{tag}-{name[0]}{name[-1]}"), 60, 10)
                     res.add(f"outage {label}: new exec {name}", ok, detail)
-                ok, detail = c.eventually(lambda: terminal_lw(env, f"outage-{tag}-term"), 60, 10)
+                ok, detail = c.eventually(lambda: terminal_lw(env, f"outage-{tag}-term"), 170, 10)
                 res.add(f"outage {label}: new pb connect terminal L->W", ok, detail)
                 rc, out = env.ct(L, f"{PB} ssh {W} -- echo outage-ssh", 90)
                 res.add(f"outage {label}: new pb ssh L->W", rc == 0 and "outage-ssh" in out, out.strip()[-200:])
@@ -172,7 +203,7 @@ def drill(env, args):
         for name, fn in (("L->W", exec_lw), ("W->L", exec_wl)):
             ok, detail = c.eventually(lambda: fn(env, f"recovered-{name[0]}{name[-1]}"), 120)
             res.add(f"recovery: new exec {name}", ok, detail)
-        ok, detail = c.eventually(lambda: (lambda o: ("long-lw-done" in o[1] and "0" in env.ct(L, "cat /tmp/long-lw.rc", 30)[1], o[1].strip()[-120:]))(env.ct(L, "cat /tmp/long-lw.out", 30)), 240, 10)
+        ok, detail = c.eventually(lambda: (lambda o: ("long-lw-done" in o[1] and "0" in env.ct(L, "cat /tmp/long-lw.rc", 30)[1], o[1].strip()[-120:]))(env.ct(L, "cat /tmp/long-lw.out", 30)), 480, 10)  # the long exec outlasts the cut by 420 s, and the cut and its checks run longer than --outage-seconds
         res.add("recovery: long L->W finished rc 0 with its output", ok, detail)
         try:
             code = wl.wait(240)
