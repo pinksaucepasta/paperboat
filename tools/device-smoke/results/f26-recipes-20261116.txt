@@ -1430,3 +1430,51 @@ Managed SSH was not prepared (elevated Windows operation timed out); setup conti
 pb: Paperboat could not access local files. Check file permissions and the local Paperboat service, then retry; run `pb doctor` if this continues. Support reference: support_09c54a97-71ca-4133-b32f-8518f070a322. Run `pb bugreport --upload` to send the details.
 rc=1
 (took 79 s, timeout 420)
+
+################ f26-07-W.txt (standard Windows user)
+=== F26-07 no admin on victus (standard Windows user rcpwn), server .31, client dev-677535d67, 2026-11-16T13:47:43Z ===
+$ pb install   [standard user]
+pb: Paperboat could not finish: installing the supplied Paperboat executable needs administrator access, and this session cannot show the Windows approval prompt; run `pb install` from a signed-in desktop session and approve it. Check the current state before retrying; run `pb doctor` if this continues. Support reference: support_fa530f71-42e8-49f4-a1e6-0cd536dfddac. Run `pb bugreport --upload` to send the details.
+rc=1
+$ PB_RECIPE=<token> pb pair   [standard user]
+Pairing this machine from recipe rcpz.
+Managed SSH was not prepared (elevated Windows operation timed out); setup continues without it. Run `pb doctor --repair` to prepare it.
+pb: Paperboat could not access local files. Check file permissions and the local Paperboat service, then retry; run `pb doctor` if this continues. Support reference: support_09c54a97-71ca-4133-b32f-8518f070a322. Run `pb bugreport --upload` to send the details.
+rc=1
+(took 79 s, timeout 420)
+=== F26-07 no admin on victus (standard user rcpwn), server .34, client dev-54c87ead9 (Windows preflight 380a162c6), 2026-11-16T14:43:10Z ===
+$ (creator) pb recipe list | grep rcpz   [before]
+rcpz   rcpz   2 / 5      2027-02-14   33m ago
+$ PB_RECIPE=<token> pb pair   [standard user, not elevated]
+The process cannot access the file because it is being used by another process.
+(took 4 s)
+$ (creator) pb recipe list | grep rcpz   [after]
+rcpz   rcpz   2 / 5      2027-02-14   54m ago
+--- re-run after ending a stalled copy session ---
+(took 1794841501 s)
+$ (creator) pb recipe list | grep rcpz   [after]
+rcpz   rcpz   2 / 5      2027-02-14   55m ago
+$ PB_RECIPE=<token> pb pair   [standard user, not elevated]
+(took 240 s)
+$ (creator) pb recipe list | grep rcpz   [after]
+rcpz   rcpz   2 / 5      2027-02-14   59m ago
+--- run after Defender's first scan of the new binary (15:20:43) ---
+$ PB_RECIPE=<token> pb pair   [standard user, not elevated] 
+Access is denied.
+Access is denied.
+(took 2 s)
+$ (creator) pb recipe list | grep rcpz   [after]
+rcpz   rcpz   2 / 5      2027-02-14   1h ago
+--- fresh copy pb54.exe (15:22:16) ---
+  ▄▄▝▀▀▀▀▀▘▄▄   Version dev-54c87ead9
+$ PB_RECIPE=<token> pb pair   [standard user, not elevated] 
+pb: Paperboat could not access local files. Check file permissions and the local Paperboat service, then retry; run `pb doctor` if this continues. Support reference: support_2e9cb6f1-2236-4de7-bcdc-0434125100c1. Run `pb bugreport --upload` to send the details.
+(took 1 s)
+$ (creator) pb recipe list | grep rcpz   [after]
+rcpz   rcpz   2 / 5      2027-02-14   1h ago
+--- dev-96c5cc3ed (b5bc0b480: preflight before the identity read), 16:09:46 ---
+  ▄▄▝▀▀▀▀▀▘▄▄   Version dev-96c5cc3ed
+$ PB_RECIPE=<token> pb pair   [standard user, not elevated] 
+pb: Installing needs an administrator PowerShell. Start PowerShell with "Run as administrator" (or connect over SSH as an administrator) and run the command again. Recipe installs never show an approval prompt, so they never hang a CI job.
+$ (creator) pb recipe list | grep rcpz   [after]
+rcpz   rcpz   3 / 5      2027-02-14   15m ago
