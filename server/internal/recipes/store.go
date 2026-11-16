@@ -97,6 +97,10 @@ func (s *Service) Update(ctx context.Context, actor string, ws workspace.Scope, 
 		if before, err = byNameTx(ctx, tx, ws, actor, in.Name, true); err != nil {
 			return err
 		}
+		if before.Source == in.Source && before.Format == in.Format {
+			after = before // the same file again: no new revision, nothing for the machines to apply
+			return nil
+		}
 		rows, err := s.checkWorkspaceTx(ctx, tx, before.AccountID, ws, r)
 		if err != nil {
 			return err

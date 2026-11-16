@@ -160,6 +160,10 @@ func TestRecipeLifecycle(t *testing.T) {
 		t.Fatalf("update: %+v %v", after, err)
 	}
 	moved()
+	// The same file again is no new revision (F26-01 device check: "unchanged (revision 3)").
+	if same, again, err := f.service.Update(f.ctx, f.account, f.personal, Input{Name: "ci", Source: strings.Replace(ci, "max_machines = 1", "max_machines = 5", 1), Format: "toml"}); err != nil || same.Revision != 2 || again.Revision != 2 {
+		t.Fatalf("unchanged update: %d -> %d %v", same.Revision, again.Revision, err)
+	}
 
 	// A machine reports what it applied with its own key, which show returns for rotate to seal to.
 	machineKey := f.token().PublicKey()
