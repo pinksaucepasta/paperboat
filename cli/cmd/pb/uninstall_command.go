@@ -17,6 +17,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/config"
 	"github.com/pinksaucepasta/paperboat/internal/daemoncmd"
 	helperconfig "github.com/pinksaucepasta/paperboat/internal/hostruntime/config"
+	service "github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
 	"github.com/pinksaucepasta/paperboat/internal/inbox"
 	"github.com/pinksaucepasta/paperboat/internal/localdaemon"
 	"github.com/pinksaucepasta/paperboat/internal/managedssh"
@@ -241,6 +242,8 @@ func userPaperboatRemovalPaths(command *cobra.Command) ([]string, error) {
 	var paths []string
 	if home, err := os.UserHomeDir(); err == nil {
 		paths = append(paths, filepath.Join(home, ".local", "bin", "pb"))
+		// macOS: the per-user daemon's log folder (launchd creates the file in it) is outside every XDG directory.
+		paths = append(paths, filepath.Dir(service.DaemonLogPath(home)))
 	} else {
 		result = errors.Join(result, err)
 	}
