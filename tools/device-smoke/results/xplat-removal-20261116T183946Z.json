@@ -1,0 +1,10 @@
+{
+ "check": "xplat-removal",
+ "results": [
+  {
+   "id": "X-41:uninstall:L",
+   "status": "PASS",
+   "detail": "rx41p-m: pb: No machine has that name or ID. Run `pb machine list` to see your machines. Support reference: support_a9f; observers: 3 events/min; new identity after enrolling again, both observers exec and pb ssh it (exec reachable 4 s after the new identity was listed, pb ssh 5 s later)"
+  }
+ ]
+}
