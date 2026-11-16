@@ -1,0 +1,88 @@
+23:03:55 user=22147E63-CA5B-4$
+23:03:55 == local administrator pbw + pb.exe (OLD build)
+The command completed successfully.
+
+The command completed successfully.
+
+
+23:03:56 == old pb version
+rc=0  
+
+23:05:23 == old pb install (try 1)
+23:06:09 Still working on the administrator step (30s)...
+Installed Paperboat dev-2e3cad1f5 at C:\Program Files\Paperboat\users\ueb88dde0587b1a71a394ac7f\bin\pb.exe. Background update checks: false. Enrollment is unchanged.
+rc=0  
+
+23:06:13 == old pb pair
+23:07:59 Still working on the administrator step (30s)...
+Still working on the administrator step (1m0s)...
+Still working on the administrator step (1m30s)...
+{"schema_version":"1.0","ok":true,"data":{"environment_id":"machine_bd608de3-8b7b-4c74-a175-70cb36a70fc1","installation_generation":1,"machine_id":"machine_bd608de3-8b7b-4c74-a175-70cb36a70fc1","server_url":"https://api.pprbt.dev"}}
+rc=0  
+
+23:07:59 settle 90 s
+23:09:29 == old pb doctor
+23:09:33 Paperboat doctor: healthy
+Correlation: support_f0e11a5c-ad4b-4fea-b56e-54ed34fb38ae
+authentication: pass: The Paperboat server accepted the current credential.
+clock: pass: This machine's clock matches the Paperboat server's.
+daemon: pass: The local daemon is ready.
+local_names: pass: Local browser names resolve to this computer.
+local_state: pass: Local Paperboat state and identity are valid.
+machine_credentials: pass: The Paperboat server accepts this machine's credentials.
+machine_guard_version: pass: The machine guard runs this pb's version.
+peer_paths: pass: No connection to another machine is in use.
+udp_ipv4: pass: IPv4 UDP sockets are available.
+udp_ipv6: pass: IPv6 UDP sockets are available.
+rc=0  
+
+23:09:33 == old pb exec lanex2-l2
+23:09:36 ok
+rc=0  
+
+23:09:36 == swap in NEW pb.exe
+
+23:09:37 == new pb version
+rc=0  
+
+23:09:40 == NEW pb install over the old install
+23:10:43 Still working on the administrator step (30s)...
+Installed Paperboat dev-2e3cad1f5 at C:\Program Files\Paperboat\users\ueb88dde0587b1a71a394ac7f\bin\pb.exe. Background update checks: false. Enrollment is unchanged.
+rc=0  
+
+23:10:44 install took 63 s
+23:10:44 == new pb doctor
+23:10:46 Paperboat doctor: healthy
+Correlation: support_6589f841-c9a4-47d6-98a7-8b5124b3e504
+authentication: pass: The Paperboat server accepted the current credential.
+clock: pass: This machine's clock matches the Paperboat server's.
+daemon: pass: The local daemon is ready.
+local_names: pass: Local browser names resolve to this computer.
+local_state: pass: Local Paperboat state and identity are valid.
+machine_credentials: pass: The Paperboat server accepts this machine's credentials.
+machine_guard_version: pass: The machine guard runs this pb's version.
+peer_paths: pass: No connection to another machine is in use.
+udp_ipv4: pass: IPv4 UDP sockets are available.
+udp_ipv6: pass: IPv6 UDP sockets are available.
+rc=0  
+
+23:10:46 == new pb exec lanex2-l2
+23:10:50 ok
+rc=0  
+
+23:10:50 == services
+
+Status  Name                                                                             DisplayName                                                                     
+------  ----                                                                             -----------                                                                     
+Running DispBrokerDesktopSvc                                                             Display Policy Service                                                          
+Running PaperboatCarrier-ueb88dde0587b1a71a394ac7f-89ec6bb0482e543864e74ff93314c3a7      PaperboatCarrier-ueb88dde0587b1a71a394ac7f-89ec6bb0482e543864e74ff93314c3a7     
+Running PaperboatHostd-ueb88dde0587b1a71a394ac7f-89ec6bb0482e543864e74ff93314c3a7        PaperboatHostd-ueb88dde0587b1a71a394ac7f-89ec6bb0482e543864e74ff93314c3a7       
+Running PaperboatLocalDaemon-ueb88dde0587b1a71a394ac7f                                   PaperboatLocalDaemon-ueb88dde0587b1a71a394ac7f                                  
+Running PaperboatSessionOwner-ueb88dde0587b1a71a394ac7f-89ec6bb0482e543864e74ff93314c3a7 PaperboatSessionOwner-ueb88dde0587b1a71a394ac7f-89ec6bb0482e543864e74ff93314c3a7
+Running PaperboatUpdated-ueb88dde0587b1a71a394ac7f                                       PaperboatUpdated-ueb88dde0587b1a71a394ac7f                                      
+
+
+
+23:27:58 stop requested
+grep: (standard input): binary file matches
+Status(StatusCode="Cancelled", Detail="", DebugException="System.OperationCanceledException: The operation was canceled.")

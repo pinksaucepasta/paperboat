@@ -1,0 +1,19 @@
+== before: egress src=192.168.64.2 http=404  default: gateway: 192.168.64.1 interface: en0 
+== en1: 
+== t+30 switch to x38r-en1
+Wrong number of network services... No changes have been made.
+Note: Quotes must be used around service names which contain spaces (ie. "Built-in Ethernet").
+** Error: The parameters were not valid.
+route: writing to routing socket: not in table
+after switch: egress src= http=000  default: 
+ping: summary: sent=2 received=2 loss=0.0% connect min/avg/max=0.02/0.04/0.05ms
+== t+90 switch back to Ethernet
+Wrong number of network services... No changes have been made.
+Note: Quotes must be used around service names which contain spaces (ie. "Built-in Ethernet").
+** Error: The parameters were not valid.
+after switch back: egress src=192.168.64.2 http=404  default: gateway: 192.168.64.1 interface: en0 
+Mac-initiated exec: exec rc=0
+exec rc=0 lines=150 of 150
+ping after: sample 3: path=regional_relay connect=0.08ms summary: sent=3 received=3 loss=0.0% connect min/avg/max=0.08/116.30/348.73ms 
+== restored: egress src=192.168.64.2 http=404  default: gateway: 192.168.64.1 interface: en0 
+An asterisk (*) denotes that a network service is disabled. Ethernet /tmp/x38r-mac-switch.sh: line 21: 30070 Terminated: 15          ( sleep 420; restore )

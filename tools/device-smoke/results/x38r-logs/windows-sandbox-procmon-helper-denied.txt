@@ -1,0 +1,213 @@
+18:59:08 == cmd.ps1
+18:59:08 procmon download
+2238760
+
+18:59:25 install under procmon
+18:59:49 {"schema_version":"1.0","ok":false,"error":{"code":"operation_failed","category":"local_io","message":"Paperboat could not finish: Windows installation failed while installing runtime services. Check the current state before retrying; run `pb doctor` if this continues.","retryable":false,"state_changed":"unknown","outco
+rc=0  
+
+18:59:58 denied
+
+19:00:47 == cmd.ps1
+19:01:10 rows 223696
+19:01:10 processes
+
+Name                      Count
+----                      -----
+svchost.exe               55720
+powershell.exe            48885
+pm.exe                    37433
+pb.exe                    31532
+wmiprvse.exe              25301
+helper.exe                 9422
+System                     4053
+appidcertstorecheck.exe    3068
+MpDefenderCoreService.exe  2691
+lsass.exe                  2093
+conhost.exe                2055
+cmd.exe                     503
+
+
+
+19:01:18 results by pb*
+
+Name                          Count
+----                          -----
+SUCCESS                       28956
+FAST IO DISALLOWED             1725
+NAME NOT FOUND                  605
+BUFFER OVERFLOW                 109
+REPARSE                          71
+INVALID PARAMETER                28
+FILE LOCKED WITH ONLY READERS    16
+NO MORE FILES                     9
+END OF FILE                       4
+IS DIRECTORY                      2
+NOT EMPTY                         2
+PATH NOT FOUND                    2
+BUFFER TOO SMALL                  1
+                                  1
+PIPE BROKEN                       1
+
+
+
+19:01:38 non-success tail of pb (excluding common benign)
+
+Time of Day        Process Name Operation                     Path                                                                                               Result                        Detail                                                          
+-----------        ------------ ---------                     ----                                                                                               ------                        ------                                                          
+6:59:26.3351422 PM pb.exe       CreateFileMapping             C:\Windows\System32\powrprof.dll                                                                   FILE LOCKED WITH ONLY READERS SyncType: SyncTypeCreateSection, PageProtection: PAGE_EXECUTE   
+6:59:26.3413966 PM pb.exe       CreateFileMapping             C:\Windows\System32\umpdc.dll                                                                      FILE LOCKED WITH ONLY READERS SyncType: SyncTypeCreateSection, PageProtection: PAGE_EXECUTE   
+6:59:26.3816332 PM pb.exe       CreateFileMapping             C:\Windows\System32\windows.storage.dll                                                            FILE LOCKED WITH ONLY READERS SyncType: SyncTypeCreateSection, PageProtection: PAGE_EXECUTE   
+6:59:26.4040677 PM pb.exe       CreateFileMapping             C:\Windows\System32\profapi.dll                                                                    FILE LOCKED WITH ONLY READERS SyncType: SyncTypeCreateSection, PageProtection: PAGE_EXECUTE   
+6:59:26.4135026 PM pb.exe       CreateFileMapping             C:\Windows\System32\oleaut32.dll                                                                   FILE LOCKED WITH ONLY READERS SyncType: SyncTypeCreateSection, PageProtection: PAGE_READONLY  
+6:59:26.4191658 PM pb.exe       CreateFileMapping             C:\Windows\Globalization\Sorting\SortDefault.nls                                                   FILE LOCKED WITH ONLY READERS SyncType: SyncTypeCreateSection, PageProtection: PAGE_READONLY  
+6:59:26.4706833 PM pb.exe       CreateFileMapping             C:\Windows\System32\ntmarta.dll                                                                    FILE LOCKED WITH ONLY READERS SyncType: SyncTypeCreateSection, PageProtection: PAGE_EXECUTE   
+6:59:26.4737607 PM pb.exe       QueryDirectory                C:\Users\pbw\AppData\Local\Paperboat\state\diagnostics                                             NO MORE FILES                 FileInformationClass: FileDirectoryInformation                  
+6:59:26.4767483 PM pb.exe       QueryDirectory                C:\Users\pbw\AppData\Local\Paperboat\state\diagnostics                                             NO MORE FILES                 FileInformationClass: FileIdBothDirectoryInformation            
+6:59:26.8684771 PM pb.exe       CreateFileMapping             C:\Windows\System32\userenv.dll                                                                    FILE LOCKED WITH ONLY READERS SyncType: SyncTypeCreateSection, PageProtection: PAGE_EXECUTE   
+6:59:26.8713330 PM pb.exe       CreateFileMapping             C:\Windows\System32\secur32.dll                                                                    FILE LOCKED WITH ONLY READERS SyncType: SyncTypeCreateSection, PageProtection: PAGE_EXECUTE   
+6:59:26.8737858 PM pb.exe       CreateFileMapping             C:\Windows\System32\sspicli.dll                                                                    FILE LOCKED WITH ONLY READERS SyncType: SyncTypeCreateSection, PageProtection: PAGE_EXECUTE   
+6:59:26.8788943 PM pb.exe       QueryDirectory                C:\Users\pbw\AppData\Local\Temp                                                                    NO MORE FILES                 FileInformationClass: FileIdBothDirectoryInformation            
+6:59:27.1018766 PM pb.exe       QueryDirectory                C:\Users\pbw\AppData\Local\Paperboat\elevation                                                     NO MORE FILES                 FileInformationClass: FileDirectoryInformation                  
+6:59:27.1040462 PM pb.exe       QueryDirectory                C:\Users\pbw\AppData\Local\Paperboat\elevation                                                     NO MORE FILES                 FileInformationClass: FileDirectoryInformation                  
+6:59:27.1676063 PM pb.exe       QueryDirectory                C:\Users\pbw\AppData\Local\Paperboat\elevation\request-7a0bd86cfb96f5572b859cb96a83c370            NO MORE FILES                 FileInformationClass: FileDirectoryInformation                  
+6:59:27.1682859 PM pb.exe       QueryDirectory                C:\Users\pbw\AppData\Local\Paperboat\elevation\request-7a0bd86cfb96f5572b859cb96a83c370            NO MORE FILES                 FileInformationClass: FileDirectoryInformation                  
+6:59:28.7974077 PM pb.exe       CreateFileMapping             C:\Users\pbw\AppData\Local\Paperboat\elevation\request-7a0bd86cfb96f5572b859cb96a83c370\helper.exe FILE LOCKED WITH ONLY READERS SyncType: SyncTypeCreateSection, PageProtection: PAGE_EXECUTE   
+6:59:29.4215119 PM pb.exe       CreateFileMapping             C:\Users\pbw\AppData\Local\Paperboat\elevation\request-7a0bd86cfb96f5572b859cb96a83c370\helper.exe FILE LOCKED WITH ONLY READERS SyncType: SyncTypeCreateSection, PageProtection: PAGE_READONLY  
+6:59:31.8983411 PM pb.exe       CreateFileMapping             C:\Users\pbw\AppData\Local\Paperboat\elevation\request-7a0bd86cfb96f5572b859cb96a83c370\helper.exe FILE LOCKED WITH ONLY READERS SyncType: SyncTypeCreateSection, PageProtection: PAGE_READONLY  
+6:59:32.3146794 PM pb.exe       CreateFileMapping             C:\Windows\apppatch\sysmain.sdb                                                                    FILE LOCKED WITH ONLY READERS SyncType: SyncTypeCreateSection, PageProtection: PAGE_READONLY  
+6:59:32.3186329 PM pb.exe       CreateFileMapping             C:\Windows\apppatch\MergeSdbFilesSource\sysMerge.sdb                                               FILE LOCKED WITH ONLY READERS SyncType: SyncTypeCreateSection, PageProtection: PAGE_READONLY  
+6:59:32.3201327 PM pb.exe       CreateFileMapping             C:\Users\pbw\AppData\Local\Paperboat\elevation\request-7a0bd86cfb96f5572b859cb96a83c370\helper.exe FILE LOCKED WITH ONLY READERS SyncType: SyncTypeCreateSection, PageProtection: PAGE_READONLY  
+6:59:46.0396444 PM pb.exe       FileSystemControl             \Device\NamedPipe\PaperboatMachineGuard                                                                                          Control: FSCTL_PIPE_LISTEN                                      
+6:59:46.0490353 PM pb.exe       ReadFile                      \Device\NamedPipe\PaperboatMachineGuard                                                            PIPE BROKEN                   Offset: 0, Length: 4, Priority: Normal                          
+6:59:46.3241404 PM pb.exe       SetDispositionInformationEx   C:\Users\pbw\AppData\Local\Paperboat\elevation\request-7a0bd86cfb96f5572b859cb96a83c370            NOT EMPTY                     Flags: FILE_DISPOSITION_DELETE, FILE_DISPOSITION_POSIX_SEMANTICS
+6:59:46.3241962 PM pb.exe       SetDispositionInformationFile C:\Users\pbw\AppData\Local\Paperboat\elevation\request-7a0bd86cfb96f5572b859cb96a83c370            NOT EMPTY                     Delete: True                                                    
+6:59:46.3251778 PM pb.exe       QueryDirectory                C:\Users\pbw\AppData\Local\Paperboat\elevation\request-7a0bd86cfb96f5572b859cb96a83c370            NO MORE FILES                 FileInformationClass: FileIdBothDirectoryInformation            
+6:59:46.4538034 PM pb.exe       QueryDirectory                C:\Users\pbw\AppData\Local\Paperboat\state\diagnostics                                             NO MORE FILES                 FileInformationClass: FileIdBothDirectoryInformation            
+
+
+
+
+[exited with code 0]
+18:59:08 == cmd.ps1
+18:59:08 procmon download
+2238760
+
+18:59:25 install under procmon
+18:59:49 {"schema_version":"1.0","ok":false,"error":{"code":"operation_failed","category":"local_io","message":"Paperboat could not finish: Windows installation failed while installing runtime services. Check the current state before retrying; run `pb doctor` if this continues.","retryable":false,"state_changed":"unknown","outco
+rc=0  
+
+18:59:58 denied
+
+19:00:47 == cmd.ps1
+19:01:10 rows 223696
+19:01:10 processes
+
+Name                      Count
+----                      -----
+svchost.exe               55720
+powershell.exe            48885
+pm.exe                    37433
+pb.exe                    31532
+wmiprvse.exe              25301
+helper.exe                 9422
+System                     4053
+appidcertstorecheck.exe    3068
+MpDefenderCoreService.exe  2691
+lsass.exe                  2093
+conhost.exe                2055
+cmd.exe                     503
+
+
+
+19:01:18 results by pb*
+
+Name                          Count
+----                          -----
+SUCCESS                       28956
+FAST IO DISALLOWED             1725
+NAME NOT FOUND                  605
+BUFFER OVERFLOW                 109
+REPARSE                          71
+INVALID PARAMETER                28
+FILE LOCKED WITH ONLY READERS    16
+NO MORE FILES                     9
+END OF FILE                       4
+IS DIRECTORY                      2
+NOT EMPTY                         2
+PATH NOT FOUND                    2
+BUFFER TOO SMALL                  1
+                                  1
+PIPE BROKEN                       1
+
+
+
+19:01:38 non-success tail of pb (excluding common benign)
+
+Time of Day        Process Name Operation                     Path                                                                                               Result                        Detail                                                          
+-----------        ------------ ---------                     ----                                                                                               ------                        ------                                                          
+6:59:26.3351422 PM pb.exe       CreateFileMapping             C:\Windows\System32\powrprof.dll                                                                   FILE LOCKED WITH ONLY READERS SyncType: SyncTypeCreateSection, PageProtection: PAGE_EXECUTE   
+6:59:26.3413966 PM pb.exe       CreateFileMapping             C:\Windows\System32\umpdc.dll                                                                      FILE LOCKED WITH ONLY READERS SyncType: SyncTypeCreateSection, PageProtection: PAGE_EXECUTE   
+6:59:26.3816332 PM pb.exe       CreateFileMapping             C:\Windows\System32\windows.storage.dll                                                            FILE LOCKED WITH ONLY READERS SyncType: SyncTypeCreateSection, PageProtection: PAGE_EXECUTE   
+6:59:26.4040677 PM pb.exe       CreateFileMapping             C:\Windows\System32\profapi.dll                                                                    FILE LOCKED WITH ONLY READERS SyncType: SyncTypeCreateSection, PageProtection: PAGE_EXECUTE   
+6:59:26.4135026 PM pb.exe       CreateFileMapping             C:\Windows\System32\oleaut32.dll                                                                   FILE LOCKED WITH ONLY READERS SyncType: SyncTypeCreateSection, PageProtection: PAGE_READONLY  
+6:59:26.4191658 PM pb.exe       CreateFileMapping             C:\Windows\Globalization\Sorting\SortDefault.nls                                                   FILE LOCKED WITH ONLY READERS SyncType: SyncTypeCreateSection, PageProtection: PAGE_READONLY  
+6:59:26.4706833 PM pb.exe       CreateFileMapping             C:\Windows\System32\ntmarta.dll                                                                    FILE LOCKED WITH ONLY READERS SyncType: SyncTypeCreateSection, PageProtection: PAGE_EXECUTE   
+6:59:26.4737607 PM pb.exe       QueryDirectory                C:\Users\pbw\AppData\Local\Paperboat\state\diagnostics                                             NO MORE FILES                 FileInformationClass: FileDirectoryInformation                  
+6:59:26.4767483 PM pb.exe       QueryDirectory                C:\Users\pbw\AppData\Local\Paperboat\state\diagnostics                                             NO MORE FILES                 FileInformationClass: FileIdBothDirectoryInformation            
+6:59:26.8684771 PM pb.exe       CreateFileMapping             C:\Windows\System32\userenv.dll                                                                    FILE LOCKED WITH ONLY READERS SyncType: SyncTypeCreateSection, PageProtection: PAGE_EXECUTE   
+6:59:26.8713330 PM pb.exe       CreateFileMapping             C:\Windows\System32\secur32.dll                                                                    FILE LOCKED WITH ONLY READERS SyncType: SyncTypeCreateSection, PageProtection: PAGE_EXECUTE   
+6:59:26.8737858 PM pb.exe       CreateFileMapping             C:\Windows\System32\sspicli.dll                                                                    FILE LOCKED WITH ONLY READERS SyncType: SyncTypeCreateSection, PageProtection: PAGE_EXECUTE   
+6:59:26.8788943 PM pb.exe       QueryDirectory                C:\Users\pbw\AppData\Local\Temp                                                                    NO MORE FILES                 FileInformationClass: FileIdBothDirectoryInformation            
+6:59:27.1018766 PM pb.exe       QueryDirectory                C:\Users\pbw\AppData\Local\Paperboat\elevation                                                     NO MORE FILES                 FileInformationClass: FileDirectoryInformation                  
+6:59:27.1040462 PM pb.exe       QueryDirectory                C:\Users\pbw\AppData\Local\Paperboat\elevation                                                     NO MORE FILES                 FileInformationClass: FileDirectoryInformation                  
+6:59:27.1676063 PM pb.exe       QueryDirectory                C:\Users\pbw\AppData\Local\Paperboat\elevation\request-7a0bd86cfb96f5572b859cb96a83c370            NO MORE FILES                 FileInformationClass: FileDirectoryInformation                  
+6:59:27.1682859 PM pb.exe       QueryDirectory                C:\Users\pbw\AppData\Local\Paperboat\elevation\request-7a0bd86cfb96f5572b859cb96a83c370            NO MORE FILES                 FileInformationClass: FileDirectoryInformation                  
+6:59:28.7974077 PM pb.exe       CreateFileMapping             C:\Users\pbw\AppData\Local\Paperboat\elevation\request-7a0bd86cfb96f5572b859cb96a83c370\helper.exe FILE LOCKED WITH ONLY READERS SyncType: SyncTypeCreateSection, PageProtection: PAGE_EXECUTE   
+6:59:29.4215119 PM pb.exe       CreateFileMapping             C:\Users\pbw\AppData\Local\Paperboat\elevation\request-7a0bd86cfb96f5572b859cb96a83c370\helper.exe FILE LOCKED WITH ONLY READERS SyncType: SyncTypeCreateSection, PageProtection: PAGE_READONLY  
+6:59:31.8983411 PM pb.exe       CreateFileMapping             C:\Users\pbw\AppData\Local\Paperboat\elevation\request-7a0bd86cfb96f5572b859cb96a83c370\helper.exe FILE LOCKED WITH ONLY READERS SyncType: SyncTypeCreateSection, PageProtection: PAGE_READONLY  
+6:59:32.3146794 PM pb.exe       CreateFileMapping             C:\Windows\apppatch\sysmain.sdb                                                                    FILE LOCKED WITH ONLY READERS SyncType: SyncTypeCreateSection, PageProtection: PAGE_READONLY  
+6:59:32.3186329 PM pb.exe       CreateFileMapping             C:\Windows\apppatch\MergeSdbFilesSource\sysMerge.sdb                                               FILE LOCKED WITH ONLY READERS SyncType: SyncTypeCreateSection, PageProtection: PAGE_READONLY  
+6:59:32.3201327 PM pb.exe       CreateFileMapping             C:\Users\pbw\AppData\Local\Paperboat\elevation\request-7a0bd86cfb96f5572b859cb96a83c370\helper.exe FILE LOCKED WITH ONLY READERS SyncType: SyncTypeCreateSection, PageProtection: PAGE_READONLY  
+6:59:46.0396444 PM pb.exe       FileSystemControl             \Device\NamedPipe\PaperboatMachineGuard                                                                                          Control: FSCTL_PIPE_LISTEN                                      
+6:59:46.0490353 PM pb.exe       ReadFile                      \Device\NamedPipe\PaperboatMachineGuard                                                            PIPE BROKEN                   Offset: 0, Length: 4, Priority: Normal                          
+6:59:46.3241404 PM pb.exe       SetDispositionInformationEx   C:\Users\pbw\AppData\Local\Paperboat\elevation\request-7a0bd86cfb96f5572b859cb96a83c370            NOT EMPTY                     Flags: FILE_DISPOSITION_DELETE, FILE_DISPOSITION_POSIX_SEMANTICS
+6:59:46.3241962 PM pb.exe       SetDispositionInformationFile C:\Users\pbw\AppData\Local\Paperboat\elevation\request-7a0bd86cfb96f5572b859cb96a83c370            NOT EMPTY                     Delete: True                                                    
+6:59:46.3251778 PM pb.exe       QueryDirectory                C:\Users\pbw\AppData\Local\Paperboat\elevation\request-7a0bd86cfb96f5572b859cb96a83c370            NO MORE FILES                 FileInformationClass: FileIdBothDirectoryInformation            
+6:59:46.4538034 PM pb.exe       QueryDirectory                C:\Users\pbw\AppData\Local\Paperboat\state\diagnostics                                             NO MORE FILES                 FileInformationClass: FileIdBothDirectoryInformation            
+
+
+
+19:02:18 == cmd.ps1
+19:03:07 helper results
+
+Name                          Count
+----                          -----
+SUCCESS                        8337
+NAME NOT FOUND                  647
+BUFFER OVERFLOW                 223
+INVALID PARAMETER                64
+REPARSE                          61
+FAST IO DISALLOWED               51
+FILE LOCKED WITH ONLY READERS    10
+SHARING VIOLATION                 8
+NO MORE FILES                     8
+END OF FILE                       4
+PATH NOT FOUND                    4
+ACCESS DENIED                     3
+PIPE BROKEN                       1
+BUFFER TOO SMALL                  1
+
+
+
+19:03:08 helper denied
+
+Time of Day        Operation  Path                                                      Result        Detail                                                                                                                                                                                                       
+-----------        ---------  ----                                                      ------        ------                                                                                                                                                                                                       
+6:59:32.3473238 PM SetEAFile  C:\Windows\System32\conhost.exe                           ACCESS DENIED                                                                                                                                                                                                              
+6:59:33.0509909 PM SetEAFile  C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe ACCESS DENIED                                                                                                                                                                                                              
+6:59:46.0915533 PM CreateFile C:\Users\pbw\AppData\Local\Paperboat\runtime              ACCESS DENIED Desired Access: Read Attributes, Read Control, Write DAC, Synchronize, Disposition: Open, Options: Synchronous IO Non-Alert, Open Reparse Point, Attributes: n/a, ShareMode: Read, Write, AllocationSize: n/a
+
+
+
+[exited with code 0]

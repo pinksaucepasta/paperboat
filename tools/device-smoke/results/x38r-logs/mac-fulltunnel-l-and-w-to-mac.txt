@@ -1,0 +1,16 @@
+== L>M ping
+sample 2: path=regional_relay connect=0.16ms
+sample 3: path=regional_relay connect=0.08ms
+summary: sent=3 received=3 loss=0.0% connect min/avg/max=0.08/83.39/249.93ms
+== L>M exec
+Darwin 25.6.0
+Paperboat ENV not applied: ENV needs Paperboat online. The command ran without your managed values; run it again once `pb status` shows Paperboat is reachable.
+== W>M ping
+sample 1: path=direct connect=256.71ms
+sample 2: path=direct connect=0.60ms
+sample 3: path=direct connect=0.00ms
+summary: sent=3 received=3 loss=0.0% connect min/avg/max=0.00/85.77/256.71ms
+
+== W>M exec
+0 Darwin 25.6.0
+

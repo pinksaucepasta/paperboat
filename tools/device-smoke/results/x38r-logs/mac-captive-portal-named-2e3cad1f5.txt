@@ -1,0 +1,12 @@
+portal probe: http=302
+== doctor with the portal up
+Paperboat doctor: unhealthy
+authentication: fail: A captive portal (Wi-Fi sign-in page) is blocking the network; open a browser to sign in.
+clock: warning: The Paperboat server could not be reached to read its clock.
+== doctor +20s
+Paperboat doctor: unhealthy
+authentication: fail: A captive portal (Wi-Fi sign-in page) is blocking the network; open a browser to sign in.
+== remove
+/tmp/mportal.sh: line 18: 39913 Terminated: 15          sudo nohup python3 /tmp/portal.py > /dev/null 2>&1 < /dev/null
+t+10s: Paperboat doctor: healthy
+ok-after-portal

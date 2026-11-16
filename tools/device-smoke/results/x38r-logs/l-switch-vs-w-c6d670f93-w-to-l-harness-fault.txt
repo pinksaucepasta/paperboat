@@ -1,0 +1,5 @@
++ 35s SWITCH to eth1: default via 172.27.0.1 dev eth1  | 172.17.0.0/16 dev docker0 proto kernel scope link src 172.17.0.1  | egress src=172.27.3.85 http=404
++ 41s ping l: summary: sent=2 received=2 loss=0.0% connect min/avg/max=0.03/0.09/0.15ms
++101s SWITCH back to eth0: default via 192.168.31.1 dev eth0  | 172.17.0.0/16 dev docker0 proto kernel scope link src 172.17.0.1  | egress src=192.168.31.149 http=404
++161s results (rc, lines of 150): {'p2l': (255, 14), 'l2p': (0, 150)}
++183s ping after: sample 1: path=direct connect=11.18ms / sample 2: path=direct connect=0.03ms / sample 3: path=direct connect=0.03ms / summary: sent=3 received=3 loss=0.0% connect min/avg/max=0.03/3.75/11.18ms

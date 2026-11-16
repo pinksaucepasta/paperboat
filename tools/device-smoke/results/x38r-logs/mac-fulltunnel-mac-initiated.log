@@ -1,0 +1,68 @@
+== before
+    gateway: 192.168.64.1
+  interface: en0
+  ▄▄▝▀▀▀▀▀▘▄▄   Version dev-23aa30088
+[#] wireguard-go utun
+[+] Interface for x38rw is utun5
+[#] wg addconf utun5 /dev/fd/63
+[#] ifconfig utun5 inet 10.38.7.2/32 10.38.7.2 alias
+[#] ifconfig utun5 up
+[#] route -q -n add -inet 0.0.0.0/1 -interface utun5
+[#] route -q -n add -inet 128.0.0.0/1 -interface utun5
+[#] route -q -n add -inet 192.168.31.146 -gateway 192.168.64.1
+[#] networksetup -getdnsservers Ethernet
+[#] networksetup -getsearchdomains Ethernet
+[#] networksetup -setdnsservers Ethernet 1.1.1.1
+[#] networksetup -setsearchdomains Ethernet Empty
+[+] Backgrounding route monitor
+== routes under the VPN
+0/1                utun5              UScg                utun5       
+default            192.168.64.1       UGScg                 en0       
+128.0/1            utun5              USc                 utun5       
+192.168.31.146     192.168.64.1       UGHS                  en0       
+== egress
+code=404 remote=157.180.74.88
+== doctor under the VPN (Mac)
+Paperboat doctor: healthy
+Correlation: support_4e1ab8b0-a1fb-48f5-aee2-9e0f1f53fec9
+authentication: pass: The Paperboat server accepted the current credential.
+clock: pass: This machine's clock matches the Paperboat server's.
+daemon: pass: The local daemon is ready.
+hostd: pass: The Paperboat host service answers.
+local_names: pass: Local browser names resolve to this computer.
+local_state: pass: Local Paperboat state and identity are valid.
+machine_credentials: pass: The Paperboat server accepts this machine's credentials.
+machine_guard_version: pass: The machine guard runs this pb's version.
+peer_paths: pass: No connection to another machine is in use.
+udp_ipv4: pass: IPv4 UDP sockets are available.
+udp_ipv6: pass: IPv6 UDP sockets are available.
+== ping rx38r-l (Mac initiator)
+sample 2: path=regional_relay connect=0.04ms
+sample 3: path=regional_relay connect=0.07ms
+summary: sent=3 received=3 loss=0.0% connect min/avg/max=0.04/170.71/512.01ms
+== exec rx38r-l (Mac initiator)
+ok-from-mac
+== ping lanex2-w (Mac initiator)
+sample 2: path=direct connect=0.02ms
+sample 3: path=direct connect=0.02ms
+summary: sent=3 received=3 loss=0.0% connect min/avg/max=0.02/114.66/343.93ms
+== exec lanex2-w (Mac initiator)
+ok-from-mac
+== ping lanex2-l2 (Mac initiator)
+sample 2: path=regional_relay connect=0.05ms
+sample 3: path=regional_relay connect=0.03ms
+summary: sent=3 received=3 loss=0.0% connect min/avg/max=0.03/149.73/449.10ms
+== exec lanex2-l2 (Mac initiator)
+ok-from-mac
+== doctor under the VPN (Mac), second look
+Paperboat doctor: healthy
+Correlation: support_2aa7eeb5-b951-4070-96c5-8d2edbf933fe
+authentication: pass: The Paperboat server accepted the current credential.
+[#] rm -f /var/run/wireguard/utun5.sock
+[#] rm -f /var/run/wireguard/x38rw.name
+== after down
+    gateway: 192.168.64.1
+  interface: en0
+/tmp/x38r-mac-ft.sh: line 21: 78385 Terminated: 15          ( sleep 600; sudo -n wg-quick down $CONF > /dev/null 2>&1 )
+Paperboat doctor: unhealthy
+Correlation: support_f35ab4ca-6626-445a-8e85-2d9e846d9ec5

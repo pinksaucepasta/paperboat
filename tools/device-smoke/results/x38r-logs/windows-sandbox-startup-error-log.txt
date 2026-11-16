@@ -1,0 +1,16 @@
+pbw                      WDAGUtilityAccount       
+The command completed with one or more errors.
+
+
+18:47:03 == cmd.ps1
+2026-11-16T13:11:36Z install_runtime 
+install supplied Windows runtime: Access is denied.
+
+FullName                                                      Length
+--------                                                      ------
+C:\ProgramData\Paperboat\MachineGuard\diagnostics\writer.lock      0
+
+
+
+
+[exited with code 0]

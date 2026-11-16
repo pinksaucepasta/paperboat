@@ -1,0 +1,12 @@
+service='Ethernet' dev=en0 ip=192.168.64.16 mask=255.255.255.0 gw=192.168.64.1
+new address: 192.168.64.201
+== before: egress src=192.168.64.16 http=404
+== t+30 manual address 192.168.64.201
+after switch: egress src= http=000  ifaddr=192.168.64.201
+ping: summary: sent=2 received=2 loss=0.0% connect min/avg/max=0.09/0.10/0.10ms
+== t+90 DHCP again
+after switch back: egress src=192.168.64.16 http=404  ifaddr=192.168.64.16
+Mac-initiated exec: exec rc=0 lines=150 of 150
+ping after: sample 3: path=direct connect=0.06ms summary: sent=3 received=3 loss=0.0% connect min/avg/max=0.06/168.80/506.28ms 
+== restored: egress src=192.168.64.16 http=404 ifaddr=192.168.64.16
+/tmp/x38r-as.sh: line 28: 33041 Terminated: 15          ( sleep 420; restore )
