@@ -4,9 +4,10 @@ import { UploadSimpleIcon } from "@phosphor-icons/react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { useRef, useState } from "react"
+import { useRef, useState, useSyncExternalStore } from "react"
 import { toast } from "sonner"
 import { ApiError, useWorkspace } from "@/lib/api"
+import { subscribeVaultLock, vaultUnlocked } from "@/lib/envvault/crypto"
 import { newToken, type NewToken } from "@/lib/recipe-token"
 import {
   createRecipe,
@@ -14,15 +15,15 @@ import {
   formatOf,
   nameFromFile,
   nameHint,
-  needsVaultKey,
   updateRecipe,
   validName,
   type FileProblem,
   type Recipe,
 } from "@/lib/recipes"
 import { queryKeys } from "@/lib/query-keys"
+import { createNamedVault, unknownVault, VaultLockedError } from "@/lib/recipe-vaults"
 import { sections } from "@/lib/sections"
-import { CommandBlock } from "@/components/add-machine-dialog"
+import { EnvUnlock } from "@/components/environment/env-unlock"
 import { TokenOnce } from "@/components/recipes/token-once"
 import { Button } from "@/components/ui/button"
 import { Field, FieldError, FieldLabel } from "@/components/ui/field"
@@ -57,7 +58,7 @@ export function RecipeEditor({ recipe, start }: { recipe?: Recipe; start?: { nam
   const save = useMutation({
     mutationFn: async () => {
       if (!workspace) throw new Error("Choose a workspace first.")
-      if (recipe) return { updated: await updateRecipe(workspace.id, recipe.name, { source, format }) }
+      if (recipe) return { updated: await updateRecipe(workspace.id, recipe, { source, format }) }
       token.current ??= await newToken()
       await createRecipe(workspace.id, { name, source, format }, token.current)
       return { token: token.current.token }
@@ -73,11 +74,25 @@ export function RecipeEditor({ recipe, start }: { recipe?: Recipe; start?: { nam
       router.push(`${listPath}/${encodeURIComponent(now.name)}`)
     },
   })
-  const failed = save.error
+  // A recipe that names a vault the workspace lacks can make it here (the vault engine wraps its key).
+  const makeVault = useMutation({
+    mutationFn: async (vault: string) => {
+      if (!workspace) throw new Error("Choose a workspace first.")
+      await createNamedVault(workspace.id, vault, workspace.kind === "team" ? workspace.id : undefined)
+    },
+    onSuccess: () => {
+      save.reset()
+      save.mutate()
+    },
+  })
+  const unlocked = useSyncExternalStore(subscribeVaultLock, vaultUnlocked, () => false)
+  const failed = makeVault.error ?? save.error
   const found = fileProblems(failed)
   const taken = failed instanceof ApiError && failed.code === "recipe_name_taken"
+  const locked = failed instanceof VaultLockedError && !unlocked
+  const missing = save.error ? unknownVault(save.error) : undefined
   const nameError = taken ? failed.message : name && !validName(name) ? nameHint : undefined
-  const other = failed && !found.length && !taken && !problem ? failed.message : undefined
+  const other = failed && !found.length && !taken && !problem && !(failed instanceof VaultLockedError) ? failed.message : undefined
 
   if (created) {
     return (
@@ -176,12 +191,14 @@ export function RecipeEditor({ recipe, start }: { recipe?: Recipe; start?: { nam
         </ul>
       )}
       {(problem ?? other) && <p className="text-sm text-destructive">{problem ?? other}</p>}
-      {needsVaultKey(failed) && (
-        <div className="flex flex-col gap-2 text-sm text-muted-foreground">
-          <span>
-            A recipe that reads vaults is {recipe ? "updated" : "created"} on a computer where your vault is unlocked.
-          </span>
-          <CommandBlock command={`pb recipe ${recipe ? "update" : "create"} -f ${recipe?.name ?? (name || "recipe")}.${format}`} />
+      {failed instanceof VaultLockedError && unlocked && <p className="text-sm text-muted-foreground">Unlocked. Save again.</p>}
+      {locked && <EnvUnlock title="This recipe reads vaults. Unlock ENV to give it their keys, then save again." />}
+      {missing && (
+        <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+          <span>The workspace has no vault named {missing}.</span>
+          <Button type="button" variant="outline" disabled={makeVault.isPending} onClick={() => makeVault.mutate(missing)}>
+            {makeVault.isPending ? "Creating…" : `Create vault ${missing}`}
+          </Button>
         </div>
       )}
       <div className="flex gap-2">

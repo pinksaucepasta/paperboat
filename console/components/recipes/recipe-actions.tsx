@@ -1,11 +1,12 @@
 "use client"
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { useState } from "react"
+import { useState, useSyncExternalStore } from "react"
 import { newToken, tokenId, type NewToken } from "@/lib/recipe-token"
-import { confirmation, revokeRecipe, rotateRecipe, type Impact, type Recipe } from "@/lib/recipes"
+import { subscribeVaultLock, vaultUnlocked } from "@/lib/envvault/crypto"
+import { confirmation, revokeRecipe, rewrapVaults, rotateRecipe, type Impact, type Recipe } from "@/lib/recipes"
 import { queryKeys } from "@/lib/query-keys"
-import { CommandBlock } from "@/components/add-machine-dialog"
+import { EnvUnlock } from "@/components/environment/env-unlock"
 import { TokenOnce } from "@/components/recipes/token-once"
 import {
   AlertDialog,
@@ -112,29 +113,25 @@ type Props = { workspace: string; recipe: Recipe; onClose: () => void }
 
 /** Rotate: the new token is made here and sent with the code; it is shown once when the server has it. */
 export function RotateRecipe({ workspace, recipe, onClose }: Props) {
-  // A recipe that reads vaults needs its vault keys wrapped to the new token on a computer with the vault unlocked.
-  if (recipe.recipe.env?.vaults?.length) return <RotateWithVaults recipe={recipe} onClose={onClose} />
+  const vaults = recipe.recipe.env?.vaults ?? []
+  const unlocked = useSyncExternalStore(subscribeVaultLock, vaultUnlocked, () => false)
+  // A recipe that reads vaults has its vault keys wrapped to the new token here, so ENV must be unlocked first.
+  if (vaults.length && !unlocked)
+    return (
+      <Dialog open onOpenChange={(open) => !open && onClose()}>
+        <DialogContent className="gap-4 sm:max-w-lg">
+          <DialogTitle>Rotate {recipe.name}</DialogTitle>
+          <EnvUnlock title={`${recipe.name} reads ${count(vaults.length, "vault", "vaults")}. Unlock ENV to give the new token their keys.`} />
+        </DialogContent>
+      </Dialog>
+    )
   return <RotateHere workspace={workspace} recipe={recipe} onClose={onClose} />
-}
-
-function RotateWithVaults({ recipe, onClose }: Omit<Props, "workspace">) {
-  return (
-    <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="gap-4 sm:max-w-md">
-        <DialogTitle>Rotate {recipe.name}</DialogTitle>
-        <p className="text-sm text-muted-foreground">
-          {recipe.name} reads vaults, so its new key is made on a computer where your vault is unlocked. Run this there:
-        </p>
-        <CommandBlock command={`pb recipe rotate ${recipe.name}`} />
-      </DialogContent>
-    </Dialog>
-  )
 }
 
 function RotateHere({ workspace, recipe, onClose }: Props) {
   const queryClient = useQueryClient()
   const [typed, setTyped] = useState("")
-  const [made, setMade] = useState<NewToken>()
+  const [made, setMade] = useState<{ token: NewToken; rewrap?: string }>()
   const token = useQuery({
     queryKey: ["recipe-rotate-token", recipe.id],
     gcTime: 0,
@@ -152,7 +149,12 @@ function RotateHere({ workspace, recipe, onClose }: Props) {
       const next = token.data
       if (!next) throw new Error("The new token isn’t ready yet. Try again.")
       await rotateRecipe(workspace, recipe.name, next, code ?? "")
-      return next
+      // The token has changed from here on: a failure to wrap the vaults is told, not undone.
+      const rewrap = await rewrapVaults(workspace, recipe, next).then(
+        () => undefined,
+        (error: Error) => error.message,
+      )
+      return { token: next, rewrap }
     },
     onSuccess: async (next) => {
       setMade(next)
@@ -166,7 +168,13 @@ function RotateHere({ workspace, recipe, onClose }: Props) {
       <Dialog open onOpenChange={(open) => !open && onClose()}>
         <DialogContent className="gap-4 sm:max-w-lg">
           <DialogTitle>{recipe.name} rotated</DialogTitle>
-          <TokenOnce token={made.token} onDone={onClose} />
+          {made.rewrap && (
+            <p className="text-sm text-destructive">
+              The token changed, but the vault keys were not wrapped to it ({made.rewrap}). Unlock ENV and change the file
+              (a comment is enough), then save, to give it its vaults.
+            </p>
+          )}
+          <TokenOnce token={made.token.token} onDone={onClose} />
         </DialogContent>
       </Dialog>
     )

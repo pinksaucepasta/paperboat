@@ -12903,6 +12903,11 @@ export interface components {
             rotated_at: string | null;
             machines: number;
             max_machines?: number;
+            /**
+             * Format: byte
+             * @description The token's X25519 public key (standard base64): vault keys are wrapped to it. Absent for a recipe made before vault keys.
+             */
+            public_key?: string;
         };
         RecipeMachine: {
             id: string;
@@ -13079,6 +13084,23 @@ export interface components {
             /** Format: date-time */
             revoked_at?: string;
             scope?: components["schemas"]["ApiTokenScopeEntry"][];
+        };
+        EnvVaultWrap: {
+            /** @enum {string} */
+            recipient_kind: "account" | "team";
+            recipient_id: string;
+            /** Format: byte */
+            wrapped: string;
+        };
+        EnvVault: {
+            name: string;
+            key_epoch: number;
+            revision: number;
+            rekey_required: boolean;
+            /** Format: byte */
+            envelope?: string;
+            wraps: components["schemas"]["EnvVaultWrap"][];
+            recipes: string[];
         };
     };
     responses: {
@@ -32236,12 +32258,18 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description JSON body as documented in shared/recipe/README.md. */
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        data: {
+                            vaults: components["schemas"]["EnvVault"][];
+                        };
+                    };
+                };
             };
             400: components["responses"]["Error"];
             401: components["responses"]["Error"];
@@ -32267,12 +32295,18 @@ export interface operations {
             };
         };
         responses: {
-            /** @description JSON body as documented in shared/recipe/README.md. */
+            /** @description Created. */
             201: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        data: {
+                            vault: components["schemas"]["EnvVault"];
+                        };
+                    };
+                };
             };
             400: components["responses"]["Error"];
             401: components["responses"]["Error"];
@@ -32295,12 +32329,18 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description JSON body as documented in shared/recipe/README.md. */
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        data: {
+                            vault: components["schemas"]["EnvVault"];
+                        };
+                    };
+                };
             };
             400: components["responses"]["Error"];
             401: components["responses"]["Error"];

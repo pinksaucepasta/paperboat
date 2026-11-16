@@ -17645,6 +17645,11 @@
           },
           "max_machines": {
             "type": "integer"
+          },
+          "public_key": {
+            "type": "string",
+            "format": "byte",
+            "description": "The token's X25519 public key (standard base64): vault keys are wrapped to it. Absent for a recipe made before vault keys."
           }
         },
         "required": [
@@ -18313,6 +18318,73 @@
           "created_by",
           "created_at",
           "expires_at"
+        ]
+      },
+      "EnvVaultWrap": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "recipient_kind": {
+            "type": "string",
+            "enum": [
+              "account",
+              "team"
+            ]
+          },
+          "recipient_id": {
+            "type": "string"
+          },
+          "wrapped": {
+            "type": "string",
+            "format": "byte"
+          }
+        },
+        "required": [
+          "recipient_kind",
+          "recipient_id",
+          "wrapped"
+        ]
+      },
+      "EnvVault": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "key_epoch": {
+            "type": "integer"
+          },
+          "revision": {
+            "type": "integer"
+          },
+          "rekey_required": {
+            "type": "boolean"
+          },
+          "envelope": {
+            "type": "string",
+            "format": "byte"
+          },
+          "wraps": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EnvVaultWrap"
+            }
+          },
+          "recipes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "name",
+          "key_epoch",
+          "revision",
+          "rekey_required",
+          "wraps",
+          "recipes"
         ]
       }
     },
@@ -55468,7 +55540,34 @@
         ],
         "responses": {
           "200": {
-            "description": "JSON body as documented in shared/recipe/README.md."
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "vaults": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/components/schemas/EnvVault"
+                          }
+                        }
+                      },
+                      "required": [
+                        "vaults"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
           },
           "400": {
             "$ref": "#/components/responses/Error"
@@ -55532,7 +55631,31 @@
         },
         "responses": {
           "201": {
-            "description": "JSON body as documented in shared/recipe/README.md."
+            "description": "Created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "vault": {
+                          "$ref": "#/components/schemas/EnvVault"
+                        }
+                      },
+                      "required": [
+                        "vault"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
           },
           "400": {
             "$ref": "#/components/responses/Error"
@@ -55595,7 +55718,31 @@
         ],
         "responses": {
           "200": {
-            "description": "JSON body as documented in shared/recipe/README.md."
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "vault": {
+                          "$ref": "#/components/schemas/EnvVault"
+                        }
+                      },
+                      "required": [
+                        "vault"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
           },
           "400": {
             "$ref": "#/components/responses/Error"

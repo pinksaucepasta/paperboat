@@ -3,7 +3,8 @@
 import { queryOptions } from "@tanstack/react-query"
 import { api, ApiError, idempotencyKey, type Data, type Schemas } from "@/lib/api"
 import { queryKeys } from "@/lib/query-keys"
-import type { NewToken } from "@/lib/recipe-token"
+import { tokenId, type NewToken } from "@/lib/recipe-token"
+import { withVaultKeys, wrapVault, type VaultWrap } from "@/lib/recipe-vaults"
 
 // Recipes. Contract: shared/recipe/README.md ("API"). `{ws}` is "personal" or the team id.
 
@@ -43,15 +44,52 @@ export const recipeQuery = (workspace: string, name: string) =>
     enabled: Boolean(workspace),
   })
 
+/** Creates the recipe; a vault it reads is wrapped to its token here (ENV unlocked), as `pb recipe create` does. */
 export const createRecipe = (workspace: string, file: { name: string; source: string; format: RecipeFormat }, token: NewToken) =>
-  write<{ recipe: Recipe }>(`${ws(workspace)}/recipes`, "POST", { ...file, token_id: token.id, auth: token.auth })
+  withVaultKeys(workspace, token, (vault_wraps) =>
+    write<Data<"/v1/workspaces/{ws}/recipes", "post">>(`${ws(workspace)}/recipes`, "POST", {
+      ...file,
+      token_id: token.id,
+      auth: token.auth,
+      public_key: token.publicKey,
+      vault_wraps,
+    }),
+  )
 
-export const updateRecipe = (workspace: string, name: string, file: { source: string; format: RecipeFormat }) =>
-  write<{ recipe: Recipe; previous: Recipe; online_machines: number }>(recipePath(workspace, name), "PUT", file)
+/** The token id and public key of an existing recipe, for wrapping vault keys to it; undefined before vault keys. */
+export const recipeKey = (recipe: Recipe) => {
+  const id = tokenId(recipe.token)
+  return id && recipe.public_key ? { id, publicKey: recipe.public_key } : undefined
+}
+
+export async function updateRecipe(workspace: string, recipe: Recipe, file: { source: string; format: RecipeFormat }, wraps: VaultWrap[] = []) {
+  const send = (vault_wraps: VaultWrap[]) =>
+    write<Data<"/v1/workspaces/{ws}/recipes/{name}", "put">>(recipePath(workspace, recipe.name), "PUT", { ...file, vault_wraps })
+  const key = recipeKey(recipe)
+  // A recipe made before vault keys has no public key to wrap to: it can still change when it needs no new vault.
+  return key ? withVaultKeys(workspace, key, send, wraps) : send(wraps)
+}
 
 /** Rotate and revoke refuse (409) until sent the current code; the refusal carries it and the impact. */
 export const rotateRecipe = (workspace: string, name: string, token: NewToken, confirm: string) =>
-  write<{ recipe: Recipe }>(`${recipePath(workspace, name)}/rotate`, "POST", { auth: token.auth, confirm })
+  write<Data<"/v1/workspaces/{ws}/recipes/{name}/rotate", "post">>(`${recipePath(workspace, name)}/rotate`, "POST", {
+    auth: token.auth,
+    public_key: token.publicKey,
+    confirm,
+  })
+
+/**
+ * After a rotate the recipe's vault keys are wrapped to its old public key: wrap each vault it reads to the new
+ * one (an update of the same file carrying the wraps), so machines made from the new token read them.
+ */
+export async function rewrapVaults(workspace: string, recipe: Recipe, token: NewToken) {
+  const names = recipe.recipe.env?.vaults ?? []
+  if (!names.length) return
+  const wraps = []
+  for (const name of names) wraps.push(await wrapVault(workspace, name, token))
+  await withVaultKeys(workspace, token, (vault_wraps) =>
+    write(recipePath(workspace, recipe.name), "PUT", { source: recipe.source, format: recipe.format, vault_wraps }), wraps)
+}
 
 export const revokeRecipe = (workspace: string, name: string, confirm: string) =>
   write<{ recipe: Recipe; impact: Impact }>(`${recipePath(workspace, name)}/revoke`, "POST", { confirm })
@@ -67,9 +105,6 @@ export const confirmation = (error: unknown): { confirm: string; impact: Impact 
   error instanceof ApiError && error.code === "confirmation_required"
     ? (error.details as { confirm: string; impact: Impact })
     : undefined
-
-/** The recipe reads vaults but this browser cannot wrap their keys to its token yet. */
-export const needsVaultKey = (error: unknown) => error instanceof ApiError && error.code === "vault_key_missing"
 
 /** What each machine says about the recipe's sections, for the sections that failed. */
 export function failedSections(machine: RecipeMachine): string[] {

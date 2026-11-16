@@ -6,6 +6,8 @@ test("a token derives its auth the way shared/recipe does", async () => {
   const made = await tokenFrom("abcdefghij", Uint8Array.from({ length: 32 }, (_, i) => i))
   expect(made.token).toBe("pbr_abcdefghij_aaaqeayeaudaocajbifqydiob4ibceqtcqkrmfyydenbwha5dypq")
   expect(made.auth).toBe("xJtv9QXERzWmQ5fuFqokaHxmhZ5liHIpALkHdzqJ9JQ=")
+  // HKDF-SHA256 "paperboat recipe key", then X25519 (Python cryptography), for the same secret.
+  expect(made.publicKey).toBe("wkZEQafgKPkDFV+zmfJURuecdF9XYLcEKv9BGKyHe1c=")
 })
 
 test("a new token has the shared shape and rotate keeps the id", async () => {
