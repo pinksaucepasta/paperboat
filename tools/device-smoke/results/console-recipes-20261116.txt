@@ -1,0 +1,30 @@
+Console Recipes on the live console (dev console serving 901665e52, server 2026.11.13.30), account: console operator, personal workspace, 2026-11-16
+== console/scripts/check-recipe-vaults.mjs (vault made in the browser, recipe wrapped to its token, edit, rotate)
+PASS  a recipe naming a vault the workspace lacks offers to create it
+PASS  nothing was created yet
+PASS  creating the vault asks to unlock ENV first
+PASS  unlocking says so
+PASS  the vault is made, the recipe is created and its token shown once
+PASS  the server has the vault, wrapped for the account
+PASS  the vault lists the recipe as a reader (its key was wrapped to the recipe)
+PASS  the recipe stores its token's public key  (revision 1)
+PASS  an edit that keeps the vault saves at revision 2  (revision 2)
+PASS  rotating wraps the vault to the new token's key
+PASS  the recipe's public key changed with its token
+PASS  the check's recipe and vault are removed  (vault delete HTTP 204)
+all passed
+== console/scripts/check-recipes.js (file errors, token once, rotate, revoke)
+PASS  the server answers GET recipes  (status 200)
+PASS  a mistake shows its line, column and suggestion  (1:1 unknown key "tgs". Did you mean "tags"?)
+PASS  nothing was created yet
+PASS  the token is shown once
+PASS  it says it is not shown again
+PASS  the install lines are shown
+PASS  the recipe opens with its file
+PASS  the server has it at revision 1
+PASS  rotating asks for the code
+PASS  rotating shows a different token
+PASS  revoking says what goes and asks for the code
+PASS  a revoked recipe leaves the list
+PASS  the server no longer lists it
+13/13 passed
