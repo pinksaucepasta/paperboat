@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"runtime"
 
 	"net/http"
 	"net/http/httptest"
@@ -50,10 +51,14 @@ func fileRequest(t *testing.T, root func() (string, error), id, raw string) *htt
 }
 
 func TestSharedFileContentTypes(t *testing.T) {
-	root := sharedFileRoot(t, map[string]string{
+	files := map[string]string{
 		"page.html": "<script>alert(1)</script>", "notes.md": "# hi", "doc.pdf": "%PDF-1.4", "pic.png": "png",
 		"draw.svg": "<svg/>", "tool.exe": "MZ", "noext": "data", "trail.": "x",
-	})
+	}
+	if runtime.GOOS == "windows" {
+		delete(files, "trail.") // NTFS drops the trailing dot: such a file cannot exist on a Windows host
+	}
+	root := sharedFileRoot(t, files)
 	cases := []struct {
 		name, contentType, disposition string
 		sandbox                        bool
@@ -68,6 +73,9 @@ func TestSharedFileContentTypes(t *testing.T) {
 		{"trail.", "application/octet-stream", "attachment", false}, // saved as "trail_" on every OS
 	}
 	for _, tc := range cases {
+		if _, ok := files[tc.name]; !ok {
+			continue
+		}
 		response := fileRequest(t, root, inbox.FileID(tc.name), "GET / HTTP/1.1\r\nHost: x\r\n\r\n")
 		if response.StatusCode != http.StatusOK || response.Header.Get("Content-Type") != tc.contentType {
 			t.Fatalf("%s: status %d type %q", tc.name, response.StatusCode, response.Header.Get("Content-Type"))

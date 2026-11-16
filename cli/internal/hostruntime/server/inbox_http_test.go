@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -86,6 +87,9 @@ func TestInboxHandlerStreamsTheFileBoundByTheCredential(t *testing.T) {
 
 // The download is announced under a name every OS's browser keeps as it is (the Inbox keeps the original).
 func TestInboxHandlerAnnouncesAPortableDownloadName(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("NTFS cannot hold these names, so a Windows Inbox never has them (its receiver refuses them)")
+	}
 	for name, want := range map[string]string{"trail.": "trail_", "CON.txt": "_CON.txt", "a:b.txt": "a_b.txt"} {
 		handler, _ := inboxFixtureWithFile(t, name, goodInboxClaims)
 		recorder := httptest.NewRecorder()
