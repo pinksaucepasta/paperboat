@@ -73,7 +73,7 @@ func ensureSSHCertificate(ctx *command.Context, client *api.Client, machine api.
 	if err != nil {
 		return nil, err
 	}
-	certificate, err := managedssh.EnsureCertificate(ctx.Context, managedssh.CertificateTarget{Home: home, Alias: machine.Alias, OSUser: target.OSUser, Session: session}, publicKey, issue, time.Now(), sshCertificateRenewal)
+	certificate, err := managedssh.EnsureCertificate(ctx.Context, managedssh.CertificateTarget{Home: home, Alias: machine.Alias, OSUser: target.OSUser, Session: session, MachineID: machine.ID}, publicKey, issue, time.Now(), sshCertificateRenewal)
 	if err != nil {
 		return nil, err
 	}

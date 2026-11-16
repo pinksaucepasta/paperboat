@@ -23,7 +23,7 @@ func renewManagedSSHCertificates(ctx context.Context, client *api.Client, home, 
 			return issued.Certificate, err
 		}
 		issueCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-		_, _ = managedssh.EnsureCertificate(issueCtx, managedssh.CertificateTarget{Home: home, Alias: machine.Alias, OSUser: machine.SSH.OSUser, Session: session}, []byte(publicKey), issue, time.Now(), 11*time.Hour)
+		_, _ = managedssh.EnsureCertificate(issueCtx, managedssh.CertificateTarget{Home: home, Alias: machine.Alias, OSUser: machine.SSH.OSUser, Session: session, MachineID: machine.ID}, []byte(publicKey), issue, time.Now(), 11*time.Hour)
 		cancel()
 	}
 }

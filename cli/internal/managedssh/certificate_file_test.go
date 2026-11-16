@@ -50,7 +50,7 @@ func TestEnsureCertificateReusesUntilItsLastHourAndRidesOutAnOutage(t *testing.T
 	publicKey := ssh.MarshalAuthorizedKey(client.PublicKey())
 	testSession = "session_1"
 	t.Cleanup(func() { testSession = "session_1" })
-	target := CertificateTarget{Home: home, Alias: "studio", OSUser: "alice", Session: "session_1"}
+	target := CertificateTarget{Home: home, Alias: "studio", OSUser: "alice", Session: "session_1", MachineID: "m"}
 	start := time.Unix(1_800_000_000, 0)
 	const validity, renewal = 12 * time.Hour, time.Hour
 	calls := 0
@@ -90,7 +90,7 @@ func TestEnsureCertificateReusesUntilItsLastHourAndRidesOutAnOutage(t *testing.T
 	}
 	// A new sign-in (session_2) never reuses the earlier session's certificate, which revocation refuses: it renews,
 	// and with the control plane unreachable it has none rather than a revoked one.
-	relogin := CertificateTarget{Home: home, Alias: "studio", OSUser: "alice", Session: "session_2"}
+	relogin := CertificateTarget{Home: home, Alias: "studio", OSUser: "alice", Session: "session_2", MachineID: "m"}
 	stillValid := renewedAt.Add(time.Hour)
 	if _, err := EnsureCertificate(t.Context(), relogin, publicKey, offline, stillValid, renewal); err == nil {
 		t.Fatal("a new sign-in used the earlier session's certificate")
@@ -101,13 +101,45 @@ func TestEnsureCertificateReusesUntilItsLastHourAndRidesOutAnOutage(t *testing.T
 		t.Fatalf("a new sign-in did not renew: calls=%d err=%v", calls-before, err)
 	}
 	testSession = "session_1"
-	fresh := CertificateTarget{Home: home, Alias: "fresh", OSUser: "alice", Session: "session_2"}
+	fresh := CertificateTarget{Home: home, Alias: "fresh", OSUser: "alice", Session: "session_2", MachineID: "m"}
 	if _, err := EnsureCertificate(t.Context(), fresh, publicKey, online(stillValid), stillValid, renewal); err == nil {
 		t.Fatal("the server's certificate for another session was accepted")
 	}
-	wrongUser := CertificateTarget{Home: home, Alias: "other", OSUser: "bob", Session: "session_1"}
+	wrongUser := CertificateTarget{Home: home, Alias: "other", OSUser: "bob", Session: "session_1", MachineID: "m"}
 	if _, err := EnsureCertificate(t.Context(), wrongUser, publicKey, online(start), start, renewal); err == nil {
 		t.Fatal("a certificate for another OS user was accepted from the server")
+	}
+}
+
+// X-41: the file is named by alias, so a machine installed again under its name (a new id, a new principal) must get
+// a new certificate, not the old machine's, which its sshd refuses ("Certificate does not contain an authorized principal").
+func TestEnsureCertificateIsNeverReusedForAnotherMachineOfTheSameName(t *testing.T) {
+	home := t.TempDir()
+	ca, client := testSignerKey(t), testSignerKey(t)
+	publicKey := ssh.MarshalAuthorizedKey(client.PublicKey())
+	testSession = "session_1"
+	start := time.Unix(1_800_000_000, 0)
+	var issuedFor string
+	issue := func(context.Context) (string, error) {
+		return testCertificate(t, ca, client.PublicKey(), []string{"alice", "pb:" + issuedFor}, start, 12*time.Hour), nil
+	}
+	issuedFor = "machine_old"
+	old := CertificateTarget{Home: home, Alias: "studio", OSUser: "alice", Session: "session_1", MachineID: "machine_old"}
+	first, err := EnsureCertificate(t.Context(), old, publicKey, issue, start, time.Hour)
+	if err != nil || !certificateOfMachine(first, "machine_old") {
+		t.Fatalf("first: %v", err)
+	}
+	issuedFor = "machine_new"
+	renewed := CertificateTarget{Home: home, Alias: "studio", OSUser: "alice", Session: "session_1", MachineID: "machine_new"}
+	value, err := EnsureCertificate(t.Context(), renewed, publicKey, issue, start.Add(time.Minute), time.Hour)
+	if err != nil || !certificateOfMachine(value, "machine_new") || certificateOfMachine(value, "machine_old") {
+		t.Fatalf("the machine enrolled again got the old machine's certificate: %v", err)
+	}
+	// with the control plane unreachable the old machine's certificate is no fallback for the new one
+	offline := func(context.Context) (string, error) { return "", errors.New("control plane unreachable") }
+	other := CertificateTarget{Home: home, Alias: "studio", OSUser: "alice", Session: "session_1", MachineID: "machine_third"}
+	if _, err := EnsureCertificate(t.Context(), other, publicKey, offline, start.Add(2*time.Minute), time.Hour); err == nil {
+		t.Fatal("another machine's certificate was used as a fallback")
 	}
 }
 

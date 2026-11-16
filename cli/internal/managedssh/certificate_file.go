@@ -16,8 +16,10 @@ import (
 
 // CertificateTarget names one machine's certificate on this computer. Session is this computer's current CLI session:
 // a certificate issued to an earlier sign-in (its key ID names that session, now revoked) is never reused.
+// MachineID is the machine's current identity: its sshd accepts only the principal "pb:<MachineID>", and the file is
+// named by alias, so a machine enrolled again under the same name (a new id) must not get the old one's certificate.
 type CertificateTarget struct {
-	Home, Alias, OSUser, Session string
+	Home, Alias, OSUser, Session, MachineID string
 }
 
 // EnsureCertificate returns this computer's certificate for target: the one in its file while it is valid for at
@@ -28,7 +30,7 @@ type CertificateTarget struct {
 func EnsureCertificate(ctx context.Context, target CertificateTarget, publicKey []byte, issue func(context.Context) (string, error), now time.Time, renewWithin time.Duration) ([]byte, error) {
 	path := ManagedCertificatePath(target.Home, target.Alias)
 	existing, readErr := os.ReadFile(path)
-	usable := readErr == nil && UsableCertificate(existing, publicKey, target.OSUser, now, 0) && certificateOfSession(existing, target.Session)
+	usable := readErr == nil && UsableCertificate(existing, publicKey, target.OSUser, now, 0) && certificateOfSession(existing, target.Session) && certificateOfMachine(existing, target.MachineID)
 	if usable && UsableCertificate(existing, publicKey, target.OSUser, now, renewWithin) {
 		return existing, nil
 	}
@@ -40,7 +42,7 @@ func EnsureCertificate(ctx context.Context, target CertificateTarget, publicKey 
 		return nil, err
 	}
 	value := []byte(strings.TrimSpace(issued) + "\n")
-	if !UsableCertificate(value, publicKey, target.OSUser, now, 0) || !certificateOfSession(value, target.Session) {
+	if !UsableCertificate(value, publicKey, target.OSUser, now, 0) || !certificateOfSession(value, target.Session) || !certificateOfMachine(value, target.MachineID) {
 		return nil, errors.New("the server's SSH certificate does not match this computer's key, user or clock")
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
@@ -58,6 +60,12 @@ func UsableCertificate(value, publicKey []byte, principal string, now time.Time,
 		return false
 	}
 	return uint64(now.Unix()) >= certificate.ValidAfter && uint64(now.Add(margin).Unix()) < certificate.ValidBefore
+}
+
+// certificateOfMachine: the certificate carries the machine principal "pb:<machine>" of the machine it was issued for.
+func certificateOfMachine(value []byte, machineID string) bool {
+	certificate, ok := parseCertificate(value)
+	return ok && machineID != "" && slices.Contains(certificate.ValidPrincipals, "pb:"+machineID)
 }
 
 // certificateOfSession: the certificate's key ID ("paperboat:<user>:<session>:<machine>") names session.
