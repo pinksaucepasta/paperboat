@@ -61,13 +61,16 @@ func actionSSHDoctor(command *cobra.Command, args []string) error {
 		return err
 	}
 	if err := managedssh.ValidateInstalledOpenSSHConfig(home, uint32(os.Geteuid()), agentSocket, domain); err != nil {
-		return fmt.Errorf("managed OpenSSH configuration is not ready; rerun `pb login`: %w", err)
+		if unsafePath := (*managedssh.UnsafeSSHPathError)(nil); errors.As(err, &unsafePath) {
+			return err // its own message names the folder and the fix
+		}
+		return commandPreparationFailure{step: prepareSSHConfiguration, cause: err}
 	}
 	if err := managedssh.ValidateManagedIdentityPublicKey(home, uint32(os.Geteuid()), identity.PublicKey); err != nil {
-		return fmt.Errorf("managed SSH public identity is not ready; rerun `pb login`: %w", err)
+		return commandPreparationFailure{step: prepareSSHIdentity, cause: err}
 	}
 	if err := managedssh.ProbeAgentIdentity(command.Context(), agentSocket, identity.Fingerprint, 5*time.Second); err != nil {
-		return fmt.Errorf("managed SSH agent is not ready; rerun `pb login`: %w", err)
+		return commandPreparationFailure{step: prepareSSHAgent, cause: err}
 	}
 	d, err := buildDeps(actionContext(command, args))
 	if err != nil {
@@ -82,7 +85,7 @@ func actionSSHDoctor(command *cobra.Command, args []string) error {
 	defer cancel()
 	connection, err := d.peerApplications.DialSSH(probeCtx, sshConnectInfo(machine, descriptor, client.Workspace(), target.OSUser), operationID)
 	if err != nil {
-		return fmt.Errorf("managed SSH transport or loopback target is not ready: %w", err)
+		return commandPreparationFailure{step: prepareSSHTransport, cause: err}
 	}
 	host, err := managedssh.AliasHost(machine.Alias, domain)
 	if err != nil {
@@ -103,7 +106,7 @@ func actionSSHDoctor(command *cobra.Command, args []string) error {
 	if err != nil {
 		stopWatch()
 		_ = connection.Close()
-		return fmt.Errorf("managed SSH certificate is not ready: %w", err)
+		return commandPreparationFailure{step: prepareSSHCertificate, cause: err}
 	}
 	authErr := managedssh.ProbeSSHAuthentication(probeCtx, bufferedStream{ReadWriteCloser: connection, reader: reader}, net.JoinHostPort(host, strconv.Itoa(int(target.Port))), target.OSUser, signer, keys.Keys)
 	stopWatch()
@@ -112,7 +115,7 @@ func actionSSHDoctor(command *cobra.Command, args []string) error {
 		if changed := pendingHostKeyFailure(command.Context(), client, machine, authErr); changed != nil {
 			return changed
 		}
-		return fmt.Errorf("managed SSH host verification or key reconciliation is not ready: %w", authErr)
+		return commandPreparationFailure{step: prepareSSHHostVerification, cause: authErr}
 	}
 	if closeErr != nil && !errors.Is(closeErr, net.ErrClosed) {
 		return fmt.Errorf("close managed SSH readiness probe: %w", closeErr)

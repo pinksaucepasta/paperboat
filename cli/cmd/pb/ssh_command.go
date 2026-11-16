@@ -253,15 +253,14 @@ func actionSSHProxy(command *cobra.Command, _ []string) error {
 	}); err != nil {
 		return friendlyCommandError(err)
 	}
-	if resolvedClient == nil {
-		var noHostKeys bool
-		machine, noHostKeys = freshenSSHHostKeys(command.Context(), machine, func() (api.UserMachine, error) {
-			_, refreshed, _, err := resolveSSHCommandTargetWarm(ctx, alias)
-			return refreshed, err
-		})
-		if noHostKeys {
-			fmt.Fprintf(command.ErrOrStderr(), "pb: %s has not published its SSH host keys yet. Check that sshd is installed and running there; a new sshd is picked up within about 30 seconds. `pb ssh doctor %s` shows the state.\n", machine.Alias, machine.Alias)
-		}
+	// resolvedClient is set when the machine came from the server, not the daemon's inventory (a machine added since
+	// its last refresh).
+	machine, noHostKeys := freshenSSHHostKeys(command.Context(), machine, resolvedClient == nil, func() (api.UserMachine, error) {
+		_, refreshed, _, err := resolveSSHCommandTargetWarm(ctx, alias)
+		return refreshed, err
+	})
+	if noHostKeys {
+		fmt.Fprintf(command.ErrOrStderr(), "pb: %s has not published its SSH host keys yet. Check that sshd is installed and running there; a new sshd is picked up within about 30 seconds. `pb ssh doctor %s` shows the state.\n", machine.Alias, machine.Alias)
 	}
 	if _, err := managedssh.ResolveDestination(managedssh.DestinationInput{AliasDomain: domain, Alias: machine.Alias, RegisteredPort: target.Port, RequestedUser: proxyUser, RegisteredUser: target.OSUser, HasRegisteredUser: true, Platform: machine.Platform}); err != nil {
 		return err

@@ -21,8 +21,11 @@ func TestFreshenSSHHostKeys(t *testing.T) {
 		wantResolves  int
 		wantKeys      int
 		wantNone      bool
+		notInventory  bool
 	}{
 		{name: "keys known: nothing is asked", start: withKeys, wantKeys: 1},
+		{name: "machine added since the last refresh (from the server, keys known): the daemon refreshes its known hosts once", start: withKeys, notInventory: true, wantRefreshes: 1, wantKeys: 1},
+		{name: "not in the inventory and no keys: one refresh, named", start: api.UserMachine{Alias: "m"}, notInventory: true, wantRefreshes: 1, wantNone: true},
 		{name: "keys published since the last refresh: found by one refresh", start: api.UserMachine{Alias: "m"}, resolved: withKeys, wantRefreshes: 1, wantResolves: 1, wantKeys: 1},
 		{name: "still none after the refresh: named", start: api.UserMachine{Alias: "m"}, resolved: api.UserMachine{Alias: "m"}, wantRefreshes: 1, wantResolves: 1, wantNone: true},
 		{name: "refresh failed: not resolved again, named", start: api.UserMachine{Alias: "m"}, refreshErr: errors.New("daemon down"), resolved: withKeys, wantRefreshes: 1, wantNone: true},
@@ -31,7 +34,7 @@ func TestFreshenSSHHostKeys(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			refreshes, resolves := 0, 0
 			refreshInventoryForSSHHostKeys = func(context.Context) error { refreshes++; return tc.refreshErr }
-			got, none := freshenSSHHostKeys(context.Background(), tc.start, func() (api.UserMachine, error) { resolves++; return tc.resolved, nil })
+			got, none := freshenSSHHostKeys(context.Background(), tc.start, !tc.notInventory, func() (api.UserMachine, error) { resolves++; return tc.resolved, nil })
 			if refreshes != tc.wantRefreshes || resolves != tc.wantResolves || len(got.SSHHostKeys) != tc.wantKeys || none != tc.wantNone {
 				t.Fatalf("refreshes=%d resolves=%d keys=%d none=%v, want %d %d %d %v", refreshes, resolves, len(got.SSHHostKeys), none, tc.wantRefreshes, tc.wantResolves, tc.wantKeys, tc.wantNone)
 			}

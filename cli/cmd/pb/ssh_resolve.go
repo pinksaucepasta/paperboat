@@ -152,19 +152,20 @@ var refreshInventoryForSSHHostKeys = refreshLocalInventory
 // sshHostKeysRefreshTimeout bounds the one refresh a connection waits for.
 const sshHostKeysRefreshTimeout = 5 * time.Second
 
-// freshenSSHHostKeys covers a machine that published its SSH host keys after this computer's last
-// inventory refresh (sshd installed after pairing, a first set): the daemon writes the known-hosts file OpenSSH
-// reads from that inventory, so until the next refresh OpenSSH finds no key and ends with a bare "Host key
-// verification failed." A first set is not a changed key (the server activates it, as at pairing), so the
-// connection asks the daemon for one refresh now instead of waiting for its event. The returned bool is true when
-// the machine still has no host keys, which the caller names. Only the warm path (no client) needs it.
-func freshenSSHHostKeys(ctx context.Context, machine api.UserMachine, resolve func() (api.UserMachine, error)) (api.UserMachine, bool) {
-	if len(machine.SSHHostKeys) > 0 {
+// freshenSSHHostKeys keeps the known-hosts file OpenSSH reads in step with machine. The daemon writes that file from
+// its inventory, so until its next refresh OpenSSH ends with a bare "Host key verification failed." for (1) a machine
+// that is not in the inventory yet (added since the last refresh, so resolved from the server: inInventory false) and
+// (2) one that published its SSH host keys after the last refresh (sshd installed after pairing, a first set). A first
+// set is not a changed key (the server activates it, as at pairing), so the connection asks the daemon for one
+// refresh now instead of waiting for its event. The returned bool is true when the machine has no host keys, which
+// the caller names.
+func freshenSSHHostKeys(ctx context.Context, machine api.UserMachine, inInventory bool, resolve func() (api.UserMachine, error)) (api.UserMachine, bool) {
+	if inInventory && len(machine.SSHHostKeys) > 0 {
 		return machine, false
 	}
 	refreshCtx, cancel := context.WithTimeout(ctx, sshHostKeysRefreshTimeout)
 	defer cancel()
-	if err := refreshInventoryForSSHHostKeys(refreshCtx); err == nil {
+	if err := refreshInventoryForSSHHostKeys(refreshCtx); err == nil && inInventory {
 		if refreshed, err := resolve(); err == nil {
 			machine = refreshed
 		}

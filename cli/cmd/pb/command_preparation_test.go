@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"net"
+	"os"
 	"strings"
 	"syscall"
 	"testing"
@@ -12,6 +14,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/updated"
+	"github.com/pinksaucepasta/paperboat/internal/managedssh"
 	"github.com/pinksaucepasta/paperboat/shared/supportref"
 )
 
@@ -142,5 +145,22 @@ func TestFriendlyCommandErrorPreservesStatusAndReference(t *testing.T) {
 	setup := classifyCLIJSONError(setupFailure(original))
 	if setup.StateChanged != "unknown" || !strings.Contains(setup.Message, "setup") {
 		t.Fatal("setup claimed a failed later step undid earlier work")
+	}
+}
+
+// pb ssh doctor names the local step that failed and what to do instead of the generic "could not finish": on pbvm2 the
+// managed SSH agent socket refused the probe (errors.Join(ErrAgentDenied, ECONNREFUSED)) and the user saw only the
+// generic text with a support reference.
+func TestSSHDoctorStepFailuresNameTheStep(t *testing.T) {
+	refused := &net.OpError{Op: "dial", Net: "unix", Err: os.NewSyscallError("connect", syscall.ECONNREFUSED)}
+	for step, want := range map[preparationStep]string{prepareSSHAgent: "SSH agent", prepareSSHConfiguration: "OpenSSH configuration", prepareSSHIdentity: "SSH key", prepareSSHTransport: "SSH stream", prepareSSHCertificate: "SSH certificate", prepareSSHHostVerification: "host key"} {
+		err := commandPreparationFailure{step: step, cause: errors.Join(managedssh.ErrAgentDenied, refused)}
+		message := userFacingError(err)
+		if !strings.Contains(message, want) || strings.Contains(message, "could not finish the command") {
+			t.Fatalf("step %d: %q", step, message)
+		}
+		if !errors.Is(err, syscall.ECONNREFUSED) {
+			t.Fatalf("step %d lost its cause", step)
+		}
 	}
 }

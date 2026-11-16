@@ -24,6 +24,12 @@ const (
 	prepareMachineNotAdded
 	prepareDoctorRepair
 	prepareConfigService
+	prepareSSHConfiguration
+	prepareSSHIdentity
+	prepareSSHAgent
+	prepareSSHTransport
+	prepareSSHCertificate
+	prepareSSHHostVerification
 )
 
 // Only finite local phases become public prose. The original error remains
@@ -50,6 +56,18 @@ func (e commandPreparationFailure) Error() string {
 		return "Paperboat could not verify Inbox preservation. Check the machine registration with `pb doctor`, then retry `pb uninstall`."
 	case prepareOpenSSH:
 		return "A supported OpenSSH client is unavailable. Install OpenSSH or repair its PATH entry, then retry `pb ssh doctor`."
+	case prepareSSHConfiguration:
+		return "Paperboat's managed OpenSSH configuration is not ready. Run `pb login` again to rewrite it, then retry `pb ssh doctor`."
+	case prepareSSHIdentity:
+		return "Paperboat's managed SSH key is not ready on this computer. Run `pb login` again, then retry `pb ssh doctor`."
+	case prepareSSHAgent:
+		return "Paperboat's SSH agent on this computer does not answer. Run `pb doctor` (the daemon may be stopped or restarting) or `pb login` again, then retry `pb ssh doctor`."
+	case prepareSSHTransport:
+		return "Paperboat could not open an SSH stream to the machine. Check that it is online with `pb machine list`, then retry `pb ssh doctor`."
+	case prepareSSHCertificate:
+		return "Paperboat could not get an SSH certificate for the machine. Check `pb doctor` and your access to the machine, then retry `pb ssh doctor`."
+	case prepareSSHHostVerification:
+		return "The machine's SSH login check failed: its host key or the managed key setup is not ready. Wait a minute for a new or reinstalled machine, then retry `pb ssh doctor`."
 	case prepareDoctorRepair:
 		if errors.Is(e.cause, elevation.ErrElevationRestrictedJob) {
 			return "Paperboat could not repair the installation: this terminal runs inside a restricted job (common in IDEs and CI) that can't start the administrator helper. Open a normal PowerShell window and run `pb doctor --repair` again."
