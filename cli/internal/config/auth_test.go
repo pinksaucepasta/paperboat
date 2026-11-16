@@ -1049,3 +1049,26 @@ func TestPublishCredentialLocation(t *testing.T) {
 		t.Fatal("a changed credential location was not written")
 	}
 }
+
+// A second config without profile_dir keeps its sign-in next to it; the default config keeps the
+// default profile (a --config login replaced a recipe machine's own session on Windows, F26).
+func TestSecondConfigHasItsOwnProfileDir(t *testing.T) {
+	root := t.TempDir()
+	def := filepath.Join(root, "default", "config.json")
+	t.Setenv(EnvConfigPath, def)
+	if !sameConfigFile(def) || !sameConfigFile(filepath.Join(root, "default", ".", "config.json")) {
+		t.Fatal("the default config is not recognised")
+	}
+	other := filepath.Join(root, "ctl", "config.json")
+	cfg, err := Load(other)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := ProfileStoreFor(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !configTestPathsEqual(store.Path, filepath.Join(root, "ctl", "credentials")) {
+		t.Fatalf("second config profile dir = %s", store.Path)
+	}
+}

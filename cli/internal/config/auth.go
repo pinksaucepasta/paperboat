@@ -478,6 +478,11 @@ func ProfileStoreFor(cfg *Config) (ProfileStore, error) {
 	dir := cfg.Auth.ProfileDir
 	if dir == "" {
 		dir = defaultDir
+		// A second config (--config elsewhere) signs in on its own: sharing the default profile would
+		// replace this computer's sign-in, a recipe machine's included (F26 device check, victus).
+		if path := cfg.Path(); path != "" && !sameConfigFile(path) {
+			dir = filepath.Join(filepath.Dir(path), "credentials")
+		}
 	} else if !filepath.IsAbs(dir) {
 		return ProfileStore{}, errors.New("auth.profile_dir must be an absolute path")
 	}
@@ -490,6 +495,20 @@ func ProfileStoreFor(cfg *Config) (ProfileStore, error) {
 		secrets = FileSecretStore{Dir: filepath.Join(dir, "secrets")}
 	}
 	return ProfileStore{Path: dir, Secrets: secrets}, nil
+}
+
+// sameConfigFile reports whether path is the default config file (PAPERBOAT_CONFIG included).
+func sameConfigFile(path string) bool {
+	def, err := DefaultPath()
+	if err != nil {
+		return true
+	}
+	if filepath.Clean(path) == filepath.Clean(def) {
+		return true
+	}
+	a, errA := os.Stat(path)
+	b, errB := os.Stat(def)
+	return errA == nil && errB == nil && os.SameFile(a, b)
 }
 
 func publishCredentialLocation(defaultDir, dir string) error {
