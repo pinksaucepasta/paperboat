@@ -307,9 +307,14 @@ func (r *SQLRepository) observeHost(ctx context.Context, request ObserveHostRequ
 				return pendingErr
 			}
 		}
+		// Owners of a key are no longer unique per account (co-hosted OS users): one observation per account at a time,
+		// so two clones cannot both pass the checks below.
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('managed-ssh-host-keys:' || $1, 0))`, request.UserID); err != nil {
+			return err
+		}
 		var retiredOwners []string
 		for _, key := range proposed.Keys {
-			owner, ownerErr := q.GetMachineSSHHostKeyOwner(ctx, dbsqlc.GetMachineSSHHostKeyOwnerParams{AccountID: request.UserID, Fingerprint: key.Fingerprint[:]})
+			owner, ownerErr := q.GetMachineSSHHostKeyOwner(ctx, dbsqlc.GetMachineSSHHostKeyOwnerParams{AccountID: request.UserID, Fingerprint: key.Fingerprint[:], UserMachineID: request.UserMachineID})
 			if ownerErr == nil && owner.UserMachineID != request.UserMachineID {
 				// The same computer enrolled again (reset, reinstall): its host keys are
 				// still recorded for the disconnected record, which no longer needs them.
@@ -322,10 +327,18 @@ func (r *SQLRepository) observeHost(ctx context.Context, request ObserveHostRequ
 					}
 				}
 			}
-			if ownerErr == nil {
-				if owner.UserMachineID != request.UserMachineID {
+			if ownerErr == nil && owner.UserMachineID != request.UserMachineID {
+				// Two OS users of one running computer share its host keys; a clone booted elsewhere has another boot id.
+				sameHost, err := q.MachinesShareRunningHost(ctx, dbsqlc.MachinesShareRunningHostParams{UserMachineID: request.UserMachineID, OtherMachineID: owner.UserMachineID})
+				if err != nil {
+					return err
+				}
+				if !sameHost {
 					return hostKeyInUse(ctx, tx, request.UserID, owner.UserMachineID)
 				}
+				ownerErr = pgx.ErrNoRows
+			}
+			if ownerErr == nil {
 				if owner.Algorithm != key.Algorithm || owner.PublicKey != key.PublicKey {
 					return ErrConflict
 				}
@@ -630,7 +643,7 @@ func releaseRetiredHostKeyOwner(ctx context.Context, q *dbsqlc.Queries, userID s
 	return released > 0, err
 }
 
-// hostKeyInUse refuses host keys another live machine of the same account already owns (a VM or container
+// hostKeyInUse refuses host keys another live machine of the same account on another running computer owns (a VM or container
 // image cloned with its /etc/ssh keys). Another account's machine presenting the same keys (two OS users of
 // one computer paired to two accounts) is not a conflict. The other machine is named only when the
 // observing account may see it.

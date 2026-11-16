@@ -57,9 +57,20 @@ WHERE user_machine_id = sqlc.arg(user_machine_id)
   AND reconciliation_version = sqlc.arg(expected_reconciliation_version)
 RETURNING *;
 
+-- Several machines of one account co-own a key when they run on one computer: the observing machine's own row first.
 -- name: GetMachineSSHHostKeyOwner :one
 SELECT * FROM machine_ssh_host_key_owners
-WHERE account_id = sqlc.arg(account_id) AND fingerprint = sqlc.arg(fingerprint);
+WHERE account_id = sqlc.arg(account_id) AND fingerprint = sqlc.arg(fingerprint)
+ORDER BY (user_machine_id = sqlc.arg(user_machine_id)) DESC, first_observed_at
+LIMIT 1;
+
+-- Two machine records on one running computer (two OS users) report the same os_boot_id; a clone booted elsewhere does not.
+-- name: MachinesShareRunningHost :one
+SELECT EXISTS(
+  SELECT 1 FROM user_machines a JOIN user_machines b ON b.id = sqlc.arg(other_machine_id)
+  WHERE a.id = sqlc.arg(user_machine_id) AND a.os_boot_id IS NOT NULL AND a.os_boot_id = b.os_boot_id
+    AND a.deleted_at IS NULL AND b.deleted_at IS NULL
+)::boolean AS same_host;
 
 -- name: DeleteRetiredMachineSSHHostKeys :exec
 DELETE FROM machine_ssh_host_keys k

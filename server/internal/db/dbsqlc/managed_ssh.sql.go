@@ -414,15 +414,19 @@ func (q *Queries) GetActiveManagedSSHUserCA(ctx context.Context, accountID strin
 const getMachineSSHHostKeyOwner = `-- name: GetMachineSSHHostKeyOwner :one
 SELECT fingerprint, user_machine_id, algorithm, public_key, first_observed_at, account_id FROM machine_ssh_host_key_owners
 WHERE account_id = $1 AND fingerprint = $2
+ORDER BY (user_machine_id = $3) DESC, first_observed_at
+LIMIT 1
 `
 
 type GetMachineSSHHostKeyOwnerParams struct {
-	AccountID   string
-	Fingerprint []byte
+	AccountID     string
+	Fingerprint   []byte
+	UserMachineID string
 }
 
+// Several machines of one account co-own a key when they run on one computer: the observing machine's own row first.
 func (q *Queries) GetMachineSSHHostKeyOwner(ctx context.Context, arg GetMachineSSHHostKeyOwnerParams) (MachineSshHostKeyOwner, error) {
-	row := q.db.QueryRow(ctx, getMachineSSHHostKeyOwner, arg.AccountID, arg.Fingerprint)
+	row := q.db.QueryRow(ctx, getMachineSSHHostKeyOwner, arg.AccountID, arg.Fingerprint, arg.UserMachineID)
 	var i MachineSshHostKeyOwner
 	err := row.Scan(
 		&i.Fingerprint,
@@ -721,6 +725,27 @@ func (q *Queries) ListRevokedManagedSSHCertificateHolders(ctx context.Context, a
 		return nil, err
 	}
 	return items, nil
+}
+
+const machinesShareRunningHost = `-- name: MachinesShareRunningHost :one
+SELECT EXISTS(
+  SELECT 1 FROM user_machines a JOIN user_machines b ON b.id = $1
+  WHERE a.id = $2 AND a.os_boot_id IS NOT NULL AND a.os_boot_id = b.os_boot_id
+    AND a.deleted_at IS NULL AND b.deleted_at IS NULL
+)::boolean AS same_host
+`
+
+type MachinesShareRunningHostParams struct {
+	OtherMachineID string
+	UserMachineID  string
+}
+
+// Two machine records on one running computer (two OS users) report the same os_boot_id; a clone booted elsewhere does not.
+func (q *Queries) MachinesShareRunningHost(ctx context.Context, arg MachinesShareRunningHostParams) (bool, error) {
+	row := q.db.QueryRow(ctx, machinesShareRunningHost, arg.OtherMachineID, arg.UserMachineID)
+	var same_host bool
+	err := row.Scan(&same_host)
+	return same_host, err
 }
 
 const promotePendingMachineSSHHostKeySet = `-- name: PromotePendingMachineSSHHostKeySet :one

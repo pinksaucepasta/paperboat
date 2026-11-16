@@ -4,6 +4,8 @@ package runtime
 
 import (
 	"path/filepath"
+	goruntime "runtime"
+	"strings"
 	"testing"
 )
 
@@ -16,6 +18,9 @@ func TestWorkerBootGenerationDistinguishesRestartAndReboot(t *testing.T) {
 	second, reason, err := recordWorkerBoot(root)
 	if err != nil || reason != "runtime_restart" || second.Generation != 2 || second.OSBootID != first.OSBootID {
 		t.Fatalf("second=%+v reason=%q err=%v", second, reason, err)
+	}
+	if goruntime.GOOS == "linux" && !strings.Contains(first.OSBootID, "/pid:[") {
+		t.Fatalf("Linux boot id %q does not name the PID namespace (containers share the kernel boot_id)", first.OSBootID)
 	}
 	second.OSBootID = "different-boot-id"
 	if err := writeWorkerBoot(filepath.Join(root, "runtime", "worker-boot.json"), second); err != nil {

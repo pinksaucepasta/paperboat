@@ -128,3 +128,59 @@ func hostKeysMoveToTheReplacement(t *testing.T, retiredState string, moves bool)
 		t.Fatalf("active host keys of the replacement=%+v error=%v", active, err)
 	}
 }
+
+// Two OS users of one computer paired to the same account share its /etc/ssh host keys: both get managed SSH
+// (same live os_boot_id). A copied disk image booted on another computer (another boot id) is still refused.
+func TestSQLRepositoryHostKeysSharedByTwoOSUsersOfOneComputer(t *testing.T) {
+	dsn := os.Getenv("PAPERBOAT_TEST_DATABASE_DSN")
+	if dsn == "" {
+		t.Skip("set PAPERBOAT_TEST_DATABASE_DSN to run managed SSH repository integration tests")
+	}
+	if err := db.ValidateIsolatedTestDSN(dsn, os.Getenv("PAPERBOAT_DATABASE_DSN")); err != nil {
+		t.Fatal(err)
+	}
+	store, err := db.Open(config.Database{Driver: "postgres", DSN: dsn})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	ctx := context.Background()
+	if err := db.Migrate(ctx, store); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC().Truncate(time.Second)
+	suffix := strings.ReplaceAll(now.Format("150405.000000000"), ".", "")
+	user := "cohost_user_" + suffix
+	firstID, secondID, cloneID := "cohost_u1_"+suffix, "cohost_u2_"+suffix, "cohost_clone_"+suffix
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.users (id,workos_subject,primary_email,status) VALUES ($1,$2,$3,'active')`, user, "workos_"+user, user+"@example.test"); err != nil {
+		t.Fatal(err)
+	}
+	for _, value := range []struct{ id, bootID string }{{firstID, "boot-a/pid:[1]"}, {secondID, "boot-a/pid:[1]"}, {cloneID, "boot-b/pid:[1]"}} {
+		if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state,online,installation_generation,os_boot_id) VALUES ($1,$2,$3,'linux','amd64','/workspace','online','occupied',true,1,$4)`, value.id, user, "env_"+value.id, value.bootID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	repository, err := NewSQLRepository(store, audit.NewWriter(store))
+	if err != nil {
+		t.Fatal(err)
+	}
+	service, _ := NewService(repository, testCertificates)
+	hostKey := publicLine(t, "ed25519")
+	observe := func(machineID string) error {
+		_, err := service.ObserveHost(ctx, ObserveHostRequest{OperationID: "operation_" + machineID, UserID: user, UserMachineID: machineID, MachineGeneration: 1, ObservationGeneration: 1, PublicKeys: []string{hostKey}, Now: now})
+		return err
+	}
+	for _, machineID := range []string{firstID, secondID} {
+		if err := observe(machineID); err != nil {
+			t.Fatalf("OS user machine %s could not record the computer's host keys: %v", machineID, err)
+		}
+		active, err := service.GetActiveHost(ctx, GetHostKeySetRequest{ActorUserID: user, UserMachineID: machineID, MachineGeneration: 1})
+		if err != nil || len(active.Keys) != 1 {
+			t.Fatalf("active host keys of %s=%+v error=%v", machineID, active, err)
+		}
+	}
+	var inUse *HostKeyInUseError
+	if err := observe(cloneID); !errors.As(err, &inUse) {
+		t.Fatalf("a cloned image on another computer recorded the same host keys: %v", err)
+	}
+}

@@ -46,14 +46,18 @@ func recordWorkerBoot(stateRoot string) (workerBootState, string, error) {
 	return next, reason, nil
 }
 
+// operatingSystemBootID names this boot of this OS instance. The server treats machines reporting the same value
+// as one computer (two OS users share its SSH host keys), so on Linux it includes the PID namespace: containers
+// share the kernel's boot_id but not their PID namespace.
 func operatingSystemBootID() (string, error) {
 	if goruntime.GOOS == "linux" {
 		body, err := os.ReadFile("/proc/sys/kernel/random/boot_id")
 		value := strings.TrimSpace(string(body))
-		if err != nil || value == "" || strings.ContainsAny(value, "\x00\r\n ") {
+		namespace, nsErr := os.Readlink("/proc/self/ns/pid")
+		if err != nil || nsErr != nil || value == "" || strings.ContainsAny(value+namespace, "\x00\r\n ") {
 			return "", ErrProductionInvalid
 		}
-		return value, nil
+		return value + "/" + namespace, nil
 	}
 	output, err := exec.Command("/usr/sbin/sysctl", "-n", "kern.boottime").Output()
 	value := strings.TrimSpace(string(output))
