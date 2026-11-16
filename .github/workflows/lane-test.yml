@@ -62,7 +62,8 @@ jobs:
     name: go ${{ matrix.module }}
     needs: plan
     if: needs.plan.outputs.go != '[]'
-    runs-on: ubuntu-latest
+    # helper: pbh install tests need a host pbh supports (Ubuntu 22.04/24.04, Debian 12); ubuntu-latest is 26.04.
+    runs-on: ${{ matrix.module == 'helper' && 'ubuntu-24.04' || 'ubuntu-latest' }}
     timeout-minutes: 60
     strategy:
       fail-fast: false
