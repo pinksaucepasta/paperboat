@@ -384,7 +384,9 @@ func (a *Authority) Run(ctx context.Context, client NetworkAPI, report func(erro
 				report(denial)
 			}
 			if err == nil {
-				if _, usable := a.regionalRenewalDelay(serverclock.Now()); usable {
+				// Relays the workspace may not use (its hosted allowance is used up) are not usable however fresh
+				// their health observations are.
+				if _, usable := a.regionalRenewalDelay(serverclock.Now()); usable && a.RelayDenial() == nil {
 					unusable = 0
 				} else {
 					unusable++
@@ -449,7 +451,9 @@ func (a *Authority) nextRefresh(err error, failures, unusable int) time.Duration
 	switch {
 	case recovering:
 		delay = backoff.Retry(unusable, regionalUnusableRetry, regionalUnusableRetryMaximum)
-		if due, ok := a.regionalRenewalDelay(serverclock.Now()); ok {
+		// Keeping health observations fresh for relays this workspace cannot use (denied: allowance used up)
+		// renewed every ~12 s on every machine for as long as the allowance stayed used up (PR-03).
+		if due, ok := a.regionalRenewalDelay(serverclock.Now()); ok && a.RelayDenial() == nil {
 			delay = due
 		}
 	case unusable > 0:
