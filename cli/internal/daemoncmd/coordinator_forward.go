@@ -87,6 +87,9 @@ func (c *Coordinator) retireFailedRoute(route *guardedRoute, cause error) {
 			}
 		}
 		c.reconcileErr = failure
+		if c.haveSnapshot { // a restarted guard closed this listener: reconnect now, not at the next guard watch tick
+			c.scheduleReconcileRetry(c.lastPeers, c.lastRevision)
+		}
 	}
 	c.snapshotMu.Unlock()
 	if removed {
