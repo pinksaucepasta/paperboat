@@ -892,18 +892,45 @@ func TestEraseInAChunkEndingMidSequenceStillRepaintsTheBar(t *testing.T) {
 	}
 }
 
+// readPipe returns what reached r since the last call, once output paused for 50 ms. A goroutine drains r: an
+// anonymous pipe on Windows ignores read deadlines, so a deadline-bounded Read blocked the test for 15 minutes.
 func readPipe(r *os.File) string {
-	var sb strings.Builder
-	buf := make([]byte, 65536)
-	for {
-		_ = r.SetReadDeadline(time.Now().Add(50 * time.Millisecond))
-		n, err := r.Read(buf)
-		sb.Write(buf[:n])
-		if err != nil || n == 0 {
-			return sb.String()
+	value, started := pipeReaders.LoadOrStore(r, &pipeReader{})
+	reader := value.(*pipeReader)
+	if !started {
+		go func() {
+			buf := make([]byte, 65536)
+			for {
+				n, err := r.Read(buf)
+				reader.mu.Lock()
+				reader.buf.Write(buf[:n])
+				reader.mu.Unlock()
+				if err != nil {
+					return
+				}
+			}
+		}()
+	}
+	for last := -1; ; time.Sleep(50 * time.Millisecond) {
+		reader.mu.Lock()
+		n := reader.buf.Len()
+		if n == last {
+			out := reader.buf.String()
+			reader.buf.Reset()
+			reader.mu.Unlock()
+			return out
 		}
+		reader.mu.Unlock()
+		last = n
 	}
 }
+
+type pipeReader struct {
+	mu  sync.Mutex
+	buf strings.Builder
+}
+
+var pipeReaders sync.Map // *os.File -> *pipeReader
 
 // X-24 in Terminal.app: the bar was reverse video only, so under vim it took vim's colours (a green or blue REC bar).
 func TestBarStartsFromDefaultColoursAndRestoresTheApplications(t *testing.T) {
