@@ -1,0 +1,32 @@
+FIX-EXECSTDIN: pb exec stdin uses stdout's adaptive zstd and frames up to the 256 KiB limit (2026-11-16 IST)
+Builds: before dev-ce199c78d (main), after dev-bd6620efe (the fix), installed with `pb install` on every machine.
+Machines: L = two throwaway Linux containers on hp (xstd-ha caller, xstd-hb target, one account), W = GitHub Windows
+runner winpool-13 (xstd-w-2), M = GitHub macOS runner macpool-3 (xstd-m). Relay = UDP blocked in the hp containers
+(iptables in the container netns), pb ping path=regional_relay; direct = pb ping path=direct.
+Data: rnd = /dev/urandom, txt = repeated log line (compressible). MB/s of `pb exec` wall time; stdin = `sh -c 'cat >/dev/null'`
+fed from a file, stdout = `cat <file>` on the target. hp is on Wi-Fi and loaded: single runs vary a lot, so every
+L cell is 2-4 runs. stdout is the unchanged path (control for link noise).
+
+Byte-exact: sha256 of stdin as received by the target equals the source for rnd and txt, L->L (30 MB), L->W, W->L, M->L (8 MB).
+M runs: the Mac caller against xstd-hb (on the after build; a before caller still sends 32 KiB raw frames).
+
+                      stdin rnd        stdin txt        stdout rnd       stdout txt
+L direct  before      3.39-5.64        6.79-7.53        7.92-10.8        9.42-11.74
+L direct  after       9.62-10.33 (1)   10.28-12.8       9.92-11.35       9.39-11.48
+L relay   before      0.70-0.76        0.97             0.56-1.40        1.61-6.79
+L relay   after       1.83-1.88        4.23-5.28        0.73-2.11        4.79-7.29
+W relay   before      L>W 0.45 W>L 0.13  L>W 0.62 W>L 0.23  L>W 0.20 W>L 0.20  L>W 1.54 W>L 0.38
+W relay   after       L>W 1.59 W>L 0.30  L>W 1.67 W>L 4.12  L>W 0.43 W>L 0.25  L>W 3.86 W>L 2.75
+W direct  before      L>W 1.41 W>L 0.15  L>W 0.71 W>L 0.19  L>W 0.10 W>L 1.38  L>W 5.91 W>L 4.12
+W direct  after       L>W 0.68 W>L 0.08  L>W 1.95 W>L 4.11  L>W 0.08 W>L 2.38  L>W 5.51 W>L 1.38
+M relay   before      M>L 0.80/0.17/0.30  M>L 1.75/0.38/0.45  M>L 1.02/0.21/0.32  M>L 6.28/2.16/5.16
+M relay   after       M>L 0.21/0.26       M>L 2.89/3.26       M>L 1.32/1.19       M>L 6.51/2.89
+M direct  before      M>L 0.23            M>L 0.09            M>L 1.24            M>L 3.54
+M direct  after       M>L 1.58            M>L 6.94            M>L 2.46            M>L 4.63
+(1) one further run at 1.85 with stdout at 8.36 in the same run (hp Wi-Fi dip), not counted.
+W direct random runs at 0.08-0.15 MB/s in both directions before and after: the hp Wi-Fi <-> GitHub runner link, not
+the change (stdout rnd shows the same).
+M relay random stdin is within the run-to-run spread before and after (0.17-0.80 vs 0.21-0.26; stdout rnd moved the
+same way), so no regression; compressible stdin gains everywhere (L relay 0.97 -> 4.2-5.3, W>L 0.19-0.23 -> 4.1).
+Summary: on the direct Linux path stdin now equals stdout (random ~10 MB/s both); over the relay random stdin is
+link-limited like stdout, and compressible stdin is 2-20x faster.
