@@ -37,6 +37,7 @@ test("the server's refusals name the vault", () => {
 })
 
 // The vault engine is a worker; a stand-in answers its actions so the calls the console makes can be read.
+const accountVault = sampleFor("GET /v1/environment-vault")
 const realFetch = globalThis.fetch
 const realWorker = (globalThis as { Worker?: unknown }).Worker
 let requests: Record<string, unknown>[]
@@ -64,6 +65,8 @@ beforeEach(() => {
   ;(globalThis as { addEventListener?: unknown }).addEventListener ??= () => {}
   globalThis.fetch = (async (input: string | URL, init?: RequestInit) => {
     const url = new URL(String(input), "http://console.example.test")
+    // The account's password vault, which every engine call carries.
+    if (url.pathname === "/api/v1/environment-vault") return Response.json({ data: accountVault })
     fetched.push({ url: url.pathname, method: init?.method ?? "GET", body: init?.body ? JSON.parse(String(init.body)) : undefined })
     const vault = { ...sampleFor("GET /v1/workspaces/{ws}/env-vaults/{name}").vault as object, name: "canary-env", wraps: [{ recipient_kind: "account", recipient_id: "a1", wrapped: "b3Blbg==" }] }
     return Response.json({ data: { vault } })
@@ -90,6 +93,7 @@ test("a vault's key is read, opened by the engine and wrapped to the recipe's pu
   expect(fetched[0]).toMatchObject({ url: "/api/v1/workspaces/personal/env-vaults/canary-env", method: "GET" })
   expect(requests.at(-1)).toEqual({
     action: "named-vault-recipe-wrap",
+    vault: accountVault,
     name: "canary-env",
     vault_wraps: [{ recipient_kind: "account", recipient_id: "a1", wrapped: "b3Blbg==" }],
     recipe_public_key: token.publicKey,
@@ -110,7 +114,7 @@ test("a recipe write that reads a vault is sent with the engine's wrap", async (
 test("a new vault's key is made by the engine (for the team too) and sent as its wraps", async () => {
   await vaultCrypto({ action: "unlock" })
   await createNamedVault("acme", "canary-env", "acme")
-  expect(requests.at(-1)).toEqual({ action: "named-vault-wraps", name: "canary-env", team_id: "acme" })
+  expect(requests.at(-1)).toEqual({ action: "named-vault-wraps", vault: accountVault, name: "canary-env", team_id: "acme" })
   expect(fetched.at(-1)).toMatchObject({
     url: "/api/v1/workspaces/acme/env-vaults",
     method: "POST",

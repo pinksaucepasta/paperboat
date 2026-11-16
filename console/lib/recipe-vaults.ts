@@ -2,6 +2,7 @@
 
 import { api, ApiError, idempotencyKey, type Data } from "@/lib/api"
 import { vaultCrypto, vaultUnlocked } from "@/lib/envvault/crypto"
+import { currentVault } from "@/lib/envvault/vault"
 
 /*
  * Named ENV vaults for recipes (PLAN F26), with the CLI's own code in the browser's vault engine
@@ -34,9 +35,10 @@ export const unknownVault = (error: unknown) =>
 /** One vault's key, wrapped to the recipe whose token has this id and public key. */
 export async function wrapVault(workspace: string, name: string, token: { id: string; publicKey: string }): Promise<VaultWrap> {
   if (!vaultUnlocked()) throw new VaultLockedError(name)
-  const { vault } = await api<Data<"/v1/workspaces/{ws}/env-vaults/{name}">>(vaultPath(workspace, name))
+  const [{ vault }, current] = await Promise.all([api<Data<"/v1/workspaces/{ws}/env-vaults/{name}">>(vaultPath(workspace, name)), currentVault()])
   return vaultCrypto<VaultWrap>({
     action: "named-vault-recipe-wrap",
+    vault: current,
     name,
     vault_wraps: vault.wraps,
     recipe_public_key: token.publicKey,
@@ -75,7 +77,8 @@ export async function withWraps<T>(send: (wraps: VaultWrap[]) => Promise<T>, wra
 /** Makes a vault named `name` in the workspace (a team's vault is wrapped for the team too); needs unlocked ENV. */
 export async function createNamedVault(workspace: string, name: string, teamId?: string): Promise<void> {
   if (!vaultUnlocked()) throw new VaultLockedError(name)
-  const { wraps } = await vaultCrypto<{ wraps: Vault["wraps"] }>({ action: "named-vault-wraps", name, team_id: teamId })
+  // Every engine call carries the account's current password vault, which it checks against what it unlocked.
+  const { wraps } = await vaultCrypto<{ wraps: Vault["wraps"] }>({ action: "named-vault-wraps", vault: await currentVault(), name, team_id: teamId })
   await api(`workspaces/${encodeURIComponent(workspace)}/env-vaults`, {
     method: "POST",
     headers: { "content-type": "application/json", "idempotency-key": idempotencyKey() },
