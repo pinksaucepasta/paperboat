@@ -1,0 +1,33 @@
+Live console 7f7a3ddbd+ (https://oracle.newt-mermaid.ts.net), throwaway test account; machine acf287ba6c74 = pbvm2 container c8-ct, pb dev-e30c9ec7c
+== console/scripts/check-requests-menu.mjs (sources stubbed in the tab with schema-complete payloads; 2 of 13 file requests carry stored=true, the offline-pending case)
+PASS  no bell while nothing waits
+PASS  bell counts every source's total (13 + 1 + 2)
+PASS  one tab per kind with its own count
+PASS  Files page 1 lists 10 requests  (10)
+PASS  a stored (offline) request is listed like the others
+PASS  pager reads 1–10 of 13
+PASS  Next shows requests 11–13
+PASS  Accept approves that request  (req-11 approve)
+PASS  count drops to 15 after the answer
+PASS  invitation reads 'Join stubteam as member'
+PASS  Decline declines the invitation  (inv-1 decline)
+PASS  machine request names the machine and team
+PASS  Accept approves the machine  (m-one approve)
+PASS  bell is gone again when nothing waits
+== console/scripts/check-port-names.mjs (real server: names added/removed through the UI, front desk saved and restored, shadow made by renaming the machine; permission steps fake the member role / can_manage=false in the tab)
+PASS  the three scopes were added  (all_machines,machine,top_level)
+PASS  machine name: full address, scope and machine  (c8pnmachine.acf287ba6c74.ppr.boats
+One machine · acf287ba6c74
+8124)
+PASS  machine name shows its port
+PASS  all-machines name shows its scope
+PASS  top-level name is <name>.<domain>  (c8pntop.ppr.boats)
+PASS  Remove name removes only that name
+PASS  a shadowed name says which machine uses its address
+PASS  front desk shows the saved port  (80)
+PASS  Save stores scheme and port  ({"port":8443,"scheme":"https"})
+PASS  front desk persists after reload
+PASS  an invalid port cannot be saved
+PASS  a member sees an all-machines name without a remove menu
+PASS  a member cannot pick All machines or Top level and is told why
+PASS  without machine management the front desk is read-only  (Front desk | Addresses that match no name go here. | https on 8443)

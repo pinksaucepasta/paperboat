@@ -18,18 +18,20 @@ const json = (route, data) => route.fulfill({ contentType: "application/json", b
 
 const state = { files: 13, invitations: 1, machines: ["m-one", "m-two"], answers: [] }
 const fileRequest = (index) => ({
-  request_id: `req-${index}`, team_id: "stubteam", sender_account: "acct-other", recipient_account: "me",
+  stored: index <= 2, stored_uploaded: index <= 2, batch_id: `batch-${index}`, manifest_digest: "digest", total_bytes: 2048,
+  committed_bytes: index <= 2 ? 2048 : 0, request_id: `req-${index}`, team_id: "stubteam", sender_account: "acct-other", recipient_account: "me",
   source_machine_id: "src", source_machine_name: "laptop", destination_machine_id: "dst", destination_machine_name: "build box",
   files: [{ basename: `file-${index}.txt`, size: 2048, sha256: "x" }], status: "pending", decision_generation: 1,
   expires_at: new Date(Date.now() + 86_400_000).toISOString(),
 })
 const invitation = () => ({
-  invitation_id: "inv-1", team_id: "stubteam", account_id: "me", role: "member", state: "pending", created_by: "acct-other",
+  invitation_id: "inv-1", generation: 1, display_name: "Me", created_at: new Date().toISOString(), last_sent_at: null, delivery_state: "sent", team_id: "stubteam", account_id: "me", role: "member", state: "pending", created_by: "acct-other",
   email: "me@example.test", created_by_email: "owner@example.test", expires_at: new Date(Date.now() + 86_400_000).toISOString(),
 })
 const paged = (rows, params) => {
   const offset = Number(params.get("offset") ?? 0), limit = Number(params.get("limit") ?? 50)
-  return { rows: rows.slice(offset, offset + limit), pagination: { limit, offset, total: rows.length } }
+  const next = offset + limit < rows.length ? offset + limit : null
+  return { rows: rows.slice(offset, offset + limit), pagination: { limit, offset, total: rows.length, next_offset: next } }
 }
 
 const browser = await chromium.launch({ executablePath: CHROME })
@@ -65,7 +67,8 @@ await ctx.route("**/api/v1/**", async (route) => {
   }
   if (path === "teams/stubteam" && method === "GET")
     return json(route, {
-      team_id: "stubteam", display_name: "Stub team", generation: 1, role: "admin",
+      team_id: "stubteam", display_name: "Stub team", generation: 1, role: "admin", env_status: "ready", owner_account: "acct-other",
+      deleted: false, suspended: false, member_count: 2, grant_count: 0, machine_count: 0,
       machine_requests: state.machines.map((id) => ({ machine_id: id, alias: id, requested_by: "acct-other", state: "pending", requested_at: new Date().toISOString() })),
     })
   if (path === "teams/stubteam/machines" && method === "POST") {
@@ -99,6 +102,7 @@ log(
 const pop = page.locator("[data-slot=popover-content]")
 const rows = () => pop.getByRole("button", { name: "Accept" }).count()
 log((await rows()) === 10, "Files page 1 lists 10 requests", String(await rows()))
+log(await pop.getByText("file-1.txt").isVisible(), "a stored (offline) request is listed like the others")
 log(await pop.getByText("1–10 of 13").isVisible(), "pager reads 1–10 of 13")
 await pop.getByRole("button", { name: "Next" }).click()
 await pop.getByText("11–13 of 13").waitFor({ timeout: 10000 }).catch(() => {})
