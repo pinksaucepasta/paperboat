@@ -58,7 +58,8 @@ try {
     }
     if (answers < 3) throw new Error(`only ${answers} vault answers: the refetches did not happen`)
     if ((await password.inputValue()) !== secret || (await confirm.inputValue()) !== secret) throw new Error("the typed text was cleared by the page")
-    if (await page.getByText("stub: too many requests").count()) throw new Error("the refetch error replaced the form")
+    // (The Vault settings row below may name the refused refetch; only the form itself must stay.)
+    if (!(await page.getByText("Create your vault", { exact: true }).isVisible())) throw new Error("the refetch error replaced the form")
     await cdp.send("Emulation.setCPUThrottlingRate", { rate: 1 })
     await page.unroute("**/api/v1/environment-vault*")
     return `${answers} vault answers`
