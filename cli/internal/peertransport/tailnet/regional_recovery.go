@@ -409,7 +409,7 @@ func (r *regionalRecovery) releaseIdlePair() {
 	r.mu.Lock()
 	id, at := r.peerID, r.peerAt
 	r.mu.Unlock()
-	if id == "" || time.Since(at) < regionalPairIdle {
+	if id == "" || at.IsZero() || time.Since(at) < regionalPairIdle { // a pair set without a bind time is not aged
 		return
 	}
 	r.authority.mu.Lock()
