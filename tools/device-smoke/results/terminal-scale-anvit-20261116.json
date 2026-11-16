@@ -1,0 +1,100 @@
+{
+ "check": "terminal-scale",
+ "target": "fts-t",
+ "terminals": 100,
+ "host_loadavg_start": [
+  "9.06",
+  "18.82",
+  "26.73"
+ ],
+ "open": {
+  "ready": 99,
+  "all_ready": false,
+  "seconds": {
+   "p50": 29.745,
+   "p95": 111.474,
+   "max": 116.88,
+   "n": 99
+  },
+  "not_ready_last_line": {
+   "pb: Paperboat is temporarily unavailable. Retry in a moment; if this continues, run `pb doctor`. Support reference: supp": 1
+  }
+ },
+ "echo": {
+  "seconds": {
+   "p50": 0.555,
+   "p95": 0.937,
+   "max": 1.056,
+   "n": 297
+  },
+  "missing": 0
+ },
+ "burst": {
+  "closed": 10,
+  "client_close_seconds": 30.89,
+  "others_echo": {
+   "p50": 0.662,
+   "p95": 1.021,
+   "max": 1.081,
+   "n": 89
+  },
+  "others_missing": 0,
+  "session_cleanup_failures": 5,
+  "session_cleanup_seconds": 61.8
+ },
+ "shared": {
+  "viewers": 50,
+  "stopped": 1,
+  "flood": {
+   "owner_MB_cumulative_per_second": [
+    0.0,
+    0.1,
+    0.2,
+    0.4,
+    0.5,
+    0.6,
+    0.6,
+    0.8,
+    0.8,
+    0.9,
+    1.0,
+    1.1
+   ],
+   "finished": 0,
+   "of": 50,
+   "seconds_to_finish": null
+  },
+  "echo_after_flood": {
+   "p50": 37.871,
+   "p95": 42.837,
+   "max": 42.85,
+   "n": 48
+  },
+  "missing": 2,
+  "stopped_viewer_alive_after_continue": true
+ },
+ "final_cleanup": {
+  "closed_and_deleted": 91,
+  "expected": 91,
+  "seconds": 797.6
+ },
+ "host_loadavg_end": [
+  "9.08",
+  "12.62",
+  "17.86"
+ ],
+ "status": "FAIL",
+ "note": "prod, anvit containers fts-c -> fts-t, pb dev-44e4789b7 on both (89ef4c914 + 2ca961578), opens 3/s. Before these fixes on dev-e37835bfc the same pair: shared 32 of 50 finished, 18 never; later runs hit the 256 terminal ceiling at 82-92 opens (owner bridge request limit). Shared phase alone on dev-44e4789b7 (--terminals 0): 50 viewers no stall 51/51 at load 13; with load 20-40 the flood did not finish in 120 s. Open here: with 90 terminals open and one viewer stopped, the 3 MB flood finished for 0 of 50 and echo took 38 s (48 of 50); 1 open refused \"temporarily unavailable\"; 5 burst-session cleanups failed; 34 shells of slow creates (open p95 111 s) were left running with no session record (abandoned-create orphans), killed by hand.",
+ "isolation": {
+  "shared_only_no_stall_50_viewers_load9": {
+   "flood_finished": "0 of 50",
+   "echo_after_flood_p50_s": 49.5
+  },
+  "shared_only_no_stall_10_viewers": {
+   "flood_finished": "7 of 10",
+   "owner_MBps": 0.1
+  },
+  "vflood_50_viewers_no_stall_load13": "51 of 51 got the end marker and an echo",
+  "vflood_10_viewers_no_stall_load13": "11 of 11"
+ }
+}
