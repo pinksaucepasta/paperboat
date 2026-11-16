@@ -60,10 +60,16 @@ func CheckSDKCount(ctx context.Context, query func(context.Context, string, ...a
 		return err
 	}
 	limits := current.Load().limits.SDK
-	perToken, perAccount := limits.OperationsPerToken, limits.OperationsPerAccount
-	from := `FROM paperboat.user_machine_access_sessions a JOIN paperboat.cli_client_sessions c ON c.id=a.cli_client_session_id AND c.user_id=a.user_id WHERE a.user_id=$1 AND a.state='active' AND a.revoked_at IS NULL AND a.expires_at>now() AND c.state='active' AND c.revoked_at IS NULL AND c.recipe_id IS NOT NULL`
+	// token is an API token id (sessions and operations) or a recipe id (operations).
+	perToken, perAccount := limits.SessionsPerToken, limits.SessionsPerAccount
+	from := `FROM paperboat.cli_client_sessions c JOIN paperboat.api_tokens t ON t.id=c.api_token_id WHERE c.user_id=$1 AND c.state='active' AND c.revoked_at IS NULL AND t.revoked_at IS NULL AND t.expires_at>now()`
+	owner := `t.id`
+	if kind == "operations" {
+		perToken, perAccount, owner = limits.OperationsPerToken, limits.OperationsPerAccount, `coalesce(c.api_token_id,c.recipe_id)`
+		from = `FROM paperboat.user_machine_access_sessions a JOIN paperboat.cli_client_sessions c ON c.id=a.cli_client_session_id AND c.user_id=a.user_id WHERE a.user_id=$1 AND a.state='active' AND a.revoked_at IS NULL AND a.expires_at>now() AND c.state='active' AND c.revoked_at IS NULL AND (c.api_token_id IS NOT NULL OR c.recipe_id IS NOT NULL)`
+	}
 	var tokenCount, accountCount int
-	if err := query(ctx, `SELECT count(*) FILTER(WHERE c.recipe_id=$2),count(*) `+from, account, token).Scan(&tokenCount, &accountCount); err != nil {
+	if err := query(ctx, `SELECT count(*) FILTER(WHERE `+owner+`=$2),count(*) `+from, account, token).Scan(&tokenCount, &accountCount); err != nil {
 		return err
 	}
 	if tokenCount >= perToken || accountCount >= perAccount {

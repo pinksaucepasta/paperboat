@@ -27,16 +27,17 @@ type PolicyNames struct {
 }
 
 type PolicyView struct {
-	Workspace         string      `json:"workspace"`
-	Version           uint64      `json:"version"`
-	Policy            string      `json:"policy"`
-	Digest            string      `json:"digest"`
-	UpdatedAt         time.Time   `json:"updated_at"`
-	UpdatedBy         string      `json:"updated_by,omitempty"`
-	UpdatedWithRecipe string      `json:"updated_with_recipe,omitempty"`
-	Message           string      `json:"message"`
-	CanEdit           string      `json:"can_edit"`
-	Names             PolicyNames `json:"names"`
+	Workspace           string      `json:"workspace"`
+	Version             uint64      `json:"version"`
+	Policy              string      `json:"policy"`
+	Digest              string      `json:"digest"`
+	UpdatedAt           time.Time   `json:"updated_at"`
+	UpdatedBy           string      `json:"updated_by,omitempty"`
+	UpdatedWithAPIToken string      `json:"updated_with_api_token,omitempty"`
+	UpdatedWithRecipe   string      `json:"updated_with_recipe,omitempty"`
+	Message             string      `json:"message"`
+	CanEdit             string      `json:"can_edit"`
+	Names               PolicyNames `json:"names"`
 }
 
 type PolicyTests struct {
@@ -72,6 +73,8 @@ type PolicyExplainRequest struct {
 	Dst    string  `json:"dst,omitempty"`
 	Action string  `json:"action,omitempty"`
 	Port   int     `json:"port,omitempty"`
+	// APIToken names one of src's API tokens: the answer then includes the token's scope.
+	APIToken string `json:"api_token,omitempty"`
 	// Recipe names a recipe of the workspace: the answer is for its machines (src defaults to
 	// its creator), narrowed by its reach.
 	Recipe string `json:"recipe,omitempty"`
@@ -96,6 +99,7 @@ type PolicyVersion struct {
 	Digest    string    `json:"digest"`
 	CreatedAt time.Time `json:"created_at"`
 	Author    string    `json:"author,omitempty"`
+	APIToken  string    `json:"api_token,omitempty"`
 	Recipe    string    `json:"recipe,omitempty"`
 	Message   string    `json:"message"`
 	Gained    int       `json:"gained"`
@@ -155,8 +159,8 @@ func (s *Service) Policy(ctx context.Context, account, ws string, version uint64
 		}
 		if version != 0 && version != p.version {
 			var kind string
-			err = tx.QueryRow(ctx, `SELECT source,digest,created_at,coalesce(author,''),coalesce(recipe,''),message,kind FROM workspace_policy_versions WHERE policy_id=$1 AND version=$2`, p.id, version).
-				Scan(&p.source, &p.digest, &p.updatedAt, &p.updatedBy, &p.recipe, &p.message, &kind)
+			err = tx.QueryRow(ctx, `SELECT source,digest,created_at,coalesce(author,''),coalesce(api_token,''),coalesce(recipe,''),message,kind FROM workspace_policy_versions WHERE policy_id=$1 AND version=$2`, p.id, version).
+				Scan(&p.source, &p.digest, &p.updatedAt, &p.updatedBy, &p.apiToken, &p.recipe, &p.message, &kind)
 			if errors.Is(err, pgx.ErrNoRows) {
 				return ErrPolicyUnavailable
 			}
@@ -195,7 +199,7 @@ func viewOf(sc policyScope, p storedPolicy, inv policy.Inventory) PolicyView {
 	slices.Sort(names.Tags)
 	slices.Sort(names.Groups)
 	return PolicyView{Workspace: sc.id, Version: p.version, Policy: string(external(p.source, inv)), Digest: p.digest, UpdatedAt: p.updatedAt,
-		UpdatedBy: userLabel(inv, p.updatedBy), UpdatedWithRecipe: p.recipe, Message: p.message, CanEdit: sc.canEdit, Names: names}
+		UpdatedBy: userLabel(inv, p.updatedBy), UpdatedWithAPIToken: p.apiToken, UpdatedWithRecipe: p.recipe, Message: p.message, CanEdit: sc.canEdit, Names: names}
 }
 
 func userLabel(inv policy.Inventory, account string) string {

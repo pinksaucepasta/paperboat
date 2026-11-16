@@ -53,7 +53,7 @@ func (s *Service) recordAccessStartedTx(ctx context.Context, tx *db.Tx, in dbsql
 	if in.TeamID.Valid {
 		metadata["workspace"] = in.TeamID.String
 	}
-	token, _ := auth.RecipeFromContext(ctx)
+	token, _ := auth.SDKSessionFromContext(ctx)
 	return s.audit.WriteTx(ctx, tx, audit.Event{ActorUserID: in.UserID, ActorTokenID: token, ActorType: audit.ActorUser, EventType: accessStartedEvent,
 		ResourceType: accessResource, ResourceID: in.UserMachineID, IdempotencyKey: in.ID, Metadata: metadata})
 }
@@ -61,8 +61,13 @@ func (s *Service) recordAccessStartedTx(ctx context.Context, tx *db.Tx, in dbsql
 // machineForCapability is getMachineForCapability that records a refusal.
 func (s *Service) machineForCapability(ctx context.Context, q *dbsqlc.Queries, in dbsqlc.GetUserMachineForCapabilityParams) (dbsqlc.UserMachine, error) {
 	row, err := getMachineForCapability(ctx, q, in)
-	if errors.Is(err, sql.ErrNoRows) || errors.Is(err, auth.ErrOutsideReach) {
-		s.recordAccessDenied(ctx, q, in, errors.Is(err, auth.ErrOutsideReach))
+	switch {
+	case errors.Is(err, auth.ErrOutsideTokenScope):
+		s.recordAccessDenied(ctx, q, in, "outside_token_scope")
+	case errors.Is(err, auth.ErrOutsideReach):
+		s.recordAccessDenied(ctx, q, in, "outside_recipe_reach")
+	case errors.Is(err, sql.ErrNoRows):
+		s.recordAccessDenied(ctx, q, in, "")
 	}
 	return row, err
 }
@@ -70,7 +75,7 @@ func (s *Service) machineForCapability(ctx context.Context, q *dbsqlc.Queries, i
 // recordAccessDenied writes the refusal on its own connection: the caller's transaction ends with
 // the refusal's error and would take the event with it. A failed write is reported, never returned
 // in place of the refusal.
-func (s *Service) recordAccessDenied(ctx context.Context, q *dbsqlc.Queries, in dbsqlc.GetUserMachineForCapabilityParams, outsideTokenScope bool) {
+func (s *Service) recordAccessDenied(ctx context.Context, q *dbsqlc.Queries, in dbsqlc.GetUserMachineForCapabilityParams, refusal string) {
 	if s.audit == nil {
 		return
 	}
@@ -78,8 +83,8 @@ func (s *Service) recordAccessDenied(ctx context.Context, q *dbsqlc.Queries, in 
 	decision, err := q.MachineAccessDecision(ctx, dbsqlc.MachineAccessDecisionParams{Actor: in.UserID, Machine: in.ID, Capability: in.Capability, ScopeSet: set, ScopeTeam: team})
 	if err == nil {
 		reason := decision.Reason
-		if outsideTokenScope {
-			reason = "outside_token_scope"
+		if refusal != "" {
+			reason = refusal
 		}
 		if reason == "" {
 			// Allowed now: the refusal raced a change that granted access.

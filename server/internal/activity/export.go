@@ -21,7 +21,7 @@ const exportPageRows = 500
 var ErrExportNeedsTeam = errors.New("audit log export is available in team workspaces")
 
 // CSVHeader is the export's column order; the documented event shape flattened.
-var CSVHeader = []string{"id", "occurred_at", "workspace", "action", "result", "reason", "actor_kind", "actor_id", "actor_email", "actor_recipe_id", "target_kind", "target_id", "target_name", "machine_id", "machine_name", "ip", "user_agent", "request_id", "details"}
+var CSVHeader = []string{"id", "occurred_at", "workspace", "action", "result", "reason", "actor_kind", "actor_id", "actor_email", "actor_token_id", "actor_recipe_id", "target_kind", "target_id", "target_name", "machine_id", "machine_name", "ip", "user_agent", "request_id", "details"}
 
 // Export writes the workspace's events matching q (newest first, at most AuditExportMaxRows) to
 // w as "csv" or "json" (one JSON array), then records the export in the audit log. Authorization
@@ -117,7 +117,7 @@ func (e *encoder) event(ev Event) error {
 			machineID, machineName = ev.Machine.ID, ev.Machine.Name
 		}
 		return e.csv.Write(csvSafe([]string{ev.ID, ev.OccurredAt.UTC().Format(time.RFC3339Nano), ev.Workspace, ev.Action, ev.Result, ev.Reason,
-			ev.Actor.Kind, ev.Actor.ID, ev.Actor.Email, ev.Actor.RecipeID, ev.Target.Kind, ev.Target.ID, ev.Target.Name,
+			ev.Actor.Kind, ev.Actor.ID, ev.Actor.Email, ev.Actor.TokenID, ev.Actor.RecipeID, ev.Target.Kind, ev.Target.ID, ev.Target.Name,
 			machineID, machineName, ev.IP, ev.UserAgent, ev.RequestID, string(details)}))
 	}
 	raw, err := json.Marshal(ev)

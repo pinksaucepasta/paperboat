@@ -13,10 +13,10 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/teams"
 )
 
-// ErrRecipeUnavailable: the session's recipe was revoked while the machine was pairing.
+// ErrRecipeUnavailable means the session's recipe was revoked while the machine was pairing.
 var ErrRecipeUnavailable = errors.New("recipe revoked")
 
-// RecipeFullError: the recipe already has max_machines machines.
+// RecipeFullError means the recipe already has max_machines machines.
 type RecipeFullError struct {
 	Name string
 	Max  int

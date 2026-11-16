@@ -18,7 +18,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/shared/recipe"
 )
 
-// ErrOutsideReach: the recipe's [[reach]] does not cover this machine action.
+// ErrOutsideReach means the recipe's [[reach]] does not cover this machine action.
 var ErrOutsideReach = errors.New("this recipe's reach does not cover this machine action")
 
 // RecipeRefusal is why a recipe token cannot start a session; the client prints the matching

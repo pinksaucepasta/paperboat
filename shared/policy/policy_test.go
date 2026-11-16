@@ -489,3 +489,30 @@ func TestRecordingActionsNeedAnExplicitTeamRule(t *testing.T) {
 		t.Fatalf("recording_view on env: %q", got)
 	}
 }
+
+func TestScopedAPITokenNarrowsItsCreator(t *testing.T) {
+	inv := personal()
+	inv.Tokens = []Token{{ID: "tok-ci", Creator: "ana", Scope: []ScopeEntry{{Dst: []string{"tag:ci"}, Allow: []string{"exec"}}}}}
+	c := mustCompile(t, `{"tags": {"tag:ci": ["machine:ci"]}}`, inv)
+	if d := c.DecideToken("tok-ci", "ana", machine("m-ci"), ActionExec, 0); !d.Allowed {
+		t.Fatalf("the scope allows exec on tag:ci: %+v", d)
+	}
+	for _, q := range []struct {
+		target Target
+		action string
+	}{{machine("m-ci"), ActionTerminal}, {machine("m-laptop"), ActionExec}} {
+		if d := c.DecideToken("tok-ci", "ana", q.target, q.action, 0); d.Allowed || d.Reason != "outside_token_scope" {
+			t.Fatalf("%v %s: %+v", q.target, q.action, d)
+		}
+	}
+	if d := c.DecideToken("tok-unscoped", "ana", machine("m-laptop"), ActionTerminal, 0); !d.Allowed {
+		t.Fatalf("an unscoped token acts as its creator: %+v", d)
+	}
+	untagged := mustCompile(t, `{}`, inv)
+	if d := untagged.DecideToken("tok-ci", "ana", machine("m-ci"), ActionExec, 0); d.Allowed {
+		t.Fatalf("a scope whose tag is gone matches nothing: %+v", d)
+	}
+	if errs := untagged.ValidateTokenScope(inv.Tokens[0].Scope); len(errs) != 1 || errs[0].Code != "unknown_tag" {
+		t.Fatalf("creating a token with an unknown tag is refused: %v", errs)
+	}
+}

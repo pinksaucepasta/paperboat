@@ -63,6 +63,7 @@ func newPolicyFixture(t *testing.T) *policyFixture {
 		_, _ = store.SQL().ExecContext(c, `DELETE FROM paperboat.team_resource_bindings WHERE team_id=$1`, f.team)
 		_, _ = store.SQL().ExecContext(c, `DELETE FROM paperboat.user_machines WHERE id=ANY($1)`, []string{f.db1, f.web1, f.web1b, f.runner})
 		_, _ = store.SQL().ExecContext(c, `DELETE FROM paperboat.teams WHERE team_id=$1`, f.team)
+		_, _ = store.SQL().ExecContext(c, `DELETE FROM paperboat.api_tokens WHERE account_id=ANY($1)`, []string{f.owner, f.admin, f.member, f.other})
 		_, _ = store.SQL().ExecContext(c, `DELETE FROM paperboat.recipes WHERE account_id=ANY($1)`, []string{f.owner, f.admin, f.member, f.other})
 		_, _ = store.SQL().ExecContext(c, `DELETE FROM paperboat.users WHERE id=ANY($1)`, []string{f.owner, f.admin, f.member, f.other})
 	})
@@ -226,6 +227,15 @@ func TestPolicySaveReviewAndRights(t *testing.T) {
 	ex, err := f.service.ExplainPolicy(f.ctx, f.member, f.team, PolicyExplainRequest{Src: "user:" + f.email(f.member), Dst: "machine:db1", Action: "exec"})
 	if err != nil || ex.Decision == nil || !ex.Decision.Allowed || ex.Decision.Rules[0] != "/rules/1" {
 		t.Fatalf("%+v %v", ex.Decision, err)
+	}
+	// A scoped API token is narrowed by its scope even where its creator is allowed.
+	f.exec(`INSERT INTO paperboat.api_tokens(id,account_id,team_id,name,secret_hash,scope,expires_at) VALUES($1,$2,$3,'ci',sha256(convert_to($1::text,'UTF8')),'[{"dst":["machine:runner"],"allow":["exec"]}]',now()+interval '1 day')`, "tok_"+f.member, f.member, f.team)
+	ex, err = f.service.ExplainPolicy(f.ctx, f.member, f.team, PolicyExplainRequest{Src: "user:" + f.email(f.member), Dst: "machine:db1", Action: "exec", APIToken: "ci"})
+	if err != nil || ex.Decision == nil || ex.Decision.Allowed || ex.Decision.Reason != "outside_token_scope" {
+		t.Fatalf("scoped token: %+v %v", ex.Decision, err)
+	}
+	if _, err = f.service.ExplainPolicy(f.ctx, f.member, f.team, PolicyExplainRequest{Src: "user:" + f.email(f.member), Dst: "machine:db1", Action: "exec", APIToken: "nope"}); !errors.As(err, &invalid) {
+		t.Fatalf("unknown token: %v", err)
 	}
 	// A recipe's machines are narrowed by its reach even where its creator is allowed.
 	f.exec(`INSERT INTO paperboat.recipes(id,token_id,account_id,team_id,name,source,source_format,canonical,auth_hash,expires_at) VALUES($1,substr(md5($1),1,10),$2,$3,'ci','','toml','{"expires":"90d","reach":[{"dst":["machine:runner"],"allow":["exec"]}]}',sha256(convert_to($1::text,'UTF8')),now()+interval '1 day')`, "recipe_"+f.member, f.member, f.team)

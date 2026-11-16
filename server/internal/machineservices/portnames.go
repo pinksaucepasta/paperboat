@@ -14,13 +14,13 @@ import (
 // ErrNameIsMachine refuses a top-level name equal to a machine's name: <name>.<domain> already opens that machine.
 var ErrNameIsMachine = errors.New("top-level name is a machine name")
 
-// ErrPortNameNotFound: no such name in the selected workspace.
+// ErrPortNameNotFound means there is no such name in the selected workspace.
 var ErrPortNameNotFound = errors.New("port name not found")
 
 // MaxPortNames bounds the names of one workspace (machine, all-machines and top-level names together).
 const MaxPortNames = 512
 
-// workspaceMachines selects the machines a workspace owns ($1 actor, $2 team or ''): the actor's personal machines,
+// workspaceMachines selects the machines a workspace owns ($1 actor, $2 team or ”): the actor's personal machines,
 // or the team's machines.
 const workspaceMachines = `SELECT m.id,m.alias FROM paperboat.user_machines m WHERE m.deleted_at IS NULL AND m.revoked_at IS NULL
  AND CASE WHEN $2='' THEN m.user_id=$1 AND m.owner_team_id IS NULL ELSE m.owner_team_id=$2 END`

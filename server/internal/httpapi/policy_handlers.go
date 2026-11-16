@@ -46,6 +46,10 @@ func policyHandler(service policyAPI, kind string) http.HandlerFunc {
 			return
 		}
 		account, ws := p.User.ID, r.PathValue("ws")
+		if p.APIToken != nil && p.APIToken.Workspace.ID != ws {
+			writeError(w, r, http.StatusForbidden, "workspace_unavailable", "This API token belongs to another workspace.")
+			return
+		}
 		if p.Client != nil && p.Client.RecipeID != "" && recipeWorkspace(p.Client).ID != ws {
 			writeError(w, r, http.StatusForbidden, "workspace_unavailable", "This machine's recipe belongs to another workspace.")
 			return

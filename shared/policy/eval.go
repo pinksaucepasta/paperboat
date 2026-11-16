@@ -11,7 +11,7 @@ import (
 type Decision struct {
 	Allowed bool `json:"allowed"`
 	// Reason is owner, rule, denied_by_rule, no_rule, port_not_allowed, private_access_off,
-	// outside_recipe_reach or unknown_subject.
+	// outside_token_scope, outside_recipe_reach or unknown_subject.
 	Reason string `json:"reason"`
 	// Rules are the JSON Pointers of the rules that decided ("/rules/2"): the deny rules for
 	// denied_by_rule, otherwise the allow rules that match.
@@ -128,6 +128,21 @@ func (c Compiled) Decide(account string, t Target, action string, port int) Deci
 		}
 	}
 	return Decision{Allowed: true, Reason: "rule", Rules: paths}
+}
+
+// DecideToken answers for a request made with an API token: the token acts as its creator,
+// and a scoped token (one in Inventory.Tokens) also needs its scope to cover the request.
+func (c Compiled) DecideToken(token, creator string, t Target, action string, port int) Decision {
+	d := c.Decide(creator, t, action, port)
+	scope, scoped := c.Scopes[token]
+	if !d.Allowed || !scoped {
+		return d
+	}
+	in := c.matching(scope, "", t, action)
+	if len(in) == 0 || (action == ActionPrivateAccess && port != 0 && !portsContain(ports(in), port)) {
+		return Decision{Reason: "outside_token_scope"}
+	}
+	return d
 }
 
 // DecideRecipe answers for a request of a recipe machine: it acts as the recipe's creator, and

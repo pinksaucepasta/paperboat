@@ -35,7 +35,7 @@ const (
 type Event struct {
 	ID          string
 	ActorUserID string
-	// ActorTokenID names the recipe whose session acted for ActorUserID, when one did.
+	// ActorTokenID names the API token or the recipe whose session acted for ActorUserID, when one did.
 	ActorTokenID   string
 	Result         string
 	Reason         string
@@ -46,6 +46,14 @@ type Event struct {
 	IdempotencyKey string
 	Metadata       map[string]any
 	CreatedAt      time.Time
+}
+
+type apiTokenKey struct{}
+
+// WithAPIToken attributes every audit event written under ctx to the API token that
+// authenticated the request.
+func WithAPIToken(ctx context.Context, tokenID string) context.Context {
+	return context.WithValue(ctx, apiTokenKey{}, tokenID)
 }
 
 type recipeKey struct{}
@@ -88,6 +96,12 @@ func write(ctx context.Context, q *dbsqlc.Queries, event Event) error {
 	event.Metadata = maps.Clone(event.Metadata)
 	if event.Metadata == nil {
 		event.Metadata = make(map[string]any)
+	}
+	if tokenID, ok := ctx.Value(apiTokenKey{}).(string); ok && tokenID != "" {
+		event.Metadata["api_token_id"] = tokenID
+		if event.ActorTokenID == "" {
+			event.ActorTokenID = tokenID // the documented actor.token_id
+		}
 	}
 	if recipeID, ok := ctx.Value(recipeKey{}).(string); ok && recipeID != "" {
 		event.Metadata["recipe_id"] = recipeID

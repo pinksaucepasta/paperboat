@@ -43,6 +43,10 @@ JSON file; comments (`//`, `/* */`) and trailing commas are allowed (HuJSON). Th
 
 Rule order never matters. Explain (`pb policy explain`) names the rule that decided.
 
+**API tokens** act as the member who created them. A token created with a scope
+(`[{"dst": ["tag:ci"], "allow": ["exec"]}]`, the same names as a rule) may only do what the
+scope lists, and never more than its creator may do at that moment.
+
 **Recipes** (`shared/recipe/README.md`): a machine paired from a recipe acts as the member who
 created it, and its `[[reach]]` (`[{"dst": ["tag:ci"], "allow": ["exec"]}]`, the same names as a
 rule) narrows that: it may only do what the reach lists on other machines, and never more than
@@ -128,7 +132,7 @@ are sorted by path, so the same file always gives the same list.
 ## HTTP API
 
 `{ws}` is `personal` or the team slug. Every endpoint needs a signed-in session (CLI device
-session or console session) whose account is an active member of `{ws}`. Errors use
+session, console session or API token) whose account is an active member of `{ws}`. Errors use
 the server's envelope `{"error": {"code", "message", "details"}}`; policy errors are in
 `details.errors` as the list above. Clients ignore unknown response fields.
 
@@ -138,13 +142,13 @@ the server's envelope `{"error": {"code", "message", "details"}}`; policy errors
 | `GET /v1/workspaces/{ws}/policy[?version=N]` | members | — | `Policy` |
 | `POST /v1/workspaces/{ws}/policy/validate` | members | `{"policy": "<file text>"}` | `Validation` |
 | `PUT /v1/workspaces/{ws}/policy` | editors | `{"policy", "expected_version", "message"?, "confirm"?}` | `Policy` |
-| `POST /v1/workspaces/{ws}/policy/explain` | members (own access), owners, admins and auditors (anyone) | `{"policy"?, "src"?, "dst"?, "action"?, "port"?, "recipe"?}` | `Explanation` |
+| `POST /v1/workspaces/{ws}/policy/explain` | members (own access), owners, admins and auditors (anyone) | `{"policy"?, "src"?, "dst"?, "action"?, "port"?, "api_token"?, "recipe"?}` | `Explanation` |
 | `GET /v1/workspaces/{ws}/policy/versions?limit=&cursor=` | members | — | `{"versions": [PolicyVersion], "total", "next_cursor"?}`: newest first, limit 1-200 (default 50); pass `next_cursor` back as `cursor` |
 | `POST /v1/workspaces/{ws}/policy/restore` | editors | `{"version", "expected_version", "message"?, "confirm"?}` | `Policy` |
 
 ```text
 Policy      {workspace, version, policy (file text, comments kept), digest ("sha256:<hex>"),
-             updated_at, updated_by ("user:<email>"), updated_with_recipe? (name), message,
+             updated_at, updated_by ("user:<email>"), updated_with_api_token? (name), updated_with_recipe? (name), message,
              can_edit ("all" | "own_machines" | "none"),
              names {users: [email], machines: [alias], previews: [name], tunnels: [name],
                     tags: [tag], groups: [group]}}
@@ -156,7 +160,7 @@ Explanation {decision?: {allowed, reason, rules: ["/rules/N"], guardrail?,    //
              what_can?: [Access]}                                             // src only
 Access      {subject, target, action, ports?, reason ("owner" | "rule"), rules?}
 Change      {change ("gained" | "lost"), subject, target, action, ports?, rules?}
-Version     {version, digest, created_at, author, recipe?, message, gained, lost,
+Version     {version, digest, created_at, author, api_token?, recipe?, message, gained, lost,
              kind ("saved" | "restored" | "rewritten" | "migrated")}
 ```
 
@@ -170,7 +174,7 @@ Version     {version, digest, created_at, author, recipe?, message, gained, lost
   is only their own machines (`can_edit: "own_machines"`; otherwise 403
   `policy_edit_forbidden`). Personal workspace: the owner.
 - **Explain** reasons: `owner`, `rule`, `denied_by_rule`, `no_rule`, `port_not_allowed`,
-  `private_access_off`, `outside_recipe_reach`; `guardrail` names a failed guardrail
+  `private_access_off`, `outside_token_scope`, `outside_recipe_reach`; `guardrail` names a failed guardrail
   (`team_suspended`, `membership_inactive`, `machine_not_in_workspace`, `team_not_entitled`,
   `machine_service_off`). A member asking about someone else is 403 `policy_explain_forbidden`.
 - **Machine tags** (`pb machine tag`, the console's "Edit tags"): the file's `tags` map stays the
@@ -199,3 +203,37 @@ Version     {version, digest, created_at, author, recipe?, message, gained, lost
   the key, as `pb env team revoke` does (rotation required). A member allowed without a key yet
   is `allowed` with `key_delivered: false`: a key holder delivers it with `pb env grants sync`.
 
+## API tokens
+
+An API token acts as the member who created it, in one workspace, until it expires or is
+revoked. An optional scope (a list of `{"dst", "allow", "ports"?}` entries using the names
+above, validated like rules) narrows it; a scope never widens it.
+
+| Method and path | Who | Request | Response |
+|---|---|---|---|
+| `POST /v1/workspaces/{ws}/api-tokens` | members | `{"name", "expires_in_days", "scope"?}` | `{"api_token": APIToken, "secret": "pbat_…"}` (secret shown once) |
+| `GET /v1/workspaces/{ws}/api-tokens?limit=&cursor=&state=` | members (own), owners/admins (all) | — | `{"api_tokens": [APIToken], "total", "active_total", "ended_total", "next_cursor"?}`: `state=active\|ended` lists only live or only revoked/expired tokens (`total` follows it, the other two counts do not); newest first, limit 1-200 (default 50); pass `next_cursor` back as `cursor` for the next page |
+| `DELETE /v1/workspaces/{ws}/api-tokens/{id}` | its creator, owners/admins | — | `{"api_token": APIToken}` (revoked) |
+
+```text
+APIToken {id, name, workspace, created_by ("user:<email>"), created_at, expires_at,
+          last_used_at?, revoked_at?, scope? ([{dst, allow, ports?}])}
+```
+
+- `name`: same characters as tag names, unique per creator and workspace (409
+  `api_token_name_taken`). `expires_in_days`: 1 to the configured maximum (default 90).
+  A bad scope is 422 `invalid_api_token_scope` with `details.errors`.
+- Use: `Authorization: Bearer pbat_…` on any API request; the request acts as the creator in
+  the token's workspace only (another workspace is 403 `workspace_unavailable`), and every
+  authorization also checks the scope (`outside_token_scope`). Expired or revoked: 401
+  `api_token_invalid`.
+- Scoped tokens: a request made with a scoped token (directly, or through a pb session made from
+  it) reads as the creator; machine actions (terminal, exec, managed SSH, files) are checked
+  against the scope (`outside_token_scope`); other changes are refused, except the policy's
+  explain/validate, revoking API tokens and the connection plumbing pb needs (including the
+  session's own E2EE endpoint certificate). No request made
+  with an API token, directly or through its session, can create an API token (403 `forbidden`).
+- `POST /v1/auth/api-token-sessions` (bearer: the API token) `{"client_label", "device_type":
+  "desktop|server|container", "os"}` returns a CLI token set for a session of the creator that
+  carries the token; it ends when the token is revoked or expires. A session cannot start
+  another (401 `api_token_required`).

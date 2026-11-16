@@ -29,6 +29,9 @@ type Compiled struct {
 	// Grants is Allows minus Denies: the access the policy gives.
 	Grants             []Grant
 	AllowPrivateAccess bool
+	// Scopes holds each scoped API token's scope, keyed by token ID, with Account empty.
+	// A scope entry whose names no longer resolve matches nothing.
+	Scopes map[string][]Grant
 	// Reach holds each recipe's reach, keyed by recipe ID, with Account empty. An entry whose
 	// names no longer resolve matches nothing.
 	Reach  map[string][]Grant
@@ -81,24 +84,36 @@ func Compile(d Document, inv Inventory, limits Limits) (Compiled, Errors) {
 	out := Compiled{Allows: allow.list(), Denies: deny.list(), x: x, tags: tags, groups: groups, rows: rows,
 		AllowPrivateAccess: !inv.Team || (d.AllowPrivateAccess != nil && *d.AllowPrivateAccess)}
 	out.Grants = subtract(out.Allows, out.Denies)
+	out.Scopes = map[string][]Grant{}
+	for _, t := range inv.Tokens {
+		out.Scopes[t.ID], _ = out.compileScope(t.Scope, false)
+	}
 	out.Reach = map[string][]Grant{}
 	for _, r := range inv.Recipes {
 		out.Reach[r.ID] = nil
 		if len(r.Reach) > 0 {
-			out.Reach[r.ID], _ = out.compileScope(r.Reach)
+			out.Reach[r.ID], _ = out.compileScope(r.Reach, true)
 		}
 	}
 	return out, nil
 }
 
-// ValidateScope checks a recipe's reach against this policy's workspace; a recipe is
-// created or changed only when it returns no errors. Paths are relative to the scope list.
+// ValidateScope checks a recipe's reach against this policy's workspace; a recipe is created or
+// changed only when it returns no errors. A tag no machine carries yet is accepted (reachTags).
+// Paths are relative to the scope list.
 func (c Compiled) ValidateScope(scope []ScopeEntry) Errors {
-	_, errs := c.compileScope(scope)
+	_, errs := c.compileScope(scope, true)
 	return errs
 }
 
-func (c Compiled) compileScope(scope []ScopeEntry) ([]Grant, Errors) {
+// ValidateTokenScope checks an API token scope; unlike a reach, every tag must exist (unknown_tag).
+func (c Compiled) ValidateTokenScope(scope []ScopeEntry) Errors {
+	_, errs := c.compileScope(scope, false)
+	return errs
+}
+
+func (c Compiled) compileScope(scope []ScopeEntry, reach bool) ([]Grant, Errors) {
+	tags := c.tags
 	e := &collector{}
 	b := newBuilder()
 	if len(scope) == 0 {
@@ -110,7 +125,10 @@ func (c Compiled) compileScope(scope []ScopeEntry) ([]Grant, Errors) {
 		if len(s.Dst) == 0 || len(s.Allow) == 0 {
 			e.add(p, "empty", "a scope entry needs dst and allow")
 		}
-		family, targets := ruleTargets(e, c.x, reachTags(c.tags, s.Dst), pointer(p, "dst"), s.Dst)
+		if reach {
+			tags = reachTags(c.tags, s.Dst)
+		}
+		family, targets := ruleTargets(e, c.x, tags, pointer(p, "dst"), s.Dst)
 		actions := ruleActions(e, c.x.inv.Team, family, pointer(p, "allow"), s.Allow)
 		ports := rulePorts(e, p, actions, s.Ports, false)
 		if len(e.errs) > before {

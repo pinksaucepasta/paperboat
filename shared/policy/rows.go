@@ -100,6 +100,14 @@ func sortRows(rows []Row) {
 // ScopeRows is the enforcement form of a recipe's reach, like Store for rules: machines by
 // ID, tags and every machine by name. A scope narrows; an entry without ports covers every port
 // of private_access (the creator's own ports still apply).
+// TokenScopeRows is ScopeRows for an API token scope, whose tags must all exist.
+func (c Compiled) TokenScopeRows(scope []ScopeEntry) ([]Row, Errors) {
+	if errs := c.ValidateTokenScope(scope); len(errs) > 0 {
+		return nil, errs
+	}
+	return c.ScopeRows(scope)
+}
+
 func (c Compiled) ScopeRows(scope []ScopeEntry) ([]Row, Errors) {
 	if errs := c.ValidateScope(scope); len(errs) > 0 {
 		return nil, errs

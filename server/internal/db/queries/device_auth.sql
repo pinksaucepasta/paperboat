@@ -56,11 +56,14 @@ UPDATE device_grants SET state='approved',user_id=sqlc.arg(user_id),approved_at=
 UPDATE device_grants SET state='denied',user_id=$2,denied_at=$3,version=version+1 WHERE id=$1 AND state='pending';
 
 -- name: AuthenticateClientAccessToken :one
-SELECT cs.id,array_to_string(cs.scopes,' ') AS scopes,u.id AS user_id,u.workos_subject,u.primary_email,u.display_name,u.status,u.role,u.created_at,coalesce(cs.recipe_id,'')::text AS recipe_id,
+SELECT cs.id,array_to_string(cs.scopes,' ') AS scopes,u.id AS user_id,u.workos_subject,u.primary_email,u.display_name,u.status,u.role,u.created_at,coalesce(cs.api_token_id,'')::text AS api_token_id,
+  coalesce((SELECT a.scope IS NOT NULL FROM api_tokens a WHERE a.id=cs.api_token_id),false)::boolean AS api_token_scoped,
+  coalesce(cs.recipe_id,'')::text AS recipe_id,
   coalesce(cs.user_machine_id,'')::text AS user_machine_id,
   coalesce((SELECT r.team_id FROM recipes r WHERE r.id=cs.recipe_id),'')::text AS recipe_team_id
 FROM cli_access_tokens t JOIN cli_client_sessions cs ON cs.id=t.cli_client_session_id JOIN users u ON u.id=cs.user_id
 WHERE t.token_hash = ANY(string_to_array(sqlc.arg(token_hashes),' ')) AND t.revoked_at IS NULL AND t.expires_at>sqlc.arg(now) AND cs.state='active' AND u.status='active'
+  AND (cs.api_token_id IS NULL OR EXISTS(SELECT 1 FROM api_tokens a WHERE a.id=cs.api_token_id AND a.revoked_at IS NULL AND a.expires_at>sqlc.arg(now)))
   AND (cs.recipe_id IS NULL OR EXISTS(SELECT 1 FROM recipes r WHERE r.id=cs.recipe_id AND r.revoked_at IS NULL));
 
 -- name: TouchClientSession :exec
@@ -71,6 +74,7 @@ SELECT rt.cli_client_session_id,rt.state,rt.expires_at,array_to_string(cs.scopes
 FROM cli_refresh_tokens rt JOIN cli_client_sessions cs ON cs.id=rt.cli_client_session_id
 JOIN users u ON u.id=cs.user_id
 WHERE rt.token_hash = ANY(string_to_array($1,' ')) AND cs.state='active' AND u.status='active'
+  AND (cs.api_token_id IS NULL OR EXISTS(SELECT 1 FROM api_tokens a WHERE a.id=cs.api_token_id AND a.revoked_at IS NULL AND a.expires_at>now()))
   AND (cs.recipe_id IS NULL OR EXISTS(SELECT 1 FROM recipes r WHERE r.id=cs.recipe_id AND r.revoked_at IS NULL))
 FOR UPDATE OF rt,cs;
 

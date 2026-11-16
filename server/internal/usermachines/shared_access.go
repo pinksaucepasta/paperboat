@@ -239,7 +239,7 @@ func (s *Service) createAccessSession(ctx context.Context, in dbsqlc.CreateUserM
 				return ErrAmbiguousTeamAccess
 			}
 		}
-		if token, ok := auth.RecipeFromContext(ctx); ok {
+		if token, ok := auth.SDKSessionFromContext(ctx); ok {
 			if err := planlimits.CheckSDKCount(ctx, func(ctx context.Context, q string, args ...any) planlimits.SDKRow {
 				return tx.QueryRow(ctx, q, args...)
 			}, in.UserID, token, "operations"); err != nil {
@@ -267,7 +267,7 @@ func (s *Service) createAccessSession(ctx context.Context, in dbsqlc.CreateUserM
 	// no host wake, and waking per exec would put a register and a config refresh on the host for each one. Team access
 	// can come from an account new to the host's signed peer network, and every other capability still needs a
 	// per-session scope: those wake both refreshes now instead of leaving the connection to wait for the periodic ones.
-	_, tokenSource := auth.RecipeFromContext(ctx)
+	_, tokenSource := auth.SDKSessionFromContext(ctx)
 	if !wakePeers && !tokenSource && onlyStandingRuleCapabilities(in.Capabilities) {
 		return nil
 	}
@@ -420,6 +420,15 @@ func getMachineForCapability(ctx context.Context, q *dbsqlc.Queries, in dbsqlc.G
 	}
 	if err != nil {
 		return row, err
+	}
+	if token, ok := auth.APITokenFromContext(ctx); ok {
+		allowed, err := q.APITokenScopeAllows(ctx, dbsqlc.APITokenScopeAllowsParams{TokenID: token, MachineID: row.ID, Capability: in.Capability})
+		if err != nil {
+			return dbsqlc.UserMachine{}, err
+		}
+		if !allowed {
+			return dbsqlc.UserMachine{}, auth.ErrOutsideTokenScope
+		}
 	}
 	if recipeID, check := auth.RecipeReachCheck(ctx, row.ID); check {
 		allowed, err := q.RecipeReachAllows(ctx, dbsqlc.RecipeReachAllowsParams{RecipeID: recipeID, MachineID: row.ID, Capability: in.Capability})

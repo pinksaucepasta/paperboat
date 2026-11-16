@@ -30,7 +30,7 @@ func (r *SQLResolver) ResolveNativePrivate(ctx context.Context, in Request) (Tar
 	if r == nil || r.database == nil || ctx == nil || in.AccountID == "" || in.UserID != in.AccountID || in.CLIClientSessionID == "" || in.ResourceKind != "machine_service" || in.Protocol != "tcp" {
 		return Target{}, ErrInvalid
 	}
-	if token, ok := auth.RecipeFromContext(ctx); ok {
+	if token, ok := auth.SDKSessionFromContext(ctx); ok {
 		if err := planlimits.AllowSDKRequest(in.UserID, token, "descriptors"); err != nil {
 			return Target{}, err
 		}

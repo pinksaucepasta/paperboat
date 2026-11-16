@@ -72,7 +72,7 @@ func (e *NameError) Error() string {
 	return b.String()
 }
 
-// ConfirmError: rotate and revoke need the code the impact was shown with.
+// ConfirmError means rotate and revoke need the code the impact was shown with.
 type ConfirmError struct {
 	Code   string
 	Impact Impact

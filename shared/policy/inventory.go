@@ -6,7 +6,7 @@ import (
 )
 
 // Inventory is what a policy is compiled against: the workspace's current members, machines,
-// previews/tunnels and recipes. The server builds it inside the transaction that saves or
+// previews/tunnels, API tokens and recipes. The server builds it inside the transaction that saves or
 // recompiles the policy.
 type Inventory struct {
 	// Team is false for a personal workspace (one member, the owner).
@@ -16,6 +16,9 @@ type Inventory struct {
 	Members   []Member
 	Machines  []Machine
 	Resources []Resource
+	// Tokens are the workspace's API tokens that have a scope; an unscoped token acts as its
+	// creator and needs no entry.
+	Tokens []Token
 	// Recipes are the workspace's recipes whose reach a question is asked under.
 	Recipes []Recipe
 }
@@ -43,6 +46,14 @@ type Resource struct {
 	Owner     string
 }
 
+// Token is an API token with a scope. A token acts as the member who created it; its scope
+// narrows that access to the listed actions on the listed targets and never widens it.
+type Token struct {
+	ID      string
+	Creator string
+	Scope   []ScopeEntry
+}
+
 // Recipe is a recipe's reach (PLAN F26): its machines act as the member who created it, and
 // the reach narrows that access to the listed actions on the listed targets, never widening
 // it. An empty reach reaches nothing.
@@ -52,7 +63,7 @@ type Recipe struct {
 	Reach   []ScopeEntry
 }
 
-// ScopeEntry is one [[reach]] entry of a recipe, in the policy file's names:
+// ScopeEntry is one part of an API token's scope or one [[reach]] entry of a recipe, in the policy file's names:
 // {"dst": ["tag:ci"], "allow": ["exec"]}. Ports narrow private_access as in a rule.
 type ScopeEntry struct {
 	Dst   []string    `json:"dst"`

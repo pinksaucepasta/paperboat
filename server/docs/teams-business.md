@@ -127,8 +127,9 @@ The same shape in the API, the export and the stream:
 | `occurred_at` | When it happened (UTC, RFC 3339). |
 | `workspace` | `personal:<account>` or `team:<team>`. |
 | `action` | What happened, `<area>.<verb>`, e.g. `team.role`, `user_machine.renamed`, `private_access.denied`. |
-| `actor.kind` | `user`, `recipe` (a machine paired from a recipe acting as its creator), `directory` (directory sync), `operator` (Paperboat staff), `system`. |
+| `actor.kind` | `user`, `api_token` (a user acting through an API token), `recipe` (a machine paired from a recipe acting as its creator), `directory` (directory sync), `operator` (Paperboat staff), `system`. |
 | `actor.id`, `actor.email` | The account and its email when the event happened. |
+| `actor.token_id` | The API token used, when one was. |
 | `actor.recipe_id` | The recipe whose machine acted, when one did. |
 | `target.kind`, `target.id`, `target.name` | What it happened to, with its name at that time. |
 | `machine` | The machine involved, if any, with its name at that time. |
@@ -150,6 +151,7 @@ use the names of `pb policy explain`, checked in this order:
 | Reason | Why |
 |---|---|
 | `outside_token_scope` | The API token used is limited to other machines or capabilities. |
+| `outside_recipe_reach` | The machine was paired from a recipe whose `[[reach]]` does not cover the target or action. |
 | `team_sso_required` | The team requires SSO and the member has no recent SSO sign-in. |
 | `machine_not_in_workspace` | Not a member, the team is suspended or unpaid, or the machine is not in the workspace. |
 | `policy` | The workspace policy does not allow this capability; `details.policy_version` is the version that decided (`pb policy explain --version`). |
@@ -164,6 +166,7 @@ Every action is `<namespace>.<verb>`. The namespaces, which a test keeps equal t
 <!-- event-catalog:start -->
 | Namespace | Events about |
 |---|---|
+| `api_token` | API tokens created and revoked. |
 | `auth` | Sign-in, sign-out, CLI device approval and revocation. |
 | `backup` | Paperboat operations: database backup reports. |
 | `billing` | Plan, seats, top-ups, Customer Portal sessions, bandwidth exhaustion. |
@@ -221,7 +224,7 @@ name or actor email), `area`, `machine_id`, `limit` (1–200) and `cursor` (from
 `GET /v1/activity/export?workspace=<team>&format=csv|json` with the same filters downloads every
 matching event, newest first, up to `business.audit_export_max_rows`. CSV columns: `id,
 occurred_at, workspace, action, result, reason, actor_kind, actor_id, actor_email,
-actor_recipe_id, target_kind, target_id, target_name, machine_id, machine_name, ip, user_agent,
+actor_token_id, actor_recipe_id, target_kind, target_id, target_name, machine_id, machine_name, ip, user_agent,
 request_id, details` (details as JSON; cells starting with `= + - @` are prefixed with `'` so
 spreadsheets never run them). JSON is one array of events. Each export is itself recorded as
 `team.activity_exported`.

@@ -19,6 +19,7 @@ type Preview struct {
 	Tunnels                  int           `json:"tunnels"`
 	ConfigSync               bool          `json:"config_sync"`
 	InboxItems               int           `json:"inbox_items"`
+	APITokens                int           `json:"api_tokens"`
 	Recipes                  int           `json:"recipes"`
 	Subscription             *Subscription `json:"subscription"`
 	TeamsDeleted             []TeamRef     `json:"teams_deleted"`
@@ -50,6 +51,7 @@ func (s *Service) Preview(ctx context.Context, user auth.User, signedInAt time.T
 		{&out.Previews, `SELECT count(*) FROM preview_leases WHERE account_id=$1 AND owner_team_id IS NULL AND terminal_state='active'`},
 		{&out.Tunnels, `SELECT count(*) FROM tunnels WHERE account_id=$1 AND owner_team_id IS NULL AND deleted_at IS NULL`},
 		{&out.InboxItems, `SELECT count(*) FROM team_inbox_requests WHERE (sender_account=$1 OR recipient_account=$1) AND status IN ('pending','approved','consumed')`},
+		{&out.APITokens, `SELECT count(*) FROM api_tokens WHERE account_id=$1 AND revoked_at IS NULL AND expires_at>now()`},
 		{&out.Recipes, `SELECT count(*) FROM recipes WHERE account_id=$1 AND revoked_at IS NULL`},
 	}
 	for _, c := range counts {

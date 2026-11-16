@@ -65,6 +65,7 @@ type storedPolicy struct {
 	allowPrivateAccess bool
 	updatedAt          time.Time
 	updatedBy          string
+	apiToken           string
 	recipe             string
 	message            string
 }
@@ -86,8 +87,8 @@ const teamDefaultPolicy = "{\n  \"rules\": [\n    {\"src\": [\"role:admin\"], \"
 func policyTx(ctx context.Context, tx *db.Tx, w Workspace) (storedPolicy, error) {
 	col, key := w.column()
 	var p storedPolicy
-	err := tx.QueryRow(ctx, `SELECT id,version,source,digest,allow_private_access,updated_at,coalesce(updated_by,''),coalesce(updated_with_recipe,''),message FROM workspace_policies WHERE `+col+`=$1 FOR UPDATE`, key).
-		Scan(&p.id, &p.version, &p.source, &p.digest, &p.allowPrivateAccess, &p.updatedAt, &p.updatedBy, &p.recipe, &p.message)
+	err := tx.QueryRow(ctx, `SELECT id,version,source,digest,allow_private_access,updated_at,coalesce(updated_by,''),coalesce(updated_with_api_token,''),coalesce(updated_with_recipe,''),message FROM workspace_policies WHERE `+col+`=$1 FOR UPDATE`, key).
+		Scan(&p.id, &p.version, &p.source, &p.digest, &p.allowPrivateAccess, &p.updatedAt, &p.updatedBy, &p.apiToken, &p.recipe, &p.message)
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return p, err
 	}
@@ -335,7 +336,7 @@ func savePolicyTx(ctx context.Context, tx *db.Tx, w Workspace, cfg config.Worksp
 	}
 	next0 := cur
 	next0.version, next0.source, next0.digest, next0.message = cur.version+1, string(in.source), digest(in.source), in.message
-	next0.updatedBy, next0.recipe = in.actor, in.recipe
+	next0.updatedBy, next0.apiToken, next0.recipe = in.actor, "", in.recipe
 	next0.allowPrivateAccess = next.AllowPrivateAccess && w.TeamID != ""
 	// Rules first: advancing the version runs the trigger that revokes sessions the new rules
 	// no longer allow, and tells the team's machines to refresh their access.

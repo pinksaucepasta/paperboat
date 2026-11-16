@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/audit"
 	"github.com/pinksaucepasta/paperboat/server/internal/auth"
@@ -18,7 +19,7 @@ func (s *Service) recordSDKAuthorization(ctx context.Context, account, session, 
 	if err != nil {
 		var limit *planlimits.SDKLimitError
 		outcome = "uncertain"
-		if errors.As(err, &limit) || errors.Is(err, auth.ErrOutsideReach) || errors.Is(err, ErrNotFound) || errors.Is(err, ErrInvalidTransferIntent) || errors.Is(err, ErrExecOperationInvalid) || errors.Is(err, workspace.ErrForbidden) || errors.Is(err, teaminbox.ErrPending) || errors.Is(err, ErrMachineCapabilityUnavailable) || errors.Is(err, ErrMachineOffline) {
+		if errors.As(err, &limit) || errors.Is(err, auth.ErrOutsideTokenScope) || errors.Is(err, auth.ErrOutsideReach) || errors.Is(err, ErrNotFound) || errors.Is(err, ErrInvalidTransferIntent) || errors.Is(err, ErrExecOperationInvalid) || errors.Is(err, workspace.ErrForbidden) || errors.Is(err, teaminbox.ErrPending) || errors.Is(err, ErrMachineCapabilityUnavailable) || errors.Is(err, ErrMachineOffline) {
 			outcome = "denied"
 		}
 	}
@@ -37,10 +38,10 @@ func validSDKOperationEnd(e OfflineAuditEvent) bool {
 // recordSDKOperationEndTx accepts only a current host's exact persisted token-session operation.
 func (s *Service) recordSDKOperationEndTx(ctx context.Context, tx *db.Tx, machine string, e OfflineAuditEvent) error {
 	var token, team, capability string
-	err := tx.QueryRow(ctx, `SELECT c.recipe_id,coalesce(a.team_id,''),a.capabilities[1]
+	err := tx.QueryRow(ctx, `SELECT coalesce(c.api_token_id,c.recipe_id),coalesce(a.team_id,''),a.capabilities[1]
  FROM paperboat.user_machine_access_sessions a JOIN paperboat.cli_client_sessions c ON c.id=a.cli_client_session_id AND c.user_id=a.user_id
  WHERE a.id=$1 AND a.user_machine_id=$2 AND a.user_id=$3 AND a.cli_client_session_id=$4 AND a.operation_id=$5
- AND c.recipe_id IS NOT NULL AND a.credential_kind='control_plane_signed' FOR UPDATE OF a`,
+ AND (c.api_token_id IS NOT NULL OR c.recipe_id IS NOT NULL) AND a.credential_kind='control_plane_signed' FOR UPDATE OF a`,
 		e.SessionID, machine, e.PeerAccountID, e.PeerEndpointID, e.OperationID).Scan(&token, &team, &capability)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ErrOfflineAuditInvalid
@@ -62,7 +63,11 @@ func (s *Service) recordSDKOperationEndTx(ctx context.Context, tx *db.Tx, machin
 	if team != "" {
 		ws = team
 	}
-	metadata := map[string]any{"recipe_id": token, "cli_client_session_id": e.PeerEndpointID, "workspace": ws,
+	key := "api_token_id"
+	if strings.HasPrefix(token, "recipe_") {
+		key = "recipe_id"
+	}
+	metadata := map[string]any{key: token, "cli_client_session_id": e.PeerEndpointID, "workspace": ws,
 		"operation_id": e.OperationID, "access_session_id": e.SessionID, "capability": capability, "outcome": e.Outcome,
 		"scope_set": true, "occurred_at": e.OccurredAt.UTC(), "reporter": "destination"}
 	if team != "" {

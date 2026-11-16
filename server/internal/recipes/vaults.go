@@ -348,7 +348,7 @@ func syncRecipeWrapsTx(ctx context.Context, tx *db.Tx, recipeID, account string,
 	return nil
 }
 
-// WrapMissingError: the recipe reads a vault but the request carries no key wrapped for it (the
+// WrapMissingError means the recipe reads a vault but the request carries no key wrapped for it (the
 // client's ENV vault was locked or skipped it).
 type WrapMissingError struct{ Vault string }
 

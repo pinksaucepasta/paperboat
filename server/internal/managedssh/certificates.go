@@ -17,7 +17,7 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-// CertificateConfig: EncryptionKey seals CA private keys at rest; Validity is how long a certificate lets a client log
+// CertificateConfig configures certificates. EncryptionKey seals CA private keys at rest; Validity is how long a certificate lets a client log
 // in, so how long clients keep starting sessions while the control plane is unreachable. Revocation does not wait
 // for it (RevocationPrincipal).
 type CertificateConfig struct {

@@ -34,6 +34,7 @@ type Actor struct {
 	Kind     string `json:"kind"`
 	ID       string `json:"id"`
 	Email    string `json:"email,omitempty"`
+	TokenID  string `json:"token_id,omitempty"`
 	RecipeID string `json:"recipe_id,omitempty"`
 }
 type Target struct {
@@ -209,12 +210,19 @@ func decode(rows interface{ Scan(...any) error }, ws string) (Event, error) {
 	var machine Machine
 	var actorType string
 	var metadata []byte
-	if err := rows.Scan(&event.ID, &event.OccurredAt, &event.Action, &actorType, &event.Actor.ID, &event.Actor.Email, &event.Actor.RecipeID,
+	var actorToken string
+	if err := rows.Scan(&event.ID, &event.OccurredAt, &event.Action, &actorType, &event.Actor.ID, &event.Actor.Email, &actorToken,
 		&event.Target.Kind, &event.Target.ID, &event.Target.Name, &machine.ID, &machine.Name,
 		&event.Result, &event.Reason, &event.IP, &event.UserAgent, &metadata, &event.sequence); err != nil {
 		return event, err
 	}
-	event.Actor.Kind = actorKind(actorType, event.Actor.RecipeID)
+	// actor_token_id holds an API token id (apitok_…) or a recipe id (recipe_…).
+	if strings.HasPrefix(actorToken, "recipe_") {
+		event.Actor.RecipeID = actorToken
+	} else {
+		event.Actor.TokenID = actorToken
+	}
+	event.Actor.Kind = actorKind(actorType, actorToken)
 	if event.Actor.Kind == "system" {
 		event.Actor = Actor{Kind: "system"}
 	}
@@ -239,8 +247,10 @@ func decode(rows interface{ Scan(...any) error }, ws string) (Event, error) {
 // actorKind maps the stored actor type to the documented one.
 func actorKind(actorType, tokenID string) string {
 	switch {
-	case actorType == "user" && tokenID != "":
+	case actorType == "user" && strings.HasPrefix(tokenID, "recipe_"):
 		return "recipe"
+	case actorType == "user" && tokenID != "":
+		return "api_token"
 	case actorType == "user", actorType == "directory":
 		return actorType
 	case actorType == "admin":

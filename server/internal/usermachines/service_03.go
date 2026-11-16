@@ -24,7 +24,7 @@ import (
 
 func (s *Service) fileTransferDescriptor(ctx context.Context, userID, sourceMachineID, destinationMachineID, cliClientSessionID, sessionID, requestID, manifestDigest string, intent TransferIntent) (descriptor FileTransferDescriptor, returnErr error) {
 	operationID := sessionID
-	if _, token := auth.RecipeFromContext(ctx); token {
+	if _, token := auth.SDKSessionFromContext(ctx); token {
 		operationID = newID("operation")
 	}
 	if requestID != "" {
@@ -49,7 +49,7 @@ func (s *Service) fileTransferDescriptor(ctx context.Context, userID, sourceMach
 	if err := s.descriptorSourceAllowed(ctx, userID, sourceMachineID, cliClientSessionID, destinationMachineID, "files"); err != nil {
 		return FileTransferDescriptor{}, err
 	}
-	_, tokenSource := auth.RecipeFromContext(ctx)
+	_, tokenSource := auth.SDKSessionFromContext(ctx)
 	if tokenSource && (sessionID != "" || intent.Direction != "" && intent.Direction != "send") {
 		return FileTransferDescriptor{}, ErrInvalidTransferIntent
 	}

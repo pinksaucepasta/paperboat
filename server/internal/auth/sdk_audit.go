@@ -10,15 +10,18 @@ import (
 
 // RecordSDKAuthorization records only authority identifiers, never operation payloads.
 func RecordSDKAuthorization(ctx context.Context, writer *audit.Writer, account, session, target, operation, capability, outcome string) error {
-	token, ok := RecipeFromContext(ctx)
-	if !ok {
-		return nil
+	key, token, ok := "api_token_id", "", false
+	if token, ok = APITokenFromContext(ctx); !ok {
+		key = "recipe_id"
+		if token, ok = RecipeFromContext(ctx); !ok {
+			return nil
+		}
 	}
 	if !mint.ValidOperationID(operation) {
 		operation = ""
 	}
 	scope, _ := workspace.FromContext(ctx)
-	metadata := map[string]any{"recipe_id": token, "cli_client_session_id": session, "workspace": scope.ID,
+	metadata := map[string]any{key: token, "cli_client_session_id": session, "workspace": scope.ID,
 		"operation_id": operation, "capability": capability, "outcome": outcome, "scope_set": true}
 	if scope.TeamID != "" {
 		metadata["scope_team"] = scope.TeamID

@@ -18,6 +18,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/accountdeletion"
 	"github.com/pinksaucepasta/paperboat/server/internal/accountprefs"
 	"github.com/pinksaucepasta/paperboat/server/internal/activity"
+	"github.com/pinksaucepasta/paperboat/server/internal/apitokens"
 	"github.com/pinksaucepasta/paperboat/server/internal/audit"
 	"github.com/pinksaucepasta/paperboat/server/internal/auditstream"
 	"github.com/pinksaucepasta/paperboat/server/internal/auth"
@@ -728,6 +729,7 @@ func New(opts Options) (*App, error) {
 		workOSOrganizations = teamidentity.HTTPWorkOS{BaseURL: opts.Config.Providers.WorkOS.BaseURL, APIKey: opts.Config.Secrets.WorkOSAPIKey}
 	}
 	teamIdentity := teamidentity.New(store, workOSOrganizations, opts.Config.Business, opts.Config.Mail.InvitationLifetimeSeconds, strings.TrimRight(opts.Config.HTTP.BrowserLoginOrigin, "/")+"/team", workspaceBilling)
+	apiTokens := apitokens.New(store, auditWriter, opts.Config.APITokens, opts.Config.Secrets.EncryptionKey)
 	recipeService := recipes.New(store, auditWriter, userMachineService.Delete)
 	accountDeletion := accountdeletion.New(store, userMachineService, opts.Config.Mail)
 	// A nil Stripe client leaves subscription jobs failing until Stripe is configured.
@@ -783,6 +785,7 @@ func New(opts Options) (*App, error) {
 		ConfigConflicts:          configConflictService,
 		Routes:                   routeService,
 		Favorites:                favorites.NewService(store),
+		APITokens:                apiTokens,
 		Recipes:                  recipeService,
 		AccountDeletion:          accountDeletion,
 		AccountPreferences:       accountprefs.New(store),
@@ -864,7 +867,8 @@ func New(opts Options) (*App, error) {
 			}
 		}
 		_, retentionErr := retention.Run(pruneContext, store, opts.Config.Retention)
-		err = errors.Join(err, retentionErr, recordingService.PruneArchive(pruneContext), teamInboxService.PruneStored(pruneContext), enrollmentService.PruneProofNonces(pruneContext), privateaccess.PurgeIdempotency(pruneContext, store))
+		// Secrets held for API token create retries never outlive their window (F21-12).
+		err = errors.Join(err, retentionErr, recordingService.PruneArchive(pruneContext), apiTokens.PruneCreateRequests(pruneContext), teamInboxService.PruneStored(pruneContext), enrollmentService.PruneProofNonces(pruneContext), privateaccess.PurgeIdempotency(pruneContext, store))
 		workers.IterationFailure(ctx, "team_retention_cleanup", "team_retention_failed", err)
 		outcome := "success"
 		if err != nil {
