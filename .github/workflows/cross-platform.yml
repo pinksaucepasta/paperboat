@@ -20,6 +20,10 @@ on:
       count:
         description: Repeat each test this many times (go test -count)
         default: '1'
+      norace:
+        description: Run macOS without the race detector too (timing measurements are skipped under it)
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -67,7 +71,7 @@ jobs:
           # A narrowed run is -v, so its log shows each test that ran (--- PASS).
           RUN: ${{ inputs.run }}
           COUNT: ${{ inputs.count || '1' }}
-          RACE: ${{ matrix.os != 'windows-latest' && '-race' || '' }}
+          RACE: ${{ matrix.os != 'windows-latest' && !inputs.norace && '-race' || '' }}
         run: |
           if [ "$RUNNER_OS" != Windows ]; then
             go test $RACE -timeout 15m -count "$COUNT" ${RUN:+-v -run "$RUN"} $PACKAGES
