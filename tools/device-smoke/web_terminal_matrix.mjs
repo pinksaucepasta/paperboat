@@ -2,7 +2,7 @@
 //
 // node web_terminal_matrix.mjs --machine <id> --owner-state <file>
 //   [--member-state <file> --member-email <addr>] [--only w2,w4,...] [--hidden-minutes 5]
-//   [--freeze-cmd '<freezes the machine, e.g. docker pause>' --thaw-cmd '<undoes it>'] (W16)
+//   [--freeze-cmd '<freezes the machine, e.g. docker pause>' --thaw-cmd '<undoes it>'] (W16; frozen < 30 s)
 // Env: PB_CONSOLE_ORIGIN (the console origin), PW_CHROMIUM (headless Chromium path).
 // Storage states are signed-in console sessions of throwaway accounts (0600 files, never printed).
 // Rows print PASS/FAIL/SKIP with terminal IDs and UTC times; terminal contents are never printed.
@@ -69,6 +69,8 @@ async function attached(page, timeout = 90_000) {
   }
   return null
 }
+// The stopped-terminal overlay's own words (the page's message, never terminal content).
+const overlayText = (page) => page.evaluate(() => [...document.querySelectorAll(".terminal-host ~ div p")].map((p) => p.textContent).join(" / "))
 const screen = (page) => page.evaluate(() => document.querySelector(".terminal-host")?.innerText ?? "")
 async function waitText(page, text, timeout = 30_000) {
   const t0 = Date.now()
@@ -504,7 +506,7 @@ const rows = {
       text = await page.evaluate(() => document.body.innerText)
     }
     const status = text.match(/exited \d+( \(SIG\w+\))?/)?.[0] ?? "-"
-    row("W15 shell killed: the closed terminal shows its exit status", status === "exited 137 (SIGKILL)", `${id} ${status} phase ${await phase(page)}`)
+    row("W15 shell killed: the closed terminal shows its exit status", status === "exited 137 (SIGKILL)", `${id} ${status} phase ${await phase(page)} close '${await page.evaluate(() => document.querySelector("[data-terminal-close]")?.getAttribute("data-terminal-close") ?? "")}' ${await overlayText(page)}`)
     opened.delete(id) // the session ended with its process
     await page.close()
   },
@@ -532,14 +534,15 @@ const rows = {
       }
       row("W16 frozen machine: stall flagged at 10 s and shown", close.includes("connection_stalled") && flagged >= 10 && shown,
         `${id} ${flagged.toFixed(1)} s, close '${close}', shown ${shown}`)
-      await sleep(20_000)
     } finally {
+      // Thaw at once: a docker pause freezes systemd too, and past 30 s its watchdog kills the paused services on
+      // thaw (a real black hole or sleep does not), which would end the shell this row waits for.
       execSync(thawCmd, { stdio: "ignore", timeout: 30_000 })
     }
     const t1 = Date.now()
     const back = await attached(page, 120_000)
     const out = back === null ? null : await run(page, "true")
-    row("W16 machine thawed: terminal live again on its own", out !== null, `${id} ${back === null ? "-" : ((Date.now() - t1) / 1000).toFixed(1)} s, phase ${await phase(page)}, close '${await page.evaluate(() => document.querySelector("[data-terminal-close]")?.getAttribute("data-terminal-close") ?? "")}'`)
+    row("W16 machine thawed: terminal live again on its own", out !== null, `${id} ${back === null ? "-" : ((Date.now() - t1) / 1000).toFixed(1)} s, phase ${await phase(page)}, close '${await page.evaluate(() => document.querySelector("[data-terminal-close]")?.getAttribute("data-terminal-close") ?? "")}' ${await overlayText(page)}`)
     await page.close()
     await closeTerminal(ctx, id)
   },

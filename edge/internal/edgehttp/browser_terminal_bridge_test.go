@@ -428,3 +428,66 @@ func TestBridgeEndCanceledSeesAnExternalCancel(t *testing.T) {
 		t.Fatal("the bridge's own cancel no longer hides the closed connections it causes")
 	}
 }
+
+// The host's last frame (terminal_stream_end, with the exit status) reaches the browser before the typed close: the
+// control plane ends the admission when it sees the session gone, which can be before the host's last frame and the
+// end of its stream have crossed the edge; the bridge used to close the browser at once and drop that frame.
+func TestBrowserTerminalBridgeDeliversTheHostsLastFrameBeforeTheClose(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	hub := NewBrowserTerminalHub()
+	defer hub.Close()
+	identity := testEdgePreviewIdentity(1, 1)
+	fence := BrowserTerminalRouteFence{Identity: identity, Revision: 1, AttachmentGeneration: 1}
+	if err := hub.ActivateRoute("route_end", fence); err != nil {
+		t.Fatal(err)
+	}
+	key := BrowserTerminalSessionKey{RouteID: "route_end", TerminalSessionID: "term_end", ProcessGeneration: identity.ProcessGeneration}
+	last := []byte("stream-end")
+	stop := make(chan struct{})
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			return
+		}
+		<-stop
+		time.Sleep(200 * time.Millisecond) // the last frame is still crossing when the admission ends
+		_ = conn.Write(r.Context(), websocket.MessageBinary, last)
+		_ = conn.Close(websocket.StatusNormalClosure, "")
+	}))
+	defer upstream.Close()
+	edge := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sub, err := hub.Subscribe(key, fence, "browser_end")
+		if err != nil {
+			return
+		}
+		defer sub.Close()
+		host, _, err := websocket.Dial(r.Context(), "ws"+strings.TrimPrefix(upstream.URL, "http"), nil)
+		if err != nil {
+			return
+		}
+		browser, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			host.CloseNow()
+			return
+		}
+		close(stop)
+		_ = bridgeBrowserTerminal(r.Context(), browser, host, sub, stop, func(error) (terminalend.Reason, bool) { return terminalend.Ended, true })
+	}))
+	defer edge.Close()
+	conn, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(edge.URL, "http"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.CloseNow()
+	want, _ := browserTerminalTLSMessage(last)
+	_, got, err := conn.Read(ctx)
+	if err != nil || string(got) != string(want) {
+		t.Fatalf("browser got %q, %v; want the host's last frame before the close", got, err)
+	}
+	_, _, err = conn.Read(ctx)
+	var closed websocket.CloseError
+	if !errors.As(err, &closed) || closed.Reason != string(terminalend.Ended) {
+		t.Fatalf("browser saw %v, want the ended close", err)
+	}
+}

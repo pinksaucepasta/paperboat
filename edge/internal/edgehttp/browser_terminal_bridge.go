@@ -263,9 +263,11 @@ func bridgeBrowserTerminal(ctx context.Context, browser, upstream *websocket.Con
 		}
 	}()
 
+	hostDone := make(chan struct{})
 	workers.Add(1)
 	go func() {
 		defer workers.Done()
+		defer close(hostDone)
 		for {
 			kind, payload, err := upstream.Read(ctx)
 			if err != nil {
@@ -324,13 +326,48 @@ func bridgeBrowserTerminal(ctx context.Context, browser, upstream *websocket.Con
 		case <-subscription.Done():
 			return bridgeEnd{"shared_output", ErrBrowserTerminalHubEnded}
 		case <-stop:
+			flushHostFrames(ctx, browser, outbound, hostDone)
 			return bridgeEnd{"admission_ended", context.Canceled}
 		case cause := <-failures:
+			flushHostFrames(ctx, browser, outbound, hostDone)
 			return cause
 		case message := <-outbound:
 			if err := browser.Write(ctx, websocket.MessageBinary, message); err != nil {
 				return bridgeEnd{"browser_write", err}
 			}
+		}
+	}
+}
+
+// browserTerminalFlushBound bounds how long an ending bridge keeps forwarding what the host already sent.
+const browserTerminalFlushBound = time.Second
+
+// flushHostFrames forwards frames the host sent before the end (its terminal_stream_end event carries the exit
+// status) ahead of the typed close: the host ends its stream right after that event and the control plane ends the
+// admission when it sees the session gone, and either end used to drop frames still queued here. It waits for the
+// host side to finish, at most browserTerminalFlushBound.
+func flushHostFrames(ctx context.Context, browser *websocket.Conn, outbound <-chan []byte, hostDone <-chan struct{}) {
+	ctx, cancel := context.WithTimeout(ctx, browserTerminalFlushBound)
+	defer cancel()
+	for {
+		select {
+		case message := <-outbound:
+			if browser.Write(ctx, websocket.MessageBinary, message) != nil {
+				return
+			}
+		case <-hostDone:
+			for {
+				select {
+				case message := <-outbound:
+					if browser.Write(ctx, websocket.MessageBinary, message) != nil {
+						return
+					}
+				default:
+					return
+				}
+			}
+		case <-ctx.Done():
+			return
 		}
 	}
 }
