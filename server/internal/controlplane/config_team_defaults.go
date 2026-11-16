@@ -56,7 +56,7 @@ func (s *ConfigAssignmentService) SetTeamDefault(ctx context.Context, userID, te
 	}
 	var item dbsqlc.TeamConfigDefault
 	err := s.store.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-		if err := teams.Lock(ctx, tx); err != nil {
+		if err := teams.LockFor(ctx, tx, teamID); err != nil {
 			return err
 		}
 		administrator, err := teamAdministratorTx(ctx, tx, userID, teamID)
@@ -113,7 +113,7 @@ func (s *ConfigAssignmentService) DeleteTeamDefault(ctx context.Context, userID,
 		return ErrAssignmentForbidden
 	}
 	err := s.store.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-		if err := teams.Lock(ctx, tx); err != nil {
+		if err := teams.LockFor(ctx, tx, teamID); err != nil {
 			return err
 		}
 		administrator, err := teamAdministratorTx(ctx, tx, userID, teamID)
@@ -150,7 +150,7 @@ func (s *ConfigAssignmentService) AdoptTeamDefault(ctx context.Context, userID, 
 		return ConfigTeamDefaultAdoptionView{}, ErrAssignmentForbidden
 	}
 	err := s.store.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-		if err := teams.Lock(ctx, tx); err != nil {
+		if err := teams.LockFor(ctx, tx, teamID); err != nil {
 			return err
 		}
 		member, err := teamMemberTx(ctx, tx, userID, teamID)

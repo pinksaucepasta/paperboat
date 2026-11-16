@@ -91,7 +91,7 @@ func New(store *db.DB, log *activity.Service, cfg config.Business, key string, m
 
 // authorizeTx checks the team, its Team plan and the account's permission.
 func authorizeTx(ctx context.Context, tx *db.Tx, account, team string, permission teams.Permission) error {
-	if err := teams.Lock(ctx, tx); err != nil {
+	if err := teams.LockFor(ctx, tx, team); err != nil {
 		return err
 	}
 	var role *string

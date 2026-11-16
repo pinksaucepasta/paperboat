@@ -43,7 +43,7 @@ func authorizeWorkspacePreviewTx(ctx context.Context, tx *db.Tx, preview string)
 	if actor == "" {
 		return ErrOwnerDenied
 	}
-	if err := teams.Lock(ctx, tx); err != nil {
+	if err := teams.LockFor(ctx, tx, scope.TeamID); err != nil {
 		return err
 	}
 	var allowed bool

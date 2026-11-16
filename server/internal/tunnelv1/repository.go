@@ -314,7 +314,7 @@ func (r *SQLRepository) Create(ctx context.Context, input CreateRecord) (Mutatio
 		queries := tx.Queries()
 		ws, selected := workspace.FromContext(ctx)
 		if selected {
-			if err := teams.Lock(ctx, tx); err != nil {
+			if err := teams.LockFor(ctx, tx, ws.TeamID); err != nil {
 				return err
 			}
 			if err := workspace.ValidateTx(ctx, tx, input.AccountID, ws); err != nil {

@@ -78,7 +78,7 @@ type Workspace struct {
 func WorkspaceTx(ctx context.Context, tx *db.Tx, account, team string, manage bool) (Workspace, error) {
 	var out Workspace
 	if manage {
-		if err := teams.Lock(ctx, tx); err != nil {
+		if err := teams.LockFor(ctx, tx, team); err != nil {
 			return out, err
 		}
 	}

@@ -116,7 +116,7 @@ type teamRow struct {
 // may read the status. It holds the team lock for the rest of the transaction.
 func authorizeTx(ctx context.Context, tx *db.Tx, account, team string, manage bool) (teamRow, bool, error) {
 	var t teamRow
-	if err := teams.Lock(ctx, tx); err != nil {
+	if err := teams.LockFor(ctx, tx, team); err != nil {
 		return t, false, err
 	}
 	var role *string

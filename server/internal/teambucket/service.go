@@ -38,7 +38,7 @@ func New(store *db.DB, encryptionKey string) *Service {
 
 // authorizeTx checks the team, its Team plan and the account's permission to manage settings.
 func authorizeTx(ctx context.Context, tx *db.Tx, account, team string) error {
-	if err := teams.Lock(ctx, tx); err != nil {
+	if err := teams.LockFor(ctx, tx, team); err != nil {
 		return err
 	}
 	var role *string

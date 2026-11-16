@@ -28,7 +28,7 @@ func (s *Service) TeamSMTP(ctx context.Context, account, team string) (SMTPConfi
 	}
 	var out SMTPConfig
 	err := s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-		if err := teams.Lock(ctx, tx); err != nil {
+		if err := teams.LockFor(ctx, tx, team); err != nil {
 			return err
 		}
 		if err := authorizeSMTPAdmin(ctx, tx, account, team); err != nil {
@@ -63,7 +63,7 @@ func (s *Service) SetTeamSMTP(ctx context.Context, account, team string, config 
 	}
 	var out SMTPConfig
 	err := s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-		if err := teams.Lock(ctx, tx); err != nil {
+		if err := teams.LockFor(ctx, tx, team); err != nil {
 			return err
 		}
 		if err := authorizeSMTPAdmin(ctx, tx, account, team); err != nil {
@@ -95,7 +95,7 @@ func (s *Service) DeleteTeamSMTP(ctx context.Context, account, team string, expe
 		return ErrInvalid
 	}
 	return s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-		if err := teams.Lock(ctx, tx); err != nil {
+		if err := teams.LockFor(ctx, tx, team); err != nil {
 			return err
 		}
 		if err := authorizeSMTPAdmin(ctx, tx, account, team); err != nil {

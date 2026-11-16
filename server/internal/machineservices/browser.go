@@ -43,7 +43,7 @@ func ResolveBrowserTx(ctx context.Context, tx *db.Tx, actor, machine string, por
 	if selected.TeamID == "" {
 		return selected, teams.Decision{}, nil
 	}
-	if e = teams.Lock(ctx, tx); e != nil {
+	if e = teams.LockFor(ctx, tx, selected.TeamID); e != nil {
 		return Authority{}, teams.Decision{}, e
 	}
 	kind, id, permission := selected.SourceKind, selected.SourceID, "use"

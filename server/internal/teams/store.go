@@ -40,6 +40,15 @@ func Lock(ctx context.Context, tx *db.Tx) error {
 	return db.LockTeamWrites(ctx, tx)
 }
 
+// LockFor serializes writes of one team against that team's writers only (see db.LockTeamWritesFor), so unrelated
+// teams never queue on each other. team "" (personal scope, team unknown before the transaction) takes Lock.
+func LockFor(ctx context.Context, tx *db.Tx, team string) error {
+	if team == "" {
+		return Lock(ctx, tx)
+	}
+	return db.LockTeamWritesFor(ctx, tx, team)
+}
+
 // invitationTeam is the team an invitation belongs to, fixed when it is created. It is read before the transaction
 // so the transaction can lock that team first; "" when there is no such invitation (the transaction reports it).
 func (s *Service) invitationTeam(ctx context.Context, id string) (string, error) {

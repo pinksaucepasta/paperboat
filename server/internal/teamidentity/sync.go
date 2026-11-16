@@ -209,7 +209,7 @@ func (s *Service) Reconcile(ctx context.Context, team string) error {
 		return err
 	}
 	return s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-		if err := teams.Lock(ctx, tx); err != nil {
+		if err := teams.LockFor(ctx, tx, team); err != nil {
 			return err
 		}
 		if err := writeState(ctx, tx, team, state); err != nil {
@@ -450,7 +450,7 @@ func (s *Service) processJIT(ctx context.Context) error {
 			}
 		}
 		errs = append(errs, s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-			if err := teams.Lock(ctx, tx); err != nil {
+			if err := teams.LockFor(ctx, tx, r.team); err != nil {
 				return err
 			}
 			if _, err := teams.ProvisionMemberTx(ctx, tx, r.team, r.account, "member", "", r.account); err != nil {

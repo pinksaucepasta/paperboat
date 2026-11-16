@@ -178,8 +178,8 @@ func (s *Store) CancelOperation(ctx context.Context, input CancelOperationInput)
 	}
 	var result CancelOperationResult
 	err := s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-		if _, selected := workspace.FromContext(ctx); selected {
-			if err := teams.Lock(ctx, tx); err != nil {
+		if ws, selected := workspace.FromContext(ctx); selected {
+			if err := teams.LockFor(ctx, tx, ws.TeamID); err != nil {
 				return err
 			}
 		}

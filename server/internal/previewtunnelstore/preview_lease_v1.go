@@ -322,10 +322,10 @@ func (s *Store) CreatePreviewLeaseV1(ctx context.Context, input CreatePreviewLea
 	now := input.Now.UTC()
 	var result CreatePreviewLeaseV1Result
 	err := s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-		if err := teams.Lock(ctx, tx); err != nil {
+		ws, selected := workspace.FromContext(ctx)
+		if err := teams.LockFor(ctx, tx, ws.TeamID); err != nil {
 			return err
 		}
-		ws, selected := workspace.FromContext(ctx)
 		if selected {
 			if err := workspace.ValidateTx(ctx, tx, input.AccountID, ws); err != nil {
 				return err
@@ -474,8 +474,8 @@ func (s *Store) RenewPreviewLeaseV1(ctx context.Context, input RenewPreviewLease
 	now := input.Now.UTC()
 	var result RenewPreviewLeaseV1Result
 	err := s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-		if _, selected := workspace.FromContext(ctx); selected {
-			if err := teams.Lock(ctx, tx); err != nil {
+		if ws, selected := workspace.FromContext(ctx); selected {
+			if err := teams.LockFor(ctx, tx, ws.TeamID); err != nil {
 				return err
 			}
 			if err := s.authorizeWorkspacePreviewTx(ctx, tx, input.ActorID, input.PreviewID); err != nil {

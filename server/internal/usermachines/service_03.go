@@ -307,7 +307,7 @@ func (s *Service) ConnectSharedTerminalSession(ctx context.Context, userID, sour
 	}
 	if snapshot.Generation != decision.ProcessGeneration {
 		if fenceErr := s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-			if err := teams.Lock(ctx, tx); err != nil {
+			if err := teams.LockFor(ctx, tx, decision.TeamID); err != nil {
 				return err
 			}
 			_, err := tx.Exec(ctx, `UPDATE team_resource_bindings SET active=false,generation=generation+1 WHERE team_id=$1 AND resource_kind='terminal_session' AND resource_id=$2 AND active AND terminal_process_generation=$3`, decision.TeamID, sessionID, decision.ProcessGeneration)

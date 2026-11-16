@@ -35,7 +35,7 @@ func (s *Service) List(ctx context.Context, userID string) ([]Favorite, error) {
 	if scope, scoped := workspace.FromContext(ctx); scoped {
 		var items []Favorite
 		err := s.store.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-			if err := teams.Lock(ctx, tx); err != nil {
+			if err := teams.LockFor(ctx, tx, scope.TeamID); err != nil {
 				return err
 			}
 			if err := workspace.ValidateTx(ctx, tx, userID, scope); err != nil {
@@ -85,7 +85,7 @@ func (s *Service) Set(ctx context.Context, userID, kind, resourceID string, favo
 		deleteParams := dbsqlc.DeleteUserFavoriteParams{UserID: userID, Kind: kind, ResourceID: resourceID}
 		scope, scoped := workspace.FromContext(ctx)
 		if scoped {
-			if err := teams.Lock(ctx, tx); err != nil {
+			if err := teams.LockFor(ctx, tx, scope.TeamID); err != nil {
 				return err
 			}
 			if err := workspace.ValidateTx(ctx, tx, userID, scope); err != nil {
