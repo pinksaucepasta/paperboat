@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -59,6 +60,9 @@ func TestRecipePairStartsARecipeSessionThenSetup(t *testing.T) {
 	loginLocalMachineID = func(*config.Config) (string, error) { return machineID, nil }
 	var setupArgs []string
 	runRecipeSetup = func(_ *command.Context, args []string) int { setupArgs = args; return 0 }
+	oldPreflight := recipeInstallPreflight
+	t.Cleanup(func() { recipeInstallPreflight = oldPreflight })
+	recipeInstallPreflight = func(context.Context) error { return nil }
 	path, _ := browserLoginFixture(t, srv.URL)
 	// A headless machine or container has no OS credential store: the recipe session goes to owner-only
 	// files, as a browser sign-in does (F26-02 on rcp-l, 2026-11-16: "OS credential store unavailable").
@@ -155,5 +159,28 @@ func TestRecipePairNamesAReplacedToken(t *testing.T) {
 	got := commandFailureMessage(err, classifyCommandFailure(err))
 	if !strings.Contains(got, "token was replaced") || !strings.Contains(got, "pb recipe rotate ci") {
 		t.Fatalf("message = %q", got)
+	}
+}
+
+// Without root or passwordless sudo a recipe install stops before the recipe session exists, so a
+// failing CI job does not use up a max_machines slot on every retry (F26 device check, rcp-l8).
+func TestRecipePairChecksRootBeforeTheSession(t *testing.T) {
+	token, _ := recipe.NewToken("")
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("unexpected request %s", r.URL.Path)
+	}))
+	defer srv.Close()
+	oldClient, oldMachine, oldPreflight := loginHTTPClient, loginLocalMachineID, recipeInstallPreflight
+	t.Cleanup(func() {
+		loginHTTPClient, loginLocalMachineID, recipeInstallPreflight = oldClient, oldMachine, oldPreflight
+	})
+	loginHTTPClient = srv.Client
+	loginLocalMachineID = func(*config.Config) (string, error) { return "", nil }
+	recipeInstallPreflight = func(context.Context) error { return errors.New("no root") }
+	path, _ := browserLoginFixture(t, srv.URL)
+	t.Setenv("PB_RECIPE", "")
+	_, err := runBrowserLogin(t, context.Background(), path, "pair", token.String())
+	if err == nil || os.Getenv("PB_RECIPE") != token.String() {
+		t.Fatalf("err=%v", err)
 	}
 }

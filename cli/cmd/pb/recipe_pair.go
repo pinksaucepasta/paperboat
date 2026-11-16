@@ -12,6 +12,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/auth"
 	"github.com/pinksaucepasta/paperboat/internal/command"
 	"github.com/pinksaucepasta/paperboat/internal/config"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntimecmd"
 	clientapi "github.com/pinksaucepasta/paperboat/shared/client/api"
 	"github.com/pinksaucepasta/paperboat/shared/recipe"
 	"github.com/pinksaucepasta/paperboat/shared/serverclock"
@@ -65,6 +66,13 @@ func recipePair(c *command.Context, tokenText string, setupArgs []string) error 
 		_, err = fmt.Fprintln(c.Writer, "This machine is already paired; nothing to do.")
 		return err
 	}
+	// The install steps read PB_RECIPE to never prompt; `pb pair pbr_…` gives the token as an argument.
+	if err := os.Setenv("PB_RECIPE", tokenText); err != nil {
+		return err
+	}
+	if err := recipeInstallPreflight(c.Context); err != nil {
+		return usageError{err: err, publicMessage: hostruntimecmd.RecipeNeedsRootMessage, refusal: true}
+	}
 	label := "Recipe on " + firstNonEmpty(loginDeviceName(), runtime.GOOS)
 	started, err := recipeSessionStart(c, issuer, token, label)
 	if err != nil {
@@ -111,7 +119,8 @@ func recipePair(c *command.Context, tokenText string, setupArgs []string) error 
 	return nil
 }
 
-// recipeSessionStart and runRecipeSetup are replaced by tests.
+// recipeSessionStart, recipeInstallPreflight and runRecipeSetup are replaced by tests.
+var recipeInstallPreflight = hostruntimecmd.RecipeInstallPreflight
 var recipeSessionStart = func(c *command.Context, issuer string, token recipe.Token, label string) (clientapi.RecipeSession, error) {
 	return api.StartRecipeSession(c.Context, issuer, token, label, recipeDeviceType(), runtime.GOOS, loginHTTPClient())
 }

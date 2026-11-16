@@ -422,3 +422,10 @@ func windowsAccountName(value string) string {
 func windowsArtifactHTTPClient() *http.Client {
 	return &http.Client{Transport: httptransport.Default(), Timeout: 2 * time.Minute, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 }
+
+// RecipeInstallPreflight: Windows pairing asks for elevation itself (an SSH administrator token is
+// already elevated), so there is nothing to check before the recipe session.
+func RecipeInstallPreflight(context.Context) error { return nil }
+
+// RecipeNeedsRootMessage is unused on Windows; it keeps one name for the recipe pairing code.
+const RecipeNeedsRootMessage = ""

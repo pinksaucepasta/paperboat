@@ -832,3 +832,16 @@ func reportInstallationFailureWithEnrollmentCredentialClient(ctx context.Context
 type enrollmentClient interface {
 	Enroll(context.Context, enrollment.Config) (enrollment.RuntimeIdentity, error)
 }
+
+// RecipeInstallPreflight refuses a recipe install that could not finish without a password, before
+// the recipe session and machine exist: a refusal after them would use up a max_machines slot on
+// every retry of a CI job (F26 device check, rcp-l8).
+func RecipeInstallPreflight(ctx context.Context) error {
+	if runningAsRoot() || exec.CommandContext(ctx, sudoExecutable, "-n", "true").Run() == nil {
+		return nil
+	}
+	return errRecipeNeedsRoot
+}
+
+// RecipeNeedsRootMessage is the PLAN F26 text for a recipe install without root or passwordless sudo.
+const RecipeNeedsRootMessage = recipeNeedsRootMessage
