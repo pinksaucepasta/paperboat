@@ -297,3 +297,23 @@ func TestReportsReachTheAuditQueueOnceEach(t *testing.T) {
 		t.Fatalf("deleted report %+v (len %d)", last, queue.Len())
 	}
 }
+
+type fakeEvents struct{ healthy bool }
+
+func (f fakeEvents) Changed() <-chan struct{} { return nil }
+func (f fakeEvents) Healthy() bool            { return f.healthy }
+
+func TestPolicyPollRunsOnlyWithoutAHealthyEventStream(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		events interface {
+			Changed() <-chan struct{}
+			Healthy() bool
+		}
+		due bool
+	}{{"no events", nil, true}, {"stream down", fakeEvents{}, true}, {"stream healthy", fakeEvents{healthy: true}, false}} {
+		if got := (&Controller{config: Config{Events: test.events}}).pollDue(); got != test.due {
+			t.Errorf("%s: pollDue = %v, want %v", test.name, got, test.due)
+		}
+	}
+}

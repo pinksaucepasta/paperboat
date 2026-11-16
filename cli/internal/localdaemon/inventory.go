@@ -36,6 +36,10 @@ const (
 	inventoryProjectionFreshness = 15 * time.Second
 	// While the server's change stream is healthy the periodic refresh is only a safety net.
 	defaultEventFallback = 5 * time.Minute
+	// The safety net re-lists machines (peer presence flips publish no event) but reuses the reconcile, completion and
+	// warm-up of an unchanged list for this long: every part of them is event-driven, on-demand or has its own expiry
+	// (PR-03: they were 7 of the 8 requests per 5 minutes of an idle Mac).
+	healthyProjectionFreshness = 30 * time.Minute
 	// requestedRefreshSpacing bounds retries while a local access step is pending. Ordinary wakes
 	// use the debounce, so reconciliation cannot start a one-second refresh loop.
 	requestedRefreshSpacing = time.Second
@@ -209,10 +213,10 @@ func (i *Inventory) Run(ctx context.Context) error {
 	requested := false
 	outages := 0
 	failed := false
-	refresh := func(reuse bool) {
+	refreshWithin := func(reuse bool, freshness time.Duration) {
 		pending = nil
 		started = time.Now()
-		failed = i.refresh(ctx, reuse && !requested, forceReconcile || !reuse) != nil
+		failed = i.refresh(ctx, reuse && !requested, forceReconcile || !reuse, freshness) != nil
 		forceReconcile = false
 		requested = false
 		// ApplyMachines can signal its own local-step transition. The completed reconcile already
@@ -224,6 +228,7 @@ func (i *Inventory) Run(ctx context.Context) error {
 			}
 		}
 	}
+	refresh := func(reuse bool) { refreshWithin(reuse, inventoryProjectionFreshness) }
 	i.restoreCachedMachines()
 	refresh(false)
 	timer := time.NewTimer(i.refreshInterval)
@@ -269,8 +274,11 @@ func (i *Inventory) Run(ctx context.Context) error {
 			refresh(true)
 		case <-timer.C:
 			healthy := i.events.Healthy()
-			if !healthy || failed || time.Since(started) >= i.eventFallback {
+			switch {
+			case !healthy || failed:
 				refresh(false)
+			case time.Since(started) >= i.eventFallback:
+				refreshWithin(true, healthyProjectionFreshness)
 			}
 			if healthy && !failed {
 				outages = 0
@@ -283,10 +291,10 @@ func (i *Inventory) Run(ctx context.Context) error {
 }
 
 func (i *Inventory) Refresh(ctx context.Context) error {
-	return i.refresh(ctx, false, true)
+	return i.refresh(ctx, false, true, inventoryProjectionFreshness)
 }
 
-func (i *Inventory) refresh(ctx context.Context, reuse, forceReconcile bool) (refreshErr error) {
+func (i *Inventory) refresh(ctx context.Context, reuse, forceReconcile bool, freshness time.Duration) (refreshErr error) {
 	i.mu.Lock()
 	defer i.mu.Unlock()
 	defer func() {
@@ -308,7 +316,7 @@ func (i *Inventory) refresh(ctx context.Context, reuse, forceReconcile bool) (re
 	stage(func(stageCtx context.Context) { machines, sourceErr = i.source.ListUserMachines(stageCtx) })
 	sameMachines := reuse && reflect.DeepEqual(machines, i.projectionMachines)
 	reuseReconcile := sameMachines && !forceReconcile && !i.pendingLocalAccess.Load() &&
-		!i.reconcileAt.IsZero() && i.clock().Sub(i.reconcileAt) < inventoryProjectionFreshness
+		!i.reconcileAt.IsZero() && i.clock().Sub(i.reconcileAt) < freshness
 	var reconcileErr error
 	var pending LocalAccessPendingError
 	if sourceErr == nil && i.reconcileMachines != nil && !reuseReconcile {
@@ -320,8 +328,8 @@ func (i *Inventory) refresh(ctx context.Context, reuse, forceReconcile bool) (re
 		}
 	}
 	i.pendingLocalAccess.Store(pending.Step != "")
-	reuseCompletion := sameMachines && !i.completionAt.IsZero() && i.clock().Sub(i.completionAt) < inventoryProjectionFreshness
-	reuseOnMachines := sameMachines && !i.onMachinesAt.IsZero() && i.clock().Sub(i.onMachinesAt) < inventoryProjectionFreshness
+	reuseCompletion := sameMachines && !i.completionAt.IsZero() && i.clock().Sub(i.completionAt) < freshness
+	reuseOnMachines := sameMachines && !i.onMachinesAt.IsZero() && i.clock().Sub(i.onMachinesAt) < freshness
 	var completionItems []localapi.CompletionItem
 	var completionErr error
 	if sourceErr == nil && !reuseCompletion {

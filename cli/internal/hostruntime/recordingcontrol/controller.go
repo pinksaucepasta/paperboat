@@ -64,8 +64,13 @@ type Config struct {
 	// Archive and Put copy closed segments to the team bucket; both nil keeps recordings on this machine only.
 	Archive Archive
 	Put     Put
-	Events  interface{ Changed() <-chan struct{} }
-	Audit   *offlineaudit.Queue
+	// Events wakes a policy refresh; while its stream is healthy that is the only refresh (the server publishes
+	// every policy or key change), the 5-minute poll runs only while it is down.
+	Events interface {
+		Changed() <-chan struct{}
+		Healthy() bool
+	}
+	Audit *offlineaudit.Queue
 	// LedgerPath holds which recording reports are already in the audit queue.
 	LedgerPath string
 	Now        func() time.Time
@@ -248,6 +253,9 @@ func (c *Controller) Shutdown(ctx context.Context) error {
 	return nil
 }
 
+// pollDue reports whether the periodic policy poll must fetch: without a healthy event stream nothing else would.
+func (c *Controller) pollDue() bool { return c.config.Events == nil || !c.config.Events.Healthy() }
+
 func (c *Controller) run(ctx context.Context) {
 	defer close(c.done)
 	var changed <-chan struct{}
@@ -268,7 +276,9 @@ func (c *Controller) run(ctx context.Context) {
 		case <-changed:
 			c.refreshPolicy(ctx)
 		case <-policies.C:
-			c.refreshPolicy(ctx)
+			if c.pollDue() {
+				c.refreshPolicy(ctx)
+			}
 		case <-prunes.C:
 			c.prune()
 		case <-c.kick:

@@ -838,6 +838,37 @@ func TestInventoryMakesNoListingWhileTheChangeStreamIsHealthyAndIdle(t *testing.
 	}
 }
 
+// PR-03: the safety-net refresh of a healthy stream re-lists machines (a peer going offline publishes no event) but
+// reconciles and re-projects only when the list changed, not every five minutes.
+func TestHealthyFallbackRelistsButReconcilesOnlyAChangedList(t *testing.T) {
+	online, offline := api.UserMachine{ID: "machine_1", Alias: "studio", Online: true}, api.UserMachine{ID: "machine_1", Alias: "studio"}
+	source := &scriptedMachineSource{results: []machineResult{{machines: []api.UserMachine{online}}, {machines: []api.UserMachine{online}}, {machines: []api.UserMachine{online}}, {machines: []api.UserMachine{offline}}}}
+	var reconciles, projections atomic.Int32
+	store, err := localapi.NewSnapshotStore(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, subscriptions, _ := eventstest.Start(t, time.Hour, machineevents.TopicInventory)
+	inventory, err := NewInventory(InventoryConfig{Source: source, Store: store, RefreshInterval: time.Second, RequestTimeout: time.Second, Events: subscriptions[0], EventFallback: time.Millisecond,
+		ReconcileMachines: func(context.Context, []api.UserMachine) error { reconciles.Add(1); return nil },
+		OnMachines:        func(context.Context, []api.UserMachine) { projections.Add(1) }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- inventory.Run(ctx) }()
+	time.Sleep(4500 * time.Millisecond) // refreshes at 0, 1, 2 s (same list) and 3, 4 s (peer offline)
+	cancel()
+	<-done
+	source.mu.Lock()
+	lists := source.index
+	source.mu.Unlock()
+	if lists != 4 || reconciles.Load() != 2 || projections.Load() != 2 {
+		t.Fatalf("lists=%d reconciles=%d projections=%d, want every refresh to list (4 distinct answers read) and only the first and the changed list to reconcile (2, 2)", lists, reconciles.Load(), projections.Load())
+	}
+}
+
 // While the change stream is unhealthy the periodic refresh backs off with jitter instead of re-listing
 // every interval in lockstep across the fleet.
 func TestInventoryOutageRefreshBacksOffWithJitter(t *testing.T) {
