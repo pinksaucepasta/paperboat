@@ -152,6 +152,41 @@ func TestStuckRecorderNeverBlocksOutput(t *testing.T) {
 	}
 }
 
+// Two Stops at once (the session exits while it is deleted): neither returns before the recording's
+// index entry is closed, so the caller never sees a stopped session's recording as still open.
+func TestConcurrentStopsBothWaitForTheRecordingToClose(t *testing.T) {
+	s, team := testService(t, Config{})
+	p, err := s.Prepare("sess_1", StartRequest{Trigger: TriggerRule, Key: Key{Generation: 1, Public: team.PublicKey().Bytes()}, QuotaBytes: 1 << 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	header, _ := recording.HeaderLine(recording.Header{Width: 80, Height: 24})
+	r := newRecorder(s, p, header)
+	s.active["sess_1"] = r // its goroutine starts later, so the stop is held in flight
+	results := make(chan error, 2)
+	for range 2 {
+		go func() {
+			_, err := s.Stop("sess_1", "", ReasonSessionEnded)
+			results <- err
+		}()
+	}
+	select {
+	case err := <-results:
+		t.Fatalf("a Stop returned (%v) before the recording closed", err)
+	case <-time.After(200 * time.Millisecond):
+	}
+	go r.run()
+	for range 2 {
+		if err := <-results; err != nil {
+			t.Fatal(err)
+		}
+	}
+	metas, err := s.List()
+	if err != nil || len(metas) != 1 || metas[0].EndedAt == nil || s.State("sess_1") != nil {
+		t.Fatalf("after both stops: %+v %v", metas, err)
+	}
+}
+
 func TestQuotaDeletesOldestFinishedThenStopsActive(t *testing.T) {
 	s, team := testService(t, Config{SegmentBytes: 256})
 	noise := func() string {

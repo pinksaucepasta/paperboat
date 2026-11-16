@@ -311,10 +311,9 @@ func (s *Service) State(sessionID string) *State {
 
 // Stop ends a session's recording, writes its last segment and returns its index entry.
 func (s *Service) Stop(sessionID, actorAccountID, reason string) (Meta, error) {
-	s.mu.Lock()
-	r := s.active[sessionID]
-	delete(s.active, sessionID)
-	s.mu.Unlock()
+	// The recorder leaves the active set itself once its index entry is written, so a concurrent Stop
+	// (the session exiting while it is deleted) waits for that write instead of returning early.
+	r := s.lookup(sessionID)
 	if r == nil {
 		return Meta{}, ErrNotRecording
 	}
@@ -463,7 +462,7 @@ func (s *Service) release(size int64) {
 	s.mu.Unlock()
 }
 
-// selfEnded removes a recording that ended on its own (quota, disk error) from the active set.
+// selfEnded removes a recording that ended (stopped, quota, disk error) from the active set.
 func (s *Service) selfEnded(r *recorder) {
 	s.mu.Lock()
 	if s.active[r.meta.SessionID] == r {
