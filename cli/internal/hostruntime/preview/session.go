@@ -25,10 +25,15 @@ const (
 	PreviewTunnelSchemaV1            = "paperboat.preview-tunnel/v1"
 	PreviewLeaseKind                 = "preview_lease"
 	PreviewLeaseDefaultRenewInterval = 10 * time.Second
-	PreviewLeaseDefaultShutdown      = 10 * time.Second
-	PreviewLeaseDefaultReconnect     = 250 * time.Millisecond
-	PreviewLeaseMaxReconnect         = 5 * time.Second
-	PreviewLeaseParentPoll           = 500 * time.Millisecond
+	// PreviewLeaseBackgroundRenewInterval: a background preview (host-owned local lease with a deadline) survives 5 minutes
+	// without a renewal on the server (previewv1.DefaultBackgroundOwnerGrace), so a minute still leaves four attempts. At 10 s
+	// 1,000 previews cost the server 100 renewal transactions a second and renewals fell behind: 299 of 365 previews
+	// were marked owner_lost on staging (F21-168).
+	PreviewLeaseBackgroundRenewInterval = time.Minute
+	PreviewLeaseDefaultShutdown         = 10 * time.Second
+	PreviewLeaseDefaultReconnect        = 250 * time.Millisecond
+	PreviewLeaseMaxReconnect            = 5 * time.Second
+	PreviewLeaseParentPoll              = 500 * time.Millisecond
 )
 
 var (
@@ -923,4 +928,12 @@ const (
 
 func validOwnerSessionKind(kind string) bool {
 	return kind == OwnerSessionLocalLease || kind == OwnerSessionForeground || kind == OwnerSessionLazyRuntime
+}
+
+// renewIntervalFor is how often a daemon-owned preview renews its lease.
+func renewIntervalFor(ownerSessionKind string, userDeadline *time.Time) time.Duration {
+	if ownerSessionKind == OwnerSessionLocalLease && userDeadline != nil {
+		return PreviewLeaseBackgroundRenewInterval
+	}
+	return PreviewLeaseDefaultRenewInterval
 }

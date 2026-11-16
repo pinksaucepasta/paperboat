@@ -283,6 +283,7 @@ func (m *DispatchManager) dispatch(ctx context.Context, authorization DispatchAu
 		UserDeadline:       lease.UserDeadline,
 		DisableParentWatch: true,
 		Now:                m.config.Now,
+		RenewInterval:      renewIntervalFor(lease.OwnerSessionKind, lease.UserDeadline),
 	}
 	if err := validateSessionLease(lease, baseSessionConfig, m.config.Now()); err != nil {
 		return DispatchOutcome{}, err
