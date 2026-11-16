@@ -1,0 +1,15 @@
+{
+ "check": "xplat-config",
+ "results": [
+  {
+   "id": "X-03:x03_merge:L>M",
+   "status": "PASS",
+   "detail": "three-way merge kept CRLF on every line"
+  },
+  {
+   "id": "X-03:x03_merge:M>L",
+   "status": "PASS",
+   "detail": "three-way merge kept CRLF on every line"
+  }
+ ]
+}
