@@ -22,6 +22,8 @@ import (
 const (
 	AdmissionDenied      quic.StreamErrorCode = 0x5043
 	AdmissionUnavailable quic.StreamErrorCode = 0x5044
+	// StreamAborted is the reset of a stream its owner abandoned (Abort).
+	StreamAborted quic.StreamErrorCode = 0x5045
 )
 
 type AdmissionRefusal struct {
@@ -248,6 +250,16 @@ func (c *earlyConn) Close() error {
 	defer c.mu.Unlock()
 	c.closed = true
 	return c.conn.Close()
+}
+
+// Abort resets the stream (see streamConn.Abort).
+func (c *earlyConn) Abort() {
+	c.cancel()
+	c.mu.Lock()
+	c.closed = true
+	conn := c.conn
+	c.mu.Unlock()
+	abortConn(conn)
 }
 
 func (c *earlyConn) CloseWrite() error {

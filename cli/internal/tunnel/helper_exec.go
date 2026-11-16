@@ -484,7 +484,7 @@ func (c *helperExecConn) Close() error {
 func (c *helperExecConn) Detach() error {
 	c.closeOnce.Do(func() {
 		c.finish(1, ErrTransportLost)
-		c.closeErr = c.message.Close()
+		c.closeErr = abortMessage(c.message)
 		if c.readLoopDone != nil {
 			<-c.readLoopDone
 		}

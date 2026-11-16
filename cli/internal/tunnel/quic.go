@@ -378,6 +378,26 @@ func (c *nativeMessageConnection) WriteMessage(ctx context.Context, kind helperM
 	}
 	return err
 }
+
+// Abort ends the connection without draining it: each stream is reset (native Abort), so data a peer never reads does
+// not keep the shared association's flow-control window.
+func (c *nativeMessageConnection) Abort() {
+	c.closeOnce.Do(func() {
+		for _, stream := range []nativeStream{c.control, c.input, c.output} {
+			if stream == nil {
+				continue
+			}
+			if aborter, ok := stream.(interface{ Abort() }); ok {
+				aborter.Abort()
+			} else {
+				_ = stream.Close()
+			}
+		}
+		c.cancel()
+		_ = c.connection.Close()
+	})
+}
+
 func (c *nativeMessageConnection) Close() error {
 	c.closeOnce.Do(func() {
 		closeCtx, cancel := context.WithTimeout(context.Background(), time.Second)

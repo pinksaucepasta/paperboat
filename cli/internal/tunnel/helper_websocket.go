@@ -129,6 +129,16 @@ type helperMessageConnection interface {
 	Close() error
 }
 
+// abortMessage ends a message connection whose peer may never read what is queued: native streams are reset (Abort),
+// anything else is closed.
+func abortMessage(message helperMessageConnection) error {
+	if aborter, ok := message.(interface{ Abort() }); ok {
+		aborter.Abort()
+		return nil
+	}
+	return message.Close()
+}
+
 type helperWebSocketConnection struct{ ws *websocket.Conn }
 
 func (c *helperWebSocketConnection) ReadMessage(ctx context.Context) (helperMessageType, []byte, error) {

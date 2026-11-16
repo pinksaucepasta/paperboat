@@ -61,6 +61,12 @@ func (c *scopeConn) CloseWrite() error {
 	}
 	return net.ErrClosed
 }
+
+// Abort resets the stream under the scope and ends the lease.
+func (c *scopeConn) Abort() {
+	c.once.Do(func() { c.stop(); c.lease.Close(); abortConn(c.Conn); c.err = net.ErrClosed })
+}
+
 func (c *scopeConn) Close() error {
 	c.once.Do(func() { c.stop(); c.lease.Close(); c.err = c.Conn.Close() })
 	return c.err
