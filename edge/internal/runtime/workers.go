@@ -542,8 +542,10 @@ func (w *RouteWorker) run(ctx context.Context) {
 			settle()
 		case <-w.TunnelWake:
 			if retry != nil || time.Now().Before(cooldownUntil) {
+				slog.Info("route_tunnel_wake", "absorbed", true)
 				continue // the scheduled re-probe or the next tick pulls this change
 			}
+			slog.Info("route_tunnel_wake", "absorbed", false)
 			if !w.wakeReconcile(ctx) {
 				return
 			}

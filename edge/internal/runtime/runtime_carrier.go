@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
+	"log/slog"
 	"sort"
 	"sync"
 	"time"
@@ -322,6 +323,7 @@ type endpointPull struct {
 	update  control.EndpointUpdate
 	err     error
 	elapsed time.Duration
+	done    time.Time
 }
 
 // nextEndpointPull is what the next endpoint pull asks for: the cursor to continue from ("" when the full set
@@ -350,7 +352,7 @@ func (w *RuntimeCarrierWorker) pullEndpoints(parent context.Context, since strin
 	defer cancel()
 	started := time.Now()
 	update, err := w.Source.EndpointAdmissions(ctx, w.Expected.NodeID(), w.Expected.ProcessEpoch(), since, wait)
-	return endpointPull{update, err, time.Since(started)}
+	return endpointPull{update, err, time.Since(started), time.Now()}
 }
 
 // reconcileEndpoints pulls and applies the endpoint routes once, without waiting at the server.
@@ -364,8 +366,14 @@ func (w *RuntimeCarrierWorker) reconcileEndpoints(parent context.Context) {
 // most, so a failing server is not hammered); a pull that came back at once with nothing new waits out EndpointInterval (a
 // server that does not hold, or is draining); anything else is pulled again right away.
 func (w *RuntimeCarrierWorker) applyEndpointPull(parent context.Context, pull endpointPull) time.Duration {
+	if waited := time.Since(pull.done); waited > time.Second {
+		// The answer waited for this loop (a synchronous runtime pull or observation): new routes wait with it.
+		slog.Warn("endpoint_pull_applied_late", "waited_ms", waited.Milliseconds())
+	}
 	if pull.err != nil {
 		observeWorkerFailure(parent, w.Reporter, "endpoint_admission", pull.err)
+		// A paused endpoint pull delays every new route until the next runtime pull: say so (tunnel create timing).
+		slog.Warn("endpoint_pull_paused", "error", pull.err.Error(), "elapsed_ms", pull.elapsed.Milliseconds())
 		w.endpointPause = true
 		return w.EndpointInterval
 	}
@@ -391,6 +399,7 @@ func (w *RuntimeCarrierWorker) applyEndpoints(parent context.Context, update con
 	if update.TunnelsChangedAt != "" && update.TunnelsChangedAt != w.tunnelsChangedAt {
 		w.tunnelsChangedAt = update.TunnelsChangedAt
 		news = true
+		slog.Info("endpoint_tunnels_changed", "changed_at", update.TunnelsChangedAt)
 		if w.OnTunnelsChanged != nil {
 			w.OnTunnelsChanged()
 		}
