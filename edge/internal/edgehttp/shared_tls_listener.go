@@ -262,7 +262,10 @@ func (l *SharedTLSListener) dispatch(conn net.Conn) {
 		if denied, ok := l.authority.(interface{ QuotaDenied(string) bool }); ok && denied.QuotaDenied(host) {
 			authorizedHTTPS = true
 		}
-		// A preview whose owner machine is asleep gets TLS too, for its "machine offline" page.
+	}
+	// A preview whose owner machine is asleep gets TLS for its "machine offline" page. Its carrier is gone, so the
+	// route matcher no longer names it (https is false): the server's offline list is the authority for the name.
+	if !authorizedHTTPS {
 		if offline, ok := l.authority.(interface{ OwnerOffline(string) bool }); ok && offline.OwnerOffline(host) {
 			authorizedHTTPS = true
 		}

@@ -570,6 +570,61 @@ func TestSharedTLSQuotaDeniedRouteCompletesTLSAndUnknownNameDoesNot(t *testing.T
 	}
 }
 
+type ownerOfflineAuthority struct {
+	tlsAuthorityFixture
+	host   string
+	asleep atomic.Bool
+}
+
+func (a *ownerOfflineAuthority) OwnerOffline(host string) bool {
+	return a.asleep.Load() && host == a.host
+}
+
+// 2026-11-17 prod: a foreground preview whose machine slept answered the branded 404 for 15 min instead of its
+// "machine offline" 503. The carrier was gone, so the route matcher no longer named the host and the offline grant
+// (inside the matcher gate) never ran. The server's offline list alone must reach the HTTPS handler.
+func TestSharedTLSOwnerOfflinePreviewWithNoCarrierReachesTheHTTPSHandler(t *testing.T) {
+	match, _ := browserTestMatch()
+	clientTLS, serverTLS, _, _, _ := task24Certificates(t, match.Host)
+	clientTLS.ServerName = match.Host
+	raw, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry, _ := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 4})
+	defer registry.Close()
+	authority := &ownerOfflineAuthority{host: match.Host}
+	authority.asleep.Store(true)
+	shared, err := NewSharedTLSListener(raw, authority, registry, func(string) bool { return false }, 4, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	shared.ServeUnknownNamesWithPage(serverTLS)
+	server := &http.Server{TLSConfig: serverTLS, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	})}
+	defer server.Close()
+	go server.ServeTLS(shared, "", "")
+	client := &http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{TLSClientConfig: clientTLS, DisableKeepAlives: true, DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, "tcp", raw.Addr().String())
+	}}}
+	response, err := client.Get("https://" + match.Host + "/")
+	if err != nil {
+		t.Fatalf("an asleep owner's preview did not complete TLS: %v", err)
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want the HTTPS handler's 503 (not the unknown-name 404)", response.StatusCode)
+	}
+	authority.asleep.Store(false)
+	if response, err = client.Get("https://" + match.Host + "/"); err == nil {
+		response.Body.Close()
+		if response.StatusCode != http.StatusNotFound {
+			t.Fatalf("a name off the offline list: status %d, want the unknown-name 404", response.StatusCode)
+		}
+	}
+}
+
 // 2026-11-04: a stopped preview (no live decision, gone from the route matcher) dropped the TLS handshake.
 // With the unknown-name page configured the edge completes a real handshake for that name and answers the
 // branded 404 itself; the HTTPS handler (the path to an origin) is never reached.
