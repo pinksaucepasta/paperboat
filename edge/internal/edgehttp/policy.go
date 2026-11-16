@@ -634,6 +634,14 @@ func (p *Policy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if acquireErr != nil {
+			// The preview's lease persists while its owner machine sleeps (the server lists it as owner-offline): its page
+			// comes before browser sign-in, which would send a visitor of a public preview to a login (and ask control).
+			if errors.Is(acquireErr, route.ErrNoMatch) && p.config.PreviewOwnerOffline != nil && p.config.PreviewOwnerOffline(candidateHost) {
+				w.Header().Set("X-Paperboat-Error", "preview_owner_offline")
+				w.Header().Set("Retry-After", "30")
+				writeErrorPage(w, http.StatusServiceUnavailable, previewOwnerOfflineMessage)
+				return
+			}
 			token, hasSession := browserCookie(r, browserEdgeCookie)
 			machine := false
 			if values := r.Header.Values("Paperboat-Access-Token"); len(values) == 1 && values[0] != "" && strings.TrimSpace(values[0]) == values[0] {
@@ -655,13 +663,6 @@ func (p *Policy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 			if !hasSession && r.Header.Get("Paperboat-Access-Token") == "" && p.config.BrowserAccess != nil && p.config.BrowserAccess.validate() && browserNavigation(r) {
 				p.config.BrowserAccess.begin(w, r, candidateHost)
-				return
-			}
-			// The preview's lease persists while its owner machine sleeps (the server lists it as owner-offline).
-			if errors.Is(acquireErr, route.ErrNoMatch) && p.config.PreviewOwnerOffline != nil && p.config.PreviewOwnerOffline(candidateHost) {
-				w.Header().Set("X-Paperboat-Error", "preview_owner_offline")
-				w.Header().Set("Retry-After", "30")
-				writeErrorPage(w, http.StatusServiceUnavailable, previewOwnerOfflineMessage)
 				return
 			}
 			// The held ingress snapshot still admits this preview but its carrier is gone: an app that is

@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/edge/internal/admission"
+	"github.com/pinksaucepasta/paperboat/edge/internal/control"
 	"github.com/pinksaucepasta/paperboat/edge/internal/route"
 	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 )
@@ -1342,6 +1343,7 @@ func TestOwnerOfflinePreviewWithNoCarrierAnswersTheOfflinePage(t *testing.T) {
 	policy, err := New(Config{PreviewBaseDomain: "preview.example.test", TunnelBaseDomain: "tunnels.example.test", RuntimeBaseDomain: "runtime.example.test",
 		MaxHeaderBytes: 4096, MaxBodyBytes: 1024, Routes: NewPreviewCarrierRouteMatcher(registry),
 		PreviewOwnerOffline: func(host string) bool { return host == "app.preview.example.test" },
+		BrowserAccess:       &BrowserAccess{Authority: refusingBrowserAuthority{t}, LoginOrigin: "https://login.example.test"},
 	}, http.NotFoundHandler())
 	if err != nil {
 		t.Fatal(err)
@@ -1350,6 +1352,9 @@ func TestOwnerOfflinePreviewWithNoCarrierAnswersTheOfflinePage(t *testing.T) {
 		recorder := httptest.NewRecorder()
 		request := httptest.NewRequest(http.MethodGet, "/", nil)
 		request.Host = host
+		// A browser navigation without a session: the offline page, not a sign-in redirect.
+		request.Header.Set("Sec-Fetch-Mode", "navigate")
+		request.Header.Set("Sec-Fetch-Dest", "document")
 		policy.ServeHTTP(recorder, request)
 		return recorder
 	}
@@ -1360,6 +1365,22 @@ func TestOwnerOfflinePreviewWithNoCarrierAnswersTheOfflinePage(t *testing.T) {
 	if unknown := serve("gone.preview.example.test"); unknown.Code != http.StatusNotFound {
 		t.Fatalf("a name that is not listed: status %d", unknown.Code)
 	}
+}
+
+// refusingBrowserAuthority fails the test if a request starts browser sign-in.
+type refusingBrowserAuthority struct{ t *testing.T }
+
+func (a refusingBrowserAuthority) Begin(context.Context, string, string) (control.BrowserBegin, error) {
+	a.t.Error("browser sign-in started for an owner-offline preview")
+	return control.BrowserBegin{}, control.ErrBrowserDenied
+}
+
+func (a refusingBrowserAuthority) Redeem(context.Context, string, string, string, string) (control.BrowserSession, error) {
+	return control.BrowserSession{}, control.ErrBrowserDenied
+}
+
+func (a refusingBrowserAuthority) Authorize(context.Context, control.BrowserAuthorizeRequest) (connectorprotocol.IngressDecision, error) {
+	return connectorprotocol.IngressDecision{}, control.ErrBrowserDenied
 }
 
 // Waiting for an admitted preview's route is bounded per name and overall: past the bound a request is answered with
