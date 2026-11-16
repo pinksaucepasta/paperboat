@@ -18,7 +18,6 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/accountdeletion"
 	"github.com/pinksaucepasta/paperboat/server/internal/accountprefs"
 	"github.com/pinksaucepasta/paperboat/server/internal/activity"
-	"github.com/pinksaucepasta/paperboat/server/internal/apitokens"
 	"github.com/pinksaucepasta/paperboat/server/internal/audit"
 	"github.com/pinksaucepasta/paperboat/server/internal/auditstream"
 	"github.com/pinksaucepasta/paperboat/server/internal/auth"
@@ -67,6 +66,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/previewtunnelstore"
 	"github.com/pinksaucepasta/paperboat/server/internal/previewv1"
 	"github.com/pinksaucepasta/paperboat/server/internal/privateaccess"
+	"github.com/pinksaucepasta/paperboat/server/internal/recipes"
 	"github.com/pinksaucepasta/paperboat/server/internal/recordings"
 	"github.com/pinksaucepasta/paperboat/server/internal/releaseauthority"
 	"github.com/pinksaucepasta/paperboat/server/internal/resourceusage"
@@ -727,7 +727,7 @@ func New(opts Options) (*App, error) {
 		workOSOrganizations = teamidentity.HTTPWorkOS{BaseURL: opts.Config.Providers.WorkOS.BaseURL, APIKey: opts.Config.Secrets.WorkOSAPIKey}
 	}
 	teamIdentity := teamidentity.New(store, workOSOrganizations, opts.Config.Business, opts.Config.Mail.InvitationLifetimeSeconds, strings.TrimRight(opts.Config.HTTP.BrowserLoginOrigin, "/")+"/team", workspaceBilling)
-	apiTokens := apitokens.New(store, auditWriter, opts.Config.APITokens, opts.Config.Secrets.EncryptionKey)
+	recipeService := recipes.New(store, auditWriter, userMachineService.Delete)
 	accountDeletion := accountdeletion.New(store, userMachineService, opts.Config.Mail)
 	// A nil Stripe client leaves subscription jobs failing until Stripe is configured.
 	subscriptionCanceller, _ := stripeClient.(accountdeletion.Subscriptions)
@@ -782,7 +782,7 @@ func New(opts Options) (*App, error) {
 		ConfigConflicts:          configConflictService,
 		Routes:                   routeService,
 		Favorites:                favorites.NewService(store),
-		APITokens:                apiTokens,
+		Recipes:                  recipeService,
 		AccountDeletion:          accountDeletion,
 		AccountPreferences:       accountprefs.New(store),
 		ControlDiagnostics:       controlDiagnostics,
@@ -848,6 +848,7 @@ func New(opts Options) (*App, error) {
 		}
 	}
 	serverWorkers = append(serverWorkers, observedWorker(supportService, "worker_workspace_domains", workspaceDomainWorker.Worker(opts.Config.TerminalSessions.WorkerInterval, 50), progress))
+	serverWorkers = append(serverWorkers, observedWorker(supportService, "worker_recipe_machines", periodicPreviewTunnelWorker(time.Minute, recipeService.CollectMachines), progress))
 	serverWorkers = append(serverWorkers, observedWorker(supportService, "worker_team_retention", periodicPreviewTunnelWorker(time.Minute, func(ctx context.Context) error {
 		pruneContext, cancel := context.WithTimeout(ctx, opts.Config.Retention.Budget+opts.Config.HTTP.RequestTimeout)
 		defer cancel()
@@ -862,8 +863,7 @@ func New(opts Options) (*App, error) {
 			}
 		}
 		_, retentionErr := retention.Run(pruneContext, store, opts.Config.Retention)
-		// Secrets held for API token create retries never outlive their window (F21-12).
-		err = errors.Join(err, retentionErr, recordingService.PruneArchive(pruneContext), apiTokens.PruneCreateRequests(pruneContext), enrollmentService.PruneProofNonces(pruneContext), privateaccess.PurgeIdempotency(pruneContext, store))
+		err = errors.Join(err, retentionErr, recordingService.PruneArchive(pruneContext), enrollmentService.PruneProofNonces(pruneContext), privateaccess.PurgeIdempotency(pruneContext, store))
 		workers.IterationFailure(ctx, "team_retention_cleanup", "team_retention_failed", err)
 		outcome := "success"
 		if err != nil {

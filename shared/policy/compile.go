@@ -28,9 +28,9 @@ type Compiled struct {
 	// Grants is Allows minus Denies: the access the policy gives.
 	Grants             []Grant
 	AllowPrivateAccess bool
-	// Scopes holds each scoped API token's scope, keyed by token ID, with Account empty.
-	// A scope entry whose names no longer resolve matches nothing.
-	Scopes map[string][]Grant
+	// Reach holds each recipe's reach, keyed by recipe ID, with Account empty. An entry whose
+	// names no longer resolve matches nothing.
+	Reach  map[string][]Grant
 	x      *index
 	tags   map[string][]string
 	groups map[string][]string
@@ -80,14 +80,17 @@ func Compile(d Document, inv Inventory, limits Limits) (Compiled, Errors) {
 	out := Compiled{Allows: allow.list(), Denies: deny.list(), x: x, tags: tags, groups: groups, rows: rows,
 		AllowPrivateAccess: !inv.Team || (d.AllowPrivateAccess != nil && *d.AllowPrivateAccess)}
 	out.Grants = subtract(out.Allows, out.Denies)
-	out.Scopes = map[string][]Grant{}
-	for _, t := range inv.Tokens {
-		out.Scopes[t.ID], _ = out.compileScope(t.Scope)
+	out.Reach = map[string][]Grant{}
+	for _, r := range inv.Recipes {
+		out.Reach[r.ID] = nil
+		if len(r.Reach) > 0 {
+			out.Reach[r.ID], _ = out.compileScope(r.Reach)
+		}
 	}
 	return out, nil
 }
 
-// ValidateScope checks an API token scope against this policy's workspace; a token is
+// ValidateScope checks a recipe's reach against this policy's workspace; a recipe is
 // created or changed only when it returns no errors. Paths are relative to the scope list.
 func (c Compiled) ValidateScope(scope []ScopeEntry) Errors {
 	_, errs := c.compileScope(scope)

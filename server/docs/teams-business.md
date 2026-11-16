@@ -127,9 +127,9 @@ The same shape in the API, the export and the stream:
 | `occurred_at` | When it happened (UTC, RFC 3339). |
 | `workspace` | `personal:<account>` or `team:<team>`. |
 | `action` | What happened, `<area>.<verb>`, e.g. `team.role`, `user_machine.renamed`, `private_access.denied`. |
-| `actor.kind` | `user`, `api_token` (a user acting through an API token), `directory` (directory sync), `operator` (Paperboat staff), `system`. |
+| `actor.kind` | `user`, `recipe` (a machine paired from a recipe acting as its creator), `directory` (directory sync), `operator` (Paperboat staff), `system`. |
 | `actor.id`, `actor.email` | The account and its email when the event happened. |
-| `actor.token_id` | The API token used, when one was. |
+| `actor.recipe_id` | The recipe whose machine acted, when one did. |
 | `target.kind`, `target.id`, `target.name` | What it happened to, with its name at that time. |
 | `machine` | The machine involved, if any, with its name at that time. |
 | `result` | `success` or `denied`. |
@@ -164,16 +164,16 @@ Every action is `<namespace>.<verb>`. The namespaces, which a test keeps equal t
 <!-- event-catalog:start -->
 | Namespace | Events about |
 |---|---|
-| `api_token` | API tokens created and revoked. |
 | `auth` | Sign-in, sign-out, CLI device approval and revocation. |
+| `backup` | Paperboat operations: database backup reports. |
 | `billing` | Plan, seats, top-ups, Customer Portal sessions, bandwidth exhaustion. |
 | `client_update_policy` | Paperboat operations: the CLI update policy. |
 | `config` | Config sync: assignments, consents, conflicts, credentials. |
 | `control` | Paperboat operations: recovered control operations. |
-| `backup` | Paperboat operations: database backup reports. |
 | `diagnostic_upload` | Support diagnostics uploaded by a user. |
 | `domain` | Custom domains: created, verification, deleted. |
 | `edge` | Paperboat operations: edge nodes and usage keys. |
+| `environment` | Named ENV vaults created, re-keyed and deleted. |
 | `environment_manifest` | ENV manifests (never values). |
 | `github` | GitHub connection and config repository. |
 | `helper` | Self-hosted helper enrollment and replacement. |
@@ -188,6 +188,7 @@ Every action is `<namespace>.<verb>`. The namespaces, which a test keeps equal t
 | `personal` | The personal workspace policy (`personal.policy.updated`, …). |
 | `preview` | Previews created, ready, renewed, stopped. |
 | `private_access` | Private access to machine ports: grants, allowed, denied. |
+| `recipe` | Recipes created, updated, rotated and revoked. |
 | `release_authority` | Paperboat operations: release signing authority. |
 | `route` | Tunnel routes and their intents. |
 | `sdk` | SDK operations that ran while Paperboat was offline, reported after reconnect. |
@@ -220,7 +221,7 @@ name or actor email), `area`, `machine_id`, `limit` (1–200) and `cursor` (from
 `GET /v1/activity/export?workspace=<team>&format=csv|json` with the same filters downloads every
 matching event, newest first, up to `business.audit_export_max_rows`. CSV columns: `id,
 occurred_at, workspace, action, result, reason, actor_kind, actor_id, actor_email,
-actor_token_id, target_kind, target_id, target_name, machine_id, machine_name, ip, user_agent,
+actor_recipe_id, target_kind, target_id, target_name, machine_id, machine_name, ip, user_agent,
 request_id, details` (details as JSON; cells starting with `= + - @` are prefixed with `'` so
 spreadsheets never run them). JSON is one array of events. Each export is itself recorded as
 `team.activity_exported`.

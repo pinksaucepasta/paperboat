@@ -121,6 +121,8 @@ type SetupInput struct {
 	RuntimeVersions                                                 json.RawMessage
 	AcceptBetaPlatform                                              bool
 	KeepAwake                                                       bool
+	// CLIClientSessionID is the session doing the setup; a recipe session is bound to the machine.
+	CLIClientSessionID string
 }
 
 func optInUserMachineKeepAwake(ctx context.Context, tx *db.Tx, userID string, row dbsqlc.UserMachine, keepAwake bool) (dbsqlc.UserMachine, error) {
@@ -191,6 +193,9 @@ func (s *Service) Setup(ctx context.Context, userID string, in SetupInput) (User
 				return err
 			}
 
+			if err := attachRecipeMachineTx(ctx, tx, userID, row.ID, in.CLIClientSessionID); err != nil {
+				return err
+			}
 			result = mapMachine(row)
 			return s.audit.WriteTx(ctx, tx, audit.Event{ActorUserID: userID, ActorType: audit.ActorUser, EventType: "machine.setup_resumed", ResourceType: "machine", ResourceID: row.ID, IdempotencyKey: "machine.setup_resumed:" + row.ID + ":" + strconv.FormatInt(row.Version, 10)})
 		}
@@ -228,6 +233,9 @@ func (s *Service) Setup(ctx context.Context, userID string, in SetupInput) (User
 
 		row, err = optInUserMachineKeepAwake(ctx, tx, userID, row, in.KeepAwake)
 		if err != nil {
+			return err
+		}
+		if err := attachRecipeMachineTx(ctx, tx, userID, row.ID, in.CLIClientSessionID); err != nil {
 			return err
 		}
 		result = mapMachine(row)

@@ -9,12 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/server/internal/apitokens"
-	"github.com/pinksaucepasta/paperboat/server/internal/audit"
 	"github.com/pinksaucepasta/paperboat/server/internal/config"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/teams"
-	"github.com/pinksaucepasta/paperboat/server/internal/workspace"
 )
 
 type fakeWorkOS struct {
@@ -212,31 +209,35 @@ func TestPostgresTeamSSOAndDirectorySync(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Both team tokens must stop authenticating; personal and other members' tokens survive.
-	tokens := apitokens.New(store, audit.NewWriter(store), config.Default().APITokens, "")
+	// Both of alice's team recipes must be revoked; personal and other members' recipes survive.
 	type credential struct {
-		secret  string
+		id      string
 		revoked bool
 	}
 	var credentials []credential
 	for _, item := range []struct {
-		account, name string
-		ws            workspace.Scope
-		revoked       bool
+		account, name, team string
+		revoked             bool
 	}{
-		{alice, "directory-one", workspace.Scope{ID: team, TeamID: team}, true},
-		{alice, "directory-two", workspace.Scope{ID: team, TeamID: team}, true},
-		{alice, "personal", workspace.Scope{ID: "personal"}, false},
-		{bob, "retained", workspace.Scope{ID: team, TeamID: team}, false},
+		{alice, "directory-one", team, true},
+		{alice, "directory-two", team, true},
+		{alice, "personal", "", false},
+		{bob, "retained", team, false},
 	} {
-		_, secret, err := tokens.Create(ctx, item.account, item.ws, apitokens.CreateInput{Name: item.name}, "")
-		if err != nil {
+		id := "recipe_" + item.account + "_" + item.name
+		if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.recipes(id,token_id,account_id,team_id,name,source,source_format,canonical,auth_hash,expires_at)
+		 VALUES($1,substr(md5($1),1,10),$2,nullif($3,''),$4,'','toml','{"expires":"90d"}',sha256(convert_to($1,'UTF8')),now()+interval '1 day')`, id, item.account, item.team, item.name); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := tokens.Authenticate(ctx, secret); err != nil {
-			t.Fatalf("before departure: %v", err)
+		credentials = append(credentials, credential{id, item.revoked})
+	}
+	revoked := func(id string) bool {
+		t.Helper()
+		var gone bool
+		if err := store.SQL().QueryRowContext(ctx, `SELECT revoked_at IS NOT NULL FROM paperboat.recipes WHERE id=$1`, id).Scan(&gone); err != nil {
+			t.Fatal(err)
 		}
-		credentials = append(credentials, credential{secret, item.revoked})
+		return gone
 	}
 
 	// Deprovisioning: alice suspended in the directory, the owner removed from it.
@@ -254,12 +255,8 @@ func TestPostgresTeamSSOAndDirectorySync(t *testing.T) {
 	}
 
 	for i, credential := range credentials {
-		_, err := tokens.Authenticate(ctx, credential.secret)
-		if credential.revoked && !errors.Is(err, apitokens.ErrInvalid) {
-			t.Fatalf("departed member token %d: got %v, want api token invalid", i, err)
-		}
-		if !credential.revoked && err != nil {
-			t.Fatalf("unrelated token %d refused: %v", i, err)
+		if revoked(credential.id) != credential.revoked {
+			t.Fatalf("recipe %d: revoked=%v, want %v", i, !credential.revoked, credential.revoked)
 		}
 	}
 
@@ -277,9 +274,9 @@ func TestPostgresTeamSSOAndDirectorySync(t *testing.T) {
 	if !bobBefore || bobAfter {
 		t.Fatalf("a deleted directory user: active before=%v after=%v, want true then false", bobBefore, bobAfter)
 	}
-	// Bob's team token goes with his membership.
-	if _, err := tokens.Authenticate(ctx, credentials[3].secret); !errors.Is(err, apitokens.ErrInvalid) {
-		t.Fatalf("a deleted directory user's team token still authenticates: %v", err)
+	// Bob's team recipe goes with his membership.
+	if !revoked(credentials[3].id) {
+		t.Fatal("a deleted directory user's team recipe is still live")
 	}
 
 	// JIT: dave signs in through the team's SSO and becomes a member.

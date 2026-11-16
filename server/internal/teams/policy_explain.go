@@ -36,9 +36,9 @@ func (s *Service) ExplainPolicy(ctx context.Context, account, ws string, r Polic
 			}
 			source = string(external(p.source, inv))
 		}
-		token := ""
-		if r.APIToken != "" {
-			if token, err = apiTokenScopeTx(ctx, tx, sc, r.Src, r.APIToken, &inv); err != nil {
+		recipe := ""
+		if r.Recipe != "" {
+			if recipe, err = recipeReachTx(ctx, tx, sc, &r, &inv); err != nil {
 				return err
 			}
 		}
@@ -70,8 +70,8 @@ func (s *Service) ExplainPolicy(ctx context.Context, account, ws string, r Polic
 		switch {
 		case src != "" && r.Dst != "" && r.Action != "":
 			d := PolicyDecision{Decision: c.Decide(src, target, r.Action, r.Port)}
-			if token != "" {
-				d.Decision = c.DecideToken(token, src, target, r.Action, r.Port)
+			if recipe != "" {
+				d.Decision = c.DecideRecipe(recipe, src, target, r.Action, r.Port)
 			}
 			if g, err := guardrailTx(ctx, tx, sc); err != nil {
 				return err
@@ -170,7 +170,7 @@ func (s *Service) PolicyVersions(ctx context.Context, account, ws string, limit 
 		if err := tx.QueryRow(ctx, `SELECT count(*) FROM workspace_policy_versions WHERE policy_id=$1`, p.id).Scan(&out.Total); err != nil {
 			return err
 		}
-		rows, err := tx.Query(ctx, `SELECT version,digest,created_at,coalesce(author,''),coalesce(api_token,''),message,gained,lost,kind
+		rows, err := tx.Query(ctx, `SELECT version,digest,created_at,coalesce(author,''),coalesce(recipe,''),message,gained,lost,kind
 FROM workspace_policy_versions WHERE policy_id=$1 AND ($2::bigint = 0 OR version < $2) ORDER BY version DESC LIMIT $3`, p.id, before, limit+1)
 		if err != nil {
 			return err
@@ -179,7 +179,7 @@ FROM workspace_policy_versions WHERE policy_id=$1 AND ($2::bigint = 0 OR version
 		for rows.Next() {
 			var v PolicyVersion
 			var author string
-			if err = rows.Scan(&v.Version, &v.Digest, &v.CreatedAt, &author, &v.APIToken, &v.Message, &v.Gained, &v.Lost, &v.Kind); err != nil {
+			if err = rows.Scan(&v.Version, &v.Digest, &v.CreatedAt, &author, &v.Recipe, &v.Message, &v.Gained, &v.Lost, &v.Kind); err != nil {
 				return err
 			}
 			v.Author = userLabel(inv, author)
@@ -207,28 +207,29 @@ func compileFailed(errs policy.Errors) bool {
 	return false
 }
 
-// apiTokenScopeTx finds src's live API token by name in this workspace and, when it has a
-// scope, adds it to inv so that the explanation applies the scope.
-func apiTokenScopeTx(ctx context.Context, tx *db.Tx, sc policyScope, src, name string, inv *policy.Inventory) (string, error) {
-	var account string
-	for _, m := range inv.Members {
-		if "user:"+strings.ToLower(m.Email) == strings.ToLower(src) {
-			account = m.AccountID
-		}
-	}
-	var id string
-	var scope []byte
-	err := tx.QueryRow(ctx, `SELECT id,scope FROM api_tokens WHERE account_id=$1 AND team_id IS NOT DISTINCT FROM nullif($2,'') AND name=$3 AND revoked_at IS NULL AND expires_at>now()`, account, sc.w.TeamID, name).Scan(&id, &scope)
+// recipeReachTx finds the workspace's live recipe by name, adds its reach to inv and makes its
+// creator the question's src when none is given.
+func recipeReachTx(ctx context.Context, tx *db.Tx, sc policyScope, r *PolicyExplainRequest, inv *policy.Inventory) (string, error) {
+	var id, creator, email string
+	var canonical []byte
+	err := tx.QueryRow(ctx, `SELECT r.id, r.account_id, u.primary_email, r.canonical FROM recipes r JOIN users u ON u.id=r.account_id
+	 WHERE r.name=$1 AND r.revoked_at IS NULL AND coalesce(r.team_id,'')=$2 AND (r.team_id IS NOT NULL OR r.account_id=$3)`,
+		r.Recipe, sc.w.TeamID, sc.actor.AccountID).Scan(&id, &creator, &email, &canonical)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return "", &PolicyInvalidError{Errors: policy.Errors{{Path: "/api_token", Code: "unknown_api_token", Message: src + " has no live API token named " + name + " in this workspace"}}}
+		return "", &PolicyInvalidError{Errors: policy.Errors{{Path: "/recipe", Code: "unknown_recipe", Message: "this workspace has no recipe named " + r.Recipe}}}
 	}
-	if err != nil || scope == nil {
-		return id, err
-	}
-	var entries []policy.ScopeEntry
-	if err = json.Unmarshal(scope, &entries); err != nil {
+	if err != nil {
 		return "", err
 	}
-	inv.Tokens = append(inv.Tokens, policy.Token{ID: id, Creator: account, Scope: entries})
+	var stored struct {
+		Reach []policy.ScopeEntry `json:"reach"`
+	}
+	if err = json.Unmarshal(canonical, &stored); err != nil {
+		return "", err
+	}
+	if r.Src == "" {
+		r.Src = "user:" + strings.ToLower(email)
+	}
+	inv.Recipes = append(inv.Recipes, policy.Recipe{ID: id, Creator: creator, Reach: stored.Reach})
 	return id, nil
 }

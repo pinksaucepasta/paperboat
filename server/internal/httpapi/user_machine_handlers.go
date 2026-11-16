@@ -94,10 +94,15 @@ func machineSetup(service *usermachines.Service) http.HandlerFunc {
 			Alias: body.Alias, Platform: body.Platform, Architecture: body.Architecture,
 			WorkspaceRoot: body.WorkspaceRoot, PublicIdentityKey: body.PublicIdentityKey,
 			RuntimeVersions: body.RuntimeVersions, AcceptBetaPlatform: body.AcceptBetaPlatform,
-			KeepAwake: body.KeepAwake,
+			KeepAwake: body.KeepAwake, CLIClientSessionID: principal.Client.SessionID,
 		})
+		var full *usermachines.RecipeFullError
 		switch {
 		case writePlanLimitReached(w, r, err):
+		case errors.As(err, &full):
+			writeErrorDetails(w, r, http.StatusConflict, "recipe_full", "Recipe "+full.Name+" has reached its max_machines. A machine leaves the recipe when it is removed; to allow more, raise max_machines and run pb recipe update.", map[string]any{"recipe": full.Name, "max_machines": full.Max})
+		case errors.Is(err, usermachines.ErrRecipeUnavailable):
+			writeError(w, r, http.StatusUnauthorized, "recipe_invalid", "This recipe token is not valid: the recipe was revoked or the token was mistyped.")
 		case errors.Is(err, usermachines.ErrInvalidSetup):
 			writeError(w, r, http.StatusBadRequest, "invalid_machine_setup", "Machine setup details are invalid or unsupported.")
 		case errors.Is(err, usermachines.ErrMachineIdentityConflict):
@@ -745,8 +750,8 @@ func userMachineExecDescriptor(service *usermachines.Service) http.HandlerFunc {
 			return
 		}
 
-		if errors.Is(err, auth.ErrOutsideTokenScope) {
-			writeError(w, r, http.StatusForbidden, "outside_token_scope", "The API token does not allow this session, workspace or machine action.")
+		if errors.Is(err, auth.ErrOutsideReach) {
+			writeError(w, r, http.StatusForbidden, "outside_recipe_reach", "This machine's recipe does not reach that machine or action. Add it to [[reach]] and run pb recipe update.")
 			return
 		}
 
@@ -799,8 +804,8 @@ func userMachineFileTransferDescriptor(service *usermachines.Service) http.Handl
 			return
 		}
 
-		if errors.Is(err, auth.ErrOutsideTokenScope) {
-			writeError(w, r, http.StatusForbidden, "outside_token_scope", "The API token does not allow this session, workspace or file transfer.")
+		if errors.Is(err, auth.ErrOutsideReach) {
+			writeError(w, r, http.StatusForbidden, "outside_recipe_reach", "This machine's recipe does not reach that machine for file transfer. Add it to [[reach]] and run pb recipe update.")
 			return
 		}
 
@@ -916,7 +921,7 @@ func userMachineTerminalSessionsCreate(service *usermachines.Service) http.Handl
 		}
 		// The console opens every terminal it creates in the browser, so a create past the
 		// open browser terminals limit is refused before a shell starts on the machine.
-		if p.Client == nil && p.APIToken == nil && writePlanLimitReached(w, r, service.CheckBrowserTerminalLimit(r.Context(), r.PathValue("machine_id"), "")) {
+		if p.Client == nil && writePlanLimitReached(w, r, service.CheckBrowserTerminalLimit(r.Context(), r.PathValue("machine_id"), "")) {
 			return
 		}
 		item, err := service.CreateConfiguredTerminalSession(r.Context(), p.User.ID, r.PathValue("machine_id"), body.Name, r.Header.Get("Idempotency-Key"))

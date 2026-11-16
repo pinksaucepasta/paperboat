@@ -53,7 +53,7 @@ func (s *Service) recordAccessStartedTx(ctx context.Context, tx *db.Tx, in dbsql
 	if in.TeamID.Valid {
 		metadata["workspace"] = in.TeamID.String
 	}
-	token, _ := auth.APITokenFromContext(ctx)
+	token, _ := auth.RecipeFromContext(ctx)
 	return s.audit.WriteTx(ctx, tx, audit.Event{ActorUserID: in.UserID, ActorTokenID: token, ActorType: audit.ActorUser, EventType: accessStartedEvent,
 		ResourceType: accessResource, ResourceID: in.UserMachineID, IdempotencyKey: in.ID, Metadata: metadata})
 }
@@ -61,8 +61,8 @@ func (s *Service) recordAccessStartedTx(ctx context.Context, tx *db.Tx, in dbsql
 // machineForCapability is getMachineForCapability that records a refusal.
 func (s *Service) machineForCapability(ctx context.Context, q *dbsqlc.Queries, in dbsqlc.GetUserMachineForCapabilityParams) (dbsqlc.UserMachine, error) {
 	row, err := getMachineForCapability(ctx, q, in)
-	if errors.Is(err, sql.ErrNoRows) || errors.Is(err, auth.ErrOutsideTokenScope) {
-		s.recordAccessDenied(ctx, q, in, errors.Is(err, auth.ErrOutsideTokenScope))
+	if errors.Is(err, sql.ErrNoRows) || errors.Is(err, auth.ErrOutsideReach) {
+		s.recordAccessDenied(ctx, q, in, errors.Is(err, auth.ErrOutsideReach))
 	}
 	return row, err
 }

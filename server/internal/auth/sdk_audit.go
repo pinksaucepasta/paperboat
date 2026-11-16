@@ -10,7 +10,7 @@ import (
 
 // RecordSDKAuthorization records only authority identifiers, never operation payloads.
 func RecordSDKAuthorization(ctx context.Context, writer *audit.Writer, account, session, target, operation, capability, outcome string) error {
-	token, ok := APITokenFromContext(ctx)
+	token, ok := RecipeFromContext(ctx)
 	if !ok {
 		return nil
 	}
@@ -18,7 +18,7 @@ func RecordSDKAuthorization(ctx context.Context, writer *audit.Writer, account, 
 		operation = ""
 	}
 	scope, _ := workspace.FromContext(ctx)
-	metadata := map[string]any{"api_token_id": token, "cli_client_session_id": session, "workspace": scope.ID,
+	metadata := map[string]any{"recipe_id": token, "cli_client_session_id": session, "workspace": scope.ID,
 		"operation_id": operation, "capability": capability, "outcome": outcome, "scope_set": true}
 	if scope.TeamID != "" {
 		metadata["scope_team"] = scope.TeamID

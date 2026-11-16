@@ -1,6 +1,6 @@
 // Package policy is the workspace access policy (PLAN F18): the file format, its validation
 // with stable path+code errors, compilation against a workspace inventory into explicit
-// grants, API token scopes, and the explain and test evaluation. The server stores and enforces the compiled
+// grants, recipe reach, and the explain and test evaluation. The server stores and enforces the compiled
 // grants; the CLI uses this package to parse and format files locally. Reference:
 // README.md in this directory; JSON Schema: schema.json.
 package policy

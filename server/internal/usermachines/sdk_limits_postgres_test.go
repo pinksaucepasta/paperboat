@@ -20,7 +20,7 @@ func TestSDKSessionRateLimits(t *testing.T) {
 	ctx, token, session := sdkSession(t, f, "exec")
 	cfg := config.Default()
 	limits := cfg.Billing.Limits
-	limits.SDK = config.SDKLimits{SessionsPerToken: 2, SessionsPerAccount: 3, OperationsPerToken: 1, OperationsPerAccount: 2}
+	limits.SDK = config.SDKLimits{OperationsPerToken: 1, OperationsPerAccount: 2}
 	planlimits.Configure(limits, "")
 	t.Cleanup(func() { planlimits.Configure(cfg.Billing.Limits, ""); planlimits.ConfigureSDKRates(cfg.RateLimits) })
 	limited := func(err error, kind string) {
@@ -30,19 +30,9 @@ func TestSDKSessionRateLimits(t *testing.T) {
 			t.Fatalf("expected typed %s limit, got %T", kind, err)
 		}
 	}
-	device := auth.NewDeviceService(f.store, f.service.audit, cfg.CLIAuth, []string{"sdk-test-token-hash-key"})
-	start := func(account, id string) error {
-		_, err := device.StartAPITokenSession(ctx, auth.APITokenSessionRequest{TokenID: id, Account: account, Label: "sdk", DeviceType: "container", OS: "linux"})
-		return err
-	}
-	if err := start(f.account, token); err != nil {
-		t.Fatal(err)
-	}
-	limited(start(f.account, token), "sessions")
 	other := f
 	other.suffix += "_other"
-	otherCtx, otherToken, otherSession := sdkSession(t, other, "exec")
-	limited(start(f.account, otherToken), "sessions")
+	otherCtx, _, otherSession := sdkSession(t, other, "exec")
 	// Concurrent descriptors contend for one persisted reservation, not an in-memory counter.
 	var wg sync.WaitGroup
 	results := make(chan error, 2)
@@ -68,7 +58,7 @@ func TestSDKSessionRateLimits(t *testing.T) {
 		t.Fatal("concurrent descriptors exceeded the token reservation limit")
 	}
 	for i, capability := range []string{"files", "private_access"} {
-		if _, err := f.store.SQL().ExecContext(ctx, `INSERT INTO paperboat.api_token_scope_rules(token_id,entry,target_kind,target_id,action,ports) VALUES($1,$2,'machine',$3,$4,'[5432,5433)')`, token, i+1, f.machine, capability); err != nil {
+		if _, err := f.store.SQL().ExecContext(ctx, `INSERT INTO paperboat.recipe_reach_rules(recipe_id,entry,target_kind,target_id,action,ports) VALUES($1,$2,'machine',$3,$4,'[5432,5433)')`, token, i+1, f.machine, capability); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -91,15 +81,12 @@ func TestSDKSessionRateLimits(t *testing.T) {
 	}
 	_, err := f.service.ExecDescriptor(ctx, f.account, "", f.machine, session, "operation_sdk_limit_account", true)
 	limited(err, "operations")
-	// Token expiry does not release an outstanding operation reservation.
-	if _, err := f.store.SQL().ExecContext(ctx, `UPDATE paperboat.api_tokens SET created_at=now()-interval '2 hours',expires_at=now()-interval '1 minute' WHERE id=$1`, token); err != nil {
+	// Recipe token expiry does not release an outstanding operation reservation.
+	if _, err := f.store.SQL().ExecContext(ctx, `UPDATE paperboat.recipes SET created_at=now()-interval '2 hours',expires_at=now()-interval '1 minute' WHERE id=$1`, token); err != nil {
 		t.Fatal(err)
 	}
 	_, err = f.service.ExecDescriptor(otherCtx, f.account, "", f.machine, otherSession, "operation_sdk_limit_expired_token", true)
 	limited(err, "operations")
-	if _, err := f.store.SQL().ExecContext(ctx, `UPDATE paperboat.api_tokens SET expires_at=now()+interval '1 hour' WHERE id=$1`, token); err != nil {
-		t.Fatal(err)
-	}
 	personal := workspace.WithContext(f.ctx, workspace.Scope{ID: "personal"})
 	if _, err := f.service.ExecDescriptor(personal, f.account, source, f.machine, "ordinary-cli", "operation_ordinary_login", true); err != nil {
 		t.Fatal("SDK quota affected ordinary login")
@@ -144,13 +131,22 @@ func testSDKRequestRates(t *testing.T, f workspaceMachineFixture) {
 		}
 	}
 	device := auth.NewDeviceService(f.store, f.service.audit, cfg.CLIAuth, []string{"sdk-test-token-hash-key"})
-	start := func(account, id string) error {
-		_, err := device.StartAPITokenSession(ctx, auth.APITokenSessionRequest{TokenID: id, Account: account, Label: "sdk", DeviceType: "container", OS: "linux"})
+	// start exchanges a recipe token with a wrong auth: refused, but only after the session rate.
+	start := func(id string) error {
+		var tokenID string
+		if err := f.store.SQL().QueryRowContext(ctx, `SELECT token_id FROM paperboat.recipes WHERE id=$1`, id).Scan(&tokenID); err != nil {
+			t.Fatal(err)
+		}
+		_, err := device.StartRecipeSession(ctx, auth.RecipeSessionRequest{TokenID: tokenID, Auth: make([]byte, 32), Label: "sdk", DeviceType: "container", OS: "linux"})
+		var refusal *auth.RecipeRefusal
+		if errors.As(err, &refusal) {
+			return nil
+		}
 		return err
 	}
 	t.Cleanup(func() { planlimits.ConfigureSDKRates(cfg.RateLimits); planlimits.Configure(cfg.Billing.Limits, "") })
 	var err error
-	// Request buckets are independent by account and token and cover descriptors and session creation.
+	// Request buckets are independent by account and recipe and cover descriptors and session creation.
 	planlimits.Configure(cfg.Billing.Limits, "")
 	rates := cfg.RateLimits
 	rates.SDKSessionPerMinute = 1
@@ -165,10 +161,10 @@ func testSDKRequestRates(t *testing.T, f workspaceMachineFixture) {
 	limited(err, "descriptors")
 	_, err = f.service.ExecDescriptor(otherCtx, f.account, "", f.machine, otherSession, "operation_sdk_rate_other_token", true)
 	limited(err, "descriptors")
-	if err := start(f.account, token); err != nil {
+	if err := start(token); err != nil {
 		t.Fatal(err)
 	}
-	limited(start(f.account, token), "sessions")
+	limited(start(token), "sessions")
 	independent := newWorkspaceMachineFixture(t)
 	independent.service.ConfigureAccess(fakeCredentialIssuer{}, f.service.issuer)
 	independent.service.ConfigureTerminalSessions(f.service.controlSigner, nil)
@@ -176,7 +172,7 @@ func testSDKRequestRates(t *testing.T, f workspaceMachineFixture) {
 	if _, err := independent.service.ExecDescriptor(independentCtx, independent.account, "", independent.machine, independentSession, "operation_sdk_rate_independent", true); err != nil {
 		t.Fatal("one account exhausted another account's descriptor quota")
 	}
-	if err := start(independent.account, independentToken); err != nil {
-		t.Fatal("one account exhausted another account's session quota")
+	if err := start(independentToken); err != nil {
+		t.Fatal("one recipe exhausted another recipe's session rate")
 	}
 }

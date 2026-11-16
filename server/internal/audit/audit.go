@@ -35,7 +35,7 @@ const (
 type Event struct {
 	ID          string
 	ActorUserID string
-	// ActorTokenID names the API token that acted for ActorUserID, when one did.
+	// ActorTokenID names the recipe whose session acted for ActorUserID, when one did.
 	ActorTokenID   string
 	Result         string
 	Reason         string
@@ -48,12 +48,12 @@ type Event struct {
 	CreatedAt      time.Time
 }
 
-type apiTokenKey struct{}
+type recipeKey struct{}
 
-// WithAPIToken attributes every audit event written under ctx to the API token that
-// authenticated the request.
-func WithAPIToken(ctx context.Context, tokenID string) context.Context {
-	return context.WithValue(ctx, apiTokenKey{}, tokenID)
+// WithRecipe attributes every audit event written under ctx to the recipe whose session made
+// the request.
+func WithRecipe(ctx context.Context, recipeID string) context.Context {
+	return context.WithValue(ctx, recipeKey{}, recipeID)
 }
 
 type Writer struct {
@@ -89,10 +89,10 @@ func write(ctx context.Context, q *dbsqlc.Queries, event Event) error {
 	if event.Metadata == nil {
 		event.Metadata = make(map[string]any)
 	}
-	if tokenID, ok := ctx.Value(apiTokenKey{}).(string); ok && tokenID != "" {
-		event.Metadata["api_token_id"] = tokenID
+	if recipeID, ok := ctx.Value(recipeKey{}).(string); ok && recipeID != "" {
+		event.Metadata["recipe_id"] = recipeID
 		if event.ActorTokenID == "" {
-			event.ActorTokenID = tokenID // the documented actor.token_id
+			event.ActorTokenID = recipeID // the documented actor.token_id
 		}
 	}
 	if requestID := serverdiagnostics.NormalizeRequestID(serverdiagnostics.RequestID(ctx)); requestID != "" {

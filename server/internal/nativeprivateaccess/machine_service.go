@@ -42,8 +42,8 @@ func (r *SQLResolver) resolveMachineServiceAttempt(ctx context.Context, in Reque
 	defer func() {
 		returnErr = preserveNativeSQLTransactionCleanup(returnErr, tx.Rollback())
 	}()
-	if e := auth.AuthorizeAPITokenSession(ctx, tx, in.UserID, in.CLIClientSessionID, in.ResourceID, "private_access", port); e != nil {
-		if e == auth.ErrOutsideTokenScope {
+	if e := auth.AuthorizeRecipeSession(ctx, tx, in.UserID, in.CLIClientSessionID, in.ResourceID, "private_access", port); e != nil {
+		if e == auth.ErrOutsideReach {
 			return Target{}, ErrDenied
 		}
 		return Target{}, e
@@ -58,7 +58,7 @@ func (r *SQLResolver) resolveMachineServiceAttempt(ctx context.Context, in Reque
 		}
 		return Target{}, e
 	}
-	if _, token := auth.APITokenFromContext(ctx); token {
+	if _, token := auth.RecipeFromContext(ctx); token {
 		scope, _ := workspace.FromContext(ctx)
 		if authority.TeamID != scope.TeamID {
 			return Target{}, ErrDenied
@@ -93,13 +93,13 @@ func (r *SQLResolver) resolveMachineServiceAttempt(ctx context.Context, in Reque
 	// Reuse the exact capability-only session. Resolving current authority must not
 	// extend its lifetime; issuance can create a replacement after expiration.
 	tokenOperation := ""
-	if _, token := auth.APITokenFromContext(ctx); token {
+	if _, token := auth.RecipeFromContext(ctx); token {
 		tokenOperation = in.OperationID
 	}
 	e = tx.QueryRowContext(ctx, `SELECT id FROM paperboat.user_machine_access_sessions WHERE user_id=$1 AND user_machine_id=$2 AND cli_client_session_id=$3 AND machine_service_port=$4 AND machine_service_source_kind=$5 AND machine_service_source_id=$6 AND machine_service_source_generation=$7 AND team_id IS NOT DISTINCT FROM nullif($8,'') AND state='active' AND revoked_at IS NULL AND expires_at>$9 AND ($10='' OR operation_id=$10) AND machine_service_team_fence=paperboat.machine_service_team_fence(user_id,user_machine_id,machine_service_source_kind,machine_service_source_id,team_id) ORDER BY created_at DESC LIMIT 1`, in.UserID, in.ResourceID, in.CLIClientSessionID, port, authority.SourceKind, authority.SourceID, authority.Generation, authority.TeamID, now, tokenOperation).Scan(&out.AccessSessionID)
 	inserted := false
 	if pureNativeRejection(e, sql.ErrNoRows) {
-		if token, ok := auth.APITokenFromContext(ctx); ok {
+		if token, ok := auth.RecipeFromContext(ctx); ok {
 			if err := planlimits.CheckSDKCount(ctx, func(ctx context.Context, q string, args ...any) planlimits.SDKRow {
 				return tx.QueryRowContext(ctx, q, args...)
 			}, in.UserID, token, "operations"); err != nil {

@@ -29,7 +29,7 @@ var eraseSteps = []struct{ name, query string }{
 	{"CLI client sessions", `UPDATE cli_client_sessions SET state='revoked', revoked_at=coalesce(revoked_at,now()), revocation_reason='account_deleted' WHERE user_id=$1 AND state='active'`},
 	{"CLI refresh tokens", `UPDATE cli_refresh_tokens SET state='revoked', revoked_at=coalesce(revoked_at,now()) WHERE state='active' AND cli_client_session_id IN (SELECT id FROM cli_client_sessions WHERE user_id=$1)`},
 	{"CLI access tokens", `UPDATE cli_access_tokens SET revoked_at=coalesce(revoked_at,now()) WHERE revoked_at IS NULL AND cli_client_session_id IN (SELECT id FROM cli_client_sessions WHERE user_id=$1)`},
-	{"API tokens", `UPDATE api_tokens SET revoked_at=now(), revoked_by='account_deleted' WHERE account_id=$1 AND revoked_at IS NULL`},
+	{"recipes", `UPDATE recipes SET revoked_at=now(), revoked_by='account_deleted' WHERE account_id=$1 AND revoked_at IS NULL`},
 	{"device grants", `DELETE FROM device_grants WHERE user_id=$1`},
 	{"managed SSH keys", `UPDATE managed_ssh_client_keys SET revoked_at=coalesce(revoked_at,now()) WHERE user_id=$1 AND revoked_at IS NULL`},
 	{"browser terminal tickets", `DELETE FROM browser_terminal_tickets WHERE user_id=$1`},

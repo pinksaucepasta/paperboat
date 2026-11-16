@@ -213,11 +213,11 @@ func writePreviewMachineProofFailure(w http.ResponseWriter, r *http.Request, err
 }
 
 func writeErrorDetails(w http.ResponseWriter, r *http.Request, status int, code, message string, details map[string]any, causes ...error) {
-	// An API token's scope refusal can come out of any machine authorization; every handler
-	// reports it the same way.
+	// A recipe's reach refusal can come out of any machine authorization; every handler reports
+	// it the same way.
 	for _, cause := range causes {
-		if errors.Is(cause, auth.ErrOutsideTokenScope) {
-			status, code, message, causes = http.StatusForbidden, "outside_token_scope", "This API token's scope does not cover this machine action.", nil
+		if errors.Is(cause, auth.ErrOutsideReach) {
+			status, code, message, causes = http.StatusForbidden, "outside_recipe_reach", "This machine's recipe does not reach that machine or action. Add it to [[reach]] and run pb recipe update.", nil
 			break
 		}
 	}

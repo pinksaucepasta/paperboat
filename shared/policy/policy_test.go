@@ -252,41 +252,39 @@ func TestPrivateAccessPortsAndTeamSwitch(t *testing.T) {
 	}
 }
 
-func TestScopedAPITokenNarrowsItsCreator(t *testing.T) {
+func TestRecipeReachNarrowsItsCreator(t *testing.T) {
 	inv := personal()
-	inv.Tokens = []Token{{ID: "tok-ci", Creator: "ana", Scope: []ScopeEntry{{Dst: []string{"tag:ci"}, Allow: []string{"exec"}}}}}
+	inv.Recipes = []Recipe{{ID: "recipe-agent", Creator: "ana", Reach: []ScopeEntry{{Dst: []string{"tag:ci"}, Allow: []string{"exec"}}}}, {ID: "recipe-ci", Creator: "ana"}}
 	c := mustCompile(t, `{"tags": {"tag:ci": ["machine:ci"]}}`, inv)
-	if d := c.DecideToken("tok-ci", "ana", machine("m-ci"), ActionExec, 0); !d.Allowed {
-		t.Fatalf("the scope allows exec on tag:ci: %+v", d)
+	if d := c.DecideRecipe("recipe-agent", "ana", machine("m-ci"), ActionExec, 0); !d.Allowed {
+		t.Fatalf("the reach allows exec on tag:ci: %+v", d)
 	}
 	for _, q := range []struct {
+		recipe string
 		target Target
 		action string
-	}{{machine("m-ci"), ActionTerminal}, {machine("m-laptop"), ActionExec}} {
-		if d := c.DecideToken("tok-ci", "ana", q.target, q.action, 0); d.Allowed || d.Reason != "outside_token_scope" {
-			t.Fatalf("%v %s: %+v", q.target, q.action, d)
+	}{{"recipe-agent", machine("m-ci"), ActionTerminal}, {"recipe-agent", machine("m-laptop"), ActionExec}, {"recipe-ci", machine("m-laptop"), ActionExec}} {
+		if d := c.DecideRecipe(q.recipe, "ana", q.target, q.action, 0); d.Allowed || d.Reason != "outside_recipe_reach" {
+			t.Fatalf("%s %v %s: %+v", q.recipe, q.target, q.action, d)
 		}
 	}
-	if d := c.DecideToken("tok-unscoped", "ana", machine("m-laptop"), ActionTerminal, 0); !d.Allowed {
-		t.Fatalf("an unscoped token acts as its creator: %+v", d)
-	}
 	untagged := mustCompile(t, `{}`, inv)
-	if d := untagged.DecideToken("tok-ci", "ana", machine("m-ci"), ActionExec, 0); d.Allowed {
-		t.Fatalf("a scope whose tag is gone matches nothing: %+v", d)
+	if d := untagged.DecideRecipe("recipe-agent", "ana", machine("m-ci"), ActionExec, 0); d.Allowed {
+		t.Fatalf("a reach whose tag is gone matches nothing: %+v", d)
 	}
-	if errs := untagged.ValidateScope(inv.Tokens[0].Scope); len(errs) != 1 || errs[0].Code != "unknown_tag" {
-		t.Fatalf("creating a token with an unknown tag is refused: %v", errs)
+	if errs := untagged.ValidateScope(inv.Recipes[0].Reach); len(errs) != 1 || errs[0].Code != "unknown_tag" {
+		t.Fatalf("creating a recipe with an unknown tag is refused: %v", errs)
 	}
 }
 
-func TestScopedTokenNeverExceedsCreator(t *testing.T) {
+func TestRecipeReachNeverExceedsCreator(t *testing.T) {
 	inv := team()
-	inv.Tokens = []Token{{ID: "tok", Creator: "bo", Scope: []ScopeEntry{{Dst: []string{"machine:*"}, Allow: []string{"*"}}}}}
+	inv.Recipes = []Recipe{{ID: "recipe", Creator: "bo", Reach: []ScopeEntry{{Dst: []string{"machine:*"}, Allow: []string{"*"}}}}}
 	c := mustCompile(t, `{"rules": [{"src": ["role:admin"], "dst": ["machine:runner"], "allow": ["exec"]}]}`, inv)
-	if d := c.DecideToken("tok", "bo", machine("m-db1"), ActionExec, 0); d.Allowed {
+	if d := c.DecideRecipe("recipe", "bo", machine("m-db1"), ActionExec, 0); d.Allowed {
 		t.Fatalf("got %+v", d)
 	}
-	if d := c.DecideToken("tok", "bo", machine("m-runner"), ActionExec, 0); !d.Allowed {
+	if d := c.DecideRecipe("recipe", "bo", machine("m-runner"), ActionExec, 0); !d.Allowed {
 		t.Fatalf("got %+v", d)
 	}
 }

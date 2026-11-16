@@ -49979,204 +49979,6 @@
         "description": "Sets one machine's tags in the workspace policy file as a new version, with the same rights, review (412) and conflict (409) rules as PUT policy."
       }
     },
-    "/v1/workspaces/{ws}/api-tokens": {
-      "get": {
-        "operationId": "get_v1_workspace_api_tokens",
-        "summary": "List API tokens",
-        "security": [
-          {
-            "bearerAccess": []
-          },
-          {
-            "cookieSession": []
-          }
-        ],
-        "x-required-bearer-scopes": [
-          "account:read"
-        ],
-        "parameters": [
-          {
-            "name": "ws",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "maxLength": 128
-            }
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 200
-            },
-            "description": "Page size (default 50)."
-          },
-          {
-            "name": "cursor",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "maxLength": 512
-            },
-            "description": "next_cursor of the previous page."
-          },
-          {
-            "name": "state",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "enum": [
-                "active",
-                "ended"
-              ]
-            },
-            "description": "Only live tokens (active) or only revoked and expired ones (ended). Omitted lists every token. A cursor works only with the state it came from."
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "JSON body as documented in shared/policy/README.md."
-          },
-          "400": {
-            "$ref": "#/components/responses/Error"
-          },
-          "401": {
-            "$ref": "#/components/responses/Error"
-          },
-          "403": {
-            "$ref": "#/components/responses/Error"
-          },
-          "503": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "description": "Members see their own tokens, owners and admins all. total counts the tokens the state filter matches; active_total and ended_total count all visible tokens whatever the filter."
-      },
-      "post": {
-        "operationId": "post_v1_workspace_api_tokens",
-        "summary": "Create an API token",
-        "security": [
-          {
-            "bearerAccess": []
-          },
-          {
-            "cookieSession": [],
-            "csrfHeader": []
-          }
-        ],
-        "x-required-bearer-scopes": [
-          "account:read"
-        ],
-        "parameters": [
-          {
-            "name": "ws",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "maxLength": 128
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "description": "{name, expires_in_days, scope?}"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "JSON body as documented in shared/policy/README.md."
-          },
-          "400": {
-            "$ref": "#/components/responses/Error"
-          },
-          "401": {
-            "$ref": "#/components/responses/Error"
-          },
-          "403": {
-            "$ref": "#/components/responses/Error"
-          },
-          "409": {
-            "$ref": "#/components/responses/Error"
-          },
-          "422": {
-            "$ref": "#/components/responses/Error"
-          },
-          "503": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "description": "Returns the secret once. The token acts as its creator in this workspace, narrowed by an optional scope."
-      }
-    },
-    "/v1/workspaces/{ws}/api-tokens/{id}": {
-      "delete": {
-        "operationId": "delete_v1_workspace_api_token",
-        "summary": "Revoke an API token",
-        "security": [
-          {
-            "bearerAccess": []
-          },
-          {
-            "cookieSession": [],
-            "csrfHeader": []
-          }
-        ],
-        "x-required-bearer-scopes": [
-          "account:read"
-        ],
-        "parameters": [
-          {
-            "name": "ws",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "maxLength": 128
-            }
-          },
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "maxLength": 128
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "JSON body as documented in shared/policy/README.md."
-          },
-          "401": {
-            "$ref": "#/components/responses/Error"
-          },
-          "403": {
-            "$ref": "#/components/responses/Error"
-          },
-          "404": {
-            "$ref": "#/components/responses/Error"
-          },
-          "503": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "description": "By its creator or an owner/admin."
-      }
-    },
     "/v1/teams/{team_id}/identity": {
       "get": {
         "operationId": "team_identity_status",
@@ -51488,43 +51290,6 @@
             "$ref": "#/components/responses/Error"
           }
         }
-      }
-    },
-    "/v1/auth/api-token-sessions": {
-      "post": {
-        "operationId": "post_v1_auth_api_token_sessions",
-        "summary": "Start a CLI session with an API token",
-        "security": [
-          {
-            "bearerAccess": []
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "description": "{client_label, device_type (desktop|server|container), os}"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "CLI token set (access_token, refresh_token, expires_in, scope, cli_client_session_id) for a session of the token's creator that carries the token."
-          },
-          "400": {
-            "$ref": "#/components/responses/Error"
-          },
-          "401": {
-            "$ref": "#/components/responses/Error"
-          },
-          "503": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "description": "The bearer is an API token (pbat_\u2026). The session ends when the token is revoked or expires; a scoped token's session is held to the scope."
       }
     },
     "/v1/github/native-links/{link_id}/review": {
@@ -53195,6 +52960,915 @@
                 "$ref": "#/components/schemas/MachineFrontDesk"
               }
             }
+          }
+        }
+      }
+    },
+    "/v1/workspaces/{ws}/recipes": {
+      "get": {
+        "operationId": "get_v1_workspace_recipes",
+        "summary": "List recipes",
+        "security": [
+          {
+            "bearerAccess": []
+          },
+          {
+            "cookieSession": []
+          }
+        ],
+        "x-required-bearer-scopes": [
+          "account:read"
+        ],
+        "parameters": [
+          {
+            "name": "ws",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "JSON body as documented in shared/recipe/README.md."
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "operationId": "post_v1_workspace_recipes",
+        "summary": "Create a recipe",
+        "security": [
+          {
+            "bearerAccess": []
+          },
+          {
+            "cookieSession": [],
+            "csrfHeader": []
+          }
+        ],
+        "x-required-bearer-scopes": [
+          "account:read"
+        ],
+        "parameters": [
+          {
+            "name": "ws",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "description": "{name, source, format (toml|json), token_id, auth, vault_wraps?: [{vault, wrapped}]}"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "JSON body as documented in shared/recipe/README.md."
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "description": "The token is made on the creator's computer (shared/recipe); the server stores sha256(auth) only."
+      }
+    },
+    "/v1/workspaces/{ws}/recipes/{name}": {
+      "get": {
+        "operationId": "get_v1_workspace_recipe",
+        "summary": "Show a recipe with its machines",
+        "security": [
+          {
+            "bearerAccess": []
+          },
+          {
+            "cookieSession": []
+          }
+        ],
+        "x-required-bearer-scopes": [
+          "account:read"
+        ],
+        "parameters": [
+          {
+            "name": "ws",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 63
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "JSON body as documented in shared/recipe/README.md."
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "operationId": "put_v1_workspace_recipe",
+        "summary": "Update a recipe (new revision, same token)",
+        "security": [
+          {
+            "bearerAccess": []
+          },
+          {
+            "cookieSession": [],
+            "csrfHeader": []
+          }
+        ],
+        "x-required-bearer-scopes": [
+          "account:read"
+        ],
+        "parameters": [
+          {
+            "name": "ws",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 63
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "description": "{source, format, vault_wraps?}"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "JSON body as documented in shared/recipe/README.md."
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/workspaces/{ws}/recipes/{name}/rotate": {
+      "post": {
+        "operationId": "post_v1_workspace_recipe_rotate",
+        "summary": "Rotate a recipe's token",
+        "security": [
+          {
+            "bearerAccess": []
+          },
+          {
+            "cookieSession": [],
+            "csrfHeader": []
+          }
+        ],
+        "x-required-bearer-scopes": [
+          "account:read"
+        ],
+        "parameters": [
+          {
+            "name": "ws",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 63
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "description": "{auth, confirm, machine_keys?: [{machine_id, sealed}]}"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "JSON body as documented in shared/recipe/README.md."
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "description": "Without the right confirm: 409 confirmation_required with {confirm, impact}."
+      }
+    },
+    "/v1/workspaces/{ws}/recipes/{name}/revoke": {
+      "post": {
+        "operationId": "post_v1_workspace_recipe_revoke",
+        "summary": "Revoke a recipe and remove its machines",
+        "security": [
+          {
+            "bearerAccess": []
+          },
+          {
+            "cookieSession": [],
+            "csrfHeader": []
+          }
+        ],
+        "x-required-bearer-scopes": [
+          "account:read"
+        ],
+        "parameters": [
+          {
+            "name": "ws",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 63
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "description": "{confirm}"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "JSON body as documented in shared/recipe/README.md."
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "description": "Without the right confirm: 409 confirmation_required with {confirm, impact}."
+      }
+    },
+    "/v1/workspaces/{ws}/env-vaults": {
+      "get": {
+        "operationId": "get_v1_workspace_env_vaults",
+        "summary": "List named ENV vaults",
+        "security": [
+          {
+            "bearerAccess": []
+          },
+          {
+            "cookieSession": []
+          }
+        ],
+        "x-required-bearer-scopes": [
+          "account:read"
+        ],
+        "parameters": [
+          {
+            "name": "ws",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "JSON body as documented in shared/recipe/README.md."
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "operationId": "post_v1_workspace_env_vaults",
+        "summary": "Create a named ENV vault",
+        "security": [
+          {
+            "bearerAccess": []
+          },
+          {
+            "cookieSession": [],
+            "csrfHeader": []
+          }
+        ],
+        "x-required-bearer-scopes": [
+          "account:read"
+        ],
+        "parameters": [
+          {
+            "name": "ws",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "description": "{name, wraps: [{recipient_kind (account|team), recipient_id, wrapped}]}"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "JSON body as documented in shared/recipe/README.md."
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/workspaces/{ws}/env-vaults/{name}": {
+      "get": {
+        "operationId": "get_v1_workspace_env_vault",
+        "summary": "Read a named ENV vault (ciphertext and the caller's wraps)",
+        "security": [
+          {
+            "bearerAccess": []
+          },
+          {
+            "cookieSession": []
+          }
+        ],
+        "x-required-bearer-scopes": [
+          "account:read"
+        ],
+        "parameters": [
+          {
+            "name": "ws",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 63
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "JSON body as documented in shared/recipe/README.md."
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "delete_v1_workspace_env_vault",
+        "summary": "Delete a named ENV vault no recipe reads",
+        "security": [
+          {
+            "bearerAccess": []
+          },
+          {
+            "cookieSession": [],
+            "csrfHeader": []
+          }
+        ],
+        "x-required-bearer-scopes": [
+          "account:read"
+        ],
+        "parameters": [
+          {
+            "name": "ws",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 63
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "JSON body as documented in shared/recipe/README.md."
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/workspaces/{ws}/env-vaults/{name}/values": {
+      "put": {
+        "operationId": "put_v1_workspace_env_vault_values",
+        "summary": "Replace a vault's values envelope",
+        "security": [
+          {
+            "bearerAccess": []
+          },
+          {
+            "cookieSession": [],
+            "csrfHeader": []
+          }
+        ],
+        "x-required-bearer-scopes": [
+          "account:read"
+        ],
+        "parameters": [
+          {
+            "name": "ws",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 63
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "description": "{expected_revision, key_epoch, envelope}"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "JSON body as documented in shared/recipe/README.md."
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/workspaces/{ws}/env-vaults/{name}/rekey": {
+      "post": {
+        "operationId": "post_v1_workspace_env_vault_rekey",
+        "summary": "Give a vault a new key",
+        "security": [
+          {
+            "bearerAccess": []
+          },
+          {
+            "cookieSession": [],
+            "csrfHeader": []
+          }
+        ],
+        "x-required-bearer-scopes": [
+          "account:read"
+        ],
+        "parameters": [
+          {
+            "name": "ws",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 63
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "description": "{expected_key_epoch, envelope, wraps, recipe_wraps: [{recipe, wrapped}]}"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "JSON body as documented in shared/recipe/README.md."
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/auth/recipe-sessions": {
+      "post": {
+        "operationId": "post_v1_auth_recipe_sessions",
+        "summary": "Start a CLI session from a recipe token",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "description": "{token_id, auth, client_label, device_type (desktop|server|container), os}"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "JSON body as documented in shared/recipe/README.md."
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "description": "Refusals: recipe_invalid, recipe_expired, recipe_replaced (401), recipe_full (409)."
+      }
+    },
+    "/v1/recipe-machine": {
+      "get": {
+        "operationId": "get_v1_recipe_machine",
+        "summary": "What a recipe machine applies",
+        "security": [
+          {
+            "bearerAccess": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "JSON body as documented in shared/recipe/README.md."
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/recipe-machine/apply": {
+      "put": {
+        "operationId": "put_v1_recipe_machine_apply",
+        "summary": "Record what a recipe machine applied",
+        "security": [
+          {
+            "bearerAccess": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "description": "{revision, sections: {env|config|preview|tunnel: {...}}}"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "JSON body as documented in shared/recipe/README.md."
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }

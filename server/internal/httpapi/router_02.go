@@ -337,26 +337,26 @@ func markResendable(next http.Handler) http.Handler {
 // signInRoutes present a credential before anyone is signed in. CLI device-token polling is not
 // here: it is bounded by its device code and the database limit in auth.DeviceService.
 var signInRoutes = map[string]bool{
-	"GET /v1/auth/workos/state":        true,
-	"POST /v1/auth/workos/callback":    true,
-	"POST /v1/auth/device/authorize":   true,
-	"POST /v1/auth/device/cancel":      true,
-	"POST /v1/auth/api-token-sessions": true,
-	"POST /v1/operator/login":          true,
-	"POST /v1/operator/email":          true,
-	"POST /v1/operator/setup":          true,
+	"GET /v1/auth/workos/state":      true,
+	"POST /v1/auth/workos/callback":  true,
+	"POST /v1/auth/device/authorize": true,
+	"POST /v1/auth/device/cancel":    true,
+	"POST /v1/operator/login":        true,
+	"POST /v1/operator/email":        true,
+	"POST /v1/operator/setup":        true,
 }
 
 // failureLimitedRoutes exchange a secret (enrollment token, pairing verifier, join code) before
 // anyone is signed in. Only rejected attempts use up the network's budget, so a fleet behind one
 // NAT enrolling or renewing is not throttled; guessing is (OWASP Authentication Cheat Sheet,
-// "Protect Against Automated Attacks"; same Check-then-Allow-on-failure shape as apiTokenAuth).
+// "Protect Against Automated Attacks"; Check, then Allow on failure).
 var failureLimitedRoutes = map[string]bool{
 	"POST /v1/machines/pairings":              true,
 	"POST /v1/machines/pairings/reset":        true,
 	"POST /v1/machines/pairings/installation": true,
 	"POST /v1/helper-enrollments":             true,
 	"POST /v1/helper-identity-renewals":       true,
+	"POST /v1/auth/recipe-sessions":           true,
 }
 
 // failureLimited covers the routes above plus the guest terminal join-code and ticket routes,

@@ -494,6 +494,7 @@ type CLIClientSession struct {
 	FreshE2eeBootstrap bool
 	UserMachineID      sql.NullString
 	ApiTokenID         sql.NullString
+	RecipeID           sql.NullString
 }
 
 type CLIRefreshToken struct {
@@ -1227,6 +1228,28 @@ type EnvironmentKeyEnrollmentRequest struct {
 	ProvedAt           sql.NullTime
 	ApprovedAt         sql.NullTime
 	CreatedAt          time.Time
+}
+
+type EnvironmentNamedVault struct {
+	ID            string
+	OwnerAccount  string
+	TeamID        sql.NullString
+	Name          string
+	KeyEpoch      int32
+	Revision      int64
+	Envelope      []byte
+	RekeyRequired bool
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+	DeletedAt     sql.NullTime
+}
+
+type EnvironmentNamedVaultWrap struct {
+	VaultID       string
+	RecipientKind string
+	RecipientID   string
+	KeyEpoch      int32
+	Wrapped       []byte
 }
 
 type EnvironmentObservation struct {
@@ -2205,6 +2228,63 @@ type PublicationBlock struct {
 	Version   int64
 	CreatedAt time.Time
 	UpdatedAt time.Time
+}
+
+type Recipe struct {
+	ID                 string
+	TokenID            string
+	AccountID          string
+	TeamID             sql.NullString
+	Name               string
+	Revision           int32
+	Source             string
+	SourceFormat       string
+	Canonical          []byte
+	AuthHash           []byte
+	PreviousAuthHash   []byte
+	RotatedAt          sql.NullTime
+	MaxMachines        sql.NullInt32
+	RemoveAfterOffline pgtype.Interval
+	MachineLifetime    pgtype.Interval
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
+	ExpiresAt          time.Time
+	LastUsedAt         sql.NullTime
+	RevokedAt          sql.NullTime
+	RevokedBy          sql.NullString
+}
+
+type RecipeMachine struct {
+	MachineID       string
+	RecipeID        string
+	AppliedRevision int32
+	ApplyState      []byte
+	PairedAt        time.Time
+	RemoveAt        sql.NullTime
+	OfflineRemoveAt sql.NullTime
+}
+
+type RecipeMachineKey struct {
+	MachineID string
+	RecipeID  string
+	Sealed    []byte
+	CreatedAt time.Time
+}
+
+type RecipeReachRule struct {
+	RecipeID   string
+	Entry      int32
+	TargetKind string
+	TargetID   string
+	Action     string
+	Ports      pgtype.Range[pgtype.Int4]
+}
+
+type RecipeVaultWrap struct {
+	RecipeID string
+	VaultID  string
+	KeyEpoch int32
+	Wrapped  []byte
 }
 
 type RecordingKey struct {
@@ -3411,6 +3491,7 @@ type WorkspacePolicy struct {
 	UpdatedBy           sql.NullString
 	UpdatedWithApiToken sql.NullString
 	Message             string
+	UpdatedWithRecipe   sql.NullString
 }
 
 type WorkspacePolicyGroup struct {
@@ -3449,4 +3530,5 @@ type WorkspacePolicyVersion struct {
 	Message   string
 	Gained    int32
 	Lost      int32
+	Recipe    sql.NullString
 }

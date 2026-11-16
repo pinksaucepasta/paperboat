@@ -3,6 +3,7 @@ module github.com/pinksaucepasta/paperboat/shared
 go 1.27.4
 
 require (
+	github.com/BurntSushi/toml v1.6.0
 	github.com/getsentry/sentry-go v0.49.0
 	github.com/google/uuid v1.6.0
 	github.com/quic-go/quic-go v0.61.0

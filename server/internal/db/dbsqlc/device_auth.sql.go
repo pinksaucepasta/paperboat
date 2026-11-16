@@ -47,11 +47,12 @@ func (q *Queries) ApproveDeviceGrant(ctx context.Context, arg ApproveDeviceGrant
 }
 
 const authenticateClientAccessToken = `-- name: AuthenticateClientAccessToken :one
-SELECT cs.id,array_to_string(cs.scopes,' ') AS scopes,u.id AS user_id,u.workos_subject,u.primary_email,u.display_name,u.status,u.role,u.created_at,coalesce(cs.api_token_id,'')::text AS api_token_id,
-  coalesce((SELECT a.scope IS NOT NULL FROM api_tokens a WHERE a.id=cs.api_token_id),false)::boolean AS api_token_scoped
+SELECT cs.id,array_to_string(cs.scopes,' ') AS scopes,u.id AS user_id,u.workos_subject,u.primary_email,u.display_name,u.status,u.role,u.created_at,coalesce(cs.recipe_id,'')::text AS recipe_id,
+  coalesce(cs.user_machine_id,'')::text AS user_machine_id,
+  coalesce((SELECT r.team_id FROM recipes r WHERE r.id=cs.recipe_id),'')::text AS recipe_team_id
 FROM cli_access_tokens t JOIN cli_client_sessions cs ON cs.id=t.cli_client_session_id JOIN users u ON u.id=cs.user_id
 WHERE t.token_hash = ANY(string_to_array($1,' ')) AND t.revoked_at IS NULL AND t.expires_at>$2 AND cs.state='active' AND u.status='active'
-  AND (cs.api_token_id IS NULL OR EXISTS(SELECT 1 FROM api_tokens a WHERE a.id=cs.api_token_id AND a.revoked_at IS NULL AND a.expires_at>$2))
+  AND (cs.recipe_id IS NULL OR EXISTS(SELECT 1 FROM recipes r WHERE r.id=cs.recipe_id AND r.revoked_at IS NULL))
 `
 
 type AuthenticateClientAccessTokenParams struct {
@@ -60,17 +61,18 @@ type AuthenticateClientAccessTokenParams struct {
 }
 
 type AuthenticateClientAccessTokenRow struct {
-	ID             string
-	Scopes         string
-	UserID         string
-	WorkosSubject  string
-	PrimaryEmail   string
-	DisplayName    string
-	Status         string
-	Role           string
-	CreatedAt      time.Time
-	ApiTokenID     string
-	ApiTokenScoped bool
+	ID            string
+	Scopes        string
+	UserID        string
+	WorkosSubject string
+	PrimaryEmail  string
+	DisplayName   string
+	Status        string
+	Role          string
+	CreatedAt     time.Time
+	RecipeID      string
+	UserMachineID string
+	RecipeTeamID  string
 }
 
 func (q *Queries) AuthenticateClientAccessToken(ctx context.Context, arg AuthenticateClientAccessTokenParams) (AuthenticateClientAccessTokenRow, error) {
@@ -86,8 +88,9 @@ func (q *Queries) AuthenticateClientAccessToken(ctx context.Context, arg Authent
 		&i.Status,
 		&i.Role,
 		&i.CreatedAt,
-		&i.ApiTokenID,
-		&i.ApiTokenScoped,
+		&i.RecipeID,
+		&i.UserMachineID,
+		&i.RecipeTeamID,
 	)
 	return i, err
 }
@@ -360,7 +363,7 @@ SELECT rt.cli_client_session_id,rt.state,rt.expires_at,array_to_string(cs.scopes
 FROM cli_refresh_tokens rt JOIN cli_client_sessions cs ON cs.id=rt.cli_client_session_id
 JOIN users u ON u.id=cs.user_id
 WHERE rt.token_hash = ANY(string_to_array($1,' ')) AND cs.state='active' AND u.status='active'
-  AND (cs.api_token_id IS NULL OR EXISTS(SELECT 1 FROM api_tokens a WHERE a.id=cs.api_token_id AND a.revoked_at IS NULL AND a.expires_at>now()))
+  AND (cs.recipe_id IS NULL OR EXISTS(SELECT 1 FROM recipes r WHERE r.id=cs.recipe_id AND r.revoked_at IS NULL))
 FOR UPDATE OF rt,cs
 `
 

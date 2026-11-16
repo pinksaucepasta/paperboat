@@ -38,10 +38,10 @@ func TestSDKSessionFileSourceAuthorization(t *testing.T) {
 			}
 		})
 	}
-	if _, err := f.store.SQL().ExecContext(ctx, `UPDATE paperboat.api_token_scope_rules SET action='exec' WHERE token_id=$1`, token); err != nil {
+	if _, err := f.store.SQL().ExecContext(ctx, `UPDATE paperboat.recipe_reach_rules SET action='exec' WHERE recipe_id=$1`, token); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.service.FileTransferDescriptorForRequest(ctx, f.account, "", f.machine, session, "", "", "", intent); !errors.Is(err, auth.ErrOutsideTokenScope) {
+	if _, err := f.service.FileTransferDescriptorForRequest(ctx, f.account, "", f.machine, session, "", "", "", intent); !errors.Is(err, auth.ErrOutsideReach) {
 		t.Fatalf("exec-only file request: %v", err)
 	}
 }

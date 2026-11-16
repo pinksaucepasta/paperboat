@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/ratelimit"
+	"github.com/pinksaucepasta/paperboat/server/internal/recipes"
 	"github.com/pinksaucepasta/paperboat/server/internal/workspacedomain"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/abusereports"
@@ -17,7 +18,6 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/accountdeletion"
 	"github.com/pinksaucepasta/paperboat/server/internal/accountprefs"
 	"github.com/pinksaucepasta/paperboat/server/internal/activity"
-	"github.com/pinksaucepasta/paperboat/server/internal/apitokens"
 	"github.com/pinksaucepasta/paperboat/server/internal/auditstream"
 	"github.com/pinksaucepasta/paperboat/server/internal/auth"
 	"github.com/pinksaucepasta/paperboat/server/internal/backupreport"
@@ -129,7 +129,7 @@ type Options struct {
 	ConfigConflicts          *controlplane.ConfigConflictService
 	Routes                   *controlplane.RouteService
 	Favorites                *favorites.Service
-	APITokens                *apitokens.Service
+	Recipes                  *recipes.Service
 	AccountDeletion          *accountdeletion.Service
 	AccountPreferences       *accountprefs.Service
 	ControlDiagnostics       *controlplane.DiagnosticsService
@@ -741,8 +741,6 @@ func NewRouter(opts Options) http.Handler {
 		handler = mux
 	}
 	handler = clientUpdatePolicyGuard(opts.ClientUpdatePolicy, time.Now, handler)
-	tokenFailures := ratelimit.New(opts.Config.RateLimits.TokenFailuresPerMinute, opts.Config.RateLimits.TokenFailuresBurst, opts.Config.RateLimits.MaxClients)
-	handler = apiTokenAuth(opts.APITokens, tokenFailures, handler)
 	handler = workspaceQueryContext(handler)
 	handler = commitPosition(opts.Database, opts.Config.RegionalDomain != "", handler)
 	handler = secureHeaders(handler)
@@ -922,13 +920,8 @@ func registerAuthRoutes(mux *http.ServeMux, opts Options) {
 		mux.Handle("GET /v1/account/deletion-preview", accountDeletionBrowserOnly(opts.AccountDeletion, requireAuth(opts.Auth, accountDeletionPreview(opts.AccountDeletion))))
 		mux.Handle("DELETE /v1/account", accountDeletionBrowserOnly(opts.AccountDeletion, requireAuth(opts.Auth, requireCSRF(opts.Auth, accountDelete(opts.Auth, opts.AccountDeletion)))))
 	}
-	if opts.APITokens != nil {
-		mux.Handle("POST /v1/workspaces/{ws}/api-tokens", accountRead(requireCSRF(opts.Auth, apiTokenCreate(opts.APITokens))))
-		mux.Handle("GET /v1/workspaces/{ws}/api-tokens", accountRead(apiTokenList(opts.APITokens)))
-		mux.Handle("DELETE /v1/workspaces/{ws}/api-tokens/{id}", accountRead(requireCSRF(opts.Auth, apiTokenRevoke(opts.APITokens))))
-		if opts.DeviceAuth != nil {
-			mux.Handle("POST /v1/auth/api-token-sessions", apiTokenSessionCreate(opts.DeviceAuth))
-		}
+	if opts.Recipes != nil {
+		registerRecipeRoutes(mux, opts.Recipes, accountRead, func(next http.Handler) http.Handler { return requireCSRF(opts.Auth, next) }, opts.DeviceAuth)
 	}
 	if opts.Favorites != nil {
 		mux.Handle("GET /v1/favorites", accountRead(favoritesList(opts.Favorites)))

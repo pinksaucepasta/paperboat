@@ -77,7 +77,6 @@ type Config struct {
 	Database             Database         `json:"database"`
 	Billing              Billing          `json:"billing"`
 	Business             Business         `json:"business"`
-	APITokens            APITokens        `json:"api_tokens"`
 	RateLimits           RateLimits       `json:"rate_limits"`
 	UserMachines         UserMachines     `json:"user_machines"`
 	ManagedSSH           ManagedSSH       `json:"managed_ssh"`
@@ -178,16 +177,6 @@ type Database struct {
 // SendsStartupParams reports whether connections start with the session settings as startup parameters.
 func (d Database) SendsStartupParams() bool { return d.StartupParams == nil || *d.StartupParams }
 
-// APITokens bounds workspace API tokens (F18).
-type APITokens struct {
-	MaxLifetimeDays     int `json:"max_lifetime_days"`
-	DefaultLifetimeDays int `json:"default_lifetime_days"`
-	MaxPerMember        int `json:"max_per_member"`
-	// RetrySeconds is how long a create with an Idempotency-Key can be repeated and gets the same
-	// token and once-shown secret back (held encrypted for this window only).
-	RetrySeconds int `json:"retry_seconds"`
-}
-
 // RateLimits bound sign-in and credential attempts per client network, in memory, before any
 // database work (PLAN F21-14).
 type RateLimits struct {
@@ -195,12 +184,9 @@ type RateLimits struct {
 	SDKSessionBurst        int `json:"sdk_session_burst"`
 	SDKDescriptorPerMinute int `json:"sdk_descriptor_per_minute"`
 	SDKDescriptorBurst     int `json:"sdk_descriptor_burst"`
-	// SignInPerMinute/SignInBurst: browser, CLI device, API-token and operator sign-in requests.
+	// SignInPerMinute/SignInBurst: browser, CLI device and operator sign-in requests.
 	SignInPerMinute int `json:"sign_in_per_minute"`
 	SignInBurst     int `json:"sign_in_burst"`
-	// TokenFailuresPerMinute/TokenFailuresBurst: failed API-token authentications on any route.
-	TokenFailuresPerMinute int `json:"token_failures_per_minute"`
-	TokenFailuresBurst     int `json:"token_failures_burst"`
 	// MachinePeerNetworkConfigPerMinute/Burst: a machine's signed-network configuration refreshes (about 6 a minute
 	// when idle, more right after changes); a looping client gets 429.
 	MachinePeerNetworkConfigPerMinute int `json:"machine_peer_network_config_per_minute"`
@@ -248,16 +234,14 @@ type PlanLimits struct {
 	PublicTCP PublicTCPLimit `json:"public_tcp"`
 }
 
-// SDKLimits counts live token sessions and outstanding operation reservations per creator and token.
+// SDKLimits counts outstanding operation reservations of recipe sessions per creator and recipe.
 type SDKLimits struct {
-	SessionsPerToken     int `json:"sessions_per_token"`
-	SessionsPerAccount   int `json:"sessions_per_account"`
 	OperationsPerToken   int `json:"operations_per_token"`
 	OperationsPerAccount int `json:"operations_per_account"`
 }
 
 func (l SDKLimits) valid() bool {
-	return l.SessionsPerToken > 0 && l.SessionsPerAccount >= l.SessionsPerToken && l.OperationsPerToken > 0 && l.OperationsPerAccount >= l.OperationsPerToken
+	return l.OperationsPerToken > 0 && l.OperationsPerAccount >= l.OperationsPerToken
 }
 
 // PublicTCPLimit is the concurrent public raw-TCP tunnel limit: Free and Pro per personal workspace, a team
@@ -554,9 +538,8 @@ func Default() Config {
 			Driver: "postgres",
 			DSN:    "postgres://postgres:postgres@127.0.0.1:5432/postgres?sslmode=disable",
 		},
-		RateLimits:        RateLimits{SDKSessionPerMinute: 30, SDKSessionBurst: 10, SDKDescriptorPerMinute: 120, SDKDescriptorBurst: 32, SignInPerMinute: 30, SignInBurst: 10, TokenFailuresPerMinute: 20, TokenFailuresBurst: 10, MachinePeerNetworkConfigPerMinute: 30, MachinePeerNetworkConfigBurst: 20, AbuseReportsPerMinute: 5, AbuseReportsBurst: 10, MaxClients: 100000},
-		APITokens:         APITokens{MaxLifetimeDays: 365, DefaultLifetimeDays: 90, MaxPerMember: 100, RetrySeconds: 600},
-		Billing:           Billing{TopupMaxQuantity: 100, TeamTrialDays: 14, PersonalAllowanceBytes: new(int64(5_000_000_000)), Limits: PlanLimits{SDK: SDKLimits{SessionsPerToken: 10, SessionsPerAccount: 100, OperationsPerToken: 32, OperationsPerAccount: 128}, Machines: PlanLimit{Free: 100, Pro: 1000, TeamCeiling: 10000}, Publications: PlanLimit{Free: 100, Pro: 1000, TeamCeiling: 10000}, BrowserTerminals: PlanLimit{Free: 10, Pro: 100, TeamCeiling: 1000}, ViewersPerSharedTerminal: 50, PublicTCP: PublicTCPLimit{Free: 1, Pro: 10, TeamPerSeat: 10}}},
+		RateLimits:        RateLimits{SDKSessionPerMinute: 30, SDKSessionBurst: 10, SDKDescriptorPerMinute: 120, SDKDescriptorBurst: 32, SignInPerMinute: 30, SignInBurst: 10, MachinePeerNetworkConfigPerMinute: 30, MachinePeerNetworkConfigBurst: 20, AbuseReportsPerMinute: 5, AbuseReportsBurst: 10, MaxClients: 100000},
+		Billing:           Billing{TopupMaxQuantity: 100, TeamTrialDays: 14, PersonalAllowanceBytes: new(int64(5_000_000_000)), Limits: PlanLimits{SDK: SDKLimits{OperationsPerToken: 32, OperationsPerAccount: 128}, Machines: PlanLimit{Free: 100, Pro: 1000, TeamCeiling: 10000}, Publications: PlanLimit{Free: 100, Pro: 1000, TeamCeiling: 10000}, BrowserTerminals: PlanLimit{Free: 10, Pro: 100, TeamCeiling: 1000}, ViewersPerSharedTerminal: 50, PublicTCP: PublicTCPLimit{Free: 1, Pro: 10, TeamPerSeat: 10}}},
 		Business:          defaultBusiness(),
 		WorkspacePolicy:   defaultWorkspacePolicy(),
 		RuntimeBaseDomain: "localhost",
@@ -716,10 +699,7 @@ func (c Config) Validate() error {
 	if err := c.WorkspacePolicy.validate(); err != nil {
 		errs = append(errs, err)
 	}
-	if t := c.APITokens; t.MaxLifetimeDays < 1 || t.DefaultLifetimeDays < 1 || t.DefaultLifetimeDays > t.MaxLifetimeDays || t.MaxPerMember < 1 || t.RetrySeconds < 60 || t.RetrySeconds > 3600 {
-		errs = append(errs, fmt.Errorf("api_tokens limits must be positive, default_lifetime_days at most max_lifetime_days and retry_seconds between 60 and 3600"))
-	}
-	if l := c.RateLimits; l.SDKSessionPerMinute < 1 || l.SDKSessionBurst < 1 || l.SDKDescriptorPerMinute < 1 || l.SDKDescriptorBurst < 1 || l.SignInPerMinute < 1 || l.SignInBurst < 1 || l.TokenFailuresPerMinute < 1 || l.TokenFailuresBurst < 1 || l.MachinePeerNetworkConfigPerMinute < 1 || l.MachinePeerNetworkConfigBurst < 1 || l.AbuseReportsPerMinute < 1 || l.AbuseReportsBurst < 1 || l.MaxClients < 1000 {
+	if l := c.RateLimits; l.SDKSessionPerMinute < 1 || l.SDKSessionBurst < 1 || l.SDKDescriptorPerMinute < 1 || l.SDKDescriptorBurst < 1 || l.SignInPerMinute < 1 || l.SignInBurst < 1 || l.MachinePeerNetworkConfigPerMinute < 1 || l.MachinePeerNetworkConfigBurst < 1 || l.AbuseReportsPerMinute < 1 || l.AbuseReportsBurst < 1 || l.MaxClients < 1000 {
 		errs = append(errs, errors.New("rate_limits must be positive and max_clients at least 1000"))
 	}
 	if c.Billing.TeamTrialDays < 0 || c.Billing.TeamTrialDays > 730 {

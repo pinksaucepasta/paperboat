@@ -25,23 +25,23 @@ func (s *Service) sourceMachineAllowed(ctx context.Context, userID, machineID st
 	return allowed, err
 }
 
-// descriptorSourceAllowed accepts either an enrolled source or a token's own CLI peer endpoint.
+// descriptorSourceAllowed accepts either an enrolled source or a recipe session's own CLI peer endpoint.
 func (s *Service) descriptorSourceAllowed(ctx context.Context, user, source, session, target, capability string) error {
-	if tokenID, token := auth.APITokenFromContext(ctx); token {
+	if tokenID, token := auth.RecipeFromContext(ctx); token {
 		if err := planlimits.AllowSDKRequest(user, tokenID, "descriptors"); err != nil {
 			return err
 		}
 		if source == "" {
-			return auth.AuthorizeAPITokenSession(ctx, s.db.SQL(), user, session, target, capability, 0)
+			return auth.AuthorizeRecipeSession(ctx, s.db.SQL(), user, session, target, capability, 0)
 		}
-		// A token session names a source only from the paired machine it signed in on (F18-06); an SDK
-		// session is bound to no machine, so a claimed source stays refused (F24-04).
+		// A recipe session names a source only from the machine it paired (F26); before pairing it is
+		// bound to no machine, so a claimed source stays refused.
 		var bound bool
 		if err := s.db.SQL().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM cli_client_sessions WHERE id=$1 AND user_id=$2 AND state='active' AND user_machine_id=$3)`, session, user, source).Scan(&bound); err != nil {
 			return err
 		}
 		if !bound {
-			return auth.ErrOutsideTokenScope
+			return auth.ErrOutsideReach
 		}
 	}
 	if source == "" || session == "" {

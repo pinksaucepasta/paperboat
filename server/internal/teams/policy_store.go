@@ -65,7 +65,7 @@ type storedPolicy struct {
 	allowPrivateAccess bool
 	updatedAt          time.Time
 	updatedBy          string
-	apiToken           string
+	recipe             string
 	message            string
 }
 
@@ -86,8 +86,8 @@ const teamDefaultPolicy = "{\n  \"rules\": [\n    {\"src\": [\"role:admin\"], \"
 func policyTx(ctx context.Context, tx *db.Tx, w Workspace) (storedPolicy, error) {
 	col, key := w.column()
 	var p storedPolicy
-	err := tx.QueryRow(ctx, `SELECT id,version,source,digest,allow_private_access,updated_at,coalesce(updated_by,''),coalesce(updated_with_api_token,''),message FROM workspace_policies WHERE `+col+`=$1 FOR UPDATE`, key).
-		Scan(&p.id, &p.version, &p.source, &p.digest, &p.allowPrivateAccess, &p.updatedAt, &p.updatedBy, &p.apiToken, &p.message)
+	err := tx.QueryRow(ctx, `SELECT id,version,source,digest,allow_private_access,updated_at,coalesce(updated_by,''),coalesce(updated_with_recipe,''),message FROM workspace_policies WHERE `+col+`=$1 FOR UPDATE`, key).
+		Scan(&p.id, &p.version, &p.source, &p.digest, &p.allowPrivateAccess, &p.updatedAt, &p.updatedBy, &p.recipe, &p.message)
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return p, err
 	}
@@ -243,7 +243,7 @@ func confirmation(changes []policy.Change) string {
 // policySave is one write of a policy file.
 type policySave struct {
 	actor    string // account; empty for a system rewrite
-	apiToken string
+	recipe   string
 	source   []byte
 	expected uint64 // 0 skips the version check (system rewrites)
 	message  string
@@ -335,7 +335,7 @@ func savePolicyTx(ctx context.Context, tx *db.Tx, w Workspace, cfg config.Worksp
 	}
 	next0 := cur
 	next0.version, next0.source, next0.digest, next0.message = cur.version+1, string(in.source), digest(in.source), in.message
-	next0.updatedBy, next0.apiToken = in.actor, in.apiToken
+	next0.updatedBy, next0.recipe = in.actor, in.recipe
 	next0.allowPrivateAccess = next.AllowPrivateAccess && w.TeamID != ""
 	// Rules first: advancing the version runs the trigger that revokes sessions the new rules
 	// no longer allow, and tells the team's machines to refresh their access.
@@ -349,13 +349,13 @@ func savePolicyTx(ctx context.Context, tx *db.Tx, w Workspace, cfg config.Worksp
 	if err = publishTagChangesTx(ctx, tx, cur.id, tagsBefore); err != nil {
 		return cur, nil, err
 	}
-	err = tx.QueryRow(ctx, `UPDATE workspace_policies SET version=$2,source=$3,digest=$4,allow_private_access=$8,updated_at=now(),updated_by=nullif($5,''),updated_with_api_token=nullif($6,''),message=$7 WHERE id=$1 RETURNING updated_at`,
-		cur.id, next0.version, next0.source, next0.digest, in.actor, in.apiToken, in.message, next0.allowPrivateAccess).Scan(&next0.updatedAt)
+	err = tx.QueryRow(ctx, `UPDATE workspace_policies SET version=$2,source=$3,digest=$4,allow_private_access=$8,updated_at=now(),updated_by=nullif($5,''),updated_with_recipe=nullif($6,''),message=$7 WHERE id=$1 RETURNING updated_at`,
+		cur.id, next0.version, next0.source, next0.digest, in.actor, in.recipe, in.message, next0.allowPrivateAccess).Scan(&next0.updatedAt)
 	if err != nil {
 		return cur, nil, err
 	}
-	if _, err = tx.Exec(ctx, `INSERT INTO workspace_policy_versions(policy_id,version,kind,source,digest,author,api_token,message,gained,lost) VALUES($1,$2,$3,$4,$5,nullif($6,''),nullif($7,''),$8,$9,$10)`,
-		cur.id, next0.version, in.kind, next0.source, next0.digest, in.actor, in.apiToken, in.message, gained, lost); err != nil {
+	if _, err = tx.Exec(ctx, `INSERT INTO workspace_policy_versions(policy_id,version,kind,source,digest,author,recipe,message,gained,lost) VALUES($1,$2,$3,$4,$5,nullif($6,''),nullif($7,''),$8,$9,$10)`,
+		cur.id, next0.version, in.kind, next0.source, next0.digest, in.actor, in.recipe, in.message, gained, lost); err != nil {
 		return cur, nil, err
 	}
 	if cfg.VersionsKept > 0 {
@@ -364,7 +364,7 @@ func savePolicyTx(ctx context.Context, tx *db.Tx, w Workspace, cfg config.Worksp
 		}
 	}
 	event := "policy." + map[string]string{"saved": "updated", "restored": "restored", "rewritten": "rewritten"}[in.kind]
-	metadata := map[string]any{"version": next0.version, "gained": gained, "lost": lost, "api_token": in.apiToken}
+	metadata := map[string]any{"version": next0.version, "gained": gained, "lost": lost, "recipe": in.recipe}
 	if w.TeamID == "" {
 		err = audit.NewWriter(nil).WriteTx(ctx, tx, audit.Event{ActorUserID: in.actor, ActorType: audit.ActorUser, EventType: "personal." + event, ResourceType: "workspace_policy", ResourceID: w.Owner, IdempotencyKey: "policy:" + w.Owner + ":" + fmt.Sprint(next0.version), Metadata: metadata})
 		return next0, changes, err

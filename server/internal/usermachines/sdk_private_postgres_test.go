@@ -48,7 +48,7 @@ func TestSDKSessionPrivatePortAuthorization(t *testing.T) {
 			}
 		})
 	}
-	if _, err := f.store.SQL().ExecContext(ctx, `UPDATE paperboat.api_token_scope_rules SET action='exec' WHERE token_id=$1`, token); err != nil {
+	if _, err := f.store.SQL().ExecContext(ctx, `UPDATE paperboat.recipe_reach_rules SET action='exec' WHERE recipe_id=$1`, token); err != nil {
 		t.Fatal(err)
 	}
 	if g, e := service.Issue(ctx, request); e == nil || g.Credential != "" {

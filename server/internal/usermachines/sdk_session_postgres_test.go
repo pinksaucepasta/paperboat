@@ -10,25 +10,30 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/server/internal/auth"
 	"github.com/pinksaucepasta/paperboat/server/internal/workspace"
+	"github.com/pinksaucepasta/paperboat/shared/recipe"
 )
 
 func sdkSession(t *testing.T, f workspaceMachineFixture, capability string) (context.Context, string, string) {
 	t.Helper()
-	token, session := "sdk_token_"+f.suffix, "sdk_session_"+f.suffix
+	token, session := "sdk_recipe_"+f.suffix, "sdk_session_"+f.suffix
 	hash := sha256.Sum256([]byte(token))
+	tokenID, err := recipe.NewID()
+	if err != nil {
+		t.Fatal(err)
+	}
 	entry := map[string]any{"dst": []string{"machine:" + f.machine}, "allow": []string{capability}}
 	if capability == "private_access" {
 		entry["ports"] = []int{5432}
 	}
-	scope, err := json.Marshal([]map[string]any{entry})
+	canonical, err := json.Marshal(map[string]any{"expires": "90d", "reach": []map[string]any{entry}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
 		for _, q := range []string{
-			`DELETE FROM paperboat.cli_client_sessions WHERE api_token_id=$1`,
-			`DELETE FROM paperboat.api_token_scope_rules WHERE token_id=$1`,
-			`DELETE FROM paperboat.api_tokens WHERE id=$1`,
+			`DELETE FROM paperboat.cli_client_sessions WHERE recipe_id=$1`,
+			`DELETE FROM paperboat.recipe_reach_rules WHERE recipe_id=$1`,
+			`DELETE FROM paperboat.recipes WHERE id=$1`,
 		} {
 			if _, err := f.store.SQL().ExecContext(context.Background(), q, token); err != nil {
 				t.Error(err)
@@ -39,16 +44,16 @@ func sdkSession(t *testing.T, f workspaceMachineFixture, capability string) (con
 		q    string
 		args []any
 	}{
-		{`INSERT INTO paperboat.api_tokens(id,account_id,name,secret_hash,scope,expires_at) VALUES($1,$2,$1,$3,$4,now()+interval '1 hour')`, []any{token, f.account, hash[:], scope}},
-		{`INSERT INTO paperboat.api_token_scope_rules(token_id,entry,target_kind,target_id,action,ports) VALUES($1,0,'machine',$2,$3,'[5432,5433)')`, []any{token, f.machine, capability}},
-		{`INSERT INTO paperboat.cli_client_sessions(id,user_id,client_id,client_label,device_type,os,scopes,state,created_at,approved_at,api_token_id) VALUES($1,$2,'sdk','sdk','container','linux','{machines:connect}','active',now(),now(),$3)`, []any{session, f.account, token}},
+		{`INSERT INTO paperboat.recipes(id,token_id,account_id,name,source,source_format,canonical,auth_hash,expires_at) VALUES($1,$5,$2,'sdk-'||substr(md5($1),1,8),'','toml',$4,$3,now()+interval '1 hour')`, []any{token, f.account, hash[:], canonical, tokenID}},
+		{`INSERT INTO paperboat.recipe_reach_rules(recipe_id,entry,target_kind,target_id,action,ports) VALUES($1,0,'machine',$2,$3,'[5432,5433)')`, []any{token, f.machine, capability}},
+		{`INSERT INTO paperboat.cli_client_sessions(id,user_id,client_id,client_label,device_type,os,scopes,state,created_at,approved_at,recipe_id) VALUES($1,$2,'sdk','sdk','container','linux','{machines:connect}','active',now(),now(),$3)`, []any{session, f.account, token}},
 	} {
 		if _, err := f.store.SQL().ExecContext(f.ctx, stmt.q, stmt.args...); err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	return auth.WithAPIToken(workspace.WithContext(f.ctx, workspace.Scope{ID: "personal"}), token), token, session
+	return auth.WithRecipe(workspace.WithContext(f.ctx, workspace.Scope{ID: "personal"}), token, ""), token, session
 }
 
 func TestSDKSessionExecSourceAuthorization(t *testing.T) {
@@ -79,22 +84,21 @@ func TestSDKSessionExecSourceAuthorization(t *testing.T) {
 			}
 		})
 	}
-	// F18-06: a token session that signed in on a paired machine is that machine's login and may name it as
-	// the source; it still may not name another machine (production 2026-11-05: every token pb exec on a
-	// paired machine was refused).
+	// A recipe session bound to its paired machine may name it as the source; it still may not name
+	// another machine (production 2026-11-05: every token pb exec on a paired machine was refused).
 	if _, err := f.store.SQL().ExecContext(ctx, `UPDATE paperboat.cli_client_sessions SET user_machine_id=$2 WHERE id=$1`, session, source); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := f.service.ExecDescriptor(ctx, f.account, source, f.machine, session, "operation_token_paired", true); err != nil {
 		t.Fatalf("a token session on its paired machine was refused: %v", err)
 	}
-	if _, err := f.service.ExecDescriptor(ctx, f.account, f.machine, f.machine, session, "operation_token_other_source", true); !errors.Is(err, auth.ErrOutsideTokenScope) {
+	if _, err := f.service.ExecDescriptor(ctx, f.account, f.machine, f.machine, session, "operation_token_other_source", true); !errors.Is(err, auth.ErrOutsideReach) {
 		t.Fatalf("a token session named a machine it is not bound to: %v", err)
 	}
-	if _, err := f.store.SQL().ExecContext(ctx, `DELETE FROM paperboat.api_token_scope_rules WHERE token_id=$1`, token); err != nil {
+	if _, err := f.store.SQL().ExecContext(ctx, `DELETE FROM paperboat.recipe_reach_rules WHERE recipe_id=$1`, token); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.service.ExecDescriptor(ctx, f.account, "", f.machine, session, "operation_sdk_scope", true); !errors.Is(err, auth.ErrOutsideTokenScope) {
+	if _, err := f.service.ExecDescriptor(ctx, f.account, "", f.machine, session, "operation_sdk_scope", true); !errors.Is(err, auth.ErrOutsideReach) {
 		t.Fatalf("missing exec scope: %v", err)
 	}
 }

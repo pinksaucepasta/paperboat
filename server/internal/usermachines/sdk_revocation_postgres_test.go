@@ -6,11 +6,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/server/internal/apitokens"
-	"github.com/pinksaucepasta/paperboat/server/internal/config"
 	"github.com/pinksaucepasta/paperboat/server/internal/controlplane"
 	"github.com/pinksaucepasta/paperboat/server/internal/machineservices"
 	"github.com/pinksaucepasta/paperboat/server/internal/nativeprivateaccess"
+	"github.com/pinksaucepasta/paperboat/server/internal/recipes"
 	"github.com/pinksaucepasta/paperboat/server/internal/workspace"
 	wire "github.com/pinksaucepasta/paperboat/shared/machineservices"
 	"github.com/pinksaucepasta/paperboat/shared/operationrevocation"
@@ -21,7 +20,7 @@ func TestSDKLiveSessionRevocation(t *testing.T) {
 	f, _, signer := newWorkspaceDescriptorFixture(t)
 	ctx, token, session := sdkSession(t, f, "exec")
 	for i, capability := range []string{"files", "private_access"} {
-		if _, err := f.store.SQL().ExecContext(ctx, `INSERT INTO paperboat.api_token_scope_rules(token_id,entry,target_kind,target_id,action,ports) VALUES($1,$2,'machine',$3,$4,'[5432,5433)')`, token, i+1, f.machine, capability); err != nil {
+		if _, err := f.store.SQL().ExecContext(ctx, `INSERT INTO paperboat.recipe_reach_rules(recipe_id,entry,target_kind,target_id,action,ports) VALUES($1,$2,'machine',$3,$4,'[5432,5433)')`, token, i+1, f.machine, capability); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -63,8 +62,16 @@ func TestSDKLiveSessionRevocation(t *testing.T) {
 	if _, err := f.store.SQL().ExecContext(ctx, `UPDATE paperboat.user_machine_access_sessions SET expires_at=now()-interval '1 minute' WHERE cli_client_session_id=$1`, session); err != nil {
 		t.Fatal(err)
 	}
-	tokens := apitokens.New(f.store, f.service.audit, config.Default().APITokens, "")
-	if _, err := tokens.Revoke(ctx, f.account, workspace.Scope{ID: "personal"}, token); err != nil {
+	recipeService := recipes.New(f.store, f.service.audit, f.service.Delete)
+	var name string
+	if err := f.store.SQL().QueryRowContext(ctx, `SELECT name FROM paperboat.recipes WHERE id=$1`, token).Scan(&name); err != nil {
+		t.Fatal(err)
+	}
+	var confirm *recipes.ConfirmError
+	if _, _, err := recipeService.Revoke(ctx, f.account, workspace.Scope{ID: "personal"}, name, ""); !errors.As(err, &confirm) {
+		t.Fatalf("revoke without confirmation: %v", err)
+	}
+	if _, _, err := recipeService.Revoke(ctx, f.account, workspace.Scope{ID: "personal"}, name, confirm.Code); err != nil {
 		t.Fatal(err)
 	}
 	for topic, generation := range topics() {
@@ -75,7 +82,7 @@ func TestSDKLiveSessionRevocation(t *testing.T) {
 	for _, id := range []any{exec.Auth["access_session_id"], file.Auth["access_session_id"], private.Target.AccessSessionID} {
 		var revoked bool
 		if err := f.store.SQL().QueryRowContext(ctx, `SELECT state='revoked' AND revoked_at IS NOT NULL FROM paperboat.user_machine_access_sessions WHERE id=$1`, id).Scan(&revoked); err != nil || !revoked {
-			t.Fatal("live operation retained access after token revoke")
+			t.Fatal("live operation retained access after recipe revoke")
 		}
 	}
 	live := make([]string, 0, 2)

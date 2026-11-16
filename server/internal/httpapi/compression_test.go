@@ -101,8 +101,8 @@ func TestCompressResponsesLeavesSensitiveAndSmallResponsesAlone(t *testing.T) {
 	}
 }
 
-// A status written before the body survives the buffering, and an API token qualifies like a machine proof.
-func TestCompressResponsesKeepsStatusForAPITokens(t *testing.T) {
+// A status written before the body survives the buffering, and a bearer session qualifies like a machine proof.
+func TestCompressResponsesKeepsStatusForBearerSessions(t *testing.T) {
 	r := httptest.NewRequest(http.MethodGet, "/v1/machines", nil)
 	r.Header.Set("Accept-Encoding", "br, gzip")
 	r.Header.Set("Authorization", "Bearer token")

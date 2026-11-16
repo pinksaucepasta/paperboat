@@ -4,7 +4,6 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/pinksaucepasta/paperboat/server/internal/apitokens"
 	"github.com/pinksaucepasta/paperboat/server/internal/workspace"
 )
 
@@ -123,8 +122,8 @@ func personalWorkspaceContext(ctx context.Context) context.Context {
 // ordinary user routes and signed publisher handlers.
 func ValidateWorkspaceSelection(ctx context.Context, service *workspace.Service, account string) (workspace.Scope, bool, error) {
 	scope, present, err := validateWorkspaceSelection(ctx, service, account)
-	if token, ok := apitokens.FromContext(ctx); ok && err == nil && (!present || scope != token.Workspace) {
-		// An API token acts only in its own workspace (apiTokenAuth selects it).
+	if own, ok := ctx.Value(recipeWorkspaceKey{}).(workspace.Scope); ok && err == nil && (present && scope != own || !present && own.TeamID != "") {
+		// A recipe session acts only in its recipe's workspace.
 		return workspace.Scope{}, false, workspace.ErrForbidden
 	}
 	return scope, present, err

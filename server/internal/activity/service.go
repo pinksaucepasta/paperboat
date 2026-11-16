@@ -31,10 +31,10 @@ type Query struct {
 	Limit                           int
 }
 type Actor struct {
-	Kind    string `json:"kind"`
-	ID      string `json:"id"`
-	Email   string `json:"email,omitempty"`
-	TokenID string `json:"token_id,omitempty"`
+	Kind     string `json:"kind"`
+	ID       string `json:"id"`
+	Email    string `json:"email,omitempty"`
+	RecipeID string `json:"recipe_id,omitempty"`
 }
 type Target struct {
 	Kind string `json:"kind"`
@@ -209,12 +209,12 @@ func decode(rows interface{ Scan(...any) error }, ws string) (Event, error) {
 	var machine Machine
 	var actorType string
 	var metadata []byte
-	if err := rows.Scan(&event.ID, &event.OccurredAt, &event.Action, &actorType, &event.Actor.ID, &event.Actor.Email, &event.Actor.TokenID,
+	if err := rows.Scan(&event.ID, &event.OccurredAt, &event.Action, &actorType, &event.Actor.ID, &event.Actor.Email, &event.Actor.RecipeID,
 		&event.Target.Kind, &event.Target.ID, &event.Target.Name, &machine.ID, &machine.Name,
 		&event.Result, &event.Reason, &event.IP, &event.UserAgent, &metadata, &event.sequence); err != nil {
 		return event, err
 	}
-	event.Actor.Kind = actorKind(actorType, event.Actor.TokenID)
+	event.Actor.Kind = actorKind(actorType, event.Actor.RecipeID)
 	if event.Actor.Kind == "system" {
 		event.Actor = Actor{Kind: "system"}
 	}
@@ -240,7 +240,7 @@ func decode(rows interface{ Scan(...any) error }, ws string) (Event, error) {
 func actorKind(actorType, tokenID string) string {
 	switch {
 	case actorType == "user" && tokenID != "":
-		return "api_token"
+		return "recipe"
 	case actorType == "user", actorType == "directory":
 		return actorType
 	case actorType == "admin":
