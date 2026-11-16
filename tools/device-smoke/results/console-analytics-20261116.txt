@@ -20,9 +20,9 @@ PASS  check-add-machine.js: the machine exists on the server  (console6-ph)
 PASS  check-add-machine.js: it is in the Personal workspace
 PASS  check-previews.js: New preview dialog opens
 PASS  check-previews.js: the preview's machine is the chosen one  (console6-ph)
-PASS  check-previews.js: dialog reports the preview live with its address  (simple-dusk-field-5853.pprbt.app)
+PASS  check-previews.js: dialog reports the preview live with its address  (simple-dusk-field-5853.app.example.test)
 PASS  check-previews.js: server has one new ready preview
-PASS  check-previews.js: list shows the address, forwards-to and an end time  (simple-dusk-field-5853.pprbt.app console6-ph localhost:18088 in 1 hour Live)
+PASS  check-previews.js: list shows the address, forwards-to and an end time  (simple-dusk-field-5853.app.example.test console6-ph localhost:18088 in 1 hour Live)
 PASS  check-previews.js: the address answers
 PASS  check-previews.js: status becomes Live
 PASS  check-previews.js: stop asks to confirm

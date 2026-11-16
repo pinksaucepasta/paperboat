@@ -1,4 +1,4 @@
-Live console 7f7a3ddbd+ (https://oracle.newt-mermaid.ts.net), throwaway test account; machine acf287ba6c74 = pbvm2 container c8-ct, pb dev-e30c9ec7c
+Live console 7f7a3ddbd+ (https://oracle.console.example.test), throwaway test account; machine acf287ba6c74 = pbvm2 container c8-ct, pb dev-e30c9ec7c
 == console/scripts/check-requests-menu.mjs (sources stubbed in the tab with schema-complete payloads; 2 of 13 file requests carry stored=true, the offline-pending case)
 PASS  no bell while nothing waits
 PASS  bell counts every source's total (13 + 1 + 2)
@@ -16,12 +16,12 @@ PASS  Accept approves the machine  (m-one approve)
 PASS  bell is gone again when nothing waits
 == console/scripts/check-port-names.mjs (real server: names added/removed through the UI, front desk saved and restored, shadow made by renaming the machine; permission steps fake the member role / can_manage=false in the tab)
 PASS  the three scopes were added  (all_machines,machine,top_level)
-PASS  machine name: full address, scope and machine  (c8pnmachine.acf287ba6c74.ppr.boats
+PASS  machine name: full address, scope and machine  (c8pnmachine.acf287ba6c74.local.example.test
 One machine · acf287ba6c74
 8124)
 PASS  machine name shows its port
 PASS  all-machines name shows its scope
-PASS  top-level name is <name>.<domain>  (c8pntop.ppr.boats)
+PASS  top-level name is <name>.<domain>  (c8pntop.local.example.test)
 PASS  Remove name removes only that name
 PASS  a shadowed name says which machine uses its address
 PASS  front desk shows the saved port  (80)

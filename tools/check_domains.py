@@ -24,6 +24,7 @@ DOC_DIRS = ("/docs/",)
 # Build configuration is where the initial API address belongs (AGENTS.md).
 ALLOWED = {
     "cli/Makefile": "DEFAULT_SERVER_URL: the release build's initial API address",
+    "LICENSE": "the public contact address",
     "tools/check_domains.py": "this check",
     "tools/test_check_domains.py": "this check's tests",
 }

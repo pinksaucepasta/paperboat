@@ -52,9 +52,9 @@ Run 'proof: IPv4 unusable, IPv6 usable (guest, same moment)' {
   'route print -4'; route print -4
   'ping 8.8.8.8'; ping -n 1 -w 1500 8.8.8.8
   'ping the Ethernet gateway'; ping -n 1 -w 1500 (Get-Content C:\gw.txt).Trim()
-  'curl -4 api'; & curl.exe -4 -s -o NUL -m 8 -w 'code=%{http_code}\n' https://api.pprbt.dev
+  'curl -4 api'; & curl.exe -4 -s -o NUL -m 8 -w 'code=%{http_code}\n' $p['API_URL']
   'curl -4 1.1.1.1'; & curl.exe -s -o NUL -m 8 -w 'code=%{http_code}\n' https://1.1.1.1/
-  'curl -6 api (DNS64/NAT64)'; & curl.exe -6 -s -o NUL -m 15 -w 'code=%{http_code} remote=%{remote_ip}\n' https://api.pprbt.dev
+  'curl -6 api (DNS64/NAT64)'; & curl.exe -6 -s -o NUL -m 15 -w 'code=%{http_code} remote=%{remote_ip}\n' $p['API_URL']
   'ipconfig'; ipconfig
 }
 

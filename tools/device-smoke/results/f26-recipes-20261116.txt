@@ -76,8 +76,8 @@ Token (shown once; save it as the secret PB_RECIPE):
   pbr_<redacted>
 
 Install, with PB_RECIPE set:
-  Linux, macOS  curl -fsSL https://get.pprbt.dev/recipe | bash
-  Windows       irm https://get.pprbt.dev/recipe.ps1 | iex
+  Linux, macOS  curl -fsSL https://get.example.test/recipe | bash
+  Windows       irm https://get.example.test/recipe.ps1 | iex
   pb installed  pb pair
 rc=0
 $ pb recipe list
@@ -123,8 +123,8 @@ Token (shown once; save it as the secret PB_RECIPE):
   pbr_<redacted>
 
 Install, with PB_RECIPE set:
-  Linux, macOS  curl -fsSL https://get.pprbt.dev/recipe | bash
-  Windows       irm https://get.pprbt.dev/recipe.ps1 | iex
+  Linux, macOS  curl -fsSL https://get.example.test/recipe | bash
+  Windows       irm https://get.example.test/recipe.ps1 | iex
   pb installed  pb pair
 
 
@@ -142,8 +142,8 @@ Token (shown once; save it as the secret PB_RECIPE):
   pbr_<redacted>
 
 Install, with PB_RECIPE set:
-  Linux, macOS  curl -fsSL https://get.pprbt.dev/recipe | bash
-  Windows       irm https://get.pprbt.dev/recipe.ps1 | iex
+  Linux, macOS  curl -fsSL https://get.example.test/recipe | bash
+  Windows       irm https://get.example.test/recipe.ps1 | iex
   pb installed  pb pair
 rc=0
 $ pb recipe list
@@ -201,10 +201,10 @@ $ pb recipe show rcpt1
 pb: The requested Paperboat resource was not found. Refresh the available targets and retry. Support reference: support_64cf2958-2def-4025-a3e6-9942b07f782f.
 
 ################ f26-02-L.txt
-$ curl -fsSL https://get.pprbt.dev/recipe | bash   (PB_RECIPE unset)
+$ curl -fsSL https://get.example.test/recipe | bash   (PB_RECIPE unset)
 pb installer: pb install failed; rerun this installer and approve administrator access when prompted
 rc=1
-$ curl -fsSL https://get.pprbt.dev/recipe | PB_RECIPE=pbr_wrong bash
+$ curl -fsSL https://get.example.test/recipe | PB_RECIPE=pbr_wrong bash
 pb installer: pb install failed; rerun this installer and approve administrator access when prompted
 rc=1
 /root/.local/bin:
@@ -620,7 +620,7 @@ Paperboat Windows machine runtime is installed. It will resume after reboot.
 Set up victus (machine_3d4aeb2a-9bbe-48b8-9631-256cb350c7f7)
 $ pb auth status 
 Signed in as <email>
-Server: https://api.pprbt.dev
+Server: https://api.example.test
 Session: session_9a9b537f-d0fb-4ea2-b3c3-50948ea1ed23
 Access expires: 2026-11-16T11:07:51Z
 $ (rcp-w) pb exec rcp-l -- hostname 
@@ -687,7 +687,7 @@ $ pb exec rcp-w2 -- hostname
 pb: No machine has that name or ID. Run `pb machine list` to see your machines. Support reference: support_bc488a4f-92ab-44e8-8b0b-2293f9aace1e. Run `pb bugreport --upload` to send the details.
 
 ################ f26-02-W.txt
-$ irm https://get.pprbt.dev/recipe.ps1 (first line)
+$ irm https://get.example.test/recipe.ps1 (first line)
   $env:PAPERBOAT_RECIPE_INSTALL='1';<# The trusted first-party HTTPS installer pin
 $ pb install
 {"schema_version":"1.0","ok":true,"data":{"automatic_update_checks":false,"distribution":"custom","enrollment":"unchanged","executable":"C:\\Program Files\\Paperboat\\users\\ue655ce475da61ffc2e916d1d\\bin\\pb.exe","sha256":"ed4a7500d78f96367aca9c67b80d3fcf1dbb09dc79637c28eb1d14194b967115","version":"dev-3e4de4a75"}}
@@ -760,8 +760,8 @@ Token (shown once; save it as the secret PB_RECIPE):
   pbr_<redacted>
 
 Install, with PB_RECIPE set:
-  Linux, macOS  curl -fsSL https://get.pprbt.dev/recipe | bash
-  Windows       irm https://get.pprbt.dev/recipe.ps1 | iex
+  Linux, macOS  curl -fsSL https://get.example.test/recipe | bash
+  Windows       irm https://get.example.test/recipe.ps1 | iex
   pb installed  pb pair
 
 $ pb recipe list
@@ -1175,8 +1175,8 @@ Recipe rcpt3 created in workspace personal.
 Token (shown once; save it as the secret PB_RECIPE):
   pbr_<redacted>
 Install, with PB_RECIPE set:
-  Linux, macOS  curl -fsSL https://get.pprbt.dev/recipe | bash
-  Windows       irm https://get.pprbt.dev/recipe.ps1 | iex
+  Linux, macOS  curl -fsSL https://get.example.test/recipe | bash
+  Windows       irm https://get.example.test/recipe.ps1 | iex
   pb installed  pb pair
 $ pb recipe list
 NAME    TAGS    MACHINES   EXPIRES      LAST USED
@@ -1260,7 +1260,7 @@ pb: recipe rcpt9 reads vault rcp-env, and your ENV keys are locked on this compu
 ################ f26-02-oneliner-L.txt / f26-02-oneliner-W.txt (release 2026.11.16.0)
 === F26-02 one-liner on Linux containers, release 2026.11.16.0, server .31, 2026-11-16T13:19:22Z ===
 --- rcp-l10 (user tester, passwordless sudo) ---
-$ curl -fsSL https://get.pprbt.dev/recipe | PB_RECIPE=<token> bash
+$ curl -fsSL https://get.example.test/recipe | PB_RECIPE=<token> bash
 curl: (23) Failure writing output to destination
 (took 1 s)
 $ (again)
@@ -1271,11 +1271,11 @@ $ curl ... | PB_RECIPE=pbr_short bash   [malformed]
 curl: (23) Failure writing output to destination
 sh: 1: /home/tester/.local/bin/pb: not found
 --- rcp-l11 (root) ---
-$ curl -fsSL https://get.pprbt.dev/recipe | PB_RECIPE=<token> bash
+$ curl -fsSL https://get.example.test/recipe | PB_RECIPE=<token> bash
 curl: (23) Failure writing output to destination
 === re-run (the first run redirected bash's stdin away from the pipe), 2026-11-16T13:19:54Z ===
 --- rcp-l10 (user tester, passwordless sudo) ---
-$ curl -fsSL https://get.pprbt.dev/recipe | PB_RECIPE=<token> bash
+$ curl -fsSL https://get.example.test/recipe | PB_RECIPE=<token> bash
 Paperboat will keep this machine awake by default, including on battery and with the lid closed; this can increase battery use and heat.
 Administrator approval is required to install its durable system service.
 Paperboat machine runtime is ready.
@@ -1289,13 +1289,13 @@ $ curl ... | PB_RECIPE=pbr_short bash   [malformed]
 Paperboat: PB_RECIPE is not a recipe token. A token starts with pbr_ and is 67 characters; this value is 9. Copy it again from where you saved it.
   ▄▄▝▀▀▀▀▀▘▄▄   Version 2026.11.16.0
 --- rcp-l11 (root) ---
-$ curl -fsSL https://get.pprbt.dev/recipe | PB_RECIPE=<token> bash
+$ curl -fsSL https://get.example.test/recipe | PB_RECIPE=<token> bash
 pb installer: pb install failed; rerun this installer and approve administrator access when prompted
 --- rcp-l11 (root) with root's user manager running (loginctl enable-linger root) ---
-$ curl -fsSL https://get.pprbt.dev/recipe | PB_RECIPE=<token> bash
+$ curl -fsSL https://get.example.test/recipe | PB_RECIPE=<token> bash
 Installed pb to /root/.local/bin/pb
 pb: This recipe has reached its max_machines. A machine leaves the recipe when it is removed; to allow more, raise max_machines and run `pb recipe update`. Support reference: support_dd60fc03-f1b4-4237-89c4-4a3dcbf12076.
-$ $env:PB_RECIPE = <token>; irm https://get.pprbt.dev/recipe.ps1 | iex
+$ $env:PB_RECIPE = <token>; irm https://get.example.test/recipe.ps1 | iex
 Installed pb to C:\Program Files\Paperboat\users\uaf2d489fd8f85362136e72dc\bin\pb.exe
 Pairing this machine from recipe rcpu.
 Resuming one-shot machine enrollment...
@@ -1311,9 +1311,9 @@ This machine is already paired; nothing to do.
   ▄▄▝▀▀▀▀▀▘▄▄   Version 2026.11.16.0
   ▄▄▝▀▀▀▀▀▘▄▄   Version dev-c6d670f93
   ▄▄▝▀▀▀▀▀▘▄▄   Version dev-d9d082603
-$ irm https://get.pprbt.dev/recipe.ps1 | iex   [PB_RECIPE missing]
+$ irm https://get.example.test/recipe.ps1 | iex   [PB_RECIPE missing]
 Paperboat: PB_RECIPE is not set. Copy the token from pb recipe create or the console (Settings -> Recipes), then run: $env:PB_RECIPE='<token>'; irm <installer>/recipe.ps1 | iex
-$ irm https://get.pprbt.dev/recipe.ps1 | iex   [PB_RECIPE malformed]
+$ irm https://get.example.test/recipe.ps1 | iex   [PB_RECIPE malformed]
 Paperboat: PB_RECIPE is not a recipe token. A token starts with pbr_ and is 67 characters; this value is 9. Copy it again from where you saved it.
 
 ################ f26-05-M2.txt + f26-07-M.txt + f26-05-L2.txt + f26-02-oneliner-M.txt
@@ -1336,7 +1336,7 @@ private = true
 Machines (1 of 5)
   rcp-mz   online   applied revision 1   now
 $ pb tunnel list
-tunnel_f7748bc3-4b1d-4d44-8be4-6ab8c4c88832	managedlmachine	https://fresh-desert-sail-5071.pprbt.app	private	active
+tunnel_f7748bc3-4b1d-4d44-8be4-6ab8c4c88832	managedlmachine	https://fresh-desert-sail-5071.app.example.test	private	active
 $ pb preview list
 preview_c5fa7286-7eea-48b3-86bc-4b49deb65d6b	public	http://127.0.0.1:3000	origin_unavailable	2026-11-16T14:12:03Z
 === F26-07 no root on pbmac2 (macOS, standard user rcpmn without sudo), server .31, client dev-de73faa7f, 2026-11-16T13:42:23Z ===
@@ -1359,14 +1359,14 @@ $ pb recipe show rcpu (machines)
   rcp-wu   online   tunnel failed: pb --config C:\Users\rcpw\AppData\Local\paperboat\config.json tunnel create victus: A tunnel with this name already exists; nothing was changed. Inspect it with `pb tunnel status <tunnel>`. (pb doctor on the machine)
 $ systemctl --user restart paperboatd
 $ pb tunnel list (after the restart)
-tunnel_7bef5133-d499-45a7-b0e9-1f831b0107db	rcp-l9	https://lively-orange-hill-9764.pprbt.app	private	active
-tunnel_4b896898-f069-4fbc-a2f0-1875ebfd081a	victus	https://cozy-shaded-sail-4409.pprbt.app	private	active
-tunnel_96f3af64-cc0a-43de-94c8-ae6de9823840	managedlmachine	https://agile-island-garden-9405.pprbt.app	private	active
+tunnel_7bef5133-d499-45a7-b0e9-1f831b0107db	rcp-l9	https://lively-orange-hill-9764.app.example.test	private	active
+tunnel_4b896898-f069-4fbc-a2f0-1875ebfd081a	victus	https://cozy-shaded-sail-4409.app.example.test	private	active
+tunnel_96f3af64-cc0a-43de-94c8-ae6de9823840	managedlmachine	https://agile-island-garden-9405.app.example.test	private	active
 $ cat recipe-apply.json
 {"revision":3,"previews":{},"tunnels":{"tunnel:{\"port\":8123,\"private\":true}":"rcp-l9"},"config":"","hook":false}=== F26-02 one-liner on pbmac2 (macOS 26.6.2, user admin, over SSH), release 2026.11.16.0, server .31, 2026-11-16T13:28:45Z ===
 $ pb uninstall
 Paperboat was completely removed. The Paperboat Inbox was preserved.
-$ curl -fsSL https://get.pprbt.dev/recipe | PB_RECIPE=<token> bash   [over SSH]
+$ curl -fsSL https://get.example.test/recipe | PB_RECIPE=<token> bash   [over SSH]
 /usr/local/share/man
 Installed pb to /Users/admin/.local/bin/pb
 pb: Paperboat could not finish the command. Check the current state before retrying; run `pb doctor` if this continues. Support reference: support_e19229dc-7ee6-492d-a5fc-7e7322879410. Run `pb bugreport --upload` to send the details.
@@ -1414,7 +1414,7 @@ $ sc stop/start PaperboatLocalDaemon-uaf2d489fd8f85362136e72dc
         STATE              : 4  RUNNING 
         STATE              : 2  START_PENDING 
 $ pb tunnel list (after the restart) 
-tunnel_08b8a378-0ec7-4ab7-8918-a65f9851329b	rcp-wz	https://lively-frosty-trail-4567.pprbt.app	private	active
+tunnel_08b8a378-0ec7-4ab7-8918-a65f9851329b	rcp-wz	https://lively-frosty-trail-4567.app.example.test	private	active
 $ pb preview list (after the restart) 
 1
 $ pb recipe show rcpz (machines) 
@@ -1481,7 +1481,7 @@ rcpz   rcpz   3 / 5      2027-02-14   15m ago
 
 ################ one-liners from release 2026.11.16.2
 === release 2026.11.16.2: one-liner as root in a fresh systemd container (rcp-l14, no linger, no login session), server .37, 2026-11-16T16:34:55Z ===
-$ (root) curl -fsSL https://get.pprbt.dev/recipe | PB_RECIPE=<token> bash
+$ (root) curl -fsSL https://get.example.test/recipe | PB_RECIPE=<token> bash
 Paperboat will keep this machine awake by default, including on battery and with the lid closed; this can increase battery use and heat.
 Paperboat machine runtime is ready.
 Set up rcp-l14 (machine_31bf974a-ca47-4429-89e5-6233759088a8)
@@ -1493,7 +1493,7 @@ active
 === release 2026.11.16.2: one-liner on pbmac2 over SSH (headless), server .37, 2026-11-16T16:35:01Z ===
 $ pb uninstall
 Paperboat was completely removed. The Paperboat Inbox was preserved.
-$ curl -fsSL https://get.pprbt.dev/recipe | PB_RECIPE=<token> bash   [over SSH, no unlocked Keychain]
+$ curl -fsSL https://get.example.test/recipe | PB_RECIPE=<token> bash   [over SSH, no unlocked Keychain]
 Administrator approval is required to install its durable system service.
 Paperboat machine runtime is ready.
 Set up managedlmachine (machine_fbce078b-43dc-4dac-a058-370a8d7821cb)

@@ -14,7 +14,7 @@ restore() { sudo -n networksetup -setdhcp "$SVC"; }
 # a free neighbour address: the last octet moved until nothing answers
 NEWIP=""; for o in 201 202 203 204 205; do c="${IP%.*}.$o"; ping -c 1 -t 1 $c >/dev/null 2>&1 || { NEWIP=$c; break; }; done
 echo "new address: ${NEWIP:-none free}"; [ -n "$NEWIP" ] || { kill $WD; touch /tmp/x38r-as.done; exit 0; }
-src() { curl -s -m 8 -o /dev/null -w "egress src=%{local_ip} http=%{http_code}" https://api.pprbt.dev/; }
+src() { curl -s -m 8 -o /dev/null -w "egress src=%{local_ip} http=%{http_code}" "${PB_API_URL:?set PB_API_URL to the API address}"; }
 echo "== before: $(src)"; touch /tmp/x38r-as.up
 ( $PB exec $PEER -- sh -c 'for i in $(seq 1 '$N'); do echo $i; sleep 1; done' > /tmp/x38r-as.exec 2>/tmp/x38r-as.exec.err; echo "exec rc=$?" > /tmp/x38r-as.exec.rc ) & EX=$!
 sleep 30

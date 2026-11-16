@@ -11,7 +11,7 @@ New-NetFirewallRule -DisplayName 'x38q ipv6' -Direction Outbound -Action Allow -
 Start-Sleep 10
 Log (route print -4 | Out-String -Width 200)
 Log ('ping 8.8.8.8: ' + ((ping -n 1 -w 1500 8.8.8.8) -join ' '))
-Log ('curl -4 api: ' + (& curl.exe -4 -s -o NUL -m 8 -w 'code=%{http_code}' https://api.pprbt.dev))
-Log ('curl -6 api: ' + (& curl.exe -6 -s -o NUL -m 15 -w 'code=%{http_code} remote=%{remote_ip}' https://api.pprbt.dev))
+Log ('curl -4 api: ' + (& curl.exe -4 -s -o NUL -m 8 -w 'code=%{http_code}' $p['API_URL']))
+Log ('curl -6 api: ' + (& curl.exe -6 -s -o NUL -m 15 -w 'code=%{http_code} remote=%{remote_ip}' $p['API_URL']))
 Start-Sleep 30
 Log '== pb doctor'; Log (PB 'doctor')

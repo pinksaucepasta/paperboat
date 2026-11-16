@@ -8,7 +8,7 @@ rm -f /tmp/x38r-ft.up /tmp/x38r-ft.done
 echo "== before"; route -n get default | grep -E "gateway|interface"; $PB version | grep Version
 sudo -n wg-quick up $CONF 2>&1 | sed 's/private-key.*//'
 echo "== routes under the VPN"; netstat -rn -f inet | grep -E "^(0/1|128.0/1|default|[0-9.]+ +[0-9.]+ +UGHS)" | head -8
-echo "== egress"; curl -s -m 10 -o /dev/null -w "code=%{http_code} remote=%{remote_ip}\n" https://api.pprbt.dev/
+echo "== egress"; curl -s -m 10 -o /dev/null -w "code=%{http_code} remote=%{remote_ip}\n" "${PB_API_URL:?set PB_API_URL to the API address}"
 sleep 40
 echo "== doctor under the VPN (Mac)"; $PB doctor 2>&1 | head -22 | cut -c1-200
 for p in rx38r-l lanex2-w lanex2-l2; do

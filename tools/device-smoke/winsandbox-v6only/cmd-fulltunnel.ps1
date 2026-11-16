@@ -12,5 +12,5 @@ $c = (Get-Content C:\host\x38q.conf -Raw) -replace 'Address = .*', 'Address = 10
 Set-Content C:\x38f.conf $c
 & 'C:\Program Files\WireGuard\wireguard.exe' /installtunnelservice C:\x38f.conf; Start-Sleep 10
 Log (route print -4 | Out-String -Width 200)
-Log ('public IPv4 egress: ' + (& curl.exe -4 -s -m 15 https://api.pprbt.dev/ -o NUL -w 'code=%{http_code} remote=%{remote_ip}' ))
+Log ('public IPv4 egress: ' + (& curl.exe -4 -s -m 15 $p['API_URL'] -o NUL -w 'code=%{http_code} remote=%{remote_ip}' ))
 Log ('default route interface: ' + (Get-NetRoute -DestinationPrefix 0.0.0.0/0 | % { "$($_.InterfaceAlias) metric $($_.RouteMetric)" } | Out-String))
