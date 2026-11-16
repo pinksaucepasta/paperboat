@@ -60,7 +60,7 @@ async function issue(previewId: string, action: InspectorAction): Promise<Grant>
 
 /** Extend a live grant in place; the credential and its token stay the same. */
 async function renew(grant: Grant): Promise<Grant> {
-  const next = await api<{ expires_at: string }>(
+  const next = await api<Data<"/v1/inspector/credentials/{credential_id}/renew", "post">>(
     `inspector/credentials/${encodeURIComponent(grant.credential_id)}/renew`,
     json({ ttl_seconds: GRANT_TTL }),
   )

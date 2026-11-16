@@ -35,8 +35,9 @@ const verdict = (key: string, data: unknown) => {
   console.log(`${found ? "FAIL" : "PASS"}  ${key}${found ? `  (${found})` : ""}`)
 }
 const get = documentedOperations().filter((k) => k.startsWith("GET "))
-for (const key of get.filter((k) => !k.includes("{"))) {
-  const path = key.slice(4)
+// {ws} is a workspace: the personal one.
+for (const key of get.filter((k) => !k.includes("{") || /\{ws\}\/[a-z/]+$/.test(k))) {
+  const path = key.slice(4).replace("{ws}", "personal")
   const { status, body } = await read(`${path}?${queries[path] ?? "workspace=personal&limit=5"}`)
   if (status !== 200) {
     console.log(`SKIP  ${key}  (HTTP ${status})`)

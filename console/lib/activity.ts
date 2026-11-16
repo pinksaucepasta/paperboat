@@ -1,7 +1,7 @@
 "use client"
 
 import { infiniteQueryOptions } from "@tanstack/react-query"
-import { api, type Schemas } from "@/lib/api"
+import { api, type Data, type Schemas } from "@/lib/api"
 import { queryKeys } from "@/lib/query-keys"
 
 /*
@@ -85,7 +85,7 @@ export const activityQuery = (input: ActivityFilter) =>
       const params = activityParams(input)
       params.set("limit", "50")
       if (pageParam) params.set("cursor", pageParam)
-      return api<{ items: ActivityEvent[]; next_cursor?: string }>(`activity?${params}`, { signal })
+      return api<Data<"/v1/activity">>(`activity?${params}`, { signal })
     },
     initialPageParam: "",
     getNextPageParam: (page) => page.next_cursor || undefined,

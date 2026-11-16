@@ -6,7 +6,7 @@ const base = { workspace: "w", version: 1, policy: "{}", digest: "", updated_at:
 test("a policy the server saved itself (no updated_by) has no author instead of crashing the editor", () => {
   expect(savedBy(base as unknown as Policy)).toBe("")
   expect(savedBy({ ...base, updated_by: "user:a@b.c" } as unknown as Policy)).toBe(" by a@b.c")
-  expect(savedBy({ ...base, updated_by: "user:a@b.c", updated_with_api_token: "ci" } as unknown as Policy)).toBe(
-    " by a@b.c with API token ci",
+  expect(savedBy({ ...base, updated_by: "user:a@b.c", updated_with_recipe: "ci" } as unknown as Policy)).toBe(
+    " by a@b.c with recipe ci",
   )
 })

@@ -19,7 +19,7 @@ const settling = (domain: WorkspaceDomain) => domain.state === "pending_dns" || 
 export const workspaceDomainsQuery = (workspace: string) =>
   queryOptions({
     queryKey: ["workspace-domains", workspace],
-    queryFn: async ({ signal }) => (await api<{ items: WorkspaceDomain[] }>(path(workspace), { signal })).items,
+    queryFn: async ({ signal }) => (await api<Data<"/v1/domains">>(path(workspace), { signal })).items,
     // Fast while DNS or the certificate is on its way, slow once everything is settled.
     refetchInterval: (query) => (query.state.data?.some(settling) ? 5_000 : 60_000),
   })

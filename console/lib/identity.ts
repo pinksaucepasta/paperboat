@@ -1,7 +1,7 @@
 "use client"
 
 import { queryOptions } from "@tanstack/react-query"
-import { api, idempotencyKey, type Schemas } from "@/lib/api"
+import { api, idempotencyKey, type Data, type Schemas } from "@/lib/api"
 
 /*
  * Team SSO and directory sync (F19, server/docs/teams-business.md). The shape is OpenAPI's
@@ -32,7 +32,7 @@ export const identityQuery = (team: string) =>
 
 /** A one-time Admin Portal link; it returns to /team?team=<id>&tab=security. */
 export const openPortal = (team: string, intent: PortalIntent) =>
-  api<{ url: string }>(`${path(team)}/portal`, { method: "POST", headers: json, body: JSON.stringify({ intent }) })
+  api<Data<"/v1/teams/{team_id}/identity/portal", "post">>(`${path(team)}/portal`, { method: "POST", headers: json, body: JSON.stringify({ intent }) })
 
 export type SsoChange = { required?: boolean; confirm?: string; session_seconds?: number; jit?: boolean }
 

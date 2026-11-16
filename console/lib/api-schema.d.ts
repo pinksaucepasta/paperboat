@@ -11852,9 +11852,6 @@ export interface components {
             external_ref: string;
             display_name: string;
             state: string;
-            default_branch: string;
-            observed_revision: string;
-            version: number;
         };
         ConfigCompareBinding: {
             assignment_id: string;
@@ -12644,6 +12641,314 @@ export interface components {
             port: number;
             /** @description Required for machine and top_level; absent for all_machines. */
             machine_id?: string;
+        };
+        PolicyNames: {
+            users: string[];
+            machines: string[];
+            previews: string[];
+            tunnels: string[];
+            tags: string[];
+            groups: string[];
+        };
+        PolicyView: {
+            workspace: string;
+            version: number;
+            policy: string;
+            digest: string;
+            /** Format: date-time */
+            updated_at: string;
+            updated_by?: string;
+            updated_with_recipe?: string;
+            message: string;
+            /** @enum {string} */
+            can_edit: "all" | "own_machines" | "none";
+            names: components["schemas"]["PolicyNames"];
+        };
+        PolicyVersion: {
+            version: number;
+            digest: string;
+            /** Format: date-time */
+            created_at: string;
+            author?: string;
+            recipe?: string;
+            message: string;
+            gained: number;
+            lost: number;
+            /** @enum {string} */
+            kind: "saved" | "restored" | "rewritten" | "migrated";
+        };
+        PolicyVersionsPage: {
+            versions: components["schemas"]["PolicyVersion"][];
+            total: number;
+            next_cursor?: string;
+        };
+        PolicyProblem: {
+            path: string;
+            code: string;
+            message: string;
+        };
+        PolicyChange: {
+            /** @enum {string} */
+            change: "gained" | "lost";
+            subject: string;
+            target: string;
+            action: string;
+            ports?: string;
+            /** @enum {string} */
+            reason: "owner" | "rule";
+            rules?: string[];
+        };
+        PolicyValidation: {
+            valid: boolean;
+            errors: components["schemas"]["PolicyProblem"][];
+            tests: {
+                passed: number;
+                failed: number;
+            };
+            access_changes: components["schemas"]["PolicyChange"][];
+            confirm?: string;
+        };
+        PolicyDecision: {
+            allowed: boolean;
+            reason: string;
+            rules?: string[];
+            guardrail?: string;
+            key_delivered?: boolean;
+        };
+        PolicyAccess: {
+            subject: string;
+            target: string;
+            action: string;
+            ports?: string;
+            /** @enum {string} */
+            reason: "owner" | "rule";
+            rules?: string[];
+        };
+        PolicyExplanation: {
+            decision?: components["schemas"]["PolicyDecision"];
+            who_can?: components["schemas"]["PolicyAccess"][];
+            what_can?: components["schemas"]["PolicyAccess"][];
+        };
+        WorkspaceTags: {
+            tags: {
+                name: string;
+                machines: string[];
+            }[];
+            can_edit: string;
+            policy_version: number;
+        };
+        MachineTagsView: {
+            tags: string[];
+            policy_version: number;
+        };
+        RecipeBody: {
+            tags?: string[];
+            reach?: ({
+                dst: string[];
+                allow: string[];
+                ports?: unknown[];
+            } & {
+                [key: string]: unknown;
+            })[];
+            expires?: string;
+            max_machines?: number;
+            remove_after_offline?: string;
+            machine_lifetime?: string;
+            env?: {
+                vaults: string[];
+                shell: boolean;
+            };
+            config?: {
+                repository: string;
+            };
+            preview?: {
+                [key: string]: unknown;
+            }[];
+            tunnel?: {
+                [key: string]: unknown;
+            }[];
+        } & {
+            [key: string]: unknown;
+        };
+        RecipeView: {
+            id: string;
+            name: string;
+            workspace: string;
+            revision: number;
+            token: string;
+            source: string;
+            /** @enum {string} */
+            format: "toml" | "json";
+            recipe: components["schemas"]["RecipeBody"];
+            created_by: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+            /** Format: date-time */
+            expires_at: string;
+            /** Format: date-time */
+            last_used_at: string | null;
+            /** Format: date-time */
+            rotated_at: string | null;
+            machines: number;
+            max_machines?: number;
+        };
+        RecipeMachine: {
+            id: string;
+            name: string;
+            online: boolean;
+            applied_revision: number;
+            apply_state: {
+                [key: string]: unknown;
+            } | null;
+            /** Format: date-time */
+            last_seen_at?: string;
+            /** Format: date-time */
+            remove_at?: string;
+        };
+        RecipeImpact: {
+            machines: {
+                id: string;
+                name: string;
+                online: boolean;
+            }[];
+            vaults: string[];
+        };
+        ConfigWarning: {
+            revision: string;
+            machine_name: string;
+            repository_name: string;
+            canonical_scope: string;
+            mode: string;
+            manifest_scope: string;
+            repository_visibility: string;
+            history_retention: string;
+            conflict_behavior: string;
+            force_behavior: string;
+            disable_action: string;
+            offline_behavior: string;
+            access_consequence: string;
+        };
+        ConfigRepositoryCandidate: {
+            provider: string;
+            external_id: string;
+            display_name: string;
+            default_branch: string;
+        };
+        ConfigTeamDefault: {
+            team_id: string;
+            provider: string;
+            external_repository_id: string;
+            display_name: string;
+            branch: string;
+            version: number;
+        };
+        ConfigTeamDefaultAdoption: {
+            team_id: string;
+            provider: string;
+            external_repository_id: string;
+            display_name: string;
+            branch: string;
+            version: number;
+            repository_id: string;
+            adopted_version: number;
+            update_pending: boolean;
+        };
+        GitHubStatus: {
+            connected: boolean;
+            login?: string;
+            avatar_url?: string;
+            scopes: string[];
+            missing_scopes: string[];
+            /** Format: date-time */
+            last_validated_at?: string;
+            config_repo_provisioned: boolean;
+            config_repo_owner?: string;
+            config_repo_name?: string;
+            config_repo_branch?: string;
+        };
+        MachineEnrollment: {
+            id: string;
+            operation_id: string;
+            state: string;
+            generation: number;
+            user_code?: string;
+            machine_id?: string;
+            requested_alias?: string;
+            platform?: string;
+            architecture?: string;
+            workspace_root?: string;
+            /** Format: date-time */
+            expires_at: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+            /** Format: date-time */
+            cancelled_at?: string;
+            failure_code?: string;
+        };
+        MachineEnrollmentStart: components["schemas"]["MachineEnrollment"] & ({
+            bootstrap_token: string;
+            bootstrap_command: string;
+            server_url: string;
+        } & {
+            [key: string]: unknown;
+        });
+        TeamInboxRequest: {
+            stored: boolean;
+            stored_uploaded: boolean;
+            request_id: string;
+            team_id: string;
+            sender_account: string;
+            recipient_account: string;
+            source_machine_id: string;
+            destination_machine_id: string;
+            batch_id: string;
+            manifest_digest: string;
+            status: string;
+            source_machine_name: string;
+            destination_machine_name: string;
+            files: {
+                basename: string;
+                size: number;
+                sha256: string;
+            }[];
+            decision_generation: number;
+            /** Format: date-time */
+            expires_at: string;
+            receipt_notification?: string;
+            /** @enum {string} */
+            transfer_mode?: "automatic" | "unlimited";
+            /** @enum {string} */
+            transfer_state?: "sending" | "paused" | "done" | "failed";
+            /** @enum {string} */
+            pause_reason?: "no_eligible_path" | "destination_offline" | "relay_quota_exhausted";
+            total_bytes: number;
+            committed_bytes: number;
+        };
+        TerminalSessionCreated: {
+            id: string;
+            name: string;
+            title: string;
+            machine: string;
+            started_in: string;
+            is_default: boolean;
+            state: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+            current_directory?: string;
+            foreground_process?: string;
+            attached_count?: number;
+            columns?: number;
+            rows?: number;
+            /** Format: date-time */
+            last_active_at?: string;
+            /** Format: date-time */
+            expires_at?: string;
         };
     };
     responses: {
@@ -14595,12 +14900,19 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Owned repositories. */
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        data: {
+                            items: components["schemas"]["ConfigRepository"][];
+                            pagination: components["schemas"]["InventoryOffsetPagination"];
+                        };
+                    };
+                };
             };
         };
     };
@@ -14644,12 +14956,19 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Eligible private repositories. */
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        data: {
+                            items: components["schemas"]["ConfigRepositoryCandidate"][];
+                            next_cursor: string;
+                        };
+                    };
+                };
             };
             400: components["responses"]["Error"];
             401: components["responses"]["Error"];
@@ -14892,12 +15211,16 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Team configuration default. */
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["ConfigTeamDefault"];
+                    };
+                };
             };
             404: components["responses"]["Error"];
         };
@@ -14911,12 +15234,16 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Team configuration default updated. */
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["ConfigTeamDefault"];
+                    };
+                };
             };
             409: components["responses"]["Error"];
         };
@@ -14952,12 +15279,16 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Current explicit adoption. */
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["ConfigTeamDefaultAdoption"];
+                    };
+                };
             };
             404: components["responses"]["Error"];
         };
@@ -14974,12 +15305,16 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Team default adopted. */
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["ConfigTeamDefaultAdoption"];
+                    };
+                };
             };
             409: components["responses"]["Error"];
         };
@@ -15017,12 +15352,16 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Structured current warning facts bound to the selected machine and repository. */
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["ConfigWarning"];
+                    };
+                };
             };
             404: components["responses"]["Error"];
         };
@@ -17984,13 +18323,15 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description GitHub status. */
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SuccessResponse"];
+                    "application/json": {
+                        data: components["schemas"]["GitHubStatus"];
+                    };
                 };
             };
             401: components["responses"]["Error"];
@@ -18029,13 +18370,18 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description OAuth URL and state. */
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SuccessResponse"];
+                    "application/json": {
+                        data: {
+                            state: string;
+                            authorization_url: string;
+                        };
+                    };
                 };
             };
             400: components["responses"]["Error"];
@@ -18069,13 +18415,19 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description GitHub connected. */
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SuccessResponse"];
+                    "application/json": {
+                        data: components["schemas"]["GitHubStatus"] & ({
+                            return_to?: string;
+                        } & {
+                            [key: string]: unknown;
+                        });
+                    };
                 };
             };
             400: components["responses"]["Error"];
@@ -18326,12 +18678,16 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Enrollment operation and one-time bootstrap handoff. */
+            /** @description Created. */
             201: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["MachineEnrollmentStart"];
+                    };
+                };
             };
             400: components["responses"]["Error"];
             403: components["responses"]["Error"];
@@ -18348,12 +18704,16 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Enrollment state without bootstrap material. */
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["MachineEnrollment"];
+                    };
+                };
             };
             404: components["responses"]["Error"];
         };
@@ -19368,12 +19728,16 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Terminal session created. */
+            /** @description Created. */
             201: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["TerminalSessionCreated"];
+                    };
+                };
             };
             400: components["responses"]["Error"];
             409: components["responses"]["Error"];
@@ -21259,12 +21623,19 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Authorized filtered page with total and next_offset continuation. */
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        data: {
+                            requests: components["schemas"]["TeamInboxRequest"][];
+                            pagination: components["schemas"]["InventoryOffsetPagination"];
+                        };
+                    };
+                };
             };
             401: components["responses"]["Error"];
         };
@@ -29392,12 +29763,16 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description JSON body as documented in shared/policy/README.md. */
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["PolicyView"];
+                    };
+                };
             };
             400: components["responses"]["Error"];
             401: components["responses"]["Error"];
@@ -29421,12 +29796,16 @@ export interface operations {
             };
         };
         responses: {
-            /** @description JSON body as documented in shared/policy/README.md. */
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["PolicyView"];
+                    };
+                };
             };
             400: components["responses"]["Error"];
             401: components["responses"]["Error"];
@@ -29452,12 +29831,16 @@ export interface operations {
             };
         };
         responses: {
-            /** @description JSON body as documented in shared/policy/README.md. */
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["PolicyValidation"];
+                    };
+                };
             };
             400: components["responses"]["Error"];
             401: components["responses"]["Error"];
@@ -29480,12 +29863,16 @@ export interface operations {
             };
         };
         responses: {
-            /** @description JSON body as documented in shared/policy/README.md. */
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["PolicyExplanation"];
+                    };
+                };
             };
             400: components["responses"]["Error"];
             401: components["responses"]["Error"];
@@ -29510,12 +29897,16 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description JSON body as documented in shared/policy/README.md. */
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["PolicyVersionsPage"];
+                    };
+                };
             };
             400: components["responses"]["Error"];
             401: components["responses"]["Error"];
@@ -29538,12 +29929,16 @@ export interface operations {
             };
         };
         responses: {
-            /** @description JSON body as documented in shared/policy/README.md. */
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["PolicyView"];
+                    };
+                };
             };
             400: components["responses"]["Error"];
             401: components["responses"]["Error"];
@@ -29566,12 +29961,16 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description JSON body as documented in shared/policy/README.md. */
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["WorkspaceTags"];
+                    };
+                };
             };
             400: components["responses"]["Error"];
             401: components["responses"]["Error"];
@@ -29596,12 +29995,16 @@ export interface operations {
             };
         };
         responses: {
-            /** @description JSON body as documented in shared/policy/README.md. */
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["MachineTagsView"];
+                    };
+                };
             };
             400: components["responses"]["Error"];
             401: components["responses"]["Error"];
@@ -30321,13 +30724,22 @@ export interface operations {
             };
         };
         responses: {
-            /** @description account_email, machine_name, requested_at, expires_at. */
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SuccessResponse"];
+                    "application/json": {
+                        data: {
+                            account_email: string;
+                            machine_name: string;
+                            /** Format: date-time */
+                            requested_at: string;
+                            /** Format: date-time */
+                            expires_at: string;
+                        };
+                    };
                 };
             };
             400: components["responses"]["Error"];
@@ -30356,13 +30768,17 @@ export interface operations {
             };
         };
         responses: {
-            /** @description authorization_url to open. */
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SuccessResponse"];
+                    "application/json": {
+                        data: {
+                            authorization_url: string;
+                        };
+                    };
                 };
             };
             400: components["responses"]["Error"];
@@ -30391,13 +30807,17 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Cancelled. */
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SuccessResponse"];
+                    "application/json": {
+                        data: {
+                            state: string;
+                        };
+                    };
                 };
             };
             400: components["responses"]["Error"];
@@ -30417,13 +30837,15 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description GitHub status, connected=false. */
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SuccessResponse"];
+                    "application/json": {
+                        data: components["schemas"]["GitHubStatus"];
+                    };
                 };
             };
             401: components["responses"]["Error"];
@@ -31255,12 +31677,18 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description JSON body as documented in shared/recipe/README.md. */
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        data: {
+                            recipes: components["schemas"]["RecipeView"][];
+                        };
+                    };
+                };
             };
             400: components["responses"]["Error"];
             401: components["responses"]["Error"];
@@ -31286,12 +31714,18 @@ export interface operations {
             };
         };
         responses: {
-            /** @description JSON body as documented in shared/recipe/README.md. */
+            /** @description Created. */
             201: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        data: {
+                            recipe: components["schemas"]["RecipeView"];
+                        };
+                    };
+                };
             };
             400: components["responses"]["Error"];
             401: components["responses"]["Error"];
@@ -31314,12 +31748,19 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description JSON body as documented in shared/recipe/README.md. */
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        data: {
+                            recipe: components["schemas"]["RecipeView"];
+                            machines: components["schemas"]["RecipeMachine"][];
+                        };
+                    };
+                };
             };
             400: components["responses"]["Error"];
             401: components["responses"]["Error"];
@@ -31346,12 +31787,22 @@ export interface operations {
             };
         };
         responses: {
-            /** @description JSON body as documented in shared/recipe/README.md. */
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        data: {
+                            recipe: components["schemas"]["RecipeView"];
+                            previous?: components["schemas"]["RecipeView"];
+                            online_machines?: number;
+                        } & {
+                            [key: string]: unknown;
+                        };
+                    };
+                };
             };
             400: components["responses"]["Error"];
             401: components["responses"]["Error"];
@@ -31378,12 +31829,18 @@ export interface operations {
             };
         };
         responses: {
-            /** @description JSON body as documented in shared/recipe/README.md. */
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        data: {
+                            recipe: components["schemas"]["RecipeView"];
+                        };
+                    };
+                };
             };
             400: components["responses"]["Error"];
             401: components["responses"]["Error"];
@@ -31410,12 +31867,20 @@ export interface operations {
             };
         };
         responses: {
-            /** @description JSON body as documented in shared/recipe/README.md. */
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        data: {
+                            recipe: components["schemas"]["RecipeView"];
+                            impact: components["schemas"]["RecipeImpact"];
+                            removal_error?: string;
+                        };
+                    };
+                };
             };
             400: components["responses"]["Error"];
             401: components["responses"]["Error"];

@@ -164,7 +164,7 @@ export function removeParticipant(session: TerminalSession, accountId: string) {
 
 /** Starts a shell on a machine in a workspace and returns its id. */
 export const startShell = (machineId: string, workspace: string) =>
-  api<{ id: string }>(`machines/${encodeURIComponent(machineId)}/terminal-sessions?workspace=${encodeURIComponent(workspace)}`, {
+  api<Data<"/v1/machines/{machine_id}/terminal-sessions", "post">>(`machines/${encodeURIComponent(machineId)}/terminal-sessions?workspace=${encodeURIComponent(workspace)}`, {
     method: "POST",
     headers: { "content-type": "application/json", "idempotency-key": idempotencyKey() },
     body: JSON.stringify({}),

@@ -2,7 +2,7 @@
 
 import { queryOptions } from "@tanstack/react-query"
 import { queryKeys } from "@/lib/query-keys"
-import { api, apiAction, idempotencyKey, type Data } from "@/lib/api"
+import { api, apiAction, idempotencyKey, type Data, type Schemas } from "@/lib/api"
 import { inboxBasename, uploadToInbox } from "@/lib/terminal/inbox-upload"
 import { resourceId, type OperationOrResource } from "@/lib/tunnels"
 
@@ -22,26 +22,7 @@ export type InboxListing = Data<"/v1/machines/{machine_id}/inbox">
 export type InboxFile = InboxListing["items"][number]
 
 /** A Team Inbox request as `GET /v1/team-inbox/requests` lists it (teaminbox.Request). */
-export type InboxRequest = {
-  request_id: string
-  team_id: string
-  sender_account: string
-  recipient_account: string
-  source_machine_id: string
-  source_machine_name?: string
-  destination_machine_id: string
-  destination_machine_name?: string
-  files: { basename: string; size: number; sha256: string }[]
-  status: "pending" | "approved" | "declined" | "expired" | "revoked" | "completed" | string
-  /** After approval, how the transfer is going (File transfer modes, PLAN 3b); `status` is the approval. */
-  transfer_state?: "sending" | "paused" | "done" | "failed"
-  pause_reason?: "no_eligible_path" | "destination_offline" | "relay_quota_exhausted"
-  transfer_mode?: "automatic" | "unlimited"
-  total_bytes?: number
-  committed_bytes?: number
-  decision_generation: number
-  expires_at: string
-}
+export type InboxRequest = Schemas["TeamInboxRequest"]
 
 const inboxPath = (machineId: string) => `machines/${encodeURIComponent(machineId)}/inbox`
 const filePath = (machineId: string, fileId: string) => `${inboxPath(machineId)}/${encodeURIComponent(fileId)}`
@@ -70,7 +51,7 @@ export const requestsQuery = (workspace: string) =>
     queryKey: fileKeys.requests(workspace),
     queryFn: async ({ signal }) =>
       (
-        await api<{ requests: InboxRequest[] }>(`team-inbox/requests?workspace=${encodeURIComponent(workspace)}`, {
+        await api<Data<"/v1/team-inbox/requests">>(`team-inbox/requests?workspace=${encodeURIComponent(workspace)}`, {
           signal,
         })
       ).requests,

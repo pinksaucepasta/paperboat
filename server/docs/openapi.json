@@ -14043,16 +14043,6 @@
           },
           "state": {
             "type": "string"
-          },
-          "default_branch": {
-            "type": "string"
-          },
-          "observed_revision": {
-            "type": "string"
-          },
-          "version": {
-            "type": "integer",
-            "minimum": 1
           }
         },
         "required": [
@@ -14060,10 +14050,7 @@
           "provider",
           "external_ref",
           "display_name",
-          "state",
-          "default_branch",
-          "observed_revision",
-          "version"
+          "state"
         ]
       },
       "ConfigCompareBinding": {
@@ -17052,6 +17039,1196 @@
           "scope",
           "name",
           "port"
+        ]
+      },
+      "PolicyNames": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "users": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "machines": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "previews": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "tunnels": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "groups": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "users",
+          "machines",
+          "previews",
+          "tunnels",
+          "tags",
+          "groups"
+        ]
+      },
+      "PolicyView": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "workspace": {
+            "type": "string"
+          },
+          "version": {
+            "type": "integer"
+          },
+          "policy": {
+            "type": "string"
+          },
+          "digest": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_by": {
+            "type": "string"
+          },
+          "updated_with_recipe": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "can_edit": {
+            "type": "string",
+            "enum": [
+              "all",
+              "own_machines",
+              "none"
+            ]
+          },
+          "names": {
+            "$ref": "#/components/schemas/PolicyNames"
+          }
+        },
+        "required": [
+          "workspace",
+          "version",
+          "policy",
+          "digest",
+          "updated_at",
+          "message",
+          "can_edit",
+          "names"
+        ]
+      },
+      "PolicyVersion": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "version": {
+            "type": "integer"
+          },
+          "digest": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "author": {
+            "type": "string"
+          },
+          "recipe": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "gained": {
+            "type": "integer"
+          },
+          "lost": {
+            "type": "integer"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "saved",
+              "restored",
+              "rewritten",
+              "migrated"
+            ]
+          }
+        },
+        "required": [
+          "version",
+          "digest",
+          "created_at",
+          "message",
+          "gained",
+          "lost",
+          "kind"
+        ]
+      },
+      "PolicyVersionsPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "versions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PolicyVersion"
+            }
+          },
+          "total": {
+            "type": "integer"
+          },
+          "next_cursor": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "versions",
+          "total"
+        ]
+      },
+      "PolicyProblem": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "code",
+          "message"
+        ]
+      },
+      "PolicyChange": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "change": {
+            "type": "string",
+            "enum": [
+              "gained",
+              "lost"
+            ]
+          },
+          "subject": {
+            "type": "string"
+          },
+          "target": {
+            "type": "string"
+          },
+          "action": {
+            "type": "string"
+          },
+          "ports": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "owner",
+              "rule"
+            ]
+          },
+          "rules": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "change",
+          "subject",
+          "target",
+          "action",
+          "reason"
+        ]
+      },
+      "PolicyValidation": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "valid": {
+            "type": "boolean"
+          },
+          "errors": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PolicyProblem"
+            }
+          },
+          "tests": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "passed": {
+                "type": "integer"
+              },
+              "failed": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "passed",
+              "failed"
+            ]
+          },
+          "access_changes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PolicyChange"
+            }
+          },
+          "confirm": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "valid",
+          "errors",
+          "tests",
+          "access_changes"
+        ]
+      },
+      "PolicyDecision": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "allowed": {
+            "type": "boolean"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "rules": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "guardrail": {
+            "type": "string"
+          },
+          "key_delivered": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "allowed",
+          "reason"
+        ]
+      },
+      "PolicyAccess": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "subject": {
+            "type": "string"
+          },
+          "target": {
+            "type": "string"
+          },
+          "action": {
+            "type": "string"
+          },
+          "ports": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "owner",
+              "rule"
+            ]
+          },
+          "rules": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "subject",
+          "target",
+          "action",
+          "reason"
+        ]
+      },
+      "PolicyExplanation": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "decision": {
+            "$ref": "#/components/schemas/PolicyDecision"
+          },
+          "who_can": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PolicyAccess"
+            }
+          },
+          "what_can": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PolicyAccess"
+            }
+          }
+        }
+      },
+      "WorkspaceTags": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "machines": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "name",
+                "machines"
+              ]
+            }
+          },
+          "can_edit": {
+            "type": "string"
+          },
+          "policy_version": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "tags",
+          "can_edit",
+          "policy_version"
+        ]
+      },
+      "MachineTagsView": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "policy_version": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "tags",
+          "policy_version"
+        ]
+      },
+      "RecipeBody": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "reach": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true,
+              "properties": {
+                "dst": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "allow": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "ports": {
+                  "type": "array",
+                  "items": {}
+                }
+              },
+              "required": [
+                "dst",
+                "allow"
+              ]
+            }
+          },
+          "expires": {
+            "type": "string"
+          },
+          "max_machines": {
+            "type": "integer"
+          },
+          "remove_after_offline": {
+            "type": "string"
+          },
+          "machine_lifetime": {
+            "type": "string"
+          },
+          "env": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "vaults": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "shell": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "vaults",
+              "shell"
+            ]
+          },
+          "config": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "repository": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "repository"
+            ]
+          },
+          "preview": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true,
+              "properties": {}
+            }
+          },
+          "tunnel": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true,
+              "properties": {}
+            }
+          }
+        }
+      },
+      "RecipeView": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "workspace": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "integer"
+          },
+          "token": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "toml",
+              "json"
+            ]
+          },
+          "recipe": {
+            "$ref": "#/components/schemas/RecipeBody"
+          },
+          "created_by": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "last_used_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "rotated_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "machines": {
+            "type": "integer"
+          },
+          "max_machines": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "workspace",
+          "revision",
+          "token",
+          "source",
+          "format",
+          "recipe",
+          "created_by",
+          "created_at",
+          "updated_at",
+          "expires_at",
+          "last_used_at",
+          "rotated_at",
+          "machines"
+        ]
+      },
+      "RecipeMachine": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "online": {
+            "type": "boolean"
+          },
+          "applied_revision": {
+            "type": "integer"
+          },
+          "apply_state": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": true
+          },
+          "last_seen_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "remove_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "online",
+          "applied_revision",
+          "apply_state"
+        ]
+      },
+      "RecipeImpact": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "machines": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "online": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "id",
+                "name",
+                "online"
+              ]
+            }
+          },
+          "vaults": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "machines",
+          "vaults"
+        ]
+      },
+      "ConfigWarning": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "revision": {
+            "type": "string"
+          },
+          "machine_name": {
+            "type": "string"
+          },
+          "repository_name": {
+            "type": "string"
+          },
+          "canonical_scope": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "manifest_scope": {
+            "type": "string"
+          },
+          "repository_visibility": {
+            "type": "string"
+          },
+          "history_retention": {
+            "type": "string"
+          },
+          "conflict_behavior": {
+            "type": "string"
+          },
+          "force_behavior": {
+            "type": "string"
+          },
+          "disable_action": {
+            "type": "string"
+          },
+          "offline_behavior": {
+            "type": "string"
+          },
+          "access_consequence": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "revision",
+          "machine_name",
+          "repository_name",
+          "canonical_scope",
+          "mode",
+          "manifest_scope",
+          "repository_visibility",
+          "history_retention",
+          "conflict_behavior",
+          "force_behavior",
+          "disable_action",
+          "offline_behavior",
+          "access_consequence"
+        ]
+      },
+      "ConfigRepositoryCandidate": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "provider": {
+            "type": "string"
+          },
+          "external_id": {
+            "type": "string"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "default_branch": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "external_id",
+          "display_name",
+          "default_branch"
+        ]
+      },
+      "ConfigTeamDefault": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "team_id": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "external_repository_id": {
+            "type": "string"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "branch": {
+            "type": "string"
+          },
+          "version": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "team_id",
+          "provider",
+          "external_repository_id",
+          "display_name",
+          "branch",
+          "version"
+        ]
+      },
+      "ConfigTeamDefaultAdoption": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "team_id": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "external_repository_id": {
+            "type": "string"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "branch": {
+            "type": "string"
+          },
+          "version": {
+            "type": "integer"
+          },
+          "repository_id": {
+            "type": "string"
+          },
+          "adopted_version": {
+            "type": "integer"
+          },
+          "update_pending": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "team_id",
+          "provider",
+          "external_repository_id",
+          "display_name",
+          "branch",
+          "version",
+          "repository_id",
+          "adopted_version",
+          "update_pending"
+        ]
+      },
+      "GitHubStatus": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "connected": {
+            "type": "boolean"
+          },
+          "login": {
+            "type": "string"
+          },
+          "avatar_url": {
+            "type": "string"
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "missing_scopes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "last_validated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "config_repo_provisioned": {
+            "type": "boolean"
+          },
+          "config_repo_owner": {
+            "type": "string"
+          },
+          "config_repo_name": {
+            "type": "string"
+          },
+          "config_repo_branch": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "connected",
+          "scopes",
+          "missing_scopes",
+          "config_repo_provisioned"
+        ]
+      },
+      "MachineEnrollment": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "operation_id": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "generation": {
+            "type": "integer"
+          },
+          "user_code": {
+            "type": "string"
+          },
+          "machine_id": {
+            "type": "string"
+          },
+          "requested_alias": {
+            "type": "string"
+          },
+          "platform": {
+            "type": "string"
+          },
+          "architecture": {
+            "type": "string"
+          },
+          "workspace_root": {
+            "type": "string"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "cancelled_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "failure_code": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "operation_id",
+          "state",
+          "generation",
+          "expires_at",
+          "created_at",
+          "updated_at"
+        ]
+      },
+      "MachineEnrollmentStart": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/MachineEnrollment"
+          },
+          {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "bootstrap_token": {
+                "type": "string"
+              },
+              "bootstrap_command": {
+                "type": "string"
+              },
+              "server_url": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "bootstrap_token",
+              "bootstrap_command",
+              "server_url"
+            ]
+          }
+        ]
+      },
+      "TeamInboxRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "stored": {
+            "type": "boolean"
+          },
+          "stored_uploaded": {
+            "type": "boolean"
+          },
+          "request_id": {
+            "type": "string"
+          },
+          "team_id": {
+            "type": "string"
+          },
+          "sender_account": {
+            "type": "string"
+          },
+          "recipient_account": {
+            "type": "string"
+          },
+          "source_machine_id": {
+            "type": "string"
+          },
+          "destination_machine_id": {
+            "type": "string"
+          },
+          "batch_id": {
+            "type": "string"
+          },
+          "manifest_digest": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "source_machine_name": {
+            "type": "string"
+          },
+          "destination_machine_name": {
+            "type": "string"
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "basename": {
+                  "type": "string"
+                },
+                "size": {
+                  "type": "integer"
+                },
+                "sha256": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "basename",
+                "size",
+                "sha256"
+              ]
+            }
+          },
+          "decision_generation": {
+            "type": "integer"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "receipt_notification": {
+            "type": "string"
+          },
+          "transfer_mode": {
+            "type": "string",
+            "enum": [
+              "automatic",
+              "unlimited"
+            ]
+          },
+          "transfer_state": {
+            "type": "string",
+            "enum": [
+              "sending",
+              "paused",
+              "done",
+              "failed"
+            ]
+          },
+          "pause_reason": {
+            "type": "string",
+            "enum": [
+              "no_eligible_path",
+              "destination_offline",
+              "relay_quota_exhausted"
+            ]
+          },
+          "total_bytes": {
+            "type": "integer"
+          },
+          "committed_bytes": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "stored",
+          "stored_uploaded",
+          "request_id",
+          "team_id",
+          "sender_account",
+          "recipient_account",
+          "source_machine_id",
+          "destination_machine_id",
+          "batch_id",
+          "manifest_digest",
+          "status",
+          "source_machine_name",
+          "destination_machine_name",
+          "files",
+          "decision_generation",
+          "expires_at",
+          "total_bytes",
+          "committed_bytes"
+        ]
+      },
+      "TerminalSessionCreated": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "machine": {
+            "type": "string"
+          },
+          "started_in": {
+            "type": "string"
+          },
+          "is_default": {
+            "type": "boolean"
+          },
+          "state": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "current_directory": {
+            "type": "string"
+          },
+          "foreground_process": {
+            "type": "string"
+          },
+          "attached_count": {
+            "type": "integer"
+          },
+          "columns": {
+            "type": "integer"
+          },
+          "rows": {
+            "type": "integer"
+          },
+          "last_active_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "title",
+          "machine",
+          "started_in",
+          "is_default",
+          "state",
+          "created_at",
+          "updated_at"
         ]
       }
     },
@@ -20373,7 +21550,38 @@
         ],
         "responses": {
           "200": {
-            "description": "Owned repositories."
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "items": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/components/schemas/ConfigRepository"
+                          }
+                        },
+                        "pagination": {
+                          "$ref": "#/components/schemas/InventoryOffsetPagination"
+                        }
+                      },
+                      "required": [
+                        "items",
+                        "pagination"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
           }
         },
         "operationId": "get_v1_config_repositories",
@@ -20503,7 +21711,38 @@
         ],
         "responses": {
           "200": {
-            "description": "Eligible private repositories."
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "items": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/components/schemas/ConfigRepositoryCandidate"
+                          }
+                        },
+                        "next_cursor": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "items",
+                        "next_cursor"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
           },
           "400": {
             "$ref": "#/components/responses/Error"
@@ -20932,7 +22171,22 @@
         ],
         "responses": {
           "200": {
-            "description": "Team configuration default."
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/ConfigTeamDefault"
+                    }
+                  }
+                }
+              }
+            }
           },
           "404": {
             "$ref": "#/components/responses/Error"
@@ -20950,7 +22204,22 @@
         ],
         "responses": {
           "200": {
-            "description": "Team configuration default updated."
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/ConfigTeamDefault"
+                    }
+                  }
+                }
+              }
+            }
           },
           "409": {
             "$ref": "#/components/responses/Error"
@@ -20993,7 +22262,22 @@
         ],
         "responses": {
           "200": {
-            "description": "Current explicit adoption."
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/ConfigTeamDefaultAdoption"
+                    }
+                  }
+                }
+              }
+            }
           },
           "404": {
             "$ref": "#/components/responses/Error"
@@ -21023,7 +22307,22 @@
         ],
         "responses": {
           "200": {
-            "description": "Team default adopted."
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/ConfigTeamDefaultAdoption"
+                    }
+                  }
+                }
+              }
+            }
           },
           "409": {
             "$ref": "#/components/responses/Error"
@@ -21087,7 +22386,22 @@
         ],
         "responses": {
           "200": {
-            "description": "Structured current warning facts bound to the selected machine and repository."
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/ConfigWarning"
+                    }
+                  }
+                }
+              }
+            }
           },
           "404": {
             "$ref": "#/components/responses/Error"
@@ -26730,11 +28044,19 @@
         "summary": "GitHub connection status",
         "responses": {
           "200": {
-            "description": "GitHub status.",
+            "description": "OK",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SuccessResponse"
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/GitHubStatus"
+                    }
+                  }
                 }
               }
             }
@@ -26812,11 +28134,32 @@
         ],
         "responses": {
           "200": {
-            "description": "OAuth URL and state.",
+            "description": "OK",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SuccessResponse"
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "state": {
+                          "type": "string"
+                        },
+                        "authorization_url": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "state",
+                        "authorization_url"
+                      ]
+                    }
+                  }
                 }
               }
             }
@@ -26855,11 +28198,32 @@
         ],
         "responses": {
           "200": {
-            "description": "GitHub connected.",
+            "description": "OK",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SuccessResponse"
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "allOf": [
+                        {
+                          "$ref": "#/components/schemas/GitHubStatus"
+                        },
+                        {
+                          "type": "object",
+                          "additionalProperties": true,
+                          "properties": {
+                            "return_to": {
+                              "type": "string"
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  }
                 }
               }
             }
@@ -27460,7 +28824,22 @@
         ],
         "responses": {
           "201": {
-            "description": "Enrollment operation and one-time bootstrap handoff."
+            "description": "Created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/MachineEnrollmentStart"
+                    }
+                  }
+                }
+              }
+            }
           },
           "400": {
             "$ref": "#/components/responses/Error"
@@ -27509,7 +28888,22 @@
         ],
         "responses": {
           "200": {
-            "description": "Enrollment state without bootstrap material."
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/MachineEnrollment"
+                    }
+                  }
+                }
+              }
+            }
           },
           "404": {
             "$ref": "#/components/responses/Error"
@@ -29644,7 +31038,22 @@
         ],
         "responses": {
           "201": {
-            "description": "Terminal session created."
+            "description": "Created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/TerminalSessionCreated"
+                    }
+                  }
+                }
+              }
+            }
           },
           "400": {
             "$ref": "#/components/responses/Error"
@@ -33389,7 +34798,38 @@
         "description": "Responses include source_machine_name and destination_machine_name captured at request creation. Request history and pending receipt delivery survive machine removal.",
         "responses": {
           "200": {
-            "description": "Authorized filtered page with total and next_offset continuation."
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "requests": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/components/schemas/TeamInboxRequest"
+                          }
+                        },
+                        "pagination": {
+                          "$ref": "#/components/schemas/InventoryOffsetPagination"
+                        }
+                      },
+                      "required": [
+                        "requests",
+                        "pagination"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
           },
           "401": {
             "$ref": "#/components/responses/Error"
@@ -49315,7 +50755,22 @@
         ],
         "responses": {
           "200": {
-            "description": "JSON body as documented in shared/policy/README.md."
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/PolicyView"
+                    }
+                  }
+                }
+              }
+            }
           },
           "400": {
             "$ref": "#/components/responses/Error"
@@ -49374,7 +50829,22 @@
         },
         "responses": {
           "200": {
-            "description": "JSON body as documented in shared/policy/README.md."
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/PolicyView"
+                    }
+                  }
+                }
+              }
+            }
           },
           "400": {
             "$ref": "#/components/responses/Error"
@@ -49440,7 +50910,22 @@
         },
         "responses": {
           "200": {
-            "description": "JSON body as documented in shared/policy/README.md."
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/PolicyValidation"
+                    }
+                  }
+                }
+              }
+            }
           },
           "400": {
             "$ref": "#/components/responses/Error"
@@ -49497,7 +50982,22 @@
         },
         "responses": {
           "200": {
-            "description": "JSON body as documented in shared/policy/README.md."
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/PolicyExplanation"
+                    }
+                  }
+                }
+              }
+            }
           },
           "400": {
             "$ref": "#/components/responses/Error"
@@ -49567,7 +51067,22 @@
         ],
         "responses": {
           "200": {
-            "description": "JSON body as documented in shared/policy/README.md."
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/PolicyVersionsPage"
+                    }
+                  }
+                }
+              }
+            }
           },
           "400": {
             "$ref": "#/components/responses/Error"
@@ -49625,7 +51140,22 @@
         },
         "responses": {
           "200": {
-            "description": "JSON body as documented in shared/policy/README.md."
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/PolicyView"
+                    }
+                  }
+                }
+              }
+            }
           },
           "400": {
             "$ref": "#/components/responses/Error"
@@ -49683,7 +51213,22 @@
         ],
         "responses": {
           "200": {
-            "description": "JSON body as documented in shared/policy/README.md."
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/WorkspaceTags"
+                    }
+                  }
+                }
+              }
+            }
           },
           "400": {
             "$ref": "#/components/responses/Error"
@@ -49753,7 +51298,22 @@
         },
         "responses": {
           "200": {
-            "description": "JSON body as documented in shared/policy/README.md."
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/MachineTagsView"
+                    }
+                  }
+                }
+              }
+            }
           },
           "400": {
             "$ref": "#/components/responses/Error"
@@ -51132,11 +52692,42 @@
         },
         "responses": {
           "200": {
-            "description": "account_email, machine_name, requested_at, expires_at.",
+            "description": "OK",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SuccessResponse"
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "account_email": {
+                          "type": "string"
+                        },
+                        "machine_name": {
+                          "type": "string"
+                        },
+                        "requested_at": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "expires_at": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      },
+                      "required": [
+                        "account_email",
+                        "machine_name",
+                        "requested_at",
+                        "expires_at"
+                      ]
+                    }
+                  }
                 }
               }
             }
@@ -51198,11 +52789,28 @@
         },
         "responses": {
           "200": {
-            "description": "authorization_url to open.",
+            "description": "OK",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SuccessResponse"
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "authorization_url": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "authorization_url"
+                      ]
+                    }
+                  }
                 }
               }
             }
@@ -51264,11 +52872,28 @@
         },
         "responses": {
           "200": {
-            "description": "Cancelled.",
+            "description": "OK",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SuccessResponse"
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "state": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "state"
+                      ]
+                    }
+                  }
                 }
               }
             }
@@ -51301,11 +52926,19 @@
         "operationId": "delete_v1_github_connection",
         "responses": {
           "200": {
-            "description": "GitHub status, connected=false.",
+            "description": "OK",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SuccessResponse"
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/GitHubStatus"
+                    }
+                  }
                 }
               }
             }
@@ -52796,7 +54429,34 @@
         ],
         "responses": {
           "200": {
-            "description": "JSON body as documented in shared/recipe/README.md."
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "recipes": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/components/schemas/RecipeView"
+                          }
+                        }
+                      },
+                      "required": [
+                        "recipes"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
           },
           "400": {
             "$ref": "#/components/responses/Error"
@@ -52860,7 +54520,31 @@
         },
         "responses": {
           "201": {
-            "description": "JSON body as documented in shared/recipe/README.md."
+            "description": "Created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "recipe": {
+                          "$ref": "#/components/schemas/RecipeView"
+                        }
+                      },
+                      "required": [
+                        "recipe"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
           },
           "400": {
             "$ref": "#/components/responses/Error"
@@ -52924,7 +54608,38 @@
         ],
         "responses": {
           "200": {
-            "description": "JSON body as documented in shared/recipe/README.md."
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "recipe": {
+                          "$ref": "#/components/schemas/RecipeView"
+                        },
+                        "machines": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/components/schemas/RecipeMachine"
+                          }
+                        }
+                      },
+                      "required": [
+                        "recipe",
+                        "machines"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
           },
           "400": {
             "$ref": "#/components/responses/Error"
@@ -52997,7 +54712,37 @@
         },
         "responses": {
           "200": {
-            "description": "JSON body as documented in shared/recipe/README.md."
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "properties": {
+                        "recipe": {
+                          "$ref": "#/components/schemas/RecipeView"
+                        },
+                        "previous": {
+                          "$ref": "#/components/schemas/RecipeView"
+                        },
+                        "online_machines": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "recipe"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
           },
           "400": {
             "$ref": "#/components/responses/Error"
@@ -53072,7 +54817,31 @@
         },
         "responses": {
           "200": {
-            "description": "JSON body as documented in shared/recipe/README.md."
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "recipe": {
+                          "$ref": "#/components/schemas/RecipeView"
+                        }
+                      },
+                      "required": [
+                        "recipe"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
           },
           "400": {
             "$ref": "#/components/responses/Error"
@@ -53148,7 +54917,38 @@
         },
         "responses": {
           "200": {
-            "description": "JSON body as documented in shared/recipe/README.md."
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "recipe": {
+                          "$ref": "#/components/schemas/RecipeView"
+                        },
+                        "impact": {
+                          "$ref": "#/components/schemas/RecipeImpact"
+                        },
+                        "removal_error": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "recipe",
+                        "impact"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
           },
           "400": {
             "$ref": "#/components/responses/Error"

@@ -5,7 +5,7 @@ import { useMutation } from "@tanstack/react-query"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useEffect, useRef, useState } from "react"
-import { api, idempotencyKey, useApiQuery, machineQuery } from "@/lib/api"
+import { api, idempotencyKey, useApiQuery, machineQuery, type Data } from "@/lib/api"
 import { Frame, TopBar } from "@/components/terminal/terminal-page"
 import { isLimitReached, LimitReached } from "@/components/limit-reached"
 import { Button } from "@/components/ui/button"
@@ -24,7 +24,7 @@ export function StartTerminal() {
   const [key, setKey] = useState(idempotencyKey)
   const start = useMutation({
     mutationFn: () =>
-      api<{ id: string }>(
+      api<Data<"/v1/machines/{machine_id}/terminal-sessions", "post">>(
         `machines/${encodeURIComponent(machineId)}/terminal-sessions?workspace=${encodeURIComponent(workspace)}`,
         {
           method: "POST",

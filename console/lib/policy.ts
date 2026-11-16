@@ -1,82 +1,24 @@
 "use client"
 
 import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query"
-import { ApiError, checked, confirmSession, idempotencyKey, send } from "@/lib/api"
+import { ApiError, checked, confirmSession, idempotencyKey, send, type Schemas } from "@/lib/api"
 import { queryKeys } from "@/lib/query-keys"
 
-// Workspace policy and API tokens. Contract: shared/policy/README.md ("HTTP API", "API tokens").
-// Hand-written types until the server documents these endpoints in openapi.json.
+// Workspace policy (types from the OpenAPI document; contract: shared/policy/README.md "HTTP API") and API tokens.
+// The server no longer serves API tokens (F26: recipes replaced them), so their types stay local.
 
-export type PolicyNames = {
-  users: string[]
-  machines: string[]
-  previews: string[]
-  tunnels: string[]
-  tags: string[]
-  groups: string[]
-}
-
-export type CanEdit = "all" | "own_machines" | "none"
-
-export type Policy = {
-  workspace: string
-  version: number
-  policy: string
-  digest: string
-  updated_at: string
-  /** Absent when the server itself saved it ("Removed machines or members that left the workspace"). */
-  updated_by?: string
-  updated_with_api_token?: string
-  /** The recipe that saved it (machine tags at pairing). */
-  updated_with_recipe?: string
-  message: string
-  can_edit: CanEdit
-  names: PolicyNames
-}
-
-export type PolicyProblem = { path: string; code: string; message: string }
-
-export type AccessChange = {
-  change: "gained" | "lost"
-  subject: string
-  target: string
-  action: string
-  /** private_access only, e.g. "22,1024-65535" */
-  ports?: string
-  rules?: string[]
-}
-
-export type Validation = {
-  valid: boolean
-  errors: PolicyProblem[]
-  tests: { passed: number; failed: number }
-  access_changes: AccessChange[]
-  confirm: string
-}
-
+export type PolicyNames = Schemas["PolicyNames"]
+export type Policy = Schemas["PolicyView"]
+export type CanEdit = Policy["can_edit"]
+export type PolicyProblem = Schemas["PolicyProblem"]
+/** `ports` is private_access only, e.g. "22,1024-65535". */
+export type AccessChange = Schemas["PolicyChange"]
+export type Validation = Schemas["PolicyValidation"]
 /** `key_delivered: false`: env_read is allowed but no key holder has delivered the team ENV key yet. */
-export type Decision = {
-  allowed: boolean
-  reason: string
-  rules?: string[]
-  guardrail?: string
-  key_delivered?: boolean
-}
-export type Explanation = { decision?: Decision }
-
-export type PolicyVersion = {
-  version: number
-  digest: string
-  created_at: string
-  /** `user:<email>`; absent for versions nobody saved (the first one, written by Paperboat). */
-  author?: string
-  api_token?: string
-  recipe?: string
-  message: string
-  gained: number
-  lost: number
-  kind: "saved" | "restored" | "rewritten" | "migrated"
-}
+export type Decision = Schemas["PolicyDecision"]
+export type Explanation = Schemas["PolicyExplanation"]
+/** `author` is `user:<email>`; absent for versions nobody saved (the first one, written by Paperboat). */
+export type PolicyVersion = Schemas["PolicyVersion"]
 
 export type ScopeEntry = { dst: string[]; allow: string[]; ports?: (number | string)[] }
 
@@ -158,11 +100,7 @@ export const policyQuery = (workspace: string) =>
 /** Machine tags in the console (Lane K's tag API, server 2026.10.23.44). */
 export const tagsLive = true
 
-export type WorkspaceTags = {
-  tags: { name: string; machines: string[] }[]
-  can_edit: "all" | "own_machines" | "none"
-  policy_version: number
-}
+export type WorkspaceTags = Schemas["WorkspaceTags"]
 
 /** The workspace's tags (`tag:<name>`) and the machines carrying each; the policy file is their store. */
 export const tagsQuery = (workspace: string) =>
@@ -183,7 +121,7 @@ export function setMachineTags(
   expected: number,
   confirm?: string,
 ) {
-  return call<{ tags: string[]; policy_version: number }>(
+  return call<Schemas["MachineTagsView"]>(
     "Saving tags",
     `${ws(workspace)}/machines/${encodeURIComponent(machineId)}/tags`,
     { method: "PUT", json: { tags, expected_version: expected, ...(confirm && { confirm }) } },
@@ -207,7 +145,7 @@ export const policyVersionsQuery = (workspace: string) =>
     queryKey: ["policy", workspace, "versions"],
     queryFn: async ({ pageParam, signal }) => {
       const query = new URLSearchParams({ limit: "50", ...(pageParam && { cursor: pageParam }) })
-      return call<{ versions: PolicyVersion[]; total: number; next_cursor?: string }>(
+      return call<Schemas["PolicyVersionsPage"]>(
         "Loading the history",
         `${ws(workspace)}/policy/versions?${query}`,
         { signal },
@@ -428,7 +366,7 @@ export function lineDiff(before: string, after: string): { kind: " " | "-" | "+"
 export function savedBy(policy: Policy) {
   if (!policy.updated_by) return ""
   const who = policy.updated_by.replace(/^user:/, "")
-  return ` by ${who}${policy.updated_with_api_token ? ` with API token ${policy.updated_with_api_token}` : ""}${policy.updated_with_recipe ? ` with recipe ${policy.updated_with_recipe}` : ""}`
+  return ` by ${who}${policy.updated_with_recipe ? ` with recipe ${policy.updated_with_recipe}` : ""}`
 }
 
 /** Shown wherever the signed-in member may look but not change the policy. */

@@ -1,47 +1,21 @@
 "use client"
 
 import { queryOptions } from "@tanstack/react-query"
-import { api, ApiError, idempotencyKey } from "@/lib/api"
+import { api, ApiError, idempotencyKey, type Data, type Schemas } from "@/lib/api"
 import { queryKeys } from "@/lib/query-keys"
 import type { NewToken } from "@/lib/recipe-token"
 
 // Recipes. Contract: shared/recipe/README.md ("API"). `{ws}` is "personal" or the team id.
 
-export type Recipe = {
-  id: string
-  name: string
-  revision: number
-  /** `pbr_<id>_…`: the secret is never shown again. */
-  token: string
-  source: string
-  format: "toml" | "json"
-  /** The canonical file, defaults filled. */
-  recipe: { tags?: string[]; env?: { vaults: string[] } }
-  created_by: string
-  created_at: string
-  updated_at: string
-  expires_at: string
-  last_used_at: string | null
-  rotated_at: string | null
-  machines: number
-  max_machines?: number
-}
-
-export type RecipeMachine = {
-  id: string
-  name: string
-  online: boolean
-  last_seen_at: string | null
-  applied_revision: number
-  /** What each section did on the machine; a section that failed carries `error`. */
-  apply_state: Record<string, { error?: string } | unknown> | null
-  remove_at: string | null
-}
+/** `token` is `pbr_<id>_…` (the secret is never shown again); `recipe` is the canonical file, defaults filled. */
+export type Recipe = Schemas["RecipeView"]
+/** What each section did on the machine (`apply_state`); a section that failed carries `error`. */
+export type RecipeMachine = Schemas["RecipeMachine"]
 
 /** One problem in the file, as `invalid_recipe` lists them. */
 export type FileProblem = { line: number; column: number; path: string; message: string; text: string }
 
-export type Impact = { machines: { id: string; name: string; online: boolean }[]; vaults: string[] }
+export type Impact = Schemas["RecipeImpact"]
 
 export type RecipeFormat = Recipe["format"]
 
@@ -57,7 +31,7 @@ const write = <T>(path: string, method: "POST" | "PUT", body: unknown) =>
 export const recipesQuery = (workspace: string) =>
   queryOptions({
     queryKey: queryKeys.recipes(workspace),
-    queryFn: async ({ signal }) => (await api<{ recipes: Recipe[] }>(`${ws(workspace)}/recipes`, { signal })).recipes,
+    queryFn: async ({ signal }) => (await api<Data<"/v1/workspaces/{ws}/recipes">>(`${ws(workspace)}/recipes`, { signal })).recipes,
     enabled: Boolean(workspace),
   })
 
@@ -65,7 +39,7 @@ export const recipeQuery = (workspace: string, name: string) =>
   queryOptions({
     queryKey: queryKeys.recipes(workspace, name),
     queryFn: ({ signal }) =>
-      api<{ recipe: Recipe; machines: RecipeMachine[] }>(recipePath(workspace, name), { signal }),
+      api<Data<"/v1/workspaces/{ws}/recipes/{name}">>(recipePath(workspace, name), { signal }),
     enabled: Boolean(workspace),
   })
 

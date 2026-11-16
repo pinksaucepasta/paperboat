@@ -17,7 +17,7 @@ const query = (workspace: string) => `?workspace=${encodeURIComponent(workspace)
 export const portNamesQuery = (workspace: string) =>
   queryOptions({
     queryKey: ["port-names", workspace],
-    queryFn: async ({ signal }) => (await api<{ items: PortName[] }>(`port-names${query(workspace)}`, { signal })).items,
+    queryFn: async ({ signal }) => (await api<Data<"/v1/port-names">>(`port-names${query(workspace)}`, { signal })).items,
   })
 
 export const setPortName = (

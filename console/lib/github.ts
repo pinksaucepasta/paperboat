@@ -1,7 +1,7 @@
 "use client"
 
 import { queryOptions } from "@tanstack/react-query"
-import { api, ApiError, checked, send } from "@/lib/api"
+import { api, ApiError, checked, send, type Data, type Schemas } from "@/lib/api"
 import { queryKeys } from "@/lib/query-keys"
 
 /*
@@ -13,26 +13,11 @@ import { queryKeys } from "@/lib/query-keys"
 /** On: GitHub returns through the server's callback to /github/callback (server 2026.10.23.40, f69bcadb). */
 export const githubLive = true
 
-export type GitHubStatus = {
-  connected: boolean
-  /** The connected GitHub account. */
-  login?: string
-  avatar_url?: string
-  scopes: string[]
-  missing_scopes: string[]
-  config_repo_provisioned: boolean
-  config_repo_owner?: string
-  config_repo_name?: string
-  config_repo_branch?: string
-}
+/** `login`/`avatar_url`: the connected GitHub account. */
+export type GitHubStatus = Schemas["GitHubStatus"]
 
 /** A `pb` request to connect GitHub, as the console reviews it (nothing is used up by reading it). */
-export type GitHubLinkReview = {
-  account_email: string
-  machine_name: string
-  requested_at: string
-  expires_at: string
-}
+export type GitHubLinkReview = Data<"/v1/github/native-links/{link_id}/review", "post">
 
 export const githubStatusQuery = queryOptions({
   queryKey: queryKeys.githubStatus,
@@ -54,7 +39,7 @@ export const reviewLink = (id: string, token: string, signal?: AbortSignal) =>
 
 /** One use: returns GitHub's authorization page for this request. */
 export const approveLink = (id: string, token: string) =>
-  api<{ authorization_url: string }>(`${linkPath(id)}/approve`, {
+  api<Data<"/v1/github/native-links/{link_id}/approve", "post">>(`${linkPath(id)}/approve`, {
     method: "POST",
     headers: json,
     body: JSON.stringify({ token }),
@@ -65,7 +50,7 @@ export const cancelLink = (id: string, token: string) =>
 
 /** Connect from the console: GitHub returns to /github/done, then back to `returnTo`. */
 export const startConnect = (returnTo: string) =>
-  api<{ authorization_url: string }>("github/oauth/start", {
+  api<Data<"/v1/github/oauth/start", "post">>("github/oauth/start", {
     method: "POST",
     headers: json,
     body: JSON.stringify({ return_to: returnTo }),

@@ -1,7 +1,7 @@
 "use client"
 
 import { queryOptions } from "@tanstack/react-query"
-import { api, apiAction } from "@/lib/api"
+import { api, apiAction, type Data, type Schemas } from "@/lib/api"
 import { cursorPage } from "@/lib/cursor-pages"
 import { queryKeys } from "@/lib/query-keys"
 
@@ -183,15 +183,7 @@ const post = <T>(path: string, body: unknown) =>
 const machinePath = (machineId: string) => `machines/${encodeURIComponent(machineId)}/config-assignment`
 
 /** What the person agrees to before a machine syncs; the sentences are the server's. */
-export type ConfigWarning = {
-  revision: string
-  repository_visibility: string
-  history_retention: string
-  access_consequence: string
-  offline_behavior: string
-  conflict_behavior: string
-  disable_action: string
-}
+export type ConfigWarning = Schemas["ConfigWarning"]
 export const configWarningQuery = (machineId: string) =>
   queryOptions({
     queryKey: ["config-sync", "warning", machineId] as const,
@@ -230,13 +222,13 @@ export const forceConfig = (environment: ConfigEnvironment, action: ForceAction)
     expected_assignment_version: environment.assignment_version,
   })
 
-export type ConfigRepository = { id: string; provider: string; external_ref: string; display_name: string; state: string }
+export type ConfigRepository = Schemas["ConfigRepository"]
 export const configRepositoriesPageSize = 20
 export const configRepositoriesQuery = (page: number) =>
   queryOptions({
     queryKey: ["config-sync", "repositories", page] as const,
     queryFn: ({ signal }) =>
-      api<{ items: ConfigRepository[] | null; pagination: { total: number } }>(
+      api<Data<"/v1/config-repositories">>(
         `config-repositories?${new URLSearchParams({
           workspace: "personal",
           limit: String(configRepositoriesPageSize),
@@ -246,13 +238,13 @@ export const configRepositoriesQuery = (page: number) =>
       ),
     placeholderData: (previous) => previous,
   })
-export type RepositoryCandidate = { provider: string; external_id: string; display_name: string; default_branch: string }
+export type RepositoryCandidate = Schemas["ConfigRepositoryCandidate"]
 /** One page of the GitHub repositories you could connect, by cursor (the list has no total). */
 export const repositoryCandidatesQuery = (cursor: string) =>
   queryOptions({
     queryKey: ["config-sync", "candidates", cursor] as const,
     queryFn: ({ signal }) =>
-      api<{ items: RepositoryCandidate[] | null; next_cursor?: string }>(
+      api<Data<"/v1/config-repositories/candidates">>(
         `config-repositories/candidates?${new URLSearchParams({ workspace: "personal", limit: "20", ...(cursor && { cursor }) })}`,
         { signal },
       ),
@@ -267,14 +259,8 @@ export const disconnectRepository = (id: string) =>
   apiAction(`config-repositories/${encodeURIComponent(id)}?workspace=personal`, { method: "DELETE" })
 
 /** A team's default repository (admins set it) and this account's adoption of it. */
-export type TeamConfigDefault = {
-  team_id: string
-  display_name: string
-  external_repository_id: string
-  branch: string
-  version: number
-}
-export type ConfigAdoption = TeamConfigDefault & { repository_id: string; adopted_version: number; update_pending: boolean }
+export type TeamConfigDefault = Schemas["ConfigTeamDefault"]
+export type ConfigAdoption = Schemas["ConfigTeamDefaultAdoption"]
 export const teamConfigDefaultQuery = (teamId: string) =>
   queryOptions({
     queryKey: ["config-sync", "team-default", teamId] as const,

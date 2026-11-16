@@ -1,7 +1,7 @@
 "use client"
 
 import { queryOptions } from "@tanstack/react-query"
-import { api, type Workspace } from "@/lib/api"
+import { api, type Data, type Workspace } from "@/lib/api"
 import type { InboxRequest } from "@/lib/files"
 import { queryKeys } from "@/lib/query-keys"
 import type { MachineAdmission, TeamInvitation, TeamSummary } from "@/lib/teams"
@@ -34,7 +34,7 @@ export const waitingFilesQuery = (workspace: string, page: number) =>
         limit: String(requestsPageSize),
         offset: offsetOf(page),
       })
-      const data = await api<{ requests: InboxRequest[]; pagination: { total: number } }>(
+      const data = await api<Data<"/v1/team-inbox/requests">>(
         `team-inbox/requests?${query}`,
         { signal },
       )
@@ -54,7 +54,7 @@ export const waitingInvitationsQuery = (page: number) =>
         limit: String(requestsPageSize),
         offset: offsetOf(page),
       })
-      const data = await api<{ items: TeamInvitation[]; pagination: { total: number } }>(
+      const data = await api<Data<"/v1/team-invitations">>(
         `team-invitations?${query}`,
         { signal },
       )

@@ -2,7 +2,7 @@
 
 import { queryOptions } from "@tanstack/react-query"
 import { queryKeys } from "@/lib/query-keys"
-import { api, idempotencyKey, type Schemas, type Workspace } from "@/lib/api"
+import { api, idempotencyKey, type Data, type Schemas, type Workspace } from "@/lib/api"
 import type { components } from "@/lib/api-schema"
 
 /** `limit` is null where the plan is unlimited (public_tcp: only on your own tunnel edge). */
@@ -86,7 +86,7 @@ export const billingProductsQuery = (workspace: Workspace | undefined) =>
   queryOptions({
     queryKey: queryKeys.billingProducts(workspace?.id ?? ""),
     queryFn: async ({ signal }) =>
-      (await api<{ items: BillingProduct[] }>(`${billingPath(workspace!)}/products`, { signal })).items,
+      (await api<Data<"/v1/billing/workspaces/personal/products">>(`${billingPath(workspace!)}/products`, { signal })).items,
     enabled: Boolean(workspace),
     staleTime: 5 * minute,
   })

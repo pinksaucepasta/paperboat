@@ -120,7 +120,7 @@ export async function grantTeamKey(team: string, account: string): Promise<void>
  */
 export async function acceptTeamKeys(): Promise<number> {
   let accepted = 0
-  const { grants } = await api<{ grants: Grant[] }>("environment/grants?workspace=personal")
+  const { grants } = await api<Data<"/v1/environment/grants">>("environment/grants?workspace=personal")
   for (const grant of grants.filter((entry) => !entry.acknowledged)) {
     const [vault, state] = await Promise.all([currentVault(), readTeamVault(grant.team_id)])
     if (!state) continue

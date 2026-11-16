@@ -206,10 +206,14 @@ export function useApiQuery<TQueryFnData, TError = Error, TData = TQueryFnData, 
 export type Schemas = components["schemas"]
 
 /** The `data` of a path's successful JSON response, as the server documents it. */
-export type Data<P extends keyof paths, M extends "get" | "post" | "put" | "patch" = "get"> = paths[P][M] extends {
-  responses: { 200: { content: { "application/json": { data?: infer T } } } }
+export type Data<P extends keyof paths, M extends "get" | "post" | "put" | "patch" | "delete" = "get"> = paths[P][M] extends {
+  responses: infer R
 }
-  ? NonNullable<T>
+  ? R extends { 200: { content: { "application/json": { data?: infer T } } } }
+    ? NonNullable<T>
+    : R extends { 201: { content: { "application/json": { data?: infer T } } } }
+      ? NonNullable<T>
+      : never
   : never
 
 export type Me = Data<"/v1/me">
@@ -258,7 +262,7 @@ export const workspacesQuery = queryOptions({
 type MachinePage = MachinePages<Machine>
 
 const machinePage = (params: Record<string, string>, signal?: AbortSignal) =>
-  api<{ items: Machine[]; pagination: { total: number } }>(`machines?${new URLSearchParams(params)}`, { signal })
+  api<Data<"/v1/machines">>(`machines?${new URLSearchParams(params)}`, { signal })
 
 async function fetchMachines(params: Record<string, string>, signal?: AbortSignal): Promise<MachinePage> {
   const page = await machinePage(params, signal)
@@ -497,7 +501,7 @@ export const runningQuery = (workspace: string) =>
   queryOptions({
     queryKey: ["running", workspace],
     queryFn: async ({ signal }) => {
-      const data = await api<{ items: ({ machine_id: string } & RunningCounts)[]; truncated: boolean }>(
+      const data = await api<Data<"/v1/machines/running-counts">>(
         `machines/running-counts?${new URLSearchParams({ workspace })}`,
         { signal },
       )

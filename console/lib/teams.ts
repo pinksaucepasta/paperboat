@@ -1,7 +1,7 @@
 "use client"
 
 import { queryOptions } from "@tanstack/react-query"
-import { api, idempotencyKey } from "@/lib/api"
+import { api, idempotencyKey, type Data } from "@/lib/api"
 import type { components } from "@/lib/api-schema"
 
 type Schemas = components["schemas"]
@@ -109,7 +109,7 @@ export const teamInvitationsQuery = (team: string) =>
   queryOptions({
     queryKey: ["team-invitations", team],
     queryFn: async ({ signal }) =>
-      (await api<{ items: TeamInvitation[] }>(`${teamPath(team)}/invitations`, { signal })).items,
+      (await api<Data<"/v1/teams/{team_id}/invitations">>(`${teamPath(team)}/invitations`, { signal })).items,
     staleTime: minute,
   })
 
@@ -118,7 +118,7 @@ export const myInvitationsQuery = queryOptions({
   queryKey: ["my-invitations"],
   // `direction=received` is the server default once the mail producer ships; until then the page
   // also filters out invitations the user sent.
-  queryFn: async ({ signal }) => (await api<{ items: TeamInvitation[] }>("team-invitations", { signal })).items,
+  queryFn: async ({ signal }) => (await api<Data<"/v1/team-invitations">>("team-invitations", { signal })).items,
   staleTime: minute,
 })
 

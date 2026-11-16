@@ -68,7 +68,7 @@ export const previewCountsQuery = (workspace: string, machine?: string) =>
     queryFn: async ({ signal }) => {
       const total = async (state: string) =>
         (
-          await api<{ total: number }>(
+          await api<Data<"/v1/previews">>(
             `previews?${new URLSearchParams({ workspace, state, limit: "1", ...(machine && { machine_id: machine }) })}`,
             { signal },
           )
