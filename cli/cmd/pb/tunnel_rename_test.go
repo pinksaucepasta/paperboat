@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
 )
@@ -91,5 +92,31 @@ func TestTunnelViewsShowThePublicAddressNextToTheName(t *testing.T) {
 	out, _, _ := executeAdversarialTunnelCommand(t, "rename", "tun_1", "new-name")
 	if !strings.Contains(out, "new-name") || !strings.Contains(out, "unchanged") {
 		t.Errorf("rename does not say the address is unchanged: %q", out)
+	}
+}
+
+func TestTunnelExtendPatchesOnlyTheExpiryFromNow(t *testing.T) {
+	withTunnelCommandClient(t, func(w http.ResponseWriter, r *http.Request) {
+		current := validCommandTunnel()
+		if r.Method == http.MethodGet {
+			w.Header().Set("ETag", current.ETag)
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": current})
+			return
+		}
+		var input map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&input); err != nil || len(input) != 1 || input["expires_at"] == nil {
+			t.Fatalf("extend body=%v error=%v", input, err)
+		}
+		expires, err := time.Parse(time.RFC3339, input["expires_at"].(string))
+		if err != nil || time.Until(expires) < 23*time.Hour || time.Until(expires) > 25*time.Hour {
+			t.Fatalf("expires_at=%v is not about 24h from now (%v)", input["expires_at"], err)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": api.TunnelMutation{Tunnel: current, Operation: validCommandOperation("tunnel", current.ID), Changed: true}})
+	})
+	if out, _, err := executeAdversarialTunnelCommand(t, "extend", "tun_1", "--duration", "24h"); err != nil || !strings.Contains(out, "now expires") {
+		t.Fatalf("extend: output=%q error=%v", out, err)
+	}
+	if _, _, err := executeAdversarialTunnelCommand(t, "extend", "tun_1"); err == nil {
+		t.Fatal("extend without --duration must be refused")
 	}
 }

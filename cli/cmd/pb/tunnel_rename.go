@@ -12,29 +12,7 @@ func tunnelRenameCommand() *cobra.Command {
 		if err := validateTunnelCreateName(args[1]); err != nil {
 			return err
 		}
-		client, ctx, err := tunnelClient(command)
-		if err != nil {
-			return err
-		}
-		id, err := resolveTunnelSelectorForCommand(ctx, client, args[0])
-		if err != nil {
-			return err
-		}
-		current, err := retryTunnelRead(ctx, func() (api.Tunnel, error) { return client.GetTunnelV1(ctx, id) })
-		if err != nil {
-			return err
-		}
-		key, err := tunnelKey()
-		if err != nil {
-			return err
-		}
-		out, err := retryTunnelRead(ctx, func() (api.TunnelMutation, error) {
-			return client.PatchTunnelV1(tunnelHostProof(ctx, client, current), id, current.ETag, key, api.TunnelPatchInput{Name: &args[1]})
-		})
-		if err != nil {
-			return err
-		}
-		out.Operation, err = waitForTunnelOperation(command, client, out.Operation)
+		out, err := patchTunnel(command, args[0], api.TunnelPatchInput{Name: &args[1]})
 		if err != nil {
 			return err
 		}
@@ -44,4 +22,32 @@ func tunnelRenameCommand() *cobra.Command {
 	tunnelMutationWaitFlags(command)
 	tunnelJSONFlag(command)
 	return command
+}
+
+// patchTunnel applies one PATCH to the tunnel selected by args[0] on its current resource version and waits for the operation.
+func patchTunnel(command *cobra.Command, selector string, patch api.TunnelPatchInput) (api.TunnelMutation, error) {
+	client, ctx, err := tunnelClient(command)
+	if err != nil {
+		return api.TunnelMutation{}, err
+	}
+	id, err := resolveTunnelSelectorForCommand(ctx, client, selector)
+	if err != nil {
+		return api.TunnelMutation{}, err
+	}
+	current, err := retryTunnelRead(ctx, func() (api.Tunnel, error) { return client.GetTunnelV1(ctx, id) })
+	if err != nil {
+		return api.TunnelMutation{}, err
+	}
+	key, err := tunnelKey()
+	if err != nil {
+		return api.TunnelMutation{}, err
+	}
+	out, err := retryTunnelRead(ctx, func() (api.TunnelMutation, error) {
+		return client.PatchTunnelV1(tunnelHostProof(ctx, client, current), id, current.ETag, key, patch)
+	})
+	if err != nil {
+		return api.TunnelMutation{}, err
+	}
+	out.Operation, err = waitForTunnelOperation(command, client, out.Operation)
+	return out, err
 }

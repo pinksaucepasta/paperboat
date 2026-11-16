@@ -29,7 +29,7 @@ func tunnelCobraCommandV1() *cobra.Command {
 	}, SilenceUsage: true, SilenceErrors: true}
 	root.PersistentFlags().Bool("ephemeral", false, "use the temporary preview lifecycle")
 	configureEphemeralLaunchFlags(root)
-	root.AddCommand(tunnelCreateCommand(), tunnelListCommand(), tunnelShowCommand(), tunnelRenameCommand())
+	root.AddCommand(tunnelCreateCommand(), tunnelListCommand(), tunnelShowCommand(), tunnelRenameCommand(), tunnelExtendCommand())
 	root.AddCommand(tunnelStatusCommand(), tunnelDoctorCommand(), tunnelLogsCommand())
 	root.AddCommand(tunnelInspectCommand(), tunnelReplayCommand())
 	for _, action := range []string{"pause", "resume", "delete"} {

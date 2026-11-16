@@ -509,7 +509,7 @@ func projectHealth(tunnel dbsqlc.Tunnel, correlationID string, now time.Time) He
 		overallCode = "tunnel_expired"
 		summary = "Tunnel expiry has passed; new traffic must be rejected."
 		retrying = false
-		repairAction = "Extend the expiry or delete the tunnel."
+		repairAction = "Run `pb tunnel extend <tunnel> --duration 24h`, or delete the tunnel."
 		dimensions.Service = HealthDimension{Status: "down", Code: "tunnel_expired"}
 		dimensions.Edge = HealthDimension{Status: "down", Code: "tunnel_expired"}
 		dimensions.Route = HealthDimension{Status: "down", Code: "route_expired"}
