@@ -438,7 +438,7 @@ func (m *Manager) Replay(ctx context.Context, req ReplayRequest, forward ReplayF
 		URL:               record.URL,
 		RequestBodyState:  record.RequestBodyState,
 		ResponseStatus:    status,
-		ResponseBodyState: responseCaptureState(responseHeader, responseBody, responseTruncated),
+		ResponseBodyState: responseCaptureState(responseTruncated),
 		ReplayRecordID:    replayRecordID,
 		SideEffects:       replaySideEffects(record.Method),
 		StartedAt:         started,
@@ -553,16 +553,11 @@ func replaySideEffects(method string) string {
 	}
 }
 
-func responseCaptureState(header http.Header, body []byte, truncated bool) CaptureState {
+func responseCaptureState(truncated bool) CaptureState {
 	if truncated {
 		return StateTruncated
 	}
-	if len(body) == 0 {
-		return StateComplete
-	}
-	if !TextBody(body) {
-		return StateUnsupported
-	}
+	// Binary and non-UTF-8 bytes are stored as sent (sanitizeBody), so their state is complete too.
 	return StateComplete
 }
 
