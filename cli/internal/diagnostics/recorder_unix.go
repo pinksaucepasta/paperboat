@@ -7,9 +7,10 @@ import (
 )
 
 type Recorder struct {
-	memory *MemoryRing
-	disk   *DiskRing
-	clock  func() time.Time
+	memory  *MemoryRing
+	disk    *DiskRing
+	clock   func() time.Time
+	repeats repeatLimiter
 }
 
 type recorderContextKey struct{}
@@ -53,6 +54,9 @@ func (r *Recorder) Record(category, code, severity string, fields map[string]str
 func (r *Recorder) RecordWithSupportReference(category, code, severity, reference string, fields map[string]string) error {
 	if r == nil || r.memory == nil || r.clock == nil {
 		return ErrInvalid
+	}
+	if site := fields["source_function"]; site != "" && r.repeats.suppress(repeatClass(category, code, severity, fields), r.clock()) {
+		return nil
 	}
 	event, err := NewEventWithSupportReference(r.clock().UTC(), category, code, severity, reference, fields)
 	if err != nil {
