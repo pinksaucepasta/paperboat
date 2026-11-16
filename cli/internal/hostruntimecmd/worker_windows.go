@@ -112,7 +112,7 @@ func windowsHostdWorkerEnvironment(install hostinstall.WindowsRuntimeConfig, lay
 	if err != nil {
 		return nil, err
 	}
-	return map[string]string{
+	environment := map[string]string{
 		windowsOwnerWorkloadEnvironment:    "1",
 		"PAPERBOAT_WINDOWS_OWNER_SID":      install.OwnerSID,
 		"PAPERBOAT_SESSION_OWNER_CATALOG":  filepath.Join(instanceRoot, "session-owners"),
@@ -132,7 +132,14 @@ func windowsHostdWorkerEnvironment(install hostinstall.WindowsRuntimeConfig, lay
 		// service-created owner tokens. Pin the native system shell explicitly;
 		// the production host validates this value before starting any session.
 		"PAPERBOAT_SHELL": shell,
-	}, nil
+	}
+	// The idle-cost profile (cmd/pb/cpu_profile.go) reaches the worker only through this explicit environment.
+	for _, name := range []string{"PAPERBOAT_CPU_PROFILE", "PAPERBOAT_CPU_PROFILE_AFTER_SECONDS", "PAPERBOAT_CPU_PROFILE_SECONDS"} {
+		if value := os.Getenv(name); value != "" {
+			environment[name] = value
+		}
+	}
+	return environment, nil
 }
 
 // runWindowsHostdService is the only SCM-facing hostd path. The child marker
