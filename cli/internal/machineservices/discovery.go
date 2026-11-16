@@ -23,6 +23,15 @@ type Service struct {
 	Loopback string
 }
 
+// listedListener says whether discovery lists a listener: the daemon user's own, and any listener on port 80 or
+// 443 whoever owns it (root, a Docker proxy, another user's Traefik or Caddy), because default private access covers
+// those web ports. Other ports below 1024 of other owners are never listed; they need an explicit allow.
+func listedListener(ownedByDaemonUser bool, port uint16) bool {
+	return ownedByDaemonUser || isWebPort(port)
+}
+
+func isWebPort(port uint16) bool { return port == 80 || port == 443 }
+
 func Snapshot(ctx context.Context) ([]Service, error) {
 	if ctx == nil {
 		return nil, ErrDiscoveryUnavailable

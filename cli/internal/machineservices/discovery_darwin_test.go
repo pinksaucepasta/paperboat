@@ -18,3 +18,25 @@ func TestParseLsofIPv6(t *testing.T) {
 		t.Fatalf("services=%#v", got)
 	}
 }
+
+func TestParseNetstatWebPorts(t *testing.T) {
+	data := []byte(`Active Internet connections (including servers)
+Proto Recv-Q Send-Q  Local Address          Foreign Address        (state)
+tcp4       0      0  *.443                  *.*                    LISTEN
+tcp46      0      0  *.80                   *.*                    LISTEN
+tcp4       0      0  127.100.0.1.80         *.*                    LISTEN
+tcp6       0      0  ::1.443                *.*                    LISTEN
+tcp4       0      0  *.22                   *.*                    LISTEN
+tcp4       0      0  192.0.2.5.51000        192.0.2.9.443          ESTABLISHED
+`)
+	got := parseNetstatWebPorts(data)
+	want := []Service{{Port: 443, Loopback: "127.0.0.1"}, {Port: 80, Loopback: "127.0.0.1"}, {Port: 80, Loopback: "::1"}, {Port: 443, Loopback: "::1"}}
+	if len(got) != len(want) {
+		t.Fatalf("services=%#v", got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("services=%#v", got)
+		}
+	}
+}

@@ -34,7 +34,7 @@ const faq = [
   },
   {
     q: "Which ports can I reach?",
-    a: "On your own machines, the ports your user is listening on, port 80, port 443 and every port from 1024 upward, are found automatically. Ports of other users or of Docker, and other ports below 1024 such as 22 or 5432, need to be allowed explicitly.",
+    a: "On your own machines, the ports your user is listening on from 1024 upward are found automatically, and so are ports 80 and 443 whoever listens on them (Traefik, Caddy or Coolify run as root or in Docker). Ports of other users or of Docker above 1024, and other ports below 1024 such as 22 or 5432, need to be allowed explicitly.",
   },
   {
     q: "Can teammates reach ports on my machine?",

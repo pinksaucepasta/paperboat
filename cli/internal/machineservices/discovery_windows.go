@@ -110,7 +110,7 @@ func parseTCPTable(data []byte, family uint32, owned func(uint32) bool) ([]Servi
 		row := unsafe.Pointer(&data[4+int(index)*rowSize])
 		if family == windows.AF_INET {
 			value := (*tcpRow4)(row)
-			if value.State != tcpStateListen || !owned(value.PID) {
+			if value.State != tcpStateListen || !(isWebPort(windowsPort(value.LocalPort)) || owned(value.PID)) {
 				continue
 			}
 			address := bits.ReverseBytes32(value.LocalAddress)
@@ -120,7 +120,7 @@ func parseTCPTable(data []byte, family uint32, owned func(uint32) bool) ([]Servi
 			continue
 		}
 		value := (*tcpRow6)(row)
-		if value.State != tcpStateListen || !owned(value.PID) {
+		if value.State != tcpStateListen || !(isWebPort(windowsPort(value.LocalPort)) || owned(value.PID)) {
 			continue
 		}
 		address := netip.AddrFrom16(value.LocalAddress).Unmap()

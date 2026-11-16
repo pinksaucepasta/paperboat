@@ -57,7 +57,7 @@ func (p Port) Address() string {
 }
 
 // AutomaticPort reports whether default private access (automatic discovery) covers a port: 80, 443 and 1024
-// and above. Other ports below 1024 (22, 5432, ...) need an explicit allow. shared/policy.DefaultPrivatePorts
+// and above. Discovery lists 80 and 443 listeners of any owner, other ports only of the daemon user. Other ports below 1024 (22, 5432, ...) need an explicit allow. shared/policy.DefaultPrivatePorts
 // and the SQL function machine_service_authorities state the same set.
 func AutomaticPort(port int) bool {
 	return port == 80 || port == 443 || (port >= 1024 && port <= 65535)

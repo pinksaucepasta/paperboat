@@ -28,3 +28,16 @@ func TestParseProcTCP6FiltersOwner(t *testing.T) {
 		t.Fatalf("services=%#v", got)
 	}
 }
+
+func TestParseProcTCPListsWebPortsOfAnyOwnerOnly(t *testing.T) {
+	data := []byte(`  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode
+   0: 00000000:0050 00000000:0000 0A 0:0 00:0 0 0 0 1
+   1: 00000000:01BB 00000000:0000 0A 0:0 00:0 0 0 0 2
+   2: 00000000:0016 00000000:0000 0A 0:0 00:0 0 0 0 3
+   3: 0100007F:1F90 00000000:0000 0A 0:0 00:0 0 0 0 4
+`)
+	got := parseProcTCP(data, false, 1000)
+	if len(got) != 2 || got[0] != (Service{Port: 80, Loopback: "127.0.0.1"}) || got[1] != (Service{Port: 443, Loopback: "127.0.0.1"}) {
+		t.Fatalf("root's 80 and 443 are listed, its 22 and 8080 are not: %#v", got)
+	}
+}

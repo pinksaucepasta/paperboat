@@ -64,7 +64,7 @@ func parseProcTCP(data []byte, ipv6 bool, ownerUID uint64) []Service {
 			continue
 		}
 		uid, err := strconv.ParseUint(fields[7], 10, 32)
-		if err != nil || uid != ownerUID {
+		if err != nil {
 			continue
 		}
 		address, portText, ok := strings.Cut(fields[1], ":")
@@ -72,7 +72,7 @@ func parseProcTCP(data []byte, ipv6 bool, ownerUID uint64) []Service {
 			continue
 		}
 		portValue, err := strconv.ParseUint(portText, 16, 16)
-		if err != nil || portValue == 0 {
+		if err != nil || portValue == 0 || !listedListener(uid == ownerUID, uint16(portValue)) {
 			continue
 		}
 		loopback := ""

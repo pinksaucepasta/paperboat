@@ -38,7 +38,47 @@ func snapshot(ctx context.Context) ([]Service, error) {
 		remaining -= output.Len()
 		services = append(services, parseLsof(output.Bytes(), uid, family.loopback)...)
 	}
-	return services, nil
+	// lsof shows only this user's sockets; port 80 and 443 listeners of any owner come from the socket table.
+	var table boundedBuffer
+	table.limit = remaining
+	cmd := exec.CommandContext(runCtx, "/usr/sbin/netstat", "-an", "-p", "tcp")
+	cmd.Stdout, cmd.Stderr = &table, &table
+	if err := cmd.Run(); errors.Is(table.err, ErrSnapshotTooLarge) {
+		return nil, table.err
+	} else if runCtx.Err() != nil {
+		return nil, runCtx.Err()
+	} else if err != nil {
+		return nil, errors.Join(ErrDiscoveryUnavailable, err)
+	}
+	return append(services, parseNetstatWebPorts(table.Bytes())...), nil
+}
+
+// parseNetstatWebPorts lists the wildcard or loopback listeners on port 80 and 443 in `netstat -an -p tcp` output:
+// "tcp4  0  0  *.443  *.*  LISTEN" (tcp46 listens on both families).
+func parseNetstatWebPorts(data []byte) []Service {
+	var services []Service
+	for _, line := range strings.Split(string(data), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 6 || !strings.HasPrefix(fields[0], "tcp") || fields[len(fields)-1] != "LISTEN" {
+			continue
+		}
+		separator := strings.LastIndex(fields[3], ".")
+		if separator < 0 {
+			continue
+		}
+		host := fields[3][:separator]
+		port, err := strconv.ParseUint(fields[3][separator+1:], 10, 16)
+		if err != nil || !isWebPort(uint16(port)) {
+			continue
+		}
+		if fields[0] != "tcp6" && (host == "*" || host == "127.0.0.1") {
+			services = append(services, Service{Port: uint16(port), Loopback: "127.0.0.1"})
+		}
+		if fields[0] != "tcp4" && (host == "*" || host == "::1") {
+			services = append(services, Service{Port: uint16(port), Loopback: "::1"})
+		}
+	}
+	return services
 }
 
 type boundedBuffer struct {

@@ -110,14 +110,14 @@ func readDiagDump(ctx context.Context, fd int, buffer []byte, family uint8, owne
 	}
 }
 
-// diagService is the one rule parseProcTCP applies to a /proc line: a listener of ownerUID on the wildcard or the
+// diagService is the one rule parseProcTCP applies to a /proc line: a listener of ownerUID (or on port 80/443 of any owner) on the wildcard or the
 // loopback address, with a port.
 func diagService(message []byte, family uint8, ownerUID uint64) (Service, bool) {
 	if len(message) < diagMessageBytes || message[0] != family || message[1] != diagListenState {
 		return Service{}, false
 	}
 	port := binary.BigEndian.Uint16(message[4:])
-	if port == 0 || uint64(binary.NativeEndian.Uint32(message[64:])) != ownerUID {
+	if port == 0 || !listedListener(uint64(binary.NativeEndian.Uint32(message[64:])) == ownerUID, port) {
 		return Service{}, false
 	}
 	address := message[8:24]

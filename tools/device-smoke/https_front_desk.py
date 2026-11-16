@@ -8,7 +8,7 @@ The host (the machine guard service paperboat-machineguard) runs a web server th
 redirects every request to https://<same host>/. Both ports are held, so the machine's own gateway moves to free ports.
 --high-ports (any Unix host, no sudo: macOS too, or a Windows host) serves the same pair on free ports >= 1024
 instead of 80/443 and skips the guard, policy and nft steps. A Windows host stops IIS (W3SVC/WAS) and starts the
-web server on 80/443; own address is checked in both modes. Checked: with ports 80 and 443 listed by a tunnel policy and the front desk 443/https the viewer opens an unmatched name and `443.<host>` over TLS (no redirect loop);
+web server on 80/443; own address is checked in both modes. Checked: with the front desk 443/https (default private access lists 80 and 443 whoever owns them, so the root-owned web server needs no `pb tunnel policy allow`) the viewer opens an unmatched name and `443.<host>` over TLS (no redirect loop);
 the host opens its own address; with the front desk 80/http the viewer gets the explanation page (502,
 X-Paperboat-Error: origin_redirect_loop), not a loop; the host's nft table redirects the held ports.
 """
@@ -79,7 +79,8 @@ def main():
     name = 'zz' + uuid.uuid4().hex[:6]
     root = tempfile.mkdtemp(prefix='pb-https-front-desk-')
     target = winhost.device()
-    steps, failure, holder, policies, stack = {}, None, None, [], contextlib.ExitStack()
+    steps, failure, holder, stack = {}, None, None, contextlib.ExitStack()
+    linux = sys.platform.startswith('linux')  # macOS has no guard service or nft
 
     def step(label, action):
         try:
@@ -96,7 +97,7 @@ def main():
             line = windows_holder(stack, target, root, args.high_ports)
         else:
             Path(root, 'holder.py').write_text(HOLDER)
-            if not args.high_ports:
+            if linux and not args.high_ports:
                 guard('stop')  # the web server was there first: the guard starts after it and finds both ports taken
             holder = subprocess.Popen(([] if args.high_ports else ['sudo', '-n']) + [
                 sys.executable, root + '/holder.py', root + '/c', root + '/k', *(('0', '0') if args.high_ports else ('443', '80'))],
@@ -107,18 +108,13 @@ def main():
         secure, plain = ready[1:3]
 
         def held():
-            if args.high_ports:
-                return
-            if target:
+            if args.high_ports or target or not linux:
                 return
             guard('start')
             time.sleep(15)  # the guard moves its gateway when the bind fails
             rules = subprocess.run(['sudo', '-n', 'nft', 'list', 'ruleset'], capture_output=True, text=True).stdout
             assert 'dnat' in rules, 'no nft redirect for the held ports'
         step('web_server_holds_80_443', held)
-        # Names open listed ports only, and the automatic list stops at 1024: 80 and 443 are listed by a policy.
-        for port in () if args.high_ports else ('80', '443'):
-            policies.append(pb_ok('tunnel', 'policy', 'allow', host, port, '--json')['id'])
         pb_ok('port', 'front-desk', host, secure, 'https')
         step('front_desk_https', lambda: fetch(args.viewer, '%s.%s.%s' % (name, host, domain), 'tls443'))
         if not args.high_ports:  # only the numeric label 443 is https; other numeric labels speak plain http
@@ -137,15 +133,13 @@ def main():
         failure = error
     finally:
         pb('port', 'front-desk', host, '80', 'http', '--json')
-        for policy in policies:
-            pb('tunnel', 'policy', 'revoke', policy, '--json')
         if holder:
             holder.terminate()
             try:
                 holder.wait(timeout=10)
             except subprocess.TimeoutExpired:
                 subprocess.run(['sudo', '-n', 'kill', '-9', str(holder.pid)])
-        if not args.high_ports and not target:
+        if linux and not args.high_ports and not target:
             subprocess.run(['sudo', '-n', 'systemctl', 'restart', 'paperboat-machineguard.service'])
         stack.close()
         shutil.rmtree(root, ignore_errors=True)
