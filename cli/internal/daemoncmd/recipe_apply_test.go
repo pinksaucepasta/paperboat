@@ -5,11 +5,13 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
+	"github.com/pinksaucepasta/paperboat/internal/localdaemon"
 	"github.com/pinksaucepasta/paperboat/internal/recipekey"
 	"github.com/pinksaucepasta/paperboat/shared/recipe"
 )
@@ -33,7 +35,7 @@ func TestRecipeApplyEnsuresSectionsWithPBCommands(t *testing.T) {
 		}
 		return []byte(`{"ok":true,"data":{}}`), nil
 	}
-	a := &recipeApplier{statePath: filepath.Join(t.TempDir(), "recipe-apply.json"), machine: "runner-7", run: run}
+	a := &recipeApplier{statePath: filepath.Join(t.TempDir(), "recipe-apply.json"), machine: func() string { return "runner-7" }, run: run}
 	r := recipe.Recipe{Preview: []recipe.Preview{{Port: 3000, TTL: "2h"}}, Tunnel: []recipe.Tunnel{{Port: 8123, Private: true}},
 		Config: &recipe.Config{Repository: "dotfiles"}, Env: &recipe.Env{Vaults: []string{"canary-env"}, Shell: true}}
 	sections, err := a.apply(context.Background(), 1, r)
@@ -114,5 +116,21 @@ func TestRecipeStepErrorNamesARejectedRecipeSession(t *testing.T) {
 	}
 	if other := errors.New("x"); recipeStepError(other) != other {
 		t.Fatal("other errors pass through")
+	}
+}
+
+// A recipe tunnel is named like the machine (from the inventory cache), not like its hostname.
+func TestRecipeMachineNameComesFromTheInventory(t *testing.T) {
+	dir := t.TempDir()
+	cache := `[{"id":"machine_2","alias":"other"},{"id":"machine_1","alias":"rcp-mu"}]`
+	if err := os.WriteFile(filepath.Join(dir, localdaemon.InventoryCacheFile), []byte(cache), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := recipeMachineName(dir, "machine_1"); got != "rcp-mu" {
+		t.Fatalf("name = %q", got)
+	}
+	host, _ := os.Hostname()
+	if got := recipeMachineName(t.TempDir(), "machine_1"); got != strings.ToLower(strings.Split(host, ".")[0]) {
+		t.Fatalf("fallback = %q", got)
 	}
 }

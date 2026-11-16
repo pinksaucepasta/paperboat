@@ -17,6 +17,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	sessionauth "github.com/pinksaucepasta/paperboat/internal/auth"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/health"
+	"github.com/pinksaucepasta/paperboat/internal/localapi"
 	"github.com/pinksaucepasta/paperboat/internal/localdaemon"
 	"github.com/pinksaucepasta/paperboat/internal/processlaunch"
 	"github.com/pinksaucepasta/paperboat/internal/recipekey"
@@ -56,7 +57,7 @@ type recipeRunner func(ctx context.Context, args ...string) ([]byte, error)
 
 type recipeApplier struct {
 	statePath string
-	machine   string // tunnel name when the recipe gives none
+	machine   func() string // tunnel name when the recipe gives none: this machine's name
 	run       recipeRunner
 }
 
@@ -106,6 +107,31 @@ func recipeCommandError(args []string, stdout, stderr []byte, err error) error {
 		return fmt.Errorf("pb %s: %w", name, err)
 	}
 	return fmt.Errorf("pb %s: %s", name, reason)
+}
+
+func (a *recipeApplier) machineName() string {
+	if a.machine == nil {
+		return ""
+	}
+	return a.machine()
+}
+
+// recipeMachineName is this machine's Paperboat name from the daemon's inventory cache, so a recipe
+// tunnel is named like the machine (tunnel names are unique per account; hostnames are not). Before
+// the first inventory it falls back to the hostname's first label.
+func recipeMachineName(stateRoot, machineID string) string {
+	if data, err := os.ReadFile(filepath.Join(stateRoot, localdaemon.InventoryCacheFile)); err == nil && len(data) <= 16<<20 {
+		var machines []localapi.MachineStatus
+		if json.Unmarshal(data, &machines) == nil {
+			for _, m := range machines {
+				if m.ID == machineID && m.Alias != "" {
+					return m.Alias
+				}
+			}
+		}
+	}
+	host, _ := os.Hostname()
+	return strings.ToLower(strings.Split(host, ".")[0])
 }
 
 // jsonData returns the object of a pb --json result: its "data" envelope, or the bare resource that
@@ -162,7 +188,7 @@ func (a *recipeApplier) apply(ctx context.Context, revision int64, r recipe.Reci
 		note("preview", a.ensure(ctx, state.Previews, previewSpecs(r.Preview), "preview", func(name string) []string { return []string{"preview", "stop", name, "--json"} }))
 	}
 	if len(r.Tunnel) > 0 || len(state.Tunnels) > 0 {
-		note("tunnel", a.ensure(ctx, state.Tunnels, tunnelSpecs(r.Tunnel, a.machine), "tunnel", func(name string) []string { return []string{"tunnel", "delete", name, "--json"} }))
+		note("tunnel", a.ensure(ctx, state.Tunnels, tunnelSpecs(r.Tunnel, a.machineName()), "tunnel", func(name string) []string { return []string{"tunnel", "delete", name, "--json"} }))
 	}
 	if r.Config != nil && state.Config != r.Config.Repository {
 		_, err := a.confirmed(ctx, "config", "sync", "apply", "--repository", r.Config.Repository, "--json")

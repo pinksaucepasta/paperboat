@@ -423,9 +423,9 @@ func localDaemonCommand() *cobra.Command {
 				go refreshMachineServices(ctx, steps, coordinator, machineServicesFetcher(cfg.ServerURL, authSource, controlTransport), servicesEvents.Changed(), coordinator.ServicesNudge())
 				// Only a machine paired from a recipe has a recipe key file; no file, no recipe loop or step.
 				if _, isRecipe, _ := recipekey.Load(cfg.Path()); isRecipe && source.SourceMachineID != "" {
-					host, _ := os.Hostname()
 					fetchRecipe, reportRecipe := recipeClients(cfg.ServerURL, authSource, controlTransport)
-					applier := &recipeApplier{statePath: recipeStatePath(cfg.Path()), machine: strings.ToLower(strings.Split(host, ".")[0]), run: pbRunner(cfg.Path())}
+					machineID := source.SourceMachineID
+					applier := &recipeApplier{statePath: recipeStatePath(cfg.Path()), machine: func() string { return recipeMachineName(paths.StateRoot, machineID) }, run: pbRunner(cfg.Path())}
 					go refreshRecipe(ctx, steps, applier, cfg.Path(), fetchRecipe, reportRecipe, recipeEvents.Changed())
 				}
 				teamShared := &teamSharedMachines{}
