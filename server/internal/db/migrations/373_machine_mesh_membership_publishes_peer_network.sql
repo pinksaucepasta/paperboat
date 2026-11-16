@@ -1,5 +1,6 @@
 -- +goose Up
 SET LOCAL lock_timeout = '5s';
+SELECT pg_advisory_xact_lock(1885686843);
 -- A machine entering or leaving its account's peer mesh (peersessions meshEntriesQuery: state online/offline, an
 -- occupied seat, not revoked, deleted or team-owned) moved only inventory, so every engine woke its peer-network
 -- renewal on inventory too, and every rename, capability or lease change anywhere in the account made all of its
@@ -24,5 +25,6 @@ EXECUTE FUNCTION paperboat.publish_machine_mesh_membership();
 
 -- +goose Down
 SET LOCAL lock_timeout = '5s';
+SELECT pg_advisory_xact_lock(1885686843);
 DROP TRIGGER user_machines_publish_mesh_membership ON paperboat.user_machines;
 DROP FUNCTION paperboat.publish_machine_mesh_membership();
