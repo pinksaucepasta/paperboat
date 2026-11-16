@@ -13,6 +13,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/command"
 	"github.com/pinksaucepasta/paperboat/internal/config"
+	"github.com/pinksaucepasta/paperboat/internal/recipekey"
 	"github.com/pinksaucepasta/paperboat/shared/recipe"
 )
 
@@ -72,7 +73,7 @@ func TestRecipePairStartsARecipeSessionThenSetup(t *testing.T) {
 		t.Fatalf("profile %+v %v", profile, err)
 	}
 	cfg, _ := config.Load(path)
-	if saved, ok, err := loadRecipeKey(cfg); err != nil || !ok || saved.TokenID != token.ID || !bytes.Equal(saved.PrivateKey, token.PrivateKey()) {
+	if saved, ok, err := recipekey.Load(cfg.Path()); err != nil || !ok || saved.TokenID != token.ID || !bytes.Equal(saved.PrivateKey, token.PrivateKey()) {
 		t.Fatalf("recipe key %v %v", ok, err)
 	}
 	secret := token.String()[len(recipe.TokenPrefix)+11:]

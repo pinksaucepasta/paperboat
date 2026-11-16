@@ -339,7 +339,7 @@ replace PB_RECIPE everywhere the old one is stored.`, Example: "  pb recipe rota
 		if err != nil {
 			return err
 		}
-		currentRecipe, _, err := client.GetRecipe(command.Context(), workspace, args[0])
+		currentRecipe, machines, err := client.GetRecipe(command.Context(), workspace, args[0])
 		if err != nil {
 			return friendlyCommandError(err)
 		}
@@ -355,12 +355,26 @@ replace PB_RECIPE everywhere the old one is stored.`, Example: "  pb recipe rota
 			return fmt.Errorf("read recipe %s: %w", args[0], err)
 		}
 		var wraps []api.RecipeVaultWrap
+		// Each running machine gets the new key sealed to its own key, so it keeps its vaults.
+		var sealed []api.RecipeMachineSeal
+		unsealed := 0
 		if confirm != "" {
 			if wraps, err = recipeVaultWraps(command, args[0], current.Vaults(), token.PublicKey(), token.ID); err != nil {
 				return err
 			}
+			for _, m := range machines {
+				if len(m.PublicKey) != 32 {
+					unsealed++
+					continue
+				}
+				box, err := recipe.SealRecipeKey(m.PublicKey, token.ID, token.PrivateKey())
+				if err != nil {
+					return fmt.Errorf("seal the new recipe key for %s: %w", m.Name, err)
+				}
+				sealed = append(sealed, api.RecipeMachineSeal{MachineID: m.ID, Sealed: box})
+			}
 		}
-		rotated, err := client.RotateRecipe(command.Context(), workspace, args[0], api.RecipeRotate{Auth: token.Auth(), PublicKey: token.PublicKey(), VaultWraps: wraps, Confirm: confirm})
+		rotated, err := client.RotateRecipe(command.Context(), workspace, args[0], api.RecipeRotate{Auth: token.Auth(), PublicKey: token.PublicKey(), VaultWraps: wraps, MachineKeys: sealed, Confirm: confirm})
 		if details, ok := api.RecipeConfirmationDetails(err); ok {
 			if wantsJSON(command) {
 				return writeCLIJSON(command.OutOrStdout(), map[string]any{"state": "confirmation_required", "confirm": details.Confirm, "impact": details.Impact})
@@ -377,7 +391,12 @@ replace PB_RECIPE everywhere the old one is stored.`, Example: "  pb recipe rota
 		if wantsJSON(command) {
 			return writeCLIJSON(command.OutOrStdout(), map[string]any{"recipe": rotated, "token": token.String()})
 		}
-		_, err = fmt.Fprintf(command.OutOrStdout(), "Recipe %s rotated. New token (shown once):\n  %s\n", rotated.Name, token)
+		if _, err = fmt.Fprintf(command.OutOrStdout(), "Recipe %s rotated. New token (shown once):\n  %s\n", rotated.Name, token); err != nil {
+			return err
+		}
+		if unsealed > 0 {
+			_, err = fmt.Fprintf(command.OutOrStdout(), "%d machines have not reported their key yet and must run the recipe install again to keep reading its vaults.\n", unsealed)
+		}
 		return err
 	}}
 	command.Flags().String("confirm", "", "the confirmation code printed without --confirm")

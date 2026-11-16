@@ -40,6 +40,7 @@ type RecipeMachine struct {
 	AppliedRevision int64           `json:"applied_revision"`
 	ApplyState      json.RawMessage `json:"apply_state"`
 	RemoveAt        *time.Time      `json:"remove_at"`
+	PublicKey       []byte          `json:"public_key"`
 }
 
 type RecipeImpact struct {
@@ -191,7 +192,8 @@ func (c *Client) RecipeMachine(ctx context.Context) (out RecipeMachineState, err
 	return out, err
 }
 
-// ApplyRecipe reports what each section did for a revision, for pb recipe show and the console.
-func (c *Client) ApplyRecipe(ctx context.Context, revision int64, sections map[string]any) error {
-	return c.do(ctx, http.MethodPut, "/v1/recipe-machine/apply", map[string]any{"revision": revision, "sections": sections}, nil)
+// ApplyRecipe reports what each section did for a revision, for pb recipe show and the console, with
+// the machine's own public key (pb recipe rotate seals the recipe's new key to it).
+func (c *Client) ApplyRecipe(ctx context.Context, revision int64, sections map[string]any, machinePublic []byte) error {
+	return c.do(ctx, http.MethodPut, "/v1/recipe-machine/apply", map[string]any{"revision": revision, "sections": sections, "public_key": machinePublic}, nil)
 }

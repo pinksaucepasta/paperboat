@@ -161,6 +161,17 @@ func TestRecipeLifecycle(t *testing.T) {
 	}
 	moved()
 
+	// A machine reports what it applied with its own key, which show returns for rotate to seal to.
+	machineKey := f.token().PublicKey()
+	if err := f.service.RecordApply(f.ctx, created.ID, f.web, 2, map[string]any{"preview": map[string]any{"ok": true}}, machineKey); err != nil {
+		t.Fatal(err)
+	}
+	if _, ms, err := f.service.Get(f.ctx, f.account, f.personal, "ci"); err != nil || len(ms) != 1 || string(ms[0].PublicKey) != string(machineKey) || ms[0].AppliedRevision != 2 {
+		t.Fatalf("machine key: %+v %v", ms, err)
+	}
+	if err := f.service.RecordApply(f.ctx, created.ID, f.web, 2, nil, []byte("short")); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("short machine key: %v", err)
+	}
 	// Rotate needs the shown code; the old token is then "replaced", the new one pairs.
 	next := recipe.Token{ID: tok.ID, Secret: f.token().Secret}
 	var confirm *ConfirmError

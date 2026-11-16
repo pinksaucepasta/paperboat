@@ -34,14 +34,14 @@ or the team id. Errors use the server envelope `{"error": {"code", "message", "d
 | `DELETE /v1/workspaces/{ws}/env-vaults/{name}` | as create | — | 204 |
 | `POST /v1/auth/recipe-sessions` | anyone with the token | `{token_id, auth, client_label, device_type: "desktop"\|"server"\|"container", os}` | CLI token set + `recipe: {id, name, revision, workspace, recipe}` |
 | `GET /v1/recipe-machine` | a recipe session (bearer) | — | `{id, name, revision, recipe, vaults: [{name, key_epoch, revision, envelope, wrapped}], machine_key?}` |
-| `PUT /v1/recipe-machine/apply` | a paired recipe session | `{revision, sections: {env\|config\|preview\|tunnel: any}}` | 204 |
+| `PUT /v1/recipe-machine/apply` | a paired recipe session | `{revision, sections: {env\|config\|preview\|tunnel: any}, public_key?}` (the machine's own X25519 key; rotate seals the new recipe key to it) | 204 |
 
 ```text
 Recipe  {id, name, workspace, revision, token ("pbr_<id>_…"), source, format, recipe (canonical),
          created_by ("user:<email>"), created_at, updated_at, expires_at, last_used_at, rotated_at,
          machines, max_machines?, public_key (Token.PublicKey: pb recipe update and the console wrap
          a newly read vault's key to it without the token)}
-Machine {id, name, online, last_seen_at, applied_revision, apply_state, remove_at}
+Machine {id, name, online, last_seen_at, applied_revision, apply_state, remove_at, public_key?}
 Vault   {name, key_epoch, revision, envelope?, wraps, recipes}
 impact  {machines: [{id, name, online}], vaults: [name]}
 ```

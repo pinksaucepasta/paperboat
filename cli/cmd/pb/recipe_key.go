@@ -2,59 +2,22 @@ package main
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/pinksaucepasta/paperboat/internal/config"
+	"github.com/pinksaucepasta/paperboat/internal/recipekey"
 	"github.com/pinksaucepasta/paperboat/shared/recipe"
 	"github.com/spf13/cobra"
 )
 
-// A machine paired from a recipe keeps the recipe's token id and X25519 private key (never the
-// token's secret) in an owner-only file next to its config, to open the vaults the recipe reads with
-// nobody online (PLAN F26 section 6).
-type recipeKeyFile struct {
-	TokenID    string `json:"token_id"`
-	PrivateKey []byte `json:"private_key"`
-}
-
-func recipeKeyPath(cfg *config.Config) string {
-	return filepath.Join(filepath.Dir(cfg.Path()), "recipe-key.json")
-}
-
+// saveRecipeKey writes this machine's recipe key file (internal/recipekey) for a fresh pairing.
 func saveRecipeKey(cfg *config.Config, token recipe.Token) error {
-	data, err := json.Marshal(recipeKeyFile{TokenID: token.ID, PrivateKey: token.PrivateKey()})
+	f, err := recipekey.New(token)
 	if err != nil {
 		return err
 	}
-	path := recipeKeyPath(cfg)
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return err
-	}
-	temporary := path + ".tmp"
-	if err := os.WriteFile(temporary, data, 0o600); err != nil {
-		return fmt.Errorf("save the recipe key: %w", err)
-	}
-	return os.Rename(temporary, path)
-}
-
-func loadRecipeKey(cfg *config.Config) (recipeKeyFile, bool, error) {
-	data, err := os.ReadFile(recipeKeyPath(cfg))
-	if errors.Is(err, os.ErrNotExist) {
-		return recipeKeyFile{}, false, nil
-	}
-	if err != nil {
-		return recipeKeyFile{}, false, err
-	}
-	var key recipeKeyFile
-	if err := json.Unmarshal(data, &key); err != nil || !recipe.ValidID(key.TokenID) || len(key.PrivateKey) != 32 {
-		return recipeKeyFile{}, false, errors.New("the recipe key file is damaged; run the recipe install again")
-	}
-	return key, true, nil
+	return recipekey.Save(cfg.Path(), f)
 }
 
 // recipeVaultEnvironment is NAME=value for every value of the vaults this machine's recipe reads; on
@@ -64,11 +27,10 @@ var recipeVaultEnvironment = func(ctx context.Context, command *cobra.Command) (
 	if err != nil {
 		return nil, err
 	}
-	key, ok, err := loadRecipeKey(cfg)
+	key, ok, err := recipekey.Load(cfg.Path())
 	if err != nil || !ok {
 		return nil, err
 	}
-	defer clear(key.PrivateKey)
 	client, err := backendClient(actionContext(command, nil))
 	if err != nil {
 		return nil, err
@@ -76,6 +38,12 @@ var recipeVaultEnvironment = func(ctx context.Context, command *cobra.Command) (
 	state, err := client.RecipeMachine(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("read the recipe's vaults: %w", friendlyCommandError(err))
+	}
+	// After a rotate, the recipe's new key arrives sealed to this machine.
+	if len(state.MachineKey) > 0 {
+		if key, _, err = recipekey.Rotated(cfg.Path(), key, state.MachineKey); err != nil {
+			return nil, err
+		}
 	}
 	var out []string
 	for _, v := range state.Vaults {

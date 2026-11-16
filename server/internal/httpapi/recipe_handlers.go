@@ -410,13 +410,14 @@ func recipeMachineApply(service *recipes.Service) http.HandlerFunc {
 		}
 		limitEnvironmentJSON(w, r, 64<<10)
 		var in struct {
-			Revision int            `json:"revision"`
-			Sections map[string]any `json:"sections"`
+			Revision  int            `json:"revision"`
+			Sections  map[string]any `json:"sections"`
+			PublicKey []byte         `json:"public_key"`
 		}
 		if !decodeStrictJSON(w, r, &in) {
 			return
 		}
-		if err := service.RecordApply(r.Context(), p.Client.RecipeID, p.Client.MachineID, in.Revision, in.Sections); err != nil {
+		if err := service.RecordApply(r.Context(), p.Client.RecipeID, p.Client.MachineID, in.Revision, in.Sections, in.PublicKey); err != nil {
 			writeRecipeError(w, r, err)
 			return
 		}

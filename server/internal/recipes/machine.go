@@ -49,15 +49,15 @@ func (s *Service) MachineRecipe(ctx context.Context, recipeID, machineID string)
 }
 
 // RecordApply stores the revision a machine applied and each section's outcome.
-func (s *Service) RecordApply(ctx context.Context, recipeID, machineID string, revision int, sections map[string]any) error {
-	if revision < 1 || len(sections) > 16 {
+func (s *Service) RecordApply(ctx context.Context, recipeID, machineID string, revision int, sections map[string]any, publicKey []byte) error {
+	if revision < 1 || len(sections) > 16 || (publicKey != nil && len(publicKey) != 32) {
 		return ErrInvalidInput
 	}
 	state, err := json.Marshal(sections)
 	if err != nil || len(state) > 32<<10 {
 		return ErrInvalidInput
 	}
-	tag, err := s.db.SQL().ExecContext(ctx, `UPDATE paperboat.recipe_machines SET applied_revision=$3, apply_state=$4 WHERE machine_id=$1 AND recipe_id=$2`, machineID, recipeID, revision, state)
+	tag, err := s.db.SQL().ExecContext(ctx, `UPDATE paperboat.recipe_machines SET applied_revision=$3, apply_state=$4, public_key=coalesce($5, public_key) WHERE machine_id=$1 AND recipe_id=$2`, machineID, recipeID, revision, state, publicKey)
 	if err != nil {
 		return fmt.Errorf("record recipe apply: %w", err)
 	}

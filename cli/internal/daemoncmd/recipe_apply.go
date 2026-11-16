@@ -19,6 +19,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/health"
 	"github.com/pinksaucepasta/paperboat/internal/localdaemon"
 	"github.com/pinksaucepasta/paperboat/internal/processlaunch"
+	"github.com/pinksaucepasta/paperboat/internal/recipekey"
 	"github.com/pinksaucepasta/paperboat/shared/backoff"
 	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 	"github.com/pinksaucepasta/paperboat/shared/recipe"
@@ -303,7 +304,7 @@ func firstNonEmptyString(values ...string) string {
 }
 
 type recipeMachineFetch func(context.Context) (api.RecipeMachineState, error)
-type recipeApplyReport func(context.Context, int64, map[string]any) error
+type recipeApplyReport func(context.Context, int64, map[string]any, []byte) error
 
 func recipeClients(serverURL string, auth *sessionauth.Source, transport http.RoundTripper) (recipeMachineFetch, recipeApplyReport) {
 	client := func(ctx context.Context) (*api.Client, error) {
@@ -320,12 +321,12 @@ func recipeClients(serverURL string, auth *sessionauth.Source, transport http.Ro
 		}
 		return c.RecipeMachine(ctx)
 	}
-	report := func(ctx context.Context, revision int64, sections map[string]any) error {
+	report := func(ctx context.Context, revision int64, sections map[string]any, machinePublic []byte) error {
 		c, err := client(ctx)
 		if err != nil {
 			return err
 		}
-		return c.ApplyRecipe(ctx, revision, sections)
+		return c.ApplyRecipe(ctx, revision, sections, machinePublic)
 	}
 	return fetch, report
 }
@@ -337,9 +338,9 @@ func notRecipeMachine(err error) bool {
 	return errors.As(err, &apiErr) && (apiErr.Status == http.StatusForbidden || apiErr.Status == http.StatusNotFound)
 }
 
-// refreshRecipe applies the recipe of a machine paired from one; on any other machine it returns at the
-// first answer. A failing apply is the recipe step, shown by pb doctor until it succeeds.
-func refreshRecipe(ctx context.Context, steps *health.Registry, applier *recipeApplier, fetch recipeMachineFetch, report recipeApplyReport, changed <-chan struct{}) {
+// refreshRecipe applies the recipe of a machine paired from one (it runs only where pb pair left a
+// recipe key file). A failing apply is the recipe step, shown by pb doctor until it succeeds.
+func refreshRecipe(ctx context.Context, steps *health.Registry, applier *recipeApplier, configPath string, fetch recipeMachineFetch, report recipeApplyReport, changed <-chan struct{}) {
 	timer := time.NewTimer(0)
 	defer timer.Stop()
 	failures := 0
@@ -358,12 +359,7 @@ func refreshRecipe(ctx context.Context, steps *health.Registry, applier *recipeA
 			return
 		}
 		if err == nil {
-			var r recipe.Recipe
-			if err = json.Unmarshal(state.Recipe, &r); err == nil {
-				var sections map[string]any
-				sections, err = applier.apply(stepCtx, state.Revision, r)
-				err = errors.Join(err, report(stepCtx, state.Revision, sections))
-			}
+			err = applyRecipeState(stepCtx, applier, configPath, state, report)
 		}
 		cancel()
 		wait := recipeIdleRefresh
@@ -382,4 +378,28 @@ func refreshRecipe(ctx context.Context, steps *health.Registry, applier *recipeA
 
 func recipeStatePath(configPath string) string {
 	return filepath.Join(filepath.Dir(configPath), "recipe-apply.json")
+}
+
+// applyRecipeState takes a rotated recipe key sealed to this machine, applies the sections and
+// reports them with the machine's own public key.
+func applyRecipeState(ctx context.Context, applier *recipeApplier, configPath string, state api.RecipeMachineState, report recipeApplyReport) error {
+	key, ok, err := recipekey.Load(configPath)
+	if err != nil || !ok {
+		return errors.Join(err, errors.New("this machine's recipe key file is missing; run the recipe install again"))
+	}
+	if len(state.MachineKey) > 0 {
+		if key, _, err = recipekey.Rotated(configPath, key, state.MachineKey); err != nil {
+			return err
+		}
+	}
+	public, err := key.MachinePublic()
+	if err != nil {
+		return err
+	}
+	var r recipe.Recipe
+	if err := json.Unmarshal(state.Recipe, &r); err != nil {
+		return fmt.Errorf("read the recipe: %w", err)
+	}
+	sections, err := applier.apply(ctx, state.Revision, r)
+	return errors.Join(err, report(ctx, state.Revision, sections, public))
 }

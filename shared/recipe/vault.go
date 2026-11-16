@@ -160,3 +160,14 @@ func OpenValues(vaultKey []byte, vault string, keyEpoch int, envelope []byte) (m
 	}
 	return values, nil
 }
+
+// SealRecipeKey seals a recipe's new private key (after rotate) to one of its machines' own X25519
+// public key, so the machine keeps opening the recipe's vaults; the server only stores the result.
+func SealRecipeKey(machinePublic []byte, tokenID string, recipePrivate []byte) ([]byte, error) {
+	return WrapToPublic(machinePublic, RecipientInfo("recipe-key", "recipe:"+tokenID), recipePrivate)
+}
+
+// OpenRecipeKey opens a SealRecipeKey result with the machine's private key.
+func OpenRecipeKey(machinePrivate []byte, tokenID string, sealed []byte) ([]byte, error) {
+	return UnwrapWithPrivate(machinePrivate, RecipientInfo("recipe-key", "recipe:"+tokenID), sealed)
+}

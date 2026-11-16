@@ -428,7 +428,7 @@ func localDaemonCommand() *cobra.Command {
 					host, _ := os.Hostname()
 					fetchRecipe, reportRecipe := recipeClients(cfg.ServerURL, authSource, controlTransport)
 					applier := &recipeApplier{statePath: recipeStatePath(cfg.Path()), machine: strings.ToLower(strings.Split(host, ".")[0]), run: pbRunner(cfg.Path())}
-					go refreshRecipe(ctx, steps, applier, fetchRecipe, reportRecipe, recipeEvents.Changed())
+					go refreshRecipe(ctx, steps, applier, cfg.Path(), fetchRecipe, reportRecipe, recipeEvents.Changed())
 				}
 				teamShared := &teamSharedMachines{}
 				return runLocalDaemon(ctx, localdaemon.DaemonConfig{

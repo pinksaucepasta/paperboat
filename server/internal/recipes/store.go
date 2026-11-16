@@ -296,11 +296,13 @@ type MachineState struct {
 	AppliedRevision int             `json:"applied_revision"`
 	ApplyState      json.RawMessage `json:"apply_state"`
 	RemoveAt        *time.Time      `json:"remove_at"`
+	// PublicKey is the machine's own key for pb recipe rotate to seal the new recipe key to.
+	PublicKey []byte `json:"public_key,omitempty"`
 }
 
 func machinesTx(ctx context.Context, tx *db.Tx, recipeID string) ([]MachineState, error) {
 	rows, err := tx.Query(ctx, `SELECT m.id, m.alias, m.online, m.last_seen_at, rm.applied_revision, rm.apply_state,
-	 CASE WHEN rm.remove_at IS NULL THEN rm.offline_remove_at WHEN rm.offline_remove_at IS NULL THEN rm.remove_at ELSE least(rm.remove_at, rm.offline_remove_at) END
+	 CASE WHEN rm.remove_at IS NULL THEN rm.offline_remove_at WHEN rm.offline_remove_at IS NULL THEN rm.remove_at ELSE least(rm.remove_at, rm.offline_remove_at) END, rm.public_key
 	 FROM recipe_machines rm JOIN live_user_machines m ON m.id=rm.machine_id WHERE rm.recipe_id=$1 ORDER BY m.alias LIMIT 1000`, recipeID)
 	if err != nil {
 		return nil, err
@@ -308,7 +310,7 @@ func machinesTx(ctx context.Context, tx *db.Tx, recipeID string) ([]MachineState
 	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (MachineState, error) {
 		var m MachineState
 		var seen, remove sql.NullTime
-		err := row.Scan(&m.ID, &m.Name, &m.Online, &seen, &m.AppliedRevision, &m.ApplyState, &remove)
+		err := row.Scan(&m.ID, &m.Name, &m.Online, &seen, &m.AppliedRevision, &m.ApplyState, &remove, &m.PublicKey)
 		m.LastSeenAt, m.RemoveAt = timePtr(seen), timePtr(remove)
 		return m, err
 	})

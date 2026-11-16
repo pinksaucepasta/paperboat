@@ -111,7 +111,8 @@ func TestRecipeRotateAndRevokeAskForConfirmation(t *testing.T) {
 	fake, url := newPolicyFake(t)
 	impact := `{"confirm":"K3M9QX","impact":{"machines":[{"id":"m1","name":"fv-1","online":true},{"id":"m2","name":"fv-2","online":false}],"vaults":[]}}`
 	// The fake answers in order and repeats its last answer, so every answer is queued up front.
-	fake.on("GET "+recipeBase+"/ci", 200, data(`{"recipe":`+recipeJSON(2, `{}`)+`,"machines":[]}`))
+	machineKey := recipe.Token{Secret: make([]byte, 32)}.PublicKey() // a running machine's own key
+	fake.on("GET "+recipeBase+"/ci", 200, data(`{"recipe":`+recipeJSON(2, `{}`)+`,"machines":[{"id":"m1","name":"fv-1","online":true,"public_key":"`+base64.StdEncoding.EncodeToString(machineKey)+`"},{"id":"m2","name":"fv-2"}]}`))
 	fake.on("POST "+recipeBase+"/ci/rotate", 409, apiFailure("confirmation_required", impact))
 	fake.on("POST "+recipeBase+"/ci/rotate", 200, data(`{"recipe":`+recipeJSON(2, `{}`)+`}`))
 	fake.on("POST "+recipeBase+"/ci/revoke", 409, apiFailure("confirmation_required", strings.Replace(impact, "K3M9QX", "7RT2WD", 1)))
@@ -128,6 +129,11 @@ func TestRecipeRotateAndRevokeAskForConfirmation(t *testing.T) {
 	sent := fake.sent("POST " + recipeBase + "/ci/rotate")[1]
 	if err != nil || token.ID != "k7f3q5xa2m" || sent["confirm"] != "K3M9QX" || sent["auth"] != base64.StdEncoding.EncodeToString(token.Auth()) {
 		t.Fatalf("rotate token=%v err=%v body=%v", token.ID, err, sent)
+	}
+	// The machine that reported its key gets the new key sealed to it; the other is told to re-pair.
+	keys, _ := sent["machine_keys"].([]any)
+	if len(keys) != 1 || keys[0].(map[string]any)["machine_id"] != "m1" || !strings.Contains(out, "1 machines have not reported their key") {
+		t.Fatalf("machine keys %v out=%s", sent["machine_keys"], out)
 	}
 	code, out, errOut = runPolicyCLI(t, url, "recipe", "revoke", "ci")
 	if code != 0 || !strings.Contains(out, "its 2 machines are removed: fv-1, fv-2") || !strings.Contains(out, "Revoke with: pb recipe revoke ci --confirm 7RT2WD") {

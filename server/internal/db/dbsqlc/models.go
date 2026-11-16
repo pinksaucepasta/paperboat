@@ -2280,6 +2280,7 @@ type RecipeMachine struct {
 	PairedAt        time.Time
 	RemoveAt        sql.NullTime
 	OfflineRemoveAt sql.NullTime
+	PublicKey       []byte
 }
 
 type RecipeMachineKey struct {

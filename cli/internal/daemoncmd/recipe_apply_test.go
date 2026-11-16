@@ -1,6 +1,7 @@
 package daemoncmd
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"net/http"
@@ -9,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
+	"github.com/pinksaucepasta/paperboat/internal/recipekey"
 	"github.com/pinksaucepasta/paperboat/shared/recipe"
 )
 
@@ -79,5 +81,34 @@ func TestNotRecipeMachine(t *testing.T) {
 		if got := notRecipeMachine(&api.APIError{Status: status}); got != want {
 			t.Fatalf("%d: %v", status, got)
 		}
+	}
+}
+
+// After a rotate the running machine takes the recipe's new key sealed to it and keeps reporting its
+// own public key, so a later rotate can reach it too (F26: rotate keeps machines working).
+func TestRecipeStateTakesARotatedKey(t *testing.T) {
+	dir := t.TempDir()
+	config := filepath.Join(dir, "config.json")
+	old, _ := recipe.NewToken("")
+	f, _ := recipekey.New(old)
+	if err := recipekey.Save(config, f); err != nil {
+		t.Fatal(err)
+	}
+	next, _ := recipe.NewToken(old.ID)
+	public, _ := f.MachinePublic()
+	sealed, _ := recipe.SealRecipeKey(public, old.ID, next.PrivateKey())
+	a := &recipeApplier{statePath: filepath.Join(dir, "s.json"), run: func(context.Context, ...string) ([]byte, error) { return nil, nil }}
+	var reported []byte
+	report := func(_ context.Context, _ int64, _ map[string]any, key []byte) error { reported = key; return nil }
+	state := api.RecipeMachineState{Revision: 2, Recipe: []byte(`{"expires":"90d"}`), MachineKey: sealed}
+	if err := applyRecipeState(context.Background(), a, config, state, report); err != nil {
+		t.Fatal(err)
+	}
+	saved, _, _ := recipekey.Load(config)
+	if !bytes.Equal(saved.PrivateKey, next.PrivateKey()) || !bytes.Equal(reported, public) {
+		t.Fatal("the rotated key was not taken or the machine key not reported")
+	}
+	if err := applyRecipeState(context.Background(), a, filepath.Join(t.TempDir(), "none.json"), state, report); err == nil {
+		t.Fatal("a machine without a recipe key file applied a recipe")
 	}
 }
