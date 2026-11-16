@@ -304,7 +304,10 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 			sender.layers = runtimeLayers
 		}
 		sender.updater = updaterClient
-		runtimeObservation = &runtimeObservationService{sender: sender, interval: 10 * time.Second, timeout: 10 * time.Second}
+		// The response of this POST carries the policies the server sets (machine services, transfer, capabilities, availability,
+		// recording): their topics send an observation at once, otherwise it is a 5-minute heartbeat plus a send on change.
+		runtimeObservation = &runtimeObservationService{sender: sender, interval: 10 * time.Second, heartbeat: runtimeObservationHeartbeat, timeout: 10 * time.Second,
+			wake: machineEvents.Subscribe(machineevents.TopicConfig, machineevents.TopicMachineServices, machineevents.TopicRecordingPolicy).Changed()}
 	}
 	workspaceRoot := environ("PAPERBOAT_WORKSPACE_ROOT")
 	if strings.TrimSpace(workspaceRoot) == "" {

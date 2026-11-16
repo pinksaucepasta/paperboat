@@ -5,6 +5,7 @@ package runtime
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -37,7 +38,13 @@ type runtimeObservationService struct {
 	mu       sync.Mutex
 	sender   *runtimeObservationSender
 	interval time.Duration
-	timeout  time.Duration
+	// heartbeat is the wait after a successful observation (zero uses interval): a change is sent at once, so an
+	// unchanged machine reports only this slowly; its presence comes from the held machine-events wait, not from
+	// these posts (PR-03: every 10 s was 0.1 req/s, the whole idle budget).
+	heartbeat time.Duration
+	// wake sends an observation at once: a machine event that moved a policy this POST's response carries.
+	wake    <-chan struct{}
+	timeout time.Duration
 	// servicesWatch is how often local listening ports are compared with the last announcement;
 	// zero uses machineServicesWatchInterval.
 	servicesWatch time.Duration
@@ -91,6 +98,14 @@ func (s *runtimeObservationService) Start(ctx context.Context) error {
 	return nil
 }
 
+// runtimeObservationHeartbeat is how long an unchanged machine goes between observations (the server needs one to
+// refresh its device records; presence is the held machine-events wait).
+const runtimeObservationHeartbeat = 4 * time.Minute
+
+// runtimeObservationStatePoll is how often the local state an observation carries is compared with the last one sent.
+// The comparison is local; only a difference makes a request.
+const runtimeObservationStatePoll = 10 * time.Second
+
 // runtimeObservationMaxRetry caps the wait between observations while the server keeps failing them.
 const runtimeObservationMaxRetry = time.Minute
 
@@ -124,8 +139,17 @@ func (s *runtimeObservationService) runtimeObservationWait(err error, failures i
 		return backoff.Retry(failures-1, s.interval, runtimeObservationMaxRetry)
 	case err != nil && !serverAnswered(err) && connectionNotOpened(err):
 		return backoff.Jitter(runtimeObservationReconnectRetry)
+	case err != nil:
+		return backoff.Jitter(s.interval)
 	}
-	return backoff.Jitter(s.interval)
+	return backoff.Jitter(s.successWait())
+}
+
+func (s *runtimeObservationService) successWait() time.Duration {
+	if s.heartbeat > 0 {
+		return s.heartbeat
+	}
+	return s.interval
 }
 
 func (s *runtimeObservationService) loop(ctx context.Context, done chan<- struct{}) {
@@ -133,7 +157,7 @@ func (s *runtimeObservationService) loop(ctx context.Context, done chan<- struct
 	// The next observation follows the interval with jitter, so a fleet that reconnected together (a
 	// server deploy) does not report in lockstep; consecutive failures the server answered back off to
 	// runtimeObservationMaxRetry instead of every machine asking a failing server every interval.
-	next := time.NewTimer(backoff.Jitter(s.interval))
+	next := time.NewTimer(backoff.Jitter(s.successWait()))
 	defer next.Stop()
 	failures := 0
 	watchEvery := s.servicesWatch
@@ -142,6 +166,12 @@ func (s *runtimeObservationService) loop(ctx context.Context, done chan<- struct
 	}
 	watch := time.NewTicker(watchEvery)
 	defer watch.Stop()
+	pollEvery := runtimeObservationStatePoll
+	if s.servicesWatch > 0 {
+		pollEvery = s.servicesWatch
+	}
+	statePoll := time.NewTicker(pollEvery)
+	defer statePoll.Stop()
 	send := func() error {
 		sendCtx, cancel := context.WithTimeout(ctx, s.timeout)
 		defer cancel()
@@ -165,8 +195,16 @@ func (s *runtimeObservationService) loop(ctx context.Context, done chan<- struct
 			next.Reset(s.runtimeObservationWait(err, failures))
 		case <-watch.C:
 			if s.sender.machineServicesChanged(ctx) {
-				send()
+				next.Reset(s.runtimeObservationWait(send(), failures))
 			}
+		case <-statePoll.C:
+			// A change of anything the observation carries (availability, update state, capabilities, ports) is sent
+			// at once; a failing server is not asked again until its backoff ends.
+			if failures == 0 && s.sender.observationChanged(ctx) {
+				next.Reset(s.runtimeObservationWait(send(), failures))
+			}
+		case <-s.wake:
+			next.Reset(s.runtimeObservationWait(send(), failures))
 		}
 	}
 }
@@ -197,6 +235,8 @@ func (s *runtimeObservationService) Shutdown(ctx context.Context) error {
 type runtimeObservationSender struct {
 	machineServicesDiscover                             func(context.Context) ([]machineservices.Service, error)
 	machineServicesMu                                   sync.Mutex
+	sentMu                                              sync.Mutex
+	sentDigest                                          [32]byte
 	machineServicesScan                                 []machineservices.Service
 	machineServicesScanErr                              error
 	machineServicesScanAt                               time.Time
@@ -245,10 +285,17 @@ func (s *runtimeObservationSender) Send(ctx context.Context) error {
 	return s.send(ctx, true)
 }
 
-func (s *runtimeObservationSender) send(ctx context.Context, mayConfirm bool) error {
-	if s.layers != nil {
-		s.observeEnvironmentFailure(ctx, 0, s.layers.FlushLayerObservations(ctx))
-	}
+// observationSnapshot is the body of one observation and a digest of it without its timestamps: two observations
+// of an unchanged machine differ only in the times they were taken.
+type observationSnapshot struct {
+	body         []byte
+	digest       [32]byte
+	now          time.Time
+	capabilities *machineCapabilitiesObservation
+}
+
+// snapshot reads the local state an observation carries; the port scan it reuses is at most within old.
+func (s *runtimeObservationSender) snapshot(ctx context.Context, within time.Duration) (observationSnapshot, error) {
 	// The server compares these times with its own clock (X-27): a machine whose clock is off reports the server's.
 	now := serverclock.Now().UTC()
 	observedCapabilities := s.capabilitiesController.Observation(now)
@@ -280,7 +327,7 @@ func (s *runtimeObservationSender) send(ctx context.Context, mayConfirm bool) er
 		Update              *runtimeUpdateObservation          `json:"update,omitempty"`
 		MachineCapabilities *machineCapabilitiesObservation    `json:"machine_capabilities,omitempty"`
 	}{
-		MachineServices:     s.machineServicesObservationWithin(ctx, machineServicesWatchInterval),
+		MachineServices:     s.machineServicesObservationWithin(ctx, within),
 		LazyRuntime:         s.lazyRuntimeObservation(),
 		EnvironmentID:       s.environmentID,
 		ResourceID:          s.machineID,
@@ -292,8 +339,64 @@ func (s *runtimeObservationSender) send(ctx context.Context, mayConfirm bool) er
 		MachineCapabilities: observedCapabilities,
 	})
 	if err != nil {
+		return observationSnapshot{}, err
+	}
+	return observationSnapshot{body: body, digest: timelessDigest(body), now: now, capabilities: observedCapabilities}, nil
+}
+
+// observationChanged reports whether the local state differs from the last observation the server accepted.
+func (s *runtimeObservationSender) observationChanged(ctx context.Context) bool {
+	snapshot, err := s.snapshot(ctx, machineServicesWatchInterval)
+	if err != nil {
+		return false
+	}
+	s.sentMu.Lock()
+	defer s.sentMu.Unlock()
+	return snapshot.digest != s.sentDigest
+}
+
+// timelessDigest hashes a JSON observation with every timestamp string removed.
+func timelessDigest(body []byte) [32]byte {
+	var value any
+	if json.Unmarshal(body, &value) != nil {
+		return sha256.Sum256(body)
+	}
+	normalized, err := json.Marshal(dropTimestamps(value))
+	if err != nil {
+		return sha256.Sum256(body)
+	}
+	return sha256.Sum256(normalized)
+}
+
+func dropTimestamps(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		for key, child := range typed {
+			if text, ok := child.(string); ok {
+				if _, err := time.Parse(time.RFC3339Nano, text); err == nil {
+					delete(typed, key)
+					continue
+				}
+			}
+			typed[key] = dropTimestamps(child)
+		}
+	case []any:
+		for index, child := range typed {
+			typed[index] = dropTimestamps(child)
+		}
+	}
+	return value
+}
+
+func (s *runtimeObservationSender) send(ctx context.Context, mayConfirm bool) error {
+	if s.layers != nil {
+		s.observeEnvironmentFailure(ctx, 0, s.layers.FlushLayerObservations(ctx))
+	}
+	snapshot, err := s.snapshot(ctx, machineServicesWatchInterval)
+	if err != nil {
 		return err
 	}
+	body, now, observedCapabilities := snapshot.body, snapshot.now, snapshot.capabilities
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, s.endpoint, bytes.NewReader(body))
 	if err != nil {
 		return err
@@ -340,6 +443,9 @@ func (s *runtimeObservationSender) send(ctx context.Context, mayConfirm bool) er
 		s.applyMachineServicesPolicy(nil)
 		return runtimeObservationFailure{stage: "control_request", cause: errorreport.HTTPStatusFailure(response), answered: true}
 	}
+	s.sentMu.Lock()
+	s.sentDigest = snapshot.digest
+	s.sentMu.Unlock()
 	s.applyMachineServicesPolicy(responseBody)
 	if s.transferPolicy != nil {
 		if err := applyRuntimeTransferPolicy(responseBody, s.transferPolicy); err != nil {

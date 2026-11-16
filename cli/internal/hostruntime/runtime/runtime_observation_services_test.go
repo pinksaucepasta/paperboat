@@ -74,3 +74,73 @@ func TestRuntimeObservationAnnouncesANewServiceWithoutWaitingForTheNextObservati
 		time.Sleep(5 * time.Millisecond)
 	}
 }
+
+func quietObservationService(t *testing.T, transport http.RoundTripper, wake <-chan struct{}) (*runtimeObservationService, func()) {
+	t.Helper()
+	sender := &runtimeObservationSender{
+		endpoint:         "https://observations.invalid/v1/runtime-observations",
+		tokens:           livenessObservationTokenSource{},
+		proofs:           livenessObservationProofSource{},
+		operationID:      func() (string, error) { return "op_runtime_observation_quiet_0001", nil },
+		environmentID:    "env_quiet",
+		machineID:        "machine_quiet",
+		reporterVersion:  "test",
+		client:           &http.Client{Transport: transport},
+		receiptPath:      filepath.Join(t.TempDir(), "runtime", "server-heartbeat.json"),
+		workerGeneration: 1,
+		osBootID:         "boot-quiet",
+		lazyBootID:       "boot-quiet", lazyStartedAt: time.Now(), installationGeneration: 7,
+		machineServicesDiscover: func(context.Context) ([]machineservices.Service, error) { return nil, nil },
+	}
+	service := &runtimeObservationService{sender: sender, interval: time.Hour, heartbeat: time.Hour, wake: wake, timeout: time.Second, servicesWatch: 20 * time.Millisecond}
+	if err := service.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	return service, func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = service.Shutdown(shutdownCtx)
+	}
+}
+
+// An unchanged machine posts one observation (at start), not one per interval: presence is the held machine-events
+// wait, and a heartbeat is hours away here. Shutdown sends the last one, which the count below excludes.
+func TestRuntimeObservationIsNotRepeatedWhileNothingChanges(t *testing.T) {
+	transport := &policyObservationTransport{}
+	_, stop := quietObservationService(t, transport, nil)
+	defer stop()
+	time.Sleep(400 * time.Millisecond)
+	if calls := transport.calls.Load(); calls != 1 {
+		t.Fatalf("%d observations in 400 ms of an unchanged machine, want 1", calls)
+	}
+}
+
+// A machine event that moved a policy the response carries sends an observation at once.
+func TestRuntimeObservationIsSentAtOnceWhenAPolicyEventWakesIt(t *testing.T) {
+	transport := &policyObservationTransport{}
+	wake := make(chan struct{}, 1)
+	_, stop := quietObservationService(t, transport, wake)
+	defer stop()
+	time.Sleep(100 * time.Millisecond)
+	before := transport.calls.Load()
+	wake <- struct{}{}
+	deadline := time.Now().Add(2 * time.Second)
+	for transport.calls.Load() <= before {
+		if time.Now().After(deadline) {
+			t.Fatalf("a policy wake did not send an observation (calls=%d)", transport.calls.Load())
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+func TestTimelessDigestIgnoresTimestampsOnly(t *testing.T) {
+	a := timelessDigest([]byte(`{"sampled_at":"2026-11-16T01:00:00Z","update":{"state":"idle","observed_at":"2026-11-16T01:00:01.5Z"},"machine_services":{"generation":3}}`))
+	b := timelessDigest([]byte(`{"sampled_at":"2026-11-16T01:00:10Z","update":{"state":"idle","observed_at":"2026-11-16T01:00:11Z"},"machine_services":{"generation":3}}`))
+	c := timelessDigest([]byte(`{"sampled_at":"2026-11-16T01:00:10Z","update":{"state":"failed","observed_at":"2026-11-16T01:00:11Z"},"machine_services":{"generation":3}}`))
+	if a != b {
+		t.Fatal("two observations that differ only in their times have different digests")
+	}
+	if a == c {
+		t.Fatal("a changed state has the same digest")
+	}
+}
