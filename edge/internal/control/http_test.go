@@ -467,6 +467,16 @@ func TestHTTPClientRouteSnapshotAsksForAVersion(t *testing.T) {
 	if len(sent) != before {
 		t.Fatalf("%d route requests inside the quiet gap, want none", len(sent)-before)
 	}
+	// A tunnel assignment change ends the gap: the wake's pull asks the server, once.
+	client.RoutesChanged()
+	for i := 0; i < 2; i++ {
+		if _, err := client.DesiredRouteSnapshot(context.Background(), "edge_1", "epoch_1"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(sent) != before+1 {
+		t.Fatalf("%d route requests after a tunnel change, want 1", len(sent)-before)
+	}
 }
 
 // A process that released to its replacement (or has not taken over yet) is silent: a control request failing

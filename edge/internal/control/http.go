@@ -123,6 +123,15 @@ func (c *HTTPClient) Silent() bool { return c.silent.Load() }
 // again, so an idle edge makes at most one route request per gap whatever its control interval.
 const routeQuietGap = 10 * time.Second
 
+// RoutesChanged ends the quiet gap: the next DesiredRouteSnapshot asks the server. The endpoint pull calls it when
+// the server reports a tunnel assignment change; without it a new tunnel's route waited out the gap on any edge
+// that had just been answered "unchanged" (`pb tunnel create --wait` 11-13 s instead of 2 s).
+func (c *HTTPClient) RoutesChanged() {
+	c.routesMu.Lock()
+	c.routesQuiet = time.Time{}
+	c.routesMu.Unlock()
+}
+
 func (c *HTTPClient) routeQuietGap() time.Duration {
 	if c.routesGap > 0 {
 		return c.routesGap

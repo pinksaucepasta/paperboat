@@ -468,6 +468,7 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 	}
 	tunnelWake := make(chan struct{}, 1)
 	runtimeWorker := &edgeruntime.RuntimeCarrierWorker{Ready: nodeReady, OnTunnelsChanged: func() {
+		client.RoutesChanged() // the wake's route pull must ask the server, not reuse an "unchanged" answer
 		select {
 		case tunnelWake <- struct{}{}:
 		default: // a wake is already pending
