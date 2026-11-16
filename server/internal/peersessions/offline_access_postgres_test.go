@@ -287,6 +287,25 @@ func TestOfflineSessionRightsEqualTheDescriptorDecisionOnPostgres(t *testing.T) 
 		}
 	}
 
+	// FIX-TEAMREACH (prod 11-16): the owner of a team-owned machine, a member of its team, dialled it from its CLI and
+	// the host never answered. The host's accept scopes carried the owner's personal policy version (116), the CLI's
+	// dial scopes the team's (17), and the relay pairs scopes only at one generation, so it dropped every packet.
+	exec(`INSERT INTO paperboat.workspace_policies(owner_account,version,source,digest) VALUES($1,1000,'{}','sha256:test')
+ ON CONFLICT (owner_account) WHERE owner_account IS NOT NULL DO UPDATE SET version=1000`, owner)
+	teamstest.SetMachineAccess(t, store, team, host, owner, "exec")
+	exec(`UPDATE paperboat.user_machines SET owner_team_id=$2 WHERE id=$1`, host, team)
+	ownerSide, hostSide := relayGrantScopesOf(owner, "offline_cli_"+owner)[host], relayGrantScopesOf(owner, host)["offline_cli_"+owner]
+	if len(ownerSide) == 0 || len(ownerSide) != len(hostSide) {
+		t.Fatalf("owner of a team-owned host: relay grant scopes CLI side %v, host side %v, want the same capabilities", ownerSide, hostSide)
+	}
+	for i, scope := range ownerSide {
+		if other := hostSide[i]; scope["capability"] != other["capability"] || scope["resource_generation"] != other["resource_generation"] {
+			t.Fatalf("owner of a team-owned host: CLI scope %v and host scope %v do not pair", scope, other)
+		}
+	}
+	exec(`UPDATE paperboat.user_machines SET owner_team_id=NULL WHERE id=$1`, host)
+	teamstest.SetMachineAccess(t, store, team, host, owner)
+
 	// Each refusal uses its own member: disabling an account or suspending a team also fires revoke triggers.
 	for _, account := range []string{member, revokedMember, suspendedMember} {
 		if got := offline["offline_cli_"+account]; len(got) != 1 || got[0] != "terminal" {

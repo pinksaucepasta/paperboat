@@ -40,7 +40,7 @@ type offlinePeer struct {
 // versions (binding, workspace policy, membership), so the daemon sees any policy change as a new scope.
 func offlineAccessPeers(ctx context.Context, tx *sql.Tx, self networkBinding, now time.Time) ([]offlinePeer, error) {
 	rows, err := tx.QueryContext(ctx, `WITH host AS (
- SELECT m.id,m.user_id FROM paperboat.user_machines m
+ SELECT m.id,m.user_id,m.owner_team_id FROM paperboat.user_machines m
  JOIN paperboat.users owner ON owner.id=m.user_id AND owner.status='active'
  JOIN paperboat.control_environments environment ON environment.id=m.environment_id AND environment.desired_state='active' AND environment.revoked_at IS NULL
  WHERE m.id=$1 AND m.user_id=$2 AND m.revoked_at IS NULL AND m.deleted_at IS NULL
@@ -51,8 +51,11 @@ func offlineAccessPeers(ctx context.Context, tx *sql.Tx, self networkBinding, no
  JOIN paperboat.teams t ON t.team_id=b.team_id AND NOT t.suspended AND t.deleted_at IS NULL
  LEFT JOIN paperboat.workspace_policies policy ON policy.team_id=b.team_id
 ), accounts AS (
- -- The generation moves with every deciding input: the binding, the workspace policy and the membership.
- SELECT h.user_id AS account_id,coalesce((SELECT policy.version FROM paperboat.workspace_policies policy WHERE policy.owner_account=h.user_id),1) AS generation FROM host h
+ -- The generation moves with every deciding input: the binding, the workspace policy and the membership. The owner's
+ -- personal policy decides only a personal host (machine_capability_allowed): on a team-owned one the owner is a member
+ -- like any other, so its scopes carry the generation its CLI's dial scopes do (teamHostPeers), which the relay pairs
+ -- exactly (derpquic reciprocalScopes). The personal policy's version there made every owner dial unanswered.
+ SELECT h.user_id AS account_id,coalesce((SELECT policy.version FROM paperboat.workspace_policies policy WHERE policy.owner_account=h.user_id),1) AS generation FROM host h WHERE h.owner_team_id IS NULL
  UNION ALL SELECT member.account_id,greatest(ht.binding_generation,ht.policy_version,member.membership_generation)
  FROM host_teams ht JOIN paperboat.team_members member ON member.team_id=ht.team_id AND member.active
 ), endpoints AS (
@@ -104,7 +107,9 @@ func networkNames() []string {
 // A team-owned machine enrolled by this very account (the usual owner who transferred it) belongs to no personal mesh
 // (personalNetworkPeers takes owner_team_id IS NULL), so it is named here too.
 func teamHostPeers(ctx context.Context, tx *sql.Tx, self networkBinding, now time.Time) ([]offlinePeer, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT n.endpoint_id,m.user_id,array_to_json(array_agg(cap.network ORDER BY cap.network)),
+	// The generation is taken over every team that shares the host with the member, allowed or not, as the host's own
+	// document does (offlineAccessPeers accounts): the relay pairs the two scopes only at one generation.
+	rows, err := tx.QueryContext(ctx, `SELECT n.endpoint_id,m.user_id,array_to_json(array_agg(DISTINCT cap.network ORDER BY cap.network) FILTER (WHERE allowed)),
  max(greatest(b.generation,coalesce(policy.version,1),member.membership_generation))
 FROM paperboat.team_members member
 JOIN paperboat.teams t ON t.team_id=member.team_id AND NOT t.suspended AND t.deleted_at IS NULL
@@ -115,9 +120,9 @@ JOIN paperboat.control_environments environment ON environment.id=m.environment_
 JOIN paperboat.peer_network_identities n ON n.machine_id=m.id AND n.user_id=m.user_id AND n.role='machine' AND n.revoked_at IS NULL
 LEFT JOIN paperboat.workspace_policies policy ON policy.team_id=member.team_id
 CROSS JOIN unnest($2::text[],$3::text[]) AS cap(policy,network)
+CROSS JOIN LATERAL (SELECT paperboat.team_machine_capability_allowed(member.account_id,member.team_id,m.id,cap.policy) AS allowed) decision
 WHERE member.account_id=$1 AND member.active AND NOT cap.network=ANY($4::text[])
- AND paperboat.team_machine_capability_allowed(member.account_id,member.team_id,m.id,cap.policy)
-GROUP BY n.endpoint_id,m.user_id ORDER BY n.endpoint_id LIMIT $5`, self.AccountID, policyNames(), networkNames(), offlineOwnerOnly, maximumOfflinePeers)
+GROUP BY n.endpoint_id,m.user_id HAVING bool_or(allowed) ORDER BY n.endpoint_id LIMIT $5`, self.AccountID, policyNames(), networkNames(), offlineOwnerOnly, maximumOfflinePeers)
 	if err != nil {
 		return nil, err
 	}
