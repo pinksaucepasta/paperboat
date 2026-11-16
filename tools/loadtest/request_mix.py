@@ -8,7 +8,7 @@ them against perf_budgets.BUDGETS['request_mix']. Staging only; edge, node and t
 Go-http-client/1.1 are not machine requests. Prints one JSON receipt with numbers only.
 With LOG_CMD set (e.g. ssh to the Compose host's `docker compose logs --no-log-prefix --since $START --until $END server`) the
 log comes from that command instead of journalctl, START/END in RFC 3339.
-Usage: request_mix.py --machines 2 [--seconds 600] [--unit pb-staging-server] [--budget request_mix|stream_open]
+Usage: request_mix.py --machines 2 [--seconds 600] [--unit pb-staging-server] [--budget request_mix|stream_open] [--version dev-<sha>-x]
 """
 import argparse
 import collections
@@ -27,7 +27,7 @@ PATH = re.compile(r'path=(\S+)')
 ID = re.compile(r'(machine|session|env|endpoint)_[0-9a-f-]+')
 
 
-def counts(unit, start, end):
+def counts(unit, start, end, version=None):
     if os.environ.get('LOG_CMD'):  # a command printing the server log between $START and $END (staging in Compose: docker compose logs)
         log = subprocess.run(['bash', '-c', os.environ['LOG_CMD']], capture_output=True, text=True, timeout=300, check=True,
                              env=dict(os.environ, START=start, END=end)).stdout
@@ -37,6 +37,8 @@ def counts(unit, start, end):
     out = collections.Counter()
     for line in log.splitlines():
         if 'msg=http_request' not in line or SKIP.search(line):
+            continue
+        if version and not line.endswith('client=paperboat/' + version):  # the stack is shared: count one build's machines
             continue
         m = PATH.search(line)
         if m:
@@ -49,13 +51,14 @@ def main():
     parser.add_argument('--machines', type=int, required=True)
     parser.add_argument('--seconds', type=int, default=600)
     parser.add_argument('--unit', default='pb-staging-server')
+    parser.add_argument('--version', help='count only requests of machines running this pb build (unique version string)')
     parser.add_argument('--budget', default='request_mix', choices=['request_mix', 'stream_open'])
     args = parser.parse_args()
     fmt = '%Y-%m-%dT%H:%M:%SZ' if os.environ.get('LOG_CMD') else '%Y-%m-%d %H:%M:%S'
     start = time.strftime(fmt, time.gmtime())
     time.sleep(args.seconds)
     end = time.strftime(fmt, time.gmtime())
-    per_path = counts(args.unit, start, end)
+    per_path = counts(args.unit, start, end, args.version)
     scale = 600 / args.seconds / args.machines
     metrics = {path: round(n * scale, 1) for path, n in sorted(per_path.items())}
     metrics['total'] = round(sum(per_path.values()) * scale, 1)
