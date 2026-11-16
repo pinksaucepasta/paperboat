@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/config"
+	"github.com/pinksaucepasta/paperboat/internal/shorttemp"
 )
 
 // X-24 on a real client: `pb connect` reads the daemon's terminal through the local stream (ServeLocalPeerConn) and its own queue, and the
@@ -22,7 +23,7 @@ func TestCtrlCUnderAFloodStopsThePaintThroughTheLocalStream(t *testing.T) {
 	wire := newExecCanaryWire()
 	wire.serverToClient = make(chan execMessage, 65536)
 	remote := attachReplayTerminal(t, host, authorizer, &target, wire)
-	socket := filepath.Join(t.TempDir(), "s")
+	socket := filepath.Join(shorttemp.Dir(t), "s")
 	listener, err := net.Listen("unix", socket)
 	if err != nil {
 		t.Fatal(err)

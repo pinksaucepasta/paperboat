@@ -13,6 +13,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/daemonrpc"
 	"github.com/pinksaucepasta/paperboat/internal/machineguard"
+	"github.com/pinksaucepasta/paperboat/internal/shorttemp"
 	"github.com/pinksaucepasta/paperboat/internal/testcert"
 )
 
@@ -76,7 +77,7 @@ func reconnectsToARestartedGuard(t *testing.T, watch time.Duration, kill func(*r
 	}
 	var clients []*restartableGuardClient
 	c, err := NewCoordinator(CoordinatorConfig{
-		SocketAddress: t.TempDir() + "/daemon.sock",
+		SocketAddress: socketAddress(shorttemp.Dir(t)),
 		ConnectNameClient: func(context.Context) (guardedNameClient, error) {
 			client := &restartableGuardClient{coordinatorNameClient: &coordinatorNameClient{}}
 			clients = append(clients, client)
