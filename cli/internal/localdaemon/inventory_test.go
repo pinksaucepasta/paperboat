@@ -1389,3 +1389,46 @@ func TestInventoryPendingLocalAccessNudgeKeepsRequestedSpacing(t *testing.T) {
 		t.Fatal("pending local access nudge did not advance promptly")
 	}
 }
+
+// After a long outage the periodic check sits at its 5-minute backoff; the worker reporting the change stream healthy
+// again must refresh the inventory at once, or pb status says "Control plane is unavailable" for minutes after
+// Paperboat is back (F21-01 W, 3m48s on dev-524977877).
+func TestInventoryRefreshesWhenTheWorkerReportsTheControlPlaneBack(t *testing.T) {
+	source := &scriptedMachineSource{results: []machineResult{{err: apiDown("/v1/machines")}, {machines: []api.UserMachine{{ID: "machine_1", Alias: "studio"}}}}}
+	store, err := localapi.NewSnapshotStore(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hub := machineevents.NewPushed()
+	inventory, err := NewInventory(InventoryConfig{Source: source, Store: store, RefreshInterval: time.Hour, RequestTimeout: time.Second, Events: hub.Subscribe(machineevents.TopicInventory)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hub.Push(nil, false)
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- inventory.Run(ctx) }()
+	defer func() {
+		cancel()
+		<-done
+	}()
+	deadline := time.Now().Add(2 * time.Second)
+	for snapshot, _ := store.Snapshot(t.Context()); snapshot.DaemonState != "degraded"; snapshot, _ = store.Snapshot(t.Context()) {
+		if time.Now().After(deadline) {
+			t.Fatalf("daemon state %q during the outage, want degraded", snapshot.DaemonState)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	hub.Push(nil, true)
+	deadline = time.Now().Add(defaultEventRefreshSpacing + 2*time.Second)
+	for {
+		snapshot, err := store.Snapshot(t.Context())
+		if err == nil && snapshot.DaemonState == "ready" {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("daemon state %q %v after the change stream recovered, want ready (periodic check is an hour away)", snapshot.DaemonState, defaultEventRefreshSpacing+2*time.Second)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
