@@ -14,7 +14,8 @@ import (
 // X-24: a session id Paperboat does not list used to fail with "Paperboat could not finish the command" and no step.
 func TestUnknownTerminalSessionErrorNamesTheLookupAndTheRecovery(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		writeAPIData(t, w, map[string]any{"items": []map[string]any{{"id": "umts_1", "name": "shell-1"}}, "total": 1})
+		writeAPIData(t, w, map[string]any{"items": []map[string]any{{"id": "umts_1", "name": "shell-1"}},
+			"pagination": map[string]any{"limit": 200, "offset": 0, "total": 1, "next_offset": nil}})
 	}))
 	defer srv.Close()
 	client := api.New(srv.URL, config.Credential{}, srv.Client())
