@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"io"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -37,7 +38,12 @@ func TestNativeCachedSenderReconnectsAfterPeerEngineRestart(t *testing.T) {
 	now := time.Now().Unix()
 	applyTestConfiguration(t, sender, signer, testConfiguration(now, 1, client, machine, "dial"))
 	applyTestConfiguration(t, receiver, signer, testConfiguration(now, 1, machine, client, "accept"))
-	clientOwner, err := native.NewOwner(native.Config{Authority: sender, TLS: clientTLS})
+	var dialFailures atomic.Int32
+	clientOwner, err := native.NewOwner(native.Config{Authority: sender, TLS: clientTLS, Observe: func(event native.Event) {
+		if event.Kind == "dial_failed" {
+			dialFailures.Add(1)
+		}
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,9 +98,14 @@ func TestNativeCachedSenderReconnectsAfterPeerEngineRestart(t *testing.T) {
 	descriptor = startTestServer(t, serverOwner, receiver, regions.Regions[1])
 	// Keep the same sender/authority and machine key, just as a remote upgrade.
 	// Replacing the sender here would conceal the retained UDP-engine failure.
+	dialFailures.Store(0)
 	exchange()
 	replacement, err := sender.Client(descriptor, "machine_test")
-	if err != nil || replacement == cached {
-		t.Fatal("peer restart retained its failed idle cached route", err)
+	// The cache rule (package doc): a failed pre-application transport retires that idle client. The restarted peer
+	// keeps its key, so its first handshake may also succeed on the cached client (the engine resets the restarted
+	// peer's WireGuard state before releasing the dial, mesh/engine.go resetRestartedPeer): Windows run 43960352441
+	// took that path in 0.09 s with no failure. Only a route that failed must be gone.
+	if err != nil || dialFailures.Load() > 0 && replacement == cached {
+		t.Fatalf("peer restart retained its failed idle cached route (dial failures %d): %v", dialFailures.Load(), err)
 	}
 }
