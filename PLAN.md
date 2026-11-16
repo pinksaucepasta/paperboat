@@ -3801,6 +3801,9 @@ The coolify format (S1) also removes the old dev deployment and its test backups
 
 ## 5. Log
 
+2026-11-16 | DEP2 test data + edges | user_a2255043-e619-477b-81fc-89394d494df6 (PR-03 test account): personal workspace usage period 2026-11-01..12-01 set unlimited (included_bytes NULL; its 5 GB were used) for PR-06's +50 ms runs.
+Edge hosts oracle+anvit: net.core.rmem_max/wmem_max = 7340032 and /etc/sysctl.d/90-paperboat-edge-udp.conf, by hand with the values pbh sets (58e060f5c); edge processes restart one host at a time after the .31 watch.
+
 2026-11-16 | RECIPES-DESIGN F26 | Design written (PLAN F26): file schema, CLI texts, errors, console, architecture, API-token removal list.
 Waits for USER DECIDES: F26 open questions 1-5 (vault naming, installer path, no HTTP bearer, expiry, revoke removes machines).
 
