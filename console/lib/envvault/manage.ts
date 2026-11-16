@@ -71,10 +71,32 @@ const ownMembership = (team: VaultTeam, account: string) => {
   return own.membership_generation
 }
 
+/**
+ * What the vault engine needs of a team whose vault doesn't exist yet: the server answers 404 for it, so the
+ * generation and the owner's membership come from the team API (as `pb env team create` does).
+ */
+async function uncreatedTeam(team: string, owner: string): Promise<VaultTeam> {
+  const base = `teams/${encodeURIComponent(team)}`
+  const [summary, members] = await Promise.all([
+    api<Schemas["TeamTeam"]>(base),
+    api<{ items: Schemas["TeamMember"][] }>(`${base}/members?limit=200`),
+  ])
+  const own = members.items.find((member) => member.account_id === owner && member.active && member.role === "owner")
+  if (summary.owner_account !== owner || !own) throw new Error("Only the team's owner can create its vault.")
+  return {
+    team_id: team,
+    owner_account: owner,
+    generation: summary.generation,
+    key_epoch: 0,
+    record_sequence: 0,
+    members: [{ account_id: owner, membership_generation: own.membership_generation, role: "owner", active: true, grant_epoch: 0, env_permission: "write" }],
+  } as unknown as VaultTeam
+}
+
 /** Creates the team's encrypted vault; the team's owner does this once. */
 export async function createTeamVault(team: string): Promise<void> {
-  const [vault, me, state] = await Promise.all([currentVault(), api<Me>("me"), readTeamVault(team)])
-  if (!state) throw new Error("This team can't hold variables yet.")
+  const [vault, me, existing] = await Promise.all([currentVault(), api<Me>("me"), readTeamVault(team)])
+  const state = existing ?? (await uncreatedTeam(team, me.id))
   const sealed = await vaultCrypto<{
     operation_id: string
     scope_envelope: string

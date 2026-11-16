@@ -15,6 +15,7 @@ const realFetch = globalThis.fetch
 const realWorker = (globalThis as { Worker?: unknown }).Worker
 let stored: Vault
 let calls: string[]
+let teamVaultCreated: boolean
 const account = fixture.vault.account_id
 
 const keep = (envelope: string) => {
@@ -32,6 +33,7 @@ beforeEach(() => {
   ;(globalThis as { addEventListener?: unknown }).addEventListener ??= () => {}
   stored = structuredClone(fixture.vault)
   calls = []
+  teamVaultCreated = false
   globalThis.fetch = (async (input: string | URL, init?: RequestInit) => {
     const url = new URL(String(input), "http://console.example.test")
     const method = init?.method ?? "GET"
@@ -53,9 +55,16 @@ beforeEach(() => {
       entitled: true,
       record_sequence: 0,
     }
-    if (url.pathname === "/api/v1/environment/teams/acme" && method === "GET") return ok(team)
+    // The real server answers 404 for a team's vault until it is created: the engine's state then comes from the team API.
+    if (url.pathname === "/api/v1/environment/teams/acme" && method === "GET") return teamVaultCreated ? ok(team) : new Response(null, { status: 404 })
+    if (url.pathname === "/api/v1/teams/acme") return ok(sampleFor("GET /v1/teams/{team_id}", { team_id: "acme", owner_account: account, generation: 1 }))
+    if (url.pathname === "/api/v1/teams/acme/members") {
+      const page = sampleFor("GET /v1/teams/{team_id}/members") as { items: object[] }
+      return ok({ ...page, total: 1, items: [{ ...page.items[0], account_id: account, membership_generation: 1, role: "owner", active: true }] })
+    }
     if (method === "POST" && /\/(reset|rotate-personal|teams)$/.test(url.pathname)) {
       keep(body.vault_envelope ?? body.envelope)
+      teamVaultCreated ||= url.pathname.endsWith("/teams")
       return ok(url.pathname.endsWith("/teams") ? team : stored)
     }
     return new Response(null, { status: 404 })
