@@ -68,3 +68,19 @@ func TestRefusedStreamNamesAnOlderMachine(t *testing.T) {
 		}
 	}
 }
+
+// An older machine's refusal is permanent: the initial-connect loop must not retry it (the same wrapped
+// peer_transport_unavailable otherwise counts as a transient transport failure), and a second look-up must not wrap it again.
+func TestVersionSkewRefusalIsNotRetried(t *testing.T) {
+	transient := &localapi.RemoteError{StatusCode: 503, Code: "peer_transport_unavailable"}
+	if !retryableInitialConnectFailure(transient) {
+		t.Fatal("the bare transport failure stopped being retryable")
+	}
+	skew := &machineVersionSkewError{message: "m runs pb a, older than this pb b; update it", cause: transient}
+	if retryableInitialConnectFailure(skew) || retryableInitialConnectFailure(fmt.Errorf("dial: %w", skew)) {
+		t.Fatal("a version-skew refusal is retried")
+	}
+	if got := explainMachineVersionSkew(t.Context(), fakeMachineVersion{version: "dev-x"}, api.UserMachine{ID: "m"}, "team_1", skew); got != error(skew) {
+		t.Fatalf("an explained refusal was wrapped again: %v", got)
+	}
+}

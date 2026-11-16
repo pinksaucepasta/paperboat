@@ -23,6 +23,9 @@ func retryableInitialConnectFailure(err error) (retryable bool) {
 			retryable = false
 		}
 	}()
+	if boundedErrorWalk(err, func(e error) bool { _, ok := e.(*machineVersionSkewError); return ok }) {
+		return false // an older machine's refusal does not go away by retrying
+	}
 	remaining := 32
 	var visit func(error, int) bool
 	visit = func(current error, status int) bool {

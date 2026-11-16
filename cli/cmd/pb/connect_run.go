@@ -431,6 +431,8 @@ func actionConnectTargetInDirectory(c *command.Context, requested, cwd string) e
 		if errors.Is(err, api.ErrUnauthenticated) {
 			return err
 		}
+		// An older target's refusal is permanent: name it now instead of retrying until the dial budget ends.
+		err = explainMachineVersionSkew(ctx, backend, resolvedMachine, backend.Workspace(), err)
 		if attempt == d.cfg.Connect.DialRetries || !retryableInitialConnectError(err) {
 			break
 		}
@@ -454,8 +456,9 @@ func actionConnectTargetInDirectory(c *command.Context, requested, cwd string) e
 		if createdSessionID != "" {
 			reportTerminalAuxFailure(ctx, "cleanup", "terminal_session_failed", closeAbandonedSession(backend, createdMachineID, createdSessionID))
 		}
-		if skew := explainMachineVersionSkew(c.Context, backend, resolvedMachine, backend.Workspace(), err); skew != err {
-			return skew
+		var skew *machineVersionSkewError
+		if errors.As(err, &skew) {
+			return err
 		}
 		return fmt.Errorf("connect to %q: %w", machineRef, err)
 	}

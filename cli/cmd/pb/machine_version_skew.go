@@ -31,6 +31,10 @@ type machineVersionReader interface {
 // stream's header carried: a non-default one is the field an older target rejects, and an exec it rejects ends as an
 // uncertain start (the reset arrives after the request was written), so that outcome counts as a refusal then too.
 func explainMachineVersionSkew(ctx context.Context, client machineVersionReader, machine api.UserMachine, workspace string, err error) error {
+	var already *machineVersionSkewError
+	if errors.As(err, &already) {
+		return err
+	}
 	var remote *localapi.RemoteError
 	refused := errors.As(err, &remote) && (remote.Code == "peer_transport_unavailable" || remote.Code == "peer_stream_unavailable")
 	namedWorkspace := workspace != "" && workspace != "personal"
