@@ -164,7 +164,28 @@ func TestReconcileAuthorizedKeysTrustsTheCAOnlyOnLoopback(t *testing.T) {
 	if replay, err := ReconcileAuthorizedKeys(home, uint32(os.Getuid()), []string{key}, testPrincipal); err != nil || replay.Changed {
 		t.Fatalf("replay=%+v error=%v", replay, err)
 	}
-	// Any other option on a managed line is a conflict, never rewritten silently.
+	// The line an earlier pb wrote (from= 127.0.0.1 only) is ours and is rewritten to the current one; sshd refused
+	// the bridge's per-user source addresses while it stayed.
+	earlier := strings.Replace(lines[1], wire.CATrustFrom, `from="127.0.0.1,::1"`, 1) + "\n"
+	if err := os.WriteFile(path, []byte(own+earlier), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if rewritten, err := ReconcileAuthorizedKeys(home, uint32(os.Getuid()), []string{key}, testPrincipal); err != nil || !rewritten.Changed {
+		t.Fatalf("earlier loopback line: changed=%+v error=%v", rewritten, err)
+	}
+	if after, _ := os.ReadFile(path); string(after) != string(value) {
+		t.Fatalf("earlier loopback line rewritten to %q, want %q", after, value)
+	}
+	// Any other option on a managed line, or a from= beyond loopback, is a conflict, never rewritten silently.
+	for _, from := range []string{`from="127.0.0.1,10.0.0.0/8"`, `from="0.0.0.0/0"`, `from="*.example.test"`} {
+		edited := strings.Replace(lines[1], wire.CATrustFrom, from, 1) + "\n"
+		if err := os.WriteFile(path, []byte(edited), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := ReconcileAuthorizedKeys(home, uint32(os.Getuid()), []string{key}, testPrincipal); !errors.Is(err, ErrAuthorizedKeysConflict) {
+			t.Fatalf("%s error=%v", from, err)
+		}
+	}
 	widened := strings.Replace(lines[1], wire.CATrustFrom, `from="*"`, 1) + "\n"
 	if err := os.WriteFile(path, []byte(widened), 0o600); err != nil {
 		t.Fatal(err)

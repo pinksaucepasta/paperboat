@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"slices"
@@ -176,20 +177,47 @@ func replaceManagedAuthorizedKeys(existing []byte, managed []string) ([]byte, er
 	return result, nil
 }
 
-// managedOptions: our options (wire.CATrustOptions), any principal, each at most once, some possibly edited out.
+// managedOptions: our options (wire.CATrustOptions), any principal, each at most once, some possibly edited out, and
+// a from= narrowed to loopback addresses (the line an earlier pb wrote for 127.0.0.1 only). A from= reaching beyond
+// loopback is someone else's edit and a conflict.
 func managedOptions(options []string) bool {
 	seen := map[string]bool{}
 	for _, option := range options {
 		kind := option
 		if principal, ok := strings.CutPrefix(option, `principals="`); ok && strings.HasSuffix(principal, `"`) && wire.ValidCAPrincipal(strings.TrimSuffix(principal, `"`)) {
 			kind = "principals"
-		} else if option != "cert-authority" && option != wire.CATrustFrom {
+		} else if loopbackFrom(option) {
+			kind = "from"
+		} else if option != "cert-authority" {
 			return false
 		}
 		if seen[kind] {
 			return false
 		}
 		seen[kind] = true
+	}
+	return true
+}
+
+// loopbackFrom: a from="..." option whose every pattern is a loopback address or a prefix inside 127.0.0.0/8 or ::1.
+func loopbackFrom(option string) bool {
+	list, ok := strings.CutPrefix(option, `from="`)
+	if !ok || !strings.HasSuffix(list, `"`) {
+		return false
+	}
+	loopback := netip.MustParsePrefix("127.0.0.0/8")
+	for _, pattern := range strings.Split(strings.TrimSuffix(list, `"`), ",") {
+		prefix, err := netip.ParsePrefix(pattern)
+		if err != nil {
+			address, addressErr := netip.ParseAddr(pattern)
+			if addressErr != nil {
+				return false
+			}
+			prefix = netip.PrefixFrom(address, address.BitLen())
+		}
+		if !(prefix.Addr().Is4() && prefix.Bits() >= 8 && loopback.Contains(prefix.Addr())) && !(prefix.Addr() == netip.IPv6Loopback() && prefix.Bits() == 128) {
+			return false
+		}
 	}
 	return true
 }
