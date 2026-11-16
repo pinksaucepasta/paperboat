@@ -38,6 +38,11 @@ type RuntimeCarrierWorker struct {
 	// Ready, when set, holds every pull and report until the server has recorded this process
 	// as ready (NodeWorker.Ready): it refuses them from an unready node.
 	Ready <-chan struct{}
+	// OnTunnelsChanged, when set, runs when an endpoint pull reports a tunnel assignment change this
+	// worker has not seen: tunnel routes are pulled by the RouteWorker, which would otherwise wait for
+	// its control interval.
+	OnTunnelsChanged func()
+	tunnelsChangedAt string
 	// runtimeSet and endpointSet are the latest runtime and endpoint admissions; only the worker
 	// goroutine touches them. endpointPause stops fast pulls until the next full pull after one
 	// fails (for example on a server that does not serve them yet).
@@ -320,6 +325,12 @@ func (w *RuntimeCarrierWorker) reconcileEndpoints(parent context.Context) (failu
 		w.endpointFullAt = time.Now()
 	}
 	w.endpointCursor = update.Cursor
+	if update.TunnelsChangedAt != "" && update.TunnelsChangedAt != w.tunnelsChangedAt {
+		w.tunnelsChangedAt = update.TunnelsChangedAt
+		if w.OnTunnelsChanged != nil {
+			w.OnTunnelsChanged()
+		}
+	}
 	w.endpointsPulled = true
 	defer w.markPulled()
 	changed := !endpointSetEqual(w.endpointSet, next)

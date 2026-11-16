@@ -181,3 +181,17 @@ SELECT EXISTS(SELECT 1 FROM assignment)`,
 // accept one up to 2 minutes old next to the edge's heartbeat and epoch (preview_routes, migration 188; tunnelv1
 // health projection).
 const ObservationRefresh = time.Minute
+
+// TunnelsChangedAt is the newest change after since to a tunnel assignment of one edge process, or
+// the zero time. The edge compares it with the last value it saw to pull its tunnel routes at once.
+func TunnelsChangedAt(ctx context.Context, q interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}, nodeID, epoch string, since time.Time) (time.Time, error) {
+	var changed *time.Time
+	err := q.QueryRow(ctx, `SELECT max(x.changed_at) FROM endpoint_edge_assignments x JOIN endpoints e ON e.id=x.endpoint_id
+WHERE x.edge_node_id=$1 AND x.edge_process_epoch=$2 AND x.changed_at>$3 AND e.kind='tunnel'`, nodeID, epoch, since).Scan(&changed)
+	if err != nil || changed == nil {
+		return time.Time{}, err
+	}
+	return *changed, nil
+}

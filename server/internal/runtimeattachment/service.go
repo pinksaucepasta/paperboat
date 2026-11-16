@@ -526,6 +526,12 @@ func (s *Service) PullEndpoints(ctx context.Context, edge previewattachment.Prev
 	} else {
 		routes, removed, last, err = endpoints.EdgeAdmissionsChanged(ctx, s.DB.Pool(), edge.NodeID, edge.ProcessEpoch, cursor.Add(-endpointDeltaOverlap), after, expires, endpointPageRows-1)
 		out.RemovedRouteIDs, out.ExpiresAt = removed, &expires
+		if err == nil && page == "" {
+			var changed time.Time
+			if changed, err = endpoints.TunnelsChangedAt(ctx, s.DB.Pool(), edge.NodeID, edge.ProcessEpoch, cursor.Add(-endpointDeltaOverlap)); !changed.IsZero() {
+				out.TunnelsChangedAt = changed.UTC().Format(time.RFC3339Nano)
+			}
+		}
 	}
 	if err != nil {
 		return runtimewire.Snapshot{}, err

@@ -89,6 +89,8 @@ type EndpointUpdate struct {
 	Removed    []string
 	Cursor     string
 	ExpiresAt  time.Time
+	// TunnelsChangedAt is the server's newest tunnel assignment change in a delta answer ("" when none).
+	TunnelsChangedAt string
 }
 
 // EndpointAdmissions pulls the endpoint routes of the edge's runtime snapshot (PLAN 3a), as deltas
@@ -115,6 +117,10 @@ func (c *HTTPClient) EndpointAdmissions(ctx context.Context, nodeID, epoch, sinc
 		}
 		if pages == 0 {
 			update.Complete, update.Cursor = result.Complete, result.Cursor
+			if len(result.TunnelsChangedAt) > 64 {
+				return EndpointUpdate{}, ErrControlUnavailable
+			}
+			update.TunnelsChangedAt = result.TunnelsChangedAt
 		} else if result.Complete != update.Complete {
 			return EndpointUpdate{}, ErrControlUnavailable
 		}

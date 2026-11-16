@@ -205,6 +205,10 @@ type Snapshot struct {
 	Cursor          string             `json:"cursor,omitempty"`
 	RemovedRouteIDs []string           `json:"removed_route_ids,omitempty"`
 	ExpiresAt       *time.Time         `json:"expires_at,omitempty"`
+	// TunnelsChangedAt (first page of a delta answer) is when this edge's newest tunnel assignment
+	// changed within the delta window; tunnel routes are not in Carriers, so the edge pulls its
+	// route snapshot when the value is new to it.
+	TunnelsChangedAt string `json:"tunnels_changed_at,omitempty"`
 }
 
 // ValidEdgeCapabilities accepts what an edge may advertise: nothing, or CapabilityEndpoints with

@@ -351,6 +351,8 @@ type RouteWorker struct {
 	Pulse    <-chan time.Time
 	// Wake runs a reconcile now, at most one per routeWakeGap (a carrier connected).
 	Wake <-chan struct{}
+	// TunnelWake does the same when the endpoint pull saw a tunnel assignment change.
+	TunnelWake <-chan struct{}
 	// NodeReady, when set, holds the accessor admission pull until the server has recorded this
 	// process as ready (NodeWorker.Ready), then reconciles at once: it refuses that pull from an
 	// unready node. Routes themselves do not wait.
@@ -486,13 +488,25 @@ func (w *RouteWorker) run(ctx context.Context) {
 			}
 			w.recordReconcile(ctx, w.reconcile(ctx))
 		case <-w.Wake:
-			w.recordReconcile(ctx, w.reconcile(ctx))
-			select {
-			case <-ctx.Done():
+			if !w.wakeReconcile(ctx) {
 				return
-			case <-time.After(routeWakeGap):
+			}
+		case <-w.TunnelWake:
+			if !w.wakeReconcile(ctx) {
+				return
 			}
 		}
+	}
+}
+
+// wakeReconcile reconciles now and holds off the next wake for routeWakeGap; false once ctx is done.
+func (w *RouteWorker) wakeReconcile(ctx context.Context) bool {
+	w.recordReconcile(ctx, w.reconcile(ctx))
+	select {
+	case <-ctx.Done():
+		return false
+	case <-time.After(routeWakeGap):
+		return true
 	}
 }
 
