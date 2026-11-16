@@ -127,3 +127,47 @@ func TestRefreshRecoveryDeniesInvalidatedSuccessorAndTampering(t *testing.T) {
 		})
 	}
 }
+
+// A client that lost the response and its attempt journal retries the rotated token with a fresh attempt id: inside
+// the reuse interval it gets the same successor; an older successor-rotated token or a later replay revokes.
+func TestRefreshReuseIntervalRedeliversOnlyRecentRotation(t *testing.T) {
+	store, router := newAuthIntegrationRouter(t)
+	cookies := loginCookies(t, router, "workos_refresh_reuse:refresh-reuse@example.com:Refresh Reuse")
+	original := authorizeCLI(t, router, cookies)
+	issued := refreshAttemptTokens(t, refreshAttemptRequest(router, original.RefreshToken, strings.Repeat("a", 64)))
+	again := refreshAttemptTokens(t, refreshAttemptRequest(router, original.RefreshToken, strings.Repeat("c", 64)))
+	if again.AccessToken != issued.AccessToken || again.RefreshToken != issued.RefreshToken || again.CLIClientSessionID != original.CLIClientSessionID {
+		t.Fatal("reuse inside the interval did not re-deliver the stored successor")
+	}
+	if _, err := store.SQL().Exec(`UPDATE paperboat.cli_refresh_tokens SET rotated_at=now()-interval '31 seconds' WHERE state='rotated'`); err != nil {
+		t.Fatal(err)
+	}
+	if response := refreshAttemptRequest(router, original.RefreshToken, strings.Repeat("d", 64)); response.Code != http.StatusUnauthorized {
+		t.Fatalf("replay after the interval status=%d", response.Code)
+	}
+	var state string
+	if err := store.SQL().QueryRow(`SELECT state FROM paperboat.cli_client_sessions WHERE id=$1`, original.CLIClientSessionID).Scan(&state); err != nil {
+		t.Fatal(err)
+	}
+	if state != "revoked" {
+		t.Fatalf("replay after the interval left session %s", state)
+	}
+}
+
+func TestRefreshReuseIntervalRevokesSupersededSuccessor(t *testing.T) {
+	store, router := newAuthIntegrationRouter(t)
+	cookies := loginCookies(t, router, "workos_refresh_reuse2:refresh-reuse2@example.com:Refresh Reuse")
+	original := authorizeCLI(t, router, cookies)
+	issued := refreshAttemptTokens(t, refreshAttemptRequest(router, original.RefreshToken, strings.Repeat("a", 64)))
+	refreshAttemptTokens(t, refreshAttemptRequest(router, issued.RefreshToken, strings.Repeat("b", 64)))
+	if response := refreshAttemptRequest(router, original.RefreshToken, strings.Repeat("c", 64)); response.Code != http.StatusUnauthorized {
+		t.Fatalf("reuse of an older token status=%d", response.Code)
+	}
+	var state string
+	if err := store.SQL().QueryRow(`SELECT state FROM paperboat.cli_client_sessions WHERE id=$1`, original.CLIClientSessionID).Scan(&state); err != nil {
+		t.Fatal(err)
+	}
+	if state != "revoked" {
+		t.Fatalf("reuse of an older token left session %s", state)
+	}
+}

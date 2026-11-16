@@ -100,7 +100,14 @@ func (s ProfileStore) prepareRefreshAttempt(p Profile, credential Credential, at
 		}
 	}
 	if attempt.State == "prepared" {
-		if err := s.Secrets.Set(attempt.SecretRef, credential.RefreshToken); err != nil {
+		// Back up the refresh token read now that the journal is on disk, not the copy read before it: a holder that
+		// rotated and committed in between (a stolen lock) would otherwise leave a consumed token paired with a fresh
+		// attempt id, which the server treats as replay and revokes the session.
+		current, err := s.Secrets.Get(p.RefreshSecretRef)
+		if err != nil {
+			return refreshAttempt{}, Credential{}, err
+		}
+		if err := s.Secrets.Set(attempt.SecretRef, current); err != nil {
 			return refreshAttempt{}, Credential{}, err
 		}
 		attempt.State = "ready"

@@ -16,6 +16,8 @@ const sharedLockRemoteStaleAfter = 30 * time.Minute
 // budget before reclaiming an empty directory left by an interrupted process.
 const sharedLockOwnerlessStaleAfter = 30 * time.Second
 
+const sharedLockWait = 60 * time.Second
+
 // processStartSlack covers the coarse (one second) process start times some platforms report.
 const processStartSlack = 2 * time.Second
 
@@ -70,7 +72,8 @@ func (l *sharedLock) Lock() error {
 	if err != nil {
 		return safeConfigCause("shared credential lock owner could not be encoded", err)
 	}
-	deadline := time.Now().Add(30 * time.Second)
+	// Longer than a holder's 30 s refresh request plus its keychain writes, so waiters outlast a slow holder.
+	deadline := time.Now().Add(sharedLockWait)
 	var lastOwnerErr error
 	var invalidSince time.Time // since when every inspection of the other process's lock directory failed
 	for {

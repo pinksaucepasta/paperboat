@@ -38,23 +38,31 @@ func (s *DeviceService) storeRefreshTokens(ctx context.Context, tx *db.Tx, token
 	return err
 }
 
+// refreshReuseInterval lets the just-rotated refresh token be presented again with a different attempt id (a client
+// that lost the response together with its attempt journal, or two processes racing past a broken lock) and get the
+// same stored successor instead of revoking the session. Later replays still revoke. Prior art: Okta's rotation grace
+// period (default 30 s, max 60 s), Auth0's reuse interval (only the most recently superseded token), RFC 9700 4.14.2.
+const refreshReuseInterval = 30 * time.Second
+
 // The caller holds the original refresh token and session locks. Recovery never
 // rotates again, extends expiry or resurrects a revoked account/session/token.
 func (s *DeviceService) recoverRefreshTokens(ctx context.Context, tx *db.Tx, tokenHash, sessionID, attempt string) (TokenSet, bool, error) {
 	var ciphertext []byte
 	var attemptHash, storedSession string
 	var accessExpiry, expiry time.Time
-	err := tx.QueryRow(ctx, `SELECT attempt_hash,cli_client_session_id,response_ciphertext,access_expires_at,expires_at FROM client_refresh_redemptions WHERE token_hash=$1`, tokenHash).Scan(&attemptHash, &storedSession, &ciphertext, &accessExpiry, &expiry)
+	var rotatedAt *time.Time
+	err := tx.QueryRow(ctx, `SELECT r.attempt_hash,r.cli_client_session_id,r.response_ciphertext,r.access_expires_at,r.expires_at,rt.rotated_at FROM client_refresh_redemptions r JOIN cli_refresh_tokens rt ON rt.token_hash=r.token_hash WHERE r.token_hash=$1`, tokenHash).Scan(&attemptHash, &storedSession, &ciphertext, &accessExpiry, &expiry, &rotatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return TokenSet{}, false, nil
 	}
 	if err != nil {
 		return TokenSet{}, false, err
 	}
-	if !s.matchesHash(attemptHash, "refresh-attempt:"+attempt) {
+	now := s.now()
+	exact := s.matchesHash(attemptHash, "refresh-attempt:"+attempt)
+	if !exact && (rotatedAt == nil || now.Sub(*rotatedAt) >= refreshReuseInterval) {
 		return TokenSet{}, false, nil
 	}
-	now := s.now()
 	if storedSession != sessionID || !now.Before(expiry) {
 		return TokenSet{}, true, ErrUnauthenticated
 	}
@@ -75,6 +83,9 @@ func (s *DeviceService) recoverRefreshTokens(ctx context.Context, tx *db.Tx, tok
 	err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM cli_client_sessions cs JOIN users u ON u.id=cs.user_id JOIN cli_refresh_tokens rt ON rt.cli_client_session_id=cs.id WHERE cs.id=$1 AND cs.state='active' AND u.status='active' AND rt.token_hash=ANY(string_to_array($2,' ')) AND rt.state='active' AND rt.expires_at>$3)`, sessionID, s.hashList(out.RefreshToken), now).Scan(&active)
 	if err != nil {
 		return TokenSet{}, true, err
+	}
+	if !active && !exact {
+		return TokenSet{}, false, nil // only the most recently superseded token is reusable; an older one is a replay
 	}
 	if !active {
 		return TokenSet{}, true, ErrUnauthenticated

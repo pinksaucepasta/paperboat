@@ -86,6 +86,10 @@ func TestDeviceAuthorizationApprovalBearerRefreshAndReplay(t *testing.T) {
 	}
 
 	refreshed := refreshDevice(t, router, tokens.RefreshToken, http.StatusOK)
+	// Past the reuse interval a replay of the rotated token revokes the family.
+	if _, err := store.SQL().Exec(`UPDATE paperboat.cli_refresh_tokens SET rotated_at=now()-interval '1 minute' WHERE state='rotated'`); err != nil {
+		t.Fatal(err)
+	}
 	refreshDevice(t, router, tokens.RefreshToken, http.StatusUnauthorized)
 	revoked := httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodGet, "/v1/auth/cli-client-sessions", nil)
