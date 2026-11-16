@@ -10,7 +10,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -171,42 +170,16 @@ type localAccessTunnelClient struct {
 }
 
 func newProductionAccessTunnelRuntime() (accessTunnelRuntime, error) {
-	stateRoot, err := previewRuntimeStateRoot()
+	listen, token, err := readLocalRuntimeEndpoint()
 	if err != nil {
 		return nil, accessTunnelFailure(ErrAccessTunnelUnavailable, err)
 	}
-	descriptor, err := readOwnerOnlyFile(filepath.Join(stateRoot, "runtime", "worker-local.json"), 4096)
+	endpoint, err := url.Parse("http://" + listen)
 	if err != nil {
 		return nil, accessTunnelFailure(ErrAccessTunnelUnavailable, err)
-	}
-	var local struct {
-		Schema        string `json:"schema"`
-		ListenAddress string `json:"listen_address"`
-	}
-	decoder := json.NewDecoder(bytes.NewReader(descriptor))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&local); err != nil {
-		return nil, accessTunnelFailure(ErrAccessTunnelUnavailable, err)
-	}
-	if err := decoder.Decode(&struct{}{}); err != io.EOF || local.Schema != "paperboat.worker-local/v1" {
-		if err != nil && err != io.EOF {
-			return nil, accessTunnelFailure(ErrAccessTunnelUnavailable, err)
-		}
-		return nil, ErrAccessTunnelUnavailable
-	}
-	endpoint, err := url.Parse("http://" + local.ListenAddress)
-	if err != nil || endpoint.Hostname() != "127.0.0.1" && endpoint.Hostname() != "::1" || endpoint.Port() == "" {
-		return nil, accessTunnelFailure(ErrAccessTunnelUnavailable, err)
-	}
-	token, err := readOwnerOnlyFile(filepath.Join(stateRoot, "runtime", "local-control-token"), 1024)
-	if err != nil {
-		return nil, accessTunnelFailure(ErrAccessTunnelUnavailable, err)
-	}
-	if strings.TrimSpace(string(token)) == "" || len(token) > 1024 {
-		return nil, ErrAccessTunnelUnavailable
 	}
 	client := &http.Client{Timeout: 15 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return ErrAccessTunnelInvalid }}
-	return &localAccessTunnelClient{base: endpoint, token: strings.TrimSpace(string(token)), client: client}, nil
+	return &localAccessTunnelClient{base: endpoint, token: token, client: client}, nil
 }
 
 func (c *localAccessTunnelClient) Start(ctx context.Context, selector, listen string) (accessTunnelSession, error) {

@@ -198,7 +198,11 @@ func runAccessMachine(command *cobra.Command, args []string) error {
 	if err = tunnelOutput(command, result, human); err != nil {
 		return errors.Join(err, proxy.Close(), runtime.Close())
 	}
-	return errors.Join(proxy.Wait(), proxy.Close(), runtime.Close())
+	if err := errors.Join(proxy.Wait(), proxy.Close(), runtime.Close()); err != nil {
+		return err
+	}
+	// Ctrl-C ends the session as a cancellation (exit 130), as `pb access tunnel` does; a cleanup failure outranks it.
+	return command.Context().Err()
 }
 
 // A just-started service is reachable only once the daemon publishes its forward. Wait on the

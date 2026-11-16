@@ -169,13 +169,29 @@ func previewRuntimeStateRoot() (string, error) {
 }
 
 func newProductionPreviewOwnerSessionClient() (*preview.LocalOwnerSessionClient, error) {
-	stateRoot, err := previewRuntimeStateRoot()
+	listen, token, err := readLocalRuntimeEndpoint()
 	if err != nil {
 		return nil, previewFailure(ErrPreviewOwnerSessionUnavailable.Error(), ErrPreviewOwnerSessionUnavailable, err)
 	}
-	data, err := readOwnerOnlyFile(filepath.Join(stateRoot, "runtime", "worker-local.json"), 4096)
+	client, err := preview.NewLocalOwnerSessionClient("http://"+listen, token, nil)
 	if err != nil {
 		return nil, previewFailure(ErrPreviewOwnerSessionUnavailable.Error(), ErrPreviewOwnerSessionUnavailable, err)
+	}
+	return client, nil
+}
+
+var errLocalRuntimeDescriptorInvalid = errors.New("local runtime descriptor is invalid")
+
+// readLocalRuntimeEndpoint reads the running hostd's loopback control address and token, the one way preview owner
+// sessions and private tunnel access reach it.
+func readLocalRuntimeEndpoint() (listenAddress, token string, err error) {
+	stateRoot, err := previewRuntimeStateRoot()
+	if err != nil {
+		return "", "", err
+	}
+	data, err := readOwnerOnlyFile(filepath.Join(stateRoot, "runtime", "worker-local.json"), 4096)
+	if err != nil {
+		return "", "", err
 	}
 	var local struct {
 		Schema        string `json:"schema"`
@@ -184,30 +200,26 @@ func newProductionPreviewOwnerSessionClient() (*preview.LocalOwnerSessionClient,
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&local); err != nil {
-		return nil, previewFailure(ErrPreviewOwnerSessionUnavailable.Error(), ErrPreviewOwnerSessionUnavailable, err)
+		return "", "", err
 	}
-	var extra any
-	if err := decoder.Decode(&extra); err != io.EOF || local.Schema != "paperboat.worker-local/v1" {
-		return nil, previewFailure(ErrPreviewOwnerSessionUnavailable.Error(), ErrPreviewOwnerSessionUnavailable, err)
+	if err := decoder.Decode(&struct{}{}); err != io.EOF || local.Schema != "paperboat.worker-local/v1" {
+		return "", "", errors.Join(errLocalRuntimeDescriptorInvalid, err)
 	}
-	host, portText, err := net.SplitHostPort(strings.TrimSpace(local.ListenAddress))
+	host, portText, err := net.SplitHostPort(local.ListenAddress)
 	if err != nil || (host != "127.0.0.1" && host != "::1") {
-		return nil, previewFailure(ErrPreviewOwnerSessionUnavailable.Error(), ErrPreviewOwnerSessionUnavailable, err)
+		return "", "", errors.Join(errLocalRuntimeDescriptorInvalid, err)
 	}
-	port, err := strconv.ParseUint(portText, 10, 16)
-	if err != nil || port == 0 {
-		return nil, previewFailure(ErrPreviewOwnerSessionUnavailable.Error(), ErrPreviewOwnerSessionUnavailable, err)
+	if port, err := strconv.ParseUint(portText, 10, 16); err != nil || port == 0 {
+		return "", "", errors.Join(errLocalRuntimeDescriptorInvalid, err)
 	}
-	token, err := readOwnerOnlyFile(filepath.Join(stateRoot, "runtime", "local-control-token"), 1024)
+	raw, err := readOwnerOnlyFile(filepath.Join(stateRoot, "runtime", "local-control-token"), 1024)
 	if err != nil {
-		return nil, previewFailure(ErrPreviewOwnerSessionUnavailable.Error(), ErrPreviewOwnerSessionUnavailable, err)
+		return "", "", err
 	}
-	if strings.TrimSpace(string(token)) == "" {
-		return nil, previewFailure(ErrPreviewOwnerSessionUnavailable.Error(), ErrPreviewOwnerSessionUnavailable)
+	token = strings.TrimSpace(string(raw))
+	clear(raw)
+	if token == "" {
+		return "", "", errLocalRuntimeDescriptorInvalid
 	}
-	client, err := preview.NewLocalOwnerSessionClient("http://"+local.ListenAddress, strings.TrimSpace(string(token)), nil)
-	if err != nil {
-		return nil, previewFailure(ErrPreviewOwnerSessionUnavailable.Error(), ErrPreviewOwnerSessionUnavailable, err)
-	}
-	return client, nil
+	return local.ListenAddress, token, nil
 }

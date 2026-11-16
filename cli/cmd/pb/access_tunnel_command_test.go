@@ -375,3 +375,29 @@ func TestAccessTunnelHeartbeatIntervalLeavesTwoMissedBeatsBeforeTheTTL(t *testin
 		t.Fatalf("interval %v and TTL %v: a live command could be reaped after one missed beat", preview.PrivateTCPAccessHeartbeatInterval, preview.PrivateTCPAccessHeartbeatTTL)
 	}
 }
+
+// Preview owner sessions and private tunnel access read hostd's endpoint with one loader; the access copy once
+// accepted port 0, which the preview copy refused.
+func TestLocalRuntimeEndpointIsReadOneWayForPreviewAndAccess(t *testing.T) {
+	for _, test := range []struct {
+		listen string
+		valid  bool
+	}{{"127.0.0.1:1234", true}, {"[::1]:1234", true}, {"127.0.0.1:0", false}, {"10.0.0.1:1234", false}} {
+		stateRoot := t.TempDir()
+		runtimeDir := filepath.Join(stateRoot, "runtime")
+		if err := os.MkdirAll(runtimeDir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		atomicfiletest.WriteOwnerOnly(t, filepath.Join(runtimeDir, "worker-local.json"), []byte(`{"schema":"paperboat.worker-local/v1","listen_address":"`+test.listen+`"}`))
+		atomicfiletest.WriteOwnerOnly(t, filepath.Join(runtimeDir, "local-control-token"), []byte("local-token\n"))
+		t.Setenv("PAPERBOAT_RUNTIME_STATE_ROOT", stateRoot)
+		_, accessErr := newProductionAccessTunnelRuntime()
+		_, previewErr := newProductionPreviewOwnerSessionClient()
+		if test.valid && (accessErr != nil || previewErr != nil) {
+			t.Fatalf("%s: access=%v preview=%v", test.listen, accessErr, previewErr)
+		}
+		if !test.valid && (!errors.Is(accessErr, ErrAccessTunnelUnavailable) || !errors.Is(previewErr, ErrPreviewOwnerSessionUnavailable)) {
+			t.Fatalf("%s accepted: access=%v preview=%v", test.listen, accessErr, previewErr)
+		}
+	}
+}

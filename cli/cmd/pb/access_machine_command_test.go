@@ -143,8 +143,8 @@ func TestAccessMachineForwardsFreshAuthorizedFlowsAndHalfClose(t *testing.T) {
 	cancel()
 	select {
 	case err = <-result:
-		if err != nil {
-			t.Fatalf("command exit: %v", err)
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("command exit: %v, want cancellation (exit 130) like pb access tunnel", err)
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("command ignored cancellation")
@@ -224,7 +224,7 @@ func TestAccessMachineJSONOutputIsBoundedPublicState(t *testing.T) {
 	cancel()
 	select {
 	case err := <-done:
-		if err != nil {
+		if !errors.Is(err, context.Canceled) {
 			t.Fatal(err)
 		}
 	case <-time.After(5 * time.Second):
