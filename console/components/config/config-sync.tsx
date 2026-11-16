@@ -3,7 +3,7 @@
 import { ArrowsClockwiseIcon, CaretRightIcon, WarningCircleIcon } from "@phosphor-icons/react"
 import Link from "next/link"
 import { useDeferredValue, useState } from "react"
-import { useApiQuery, type Machine } from "@/lib/api"
+import { useApiQuery, useWorkspace, type Machine } from "@/lib/api"
 import { cursorPageSize } from "@/lib/cursor-pages"
 import { usePageParam } from "@/lib/use-page-param"
 import { ListPager } from "@/components/list-pager"
@@ -44,6 +44,8 @@ export function MachineConfigSync() {
  */
 export function ConfigSync({ machine: tabMachine }: { machine?: Machine }) {
   const { scope, machine } = useListScope(tabMachine)
+  // Your GitHub account and repositories belong to Personal; a team shows its own default instead.
+  const personal = useWorkspace()?.kind !== "team"
   const [search, setSearch] = useState("")
   const q = useDeferredValue(search.trim())
   const pages = usePageParam(`${q}|${scope ?? ""}`)
@@ -76,8 +78,12 @@ export function ConfigSync({ machine: tabMachine }: { machine?: Machine }) {
   }
   return (
     <div className="flex flex-col gap-10">
-      <GitHubConnection />
-      <ConfigRepositories />
+      {personal && (
+        <>
+          <GitHubConnection />
+          <ConfigRepositories />
+        </>
+      )}
       <TeamConfigDefaults />
       {status.isPending || status.data.total || q || idle.data?.total ? (
         <AllMachines

@@ -59,6 +59,18 @@
     )
   }
 
+  // GitHub is only the account link; repositories (and "+ Connect") are their own section; a Personal
+  // workspace has no team default.
+  const workspaces = await get("workspaces")
+  const team = document.cookie.match(/pb-workspace=([a-z0-9-]+)/)?.[1] ?? "personal"
+  const isPersonal = (workspaces?.items ?? []).find((w) => w.id === team)?.kind !== "team"
+  const pageText = main()?.innerText ?? ""
+  if (isPersonal) {
+    pass("GitHub block names the account, not a repository", !/config in /.test(pageText))
+    pass("Repositories section has a Connect button", /Repositories/.test(pageText) && /Connect/.test(pageText))
+    pass("a Personal workspace shows no team default", !/Team default/.test(pageText))
+  } else pass("a team workspace shows its team default", /Team default/.test(pageText) && !/GitHub account/.test(pageText))
+
   // The table lists the machines that sync; the ones that don't are folded under "Not syncing".
   const status = await get("config-sync/status?limit=200&state=configured")
   const idle = await get("config-sync/status?limit=1&state=disabled")

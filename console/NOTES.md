@@ -387,6 +387,12 @@ their reasons. By decision, conflicts are only reported; they're resolved on the
 `reason` and `recovery_actions` values aren't enumerated in the OpenAPI document, so the console
 shows them humanized (`changed_both_sides` → "Changed both sides").
 
+Layout (2026-11-16): the GitHub block is only the account link; repositories (any Git URL, GitHub ones
+pickable once linked) are their own list; "Team default" shows only in a team workspace. Gaps for
+FEAT-CONFIGREPOS: `ConfigRepository` has no machine count or default/assignment state (so no "used by N
+machines" yet), the machine table's `source` (machine or tag rule), tag → repository rules, and team-connected
+repositories (admins can remove a team default here but not yet pick one).
+
 ## Domains page
 
 Workspace domains (`lib/workspace-domains.ts`, `components/domains/`), on `GET/POST /v1/domains`,

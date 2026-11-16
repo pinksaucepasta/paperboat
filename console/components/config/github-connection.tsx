@@ -12,8 +12,8 @@ import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 
 /**
- * Your GitHub connection, which config sync uses to read and write your config repository:
- * connect (GitHub returns to /github/done and back here) or disconnect.
+ * Your GitHub account link, which lets you pick your GitHub repositories under Repositories:
+ * connect (GitHub returns to /github/done and back here) or disconnect. It names no repository.
  */
 export function GitHubConnection() {
   const queryClient = useQueryClient()
@@ -26,10 +26,9 @@ export function GitHubConnection() {
   if (!githubLive) return null
   if (status.isPending)
     return (
-      // The connected row (the usual case), its words as they are and the account and repository as
-      // placeholders; on a phone it wraps like the loaded line.
+      // The connected row (the usual case), its words as they are and the account as a placeholder.
       <Section
-        title="GitHub"
+        title="GitHub account"
         action={
           <Button variant="outline" size="lg" tabIndex={-1} aria-hidden className="pointer-events-none">
             Disconnect
@@ -40,10 +39,6 @@ export function GitHubConnection() {
           <Skeleton className="size-6 shrink-0 rounded-full" />
           <span>
             Connected as <Skeleton className="inline-block h-3 w-20 align-middle" />
-            <span className="text-muted-foreground">
-              {" "}
-              · config in <Skeleton className="inline-block h-3 w-40 align-middle" />
-            </span>
           </span>
         </div>
       </Section>
@@ -52,7 +47,7 @@ export function GitHubConnection() {
   const data = status.data
   return (
     <Section
-      title="GitHub"
+      title="GitHub account"
       action={
         data.connected ? (
           <Button variant="outline" size="lg" onClick={() => setDisconnecting(true)}>
@@ -75,17 +70,11 @@ export function GitHubConnection() {
             </Avatar>
             <span>
               Connected as <span className="font-medium">{data.login}</span>
-              {data.config_repo_name && (
-                <span className="text-muted-foreground">
-                  {" "}
-                  · config in {data.config_repo_owner}/{data.config_repo_name}
-                </span>
-              )}
             </span>
           </>
         ) : (
           <span className="text-muted-foreground">
-            Connect GitHub to keep your config files in a private repository.
+            Connect GitHub to pick your private repositories.
           </span>
         )}
       </div>
@@ -97,7 +86,7 @@ export function GitHubConnection() {
         open={disconnecting}
         onOpenChange={setDisconnecting}
         title="Disconnect GitHub?"
-        description="Machines stop syncing until you reconnect GitHub. Your repository stays. You can also revoke Paperboat in GitHub → Settings → Applications."
+        description="Machines using your GitHub repositories stop syncing until you reconnect. The repositories stay. You can also revoke Paperboat in GitHub → Settings → Applications."
         action="Disconnect"
         pending="Disconnecting…"
         mutation={{

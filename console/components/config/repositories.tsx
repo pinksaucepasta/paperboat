@@ -3,9 +3,10 @@
 import { PlusIcon } from "@phosphor-icons/react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
-import { useApiQuery, workspacesQuery } from "@/lib/api"
+import { useApiQuery, useWorkspace } from "@/lib/api"
 import {
   adoptTeamDefault,
+  clearTeamConfigDefault,
   configAdoptionQuery,
   configRepositoriesPageSize,
   configRepositoriesQuery,
@@ -16,6 +17,7 @@ import {
   unadoptTeamDefault,
   type ConfigRepository,
 } from "@/lib/config-sync"
+import { githubStatusQuery } from "@/lib/github"
 import { usePageParam } from "@/lib/use-page-param"
 import { ListPager } from "@/components/list-pager"
 import { LoadError } from "@/components/load-error"
@@ -59,7 +61,9 @@ export function ConfigRepositories() {
           <div key={repository.id} className="flex min-h-12 items-center justify-between gap-4 border-b border-divider text-sm">
             <div className="flex min-w-0 flex-col">
               <span className="truncate font-medium">{repository.display_name || repository.external_ref}</span>
-              {repository.provider !== "github" && (
+              {repository.provider === "github" ? (
+                <span className="truncate text-xs text-muted-foreground">GitHub</span>
+              ) : (
                 <span className="truncate font-mono text-xs text-muted-foreground">{repository.external_ref}</span>
               )}
             </div>
@@ -93,7 +97,10 @@ export function ConfigRepositories() {
 
 function ConnectDialog({ onClose }: { onClose: () => void }) {
   const queryClient = useQueryClient()
-  const [source, setSource] = useState<"github" | "git">("github")
+  // GitHub repositories can be picked once your GitHub account is linked; any Git URL always works.
+  const linked = useApiQuery(githubStatusQuery).data?.connected === true
+  const [chosen, setSource] = useState<"github" | "git">("github")
+  const source = linked ? chosen : "git"
   const done = () => {
     void queryClient.invalidateQueries({ queryKey: ["config-sync"] })
     onClose()
@@ -102,16 +109,18 @@ function ConnectDialog({ onClose }: { onClose: () => void }) {
     <Dialog open onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="gap-4 sm:max-w-md">
         <DialogTitle>Connect a repository</DialogTitle>
-        <ToggleGroup
-          value={[source]}
-          onValueChange={(value) => value[0] && setSource(value[0] as "github" | "git")}
-          variant="outline"
-          spacing={0}
-          className="self-start"
-        >
-          <ToggleGroupItem value="github">GitHub</ToggleGroupItem>
-          <ToggleGroupItem value="git">Git URL</ToggleGroupItem>
-        </ToggleGroup>
+        {linked && (
+          <ToggleGroup
+            value={[source]}
+            onValueChange={(value) => value[0] && setSource(value[0] as "github" | "git")}
+            variant="outline"
+            spacing={0}
+            className="self-start"
+          >
+            <ToggleGroupItem value="github">GitHub</ToggleGroupItem>
+            <ToggleGroupItem value="git">Git URL</ToggleGroupItem>
+          </ToggleGroup>
+        )}
         {source === "github" ? <GitHubPicker onDone={done} /> : <GitUrlForm onDone={done} onCancel={onClose} />}
       </DialogContent>
     </Dialog>
@@ -220,16 +229,21 @@ function GitUrlForm({ onDone, onCancel }: { onDone: () => void; onCancel: () => 
   )
 }
 
-/** Teams that set a default config repository: use it on all your machines, or stop. */
+/**
+ * The selected team's default config repository: members use it on all their machines or stop;
+ * owners and admins can remove it. Nothing in a Personal workspace.
+ */
 export function TeamConfigDefaults() {
-  const teams = (useApiQuery(workspacesQuery).data ?? []).filter((workspace) => workspace.kind === "team")
+  const team = useWorkspace()
   const adoption = useApiQuery(configAdoptionQuery)
-  if (teams.length === 0) return null
+  if (!team || team.kind !== "team") return null
   return (
-    <Section title="Team defaults">
-      {teams.map((team) => (
-        <TeamDefaultRow key={team.id} team={team} adoptedTeam={adoption.data?.team_id} adoptedVersion={adoption.data?.adopted_version} />
-      ))}
+    <Section title="Team default">
+      <TeamDefaultRow
+        team={team}
+        adoptedTeam={adoption.data?.team_id}
+        adoptedVersion={adoption.data?.adopted_version}
+      />
     </Section>
   )
 }
@@ -239,34 +253,43 @@ function TeamDefaultRow({
   adoptedTeam,
   adoptedVersion,
 }: {
-  team: { id: string; name: string }
+  team: { id: string; name: string; role: string }
   adoptedTeam?: string
   adoptedVersion?: number
 }) {
   const queryClient = useQueryClient()
   const query = useQuery(teamConfigDefaultQuery(team.id))
   const [asking, setAsking] = useState(false)
+  const [clearing, setClearing] = useState(false)
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["config-sync"] })
+  if (query.isPending) return <Skeleton className="my-3 h-4 w-48" />
   // A team without a default answers "unavailable", the same as one you may not read.
-  if (!query.data) return null
+  if (!query.data) return <p className="border-b border-divider py-3 text-sm text-muted-foreground">No default repository.</p>
   const using = adoptedTeam === team.id
   const stale = using && adoptedVersion !== query.data.version
+  const manage = team.role === "owner" || team.role === "admin"
   return (
     <div className="flex min-h-14 items-center justify-between gap-4 border-b border-divider text-sm">
       <div className="flex min-w-0 flex-col">
-        <span className="truncate font-medium">{team.name}</span>
+        <span className="truncate font-medium">{query.data.display_name}</span>
         <span className="truncate text-muted-foreground">
-          {query.data.display_name}
-          {using && (stale ? " · newer default available" : " · in use")}
+          {using ? (stale ? "Newer default available" : "In use on your machines") : "Not in use on your machines"}
         </span>
       </div>
-      {using && !stale ? (
-        <ConfirmUnadopt onDone={refresh} />
-      ) : (
-        <Button variant="outline" size="sm" onClick={() => setAsking(true)}>
-          {stale ? "Update" : "Use"}
-        </Button>
-      )}
+      <div className="flex shrink-0 gap-2">
+        {using && !stale ? (
+          <ConfirmUnadopt onDone={refresh} />
+        ) : (
+          <Button variant="outline" size="sm" onClick={() => setAsking(true)}>
+            {stale ? "Update" : "Use"}
+          </Button>
+        )}
+        {manage && (
+          <Button variant="outline" size="sm" onClick={() => setClearing(true)}>
+            Remove default
+          </Button>
+        )}
+      </div>
       {asking && (
         <ConfirmAction
           open
@@ -276,6 +299,17 @@ function TeamDefaultRow({
           action="Use default"
           pending="Applying…"
           mutation={{ mutationFn: () => adoptTeamDefault(team.id, query.data.version), onSuccess: refresh }}
+        />
+      )}
+      {clearing && (
+        <ConfirmAction
+          open
+          onOpenChange={(open) => !open && setClearing(false)}
+          title={`Remove ${team.name}'s default repository?`}
+          description="Machines already using it keep their current config setup."
+          action="Remove default"
+          pending="Removing…"
+          mutation={{ mutationFn: () => clearTeamConfigDefault(team.id, query.data.version), onSuccess: refresh }}
         />
       )}
     </div>
