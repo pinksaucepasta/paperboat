@@ -1348,21 +1348,23 @@ func TestOwnerOfflinePreviewWithNoCarrierAnswersTheOfflinePage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	serve := func(host string) *httptest.ResponseRecorder {
+	serve := func(host string, navigate bool) *httptest.ResponseRecorder {
 		recorder := httptest.NewRecorder()
 		request := httptest.NewRequest(http.MethodGet, "/", nil)
 		request.Host = host
-		// A browser navigation without a session: the offline page, not a sign-in redirect.
-		request.Header.Set("Sec-Fetch-Mode", "navigate")
-		request.Header.Set("Sec-Fetch-Dest", "document")
+		if navigate { // a browser navigation without a session
+			request.Header.Set("Sec-Fetch-Mode", "navigate")
+			request.Header.Set("Sec-Fetch-Dest", "document")
+		}
 		policy.ServeHTTP(recorder, request)
 		return recorder
 	}
-	got := serve("app.preview.example.test")
+	// The offline page, not a sign-in redirect, for a browser visitor too.
+	got := serve("app.preview.example.test", true)
 	if got.Code != http.StatusServiceUnavailable || got.Header().Get("X-Paperboat-Error") != "preview_owner_offline" || !strings.Contains(got.Body.String(), "offline or asleep") || !strings.Contains(got.Body.String(), "same URL") {
 		t.Fatalf("owner-offline preview: status %d %q body %q", got.Code, got.Header().Get("X-Paperboat-Error"), got.Body.String())
 	}
-	if unknown := serve("gone.preview.example.test"); unknown.Code != http.StatusNotFound {
+	if unknown := serve("gone.preview.example.test", false); unknown.Code != http.StatusNotFound {
 		t.Fatalf("a name that is not listed: status %d", unknown.Code)
 	}
 }
