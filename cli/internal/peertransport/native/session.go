@@ -520,6 +520,11 @@ func closeSendSide(stream *quic.Stream) error {
 
 func (c *streamConn) CloseWrite() error { return closeSendSide(c.Stream) }
 
+// Close closes both directions. quic-go's Stream.Close sends only the FIN: bytes the peer had already sent stayed unread
+// in the stream and held the shared association's connection window, so after 10 terminals were closed mid-burst every
+// other terminal and new viewer on that peer stalled (F21-164). CancelRead returns that credit and stops the sender.
+func (c *streamConn) Close() error { c.Stream.CancelRead(0); return closeSendSide(c.Stream) }
+
 type routedConn struct {
 	*peerquic.RoutedStream
 	session       *Session
@@ -610,6 +615,10 @@ func (c *limitedConn) CloseWrite() error {
 func (c *routedConn) LocalAddr() net.Addr  { return c.local }
 func (c *routedConn) RemoteAddr() net.Addr { return c.remote }
 func (c *routedConn) CloseWrite() error    { return closeSendSide(c.RoutedStream.Stream) }
+func (c *routedConn) Close() error {
+	c.RoutedStream.Stream.CancelRead(0) // see streamConn.Close
+	return closeSendSide(c.RoutedStream.Stream)
+}
 
 var _ net.Conn = (*streamConn)(nil)
 var _ net.Conn = (*routedConn)(nil)

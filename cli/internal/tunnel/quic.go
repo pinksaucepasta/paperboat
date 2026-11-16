@@ -392,6 +392,9 @@ func (c *nativeMessageConnection) Close() error {
 			if graceful, ok := stream.(interface{ WaitWriteClosed(context.Context) error }); ok {
 				_ = graceful.WaitWriteClosed(closeCtx)
 			}
+			// Also stop reading: the host's unread output on a FIN-only stream held the peer's shared QUIC
+			// connection window, and 10 terminals closed mid-burst stalled every other one (F21-164).
+			_ = stream.Close()
 		}
 		c.cancel()
 		_ = c.connection.Close()
