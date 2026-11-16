@@ -95,12 +95,13 @@ type Hub struct {
 	wait     WaitFunc
 	fallback time.Duration
 
-	mu       sync.Mutex
-	subs     map[Topic][]*Subscription
-	known    map[Topic]int64
-	healthy  bool
-	lastPush time.Time     // nonzero for locally forwarded events; health expires if the worker stops
-	changed  chan struct{} // closed and replaced when a topic is first subscribed
+	mu            sync.Mutex
+	subs          map[Topic][]*Subscription
+	known         map[Topic]int64
+	healthy       bool
+	invalidations uint64        // wakes without a topic generation change (401 or recovery)
+	lastPush      time.Time     // nonzero for locally forwarded events; health expires if the worker stops
+	changed       chan struct{} // closed and replaced when a topic is first subscribed
 	// recovered gets one token each time the wait loop succeeds again after failing: the control plane is
 	// reachable again. One consumer: the offline audit uploader.
 	recovered chan struct{}
@@ -292,6 +293,7 @@ func (h *Hub) snapshot() (map[Topic]int64, <-chan struct{}) {
 func (h *Hub) wakeAll() {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	h.invalidations++
 	for _, subs := range h.subs {
 		for _, sub := range subs {
 			sub.notify()

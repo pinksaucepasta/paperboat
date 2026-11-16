@@ -52,7 +52,11 @@ func TestWorkerForwardsDaemonTopicsFromSingleWait(t *testing.T) {
 	refuse.Store(true)
 	plane.Publish(machineevents.TopicRecipe)
 	deadline := time.Now().Add(3 * time.Second)
-	for hub.Generations()[machineevents.TopicRecipe] < 2 {
+	for {
+		known, _ := hub.Generations()
+		if known[machineevents.TopicRecipe] >= 2 {
+			break
+		}
 		if time.Now().After(deadline) {
 			t.Fatal("worker did not see recipe change")
 		}

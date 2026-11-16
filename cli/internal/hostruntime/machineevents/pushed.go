@@ -37,8 +37,14 @@ func (h *Hub) Push(topics []Topic, healthy bool) {
 	}
 }
 
-// Generations snapshots the worker's observed topic cursors for local fan-out.
-func (h *Hub) Generations() map[Topic]int64 {
-	known, _ := h.snapshot()
-	return known
+// Generations snapshots topic cursors and the serial of cursor-free invalidations
+// atomically, so local delivery neither loses recovery wakes nor repeats topic wakes.
+func (h *Hub) Generations() (map[Topic]int64, uint64) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	known := make(map[Topic]int64, len(h.known))
+	for topic, generation := range h.known {
+		known[topic] = generation
+	}
+	return known, h.invalidations
 }

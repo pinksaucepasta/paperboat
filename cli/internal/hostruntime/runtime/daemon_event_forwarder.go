@@ -44,10 +44,9 @@ func (f *daemonEventForwarder) Start(ctx context.Context) error {
 		ticker := time.NewTicker(30 * time.Second)
 		defer ticker.Stop()
 		sent := make(map[machineevents.Topic]int64)
-		wake := false
-		retry := false
+		var invalidations uint64
 		for {
-			known := f.hub.Generations()
+			known, currentInvalidations := f.hub.Generations()
 			push := localapi.MachineEventPush{MachineID: f.machine, Healthy: f.hub.Healthy()}
 			for _, topic := range machineevents.DaemonTopics {
 				if known[topic] > sent[topic] {
@@ -56,22 +55,17 @@ func (f *daemonEventForwarder) Start(ctx context.Context) error {
 			}
 			// Recovery and authorization failures wake all worker subscriptions
 			// without moving a cursor. Preserve those invalidations too.
-			if (wake && len(push.Topics) == 0) || retry {
+			if currentInvalidations != invalidations {
 				push.Topics = append([]machineevents.Topic(nil), machineevents.DaemonTopics...)
 			}
 			// On a failed push retain the invalidations for the next heartbeat.
 			if f.push(ctx, push) == nil {
-				sent = known
-				retry = false
-			} else {
-				retry = retry || len(push.Topics) > 0
+				sent, invalidations = known, currentInvalidations
 			}
-			wake = false
 			select {
 			case <-ctx.Done():
 				return
 			case <-f.events.Changed():
-				wake = true
 			case <-ticker.C:
 			}
 		}
