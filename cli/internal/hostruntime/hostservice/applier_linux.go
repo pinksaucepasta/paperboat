@@ -5,6 +5,7 @@ package hostservice
 import (
 	"context"
 	"errors"
+	"os"
 	"os/exec"
 	"sync"
 	"syscall"
@@ -19,6 +20,9 @@ type platformApplier struct {
 
 func NewPlatformApplier(string) Applier { return &platformApplier{} }
 
+// systemBus is the D-Bus socket logind needs; a variable so tests can describe a host without it.
+var systemBus = "/run/dbus/system_bus_socket"
+
 func (a *platformApplier) Apply(ctx context.Context, mode string) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -26,6 +30,11 @@ func (a *platformApplier) Apply(ctx context.Context, mode string) error {
 		return a.releaseLocked(ctx)
 	}
 	if a.command != nil && a.command.Process != nil {
+		return nil
+	}
+	if _, err := os.Stat(systemBus); errors.Is(err, os.ErrNotExist) {
+		// No system bus, so no logind: nothing suspends this host on idle or lid close (minimal
+		// servers and containers), and systemd-inhibit could only fail.
 		return nil
 	}
 	command := exec.Command("/usr/bin/systemd-inhibit",
