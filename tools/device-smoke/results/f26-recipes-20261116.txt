@@ -1256,3 +1256,62 @@ $ pb env lock
 ENV vault operation completed.
 $ pb recipe create -f rcpt9.toml   [ENV locked]
 pb: recipe rcpt9 reads vault rcp-env, and your ENV keys are locked on this computer. Unlock them with pb env unlock, then run the command again. The vault key is wrapped here, on your computer; Paperboat never sees it.
+
+################ f26-02-oneliner-L.txt / f26-02-oneliner-W.txt (release 2026.11.16.0)
+=== F26-02 one-liner on Linux containers, release 2026.11.16.0, server .31, 2026-11-16T13:19:22Z ===
+--- rcp-l10 (user tester, passwordless sudo) ---
+$ curl -fsSL https://get.pprbt.dev/recipe | PB_RECIPE=<token> bash
+curl: (23) Failure writing output to destination
+(took 1 s)
+$ (again)
+$ curl ... | PB_RECIPE= bash   [missing]
+curl: (23) Failure writing output to destination
+curl: (23) Failure writing output to destination
+$ curl ... | PB_RECIPE=pbr_short bash   [malformed]
+curl: (23) Failure writing output to destination
+sh: 1: /home/tester/.local/bin/pb: not found
+--- rcp-l11 (root) ---
+$ curl -fsSL https://get.pprbt.dev/recipe | PB_RECIPE=<token> bash
+curl: (23) Failure writing output to destination
+=== re-run (the first run redirected bash's stdin away from the pipe), 2026-11-16T13:19:54Z ===
+--- rcp-l10 (user tester, passwordless sudo) ---
+$ curl -fsSL https://get.pprbt.dev/recipe | PB_RECIPE=<token> bash
+Paperboat will keep this machine awake by default, including on battery and with the lid closed; this can increase battery use and heat.
+Administrator approval is required to install its durable system service.
+Paperboat machine runtime is ready.
+Set up rcp-l10 (machine_301fc602-beb5-452d-8ace-08d2cafe54ef)
+(took 36 s)
+$ (again)
+This machine is already paired; nothing to do.
+$ curl ... | PB_RECIPE= bash   [missing]
+Paperboat: PB_RECIPE is not set. Copy the token from pb recipe create or the console (Settings -> Recipes) and run the installer with PB_RECIPE=<token> set.
+$ curl ... | PB_RECIPE=pbr_short bash   [malformed]
+Paperboat: PB_RECIPE is not a recipe token. A token starts with pbr_ and is 67 characters; this value is 9. Copy it again from where you saved it.
+  ▄▄▝▀▀▀▀▀▘▄▄   Version 2026.11.16.0
+--- rcp-l11 (root) ---
+$ curl -fsSL https://get.pprbt.dev/recipe | PB_RECIPE=<token> bash
+pb installer: pb install failed; rerun this installer and approve administrator access when prompted
+--- rcp-l11 (root) with root's user manager running (loginctl enable-linger root) ---
+$ curl -fsSL https://get.pprbt.dev/recipe | PB_RECIPE=<token> bash
+Installed pb to /root/.local/bin/pb
+pb: This recipe has reached its max_machines. A machine leaves the recipe when it is removed; to allow more, raise max_machines and run `pb recipe update`. Support reference: support_dd60fc03-f1b4-4237-89c4-4a3dcbf12076.
+$ $env:PB_RECIPE = <token>; irm https://get.pprbt.dev/recipe.ps1 | iex
+Installed pb to C:\Program Files\Paperboat\users\uaf2d489fd8f85362136e72dc\bin\pb.exe
+Pairing this machine from recipe rcpu.
+Resuming one-shot machine enrollment...
+Requesting administrator approval to install Paperboat Windows services...
+Still working on the administrator step (30s)...
+Paperboat Windows machine runtime is installed. It will resume after reboot.
+Set up victus (machine_d8c0b194-773c-47cd-ae01-c09a0654f568)
+(took 124 s)
+$ (again)
+Still working on the administrator step (30s)...
+Installed pb to C:\Program Files\Paperboat\users\uaf2d489fd8f85362136e72dc\bin\pb.exe
+This machine is already paired; nothing to do.
+  ▄▄▝▀▀▀▀▀▘▄▄   Version 2026.11.16.0
+  ▄▄▝▀▀▀▀▀▘▄▄   Version dev-c6d670f93
+  ▄▄▝▀▀▀▀▀▘▄▄   Version dev-d9d082603
+$ irm https://get.pprbt.dev/recipe.ps1 | iex   [PB_RECIPE missing]
+Paperboat: PB_RECIPE is not set. Copy the token from pb recipe create or the console (Settings -> Recipes), then run: $env:PB_RECIPE='<token>'; irm <installer>/recipe.ps1 | iex
+$ irm https://get.pprbt.dev/recipe.ps1 | iex   [PB_RECIPE malformed]
+Paperboat: PB_RECIPE is not a recipe token. A token starts with pbr_ and is 67 characters; this value is 9. Copy it again from where you saved it.
