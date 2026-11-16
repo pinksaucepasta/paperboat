@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/auth"
+	"github.com/pinksaucepasta/paperboat/server/internal/controlplane"
 	"github.com/pinksaucepasta/paperboat/server/internal/recipes"
 	"github.com/pinksaucepasta/paperboat/server/internal/workspace"
 	"github.com/pinksaucepasta/paperboat/shared/recipe"
@@ -453,6 +454,16 @@ func registerRecipeRoutes(mux *http.ServeMux, service *recipes.Service, account 
 // recipeRepositoryReader is nil (every recipe read refused) when the server runs without recipes.
 func recipeRepositoryReader(service *recipes.Service) interface {
 	ReadsRepository(ctx context.Context, recipeID, repositoryID string) (bool, error)
+} {
+	if service == nil {
+		return nil
+	}
+	return service
+}
+
+// configRuleReader is nil (no rule allows a recipe read) when the server runs without config assignments.
+func configRuleReader(service *controlplane.ConfigAssignmentService) interface {
+	MachineRule(ctx context.Context, userID, machineID string) (controlplane.ConfigMachineRuleView, error)
 } {
 	if service == nil {
 		return nil

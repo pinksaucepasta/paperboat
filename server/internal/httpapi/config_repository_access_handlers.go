@@ -62,6 +62,8 @@ func configRepositoryAccessIssue(service *controlplane.ConfigRepositoryAccessSer
 
 func configRepositoryReadAccess(service *controlplane.ConfigRepositoryAccessService, recipeRepositories interface {
 	ReadsRepository(ctx context.Context, recipeID, repositoryID string) (bool, error)
+}, rules interface {
+	MachineRule(ctx context.Context, userID, machineID string) (controlplane.ConfigMachineRuleView, error)
 }) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
@@ -70,15 +72,12 @@ func configRepositoryReadAccess(service *controlplane.ConfigRepositoryAccessServ
 			writeError(w, r, http.StatusUnauthorized, "unauthenticated", "Authentication is required.")
 			return
 		}
-		// A recipe machine reads only the repository its recipe's [config] names (recipeRoute lets it reach here).
+		// A recipe machine reads only the repository its recipe names (recipeRoute lets it reach here).
 		if p.Client != nil && p.Client.RecipeID != "" {
-			allowed := false
-			if recipeRepositories != nil {
-				var err error
-				if allowed, err = recipeRepositories.ReadsRepository(r.Context(), p.Client.RecipeID, r.PathValue("repository_id")); err != nil {
-					writeError(w, r, http.StatusServiceUnavailable, "access_uncertain", "The recipe's repository could not be checked; retry.", err)
-					return
-				}
+			allowed, err := recipeMayReadRepository(r.Context(), p, r.PathValue("repository_id"), recipeRepositories, rules)
+			if err != nil {
+				writeError(w, r, http.StatusServiceUnavailable, "access_uncertain", "The recipe's repository could not be checked; retry.", err)
+				return
 			}
 			if !allowed {
 				writeRecipeRouteRefusal(w, r)
@@ -110,4 +109,26 @@ func writeConfigRepositoryReadAccessError(w http.ResponseWriter, r *http.Request
 		return
 	}
 	writeError(w, r, http.StatusServiceUnavailable, "configuration_unavailable", "Repository read authorization could not be revalidated. Keep the support reference and retry after service recovery.", err)
+}
+
+// recipeMayReadRepository: the repository the recipe's [config] names, or, for a recipe without one,
+// the repository the workspace policy's config_sync tag rule picks for this machine (F11-06).
+func recipeMayReadRepository(ctx context.Context, p principal, repositoryID string, recipeRepositories interface {
+	ReadsRepository(ctx context.Context, recipeID, repositoryID string) (bool, error)
+}, rules interface {
+	MachineRule(ctx context.Context, userID, machineID string) (controlplane.ConfigMachineRuleView, error)
+}) (bool, error) {
+	if recipeRepositories != nil {
+		if allowed, err := recipeRepositories.ReadsRepository(ctx, p.Client.RecipeID, repositoryID); err != nil || allowed {
+			return allowed, err
+		}
+	}
+	if rules == nil || p.Client.MachineID == "" {
+		return false, nil
+	}
+	rule, err := rules.MachineRule(ctx, p.User.ID, p.Client.MachineID)
+	if err != nil {
+		return false, err
+	}
+	return rule.Matched && rule.RepositoryID == repositoryID, nil
 }

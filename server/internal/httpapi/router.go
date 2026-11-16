@@ -515,7 +515,7 @@ func NewRouter(opts Options) http.Handler {
 					return requireAuth(opts.Auth, next)
 				}
 				if opts.ConfigRepositoryAccess != nil && opts.DeviceAuth != nil {
-					mux.Handle("POST /v1/config-repositories/{repository_id}/read-access", requireBearerAuth(opts.DeviceAuth, requireScope("machines:read", configRepositoryReadAccess(opts.ConfigRepositoryAccess, recipeRepositoryReader(opts.Recipes)))))
+					mux.Handle("POST /v1/config-repositories/{repository_id}/read-access", requireBearerAuth(opts.DeviceAuth, requireScope("machines:read", configRepositoryReadAccess(opts.ConfigRepositoryAccess, recipeRepositoryReader(opts.Recipes), configRuleReader(opts.ConfigAssignments)))))
 				}
 				mux.Handle("GET /v1/config-repositories", configAuth("machines:read", configRepositories(opts.ConfigAssignments)))
 				mux.Handle("GET /v1/config-repositories/{repository_id}", configAuth("machines:read", configRepositoryGet(opts.ConfigAssignments)))
