@@ -9,6 +9,7 @@ Run on a client machine against a target of the same account:  terminal_scale.py
   4. one terminal with V extra viewers (attached by name), one viewer stopped (SIGSTOP) while the shell floods output:
      the owner and the live viewers still receive their markers; the stopped viewer must not slow them;
   5. every session this run created is closed and deleted.
+--host-os windows: the host's shell is cmd (prompt = ready, markers through a set variable, floods through PowerShell).
 Prints one JSON receipt (numbers only; terminal contents are never kept or printed).
 """
 import argparse
@@ -32,10 +33,13 @@ from session_cleanup import cleanup
 
 PB = str(Path.home() / '.local/bin/pb')
 READY_SEQ = b'\x1b[?2004h'  # the shell enabled bracketed paste: it is at its prompt
+WINDOWS_PROMPT = re.compile(rb'[A-Za-z]:\\[^>\r\n]*>')  # cmd's prompt, the ready sign of a Windows host
+WINDOWS = False  # --host-os windows
 QUERIES = [(b'\x1b[6n', b'\x1b[1;1R'),
            (b'\x1b]10;?\x07', b'\x1b]10;rgb:ffff/ffff/ffff\x07'), (b'\x1b]11;?\x07', b'\x1b]11;rgb:0000/0000/0000\x07'),
            (b'\x1b]10;?\x1b\\', b'\x1b]10;rgb:ffff/ffff/ffff\x07'), (b'\x1b]11;?\x1b\\', b'\x1b]11;rgb:0000/0000/0000\x07')]
 TAIL = 1 << 16
+WIN_FLOOD = 'powershell -NoProfile -Command "1..%d|%%{\'A\'*%d}"'  # N lines of M characters
 
 
 class Term:
@@ -67,8 +71,10 @@ class Term:
         for query, reply in QUERIES:
             if query in chunk:
                 os.write(self.fd, reply)
-        if self.ready_at is None and READY_SEQ in self.tail:
+        if self.ready_at is None and (WINDOWS_PROMPT.search(self.tail) if WINDOWS else READY_SEQ in self.tail):
             self.ready_at = time.monotonic() - self.t0
+            if WINDOWS:
+                self.send('set X=PB_SC\r')  # %X%_<id> is expanded by the shell: the typed line never contains the marker
         for token, started in self.marks.items():
             if token not in self.done and token in self.tail:
                 self.done[token] = time.monotonic() - started
@@ -80,7 +86,7 @@ class Term:
     def mark(self):
         """Send a command printing a fresh marker; the echoed command line does not contain the marker itself."""
         suffix = uuid.uuid4().hex[:16]
-        self.send("printf 'PB_%s_%s\\n' SC " + suffix + '\r')
+        self.send(('echo %X%_' + suffix if WINDOWS else "printf 'PB_%s_%s\\n' SC " + suffix) + '\r')
         token = ('PB_SC_' + suffix).encode()
         self.marks[token] = time.monotonic()
         return token
@@ -180,8 +186,11 @@ def main():
     parser.add_argument('--rate', type=float, default=3, help='terminals opened per second (a burst of 100 at once is a connect storm, not holding 100)')
     parser.add_argument('--flood-timeout', type=int, default=120)
     parser.add_argument('--flood-mb', type=int, default=3)
+    parser.add_argument('--host-os', choices=['posix', 'windows'], default='posix', help='the target machine\'s OS (its shell)')
     parser.add_argument('--no-stall', action='store_true', help='control run: nobody is stopped')
     args = parser.parse_args()
+    global WINDOWS
+    WINDOWS = args.host_os == 'windows'
     run = uuid.uuid4().hex[:6]
     names = [f'smoke-scale-{run}-{i:03d}' for i in range(args.terminals)]
     shared = f'smoke-scale-{run}-shared'
@@ -211,7 +220,7 @@ def main():
         # Output burst in `burst` terminals, closed in the middle of it, while the rest keep echoing.
         burst, rest = live[:args.burst], live[args.burst:]
         for t in burst:
-            t.send('head -c 20000000 /dev/zero | base64\r')
+            t.send(WIN_FLOOD % (20000, 1000) + '\r' if WINDOWS else 'head -c 20000000 /dev/zero | base64\r')
         pump_all(terms, 1.0)
         started = time.monotonic()
         for t in burst:
@@ -235,8 +244,9 @@ def main():
         stalled = viewers[0]
         if not args.no_stall:
             os.kill(stalled.pid, signal.SIGSTOP)
-        end_token = b'PB_FLOODEND_' + run.encode()
-        owner.send("head -c %d /dev/zero | base64;" % (args.flood_mb << 20) + " printf '\\nPB_%s_%s\\n' FLOODEND " + run + '\r')
+        end_token = (b'PB_SCFLOODEND_' if WINDOWS else b'PB_FLOODEND_') + run.encode()
+        owner.send((WIN_FLOOD % (args.flood_mb << 10, 1024) + ' & echo %X%FLOODEND_' + run if WINDOWS else
+                    "head -c %d /dev/zero | base64;" % (args.flood_mb << 20) + " printf '\\nPB_%s_%s\\n' FLOODEND " + run) + '\r')
         flood_started = time.monotonic()
         survivors = [owner, *viewers] if args.no_stall else [owner, *viewers[1:]]  # the control run reads every viewer
         done_at = {}
@@ -269,6 +279,8 @@ def main():
     finally:
         for t in [*terms, *viewers]:
             t.close()
+        if 'session_cleanup_failures' not in receipt.get('burst', {}):
+            cleanup_all(args.target, names[:args.burst])  # a run that stopped before the burst cleanup leaves those behind
         reasons = {}
         cleaned, took = cleanup_all(args.target, [*names[args.burst:], shared], errors=reasons)
         receipt['final_cleanup'] = {'closed_and_deleted': cleaned, 'expected': len(names[args.burst:]) + 1, 'seconds': took, 'errors': reasons}
