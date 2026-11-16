@@ -423,9 +423,17 @@ func windowsArtifactHTTPClient() *http.Client {
 	return &http.Client{Transport: httptransport.Default(), Timeout: 2 * time.Minute, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 }
 
-// RecipeInstallPreflight: Windows pairing asks for elevation itself (an SSH administrator token is
-// already elevated), so there is nothing to check before the recipe session.
-func RecipeInstallPreflight(context.Context) error { return nil }
+// RecipeInstallPreflight refuses a recipe install that is not elevated, before the recipe session:
+// it would otherwise wait on approval prompts nobody can answer and fail late (victus, a standard
+// user: 79 s, then "could not access local files"). An administrator over SSH is already elevated.
+func RecipeInstallPreflight(context.Context) error {
+	if recipeProcessElevated() {
+		return nil
+	}
+	return errRecipeNeedsRoot
+}
 
-// RecipeNeedsRootMessage is unused on Windows; it keeps one name for the recipe pairing code.
-const RecipeNeedsRootMessage = ""
+var recipeProcessElevated = func() bool { return windows.GetCurrentProcessToken().IsElevated() }
+
+// RecipeNeedsRootMessage is the recipe.ps1 text for the same refusal (cli/tools/install.ps1).
+const RecipeNeedsRootMessage = `Installing needs an administrator PowerShell. Start PowerShell with "Run as administrator" (or connect over SSH as an administrator) and run the command again. Recipe installs never show an approval prompt, so they never hang a CI job.`
