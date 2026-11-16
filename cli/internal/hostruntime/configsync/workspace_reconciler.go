@@ -522,8 +522,9 @@ func (r *PlaintextWorkspaceReconciler) Reconcile(ctx context.Context, repository
 		if snapshotErr != nil {
 			return PreparedPublication{}, snapshotErr
 		}
-		r.observeLocal(merged.Files, plan.DeleteLocal)
-		accepted := AcceptedBaseline(baselineFiles, merged.Files, remoteFiles.Files, r.descriptor.Mode, writesEnabled)
+		settled := settleConcurrentEdits(merged.Files, localFiles.Files, plan, mergedContents)
+		r.observeLocal(settled, plan.DeleteLocal)
+		accepted := AcceptedBaseline(baselineFiles, settled, remoteFiles.Files, r.descriptor.Mode, writesEnabled)
 		freezeConflictBaseline(accepted, baselineFiles, plan.Conflicts)
 		frozen := nextFrozenPaths(baselineFrozen, plan.Conflicts, baselineRevision)
 		r.pending = &pendingBaseline{CommitID: remote.Revision, Value: Baseline{
@@ -548,8 +549,9 @@ func (r *PlaintextWorkspaceReconciler) Reconcile(ctx context.Context, repository
 	if err != nil {
 		return PreparedPublication{}, err
 	}
-	r.observeLocal(merged.Files, plan.DeleteLocal)
-	accepted := AcceptedBaseline(baselineFiles, merged.Files, merged.Files, r.descriptor.Mode, writesEnabled)
+	settled := settleConcurrentEdits(merged.Files, localFiles.Files, plan, mergedContents)
+	r.observeLocal(settled, plan.DeleteLocal)
+	accepted := AcceptedBaseline(baselineFiles, settled, settled, r.descriptor.Mode, writesEnabled)
 	freezeConflictBaseline(accepted, baselineFiles, plan.Conflicts)
 	frozen := nextFrozenPaths(baselineFrozen, plan.Conflicts, baselineRevision)
 	r.pending = &pendingBaseline{CommitID: commit.String(), Value: Baseline{

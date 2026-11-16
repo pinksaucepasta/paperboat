@@ -168,6 +168,39 @@ func boundPathSummaries(values []PathSummary, limit int) []PathSummary {
 	return result
 }
 
+// settleConcurrentEdits is the local state this sync actually reconciled. The snapshot taken after the commit also sees a
+// file the user wrote or edited while the sync was running; recording that as synced would drop it from the baseline
+// and suppress its watch event, so it would stay unpublished until edited again. A path this sync did not write keeps the
+// state the plan saw, so the next pass finds the difference.
+func settleConcurrentEdits(after, planned map[string]FileState, plan ReconcilePlan, merged map[string]mergedContent) map[string]FileState {
+	touched := make(map[string]struct{}, len(plan.ApplyRemote)+len(plan.DeleteLocal)+len(merged))
+	for _, name := range append(append([]string(nil), plan.ApplyRemote...), plan.DeleteLocal...) {
+		touched[name] = struct{}{}
+	}
+	for name := range merged {
+		touched[name] = struct{}{}
+	}
+	settled := cloneFileStates(after)
+	for name, state := range after {
+		if _, ours := touched[name]; ours || planned[name] == state {
+			continue
+		}
+		if before, ok := planned[name]; ok {
+			settled[name] = before
+		} else {
+			delete(settled, name)
+		}
+	}
+	for name, before := range planned {
+		if _, ours := touched[name]; !ours {
+			if _, ok := after[name]; !ok {
+				settled[name] = before
+			}
+		}
+	}
+	return settled
+}
+
 func (r *PlaintextWorkspaceReconciler) observeLocal(files map[string]FileState, deleted []string) {
 	r.observed = cloneFileStates(files)
 	for _, name := range deleted {
