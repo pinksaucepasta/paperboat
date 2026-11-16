@@ -83,6 +83,7 @@ type Bar struct {
 	alternate       bool
 	closed          bool
 	lastRows        int
+	staleRows       []int // bar rows of earlier, shorter window heights, erased by the next draw
 	scrollRows      int
 	scrollDirty     bool
 	noticeDuration  time.Duration

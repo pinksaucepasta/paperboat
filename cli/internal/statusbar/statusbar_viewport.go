@@ -127,6 +127,9 @@ func (b *Bar) refreshViewportLocked() (int, int) {
 		b.enabled = false
 		return w, h
 	}
+	if b.enabled && b.lastRows > 0 && b.lastRows < h && len(b.staleRows) < 32 {
+		b.staleRows = append(b.staleRows, b.lastRows) // a taller window leaves the old bar row in the middle of the screen
+	}
 	b.enabled = true
 	b.lastRows = h
 	return w, h
@@ -155,6 +158,10 @@ func (b *Bar) drawNowLocked() {
 	}
 	text := b.layoutLocked(w - b.lastColumnFree)
 	b.ensureScrollRegionLocked(h - 1)
+	for _, row := range b.staleRows {
+		_, _ = fmt.Fprintf(b.serializedOut, b.cursorSave+"\x1b[%d;1H\x1b[2K"+b.cursorRestore, row)
+	}
+	b.staleRows = b.staleRows[:0]
 	style, restore := b.barStyleLocked()
 	_, _ = fmt.Fprintf(b.serializedOut, b.cursorSave+"\x1b[%d;1H\x1b[2K%s%s%s"+b.cursorRestore, h, style, text, restore)
 	b.redrawPending = false

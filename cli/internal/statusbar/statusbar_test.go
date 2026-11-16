@@ -847,3 +847,30 @@ func TestRecordingKeepsTheBarInFullscreenApplications(t *testing.T) {
 		t.Fatalf("re-entering while recorded: rows = %d suspended=%t", rows, bar.suspended)
 	}
 }
+
+// X-24 in a real GUI terminal: after the window grew, the bar row of the old height stayed in the middle of the screen
+// ("connecting" above the prompt). The next draw erases it before painting the bar on the new last row.
+func TestTallerWindowErasesTheOldBarRow(t *testing.T) {
+	input, _, _ := os.Pipe()
+	reader, output, _ := os.Pipe()
+	defer input.Close()
+	defer reader.Close()
+	rows := 24
+	bar := New(Options{
+		Mode: ModeAuto, Term: "xterm-256color", Input: input, Output: output,
+		IsTerminal: func(int) bool { return true }, GetSize: func(int) (int, int, error) { return 80, rows, nil },
+	})
+	bar.RemoteSize()
+	rows = 30
+	bar.RemoteSize()
+	bar.mu.Lock()
+	bar.drawNowLocked()
+	bar.mu.Unlock()
+	_ = bar.Close()
+	_ = output.Close()
+	raw, _ := io.ReadAll(reader)
+	erase, paint := strings.Index(string(raw), "\x1b[24;1H\x1b[2K"), strings.LastIndex(string(raw), "\x1b[30;1H\x1b[2K")
+	if erase < 0 || paint < 0 || erase > paint {
+		t.Fatalf("old row 24 not erased before the bar is painted on row 30: erase=%d paint=%d in %q", erase, paint, raw)
+	}
+}
