@@ -161,11 +161,17 @@ func commandFailureMessage(err error, failure commandFailure) string {
 		case ErrAccessTunnelAuthentication:
 			return "Paperboat authentication is required. Sign in to Paperboat, then retry."
 		case ErrAccessTunnelForbidden:
-			return "Private access was denied. Check that this account can access the tunnel, then retry."
+			return "Private access was denied. `pb access tunnel` needs a tcp_private route on a tunnel this account can access (`pb tunnel route add <tunnel> --protocol tcp_private`); check the name, then retry."
 		case ErrAccessTunnelRuntimeRPCUnavailable:
 			return "The installed Paperboat service does not support private TCP access. Update Paperboat, then retry."
 		case ErrAccessTunnelUnavailable:
 			return "Paperboat private access is unavailable. Check the local Paperboat service and target machine, then retry; run `pb doctor` if this continues."
+		case ErrAccessTunnelInvalid:
+			answer := "an answer this pb does not understand"
+			if status, ok := owned.cause.(accessTunnelHTTPStatus); ok {
+				answer = fmt.Sprintf("HTTP %d", status.status)
+			}
+			return "The local Paperboat service answered the private access request with " + answer + ". Run `pb update` so pb and the service match, then retry; run `pb doctor` if this continues."
 		}
 	case *envCommandFailure:
 		return owned.Error()

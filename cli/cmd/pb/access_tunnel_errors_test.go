@@ -60,3 +60,24 @@ func TestAccessTunnelGoneIsOperationalWithGuidance(t *testing.T) {
 		}
 	}
 }
+
+// soleCommandOwner walked past accessTunnelCauseError to its HTTP status leaf, so every refusal hostd sent
+// (403 for a tunnel without a tcp_private route, 401, 404, 503, or an unknown status) printed the generic text.
+func TestAccessTunnelRefusalsNameTheirCause(t *testing.T) {
+	for _, test := range []struct {
+		err  error
+		want string
+	}{
+		{accessTunnelHTTPError(http.StatusUnauthorized), "authentication is required"},
+		{accessTunnelHTTPError(http.StatusForbidden), "tcp_private"},
+		{accessTunnelHTTPError(http.StatusNotFound), "does not support private TCP access"},
+		{accessTunnelHTTPError(http.StatusServiceUnavailable), "private access is unavailable"},
+		{accessTunnelHTTPError(http.StatusConflict), "with HTTP 409"},
+		{accessTunnelFailure(ErrAccessTunnelInvalid, errAccessTunnelMalformedAnswer), "does not understand"},
+	} {
+		text := commandFailureMessage(test.err, classifyCommandFailure(test.err))
+		if !strings.Contains(text, test.want) || strings.Contains(text, "could not finish the command") {
+			t.Fatalf("%v: message=%q, want %q", test.err, text, test.want)
+		}
+	}
+}

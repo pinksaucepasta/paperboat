@@ -35,6 +35,8 @@ var (
 	ErrAccessTunnelRuntimeRPCUnavailable = errors.New("installed hostd does not expose private TCP access")
 	// ErrAccessTunnelGone: hostd no longer knows the session, so its listener is closed (missed heartbeats or revoked route).
 	ErrAccessTunnelGone = errors.New("private TCP access session is gone")
+	// errAccessTunnelMalformedAnswer: hostd's success answer failed validation (the cause of an ErrAccessTunnelInvalid).
+	errAccessTunnelMalformedAnswer = errors.New("local host service answer is malformed")
 )
 
 type accessTunnelSession struct {
@@ -204,7 +206,7 @@ func (c *localAccessTunnelClient) Start(ctx context.Context, selector, listen st
 	}
 	if err := rejectAccessTunnelDuplicateJSON(data); err != nil {
 		if errors.Is(err, ErrAccessTunnelInvalid) {
-			return accessTunnelSession{}, ErrAccessTunnelInvalid
+			return accessTunnelSession{}, accessTunnelFailure(ErrAccessTunnelInvalid, errAccessTunnelMalformedAnswer)
 		}
 		return accessTunnelSession{}, accessTunnelFailure(ErrAccessTunnelUnavailable, err)
 	}
@@ -218,10 +220,10 @@ func (c *localAccessTunnelClient) Start(ctx context.Context, selector, listen st
 		if err != nil {
 			return accessTunnelSession{}, accessTunnelFailure(ErrAccessTunnelUnavailable, err)
 		}
-		return accessTunnelSession{}, ErrAccessTunnelInvalid
+		return accessTunnelSession{}, accessTunnelFailure(ErrAccessTunnelInvalid, errAccessTunnelMalformedAnswer)
 	}
 	if !validAccessTunnelSession(out, listen) {
-		return accessTunnelSession{}, ErrAccessTunnelInvalid
+		return accessTunnelSession{}, accessTunnelFailure(ErrAccessTunnelInvalid, errAccessTunnelMalformedAnswer)
 	}
 	return out, nil
 }
