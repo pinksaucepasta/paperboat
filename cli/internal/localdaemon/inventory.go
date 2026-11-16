@@ -5,6 +5,7 @@ import (
 	"errors"
 	"math/rand/v2"
 	"net/url"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -29,17 +30,14 @@ const (
 	defaultRefreshInterval = time.Minute
 	defaultRequestTimeout  = 10 * time.Second
 	minimumRefreshInterval = time.Second
-	// One machine change bumps the inventory topic of every machine in its audience, so on a busy account
-	// every daemon was woken every ~15 s and re-listed the account's machines (the largest server load).
-	// Changes that arrive within the spacing are folded into one refresh. The spacing counts from the start of
-	// the previous refresh, so a change shows locally within the spacing plus one refresh (the 30 s bound of
-	// smoke check inventory-freshness; a refresh takes up to ~10 s on a slow control plane).
-	defaultEventRefreshSpacing = 15 * time.Second
+	// All ordinary wakes share a bounded debounce: topic moves from one change arrive together.
+	defaultEventRefreshSpacing = 2 * time.Second
+	// Reuse unrelated projections briefly, but invalidate immediately when their machine inputs change.
+	inventoryProjectionFreshness = 15 * time.Second
 	// While the server's change stream is healthy the periodic refresh is only a safety net.
 	defaultEventFallback = 5 * time.Minute
-	// requestedRefreshSpacing is the least time between a refresh and one asked for by a local command
-	// (pb wait, managed SSH after it starts): requests in between fold into one refresh at the spacing, so a
-	// loop of commands costs the server at most one inventory per second.
+	// requestedRefreshSpacing bounds retries while a local access step is pending. Ordinary wakes
+	// use the debounce, so reconciliation cannot start a one-second refresh loop.
 	requestedRefreshSpacing = time.Second
 	// While it is unhealthy (usually the server itself is failing) the periodic refresh backs off from the
 	// refresh interval to outageMaximumRefresh with jitter, so a fleet does not re-list every machine in
@@ -90,11 +88,11 @@ type InventoryConfig struct {
 	// Events wakes a refresh when the server reports an inventory change; while its wait loop is
 	// healthy the periodic refresh becomes a safety net. Nil refreshes on the interval only.
 	Events *machineevents.Subscription
-	// AccessEvents wakes a refresh for an access change, spaced like a local request; nil: none.
+	// AccessEvents joins the inventory debounce for access changes; nil: none.
 	AccessEvents *machineevents.Subscription
-	// Nudge wakes a refresh like RequestRefresh (a local change the server does not announce); nil: none.
+	// Nudge joins the debounce, or advances a pending local access step at requestedRefreshSpacing.
 	Nudge <-chan struct{}
-	// EventRefreshSpacing is the least time between two refreshes woken by events (0: the default).
+	// EventRefreshSpacing is the debounce after the first ordinary wake (0: the default).
 	// EventFallback is the refresh period while events are healthy (0: the default).
 	EventRefreshSpacing time.Duration
 	EventFallback       time.Duration
@@ -126,6 +124,12 @@ type Inventory struct {
 	completion        localapi.CompletionSnapshot
 	cachePath         string
 	cached            []byte // the cache file's content as last read or written; guarded by mu after Run starts
+
+	pendingLocalAccess atomic.Bool // last reconcile still had a local step
+	projectionMachines []api.UserMachine
+	reconcileAt        time.Time
+	completionAt       time.Time
+	onMachinesAt       time.Time
 }
 
 // localAccessStartupGrace is how long after start a failed local-access reconcile reads as starting, below the 60 s a
@@ -195,69 +199,67 @@ func (i *Inventory) Snapshot(ctx context.Context) (localapi.Snapshot, error) {
 	return i.store.Snapshot(ctx)
 }
 
-// Run refreshes once, then on the interval while there is no healthy change stream. With one, an inventory change
-// refreshes at most once per eventSpacing, counted from the start of the previous refresh (changes in between fold
-// into that refresh), and the interval only checks whether eventFallback has passed since the last refresh.
-// A refresh that failed is retried on the outage backoff whatever the stream's health, so a local reconcile
-// that failed while pb update restarted the services does not wait the event fallback.
+// Run refreshes once, then coalesces topic moves and local wakes into one bounded debounce.
+// Refused event waits refresh immediately; outages keep their existing backoff.
 func (i *Inventory) Run(ctx context.Context) error {
-	var started time.Time        // of the latest refresh
-	var pending <-chan time.Time // a change waiting for the spacing
-	outages := 0                 // consecutive periodic checks that found the stream unhealthy or the refresh failed
-	failed := false              // the latest refresh failed; retry it on the outage backoff, not the event fallback
-	refresh := func() {
-		pending = nil // this refresh shows every change so far
+	var started time.Time
+	var pending <-chan time.Time
+	var due time.Time
+	forceReconcile := true
+	outages := 0
+	failed := false
+	refresh := func(reuse bool) {
+		pending = nil
 		started = time.Now()
-		failed = i.Refresh(ctx) != nil
+		failed = i.refresh(ctx, reuse, forceReconcile || !reuse) != nil
+		forceReconcile = false
+		// ApplyMachines can signal its own local-step transition. The completed reconcile already
+		// observed it. Keep the wake when a pending step may have cleared during the refresh.
+		if !i.pendingLocalAccess.Load() {
+			select {
+			case <-i.nudge:
+			default:
+			}
+		}
 	}
 	i.restoreCachedMachines()
-	refresh()
+	refresh(false)
 	timer := time.NewTimer(i.refreshInterval)
 	defer timer.Stop()
-	// soon refreshes now or within requestedRefreshSpacing, replacing a later pending refresh: an inventory event
-	// just before a local request or an access change armed the 15 s event spacing, and the request waited for it.
-	soon := func() <-chan time.Time {
-		if wait := requestedRefreshSpacing - time.Since(started); wait > 0 {
-			return time.After(wait)
+	schedule := func(delay time.Duration, force bool) {
+		forceReconcile = forceReconcile || force
+		next := time.Now().Add(delay)
+		if pending == nil || next.Before(due) {
+			due = next
+			pending = time.After(delay)
 		}
-		refresh()
-		return pending
 	}
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-i.wake:
-			pending = soon()
+			schedule(i.eventSpacing, true)
 		case <-i.nudge:
-			pending = soon()
+			delay := i.eventSpacing
+			if i.pendingLocalAccess.Load() {
+				delay = max(0, requestedRefreshSpacing-time.Since(started))
+			}
+			schedule(delay, true)
 		case <-i.accessEvents.Changed():
-			// An access change (a machine shared with this account, a grant, the team's private access setting)
-			// shows within requestedRefreshSpacing, not the event spacing: such changes are rare, and a member
-			// waited up to ~30 s to reach a machine just shared with them (F9-04, hp 2026-10-27). Prior art:
-			// Tailscale pushes netmap changes to the client at once (control/controlclient map poll).
-			pending = soon()
+			schedule(min(i.eventSpacing, defaultEventRefreshSpacing), true)
 		case <-i.events.Changed():
-			// A wake while the stream is unhealthy is its refused wait (this machine revoked or signed out):
-			// refresh now, so pb status says so at once instead of after the spacing (C036).
 			if !i.events.Healthy() {
-				refresh()
-				continue
+				refresh(false)
+			} else {
+				schedule(i.eventSpacing, false)
 			}
-			if pending != nil {
-				continue
-			}
-			if wait := i.eventSpacing - time.Since(started); wait > 0 {
-				pending = time.After(wait)
-				continue
-			}
-			refresh()
 		case <-pending:
-			refresh()
+			refresh(true)
 		case <-timer.C:
 			healthy := i.events.Healthy()
 			if !healthy || failed || time.Since(started) >= i.eventFallback {
-				refresh()
+				refresh(false)
 			}
 			if healthy && !failed {
 				outages = 0
@@ -269,7 +271,11 @@ func (i *Inventory) Run(ctx context.Context) error {
 	}
 }
 
-func (i *Inventory) Refresh(ctx context.Context) (refreshErr error) {
+func (i *Inventory) Refresh(ctx context.Context) error {
+	return i.refresh(ctx, false, true)
+}
+
+func (i *Inventory) refresh(ctx context.Context, reuse, forceReconcile bool) (refreshErr error) {
 	i.mu.Lock()
 	defer i.mu.Unlock()
 	defer func() {
@@ -289,18 +295,26 @@ func (i *Inventory) Refresh(ctx context.Context) (refreshErr error) {
 	var machines []api.UserMachine
 	var sourceErr error
 	stage(func(stageCtx context.Context) { machines, sourceErr = i.source.ListUserMachines(stageCtx) })
+	sameMachines := reuse && reflect.DeepEqual(machines, i.projectionMachines)
+	reuseReconcile := sameMachines && !forceReconcile && !i.pendingLocalAccess.Load() &&
+		!i.reconcileAt.IsZero() && i.clock().Sub(i.reconcileAt) < inventoryProjectionFreshness
 	var reconcileErr error
 	var pending LocalAccessPendingError
-	if sourceErr == nil && i.reconcileMachines != nil {
+	if sourceErr == nil && i.reconcileMachines != nil && !reuseReconcile {
+		i.reconcileAt = time.Time{}
 		stage(func(stageCtx context.Context) { reconcileErr = i.reconcileMachines(stageCtx, machines) })
 		// Native access is set up; one step (the browser certificate) is still being retried by the coordinator.
 		if errors.As(reconcileErr, &pending) {
 			reconcileErr = nil
 		}
 	}
+	i.pendingLocalAccess.Store(pending.Step != "")
+	reuseCompletion := sameMachines && !i.completionAt.IsZero() && i.clock().Sub(i.completionAt) < inventoryProjectionFreshness
+	reuseOnMachines := sameMachines && !i.onMachinesAt.IsZero() && i.clock().Sub(i.onMachinesAt) < inventoryProjectionFreshness
 	var completionItems []localapi.CompletionItem
 	var completionErr error
-	if sourceErr == nil {
+	if sourceErr == nil && !reuseCompletion {
+		i.completionAt = time.Time{}
 		if source, ok := i.source.(CompletionInventorySource); ok {
 			stage(func(stageCtx context.Context) {
 				completionItems, completionErr = source.ListCompletionItems(stageCtx, machines)
@@ -327,6 +341,9 @@ func (i *Inventory) Refresh(ctx context.Context) (refreshErr error) {
 	portal := i.captivePortalBlocks(ctx, sourceErr, reconcileErr)
 	i.captive.Store(portal)
 	now := i.clock().UTC()
+	if sourceErr == nil && reconcileErr == nil && !reuseReconcile {
+		i.reconcileAt = now
+	}
 	var answered []localapi.MachineStatus
 	if _, err := i.store.Update(now, func(current *localapi.Snapshot) (localapi.Snapshot, error) {
 		desired := localapi.Snapshot{DaemonState: "ready", DaemonVersion: buildinfo.Version}
@@ -420,18 +437,29 @@ func (i *Inventory) Refresh(ctx context.Context) (refreshErr error) {
 	i.completionMu.RLock()
 	haveProjection := i.completion.Validate() == nil
 	i.completionMu.RUnlock()
-	if sourceErr == nil && (completionErr == nil || len(completionItems) > 0 && !haveProjection) {
+	if sourceErr == nil && !reuseCompletion && (completionErr == nil || len(completionItems) > 0 && !haveProjection) {
 		snapshot := localapi.CompletionSnapshot{Schema: localapi.CompletionSchemaV1, ObservedAt: now, Items: append([]localapi.CompletionItem(nil), completionItems...)}
 		if validationErr := snapshot.Validate(); validationErr == nil {
 			i.completionMu.Lock()
 			i.completion = snapshot
+			if completionErr == nil {
+				i.completionAt = now
+			}
 			i.completionMu.Unlock()
 		} else {
 			refreshErr = errors.Join(refreshErr, inventorySourceFailure("completion_projection", validationErr))
 		}
 	}
-	if sourceErr == nil && i.onMachines != nil {
+	if sourceErr == nil && i.onMachines != nil && !reuseOnMachines {
 		i.onMachines(ctx, append([]api.UserMachine(nil), machines...))
+		i.onMachinesAt = now
+	}
+	if sourceErr == nil {
+		i.projectionMachines = append([]api.UserMachine(nil), machines...)
+	}
+	if inventoryAuthenticationRequired(sourceErr) || inventoryAuthenticationRequired(reconcileErr) {
+		i.completionAt, i.onMachinesAt, i.reconcileAt = time.Time{}, time.Time{}, time.Time{}
+		i.projectionMachines = nil
 	}
 	return refreshErr
 }

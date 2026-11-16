@@ -658,10 +658,9 @@ func TestInventoryFoldsChangesWithinTheSpacingIntoOneRefresh(t *testing.T) {
 	}
 }
 
-// A change shows locally within the spacing plus one refresh (smoke check inventory-freshness, 30 s): the spacing
-// counts from the start of the previous refresh. Counted from its end, a change that arrived just after a slow
-// refresh waited the whole spacing and then a whole refresh (40 s on device with a 30 s spacing).
-func TestInventoryChangeIsShownWithinTheSpacingOfThePreviousRefreshStart(t *testing.T) {
+// A change shows within the bounded debounce plus one refresh, including on a slow control plane.
+// With the default two-second debounce this remains within inventory-freshness's 30-second bound.
+func TestInventoryChangeIsShownWithinDebouncePlusOneRefresh(t *testing.T) {
 	const spacing, duration = time.Second, 500 * time.Millisecond
 	store, err := localapi.NewSnapshotStore(nil)
 	if err != nil {
@@ -687,7 +686,7 @@ func TestInventoryChangeIsShownWithinTheSpacingOfThePreviousRefreshStart(t *test
 	select {
 	case shown := <-refreshed:
 		if took := shown.Sub(changed); took > spacing+duration+100*time.Millisecond {
-			t.Fatalf("a change after a refresh was shown after %v, want within the spacing (%v) of the previous refresh's start plus that refresh", took.Round(10*time.Millisecond), spacing)
+			t.Fatalf("a change after a refresh was shown after %v, want within debounce (%v) plus one refresh", took.Round(10*time.Millisecond), spacing)
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("the change was never refreshed")
@@ -1339,8 +1338,50 @@ func TestInventoryReusesUnchangedProjectionsAndInvalidatesMachineChanges(t *test
 		if got := configuration.Load(); got != want {
 			t.Fatalf("change %d: client-configuration callbacks=%d want=%d", n, got, want)
 		}
-		if got := reconciles.Load(); got != int32(n+2) {
+		if got := reconciles.Load(); got != int32(n+1) {
 			t.Fatalf("change %d: reconciles=%d", n, got)
 		}
+	}
+}
+
+func TestInventoryPendingLocalAccessNudgeKeepsRequestedSpacing(t *testing.T) {
+	source := &scriptedMachineSource{results: []machineResult{{machines: []api.UserMachine{{ID: "machine_1", Alias: "studio"}}}}}
+	store, err := localapi.NewSnapshotStore(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nudge := make(chan struct{}, 1)
+	refreshed := make(chan time.Time, 8)
+	var reconciles atomic.Int32
+	inventory, err := NewInventory(InventoryConfig{
+		Source: source, Store: store, RefreshInterval: time.Hour, Nudge: nudge,
+		ReconcileMachines: func(context.Context, []api.UserMachine) error {
+			if reconciles.Add(1) == 1 {
+				return LocalAccessPendingError{Step: "browser_gateway_port"}
+			}
+			return nil
+		},
+		OnRefresh: func(error) { refreshed <- time.Now() },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- inventory.Run(ctx) }()
+	defer func() { cancel(); <-done }()
+	first := <-refreshed
+	nudge <- struct{}{}
+	select {
+	case at := <-refreshed:
+		if gap := at.Sub(first); gap < requestedRefreshSpacing-50*time.Millisecond || gap > requestedRefreshSpacing+500*time.Millisecond {
+			t.Fatalf("pending access advanced after %v, want requested spacing %v", gap, requestedRefreshSpacing)
+		}
+		snapshot, err := store.Snapshot(t.Context())
+		if err != nil || len(snapshot.Health) != 0 {
+			t.Fatalf("cleared access step not published: snapshot=%+v err=%v", snapshot, err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("pending local access nudge did not advance promptly")
 	}
 }
