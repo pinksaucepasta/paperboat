@@ -69,15 +69,15 @@ func readyMachineGuard(ctx context.Context, version string) (resultErr error) {
 	if err := validateMachineGuardStatus(status); err != nil {
 		return err
 	}
-	if !machineGuardNotOlder(status, version) {
+	if !MachineGuardNotOlder(status, version) {
 		return fmt.Errorf("machine guard runs %s, older than this installation (%s)", status.Version, version)
 	}
 	return nil
 }
 
-// machineGuardNotOlder: the same version, a release not older, or (for development builds, whose
+// MachineGuardNotOlder (also pb doctor's mismatch test): the same version, a release not older, or (for development builds, whose
 // versions do not order) a guard whose code revision is not lower than this build's.
-func machineGuardNotOlder(status machineguard.RuntimeStatus, version string) bool {
+func MachineGuardNotOlder(status machineguard.RuntimeStatus, version string) bool {
 	if status.Version == version {
 		return true
 	}

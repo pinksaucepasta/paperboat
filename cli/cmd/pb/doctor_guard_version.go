@@ -8,30 +8,31 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
 	doctorpkg "github.com/pinksaucepasta/paperboat/internal/doctor"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
 	"github.com/pinksaucepasta/paperboat/internal/machineguard"
 )
 
-// readMachineGuardVersion asks the running machine guard for its version.
-var readMachineGuardVersion = func(ctx context.Context) (string, error) {
+// readMachineGuardStatus asks the running machine guard for its status (version and code revision).
+var readMachineGuardStatus = func(ctx context.Context) (machineguard.RuntimeStatus, error) {
 	client, err := machineguard.Connect(ctx, machineguard.DefaultSocket)
 	if err != nil {
-		return "", err
+		return machineguard.RuntimeStatus{}, err
 	}
 	defer client.Close()
-	status, err := client.Status(ctx)
-	return status.Version, err
+	return client.Status(ctx)
 }
 
 // machineGuardStartFailure is the reason the guard last stopped before serving; tests replace it.
 var machineGuardStartFailure = machineguard.StartFailure
 
-// probeDoctorGuardVersion reports a machine guard on another version than pb: the guard ships with pb and
-// every installation, update and rollback keeps the two equal.
+// probeDoctorGuardVersion reports a machine guard older than pb: the guard ships with pb and every installation,
+// update and rollback brings it along. It judges by the installer's own rule (development builds of the same guard
+// revision keep their guard), so a dev update that rightly kept the guard is not reported degraded.
 func probeDoctorGuardVersion(ctx context.Context) doctorpkg.Check {
 	check := doctorpkg.Check{Category: "local", Code: "machine_guard_version", Status: doctorpkg.StatusPass, Summary: "The machine guard runs this pb's version."}
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	version, err := readMachineGuardVersion(ctx)
+	status, err := readMachineGuardStatus(ctx)
 	if err != nil {
 		check.Status, check.Summary = doctorpkg.StatusWarning, "The machine guard could not be asked for its version."
 		if reason := machineGuardStartFailure(); reason != "" {
@@ -40,9 +41,9 @@ func probeDoctorGuardVersion(ctx context.Context) doctorpkg.Check {
 		check.Recovery = "Run `pb install` again to reinstall the machine guard, then run `pb doctor` again."
 		return check
 	}
-	if version != buildinfo.Version {
+	if !hostinstall.MachineGuardNotOlder(status, buildinfo.Version) {
 		check.Status = doctorpkg.StatusWarning
-		check.Summary = "The machine guard runs " + version + ", pb is " + buildinfo.Version + "."
+		check.Summary = "The machine guard runs " + status.Version + ", pb is " + buildinfo.Version + "."
 		check.Recovery = "Run `pb install` again to install the matching machine guard, then run `pb doctor` again."
 	}
 	return check

@@ -110,7 +110,7 @@ func TestMachineGuardIsNotDowngradedByAnOlderInstall(t *testing.T) {
 		"dev guard of a higher revision": {machineguard.RuntimeStatus{Version: "dev-a344bd52b", Revision: r + 1}, "2026.11.16.0", true},
 		"dev guard of a lower revision":  {machineguard.RuntimeStatus{Version: "dev-a344bd52b", Revision: r - 1, Features: machineguard.Features()}, "dev-de73faa7f", false},
 	} {
-		if got := machineGuardNotOlder(c.guard, c.version); got != c.notOlder {
+		if got := MachineGuardNotOlder(c.guard, c.version); got != c.notOlder {
 			t.Errorf("%s: not older = %v", name, got)
 		}
 	}
