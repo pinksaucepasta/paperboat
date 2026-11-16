@@ -495,7 +495,7 @@ func (s renewingMachineIdentity) Proof(ctx context.Context, operationID, method,
 
 type managedSSHControlClient interface {
 	ObserveManagedSSHHostKeys(context.Context, string, string, string, uint64, uint64, []string, []byte) (clientapi.ManagedSSHHostKeySet, error)
-	ManagedSSHAuthorizedKeys(context.Context, string, string, uint64, []byte) (clientapi.ManagedSSHAuthorizedKeys, error)
+	ManagedSSHUserCAs(context.Context, string, string, uint64, []byte) (clientapi.ManagedSSHUserCAs, error)
 }
 
 func initializeProductionManagedSSHUnix(ctx context.Context, host *managedssh.Host, controlURL string, transport http.RoundTripper, registration runtimeidentity.Registration, identitySource managedSSHIdentitySource, observationGeneration uint64, workerEpoch uint64, keyEvents *machineevents.Subscription) (Service, error) {
@@ -547,53 +547,53 @@ func managedSSHInitialOperationIDs(registration runtimeidentity.Registration, ob
 	return "managed-ssh-observe-" + suffix, "managed-ssh-keys-" + suffix
 }
 
-func reconcileManagedSSHAuthorityWithFingerprint(ctx context.Context, client managedSSHControlClient, identitySource managedSSHIdentitySource, registration runtimeidentity.Registration, observationGeneration uint64, fingerprint [32]byte, publicKeys []string) (clientapi.ManagedSSHAuthorizedKeys, bool, error) {
+func reconcileManagedSSHAuthorityWithFingerprint(ctx context.Context, client managedSSHControlClient, identitySource managedSSHIdentitySource, registration runtimeidentity.Registration, observationGeneration uint64, fingerprint [32]byte, publicKeys []string) (clientapi.ManagedSSHUserCAs, bool, error) {
 	observeOperationID, keyOperationID := managedSSHInitialOperationIDs(registration, observationGeneration, fingerprint)
 	return reconcileManagedSSHAuthorityWithOperations(ctx, client, identitySource, registration, observationGeneration, publicKeys,
 		observeOperationID, keyOperationID)
 }
 
-func reconcileManagedSSHAuthorityWithOperations(ctx context.Context, client managedSSHControlClient, identitySource managedSSHIdentitySource, registration runtimeidentity.Registration, observationGeneration uint64, publicKeys []string, observeOperationID, keyOperationID string) (clientapi.ManagedSSHAuthorizedKeys, bool, error) {
+func reconcileManagedSSHAuthorityWithOperations(ctx context.Context, client managedSSHControlClient, identitySource managedSSHIdentitySource, registration runtimeidentity.Registration, observationGeneration uint64, publicKeys []string, observeOperationID, keyOperationID string) (clientapi.ManagedSSHUserCAs, bool, error) {
 	if ctx == nil || client == nil || identitySource == nil || registration.MachineID == "" || registration.InstallationGeneration < 1 || observationGeneration == 0 || len(publicKeys) == 0 {
-		return clientapi.ManagedSSHAuthorizedKeys{}, false, ErrProductionInvalid
+		return clientapi.ManagedSSHUserCAs{}, false, ErrProductionInvalid
 	}
 	body, err := json.Marshal(map[string]any{"observation_generation": observationGeneration, "public_keys": publicKeys})
 	if err != nil {
-		return clientapi.ManagedSSHAuthorizedKeys{}, false, err
+		return clientapi.ManagedSSHUserCAs{}, false, err
 	}
 	path := "/v1/machines/" + registration.MachineID + "/ssh-host-keys"
 	proof, err := identitySource.Proof(ctx, observeOperationID, http.MethodPut, path, body)
 	if err != nil {
-		return clientapi.ManagedSSHAuthorizedKeys{}, false, err
+		return clientapi.ManagedSSHUserCAs{}, false, err
 	}
 	identityCredential, err := identitySource.Token(ctx)
 	if err != nil {
-		return clientapi.ManagedSSHAuthorizedKeys{}, false, err
+		return clientapi.ManagedSSHUserCAs{}, false, err
 	}
 	set, err := client.ObserveManagedSSHHostKeys(ctx, registration.MachineID, identityCredential, observeOperationID, uint64(registration.InstallationGeneration), observationGeneration, publicKeys, proof)
 	if err != nil {
-		return clientapi.ManagedSSHAuthorizedKeys{}, false, err
+		return clientapi.ManagedSSHUserCAs{}, false, err
 	}
 	// A pending set (the machine's host keys changed and wait for pb ssh trust-host) keeps the current client
 	// keys from the server, so trust-host works at once (C066); clients refuse the changed host until then.
 	// Any other state installs none. The keys are always the server's current list, so a revocation still
 	// applies at once.
 	if set.State != "active" && set.State != "pending" {
-		return clientapi.ManagedSSHAuthorizedKeys{}, false, nil
+		return clientapi.ManagedSSHUserCAs{}, false, nil
 	}
 	keyBody := []byte("{}")
-	keyPath := "/v1/machines/" + registration.MachineID + "/ssh-authorized-keys"
+	keyPath := "/v1/machines/" + registration.MachineID + "/ssh-user-cas"
 	keyProof, err := identitySource.Proof(ctx, keyOperationID, http.MethodPost, keyPath, keyBody)
 	if err != nil {
-		return clientapi.ManagedSSHAuthorizedKeys{}, false, err
+		return clientapi.ManagedSSHUserCAs{}, false, err
 	}
 	identityCredential, err = identitySource.Token(ctx)
 	if err != nil {
-		return clientapi.ManagedSSHAuthorizedKeys{}, false, err
+		return clientapi.ManagedSSHUserCAs{}, false, err
 	}
-	keySet, err := client.ManagedSSHAuthorizedKeys(ctx, registration.MachineID, identityCredential, uint64(registration.InstallationGeneration), keyProof)
+	keySet, err := client.ManagedSSHUserCAs(ctx, registration.MachineID, identityCredential, uint64(registration.InstallationGeneration), keyProof)
 	if err != nil {
-		return clientapi.ManagedSSHAuthorizedKeys{}, false, err
+		return clientapi.ManagedSSHUserCAs{}, false, err
 	}
 	return keySet, set.State == "active", nil
 }

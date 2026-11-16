@@ -4,9 +4,8 @@ package localdaemon
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
@@ -51,15 +50,8 @@ func StartManagedSSH(ctx context.Context, cfg ManagedSSHConfig, machines []api.U
 	if err != nil {
 		return nil, err
 	}
-	registerCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	client := api.New(cfg.ServerURL, credential, nil)
 	client.SetCredentialSource(cfg.Auth)
-	operation := sha256.Sum256([]byte(identity.PublicKey + "\x00" + cfg.CLIClientSessionID))
-	_, err = client.RegisterManagedSSHClientKey(registerCtx, identity.PublicKey, identity.Fingerprint, "managed-ssh-register-"+hex.EncodeToString(operation[:16]))
-	cancel()
-	if err != nil {
-		return nil, managedSSHAuthorityError(err)
-	}
 	capabilities, err := managedssh.ProbeOpenSSH(ctx, "ssh.exe", 5*time.Second)
 	if err != nil || !capabilities.Ready() {
 		return nil, errors.Join(managedssh.ErrOpenSSHUnavailable, err)
@@ -89,7 +81,7 @@ func StartManagedSSH(ctx context.Context, cfg ManagedSSHConfig, machines []api.U
 	if err != nil {
 		return nil, errors.Join(err, agentRuntime.Close())
 	}
-	return &ManagedSSHRuntime{closeFn: agentRuntime.Close, refresh: install, domain: domain}, nil
+	return &ManagedSSHRuntime{closeFn: agentRuntime.Close, refresh: renewingManagedSSHInstall(install, client, cfg.Home, identity.PublicKey), domain: domain}, nil
 }
 
 // Refresh rewrites the managed aliases for machines, the inventory's latest list.
@@ -211,15 +203,38 @@ func installWindowsOpenSSHConfig(cfg ManagedSSHConfig, agentSocket, publicKey, d
 	}
 	identityFile := managedssh.ManagedIdentityPublicKeyPath(cfg.Home)
 	executable := quoteWindowsOpenSSH(windowsOpenSSHExecutable(cfg.Executable))
-	_, err := managedssh.InstallOpenSSHConfig(managedssh.OpenSSHConfig{
+	// Match exec takes one quoted word, so the path there has no spaces: its 8.3 short form.
+	short, err := windowsShortPath(cfg.Executable)
+	if err != nil {
+		return err
+	}
+	_, err = managedssh.InstallOpenSSHConfig(managedssh.OpenSSHConfig{
 		Home: cfg.Home, OwnerUID: cfg.OwnerUID, AliasDomain: domain,
-		ProxyCommand:      managedSSHProxyCommand(executable),
-		KnownHostsCommand: executable + " __ssh-known-hosts --host %h --port %p",
-		AgentSocket:       agentSocket,
-		IdentityFile:      identityFile,
-		Targets:           targets,
+		ProxyCommand:       managedSSHProxyCommand(executable),
+		KnownHostsCommand:  executable + " __ssh-known-hosts --host %h --port %p",
+		AgentSocket:        agentSocket,
+		IdentityFile:       identityFile,
+		CertificateCommand: windowsOpenSSHExecutable(short),
+		Targets:            targets,
 	})
 	return err
+}
+
+func windowsShortPath(path string) (string, error) {
+	long, err := windows.UTF16PtrFromString(path)
+	if err != nil {
+		return "", err
+	}
+	buffer := make([]uint16, windows.MAX_LONG_PATH)
+	n, err := windows.GetShortPathName(long, &buffer[0], uint32(len(buffer)))
+	if err != nil || n == 0 || int(n) >= len(buffer) {
+		return "", fmt.Errorf("find the short path of %s for the SSH configuration: %w", path, err)
+	}
+	short := windows.UTF16ToString(buffer[:n])
+	if strings.ContainsAny(short, " \"%") {
+		return "", fmt.Errorf("the short path of %s still has a space; enable 8.3 names on its drive or install pb in a path without spaces", path)
+	}
+	return short, nil
 }
 
 func ensureWindowsSSHDirectory(path string) error {

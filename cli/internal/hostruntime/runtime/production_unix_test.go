@@ -105,12 +105,12 @@ func (c *managedSSHTestClient) ObserveManagedSSHHostKeys(_ context.Context, mach
 	return clientapi.ManagedSSHHostKeySet{State: "active"}, nil
 }
 
-func (c *managedSSHTestClient) ManagedSSHAuthorizedKeys(_ context.Context, machineID, identity string, generation uint64, proof []byte) (clientapi.ManagedSSHAuthorizedKeys, error) {
+func (c *managedSSHTestClient) ManagedSSHUserCAs(_ context.Context, machineID, identity string, generation uint64, proof []byte) (clientapi.ManagedSSHUserCAs, error) {
 	if machineID != "machine_1" || generation != 4 {
-		return clientapi.ManagedSSHAuthorizedKeys{}, errors.New("wrong authorized-key request")
+		return clientapi.ManagedSSHUserCAs{}, errors.New("wrong authorized-key request")
 	}
 	c.keysIdentity, c.keysProof = identity, append([]byte(nil), proof...)
-	return clientapi.ManagedSSHAuthorizedKeys{Keys: []string{"ssh-ed25519 AAAA managed"}}, nil
+	return clientapi.ManagedSSHUserCAs{Keys: []string{"ssh-ed25519 AAAA managed"}, Principal: "pb:machine_1:0"}, nil
 }
 
 func TestManagedSSHAuthorityUsesCurrentCredentialAndExactProofBodies(t *testing.T) {
@@ -133,7 +133,7 @@ func TestManagedSSHAuthorityUsesCurrentCredentialAndExactProofBodies(t *testing.
 	if json.Unmarshal(identity.proofs[0].body, &observed) != nil || observed.ObservationGeneration != 7 || len(observed.PublicKeys) != 1 || identity.proofs[0].method != http.MethodPut || identity.proofs[0].path != "/v1/machines/machine_1/ssh-host-keys" {
 		t.Fatalf("observation proof = %#v body=%s", identity.proofs[0], identity.proofs[0].body)
 	}
-	if string(identity.proofs[1].body) != "{}" || identity.proofs[1].method != http.MethodPost || identity.proofs[1].path != "/v1/machines/machine_1/ssh-authorized-keys" {
+	if string(identity.proofs[1].body) != "{}" || identity.proofs[1].method != http.MethodPost || identity.proofs[1].path != "/v1/machines/machine_1/ssh-user-cas" {
 		t.Fatalf("authorized-key proof = %#v", identity.proofs[1])
 	}
 	if string(client.observedProof) != "proof-"+observeOperationID || string(client.keysProof) != "proof-"+keyOperationID {
@@ -230,7 +230,7 @@ func managedSSHRuntimeTestHome(t *testing.T) string {
 	return home
 }
 
-func (c *rotatingManagedSSHClient) ManagedSSHAuthorizedKeys(context.Context, string, string, uint64, []byte) (clientapi.ManagedSSHAuthorizedKeys, error) {
+func (c *rotatingManagedSSHClient) ManagedSSHUserCAs(context.Context, string, string, uint64, []byte) (clientapi.ManagedSSHUserCAs, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	index := c.calls
@@ -238,7 +238,7 @@ func (c *rotatingManagedSSHClient) ManagedSSHAuthorizedKeys(context.Context, str
 		index = len(c.keys) - 1
 	}
 	c.calls++
-	return clientapi.ManagedSSHAuthorizedKeys{Keys: append([]string(nil), c.keys[index]...)}, nil
+	return clientapi.ManagedSSHUserCAs{Keys: append([]string(nil), c.keys[index]...), Principal: "pb:machine_1:0"}, nil
 }
 
 type refreshingManagedSSHIdentity struct {

@@ -30501,157 +30501,6 @@
         }
       }
     },
-    "/v1/ssh/client-keys/{fingerprint}": {
-      "put": {
-        "summary": "Register the current CLI session managed SSH public key",
-        "operationId": "put_v1_ssh_client_key",
-        "security": [
-          {
-            "bearerAccess": []
-          }
-        ],
-        "x-required-bearer-scopes": [
-          "machines:connect"
-        ],
-        "parameters": [
-          {
-            "name": "fingerprint",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^SHA256:[A-Za-z0-9+/]{43}$"
-            }
-          },
-          {
-            "$ref": "#/components/parameters/IdempotencyKey"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "additionalProperties": false,
-                "required": [
-                  "public_key"
-                ],
-                "properties": {
-                  "public_key": {
-                    "type": "string",
-                    "maxLength": 8192
-                  }
-                }
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "Client key registered.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SuccessResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/Error"
-          },
-          "401": {
-            "$ref": "#/components/responses/Error"
-          },
-          "403": {
-            "$ref": "#/components/responses/Error"
-          },
-          "409": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      },
-      "delete": {
-        "summary": "Revoke a managed SSH client public key",
-        "operationId": "delete_v1_ssh_client_key",
-        "security": [
-          {
-            "bearerAccess": []
-          }
-        ],
-        "x-required-bearer-scopes": [
-          "machines:connect"
-        ],
-        "parameters": [
-          {
-            "name": "fingerprint",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^SHA256:[A-Za-z0-9+/]{43}$"
-            }
-          },
-          {
-            "$ref": "#/components/parameters/IdempotencyKey"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "additionalProperties": false,
-                "required": [
-                  "reason"
-                ],
-                "properties": {
-                  "reason": {
-                    "type": "string",
-                    "enum": [
-                      "client_revoked",
-                      "client_logout",
-                      "account_revoked",
-                      "key_rotated",
-                      "key_compromise"
-                    ]
-                  }
-                }
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Client key revoked.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SuccessResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/Error"
-          },
-          "401": {
-            "$ref": "#/components/responses/Error"
-          },
-          "403": {
-            "$ref": "#/components/responses/Error"
-          },
-          "404": {
-            "$ref": "#/components/responses/Error"
-          },
-          "409": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
     "/v1/machines/{machine_id}/ssh-target": {
       "put": {
         "summary": "Register or update a managed SSH machine target",
@@ -30968,61 +30817,6 @@
             "$ref": "#/components/responses/Error"
           }
         }
-      }
-    },
-    "/v1/machines/{machine_id}/ssh-authorized-keys": {
-      "parameters": [
-        {
-          "name": "machine_id",
-          "in": "path",
-          "required": true,
-          "schema": {
-            "type": "string"
-          }
-        }
-      ],
-      "post": {
-        "summary": "Read active managed SSH client keys for a machine",
-        "description": "Machine-proof authenticated, generation-bound key inventory used only for authorized_keys reconciliation.",
-        "security": [],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "additionalProperties": false
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Current active managed SSH public keys."
-          },
-          "400": {
-            "$ref": "#/components/responses/Error"
-          },
-          "401": {
-            "$ref": "#/components/responses/Error"
-          },
-          "404": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "operationId": "post_v1_machines_machine_id_ssh_authorized_keys",
-        "parameters": [
-          {
-            "name": "workspace",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "maxLength": 63
-            },
-            "description": "Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field."
-          }
-        ]
       }
     },
     "/v1/machines/{machine_id}/ssh-host-keys/{set_id}/promote": {
@@ -53871,6 +53665,165 @@
             "$ref": "#/components/responses/Error"
           }
         }
+      }
+    },
+    "/v1/machines/{machine_id}/ssh-user-cas": {
+      "parameters": [
+        {
+          "name": "machine_id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "summary": "Read the managed SSH user CAs and revocation principal a machine trusts",
+        "description": "Machine-proof authenticated, generation-bound trust set used only for the managed CA lines (cert-authority) of the machine.",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The user CA public keys (at most 3, during a rotation) and the principal every certificate must carry."
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "operationId": "post_v1_machines_machine_id_ssh_authorized_keys",
+        "parameters": [
+          {
+            "name": "workspace",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 63
+            },
+            "description": "Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field."
+          }
+        ]
+      }
+    },
+    "/v1/machines/{machine_id}/ssh-certificate": {
+      "parameters": [
+        {
+          "name": "machine_id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "summary": "Issue a short-lived managed SSH certificate for this CLI session's key on one machine",
+        "operationId": "post_v1_machine_ssh_certificate",
+        "security": [
+          {
+            "bearerAccess": []
+          }
+        ],
+        "x-required-bearer-scopes": [
+          "machines:connect"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "machine_generation",
+                  "public_key"
+                ],
+                "properties": {
+                  "machine_generation": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "public_key": {
+                    "type": "string",
+                    "maxLength": 8192
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The certificate (principals: the machine's OS user and revocation principal), its OS user and expiry."
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/admin/managed-ssh/accounts/{account_id}/rotate-user-ca": {
+      "parameters": [
+        {
+          "name": "account_id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "summary": "Advance one account's managed SSH user CA rotation by one step",
+        "description": "Adds a pending CA (trusted by hosts, not signing), promotes it after 15 minutes, then removes the retiring CA once every certificate it signed has expired. Returns the account's CAs.",
+        "operationId": "post_v1_admin_managed_ssh_rotate_user_ca",
+        "security": [
+          {
+            "csrfHeader": [],
+            "operatorCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The account's CAs: id, state (pending, active, retiring), public key, state change time."
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-operator-capability": "admin"
       }
     }
   }

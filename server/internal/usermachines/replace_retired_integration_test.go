@@ -56,7 +56,7 @@ func TestAddingTheSameComputerAgainRemovesItsRetiredRecordAndKeepsTheName(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	sshService, _ := managedssh.NewService(repository.WithMachineReplacer(service))
+	sshService, _ := managedssh.NewService(repository.WithMachineReplacer(service), managedssh.CertificateConfig{EncryptionKey: "test-encryption-key-0123456789abcdef", Validity: 10 * time.Minute})
 	now := time.Now().UTC().Truncate(time.Second)
 	observe := func(userID, machineID string, keys ...string) error {
 		t.Helper()

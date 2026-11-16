@@ -36,7 +36,9 @@ type OpenSSHConfig struct {
 	KnownHostsCommand string
 	AgentSocket       string
 	IdentityFile      string
-	Targets           []OpenSSHAliasTarget
+	// CertificateCommand is the quoted pb executable the fragment's Match exec runs (see ownedOpenSSH).
+	CertificateCommand string
+	Targets            []OpenSSHAliasTarget
 }
 
 type OpenSSHConfigResult struct{ Changed bool }
@@ -205,7 +207,6 @@ func InstallOpenSSHConfig(config OpenSSHConfig) (result OpenSSHConfigResult, res
 	var includeChunk string
 	if recordSet {
 		if !ownedSet || record.Version != 1 || !validRecordedInclude(record.IncludeChunk, includeLine) || !validAliasSuffix(record.AliasSuffix) ||
-			!validOwnedOpenSSHContent(existingOwned, record.AliasSuffix) ||
 			record.OwnedHash != hashOpenSSHBytes(existingOwned) || bytes.Count(main, []byte(record.IncludeChunk)) != 1 {
 			return OpenSSHConfigResult{}, ErrOpenSSHConfigConflict
 		}
@@ -283,7 +284,6 @@ func UninstallOpenSSHConfig(home string, ownerUID uint32) (result OpenSSHConfigR
 	owned, ownedSet, err := readOpenSSHFileAt(directoryFD, "paperboat_config", ownerUID)
 	includeLine := "Include ~/.ssh/paperboat_config # " + openSSHIncludeMarker + "\n"
 	if err != nil || !mainSet || !ownedSet || !validRecordedInclude(record.IncludeChunk, includeLine) ||
-		!validOwnedOpenSSHContent(owned, record.AliasSuffix) ||
 		record.OwnedHash != hashOpenSSHBytes(owned) || bytes.Count(main, []byte(record.IncludeChunk)) != 1 {
 		return OpenSSHConfigResult{}, ErrOpenSSHConfigConflict
 	}
@@ -306,16 +306,11 @@ func renderOwnedOpenSSHConfig(config OpenSSHConfig) ([]byte, error) {
 	if ValidateAliasDomain(config.AliasDomain) != nil || !validOpenSSHCommand(config.ProxyCommand) || !validOpenSSHCommand(config.KnownHostsCommand) || !filepath.IsAbs(config.AgentSocket) || strings.ContainsAny(config.AgentSocket, "\r\n\x00\"") || !filepath.IsAbs(config.IdentityFile) || strings.ContainsAny(config.IdentityFile, "\r\n\x00\"") {
 		return nil, ErrOpenSSHConfigConflict
 	}
-	return formatOwnedOpenSSH(config.AliasDomain, ownedOpenSSH{Targets: config.Targets, ProxyCommand: config.ProxyCommand, KnownHostsCommand: config.KnownHostsCommand, Agent: config.AgentSocket, Identity: config.IdentityFile})
+	return formatOwnedOpenSSH(config.AliasDomain, ownedOpenSSH{Targets: config.Targets, ProxyCommand: config.ProxyCommand, KnownHostsCommand: config.KnownHostsCommand, Agent: config.AgentSocket, Identity: config.IdentityFile, CertificateCommand: config.CertificateCommand})
 }
 
 func validRecordedInclude(chunk, line string) bool {
 	return chunk == line || chunk == "\n"+line
-}
-
-func validOwnedOpenSSHContent(value []byte, suffix string) bool {
-	_, ok := parseOwnedOpenSSH(value, suffix)
-	return ok
 }
 
 func validOpenSSHCommand(value string) bool {

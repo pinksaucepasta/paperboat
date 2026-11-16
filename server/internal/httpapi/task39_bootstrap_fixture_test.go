@@ -135,7 +135,7 @@ func TestTask39ServeAuthenticatedEnrollment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sshService, err := managedssh.NewService(sshRepository)
+	sshService, err := managedssh.NewService(sshRepository, managedssh.CertificateConfig{EncryptionKey: "test-encryption-key-0123456789abcdef", Validity: 10 * time.Minute})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -39,6 +39,6 @@ func cleanupProductionManagedSSH(ctx context.Context, registration runtimeidenti
 	if err != nil {
 		return ErrManagedSSHUnavailable
 	}
-	_, err = reconcilePlatformAuthorizedKeys(account.HomeDir, uint32(uid), nil)
+	_, err = reconcilePlatformAuthorizedKeys(account.HomeDir, uint32(uid), nil, "")
 	return err
 }

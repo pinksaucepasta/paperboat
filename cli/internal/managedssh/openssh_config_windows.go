@@ -32,7 +32,9 @@ var ErrOpenSSHConfigConflict = errors.New("Paperboat OpenSSH configuration confl
 type OpenSSHConfig struct {
 	AliasDomain                                                      string
 	Home, ProxyCommand, KnownHostsCommand, AgentSocket, IdentityFile string
-	Targets                                                          []OpenSSHAliasTarget
+	// CertificateCommand is the pb executable the fragment's Match exec runs (see ownedOpenSSH).
+	CertificateCommand string
+	Targets            []OpenSSHAliasTarget
 	// OwnerUID is retained for the cross-platform API. Windows validates the
 	// current token SID instead; numeric POSIX IDs have no security meaning.
 	OwnerUID uint32
@@ -99,7 +101,7 @@ func InstallOpenSSHConfig(config OpenSSHConfig) (result OpenSSHConfigResult, res
 	var nextMain []byte
 	var includeChunk string
 	if recordSet {
-		if !ownedSet || record.Version != 1 || !validRecordedInclude(record.IncludeChunk, includeLine) || !validAliasSuffix(record.AliasSuffix) || !validOwnedOpenSSHContent(existingOwned, record.AliasSuffix) || record.OwnedHash != hashOpenSSHBytes(existingOwned) || bytes.Count(main, []byte(record.IncludeChunk)) != 1 {
+		if !ownedSet || record.Version != 1 || !validRecordedInclude(record.IncludeChunk, includeLine) || !validAliasSuffix(record.AliasSuffix) || record.OwnedHash != hashOpenSSHBytes(existingOwned) || bytes.Count(main, []byte(record.IncludeChunk)) != 1 {
 			return OpenSSHConfigResult{}, ErrOpenSSHConfigConflict
 		}
 		nextMain, includeChunk = main, record.IncludeChunk
@@ -219,7 +221,7 @@ func UninstallOpenSSHConfig(home string, _ uint32) (result OpenSSHConfigResult, 
 		return OpenSSHConfigResult{}, nil
 	}
 	line := "Include ~/.ssh/paperboat_config # " + openSSHIncludeMarker + "\n"
-	if !mainSet || !ownedSet || !validRecordedInclude(record.IncludeChunk, line) || !validOwnedOpenSSHContent(owned, record.AliasSuffix) || record.OwnedHash != hashOpenSSHBytes(owned) || bytes.Count(main, []byte(record.IncludeChunk)) != 1 {
+	if !mainSet || !ownedSet || !validRecordedInclude(record.IncludeChunk, line) || record.OwnedHash != hashOpenSSHBytes(owned) || bytes.Count(main, []byte(record.IncludeChunk)) != 1 {
 		return OpenSSHConfigResult{}, ErrOpenSSHConfigConflict
 	}
 	nextMain := bytes.Replace(main, []byte(record.IncludeChunk), nil, 1)
@@ -272,21 +274,10 @@ func renderOwnedOpenSSHConfig(config OpenSSHConfig) ([]byte, error) {
 	if ValidateAliasDomain(config.AliasDomain) != nil || !validOpenSSHCommand(config.ProxyCommand) || !validOpenSSHCommand(config.KnownHostsCommand) || !validWindowsAgentPipe(config.AgentSocket) || strings.ContainsAny(config.AgentSocket, "\r\n\x00\"") || !filepath.IsAbs(config.IdentityFile) || strings.ContainsAny(config.IdentityFile, "\r\n\x00\"") {
 		return nil, ErrOpenSSHConfigConflict
 	}
-	return formatOwnedOpenSSH(config.AliasDomain, ownedOpenSSH{Targets: config.Targets, ProxyCommand: config.ProxyCommand, KnownHostsCommand: config.KnownHostsCommand, Agent: config.AgentSocket, Identity: config.IdentityFile})
+	return formatOwnedOpenSSH(config.AliasDomain, ownedOpenSSH{Targets: config.Targets, ProxyCommand: config.ProxyCommand, KnownHostsCommand: config.KnownHostsCommand, Agent: config.AgentSocket, Identity: config.IdentityFile, CertificateCommand: config.CertificateCommand})
 }
 
 func validRecordedInclude(chunk, line string) bool { return chunk == line || chunk == "\n"+line }
-func validOwnedOpenSSHContent(value []byte, suffix string) bool {
-	owned, ok := parseOwnedOpenSSH(value, suffix)
-	if !ok {
-		return false
-	}
-	if len(owned.Targets) == 0 {
-		return true
-	}
-	return validWindowsAgentPipe(owned.Agent) && filepath.IsAbs(owned.Identity) && strings.EqualFold(filepath.Base(owned.Identity), ManagedIdentityPublicKeyFilename) && strings.EqualFold(filepath.Base(filepath.Dir(owned.Identity)), ".ssh")
-}
-
 func validOpenSSHCommand(value string) bool {
 	return value != "" && len(value) <= 4096 && !strings.ContainsAny(value, "\r\n\x00#")
 }

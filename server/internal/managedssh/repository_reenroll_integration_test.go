@@ -68,7 +68,7 @@ func hostKeysMoveToTheReplacement(t *testing.T, retiredState string, moves bool)
 	if err != nil {
 		t.Fatal(err)
 	}
-	service, _ := NewService(repository)
+	service, _ := NewService(repository, testCertificates)
 	observe := func(operation, userID, machineID string, keys ...string) error {
 		_, err := service.ObserveHost(ctx, ObserveHostRequest{OperationID: operation + suffix, UserID: userID, UserMachineID: machineID, MachineGeneration: 1, ObservationGeneration: 1, PublicKeys: keys, Now: now})
 		return err

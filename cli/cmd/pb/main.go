@@ -453,6 +453,9 @@ recovery instructions before retrying an operation that may have created resourc
 	sshProxyCommand.Flags().String("port", "", "")
 	sshProxyCommand.Flags().String("user", "", "")
 	root.AddCommand(sshProxyCommand)
+	sshCertificateCommand := &cobra.Command{Use: "__ssh-certificate", Hidden: true, Args: commandArgs(cobra.NoArgs), RunE: actionSSHCertificate}
+	sshCertificateCommand.Flags().String("host", "", "")
+	root.AddCommand(sshCertificateCommand)
 	sshKnownHostsCommand := &cobra.Command{Use: "__ssh-known-hosts", Hidden: true, Args: commandArgs(cobra.NoArgs), RunE: actionSSHKnownHosts}
 	sshKnownHostsCommand.Flags().String("host", "", "")
 	sshKnownHostsCommand.Flags().String("port", "", "")

@@ -3,7 +3,6 @@
 package localdaemon
 
 import (
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -27,25 +26,9 @@ func TestManagedSSHUsesDiscoveredDomainAndRefreshesAliases(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(root) })
-	registrations := make(chan string, 3)
-	operations := make(chan string, 3)
 	var domain atomic.Value
 	domain.Store("fleet.example.test")
 	mux := http.NewServeMux()
-	mux.HandleFunc("PUT /v1/ssh/client-keys/{fingerprint}", func(w http.ResponseWriter, r *http.Request) {
-		var input struct {
-			PublicKey string `json:"public_key"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
-			t.Error(err)
-			w.WriteHeader(http.StatusBadRequest)
-			return
-		}
-		registrations <- input.PublicKey
-		operations <- r.Header.Get("Idempotency-Key")
-		writeManagedSSHTestResponse(w, api.ManagedSSHClientKey{Type: "client_key", Version: 1,
-			Fingerprint: r.PathValue("fingerprint"), PublicKey: input.PublicKey, State: "active", ReconciliationVersion: 1})
-	})
 	mux.HandleFunc("GET /v1/client-configuration", func(w http.ResponseWriter, r *http.Request) {
 		writeManagedSSHTestResponse(w, map[string]any{"version": "1", "machines_url": "http://" + r.Host + "/machines",
 			"local_access_base_domain": domain.Load().(string)})
@@ -94,21 +77,4 @@ func TestManagedSSHUsesDiscoveredDomainAndRefreshesAliases(t *testing.T) {
 			}
 		}
 	}
-	firstKey, firstOperation := <-registrations, <-operations
-	if err := runtime.Close(); err != nil {
-		t.Fatal(err)
-	}
-	cfg.CLIClientSessionID = "cli_relogin"
-	replacement, err := StartManagedSSH(t.Context(), cfg, machines)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer replacement.Close()
-	if key := <-registrations; key != firstKey {
-		t.Fatal("relogin minted another SSH key")
-	}
-	if operation := <-operations; operation == "" || operation == firstOperation {
-		t.Fatal("relogin reused the old session's registration operation")
-	}
-
 }

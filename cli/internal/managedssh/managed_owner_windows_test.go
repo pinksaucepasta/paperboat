@@ -48,12 +48,13 @@ func managedSSHWindowsTestHome(t *testing.T) string {
 
 func managedSSHWindowsTestConfig(home string) OpenSSHConfig {
 	return OpenSSHConfig{AliasDomain: testAliasDomain,
-		Home:              home,
-		ProxyCommand:      `"C:\Program Files\Paperboat\bin\pb.exe" __ssh-proxy --host %h --port %p --user %r`,
-		KnownHostsCommand: `"C:\Program Files\Paperboat\bin\pb.exe" __ssh-known-hosts --host %h --port %p`,
-		AgentSocket:       `\\.\pipe\paperboat-ssh-agent-test`,
-		IdentityFile:      ManagedIdentityPublicKeyPath(home),
-		Targets:           []OpenSSHAliasTarget{{Alias: "hn", User: "root", Port: 22}},
+		Home:               home,
+		ProxyCommand:       `"C:\Program Files\Paperboat\bin\pb.exe" __ssh-proxy --host %h --port %p --user %r`,
+		KnownHostsCommand:  `"C:\Program Files\Paperboat\bin\pb.exe" __ssh-known-hosts --host %h --port %p`,
+		AgentSocket:        `\\.\pipe\paperboat-ssh-agent-test`,
+		IdentityFile:       ManagedIdentityPublicKeyPath(home),
+		CertificateCommand: "//?/C:/PROGRA~1/PAPERB~1/bin/pb.exe",
+		Targets:            []OpenSSHAliasTarget{{Alias: "hn", User: "root", Port: 22}},
 	}
 }
 

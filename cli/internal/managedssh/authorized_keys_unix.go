@@ -23,11 +23,7 @@ import (
 
 const (
 	managedAuthorizedKeyMarker = "paperboat-managed-ssh-v1:"
-	// managedAuthorizedKeyFrom limits every managed key to the loopback connections the host's own
-	// bridge makes (BridgeSSH dials 127.0.0.1 or ::1), so a managed key never opens a session that
-	// bypasses the stream and survives revocation (direct sshd over LAN or tailnet is refused at login).
-	managedAuthorizedKeyFrom = `from="127.0.0.1,::1"`
-	maxAuthorizedKeysBytes   = 4 << 20
+	maxAuthorizedKeysBytes     = 4 << 20
 )
 
 var ErrAuthorizedKeysConflict = errors.New("managed SSH authorized_keys reconciliation conflict")
@@ -37,8 +33,10 @@ type AuthorizedKeysResult struct {
 	Count   int
 }
 
-func ReconcileAuthorizedKeys(home string, ownerUID uint32, publicKeys []string) (AuthorizedKeysResult, error) {
-	if !filepath.IsAbs(home) || len(publicKeys) > wire.MaxClientKeys {
+// ReconcileAuthorizedKeys makes the Paperboat lines of the owner's authorized_keys trust exactly caKeys for
+// certificates carrying principal (wire.CATrustOptions). The file is the owner's, so only the owner logs in by it.
+func ReconcileAuthorizedKeys(home string, ownerUID uint32, caKeys []string, principal string) (AuthorizedKeysResult, error) {
+	if !filepath.IsAbs(home) || len(caKeys) > wire.MaxUserCAs || len(caKeys) > 0 && !wire.ValidCAPrincipal(principal) {
 		return AuthorizedKeysResult{}, ErrAuthorizedKeysConflict
 	}
 	home = filepath.Clean(home)
@@ -90,7 +88,7 @@ func ReconcileAuthorizedKeys(home string, ownerUID uint32, publicKeys []string) 
 	if err != nil {
 		return AuthorizedKeysResult{}, err
 	}
-	managed, err := canonicalManagedAuthorizedKeys(publicKeys)
+	managed, err := canonicalManagedAuthorizedKeys(caKeys, principal)
 	if err != nil {
 		return AuthorizedKeysResult{}, err
 	}
@@ -124,7 +122,7 @@ func openAuthorizedKeysLock(directoryFD int) (int, bool, error) {
 	return fd, false, err
 }
 
-func canonicalManagedAuthorizedKeys(values []string) ([]string, error) {
+func canonicalManagedAuthorizedKeys(values []string, principal string) ([]string, error) {
 	result := make([]string, 0, len(values))
 	seen := make(map[[32]byte]bool, len(values))
 	for _, value := range values {
@@ -138,7 +136,7 @@ func canonicalManagedAuthorizedKeys(values []string) ([]string, error) {
 		}
 		seen[fingerprint] = true
 		canonical := strings.TrimSpace(string(ssh.MarshalAuthorizedKey(public)))
-		result = append(result, managedAuthorizedKeyFrom+" "+canonical+" "+managedAuthorizedKeyMarker+hex.EncodeToString(fingerprint[:]))
+		result = append(result, wire.CATrustOptions(principal)+" "+canonical+" "+managedAuthorizedKeyMarker+hex.EncodeToString(fingerprint[:]))
 	}
 	slices.Sort(result)
 	return result, nil
@@ -157,8 +155,8 @@ func replaceManagedAuthorizedKeys(existing []byte, managed []string) ([]byte, er
 		trimmed := bytes.TrimSuffix(line, []byte{'\n'})
 		trimmed = bytes.TrimSuffix(trimmed, []byte{'\r'})
 		public, comment, options, rest, err := ssh.ParseAuthorizedKey(trimmed)
-		// A managed line is ours with the loopback option, or without it (edited out): both are replaced.
-		if err != nil || public.Type() != ssh.KeyAlgoED25519 || len(options) > 1 || len(options) == 1 && options[0] != managedAuthorizedKeyFrom || len(strings.TrimSpace(string(rest))) != 0 {
+		// A managed line is ours with our options or some of them edited out: it is replaced.
+		if err != nil || public.Type() != ssh.KeyAlgoED25519 || !managedOptions(options) || len(strings.TrimSpace(string(rest))) != 0 {
 			return nil, ErrAuthorizedKeysConflict
 		}
 		fingerprint := sha256.Sum256(public.Marshal())
@@ -176,6 +174,24 @@ func replaceManagedAuthorizedKeys(existing []byte, managed []string) ([]byte, er
 		}
 	}
 	return result, nil
+}
+
+// managedOptions: our options (wire.CATrustOptions), any principal, each at most once, some possibly edited out.
+func managedOptions(options []string) bool {
+	seen := map[string]bool{}
+	for _, option := range options {
+		kind := option
+		if principal, ok := strings.CutPrefix(option, `principals="`); ok && strings.HasSuffix(principal, `"`) && wire.ValidCAPrincipal(strings.TrimSuffix(principal, `"`)) {
+			kind = "principals"
+		} else if option != "cert-authority" && option != `from="127.0.0.1,::1"` {
+			return false
+		}
+		if seen[kind] {
+			return false
+		}
+		seen[kind] = true
+	}
+	return true
 }
 
 func validateOwnedDirectory(path string, ownerUID uint32, strictMode bool) error {

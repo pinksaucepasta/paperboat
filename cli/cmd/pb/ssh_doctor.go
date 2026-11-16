@@ -99,7 +99,13 @@ func actionSSHDoctor(command *cobra.Command, args []string) error {
 		_ = connection.Close()
 		return refused
 	}
-	authErr := managedssh.ProbeSSHAuthentication(probeCtx, bufferedStream{ReadWriteCloser: connection, reader: reader}, net.JoinHostPort(host, strconv.Itoa(int(target.Port))), target.OSUser, identity.Signer, keys.Keys)
+	signer, err := sshCertificateSigner(actionContext(command, args), client, machine, target, identity.Signer)
+	if err != nil {
+		stopWatch()
+		_ = connection.Close()
+		return fmt.Errorf("managed SSH certificate is not ready: %w", err)
+	}
+	authErr := managedssh.ProbeSSHAuthentication(probeCtx, bufferedStream{ReadWriteCloser: connection, reader: reader}, net.JoinHostPort(host, strconv.Itoa(int(target.Port))), target.OSUser, signer, keys.Keys)
 	stopWatch()
 	closeErr := connection.Close()
 	if authErr != nil {

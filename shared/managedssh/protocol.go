@@ -1,17 +1,6 @@
 // Package managedssh defines the managed SSH wire documents and public-key identity.
 package managedssh
 
-type ClientKeyDocument struct {
-	Type                  string `json:"type"`
-	Version               int    `json:"version"`
-	Fingerprint           string `json:"fingerprint"`
-	PublicKey             string `json:"public_key"`
-	State                 string `json:"state"`
-	ReconciliationVersion uint64 `json:"reconciliation_version"`
-	CreatedAt             string `json:"created_at"`
-	RevokedAt             string `json:"revoked_at,omitempty"`
-}
-
 type TargetDocument struct {
 	Type                  string `json:"type"`
 	Version               int    `json:"version"`
@@ -39,10 +28,24 @@ type HostKeySetDocument struct {
 	PromotedAt            string   `json:"promoted_at,omitempty"`
 }
 
-type AuthorizedKeysDocument struct {
+// CertificateDocument is a short-lived user certificate for one machine: principal OSUser, usable until ValidBefore.
+type CertificateDocument struct {
+	Type              string `json:"type"`
+	Version           int    `json:"version"`
+	MachineID         string `json:"machine_id"`
+	MachineGeneration uint64 `json:"machine_generation"`
+	OSUser            string `json:"os_user"`
+	Certificate       string `json:"certificate"`
+	ValidBefore       string `json:"valid_before"`
+}
+
+// UserCAsDocument lists the user CA public keys a machine trusts for managed SSH (at most MaxUserCAs) and the
+// revocation principal every certificate must carry (the CA lines' principals= option).
+type UserCAsDocument struct {
 	Type              string   `json:"type"`
 	Version           int      `json:"version"`
 	MachineID         string   `json:"machine_id"`
 	MachineGeneration uint64   `json:"machine_generation"`
 	Keys              []string `json:"keys"`
+	Principal         string   `json:"principal"`
 }

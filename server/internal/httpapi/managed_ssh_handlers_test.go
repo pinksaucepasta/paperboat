@@ -3,13 +3,12 @@ package httpapi
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
-	wire "github.com/pinksaucepasta/paperboat/shared/managedssh"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"syscall"
 	"testing"
+
+	wire "github.com/pinksaucepasta/paperboat/shared/managedssh"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/managedssh"
 )
@@ -23,12 +22,9 @@ func TestManagedSSHErrorPreservesPureResponsesAndReportsOperationalFailures(t *t
 	}{
 		{"invalid", wire.ErrInvalid, 400, "invalid_request"},
 		{"conflict", managedssh.ErrConflict, 409, "operation_conflict"},
-		{"capacity", managedssh.ErrMachineKeyCapacity, 409, "managed_ssh_key_capacity"},
-		{"client key capacity", managedssh.ErrClientKeyCapacity, 409, "managed_ssh_client_key_capacity"},
 		{"unavailable", managedssh.ErrUnavailable, 404, "not_found"},
 		{"native IO", syscall.EIO, 503, "managed_ssh_unavailable"},
 		{"mixed conflict", errors.Join(managedssh.ErrConflict, syscall.EIO), 503, "managed_ssh_unavailable"},
-		{"mixed capacity", errors.Join(managedssh.ErrMachineKeyCapacity, syscall.EIO), 503, "managed_ssh_unavailable"},
 		{"mixed unavailable", errors.Join(managedssh.ErrUnavailable, syscall.EIO), 503, "managed_ssh_unavailable"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -43,10 +39,6 @@ func TestManagedSSHErrorPreservesPureResponsesAndReportsOperationalFailures(t *t
 			}
 			if body.Error.Code != tc.code {
 				t.Fatalf("code=%s want%s", body.Error.Code, tc.code)
-			}
-			// The refusal names the limit and the way out, so a user at the cap knows what to free.
-			if tc.code == "managed_ssh_client_key_capacity" && (!strings.Contains(body.Error.Message, fmt.Sprintf("%d signed-in computers", wire.MaxClientKeys)) || !strings.Contains(body.Error.Message, "pb logout")) {
-				t.Fatalf("capacity message = %q", body.Error.Message)
 			}
 			if tc.status < 500 {
 				if logs.Len() != 0 {

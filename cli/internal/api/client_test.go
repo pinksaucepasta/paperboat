@@ -146,18 +146,18 @@ func TestPrepareAuthenticatedMachineInstallationBindsMachineOperationAndGenerati
 	}
 }
 
-func TestManagedSSHAuthorizedKeysReportsSafeContractMismatch(t *testing.T) {
+func TestManagedSSHUserCAsReportsSafeContractMismatch(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost || r.URL.Path != "/v1/machines/machine_1/ssh-authorized-keys" {
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/machines/machine_1/ssh-user-cas" {
 			http.NotFound(w, r)
 			return
 		}
-		writeData(w, http.StatusOK, ManagedSSHAuthorizedKeys{Type: "PRIVATE_PAYLOAD", Version: 1, MachineID: "PRIVATE_MACHINE", MachineGeneration: 2})
+		writeData(w, http.StatusOK, ManagedSSHUserCAs{Type: "PRIVATE_PAYLOAD", Version: 1, MachineID: "PRIVATE_MACHINE", MachineGeneration: 2})
 	}))
 	defer server.Close()
 
-	_, err := New(server.URL, config.Credential{}, server.Client()).ManagedSSHAuthorizedKeys(t.Context(), "machine_1", "credential_1", 1, []byte("proof"))
-	if err == nil || err.Error() != "paperboat-server returned an invalid managed SSH authorized-key set" || strings.Contains(err.Error(), "PRIVATE") {
+	_, err := New(server.URL, config.Credential{}, server.Client()).ManagedSSHUserCAs(t.Context(), "machine_1", "credential_1", 1, []byte("proof"))
+	if err == nil || err.Error() != "paperboat-server returned an invalid managed SSH user CA set" || strings.Contains(err.Error(), "PRIVATE") {
 		t.Fatalf("err=%v", err)
 	}
 }
@@ -470,24 +470,27 @@ func TestObserveManagedSSHHostKeysAcceptsReusedActiveSet(t *testing.T) {
 	}
 }
 
-func TestManagedSSHClientKeyRegistrationBindsFingerprintAndIdempotency(t *testing.T) {
-	var requestPath, operationID, body string
-	fingerprint := [32]byte{1, 2, 3}
+func TestIssueManagedSSHCertificateSendsMachineAndKeyAndChecksTheAnswer(t *testing.T) {
+	var requestPath, body string
+	answer := ManagedSSHCertificate{Type: "ssh_user_certificate", Version: 1, MachineID: "um_1", MachineGeneration: 3, OSUser: "alice", Certificate: "ssh-ed25519-cert-v01@openssh.com AAAA", ValidBefore: "2026-11-16T10:00:00Z"}
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		requestPath = request.URL.Path
-		operationID = request.Header.Get("Idempotency-Key")
+		requestPath = request.Method + " " + request.URL.Path
 		value, _ := io.ReadAll(request.Body)
 		body = string(value)
-		writeData(writer, http.StatusCreated, ManagedSSHClientKey{Type: "client_key", Version: 1, Fingerprint: "SHA256:AQIDAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", PublicKey: "ssh-ed25519 AAAA test", State: "active", ReconciliationVersion: 1})
+		writeData(writer, http.StatusOK, answer)
 	}))
 	defer server.Close()
 	client := New(server.URL, config.Credential{AccessToken: "token"}, server.Client())
-	key, err := client.RegisterManagedSSHClientKey(context.Background(), "ssh-ed25519 AAAA test", fingerprint, "managed-ssh-operation-1")
-	if err != nil || key.State != "active" {
-		t.Fatalf("key=%+v err=%v", key, err)
+	certificate, err := client.IssueManagedSSHCertificate(context.Background(), "um_1", 3, "ssh-ed25519 AAAA test\n")
+	if err != nil || certificate != answer {
+		t.Fatalf("certificate=%+v err=%v", certificate, err)
 	}
-	if requestPath != "/v1/ssh/client-keys/SHA256:AQIDAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" || operationID != "managed-ssh-operation-1" || body != `{"public_key":"ssh-ed25519 AAAA test"}` {
-		t.Fatalf("path=%q operation=%q body=%q", requestPath, operationID, body)
+	if requestPath != "POST /v1/machines/um_1/ssh-certificate" || body != `{"machine_generation":3,"public_key":"ssh-ed25519 AAAA test"}` {
+		t.Fatalf("request=%q body=%q", requestPath, body)
+	}
+	answer.MachineID = "um_other"
+	if _, err := client.IssueManagedSSHCertificate(context.Background(), "um_1", 3, "ssh-ed25519 AAAA test"); err == nil {
+		t.Fatal("a certificate for another machine was accepted")
 	}
 }
 

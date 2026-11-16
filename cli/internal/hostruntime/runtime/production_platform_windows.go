@@ -224,7 +224,7 @@ func cleanupProductionManagedSSH(ctx context.Context, _ runtimeidentity.Registra
 	if err != nil {
 		return err
 	}
-	_, err = reconcilePlatformAuthorizedKeys(filepath.Join(root, "ssh"), 0, nil)
+	_, err = reconcilePlatformAuthorizedKeys(filepath.Join(root, "ssh"), 0, nil, "")
 	return err
 }
 

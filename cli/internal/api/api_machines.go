@@ -137,21 +137,25 @@ type ManagedSSHHostKeySet struct {
 	ReconciliationVersion uint64   `json:"reconciliation_version"`
 }
 
-type ManagedSSHAuthorizedKeys struct {
+// ManagedSSHUserCAs are the user CA public keys a machine trusts for managed SSH logins.
+type ManagedSSHUserCAs struct {
 	Type              string   `json:"type"`
 	Version           int      `json:"version"`
 	MachineID         string   `json:"machine_id"`
 	MachineGeneration uint64   `json:"machine_generation"`
 	Keys              []string `json:"keys"`
+	Principal         string   `json:"principal"`
 }
 
-type ManagedSSHClientKey struct {
-	Type                  string `json:"type"`
-	Version               int    `json:"version"`
-	Fingerprint           string `json:"fingerprint"`
-	PublicKey             string `json:"public_key"`
-	State                 string `json:"state"`
-	ReconciliationVersion uint64 `json:"reconciliation_version"`
+// ManagedSSHCertificate is a short-lived user certificate for one machine.
+type ManagedSSHCertificate struct {
+	Type              string `json:"type"`
+	Version           int    `json:"version"`
+	MachineID         string `json:"machine_id"`
+	MachineGeneration uint64 `json:"machine_generation"`
+	OSUser            string `json:"os_user"`
+	Certificate       string `json:"certificate"`
+	ValidBefore       string `json:"valid_before"`
 }
 
 type ClientInstallation struct {

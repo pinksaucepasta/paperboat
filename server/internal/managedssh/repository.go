@@ -9,17 +9,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/pinksaucepasta/paperboat/server/internal/machineevents"
-	wire "github.com/pinksaucepasta/paperboat/shared/managedssh"
 	"math"
 	"reflect"
 	"slices"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/server/internal/machineevents"
+	wire "github.com/pinksaucepasta/paperboat/shared/managedssh"
+
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/pinksaucepasta/paperboat/server/internal/audit"
-	"github.com/pinksaucepasta/paperboat/server/internal/config"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
 	"github.com/pinksaucepasta/paperboat/server/internal/teams"
@@ -42,208 +42,13 @@ type SQLRepository struct {
 	replacer MachineReplacer
 	store    *db.DB
 	audit    *audit.Writer
-	// clientKeyWindow is how recently a CLI session must have been used for its SSH key to count.
-	clientKeyWindow time.Duration
 }
 
 func NewSQLRepository(store *db.DB, writer *audit.Writer) (*SQLRepository, error) {
 	if store == nil || writer == nil {
 		return nil, wire.ErrInvalid
 	}
-	return &SQLRepository{store: store, audit: writer, clientKeyWindow: config.Default().ManagedSSH.ClientKeyActiveWindow}, nil
-}
-
-// WithClientKeyWindow sets how recently a CLI session must have been used for its SSH key to count
-// toward capacity and authorized keys.
-func (r *SQLRepository) WithClientKeyWindow(window time.Duration) *SQLRepository {
-	if window > 0 {
-		r.clientKeyWindow = window
-	}
-	return r
-}
-
-func (r *SQLRepository) usedSince(now time.Time) time.Time { return now.Add(-r.clientKeyWindow) }
-
-func (r *SQLRepository) RegisterClient(ctx context.Context, request RegisterClientRequest, proposed ClientKey) (ClientKey, error) {
-	var result ClientKey
-	requestHash := managedOperationHash(struct {
-		SessionID string
-		PublicKey string
-	}{request.CLIClientSessionID, proposed.PublicKey})
-	err := r.store.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-		q := tx.Queries()
-		if _, err := q.ResolveManagedSSHClientAuthorityForUpdate(ctx, dbsqlc.ResolveManagedSSHClientAuthorityForUpdateParams{CLIClientSessionID: request.CLIClientSessionID, UserID: request.UserID}); err != nil {
-			return authorityError(err)
-		}
-		operation, err := managedOperationReplay(ctx, q, request.OperationID, request.UserID, "client_key_register", requestHash)
-		if err != nil {
-			return err
-		}
-		if operation != nil {
-			row, getErr := q.GetManagedSSHClientKeyByFingerprint(ctx, proposed.Fingerprint[:])
-			if getErr != nil {
-				return getErr
-			}
-			if !sameClientKey(row, proposed) {
-				return ErrConflict
-			}
-			result, err = clientKeyFromRow(row)
-			return err
-		}
-		active, err := q.GetActiveManagedSSHClientKeyForUpdate(ctx, request.CLIClientSessionID)
-		if err == nil && active.PublicKey != proposed.PublicKey {
-			// The session's endpoint replaced its key (lost local secret, key scope change): its own login
-			// moves to the new key, as a logout + login would. Tailscale rotates node keys the same way.
-			if _, err := q.RevokeManagedSSHClientKey(ctx, dbsqlc.RevokeManagedSSHClientKeyParams{RevokedAt: sql.NullTime{Time: request.Now, Valid: true}, RevocationReason: sql.NullString{String: "key_rotated", Valid: true}, Fingerprint: active.Fingerprint}); err != nil {
-				return err
-			}
-			err = pgx.ErrNoRows
-		}
-		if err == nil {
-			if !sameClientKey(active, proposed) {
-				return ErrConflict
-			}
-			result, err = clientKeyFromRow(active)
-			if err != nil {
-				return err
-			}
-			return createManagedOperation(ctx, q, request.OperationID, request.UserID, "client_key_register", requestHash, hex.EncodeToString(proposed.Fingerprint[:]), result.ReconciliationVersion, request.Now)
-		}
-		if err != pgx.ErrNoRows {
-			return err
-		}
-		activeCount, err := q.CountActiveManagedSSHClientKeysForUser(ctx, dbsqlc.CountActiveManagedSSHClientKeysForUserParams{Fingerprint: proposed.Fingerprint[:], UserID: request.UserID, UsedSince: sql.NullTime{Time: r.usedSince(request.Now), Valid: true}})
-		if err != nil {
-			return err
-		}
-		if activeCount >= wire.MaxClientKeys {
-			return ErrClientKeyCapacity
-		}
-		existing, err := q.GetManagedSSHClientKeyByFingerprint(ctx, proposed.Fingerprint[:])
-		if err == nil {
-			existing, err = reuseClientKey(ctx, tx, existing, proposed)
-			if err != nil {
-				return err
-			}
-			result, err = clientKeyFromRow(existing)
-			if err != nil {
-				return err
-			}
-			return createManagedOperation(ctx, q, request.OperationID, request.UserID, "client_key_register", requestHash, hex.EncodeToString(proposed.Fingerprint[:]), result.ReconciliationVersion, request.Now)
-		}
-		if err != pgx.ErrNoRows {
-			return err
-		}
-		created, err := q.CreateManagedSSHClientKey(ctx, dbsqlc.CreateManagedSSHClientKeyParams{Fingerprint: proposed.Fingerprint[:], UserID: proposed.UserID, CLIClientSessionID: proposed.CLIClientSessionID, Algorithm: proposed.Algorithm, PublicKey: proposed.PublicKey, ReconciliationVersion: int64(proposed.ReconciliationVersion), CreatedAt: proposed.CreatedAt})
-		if err != nil {
-			return err
-		}
-		result, err = clientKeyFromRow(created)
-		if err != nil {
-			return err
-		}
-		if err := createManagedOperation(ctx, q, request.OperationID, request.UserID, "client_key_register", requestHash, hex.EncodeToString(proposed.Fingerprint[:]), result.ReconciliationVersion, request.Now); err != nil {
-			return err
-		}
-		return r.audit.WriteTx(ctx, tx, audit.Event{ActorUserID: request.UserID, ActorType: audit.ActorUser, EventType: "managed_ssh.client_key_registered", ResourceType: "managed_ssh_client_key", ResourceID: hex.EncodeToString(proposed.Fingerprint[:]), IdempotencyKey: request.OperationID, Metadata: map[string]any{"cli_client_session_id": request.CLIClientSessionID, "algorithm": proposed.Algorithm, "reconciliation_version": proposed.ReconciliationVersion}})
-	})
-	return result, conflictOnUnique(err)
-}
-
-// A fresh login moves this endpoint's account key to its new session. Revoking
-// the old session then cannot remove authority belonging to the new login.
-func reuseClientKey(ctx context.Context, tx *db.Tx, existing dbsqlc.ManagedSshClientKey, proposed ClientKey) (dbsqlc.ManagedSshClientKey, error) {
-	if existing.UserID != proposed.UserID || existing.Algorithm != proposed.Algorithm || existing.PublicKey != proposed.PublicKey {
-		return existing, ErrConflict
-	}
-	if existing.CLIClientSessionID == proposed.CLIClientSessionID {
-		return existing, nil
-	}
-	if _, err := tx.Exec(ctx, `UPDATE managed_ssh_client_keys
- SET cli_client_session_id=$2, state='active', revoked_at=NULL, revocation_reason=NULL,
- reconciliation_version=reconciliation_version+1 WHERE fingerprint=$1`, proposed.Fingerprint[:], proposed.CLIClientSessionID); err != nil {
-		return existing, err
-	}
-	// An idle key may already be absent from hosts although its row stays active.
-	// Rebinding it must wake their authorized_keys sync even without a state change.
-	if _, err := tx.Exec(ctx, `SELECT publish_managed_ssh_account($1)`, proposed.UserID); err != nil {
-		return existing, err
-	}
-	return tx.Queries().GetManagedSSHClientKeyByFingerprint(ctx, proposed.Fingerprint[:])
-}
-
-func (r *SQLRepository) RevokeClient(ctx context.Context, request RevokeClientRequest) (ClientKey, error) {
-	var result ClientKey
-	requestHash := managedOperationHash(struct {
-		Fingerprint [32]byte
-		Reason      string
-	}{request.Fingerprint, request.Reason})
-	err := r.store.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-		q := tx.Queries()
-		operation, err := managedOperationReplay(ctx, q, request.OperationID, request.ActorUserID, "client_key_revoke", requestHash)
-		if err != nil {
-			return err
-		}
-		row, err := q.GetManagedSSHClientKeyByFingerprint(ctx, request.Fingerprint[:])
-		if err == pgx.ErrNoRows {
-			return ErrUnavailable
-		}
-		if err != nil {
-			return err
-		}
-		if row.UserID != request.ActorUserID {
-			return ErrConflict
-		}
-		if row.State == "revoked" {
-			if row.RevocationReason.String != request.Reason || operation == nil {
-				return ErrConflict
-			}
-			result, err = clientKeyFromRow(row)
-			return err
-		}
-		row, err = q.RevokeManagedSSHClientKey(ctx, dbsqlc.RevokeManagedSSHClientKeyParams{RevokedAt: sql.NullTime{Time: request.Now, Valid: true}, RevocationReason: sql.NullString{String: request.Reason, Valid: true}, Fingerprint: request.Fingerprint[:]})
-		if err == pgx.ErrNoRows {
-			return ErrUnavailable
-		}
-		if err != nil {
-			return err
-		}
-		result, err = clientKeyFromRow(row)
-		if err != nil {
-			return err
-		}
-		if err := createManagedOperation(ctx, q, request.OperationID, request.ActorUserID, "client_key_revoke", requestHash, hex.EncodeToString(request.Fingerprint[:]), result.ReconciliationVersion, request.Now); err != nil {
-			return err
-		}
-		return r.audit.WriteTx(ctx, tx, audit.Event{ActorUserID: request.ActorUserID, ActorType: audit.ActorUser, EventType: "managed_ssh.client_key_revoked", ResourceType: "managed_ssh_client_key", ResourceID: hex.EncodeToString(request.Fingerprint[:]), IdempotencyKey: request.OperationID, Metadata: map[string]any{"reason": request.Reason, "reconciliation_version": result.ReconciliationVersion}})
-	})
-	return result, err
-}
-
-func (r *SQLRepository) ListClientKeys(ctx context.Context, request ListClientKeysRequest) (ClientKeySet, error) {
-	result := ClientKeySet{UserMachineID: request.UserMachineID, MachineGeneration: request.MachineGeneration}
-	err := r.store.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-		if _, err := tx.Queries().ResolveMachineSSHHostKeyAuthorityForUpdate(ctx, dbsqlc.ResolveMachineSSHHostKeyAuthorityForUpdateParams{UserMachineID: request.UserMachineID, UserID: request.ActorUserID, MachineGeneration: int64(request.MachineGeneration)}); err != nil {
-			return authorityError(err)
-		}
-		rows, err := tx.Queries().ListActiveManagedSSHClientKeysForMachine(ctx, dbsqlc.ListActiveManagedSSHClientKeysForMachineParams{MachineID: request.UserMachineID, UsedSince: sql.NullTime{Time: r.usedSince(time.Now()), Valid: true}})
-		if err != nil {
-			return err
-		}
-		if len(rows) > wire.MaxClientKeys {
-			return errors.Join(ErrUnavailable, ErrMachineKeyCapacity)
-		}
-		result.Keys = make([]ClientKey, 0, len(rows))
-		for _, row := range rows {
-			key, err := clientKeyFromRow(row)
-			if err != nil {
-				return err
-			}
-			result.Keys = append(result.Keys, key)
-		}
-		return nil
-	})
-	return result, err
+	return &SQLRepository{store: store, audit: writer}, nil
 }
 
 func (r *SQLRepository) RegisterTarget(ctx context.Context, request RegisterTargetRequest) (MachineTarget, error) {
@@ -709,14 +514,6 @@ func loadHostKeySet(ctx context.Context, q *dbsqlc.Queries, row dbsqlc.MachineSs
 	return result, nil
 }
 
-func clientKeyFromRow(row dbsqlc.ManagedSshClientKey) (ClientKey, error) {
-	fingerprint, err := fingerprintFromBytes(row.Fingerprint)
-	if err != nil {
-		return ClientKey{}, err
-	}
-	return ClientKey{Fingerprint: fingerprint, UserID: row.UserID, CLIClientSessionID: row.CLIClientSessionID, Algorithm: row.Algorithm, PublicKey: row.PublicKey, State: row.State, ReconciliationVersion: uint64(row.ReconciliationVersion), CreatedAt: row.CreatedAt, RevokedAt: nullTime(row.RevokedAt), RevocationReason: row.RevocationReason.String}, nil
-}
-
 func hostKeySetFromRow(row dbsqlc.MachineSshHostKeySet) (HostKeySet, error) {
 	fingerprint, err := fingerprintFromBytes(row.SetFingerprint)
 	if err != nil {
@@ -739,10 +536,6 @@ func fingerprintFromBytes(value []byte) ([32]byte, error) {
 	}
 	copy(result[:], value)
 	return result, nil
-}
-
-func sameClientKey(row dbsqlc.ManagedSshClientKey, proposed ClientKey) bool {
-	return bytes.Equal(row.Fingerprint, proposed.Fingerprint[:]) && row.UserID == proposed.UserID && row.CLIClientSessionID == proposed.CLIClientSessionID && row.Algorithm == proposed.Algorithm && row.PublicKey == proposed.PublicKey
 }
 
 func authorityError(err error) error {

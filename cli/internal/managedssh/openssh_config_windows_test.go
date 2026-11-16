@@ -33,11 +33,12 @@ func TestValidateInstalledOpenSSHConfigAcceptsTargetBlocks(t *testing.T) {
 	home := managedSSHWindowsTestHome(t)
 	agentSocket := `\\.\pipe\paperboat-ssh-agent-test`
 	config := OpenSSHConfig{AliasDomain: testAliasDomain,
-		Home:              home,
-		ProxyCommand:      `"C:\Program Files\Paperboat\bin\pb.exe" __ssh-proxy --host %h --port %p --user %r`,
-		KnownHostsCommand: `"C:\Program Files\Paperboat\bin\pb.exe" __ssh-known-hosts --host %h --port %p`,
-		AgentSocket:       agentSocket,
-		IdentityFile:      ManagedIdentityPublicKeyPath(home),
+		Home:               home,
+		ProxyCommand:       `"C:\Program Files\Paperboat\bin\pb.exe" __ssh-proxy --host %h --port %p --user %r`,
+		KnownHostsCommand:  `"C:\Program Files\Paperboat\bin\pb.exe" __ssh-known-hosts --host %h --port %p`,
+		AgentSocket:        agentSocket,
+		IdentityFile:       ManagedIdentityPublicKeyPath(home),
+		CertificateCommand: "//?/C:/PROGRA~1/PAPERB~1/bin/pb.exe",
 		Targets: []OpenSSHAliasTarget{
 			{Alias: "hn", User: "root", Port: 22},
 			{Alias: "victus", User: "Pujan", Port: 38222},

@@ -1,14 +1,3 @@
--- name: ResolveManagedSSHClientAuthorityForUpdate :one
-SELECT session.id AS cli_client_session_id, session.user_id, session.version
-FROM cli_client_sessions session
-JOIN users owner ON owner.id = session.user_id
-WHERE session.id = sqlc.arg(cli_client_session_id)
-  AND session.user_id = sqlc.arg(user_id)
-  AND session.state = 'active'
-  AND session.revoked_at IS NULL
-  AND owner.status = 'active'
-FOR UPDATE OF session, owner;
-
 -- name: GetManagedSSHOperationForUpdate :one
 SELECT * FROM managed_ssh_operations
 WHERE operation_id = sqlc.arg(operation_id)
@@ -23,48 +12,6 @@ VALUES
    sqlc.arg(request_hash), sqlc.arg(resource_id), sqlc.arg(result_revision),
    sqlc.arg(created_at))
 RETURNING *;
-
--- name: GetManagedSSHClientKeyByFingerprint :one
-SELECT * FROM managed_ssh_client_keys
-WHERE fingerprint = sqlc.arg(fingerprint)
-FOR UPDATE;
-
--- name: GetActiveManagedSSHClientKeyForUpdate :one
-SELECT * FROM managed_ssh_client_keys
-WHERE cli_client_session_id = sqlc.arg(cli_client_session_id) AND state = 'active'
-FOR UPDATE;
-
--- name: CreateManagedSSHClientKey :one
-INSERT INTO managed_ssh_client_keys
-  (fingerprint, user_id, cli_client_session_id, algorithm, public_key,
-   reconciliation_version, created_at)
-VALUES
-  (sqlc.arg(fingerprint), sqlc.arg(user_id), sqlc.arg(cli_client_session_id),
-   sqlc.arg(algorithm), sqlc.arg(public_key), sqlc.arg(reconciliation_version),
-   sqlc.arg(created_at))
-RETURNING *;
-
--- name: RevokeManagedSSHClientKey :one
-UPDATE managed_ssh_client_keys
-SET state = 'revoked', revoked_at = sqlc.arg(revoked_at),
-    revocation_reason = sqlc.arg(revocation_reason),
-    reconciliation_version = reconciliation_version + 1
-WHERE fingerprint = sqlc.arg(fingerprint) AND state = 'active'
-RETURNING *;
-
--- name: ListActiveManagedSSHClientKeysForUser :many
-SELECT k.* FROM managed_ssh_client_keys k
-JOIN cli_client_sessions cs ON cs.id = k.cli_client_session_id AND cs.state = 'active'
-  AND coalesce(cs.last_used_at, cs.created_at) >= sqlc.arg(used_since)
-WHERE k.user_id = sqlc.arg(user_id) AND k.state = 'active'
-ORDER BY k.created_at DESC, k.cli_client_session_id DESC
-LIMIT 256;
-
--- name: CountActiveManagedSSHClientKeysForUser :one
-SELECT count(*) FROM managed_ssh_client_keys k
-JOIN cli_client_sessions cs ON cs.id = k.cli_client_session_id AND cs.state = 'active'
-  AND coalesce(cs.last_used_at, cs.created_at) >= sqlc.arg(used_since)
-WHERE k.user_id = sqlc.arg(user_id) AND k.state = 'active' AND k.fingerprint <> sqlc.arg(fingerprint);
 
 -- name: ResolveMachineSSHHostKeyAuthorityForUpdate :one
 SELECT machine.id AS user_machine_id, machine.user_id, machine.installation_generation
@@ -209,13 +156,6 @@ SET state = 'active', promoted_at = sqlc.arg(promoted_at),
 WHERE id = sqlc.arg(id) AND state = 'pending'
 RETURNING *;
 
--- name: ListActiveManagedSSHClientKeysForMachine :many
-SELECT k.* FROM managed_ssh_client_keys k
-JOIN cli_client_sessions cs ON cs.id=k.cli_client_session_id AND cs.user_id=k.user_id AND cs.state='active' AND cs.revoked_at IS NULL
- AND coalesce(cs.last_used_at,cs.created_at) >= sqlc.arg(used_since)
-WHERE k.state='active' AND machine_capability_allowed(k.user_id,sqlc.arg(machine_id),'managed_ssh')
-ORDER BY k.created_at DESC,k.cli_client_session_id DESC LIMIT 257;
-
 -- name: ResolveMachineSSHUseAuthorityForUpdate :one
 SELECT m.id FROM user_machines m WHERE m.id=sqlc.arg(machine_id)
 AND m.installation_generation=sqlc.arg(machine_generation)
@@ -246,3 +186,60 @@ SELECT * FROM machine_ssh_host_key_sets WHERE user_machine_id = sqlc.arg(user_ma
 
 -- name: GetPendingMachineSSHHostKeySet :one
 SELECT * FROM machine_ssh_host_key_sets WHERE user_machine_id = sqlc.arg(user_machine_id) AND state = 'pending';
+
+-- name: ResolveMachineSSHCertificateAuthority :one
+-- One read for certificate issuance: the CLI session is live, the user may use managed SSH on the exact machine and
+-- generation, and the machine has a target. account_id names the CA (the machine's immutable owner account).
+SELECT m.user_id AS account_id, t.os_user FROM user_machines m
+JOIN machine_ssh_targets t ON t.user_machine_id = m.id AND t.machine_generation = m.installation_generation
+JOIN cli_client_sessions session ON session.id = sqlc.arg(cli_client_session_id) AND session.user_id = sqlc.arg(user_id)
+  AND session.state = 'active' AND session.revoked_at IS NULL
+WHERE m.id = sqlc.arg(machine_id) AND m.installation_generation = sqlc.arg(machine_generation)
+AND ((m.owner_team_id IS NULL AND m.user_id = sqlc.arg(user_id) AND m.deleted_at IS NULL)
+  OR machine_capability_allowed(sqlc.arg(user_id), m.id, 'managed_ssh') OR machine_management_allowed(sqlc.arg(user_id), m.id))
+AND m.state NOT IN ('revoked', 'disconnected', 'deleted');
+
+-- name: CreateFirstManagedSSHUserCA :exec
+-- The account's first CA, made on first use; a concurrent first use keeps the row that won.
+INSERT INTO managed_ssh_user_cas (id, account_id, state, public_key, private_key_ciphertext, created_at, state_changed_at)
+SELECT sqlc.arg(id), sqlc.arg(account_id), 'active', sqlc.arg(public_key), sqlc.arg(private_key_ciphertext), sqlc.arg(now), sqlc.arg(now)
+WHERE NOT EXISTS (SELECT 1 FROM managed_ssh_user_cas WHERE account_id = sqlc.arg(account_id))
+ON CONFLICT DO NOTHING;
+
+-- name: CreatePendingManagedSSHUserCA :exec
+INSERT INTO managed_ssh_user_cas (id, account_id, state, public_key, private_key_ciphertext, created_at, state_changed_at)
+VALUES (sqlc.arg(id), sqlc.arg(account_id), 'pending', sqlc.arg(public_key), sqlc.arg(private_key_ciphertext), sqlc.arg(now), sqlc.arg(now));
+
+-- name: GetActiveManagedSSHUserCA :one
+SELECT * FROM managed_ssh_user_cas WHERE account_id = sqlc.arg(account_id) AND state = 'active';
+
+-- name: ListManagedSSHUserCAs :many
+SELECT * FROM managed_ssh_user_cas WHERE account_id = sqlc.arg(account_id)
+ORDER BY created_at, CASE state WHEN 'retiring' THEN 0 WHEN 'active' THEN 1 ELSE 2 END;
+
+-- name: SetManagedSSHUserCAState :exec
+UPDATE managed_ssh_user_cas SET state = sqlc.arg(new_state), state_changed_at = sqlc.arg(now)
+WHERE account_id = sqlc.arg(account_id) AND state = sqlc.arg(old_state);
+
+-- name: DeleteManagedSSHUserCA :exec
+DELETE FROM managed_ssh_user_cas WHERE account_id = sqlc.arg(account_id) AND state = sqlc.arg(state);
+
+-- name: RecordManagedSSHCertificateHolder :exec
+INSERT INTO managed_ssh_certificate_holders (machine_id, cli_client_session_id, user_id, valid_before)
+VALUES (sqlc.arg(machine_id), sqlc.arg(cli_client_session_id), sqlc.arg(user_id), sqlc.arg(valid_before))
+ON CONFLICT (machine_id, cli_client_session_id) DO UPDATE SET valid_before = GREATEST(managed_ssh_certificate_holders.valid_before, EXCLUDED.valid_before);
+
+-- name: ListRevokedManagedSSHCertificateHolders :many
+-- Holders of a still-valid certificate for the machine that may no longer log in to it: the machine's revocation
+-- token is derived from them (bounded: one row per CLI session that got a certificate within the validity).
+SELECT h.cli_client_session_id FROM managed_ssh_certificate_holders h
+JOIN user_machines m ON m.id = h.machine_id
+LEFT JOIN cli_client_sessions session ON session.id = h.cli_client_session_id AND session.user_id = h.user_id
+  AND session.state = 'active' AND session.revoked_at IS NULL
+WHERE h.machine_id = sqlc.arg(machine_id) AND h.valid_before > sqlc.arg(now)
+AND (session.id IS NULL OR NOT ((m.owner_team_id IS NULL AND m.user_id = h.user_id AND m.deleted_at IS NULL)
+  OR machine_capability_allowed(h.user_id, m.id, 'managed_ssh') OR machine_management_allowed(h.user_id, m.id)))
+ORDER BY h.cli_client_session_id;
+
+-- name: DeleteExpiredManagedSSHCertificateHolders :exec
+DELETE FROM managed_ssh_certificate_holders WHERE machine_id = sqlc.arg(machine_id) AND valid_before <= sqlc.arg(now);

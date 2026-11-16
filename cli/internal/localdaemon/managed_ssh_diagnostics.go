@@ -10,37 +10,12 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/managedssh"
 )
 
-type managedSSHAuthorityFailure struct{ cause error }
-
-func (e *managedSSHAuthorityFailure) Error() string {
-	if e == nil {
-		return ""
-	}
-	return "managed SSH authority operation failed"
-}
-
-func (e *managedSSHAuthorityFailure) Unwrap() error { return e.cause }
-
-func (*managedSSHAuthorityFailure) DiagnosticStage() string { return "peer_authority" }
-
-func (*managedSSHAuthorityFailure) DiagnosticCode() string { return "managed_ssh_failed" }
-
-func managedSSHAuthorityError(err error) error {
-	if err == nil {
-		return nil
-	}
-	return &managedSSHAuthorityFailure{cause: err}
-}
-
 func managedSSHHealthCode(err error) string {
 	if err == nil {
 		return ""
 	}
 	if managedSSHAuthenticationRejection(err) {
 		return "ssh_key_rejected"
-	}
-	if hasAPIErrorCode(err, "managed_ssh_client_key_capacity") {
-		return managedSSHClientKeyCapacityCode
 	}
 	if hasCause(err, func(current error) bool { _, ok := current.(*managedssh.UnsafeSSHPathError); return ok }) {
 		return managedSSHUnsafeDirectoryCode
@@ -68,17 +43,9 @@ func managedSSHServerRefusal(err error) string {
 	return code
 }
 
-// managedSSHServerRefusedCode: the server refused this computer's managed SSH registration or configuration
+// managedSSHServerRefusedCode: the server refused this computer's managed SSH configuration
 // request (the diagnostics event names the server's code). Retrying unchanged repeats it.
 const managedSSHServerRefusedCode = "ssh_server_refused"
-
-// hasAPIErrorCode walks at most 16 causes (errors.As would loop on a cyclic chain, see BoundsCyclicCause).
-func hasAPIErrorCode(err error, code string) bool {
-	return hasCause(err, func(current error) bool {
-		response, ok := current.(*api.APIError)
-		return ok && response != nil && response.Code == code
-	})
-}
 
 func hasCause(err error, match func(error) bool) bool {
 	pending := []error{err}
@@ -100,10 +67,6 @@ func hasCause(err error, match func(error) bool) bool {
 
 // managedSSHUnsafeDirectoryCode: this computer's .ssh folder has an owner or write access OpenSSH would not trust.
 const managedSSHUnsafeDirectoryCode = "ssh_directory_unsafe"
-
-// managedSSHClientKeyCapacityCode: the account already has the most signed-in computers using managed SSH, so this
-// computer's key was refused. Retrying cannot help until one is signed out (pb logout) or removed.
-const managedSSHClientKeyCapacityCode = "ssh_client_key_capacity"
 
 func managedSSHAuthenticationRejection(err error) bool {
 	if err == nil {

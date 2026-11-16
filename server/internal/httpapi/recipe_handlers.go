@@ -42,8 +42,6 @@ func recipeRoute(r *http.Request, own string) bool {
 		return true
 	case strings.HasPrefix(p, "/v1/recipe-machine"):
 		return true
-	case r.Method == http.MethodPut && strings.HasPrefix(p, "/v1/ssh/client-keys/"):
-		return true
 	}
 	if r.Method != http.MethodPost {
 		return false
@@ -53,7 +51,7 @@ func recipeRoute(r *http.Request, own string) bool {
 	}
 	parts := strings.Split(strings.TrimPrefix(p, "/v1/"), "/")
 	switch {
-	case len(parts) == 3 && parts[0] == "machines" && (parts[2] == "exec-descriptor" || parts[2] == "file-transfer-descriptor" ||
+	case len(parts) == 3 && parts[0] == "machines" && (parts[2] == "exec-descriptor" || parts[2] == "file-transfer-descriptor" || parts[2] == "ssh-certificate" ||
 		parts[2] == "connection-descriptor" || parts[2] == "terminal-sessions" || parts[2] == "events"):
 		return true
 	case len(parts) == 4 && parts[0] == "machines" && parts[2] == "events" && parts[3] == "wait":

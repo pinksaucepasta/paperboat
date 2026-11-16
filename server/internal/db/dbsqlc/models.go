@@ -1817,6 +1817,13 @@ type ManagedNodeAuthority struct {
 	UpdatedAt         time.Time
 }
 
+type ManagedSshCertificateHolder struct {
+	MachineID          string
+	CLIClientSessionID string
+	UserID             string
+	ValidBefore        time.Time
+}
+
 type ManagedSshClientKey struct {
 	Fingerprint           []byte
 	UserID                string
@@ -1838,6 +1845,16 @@ type ManagedSshOperation struct {
 	ResourceID     string
 	ResultRevision int64
 	CreatedAt      time.Time
+}
+
+type ManagedSshUserCa struct {
+	ID                   string
+	AccountID            string
+	State                string
+	PublicKey            string
+	PrivateKeyCiphertext []byte
+	CreatedAt            time.Time
+	StateChangedAt       time.Time
 }
 
 type MintWithdrawnKey struct {

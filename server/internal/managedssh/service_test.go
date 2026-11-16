@@ -6,34 +6,50 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"errors"
-	"github.com/google/uuid"
-	wire "github.com/pinksaucepasta/paperboat/shared/managedssh"
 	"io"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+	wire "github.com/pinksaucepasta/paperboat/shared/managedssh"
+
 	"golang.org/x/crypto/ssh"
 )
 
 type fakeRepository struct {
-	client ClientKey
-	host   HostKeySet
-	target MachineTarget
-	err    error
+	host    HostKeySet
+	target  MachineTarget
+	cas     []UserCA
+	osUser  string
+	revoked []string
+	err     error
 }
 
-func (r *fakeRepository) RegisterClient(_ context.Context, _ RegisterClientRequest, key ClientKey) (ClientKey, error) {
-	r.client = key
-	return key, r.err
+func (r *fakeRepository) ensureCA(candidate NewUserCA) {
+	if len(r.cas) == 0 {
+		r.cas = append(r.cas, UserCA{ID: candidate.ID, State: "active", PublicKey: candidate.PublicKey, PrivateKeyCiphertext: candidate.PrivateKeyCiphertext})
+	}
 }
-func (r *fakeRepository) RevokeClient(_ context.Context, request RevokeClientRequest) (ClientKey, error) {
-	result := r.client
-	result.State, result.RevokedAt, result.RevocationReason = "revoked", request.Now, request.Reason
-	return result, r.err
+func (r *fakeRepository) CertificateAuthority(_ context.Context, request IssueCertificateRequest, candidate NewUserCA) (CertificateAuthorization, error) {
+	if r.err != nil {
+		return CertificateAuthorization{}, r.err
+	}
+	r.ensureCA(candidate)
+	for _, ca := range r.cas {
+		if ca.State == "active" {
+			return CertificateAuthorization{OSUser: r.osUser, CA: ca, Principal: RevocationPrincipal(request.UserMachineID, r.revoked)}, nil
+		}
+	}
+	return CertificateAuthorization{}, ErrUnavailable
 }
-func (r *fakeRepository) ListClientKeys(_ context.Context, request ListClientKeysRequest) (ClientKeySet, error) {
-	return ClientKeySet{UserMachineID: request.UserMachineID, MachineGeneration: request.MachineGeneration, Keys: []ClientKey{r.client}}, r.err
+func (r *fakeRepository) UserCAs(_ context.Context, request UserCAsRequest, candidate NewUserCA) ([]UserCA, string, error) {
+	r.ensureCA(candidate)
+	return r.cas, RevocationPrincipal(request.UserMachineID, r.revoked), r.err
+}
+func (r *fakeRepository) RotateUserCA(_ context.Context, _ RotateUserCARequest, candidate NewUserCA) ([]UserCA, error) {
+	r.cas = append(r.cas, UserCA{ID: candidate.ID, State: "pending", PublicKey: candidate.PublicKey, PrivateKeyCiphertext: candidate.PrivateKeyCiphertext})
+	return r.cas, r.err
 }
 func (r *fakeRepository) ObserveHost(_ context.Context, _ ObserveHostRequest, set HostKeySet) (HostKeySet, error) {
 	r.host = set
@@ -62,29 +78,9 @@ func (r *fakeRepository) GetTarget(_ context.Context, _ GetTargetRequest) (Machi
 	return r.target, r.err
 }
 
-func TestServiceCanonicalizesManagedClientEd25519Key(t *testing.T) {
-	repository := &fakeRepository{}
-	service, _ := NewService(repository)
-	now := time.Unix(1_800_000_000, 0).UTC()
-	line := publicLine(t, "ed25519") + " workstation comment"
-	result, err := service.RegisterClient(context.Background(), RegisterClientRequest{OperationID: "operation_managed_ssh_01", UserID: "user_01", CLIClientSessionID: "client_01", PublicKey: line, Now: now})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if result.Algorithm != ssh.KeyAlgoED25519 || result.PublicKey == line || strings.Contains(result.PublicKey, "comment") || result.Fingerprint == [32]byte{} || result.State != "active" || result.ReconciliationVersion != 1 || result.CreatedAt != now {
-		t.Fatalf("key=%+v", result)
-	}
-	if _, err := service.RegisterClient(context.Background(), RegisterClientRequest{OperationID: "operation_managed_ssh_01", UserID: "user_01", CLIClientSessionID: "client_01", PublicKey: publicLine(t, "rsa"), Now: now}); !errors.Is(err, wire.ErrInvalid) {
-		t.Fatalf("RSA client key error=%v", err)
-	}
-	if _, err := service.RegisterClient(context.Background(), RegisterClientRequest{OperationID: "operation_managed_ssh_01", UserID: "user_01", CLIClientSessionID: "client_01", PublicKey: "command=\"id\" " + publicLine(t, "ed25519"), Now: now}); !errors.Is(err, wire.ErrInvalid) {
-		t.Fatalf("authorized_keys option error=%v", err)
-	}
-}
-
 func TestServiceHostSetFingerprintIsOrderIndependentAndRejectsDuplicates(t *testing.T) {
 	repository := &fakeRepository{}
-	service, _ := NewService(repository)
+	service, _ := NewService(repository, testCertificates)
 	now := time.Unix(1_800_000_000, 0).UTC()
 	first, second := publicLine(t, "ed25519"), publicLine(t, "rsa")
 	request := ObserveHostRequest{OperationID: "operation_managed_ssh_01", UserID: "user_01", UserMachineID: "machine_01", MachineGeneration: 2, ObservationGeneration: 3, PublicKeys: []string{first, second}, Now: now}
@@ -112,13 +108,10 @@ func TestServiceHostSetFingerprintIsOrderIndependentAndRejectsDuplicates(t *test
 	}
 }
 
-func TestServiceValidatesRevocationAndPromotion(t *testing.T) {
+func TestServiceValidatesPromotion(t *testing.T) {
 	repository := &fakeRepository{}
-	service, _ := NewService(repository)
+	service, _ := NewService(repository, testCertificates)
 	now := time.Now().UTC()
-	if _, err := service.RevokeClient(context.Background(), RevokeClientRequest{OperationID: "operation_managed_ssh_01", ActorUserID: "user_01", Fingerprint: [32]byte{1}, Reason: "unknown", Now: now}); !errors.Is(err, wire.ErrInvalid) {
-		t.Fatalf("revocation error=%v", err)
-	}
 	if _, err := service.PromoteHost(context.Background(), PromoteHostRequest{OperationID: "operation_managed_ssh_01", ActorUserID: "user_01", UserMachineID: "machine_01", MachineGeneration: 1, SetID: "keyset_01234567-89ab-4cde-8fab-0123456789ab", Now: now}); !errors.Is(err, wire.ErrInvalid) {
 		t.Fatalf("promotion error=%v", err)
 	}
@@ -127,7 +120,7 @@ func TestServiceValidatesRevocationAndPromotion(t *testing.T) {
 
 func TestServiceValidatesMachineTarget(t *testing.T) {
 	repository := &fakeRepository{}
-	service, _ := NewService(repository)
+	service, _ := NewService(repository, testCertificates)
 	now := time.Unix(1_800_000_000, 0).UTC()
 	target, err := service.RegisterTarget(context.Background(), RegisterTargetRequest{OperationID: "operation_managed_ssh_01", ActorUserID: "user_01", UserMachineID: "machine_01", MachineGeneration: 2, OSUser: "deploy", TargetPort: 2222, Now: now})
 	if err != nil || target.OSUser != "deploy" || target.TargetPort != 2222 || target.MachineGeneration != 2 {
@@ -168,7 +161,7 @@ func publicLine(t *testing.T, kind string) string {
 
 func TestServiceHostSetEntropyFailureDoesNotObserve(t *testing.T) {
 	repository := &fakeRepository{}
-	service, _ := NewService(repository)
+	service, _ := NewService(repository, testCertificates)
 	service.random = strings.NewReader("")
 	_, err := service.ObserveHost(context.Background(), ObserveHostRequest{OperationID: "operation_managed_ssh_01", UserID: "user_01", UserMachineID: "machine_01", MachineGeneration: 1, ObservationGeneration: 1, PublicKeys: []string{publicLine(t, "ed25519")}, Now: time.Now()})
 	if !errors.Is(err, io.EOF) || repository.host.ID != "" {

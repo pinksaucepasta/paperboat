@@ -20,7 +20,7 @@ func TestFullUninstallRetiresUnusedSSHLocksAndPreservesForeignFiles(t *testing.T
 	if _, err := UninstallOpenSSHConfig(home, uid); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ReconcileAuthorizedKeys(home, uid, nil); err != nil {
+	if _, err := ReconcileAuthorizedKeys(home, uid, nil, testPrincipal); err != nil {
 		t.Fatal(err)
 	}
 	foreign := filepath.Join(home, ".ssh", "foreign")

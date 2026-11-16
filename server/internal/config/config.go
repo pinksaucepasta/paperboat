@@ -256,10 +256,11 @@ func (l PlanLimit) valid() bool {
 	return l.Free > 0 && l.Pro >= l.Free && l.TeamCeiling >= l.Pro
 }
 
-// ManagedSSH bounds how long an idle CLI session keeps counting toward SSH client-key capacity
-// and authorized keys; a session used within the window keeps its key, an older one stops counting.
+// ManagedSSH: CertificateValidity is how long a managed SSH user certificate lets a client log in, so how long
+// clients keep starting new sessions while the control plane is unreachable. Revocation reaches hosts at once
+// (managedssh.RevocationPrincipal), not at expiry.
 type ManagedSSH struct {
-	ClientKeyActiveWindow time.Duration `json:"client_key_active_window"`
+	CertificateValidity time.Duration `json:"certificate_validity"`
 }
 
 type UserMachines struct {
@@ -543,7 +544,7 @@ func Default() Config {
 		Business:          defaultBusiness(),
 		WorkspacePolicy:   defaultWorkspacePolicy(),
 		RuntimeBaseDomain: "localhost",
-		ManagedSSH:        ManagedSSH{ClientKeyActiveWindow: 30 * 24 * time.Hour},
+		ManagedSSH:        ManagedSSH{CertificateValidity: 12 * time.Hour},
 		UserMachines:      UserMachines{PairingLifetime: 10 * time.Minute, OfflineAfter: 2 * time.Minute, ExpiredAccessSessionRetention: 7 * 24 * time.Hour, AllowedPlatforms: []string{"darwin", "linux", "windows"}, RuntimeListenPort: 38080},
 		TerminalSessions:  TerminalSessions{OperationTimeout: 15 * time.Second, RetryBackoff: time.Second, WorkerInterval: time.Second, MaxAttemptsBeforeAlert: 10, OperationMaxAge: 30 * 24 * time.Hour},
 		Preview:           Preview{BaseDomain: "preview.localhost", SharedFileMaxBytes: 2 << 30},
@@ -723,8 +724,8 @@ func (c Config) Validate() error {
 	if c.UserMachines.ExpiredAccessSessionRetention < time.Hour {
 		errs = append(errs, fmt.Errorf("user_machines expired access session retention must be at least one hour"))
 	}
-	if c.ManagedSSH.ClientKeyActiveWindow < time.Hour {
-		errs = append(errs, fmt.Errorf("managed_ssh client key active window must be at least one hour"))
+	if c.ManagedSSH.CertificateValidity < time.Minute || c.ManagedSSH.CertificateValidity > 24*time.Hour {
+		errs = append(errs, fmt.Errorf("managed_ssh certificate validity must be between one minute and 24 hours"))
 	}
 	if c.UserMachines.PairingLifetime <= 0 || c.UserMachines.OfflineAfter <= 0 || len(c.UserMachines.AllowedPlatforms) == 0 {
 		errs = append(errs, fmt.Errorf("user_machines pairing lifetime, offline timeout, and allowed platforms are required"))

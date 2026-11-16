@@ -72,19 +72,35 @@ func (c *Client) ObserveManagedSSHHostKeys(ctx context.Context, machineID, keyID
 	return set, nil
 }
 
-func (c *Client) ManagedSSHAuthorizedKeys(ctx context.Context, machineID, keyID string, generation uint64, proof []byte) (ManagedSSHAuthorizedKeys, error) {
+func (c *Client) ManagedSSHUserCAs(ctx context.Context, machineID, keyID string, generation uint64, proof []byte) (ManagedSSHUserCAs, error) {
 	if strings.TrimSpace(machineID) == "" || strings.TrimSpace(keyID) == "" || generation == 0 || len(proof) == 0 {
-		return ManagedSSHAuthorizedKeys{}, errors.New("valid managed SSH authorized-key request is required")
+		return ManagedSSHUserCAs{}, errors.New("valid managed SSH user CA request is required")
 	}
-	var set ManagedSSHAuthorizedKeys
-	err := c.doWithHeaders(ctx, http.MethodPost, "/v1/machines/"+url.PathEscape(machineID)+"/ssh-authorized-keys", map[string]any{}, &set, http.Header{"X-Paperboat-Machine-Identity": []string{keyID}, "X-Paperboat-Machine-Proof": []string{base64.RawURLEncoding.EncodeToString(proof)}})
+	var set ManagedSSHUserCAs
+	err := c.doWithHeaders(ctx, http.MethodPost, "/v1/machines/"+url.PathEscape(machineID)+"/ssh-user-cas", map[string]any{}, &set, http.Header{"X-Paperboat-Machine-Identity": []string{keyID}, "X-Paperboat-Machine-Proof": []string{base64.RawURLEncoding.EncodeToString(proof)}})
 	if err != nil {
-		return ManagedSSHAuthorizedKeys{}, err
+		return ManagedSSHUserCAs{}, err
 	}
-	if set.Type != "authorized_key_set" || set.Version != 1 || set.MachineID != machineID || set.MachineGeneration != generation || len(set.Keys) > wire.MaxClientKeys {
-		return ManagedSSHAuthorizedKeys{}, errors.New("paperboat-server returned an invalid managed SSH authorized-key set")
+	if set.Type != "ssh_user_ca_set" || set.Version != 1 || set.MachineID != machineID || set.MachineGeneration != generation || len(set.Keys) == 0 || len(set.Keys) > wire.MaxUserCAs || !wire.ValidCAPrincipal(set.Principal) || !strings.HasPrefix(set.Principal, "pb:"+machineID+":") {
+		return ManagedSSHUserCAs{}, errors.New("paperboat-server returned an invalid managed SSH user CA set")
 	}
 	return set, nil
+}
+
+// IssueManagedSSHCertificate asks for a short-lived certificate of this sign-in's managed SSH key for one machine.
+func (c *Client) IssueManagedSSHCertificate(ctx context.Context, machineID string, generation uint64, publicKey string) (ManagedSSHCertificate, error) {
+	if strings.TrimSpace(machineID) == "" || generation == 0 || strings.TrimSpace(publicKey) == "" {
+		return ManagedSSHCertificate{}, errors.New("valid managed SSH certificate request is required")
+	}
+	var certificate ManagedSSHCertificate
+	err := c.do(ctx, http.MethodPost, "/v1/machines/"+url.PathEscape(machineID)+"/ssh-certificate", map[string]any{"machine_generation": generation, "public_key": strings.TrimSpace(publicKey)}, &certificate)
+	if err != nil {
+		return ManagedSSHCertificate{}, err
+	}
+	if certificate.Type != "ssh_user_certificate" || certificate.Version != 1 || certificate.MachineID != machineID || certificate.MachineGeneration != generation || certificate.OSUser == "" || certificate.Certificate == "" {
+		return ManagedSSHCertificate{}, errors.New("paperboat-server returned an invalid managed SSH certificate")
+	}
+	return certificate, nil
 }
 
 func (c *Client) ManagedSSHHostKeys(ctx context.Context, machineID string, generation uint64) (ManagedSSHHostKeySet, error) {
@@ -123,23 +139,4 @@ func (c *Client) PromoteManagedSSHHostKeys(ctx context.Context, machineID, setID
 		return ManagedSSHHostKeySet{}, errors.New("paperboat-server returned an invalid managed SSH host-key promotion")
 	}
 	return set, nil
-}
-
-func (c *Client) RegisterManagedSSHClientKey(ctx context.Context, publicKey string, fingerprint [32]byte, operationID string) (ManagedSSHClientKey, error) {
-	publicKey = strings.TrimSpace(publicKey)
-	operationID = strings.TrimSpace(operationID)
-	if publicKey == "" || fingerprint == [32]byte{} || operationID == "" {
-		return ManagedSSHClientKey{}, errors.New("valid managed SSH client-key registration is required")
-	}
-	encodedFingerprint := "SHA256:" + base64.RawStdEncoding.EncodeToString(fingerprint[:])
-	var key ManagedSSHClientKey
-	path := "/v1/ssh/client-keys/" + url.PathEscape(encodedFingerprint)
-	err := c.doWithHeaders(ctx, http.MethodPut, path, map[string]string{"public_key": publicKey}, &key, http.Header{"Idempotency-Key": []string{operationID}})
-	if err != nil {
-		return ManagedSSHClientKey{}, err
-	}
-	if key.Type != "client_key" || key.Version != 1 || key.Fingerprint != encodedFingerprint || key.PublicKey != publicKey || key.State != "active" || key.ReconciliationVersion == 0 {
-		return ManagedSSHClientKey{}, errors.New("paperboat-server returned an invalid managed SSH client key")
-	}
-	return key, nil
 }

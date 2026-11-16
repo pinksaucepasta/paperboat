@@ -153,14 +153,14 @@ func (s *managedSSHKeyReconciler) reconcile(ctx context.Context) error {
 		if !s.hostKeyInUse.Load() && retryableManagedSSHAuthorityError(err) {
 			return &managedSSHAuthorityUnavailable{cause: err}
 		}
-		_, cleanupErr := reconcilePlatformAuthorizedKeys(s.home, s.ownerUID, nil)
+		_, cleanupErr := reconcilePlatformAuthorizedKeys(s.home, s.ownerUID, nil, "")
 		if cleanupErr == nil && s.hostKeyInUse.Load() {
 			return &managedSSHHostKeyInUse{cause: err}
 		}
 		return errors.Join(err, cleanupErr)
 	}
 	// Not active (pending): the keys are the server's current client keys, kept so trust-host works at once.
-	_, err = reconcilePlatformAuthorizedKeys(s.home, s.ownerUID, keys.Keys)
+	_, err = reconcilePlatformAuthorizedKeys(s.home, s.ownerUID, keys.Keys, keys.Principal)
 	s.ready.Store(err == nil && active)
 	return err
 }

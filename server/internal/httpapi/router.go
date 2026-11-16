@@ -201,6 +201,9 @@ func NewRouter(opts Options) http.Handler {
 				mux.Handle("PUT /v1/admin/client-update-policy", operatorRoute(opts, clientUpdatePolicyPut(opts.ClientUpdatePolicy)))
 			}
 		}
+		if opts.ManagedSSH != nil && opts.OperatorAuth != nil {
+			mux.Handle("POST /v1/admin/managed-ssh/accounts/{account_id}/rotate-user-ca", operatorRoute(opts, managedSSHRotateUserCA(opts.ManagedSSH)))
+		}
 		registerOperatorRoutes(mux, opts)
 		registerOperatorAuthentication(mux, opts)
 		mux.HandleFunc("GET /healthz", health)
@@ -479,8 +482,7 @@ func NewRouter(opts Options) http.Handler {
 				cliWrite := func(next http.Handler) http.Handler {
 					return requireBearerAuth(opts.DeviceAuth, requireScope("machines:connect", next))
 				}
-				mux.Handle("PUT /v1/ssh/client-keys/{fingerprint}", cliWrite(managedSSHClientKeyPut(opts.ManagedSSH)))
-				mux.Handle("DELETE /v1/ssh/client-keys/{fingerprint}", cliWrite(managedSSHClientKeyDelete(opts.ManagedSSH)))
+				mux.Handle("POST /v1/machines/{machine_id}/ssh-certificate", cliWrite(managedSSHCertificate(opts.ManagedSSH)))
 				mux.Handle("PUT /v1/machines/{machine_id}/ssh-target", sshWrite(managedSSHTargetPut(opts.ManagedSSH)))
 				mux.Handle("GET /v1/machines/{machine_id}/ssh-target", sshRead(managedSSHTargetGet(opts.ManagedSSH)))
 				mux.Handle("GET /v1/machines/{machine_id}/ssh-host-keys", sshRead(managedSSHHostKeysGet(opts.ManagedSSH)))
@@ -701,7 +703,7 @@ func NewRouter(opts Options) http.Handler {
 		}
 		if opts.ManagedSSH != nil && opts.RuntimeIdentity != nil {
 			mux.HandleFunc("PUT /v1/machines/{machine_id}/ssh-host-keys", managedSSHHostKeysObserve(opts.ManagedSSH, opts.RuntimeIdentity))
-			mux.HandleFunc("POST /v1/machines/{machine_id}/ssh-authorized-keys", managedSSHAuthorizedKeys(opts.ManagedSSH, opts.RuntimeIdentity))
+			mux.HandleFunc("POST /v1/machines/{machine_id}/ssh-user-cas", managedSSHUserCAs(opts.ManagedSSH, opts.RuntimeIdentity))
 		}
 		if opts.PeerIdentity != nil && opts.RuntimeIdentity != nil {
 			mux.HandleFunc("POST /v1/machine-peer-identity", machineEndpointRequest(opts.PeerIdentity, opts.RuntimeIdentity))

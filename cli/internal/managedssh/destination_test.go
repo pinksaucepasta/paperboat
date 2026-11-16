@@ -178,7 +178,7 @@ func TestValidUsernameAcceptsSpacesAndUnicodeLettersOnly(t *testing.T) {
 
 func TestOwnedOpenSSHRoundTripsAnAccountWithASpaceAndANonASCIIFirstLetter(t *testing.T) {
 	for _, user := range []string{"Zoë Test", "ëric", "HOST\\Zoë Test"} {
-		owned := ownedOpenSSH{Agent: "/run/agent", Identity: "/home/a/key.pub", ProxyCommand: "pb __ssh-proxy", KnownHostsCommand: "pb known",
+		owned := ownedOpenSSH{Agent: "/run/agent", Identity: "/home/a/key.pub", ProxyCommand: "pb __ssh-proxy", KnownHostsCommand: "pb known", CertificateCommand: "pb",
 			Targets: []OpenSSHAliasTarget{{Alias: "box", User: user, Port: 22, AnyCaseUser: true}}}
 		raw, err := formatOwnedOpenSSH(testAliasDomain, owned)
 		if err != nil || !strings.Contains(string(raw), `user "`+user+`,`) {

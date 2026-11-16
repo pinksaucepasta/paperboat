@@ -452,9 +452,8 @@ func New(opts Options) (*App, error) {
 	if err != nil {
 		return nil, err
 	}
-	managedSSHRepository.WithClientKeyWindow(opts.Config.ManagedSSH.ClientKeyActiveWindow)
 	managedSSHRepository.WithMachineReplacer(userMachineService)
-	managedSSHService, err := managedssh.NewService(managedSSHRepository)
+	managedSSHService, err := managedssh.NewService(managedSSHRepository, managedssh.CertificateConfig{EncryptionKey: opts.Config.Secrets.EncryptionKey, Validity: opts.Config.ManagedSSH.CertificateValidity})
 	if err != nil {
 		return nil, err
 	}

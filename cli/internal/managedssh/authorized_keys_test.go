@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	wire "github.com/pinksaucepasta/paperboat/shared/managedssh"
 	"os"
 	"path/filepath"
 	"strings"
@@ -27,7 +28,7 @@ func TestReconcileAuthorizedKeysPreservesUnrelatedBytesAndIsIdempotent(t *testin
 		t.Fatal(err)
 	}
 	firstKey, secondKey := authorizedPublicLine(t), authorizedPublicLine(t)
-	result, err := ReconcileAuthorizedKeys(home, uint32(os.Getuid()), []string{secondKey, firstKey})
+	result, err := ReconcileAuthorizedKeys(home, uint32(os.Getuid()), []string{secondKey, firstKey}, testPrincipal)
 	if err != nil || !result.Changed || result.Count != 2 {
 		t.Fatalf("result=%+v error=%v", result, err)
 	}
@@ -38,11 +39,11 @@ func TestReconcileAuthorizedKeysPreservesUnrelatedBytesAndIsIdempotent(t *testin
 	if !strings.HasPrefix(string(updated), unrelated) || strings.Count(string(updated), managedAuthorizedKeyMarker) != 2 {
 		t.Fatalf("updated authorized_keys=%q", updated)
 	}
-	replay, err := ReconcileAuthorizedKeys(home, uint32(os.Getuid()), []string{firstKey, secondKey})
+	replay, err := ReconcileAuthorizedKeys(home, uint32(os.Getuid()), []string{firstKey, secondKey}, testPrincipal)
 	if err != nil || replay.Changed || replay.Count != 2 {
 		t.Fatalf("replay=%+v error=%v", replay, err)
 	}
-	removed, err := ReconcileAuthorizedKeys(home, uint32(os.Getuid()), nil)
+	removed, err := ReconcileAuthorizedKeys(home, uint32(os.Getuid()), nil, testPrincipal)
 	if err != nil || !removed.Changed || removed.Count != 0 {
 		t.Fatalf("removed=%+v error=%v", removed, err)
 	}
@@ -63,7 +64,7 @@ func TestReconcileAuthorizedKeysRejectsMarkerConflictSymlinkAndPermissions(t *te
 	if err := os.WriteFile(path, []byte(original), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ReconcileAuthorizedKeys(home, uint32(os.Getuid()), []string{authorizedPublicLine(t)}); !errors.Is(err, ErrAuthorizedKeysConflict) {
+	if _, err := ReconcileAuthorizedKeys(home, uint32(os.Getuid()), []string{authorizedPublicLine(t)}, testPrincipal); !errors.Is(err, ErrAuthorizedKeysConflict) {
 		t.Fatalf("marker conflict error=%v", err)
 	}
 	unchanged, _ := os.ReadFile(path)
@@ -80,7 +81,7 @@ func TestReconcileAuthorizedKeysRejectsMarkerConflictSymlinkAndPermissions(t *te
 	if err := os.Symlink(target, path); err != nil {
 		t.Skipf("symlinks unavailable: %v", err)
 	}
-	if _, err := ReconcileAuthorizedKeys(home, uint32(os.Getuid()), nil); err == nil {
+	if _, err := ReconcileAuthorizedKeys(home, uint32(os.Getuid()), nil, testPrincipal); err == nil {
 		t.Fatal("symlinked authorized_keys was accepted")
 	}
 	targetValue, _ := os.ReadFile(target)
@@ -93,7 +94,7 @@ func TestReconcileAuthorizedKeysRejectsMarkerConflictSymlinkAndPermissions(t *te
 	if err := os.WriteFile(path, []byte("unrelated\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ReconcileAuthorizedKeys(home, uint32(os.Getuid()), nil); err == nil {
+	if _, err := ReconcileAuthorizedKeys(home, uint32(os.Getuid()), nil, testPrincipal); err == nil {
 		t.Fatal("permissive authorized_keys was accepted")
 	}
 }
@@ -107,7 +108,7 @@ func TestReconcileAuthorizedKeysSerializesConcurrentRepair(t *testing.T) {
 		group.Add(1)
 		go func() {
 			defer group.Done()
-			_, err := ReconcileAuthorizedKeys(home, uint32(os.Getuid()), keys)
+			_, err := ReconcileAuthorizedKeys(home, uint32(os.Getuid()), keys, testPrincipal)
 			errorsFound <- err
 		}()
 	}
@@ -133,7 +134,7 @@ func managedSSHTestHome(t *testing.T) string {
 	return home
 }
 
-func TestReconcileAuthorizedKeysRestrictsManagedLinesToLoopback(t *testing.T) {
+func TestReconcileAuthorizedKeysTrustsTheCAOnlyOnLoopback(t *testing.T) {
 	home := managedSSHTestHome(t)
 	directory := filepath.Join(home, ".ssh")
 	if err := os.Mkdir(directory, 0o700); err != nil {
@@ -147,20 +148,20 @@ func TestReconcileAuthorizedKeysRestrictsManagedLinesToLoopback(t *testing.T) {
 	if err := os.WriteFile(path, []byte(own+bare), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	result, err := ReconcileAuthorizedKeys(home, uint32(os.Getuid()), []string{key})
+	result, err := ReconcileAuthorizedKeys(home, uint32(os.Getuid()), []string{key}, testPrincipal)
 	if err != nil || !result.Changed {
 		t.Fatalf("result=%+v error=%v", result, err)
 	}
 	value, _ := os.ReadFile(path)
 	lines := strings.Split(strings.TrimSpace(string(value)), "\n")
-	if len(lines) != 2 || lines[0]+"\n" != own || !strings.HasPrefix(lines[1], `from="127.0.0.1,::1" ssh-ed25519 `) || !strings.HasSuffix(lines[1], managedAuthorizedKeyMarker+fingerprintHex(t, key)) {
+	if len(lines) != 2 || lines[0]+"\n" != own || !strings.HasPrefix(lines[1], wire.CATrustOptions(testPrincipal)+" ssh-ed25519 ") || !strings.HasSuffix(lines[1], managedAuthorizedKeyMarker+fingerprintHex(t, key)) {
 		t.Fatalf("authorized_keys=%q", value)
 	}
 	parsed, _, options, _, err := ssh.ParseAuthorizedKey([]byte(lines[1]))
-	if err != nil || parsed == nil || len(options) != 1 || options[0] != managedAuthorizedKeyFrom {
+	if err != nil || parsed == nil || strings.Join(options, ",") != wire.CATrustOptions(testPrincipal) {
 		t.Fatalf("managed line options=%q error=%v", options, err)
 	}
-	if replay, err := ReconcileAuthorizedKeys(home, uint32(os.Getuid()), []string{key}); err != nil || replay.Changed {
+	if replay, err := ReconcileAuthorizedKeys(home, uint32(os.Getuid()), []string{key}, testPrincipal); err != nil || replay.Changed {
 		t.Fatalf("replay=%+v error=%v", replay, err)
 	}
 	// Any other option on a managed line is a conflict, never rewritten silently.
@@ -168,13 +169,15 @@ func TestReconcileAuthorizedKeysRestrictsManagedLinesToLoopback(t *testing.T) {
 	if err := os.WriteFile(path, []byte(widened), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ReconcileAuthorizedKeys(home, uint32(os.Getuid()), []string{key}); !errors.Is(err, ErrAuthorizedKeysConflict) {
+	if _, err := ReconcileAuthorizedKeys(home, uint32(os.Getuid()), []string{key}, testPrincipal); !errors.Is(err, ErrAuthorizedKeysConflict) {
 		t.Fatalf("widened option error=%v", err)
 	}
 	if after, _ := os.ReadFile(path); string(after) != widened {
 		t.Fatal("conflicting authorized_keys was modified")
 	}
 }
+
+const testPrincipal = "pb:machine_1:0"
 
 func mustParseKey(t *testing.T, line string) ssh.PublicKey {
 	t.Helper()

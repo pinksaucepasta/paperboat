@@ -4,8 +4,6 @@ package localdaemon
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -41,7 +39,7 @@ type ManagedSSHRuntime struct {
 	domain *string
 }
 
-// StartManagedSSH registers the key, starts the agent and installs the OpenSSH configuration for
+// StartManagedSSH starts the agent and installs the OpenSSH configuration for
 // machines, the inventory's list; it never lists machines itself.
 func StartManagedSSH(ctx context.Context, cfg ManagedSSHConfig, machines []api.UserMachine) (*ManagedSSHRuntime, error) {
 	if ctx == nil || strings.TrimSpace(cfg.ServerURL) == "" || cfg.Auth == nil || cfg.Store.Path == "" || strings.TrimSpace(cfg.CLIClientSessionID) == "" || strings.TrimSpace(cfg.AccountID) == "" || !filepath.IsAbs(cfg.Home) || !filepath.IsAbs(cfg.RuntimeDirectory) || !filepath.IsAbs(cfg.Executable) {
@@ -55,15 +53,8 @@ func StartManagedSSH(ctx context.Context, cfg ManagedSSHConfig, machines []api.U
 	if err != nil {
 		return nil, err
 	}
-	registerCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	client := api.New(cfg.ServerURL, credential, nil)
 	client.SetCredentialSource(cfg.Auth)
-	operation := sha256.Sum256([]byte(identity.PublicKey + "\x00" + cfg.CLIClientSessionID))
-	_, err = client.RegisterManagedSSHClientKey(registerCtx, identity.PublicKey, identity.Fingerprint, "managed-ssh-register-"+hex.EncodeToString(operation[:16]))
-	cancel()
-	if err != nil {
-		return nil, managedSSHAuthorityError(err)
-	}
 	capabilities, err := managedssh.ProbeOpenSSH(ctx, "ssh", 5*time.Second)
 	if err != nil || !capabilities.Ready() {
 		return nil, errors.Join(managedssh.ErrOpenSSHUnavailable, err)
@@ -74,6 +65,9 @@ func StartManagedSSH(ctx context.Context, cfg ManagedSSHConfig, machines []api.U
 	}
 	if err := managedssh.InstallManagedIdentityPublicKey(cfg.Home, cfg.OwnerUID, identity.PublicKey); err != nil {
 		return nil, errors.Join(err, agent.Close())
+	}
+	if strings.ContainsAny(cfg.Executable, "'\"%") {
+		return nil, errors.Join(ErrInvalidInventoryConfig, errors.New("the pb executable path holds a quote or % that OpenSSH configuration cannot carry"))
 	}
 	command := strconv.Quote(cfg.Executable)
 	domain := new(string)
@@ -93,7 +87,9 @@ func StartManagedSSH(ctx context.Context, cfg ManagedSSHConfig, machines []api.U
 			KnownHostsCommand: "/bin/cat " + strconv.Quote(knownHosts),
 			AgentSocket:       agent.Socket(),
 			IdentityFile:      managedssh.ManagedIdentityPublicKeyPath(cfg.Home),
-			Targets:           managedSSHAliasTargets(machines),
+			// Match exec runs through the user's shell: single quotes keep the path one word.
+			CertificateCommand: "'" + cfg.Executable + "'",
+			Targets:            managedSSHAliasTargets(machines),
 		})
 		if err == nil {
 			*domain = configuration.LocalAccessBaseDomain
@@ -108,7 +104,7 @@ func StartManagedSSH(ctx context.Context, cfg ManagedSSHConfig, machines []api.U
 	if err != nil {
 		return nil, errors.Join(err, agent.Close())
 	}
-	return &ManagedSSHRuntime{agent: agent, refresh: install, domain: domain}, nil
+	return &ManagedSSHRuntime{agent: agent, refresh: renewingManagedSSHInstall(install, client, cfg.Home, identity.PublicKey), domain: domain}, nil
 }
 
 // Refresh rewrites the managed aliases for machines, the inventory's latest list.

@@ -200,7 +200,7 @@ func TestInstalledOpenSSHConfigOffersTheManagedKeyOnlyToTheSetupUser(t *testing.
 		return strings.ToLower(stdout.String())
 	}
 	managed := effective("pbt")
-	for _, required := range []string{"identitiesonly yes\n", "batchmode yes\n", "passwordauthentication no\n", "kbdinteractiveauthentication no\n", "identityagent " + strings.ToLower(config.AgentSocket) + "\n", "identityfile " + strings.ToLower(config.IdentityFile) + "\n", "port 22\n", "proxycommand \"/usr/local/bin/pb\" internal ssh-proxy"} {
+	for _, required := range []string{"identitiesonly yes\n", "batchmode yes\n", "passwordauthentication no\n", "kbdinteractiveauthentication no\n", "identityagent " + strings.ToLower(config.AgentSocket) + "\n", "identityfile " + strings.ToLower(config.IdentityFile) + "\n", "certificatefile " + strings.ToLower(ManagedCertificatePath(home, "homelab")) + "\n", "port 22\n", "proxycommand \"/usr/local/bin/pb\" internal ssh-proxy"} {
 		if !strings.Contains(managed, required) {
 			t.Fatalf("setup user is missing %q:\n%s", required, managed)
 		}
@@ -371,6 +371,8 @@ func openSSHTestConfig(home string) OpenSSHConfig {
 		KnownHostsCommand: "\"/usr/local/bin/pb\" internal ssh-known-hosts --host %h --port %p",
 		AgentSocket:       filepath.Join(home, ".paperboat", "run", "ssh-agent.sock"),
 		IdentityFile:      ManagedIdentityPublicKeyPath(home),
+		// The shell's true: `ssh -G` runs the Match exec, and it must succeed for the managed options to apply.
+		CertificateCommand: "true",
 	}
 }
 
@@ -385,7 +387,7 @@ func readOpenSSHTestFile(t *testing.T, path string) []byte {
 
 func TestOwnedOpenSSHListsTheSpellingsOfAWindowsUserAndKeepsOthersExact(t *testing.T) {
 	owned := ownedOpenSSH{
-		Agent: `/run/pb/agent.sock`, Identity: `/home/u/.ssh/pb.pub`, ProxyCommand: "pb __ssh-proxy %h", KnownHostsCommand: "pb __known-hosts %H",
+		Agent: `/run/pb/agent.sock`, Identity: `/home/u/.ssh/pb.pub`, ProxyCommand: "pb __ssh-proxy %h", KnownHostsCommand: "pb __known-hosts %H", CertificateCommand: "'/usr/local/bin/pb'",
 		Targets: []OpenSSHAliasTarget{
 			{Alias: "victus", User: "Pujan", Port: 47723, AnyCaseUser: true},
 			{Alias: "runner", User: "runneradmin", Port: 40925, AnyCaseUser: true},
@@ -400,9 +402,9 @@ func TestOwnedOpenSSHListsTheSpellingsOfAWindowsUserAndKeepsOthersExact(t *testi
 	// OpenSSH users are case-sensitive and ssh_config(5) patterns have only * ? and !: a Windows target lists the registered
 	// spelling and the lowercase, uppercase and capitalized ones; a Linux or macOS user stays exactly as registered.
 	for _, want := range []string{
-		`Match host victus.machines.example.test user "Pujan,pujan,PUJAN"` + "\n",
-		`Match host runner.machines.example.test user "runneradmin,RUNNERADMIN,Runneradmin"` + "\n",
-		`Match host linux.machines.example.test user "Deploy"` + "\n",
+		`Match host victus.machines.example.test user "Pujan,pujan,PUJAN" exec "`,
+		`Match host runner.machines.example.test user "runneradmin,RUNNERADMIN,Runneradmin" exec "`,
+		`Match host linux.machines.example.test user "Deploy" exec "`,
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("fragment lacks %q:\n%s", want, text)
@@ -414,5 +416,57 @@ func TestOwnedOpenSSHListsTheSpellingsOfAWindowsUserAndKeepsOthersExact(t *testi
 	}
 	if _, ok := parseOwnedOpenSSH([]byte(strings.Replace(text, `"Pujan,pujan,PUJAN"`, `"Pujan,pujan,PUJAN,PuJan"`, 1)), "machines.example.test"); ok {
 		t.Fatal("a spelling list other than ours must not parse as ours")
+	}
+}
+
+// A fragment pb wrote in an earlier format (here: without the certificate lines) is replaced on install: the recorded
+// hash proves it is pb's own, unedited. An edited fragment is still refused.
+func TestOpenSSHConfigInstallReplacesAnEarlierFormatItWrote(t *testing.T) {
+	home := managedSSHTestHome(t)
+	config := openSSHTestConfig(home)
+	config.Targets = []OpenSSHAliasTarget{{Alias: "box", User: "pbt", Port: 22}}
+	if _, err := InstallOpenSSHConfig(config); err != nil {
+		t.Fatal(err)
+	}
+	directory := filepath.Join(home, ".ssh")
+	ownedPath, recordPath := filepath.Join(directory, "paperboat_config"), filepath.Join(directory, ".paperboat-config-install-v1.json")
+	rewrite := func(owned []byte, recordHash bool) {
+		t.Helper()
+		if err := os.WriteFile(ownedPath, owned, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if !recordHash {
+			return
+		}
+		var record openSSHInstallRecord
+		if err := json.Unmarshal(readOpenSSHTestFile(t, recordPath), &record); err != nil {
+			t.Fatal(err)
+		}
+		record.OwnedHash = hashOpenSSHBytes(owned)
+		value, _ := json.Marshal(record)
+		if err := os.WriteFile(recordPath, value, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	earlier := bytes.NewBuffer(nil)
+	for _, line := range strings.SplitAfter(string(readOpenSSHTestFile(t, ownedPath)), "\n") {
+		if strings.HasPrefix(line, "    CertificateFile ") {
+			continue
+		}
+		if before, _, ok := strings.Cut(line, ` exec "`); ok {
+			line = before + "\n"
+		}
+		earlier.WriteString(line)
+	}
+	rewrite(earlier.Bytes(), true)
+	if _, err := InstallOpenSSHConfig(config); err != nil {
+		t.Fatalf("install over the earlier format pb wrote: %v", err)
+	}
+	if !bytes.Contains(readOpenSSHTestFile(t, ownedPath), []byte("    CertificateFile ")) {
+		t.Fatal("the earlier fragment was not replaced")
+	}
+	rewrite(append(readOpenSSHTestFile(t, ownedPath), "# edited\n"...), false)
+	if _, err := InstallOpenSSHConfig(config); !errors.Is(err, ErrOpenSSHConfigConflict) {
+		t.Fatalf("an edited fragment was replaced: %v", err)
 	}
 }

@@ -33,24 +33,31 @@ func (q *Queries) AddMachineSSHHostKeyToSet(ctx context.Context, arg AddMachineS
 	return err
 }
 
-const countActiveManagedSSHClientKeysForUser = `-- name: CountActiveManagedSSHClientKeysForUser :one
-SELECT count(*) FROM managed_ssh_client_keys k
-JOIN cli_client_sessions cs ON cs.id = k.cli_client_session_id AND cs.state = 'active'
-  AND coalesce(cs.last_used_at, cs.created_at) >= $1
-WHERE k.user_id = $2 AND k.state = 'active' AND k.fingerprint <> $3
+const createFirstManagedSSHUserCA = `-- name: CreateFirstManagedSSHUserCA :exec
+INSERT INTO managed_ssh_user_cas (id, account_id, state, public_key, private_key_ciphertext, created_at, state_changed_at)
+SELECT $1, $2, 'active', $3, $4, $5, $5
+WHERE NOT EXISTS (SELECT 1 FROM managed_ssh_user_cas WHERE account_id = $2)
+ON CONFLICT DO NOTHING
 `
 
-type CountActiveManagedSSHClientKeysForUserParams struct {
-	UsedSince   sql.NullTime
-	UserID      string
-	Fingerprint []byte
+type CreateFirstManagedSSHUserCAParams struct {
+	ID                   string
+	AccountID            string
+	PublicKey            string
+	PrivateKeyCiphertext []byte
+	Now                  time.Time
 }
 
-func (q *Queries) CountActiveManagedSSHClientKeysForUser(ctx context.Context, arg CountActiveManagedSSHClientKeysForUserParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countActiveManagedSSHClientKeysForUser, arg.UsedSince, arg.UserID, arg.Fingerprint)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
+// The account's first CA, made on first use; a concurrent first use keeps the row that won.
+func (q *Queries) CreateFirstManagedSSHUserCA(ctx context.Context, arg CreateFirstManagedSSHUserCAParams) error {
+	_, err := q.db.Exec(ctx, createFirstManagedSSHUserCA,
+		arg.ID,
+		arg.AccountID,
+		arg.PublicKey,
+		arg.PrivateKeyCiphertext,
+		arg.Now,
+	)
+	return err
 }
 
 const createMachineSSHHostKeyOwner = `-- name: CreateMachineSSHHostKeyOwner :one
@@ -184,53 +191,6 @@ func (q *Queries) CreateMachineSSHTarget(ctx context.Context, arg CreateMachineS
 	return i, err
 }
 
-const createManagedSSHClientKey = `-- name: CreateManagedSSHClientKey :one
-INSERT INTO managed_ssh_client_keys
-  (fingerprint, user_id, cli_client_session_id, algorithm, public_key,
-   reconciliation_version, created_at)
-VALUES
-  ($1, $2, $3,
-   $4, $5, $6,
-   $7)
-RETURNING fingerprint, user_id, cli_client_session_id, algorithm, public_key, state, reconciliation_version, created_at, revoked_at, revocation_reason
-`
-
-type CreateManagedSSHClientKeyParams struct {
-	Fingerprint           []byte
-	UserID                string
-	CLIClientSessionID    string
-	Algorithm             string
-	PublicKey             string
-	ReconciliationVersion int64
-	CreatedAt             time.Time
-}
-
-func (q *Queries) CreateManagedSSHClientKey(ctx context.Context, arg CreateManagedSSHClientKeyParams) (ManagedSshClientKey, error) {
-	row := q.db.QueryRow(ctx, createManagedSSHClientKey,
-		arg.Fingerprint,
-		arg.UserID,
-		arg.CLIClientSessionID,
-		arg.Algorithm,
-		arg.PublicKey,
-		arg.ReconciliationVersion,
-		arg.CreatedAt,
-	)
-	var i ManagedSshClientKey
-	err := row.Scan(
-		&i.Fingerprint,
-		&i.UserID,
-		&i.CLIClientSessionID,
-		&i.Algorithm,
-		&i.PublicKey,
-		&i.State,
-		&i.ReconciliationVersion,
-		&i.CreatedAt,
-		&i.RevokedAt,
-		&i.RevocationReason,
-	)
-	return i, err
-}
-
 const createManagedSSHOperation = `-- name: CreateManagedSSHOperation :one
 INSERT INTO managed_ssh_operations
   (operation_id, user_id, operation_kind, request_hash, resource_id,
@@ -273,6 +233,58 @@ func (q *Queries) CreateManagedSSHOperation(ctx context.Context, arg CreateManag
 		&i.CreatedAt,
 	)
 	return i, err
+}
+
+const createPendingManagedSSHUserCA = `-- name: CreatePendingManagedSSHUserCA :exec
+INSERT INTO managed_ssh_user_cas (id, account_id, state, public_key, private_key_ciphertext, created_at, state_changed_at)
+VALUES ($1, $2, 'pending', $3, $4, $5, $5)
+`
+
+type CreatePendingManagedSSHUserCAParams struct {
+	ID                   string
+	AccountID            string
+	PublicKey            string
+	PrivateKeyCiphertext []byte
+	Now                  time.Time
+}
+
+func (q *Queries) CreatePendingManagedSSHUserCA(ctx context.Context, arg CreatePendingManagedSSHUserCAParams) error {
+	_, err := q.db.Exec(ctx, createPendingManagedSSHUserCA,
+		arg.ID,
+		arg.AccountID,
+		arg.PublicKey,
+		arg.PrivateKeyCiphertext,
+		arg.Now,
+	)
+	return err
+}
+
+const deleteExpiredManagedSSHCertificateHolders = `-- name: DeleteExpiredManagedSSHCertificateHolders :exec
+DELETE FROM managed_ssh_certificate_holders WHERE machine_id = $1 AND valid_before <= $2
+`
+
+type DeleteExpiredManagedSSHCertificateHoldersParams struct {
+	MachineID string
+	Now       time.Time
+}
+
+func (q *Queries) DeleteExpiredManagedSSHCertificateHolders(ctx context.Context, arg DeleteExpiredManagedSSHCertificateHoldersParams) error {
+	_, err := q.db.Exec(ctx, deleteExpiredManagedSSHCertificateHolders, arg.MachineID, arg.Now)
+	return err
+}
+
+const deleteManagedSSHUserCA = `-- name: DeleteManagedSSHUserCA :exec
+DELETE FROM managed_ssh_user_cas WHERE account_id = $1 AND state = $2
+`
+
+type DeleteManagedSSHUserCAParams struct {
+	AccountID string
+	State     string
+}
+
+func (q *Queries) DeleteManagedSSHUserCA(ctx context.Context, arg DeleteManagedSSHUserCAParams) error {
+	_, err := q.db.Exec(ctx, deleteManagedSSHUserCA, arg.AccountID, arg.State)
+	return err
 }
 
 const deleteRetiredMachineSSHHostKeyOwner = `-- name: DeleteRetiredMachineSSHHostKeyOwner :execrows
@@ -380,26 +392,21 @@ func (q *Queries) GetActiveMachineSSHHostKeySetForUpdate(ctx context.Context, us
 	return i, err
 }
 
-const getActiveManagedSSHClientKeyForUpdate = `-- name: GetActiveManagedSSHClientKeyForUpdate :one
-SELECT fingerprint, user_id, cli_client_session_id, algorithm, public_key, state, reconciliation_version, created_at, revoked_at, revocation_reason FROM managed_ssh_client_keys
-WHERE cli_client_session_id = $1 AND state = 'active'
-FOR UPDATE
+const getActiveManagedSSHUserCA = `-- name: GetActiveManagedSSHUserCA :one
+SELECT id, account_id, state, public_key, private_key_ciphertext, created_at, state_changed_at FROM managed_ssh_user_cas WHERE account_id = $1 AND state = 'active'
 `
 
-func (q *Queries) GetActiveManagedSSHClientKeyForUpdate(ctx context.Context, cliClientSessionID string) (ManagedSshClientKey, error) {
-	row := q.db.QueryRow(ctx, getActiveManagedSSHClientKeyForUpdate, cliClientSessionID)
-	var i ManagedSshClientKey
+func (q *Queries) GetActiveManagedSSHUserCA(ctx context.Context, accountID string) (ManagedSshUserCa, error) {
+	row := q.db.QueryRow(ctx, getActiveManagedSSHUserCA, accountID)
+	var i ManagedSshUserCa
 	err := row.Scan(
-		&i.Fingerprint,
-		&i.UserID,
-		&i.CLIClientSessionID,
-		&i.Algorithm,
-		&i.PublicKey,
+		&i.ID,
+		&i.AccountID,
 		&i.State,
-		&i.ReconciliationVersion,
+		&i.PublicKey,
+		&i.PrivateKeyCiphertext,
 		&i.CreatedAt,
-		&i.RevokedAt,
-		&i.RevocationReason,
+		&i.StateChangedAt,
 	)
 	return i, err
 }
@@ -527,30 +534,6 @@ func (q *Queries) GetMachineSSHTargetForUpdate(ctx context.Context, userMachineI
 	return i, err
 }
 
-const getManagedSSHClientKeyByFingerprint = `-- name: GetManagedSSHClientKeyByFingerprint :one
-SELECT fingerprint, user_id, cli_client_session_id, algorithm, public_key, state, reconciliation_version, created_at, revoked_at, revocation_reason FROM managed_ssh_client_keys
-WHERE fingerprint = $1
-FOR UPDATE
-`
-
-func (q *Queries) GetManagedSSHClientKeyByFingerprint(ctx context.Context, fingerprint []byte) (ManagedSshClientKey, error) {
-	row := q.db.QueryRow(ctx, getManagedSSHClientKeyByFingerprint, fingerprint)
-	var i ManagedSshClientKey
-	err := row.Scan(
-		&i.Fingerprint,
-		&i.UserID,
-		&i.CLIClientSessionID,
-		&i.Algorithm,
-		&i.PublicKey,
-		&i.State,
-		&i.ReconciliationVersion,
-		&i.CreatedAt,
-		&i.RevokedAt,
-		&i.RevocationReason,
-	)
-	return i, err
-}
-
 const getManagedSSHOperationForUpdate = `-- name: GetManagedSSHOperationForUpdate :one
 SELECT operation_id, user_id, operation_kind, request_hash, resource_id, result_revision, created_at FROM managed_ssh_operations
 WHERE operation_id = $1
@@ -620,95 +603,6 @@ func (q *Queries) GetPendingMachineSSHHostKeySetForUpdate(ctx context.Context, u
 	return i, err
 }
 
-const listActiveManagedSSHClientKeysForMachine = `-- name: ListActiveManagedSSHClientKeysForMachine :many
-SELECT k.fingerprint, k.user_id, k.cli_client_session_id, k.algorithm, k.public_key, k.state, k.reconciliation_version, k.created_at, k.revoked_at, k.revocation_reason FROM managed_ssh_client_keys k
-JOIN cli_client_sessions cs ON cs.id=k.cli_client_session_id AND cs.user_id=k.user_id AND cs.state='active' AND cs.revoked_at IS NULL
- AND coalesce(cs.last_used_at,cs.created_at) >= $1
-WHERE k.state='active' AND machine_capability_allowed(k.user_id,$2,'managed_ssh')
-ORDER BY k.created_at DESC,k.cli_client_session_id DESC LIMIT 257
-`
-
-type ListActiveManagedSSHClientKeysForMachineParams struct {
-	UsedSince sql.NullTime
-	MachineID string
-}
-
-func (q *Queries) ListActiveManagedSSHClientKeysForMachine(ctx context.Context, arg ListActiveManagedSSHClientKeysForMachineParams) ([]ManagedSshClientKey, error) {
-	rows, err := q.db.Query(ctx, listActiveManagedSSHClientKeysForMachine, arg.UsedSince, arg.MachineID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []ManagedSshClientKey
-	for rows.Next() {
-		var i ManagedSshClientKey
-		if err := rows.Scan(
-			&i.Fingerprint,
-			&i.UserID,
-			&i.CLIClientSessionID,
-			&i.Algorithm,
-			&i.PublicKey,
-			&i.State,
-			&i.ReconciliationVersion,
-			&i.CreatedAt,
-			&i.RevokedAt,
-			&i.RevocationReason,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listActiveManagedSSHClientKeysForUser = `-- name: ListActiveManagedSSHClientKeysForUser :many
-SELECT k.fingerprint, k.user_id, k.cli_client_session_id, k.algorithm, k.public_key, k.state, k.reconciliation_version, k.created_at, k.revoked_at, k.revocation_reason FROM managed_ssh_client_keys k
-JOIN cli_client_sessions cs ON cs.id = k.cli_client_session_id AND cs.state = 'active'
-  AND coalesce(cs.last_used_at, cs.created_at) >= $1
-WHERE k.user_id = $2 AND k.state = 'active'
-ORDER BY k.created_at DESC, k.cli_client_session_id DESC
-LIMIT 256
-`
-
-type ListActiveManagedSSHClientKeysForUserParams struct {
-	UsedSince sql.NullTime
-	UserID    string
-}
-
-func (q *Queries) ListActiveManagedSSHClientKeysForUser(ctx context.Context, arg ListActiveManagedSSHClientKeysForUserParams) ([]ManagedSshClientKey, error) {
-	rows, err := q.db.Query(ctx, listActiveManagedSSHClientKeysForUser, arg.UsedSince, arg.UserID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []ManagedSshClientKey
-	for rows.Next() {
-		var i ManagedSshClientKey
-		if err := rows.Scan(
-			&i.Fingerprint,
-			&i.UserID,
-			&i.CLIClientSessionID,
-			&i.Algorithm,
-			&i.PublicKey,
-			&i.State,
-			&i.ReconciliationVersion,
-			&i.CreatedAt,
-			&i.RevokedAt,
-			&i.RevocationReason,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listMachineSSHHostKeysForSet = `-- name: ListMachineSSHHostKeysForSet :many
 SELECT member.ordinal, owner.fingerprint, owner.algorithm, owner.public_key
 FROM machine_ssh_host_keys member
@@ -751,6 +645,77 @@ func (q *Queries) ListMachineSSHHostKeysForSet(ctx context.Context, setID string
 	return items, nil
 }
 
+const listManagedSSHUserCAs = `-- name: ListManagedSSHUserCAs :many
+SELECT id, account_id, state, public_key, private_key_ciphertext, created_at, state_changed_at FROM managed_ssh_user_cas WHERE account_id = $1
+ORDER BY created_at, CASE state WHEN 'retiring' THEN 0 WHEN 'active' THEN 1 ELSE 2 END
+`
+
+func (q *Queries) ListManagedSSHUserCAs(ctx context.Context, accountID string) ([]ManagedSshUserCa, error) {
+	rows, err := q.db.Query(ctx, listManagedSSHUserCAs, accountID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ManagedSshUserCa
+	for rows.Next() {
+		var i ManagedSshUserCa
+		if err := rows.Scan(
+			&i.ID,
+			&i.AccountID,
+			&i.State,
+			&i.PublicKey,
+			&i.PrivateKeyCiphertext,
+			&i.CreatedAt,
+			&i.StateChangedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRevokedManagedSSHCertificateHolders = `-- name: ListRevokedManagedSSHCertificateHolders :many
+SELECT h.cli_client_session_id FROM managed_ssh_certificate_holders h
+JOIN user_machines m ON m.id = h.machine_id
+LEFT JOIN cli_client_sessions session ON session.id = h.cli_client_session_id AND session.user_id = h.user_id
+  AND session.state = 'active' AND session.revoked_at IS NULL
+WHERE h.machine_id = $1 AND h.valid_before > $2
+AND (session.id IS NULL OR NOT ((m.owner_team_id IS NULL AND m.user_id = h.user_id AND m.deleted_at IS NULL)
+  OR machine_capability_allowed(h.user_id, m.id, 'managed_ssh') OR machine_management_allowed(h.user_id, m.id)))
+ORDER BY h.cli_client_session_id
+`
+
+type ListRevokedManagedSSHCertificateHoldersParams struct {
+	MachineID string
+	Now       time.Time
+}
+
+// Holders of a still-valid certificate for the machine that may no longer log in to it: the machine's revocation
+// token is derived from them (bounded: one row per CLI session that got a certificate within the validity).
+func (q *Queries) ListRevokedManagedSSHCertificateHolders(ctx context.Context, arg ListRevokedManagedSSHCertificateHoldersParams) ([]string, error) {
+	rows, err := q.db.Query(ctx, listRevokedManagedSSHCertificateHolders, arg.MachineID, arg.Now)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var cli_client_session_id string
+		if err := rows.Scan(&cli_client_session_id); err != nil {
+			return nil, err
+		}
+		items = append(items, cli_client_session_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const promotePendingMachineSSHHostKeySet = `-- name: PromotePendingMachineSSHHostKeySet :one
 UPDATE machine_ssh_host_key_sets
 SET state = 'active', promoted_at = $1,
@@ -781,6 +746,29 @@ func (q *Queries) PromotePendingMachineSSHHostKeySet(ctx context.Context, arg Pr
 		&i.RejectionReason,
 	)
 	return i, err
+}
+
+const recordManagedSSHCertificateHolder = `-- name: RecordManagedSSHCertificateHolder :exec
+INSERT INTO managed_ssh_certificate_holders (machine_id, cli_client_session_id, user_id, valid_before)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (machine_id, cli_client_session_id) DO UPDATE SET valid_before = GREATEST(managed_ssh_certificate_holders.valid_before, EXCLUDED.valid_before)
+`
+
+type RecordManagedSSHCertificateHolderParams struct {
+	MachineID          string
+	CLIClientSessionID string
+	UserID             string
+	ValidBefore        time.Time
+}
+
+func (q *Queries) RecordManagedSSHCertificateHolder(ctx context.Context, arg RecordManagedSSHCertificateHolderParams) error {
+	_, err := q.db.Exec(ctx, recordManagedSSHCertificateHolder,
+		arg.MachineID,
+		arg.CLIClientSessionID,
+		arg.UserID,
+		arg.ValidBefore,
+	)
+	return err
 }
 
 const rejectPendingMachineSSHHostKeySet = `-- name: RejectPendingMachineSSHHostKeySet :one
@@ -853,6 +841,43 @@ func (q *Queries) ReplaceMachineSSHTargetGeneration(ctx context.Context, arg Rep
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
+	return i, err
+}
+
+const resolveMachineSSHCertificateAuthority = `-- name: ResolveMachineSSHCertificateAuthority :one
+SELECT m.user_id AS account_id, t.os_user FROM user_machines m
+JOIN machine_ssh_targets t ON t.user_machine_id = m.id AND t.machine_generation = m.installation_generation
+JOIN cli_client_sessions session ON session.id = $1 AND session.user_id = $2
+  AND session.state = 'active' AND session.revoked_at IS NULL
+WHERE m.id = $3 AND m.installation_generation = $4
+AND ((m.owner_team_id IS NULL AND m.user_id = $2 AND m.deleted_at IS NULL)
+  OR machine_capability_allowed($2, m.id, 'managed_ssh') OR machine_management_allowed($2, m.id))
+AND m.state NOT IN ('revoked', 'disconnected', 'deleted')
+`
+
+type ResolveMachineSSHCertificateAuthorityParams struct {
+	CLIClientSessionID string
+	UserID             string
+	MachineID          string
+	MachineGeneration  int64
+}
+
+type ResolveMachineSSHCertificateAuthorityRow struct {
+	AccountID string
+	OsUser    string
+}
+
+// One read for certificate issuance: the CLI session is live, the user may use managed SSH on the exact machine and
+// generation, and the machine has a target. account_id names the CA (the machine's immutable owner account).
+func (q *Queries) ResolveMachineSSHCertificateAuthority(ctx context.Context, arg ResolveMachineSSHCertificateAuthorityParams) (ResolveMachineSSHCertificateAuthorityRow, error) {
+	row := q.db.QueryRow(ctx, resolveMachineSSHCertificateAuthority,
+		arg.CLIClientSessionID,
+		arg.UserID,
+		arg.MachineID,
+		arg.MachineGeneration,
+	)
+	var i ResolveMachineSSHCertificateAuthorityRow
+	err := row.Scan(&i.AccountID, &i.OsUser)
 	return i, err
 }
 
@@ -952,67 +977,26 @@ func (q *Queries) ResolveMachineSSHUseAuthorityForUpdate(ctx context.Context, ar
 	return id, err
 }
 
-const resolveManagedSSHClientAuthorityForUpdate = `-- name: ResolveManagedSSHClientAuthorityForUpdate :one
-SELECT session.id AS cli_client_session_id, session.user_id, session.version
-FROM cli_client_sessions session
-JOIN users owner ON owner.id = session.user_id
-WHERE session.id = $1
-  AND session.user_id = $2
-  AND session.state = 'active'
-  AND session.revoked_at IS NULL
-  AND owner.status = 'active'
-FOR UPDATE OF session, owner
+const setManagedSSHUserCAState = `-- name: SetManagedSSHUserCAState :exec
+UPDATE managed_ssh_user_cas SET state = $1, state_changed_at = $2
+WHERE account_id = $3 AND state = $4
 `
 
-type ResolveManagedSSHClientAuthorityForUpdateParams struct {
-	CLIClientSessionID string
-	UserID             string
+type SetManagedSSHUserCAStateParams struct {
+	NewState  string
+	Now       time.Time
+	AccountID string
+	OldState  string
 }
 
-type ResolveManagedSSHClientAuthorityForUpdateRow struct {
-	CLIClientSessionID string
-	UserID             string
-	Version            int64
-}
-
-func (q *Queries) ResolveManagedSSHClientAuthorityForUpdate(ctx context.Context, arg ResolveManagedSSHClientAuthorityForUpdateParams) (ResolveManagedSSHClientAuthorityForUpdateRow, error) {
-	row := q.db.QueryRow(ctx, resolveManagedSSHClientAuthorityForUpdate, arg.CLIClientSessionID, arg.UserID)
-	var i ResolveManagedSSHClientAuthorityForUpdateRow
-	err := row.Scan(&i.CLIClientSessionID, &i.UserID, &i.Version)
-	return i, err
-}
-
-const revokeManagedSSHClientKey = `-- name: RevokeManagedSSHClientKey :one
-UPDATE managed_ssh_client_keys
-SET state = 'revoked', revoked_at = $1,
-    revocation_reason = $2,
-    reconciliation_version = reconciliation_version + 1
-WHERE fingerprint = $3 AND state = 'active'
-RETURNING fingerprint, user_id, cli_client_session_id, algorithm, public_key, state, reconciliation_version, created_at, revoked_at, revocation_reason
-`
-
-type RevokeManagedSSHClientKeyParams struct {
-	RevokedAt        sql.NullTime
-	RevocationReason sql.NullString
-	Fingerprint      []byte
-}
-
-func (q *Queries) RevokeManagedSSHClientKey(ctx context.Context, arg RevokeManagedSSHClientKeyParams) (ManagedSshClientKey, error) {
-	row := q.db.QueryRow(ctx, revokeManagedSSHClientKey, arg.RevokedAt, arg.RevocationReason, arg.Fingerprint)
-	var i ManagedSshClientKey
-	err := row.Scan(
-		&i.Fingerprint,
-		&i.UserID,
-		&i.CLIClientSessionID,
-		&i.Algorithm,
-		&i.PublicKey,
-		&i.State,
-		&i.ReconciliationVersion,
-		&i.CreatedAt,
-		&i.RevokedAt,
-		&i.RevocationReason,
+func (q *Queries) SetManagedSSHUserCAState(ctx context.Context, arg SetManagedSSHUserCAStateParams) error {
+	_, err := q.db.Exec(ctx, setManagedSSHUserCAState,
+		arg.NewState,
+		arg.Now,
+		arg.AccountID,
+		arg.OldState,
 	)
-	return i, err
+	return err
 }
 
 const supersedeActiveMachineSSHHostKeySet = `-- name: SupersedeActiveMachineSSHHostKeySet :one

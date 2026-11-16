@@ -2,6 +2,7 @@ package managedssh
 
 import (
 	"fmt"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -14,9 +15,10 @@ import (
 //	# BEGIN paperboat-managed-ssh-v1
 //	Host <alias>.<domain>                 one group per machine
 //	    Port <n>
-//	Match host <alias>.<domain> user "<setup user>"
+//	Match host <alias>.<domain> user "<setup user>" exec "<pb> __ssh-certificate --host <alias>.<domain>"
 //	    IdentityAgent "<pb agent>"        the managed key is offered only to the user who set pb up
 //	    IdentityFile "<public key file>"
+//	    CertificateFile "<certificate>"   a certificate for this machine, fetched or renewed by the exec above
 //	    IdentitiesOnly yes
 //	    BatchMode yes
 //	    PasswordAuthentication no
@@ -36,6 +38,9 @@ type ownedOpenSSH struct {
 	KnownHostsCommand string
 	Agent             string
 	Identity          string
+	// CertificateCommand runs before each managed connection (Match exec, so before OpenSSH loads the certificate
+	// file; a ProxyCommand runs too late) and keeps that machine's certificate file fresh.
+	CertificateCommand string
 }
 
 const ownedOpenSSHTransport = "    StrictHostKeyChecking yes\n    CheckHostIP no\n    UserKnownHostsFile none\n    GlobalKnownHostsFile none\n    CanonicalizeHostname yes\n"
@@ -60,9 +65,27 @@ func unquoteOpenSSHPath(line, prefix string) (string, bool) {
 
 // ManagedIdentityArguments are the fragment's managed-key options as OpenSSH command-line options. A connection
 // that overrides Hostname needs them there: `Match host` compares the overridden name (ssh_config(5)), so the
-// fragment's Match group, which offers the managed key, never applies to it.
-func ManagedIdentityArguments(agent, identity string) []string {
-	return []string{"-o", "IdentityAgent=" + quoteOpenSSHPath(agent), "-o", "IdentityFile=" + quoteOpenSSHPath(identity)}
+// fragment's Match group, which offers the managed key, never applies to it; its caller fetches the certificate.
+func ManagedIdentityArguments(agent, identity, certificate string) []string {
+	return []string{"-o", "IdentityAgent=" + quoteOpenSSHPath(agent), "-o", "IdentityFile=" + quoteOpenSSHPath(identity), "-o", "CertificateFile=" + quoteOpenSSHPath(certificate)}
+}
+
+// ManagedCertificatePath is where this computer keeps its managed SSH certificate for one machine alias.
+func ManagedCertificatePath(home, alias string) string {
+	return managedCertificatePathIn(filepath.Join(home, ".ssh"), alias)
+}
+
+func managedCertificatePathIn(sshDirectory, alias string) string {
+	return filepath.Join(sshDirectory, "paperboat-managed-ssh-certs", alias+"-cert.pub")
+}
+
+// certificateMatchCommand is the Match exec argument for host; validCertificateCommand keeps it one quoted token.
+func certificateMatchCommand(command, host string) string {
+	return "exec \"" + command + " __ssh-certificate --host " + host + "\""
+}
+
+func validCertificateCommand(command string) bool {
+	return command != "" && !strings.ContainsAny(command, "\"\r\n\x00%")
 }
 
 // matchUserPattern is the `Match user` pattern list for a registered account: the account as registered and, for an
@@ -94,16 +117,17 @@ func formatOwnedOpenSSH(domain string, owned ownedOpenSSH) ([]byte, error) {
 	seen := make(map[string]struct{}, len(owned.Targets))
 	for _, target := range owned.Targets {
 		host, err := AliasHost(target.Alias, domain)
-		if err != nil || target.Port == 0 || !ValidUsername(target.User) {
+		if err != nil || target.Port == 0 || !ValidUsername(target.User) || !validCertificateCommand(owned.CertificateCommand) {
 			return nil, ErrOpenSSHConfigConflict
 		}
 		if _, exists := seen[host]; exists {
 			return nil, ErrOpenSSHConfigConflict
 		}
 		seen[host] = struct{}{}
-		fmt.Fprintf(&out, "Host %s\n    Port %d\nMatch host %s user \"%s\"\n", host, target.Port, host, matchUserPattern(target))
+		fmt.Fprintf(&out, "Host %s\n    Port %d\nMatch host %s user \"%s\" %s\n", host, target.Port, host, matchUserPattern(target), certificateMatchCommand(owned.CertificateCommand, host))
 		out.WriteString("    IdentityAgent " + quoteOpenSSHPath(owned.Agent) + "\n")
 		out.WriteString("    IdentityFile " + quoteOpenSSHPath(owned.Identity) + "\n")
+		out.WriteString("    CertificateFile " + quoteOpenSSHPath(managedCertificatePathIn(filepath.Dir(owned.Identity), target.Alias)) + "\n")
 		out.WriteString(ownedOpenSSHManagedAuth)
 	}
 	out.WriteString("Host *." + domain + "\n")
@@ -120,25 +144,26 @@ func parseOwnedOpenSSH(value []byte, domain string) (ownedOpenSSH, bool) {
 	lines := strings.Split(strings.TrimSuffix(string(value), "\n"), "\n")
 	var owned ownedOpenSSH
 	index := 1
-	for index+8 < len(lines) && strings.HasPrefix(lines[index], "Host ") && lines[index] != "Host *."+domain {
+	for index+9 < len(lines) && strings.HasPrefix(lines[index], "Host ") && lines[index] != "Host *."+domain {
 		host := strings.TrimPrefix(lines[index], "Host ")
 		alias, err := ParseAliasHost(host, domain)
 		port, portErr := strconv.ParseUint(strings.TrimPrefix(lines[index+1], "    Port "), 10, 16)
-		prefix := "Match host " + host + " user \""
-		if err != nil || portErr != nil || !strings.HasPrefix(lines[index+1], "    Port ") || !strings.HasPrefix(lines[index+2], prefix) || !strings.HasSuffix(lines[index+2], "\"") {
+		prefix, execPrefix, execSuffix := "Match host "+host+" user \"", "\" exec \"", " __ssh-certificate --host "+host+"\""
+		users, command, execOK := strings.Cut(strings.TrimPrefix(lines[index+2], prefix), execPrefix)
+		if err != nil || portErr != nil || !strings.HasPrefix(lines[index+1], "    Port ") || !strings.HasPrefix(lines[index+2], prefix) || !execOK || !strings.HasSuffix(command, execSuffix) {
 			return ownedOpenSSH{}, false
 		}
-		user, _, anyCase := strings.Cut(strings.TrimSuffix(strings.TrimPrefix(lines[index+2], prefix), "\""), ",")
+		user, _, anyCase := strings.Cut(users, ",")
 		agent, agentOK := unquoteOpenSSHPath(lines[index+3], "    IdentityAgent ")
 		identity, identityOK := unquoteOpenSSHPath(lines[index+4], "    IdentityFile ")
 		if !agentOK || !identityOK {
 			return ownedOpenSSH{}, false
 		}
 		if len(owned.Targets) == 0 {
-			owned.Agent, owned.Identity = agent, identity
+			owned.Agent, owned.Identity, owned.CertificateCommand = agent, identity, strings.TrimSuffix(command, execSuffix)
 		}
 		owned.Targets = append(owned.Targets, OpenSSHAliasTarget{Alias: alias, User: user, Port: uint16(port), AnyCaseUser: anyCase})
-		index += 9
+		index += 10
 	}
 	if index+3 >= len(lines) || lines[index] != "Host *."+domain || !strings.HasPrefix(lines[index+1], "    ProxyCommand ") || !strings.HasPrefix(lines[index+2], "    KnownHostsCommand ") {
 		return ownedOpenSSH{}, false

@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	wire "github.com/pinksaucepasta/paperboat/shared/managedssh"
 	"io"
 	"net"
 	"os"
@@ -28,7 +29,7 @@ const (
 	ProtocolV1                       = "paperboat.host-service/v1"
 	AllowSleep                       = "allow_sleep"
 	KeepAwake                        = "keep_awake"
-	maxAuthorizedKeys                = 256
+	maxAuthorizedKeys                = wire.MaxUserCAs
 	windowsHostServiceMaxRequestSize = 64 << 10
 )
 
@@ -46,6 +47,7 @@ type Request struct {
 	Version        int64                     `json:"version,omitempty"`
 	Artifact       *bootstrap.ArtifactTarget `json:"artifact,omitempty"`
 	AuthorizedKeys *[]string                 `json:"authorized_keys,omitempty"`
+	SSHPrincipal   string                    `json:"ssh_principal,omitempty"`
 }
 type Response struct {
 	Schema                   string    `json:"schema"`
@@ -86,7 +88,7 @@ type UpdateDiagnostics interface {
 	UpdateHealth() string
 }
 type AuthorizedKeysReconciler interface {
-	ReconcileAuthorizedKeys(context.Context, []string) (bool, error)
+	ReconcileAuthorizedKeys(context.Context, []string, string) (bool, error)
 }
 type Config struct {
 	SocketPath        string
@@ -242,7 +244,7 @@ func (s *Server) serveContext(ctx context.Context, connection net.Conn) error {
 		if request.Mode != "" || request.Version != 0 || request.Artifact != nil || request.AuthorizedKeys == nil || len(*request.AuthorizedKeys) > maxAuthorizedKeys || s.config.AuthorizedKeys == nil {
 			return s.respond(connection, s.errorResponse("invalid_request"))
 		}
-		changed, reconcileErr := s.config.AuthorizedKeys.ReconcileAuthorizedKeys(requestCtx, append([]string(nil), (*request.AuthorizedKeys)...))
+		changed, reconcileErr := s.config.AuthorizedKeys.ReconcileAuthorizedKeys(requestCtx, append([]string(nil), (*request.AuthorizedKeys)...), request.SSHPrincipal)
 		if reconcileErr != nil {
 			if !allErrorLeavesMatch(reconcileErr, func(leaf error) bool {
 				return leaf == windowsopenssh.ErrQualificationEnrollment || normalRequestLeaf(leaf)

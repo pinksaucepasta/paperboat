@@ -3,7 +3,6 @@ package localdaemon
 import (
 	"context"
 	"errors"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machineevents"
 	"math/rand/v2"
 	"net/url"
 	"sort"
@@ -12,13 +11,14 @@ import (
 	"sync"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machineevents"
+
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
 	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 	"github.com/pinksaucepasta/paperboat/shared/httptransport"
-	wire "github.com/pinksaucepasta/paperboat/shared/managedssh"
 )
 
 const (
@@ -552,10 +552,6 @@ func mapMachines(machines []api.UserMachine) []localapi.MachineStatus {
 			// Without a code this computer's managed SSH is still starting: nothing to report or refuse yet.
 			code := machine.SSHLocalCode
 			status.Health = []localapi.HealthItem{{Code: code, Severity: "warning", Title: "Managed SSH is not ready", Recovery: managedSSHDoctorRecovery, ETag: code}}
-			if code == managedSSHClientKeyCapacityCode {
-				status.Health[0].Title = "This computer cannot use managed SSH: the account's limit of " + strconv.Itoa(wire.MaxClientKeys) + " signed-in computers using managed SSH is reached"
-				status.Health[0].Recovery = "Sign out on a computer you no longer use (pb logout there) or revoke it (pb machine revoke <machine>), then retry"
-			}
 			if code == managedSSHServerRefusedCode {
 				status.Health[0].Title = "Managed SSH is not ready: the server refused this computer's managed SSH request"
 				status.Health[0].Recovery = "Run pb ssh doctor <machine>; if it repeats, run pb logout and pb login, then pb bugreport --upload"

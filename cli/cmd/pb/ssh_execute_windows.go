@@ -77,6 +77,13 @@ func executeManagedSSH(cobraCommand *cobra.Command, ctx *command.Context, machin
 		if err != nil {
 			return err
 		}
+		if identity.Signer, err = sshCertificateSigner(ctx, client, machine, liveTarget, identity.Signer); err != nil {
+			return friendlyCommandError(err)
+		}
+	} else if destination.Managed {
+		if _, err := ensureSSHCertificate(ctx, client, machine, liveTarget); err != nil {
+			return friendlyCommandError(err)
+		}
 	}
 	operationID := newSSHOperationID()
 	descriptor := pendingSSHDescriptor(machine, operationID)
@@ -127,7 +134,7 @@ func executeManagedSSH(cobraCommand *cobra.Command, ctx *command.Context, machin
 	if err != nil {
 		return commandPreparationFailure{step: prepareMachineUser, cause: err}
 	}
-	identityArguments := managedssh.ManagedIdentityArguments(agentSocket, managedssh.ManagedIdentityPublicKeyPath(home))
+	identityArguments := managedssh.ManagedIdentityArguments(agentSocket, managedssh.ManagedIdentityPublicKeyPath(home), managedssh.ManagedCertificatePath(home, machine.Alias))
 	return (managedssh.LoopbackOpenSSHExecutor{}).Execute(cobraCommand.Context(), "ssh", func(port uint16) []string {
 		return windowsLoopbackOpenSSHArguments(destination, port, executable, identityArguments, passthrough, includePassthrough)
 	}, environment, stream)

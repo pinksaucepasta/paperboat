@@ -11,8 +11,21 @@ import (
 
 const MaxHostKeys = 8
 
-// MaxClientKeys is how many live client keys one account may register, and the most a host authorizes.
-const MaxClientKeys = 256
+// CATrustOptions are the options of a host's line trusting a user CA: certificates carrying principal (the machine's
+// revocation principal), and only on the loopback connections the host's own bridge makes (BridgeSSH dials 127.0.0.1
+// or ::1), so a certificate never opens a session that bypasses the stream (direct sshd over LAN or tailnet is
+// refused at login). Callers check ValidCAPrincipal first.
+func CATrustOptions(principal string) string {
+	return `cert-authority,principals="` + principal + `",from="127.0.0.1,::1"`
+}
+
+// ValidCAPrincipal: a revocation principal as the server makes it ("pb:<machine>:<token>"), safe inside principals="".
+func ValidCAPrincipal(value string) bool {
+	return strings.HasPrefix(value, "pb:") && len(value) <= 200 && !strings.ContainsAny(value, "\",\r\n\t\x00 *?!")
+}
+
+// MaxUserCAs is the most user CAs a host trusts: one pending, one active and one retiring during a rotation.
+const MaxUserCAs = 3
 const MaxHostKeyBytes = 8192
 
 var ErrInvalid = errors.New("managed SSH request is invalid")

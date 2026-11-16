@@ -7,13 +7,13 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"fmt"
-	wire "github.com/pinksaucepasta/paperboat/shared/managedssh"
 	"io"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
+
+	wire "github.com/pinksaucepasta/paperboat/shared/managedssh"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/controlplane"
 	"github.com/pinksaucepasta/paperboat/server/internal/managedssh"
@@ -22,8 +22,9 @@ import (
 const maxManagedSSHRequest = 64 << 10
 
 type managedSSHService interface {
-	RegisterClient(context.Context, managedssh.RegisterClientRequest) (managedssh.ClientKey, error)
-	RevokeClient(context.Context, managedssh.RevokeClientRequest) (managedssh.ClientKey, error)
+	IssueCertificate(context.Context, managedssh.IssueCertificateRequest) (managedssh.Certificate, error)
+	TrustedUserCAs(context.Context, managedssh.UserCAsRequest) (managedssh.TrustedUserCASet, error)
+	RotateUserCA(context.Context, string, time.Time) ([]managedssh.UserCA, error)
 	RegisterTarget(context.Context, managedssh.RegisterTargetRequest) (managedssh.MachineTarget, error)
 	UpdateTargetPort(context.Context, managedssh.UpdateTargetPortRequest) (managedssh.MachineTarget, error)
 	GetTarget(context.Context, managedssh.GetTargetRequest) (managedssh.MachineTarget, error)
@@ -31,58 +32,56 @@ type managedSSHService interface {
 	PromoteHost(context.Context, managedssh.PromoteHostRequest) (managedssh.HostKeySet, error)
 	GetActiveHost(context.Context, managedssh.GetHostKeySetRequest) (managedssh.HostKeySet, error)
 	GetPendingHost(context.Context, managedssh.GetHostKeySetRequest) (managedssh.HostKeySet, error)
-	ListClientKeys(context.Context, managedssh.ListClientKeysRequest) (managedssh.ClientKeySet, error)
 }
 
 type machineRequestVerifier interface {
 	VerifyMachineRequest(context.Context, string, []byte, string, string, []byte) (controlplane.MachineRequestClaims, error)
 }
 
-func managedSSHClientKeyPut(service managedSSHService) http.HandlerFunc {
+// managedSSHCertificate signs the calling CLI session's managed SSH public key for one machine (F5 via certificates).
+func managedSSHCertificate(service managedSSHService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		p, ok := principalFromContext(r.Context())
 		var body struct {
-			PublicKey string `json:"public_key"`
+			MachineGeneration uint64 `json:"machine_generation"`
+			PublicKey         string `json:"public_key"`
 		}
 		if !ok || p.Client == nil {
 			writeError(w, r, http.StatusUnauthorized, "authentication_required", "CLI authentication is required.")
 			return
 		}
-		if strings.TrimSpace(r.Header.Get("Idempotency-Key")) == "" {
-			writeManagedSSHInvalid(w, r)
-			return
-		}
 		if !decodeManagedSSHJSON(w, r, &body) {
 			return
 		}
-		key, err := wire.ParsePublicKey(body.PublicKey, true)
-		if err != nil || encodeSSHFingerprint(key.Fingerprint) != r.PathValue("fingerprint") {
-			writeManagedSSHInvalid(w, r)
-			return
-		}
-		value, err := service.RegisterClient(r.Context(), managedssh.RegisterClientRequest{OperationID: strings.TrimSpace(r.Header.Get("Idempotency-Key")), UserID: p.User.ID, CLIClientSessionID: p.Client.SessionID, PublicKey: body.PublicKey, Now: time.Now().UTC()})
+		certificate, err := service.IssueCertificate(r.Context(), managedssh.IssueCertificateRequest{UserID: p.User.ID, CLIClientSessionID: p.Client.SessionID, UserMachineID: r.PathValue("machine_id"), MachineGeneration: body.MachineGeneration, PublicKey: body.PublicKey, Now: time.Now().UTC()})
 		if managedSSHError(w, r, err) {
 			return
 		}
-		writeJSON(w, http.StatusCreated, SuccessResponse{Data: managedSSHClientKeyResponse(value)})
+		writeJSON(w, http.StatusOK, SuccessResponse{Data: wire.CertificateDocument{Type: "ssh_user_certificate", Version: 1, MachineID: r.PathValue("machine_id"), MachineGeneration: body.MachineGeneration, OSUser: certificate.OSUser, Certificate: certificate.Certificate, ValidBefore: certificate.ValidBefore.Format(time.RFC3339)}})
 	}
 }
 
-func managedSSHClientKeyDelete(service managedSSHService) http.HandlerFunc {
+func managedSSHRotateUserCA(service managedSSHService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		p, ok := principalFromContext(r.Context())
-		var body struct {
-			Reason string `json:"reason"`
-		}
-		fingerprint, fingerprintErr := decodeSSHFingerprint(r.PathValue("fingerprint"))
-		if !ok || p.Client == nil || fingerprintErr != nil || strings.TrimSpace(r.Header.Get("Idempotency-Key")) == "" || !decodeManagedSSHJSON(w, r, &body) {
+		cas, err := service.RotateUserCA(r.Context(), r.PathValue("account_id"), time.Now().UTC())
+		if errors.Is(err, managedssh.ErrRotationInvalid) {
+			writeManagedSSHInvalid(w, r)
 			return
 		}
-		value, err := service.RevokeClient(r.Context(), managedssh.RevokeClientRequest{OperationID: strings.TrimSpace(r.Header.Get("Idempotency-Key")), ActorUserID: p.User.ID, Fingerprint: fingerprint, Reason: body.Reason, Now: time.Now().UTC()})
 		if managedSSHError(w, r, err) {
 			return
 		}
-		writeJSON(w, http.StatusOK, SuccessResponse{Data: managedSSHClientKeyResponse(value)})
+		type caView struct {
+			ID             string `json:"id"`
+			State          string `json:"state"`
+			PublicKey      string `json:"public_key"`
+			StateChangedAt string `json:"state_changed_at"`
+		}
+		views := make([]caView, len(cas))
+		for index, ca := range cas {
+			views[index] = caView{ID: ca.ID, State: ca.State, PublicKey: ca.PublicKey, StateChangedAt: ca.StateChangedAt.UTC().Format(time.RFC3339)}
+		}
+		writeJSON(w, http.StatusOK, SuccessResponse{Data: views})
 	}
 }
 
@@ -170,7 +169,7 @@ func managedSSHHostKeysObserve(service managedSSHService, identities machineRequ
 	}
 }
 
-func managedSSHAuthorizedKeys(service managedSSHService, identities machineRequestVerifier) http.HandlerFunc {
+func managedSSHUserCAs(service managedSSHService, identities machineRequestVerifier) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		body, ok := readManagedSSHBody(w, r)
 		if !ok {
@@ -196,15 +195,11 @@ func managedSSHAuthorizedKeys(service managedSSHService, identities machineReque
 			writeError(w, r, http.StatusUnauthorized, "authentication_required", "Machine authentication is required.")
 			return
 		}
-		set, err := service.ListClientKeys(r.Context(), managedssh.ListClientKeysRequest{ActorUserID: claims.UserID, UserMachineID: claims.MachineID, MachineGeneration: uint64(claims.InstallationGeneration)})
+		set, err := service.TrustedUserCAs(r.Context(), managedssh.UserCAsRequest{ActorUserID: claims.UserID, UserMachineID: claims.MachineID, MachineGeneration: uint64(claims.InstallationGeneration), Now: time.Now().UTC()})
 		if managedSSHError(w, r, err) {
 			return
 		}
-		keys := make([]string, len(set.Keys))
-		for index := range set.Keys {
-			keys[index] = set.Keys[index].PublicKey
-		}
-		writeJSON(w, http.StatusOK, SuccessResponse{Data: wire.AuthorizedKeysDocument{Type: "authorized_key_set", Version: 1, MachineID: set.UserMachineID, MachineGeneration: set.MachineGeneration, Keys: keys}})
+		writeJSON(w, http.StatusOK, SuccessResponse{Data: wire.UserCAsDocument{Type: "ssh_user_ca_set", Version: 1, MachineID: claims.MachineID, MachineGeneration: uint64(claims.InstallationGeneration), Keys: set.Keys, Principal: set.Principal}})
 	}
 }
 
@@ -255,14 +250,6 @@ func managedSSHHostKeysPromote(service managedSSHService) http.HandlerFunc {
 		}
 		writeJSON(w, http.StatusOK, SuccessResponse{Data: managedSSHHostKeySetResponse(value)})
 	}
-}
-
-func managedSSHClientKeyResponse(value managedssh.ClientKey) wire.ClientKeyDocument {
-	result := wire.ClientKeyDocument{Type: "client_key", Version: 1, Fingerprint: encodeSSHFingerprint(value.Fingerprint), PublicKey: value.PublicKey, State: value.State, ReconciliationVersion: value.ReconciliationVersion, CreatedAt: value.CreatedAt.UTC().Format(time.RFC3339)}
-	if !value.RevokedAt.IsZero() {
-		result.RevokedAt = value.RevokedAt.UTC().Format(time.RFC3339)
-	}
-	return result
 }
 
 func managedSSHTargetResponse(value managedssh.MachineTarget) wire.TargetDocument {
@@ -358,12 +345,6 @@ func managedSSHError(w http.ResponseWriter, r *http.Request, err error) bool {
 	case expectedHTTPErrorOnly(err, wire.ErrInvalid):
 	case expectedHTTPErrorOnly(err, managedssh.ErrConflict):
 		status, code = http.StatusConflict, "operation_conflict"
-	case expectedHTTPErrorOnly(err, managedssh.ErrMachineKeyCapacity):
-		writeError(w, r, http.StatusConflict, "managed_ssh_key_capacity", fmt.Sprintf("This machine has more than %d authorized SSH client keys. Revoke unused client keys or narrow its SSH grants, then retry.", wire.MaxClientKeys))
-		return true
-	case expectedHTTPErrorOnly(err, managedssh.ErrClientKeyCapacity):
-		writeError(w, r, http.StatusConflict, "managed_ssh_client_key_capacity", fmt.Sprintf("%d signed-in computers already use managed SSH on this account. Sign out on one you no longer use (pb logout there) or remove it, then retry.", wire.MaxClientKeys))
-		return true
 	case expectedHTTPErrorOnly(err, managedssh.ErrUnavailable):
 		status, code = http.StatusNotFound, "not_found"
 	default:

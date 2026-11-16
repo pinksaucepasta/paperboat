@@ -7,8 +7,8 @@ import "errors"
 var ErrOpenSSHConfigConflict = errors.New("Paperboat OpenSSH configuration conflicts with existing state")
 
 type OpenSSHConfig struct {
-	AliasDomain, Home, ProxyCommand, KnownHostsCommand, AgentSocket, IdentityFile string
-	OwnerUID                                                                      uint32
+	AliasDomain, Home, ProxyCommand, KnownHostsCommand, AgentSocket, IdentityFile, CertificateCommand string
+	OwnerUID                                                                                          uint32
 }
 type OpenSSHConfigResult struct{ Changed bool }
 

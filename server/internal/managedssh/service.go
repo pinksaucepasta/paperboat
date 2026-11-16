@@ -1,13 +1,11 @@
-// Package managedssh owns server authority for managed SSH public keys and
-// immutable machine host-key observations.
+// Package managedssh owns server authority for managed SSH: user certificate authorities and the short-lived
+// certificates they sign, machine targets and immutable machine host-key observations.
 package managedssh
 
 import (
 	"context"
 	"crypto/rand"
 	"errors"
-	"github.com/google/uuid"
-	wire "github.com/pinksaucepasta/paperboat/shared/managedssh"
 	"io"
 	"math"
 	"regexp"
@@ -15,59 +13,17 @@ import (
 	"time"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/google/uuid"
+	wire "github.com/pinksaucepasta/paperboat/shared/managedssh"
 )
 
 var (
 	ErrConflict = errors.New("managed SSH key conflicts with current authority")
 	// ErrHostKeyInUse: the observed host keys already belong to another machine.
-	ErrHostKeyInUse       = errors.New("managed SSH host keys belong to another machine")
-	ErrUnavailable        = errors.New("managed SSH authority is unavailable")
-	ErrMachineKeyCapacity = errors.New("machine exceeds the managed SSH client-key limit")
-	// ErrClientKeyCapacity: the user already has the maximum of active client keys (signed-in computers using
-	// managed SSH). It was ErrUnavailable (404), which clients retried forever as "target not ready".
-	ErrClientKeyCapacity = errors.New("user has the maximum of active managed SSH client keys")
+	ErrHostKeyInUse = errors.New("managed SSH host keys belong to another machine")
+	ErrUnavailable  = errors.New("managed SSH authority is unavailable")
 )
-
-type ClientKey struct {
-	Fingerprint           [32]byte
-	UserID                string
-	CLIClientSessionID    string
-	Algorithm             string
-	PublicKey             string
-	State                 string
-	ReconciliationVersion uint64
-	CreatedAt             time.Time
-	RevokedAt             time.Time
-	RevocationReason      string
-}
-
-type RegisterClientRequest struct {
-	OperationID        string
-	UserID             string
-	CLIClientSessionID string
-	PublicKey          string
-	Now                time.Time
-}
-
-type RevokeClientRequest struct {
-	OperationID string
-	ActorUserID string
-	Fingerprint [32]byte
-	Reason      string
-	Now         time.Time
-}
-
-type ListClientKeysRequest struct {
-	ActorUserID       string
-	UserMachineID     string
-	MachineGeneration uint64
-}
-
-type ClientKeySet struct {
-	UserMachineID     string
-	MachineGeneration uint64
-	Keys              []ClientKey
-}
 
 type MachineTarget struct {
 	UserMachineID         string
@@ -145,9 +101,9 @@ type GetHostKeySetRequest struct {
 }
 
 type Repository interface {
-	RegisterClient(context.Context, RegisterClientRequest, ClientKey) (ClientKey, error)
-	RevokeClient(context.Context, RevokeClientRequest) (ClientKey, error)
-	ListClientKeys(context.Context, ListClientKeysRequest) (ClientKeySet, error)
+	CertificateAuthority(context.Context, IssueCertificateRequest, NewUserCA) (CertificateAuthorization, error)
+	UserCAs(context.Context, UserCAsRequest, NewUserCA) ([]UserCA, string, error)
+	RotateUserCA(context.Context, RotateUserCARequest, NewUserCA) ([]UserCA, error)
 	ObserveHost(context.Context, ObserveHostRequest, HostKeySet) (HostKeySet, error)
 	PromoteHost(context.Context, PromoteHostRequest) (HostKeySet, error)
 	GetActiveHost(context.Context, GetHostKeySetRequest) (HostKeySet, error)
@@ -181,45 +137,16 @@ func (s *Service) GetTarget(ctx context.Context, request GetTargetRequest) (Mach
 }
 
 type Service struct {
-	repository Repository
-	random     io.Reader
+	repository   Repository
+	random       io.Reader
+	certificates CertificateConfig
 }
 
-func NewService(repository Repository) (*Service, error) {
-	if repository == nil {
+func NewService(repository Repository, certificates CertificateConfig) (*Service, error) {
+	if repository == nil || certificates.EncryptionKey == "" || certificates.Validity < time.Minute || certificates.Validity > 24*time.Hour {
 		return nil, wire.ErrInvalid
 	}
-	return &Service{repository: repository, random: rand.Reader}, nil
-}
-
-func (s *Service) RegisterClient(ctx context.Context, request RegisterClientRequest) (ClientKey, error) {
-	if s == nil || s.repository == nil || ctx == nil || !validOperationID(request.OperationID) || !bounded(request.UserID) || !bounded(request.CLIClientSessionID) || request.Now.IsZero() {
-		return ClientKey{}, wire.ErrInvalid
-	}
-	key, err := wire.ParsePublicKey(request.PublicKey, true)
-	if err != nil {
-		return ClientKey{}, err
-	}
-	return s.repository.RegisterClient(ctx, request, ClientKey{
-		Fingerprint: key.Fingerprint, Algorithm: key.Algorithm, PublicKey: key.PublicKey,
-		UserID: request.UserID, CLIClientSessionID: request.CLIClientSessionID,
-		State: "active", ReconciliationVersion: 1, CreatedAt: request.Now.UTC(),
-	})
-}
-
-func (s *Service) RevokeClient(ctx context.Context, request RevokeClientRequest) (ClientKey, error) {
-	if s == nil || s.repository == nil || ctx == nil || !validOperationID(request.OperationID) || !bounded(request.ActorUserID) || request.Fingerprint == [32]byte{} || !validClientRevocation(request.Reason) || request.Now.IsZero() {
-		return ClientKey{}, wire.ErrInvalid
-	}
-	request.Now = request.Now.UTC()
-	return s.repository.RevokeClient(ctx, request)
-}
-
-func (s *Service) ListClientKeys(ctx context.Context, request ListClientKeysRequest) (ClientKeySet, error) {
-	if s == nil || s.repository == nil || ctx == nil || !bounded(request.ActorUserID) || !bounded(request.UserMachineID) || request.MachineGeneration == 0 || request.MachineGeneration > math.MaxInt64 {
-		return ClientKeySet{}, wire.ErrInvalid
-	}
-	return s.repository.ListClientKeys(ctx, request)
+	return &Service{repository: repository, random: rand.Reader, certificates: certificates}, nil
 }
 
 func (s *Service) ObserveHost(ctx context.Context, request ObserveHostRequest) (HostKeySet, error) {
@@ -274,15 +201,6 @@ func validOperationID(value string) bool {
 		}
 	}
 	return true
-}
-
-func validClientRevocation(value string) bool {
-	switch value {
-	case "client_revoked", "client_logout", "account_revoked", "key_rotated", "key_compromise":
-		return true
-	default:
-		return false
-	}
 }
 
 func bounded(value string) bool {

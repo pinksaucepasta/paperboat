@@ -63,6 +63,8 @@ VALUES($1||'_cli',$1,'pb','laptop','cli','linux',ARRAY['machines:connect'],'acti
 	exec(`INSERT INTO paperboat.managed_ssh_client_keys(fingerprint,user_id,cli_client_session_id,algorithm,public_key,state,created_at,revoked_at,revocation_reason)
 SELECT sha256(convert_to($1||k,'UTF8')),$1,$1||'_cli','ssh-ed25519','ssh-ed25519 '||md5($1||k)||repeat('k',64),st,now()-interval '60 days',r,CASE WHEN r IS NULL THEN NULL ELSE 'client_logout' END
 FROM (VALUES('_old','revoked',now()-interval '31 days'),('_live','revoked',now()),('_active','active',NULL::timestamptz)) v(k,st,r)`, user)
+	exec(`INSERT INTO paperboat.managed_ssh_certificate_holders(machine_id,cli_client_session_id,user_id,valid_before)
+SELECT $1||'_machine',$1||k,$1,v FROM (VALUES('_old',now()-interval '2 hours'),('_live',now()+interval '1 hour')) x(k,v)`, user)
 	exec(`INSERT INTO paperboat.peer_endpoint_certificates(fingerprint,user_id,endpoint_id,role,generation,serial,certificate,quic_public_key,issued_at,expires_at,key_id,signer_public_key)
 SELECT sha256(convert_to($1||k,'UTF8')),$1,$1||k,'machine',1,1,decode(repeat('00',200),'hex'),sha256(convert_to('q'||k,'UTF8')),e-interval '1 day',e,'key',sha256(convert_to('s'||k,'UTF8'))
 FROM (VALUES('_old',now()-interval '31 days'),('_named',now()-interval '31 days'),('_live',now()+interval '1 day')) v(k,e)`, user)
@@ -95,6 +97,7 @@ VALUES($1,$1||'_named','cli',NULL,1,0,1,sha256(convert_to('w'||$1,'UTF8')),sha25
 		"browser_machine_credentials": {`SELECT string_agg(replace(credential_id,$1,''),',' ORDER BY credential_id) FROM paperboat.browser_machine_credentials WHERE account_id=$1`, "_live"},
 		"control_operations":          {`SELECT string_agg(replace(id,$1,''),',' ORDER BY id) FROM paperboat.control_operations WHERE id LIKE $1||'%'`, "_live,_running"},
 		"transactional_mail_outbox":   {`SELECT string_agg(replace(mail_id,$1,''),',' ORDER BY mail_id) FROM paperboat.transactional_mail_outbox WHERE mail_id LIKE $1||'%'`, "_live,_queued"},
+		"certificate_holders":         {`SELECT string_agg(replace(cli_client_session_id,$1,''),',') FROM paperboat.managed_ssh_certificate_holders WHERE user_id=$1`, "_live"},
 		"managed_ssh_client_keys":     {`SELECT count(*)::text FROM paperboat.managed_ssh_client_keys WHERE user_id=$1`, "2"},
 		"peer_endpoint_certificates":  {`SELECT string_agg(replace(endpoint_id,$1,''),',' ORDER BY endpoint_id) FROM paperboat.peer_endpoint_certificates WHERE user_id=$1`, "_live,_named"},
 		"revocations":                 {`SELECT count(*)::text FROM paperboat.peer_endpoint_certificate_revocations WHERE user_id=$1`, "0"},
