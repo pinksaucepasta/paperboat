@@ -1,5 +1,5 @@
 #!/bin/sh
-# Redeploys the production console (served by the server box's proxy) to origin/main.
+# Redeploys the production console (served by the server box's proxy) to origin/main, or to a newer build that contains it.
 #
 # console-live.sh builds main on this machine; the build output is shipped to the box, which installs the
 # production dependencies for its own platform and starts the new build in the slot it is NOT serving from.
@@ -9,14 +9,19 @@ set -eu
 host=${PB_CONSOLE_PROD_HOST:-root@coolify}
 dir=/opt/paperboat-console
 here=$(cd "$(dirname "$0")" && pwd)
+tree=${PB_CONSOLE_TREE:-$HOME/paperboat}
+# The commit to ship: main as fetched now. Another lane may fast-forward the shared tree between console-live's
+# lock and ours (11-16: 2 of 3 runs), so the build only has to contain this commit, not equal main afterwards.
+git -C "$tree" fetch -q origin main
+want=$(git -C "$tree" rev-parse FETCH_HEAD)
 "$here/console-live.sh"
 # Hold console-live's lock so no other deploy flips or deletes the slot being shipped.
 exec 9>"$HOME/.config/paperboat-console/live.lock"
 flock -w 1800 9 || { echo "console-prod: another deploy is still running" >&2; exit 1; }
-tree=${PB_CONSOLE_TREE:-$HOME/paperboat}
+# slot.env and built.commit are written together under that lock: the slot holds exactly the build `head`.
 slot=$(sed -n 's/^NEXT_DIST_DIR=//p' "$HOME/.config/paperboat-console/slot.env")
-head=$(git -C "$tree" rev-parse HEAD)
-[ "$(cat "$HOME/.config/paperboat-console/built.commit")" = "$head" ] || { echo "console-prod: the live build is not main" >&2; exit 1; }
+head=$(cat "$HOME/.config/paperboat-console/built.commit")
+git -C "$tree" merge-base --is-ancestor "$want" "$head" || { echo "console-prod: the live build ($head) does not contain $want" >&2; exit 1; }
 old=$(ssh "$host" "sed -n 's/^NEXT_DIST_DIR=//p' $dir/slot.env 2>/dev/null" || true)
 case $old in .next-a) new=.next-b ;; *) new=.next-a ;; esac
 cd "$tree/console"
