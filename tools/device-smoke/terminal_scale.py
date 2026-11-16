@@ -147,19 +147,23 @@ def echo_round(terms, timeout=60):
     return got, len(terms) - len(got)
 
 
-def cleanup_all(target, names, workers=8):
-    """Close and delete the named sessions, `workers` at a time (one at a time takes about 20 s each). Returns (done, seconds)."""
+def cleanup_all(target, names, workers=8, errors=None):
+    """Close and delete the named sessions, `workers` at a time (one at a time takes about 20 s each). Returns (done, seconds).
+    errors, when given, counts each failure's reason (the receipt says which step failed, not only how many)."""
     from concurrent.futures import ThreadPoolExecutor
     def one(name):
         try:
             cleanup(PB, target, name)
-            return 1
-        except Exception:
-            return 0
+            return None
+        except Exception as e:
+            return '%s: %s' % (type(e).__name__, str(e)[:160])
     started = time.monotonic()
     with ThreadPoolExecutor(workers) as pool:
-        done = sum(pool.map(one, names))
-    return done, round(time.monotonic() - started, 1)
+        failures = [f for f in pool.map(one, names) if f]
+    if errors is not None:
+        for f in failures:
+            errors[f] = errors.get(f, 0) + 1
+    return len(names) - len(failures), round(time.monotonic() - started, 1)
 
 
 def session_state(target, name):
@@ -216,8 +220,10 @@ def main():
         got, lost = echo_round(rest)
         receipt['burst'] = {'closed': len(burst), 'client_close_seconds': round(closed_clients, 2),
                             'others_echo': quantiles(got), 'others_missing': lost}
-        done, took = cleanup_all(args.target, names[:args.burst])
-        receipt['burst']['session_cleanup_failures'] = args.burst - done
+        reasons = {}
+        done, took = cleanup_all(args.target, names[:args.burst], errors=reasons)
+        receipt['burst']['session_cleanup_errors'] = reasons
+        receipt['burst']['session_cleanup_failures'] = len(names[:args.burst]) - done
         receipt['burst']['session_cleanup_seconds'] = took
         # One terminal, V viewers, one stopped viewer while the shell floods.
         owner = Term(args.target, ['--name', shared])
@@ -256,8 +262,9 @@ def main():
     finally:
         for t in [*terms, *viewers]:
             t.close()
-        cleaned, took = cleanup_all(args.target, [*names[args.burst:], shared])
-        receipt['final_cleanup'] = {'closed_and_deleted': cleaned, 'expected': len(names) - args.burst + 1, 'seconds': took}
+        reasons = {}
+        cleaned, took = cleanup_all(args.target, [*names[args.burst:], shared], errors=reasons)
+        receipt['final_cleanup'] = {'closed_and_deleted': cleaned, 'expected': len(names[args.burst:]) + 1, 'seconds': took, 'errors': reasons}
     echo = receipt.get('echo', {}).get('seconds') or {}
     receipt['host_loadavg_end'] = open('/proc/loadavg').read().split()[:3]
     receipt['status'] = 'PASS' if (receipt['open']['all_ready'] and receipt['echo']['missing'] == 0
