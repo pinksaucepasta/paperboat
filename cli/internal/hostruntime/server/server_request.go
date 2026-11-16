@@ -21,7 +21,9 @@ func (s *Server) startRequest(frame protocol.Frame, writer *lockedWriter, author
 	case s.sem <- struct{}{}:
 	default:
 		s.recordOperation("protocol", "rejected")
-		_ = writer.write(errorFrame(frame.RequestID, "resource_limit", "operation concurrency limit reached", true))
+		// A busy host, not a ceiling: "unavailable" is retried by every client. resource_limit read as the 256-terminal
+		// ceiling and ended the open (F21-164: 2 of 100 opens at 3/s while ~48 slow opens held the 32 slots).
+		_ = writer.write(errorFrame(frame.RequestID, "unavailable", "operation concurrency limit reached", true))
 		return
 	}
 	// Admission and wg.Add happen under s.mu with the stopped check, so Shutdown's wg.Wait never races an Add

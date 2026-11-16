@@ -668,6 +668,14 @@ func TestConcurrencyLimitRejectsBeforeSecondHandler(t *testing.T) {
 	if err != nil || response.RequestID != "req_2" || response.Type != "error" {
 		t.Fatalf("response=%#v err=%v", response, err)
 	}
+	// A busy host is a transient refusal the client retries, never the terminal ceiling (resource_limit).
+	var refusal struct {
+		Code      string `json:"code"`
+		Retryable bool   `json:"retryable"`
+	}
+	if json.Unmarshal(response.Payload, &refusal) != nil || refusal.Code != "unavailable" || !refusal.Retryable {
+		t.Fatalf("concurrency refusal=%s, want retryable unavailable", response.Payload)
+	}
 	close(release)
 	if calls.Load() != 1 {
 		t.Fatalf("handler calls=%d", calls.Load())
