@@ -1,0 +1,40 @@
+{
+ "check": "xplat-tunnel-extend-policy",
+ "devices": [
+  "L",
+  "M",
+  "W"
+ ],
+ "results": [
+  {
+   "id": "C304:L",
+   "status": "PASS",
+   "detail": "created with --duration 2m (expiry 2026-11-16T21:38:33.750674Z); expired -> '<!doctype html> <html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport'; extend 1h -> expiry 2026-11-16T22:38:39.982456Z, serving again, show 2026-11-16T22:38:39.982456Z; human output ok; no-duration refused"
+  },
+  {
+   "id": "C305:L",
+   "status": "PASS",
+   "detail": "allow -> lap_covlyhmhhz24ff66y2gnr2swpa generation 1; list shows both (text and json); expired, re-approved by ID -> generation 2 expiring 2026-11-16T22:40:34.521526332Z; get matches"
+  },
+  {
+   "id": "C304:M",
+   "status": "PASS",
+   "detail": "created with --duration 2m (expiry 2026-11-16T21:42:37.610906Z); expired -> '<!doctype html> <html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport'; extend 1h -> expiry 2026-11-16T22:42:51.641222Z, serving again, show 2026-11-16T22:42:51.641222Z; human output ok; no-duration refused"
+  },
+  {
+   "id": "C305:M",
+   "status": "PASS",
+   "detail": "allow -> lap_ceafxxl7kzaylxmy3cpuiiuxm4 generation 1; list shows both (text and json); expired, re-approved by ID -> generation 2 expiring 2026-11-16T22:44:55.556711Z; get matches"
+  },
+  {
+   "id": "C304:W",
+   "status": "PASS",
+   "detail": "created with --duration 2m (expiry 2026-11-16T21:47:01.699284Z); expired -> '<!doctype html> <html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport'; extend 1h -> expiry 2026-11-16T22:47:06.125409Z, serving again, show 2026-11-16T22:47:06.125409Z; human output ok; no-duration refused"
+  },
+  {
+   "id": "C305:W",
+   "status": "PASS",
+   "detail": "allow -> lap_o5ytwctvcahpidggzou44t5d5i generation 1; list shows both (text and json); expired, re-approved by ID -> generation 2 expiring 2026-11-16T22:49:14.2765808Z; get matches"
+  }
+ ]
+}
