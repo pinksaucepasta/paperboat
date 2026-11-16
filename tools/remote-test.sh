@@ -8,7 +8,8 @@
 # Only git-tracked, committed files are tested: that is what `git archive HEAD` ships. No PostgreSQL is
 # on pbvm2/pbvm3, so PostgreSQL suites skip there; anvit has one (~/.pb-test-pg-dsn), so use anvit for server.
 # The synced tree has no .git, so the full HEAD goes over as GITHUB_SHA (tools/tuf-repository reads it for its release source commit).
-# gcc is installed on all three, so -race works.
+# gcc is installed on all three, so -race works. The cli module needs passwordless sudo on the host (root updater fixture,
+# frozen-filesystem bandwidth test): anvit has it, hermes does not.
 set -euo pipefail
 
 usage() { sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
@@ -37,6 +38,7 @@ flock 8
 stage=$(mktemp -d "${TMPDIR:-/tmp}/pb-remote-test.XXXXXX")
 trap 'rm -rf "$stage"' EXIT
 git archive HEAD -- . ':!console' ':!marketing' | tar x -C "$stage"
+git archive HEAD -- console/lib/envvault/testdata | tar x -C "$stage" # cli/cmd/environmentvault-wasm reads the console's vault fixture
 sha=$(git rev-parse --short HEAD)
 
 echo "remote-test: syncing $sha to $host:pb-remote-test/$lane" >&2
@@ -49,8 +51,12 @@ printf -v quoted ' %q' "$@"
 exec ssh -o BatchMode=yes -o ServerAliveInterval=30 "$host" \
   "GITHUB_SHA=$(git rev-parse HEAD) flock -w 3600 \$HOME/pb-remote-test/host.lock bash -s -- $module $lane$quoted" <<'REMOTE'
 set -euo pipefail
+umask 022 # a host default of 002 makes every t.TempDir group-writable, which the daemon socket check refuses
 module=$1 lane=$2
 shift 2
+if [ "$module" = cli ] && ! sudo -n true 2>/dev/null; then
+  echo "remote-test: warning: $(hostname) has no passwordless sudo; cli root-updater and isolated-filesystem tests will fail here, run cli on tools/ci-test.sh or anvit" >&2
+fi
 export PATH=$HOME/.local/go1.27.4/bin:$HOME/go-sdk-1.27.4/bin:$PATH GOTOOLCHAIN=local
 cd "$HOME/pb-remote-test/$lane/$module"
 go version
