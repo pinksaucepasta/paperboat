@@ -73,6 +73,10 @@ func commandFailureMessage(err error, failure commandFailure) string {
 	if err == nil {
 		return ""
 	}
+	var skew *machineVersionSkewError
+	if boundedErrorWalk(err, func(e error) bool { v, ok := e.(*machineVersionSkewError); skew = v; return ok }) {
+		return skew.message
+	}
 	if message := sshFailureMessage(err); message != "" {
 		return message
 	}

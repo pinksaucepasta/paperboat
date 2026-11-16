@@ -292,6 +292,11 @@ func actionSSHProxy(command *cobra.Command, _ []string) error {
 		if notReady := sshTargetHealth(command.Context(), machine.ID, machine.Alias); notReady != nil {
 			return notReady
 		}
+		if resolvedClient != nil {
+			if skew := explainMachineVersionSkew(command.Context(), resolvedClient, machine, err); skew != err {
+				return skew
+			}
+		}
 		return explainSSHDial(machine.Alias, err)
 	}
 	halfCloser, ok := connection.(interface{ CloseWrite() error })

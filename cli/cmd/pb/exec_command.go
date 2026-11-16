@@ -144,6 +144,9 @@ func actionRemoteExec(c *command.Context, requested string, request tunnel.ExecR
 		if remote, ok := err.(*localapi.RemoteError); ok && remote.Code == "environment_unavailable" {
 			return fail(125, "environment_unavailable", false, false, err)
 		}
+		if skew := explainMachineVersionSkew(c.Context, client, machine, err); skew != err {
+			return fail(255, "machine_version_skew", false, false, skew)
+		}
 		if remote, ok := err.(*localapi.RemoteError); ok && localapi.Refusal(remote.Code) {
 			return fail(255, remote.Code, false, false, err)
 		}
