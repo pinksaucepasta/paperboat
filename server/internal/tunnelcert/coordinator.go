@@ -1023,7 +1023,7 @@ func (c *Coordinator) Ensure(ctx context.Context, domain Domain) (result Result,
 		request := DistributionRequest{Certificate: stored, Bundle: bundle, Target: DistributionTarget(target)}
 		if err := c.config.Distributor.Stage(ctx, request); err != nil {
 			cause := fmt.Errorf("%w: stage edge %s: %w", ErrDistributionUnavailable, target.NodeID, err)
-			if rollbackErr := c.rollbackStaged(stored, staged); rollbackErr != nil {
+			if rollbackErr := c.rollbackStaged(stored, staged, 0); rollbackErr != nil {
 				cause = errors.Join(cause, rollbackErr)
 			}
 			return Result{}, c.failStaged(ctx, stored.ID, "edge_stage_failed", cause, now)
@@ -1035,16 +1035,16 @@ func (c *Coordinator) Ensure(ctx context.Context, domain Domain) (result Result,
 	for _, request := range staged {
 		if err := c.config.Distributor.WaitReady(distributionCtx, request); err != nil {
 			cause := fmt.Errorf("%w: edge %s: %w", ErrCertificateNotReady, request.Target.NodeID, err)
-			if rollbackErr := c.rollbackStaged(stored, staged); rollbackErr != nil {
+			if rollbackErr := c.rollbackStaged(stored, staged, 0); rollbackErr != nil {
 				cause = errors.Join(cause, rollbackErr)
 			}
 			return Result{}, c.failStaged(ctx, stored.ID, "edge_not_ready", cause, now)
 		}
 	}
-	for _, request := range staged {
+	for i, request := range staged {
 		if err := c.config.Distributor.Activate(distributionCtx, request); err != nil {
 			cause := fmt.Errorf("%w: activate edge %s: %w", ErrDistributionUnavailable, request.Target.NodeID, err)
-			if rollbackErr := c.rollbackStaged(stored, staged); rollbackErr != nil {
+			if rollbackErr := c.rollbackStaged(stored, staged, i); rollbackErr != nil {
 				cause = errors.Join(cause, rollbackErr)
 			}
 			return Result{}, c.failStaged(ctx, stored.ID, "edge_activate_failed", cause, now)
@@ -1053,7 +1053,7 @@ func (c *Coordinator) Ensure(ctx context.Context, domain Domain) (result Result,
 	active, err := c.config.Store.Activate(ctx, stored.ID, domain.Generation, now)
 	if err != nil {
 		cause := fmt.Errorf("%w: activate durable certificate: %w", ErrDistributionUnavailable, err)
-		if rollbackErr := c.rollbackStaged(stored, staged); rollbackErr != nil {
+		if rollbackErr := c.rollbackStaged(stored, staged, len(staged)); rollbackErr != nil {
 			cause = errors.Join(cause, rollbackErr)
 		}
 		return Result{}, c.failStaged(ctx, stored.ID, "certificate_activate_failed", cause, now)
@@ -1148,16 +1148,21 @@ func activeCertificateMatchesDomain(certificate StoredCertificate, domain Domain
 	return certificate.LeafHostname == "" && certificate.Hostname == domain.Hostname && certificate.CertificateReference == domain.CertificateReference
 }
 
-func (c *Coordinator) rollbackStaged(certificate StoredCertificate, staged []DistributionRequest) error {
+// rollbackStaged removes the copies a failed Ensure staged. A preview lease renews as a new certificate generation every
+// few seconds and the edge treats a revoke of a preview generation as "this preview ended": it also drops the older
+// generation it is serving. A renewal that failed before activation (an edge cut off from control timing out) must not
+// take the served certificate with it, so it only retires its own staged copy (F21-17 recovery, L397).
+func (c *Coordinator) rollbackStaged(certificate StoredCertificate, staged []DistributionRequest, activated int) error {
 	if len(staged) == 0 {
 		return nil
 	}
 	rollbackCtx, cancel := context.WithTimeout(context.Background(), c.config.DistributionTimeout)
 	defer cancel()
 	var rollbackErr error
-	for _, request := range staged {
+	for i, request := range staged {
 		var err error
-		if rollback, ok := c.config.Distributor.(CertificateDistributionRollback); ok {
+		// The first `activated` staged targets activated; the rest only hold the staged copy.
+		if rollback, ok := c.config.Distributor.(CertificateDistributionRollback); ok && (i < activated || certificate.Target().normalizedKind() != TargetPreviewLease) {
 			err = rollback.Revoke(rollbackCtx, certificate, request.Target)
 		} else {
 			err = c.config.Distributor.Retire(rollbackCtx, certificate, request.Target)

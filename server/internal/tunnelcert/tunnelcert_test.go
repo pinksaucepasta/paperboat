@@ -626,14 +626,16 @@ func TestCoordinatorGenerationSourceSkipsFailedStagedGeneration(t *testing.T) {
 }
 
 type stagedFailureDistributor struct {
-	mu          sync.Mutex
-	stageCount  int
-	readyCount  int
-	failStageAt int
-	failReadyAt int
-	rollbackErr error
-	staged      map[string]bool
-	rolledBack  []string
+	mu             sync.Mutex
+	stageCount     int
+	readyCount     int
+	failStageAt    int
+	failReadyAt    int
+	activateCount  int
+	failActivateAt int
+	rollbackErr    error
+	staged         map[string]bool
+	rolledBack     []string
 }
 
 func newStagedFailureDistributor() *stagedFailureDistributor {
@@ -664,6 +666,10 @@ func (d *stagedFailureDistributor) WaitReady(_ context.Context, request Distribu
 func (d *stagedFailureDistributor) Activate(_ context.Context, request DistributionRequest) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	d.activateCount++
+	if d.failActivateAt > 0 && d.activateCount == d.failActivateAt {
+		return ErrDistributionUnavailable
+	}
 	if !d.staged[request.Target.NodeID] {
 		return ErrCertificateNotReady
 	}
@@ -930,5 +936,55 @@ func TestPreviewIssuanceSurvivesHeartbeatAndRejectsChangedAuthority(t *testing.T
 				t.Fatalf("authoritative retained certificate=%+v found=%v err=%v", certificate, found, err)
 			}
 		})
+	}
+}
+
+// An edge cut off from control times a preview renewal out before activation. The rollback must retire only the staged
+// copy: the edge reads a revoke of a preview generation as "the preview ended" and also drops the older generation it is
+// serving, leaving the hostname without a certificate (F21-17 recovery, staging 2026-11-13).
+func TestPreviewRenewalThatFailsBeforeActivationRetiresInsteadOfRevoking(t *testing.T) {
+	now := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
+	issuer := &testIssuer{bundle: testBundle(t, []string{"*.preview.example.test"}, now, 60*24*time.Hour)}
+	coordinator, store, _, _ := coordinatorForTest(t, issuer)
+	distributor := newStagedFailureDistributor()
+	distributor.failReadyAt = 1
+	coordinator.config.Distributor = distributor
+	domain := testDomain("*.preview.example.test", StrategyDelegatedDNS01)
+	domain.TunnelID, domain.TargetKind, domain.PreviewID, domain.PreviewGeneration = "", TargetPreviewLease, "preview_001", 6
+	domain.PreviewState, domain.PreviewExpiresAt = "active", now.Add(time.Hour)
+	domain = registerPreviewAuthorityForTest(store, domain)
+	if _, err := coordinator.Ensure(context.Background(), domain); !errors.Is(err, ErrCertificateNotReady) {
+		t.Fatalf("ensure error = %v, want not ready", err)
+	}
+	distributor.mu.Lock()
+	defer distributor.mu.Unlock()
+	if len(distributor.rolledBack) != 0 {
+		t.Fatalf("a failed preview renewal revoked %v; revoke also drops the served older generation", distributor.rolledBack)
+	}
+	if len(distributor.staged) != 0 {
+		t.Fatalf("the staged copy was not retired: %v", distributor.staged)
+	}
+}
+
+// With two edges, one activated the renewal and the other failed to: only the activated copy is revoked. Revoking the
+// edge that still holds the staged copy would also drop the older preview generation it is serving.
+func TestPreviewRenewalRevokesOnlyTheEdgesThatActivated(t *testing.T) {
+	now := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
+	issuer := &testIssuer{bundle: testBundle(t, []string{"*.preview.example.test"}, now, 60*24*time.Hour)}
+	coordinator, store, _, _ := coordinatorForTest(t, issuer)
+	distributor := newStagedFailureDistributor()
+	distributor.failActivateAt = 2
+	coordinator.config.Distributor = distributor
+	domain := testDomain("*.preview.example.test", StrategyDelegatedDNS01)
+	domain.TunnelID, domain.TargetKind, domain.PreviewID, domain.PreviewGeneration = "", TargetPreviewLease, "preview_001", 6
+	domain.PreviewState, domain.PreviewExpiresAt = "active", now.Add(time.Hour)
+	domain = registerPreviewAuthorityForTest(store, domain)
+	if _, err := coordinator.Ensure(context.Background(), domain); !errors.Is(err, ErrDistributionUnavailable) {
+		t.Fatalf("ensure error = %v, want distribution unavailable", err)
+	}
+	distributor.mu.Lock()
+	defer distributor.mu.Unlock()
+	if strings.Join(distributor.rolledBack, ",") != "edge_a" || len(distributor.staged) != 0 {
+		t.Fatalf("revoked=%v staged=%v, want only edge_a (activated) revoked and edge_b's staged copy retired", distributor.rolledBack, distributor.staged)
 	}
 }

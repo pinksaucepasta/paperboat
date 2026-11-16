@@ -1122,6 +1122,17 @@ func (d *SQLDistributor) RevokeCertificate(ctx context.Context, certificate Stor
 		if transportCertificate.State == StateRevoked || transportCertificate.State == StateFailed {
 			transportCertificate.State = StateActive
 		}
+		if certificate.State == StateFailed && certificate.Target().normalizedKind() == TargetPreviewLease && row.State != "active" {
+			// A failed preview renewal never served on this edge. The edge reads a revoke of a preview generation as "the
+			// preview ended" and drops the older generation it still serves, so remove only this staged copy (L397).
+			if err := d.transport.Retire(ctx, transportCertificate, target); err != nil {
+				return err
+			}
+			if err := d.markEdgeState(ctx, certificate, target, "retired"); err != nil {
+				return err
+			}
+			continue
+		}
 		if err := revoker.Revoke(ctx, transportCertificate, target); err != nil {
 			return err
 		}
