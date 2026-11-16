@@ -22,7 +22,8 @@ const request = cache(async () => {
   const selected = jar.get("pb-workspace")?.value
   const workspace = selected && workspacePattern.test(selected) ? selected : "personal"
   const cookie = jar.toString()
-  // Set when the control plane answers 401: the cookie is there but the session is over.
+  // Set when /me answers 401: the cookie is there but the session is over. Other reads are not
+  // asked: an unknown path also answers 401 (NOTES.md), and redirecting on it loops with AuthKit.
   const state = { ended: false }
 
   const get = async <T>(path: string): Promise<T | undefined> => {
@@ -31,7 +32,7 @@ const request = cache(async () => {
         headers: { accept: "application/json", cookie },
         signal: AbortSignal.timeout(3_000),
       })
-      if (response.status === 401) state.ended = true
+      if (response.status === 401 && path === "me") state.ended = true
       if (!response.ok) return
       const body = (await response.json()) as { data?: T }
       // A wrong shape is left out like any failure: the browser asks again and shows the named error.
