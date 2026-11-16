@@ -365,3 +365,44 @@ func TestClosedSessionsReleaseTheirOutputBuffers(t *testing.T) {
 		t.Fatalf("heap kept %d KiB after closing %d flooded sessions; want at most %d KiB", retained>>10, sessions, limit>>10)
 	}
 }
+
+type terminateRecordingProcess struct {
+	*capacityProcess
+	terminated atomic.Bool
+}
+
+func (p *terminateRecordingProcess) Terminate(ctx context.Context, grace time.Duration) (pty.ExitResult, error) {
+	p.terminated.Store(true)
+	return p.capacityProcess.Terminate(ctx, grace)
+}
+
+// A create whose shell started but whose record could not be committed (failed Running transition or persist) must end
+// the shell: CloseIO alone left one that ignores the hangup running with no record to list, attach to or close it.
+func TestCreateWithoutARecordTerminatesTheShell(t *testing.T) {
+	state, err := store.Open(context.Background(), store.Config{Root: filepath.Join(t.TempDir(), "state")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	process := &terminateRecordingProcess{capacityProcess: &capacityProcess{done: make(chan struct{}), exited: new(atomic.Int32)}}
+	manager, err := NewManager(ManagerConfig{
+		Store: state,
+		Launch: func(pty.Command) (PTYProcess, error) {
+			_ = state.Close() // the record commit after launch fails
+			return process, nil
+		},
+		MaxSessions: 2, MaxAttachments: 1, MaxInputDecisions: 2, HistoryBytes: 4096, AttachmentBytes: 4096,
+		TerminationTimeout: time.Second, TerminationGrace: 10 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.Create(context.Background(), CreateRequest{Name: "no-record", Command: pty.Command{Path: "/bin/sh", CWD: "/tmp", Dimensions: pty.Dimensions{Columns: 80, Rows: 24}}}); err == nil {
+		t.Fatal("create succeeded without a committed record")
+	}
+	if !process.terminated.Load() {
+		t.Fatal("the shell started for a create without a record was not terminated")
+	}
+	if left := manager.List(); len(left) != 0 {
+		t.Fatalf("manager lists %d session(s) after the failed create", len(left))
+	}
+}

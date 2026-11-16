@@ -369,8 +369,11 @@ func (m *Manager) Create(ctx context.Context, request CreateRequest) (Snapshot, 
 		}
 		return Snapshot{}, err
 	}
-	if err := session.lifecycle.Transition(Running); err != nil {
-		// CloseIO alone leaves a shell that ignores the hangup running with no record; end it like a failed persist.
+	err = session.lifecycle.Transition(Running)
+	if err == nil {
+		err = m.persist(ctx, session)
+	}
+	if err != nil { // the shell runs but has no record: end it (CloseIO alone leaves one that ignores the hangup running)
 		terminateCtx, cancel := context.WithTimeout(context.Background(), m.config.TerminationTimeout)
 		_, terminateErr := process.Terminate(terminateCtx, 0)
 		cancel()
@@ -379,14 +382,6 @@ func (m *Manager) Create(ctx context.Context, request CreateRequest) (Snapshot, 
 		return Snapshot{}, errors.Join(err, classifySessionFailure("lifecycle", errors.Join(terminateErr, cleanupErr)))
 	}
 	_, generation := session.lifecycle.Snapshot()
-	if err := m.persist(ctx, session); err != nil {
-		terminateCtx, cancel := context.WithTimeout(context.Background(), m.config.TerminationTimeout)
-		_, terminateErr := process.Terminate(terminateCtx, 0)
-		cancel()
-		cleanupErr := m.discardFailedCreate(context.Background(), session, Creating)
-		observeSessionFailure(session, "lifecycle", errors.Join(terminateErr, cleanupErr))
-		return Snapshot{}, errors.Join(err, classifySessionFailure("lifecycle", errors.Join(terminateErr, cleanupErr)))
-	}
 	session.inputs = NewBoundedInputJournal(generation, m.config.MaxInputDecisions)
 	session.process = process
 	session.identification = identificationTracker{}
