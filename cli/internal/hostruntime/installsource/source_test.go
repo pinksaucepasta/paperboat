@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestSuppliedSourceBindsBytesAndUpdatePolicy(t *testing.T) {
@@ -86,7 +87,7 @@ func TestVerifyCachesByFileIdentityAndRehashesAfterAnyRewrite(t *testing.T) {
 	if !cacheable {
 		t.Skip("no inode/ctime identity on this platform; every Verify hashes")
 	}
-	if length, sum, ok := verifiedFiles.lookup(path, identity); !ok || length != source.Length || sum != source.SHA256 {
+	if entry := rememberedEntry(path); entry.identity != identity || entry.length != source.Length || entry.sha256 != source.SHA256 {
 		t.Fatal("a verified executable was not remembered")
 	}
 	other := source
@@ -124,7 +125,7 @@ func TestVerifyDigestRemembersAMatchAndRefusesAnythingElse(t *testing.T) {
 		t.Fatal(err)
 	}
 	if identity, cacheable := fileIdentityOf(path); cacheable {
-		if length, sum, ok := verifiedFiles.lookup(path, identity); !ok || length != int64(len(body)) || sum != digest {
+		if entry := rememberedEntry(path); entry.identity != identity || entry.length != int64(len(body)) || entry.sha256 != digest {
 			t.Fatal("a verified file was not remembered")
 		}
 	}
@@ -150,5 +151,33 @@ func TestDigestIsRehashedAfterARewrite(t *testing.T) {
 				t.Fatalf("Digest(%q) = %d %s %v", body, length, got, err)
 			}
 		}
+	}
+}
+
+func rememberedEntry(path string) verifiedFile {
+	verifiedFiles.mu.Lock()
+	defer verifiedFiles.mu.Unlock()
+	return verifiedFiles.entries[path]
+}
+
+// A file changed within racyWindow of its hash is hashed again: a same-size rewrite in the same file-time tick keeps
+// the identity (Windows run 43960352441: TestDigestIsRehashedAfterARewrite got the first body's digest).
+func TestDigestOfARecentlyChangedFileIsNotServedFromTheCache(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "pb")
+	if err := os.WriteFile(path, []byte("body"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	identity, cacheable := fileIdentityOf(path)
+	if !cacheable {
+		t.Skip("no file identity on this platform; every Digest hashes")
+	}
+	cache := &verificationCache{entries: map[string]verifiedFile{}}
+	cache.remember(path, identity, identity.changed(), 4, "racy")
+	if _, _, ok := cache.lookup(path, identity); ok {
+		t.Fatal("an entry hashed in the same tick as the file's last change was served")
+	}
+	cache.remember(path, identity, identity.changed().Add(racyWindow+time.Millisecond), 4, "settled")
+	if _, sum, ok := cache.lookup(path, identity); !ok || sum != "settled" {
+		t.Fatal("an entry hashed well after the file's last change was not served")
 	}
 }

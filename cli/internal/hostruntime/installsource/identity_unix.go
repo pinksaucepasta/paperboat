@@ -5,6 +5,7 @@ package installsource
 import (
 	"os"
 	"syscall"
+	"time"
 )
 
 // fileIdentity is a regular file's exact on-disk identity; any change to its bytes or metadata
@@ -28,4 +29,13 @@ func fileIdentityOf(path string) (fileIdentity, bool) {
 		return fileIdentity{}, false
 	}
 	return statIdentity(stat), true
+}
+
+// changed is the file's last data or metadata change.
+func (i fileIdentity) changed() time.Time {
+	m, c := time.Unix(i.mtimeSeconds, i.mtimeNanoseconds), time.Unix(i.ctimeSeconds, i.ctimeNanoseconds)
+	if m.After(c) {
+		return m
+	}
+	return c
 }

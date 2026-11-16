@@ -3,6 +3,7 @@
 package installsource
 
 import (
+	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -51,4 +52,10 @@ func fileIdentityOf(path string) (fileIdentity, bool) {
 		size:      int64(info.FileSizeHigh)<<32 | int64(info.FileSizeLow),
 		lastWrite: basic.LastWriteTime, changeTime: basic.ChangeTime,
 	}, true
+}
+
+// changed is the file's last write or change (FILETIME: 100 ns units since 1601).
+func (i fileIdentity) changed() time.Time {
+	t := max(i.lastWrite, i.changeTime)
+	return time.Unix(0, (t-116444736000000000)*100)
 }

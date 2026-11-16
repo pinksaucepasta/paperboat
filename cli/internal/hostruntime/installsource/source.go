@@ -13,6 +13,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/binarytarget"
@@ -131,12 +132,13 @@ func Digest(path string) (int64, string, error) {
 			return length, sum, nil
 		}
 	}
+	hashedAt := time.Now()
 	length, sum, err := digestFile(path)
 	if err != nil {
 		return 0, "", err
 	}
 	if after, ok := fileIdentityOf(path); cacheable && ok && after == identity {
-		verifiedFiles.remember(path, identity, length, sum)
+		verifiedFiles.remember(path, identity, hashedAt, length, sum)
 	}
 	return length, sum, nil
 }
@@ -150,8 +152,14 @@ var verifiedFiles = &verificationCache{entries: map[string]verifiedFile{}}
 
 const maxVerifiedFiles = 16
 
+// racyWindow covers file-time granularity (Windows timestamps advance per ~16 ms tick, Linux ctime per jiffy): a
+// same-size rewrite within one tick keeps the identity, so an entry is served only once the file's last change is
+// this much older than its hash. Prior art: git's racy-clean index entries (Documentation/technical/racy-git.txt).
+const racyWindow = time.Second
+
 type verifiedFile struct {
 	identity fileIdentity
+	hashedAt time.Time
 	length   int64
 	sha256   string
 }
@@ -165,19 +173,19 @@ func (c *verificationCache) lookup(path string, identity fileIdentity) (int64, s
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	entry, ok := c.entries[path]
-	if !ok || entry.identity != identity {
+	if !ok || entry.identity != identity || !entry.identity.changed().Before(entry.hashedAt.Add(-racyWindow)) {
 		return 0, "", false
 	}
 	return entry.length, entry.sha256, true
 }
 
-func (c *verificationCache) remember(path string, identity fileIdentity, length int64, sha256 string) {
+func (c *verificationCache) remember(path string, identity fileIdentity, hashedAt time.Time, length int64, sha256 string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if _, ok := c.entries[path]; !ok && len(c.entries) >= maxVerifiedFiles {
 		clear(c.entries)
 	}
-	c.entries[path] = verifiedFile{identity, length, sha256}
+	c.entries[path] = verifiedFile{identity, hashedAt, length, sha256}
 }
 
 func digestFile(path string) (length int64, digest string, resultErr error) {
