@@ -52,7 +52,7 @@ func goodTar(t *testing.T) []byte {
 	return buildTar(t,
 		tarItem{name: "docs/", typ: tar.TypeDir}, tarItem{name: "docs/a.txt", body: "alpha"},
 		tarItem{name: "docs/deep/", typ: tar.TypeDir}, tarItem{name: "docs/deep/ünï.txt", body: "unicode"},
-		tarItem{name: "empty/", typ: tar.TypeDir}, tarItem{name: "CON.txt", body: "reserved"})
+		tarItem{name: "empty/", typ: tar.TypeDir}, tarItem{name: reservedOnWindows + ".txt", body: "reserved"})
 }
 
 // sendFolder creates a folder transfer holding data and uploads it in two chunks (a resume in the middle).
@@ -97,7 +97,7 @@ func TestFolderIsPublishedAsAFolderWithEmptyFoldersAndPrivateModes(t *testing.T)
 	if err != nil || path != filepath.Join(inbox, "proj") {
 		t.Fatalf("PublishedPath = %q, %v", path, err)
 	}
-	for rel, body := range map[string]string{"docs/a.txt": "alpha", "docs/deep/ünï.txt": "unicode", "CON.txt": "reserved"} {
+	for rel, body := range map[string]string{"docs/a.txt": "alpha", "docs/deep/ünï.txt": "unicode", reservedOnWindows + ".txt": "reserved"} {
 		got, err := os.ReadFile(filepath.Join(path, filepath.FromSlash(rel)))
 		if err != nil || string(got) != body {
 			t.Fatalf("%s = %q, %v", rel, got, err)
@@ -107,7 +107,7 @@ func TestFolderIsPublishedAsAFolderWithEmptyFoldersAndPrivateModes(t *testing.T)
 		t.Fatalf("the empty folder was not kept: %v", err)
 	}
 	if runtime.GOOS != "windows" {
-		for rel, want := range map[string]os.FileMode{"CON.txt": 0o600, "docs/a.txt": 0o600, "docs": 0o700, "empty": 0o700} {
+		for rel, want := range map[string]os.FileMode{reservedOnWindows + ".txt": 0o600, "docs/a.txt": 0o600, "docs": 0o700, "empty": 0o700} {
 			if info, err := os.Stat(filepath.Join(path, rel)); err != nil || info.Mode().Perm() != want {
 				t.Fatalf("%s mode = %v (err %v), want %v: the sender's setuid/exec bits must not arrive", rel, info.Mode(), err, want)
 			}

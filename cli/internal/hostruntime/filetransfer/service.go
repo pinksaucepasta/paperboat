@@ -681,7 +681,7 @@ func validDigest(value string) bool {
 	return err == nil && len(decoded) == 32
 }
 func validBasename(platform, value string) bool {
-	return value != "" && utf8.ValidString(value) && len(value) <= 255 && value == filepath.Base(value) && value != "." && value != ".." &&
+	return value != "" && utf8.ValidString(value) && len(value) <= 255 && value != "." && value != ".." &&
 		!strings.ContainsAny(value, "/\\\x00") && transfername.Refusal(platform, value) == ""
 }
 

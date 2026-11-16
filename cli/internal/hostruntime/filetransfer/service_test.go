@@ -22,6 +22,10 @@ import (
 	"github.com/pinksaucepasta/paperboat/shared/supportref"
 )
 
+// reservedOnWindows is a name only Windows refuses; the test host is the receiver, so a Windows host gets a plain one
+// (TestReceiverRefusesNamesItsOwnPlatformCannotStore covers the Windows refusal).
+var reservedOnWindows = map[bool]string{false: "CON", true: "CONSOLE"}[runtime.GOOS == "windows"]
+
 func newService(t *testing.T) (*Service, *store.Store, string) {
 	t.Helper()
 	root := t.TempDir()
@@ -904,7 +908,7 @@ func TestCreateEnforcesExactFileAndBatchBoundaries(t *testing.T) {
 		files[index] = File{Basename: fmt.Sprintf("file-%d.bin", index), Size: MaxFileBytes, SHA256: digest(nil)}
 	}
 	files[0].Basename = "résumé 最終.bin"
-	files[1].Basename = "CON"
+	files[1].Basename = reservedOnWindows
 	created, err := service.Create(context.Background(), CreateRequest{BatchID: "boundary-ok", SourceMachineID: "machine_source", DestinationMachineID: "machine_local", InitiatingUserID: "user_1", SessionID: "ses", Files: files})
 	if err != nil || len(created) != MaxBatchFiles {
 		t.Fatalf("exact boundary: transfers=%d err=%v", len(created), err)
