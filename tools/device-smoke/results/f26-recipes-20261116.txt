@@ -1478,3 +1478,26 @@ $ PB_RECIPE=<token> pb pair   [standard user, not elevated]
 pb: Installing needs an administrator PowerShell. Start PowerShell with "Run as administrator" (or connect over SSH as an administrator) and run the command again. Recipe installs never show an approval prompt, so they never hang a CI job.
 $ (creator) pb recipe list | grep rcpz   [after]
 rcpz   rcpz   3 / 5      2027-02-14   15m ago
+
+################ one-liners from release 2026.11.16.2
+=== release 2026.11.16.2: one-liner as root in a fresh systemd container (rcp-l14, no linger, no login session), server .37, 2026-11-16T16:34:55Z ===
+$ (root) curl -fsSL https://get.pprbt.dev/recipe | PB_RECIPE=<token> bash
+Paperboat will keep this machine awake by default, including on battery and with the lid closed; this can increase battery use and heat.
+Paperboat machine runtime is ready.
+Set up rcp-l14 (machine_31bf974a-ca47-4429-89e5-6233759088a8)
+(took 46 s)
+$ (again)
+This machine is already paired; nothing to do.
+  ▄▄▝▀▀▀▀▀▘▄▄   Version 2026.11.16.2
+active
+=== release 2026.11.16.2: one-liner on pbmac2 over SSH (headless), server .37, 2026-11-16T16:35:01Z ===
+$ pb uninstall
+Paperboat was completely removed. The Paperboat Inbox was preserved.
+$ curl -fsSL https://get.pprbt.dev/recipe | PB_RECIPE=<token> bash   [over SSH, no unlocked Keychain]
+Administrator approval is required to install its durable system service.
+Paperboat machine runtime is ready.
+Set up managedlmachine (machine_fbce078b-43dc-4dac-a058-370a8d7821cb)
+(took 46 s)
+$ (again)
+This machine is already paired; nothing to do.
+  ▄▄▝▀▀▀▀▀▘▄▄   Version 2026.11.16.2
