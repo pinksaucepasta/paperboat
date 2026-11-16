@@ -76,7 +76,8 @@ export function EnvironmentList({
   // Most visits find the vault locked, so it loads as the unlock card (typing works, Unlock waits),
   // in the static shell too, before the session is known.
   if (!workspace || !me.data || vault.isPending) return <EnvUnlock loading />
-  if (vault.isError) {
+  // Only before the first answer: a refetch that fails (focus, a 429) must not replace a form being typed in.
+  if (vault.isError && vault.data === undefined) {
     return <p className="py-16 text-center text-sm text-destructive">{vault.error.message}</p>
   }
   if (!vault.data) return <EnvVaultSetup />

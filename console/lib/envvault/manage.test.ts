@@ -16,6 +16,7 @@ const realWorker = (globalThis as { Worker?: unknown }).Worker
 let stored: Vault
 let calls: string[]
 let teamVaultCreated: boolean
+let failRotate = false
 const account = fixture.vault.account_id
 
 const keep = (envelope: string) => {
@@ -34,6 +35,7 @@ beforeEach(() => {
   stored = structuredClone(fixture.vault)
   calls = []
   teamVaultCreated = false
+  failRotate = false
   globalThis.fetch = (async (input: string | URL, init?: RequestInit) => {
     const url = new URL(String(input), "http://console.example.test")
     const method = init?.method ?? "GET"
@@ -62,6 +64,7 @@ beforeEach(() => {
       const page = sampleFor("GET /v1/teams/{team_id}/members") as { items: object[] }
       return ok({ ...page, total: 1, items: [{ ...page.items[0], account_id: account, membership_generation: 1, role: "owner", active: true }] })
     }
+    if (failRotate && method === "POST" && url.pathname.endsWith("/rotate-personal")) return new Response(null, { status: 400 })
     if (method === "POST" && /\/(reset|rotate-personal|teams)$/.test(url.pathname)) {
       keep(body.vault_envelope ?? body.envelope)
       teamVaultCreated ||= url.pathname.endsWith("/teams")
@@ -111,4 +114,14 @@ test("a team's vault is created and its key lands in the owner's vault", async (
   expect(calls).toContain("POST /api/v1/environment/teams")
   expect(stored.generation).toBe(fixture.vault.generation + 1)
   expect(vaultUnlocked()).toBe(true)
+})
+
+test("a rotation the server refuses throws, drops the staged rotation and leaves the vault locked but unchanged", async () => {
+  await unlockVault(fixture.password)
+  failRotate = true
+  await expect(rotatePersonalKey()).rejects.toThrow()
+  expect(vaultUnlocked()).toBe(false)
+  expect(stored.generation).toBe(fixture.vault.generation)
+  expect(calls.some((call) => call.startsWith("DELETE /api/v1/environment/rotate-personal/"))).toBe(true)
+  expect(await opens(fixture.password)).toBe(true)
 })

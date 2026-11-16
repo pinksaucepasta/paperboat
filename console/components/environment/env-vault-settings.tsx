@@ -35,7 +35,37 @@ type Change = "password" | "create" | "replace" | "off" | "key" | "reset"
  */
 export function EnvVaultSettings() {
   const unlocked = useSyncExternalStore(subscribeVaultLock, vaultUnlocked, () => false)
-  return unlocked ? <OpenVault /> : <ClosedVault />
+  const client = useQueryClient()
+  const [change, setChange] = useState<Change>()
+  const close = () => setChange(undefined)
+  const done = () => {
+    close()
+    return client.invalidateQueries({ queryKey: ["env-vault-recovery"] })
+  }
+  return (
+    <>
+      {unlocked ? <OpenVault onChange={setChange} /> : <ClosedVault />}
+      {/* Here, not in OpenVault: a change that fails locks the vault, and its dialog must stay to say why. */}
+      {change === "key" && (
+        <ConfirmAction
+          open
+          onOpenChange={(open) => !open && close()}
+          title="Replace your personal key?"
+          description="Every variable is sealed again with a new key. This can take a moment."
+          action="Replace key"
+          pending="Replacing…"
+          confirmName="ROTATE ENV"
+          mutation={{ mutationFn: rotatePersonalKey, onSuccess: () => client.invalidateQueries({ queryKey: ["env-names"] }) }}
+        />
+      )}
+      {change === "reset" && <ResetDialog onClose={close} />}
+      {change === "password" && <PasswordDialog onClose={close} onDone={done} />}
+      {(change === "create" || change === "replace") && (
+        <CodeDialog replacing={change === "replace"} onClose={close} onDone={done} />
+      )}
+      <TurnOff open={change === "off"} onClose={close} onDone={done} />
+    </>
+  )
 }
 
 function ClosedVault() {
@@ -78,18 +108,12 @@ function ClosedVault() {
   )
 }
 
-function OpenVault() {
-  const client = useQueryClient()
-  const [change, setChange] = useState<Change>()
+function OpenVault({ onChange }: { onChange: (change: Change) => void }) {
   const recovery = useQuery({ queryKey: ["env-vault-recovery"], queryFn: recoveryEnabled, staleTime: 0, gcTime: 0 })
-  const done = () => {
-    setChange(undefined)
-    return client.invalidateQueries({ queryKey: ["env-vault-recovery"] })
-  }
   return (
     <Section title="Vault">
       <SettingRow label="Password">
-        <Button variant="outline" onClick={() => setChange("password")}>
+        <Button variant="outline" onClick={() => onChange("password")}>
           Change…
         </Button>
       </SettingRow>
@@ -106,48 +130,30 @@ function OpenVault() {
         <span className="flex gap-2">
           {recovery.data ? (
             <>
-              <Button variant="outline" onClick={() => setChange("replace")}>
+              <Button variant="outline" onClick={() => onChange("replace")}>
                 Replace…
               </Button>
-              <Button variant="outline" onClick={() => setChange("off")}>
+              <Button variant="outline" onClick={() => onChange("off")}>
                 Turn off…
               </Button>
             </>
           ) : (
-            <Button variant="outline" disabled={recovery.isPending} onClick={() => setChange("create")}>
+            <Button variant="outline" disabled={recovery.isPending} onClick={() => onChange("create")}>
               Create…
             </Button>
           )}
         </span>
       </SettingRow>
       <SettingRow label="Personal key" description="Seals your variables again with a new key. Your password stays.">
-        <Button variant="outline" onClick={() => setChange("key")}>
+        <Button variant="outline" onClick={() => onChange("key")}>
           Replace…
         </Button>
       </SettingRow>
       <SettingRow label="Reset vault" description="Deletes your variables and team keys, then starts over with a new password.">
-        <Button variant="outline" onClick={() => setChange("reset")}>
+        <Button variant="outline" onClick={() => onChange("reset")}>
           Reset…
         </Button>
       </SettingRow>
-      {change === "key" && (
-        <ConfirmAction
-          open
-          onOpenChange={(open) => !open && setChange(undefined)}
-          title="Replace your personal key?"
-          description="Every variable is sealed again with a new key. This can take a moment."
-          action="Replace key"
-          pending="Replacing…"
-          confirmName="ROTATE ENV"
-          mutation={{ mutationFn: rotatePersonalKey, onSuccess: () => client.invalidateQueries({ queryKey: ["env-names"] }) }}
-        />
-      )}
-      {change === "reset" && <ResetDialog onClose={() => setChange(undefined)} />}
-      {change === "password" && <PasswordDialog onClose={() => setChange(undefined)} onDone={done} />}
-      {(change === "create" || change === "replace") && (
-        <CodeDialog replacing={change === "replace"} onClose={() => setChange(undefined)} onDone={done} />
-      )}
-      <TurnOff open={change === "off"} onClose={() => setChange(undefined)} onDone={done} />
     </Section>
   )
 }
