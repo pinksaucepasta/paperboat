@@ -1,0 +1,57 @@
+FIX-PATHLOSS2: with a lossy direct path held down, the session stays on the relay (2026-11-16 IST)
+Machines: winpool-1 (GitHub Windows runner, Azure 132.196.62.242, machine pl2-w) -> pl2-h (container on hp Wi-Fi,
+10.0.0.8), one throwaway account. 8 MB random stdin via `pb exec pl2-h -- sh -c 'cat >/dev/null'`, MB/s of wall
+time. Loss = hp DOCKER-USER rule dropping 40% of UDP from 132.196.62.242 to 10.0.0.8 (relay traffic untouched);
+relay-only = the same rule at 100%. Counters: pcap on pl2-h's veth (hp) and pktmon on Windows (packets > 600 B by
+destination; "direct s" = seconds in which Windows sent data to hp's direct address).
+
+Suspect from the brief (ping/call-me-maybe storm while the path is in doubt) measured and ruled out: disco on the
+direct path was 40-50 datagrams per ~120 s run each way (~0.4/s), no extra relay bytes (9.3-9.7 MB in for 8 MB in
+lossy and relay-only runs alike). Rule S: web search (tailscale magicsock call-me-maybe / lossy direct worse than
+DERP) found no upstream report; ref/tailscale wgengine/magicsock/endpoint.go discoPingTimeout clears an untrusted
+bestAddr and drops the ping, and heartbeat()/wantFullPingLocked/sendDiscoPingsLocked rate-limit pings per endpoint
+(discoPingInterval 5 s), so pings are not the cost.
+
+Real cause (Windows pcap + a local logging build): data still rode the lossy direct path for long stretches (before:
+61 of 128 s, 0.02 MB/s while there), and every such stretch collapses the session's congestion window, which then
+regrows slowly over the ~0.3 s relay RTT. Three holes in the fork's loss demotion (f3b499e17/22a0c35bd):
+1. discoPingTimeout cleared an untrusted bestAddr before recording the lost heartbeat. A heartbeat times out 5 s after
+   it was sent, usually after the 6.5 s trust from the previous pong, so most losses never reached the window and
+   rediscovery put the path back with no hold-down. Fix 0b04e51f9 (record first; demote at 3 losses without waiting
+   for a full window).
+2. handleCallMeMaybe / sendPingsLocked deleted hp's endpointState whenever hp's call-me-maybe list changed (Wi-Fi
+   NAT), wiping the window and the hold-down (log: "delete 122.176.235.126:41642 handleCallMeMaybe", then "now using"
+   the same address 4 s later). 3. After a hold-down, clean heartbeats shifted the old losses out, so the re-promoted
+   path rode 38 s until 3 new losses. Fix 8abfc248e: the loss record lives in endpoint.pathLoss (outlives
+   endpointState, bounded at 16, cleared on a connectivity change); a path demoted before is dropped on its first lost
+   heartbeat until a full clean window.
+   Review (Spark): send failures and disco-key cancels counted as loss -> fb5827f6e (only a timeout counts; eviction
+   keeps live hold-downs). Prior art: ref/tailscale and ref/netbird keep a path until full timeout / ICE failure.
+
+Tests (fork fb5827f6e, hermes): Test_endpoint_lossyHeartbeatCountsAfterTrustExpires (fails before 0b04e51f9: "no
+hold-down after 0 lost heartbeats"), Test_endpoint_lossyPathSurvivesEndpointChurn (fails when the record is deleted
+with the endpoint state, and when probation is removed), Test_endpoint_heartbeatSendFailureIsNotLoss (fails with the
+old result check), Test_endpoint_lossyDirectPathFallsBackToRelay: PASS; wgengine/magicsock -race PASS.
+cli -race (GitHub run 43907143376): peertransport/mesh, tailnet, native and every other peertransport package PASS;
+relay PASS. Two unrelated red tests in that run: managedssh TestRealSSHDHonoursTheManagedCALines (runner sshd
+PerSourcePenalties drops the valid login after the test's deliberate failures; also red at 072c849b7/5f00bc605) and
+hostruntime/session TestDeletedSessionEndsItsRecordingBeforeDeleteReturns (no tailscale import on its path).
+
+                       build           run (MB/s, direct s)
+before  loss40         dev-677535d67   0.07, 0.06, 0.07 (hp pcap); 0.06 (61 s direct of 128)
+before  relay-only     dev-677535d67   0.16, 0.24; 0.20
+step 1  loss40         dev-072c849b7   0.07 (55 s), 0.08 (52 s), 0.09 (7 s), 0.08 (23 s), 0.10 (40 s)
+step 1  relay-only     dev-072c849b7   0.38, 0.22
+after   clean          dev-dc10768df   0.22 (26 s direct; hp Wi-Fi slow then)
+after   loss40         dev-dc10768df   0.12 (22 s: first exposure of a fresh path), 0.44 (0 s), 0.15 (8 s: one
+                                       re-probe after the hold-down), 0.90 (0 s)
+after   relay-only     dev-dc10768df   0.25, 0.21
+after   loss removed   dev-dc10768df   +2 min 0.64, +3 min 1.02 still relay (hold-down, up to 8 min after repeated
+                                       demotions); +9 min 1.21 MB/s, 4 s, all direct
+pb version dev-dc10768df on pl2-w and pl2-h for every "after" row.
+Result: once a lossy path has been demoted, runs with no re-probe are at or above relay-only (0.44, 0.90 vs
+0.21-0.25); a run that meets the first exposure or a re-probe still loses (0.12, 0.15) because one lossy episode
+collapses the congestion window, and re-probes get rarer as the hold-down doubles (30 s .. 8 min). Cost: a
+recovered path returns to direct only after its hold-down (here ~9 min).
+Pair check (dev-dc10768df): pb exec pl2-h -- hostname from pl2-w answers ccc5af4399f9 (pl2-h), pb exec pl2-w --
+hostname from pl2-h answers runnervmm7ud1, pb connect pl2-h from pl2-w echoes PL2MARK42 computed by the remote shell.
