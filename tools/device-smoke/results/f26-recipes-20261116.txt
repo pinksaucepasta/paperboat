@@ -1005,3 +1005,72 @@ $ pb machine list --json (this machine tags)
   File "<string>", line 1, in <module>
   File "<string>", line 1, in <listcomp>
 AttributeError: 'str' object has no attribute 'get'
+
+################ f26-06-W.txt / f26-06-M.txt / f26-06-revoke.txt
+=== F26-06 on victus (Windows 11), throwaway OS user rcpw2, server .31, client dev-dd317c2af, 2026-11-16T11:15:00Z ===
+The system cannot find the file install.
+  ▄▄▝▀▀▀▀▀▘▄▄   Version dev-dd317c2af
+$ PB_RECIPE=<rcptw token: max_machines=1, machine_lifetime=5m> pb pair --name rcp-w6 
+Pairing this machine from recipe rcptw.
+Resuming one-shot machine enrollment...
+Requesting administrator approval to install Paperboat Windows services...
+Still working on the administrator step (30s)...
+Paperboat Windows machine runtime is installed. It will resume after reboot.
+Set up rcp-w6 (machine_194785ee-88de-4069-aa88-1b05fc58ef02)
+paired at 16:45:35.07
+--- 11:21:32 (creator) pb machine list (rcp-w6, paired 11:15:35, machine_lifetime=5m) / pb recipe list ---
+rcp-w   personal   online                      terminal,exec
+rcp-w6  personal   online                      terminal,exec
+rcptw   rcptw   1 / 1      2027-02-14   5m ago
+--- 11:24:43 (creator) pb machine list / pb recipe list ---
+rcp-w  personal   online                      terminal,exec,
+rcptw   rcptw   0 / 1      2027-02-14   9m ago
+--- 11:35:42 pb recipe rotate rcpx --confirm <code> run from the Windows creator (ok=true); rcp-w afterwards: ---
+$ (rcp-w) pb env run -- cmd /c echo RCP_SECRET 
+RCP_SECRET=vault-value-1
+$ (rcp-w) pb exec rcp-l -- hostname 
+rcp-l
+$ pb recipe show rcpx (machines) 
+  rcp-l   online    applied revision 2   now
+  rcp-m   offline   preview failed: pb --config /Users/admin/Library/Application Support/paperboat/config.json preview 3000: The local Paperboat service did not keep the preview open: it did not answer in time or is restarting. Retry; if this continues, run `pb doctor`. (pb doctor on the machine)
+  rcp-w   online    applied revision 2   now
+=== F26-06 on pbmac2 (macOS), server .31, client dev-558f58ef1: pb recipe rotate rcpx --confirm <code> from the Windows creator at 12:23:38Z (ok=true), then on the Mac: ===
+$ pb env run -- sh -c echo RCP_SECRET
+RCP_SECRET=$RCP_SECRET
+$ pb exec rcp-l -- hostname
+rcp-l
+$ pb recipe show rcpx (machines)
+  managedlmachine   online   applied revision 2   now
+  rcp-l             online   applied revision 2   now
+  rcp-w             online   applied revision 2   now
+$ pb env run -- sh -c 'echo RCP_SECRET=vault-value-1
+'   [after the rotate]
+RCP_SECRET=vault-value-1
+$ (after pb recipe revoke rcpx) pb status
+pb: Your Paperboat session is no longer valid. Run `pb login` and approve this CLI in your browser. The printed link works on another device when this machine has no browser. Then retry. Support reference: support_3e6462d5-0c1d-40ac-b49b-47da46217153. Run `pb bugreport --upload` to send the details.
+$ PB_RECIPE=<rcpx token> pb pair   [revoked recipe, machine still signed in locally]
+This machine is already paired; nothing to do.
+$ pb logout
+Signed out
+$ PB_RECIPE=<rcptm token: max_machines=1, machine_lifetime=5m> pb pair --name rcp-m6
+pb: Machine setup did not finish. Some setup steps may have completed. Run `pb doctor`, then retry `pb setup` to resume. Support reference: support_5c2e2da8-0d5c-4cd1-b3db-b58dfc793e16. Run `pb bugreport --upload` to send the details.
+paired at 12:25:46
+$ pb uninstall
+Paperboat was completely removed. The Paperboat Inbox was preserved.
+$ pb install (dev-558f58ef1)
+Installed Paperboat dev-558f58ef1 at /Users/admin/.local/bin/pb. Background update checks: false. Enrollment is unchanged.
+$ PB_RECIPE=<rcptm token: max_machines=1, machine_lifetime=5m> pb pair --name rcp-m6
+pb: Recipe rcptm already has 1 of 1 machines. A machine leaves the recipe when it is removed (`pb machine revoke <machine>`, or by remove_after_offline). To allow more, raise max_machines and run `pb recipe update -f rcptm.toml`. Support reference: support_0f624efd-419a-451c-8a90-09c8e99339a8.
+paired at 12:27:23
+=== final pb recipe revoke rcpx (creator on Linux), server .31, 2026-11-16T12:24:38Z ===
+$ pb recipe revoke rcpx
+Revoking rcpx:
+  - its token stops working
+  - its 3 machines are removed: managedlmachine, rcp-l, rcp-w
+Revoke with: pb recipe revoke rcpx --confirm JMGBY7
+$ pb recipe revoke rcpx --confirm <code>
+Recipe rcpx revoked. 3 machines removed.
+$ pb machine list (rcp machines) at 12:24:41
+$ pb env vault list
+VAULT     KEY   REVISION   RECIPES
+rcp-env   1     1          -
