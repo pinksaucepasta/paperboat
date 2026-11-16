@@ -954,7 +954,7 @@ func TestBarRowLeavesTheMainScreenBeforeTheAlternateScreenIsEntered(t *testing.T
 
 // X-24 in gnome-terminal: VTE pushes a cleared screen into its scrollback, the bar row with it, and pulls the row back into view
 // when the window grows, so a stale bar stood in the middle of the screen after a resize inside vim. Every clear of the main
-// screen (the remote's, the attach's, the exit's) erases the bar row first; inside the alternate screen nothing goes to history.
+// screen (the remote's, the attach's, the exit's) and of a visible alternate screen erases the bar row first.
 func TestBarRowIsErasedBeforeAClearOfTheMainScreen(t *testing.T) {
 	row := "\x1b[24;1H\x1b[2K"
 	t.Run("remote clear", func(t *testing.T) {
@@ -975,7 +975,22 @@ func TestBarRowIsErasedBeforeAClearOfTheMainScreen(t *testing.T) {
 		_, _ = bar.Write([]byte("\x1b[H\x1b[2J"))
 		time.Sleep(300 * time.Millisecond)
 		if out := readPipe(reader); strings.Contains(out[:strings.Index(out, "\x1b[2J")], row) {
-			t.Fatalf("bar row erased before a clear of the alternate screen: %q", out)
+			t.Fatalf("hidden bar row erased before a clear of the alternate screen: %q", out)
+		}
+	})
+	t.Run("recorded alternate screen", func(t *testing.T) { // iTerm2 saves a cleared alternate screen, the visible REC bar with it
+		bar, reader := newTestBar(t, ModeAuto, "xterm-256color", 80, 24, true, time.Second)
+		bar.SetRecording(true)
+		bar.RemoteSize()
+		_, _ = bar.Write([]byte("\x1b[?1049h"))
+		time.Sleep(300 * time.Millisecond)
+		readPipe(reader)
+		_, _ = bar.Write([]byte("\x1b[H\x1b[2Jvim"))
+		time.Sleep(300 * time.Millisecond)
+		out := readPipe(reader)
+		erase, clear := strings.Index(out, row), strings.Index(out, "\x1b[2J")
+		if erase < 0 || clear < 0 || erase > clear || strings.LastIndex(out, row) < clear {
+			t.Fatalf("visible bar row not erased before a clear of the alternate screen and painted again: %q", out)
 		}
 	})
 	t.Run("attach and exit", func(t *testing.T) {
