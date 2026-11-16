@@ -28,9 +28,14 @@ type RuntimeCarrierWorker struct {
 	Endpoints          *edgehttp.DataCarrierPreviewRegistry
 	BrowserTerminalHub *edgehttp.BrowserTerminalHub
 	Interval           time.Duration
-	// EndpointInterval paces the small endpoint-only pull (PLAN 3a) that admits a new preview or
-	// tunnel route within a second; zero disables it (endpoint routes then follow full pulls).
+	// EndpointInterval is the pause before the first held endpoint pull, the shortest gap after a pull that
+	// answered at once with nothing new, and the pause between checks while paused after a failure; zero disables the endpoint
+	// pull (endpoint routes then follow full pulls). Once the worker holds a cursor the pull is held at the
+	// server (EndpointWait) and answered the moment a route is written, so a new preview or tunnel route
+	// reaches every edge together (PLAN 3a).
 	EndpointInterval time.Duration
+	// EndpointWait is how long the server may hold a delta pull with nothing new (zero: endpointWait).
+	EndpointWait time.Duration
 	// EndpointFullInterval: how often the endpoint pull takes the full set instead of deltas (zero:
 	// endpointFullInterval, the server's admission lifetime).
 	EndpointFullInterval time.Duration
@@ -163,11 +168,14 @@ func (w *RuntimeCarrierWorker) Start(ctx context.Context) error {
 		var lastMissPull time.Time
 		ticker := time.NewTicker(w.Interval)
 		defer ticker.Stop()
-		var fast <-chan time.Time
-		if w.EndpointInterval > 0 {
-			fastTicker := time.NewTicker(w.EndpointInterval)
-			defer fastTicker.Stop()
-			fast = fastTicker.C
+		// One endpoint pull is in flight at a time and its answer is applied here, so the worker's state stays
+		// with this goroutine while the server holds the pull.
+		results := make(chan endpointPull, 1)
+		fastTimer := time.NewTimer(w.EndpointInterval)
+		defer fastTimer.Stop()
+		fast := fastTimer.C
+		if w.EndpointInterval <= 0 {
+			fast = nil
 		}
 		for {
 			select {
@@ -176,7 +184,14 @@ func (w *RuntimeCarrierWorker) Start(ctx context.Context) error {
 			case <-ticker.C:
 				w.reconcile(run, nil)
 			case <-fast:
-				w.reconcileEndpoints(run)
+				if w.endpointPause { // a failed pull waits for the next runtime pull
+					fastTimer.Reset(w.EndpointInterval)
+					continue
+				}
+				since, wait := w.nextEndpointPull()
+				go func() { results <- w.pullEndpoints(run, since, wait) }()
+			case pull := <-results:
+				fastTimer.Reset(w.applyEndpointPull(run, pull))
 			case <-w.wake:
 				w.observe(run)
 			case <-w.pullWake:
@@ -298,16 +313,20 @@ const endpointFullInterval = 2 * time.Minute
 // endpointRenewStep: a delta's later expiry is installed once it moved this far, not on every poll.
 const endpointRenewStep = 30 * time.Second
 
-// reconcileEndpoints updates only the endpoint routes from the endpoint pull: the full set when due,
-// otherwise the changes since the last cursor. A failed pull keeps the last good set and pauses
-// fast pulls until the next full runtime pull.
-func (w *RuntimeCarrierWorker) reconcileEndpoints(parent context.Context) (failure error) {
-	if w.endpointPause {
-		return nil
-	}
-	defer func() { observeWorkerFailure(parent, w.Reporter, "endpoint_admission", failure) }()
-	ctx, cancel := context.WithTimeout(parent, w.Timeout)
-	defer cancel()
+// endpointWait is how long the server may hold a delta endpoint pull that has nothing new: below the server's
+// bound (runtimewire.MaximumEndpointWaitMilliseconds) and long enough that an idle edge makes ~2 requests a minute.
+const endpointWait = 25 * time.Second
+
+// endpointPull is the answer to one endpoint pull and how long it took.
+type endpointPull struct {
+	update  control.EndpointUpdate
+	err     error
+	elapsed time.Duration
+}
+
+// nextEndpointPull is what the next endpoint pull asks for: the cursor to continue from ("" when the full set
+// is due, which the server answers at once) and how long the server may hold it.
+func (w *RuntimeCarrierWorker) nextEndpointPull() (since string, wait time.Duration) {
 	since, full := w.endpointCursor, w.EndpointFullInterval
 	if full <= 0 {
 		full = endpointFullInterval
@@ -315,11 +334,55 @@ func (w *RuntimeCarrierWorker) reconcileEndpoints(parent context.Context) (failu
 	if time.Since(w.endpointFullAt) >= full {
 		since = ""
 	}
-	update, err := w.Source.EndpointAdmissions(ctx, w.Expected.NodeID(), w.Expected.ProcessEpoch(), since)
-	if err != nil {
-		w.endpointPause = true
-		return err
+	if since == "" {
+		return "", 0
 	}
+	if wait = w.EndpointWait; wait <= 0 {
+		wait = endpointWait
+	}
+	return since, wait
+}
+
+// pullEndpoints asks the server for the endpoint routes; the request is bounded by the wait plus the control
+// timeout. It reads no worker state, so it may run beside the worker's loop.
+func (w *RuntimeCarrierWorker) pullEndpoints(parent context.Context, since string, wait time.Duration) endpointPull {
+	ctx, cancel := context.WithTimeout(parent, wait+w.Timeout)
+	defer cancel()
+	started := time.Now()
+	update, err := w.Source.EndpointAdmissions(ctx, w.Expected.NodeID(), w.Expected.ProcessEpoch(), since, wait)
+	return endpointPull{update, err, time.Since(started)}
+}
+
+// reconcileEndpoints pulls and applies the endpoint routes once, without waiting at the server.
+func (w *RuntimeCarrierWorker) reconcileEndpoints(parent context.Context) {
+	since, _ := w.nextEndpointPull()
+	w.applyEndpointPull(parent, w.pullEndpoints(parent, since, 0))
+}
+
+// applyEndpointPull installs an endpoint answer and returns how long to pause before the next pull. A failed
+// pull keeps the last good set and pauses endpoint pulls until the next runtime pull (once per Interval at
+// most, so a failing server is not hammered); a pull that came back at once with nothing new waits out EndpointInterval (a
+// server that does not hold, or is draining); anything else is pulled again right away.
+func (w *RuntimeCarrierWorker) applyEndpointPull(parent context.Context, pull endpointPull) time.Duration {
+	if pull.err != nil {
+		observeWorkerFailure(parent, w.Reporter, "endpoint_admission", pull.err)
+		w.endpointPause = true
+		return w.EndpointInterval
+	}
+	news, failure := w.applyEndpoints(parent, pull.update)
+	observeWorkerFailure(parent, w.Reporter, "endpoint_admission", failure)
+	switch {
+	case failure != nil:
+		return w.EndpointInterval
+	case !news && pull.elapsed < w.EndpointInterval:
+		return w.EndpointInterval - pull.elapsed
+	}
+	return 0
+}
+
+// applyEndpoints merges an endpoint answer into the installed set. news reports a changed set or a tunnel
+// assignment change this worker had not seen.
+func (w *RuntimeCarrierWorker) applyEndpoints(parent context.Context, update control.EndpointUpdate) (news bool, failure error) {
 	next, expiry := mergeEndpointUpdate(w.endpointSet, update)
 	if update.Complete {
 		w.endpointFullAt = time.Now()
@@ -327,6 +390,7 @@ func (w *RuntimeCarrierWorker) reconcileEndpoints(parent context.Context) (failu
 	w.endpointCursor = update.Cursor
 	if update.TunnelsChangedAt != "" && update.TunnelsChangedAt != w.tunnelsChangedAt {
 		w.tunnelsChangedAt = update.TunnelsChangedAt
+		news = true
 		if w.OnTunnelsChanged != nil {
 			w.OnTunnelsChanged()
 		}
@@ -335,17 +399,17 @@ func (w *RuntimeCarrierWorker) reconcileEndpoints(parent context.Context) (failu
 	defer w.markPulled()
 	changed := !endpointSetEqual(w.endpointSet, next)
 	if !changed && expiry.Sub(w.endpointExpiry) < endpointRenewStep {
-		return nil
+		return news, nil
 	}
 	w.endpointSet, w.endpointExpiry = next, expiry
 	if err := w.install(); err != nil {
-		return err
+		return news || changed, err
 	}
 	if changed {
 		w.withdraw()
 		w.observe(parent)
 	}
-	return nil
+	return news || changed, nil
 }
 
 // mergeEndpointUpdate applies a full set or a delta to the current endpoint admissions (sorted by

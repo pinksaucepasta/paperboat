@@ -36,7 +36,7 @@ func (s *runtimeSourceFake) RuntimeCarrierAdmissions(context.Context, string, st
 	defer s.mu.Unlock()
 	return append([]runtimewire.Admission(nil), s.admissions...), s.err
 }
-func (s *runtimeSourceFake) EndpointAdmissions(_ context.Context, _, _, since string) (control.EndpointUpdate, error) {
+func (s *runtimeSourceFake) EndpointAdmissions(_ context.Context, _, _, since string, _ time.Duration) (control.EndpointUpdate, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.endpointPulls = append(s.endpointPulls, since)

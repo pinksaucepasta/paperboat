@@ -90,6 +90,9 @@ type HTTPClient struct {
 	onDemand *http.Client
 	// ingress sends the ingress decisions fetch with its own, longer timeout (connectorprotocol.IngressFetchTimeout).
 	ingress        *http.Client
+	// longPoll sends the held endpoint pull (EdgeRequest.WaitMilliseconds): it has no fixed timeout, the caller's
+	// context bounds it at the wait plus the control timeout.
+	longPoll       *http.Client
 	controlFailure func(context.Context, string, error)
 	controlTrace   func(context.Context, string) (string, string, func(string, string))
 	nodeReady      <-chan struct{}
@@ -154,7 +157,9 @@ func NewHTTPClient(config HTTPConfig) (*HTTPClient, error) {
 	onDemand.Timeout = max(config.Timeout, OnDemandCertificateTimeout)
 	ingress := *client
 	ingress.Timeout = max(config.Timeout, connectorprotocol.IngressFetchTimeout)
-	return &HTTPClient{base: base, credential: config.Credential, client: client, onDemand: &onDemand, ingress: &ingress, controlTrace: config.ControlTrace, controlFailure: config.ControlFailure, nodeReady: config.NodeReady}, nil
+	longPoll := *client
+	longPoll.Timeout = 0
+	return &HTTPClient{base: base, credential: config.Credential, client: client, onDemand: &onDemand, ingress: &ingress, longPoll: &longPoll, controlTrace: config.ControlTrace, controlFailure: config.ControlFailure, nodeReady: config.NodeReady}, nil
 }
 
 // ErrNodeNotReady: the request was not sent because the edge process is not ready yet.
@@ -581,6 +586,8 @@ func (c *HTTPClient) postNodeWithMaximumAndIdentity(ctx context.Context, path, n
 		httpClient = c.onDemand
 	} else if path == ingressDecisionsPath {
 		httpClient = c.ingress
+	} else if path == runtimewire.EdgeEndpointPullPath {
+		httpClient = c.longPoll
 	}
 	var response *http.Response
 	for attempt := 1; ; attempt++ {

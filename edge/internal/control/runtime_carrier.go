@@ -57,7 +57,7 @@ type RuntimeCarrierSource interface {
 	RuntimeCarrierAdmissions(context.Context, string, string) ([]runtimewire.Admission, error)
 	// EndpointAdmissions returns the full endpoint set when since is empty, otherwise what changed
 	// since that cursor.
-	EndpointAdmissions(ctx context.Context, nodeID, epoch, since string) (EndpointUpdate, error)
+	EndpointAdmissions(ctx context.Context, nodeID, epoch, since string, wait time.Duration) (EndpointUpdate, error)
 	ObserveRuntimeCarriers(context.Context, string, string, []runtimewire.Observation) error
 }
 
@@ -96,7 +96,7 @@ type EndpointUpdate struct {
 // EndpointAdmissions pulls the endpoint routes of the edge's runtime snapshot (PLAN 3a), as deltas
 // after the first full set (Lane W scale matrix). The server sends them grouped by carrier in pages;
 // all pages of one answer are read here, and the first page's cursor is the answer's cursor.
-func (c *HTTPClient) EndpointAdmissions(ctx context.Context, nodeID, epoch, since string) (EndpointUpdate, error) {
+func (c *HTTPClient) EndpointAdmissions(ctx context.Context, nodeID, epoch, since string, wait time.Duration) (EndpointUpdate, error) {
 	if connectorprotocol.ValidateIdentifier(nodeID) != nil || connectorprotocol.ValidateOpaqueEpoch(epoch) != nil || len(since) > 64 {
 		return EndpointUpdate{}, ErrControlInvalid
 	}
@@ -108,7 +108,7 @@ func (c *HTTPClient) EndpointAdmissions(ctx context.Context, nodeID, epoch, sinc
 			return EndpointUpdate{}, ErrControlUnavailable
 		}
 		var result runtimewire.Snapshot
-		request := runtimewire.EdgeRequest{NodeID: nodeID, ProcessEpoch: epoch, Capabilities: edgeRuntimeCapabilities, Since: since, Page: page}
+		request := runtimewire.EdgeRequest{NodeID: nodeID, ProcessEpoch: epoch, Capabilities: edgeRuntimeCapabilities, Since: since, Page: page, WaitMilliseconds: wait.Milliseconds()}
 		if err := c.postNodeWithMaximumAndIdentity(ctx, runtimewire.EdgeEndpointPullPath, nodeID, epoch, request, &result, maxRuntimeCarrierSnapshotBytes); err != nil {
 			return EndpointUpdate{}, err
 		}

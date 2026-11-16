@@ -189,11 +189,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.URL.Path == runtimewire.EdgeEndpointPullPath {
-		if len(request.Observations) != 0 || !runtimewire.HasCapability(request.Capabilities, runtimewire.CapabilityEndpoints) || !runtimewire.ValidEdgeCapabilities(request.Capabilities) {
+		if len(request.Observations) != 0 || !runtimewire.HasCapability(request.Capabilities, runtimewire.CapabilityEndpoints) || !runtimewire.ValidEdgeCapabilities(request.Capabilities) || request.WaitMilliseconds < 0 || request.WaitMilliseconds > runtimewire.MaximumEndpointWaitMilliseconds {
 			writeError(w, 400, "invalid_request")
 			return
 		}
-		snapshot, err := h.Service.PullEndpoints(r.Context(), edge, request.Capabilities, request.Since, request.Page)
+		snapshot, err := h.Service.PullEndpoints(r.Context(), edge, request.Capabilities, request.Since, request.Page, time.Duration(request.WaitMilliseconds)*time.Millisecond)
 		if err != nil {
 			serviceError(w, r, err)
 			return

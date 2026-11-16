@@ -136,7 +136,7 @@ func (s drainSource) RuntimeCarrierAdmissions(context.Context, string, string) (
 	var admissions []runtimewire.Admission
 	return admissions, json.Unmarshal(raw, &admissions)
 }
-func (drainSource) EndpointAdmissions(context.Context, string, string, string) (control.EndpointUpdate, error) {
+func (drainSource) EndpointAdmissions(context.Context, string, string, string, time.Duration) (control.EndpointUpdate, error) {
 	return control.EndpointUpdate{Complete: true}, nil
 }
 func (drainSource) ObserveRuntimeCarriers(context.Context, string, string, []runtimewire.Observation) error {

@@ -56,11 +56,11 @@ func TestEndpointPullGoldenThroughTheEdgeClient(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
-	update, err := client.EndpointAdmissions(ctx, carrier.EdgeNodeID, carrier.EdgeProcessEpoch, "")
+	update, err := client.EndpointAdmissions(ctx, carrier.EdgeNodeID, carrier.EdgeProcessEpoch, "", 0)
 	if err != nil || !update.Complete || len(update.Admissions) == 0 || update.Cursor == "" {
 		t.Fatalf("full answer through the edge client: %+v %v", update, err)
 	}
-	delta, err := client.EndpointAdmissions(ctx, carrier.EdgeNodeID, carrier.EdgeProcessEpoch, update.Cursor)
+	delta, err := client.EndpointAdmissions(ctx, carrier.EdgeNodeID, carrier.EdgeProcessEpoch, update.Cursor, 0)
 	if err != nil || delta.Complete || len(delta.Admissions) != 1 || len(delta.Removed) != 1 || delta.ExpiresAt.IsZero() {
 		t.Fatalf("delta answer through the edge client: %+v %v", delta, err)
 	}

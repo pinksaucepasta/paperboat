@@ -261,3 +261,37 @@ func (h *Hub) changed(ctx context.Context, machineID, account string, known map[
 	}
 	return changed, rows.Err()
 }
+
+// Watch is a subscription to one notification key (a payload of the machine_events channel) for a caller
+// that must subscribe before it reads, so a change between its read and its wait is not lost.
+type Watch struct {
+	hub  *Hub
+	wake chan struct{}
+	stop func()
+}
+
+// Watch subscribes to key. The caller must Close it.
+func (h *Hub) Watch(key string) *Watch {
+	wake, stop := h.subscribe(key)
+	return &Watch{hub: h, wake: wake, stop: stop}
+}
+
+// Close ends the subscription.
+func (w *Watch) Close() { w.stop() }
+
+// Wait holds until the key was notified since Watch (or the last Wait): true. It returns false when maxWait
+// passes or the server drains, and ctx's error if the request is abandoned.
+func (w *Watch) Wait(ctx context.Context, maxWait time.Duration) (bool, error) {
+	timer := time.NewTimer(maxWait)
+	defer timer.Stop()
+	select {
+	case <-w.wake:
+		return true, nil
+	case <-timer.C:
+		return false, nil
+	case <-w.hub.draining:
+		return false, nil
+	case <-ctx.Done():
+		return false, ctx.Err()
+	}
+}

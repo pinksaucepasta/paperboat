@@ -28,6 +28,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/edgeplacement"
 	"github.com/pinksaucepasta/paperboat/server/internal/edgeset"
 	"github.com/pinksaucepasta/paperboat/server/internal/endpoints"
+	"github.com/pinksaucepasta/paperboat/server/internal/machineevents"
 	"github.com/pinksaucepasta/paperboat/server/internal/machinelatency"
 	"github.com/pinksaucepasta/paperboat/server/internal/previewattachment"
 	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
@@ -53,6 +54,8 @@ const DefaultAdmissionLifetime = 10 * time.Minute
 type Service struct {
 	DB                *db.DB
 	AdmissionLifetime time.Duration
+	// Events wakes held endpoint pulls; nil answers every pull at once.
+	Events *machineevents.Hub
 }
 
 func validRequest(p previewattachment.MachineProof, r runtimewire.Request) bool {
@@ -479,11 +482,13 @@ const observationRefresh = time.Minute
 // agents' runtime carriers on this edge). An edge with CapabilityEndpointDeltas gets them grouped by
 // carrier in pages of endpointPageRows (page continues one answer), and given a cursor only what
 // changed since it; every answer carries the next cursor. Other edges get the full set as before.
-func (s *Service) PullEndpoints(ctx context.Context, edge previewattachment.PreviewEdgeIdentity, capabilities []string, since, page string) (runtimewire.Snapshot, error) {
+// A delta pull with wait > 0 and nothing to report is held up to wait for a write to one of the edge's
+// assignments (migration 376 notifies 'edge:<node>'), so a new route reaches every edge at once instead
+// of at each edge's next poll. Prior art: headscale hscontrol/poll.go serveLongPoll.
+func (s *Service) PullEndpoints(ctx context.Context, edge previewattachment.PreviewEdgeIdentity, capabilities []string, since, page string, wait time.Duration) (runtimewire.Snapshot, error) {
 	if !runtimewire.HasCapability(capabilities, runtimewire.CapabilityEndpoints) || !runtimewire.ValidEdgeCapabilities(capabilities) {
 		return runtimewire.Snapshot{}, ErrInvalid
 	}
-	expires := admission.Deadline(time.Now(), s.admissionLifetime())
 	out := runtimewire.Snapshot{Schema: runtimewire.Schema}
 	if !runtimewire.HasCapability(capabilities, runtimewire.CapabilityEndpointDeltas) {
 		if page != "" {
@@ -492,7 +497,7 @@ func (s *Service) PullEndpoints(ctx context.Context, edge previewattachment.Prev
 		if err := endpoints.RecordEdgeServes(ctx, s.DB.Pool(), edge.NodeID, edge.ProcessEpoch, runtimewire.HasCapability(capabilities, runtimewire.CapabilityTunnelEndpoints)); err != nil {
 			return runtimewire.Snapshot{}, err
 		}
-		routes, err := endpoints.EdgeAdmissions(ctx, s.DB.Pool(), edge.NodeID, edge.ProcessEpoch, expires, runtimewire.MaximumAdmissions)
+		routes, err := endpoints.EdgeAdmissions(ctx, s.DB.Pool(), edge.NodeID, edge.ProcessEpoch, admission.Deadline(time.Now(), s.admissionLifetime()), runtimewire.MaximumAdmissions)
 		if err != nil {
 			return runtimewire.Snapshot{}, err
 		}
@@ -502,6 +507,63 @@ func (s *Service) PullEndpoints(ctx context.Context, edge previewattachment.Prev
 		out.Complete, out.Admissions = true, &routes
 		return out, nil
 	}
+	var watch *machineevents.Watch
+	if wait > 0 && page == "" && s.Events != nil {
+		// Subscribe before reading, so a write between the read and the wait still wakes it.
+		watch = s.Events.Watch(EdgeEventKey(edge.NodeID))
+		defer watch.Close()
+	}
+	answer, err := s.endpointDelta(ctx, edge, capabilities, since, page, endpointDeltaOverlap)
+	deadline := time.Now().Add(wait)
+	for {
+		if watch == nil || err != nil || answer.Complete {
+			return answer, err
+		}
+		hold, overlapOnly := time.Until(deadline), false
+		if !quietEndpointAnswer(answer) {
+			// The answer re-reads the last endpointDeltaOverlap for transactions that committed late, so a recent
+			// change repeats in every answer for 10 s. Without the overlap, nothing new: hold briefly (a new write
+			// still wakes it at once) instead of answering back to back.
+			exact, exactErr := s.endpointDelta(ctx, edge, capabilities, since, page, 0)
+			if exactErr != nil || exact.Complete || !quietEndpointAnswer(exact) {
+				return answer, exactErr
+			}
+			hold, overlapOnly = min(hold, endpointOverlapHold), true
+		}
+		if hold <= 0 {
+			return answer, nil
+		}
+		woken, waitErr := watch.Wait(ctx, hold)
+		if waitErr != nil {
+			return runtimewire.Snapshot{}, waitErr
+		}
+		if !woken && overlapOnly {
+			// Nothing written during the brief overlap hold: the answer read before still holds (a third read per
+			// 500 ms would triple the endpoint pull's queries in the 10 s after every change).
+			return answer, nil
+		}
+		// Read again after a timeout too: the answer carries a fresh cursor and expiry. A wake that finds nothing
+		// for this edge yet (the notified write is not visible to this read) goes back to waiting.
+		answer, err = s.endpointDelta(ctx, edge, capabilities, since, page, endpointDeltaOverlap)
+		if !woken {
+			return answer, err
+		}
+	}
+}
+
+// EdgeEventKey is the machineevents key an edge's held endpoint pull waits on (migration 376).
+func EdgeEventKey(nodeID string) string { return "edge:" + nodeID }
+
+// quietEndpointAnswer reports whether a delta answer carries nothing for the edge to act on.
+func quietEndpointAnswer(a runtimewire.Snapshot) bool {
+	return len(a.RemovedRouteIDs) == 0 && a.TunnelsChangedAt == "" && a.Next == "" && (a.Carriers == nil || len(*a.Carriers) == 0)
+}
+
+// endpointDelta answers one endpoint pull of an edge with CapabilityEndpointDeltas: a page of the full set, or
+// the changes since the cursor minus overlap.
+func (s *Service) endpointDelta(ctx context.Context, edge previewattachment.PreviewEdgeIdentity, capabilities []string, since, page string, overlap time.Duration) (runtimewire.Snapshot, error) {
+	expires := admission.Deadline(time.Now(), s.admissionLifetime())
+	out := runtimewire.Snapshot{Schema: runtimewire.Schema}
 	after, err := decodeEndpointPage(page)
 	if err != nil {
 		return runtimewire.Snapshot{}, ErrInvalid
@@ -524,11 +586,11 @@ func (s *Service) PullEndpoints(ctx context.Context, edge previewattachment.Prev
 		out.Complete = true
 		routes, last, err = endpoints.EdgeAdmissionsPage(ctx, s.DB.Pool(), edge.NodeID, edge.ProcessEpoch, after, expires, endpointPageRows-1)
 	} else {
-		routes, removed, last, err = endpoints.EdgeAdmissionsChanged(ctx, s.DB.Pool(), edge.NodeID, edge.ProcessEpoch, cursor.Add(-endpointDeltaOverlap), after, expires, endpointPageRows-1)
+		routes, removed, last, err = endpoints.EdgeAdmissionsChanged(ctx, s.DB.Pool(), edge.NodeID, edge.ProcessEpoch, cursor.Add(-overlap), after, expires, endpointPageRows-1)
 		out.RemovedRouteIDs, out.ExpiresAt = removed, &expires
 		if err == nil && page == "" {
 			var changed time.Time
-			if changed, err = endpoints.TunnelsChangedAt(ctx, s.DB.Pool(), edge.NodeID, edge.ProcessEpoch, cursor.Add(-endpointDeltaOverlap)); !changed.IsZero() {
+			if changed, err = endpoints.TunnelsChangedAt(ctx, s.DB.Pool(), edge.NodeID, edge.ProcessEpoch, cursor.Add(-overlap)); !changed.IsZero() {
 				out.TunnelsChangedAt = changed.UTC().Format(time.RFC3339Nano)
 			}
 		}
@@ -577,6 +639,8 @@ const (
 	endpointDeltaOverlap = 10 * time.Second
 	// endpointDeltaWindow: an older cursor gets a full answer.
 	endpointDeltaWindow = 10 * time.Minute
+	// endpointOverlapHold is how long a pull whose answer only repeats the overlap is held: the old poll rate.
+	endpointOverlapHold = 500 * time.Millisecond
 )
 
 func (s *Service) Observe(ctx context.Context, edge previewattachment.PreviewEdgeIdentity, observations []runtimewire.Observation) error {

@@ -64,20 +64,20 @@ VALUES($1,$2,$3,$3,$4,'owner_session_delta','foreground','http','127.0.0.1:3000'
 	if values, err := f.service.Pull(ctx, f.edge, deltas); err != nil || len(values) != 1 || values[0].EndpointID != "" {
 		t.Fatalf("full runtime pull of a delta edge = %d admissions, %v", len(values), err)
 	}
-	full, err := f.service.PullEndpoints(ctx, f.edge, deltas, "", "")
+	full, err := f.service.PullEndpoints(ctx, f.edge, deltas, "", "", 0)
 	if err != nil || !full.Complete || len(flatten(full)) != 1 || flatten(full)[0].EndpointID != first || full.Cursor == "" || full.Admissions != nil {
 		t.Fatalf("full endpoint pull = %+v, %v", full, err)
 	}
 	// Nothing changed since the cursor (rows older than the overlap): an empty delta.
 	f.exec(t, `UPDATE endpoint_edge_assignments SET changed_at=now()-interval '1 minute' WHERE edge_node_id IN ($1,$2)`, f.node, f.backupNode)
-	idle, err := f.service.PullEndpoints(ctx, f.edge, deltas, full.Cursor, "")
+	idle, err := f.service.PullEndpoints(ctx, f.edge, deltas, full.Cursor, "", 0)
 	if err != nil || idle.Complete || idle.Carriers == nil || len(flatten(idle)) != 0 || len(idle.RemovedRouteIDs) != 0 || idle.ExpiresAt == nil {
 		t.Fatalf("idle delta = %+v, %v", idle, err)
 	}
 	// A new preview arrives as an admission, a stopped one as a removed route.
 	register(second)
 	f.exec(t, `UPDATE preview_leases SET terminal_state='stopped',stopped_at=now() WHERE id=$1`, first)
-	changed, err := f.service.PullEndpoints(ctx, f.edge, deltas, idle.Cursor, "")
+	changed, err := f.service.PullEndpoints(ctx, f.edge, deltas, idle.Cursor, "", 0)
 	if err != nil || changed.Complete || len(flatten(changed)) != 1 || flatten(changed)[0].EndpointID != second ||
 		len(changed.RemovedRouteIDs) != 1 || changed.RemovedRouteIDs[0] != first {
 		t.Fatalf("delta after a change = %+v, %v", changed, err)
@@ -85,7 +85,7 @@ VALUES($1,$2,$3,$3,$4,'owner_session_delta','foreground','http','127.0.0.1:3000'
 	// An access change arrives as the updated admission.
 	f.exec(t, `UPDATE endpoint_edge_assignments SET changed_at=now()-interval '1 minute' WHERE edge_node_id IN ($1,$2)`, f.node, f.backupNode)
 	f.exec(t, `UPDATE endpoints SET access_mode='private' WHERE id=$1`, second)
-	access, err := f.service.PullEndpoints(ctx, f.edge, deltas, changed.Cursor, "")
+	access, err := f.service.PullEndpoints(ctx, f.edge, deltas, changed.Cursor, "", 0)
 	if err != nil || len(flatten(access)) != 1 || flatten(access)[0].RouteKind != runtimewire.EndpointRestrictedRouteKind {
 		t.Fatalf("delta after an access change = %+v, %v", access, err)
 	}
@@ -93,7 +93,7 @@ VALUES($1,$2,$3,$3,$4,'owner_session_delta','foreground','http','127.0.0.1:3000'
 	// A carrier renewal (only expires_at inside its admission) is not a change.
 	f.exec(t, `UPDATE endpoint_edge_assignments SET changed_at=now()-interval '1 minute' WHERE edge_node_id IN ($1,$2)`, f.node, f.backupNode)
 	f.exec(t, `UPDATE runtime_carrier_attachments SET admission=jsonb_set(admission,'{expires_at}',to_jsonb(to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS"Z"'))) WHERE machine_id=$1`, f.machine)
-	renewed, err := f.service.PullEndpoints(ctx, f.edge, deltas, changed.Cursor, "")
+	renewed, err := f.service.PullEndpoints(ctx, f.edge, deltas, changed.Cursor, "", 0)
 	if err != nil || len(flatten(renewed)) != 0 || len(renewed.RemovedRouteIDs) != 0 {
 		t.Fatalf("a renewal produced a delta: %+v, %v", renewed, err)
 	}
@@ -103,7 +103,7 @@ VALUES($1,$2,$3,$3,$4,'owner_session_delta','foreground','http','127.0.0.1:3000'
 	endpointPageRows = 1
 	seen, page := map[string]bool{}, ""
 	for i := 0; ; i++ {
-		answer, err := f.service.PullEndpoints(ctx, f.edge, deltas, "", page)
+		answer, err := f.service.PullEndpoints(ctx, f.edge, deltas, "", page, 0)
 		if err != nil || !answer.Complete || i > 5 {
 			t.Fatalf("paged full answer: %+v %v", answer, err)
 		}
@@ -122,7 +122,7 @@ VALUES($1,$2,$3,$3,$4,'owner_session_delta','foreground','http','127.0.0.1:3000'
 	}
 	endpointPageRows = 500
 	// An old or missing cursor gets a full answer.
-	if again, err := f.service.PullEndpoints(ctx, f.edge, deltas, "not-a-cursor", ""); err != nil || !again.Complete {
+	if again, err := f.service.PullEndpoints(ctx, f.edge, deltas, "not-a-cursor", "", 0); err != nil || !again.Complete {
 		t.Fatalf("invalid cursor = %+v, %v", again, err)
 	}
 }
@@ -131,7 +131,7 @@ VALUES($1,$2,$3,$3,$4,'owner_session_delta','foreground','http','127.0.0.1:3000'
 // expiry, exactly as before.
 func TestEndpointPullWithoutDeltasKeepsItsShapeOnPostgres(t *testing.T) {
 	f := newAgentFixture(t, "epnodelta")
-	snapshot, err := f.service.PullEndpoints(f.ctx, f.edge, []string{runtimewire.CapabilityEndpoints}, "", "")
+	snapshot, err := f.service.PullEndpoints(f.ctx, f.edge, []string{runtimewire.CapabilityEndpoints}, "", "", 0)
 	if err != nil {
 		t.Fatal(err)
 	}

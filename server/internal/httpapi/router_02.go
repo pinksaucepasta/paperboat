@@ -5,6 +5,7 @@ import (
 	"errors"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/ratelimit"
+	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
 	"log/slog"
 	"math"
 	"net/http"
@@ -117,7 +118,8 @@ func isStreamingRoute(r *http.Request) bool {
 		// representation is an ordinary request and keeps the request timeout.
 		return !strings.HasSuffix(r.URL.Path, "/events") || acceptsEventStream(r)
 	}
-	return isMachineEventsWait(r.URL.Path) || isReleaseDownload(r)
+	// The edge's endpoint pull is held up to runtimewire.MaximumEndpointWaitMilliseconds for a change.
+	return isMachineEventsWait(r.URL.Path) || isReleaseDownload(r) || (r.Method == http.MethodPost && r.URL.Path == runtimewire.EdgeEndpointPullPath)
 }
 
 // acceptsEventStream reports whether the client asked for a text/event-stream representation. It picks the

@@ -532,7 +532,7 @@ func New(opts Options) (*App, error) {
 			return nil, fmt.Errorf("configure preview carrier edge verifier: %w", verifierErr)
 		}
 		previewEdgeVerifier.SetNodeCredentials(nodeCredentials)
-		runtimeAttachmentHandler = &runtimeattachment.Handler{Service: &runtimeattachment.Service{DB: store}, Machine: previewAttachmentMachineVerifier, Edge: previewEdgeVerifier, OriginHealth: tunnelRepository}
+		runtimeAttachmentHandler = &runtimeattachment.Handler{Service: &runtimeattachment.Service{DB: store, Events: machineEventHub}, Machine: previewAttachmentMachineVerifier, Edge: previewEdgeVerifier, OriginHealth: tunnelRepository}
 		if len(trustedLoginOrigins) > 0 {
 			newBrowserService := browseraccess.NewService
 			if opts.Config.Environment != config.EnvironmentProduction {

@@ -36,26 +36,26 @@ VALUES($1,1,sha256(convert_to($1::text,'UTF8')),convert_to(json_build_object('ro
 	if a, err := f.service.Attach(f.ctx, f.proof, request); err != nil || !a.TunnelEndpointsServed {
 		t.Fatalf("attach: tunnels served=%v %v", a.TunnelEndpointsServed, err)
 	}
-	full, err := f.service.PullEndpoints(f.ctx, f.edge, both, "", "")
+	full, err := f.service.PullEndpoints(f.ctx, f.edge, both, "", "", 0)
 	if err != nil || !full.Complete || full.TunnelsChangedAt != "" {
 		t.Fatalf("full pull = %+v, %v", full, err)
 	}
 	if err := endpoints.SyncTunnelAgents(f.ctx, f.database, 100); err != nil {
 		t.Fatal(err)
 	}
-	delta, err := f.service.PullEndpoints(f.ctx, f.edge, both, full.Cursor, "")
+	delta, err := f.service.PullEndpoints(f.ctx, f.edge, both, full.Cursor, "", 0)
 	if err != nil || delta.Complete || delta.TunnelsChangedAt == "" {
 		t.Fatalf("delta after the tunnel was assigned = %+v, %v", delta, err)
 	}
 	if _, err := time.Parse(time.RFC3339Nano, delta.TunnelsChangedAt); err != nil {
 		t.Fatalf("tunnels_changed_at %q: %v", delta.TunnelsChangedAt, err)
 	}
-	again, err := f.service.PullEndpoints(f.ctx, f.edge, both, delta.Cursor, "")
+	again, err := f.service.PullEndpoints(f.ctx, f.edge, both, delta.Cursor, "", 0)
 	if err != nil || again.TunnelsChangedAt != delta.TunnelsChangedAt {
 		t.Fatalf("a repeated delta changed the value: %q vs %q (%v)", again.TunnelsChangedAt, delta.TunnelsChangedAt, err)
 	}
 	f.exec(t, `UPDATE endpoint_edge_assignments SET changed_at=now()-interval '1 minute' WHERE edge_node_id IN ($1,$2)`, f.node, f.backupNode)
-	idle, err := f.service.PullEndpoints(f.ctx, f.edge, both, delta.Cursor, "")
+	idle, err := f.service.PullEndpoints(f.ctx, f.edge, both, delta.Cursor, "", 0)
 	if err != nil || idle.TunnelsChangedAt != "" {
 		t.Fatalf("idle delta = %+v, %v", idle, err)
 	}

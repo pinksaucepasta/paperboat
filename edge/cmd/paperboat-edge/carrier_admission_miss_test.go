@@ -44,7 +44,7 @@ func (s *missSource) RuntimeCarrierAdmissions(context.Context, string, string) (
 	return append([]runtimewire.Admission(nil), s.admissions...), nil
 }
 
-func (s *missSource) EndpointAdmissions(context.Context, string, string, string) (control.EndpointUpdate, error) {
+func (s *missSource) EndpointAdmissions(context.Context, string, string, string, time.Duration) (control.EndpointUpdate, error) {
 	return control.EndpointUpdate{Complete: true, Cursor: "cursor"}, nil
 }
 

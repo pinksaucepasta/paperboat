@@ -186,7 +186,13 @@ type EdgeRequest struct {
 	Since string `json:"since,omitempty"`
 	// Page continues a paged endpoint answer (the Next of its previous page).
 	Page string `json:"page,omitempty"`
+	// WaitMilliseconds, on a delta endpoint pull, asks the server to hold an answer that has nothing to report for
+	// up to this long, until a write to the edge's assignments (0..MaximumEndpointWaitMilliseconds).
+	WaitMilliseconds int64 `json:"wait_ms,omitempty"`
 }
+
+// MaximumEndpointWaitMilliseconds bounds EdgeRequest.WaitMilliseconds.
+const MaximumEndpointWaitMilliseconds = 25000
 
 // Snapshot requires an explicit admissions array, including when empty.
 // A nil pointer identifies an absent/null incomplete snapshot on decode.

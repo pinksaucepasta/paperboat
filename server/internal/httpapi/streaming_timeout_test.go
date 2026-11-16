@@ -147,3 +147,12 @@ func TestEdgeBrowserTerminalControlUpgradesPastTheRequestTimeout(t *testing.T) {
 		t.Fatalf("echo = %q, %v; want the socket to outlive the request timeout", message, err)
 	}
 }
+
+// The edge's endpoint pull is held up to 25 s for a change, past the request timeout; the same path by GET is not.
+func TestEdgeEndpointPullSkipsTheRequestTimeout(t *testing.T) {
+	for method, want := range map[string]bool{http.MethodPost: true, http.MethodGet: false} {
+		if got := isStreamingRoute(httptest.NewRequest(method, "/v1/edge/runtime/endpoint-admissions", nil)); got != want {
+			t.Fatalf("%s endpoint pull: streaming=%v, want %v", method, got, want)
+		}
+	}
+}
