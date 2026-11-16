@@ -142,6 +142,12 @@ func standardWindowsEnvironment(token windows.Token) map[string]string {
 	if name, err := windows.ComputerName(); err == nil {
 		values["COMPUTERNAME"] = name
 	}
+	// An S4U token's environment block carries no account name.
+	if user, err := token.GetTokenUser(); err == nil {
+		if account, domain, _, err := user.User.Sid.LookupAccount(""); err == nil {
+			values["USERNAME"], values["USERDOMAIN"] = account, domain
+		}
+	}
 	for _, folder := range []struct {
 		key string
 		id  *windows.KNOWNFOLDERID
