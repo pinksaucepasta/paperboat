@@ -41,21 +41,9 @@ func ResolvePaths(environ func(string) string, home string, uid int) (Paths, err
 	if err := ensureOwnerDirectory(stateRoot, uid); err != nil {
 		return Paths{}, err
 	}
-	runtimeBase := ""
-	if runtime.GOOS == "linux" {
-		if candidate := environ("XDG_RUNTIME_DIR"); candidate != "" {
-			if !filepath.IsAbs(candidate) {
-				return Paths{}, ErrInvalidConfig
-			}
-			if safeOwnerDirectory(candidate, uid) {
-				runtimeBase = candidate
-			}
-		} else {
-			candidate := filepath.Join("/run/user", strconv.Itoa(uid))
-			if safeOwnerDirectory(candidate, uid) {
-				runtimeBase = candidate
-			}
-		}
+	runtimeBase, err := linuxRuntimeBase(environ, uid)
+	if err != nil {
+		return Paths{}, err
 	}
 	// Darwin launchd supplies TMPDIR even when the installing shell does not.
 	// Keep its per-user socket in the protected state directory so GUI, SSH and
@@ -94,6 +82,25 @@ func userStateRoot(environ func(string) string, home string) (string, error) {
 		return filepath.Join(home, ".local", "state", "paperboat"), nil
 	}
 	return filepath.Join(home, "Library", "Application Support", "Paperboat", "state"), nil
+}
+
+// linuxRuntimeBase is the user's runtime directory for the socket, or "" for the state directory.
+// root gets "": its daemon is a system unit (service.UserServiceRoot) started at boot, while
+// /run/user/0 exists only during a login session, so daemon and CLI could resolve different sockets.
+func linuxRuntimeBase(environ func(string) string, uid int) (string, error) {
+	if runtime.GOOS != "linux" || uid == 0 {
+		return "", nil
+	}
+	candidate := environ("XDG_RUNTIME_DIR")
+	if candidate == "" {
+		candidate = filepath.Join("/run/user", strconv.Itoa(uid))
+	} else if !filepath.IsAbs(candidate) {
+		return "", ErrInvalidConfig
+	}
+	if safeOwnerDirectory(candidate, uid) {
+		return candidate, nil
+	}
+	return "", nil
 }
 
 func ensureOwnerDirectory(path string, uid int) error {

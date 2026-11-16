@@ -54,7 +54,11 @@ func TestResolvePathsUsesSafeRuntimeAndRejectsRelativeOverrides(t *testing.T) {
 		environment["TMPDIR"] = runtimeRoot
 	}
 	paths, err := ResolvePaths(func(key string) string { return environment[key] }, home, os.Geteuid())
-	if err != nil || paths.RuntimeRoot != filepath.Join(runtimeRoot, "paperboat") {
+	want := filepath.Join(runtimeRoot, "paperboat")
+	if os.Geteuid() == 0 { // root never uses a login session's runtime directory (CI runs as root)
+		want = filepath.Join(home, "state", "paperboat", "run")
+	}
+	if err != nil || paths.RuntimeRoot != want {
 		t.Fatalf("paths=%#v err=%v", paths, err)
 	}
 	if runtime.GOOS == "linux" {
@@ -109,5 +113,19 @@ func TestResolvePathsRejectsPermissiveOwnedRuntimeDirectory(t *testing.T) {
 	paths, err := ResolvePaths(func(key string) string { return environment[key] }, home, os.Geteuid())
 	if err != nil || paths.RuntimeRoot == filepath.Join(runtimeRoot, "paperboat") {
 		t.Fatalf("paths=%#v err=%v", paths, err)
+	}
+}
+
+func TestRootSocketIgnoresTheLoginSessionRuntimeDirectory(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("Linux runtime directory")
+	}
+	// "/" is root-owned and not group/world writable, so it would otherwise pass as root's runtime directory.
+	base, err := linuxRuntimeBase(func(key string) string { return map[string]string{"XDG_RUNTIME_DIR": "/"}[key] }, 0)
+	if err != nil || base != "" {
+		t.Fatalf("root runtime base = %q, %v", base, err)
+	}
+	if _, err := linuxRuntimeBase(func(string) string { return "relative" }, 1000); err == nil {
+		t.Fatal("relative XDG_RUNTIME_DIR was accepted")
 	}
 }

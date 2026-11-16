@@ -16,6 +16,9 @@ import (
 // Discover only the current UID's protected native runtime and socket, and
 // supply them to this read-only query without changing the shell environment.
 func prepareConfigServiceQuery(query *exec.Cmd) {
+	if os.Geteuid() == 0 {
+		return // root's config sync is a system unit (service.UserServiceRoot): no user bus.
+	}
 	root := filepath.Join("/run/user", strconv.Itoa(os.Geteuid()))
 	if refusal := configServiceRuntimeRefusal(root, os.Geteuid()); refusal != "" {
 		// Windows returns an error here; the query still runs, with the caller's own environment, and says why it did not

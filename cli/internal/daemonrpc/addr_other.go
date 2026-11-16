@@ -30,14 +30,20 @@ func defaultSocketAddress() string {
 		return env
 	}
 
-	if xdg := os.Getenv("XDG_RUNTIME_DIR"); xdg != "" {
-		return filepath.Join(xdg, "paperboat", "daemon.sock")
-	}
+	return unixSocketAddress(os.Getuid())
+}
 
-	uid := os.Getuid()
-	runUserPath := fmt.Sprintf("/run/user/%d/paperboat/daemon.sock", uid)
-	if _, err := os.Stat(runUserPath); err == nil {
-		return runUserPath
+func unixSocketAddress(uid int) string {
+	// root's daemon is a system unit started at boot, while XDG_RUNTIME_DIR and /run/user/0 belong to a
+	// login session: daemon and CLI would pick different sockets, so root always uses the temp path.
+	if uid != 0 {
+		if xdg := os.Getenv("XDG_RUNTIME_DIR"); xdg != "" {
+			return filepath.Join(xdg, "paperboat", "daemon.sock")
+		}
+		runUserPath := fmt.Sprintf("/run/user/%d/paperboat/daemon.sock", uid)
+		if _, err := os.Stat(runUserPath); err == nil {
+			return runUserPath
+		}
 	}
 	return filepath.Join(os.TempDir(), fmt.Sprintf("paperboat-%d", uid), "daemon.sock")
 }
