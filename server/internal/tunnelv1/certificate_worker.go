@@ -427,6 +427,7 @@ func (w *CertificateWorker) Worker(interval time.Duration, limit int) workers.Wo
 	}
 }
 
+// renewBefore and issuerName arrive normalized by NewCertificateWorker, the one place that defaults them.
 func certificateDomainWithConfig(row dbsqlc.TunnelDomain, edges []dbsqlc.ListReadyTunnelCertificateEdgesV1Row, now time.Time, renewBefore time.Duration, issuerName string) (tunnelcert.Domain, error) {
 	strategy, err := certificateStrategy(row.CertificateStrategy)
 	if err != nil {
@@ -441,12 +442,6 @@ func certificateDomainWithConfig(row dbsqlc.TunnelDomain, edges []dbsqlc.ListRea
 	targets := make([]tunnelcert.EdgeTarget, 0, len(edges))
 	for _, edge := range edges {
 		targets = append(targets, tunnelcert.EdgeTarget{NodeID: edge.EdgeNodeID, ProcessEpoch: edge.EdgeProcessEpoch, Generation: uint64(edge.AssignmentGeneration)})
-	}
-	if renewBefore <= 0 || renewBefore >= 365*24*time.Hour {
-		renewBefore = 30 * 24 * time.Hour
-	}
-	if issuerName == "" {
-		issuerName = "letsencrypt"
 	}
 	return tunnelcert.Domain{ID: row.ID, AccountID: row.AccountID, TunnelID: row.TunnelID, TargetKind: tunnelcert.TargetDurableRoute, RouteID: row.RouteID, Hostname: row.Hostname, ChallengeReference: row.OwnershipChallengeReference, Generation: uint64(row.Generation), Strategy: strategy, OwnershipState: row.OwnershipState, CAAState: row.CaaState, CertificateReference: row.CertificateReference.String, CertificateGeneration: 0, RenewalDue: !row.CertificateExpiresAt.Valid || !row.CertificateExpiresAt.Time.After(now.Add(renewBefore)), AllowOnDemandFallback: onDemandPolicy, EdgeTargets: targets, Issuer: issuerName, WorkspaceDomainID: row.WorkspaceDomainID.String}, nil
 }
@@ -469,12 +464,6 @@ func previewCertificateDomainWithConfig(row dbsqlc.PreviewDomain, lease dbsqlc.P
 	targets := make([]tunnelcert.EdgeTarget, 0, len(edges))
 	for _, edge := range edges {
 		targets = append(targets, tunnelcert.EdgeTarget{NodeID: edge.EdgeNodeID, ProcessEpoch: edge.EdgeProcessEpoch, Generation: uint64(edge.AttachmentGeneration)})
-	}
-	if renewBefore <= 0 || renewBefore >= 365*24*time.Hour {
-		renewBefore = 30 * 24 * time.Hour
-	}
-	if issuerName == "" {
-		issuerName = "letsencrypt"
 	}
 	return tunnelcert.Domain{ID: row.ID, AccountID: row.AccountID, TargetKind: tunnelcert.TargetPreviewLease, PreviewID: row.PreviewID, PreviewGeneration: uint64(row.PreviewGeneration), PreviewOwnerMachineID: lease.OwnerMachineID, PreviewOwnerSessionID: lease.OwnerSessionID, PreviewState: "active", PreviewExpiresAt: expiresAt.UTC(), Hostname: row.Hostname, ChallengeReference: row.OwnershipChallengeReference, Generation: uint64(row.Generation), Strategy: strategy, OwnershipState: row.OwnershipState, CAAState: row.CaaState, CertificateReference: row.CertificateReference.String, RenewalDue: row.CertificateState != "ready" || !row.CertificateExpiresAt.Valid || !row.CertificateExpiresAt.Time.After(now.Add(renewBefore)), AllowOnDemandFallback: strategy == tunnelcert.StrategyOnDemandLeaf, EdgeTargets: targets, Issuer: issuerName, WorkspaceDomainID: row.WorkspaceDomainID.String}, nil
 }

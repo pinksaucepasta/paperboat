@@ -698,7 +698,7 @@ func (s *Store) StopPreviewLeaseV1(ctx context.Context, input StopPreviewLeaseV1
 		}); err != nil {
 			return translate(err)
 		}
-		if _, err := tunnelcert.RevokePreviewCertificatesTx(ctx, tx, input.AccountID, input.PreviewID, "preview_lease_terminal", now); err != nil {
+		if _, err := tunnelcert.RevokePreviewCertificatesTx(ctx, tx, input.AccountID, input.PreviewID, now); err != nil {
 			return translate(err)
 		}
 		key := input.IdempotencyKey
@@ -869,7 +869,7 @@ func (s *Store) ReconcilePreviewLeasesV1(ctx context.Context, input ReconcilePre
 			}); err != nil {
 				return translate(err)
 			}
-			if _, err := tunnelcert.RevokePreviewCertificatesTx(ctx, tx, record.AccountID, record.ID, "preview_lease_terminal", now); err != nil {
+			if _, err := tunnelcert.RevokePreviewCertificatesTx(ctx, tx, record.AccountID, record.ID, now); err != nil {
 				return translate(err)
 			}
 			result.Expired = append(result.Expired, record)
@@ -901,7 +901,7 @@ func (s *Store) ReconcilePreviewLeasesV1(ctx context.Context, input ReconcilePre
 			}); err != nil {
 				return translate(err)
 			}
-			if _, err := tunnelcert.RevokePreviewCertificatesTx(ctx, tx, record.AccountID, record.ID, "preview_lease_terminal", now); err != nil {
+			if _, err := tunnelcert.RevokePreviewCertificatesTx(ctx, tx, record.AccountID, record.ID, now); err != nil {
 				return translate(err)
 			}
 			result.OwnerLost = append(result.OwnerLost, record)

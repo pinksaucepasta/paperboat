@@ -245,13 +245,15 @@ func RebindPreviewCertificatesTx(ctx context.Context, tx *db.Tx, accountID, prev
 // RevokePreviewCertificatesTx terminally withdraws every live preview target
 // for a lease. It is intended to run in the same transaction as the lease and
 // preview-domain terminal transition. Edge distribution cleanup then follows
-// the revoked certificate rows without exposing a stale active target.
-func RevokePreviewCertificatesTx(ctx context.Context, tx *db.Tx, accountID, previewID, reason string, now time.Time) (int64, error) {
-	if tx == nil || !validIdentifier(accountID) || !validIdentifier(previewID) || reason == "" || now.IsZero() {
+// the revoked certificate rows without exposing a stale active target, and the
+// CA revocation worker picks them up by the same pending marker as
+// RevokeDurableCertificatesTx.
+func RevokePreviewCertificatesTx(ctx context.Context, tx *db.Tx, accountID, previewID string, now time.Time) (int64, error) {
+	if tx == nil || !validIdentifier(accountID) || !validIdentifier(previewID) || now.IsZero() {
 		return 0, ErrInvalid
 	}
 	return tx.Queries().RevokePreviewCertificatesForLeaseV1(ctx, dbsqlc.RevokePreviewCertificatesForLeaseV1Params{
-		Now: sql.NullTime{Time: now.UTC(), Valid: true}, FailureCode: sql.NullString{String: reason, Valid: true},
+		Now: sql.NullTime{Time: now.UTC(), Valid: true}, FailureCode: sql.NullString{String: "ca_revocation_pending", Valid: true},
 		AccountID: accountID, PreviewID: sql.NullString{String: previewID, Valid: true},
 	})
 }

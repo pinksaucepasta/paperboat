@@ -200,6 +200,24 @@ func TestPreviewCertificateIssuanceRenewalFencesOnPostgres(t *testing.T) {
 			if err := coordinator.CommitPreviewDomainCertificateReady(ctx, refreshed.AccountID, refreshed.ID, refreshed.PreviewID, refreshed.PreviewGeneration, refreshed.Generation, certificate, now); err != nil {
 				t.Fatal(err)
 			}
+			// An ended preview's certificate must reach the CA revocation queue like a deleted tunnel's.
+			if err := database.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+				_, err := tunnelcert.RevokePreviewCertificatesTx(ctx, tx, f.previewAccountID, f.previewLeaseID, now)
+				return err
+			}); err != nil {
+				t.Fatal(err)
+			}
+			pending, err := store.ListPendingCertificateRevocations(ctx, 500)
+			if err != nil {
+				t.Fatal(err)
+			}
+			queued := false
+			for _, record := range pending {
+				queued = queued || record.ID == certificate.ID
+			}
+			if !queued {
+				t.Fatalf("revoked preview certificate %s is not queued for CA revocation", certificate.ID)
+			}
 		})
 	}
 }
