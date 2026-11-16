@@ -315,7 +315,7 @@ func doctorProbes(command *cobra.Command, snapshot localapi.Snapshot, machine *l
 	probes = append(probes, doctorDaemonHealthProbes(snapshot.Health)...)
 	probes = append(probes, doctorLingerProbes()...)
 	probes = append(probes, doctorCarrierProbes()...)
-	probes = append(probes, doctorHostdProbes()...)
+	probes = append(probes, doctorHostd()...)
 	probes = append(probes, doctorSSHSourceProbes()...)
 	if machine != nil {
 		probes = append(probes, doctorMachineProbes(*machine)...)
@@ -517,6 +517,9 @@ func doctorServerFailure(ctx context.Context, serverURL string, check doctorpkg.
 	}
 	return check
 }
+
+// doctorHostd is swapped by tests: the host service lives at fixed system paths, not under HOME.
+var doctorHostd = doctorHostdProbes
 
 func probeDoctorLocalState(ctx context.Context) doctorpkg.Check {
 	state := collectLocalDoctor(ctx)

@@ -310,6 +310,10 @@ func checkDoctorOwnerSocketJSON(t *testing.T, doctorArgs ...string) {
 	t.Setenv("XDG_RUNTIME_DIR", runtimeRoot)
 	t.Setenv("TMPDIR", runtimeRoot)
 	t.Setenv("PAPERBOAT_RUNTIME_STATE_ROOT", filepath.Join(root, "unconfigured-runtime"))
+	// Never the host's real install: a computer with Paperboat installed has a host service at fixed system paths.
+	previousHostd := doctorHostd
+	t.Cleanup(func() { doctorHostd = previousHostd })
+	doctorHostd = func() []doctorpkg.Probe { return nil }
 	backend := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if request.URL.Path != "/v1/me" || request.Header.Get("Authorization") != "Bearer token" {
 			http.Error(writer, "not found", http.StatusNotFound)
