@@ -4,6 +4,7 @@ package machineguard
 
 import (
 	"errors"
+	"math/rand/v2"
 	"net"
 	"net/netip"
 	"os"
@@ -100,12 +101,19 @@ func TestGatewayRefusesAPeerThatClosedBeforeLookup(t *testing.T) {
 // only while its own connecting socket is live, and a stale accepted connection of a reset client never is.
 func TestGatewayAttributionUnderTupleReuseChurn(t *testing.T) {
 	listener := gatewayListener(t)
-	probe, err := net.Listen("tcp4", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
+	// The client port sits below Linux's ephemeral range (32768-60999 by default), so no other socket's
+	// connect or :0 bind can take it between rounds; a port from :0 was taken mid-churn on CI.
+	port := 0
+	for try := 0; port == 0 && try < 20; try++ {
+		candidate := 20000 + rand.IntN(10000)
+		if probe, err := net.Listen("tcp4", "127.0.0.1:"+strconv.Itoa(candidate)); err == nil {
+			port = candidate
+			_ = probe.Close()
+		}
 	}
-	port := probe.Addr().(*net.TCPAddr).Port
-	_ = probe.Close()
+	if port == 0 {
+		t.Fatal("no free client port below the ephemeral range")
+	}
 	dialer := &net.Dialer{LocalAddr: &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: port}}
 	var previous string
 	for round := 0; round < 100; round++ {
