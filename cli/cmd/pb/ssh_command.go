@@ -100,8 +100,24 @@ func explainSSHFailure(command *cobra.Command, machine api.UserMachine, err erro
 		// Signed out (pb logout, or the session revoked and removed): the host closed the session for it.
 		fmt.Fprintf(command.ErrOrStderr(), sshSignInEndedMessage, machine.Alias)
 	case clientErr == nil && !explainRevokedSSHAccess(command, client, machine, err):
-		explainChangedSSHHostIdentity(command, client, machine, err)
+		if !explainSSHVersionSkew(command, client, client.Workspace(), machine) {
+			explainChangedSSHHostIdentity(command, client, machine, err)
+		}
 	}
+}
+
+// explainSSHVersionSkew names an older machine behind a closed SSH stream. An older target resets the stream that carries
+// a named workspace right after its header, so OpenSSH only sees the connection close. It reports whether it printed.
+func explainSSHVersionSkew(command *cobra.Command, client machineVersionReader, workspace string, machine api.UserMachine) bool {
+	if workspace == "" || workspace == "personal" {
+		return false
+	}
+	skew := machineVersionSkew(command.Context(), client, machine)
+	if skew == nil {
+		return false
+	}
+	fmt.Fprintf(command.ErrOrStderr(), "pb: %s\n", skew.message)
+	return true
 }
 
 const sshSignInEndedMessage = "pb: access to %s was revoked: this sign-in was ended. Run `pb login` to sign in again.\n"

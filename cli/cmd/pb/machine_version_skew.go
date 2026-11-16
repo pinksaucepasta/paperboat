@@ -41,13 +41,23 @@ func explainMachineVersionSkew(ctx context.Context, client machineVersionReader,
 	if client == nil || !(refused || namedWorkspace && execStartUncertain(err)) {
 		return err
 	}
+	if skew := machineVersionSkew(ctx, client, machine); skew != nil {
+		skew.cause = err
+		return skew
+	}
+	return err
+}
+
+// machineVersionSkew is the skew message for a machine whose running pb differs from this one, or nil when it is the same,
+// newer, or its version cannot be read.
+func machineVersionSkew(ctx context.Context, client machineVersionReader, machine api.UserMachine) *machineVersionSkewError {
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 	status, statusErr := client.MachineUpdateStatus(ctx, machine.ID)
 	theirs, _ := status["current_version"].(string)
 	ours := buildinfo.Version
 	if statusErr != nil || theirs == "" || theirs == ours {
-		return err
+		return nil
 	}
 	name := machine.Alias
 	if name == "" {
@@ -55,10 +65,10 @@ func explainMachineVersionSkew(ctx context.Context, client machineVersionReader,
 	}
 	if order, orderErr := selfupdate.CompareVersions(theirs, ours); orderErr == nil {
 		if order >= 0 {
-			return err
+			return nil
 		}
-		return &machineVersionSkewError{name + " runs pb " + theirs + ", older than this pb " + ours + "; update it (`pb update` on that machine), then retry.", err}
+		return &machineVersionSkewError{message: name + " runs pb " + theirs + ", older than this pb " + ours + "; update it (`pb update` on that machine), then retry."}
 	}
 	// Development builds carry no order: say both and which side to update.
-	return &machineVersionSkewError{name + " runs pb " + theirs + " and this pb is " + ours + "; a build older than the other can refuse its connections. Update the older one (`pb update` on that machine), then retry.", err}
+	return &machineVersionSkewError{message: name + " runs pb " + theirs + " and this pb is " + ours + "; a build older than the other can refuse its connections. Update the older one (`pb update` on that machine), then retry."}
 }

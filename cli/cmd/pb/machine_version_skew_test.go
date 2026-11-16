@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
+	"github.com/spf13/cobra"
 )
 
 type fakeMachineVersion struct {
@@ -82,5 +84,28 @@ func TestVersionSkewRefusalIsNotRetried(t *testing.T) {
 	}
 	if got := explainMachineVersionSkew(t.Context(), fakeMachineVersion{version: "dev-x"}, api.UserMachine{ID: "m"}, "team_1", skew); got != error(skew) {
 		t.Fatalf("an explained refusal was wrapped again: %v", got)
+	}
+}
+
+// A named-workspace pb ssh to an older machine only sees the connection close: pb says why after OpenSSH exits.
+func TestSSHClosedStreamNamesAnOlderMachine(t *testing.T) {
+	previous := buildinfo.Version
+	t.Cleanup(func() { buildinfo.Version = previous })
+	buildinfo.Version = "dev-new"
+	machine := api.UserMachine{ID: "machine_1", Alias: "canary-t"}
+	reader := fakeMachineVersion{version: "dev-old"}
+	var stderr bytes.Buffer
+	command := &cobra.Command{}
+	command.SetContext(t.Context())
+	command.SetErr(&stderr)
+	if explainSSHVersionSkew(command, reader, "personal", machine) || explainSSHVersionSkew(command, reader, "", machine) || stderr.Len() != 0 {
+		t.Fatalf("a default workspace was explained as version skew: %q", stderr.String())
+	}
+	if !explainSSHVersionSkew(command, reader, "team_1", machine) || !strings.Contains(stderr.String(), "canary-t runs pb dev-old and this pb is dev-new") {
+		t.Fatalf("named workspace: %q", stderr.String())
+	}
+	stderr.Reset()
+	if explainSSHVersionSkew(command, fakeMachineVersion{version: "dev-new"}, "team_1", machine) || stderr.Len() != 0 {
+		t.Fatalf("same version explained: %q", stderr.String())
 	}
 }
