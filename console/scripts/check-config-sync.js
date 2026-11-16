@@ -71,13 +71,13 @@
     pass("Repositories section has a Connect button", /Repositories/.test(pageText) && /Connect/.test(pageText))
     pass("a Personal workspace shows no team default", !/Team default/.test(pageText))
   } else pass("a team workspace shows its team default", /Team default/.test(pageText) && !/GitHub account/.test(pageText))
-  // Each repository says how many machines use it (and, in a team workspace, whether it is the team default).
-  const repositories = (await get(`config-repositories?workspace=${team}&limit=20`))?.items ?? []
+  // Each repository says how many machines use it; the list is shown only in the Personal workspace (a team
+  // workspace has the Team default row, whose Choose dialog marks the current default).
+  const repositories = isPersonal ? ((await get("config-repositories?workspace=personal&limit=20"))?.items ?? []) : []
   for (const repository of repositories) {
     const count = repository.machine_count ?? 0
     const used = count === 0 ? "Not used" : `Used by ${count} ${count === 1 ? "machine" : "machines"}`
-    const label = (repository.team_default ? "Team default · " : "") + used
-    pass(`repository ${repository.display_name} says "${label}"`, pageText.includes(label))
+    pass(`repository ${repository.display_name} says "${used}"`, pageText.includes(used))
   }
 
   // The table lists the machines that sync; the ones that don't are folded under "Not syncing".

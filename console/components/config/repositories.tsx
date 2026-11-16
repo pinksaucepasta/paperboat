@@ -35,8 +35,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 export function ConfigRepositories() {
   const queryClient = useQueryClient()
   const pages = usePageParam("config-repositories")
-  const workspace = useWorkspace()?.id
-  const query = useApiQuery(configRepositoriesQuery(pages.page, workspace))
+  const query = useApiQuery(configRepositoriesQuery(pages.page))
   const [connecting, setConnecting] = useState(false)
   const [removing, setRemoving] = useState<ConfigRepository | null>(null)
   const items = query.data?.items ?? []
@@ -70,10 +69,7 @@ export function ConfigRepositories() {
               )}
             </div>
             <div className="flex shrink-0 items-center gap-4">
-              <span className="hidden text-muted-foreground sm:inline">
-                {repository.team_default && "Team default · "}
-                {usedBy(repository.machine_count ?? 0)}
-              </span>
+              <span className="hidden text-muted-foreground sm:inline">{usedBy(repository.machine_count ?? 0)}</span>
               <Button variant="outline" size="sm" onClick={() => setRemoving(repository)}>
                 Disconnect
               </Button>
