@@ -11,3 +11,9 @@ delivery lanex2-l2 rc=0
 == stricter revoke checks (a value set after the revoke reaches survivors, never the revoked machine), 14:3x UTC:
 {"check": "env-revoke-rotation", "status": "PASS", "survivor_untouched_by_revoke": true, "fence_before": 119, "fence_after": 120}
 xplat_envscopes rotation L+W PASS: results/xplat-envscopes-20261116T143203Z.json
+
+== Mac target lanex2-m (fleet lock), same builds:
+env_scopes.py lanex2-m: {"check": "env-scopes", "status": "PASS", "personal_in_exec_and_terminal": true, "override_isolated_to_machine": true, "unset_restores_and_removes": true, "never_in_output_or_diagnostics": true}
+env_delivery.py lanex2-m --expect applied: first run FAILED once ('an ENV warning was shown although delivery is not failing') right after the L+M+W rotation run (the key rotation re-seal was still in flight); rerun on a settled account:
+{"check": "env-delivery", "target": "lanex2-m", "expect": "applied", "status": "PASS", "published": true, "applied": true}
+xplat_envscopes L,M,W all parts PASS (results/xplat-envscopes-20261116T142502Z.json): override L/M/W, personal, case, hoststate, rotation (assertions of the first rewrite; the stricter post-revoke assertions ran on L+W).
