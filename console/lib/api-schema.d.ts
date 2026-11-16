@@ -8427,6 +8427,48 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/machines/{machine_id}/ssh-descriptor": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                machine_id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Issue a managed SSH operation credential (sessions the server authorizes per operation: API token, recipe)
+         * @description Like exec-descriptor, for managed SSH: an ssh_operation credential with scope ssh:operate and a managed_ssh access session. Other sessions need none; hosts admit their SSH from signed rules.
+         */
+        post: operations["post_v1_machines_machine_id_ssh_descriptor"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/preview-lease-renewals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Renew many preview leases of one machine
+         * @description Renews up to 100 leases in one request, so a machine with N previews sends ceil(N/100) requests per renewal interval instead of N. Each item is exactly one single-lease renewal (own ETag precondition and idempotency key). The Idempotency-Key header identifies the batch and is the machine proof's operation id.
+         */
+        post: operations["post_v1_preview_lease_renewals"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -13100,6 +13142,30 @@ export interface components {
             envelope?: string;
             wraps: components["schemas"]["EnvVaultWrap"][];
             recipes: string[];
+        };
+        PreviewLeaseRenewalRequest: {
+            renewals: {
+                preview_id: string;
+                /** @description The lease's strong ETag, the same precondition the single renew sends as If-Match. */
+                etag: string;
+                /** @description Per-lease key, interchangeable with the single renew endpoint's. */
+                idempotency_key: string;
+                owner_session_id: string;
+            }[];
+        };
+        PreviewLeaseRenewalResponse: {
+            data: {
+                /** @description One result per request item, in request order. A failing item never fails the others. */
+                results: {
+                    preview_id: string;
+                    /** @description HTTP status the single renew endpoint would have returned for this lease. */
+                    status: number;
+                    etag?: string;
+                    preview?: components["schemas"]["PreviewLease"];
+                    /** @description The error object the single renew endpoint would have returned. */
+                    error?: Record<string, never>;
+                }[];
+            };
         };
     };
     responses: {
@@ -32604,6 +32670,69 @@ export interface operations {
             400: components["responses"]["Error"];
             401: components["responses"]["Error"];
             404: components["responses"]["Error"];
+        };
+    };
+    post_v1_machines_machine_id_ssh_descriptor: {
+        parameters: {
+            query?: {
+                /** @description Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field. */
+                workspace?: string;
+            };
+            header?: never;
+            path: {
+                machine_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    source_machine_id: string;
+                    operation_id: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Fresh execution descriptor. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    post_v1_preview_lease_renewals: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PreviewLeaseRenewalRequest"];
+            };
+        };
+        responses: {
+            /** @description One result per item. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PreviewLeaseRenewalResponse"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
         };
     };
 }
