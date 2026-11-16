@@ -8,6 +8,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -58,12 +59,9 @@ func TestPolicyPostgres(t *testing.T) {
 	}
 	svc.now = func() time.Time { return now }
 	in := UpsertRequest{MachineID: machine, Target: Target{Scheme: "http", Address: "127.0.0.1:3210"}, AccessMode: "private", ExpiresAt: now.Add(time.Hour)}
-	// F21-157: the policy upsert replays two serialization failures (40001) instead of failing.
-	pending, restore := db.InjectSerializationFailures(2)
 	p, err := svc.Upsert(ctx, owner, in)
-	restore()
-	if err != nil || pending() != 0 {
-		t.Fatalf("upsert after two forced 40001: err=%v pending=%d", err, pending())
+	if err != nil {
+		t.Fatalf("upsert: %v", err)
 	}
 	// A policy change wakes the host (machine_services topic) instead of waiting for its heartbeat.
 	topic := func() (n int) {
@@ -238,5 +236,92 @@ func TestPolicyRegrantPostgres(t *testing.T) {
 	}
 	if err = store.SQL().QueryRowContext(ctx, `SELECT count(*) FROM paperboat.managed_hostnames WHERE resource_kind='machine' AND resource_id=$1 AND port=80 AND hostname=$2`, machine, first.Hostname).Scan(&reservations); err != nil || reservations != 1 {
 		t.Fatalf("stable owner reservation: %d %v", reservations, err)
+	}
+}
+
+// Creates racing in one environment, against the machine heartbeat that rewrites the machine row, all succeed up to the
+// cap and the cap holds (the environment advisory lock orders the count and the insert; no SERIALIZABLE conflicts).
+func TestUpsertConcurrentCreatesKeepCapPostgres(t *testing.T) {
+	dsn := strings.TrimSpace(os.Getenv("PAPERBOAT_TEST_DATABASE_DSN"))
+	if dsn == "" {
+		t.Skip("set PAPERBOAT_TEST_DATABASE_DSN")
+	}
+	if err := db.ValidateIsolatedTestDSN(dsn, os.Getenv("PAPERBOAT_DATABASE_DSN")); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	store, err := db.Open(config.Database{Driver: "postgres", DSN: dsn})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if os.Getenv("PAPERBOAT_TEST_SCHEMA_READY") != "1" {
+		if err = db.Migrate(ctx, store); err != nil {
+			t.Fatal(err)
+		}
+	}
+	suffix := fmt.Sprint(time.Now().UnixNano())
+	owner, machine, environment := "usr_lazycap_"+suffix, "mach_lazycap_"+suffix, "env_lazycap_"+suffix
+	t.Cleanup(func() {
+		_, _ = store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.lazy_access_policies WHERE account_id=$1`, owner)
+		_, _ = store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.user_machines WHERE id=$1`, machine)
+		_, _ = store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.users WHERE id=$1`, owner)
+	})
+	if _, err = store.SQL().ExecContext(ctx, `INSERT INTO paperboat.users(id,workos_subject,primary_email,status) VALUES($1,$1,$1||'@test.invalid','active')`, owner); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines(id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state,online,installation_generation) VALUES($1,$2,$3,'linux','amd64','/workspace','online','occupied',true,1)`, machine, owner, environment); err != nil {
+		t.Fatal(err)
+	}
+	svc, err := NewService(store, "preview.example.test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stop := make(chan struct{})
+	var writers sync.WaitGroup
+	for range 4 {
+		writers.Add(1)
+		go func() {
+			defer writers.Done()
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				_, _ = store.SQL().ExecContext(ctx, `UPDATE paperboat.user_machines SET online=true WHERE id=$1`, machine)
+			}
+		}()
+	}
+	const attempts = machineservices.MaxBrowserPolicies + 8
+	errs := make([]error, attempts)
+	var wg sync.WaitGroup
+	for i := range attempts {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			in := UpsertRequest{MachineID: machine, Target: Target{Scheme: "http", Address: fmt.Sprintf("127.0.0.1:%d", 3000+i)}, AccessMode: "private", ExpiresAt: time.Now().Add(time.Hour)}
+			_, errs[i] = svc.Upsert(ctx, owner, in)
+		}()
+	}
+	wg.Wait()
+	close(stop)
+	writers.Wait()
+	created := 0
+	for i, e := range errs {
+		switch {
+		case e == nil:
+			created++
+		case errors.Is(e, ErrCapacity):
+		default:
+			t.Fatalf("create %d failed: %v", i, e)
+		}
+	}
+	var stored int
+	if err := store.SQL().QueryRowContext(ctx, `SELECT count(*) FROM paperboat.lazy_access_policies WHERE environment_id=$1 AND deleted_at IS NULL`, environment).Scan(&stored); err != nil {
+		t.Fatal(err)
+	}
+	if created != machineservices.MaxBrowserPolicies || stored != machineservices.MaxBrowserPolicies {
+		t.Fatalf("created %d, stored %d, want %d each", created, stored, machineservices.MaxBrowserPolicies)
 	}
 }

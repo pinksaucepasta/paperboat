@@ -69,7 +69,11 @@ func NewService(database *db.DB, endpointDomain string) (*Service, error) {
 	return &Service{db: database, endpointDomain: domain, now: time.Now}, nil
 }
 
-// Upsert stores a lazy access policy; its serializable transaction is replayed after a serialization failure.
+// Upsert stores a lazy access policy. The transaction is READ COMMITTED under the environment advisory lock (also
+// taken by browseraccess before it adds a policy), not SERIALIZABLE: its snapshot was taken before the lock wait, so
+// every queued create failed with 40001 against the one before it and against the machine heartbeat that rewrites
+// the FOR SHARE row. The cap count and the insert run after the lock, so they read the previous holder's commit
+// (same fix as metering.RecordRuntimeObservation, 263462f6e). A deadlock is replayed.
 func (s *Service) Upsert(ctx context.Context, accountID string, input UpsertRequest) (Policy, error) {
 	var out Policy
 	err := db.RetrySerializable(ctx, func() (e error) {
@@ -87,11 +91,8 @@ func (s *Service) upsertAttempt(ctx context.Context, accountID string, input Ups
 	if err := validateUpsert(accountID, input, now); err != nil {
 		return Policy{}, err
 	}
-	tx, err := db.BeginSerializable(ctx, s.db.SQL())
+	tx, err := s.db.SQL().BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
 	if err != nil {
-		if db.IsSerializationFailure(err) {
-			return Policy{}, err
-		}
 		beginErr := policyFailure("begin lazy policy transaction failed", err)
 		return Policy{}, upsertContextFailure(ctx, beginErr)
 	}
