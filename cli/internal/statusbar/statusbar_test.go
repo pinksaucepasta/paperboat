@@ -381,11 +381,11 @@ func TestWriteDefersRedrawUntilSplitANSICompletes(t *testing.T) {
 	if !strings.Contains(string(raw), "\x1b[r") {
 		t.Fatalf("scroll region was not reset on cleanup: %q", raw)
 	}
-	if strings.Contains(string(raw), "\x1b7") || strings.Contains(string(raw), "\x1b[0m") {
-		t.Fatalf("renderer changed remote DEC cursor or reset SGR state: %q", raw)
+	if strings.Contains(string(raw), "\x1b7") {
+		t.Fatalf("renderer changed the remote DEC cursor slot: %q", raw)
 	}
-	if !strings.Contains(string(raw), "\x1b[7m") || !strings.Contains(string(raw), "\x1b[27m") {
-		t.Fatalf("renderer did not apply and restore its reverse-video background: %q", raw)
+	if !strings.Contains(string(raw), "\x1b[0m\x1b[7m") || !strings.Contains(string(raw), "connecting\x1b[0m\x1b[u") {
+		t.Fatalf("renderer did not paint its reverse-video bar from default colours and restore the remote's: %q", raw)
 	}
 }
 
@@ -526,7 +526,8 @@ func TestAppleTerminalBarLeavesTheLastColumnFree(t *testing.T) {
 				t.Fatalf("no bar draw: %q", s)
 			}
 			row := s[start+len("\x1b[3;1H\x1b[2K"):]
-			row = row[:strings.Index(row, "\x1b[27m")]
+			row = strings.TrimPrefix(row, "\x1b[0m\x1b[7m")
+			row = row[:strings.Index(row, "\x1b[0m")]
 			if got := ansi.StringWidth(row); got != want {
 				t.Fatalf("%s: bar row is %d columns, want %d: %q", program, got, want, row)
 			}
@@ -901,5 +902,18 @@ func readPipe(r *os.File) string {
 		if err != nil || n == 0 {
 			return sb.String()
 		}
+	}
+}
+
+// X-24 in Terminal.app: the bar was reverse video only, so under vim it took vim's colours (a green or blue REC bar).
+func TestBarStartsFromDefaultColoursAndRestoresTheApplications(t *testing.T) {
+	bar, _ := newTestBar(t, ModeAuto, "xterm-256color", 80, 24, true, time.Second)
+	bar.SetIdentity("demo", "default")
+	_, _ = bar.Write([]byte("\x1b[42;30mvim"))
+	bar.mu.Lock()
+	style, restore := bar.barStyleLocked()
+	bar.mu.Unlock()
+	if style != "\x1b[0m\x1b[7m" || restore != "\x1b[0m\x1b[42;30m" {
+		t.Fatalf("style = %q restore = %q", style, restore)
 	}
 }

@@ -173,6 +173,9 @@ func (b *Bar) activityLocked() string {
 
 func (b *Bar) barStyleLocked() (style, restore string) {
 	if b.noColor || b.theme == ThemeMono || (b.theme == ThemeTerminal && !b.hasColorOverridesLocked()) || b.appSGROverflow {
+		if !b.appSGROverflow { // reverse video alone takes the application's colours (vim's green mode bar): start from the default ones
+			return "\x1b[0m\x1b[7m", "\x1b[0m" + string(b.appSGR)
+		}
 		restore = "\x1b[27m"
 		if b.appInverse {
 			restore = "\x1b[7m"
