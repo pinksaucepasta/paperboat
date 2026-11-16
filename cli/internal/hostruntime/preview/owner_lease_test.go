@@ -312,3 +312,51 @@ func min(left, right int) int {
 	}
 	return right
 }
+
+// A sleep freezes the CLI and this worker together: the first sweep or heartbeat after the wake must not end the
+// foreground preview the CLI could not heartbeat; a CLI that died while the worker kept running still ends it.
+func TestOwnerSessionLeaseSurvivesASleepOfTheWholeMachine(t *testing.T) {
+	now := time.Date(2026, 11, 16, 12, 0, 0, 0, time.UTC)
+	registry, err := NewRuntimeOwnerSessionRegistry(RuntimeOwnerSessionRegistryConfig{MachineID: "machine_01", RuntimeDone: make(chan struct{}), MaxSessions: 4})
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager, err := NewOwnerSessionLeaseManager(OwnerSessionLeaseManagerConfig{
+		MachineID: "machine_01", ControlToken: "control_secret", Registry: registry, TTL: 15 * time.Second, Now: func() time.Time { return now },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := LeaseTarget{Scheme: "http", Address: "127.0.0.1:3000"}
+	asleep, err := manager.Acquire(OwnerSessionLeaseRequest{Target: target}, "owner_request_sleep")
+	if err != nil {
+		t.Fatal(err)
+	}
+	died, err := manager.Acquire(OwnerSessionLeaseRequest{Target: LeaseTarget{Scheme: "http", Address: "127.0.0.1:3001"}}, "owner_request_died")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tick := func(at time.Time) { // what watchContext's ticker does
+		manager.mu.Lock()
+		manager.sweepLocked(at)
+		manager.lastTick = at
+		manager.mu.Unlock()
+	}
+	tick(now)
+	now = now.Add(15 * time.Minute) // frozen: no tick ran
+	if _, err := manager.Heartbeat(asleep.ID, asleep.Token); err != nil {
+		t.Fatalf("first heartbeat after a 15 min sleep: %v", err)
+	}
+	for range 20 { // the worker runs on; the second CLI never heartbeats again
+		now = now.Add(time.Second)
+		tick(now)
+		if now.Sub(now.Truncate(5*time.Second)) == 0 {
+			if _, err := manager.Heartbeat(asleep.ID, asleep.Token); err != nil {
+				t.Fatalf("heartbeat while awake: %v", err)
+			}
+		}
+	}
+	if _, err := manager.Heartbeat(died.ID, died.Token); !errors.Is(err, ErrOwnerSessionLeaseLost) {
+		t.Fatalf("a CLI silent for 20 s of awake time kept its lease: %v", err)
+	}
+}

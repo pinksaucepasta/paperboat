@@ -88,6 +88,7 @@ type OwnerSessionLeaseManager struct {
 
 	mu          sync.Mutex
 	closed      bool
+	lastTick    time.Time // last sweep of the background ticker; zero without one (tests)
 	leases      map[string]*ownerSessionLeaseEntry
 	idempotency map[string]ownerSessionLeaseReplay
 }
@@ -149,7 +150,7 @@ func NewOwnerSessionLeaseManager(config OwnerSessionLeaseManagerConfig) (*OwnerS
 	return manager, nil
 }
 
-func (m *OwnerSessionLeaseManager) watchContext() {
+func (m *OwnerSessionLeaseManager) sweepInterval() time.Duration {
 	interval := m.ttl / 3
 	if interval < 100*time.Millisecond {
 		interval = 100 * time.Millisecond
@@ -157,15 +158,42 @@ func (m *OwnerSessionLeaseManager) watchContext() {
 	if interval > time.Second {
 		interval = time.Second
 	}
-	ticker := time.NewTicker(interval)
+	return interval
+}
+
+func (m *OwnerSessionLeaseManager) watchContext() {
+	ticker := time.NewTicker(m.sweepInterval())
 	defer ticker.Stop()
+	m.mu.Lock()
+	m.lastTick = m.now().UTC()
+	m.mu.Unlock()
 	for {
 		select {
 		case <-m.done:
 			_ = m.Close()
 			return
 		case <-ticker.C:
-			m.Sweep(m.now())
+			now := m.now().UTC()
+			m.mu.Lock()
+			m.sweepLocked(now)
+			m.lastTick = now
+			m.mu.Unlock()
+		}
+	}
+}
+
+// resumeAfterSuspendLocked keeps foreground leases through a sleep of the machine: when the ticker missed its
+// sweeps (wall clock jumped past 1.5 intervals, as tailscale net/netmon checkWallTimeAdvanceLocked detects
+// sleep), the owner CLIs were frozen too and could not heartbeat, so each gets a fresh TTL to do so.
+func (m *OwnerSessionLeaseManager) resumeAfterSuspendLocked(now time.Time) {
+	if m.lastTick.IsZero() || now.Sub(m.lastTick) <= m.sweepInterval()*3/2 {
+		return
+	}
+	m.lastTick = now
+	for _, entry := range m.leases {
+		if !entry.closed && !entry.lease.Background && entry.lease.ExpiresAt.Before(now.Add(m.ttl)) {
+			entry.lease.ExpiresAt = now.Add(m.ttl)
+			m.handOverLocked(entry)
 		}
 	}
 }
@@ -362,6 +390,7 @@ func (m *OwnerSessionLeaseManager) Sweep(now time.Time) {
 }
 
 func (m *OwnerSessionLeaseManager) sweepLocked(now time.Time) {
+	m.resumeAfterSuspendLocked(now)
 	for leaseID, entry := range m.leases {
 		if entry.lease.Background && !entry.closed {
 			attached, ended := m.registry.MachineOwnerSessionDispatchState(m.machineID, entry.lease.OwnerSessionID)
