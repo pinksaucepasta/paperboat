@@ -86,6 +86,9 @@ func (f *loadConfigFixture) team(enrollment *EnrollmentService, assignments *Con
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := assignments.ConnectRepository(ctx, member, "github", "loadcfg-"+tag, ""); err != nil { // adopting needs the member's own connection to it
+		t.Fatal(err)
+	}
 	if _, err := assignments.SetTeamDefault(ctx, owner, team, repo.ID, 0); err != nil {
 		t.Fatal(err)
 	}
