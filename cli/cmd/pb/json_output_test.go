@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/preview"
 	"github.com/pinksaucepasta/paperboat/shared/supportref"
 	"os"
 	"path/filepath"
@@ -342,5 +343,22 @@ func TestUninstallNamesTheExactHostnameOnAMismatch(t *testing.T) {
 	code := run(context.Background(), []string{"uninstall", "--confirmation", "UNINSTALL PAPERBOAT", "--hostname", strings.ToUpper(hostname) + "x"}, &stdout, &stderr)
 	if code != 2 || !strings.Contains(stderr.String(), "exact hostname: "+hostname) {
 		t.Fatalf("exit=%d stderr=%q", code, stderr.String())
+	}
+}
+
+// F21-168: at the local service's preview cap the failure names that limit with its own code, not "the service did not
+// keep the preview open: it is restarting" (39 of 1,000 creations on staging).
+func TestPreviewSessionLimitIsTypedAndNamed(t *testing.T) {
+	err := previewFailure(ErrPreviewOwnerSessionUnavailable.Error(), ErrPreviewOwnerSessionUnavailable, preview.ErrOwnerSessionLeaseLimit)
+	got := classifyCLIJSONError(err)
+	if got.Code != "preview_session_limit_reached" || got.Category != "conflict" || got.StateChanged != false || got.Recovery == "" {
+		t.Fatalf("classified = %+v", got)
+	}
+	if !strings.Contains(got.Message, "most previews") || strings.Contains(got.Message, "restarting") {
+		t.Fatalf("message = %q", got.Message)
+	}
+	other := classifyCLIJSONError(previewFailure(ErrPreviewOwnerSessionUnavailable.Error(), ErrPreviewOwnerSessionUnavailable, context.DeadlineExceeded))
+	if other.Code == "preview_session_limit_reached" || !strings.Contains(other.Message, "restarting") {
+		t.Fatalf("an unrelated owner-session failure was reported as the limit: %+v", other)
 	}
 }

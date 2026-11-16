@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/preview"
 	"net/http"
 	"os"
 	"os/exec"
@@ -87,6 +88,9 @@ func commandFailureMessage(err error, failure commandFailure) string {
 	}
 	if localDaemonStopped(commandGOOS, err) && failure.kind != commandCanceled && failure.kind != commandInteractiveCanceled {
 		return localDaemonStoppedSummary + " " + localDaemonStoppedRecovery
+	}
+	if boundedErrorWalk(err, func(e error) bool { return e == preview.ErrOwnerSessionLeaseLimit }) {
+		return previewSessionLimitMessage
 	}
 	if boundedErrorWalk(err, func(e error) bool { return e == ErrPreviewOwnerSessionUnavailable }) && failure.kind != commandCanceled && failure.kind != commandInteractiveCanceled {
 		return "The local Paperboat service did not keep the preview open: it did not answer in time or is restarting. Retry; if this continues, run `pb doctor`."
@@ -444,3 +448,7 @@ func nativeLaunchMessage(launch managedssh.NativeLaunchError) string {
 	}
 	return "The native SSH or transfer tool could not start. Check that the required tool is installed and executable, then retry; run `pb ssh doctor` to check SSH setup."
 }
+
+// previewSessionLimitMessage names the limit the local service hit: previews this computer keeps open (the daemon's own
+// cap, separate from the plan limit the server enforces), so a user at the cap is not told the service is restarting.
+const previewSessionLimitMessage = "This computer already keeps the most previews open that its Paperboat service allows. Stop one you no longer need (pb preview stop), then retry."

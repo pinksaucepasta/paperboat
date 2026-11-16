@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/preview"
 	"io"
 	"slices"
 	"strings"
@@ -128,6 +129,10 @@ func classifyCLIJSONFailure(err error, failure commandFailure) cliJSONError {
 	if boundedErrorWalk(err, func(cause error) bool { _, ok := cause.(*computerRemovedError); return ok }) {
 		result.Code, result.Category, result.StateChanged = "computer_removed", "conflict", false
 		result.Recovery = "Run pb login --fresh to add this computer again; it resets the local Paperboat setup (the Inbox is kept)."
+	}
+	if boundedErrorWalk(err, func(cause error) bool { return cause == preview.ErrOwnerSessionLeaseLimit }) {
+		result.Code, result.Category, result.StateChanged = "preview_session_limit_reached", "conflict", false
+		result.Recovery = "Stop a preview you no longer need with pb preview stop, then retry."
 	}
 	if updaterFailure := updaterControlFailure(err); updaterFailure != nil {
 		result = classifyUpdaterControlJSONError(result, updaterFailure)
