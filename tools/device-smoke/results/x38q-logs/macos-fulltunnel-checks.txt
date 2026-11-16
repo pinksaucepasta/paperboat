@@ -1,0 +1,8 @@
+== L>M(pbx38, VPN on) ping
+sample 1: path=direct connect=1708.55ms
+sample 2: path=direct connect=0.11ms
+sample 3: path=direct connect=0.12ms
+summary: sent=3 received=3 loss=0.0% connect min/avg/max=0.11/569.59/1708.55ms
+== L>M exec
+== L>M(mp) unaffected
+ok

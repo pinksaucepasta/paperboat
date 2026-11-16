@@ -1,0 +1,441 @@
+16:51:59 == cmd.ps1
+16:52:05 listener job: Running 
+16:52:05 portal probe: code=302 location=http://portal.example.test/login remote=127.0.0.1
+16:53:15 == doctor with the portal up
+16:53:17 Paperboat doctor: unhealthy
+Correlation: support_8d38b70a-6f2b-4b01-90c9-dccd3713eca9
+authentication: fail: Paperboat authentication is unavailable.
+  Recovery: Check local credential storage and the Paperboat service, then run `pb doctor` again.
+clock: warning: The Paperboat server could not be reached to read its clock.
+  Recovery: Check the connection to Paperboat and run `pb doctor` again.
+daemon: pass: The local daemon is ready.
+local_names: pass: Local browser names resolve to this computer.
+local_state: pass: Local Paperboat state and identity are valid.
+machine_credentials: pass: The Paperboat server accepts this machine's credentials.
+machine_guard_version: pass: The machine guard runs this pb's version.
+peer_paths: pass: No connection to another machine is in use.
+udp_ipv4: pass: IPv4 UDP sockets are available.
+udp_ipv6: pass: IPv6 UDP sockets are available.
+rc=0  
+
+16:54:50 == doctor 20 s after the portal was removed
+16:54:53 Paperboat doctor: unhealthy
+Correlation: support_36272246-3517-49f2-a7b0-1015fda686f4
+authentication: pass: The Paperboat server accepted the current credential.
+clock: pass: This machine's clock matches the Paperboat server's.
+daemon: warning: The local daemon is degraded. Control plane is unavailable.
+  Recovery: Check network access and Paperboat authentication.
+daemon:control_plane_unavailable: fail: Control plane is unavailable
+  Recovery: Check network access and Paperboat authentication
+local_names: pass: Local browser names resolve to this computer.
+local_state: pass: Local Paperboat state and identity are valid.
+machine_credentials: pass: The Paperboat server accepts this machine's credentials.
+machine_guard_version: pass: The machine guard runs this pb's version.
+peer_paths: pass: No connection to another machine is in use.
+udp_ipv4: pass: IPv4 UDP sockets are available.
+udp_ipv6: pass: IPv6 UDP sockets are available.
+rc=0  
+
+16:54:53 == pb exec rx38o-a
+16:54:55 Paperboat ENV not applied: ENV needs Paperboat online or an unlocked vault; delivery to this machine is pending. The command ran without your managed values; run `pb env unlock` on any of your devices, or run it again once `pb status` shows Paperboat is reachable.
+ok
+rc=0  
+
+16:55:16 == cmd.ps1
+16:55:19 recovery probe 1 : Paperboat doctor: healthy
+16:56:22 == cmd.ps1
+16:56:22 remove lockdown
+16:56:40 ===========================================================================
+Interface List
+209...........................WireGuard Tunnel
+205...00 15 5d 23 3e a1 ......Microsoft Hyper-V Network Adapter
+200...........................Software Loopback Interface 1
+===========================================================================
+
+IPv4 Route Table
+===========================================================================
+Active Routes:
+Network Destination        Netmask          Gateway       Interface  Metric
+          0.0.0.0          0.0.0.0       172.27.0.1     172.27.15.19     30
+          0.0.0.0          0.0.0.0         On-link         10.38.0.2      0
+        10.38.0.2  255.255.255.255         On-link         10.38.0.2    256
+        127.0.0.0        255.0.0.0         On-link         127.0.0.1    331
+        127.0.0.1  255.255.255.255         On-link         127.0.0.1    331
+  127.255.255.255  255.255.255.255         On-link         127.0.0.1    331
+       172.27.0.0    255.255.240.0         On-link      172.27.15.19    271
+     172.27.15.19  255.255.255.255         On-link      172.27.15.19    271
+    172.27.15.255  255.255.255.255         On-link      172.27.15.19    271
+        224.0.0.0        240.0.0.0         On-link         127.0.0.1    331
+        224.0.0.0        240.0.0.0         On-link      172.27.15.19    271
+  255.255.255.255  255.255.255.255         On-link         127.0.0.1    331
+  255.255.255.255  255.255.255.255         On-link      172.27.15.19    271
+===========================================================================
+Persistent Routes:
+  None
+
+16:56:41 public IPv4 egress: code=404 remote=157.180.74.88
+16:56:41 default route interface: x38f metric 0
+Ethernet metric 15
+
+16:57:11 == pb doctor (full tunnel)
+16:57:15 Paperboat doctor: healthy
+Correlation: support_0cc898d6-0220-4c56-9b9e-7abeeeeccd73
+authentication: pass: The Paperboat server accepted the current credential.
+clock: pass: This machine's clock matches the Paperboat server's.
+daemon: pass: The local daemon is ready.
+local_names: pass: Local browser names resolve to this computer.
+local_state: pass: Local Paperboat state and identity are valid.
+machine_credentials: pass: The Paperboat server accepts this machine's credentials.
+machine_guard_version: pass: The machine guard runs this pb's version.
+peer_paths: pass: No connection to another machine is in use.
+udp_ipv4: pass: IPv4 UDP sockets are available.
+udp_ipv6: pass: IPv6 UDP sockets are available.
+rc=0  
+
+16:57:15 == pb ping rx38o-a
+16:57:17 sample 1: path=direct connect=435.60ms
+sample 2: path=direct connect=0.00ms
+sample 3: path=direct connect=0.70ms
+summary: sent=3 received=3 loss=0.0% connect min/avg/max=0.70/145.43/435.60ms
+rc=0  
+
+16:57:17 == pb exec rx38o-a
+16:57:20 Paperboat ENV not applied: ENV needs Paperboat online or an unlocked vault; delivery to this machine is pending. The command ran without your managed values; run `pb env unlock` on any of your devices, or run it again once `pb status` shows Paperboat is reachable.
+ok
+rc=0  
+
+16:57:20 long exec W>L started (150 s)
+17:01:36 == cmd.ps1
+17:01:36 long exec W>L: lines=0 last=sh: 0: cannot open /tmp/count150.sh: No such file rc=0  
+17:01:36 == pb ping (path after the rebind)
+17:01:38 sample 1: path=direct connect=101.35ms
+sample 2: path=direct connect=0.99ms
+sample 3: path=direct connect=0.00ms
+summary: sent=3 received=3 loss=0.0% connect min/avg/max=0.00/34.11/101.35ms
+rc=0  
+
+17:01:39 == pb doctor
+17:01:41 Paperboat doctor: healthy
+Correlation: support_80665da8-47bd-4efe-bc26-ebb3ba7a644b
+authentication: pass: The Paperboat server accepted the current credential.
+clock: pass: This machine's clock matches the Paperboat server's.
+daemon: pass: The local daemon is ready.
+local_names: pass: Local browser names resolve to this computer.
+local_state: pass: Local Paperboat state and identity are valid.
+machine_credentials: pass: The Paperboat server accepts this machine's credentials.
+machine_guard_version: pass: The machine guard runs this pb's version.
+peer_paths: pass: Paths: rx38o-a direct.
+udp_ipv4: pass: IPv4 UDP sockets are available.
+udp_ipv6: pass: IPv6 UDP sockets are available.
+rc=0  
+
+17:02:26 == cmd.ps1
+17:02:26 long exec W>L started (150 s)
+17:04:48 == cmd.ps1
+17:04:58 long exec W>L: lines=150 last=150 rc=0  
+17:04:58 == pb ping (path after the rebind)
+17:05:00 sample 1: path=direct connect=0.55ms
+sample 2: path=direct connect=0.00ms
+sample 3: path=direct connect=0.00ms
+summary: sent=3 received=3 loss=0.0% connect min/avg/max=0.00/0.18/0.55ms
+rc=0  
+
+17:05:00 == pb doctor
+17:05:04 Paperboat doctor: healthy
+Correlation: support_1ea615b1-9d2a-4e1b-970a-fd8bcc5d6e36
+authentication: pass: The Paperboat server accepted the current credential.
+clock: pass: This machine's clock matches the Paperboat server's.
+daemon: pass: The local daemon is ready.
+local_names: pass: Local browser names resolve to this computer.
+local_state: pass: Local Paperboat state and identity are valid.
+machine_credentials: pass: The Paperboat server accepts this machine's credentials.
+machine_guard_version: pass: The machine guard runs this pb's version.
+peer_paths: pass: Paths: rx38o-a direct.
+udp_ipv4: pass: IPv4 UDP sockets are available.
+udp_ipv6: pass: IPv6 UDP sockets are available.
+rc=0  
+
+17:05:44 == cmd.ps1
+17:05:44 long exec W>L started (150 s)
+17:08:36 == cmd.ps1
+17:08:36 long exec W>L: lines=150 last=150 rc=0  
+17:08:36 == pb ping (path after the rebind)
+17:08:38 sample 1: path=direct connect=14.50ms
+sample 2: path=direct connect=0.62ms
+sample 3: path=direct connect=0.00ms
+summary: sent=3 received=3 loss=0.0% connect min/avg/max=0.00/5.04/14.50ms
+rc=0  
+
+17:08:38 == pb doctor
+17:08:40 Paperboat doctor: healthy
+Correlation: support_e7fbeb82-c0f9-4e88-a85a-ad452069e09b
+authentication: pass: The Paperboat server accepted the current credential.
+clock: pass: This machine's clock matches the Paperboat server's.
+daemon: pass: The local daemon is ready.
+local_names: pass: Local browser names resolve to this computer.
+local_state: pass: Local Paperboat state and identity are valid.
+machine_credentials: pass: The Paperboat server accepts this machine's credentials.
+machine_guard_version: pass: The machine guard runs this pb's version.
+peer_paths: pass: Paths: rx38o-a direct.
+udp_ipv4: pass: IPv4 UDP sockets are available.
+udp_ipv6: pass: IPv6 UDP sockets are available.
+rc=0  
+
+17:19:40 == cmd.ps1
+17:20:05 ===========================================================================
+Interface List
+209...........................WireGuard Tunnel
+205...00 15 5d 23 3e a1 ......Microsoft Hyper-V Network Adapter
+200...........................Software Loopback Interface 1
+===========================================================================
+
+IPv4 Route Table
+===========================================================================
+Active Routes:
+Network Destination        Netmask          Gateway       Interface  Metric
+        127.0.0.0        255.0.0.0         On-link         127.0.0.1    331
+        127.0.0.1  255.255.255.255         On-link         127.0.0.1    331
+  127.255.255.255  255.255.255.255         On-link         127.0.0.1    331
+      169.254.0.0      255.255.0.0         On-link    169.254.226.66    261
+   169.254.226.66  255.255.255.255         On-link    169.254.226.66    261
+  169.254.255.255  255.255.255.255         On-link    169.254.226.66    261
+       172.27.0.0    255.255.240.0         On-link      172.27.15.19    271
+     172.27.15.19  255.255.255.255         On-link      172.27.15.19    271
+    172.27.15.255  255.255.255.255         On-link      172.27.15.19    271
+   192.168.31.146  255.255.255.255       172.27.0.1     172.27.15.19     16
+        224.0.0.0        240.0.0.0         On-link         127.0.0.1    331
+        224.0.0.0        240.0.0.0         On-link      172.27.15.19    271
+  255.255.255.255  255.255.255.255         On-link         127.0.0.1    331
+  255.255.255.255  255.255.255.255         On-link      172.27.15.19    271
+===========================================================================
+Persistent Routes:
+  None
+
+17:20:05 ping 8.8.8.8:  Pinging 8.8.8.8 with 32 bytes of data: PING: transmit failed. General failure.   Ping statistics for 8.8.8.8:     Packets: Sent = 1, Received = 0, Lost = 1 (100% loss),
+17:20:05 curl -4 api: code=000
+17:20:05 curl -6 api: code=404 remote=64:ff9b::9db4:4a58
+17:20:35 == pb doctor
+17:20:39 Paperboat doctor: healthy
+Correlation: support_83f09a39-7b18-4851-917b-727b7cbd337c
+authentication: pass: The Paperboat server accepted the current credential.
+clock: pass: This machine's clock matches the Paperboat server's.
+daemon: pass: The local daemon is ready.
+local_names: pass: Local browser names resolve to this computer.
+local_state: pass: Local Paperboat state and identity are valid.
+machine_credentials: pass: The Paperboat server accepts this machine's credentials.
+machine_guard_version: pass: The machine guard runs this pb's version.
+peer_paths: pass: No connection to another machine is in use.
+udp_ipv4: pass: IPv4 UDP sockets are available.
+udp_ipv6: pass: IPv6 UDP sockets are available.
+rc=0  
+
+17:32:33 == cmd.ps1
+17:32:33 == pb ping rx38q-m-5
+17:32:36 sample 1: path=direct connect=188.31ms
+sample 2: path=direct connect=0.00ms
+sample 3: path=direct connect=0.00ms
+summary: sent=3 received=3 loss=0.0% connect min/avg/max=0.00/62.77/188.31ms
+rc=0  
+
+17:32:36 == pb exec rx38q-m-5
+17:32:38 Paperboat ENV not applied: ENV needs Paperboat online or an unlocked vault; delivery to this machine is pending. The command ran without your managed values; run `pb env unlock` on any of your devices, or run it again once `pb status` shows Paperboat is reachable.
+Darwin ManagedlMachine.lan 25.6.0 Darwin Kernel Version 25.6.0: Fri Jul 31 19:16:43 PDT 2026; root:xnu-12377.161.14~5/RELEASE_ARM64_VMAPPLE arm64
+rc=0  
+
+17:34:36 == cmd.ps1
+17:34:36 == pb ping rx38q-mp
+17:34:41 sample 1: path=regional_relay connect=1921.99ms
+sample 2: path=regional_relay connect=0.00ms
+sample 3: path=regional_relay connect=0.71ms
+summary: sent=3 received=3 loss=0.0% connect min/avg/max=0.71/640.90/1921.99ms
+rc=0  
+
+17:34:41 == pb exec rx38q-mp
+17:34:43 Paperboat ENV not applied: ENV needs Paperboat online or an unlocked vault; delivery to this machine is pending. The command ran without your managed values; run `pb env unlock` on any of your devices, or run it again once `pb status` shows Paperboat is reachable.
+Darwin sat12-dp150-efb39a09-97f1-4455-93b9-263300ebe628-32C5878A8ECB.local 25.6.0 Darwin Kernel Version 25.6.0: Mon Oct 12 00:39:04 PDT 2026; root:xnu-12377.161.15.701.48~2/RELEASE_ARM64_VMAPPLE arm64
+rc=0  
+
+17:39:35 == cmd.ps1
+17:39:35 == pb ping rx38q-m-5
+17:39:38 sample 1: path=direct connect=188.96ms
+sample 2: path=direct connect=0.80ms
+sample 3: path=direct connect=0.00ms
+summary: sent=3 received=3 loss=0.0% connect min/avg/max=0.00/63.25/188.96ms
+rc=0  
+
+17:39:38 == pb exec rx38q-m-5
+17:39:41 Paperboat ENV not applied: ENV needs Paperboat online or an unlocked vault; delivery to this machine is pending. The command ran without your managed values; run `pb env unlock` on any of your devices, or run it again once `pb status` shows Paperboat is reachable.
+Darwin ManagedlMachine.lan 25.6.0 Darwin Kernel Version 25.6.0: Fri Jul 31 19:16:43 PDT 2026; root:xnu-12377.161.14~5/RELEASE_ARM64_VMAPPLE arm64
+rc=0  
+
+17:52:47 == cmd.ps1
+17:52:48 long exec W>L started (150 s)
+17:55:33 == cmd.ps1
+17:55:34 long exec W>L: lines=150 last=150 rc=0  
+17:55:34 == pb ping (path after the rebind)
+17:55:36 sample 1: path=regional_relay connect=91.44ms
+sample 2: path=regional_relay connect=0.00ms
+sample 3: path=regional_relay connect=0.00ms
+summary: sent=3 received=3 loss=0.0% connect min/avg/max=0.00/30.48/91.44ms
+rc=0  
+
+17:55:36 == pb doctor
+17:55:38 Paperboat doctor: healthy
+Correlation: support_08318aa5-b2db-40f0-bf65-aa29bce7e34a
+authentication: pass: The Paperboat server accepted the current credential.
+clock: pass: This machine's clock matches the Paperboat server's.
+daemon: pass: The local daemon is ready.
+local_names: pass: Local browser names resolve to this computer.
+local_state: pass: Local Paperboat state and identity are valid.
+machine_credentials: pass: The Paperboat server accepts this machine's credentials.
+machine_guard_version: pass: The machine guard runs this pb's version.
+peer_paths: pass: Paths: rx38o-a relay.
+udp_ipv4: pass: IPv4 UDP sockets are available.
+udp_ipv6: pass: IPv6 UDP sockets are available.
+rc=0  
+
+17:58:42 == cmd.ps1
+17:59:10 ===========================================================================
+Interface List
+209...........................WireGuard Tunnel
+205...00 15 5d 23 3e a1 ......Microsoft Hyper-V Network Adapter
+200...........................Software Loopback Interface 1
+===========================================================================
+
+IPv4 Route Table
+===========================================================================
+Active Routes:
+Network Destination        Netmask          Gateway       Interface  Metric
+          0.0.0.0          0.0.0.0       172.27.0.1     172.27.15.19     30
+        127.0.0.0        255.0.0.0         On-link         127.0.0.1    331
+        127.0.0.1  255.255.255.255         On-link         127.0.0.1    331
+  127.255.255.255  255.255.255.255         On-link         127.0.0.1    331
+      169.254.0.0      255.255.0.0         On-link    169.254.226.66    261
+   169.254.226.66  255.255.255.255         On-link    169.254.226.66    261
+  169.254.255.255  255.255.255.255         On-link    169.254.226.66    261
+       172.27.0.0    255.255.240.0         On-link      172.27.15.19    271
+     172.27.15.19  255.255.255.255         On-link      172.27.15.19    271
+    172.27.15.255  255.255.255.255         On-link      172.27.15.19    271
+        224.0.0.0        240.0.0.0         On-link         127.0.0.1    331
+        224.0.0.0        240.0.0.0         On-link      172.27.15.19    271
+  255.255.255.255  255.255.255.255         On-link         127.0.0.1    331
+  255.255.255.255  255.255.255.255         On-link      172.27.15.19    271
+===========================================================================
+Persistent Routes:
+  None
+
+17:59:10 curl -4 api: code=404
+17:59:11 curl -6 api: code=404 remote=64:ff9b::9db4:4a58
+17:59:11 == dual-stack pb doctor
+17:59:13 Paperboat doctor: healthy
+Correlation: support_1bab078e-0be9-491f-a5cc-68db34474a8c
+authentication: pass: The Paperboat server accepted the current credential.
+clock: pass: This machine's clock matches the Paperboat server's.
+daemon: pass: The local daemon is ready.
+local_names: pass: Local browser names resolve to this computer.
+local_state: pass: Local Paperboat state and identity are valid.
+machine_credentials: pass: The Paperboat server accepts this machine's credentials.
+machine_guard_version: pass: The machine guard runs this pb's version.
+peer_paths: pass: No connection to another machine is in use.
+udp_ipv4: pass: IPv4 UDP sockets are available.
+udp_ipv6: pass: IPv6 UDP sockets are available.
+rc=0  
+
+17:59:13 == pb ping rx38o-a
+17:59:15 sample 1: path=regional_relay connect=147.61ms
+sample 2: path=regional_relay connect=0.00ms
+sample 3: path=regional_relay connect=0.00ms
+summary: sent=3 received=3 loss=0.0% connect min/avg/max=0.00/49.20/147.61ms
+rc=0  
+
+17:59:15 == pb exec rx38o-a
+17:59:18 Paperboat ENV not applied: ENV needs Paperboat online or an unlocked vault; delivery to this machine is pending. The command ran without your managed values; run `pb env unlock` on any of your devices, or run it again once `pb status` shows Paperboat is reachable.
+Linux 7fa27940ed29 6.8.0-147-generic #147-Ubuntu SMP PREEMPT_DYNAMIC Thu Sep 24 11:33:16 UTC 2026 x86_64 x86_64 x86_64 GNU/Linux
+rc=0  
+
+17:59:18 == pb ping rx38q-mp
+17:59:21 sample 1: path=direct connect=820.35ms
+sample 2: path=direct connect=0.00ms
+sample 3: path=direct connect=0.00ms
+summary: sent=3 received=3 loss=0.0% connect min/avg/max=0.00/273.45/820.35ms
+rc=0  
+
+17:59:21 == pb exec rx38q-mp
+17:59:23 Paperboat ENV not applied: ENV needs Paperboat online or an unlocked vault; delivery to this machine is pending. The command ran without your managed values; run `pb env unlock` on any of your devices, or run it again once `pb status` shows Paperboat is reachable.
+Darwin sat12-dp150-efb39a09-97f1-4455-93b9-263300ebe628-32C5878A8ECB.local 25.6.0 Darwin Kernel Version 25.6.0: Mon Oct 12 00:39:04 PDT 2026; root:xnu-12377.161.15.701.48~2/RELEASE_ARM64_VMAPPLE arm64
+rc=0  
+
+17:59:23 == pb ping rx38q-m-5
+17:59:27 sample 1: path=direct connect=1603.07ms
+sample 2: path=direct connect=0.00ms
+sample 3: path=direct connect=0.00ms
+summary: sent=3 received=3 loss=0.0% connect min/avg/max=0.00/534.36/1603.07ms
+rc=0  
+
+17:59:27 == pb exec rx38q-m-5
+17:59:29 Paperboat ENV not applied: ENV needs Paperboat online or an unlocked vault; delivery to this machine is pending. The command ran without your managed values; run `pb env unlock` on any of your devices, or run it again once `pb status` shows Paperboat is reachable.
+Darwin ManagedlMachine.lan 25.6.0 Darwin Kernel Version 25.6.0: Fri Jul 31 19:16:43 PDT 2026; root:xnu-12377.161.14~5/RELEASE_ARM64_VMAPPLE arm64
+rc=0  
+
+17:59:29 == dead WinHTTP proxy
+18:00:17 Paperboat doctor: unhealthy
+Correlation: support_03f362c8-0607-4006-a546-112f02b3f7a6
+authentication: fail: The Paperboat server is unreachable through the configured proxy.
+  Recovery: The configured proxy did not accept the connection. Start it, or remove HTTPS_PROXY (PAPERBOAT_HTTPS_PROXY for a managed service) and the system proxy setting, then retry `pb doctor`.
+clock: pass: This machine's clock matches the Paperboat server's.
+daemon: warning: The local daemon is degraded. Control plane is unavailable: the configured proxy did not accept the connection.
+  Recovery: Start the proxy, or remove PAPERBOAT_HTTPS_PROXY (service environment) and the system proxy setting, then restart the daemon.
+daemon:control_plane_unavailable: fail: Control plane is unavailable: the configured proxy did not accept the connection
+  Recovery: Start the proxy, or remove PAPERBOAT_HTTPS_PROXY (service environment) and the system proxy setting, then restart the daemon
+local_names: pass: Local browser names resolve to this computer.
+local_state: pass: Local Paperboat state and identity are valid.
+machine_credentials: pass: The Paperboat server accepts this machine's credentials.
+machine_guard_version: pass: The machine guard runs this pb's version.
+peer_paths: pass: Paths: rx38q-m-5 direct.
+udp_ipv4: pass: IPv4 UDP sockets are available.
+udp_ipv6: pass: IPv6 UDP sockets are available.
+rc=0  
+
+18:00:17 == proxy reset
+18:01:19 Paperboat doctor: healthy
+Correlation: support_4998e26f-f0b0-4d70-a682-5b9e7ad102d9
+authentication: pass: The Paperboat server accepted the current credential.
+clock: pass: This machine's clock matches the Paperboat server's.
+daemon: pass: The local daemon is ready.
+local_names: pass: Local browser names resolve to this computer.
+local_state: pass: Local Paperboat state and identity are valid.
+machine_credentials: pass: The Paperboat server accepts this machine's credentials.
+machine_guard_version: pass: The machine guard runs this pb's version.
+peer_paths: pass: No connection to another machine is in use.
+udp_ipv4: pass: IPv4 UDP sockets are available.
+udp_ipv6: pass: IPv6 UDP sockets are available.
+rc=0  
+
+18:09:36 == cmd.ps1
+18:09:37 == pb install (upgrade in place to the fix build)
+18:10:26 Still working on the administrator step (30s)...
+{"schema_version":"1.0","ok":false,"error":{"code":"operation_failed","category":"local_io","message":"Paperboat could not finish: Windows installation failed while installing runtime services. Check the current state before retrying; run `pb doctor` if this continues.","retryable":false,"state_changed":"unknown","outcome_uncertain":false,"support_reference":"support_989a27e5-0733-4183-b631-eed7d58d4d48"}}
+rc=0  
+
+18:10:46 == pb version
+18:10:49       â–„â–ˆâ–„       Paperboat
+  â–„â–„â–â–€â–€â–€â–€â–€â–˜â–„â–„   Version dev-c6d670f93
+   â–€â–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–€
+rc=0  
+
+18:10:49 == pb doctor
+18:10:53 Paperboat doctor: degraded
+Correlation: support_f794cd5c-0369-458c-b522-946e3134a106
+authentication: pass: The Paperboat server accepted the current credential.
+clock: pass: This machine's clock matches the Paperboat server's.
+daemon: pass: The local daemon is ready.
+local_names: pass: Local browser names resolve to this computer.
+local_state: pass: Local Paperboat state and identity are valid.
+machine_credentials: pass: The Paperboat server accepts this machine's credentials.
+machine_guard_version: warning: The machine guard runs dev-87d7a5241, pb is dev-c6d670f93.
+  Recovery: Run `pb install` again to install the matching machine guard, then run `pb doctor` again.
+peer_paths: pass: No connection to another machine is in use.
+udp_ipv4: pass: IPv4 UDP sockets are available.
+udp_ipv6: pass: IPv6 UDP sockets are available.
+rc=0  
+

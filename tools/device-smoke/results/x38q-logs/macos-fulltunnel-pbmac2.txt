@@ -1,0 +1,20 @@
+== before:     gateway: 192.168.31.1   interface: en0 
+[#] route -q -n add -inet 0.0.0.0/1 -interface utun4
+[#] route -q -n add -inet 128.0.0.0/1 -interface utun4
+[#] route -q -n add -inet 192.168.31.146 -gateway 192.168.31.1
+[+] Backgrounding route monitor
+== routes after:
+Routing tables
+
+Internet:
+Destination        Gateway            Flags               Netif Expire
+0/1                utun4              UScg                utun4       
+default            192.168.31.1       UGScg                 en0       
+10.38.0.3          10.38.0.3          UH                  utun4       
+127                127.0.0.1          UCS                   lo0       
+127.0.0.1          127.0.0.1          UH                    lo0       
+== default:     gateway: 192.168.31.1   interface: en0 
+== egress: code=404 remote=157.180.74.88
+[#] rm -f /var/run/wireguard/utun4.sock
+[#] rm -f /var/run/wireguard/x38m.name
+== after down:     gateway: 192.168.31.1   interface: en0 

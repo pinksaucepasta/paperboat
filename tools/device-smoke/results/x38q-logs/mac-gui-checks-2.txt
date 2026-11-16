@@ -1,0 +1,13 @@
+== mp>L ping
+sample 1: path=regional_relay connect=1346.45ms
+sample 2: path=regional_relay connect=0.09ms
+sample 3: path=regional_relay connect=0.09ms
+summary: sent=3 received=3 loss=0.0% connect min/avg/max=0.09/448.88/1346.45ms
+== mp>L exec
+ok
+== mp>W exec again
+ok
+== doctor
+Paperboat doctor: healthy
+Correlation: support_113d61b8-ab33-45e4-9f42-2334bf682eb8
+authentication: pass: The Paperboat server accepted the current credential.

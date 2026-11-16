@@ -1,0 +1,16 @@
+== L>W path before: sample 1: path=direct connect=11.04ms sample 2: path=direct connect=0.06ms 
+== conntrack before rebind:
+udp      17 104 src=10.38.0.2 dst=49.36.124.90 sport=64218 dport=38518 src=49.36.124.90 dst=192.168.31.146 sport=38518 dport=43426 [ASSURED] mark=0 use=1
+udp      17 118 src=10.38.0.2 dst=152.67.0.60 sport=54865 dport=27446 src=152.67.0.60 dst=192.168.31.146 sport=27446 dport=43790 [ASSURED] mark=0 use=1
+udp      17 4 src=10.38.0.2 dst=1.1.1.1 sport=55279 dport=53 src=1.1.1.1 dst=192.168.31.146 sport=53 dport=43514 mark=0 use=1
+udp      17 118 src=10.38.0.2 dst=140.245.11.41 sport=50394 dport=27446 src=140.245.11.41 dst=192.168.31.146 sport=27446 dport=43866 [ASSURED] mark=0 use=1
+== rebind at 17:06:09: udp      17 100 src=10.38.0.2 dst=140.245.11.41 sport=41642 dport=27445 src=140.245.11.41 dst=192.168.31.146 sport=27445 dport=43659 [ASSURED] mark=0 use=1
+== conntrack after rebind:
+udp      17 21 src=10.38.0.2 dst=49.36.124.90 sport=41642 dport=43426 [UNREPLIED] src=49.36.124.90 dst=192.168.31.146 sport=43426 dport=44464 mark=0 use=1
+udp      17 24 src=10.38.0.2 dst=49.36.124.90 sport=64218 dport=42755 [UNREPLIED] src=49.36.124.90 dst=192.168.31.146 sport=42755 dport=44250 mark=0 use=1
+udp      17 19 src=10.38.0.2 dst=152.67.0.60 sport=54865 dport=27446 src=152.67.0.60 dst=192.168.31.146 sport=27446 dport=44064 mark=0 use=1
+udp      17 119 src=10.38.0.2 dst=1.1.1.1 sport=55279 dport=53 src=1.1.1.1 dst=192.168.31.146 sport=53 dport=44929 [ASSURED] mark=0 use=1
+== L>W path at +12s: sample 1: path=direct connect=0.06ms sample 2: path=direct connect=0.06ms 
+== L>W path at +40s: sample 1: path=direct connect=0.22ms sample 2: path=direct connect=0.51ms 
+== L>W path at +70s: sample 1: path=direct connect=0.19ms sample 2: path=direct connect=0.08ms 
+== L>W long exec: lines=0 last= rc=0
