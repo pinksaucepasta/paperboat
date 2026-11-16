@@ -1,5 +1,6 @@
 import { afterEach, beforeAll, beforeEach, expect, test } from "bun:test"
 import { createHash } from "node:crypto"
+import { sampleFor } from "@/lib/api-sample"
 import { lockVault, vaultUnlocked } from "@/lib/envvault/crypto"
 import { createTeamVault, resetVault, rotatePersonalKey } from "@/lib/envvault/manage"
 import { fixture, loadVaultWasm, WasmWorker } from "@/lib/envvault/testkit"
@@ -37,26 +38,26 @@ beforeEach(() => {
     calls.push(`${method} ${url.pathname}`)
     const body = typeof init?.body === "string" ? JSON.parse(init.body) : undefined
     const ok = (data: unknown) => Response.json({ data })
-    if (url.pathname === "/api/v1/me") return ok({ id: account })
+    if (url.pathname === "/api/v1/me") return ok(sampleFor("GET /v1/me", { id: account }))
     if (url.pathname === "/api/v1/environment-vault") return ok(stored)
     if (url.pathname === "/api/v1/environment/scopes") return ok({ rotation_required: false, key_epoch: 1, scopes: [] })
-    if (url.pathname === "/api/v1/environment/teams/acme" && method === "GET")
-      return ok({
-        team_id: "acme",
-        owner_account: account,
-        generation: 1,
-        key_epoch: 0,
-        members: [
-          { account_id: account, membership_generation: 1, role: "owner", active: true, grant_epoch: 0, env_permission: "write" },
-        ],
-        scope: {},
-        rotation_required: false,
-        entitled: true,
-        record_sequence: 0,
-      })
+    const team = {
+      ...sampleFor("GET /v1/environment/teams/{team_id}"),
+      team_id: "acme",
+      owner_account: account,
+      generation: 1,
+      key_epoch: 0,
+      members: [
+        { account_id: account, membership_generation: 1, role: "owner", active: true, grant_epoch: 0, env_permission: "write" },
+      ],
+      rotation_required: false,
+      entitled: true,
+      record_sequence: 0,
+    }
+    if (url.pathname === "/api/v1/environment/teams/acme" && method === "GET") return ok(team)
     if (method === "POST" && /\/(reset|rotate-personal|teams)$/.test(url.pathname)) {
       keep(body.vault_envelope ?? body.envelope)
-      return ok({})
+      return ok(url.pathname.endsWith("/teams") ? team : stored)
     }
     return new Response(null, { status: 404 })
   }) as typeof fetch
