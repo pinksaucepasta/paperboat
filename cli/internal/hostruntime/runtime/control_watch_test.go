@@ -13,6 +13,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/controlbackoff"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/envinject"
+	runtimeidentity "github.com/pinksaucepasta/paperboat/internal/hostruntime/identity"
 )
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
@@ -73,4 +74,9 @@ func TestLayerEnvironmentDoesNotWaitOnAControlPlaneKnownDown(t *testing.T) {
 	if err == nil || calls != 0 || envinject.LaunchNoticeFor(err) != envinject.LaunchNoticeOffline {
 		t.Fatalf("ENV lookup waited on a known outage: calls=%d err=%v notice=%q", calls, err, envinject.LaunchNoticeFor(err))
 	}
+}
+
+func layerRegistration(t *testing.T) runtimeidentity.Registration {
+	t.Helper()
+	return runtimeidentity.Registration{MachineID: "machine_1", InstallationGeneration: 11}
 }

@@ -347,11 +347,6 @@ func (c *layerTestCredentials) snapshot() (operation, method, path string, body 
 	return c.operation, c.method, c.path, bytes.Clone(c.body), c.calls
 }
 
-func layerRegistration(t *testing.T) runtimeidentity.Registration {
-	t.Helper()
-	return runtimeidentity.Registration{MachineID: "machine_1", InstallationGeneration: 11}
-}
-
 func layerServiceURL(t *testing.T, raw string) *url.URL {
 	t.Helper()
 	parsed, err := url.Parse(raw)
