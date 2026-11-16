@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/command"
 	"github.com/pinksaucepasta/paperboat/internal/config"
 	"github.com/pinksaucepasta/paperboat/internal/recipekey"
@@ -137,5 +138,22 @@ func TestHostMachineNameKeepsTheFirstLabel(t *testing.T) {
 		if got := hostMachineName(host); got != want {
 			t.Fatalf("%q -> %q, want %q", host, got, want)
 		}
+	}
+}
+
+// A rotated token is refused with 401 recipe_replaced: pb pair says the token was replaced and which
+// recipe to rotate, not that a session must log in again (F26-07 device check, victus).
+func TestRecipePairNamesAReplacedToken(t *testing.T) {
+	token, _ := recipe.NewToken("")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"ok":false,"error":{"code":"recipe_replaced","message":"x","details":{"recipe":"ci","at":"2026-11-16T10:00:00Z"}}}`))
+	}))
+	defer srv.Close()
+	_, err := api.StartRecipeSession(context.Background(), srv.URL, token, "l", "cli", "linux", srv.Client())
+	got := commandFailureMessage(err, classifyCommandFailure(err))
+	if !strings.Contains(got, "token was replaced") || !strings.Contains(got, "pb recipe rotate ci") {
+		t.Fatalf("message = %q", got)
 	}
 }

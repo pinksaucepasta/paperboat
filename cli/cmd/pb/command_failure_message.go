@@ -263,7 +263,8 @@ func typedCommandOwnerMessage(owner error, failure commandFailure) string {
 		if owner.Status == http.StatusUpgradeRequired && owner.Code == "update_required" {
 			return owner.Error()
 		}
-		if owner.Status == http.StatusUnauthorized {
+		// A refused recipe token names why (replaced, expired, revoked), not a session to log in again.
+		if owner.Status == http.StatusUnauthorized && !strings.HasPrefix(owner.Code, "recipe_") {
 			return "Your Paperboat session is no longer valid. " + dashboardEnrollmentGuidance + " Then retry."
 		}
 		message := friendlyAPIError(owner)

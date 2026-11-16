@@ -90,7 +90,7 @@ func publicCallOptions(hc *http.Client) clientapi.CallOptions {
 				versionErr := &ErrIncompatibleVersion{Required: safeRequiredProtocol(required), Message: apiErrorMessage("incompatible_client_version", resp.StatusCode)}
 				return &clientapi.CallFailure{Message: versionErr.Error(), Err: errors.Join(versionErr, cause)}
 			}
-			return &APIError{Status: resp.StatusCode, Code: env.Error.Code, Message: apiErrorMessage(env.Error.Code, resp.StatusCode), ServerMessage: BoundedServerMessage(env.Error.Message), RequestID: responseRequestID(resp.Header), SupportReference: responseOrRequestSupportReference(resp.Header, env.Error.SupportReference, requestSupportReference), Details: env.Error.Details, cause: cause}
+			return &APIError{Status: resp.StatusCode, Code: env.Error.Code, Message: apiErrorMessageFor(env.Error.Code, resp.StatusCode, env.Error.Details), ServerMessage: BoundedServerMessage(env.Error.Message), RequestID: responseRequestID(resp.Header), SupportReference: responseOrRequestSupportReference(resp.Header, env.Error.SupportReference, requestSupportReference), Details: env.Error.Details, cause: cause}
 		},
 	}
 	return options
