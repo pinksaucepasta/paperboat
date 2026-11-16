@@ -1,0 +1,70 @@
+{
+ "check": "xplat-envteam",
+ "devices": [
+  "L",
+  "M",
+  "W"
+ ],
+ "results": [
+  {
+   "id": "X-12:team-deliver:L>M",
+   "status": "PASS",
+   "detail": "the team value reaches envrerun-t-m for a team launch run by the owner on envrerun-t-l"
+  },
+  {
+   "id": "X-12:team-deliver:L>W",
+   "status": "PASS",
+   "detail": "the team value reaches envrerun-t-w for a team launch run by the owner on envrerun-t-l"
+  },
+  {
+   "id": "X-12:team-deliver:M>L",
+   "status": "PASS",
+   "detail": "the team value reaches envrerun-t-l for a team launch run by the owner on envrerun-t-m"
+  },
+  {
+   "id": "X-12:team-deliver:M>W",
+   "status": "PASS",
+   "detail": "the team value reaches envrerun-t-w for a team launch run by the owner on envrerun-t-m"
+  },
+  {
+   "id": "X-12:team-deliver:W>L",
+   "status": "PASS",
+   "detail": "the team value reaches envrerun-t-l for a team launch run by the owner on envrerun-t-w"
+  },
+  {
+   "id": "X-12:team-deliver:W>M",
+   "status": "PASS",
+   "detail": "the team value reaches envrerun-t-m for a team launch run by the owner on envrerun-t-w"
+  },
+  {
+   "id": "X-12:team-deliver:member>L",
+   "status": "PASS",
+   "detail": "the team value reaches envrerun-t-l for the granted member (Linux machine of another account)"
+  },
+  {
+   "id": "X-12:team-deliver:member>M",
+   "status": "PASS",
+   "detail": "the team value reaches envrerun-t-m for the granted member (Linux machine of another account)"
+  },
+  {
+   "id": "X-12:team-deliver:member>W",
+   "status": "PASS",
+   "detail": "the team value reaches envrerun-t-w for the granted member (Linux machine of another account)"
+  },
+  {
+   "id": "X-12:team-revoke:L",
+   "status": "PASS",
+   "detail": "after revoke the member gets nothing on envrerun-t-l (rc=1: pb: You do not have permission to perform this action. Check the selected accoun); the owner still gets the value"
+  },
+  {
+   "id": "X-12:team-revoke:M",
+   "status": "PASS",
+   "detail": "after revoke the member gets nothing on envrerun-t-m (rc=1: pb: You do not have permission to perform this action. Check the selected accoun); the owner still gets the value"
+  },
+  {
+   "id": "X-12:team-revoke:W",
+   "status": "PASS",
+   "detail": "after revoke the member gets nothing on envrerun-t-w (rc=1: pb: You do not have permission to perform this action. Check the selected accoun); the owner still gets the value"
+  }
+ ]
+}
