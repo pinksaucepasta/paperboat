@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 	"unsafe"
 
 	"github.com/pinksaucepasta/paperboat/internal/windowssecurity"
@@ -118,12 +119,29 @@ func Write(path string, data []byte, options Options) (resultErr error) {
 	if err != nil {
 		return &Error{Stage: StageReplace, Path: path, Err: err}
 	}
-	if err := windows.MoveFileEx(from, to, windows.MOVEFILE_REPLACE_EXISTING|windows.MOVEFILE_WRITE_THROUGH); err != nil {
+	if err := replaceRetrying(from, to); err != nil {
 		return &Error{Stage: StageReplace, Path: path, Err: err}
 	}
 	published = true
 	return nil
 }
+
+// replaceRetrying survives a reader (a scanner, an indexer, another pb process) holding the destination for a moment:
+// Windows reports that as access denied or a sharing violation. Same bound as the other Windows file replacements
+// (updated/activation_windows.go retryWindowsFileOperation, machineguard/server_windows.go).
+func replaceRetrying(from, to *uint16) error {
+	deadline := time.Now().Add(replaceRetryBudget)
+	for {
+		err := windows.MoveFileEx(from, to, windows.MOVEFILE_REPLACE_EXISTING|windows.MOVEFILE_WRITE_THROUGH)
+		busy := errors.Is(err, windows.ERROR_ACCESS_DENIED) || errors.Is(err, windows.ERROR_SHARING_VIOLATION) || errors.Is(err, windows.ERROR_LOCK_VIOLATION)
+		if err == nil || !busy || time.Now().After(deadline) {
+			return err
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
+const replaceRetryBudget = 5 * time.Second
 
 func createProtectedTemporary(parent, descriptor string) (*os.File, string, error) {
 	finalDescriptor, err := windows.SecurityDescriptorFromString(descriptor)

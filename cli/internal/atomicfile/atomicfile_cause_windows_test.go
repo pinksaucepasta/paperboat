@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"syscall"
 	"testing"
+	"time"
 )
 
 type atomicPrivateError struct{}
@@ -122,5 +123,34 @@ func TestWindowsAtomicNativeHandleProbeFailureAndRecovery(t *testing.T) {
 	var empty *Error
 	if empty.Unwrap() != nil || empty.Error() != "atomic file write failed" {
 		t.Fatal("nil atomic error unsafe")
+	}
+}
+
+// X-41: a reset right after a revoke failed with "atomic file write failed: Access is denied" because another process held
+// the destination for a moment; the replacement now waits for the reader instead of failing the whole install commit.
+func TestWindowsAtomicReplacementWaitsForABriefReader(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "private-destination.json")
+	options := Options{Mode: 0o600, OwnerUID: -1, OwnerGID: -1}
+	if err := Write(path, []byte("original"), options); err != nil {
+		t.Fatal("initial protected write failed")
+	}
+	nativePath, err := windows.UTF16PtrFromString(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handle, err := windows.CreateFile(nativePath, windows.GENERIC_READ, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE, nil, windows.OPEN_EXISTING, windows.FILE_ATTRIBUTE_NORMAL, 0)
+	if err != nil {
+		t.Fatal("fixture could not hold destination")
+	}
+	go func() {
+		time.Sleep(400 * time.Millisecond)
+		windows.CloseHandle(handle)
+	}()
+	if err := Write(path, []byte("replacement"), options); err != nil {
+		t.Fatalf("replacement did not wait for the reader: %v", errors.Unwrap(err))
+	}
+	if contents, readErr := os.ReadFile(path); readErr != nil || string(contents) != "replacement" {
+		t.Fatal("destination not replaced")
 	}
 }
