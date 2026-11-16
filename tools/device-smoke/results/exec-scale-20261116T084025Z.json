@@ -1,0 +1,208 @@
+{
+ "check": "exec-scale",
+ "client": "rf166p-a",
+ "target": "rf166p-b",
+ "count": 32,
+ "sleep_s": 20,
+ "budget_s": 30.0,
+ "fastest_s": 27.01,
+ "median_s": 27.55,
+ "slowest_s": 28.07,
+ "failed": [],
+ "over_budget": 0,
+ "status": "PASS",
+ "rows": [
+  {
+   "i": 0,
+   "seconds": 27.23,
+   "rc": 0,
+   "tail": "pending. The command ran without your managed values; run `pb env unlock` on any of your devices, or run it again once `pb status` shows Paperboat is reachable."
+  },
+  {
+   "i": 1,
+   "seconds": 27.6,
+   "rc": 0,
+   "tail": "pending. The command ran without your managed values; run `pb env unlock` on any of your devices, or run it again once `pb status` shows Paperboat is reachable."
+  },
+  {
+   "i": 2,
+   "seconds": 27.2,
+   "rc": 0,
+   "tail": "pending. The command ran without your managed values; run `pb env unlock` on any of your devices, or run it again once `pb status` shows Paperboat is reachable."
+  },
+  {
+   "i": 3,
+   "seconds": 27.91,
+   "rc": 0,
+   "tail": "pending. The command ran without your managed values; run `pb env unlock` on any of your devices, or run it again once `pb status` shows Paperboat is reachable."
+  },
+  {
+   "i": 4,
+   "seconds": 27.28,
+   "rc": 0,
+   "tail": "pending. The command ran without your managed values; run `pb env unlock` on any of your devices, or run it again once `pb status` shows Paperboat is reachable."
+  },
+  {
+   "i": 5,
+   "seconds": 27.88,
+   "rc": 0,
+   "tail": "pending. The command ran without your managed values; run `pb env unlock` on any of your devices, or run it again once `pb status` shows Paperboat is reachable."
+  },
+  {
+   "i": 6,
+   "seconds": 27.22,
+   "rc": 0,
+   "tail": "pending. The command ran without your managed values; run `pb env unlock` on any of your devices, or run it again once `pb status` shows Paperboat is reachable."
+  },
+  {
+   "i": 7,
+   "seconds": 27.04,
+   "rc": 0,
+   "tail": "pending. The command ran without your managed values; run `pb env unlock` on any of your devices, or run it again once `pb status` shows Paperboat is reachable."
+  },
+  {
+   "i": 8,
+   "seconds": 27.25,
+   "rc": 0,
+   "tail": "pending. The command ran without your managed values; run `pb env unlock` on any of your devices, or run it again once `pb status` shows Paperboat is reachable."
+  },
+  {
+   "i": 9,
+   "seconds": 27.93,
+   "rc": 0,
+   "tail": "pending. The command ran without your managed values; run `pb env unlock` on any of your devices, or run it again once `pb status` shows Paperboat is reachable."
+  },
+  {
+   "i": 10,
+   "seconds": 27.59,
+   "rc": 0,
+   "tail": "pending. The command ran without your managed values; run `pb env unlock` on any of your devices, or run it again once `pb status` shows Paperboat is reachable."
+  },
+  {
+   "i": 11,
+   "seconds": 27.63,
+   "rc": 0,
+   "tail": "pending. The command ran without your managed values; run `pb env unlock` on any of your devices, or run it again once `pb status` shows Paperboat is reachable."
+  },
+  {
+   "i": 12,
+   "seconds": 27.28,
+   "rc": 0,
+   "tail": "pending. The command ran without your managed values; run `pb env unlock` on any of your devices, or run it again once `pb status` shows Paperboat is reachable."
+  },
+  {
+   "i": 13,
+   "seconds": 27.62,
+   "rc": 0,
+   "tail": "pending. The command ran without your managed values; run `pb env unlock` on any of your devices, or run it again once `pb status` shows Paperboat is reachable."
+  },
+  {
+   "i": 14,
+   "seconds": 27.01,
+   "rc": 0,
+   "tail": "pending. The command ran without your managed values; run `pb env unlock` on any of your devices, or run it again once `pb status` shows Paperboat is reachable."
+  },
+  {
+   "i": 15,
+   "seconds": 27.58,
+   "rc": 0,
+   "tail": "pending. The command ran without your managed values; run `pb env unlock` on any of your devices, or run it again once `pb status` shows Paperboat is reachable."
+  },
+  {
+   "i": 16,
+   "seconds": 27.51,
+   "rc": 0,
+   "tail": "pending. The command ran without your managed values; run `pb env unlock` on any of your devices, or run it again once `pb status` shows Paperboat is reachable."
+  },
+  {
+   "i": 17,
+   "seconds": 27.47,
+   "rc": 0,
+   "tail": "pending. The command ran without your managed values; run `pb env unlock` on any of your devices, or run it again once `pb status` shows Paperboat is reachable."
+  },
+  {
+   "i": 18,
+   "seconds": 27.86,
+   "rc": 0,
+   "tail": "pending. The command ran without your managed values; run `pb env unlock` on any of your devices, or run it again once `pb status` shows Paperboat is reachable."
+  },
+  {
+   "i": 19,
+   "seconds": 27.55,
+   "rc": 0,
+   "tail": "pending. The command ran without your managed values; run `pb env unlock` on any of your devices, or run it again once `pb status` shows Paperboat is reachable."
+  },
+  {
+   "i": 20,
+   "seconds": 27.43,
+   "rc": 0,
+   "tail": "pending. The command ran without your managed values; run `pb env unlock` on any of your devices, or run it again once `pb status` shows Paperboat is reachable."
+  },
+  {
+   "i": 21,
+   "seconds": 27.53,
+   "rc": 0,
+   "tail": "pending. The command ran without your managed values; run `pb env unlock` on any of your devices, or run it again once `pb status` shows Paperboat is reachable."
+  },
+  {
+   "i": 22,
+   "seconds": 27.15,
+   "rc": 0,
+   "tail": "pending. The command ran without your managed values; run `pb env unlock` on any of your devices, or run it again once `pb status` shows Paperboat is reachable."
+  },
+  {
+   "i": 23,
+   "seconds": 27.56,
+   "rc": 0,
+   "tail": "pending. The command ran without your managed values; run `pb env unlock` on any of your devices, or run it again once `pb status` shows Paperboat is reachable."
+  },
+  {
+   "i": 24,
+   "seconds": 27.03,
+   "rc": 0,
+   "tail": "pending. The command ran without your managed values; run `pb env unlock` on any of your devices, or run it again once `pb status` shows Paperboat is reachable."
+  },
+  {
+   "i": 25,
+   "seconds": 28.07,
+   "rc": 0,
+   "tail": "pending. The command ran without your managed values; run `pb env unlock` on any of your devices, or run it again once `pb status` shows Paperboat is reachable."
+  },
+  {
+   "i": 26,
+   "seconds": 27.82,
+   "rc": 0,
+   "tail": "pending. The command ran without your managed values; run `pb env unlock` on any of your devices, or run it again once `pb status` shows Paperboat is reachable."
+  },
+  {
+   "i": 27,
+   "seconds": 27.86,
+   "rc": 0,
+   "tail": "pending. The command ran without your managed values; run `pb env unlock` on any of your devices, or run it again once `pb status` shows Paperboat is reachable."
+  },
+  {
+   "i": 28,
+   "seconds": 27.53,
+   "rc": 0,
+   "tail": "pending. The command ran without your managed values; run `pb env unlock` on any of your devices, or run it again once `pb status` shows Paperboat is reachable."
+  },
+  {
+   "i": 29,
+   "seconds": 27.26,
+   "rc": 0,
+   "tail": "pending. The command ran without your managed values; run `pb env unlock` on any of your devices, or run it again once `pb status` shows Paperboat is reachable."
+  },
+  {
+   "i": 30,
+   "seconds": 27.59,
+   "rc": 0,
+   "tail": "pending. The command ran without your managed values; run `pb env unlock` on any of your devices, or run it again once `pb status` shows Paperboat is reachable."
+  },
+  {
+   "i": 31,
+   "seconds": 27.61,
+   "rc": 0,
+   "tail": "pending. The command ran without your managed values; run `pb env unlock` on any of your devices, or run it again once `pb status` shows Paperboat is reachable."
+  }
+ ]
+}
