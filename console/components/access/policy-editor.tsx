@@ -3,6 +3,7 @@
 import { useQuery } from "@tanstack/react-query"
 import { useEffect, useRef, useState } from "react"
 import {
+  configSyncProblems,
   hasComments,
   parsePolicy,
   readOnlyNote,
@@ -15,26 +16,6 @@ import {
 import { ChangesDialog } from "@/components/access/changes-dialog"
 import { Time } from "@/components/time"
 import { Button } from "@/components/ui/button"
-
-/** The server's check of a draft, a moment after the last keystroke. `validate` checks now. */
-export function usePolicyValidation(workspace: string, text: string) {
-  const [checked, setChecked] = useState(text)
-  useEffect(() => {
-    const timer = setTimeout(() => setChecked(text), 800)
-    return () => clearTimeout(timer)
-  }, [text])
-  const validation = useQuery({
-    queryKey: ["policy-validate", workspace, checked],
-    queryFn: ({ signal }) => validatePolicy(workspace, checked, signal),
-    staleTime: Infinity,
-    retry: false,
-  })
-  return {
-    validation,
-    checking: validation.isFetching || checked !== text,
-    validate: () => (checked === text ? validation.refetch() : setChecked(text)),
-  }
-}
 
 /** The policy as a file: a plain editor with line numbers, checked by the server as you type. */
 export function PolicyEditor({
@@ -51,8 +32,18 @@ export function PolicyEditor({
   onSaved: () => void
 }) {
   const editable = policy.can_edit === "all"
+  const [checked, setChecked] = useState(text)
   const [reviewing, setReviewing] = useState(false)
-  const { validation, checking, validate } = usePolicyValidation(workspace, text)
+  useEffect(() => {
+    const timer = setTimeout(() => setChecked(text), 800)
+    return () => clearTimeout(timer)
+  }, [text])
+  const validation = useQuery({
+    queryKey: ["policy-validate", workspace, checked],
+    queryFn: ({ signal }) => validatePolicy(workspace, checked, signal),
+    staleTime: Infinity,
+    retry: false,
+  })
   const dirty = text !== policy.policy
   const formattable = parsePolicy(text) !== undefined && !hasComments(text)
   const note = readOnlyNote(policy)
@@ -74,7 +65,7 @@ export function PolicyEditor({
             >
               Format
             </Button>
-            <Button variant="outline" onClick={validate}>
+            <Button variant="outline" onClick={() => (checked === text ? validation.refetch() : setChecked(text))}>
               Validate
             </Button>
             <Button variant="outline" disabled={!dirty} onClick={() => onChange(policy.policy)}>
@@ -87,11 +78,15 @@ export function PolicyEditor({
         )}
       </div>
       {note && <p className="text-sm text-muted-foreground">{note}</p>}
+      <p className="text-xs text-muted-foreground">
+        Sections: groups, tags, rules, tests and config_sync (the repository machines sync config with, for all
+        machines or a tag).
+      </p>
       <CodeArea value={text} onChange={editable ? onChange : undefined} />
       <ValidationResult
         validation={validation.data}
         error={validation.error}
-        checking={checking}
+        checking={validation.isFetching || checked !== text}
       />
       {reviewing && (
         <ChangesDialog
@@ -138,7 +133,9 @@ function ValidationResult({
             <li key={index} className="flex flex-wrap items-baseline gap-x-3 border-b border-divider py-1.5">
               <span className="font-mono text-xs">{problem.path || "/"}</span>
               <span className="font-mono text-xs text-muted-foreground">{problem.code}</span>
-              <span className="min-w-0 flex-1">{problem.message}</span>
+              <span className="min-w-0 flex-1">
+                {(problem.path.startsWith("/config_sync") && configSyncProblems[problem.code]) || problem.message}
+              </span>
             </li>
           ))}
         </ul>

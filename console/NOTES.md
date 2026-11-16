@@ -390,8 +390,8 @@ shows them humanized (`changed_both_sides` → "Changed both sides").
 Layout (2026-11-16): the GitHub block is only the account link; repositories (any Git URL, GitHub ones
 pickable once linked) are their own list; "Team default" shows only in a team workspace.
 
-Policy-chosen repositories (FEAT-CONFIGREPOS): Access has a Config sync tab editing the policy's `config_sync`
-rules as rows (same draft and review as Policy file; a file with comments is edited as a file). A machine's
+Policy-chosen repositories (FEAT-CONFIGREPOS): `config_sync` rules are edited in the policy file like every other section (Access → Policy file;
+its errors read in plain words, and the hint under the file names the section). A machine's
 Config sync tab shows `GET /v1/machines/{id}/config-rule` as a Policy rule section and "Chosen by" from the
 config assignment's `source` (`machine`, `tag_rule`). Gaps: the status payload has no `source`, so the all-machines
 table cannot show it per row; `ConfigRepository` has no machine count or default state ("used by N machines");

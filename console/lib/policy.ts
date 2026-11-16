@@ -273,15 +273,11 @@ export type PolicyRule = {
   note?: string
 }
 
-/** Picks the config sync repository for the machines in `dst` (`machine:*` or tags); the first match wins. */
-export type ConfigSyncRule = { dst: string[]; repository: string; branch?: string; note?: string }
-
 export type PolicyFile = {
   allow_private_access?: boolean
   groups?: Record<string, string[]>
   tags?: Record<string, string[]>
   rules?: PolicyRule[]
-  config_sync?: ConfigSyncRule[]
   tests?: unknown[]
 }
 
@@ -361,4 +357,12 @@ export function readOnlyNote(policy: Policy) {
   return policy.can_edit === "own_machines"
     ? "You can change access only for your own machines, from the Team page."
     : "Only owners and admins can change access."
+}
+
+/** What a `config_sync` rule's errors mean, in plain words, by the server's error code. */
+export const configSyncProblems: Record<string, string> = {
+  required: "Add a target.",
+  unknown_target: "Use machine:* or a tag this policy defines.",
+  invalid_repository: "Use a Git URL (https://, ssh://, user@host:path) or an absolute path.",
+  invalid_branch: "Not a valid Git branch name.",
 }

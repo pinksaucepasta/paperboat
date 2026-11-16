@@ -322,11 +322,3 @@ export const configSourceQuery = (machineId: string, workspace: string) =>
       ),
     retry: false,
   })
-
-/** What the policy file's `config_sync` errors mean, in plain words, by the server's error code. */
-export const configSyncProblems: Record<string, string> = {
-  required: "Add a target.",
-  unknown_target: "Use machine:* or a tag this policy defines.",
-  invalid_repository: "Use a Git URL (https://, ssh://, user@host:path) or an absolute path.",
-  invalid_branch: "Not a valid Git branch name.",
-}
