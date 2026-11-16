@@ -57,19 +57,27 @@ func TestResolveLocalServesStaleIdentityWhileOneRefreshRuns(t *testing.T) {
 		t.Fatalf("stale reads started %d background refreshes, want exactly 1", got-1)
 	}
 	close(release)
-	for deadline = time.Now().Add(2 * time.Second); time.Now().Before(deadline); time.Sleep(5 * time.Millisecond) {
-		cache.mu.Lock()
-		done := len(cache.refreshing) == 0
-		cache.mu.Unlock()
-		if done {
-			break
+	refreshed := func() {
+		t.Helper()
+		for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); time.Sleep(5 * time.Millisecond) {
+			cache.mu.Lock()
+			done := len(cache.refreshing) == 0
+			cache.mu.Unlock()
+			if done {
+				return
+			}
 		}
+		t.Fatal("a background refresh did not finish")
 	}
-	before := calls.Load()
-	if got := resolve(3 * time.Hour); got.RootPublic[0] != 2 || calls.Load() != before {
+	refreshed()
+	// A call that waited for the server would answer its own (third) identity; the read also starts a background
+	// refresh, which must finish before counting the renewal below (it raced the count on Windows, run 43960352441).
+	if got := resolve(3 * time.Hour); got.RootPublic[0] != 2 {
 		t.Fatal("an identity hours old (Paperboat unreachable all along) made the caller wait for the server")
 	}
-	// The refreshed certificate (issued at 25 s, 24 h) is within the margin of its expiry: wait for a renewal.
+	refreshed()
+	before := calls.Load()
+	// The refreshed certificate (issued now, 24 h) is within the margin of its expiry: wait for a renewal.
 	resolve(25*time.Second + 24*time.Hour - localCertificateMargin/2)
 	if calls.Load() != before+1 {
 		t.Fatal("a certificate about to expire was served without waiting for the server")
