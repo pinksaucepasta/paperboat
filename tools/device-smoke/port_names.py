@@ -4,8 +4,8 @@
   python3 port_names.py VIEWER [--shadow-machine NAME] [--late-machine NAME]
 
 The host serves two synthetic pages, names them from the host, and the viewer (nothing configured there) fetches each
-address over HTTPS with normal certificate verification through `pb exec VIEWER -- curl`. Unix hosts and viewers only
-(the host starts python3 servers, the viewer needs curl). --shadow-machine NAME (an existing machine of the account) also
+address over HTTPS with normal certificate verification through `pb exec VIEWER -- curl`. Unix or Windows host (PB_SMOKE_WINDOWS_PB set: run from the
+controller, the origin servers run there with python, see winorigin.py); the viewer needs curl. --shadow-machine NAME (an existing machine of the account) also
 checks that a top-level name equal to a machine is refused. --late-machine NAME (a spare machine of the account, not the
 host or the viewer) is renamed to an existing top-level name for the check and renamed back: the name must show shadowed
 and the viewer must reach that machine's own page, not the named port.
@@ -13,6 +13,7 @@ and the viewer must reach that machine's own page, not the named port.
 import argparse
 import contextlib
 import json
+import re
 import shutil
 import socket
 import subprocess
@@ -23,6 +24,7 @@ import uuid
 from pathlib import Path
 
 import winhost
+import winorigin
 from install_lifecycle import registration
 from pairing_lifecycle import command_result
 
@@ -55,6 +57,11 @@ def free_port():
 
 @contextlib.contextmanager
 def page(root, marker):
+    target = winhost.device()
+    if target:
+        with winorigin.origin(target, winorigin.PAGE, marker) as port:
+            yield int(port)
+        return
     directory = Path(tempfile.mkdtemp(dir=root))
     (directory / 'who').write_text(marker)
     port = free_port()
@@ -92,7 +99,9 @@ def version(viewer=None):
         result = command_result(BINARY, 'exec', viewer, '--timeout', '30s', '--', *words, timeout=60)
     else:
         result = command_result(BINARY, '--version')
-    return result.stdout.strip() if result.returncode == 0 else 'unknown'
+    text = result.stdout.strip()
+    banner = re.search(r'Version (\S+)', text)  # pb prints its banner when it has a console, as on Windows
+    return (banner.group(1) if banner else text) if result.returncode == 0 else 'unknown'
 
 
 def main():
@@ -175,6 +184,7 @@ def main():
                 step('late_machine_takes_address', late)
     except Exception as error:
         failure = error
+        print('port-names: %s' % error, file=sys.stderr)
     finally:
         cleanup = []
         for name, scope in reversed(created):
