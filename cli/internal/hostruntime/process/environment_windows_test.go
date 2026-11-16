@@ -123,7 +123,7 @@ func TestWindowsBaseEnvironmentHasStandardVariables(t *testing.T) {
 	if _, err := launcher.Launch(context.Background(), LaunchRequest{ID: "ses_env", Dimensions: pty.Dimensions{Columns: 80, Rows: 24}}); err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command(filepath.Join(system, "cmd.exe"), "/d", "/c", "echo %OS%|%ProgramFiles(x86)%|%SystemDrive%|%COMPUTERNAME%")
+	cmd := exec.Command(filepath.Join(system, "cmd.exe"), "/d", "/c", "echo %OS%;%ProgramFiles(x86)%;%SystemDrive%;%COMPUTERNAME%")
 	cmd.Env = environment
 	output, err := cmd.Output()
 	if err != nil || strings.Contains(string(output), "%") {
