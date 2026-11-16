@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -51,7 +52,7 @@ func TestRestartWhilePaperboatIsUnreachableStartsFromTheLastAnsweredMachines(t *
 	}
 
 	start(machineResult{machines: []api.UserMachine{ready, other}})
-	if info, err := os.Stat(cache); err != nil || info.Mode().Perm() != 0o600 {
+	if info, err := os.Stat(cache); err != nil || runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 { // Windows reports 0666 whatever the ACL says
 		t.Fatalf("answered list not cached owner-only: %v %v", info, err)
 	}
 	down := machineResult{err: apiDown("/v1/machines")}
