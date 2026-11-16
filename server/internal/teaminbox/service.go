@@ -509,7 +509,9 @@ func (s *Service) Decide(ctx context.Context, recipient, requestID, decision str
 		return auditLifecycleTx(ctx, tx, recipient, out, "decide", requestID+":"+decision, decision)
 	})
 	if err == nil && (decision == "declined" || outcomeErr != nil) {
-		err = s.DeleteStored(ctx, requestID)
+		// The decision is committed; a failed object delete must not replace it. PruneStored
+		// retries the delete and reports its failure.
+		_ = s.DeleteStored(ctx, requestID)
 	}
 	if err == nil && outcomeErr != nil {
 		return out, outcomeErr

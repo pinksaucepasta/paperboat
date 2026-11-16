@@ -306,8 +306,8 @@ func (s *Service) StoredDownloadURLs(ctx context.Context, machine, id string, in
 		if err := teams.Lock(ctx, tx); err != nil {
 			return err
 		}
-		// The first recipient machine claims the transfer atomically. Every retry is
-		// fenced to that same machine, so two online hosts cannot both publish it.
+		// Accepting named one machine; every retry is fenced to it, so two online hosts
+		// cannot both publish the transfer.
 		var team string
 		err := tx.QueryRow(ctx, `UPDATE team_inbox_requests r SET stored_machine_id=$1,status='consumed',consumed_at=coalesce(consumed_at,$3),updated_at=$3
  WHERE r.request_id=$2 AND r.stored_uploaded AND r.stored_deleted_at IS NULL AND r.expires_at>$3
@@ -374,7 +374,9 @@ func (s *Service) StoredReceived(ctx context.Context, machine, id, digest string
 	if err != nil {
 		return err
 	}
-	return s.DeleteStored(ctx, id)
+	// The receipt is committed; PruneStored retries a failed object delete and reports it.
+	_ = s.DeleteStored(ctx, id)
+	return nil
 }
 
 // DeleteStored is retryable: keep the manifest until every delete succeeds and

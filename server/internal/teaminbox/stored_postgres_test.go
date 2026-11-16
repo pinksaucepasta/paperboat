@@ -374,6 +374,20 @@ func TestPostgresStoredDeclineExpiryAndRevocationCleanLateUploads(t *testing.T) 
 	}
 }
 
+func TestPostgresStoredDeclineKeepsDecisionWhenDeleteFails(t *testing.T) {
+	f := newStoredFixture(t)
+	r := f.uploaded()
+	f.b.deleteErr = errors.New("bucket temporarily unavailable")
+	out, err := f.s.Decide(f.ctx, f.recipient, r.RequestID, "declined", r.DecisionGeneration)
+	if err != nil || out.Status != "declined" || len(f.b.objects) == 0 {
+		t.Fatal("decline must succeed and leave the delete to the sweeper", err)
+	}
+	f.b.deleteErr = nil
+	if err := f.s.PruneStored(f.ctx); err != nil || len(f.b.objects) != 0 {
+		t.Fatal("sweeper did not delete after the failed inline delete", err)
+	}
+}
+
 func TestPostgresStoredBucketCannotBeRemovedBeforeCleanup(t *testing.T) {
 	f := newStoredFixture(t)
 	f.exec(`INSERT INTO paperboat.team_buckets(team_id,endpoint,region,bucket,prefix,path_style,access_key_id,secret,checked_at,use_files)
