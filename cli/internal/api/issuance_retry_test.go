@@ -101,3 +101,20 @@ func TestInventoryListRetriesServiceUnavailable(t *testing.T) {
 		t.Fatalf("calls=%d sessions=%d err=%v", calls.Load(), len(sessions), err)
 	}
 }
+
+// F21-164: a viewer joining an existing session asks for its connection again after a busy 503.
+func TestSessionDescriptorRetriesServiceUnavailable(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"error":{"code":"service_busy","message":"x"}}`))
+	}))
+	defer server.Close()
+	client := New(server.URL, config.Credential{AccessToken: "token"}, server.Client())
+	client.SetSourceMachineID("machine_local")
+	if _, err := client.UserMachineConnectionDescriptorForSession(context.Background(), "machine_target", "terminal_1"); err == nil || calls.Load() != issuanceAttempts {
+		t.Fatalf("calls=%d err=%v", calls.Load(), err)
+	}
+}

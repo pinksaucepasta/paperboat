@@ -277,7 +277,9 @@ func (c *Client) UserMachineConnectionDescriptorForSession(ctx context.Context, 
 	if values != nil {
 		body = values
 	}
-	err := c.do(ctx, http.MethodPost, "/v1/machines/"+url.PathEscape(machineID)+"/connection-descriptor", body, &out)
+	// A busy 503 is asked again (F21-164: 9 of 50 viewers joining one session at once exited "temporarily
+	// unavailable"); a repeat only issues the connection again.
+	err := c.doIssuance(ctx, http.MethodPost, "/v1/machines/"+url.PathEscape(machineID)+"/connection-descriptor", body, &out, false)
 	if err == nil {
 		err = out.NormalizeConnectionDescriptor()
 	}
