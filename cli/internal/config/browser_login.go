@@ -29,6 +29,9 @@ type BrowserLoginState struct {
 	Enrollment *LoginEnrollment `json:"enrollment,omitempty"`
 }
 
+// ErrLoginInProgress means another sign-in on this profile held the login lock past the wait.
+var ErrLoginInProgress = errors.New("another pb login is in progress for this profile")
+
 // LoginEnrollment is the enrollment an approved login handed this device.
 type LoginEnrollment struct {
 	BootstrapToken string    `json:"bootstrap_token"`
@@ -50,7 +53,9 @@ func (s ProfileStore) WithBrowserLogin(issuer string, fn func(*BrowserLoginState
 		return err
 	}
 	lock := newSharedLock(path + ".browser-login.lock")
-	if err = lock.Lock(); err != nil {
+	if err = lock.Lock(); errors.Is(err, errSharedLockTimeout) {
+		return errors.Join(ErrLoginInProgress, err)
+	} else if err != nil {
 		return err
 	}
 	defer func() { resultErr = errors.Join(resultErr, lock.Unlock()) }()

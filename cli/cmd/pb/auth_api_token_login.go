@@ -43,6 +43,13 @@ func apiTokenLogin(c *command.Context, path string) error {
 	if err != nil {
 		return err
 	}
+	// The browser-login lock serializes every sign-in on this profile, so two logins never interleave their writes.
+	return loginInProgressFailure(store.WithBrowserLogin(issuer, func(*config.BrowserLoginState, func() error) error {
+		return apiTokenSignIn(c, cfg, store, issuer, token)
+	}))
+}
+
+func apiTokenSignIn(c *command.Context, cfg *config.Config, store config.ProfileStore, issuer, token string) error {
 	label := "API token on " + firstNonEmpty(loginDeviceName(), runtime.GOOS)
 	// On a paired machine the session becomes that machine's login, as a browser login there (F18-06).
 	machineID, err := loginLocalMachineID(cfg)

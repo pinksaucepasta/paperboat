@@ -195,6 +195,9 @@ func sourceIdentifier(value string, maximum int) string {
 	return value
 }
 
+// processEUID is the effective user; a variable so tests can act as root.
+var processEUID = os.Geteuid
+
 // processDiagnosticsDirectory is the user's state directory, except for the
 // root update service and its activation helper, and the root machine guard:
 // they run under the service manager with no HOME and own their own state root,
@@ -205,7 +208,8 @@ func processDiagnosticsDirectory(command *cobra.Command) (string, error) {
 			return filepath.Join(root, "diagnostics"), nil
 		}
 	}
-	if command != nil && command.Name() == "run" && command.Parent() != nil && command.Parent().Name() == "machine-guard" && machineguard.DefaultStateDir != "" {
+	// Root `machine-guard install|uninstall` under sudo keeps the user's HOME, whose diagnostics directory root refuses.
+	if command != nil && (command.Name() == "run" || processEUID() == 0) && command.Parent() != nil && command.Parent().Name() == "machine-guard" && machineguard.DefaultStateDir != "" {
 		return filepath.Join(machineguard.DefaultStateDir, "diagnostics"), nil
 	}
 	paths, err := currentLocalDaemonPaths()

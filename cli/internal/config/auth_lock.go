@@ -16,7 +16,7 @@ const sharedLockRemoteStaleAfter = 30 * time.Minute
 // budget before reclaiming an empty directory left by an interrupted process.
 const sharedLockOwnerlessStaleAfter = 30 * time.Second
 
-const sharedLockWait = 60 * time.Second
+var sharedLockWait = 60 * time.Second // a variable so tests can wait less
 
 // processStartSlack covers the coarse (one second) process start times some platforms report.
 const processStartSlack = 2 * time.Second
@@ -35,6 +35,8 @@ type sharedLock struct {
 }
 
 var sharedLockMu sync.Map
+
+var errSharedLockTimeout = errors.New("timed out waiting for shared credential lock")
 
 // sharedLockInspectGrace is how long a waiter keeps polling a lock directory it cannot validate: a release races the
 // inspection for milliseconds, a directory with a foreign owner or ACL stays invalid.
@@ -124,7 +126,7 @@ func (l *sharedLock) Lock() error {
 			}
 		}
 		if time.Now().After(deadline) {
-			return errors.Join(errors.New("timed out waiting for shared credential lock"), lastOwnerErr)
+			return errors.Join(errSharedLockTimeout, lastOwnerErr)
 		}
 		//paperboat:allow-source-policy sleep owner=runtime-auth reason=bounded-cross-process-lock-poll
 		time.Sleep(25 * time.Millisecond)

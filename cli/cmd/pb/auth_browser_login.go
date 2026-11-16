@@ -94,7 +94,7 @@ func browserLogin(c *command.Context, resume *config.BrowserLoginState) error {
 	if c.Bool("reauth") && c.Bool("change-account") {
 		return invocationError(errors.New("choose either --reauth or --change-account"))
 	}
-	return store.WithBrowserLogin(issuer, func(state *config.BrowserLoginState, save func() error) error {
+	return loginInProgressFailure(store.WithBrowserLogin(issuer, func(state *config.BrowserLoginState, save func() error) error {
 		if resume != nil {
 			*state = *resume
 			if err := save(); err != nil {
@@ -305,7 +305,16 @@ func browserLogin(c *command.Context, resume *config.BrowserLoginState) error {
 		}
 		_, err = fmt.Fprintln(c.Writer, added)
 		return err
-	})
+	}))
+}
+
+// loginInProgressFailure names a concurrent sign-in on this profile instead of a bare local_io failure (lanex2-m
+// 2026-11-16: two logins at once ended one with only "could not finish the command").
+func loginInProgressFailure(err error) error {
+	if errors.Is(err, config.ErrLoginInProgress) {
+		return browserLoginFailure{message: "Another pb login is running for this profile. Finish or cancel it (Ctrl-C), then run pb login again.", cause: err}
+	}
+	return err
 }
 func validateApprovalURL(a api.DeviceAuthorization) error {
 	u, e := url.Parse(a.VerificationURIComplete)

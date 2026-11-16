@@ -73,3 +73,33 @@ func TestBrowserLoginParseFailureRetainsCauseWithoutExposingStoredState(t *testi
 		t.Fatalf("parse failure=%v callbackCalled=%t", err, callbackCalled)
 	}
 }
+
+// lanex2-m 2026-11-16: a second sign-in while another process held this profile's login lock failed as a bare
+// local_io error. It must say another login is running.
+func TestSecondBrowserLoginNamesTheLoginInProgress(t *testing.T) {
+	root := t.TempDir()
+	store := ProfileStore{Path: root, Secrets: FileSecretStore{Dir: filepath.Join(root, "secrets")}}
+	issuer, err := NormalizeIssuer("https://api.example.test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ensureProfileDirectory(filepath.Dir(store.profilePath(issuer))); err != nil {
+		t.Fatal(err)
+	}
+	// Another live holder of the lock directory (no in-process mutex, as a second pb process).
+	other := &sharedLock{path: store.profilePath(issuer) + ".browser-login.lock.d"}
+	if err := other.Lock(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = other.Unlock() })
+	old := sharedLockWait
+	t.Cleanup(func() { sharedLockWait = old })
+	sharedLockWait = 100 * time.Millisecond
+	err = store.WithBrowserLogin(issuer, func(*BrowserLoginState, func() error) error {
+		t.Error("second login ran while another held the lock")
+		return nil
+	})
+	if !errors.Is(err, ErrLoginInProgress) {
+		t.Fatalf("second login = %v, want ErrLoginInProgress", err)
+	}
+}

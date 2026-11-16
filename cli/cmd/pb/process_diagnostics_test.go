@@ -80,3 +80,26 @@ func TestMachineGuardDiagnosticsUseItsOwnStateDirectory(t *testing.T) {
 		t.Fatalf("machine guard diagnostics directory = %q, want %q", directory, want)
 	}
 }
+
+// lanex2-m 2026-11-16: root `pb daemon machine-guard install` under sudo kept the user's HOME and warned "settings
+// could not be saved": root refuses the user-owned diagnostics directory. Root guard commands use the guard's own.
+func TestRootMachineGuardInstallDiagnosticsUseGuardStateDirectory(t *testing.T) {
+	if machineguard.DefaultStateDir == "" {
+		t.Skip("machine guard is not supported on this platform")
+	}
+	command, _, err := newRootCommand().Find([]string{"daemon", "machine-guard", "install"})
+	if err != nil || command.Name() != "install" {
+		t.Fatalf("find machine-guard install: %v", err)
+	}
+	old := processEUID
+	t.Cleanup(func() { processEUID = old })
+	want := filepath.Join(machineguard.DefaultStateDir, "diagnostics")
+	processEUID = func() int { return 1000 }
+	if directory, _ := processDiagnosticsDirectory(command); directory == want {
+		t.Fatal("a user's machine-guard install must keep the user's diagnostics directory")
+	}
+	processEUID = func() int { return 0 }
+	if directory, err := processDiagnosticsDirectory(command); err != nil || directory != want {
+		t.Fatalf("root machine-guard install diagnostics = %q, %v; want %q", directory, err, want)
+	}
+}
