@@ -3,7 +3,7 @@
 
   XPLAT_PREFIX=... XPLAT_TEAM=<team> XPLAT_MEMBER_CT=<container of the member's Linux machine> xplat_envteam.py [--devices L,M,W]
 
-Needs the fleet (owner account, controller L, devices L/M/W), a paid team the owner owns with the member's account as an active
+(member container elsewhere: XPLAT_MEMBER_HOST, _USER, _UID, _DOCKER, _NAME.) Needs the fleet (owner account, controller L, devices L/M/W), a paid team the owner owns with the member's account as an active
 member (final_fixtures.py), the member's Linux container signed in and paired under the member account (own ENV vault; its password
 in XPLAT_MEMBER_VAULT_PW, the owner's in XPLAT_VAULT_PW; both read inside, never printed). Values are random and never printed.
   deliver    every owner device is shared into the team; the owner's team value reaches a team launch on each target when the actor
@@ -80,6 +80,7 @@ def until(actor, target, want, seconds=150):
 def setup(owner, member, devices, member_account):
     ids = machine_ids(owner)
     IDS.update(ids)
+    owner_account = json.loads(owner.pb('auth', 'status', '--json').text)['account']['id']
     pw = fleet.Path(os.environ.get('XPLAT_VAULT_PW', Path.home() / '.pbmac/xplat2-vault.pw')).read_bytes().strip()
     for dev, secret in [(d, pw) for d in devices.values()]:
         assert dev.pb('env', 'unlock', '--password-stdin', input=secret + b'\n', timeout=120).rc == 0, '%s unlock' % dev.name
@@ -89,6 +90,9 @@ def setup(owner, member, devices, member_account):
         assert done.rc == 0 or 'already' in (done.text + done.errtext).lower(), 'share %s: %s' % (dev.name, (done.text + done.errtext)[-200:])
         done = owner.pb('team', 'machine', 'grant', TEAM, ids[dev.alias], '--member', member_account, '--capability', 'exec', '--generation', generation(owner), '--json', timeout=180)
         assert done.rc == 0, 'machine grant %s: %s' % (dev.name, (done.text + done.errtext)[-200:])
+        # an owner launching in its own team workspace needs an exec grant to itself, else its machine list there is empty
+        done = owner.pb('team', 'machine', 'grant', TEAM, ids[dev.alias], '--member', owner_account, '--capability', 'exec', '--generation', generation(owner), '--json', timeout=180)
+        assert done.rc == 0, 'owner self grant %s: %s' % (dev.name, (done.text + done.errtext)[-200:])
     state = json.loads(owner.pb('team', 'get', TEAM, '--json').text)
     state = state.get('data', state).get('env_status')
     if state == 'not_initialized':
@@ -104,6 +108,9 @@ def setup(owner, member, devices, member_account):
     assert done.rc == 0, 'env team grant: ' + (done.text + done.errtext)[-200:]
     done = member.pb('env', 'grants', 'sync', '--json', timeout=180)
     assert done.rc == 0, 'member sync: ' + (done.text + done.errtext)[-200:]
+    assert member.pb('env', 'unlock', '--password-stdin', input=MEMBER_PW.read_bytes().strip() + b'\n', timeout=120).rc == 0, 'member re-unlock'
+    for dev in devices.values():  # changing a team scope leaves every host pending until an unlocked vault re-seals it
+        assert dev.pb('env', 'unlock', '--password-stdin', input=pw + b'\n', timeout=120).rc == 0, '%s re-unlock' % dev.name
 
 
 def t_deliver_owner(actor, target):
@@ -144,11 +151,17 @@ def main():
     keys = argv[argv.index('--devices') + 1].split(',') if '--devices' in argv else ['L', 'M', 'W']
     devices = {k: d for k, d in fleet.fleet().items() if k in keys}
     owner = fleet.controller()
-    controller_host, fleet.L_HOST = fleet.L_HOST, os.environ.get('XPLAT_MEMBER_HOST', fleet.L_HOST)  # the member's container may live on another host
+    # the member's container may live on another host, with its own user and docker command (XPLAT_MEMBER_HOST/_USER/_UID/_DOCKER)
+    controller_host, fleet.L_HOST = fleet.L_HOST, os.environ.get('XPLAT_MEMBER_HOST', fleet.L_HOST)
+    names = {'XPLAT_L_USER': 'XPLAT_MEMBER_USER', 'XPLAT_L_UID': 'XPLAT_MEMBER_UID', 'XPLAT_L_DOCKER': 'XPLAT_MEMBER_DOCKER'}
+    saved = {k: os.environ.get(k) for k in names}
+    os.environ.update({k: os.environ[v] for k, v in names.items() if v in os.environ})
     try:
         member = fleet.linux(name=os.environ.get('XPLAT_MEMBER_NAME', fleet.PREFIX + '-l2'), ct=os.environ['XPLAT_MEMBER_CT'])
     finally:
         fleet.L_HOST = controller_host
+        for k, v in saved.items():
+            os.environ.pop(k, None) if v is None else os.environ.__setitem__(k, v)
     member_account = json.loads(member.pb('auth', 'status', '--json').text)['account']['id']
     cleanup = []
     try:

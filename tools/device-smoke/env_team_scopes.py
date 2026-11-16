@@ -2,7 +2,8 @@
 """F10-04: team ENV scope lifecycle with two real accounts; access follows grants and roles.
 
 OWNER is a paired machine of the team owner (an unlocked-able ENV vault), MEMBER a paired machine of a second account
-(its own ENV vault). Both are commands that run pb, e.g. `sudo -n docker exec -u pbt -e HOME=/home/pbt
+(its own ENV vault). Both are commands that run pb and keep every argument intact (over ssh use a wrapper that quotes:
+`ssh host cmd` splits `--confirm "RESET ENV TEAM x"`), e.g. `sudo -n docker exec -u pbt -e HOME=/home/pbt
 -e XDG_RUNTIME_DIR=/run/user/1000 CT /home/pbt/.local/bin/pb`. The team must be paid, with a free seat.
 
 Usage: env_team_scopes.py --team TEAM --owner-cmd CMD --owner-password-file F --member-cmd CMD --member-password-file F
@@ -85,7 +86,10 @@ def main():
             invitation = next(i['invitation_id'] for i in invitations if i['team_id'] == team)
             must(member('team', 'accept', invitation, '--json'), 'accept')
         joined = True
-        must(owner('env', 'team', 'reset', team, '--confirm', 'RESET ENV TEAM ' + team, '--json'), 'reset')
+        if team_state().get('env_status') == 'not_initialized':  # a fresh team has no scope to reset
+            must(owner('env', 'team', 'create', team, '--json'), 'create')
+        else:
+            must(owner('env', 'team', 'reset', team, '--confirm', 'RESET ENV TEAM ' + team, '--json'), 'reset')
         results['reset_creates_an_empty_scope'] = scope(args.owner_cmd)['names'] == []
 
         value = uuid.uuid4().hex
