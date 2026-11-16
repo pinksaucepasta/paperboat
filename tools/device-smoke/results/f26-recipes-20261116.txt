@@ -1315,3 +1315,79 @@ $ irm https://get.pprbt.dev/recipe.ps1 | iex   [PB_RECIPE missing]
 Paperboat: PB_RECIPE is not set. Copy the token from pb recipe create or the console (Settings -> Recipes), then run: $env:PB_RECIPE='<token>'; irm <installer>/recipe.ps1 | iex
 $ irm https://get.pprbt.dev/recipe.ps1 | iex   [PB_RECIPE malformed]
 Paperboat: PB_RECIPE is not a recipe token. A token starts with pbr_ and is 67 characters; this value is 9. Copy it again from where you saved it.
+
+################ f26-05-M2.txt + f26-07-M.txt + f26-05-L2.txt + f26-02-oneliner-M.txt
+=== F26-05 on pbmac2 (macOS 26.6.2), recipe rcpz ([[preview]] 3000, [[tunnel]] 8123 private), server .31, client dev-de73faa7f, 2026-11-16T13:38:50Z ===
+$ pb uninstall
+Paperboat was completely removed. The Paperboat Inbox was preserved.
+$ pb install (dev-de73faa7f)
+Installed Paperboat dev-de73faa7f at /Users/admin/.local/bin/pb. Background update checks: false. Enrollment is unchanged.
+$ PB_RECIPE=<rcpz token> pb pair --name rcp-mz
+Set up rcp-mz (machine_ee684fdf-de9f-4a02-823f-34c78538090b)
+$ pb recipe show rcpz (machines)
+$ launchctl kickstart -k gui/501/com.pinksaucepasta.paperboatd   [restart the daemon]
+$ pb tunnel list / pb preview list (after the restart)
+0
+$ cat recipe-apply.json
+{"revision":1,"previews":{"preview:{\"port\":3000,\"ttl\":\"1h\"}":"preview_c5fa7286-7eea-48b3-86bc-4b49deb65d6b"},"tunnels":{"tunnel:{\"port\":8123,\"private\":true}":"managedlmachine"},"config":"","hook":false}
+$ pb recipe show rcpz
+port = 8123
+private = true
+Machines (1 of 5)
+  rcp-mz   online   applied revision 1   now
+$ pb tunnel list
+tunnel_f7748bc3-4b1d-4d44-8be4-6ab8c4c88832	managedlmachine	https://fresh-desert-sail-5071.pprbt.app	private	active
+$ pb preview list
+preview_c5fa7286-7eea-48b3-86bc-4b49deb65d6b	public	http://127.0.0.1:3000	origin_unavailable	2026-11-16T14:12:03Z
+=== F26-07 no root on pbmac2 (macOS, standard user rcpmn without sudo), server .31, client dev-de73faa7f, 2026-11-16T13:42:23Z ===
+$ (creator) pb recipe list | grep rcpz   [before]
+rcpz   rcpz   1 / 5      2027-02-14   2m ago
+uid=502(rcpmn) gid=20(staff) groups=20(staff),12(everyone),6
+$ (user rcpmn: no admin, no sudo) sudo -n true
+sudo: a password is required
+$ (user rcpmn) PB_RECIPE=<token> pb pair
+pb: Installing needs root or passwordless sudo, and this shell has neither. Run the installer as root (in Docker the default user is root), or allow passwordless sudo for this user. Recipe installs never ask for a password, so they never hang a CI job.
+$ (creator) pb recipe list | grep rcpz   [after]
+rcpz   rcpz   1 / 5      2027-02-14   3m ago
+=== F26-05 tunnel on rcp-l9 (Linux container), recipe rcpu revision 2 ([[tunnel]] port=8123 private), server .31, client dev-de73faa7f, 2026-11-16T13:13:09Z ===
+  ▄▄▝▀▀▀▀▀▘▄▄   Version dev-de73faa7f
+$ PB_RECIPE=<rcpu token> pb pair --name rcp-l9
+Set up rcp-l9 (machine_1ca6d13a-c5e5-4b10-b123-afb337850c30)
+$ pb recipe show rcpu (machines)
+  rcp-l9   online   applied revision 3   now
+  rcp-mu   online   tunnel failed: pb --config /Users/admin/Library/Application Support/paperboat/config.json tunnel create managedlmachine: A tunnel with this name already exists; nothing was changed. Inspect it with `pb tunnel status <tunnel>`. (pb doctor on the machine)
+  rcp-wu   online   tunnel failed: pb --config C:\Users\rcpw\AppData\Local\paperboat\config.json tunnel create victus: A tunnel with this name already exists; nothing was changed. Inspect it with `pb tunnel status <tunnel>`. (pb doctor on the machine)
+$ systemctl --user restart paperboatd
+$ pb tunnel list (after the restart)
+tunnel_7bef5133-d499-45a7-b0e9-1f831b0107db	rcp-l9	https://lively-orange-hill-9764.pprbt.app	private	active
+tunnel_4b896898-f069-4fbc-a2f0-1875ebfd081a	victus	https://cozy-shaded-sail-4409.pprbt.app	private	active
+tunnel_96f3af64-cc0a-43de-94c8-ae6de9823840	managedlmachine	https://agile-island-garden-9405.pprbt.app	private	active
+$ cat recipe-apply.json
+{"revision":3,"previews":{},"tunnels":{"tunnel:{\"port\":8123,\"private\":true}":"rcp-l9"},"config":"","hook":false}=== F26-02 one-liner on pbmac2 (macOS 26.6.2, user admin, over SSH), release 2026.11.16.0, server .31, 2026-11-16T13:28:45Z ===
+$ pb uninstall
+Paperboat was completely removed. The Paperboat Inbox was preserved.
+$ curl -fsSL https://get.pprbt.dev/recipe | PB_RECIPE=<token> bash   [over SSH]
+/usr/local/share/man
+Installed pb to /Users/admin/.local/bin/pb
+pb: Paperboat could not finish the command. Check the current state before retrying; run `pb doctor` if this continues. Support reference: support_e19229dc-7ee6-492d-a5fc-7e7322879410. Run `pb bugreport --upload` to send the details.
+(took 34 s)
+$ (again)
+pb: Paperboat could not finish the command. Check the current state before retrying; run `pb doctor` if this continues. Support reference: support_6b0df9ab-3cac-4b76-a4ac-ecd6c24d0c4b. Run `pb bugreport --upload` to send the details.
+$ curl ... | PB_RECIPE= bash   [missing]
+Paperboat: PB_RECIPE is not set. Copy the token from pb recipe create or the console (Settings -> Recipes) and run the installer with PB_RECIPE=<token> set.
+  ▄▄▝▀▀▀▀▀▘▄▄   Version 2026.11.16.0
+--- rcp-l12 (root, fresh, no linger): the one-liner's steps with dev-de73faa7f (contains the root fix 93b25b246, not in release 2026.11.16.0), 2026-11-16T13:29:55Z ---
+$ (root) pb install
+pb: the executable /root/pb-dev is owned by another user; copy it to a file you own (or run `sudo chown 0 /root/pb-dev`), then run `pb install` again. Support reference: support_c86192a1-0bcc-4eca-a575-9dcb03e16fb6. Run `pb bugreport --upload` to send the details.
+$ (root) PB_RECIPE=<token> pb pair
+sh: 1: /root/.local/bin/pb: not found
+$ (again)
+sh: 1: /root/.local/bin/pb: not found
+inactive
+$ (root, binary owned by root) pb install
+Installed Paperboat dev-de73faa7f at /root/.local/bin/pb. Background update checks: false. Enrollment is unchanged.
+$ (root) PB_RECIPE=<token> pb pair
+Set up rcp-l12 (machine_a79d7d58-5c37-4d93-bad4-cfe04772d540)
+$ (again)
+This machine is already paired; nothing to do.
+active
