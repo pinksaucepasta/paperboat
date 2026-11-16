@@ -23,7 +23,8 @@ func TestRecipeApplyEnsuresSectionsWithPBCommands(t *testing.T) {
 		ran = append(ran, line)
 		switch {
 		case args[0] == "preview" && args[1] != "stop":
-			return []byte(`{"ok":true,"data":{"name":"calm-summer-beach"}}`), nil
+			// pb preview --json prints the bare preview resource (F26-05 device check, rcp-l).
+			return []byte(`{"schema":"paperboat.preview-tunnel/v1","kind":"preview_lease","id":"calm-summer-beach","state":"ready"}`), nil
 		case args[0] == "tunnel" && args[1] == "create":
 			return []byte(`{"ok":true,"data":{"name":"` + args[2] + `"}}`), nil
 		case args[0] == "config" && !strings.Contains(line, "--confirm"):

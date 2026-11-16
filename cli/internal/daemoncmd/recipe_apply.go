@@ -108,13 +108,15 @@ func recipeCommandError(args []string, stdout, stderr []byte, err error) error {
 	return fmt.Errorf("pb %s: %s", name, reason)
 }
 
-// jsonData returns the "data" object of a pb --json result.
+// jsonData returns the object of a pb --json result: its "data" envelope, or the bare resource that
+// pb preview and pb tunnel print.
 func jsonData(out []byte) map[string]any {
-	var envelope struct {
-		Data map[string]any `json:"data"`
+	var object map[string]any
+	_ = json.Unmarshal(out, &object)
+	if data, ok := object["data"].(map[string]any); ok {
+		return data
 	}
-	_ = json.Unmarshal(out, &envelope)
-	return envelope.Data
+	return object
 }
 
 func (a *recipeApplier) load() recipeApplyState {
