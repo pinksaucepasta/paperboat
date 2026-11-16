@@ -11,8 +11,8 @@ import (
 // credential, each in its own process (host runtime and __runtime-carrier), so a machine stays within 10 a
 // minute, and each engine still renews its relay observations (valid 15 s) in time. A renewal over budget is
 // not dropped; it waits for the next token, so requests in between coalesce into it. A 429 holds the budget for the
-// server's Retry-After, at least one refill; an urgent renewal (stream admission, server-announced change) waits
-// only the Retry-After itself, as Tailscale's controlclient does (auto.go updateRoutine, direct.go
+// server's Retry-After, at least one refill; a stream admission or a server-announced change waits only the
+// Retry-After itself (an announced change also borrows at most one burst ahead, then waits for tokens), as Tailscale's controlclient does (auto.go updateRoutine, direct.go
 // parseRateLimitError). Uncoupled triggers drove one machine credential past 150 calls a minute (hp 2026-10-27,
 // dev-e5cebaac and dev-b7651a0a).
 var renewalBudget = &tokenBucket{refill: 12 * time.Second, burst: 2}
@@ -33,6 +33,20 @@ type tokenBucket struct {
 // take spends a token and returns 0, or returns how long until one is available. An urgent renewal spends a
 // token if there is one but waits only for a 429's hold.
 func (b *tokenBucket) take(now time.Time, urgent bool) time.Duration {
+	return b.takeAt(now, 0, urgent)
+}
+
+// takeAnnounced spends a token for a renewal the server announced (a peer_network or machine_access event). It may
+// borrow one burst ahead, so a revocation after a quiet spell is renewed at once, but an event storm is then held to
+// the budget's rate like any renewal: announcements used to skip the budget, and churn anywhere in an account
+// made each of its endpoints renew about every 36 s (FIX-PERF-SERVER, 89 machines, 2026-11-16).
+func (b *tokenBucket) takeAnnounced(now time.Time) time.Duration {
+	return b.takeAt(now, b.burst, false)
+}
+
+// takeAt spends a token, borrowing up to borrow tokens ahead; an admission proceeds without one. Both honour only
+// a 429's own hold.
+func (b *tokenBucket) takeAt(now time.Time, borrow float64, admission bool) time.Duration {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.last.IsZero() {
@@ -43,20 +57,24 @@ func (b *tokenBucket) take(now time.Time, urgent bool) time.Duration {
 		b.last = now
 	}
 	until := b.blockedUntil
-	if urgent {
+	if admission || borrow > 0 {
 		until = b.retryUntil
 	}
 	if wait := until.Sub(now); wait > 0 {
 		b.deferred++
 		return wait
 	}
-	if b.tokens >= 1 || urgent {
-		b.tokens = max(0, b.tokens-1)
-		b.granted++
-		return 0
+	switch {
+	case b.tokens >= 1-borrow:
+		b.tokens--
+	case admission:
+		b.tokens = min(b.tokens, 0)
+	default:
+		b.deferred++
+		return time.Duration((1 - borrow - b.tokens) * float64(b.refill))
 	}
-	b.deferred++
-	return time.Duration((1 - b.tokens) * float64(b.refill))
+	b.granted++
+	return 0
 }
 
 // wait blocks until a token is spent or ctx ends; an urgent wait blocks only for a 429's hold.

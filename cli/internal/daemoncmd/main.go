@@ -406,7 +406,7 @@ func localDaemonCommand() *cobra.Command {
 				accessEvents := events.hub.Subscribe(machineevents.TopicMachineAccess)
 				servicesEvents := events.hub.Subscribe(machineevents.TopicMachineServices)
 				recipeEvents := events.hub.Subscribe(machineevents.TopicRecipe)
-				networkEvents := events.hub.Subscribe(machineevents.TopicPeerNetwork, machineevents.TopicInventory)
+				networkEvents := events.hub.Subscribe(machineevents.TopicPeerNetwork) // mesh joins move it too (migration 373)
 				go func() {
 					for {
 						select {

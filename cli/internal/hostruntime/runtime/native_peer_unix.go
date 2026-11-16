@@ -54,9 +54,8 @@ type productionNativePeerConfig struct {
 	usage                                    *bandwidth.Recorder
 	// offlineAudit records sessions started or refused without Paperboat (F21-11); nil refuses them.
 	offlineAudit *offlineaudit.Queue
-	// networkEvents wakes the signed-network renewal when the server reports a peer or key change
-	// (peer_network) or a machine joining or leaving (inventory): a newly paired machine enters the mesh
-	// when it first comes online, which moves only inventory. nil leaves the periodic renewal alone.
+	// networkEvents wakes the signed-network renewal when the server reports a peer, key or mesh membership
+	// change (hostRenewalTopics). nil leaves the periodic renewal alone.
 	networkEvents *machineevents.Subscription
 }
 

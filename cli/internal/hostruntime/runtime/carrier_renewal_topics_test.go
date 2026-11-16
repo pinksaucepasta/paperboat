@@ -34,3 +34,29 @@ func TestCarrierRenewalWakesOnAccessAndPeerNetworkChangesNotInventory(t *testing
 		}
 	}
 }
+
+// Inventory churn anywhere in an account (renames, capabilities, leases) wakes no host renewal however much of it
+// there is; a peer_network change (keys, revocation, a machine entering or leaving the mesh) still does at once.
+func TestHostRenewalIgnoresInventoryChurnButNotPeerNetwork(t *testing.T) {
+	hub, _, plane := eventstest.Start(t, time.Hour, machineevents.TopicPeerNetwork, machineevents.TopicInventory)
+	sub := hub.Subscribe(hostRenewalTopics...)
+	woke := func() bool {
+		select {
+		case <-sub.Changed():
+			return true
+		case <-time.After(300 * time.Millisecond):
+			return false
+		}
+	}
+	woke() // a subscription to a newly known topic may wake once
+	for range 50 {
+		plane.Publish(machineevents.TopicInventory)
+	}
+	if woke() {
+		t.Fatal("inventory churn woke the host's renewal")
+	}
+	plane.Publish(machineevents.TopicPeerNetwork)
+	if !woke() {
+		t.Fatal("a peer_network change did not wake the host's renewal")
+	}
+}

@@ -188,8 +188,8 @@ func (a *Authority) NetworkChanged() {
 }
 
 // RequestUrgentRefresh asks Run to renew now for a change the server announced (a machine event: an access
-// revocation, a peer change). Unlike RequestRefresh it does not wait for the renewal budget; such renewals
-// are spaced by urgentRefreshSpacing instead.
+// revocation, a peer change). Unlike RequestRefresh it may borrow one burst ahead of the renewal budget, and
+// such renewals are spaced by urgentRefreshSpacing.
 func (a *Authority) RequestUrgentRefresh() {
 	select {
 	case a.refreshUrgent <- struct{}{}:

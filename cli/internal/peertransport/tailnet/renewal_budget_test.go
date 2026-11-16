@@ -133,11 +133,10 @@ func TestDirectRefreshStormStaysWithinTheBudget(t *testing.T) {
 	}
 }
 
-// A server-announced change is renewed at once even with the budget spent; announcements inside the spacing wait
-// for its end (still without the budget) and coalesce into one renewal.
-func TestUrgentRefreshSkipsTheBudgetButIsSpaced(t *testing.T) {
-	b := &tokenBucket{refill: time.Hour, burst: 1}
-	useBudget(t, b)
+// A server-announced change is renewed at once even with the budget spent (it borrows one burst ahead);
+// announcements after it coalesce into one renewal that waits for the spacing and then for the budget.
+func TestUrgentRefreshBorrowsOneBurstThenWaitsForTheBudget(t *testing.T) {
+	useBudget(t, &tokenBucket{refill: 4 * time.Second, burst: 1})
 	a, c, signer, _ := networkTestAuthority(t)
 	if err := a.Apply(t.Context(), networkToken(t, signer, c)); err != nil {
 		t.Fatal(err)
@@ -154,19 +153,47 @@ func TestUrgentRefreshSkipsTheBudgetButIsSpaced(t *testing.T) {
 	defer func() { cancel(); <-done }()
 	waitFor(t, 5*time.Second, "first renewal", func() bool { return calls.Load() >= 1 }) // spends the only token
 	a.RequestUrgentRefresh()
-	waitFor(t, 5*time.Second, "urgent renewal with the budget spent", func() bool { return calls.Load() >= 2 })
-	// Three announcements right after it: one renewal, after the spacing, still without the budget (an hour here).
+	waitFor(t, time.Second, "urgent renewal with the budget spent", func() bool { return calls.Load() >= 2 })
+	borrowed := time.Now()
 	a.RequestUrgentRefresh()
 	a.RequestUrgentRefresh()
 	a.RequestUrgentRefresh()
-	time.Sleep(urgentRefreshSpacing / 2)
+	time.Sleep(urgentRefreshSpacing + 500*time.Millisecond)
 	if got := calls.Load(); got != 2 {
-		t.Fatalf("%d renewals; an announcement inside the spacing was not deferred", got)
+		t.Fatalf("%d renewals after %v; an announcement with the budget borrowed did not wait for it", got, time.Since(borrowed))
 	}
-	waitFor(t, urgentRefreshSpacing+3*time.Second, "deferred urgent renewal", func() bool { return calls.Load() >= 3 })
+	waitFor(t, 5*time.Second, "deferred urgent renewal", func() bool { return calls.Load() >= 3 })
 	time.Sleep(onDemandRefreshSpacing + 200*time.Millisecond)
 	if got := calls.Load(); got != 3 {
 		t.Fatalf("%d renewals; the announcements did not coalesce", got)
+	}
+}
+
+// A steady stream of server announcements (churn elsewhere in an account) is held to the renewal budget, not only
+// to the 2 s spacing: an 89-machine account had every endpoint renewing about every 36 s from such churn.
+func TestAnnouncementStormStaysWithinTheBudget(t *testing.T) {
+	useBudget(t, &tokenBucket{refill: 4 * time.Second, burst: 1})
+	a, c, signer, _ := networkTestAuthority(t)
+	if err := a.Apply(t.Context(), networkToken(t, signer, c)); err != nil {
+		t.Fatal(err)
+	}
+	var calls atomic.Int32
+	client := networkAPIFunc{configuration: func(context.Context, string) (string, error) {
+		calls.Add(1)
+		c.Generation++
+		return networkToken(t, signer, c), nil
+	}}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- a.Run(ctx, client, nil) }()
+	defer func() { cancel(); <-done }()
+	for start := time.Now(); time.Since(start) < 8*time.Second; time.Sleep(5 * time.Millisecond) {
+		a.RequestUrgentRefresh()
+	}
+	// The spacing alone allows 1 + 8 s / 2 s = 5 renewals; the budget allows the first token, one borrowed and
+	// one per 4 s refill: 4.
+	if got := calls.Load(); got > 4 || got < 2 {
+		t.Fatalf("%d renewals in 8 s of announcements, want at most 4", got)
 	}
 }
 

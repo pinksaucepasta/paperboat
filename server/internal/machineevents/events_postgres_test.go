@@ -268,6 +268,14 @@ func TestWritesThatChangeWhatAHostCachesPublishTheirTopicsOnPostgres(t *testing.
 	expect("offline", moved(TopicInventory, all, func() { exec(`UPDATE paperboat.user_machines SET state='offline' WHERE id=$1`, server) }), map[string]bool{laptop: false, server: false, outsider: false})
 	exec(`UPDATE paperboat.user_machines SET state='online' WHERE id=$1`, server)
 	expect("heartbeat only", moved(TopicInventory, all, func() { exec(`UPDATE paperboat.user_machines SET last_seen_at=now() WHERE id=$1`, server) }), map[string]bool{laptop: false, server: false})
+	// peer_network: engines renew their signed configuration on it alone, so a machine entering or leaving the mesh
+	// moves it; a rename or an online/offline flip does not (it once woke every endpoint of an account).
+	expect("rename is not the mesh", moved(TopicPeerNetwork, all, func() { exec(`UPDATE paperboat.user_machines SET alias='renamed-again' WHERE id=$1`, server) }), map[string]bool{laptop: false, server: false, outsider: false})
+	expect("offline is not the mesh", moved(TopicPeerNetwork, all, func() { exec(`UPDATE paperboat.user_machines SET state='offline' WHERE id=$1`, server) }), map[string]bool{laptop: false, server: false, outsider: false})
+	expect("leaves the mesh", moved(TopicPeerNetwork, all, func() { exec(`UPDATE paperboat.user_machines SET state='pending' WHERE id=$1`, server) }), map[string]bool{laptop: true, server: true, outsider: false})
+	expect("joins the mesh", moved(TopicPeerNetwork, all, func() { exec(`UPDATE paperboat.user_machines SET state='online' WHERE id=$1`, server) }), map[string]bool{laptop: true, server: true, outsider: false})
+	expect("seat released", moved(TopicPeerNetwork, all, func() { exec(`UPDATE paperboat.user_machines SET seat_state='released' WHERE id=$1`, server) }), map[string]bool{laptop: true, outsider: false})
+	exec(`UPDATE paperboat.user_machines SET seat_state='occupied' WHERE id=$1`, server)
 	services := func(list string) {
 		exec(`INSERT INTO paperboat.machine_service_snapshots(machine_id,installation_generation,boot_id,started_at,generation,services,expires_at,updated_at) VALUES($1,1,'boot-012345678901',now(),1,$2::jsonb,now()+interval '1 hour',now())
  ON CONFLICT(machine_id) DO UPDATE SET services=EXCLUDED.services,expires_at=EXCLUDED.expires_at,updated_at=now()`, server, list)

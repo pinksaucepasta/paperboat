@@ -347,10 +347,10 @@ func (a *Authority) Run(ctx context.Context, client NetworkAPI, report func(erro
 			}
 			earlier(max(0, onDemandRefreshSpacing-time.Since(lastRefresh)))
 		case <-a.refreshUrgent:
-			// A server-announced change (revocation, peer change) is never kept waiting for the budget, only
-			// spaced, so an event storm stays bounded: a request inside the spacing is deferred to its end
-			// (not handed to the budget), and requests while one is pending coalesce into it. A failing server
-			// keeps its backoff.
+			// A server-announced change (revocation, peer change) is renewed at once while the budget can lend
+			// a burst (takeAnnounced), and spaced: a request inside the spacing is deferred to its end, and
+			// requests while one is pending coalesce into it. A storm then waits for tokens like any renewal.
+			// A failing server keeps its backoff.
 			if failures == 0 && !urgent {
 				wait := max(0, urgentRefreshSpacing-time.Since(lastUrgent))
 				lastUrgent, urgent = time.Now().Add(wait), true
@@ -361,7 +361,13 @@ func (a *Authority) Run(ctx context.Context, client NetworkAPI, report func(erro
 			earlier(a.nextRefresh(nil, 0, unusable))
 		case <-timer.C:
 			if a.budgeted() {
-				if wait := renewalBudget.take(time.Now(), urgent); wait > 0 {
+				var wait time.Duration
+				if urgent {
+					wait = renewalBudget.takeAnnounced(time.Now())
+				} else {
+					wait = renewalBudget.take(time.Now(), false)
+				}
+				if wait > 0 {
 					reset(wait)
 					continue
 				}
@@ -532,7 +538,7 @@ func refreshRetryDelay(failures int) time.Duration {
 // down is not asked more often; a local network change ends the backoff (NetworkChanged).
 const unreachedAttempt = 3 * time.Second
 
-// urgentRefreshSpacing bounds the renewals server-announced changes start outside the renewal budget. A revoked
+// urgentRefreshSpacing spaces the renewals server-announced changes start (on top of the renewal budget). A revoked
 // CLI session must end its running exec and terminal within about 2 s, so a revoke that follows another
 // announcement waits at most this long.
 const urgentRefreshSpacing = 2 * time.Second

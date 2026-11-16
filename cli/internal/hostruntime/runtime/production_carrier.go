@@ -166,6 +166,11 @@ func auditCarrierSSH(path string, ssh *managedssh.Host) (*offlineaudit.Queue, er
 // bump), so the 46aa1e11 loop cannot recur. Without a change the carrier renews on the engine's idle cadence (F21-18).
 var carrierRenewalTopics = []machineevents.Topic{machineevents.TopicMachineAccess, machineevents.TopicPeerNetwork}
 
+// hostRenewalTopics wake the host engine's signed-network renewal: peer_network alone, which a machine entering or
+// leaving the mesh moves too (migration 373). Inventory (renames, capabilities, leases anywhere in the account) once
+// woke every endpoint of an 89-machine account about every 36 s (FIX-PERF-SERVER, 2026-11-16).
+var hostRenewalTopics = []machineevents.Topic{machineevents.TopicPeerNetwork}
+
 func (c *ProductionCarrier) Start(ctx context.Context) error {
 	if c == nil || ctx == nil {
 		return ErrProductionInvalid
