@@ -102,7 +102,7 @@ export function RecordingList({ machine: tabMachine }: { machine?: Machine }) {
         ) : (
           <tbody className="divide-y divide-divider border-b border-divider">
             {rows.map((recording) => (
-              <Row key={recording.id} recording={recording} showMachine={!scope} emails={emails} />
+              <Row key={recording.id} recording={recording} showMachine={!scope} emails={personal ? undefined : emails} />
             ))}
           </tbody>
         )}
@@ -123,14 +123,15 @@ export function RecordingList({ machine: tabMachine }: { machine?: Machine }) {
   )
 }
 
-function Row({ recording, showMachine, emails }: { recording: Recording; showMachine: boolean; emails: Map<string, string> }) {
+/** emails is undefined in the personal workspace, where every recording is yours. */
+function Row({ recording, showMachine, emails }: { recording: Recording; showMachine: boolean; emails?: Map<string, string> }) {
   const { dateTime, now } = useTimeFormat(60_000)
   const live = recording.state === "recording"
   const deleted = recording.state === "deleted"
   const ended = recording.ended_at ? Date.parse(recording.ended_at) : now
   // The person recorded: the one who started it by hand, else everyone attached while it ran.
   const people = recording.started_by ? [recording.started_by] : recording.accounts
-  const who = people.map((account) => emails.get(account) ?? account)
+  const who = emails ? people.map((account) => emails.get(account) ?? account) : ["You"]
   const href = `/recordings/${encodeURIComponent(recording.id)}`
   return (
     <tr className="relative h-14 hover:bg-surface [&>td]:px-3" data-recording-id={recording.id}>
