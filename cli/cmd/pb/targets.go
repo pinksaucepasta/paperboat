@@ -391,6 +391,9 @@ func resolveWarmUserMachine(ctx context.Context, requested string) (api.UserMach
 	return api.UserMachine{ID: status.ID, EnvironmentID: status.EnvironmentID, WorkspaceRoot: status.WorkspaceRoot, Alias: status.Alias, Platform: status.Platform, State: "ready", Online: true, InstallationGeneration: int64(status.Generation), SSHUser: status.SSHUser, SSHPort: status.SSHPort, SSHHostKeys: status.SSHHostKeys}, true
 }
 
+// controlPlaneProbeTimeout bounds the health request that decides whether a new terminal asks Paperboat at all.
+const controlPlaneProbeTimeout = 5 * time.Second
+
 // daemonReportsControlPlaneUnavailable is the daemon's own health: its last refresh could not reach Paperboat.
 func daemonReportsControlPlaneUnavailable(ctx context.Context) bool {
 	snapshot, err := loadWarmMachineSnapshot(ctx)

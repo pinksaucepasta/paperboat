@@ -144,9 +144,10 @@ func actionConnectTargetInDirectory(c *command.Context, requested, cwd string) e
 	if strings.TrimSpace(d.cfg.ServerURL) == "" {
 		return commandRejection{reason: commandRejectMissingServer}
 	}
-	// The daemon's report spares a new terminal the request timeouts of a control plane it already knows is down (a
-	// blackholed API holds each of the token refresh and the grant for 30 s).
-	controlPlaneDown := daemonReportsControlPlaneUnavailable(c.Context)
+	// A new terminal does not wait out the request timeouts of a control plane that is down (a blackholed API holds each
+	// of the token refresh, the grant and the ENV lookup for 30 s): the daemon's health says so, or a health request
+	// gets no answer within a few seconds (the daemon may not have noticed yet).
+	controlPlaneDown := daemonReportsControlPlaneUnavailable(c.Context) || !api.ControlPlaneReachable(c.Context, d.cfg.ServerURL, controlPlaneProbeTimeout)
 	var cred config.Credential
 	if !controlPlaneDown {
 		cred, err = d.auth.Credential()
