@@ -126,6 +126,9 @@ the cleanup is complete.
 - `PATCH /v1/machines/{machine_id}/terminal-sessions/{session_id}` accepts
   `{ "name": "api-debugging" }`; only the session owner may rename it. The reserved
   default name cannot change. Renaming preserves the session ID and running process.
+- `POST /v1/machines/{id}/offline-terminal-sessions` is the host's own registration of the same sessions (machine
+  credential and signed proof, body `{session_id, account_id}`): the host registers every offline-created session
+  itself once Paperboat answers, so none stays unlisted because the client that opened it left early.
 - `POST /v1/machines/{machine_id}/terminal-sessions/{session_id}/adopt` registers a session the machine
   started while the client could not reach Paperboat (id `terminal_offline_*`); the machine must be online
   and know it. It is then listed and closed like any other; repeating the call returns the same session.

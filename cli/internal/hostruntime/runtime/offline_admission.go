@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/enrollment"
@@ -14,6 +15,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/managedssh"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/native"
 	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
+	"github.com/pinksaucepasta/paperboat/shared/sessionname"
 )
 
 // offlineAdmission records every offline session decision before the host acts on it (F21-11):
@@ -45,22 +47,48 @@ func offlineAdmission(queue *offlineaudit.Queue, online func() bool) func(contex
 			// The refusal itself cannot be recorded either; the session stays refused.
 			return err
 		}
+		if err == nil && refusal == nil {
+			rememberOfflineTerminal(queue.Adopt, request)
+		}
 		return errors.Join(refusal, err)
 	}
 }
 
-// newOfflineAuditService uploads queue to POST /v1/machines/{id}/audit-backlog with the machine's own credential.
-func newOfflineAuditService(queue *offlineaudit.Queue, controlURL *url.URL, machineID, stateRoot string, transport http.RoundTripper, tokens *enrollment.RenewingTokenSource, operationID func() (string, error), reachable <-chan struct{}) *offlineAuditService {
-	return &offlineAuditService{uploader: &offlineaudit.Uploader{Queue: queue, ServerURL: strings.TrimSuffix(controlURL.String(), "/"), MachineID: machineID,
-		Client: &http.Client{Transport: errorreport.TransportOperation(transport, controlURL.String(), "offline_audit"), CheckRedirect: rejectRuntimePolicyRedirect},
-		Tokens: tokens, Proofs: enrollment.ProofSource{StateRoot: stateRoot}, OperationID: operationID, MinInterval: offlineaudit.UploadInterval, Wake: reachable}}
+// rememberOfflineTerminal queues a terminal session opened without Paperboat (its id says so) for registration: the host
+// tells the server once it answers, so the session is listed even when the client that opened it is gone. Failing to
+// queue it never refuses the session.
+func rememberOfflineTerminal(adopt *offlineaudit.Queue, request native.OfflineAdmission) {
+	id := request.Header.OperationID
+	if adopt == nil || !sessionname.IsOfflineID(id) || adopt.HasOperation(id) {
+		return
+	}
+	event := offlineaudit.Event{Kind: offlineaudit.KindStarted, Capability: request.Capability, PeerEndpointID: request.Peer.EndpointID, PeerAccountID: request.Peer.AccountID, OperationID: id}
+	if err := adopt.Record(event); err != nil {
+		diagnosticlog.TryWarn("an offline terminal session could not be queued for registration with Paperboat", "error", err)
+	}
 }
 
-// offlineAuditService uploads the offline session backlog whenever events are queued.
+// newOfflineAuditService uploads queue to POST /v1/machines/{id}/audit-backlog and registers the offline terminal
+// sessions of queue.Adopt with POST /v1/machines/{id}/offline-terminal-sessions, both with the machine's own credential.
+func newOfflineAuditService(queue *offlineaudit.Queue, controlURL *url.URL, machineID, stateRoot string, transport http.RoundTripper, tokens *enrollment.RenewingTokenSource, operationID func() (string, error), reachable <-chan struct{}) *offlineAuditService {
+	serverURL := strings.TrimSuffix(controlURL.String(), "/")
+	client := &http.Client{Transport: errorreport.TransportOperation(transport, controlURL.String(), "offline_audit"), CheckRedirect: rejectRuntimePolicyRedirect}
+	proofs := enrollment.ProofSource{StateRoot: stateRoot}
+	return &offlineAuditService{reachable: reachable,
+		uploader: &offlineaudit.Uploader{Queue: queue, ServerURL: serverURL, MachineID: machineID, Client: client,
+			Tokens: tokens, Proofs: proofs, OperationID: operationID, MinInterval: offlineaudit.UploadInterval},
+		adopter: &offlineaudit.Adopter{Queue: queue.Adopt, ServerURL: serverURL, MachineID: machineID, Client: client,
+			Tokens: tokens, Proofs: proofs, OperationID: operationID}}
+}
+
+// offlineAuditService uploads the offline session backlog whenever events are queued and registers the sessions opened
+// without Paperboat once it answers.
 type offlineAuditService struct {
-	uploader *offlineaudit.Uploader
-	cancel   context.CancelFunc
-	done     chan struct{}
+	uploader  *offlineaudit.Uploader
+	adopter   *offlineaudit.Adopter
+	reachable <-chan struct{}
+	cancel    context.CancelFunc
+	done      chan struct{}
 }
 
 func (s *offlineAuditService) Start(context.Context) error {
@@ -69,7 +97,30 @@ func (s *offlineAuditService) Start(context.Context) error {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	s.cancel, s.done = cancel, make(chan struct{})
-	go func() { defer close(s.done); s.uploader.Run(ctx) }()
+	// The control plane being reachable again wakes both loops: one signal reaches each.
+	uploadWake, adoptWake := make(chan struct{}, 1), make(chan struct{}, 1)
+	s.uploader.Wake, s.adopter.Wake = uploadWake, adoptWake
+	var running sync.WaitGroup
+	running.Add(3)
+	go func() { defer running.Done(); s.uploader.Run(ctx) }()
+	go func() { defer running.Done(); s.adopter.Run(ctx) }()
+	go func() {
+		defer running.Done()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-s.reachable:
+				for _, wake := range []chan struct{}{uploadWake, adoptWake} {
+					select {
+					case wake <- struct{}{}:
+					default:
+					}
+				}
+			}
+		}
+	}()
+	go func() { running.Wait(); close(s.done) }()
 	return nil
 }
 

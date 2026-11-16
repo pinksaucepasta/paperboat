@@ -137,6 +137,52 @@ func resourceUsageNative(identities machineRequestVerifier, service *resourceusa
 
 // machineAuditBacklog accepts a host's offline session events (PLAN 3b offline-capable authority, F21-11). The
 // machine proof signs the whole body; the path names the same machine.
+// machineOfflineTerminalSession registers a terminal session the machine itself opened while Paperboat was unreachable
+// (the host owns its sessions): signed with the machine's own credential, it names the session and the account that
+// opened it. The account must have terminal access to the machine; the host must confirm the session.
+func machineOfflineTerminalSession(identities machineRequestVerifier, machines *usermachines.Service) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		noStore(w)
+		body, err := io.ReadAll(io.LimitReader(r.Body, 4<<10+1))
+		if err != nil {
+			if expectedHTTPErrorOnly(err, context.Canceled) {
+				return
+			}
+			writeError(w, r, 503, "unavailable", "The registration could not be received; retry.", err)
+			return
+		}
+		var request struct {
+			SessionID string `json:"session_id"`
+			AccountID string `json:"account_id"`
+		}
+		decoder := json.NewDecoder(bytes.NewReader(body))
+		decoder.DisallowUnknownFields()
+		if len(body) > 4<<10 || decoder.Decode(&request) != nil || decoder.Decode(&struct{}{}) != io.EOF || request.SessionID == "" || request.AccountID == "" {
+			writeError(w, r, 400, "invalid_request", "A session id and an account id are required.")
+			return
+		}
+		proof, err := base64.RawURLEncoding.DecodeString(r.Header.Get("X-Paperboat-Machine-Proof"))
+		if err != nil || len(proof) == 0 || identities == nil || machines == nil {
+			writeError(w, r, 401, "unauthenticated", "Current signed runtime identity is required.")
+			return
+		}
+		identity, err := identities.VerifyMachineRequest(r.Context(), strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "), proof, r.Method, r.URL.Path, body)
+		if err != nil {
+			writeMachineProofFailure(w, r, err, "unauthenticated", "Current signed runtime identity is required.")
+			return
+		}
+		if r.PathValue("id") != identity.MachineID {
+			writeError(w, r, 403, "forbidden", "A machine registers only its own sessions.")
+			return
+		}
+		item, err := machines.AdoptOfflineTerminalSession(r.Context(), request.AccountID, identity.MachineID, request.SessionID)
+		if userMachineTerminalSessionError(w, r, err) {
+			return
+		}
+		writeJSON(w, 200, SuccessResponse{Data: item})
+	}
+}
+
 func machineAuditBacklog(identities machineRequestVerifier, machines *usermachines.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		noStore(w)

@@ -54179,6 +54179,82 @@
         "operationId": "post_v1_machines_id_audit_backlog"
       }
     },
+    "/v1/machines/{id}/offline-terminal-sessions": {
+      "post": {
+        "summary": "Register an offline-created terminal session (host)",
+        "description": "A host registers a terminal session it opened while Paperboat was unreachable (id terminal_offline_*), naming the session and the account that opened it; the host owns its sessions, so none stays unlisted because the client that opened it left early. Authenticated with the machine-control bearer credential and a signed machine proof over the exact body; a machine registers only its own sessions. The account must have terminal access to the machine and the machine must be online and know the session; the session is then listed and follows the same rules as any other. Repeating the call returns the same session.",
+        "security": [],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "session_id",
+                  "account_id"
+                ],
+                "properties": {
+                  "session_id": {
+                    "type": "string"
+                  },
+                  "account_id": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Registered, or already registered.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/TerminalSessionCreated"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "operationId": "post_v1_machines_id_offline_terminal_sessions"
+      }
+    },
     "/v1/teams/{team_id}/members": {
       "get": {
         "operationId": "team_members",

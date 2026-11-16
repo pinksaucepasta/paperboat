@@ -77,9 +77,24 @@ type Queue struct {
 	mu      sync.Mutex
 	events  []Event
 	changed chan struct{}
+	// Adopt holds the terminal sessions created while Paperboat was unreachable that the server has not been told
+	// about yet (an event's OperationID is the session id, PeerAccountID its owner); the Adopter registers them once
+	// Paperboat answers. It lives beside the backlog file so that every holder of the backlog also holds it.
+	Adopt *Queue
 }
 
 func Open(path string, now func() time.Time) (*Queue, error) {
+	q, err := open(path, now)
+	if err != nil {
+		return nil, err
+	}
+	if q.Adopt, err = open(path+".adopt", now); err != nil {
+		return nil, err
+	}
+	return q, nil
+}
+
+func open(path string, now func() time.Time) (*Queue, error) {
 	if now == nil {
 		now = serverclock.Now
 	}
@@ -151,6 +166,18 @@ func (q *Queue) Remove(n int) error {
 	}
 	q.events = next
 	return nil
+}
+
+// HasOperation reports whether an event for operationID is queued.
+func (q *Queue) HasOperation(operationID string) bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	for _, event := range q.events {
+		if event.OperationID == operationID {
+			return true
+		}
+	}
+	return false
 }
 
 func (q *Queue) Len() int {

@@ -378,6 +378,7 @@ func NewRouter(opts Options) http.Handler {
 		if opts.ResourceUsage != nil {
 			mux.HandleFunc("POST /v1/usage/native", resourceUsageNative(opts.RuntimeIdentity, opts.ResourceUsage))
 			mux.HandleFunc("POST /v1/machines/{id}/audit-backlog", machineAuditBacklog(opts.RuntimeIdentity, opts.Machines))
+			mux.HandleFunc("POST /v1/machines/{id}/offline-terminal-sessions", machineOfflineTerminalSession(opts.RuntimeIdentity, opts.Machines))
 			if opts.Recordings != nil {
 				mux.HandleFunc("GET "+recording.PolicyPath, machineRecordingPolicy(opts.RuntimeIdentity, opts.Recordings))
 				registerMachineArchiveRoutes(mux, opts.RuntimeIdentity, opts.Recordings)

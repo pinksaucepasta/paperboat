@@ -239,3 +239,24 @@ func TestExecEndAuditQueuesOutcomeExitCodeAndDuration(t *testing.T) {
 		t.Fatal("a host without an audit queue got an exec end recorder")
 	}
 }
+
+// A terminal session opened without Paperboat (its id says so) is queued for registration so the host can tell the
+// server once it answers; a refusal, an exec and a repeated attach are not queued (again).
+func TestOfflineAdmissionQueuesOfflineTerminalSessionsForRegistration(t *testing.T) {
+	queue, err := offlineaudit.Open(filepath.Join(t.TempDir(), "offline-audit.json"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := func(operation string, allowed bool) native.OfflineAdmission {
+		return native.OfflineAdmission{Peer: tailnet.NetworkBinding{AccountID: "acct", EndpointID: "cli_1"}, Header: streamauth.Header{OperationID: operation}, Capability: "terminal", Allowed: allowed}
+	}
+	admit := offlineAdmission(queue, offlineHost)
+	_ = admit(context.Background(), request("terminal_offline_a", true))
+	_ = admit(context.Background(), request("terminal_offline_a", true)) // a reattach
+	_ = admit(context.Background(), request("terminal_offline_refused", false))
+	_ = admit(context.Background(), request("op_exec_1", true))
+	got := queue.Adopt.Oldest(10)
+	if len(got) != 1 || got[0].OperationID != "terminal_offline_a" || got[0].PeerAccountID != "acct" {
+		t.Fatalf("queued for registration: %+v, want only terminal_offline_a owned by acct", got)
+	}
+}

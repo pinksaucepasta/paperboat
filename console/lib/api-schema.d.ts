@@ -7955,6 +7955,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/machines/{id}/offline-terminal-sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Register an offline-created terminal session (host)
+         * @description A host registers a terminal session it opened while Paperboat was unreachable (id terminal_offline_*), naming the session and the account that opened it; the host owns its sessions, so none stays unlisted because the client that opened it left early. Authenticated with the machine-control bearer credential and a signed machine proof over the exact body; a machine registers only its own sessions. The account must have terminal access to the machine and the machine must be online and know the session; the session is then listed and follows the same rules as any other. Repeating the call returns the same session.
+         */
+        post: operations["post_v1_machines_id_offline_terminal_sessions"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/teams/{team_id}/members": {
         parameters: {
             query?: never;
@@ -31680,6 +31700,42 @@ export interface operations {
             401: components["responses"]["Error"];
             403: components["responses"]["Error"];
             503: components["responses"]["Error"];
+        };
+    };
+    post_v1_machines_id_offline_terminal_sessions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    session_id: string;
+                    account_id: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Registered, or already registered. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["TerminalSessionCreated"];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
         };
     };
     team_members: {
