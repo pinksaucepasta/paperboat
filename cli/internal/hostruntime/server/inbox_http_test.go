@@ -9,7 +9,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -30,8 +29,8 @@ func inboxFixture(t *testing.T, claimsFor func(id, class string) auth.Claims) (h
 func inboxFixtureWithFile(t *testing.T, file string, claimsFor func(id, class string) auth.Claims) (http.Handler, string) {
 	t.Helper()
 	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, file), []byte("hello inbox"), 0o600); err != nil {
-		t.Skip("this OS cannot store", file)
+	if err := os.WriteFile(filepath.Join(root, file), []byte("hello inbox"), 0o600); err != nil || !storedAs(root, file) {
+		t.Skip("this OS cannot store", file) // NTFS refuses ':' and silently drops a trailing dot
 	}
 	handler, err := NewInboxHandler(InboxHandlerConfig{
 		MachineID: "machine_1", InboxPath: func() (string, error) { return root, nil },
@@ -87,17 +86,27 @@ func TestInboxHandlerStreamsTheFileBoundByTheCredential(t *testing.T) {
 
 // The download is announced under a name every OS's browser keeps as it is (the Inbox keeps the original).
 func TestInboxHandlerAnnouncesAPortableDownloadName(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("NTFS cannot hold these names, so a Windows Inbox never has them (its receiver refuses them)")
-	}
 	for name, want := range map[string]string{"trail.": "trail_", "CON.txt": "_CON.txt", "a:b.txt": "a_b.txt"} {
-		handler, _ := inboxFixtureWithFile(t, name, goodInboxClaims)
-		recorder := httptest.NewRecorder()
-		handler.ServeHTTP(recorder, inboxRequest(http.MethodGet, inbox.FileID(name)))
-		if got := recorder.Header().Get("Content-Disposition"); recorder.Code != http.StatusOK || got != "attachment; filename*=UTF-8''"+want {
-			t.Fatalf("%q: status=%d disposition=%q, want %q", name, recorder.Code, got, want)
+		t.Run(name, func(t *testing.T) {
+			handler, _ := inboxFixtureWithFile(t, name, goodInboxClaims)
+			recorder := httptest.NewRecorder()
+			handler.ServeHTTP(recorder, inboxRequest(http.MethodGet, inbox.FileID(name)))
+			if got := recorder.Header().Get("Content-Disposition"); recorder.Code != http.StatusOK || got != "attachment; filename*=UTF-8''"+want {
+				t.Fatalf("%q: status=%d disposition=%q, want %q", name, recorder.Code, got, want)
+			}
+		})
+	}
+}
+
+// storedAs reports whether root holds a file named exactly name.
+func storedAs(root, name string) bool {
+	entries, _ := os.ReadDir(root)
+	for _, entry := range entries {
+		if entry.Name() == name {
+			return true
 		}
 	}
+	return false
 }
 
 func TestInboxHandlerDeletesOneFile(t *testing.T) {
