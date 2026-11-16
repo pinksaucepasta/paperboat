@@ -1,0 +1,4 @@
+site-check (bun run check:site) on the built site incl. /docs/put-any-server-behind-paperboat/, commands checked against pb dev-432169341; 2026-11-16
+$ node checks/site-check.mjs
+site-check: 217 commands checked against /home/ubuntu/pb-builds/dev-432169341/pb-linux-arm64
+site-check: 39 pages, 0 problems

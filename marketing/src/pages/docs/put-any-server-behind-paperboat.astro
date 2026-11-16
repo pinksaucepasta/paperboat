@@ -1,0 +1,332 @@
+---
+import Page from "../../layouts/Page.astro"
+import Head from "../../components/Head.astro"
+import Sheet from "../../components/Sheet.astro"
+import Code from "../../components/Code.astro"
+import Closing from "../../components/Closing.astro"
+import { localDomain } from "../../site"
+import { breadcrumbSchema } from "../../schema"
+
+const sections = [
+  ["forwards", "What Paperboat sends"],
+  ["origin", "Choose the origin"],
+  ["proxies", "Reverse proxies"],
+  ["coolify", "Coolify"],
+  ["frameworks", "Frameworks"],
+  ["grpc", "gRPC, WebSocket and streams"],
+  ["limits", "Uploads and timeouts"],
+  ["private", "Private access"],
+]
+
+const forwarded = [
+  ["X-Forwarded-Proto", "Always https: the visitor reached the edge over HTTPS."],
+  ["X-Forwarded-Host", "The public name the visitor typed."],
+  ["X-Forwarded-Port", "Always 443."],
+  ["X-Forwarded-For, X-Real-IP", "The visitor's address, one value. Anything the visitor sent under these names is dropped first."],
+  ["Forwarded", "The same facts in the standard form: for, proto and host."],
+  ["Host", "The public name, unchanged. Override it with --host-header when the app has a host allow-list."],
+  ["Paperboat-Visitor-Assertion", "Only on private and team routes: a signed token naming the signed-in visitor. Public routes never carry it."],
+]
+
+const origins = [
+  ["Plain HTTP, the simplest", "--to http://localhost:80"],
+  ["HTTP/2 without TLS (gRPC servers)", "--to h2c://localhost:50051"],
+  ["Caddy tls internal, or an origin with its own private CA", "--to https://localhost:443 --tls-ca <root.crt>"],
+  ["A long-lived self-signed certificate (NAS, Proxmox, router)", "--to https://localhost:8006 --tls-verification pinned"],
+  ["Any certificate on the same machine, when you just want it to work", "--to https://localhost:443 --tls-verification insecure"],
+  ["A real certificate from a DNS-01 challenge", "--to https://localhost:443 (the default verification)"],
+]
+
+const route = [
+  { lines: ["$ pb tunnel create api --from http://localhost:80 --wait"], note: "A tunnel to the proxy's port 80. A preview takes the same target: pb preview http://localhost:80." },
+  { lines: ["$ pb tunnel route add api --name web --to https://localhost:443 --tls-ca caddy-root.crt --wait"], note: "Add a second route, or use another origin, with the flags in the table." },
+  { lines: ["$ pb preview http://localhost:3000 --host-header localhost"], note: "The app sees Host: localhost; the visitor keeps the public name." },
+]
+
+const nginx = `# inside the server block that answers the tunnel
+set_real_ip_from 127.0.0.1;
+real_ip_header X-Forwarded-For;
+
+location / {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Proto $http_x_forwarded_proto;
+    proxy_buffering off;
+    client_max_body_size 100m;
+}`
+
+const caddy = `{
+    servers {
+        trusted_proxies static 127.0.0.1/32 ::1/128
+    }
+}
+
+# Plain http, so Caddy does not redirect the tunnel to HTTPS.
+http://app.example.test {
+    reverse_proxy 127.0.0.1:3000
+}`
+
+const traefik = `# traefik.yml (static configuration)
+entryPoints:
+  web:
+    address: ":80"
+    forwardedHeaders:
+      trustedIPs:
+        - "127.0.0.1/32"
+        - "::1/128"`
+
+const apache = `RemoteIPHeader X-Forwarded-For
+RemoteIPInternalProxy 127.0.0.1
+SetEnvIf X-Forwarded-Proto https HTTPS=on
+
+# Only for an app that does not answer Expect: 100-continue (HTTP/1.0 servers).
+Proxy100Continue Off`
+
+const frameworks = [
+  ["Vite", "Host allow-list", "server.allowedHosts: [\".example.test\"] (and preview.allowedHosts), or run the preview with --host-header localhost."],
+  ["Next.js", "Dev origins", "allowedDevOrigins: [\"app.example.test\"] in next.config, so the dev server accepts the public name."],
+  ["Django", "Host, scheme, CSRF", "ALLOWED_HOSTS, CSRF_TRUSTED_ORIGINS = [\"https://app.example.test\"], SECURE_PROXY_SSL_HEADER = (\"HTTP_X_FORWARDED_PROTO\", \"https\")."],
+  ["Rails", "Host, scheme", "config.hosts << \"app.example.test\" and config.assume_ssl = true."],
+  ["Express", "Trusted proxy", "app.set(\"trust proxy\", \"loopback\"), then req.protocol, req.hostname and req.ip are the visitor's."],
+  ["Flask", "Trusted proxy", "app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)."],
+  ["Laravel", "Trusted proxy", "$middleware->trustProxies(at: '127.0.0.1') in bootstrap/app.php."],
+  ["Spring Boot", "Trusted proxy", "server.forward-headers-strategy=native."],
+  ["ASP.NET Core", "Trusted proxy", "app.UseForwardedHeaders with XForwardedFor and XForwardedProto; loopback is trusted by default."],
+]
+
+const limits = [
+  ["Request body", "100 MB per request; larger is refused with 413.", "Upload in chunks, or use a TCP route for bulk transfer."],
+  ["Request headers", "32 KB in total; larger is refused with 431.", "Trim cookies."],
+  ["First byte from your app", "100 seconds; slower is answered with 504 and the code origin_timeout.", "Answer early and stream, or return a job id."],
+  ["Stalled upload", "A body that stops arriving for 60 seconds is answered with 408.", "Retry the upload."],
+]
+
+const front = [
+  { lines: ["$ pb port front-desk homelab 443 https"], note: "Names that match no port go to the proxy on port 443 over HTTPS. The default is port 80 over http." },
+  { lines: ["$ pb port name set grafana 3000 --machine homelab"], note: `A name that matches a port goes straight there: https://grafana.homelab.${localDomain}.` },
+]
+---
+
+<Page
+  title="Put any server behind Paperboat | Paperboat"
+  description="Settings for Caddy, Traefik, nginx, Apache, Coolify and common frameworks behind a Paperboat preview or tunnel."
+  schema={[breadcrumbSchema(Astro.site, [["Docs", "/docs/"], ["Put any server behind Paperboat", "/docs/put-any-server-behind-paperboat/"]])]}
+>
+  <Head title="Put any server behind Paperboat" here="Put any server behind Paperboat" trail={[["Docs", "/docs/"]]}>
+    <p>
+      A <a href="/features/previews/">preview</a> or <a href="/features/tunnels/">tunnel</a> sends each request to a port on your machine. Most
+      servers work as they are. These are the settings for the ones that do not: a reverse proxy, a framework that checks the host name, a
+      streaming or gRPC service.
+    </p>
+  </Head>
+
+  <div class="wrap layout">
+    <nav class="toc" aria-label="On this page">
+      <ol>
+        {sections.map(([id, label]) => <li><a href={`#${id}`}>{label}</a></li>)}
+      </ol>
+    </nav>
+
+    <div class="body">
+      <section id="forwards" aria-labelledby="forwards-title">
+        <h2 class="h2" id="forwards-title">What Paperboat sends</h2>
+        <p class="lede">
+          Paperboat answers the public name over HTTPS and tells your server so. The request reaches it from the same machine (loopback), which
+          most frameworks already trust, so redirects, absolute links, <code>Secure</code> cookies and CSRF origin checks work without changes.
+        </p>
+        <div class="scroll">
+          <table class="facts wide">
+            <thead><tr><th scope="col">Header</th><th scope="col">Value</th></tr></thead>
+            <tbody>
+              {forwarded.map(([name, value]) => <tr><th scope="row"><code>{name}</code></th><td>{value}</td></tr>)}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="origin" aria-labelledby="origin-title">
+        <h2 class="h2" id="origin-title">Choose the origin</h2>
+        <p class="lede">
+          Your server does not need a public certificate: Paperboat holds the certificate for the public name. Behind a tunnel your server cannot
+          get one by HTTP-01 or TLS-ALPN-01 either, because Paperboat answers for the name. Pick the row that matches your server.
+        </p>
+        <div class="scroll">
+          <table class="facts wide">
+            <thead><tr><th scope="col">Your server</th><th scope="col">Route</th></tr></thead>
+            <tbody>
+              {origins.map(([name, flags]) => <tr><th scope="row">{name}</th><td><code>{flags}</code></td></tr>)}
+            </tbody>
+          </table>
+        </div>
+        <Sheet steps={route} />
+      </section>
+
+      <section id="proxies" aria-labelledby="proxies-title">
+        <h2 class="h2" id="proxies-title">Reverse proxies</h2>
+        <p class="lede">
+          A proxy in front of your app decides what the app sees. Without the trusted-proxy line it replaces the visitor's address with its own, so
+          every visitor looks like one address. If the proxy's port 80 redirects to HTTPS, point the route at its HTTPS port instead.
+        </p>
+        <h3 class="h3">nginx</h3>
+        <p>Use <code>$http_x_forwarded_proto</code>, not <code>$scheme</code>, which says http. Without <code>client_max_body_size</code> nginx refuses bodies over 1 MB.</p>
+        <Code name="nginx.conf" text={nginx} />
+        <h3 class="h3">Caddy</h3>
+        <p>Serve the site as <code>http://name</code>, or use <code>auto_https disable_redirects</code> on the port the tunnel uses.</p>
+        <Code name="Caddyfile" text={caddy} />
+        <h3 class="h3">Traefik</h3>
+        <p>Add the Docker bridge to <code>trustedIPs</code> if Traefik runs in a container. Put the HTTP-to-HTTPS redirect only on entry points the tunnel does not use.</p>
+        <Code name="traefik.yml" text={traefik} />
+        <h3 class="h3">Apache</h3>
+        <p>Needs <code>mod_remoteip</code> and <code>mod_setenvif</code>. Guard any <code>RewriteCond %{"{HTTPS}"} off</code> redirect with the <code>HTTPS=on</code> variable set here.</p>
+        <Code name="apache.conf" text={apache} />
+      </section>
+
+      <section id="coolify" aria-labelledby="coolify-title">
+        <h2 class="h2" id="coolify-title">Coolify</h2>
+        <div class="prose">
+          <p>
+            Coolify runs Traefik (or Caddy) as its proxy and picks the app by host name. Paperboat keeps the public name as the host, so set the
+            app's domain in Coolify to the name you open: your tunnel's address or a custom domain.
+          </p>
+          <p>
+            Coolify redirects http to https on a domain with an https address, so point the route at the proxy's HTTPS port with the certificate
+            options from the table above: <code>--to https://localhost:443</code> with <code>--tls-verification insecure</code> (the proxy is on the
+            same machine). Paperboat sends the public name as the TLS server name, so the proxy picks the right site.
+          </p>
+          <p>
+            For a preview, or when the app's domain in Coolify is not the public name, send the name Coolify knows:
+            <code>pb preview http://localhost:80 --host-header app.example.test</code>.
+          </p>
+          <p>For your own machines only, use the <a href="#private">front desk</a>: no public address is needed.</p>
+        </div>
+      </section>
+
+      <section id="frameworks" aria-labelledby="frameworks-title">
+        <h2 class="h2" id="frameworks-title">Frameworks</h2>
+        <p class="lede">
+          Most frameworks trust loopback, so the forwarded headers just work. These are the ones that check the host name or need one setting for
+          the visitor's address. Use <code>--host-header</code> instead of changing a dev server's allow-list.
+        </p>
+        <div class="scroll">
+          <table class="facts wide">
+            <thead><tr><th scope="col">Framework</th><th scope="col">Setting for</th><th scope="col">Configure</th></tr></thead>
+            <tbody>
+              {frameworks.map(([name, what, how]) => <tr><th scope="row">{name}</th><td>{what}</td><td><code>{how}</code></td></tr>)}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="grpc" aria-labelledby="grpc-title">
+        <h2 class="h2" id="grpc-title">gRPC, WebSocket and streams</h2>
+        <div class="prose">
+          <p>
+            WebSocket upgrades, server-sent events and streamed responses pass through, so AI token streams arrive as they are produced. Turn off
+            response buffering in any proxy in between (<code>proxy_buffering off</code> in nginx).
+          </p>
+          <p>
+            gRPC passes through with its trailers. Clients connect to the public name on port 443 over TLS. Point the route at a plain HTTP/2
+            server with <code>--to h2c://localhost:50051</code>; an https origin works as well.
+          </p>
+          <p>gRPC-Web is not tested; if your proxy translates it to gRPC, route to the proxy as to any HTTP origin.</p>
+        </div>
+      </section>
+
+      <section id="limits" aria-labelledby="limits-title">
+        <h2 class="h2" id="limits-title">Uploads and timeouts</h2>
+        <p class="lede">These are the defaults of Paperboat's edge; an edge you host yourself can change them.</p>
+        <div class="scroll">
+          <table class="facts wide">
+            <thead><tr><th scope="col">Limit</th><th scope="col">Value</th><th scope="col">If you hit it</th></tr></thead>
+            <tbody>
+              {limits.map(([name, value, fix]) => <tr><th scope="row">{name}</th><td>{value}</td><td>{fix}</td></tr>)}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="private" aria-labelledby="private-title">
+        <h2 class="h2" id="private-title">Private access</h2>
+        <p class="lede">
+          On your own machines a proxy needs no public address. <code>https://app.homelab.{localDomain}</code> goes to the port named
+          <code>app</code>; a name no port has goes to the machine's <em>front desk</em>, the proxy that knows it. The proxy sees the name the
+          browser typed as its Host.
+        </p>
+        <Sheet steps={front} />
+      </section>
+    </div>
+  </div>
+
+  <Closing />
+</Page>
+
+<style>
+  .layout {
+    display: grid;
+    gap: var(--s7);
+    padding-bottom: var(--section);
+  }
+
+  .toc ol {
+    display: grid;
+    padding-block: var(--s3);
+    border-block: 1px solid var(--rule);
+    font-size: var(--text-ui);
+  }
+
+  .toc a {
+    display: flex;
+    align-items: center;
+    min-height: 36px;
+    color: var(--fog);
+  }
+
+  .toc a:hover {
+    color: var(--ink);
+  }
+
+  .body {
+    display: grid;
+    gap: var(--s8);
+    min-width: 0;
+  }
+
+  .body > section {
+    display: grid;
+    gap: var(--s5);
+    min-width: 0;
+  }
+
+  .body :global(.prose),
+  .body .lede {
+    min-width: 0;
+  }
+
+  .body p code,
+  .body .lede code {
+    white-space: normal; /* long flags must wrap on a phone */
+    overflow-wrap: anywhere;
+  }
+
+  .body p a {
+    color: var(--cobalt);
+  }
+
+  @media (min-width: 1000px) {
+    .layout {
+      grid-template-columns: 220px minmax(0, 1fr);
+      gap: var(--s8);
+      align-items: start;
+    }
+
+    .toc {
+      position: sticky;
+      top: calc(var(--header) + var(--s5));
+    }
+
+    .toc ol {
+      border: 0;
+      padding: 0;
+    }
+  }
+</style>

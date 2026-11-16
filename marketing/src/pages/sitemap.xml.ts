@@ -13,6 +13,7 @@ export const paths = [
   "/pricing/",
   "/security/",
   "/docs/",
+  "/docs/put-any-server-behind-paperboat/",
   "/report-abuse/",
 ]
 
