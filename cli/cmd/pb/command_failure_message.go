@@ -372,7 +372,7 @@ var localAPICodeShape = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
 // transferLimitMessage says which transfer limit a send exceeded and by how much. Nothing was sent.
 func transferLimitMessage(limit *filetransfer.LimitError) string {
 	if limit.Scope != filetransfer.LimitBatchFiles && limit.Limit == api.AutomaticTransferLimit {
-		return fmt.Sprintf("This transfer is %s. Automatic sends up to 2 GB. Use --unlimited to send directly or through your own relay. Nothing was sent.", transferGigabytes(limit.Value))
+		return fmt.Sprintf("This transfer is %s. Automatic sends up to 2 GB. Use --unlimited to send directly or through your own relay. Nothing was sent.", transferGigabytes(limit.Value, limit.Limit))
 	}
 	switch limit.Scope {
 	case filetransfer.LimitBatchFiles:
@@ -384,8 +384,13 @@ func transferLimitMessage(limit *filetransfer.LimitError) string {
 }
 
 // transferGigabytes is a size in decimal gigabytes, as the Automatic bound (2 GB = 2,000,000,000 bytes) is stated.
-func transferGigabytes(bytes int64) string {
-	return fmt.Sprintf("%.1f GB", float64(bytes)/1e9)
+// A size just over the bound would round down to the bound ("2.0 GB" refused for a 2 GB limit), so it is stated in bytes.
+func transferGigabytes(bytes, limit int64) string {
+	text := fmt.Sprintf("%.1f GB", float64(bytes)/1e9)
+	if bytes > limit && fmt.Sprintf("%.1f", float64(bytes)/1e9) <= fmt.Sprintf("%.1f", float64(limit)/1e9) {
+		return fmt.Sprintf("%d bytes", bytes)
+	}
+	return text
 }
 
 func transferSize(bytes int64) string {

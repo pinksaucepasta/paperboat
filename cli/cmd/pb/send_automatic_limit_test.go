@@ -36,7 +36,7 @@ func TestAutomaticSendBoundIsTheBatchTotal(t *testing.T) {
 	if err == nil || !asLimit(err, &limit) {
 		t.Fatalf("2,000,000,001 bytes accepted: %v", err)
 	}
-	if message := transferLimitMessage(limit); message != "This transfer is 2.0 GB. Automatic sends up to 2 GB. Use --unlimited to send directly or through your own relay. Nothing was sent." {
+	if message := transferLimitMessage(limit); message != "This transfer is 2000000001 bytes. Automatic sends up to 2 GB. Use --unlimited to send directly or through your own relay. Nothing was sent." {
 		t.Fatalf("message=%q", message)
 	}
 	big := &filetransfer.LimitError{Scope: filetransfer.LimitBatchBytes, Value: 3_400_000_000, Limit: api.AutomaticTransferLimit}
