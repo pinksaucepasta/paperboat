@@ -972,3 +972,36 @@ rcptw   rcptw   1 / 1      2027-02-14   5m ago
 --- 11:24:43 (creator) pb machine list / pb recipe list ---
 rcp-w  personal   online                      terminal,exec,
 rcptw   rcptw   0 / 1      2027-02-14   9m ago
+
+################ f26-02-M5.txt (macOS headless pair, reach, vault, preview)
+=== pbmac2 (macOS 26.6.2, user admin, over SSH, no unlocked Keychain), server .31, client dev-558f58ef1, 2026-11-16T12:17:28Z ===
+$ pb install (dev-558f58ef1, includes db7e1663d)
+Installed Paperboat dev-558f58ef1 at /Users/admin/.local/bin/pb. Background update checks: false. Enrollment is unchanged.
+  ▄▄▝▀▀▀▀▀▘▄▄   Version dev-558f58ef1
+$ hostname
+ManagedlMachine.lan
+$ PB_RECIPE=<current rcpx token> pb pair   [no --name]
+Paperboat machine runtime is ready.
+Set up managedlmachine (machine_28cf0686-d6c2-4fc2-add3-2919eeb7dbfd)
+(took 16 s)
+$ PB_RECIPE=<current rcpx token> pb pair (again)
+This machine is already paired; nothing to do.
+$ pb machine list (this machine)
+managedlmachine  personal   online  terminal,exec,managed_ssh,files,preview_manage,tunnel_manage,private_access,manage  
+$ pb exec rcp-l -- hostname   [tag:rcpx, exec allowed]
+rcp-l
+$ pb ssh --user tester rcp-l -- hostname   [managed_ssh not in allow]
+Connection closed by UNKNOWN port 65535
+$ pb env run -- sh -c 'echo RCP_SECRET=$RCP_SECRET'
+RCP_SECRET=vault-value-1
+$ pb recipe show rcpx (machines)
+  managedlmachine   online   applied revision 2   now
+  rcp-l             online   applied revision 2   now
+  rcp-w             online   applied revision 2   now
+$ pb ssh --user tester rcp-l -- hostname   [managed_ssh not in allow]
+pb: you do not have SSH access to this machine; ask a team admin to grant it. Support reference: support_a7065d6b-90a0-49f7-8336-f8e593109449. Run `pb bugreport --upload` to send the details.
+Connection closed by UNKNOWN port 65535
+$ pb machine list --json (this machine tags)
+  File "<string>", line 1, in <module>
+  File "<string>", line 1, in <listcomp>
+AttributeError: 'str' object has no attribute 'get'
