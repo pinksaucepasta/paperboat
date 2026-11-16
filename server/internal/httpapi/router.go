@@ -254,7 +254,6 @@ func NewRouter(opts Options) http.Handler {
 			mux.Handle("GET /v1/previews/{preview_id}", previewRead(previewLeaseGet(opts.PreviewLeases)))
 			mux.Handle("DELETE /v1/previews/{preview_id}", previewMutation(previewLeaseStop(opts.PreviewLeases, opts.RuntimeIdentity)))
 			mux.Handle("POST /v1/previews/{preview_id}/lease/renew", previewMutation(previewLeaseRenew(opts.PreviewLeases, opts.RuntimeIdentity)))
-			mux.Handle("POST /v1/preview-lease-renewals", previewMutation(previewLeaseRenewBatch(opts.PreviewLeases, opts.RuntimeIdentity)))
 			mux.Handle("GET /v1/previews/{preview_id}/events", previewRead(previewTunnelEvents(opts.PreviewTunnelAPI, "preview_lease", "preview_id")))
 			if opts.IPRules != nil {
 				mux.Handle("GET /v1/previews/{preview_id}/ip-rules", previewRead(ipRules(opts.IPRules, "preview", "preview_id", false)))

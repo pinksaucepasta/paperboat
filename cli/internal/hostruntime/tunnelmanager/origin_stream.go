@@ -211,15 +211,17 @@ func (f OriginStreamForwarder) serve(ctx context.Context, active StreamSource, i
 			continue
 		}
 		permit := permits[route.ID]
+		select {
+		case permit <- struct{}{}:
+		default:
+			_ = stream.Close()
+			continue
+		}
 		running.wg.Add(1)
 		go func() {
 			defer running.wg.Done()
-			defer stream.Close()
-			// The accept loop never waits: a full route makes only this stream wait for the permit.
-			if !acquireRoutePermit(ctx, permit, routePermitWait) {
-				return
-			}
 			defer func() { <-permit }()
+			defer stream.Close()
 			stopCancel := context.AfterFunc(ctx, func() { _ = stream.Close() })
 			defer stopCancel()
 			streamCtx := ctx
@@ -238,30 +240,6 @@ func (f OriginStreamForwarder) serve(ctx context.Context, active StreamSource, i
 				_ = f.serveHTTP(streamCtx, bounded, route, transport)
 			}
 		}()
-	}
-}
-
-// routePermitWait is how long a stream offered to a full route waits for a permit before it is refused. A
-// route near its limit frees a permit within milliseconds when clients disconnect, so a second burst
-// that arrives right after a near-full one is served, not refused (F21-168). It matches the edge's
-// stream permit wait (edge/internal/datacarrier streamPermitWait).
-const routePermitWait = time.Second
-
-func acquireRoutePermit(ctx context.Context, permit chan struct{}, wait time.Duration) bool {
-	select {
-	case permit <- struct{}{}:
-		return true
-	default:
-	}
-	timer := time.NewTimer(wait)
-	defer timer.Stop()
-	select {
-	case permit <- struct{}{}:
-		return true
-	case <-timer.C:
-		return false
-	case <-ctx.Done():
-		return false
 	}
 }
 

@@ -33,3 +33,19 @@ func TestUnknownTerminalSessionErrorNamesTheLookupAndTheRecovery(t *testing.T) {
 		}
 	}
 }
+
+// Resolving a session by name must not make the server probe every host: one round trip and one write per session.
+func TestResolveTerminalSessionAsksForStoredRows(t *testing.T) {
+	var query string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		query = r.URL.RawQuery
+		writeAPIData(t, w, map[string]any{"items": []map[string]any{{"id": "umts_1", "name": "shell-1"}},
+			"pagination": map[string]any{"limit": 200, "offset": 0, "total": 1, "next_offset": nil}})
+	}))
+	defer srv.Close()
+	client := api.New(srv.URL, config.Credential{}, srv.Client())
+	session, err := resolveTerminalSession(context.Background(), client, environmentTarget{id: "um_1"}, "shell-1")
+	if err != nil || session.ID != "umts_1" || !strings.Contains(query, "live=false") {
+		t.Fatalf("session=%q err=%v query=%q, want live=false", session.ID, err, query)
+	}
+}

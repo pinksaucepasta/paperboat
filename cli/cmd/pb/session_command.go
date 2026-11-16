@@ -230,7 +230,7 @@ func sessionClose(c *command.Context) error {
 		return err
 	}
 	if all {
-		sessions, err := listTerminalSessionsForTarget(c.Context, client, target)
+		sessions, err := listStoredTerminalSessionsForTarget(c.Context, client, target)
 		if err != nil {
 			return friendlyCommandError(err)
 		}
@@ -333,7 +333,7 @@ func sessionDelete(c *command.Context) error {
 		return err
 	}
 	if all {
-		sessions, err := listTerminalSessionsForTarget(c.Context, client, target)
+		sessions, err := listStoredTerminalSessionsForTarget(c.Context, client, target)
 		if err != nil {
 			return friendlyCommandError(err)
 		}

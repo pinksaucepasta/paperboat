@@ -238,12 +238,14 @@ line (rows, commit, image tag) and keep the previous image tag until the smoke r
 `deploy/gated-deploy.py` on oracle, which holds the deploy lock from before the switch until the verdict:
 
 ```sh
-python3 deploy/gated-deploy.py --what 'W4 server 2026.11.11.10 + oracle edge' \
+python3 deploy/gated-deploy.py --what 'W4 server 2026.11.11.10 + oracle edge' --e2e-commit <the build's commit> \
   --server-host root@coolify --edge local --edge ubuntu@anvit \
   --deploy "PROBE='...' SQL='...' deploy/check-edges.sh --deploy '<the step 3 or 4 command>' local=<ip> anvit=<ip>"
 ```
 
-It refuses (exit 3) when the production canary is red before the deploy; `--force '<reason>'` overrides
+It first runs the core end-to-end check (TestE2ECore: real server, edge and relay, personal and team machines)
+on `--e2e-commit` with `tools/ci-test.sh e2e` on a GitHub runner (about 30 min) and refuses (exit 6) unless it
+passes, before staging, the lock or prod are touched. It refuses (exit 3) when the production canary is red before the deploy; `--force '<reason>'` overrides
 and writes the reason into the lock. It notes the serving server image and both edges' relay/edge images,
 runs the command (check-edges.sh keeps the 5xx, preview and offline checks), then triggers canary runs
 until one that started after the switch passes, for up to `--wait` (300) seconds. A failed command or no
@@ -264,10 +266,7 @@ take the prober down with it. Results: `~/.local/state/paperboat-canary/` (`hist
 runs; `status.json`; `alerts.log`), shown as the first card on the progress page and at its `/canary.json`.
 With `CANARY_EDGES` (every managed edge address, space separated, in the same env file) the `edges` step also
 fetches the canary tunnel at each edge's own address, so an edge that DNS already dropped (heartbeat lost,
-provider null-route) still turns the canary red. With `CANARY_TEAM`/`CANARY_TEAM_MACHINE` the `team_exec` step runs
-`pb --workspace <team> exec` from `canary-a` to `canary-t` (container `pb-canary-t` on oracle), a machine shared into a
-team the canary account owns with an exact exec grant to that account, so a server that breaks team-owned machines
-(server .34, 2026-11-16) turns the canary red although personal machines still work. A step that fails two runs in a row sends one line to the coordinator thread (`t3 thread send`,
+provider null-route) still turns the canary red. A step that fails two runs in a row sends one line to the coordinator thread (`t3 thread send`,
 `CANARY_ALERT_THREAD` in the mode-0600 `~/.config/paperboat-canary.env`) and its first pass sends one
 recovery line; both also go to `alerts.log`. Set the machines up with `tools/probe/canary-setup.sh`; keep
 them on a `main` build (copy the binary to `/home/pbt/pb` in the container, `./pb install` as `pbt`).

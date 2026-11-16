@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net"
 	"strings"
@@ -417,32 +416,5 @@ func TestPreviewRejectedStreamsEmitSafeDiagnosticsAndPreserveRoutes(t *testing.T
 	defer accepted.Close()
 	if open != valid {
 		t.Fatal("rejection disturbed valid route")
-	}
-}
-
-// F21-168: a burst of streams for one route that arrives while the route's forwarder is busy is queued, not
-// closed silently. The route queue held 16; 1,000 simultaneous public connections lost about 1% of them.
-func TestDataCarrierPreviewHubQueuesABurstForOneRoute(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	identity := testPreviewCarrierIdentity(1)
-	pair := newPreviewCarrierPair(t, ctx, identity)
-	defer pair.close()
-	hub, err := NewDataCarrierPreviewHub(ctx, DataCarrierPreviewHubConfig{Active: pair.active, Identity: identity})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer hub.Close()
-	registration, err := hub.Register("preview_a")
-	if err != nil {
-		t.Fatal(err)
-	}
-	const burst = 100
-	for i := 0; i < burst; i++ {
-		_ = pair.openEdgeStream(t, testPreviewStreamOpen(identity, "preview_a", fmt.Sprintf("request_%d", i)))
-	}
-	for i := 0; i < burst; i++ {
-		accepted, _ := acceptPreviewRegistration(t, registration)
-		_ = accepted.Close()
 	}
 }

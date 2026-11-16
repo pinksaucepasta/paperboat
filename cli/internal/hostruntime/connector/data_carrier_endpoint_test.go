@@ -9,7 +9,6 @@ import (
 	"crypto/x509/pkix"
 	"encoding/pem"
 	"errors"
-	"fmt"
 	"io"
 	"math/big"
 	"net"
@@ -609,78 +608,5 @@ func TestBlackholedQUICCarrierClosesAfterTheIdleTimeout(t *testing.T) {
 	case <-carrier.Done():
 	case <-time.After(3 * time.Second):
 		t.Fatal("blackholed QUIC carrier still open")
-	}
-}
-
-// F21-168: a QUIC carrier takes as many concurrent edge-opened streams as the configured stream count.
-// The connector's QUIC config capped the edge's incoming-stream credit at 16, so stream 17 onward waited
-// for an earlier stream to close.
-func TestDataCarrierEndpointQUICTakesTheConfiguredConcurrentStreams(t *testing.T) {
-	clientTLS, serverTLS, _ := testDataCarrierCertificates(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	packetConn, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.ParseIP("127.0.0.1")})
-	if err != nil {
-		t.Fatalf("listen UDP: %v", err)
-	}
-	config := DefaultDataCarrierConfig()
-	quicListener, err := quic.Listen(packetConn, serverTLS.Clone(), &quic.Config{MaxIncomingStreams: int64(config.MaximumStreams + config.QueueDepth + 1)})
-	if err != nil {
-		_ = packetConn.Close()
-		t.Fatalf("listen QUIC: %v", err)
-	}
-	defer quicListener.Close()
-	identity := testDataCarrierIdentity()
-	serverResult := make(chan *DataCarrier, 1)
-	go func() {
-		connection, err := quicListener.Accept(ctx)
-		if err != nil {
-			serverResult <- nil
-			return
-		}
-		carrier, err := NewDataCarrierClientWithSession(ctx, newQUICDataCarrierSession(connection), config, identity)
-		if err != nil {
-			carrier = nil
-		}
-		serverResult <- carrier
-	}()
-	session, err := DialQUIC(ctx, DataCarrierEndpointConfig{Address: quicListener.Addr().String(), TLS: clientTLS, PeerBinding: func(tls.ConnectionState) (DataCarrierIdentity, error) { return identity, nil }, ExpectedIdentity: identity})
-	if err != nil {
-		t.Fatalf("dial QUIC carrier: %v", err)
-	}
-	client, err := NewDataCarrierServerWithSession(ctx, session, config, DataCarrierAdmission{Identity: identity, Authorize: func(context.Context, StreamOpen) error { return nil }})
-	if err != nil {
-		t.Fatalf("new QUIC client carrier: %v", err)
-	}
-	server := <-serverResult
-	if server == nil {
-		t.Fatal("new QUIC server carrier failed")
-	}
-	defer client.Close()
-	defer server.Close()
-	go func() {
-		for {
-			if _, _, err := client.AcceptStream(ctx); err != nil {
-				return
-			}
-		}
-	}()
-	streams := 100
-	opened := make(chan error, streams)
-	for i := 0; i < streams; i++ {
-		go func() {
-			_, err := server.OpenStream(ctx, testDataCarrierStreamOpen("route-a", fmt.Sprintf("held-%d", i)))
-			opened <- err
-		}()
-	}
-	for i := 0; i < streams; i++ {
-		select {
-		case err := <-opened:
-			if err != nil {
-				t.Fatalf("stream %d of %d held at once: %v", i+1, streams, err)
-			}
-		case <-time.After(10 * time.Second):
-			t.Fatalf("only %d of %d streams could be open at once; the QUIC stream credit is below the carrier's stream count", i, streams)
-		}
 	}
 }

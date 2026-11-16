@@ -2,6 +2,8 @@
 """Canary-gated deploy of the server and/or tunnel edges with automatic rollback (deploy/README.md step 6).
 
 Runs on oracle, next to the production canary (tools/probe/canary.py, user unit paperboat-canary):
+  e. runs the core end-to-end check (TestE2ECore: real server, edge, relay, personal and team machines) on the
+     candidate commit (--e2e-commit, tools/ci-test.sh e2e on a GitHub runner) and refuses unless it passes;
   0. with --stage CMD: runs it first (deploy the candidate to staging and require a green staging canary,
      deploy/staging.py + deploy/staging-canary.sh); a failing stage refuses the deploy before prod or the lock is touched;
   1. refuses when the canary is red before the deploy (--force "<reason>" overrides);
@@ -12,9 +14,10 @@ Runs on oracle, next to the production canary (tools/probe/canary.py, user unit 
   6. if the deploy command failed or no pass came, rolls back everything that changed (server first,
      then each edge) to the noted images and runs the canary again to report the result.
 Exit: 0 kept, 1 rolled back and green again, 2 rolled back and still red (or rollback failed),
-3 refused (canary red before), 4 deploy lock held by someone else, 5 refused (staging failed).
+3 refused (canary red before), 4 deploy lock held by someone else, 5 refused (staging failed),
+6 refused (end-to-end check of the candidate commit failed).
 """
-import argparse, json, shlex, subprocess, sys, time
+import argparse, json, shlex, subprocess, sys, tempfile, time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -43,8 +46,8 @@ def parse_edge(text):
 
 
 class Gate:
-    def __init__(self, args, sh, deploy, canary, wall=time.time, mono=time.monotonic, say=print, stage=None):
-        self.a, self.sh, self.deploy, self.canary, self.stage = args, sh, deploy, canary, stage
+    def __init__(self, args, sh, deploy, canary, e2e, wall=time.time, mono=time.monotonic, say=print, stage=None):
+        self.a, self.sh, self.deploy, self.canary, self.e2e, self.stage = args, sh, deploy, canary, e2e, stage
         self.wall, self.mono, self.say = wall, mono, say
 
     def images(self):
@@ -88,6 +91,9 @@ class Gate:
         return ok
 
     def run(self):
+        if (code := self.e2e()) != 0:
+            self.say(f"refused: the end-to-end check of the candidate commit failed (exit {code}); prod was not touched")
+            return 6
         if self.stage is not None and (code := self.stage()) != 0:
             self.say(f"refused: the staging step failed (exit {code}); fix staging or the build first, prod was not touched")
             return 5
@@ -155,9 +161,28 @@ def shell(target, script):
         return 124, f"timed out: {script[:120]}"
 
 
+def run_e2e(commit, run=subprocess.run):
+    """tools/ci-test.sh e2e on a detached worktree of commit (it tests that tree's HEAD); its exit status."""
+    repo = str(Path(__file__).resolve().parent.parent)
+    if run(["git", "-C", repo, "fetch", "-q", "origin"]).returncode != 0:
+        print("e2e: git fetch failed")
+        return 2
+    with tempfile.TemporaryDirectory(prefix="gated-e2e-") as scratch:
+        tree = f"{scratch}/e2e-gate-{commit[:12]}"
+        if run(["git", "-C", repo, "worktree", "add", "-q", "--detach", tree, commit]).returncode != 0:
+            print(f"e2e: commit {commit} is not in the repository")
+            return 2
+        try:
+            return run(["tools/ci-test.sh", "e2e"], cwd=tree).returncode
+        finally:
+            run(["git", "-C", repo, "worktree", "remove", "--force", tree])
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--what", required=True, help="lane and what is deployed, written into the deploy lock")
+    p.add_argument("--e2e-commit", required=True,
+                   help="the candidate's commit; TestE2ECore must pass on it (tools/ci-test.sh e2e) before anything else")
     p.add_argument("--stage", default="", help="staging step, run with sh -c before anything else; must exit 0")
     p.add_argument("--deploy", required=True, help="the deploy command, run with sh -c on this host")
     p.add_argument("--server-host", required=True, help="ssh target of the control-plane host")
@@ -178,8 +203,11 @@ def main(argv=None):
     def stage():
         return subprocess.run(["sh", "-c", a.stage]).returncode
 
+    def e2e():
+        return run_e2e(a.e2e_commit)
+
     try:
-        return Gate(a, shell, deploy, canary, stage=stage if a.stage else None).run()
+        return Gate(a, shell, deploy, canary, e2e, stage=stage if a.stage else None).run()
     except RuntimeError as error:  # the lock is already released; nothing was rolled back
         print(f"gate stopped: {error}")
         return 2

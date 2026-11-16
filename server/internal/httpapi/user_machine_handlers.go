@@ -910,11 +910,15 @@ func userMachineTerminalSessionsList(service *usermachines.Service) http.Handler
 			writeError(w, r, http.StatusUnauthorized, "unauthenticated", "Authentication is required.")
 			return
 		}
-		query, valid := readInventoryQuery(w, r, []string{"running", "closed", "unavailable"}, true)
+		query, valid := readInventoryQuery(w, r, []string{"running", "closed", "unavailable"}, true, "live")
 		if !valid {
 			return
 		}
-		items, total, err := service.ListTerminalSessionInventory(personalWorkspaceContext(r.Context()), p.User.ID, r.PathValue("machine_id"), usermachines.InventoryOptions{Limit: query.Limit, Offset: query.Offset, Q: query.Q, State: query.State, Owner: query.Owner, Closed: query.Closed})
+		withoutLive, valid := readWithoutLive(w, r)
+		if !valid {
+			return
+		}
+		items, total, err := service.ListTerminalSessionInventory(personalWorkspaceContext(r.Context()), p.User.ID, r.PathValue("machine_id"), usermachines.InventoryOptions{Limit: query.Limit, Offset: query.Offset, Q: query.Q, State: query.State, Owner: query.Owner, Closed: query.Closed, WithoutLiveMetadata: withoutLive})
 		if userMachineTerminalSessionError(w, r, err) {
 			return
 		}

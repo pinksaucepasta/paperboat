@@ -18,11 +18,8 @@ func terminalSessionCatalog(service *usermachines.Service) http.HandlerFunc {
 		if !valid {
 			return
 		}
-		// live=false returns the stored rows without probing each host (shell completion
-		// refreshes); authorization is unchanged.
-		live := r.URL.Query().Get("live")
-		if live != "" && live != "true" && live != "false" {
-			writeError(w, r, 400, "invalid_inventory_query", "Use one valid limit (1–200), nonnegative offset, and supported inventory filters.")
+		withoutLive, valid := readWithoutLive(w, r)
+		if !valid {
 			return
 		}
 		// machine_id: one machine's sessions (the console's machine page), counted and paged on their own.
@@ -30,7 +27,7 @@ func terminalSessionCatalog(service *usermachines.Service) http.HandlerFunc {
 		if !valid {
 			return
 		}
-		items, total, err := service.TerminalSessionInventory(personalWorkspaceContext(r.Context()), account, usermachines.InventoryOptions{Limit: query.Limit, Offset: query.Offset, Q: query.Q, State: query.State, Owner: query.Owner, Closed: query.Closed, MachineID: machineID, WithoutLiveMetadata: live == "false"})
+		items, total, err := service.TerminalSessionInventory(personalWorkspaceContext(r.Context()), account, usermachines.InventoryOptions{Limit: query.Limit, Offset: query.Offset, Q: query.Q, State: query.State, Owner: query.Owner, Closed: query.Closed, MachineID: machineID, WithoutLiveMetadata: withoutLive})
 		if err != nil {
 			writeError(w, r, 500, "internal_error", "Terminal sessions could not be loaded.", err)
 			return
@@ -142,4 +139,15 @@ func writeTerminalSharingMutation(w http.ResponseWriter, r *http.Request, item u
 	default:
 		writeJSON(w, 200, SuccessResponse{Data: item})
 	}
+}
+
+// readWithoutLive reads live=false: the stored rows without probing each host (shell completion refreshes, session
+// name resolution); authorization is unchanged.
+func readWithoutLive(w http.ResponseWriter, r *http.Request) (withoutLive, valid bool) {
+	live := r.URL.Query().Get("live")
+	if live != "" && live != "true" && live != "false" {
+		writeError(w, r, 400, "invalid_inventory_query", "Use one valid limit (1–200), nonnegative offset, and supported inventory filters.")
+		return false, false
+	}
+	return live == "false", true
 }

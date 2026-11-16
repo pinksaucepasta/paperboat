@@ -211,6 +211,9 @@ func (s *Service) ListTerminalSessionInventory(ctx context.Context, account, mac
 	if err := tx.Commit(ctx); err != nil {
 		return nil, 0, err
 	}
+	if opts.WithoutLiveMetadata {
+		return out, total, nil
+	}
 	for index, live := range s.terminalInventoryObservations(ctx, account, ids) {
 		if live == nil {
 			continue

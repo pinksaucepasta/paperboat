@@ -345,17 +345,6 @@ VALUES($1,$2,$3,$3,$4,'owner_session_endpoint','foreground','http','127.0.0.1:30
 		t.Fatal("a drained edge was waited for")
 	}
 	exec(`UPDATE control_tunnel_nodes SET drain_deadline=NULL WHERE id=$1`, backupNode)
-	// A customer's own edge never serves a managed preview, so it is not waited for: a self-hosted edge that is
-	// live and does not hold the route must not keep every managed preview "connecting" (staging 2026-11-16,
-	// F21-168: two live edges of another account's pool held a managed preview pending forever).
-	if !pending() {
-		t.Fatal("setup: the unserved live edge should hold the preview pending")
-	}
-	exec(`INSERT INTO selfhost_installations(id,node_id,installation_public_key,runtime_hash,runtime_ciphertext,name,capability,scope_kind,scope_id,claim_id,claim_complete) VALUES($1,$2,$3,$3,'fixture','customer edge','tunnel','account',$4,$1,true)`, prefix+"_customer_edge", backupNode, []byte(strings.Repeat("k", 32)), prefix+"_other_account")
-	if pending() {
-		t.Fatal("a customer's self-hosted edge that does not serve the route holds a managed preview pending")
-	}
-	exec(`DELETE FROM selfhost_installations WHERE id=$1`, prefix+"_customer_edge")
 	// The owner's native `pb preview inspect` gets its inspector network scope from a preview served
 	// as an endpoint route (it read only the legacy attachments, so the dial was refused).
 	cli, credential := prefix+"_cli", prefix+"_inspector"

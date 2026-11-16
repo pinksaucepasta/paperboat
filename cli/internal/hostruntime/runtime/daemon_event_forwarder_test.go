@@ -86,9 +86,3 @@ func TestWorkerForwardsDaemonTopicsFromSingleWait(t *testing.T) {
 		}
 	}
 }
-
-func TestDaemonPushUIDIsNeverNegative(t *testing.T) {
-	if daemonPushUID() < 0 {
-		t.Fatal("daemon push uid must be valid on every OS (Windows os.Geteuid is -1)")
-	}
-}

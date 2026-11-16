@@ -223,6 +223,12 @@ func listTerminalSessionsForTarget(ctx context.Context, client *api.Client, targ
 	return client.ListUserMachineTerminalSessions(ctx, target.id)
 }
 
+// listStoredTerminalSessionsForTarget lists a machine's sessions without the host probe per session (live=false): for
+// callers that match names or states, where the live metadata would cost one host round trip per session.
+func listStoredTerminalSessionsForTarget(ctx context.Context, client *api.Client, target environmentTarget) ([]api.TerminalSession, error) {
+	return client.ListUserMachineTerminalSessionsFiltered(ctx, target.id, url.Values{"live": {"false"}})
+}
+
 func createTerminalSessionForTarget(ctx context.Context, client *api.Client, target environmentTarget, name, idempotencyKey string) (api.TerminalSession, error) {
 	return client.CreateUserMachineTerminalSession(ctx, target.id, name, idempotencyKey)
 }
@@ -407,7 +413,7 @@ func daemonReportsControlPlaneUnavailable(ctx context.Context) bool {
 }
 
 func resolveTerminalSession(ctx context.Context, client *api.Client, target environmentTarget, ref string) (api.TerminalSession, error) {
-	sessions, err := listTerminalSessionsForTarget(ctx, client, target)
+	sessions, err := listStoredTerminalSessionsForTarget(ctx, client, target)
 	if err != nil {
 		return api.TerminalSession{}, friendlyCommandError(err)
 	}
