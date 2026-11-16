@@ -65,7 +65,9 @@ func installLinuxUserTrust(ctx context.Context, certificatePEM []byte, run nssCo
 	}
 	uid := uint32(os.Geteuid())
 	if uid == 0 {
-		return errors.New("local browser trust must be installed by the signed-in user session")
+		// root enrolled itself (its daemon is a system unit): its trust is the system store the
+		// machine guard installs, so nothing is written to root's home and nothing is left to clean.
+		return nil
 	}
 	home, err := currentUserHome()
 	if err != nil {
@@ -225,7 +227,7 @@ func cleanupLinuxUserTrust(ctx context.Context, run nssCommand) error {
 func cleanupLinuxUserTrustExcept(ctx context.Context, active *x509.Certificate, run nssCommand) error {
 	uid := uint32(os.Geteuid())
 	if uid == 0 {
-		return errors.New("local browser trust cleanup must run in the signed-in user session")
+		return nil // root never installs user trust (installLinuxUserTrust)
 	}
 	home, err := currentUserHome()
 	if err != nil {
@@ -304,7 +306,7 @@ func cleanupLinuxUserTrustExcept(ctx context.Context, active *x509.Certificate, 
 func removeLinuxUserTrustReceipt(ctx context.Context, certificate *x509.Certificate, run nssCommand) error {
 	uid := uint32(os.Geteuid())
 	if uid == 0 {
-		return errors.New("local browser trust cleanup must run in the signed-in user session")
+		return nil // root never installs user trust (installLinuxUserTrust)
 	}
 	home, err := currentUserHome()
 	if err != nil {

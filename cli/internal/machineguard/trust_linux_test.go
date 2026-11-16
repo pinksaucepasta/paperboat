@@ -171,9 +171,9 @@ func TestLinuxUserTrustInstallsAndRemovesExactOwnedRoot(t *testing.T) {
 	}
 }
 
-// Browser trust belongs to the signed-in user's session: as root every entry point refuses with that error, runs no NSS
-// command and leaves the home directory untouched (the unprivileged test above covers the user path).
-func TestLinuxUserTrustRefusesRoot(t *testing.T) {
+// root's browser trust is the system store the machine guard installs: as root every user-trust entry point succeeds
+// without an NSS command and leaves the home directory untouched (the unprivileged test above covers the user path).
+func TestLinuxUserTrustIsSystemTrustForRoot(t *testing.T) {
 	if os.Geteuid() != 0 {
 		t.Skip("needs root; runs in tools/cli-root-tests.sh")
 	}
@@ -197,12 +197,12 @@ func TestLinuxUserTrustRefusesRoot(t *testing.T) {
 		"cleanup except": func() error { return cleanupLinuxUserTrustExcept(t.Context(), root, run) },
 		"remove receipt": func() error { return removeLinuxUserTrustReceipt(t.Context(), root, run) },
 	} {
-		if err := call(); err == nil || !strings.Contains(err.Error(), "signed-in user session") {
-			t.Fatalf("%s as root: %v, want the signed-in user session refusal", name, err)
+		if err := call(); err != nil {
+			t.Fatalf("%s as root: %v", name, err)
 		}
 	}
 	if commands != 0 || linuxTrustTree(t, home) != before {
-		t.Fatalf("root refusal touched things: %d NSS commands, tree changed=%v", commands, linuxTrustTree(t, home) != before)
+		t.Fatalf("root user trust touched things: %d NSS commands, tree changed=%v", commands, linuxTrustTree(t, home) != before)
 	}
 }
 
