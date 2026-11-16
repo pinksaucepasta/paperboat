@@ -9,7 +9,6 @@ import (
 	"net"
 	"net/url"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -562,40 +561,13 @@ func runPreviewStopCobra(command *cobra.Command, args []string) error {
 	return err
 }
 
+// previewStopCompletion reads the daemon's cached live previews: one server list call took ~1.7 s, far past the
+// shell completion deadline, so <TAB> never offered anything.
 func previewStopCompletion(command *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 	if len(args) > 0 {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
-	ctx, cancel := context.WithTimeout(shellCompletionContext(command), shellCompletionDeadline)
-	defer cancel()
-	client, err := previewClientForCommand(command)
-	if err != nil {
-		return nil, cobra.ShellCompDirectiveNoFileComp
-	}
-	values := []string{}
-	cursor := ""
-	seen := map[string]bool{"": true}
-	for {
-		page, err := client.ListPreviewLeasesFiltered(ctx, cursor, 200, selectorFilter(toComplete))
-		if err != nil {
-			return nil, cobra.ShellCompDirectiveNoFileComp
-		}
-		for _, item := range page.Items {
-			if strings.HasPrefix(strings.ToLower(item.ID), strings.ToLower(toComplete)) {
-				values = append(values, item.ID+"\t"+item.State)
-			}
-		}
-		if page.NextCursor == "" {
-			break
-		}
-		if len(page.Items) == 0 || seen[page.NextCursor] {
-			return nil, cobra.ShellCompDirectiveNoFileComp
-		}
-		seen[page.NextCursor] = true
-		cursor = page.NextCursor
-	}
-	sort.Strings(values)
-	return values, cobra.ShellCompDirectiveNoFileComp
+	return localCompletion(command, "preview", "", toComplete)
 }
 
 func parsePreviewTarget(raw string) (preview.LeaseTarget, error) {

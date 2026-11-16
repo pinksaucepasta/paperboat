@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -20,6 +21,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/preview"
+	"github.com/pinksaucepasta/paperboat/internal/localapi"
 	"github.com/pinksaucepasta/paperboat/shared/supportref"
 	"github.com/spf13/cobra"
 )
@@ -132,6 +134,9 @@ func TestPreviewHostHeaderFlagIsValidatedBeforeAnythingStarts(t *testing.T) {
 		"unix target": {"unix:///tmp/app.sock", "--host-header", "app.example.test"},
 		"white space": {"3000", "--host-header", "a b"},
 	} {
+		if name == "unix target" && runtime.GOOS == "windows" {
+			continue // /tmp/app.sock is not an absolute path on Windows: the target itself is refused first
+		}
 		command := previewCobraCommandV1()
 		command.SetOut(io.Discard)
 		command.SetErr(io.Discard)
@@ -1022,32 +1027,58 @@ func TestFormatPreviewTargetShowsTheHostHeader(t *testing.T) {
 	}
 }
 
-// Stop completion asks the server for the previews matching what was typed (q), like the tunnel selector, instead of
-// reading every preview of the account inside the 200 ms completion deadline.
-func TestPreviewStopCompletionFiltersOnServer(t *testing.T) {
-	var queries []string
-	server := newPreviewCommandServer(t, func(r *http.Request, _ map[string]any) (any, string, int) {
-		if r.Method+" "+r.URL.Path != http.MethodGet+" /v1/previews" {
-			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
-		}
-		queries = append(queries, r.URL.Query().Get("q"))
-		lease := previewCommandLease("prv_cli_3", "machine_cli", "session_cli", "foreground", "https", "localhost:8443", "ready")
-		return map[string]any{"items": []any{lease}, "next_cursor": ""}, "", http.StatusOK
-	})
-	defer server.Close()
-	client := api.New(server.URL, config.Credential{AccessToken: "test-token"}, server.Client())
+type previewCompletionSource []localapi.CompletionItem
+
+func (s previewCompletionSource) Completions(context.Context) (localapi.CompletionSnapshot, error) {
+	return localapi.CompletionSnapshot{Schema: localapi.CompletionSchemaV1, ObservedAt: time.Now().UTC(), Items: s}, nil
+}
+
+// pb preview stop <TAB> offered nothing: one server list call took ~1.7 s against a 200 ms completion deadline.
+// It reads the daemon's cached live previews instead and never calls the server.
+func TestPreviewStopCompletionReadsTheDaemonCache(t *testing.T) {
+	root := commandRuntimeTestRoot(t)
+	runtimeRoot := filepath.Join(root, "runtime")
+	if err := os.Mkdir(runtimeRoot, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", root)
+	t.Setenv("XDG_STATE_HOME", filepath.Join(root, "state"))
+	t.Setenv("XDG_RUNTIME_DIR", runtimeRoot)
+	t.Setenv("TMPDIR", runtimeRoot)
 	previous := previewClientForCommand
 	t.Cleanup(func() { previewClientForCommand = previous })
-	previewClientForCommand = func(*cobra.Command) (*api.Client, error) { return client, nil }
+	previewClientForCommand = func(*cobra.Command) (*api.Client, error) { t.Fatal("completion called the server"); return nil, nil }
+	paths, err := currentLocalDaemonPaths()
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot := localapi.Snapshot{Schema: localapi.SnapshotSchemaV1, Generation: 1, ObservedAt: time.Now().UTC(), DaemonState: "ready", DaemonVersion: "dev", Machines: []localapi.MachineStatus{}}
+	store, err := localapi.NewSnapshotStore(&snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config, err := commandLocalAPIServerConfig(paths.SocketPath, store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config.Completions = previewCompletionSource{
+		{Kind: "preview", Value: "prv_cli_3", Description: "ready"},
+		{Kind: "preview", Value: "prv_other", Description: "ready"},
+		{Kind: "machine", Value: "prv_cli_machine", Description: "online"},
+	}
+	server, err := localapi.NewServer(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- server.Run(ctx) }()
+	t.Cleanup(func() { cancel(); <-done })
+	waitForCommandSocket(t, paths.SocketPath)
 
 	command := &cobra.Command{}
 	command.SetContext(context.Background())
-	values, _ := previewStopCompletion(command, nil, "prv_cli")
-	if len(values) != 1 || !strings.HasPrefix(values[0], "prv_cli_3\t") {
+	if values, _ := previewStopCompletion(command, nil, "prv_cli"); len(values) != 1 || values[0] != "prv_cli_3\tready" {
 		t.Fatalf("completion = %q", values)
-	}
-	values, _ = previewStopCompletion(command, nil, "")
-	if len(values) != 1 || strings.Join(queries, ",") != "prv_cli," {
-		t.Fatalf("completion = %q, server q = %q", values, queries)
 	}
 }
