@@ -96,6 +96,10 @@ func TestPeerPolicyInvalidationCoversEveryMutationPathOnPostgres(t *testing.T) {
 	exec(`INSERT INTO paperboat.teams(team_id,owner_account,generation) VALUES($1,$2,1)`, team, owner)
 	exec(`INSERT INTO paperboat.team_members(team_id,account_id,membership_generation,role,active) VALUES($1,$2,1,'admin',true),($1,$3,1,'member',true)`, team, owner, member)
 	exec(`INSERT INTO paperboat.team_resource_bindings(team_id,resource_kind,resource_id,owner_account) VALUES($1,'machine',$2,$3)`, team, host, owner)
+	// A private tunnel the host published: its routes decide private access sessions (machine_service_authorities).
+	tunnel, tunnelLabel := "pi_tun_"+x, x[len(x)-12:]
+	exec(`INSERT INTO paperboat.tunnels(id,account_id,name,desired_state,access_mode,generation,stable_endpoint_id,stable_endpoint,created_by_host_id,created_by_actor_id) VALUES($1,$2,$1,'active','private',1,$3,$4,$5,$2)`, tunnel, owner, "endpoint_00000000-0000-4000-8000-"+tunnelLabel, "https://pi-"+tunnelLabel+".example.test", host)
+	exec(`INSERT INTO paperboat.tunnel_routes(id,tunnel_id,name,protocol,match_type,origin_scheme,origin_address,generation,desired_state,created_by_actor_id,updated_by_actor_id) VALUES($1||'_r',$1,'web','http','catch_all','http','127.0.0.1:3000',1,'active',$2,$2)`, tunnel, owner)
 
 	// Every case is one write and the parties it must name; "" cases must name none of the listed parties.
 	teamKeys := []string{"account:" + owner, "account:" + member, host}
@@ -110,11 +114,18 @@ func TestPeerPolicyInvalidationCoversEveryMutationPathOnPostgres(t *testing.T) {
 		{"identity relay revocation generation only", `UPDATE paperboat.peer_network_identities SET relay_revocation_generation=relay_revocation_generation+1 WHERE endpoint_id=$1`, []any{host}, []string{host}, true},
 		{"identity configuration request's own write", `UPDATE paperboat.peer_network_identities SET config_generation=config_generation+1,updated_at=now() WHERE endpoint_id=$1`, []any{host}, []string{host}, true},
 		{"certificate revoked", `UPDATE paperboat.peer_endpoint_certificates SET revoked_at=now(),revocation_reason='endpoint_removed' WHERE endpoint_id=$1`, []any{cli}, []string{"account:" + owner, cli}, false},
+		// A revocation record makes loadNetworkBinding refuse the certificate: the account topic names its account.
+		{"certificate revocation record", `INSERT INTO paperboat.peer_endpoint_certificate_revocations(operation_id,user_id,certificate_fingerprint,serial,reason,created_at) SELECT 'revoke_'||endpoint_id||'_op',user_id,fingerprint,serial,'endpoint_removed',now() FROM paperboat.peer_endpoint_certificates WHERE endpoint_id=$1`, []any{cli}, []string{"account:" + owner}, false},
 		{"user status", `UPDATE paperboat.users SET status='disabled' WHERE id=$1`, []any{other}, []string{"account:" + other}, false},
 		{"environment suspended", `UPDATE paperboat.control_environments SET desired_state='suspended' WHERE id=$1`, []any{env}, []string{"account:" + owner}, false},
 		{"environment active", `UPDATE paperboat.control_environments SET desired_state='active' WHERE id=$1`, []any{env}, []string{"account:" + owner}, false},
 		{"machine presence", `UPDATE paperboat.user_machines SET online=false WHERE id=$1`, []any{host}, []string{host}, false},
 		{"machine capabilities", `UPDATE paperboat.user_machines SET configured_capabilities=ARRAY['terminal_host'] WHERE id=$1`, []any{host}, []string{host, "account:" + owner}, false},
+		// The machine-service toggle as machineservices.updatePolicyAttempt writes it: the generation the automatic
+		// sessions are fenced on, their revocation, and the machine topic.
+		{"machine service toggle", `WITH m AS (UPDATE paperboat.user_machines SET personal_auto_enabled=false,machine_service_policy_generation=machine_service_policy_generation+1 WHERE id=$1 RETURNING id),
+ r AS (UPDATE paperboat.user_machine_access_sessions SET state='revoked',revoked_at=now(),revocation_reason='machine_service_policy_changed' WHERE user_machine_id=$1 AND state='active' AND machine_service_source_kind='automatic' RETURNING id)
+ SELECT paperboat.publish_machine_topic(ARRAY[$1::text],'machine_services') FROM m`, []any{host}, []string{host}, false},
 		{"member role", `UPDATE paperboat.team_members SET role='auditor' WHERE team_id=$1 AND account_id=$2`, []any{team, member}, teamKeys, false},
 		{"member sign-in only", `UPDATE paperboat.team_members SET sso_verified_at=now() WHERE team_id=$1 AND account_id=$2`, []any{team, member}, []string{"account:" + member}, true},
 		{"member joins", `INSERT INTO paperboat.team_members(team_id,account_id,membership_generation,role,active) VALUES($1,$2,1,'member',true)`, []any{team, other}, append([]string{"account:" + other}, teamKeys...), false},
@@ -151,6 +162,9 @@ func TestPeerPolicyInvalidationCoversEveryMutationPathOnPostgres(t *testing.T) {
 		{"inspected preview lease", `INSERT INTO paperboat.preview_leases(owner_session_kind,id,endpoint,account_id,actor_id,owner_machine_id,owner_session_id,target_scheme,target_address,access_mode,lease_deadline) VALUES('foreground',$1||'_pv','https://'||replace($1,'_','-')||'.example.test',$2,$2,$1,'certificate-owner','http','127.0.0.1:3000','public',now()+interval '1 hour')`, []any{host, owner}, []string{host, cli}, true},
 		{"inspected preview lease renewed", `UPDATE paperboat.preview_leases SET lease_deadline=lease_deadline+interval '1 hour' WHERE id=$1||'_pv'`, []any{host}, []string{host, cli}, true},
 		{"inspected preview lease stopped", `UPDATE paperboat.preview_leases SET terminal_state='stopped',stopped_at=now() WHERE id=$1||'_pv'`, []any{host}, []string{host, cli}, false},
+		// A route edit as UpdateTunnelRouteV1 writes it (every edit advances the generation the private access sessions
+		// are fenced on): the private_routes topic names the host's account, a peer key of every document holding the host.
+		{"private tunnel route edited", `UPDATE paperboat.tunnel_routes SET origin_address='127.0.0.1:3001',generation=generation+1 WHERE tunnel_id=$1`, []any{tunnel}, []string{"account:" + owner}, false},
 		{"config repository and assignment", `WITH r AS (INSERT INTO paperboat.control_config_repositories(id,owner_user_id,provider,external_ref,display_name) VALUES($1,$2,'github','x/y','y'))
  INSERT INTO paperboat.control_config_assignments(id,environment_id,repository_id,mode,consent_state,machine_id) VALUES($3,$4,$1,'pull_only','revoked',$5)`, []any{repo, owner, assignment, env, host}, []string{host, "account:" + owner}, false},
 		{"config assignment version", `UPDATE paperboat.control_config_assignments SET version=version+1 WHERE id=$1`, []any{assignment}, []string{host, "account:" + owner}, false},
