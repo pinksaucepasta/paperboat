@@ -1501,3 +1501,13 @@ Set up managedlmachine (machine_fbce078b-43dc-4dac-a058-370a8d7821cb)
 $ (again)
 This machine is already paired; nothing to do.
   ▄▄▝▀▀▀▀▀▘▄▄   Version 2026.11.16.2
+
+################ f26-05-config.txt
+=== F26-05 [config] on server .39 (1dbaa5bd6), clients dev-c688afd25, recipe rcpz [config] repository = "rcp-cfg2" (public HTTPS, octocat/Spoon-Knife), 2026-11-16T16:58:22Z ===
+$ (creator) pb recipe show rcpz (machines)
+  managedlmachine   online    applied revision 4   now
+  rcp-l13           online    applied revision 4   now
+  rcp-l14           offline   config failed: pb --config /root/.config/paperboat/config.json config sync apply: This machine has no usable credentials for the config repository. Save them with `pb config repository credentials set <repository> --file <profile>
+  rcp-wz            online    config failed: pb --config C:\Users\rcpw3\AppData\Local\paperboat\config.json config sync apply: Paperboat could not finish the command. Check the current state before retrying; run `pb doctor` if this continues. (pb doctor on the
+$ (rcp-l13) cat config-sync.toml
+mode = "pull_only"
