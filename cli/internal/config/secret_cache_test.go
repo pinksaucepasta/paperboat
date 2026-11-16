@@ -44,3 +44,25 @@ func TestSecretCacheDoesNotRememberErrors(t *testing.T) {
 		t.Fatalf("an error was remembered: %q, %v", value, err)
 	}
 }
+
+// Another process rotates the refresh token under the same reference; a cached copy would be sent with a fresh
+// attempt id and revoke the session, so every read of a refresh token reaches the keychain.
+func TestSecretCacheNeverServesRefreshTokens(t *testing.T) {
+	cache := &secretCache{ttl: time.Hour, now: time.Now}
+	for _, ref := range []string{"profile-abc-refresh", "refresh-attempt-abc-0123"} {
+		keychain := "r0"
+		read := func() (string, error) { return keychain, nil }
+		cache.get(ref, read)
+		cache.set(ref, "r0")
+		keychain = "r1"
+		if value, _ := cache.get(ref, read); value != "r1" {
+			t.Fatalf("%s served a cached refresh token %q after another process rotated it", ref, value)
+		}
+	}
+	keychain := "a0"
+	cache.get("profile-abc-access", func() (string, error) { return keychain, nil })
+	keychain = "a1"
+	if value, _ := cache.get("profile-abc-access", func() (string, error) { return keychain, nil }); value != "a0" {
+		t.Fatal("access tokens stopped being cached")
+	}
+}
