@@ -228,18 +228,20 @@ def source_archive(commit):
     return short, full, git("archive", full, "--", ".", ":!console", ":!marketing", ":!tools")
 
 
-def build(commit):
+def build(commit, target="server"):
+    """Build paperboat-server:stg-<short> (target 'server') or paperboat-edge:stg-<short> (target 'edge') on HOST."""
+    dockerfile = {"server": "server/deploy/Dockerfile", "edge": "edge/deploy/Dockerfile"}[target]
     short, full, tar = source_archive(commit)
     src = f"pb-stg-src-{short}"
     done = subprocess.run(["ssh", "-o", "BatchMode=yes", HOST, f"rm -rf ~/{src} && mkdir ~/{src} && tar x -C ~/{src}"], input=tar, capture_output=True, timeout=300)
     if done.returncode:
         raise SystemExit(f"staging: copying the source to {HOST} failed: {done.stderr.decode()[-300:]}")
-    image = f"paperboat-server:stg-{short}"
+    image = f"paperboat-{target}:stg-{short}"
     # The Dockerfile accepts only YYYY.MM.DD.N: a staging build is today's date with a high N derived from the commit, never a release number.
     version = datetime.datetime.now(datetime.timezone.utc).strftime("%Y.%m.%d") + f".{900000 + int(full[:5], 16) % 100000}"
     # The build log stays on the host (~/pb-stg-build.log); a failure prints its last lines: the compiler error, not just 'exit code 1'.
     ssh(HOST, f"cd ~/{src} && nice -n 10 docker build --progress=plain --build-arg PAPERBOAT_VERSION={version} --build-arg PAPERBOAT_COMMIT={full} "
-              f"-t {image} -f server/deploy/Dockerfile . > ~/pb-stg-build.log 2>&1; rc=$?; rm -rf ~/{src}; "
+              f"-t {image} -f {dockerfile} . > ~/pb-stg-build.log 2>&1; rc=$?; rm -rf ~/{src}; "
               f"[ $rc = 0 ] || {{ grep -v -E '^#[0-9]+ (DONE|CACHED|sha256)' ~/pb-stg-build.log | tail -25 >&2; }}; exit $rc", tail=2500)
     print(image)
 
@@ -512,7 +514,7 @@ def reset():
     seed()
 
 
-COMMANDS = {"dns": (dns, 0), "grant": (grant, 0), "init": (init, 0), "build": (build, 1), "up": (up, 1), "seed": (seed, 0), "enroll": (enroll, 1), "reset": (reset, 0),
+COMMANDS = {"dns": (dns, 0), "grant": (grant, 0), "init": (init, 0), "build": (build, 1), "build-edge": (lambda commit: build(commit, "edge"), 1), "up": (up, 1), "seed": (seed, 0), "enroll": (enroll, 1), "reset": (reset, 0),
             "status": (lambda: print(json.dumps(status())), 0), "edge": (lambda image: print(json.dumps(edge(image))), 1), "relay": (lambda image: print(json.dumps(relay(image))), 1), "down": (lambda: remote("docker compose down"), 0),
             "logs": (lambda: print(remote("docker compose logs --no-color --tail 80 server")), 0)}
 
