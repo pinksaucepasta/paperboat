@@ -116,7 +116,7 @@ func TestOfflineSessionRightsEqualTheDescriptorDecisionOnPostgres(t *testing.T) 
 	// scopes returns peer endpoint -> sorted offline capabilities, and the mesh scopes' expiries, of one document.
 	read := func(authority string) (map[string][]string, []float64) {
 		t.Helper()
-		result, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "configuration_" + suffix + authority, UserID: owner, EndpointID: host, Authority: authority})
+		result, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "configuration_" + suffix + authority + fmt.Sprint(time.Now().UnixNano()), UserID: owner, EndpointID: host, Authority: authority})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -206,6 +206,18 @@ func TestOfflineSessionRightsEqualTheDescriptorDecisionOnPostgres(t *testing.T) 
 	if got := offline["offline_cli_"+shellMember]; !slices.Equal(got, []string{"exec", "managed_ssh"}) {
 		t.Errorf("member behind 40 busy owner endpoints: host offline scopes %v, want [exec managed_ssh]", got)
 	}
+	// At the bound every account keeps a share: the owner's 41 endpoints, all newer than the others' (never used), take
+	// one slot each round, not every slot (member, shellMember and the others lost theirs to a plain newest-first cut).
+	defer func(limit int) { maximumOfflinePeers = limit }(maximumOfflinePeers)
+	maximumOfflinePeers = 5
+	crowded, _ := read(AuthorityUntilRevoked)
+	if got := crowded["offline_cli_"+shellMember]; !slices.Equal(got, []string{"exec", "managed_ssh"}) {
+		t.Errorf("member behind a busy owner at the bound: host offline scopes %v, want [exec managed_ssh]", got)
+	}
+	if got := crowded["offline_cli_"+member]; !slices.Equal(got, []string{"terminal"}) {
+		t.Errorf("member behind a busy owner at the bound: host offline scopes %v, want [terminal]", got)
+	}
+	maximumOfflinePeers = 400
 	for cli, account := range clis {
 		var want []string
 		for _, c := range offlineCapabilities {

@@ -11,8 +11,10 @@ import (
 // used sessions of every account that may start a session there), and the team hosts a member's CLI document names.
 // At 32 an account's busy endpoints crowded a member's out, and its pb ssh to a team machine was refused
 // (scope_rejected). 400 peers at five capabilities stay within half of peernetwork.MaxScopes; the document loops stop
-// adding at the bound rather than failing (Tailscale's netmap names every peer the policy allows).
-const maximumOfflinePeers = 400
+// adding at the bound rather than failing (Tailscale's netmap names every peer the policy allows). Within the bound the
+// host's endpoints are shared fairly between accounts (offlineAccessPeers ranks each account's own, newest first), so
+// one account with hundreds of endpoints cannot take every slot from the others. A var only so a test can lower it.
+var maximumOfflinePeers = 400
 
 // offlineCapabilities maps the policy capability that decides a session (machine_capability_allowed, the same
 // function online descriptors use) to the network scope capability the daemon checks.
@@ -59,13 +61,17 @@ func offlineAccessPeers(ctx context.Context, tx *sql.Tx, self networkBinding, no
  UNION ALL SELECT member.account_id,greatest(ht.binding_generation,ht.policy_version,member.membership_generation)
  FROM host_teams ht JOIN paperboat.team_members member ON member.team_id=ht.team_id AND member.active
 ), endpoints AS (
- SELECT c.id,c.user_id,max(a.generation) AS generation FROM paperboat.cli_client_sessions c
- JOIN accounts a ON a.account_id=c.user_id
- JOIN paperboat.users actor ON actor.id=c.user_id AND actor.status='active'
- JOIN paperboat.peer_network_identities n ON n.endpoint_id=c.id AND n.user_id=c.user_id AND n.role='cli' AND n.revoked_at IS NULL
- WHERE c.state='active' AND c.revoked_at IS NULL AND c.api_token_id IS NULL AND c.recipe_id IS NULL
- GROUP BY c.id,c.user_id,c.last_used_at
- ORDER BY c.last_used_at DESC NULLS LAST,c.id LIMIT $3
+ SELECT id,user_id,generation FROM (
+  SELECT c.id,c.user_id,max(a.generation) AS generation,c.last_used_at,
+   row_number() OVER (PARTITION BY c.user_id ORDER BY c.last_used_at DESC NULLS LAST,c.id) AS share
+  FROM paperboat.cli_client_sessions c
+  JOIN accounts a ON a.account_id=c.user_id
+  JOIN paperboat.users actor ON actor.id=c.user_id AND actor.status='active'
+  JOIN paperboat.peer_network_identities n ON n.endpoint_id=c.id AND n.user_id=c.user_id AND n.role='cli' AND n.revoked_at IS NULL
+  WHERE c.state='active' AND c.revoked_at IS NULL AND c.api_token_id IS NULL AND c.recipe_id IS NULL
+  GROUP BY c.id,c.user_id,c.last_used_at) ranked
+ -- Every account's newest endpoint first, then every account's second: a fair share of the bound.
+ ORDER BY share,last_used_at DESC NULLS LAST,id LIMIT $3
 ), allowed AS MATERIALIZED (
  -- A capability is decided per account, not per endpoint: the policy functions run once per (account, capability)
  -- instead of once per CLI endpoint (a team-shared host took 1.5 s of CPU per document with 66 endpoints).
