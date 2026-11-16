@@ -182,27 +182,7 @@ func dispatchElevatedOperation(ctx context.Context, request elevation.Request) (
 		case elevation.ActionRepair:
 			return repairWindowsInstallation(ctx, request.OwnerSID)
 		case elevation.ActionConfigInstall, elevation.ActionConfigRemove:
-			unlock, err := lockWindowsNativeInstall(ctx)
-			if err != nil {
-				return err
-			}
-			defer func() {
-				if err := unlock(); err != nil {
-					resultErr = withCleanup("native service operation or its cleanup failed", resultErr, err)
-				}
-			}()
-			definition, err := hostinstall.WindowsConfigServiceDefinition(request.OwnerSID)
-			if err != nil {
-				return err
-			}
-			installer, err := service.New(definition)
-			if err != nil {
-				return err
-			}
-			if request.Action == elevation.ActionConfigInstall {
-				return installer.Install(ctx)
-			}
-			return installer.Uninstall(ctx)
+			return hostinstall.ManageWindowsConfigService(ctx, request.OwnerSID, request.Action == elevation.ActionConfigInstall)
 		case elevation.ActionStop:
 			return hostinstall.Stop(ctx, request.OwnerSID)
 		case elevation.ActionDaemonInstall:

@@ -2,7 +2,38 @@
 
 package hostinstall
 
-import "github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
+import (
+	"context"
+	"errors"
+
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
+)
+
+// ManageWindowsConfigService installs or removes the owner's config sync
+// service. The caller must already be elevated.
+func ManageWindowsConfigService(ctx context.Context, ownerSID string, install bool) (resultErr error) {
+	unlock, err := LockWindowsNativeInstall(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err := unlock(); err != nil {
+			resultErr = errors.Join(resultErr, err)
+		}
+	}()
+	definition, err := WindowsConfigServiceDefinition(ownerSID)
+	if err != nil {
+		return err
+	}
+	installer, err := service.New(definition)
+	if err != nil {
+		return err
+	}
+	if install {
+		return installer.Install(ctx)
+	}
+	return installer.Uninstall(ctx)
+}
 
 // WindowsConfigServiceDefinition derives every privileged service field from
 // the protected installation belonging to the elevation request owner.

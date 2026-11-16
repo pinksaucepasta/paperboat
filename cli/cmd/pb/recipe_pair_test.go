@@ -40,7 +40,7 @@ func TestRecipePairStartsARecipeSessionThenSetup(t *testing.T) {
 				t.Errorf("session request %q %+v", r.Header.Get("Authorization"), body)
 			}
 			writeAPIData(t, w, map[string]any{"access_token": "rcp-access", "refresh_token": "rcp-refresh", "token_type": "Bearer", "expires_in": 3600, "cli_client_session_id": "cls_recipe",
-				"recipe": map[string]any{"id": "rcp_1", "name": "ci", "revision": 1, "workspace": "personal", "recipe": map[string]any{}}})
+				"recipe": map[string]any{"id": "rcp_1", "name": "ci", "revision": 1, "workspace": "personal", "recipe": map[string]any{"config": map[string]any{"repository": "dotfiles"}}}})
 		case "/v1/me":
 			if removed {
 				w.Header().Set("Content-Type", "application/json")
@@ -67,7 +67,18 @@ func TestRecipePairStartsARecipeSessionThenSetup(t *testing.T) {
 	machineID := ""
 	loginLocalMachineID = func(*config.Config) (string, error) { return machineID, nil }
 	var setupArgs []string
-	runRecipeSetup = func(_ *command.Context, args []string) int { setupArgs = args; return 0 }
+	runRecipeSetup = func(_ *command.Context, args []string) int { setupArgs, machineID = args, "machine_1"; return 0 }
+	// Windows: the elevated pairing adds the config service the daemon's unelevated [config] apply needs.
+	oldNeeds, oldService := recipeConfigNeedsService, recipeConfigService
+	t.Cleanup(func() { recipeConfigNeedsService, recipeConfigService = oldNeeds, oldService })
+	serviceFor := ""
+	recipeConfigNeedsService = true
+	recipeConfigService = func(_ context.Context, id string, install bool) error {
+		if install {
+			serviceFor = id
+		}
+		return nil
+	}
 	oldPreflight := recipeInstallPreflight
 	t.Cleanup(func() { recipeInstallPreflight = oldPreflight })
 	recipeInstallPreflight = func(context.Context) error { return nil }
@@ -90,6 +101,9 @@ func TestRecipePairStartsARecipeSessionThenSetup(t *testing.T) {
 	}
 	if strings.Join(setupArgs, " ") != "--config "+path+" setup --name runner-1" {
 		t.Fatalf("setup args = %v", setupArgs)
+	}
+	if serviceFor != "machine_1" {
+		t.Fatalf("config service installed for %q, want the paired machine", serviceFor)
 	}
 	saved, _ := config.Load(path)
 	store, _ := config.ProfileStoreFor(saved)
@@ -115,7 +129,7 @@ func TestRecipePairStartsARecipeSessionThenSetup(t *testing.T) {
 	})
 
 	// Run again on the paired machine: nothing to do, no session, no setup.
-	machineID, setupArgs = "machine_1", nil
+	setupArgs = nil
 	t.Setenv("PB_RECIPE", token.String())
 	out, err = runBrowserLogin(t, context.Background(), path, "pair")
 	if err != nil || !strings.Contains(out, "already paired") || setupArgs != nil {

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -131,7 +132,33 @@ func recipePair(c *command.Context, tokenText string, setupArgs []string) error 
 	if code := runRecipeSetup(c, append(args, setupArgs...)); code != 0 {
 		return exitCodeError{code: code}
 	}
+	if recipeConfigNeedsService && recipeHasConfig(started.Recipe.Recipe) {
+		// The daemon applies [config] unelevated; on Windows the config service needs an administrator
+		// once, and pairing already runs elevated (recipeInstallPreflight).
+		machineID, err := loginLocalMachineID(cfg)
+		if err == nil {
+			err = recipeConfigService(c.Context, machineID, true)
+		}
+		if err != nil {
+			return fmt.Errorf("install the config sync service; run pb config sync apply in an administrator PowerShell: %w", err)
+		}
+	}
 	return nil
+}
+
+// recipeConfigNeedsService and recipeConfigService are replaced by tests.
+var (
+	recipeConfigNeedsService = runtime.GOOS == "windows"
+	recipeConfigService      = manageConfigService
+)
+
+func recipeHasConfig(spec json.RawMessage) bool {
+	var r struct {
+		Config struct {
+			Repository string `json:"repository"`
+		} `json:"config"`
+	}
+	return json.Unmarshal(spec, &r) == nil && r.Config.Repository != ""
 }
 
 const recipeMachineRemovedMessage = "This machine was removed from Paperboat (its recipe was revoked, or machine_lifetime or remove_after_offline removed it). Run `pb uninstall`, then the recipe install again."

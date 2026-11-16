@@ -35,6 +35,15 @@ func manageWindowsConfigService(ctx context.Context, stateRoot string, install b
 	if err != nil {
 		return true, err
 	}
+	if install && windowsConfigServiceStatus() == "active" {
+		// Re-applies run unelevated from the daemon; a running service needs nothing.
+		return true, nil
+	}
+	if elevation.IsCurrentProcessElevated() {
+		// The bridge cannot break away from an OpenSSH session's job; an
+		// elevated pb needs no bridge.
+		return true, hostinstall.ManageWindowsConfigService(ctx, owner, install)
+	}
 	action := elevation.ActionConfigRemove
 	if install {
 		action = elevation.ActionConfigInstall
