@@ -13,7 +13,9 @@ func TestRefusedStreamsRenewAtMostBoundedTimesThenFail(t *testing.T) {
 	client := NewClient("http://example.test", Auth{Token: "t0"}, Binding{}, nil)
 	client.native = true
 	var delays []int
-	client.renewDelay = func(n int) time.Duration { delays = append(delays, n); return 0 }
+	now := time.Unix(0, 0)
+	client.now = func() time.Time { return now }
+	client.renewDelay = func(n int) time.Duration { delays = append(delays, n); now = now.Add(time.Minute); return 0 }
 	renewed := 0
 	client.RefreshAuth = func(context.Context) (Auth, error) {
 		renewed++
@@ -24,7 +26,7 @@ func TestRefusedStreamsRenewAtMostBoundedTimesThenFail(t *testing.T) {
 		last = client.afterTransportLoss(t.Context(), client.currentAuth(), io.EOF)
 	}
 	if renewed != maxRenewalsWithoutProgress {
-		t.Fatalf("renewals = %d, want %d", renewed, maxRenewalsWithoutProgress)
+		t.Fatalf("renewals = %d, want %d (each a minute apart, so past the time floor)", renewed, maxRenewalsWithoutProgress)
 	}
 	if retryableTransferFailure(last) {
 		t.Fatalf("the send must end once renewals are exhausted, got retryable %v", last)
@@ -57,5 +59,27 @@ func TestRenewalDelayIsBoundedAndJittered(t *testing.T) {
 		if d := renewalDelay(n); d <= 0 || d > 45*time.Second {
 			t.Fatalf("renewalDelay(%d) = %v", n, d)
 		}
+	}
+}
+
+// X-26/X-37: a peer frozen by sleep, or a relay path that dropped, while the server still grants renewals: quick
+// renewals without a committed chunk must not end the send before the time floor, then resume once a chunk commits.
+func TestRenewalsWithoutProgressKeepTheSendForTheTimeFloor(t *testing.T) {
+	client := NewClient("http://example.test", Auth{Token: "t0"}, Binding{}, nil)
+	client.native = true
+	now := time.Unix(0, 0)
+	client.now = func() time.Time { return now }
+	client.renewDelay = func(int) time.Duration { now = now.Add(10 * time.Second); return 0 }
+	client.RefreshAuth = func(context.Context) (Auth, error) { return Auth{Token: "t" + now.String()}, nil }
+	for i := 0; now.Before(time.Unix(0, 0).Add(minRenewingWithoutProgress - 10*time.Second)); i++ {
+		if err := client.afterTransportLoss(t.Context(), client.currentAuth(), io.EOF); !retryableTransferFailure(err) {
+			t.Fatalf("renewal %d at %v without progress ended the send: %v", i+1, now.Sub(time.Unix(0, 0)), err)
+		}
+	}
+	for range maxRenewalsWithoutProgress {
+		_ = client.afterTransportLoss(t.Context(), client.currentAuth(), io.EOF)
+	}
+	if err := client.afterTransportLoss(t.Context(), client.currentAuth(), io.EOF); retryableTransferFailure(err) {
+		t.Fatalf("past the time floor and the count the send must end, got retryable %v", err)
 	}
 }

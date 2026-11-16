@@ -163,9 +163,12 @@ type Client struct {
 	authMu     sync.RWMutex
 	refreshMu  sync.Mutex
 	renewals   int // renewals since the last committed chunk, guarded by refreshMu
-	auth       Auth
-	binding    Binding
-	native     bool
+	// renewingSince is when the first of those renewals was granted, guarded by refreshMu.
+	renewingSince time.Time
+	now           func() time.Time // nil: time.Now (a field only so tests can move the clock)
+	auth          Auth
+	binding       Binding
+	native        bool
 }
 
 func NewClient(endpoint string, auth Auth, binding Binding, client *http.Client) *Client {
@@ -814,7 +817,11 @@ func (c *Client) afterTransportLoss(ctx context.Context, previous Auth, err erro
 	// A refused stream (the host closes it, the sender sees an EOF) looks like a lost connection, and each renewal opens
 	// an access session: without a pause and a bound the sender renewed until the server's operations cap answered 429
 	// (X-15). The first renewal is immediate; later ones without a committed chunk between them back off and then stop.
-	if c.renewals >= maxRenewalsWithoutProgress {
+	clock := c.now
+	if clock == nil {
+		clock = time.Now
+	}
+	if c.renewals >= maxRenewalsWithoutProgress && clock().Sub(c.renewingSince) >= minRenewingWithoutProgress {
 		return errors.Join(err, &nativeAuthorizationFailure{errors.New("the destination keeps refusing the transfer after renewed authorization")})
 	}
 	if c.renewals > 0 {
@@ -827,14 +834,23 @@ func (c *Client) afterTransportLoss(ctx context.Context, previous Auth, err erro
 		// a failed renewal opened no session (daemon restarting, machine offline): not counted
 		return errors.Join(err, refreshErr)
 	}
+	if c.renewals == 0 {
+		c.renewingSince = clock()
+	}
 	c.renewals++
 	c.setAuth(fresh)
 	return err
 }
 
-// maxRenewalsWithoutProgress bounds renewals in a row that no committed chunk followed: 8 with the backoff below is
-// about two minutes, inside the 32-operation cap and far shorter than the recovery window.
-const maxRenewalsWithoutProgress = 8
+// maxRenewalsWithoutProgress and minRenewingWithoutProgress bound renewals in a row that no committed chunk followed:
+// the send ends after at least 8 of them and 5 minutes (about 17 with the backoff below), far shorter than the recovery
+// window. The time floor outlasts a peer that sleeps while the server still lists it online (75-104 s until it is
+// shown offline; then renewals fail and are not counted): 8 renewals alone were ~40 s and ended sends across a
+// sleep (X-26) or a relay path that dropped for a few minutes (X-37).
+const (
+	maxRenewalsWithoutProgress = 8
+	minRenewingWithoutProgress = 5 * time.Minute
+)
 
 // renewalDelay is n^2 * 250 ms capped at 30 s, jittered 0.5-1.5x (prior art: ~/ref/tailscale/util/backoff/backoff.go).
 func renewalDelay(n int) time.Duration {
