@@ -66,6 +66,12 @@ var policies = []policy{
 	// Its native admissions cascade with it.
 	{"inspector_credentials", batchOf("inspector_credentials", `expires_at < now()-make_interval(secs=>$2)`),
 		seconds(func(c config.Retention) time.Duration { return c.ExpiredCredentials })},
+	// A consumed edge ticket is kept while its attachment is attached (and a window after), so the edge can resume
+	// that attachment's control channel; then it goes like any other.
+	{"browser_terminal_tickets", batchOf("browser_terminal_tickets", `expires_at < now()-make_interval(secs=>$2)
+ AND NOT EXISTS (SELECT 1 FROM paperboat.native_usage_authorities usage WHERE usage.access_session_id=browser_terminal_tickets.edge_attachment_id
+  AND usage.resource_kind='terminal' AND usage.attached_until > now()-make_interval(secs=>$2))`),
+		seconds(func(c config.Retention) time.Duration { return c.ExpiredCredentials })},
 	// Only after the certificate expired: a holder that lost access stays on its machines' revoked lists
 	// until then (managedssh.TrustedUserCAs revoked key IDs), so deleting it earlier would let its certificate in again.
 	{"managed_ssh_certificate_holders", batchOf("managed_ssh_certificate_holders", `valid_before < now()-make_interval(secs=>$2)`),

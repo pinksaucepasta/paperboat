@@ -11,6 +11,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/server/internal/config"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/retention"
 )
 
 var testBrowserKeyDigest = strings.Repeat("A", 43)
@@ -204,7 +205,7 @@ func TestBrowserInspectorTicketIsBoundToItsCredentialPostgres(t *testing.T) {
 }
 
 // A consumed edge ticket names its attachment: only that attachment resumes with it, only while the
-// principal's session is live. Cleanup keeps it while the attachment is attached (and an hour
+// principal's session is live. Retention keeps it while the attachment is attached (and an hour
 // after), however old the ticket, then deletes it like any other.
 func TestEdgeTicketResumesItsAttachmentAndIsKeptWhileAttachedPostgres(t *testing.T) {
 	dsn := os.Getenv("PAPERBOAT_TEST_DATABASE_DSN")
@@ -268,16 +269,28 @@ func TestEdgeTicketResumesItsAttachmentAndIsKeptWhileAttachedPostgres(t *testing
 	// Long expired, but its attachment is attached: kept.
 	exec(`INSERT INTO native_usage_authorities(access_session_id,machine_id,installation_generation,workspace_id,resource_kind,resource_id,resource_name,machine_name,capabilities,admitted_at,expires_at,retain_until,edge_node_id,actor_account_id,attached_until) SELECT $1,m.id,m.installation_generation,'personal:'||$3,'terminal',$2,'t','btr',ARRAY['terminal'],now(),now()+interval '1 minute',now()+interval '7 days','edge_btr',$3,now()+interval '1 minute' FROM user_machines m WHERE m.id=$4`, attachment, terminal, user, machine)
 	exec(`UPDATE browser_terminal_tickets SET created_at=now()-interval '3 hours',expires_at=now()-interval '2 hours' WHERE edge_attachment_id=$1`, attachment)
-	_ = issue() // runs cleanup
+	_ = issue()
 	if _, err := tickets.ResumeEdge(ctx, issued.Value, issued.Origin, attachment); err != nil {
 		t.Fatalf("cleanup deleted the ticket of an attached attachment: %v", err)
 	}
-	// The attachment ended over an hour ago: the next cleanup deletes the ticket.
+	// The attachment ended over an hour ago. Issuing never prunes (no table-wide DELETE per request); retention does.
 	exec(`UPDATE native_usage_authorities SET attached_until=now()-interval '61 minutes' WHERE access_session_id=$1`, attachment)
 	_ = issue()
-	var kept int
-	if err := store.SQL().QueryRowContext(ctx, `SELECT count(*) FROM browser_terminal_tickets WHERE edge_attachment_id=$1`, attachment).Scan(&kept); err != nil || kept != 0 {
-		t.Fatalf("tickets kept after their attachment ended: %d, %v", kept, err)
+	count := func() (n int) {
+		t.Helper()
+		if err := store.SQL().QueryRowContext(ctx, `SELECT count(*) FROM browser_terminal_tickets WHERE edge_attachment_id=$1`, attachment).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	if count() != 1 {
+		t.Fatal("Issue pruned expired tickets on the request path")
+	}
+	if _, err := retention.Run(ctx, store, config.Default().Retention); err != nil {
+		t.Fatal(err)
+	}
+	if kept := count(); kept != 0 {
+		t.Fatalf("tickets kept after their attachment ended: %d", kept)
 	}
 }
 

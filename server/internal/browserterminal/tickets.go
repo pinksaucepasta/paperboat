@@ -64,14 +64,7 @@ func (s TicketStore) Issue(ctx context.Context, in Ticket) (result Ticket, resul
 	in.Value = base64.RawURLEncoding.EncodeToString(secret)
 	hash := sha256.Sum256(secret)
 	in.ExpiresAt = time.Now().UTC().Add(TicketLifetime)
-	// A consumed edge ticket is kept while its attachment is attached (and an hour after), so the
-	// edge can resume that attachment's control channel; then it goes like any other.
-	_, err := s.DB.SQL().ExecContext(ctx, `DELETE FROM browser_terminal_tickets ticket WHERE ticket.expires_at < now() - interval '1 hour'
-		AND NOT EXISTS (SELECT 1 FROM native_usage_authorities usage WHERE usage.access_session_id=ticket.edge_attachment_id
-			AND usage.resource_kind='terminal' AND usage.attached_until > now() - interval '1 hour')`)
-	if err != nil {
-		return Ticket{}, err
-	}
+	// Expired tickets are pruned by internal/retention, never on this request path.
 	tx, err := s.DB.SQL().BeginTx(ctx, nil)
 	if err != nil {
 		return Ticket{}, err
