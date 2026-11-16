@@ -28,6 +28,10 @@ const (
 	terminalUnreachableBatch = 100
 )
 
+// terminalProbeTimeout bounds one question to a host: a host that does not answer holds a worker this long, not for
+// the rest of the batch budget (four silent hosts used to hold all four workers for the whole 8 s, every sweep).
+var terminalProbeTimeout = 2 * time.Second
+
 // Why a session ended, shown by the console. Written once, with the close.
 const (
 	terminalClosedHostGone    = "host_gone"           // the host answered "unknown session"
@@ -134,13 +138,24 @@ func (s *Service) probeStaleTerminalSessions(ctx context.Context) error {
 		errs []error
 		wg   sync.WaitGroup
 		jobs = make(chan terminalOrphan)
+		// silent holds the machines whose host did not answer in this sweep: their other sessions are not asked,
+		// since the next one would hold a worker for another terminalProbeTimeout.
+		silent sync.Map
 	)
 	for worker := 0; worker < terminalReconcileConcurrency; worker++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			for o := range jobs {
-				if err := s.checkTerminalSession(ctx, o, hosts[o.userMachineID]); err != nil {
+				if _, skip := silent.Load(o.userMachineID); skip {
+					if err := s.requeueTerminalSession(ctx, o.sessionID); err != nil {
+						mu.Lock()
+						errs = append(errs, err)
+						mu.Unlock()
+					}
+					continue
+				}
+				if err := s.checkTerminalSession(ctx, o, hosts[o.userMachineID], &silent); err != nil {
 					mu.Lock()
 					errs = append(errs, err)
 					mu.Unlock()
@@ -164,13 +179,15 @@ func (s *Service) probeStaleTerminalSessions(ctx context.Context) error {
 
 // checkTerminalSession asks the host for one session. The host's "unknown" answer closes the row and its snapshot
 // is recorded. Any other host outcome changes nothing; only signing and database errors are returned.
-func (s *Service) checkTerminalSession(ctx context.Context, o terminalOrphan, host terminalHost) error {
+func (s *Service) checkTerminalSession(ctx context.Context, o terminalOrphan, host terminalHost, silent *sync.Map) error {
 	now := s.now().UTC()
 	token, err := s.signProcessCredential(ctx, mint.CredentialInput{Issuer: s.issuer, Audience: "paperboat-machine", Subject: o.ownerAccount, JTI: newID("token"), IssuedAt: now, ExpiresAt: now.Add(time.Minute), CredentialClass: "terminal_operation", Scopes: []string{"terminal:operate"}, EnvironmentID: host.environmentID, MachineID: o.userMachineID, UserID: o.ownerAccount, CLIClientSessionID: "control-plane", SessionID: o.sessionID})
 	if err != nil {
 		return err
 	}
-	snapshot, observeErr := s.controlRuntime.Terminal(ctx, host.ingress, token, "snapshot", o.sessionID, newID("operation"))
+	probeCtx, cancel := context.WithTimeout(ctx, terminalProbeTimeout)
+	defer cancel()
+	snapshot, observeErr := s.controlRuntime.Terminal(probeCtx, host.ingress, token, "snapshot", o.sessionID, newID("operation"))
 	switch {
 	case observeErr == nil:
 		_, err = s.db.SQL().ExecContext(ctx, `UPDATE user_machine_terminal_sessions SET runtime_state=$2,closed_at=CASE WHEN $2 IN ('closed','exited','deleted') THEN coalesce(closed_at,now()) ELSE NULL END,closed_reason=`+terminalSnapshotClosedReasonSQL+`,last_runtime_sync_at=now(),updated_at=now() WHERE id=$1`, o.sessionID, snapshot.State)
@@ -178,11 +195,18 @@ func (s *Service) checkTerminalSession(ctx context.Context, o terminalOrphan, ho
 	case helperruntime.IsSessionUnknown(observeErr):
 		return s.markTerminalSessionAbsent(ctx, o.sessionID)
 	default:
-		// Move the row to the back of the queue: a host that does not answer must not hold the batch
-		// for the orphans behind it.
-		_, err = s.db.SQL().ExecContext(ctx, `UPDATE user_machine_terminal_sessions SET updated_at=now() WHERE id=$1`, o.sessionID)
-		return err
+		silent.Store(o.userMachineID, struct{}{})
+		return s.requeueTerminalSession(ctx, o.sessionID)
 	}
+}
+
+// requeueTerminalSession moves a row to the back of the queue: a host that does not answer must not hold the batch
+// for the orphans behind it. It does not use the batch context, which has run out when the host was the reason.
+func (s *Service) requeueTerminalSession(ctx context.Context, sessionID string) error {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	_, err := s.db.SQL().ExecContext(ctx, `UPDATE user_machine_terminal_sessions SET updated_at=now() WHERE id=$1`, sessionID)
+	return err
 }
 
 // terminalHostRoute finds where the server reaches a machine's terminal host. A machine without an active route

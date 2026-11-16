@@ -28,6 +28,7 @@ type hostWithSessions struct {
 	has         map[string]bool
 	exited      map[string]bool
 	unreachable bool
+	hang        map[string]bool // sessions whose host never answers: the call returns only when its context ends
 	mu          sync.Mutex
 	asked       map[string]int
 }
@@ -38,10 +39,14 @@ func (h *hostWithSessions) askedCount(session string) int {
 	return h.asked[session]
 }
 
-func (h *hostWithSessions) Terminal(_ context.Context, _, _, operation, session, _ string) (helperruntime.Snapshot, error) {
+func (h *hostWithSessions) Terminal(ctx context.Context, _, _, operation, session, _ string) (helperruntime.Snapshot, error) {
 	h.mu.Lock()
 	h.asked[session]++
 	h.mu.Unlock()
+	if h.hang[session] {
+		<-ctx.Done()
+		return helperruntime.Snapshot{}, ctx.Err()
+	}
 	if h.unreachable {
 		return helperruntime.Snapshot{}, errors.New("fixture host unavailable")
 	}
@@ -258,5 +263,53 @@ func TestPostgresTerminalSessionsReconcileOnReconnectAndAgeOut(t *testing.T) {
 		if got, listed := reasons[ids[name]]; !listed || got != want {
 			t.Fatalf("catalog closed_reason of %s = %q (listed=%v), want %q", name, got, listed, want)
 		}
+	}
+}
+
+// A host that never answers holds one worker per probe until the probe deadline, not the whole 8 s batch budget; its
+// other sessions are not asked in that sweep, they all go to the back of the queue (the requeue must not use the
+// batch context), and the sessions behind them on a healthy host are confirmed in the same sweep.
+func TestPostgresSilentHostDoesNotStarveTheTerminalSweep(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	service, host, silentOwner, silentMachine := terminalOrphanFixture(t, store)
+	_, _, healthyOwner, healthyMachine := terminalOrphanFixture(t, store)
+	old := terminalProbeTimeout
+	terminalProbeTimeout = 100 * time.Millisecond
+	t.Cleanup(func() { terminalProbeTimeout = old })
+	host.hang = map[string]bool{}
+	var silent []string
+	// Older than every row other tests leave behind, so the silent ones lead the queue; more of them than workers.
+	for i := 0; i < terminalReconcileConcurrency*2; i++ {
+		id := "terminal_" + uuid.NewString()
+		silent = append(silent, id)
+		host.hang[id] = true
+		insertOrphanSession(t, store, id, silentOwner, silentMachine, fmt.Sprintf("silent-%d-%d", i, time.Now().UnixNano()), 26*24*time.Hour)
+	}
+	healthy := "terminal_" + uuid.NewString()
+	host.has = map[string]bool{healthy: true}
+	insertOrphanSession(t, store, healthy, healthyOwner, healthyMachine, fmt.Sprint("healthy-", time.Now().UnixNano()), 25*24*time.Hour)
+
+	started := time.Now()
+	if err := service.reconcileTerminalSessions(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if took := time.Since(started); took > terminalReconcileBudget/2 {
+		t.Fatalf("sweep took %s: silent hosts held the workers", took)
+	}
+	var confirmed bool
+	if err := store.SQL().QueryRowContext(ctx, `SELECT last_runtime_sync_at IS NOT NULL FROM paperboat.user_machine_terminal_sessions WHERE id=$1`, healthy).Scan(&confirmed); err != nil || !confirmed {
+		t.Fatalf("session on the healthy host was not confirmed in the same sweep: %v", err)
+	}
+	asked := 0
+	for _, id := range silent {
+		asked += host.askedCount(id)
+		var requeued bool
+		if err := store.SQL().QueryRowContext(ctx, `SELECT updated_at > now()-interval '1 minute' FROM paperboat.user_machine_terminal_sessions WHERE id=$1`, id).Scan(&requeued); err != nil || !requeued {
+			t.Fatalf("silent session %s was not moved to the back of the queue: %v", id, err)
+		}
+	}
+	if asked > terminalReconcileConcurrency {
+		t.Fatalf("a silent machine was asked %d times in one sweep, want at most one per worker (%d)", asked, terminalReconcileConcurrency)
 	}
 }
