@@ -171,3 +171,43 @@ ok
 - `pb pair` from a non-interactive elevated task printed "Still working on the administrator step" for over 2 minutes and my job timeout cut it before the final JSON; the machine was nevertheless enrolled and healthy afterwards (services running). Not reproduced on a real session; worth a look when pair is run from a scheduled task.
 - WireGuard with `AllowedIPs = ::/0` alone made every IPv4 packet on the guest fail ("General failure"), so the tunnel uses `2000::/3` plus the NAT64 prefix.
 - The paths in the table are from one run each; the A -> W path moved from direct to relay once IPv4 was removed, as expected.
+
+
+## Continuation audit (2026-11-16 03:49 UTC)
+
+The recorded successful traffic above is historical evidence, not a currently reachable guest.
+Commit `6e53cdad9cdb343a3fa3844a9c4617ca7b25092f` containing that run is already on `origin/main`.
+No product code, CHECKLIST.md, Victus fleet installation, host firewall, host DNS, or other VMs
+were changed during this continuation.
+
+Read-only checks on Victus:
+```
+Get-Process WindowsSandbox*,wsb*,vmmem* | Select Name,Id,SessionId
+vmmem         11348 0
+vmmem         11660 0
+vmmemCmZygote  6776 0
+quser
+No User exists for *
+```
+No Sandbox process or interactive desktop session was found. From pbvm2:
+```
+sudo docker exec -u pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000 rx38o-a /home/pbt/.local/bin/pb ping rx38o-w --count 1
+pb: the machine is offline; start or repair Paperboat on it (`pb doctor`), then retry.
+Support reference: support_fbbd2d2f-ee8e-48de-8a97-dd4a52c6d3f4
+```
+
+**Strict isolation remains unproved:** removing the IPv4 default route proves no routed
+public IPv4 path; it does not block IPv4 to the Ethernet on-link subnet or loopback.
+The recorded configuration does not include a guest outbound firewall restriction to
+only the WireGuard endpoint. Thus it does not meet the literal requirement “IPv4 unusable
+for everything except a tunnel endpoint”; do not tick that stronger claim from this file.
+The earlier doctor and bidirectional relay ping/exec results remain recorded passes.
+`pb connect`, browser edge traffic, and absence of a waiting firewall prompt were not verified.
+
+Reruns used an interactive Victus desktop session with `wsb exec -r System`, not direct
+SSH into the guest. The host staging directory is `C:\Users\pujan\rx38o`, its mapped guest
+share was `C:\host`, and the host task was `rx38o-job`.
+The Sandbox is ephemeral and is currently unavailable: a new logged-in desktop session,
+new Sandbox, build copy/hash verification, enrollment, and stricter guest IPv4 isolation
+are required before rerunning. No claim is made that the old guest can be resumed.
+The paired identity was not revoked; the NAT64 bed and Linux peer were left untouched.
