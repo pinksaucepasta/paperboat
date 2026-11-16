@@ -1235,3 +1235,24 @@ NAME       ID
 rcp-ctlm4  apitok_bfae040c6866f9ddb5aea32c36e1f507
 $ pb --config ~/rcpctl/config.json logout
 Signed out
+
+################ f26-07-noroot.txt + f26-07-L.txt (vault locked)
+=== F26-07 no root on rcp-l8 (Linux container, user nos without sudo), server .31, client dev-c6d670f93, 2026-11-16T13:01:19Z ===
+$ (creator) pb recipe list | grep rcpu   [before]
+rcpu    rcpu    1 / 2      2027-02-14   8m ago
+$ (user nos, no sudo) PB_RECIPE=<token> ./pb pair
+This machine is already paired; nothing to do.
+rc=0
+$ (creator) pb recipe list | grep rcpu   [after: unchanged, no session or machine was made]
+rcpu    rcpu    1 / 2      2027-02-14   9m ago
+--- fresh user nos2 (no sudo, never paired) ---
+sudo: a password is required
+$ (user nos2, no sudo) PB_RECIPE=<token> ./pb pair
+pb: Paperboat: installing needs root or passwordless sudo, and this shell has neither. Run the installer as root (in Docker the default user is root), or allow passwordless sudo for this user. Recipe installs never ask for a password, so they never hang a CI job.
+$ (creator) pb recipe list | grep rcpu   [after]
+rcpu    rcpu    1 / 2      2027-02-14   9m ago
+=== F26-07 vault locked on rcp-l8 (Linux container with a Secret Service), server .31, client dev-dd317c2af, 2026-11-16T13:02:45Z ===
+$ pb env lock
+ENV vault operation completed.
+$ pb recipe create -f rcpt9.toml   [ENV locked]
+pb: recipe rcpt9 reads vault rcp-env, and your ENV keys are locked on this computer. Unlock them with pb env unlock, then run the command again. The vault key is wrapped here, on your computer; Paperboat never sees it.
