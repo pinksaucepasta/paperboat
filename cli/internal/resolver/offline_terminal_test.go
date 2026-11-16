@@ -60,3 +60,20 @@ func TestResolveOpensANewTerminalSessionOfflineWhenPaperboatIsUnreachable(t *tes
 		t.Fatalf("a refusal opened offline: %+v", info.Terminal)
 	}
 }
+
+// A daemon that already reports Paperboat unreachable spares a new terminal the request timeout (31-62 s in the
+// F21-01 W outage drill): the grant is never asked for. A terminal the host cannot admit offline still asks.
+func TestResolveOpensANewTerminalOfflineWithoutAskingWhenTheDaemonReportsAnOutage(t *testing.T) {
+	asked := errors.New("the grant was requested")
+	resolved := &ResolvedMachine{ID: "um_1", Name: "My App", State: "online", Generation: 3, EnvironmentID: "env_1"}
+	create := &TerminalSessionCreate{Name: "work", IdempotencyKey: "key-1"}
+
+	info, err := newTestResolver(&fakeClient{connectErr: asked}).Resolve(context.Background(), ConnectRequest{Machine: "My App", ResolvedMachine: resolved, CreateTerminalSession: create, ControlPlaneUnavailable: true})
+	if err != nil || info.Terminal == nil || !info.Terminal.Auth.Offline {
+		t.Fatalf("resolve = %+v, %v; want an offline terminal without a request", info, err)
+	}
+	_, err = newTestResolver(&fakeClient{connectErr: asked}).Resolve(context.Background(), ConnectRequest{Machine: "My App", ResolvedMachine: resolved, CreateTerminalSession: create, TerminalSessionID: "umts_1", ControlPlaneUnavailable: true})
+	if !errors.Is(err, asked) {
+		t.Fatalf("attaching to an existing session = %v, want the grant request", err)
+	}
+}

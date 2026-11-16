@@ -111,10 +111,17 @@ func (r *APIResolver) Resolve(ctx context.Context, req ConnectRequest) (ConnectI
 	var createdSession *TerminalSessionInfo
 	var resp api.ConnectionDescriptor
 	if req.CreateTerminalSession != nil {
+		if req.ControlPlaneUnavailable {
+			// The daemon already knows Paperboat is unreachable: asking it would only wait out the request timeout.
+			if offline, ok := r.offlineTerminal(req, target); ok {
+				outcome = "offline"
+				return offline, nil
+			}
+		}
 		var createErr error
 		resp, createdSession, createErr = r.connectWithSessionCreate(ctx, target, req.CreateTerminalSession)
 		if createErr != nil {
-			if offline, ok := r.offlineTerminal(req, target, createErr); ok {
+			if offline, ok := r.offlineTerminal(req, target); ok && api.Unreachable(createErr) {
 				outcome = "offline"
 				return offline, nil
 			}
@@ -180,9 +187,9 @@ const offlineTerminalLifetime = 12 * time.Hour
 // own signed scopes and names the session by the stream's operation, so the session id is made here and the machine
 // is the one the daemon resolved. Attaching to an existing session, or a machine the daemon did not resolve, still
 // needs Paperboat: the grant names the session and the server holds the inventory.
-func (r *APIResolver) offlineTerminal(req ConnectRequest, target target, cause error) (ConnectInfo, bool) {
+func (r *APIResolver) offlineTerminal(req ConnectRequest, target target) (ConnectInfo, bool) {
 	create, resolved := req.CreateTerminalSession, req.ResolvedMachine
-	if !api.Unreachable(cause) || create == nil || req.TerminalSessionID != "" || resolved == nil || resolved.EnvironmentID == "" {
+	if create == nil || req.TerminalSessionID != "" || resolved == nil || resolved.EnvironmentID == "" {
 		return ConnectInfo{}, false
 	}
 	sessionID := "terminal_offline_" + strings.ReplaceAll(uuid.NewString(), "-", "_")

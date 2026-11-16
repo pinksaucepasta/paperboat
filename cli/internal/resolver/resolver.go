@@ -188,6 +188,9 @@ type ConnectRequest struct {
 	// session and issue its connection descriptor in one round trip. It is
 	// mutually exclusive with TerminalSessionID.
 	CreateTerminalSession *TerminalSessionCreate
+	// ControlPlaneUnavailable is the daemon's report that Paperboat is unreachable: a new terminal then opens from the
+	// host's rules at once instead of after a request timeout.
+	ControlPlaneUnavailable bool
 }
 
 // ResolvedMachine is a machine catalog entry the caller resolved before

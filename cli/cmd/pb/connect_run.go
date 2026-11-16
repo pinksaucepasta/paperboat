@@ -144,9 +144,15 @@ func actionConnectTargetInDirectory(c *command.Context, requested, cwd string) e
 	if strings.TrimSpace(d.cfg.ServerURL) == "" {
 		return commandRejection{reason: commandRejectMissingServer}
 	}
-	cred, err := d.auth.Credential()
-	if err != nil && !api.Unreachable(err) { // an expired token that cannot be refreshed offline still opens a new session offline
-		return err
+	// The daemon's report spares a new terminal the request timeouts of a control plane it already knows is down (a
+	// blackholed API holds each of the token refresh and the grant for 30 s).
+	controlPlaneDown := daemonReportsControlPlaneUnavailable(c.Context)
+	var cred config.Credential
+	if !controlPlaneDown {
+		cred, err = d.auth.Credential()
+		if err != nil && !api.Unreachable(err) { // an expired token that cannot be refreshed offline still opens a new session offline
+			return err
+		}
 	}
 	backend, err := newWorkspaceAPIClient(c, d.cfg.ServerURL, d.auth)
 	if err != nil {
@@ -335,7 +341,7 @@ func actionConnectTargetInDirectory(c *command.Context, requested, cwd string) e
 	createdSessionID, createdMachineID := "", ""
 	offlineSessionID := "" // an offline session is named only once its dial succeeds, so a retry mints another
 	for attempt := 0; attempt <= d.cfg.Connect.DialRetries; attempt++ {
-		resolveRequest := resolver.ConnectRequest{Machine: machineRef, Credential: cred, TerminalSessionID: terminalSessionID, CreateTerminalSession: createSession}
+		resolveRequest := resolver.ConnectRequest{Machine: machineRef, Credential: cred, TerminalSessionID: terminalSessionID, CreateTerminalSession: createSession, ControlPlaneUnavailable: controlPlaneDown}
 		if target.kind == environmentUserMachine && resolvedMachine.ID != "" && resolvedMachine.InstallationGeneration > 0 {
 			resolveRequest.ResolvedMachine = &resolver.ResolvedMachine{ID: resolvedMachine.ID, Name: resolvedMachine.Alias, State: resolvedMachine.State, Generation: uint64(resolvedMachine.InstallationGeneration), EnvironmentID: resolvedMachine.EnvironmentID}
 		}

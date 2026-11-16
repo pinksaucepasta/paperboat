@@ -391,6 +391,12 @@ func resolveWarmUserMachine(ctx context.Context, requested string) (api.UserMach
 	return api.UserMachine{ID: status.ID, EnvironmentID: status.EnvironmentID, WorkspaceRoot: status.WorkspaceRoot, Alias: status.Alias, Platform: status.Platform, State: "ready", Online: true, InstallationGeneration: int64(status.Generation), SSHUser: status.SSHUser, SSHPort: status.SSHPort, SSHHostKeys: status.SSHHostKeys}, true
 }
 
+// daemonReportsControlPlaneUnavailable is the daemon's own health: its last refresh could not reach Paperboat.
+func daemonReportsControlPlaneUnavailable(ctx context.Context) bool {
+	snapshot, err := loadWarmMachineSnapshot(ctx)
+	return err == nil && len(snapshot.Health) == 1 && snapshot.Health[0].Code == "control_plane_unavailable"
+}
+
 func resolveTerminalSession(ctx context.Context, client *api.Client, target environmentTarget, ref string) (api.TerminalSession, error) {
 	sessions, err := listTerminalSessionsForTarget(ctx, client, target)
 	if err != nil {
