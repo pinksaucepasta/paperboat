@@ -124,3 +124,17 @@ func TestDarwinEarlierAnchorRequiresEmptySubtree(t *testing.T) {
 		t.Fatal("live earlier anchor accepted")
 	}
 }
+
+func TestDarwinReachesRdr(t *testing.T) {
+	const own = "com.apple/000.paperboat-machineguard"
+	for nat, want := range map[string]bool{
+		"nat-anchor \"com.apple/*\" all\nrdr-anchor \"com.apple/*\" all\n": true,
+		"rdr-anchor   \"" + own + "\"  all\n":                              true,
+		"nat-anchor \"com.apple/*\" all\n":                                 false,
+		"":                                                                 false,
+	} {
+		if got := darwinReachesRdr(nat, own); got != want {
+			t.Errorf("darwinReachesRdr(%q) = %v, want %v", nat, got, want)
+		}
+	}
+}

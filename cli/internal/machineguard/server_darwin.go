@@ -23,8 +23,10 @@ import (
 
 const DefaultSocket = "/Library/Application Support/Paperboat/machineguard-control/control.sock"
 const DefaultStateDir = "/Library/Application Support/Paperboat/machineguard"
-// gatewayRedirects: pf here has no equivalent redirect yet; a held gateway port stays a refusal (pb doctor names the holder).
-const gatewayRedirects = false
+
+// portRedirects: every machine and gateway port listens on a free high port and the anchor's rdr rule sends ip:port
+// there: XNU refuses a 0.0.0.0:P bind next to the broker's 127.100.x.y:P socket for any other uid, whatever the options.
+const portRedirects = true
 
 const darwinBrokerAccount = "_paperboat_machineguard"
 
@@ -184,7 +186,7 @@ func bindDarwinSocket(ctx context.Context, fd int, address, loopbackCIDR string)
 	// listener necessarily has a bound local port, already excluded above.
 	host, portText, _ := net.SplitHostPort(address)
 	port, portErr := strconv.Atoi(portText)
-	if portErr != nil || port < 1 || port > 65535 {
+	if portErr != nil || port < 0 || port > 65535 { // 0: a free high port (portRedirects)
 		return nil, errors.New("invalid protected port")
 	}
 	ip := net.ParseIP(host).To4()
@@ -213,7 +215,7 @@ func bindDarwinSocket(ctx context.Context, fd int, address, loopbackCIDR string)
 func ServeSocketChild(ctx context.Context, address, loopbackCIDR string) error {
 	_, rawPort, splitErr := net.SplitHostPort(address)
 	port, portErr := strconv.Atoi(rawPort)
-	if splitErr != nil || portErr != nil || port < 1 || port > 65535 {
+	if splitErr != nil || portErr != nil || port < 0 || port > 65535 {
 		return errors.New("invalid protected port")
 	}
 	if err := ctx.Err(); err != nil {
@@ -278,6 +280,15 @@ func darwinRules(ctx context.Context, leases []*guardedLease, loopbackCIDR ...st
 		return "", err
 	}
 	var b strings.Builder
+	// pf needs translation before filter rules; the filter sees the high port after the rewrite on lo0 input.
+	redirected := map[string]bool{} // gateway leases of several uids share one port
+	for _, lease := range leases {
+		rule := fmt.Sprintf("rdr on lo0 inet proto tcp from any to %s port %d -> %s port %d\n", lease.ip, lease.port, lease.ip, leaseListenPort(lease))
+		if leaseListenPort(lease) != lease.port && !redirected[rule] {
+			redirected[rule] = true
+			b.WriteString(rule)
+		}
+	}
 	// No remote interface may enter a loopback projection.
 	prefixes := loopbackCIDR
 	if darwinPrefix != "" {
@@ -301,8 +312,9 @@ func darwinRules(ctx context.Context, leases []*guardedLease, loopbackCIDR ...st
 			client = ""
 		}
 		fmt.Fprintf(&b, "pass out quick on lo0 inet proto tcp from any to %s port %d%s no state\n", lease.ip, lease.port, client)
-		fmt.Fprintf(&b, "pass out quick on lo0 inet proto tcp from %s port %d to any user %d no state\n", lease.ip, lease.port, broker)
-		fmt.Fprintf(&b, "pass in quick on lo0 inet proto tcp from any to %s port %d user %d flags S/SA keep state\n", lease.ip, lease.port, broker)
+		listen := leaseListenPort(lease)
+		fmt.Fprintf(&b, "pass out quick on lo0 inet proto tcp from %s port %d to any user %d no state\n", lease.ip, listen, broker)
+		fmt.Fprintf(&b, "pass in quick on lo0 inet proto tcp from any to %s port %d user %d flags S/SA keep state\n", lease.ip, listen, broker)
 		fmt.Fprintf(&b, "pass in quick on lo0 inet proto tcp from %s port %d to any%s no state\n", lease.ip, lease.port, client)
 	}
 	for _, prefix := range prefixes {

@@ -60,11 +60,8 @@ func (g *guardServer) routeGateway(ctx context.Context, uid string, port int) (*
 	}
 	gateway := g.gateways[port]
 	if gateway == nil {
-		listener, err := listenProtected(ctx, net.JoinHostPort(splitdns.BrowserGatewayIP, strconv.Itoa(port)), g.cfg.LoopbackCIDR)
-		if errors.Is(err, ErrPortInUse) && gatewayRedirects {
-			// A web server holds this port on every address: listen on a free one; the guard's nat rule sends the gateway address there.
-			listener, err = listenProtected(ctx, net.JoinHostPort(splitdns.BrowserGatewayIP, "0"), g.cfg.LoopbackCIDR)
-		}
+		// A free port: the guard's nat/rdr rule sends the gateway address there (portRedirects).
+		listener, err := listenProtected(ctx, net.JoinHostPort(splitdns.BrowserGatewayIP, "0"), g.cfg.LoopbackCIDR)
 		if err != nil {
 			return nil, err
 		}
@@ -218,4 +215,19 @@ func (r *gatewayRoute) Accept() (net.Conn, error) {
 }
 func (r *gatewayRoute) Addr() net.Addr {
 	return &net.TCPAddr{IP: net.ParseIP(splitdns.BrowserGatewayIP), Port: r.gateway.port}
+}
+
+// leaseListenPort is the port the lease's socket really listens on: the free high port its redirect sends the
+// lease's own port to (portRedirects).
+func leaseListenPort(l *guardedLease) int {
+	if route, ok := l.listener.(*gatewayRoute); ok {
+		return route.gateway.listenPort()
+	}
+	if l.listener == nil {
+		return l.port
+	}
+	if addr, ok := l.listener.Addr().(*net.TCPAddr); ok {
+		return addr.Port
+	}
+	return l.port
 }

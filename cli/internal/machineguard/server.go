@@ -354,7 +354,8 @@ func validProtectedBindAddress(address, cidr string) bool {
 		return false
 	}
 	number, _ := strconv.Atoi(port)
-	return validAddressInCIDR(host, cidr) || host == splitdns.BrowserGatewayIP && gatewayPortAllowed(number)
+	// Port 0 is the guard's own free-port bind behind its redirect (portRedirects).
+	return validAddressInCIDR(host, cidr) || host == splitdns.BrowserGatewayIP && (number == 0 || gatewayPortAllowed(number))
 }
 
 // gatewayPortAllowed is the set of ports the browser gateway address may serve: 80 and 443 for the web
@@ -435,7 +436,11 @@ func (g *guardServer) handle(ctx context.Context, conn controlConn, uid string, 
 		if err := g.persist(); err != nil {
 			return nil, err
 		}
-		listener, err := listenProtected(ctx, key, g.cfg.LoopbackCIDR)
+		bind := key
+		if portRedirects {
+			bind = net.JoinHostPort(in.IP, "0") // the nat rule sends key here
+		}
+		listener, err := listenProtected(ctx, bind, g.cfg.LoopbackCIDR)
 		if err != nil {
 			return nil, fmt.Errorf("create protected listener: %w", err)
 		}

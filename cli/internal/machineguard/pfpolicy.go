@@ -186,3 +186,14 @@ func darwinAnchorName(name string) bool {
 	}
 	return true
 }
+
+// darwinReachesRdr reports whether the root translation rules (pfctl -s nat) evaluate the anchor's rdr rules.
+func darwinReachesRdr(nat, anchor string) bool {
+	for _, line := range strings.Split(nat, "\n") {
+		line = strings.Join(strings.Fields(line), " ")
+		if line == `rdr-anchor "com.apple/*" all` || line == `rdr-anchor "`+anchor+`" all` {
+			return true
+		}
+	}
+	return false
+}

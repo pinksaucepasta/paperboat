@@ -131,6 +131,7 @@ func TestLinuxMachineGuardNamespace(t *testing.T) {
 	os.Chmod(filepath.Dir(root), 0755)
 	os.Chmod(root, 0755)
 	cfg := Config{StateDir: filepath.Join(root, "state"), Socket: filepath.Join(root, "run", "control.sock")}
+	recordTestDefaultDomain(t, cfg.StateDir)
 	start := func() (*Client, context.CancelFunc, <-chan error) {
 		t.Helper()
 		ctx, cancel := context.WithCancel(context.Background())
@@ -140,6 +141,9 @@ func TestLinuxMachineGuardNamespace(t *testing.T) {
 		for time.Now().Before(deadline) {
 			client, err := Connect(context.Background(), cfg.Socket)
 			if err == nil {
+				if _, err = client.Status(context.Background()); err != nil { // learns the guard's claims feature
+					t.Fatal(err)
+				}
 				return client, cancel, done
 			}
 			select {
@@ -164,13 +168,12 @@ func TestLinuxMachineGuardNamespace(t *testing.T) {
 			t.Error("guard cleanup timed out")
 		}
 	}()
-	address := netip.MustParseAddr("127.100.23.45")
 	const port = 48086
-	destination := net.JoinHostPort(address.String(), fmt.Sprint(port))
-	listener, err := client.Acquire(t.Context(), "office.local.example.test", address, port)
+	listener, address, err := client.AcquireMachine(t.Context(), "account-1", "machine-1", "office.local.example.test", netip.MustParseAddr("127.100.23.45"), port)
 	if err != nil {
 		t.Fatal(err)
 	}
+	destination := net.JoinHostPort(address.String(), fmt.Sprint(port))
 	if err = client.ApplyPolicy(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -206,6 +209,31 @@ func TestLinuxMachineGuardNamespace(t *testing.T) {
 		}
 	}
 	echo()
+	// A program (Vite --host, Docker -p, rails -b 0.0.0.0) can still bind the machine port on every address,
+	// and the protected name still reaches the guard, not the program.
+	program, err := net.Listen("tcp4", fmt.Sprintf("0.0.0.0:%d", port))
+	if err != nil {
+		t.Fatalf("a program cannot bind the machine port on every address: %v", err)
+	}
+	echo()
+	program.Close() // the release check below binds the port on every address itself
+	// The same holds for a browser gateway port (https://<machine>.<domain>:<port>).
+	gatewayPort := port + 1
+	gateway, err := client.Acquire(t.Context(), splitdns.BrowserGatewayHostname, netip.MustParseAddr(splitdns.BrowserGatewayIP), gatewayPort)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = client.ApplyPolicy(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	gatewayProgram, err := net.Listen("tcp4", fmt.Sprintf("0.0.0.0:%d", gatewayPort))
+	if err != nil {
+		t.Fatalf("a program cannot bind a gateway port on every address: %v", err)
+	}
+	gatewayProgram.Close()
+	if err = gateway.Close(); err != nil {
+		t.Fatal(err)
+	}
 	executable, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
@@ -235,28 +263,8 @@ func TestLinuxMachineGuardNamespace(t *testing.T) {
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("foreign UID denial: %v %s", err, output)
 	}
-	// The browser gateway shares the DNS address. Its replies therefore also
-	// target the protected range; ownership must permit the owner in both directions.
-	gateway, err := client.Acquire(t.Context(), splitdns.BrowserGatewayHostname, netip.MustParseAddr(splitdns.BrowserGatewayIP), 80)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err = client.ApplyPolicy(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	defer gateway.Close()
-	gatewayConn, err := net.DialTimeout("tcp4", splitdns.BrowserGatewayIP+":80", time.Second)
-	if err != nil {
-		t.Fatalf("gateway owner connection: %v", err)
-	}
-	gatewayConn.Close()
-	gatewayProbe := exec.Command(probe, "-test.run=^TestMachineGuardOtherUserProbe$")
-	gatewayProbe.Env = append(os.Environ(), "PAPERBOAT_GUARD_PROBE="+splitdns.BrowserGatewayIP+":80", "PAPERBOAT_GUARD_SOCKET="+cfg.Socket)
-	gatewayProbe.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{Uid: 65534, Gid: 65534}}
-	if output, err := gatewayProbe.CombinedOutput(); err != nil {
-		t.Fatalf("foreign gateway UID denial: %v %s", err, output)
-	}
-	if accepted.Load() != 1 {
+	// The routed browser gateway admits any uid at TCP and refuses by attribution: its own tests cover that.
+	if accepted.Load() != 2 { // the owner's two echoes
 		t.Fatal("unauthorized traffic reached accept")
 	}
 	denied := func() {
@@ -278,7 +286,7 @@ func TestLinuxMachineGuardNamespace(t *testing.T) {
 	wildcard.Close()
 	// A distinct controller cannot steal an active socket; old connection closure
 	// never releases a replacement's listener. Recovery retains durable reservations.
-	listener, err = client.Acquire(t.Context(), "office.local.example.test", address, port)
+	listener, _, err = client.AcquireMachine(t.Context(), "account-1", "machine-1", "office.local.example.test", address, port)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -340,7 +348,7 @@ func TestLinuxMachineGuardNamespace(t *testing.T) {
 	}
 	// Restore default deny and root-owned journal after restart.
 	client, stop, done = start()
-	listener, err = client.Acquire(t.Context(), "office.local.example.test", address, port)
+	listener, _, err = client.AcquireMachine(t.Context(), "account-1", "machine-1", "office.local.example.test", address, port)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -393,8 +401,10 @@ func TestMachineGuardOtherUserProbe(t *testing.T) {
 		stolen.Close()
 		t.Fatal("foreign owner stole reserved name/address")
 	}
-	otherIP := netip.MustParseAddr("127.100.23.46")
-	listener, err := client.Acquire(t.Context(), "studio.local.example.test", otherIP, 48086)
+	if _, err := client.Status(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	listener, otherIP, err := client.AcquireMachine(t.Context(), "account-2", "machine-2", "studio.local.example.test", netip.MustParseAddr("127.100.23.46"), 48086)
 	if err != nil {
 		t.Fatalf("disjoint OS-user listener: %v", err)
 	}

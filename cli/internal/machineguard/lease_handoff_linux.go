@@ -220,7 +220,8 @@ func leasesFromFiles(files []*os.File, names []string) []*guardedLease {
 		if err != nil {
 			continue
 		}
-		if addr, ok := listener.Addr().(*net.TCPAddr); !ok || addr.Port != port || !addr.IP.Equal(net.ParseIP(ip)) {
+		// The port is not checked: a machine lease listens on a high port (portRedirects).
+		if addr, ok := listener.Addr().(*net.TCPAddr); !ok || !addr.IP.Equal(net.ParseIP(ip)) {
 			listener.Close()
 			continue
 		}

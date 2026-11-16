@@ -119,6 +119,9 @@ func applyProtection(ctx context.Context, cfg Config, leases []*guardedLease) er
 			return darwinStep("add the Paperboat anchor to the PF root ruleset", err)
 		}
 	}
+	if err = darwinEnsureRdrHook(ctx); err != nil {
+		return darwinStep("add the Paperboat anchor to the PF translation rules", err)
+	}
 	status, err := darwinRun(ctx, "", "/sbin/pfctl", "-s", "info")
 	if err != nil {
 		return darwinStep("read the PF status", err)
@@ -293,5 +296,20 @@ func darwinInstallHook(ctx context.Context) error {
 		return fmt.Errorf("read the PF root ruleset: %w", err)
 	}
 	_, err = darwinRun(ctx, darwinInsertHook(string(out), darwinAnchor), "/sbin/pfctl", "-R", "-f", "-")
+	return err
+}
+
+// darwinEnsureRdrHook makes the root translation rules reach the anchor's rdr rules (portRedirects): macOS's
+// pf.conf does with rdr-anchor "com.apple/*"; a pf.conf without it gets the guard's own rdr-anchor appended
+// (-N reloads only the translation rules, every filter rule and option stays).
+func darwinEnsureRdrHook(ctx context.Context) error {
+	out, err := exec.CommandContext(ctx, "/sbin/pfctl", "-s", "nat").Output()
+	if err != nil {
+		return fmt.Errorf("read the PF translation rules: %w", err)
+	}
+	if darwinReachesRdr(string(out), darwinAnchor) {
+		return nil
+	}
+	_, err = darwinRun(ctx, strings.TrimRight(string(out), "\n")+"\n"+`rdr-anchor "`+darwinAnchor+`" all`+"\n", "/sbin/pfctl", "-N", "-f", "-")
 	return err
 }

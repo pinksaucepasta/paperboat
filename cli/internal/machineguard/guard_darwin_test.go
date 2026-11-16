@@ -3,6 +3,7 @@
 package machineguard
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"io"
@@ -16,6 +17,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/internal/splitdns"
 )
 
 func TestDarwinGuardSocketChild(t *testing.T) {
@@ -30,6 +33,23 @@ func TestDarwinGuardSocketChild(t *testing.T) {
 	if err := ServeSocketChild(context.Background(), address, loopbackCIDR); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// TestDarwinGuardProgramBind is the other user's program: it binds 0.0.0.0 on the port, says "bound" and holds the
+// socket until its stdin closes.
+func TestDarwinGuardProgramBind(t *testing.T) {
+	port := os.Getenv("PAPERBOAT_GUARD_PROGRAM_PORT")
+	if port == "" {
+		t.Skip("isolated child only")
+	}
+	listener, err := net.Listen("tcp4", "0.0.0.0:"+port)
+	if err != nil {
+		fmt.Println("bind failed:", err)
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	fmt.Println("bound")
+	_, _ = io.Copy(io.Discard, os.Stdin)
 }
 
 func TestDarwinGuardOtherUser(t *testing.T) {
@@ -52,9 +72,15 @@ func TestDarwinGuardOtherUser(t *testing.T) {
 		listener.Close()
 		t.Fatal("foreign name/address reservation stolen")
 	}
-	listener, err := client.Acquire(ctx, "other.local.example.test", netip.MustParseAddr("127.100.253.69"), 54370)
+	if _, err = client.Status(ctx); err != nil {
+		t.Fatal(err)
+	}
+	listener, assigned, err := client.AcquireMachine(ctx, "account-2", "machine-2", "other.local.example.test", netip.MustParseAddr("127.100.253.69"), 54370)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if assigned.String() != "127.100.253.69" {
+		t.Fatal("guard assigned another address", assigned)
 	}
 	if err = client.ApplyPolicy(ctx); err != nil {
 		t.Fatal(err)
@@ -113,6 +139,7 @@ func TestDarwinGuardKernel(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg := Config{StateDir: filepath.Join(root, "state"), Socket: filepath.Join(root, "control.sock"), LoopbackCIDR: "127.100.0.0/16"}
+	recordTestDefaultDomain(t, cfg.StateDir)
 	defer func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -159,10 +186,15 @@ func TestDarwinGuardKernel(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer client.Close()
-	address := netip.MustParseAddr("127.100.253.68")
-	listener, err := client.Acquire(ctx, "office.local.example.test", address, 54369)
+	if _, err = client.Status(ctx); err != nil { // learns the guard's claims feature
+		t.Fatal(err)
+	}
+	listener, address, err := client.AcquireMachine(ctx, "account-1", "machine-1", "office.local.example.test", netip.MustParseAddr("127.100.253.68"), 54369)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if address.String() != "127.100.253.68" {
+		t.Fatal("guard assigned another address", address)
 	}
 	if err = client.ApplyPolicy(ctx); err != nil {
 		t.Fatal(err)
@@ -199,13 +231,66 @@ func TestDarwinGuardKernel(t *testing.T) {
 		}
 	}
 	echo()
+	// A program of another OS user (Vite --host, docker -p) can still bind the machine port on every address, and
+	// the protected name still reaches the guard, not the program.
+	program := exec.Command(os.Args[0], "-test.run=^TestDarwinGuardProgramBind$", "-test.v")
+	program.Env = append(os.Environ(), "PAPERBOAT_GUARD_PROGRAM_PORT=54369")
+	program.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{Uid: 501, Gid: 20}}
+	hold, err := program.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	bound, err := program.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = program.Start(); err != nil {
+		t.Fatal(err)
+	}
+	reader, line := bufio.NewReader(bound), ""
+	for !strings.HasPrefix(line, "bound") && !strings.HasPrefix(line, "bind failed") { // after go test's own lines
+		next, err := reader.ReadString('\n')
+		if line = next; err != nil {
+			break
+		}
+	}
+	if !strings.HasPrefix(line, "bound") {
+		hold.Close()
+		program.Wait()
+		t.Fatalf("a program cannot bind the machine port on every address: %s", line)
+	}
+	echo()
+	hold.Close()
+	if err = program.Wait(); err != nil {
+		t.Fatal("program child", err)
+	}
+	const port = 54369
+	// The same holds for a browser gateway port (https://<machine>.<domain>:<port>).
+	gatewayPort := port + 1
+	gateway, err := client.Acquire(ctx, splitdns.BrowserGatewayHostname, netip.MustParseAddr(splitdns.BrowserGatewayIP), gatewayPort)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = client.ApplyPolicy(ctx); err != nil {
+		t.Fatal(err)
+	}
+	gatewayProgram := exec.Command(os.Args[0], "-test.run=^TestDarwinGuardProgramBind$")
+	gatewayProgram.Env = append(os.Environ(), fmt.Sprintf("PAPERBOAT_GUARD_PROGRAM_PORT=%d", gatewayPort))
+	gatewayProgram.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{Uid: 501, Gid: 20}}
+	gatewayProgram.Stdin = strings.NewReader("") // binds, says bound, exits
+	if output, err := gatewayProgram.CombinedOutput(); err != nil || !strings.Contains(string(output), "bound") {
+		t.Fatalf("a program cannot bind a gateway port on every address: %v %s", err, output)
+	}
+	if err = gateway.Close(); err != nil {
+		t.Fatal(err)
+	}
 	child := exec.Command(os.Args[0], "-test.run=^TestDarwinGuardOtherUser$", "-test.v")
 	child.Env = append(os.Environ(), "PAPERBOAT_GUARD_SOCKET="+cfg.Socket)
 	child.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{Uid: 501, Gid: 20}}
 	if output, err := child.CombinedOutput(); err != nil {
 		t.Fatalf("other OS user: %v %s", err, output)
 	}
-	if accepted.Load() != 1 {
+	if accepted.Load() != 2 { // the owner's two echoes
 		t.Fatal("foreign traffic reached accept", accepted.Load())
 	}
 	echo()

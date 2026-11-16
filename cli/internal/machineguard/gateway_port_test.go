@@ -16,7 +16,8 @@ func TestGatewayServesEveryPort(t *testing.T) {
 		}
 	}
 	gateway := splitdns.BrowserGatewayIP
-	if !validProtectedBindAddress(gateway+":5432", machineloopback.DefaultCIDR) || !validProtectedBindAddress(gateway+":22", machineloopback.DefaultCIDR) || validProtectedBindAddress(gateway+":0", machineloopback.DefaultCIDR) {
+	// :0 is the guard's own free-port bind behind its redirect; requests for port 0 are refused above.
+	if !validProtectedBindAddress(gateway+":5432", machineloopback.DefaultCIDR) || !validProtectedBindAddress(gateway+":22", machineloopback.DefaultCIDR) || !validProtectedBindAddress(gateway+":0", machineloopback.DefaultCIDR) || validProtectedBindAddress(gateway+":65536", machineloopback.DefaultCIDR) {
 		t.Fatal("protected bind addresses on the gateway do not follow the gateway port policy (any port, 22 included)")
 	}
 }

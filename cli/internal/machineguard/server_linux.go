@@ -24,9 +24,10 @@ const DefaultStateDir = "/var/lib/paperboat-machineguard"
 const guardMark = 0x5042
 const guardTable = "paperboat_machineguard"
 
-// gatewayRedirects: when a gateway port is held on all addresses, the guard listens on a free high port and the
-// nat rule above sends the gateway address there.
-const gatewayRedirects = true
+// portRedirects: every machine and gateway port listens on a free high port and the nat rule sends ip:port there, so
+// a program can still bind that port on every address (Linux refuses 0.0.0.0:P next to a listening 127.100.x.y:P,
+// whatever the options; Tailscale and NetBird hold no local ports for peers at all).
+const portRedirects = true
 
 func peerUID(conn *net.UnixConn) (uint32, error) {
 	raw, err := conn.SyscallConn()
@@ -82,31 +83,22 @@ func applyProtection(ctx context.Context, cfg Config, leases []*guardedLease) er
 	return nil
 }
 
-// leaseListenPort is the port the lease's socket really listens on: the gateway's high port when a program holds
-// the browser port on every address (gatewayRedirects), else the lease's own port.
-func leaseListenPort(l *guardedLease) int {
-	if route, ok := l.listener.(*gatewayRoute); ok {
-		return route.gateway.listenPort()
-	}
-	return l.port
-}
-
 // protectionRules is the owned nft table for the leases. A gateway port moved to a high port (a web server holds
 // :80/:443 on all addresses) gets a nat output DNAT from the gateway address, so every URL stays unchanged; the
 // filter chains see the packet after that rewrite and so name the high port.
 func protectionRules(leases []*guardedLease) (string, error) {
 	var script strings.Builder
 	fmt.Fprintf(&script, "table inet %s {\n", guardTable)
-	redirects := map[int]int{}
+	redirects := map[string]string{} // ip:port -> rule; gateway leases of several uids share one
 	for _, l := range leases {
 		if port := leaseListenPort(l); port != l.port {
-			redirects[l.port] = port
+			redirects[net.JoinHostPort(l.ip, strconv.Itoa(l.port))] = fmt.Sprintf("ip daddr %s tcp dport %d dnat ip to %s:%d\n", l.ip, l.port, l.ip, port)
 		}
 	}
 	if len(redirects) > 0 {
 		script.WriteString("chain gateway_nat { type nat hook output priority -100; policy accept;\n")
-		for _, port := range slices.Sorted(maps.Keys(redirects)) {
-			fmt.Fprintf(&script, "ip daddr %s tcp dport %d dnat ip to %s:%d\n", splitdns.BrowserGatewayIP, port, splitdns.BrowserGatewayIP, redirects[port])
+		for _, key := range slices.Sorted(maps.Keys(redirects)) {
+			script.WriteString(redirects[key])
 		}
 		script.WriteString("}\n")
 	}
@@ -121,7 +113,7 @@ func protectionRules(leases []*guardedLease) (string, error) {
 			fmt.Fprintf(&script, "ip daddr %s tcp dport %d accept\n", l.ip, leaseListenPort(l))
 			continue
 		}
-		fmt.Fprintf(&script, "ip daddr %s tcp dport %d meta skuid %d accept\n", l.ip, l.port, uid)
+		fmt.Fprintf(&script, "ip daddr %s tcp dport %d meta skuid %d accept\n", l.ip, leaseListenPort(l), uid)
 	}
 	// Replies can target the protected gateway address itself. Only a marked
 	// broker socket in an already admitted connection may bypass the UID check.

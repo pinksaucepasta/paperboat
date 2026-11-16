@@ -30,6 +30,10 @@ const DefaultStateDir = `C:\ProgramData\Paperboat\MachineGuard`
 // deadline whenever routes went away (victus, 2026-11-16: local access degraded every ~20 min).
 const releaseDefersPolicy = true
 
+// portRedirects: machine ports listen on their own port; Windows lets a program bind 0.0.0.0 on the same
+// port next to the guard's specific-address listener (and routes 127.100.x.y to the more specific guard socket).
+const portRedirects = false
+
 func requirePrivilege() error {
 	token, err := windows.OpenCurrentProcessToken()
 	if err != nil {

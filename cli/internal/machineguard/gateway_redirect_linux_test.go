@@ -54,6 +54,28 @@ func TestProtectionRulesRedirectOnlyAHeldGatewayPort(t *testing.T) {
 	}
 }
 
+// A machine port listens on a high port so a program can still bind 0.0.0.0 on the same port: the nat rule sends
+// ip:port there and the uid rule names the high port the filter chain sees after the rewrite.
+func TestProtectionRulesRedirectAMachinePortToItsHighPort(t *testing.T) {
+	lease := &guardedLease{ip: "127.100.1.2", port: 8080, uid: "1000", listener: heldListener{port: 41234}}
+	rules, err := protectionRules([]*guardedLease{lease})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"ip daddr 127.100.1.2 tcp dport 8080 dnat ip to 127.100.1.2:41234\n",
+		"ip daddr 127.100.1.2 tcp dport 41234 meta skuid 1000 accept\n",
+		"ip daddr 127.100.1.2 tcp dport 41234 tcp flags & (syn | ack) == syn socket mark",
+	} {
+		if !strings.Contains(rules, want) {
+			t.Errorf("rules lack %q:\n%s", want, rules)
+		}
+	}
+	if strings.Contains(rules, "dport 8080 meta skuid") {
+		t.Errorf("uid rule names the dialed port, which the filter never sees after the nat rewrite:\n%s", rules)
+	}
+}
+
 func TestProtectionRulesHaveNoNatChainWithoutARedirect(t *testing.T) {
 	for _, leases := range [][]*guardedLease{nil, {gatewayLease(80, 80), {ip: "127.100.1.2", port: 22, uid: "1000"}}} {
 		rules, err := protectionRules(leases)
@@ -98,8 +120,8 @@ func TestAttributionUsesTheDialedPortOfARedirectedGateway(t *testing.T) {
 	}
 }
 
-// As root (the guard's own privilege; SO_MARK needs it): a port held on every address makes the gateway fall
-// back to a free high port, and the lease reports it for the nat rule.
+// As root (the guard's own privilege; SO_MARK needs it): the gateway listens on a free high port, so a port held on
+// every address still gets a gateway, and the lease reports the high port for the nat rule.
 func TestRouteGatewayFallsBackWhenThePortIsHeld(t *testing.T) {
 	if os.Geteuid() != 0 {
 		t.Skip("needs root for the guard's SO_MARK listener")
