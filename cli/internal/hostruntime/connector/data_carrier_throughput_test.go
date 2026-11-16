@@ -9,6 +9,7 @@ import (
 	"time"
 
 	sharedprotocol "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
+	"github.com/pinksaucepasta/paperboat/shared/quicdial"
 	"github.com/quic-go/quic-go"
 )
 
@@ -68,7 +69,7 @@ func delayedUDPRelay(t *testing.T, target *net.UDPAddr, delay time.Duration) str
 	return front.LocalAddr().String()
 }
 
-// One QUIC stream from the connector's dial configuration into the edge's receive windows (256 KiB initial, 4 MiB
+// One QUIC stream, sent the way the daemon dials (quicdial.Dial with defaultQUICConfig on the OS socket), into the edge's receive windows (256 KiB initial, 4 MiB
 // maximum, as edge/internal/datacarrier endpointQUICConfig) must hold the budget at 50 ms RTT. The connection is made
 // through the delay, so its handshake measures the real RTT: a connection that measured ~1 ms before the delay
 // appeared makes quic-go's HyStart leave slow start at once (40 KB window, 88-95 Mbit/s on Linux). This is the sender
@@ -112,7 +113,7 @@ func TestQUICCarrierStreamHoldsTheBudgetAtRealRTT(t *testing.T) {
 		received <- err
 	}()
 	address := delayedUDPRelay(t, packetConn.LocalAddr().(*net.UDPAddr), 50*time.Millisecond)
-	connection, err := quic.DialAddr(ctx, address, clientTLS, defaultQUICConfig())
+	connection, err := quicdial.Dial(ctx, address, clientTLS, defaultQUICConfig(), false) // the daemon's own dial (data_carrier_endpoint.go)
 	if err != nil {
 		t.Fatal(err)
 	}
