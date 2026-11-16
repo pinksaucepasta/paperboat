@@ -99,6 +99,11 @@ func TestWindowsRestoreStartsThePreviousSessionOwner(t *testing.T) {
 		got.OwnerSID != config.OwnerSID || got.StateRoot != config.StateRoot || got.WorkspaceRoot != config.Workspace {
 		t.Fatalf("session owner prepared for another installation than the restored one: %+v", got)
 	}
+	// The recovery of a pending installation journal restores through this request: an empty Home failed Validate,
+	// so the journal stayed and session-owner cleanup waited for it all day (lanex2-w, victus, 2026-11-16).
+	if !safeAbsolute(got.Home) || !safeAbsolute(got.Executable) || !safeAbsolute(got.StateRoot) || !safeAbsolute(got.WorkspaceRoot) {
+		t.Fatalf("restore request fails Validate's paths: %+v", got)
+	}
 	prepareErr = unavailable
 	if err := restoreWindowsSessionOwner(context.Background(), config, layout); !errors.Is(err, unavailable) {
 		t.Fatalf("a session owner that did not start must fail the restore, got %v", err)
