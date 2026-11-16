@@ -67,7 +67,7 @@ def provision(devices):
     """Unlock every device's vault and set the XP_ values once: what each ENV delivery check (also xplat_term's connect) reads."""
     password = PASSWORD.read_bytes().strip()
     for dev in devices.values():
-        done = dev.pb('env', 'vault', 'unlock', '--password-stdin', input=password + b'\n', timeout=120)
+        done = dev.pb('env', 'unlock', '--password-stdin', input=password + b'\n', timeout=120)
         assert done.rc == 0, '%s: unlock failed: %s' % (dev.name, (done.text + done.errtext)[-200:])
     ctl = fleet.controller()
     for name, value in VALUES.items():

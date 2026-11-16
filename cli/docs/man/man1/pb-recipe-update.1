@@ -1,0 +1,59 @@
+.nh
+.TH "PB-RECIPE-UPDATE" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-recipe-update - Change a recipe from its file
+
+
+.SH SYNOPSIS
+\fBpb recipe update -f <file> [flags]\fP
+
+
+.SH DESCRIPTION
+Change a recipe to what its file now says; the recipe is named by the file's base
+name. The token stays the same. Online machines from the recipe apply the new
+revision at once (tags change server-side; ENV, config, preview and tunnel sections
+are created, changed or removed on each machine).
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB-f\fP, \fB--file\fP=""
+	the recipe file (.toml or .json)
+
+.PP
+\fB-h\fP, \fB--help\fP[=false]
+	help for update
+
+.PP
+\fB--json\fP[=false]
+	print JSON
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH EXAMPLE
+.EX
+  pb recipe update -f ci.toml
+.EE
+
+
+.SH SEE ALSO
+\fBpb-recipe(1)\fP

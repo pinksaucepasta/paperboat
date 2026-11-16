@@ -15,12 +15,12 @@ func TestCommandGroupsRejectUnknownWordsAndListJSON(t *testing.T) {
 		}
 	}
 	var out bytes.Buffer
-	if code := run(t.Context(), []string{"env", "vault", "--json"}, &out, &out); code != 0 || !strings.Contains(out.String(), `"commands"`) {
-		t.Fatalf("env vault --json: exit=%d output=%s", code, out.String())
+	if code := run(t.Context(), []string{"env", "grants", "--json"}, &out, &out); code != 0 || !strings.Contains(out.String(), `"commands"`) {
+		t.Fatalf("env grants --json: exit=%d output=%s", code, out.String())
 	}
 	out.Reset()
-	if code := run(t.Context(), []string{"env", "vault"}, &out, &out); code != 0 || !strings.Contains(out.String(), "Usage") {
-		t.Fatalf("env vault without arguments should still show help: exit=%d output=%s", code, out.String())
+	if code := run(t.Context(), []string{"env", "grants"}, &out, &out); code != 0 || !strings.Contains(out.String(), "Usage") {
+		t.Fatalf("env grants without arguments should still show help: exit=%d output=%s", code, out.String())
 	}
 }
 

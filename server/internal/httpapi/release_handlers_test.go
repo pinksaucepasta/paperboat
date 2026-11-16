@@ -91,6 +91,22 @@ func TestReleaseEndpointsServeInstallAndTUF(t *testing.T) {
 			t.Fatalf("plain installer %s for %q: status=%d body=%q headers=%v", test.path, test.userAgent, response.Code, response.Body.String(), response.Header())
 		}
 	}
+	// /recipe and /recipe.ps1 are the same installers marked as a recipe install; the token never goes in the URL (F26).
+	for _, test := range []struct{ path, body string }{
+		{"/recipe", "#!/bin/sh\nPAPERBOAT_RECIPE_INSTALL=1\nexport PAPERBOAT_RECIPE_INSTALL\necho paperboat\n"},
+		{"/recipe.ps1", "$env:PAPERBOAT_RECIPE_INSTALL='1';Write-Output paperboat-windows\n"},
+	} {
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, test.path, nil))
+		if response.Code != http.StatusOK || response.Body.String() != test.body || response.Header().Get("Cache-Control") != "no-store" || response.Result().ContentLength != int64(len(test.body)) {
+			t.Fatalf("recipe installer %s: status=%d body=%q", test.path, response.Code, response.Body.String())
+		}
+		response = httptest.NewRecorder()
+		router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, test.path+"?t=pbr_x", nil))
+		if response.Code != http.StatusBadRequest {
+			t.Fatalf("recipe installer %s with a query: status=%d", test.path, response.Code)
+		}
+	}
 	for _, path := range []string{"/install", "/install.ps1"} {
 		for _, query := range []string{"?p=", "?other=value", "?p=4J7M9Q2V8X4N6P5R1T0W8Y2ZAB&p=4J7M9Q2V8X4N6P5R1T0W8Y2ZAB", "?p=4J7M9Q2V8X4N6P5R1T0W8Y2ZAB&other=value", "?p=%invalid"} {
 			response := httptest.NewRecorder()

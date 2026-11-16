@@ -7,7 +7,7 @@ import { newRecoveryCode, setUpVault } from "@/lib/envvault/protection"
 import { PasswordForm, RecoveryCodeStep } from "@/components/environment/env-recovery-code"
 import { Empty, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 
-/** No vault yet: a password and a recovery code create one in this browser, the same vault `pb env vault init` makes. */
+/** No vault yet: a password and a recovery code create one in this browser, the same vault `pb env init` makes. */
 export function EnvVaultSetup() {
   const client = useQueryClient()
   const [made, setMade] = useState<{ password: string; code: string }>()

@@ -2,7 +2,7 @@ package main
 
 import "testing"
 
-// pb env vault reset is the documented path for a user who lost both the password and the recovery code, so it must
+// pb env reset is the documented path for a user who lost both the password and the recovery code, so it must
 // install its new keys into a locked memory custody; ordinary key and value commands still need an unlocked vault.
 func TestVaultResetEstablishesMemoryCustody(t *testing.T) {
 	for _, action := range []string{"unlock", "init", "recover", "reset"} {

@@ -112,7 +112,17 @@ func readEnvHookRecord(command *cobra.Command) (envHookRecord, error) {
 // this unix user is still the recorded one; the runtime then refuses any
 // account but its own.
 func loadEnvironmentHook(ctx context.Context, command *cobra.Command, record envHookRecord) envHookResult {
-	return loadFromRuntime(ctx, command, record, runtime.ShellEnvironmentPath)
+	result := loadFromRuntime(ctx, command, record, runtime.ShellEnvironmentPath)
+	if result.quiet || result.reason != "" {
+		return result
+	}
+	// A machine paired from a recipe also gets the values of the vaults the recipe reads (F26).
+	values, err := withRecipeVaultValues(ctx, command, result.values)
+	if err != nil {
+		return envHookResult{reason: err.Error()}
+	}
+	result.values = values
+	return result
 }
 
 // loadEnvironmentNames asks the same runtime for the names only (`pb env names`).
@@ -181,7 +191,7 @@ func requestShellEnvironment(ctx context.Context, endpoint, token, path string, 
 	case "names_listing_disabled":
 		return envHookResult{disabled: true}
 	case "environment_pending":
-		return envHookResult{reason: "ENV needs Paperboat online, or run `pb env vault unlock` (delivery to this machine is pending)"}
+		return envHookResult{reason: "ENV needs Paperboat online, or run `pb env unlock` (delivery to this machine is pending)"}
 	case "environment_undeliverable":
 		return envHookResult{reason: "ENV delivery to this machine failed; see `pb env host show`"}
 	}

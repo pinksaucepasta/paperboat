@@ -100,7 +100,7 @@ def flow(kind, target, observers, controller):
         names = o.pb('env', 'list', '--json', timeout=120)
         assert names.rc == 0 and all(k in names.text for k in env.VALUES), '%s lost the ENV names after the removal: %s' % (o.name, (names.text + names.errtext)[-200:])
     # The removal fences the sources the removed machine could read: the others report ENV pending until a client with the
-    # vault password unlocks it again (`pb env vault unlock` re-seals the layers). Measure both, then the recovery.
+    # vault password unlocks it again (`pb env unlock` re-seals the layers). Measure both, then the recovery.
     blank = time.time()
     try:
         env.t_exec(observers[0], observers[1])
@@ -108,7 +108,7 @@ def flow(kind, target, observers, controller):
     except AssertionError:
         notes.append('ENV pending on the observers after the removal')
         unlock(observers[0])
-        notes.append('delivered %d s after `pb env vault unlock` on %s' % (delivered(observers[0], observers[1]), observers[0].name))
+        notes.append('delivered %d s after `pb env unlock` on %s' % (delivered(observers[0], observers[1]), observers[0].name))
     for a, b in ((observers[0], observers[1]), (observers[1], observers[0])):
         notes.append('%s>%s %d s' % (a.name, b.name, delivered(a, b)))
         assert time.time() - blank < GAP_TOTAL, 'ENV on the other machines still empty %d s after the removal' % (time.time() - blank)

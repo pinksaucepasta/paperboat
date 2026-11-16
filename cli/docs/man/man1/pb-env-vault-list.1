@@ -1,0 +1,48 @@
+.nh
+.TH "PB-ENV-VAULT-LIST" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-env-vault-list - List the workspace's named ENV vaults
+
+
+.SH SYNOPSIS
+\fBpb env vault list [flags]\fP
+
+
+.SH DESCRIPTION
+List the named vaults of the active workspace with their key epoch, value revision and
+the recipes that read them. Values are never printed; pb env run shows them to a
+command on a machine that may read them.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for list
+
+.PP
+\fB--json\fP[=false]
+	print JSON
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-env-vault(1)\fP

@@ -51,6 +51,8 @@ const (
 	// TopicRecordingPolicy moves when the machine's team recording policy or key changed.
 	TopicRecordingPolicy Topic = recording.Topic
 	TopicStoredFiles     Topic = "stored_files"
+	// TopicRecipe moves when what a machine paired from a recipe applies changed (GET /v1/recipe-machine).
+	TopicRecipe Topic = "recipe"
 )
 
 const (

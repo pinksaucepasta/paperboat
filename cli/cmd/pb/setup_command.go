@@ -51,11 +51,30 @@ func privilegedServiceOperationCommand() *cobra.Command {
 
 func pairCommand() *cobra.Command {
 	command := &cobra.Command{
-		Use:   "pair",
-		Short: "Enroll this machine with a one-shot token",
-		Args:  commandArgs(cobra.NoArgs),
-		RunE: func(command *cobra.Command, _ []string) error {
+		Use:     "pair [pbr_…]",
+		Short:   "Pair this machine from a recipe token or a one-shot enrollment token",
+		Example: "  pb pair pbr_k7f3q9xa2m_...\n  PB_RECIPE=pbr_k7f3q9xa2m_... pb pair\n  pb pair --enrollment-token-file /root/pb-token",
+		Args:    commandArgs(cobra.MaximumNArgs(1)),
+		RunE: func(command *cobra.Command, args []string) error {
 			jsonOutput, _ := command.Flags().GetBool("json")
+			enrollmentToken, _ := command.Flags().GetString("enrollment-token")
+			enrollmentFile, _ := command.Flags().GetString("enrollment-token-file")
+			recipeToken, fromRecipe, err := recipeTokenFromPair(args, strings.TrimSpace(enrollmentToken+enrollmentFile) != "")
+			if err != nil {
+				return err
+			}
+			if fromRecipe {
+				var setupArgs []string
+				for _, name := range []string{"name", "state-root"} {
+					if value, _ := command.Flags().GetString(name); strings.TrimSpace(value) != "" {
+						setupArgs = append(setupArgs, "--"+name, value)
+					}
+				}
+				if jsonOutput {
+					setupArgs = append(setupArgs, "--json")
+				}
+				return recipePair(actionContext(command, nil), recipeToken, setupArgs)
+			}
 			stateRoot, err := command.Flags().GetString("state-root")
 			if err != nil {
 				return err

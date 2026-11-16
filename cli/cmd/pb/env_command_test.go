@@ -45,7 +45,7 @@ func TestEnvironmentVariableCommandSurfaceKeepsValuesOutOfArguments(t *testing.T
 	for _, path := range [][]string{
 		{"env", "rotate"}, {"env", "rotate", "cancel"},
 		{"env", "team", "create"}, {"env", "team", "grant"}, {"env", "team", "rotate"}, {"env", "team", "revoke"}, {"env", "team", "reset"},
-		{"env", "grants", "sync"}, {"env", "host", "select"}, {"env", "vault", "remove"}, {"env", "vault", "reset"},
+		{"env", "grants", "sync"}, {"env", "host", "select"}, {"env", "remove"}, {"env", "reset"},
 	} {
 		command, _, err := root.Find(path)
 		if err != nil || command == nil {
@@ -55,13 +55,13 @@ func TestEnvironmentVariableCommandSurfaceKeepsValuesOutOfArguments(t *testing.T
 	if cancel, _, _ := root.Find([]string{"env", "rotate", "cancel"}); cancel.Flags().Lookup("confirm") == nil {
 		t.Fatal("rotation cancel omitted typed confirmation")
 	}
-	if remove, _, _ := root.Find([]string{"env", "vault", "remove"}); remove.Flags().Lookup("confirm") == nil {
+	if remove, _, _ := root.Find([]string{"env", "remove"}); remove.Flags().Lookup("confirm") == nil {
 		t.Fatal("vault remove omitted local-custody confirmation")
 	}
-	if reset, _, _ := root.Find([]string{"env", "vault", "reset"}); reset.Flags().Lookup("confirm") == nil || reset.Flags().Lookup("recovery-file") == nil {
+	if reset, _, _ := root.Find([]string{"env", "reset"}); reset.Flags().Lookup("confirm") == nil || reset.Flags().Lookup("recovery-file") == nil {
 		t.Fatal("vault reset omitted confirmation or recovery file")
 	}
-	for _, path := range [][]string{{"env", "init"}, {"env", "manager"}, {"env", "root"}, {"env", "recovery"}} {
+	for _, path := range [][]string{{"env", "manager"}, {"env", "root"}} {
 		if command, _, err := root.Find(path); err == nil && command != nil && command.Use != "env" {
 			t.Fatalf("legacy ENV command remains registered at %v: %q", path, command.Use)
 		}
@@ -252,7 +252,7 @@ func TestEnvironmentVariableSetConflictErrorUsesOnlyStableCode(t *testing.T) {
 
 func TestEnvironmentVariableCommandErrorKeepsExpectedStateCauseOnlyWhenUnmixed(t *testing.T) {
 	pure := safeEnvironmentVariableCommandError(environmentmanager.ErrVaultLocked)
-	if !errors.Is(pure, environmentmanager.ErrVaultLocked) || !strings.Contains(pure.Error(), "pb env vault unlock") {
+	if !errors.Is(pure, environmentmanager.ErrVaultLocked) || !strings.Contains(pure.Error(), "pb env unlock") {
 		t.Fatalf("pure locked state lost recovery guidance or cause: %v", pure)
 	}
 	operational := syscall.EIO
@@ -278,12 +278,12 @@ func TestResumeSuppressesOnlyAnUnmixedLayerRefreshConflict(t *testing.T) {
 
 func TestENVRecipientRecoveryAdviceRequiresUnmixedCause(t *testing.T) {
 	pureLock := (&envHostRefreshFailure{cause: errors.Join(environmentmanager.ErrVaultLocked, nil)}).Error()
-	if !strings.Contains(pureLock, "pb env vault unlock") {
+	if !strings.Contains(pureLock, "pb env unlock") {
 		t.Fatalf("pure lock did not retain unlock recovery: %q", pureLock)
 	}
 	operational := syscall.EIO
 	mixedLock := (&envHostRefreshFailure{cause: errors.Join(environmentmanager.ErrVaultLocked, operational)}).Error()
-	if strings.Contains(mixedLock, "pb env vault unlock") || !strings.Contains(mixedLock, "pb env vault resume") {
+	if strings.Contains(mixedLock, "pb env unlock") || !strings.Contains(mixedLock, "pb env resume") {
 		t.Fatalf("mixed lock and I/O failure received misleading recovery: %q", mixedLock)
 	}
 	pureAuth := (&envHostRefreshFailure{cause: &api.APIError{Status: 401}}).Error()
@@ -291,7 +291,7 @@ func TestENVRecipientRecoveryAdviceRequiresUnmixedCause(t *testing.T) {
 		t.Fatalf("pure authorization rejection lost recovery: %q", pureAuth)
 	}
 	mixedAuth := (&envHostRefreshFailure{cause: errors.Join(&api.APIError{Status: 401}, operational)}).Error()
-	if strings.Contains(mixedAuth, "pb auth login") || !strings.Contains(mixedAuth, "pb env vault resume") {
+	if strings.Contains(mixedAuth, "pb auth login") || !strings.Contains(mixedAuth, "pb env resume") {
 		t.Fatalf("mixed authorization and I/O failure received misleading recovery: %q", mixedAuth)
 	}
 
@@ -309,7 +309,7 @@ func TestENVRecoveryCauseInspectionRejectsCyclicAndOversizedTrees(t *testing.T) 
 		t.Fatal("cyclic cause was accepted as an ordinary ENV state")
 	}
 	cycleMessage := (&envHostRefreshFailure{cause: cycle}).Error()
-	if !strings.Contains(cycleMessage, "pb env vault resume") || strings.Contains(cycleMessage, "pb auth login") {
+	if !strings.Contains(cycleMessage, "pb env resume") || strings.Contains(cycleMessage, "pb auth login") {
 		t.Fatalf("cyclic cause did not receive bounded generic recovery: %q", cycleMessage)
 	}
 	causes := make([]error, 17)
@@ -506,8 +506,8 @@ func TestENVSafeFailureKeepsRecoveryAndCauseInRealFormatter(t *testing.T) {
 		cause    error
 		recovery string
 	}{
-		{environmentmanager.ErrVaultLocked, "pb env vault unlock"},
-		{environmentmanager.ErrVaultPending, "pb env vault resume"},
+		{environmentmanager.ErrVaultLocked, "pb env unlock"},
+		{environmentmanager.ErrVaultPending, "pb env resume"},
 		{&api.APIError{Status: 403, Code: "team_entitlement_required", Message: "PRIVATE_PROVIDER_VALUE"}, "Team Billing"},
 		{&api.APIError{Status: 409, Code: "version_conflict", Message: "PRIVATE_PROVIDER_VALUE"}, "retry"},
 	} {

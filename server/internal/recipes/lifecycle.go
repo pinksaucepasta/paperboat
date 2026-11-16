@@ -21,8 +21,8 @@ type MachineKey struct {
 // Rotate gives the recipe a new token (the client made it: same token id, new auth). The old token
 // stops pairing at once; the machines keep running. Without confirm, or with a stale one, it
 // returns *ConfirmError with the impact. Rotating again with the same auth returns the recipe.
-func (s *Service) Rotate(ctx context.Context, actor string, ws workspace.Scope, name string, auth []byte, keys []MachineKey, confirm string) (Recipe, error) {
-	if len(auth) != 32 || len(keys) > 1000 {
+func (s *Service) Rotate(ctx context.Context, actor string, ws workspace.Scope, name string, auth, publicKey []byte, keys []MachineKey, confirm string) (Recipe, error) {
+	if len(auth) != 32 || len(publicKey) != 32 || len(keys) > 1000 {
 		return Recipe{}, ErrInvalidInput
 	}
 	var out Recipe
@@ -51,7 +51,7 @@ func (s *Service) Rotate(ctx context.Context, actor string, ws workspace.Scope, 
 		}
 		now := s.now().UTC()
 		if _, err := tx.Exec(ctx, `UPDATE recipes SET previous_auth_hash=auth_hash, auth_hash=$2, rotated_at=$3, updated_at=$3,
-		 expires_at=$4 WHERE id=$1`, r.ID, recipe.AuthHash(auth), now, now.Add(r.Recipe.ExpiresIn())); err != nil {
+		 expires_at=$4, public_key=$5 WHERE id=$1`, r.ID, recipe.AuthHash(auth), now, now.Add(r.Recipe.ExpiresIn()), publicKey); err != nil {
 			return mapInsertError(err)
 		}
 		for _, k := range keys {

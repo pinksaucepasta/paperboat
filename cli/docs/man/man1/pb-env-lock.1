@@ -1,0 +1,52 @@
+.nh
+.TH "PB-ENV-LOCK" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-env-lock - Clear unlocked vault keys while retaining encrypted custody
+
+
+.SH SYNOPSIS
+\fBpb env lock [flags]\fP
+
+
+.SH DESCRIPTION
+Clear unlocked vault keys while retaining encrypted custody
+
+.PP
+Clear unlocked ENV keys from this machine while retaining encrypted custody. Unlock with the password before another key-dependent operation.
+
+.PP
+ENV values are encrypted before they leave the client. The interactive picker separates shared Team globals, your private member globals, and device overrides in the active workspace; commands select exact scopes explicitly; list output shows metadata rather than secret values. Unlock the local vault when a key operation requires it.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for lock
+
+.PP
+\fB--json\fP[=false]
+	print canonical JSON
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-env(1)\fP

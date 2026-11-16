@@ -95,10 +95,18 @@ Read the [CLI guide](../cli.md) for interactive use, scripting, installation of 
 | [pb env hook](pb_env_hook.md) | Load ENV in plain ssh and VS Code shells through a shell startup hook |
 | [pb env host](pb_env_host.md) | Inspect automatic workspace ENV delivery |
 | [pb env host show](pb_env_host_show.md) | Show published ENV delivery and observed application on a host |
+| [pb env init](pb_env_init.md) | Create a password-protected ENV vault |
 | [pb env list](pb_env_list.md) | List configured environment-variable metadata |
 | [pb env load](pb_env_load.md) | Load your workspace ENV into the current shell |
+| [pb env lock](pb_env_lock.md) | Clear unlocked vault keys while retaining encrypted custody |
 | [pb env names](pb_env_names.md) | List the names of the ENV variables commands on this machine receive (never values) |
 | [pb env names access](pb_env_names_access.md) | Show or set whether commands on machines can list ENV names in this workspace |
+| [pb env password](pb_env_password.md) | Rewrap unlocked ENV keys with a new password |
+| [pb env recover](pb_env_recover.md) | Recover vault access and replace the password and recovery code |
+| [pb env recovery](pb_env_recovery.md) | Enable, replace, or disable the optional recovery code |
+| [pb env remove](pb_env_remove.md) | Remove this machine's local ENV vault custody |
+| [pb env reset](pb_env_reset.md) | Replace personal ENV keys and delete every personal value |
+| [pb env resume](pb_env_resume.md) | Reconcile an interrupted vault publication |
 | [pb env rotate](pb_env_rotate.md) | Rotate personal ENV scope keys while preserving values |
 | [pb env rotate cancel](pb_env_rotate_cancel.md) | Cancel an uncommitted personal ENV key rotation |
 | [pb env run](pb_env_run.md) | Run a command with your workspace ENV in its environment |
@@ -109,17 +117,12 @@ Read the [CLI guide](../cli.md) for interactive use, scripting, installation of 
 | [pb env team reset](pb_env_team_reset.md) | Discard all values and replace an encrypted ENV team key |
 | [pb env team revoke](pb_env_team_revoke.md) | Rotate an ENV team scope and revoke selected members |
 | [pb env team rotate](pb_env_team_rotate.md) | Rotate an encrypted ENV team key while preserving its values |
+| [pb env unlock](pb_env_unlock.md) | Unlock this account's ENV vault on this machine |
 | [pb env unset](pb_env_unset.md) | Remove one environment variable |
-| [pb env vault](pb_env_vault.md) | Manage password-protected ENV key custody |
-| [pb env vault init](pb_env_vault_init.md) | Create a password-protected ENV vault |
-| [pb env vault lock](pb_env_vault_lock.md) | Clear unlocked vault keys while retaining encrypted custody |
-| [pb env vault password](pb_env_vault_password.md) | Rewrap unlocked ENV keys with a new password |
-| [pb env vault recover](pb_env_vault_recover.md) | Recover vault access and replace the password and recovery code |
-| [pb env vault recovery](pb_env_vault_recovery.md) | Enable, replace, or disable the optional recovery code |
-| [pb env vault remove](pb_env_vault_remove.md) | Remove this machine's local ENV vault custody |
-| [pb env vault reset](pb_env_vault_reset.md) | Replace personal ENV keys and delete every personal value |
-| [pb env vault resume](pb_env_vault_resume.md) | Reconcile an interrupted vault publication |
-| [pb env vault unlock](pb_env_vault_unlock.md) | Unlock this account's ENV vault on this machine |
+| [pb env vault](pb_env_vault.md) | Create, list and delete named ENV vaults that recipes read |
+| [pb env vault create](pb_env_vault_create.md) | Create a named ENV vault |
+| [pb env vault delete](pb_env_vault_delete.md) | Delete a named ENV vault and its values |
+| [pb env vault list](pb_env_vault_list.md) | List the workspace's named ENV vaults |
 | [pb environments](pb_environments.md) | List enrolled machines available to this account |
 | [pb exec](pb_exec.md) | Execute an exact command on a machine |
 | [pb inbox](pb_inbox.md) | Manage the Paperboat Inbox |
@@ -142,7 +145,7 @@ Read the [CLI guide](../cli.md) for interactive use, scripting, installation of 
 | [pb machine revoke](pb_machine_revoke.md) | Disconnect and revoke a machine |
 | [pb machine tag](pb_machine_tag.md) | Show or change a machine's tags |
 | [pb new](pb_new.md) | Open a fresh terminal on this device in the current directory |
-| [pb pair](pb_pair.md) | Enroll this machine with a one-shot token |
+| [pb pair](pb_pair.md) | Pair this machine from a recipe token or a one-shot enrollment token |
 | [pb ping](pb_ping.md) | Measure authenticated connectivity to a machine |
 | [pb policy](pb_policy.md) | Read, test and change the workspace access policy |
 | [pb policy explain](pb_policy_explain.md) | Explain who can do what under the policy |
@@ -166,7 +169,14 @@ Read the [CLI guide](../cli.md) for interactive use, scripting, installation of 
 | [pb preview replay](pb_preview_replay.md) | Deliberately replay one retained HTTP request to the same origin |
 | [pb preview status](pb_preview_status.md) | Show temporary preview status |
 | [pb preview stop](pb_preview_stop.md) | Stop a temporary preview |
-| [pb recordings](pb_recordings.md) | List and replay team terminal recordings |
+| [pb recipe](pb_recipe.md) | Create and manage recipes that pair and set up machines |
+| [pb recipe create](pb_recipe_create.md) | Create a recipe from a file and print its token once |
+| [pb recipe list](pb_recipe_list.md) | List the workspace's recipes |
+| [pb recipe revoke](pb_recipe_revoke.md) | Revoke a recipe and remove its machines |
+| [pb recipe rotate](pb_recipe_rotate.md) | Give a recipe a new token; its machines keep working |
+| [pb recipe show](pb_recipe_show.md) | Show a recipe, its file and its machines |
+| [pb recipe update](pb_recipe_update.md) | Change a recipe from its file |
+| [pb recordings](pb_recordings.md) | List and replay terminal recordings |
 | [pb recordings export](pb_recordings_export.md) | Write a recording as an asciicast v2 file |
 | [pb recordings list](pb_recordings_list.md) | List the recordings you may see |
 | [pb recordings play](pb_recordings_play.md) | Replay a recording in this terminal |

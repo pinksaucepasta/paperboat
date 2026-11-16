@@ -16,8 +16,8 @@ func TestLocalCommandArgumentsFailBeforeAuthenticationWithoutFaultCapture(t *tes
 		{"machine", "availability", "PRIVATE_MACHINE", "--mode", "PRIVATE_MODE", "--json"},
 		{"machine", "capabilities", "PRIVATE_MACHINE", "--json"},
 		{"session", "rename", "PRIVATE_MACHINE", "PRIVATE_SESSION", "default", "--json"}, // "default" is reserved; any other text is a valid name since 7f83cc386
-		{"env", "vault", "init", "--json"},
-		{"env", "vault", "recover", "--json"},
+		{"env", "init", "--json"},
+		{"env", "recover", "--json"},
 		{"inbox", "policy", "PRIVATE_INVALID_POLICY", "--json"},
 		{"inbox", "requests", "PRIVATE_EXTRA_ARG", "--json"},
 		{"config", "set", "ssh-target-port", "PRIVATE_INVALID_PORT", "--json"},

@@ -317,7 +317,7 @@ func TestPasswordVaultCommandSavesRecoveryBeforePublicationAndHidesCode(t *testi
 		"Master password":         [][]byte{password},
 		"Confirm master password": [][]byte{password},
 	})
-	stdout, stderr, err := executePasswordVaultCommand(t, "vault", "init", "--recovery-file", path)
+	stdout, stderr, err := executePasswordVaultCommand(t, "init", "--recovery-file", path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -349,8 +349,8 @@ func TestPasswordVaultCommandCommitErrorRetainsCodeAndResumeRetriesExactBytes(t 
 		"Master password":         [][]byte{password},
 		"Confirm master password": [][]byte{password},
 	})
-	stdout, stderr, err := executePasswordVaultCommand(t, "vault", "init", "--recovery-file", path)
-	if err == nil || !strings.Contains(err.Error(), "retain the new recovery file") || !strings.Contains(err.Error(), "pb env vault resume") {
+	stdout, stderr, err := executePasswordVaultCommand(t, "init", "--recovery-file", path)
+	if err == nil || !strings.Contains(err.Error(), "retain the new recovery file") || !strings.Contains(err.Error(), "pb env resume") {
 		t.Fatalf("commit error=%v; want actionable custody/resume guidance", err)
 	}
 	if fixture.control.hostRefreshes != 0 {
@@ -374,7 +374,7 @@ func TestPasswordVaultCommandCommitErrorRetainsCodeAndResumeRetriesExactBytes(t 
 	pending.Clear()
 	assertCommandVaultNoSecret(t, fixture.secrets, code)
 
-	stdout, stderr, err = executePasswordVaultCommand(t, "vault", "resume")
+	stdout, stderr, err = executePasswordVaultCommand(t, "resume")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -439,7 +439,7 @@ func TestPasswordVaultCommandBadRecoveryLeavesVaultCustodyUnchanged(t *testing.T
 			"New master password":         [][]byte{newPassword},
 			"Confirm new master password": [][]byte{newPassword},
 		})
-		stdout, stderr, commandErr := executePasswordVaultCommand(t, "vault", "recover", "--recovery-file", path)
+		stdout, stderr, commandErr := executePasswordVaultCommand(t, "recover", "--recovery-file", path)
 		if commandErr == nil || !strings.Contains(commandErr.Error(), "retain the new recovery file") || strings.Contains(stdout, string(badCode)) || strings.Contains(stderr, string(badCode)) || strings.Contains(commandErr.Error(), string(badCode)) {
 			t.Fatalf("bad code command result: err=%v stdout=%q stderr=%q", commandErr, stdout, stderr)
 		}
@@ -480,7 +480,7 @@ func TestPasswordVaultResetRequiresExactConfirmationBeforePrompt(t *testing.T) {
 		passwordVaultForCommand = previousManager
 		passwordVaultPrompt = previousPrompt
 	})
-	_, _, err := executePasswordVaultCommand(t, "vault", "reset", "--confirm", "RESET ENV wrong-account")
+	_, _, err := executePasswordVaultCommand(t, "reset", "--confirm", "RESET ENV wrong-account")
 	if err == nil || !strings.Contains(err.Error(), "RESET ENV <account_id>") {
 		t.Fatalf("reset confirmation error=%v", err)
 	}
@@ -505,7 +505,7 @@ func TestPasswordVaultRemoveDeletesOnlyLocalCustodyAfterTypedConfirmation(t *tes
 		return fixture.manager, nil
 	}
 	t.Cleanup(func() { passwordVaultForCommand = previousManager })
-	if _, _, err := executePasswordVaultCommand(t, "vault", "remove", "--confirm", "REMOVE LOCAL ENV wrong-account"); err == nil {
+	if _, _, err := executePasswordVaultCommand(t, "remove", "--confirm", "REMOVE LOCAL ENV wrong-account"); err == nil {
 		t.Fatal("wrong local-custody confirmation unexpectedly succeeded")
 	}
 	local, err := fixture.store.LoadPasswordVault(commandVaultIssuer, commandVaultAccount)
@@ -513,7 +513,7 @@ func TestPasswordVaultRemoveDeletesOnlyLocalCustodyAfterTypedConfirmation(t *tes
 		t.Fatalf("wrong confirmation changed local custody: %v", err)
 	}
 	local.Clear()
-	stdout, _, err := executePasswordVaultCommand(t, "vault", "remove", "--confirm", "REMOVE LOCAL ENV "+commandVaultAccount)
+	stdout, _, err := executePasswordVaultCommand(t, "remove", "--confirm", "REMOVE LOCAL ENV "+commandVaultAccount)
 	if err != nil || !strings.Contains(stdout, "cloud personal and team ciphertext was not changed") {
 		t.Fatalf("remove output=%q err=%v", stdout, err)
 	}
@@ -555,24 +555,24 @@ func TestPasswordVaultUnlockRefreshesRecipientsAndKeepsPendingRecovery(t *testin
 		t.Fatal(err)
 	}
 	installPasswordVaultCommandDependencies(t, fixture.manager, map[string][][]byte{"Master password": {password}})
-	stdout, stderr, err := executePasswordVaultCommand(t, "vault", "unlock")
+	stdout, stderr, err := executePasswordVaultCommand(t, "unlock")
 	if err != nil || fixture.control.hostRefreshes != 1 || !strings.Contains(stdout, "completed") {
 		t.Fatalf("refreshes=%d err=%v stdout=%q stderr=%q", fixture.control.hostRefreshes, err, stdout, stderr)
 	}
 	private := errors.New("PRIVATE_REFRESH_TRANSPORT")
 	fixture.control.hostRefreshError = private
-	_, _, err = executePasswordVaultCommand(t, "vault", "resume")
+	_, _, err = executePasswordVaultCommand(t, "resume")
 	var pending *envHostRefreshFailure
 	if !errors.As(err, &pending) || !errors.Is(err, private) || fixture.control.hostRefreshes != 2 {
 		t.Fatal("resume did not retain recipient refresh failure")
 	}
 	message := userFacingError(err)
 	result := classifyCLIJSONError(err)
-	if strings.Contains(message, "PRIVATE") || !strings.Contains(message, "pb env vault resume") || result.Code != "env_recipient_refresh_pending" || result.StateChanged != true || !result.Retryable {
+	if strings.Contains(message, "PRIVATE") || !strings.Contains(message, "pb env resume") || result.Code != "env_recipient_refresh_pending" || result.StateChanged != true || !result.Retryable {
 		t.Fatalf("unsafe pending refresh=%#v", result)
 	}
 	fixture.control.hostRefreshError = nil
-	if _, _, err = executePasswordVaultCommand(t, "vault", "resume"); err != nil || fixture.control.hostRefreshes != 3 {
+	if _, _, err = executePasswordVaultCommand(t, "resume"); err != nil || fixture.control.hostRefreshes != 3 {
 		t.Fatal("recipient refresh did not recover")
 	}
 }
@@ -711,7 +711,7 @@ func (c *commandVaultControl) PutVaultRecords(_ context.Context, coordinate api.
 
 func TestVaultUnlockWithTheWrongPasswordSaysSo(t *testing.T) {
 	got := vaultCredentialCommandError(fmt.Errorf("unlock: %w", environmente2ee.ErrVaultUnlock))
-	if !errors.Is(got, environmente2ee.ErrVaultUnlock) || !strings.Contains(got.Error(), "pb env vault recover") {
+	if !errors.Is(got, environmente2ee.ErrVaultUnlock) || !strings.Contains(got.Error(), "pb env recover") {
 		t.Fatalf("wrong password = %v, want password guidance", got)
 	}
 	mixed := errors.Join(environmente2ee.ErrVaultUnlock, syscall.EIO)

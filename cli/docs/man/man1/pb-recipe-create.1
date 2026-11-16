@@ -1,0 +1,60 @@
+.nh
+.TH "PB-RECIPE-CREATE" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-recipe-create - Create a recipe from a file and print its token once
+
+
+.SH SYNOPSIS
+\fBpb recipe create -f <file> [flags]\fP
+
+
+.SH DESCRIPTION
+Create a recipe from a TOML or JSON file; its name is the file's base name (ci.toml
+makes ci). The file is checked on this computer first, with file:line:col errors.
+The token is made here and printed once: save it as the secret PB_RECIPE. Paperboat
+stores only a hash of it and can never read the ENV vaults the recipe reads.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB-f\fP, \fB--file\fP=""
+	the recipe file (.toml or .json)
+
+.PP
+\fB-h\fP, \fB--help\fP[=false]
+	help for create
+
+.PP
+\fB--json\fP[=false]
+	print JSON (the token included, once)
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH EXAMPLE
+.EX
+  pb recipe create -f ci.toml
+  pb recipe create -f ci.toml --workspace acme
+.EE
+
+
+.SH SEE ALSO
+\fBpb-recipe(1)\fP

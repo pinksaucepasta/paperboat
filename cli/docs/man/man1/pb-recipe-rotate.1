@@ -1,0 +1,60 @@
+.nh
+.TH "PB-RECIPE-ROTATE" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-recipe-rotate - Give a recipe a new token; its machines keep working
+
+
+.SH SYNOPSIS
+\fBpb recipe rotate <name> [flags]\fP
+
+
+.SH DESCRIPTION
+Give a recipe a new token. The old token stops working at once; machines already
+paired from it keep running. Without --confirm, print what changes and the
+confirmation code; run it again with --confirm <code>\&. The new token is printed once:
+replace PB_RECIPE everywhere the old one is stored.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB--confirm\fP=""
+	the confirmation code printed without --confirm
+
+.PP
+\fB-h\fP, \fB--help\fP[=false]
+	help for rotate
+
+.PP
+\fB--json\fP[=false]
+	print JSON (the new token included, once)
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH EXAMPLE
+.EX
+  pb recipe rotate ci
+  pb recipe rotate ci --confirm K3M9QX
+.EE
+
+
+.SH SEE ALSO
+\fBpb-recipe(1)\fP

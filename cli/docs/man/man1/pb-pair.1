@@ -2,18 +2,18 @@
 .TH "PB-PAIR" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
 
 .SH NAME
-pb-pair - Enroll this machine with a one-shot token
+pb-pair - Pair this machine from a recipe token or a one-shot enrollment token
 
 
 .SH SYNOPSIS
-\fBpb pair [flags]\fP
+\fBpb pair [pbr_…] [flags]\fP
 
 
 .SH DESCRIPTION
-Enroll this machine with a one-shot token
+Pair this machine from a recipe token or a one-shot enrollment token
 
 .PP
-Enroll this machine with a one-shot token from the dashboard Add machine command or pb machine add, optionally reading it from a private file. pb login is the way to add a computer with browser approval. Name, shell, and state-root options target the local installation; enrollment binds a new machine identity to the account.
+Pair from a recipe token (the argument, or PB_RECIPE in the environment): the machine joins as the recipe says (tags, reach, ENV, config, preview, tunnel) with no prompt, and running it again on a paired machine does nothing. Or enroll with a one-shot token from the dashboard Add machine command or pb machine add, optionally reading it from a private file. pb login is the way to add a computer with browser approval. Name, shell, and state-root options target the local installation; enrollment binds a new machine identity to the account.
 
 .PP
 JSON output is supported with --json.
@@ -63,6 +63,14 @@ JSON output is supported with --json.
 .PP
 \fB--workspace\fP=""
 	resource workspace selector: personal or a team slug
+
+
+.SH EXAMPLE
+.EX
+  pb pair pbr_k7f3q9xa2m_...
+  PB_RECIPE=pbr_k7f3q9xa2m_... pb pair
+  pb pair --enrollment-token-file /root/pb-token
+.EE
 
 
 .SH SEE ALSO

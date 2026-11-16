@@ -68,6 +68,9 @@ func apiErrorMessage(code string, status int) string {
 var updateFloorVersion = regexp.MustCompile(`^[0-9]{4}\.[0-9]{1,2}\.[0-9]{1,2}\.[0-9]{1,6}$`)
 
 func apiErrorMessageFor(code string, status int, details map[string]any) string {
+	if message, ok := recipeErrorMessage(code, details); ok {
+		return message
+	}
 	billing := billingURL(details)
 	switch code {
 	case "bandwidth_quota_exhausted":
@@ -236,6 +239,7 @@ var publicAPIMessages = map[string]string{
 	"api_token_name_taken":            "You already have an API token with this name in this workspace. Choose another name or revoke the old token.",
 	"invalid_api_token_scope":         "The API token scope is not valid. Fix the listed errors and try again.",
 	"api_token_invalid":               "The API token expired or was revoked. Create a new one with `pb api-token create`.",
+	"outside_recipe_reach":            "This machine's recipe does not reach that machine or action. Add it to [[reach]] and run `pb recipe update`.",
 	"outside_token_scope":             "This API token's scope does not cover this. Use a token whose scope includes it, or sign in with `pb login`.",
 	"team_sso_required":               "This team requires single sign-on. Run `pb login` and sign in through your company's identity provider, then retry.",
 	"directory_managed":               "This member is managed by your company directory. Change their membership or role in your identity provider.",

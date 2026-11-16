@@ -64,7 +64,7 @@ try {
   let code = ""
   await step("a fresh account is offered setting up the vault in the browser", async () => {
     await page.getByText("Create your vault", { exact: true }).waitFor(long)
-    if (await page.getByText("pb env vault init").count()) throw new Error("still sends people to the CLI")
+    if (await page.getByText("pb env init").count()) throw new Error("still sends people to the CLI")
   })
   await step("mismatched passwords are refused before anything is made", async () => {
     await page.locator("#vault-new-password").fill(first)

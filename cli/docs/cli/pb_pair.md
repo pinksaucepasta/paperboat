@@ -1,17 +1,25 @@
 ## pb pair
 
-Enroll this machine with a one-shot token
+Pair this machine from a recipe token or a one-shot enrollment token
 
 ### Synopsis
 
-Enroll this machine with a one-shot token
+Pair this machine from a recipe token or a one-shot enrollment token
 
-Enroll this machine with a one-shot token from the dashboard Add machine command or pb machine add, optionally reading it from a private file. pb login is the way to add a computer with browser approval. Name, shell, and state-root options target the local installation; enrollment binds a new machine identity to the account.
+Pair from a recipe token (the argument, or PB_RECIPE in the environment): the machine joins as the recipe says (tags, reach, ENV, config, preview, tunnel) with no prompt, and running it again on a paired machine does nothing. Or enroll with a one-shot token from the dashboard Add machine command or pb machine add, optionally reading it from a private file. pb login is the way to add a computer with browser approval. Name, shell, and state-root options target the local installation; enrollment binds a new machine identity to the account.
 
 JSON output is supported with --json.
 
 ```
-pb pair [flags]
+pb pair [pbr_…] [flags]
+```
+
+### Examples
+
+```
+  pb pair pbr_k7f3q9xa2m_...
+  PB_RECIPE=pbr_k7f3q9xa2m_... pb pair
+  pb pair --enrollment-token-file /root/pb-token
 ```
 
 ### Options

@@ -1,0 +1,60 @@
+.nh
+.TH "PB-RECIPE-REVOKE" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-recipe-revoke - Revoke a recipe and remove its machines
+
+
+.SH SYNOPSIS
+\fBpb recipe revoke <name> [flags]\fP
+
+
+.SH DESCRIPTION
+Revoke a recipe: its token stops working and every machine paired from it is
+removed. Without --confirm, print what changes and the confirmation code; run it
+again with --confirm <code>\&. Use pb recipe rotate instead to replace a leaked token
+and keep the machines.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB--confirm\fP=""
+	the confirmation code printed without --confirm
+
+.PP
+\fB-h\fP, \fB--help\fP[=false]
+	help for revoke
+
+.PP
+\fB--json\fP[=false]
+	print JSON
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH EXAMPLE
+.EX
+  pb recipe revoke ci
+  pb recipe revoke ci --confirm 7RT2WD
+.EE
+
+
+.SH SEE ALSO
+\fBpb-recipe(1)\fP

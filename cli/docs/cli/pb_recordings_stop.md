@@ -34,5 +34,5 @@ pb recordings stop [session-id] [flags]
 
 ### SEE ALSO
 
-* [pb recordings](pb_recordings.md)	 - List and replay team terminal recordings
+* [pb recordings](pb_recordings.md)	 - List and replay terminal recordings
 

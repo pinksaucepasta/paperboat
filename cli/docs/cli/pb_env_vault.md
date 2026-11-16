@@ -1,14 +1,13 @@
 ## pb env vault
 
-Manage password-protected ENV key custody
+Create, list and delete named ENV vaults that recipes read
 
 ### Synopsis
 
-Manage password-protected ENV key custody
-
-Initialize, unlock, lock, recover, rewrap, or remove local custody of ENV keys. Reset is the destructive account-level path and is separate from locking or removing one machine's custody.
-
-ENV values are encrypted before they leave the client. The interactive picker separates shared Team globals, your private member globals, and device overrides in the active workspace; commands select exact scopes explicitly; list output shows metadata rather than secret values. Unlock the local vault when a key operation requires it.
+A named vault is a set of ENV values with its own key, for example canary-env. Members
+of the workspace read it with their ENV keys, and machines paired from a recipe whose
+[env] vaults lists it read it with the recipe's token, with nobody online. Set values
+with pb env set <name> --vault <vault>.
 
 With --json, this command group lists its available commands.
 
@@ -35,13 +34,7 @@ pb env vault [flags]
 ### SEE ALSO
 
 * [pb env](pb_env.md)	 - Manage automatic global ENV and device overrides
-* [pb env vault init](pb_env_vault_init.md)	 - Create a password-protected ENV vault
-* [pb env vault lock](pb_env_vault_lock.md)	 - Clear unlocked vault keys while retaining encrypted custody
-* [pb env vault password](pb_env_vault_password.md)	 - Rewrap unlocked ENV keys with a new password
-* [pb env vault recover](pb_env_vault_recover.md)	 - Recover vault access and replace the password and recovery code
-* [pb env vault recovery](pb_env_vault_recovery.md)	 - Enable, replace, or disable the optional recovery code
-* [pb env vault remove](pb_env_vault_remove.md)	 - Remove this machine's local ENV vault custody
-* [pb env vault reset](pb_env_vault_reset.md)	 - Replace personal ENV keys and delete every personal value
-* [pb env vault resume](pb_env_vault_resume.md)	 - Reconcile an interrupted vault publication
-* [pb env vault unlock](pb_env_vault_unlock.md)	 - Unlock this account's ENV vault on this machine
+* [pb env vault create](pb_env_vault_create.md)	 - Create a named ENV vault
+* [pb env vault delete](pb_env_vault_delete.md)	 - Delete a named ENV vault and its values
+* [pb env vault list](pb_env_vault_list.md)	 - List the workspace's named ENV vaults
 

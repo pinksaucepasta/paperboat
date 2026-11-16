@@ -112,6 +112,8 @@ type Recipe struct {
 	RevokedAt   *time.Time
 	Machines    int
 	MaxMachines int
+	// PublicKey is the token's X25519 public key, to wrap vault keys to without the token.
+	PublicKey []byte
 }
 
 // Input is a recipe file as the client sends it, with the token it made (create and rotate).
@@ -120,8 +122,9 @@ type Input struct {
 	Source string
 	Format string // toml or json
 	// TokenID and Auth come from shared/recipe.Token on the creator's computer.
-	TokenID string
-	Auth    []byte
+	TokenID   string
+	Auth      []byte
+	PublicKey []byte
 	// Wraps carry each vault key the recipe newly reads, wrapped to the recipe's public key.
 	Wraps []VaultWrap
 }
@@ -154,7 +157,7 @@ func parse(in Input) (recipe.Recipe, error) {
 }
 
 func checkToken(in Input) error {
-	if !recipe.ValidID(in.TokenID) || len(in.Auth) != 32 {
+	if !recipe.ValidID(in.TokenID) || len(in.Auth) != 32 || len(in.PublicKey) != 32 {
 		return ErrInvalidInput
 	}
 	return nil

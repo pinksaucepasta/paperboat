@@ -20706,6 +20706,28 @@
         "operationId": "get_install"
       }
     },
+    "/recipe": {
+      "get": {
+        "summary": "Download the Paperboat recipe installer",
+        "security": [],
+        "description": "Serves the published shell installer (`curl \u2026 | bash`) marked as a recipe install: it pairs from PB_RECIPE and refuses at once, before downloading, when PB_RECIPE is missing or not a recipe token. The token never goes in the URL, so any query is rejected (400). Responses are not cached.",
+        "responses": {
+          "200": {
+            "description": "Product-pinned Paperboat installer with exact Content-Length.",
+            "content": {
+              "text/plain": {}
+            }
+          },
+          "400": {
+            "description": "Invalid enrollment parameter."
+          },
+          "404": {
+            "description": "No installer has been published."
+          }
+        },
+        "operationId": "get_recipe"
+      }
+    },
     "/install.ps1": {
       "get": {
         "summary": "Download the Paperboat PowerShell installer",
@@ -20738,6 +20760,28 @@
           }
         },
         "operationId": "get_install_ps1"
+      }
+    },
+    "/recipe.ps1": {
+      "get": {
+        "summary": "Download the Paperboat recipe installer",
+        "security": [],
+        "description": "Serves the published PowerShell installer (`irm \u2026 | iex`) marked as a recipe install: it pairs from PB_RECIPE and refuses at once, before downloading, when PB_RECIPE is missing or not a recipe token. The token never goes in the URL, so any query is rejected (400). Responses are not cached.",
+        "responses": {
+          "200": {
+            "description": "Product-pinned Paperboat installer with exact Content-Length.",
+            "content": {
+              "text/plain": {}
+            }
+          },
+          "400": {
+            "description": "Invalid enrollment parameter."
+          },
+          "404": {
+            "description": "No installer has been published."
+          }
+        },
+        "operationId": "get_recipe_ps1"
       }
     },
     "/tuf/{path...}": {

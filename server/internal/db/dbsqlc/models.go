@@ -2269,6 +2269,7 @@ type Recipe struct {
 	LastUsedAt         sql.NullTime
 	RevokedAt          sql.NullTime
 	RevokedBy          sql.NullString
+	PublicKey          []byte
 }
 
 type RecipeMachine struct {

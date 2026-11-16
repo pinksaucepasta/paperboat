@@ -14,6 +14,16 @@ $tokenSource = [string]$env:PAPERBOAT_ENROLLMENT_TOKEN_FILE
 $name = if ($env:PAPERBOAT_MACHINE_ALIAS) { [string]$env:PAPERBOAT_MACHINE_ALIAS } else { [string]$env:PAPERBOAT_MACHINE_NAME }
 if ($server -and $server -notmatch '^https://') { throw 'Paperboat server URL must use HTTPS.' }
 if (-not [string]::IsNullOrWhiteSpace($token) -and -not [string]::IsNullOrWhiteSpace($tokenSource)) { throw 'Use only one Paperboat enrollment token source.' }
+# get.<domain>/recipe.ps1 sets PAPERBOAT_RECIPE_INSTALL: pair from PB_RECIPE, refusing at once, before anything is installed (PLAN F26).
+$recipe = [string]$env:PAPERBOAT_RECIPE_INSTALL -eq '1'
+if ($recipe) {
+  $recipeToken = [string]$env:PB_RECIPE
+  if ([string]::IsNullOrWhiteSpace($recipeToken)) { throw "Paperboat: PB_RECIPE is not set. Copy the token from pb recipe create or the console (Settings -> Recipes), then run: `$env:PB_RECIPE='<token>'; irm <installer>/recipe.ps1 | iex" }
+  if (-not $recipeToken.StartsWith('pbr_') -or $recipeToken.Length -ne 67) { throw "Paperboat: PB_RECIPE is not a recipe token. A token starts with pbr_ and is 67 characters; this value is $($recipeToken.Length). Copy it again from where you saved it." }
+  if (-not [string]::IsNullOrWhiteSpace($token) -or -not [string]::IsNullOrWhiteSpace($tokenSource)) { throw 'Paperboat: a recipe install pairs from PB_RECIPE; remove the enrollment token.' }
+  $principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
+  if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { throw 'Paperboat: installing needs an administrator PowerShell. Start PowerShell with "Run as administrator" and run the command again.' }
+}
 $arch = if ([Runtime.InteropServices.RuntimeInformation]::OSArchitecture -eq 'Arm64') { 'arm64' } elseif ([Runtime.InteropServices.RuntimeInformation]::OSArchitecture -eq 'X64') { 'amd64' } else { throw 'Paperboat supports only Windows AMD64 and ARM64.' }
 $asset = "pb-windows-$arch.exe"
 if ($arch -eq 'amd64') {
@@ -117,7 +127,12 @@ try {
     $installedPb = Invoke-PaperboatInstall $download
     Write-Host "Installed pb to $installedPb"
   }
-  if ($null -ne $tokenFile) {
+  if ($recipe) {
+    # pb pair reads PB_RECIPE; an already paired machine is left as it is.
+    $pairArgs = @('pair')
+    if ($server) { $pairArgs += @('--server', $server) }
+    Invoke-Paperboat $installedPb $pairArgs 'Paperboat pairing'
+  } elseif ($null -ne $tokenFile) {
     if ([string]::IsNullOrWhiteSpace($name)) { $name = [string]$env:COMPUTERNAME }
     $name = $name.Trim().ToLowerInvariant()
     # Pairing uses the installed binary and never purges an existing identity.

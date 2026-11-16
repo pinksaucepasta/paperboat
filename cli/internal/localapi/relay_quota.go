@@ -15,6 +15,10 @@ const RelayQuotaCode = "bandwidth_quota_exhausted"
 // the CLI session's API token scope does not cover the target (F18-06).
 const TokenScopeCode = "outside_token_scope"
 
+// RecipeReachCode is the same refusal for a machine paired from a recipe whose [[reach]] does not
+// cover the target (F26).
+const RecipeReachCode = "outside_recipe_reach"
+
 // UpdateRequiredCode is the control plane's refusal of a client below the minimum supported version (HTTP 426).
 const UpdateRequiredCode = "update_required"
 
@@ -39,7 +43,7 @@ func (e *NoEligiblePathError) Error() string {
 const AuthenticationRequiredCode = "authentication_required"
 
 func Refusal(code string) bool {
-	return code == RelayQuotaCode || code == TokenScopeCode || code == UpdateRequiredCode
+	return code == RelayQuotaCode || code == TokenScopeCode || code == RecipeReachCode || code == UpdateRequiredCode
 }
 
 // writeServerRefusal answers a failed peer operation with the refusal its error carries (the
@@ -58,8 +62,8 @@ func writeServerRefusal(writer http.ResponseWriter, requestID string, err error)
 		return true
 	case errors.As(err, &coded) && coded.LocalAPICode() == RelayQuotaCode:
 		message = coded.LocalAPIMessage()
-	case errors.As(err, &refused) && refused.Code == TokenScopeCode:
-		writeError(writer, http.StatusForbidden, requestID, TokenScopeCode, api.PublicMessage(TokenScopeCode))
+	case errors.As(err, &refused) && (refused.Code == TokenScopeCode || refused.Code == RecipeReachCode):
+		writeError(writer, http.StatusForbidden, requestID, refused.Code, api.PublicMessage(refused.Code))
 		return true
 	case errors.As(err, &refused) && refused.Code == UpdateRequiredCode && safeText(refused.Message):
 		// A below-floor client: the daemon answered exec, ssh and probe with the generic 'peer stream unavailable' while

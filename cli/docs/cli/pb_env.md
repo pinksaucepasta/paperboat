@@ -41,13 +41,22 @@ pb env [flags]
 * [pb env grants](pb_env_grants.md)	 - Reconcile encrypted ENV team grants
 * [pb env hook](pb_env_hook.md)	 - Load ENV in plain ssh and VS Code shells through a shell startup hook
 * [pb env host](pb_env_host.md)	 - Inspect automatic workspace ENV delivery
+* [pb env init](pb_env_init.md)	 - Create a password-protected ENV vault
 * [pb env list](pb_env_list.md)	 - List configured environment-variable metadata
 * [pb env load](pb_env_load.md)	 - Load your workspace ENV into the current shell
+* [pb env lock](pb_env_lock.md)	 - Clear unlocked vault keys while retaining encrypted custody
 * [pb env names](pb_env_names.md)	 - List the names of the ENV variables commands on this machine receive (never values)
+* [pb env password](pb_env_password.md)	 - Rewrap unlocked ENV keys with a new password
+* [pb env recover](pb_env_recover.md)	 - Recover vault access and replace the password and recovery code
+* [pb env recovery](pb_env_recovery.md)	 - Enable, replace, or disable the optional recovery code
+* [pb env remove](pb_env_remove.md)	 - Remove this machine's local ENV vault custody
+* [pb env reset](pb_env_reset.md)	 - Replace personal ENV keys and delete every personal value
+* [pb env resume](pb_env_resume.md)	 - Reconcile an interrupted vault publication
 * [pb env rotate](pb_env_rotate.md)	 - Rotate personal ENV scope keys while preserving values
 * [pb env run](pb_env_run.md)	 - Run a command with your workspace ENV in its environment
 * [pb env set](pb_env_set.md)	 - Set one environment variable through a hidden prompt or bounded stdin
 * [pb env team](pb_env_team.md)	 - Manage encrypted ENV team scopes
+* [pb env unlock](pb_env_unlock.md)	 - Unlock this account's ENV vault on this machine
 * [pb env unset](pb_env_unset.md)	 - Remove one environment variable
-* [pb env vault](pb_env_vault.md)	 - Manage password-protected ENV key custody
+* [pb env vault](pb_env_vault.md)	 - Create, list and delete named ENV vaults that recipes read
 

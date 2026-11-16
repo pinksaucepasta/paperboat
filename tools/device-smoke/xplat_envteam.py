@@ -82,8 +82,8 @@ def setup(owner, member, devices, member_account):
     IDS.update(ids)
     pw = fleet.Path(os.environ.get('XPLAT_VAULT_PW', Path.home() / '.pbmac/xplat2-vault.pw')).read_bytes().strip()
     for dev, secret in [(d, pw) for d in devices.values()]:
-        assert dev.pb('env', 'vault', 'unlock', '--password-stdin', input=secret + b'\n', timeout=120).rc == 0, '%s unlock' % dev.name
-    assert member.pb('env', 'vault', 'unlock', '--password-stdin', input=MEMBER_PW.read_bytes().strip() + b'\n', timeout=120).rc == 0, 'member unlock'
+        assert dev.pb('env', 'unlock', '--password-stdin', input=secret + b'\n', timeout=120).rc == 0, '%s unlock' % dev.name
+    assert member.pb('env', 'unlock', '--password-stdin', input=MEMBER_PW.read_bytes().strip() + b'\n', timeout=120).rc == 0, 'member unlock'
     for dev in devices.values():
         done = owner.pb('team', 'machine', 'share', TEAM, ids[dev.alias], '--generation', generation(owner), '--json', timeout=180)
         assert done.rc == 0 or 'already' in (done.text + done.errtext).lower(), 'share %s: %s' % (dev.name, (done.text + done.errtext)[-200:])

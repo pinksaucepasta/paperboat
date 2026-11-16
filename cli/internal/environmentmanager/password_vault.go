@@ -11,8 +11,8 @@ import (
 )
 
 var ErrVaultChanged = errors.New("ENV vault changed; unlock the current vault before retrying")
-var ErrVaultLocked = errors.New("ENV vault is locked; run `pb env vault unlock` before changing ENV keys or values")
-var ErrVaultPending = errors.New("ENV vault publication is pending; run `pb env vault resume` before retrying")
+var ErrVaultLocked = errors.New("ENV vault is locked; run `pb env unlock` before changing ENV keys or values")
+var ErrVaultPending = errors.New("ENV vault publication is pending; run `pb env resume` before retrying")
 
 // ErrNoRotationInProgress means a rotation cancel found no uncommitted personal rotation.
 // ErrVaultNotSetUp: this computer holds no ENV vault for the signed-in account.

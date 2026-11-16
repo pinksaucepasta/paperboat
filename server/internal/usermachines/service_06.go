@@ -52,6 +52,9 @@ func (s *Service) ReconcileUserMachineEntitlement(ctx context.Context, userID st
 			}
 			for _, machine := range machines {
 				revokedMachineIDs = append(revokedMachineIDs, machine.ID)
+				if err := db.FenceRemovedMachineVaultTx(ctx, tx, userID, machine.ID); err != nil {
+					return err
+				}
 				if err := db.CleanupMachineMachineTx(ctx, tx, userID, machine.ID, now); err != nil {
 					return err
 				}
@@ -70,6 +73,9 @@ func (s *Service) ReconcileUserMachineEntitlement(ctx context.Context, userID st
 			return err
 		}
 		for _, id := range revoked {
+			if err := db.FenceRemovedMachineVaultTx(ctx, tx, userID, id); err != nil {
+				return err
+			}
 			if err := db.CleanupMachineMachineTx(ctx, tx, userID, id, now); err != nil {
 				return err
 			}

@@ -59,7 +59,7 @@ def unlock(password_file):
     if not password_file:
         return
     with open(password_file) as handle:
-        result = command_result(PB, 'env', 'vault', 'unlock', '--password-stdin', '--json', input=handle.read(), timeout=90)
+        result = command_result(PB, 'env', 'unlock', '--password-stdin', '--json', input=handle.read(), timeout=90)
     if result.returncode:
         raise RuntimeError('the vault did not unlock; recordings cannot be replayed without it')
 

@@ -25,6 +25,7 @@ pb env set <name> [flags]
       --team string         team scope; cannot be combined with --machine
       --value-file string   read the raw value from an absolute file path
       --value-stdin         read the raw value from non-interactive stdin
+      --vault string        set the value in this named vault (pb env vault list) instead of your ENV
 ```
 
 ### Options inherited from parent commands

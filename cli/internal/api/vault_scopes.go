@@ -164,7 +164,7 @@ func (c *Client) GetVaultTeam(ctx context.Context, team string) (VaultTeamState,
 
 // teamWorkspace binds a copy of the client to the team a team-ENV operation names: the server refuses
 // a team operation sent in another workspace (409 workspace_target_conflict), whatever --workspace the
-// command was given, and `pb env vault resume` replays a pending team operation the same way.
+// command was given, and `pb env resume` replays a pending team operation the same way.
 func (c *Client) teamWorkspace(team string) (*Client, error) {
 	scoped := *c
 	if err := scoped.SetWorkspace(team); err != nil {

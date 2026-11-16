@@ -24,7 +24,7 @@ pb recordings list [flags]
       --json             print JSON
       --limit int        show at most this many items (1-200) (default 50)
       --machine string   only this machine's recordings (machine id)
-      --team string      team whose recordings to list; defaults to the active team workspace
+      --team string      team whose recordings to list; defaults to the active workspace (personal: your own)
 ```
 
 ### Options inherited from parent commands
@@ -38,5 +38,5 @@ pb recordings list [flags]
 
 ### SEE ALSO
 
-* [pb recordings](pb_recordings.md)	 - List and replay team terminal recordings
+* [pb recordings](pb_recordings.md)	 - List and replay terminal recordings
 

@@ -1,12 +1,12 @@
 ## pb recordings
 
-List and replay team terminal recordings
+List and replay terminal recordings
 
 ### Synopsis
 
-List and replay team terminal recordings
+List and replay terminal recordings
 
-List the team terminal recordings you may see, start or stop recording a session you are attached to, and replay or export one from the machine that recorded it. Each replay is audited first; the recording key opens with your unlocked vault on this computer.
+List the terminal recordings you may see (your own, or a team's), start or stop recording a session you are attached to, and replay or export one from the machine that recorded it. Each replay is audited first; the recording key opens with your unlocked vault on this computer.
 
 With --json, this command group lists its available commands.
 

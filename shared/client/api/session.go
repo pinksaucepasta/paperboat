@@ -2,8 +2,11 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/shared/recipe"
 )
 
 type TokenSet struct {
@@ -66,5 +69,27 @@ func (c *Client) StartAPITokenSession(ctx context.Context, token, label, deviceT
 		body["enrolled_machine_id"] = machineID
 	}
 	err := Call(ctx, c.BaseURL, http.MethodPost, "/v1/auth/api-token-sessions", body, token, &out, c.Options)
+	return out, err
+}
+
+// RecipeSession is a CLI session started from a recipe token, with the recipe it pairs the machine to.
+type RecipeSession struct {
+	TokenSet
+	Recipe struct {
+		ID        string          `json:"id"`
+		Name      string          `json:"name"`
+		Revision  int64           `json:"revision"`
+		Workspace string          `json:"workspace"`
+		Recipe    json.RawMessage `json:"recipe"`
+	} `json:"recipe"`
+}
+
+// StartRecipeSession exchanges a recipe token for a CLI session of the recipe's creator, limited to
+// the recipe's machine (shared/recipe/README.md). Only the token id and its derived auth leave this
+// computer, never the secret.
+func (c *Client) StartRecipeSession(ctx context.Context, token recipe.Token, label, deviceType, osName string) (RecipeSession, error) {
+	var out RecipeSession
+	body := map[string]any{"token_id": token.ID, "auth": token.Auth(), "client_label": label, "device_type": deviceType, "os": osName}
+	err := Call(ctx, c.BaseURL, http.MethodPost, "/v1/auth/recipe-sessions", body, "", &out, c.Options)
 	return out, err
 }

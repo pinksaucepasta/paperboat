@@ -85,12 +85,13 @@ type recipeJSON struct {
 	RotatedAt   *time.Time    `json:"rotated_at"`
 	Machines    int           `json:"machines"`
 	MaxMachines int           `json:"max_machines,omitempty"`
+	PublicKey   []byte        `json:"public_key,omitempty"`
 }
 
 func recipeView(r recipes.Recipe) recipeJSON {
 	return recipeJSON{ID: r.ID, Name: r.Name, Workspace: r.Workspace.ID, Revision: r.Revision, Token: recipe.MaskedID(r.TokenID), Source: r.Source,
 		Format: r.Format, Recipe: r.Recipe, CreatedBy: r.CreatedBy, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt, ExpiresAt: r.ExpiresAt,
-		LastUsedAt: r.LastUsedAt, RotatedAt: r.RotatedAt, Machines: r.Machines, MaxMachines: r.MaxMachines}
+		LastUsedAt: r.LastUsedAt, RotatedAt: r.RotatedAt, Machines: r.Machines, MaxMachines: r.MaxMachines, PublicKey: r.PublicKey}
 }
 
 // recipeRequest resolves {ws} and the acting account; a recipe session never manages recipes
@@ -115,12 +116,13 @@ func recipeRequest(w http.ResponseWriter, r *http.Request) (string, workspace.Sc
 }
 
 type recipeFileBody struct {
-	Name    string              `json:"name"`
-	Source  string              `json:"source"`
-	Format  string              `json:"format"`
-	TokenID string              `json:"token_id"`
-	Auth    []byte              `json:"auth"`
-	Wraps   []recipes.VaultWrap `json:"vault_wraps"`
+	Name      string              `json:"name"`
+	Source    string              `json:"source"`
+	Format    string              `json:"format"`
+	TokenID   string              `json:"token_id"`
+	Auth      []byte              `json:"auth"`
+	PublicKey []byte              `json:"public_key"`
+	Wraps     []recipes.VaultWrap `json:"vault_wraps"`
 }
 
 func recipeCreate(service *recipes.Service) http.HandlerFunc {
@@ -134,7 +136,7 @@ func recipeCreate(service *recipes.Service) http.HandlerFunc {
 		if !decodeStrictJSON(w, r, &in) {
 			return
 		}
-		out, err := service.Create(r.Context(), account, ws, recipes.Input{Name: in.Name, Source: in.Source, Format: in.Format, TokenID: in.TokenID, Auth: in.Auth, Wraps: in.Wraps})
+		out, err := service.Create(r.Context(), account, ws, recipes.Input{Name: in.Name, Source: in.Source, Format: in.Format, TokenID: in.TokenID, Auth: in.Auth, PublicKey: in.PublicKey, Wraps: in.Wraps})
 		if err != nil {
 			writeRecipeError(w, r, err)
 			return
@@ -224,6 +226,7 @@ func recipeRotate(service *recipes.Service) http.HandlerFunc {
 		limitEnvironmentJSON(w, r, 1<<20)
 		var in struct {
 			Auth        []byte `json:"auth"`
+			PublicKey   []byte `json:"public_key"`
 			Confirm     string `json:"confirm"`
 			MachineKeys []struct {
 				MachineID string `json:"machine_id"`
@@ -237,7 +240,7 @@ func recipeRotate(service *recipes.Service) http.HandlerFunc {
 		for _, k := range in.MachineKeys {
 			keys = append(keys, recipes.MachineKey{MachineID: k.MachineID, Sealed: k.Sealed})
 		}
-		out, err := service.Rotate(r.Context(), account, ws, r.PathValue("name"), in.Auth, keys, in.Confirm)
+		out, err := service.Rotate(r.Context(), account, ws, r.PathValue("name"), in.Auth, in.PublicKey, keys, in.Confirm)
 		if err != nil {
 			writeRecipeError(w, r, err)
 			return

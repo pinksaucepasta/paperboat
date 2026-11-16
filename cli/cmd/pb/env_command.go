@@ -245,7 +245,22 @@ func environmentVariablesCobraCommand() *cobra.Command {
 			if jsonOutput && !valueStdin && strings.TrimSpace(valueFile) == "" {
 				return localArgumentError("env set with --json requires --value-stdin or --value-file")
 			}
-			if err := setEnvironmentVariableForScope(command, team, machine, args[0], valueStdin, valueFile); err != nil {
+			if vault, _ := command.Flags().GetString("vault"); vault != "" {
+				if team != "" || machine != "" {
+					return localArgumentError("--vault cannot be combined with --team or --machine")
+				}
+				value, err := readEnvironmentVariableValueFile(command, valueStdin, valueFile)
+				if err != nil {
+					return err
+				}
+				defer clear(value)
+				if value == nil {
+					value = []byte{}
+				}
+				if err := changeNamedVaultValue(command, vault, args[0], value); err != nil {
+					return err
+				}
+			} else if err := setEnvironmentVariableForScope(command, team, machine, args[0], valueStdin, valueFile); err != nil {
 				return err
 			}
 			if jsonOutput {
@@ -256,6 +271,7 @@ func environmentVariablesCobraCommand() *cobra.Command {
 	}
 	set.Flags().String("team", "", "team scope; cannot be combined with --machine")
 	set.Flags().String("machine", "", "Private device override in the active workspace; omitted uses your global values")
+	set.Flags().String("vault", "", "set the value in this named vault (pb env vault list) instead of your ENV")
 	set.Flags().Bool("value-stdin", false, "read the raw value from non-interactive stdin")
 	set.Flags().String("value-file", "", "read the raw value from an absolute file path")
 	set.Flags().Bool("json", false, "print redacted JSON metadata")
@@ -267,7 +283,14 @@ func environmentVariablesCobraCommand() *cobra.Command {
 		RunE: func(command *cobra.Command, args []string) error {
 			team, _ := command.Flags().GetString("team")
 			machine, _ := command.Flags().GetString("machine")
-			if err := unsetEnvironmentVariableForScope(command, team, machine, args[0]); err != nil {
+			if vault, _ := command.Flags().GetString("vault"); vault != "" {
+				if team != "" || machine != "" {
+					return localArgumentError("--vault cannot be combined with --team or --machine")
+				}
+				if err := changeNamedVaultValue(command, vault, args[0], nil); err != nil {
+					return err
+				}
+			} else if err := unsetEnvironmentVariableForScope(command, team, machine, args[0]); err != nil {
 				return err
 			}
 			if jsonOutput, _ := command.Flags().GetBool("json"); jsonOutput {
@@ -278,6 +301,7 @@ func environmentVariablesCobraCommand() *cobra.Command {
 	}
 	unset.Flags().String("team", "", "team scope; cannot be combined with --machine")
 	unset.Flags().String("machine", "", "Private device override in the active workspace; omitted uses your global values")
+	unset.Flags().String("vault", "", "remove the name from this named vault instead of your ENV")
 	unset.Flags().String("confirm", "", "six-character confirmation code from the preview")
 	unset.Flags().Bool("json", false, "print redacted JSON metadata")
 
@@ -285,6 +309,7 @@ func environmentVariablesCobraCommand() *cobra.Command {
 	addEnvironmentNamesCommand(root)
 	addVaultScopeCommands(root)
 	addPasswordVaultCommands(root)
+	addNamedVaultCommands(root)
 	addEnvironmentHookCommand(root)
 	addEnvironmentRunCommands(root)
 	return root
@@ -470,9 +495,9 @@ func safeEnvironmentVariableCommandError(err error) error {
 	}
 	if environmentFailureHasMarker(err, func(cause error) bool { _, ok := cause.(*environmentmanager.ScopePublicationPending); return ok }) {
 		if rejected, ok := environmentAPIErrorForRecovery(err); ok && rejected.Code == "team_entitlement_required" {
-			return envCommandError(err, "ENV source publication remains pending. Activate Team Billing, then run `pb env vault resume` to retry the exact staged operation.")
+			return envCommandError(err, "ENV source publication remains pending. Activate Team Billing, then run `pb env resume` to retry the exact staged operation.")
 		}
-		return envCommandError(err, "ENV source publication remains unconfirmed. Run `pb env vault resume` to retry the exact staged operation before another edit.")
+		return envCommandError(err, "ENV source publication remains unconfirmed. Run `pb env resume` to retry the exact staged operation before another edit.")
 	}
 	if environmentFailureHasMarker(err, func(cause error) bool {
 		_, ok := cause.(*environmentmanager.LayerPublicationPending)
@@ -492,7 +517,7 @@ func safeEnvironmentVariableCommandError(err error) error {
 	}
 	switch {
 	case onlyEnvironmentFailureLeaves(err, func(leaf error) bool { return errors.Is(leaf, environmentmanager.ErrVaultPending) }):
-		return envCommandError(err, "ENV vault publication is pending; run `pb env vault resume` before retrying")
+		return envCommandError(err, "ENV vault publication is pending; run `pb env resume` before retrying")
 	case onlyEnvironmentFailureLeaves(err, func(leaf error) bool { return errors.Is(leaf, environmentmanager.ErrVaultTeamGrantRequired) }):
 		return envCommandError(err, "ENV team access needs a key grant; ask a surviving team member to regrant access, then run `pb env grants sync`")
 	case onlyEnvironmentFailureLeaves(err, func(leaf error) bool { return leaf == config.ErrSecretNotFound }):
@@ -505,7 +530,7 @@ func safeEnvironmentVariableCommandError(err error) error {
 	case onlyEnvironmentFailureLeaves(err, func(leaf error) bool { return errors.Is(leaf, environmentmanager.ErrNoRotationInProgress) }):
 		return envCommandError(err, "No personal ENV key rotation is in progress; nothing was changed.")
 	case onlyEnvironmentFailureLeaves(err, func(leaf error) bool { return errors.Is(leaf, environmentmanager.ErrVaultLocked) }):
-		return envCommandError(err, "ENV vault is locked; run `pb env vault unlock` before changing variables")
+		return envCommandError(err, "ENV vault is locked; run `pb env unlock` before changing variables")
 	case onlyEnvironmentFailureLeaves(err, func(leaf error) bool { return errors.Is(leaf, environmentmanager.ErrVaultChanged) }):
 		return envCommandError(err, "ENV vault changed; unlock the current vault and retry")
 	case onlyEnvironmentFailureLeaves(err, func(leaf error) bool { return errors.Is(leaf, environmentmanager.ErrVariableNotConfigured) }):
@@ -529,13 +554,13 @@ func safeEnvironmentVariableCommandError(err error) error {
 		case "key_authorization_required":
 			return envCommandError(err, "ENV recipient authorization is unavailable; run `pb env grants sync` and retry")
 		case "team_entitlement_required":
-			return envCommandError(err, "This ENV Team source requires an active Team subscription. Activate Team Billing, then retry the source operation or run `pb env vault resume` for a pending delivery.")
+			return envCommandError(err, "This ENV Team source requires an active Team subscription. Activate Team Billing, then retry the source operation or run `pb env resume` for a pending delivery.")
 		case "record_capacity_exceeded":
 			return envCommandError(err, "This ENV scope is full: it holds at most 128 variables and 256 KiB, or has used up its record identifiers. Nothing was changed; unset a variable or run `pb env rotate` to retire old identifiers, then submit the edit again.")
 		case "forbidden":
 			return envCommandError(err, "You do not have write access to this ENV source; nothing was changed. Ask a Team admin for write access, then submit the edit again.")
 		case "operation_conflict":
-			return envCommandError(err, "the ENV operation conflicts with an existing operation; run `pb env vault resume` before retrying")
+			return envCommandError(err, "the ENV operation conflicts with an existing operation; run `pb env resume` before retrying")
 		}
 	}
 	// A submitted value must not be retained in arbitrary transport or server
@@ -561,7 +586,7 @@ func paperboatUnreachable(ctx context.Context) bool {
 	return false
 }
 
-const envNotSetUpMessage = "ENV is not set up for this account on this computer; nothing was changed. Run `pb env vault unlock` if this account already uses ENV, or `pb env vault init` to set it up."
+const envNotSetUpMessage = "ENV is not set up for this account on this computer; nothing was changed. Run `pb env unlock` if this account already uses ENV, or `pb env init` to set it up."
 
 func environmentVariableScopeLabel(target environmentVariableTarget) string {
 	if target.machineID == "" {

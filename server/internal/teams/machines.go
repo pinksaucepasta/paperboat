@@ -429,6 +429,9 @@ func removeTeamMachineTx(ctx context.Context, tx *db.Tx, team, machine string) e
 		return err
 	}
 	now := time.Now().UTC()
+	if err := db.FenceRemovedMachineVaultTx(ctx, tx, issuer, machine); err != nil {
+		return err
+	}
 	if _, err := tx.Exec(ctx, `UPDATE user_machines SET revoked_at=coalesce(revoked_at,$3),state='revoked',seat_state='released',online=false,version=version+1,updated_at=$3 WHERE id=$1 AND owner_team_id=$2`, machine, team, now); err != nil {
 		return err
 	}

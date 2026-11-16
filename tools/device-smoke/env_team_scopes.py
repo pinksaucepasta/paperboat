@@ -78,7 +78,7 @@ def main():
     joined = granted = False
     try:
         for command, password in ((args.owner_cmd, args.owner_password_file), (args.member_cmd, args.member_password_file)):
-            must(pb(command, 'env', 'vault', 'unlock', '--password-file', password, '--json'), 'vault unlock')
+            must(pb(command, 'env', 'unlock', '--password-file', password, '--json'), 'vault unlock')
         if not any(m['account_id'] == args.member_account and m['active'] for m in team_state()['members']):
             must(owner('team', 'invite', team, args.member_email, '--generation', str(team_state()['generation']), '--json'), 'invite')
             invitations = must(member('team', 'invitations', '--json'), 'member invitations')

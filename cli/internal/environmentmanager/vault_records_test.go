@@ -200,7 +200,7 @@ func TestDeniedRecordWriteIsReportedAndNotLeftPending(t *testing.T) {
 }
 
 // F21-170: the server refuses the 129th variable (or the byte after 256 KiB) with 409 record_capacity_exceeded; that is
-// a definite refusal, so the staged write is dropped and the next edit is not blocked behind `pb env vault resume`.
+// a definite refusal, so the staged write is dropped and the next edit is not blocked behind `pb env resume`.
 func TestScopeLimitRefusalIsReportedAndNotLeftPending(t *testing.T) {
 	ctx := context.Background()
 	v, c, store := newVaultScopesFixture(t)

@@ -390,7 +390,7 @@ func localDaemonCommand() *cobra.Command {
 				}, peerTunnel.NativeRelayCandidates).Run(ctx)
 				// The server tells the daemon when the machine list changed, so inventory refreshes at
 				// once; without a machine id (never enrolled) or while the wait fails it polls as before.
-				var inventoryEvents, accessEvents, servicesEvents *machineevents.Subscription
+				var inventoryEvents, accessEvents, servicesEvents, recipeEvents *machineevents.Subscription
 				if source.SourceMachineID != "" {
 					events, eventsErr := machineevents.NewWithWaiter(machineevents.UserWaiter(func(waitCtx context.Context, known map[string]int64) (map[string]int64, error) {
 						credential, credentialErr := authSource.WithContext(waitCtx).Credential()
@@ -405,6 +405,7 @@ func localDaemonCommand() *cobra.Command {
 					inventoryEvents = events.Subscribe(machineevents.TopicInventory)
 					accessEvents = events.Subscribe(machineevents.TopicMachineAccess)
 					servicesEvents = events.Subscribe(machineevents.TopicMachineServices)
+					recipeEvents = events.Subscribe(machineevents.TopicRecipe)
 					// A newly paired machine enters the mesh when it first comes online, which moves only inventory.
 					networkEvents := events.Subscribe(machineevents.TopicPeerNetwork, machineevents.TopicInventory)
 					go func() {
@@ -423,6 +424,12 @@ func localDaemonCommand() *cobra.Command {
 					defer func() { _ = events.Shutdown(context.WithoutCancel(ctx)) }()
 				}
 				go refreshMachineServices(ctx, steps, coordinator, machineServicesFetcher(cfg.ServerURL, authSource, controlTransport), servicesEvents.Changed(), coordinator.ServicesNudge())
+				if source.SourceMachineID != "" {
+					host, _ := os.Hostname()
+					fetchRecipe, reportRecipe := recipeClients(cfg.ServerURL, authSource, controlTransport)
+					applier := &recipeApplier{statePath: recipeStatePath(cfg.Path()), machine: strings.ToLower(strings.Split(host, ".")[0]), run: pbRunner(cfg.Path())}
+					go refreshRecipe(ctx, steps, applier, fetchRecipe, reportRecipe, recipeEvents.Changed())
+				}
 				teamShared := &teamSharedMachines{}
 				return runLocalDaemon(ctx, localdaemon.DaemonConfig{
 					InventoryEvents: inventoryEvents, AccessEvents: accessEvents, LocalAccessChanged: coordinator.LocalAccessChanged(), Steps: steps,

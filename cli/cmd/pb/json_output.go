@@ -157,7 +157,7 @@ func classifyCLIJSONFailure(err error, failure commandFailure) cliJSONError {
 		}
 		if typed.cause == environmentmanager.ErrVaultNotSetUp {
 			result.Code, result.Category, result.StateChanged = "env_not_set_up", "conflict", false
-			result.Recovery = "Run `pb env vault unlock` if this account already uses ENV, or `pb env vault init` to set it up."
+			result.Recovery = "Run `pb env unlock` if this account already uses ENV, or `pb env init` to set it up."
 		}
 		if onlyEnvironmentFailureLeaves(typed.cause, func(leaf error) bool {
 			return leaf == environmentmanager.ErrVaultLocked || leaf == environmentmanager.ErrVaultPending || leaf == environmentmanager.ErrVaultChanged || leaf == environmentmanager.ErrVaultTeamGrantRequired || leaf == environmentmanager.ErrVariableNotConfigured
@@ -266,6 +266,10 @@ func classifyCLIJSONFailure(err error, failure commandFailure) cliJSONError {
 		if typed.Code == localapi.TokenScopeCode {
 			result.Code, result.Category, result.StateChanged, result.Retryable = localapi.TokenScopeCode, "authorization_or_entitlement", false, false
 			result.Recovery = "Use an API token whose scope includes this machine and action, or sign in with `pb login`."
+		}
+		if typed.Code == localapi.RecipeReachCode {
+			result.Code, result.Category, result.StateChanged, result.Retryable = localapi.RecipeReachCode, "authorization_or_entitlement", false, false
+			result.Recovery = "Add this machine and action to the recipe's [[reach]] and run `pb recipe update`."
 		}
 		if typed.Code == localapi.RelayQuotaCode {
 			// The connection was refused before anything was sent or started.

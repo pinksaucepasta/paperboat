@@ -20,11 +20,11 @@ or the team id. Errors use the server envelope `{"error": {"code", "message", "d
 
 | Method and path | Who | Request | Response |
 |---|---|---|---|
-| `POST /v1/workspaces/{ws}/recipes` | personal: owner; team: owners, admins | `{name, source, format: "toml"\|"json", token_id, auth, vault_wraps?: [{vault, wrapped}]}` | 201 `{recipe}`; same `token_id`+`auth` again returns the same recipe |
+| `POST /v1/workspaces/{ws}/recipes` | personal: owner; team: owners, admins | `{name, source, format: "toml"\|"json", token_id, auth, public_key, vault_wraps?: [{vault, wrapped}]}` | 201 `{recipe}`; same `token_id`+`auth` again returns the same recipe |
 | `GET /v1/workspaces/{ws}/recipes` | members | — | `{recipes: [Recipe]}` |
 | `GET /v1/workspaces/{ws}/recipes/{name}` | members | — | `{recipe, machines: [Machine]}` |
 | `PUT /v1/workspaces/{ws}/recipes/{name}` | as create | `{source, format, vault_wraps?}` | `{recipe, previous, online_machines}` |
-| `POST /v1/workspaces/{ws}/recipes/{name}/rotate` | as create | `{auth, confirm, machine_keys?: [{machine_id, sealed}]}` | `{recipe}` |
+| `POST /v1/workspaces/{ws}/recipes/{name}/rotate` | as create | `{auth, public_key, confirm, machine_keys?: [{machine_id, sealed}]}` | `{recipe}` |
 | `POST /v1/workspaces/{ws}/recipes/{name}/revoke` | as create | `{confirm}` | `{recipe, impact}` |
 | `GET /v1/workspaces/{ws}/env-vaults` | members | — | `{vaults: [Vault]}` (no envelope) |
 | `POST /v1/workspaces/{ws}/env-vaults` | as create | `{name, wraps: [{recipient_kind: "account"\|"team", recipient_id, wrapped}]}` | 201 `{vault}` |
@@ -39,7 +39,8 @@ or the team id. Errors use the server envelope `{"error": {"code", "message", "d
 ```text
 Recipe  {id, name, workspace, revision, token ("pbr_<id>_…"), source, format, recipe (canonical),
          created_by ("user:<email>"), created_at, updated_at, expires_at, last_used_at, rotated_at,
-         machines, max_machines?}
+         machines, max_machines?, public_key (Token.PublicKey: pb recipe update and the console wrap
+         a newly read vault's key to it without the token)}
 Machine {id, name, online, last_seen_at, applied_revision, apply_state, remove_at}
 Vault   {name, key_epoch, revision, rekey_required, envelope?, wraps, recipes}
 impact  {machines: [{id, name, online}], vaults: [name]}
@@ -83,3 +84,11 @@ Errors:
 Machines leave a recipe through the `pb machine revoke` path: revoke removes all of them;
 `machine_lifetime` removes each when it ends; `remove_after_offline` removes a machine that has
 been offline that long (cancelled while it is online; the server checks every minute).
+
+## Vault crypto
+
+`wrapped`, `sealed` and `envelope` bytes have one format, implemented once in `vault.go` (CLI,
+daemon and the browser's `cli/cmd/environmentvault-wasm`): a vault key is wrapped to an X25519 key
+(recipe `public_key`, account ENV sharing key) with HPKE base mode DHKEM(X25519)/HKDF-SHA256/AES-256-GCM
+(`enc || ciphertext`, info `RecipientInfo(vault, "recipe:<token_id>" | "account:<id>")`), or to a
+team's ENV key with AES-256-GCM; values are one JSON object sealed with AES-256-GCM under the vault key.

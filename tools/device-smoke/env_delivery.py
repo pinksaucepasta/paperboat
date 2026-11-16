@@ -7,7 +7,7 @@ The command always runs (exit 0): managed ENV is an addition to a launch, never 
   empty         no ENV assigned: host show lists no layers, no ENV line.
   applied       delivered: host show says published and applied, no ENV line.
   pending       not delivered yet: host show says not applied; the command says delivery is pending
-                and points at `pb env vault unlock`; the value is absent.
+                and points at `pb env unlock`; the value is absent.
   undeliverable delivery failed: the command says so and points at `pb env host show`.
 The caller creates the state (for pending: change a scope while no unlocked device can re-seal it).
 """
@@ -21,7 +21,7 @@ import winhost
 
 PB = winhost.pb_path()
 SENTINEL = 'PB_ENV_DELIVERY_PROBE'
-PENDING = ('delivery to this machine is pending', 'pb env vault unlock')
+PENDING = ('delivery to this machine is pending', 'pb env unlock')
 UNDELIVERABLE = ('delivery to this machine failed', 'pb env host show')
 
 

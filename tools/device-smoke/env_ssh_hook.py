@@ -171,7 +171,7 @@ def windows_pb(*arguments, stdin=None):
 
 def windows_unlock(password_file):
     if password_file:
-        must(windows_pb('env', 'vault', 'unlock', '--password-file', password_file, '--json'), 'unlock the ENV vault')
+        must(windows_pb('env', 'unlock', '--password-file', password_file, '--json'), 'unlock the ENV vault')
 
 
 def windows_cleanup(*steps):

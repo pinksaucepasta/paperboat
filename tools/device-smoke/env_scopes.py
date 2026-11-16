@@ -3,7 +3,7 @@
 
   env_scopes.py TARGET [--password-file ABSOLUTE_OWNER_ONLY_FILE] [--rotate]
 
-Run on a machine with an unlocked ENV vault (--password-file unlocks it first with `pb env vault unlock`).
+Run on a machine with an unlocked ENV vault (--password-file unlocks it first with `pb env unlock`).
 TARGET is another machine of the same account; the machine this runs on is the second machine, so every
 step also checks that a scope does not leak to the other machine.
   1. a personal value is set: `pb env list` names it (names only, no value anywhere in the output); a new exec
@@ -189,7 +189,7 @@ def main():
     parser.add_argument('--rotate', action='store_true', help='also rotate the personal scope keys (pb env rotate) and check the value survives')
     args = parser.parse_args()
     if args.password_file:
-        code, _, err = run('env', 'vault', 'unlock', '--password-file', args.password_file, '--json')
+        code, _, err = run('env', 'unlock', '--password-file', args.password_file, '--json')
         if code:
             raise RuntimeError('unlocking the ENV vault failed: ' + err[:120])
     name = 'PB_SMOKE_' + uuid.uuid4().hex[:8].upper()

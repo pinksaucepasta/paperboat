@@ -54,12 +54,12 @@ def setup_env(devices):
         VAULT_PASSWORD.chmod(0o600)
     password = VAULT_PASSWORD.read_bytes().strip() + b'\n'
     ctl = fleet.controller()
-    status = ctl.pb('env', 'vault', 'unlock', '--password-stdin', input=password, timeout=120)
+    status = ctl.pb('env', 'unlock', '--password-stdin', input=password, timeout=120)
     if status.rc != 0:
-        done = ctl.pb('env', 'vault', 'init', '--password-stdin', input=password, timeout=120)
+        done = ctl.pb('env', 'init', '--password-stdin', input=password, timeout=120)
         assert done.rc == 0, 'vault init: ' + (done.text + done.errtext)[-300:]
     for dev in devices.values():
-        done = dev.pb('env', 'vault', 'unlock', '--password-stdin', input=password, timeout=120)
+        done = dev.pb('env', 'unlock', '--password-stdin', input=password, timeout=120)
         assert done.rc == 0, '%s vault unlock: %s' % (dev.name, (done.text + done.errtext)[-200:])
     done = ctl.pb('env', 'set', 'X22_VALUE', '--value-stdin', input=VALUE.encode(), timeout=120)
     assert done.rc == 0, 'env set: ' + (done.text + done.errtext)[-300:]

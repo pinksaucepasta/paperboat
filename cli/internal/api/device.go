@@ -3,11 +3,12 @@ package api
 import (
 	"context"
 	"errors"
-	clientapi "github.com/pinksaucepasta/paperboat/shared/client/api"
 	"net/http"
 
 	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
+	clientapi "github.com/pinksaucepasta/paperboat/shared/client/api"
+	"github.com/pinksaucepasta/paperboat/shared/recipe"
 )
 
 const ClientID = "paperboat"
@@ -107,4 +108,9 @@ func CancelDeviceLogin(ctx context.Context, baseURL, deviceCode string, hc *http
 // token (PLAN F18-06): the token is the request's bearer and is not stored by the caller.
 func StartAPITokenSession(ctx context.Context, baseURL, apiToken, label, deviceType, osName, machineID string, hc *http.Client) (clientapi.TokenSet, error) {
 	return (&clientapi.Client{BaseURL: baseURL, Options: publicCallOptions(hc)}).StartAPITokenSession(ctx, apiToken, label, deviceType, osName, machineID)
+}
+
+// StartRecipeSession exchanges a recipe token for a CLI session limited to the recipe's machine (F26).
+func StartRecipeSession(ctx context.Context, baseURL string, token recipe.Token, label, deviceType, osName string, hc *http.Client) (clientapi.RecipeSession, error) {
+	return (&clientapi.Client{BaseURL: baseURL, Options: publicCallOptions(hc)}).StartRecipeSession(ctx, token, label, deviceType, osName)
 }

@@ -85,12 +85,13 @@ pb [environment] [new] [flags]
 * [pb logout](pb_logout.md)	 - Revoke and remove the active client session
 * [pb machine](pb_machine.md)	 - Manage machines
 * [pb new](pb_new.md)	 - Open a fresh terminal on this device in the current directory
-* [pb pair](pb_pair.md)	 - Enroll this machine with a one-shot token
+* [pb pair](pb_pair.md)	 - Pair this machine from a recipe token or a one-shot enrollment token
 * [pb ping](pb_ping.md)	 - Measure authenticated connectivity to a machine
 * [pb policy](pb_policy.md)	 - Read, test and change the workspace access policy
 * [pb port](pb_port.md)	 - Name machine ports and set a machine's front desk
 * [pb preview](pb_preview.md)	 - Expose a local target through a temporary preview
-* [pb recordings](pb_recordings.md)	 - List and replay team terminal recordings
+* [pb recipe](pb_recipe.md)	 - Create and manage recipes that pair and set up machines
+* [pb recordings](pb_recordings.md)	 - List and replay terminal recordings
 * [pb relay](pb_relay.md)	 - Inspect hosted and self-hosted relays
 * [pb reset](pb_reset.md)	 - Remove the current Paperboat setup before fresh enrollment
 * [pb resolve](pb_resolve.md)	 - Resolve a peer machine IP, port forwardings over gRPC IPC

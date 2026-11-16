@@ -52,7 +52,7 @@ def py(dev):
 
 
 def unlock(dev, secret):
-    return dev.pb('env', 'vault', 'unlock', '--password-stdin', input=secret + b'\n', timeout=120)
+    return dev.pb('env', 'unlock', '--password-stdin', input=secret + b'\n', timeout=120)
 
 
 def locked(dev):
@@ -62,7 +62,7 @@ def locked(dev):
 
 
 def recover_and_restore(dev):
-    """`pb env vault recover` with the recovery code gives a new password and recovery code; the account's files are rewritten
+    """`pb env recover` with the recovery code gives a new password and recovery code; the account's files are rewritten
     with them (mode 600, never printed) so the later checks keep working."""
     recovery = RECOVERY.read_bytes().strip()
     new_password = b'rec-' + os.urandom(12).hex().encode()
@@ -74,7 +74,7 @@ def recover_and_restore(dev):
         winhost.RemotePath(dev.device, old_file).enrollment_token_file()  # the owner-only ACL pb requires of a secret file
     new_file = stage + ('\\new' if dev.os == 'windows' else '/new')
     dev.remove(new_file)
-    done = dev.pb('env', 'vault', 'recover', '--password-stdin', '--recovery-input-file', old_file, '--recovery-file', new_file, input=new_password + b'\n', timeout=180)
+    done = dev.pb('env', 'recover', '--password-stdin', '--recovery-input-file', old_file, '--recovery-file', new_file, input=new_password + b'\n', timeout=180)
     assert done.rc == 0, 'recover failed: %s' % (done.text + done.errtext)[-200:]
     fresh = dev.read(new_file)
     for path, data in ((PASSWORD, new_password), (RECOVERY, fresh.strip())):
@@ -94,7 +94,7 @@ def reset_vault(dev, new_password):
     new_file = stage + ('\\fresh' if dev.os == 'windows' else '/fresh')
     dev.remove(new_file)
     dev.write(stage + ('\\.keep' if dev.os == 'windows' else '/.keep'), b'')
-    done = dev.pb('env', 'vault', 'reset', '--confirm', 'RESET ENV ' + account, '--password-stdin', '--recovery-file', new_file,
+    done = dev.pb('env', 'reset', '--confirm', 'RESET ENV ' + account, '--password-stdin', '--recovery-file', new_file,
                   input=new_password + b'\n', timeout=180)
     assert done.rc == 0, 'reset failed: %s' % (done.text + done.errtext)[-200:]
     recovery = dev.read(new_file)
@@ -108,13 +108,13 @@ def reset_vault(dev, new_password):
 def t_lock(dev):
     password = PASSWORD.read_bytes().strip()
     recovery = RECOVERY.read_bytes().strip()
-    assert dev.pb('env', 'vault', 'lock').rc == 0, 'lock failed'
+    assert dev.pb('env', 'lock').rc == 0, 'lock failed'
     assert locked(dev), 'a locked vault still lists ENV: %s' % dev.pb('env', 'list').text[:120]
     done = unlock(dev, b'wrong-password-' + os.urandom(4).hex().encode())
     assert done.rc != 0, 'a wrong password unlocked the vault'
     assert unlock(dev, password).rc == 0, 'the password did not unlock'
     assert dev.pb('env', 'list').rc == 0, 'ENV not readable after unlock'
-    assert dev.pb('env', 'vault', 'lock').rc == 0 and locked(dev)
+    assert dev.pb('env', 'lock').rc == 0 and locked(dev)
     # a recovery code is not a password: `unlock` refuses it, `recover` opens the vault and replaces both secrets
     refused = unlock(dev, recovery)
     assert refused.rc != 0, 'unlock accepted a recovery code'
@@ -125,11 +125,11 @@ def t_lock(dev):
 
 def t_persist(dev, other):
     """The unlock survives a daemon restart where the OS has a secure store (Keychain on M, Credential Manager on W) and is
-    gone on Linux without a Secret Service (keys only in daemon memory, as `pb env vault init --help` says); locking here
+    gone on Linux without a Secret Service (keys only in daemon memory, as `pb env init --help` says); locking here
     leaves the other device's vault open."""
     password = PASSWORD.read_bytes().strip()
     assert unlock(dev, password).rc == 0 and unlock(other, password).rc == 0
-    assert dev.pb('env', 'vault', 'lock').rc == 0 and other.pb('env', 'list').rc == 0, 'locking %s locked %s' % (dev.name, other.name)
+    assert dev.pb('env', 'lock').rc == 0 and other.pb('env', 'list').rc == 0, 'locking %s locked %s' % (dev.name, other.name)
     assert unlock(dev, password).rc == 0
     assert dev.pb('service', 'restart', timeout=180).rc == 0, 'service restart failed'
     deadline, readable = time.time() + 90, False
@@ -149,7 +149,7 @@ def t_remove(dev, other):
     account = fleet.json_pb(dev, 'auth', 'status')['account']['id']
     password = PASSWORD.read_bytes().strip()
     assert unlock(dev, password).rc == 0 and unlock(other, password).rc == 0
-    done = dev.pb('env', 'vault', 'remove', '--confirm', 'REMOVE LOCAL ENV ' + account, timeout=120)
+    done = dev.pb('env', 'remove', '--confirm', 'REMOVE LOCAL ENV ' + account, timeout=120)
     assert done.rc == 0, 'remove failed: %s' % (done.text + done.errtext)[-200:]
     try:
         assert dev.pb('env', 'list').rc != 0, 'ENV is still readable on %s after its custody was removed' % dev.name

@@ -243,7 +243,7 @@ scope yet (the CLI's `refreshENVRecordScope` step), applying stricter recipient 
 
 - Scopes: Personal, the selected Team workspace's shared set, and a machine's own override (its tab).
 - Not in the browser: vault init, recovery code, password change, reset, Team key grants. The page
-  points to `pb env vault init` when no vault exists.
+  points to `pb env init` when no vault exists.
 - Delivery status per machine (`/v1/environment/layers`) is not shown yet.
 - Browser check: `scripts/check-environment.js` (F10-06).
 

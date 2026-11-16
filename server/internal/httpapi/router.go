@@ -213,6 +213,8 @@ func NewRouter(opts Options) http.Handler {
 		if opts.ReleaseFiles != nil {
 			mux.Handle("GET /install", installScript(opts.ReleaseFiles))
 			mux.Handle("GET /install.ps1", installScriptPowerShell(opts.ReleaseFiles))
+			mux.Handle("GET /recipe", recipeInstallScript(opts.ReleaseFiles, "/install", false))
+			mux.Handle("GET /recipe.ps1", recipeInstallScript(opts.ReleaseFiles, "/windows", true))
 			mux.Handle("GET /selfhost/install", selfhostInstaller(opts.ReleaseFiles))
 			mux.Handle("GET /selfhost/versions/{path...}", selfhostPackage(opts.ReleaseFiles))
 			mux.HandleFunc("GET /selfhost/address", selfhostAddress)
@@ -780,7 +782,7 @@ func telemetryRouteFamily(r *http.Request) string {
 		return "health"
 	case strings.HasPrefix(path, "/v1/edge/"):
 		return "edge_control"
-	case path == "/install", strings.HasPrefix(path, "/tuf/"), strings.HasPrefix(path, "/helper-releases/"):
+	case path == "/install", path == "/recipe", strings.HasPrefix(path, "/tuf/"), strings.HasPrefix(path, "/helper-releases/"):
 		return "release"
 	case strings.HasPrefix(path, "/v1/"), strings.HasPrefix(path, "/.well-known/"):
 		return "public_api"

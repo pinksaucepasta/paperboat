@@ -208,3 +208,28 @@ func writeInstallerFixture(t *testing.T, path, body string) {
 		t.Fatal(err)
 	}
 }
+
+// F26: the recipe installer (get.<domain>/recipe) refuses at once, before downloading anything, when
+// PB_RECIPE is missing or is not a recipe token.
+func TestRecipeInstallerRefusesAMissingOrMalformedTokenAtOnce(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("install.sh targets POSIX hosts")
+	}
+	root := t.TempDir()
+	// curl must never run: the refusal comes first.
+	writeInstallerFixture(t, filepath.Join(root, "curl"), "#!/bin/sh\necho curl-ran >&2\nexit 1\n")
+	for value, want := range map[string]string{
+		"":                       "PB_RECIPE is not set",
+		"pbr_short":              "this value is 9",
+		"not-a-token-at-all-xyz": "PB_RECIPE is not a recipe token",
+	} {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		command := exec.CommandContext(ctx, "sh", "install.sh")
+		command.Env = append(os.Environ(), "PATH="+root+":"+os.Getenv("PATH"), "PAPERBOAT_RECIPE_INSTALL=1", "PB_RECIPE="+value, "PAPERBOAT_ENROLLMENT_TOKEN=")
+		output, err := command.CombinedOutput()
+		cancel()
+		if err == nil || !strings.Contains(string(output), want) || strings.Contains(string(output), "curl-ran") {
+			t.Fatalf("PB_RECIPE=%q: err=%v output=%s", value, err, output)
+		}
+	}
+}

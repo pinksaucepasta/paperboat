@@ -60,7 +60,7 @@ def until(ctl, dev, want, seconds=WAIT):
 
 
 def unlock(dev):
-    return dev.pb('env', 'vault', 'unlock', '--password-stdin', input=PASSWORD.read_bytes().strip() + b'\n', timeout=120)
+    return dev.pb('env', 'unlock', '--password-stdin', input=PASSWORD.read_bytes().strip() + b'\n', timeout=120)
 
 
 def setv(ctl, name, value, machine=None):
@@ -194,7 +194,7 @@ def t_rotation(ctl, devices):
     try:
         setv(ctl, name, value)
         revoked, machine_id = throwaway(fleet.PREFIX, container)
-        assert ctl.pb('env', 'vault', 'unlock', '--password-file', PASSWORD_REMOTE(ctl), '--json', timeout=120).rc == 0, 'unlock to seal for the new machine failed'
+        assert ctl.pb('env', 'unlock', '--password-file', PASSWORD_REMOTE(ctl), '--json', timeout=120).rc == 0, 'unlock to seal for the new machine failed'
         assert until(ctl, revoked, {name: value}) == {name: value}, 'the throwaway machine never received the value'
         before = {}
         for dev in devices.values():
@@ -214,7 +214,7 @@ def t_rotation(ctl, devices):
             assert pending.get(dev.name), '%s never showed a pending delivery after the revoke' % dev.name
             done = ctl.pb('exec', dev.alias, '--', *true_argv(dev), timeout=120)
             assert done.rc == 0 and 'ENV not applied' in done.errtext, '%s: a command while pending did not run and say that ENV was not applied: %s' % (dev.name, done.errtext[-150:])
-        unlock = ctl.pb('env', 'vault', 'unlock', '--password-file', PASSWORD_REMOTE(ctl), '--json', timeout=120)
+        unlock = ctl.pb('env', 'unlock', '--password-file', PASSWORD_REMOTE(ctl), '--json', timeout=120)
         assert unlock.rc == 0, 'unlock failed: ' + (unlock.text + unlock.errtext)[-150:]
         for dev in devices.values():
             assert until(ctl, dev, {name: value}) == {name: value}, '%s does not see the value after the rotation' % dev.name
@@ -260,7 +260,7 @@ def main():
     ctl = fleet.controller()
     password = PASSWORD.read_bytes().strip()
     for dev in devices.values():
-        done = dev.pb('env', 'vault', 'unlock', '--password-stdin', input=password + b'\n', timeout=120)
+        done = dev.pb('env', 'unlock', '--password-stdin', input=password + b'\n', timeout=120)
         assert done.rc == 0, '%s: unlock failed' % dev.name
     for scope in [None] + [d.alias for d in devices.values()]:  # leftovers of an interrupted run would leak into the exact comparisons below
         listed = ctl.pb('env', 'list', *(['--machine', scope] if scope else []), '--json', timeout=120)

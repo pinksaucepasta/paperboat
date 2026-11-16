@@ -17,12 +17,14 @@ const (
 	StepRegisterNetwork = "register_network"
 	StepPeerAuthority   = "peer_authority"
 	StepMachineServices = "machine_services"
+	StepRecipe          = "recipe"
 )
 
 var stepTitles = map[string]string{
 	StepRegisterNetwork: "Registering this computer with the Paperboat network",
 	StepPeerAuthority:   "Verifying the peer network configuration",
 	StepMachineServices: "Reading the services your machines announce for the browser",
+	StepRecipe:          "Applying this machine's recipe (preview, tunnel, config, ENV)",
 }
 
 const stepRecovery = "Paperboat retries this on its own. If it keeps failing, check this computer's network and that the Paperboat server is reachable, then run `pb doctor` again."

@@ -14,7 +14,7 @@ import {
 } from "@/lib/envvault/vault"
 
 /*
- * Team vaults and key changes in the browser: what `pb env team …`, `pb env rotate` and `pb env vault reset`
+ * Team vaults and key changes in the browser: what `pb env team …`, `pb env rotate` and `pb env reset`
  * do, with the same WASM engine and the same server calls. The keys stay in the worker; each call here only
  * feeds it server state and sends back the sealed result. Every flow needs the vault unlocked, except the
  * reset of a vault whose password is lost.

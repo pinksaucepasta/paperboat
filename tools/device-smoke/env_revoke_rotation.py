@@ -84,7 +84,7 @@ def main():
         code, out, err = run('exec', args.survivor, '--', *windows_target.true_argv(PB, args.survivor))
         if code or 'ENV not applied' not in err:
             raise RuntimeError('a command on the pending machine did not run and say that ENV was not applied')
-        code, _, _ = run('env', 'vault', 'unlock', '--password-file', args.password_file, '--json')
+        code, _, _ = run('env', 'unlock', '--password-file', args.password_file, '--json')
         if code:
             raise RuntimeError('unlocking the vault failed')
         deadline = time.monotonic() + WAIT_SECONDS

@@ -80,6 +80,46 @@ func installScriptPowerShell(files http.Handler) http.HandlerFunc {
 	return installHandler(files, "/windows", true)
 }
 
+// recipeInstallScript serves the same installers at /recipe and /recipe.ps1 marked as a recipe install
+// (PLAN F26): the script pairs from PB_RECIPE and refuses at once when it is missing or malformed. The
+// token never goes in the URL, so a query is refused.
+func recipeInstallScript(files http.Handler, path string, powershell bool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("Content-Security-Policy", "default-src 'none'; sandbox")
+		w.Header().Set("Referrer-Policy", "no-referrer")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		if r.URL.RawQuery != "" {
+			http.Error(w, "the recipe installer takes no parameters; set PB_RECIPE in the environment", http.StatusBadRequest)
+			return
+		}
+		recorder := httptest.NewRecorder()
+		clone := r.Clone(r.Context())
+		clone.URL.Path = path
+		files.ServeHTTP(recorder, clone)
+		if recorder.Code != http.StatusOK {
+			http.Error(w, "installer unavailable", recorder.Code)
+			return
+		}
+		script := bytes.TrimPrefix(recorder.Body.Bytes(), []byte("\xef\xbb\xbf"))
+		var body []byte
+		if powershell {
+			body = append([]byte("$env:PAPERBOAT_RECIPE_INSTALL='1';"), script...)
+		} else {
+			// The shebang stays the first line (see serveEnrollmentScript).
+			lineEnd := bytes.IndexByte(script, '\n')
+			if lineEnd < 0 || !bytes.Equal(script[:lineEnd], []byte("#!/bin/sh")) {
+				http.Error(w, "installer unavailable", http.StatusInternalServerError)
+				return
+			}
+			body = append(append(append([]byte{}, script[:lineEnd+1]...), "PAPERBOAT_RECIPE_INSTALL=1\nexport PAPERBOAT_RECIPE_INSTALL\n"...), script[lineEnd+1:]...)
+		}
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.Header().Set("Content-Length", strconv.Itoa(len(body)))
+		_, _ = w.Write(body)
+	}
+}
+
 func installHandler(files http.Handler, path string, powershell bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")

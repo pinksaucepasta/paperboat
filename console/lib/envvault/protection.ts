@@ -5,7 +5,7 @@ import { lockVault, vaultCrypto } from "@/lib/envvault/crypto"
 import { currentVault, readVault, vaultIssuer, type Vault } from "@/lib/envvault/vault"
 
 /*
- * Vault setup, password change and the recovery code in the browser: `pb env vault init`,
+ * Vault setup, password change and the recovery code in the browser: `pb env init`,
  * `password`, `recovery` and `recover` with the CLI's own envelopes (the vault WASM). The password
  * and the codes stay in the worker; the server only receives the sealed vault. A code is shown
  * before anything is published, so a closed tab never leaves a vault protected by a code nobody saw.
@@ -75,7 +75,7 @@ export async function replaceRecoveryCode(code: string): Promise<void> {
 
 /**
  * After `unlockVault(code, "recovery")`: a new password and a new recovery code in one vault version,
- * like `pb env vault recover`. The old code stops working.
+ * like `pb env recover`. The old code stops working.
  */
 export async function recoverVault(password: string, code: string): Promise<void> {
   const vault = await currentVault()

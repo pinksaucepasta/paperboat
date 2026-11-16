@@ -2,7 +2,7 @@
 .TH "PB-ENV-VAULT" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
 
 .SH NAME
-pb-env-vault - Manage password-protected ENV key custody
+pb-env-vault - Create, list and delete named ENV vaults that recipes read
 
 
 .SH SYNOPSIS
@@ -10,13 +10,10 @@ pb-env-vault - Manage password-protected ENV key custody
 
 
 .SH DESCRIPTION
-Manage password-protected ENV key custody
-
-.PP
-Initialize, unlock, lock, recover, rewrap, or remove local custody of ENV keys. Reset is the destructive account-level path and is separate from locking or removing one machine's custody.
-
-.PP
-ENV values are encrypted before they leave the client. The interactive picker separates shared Team globals, your private member globals, and device overrides in the active workspace; commands select exact scopes explicitly; list output shows metadata rather than secret values. Unlock the local vault when a key operation requires it.
+A named vault is a set of ENV values with its own key, for example canary-env. Members
+of the workspace read it with their ENV keys, and machines paired from a recipe whose
+[env] vaults lists it read it with the recipe's token, with nobody online. Set values
+with pb env set <name> --vault <vault>\&.
 
 .PP
 With --json, this command group lists its available commands.
@@ -49,4 +46,4 @@ With --json, this command group lists its available commands.
 
 
 .SH SEE ALSO
-\fBpb-env(1)\fP, \fBpb-env-vault-init(1)\fP, \fBpb-env-vault-lock(1)\fP, \fBpb-env-vault-password(1)\fP, \fBpb-env-vault-recover(1)\fP, \fBpb-env-vault-recovery(1)\fP, \fBpb-env-vault-remove(1)\fP, \fBpb-env-vault-reset(1)\fP, \fBpb-env-vault-resume(1)\fP, \fBpb-env-vault-unlock(1)\fP
+\fBpb-env(1)\fP, \fBpb-env-vault-create(1)\fP, \fBpb-env-vault-delete(1)\fP, \fBpb-env-vault-list(1)\fP

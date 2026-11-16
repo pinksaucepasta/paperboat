@@ -2442,7 +2442,7 @@ class EnvHookPlumbing(unittest.TestCase):
         self.assertEqual('PASS', windows_checks.verdict(code, json.dumps(report)))
         self.assertEqual({'cached_ms': 41, 'quiet_ms': 120, 'quiet_output_bytes': 0},
                          {key: report[key] for key in ('cached_ms', 'quiet_ms', 'quiet_output_bytes')})
-        self.assertEqual(('env', 'vault', 'unlock', '--password-file', r'C:\v\pw', '--json'), device.calls[0])
+        self.assertEqual(('env', 'unlock', '--password-file', r'C:\v\pw', '--json'), device.calls[0])
         self.assertEqual(2, device.calls.count(('env', 'hook', 'powershell', '--install')))
         self.assertEqual(device.before, {path: data for path, data in device.disk.items() if data})
         self.assertEqual((None, True), (device.value, device.names_on))  # the probe is unset, the setting is back on
@@ -2733,7 +2733,7 @@ class EnvVscodeRemote(unittest.TestCase):
                           'server_after_reload_has_probe': True}, report)
         self.assertEqual('PASS', windows_checks.verdict(code, json.dumps(report)))
         self.assertEqual((device.DIR, 'server-win32-x64'), (device.fetched['dir'], device.fetched['url'].split('/')[-2]))
-        self.assertEqual(('env', 'vault', 'unlock', '--password-file', r'C:\v\pw', '--json'), device.calls[0])
+        self.assertEqual(('env', 'unlock', '--password-file', r'C:\v\pw', '--json'), device.calls[0])
         # both servers are stopped, their folder and the hook are gone, the probe is unset
         self.assertEqual((set(), device.before, None), (device.running, {p: d for p, d in device.disk.items() if d}, device.value))
 

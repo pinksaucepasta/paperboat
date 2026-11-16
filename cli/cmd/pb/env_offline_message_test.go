@@ -33,7 +33,7 @@ func TestEnvWithoutAVaultWhileOfflineSaysItNeedsPaperboatOnline(t *testing.T) {
 }
 
 func TestPendingEnvironmentLaunchAlsoSaysEnvNeedsPaperboatOnline(t *testing.T) {
-	if line := launchWarningLine([]string{"environment_pending"}); !strings.Contains(line, "ENV needs Paperboat online") || !strings.Contains(line, "pb env vault unlock") {
+	if line := launchWarningLine([]string{"environment_pending"}); !strings.Contains(line, "ENV needs Paperboat online") || !strings.Contains(line, "pb env unlock") {
 		t.Fatalf("pending line=%q", line)
 	}
 }

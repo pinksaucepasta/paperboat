@@ -1,0 +1,48 @@
+.nh
+.TH "PB-ENV-VAULT-CREATE" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-env-vault-create - Create a named ENV vault
+
+
+.SH SYNOPSIS
+\fBpb env vault create <vault> [flags]\fP
+
+
+.SH DESCRIPTION
+Create a named vault in the active workspace. Its key is made on this computer and
+wrapped with your ENV keys (and the team's, in a team workspace), so unlock them first
+with pb env unlock. Names use lowercase letters, digits and -, up to 63 characters.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for create
+
+.PP
+\fB--json\fP[=false]
+	print JSON
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-env-vault(1)\fP

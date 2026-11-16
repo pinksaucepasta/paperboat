@@ -24,7 +24,7 @@ type Team = Data<"/v1/environment/teams/{team_id}">
 export class DeliveryPending extends Error {
   constructor(readonly failed: number) {
     super(
-      `Saved. ${failed === 1 ? "One machine" : `${failed} machines`} will receive it after your next change, or run pb env vault resume.`,
+      `Saved. ${failed === 1 ? "One machine" : `${failed} machines`} will receive it after your next change, or run pb env resume.`,
     )
   }
 }
@@ -42,7 +42,7 @@ const query = (scope: EnvScope, extra: Record<string, string> = {}) =>
 const scopePath = (scope: EnvScope) => `environment/scopes/${scope.kind}/${encodeURIComponent(scope.owner)}`
 const notFound = (error: unknown) => error instanceof ApiError && error.status === 404
 
-/** The account's encrypted vault, or null before `pb env vault init` has created one. */
+/** The account's encrypted vault, or null before `pb env init` has created one. */
 export async function readVault(signal?: AbortSignal): Promise<Vault | null> {
   try {
     return await api<Vault>("environment-vault?workspace=personal", { signal })

@@ -398,7 +398,7 @@ func TestENVNotSetUpIsNamedNotAuthentication(t *testing.T) {
 			t.Fatalf("kind=%v code=%q state=%v", failure.kind, result.Code, result.StateChanged)
 		}
 		message := userFacingError(err)
-		if !strings.Contains(message, "ENV is not set up") || !strings.Contains(message, "pb env vault init") || !strings.Contains(message, "pb env vault unlock") || strings.Contains(message, "update failed") {
+		if !strings.Contains(message, "ENV is not set up") || !strings.Contains(message, "pb env init") || !strings.Contains(message, "pb env unlock") || strings.Contains(message, "update failed") {
 			t.Fatalf("message %q", message)
 		}
 	}

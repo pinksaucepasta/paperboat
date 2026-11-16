@@ -490,6 +490,7 @@ mode, relays, and observation timestamps.`, Example: "  pb relay list\n  pb rela
 	root.AddCommand(edgeCommand())
 	root.AddCommand(policyCobraCommand())
 	root.AddCommand(apiTokenCobraCommand())
+	root.AddCommand(recipeCobraCommand())
 
 	root.AddCommand(authLoginCommand())
 	root.AddCommand(authCobraCommand())

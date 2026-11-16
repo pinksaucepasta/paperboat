@@ -37,22 +37,22 @@ func (e *envHostRefreshFailure) recovery() string {
 	}
 	if rejected, ok := environmentAPIErrorForRecovery(e.cause); ok {
 		if rejected.Code == "team_entitlement_required" {
-			return "Activate Team Billing for the selected Team source, then run `pb env vault resume`."
+			return "Activate Team Billing for the selected Team source, then run `pb env resume`."
 		}
 		if rejected.Status == 401 {
-			return "Sign in again to the same account with `pb auth login`, then run `pb env vault resume`."
+			return "Sign in again to the same account with `pb auth login`, then run `pb env resume`."
 		}
 		if rejected.Status == 403 {
-			return "Restore the required recipient and source permissions for this account, then run `pb env vault resume`. No device access was expanded."
+			return "Restore the required recipient and source permissions for this account, then run `pb env resume`. No device access was expanded."
 		}
 	}
 	switch {
 	case onlyEnvironmentFailureLeaves(e.cause, func(leaf error) bool { return errors.Is(leaf, environmentmanager.ErrVaultLocked) }), onlyEnvironmentFailureLeaves(e.cause, func(leaf error) bool { return errors.Is(leaf, environmentmanager.ErrVaultChanged) }):
-		return "Run `pb env vault unlock` to refresh authorized workspace layers."
+		return "Run `pb env unlock` to refresh authorized workspace layers."
 	case onlyEnvironmentFailureLeaves(e.cause, func(leaf error) bool { return errors.Is(leaf, environmentmanager.ErrVaultTeamGrantRequired) }):
-		return "Run `pb env grants sync`, then retry `pb env vault resume`."
+		return "Run `pb env grants sync`, then retry `pb env resume`."
 	default:
-		return "Run `pb env vault resume` to retry any staged publication exactly and refresh authorized workspace layers."
+		return "Run `pb env resume` to retry any staged publication exactly and refresh authorized workspace layers."
 	}
 }
 func refreshENVLayers(command *cobra.Command, manager environmentmanager.PasswordVault, sourceChanged bool) error {

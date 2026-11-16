@@ -241,13 +241,12 @@ func (s *Service) Authorize(ctx context.Context, account, team, kind, id, permis
 	})
 	return out, err
 }
-
-// FenceENVTx marks the team key for lazy rotation after someone left. It never touches deliveries: the
-// remaining machines keep their ENV, the leaver is simply no longer a recipient, and the next unlocked
-// write rotates the key.
 func FenceENVTx(ctx context.Context, tx *db.Tx, team string) error {
 	_, err := tx.Exec(ctx, `UPDATE environment_vault_teams SET rotation_required=true WHERE team_id=$1`, team)
-	return err
+	if err != nil {
+		return err
+	}
+	return InvalidateENVTx(ctx, tx, team)
 }
 func InvalidateENVTx(ctx context.Context, tx *db.Tx, team string) error {
 	_, err := tx.Exec(ctx, `UPDATE environment_vault_layer_fences SET generation=generation+1 WHERE owner_kind='team' AND owner_id=$1`, team)

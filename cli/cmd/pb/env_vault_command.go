@@ -40,7 +40,6 @@ var passwordVaultPrompt = func(command *cobra.Command, title string) ([]byte, er
 }
 
 func addPasswordVaultCommands(root *cobra.Command) {
-	vault := &cobra.Command{Use: "vault", Short: "Manage password-protected ENV key custody", Args: commandArgs(cobra.NoArgs)}
 	for _, action := range []string{"init", "unlock", "password", "lock", "resume", "recovery", "recover"} {
 		cmd := &cobra.Command{Use: action, Args: commandArgs(cobra.NoArgs)}
 		switch action {
@@ -184,7 +183,7 @@ func addPasswordVaultCommands(root *cobra.Command) {
 			}
 			if err != nil {
 				if recoverySaved {
-					return fmt.Errorf("%w; retain the new recovery file: activation is unconfirmed; run `pb env vault resume` to reconcile any pending publication before retrying", err)
+					return fmt.Errorf("%w; retain the new recovery file: activation is unconfirmed; run `pb env resume` to reconcile any pending publication before retrying", err)
 				}
 				return vaultCredentialCommandError(err)
 			}
@@ -226,7 +225,7 @@ func addPasswordVaultCommands(root *cobra.Command) {
 			}
 			return writeVaultResult(command, action, "ENV vault operation completed.", fields)
 		}
-		vault.AddCommand(cmd)
+		root.AddCommand(cmd)
 	}
 	remove := &cobra.Command{
 		Use:   "remove",
@@ -238,7 +237,7 @@ func addPasswordVaultCommands(root *cobra.Command) {
 	}
 	remove.Flags().String("confirm", "", "exact confirmation phrase: REMOVE LOCAL ENV <account_id>")
 	addVaultJSONFlag(remove)
-	vault.AddCommand(remove)
+	root.AddCommand(remove)
 	reset := &cobra.Command{
 		Use:   "reset",
 		Short: "Replace personal ENV keys and delete every personal value",
@@ -251,8 +250,7 @@ func addPasswordVaultCommands(root *cobra.Command) {
 	reset.Flags().String("recovery-file", "", "save a newly generated recovery code to a new absolute file path")
 	addVaultPasswordFlags(reset)
 	addVaultJSONFlag(reset)
-	vault.AddCommand(reset)
-	root.AddCommand(vault)
+	root.AddCommand(reset)
 }
 
 func runPasswordVaultReset(command *cobra.Command) error {
@@ -302,7 +300,7 @@ func runPasswordVaultReset(command *cobra.Command) error {
 	err = manager.ResetPersonal(command.Context(), password, recovery, true)
 	if err != nil {
 		if recoverySaved {
-			return fmt.Errorf("%w; retain the new recovery file: activation is unconfirmed; run `pb env vault resume` to reconcile any pending publication before retrying", err)
+			return fmt.Errorf("%w; retain the new recovery file: activation is unconfirmed; run `pb env resume` to reconcile any pending publication before retrying", err)
 		}
 		return safeEnvironmentVariableCommandError(err)
 	}
@@ -347,7 +345,7 @@ func confirmedVaultPassword(command *cobra.Command) ([]byte, error) {
 // vault deliberately does not say which check failed.
 func vaultCredentialCommandError(err error) error {
 	if onlyEnvironmentFailureLeaves(err, func(leaf error) bool { return errors.Is(leaf, environmente2ee.ErrVaultUnlock) }) {
-		return envCommandError(err, "That password or recovery code does not open this account's ENV vault; nothing was changed. Retry with the right one, or run `pb env vault recover` with your recovery code.")
+		return envCommandError(err, "That password or recovery code does not open this account's ENV vault; nothing was changed. Retry with the right one, or run `pb env recover` with your recovery code.")
 	}
 	return err
 }

@@ -17,6 +17,24 @@ machine_name=${PAPERBOAT_MACHINE_ALIAS:-${PAPERBOAT_MACHINE_NAME:-}}
 ssh_port=
 recovery_output=
 [ -z "$token" ] || pair=true
+# get.<domain>/recipe sets PAPERBOAT_RECIPE_INSTALL=1: the install pairs from PB_RECIPE and refuses at
+# once, before anything is installed, when PB_RECIPE is missing or not a recipe token (PLAN F26).
+recipe=false
+if [ "${PAPERBOAT_RECIPE_INSTALL:-}" = 1 ]; then
+  recipe=true join=false
+  if [ -z "${PB_RECIPE:-}" ]; then
+    echo "Paperboat: PB_RECIPE is not set. Copy the token from pb recipe create or the console (Settings -> Recipes) and run the installer with PB_RECIPE=<token> set." >&2
+    exit 2
+  fi
+  case $PB_RECIPE in
+    pbr_*) [ "${#PB_RECIPE}" -eq 67 ] || recipe_bad=true ;;
+    *) recipe_bad=true ;;
+  esac
+  if [ "${recipe_bad:-false}" = true ]; then
+    echo "Paperboat: PB_RECIPE is not a recipe token. A token starts with pbr_ and is 67 characters; this value is ${#PB_RECIPE}. Copy it again from where you saved it." >&2
+    exit 2
+  fi
+fi
 
 usage() { cat <<'EOF'
 Install the current Paperboat release.
@@ -59,6 +77,7 @@ while [ "$#" -gt 0 ]; do
 done
 
 [ "$setup" != true ] || [ "$pair" != true ] || { echo "pb installer: use either --setup or --pair" >&2; exit 2; }
+[ "$recipe" != true ] || { [ "$setup" != true ] && [ "$pair" != true ]; } || { echo "pb installer: a recipe install pairs from PB_RECIPE; drop --setup, --pair and enrollment tokens" >&2; exit 2; }
 if [ "$setup" = true ] || [ "$pair" = true ]; then join=false; fi
 [ -z "$token" ] || [ -z "$token_file" ] || { echo "pb installer: use only one enrollment token source" >&2; exit 2; }
 [ "$pair" != true ] || [ -n "$token" ] || [ -n "$token_file" ] || { echo "pb installer: --pair requires --enrollment-token or --enrollment-token-file" >&2; exit 2; }
@@ -232,7 +251,10 @@ case "$target" in /*) ;; *) echo "pb installer: install returned a non-absolute 
 
 set --
 [ -z "$machine_name" ] || set -- "$@" --name "$machine_name"
-if [ "$pair" = true ]; then
+if [ "$recipe" = true ]; then
+  # pb pair reads PB_RECIPE; an already paired machine is left as it is.
+  "$target" pair "$@"
+elif [ "$pair" = true ]; then
   [ -z "$token_file" ] || set -- "$@" --enrollment-token-file "$token_file"
   [ -z "$ssh_port" ] || set -- "$@" --ssh-port "$ssh_port"
   "$target" pair "$@"

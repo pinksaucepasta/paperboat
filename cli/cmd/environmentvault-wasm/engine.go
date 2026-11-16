@@ -75,6 +75,11 @@ type request struct {
 	Chain         []recordingLink   `json:"chain"`
 	Handle        string            `json:"handle"`
 	File          string            `json:"file"` // recording-segment: one segment file
+
+	// Named vaults (PLAN F26), byte fields standard base64 as the server sends them.
+	VaultWraps      []env.NamedVaultWrap `json:"vault_wraps"`
+	RecipePublicKey []byte               `json:"recipe_public_key"`
+	TokenID         string               `json:"token_id"`
 }
 type engine struct {
 	mu          sync.Mutex
@@ -155,6 +160,8 @@ func (e *engine) run(ctx context.Context, r request) (any, error) {
 		return e.reconcileScope(r)
 	case "personal-rotate", "personal-rotate-scope":
 		return e.rotatePersonal(ctx, r)
+	case "named-vault-wraps", "named-vault-recipe-wrap":
+		return e.namedVault(r)
 	case "status":
 		account := e.head.AccountID
 		if e.pendingRaw != nil {
@@ -330,7 +337,7 @@ func (e *engine) run(ctx context.Context, r request) (any, error) {
 			secret := []byte(r.Password)
 			defer clear(secret)
 			protection, err = env.ReplaceVaultPassword(ctx, e.head, protection, secret)
-			if err == nil && r.EnableRecovery { // recover: new password and new code in one vault version, as `pb env vault recover`
+			if err == nil && r.EnableRecovery { // recover: new password and new code in one vault version, as `pb env recover`
 				code := []byte(r.Code)
 				defer clear(code)
 				protection, err = env.ReplaceVaultRecovery(ctx, e.head, protection, code)

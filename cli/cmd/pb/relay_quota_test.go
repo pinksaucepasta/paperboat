@@ -64,3 +64,23 @@ func TestAPITokenScopeRefusalSaysTheTokenDoesNotCoverIt(t *testing.T) {
 		t.Fatalf("a direct API refusal keeps its code: %#v", encoded)
 	}
 }
+
+// F26: a machine outside a recipe's reach is a refusal with its own message and code.
+func TestRecipeReachRefusalSaysTheRecipeDoesNotReachIt(t *testing.T) {
+	message := api.PublicMessage(localapi.RecipeReachCode)
+	refusal := &localapi.RemoteError{StatusCode: http.StatusForbidden, Code: localapi.RecipeReachCode, Message: message}
+	err := fmt.Errorf("open exec stream: %w", refusal)
+	if got := commandFailureMessage(err, classifyCommandFailure(err)); got != message || !strings.Contains(got, "[[reach]]") {
+		t.Fatalf("message = %q", got)
+	}
+	if retryableInitialConnectFailure(err) {
+		t.Fatal("a reach refusal must not be retried")
+	}
+	if encoded := classifyCLIJSONError(err); encoded.Code != localapi.RecipeReachCode || encoded.Retryable || encoded.StateChanged != false {
+		t.Fatalf("json = %#v", encoded)
+	}
+	direct := &api.APIError{Status: http.StatusForbidden, Code: localapi.RecipeReachCode}
+	if encoded := classifyCLIJSONError(direct); encoded.Code != localapi.RecipeReachCode {
+		t.Fatalf("a direct API refusal keeps its code: %#v", encoded)
+	}
+}

@@ -644,7 +644,7 @@ func TestBrowserScopeCandidateRetainsCurrentWriterAcrossCustodyAdvance(t *testin
 }
 
 // A vault made natively with a recovery code recovers in the browser engine (password and code replaced in
-// one version, as `pb env vault recover`) and the result opens natively; replaced secrets stop working and
+// one version, as `pb env recover`) and the result opens natively; replaced secrets stop working and
 // turning recovery off leaves no code that opens the vault.
 func TestBrowserRecoveryInteroperatesWithNativeVault(t *testing.T) {
 	ctx := context.Background()

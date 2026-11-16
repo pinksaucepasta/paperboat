@@ -299,13 +299,16 @@ func TestPostgresVaultScopesTeamRotationAndReconciliation(t *testing.T) {
 	}
 	scopeRaw = memberScope
 	granted.Generation = writable.Generation
+	if err := store.InTx(ctx, func(ctx context.Context, tx *db.Tx) error { return db.FenceRemovedMachineVaultTx(ctx, tx, member, "") }); err != nil {
+		t.Fatal(err)
+	}
 	memberInventory, err := service.GetVaultPersonalScopes(ctx, member)
 	if err != nil || memberInventory.RotationRequired {
 		t.Fatal("machine removal required personal key rotation", err)
 	}
 	fencedTeam, err := service.GetVaultTeam(ctx, owner, team)
-	if err != nil || fencedTeam.RotationRequired || fencedTeam.Generation != granted.Generation {
-		t.Fatal("machine removal must leave ready team keys and delivery authority untouched", err)
+	if err != nil || fencedTeam.RotationRequired || fencedTeam.Generation != granted.Generation+1 {
+		t.Fatal("machine removal must preserve ready team keys and advance delivery authority", err)
 	}
 	removedTeam, err := authority.Mutate(ctx, owner, team, teams.MutationRequest{OperationID: "remove_before_rekey_" + suffix, ExpectedGeneration: fencedTeam.Generation, Action: "remove", AccountID: member})
 	if err != nil {

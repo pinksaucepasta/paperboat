@@ -52,7 +52,7 @@ func TestVaultJSONInitUsesPasswordStdinWithoutPromptOrSecretOutput(t *testing.T)
 	fixture := newCommandVaultFixture(t)
 	installPasswordVaultCommandDependencies(t, fixture.manager, map[string][][]byte{})
 	password := []byte("json stdin password")
-	stdout, stderr, err := executePasswordVaultCommand(t, "vault", "init", "--json", "--password-stdin")
+	stdout, stderr, err := executePasswordVaultCommand(t, "init", "--json", "--password-stdin")
 	if err == nil {
 		t.Fatal("missing stdin password unexpectedly succeeded")
 	}
@@ -64,7 +64,7 @@ func TestVaultJSONInitUsesPasswordStdinWithoutPromptOrSecretOutput(t *testing.T)
 	}
 
 	root := environmentVariablesCobraCommand()
-	root.SetArgs([]string{"vault", "init", "--json", "--password-stdin"})
+	root.SetArgs([]string{"init", "--json", "--password-stdin"})
 	root.SetIn(bytes.NewReader(password))
 	var output, errorOutput bytes.Buffer
 	root.SetOut(&output)
@@ -83,14 +83,14 @@ func TestVaultPasswordFilePreservesRawBytesAcrossInitAndUnlock(t *testing.T) {
 	installPasswordVaultCommandDependencies(t, fixture.manager, map[string][][]byte{})
 	password := []byte("  raw password with newline\n")
 	path := writeVaultInputFile(t, password, 0o600)
-	stdout, stderr, err := executePasswordVaultCommand(t, "vault", "init", "--json", "--password-file", path)
+	stdout, stderr, err := executePasswordVaultCommand(t, "init", "--json", "--password-file", path)
 	if err != nil || stderr != "" {
 		t.Fatalf("init stdout=%q stderr=%q err=%v", stdout, stderr, err)
 	}
-	if _, _, err := executePasswordVaultCommand(t, "vault", "lock", "--json"); err != nil {
+	if _, _, err := executePasswordVaultCommand(t, "lock", "--json"); err != nil {
 		t.Fatal(err)
 	}
-	stdout, stderr, err = executePasswordVaultCommand(t, "vault", "unlock", "--json", "--password-file", path)
+	stdout, stderr, err = executePasswordVaultCommand(t, "unlock", "--json", "--password-file", path)
 	if err != nil || stderr != "" {
 		t.Fatalf("unlock stdout=%q stderr=%q err=%v", stdout, stderr, err)
 	}
@@ -108,7 +108,7 @@ func TestVaultJSONRejectsMissingPasswordBeforeManagerLookup(t *testing.T) {
 		return environmentmanager.PasswordVault{}, errors.New("manager must not be called")
 	}
 	defer func() { passwordVaultForCommand = previous }()
-	_, _, err := executePasswordVaultCommand(t, "vault", "init", "--json")
+	_, _, err := executePasswordVaultCommand(t, "init", "--json")
 	if err == nil || !strings.Contains(err.Error(), "--json requires --password-file or --password-stdin") {
 		t.Fatalf("missing password error=%v", err)
 	}
@@ -127,23 +127,23 @@ func TestVaultPasswordInputRejectsUnsafeFilesAndConflictingSources(t *testing.T)
 	}
 	defer func() { passwordVaultForCommand = previousManager }()
 	unsafe := writeVaultInputFile(t, []byte("password"), 0o644)
-	_, _, err := executePasswordVaultCommand(t, "vault", "init", "--json", "--password-file", unsafe)
+	_, _, err := executePasswordVaultCommand(t, "init", "--json", "--password-file", unsafe)
 	if err == nil || !strings.Contains(err.Error(), "owner-only") || called {
 		t.Fatalf("unsafe password file err=%v manager_called=%t", err, called)
 	}
 	missing := filepath.Join(t.TempDir(), "missing-password")
-	_, _, err = executePasswordVaultCommand(t, "vault", "init", "--json", "--password-file", missing)
+	_, _, err = executePasswordVaultCommand(t, "init", "--json", "--password-file", missing)
 	if err == nil || !errors.Is(err, os.ErrNotExist) || strings.Contains(err.Error(), missing) || called {
 		t.Fatalf("missing password file lost its private cause or exposed its path: err=%v manager_called=%t", err, called)
 	}
 	called = false
 	tooLarge := writeVaultInputFile(t, bytes.Repeat([]byte{'x'}, vaultSecretMaximumBytes+1), 0o600)
-	_, _, err = executePasswordVaultCommand(t, "vault", "init", "--json", "--password-file", tooLarge)
+	_, _, err = executePasswordVaultCommand(t, "init", "--json", "--password-file", tooLarge)
 	if err == nil || !strings.Contains(err.Error(), "1024") || called {
 		t.Fatalf("oversized password file err=%v manager_called=%t", err, called)
 	}
 	called = false
-	_, _, err = executePasswordVaultCommand(t, "vault", "init", "--json", "--password-file", unsafe, "--password-stdin")
+	_, _, err = executePasswordVaultCommand(t, "init", "--json", "--password-file", unsafe, "--password-stdin")
 	if err == nil || !strings.Contains(err.Error(), "choose --password-file or --password-stdin") || called {
 		t.Fatalf("conflicting password sources err=%v manager_called=%t", err, called)
 	}
@@ -152,7 +152,7 @@ func TestVaultPasswordInputRejectsUnsafeFilesAndConflictingSources(t *testing.T)
 func TestVaultRecoveryInputReadFailureRetainsCauseWithoutPath(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "missing-recovery-code")
 	replacement := filepath.Join(t.TempDir(), "replacement-code")
-	_, _, err := executePasswordVaultCommand(t, "vault", "recover", "--json", "--recovery-input-file", missing, "--password-stdin", "--recovery-file", replacement)
+	_, _, err := executePasswordVaultCommand(t, "recover", "--json", "--recovery-input-file", missing, "--password-stdin", "--recovery-file", replacement)
 	if err == nil || !errors.Is(err, os.ErrNotExist) || strings.Contains(err.Error(), missing) {
 		t.Fatalf("missing recovery input lost its private cause or exposed its path: %v", err)
 	}
@@ -184,7 +184,7 @@ func TestVaultJSONRecoverReadsSeparateRecoveryInputFile(t *testing.T) {
 	defer clear(newPassword)
 	replacementFile := filepath.Join(t.TempDir(), "replacement-code")
 	root := environmentVariablesCobraCommand()
-	root.SetArgs([]string{"vault", "recover", "--json", "--recovery-input-file", recoveryInput, "--password-stdin", "--recovery-file", replacementFile})
+	root.SetArgs([]string{"recover", "--json", "--recovery-input-file", recoveryInput, "--password-stdin", "--recovery-file", replacementFile})
 	root.SetIn(bytes.NewReader(newPassword))
 	var output, errorOutput bytes.Buffer
 	root.SetOut(&output)
@@ -213,7 +213,7 @@ func TestVaultPasswordSourcesTrimOneTrailingNewlineOnEveryCommand(t *testing.T) 
 	fixture := newCommandVaultFixture(t)
 	installPasswordVaultCommandDependencies(t, fixture.manager, map[string][][]byte{})
 	root := environmentVariablesCobraCommand()
-	root.SetArgs([]string{"vault", "init", "--json", "--password-stdin"})
+	root.SetArgs([]string{"init", "--json", "--password-stdin"})
 	root.SetIn(strings.NewReader("trim me\r\n"))
 	var output, errorOutput bytes.Buffer
 	root.SetOut(&output)
@@ -221,17 +221,17 @@ func TestVaultPasswordSourcesTrimOneTrailingNewlineOnEveryCommand(t *testing.T) 
 	if err := root.Execute(); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := executePasswordVaultCommand(t, "vault", "lock", "--json"); err != nil {
+	if _, _, err := executePasswordVaultCommand(t, "lock", "--json"); err != nil {
 		t.Fatal(err)
 	}
 	for _, content := range []string{"trim me", "trim me\n", "trim me\r\n"} {
 		path := writeVaultInputFile(t, []byte(content), 0o600)
-		if _, _, err := executePasswordVaultCommand(t, "vault", "unlock", "--json", "--password-file", path); err != nil {
+		if _, _, err := executePasswordVaultCommand(t, "unlock", "--json", "--password-file", path); err != nil {
 			t.Fatalf("file %q did not unlock a vault initialised from stdin %q: %v", content, "trim me\r\n", err)
 		}
 	}
 	extra := writeVaultInputFile(t, []byte("trim me\n\n"), 0o600)
-	if _, _, err := executePasswordVaultCommand(t, "vault", "unlock", "--json", "--password-file", extra); err == nil {
+	if _, _, err := executePasswordVaultCommand(t, "unlock", "--json", "--password-file", extra); err == nil {
 		t.Fatal("a second trailing newline was also removed")
 	}
 }

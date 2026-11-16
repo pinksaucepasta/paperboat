@@ -22,7 +22,7 @@ import (
 
 const recipeColumns = `r.id, r.token_id, r.account_id, coalesce(r.team_id,''), r.name, r.revision, r.source, r.source_format,
  r.canonical, 'user:'||u.primary_email, r.created_at, r.updated_at, r.expires_at, r.last_used_at, r.rotated_at, r.revoked_at,
- coalesce(r.max_machines,0), (SELECT count(*) FROM recipe_machines rm JOIN live_user_machines m ON m.id=rm.machine_id WHERE rm.recipe_id=r.id)`
+ coalesce(r.max_machines,0), coalesce(r.public_key,''::bytea), (SELECT count(*) FROM recipe_machines rm JOIN live_user_machines m ON m.id=rm.machine_id WHERE rm.recipe_id=r.id)`
 
 // Create stores a new recipe for actor in ws. A repeated create with the same token id and auth
 // (a client that lost the response) returns the recipe it made.
@@ -59,10 +59,10 @@ func (s *Service) Create(ctx context.Context, actor string, ws workspace.Scope, 
 		}
 		now := s.now().UTC()
 		if _, err := tx.Exec(ctx, `INSERT INTO recipes(id,token_id,account_id,team_id,name,source,source_format,canonical,auth_hash,
-		 max_machines,remove_after_offline,machine_lifetime,created_at,updated_at,expires_at)
-		 VALUES($1,$2,$3,nullif($4,''),$5,$6,$7,$8,$9,nullif($10,0),$11,$12,$13,$13,$14)`,
+		 max_machines,remove_after_offline,machine_lifetime,created_at,updated_at,expires_at,public_key)
+		 VALUES($1,$2,$3,nullif($4,''),$5,$6,$7,$8,$9,nullif($10,0),$11,$12,$13,$13,$14,$15)`,
 			id, in.TokenID, actor, ws.TeamID, in.Name, in.Source, in.Format, r.Canonical(), recipe.AuthHash(in.Auth),
-			r.MaxMachines, interval(r.OfflineAfter()), interval(r.Lifetime()), now, now.Add(r.ExpiresIn())); err != nil {
+			r.MaxMachines, interval(r.OfflineAfter()), interval(r.Lifetime()), now, now.Add(r.ExpiresIn()), in.PublicKey); err != nil {
 			return mapInsertError(err)
 		}
 		if err := insertReachTx(ctx, tx, id, rows); err != nil {
@@ -349,7 +349,7 @@ func scanRecipe(row pgx.Row) (Recipe, error) {
 	var canonical []byte
 	var lastUsed, rotated, revoked sql.NullTime
 	if err := row.Scan(&r.ID, &r.TokenID, &r.AccountID, &teamID, &r.Name, &r.Revision, &r.Source, &r.Format, &canonical, &r.CreatedBy,
-		&r.CreatedAt, &r.UpdatedAt, &r.ExpiresAt, &lastUsed, &rotated, &revoked, &r.MaxMachines, &r.Machines); err != nil {
+		&r.CreatedAt, &r.UpdatedAt, &r.ExpiresAt, &lastUsed, &rotated, &revoked, &r.MaxMachines, &r.PublicKey, &r.Machines); err != nil {
 		return Recipe{}, err
 	}
 	r.Workspace = scopeFor(teamID)

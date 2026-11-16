@@ -673,3 +673,11 @@ func (v PasswordVault) RecordingKey(ctx context.Context, teamID string, have int
 	})
 	return key, err
 }
+
+// WithUnlockedKeys gives fn this account's unlocked ENV keys (named vaults wrap their keys with
+// them); it fails with ErrVaultLocked while the vault is locked on this computer.
+func (v PasswordVault) WithUnlockedKeys(ctx context.Context, fn func(*environmente2ee.VaultKeys) error) error {
+	return v.withVaultKeys(ctx, func(_ *config.PasswordVaultRecord, keys *environmente2ee.VaultKeys, _ VaultDataClient) error {
+		return fn(keys)
+	})
+}

@@ -17,7 +17,7 @@ func TestExecStartedEventShowsOnePendingEnvironmentLine(t *testing.T) {
 	if err := writeExecEvent(ctx, nil, event, false, false); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Count(errOut.String(), "\n") != 1 || !strings.Contains(errOut.String(), "pb env vault unlock") || out.Len() != 0 {
+	if strings.Count(errOut.String(), "\n") != 1 || !strings.Contains(errOut.String(), "pb env unlock") || out.Len() != 0 {
 		t.Fatalf("stderr=%q stdout=%q", errOut.String(), out.String())
 	}
 	out.Reset()
@@ -37,7 +37,7 @@ func TestExecStartedEventShowsOnePendingEnvironmentLine(t *testing.T) {
 func TestUndeliverableEnvironmentLaunchPointsAtHostShowNotVaultUnlock(t *testing.T) {
 	pending := launchWarningLine([]string{"environment_pending"})
 	failed := launchWarningLine([]string{"environment_undeliverable"})
-	if !strings.Contains(pending, "pending") || !strings.Contains(pending, "pb env vault unlock") {
+	if !strings.Contains(pending, "pending") || !strings.Contains(pending, "pb env unlock") {
 		t.Fatalf("pending line=%q", pending)
 	}
 	if !strings.Contains(failed, "failed") || !strings.Contains(failed, "pb env host show") || strings.Contains(failed, "pending") {

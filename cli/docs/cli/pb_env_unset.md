@@ -24,6 +24,7 @@ pb env unset <name> [flags]
       --json             print redacted JSON metadata
       --machine string   Private device override in the active workspace; omitted uses your global values
       --team string      team scope; cannot be combined with --machine
+      --vault string     remove the name from this named vault instead of your ENV
 ```
 
 ### Options inherited from parent commands
