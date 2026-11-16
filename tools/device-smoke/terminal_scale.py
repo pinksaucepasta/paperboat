@@ -250,6 +250,13 @@ def main():
                 timeline.append(round(owner.bytes / 1e6, 1))
         flood = {'owner_MB_cumulative_per_second': timeline[::5], 'finished': len(done_at), 'of': len(survivors),
                  'seconds_to_finish': quantiles(list(done_at.values()))}
+        stuck = {}
+        for i, t in enumerate(survivors):  # a viewer that never got the end marker: alive? how much? pb's last line?
+            if i not in done_at:
+                line = re.sub(rb'\x1b\[[0-9;?]*[a-zA-Z]|\x1b\][^\x07\x1b]*(\x07|\x1b\\)', b'', t.tail[-400:]).decode(errors='replace').strip().splitlines()
+                key = '%s MB=%d last=%s' % ('alive' if t.alive else 'exited', t.bytes >> 20, re.sub(r'[A-Za-z0-9+/=]{20,}', '<base64>', line[-1])[:100] if line else '(silent)')
+                stuck[key] = stuck.get(key, 0) + 1
+        flood['unfinished'] = stuck
         for t in survivors:
             t.tail = b''
         got, lost = echo_round(survivors, timeout=60)
