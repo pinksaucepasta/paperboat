@@ -22,6 +22,7 @@ const long = { timeout: Number(process.env.LONG_MS ?? 90000) } // vault cryptogr
 const seen = []
 const secrets = []
 const people = []
+const refused = [] // every 4xx/5xx answer a page got, printed when a step fails
 
 const browser = await chromium.launch({ executablePath })
 
@@ -31,6 +32,9 @@ async function person(state, workspace) {
   const page = await context.newPage()
   people.push(page)
   page.on("request", (request) => seen.push(`${request.url()}\n${request.postData() ?? ""}`))
+  page.on("response", (response) => {
+    if (response.status() >= 400) refused.push(`${new Date().toISOString().slice(11, 19)} ${response.status()} ${new URL(response.url()).pathname}`)
+  })
   const button = (name) => page.getByRole("button", { name, exact: true })
   return {
     context,
@@ -71,6 +75,7 @@ async function step(name, run) {
     pass(name, true, `${Math.round((Date.now() - started) / 1000)} s${typeof detail === "string" && detail ? `, ${detail}` : ""}`)
   } catch (error) {
     if (process.env.SHOT_DIR) await Promise.all(people.map((page, i) => page.screenshot({ path: `${process.env.SHOT_DIR}/fail-${i}.png`, fullPage: true }).catch(() => {})))
+    if (refused.length) console.log(`  answers >= 400 so far: ${refused.slice(-8).join(" | ")}`)
     pass(name, false, String(error.message ?? error).split("\n")[0].slice(0, 160))
     throw error
   }

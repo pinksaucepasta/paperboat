@@ -7,6 +7,7 @@ import {
   currentVault,
   operationId,
   readRecords,
+  readScope,
   readVault,
   type EnvRecord,
   type EnvScope,
@@ -226,10 +227,13 @@ export async function rotatePersonalKey(): Promise<void> {
     for (const head of inventory.scopes) {
       const scope: EnvScope = { kind: "personal", owner: me.id, machine: head.machine_id, workspace: head.workspace_id }
       const { records, sequence } = await readRecords(scope)
+      // The inventory's heads carry no envelope; the engine opens the scope's own anchor.
+      const anchor = await readScope(scope)
+      if (!anchor) throw new Error("A scope of your vault could not be read.")
       const next = await vaultCrypto<{ envelope: string; document_id: string; records: unknown }>({
         action: "personal-rotate-scope",
         vault,
-        scope: head,
+        scope: anchor,
         records,
         record_sequence: sequence,
       })

@@ -101,7 +101,7 @@ function sameScope(
   )
 }
 
-async function readScope(scope: EnvScope, signal?: AbortSignal): Promise<Scope | null> {
+export async function readScope(scope: EnvScope, signal?: AbortSignal): Promise<Scope | null> {
   try {
     const anchor = await api<Scope>(`${scopePath(scope)}?${query(scope)}`, { signal })
     if (!sameScope(scope, anchor)) throw new Error("The encrypted scope did not match the one requested.")
