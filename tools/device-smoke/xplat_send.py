@@ -357,6 +357,8 @@ def folder_send_and_verify(src, dst, root, link, before, restart=False):
         done = outcome.get('done')
     else:
         done = src.pb('send', path, '--to', dst.alias, timeout=900)
+    if restart:
+        assert outcome['restart'].rc == 0, 'the receiver daemon restart failed (rc=%s), so no resume was exercised: %s' % (outcome['restart'].rc, (outcome['restart'].text + outcome['restart'].errtext)[-300:])
     assert done is not None and done.rc == 0, 'the folder was not delivered: ' + ((done.text + done.errtext)[-300:] if done else 'hung')
     message = done.text + done.errtext
     assert 'Folder xplat-tree:' in message and 'delivered to' in message, 'the send did not report the folder: ' + message[-300:]

@@ -1,0 +1,29 @@
+{
+ "check": "xplat-send",
+ "devices": [
+  "L",
+  "W"
+ ],
+ "results": [
+  {
+   "id": "X-15:refuse:L>W",
+   "status": "PASS",
+   "detail": "a symbolic link is refused with the path and what to do"
+  },
+  {
+   "id": "F6-07:folderbig:L>W",
+   "status": "PASS",
+   "detail": "7 files and 7 folders (empty ones kept) arrive with equal sha256, link skipped and listed across a receiver daemon restart (rc=0)"
+  },
+  {
+   "id": "X-15:refuse:W>L",
+   "status": "PASS",
+   "detail": "a symbolic link is refused with the path and what to do"
+  },
+  {
+   "id": "F6-07:folderbig:W>L",
+   "status": "PASS",
+   "detail": "7 files and 7 folders (empty ones kept) arrive with equal sha256, link skipped and listed across a receiver daemon restart (rc=0)"
+  }
+ ]
+}

@@ -1,0 +1,19 @@
+{
+ "check": "xplat-send",
+ "devices": [
+  "L",
+  "W"
+ ],
+ "results": [
+  {
+   "id": "F6-07:folder:L>W",
+   "status": "PASS",
+   "detail": "6 files and 7 folders (empty ones kept) arrive with equal sha256, link skipped and listed; folder with CON.txt refused naming the path"
+  },
+  {
+   "id": "F6-07:folder:W>L",
+   "status": "PASS",
+   "detail": "6 files and 7 folders (empty ones kept) arrive with equal sha256, link skipped and listed"
+  }
+ ]
+}
