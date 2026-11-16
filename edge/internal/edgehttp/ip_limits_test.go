@@ -133,3 +133,28 @@ func TestPolicyRefusesAnAddressOverItsLimit(t *testing.T) {
 		t.Fatalf("limited request: ok=%v %d %q %q", ok, second.Code, second.Header().Get("X-Paperboat-Error"), second.Header().Get("Retry-After"))
 	}
 }
+
+// X-43 saw 12-50% of 250 back-to-back new connections from one address reset: that is this limit (20 TLS handshakes/s,
+// burst 50), not a preview fault. A browser opening 6 connections, even on several reloads, stays inside the burst.
+func TestHandshakeRateAdmitsABrowserAndStopsAFlood(t *testing.T) {
+	now := time.Unix(1_000_000, 0)
+	l := newAddressLimiter(addressHandshakeRate, addressRate{}, 0)
+	l.now = func() time.Time { return now }
+	for i := 0; i < 36; i++ { // six reloads of six parallel connections
+		if _, ok := l.admit("192.0.2.9", false); !ok {
+			t.Fatalf("browser handshake %d refused", i)
+		}
+	}
+	l = newAddressLimiter(addressHandshakeRate, addressRate{}, 0)
+	l.now = func() time.Time { return now }
+	admitted := 0
+	for i := 0; i < 250; i++ { // 250 handshakes over 4 s
+		now = now.Add(16 * time.Millisecond)
+		if _, ok := l.admit("192.0.2.9", false); ok {
+			admitted++
+		}
+	}
+	if admitted < 100 || admitted > 140 {
+		t.Fatalf("flood admitted %d of 250, want about burst 50 + 20/s*4s", admitted)
+	}
+}
