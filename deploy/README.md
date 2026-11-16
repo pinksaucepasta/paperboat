@@ -238,12 +238,14 @@ line (rows, commit, image tag) and keep the previous image tag until the smoke r
 `deploy/gated-deploy.py` on oracle, which holds the deploy lock from before the switch until the verdict:
 
 ```sh
-python3 deploy/gated-deploy.py --what 'W4 server 2026.11.11.10 + oracle edge' \
+python3 deploy/gated-deploy.py --what 'W4 server 2026.11.11.10 + oracle edge' --e2e-commit <the build's commit> \
   --server-host root@coolify --edge local --edge ubuntu@anvit \
   --deploy "PROBE='...' SQL='...' deploy/check-edges.sh --deploy '<the step 3 or 4 command>' local=<ip> anvit=<ip>"
 ```
 
-It refuses (exit 3) when the production canary is red before the deploy; `--force '<reason>'` overrides
+It first runs the core end-to-end check (TestE2ECore: real server, edge and relay, personal and team machines)
+on `--e2e-commit` with `tools/ci-test.sh e2e` on a GitHub runner (about 30 min) and refuses (exit 6) unless it
+passes, before staging, the lock or prod are touched. It refuses (exit 3) when the production canary is red before the deploy; `--force '<reason>'` overrides
 and writes the reason into the lock. It notes the serving server image and both edges' relay/edge images,
 runs the command (check-edges.sh keeps the 5xx, preview and offline checks), then triggers canary runs
 until one that started after the switch passes, for up to `--wait` (300) seconds. A failed command or no
