@@ -252,7 +252,9 @@ func runSendCommand(cobraCommand *cobra.Command, paths []string) error {
 				return grantErr
 			}
 			nativeClient, nativeErr := filetransfer.NewRenewableNativeClient(initialGrant, func(renewCtx context.Context) (filetransfer.NativeGrant, error) {
-				fresh, renewErr := client.MachineFileTransferDescriptorForRequest(renewCtx, destination.ID, sourceMachineID, sessionID, descriptorRequestID, descriptorDigest, declared)
+				fresh, renewErr := retryRenewalOnLimit(renewCtx, func() (api.FileTransfer, error) {
+					return client.MachineFileTransferDescriptorForRequest(renewCtx, destination.ID, sourceMachineID, sessionID, descriptorRequestID, descriptorDigest, declared)
+				})
 				if renewErr != nil {
 					return filetransfer.NativeGrant{}, renewErr
 				}
