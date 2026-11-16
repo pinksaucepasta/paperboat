@@ -14,6 +14,10 @@ type Item struct {
 	Role string `json:"role"`
 	// ApproveNewMachines is set for a team that asks an owner or admin to accept machines members add.
 	ApproveNewMachines bool `json:"approve_new_machines,omitempty"`
+	// SSORequired is set for a team whose members need a recent SSO sign-in; SSOSignedIn tells the viewer whether
+	// theirs counts (the console labels the team "Needs SSO sign-in" while it does not).
+	SSORequired bool  `json:"sso_required,omitempty"`
+	SSOSignedIn *bool `json:"sso_signed_in,omitempty"`
 }
 
 type Service struct{ db *db.DB }
@@ -41,7 +45,8 @@ func (s *Service) List(ctx context.Context, account string) ([]Item, error) {
 		if !active {
 			return ErrForbidden
 		}
-		rows, err := tx.Query(ctx, `SELECT t.team_id,coalesce(t.display_name,t.team_id),CASE WHEN t.owner_account=$1 THEN 'owner' ELSE m.role END,t.approve_new_machines
+		rows, err := tx.Query(ctx, `SELECT t.team_id,coalesce(t.display_name,t.team_id),CASE WHEN t.owner_account=$1 THEN 'owner' ELSE m.role END,t.approve_new_machines,
+			t.sso_required,CASE WHEN t.sso_required THEN team_member_sso_ok(t.team_id,$1) END
 			FROM teams t JOIN team_members m USING(team_id)
 			WHERE m.account_id=$1 AND m.active AND t.deleted_at IS NULL AND NOT t.suspended
 			ORDER BY t.team_id LIMIT $2`, account, teams.MaximumMembers+1)
@@ -50,12 +55,13 @@ func (s *Service) List(ctx context.Context, account string) ([]Item, error) {
 		}
 		for rows.Next() {
 			var teamID, name, role string
-			var approve bool
-			if err := rows.Scan(&teamID, &name, &role, &approve); err != nil {
+			var approve, ssoRequired bool
+			var ssoSignedIn *bool
+			if err := rows.Scan(&teamID, &name, &role, &approve, &ssoRequired, &ssoSignedIn); err != nil {
 				rows.Close()
 				return err
 			}
-			out = append(out, Item{ID: teamID, Name: name, Kind: "team", Role: role, ApproveNewMachines: approve})
+			out = append(out, Item{ID: teamID, Name: name, Kind: "team", Role: role, ApproveNewMachines: approve, SSORequired: ssoRequired, SSOSignedIn: ssoSignedIn})
 		}
 		if err := rows.Err(); err != nil {
 			rows.Close()

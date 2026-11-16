@@ -5,11 +5,11 @@ import (
 	"testing"
 )
 
-// Released CLIs decode GET /v1/workspaces strictly: a field they do not know makes every daemon's
-// inventory refresh fail ("Local machine access is unavailable"). Adding a field here means the
-// client accepts it first and is released, so this list changes only with that order.
-func TestWorkspaceItemCarriesOnlyFieldsReleasedClientsDecode(t *testing.T) {
-	raw, err := json.Marshal(Item{ID: "t", Name: "t", Kind: "team", Role: "owner", ApproveNewMachines: true})
+// The fields of GET /v1/workspaces: this list is the answer's contract (server/docs/openapi.json Workspace) and
+// changes with it. Clients (shared/client/api, the console) ignore fields they do not know.
+func TestWorkspaceItemCarriesOnlyDocumentedFields(t *testing.T) {
+	signedIn := false
+	raw, err := json.Marshal(Item{ID: "t", Name: "t", Kind: "team", Role: "owner", ApproveNewMachines: true, SSORequired: true, SSOSignedIn: &signedIn})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -17,10 +17,10 @@ func TestWorkspaceItemCarriesOnlyFieldsReleasedClientsDecode(t *testing.T) {
 	if err = json.Unmarshal(raw, &fields); err != nil {
 		t.Fatal(err)
 	}
-	allowed := map[string]bool{"id": true, "name": true, "kind": true, "role": true, "approve_new_machines": true}
+	allowed := map[string]bool{"id": true, "name": true, "kind": true, "role": true, "approve_new_machines": true, "sso_required": true, "sso_signed_in": true}
 	for name := range fields {
 		if !allowed[name] {
-			t.Errorf("workspace item field %q is unknown to released clients; ship the client first", name)
+			t.Errorf("workspace item field %q is not documented in openapi.json Workspace", name)
 		}
 	}
 }
