@@ -1,0 +1,12 @@
+{"row": "PR-06", "build": "dev-03c7d234f (main 03c7d234f) on both ends; prod server .30 and prod edges (two, 0.8 ms from the test host)",
+ "method": "two throwaway containers on anvit (arm64), tc netem delay N ms limit 100000 on the origin container's egress, carrier restarted after the delay, python origin 100-200 MiB, second machine downloads the tunnel URL with curl through pb exec; the visitor reached whichever edge DNS returned",
+ "control_raw_tcp_between_containers": {"rtt_0_ms_mbit_s": 11781, "rtt_50_ms_mbit_s": 540},
+ "tunnel_download_mbit_s": {
+  "rtt_0":  {"anvit_load_20_50": [128.5, 74.7, 140.3], "anvit_load_17": [142.8, 173.3, 143.6, 149.0]},
+  "rtt_10": {"anvit_load_8": [156.4, 103.3, 144.4, 103.4]},
+  "rtt_25": {"anvit_load_9": [134.0, 187.5, 141.0, 175.8]},
+  "rtt_40": {"anvit_load_6": {"edge_152.67.0.60": [28.1, 36.7], "edge_140.245.11.41": [95.2, 98.5]}},
+  "rtt_50": {"anvit_load_20_50": [23.7, 24.4, 24.5, 24.5, 28.0, 29.4], "anvit_load_4": {"edge_152.67.0.60": [80.7, 88.6], "edge_140.245.11.41": [168.4, 132.5]}}},
+ "http_version": "HTTP/1.1 and HTTP/2 visitors give the same numbers at 50 ms, so the visitor leg is not the limit",
+ "finding": "Not reached: the 50 ms median is 24.5 (loaded host) to 88 (idle host), budget 150. 25 ms gives 134-187, so the stream window does grow (a 256 KiB window would cap 25 ms at 84); the collapse at 40-50 ms is erratic and edge dependent (152.67.0.60 is the low one), which points at loss or CPU on the edge host (UDP receive buffer is quic-go's 7 MiB request against the stock 208 KiB rmem_max, nothing in deploy/ raises it), not at the window. The carrier is QUIC (ss shows UDP only), so there is no yamux layer on this path.",
+ "stopped": "the test account's free bandwidth allowance ran out after ~4 GB (HTTP 429 bandwidth_quota_exhausted, retry-after 14 days); a rerun needs an account with a paid or unlimited allowance. Machines revoked by exact id, containers removed."}
