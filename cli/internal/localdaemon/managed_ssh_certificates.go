@@ -12,7 +12,7 @@ import (
 // renewManagedSSHCertificates keeps the certificates of machines a connection used in the last day under an hour
 // old (valid for 11 of their 12 hours), so a control-plane outage leaves new logins working for most of the
 // certificate validity (F5-08) and connections never wait on a renewal. A failure is retried at the next refresh.
-func renewManagedSSHCertificates(ctx context.Context, client *api.Client, home, publicKey string, machines []api.UserMachine) {
+func renewManagedSSHCertificates(ctx context.Context, client *api.Client, home, publicKey, session string, machines []api.UserMachine) {
 	used := managedssh.RecentlyUsedCertificates(home, time.Now().Add(-24*time.Hour))
 	for _, machine := range machines {
 		if machine.SSH == nil || machine.SSH.OSUser == "" || !slices.Contains(used, machine.Alias) {
@@ -23,18 +23,18 @@ func renewManagedSSHCertificates(ctx context.Context, client *api.Client, home, 
 			return issued.Certificate, err
 		}
 		issueCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-		_, _ = managedssh.EnsureCertificate(issueCtx, managedssh.CertificateTarget{Home: home, Alias: machine.Alias, OSUser: machine.SSH.OSUser}, []byte(publicKey), issue, time.Now(), 11*time.Hour)
+		_, _ = managedssh.EnsureCertificate(issueCtx, managedssh.CertificateTarget{Home: home, Alias: machine.Alias, OSUser: machine.SSH.OSUser, Session: session}, []byte(publicKey), issue, time.Now(), 11*time.Hour)
 		cancel()
 	}
 }
 
 // renewingManagedSSHInstall is a refresh that also renews the certificates of recently used machines.
-func renewingManagedSSHInstall(install func(context.Context, []api.UserMachine) error, client *api.Client, home, publicKey string) func(context.Context, []api.UserMachine) error {
+func renewingManagedSSHInstall(install func(context.Context, []api.UserMachine) error, client *api.Client, home, publicKey, session string) func(context.Context, []api.UserMachine) error {
 	return func(ctx context.Context, machines []api.UserMachine) error {
 		if err := install(ctx, machines); err != nil {
 			return err
 		}
-		renewManagedSSHCertificates(ctx, client, home, publicKey, machines)
+		renewManagedSSHCertificates(ctx, client, home, publicKey, session, machines)
 		return nil
 	}
 }

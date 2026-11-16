@@ -14,9 +14,10 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-// CertificateTarget names one machine's certificate on this computer.
+// CertificateTarget names one machine's certificate on this computer. Session is this computer's current CLI session:
+// a certificate issued to an earlier sign-in (its key ID names that session, now revoked) is never reused.
 type CertificateTarget struct {
-	Home, Alias, OSUser string
+	Home, Alias, OSUser, Session string
 }
 
 // EnsureCertificate returns this computer's certificate for target: the one in its file while it is valid for at
@@ -27,7 +28,7 @@ type CertificateTarget struct {
 func EnsureCertificate(ctx context.Context, target CertificateTarget, publicKey []byte, issue func(context.Context) (string, error), now time.Time, renewWithin time.Duration) ([]byte, error) {
 	path := ManagedCertificatePath(target.Home, target.Alias)
 	existing, readErr := os.ReadFile(path)
-	usable := readErr == nil && UsableCertificate(existing, publicKey, target.OSUser, now, 0)
+	usable := readErr == nil && UsableCertificate(existing, publicKey, target.OSUser, now, 0) && certificateOfSession(existing, target.Session)
 	if usable && UsableCertificate(existing, publicKey, target.OSUser, now, renewWithin) {
 		return existing, nil
 	}
@@ -39,7 +40,7 @@ func EnsureCertificate(ctx context.Context, target CertificateTarget, publicKey 
 		return nil, err
 	}
 	value := []byte(strings.TrimSpace(issued) + "\n")
-	if !UsableCertificate(value, publicKey, target.OSUser, now, 0) {
+	if !UsableCertificate(value, publicKey, target.OSUser, now, 0) || !certificateOfSession(value, target.Session) {
 		return nil, errors.New("the server's SSH certificate does not match this computer's key, user or clock")
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
@@ -57,6 +58,13 @@ func UsableCertificate(value, publicKey []byte, principal string, now time.Time,
 		return false
 	}
 	return uint64(now.Unix()) >= certificate.ValidAfter && uint64(now.Add(margin).Unix()) < certificate.ValidBefore
+}
+
+// certificateOfSession: the certificate's key ID ("paperboat:<user>:<session>:<machine>") names session.
+func certificateOfSession(value []byte, session string) bool {
+	certificate, ok := parseCertificate(value)
+	parts := strings.Split(certificate.KeyId, ":")
+	return ok && session != "" && len(parts) == 4 && parts[2] == session
 }
 
 func parseCertificate(value []byte) (*ssh.Certificate, bool) {

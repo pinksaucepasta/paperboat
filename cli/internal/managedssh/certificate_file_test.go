@@ -13,11 +13,14 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
+// testSession is the CLI session testCertificate issues to; a test signs in again by changing it.
+var testSession = "session_1"
+
 // testCertificate signs key's public part with ca for principals, valid from issued (backdated a minute, like the
 // server) for validity.
 func testCertificate(t *testing.T, ca ssh.Signer, key ssh.PublicKey, principals []string, issued time.Time, validity time.Duration) string {
 	t.Helper()
-	certificate := &ssh.Certificate{Key: key, CertType: ssh.UserCert, KeyId: "test", ValidPrincipals: principals,
+	certificate := &ssh.Certificate{Key: key, CertType: ssh.UserCert, KeyId: "paperboat:user_1:" + testSession + ":machine_1", ValidPrincipals: principals,
 		ValidAfter: uint64(issued.Add(-time.Minute).Unix()), ValidBefore: uint64(issued.Add(validity).Unix()),
 		Permissions: ssh.Permissions{Extensions: map[string]string{"permit-pty": ""}}}
 	if err := certificate.SignCert(rand.Reader, ca); err != nil {
@@ -45,7 +48,9 @@ func TestEnsureCertificateReusesUntilItsLastHourAndRidesOutAnOutage(t *testing.T
 	home := t.TempDir()
 	ca, client := testSignerKey(t), testSignerKey(t)
 	publicKey := ssh.MarshalAuthorizedKey(client.PublicKey())
-	target := CertificateTarget{Home: home, Alias: "studio", OSUser: "alice"}
+	testSession = "session_1"
+	t.Cleanup(func() { testSession = "session_1" })
+	target := CertificateTarget{Home: home, Alias: "studio", OSUser: "alice", Session: "session_1"}
 	start := time.Unix(1_800_000_000, 0)
 	const validity, renewal = 12 * time.Hour, time.Hour
 	calls := 0
@@ -83,7 +88,23 @@ func TestEnsureCertificateReusesUntilItsLastHourAndRidesOutAnOutage(t *testing.T
 	if _, err := ensure(offline, renewedAt.Add(validity+time.Second)); err == nil {
 		t.Fatal("an expired certificate was used while the control plane is unreachable")
 	}
-	wrongUser := CertificateTarget{Home: home, Alias: "other", OSUser: "bob"}
+	// A new sign-in (session_2) never reuses the earlier session's certificate, which revocation refuses: it renews,
+	// and with the control plane unreachable it has none rather than a revoked one.
+	relogin := CertificateTarget{Home: home, Alias: "studio", OSUser: "alice", Session: "session_2"}
+	stillValid := renewedAt.Add(time.Hour)
+	if _, err := EnsureCertificate(t.Context(), relogin, publicKey, offline, stillValid, renewal); err == nil {
+		t.Fatal("a new sign-in used the earlier session's certificate")
+	}
+	testSession = "session_2"
+	before := calls
+	if value, err := EnsureCertificate(t.Context(), relogin, publicKey, online(stillValid), stillValid, renewal); err != nil || calls != before+1 || !certificateOfSession(value, "session_2") {
+		t.Fatalf("a new sign-in did not renew: calls=%d err=%v", calls-before, err)
+	}
+	testSession = "session_1"
+	if _, err := EnsureCertificate(t.Context(), relogin, publicKey, online(stillValid), stillValid, renewal); err == nil {
+		t.Fatal("the server's certificate for another session was accepted")
+	}
+	wrongUser := CertificateTarget{Home: home, Alias: "other", OSUser: "bob", Session: "session_1"}
 	if _, err := EnsureCertificate(t.Context(), wrongUser, publicKey, online(start), start, renewal); err == nil {
 		t.Fatal("a certificate for another OS user was accepted from the server")
 	}

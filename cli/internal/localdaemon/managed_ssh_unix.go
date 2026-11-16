@@ -104,7 +104,7 @@ func StartManagedSSH(ctx context.Context, cfg ManagedSSHConfig, machines []api.U
 	if err != nil {
 		return nil, errors.Join(err, agent.Close())
 	}
-	return &ManagedSSHRuntime{agent: agent, refresh: renewingManagedSSHInstall(install, client, cfg.Home, identity.PublicKey), domain: domain}, nil
+	return &ManagedSSHRuntime{agent: agent, refresh: renewingManagedSSHInstall(install, client, cfg.Home, identity.PublicKey, cfg.CLIClientSessionID), domain: domain}, nil
 }
 
 // Refresh rewrites the managed aliases for machines, the inventory's latest list.

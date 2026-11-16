@@ -9,6 +9,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/command"
+	"github.com/pinksaucepasta/paperboat/internal/config"
 	"github.com/pinksaucepasta/paperboat/internal/managedssh"
 	"github.com/spf13/cobra"
 	"golang.org/x/crypto/ssh"
@@ -68,7 +69,11 @@ func ensureSSHCertificate(ctx *command.Context, client *api.Client, machine api.
 		issued, err := client.IssueManagedSSHCertificate(issueCtx, machine.ID, target.MachineGeneration, string(publicKey))
 		return issued.Certificate, err
 	}
-	certificate, err := managedssh.EnsureCertificate(ctx.Context, managedssh.CertificateTarget{Home: home, Alias: machine.Alias, OSUser: target.OSUser}, publicKey, issue, time.Now(), sshCertificateRenewal)
+	session, err := currentCLISession(ctx)
+	if err != nil {
+		return nil, err
+	}
+	certificate, err := managedssh.EnsureCertificate(ctx.Context, managedssh.CertificateTarget{Home: home, Alias: machine.Alias, OSUser: target.OSUser, Session: session}, publicKey, issue, time.Now(), sshCertificateRenewal)
 	if err != nil {
 		return nil, err
 	}
@@ -90,4 +95,21 @@ func sshCertificateSigner(ctx *command.Context, client *api.Client, machine api.
 		return nil, errors.New("the managed SSH certificate file holds no certificate")
 	}
 	return ssh.NewCertSigner(certificate, signer)
+}
+
+// currentCLISession is this computer's signed-in CLI session (the profile pb login wrote).
+func currentCLISession(ctx *command.Context) (string, error) {
+	d, err := buildDeps(ctx)
+	if err != nil {
+		return "", err
+	}
+	store, err := config.ProfileStoreFor(d.cfg)
+	if err != nil {
+		return "", err
+	}
+	profile, err := store.Load(d.cfg.ServerURL)
+	if err != nil || profile.CLIClientSessionID == "" {
+		return "", errors.Join(errors.New("this computer is not signed in; run `pb login`"), err)
+	}
+	return profile.CLIClientSessionID, nil
 }
