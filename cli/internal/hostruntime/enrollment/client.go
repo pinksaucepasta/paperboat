@@ -360,6 +360,12 @@ func loadRuntimeIdentity(root string, now time.Time, expiryGrace time.Duration) 
 	if err != nil {
 		return RuntimeIdentity{}, unavailableEnrollment(err)
 	}
+	if value, hit := cachedRuntimeIdentity(root, info); hit {
+		if validRuntimeIdentity(value, now, expiryGrace) {
+			return value, nil
+		}
+		return RuntimeIdentity{}, ErrInvalid
+	}
 	secure, err := checkIdentityFile(path, info, 32<<10)
 	if err != nil {
 		return RuntimeIdentity{}, unavailableEnrollment(err)
@@ -375,8 +381,7 @@ func loadRuntimeIdentity(root string, now time.Time, expiryGrace time.Duration) 
 	if err := decodeResponseJSON(body, &value); err != nil {
 		return RuntimeIdentity{}, unavailableEnrollment(err)
 	}
-	validExpiry := expiryGrace < 0 || value.ExpiresAt.After(now.Add(-expiryGrace))
-	if value.Version != 1 || value.HelperID == "" || value.MachineID == "" || value.EnvironmentID == "" || len(value.Credential) < 32 || !validExpiry || value.KeyID == "" {
+	if !validRuntimeIdentity(value, now, expiryGrace) {
 		return RuntimeIdentity{}, ErrInvalid
 	}
 	store, err := identity.Open(identity.Config{StateRoot: root})
@@ -386,7 +391,13 @@ func loadRuntimeIdentity(root string, now time.Time, expiryGrace time.Duration) 
 	if store.Current().ID != value.KeyID {
 		return RuntimeIdentity{}, ErrInvalid
 	}
+	storeRuntimeIdentity(root, info, value)
 	return value, nil
+}
+
+func validRuntimeIdentity(value RuntimeIdentity, now time.Time, expiryGrace time.Duration) bool {
+	validExpiry := expiryGrace < 0 || value.ExpiresAt.After(now.Add(-expiryGrace))
+	return value.Version == 1 && value.HelperID != "" && value.MachineID != "" && value.EnvironmentID != "" && len(value.Credential) >= 32 && validExpiry && value.KeyID != ""
 }
 
 func decodeResponseJSON(data []byte, target any) error {
