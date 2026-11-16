@@ -186,7 +186,7 @@ VALUES($1,1,sha256(convert_to($1::text,'UTF8')),convert_to(json_build_object('ro
 	if afterFull := scoped(); afterFull != afterScoped {
 		t.Fatalf("the full sync changed what the scoped sync assigned: %q then %q", afterScoped, afterFull)
 	}
-	f.exec(t, `UPDATE tunnels SET deleted_at=now() WHERE id=$1`, tunnelTwo)
+	f.exec(t, `UPDATE tunnels SET desired_state='deleted', deleted_at=now() WHERE id=$1`, tunnelTwo)
 	sync()
 	// Each edge gets the route in its tunnel route snapshot, bound to the agent's runtime carrier on
 	// that edge (its identity exactly as the edge admitted the carrier), not to a tunnel connector.
