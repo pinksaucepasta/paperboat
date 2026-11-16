@@ -270,7 +270,10 @@ provider null-route) still turns the canary red. With `CANARY_TEAM`/`CANARY_TEAM
 (server .34, 2026-11-16) turns the canary red although personal machines still work. A step that fails two runs in a row sends one line to the coordinator thread (`t3 thread send`,
 `CANARY_ALERT_THREAD` in the mode-0600 `~/.config/paperboat-canary.env`) and its first pass sends one
 recovery line; both also go to `alerts.log`. Set the machines up with `tools/probe/canary-setup.sh`; keep
-them on a `main` build (copy the binary to `/home/pbt/pb` in the container, `./pb install` as `pbt`).
+all three (`canary-a`, `canary-b`, `canary-t`) on the same `main` build, upgraded together (copy the binary to
+`/home/pbt/pb` in the container, `chmod 0755`, `./pb install` as `pbt`): there is no compatibility between builds, so a
+host left on an older build refuses the newer client's streams (canary-t on dev-6e1e23255 refused dev-65dddfdfe's
+workspace header, team_exec red 2026-11-16 18:36-18:50 UTC).
 They are in the shared test account, protected from `cleanup_test_account.py`; never revoke them.
 **Account probe** (`tools/probe/account.py`, run by `canary.py --account` from `deploy/paperboat-canary-account.{service,timer}`
 every hour, not every minute: WorkOS rate-limits sign-ins and mails new-device alerts): a headless WorkOS password
