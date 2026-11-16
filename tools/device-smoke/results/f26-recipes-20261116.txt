@@ -1074,3 +1074,80 @@ $ pb machine list (rcp machines) at 12:24:41
 $ pb env vault list
 VAULT     KEY   REVISION   RECIPES
 rcp-env   1     1          -
+
+################ f26-06-M.txt (macOS lifetime, max_machines, rotate, revoke) + f26-01-M.txt (first run)
+=== F26-06 on pbmac2 (macOS), server .31, client dev-558f58ef1: pb recipe rotate rcpx --confirm <code> from the Windows creator at 12:23:38Z (ok=true), then on the Mac: ===
+$ pb env run -- sh -c echo RCP_SECRET
+RCP_SECRET=$RCP_SECRET
+$ pb exec rcp-l -- hostname
+rcp-l
+$ pb recipe show rcpx (machines)
+  managedlmachine   online   applied revision 2   now
+  rcp-l             online   applied revision 2   now
+  rcp-w             online   applied revision 2   now
+$ pb env run -- sh -c 'echo RCP_SECRET=vault-value-1
+'   [after the rotate]
+RCP_SECRET=vault-value-1
+$ (after pb recipe revoke rcpx) pb status
+pb: Your Paperboat session is no longer valid. Run `pb login` and approve this CLI in your browser. The printed link works on another device when this machine has no browser. Then retry. Support reference: support_3e6462d5-0c1d-40ac-b49b-47da46217153. Run `pb bugreport --upload` to send the details.
+$ PB_RECIPE=<rcpx token> pb pair   [revoked recipe, machine still signed in locally]
+This machine is already paired; nothing to do.
+$ pb logout
+Signed out
+$ PB_RECIPE=<rcptm token: max_machines=1, machine_lifetime=5m> pb pair --name rcp-m6
+pb: Machine setup did not finish. Some setup steps may have completed. Run `pb doctor`, then retry `pb setup` to resume. Support reference: support_5c2e2da8-0d5c-4cd1-b3db-b58dfc793e16. Run `pb bugreport --upload` to send the details.
+paired at 12:25:46
+$ pb uninstall
+Paperboat was completely removed. The Paperboat Inbox was preserved.
+$ pb install (dev-558f58ef1)
+Installed Paperboat dev-558f58ef1 at /Users/admin/.local/bin/pb. Background update checks: false. Enrollment is unchanged.
+$ PB_RECIPE=<rcptm token: max_machines=1, machine_lifetime=5m> pb pair --name rcp-m6
+pb: Recipe rcptm already has 1 of 1 machines. A machine leaves the recipe when it is removed (`pb machine revoke <machine>`, or by remove_after_offline). To allow more, raise max_machines and run `pb recipe update -f rcptm.toml`. Support reference: support_0f624efd-419a-451c-8a90-09c8e99339a8.
+paired at 12:27:23
+--- 12:34:34 pb recipe show rcptm (the leftover machine from the failed re-pair) ---
+machine_lifetime = "5m"
+Machines (0 of 1)
+$ PB_RECIPE=<rcptm token> pb pair --name rcp-m6   [after the leftover was removed]
+Set up rcp-m6 (machine_b3663cf2-29ba-4a41-a758-503bed763a78)
+paired at 12:39:57
+--- 12:49:12 (creator) pb recipe show rcptm / machine list (rcp-m6 paired 12:39:57, machine_lifetime=5m) ---
+machine_lifetime = "5m"
+Machines (0 of 1)
+0
+=== F26-01/07/08 on pbmac2 (macOS 26.6.2, creator = a second --config on user admin over SSH), server .31, client dev-558f58ef1, 2026-11-16T12:21:02Z ===
+$ (default, the recipe machine) pb auth status
+Session: session_44e976d5-e52a-419a-8e33-bdcef38d2068
+$ pb --config ~/rcpctl/config.json login --api-token-file <file>
+pb: Paperboat could not finish the command. Check the current state before retrying; run `pb doctor` if this continues. Support reference: support_fa293189-3d8f-4aa8-abf9-96dd13eb2f4a. Run `pb bugreport --upload` to send the details.
+$ (default) pb auth status   [must be unchanged]
+Session: session_44e976d5-e52a-419a-8e33-bdcef38d2068
+$ pb recipe create -f rcpbad.toml
+pb: rcpbad.toml:1:1: unknown key "tag". Did you mean "tags"?
+$ pb recipe create -f rcpt4.toml
+pb: Paperboat sign-in credentials are unavailable. Run `pb login` and approve this CLI in your browser. The printed link works on another device when this machine has no browser. Then retry. Support reference: support_6f846eab-c1f4-4d88-8758-ed7eb521916a. Run `pb bugreport --upload` to send the details.
+$ pb recipe create -f rcpt3.toml
+pb: Paperboat sign-in credentials are unavailable. Run `pb login` and approve this CLI in your browser. The printed link works on another device when this machine has no browser. Then retry. Support reference: support_d187b9d4-fa57-4ed9-be3f-f76744ed86fb. Run `pb bugreport --upload` to send the details.
+$ pb recipe list
+pb: Paperboat sign-in credentials are unavailable. Run `pb login` and approve this CLI in your browser. The printed link works on another device when this machine has no browser. Then retry. Support reference: support_f0dbd76d-22a6-4226-a405-d299116b79ba. Run `pb bugreport --upload` to send the details.
+$ pb recipe show rcpt3
+pb: Paperboat sign-in credentials are unavailable. Run `pb login` and approve this CLI in your browser. The printed link works on another device when this machine has no browser. Then retry. Support reference: support_0f2ea22e-2296-4ecb-ab4a-ea0909aedfe3. Run `pb bugreport --upload` to send the details.
+$ pb recipe update -f u/rcpt3.toml
+pb: Paperboat sign-in credentials are unavailable. Run `pb login` and approve this CLI in your browser. The printed link works on another device when this machine has no browser. Then retry. Support reference: support_1ca8f396-dabd-4b7d-ad64-c4275714fe53. Run `pb bugreport --upload` to send the details.
+$ pb recipe update -f u/rcpt3.toml
+pb: Paperboat sign-in credentials are unavailable. Run `pb login` and approve this CLI in your browser. The printed link works on another device when this machine has no browser. Then retry. Support reference: support_383a5a40-d855-4144-bcd3-6d97de8019d0. Run `pb bugreport --upload` to send the details.
+$ pb recipe rotate rcpt3 --confirm <code>
+pb: Paperboat sign-in credentials are unavailable. Run `pb login` and approve this CLI in your browser. The printed link works on another device when this machine has no browser. Then retry. Support reference: support_d86544b8-5db9-4126-84e7-4f4fb204cc0d. Run `pb bugreport --upload` to send the details.
+$ pb recipe revoke rcpt3 --confirm <code>
+pb: Paperboat sign-in credentials are unavailable. Run `pb login` and approve this CLI in your browser. The printed link works on another device when this machine has no browser. Then retry. Support reference: support_1cfdf746-706a-491b-8425-55b4a68b9e67. Run `pb bugreport --upload` to send the details.
+$ pb recipe list
+pb: Paperboat sign-in credentials are unavailable. Run `pb login` and approve this CLI in your browser. The printed link works on another device when this machine has no browser. Then retry. Support reference: support_dd0c1fa4-7bc1-4026-b7c8-46c23eb2f3ab. Run `pb bugreport --upload` to send the details.
+$ pb env unlock --password-stdin   [SSH session, no unlocked Keychain]
+pb: Not signed in to Paperboat. Run `pb login` and approve this CLI in your browser. The printed link works on another device when this machine has no browser. Then retry. Support reference: support_cf7bd6d2-ac57-4bda-bd7f-97356868299f. Run `pb bugreport --upload` to send the details.
+$ PB_RECIPE=pbr_short pb pair   [malformed]
+pb: this is not a recipe token. A token starts with pbr_ and is 67 characters; this value is 9.
+$ pb --config ~/rcpctl/config.json logout
+Signed out
+$ (default) pb auth status / pb exec rcp-l
+Session: session_44e976d5-e52a-419a-8e33-bdcef38d2068
+rcp-l
+=== F26-01/07 on pbmac2 (macOS 26.6.2, creator = a second --config on user admin over SSH), server .31, client dev-c6d670f93, 2026-11-16T12:49:19Z ===
