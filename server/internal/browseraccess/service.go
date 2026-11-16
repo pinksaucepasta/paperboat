@@ -145,6 +145,9 @@ func newService(store *db.DB, trustedLoginOrigin string, developmentHTTP bool) (
 	return &Service{sessionPolicy: config.DefaultBrowserSessions(), db: store, trustedOrigin: u.Scheme + "://" + u.Host, now: func() time.Time { return time.Now().UTC() }}, nil
 }
 
+// pendingBeginsPerResource bounds unauthenticated sign-in transactions open at once for one resource.
+const pendingBeginsPerResource = 4096
+
 func (s *Service) Begin(ctx context.Context, in BeginRequest) (BeginResult, error) {
 	host, err := validHost(in.Host)
 	if err != nil || !validReturn(in.ReturnPath) {
@@ -170,17 +173,20 @@ func (s *Service) Begin(ctx context.Context, in BeginRequest) (BeginResult, erro
 		if e != nil {
 			return e
 		}
-		if _, e := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(260026)`); e != nil {
+		// SKIP LOCKED: concurrent Begins share the bounded expiry sweep instead of queueing on each other's rows.
+		if _, e := tx.Exec(ctx, `DELETE FROM browser_access_transactions WHERE transaction_id IN (SELECT transaction_id FROM browser_access_transactions WHERE expires_at<=$1 ORDER BY expires_at LIMIT 256 FOR UPDATE SKIP LOCKED)`, now); e != nil {
 			return e
 		}
-		if _, e := tx.Exec(ctx, `DELETE FROM browser_access_transactions WHERE transaction_id IN (SELECT transaction_id FROM browser_access_transactions WHERE expires_at<=$1 ORDER BY expires_at LIMIT 256)`, now); e != nil {
+		// The cap and its lock are per target resource: a sign-in burst at one tunnel or preview never refuses or
+		// serializes Begins for any other.
+		if _, e := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext('browser_begin:'||$1||':'||$2))`, target.kind, target.id); e != nil {
 			return e
 		}
 		var n int
-		if e := tx.QueryRow(ctx, `SELECT count(*) FROM browser_access_transactions WHERE expires_at>$1`, now).Scan(&n); e != nil {
+		if e := tx.QueryRow(ctx, `SELECT count(*) FROM browser_access_transactions WHERE resource_kind=$1 AND resource_id=$2 AND expires_at>$3`, target.kind, target.id, now).Scan(&n); e != nil {
 			return e
 		}
-		if n >= 4096 {
+		if n >= pendingBeginsPerResource {
 			return ErrCapacity
 		}
 		_, e = tx.Exec(ctx, `INSERT INTO browser_access_transactions(transaction_id,state_hash,hostname,return_path,resource_kind,resource_id,route_id,created_at,expires_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`, id, h[:], host, in.ReturnPath, target.kind, target.id, target.route, now, out.ExpiresAt)
