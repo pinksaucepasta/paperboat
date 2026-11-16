@@ -134,8 +134,8 @@ func TestRuntimeObservationIsSentAtOnceWhenAPolicyEventWakesIt(t *testing.T) {
 }
 
 func TestTimelessDigestIgnoresTimestampsOnly(t *testing.T) {
-	a := timelessDigest([]byte(`{"sampled_at":"2026-11-16T01:00:00Z","update":{"state":"idle","observed_at":"2026-11-16T01:00:01.5Z"},"machine_services":{"generation":3}}`))
-	b := timelessDigest([]byte(`{"sampled_at":"2026-11-16T01:00:10Z","update":{"state":"idle","observed_at":"2026-11-16T01:00:11Z"},"machine_services":{"generation":3}}`))
+	a := timelessDigest([]byte(`{"sampled_at":"2026-11-16T01:00:00Z","update":{"state":"idle","operation_id":"update-1-111","observed_at":"2026-11-16T01:00:01.5Z"},"machine_services":{"generation":3}}`))
+	b := timelessDigest([]byte(`{"sampled_at":"2026-11-16T01:00:10Z","update":{"state":"idle","operation_id":"update-1-222","observed_at":"2026-11-16T01:00:11Z"},"machine_services":{"generation":3}}`))
 	c := timelessDigest([]byte(`{"sampled_at":"2026-11-16T01:00:10Z","update":{"state":"failed","observed_at":"2026-11-16T01:00:11Z"},"machine_services":{"generation":3}}`))
 	if a != b {
 		t.Fatal("two observations that differ only in their times have different digests")

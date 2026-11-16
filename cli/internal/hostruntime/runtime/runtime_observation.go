@@ -355,7 +355,7 @@ func (s *runtimeObservationSender) observationChanged(ctx context.Context) bool 
 	return snapshot.digest != s.sentDigest
 }
 
-// timelessDigest hashes a JSON observation with every timestamp string removed.
+// timelessDigest hashes a JSON observation with every timestamp string and operation id removed.
 func timelessDigest(body []byte) [32]byte {
 	var value any
 	if json.Unmarshal(body, &value) != nil {
@@ -372,6 +372,10 @@ func dropTimestamps(value any) any {
 	switch typed := value.(type) {
 	case map[string]any:
 		for key, child := range typed {
+			if key == "operation_id" { // update.operation_id carries the sample's nanosecond clock
+				delete(typed, key)
+				continue
+			}
 			if text, ok := child.(string); ok {
 				if _, err := time.Parse(time.RFC3339Nano, text); err == nil {
 					delete(typed, key)
