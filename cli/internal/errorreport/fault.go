@@ -2,7 +2,7 @@ package errorreport
 
 import (
 	"context"
-	"errors"
+	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 	"github.com/pinksaucepasta/paperboat/shared/reporting"
 	"path/filepath"
 	"runtime"
@@ -152,8 +152,7 @@ func (r *Reporter) ObserveFailure(ctx context.Context, component, operation, sta
 	// A refusal made locally and already explained (a revoked identity waiting out its backoff, controlbackoff) is
 	// not a new failure: recording each held-back retry of every runtime loop is the burst this prevents (X-41: 84
 	// events in the minute after a revoke on Windows, bound 45).
-	var quiet interface{ QuietFailure() bool }
-	if errors.As(err, &quiet) && quiet.QuietFailure() {
+	if diagnosticlog.QuietFailure(err) {
 		return fault
 	}
 	return r.captureFault(ctx, fault, false)

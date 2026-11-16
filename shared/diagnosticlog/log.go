@@ -4,7 +4,6 @@ package diagnosticlog
 
 import (
 	"context"
-	"errors"
 	"log/slog"
 	"runtime"
 	"strings"
@@ -52,6 +51,33 @@ func ensureWorker() {
 	})
 }
 
+// QuietFailure reports whether err, or an error it wraps (at most 16 nodes), is a locally explained refusal that needs no
+// record. An error whose Unwrap panics or has no end counts as not quiet: a diagnostic must never fail its caller.
+func QuietFailure(err error) (quiet bool) {
+	defer func() {
+		if recover() != nil {
+			quiet = false
+		}
+	}()
+	pending := []error{err}
+	for visited := 0; len(pending) > 0 && visited < 16; visited++ {
+		next := pending[0]
+		pending = pending[1:]
+		if marker, ok := next.(interface{ QuietFailure() bool }); ok && marker.QuietFailure() {
+			return true
+		}
+		switch wrapped := next.(type) {
+		case interface{ Unwrap() error }:
+			if inner := wrapped.Unwrap(); inner != nil {
+				pending = append(pending, inner)
+			}
+		case interface{ Unwrap() []error }:
+			pending = append(pending, wrapped.Unwrap()...)
+		}
+	}
+	return false
+}
+
 // TryInfo enqueues one record without waiting for the logging backend.
 func TryInfo(message string, args ...any) {
 	tryLog(slog.LevelInfo, message, args...)
@@ -63,8 +89,7 @@ func TryError(message string, args ...any) { tryLog(slog.LevelError, message, ar
 func tryLog(level slog.Level, message string, args ...any) {
 	// A refusal made locally and already explained (a revoked identity waiting out its backoff) is no record.
 	for _, arg := range args {
-		var quiet interface{ QuietFailure() bool }
-		if err, ok := arg.(error); ok && errors.As(err, &quiet) && quiet.QuietFailure() {
+		if err, ok := arg.(error); ok && QuietFailure(err) {
 			return
 		}
 	}

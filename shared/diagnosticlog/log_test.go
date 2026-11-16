@@ -145,3 +145,18 @@ func TestWarnAboutAQuietRefusalIsNotQueued(t *testing.T) {
 		t.Fatalf("records = %q", h.messages)
 	}
 }
+
+type panickingUnwrap struct{}
+
+func (panickingUnwrap) Error() string { return "bad" }
+func (panickingUnwrap) Unwrap() error { panic("unwrap") }
+
+// A malformed error must not make the diagnostic itself fail.
+func TestQuietFailureSurvivesAnErrorWhoseUnwrapPanics(t *testing.T) {
+	if QuietFailure(panickingUnwrap{}) || QuietFailure(nil) || QuietFailure(errors.New("x")) {
+		t.Fatal("a plain or malformed error was taken for a quiet refusal")
+	}
+	if !QuietFailure(errors.Join(errors.New("x"), quietRefusal{})) {
+		t.Fatal("a joined quiet refusal was missed")
+	}
+}
