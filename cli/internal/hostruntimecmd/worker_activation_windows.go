@@ -23,8 +23,12 @@ func readWorkerActivationByte(ctx context.Context, file *os.File) (byte, error) 
 	if kind != windows.FILE_TYPE_PIPE {
 		return 0, runtimeFailure("worker activation requires the supervisor pipe")
 	}
-	ticker := time.NewTicker(20 * time.Millisecond)
-	defer ticker.Stop()
+	// The supervisor pipe is polled (a blocking ReadFile cannot be cancelled by ctx). The first seconds poll fast
+	// for the activation line; a worker that then waits for its next control command polls every
+	// workerControlIdlePoll: a 20 ms poll for the worker's whole life was ~50 wakeups/s and ~1% of a core idle (PR-03).
+	started := time.Now()
+	timer := time.NewTimer(workerControlFastPoll)
+	defer timer.Stop()
 	for {
 		if err := runtimeContextFailure(ctx); err != nil {
 			return 0, err
@@ -45,10 +49,21 @@ func readWorkerActivationByte(ctx context.Context, file *os.File) (byte, error) 
 			_, err := io.ReadFull(file, b[:])
 			return b[0], err
 		}
+		delay := workerControlFastPoll
+		if time.Since(started) > workerControlFastWindow {
+			delay = workerControlIdlePoll
+		}
+		timer.Reset(delay)
 		select {
 		case <-ctx.Done():
 			return 0, runtimeContextFailure(ctx)
-		case <-ticker.C:
+		case <-timer.C:
 		}
 	}
 }
+
+const (
+	workerControlFastPoll   = 20 * time.Millisecond
+	workerControlFastWindow = 2 * time.Second
+	workerControlIdlePoll   = 250 * time.Millisecond
+)
