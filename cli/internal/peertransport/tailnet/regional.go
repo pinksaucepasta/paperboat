@@ -30,6 +30,12 @@ type RegionalNode = peernetwork.RegionalNode
 type RegionalCandidates = peernetwork.RegionalCandidates
 
 func (a *Authority) ApplyRegionalCandidates(ctx context.Context, token string) error {
+	return a.applyRegionalCandidates(ctx, token, false)
+}
+
+// applyRegionalCandidates verifies and installs a candidate set; restored is the set persisted with the configuration
+// Restore installed (relay_restore.go): its signature was verified when it arrived, every claim is checked again.
+func (a *Authority) applyRegionalCandidates(ctx context.Context, token string, restored bool) error {
 	parts := strings.Split(token, ".")
 	if len(parts) != 3 || len(token) > MaxConfigurationBytes {
 		return ErrRegionalAuthority
@@ -53,9 +59,11 @@ func (a *Authority) ApplyRegionalCandidates(ctx context.Context, token string) e
 	if e1 != nil || e2 != nil || e3 != nil || peernetwork.DecodeSigned(header, &h) != nil || h.Algorithm != "EdDSA" || h.Type != peernetwork.RegionalCandidatesType || !peernetwork.ValidID(h.KeyID) || peernetwork.DecodeSigned(body, &c) != nil {
 		return ErrRegionalAuthority
 	}
-	pub, found, err := a.options.Keys.Lookup(ctx, h.KeyID)
-	if err != nil || !found || !ed25519.Verify(pub, []byte(parts[0]+"."+parts[1]), sig) {
-		return ErrRegionalAuthority
+	if !restored {
+		pub, found, err := a.options.Keys.Lookup(ctx, h.KeyID)
+		if err != nil || !found || !ed25519.Verify(pub, []byte(parts[0]+"."+parts[1]), sig) {
+			return ErrRegionalAuthority
+		}
 	}
 	now := serverclock.Now().UTC()
 	a.mu.Lock()

@@ -118,6 +118,7 @@ func runWindowsDaemon(ctx context.Context, config DaemonConfig) (runErr error) {
 		Events:            config.InventoryEvents,
 		AccessEvents:      config.AccessEvents,
 		Nudge:             config.LocalAccessChanged,
+		CachePath:         inventoryCachePath(config.Paths.StateRoot),
 		OnRefresh:         inventoryRefreshObserver(ctx, recorder), OnMachines: func(refreshCtx context.Context, machines []api.UserMachine) {
 			if config.OnMachines != nil {
 				config.OnMachines(refreshCtx, machines)

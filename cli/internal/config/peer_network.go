@@ -135,20 +135,99 @@ func (s ProfileStore) LoadPeerNetworkConfiguration(issuer, accountID, endpointID
 	if err != nil {
 		return "", err
 	}
+	data, err := readOwnerFile(path, limit)
+	return string(data), err
+}
+
+// The trust behind this endpoint's verified certificate (the server's endpoint-certificate keys and the key ID that
+// signed it) is kept the same way, so a daemon restarted while Paperboat is unreachable verifies its own certificate
+// without asking (F21-01). Public keys only.
+func (s ProfileStore) peerLocalTrustPath(issuer, accountID, endpointID string) (string, error) {
+	return s.peerFilePath("peer-local-trust-v1-", issuer, accountID, endpointID)
+}
+
+// peerFilePath names an owner-only file beside the profile for one endpoint of one account.
+func (s ProfileStore) peerFilePath(prefix, issuer, accountID, endpointID string) (string, error) {
+	if s.Path == "" || !validCredentialID(accountID) || !validCredentialID(endpointID) {
+		return "", errors.New("peer file path is invalid")
+	}
+	digest := sha256.Sum256([]byte(issuer + "\x00" + accountID + "\x00" + endpointID))
+	return filepath.Join(s.Path, prefix+hex.EncodeToString(digest[:])+".json"), nil
+}
+
+// The relay list and relay grants of the last answered renewal are kept the same way, so a daemon restarted while
+// Paperboat is unreachable can open relayed paths through its last known relays (each grant lasts at most
+// relaylimits.MaxGrantLifetime and the relay enforces it). The reader verifies every claim against the restored
+// configuration.
+func (s ProfileStore) SavePeerNetworkRelays(issuer, accountID, endpointID string, data []byte) error {
+	path, err := s.peerFilePath("peer-network-relays-v1-", issuer, accountID, endpointID)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(s.Path, 0o700); err != nil {
+		return err
+	}
+	return atomicWrite(path, data, 0o600)
+}
+
+// LoadPeerNetworkRelays reads the persisted relay state of at most limit bytes; nil when none.
+func (s ProfileStore) LoadPeerNetworkRelays(issuer, accountID, endpointID string, limit int) ([]byte, error) {
+	path, err := s.peerFilePath("peer-network-relays-v1-", issuer, accountID, endpointID)
+	if err != nil {
+		return nil, err
+	}
+	return readOwnerFile(path, limit)
+}
+
+// SavePeerLocalTrust replaces the persisted local trust with data, atomically, mode 0600.
+func (s ProfileStore) SavePeerLocalTrust(issuer, accountID, endpointID string, data []byte) error {
+	path, err := s.peerLocalTrustPath(issuer, accountID, endpointID)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(s.Path, 0o700); err != nil {
+		return err
+	}
+	return atomicWrite(path, data, 0o600)
+}
+
+// LoadPeerLocalTrust reads the persisted local trust of at most limit bytes; nil when none.
+func (s ProfileStore) LoadPeerLocalTrust(issuer, accountID, endpointID string, limit int) ([]byte, error) {
+	path, err := s.peerLocalTrustPath(issuer, accountID, endpointID)
+	if err != nil {
+		return nil, err
+	}
+	return readOwnerFile(path, limit)
+}
+
+// DeletePeerLocalTrust removes the persisted local trust (Paperboat refused this endpoint); none is not an error.
+func (s ProfileStore) DeletePeerLocalTrust(issuer, accountID, endpointID string) error {
+	path, err := s.peerLocalTrustPath(issuer, accountID, endpointID)
+	if err != nil {
+		return err
+	}
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
+}
+
+// readOwnerFile reads at most limit bytes of path; nil when it does not exist.
+func readOwnerFile(path string, limit int) ([]byte, error) {
 	file, err := os.Open(path)
 	if errors.Is(err, os.ErrNotExist) {
-		return "", nil
+		return nil, nil
 	}
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	defer file.Close()
 	data, err := io.ReadAll(io.LimitReader(file, int64(limit)+1))
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	if len(data) > limit {
-		return "", errors.New("persisted peer network configuration is too large")
+		return nil, errors.New("persisted peer file " + filepath.Base(path) + " is too large")
 	}
-	return string(data), nil
+	return data, nil
 }

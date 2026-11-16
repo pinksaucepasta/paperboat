@@ -687,12 +687,8 @@ func newCLINativeAuthority(ctx context.Context, issuer string, store config.Prof
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	refresh, cancelRefresh := context.WithTimeout(ctx, 10*time.Second)
-	err = keys.Refresh(refresh)
-	cancelRefresh()
-	if err != nil {
-		return nil, nil, nil, err
-	}
+	// No key set fetch here: a restart while Paperboat is unreachable restores the last verified configuration
+	// (RegisterOrRestore), and the first answer fetches the keys it names (knowSigningKeys).
 	leaf, err := issueCLILeaf(identity)
 	if err != nil {
 		return nil, nil, nil, err

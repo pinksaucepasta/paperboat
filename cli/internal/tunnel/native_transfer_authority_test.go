@@ -26,12 +26,13 @@ func TestNativeTransferUsesOwnIdentityBeforeAuthenticatedRemoteNetwork(t *testin
 	control := &connectedMachineAccess{}
 	transport := connectedRoundTripper(func(request *http.Request) (*http.Response, error) {
 		status := http.StatusServiceUnavailable
+		if request.URL.Path == "/v1/peer-network/register" { // the engine's own network authority, no key set first
+			networkReads.Add(1)
+		}
 		switch request.URL.Path {
 		case "/v1/endpoints/machine_foreign/certificates/1":
 			targetReads.Add(1)
 			status = http.StatusNotFound
-		case "/.well-known/jwks.json":
-			networkReads.Add(1)
 		default:
 			return control.control(request, identity, connectedNetworkAPI{})
 		}

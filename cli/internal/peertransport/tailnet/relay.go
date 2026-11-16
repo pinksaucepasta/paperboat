@@ -71,7 +71,13 @@ type relayAuthority struct {
 // ApplyRelayGrants consumes only signed grants from the same network refresh.
 // Invalid or absent grants remove cached relay authority; they cannot extend a lease. A grant relays would refuse
 // is left out and the others apply; when none applies it returns ErrAuthority.
-func (a *Authority) ApplyRelayGrants(ctx context.Context, tokens []string) (resultErr error) {
+func (a *Authority) ApplyRelayGrants(ctx context.Context, tokens []string) error {
+	return a.applyRelayGrants(ctx, tokens, false)
+}
+
+// applyRelayGrants installs relay grants; restored grants were persisted with the restored configuration
+// (relay_restore.go) and skip only the signature check, which they passed when they arrived.
+func (a *Authority) applyRelayGrants(ctx context.Context, tokens []string, restored bool) (resultErr error) {
 	a.mu.Lock()
 	if a.current == nil || !a.usableLocked() {
 		a.mu.Unlock()
@@ -138,7 +144,7 @@ func (a *Authority) ApplyRelayGrants(ctx context.Context, tokens []string) (resu
 	refused := map[string]bool{}
 	control := map[string][]key.NodePublic{}
 	for _, token := range tokens {
-		g, peers, err := a.verifyRelayGrant(ctx, token, cfg, nodes)
+		g, peers, err := a.verifyRelayGrant(ctx, token, cfg, nodes, restored)
 		earlier, chunk := grants[g.NodeID], next[g.NodeID] != ""
 		if err == nil && chunk && (len(strings.Split(next[g.NodeID], "\n")) >= derpquic.MaxGrantParts || earlier.ExpiresAt != g.ExpiresAt || earlier.IssuedAt != g.IssuedAt) {
 			err = ErrAuthority // the parts of one grant share one issue and one expiry, within the relay's bound
@@ -187,7 +193,7 @@ func (a *Authority) ApplyRelayGrants(ctx context.Context, tokens []string) (resu
 // verifyRelayGrant checks one grant part exactly: its signature, every claim against this configuration and the
 // relay it names, and the relay's own rules. It returns the grant (its NodeID set once the body decodes, so a
 // failure names its relay) and the relay-control peers the grant makes.
-func (a *Authority) verifyRelayGrant(ctx context.Context, token string, cfg NetworkConfiguration, nodes []RegionalNode) (peernetwork.RelayGrant, []key.NodePublic, error) {
+func (a *Authority) verifyRelayGrant(ctx context.Context, token string, cfg NetworkConfiguration, nodes []RegionalNode, restored bool) (peernetwork.RelayGrant, []key.NodePublic, error) {
 	var g peernetwork.RelayGrant
 	parts := strings.Split(token, ".")
 	if len(parts) != 3 || len(token) > MaxConfigurationBytes {
@@ -214,14 +220,19 @@ func (a *Authority) verifyRelayGrant(ctx context.Context, token string, cfg Netw
 	if node == nil {
 		return g, nil, ErrRegionalAuthority
 	}
-	pub, found, err := a.options.Keys.Lookup(ctx, h.KeyID)
-	if err != nil || !found {
-		return g, nil, ErrAuthority
+	if !restored {
+		pub, found, err := a.options.Keys.Lookup(ctx, h.KeyID)
+		if err != nil || !found {
+			return g, nil, ErrAuthority
+		}
+		// The real certificate is required when configuring the carrier. Before that,
+		// verify the signature and all claims here, then compare its signed fingerprint
+		// with the already approved local binding.
+		if len(pub) != 32 || !ed25519.Verify(pub, []byte(parts[0]+"."+parts[1]), mustDecodeRelaySignature(parts[2])) {
+			return g, nil, ErrAuthority
+		}
 	}
-	// The real certificate is required when configuring the carrier. Before that,
-	// verify the signature and all claims here, then compare its signed fingerprint
-	// with the already approved local binding.
-	if len(pub) != 32 || !ed25519.Verify(pub, []byte(parts[0]+"."+parts[1]), mustDecodeRelaySignature(parts[2])) || h.KeyID == "" {
+	if h.KeyID == "" {
 		return g, nil, ErrAuthority
 	}
 	var fullHeader struct {

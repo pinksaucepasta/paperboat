@@ -98,6 +98,9 @@ type InventoryConfig struct {
 	// EventFallback is the refresh period while events are healthy (0: the default).
 	EventRefreshSpacing time.Duration
 	EventFallback       time.Duration
+	// CachePath keeps the last answered machine list for a restart while Paperboat is unreachable (inventory_cache.go);
+	// empty: no cache.
+	CachePath string
 }
 
 type Inventory struct {
@@ -121,6 +124,8 @@ type Inventory struct {
 	reconciledOnce    bool      // a local-access reconcile has succeeded since start; guarded by store.Update
 	completionMu      sync.RWMutex
 	completion        localapi.CompletionSnapshot
+	cachePath         string
+	cached            []byte // the cache file's content as last read or written; guarded by mu after Run starts
 }
 
 // localAccessStartupGrace is how long after start a failed local-access reconcile reads as starting, below the 60 s a
@@ -164,6 +169,7 @@ func NewInventory(config InventoryConfig) (*Inventory, error) {
 		eventSpacing:      config.EventRefreshSpacing,
 		eventFallback:     config.EventFallback,
 		wake:              make(chan struct{}, 1),
+		cachePath:         config.CachePath,
 	}, nil
 }
 
@@ -204,6 +210,7 @@ func (i *Inventory) Run(ctx context.Context) error {
 		started = time.Now()
 		failed = i.Refresh(ctx) != nil
 	}
+	i.restoreCachedMachines()
 	refresh()
 	timer := time.NewTimer(i.refreshInterval)
 	defer timer.Stop()
@@ -320,6 +327,7 @@ func (i *Inventory) Refresh(ctx context.Context) (refreshErr error) {
 	portal := i.captivePortalBlocks(ctx, sourceErr, reconcileErr)
 	i.captive.Store(portal)
 	now := i.clock().UTC()
+	var answered []localapi.MachineStatus
 	if _, err := i.store.Update(now, func(current *localapi.Snapshot) (localapi.Snapshot, error) {
 		desired := localapi.Snapshot{DaemonState: "ready", DaemonVersion: buildinfo.Version}
 		if current != nil {
@@ -327,6 +335,7 @@ func (i *Inventory) Refresh(ctx context.Context) (refreshErr error) {
 		}
 		if sourceErr == nil {
 			desired.Machines = preserveLocalObservations(mapMachines(machines), current)
+			answered = desired.Machines
 			// The first reconcile runs once the machine list answers: right after start, or after `pb pair` when the
 			// daemon was waiting for enrollment. The grace counts from then, so a slow first setup is starting either way.
 			if i.setupSince.IsZero() {
@@ -396,7 +405,11 @@ func (i *Inventory) Refresh(ctx context.Context) (refreshErr error) {
 	}); err != nil {
 		return errors.Join(refreshErr, err)
 	}
+	if sourceErr == nil {
+		i.saveCachedMachines(answered)
+	}
 	if inventoryAuthenticationRequired(sourceErr) || inventoryAuthenticationRequired(reconcileErr) {
+		i.forgetCachedMachines()
 		i.completionMu.Lock()
 		i.completion = localapi.CompletionSnapshot{}
 		i.completionMu.Unlock()

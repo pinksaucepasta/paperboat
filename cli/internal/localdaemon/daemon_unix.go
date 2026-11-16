@@ -130,7 +130,7 @@ func Run(ctx context.Context, config DaemonConfig) (runErr error) {
 		return err
 	}
 	diagnosticAPI := &diagnosticService{recorder: recorder, snapshots: store, stateRoot: config.Paths.StateRoot, ownerUID: config.OwnerUID, clock: diagnosticClock}
-	inventory, err := NewInventory(InventoryConfig{Source: config.Source, Store: store, RefreshInterval: config.RefreshInterval, RequestTimeout: config.RequestTimeout, Clock: config.Clock, ReconcileMachines: config.ReconcileMachines, Events: config.InventoryEvents, AccessEvents: config.AccessEvents, Nudge: config.LocalAccessChanged, OnRefresh: inventoryRefreshObserver(ctx, recorder), OnMachines: func(refreshCtx context.Context, machines []api.UserMachine) {
+	inventory, err := NewInventory(InventoryConfig{Source: config.Source, Store: store, RefreshInterval: config.RefreshInterval, RequestTimeout: config.RequestTimeout, Clock: config.Clock, ReconcileMachines: config.ReconcileMachines, Events: config.InventoryEvents, AccessEvents: config.AccessEvents, Nudge: config.LocalAccessChanged, CachePath: inventoryCachePath(config.Paths.StateRoot), OnRefresh: inventoryRefreshObserver(ctx, recorder), OnMachines: func(refreshCtx context.Context, machines []api.UserMachine) {
 		if config.OnMachines != nil {
 			config.OnMachines(refreshCtx, machines)
 		}

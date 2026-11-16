@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/config"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/identitybootstrap"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/trustedkeys"
+	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 	"github.com/pinksaucepasta/paperboat/shared/peertransport/endpointidentity"
 )
 
@@ -161,6 +163,7 @@ func resolve(ctx context.Context, request Request, localOnly bool) (Authority, e
 		clear(localState.Raw)
 		return fail(ErrInvalid)
 	}
+	saveLocalTrust(request, root.TrustedKeys, localDocument.KeyID)
 	if localOnly {
 		localRootPublic := append(ed25519.PublicKey(nil), localKey.PublicKey...)
 		return Authority{RootPublic: localRootPublic, TrustedKeys: trusted, LocalKeys: keys, LocalCertificate: local, LocalCertificateRaw: localState.Raw}, nil
@@ -199,3 +202,66 @@ func (a *Authority) Clear() {
 	clear(a.MachineCertificateRaw)
 	*a = Authority{}
 }
+
+// localTrust is what ResolveSavedLocal needs from Paperboat to verify this endpoint's own certificate: the server's
+// endpoint-certificate keys and the key that signed it, as last verified (public keys only).
+type localTrust struct {
+	Version     int           `json:"version"`
+	TrustedKeys []api.E2EEKey `json:"trusted_keys"`
+	LocalKeyID  string        `json:"local_key_id"`
+}
+
+const maxLocalTrustBytes = 1 << 20 // a large account carries ~50 KiB of keys
+
+func saveLocalTrust(request Request, keys []api.E2EEKey, keyID string) {
+	data, err := json.Marshal(localTrust{Version: 1, TrustedKeys: keys, LocalKeyID: keyID})
+	if err == nil && len(data) <= maxLocalTrustBytes {
+		err = request.Store.SavePeerLocalTrust(request.Issuer, request.AccountID, request.CLIClientSessionID, data)
+	}
+	if err != nil {
+		diagnosticlog.TryWarn("peer local trust not saved", "error", err)
+	}
+}
+
+// ResolveSavedLocal is ResolveLocal without Paperboat: this endpoint's stored certificate verified against the trust
+// last verified with Paperboat, so a daemon restarted while Paperboat is unreachable starts sessions like one that
+// kept running (F21-01). Callers confirm it with Paperboat in the background (Cache.ResolveLocal).
+func ResolveSavedLocal(request Request) (Authority, error) {
+	if request.AccountID == "" || request.CLIClientSessionID == "" || request.Now.IsZero() {
+		return Authority{}, ErrInvalid
+	}
+	data, err := request.Store.LoadPeerLocalTrust(request.Issuer, request.AccountID, request.CLIClientSessionID, maxLocalTrustBytes)
+	if err != nil || data == nil {
+		return Authority{}, errors.Join(ErrNoSavedTrust, err)
+	}
+	var saved localTrust
+	if err := json.Unmarshal(data, &saved); err != nil || saved.Version != 1 {
+		return Authority{}, ErrInvalid
+	}
+	trusted, err := trustedkeys.FromAPI(saved.TrustedKeys)
+	if err != nil {
+		return Authority{}, ErrInvalid
+	}
+	keys, err := request.Store.PeerEndpointKeys(request.Issuer, request.AccountID, request.CLIClientSessionID)
+	if err != nil {
+		trustedkeys.Clear(trusted)
+		return Authority{}, err
+	}
+	localState, err := request.Store.LoadPeerCertificate(request.Issuer, request.CLIClientSessionID)
+	var local endpointidentity.Certificate
+	if err == nil {
+		local, err = endpointidentity.VerifyWithTrustedKey(localState.Raw, saved.LocalKeyID, trusted, endpointidentity.Expected{AccountID: request.AccountID, Role: endpointidentity.RoleCLI, EndpointID: request.CLIClientSessionID, Generation: 1}, request.Now.UTC())
+	}
+	localKey, ok := endpointidentity.TrustedKeyFor(trusted, saved.LocalKeyID)
+	if err != nil || !ok || !bytes.Equal(local.Claims.QUICPublicKey, keys.QUICPrivate.Public().(ed25519.PublicKey)) {
+		clear(localState.Raw)
+		trustedkeys.Clear(trusted)
+		clear(keys.RootPrivate)
+		clear(keys.QUICPrivate)
+		return Authority{}, errors.Join(ErrInvalid, err)
+	}
+	return Authority{RootPublic: append(ed25519.PublicKey(nil), localKey.PublicKey...), TrustedKeys: trusted, LocalKeys: keys, LocalCertificate: local, LocalCertificateRaw: localState.Raw}, nil
+}
+
+// ErrNoSavedTrust: no local trust was saved yet (the first resolution after pairing asks Paperboat).
+var ErrNoSavedTrust = errors.New("no saved peer local trust")

@@ -235,6 +235,7 @@ func (a *Authority) refresh(ctx context.Context, client NetworkAPI, since time.T
 		a.options.OnAuthority(nil)
 	}
 	a.refreshedFrom = started
+	a.saveRelays(result.CandidateSet, result.RelayGrants)
 	a.setRelayDenial(result.RelayDenial())
 	if a.membershipGrants.Swap(result.MembershipGrants) != result.MembershipGrants && result.MembershipGrants {
 		a.RequestRefresh() // ask for membership grants on the next renewal

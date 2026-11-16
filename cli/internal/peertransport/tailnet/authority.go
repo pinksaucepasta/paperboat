@@ -111,19 +111,21 @@ type Authority struct {
 	expiresAt atomic.Int64
 	// renewalFailing is set while the last renewal failed: Paperboat is not answering.
 	renewalFailing atomic.Bool
-	mu             sync.Mutex
-	updateMu       sync.Mutex // custody I/O must never hold the expiry/lifecycle lock
-	options        AuthorityOptions
-	current        *NetworkConfiguration
-	private        key.NodePrivate
-	closed         bool
-	expired        bool
-	lastVerified   time.Time
-	relayDenied    *api.APIError
-	done           chan struct{}
-	server         *UDPServer
-	clientEngine   *mesh.Server
-	lastReSTUN     time.Time // guarded by mu
+	// savedRelays is the digest of the relay state last persisted (relay_restore.go); refreshes are serialized.
+	savedRelays  [32]byte
+	mu           sync.Mutex
+	updateMu     sync.Mutex // custody I/O must never hold the expiry/lifecycle lock
+	options      AuthorityOptions
+	current      *NetworkConfiguration
+	private      key.NodePrivate
+	closed       bool
+	expired      bool
+	lastVerified time.Time
+	relayDenied  *api.APIError
+	done         chan struct{}
+	server       *UDPServer
+	clientEngine *mesh.Server
+	lastReSTUN   time.Time // guarded by mu
 	// clientRelay: the client engine was started with at least one relay region (from a descriptor or configured nodes).
 	clientRelay bool
 	// reportMu guards the endpoint report schedule (endpoint_report.go).
@@ -553,16 +555,21 @@ func (a *Authority) Restore(ctx context.Context) error {
 		return ErrAuthority
 	}
 	a.updateMu.Lock()
-	defer a.updateMu.Unlock()
 	a.mu.Lock()
-	defer a.mu.Unlock()
-	if a.closed {
-		return ErrAuthority
+	installed := false
+	switch {
+	case a.closed:
+		err = ErrAuthority
+	case a.current == nil:
+		err = a.installLocked(cfg, selected, time.Unix(cfg.IssuedAt, 0))
+		installed = err == nil
 	}
-	if a.current != nil {
-		return nil
+	a.mu.Unlock()
+	a.updateMu.Unlock()
+	if installed {
+		a.restoreRelays(ctx)
 	}
-	return a.installLocked(cfg, selected, time.Unix(cfg.IssuedAt, 0))
+	return err
 }
 
 func (a *Authority) dropLocked() {

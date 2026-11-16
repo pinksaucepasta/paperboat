@@ -9,6 +9,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/config"
+	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 	"github.com/pinksaucepasta/paperboat/shared/peertransport/endpointidentity"
 	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 )
@@ -44,10 +45,12 @@ type Cache struct {
 	refreshing map[cacheKey]bool
 	// resolveLocal is ResolveLocal; tests replace it to count and pace control-plane work.
 	resolveLocal func(context.Context, Request) (Authority, error)
+	// resolveSaved is ResolveSavedLocal: the identity last verified with Paperboat, from disk.
+	resolveSaved func(Request) (Authority, error)
 }
 
 func NewCache() *Cache {
-	return &Cache{entries: make(map[cacheKey]cacheEntry), refreshing: make(map[cacheKey]bool), resolveLocal: ResolveLocal}
+	return &Cache{entries: make(map[cacheKey]cacheEntry), refreshing: make(map[cacheKey]bool), resolveLocal: ResolveLocal, resolveSaved: ResolveSavedLocal}
 }
 
 func (c *Cache) Resolve(ctx context.Context, request Request) (Authority, error) {
@@ -103,6 +106,23 @@ func (c *Cache) ResolveLocal(ctx context.Context, request Request) (Authority, e
 		}
 	}
 	c.mu.Unlock()
+	// Nothing cached since this daemon started: serve the identity last verified with Paperboat at once and confirm it
+	// in the background (a refusal there drops it), so a restart while Paperboat is unreachable is like a sleep and
+	// a dropped API port cannot hold the caller (F21-01). A certificate close to expiry waits for the renewal below.
+	if saved, err := c.resolveSaved(request); err == nil && saved.LocalCertificate.Claims.ExpiresAt.After(now.Add(localCertificateMargin)) {
+		c.mu.Lock()
+		if _, ok := c.entries[key]; !ok {
+			c.entries[key] = cacheEntry{authority: cloneAuthority(saved), refreshedAt: now.Add(-trustRefreshInterval)}
+		}
+		if !c.refreshing[key] {
+			c.refreshing[key] = true
+			go c.refreshLocal(key, request)
+		}
+		c.mu.Unlock()
+		return saved, nil
+	} else if err == nil {
+		saved.Clear()
+	}
 	resolved, err := c.resolveLocal(ctx, request)
 	if err != nil {
 		// With Paperboat unreachable the verified identity stays usable until its certificate
@@ -144,6 +164,10 @@ func (c *Cache) refreshLocal(key cacheKey, request Request) {
 			delete(c.entries, key)
 		}
 		c.mu.Unlock()
+		// Nor may a restart serve it from disk again.
+		if err := request.Store.DeletePeerLocalTrust(request.Issuer, request.AccountID, request.CLIClientSessionID); err != nil {
+			diagnosticlog.TryWarn("peer local trust not removed", "error", err)
+		}
 	}
 	if err != nil {
 		return
