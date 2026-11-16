@@ -21,18 +21,24 @@ func TestRepeatedFailureFromOneCallSiteIsRecordedOncePerWindow(t *testing.T) {
 	if got := len(recorder.Recent()); got != 1 {
 		t.Fatalf("records after ten repeats = %d", got)
 	}
-	_ = recorder.Record("control_request", "control_request_failed", "warning", fields("b.refresh"))
+	if err := recorder.Record("control_request", "control_request_failed", "warning", fields("b.refresh")); err != nil {
+		t.Fatal(err)
+	}
 	if got := len(recorder.Recent()); got != 2 {
 		t.Fatalf("another call site's failure was suppressed: %d records", got)
 	}
 	now = now.Add(repeatWindow)
-	_ = recorder.Record("control_request", "control_request_failed", "warning", fields("a.refresh"))
+	if err := recorder.Record("control_request", "control_request_failed", "warning", fields("a.refresh")); err != nil {
+		t.Fatal(err)
+	}
 	if got := len(recorder.Recent()); got != 3 {
 		t.Fatalf("the failure was not recorded again after the window: %d records", got)
 	}
 	// a record that names no call site (a one-off event) is never held back
 	for range 3 {
-		_ = recorder.Record("lifecycle", "component_started", "info", map[string]string{"component": "x"})
+		if err := recorder.Record("shutdown", "telemetry_shutdown", "info", map[string]string{"component": "paperboat-daemon", "operation": "component_shutdown", "state": "ok"}); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if got := len(recorder.Recent()); got != 6 {
 		t.Fatalf("records without a call site were suppressed: %d records", got)
