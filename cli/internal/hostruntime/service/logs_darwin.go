@@ -4,6 +4,7 @@ package service
 
 import (
 	"errors"
+	"os"
 	"os/user"
 	"path/filepath"
 	"strconv"
@@ -22,6 +23,10 @@ func prepareNativeServiceLogs(config Config, definition []byte) error {
 	}
 	if paths.Out == "" && paths.Err == "" {
 		return nil
+	}
+	if config.Kind == DaemonKind {
+		// The per-user daemon's log lives in the user's own Library/Logs; launchd creates the file, not its folder.
+		return os.MkdirAll(filepath.Dir(paths.Out), 0o700)
 	}
 	account, err := user.Lookup(config.User)
 	if err != nil {

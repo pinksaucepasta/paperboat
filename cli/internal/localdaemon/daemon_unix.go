@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
@@ -16,6 +17,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/health"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machineevents"
+	hostservice "github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
 	"github.com/pinksaucepasta/paperboat/internal/tunnel"
 	"github.com/pinksaucepasta/paperboat/shared/supportref"
@@ -77,6 +79,9 @@ func Run(ctx context.Context, config DaemonConfig) (runErr error) {
 	defer func() { runErr = daemonCleanupFailure(runErr, lock.Close()) }()
 	if closer, ok := config.FileTransfers.(interface{ Close() error }); ok {
 		defer func() { runErr = daemonCleanupFailure(runErr, closer.Close()) }()
+	}
+	if home, homeErr := os.UserHomeDir(); runtime.GOOS == "darwin" && homeErr == nil {
+		go keepDaemonLogBounded(ctx, hostservice.DaemonLogPath(home))
 	}
 	recorder := diagnostics.FromContext(ctx)
 	ownedRecorder := recorder == nil

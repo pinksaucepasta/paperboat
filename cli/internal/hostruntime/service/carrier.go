@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"path/filepath"
 	"strconv"
 	"strings"
 )
@@ -18,6 +19,12 @@ func generationalUnit(config Config) bool {
 
 // RetiredGenerationLogPath is where launchd writes a generation's unit output (renderLaunchd's StandardOutPath).
 func RetiredGenerationLogPath(label string) string { return "/var/log/" + label + ".log" }
+
+// DaemonLogPath is where launchd writes the macOS per-user daemon's output: the user's Library/Logs (Console.app
+// lists it); /var/log is root's. The daemon keeps it bounded itself (localdaemon.KeepDaemonLogBounded).
+func DaemonLogPath(home string) string {
+	return filepath.Join(home, "Library", "Logs", "Paperboat", "paperboatd.log")
+}
 
 func validateCarrierConfig(config Config) error {
 	if config.Kind != CarrierKind {

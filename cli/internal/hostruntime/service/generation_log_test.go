@@ -22,3 +22,15 @@ func TestRetiredGenerationLogPathIsTheUnitsOwnStandardOutPath(t *testing.T) {
 		t.Fatalf("the rendered definition does not log to %s:\n%s", want, body)
 	}
 }
+
+// The macOS per-user daemon had no StandardOutPath, so launchd discarded its output and a stuck daemon left nothing to read.
+func TestPerUserDaemonLogsToTheUsersLibraryLogs(t *testing.T) {
+	body, err := renderLaunchd(Config{Platform: "darwin", Kind: DaemonKind, ConfigRoot: "/Users/t", Executable: "/Users/t/.local/bin/pb", User: "t", Group: "staff", Arguments: []string{"daemon"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "<string>/Users/t/Library/Logs/Paperboat/paperboatd.log</string>"
+	if strings.Count(string(body), want) != 2 || DaemonLogPath("/Users/t") != "/Users/t/Library/Logs/Paperboat/paperboatd.log" {
+		t.Fatalf("stdout and stderr do not both go to %s:\n%s", want, body)
+	}
+}

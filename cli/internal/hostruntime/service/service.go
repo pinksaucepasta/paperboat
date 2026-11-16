@@ -486,6 +486,10 @@ func renderLaunchd(config Config) ([]byte, error) {
 		definition.StandardOutPath = RetiredGenerationLogPath(label)
 		definition.StandardErrorPath = definition.StandardOutPath
 	}
+	if config.Kind == DaemonKind {
+		definition.StandardOutPath = DaemonLogPath(config.ConfigRoot)
+		definition.StandardErrorPath = definition.StandardOutPath
+	}
 	// launchd user agents inherit the logged-in user and reject UserName and
 	// GroupName keys. System services retain explicit identity fields.
 	if config.Kind == WorkerKind || config.Kind == HostKind || config.Kind == HostdKind || config.Kind == UpdaterKind || config.Kind == SessionOwnerKind || config.Kind == CarrierKind {
