@@ -276,6 +276,18 @@ func TestAdmittedScopesTakeEverySharedKind(t *testing.T) {
 	if _, err := admittedScopeIDs([]AdmittedScope{{ResourceKind: "recording", ResourceID: ""}}); err == nil {
 		t.Fatal("an empty id was accepted")
 	}
+	// F21-164: a client reports up to peernetwork.MaxAdmittedScopes references (its whole admitted inventory); one more
+	// is refused.
+	full := make([]AdmittedScope, peernetwork.MaxAdmittedScopes)
+	for i := range full {
+		full[i] = AdmittedScope{ResourceKind: "recording", ResourceID: fmt.Sprintf("r%03d", i)}
+	}
+	if _, err := admittedScopeIDs(full); err != nil {
+		t.Fatalf("a full admitted inventory was refused: %v", err)
+	}
+	if _, err := admittedScopeIDs(append(full, AdmittedScope{ResourceKind: "recording", ResourceID: "over"})); err == nil {
+		t.Fatal("more references than the admitted bound were accepted")
+	}
 }
 
 // Every regional candidate set the server builds (regionalCandidateSet), signed by the real mint, is one clients

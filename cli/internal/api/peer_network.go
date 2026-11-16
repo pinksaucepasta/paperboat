@@ -3,6 +3,8 @@ package api
 import (
 	"context"
 	"net/http"
+
+	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
 )
 
 type PeerNetworkRegistration struct {
@@ -62,7 +64,7 @@ func (r PeerNetworkConfigurationResult) RelayDenial() *APIError {
 	return &APIError{Status: http.StatusConflict, Code: r.RelayDenied, Message: apiErrorMessageFor(r.RelayDenied, http.StatusConflict, details), Details: details}
 }
 
-const MaxAdmittedNetworkScopes = 128
+const MaxAdmittedNetworkScopes = peernetwork.MaxAdmittedScopes
 
 type AdmittedNetworkScope struct {
 	ResourceKind string `json:"resource_kind"`

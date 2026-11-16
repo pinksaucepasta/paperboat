@@ -1392,3 +1392,38 @@ func TestNetworkRefreshRegistersAgainOnASelfMismatchAndReportsTheRefusal(t *test
 		t.Fatalf("accepted configuration: %v %v", err, outcomes)
 	}
 }
+
+// F21-164: one machine's pb commands share one daemon endpoint, so its admitted inventory holds every terminal and
+// viewer at once: 100 terminals and a shared terminal with 50 viewers fit; the bound still refuses one more.
+func TestAdmittedInventoryHoldsHundredTerminalsAndFiftyViewers(t *testing.T) {
+	a, c, signer, _ := networkTestAuthority(t)
+	base := c.Peers[0].Scopes[0]
+	for i := 0; i <= api.MaxAdmittedNetworkScopes; i++ {
+		s := base
+		s.ResourceID = fmt.Sprintf("grant_scale_%03d", i)
+		c.Peers[0].Scopes = append(c.Peers[0].Scopes, s)
+	}
+	if err := a.Apply(t.Context(), networkToken(t, signer, c)); err != nil {
+		t.Fatal(err)
+	}
+	peer := c.Peers[0].Identity.EndpointID
+	var releases []func()
+	defer func() {
+		for _, release := range releases {
+			release()
+		}
+	}()
+	for i := 0; i < api.MaxAdmittedNetworkScopes; i++ {
+		release, err := a.TrackAdmittedScope(peer, fmt.Sprintf("grant_scale_%03d", i), base.Capability, base.Direction)
+		if err != nil {
+			t.Fatalf("admitted scope %d of %d refused: %v", i+1, api.MaxAdmittedNetworkScopes, err)
+		}
+		releases = append(releases, release)
+	}
+	if api.MaxAdmittedNetworkScopes < 151 {
+		t.Fatalf("the inventory holds %d scopes, fewer than 100 terminals + 1 owner + 50 viewers", api.MaxAdmittedNetworkScopes)
+	}
+	if _, err := a.TrackAdmittedScope(peer, fmt.Sprintf("grant_scale_%03d", api.MaxAdmittedNetworkScopes), base.Capability, base.Direction); !errors.Is(err, ErrAdmission) {
+		t.Fatalf("a scope past the bound was admitted: %v", err)
+	}
+}

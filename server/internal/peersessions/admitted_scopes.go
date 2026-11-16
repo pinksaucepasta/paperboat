@@ -15,9 +15,9 @@ type AdmittedScope struct {
 
 // admittedScopeIDs groups the reported scopes by kind. A kind this server does not know (a newer client's) and a
 // repeat (a retry after a lost answer) are skipped, never a reason to refuse the endpoint its whole configuration;
-// a malformed id or more than 128 references still are.
+// a malformed id or more than peernetwork.MaxAdmittedScopes references still are.
 func admittedScopeIDs(scopes []AdmittedScope) (map[string][]string, error) {
-	if len(scopes) > 128 {
+	if len(scopes) > peernetwork.MaxAdmittedScopes {
 		return nil, ErrInvalid
 	}
 	ids := map[string][]string{}

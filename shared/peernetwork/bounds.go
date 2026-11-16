@@ -15,4 +15,9 @@ const (
 	// MaxConfigurationBytes bounds one signed configuration (and relay grant or regional candidate
 	// token): every endpoint at MaxPeerBytes plus the configuration's own fields.
 	MaxConfigurationBytes = MaxEndpoints*MaxPeerBytes + 16<<10
+	// MaxAdmittedScopes bounds the distinct scopes one endpoint holds admitted streams on (the client's admitted
+	// inventory) and reports when it renews its configuration. Every terminal, viewer and transfer of one machine's
+	// pb commands counts against its one daemon endpoint: 128 refused the 37th of 50 viewers joining while 90 terminals
+	// were open (F21-164). Sized like the server's 256 access sessions per document (peersessions maximumNetworkGrants).
+	MaxAdmittedScopes = 256
 )
