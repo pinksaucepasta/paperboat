@@ -101,7 +101,7 @@ func TestRecipeListShowAndUpdate(t *testing.T) {
 	}
 	fake.on("PUT "+recipeBase+"/ci", 200, data(`{"recipe":`+recipeJSON(3, `{"preview":[{"port":3000,"ttl":"4h"}]}`)+`,"previous":`+recipeJSON(2, `{"preview":[{"port":3000,"ttl":"2h"}]}`)+`,"online_machines":2}`))
 	code, out, errOut = runPolicyCLI(t, url, "recipe", "update", "-f", writeRecipeFile(t, "ci.toml", ciRecipeTOML))
-	if code != 0 || !strings.Contains(out, "Recipe ci updated to revision 3: preview changed. 2 online machines apply it now.") {
+	if code != 0 || !strings.Contains(out, "Recipe ci updated to revision 3: preview changed. 2 online machines will apply it now.") {
 		t.Fatalf("update code=%d out=%s err=%s", code, out, errOut)
 	}
 }
@@ -118,7 +118,7 @@ func TestRecipeRotateAndRevokeAskForConfirmation(t *testing.T) {
 	fake.on("POST "+recipeBase+"/ci/revoke", 409, apiFailure("confirmation_required", strings.Replace(impact, "K3M9QX", "7RT2WD", 1)))
 	fake.on("POST "+recipeBase+"/ci/revoke", 200, data(`{"recipe":`+recipeJSON(2, `{}`)+`,"impact":{"machines":[{"id":"m1","name":"fv-1"},{"id":"m2","name":"fv-2"}],"vaults":[]}}`))
 	code, out, errOut := runPolicyCLI(t, url, "recipe", "rotate", "ci")
-	if code != 0 || !strings.Contains(out, "Its 2 machines keep running") || !strings.Contains(out, "Rotate with: pb recipe rotate ci --confirm K3M9QX") {
+	if code != 0 || !strings.Contains(out, "Its 2 machines will keep running") || !strings.Contains(out, "Rotate with: pb recipe rotate ci --confirm K3M9QX") {
 		t.Fatalf("rotate preview code=%d out=%s err=%s", code, out, errOut)
 	}
 	code, out, errOut = runPolicyCLI(t, url, "recipe", "rotate", "ci", "--confirm", "K3M9QX")
@@ -132,11 +132,11 @@ func TestRecipeRotateAndRevokeAskForConfirmation(t *testing.T) {
 	}
 	// The machine that reported its key gets the new key sealed to it; the other is told to re-pair.
 	keys, _ := sent["machine_keys"].([]any)
-	if len(keys) != 1 || keys[0].(map[string]any)["machine_id"] != "m1" || !strings.Contains(out, "1 machines have not reported their key") {
+	if len(keys) != 1 || keys[0].(map[string]any)["machine_id"] != "m1" || !strings.Contains(out, "1 machine did not report a key yet") {
 		t.Fatalf("machine keys %v out=%s", sent["machine_keys"], out)
 	}
 	code, out, errOut = runPolicyCLI(t, url, "recipe", "revoke", "ci")
-	if code != 0 || !strings.Contains(out, "its 2 machines are removed: fv-1, fv-2") || !strings.Contains(out, "Revoke with: pb recipe revoke ci --confirm 7RT2WD") {
+	if code != 0 || !strings.Contains(out, "its 2 machines will be removed: fv-1, fv-2") || !strings.Contains(out, "Revoke with: pb recipe revoke ci --confirm 7RT2WD") {
 		t.Fatalf("revoke preview code=%d out=%s err=%s", code, out, errOut)
 	}
 	code, out, errOut = runPolicyCLI(t, url, "recipe", "revoke", "ci", "--confirm", "7RT2WD")

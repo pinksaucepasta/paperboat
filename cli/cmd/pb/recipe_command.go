@@ -309,7 +309,7 @@ are created, changed or removed on each machine).`, Example: "  pb recipe update
 			_, err = fmt.Fprintf(command.OutOrStdout(), "Recipe %s is unchanged (revision %d).\n", name, updated.Recipe.Revision)
 			return err
 		}
-		_, err = fmt.Fprintf(command.OutOrStdout(), "Recipe %s updated to revision %d: %s changed. %d online machines apply it now.\n", name, updated.Recipe.Revision, strings.Join(changed, ", "), updated.OnlineMachines)
+		_, err = fmt.Fprintf(command.OutOrStdout(), "Recipe %s updated to revision %d: %s changed. %d online machine%s will apply it now.\n", name, updated.Recipe.Revision, strings.Join(changed, ", "), updated.OnlineMachines, plural(updated.OnlineMachines))
 		return err
 	}}
 	command.Flags().StringP("file", "f", "", "the recipe file (.toml or .json)")
@@ -388,7 +388,7 @@ replace PB_RECIPE everywhere the old one is stored.`, Example: "  pb recipe rota
 			}
 			out := command.OutOrStdout()
 			fmt.Fprintf(out, "Rotating %s gives it a new token.\n", args[0])
-			fmt.Fprintf(out, "  The old token stops working at once. Its %d machines keep running.\n", len(details.Impact.Machines))
+			fmt.Fprintf(out, "  The old token stops working at once. Its %d machine%s will keep running.\n", len(details.Impact.Machines), plural(len(details.Impact.Machines)))
 			fmt.Fprintf(out, "  Then replace PB_RECIPE everywhere the old token is stored.\nRotate with: pb recipe rotate %s --confirm %s\n", args[0], details.Confirm)
 			return nil
 		}
@@ -402,7 +402,7 @@ replace PB_RECIPE everywhere the old one is stored.`, Example: "  pb recipe rota
 			return err
 		}
 		if unsealed > 0 {
-			_, err = fmt.Fprintf(command.OutOrStdout(), "%d machines have not reported their key yet and must run the recipe install again to keep reading its vaults.\n", unsealed)
+			_, err = fmt.Fprintf(command.OutOrStdout(), "%d machine%s did not report a key yet; run the recipe install there again to keep reading its vaults.\n", unsealed, plural(unsealed))
 		}
 		return err
 	}}
@@ -433,7 +433,7 @@ and keep the machines.`, Example: "  pb recipe revoke ci\n  pb recipe revoke ci 
 				names = append(names, m.Name)
 			}
 			if len(names) > 0 {
-				fmt.Fprintf(out, "  - its %d machines are removed: %s\n", len(names), strings.Join(names, ", "))
+				fmt.Fprintf(out, "  - its %d machine%s will be removed: %s\n", len(names), plural(len(names)), strings.Join(names, ", "))
 			}
 			fmt.Fprintf(out, "Revoke with: pb recipe revoke %s --confirm %s\n", args[0], details.Confirm)
 			return nil
@@ -445,7 +445,7 @@ and keep the machines.`, Example: "  pb recipe revoke ci\n  pb recipe revoke ci 
 			return writeCLIJSON(command.OutOrStdout(), revoked)
 		}
 		out := command.OutOrStdout()
-		fmt.Fprintf(out, "Recipe %s revoked. %d machines removed.\n", revoked.Recipe.Name, len(revoked.Impact.Machines))
+		fmt.Fprintf(out, "Recipe %s revoked. %d machine%s removed.\n", revoked.Recipe.Name, len(revoked.Impact.Machines), plural(len(revoked.Impact.Machines)))
 		if revoked.RemovalError != "" {
 			fmt.Fprintln(out, revoked.RemovalError)
 		}
