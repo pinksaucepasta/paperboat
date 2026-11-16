@@ -1,4 +1,5 @@
 import type { Metadata } from "next"
+import { Suspense } from "react"
 import { Crumb, CrumbLink, PageHeader } from "@/components/page-header"
 import { EditRecipe } from "@/components/recipes/edit-recipe"
 import { WithSession } from "@/components/with-session"
@@ -6,10 +7,20 @@ import { sections } from "@/lib/sections"
 
 export const metadata: Metadata = { title: "Edit recipe" }
 
-export default async function Page({ params }: { params: Promise<{ name: string }> }) {
-  const name = decodeURIComponent((await params).name)
+export default function Page({ params }: PageProps<"/settings/recipes/[name]/edit">) {
   return (
     <WithSession>
+      <Suspense>
+        <Edit params={params} />
+      </Suspense>
+    </WithSession>
+  )
+}
+
+async function Edit({ params }: Pick<PageProps<"/settings/recipes/[name]/edit">, "params">) {
+  const name = decodeURIComponent((await params).name)
+  return (
+    <>
       <PageHeader>
         <CrumbLink href={sections.recipes.href}>{sections.recipes.title}</CrumbLink>
         <CrumbLink href={`${sections.recipes.href}/${encodeURIComponent(name)}`}>{name}</CrumbLink>
@@ -18,6 +29,6 @@ export default async function Page({ params }: { params: Promise<{ name: string 
       <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 md:px-8 md:py-8">
         <EditRecipe name={name} />
       </main>
-    </WithSession>
+    </>
   )
 }
