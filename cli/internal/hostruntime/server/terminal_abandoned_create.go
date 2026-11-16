@@ -39,6 +39,8 @@ func freshTerminalCreate(frame protocol.Frame, outcome operation.Outcome, replay
 
 // closeUndeliveredCreate closes a session whose create answer did not reach its requester, unless someone attached
 // it meanwhile.
+// shortcut: the participant check and the close are two calls; an attach landing between them sees the session closed
+// and its client restarts it (RestartIfNotRunning). Upgrade to a close-if-unattached manager call if that is ever seen.
 func (s *Server) closeUndeliveredCreate(sessionID string, authorization Authorization) {
 	ctx, cancel := context.WithTimeout(s.ctx, s.config.MutationDeadline)
 	defer cancel()
