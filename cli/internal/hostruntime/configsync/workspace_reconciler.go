@@ -71,7 +71,7 @@ func (r *PlaintextWorkspaceReconciler) leavesToOtherDirection(resolution Conflic
 // revision is what the user sees as the last applied one.
 func CombineDirectionalDiagnostics(pull, push ReconciliationDiagnostics) ReconciliationDiagnostics {
 	push.LastAppliedRevision = pull.LastAppliedRevision
-	push.Skipped = append(append([]PathSummary(nil), pull.Skipped...), push.Skipped...)
+	push.Skipped = uniquePathSummaries(append(append([]PathSummary(nil), pull.Skipped...), push.Skipped...))
 	push.Conflicts = uniquePathSummaries(append(append([]PathSummary(nil), pull.Conflicts...), push.Conflicts...))
 	push.PendingCleanPathCount += pull.PendingCleanPathCount
 	return push

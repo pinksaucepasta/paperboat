@@ -508,3 +508,12 @@ func TestSplitHalvesListAConflictOnceAndResolveItByPath(t *testing.T) {
 		t.Fatalf("conflicts = %+v, want one entry, the pull half's", combined.Conflicts)
 	}
 }
+
+// F21-170: both halves of a bidirectional assignment skip the same file (one over the 5 MiB bound), which the status lists once.
+func TestSplitHalvesListASkippedFileOnce(t *testing.T) {
+	skipped := PathSummary{Path: "cfg/big.txt", Reason: "max_file_bytes"}
+	combined := CombineDirectionalDiagnostics(ReconciliationDiagnostics{Skipped: []PathSummary{skipped}}, ReconciliationDiagnostics{Skipped: []PathSummary{skipped}})
+	if len(combined.Skipped) != 1 || combined.Skipped[0] != skipped {
+		t.Fatalf("skipped = %+v, want one entry", combined.Skipped)
+	}
+}
