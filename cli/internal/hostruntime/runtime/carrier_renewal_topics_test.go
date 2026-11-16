@@ -8,10 +8,11 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machineevents/eventstest"
 )
 
-// F5-10: the carrier's renewal wakes on an access change but never on what a renewal itself moves (it reports
-// endpoints, which publishes peer_network and inventory): 46aa1e11 listened to those and renewals fed each other.
-func TestCarrierRenewalWakesOnAccessChangesNotOnItsOwnEffects(t *testing.T) {
-	hub, _, plane := eventstest.Start(t, time.Hour, machineevents.TopicMachineAccess)
+// F21-18: the carrier renews on an access or peer network change, so it needs no per-minute fallback, but not on
+// inventory, which a renewal's own effects could move (46aa1e11 listened to peer_network and inventory when every
+// unchanged endpoint report still published them; the server publishes only a changed set now).
+func TestCarrierRenewalWakesOnAccessAndPeerNetworkChangesNotInventory(t *testing.T) {
+	hub, _, plane := eventstest.Start(t, time.Hour, machineevents.TopicMachineAccess, machineevents.TopicPeerNetwork)
 	sub := hub.Subscribe(carrierRenewalTopics...)
 	woke := func() bool {
 		select {
@@ -22,13 +23,14 @@ func TestCarrierRenewalWakesOnAccessChangesNotOnItsOwnEffects(t *testing.T) {
 		}
 	}
 	woke() // a subscription to a newly known topic may wake once
-	plane.Publish(machineevents.TopicPeerNetwork)
 	plane.Publish(machineevents.TopicInventory)
 	if woke() {
-		t.Fatal("a renewal's own peer_network/inventory publish woke the carrier's renewal")
+		t.Fatal("an inventory change woke the carrier's renewal")
 	}
-	plane.Publish(machineevents.TopicMachineAccess)
-	if !woke() {
-		t.Fatal("an access change did not wake the carrier's renewal")
+	for _, topic := range []machineevents.Topic{machineevents.TopicMachineAccess, machineevents.TopicPeerNetwork} {
+		plane.Publish(topic)
+		if !woke() {
+			t.Fatalf("a %s change did not wake the carrier's renewal", topic)
+		}
 	}
 }

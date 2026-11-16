@@ -58,8 +58,6 @@ type productionNativePeerConfig struct {
 	// (peer_network) or a machine joining or leaving (inventory): a newly paired machine enters the mesh
 	// when it first comes online, which moves only inventory. nil leaves the periodic renewal alone.
 	networkEvents *machineevents.Subscription
-	// idleRenewal is the engine's renewal when no event announced a change (tailnet.AuthorityOptions.IdleRefresh).
-	idleRenewal time.Duration
 }
 
 type productionNativePeerService struct {
@@ -253,7 +251,7 @@ func (s *productionNativePeerService) buildGeneration(ctx context.Context) (*pro
 	if err != nil {
 		return nil, err
 	}
-	authority, err := tailnet.NewAuthority(tailnet.AuthorityOptions{Store: clientconfig.ProfileStore{Path: filepath.Join(s.config.stateRoot, "peer-network"), Secrets: clientconfig.FileSecretStore{Dir: filepath.Join(s.config.stateRoot, "peer-network", "secrets")}}, Issuer: s.config.issuer, Self: self, Keys: s.config.keys, IdleRefresh: s.config.idleRenewal})
+	authority, err := tailnet.NewAuthority(tailnet.AuthorityOptions{Store: clientconfig.ProfileStore{Path: filepath.Join(s.config.stateRoot, "peer-network"), Secrets: clientconfig.FileSecretStore{Dir: filepath.Join(s.config.stateRoot, "peer-network", "secrets")}}, Issuer: s.config.issuer, Self: self, Keys: s.config.keys})
 	if err != nil {
 		return nil, err
 	}

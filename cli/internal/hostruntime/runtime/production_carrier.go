@@ -118,7 +118,7 @@ func assembleServing(ctx context.Context, base *carrierIdentity, environ func(st
 		controlURL: controlURL.String(), issuer: strings.TrimRight(valueOrRuntime(environ("PAPERBOAT_CONTROL_ISSUER"), controlURL.String()), "/"),
 		stateRoot: config.StateRoot, machineID: base.identity.MachineID, generation: uint64(base.generation),
 		transport: transport, identity: base.machineIdentity, keys: keys, dispatch: dispatch, ssh: ssh, usage: usage, offlineAudit: audit,
-		networkEvents: base.events.Subscribe(carrierRenewalTopics...), idleRenewal: carrierIdleRenewal,
+		networkEvents: base.events.Subscribe(carrierRenewalTopics...),
 	})
 	if err != nil {
 		return nil, err
@@ -159,14 +159,11 @@ func auditCarrierSSH(path string, ssh *managedssh.Host) (*offlineaudit.Queue, er
 	return audit, nil
 }
 
-// carrierRenewalTopics wake the carrier's signed-network renewal. Only machine_access: it moves on grant, access
-// session and CLI-session revocation, never because a renewal ran. peer_network and inventory move when a renewal
-// reports endpoints (migration 186), so listening to them fed renewals back into each other (46aa1e11, reverted).
-var carrierRenewalTopics = []machineevents.Topic{machineevents.TopicMachineAccess}
-
-// carrierIdleRenewal: hearing no peer_network or inventory change (above), the carrier learns a newly paired or
-// re-keyed peer only by renewing, so it keeps the ~1-minute cadence it had while event-driven engines idle longer.
-const carrierIdleRenewal = time.Minute
+// carrierRenewalTopics wake the carrier's signed-network renewal: machine_access (grant, access session and
+// CLI-session revocation) and peer_network (a peer paired, re-keyed or revoked, a relay changed). A renewal that reports
+// unchanged endpoints moves neither (migration 186 publishes only a changed set; 202 never publishes the generation
+// bump), so the 46aa1e11 loop cannot recur. Without a change the carrier renews on the engine's idle cadence (F21-18).
+var carrierRenewalTopics = []machineevents.Topic{machineevents.TopicMachineAccess, machineevents.TopicPeerNetwork}
 
 func (c *ProductionCarrier) Start(ctx context.Context) error {
 	if c == nil || ctx == nil {
