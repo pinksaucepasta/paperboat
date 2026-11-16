@@ -151,6 +151,7 @@ export async function acceptTeamKeys(): Promise<number> {
       vault,
       team: state,
       owner: grant.team_id,
+      operation_id: operationId(),
       grant: {
         team_id: grant.team_id,
         membership_generation: grant.membership_generation,
