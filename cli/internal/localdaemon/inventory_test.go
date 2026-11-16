@@ -1166,6 +1166,7 @@ func TestInventoryListingFailureNamesTheControlPlaneOnlyForTheAPI(t *testing.T) 
 	}{
 		"API deadline":      {apiDown("/v1/machines"), "control_plane_unavailable"},
 		"API unavailable":   {fmt.Errorf("list machines: %w", &api.APIError{Status: 503, Code: "temporarily_unavailable"}), "control_plane_unavailable"},
+		"HTML page":         {fmt.Errorf("list machines: %w", &api.ResponseDecodeError{Err: errors.New("invalid character '<'")}), "control_plane_unavailable"},
 		"local credentials": {errors.New("read the daemon credential: permission denied"), "machine_list_unavailable"},
 		"peer request":      {&url.Error{Op: "Get", URL: "https://peer.example.test/v1/x", Err: context.DeadlineExceeded}, "machine_list_unavailable"},
 	} {

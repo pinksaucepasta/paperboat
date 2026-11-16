@@ -545,7 +545,12 @@ func controlPlaneUnreachable(err error, apiHost string) bool {
 		return parseErr == nil && apiHost != "" && strings.EqualFold(target.Host, apiHost)
 	}
 	var response *api.APIError
-	return errors.As(err, &response) && (response.Status == 408 || response.Status == 429 || response.Status >= 500)
+	if errors.As(err, &response) {
+		return response.Status == 408 || response.Status == 429 || response.Status >= 500
+	}
+	// A Wi-Fi sign-in page answers 200 HTML after the client followed its redirect: the server did not answer.
+	var invalid *api.ResponseDecodeError
+	return errors.As(err, &invalid)
 }
 
 func (i *Inventory) Completions(context.Context) (localapi.CompletionSnapshot, error) {
