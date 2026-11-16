@@ -299,13 +299,13 @@ func (p *Process) Terminate(ctx context.Context, grace time.Duration) (ExitResul
 	// Closing a terminal hangs up its shell, as tmux and ttyd do (ttyd's default close signal is SIGHUP): an interactive
 	// shell ignores SIGTERM, so SIGTERM alone sat out the whole grace before SIGKILL on every close. What ignores SIGHUP
 	// (nohup) gets SIGTERM after hangupWindow, so a child that handles TERM for cleanup is not hit by both at once.
-	signalErr := p.signalGroup(Hangup)
+	signalErr := p.Signal(Hangup)
 	if signalErr == nil || errors.Is(signalErr, syscall.EPERM) {
 		select {
 		case <-p.done:
 		case <-ctx.Done():
 		case <-time.After(min(grace, hangupWindow)):
-			if termErr := p.signalGroup(Terminate); termErr == nil || processGone(termErr) {
+			if termErr := p.Signal(Terminate); termErr == nil || processGone(termErr) {
 				signalErr = nil
 			} else {
 				signalErr = termErr
@@ -318,7 +318,7 @@ func (p *Process) Terminate(ctx context.Context, grace time.Duration) (ExitResul
 		return ExitResult{}, signalErr
 	}
 	graceCtx, cancel := context.WithTimeout(ctx, grace)
-	result, err := p.Wait(graceCtx)
+	result, err := p.waitForExit(graceCtx)
 	cancel()
 	if err == nil {
 		return result, p.CloseIO()
@@ -339,15 +339,27 @@ func (p *Process) Terminate(ctx context.Context, grace time.Duration) (ExitResul
 	return result, err
 }
 
-// signalGroup is Signal, tried once more after a moment on EPERM: Darwin refuses a group signal while a member is an
-// unreaped zombie (the shell's own `sleep` between exit and reap; macOS run 43960352441), which lasts milliseconds.
-func (p *Process) signalGroup(signal Signal) error {
-	err := p.Signal(signal)
-	if errors.Is(err, syscall.EPERM) {
-		time.Sleep(20 * time.Millisecond)
-		err = p.Signal(signal)
+// waitForExit is Wait that also discards output nobody reads once the group has no live member (Darwin answers a
+// group probe with EPERM then). A macOS session leader's exit waits until its terminal output drains, and the session
+// stops reading before it terminates (session.stopOutputPersistence), so a shell that printed while exiting
+// ("Terminated: 15") stayed unreaped and refused every later signal, SIGKILL too (macOS run 43974662614). A leader
+// that exited before it was reaped (the other EPERM) is reaped well within the first interval.
+func (p *Process) waitForExit(ctx context.Context) (ExitResult, error) {
+	for {
+		select {
+		case <-p.done:
+			return p.Wait(context.Background())
+		case <-ctx.Done():
+			return ExitResult{}, ctx.Err()
+		case <-time.After(50 * time.Millisecond):
+			if p.cmd.Process == nil || !errors.Is(syscall.Kill(-p.cmd.Process.Pid, 0), syscall.EPERM) {
+				continue
+			}
+			if raw, err := p.file.SyscallConn(); err == nil {
+				_ = raw.Control(func(fd uintptr) { flushPendingOutput(int(fd)) })
+			}
+		}
 	}
-	return err
 }
 
 // processGone reports a signal that found no process: it has exited (its group may already be gone
