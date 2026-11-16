@@ -71,7 +71,7 @@ func (b *Bar) hardResetRestoresViewport(sequence []byte) bool {
 }
 
 func (b *Bar) trackAlternateScreen(sequence []byte) bool {
-	if b.fullscreen != FullscreenHide || len(sequence) < 6 || sequence[0] != '\x1b' {
+	if len(sequence) < 6 || sequence[0] != '\x1b' {
 		return false
 	}
 	raw := string(sequence)
@@ -84,8 +84,11 @@ func (b *Bar) trackAlternateScreen(sequence []byte) bool {
 		return false
 	}
 	b.alternate = entering
-	if entering && b.recording {
-		return false // REC stays on screen in full-screen applications: the bar keeps its row, as with FullscreenShow
+	if b.fullscreen != FullscreenHide || entering && b.recording {
+		// The bar keeps its row (FullscreenShow, or REC): it was erased from the screen being left (clearMarginBeforeFullscreen), so the
+		// screen being entered or returned to needs it painted.
+		b.scrollDirty = true
+		return true
 	}
 	if entering {
 		_, _ = fmt.Fprint(b.serializedOut, "\x1b[r")

@@ -250,6 +250,13 @@ func (b *Bar) clearMarginBeforeFullscreen(data []byte) {
 	defer b.mu.Unlock()
 	if !b.alternate && bytes.Contains(data, []byte("\x1b[?1049h")) {
 		_, _ = fmt.Fprint(b.serializedOut, b.cursorSave+"\x1b[r"+b.cursorRestore)
+		if b.activeLocked() && b.lastRows > 0 {
+			// The terminal keeps the main screen while the application owns the alternate one, and a VTE-based terminal re-flows it
+			// when the window is resized meanwhile: a bar row left on it comes back in the middle of the screen (X-24, gnome-terminal),
+			// out of reach of any erase by row number. The bar is painted again on whichever screen is shown.
+			_, _ = fmt.Fprintf(b.serializedOut, b.cursorSave+"\x1b[%d;1H\x1b[2K"+b.cursorRestore, b.lastRows)
+			b.redrawPending = true
+		}
 	}
 }
 

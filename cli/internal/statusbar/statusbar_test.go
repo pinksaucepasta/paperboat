@@ -917,3 +917,37 @@ func TestBarStartsFromDefaultColoursAndRestoresTheApplications(t *testing.T) {
 		t.Fatalf("style = %q restore = %q", style, restore)
 	}
 }
+
+// X-24 in gnome-terminal: after the window was resized inside vim, a stale copy of the bar row stood in the middle of the main
+// screen (VTE re-flows the main screen it keeps while the application owns the alternate one). The bar row is erased from the
+// main screen before the alternate screen is entered, and painted again on the screen shown, in every full-screen mode.
+func TestBarRowLeavesTheMainScreenBeforeTheAlternateScreenIsEntered(t *testing.T) {
+	for name, configure := range map[string]func(*Bar){
+		"hide":      func(b *Bar) { b.fullscreen = FullscreenHide },
+		"show":      func(b *Bar) { b.fullscreen = FullscreenShow },
+		"recording": func(b *Bar) { b.fullscreen = FullscreenHide; b.SetRecording(true) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			bar, reader := newTestBar(t, ModeAuto, "xterm-256color", 80, 24, true, time.Second)
+			configure(bar)
+			bar.RemoteSize()
+			time.Sleep(200 * time.Millisecond)
+			readPipe(reader)
+			_, _ = bar.Write([]byte("\x1b[?1049h\x1b[H\x1b[2Jvim"))
+			time.Sleep(300 * time.Millisecond)
+			out := readPipe(reader)
+			erase, enter := strings.Index(out, "\x1b[24;1H\x1b[2K"), strings.Index(out, "\x1b[?1049h")
+			if erase < 0 || enter < 0 || erase > enter {
+				t.Fatalf("bar row 24 not erased before the alternate screen is entered: %q", out)
+			}
+			if name != "hide" && !strings.Contains(out[enter:], "\x1b[24;1H\x1b[2K") {
+				t.Fatalf("bar not painted again on the alternate screen: %q", out)
+			}
+			_, _ = bar.Write([]byte("\x1b[?1049l"))
+			time.Sleep(300 * time.Millisecond)
+			if out := readPipe(reader); !strings.Contains(out, "\x1b[24;1H\x1b[2K") {
+				t.Fatalf("bar not painted again on the main screen after the application left: %q", out)
+			}
+		})
+	}
+}
