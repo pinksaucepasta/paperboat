@@ -22,6 +22,12 @@ type Retention struct {
 	// until then), and a tunnel, tunnel route or preview/tunnel domain after it was deleted (past its quarantine), and a DNS
 	// publication after its records were withdrawn.
 	EndedPublications time.Duration `json:"ended_publications"`
+	// FinishedEnrollments: a cancelled, expired, denied, revoked or deleted machine pairing, and a pairing reset receipt,
+	// once nothing can retry them (installation recovery lasts 24 hours, so at least that). Helper enrollment grants
+	// go with ExpiredCredentials.
+	FinishedEnrollments time.Duration `json:"finished_enrollments"`
+	// AccountDeletionJobs: a finished (done or failed) provider job of an account deletion, the proof its cleanup ran.
+	AccountDeletionJobs time.Duration `json:"account_deletion_jobs"`
 	// AcknowledgedUsageReceipts: edge usage receipts after the server acknowledged them.
 	AcknowledgedUsageReceipts time.Duration `json:"acknowledged_usage_receipts"`
 	TunnelLogs                time.Duration `json:"tunnel_logs"`
@@ -47,6 +53,7 @@ type Retention struct {
 func defaultRetention() Retention {
 	return Retention{
 		ExpiredCredentials: time.Hour, IdempotencyRecords: day, FinishedOperations: 7 * day, EndedSessions: 30 * day, EndedPublications: 30 * day,
+		FinishedEnrollments: 7 * day, AccountDeletionJobs: 90 * day,
 		AcknowledgedUsageReceipts: 2 * day, TunnelLogs: 7 * day, DecidedMachineRequests: 90 * day, InboxRequests: 30 * day, StripeEvents: 30 * day,
 		SupersededMeshEntries: time.Hour, Recordings: 90 * day, SupportReportsPerAccount: 1000, Batch: 500, Budget: 20 * time.Second,
 	}
@@ -54,7 +61,7 @@ func defaultRetention() Retention {
 
 func (r Retention) validate(accessSessionRetention time.Duration) error {
 	switch {
-	case r.ExpiredCredentials < time.Minute, r.IdempotencyRecords < time.Hour, r.FinishedOperations < day, r.EndedPublications < day,
+	case r.ExpiredCredentials < time.Minute, r.IdempotencyRecords < time.Hour, r.FinishedOperations < day, r.EndedPublications < day, r.FinishedEnrollments < 2*day, r.AccountDeletionJobs < day,
 		r.AcknowledgedUsageReceipts < time.Hour, r.TunnelLogs < time.Hour, r.DecidedMachineRequests < day, r.InboxRequests < day, r.StripeEvents < 4*day,
 		r.SupersededMeshEntries < time.Minute:
 		return fmt.Errorf("retention: a window is below its minimum")

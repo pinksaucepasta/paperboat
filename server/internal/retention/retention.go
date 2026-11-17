@@ -112,6 +112,27 @@ var policies = []policy{
 	{"preview_domains", batchOf("preview_domains",
 		`deleted_at < now()-make_interval(secs=>$2) AND (quarantine_until IS NULL OR quarantine_until < now())`),
 		seconds(func(c config.Retention) time.Duration { return c.EndedPublications })},
+	// A grant past its expiry is dead (a consumed one replays only until then). One a pairing still names stays: the
+	// pairing's setup check needs the link, so the pairing policy below goes first and the grant on a later pass.
+	{"control_helper_enrollments", batchOf("control_helper_enrollments", `expires_at < now()-make_interval(secs=>$2)
+ AND NOT EXISTS(SELECT 1 FROM paperboat.user_machine_pairings p WHERE p.authenticated_setup_helper_enrollment_id=control_helper_enrollments.id)`),
+		seconds(func(c config.Retention) time.Duration { return c.ExpiredCredentials })},
+	// A pairing nobody can retry any more (failed_retryable, ready, disconnected and auth_consumed stay: a console retry,
+	// a live machine or its recovery still reads them); its reset receipts cascade.
+	{"user_machine_pairings", batchOf("user_machine_pairings",
+		`installation_state IN ('cancelled','expired','denied','revoked','deleted') AND expires_at < now()-make_interval(secs=>$2)
+ AND updated_at < now()-make_interval(secs=>$2)
+ AND (installation_config_consumed_at IS NULL OR installation_config_consumed_at < now()-make_interval(secs=>$2))`),
+		seconds(func(c config.Retention) time.Duration { return c.FinishedEnrollments })},
+	// A receipt replays a reset only while its enrollment still waits for bootstrap; the pairing policy above takes the
+	// receipts of pairings it deletes, this one those of a pairing that lives on (a paired machine).
+	{"user_machine_pairing_resets", batchOf("user_machine_pairing_resets", `completed_at < now()-make_interval(secs=>$2)
+ AND NOT EXISTS(SELECT 1 FROM paperboat.user_machine_pairings p WHERE p.id=user_machine_pairing_resets.enrollment_id
+  AND p.installation_state='awaiting_bootstrap')`),
+		seconds(func(c config.Retention) time.Duration { return c.FinishedEnrollments })},
+	{"account_deletion_jobs", batchOf("account_deletion_jobs",
+		`state IN ('done','failed') AND coalesce(completed_at,created_at) < now()-make_interval(secs=>$2)`),
+		seconds(func(c config.Retention) time.Duration { return c.AccountDeletionJobs })},
 	// A finished operation still referenced stays until its referrer goes.
 	{"operations", batchOf("operations", `completed_at < now()-make_interval(secs=>$2)
  AND NOT EXISTS(SELECT 1 FROM paperboat.preview_lease_create_operations x WHERE x.account_id=operations.account_id AND x.operation_id=operations.id)`),
