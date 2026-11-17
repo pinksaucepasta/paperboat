@@ -79,6 +79,7 @@ type item struct {
 	trace      sentry.Context
 }
 type Service struct {
+	flood            *reporting.FloodGuard // repeated identical faults reach Sentry a few times, then once an hour
 	store            Store
 	client           *sentry.Client
 	release          string
@@ -192,7 +193,7 @@ func New(store Store, cfg Config) (*Service, error) {
 	if !tokenPattern.MatchString(release) {
 		return nil, ErrInvalid
 	}
-	s := &Service{store: store, release: release, environment: cfg.Environment, region: cfg.Region, instance: cfg.Instance, queue: make(chan item, QueueCapacity), logger: slog.Default()}
+	s := &Service{flood: reporting.NewFloodGuard(""), store: store, release: release, environment: cfg.Environment, region: cfg.Region, instance: cfg.Instance, queue: make(chan item, QueueCapacity), logger: slog.Default()}
 	options := sentry.ClientOptions{}
 	if err := s.configureSignals(cfg, &options); err != nil {
 		return nil, err
@@ -677,6 +678,10 @@ func (s *Service) process(ctx context.Context, value item) {
 	}
 	e := NewFaultEvent(value.fault, value.stack)
 	if e == nil {
+		s.sdkSubmissionsDropped.Add(1)
+		return
+	}
+	if ok, _ := s.flood.Admit(value.fault.Component + "/" + value.fault.Operation + "/" + value.fault.Stage + "/" + value.fault.Code + "/" + value.fault.Cause); !ok {
 		s.sdkSubmissionsDropped.Add(1)
 		return
 	}

@@ -42,6 +42,7 @@ func openProcessDiagnostics(ctx context.Context, args []string, reporter *errorr
 		var directory string
 		directory, storageErr = processDiagnosticsDirectory(command)
 		if storageErr == nil {
+			reporter.PersistFloodState(filepath.Join(directory, "sentry-flood.json"))
 			recorder, storageErr = diagnostics.NewRecorder(diagnostics.DiskConfig{Directory: directory, OwnerUID: os.Geteuid()})
 		}
 	}

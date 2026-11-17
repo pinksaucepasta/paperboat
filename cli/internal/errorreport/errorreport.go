@@ -54,6 +54,7 @@ type Reporter struct {
 	httpFailures             atomic.Uint64
 	flushStatus              atomic.Uint32
 	flushDone                chan struct{}
+	flood                    *reporting.FloodGuard
 }
 
 func FromEnvironment() *Reporter {
@@ -105,7 +106,7 @@ func newReporter(dsn, release string, transport sentry.Transport) *Reporter {
 }
 
 func newSignalReporter(dsn, release string, transport sentry.Transport, logs, metrics bool, rate float64) *Reporter {
-	r := &Reporter{logs: logs, metrics: metrics, rate: rate, metricSchema: make(map[string]map[string]map[string]bool)}
+	r := &Reporter{flood: reporting.NewFloodGuard(""), logs: logs, metrics: metrics, rate: rate, metricSchema: make(map[string]map[string]map[string]bool)}
 	client, err := sentry.NewClient(sentry.ClientOptions{
 		Dsn: dsn, Release: release, Environment: environment(), Transport: transport,
 		AttachStacktrace: false, EnableTracing: rate > 0, TracesSampleRate: rate, MaxSpans: 64, BeforeSendLog: sanitizeLog, BeforeSendMetric: r.sanitizeMetric, BeforeSendTransaction: sanitizeTransaction, MaxBreadcrumbs: 0,
@@ -127,6 +128,14 @@ func newSignalReporter(dsn, release string, transport sentry.Transport, logs, me
 	return r
 }
 
+// PersistFloodState keeps the repeated-error limits in path (its directory must exist), so a daemon that crashes and
+// is restarted by its service manager every few seconds does not get a fresh allowance per process.
+func (r *Reporter) PersistFloodState(path string) {
+	if r != nil && r.flood != nil {
+		r.flood.SetPath(path)
+	}
+}
+
 func (r *Reporter) Enabled() bool { return r != nil && r.client != nil && !r.closed.Load() }
 
 func (r *Reporter) Capture(ctx context.Context, component, classification string) {
@@ -134,7 +143,8 @@ func (r *Reporter) Capture(ctx context.Context, component, classification string
 		return
 	}
 	defer r.submitMu.RUnlock()
-	if !r.admit(time.Now()) {
+	admitted, suppressed := r.flood.Admit(component + "/" + classification)
+	if !admitted || !r.admit(time.Now()) {
 		return
 	}
 	ctx = r.context(ctx)
@@ -142,6 +152,9 @@ func (r *Reporter) Capture(ctx context.Context, component, classification string
 	event.Level = sentry.LevelError
 	event.Exception = []sentry.Exception{{Type: classification, Stacktrace: safeStack(2)}}
 	event.Tags = map[string]string{"component": Component(component)}
+	if suppressed > 0 {
+		event.Tags["suppressed_events"] = strconv.FormatUint(uint64(suppressed), 10)
+	}
 	if value, ok := ctx.Value(lifecycleComponentKey{}).(string); ok {
 		event.Tags["service_component"] = serviceComponent(value)
 	}
@@ -357,6 +370,9 @@ func sanitize(event *sentry.Event, _ *sentry.EventHint) *sentry.Event {
 		if number, err := strconv.ParseUint(value, 10, 32); err == nil && number != 0 {
 			tags["errno"] = strconv.FormatUint(number, 10)
 		}
+	}
+	if value := event.Tags["suppressed_events"]; validErrno(value) {
+		tags["suppressed_events"] = value
 	}
 	if value := event.Tags["error_chain"]; value != "" {
 		types := strings.Split(value, ",")

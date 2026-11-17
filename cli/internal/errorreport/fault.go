@@ -219,7 +219,11 @@ func (r *Reporter) captureFault(ctx context.Context, f Fault, capture bool) Faul
 			meter.Distribution("paperboat.operation.duration", time.Duration(duration).Seconds(), sentry.WithUnit(sentry.UnitSecond))
 		}
 	}
-	if !capture || f.Outcome == "canceled" || f.Outcome == "rejected" || !r.admit(time.Now()) {
+	if !capture || f.Outcome == "canceled" || f.Outcome == "rejected" {
+		return f
+	}
+	admitted, suppressed := r.flood.Admit(f.Component + "/" + f.Stage + "/" + f.Code + "/" + f.Cause)
+	if !admitted || !r.admit(time.Now()) {
 		return f
 	}
 	event := sentry.NewEvent()
@@ -240,6 +244,9 @@ func (r *Reporter) captureFault(ctx context.Context, f Fault, capture bool) Faul
 	}
 	event.Exception = []sentry.Exception{{Type: f.Code, Value: f.Cause, Stacktrace: safeStack(2)}}
 	event.Fingerprint = []string{"{{ default }}", f.Component, f.Stage, f.Code, f.Cause}
+	if suppressed > 0 {
+		event.Tags["suppressed_events"] = strconv.FormatUint(uint64(suppressed), 10)
+	}
 	if span := sentry.SpanFromContext(ctx); span != nil {
 		event.Contexts = map[string]sentry.Context{"trace": {"trace_id": span.TraceID, "span_id": span.SpanID}}
 	}

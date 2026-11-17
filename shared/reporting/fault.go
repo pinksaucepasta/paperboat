@@ -158,7 +158,15 @@ func (r *Reporter) observeFailure(ctx context.Context, definition string, err er
 		meter.SetAttributes(attribute.String("component", r.component), attribute.String("operation", fault.Operation), attribute.String("outcome", fault.Outcome), attribute.String("code", fault.Code))
 		meter.Count("paperboat.operation.count", 1)
 	}
-	if !capture || fault.Outcome == "canceled" || fault.Outcome == "rejected" || !r.permit(&r.sent, &r.droppedErrors, maxEvents) {
+	if !capture || fault.Outcome == "canceled" || fault.Outcome == "rejected" {
+		return fault
+	}
+	admitted, suppressed := r.flood.Admit(fault.Component + "/" + fault.Stage + "/" + fault.Code + "/" + fault.Cause)
+	if !admitted {
+		r.droppedErrors.Add(1)
+		return fault
+	}
+	if !r.permit(&r.sent, &r.droppedErrors, maxEvents) {
 		return fault
 	}
 	event := &sentry.Event{
@@ -172,6 +180,9 @@ func (r *Reporter) observeFailure(ctx context.Context, definition string, err er
 		Fingerprint: []string{"{{ default }}", fault.Component, fault.Stage, fault.Code, fault.Cause},
 	}
 	addFaultTags(event.Tags, fault)
+	if suppressed > 0 {
+		event.Tags["suppressed_events"] = strconv.FormatUint(uint64(suppressed), 10)
+	}
 	r.client.CaptureEvent(event, nil, nil)
 	return fault
 }

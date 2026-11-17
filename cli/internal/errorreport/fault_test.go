@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -400,5 +401,20 @@ func TestObserveFailureSkipsLocallyExplainedRefusals(t *testing.T) {
 	r.ObserveFailure(context.Background(), "paperboat-daemon", "engine_tunnels", "fetch", "service_failed", errors.New("boom"))
 	if seen != 1 {
 		t.Fatalf("an ordinary failure was recorded %d times", seen)
+	}
+}
+
+// GO-2S: a daemon restarted by its service manager every 5 s sent one event per process, 4,135 in 11 hours.
+func TestCrashLoopingProcessesShareTheFloodLimit(t *testing.T) {
+	state := filepath.Join(t.TempDir(), "sentry-flood.json")
+	transport := &recordingTransport{}
+	for range 25 {
+		r := newReporter("https://public@example.invalid/1", "test", transport)
+		r.PersistFloodState(state)
+		r.CaptureFailure(context.Background(), "paperboat-daemon", "daemon", "command", "unexpected_cli_failure", syscall.EIO)
+		r.Flush(context.Background())
+	}
+	if len(transport.events) != 3 {
+		t.Fatalf("%d events from 25 restarts, want 3", len(transport.events))
 	}
 }

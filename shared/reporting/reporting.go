@@ -49,6 +49,7 @@ type Reporter struct {
 	component             string
 	region, instance      string
 	localFault            func(Fault)
+	flood                 *FloodGuard
 	quotaMu               sync.Mutex
 	sent                  atomic.Uint32
 	logsSent              atomic.Uint32
@@ -142,7 +143,7 @@ func New(component string) (*Reporter, error) {
 	config.Environment = environment
 	config.PropagateTraceparent = false
 	config.TracePropagationTargets = []string{}
-	r := &Reporter{enabled: true, logs: logs, traces: traceRate > 0, metrics: metrics, component: component, region: region, instance: instance, localFault: writeLocalFault}
+	r := &Reporter{enabled: true, logs: logs, traces: traceRate > 0, metrics: metrics, component: component, region: region, instance: instance, localFault: writeLocalFault, flood: NewFloodGuard("")}
 	config.HTTPTransport = sdkHTTPObserver{next: &http.Transport{Proxy: http.ProxyFromEnvironment}, failures: &r.httpFailures}
 	client, err := sentry.NewClient(config)
 	if err != nil {
@@ -150,6 +151,14 @@ func New(component string) (*Reporter, error) {
 	}
 	r.client, r.hub = client, sentry.NewHub(client, sentry.NewScope())
 	return r, nil
+}
+
+// PersistFloodState keeps the repeated-error limits in path, so a crash-looping process that restarts does not get
+// a fresh allowance each time. The directory must exist; an unwritable path only costs the persistence.
+func (r *Reporter) PersistFloodState(path string) {
+	if r != nil && r.flood != nil {
+		r.flood.SetPath(path)
+	}
 }
 
 func firstNonempty(value, fallback string) string {
@@ -294,7 +303,11 @@ func sanitizeLog(log *sentry.Log, component, release, environment string, fleet 
 		attrs["cause"] = attribute.StringValue(cause)
 		attrs["error_type"] = attribute.StringValue(errorType)
 	}
-	for key, value := range map[string]string{"error_chain": errorChain, "errno": errno, "http_status": httpStatus, "source_file": sourceFile, "source_function": sourceFunction, "source_line": sourceLine} {
+	suppressed := event.Tags["suppressed_events"]
+	if suppressed != "" && !validErrno(suppressed) {
+		suppressed = ""
+	}
+	for key, value := range map[string]string{"error_chain": errorChain, "errno": errno, "http_status": httpStatus, "source_file": sourceFile, "source_function": sourceFunction, "source_line": sourceLine, "suppressed_events": suppressed} {
 		if value != "" {
 			attrs[key] = attribute.StringValue(value)
 		}
