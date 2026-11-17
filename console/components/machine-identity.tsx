@@ -11,6 +11,7 @@ import { useMachineEdit } from "@/components/machine-edit"
 import { TagChips } from "@/components/machine-tags"
 import { RemoveMachineDialog } from "@/components/machine-remove"
 import { DangerZone as DangerZonePanel } from "@/components/section"
+import { ErrorMessage } from "@/components/error-reference"
 
 /**
  * The machine's name and tags. Hovering shows a pencil; editing happens in the title
@@ -97,7 +98,7 @@ function TitleEditor({
       {(edit.problem || edit.save.isError || nameChanged) && (
         <p className={edit.problem || edit.save.isError ? "text-xs text-destructive" : "text-xs text-muted-foreground"}>
           {edit.save.isError
-            ? edit.save.error.message
+            ? <ErrorMessage error={edit.save.error} />
             : (edit.problem ??
               (hostname && (
                 <>

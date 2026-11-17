@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
+import { ErrorMessage } from "@/components/error-reference"
 
 /** "tag:prod" → "prod": the prefix belongs to the policy file, not to what people read. */
 export const tagLabel = (tag: string) => tag.replace(/^tag:/, "")
@@ -142,7 +143,7 @@ function EditTags({ machine, onClose }: { machine: Machine; onClose: () => void 
         )}
         {save.isError && !(failure instanceof PolicyError && failure.status === 412) && (
           <p className="text-sm text-destructive">
-            {conflict ? "Someone changed the policy meanwhile. Close and open this again to see the current tags." : save.error.message}
+            {conflict ? "Someone changed the policy meanwhile. Close and open this again to see the current tags." : <ErrorMessage error={save.error} />}
           </p>
         )}
         <DialogFooter>

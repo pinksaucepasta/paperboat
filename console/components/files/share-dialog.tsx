@@ -226,7 +226,7 @@ function UploadBody({
   const destination = pickHost(destinations, (entry) => destinationValue(entry) === chosen, Boolean(source.machine))
   const [file, setFile] = useState<File>()
   const [progress, setProgress] = useState(0)
-  const [error, setError] = useState<string>()
+  const [error, setError] = useState<Error>()
   const cancel = useRef<() => void>(undefined)
   const inputRef = useRef<HTMLInputElement>(null)
   const [over, setOver] = useState(false)
@@ -252,7 +252,7 @@ function UploadBody({
       (failure: Error) => {
         registerCancel(undefined)
         setFile(undefined)
-        setError(failure.message)
+        setError(failure)
       },
     )
   }
@@ -334,7 +334,9 @@ function UploadBody({
         <span className="text-xs text-muted-foreground">or click to choose</span>
       </button>
       {error ? (
-        <p className="text-sm text-destructive">{error}</p>
+        <p className="text-sm text-destructive">
+          <ErrorMessage error={error} />
+        </p>
       ) : (
         <p className="text-xs text-muted-foreground">
           {destination

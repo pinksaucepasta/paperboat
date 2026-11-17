@@ -26,6 +26,7 @@ import { Field, FieldError, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
+import { ErrorMessage } from "@/components/error-reference"
 
 const scopeLabels: Record<PortNameScope, string> = {
   machine: "One machine",
@@ -155,9 +156,11 @@ function AddNameDialog({ wide, domain, onClose }: { wide: boolean; domain: strin
   const port = Number(portText)
   const picked = useMachine(machineId).data
   const needsMachine = scope !== "all_machines"
-  const nameProblem = name && !portNamePattern.test(name) ? "Use lowercase letters, digits and dashes. Not only digits." : undefined
+  const nameProblem =
+    name && !portNamePattern.test(name) ? "Use lowercase letters, digits and dashes. Not only digits." : undefined
   const portProblem = portText && !validPort(port) ? "A port is a number from 1 to 65535." : undefined
-  const denied = scope === "machine" && picked && !wide && !picked.can_manage ? "You can’t manage this machine." : undefined
+  const denied =
+    scope === "machine" && picked && !wide && !picked.can_manage ? "You can’t manage this machine." : undefined
   const ready = name && !nameProblem && portText && !portProblem && (!needsMachine || machineId) && !denied
   const add = useMutation({
     mutationFn: () =>
@@ -173,7 +176,7 @@ function AddNameDialog({ wide, domain, onClose }: { wide: boolean; domain: strin
       onClose()
     },
   })
-  const error = nameProblem ?? portProblem ?? denied ?? (add.isError ? add.error.message : undefined)
+  const error = nameProblem ?? portProblem ?? denied ?? (add.isError ? <ErrorMessage error={add.error} /> : undefined)
   return (
     <Dialog open onOpenChange={(next) => !next && !add.isPending && onClose()}>
       <DialogContent className="gap-4 sm:max-w-md">

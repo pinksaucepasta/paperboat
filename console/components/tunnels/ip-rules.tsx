@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button"
 import { Field, FieldError, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
+import { ErrorMessage } from "@/components/error-reference"
 
 /** A tunnel's or preview's IP rules: who may reach it by address, checked by the edge before your app. */
 export function IpRules({ kind, id }: { kind: "tunnel" | "preview"; id: string }) {
@@ -73,7 +74,9 @@ function RulesForm({ kind, id, saved }: { kind: "tunnel" | "preview"; id: string
           values={draft.deny}
           onChange={(deny) => setDraft({ ...draft, deny })}
         />
-        {save.isError && <FieldError>{save.error.message.replace(/^ip rules invalid: /, "")}</FieldError>}
+        {save.isError && <FieldError>
+            <ErrorMessage error={save.error} message={save.error.message.replace(/^ip rules invalid: /, "")} />
+          </FieldError>}
       </div>
     </Section>
   )

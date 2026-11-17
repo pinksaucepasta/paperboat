@@ -10,6 +10,7 @@ import { Frame, TerminalRoom, TopBar } from "@/components/terminal/terminal-page
 import { Button } from "@/components/ui/button"
 import { Field, FieldDescription, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
+import { ErrorMessage } from "@/components/error-reference"
 
 /**
  * `/terminal/{id}`, the link a terminal is shared by. People with access through their account
@@ -39,7 +40,8 @@ export function TerminalJoin({ id, withCode }: { id: string; withCode: boolean }
   })
   const [askCode, setAskCode] = useState(withCode)
 
-  if (access.data?.access_method === "code") return <TerminalRoom session={access.data.session} guest onPushed={setPushed} />
+  if (access.data?.access_method === "code")
+    return <TerminalRoom session={access.data.session} guest onPushed={setPushed} />
   if (access.isPending || account || me.isPending) {
     return (
       <Frame>
@@ -121,11 +123,16 @@ function JoinForm({ id, signedIn }: { id: string; signedIn?: Me }) {
     onError: () => setCode(""),
   })
   const problem =
-    join.error instanceof ApiError && (join.error.status === 429 || join.error.code === "terminal_guest_capacity")
-      ? join.error.message
-      : join.isError
-        ? "That code didn’t work. Codes expire or get replaced — ask for a new one."
-        : ""
+    join.error instanceof ApiError && (join.error.status === 429 || join.error.code === "terminal_guest_capacity") ? (
+      <ErrorMessage error={join.error} />
+    ) : join.isError ? (
+      <ErrorMessage
+        error={join.error}
+        message="That code didn’t work. Codes expire or get replaced — ask for a new one."
+      />
+    ) : (
+      ""
+    )
 
   return (
     <Frame>

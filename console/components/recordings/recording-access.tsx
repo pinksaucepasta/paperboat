@@ -8,6 +8,7 @@ import { subscribeVaultLock, vaultUnlocked } from "@/lib/envvault/crypto"
 import { grantRecordingKey, recordingKeyQuery, recordingMessage, waitingViewers } from "@/lib/recordings"
 import { EnvUnlock } from "@/components/environment/env-unlock"
 import { Button } from "@/components/ui/button"
+import { ErrorMessage } from "@/components/error-reference"
 
 /**
  * Viewers added after the key was made have no copy of it until someone holding one seals it for them, in their
@@ -39,7 +40,7 @@ export function RecordingAccess({ teamId }: { teamId: string }) {
         >
           {grant.isPending ? "Giving access…" : "Give access"}
         </Button>
-        {grant.isError && <p className="w-full text-destructive">{recordingMessage(grant.error)}</p>}
+        {grant.isError && <p className="w-full text-destructive">{<ErrorMessage error={grant.error} message={recordingMessage(grant.error)} />}</p>}
       </div>
       {asked && !unlocked && <EnvUnlock title="Unlock your vault to give them a copy of the recording key." />}
     </div>

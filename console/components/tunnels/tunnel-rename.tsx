@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Field, FieldError, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
+import { ErrorMessage } from "@/components/error-reference"
 
 /** The server's rule (tunnelv1 validateTunnelName): 1–63 of letters, digits, ".", "_", "-", not starting with punctuation. */
 const namePattern = /^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$/
@@ -36,7 +37,13 @@ function useRename(tunnel: Tunnel, onDone: () => void) {
     if (final === tunnel.name) return onDone()
     if (!problem) save.mutate()
   }
-  return { name, setName, problem: problem ?? (save.isError ? save.error.message : undefined), save, submit }
+  return {
+    name,
+    setName,
+    problem: problem ?? (save.isError ? <ErrorMessage error={save.error} /> : undefined),
+    save,
+    submit,
+  }
 }
 
 const inPlace =

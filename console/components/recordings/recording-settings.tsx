@@ -29,6 +29,7 @@ import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
+import { ErrorMessage } from "@/components/error-reference"
 
 /**
  * Team → Recordings (the personal workspace's key is set up in PersonalRecordingSetup): the team recording key, who may start recordings by hand, and the policy rules that record
@@ -46,7 +47,7 @@ export function RecordingSettings({ team, emails, admin }: { team: Team; emails:
         </Link>
       </p>
     )
-  if (key.isError) return <p className="text-sm text-muted-foreground">{recordingMessage(key.error)}</p>
+  if (key.isError) return <p className="text-sm text-muted-foreground">{<ErrorMessage error={key.error} message={recordingMessage(key.error)} />}</p>
   return (
     <div className="flex flex-col gap-10" data-recording-settings>
       <RecordingAccess teamId={team.team_id} />
@@ -98,7 +99,7 @@ function KeySection({
           Add a replay rule first. The key is encrypted for each person who can replay.
         </p>
       )}
-      {create.isError && <p className="border-b border-divider py-3 text-sm text-destructive">{recordingMessage(create.error)}</p>}
+      {create.isError && <p className="border-b border-divider py-3 text-sm text-destructive">{<ErrorMessage error={create.error} message={recordingMessage(create.error)} />}</p>}
       {state?.viewers.map((viewer) => (
         <Row key={viewer.account_id} label={emails.get(viewer.account_id) ?? viewer.account_id}>
           <span className="text-muted-foreground">{viewerStatus(viewer, Boolean(state.key))}</span>
@@ -129,7 +130,7 @@ function ManualStartSection({ teamId, state, admin }: { teamId: string; state: R
           onCheckedChange={(checked) => change.mutate(checked)}
         />
       </SettingRow>
-      {change.isError && <p className="py-3 text-sm text-destructive">{recordingMessage(change.error)}</p>}
+      {change.isError && <p className="py-3 text-sm text-destructive">{<ErrorMessage error={change.error} message={recordingMessage(change.error)} />}</p>}
     </Section>
   )
 }

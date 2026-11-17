@@ -15,6 +15,7 @@ import { EnvUnlock } from "@/components/environment/env-unlock"
 import { Crumb, CrumbLink, PageHeader } from "@/components/page-header"
 import { Button } from "@/components/ui/button"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
+import { ErrorMessage } from "@/components/error-reference"
 
 const speeds = [1, 2, 4, 8] as const
 
@@ -56,7 +57,7 @@ function ReplayError({ error, retry }: { error: unknown; retry: () => void }) {
   const retryable = ["machine_unavailable", "credential_expired", "connection_lost", "connection_failed", "recordings_unavailable", "too_many_pending", "network", "timeout"].includes(code) || !code
   return (
     <div className="flex flex-col items-center gap-3 py-12 text-center text-sm text-muted-foreground" data-recording-error={code || "failed"}>
-      <p>{recordingMessage(error)}</p>
+      <p><ErrorMessage error={error} message={recordingMessage(error)} /></p>
       {retryable && (
         <Button variant="outline" size="sm" onClick={retry}>
           Retry

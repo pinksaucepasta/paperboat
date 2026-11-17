@@ -6,6 +6,7 @@ import Link from "next/link"
 import { createRecordingKey, personalWorkspace, recordingKeyQuery, recordingMessage, type RecordingKeyState, type RecordingViewer } from "@/lib/recordings"
 import { Button } from "@/components/ui/button"
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
+import { ErrorMessage } from "@/components/error-reference"
 
 /**
  * The personal workspace's recording key: made in this browser, encrypted to the owner's own ENV keys (the same vault
@@ -41,7 +42,7 @@ export function PersonalRecordingSetup({ state }: { state: RecordingKeyState }) 
             {create.isPending ? "Turning on…" : "Turn on recording"}
           </Button>
         )}
-        {create.isError && <p className="text-sm text-destructive">{recordingMessage(create.error)}</p>}
+        {create.isError && <p className="text-sm text-destructive">{<ErrorMessage error={create.error} message={recordingMessage(create.error)} />}</p>}
       </EmptyContent>
     </Empty>
   )

@@ -82,7 +82,7 @@ function ClosedVault() {
           vault.isPending ? (
             <Skeleton className="my-0.5 h-4 w-56" />
           ) : vault.isError ? (
-            vault.error.message
+            <ErrorMessage error={vault.error} />
           ) : notSetUp ? (
             "Not set up. Create your vault above to store variables."
           ) : (

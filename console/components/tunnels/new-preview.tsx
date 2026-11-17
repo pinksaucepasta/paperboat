@@ -265,7 +265,7 @@ export function Starting({
         <p className="font-medium">The preview didn’t start</p>
         <p className="text-sm text-muted-foreground">
           {preview.isError
-            ? preview.error.message
+            ? <ErrorMessage error={preview.error} />
             : `Couldn’t start the preview on ${machineName}. Check that ${machineName} is online and try again.`}
         </p>
         <Button variant="secondary" size="lg" className="mt-1" onClick={onDone}>

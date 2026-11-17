@@ -29,6 +29,7 @@ import { Button } from "@/components/ui/button"
 import { Field, FieldError, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
+import { ErrorMessage } from "@/components/error-reference"
 
 const maxBytes = 64 << 10
 const listPath = sections.recipes.href
@@ -98,7 +99,9 @@ export function RecipeEditor({ recipe, start }: { recipe?: Recipe; start?: { nam
   const missing = save.error ? unknownVault(save.error) : undefined
   const nameError = taken ? failed.message : name && !validName(name) ? nameHint : undefined
   const other =
-    failed && !found.length && !taken && !problem && !(failed instanceof VaultLockedError) ? failed.message : undefined
+    failed && !found.length && !taken && !problem && !(failed instanceof VaultLockedError) ? (
+      <ErrorMessage error={failed} />
+    ) : undefined
 
   if (created) {
     return (

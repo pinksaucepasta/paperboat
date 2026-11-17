@@ -25,6 +25,7 @@ import {
 import { answerInvitation, answerMachine, roleLabels, type TeamInvitation } from "@/lib/teams"
 import { queryKeys } from "@/lib/query-keys"
 import { useTrack } from "@/lib/analytics"
+import { ErrorMessage } from "@/components/error-reference"
 
 /**
  * The header's Requests: things waiting for you to accept or decline (files teammates want to send,
@@ -121,13 +122,17 @@ function Answer({
   accept = "Accept",
 }: {
   pending: boolean
-  error?: string
+  error?: Error | null
   answer: (reply: "accept" | "decline") => void
   accept?: string
 }) {
   return (
     <>
-      {error && <span className="text-xs text-destructive">{error}</span>}
+      {error && (
+        <span className="text-xs text-destructive">
+          <ErrorMessage error={error} />
+        </span>
+      )}
       <div className="flex gap-2">
         <Button variant="outline" disabled={pending} onClick={() => answer("decline")}>
           Decline
@@ -173,7 +178,7 @@ function FileRequest({ request, workspace }: { request: InboxRequest; workspace:
           {request.destination_machine_name || "your machine"} · expires <Time iso={request.expires_at} relative />
         </span>
       </div>
-      <Answer pending={decide.isPending} error={decide.error?.message} answer={decide.mutate} />
+      <Answer pending={decide.isPending} error={decide.error} answer={decide.mutate} />
     </div>
   )
 }
@@ -211,7 +216,7 @@ function InvitationRequest({ invitation }: { invitation: TeamInvitation }) {
           Invited by {invitation.created_by_email} · expires <Time iso={invitation.expires_at} relative />
         </span>
       </div>
-      <Answer pending={answer.isPending} error={answer.error?.message} answer={answer.mutate} accept="Join team" />
+      <Answer pending={answer.isPending} error={answer.error} answer={answer.mutate} accept="Join team" />
     </div>
   )
 }
@@ -245,7 +250,7 @@ function MachineRequestRow({ row }: { row: MachineRequest }) {
         <span className="font-medium">{row.request.alias}</span> wants to join{" "}
         <span className="font-medium">{row.team.display_name || row.team.team_id}</span>
       </span>
-      <Answer pending={answer.isPending} error={answer.error?.message} answer={answer.mutate} />
+      <Answer pending={answer.isPending} error={answer.error} answer={answer.mutate} />
     </div>
   )
 }

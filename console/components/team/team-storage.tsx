@@ -20,6 +20,7 @@ import { Field, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
+import { ErrorMessage } from "@/components/error-reference"
 
 /**
  * Team → Storage: the team's own S3-compatible bucket, where machines archive their terminal recordings. Owners and admins
@@ -39,7 +40,7 @@ export function TeamStorage({ team, admin }: { team: string; admin: boolean }) {
         </Link>
       </p>
     )
-  if (bucket.isError) return <p className="text-sm text-muted-foreground">{bucketMessage(bucket.error)}</p>
+  if (bucket.isError) return <p className="text-sm text-muted-foreground">{<ErrorMessage error={bucket.error} message={bucketMessage(bucket.error)} />}</p>
   return (
     <div className="flex flex-col gap-10" data-team-storage>
       <Section
@@ -176,7 +177,7 @@ function BucketDialog({ team, bucket, onClose }: { team: string; bucket?: TeamBu
           </SettingRow>
           <p className="text-xs text-muted-foreground">The key needs permission to put, get and delete objects.</p>
           <p className="text-xs text-muted-foreground">Browser replay needs the bucket’s CORS to allow GET from {window.location.origin}.</p>
-          {save.isError && <p className="text-sm text-destructive">{bucketMessage(save.error)}</p>}
+          {save.isError && <p className="text-sm text-destructive">{<ErrorMessage error={save.error} message={bucketMessage(save.error)} />}</p>}
           <DialogFooter>
             <Button type="submit" size="lg" disabled={save.isPending}>
               {save.isPending ? "Checking…" : bucket ? "Save" : "Connect"}

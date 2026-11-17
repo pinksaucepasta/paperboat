@@ -638,7 +638,7 @@ function ChangeEdgesDialog({
       : undefined
   const failure =
     running === undefined
-      ? save.error?.message
+      ? save.error && <ErrorMessage error={save.error} />
       : running
         ? `Stop ${running} running ${running === 1 ? "preview or tunnel" : "previews and tunnels"} first.`
         : "Stop running previews and tunnels first."

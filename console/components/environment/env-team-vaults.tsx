@@ -79,7 +79,7 @@ function TeamRow({ team, unlocked }: { team: Workspace; unlocked: boolean }) {
         vault.isPending ? (
           <Skeleton className="my-0.5 h-4 w-40" />
         ) : vault.isError ? (
-          vault.error.message
+          <ErrorMessage error={vault.error} />
         ) : !created ? (
           "No variables yet."
         ) : (

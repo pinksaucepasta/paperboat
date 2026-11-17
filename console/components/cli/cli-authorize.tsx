@@ -128,7 +128,7 @@ function Request({ code }: { code: string }) {
       workspaces={workspaces.data ?? []}
       workspaceName={workspaceName}
       busy={decide.isPending}
-      error={decide.isError ? decide.error.message : undefined}
+      error={decide.isError ? decide.error : undefined}
       onDecide={(decision, workspaceId) => decide.mutate({ decision, workspaceId })}
     />
   )
@@ -148,7 +148,7 @@ function Pending({
   workspaces: Workspace[]
   workspaceName: (id: string) => string
   busy: boolean
-  error: string | undefined
+  error: Error | undefined
   onDecide: (decision: "approve" | "deny", workspaceId?: string) => void
 }) {
   const [choice, setChoice] = useState<string>()
@@ -197,7 +197,11 @@ function Pending({
           Approve only if this matches the code in your terminal.
         </FieldDescription>
       </Field>
-      {error && <p className="text-sm font-medium text-white">{error}</p>}
+      {error && (
+        <p className="text-sm font-medium text-white">
+          <ErrorMessage error={error} />
+        </p>
+      )}
       <div className="flex gap-2">
         <Button
           size="lg"

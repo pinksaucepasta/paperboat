@@ -9,6 +9,7 @@ import { approveLink, cancelLink, finishConnect, githubErrors, reviewLink } from
 import { useTimeFormat } from "@/lib/use-time-format"
 import { BrandScreen, Heading, Outcome, brandPrimary, brandSecondary } from "@/components/brand-screen"
 import { Button } from "@/components/ui/button"
+import { ErrorMessage } from "@/components/error-reference"
 
 /** The link's secret travels in the fragment (never sent to a server or a link preview). */
 function useFragment(): string {
@@ -91,7 +92,7 @@ function Review({ link, token }: { link: string; token: string }) {
       <p className="text-sm text-white/75">Approve only if you just started this from your terminal.</p>
       {failed && (
         <p className="text-sm text-white">
-          {failed instanceof ApiError ? (githubErrors[failed.code] ?? failed.message) : failed.message}
+          {<ErrorMessage error={failed} message={failed instanceof ApiError ? (githubErrors[failed.code] ?? failed.message) : failed.message} />}
         </p>
       )}
       <div className="flex gap-3">
@@ -126,7 +127,7 @@ function Problem({ error }: { error: Error }) {
         expired ? "This link expired" : code === "github_link_used" ? "Already done" : "Couldn’t open this request"
       }
     >
-      {githubErrors[code] ?? error.message} {code === "github_link_other_account" ? "" : startAgain}
+      {<ErrorMessage error={error} message={githubErrors[code] ?? error.message} />} {code === "github_link_other_account" ? "" : startAgain}
     </Outcome>
   )
 }
@@ -199,7 +200,7 @@ export function GitHubCallback() {
           </Outcome>
         ) : errorCode || !code || !state ? (
           <Outcome icon={<XCircleIcon className="size-8 text-white" />} title="GitHub not connected">
-            {githubErrors[errorCode] ?? (finish.error?.message || "GitHub didn’t send the connection back.")} Try again
+            {<ErrorMessage error={finish.error} message={githubErrors[errorCode] ?? (finish.error?.message || "GitHub didn’t send the connection back.")} />} Try again
             from Config sync.
           </Outcome>
         ) : (

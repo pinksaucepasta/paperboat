@@ -47,7 +47,7 @@ export function AuditStreams({ team, canConfigure }: { team: string; canConfigur
     const plan = streams.error instanceof ApiError && streams.error.code === "team_plan_required"
     return (
       <p className="py-6 text-sm text-muted-foreground">
-        {plan ? "Streaming the audit log is part of the Team plan." : streams.error.message}
+        {plan ? "Streaming the audit log is part of the Team plan." : <ErrorMessage error={streams.error} />}
       </p>
     )
   }

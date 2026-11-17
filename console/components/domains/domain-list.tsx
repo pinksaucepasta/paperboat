@@ -485,7 +485,7 @@ function AddDomainDialog({ onClose, onAdded }: { onClose: () => void; onAdded: (
               spellCheck={false}
               className="font-mono"
             />
-            {(problem || add.isError) && <FieldError>{problem ?? add.error?.message}</FieldError>}
+            {(problem || add.isError) && <FieldError>{problem ?? (add.error ? <ErrorMessage error={add.error} /> : undefined)}</FieldError>}
           </Field>
           <DialogFooter>
             <Button type="button" variant="secondary" size="lg" onClick={onClose} disabled={add.isPending}>
