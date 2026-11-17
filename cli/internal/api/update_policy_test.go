@@ -12,10 +12,10 @@ import (
 func TestUpdatePolicyDeadlineAndResponseValidation(t *testing.T) {
 	deadline := time.Date(2026, 10, 9, 4, 0, 0, 0, time.UTC)
 	p := UpdatePolicy{Schema: "paperboat.client-update-policy/v1", Revision: 2, MinimumVersion: "2026.10.08.2", Reason: "Protocol update", EnforceAt: &deadline}
-	if p.Required("2026.10.08.1", deadline.Add(-time.Nanosecond)) || !p.Required("2026.10.08.1", deadline) || p.Required("2026.10.08.2", deadline) {
+	if UpdatePolicyRequired(p, "2026.10.08.1", deadline.Add(-time.Nanosecond)) || !UpdatePolicyRequired(p, "2026.10.08.1", deadline) || UpdatePolicyRequired(p, "2026.10.08.2", deadline) {
 		t.Fatal("deadline/floor enforcement incorrect")
 	}
-	if !p.Required("unknown", deadline) {
+	if !UpdatePolicyRequired(p, "unknown", deadline) {
 		t.Fatal("unidentified build accepted after deadline")
 	}
 	for _, body := range []string{

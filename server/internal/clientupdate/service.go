@@ -19,9 +19,10 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/audit"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/releases"
+	"github.com/pinksaucepasta/paperboat/shared/clientupdate"
 )
 
-const Schema = "paperboat.client-update-policy/v1"
+const Schema = clientupdate.Schema
 
 var (
 	ErrFloorUnavailable   = errors.New("global floor unavailable on all published platforms")
@@ -38,13 +39,7 @@ func (e releaseUnavailableFailure) Unwrap() []error {
 	return []error{ErrReleaseUnavailable, e.cause}
 }
 
-type Policy struct {
-	Schema         string     `json:"schema"`
-	Revision       int64      `json:"revision"`
-	MinimumVersion string     `json:"minimum_version"`
-	Reason         string     `json:"reason"`
-	EnforceAt      *time.Time `json:"enforce_at,omitempty"`
-}
+type Policy = clientupdate.Policy
 type Input struct {
 	ExpectedRevision int64      `json:"expected_revision"`
 	MinimumVersion   string     `json:"minimum_version"`
@@ -135,7 +130,9 @@ func Compare(a, b [4]uint64) int {
 	}
 	return 0
 }
-func (p Policy) RequiresUpdate(version string, now time.Time) bool {
+
+// RequiresUpdate is the server gate: strict calendar versions, and an unparseable version is behind.
+func RequiresUpdate(p Policy, version string, now time.Time) bool {
 	if p.MinimumVersion == "" || p.EnforceAt != nil && now.Before(*p.EnforceAt) {
 		return false
 	}

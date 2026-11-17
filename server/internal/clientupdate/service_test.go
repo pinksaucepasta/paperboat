@@ -19,20 +19,20 @@ func TestSupportedVersion(t *testing.T) {
 	}
 	at := time.Date(2026, 10, 8, 12, 0, 0, 0, time.UTC)
 	p := Policy{MinimumVersion: "2026.10.8.10", EnforceAt: &at}
-	if p.RequiresUpdate("2026.10.8.9", at.Add(-time.Nanosecond)) {
+	if RequiresUpdate(p, "2026.10.8.9", at.Add(-time.Nanosecond)) {
 		t.Fatal("enforced before date")
 	}
 	for _, s := range []string{"2026.10.8.9", "dev", ""} {
-		if !p.RequiresUpdate(s, at) {
+		if !RequiresUpdate(p, s, at) {
 			t.Fatalf("below/malformed %s", s)
 		}
 	}
 	for _, s := range []string{"2026.10.8.10", "2026.10.8.11", "2026.10.9.0"} {
-		if p.RequiresUpdate(s, at) {
+		if RequiresUpdate(p, s, at) {
 			t.Fatalf("compatible %s", s)
 		}
 	}
-	if (Policy{}).RequiresUpdate("dev", at) {
+	if RequiresUpdate(Policy{}, "dev", at) {
 		t.Fatal("disabled")
 	}
 }

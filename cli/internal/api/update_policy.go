@@ -12,18 +12,13 @@ import (
 	"unicode/utf8"
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/selfupdate"
+	"github.com/pinksaucepasta/paperboat/shared/clientupdate"
 )
 
-type UpdatePolicy struct {
-	Schema         string     `json:"schema"`
-	Revision       int64      `json:"revision"`
-	MinimumVersion string     `json:"minimum_version"`
-	Reason         string     `json:"reason"`
-	EnforceAt      *time.Time `json:"enforce_at,omitempty"`
-}
+type UpdatePolicy = clientupdate.Policy
 
-func (p UpdatePolicy) Validate() error {
-	if p.Schema != "paperboat.client-update-policy/v1" || p.Revision < 0 || len(p.Reason) > 256 || !utf8.ValidString(p.Reason) {
+func ValidateUpdatePolicy(p UpdatePolicy) error {
+	if p.Schema != clientupdate.Schema || p.Revision < 0 || len(p.Reason) > 256 || !utf8.ValidString(p.Reason) {
 		return errors.New("invalid update policy")
 	}
 	for _, c := range p.Reason {
@@ -39,16 +34,16 @@ func (p UpdatePolicy) Validate() error {
 	return nil
 }
 
-func (p UpdatePolicy) Behind(version string) bool {
-	if p.Validate() != nil || p.MinimumVersion == "" {
+func UpdatePolicyBehind(p UpdatePolicy, version string) bool {
+	if ValidateUpdatePolicy(p) != nil || p.MinimumVersion == "" {
 		return false
 	}
 	comparison, err := selfupdate.CompareVersions(version, p.MinimumVersion)
 	return err != nil || comparison < 0
 }
 
-func (p UpdatePolicy) Required(version string, now time.Time) bool {
-	return p.Behind(version) && (p.EnforceAt == nil || !now.Before(*p.EnforceAt))
+func UpdatePolicyRequired(p UpdatePolicy, version string, now time.Time) bool {
+	return UpdatePolicyBehind(p, version) && (p.EnforceAt == nil || !now.Before(*p.EnforceAt))
 }
 
 func FetchUpdatePolicy(ctx context.Context, baseURL string, hc *http.Client) (UpdatePolicy, error) {
@@ -73,7 +68,7 @@ func FetchUpdatePolicy(ctx context.Context, baseURL string, hc *http.Client) (Up
 	}
 	decoder := json.NewDecoder(io.LimitReader(response.Body, 4097))
 	var extra any
-	if decoder.Decode(&envelope) != nil || decoder.Decode(&extra) != io.EOF || envelope.Data.Validate() != nil {
+	if decoder.Decode(&envelope) != nil || decoder.Decode(&extra) != io.EOF || ValidateUpdatePolicy(envelope.Data) != nil {
 		return UpdatePolicy{}, errors.New("invalid update policy response")
 	}
 	return envelope.Data, nil

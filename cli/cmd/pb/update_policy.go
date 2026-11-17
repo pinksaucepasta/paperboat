@@ -95,11 +95,11 @@ func checkCLIUpdatePolicy(command *cobra.Command) error {
 		}
 	}
 	version := cliUpdateVersion()
-	if !policy.Behind(version) {
+	if !api.UpdatePolicyBehind(policy, version) {
 		return nil
 	}
 	jsonOutput, _ := command.Flags().GetBool("json")
-	if policy.Required(version, time.Now()) {
+	if api.UpdatePolicyRequired(policy, version, time.Now()) {
 		if !jsonOutput {
 			fmt.Fprintf(command.ErrOrStderr(), "Update required: Paperboat %s or newer.\n", policy.MinimumVersion)
 			if policy.Reason != "" {
@@ -165,11 +165,11 @@ func readCLIUpdatePolicy(path string) (api.UpdatePolicy, error) {
 	if err != nil || len(data) > 4096 || json.Unmarshal(data, &policy) != nil {
 		return policy, errors.New("invalid cached update policy")
 	}
-	return policy, policy.Validate()
+	return policy, api.ValidateUpdatePolicy(policy)
 }
 
 func saveCLIUpdatePolicy(path string, policy api.UpdatePolicy) error {
-	if path == "" || policy.Validate() != nil {
+	if path == "" || api.ValidateUpdatePolicy(policy) != nil {
 		return errors.New("invalid cached update policy")
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {

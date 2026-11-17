@@ -134,7 +134,7 @@ func clientUpdatePolicyGuard(s ClientUpdatePolicyAPI, now func() time.Time, next
 		if !ok {
 			version = ""
 		}
-		if p.RequiresUpdate(version, now()) {
+		if clientupdate.RequiresUpdate(p, version, now()) {
 			w.Header().Set("Cache-Control", "no-store")
 			writeErrorDetails(w, r, http.StatusUpgradeRequired, "update_required", "This Paperboat CLI version is no longer supported. Run pb update before using this feature.", map[string]any{"minimum_version": p.MinimumVersion, "reason": p.Reason})
 			return
