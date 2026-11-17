@@ -114,6 +114,30 @@ desired_addresses,provider_records,state,created_at,updated_at)
 SELECT $1||k||'.example.test',$1,1,'v',now(),1,'[]'::jsonb,rec,st,now()-interval '40 days',u
 FROM (VALUES('_old','[]'::jsonb,'verified',now()-interval '31 days'),('_recent','[]'::jsonb,'verified',now()),
  ('_held','[{"id":"x"}]'::jsonb,'verified',now()-interval '31 days')) v(k,rec,st,u)`, user)
+	// Terminal sessions: deleted 8 days ago, deleted 8 days ago with its host delete still pending, deleted now, live.
+	exec(`INSERT INTO paperboat.user_machine_terminal_sessions(id,user_machine_id,name,launch_cwd,desired_state,runtime_state,owner_account,deleted_at)
+SELECT $1||k,$1||'_host','n'||replace(k,'_',''),'',CASE WHEN d IS NULL THEN 'open' ELSE 'deleted' END,'closed',$1,d
+FROM (VALUES('_s_old',now()-interval '8 days'),('_s_pending',now()-interval '8 days'),('_s_recent',now()),('_s_live',NULL::timestamptz)) v(k,d)`, user)
+	exec(`INSERT INTO paperboat.user_machine_terminal_session_operations(id,user_machine_id,terminal_session_id,operation,state)
+VALUES($1||'_o_old',$1||'_host',$1||'_s_old','delete_history','applied'),($1||'_o_pending',$1||'_host',$1||'_s_pending','delete_history','pending')`, user)
+	// Control routes: a detached route replaced by a newer one, a detached route that is its environment's newest,
+	// a recently detached replaced route and the replacing live route.
+	exec(`INSERT INTO paperboat.control_environments(id,workspace_id,owner_user_id) VALUES($1||'_e1',$1,$1),($1||'_e2',$1,$1),($1||'_e3',$1,$1)`, user)
+	exec(`INSERT INTO paperboat.control_routes(id,environment_id,kind,public_host,target_host,target_port,desired_state,created_at,updated_at)
+SELECT $1||k,$1||e,'runtime_https_wss',replace($1||k,'_','-')||'.runtime.example.test','127.0.0.1',38080,st,c,u
+FROM (VALUES('_cr_old','_e1','detached',now()-interval '40 days',now()-interval '8 days'),('_cr_new','_e1','attached',now()-interval '1 day',now()),
+ ('_cr_only','_e2','detached',now()-interval '40 days',now()-interval '8 days'),
+ ('_cr_recent','_e3','detached',now()-interval '40 days',now()),('_cr_recent_new','_e3','attached',now()-interval '1 day',now())) v(k,e,st,c,u)`, user)
+	// Configuration generations of a live tunnel at generation 5: the oldest two are past their retention, 3 is not, 4 is
+	// the previous generation the next one needs, 5 is active.
+	exec(`INSERT INTO paperboat.tunnels(id,account_id,name,desired_state,access_mode,generation,stable_endpoint_id,stable_endpoint,created_by_host_id,
+created_by_actor_id,created_at,updated_at)
+VALUES($1||'_t_gens',$1,'gens','active','private',5,'endpoint_'||gen_random_uuid(),'https://'||gen_random_uuid()||'.tunnels.example.test',$1||'_host',$1,now()-interval '200 days',now())`, user)
+	exec(`INSERT INTO paperboat.tunnel_config_generations(tunnel_id,generation,previous_generation,content_hash,snapshot,activation_state,created_by_actor_id,
+created_at,activated_at,retained_until)
+SELECT $1||'_t_gens',g,CASE WHEN g>1 THEN g-1 END,sha256(convert_to('g'||g,'UTF8')),'{}'::bytea,CASE WHEN g=5 THEN 'active' ELSE 'superseded' END,$1,
+now()-interval '200 days',CASE WHEN g=5 THEN now() END,CASE WHEN g=3 THEN now()+interval '1 day' ELSE now()-interval '1 day' END
+FROM generate_series(1,5) g`, user)
 	if err := fixture.Commit(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -138,13 +162,17 @@ FROM (VALUES('_old','[]'::jsonb,'verified',now()-interval '31 days'),('_recent',
 		"peer_endpoint_certificates":  {`SELECT string_agg(replace(endpoint_id,$1,''),',' ORDER BY endpoint_id) FROM paperboat.peer_endpoint_certificates WHERE user_id=$1`, "_live,_named"},
 		"revocations":                 {`SELECT count(*)::text FROM paperboat.peer_endpoint_certificate_revocations WHERE user_id=$1`, "0"},
 		"preview_leases":              {`SELECT string_agg(replace(id,$1,''),',' ORDER BY id) FROM paperboat.preview_leases WHERE account_id=$1`, "_active,_recent"},
-		"tunnels":                     {`SELECT string_agg(replace(id,$1,''),',' ORDER BY id) FROM paperboat.tunnels WHERE account_id=$1`, "_t_live,_t_recent"},
+		"tunnels":                     {`SELECT string_agg(replace(id,$1,''),',' ORDER BY id) FROM paperboat.tunnels WHERE account_id=$1`, "_t_gens,_t_live,_t_recent"},
 		"tunnel_routes":               {`SELECT string_agg(replace(id,$1,''),',' ORDER BY id) FROM paperboat.tunnel_routes WHERE id LIKE $1||'%'`, "_r_live"},
 		"control_route_operations":    {`SELECT string_agg(replace(operation_key,$1,''),',' ORDER BY operation_key) FROM paperboat.control_route_operations WHERE operation_key LIKE $1||'%'`, "_pending,_recent"},
 		"vault_operations":            {`SELECT string_agg(replace(operation_id,$1,''),',' ORDER BY operation_id) FROM paperboat.environment_vault_operations WHERE account_id=$1`, "_recent"},
 		"capability_operations":       {`SELECT string_agg(idempotency_key,',' ORDER BY idempotency_key) FROM paperboat.user_machine_capability_operations WHERE user_id=$1`, "recent"},
 		"reconciliation_attempts":     {`SELECT string_agg(replace(id,$1,''),',' ORDER BY id) FROM paperboat.control_reconciliation_attempts WHERE environment_id=$1||'_env'`, "_recent,_started"},
 		"edge_dns_publications":       {`SELECT string_agg(replace(replace(hostname,'.example.test',''),$1,''),',' ORDER BY hostname) FROM paperboat.edge_dns_publications WHERE owner_id=$1`, "_held,_recent"},
+		"terminal_sessions":           {`SELECT string_agg(replace(id,$1,''),',' ORDER BY id) FROM paperboat.user_machine_terminal_sessions WHERE owner_account=$1`, "_s_live,_s_pending,_s_recent"},
+		"terminal_operations":         {`SELECT string_agg(replace(id,$1,''),',' ORDER BY id) FROM paperboat.user_machine_terminal_session_operations WHERE id LIKE $1||'%'`, "_o_pending"},
+		"control_routes":              {`SELECT string_agg(replace(id,$1,''),',' ORDER BY id) FROM paperboat.control_routes WHERE id LIKE $1||'%'`, "_cr_new,_cr_only,_cr_recent,_cr_recent_new"},
+		"tunnel_config_generations":   {`SELECT string_agg(generation::text,',' ORDER BY generation) FROM paperboat.tunnel_config_generations WHERE tunnel_id=$1||'_t_gens'`, "3,4,5"},
 		"peer_mesh_log":               {`SELECT string_agg(mesh_seq::text,',' ORDER BY mesh_seq) FROM paperboat.peer_mesh_log WHERE account_id=$1`, "2,5,6"},
 	} {
 		if got := left(test.query); got != test.want {

@@ -106,6 +106,11 @@ var policies = []policy{
 		seconds(func(c config.Retention) time.Duration { return c.EndedPublications })},
 	{"tunnel_routes", batchOf("tunnel_routes", `desired_state = 'deleted' AND deleted_at < now()-make_interval(secs=>$2)`),
 		seconds(func(c config.Retention) time.Duration { return c.EndedPublications })},
+	// A live tunnel's old configuration generations: superseded or rejected, past their retained_until, not the newest
+	// two (the next generation needs its predecessor). Nothing else references a generation since the connector stack
+	// was deleted (migration 201).
+	{"tunnel_config_generations", batchOf("tunnel_config_generations", `activation_state IN ('superseded','rejected') AND retained_until < now()
+ AND generation < (SELECT t.generation-1 FROM paperboat.tunnels t WHERE t.id=tunnel_config_generations.tunnel_id)`), none},
 	{"tunnel_domains", batchOf("tunnel_domains",
 		`deleted_at < now()-make_interval(secs=>$2) AND (quarantine_until IS NULL OR quarantine_until < now())`),
 		seconds(func(c config.Retention) time.Duration { return c.EndedPublications })},
@@ -133,6 +138,18 @@ var policies = []policy{
 	{"account_deletion_jobs", batchOf("account_deletion_jobs",
 		`state IN ('done','failed') AND coalesce(completed_at,created_at) < now()-make_interval(secs=>$2)`),
 		seconds(func(c config.Retention) time.Duration { return c.AccountDeletionJobs })},
+	// A terminal session its owner or the closed-session expiry deleted (the row stays as a tombstone until the host's
+	// delete_history operation finished); its operations, grants and tickets cascade.
+	{"user_machine_terminal_sessions", batchOf("user_machine_terminal_sessions", `deleted_at < now()-make_interval(secs=>$2)
+ AND NOT EXISTS(SELECT 1 FROM paperboat.user_machine_terminal_session_operations o
+  WHERE o.terminal_session_id=user_machine_terminal_sessions.id AND o.state='pending')`),
+		seconds(func(c config.Retention) time.Duration { return c.FinishedOperations })},
+	// A detached route replaced by a newer route of its environment and kind (reactivation takes the newest); the
+	// carrier attachments of the route cascade, and a removed environment takes all its routes with it.
+	{"control_routes", batchOf("control_routes", `desired_state = 'detached' AND updated_at < now()-make_interval(secs=>$2)
+ AND EXISTS(SELECT 1 FROM paperboat.control_routes n WHERE n.environment_id=control_routes.environment_id AND n.kind=control_routes.kind
+  AND (n.created_at, n.id) > (control_routes.created_at, control_routes.id))`),
+		seconds(func(c config.Retention) time.Duration { return c.FinishedOperations })},
 	// A finished operation still referenced stays until its referrer goes.
 	{"operations", batchOf("operations", `completed_at < now()-make_interval(secs=>$2)
  AND NOT EXISTS(SELECT 1 FROM paperboat.preview_lease_create_operations x WHERE x.account_id=operations.account_id AND x.operation_id=operations.id)`),
