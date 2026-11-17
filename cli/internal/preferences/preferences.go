@@ -30,6 +30,7 @@ type TUI struct {
 	Theme         string              `json:"theme,omitempty"`
 	Accent        string              `json:"accent,omitempty"`
 	Density       string              `json:"density,omitempty"`
+	Mouse         string              `json:"mouse,omitempty"`
 	Keys          map[string]string   `json:"keys,omitempty"`
 	HomeOrder     []string            `json:"home_order,omitempty"`
 	HomeHidden    []string            `json:"home_hidden,omitempty"`
@@ -48,7 +49,7 @@ type Document struct {
 
 func Default() Document {
 	return Document{Version: 1, PortAction: "preview", TUI: TUI{
-		Theme: "terminal", Density: "comfortable",
+		Theme: "terminal", Density: "comfortable", Mouse: "on",
 		Keys:          map[string]string{"up": "up", "down": "down", "select": "enter", "back": "esc", "preview_open": "o", "preview_background": "b", "preview_tunnel": "t", "preview_stop": "s"},
 		Columns:       map[string][]string{"machines": {"status", "platform"}, "sessions": {"machine", "state"}, "previews": {"state", "access"}, "tunnels": {"state", "access", "endpoint"}},
 		PreviewPanels: []string{"target", "access", "expiry", "domains"},
@@ -74,6 +75,9 @@ func Effective(doc Document) Document {
 	}
 	if result.TUI.Density == "" {
 		result.TUI.Density = defaults.TUI.Density
+	}
+	if result.TUI.Mouse == "" {
+		result.TUI.Mouse = defaults.TUI.Mouse
 	}
 	if result.TUI.Keys == nil {
 		result.TUI.Keys = defaults.TUI.Keys
@@ -325,6 +329,9 @@ func Validate(doc Document) error {
 	}
 	if !slices.Contains([]string{"", "comfortable", "compact"}, doc.TUI.Density) {
 		return errors.New("tui density is invalid")
+	}
+	if !slices.Contains([]string{"", "on", "off"}, doc.TUI.Mouse) {
+		return errors.New("tui mouse is invalid")
 	}
 	if err := validateTUI(Effective(doc)); err != nil {
 		return err

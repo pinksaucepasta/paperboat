@@ -445,7 +445,7 @@ func editPreferenceAppearance(c *cobra.Command, doc *preferences.Document) error
 	baseCtx := c.Context()
 	for {
 		c.SetContext(preferences.WithContext(baseCtx, *doc))
-		item, err := chooseHomeAction(c, "Appearance", []selector.Item{{ID: "theme", Title: "Theme", Description: doc.TUI.Theme}, {ID: "accent", Title: "Accent color", Description: orNone(doc.TUI.Accent)}, {ID: "density", Title: "List density", Description: doc.TUI.Density}, {ID: "done", Title: "Done", Action: true}})
+		item, err := chooseHomeAction(c, "Appearance", []selector.Item{{ID: "theme", Title: "Theme", Description: doc.TUI.Theme}, {ID: "accent", Title: "Accent color", Description: orNone(doc.TUI.Accent)}, {ID: "density", Title: "List density", Description: doc.TUI.Density}, {ID: "mouse", Title: "Mouse", Description: doc.TUI.Mouse + " · click selects, double-click opens"}, {ID: "done", Title: "Done", Action: true}})
 		if err != nil {
 			return err
 		}
@@ -462,6 +462,12 @@ func editPreferenceAppearance(c *cobra.Command, doc *preferences.Document) error
 			v, e := preferencePick(c, "List density", []string{"comfortable", "compact"}, doc.TUI.Density)
 			if e == nil {
 				doc.TUI.Density = v
+			}
+			err = e
+		case "mouse":
+			v, e := preferencePick(c, "Mouse", []string{"on", "off"}, doc.TUI.Mouse)
+			if e == nil {
+				doc.TUI.Mouse = v
 			}
 			err = e
 		case "accent":

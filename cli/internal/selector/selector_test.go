@@ -18,6 +18,7 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/pinksaucepasta/paperboat/cli/internal/preferences"
 )
 
 func TestPersistentScreenIsOwnedAcrossNestedControls(t *testing.T) {
@@ -484,8 +485,23 @@ type selectorPrivateFailure struct{}
 func (selectorPrivateFailure) Error() string { panic("private error must not be formatted") }
 
 func TestViewUsesCellMotionMouse(t *testing.T) {
-	if mode := NewView("x").MouseMode; mode != tea.MouseModeCellMotion {
+	if mode := NewView(context.Background(), "x").MouseMode; mode != tea.MouseModeCellMotion {
 		t.Fatalf("mouse mode = %v, want cell motion", mode)
+	}
+}
+
+func TestMousePreferenceOffDisablesMouseReporting(t *testing.T) {
+	ctx := preferences.WithContext(context.Background(), preferences.Document{Version: 1, TUI: preferences.TUI{Mouse: "off"}})
+	if mode := NewView(ctx, "x").MouseMode; mode != tea.MouseModeNone {
+		t.Fatalf("mouse off left mode %v", mode)
+	}
+	model := chooserModel{options: Options{Context: ctx, Title: "Machines"}, choices: NewModel([]Item{{ID: "one"}}, 8), width: 80, height: 24}
+	if mode := model.View().MouseMode; mode != tea.MouseModeNone {
+		t.Fatalf("chooser ignores the mouse preference: %v", mode)
+	}
+	invalid := preferences.Document{Version: 1, TUI: preferences.TUI{Mouse: "sometimes"}}
+	if err := preferences.Validate(invalid); err == nil {
+		t.Fatal("an unknown mouse value was accepted")
 	}
 }
 

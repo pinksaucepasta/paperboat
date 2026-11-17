@@ -634,7 +634,7 @@ func (m homeTextModel) bindings() (leave, scroll, page key.Binding) {
 	return leave, selector.Move(m.ctx, "scroll"), selector.Hint("PgUp/PgDn", "page", "pgup", "pgdown")
 }
 
-func (m homeTextModel) View() tea.View { return selector.NewView(m.render()) }
+func (m homeTextModel) View() tea.View { return selector.NewView(m.ctx, m.render()) }
 func (m homeTextModel) render() string {
 	title := selector.TitleStyle(m.ctx).Render(ansi.Truncate(m.title, m.width, "…"))
 	leave, scroll, page := m.bindings()

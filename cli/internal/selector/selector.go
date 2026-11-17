@@ -21,6 +21,7 @@ import (
 	"github.com/charmbracelet/x/term"
 	"github.com/junegunn/fzf/src/algo"
 	"github.com/junegunn/fzf/src/util"
+	"github.com/pinksaucepasta/paperboat/cli/internal/preferences"
 )
 
 func init() {
@@ -112,9 +113,11 @@ func ProgramOptions(input *os.File, output io.Writer) []tea.ProgramOption {
 // NewView wraps rendered content with the screen settings v1 passed as program
 // options: cell-motion mouse (clicks, drags and wheel only), and the alternate screen unless a persistent
 // screen is already active.
-func NewView(content string) tea.View {
+func NewView(ctx context.Context, content string) tea.View {
 	view := tea.NewView(content)
-	view.MouseMode = tea.MouseModeCellMotion
+	if preferences.FromContext(ctx).TUI.Mouse != "off" {
+		view.MouseMode = tea.MouseModeCellMotion
+	}
 	view.AltScreen = persistentScreen.Load() == 0 || suspendedScreen.Load() > 0
 	return view
 }
@@ -442,7 +445,7 @@ func (m loadingModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m loadingModel) View() tea.View { return NewView(m.render()) }
+func (m loadingModel) View() tea.View { return NewView(m.ctx, m.render()) }
 
 func (m loadingModel) render() string {
 	lineWidth := viewWidth(m.width)
@@ -771,7 +774,7 @@ func (m chooserModel) itemAtRow(row int) (int, bool) {
 	return index, index >= m.choices.offset && index < end
 }
 
-func (m chooserModel) View() tea.View { return NewView(m.render()) }
+func (m chooserModel) View() tea.View { return NewView(m.options.Context, m.render()) }
 
 func (m chooserModel) render() string {
 	lineWidth := viewWidth(m.width)

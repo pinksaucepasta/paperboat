@@ -105,7 +105,7 @@ func (m confirmModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-func (m confirmModel) View() tea.View { return selector.NewView(m.render()) }
+func (m confirmModel) View() tea.View { return selector.NewView(m.options.Context, m.render()) }
 
 func (m confirmModel) render() string {
 	width := promptWidth(m.width)

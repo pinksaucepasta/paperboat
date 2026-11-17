@@ -117,7 +117,7 @@ func (m textModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	return m, command
 }
 
-func (m textModel) View() tea.View { return selector.NewView(m.render()) }
+func (m textModel) View() tea.View { return selector.NewView(m.options.Context, m.render()) }
 
 func (m textModel) render() string {
 	width := promptWidth(m.width)

@@ -72,7 +72,7 @@ between those resources automatically. Redirected and JSON output do not start a
 
 Open **Customize** from the home screen, or run `pb config customize`. The guided
 editor covers shortcuts, command defaults, themes and accent colors, keybindings,
-list density, home order/visibility, favorite shortcut actions, list detail columns,
+list density, mouse on/off, home order/visibility, favorite shortcut actions, list detail columns,
 and live preview panels. Changes remain in a draft until **Save changes**; the home
 preview never runs an action. Escape returns to the previous screen. Leaving a changed
 draft offers to discard it. Saving checks for edits made by another process.
@@ -98,6 +98,7 @@ For example:
     "theme": "dark",
     "accent": "#7C9CFF",
     "density": "comfortable",
+    "mouse": "on",
     "home_order": ["previews", "machines", "sessions"],
     "home_hidden": ["team"],
     "favorites": ["mac", "upload"],

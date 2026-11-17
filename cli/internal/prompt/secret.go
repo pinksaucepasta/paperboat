@@ -123,7 +123,7 @@ func (m secretModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	return m, command
 }
 
-func (m secretModel) View() tea.View { return selector.NewView(m.render()) }
+func (m secretModel) View() tea.View { return selector.NewView(m.options.Context, m.render()) }
 
 func (m secretModel) render() string {
 	width := promptWidth(m.width)
