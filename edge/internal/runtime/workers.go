@@ -379,7 +379,7 @@ type RouteWorker struct {
 	routesAdmitted                 bool
 	accessorAdmitted               bool
 	starting                       bool
-	probePending                   bool         // this reconcile found a carrier that does not serve its route yet
+	probePending                   bool         // this reconcile found a route its carrier does not serve yet (pending or a cut probe stream)
 	reconciles                     atomic.Int64 // reconciles run (route_probe_retry log; tests)
 	lastErr                        error
 	canonicalSet                   bool
@@ -1362,7 +1362,7 @@ func (w *RouteWorker) resolveCanonicalGroups(ctx context.Context, candidates, pr
 	}
 	for _, group := range canonicalAssignmentGroups(candidates) {
 		if err := w.probeCanonicalGroup(ctx, group.assignments); err != nil {
-			w.probePending = w.probePending || errors.Is(err, edgehttp.ErrDataCarrierRouteUnavailable)
+			w.probePending = true // pending carrier or a cut probe stream: re-probe now rather than on the next tick
 			failures = append(failures, err)
 			failedAssignments = append(failedAssignments, group.assignments...)
 			if lkg, ok := previousByKey[group.key]; ok {

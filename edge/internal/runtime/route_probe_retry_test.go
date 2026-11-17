@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"fmt"
+	"io"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -19,14 +20,18 @@ type lateServingCarrier struct {
 	workerCarrierProbe
 	serving atomic.Bool
 	probes  atomic.Int32
+	failure error // what the probe answers before the machine serves; nil: carrier-pending
 }
 
 func (c *lateServingCarrier) ProbeRoutes(_ context.Context, rules []route.RouteRule) error {
 	if len(rules) == 0 {
 		return nil
 	}
-	c.probes.Add(1)
+	probe := c.probes.Add(1)
 	if !c.serving.Load() {
+		if c.failure != nil && probe > 1 { // the start-up probe finds it pending; a non-pending error would fail Start
+			return c.failure
+		}
 		return fmt.Errorf("%w: the machine does not serve the route yet", edgehttp.ErrDataCarrierRouteUnavailable)
 	}
 	return nil
@@ -64,7 +69,17 @@ func startProbeRetryWorker(t *testing.T, carrier *lateServingCarrier, wake, tunn
 // The wake for a new tunnel reaches the edge before the machine serves the route: the edge probes it again within a
 // second instead of at its next control tick (prod `pb tunnel create --wait` 7-16 s, both edges waiting a tick).
 func TestRouteWorkerReprobesARouteItsMachineServesJustAfterTheTunnelWake(t *testing.T) {
-	carrier := &lateServingCarrier{}
+	assertReprobedAfterTunnelWake(t, &lateServingCarrier{})
+}
+
+// The wake's probe can also fail on a carrier stream cut (prod oracle edge, 00:21:56Z: route_probe end_of_stream);
+// that route was staged only on the next 5 s tick (`pb tunnel create --wait` 5.9 s instead of 1.5 s).
+func TestRouteWorkerReprobesARouteWhoseWakeProbeHitAStreamCut(t *testing.T) {
+	assertReprobedAfterTunnelWake(t, &lateServingCarrier{failure: io.ErrUnexpectedEOF})
+}
+
+func assertReprobedAfterTunnelWake(t *testing.T, carrier *lateServingCarrier) {
+	t.Helper()
 	tunnelWake := make(chan struct{}, 1)
 	_, assignment, registry := startProbeRetryWorker(t, carrier, nil, tunnelWake, 5*time.Second)
 	before := carrier.probes.Load()
