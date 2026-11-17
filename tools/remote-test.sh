@@ -38,7 +38,6 @@ flock 8
 stage=$(mktemp -d "${TMPDIR:-/tmp}/pb-remote-test.XXXXXX")
 trap 'rm -rf "$stage"' EXIT
 git archive HEAD -- . ':!console' ':!marketing' | tar x -C "$stage"
-git archive HEAD -- console/lib/envvault/testdata | tar x -C "$stage" # cli/cmd/environmentvault-wasm reads the console's vault fixture
 sha=$(git rev-parse --short HEAD)
 
 echo "remote-test: syncing $sha to $host:pb-remote-test/$lane" >&2
