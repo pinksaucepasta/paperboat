@@ -249,8 +249,14 @@ func (b *PrivateAccessStreamBridge) serveStream(parent context.Context, stream *
 	copyDone := make(chan error, 2)
 	var last atomic.Int64
 	last.Store(time.Now().UnixNano())
-	go func() { _, err := io.Copy(target, activityReader{stream, &last}); copyDone <- err }()
-	go func() { _, err := io.Copy(stream, activityReader{target, &last}); copyDone <- err }()
+	go func() {
+		_, err := io.Copy(trafficWriter{target, "ingress"}, activityReader{stream, &last})
+		copyDone <- err
+	}()
+	go func() {
+		_, err := io.Copy(trafficWriter{stream, "egress"}, activityReader{target, &last})
+		copyDone <- err
+	}()
 	if b.idleTimeout > 0 && open.Request.Protocol == "tcp" {
 		stopIdle := closeWhenIdle(b.idleTimeout, &last, make(chan struct{}), func() {
 			_ = target.Close()

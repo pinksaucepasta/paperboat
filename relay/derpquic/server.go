@@ -49,31 +49,33 @@ func (s *Server) overFairShareLocked(account string, count int) bool {
 
 type Stats struct {
 	Accepted, Denied, Forwarded, Dropped uint64
-	Connections                          int
-	Draining                             bool
+	// BytesForwarded is the payload bytes of every forwarded packet.
+	BytesForwarded uint64
+	Connections    int
+	Draining       bool
 }
 type Server struct {
-	connectionLimit                      int
-	service                              *localService
-	verifier                             Verifier // Keys unused: the trusted set is keys
-	keys                                 atomic.Pointer[map[string]ed25519.PublicKey]
-	refresher                            atomic.Pointer[func() error]
-	keysRefreshedAt                      atomic.Int64
-	mu                                   sync.Mutex
-	peers                                map[key.NodePublic]*peerConn
-	fences                               map[string]*grantFence
-	quotaDenied                          map[string]bool
-	accounts                             map[string]*budget
-	connections                          map[*quic.Conn]struct{}
-	wssConnections                       map[*peerConn]struct{}
-	draining                             bool
-	drainTimer                           *time.Timer
-	deadline                             time.Time
-	listener                             *quic.Listener
-	transport                            *quic.Transport
-	workers                              sync.WaitGroup
-	accepted, denied, forwarded, dropped atomic.Uint64
-	lastRefusalLog                       atomic.Int64
+	connectionLimit                                      int
+	service                                              *localService
+	verifier                                             Verifier // Keys unused: the trusted set is keys
+	keys                                                 atomic.Pointer[map[string]ed25519.PublicKey]
+	refresher                                            atomic.Pointer[func() error]
+	keysRefreshedAt                                      atomic.Int64
+	mu                                                   sync.Mutex
+	peers                                                map[key.NodePublic]*peerConn
+	fences                                               map[string]*grantFence
+	quotaDenied                                          map[string]bool
+	accounts                                             map[string]*budget
+	connections                                          map[*quic.Conn]struct{}
+	wssConnections                                       map[*peerConn]struct{}
+	draining                                             bool
+	drainTimer                                           *time.Timer
+	deadline                                             time.Time
+	listener                                             *quic.Listener
+	transport                                            *quic.Transport
+	workers                                              sync.WaitGroup
+	accepted, denied, forwarded, dropped, bytesForwarded atomic.Uint64
+	lastRefusalLog                                       atomic.Int64
 }
 type queued struct {
 	packet
@@ -550,6 +552,9 @@ func (s *Server) writePackets(p *peerConn) {
 				return
 			}
 			s.forwarded.Add(1)
+			if !msg.control { // control frames are protocol, not payload
+				s.bytesForwarded.Add(uint64(len(msg.packet.data)))
+			}
 		}
 	}
 }
@@ -666,7 +671,7 @@ func (s *Server) closeDrained() {
 func (s *Server) Snapshot() Stats {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return Stats{s.accepted.Load(), s.denied.Load(), s.forwarded.Load(), s.dropped.Load(), len(s.connections) + len(s.wssConnections), s.draining}
+	return Stats{s.accepted.Load(), s.denied.Load(), s.forwarded.Load(), s.dropped.Load(), s.bytesForwarded.Load(), len(s.connections) + len(s.wssConnections), s.draining}
 }
 func (s *Server) Close() error {
 	s.mu.Lock()

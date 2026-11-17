@@ -2,10 +2,13 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -15,6 +18,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/edge/internal/telemetry"
 	"github.com/pinksaucepasta/paperboat/edge/internal/testedge"
 	"github.com/pinksaucepasta/paperboat/edge/internal/usage"
+	"github.com/pinksaucepasta/paperboat/shared/nodemetrics"
 )
 
 type routeSourceFunc func(context.Context, string) ([]control.RouteAssignment, error)
@@ -240,6 +244,51 @@ func TestNodeWorkerHeartbeatCarriesErrorPageReferencesOnce(t *testing.T) {
 	}
 	if carried != 1 {
 		t.Fatalf("the reference rode %d heartbeats, want 1: %+v", carried, sink.seen)
+	}
+}
+
+// Every heartbeat carries the edge's report (version, CPU, memory, bytes); without a supplier it carries none.
+func TestNodeWorkerHeartbeatCarriesTheNodeMetricsReport(t *testing.T) {
+	state := node.New("edge")
+	state.MarkReady()
+	manager, _ := node.NewManager(state, 2)
+	sink := &observedHeartbeats{NodeSink: testedge.New()}
+	pulse := make(chan time.Time)
+	var sampled atomic.Int32
+	worker := &NodeWorker{Manager: manager, Sink: sink, Registration: testNodeRegistration(t, "edge", "process", 2), Pulse: pulse, Now: func() time.Time { return time.Unix(10, 0) },
+		Metrics: func(at time.Time) *nodemetrics.Report {
+			sampled.Add(1)
+			return &nodemetrics.Report{Version: "dev-edge", CPUPercent: 12.5, RSSBytes: 64 << 20, BytesIn: 100, BytesOut: 200}
+		}}
+	if err := worker.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer worker.Shutdown(context.Background())
+	pulse <- time.Unix(11, 0)
+	pulse <- time.Unix(12, 0) // accepted only once the previous heartbeat is done
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	if len(sink.seen) == 0 {
+		t.Fatal("no heartbeat was sent")
+	}
+	// The registration's own first heartbeat is built by the manager; every heartbeat the worker sends carries the report.
+	last := sink.seen[len(sink.seen)-1]
+	if m := last.Metrics; m == nil || m.Version != "dev-edge" || m.CPUPercent != 12.5 || m.BytesIn != 100 || m.BytesOut != 200 || m.Validate() != nil {
+		t.Fatalf("heartbeat metrics = %+v", last.Metrics)
+	}
+	raw, _ := json.Marshal(last)
+	if !strings.Contains(string(raw), `"metrics":{"version":"dev-edge"`) {
+		t.Fatalf("metrics are not on the wire: %s", raw)
+	}
+	if sampled.Load() == 0 {
+		t.Fatal("the report supplier was never called")
+	}
+}
+
+func TestNodeObservationWithoutMetricsOmitsTheField(t *testing.T) {
+	raw, _ := json.Marshal(control.NodeObservation{NodeID: "edge", ProcessEpoch: "p"})
+	if strings.Contains(string(raw), "metrics") {
+		t.Fatalf("an observation without metrics sent the field: %s", raw)
 	}
 }
 

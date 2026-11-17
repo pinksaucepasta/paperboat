@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/shared/nodemetrics"
 	"io"
 	"log/slog"
 	"net"
@@ -187,6 +188,8 @@ type NodeWorker struct {
 	Interval     time.Duration
 	Pulse        <-chan time.Time
 	Now          func() time.Time
+	// Metrics, when set, supplies the report sent with each heartbeat.
+	Metrics func(time.Time) *nodemetrics.Report
 	// OnAnswer, when set, applies each heartbeat answer (the server's ingress limits).
 	OnAnswer func(control.NodeAnswer) error
 	// Ready, when set, is closed once the server has recorded this process as ready (a
@@ -255,6 +258,9 @@ func (w *NodeWorker) heartbeat(ctx context.Context, at time.Time) error {
 	}
 	for hostname, count := range telemetry.TakeRefusals() {
 		observation.Refusals = append(observation.Refusals, control.HostRefusals{Hostname: hostname, Count: count})
+	}
+	if w.Metrics != nil {
+		observation.Metrics = w.Metrics(at)
 	}
 	answer, err := w.Sink.Heartbeat(ctx, observation)
 	if errors.Is(err, control.ErrNodeObservationStale) {

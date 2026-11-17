@@ -136,7 +136,7 @@ func runContext(processCtx context.Context, reporters ...*reporting.Reporter) er
 	if reporter != nil {
 		controlTrace = reporter.ControlTrace
 	}
-	control, err := nodelifecycle.New(nodelifecycle.Config{URL: *controlURL, Credential: strings.TrimSpace(string(credential)), NodeID: *node, Trust: trust, ExpectedGeneration: *generation, StatePath: *nodeState, HTTP: controlHTTP, ControlTrace: controlTrace, ControlFailure: func(ctx context.Context, reference string, err error) {
+	control, err := nodelifecycle.New(nodelifecycle.Config{URL: *controlURL, Credential: strings.TrimSpace(string(credential)), NodeID: *node, Version: version, Trust: trust, ExpectedGeneration: *generation, StatePath: *nodeState, HTTP: controlHTTP, ControlTrace: controlTrace, ControlFailure: func(ctx context.Context, reference string, err error) {
 		reporter.ObserveFailure(reporting.WithSupportReference(ctx, reference), "control_request", err)
 	}})
 	if err != nil {

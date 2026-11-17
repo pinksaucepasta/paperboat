@@ -11,6 +11,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/shared/nodemetrics"
 	"strings"
 	"time"
 
@@ -279,6 +280,8 @@ type NodeObservation struct {
 	ErrorPages []ErrorPageReference `json:"error_pages,omitempty"`
 	// Refusals count, per hostname, what this edge refused for flood protection since the last heartbeat.
 	Refusals []HostRefusals `json:"refusals,omitempty"`
+	// Metrics is this edge's version, CPU, memory and bytes carried since it started (nodemetrics.Report).
+	Metrics *nodemetrics.Report `json:"metrics,omitempty"`
 }
 
 // HostRefusals is how many requests or connections to one hostname the edge refused for flood protection.
