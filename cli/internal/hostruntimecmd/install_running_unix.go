@@ -30,6 +30,12 @@ import (
 // InstallRunningBinary installs this executable. controlURL is the selected server (pb --server); empty
 // uses the configured one.
 func InstallRunningBinary(ctx context.Context, executable string, source installsource.Source, directory, controlURL string) (string, error) {
+	if NoSystemd() {
+		if err := source.Verify(executable); err != nil {
+			return "", err
+		}
+		return installBinaryOnly(executable, directory, os.Stderr)
+	}
 	return installUpdateSource(ctx, executable, source, "", false, directory, false, controlURL)
 }
 func InstallUpdateSource(ctx context.Context, executable string, source installsource.Source, bundlePath string, force bool, directory, controlURL string) (string, error) {

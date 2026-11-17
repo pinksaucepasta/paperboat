@@ -15,6 +15,9 @@ import (
 )
 
 func bootstrapLocalDaemonInstaller(cfg *config.Config) func(context.Context) error {
+	if NoSystemd() {
+		return func(context.Context) error { return nil } // the user daemon is a systemd user service
+	}
 	return func(ctx context.Context) error {
 		executable, err := liveExecutable(os.Executable, systemWorkerExecutable())
 		if err != nil {

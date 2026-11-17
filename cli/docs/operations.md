@@ -252,19 +252,33 @@ Machine-control credentials renew in memory and are bound to the enrolled Ed2551
 installation generation. Reinstall or machine revocation invalidates them. Never
 copy a runtime state directory to another machine.
 
-## Container hostd and updates
+## Containers (`pb daemon --foreground`)
 
-Self-hosted container deployments use the same split update boundary as native
-hosts. `paperboat-hostd` stays alive and owns live workloads; the root-only
-`paperboat-updated` process verifies TUF metadata, rotates root-owned artifacts in the
-persistent release volume, and replaces only the runtime worker. Routine runtime and CLI
-updates do not replace the container or close a hostd-owned stream.
+Any Linux container can run Paperboat without systemd. `pb daemon --foreground` is the
+container's main command, like `tailscaled`: one supervisor that checks the state tree, enrolls
+the machine on its first start and runs `hostd` (which owns terminals, managed SSH, file
+transfers, previews and tunnels) as an unprivileged runtime user (uid 10001, `paperboat`,
+created in a plain container, baked into the supplied image). It never installs or changes a
+service; `SIGTERM` drains hostd and exits 0, and hostd ending by itself exits with its status.
 
-Use the supplied [container deployment guide](../deploy/container/README.md) and Compose
-definitions. Keep `/var/lib/paperboat` and `/workspace` persistent, distinct, and attached
-only to the Paperboat container. The supplied definitions make the root filesystem read-only
-and do not publish any host port. A pod eviction, image replacement, node failure, or an
-administrator container restart is supervisor-class maintenance, not an invisible update.
+```sh
+curl -fsSL <installer URL> | sh          # on a machine without systemd: installs pb, changes nothing else
+PAPERBOAT_ENROLLMENT_CREDENTIAL=<token from pb machine add> pb daemon --foreground
+```
+
+The token is needed on the first start only. The machine keeps its enrollment in
+`/var/lib/paperboat`, so a restart with the state volume attached needs no token and no machine
+ID (`PAPERBOAT_MACHINE_ID` is optional and, when set, must match). The control server defaults
+to the build's, like a normal install (`PAPERBOAT_CONTROL_URL` overrides it, https only). Keep
+`/var/lib/paperboat` and `/workspace` persistent and attached only to this container, and run
+with an init process (`docker run --init`) so orphaned processes are reaped. Without systemd,
+`pb install` copies the binary (`/usr/local/bin/pb` as root) and `pb pair` prints this command;
+neither changes anything else.
+
+There is no in-container updater: a new version is a new image or binary and a container
+restart, which is supervisor-class maintenance. Use the supplied
+[container deployment guide](../deploy/container/README.md) and Compose definitions; they make the
+root filesystem read-only and publish no host port.
 
 ### Native operational telemetry
 

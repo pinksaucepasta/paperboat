@@ -57,3 +57,13 @@ func TestShellInstallerParses(t *testing.T) {
 		t.Fatalf("sh -n install.sh: %v\n%s", err, output)
 	}
 }
+
+func TestShellInstallerSkipsTheServiceResetWithoutSystemd(t *testing.T) {
+	body := installerSource(t, "install.sh")
+	for _, required := range []string{"/run/systemd/system", `[ "$pair" = true ] && [ "$no_systemd" = false ]`} {
+		if !strings.Contains(body, required) {
+			t.Fatalf("shell installer is missing %q", required)
+		}
+	}
+	requireInOrder(t, body, "no_systemd=true", `"$installer_pb" reset`)
+}

@@ -224,6 +224,14 @@ func runBootstrap(ctx context.Context, args []string, stdin io.Reader, stdout, s
 		}
 	}
 
+	if NoSystemd() {
+		// A container pairs and stops here: hostd runs in the foreground, so no service is installed.
+		if err := bootstrap.ClearResume(*stateRoot); err != nil {
+			return fmt.Errorf("clear completed machine enrollment resume state: %w", err)
+		}
+		fmt.Fprintln(stderr, "Enrollment accepted. This machine has no systemd, so no service was installed.")
+		return nil
+	}
 	source, err := installsource.Inspect(artifactPath, buildinfo.Version, buildinfo.Distribution)
 	if err != nil {
 		return err

@@ -159,7 +159,12 @@ fi
 chmod 0755 "$product_file"
 installer_pb=$product_file
 
-if [ "$pair" = true ]; then
+# Linux without systemd (a container): pb install only places the binary and pb pair prints how to run
+# `pb daemon --foreground`. A reset would stop and remove a service this machine cannot have.
+no_systemd=false
+if [ "$os" = linux ] && [ ! -d /run/systemd/system ]; then no_systemd=true; fi
+
+if [ "$pair" = true ] && [ "$no_systemd" = false ]; then
   unset PAPERBOAT_ENROLLMENT_TOKEN || true
   host=$(hostname)
   [ -n "$host" ] || { echo "pb installer: could not resolve this machine hostname" >&2; exit 1; }

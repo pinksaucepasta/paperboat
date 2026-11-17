@@ -57,6 +57,18 @@ func pairCommand() *cobra.Command {
 		Args:    commandArgs(cobra.MaximumNArgs(1)),
 		RunE: func(command *cobra.Command, args []string) error {
 			jsonOutput, _ := command.Flags().GetBool("json")
+			if hostruntimecmd.NoSystemd() {
+				// No service can be installed: change nothing (the token stays unused) and say how to run.
+				executable, err := os.Executable()
+				if err != nil {
+					return err
+				}
+				if jsonOutput {
+					return writeCLIJSON(command.OutOrStdout(), map[string]any{"paired": false, "reason": "no_systemd"})
+				}
+				_, err = fmt.Fprintln(command.ErrOrStderr(), hostruntimecmd.ForegroundHint(executable))
+				return err
+			}
 			enrollmentToken, _ := command.Flags().GetString("enrollment-token")
 			enrollmentFile, _ := command.Flags().GetString("enrollment-token-file")
 			recipeToken, fromRecipe, err := recipeTokenFromPair(args, strings.TrimSpace(enrollmentToken+enrollmentFile) != "")

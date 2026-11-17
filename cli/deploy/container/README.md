@@ -1,42 +1,42 @@
 # Paperboat containers
 
-The self-hosted image runs a stable `paperboat-hostd` process and a
-separate root `paperboat-updated` process. Hostd owns terminal PTYs, managed
-SSH channels, file transfers, previews, and live relay or
-direct streams. The updater owns only TUF verification, release staging,
-cutover, rollback, and bounded cleanup.
+`pb daemon --foreground` runs Paperboat as a container's main command (see
+[operations](../../docs/operations.md#containers-pb-daemon---foreground)). It is one supervisor in Go,
+the only process manager: it checks the state tree, enrolls the machine on the first start from
+`PAPERBOAT_ENROLLMENT_CREDENTIAL` (a token from `pb machine add`) and runs `paperboat hostd` as the
+`paperboat` user (uid/gid `10001`). Hostd owns terminal PTYs, managed SSH channels, file transfers,
+previews and live relay or direct streams. There is no in-container updater: a new version is a new
+image or binary and a restart.
 
-The `/var/lib/paperboat` volume is mandatory and contains three separate
-ownership domains:
+Any Linux container works: install `pb` with the one-liner (on a machine without systemd it only
+copies the binary) and make `pb daemon --foreground` the main command. The supplied image does the
+same with `tini` as PID 1 to reap orphaned processes.
+
+The `/var/lib/paperboat` volume is mandatory and holds two ownership domains:
 
 | Path | Owner | Purpose |
 | --- | --- | --- |
-| `releases/` | root, not writable by the runtime user | active, rollback, and staged runtime and CLI artifacts |
-| `updated/` | root, mode `0700` | updater journal and TUF metadata |
-| `runtime/` and `hostd/` | `paperboat` UID/GID `10001`, mode `0700` | durable workload state and hostd capability token |
+| `runtime/` and `hostd/` | `paperboat` UID/GID `10001`, mode `0700` | enrollment, durable workload state and the hostd capability token |
+| `/var/lib/paperboat`, `/run/paperboat-updated` | root, mode `0755` | parents only |
 
-`/workspace` is a second persistent volume owned by the `paperboat` runtime
-user. Never mount either volume from a less-trusted container. Never copy the
-release volume between machines because it contains installation-local state.
+`/workspace` is a second persistent volume owned by the `paperboat` runtime user. Never mount
+either volume from a less-trusted container, and never copy the state volume between machines: it
+holds this machine's identity.
 
-The root filesystem is read-only in the supplied Compose definition. Only
-the fixed state and workspace volumes plus tmpfs `/run` and `/tmp` are
-writable. The entrypoint requires an HTTPS release repository, pins runtime
-paths, and rejects unexpected ownership, symlinks, and malformed capability tokens.
+The root filesystem is read-only in the supplied Compose definition. Only the fixed state and
+workspace volumes plus tmpfs `/run` and `/tmp` are writable. The supervisor pins the runtime paths
+(a deployment cannot select a socket, token or state path) and rejects unexpected ownership,
+symlinks and a malformed capability token.
 
 ## Self-hosted container
 
-Use [../self-hosted/compose.yaml](../self-hosted/compose.yaml). The first
-start consumes the normal one-time machine enrollment credential. Remove that
-credential from the deployment configuration after enrollment. No SSH daemon
-or host port is exposed by the container; all connectivity uses normal Paperboat
-direct or relay paths.
+Use [../self-hosted/compose.yaml](../self-hosted/compose.yaml). Set `PAPERBOAT_CONTROL_URL` and, for
+the first start only, `PAPERBOAT_ENROLLMENT_CREDENTIAL`; remove the credential afterwards. A restart
+with the state volume needs neither a token nor a machine ID. No SSH daemon or host port is exposed;
+all connectivity uses normal Paperboat direct or relay paths.
 
 ## Operational boundary
 
-Ordinary runtime and CLI updates are invisible and preserve hostd-owned work.
-A container image replacement, pod eviction, node loss, or administrator
-container restart is supervisor-class maintenance and is outside that
-continuity guarantee. Schedule such work through the maintenance approval
-flow when protected workloads are present. Keep the two volumes attached and
-use normal durable recovery after a restart.
+An image replacement, pod eviction, node loss or administrator container restart is
+supervisor-class maintenance. Schedule it through the maintenance approval flow when protected
+workloads are present, and keep the two volumes attached.

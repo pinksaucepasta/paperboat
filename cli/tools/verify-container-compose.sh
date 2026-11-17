@@ -16,8 +16,6 @@ fi
 
 run_compose() {
   PAPERBOAT_IMAGE=example.invalid/paperboat:test \
-  PAPERBOAT_RELEASE_REPOSITORY=https://releases.paperboat.test \
-  PAPERBOAT_MACHINE_ID=mch_container_test \
   PAPERBOAT_CONTROL_URL=https://api.paperboat.test \
   PAPERBOAT_ENROLLMENT_CREDENTIAL=test-enrollment \
   compose -f "$1" config >/dev/null

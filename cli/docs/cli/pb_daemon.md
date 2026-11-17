@@ -6,7 +6,7 @@ Paperboat endpoint daemon
 
 Paperboat endpoint daemon
 
-Run the daemon under supervision or manage the privileged machine guard. Most users should use pb service to install, start, stop, and inspect the background process.
+Run the daemon under supervision or manage the privileged machine guard. Most users should use pb service to install, start, stop, and inspect the background process. In a Linux container without systemd, pb daemon --foreground is the container's main command: it enrolls the machine on its first start from PAPERBOAT_ENROLLMENT_CREDENTIAL (a token from pb machine add), keeps the enrollment in the state volume so a restart needs no token, runs hostd as an unprivileged runtime user and stops cleanly on SIGTERM.
 
 With --json, this command group lists its available commands.
 
@@ -18,6 +18,7 @@ pb daemon [flags]
 
 ```
       --config string   configuration file
+      --foreground      run hostd in the foreground as a container's main command (Linux)
   -h, --help            help for daemon
       --server string   Paperboat server URL
 ```

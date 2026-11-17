@@ -71,12 +71,24 @@ func NewCommand() *cobra.Command {
 	root.Version = buildinfo.Version
 	root.PersistentFlags().String("config", "", "configuration file")
 	root.PersistentFlags().String("server", "", "Paperboat server URL")
+	root.Flags().Bool("foreground", false, "run hostd in the foreground as a container's main command (Linux)")
+	localDaemon := root.RunE
+	root.RunE = func(command *cobra.Command, args []string) error {
+		if foreground, _ := command.Flags().GetBool("foreground"); foreground {
+			if code := hostruntimecmd.RunForeground(command.Context(), command.OutOrStdout(), command.ErrOrStderr()); code != 0 {
+				return exitCodeError{code: code}
+			}
+			return nil
+		}
+		return localDaemon(command, args)
+	}
 	root.AddCommand(hostRuntimeCommand())
 	root.AddCommand(hostdRuntimeCommand())
 	root.AddCommand(sessionOwnerRuntimeCommand())
 	root.AddCommand(carrierRuntimeCommand())
 	root.AddCommand(runtimeWorkerCommand())
 	root.AddCommand(updatedRuntimeCommand())
+	root.AddCommand(bootstrapRuntimeCommand())
 	root.AddCommand(activatorRuntimeCommand())
 	root.AddCommand(localDaemonRuntimeCommand())
 	root.AddCommand(windowsSSHDServiceCommand())
@@ -164,6 +176,17 @@ func runtimeWorkerCommand() *cobra.Command {
 func updatedRuntimeCommand() *cobra.Command {
 	return &cobra.Command{Use: "__runtime-updated", Hidden: true, DisableFlagParsing: true, RunE: func(command *cobra.Command, args []string) error {
 		code := hostruntimecmd.Execute(command.Context(), append([]string{"updated"}, args...), command.InOrStdin(), command.OutOrStdout(), command.ErrOrStderr())
+		if code != 0 {
+			return exitCodeError{code: code}
+		}
+		return nil
+	}, SilenceUsage: true, SilenceErrors: true}
+}
+
+// bootstrapRuntimeCommand is the container supervisor's first-start pairing, run as the runtime user.
+func bootstrapRuntimeCommand() *cobra.Command {
+	return &cobra.Command{Use: "__runtime-bootstrap", Hidden: true, DisableFlagParsing: true, RunE: func(command *cobra.Command, args []string) error {
+		code := hostruntimecmd.Execute(command.Context(), append([]string{"bootstrap"}, args...), command.InOrStdin(), command.OutOrStdout(), command.ErrOrStderr())
 		if code != 0 {
 			return exitCodeError{code: code}
 		}
