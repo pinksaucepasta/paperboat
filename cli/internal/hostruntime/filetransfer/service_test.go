@@ -1132,10 +1132,10 @@ func TestInboxChangeKeepsPublishedHistoryAndUsesNewDestination(t *testing.T) {
 func TestCreateHonorsTheSignedMaxBytes(t *testing.T) {
 	service, _, _ := newService(t)
 	files := []File{{Basename: "a.bin", Size: 600, SHA256: digest(nil)}, {Basename: "b.bin", Size: 400, SHA256: digest(nil)}}
-	if _, err := service.Create(context.Background(), CreateRequest{BatchID: "signed-ok", SourceMachineID: "machine_source", DestinationMachineID: "machine_local", InitiatingUserID: "user_1", SessionID: "ses", Files: files, MaxBytes: 1000}); err != nil {
+	if _, err := service.Create(context.Background(), CreateRequest{BatchID: "signed-ok", SourceMachineID: "machine_source", DestinationMachineID: "machine_local", InitiatingUserID: "user_1", SessionID: "ses", Files: files, MaxBytes: 1000, TransferMode: "automatic"}); err != nil {
 		t.Fatalf("batch at the signed bound refused: %v", err)
 	}
-	if _, err := service.Create(context.Background(), CreateRequest{BatchID: "signed-over", SourceMachineID: "machine_source", DestinationMachineID: "machine_local", InitiatingUserID: "user_1", SessionID: "ses", Files: files, MaxBytes: 999}); !hasCode(err, BatchLimit) {
+	if _, err := service.Create(context.Background(), CreateRequest{BatchID: "signed-over", SourceMachineID: "machine_source", DestinationMachineID: "machine_local", InitiatingUserID: "user_1", SessionID: "ses", Files: files, MaxBytes: 999, TransferMode: "automatic"}); !hasCode(err, BatchLimit) {
 		t.Fatalf("batch over the signed bound err=%v", err)
 	}
 }

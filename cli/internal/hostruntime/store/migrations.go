@@ -4,7 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"embed"
-
+	"strings"
 	"sync"
 
 	"github.com/pressly/goose/v3"
@@ -55,6 +55,15 @@ func validateDatabaseSchema(ctx context.Context, database *sql.DB) error {
 			return storeFailure("runtime state schema is invalid", ErrCorrupt, err)
 		}
 		return storeFailure("runtime state schema check failed", err)
+	}
+	// squibble compares columns, not CHECK bodies: a store created with the retired 50 MiB per-file limit would
+	// open and then refuse every larger file. Zero compat: such a machine is reinstalled, so refuse it here.
+	var table string
+	if err := database.QueryRowContext(ctx, `SELECT sql FROM sqlite_master WHERE type='table' AND name='file_transfers'`).Scan(&table); err != nil {
+		return storeFailure("runtime state schema check failed", err)
+	}
+	if strings.Contains(table, "52428800") {
+		return storeFailure("runtime state has the retired 50 MiB file transfer limit; reinstall this machine (pb uninstall, then pb install and pair)", ErrCorrupt)
 	}
 	return nil
 }
