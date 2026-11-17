@@ -8,7 +8,7 @@ import (
 )
 
 // The platform counters are series of the control plane's one metrics registry
-// (telemetry.PlatformMetricDescriptors). The registry is created here with a
+// (telemetry.PlatformMetricNames). The registry is created here with a
 // default instance so packages can count before the app exists; the app binds its
 // own so a single instance carries typed and platform series.
 var process atomic.Pointer[sharedmetrics.Metrics]

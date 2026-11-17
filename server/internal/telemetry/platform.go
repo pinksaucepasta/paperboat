@@ -40,11 +40,6 @@ var platformMetrics = func() []sharedmetrics.Descriptor {
 	return descriptors
 }()
 
-// PlatformMetricDescriptors returns the flat platform metrics.
-func PlatformMetricDescriptors() []sharedmetrics.Descriptor {
-	return sharedmetrics.Clone(platformMetrics)
-}
-
 // PlatformMetricNames returns the sorted names of the flat platform metrics.
 func PlatformMetricNames() []string {
 	names := make([]string, len(platformMetrics))
