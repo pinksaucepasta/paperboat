@@ -265,7 +265,7 @@ func TestBrowserCookieRequestsFromSiblingHostsAreRefused(t *testing.T) {
 		w := httptest.NewRecorder()
 		_, finish, ok := b.authorize(w, r, m)
 		finish()
-		if ok != c.allowed || (!c.allowed && (w.Code != 403 || a.calls.Load() != 0)) {
+		if ok != c.allowed || (!c.allowed && (w.Code != 404 || a.calls.Load() != 0)) {
 			t.Fatalf("%s: allowed=%v status=%d", c.name, ok, w.Code)
 		}
 	}

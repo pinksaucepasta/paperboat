@@ -161,7 +161,7 @@ func (b *BrowserAccess) callback(w http.ResponseWriter, r *http.Request) {
 	session, err := b.Authority.Redeem(ctx, transaction, nonce, r.PostForm.Get("handoff"), host)
 	clearBrowserHandoff(w)
 	if errors.Is(err, control.ErrBrowserDenied) {
-		b.notFoundPage(ctx, w, host)
+		b.notFoundPage(r.Context(), w, host)
 		return
 	}
 	if err != nil {
@@ -178,8 +178,10 @@ func (b *BrowserAccess) callback(w http.ResponseWriter, r *http.Request) {
 
 // notFoundPage is the one answer for a signed-in visitor who cannot open a name: it does not exist, or it is a private
 // app this account may not open. The two must be indistinguishable (anyone can sign up, so a different answer would let
-// them enumerate private names). Prior art: GitHub answers 404 for a private repository the viewer cannot see, and
-// cloudflared Access answers a denied user with one generic page (~/ref/cloudflared/ingress/middleware/jwtvalidator.go).
+// them enumerate private names). Prior art: GitHub answers 404 for a private repository the viewer cannot see; cloudflared
+// (~/ref/cloudflared/ingress/middleware/jwtvalidator.go) and Teleport (~/ref/teleport/lib/web/app/handler_test.go) answer
+// 403 for a denied user, which we do not copy because anyone can sign up here. The link needs the control server's Begin
+// to answer alike for a name that does not exist (it must be host-blind), or its presence tells the two apart.
 // "Use a different account" starts a fresh sign-in with switch=1 for the console to offer an account change; without a
 // new transaction the page has no link.
 func (b *BrowserAccess) notFoundPage(ctx context.Context, w http.ResponseWriter, host string) {
@@ -195,9 +197,9 @@ func (b *BrowserAccess) notFoundPage(ctx context.Context, w http.ResponseWriter,
 }
 
 // navigationNotFound answers a browser page load with notFoundPage and anything else (fetch, xhr, websocket) with the
-// plain 404, so a script gets no Set-Cookie it cannot use.
+// plain 404, so a script gets no Set-Cookie it cannot use. A machine access token never gets the link either.
 func (b *BrowserAccess) navigationNotFound(w http.ResponseWriter, r *http.Request, host string) {
-	if b.validate() && browserNavigation(r) {
+	if b.validate() && browserNavigation(r) && len(r.Header.Values("Paperboat-Access-Token")) == 0 {
 		b.notFoundPage(r.Context(), w, host)
 		return
 	}
@@ -337,13 +339,15 @@ func (b *BrowserAccess) authorize(w http.ResponseWriter, r *http.Request, m rout
 		b.begin(w, r, m.Host)
 		return r, func() {}, false
 	}
+	// These checks answer before control is asked, so they answer a name that does not exist alike (404): a 403 here
+	// would tell a signed-in visitor which private names exist.
 	if !machine && crossSiteSubresource(r, m.Host) {
-		writeErrorPage(w, 403, "This request came from another site and was blocked. Open the address directly in your browser.")
+		writeErrorPage(w, http.StatusNotFound, "")
 		return r, func() {}, false
 	}
 	if !machine && (r.Method != http.MethodGet && r.Method != http.MethodHead && r.Method != http.MethodOptions || isWebSocketUpgrade(r.Header)) {
 		if len(r.Header.Values("Origin")) != 1 || r.Header.Get("Origin") != "https://"+m.Host {
-			writeErrorPage(w, 403, "This request came from another site and was blocked. Open the address directly in your browser.")
+			writeErrorPage(w, http.StatusNotFound, "")
 			return r, func() {}, false
 		}
 	}
@@ -374,7 +378,7 @@ func (b *BrowserAccess) authorize(w http.ResponseWriter, r *http.Request, m rout
 		return r, func() {}, false
 	}
 	if !browserDecisionMatches(d, m) {
-		writeErrorPage(w, http.StatusNotFound, "")
+		b.navigationNotFound(w, r, m.Host)
 		return r, func() {}, false
 	}
 	lease, err := runtimeadmission.Admit(r.Context(), d.ExpiresAt, nil)

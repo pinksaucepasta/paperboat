@@ -704,7 +704,7 @@ func (p *Policy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			// A signed-in visitor gets the very page a denied private app gets (navigationNotFound).
-			if hasSession && !machine && !browserReservedDuplicates(r) {
+			if hasSession && !machine && !browserReservedDuplicates(r) && p.config.BrowserAccess != nil {
 				p.config.BrowserAccess.navigationNotFound(w, r, candidateHost)
 				return
 			}

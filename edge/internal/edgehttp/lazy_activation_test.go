@@ -179,6 +179,8 @@ func TestLazyActivationErrorResponses(t *testing.T) {
 var (
 	refMask  = regexp.MustCompile(`support_[0-9a-f-]{36}`)
 	timeMask = regexp.MustCompile(`\d{4}-\d\d-\d\d \d\d:\d\d:\d\d UTC`)
+	// The handoff cookie's Expires moves with the clock, so two otherwise equal answers can straddle a second.
+	expiresMask = regexp.MustCompile(`Expires=[^;\]]*`)
 )
 
 // Anyone can sign up, so a signed-in visitor must not tell a name that does not exist from a private app they may not
@@ -196,7 +198,7 @@ func TestSignedInUnknownHostLooksLikeDeniedPrivateApp(t *testing.T) {
 	}}
 	authority.decision, authority.failure = decision, control.ErrBrowserDenied
 	p := newLazyPolicy(t, registry, authority, http.HandlerFunc(func(http.ResponseWriter, *http.Request) { t.Fatal("reached the app") }))
-	get := func(host string, signedIn bool) *httptest.ResponseRecorder {
+	get := func(host string, signedIn bool, edit ...func(*http.Request)) *httptest.ResponseRecorder {
 		r := httptest.NewRequest(http.MethodGet, "https://"+host+"/", nil)
 		r.Host = host
 		r.Header.Set("Sec-Fetch-Mode", "navigate")
@@ -205,6 +207,9 @@ func TestSignedInUnknownHostLooksLikeDeniedPrivateApp(t *testing.T) {
 		if signedIn {
 			r.AddCookie(&http.Cookie{Name: browserEdgeCookie, Value: "browser-token"})
 		}
+		for _, e := range edit {
+			e(r)
+		}
 		w := httptest.NewRecorder()
 		p.ServeHTTP(w, r)
 		return w
@@ -212,7 +217,7 @@ func TestSignedInUnknownHostLooksLikeDeniedPrivateApp(t *testing.T) {
 	shape := func(w *httptest.ResponseRecorder) string {
 		h := w.Header().Clone()
 		h.Del(referenceHeader)
-		return fmt.Sprint(w.Code, h, timeMask.ReplaceAllString(refMask.ReplaceAllString(w.Body.String(), "REF"), "TIME"))
+		return fmt.Sprint(w.Code, expiresMask.ReplaceAllString(fmt.Sprint(h), "Expires=X"), timeMask.ReplaceAllString(refMask.ReplaceAllString(w.Body.String(), "REF"), "TIME"))
 	}
 	want := shape(get(denied, true))
 	if w := get(denied, true); w.Code != 404 || !strings.Contains(w.Body.String(), "Use a different account") || !strings.Contains(w.Body.String(), notFoundMessage) {
@@ -223,8 +228,43 @@ func TestSignedInUnknownHostLooksLikeDeniedPrivateApp(t *testing.T) {
 			t.Fatalf("%s differs from a denied private app:\n%s\n%s", host, got, want)
 		}
 	}
-	// Anonymous visitors are sent to sign in for every name alike; a name that does not exist is a plain 404 for them.
-	if a, b := get(denied, false), get("nothing.custom.example.test", false); a.Code != b.Code || a.Header().Get("Location") != b.Header().Get("Location") {
-		t.Fatalf("anonymous answers differ: %d %q vs %d %q", a.Code, a.Header().Get("Location"), b.Code, b.Header().Get("Location"))
+	// A request the edge refuses before asking control (another site's subresource) and a machine token's page load are
+	// answered alike for every name too.
+	crossSite := func(r *http.Request) {
+		r.Header.Set("Sec-Fetch-Site", "cross-site")
+		r.Header.Set("Sec-Fetch-Mode", "cors")
+	}
+	machine := func(r *http.Request) { r.Header.Set("Paperboat-Access-Token", "machine-token") }
+	for name, edit := range map[string]func(*http.Request){"cross-site": crossSite, "machine token": machine} {
+		want := shape(get(denied, true, edit))
+		for _, host := range []string{lazy, "nothing.custom.example.test"} {
+			if got := shape(get(host, true, edit)); got != want {
+				t.Fatalf("%s, %s differs from a denied private app:\n%s\n%s", name, host, got, want)
+			}
+		}
+	}
+}
+
+// The control server answers Begin for a name that does not exist with 404 (ErrBrowserDenied at the edge): a signed-out
+// browser gets the 404 page, never the 403 "no access" page this used to be.
+type beginDeniedAuthority struct{ lazyAuthorityFixture }
+
+func (*beginDeniedAuthority) Begin(context.Context, string, string) (control.BrowserBegin, error) {
+	return control.BrowserBegin{}, control.ErrBrowserDenied
+}
+
+func TestSignedOutUnknownHostNavigationIs404(t *testing.T) {
+	authority := &beginDeniedAuthority{}
+	p, err := New(Config{BrowserAccess: &BrowserAccess{Authority: authority, LoginOrigin: "https://login.example.test"}, PreviewBaseDomain: "preview.example.test", TunnelBaseDomain: "tunnels.example.test", RuntimeBaseDomain: "runtime.example.test", MaxHeaderBytes: 4096, MaxBodyBytes: 4096, Routes: route.NewGenerationRegistry(1)}, http.NotFoundHandler())
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := httptest.NewRequest(http.MethodGet, "https://hello.custom.example.test/", nil)
+	r.Header.Set("Sec-Fetch-Mode", "navigate")
+	r.Header.Set("Sec-Fetch-Dest", "document")
+	w := httptest.NewRecorder()
+	p.ServeHTTP(w, r)
+	if w.Code != 404 || !strings.Contains(w.Body.String(), notFoundMessage) {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
 	}
 }
