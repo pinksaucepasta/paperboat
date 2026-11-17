@@ -48,7 +48,7 @@ func assertNativeConsumerWorkspace(t *testing.T, store *db.DB, service *Service,
 			t.Run(c.consumer, func(t *testing.T) {
 				session := "native_" + c.consumer + suffix
 				exec(`INSERT INTO user_machine_access_sessions(credential_kind,id,user_machine_id,user_id,environment_id,cli_client_session_id,http_base_url,helper_terminal_session_id,expires_at,created_at,capabilities,team_id) VALUES('control_plane_signed',$1,$2,$3,$2,$4,'','fixture',$5,$6,ARRAY[$7]::text[],$8)`, session, machine, member, client, now.Add(time.Hour), now.Add(-time.Minute), c.capability, team)
-				report := NativeReport{AccessSessionID: session, StreamID: session, Consumer: c.consumer, Mode: "direct", IntervalStart: now, IntervalEnd: now.Add(20 * time.Second), Upload: 17, Download: 19}
+				report := NativeReport{AccessSessionID: session, StreamID: session, Consumer: c.consumer, Mode: "direct", IntervalStart: now, IntervalEnd: now.Add(20 * time.Second), UploadBytes: 17, DownloadBytes: 19}
 				receipt, err := service.RecordNative(ctx, machine, 1, NativeBatch{Reports: []NativeReport{report}})
 				if err != nil || receipt.Accepted != 1 {
 					t.Fatalf("native admission/report: %+v %v", receipt, err)
@@ -64,7 +64,7 @@ func assertNativeConsumerWorkspace(t *testing.T, store *db.DB, service *Service,
 		}
 		// A host meters every stream, recordings included: a recording report is judged on its own (here: no usage
 		// authority, so rejected) and never refuses the rest of the batch, which it did as an unknown consumer.
-		terminal := NativeReport{AccessSessionID: "native_terminal" + suffix, StreamID: "batch_terminal", Consumer: "terminal", Mode: "direct", IntervalStart: now, IntervalEnd: now.Add(20 * time.Second), Upload: 1, Download: 1}
+		terminal := NativeReport{AccessSessionID: "native_terminal" + suffix, StreamID: "batch_terminal", Consumer: "terminal", Mode: "direct", IntervalStart: now, IntervalEnd: now.Add(20 * time.Second), UploadBytes: 1, DownloadBytes: 1}
 		recording := terminal
 		recording.StreamID, recording.Consumer = "batch_recording", "recording"
 		receipt, err := service.RecordNative(ctx, machine, 1, NativeBatch{Reports: []NativeReport{terminal, recording}})
@@ -99,7 +99,7 @@ func assertHostRulesUsage(t *testing.T, store *db.DB, service *Service, suffix, 
 		}()
 		exec(`INSERT INTO user_machines(id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state,online,installation_generation) VALUES($1,$2,$1,'linux','amd64','/workspace','online','occupied',true,1)`, machine, owner)
 		report := func(session, peer, stream string) NativeReport {
-			return NativeReport{AccessSessionID: session, PeerAccountID: peer, StreamID: stream, Consumer: "ssh", Mode: "relay", IntervalStart: now, IntervalEnd: now.Add(20 * time.Second), Upload: 1 << 20, Download: 1<<20 + 7}
+			return NativeReport{AccessSessionID: session, PeerAccountID: peer, StreamID: stream, Consumer: "ssh", Mode: "relay", IntervalStart: now, IntervalEnd: now.Add(20 * time.Second), UploadBytes: 1 << 20, DownloadBytes: 1<<20 + 7}
 		}
 		receipt, err := service.RecordNative(ctx, machine, 1, NativeBatch{Reports: []NativeReport{report(machine, owner, "s1"), report(machine, stranger, "s2"), report("other_"+machine, owner, "s3")}})
 		if err != nil || receipt.Accepted != 1 || len(receipt.RejectedIndices) != 2 || receipt.RejectedIndices[0] != 1 || receipt.RejectedIndices[1] != 2 {
@@ -112,7 +112,7 @@ func assertHostRulesUsage(t *testing.T, store *db.DB, service *Service, suffix, 
 		if err != nil || events != 1 || kind != "ssh" || workspace != "personal:"+owner || actor != owner || upload != 1<<20 || download != 1<<20+7 {
 			t.Fatalf("host-rules event count=%d kind=%q workspace=%q actor=%q bytes=%d/%d: %v", events, kind, workspace, actor, upload, download, err)
 		}
-		if err := (NativeReport{AccessSessionID: machine, PeerAccountID: owner, StreamID: "s4", Consumer: "file_transfer", Mode: "relay", IntervalStart: now, IntervalEnd: now}).validate(now); err == nil {
+		if err := validateNativeReport(NativeReport{AccessSessionID: machine, PeerAccountID: owner, StreamID: "s4", Consumer: "file_transfer", Mode: "relay", IntervalStart: now, IntervalEnd: now}, now); err == nil {
 			t.Fatal("a host-rules report for a consumer host rules never admit was valid")
 		}
 	})

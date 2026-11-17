@@ -69,7 +69,7 @@ func TestPostgresBandwidthHistory(t *testing.T) {
 	}
 	service := New(store)
 	service.Now = func() time.Time { return now.Add(2 * time.Minute) }
-	report := NativeReport{AccessSessionID: session, StreamID: "stream1", Consumer: "terminal", Mode: "direct", IntervalStart: now, IntervalEnd: now.Add(30 * time.Second), Upload: 100, Download: 200}
+	report := NativeReport{AccessSessionID: session, StreamID: "stream1", Consumer: "terminal", Mode: "direct", IntervalStart: now, IntervalEnd: now.Add(30 * time.Second), UploadBytes: 100, DownloadBytes: 200}
 	for _, consumer := range []string{"retired_consumer", "retired_consumer_manage"} {
 		retired := report
 		retired.Consumer = consumer
@@ -86,15 +86,15 @@ func TestPostgresBandwidthHistory(t *testing.T) {
 	if _, err := service.RecordNative(ctx, machine, 1, batch); err != nil {
 		t.Fatal(err)
 	}
-	report.Upload = 50
-	report.Download = 80
+	report.UploadBytes = 50
+	report.DownloadBytes = 80
 	if _, err := service.RecordNative(ctx, machine, 1, NativeBatch{Reports: []NativeReport{report}}); err != nil {
 		t.Fatal(err)
 	}
 	report.Mode = "relay"
 	report.NodeID = node
-	report.Upload = 30
-	report.Download = 40
+	report.UploadBytes = 30
+	report.DownloadBytes = 40
 	if _, err := service.RecordNative(ctx, machine, 1, NativeBatch{Reports: []NativeReport{report}}); err != nil {
 		t.Fatal(err)
 	}
@@ -159,8 +159,8 @@ func TestPostgresBandwidthHistory(t *testing.T) {
 	exec(`DELETE FROM user_machine_access_sessions WHERE id=$1`, session)
 	report.StreamID = "retained-earlier"
 	report.IntervalEnd = now.Add(20 * time.Second)
-	report.Upload = 5
-	report.Download = 7
+	report.UploadBytes = 5
+	report.DownloadBytes = 7
 	receipt, err = service.RecordNative(ctx, machine, 1, NativeBatch{Reports: []NativeReport{report}})
 	if err != nil || receipt.Accepted != 1 {
 		t.Fatalf("retained=%+v %v", receipt, err)
@@ -190,7 +190,7 @@ func TestPostgresBandwidthHistory(t *testing.T) {
 	if err := service.RecordBrowserAdmission(ctx, attachment, machine, terminal, edgeNode, a, browserEnd.Add(5*time.Minute)); err != nil {
 		t.Fatal(err)
 	}
-	browser := NativeReport{AccessSessionID: attachment, StreamID: attachment, Consumer: "terminal", Mode: "edge", IntervalStart: browserStart, IntervalEnd: browserEnd, Upload: 17, Download: 19}
+	browser := NativeReport{AccessSessionID: attachment, StreamID: attachment, Consumer: "terminal", Mode: "edge", IntervalStart: browserStart, IntervalEnd: browserEnd, UploadBytes: 17, DownloadBytes: 19}
 	receipt, err = service.RecordNative(ctx, machine, 1, NativeBatch{Reports: []NativeReport{browser}})
 	if err != nil || receipt.Accepted != 1 {
 		t.Fatalf("browser attachment=%+v %v", receipt, err)
@@ -208,7 +208,7 @@ func TestPostgresBandwidthHistory(t *testing.T) {
 	for _, port := range []int{3000, 4000} {
 		serviceSession := session + fmt.Sprint(port)
 		exec(`INSERT INTO user_machine_access_sessions(credential_kind,id,user_machine_id,user_id,environment_id,cli_client_session_id,http_base_url,expires_at,created_at,capabilities,machine_service_port,machine_service_source_kind,machine_service_source_id,machine_service_source_generation,machine_service_team_fence) VALUES('control_plane_signed',$1,$2,$3,$4,$5,'',$6,$7,ARRAY['private_access'],$8,'automatic',$2,1,paperboat.machine_service_team_fence($3,$2,'automatic',$2,NULL))`, serviceSession, machine, a, "env_"+suffix, client, now.Add(time.Hour), now.Add(-time.Minute), port)
-		serviceReport := NativeReport{AccessSessionID: serviceSession, StreamID: serviceSession, Consumer: "private_tcp", Mode: "direct", IntervalStart: now, IntervalEnd: now.Add(30 * time.Second), Upload: int64(port)}
+		serviceReport := NativeReport{AccessSessionID: serviceSession, StreamID: serviceSession, Consumer: "private_tcp", Mode: "direct", IntervalStart: now, IntervalEnd: now.Add(30 * time.Second), UploadBytes: int64(port)}
 		receipt, err = service.RecordNative(ctx, machine, 1, NativeBatch{Reports: []NativeReport{serviceReport}})
 		if err != nil || receipt.Accepted != 1 {
 			t.Fatalf("service port=%d: %+v %v", port, receipt, err)
@@ -238,7 +238,7 @@ func TestPostgresBandwidthHistory(t *testing.T) {
 	// was deleted, but does not expose a foreign private node named by a host.
 	exec(`UPDATE selfhost_installations SET scope_id=$2,name='Private outsider relay' WHERE node_id=$1`, node, b)
 	report.Mode, report.NodeID, report.StreamID = "relay", node, "foreign-node"
-	report.IntervalEnd, report.Upload, report.Download = now.Add(20*time.Second), 3, 4
+	report.IntervalEnd, report.UploadBytes, report.DownloadBytes = now.Add(20*time.Second), 3, 4
 	receipt, err = service.RecordNative(ctx, machine, 1, NativeBatch{Reports: []NativeReport{report}})
 	if err != nil || receipt.Accepted != 1 {
 		t.Fatalf("foreign node observation=%+v %v", receipt, err)
@@ -249,7 +249,7 @@ func TestPostgresBandwidthHistory(t *testing.T) {
 	}
 	// Retirement is not revocation of the owner's right to see earlier usage.
 	exec(`UPDATE selfhost_installations SET scope_id=$2,state='removed',name='Student relay' WHERE node_id=$1`, node, a)
-	report.StreamID, report.Upload, report.Download = "retired-owned-node", 6, 8
+	report.StreamID, report.UploadBytes, report.DownloadBytes = "retired-owned-node", 6, 8
 	receipt, err = service.RecordNative(ctx, machine, 1, NativeBatch{Reports: []NativeReport{report}})
 	if err != nil || receipt.Accepted != 1 {
 		t.Fatalf("retired owner observation=%+v %v", receipt, err)
@@ -357,12 +357,12 @@ func TestUsageBounds(t *testing.T) {
 			t.Fatalf("accepted %+v", q)
 		}
 	}
-	r := NativeReport{AccessSessionID: "session", StreamID: "stream", Consumer: "file_transfer", Mode: "relay", IntervalStart: now, IntervalEnd: now.Add(time.Second), Upload: 1}
-	if err := r.validate(now.Add(time.Minute)); err != nil {
+	r := NativeReport{AccessSessionID: "session", StreamID: "stream", Consumer: "file_transfer", Mode: "relay", IntervalStart: now, IntervalEnd: now.Add(time.Second), UploadBytes: 1}
+	if err := validateNativeReport(r, now.Add(time.Minute)); err != nil {
 		t.Fatalf("relay unknown node: %v", err)
 	}
 	r.IntervalStart = r.IntervalStart.Add(time.Second)
-	if r.validate(now.Add(time.Minute)) == nil {
+	if validateNativeReport(r, now.Add(time.Minute)) == nil {
 		t.Fatal("accepted unbounded interval key")
 	}
 }

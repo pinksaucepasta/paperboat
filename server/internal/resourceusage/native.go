@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/shared/nativeusage"
 	"github.com/pinksaucepasta/paperboat/shared/peerconsumer"
 	"strings"
 	"time"
@@ -21,29 +22,12 @@ var ErrDenied = errors.New("usage reporting authority unavailable")
 const MaxReports = 64
 const DeliveryWindow = 7 * 24 * time.Hour
 const MaxCounter int64 = 1 << 40 // 1 TiB per stream/path/minute; bounds corrupt reports.
-type NativeReport struct {
-	AccessSessionID string    `json:"access_session_id"`
-	StreamID        string    `json:"stream_id"`
-	Consumer        string    `json:"consumer"`
-	Mode            string    `json:"mode"`
-	NodeID          string    `json:"node_id"`
-	IntervalStart   time.Time `json:"interval_start"`
-	IntervalEnd     time.Time `json:"interval_end"`
-	Upload          int64     `json:"upload_bytes"`
-	Download        int64     `json:"download_bytes"`
-	// PeerAccountID marks a stream the host admitted from its own signed rules (every managed SSH stream, D1;
-	// exec or terminal offline): it has no access session, AccessSessionID is the host machine itself.
-	PeerAccountID string `json:"peer_account_id,omitempty"`
-}
-type NativeBatch struct {
-	Reports             []NativeReport `json:"reports"`
-	UnrecordedBytes     int64          `json:"unrecorded_bytes,omitempty"`
-	ExpiredBytes        int64          `json:"expired_bytes,omitempty"`
-	RecordingIncomplete bool           `json:"recording_incomplete,omitempty"`
-}
+type NativeReport = nativeusage.Report
 
-func (r NativeReport) validate(now time.Time) error {
-	if r.AccessSessionID == "" || len(r.AccessSessionID) > 256 || r.StreamID == "" || len(r.StreamID) > 128 || len(r.NodeID) > 256 || strings.TrimSpace(r.StreamID) != r.StreamID || r.Upload < 0 || r.Download < 0 || r.Upload > MaxCounter || r.Download > MaxCounter {
+type NativeBatch = nativeusage.Batch
+
+func validateNativeReport(r NativeReport, now time.Time) error {
+	if r.AccessSessionID == "" || len(r.AccessSessionID) > 256 || r.StreamID == "" || len(r.StreamID) > 128 || len(r.NodeID) > 256 || strings.TrimSpace(r.StreamID) != r.StreamID || r.UploadBytes < 0 || r.DownloadBytes < 0 || r.UploadBytes > MaxCounter || r.DownloadBytes > MaxCounter {
 		return ErrInvalid
 	}
 	if r.IntervalStart.IsZero() || !r.IntervalStart.Equal(r.IntervalStart.UTC().Truncate(time.Minute)) || r.IntervalEnd.Before(r.IntervalStart) || r.IntervalEnd.After(r.IntervalStart.Add(time.Minute)) || r.IntervalEnd.After(now.Add(time.Minute)) || now.Sub(r.IntervalEnd) > DeliveryWindow {
@@ -98,7 +82,7 @@ func (s *Service) RecordNative(ctx context.Context, machine string, generation i
 		return receipt, ErrInvalid
 	}
 	for _, r := range batch.Reports {
-		if err := r.validate(now); err != nil {
+		if err := validateNativeReport(r, now); err != nil {
 			return receipt, err
 		}
 	}
@@ -181,13 +165,13 @@ func (s *Service) RecordNative(ctx context.Context, machine string, generation i
 			if err := tx.QueryRow(ctx, `SELECT upload_bytes,download_bytes FROM resource_bandwidth_events WHERE operation_id=$1`, operation).Scan(&previousUp, &previousDown); err != nil && !errors.Is(err, sql.ErrNoRows) {
 				return err
 			}
-			grown := max(previousUp, r.Upload) + max(previousDown, r.Download) - previousUp - previousDown
+			grown := max(previousUp, r.UploadBytes) + max(previousDown, r.DownloadBytes) - previousUp - previousDown
 			if s.Debiter != nil && r.Mode == "relay" && hosting == "managed" && grown > 0 {
 				if _, _, err := s.Debiter.DebitWorkspaceBandwidthTx(ctx, tx, ws, grown, r.IntervalEnd); err != nil {
 					return fmt.Errorf("debit native relay bandwidth: %w", err)
 				}
 			}
-			_, err = tx.Exec(ctx, `INSERT INTO resource_bandwidth_events(operation_id,workspace_id,resource_kind,resource_id,resource_name,machine_id,machine_name,mode,hosting,node_id,node_name,upload_bytes,download_bytes,interval_start,interval_end,resource_route_id,actor_account_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) ON CONFLICT(operation_id) DO UPDATE SET actor_account_id=coalesce(resource_bandwidth_events.actor_account_id,EXCLUDED.actor_account_id),upload_bytes=greatest(resource_bandwidth_events.upload_bytes,EXCLUDED.upload_bytes),download_bytes=greatest(resource_bandwidth_events.download_bytes,EXCLUDED.download_bytes),interval_end=greatest(resource_bandwidth_events.interval_end,EXCLUDED.interval_end)`, operation, ws, kind, id, name, machine, machineName, r.Mode, hosting, r.NodeID, nodeName, r.Upload, r.Download, r.IntervalStart, r.IntervalEnd, resourceRoute, actor)
+			_, err = tx.Exec(ctx, `INSERT INTO resource_bandwidth_events(operation_id,workspace_id,resource_kind,resource_id,resource_name,machine_id,machine_name,mode,hosting,node_id,node_name,upload_bytes,download_bytes,interval_start,interval_end,resource_route_id,actor_account_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) ON CONFLICT(operation_id) DO UPDATE SET actor_account_id=coalesce(resource_bandwidth_events.actor_account_id,EXCLUDED.actor_account_id),upload_bytes=greatest(resource_bandwidth_events.upload_bytes,EXCLUDED.upload_bytes),download_bytes=greatest(resource_bandwidth_events.download_bytes,EXCLUDED.download_bytes),interval_end=greatest(resource_bandwidth_events.interval_end,EXCLUDED.interval_end)`, operation, ws, kind, id, name, machine, machineName, r.Mode, hosting, r.NodeID, nodeName, r.UploadBytes, r.DownloadBytes, r.IntervalStart, r.IntervalEnd, resourceRoute, actor)
 			if err != nil {
 				return fmt.Errorf("persist native usage: %w", err)
 			}

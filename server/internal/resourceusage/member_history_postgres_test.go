@@ -60,7 +60,7 @@ func assertTeamMemberHistory(t *testing.T, store *db.DB, service *Service, suffi
 			session := "team_access_" + c.actor
 			exec("INSERT INTO cli_client_sessions(id,user_id,client_id,client_label,device_type,os,scopes,state,created_at,approved_at) VALUES($1,$2,$1,'Usage','desktop','linux',ARRAY['account:read'],'active',$3,$3)", client+c.actor, c.actor, now)
 			exec("INSERT INTO user_machine_access_sessions(credential_kind,id,user_machine_id,user_id,environment_id,cli_client_session_id,http_base_url,helper_terminal_session_id,expires_at,created_at,capabilities) VALUES('control_plane_signed',$1,$2,$3,$4,$5,'','fixture',$6,$7,ARRAY['terminal'])", session, machine, c.actor, "team_env_"+suffix, client+c.actor, now.Add(time.Hour), now.Add(-time.Minute))
-			batch := NativeBatch{Reports: []NativeReport{{AccessSessionID: session, StreamID: "team-stream", Consumer: "terminal", Mode: "direct", IntervalStart: now, IntervalEnd: now.Add(20 * time.Second), Upload: c.want.Upload, Download: c.want.Download}}}
+			batch := NativeBatch{Reports: []NativeReport{{AccessSessionID: session, StreamID: "team-stream", Consumer: "terminal", Mode: "direct", IntervalStart: now, IntervalEnd: now.Add(20 * time.Second), UploadBytes: c.want.Upload, DownloadBytes: c.want.Download}}}
 			receipt, err := service.RecordNative(ctx, machine, 1, batch)
 			if err != nil || receipt.Accepted != 1 {
 				t.Fatalf("team measurement: %+v %v", receipt, err)

@@ -91,7 +91,7 @@ func TestNativeRelayBytesAreDebitedOnceByGrowthPostgres(t *testing.T) {
 	service := New(store)
 	service.Debiter = debiter
 	report := func(stream, mode, nodeID string, up, down int64) NativeReport {
-		return NativeReport{AccessSessionID: session, StreamID: stream, Consumer: "file_transfer", Mode: mode, NodeID: nodeID, IntervalStart: now, IntervalEnd: now.Add(20 * time.Second), Upload: up, Download: down}
+		return NativeReport{AccessSessionID: session, StreamID: stream, Consumer: "file_transfer", Mode: mode, NodeID: nodeID, IntervalStart: now, IntervalEnd: now.Add(20 * time.Second), UploadBytes: up, DownloadBytes: down}
 	}
 	send := func(r NativeReport) {
 		t.Helper()
