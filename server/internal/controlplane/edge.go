@@ -14,6 +14,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/shared/nodemetrics"
 	"io"
 	"log/slog"
 	"net/http"
@@ -576,6 +577,8 @@ type edgeNodeObservation struct {
 	ErrorPages []edgeErrorPage `json:"error_pages,omitempty"`
 	// Refusals count, per hostname, what the edge refused for flood protection since its last heartbeat.
 	Refusals []edgeHostRefusals `json:"refusals,omitempty"`
+	// Metrics is the edge's version, CPU, memory and bytes carried; optional, an older edge sends none.
+	Metrics *nodemetrics.Report `json:"metrics,omitempty"`
 }
 
 type edgeHostRefusals struct {
@@ -999,6 +1002,7 @@ func (s *EdgeService) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
 	if !s.decode(w, r, &input) {
 		return
 	}
+	input.Metrics = usableMetrics(r.Context(), input.NodeID, input.Metrics)
 	if err := s.Heartbeat(r.Context(), input); err != nil {
 		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, pgx.ErrNoRows) {
 			writeEdgeError(w, r, http.StatusConflict, "node_observation_stale", false, 0, err)
@@ -1013,6 +1017,7 @@ func (s *EdgeService) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
 	}
 	recordEdgeErrorPages(r.Context(), input.ErrorPages)
 	s.recordEdgeRefusals(r.Context(), input.NodeID, input.Refusals)
+	s.recordNodeMetrics(r.Context(), "edge", input.NodeID, input.ProcessEpoch, int64(input.ActiveStreams), input.Metrics)
 	writeHeartbeatAnswer(w, s.ingressLimits)
 }
 

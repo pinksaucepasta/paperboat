@@ -8410,6 +8410,9 @@
             "type": "string",
             "pattern": "^[0-9a-f]{64}$",
             "description": "Lowercase hex SHA-256 of the membership: one account_id NUL endpoint_id LF line per subject, sorted as strings. Grant generations are not part of it. Required when subjects is omitted."
+          },
+          "metrics": {
+            "$ref": "#/components/schemas/NodeMetricsReport"
           }
         }
       },
@@ -19061,6 +19064,213 @@
           "configuration": {
             "type": "object",
             "additionalProperties": true
+          }
+        }
+      },
+      "OperatorNodeWarning": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "code",
+          "severity",
+          "message"
+        ],
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "severity": {
+            "type": "string",
+            "enum": [
+              "critical",
+              "warning",
+              "info"
+            ]
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "OperatorNodeCapacity": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "kind",
+          "warnings"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "edge",
+              "relay",
+              "server"
+            ]
+          },
+          "state": {
+            "type": "string"
+          },
+          "region": {
+            "type": "string"
+          },
+          "site": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          },
+          "cpu_percent": {
+            "type": "number"
+          },
+          "cpu_sustained_percent": {
+            "type": "number"
+          },
+          "rss_bytes": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "connections": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "connection_limit": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "bytes_today": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "bytes_month": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "allowance_used": {
+            "type": "number"
+          },
+          "last_heartbeat_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "metrics_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OperatorNodeWarning"
+            }
+          }
+        }
+      },
+      "OperatorCapacityPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "observed_at",
+          "today",
+          "month_start",
+          "thresholds",
+          "total",
+          "items"
+        ],
+        "properties": {
+          "observed_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "today": {
+            "type": "string"
+          },
+          "month_start": {
+            "type": "string"
+          },
+          "total": {
+            "type": "integer"
+          },
+          "thresholds": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "monthly_traffic_bytes",
+              "traffic_warn_fraction",
+              "edge_cpu_warn_percent",
+              "relay_rss_warn_bytes",
+              "cpu_sustained_seconds"
+            ],
+            "properties": {
+              "monthly_traffic_bytes": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "traffic_warn_fraction": {
+                "type": "number"
+              },
+              "edge_cpu_warn_percent": {
+                "type": "number"
+              },
+              "relay_rss_warn_bytes": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "cpu_sustained_seconds": {
+                "type": "integer"
+              }
+            }
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OperatorNodeCapacity"
+            }
+          },
+          "truncated": {
+            "type": "boolean",
+            "description": "More nodes exist than listed (the page holds the first 1000)."
+          }
+        }
+      },
+      "NodeMetricsReport": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "cpu_percent",
+          "rss_bytes",
+          "bytes_in",
+          "bytes_out"
+        ],
+        "description": "What an edge or relay reports about itself with a heartbeat. Bytes are cumulative since the process started.",
+        "properties": {
+          "version": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "cpu_percent": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100,
+            "description": "Share of all the host's CPUs over the last sample."
+          },
+          "rss_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "bytes_in": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "bytes_out": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
           }
         }
       }
@@ -58331,6 +58541,80 @@
             }
           }
         }
+      }
+    },
+    "/v1/admin/infrastructure/capacity": {
+      "get": {
+        "operationId": "get_v1_admin_infrastructure_capacity",
+        "summary": "Operator node capacity",
+        "responses": {
+          "400": {
+            "description": "Invalid target, body, pagination or confirmation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Browser authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Operator session or capability required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Evidence, provider or audit unavailable; outcome may require checking target state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Audited result. Cache-Control: no-store.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/OperatorCapacityPage"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "parameters": [],
+        "security": [
+          {
+            "operatorCookie": []
+          }
+        ],
+        "x-operator-capability": "operations",
+        "description": "Current active operator account and separate operator session required. See docs/runbooks/operator-admin.md. Audited before disclosure; unavailable auditing fails closed."
       }
     }
   }

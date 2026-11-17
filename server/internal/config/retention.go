@@ -45,6 +45,9 @@ type Retention struct {
 	// Recordings: session recording index rows after the recording started (the bytes live on the machine, which
 	// deletes them after Recordings.MachineRetentionDays).
 	Recordings time.Duration `json:"recordings"`
+	// NodeCapacityDaily: a node's per-day byte totals and peaks (and the latest-sample row of a node that stopped
+	// reporting). At least 35 days, so a month's traffic is always complete.
+	NodeCapacityDaily time.Duration `json:"node_capacity_daily"`
 	// SupportReportsPerAccount keeps an account's newest reports (they also expire on their own).
 	SupportReportsPerAccount int `json:"support_reports_per_account"`
 	// Batch rows per delete statement and the time one pass may take, so a backlog drains without long locks.
@@ -57,7 +60,7 @@ func defaultRetention() Retention {
 		ExpiredCredentials: time.Hour, IdempotencyRecords: day, FinishedOperations: 7 * day, EndedSessions: 30 * day, EndedPublications: 30 * day,
 		FinishedEnrollments: 7 * day, AbandonedEnrollments: 30 * day, AccountDeletionJobs: 90 * day,
 		AcknowledgedUsageReceipts: 2 * day, TunnelLogs: 7 * day, DecidedMachineRequests: 90 * day, InboxRequests: 30 * day, StripeEvents: 30 * day,
-		SupersededMeshEntries: time.Hour, Recordings: 90 * day, SupportReportsPerAccount: 1000, Batch: 500, Budget: 20 * time.Second,
+		SupersededMeshEntries: time.Hour, Recordings: 90 * day, NodeCapacityDaily: 90 * day, SupportReportsPerAccount: 1000, Batch: 500, Budget: 20 * time.Second,
 	}
 }
 
@@ -65,7 +68,7 @@ func (r Retention) validate(accessSessionRetention time.Duration) error {
 	switch {
 	case r.ExpiredCredentials < time.Minute, r.IdempotencyRecords < time.Hour, r.FinishedOperations < day, r.EndedPublications < day, r.FinishedEnrollments < 2*day, r.AbandonedEnrollments < 2*day, r.AccountDeletionJobs < day,
 		r.AcknowledgedUsageReceipts < time.Hour, r.TunnelLogs < time.Hour, r.DecidedMachineRequests < day, r.InboxRequests < day, r.StripeEvents < 4*day,
-		r.SupersededMeshEntries < time.Minute:
+		r.SupersededMeshEntries < time.Minute, r.NodeCapacityDaily < 35*day:
 		return fmt.Errorf("retention: a window is below its minimum")
 	case r.EndedSessions < accessSessionRetention:
 		return fmt.Errorf("retention.ended_sessions must be at least user_machines.expired_access_session_retention")

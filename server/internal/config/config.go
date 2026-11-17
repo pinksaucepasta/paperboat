@@ -103,6 +103,7 @@ type Config struct {
 	Access               Access           `json:"access"`
 	Diagnostics          Diagnostics      `json:"diagnostics"`
 	Retention            Retention        `json:"retention"`
+	NodeCapacity         NodeCapacity     `json:"node_capacity"`
 	Recordings           Recordings       `json:"recordings"`
 	Notifications        Notifications    `json:"notifications"`
 	Providers            Providers        `json:"providers"`
@@ -621,9 +622,10 @@ func Default() Config {
 				DeliveryTimeout: 10 * time.Minute, MaxPendingSpoolBytes: 2_000_000_000,
 			},
 		},
-		Diagnostics: Diagnostics{Retention: 7 * 24 * time.Hour},
-		Retention:   defaultRetention(),
-		Recordings:  defaultRecordings(),
+		Diagnostics:  Diagnostics{Retention: 7 * 24 * time.Hour},
+		Retention:    defaultRetention(),
+		NodeCapacity: defaultNodeCapacity(),
+		Recordings:   defaultRecordings(),
 		Providers: Providers{
 			WorkOS: ProviderConfig{BaseURL: "https://api.workos.com"},
 			GitHub: ProviderConfig{
@@ -647,6 +649,9 @@ func Default() Config {
 
 func (c Config) Validate() error {
 	if err := c.Recordings.validate(c.Retention.Recordings); err != nil {
+		return err
+	}
+	if err := c.NodeCapacity.validate(); err != nil {
 		return err
 	}
 	if err := c.Retention.validate(c.UserMachines.ExpiredAccessSessionRetention); err != nil {

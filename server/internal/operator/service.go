@@ -35,10 +35,11 @@ type Service struct {
 	audit          *audit.Writer
 	hostStaleAfter time.Duration
 	nodeStaleAfter time.Duration
+	capacity       config.NodeCapacity
 }
 
 func NewService(store *db.DB) *Service {
-	return &Service{store: store, audit: audit.NewWriter(store), hostStaleAfter: config.Default().UserMachines.OfflineAfter, nodeStaleAfter: controlplane.ControlTunnelNodeStaleAfter()}
+	return &Service{store: store, audit: audit.NewWriter(store), hostStaleAfter: config.Default().UserMachines.OfflineAfter, nodeStaleAfter: controlplane.ControlTunnelNodeStaleAfter(), capacity: config.Default().NodeCapacity}
 }
 
 type Account struct {
@@ -279,18 +280,18 @@ func allowed(role auth.Role, kind string) bool {
 	case "billing":
 		return kind == "account" || kind == "team" || kind == "billing" || kind == "billing_operation" || kind == "workspaces" || kind == "billing_operations" || kind == "machines" || kind == "machine"
 	case "operations":
-		return kind == "infrastructure" || kind == "control_operation" || kind == "control_operations" || kind == "tunnel_status" || kind == "machines" || kind == "machine"
+		return kind == "infrastructure" || kind == "control_operation" || kind == "control_operations" || kind == "tunnel_status" || kind == "machines" || kind == "machine" || kind == "capacity"
 	default:
 		return false
 	}
 }
 
 func validKind(kind string) bool {
-	return kind == "account" || kind == "team" || kind == "billing" || kind == "infrastructure" || kind == "control_operation" || kind == "billing_operation" || kind == "audit" || kind == "accounts" || kind == "teams" || kind == "workspaces" || kind == "billing_operations" || kind == "control_operations" || kind == "overview" || kind == "tunnel_status" || kind == "audit_events" || kind == "machines" || kind == "machine"
+	return kind == "account" || kind == "team" || kind == "billing" || kind == "infrastructure" || kind == "control_operation" || kind == "billing_operation" || kind == "audit" || kind == "accounts" || kind == "teams" || kind == "workspaces" || kind == "billing_operations" || kind == "control_operations" || kind == "overview" || kind == "tunnel_status" || kind == "audit_events" || kind == "machines" || kind == "machine" || kind == "capacity"
 }
 
 func pageKind(kind string) bool {
-	return kind == "infrastructure" || kind == "audit" || kind == "accounts" || kind == "teams" || kind == "workspaces" || kind == "billing_operations" || kind == "control_operations" || kind == "audit_events" || kind == "machines"
+	return kind == "infrastructure" || kind == "audit" || kind == "accounts" || kind == "teams" || kind == "workspaces" || kind == "billing_operations" || kind == "control_operations" || kind == "audit_events" || kind == "machines" || kind == "capacity"
 }
 
 func safeID(v string) bool {
@@ -355,6 +356,8 @@ func (s *Service) readTx(ctx context.Context, tx *db.Tx, kind, target, after str
 		return readControlOperations(ctx, tx, target, after, limit)
 	case "overview":
 		return s.readOverview(ctx, tx, target)
+	case "capacity":
+		return s.readCapacity(ctx, tx)
 	case "tunnel_status":
 		return readTunnelStatus(ctx, tx, target)
 	default:

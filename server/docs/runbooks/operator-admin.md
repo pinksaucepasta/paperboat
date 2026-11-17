@@ -83,6 +83,18 @@ filters. Accounts take `q` (email, name or id contains) and `status`; teams take
   `_FILE`; a personal key with `query:read` only). Unset: status says not
   configured and overview answers `analytics_not_configured`. Retention and
   console country/device views need events the sites do not send yet.
+- `/v1/admin/infrastructure/capacity` (operations): every edge, relay and control-plane
+  server with CPU (now and a five minute average), memory, connections, version,
+  last heartbeat, location, and bytes today and this month (UTC) against the
+  per-node monthly allowance (`node_capacity.monthly_traffic_bytes`, default 20 TB;
+  an edge counts bytes in plus out, so a proxied download counts twice). Warnings:
+  edge sustained CPU at or above `edge_cpu_warn_percent` (50), relay memory at or
+  above `relay_rss_warn_bytes` (1 GiB), month traffic at or above
+  `traffic_warn_fraction` (80%) of the allowance, and a stale heartbeat. Edges and
+  relays report this in their heartbeat; **deploy the server before the edges and
+  relays**, since an older server rejects the new field. Day totals live in
+  `node_capacity_daily` and are pruned after `retention.node_capacity_daily` (90
+  days).
 - `/v1/admin/teams` and `/{team_id}`: ownership/generation, suspension and bounded
   membership pages, plus the team's billing workspace ID.
 - `/v1/admin/billing/workspaces` and `/{workspace_id}`: subscription state, paid

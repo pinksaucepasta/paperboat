@@ -97,6 +97,19 @@ function route(req, url) {
   if (p === "/v1/admin/nodes") return { items: [{ id: "node_1", protocol_version: "1.0", region_id: "eu", edge_pool: "a", failure_domain: "x", state: "ready", endpoint_host: "edge.example.test", endpoint_tcp_port: 443, endpoint_quic_port: 443, roles: ["relay"], transports: ["tcp"], capacity_limit: 10, revision: 1, node_generation: 1, registry_expires_at: "2026-11-18T00:00:00Z", ready: true, observed_at: "2026-11-17T09:00:00Z" }], total: 1 }
   if (p === "/v1/admin/regions") return { __status: 503, code: "infrastructure_unavailable", message: "Infrastructure is unavailable.", reference: "support_fixture_regions" }
   if (p === "/v1/admin/infrastructure") return { items: [{ kind: url.searchParams.get("kind"), id: "relay_1", state: "ready", desired_state: "", observed_status: "ready", ready: true, stale: false, revision: 3 }], total: 1 }
+  if (p === "/v1/admin/infrastructure/capacity")
+    return {
+      observed_at: "2026-11-18T09:00:00Z", today: "2026-11-18", month_start: "2026-11-01", total: 4,
+      thresholds: { monthly_traffic_bytes: 20e12, traffic_warn_fraction: 0.8, edge_cpu_warn_percent: 50, relay_rss_warn_bytes: 1 << 30, cpu_sustained_seconds: 300 },
+      items: [
+        { id: "edge-hel-1", kind: "edge", state: "ready", region: "hel", site: "Helsinki", version: "dev-abc1234", cpu_percent: 80, cpu_sustained_percent: 65, rss_bytes: 300e6, connections: 120, connection_limit: 5000, bytes_today: 3e12, bytes_month: 17e12, allowance_used: 0.85, last_heartbeat_at: "2026-11-18T08:59:55Z", metrics_at: "2026-11-18T08:59:55Z",
+          warnings: [{ code: "edge_cpu_high", severity: "warning", message: "Sustained CPU is 65% (warning at 50%)." }, { code: "traffic_allowance_high", severity: "warning", message: "This month's traffic 17.0 TB is 85% of the 20.0 TB allowance." }] },
+        { id: "relay-fsn-1", kind: "relay", state: "ready", region: "fsn", version: "dev-abc1234", cpu_percent: 5, cpu_sustained_percent: 5, rss_bytes: 2e9, connections: 40, connection_limit: 4096, bytes_today: 1e9, bytes_month: 5e9, allowance_used: 0.00025, last_heartbeat_at: "2026-11-18T08:59:58Z",
+          warnings: [{ code: "relay_memory_high", severity: "warning", message: "Memory is 1.9 GiB (warning at 1.0 GiB)." }] },
+        { id: "edge-old", kind: "edge", state: "ready", region: "hel", last_heartbeat_at: "2026-11-18T08:50:00Z", warnings: [{ code: "no_metrics", severity: "info", message: "This node does not report CPU, memory or traffic yet (an older build)." }] },
+        { id: "server-main", kind: "server", version: "dev-abc1234", cpu_percent: 3, cpu_sustained_percent: 3, rss_bytes: 500e6, last_heartbeat_at: "2026-11-18T08:59:40Z", metrics_at: "2026-11-18T08:59:40Z", warnings: [] },
+      ],
+    }
   if (p === "/v1/admin/billing/workspaces") return { workspaces: [{ id: "bw_t", scope: "team", scope_id: "team_a", product_code: "team_monthly", state: "active", quantity: 3, period_end: "2026-12-01T00:00:00Z", cancel_at_period_end: false, revision: 1, observed_at: "2026-11-17T09:00:00Z" }], total: 1 }
   if (p === "/v1/admin/billing/workspace-operations") return { operations: [], total: 0 }
   if (p === "/v1/admin/billing/products") return { products: [{ code: "team_monthly", display_name: "Team", catalog_type: "subscription", price_id: "price_1", product_id: "prod_1", unit_amount: 1500, currency: "usd", interval: "month", allowance_bytes: null, active: true, version: 1, price_verified: true }] }
@@ -322,6 +335,18 @@ try {
     expect((await text("[data-error-block]")).includes("support_fixture_regions"), "reference missing")
     await p.getByRole("tab", { name: "Relay health" }).click()
     await waitReady("relay health")
+  })
+  await step("capacity: every node with CPU, memory, traffic and the three warnings", async () => {
+    await p.goto(`${ORIGIN}/capacity`)
+    await p.waitForSelector("[data-capacity-ready]")
+    expect((await p.locator("[data-table=capacity] tbody tr").count()) === 4, "four nodes expected")
+    expect((await text('[data-node="edge-hel-1"] [data-warning="edge_cpu_high"]')).includes("65%"), "edge CPU warning")
+    expect((await text('[data-node="edge-hel-1"] [data-warning="traffic_allowance_high"]')).includes("85%"), "traffic warning")
+    expect((await text('[data-node="relay-fsn-1"] [data-warning="relay_memory_high"]')).includes("1.9 GiB"), "relay memory warning")
+    expect((await p.locator('[data-node="server-main"]').getAttribute("data-level")) === "ok", "a healthy server has no warning")
+    expect((await text('[data-node="edge-old"]')).includes("older build"), "node without metrics says so")
+    expect((await text('[data-stat="Need attention"]')).includes("2"), "two nodes need attention")
+    await p.screenshot({ path: `${shots}/capacity-light.png`, fullPage: true })
   })
   await step("billing: workspaces, operations (empty) and plans", async () => {
     await p.goto(`${ORIGIN}/billing`)

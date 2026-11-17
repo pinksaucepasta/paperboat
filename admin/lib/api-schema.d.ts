@@ -8698,6 +8698,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/infrastructure/capacity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Operator node capacity
+         * @description Current active operator account and separate operator session required. See docs/runbooks/operator-admin.md. Audited before disclosure; unavailable auditing fails closed.
+         */
+        get: operations["get_v1_admin_infrastructure_capacity"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -10803,6 +10823,7 @@ export interface components {
             subjects?: components["schemas"]["NativeRelaySubject"][];
             /** @description Lowercase hex SHA-256 of the membership: one account_id NUL endpoint_id LF line per subject, sorted as strings. Grant generations are not part of it. Required when subjects is omitted. */
             subjects_digest?: string;
+            metrics?: components["schemas"]["NodeMetricsReport"];
         };
         EnvironmentVaultScope: {
             /** @description personal or the canonical Team ID. Included in the signed encrypted source and private-key derivation. */
@@ -13595,6 +13616,70 @@ export interface components {
             configuration?: {
                 [key: string]: unknown;
             };
+        };
+        OperatorNodeWarning: {
+            code: string;
+            /** @enum {string} */
+            severity: "critical" | "warning" | "info";
+            message: string;
+        };
+        OperatorNodeCapacity: {
+            id: string;
+            /** @enum {string} */
+            kind: "edge" | "relay" | "server";
+            state?: string;
+            region?: string;
+            site?: string;
+            version?: string;
+            cpu_percent?: number;
+            cpu_sustained_percent?: number;
+            /** Format: int64 */
+            rss_bytes?: number;
+            /** Format: int64 */
+            connections?: number;
+            /** Format: int64 */
+            connection_limit?: number;
+            /** Format: int64 */
+            bytes_today?: number;
+            /** Format: int64 */
+            bytes_month?: number;
+            allowance_used?: number;
+            /** Format: date-time */
+            last_heartbeat_at?: string;
+            /** Format: date-time */
+            metrics_at?: string;
+            warnings: components["schemas"]["OperatorNodeWarning"][];
+        };
+        OperatorCapacityPage: {
+            /** Format: date-time */
+            observed_at: string;
+            today: string;
+            month_start: string;
+            total: number;
+            thresholds: {
+                /** Format: int64 */
+                monthly_traffic_bytes: number;
+                traffic_warn_fraction: number;
+                edge_cpu_warn_percent: number;
+                /** Format: int64 */
+                relay_rss_warn_bytes: number;
+                cpu_sustained_seconds: number;
+            };
+            items: components["schemas"]["OperatorNodeCapacity"][];
+            /** @description More nodes exist than listed (the page holds the first 1000). */
+            truncated?: boolean;
+        };
+        /** @description What an edge or relay reports about itself with a heartbeat. Bytes are cumulative since the process started. */
+        NodeMetricsReport: {
+            version?: string;
+            /** @description Share of all the host's CPUs over the last sample. */
+            cpu_percent: number;
+            /** Format: int64 */
+            rss_bytes: number;
+            /** Format: int64 */
+            bytes_in: number;
+            /** Format: int64 */
+            bytes_out: number;
         };
     };
     responses: {
@@ -33876,6 +33961,64 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    get_v1_admin_infrastructure_capacity: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Audited result. Cache-Control: no-store. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["OperatorCapacityPage"];
+                    };
+                };
+            };
+            /** @description Invalid target, body, pagination or confirmation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Browser authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Operator session or capability required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Evidence, provider or audit unavailable; outcome may require checking target state */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
             };
         };
     };

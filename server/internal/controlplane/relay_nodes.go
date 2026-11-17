@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/shared/nodemetrics"
 	"github.com/pinksaucepasta/paperboat/shared/relaylimits"
 	"net/http"
 	"strings"
@@ -54,6 +55,8 @@ type relayNodeObservation struct {
 	// QuotaDeniedSupported is sent by relays that understand LeaseDocument.QuotaDenied. Relays
 	// decode leases strictly, so an older relay must never be sent the field.
 	QuotaDeniedSupported bool `json:"quota_denied_supported,omitempty"`
+	// Metrics is the relay's version, CPU, memory and bytes forwarded; optional, an older relay sends none.
+	Metrics *nodemetrics.Report `json:"metrics,omitempty"`
 }
 type relayNodeLeaseDocument struct {
 	NodeID        string                `json:"node_id"`
@@ -165,6 +168,7 @@ func (s *EdgeService) ObserveRelayNode(ctx context.Context, in relayNodeObservat
 	if !relayIdentifier(in.NodeID) || !relayIdentifier(in.ProcessEpoch) || in.Generation < 1 || in.CapacityUsed < 0 || len(in.Subjects) > relaylimits.MaxConnectionsPerNode || (in.SubjectsDigest != "" && !validRelaySubjectsDigest(in.SubjectsDigest)) {
 		return out, invalidUsage("relay_nodes.go:139")
 	}
+	in.Metrics = usableMetrics(ctx, in.NodeID, in.Metrics)
 	seen := map[string]bool{}
 	for _, subject := range in.Subjects {
 		k := subject.AccountID + "\x00" + subject.EndpointID
@@ -191,6 +195,7 @@ func (s *EdgeService) ObserveRelayNode(ctx context.Context, in relayNodeObservat
 		return relayNodeLeaseDocument{}, err
 	}
 	s.countRelayObservation(in, required)
+	s.recordNodeMetrics(ctx, "relay", in.NodeID, in.ProcessEpoch, in.CapacityUsed, in.Metrics)
 	// After the commit and outside the transaction: read-only, cached, bounded, fail-open.
 	if s.relayQuota != nil && in.QuotaDeniedSupported {
 		accounts := make([]string, 0, len(set.list))

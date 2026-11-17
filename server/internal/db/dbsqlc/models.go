@@ -1882,6 +1882,30 @@ type NativeUsageReportingStatus struct {
 	RejectedReports        int64
 }
 
+type NodeCapacity struct {
+	NodeID              string
+	Role                string
+	ProcessEpoch        string
+	Version             string
+	CpuPercent          float32
+	CpuSustainedPercent float32
+	RssBytes            int64
+	Connections         sql.NullInt32
+	BytesInTotal        int64
+	BytesOutTotal       int64
+	ReportedAt          time.Time
+}
+
+type NodeCapacityDaily struct {
+	NodeID         string
+	Day            time.Time
+	BytesIn        int64
+	BytesOut       int64
+	CpuMax         float32
+	RssMax         int64
+	ConnectionsMax int32
+}
+
 type Operation struct {
 	ID              string
 	AccountID       string

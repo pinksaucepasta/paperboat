@@ -100,6 +100,9 @@ func overlayEnv(c *Config, lookup func(string) (string, bool), readFile func(str
 	if err := setSecret("PAPERBOAT_SENTRY_API_TOKEN", &c.Secrets.SentryAPIToken); err != nil {
 		return err
 	}
+	if err := overlayNodeCapacityEnv(c, lookup); err != nil {
+		return err
+	}
 	setString("PAPERBOAT_POSTHOG_HOST", &c.Analytics.PostHogHost)
 	setString("PAPERBOAT_POSTHOG_PROJECT_ID", &c.Analytics.PostHogProjectID)
 	if err := setSecret("PAPERBOAT_POSTHOG_PERSONAL_API_KEY", &c.Secrets.PostHogPersonalKey); err != nil {

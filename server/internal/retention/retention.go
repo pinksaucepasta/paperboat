@@ -231,6 +231,11 @@ var policies = []policy{
 		seconds(func(c config.Retention) time.Duration { return c.InboxRequests })},
 	{"stripe_events", batchOf("stripe_events", `processed_at < now()-make_interval(secs=>$2)`),
 		seconds(func(c config.Retention) time.Duration { return c.StripeEvents })},
+	// A node's day totals and the latest-sample row of a node that stopped reporting.
+	{"node_capacity_daily", batchOf("node_capacity_daily", `day < (now()-make_interval(secs=>$2))::date`),
+		seconds(func(c config.Retention) time.Duration { return c.NodeCapacityDaily })},
+	{"node_capacity", batchOf("node_capacity", `reported_at < now()-make_interval(secs=>$2)`),
+		seconds(func(c config.Retention) time.Duration { return c.NodeCapacityDaily })},
 	{"support_reports_expired", batchOf("support_report_occurrences", `expires_at < now()`), none},
 	// A group's expires_at is its newest occurrence's, so it goes after the occurrences it explains.
 	{"support_report_groups_expired", batchOf("support_report_groups", `expires_at < now()`), none},

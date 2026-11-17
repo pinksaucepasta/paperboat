@@ -691,6 +691,7 @@ func New(opts Options) (*App, error) {
 		_ = store.Close()
 		return nil, err
 	}
+	operatorService.SetNodeCapacity(opts.Config.NodeCapacity)
 	resourceUsageService := resourceusage.New(store)
 	resourceUsageService.Debiter = workspaceBilling
 	recordingService := recordings.New(store, opts.Config.Recordings, mintKeys, config.NormalizeIssuer(opts.Config.HTTP.PublicBaseURL))
@@ -970,7 +971,9 @@ func New(opts Options) (*App, error) {
 		// Every replica keeps its own in-memory peer policy documents in sync from the same notifications.
 		observedWorker(supportService, "worker_peer_policy", listenerWorker(24*time.Second, func(ctx context.Context) error {
 			return peerNetworkService.ListenPolicy(ctx, store.Direct(), 24*time.Second)
-		}), progress))
+		}), progress),
+		// Each server process records its own CPU and memory for the operator capacity page.
+		observedWorker(supportService, "worker_node_capacity", periodicPreviewTunnelWorker(30*time.Second, serverCapacityRecorder(store, opts.Config.Reporting.Instance)), progress))
 	serverWorkers = append(serverWorkers, observedWorker(supportService, "worker_edge_sets", periodicPreviewTunnelWorker(opts.Config.TerminalSessions.WorkerInterval, func(ctx context.Context) error {
 		reconcileContext, cancel := context.WithTimeout(ctx, opts.Config.HTTP.RequestTimeout)
 		defer cancel()
