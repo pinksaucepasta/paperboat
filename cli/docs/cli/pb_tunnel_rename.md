@@ -5,7 +5,8 @@ Rename a durable tunnel
 ### Synopsis
 
 Rename a durable tunnel, selected by ID or current name. The name is only a label: the
-tunnel's address, routes, connectors and access rules do not change.
+tunnel's address, routes, connectors and access rules do not change. To change the address
+itself, use pb tunnel address.
 
 A change returns once the request is accepted, and the tunnel may still be connecting. Pass
 --wait to wait (at most --timeout, default 2m, 1s to 10m) until it finishes, or check pb tunnel
