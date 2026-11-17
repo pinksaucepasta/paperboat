@@ -45,7 +45,7 @@ func TestRuntimeObservationUpdatesTransferPolicyWithoutTunnel(t *testing.T) {
 	if policies.Current() != policy {
 		t.Fatal("server policy not applied")
 	}
-	for _, body := range []string{`{}`, `{"data":{"file_transfer_policy":null}}`, `{"data":{"file_transfer_policy":{"max_file_bytes":999999999999}}}`} {
+	for _, body := range []string{`{}`, `{"data":{"file_transfer_policy":null}}`, `{"data":{"file_transfer_policy":{"automatic_max_batch_bytes":2000000001}}}`} {
 		if applyRuntimeTransferPolicy([]byte(body), policies) == nil {
 			t.Fatal("missing/invalid policy accepted")
 		}

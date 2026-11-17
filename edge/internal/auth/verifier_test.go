@@ -311,6 +311,13 @@ func TestVerifierRejectsMissingOrInvalidFileTransferPolicy(t *testing.T) {
 		func(claims map[string]any) {
 			claims["file_transfer_policy"].(map[string]any)["automatic_max_batch_bytes"] = 0
 		},
+		func(claims map[string]any) {
+			claims["file_transfer_policy"].(map[string]any)["automatic_max_batch_bytes"] = 2_000_000_001
+			claims["file_transfer_policy"].(map[string]any)["max_pending_spool_bytes"] = 3_000_000_000
+		},
+		func(claims map[string]any) {
+			claims["file_transfer_policy"].(map[string]any)["max_pending_spool_bytes"] = 1 << 30
+		},
 	} {
 		if _, err := verifier.Verify(context.Background(), tokenFor(t, private, "key-1", mutate)); err == nil {
 			t.Fatal("invalid file transfer policy accepted")
