@@ -764,8 +764,12 @@ func actionHomeInvitations(command *cobra.Command, sent bool) error {
 	}
 	team := ""
 	if sent {
-		teams, err := client.ListTeams(command.Context())
-		if err != nil {
+		var teams []api.Team
+		if err := homeLoading(command, "Invitations", "Loading teams", func(loadCtx context.Context) error {
+			var listErr error
+			teams, listErr = client.ListTeams(loadCtx)
+			return listErr
+		}); err != nil {
 			return err
 		}
 		items := []selector.Item{}
@@ -779,8 +783,12 @@ func actionHomeInvitations(command *cobra.Command, sent bool) error {
 		team = choice.ID
 	}
 	for {
-		invitations, err := client.TeamInvitations(command.Context(), team)
-		if err != nil {
+		var invitations []api.TeamInvitation
+		if err := homeLoading(command, "Invitations", "Loading invitations", func(loadCtx context.Context) error {
+			var listErr error
+			invitations, listErr = client.TeamInvitations(loadCtx, team)
+			return listErr
+		}); err != nil {
 			return err
 		}
 		items := []selector.Item{}

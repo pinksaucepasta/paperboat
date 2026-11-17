@@ -4,7 +4,6 @@ package selector
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"os"
 	"runtime"
@@ -15,6 +14,7 @@ import (
 	"time"
 	"unicode"
 
+	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -401,7 +401,6 @@ func ChooseWithAction(options Options) (selection Result, err error) {
 }
 
 type loadDoneMsg struct{ err error }
-type loadTickMsg struct{}
 
 type loadingModel struct {
 	ctx           context.Context
@@ -411,16 +410,12 @@ type loadingModel struct {
 	done          bool
 	interrupted   bool
 	err           error
-	frame         int
+	spin          spinner.Model
 	width, height int
 }
 
 func (m loadingModel) Init() tea.Cmd {
-	return tea.Batch(RequestBackground(), func() tea.Msg { return loadDoneMsg{err: m.work(context.Background())} }, loadingTick())
-}
-
-func loadingTick() tea.Cmd {
-	return tea.Tick(100*time.Millisecond, func(time.Time) tea.Msg { return loadTickMsg{} })
+	return tea.Batch(RequestBackground(), func() tea.Msg { return loadDoneMsg{err: m.work(context.Background())} }, m.spin.Tick)
 }
 
 func (m loadingModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
@@ -439,9 +434,10 @@ func (m loadingModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case loadDoneMsg:
 		m.done, m.err = true, message.err
 		return m, tea.Quit
-	case loadTickMsg:
-		m.frame = (m.frame + 1) % 4
-		return m, loadingTick()
+	case spinner.TickMsg:
+		var command tea.Cmd
+		m.spin, command = m.spin.Update(message)
+		return m, command
 	}
 	return m, nil
 }
@@ -457,7 +453,7 @@ func (m loadingModel) render() string {
 	for _, line := range boat {
 		lines = append(lines, truncateLine(line, lineWidth))
 	}
-	lines = append(lines, "", truncateLine(fmt.Sprintf("  %c  %s", "|/-\\"[m.frame], SanitizeText(m.detail)), lineWidth))
+	lines = append(lines, "", truncateLine("  "+m.spin.View()+"  "+SanitizeText(m.detail), lineWidth))
 	if height == 1 {
 		return styles.help.Render(loadingFooter(m.ctx, lineWidth))
 	}
@@ -493,7 +489,7 @@ func Loading(ctx context.Context, title, detail string, input *os.File, output i
 	workerDone := make(chan struct{})
 	var workerErr error
 	go func() { defer close(workerDone); workerErr = loadingWork(workCtx, work) }()
-	model := loadingModel{ctx: ctx, title: title, detail: detail, width: 80, height: 24, cancel: cancel, work: func(context.Context) error { <-workerDone; return workerErr }}
+	model := loadingModel{spin: spinner.New(spinner.WithSpinner(spinner.Line)), ctx: ctx, title: title, detail: detail, width: 80, height: 24, cancel: cancel, work: func(context.Context) error { <-workerDone; return workerErr }}
 	programOptions := ProgramOptions(input, output)
 	if ScreenActive() {
 		writeScreen(output, model.render()+"\x1b[H")

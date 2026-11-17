@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -603,5 +604,23 @@ func TestLargeListFiltersAfterDebounceAndFlushesBeforeSelecting(t *testing.T) {
 	next, _ = next.Update(tea.KeyPressMsg{Code: '5', Text: "5"})
 	if got := next.(chooserModel); len(got.choices.visible) != 1 || got.filterPending {
 		t.Fatalf("a short list must filter on every keystroke: visible=%d", len(got.choices.visible))
+	}
+}
+
+func TestLoadingSpinnerAdvancesThroughBubblesSpinner(t *testing.T) {
+	model := loadingModel{spin: spinner.New(spinner.WithSpinner(spinner.Line)), title: "Machines", detail: "Loading", width: 40, height: 10}
+	var next tea.Model = model
+	seen := map[string]bool{}
+	for range 4 {
+		view := ansi.Strip(next.(loadingModel).render())
+		seen[strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(strings.Split(view, "\n")[6]), "Loading"))] = true
+		var command tea.Cmd
+		next, command = next.Update(next.(loadingModel).spin.Tick())
+		if command == nil {
+			t.Fatal("the spinner stopped ticking")
+		}
+	}
+	if len(seen) != 4 {
+		t.Fatalf("spinner showed %d distinct frames, want the 4 line frames: %v", len(seen), seen)
 	}
 }

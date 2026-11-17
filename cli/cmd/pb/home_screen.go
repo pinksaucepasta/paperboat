@@ -215,14 +215,22 @@ func actionHomeInbox(command *cobra.Command) error {
 	if err != nil {
 		return err
 	}
-	me, err := client.Me(ctx.Context)
-	if err != nil {
-		return friendlyCommandError(err)
+	var me api.Me
+	if err := homeLoading(command, "Team Inbox", "Loading your account", func(loadCtx context.Context) error {
+		var meErr error
+		me, meErr = client.Me(loadCtx)
+		return friendlyCommandError(meErr)
+	}); err != nil {
+		return err
 	}
 	for {
-		requests, listErr := client.PendingTeamInboxRequests(ctx.Context)
-		if listErr != nil {
+		var requests []api.TeamInboxRequest
+		if err := homeLoading(command, "Team Inbox", "Loading file requests", func(loadCtx context.Context) error {
+			var listErr error
+			requests, listErr = client.PendingTeamInboxRequests(loadCtx)
 			return friendlyCommandError(listErr)
+		}); err != nil {
+			return err
 		}
 		pending := slices.DeleteFunc(requests, func(request api.TeamInboxRequest) bool {
 			return request.RecipientAccount != me.ID || request.Status != "pending"
