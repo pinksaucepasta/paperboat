@@ -443,6 +443,60 @@
       }
     },
     {
+      "name": "paperboat_server_http_route_duration_seconds",
+      "kind": "histogram",
+      "labels": {
+        "route": [
+          "unmatched"
+        ],
+        "status_class": [
+          "1xx",
+          "2xx",
+          "3xx",
+          "4xx",
+          "5xx"
+        ]
+      },
+      "buckets": [
+        0.001,
+        0.005,
+        0.01,
+        0.025,
+        0.05,
+        0.1,
+        0.25,
+        0.5,
+        1,
+        2,
+        5,
+        10
+      ]
+    },
+    {
+      "name": "paperboat_server_http_route_requests_total",
+      "kind": "counter",
+      "labels": {
+        "method": [
+          "delete",
+          "get",
+          "other",
+          "patch",
+          "post",
+          "put"
+        ],
+        "route": [
+          "unmatched"
+        ],
+        "status_class": [
+          "1xx",
+          "2xx",
+          "3xx",
+          "4xx",
+          "5xx"
+        ]
+      }
+    },
+    {
       "name": "paperboat_server_operation_idempotency_total",
       "kind": "counter",
       "labels": {

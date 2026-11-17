@@ -100,6 +100,59 @@ func Clone(descriptors []Descriptor) []Descriptor {
 	return result
 }
 
+// MaximumLabelValues bounds a label whose values are added at run time.
+const MaximumLabelValues = 1024
+
+// AllowLabelValue makes value acceptable for a label whose values are registered names (route templates) the
+// process itself defines, not anything a request carries. It does nothing when the value is already allowed and
+// fails once the label holds MaximumLabelValues.
+func (m *Metrics) AllowLabelValue(name, label, value string) error {
+	if m == nil {
+		return safe.NewError(safe.ErrorClosed, "record metric")
+	}
+	m.mu.RLock()
+	known, err := m.labelValueAllowed(name, label, value)
+	m.mu.RUnlock()
+	if known || err != nil {
+		return err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	descriptor := m.descriptors[name]
+	// Copy on write: Snapshot and callers of prepare read the labels they were handed without the lock.
+	labels := append([]LabelDescriptor(nil), descriptor.Labels...)
+	for index := range labels {
+		if labels[index].Name != label {
+			continue
+		}
+		if containsString(labels[index].AllowedValues, value) {
+			return nil
+		}
+		if len(labels[index].AllowedValues) >= MaximumLabelValues {
+			return safe.NewError(safe.ErrorMetricCardinality, "record metric")
+		}
+		labels[index].AllowedValues = append(append([]string(nil), labels[index].AllowedValues...), value)
+	}
+	descriptor.Labels = labels
+	m.descriptors[name] = descriptor
+	return nil
+}
+
+// labelValueAllowed reports whether value is already allowed; the error names an unknown metric or label.
+// Callers hold m.mu.
+func (m *Metrics) labelValueAllowed(name, label, value string) (bool, error) {
+	descriptor, ok := m.descriptors[name]
+	if !ok {
+		return false, safe.NewError(safe.ErrorUnknownMetric, "record metric")
+	}
+	for _, candidate := range descriptor.Labels {
+		if candidate.Name == label {
+			return containsString(candidate.AllowedValues, value), nil
+		}
+	}
+	return false, safe.NewError(safe.ErrorUnknownLabel, "record metric")
+}
+
 func (m *Metrics) AddCounter(name string, labels Labels, delta uint64) error {
 	return m.mutate(name, labels, Counter, delta, true)
 }
@@ -197,6 +250,8 @@ func (m *Metrics) prepare(name string, labels Labels, kind Kind) (Descriptor, me
 	if m == nil {
 		return Descriptor{}, metricKey{}, safe.NewError(safe.ErrorClosed, "record metric")
 	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	descriptor, ok := m.descriptors[name]
 	if !ok {
 		return Descriptor{}, metricKey{}, safe.NewError(safe.ErrorUnknownMetric, "record metric")

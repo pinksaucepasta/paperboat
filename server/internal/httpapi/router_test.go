@@ -525,3 +525,26 @@ func TestServerVersionReportsTheBuildWithoutAuthentication(t *testing.T) {
 		t.Fatalf("body = %s err=%v", rec.Body.String(), err)
 	}
 }
+
+// The real router reports each request under the pattern it matched, and nothing else becomes a route label.
+func TestRouterRouteMetricsUseMatchedTemplates(t *testing.T) {
+	routes := telemetry.NewMetricsWithLimit(64)
+	router := NewRouter(Options{Config: config.Default(), Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), TelemetryHTTP: &telemetry.HTTPObserver{Routes: routes}})
+	for _, path := range []string{"/healthz", "/v1/server-version", "/v1/server-version", "/customer.example/secret-path"} {
+		router.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, path, nil))
+	}
+	counts := map[string]uint64{}
+	for _, sample := range routes.Snapshot() {
+		if sample.Name != telemetry.MetricHTTPRouteRequests {
+			continue
+		}
+		for _, label := range sample.Labels {
+			if label.Name == "route" {
+				counts[label.Value] += sample.Value
+			}
+		}
+	}
+	if counts["/healthz"] != 1 || counts["/v1/server-version"] != 2 || counts["/"] != 1 || len(counts) != 3 {
+		t.Fatalf("route counts = %v", counts)
+	}
+}

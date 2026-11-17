@@ -582,8 +582,10 @@ func New(opts Options) (*App, error) {
 		_ = store.Close()
 		return nil, fmt.Errorf("configure telemetry health: %w", telemetryErr)
 	}
+	telemetryRouteMetrics := telemetry.NewMetricsWithLimit(4096)
 	telemetryHTTP := &telemetry.HTTPObserver{
 		Metrics: telemetryMetrics,
+		Routes:  telemetryRouteMetrics,
 		Identity: func(ctx context.Context) (string, string) {
 			return serverdiagnostics.RequestID(ctx), serverdiagnostics.CorrelationID(ctx)
 		},
@@ -833,6 +835,7 @@ func New(opts Options) (*App, error) {
 		MachineEventSigning:      machineEventSigning,
 		TelemetryHTTP:            telemetryHTTP,
 		TelemetryMetrics:         telemetryMetrics,
+		TelemetryRouteMetrics:    telemetryRouteMetrics,
 		TelemetryDiagnostics:     telemetryDiagnostics,
 	})
 	// Membership is authoritative; provider retries run outside its transaction.

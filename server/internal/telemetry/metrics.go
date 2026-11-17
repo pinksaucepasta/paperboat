@@ -34,6 +34,10 @@ const (
 	MetricRouteLatency             = "paperboat_server_route_latency_seconds"
 	MetricHTTPRequests             = "paperboat_server_http_requests_total"
 	MetricHTTPDuration             = "paperboat_server_http_request_duration_seconds"
+	// Per matched route template (a registered mux pattern without its method, never a raw path or id). The route
+	// label values are added as routes are first seen, see AllowLabelValue; unmatched requests count as "unmatched".
+	MetricHTTPRouteRequests = "paperboat_server_http_route_requests_total"
+	MetricHTTPRouteDuration = "paperboat_server_http_route_duration_seconds"
 	MetricRelaySubjectObservations = "paperboat_server_relay_subject_observations_total"
 )
 
@@ -60,6 +64,15 @@ var localMetricDescriptors = []sharedmetrics.Descriptor{
 	}},
 	{Name: MetricHTTPDuration, Kind: sharedmetrics.Histogram, Labels: []sharedmetrics.LabelDescriptor{
 		{Name: "route_family", AllowedValues: []string{"health", "public_api", "edge_control", "release", "internal", "other"}},
+		{Name: "status_class", AllowedValues: []string{"1xx", "2xx", "3xx", "4xx", "5xx"}},
+	}, Histogram: &sharedmetrics.HistogramDescriptor{Buckets: []float64{0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10}}},
+	{Name: MetricHTTPRouteRequests, Kind: sharedmetrics.Counter, Labels: []sharedmetrics.LabelDescriptor{
+		{Name: "method", AllowedValues: []string{"get", "post", "put", "patch", "delete", "other"}},
+		{Name: "route", AllowedValues: []string{UnmatchedRoute}},
+		{Name: "status_class", AllowedValues: []string{"1xx", "2xx", "3xx", "4xx", "5xx"}},
+	}},
+	{Name: MetricHTTPRouteDuration, Kind: sharedmetrics.Histogram, Labels: []sharedmetrics.LabelDescriptor{
+		{Name: "route", AllowedValues: []string{UnmatchedRoute}},
 		{Name: "status_class", AllowedValues: []string{"1xx", "2xx", "3xx", "4xx", "5xx"}},
 	}, Histogram: &sharedmetrics.HistogramDescriptor{Buckets: []float64{0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10}}},
 }

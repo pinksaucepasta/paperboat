@@ -172,6 +172,8 @@ type Options struct {
 	MachineEventSigning    MachineEventSigning
 	TelemetryHTTP          *telemetry.HTTPObserver
 	TelemetryMetrics       *sharedmetrics.Metrics
+	// TelemetryRouteMetrics is the per-route-template registry of TelemetryHTTP (HTTPObserver.Routes), listed by /metrics.
+	TelemetryRouteMetrics  *sharedmetrics.Metrics
 	TelemetryDiagnostics   *telemetry.Diagnostics
 }
 
@@ -231,7 +233,7 @@ func NewRouter(opts Options) http.Handler {
 			regions = &servernodes.RegionCache{DB: opts.ServerNodes.DB, Domain: opts.Config.RegionalDomain}
 		}
 		mux.HandleFunc("GET /v1/client-configuration", clientConfiguration(opts.Config, regions))
-		mux.Handle("GET /metrics", metrics(opts.ControlDiagnostics, opts.TelemetryMetrics))
+		mux.Handle("GET /metrics", metrics(opts.ControlDiagnostics, opts.TelemetryMetrics, opts.TelemetryRouteMetrics))
 		mux.Handle(telemetryDiagnosticsPath, telemetryDiagnostics(opts.TelemetryDiagnostics))
 		if opts.MintKeys != nil {
 			mux.Handle("GET /.well-known/jwks.json", opts.MintKeys)
@@ -758,7 +760,7 @@ func NewRouter(opts Options) http.Handler {
 			mux.HandleFunc("POST /v1/abuse-reports", abuseReportSubmit(opts.AbuseReports, ratelimit.New(opts.Config.RateLimits.AbuseReportsPerMinute, opts.Config.RateLimits.AbuseReportsBurst, opts.Config.RateLimits.MaxClients)))
 		}
 		mux.HandleFunc("/", notFound)
-		handler = mux
+		handler = matchedRoute(mux)
 	}
 	handler = clientUpdatePolicyGuard(opts.ClientUpdatePolicy, time.Now, handler)
 	tokenFailures := ratelimit.New(opts.Config.RateLimits.TokenFailuresPerMinute, opts.Config.RateLimits.TokenFailuresBurst, opts.Config.RateLimits.MaxClients)
@@ -784,6 +786,15 @@ func NewRouter(opts Options) http.Handler {
 	handler = correlationID(handler)
 	handler = requestID(handler)
 	return handler
+}
+
+// matchedRoute tells the telemetry observer around the router which registered pattern serves the request.
+func matchedRoute(mux *http.ServeMux) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, pattern := mux.Handler(r)
+		telemetry.SetMatchedRoute(r, pattern)
+		mux.ServeHTTP(w, r)
+	})
 }
 
 func telemetryRouteFamily(r *http.Request) string {
@@ -828,7 +839,7 @@ func serverVersion(w http.ResponseWriter, _ *http.Request) {
 	}})
 }
 
-func metrics(diagnostics *controlplane.DiagnosticsService, typed *sharedmetrics.Metrics) http.HandlerFunc {
+func metrics(diagnostics *controlplane.DiagnosticsService, typed, routes *sharedmetrics.Metrics) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		host, _, err := net.SplitHostPort(r.RemoteAddr)
 		if err != nil || !net.ParseIP(host).IsLoopback() {
@@ -852,6 +863,9 @@ func metrics(diagnostics *controlplane.DiagnosticsService, typed *sharedmetrics.
 		}
 		if typed != nil {
 			result["typed"] = telemetry.TypedSamples(typed)
+		}
+		if routes != nil {
+			result["typed_routes"] = routes.Snapshot()
 		}
 		writeJSON(w, http.StatusOK, SuccessResponse{Data: result})
 	}
