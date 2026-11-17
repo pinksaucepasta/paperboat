@@ -119,6 +119,9 @@ func TestParseMeowPingMalformed(t *testing.T) {
 		{"unknown_type", append([]byte("meow\x7f"), full[5:]...)},
 		{"truncated_node_key", full[:5+key.NodePublicRawLen-1]},
 		{"truncated_disco_key", full[:len(full)-2*meowNonceLen-1]},
+		{"no_nonce", full[:len(full)-2*meowNonceLen]},
+		{"truncated_nonce", full[:len(full)-meowNonceLen-1]},
+		{"no_start", full[:len(full)-meowNonceLen]},
 		{"zero_disco_key", zeroDisco},
 	}
 	for _, tt := range tests {
@@ -135,8 +138,8 @@ func TestParseMeowPingMalformed(t *testing.T) {
 		})
 	}
 
-	// Every truncation of a valid ping must be rejected.
-	for n := range len(full) - 2*meowNonceLen {
+	// Every strict prefix of a valid ping must be rejected.
+	for n := range len(full) {
 		if _, _, _, ok := ParseMeowPing(full[:n]); ok {
 			t.Errorf("ParseMeowPing accepted a %d-byte prefix of a %d-byte ping", n, len(full))
 		}
@@ -180,28 +183,29 @@ var testNonce = [meowNonceLen]byte{1, 2, 3, 4, 5, 6, 7, 8}
 var testStart = [meowNonceLen]byte{9, 10, 11, 12, 13, 14, 15, 16}
 
 // The handshake nonce goes out on the ping and comes back on the meowed, so the dialer can tell an answer to its own
-// outstanding handshake from a duplicate or a stale one. A ping from a sender without a nonce still parses (zero
-// nonce) and gets a bare meowed, which carries none.
+// outstanding handshake from a duplicate or a stale one. A ping without the nonce, and a meowed without the nonce
+// and the start id, are not handshake messages.
 func TestMeowNonceRoundTrip(t *testing.T) {
 	ping := EncodeMeowPing(key.NewNode().Public(), key.NewDisco().Public(), testNonce, testStart)
 	if _, _, nonce, ok := ParseMeowPing(ping); !ok || nonce != testNonce {
 		t.Fatalf("ping nonce %v ok=%v", nonce, ok)
 	}
-	if nonce, start, ok := meowedNonce(EncodeMeowed(testNonce, testStart)); !ok || nonce != testNonce || start != testStart {
+	answer := EncodeMeowed(testNonce, testStart)
+	if nonce, start, ok := meowedNonce(answer); !ok || nonce != testNonce || start != testStart {
 		t.Fatalf("meowed echo %v start %v ok=%v", nonce, start, ok)
 	}
 	if start := meowPingStart(ping); start != testStart {
 		t.Fatalf("ping start %v", start)
 	}
-	bare := ping[:len(ping)-2*meowNonceLen]
-	_, _, nonce, ok := ParseMeowPing(bare)
-	if !ok || nonce != ([meowNonceLen]byte{}) {
-		t.Fatalf("ping without a nonce: %v ok=%v", nonce, ok)
+	if _, _, _, ok := ParseMeowPing(ping[:len(ping)-2*meowNonceLen]); ok {
+		t.Fatal("a ping without a nonce was accepted")
 	}
-	if reply := EncodeMeowed(nonce, testStart); len(reply) != 5 {
-		t.Fatalf("answer to a ping without a nonce is %d bytes, want a bare meowed", len(reply))
+	if _, _, _, ok := ParseMeowPing(ping[:len(ping)-meowNonceLen]); ok {
+		t.Fatal("a ping without a start id was accepted")
 	}
-	if _, _, ok := meowedNonce(EncodeMeowed(nonce, testStart)); ok {
-		t.Fatal("a bare meowed reported a nonce")
+	for _, n := range []int{5, 5 + meowNonceLen, 5 + 2*meowNonceLen - 1} {
+		if _, _, ok := meowedNonce(answer[:n]); ok {
+			t.Fatalf("a %d-byte meowed was taken as an answer", n)
+		}
 	}
 }

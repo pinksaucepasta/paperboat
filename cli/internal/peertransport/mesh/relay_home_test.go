@@ -204,7 +204,7 @@ func TestSignedHomeOutranksAnAnsweredRegion(t *testing.T) {
 	s.peerReadyMu.Lock()
 	s.peerReady = map[key.NodePublic]*meowWait{peer: w}
 	s.peerReadyMu.Unlock()
-	s.meowed(peer, two.RegionID, w.nonce, [meowNonceLen]byte{}, true)
+	s.meowed(peer, two.RegionID, w.nonce, testStart)
 	select {
 	case <-w.ready:
 	default:

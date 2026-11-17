@@ -110,7 +110,7 @@ func TestRelayConnectsStayBoundedWithEveryRelayDown(t *testing.T) {
 }
 
 // Only the first answer to our outstanding handshake moves the peer, and only one that echoes its nonce: a late answer
-// to an earlier handshake, a bare answer (a peer without nonces) and a second answer from another relay do not.
+// to an earlier handshake, and a second answer from another relay do not.
 func TestOnlyTheAnswerToOurHandshakeRecordsItsRegion(t *testing.T) {
 	regions := integration.RunDERPAndSTUN(t, logger.Discard, "127.0.0.1")
 	one, two := regions.Regions[1], relayRegionCopy(regions.Regions[1], 2)
@@ -146,8 +146,11 @@ func TestOnlyTheAnswerToOurHandshakeRecordsItsRegion(t *testing.T) {
 		}
 	}
 	answer := func(region tailcfg.DERPRegionID, pkt []byte) {
-		nonce, start, echoed := meowedNonce(pkt)
-		s.meowed(peer, region, nonce, start, echoed)
+		nonce, start, ok := meowedNonce(pkt)
+		if !ok {
+			t.Fatal("fixture: not an answer")
+		}
+		s.meowed(peer, region, nonce, start)
 	}
 	if got := s.lb.peerDERPRegion(peer); got != one.RegionID {
 		t.Fatalf("fixture: peer starts on %d, want %d", got, one.RegionID)
@@ -164,11 +167,6 @@ func TestOnlyTheAnswerToOurHandshakeRecordsItsRegion(t *testing.T) {
 	answer(one.RegionID, EncodeMeowed(w.nonce, testStart)) // the same answer again, from the peer's other relay
 	if s.lb.peerDERPRegion(peer) != two.RegionID {
 		t.Fatal("a second answer to an answered handshake moved the peer")
-	}
-	bare := outstanding(9)
-	answer(one.RegionID, EncodeMeowed([meowNonceLen]byte{}, testStart))
-	if !answered(bare) || s.lb.peerDERPRegion(peer) != two.RegionID {
-		t.Fatal("a bare answer must complete the handshake without moving the peer")
 	}
 	// Only the answer to the latest dial's own probe may report a restart: a late answer from the old process (or to
 	// an earlier ping) carrying another start id never resets a fresh session.
@@ -216,7 +214,7 @@ func TestHandshakeAnswerRacingAContactChangeDoesNotDeadlock(t *testing.T) {
 
 	s.lb.policyMu.Lock() // a contact change is under way
 	answered := make(chan struct{})
-	go func() { s.meowed(peer, two.RegionID, w.nonce, testStart, true); close(answered) }()
+	go func() { s.meowed(peer, two.RegionID, w.nonce, testStart); close(answered) }()
 	time.Sleep(100 * time.Millisecond) // the answer is now waiting for policyMu inside setPeerRelayRegion
 	invalidated := make(chan struct{})
 	go func() { s.invalidateAuthorizedPeerLocked(peer); close(invalidated) }()
