@@ -150,7 +150,7 @@ func RenderCandidate(request Request) (CandidateRender, error) {
 	if err != nil {
 		return CandidateRender{}, err
 	}
-	installer, err := carrierInstaller(carrier)
+	installer, err := carrierInstallerWithPending(carrier, true, nil)
 	if err != nil {
 		return CandidateRender{}, err
 	}
