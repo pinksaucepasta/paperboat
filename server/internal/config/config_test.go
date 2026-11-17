@@ -508,3 +508,13 @@ func TestBrowserLoginOriginTakesAListWithTheFirstAsPrimary(t *testing.T) {
 		t.Fatalf("an extra origin with a path passed validation: %v", err)
 	}
 }
+
+// The Automatic bound is the product's 2,000,000,000 bytes: the daemon and the edge refuse a larger policy, so the
+// server refuses to publish one.
+func TestValidationRejectsAnAutomaticBoundOver2GB(t *testing.T) {
+	cfg := Default()
+	cfg.Access.FileTransfer.AutomaticMaxBatchBytes = 2_000_000_001
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "file_transfer") {
+		t.Fatalf("a bound over 2 GB validated: %v", err)
+	}
+}

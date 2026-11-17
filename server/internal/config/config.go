@@ -891,7 +891,7 @@ func (c Config) Validate() error {
 		errs = append(errs, fmt.Errorf("access.connect_poll_interval must be positive and no greater than connect_ready_timeout"))
 	}
 	transfer := c.Access.FileTransfer
-	if strings.TrimSpace(transfer.Revision) == "" || transfer.AutomaticMaxBatchBytes < 1 || transfer.AutomaticMaxBatchBytes > 1<<40 || transfer.MaxBatchFiles < 1 || transfer.MaxBatchFiles > 10 || transfer.MaxConcurrentTransfers < 1 || transfer.MaxConcurrentTransfers > 2 || transfer.Retention <= 0 || transfer.DeliveryTimeout <= 0 || transfer.MaxPendingSpoolBytes < transfer.AutomaticMaxBatchBytes {
+	if strings.TrimSpace(transfer.Revision) == "" || transfer.AutomaticMaxBatchBytes < 1 || transfer.AutomaticMaxBatchBytes > 2_000_000_000 || transfer.MaxBatchFiles < 1 || transfer.MaxBatchFiles > 10 || transfer.MaxConcurrentTransfers < 1 || transfer.MaxConcurrentTransfers > 2 || transfer.Retention <= 0 || transfer.DeliveryTimeout <= 0 || transfer.MaxPendingSpoolBytes < transfer.AutomaticMaxBatchBytes {
 		errs = append(errs, fmt.Errorf("access.file_transfer policy is invalid"))
 	}
 	diagnosticsConfigured := strings.TrimSpace(c.Diagnostics.ObjectEndpoint) != "" || strings.TrimSpace(c.Diagnostics.ObjectRegion) != "" || strings.TrimSpace(c.Diagnostics.ObjectBucket) != "" || strings.TrimSpace(c.Secrets.DiagnosticsAccessKey) != "" || strings.TrimSpace(c.Secrets.DiagnosticsSecretKey) != ""
