@@ -102,7 +102,7 @@ func TestRecoveryAddressesTheJournaledCandidateHostdNotTheServingOne(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	hostd, _, err := installersWithMaintenance(recovery, platformPaths(serving.UID), true, false)
+	hostd, _, err := installersWithMaintenance(recovery, platformPaths(serving.UID), true, false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

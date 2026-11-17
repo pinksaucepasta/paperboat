@@ -40,13 +40,11 @@ func installWithIntent(ctx context.Context, request Request, nativeLockHeld bool
 	paths := platformPaths(request.UID)
 	hooks = hooks.bound(request)
 	// hostd owns the runtime control plane; the root host service applies only the power policy.
-	legacyHost, err := hostInstallerWithMissing(request, paths, true)
+	// The installing process is often another build (a signed update's helper is the previous
+	// build; pb update --from runs the invoking CLI), so the candidate renders every unit it runs.
+	legacyHost, hostd, updater, guardUnits, err := candidateInstallers(ctx, request, paths, intent != unixEnrollmentInstall)
 	if err != nil {
-		return errors.Join(ErrInvalidRequest, err)
-	}
-	hostd, updater, err := installersWithMaintenance(request, paths, true, intent != unixEnrollmentInstall)
-	if err != nil {
-		return errors.Join(ErrInvalidRequest, err)
+		return err
 	}
 	lifecycle, err := newLifecycleManager(request, paths, legacyHost, hostd, updater)
 	if err != nil {
@@ -127,7 +125,7 @@ func installWithIntent(ctx context.Context, request Request, nativeLockHeld bool
 		}
 		// Every installation and update, signed updates included, brings the guard to this build's
 		// version; the undo puts the prior guard back if the update does not commit.
-		undo, err := installMachineGuardReversible(ctx, request)
+		undo, err := installMachineGuardReversible(ctx, request, guardUnits)
 		if err != nil {
 			return err
 		}
@@ -167,14 +165,9 @@ func installWithIntent(ctx context.Context, request Request, nativeLockHeld bool
 		if candidateOwner, err = newCandidateSessionOwner(request); err != nil {
 			return err
 		}
-		if err := prepareSessionOwner(ctx, request, paths); err != nil {
+		carrierUpgrade, err = stageUnixUpgrade(ctx, request, paths, !coldCarrier && !replaceCarrier)
+		if err != nil {
 			return err
-		}
-		if !coldCarrier && !replaceCarrier {
-			carrierUpgrade, err = stageUnixCarrierUpgrade(ctx, request, paths)
-			if err != nil {
-				return err
-			}
 		}
 		prepareCutover := func(ctx context.Context) error {
 			if intent == unixPreparedUpdate {

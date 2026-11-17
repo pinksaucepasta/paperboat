@@ -21,7 +21,7 @@ import (
 const darwinHelperPath = "/Library/PrivilegedHelperTools/io.paperboat.machineguard"
 const darwinLaunchPath = "/Library/LaunchDaemons/io.paperboat.machineguard.plist"
 
-func installGuard(ctx context.Context, executable, browserDomain string, undo **Undo) (resultErr error) {
+func installGuard(ctx context.Context, executable, browserDomain string, units map[string]string, undo **Undo) (resultErr error) {
 	if err := requirePrivilege(); err != nil {
 		return err
 	}
@@ -56,14 +56,37 @@ func installGuard(ctx context.Context, executable, browserDomain string, undo **
 		return err
 	}
 
-	return installDarwin(ctx, executable, darwinInstallConfig{
-		HelperPath: darwinHelperPath, LaunchPath: darwinLaunchPath, NewsyslogPath: darwinNewsyslogPath,
-		Label: "io.paperboat.machineguard", Socket: DefaultSocket, Account: darwinBrokerAccount, StateDir: DefaultStateDir,
-		LaunchArguments: []string{"daemon", "machine-guard", "run"}, InstallAccount: true, Undo: undo,
-	})
+	cfg := darwinGuardConfig()
+	cfg.StateDir, cfg.InstallAccount, cfg.Undo = DefaultStateDir, true, undo
+	if units != nil {
+		cfg.Unit = units[filepath.Base(darwinLaunchPath)]
+		if len(units) != 1 || cfg.Unit == "" {
+			return errGuardUnits
+		}
+	}
+	return installDarwin(ctx, executable, cfg)
+}
+
+func darwinGuardConfig() darwinInstallConfig {
+	return darwinInstallConfig{HelperPath: darwinHelperPath, LaunchPath: darwinLaunchPath, NewsyslogPath: darwinNewsyslogPath,
+		Label: "io.paperboat.machineguard", Socket: DefaultSocket, Account: darwinBrokerAccount,
+		LaunchArguments: []string{"daemon", "machine-guard", "run"}}
+}
+
+// Units returns this build's guard unit files by name. An update installs the
+// candidate build's own units, so the guard never runs another build's render.
+func Units() map[string]string {
+	cfg := darwinGuardConfig()
+	unit, err := darwinGuardLaunchPlist(cfg.Label, append([]string{cfg.HelperPath}, cfg.LaunchArguments...))
+	if err != nil {
+		return nil
+	}
+	return map[string]string{filepath.Base(darwinLaunchPath): unit}
 }
 
 type darwinInstallConfig struct {
+	// Unit is the launchd declaration as the installed build rendered it; empty renders this build's.
+	Unit                                           string
 	HelperPath, LaunchPath, Label, Socket, Account string
 	NewsyslogPath                                  string // set for the real install; tests leave it empty
 	StateDir                                       string
@@ -148,9 +171,11 @@ func installDarwin(ctx context.Context, executable string, cfg darwinInstallConf
 			return trustErr
 		}
 	}
-	unit, err := darwinGuardLaunchPlist(cfg.Label, append([]string{cfg.HelperPath}, cfg.LaunchArguments...))
-	if err != nil {
-		return err
+	unit := cfg.Unit
+	if unit == "" {
+		if unit, err = darwinGuardLaunchPlist(cfg.Label, append([]string{cfg.HelperPath}, cfg.LaunchArguments...)); err != nil {
+			return err
+		}
 	}
 	err = darwinWrite(cfg.LaunchPath, []byte(unit), 0644)
 	rollback.record(cfg.LaunchPath)

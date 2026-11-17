@@ -1100,7 +1100,7 @@ func installUnboundWindowsBinary(ctx context.Context, request Request) (resultEr
 	if err := request.Source.Verify(request.Executable); err != nil {
 		return hostInstallFailure("source bytes", ErrInvalidRequest, err)
 	}
-	if err := runWindowsInstallPhase(ctx, "install Paperboat machine guard", func() error { return installMachineGuard(ctx, request) }); err != nil {
+	if err := runWindowsInstallPhase(ctx, "install Paperboat machine guard", func() error { return installMachineGuard(ctx, request, nil) }); err != nil {
 		return err
 	}
 	instance, err := WindowsInstanceForSID(request.OwnerSID)

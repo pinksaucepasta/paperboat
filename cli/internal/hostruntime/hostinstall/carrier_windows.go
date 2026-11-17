@@ -270,6 +270,9 @@ func publishCarrierFiles(c CarrierConfig, path string, capability []byte) error 
 // publishCarrierDescriptor marks a generation active: config.json becomes its descriptor.
 func publishCarrierDescriptor(c CarrierConfig) error { return writeWindowsCarrierDescriptors(c, true) }
 
+// activateCarrierGeneration makes a staged generation the active one. Windows stages it in the installing process.
+func activateCarrierGeneration(c CarrierConfig) error { return publishCarrierDescriptor(c) }
+
 func writeWindowsCarrierDescriptors(c CarrierConfig, active bool) error {
 	body, err := jsonCarrier(c)
 	if err != nil {
