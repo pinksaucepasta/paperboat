@@ -1891,7 +1891,8 @@
         "required": [
           "transaction_id",
           "state",
-          "expires_at"
+          "expires_at",
+          "login_origin"
         ],
         "properties": {
           "transaction_id": {
@@ -1906,6 +1907,10 @@
           "expires_at": {
             "type": "string",
             "format": "date-time"
+          },
+          "login_origin": {
+            "type": "string",
+            "description": "The console origin the edge sends the browser to: the server's one configured login origin."
           }
         }
       },
@@ -1916,7 +1921,8 @@
           "transaction_id",
           "state",
           "handoff",
-          "host"
+          "host",
+          "origin"
         ],
         "properties": {
           "transaction_id": {
@@ -1936,6 +1942,10 @@
           "host": {
             "type": "string",
             "maxLength": 253
+          },
+          "origin": {
+            "type": "string",
+            "description": "The Origin header of the console's callback post; only the login origin may deliver a handoff."
           }
         }
       },

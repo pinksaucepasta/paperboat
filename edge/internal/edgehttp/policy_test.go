@@ -1343,7 +1343,7 @@ func TestOwnerOfflinePreviewWithNoCarrierAnswersTheOfflinePage(t *testing.T) {
 	policy, err := New(Config{PreviewBaseDomain: "preview.example.test", TunnelBaseDomain: "tunnels.example.test", RuntimeBaseDomain: "runtime.example.test",
 		MaxHeaderBytes: 4096, MaxBodyBytes: 1024, Routes: NewPreviewCarrierRouteMatcher(registry),
 		PreviewOwnerOffline: func(host string) bool { return host == "app.preview.example.test" },
-		BrowserAccess:       &BrowserAccess{Authority: refusingBrowserAuthority{t}, LoginOrigin: "https://login.example.test"},
+		BrowserAccess:       &BrowserAccess{Authority: refusingBrowserAuthority{t}},
 	}, http.NotFoundHandler())
 	if err != nil {
 		t.Fatal(err)
@@ -1377,7 +1377,7 @@ func (a refusingBrowserAuthority) Begin(context.Context, string, string) (contro
 	return control.BrowserBegin{}, control.ErrBrowserDenied
 }
 
-func (a refusingBrowserAuthority) Redeem(context.Context, string, string, string, string) (control.BrowserSession, error) {
+func (a refusingBrowserAuthority) Redeem(context.Context, string, string, string, string, string) (control.BrowserSession, error) {
 	return control.BrowserSession{}, control.ErrBrowserDenied
 }
 

@@ -139,7 +139,7 @@ type task27Authority struct {
 func (*task27Authority) Begin(context.Context, string, string) (control.BrowserBegin, error) {
 	return control.BrowserBegin{}, control.ErrBrowserDenied
 }
-func (*task27Authority) Redeem(context.Context, string, string, string, string) (control.BrowserSession, error) {
+func (*task27Authority) Redeem(context.Context, string, string, string, string, string) (control.BrowserSession, error) {
 	return control.BrowserSession{}, control.ErrBrowserDenied
 }
 func (a *task27Authority) Authorize(_ context.Context, r control.BrowserAuthorizeRequest) (connectorprotocol.IngressDecision, error) {
@@ -330,7 +330,7 @@ func TestTask27CrossRepositoryLazyActivation(t *testing.T) {
 		}
 		return registry.Attach(DataCarrierPreviewRoute{RouteID: "preview_task27", Hostname: host, Kind: dataCarrierPreviewPrivateRouteKind, Revision: 1, Server: server, PreviewID: "preview_task27", AccessMode: "private", EdgeNodeID: "edge_task27", EdgeProcessEpoch: "epoch_task27_12345678", ExpiresAt: time.Now().Add(time.Hour)})
 	}
-	gateway, err := NewGatewayWithTransports(Config{BrowserAccess: &BrowserAccess{Authority: authority, LazyAuthority: authority, LoginOrigin: "https://login.example.test"}, PreviewBaseDomain: "preview.example.test", TunnelBaseDomain: "tunnels.example.test", RuntimeBaseDomain: "runtime.example.test", MaxHeaderBytes: 4096, MaxBodyBytes: 4096, Routes: NewCompositeRouteMatcher(NewPreviewCarrierRouteMatcher(registry)), RequestID: func() string { return "request_task27" }}, "127.0.0.1:1", transport, nil)
+	gateway, err := NewGatewayWithTransports(Config{BrowserAccess: &BrowserAccess{Authority: authority, LazyAuthority: authority}, PreviewBaseDomain: "preview.example.test", TunnelBaseDomain: "tunnels.example.test", RuntimeBaseDomain: "runtime.example.test", MaxHeaderBytes: 4096, MaxBodyBytes: 4096, Routes: NewCompositeRouteMatcher(NewPreviewCarrierRouteMatcher(registry)), RequestID: func() string { return "request_task27" }}, "127.0.0.1:1", transport, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

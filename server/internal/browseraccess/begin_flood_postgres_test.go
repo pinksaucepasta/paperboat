@@ -96,7 +96,7 @@ func TestBeginRateLimitStoresNothingAndAnswersLikeAnyOtherPostgres(t *testing.T)
 	begin := func(i int, ip string) BeginResult {
 		t.Helper()
 		out, e := svc.Begin(ctx, BeginRequest{Host: fmt.Sprintf("limited-%d-%s.preview.example.test", i, suffix), ReturnPath: "/", ClientIP: ip})
-		if e != nil || out.TransactionID == "" || out.State == "" || !out.ExpiresAt.After(time.Now()) {
+		if e != nil || out.TransactionID == "" || out.State == "" || !out.ExpiresAt.After(time.Now()) || out.LoginOrigin != "https://console.example.test" {
 			t.Fatalf("begin %d from %s: %+v %v", i, ip, out, e)
 		}
 		return out

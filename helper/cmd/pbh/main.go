@@ -201,7 +201,7 @@ func install(ctx context.Context, args []string, out io.Writer) (err error) {
 	fs.String("preview-domain", "", "preview base domain")
 	fs.String("tunnel-domain", "", "durable tunnel base domain")
 	fs.String("runtime-domain", "", "runtime base domain")
-	fs.String("browser-login-origin", "", "console origin that signs browsers in to private previews and tunnels (enables browser access)")
+	fs.Bool("browser-access", false, "let browsers sign in to private previews and tunnels through the console")
 	fs.String("https-cert", "", "browser-trusted HTTPS certificate file for the endpoint hostname")
 	fs.String("https-key", "", "owner-only private key file for browser HTTPS")
 	fs.String("control-ca", "", "CA certificate file for a private control plane (default: public roots)")

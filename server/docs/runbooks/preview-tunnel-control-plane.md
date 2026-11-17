@@ -336,7 +336,10 @@ cookie-carrying requests that a sibling preview/tunnel host or another site
 started other than as a top-level document navigation (Sec-Fetch-Site). Listing
 the base domain on the PSL later adds browser-level isolation and needs no code
 change. These APIs do not provision DNS/TLS. Enable it on an installation with
-`pbh install --browser-login-origin https://<console origin>`.
+`pbh install --browser-access`. The console the browser signs in at is the
+server's `PAPERBOAT_BROWSER_LOGIN_ORIGIN` (first origin): the server returns it
+on every begin and accepts a handoff only from it, so an edge has no console
+address of its own to get wrong.
 
 ### Shared TCP443 TLS pass-through
 

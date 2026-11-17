@@ -31,7 +31,6 @@ type Deployment struct {
 	PublicHTTPSCertFile       string `json:"public_https_cert_file,omitempty"`
 	PublicHTTPSKeyFile        string `json:"public_https_key_file,omitempty"`
 	BrowserAccessEnabled      bool   `json:"browser_access_enabled"`
-	BrowserLoginOrigin        string `json:"browser_login_origin"`
 	ControlURL                string `json:"control_url"`
 	CredentialIssuer          string `json:"credential_issuer"`
 	ControlCredentialFile     string `json:"control_credential_file"`
@@ -168,19 +167,6 @@ func (d Deployment) validate() error {
 	}
 	if _, _, err := net.SplitHostPort(d.PublicHTTPListenAddress); err != nil || d.PublicHTTPListenAddress == d.PublicHTTPSListenAddress {
 		return errors.New("public HTTP listener is invalid")
-	}
-	if d.BrowserAccessEnabled {
-		// Isolation does not depend on the public suffix list: browser cookies
-		// are host-only __Host- cookies and the edge adds same-site request checks.
-		login, e := url.Parse(d.BrowserLoginOrigin)
-		if e != nil || login.Scheme != "https" || login.Host == "" || login.User != nil || login.Path != "" || login.RawQuery != "" || login.Fragment != "" {
-			return errors.New("browser access requires an exact trusted HTTPS login origin")
-		}
-		for _, domain := range []string{d.PreviewBaseDomain, d.TunnelBaseDomain} {
-			if login.Hostname() == domain || strings.HasSuffix(login.Hostname(), "."+domain) {
-				return errors.New("browser login origin must not be inside a preview or tunnel domain")
-			}
-		}
 	}
 	for _, domain := range []string{d.PreviewBaseDomain, d.TunnelBaseDomain, d.RuntimeBaseDomain} {
 		if domain == "" && d.SelfHosted && !d.BrowserAccessEnabled {

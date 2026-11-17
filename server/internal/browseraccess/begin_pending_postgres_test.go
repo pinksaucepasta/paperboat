@@ -135,7 +135,7 @@ func TestBeginUnknownNameIsADeniedSignInPostgres(t *testing.T) {
 		if e != nil || !issue.Denied || issue.Handoff == "" {
 			t.Fatalf("%s: issue %+v %v, want a denied handoff", host, issue, e)
 		}
-		if _, e = svc.Redeem(ctx, RedeemRequest{TransactionID: begin.TransactionID, State: begin.State, Handoff: issue.Handoff, Host: host}); !errors.Is(e, ErrAccessDenied) {
+		if _, e = svc.Redeem(ctx, RedeemRequest{TransactionID: begin.TransactionID, State: begin.State, Handoff: issue.Handoff, Host: host, Origin: begin.LoginOrigin}); !errors.Is(e, ErrAccessDenied) {
 			t.Fatalf("%s: redeem %v, want ErrAccessDenied", host, e)
 		}
 	}

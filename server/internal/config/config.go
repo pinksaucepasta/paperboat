@@ -117,7 +117,8 @@ type Config struct {
 type HTTPConfig struct {
 	BrowserLoginOrigin string `json:"browser_login_origin"`
 	// BrowserLoginExtraOrigins are further consoles that may sign in (a dev console next to the production one); the primary is
-	// BrowserLoginOrigin, the one clients and links name. PAPERBOAT_BROWSER_LOGIN_ORIGIN takes them as a comma list.
+	// BrowserLoginOrigin, the one clients and links name and the only one edges send browsers to for a preview or tunnel
+	// sign-in. PAPERBOAT_BROWSER_LOGIN_ORIGIN takes them as a comma list.
 	BrowserLoginExtraOrigins []string      `json:"browser_login_extra_origins"`
 	Address                  string        `json:"address"`
 	PublicBaseURL            string        `json:"public_base_url"`
@@ -733,6 +734,19 @@ func (c Config) Validate() error {
 		origin, e := url.Parse(loginOrigin)
 		if e != nil || origin.Host == "" || origin.User != nil || origin.Path != "" || origin.RawQuery != "" || origin.Fragment != "" || (origin.Scheme != "https" && (origin.Scheme != "http" || c.Environment == EnvironmentProduction)) {
 			errs = append(errs, fmt.Errorf("http.browser_login_origin must be an exact trusted origin; production requires HTTPS"))
+			continue
+		}
+		// The origin must be written as a browser sends it in an Origin header (lower case, no default port, no
+		// trailing dot): the console's sign-in checks and the browser-access redeem compare it exactly.
+		if port := origin.Port(); loginOrigin != strings.ToLower(loginOrigin) || strings.HasSuffix(origin.Hostname(), ".") || (origin.Scheme == "https" && port == "443") || (origin.Scheme == "http" && port == "80") {
+			errs = append(errs, fmt.Errorf("http.browser_login_origin must be written as a browser sends it: lower case, no default port, no trailing dot"))
+			continue
+		}
+		// The console must not live inside a preview or tunnel domain: those hosts run customer apps.
+		for _, domain := range []string{c.Preview.BaseDomain, c.Tunnel.BaseDomain} {
+			if domain != "" && (origin.Hostname() == domain || strings.HasSuffix(origin.Hostname(), "."+domain)) {
+				errs = append(errs, fmt.Errorf("http.browser_login_origin must not be inside a preview or tunnel domain"))
+			}
 		}
 	}
 	if c.HTTP.MaxBodyBytes <= 0 {

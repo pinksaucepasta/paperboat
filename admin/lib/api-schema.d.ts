@@ -9461,12 +9461,16 @@ export interface components {
             state: string;
             /** Format: date-time */
             expires_at: string;
+            /** @description The console origin the edge sends the browser to: the server's one configured login origin. */
+            login_origin: string;
         };
         BrowserAccessRedeemRequest: {
             transaction_id: string;
             state: string;
             handoff: string;
             host: string;
+            /** @description The Origin header of the console's callback post; only the login origin may deliver a handoff. */
+            origin: string;
         };
         BrowserAccessRedeemResult: {
             token: string;

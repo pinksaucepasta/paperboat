@@ -38,8 +38,8 @@ func TestActualTLSGlobalClaimExportsManagedRuntimeAndReappliesOnRestart(t *testi
 		if deployment["self_hosted"] != false {
 			t.Fatal("authenticated global claim exported a customer-hosted runtime")
 		}
-		if deployment["browser_access_enabled"] != false || deployment["browser_login_origin"] != "" {
-			t.Fatal("enabled browser access without a configured login origin")
+		if deployment["browser_access_enabled"] != false {
+			t.Fatal("enabled browser access without being asked")
 		}
 		if deployment["infrastructure_tls_cert_file"] != filepath.Join(dir, "tls.crt") || deployment["infrastructure_tls_key_file"] != filepath.Join(dir, "tls.key") {
 			t.Fatal("global ownership changed claimed carrier identity")
@@ -73,10 +73,10 @@ func TestActualTLSGlobalClaimExportsManagedRuntimeAndReappliesOnRestart(t *testi
 	}
 }
 
-func TestBrowserLoginOriginEnablesBrowserAccessInExportedDeployment(t *testing.T) {
-	for _, origin := range []string{"", "https://console.example.test"} {
+func TestBrowserAccessFlagEnablesBrowserAccessInExportedDeployment(t *testing.T) {
+	for _, enabled := range []bool{false, true} {
 		dir := t.TempDir()
-		setup := Setup{ScopeType: "global", Capability: "tunnel", ControlURL: "https://api.example.test", BrowserLoginOrigin: origin}
+		setup := Setup{ScopeType: "global", Capability: "tunnel", ControlURL: "https://api.example.test", BrowserAccess: enabled}
 		registration := Registration{NodeID: "node_x", UsageKeyID: "key", EdgePool: "pool", RuntimeCredential: "c"}
 		_, usage, err := ed25519.GenerateKey(rand.Reader)
 		if err != nil {
@@ -93,16 +93,11 @@ func TestBrowserLoginOriginEnablesBrowserAccessInExportedDeployment(t *testing.T
 		if err := json.Unmarshal(body, &deployment); err != nil {
 			t.Fatal(err)
 		}
-		if deployment["browser_access_enabled"] != (origin != "") || deployment["browser_login_origin"] != origin {
-			t.Fatalf("origin %q exported %v / %v", origin, deployment["browser_access_enabled"], deployment["browser_login_origin"])
+		if deployment["browser_access_enabled"] != enabled {
+			t.Fatalf("browser access %v exported %v", enabled, deployment["browser_access_enabled"])
 		}
-	}
-	for _, bad := range []string{"http://console.example.test", "https://console.example.test/x", "console.example.test", "https://u@console.example.test"} {
-		if validateBrowserLoginOrigin(bad) == nil {
-			t.Fatalf("accepted login origin %q", bad)
+		if _, ok := deployment["browser_login_origin"]; ok {
+			t.Fatal("exported a login origin: the server names the console")
 		}
-	}
-	if validateBrowserLoginOrigin("") != nil || validateBrowserLoginOrigin("https://console.example.test") != nil {
-		t.Fatal("rejected a valid login origin")
 	}
 }

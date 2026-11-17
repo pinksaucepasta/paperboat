@@ -383,7 +383,7 @@ def edge(image):
         "tls.crt": cert_pem, "tls.key": key_pem,
         "pub.crt": cert_pem, "pub.key": key_pem,  # the edge refuses the carrier certificate files as the public ones
         "deployment.json": json.dumps({
-            "self_hosted": False, "browser_access_enabled": False, "browser_login_origin": "", "control_url": api, "credential_issuer": api,
+            "self_hosted": False, "browser_access_enabled": False, "control_url": api, "credential_issuer": api,
             "control_credential_file": "/state/runtime.credential", "control_ca_file": "", "jwks_file": "/state/jwks.json",
             "revocations_file": "/state/revocations.json", "usage_signing_key_file": "/state/usage.key",
             "infrastructure_tls_cert_file": "/state/tls.crt", "infrastructure_tls_key_file": "/state/tls.key",

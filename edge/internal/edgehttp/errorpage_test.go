@@ -38,7 +38,7 @@ func (*failingBeginAuthority) Begin(context.Context, string, string) (control.Br
 }
 
 func TestBrowserAuthorizationFailureRendersBrandedPage(t *testing.T) {
-	b := BrowserAccess{Authority: &failingBeginAuthority{}, LoginOrigin: "https://login.example.test"}
+	b := BrowserAccess{Authority: &failingBeginAuthority{}}
 	r := httptest.NewRequest("GET", "https://app.example.test/", nil)
 	r.Header.Set("Sec-Fetch-Mode", "navigate")
 	r.Header.Set("Sec-Fetch-Dest", "document")

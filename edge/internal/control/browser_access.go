@@ -30,6 +30,7 @@ type BrowserBegin struct {
 	TransactionID string    `json:"transaction_id"`
 	State         string    `json:"state"`
 	ExpiresAt     time.Time `json:"expires_at"`
+	LoginOrigin   string    `json:"login_origin"`
 }
 type BrowserSession struct {
 	Token      string    `json:"token"`
@@ -72,14 +73,15 @@ func (c *BrowserAccessClient) Begin(ctx context.Context, host, path string) (Bro
 	}{host, path, clientIP}, &out)
 	return out, err
 }
-func (c *BrowserAccessClient) Redeem(ctx context.Context, transaction, state, handoff, host string) (BrowserSession, error) {
+func (c *BrowserAccessClient) Redeem(ctx context.Context, transaction, state, handoff, host, origin string) (BrowserSession, error) {
 	var out BrowserSession
 	err := c.call(ctx, "redeem", struct {
 		TransactionID string `json:"transaction_id"`
 		State         string `json:"state"`
 		Handoff       string `json:"handoff"`
 		Host          string `json:"host"`
-	}{transaction, state, handoff, host}, &out)
+		Origin        string `json:"origin"`
+	}{transaction, state, handoff, host, origin}, &out)
 	return out, err
 }
 func (c *BrowserAccessClient) Authorize(ctx context.Context, in BrowserAuthorizeRequest) (connectorprotocol.IngressDecision, error) {

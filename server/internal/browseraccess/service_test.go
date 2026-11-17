@@ -1,6 +1,8 @@
 package browseraccess
 
 import (
+	"context"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -55,5 +57,28 @@ func TestNewServiceRequiresExactHTTPSOrigin(t *testing.T) {
 	s, err := NewService(nil, "https://login.example.test/")
 	if err != nil || s.trustedOrigin != "https://login.example.test" {
 		t.Fatalf("NewService valid origin: %#v %v", s, err)
+	}
+	if s, err = NewService(nil, "https://Login.Example.Test:443"); err != nil || s.trustedOrigin != "https://login.example.test" {
+		t.Fatalf("explicit default port: %v %+v, want the origin a browser sends", err, s)
+	}
+	if s, err = NewService(nil, "https://login.example.test:8443"); err != nil || s.trustedOrigin != "https://login.example.test:8443" {
+		t.Fatalf("non-default port: %v %+v, want it kept", err, s)
+	}
+	if s, err = NewService(nil, "https://Login.Example.Test"); err != nil || s.trustedOrigin != "https://login.example.test" {
+		t.Fatalf("NewService kept the origin's case: %#v %v", s, err)
+	}
+}
+
+// Only the configured login origin may deliver a handoff, however trusted another console origin is elsewhere.
+func TestRedeemRefusesAnyOriginButTheLoginOrigin(t *testing.T) {
+	s, err := NewService(nil, "https://login.example.test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, origin := range []string{"", "https://dev.example.test", "http://login.example.test", "https://login.example.test/", "null"} {
+		_, err := s.Redeem(context.Background(), RedeemRequest{TransactionID: "transaction_1", State: "s", Handoff: "h", Host: "app.example.test", Origin: origin})
+		if !errors.Is(err, ErrInvalid) {
+			t.Fatalf("Redeem from origin %q: %v, want ErrInvalid", origin, err)
+		}
 	}
 }

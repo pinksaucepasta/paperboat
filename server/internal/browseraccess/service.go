@@ -55,6 +55,8 @@ type BeginResult struct {
 	TransactionID string    `json:"transaction_id"`
 	State         string    `json:"state"`
 	ExpiresAt     time.Time `json:"expires_at"`
+	// LoginOrigin is the console the edge sends the browser to: the server's one configured login origin.
+	LoginOrigin string `json:"login_origin"`
 }
 type IssueRequest struct {
 	TransactionID string       `json:"transaction_id"`
@@ -73,6 +75,8 @@ type RedeemRequest struct {
 	State         string `json:"state"`
 	Handoff       string `json:"handoff"`
 	Host          string `json:"host"`
+	// Origin is the Origin header of the console's callback post; only the login origin may deliver a handoff.
+	Origin string `json:"origin"`
 }
 type RedeemResult struct {
 	Token      string    `json:"token"`
@@ -145,12 +149,22 @@ func NewService(store *db.DB, trustedLoginOrigin string) (*Service, error) {
 func NewDevelopmentService(store *db.DB, trustedLoginOrigin string) (*Service, error) {
 	return newService(store, trustedLoginOrigin, true)
 }
+
+// serializedOrigin is the origin as a browser writes it in an Origin header: lower case, no default port.
+func serializedOrigin(u *url.URL) string {
+	host := u.Host
+	if port := u.Port(); (u.Scheme == "https" && port == "443") || (u.Scheme == "http" && port == "80") {
+		host = strings.TrimSuffix(host, ":"+port)
+	}
+	return strings.ToLower(u.Scheme + "://" + host)
+}
+
 func newService(store *db.DB, trustedLoginOrigin string, developmentHTTP bool) (*Service, error) {
 	u, err := url.Parse(trustedLoginOrigin)
 	if err != nil || (u.Scheme != "https" && !(developmentHTTP && u.Scheme == "http")) || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") {
 		return nil, fmt.Errorf("trusted login origin: %w", ErrInvalid)
 	}
-	s := &Service{sessionPolicy: config.DefaultBrowserSessions(), db: store, trustedOrigin: u.Scheme + "://" + u.Host, now: func() time.Time { return time.Now().UTC() }}
+	s := &Service{sessionPolicy: config.DefaultBrowserSessions(), db: store, trustedOrigin: serializedOrigin(u), now: func() time.Time { return time.Now().UTC() }}
 	s.ConfigureBegin(config.Default().RateLimits)
 	return s, nil
 }
@@ -202,7 +216,7 @@ func (s *Service) Begin(ctx context.Context, in BeginRequest) (BeginResult, erro
 		return BeginResult{}, err
 	}
 	now := s.now()
-	out := BeginResult{TransactionID: id, State: state, ExpiresAt: now.Add(transactionTTL)}
+	out := BeginResult{TransactionID: id, State: state, ExpiresAt: now.Add(transactionTTL), LoginOrigin: s.trustedOrigin}
 	if !s.beginAllowed(in.ClientIP) {
 		// Past a limit nothing is stored and the answer has the shape of any other, so a flood cannot tell it was limited.
 		// The only difference left is for a visitor who then signs in: Issue finds no transaction (404) where a stored
@@ -367,7 +381,7 @@ func (s *Service) Issue(ctx context.Context, in IssueRequest) (IssueResult, erro
 
 func (s *Service) Redeem(ctx context.Context, in RedeemRequest) (RedeemResult, error) {
 	host, err := validHost(in.Host)
-	if err != nil {
+	if err != nil || in.Origin != s.trustedOrigin {
 		return RedeemResult{}, ErrInvalid
 	}
 	sh, hh := digest(in.State), digest(in.Handoff)

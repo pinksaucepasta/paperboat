@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strconv"
 
 	"github.com/pinksaucepasta/paperboat/relay/selfhost"
 )
@@ -27,7 +28,7 @@ func existingInstallConfig(dir string, fs *flag.FlagSet) (selfhost.Config, bool,
 	if err != nil {
 		return c, false, err
 	}
-	expected := map[string]string{"enable": installationMode(c), "endpoint-host": c.EndpointHost, "name": c.Name, "claim-listen": c.Listen, "preview-domain": c.PreviewDomain, "tunnel-domain": c.TunnelDomain, "runtime-domain": c.RuntimeDomain, "browser-login-origin": c.BrowserLoginOrigin}
+	expected := map[string]string{"enable": installationMode(c), "endpoint-host": c.EndpointHost, "name": c.Name, "claim-listen": c.Listen, "preview-domain": c.PreviewDomain, "tunnel-domain": c.TunnelDomain, "runtime-domain": c.RuntimeDomain, "browser-access": strconv.FormatBool(c.BrowserAccess)}
 	staged := map[string]struct {
 		file   trustFile
 		stored string
@@ -76,7 +77,7 @@ func freshInstallConfig(ctx context.Context, fs *flag.FlagSet) (selfhost.Config,
 	if failure == "" {
 		failure = host
 	}
-	c := selfhost.Config{Name: name, EndpointHost: host, Listen: value("claim-listen"), PreviewDomain: value("preview-domain"), TunnelDomain: value("tunnel-domain"), RuntimeDomain: value("runtime-domain"), BrowserLoginOrigin: value("browser-login-origin")}
+	c := selfhost.Config{Name: name, EndpointHost: host, Listen: value("claim-listen"), PreviewDomain: value("preview-domain"), TunnelDomain: value("tunnel-domain"), RuntimeDomain: value("runtime-domain"), BrowserAccess: value("browser-access") == "true"}
 	mode := value("enable")
 	if mode == "relay" || mode == "both" {
 		tcp := 443

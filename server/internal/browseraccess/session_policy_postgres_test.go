@@ -66,7 +66,7 @@ func TestConfiguredResourceSessionPostgres(t *testing.T) {
 		if e != nil {
 			t.Fatal(e)
 		}
-		r, e := s.Redeem(ctx, RedeemRequest{TransactionID: begin.TransactionID, State: begin.State, Handoff: issued.Handoff, Host: host})
+		r, e := s.Redeem(ctx, RedeemRequest{TransactionID: begin.TransactionID, State: begin.State, Handoff: issued.Handoff, Host: host, Origin: begin.LoginOrigin})
 		if e != nil {
 			t.Fatal(e)
 		}
@@ -172,7 +172,7 @@ func TestTunnelOwnerSessionSurvivesAnOrdinaryTunnelEditPostgres(t *testing.T) {
 	if issued.Denied {
 		t.Fatal("the owner was denied their own private tunnel")
 	}
-	grant, err := s.Redeem(ctx, RedeemRequest{TransactionID: begin.TransactionID, State: begin.State, Handoff: issued.Handoff, Host: host})
+	grant, err := s.Redeem(ctx, RedeemRequest{TransactionID: begin.TransactionID, State: begin.State, Handoff: issued.Handoff, Host: host, Origin: begin.LoginOrigin})
 	if err != nil {
 		t.Fatal(err)
 	}
