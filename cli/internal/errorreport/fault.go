@@ -177,7 +177,7 @@ func (r *Reporter) captureFault(ctx context.Context, f Fault, capture bool) Faul
 	if !r.beginSubmit(false) {
 		return f
 	}
-	defer r.submitMu.RUnlock()
+	defer r.fence.End()
 	ctx = r.context(ctx)
 	if r.logs && r.admitSignal(0) {
 		logger := sentry.NewLogger(ctx)

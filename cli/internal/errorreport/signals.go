@@ -110,7 +110,7 @@ func (r *Reporter) Observe(ctx context.Context, component, operation, outcome st
 	if !r.beginSubmit(false) {
 		return
 	}
-	defer r.submitMu.RUnlock()
+	defer r.fence.End()
 	component = Component(component)
 	operation = Operation(operation)
 	outcome = Outcome(outcome)
@@ -164,7 +164,7 @@ func (r *Reporter) Start(ctx context.Context, component, operation string) (cont
 	if !r.beginSubmit(false) {
 		return ctx, func(string) {}
 	}
-	defer r.submitMu.RUnlock()
+	defer r.fence.End()
 	operation = Operation(operation)
 	component = Component(component)
 	r.component.CompareAndSwap(nil, &component)
@@ -201,7 +201,7 @@ func (r *Reporter) Start(ctx context.Context, component, operation string) (cont
 			if !r.beginSubmit(false) {
 				return
 			}
-			defer r.submitMu.RUnlock()
+			defer r.fence.End()
 			span.SetTag("outcome", outcome)
 			if outcome == "failed" {
 				span.Status = sentry.SpanStatusInternalError

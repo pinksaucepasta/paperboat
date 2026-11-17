@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	sharedtelemetry "github.com/pinksaucepasta/paperboat/shared/telemetry"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -69,7 +70,7 @@ func TestRuntimeLifecycleFailureRecoveryAndRegistryExport(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	events, err := hosttelemetry.NewEventLog(4)
+	events, err := sharedtelemetry.NewEventLog(4)
 	if err != nil {
 		t.Fatal(err)
 	}

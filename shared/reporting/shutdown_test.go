@@ -214,7 +214,7 @@ func TestShutdownDeadlineBoundsBlockedSDKJoinAndFencesNewProducers(t *testing.T)
 	close(transport.release)
 	<-submitted
 	select {
-	case <-r.closeDone:
+	case <-r.fence.Done():
 	case <-time.After(time.Second):
 		t.Fatal("released SDK worker did not clean up")
 	}
@@ -249,7 +249,7 @@ func TestProductionOutageBoundsWholeShutdown(t *testing.T) {
 		t.Fatal("outage presented as drained or exceeded deadline")
 	}
 	select {
-	case <-r.closeDone:
+	case <-r.fence.Done():
 	case <-time.After(time.Second):
 		t.Fatal("SDK cleanup did not finish")
 	}

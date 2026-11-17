@@ -150,7 +150,7 @@ func (r *Reporter) observeFailure(ctx context.Context, definition string, err er
 	if !r.beginSubmit() {
 		return fault
 	}
-	defer r.submitMu.RUnlock()
+	defer r.fence.End()
 	ctx = sentry.SetHubOnContext(ctx, r.hub)
 	r.captureFaultLog(ctx, fault)
 	if r.metrics && r.permit(&r.metricsSent, &r.droppedMetrics, maxDetailMetrics) {

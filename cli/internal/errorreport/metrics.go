@@ -112,7 +112,7 @@ func (r *Reporter) sampleMetrics() {
 		}
 		meter.SetAttributes(attrs...)
 		meter.Gauge(sample.Name, sample.Value)
-		r.submitMu.RUnlock()
+		r.fence.End()
 		r.mu.Lock()
 		r.metricsSent[metricSampleKey(sample)] = sample.Value
 		r.mu.Unlock()

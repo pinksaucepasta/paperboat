@@ -252,7 +252,7 @@ func TestSamplerDeadlineSealsLateSnapshotAndCleansWorker(t *testing.T) {
 		t.Fatal("released sampler did not exit")
 	}
 	select {
-	case <-r.flushDone:
+	case <-r.fence.Done():
 	case <-time.After(time.Second):
 		t.Fatal("shutdown cleanup did not finish")
 	}
@@ -296,7 +296,7 @@ func TestProductionTransportOutageHasBoundedShutdownStatus(t *testing.T) {
 		t.Fatal("outage exceeded deadline or was presented as drained")
 	}
 	select {
-	case <-r.flushDone:
+	case <-r.fence.Done():
 	case <-time.After(time.Second):
 		t.Fatal("SDK cleanup did not finish")
 	}

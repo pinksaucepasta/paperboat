@@ -39,7 +39,6 @@ type Reporter struct {
 	sources                  []func() []MetricSample
 	metricSchema             map[string]map[string]map[string]bool
 	samplerStop, samplerDone chan struct{}
-	flushOnce                sync.Once
 	client                   *sentry.Client
 	mu                       sync.Mutex
 	window                   time.Time
@@ -47,13 +46,8 @@ type Reporter struct {
 	logs, metrics            bool
 	rate                     float64
 	limits                   [3]signalLimit
-	closed                   atomic.Bool
-	sealed                   atomic.Bool
-	submitMu                 sync.RWMutex
-	submissionsDropped       atomic.Uint64
+	fence                    reporting.Fence
 	httpFailures             atomic.Uint64
-	flushStatus              atomic.Uint32
-	flushDone                chan struct{}
 	flood                    *reporting.FloodGuard
 }
 
@@ -136,13 +130,13 @@ func (r *Reporter) PersistFloodState(path string) {
 	}
 }
 
-func (r *Reporter) Enabled() bool { return r != nil && r.client != nil && !r.closed.Load() }
+func (r *Reporter) Enabled() bool { return r != nil && r.client != nil && !r.fence.Closed() }
 
 func (r *Reporter) Capture(ctx context.Context, component, classification string) {
 	if !safeComponent(component) || !safeClassification(classification) || !r.beginSubmit(false) {
 		return
 	}
-	defer r.submitMu.RUnlock()
+	defer r.fence.End()
 	admitted, suppressed := r.flood.Admit(component + "/" + classification)
 	if !admitted || !r.admit(time.Now()) {
 		return
@@ -167,52 +161,31 @@ func (r *Reporter) Capture(ctx context.Context, component, classification string
 	r.client.CaptureEvent(event, nil, nil)
 }
 
+// Flush stops the metric sampler, then closes the SDK within one shutdown budget (see reporting.Fence).
 func (r *Reporter) Flush(ctx context.Context) {
 	if r == nil || r.client == nil {
 		return
 	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	waitCtx, stop := context.WithTimeout(ctx, flushLimit)
-	defer stop()
-	r.flushOnce.Do(func() {
-		r.flushDone = make(chan struct{})
-		r.closed.Store(true)
-		r.flushStatus.Store(1)
-		flushCtx, cancel := context.WithTimeout(ctx, flushLimit)
-		go func() {
-			defer cancel()
-			defer close(r.flushDone)
-			if r.samplerStop != nil {
-				close(r.samplerStop)
-				select {
-				case <-r.samplerDone:
-				case <-flushCtx.Done():
-					r.flushStatus.Store(3)
-				}
-			}
-			r.sealed.Store(true)
-			// Every admitted submission finishes before SDK drain/close. Sources
-			// run outside this short gate, so a stuck registry cannot hold it.
-			r.submitMu.Lock()
-			defer r.submitMu.Unlock()
-			flushed := r.client.FlushWithContext(flushCtx)
-			r.client.Close()
-			if flushed && flushCtx.Err() == nil {
-				r.flushStatus.CompareAndSwap(1, 2)
-			} else {
-				r.flushStatus.Store(3)
-			}
-		}()
+	r.fence.Close(ctx, flushLimit, r.stopSampler, func(flushCtx context.Context) bool {
+		// Every admitted submission finished before this runs. Sources run outside
+		// the fence, so a stuck registry cannot hold it.
+		flushed := r.client.FlushWithContext(flushCtx)
+		r.client.Close()
+		return flushed
 	})
+}
+
+// stopSampler stops the metric sampler and reports whether it finished in time.
+func (r *Reporter) stopSampler(ctx context.Context) bool {
+	if r.samplerStop == nil {
+		return true
+	}
+	close(r.samplerStop)
 	select {
-	case <-r.flushDone:
-	case <-waitCtx.Done():
-		// Seal before returning: a late sampler must not win the race with
-		// the cleanup goroutine observing the same expired deadline.
-		r.sealed.Store(true)
-		r.flushStatus.Store(3)
+	case <-r.samplerDone:
+		return true
+	case <-ctx.Done():
+		return false
 	}
 }
 
@@ -222,16 +195,7 @@ func (r *Reporter) FlushStatus() string {
 	if r == nil || r.client == nil {
 		return "disabled"
 	}
-	switch r.flushStatus.Load() {
-	case 1:
-		return "flushing"
-	case 2:
-		return "drained"
-	case 3:
-		return "timed_out"
-	default:
-		return "not_started"
-	}
+	return r.fence.Status()
 }
 
 // SDKSubmissionsDropped counts submissions refused by the shutdown fence. SDK
@@ -240,7 +204,7 @@ func (r *Reporter) SDKSubmissionsDropped() uint64 {
 	if r == nil {
 		return 0
 	}
-	return r.submissionsDropped.Load()
+	return r.fence.Dropped()
 }
 
 // SDKHTTPFailures counts failed export HTTP attempts, not lost signals. A
@@ -266,19 +230,7 @@ func (t sdkHTTPObserver) RoundTrip(req *http.Request) (*http.Response, error) {
 }
 
 func (r *Reporter) beginSubmit(sampler bool) bool {
-	if r == nil || r.client == nil {
-		return false
-	}
-	if !r.submitMu.TryRLock() {
-		r.submissionsDropped.Add(1)
-		return false
-	}
-	if r.sealed.Load() || !sampler && r.closed.Load() {
-		r.submitMu.RUnlock()
-		r.submissionsDropped.Add(1)
-		return false
-	}
-	return true
+	return r != nil && r.client != nil && r.fence.Begin(sampler)
 }
 
 func safeRelease(value string) bool {

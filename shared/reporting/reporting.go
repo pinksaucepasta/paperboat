@@ -68,12 +68,7 @@ type Reporter struct {
 	droppedMetrics        atomic.Uint64
 	droppedErrors         atomic.Uint64
 	droppedTraces         atomic.Uint64
-	closed                atomic.Bool
-	submitMu              sync.RWMutex
-	closeOnce             sync.Once
-	closeDone             chan struct{}
-	flushStatus           atomic.Uint32
-	submissionsDropped    atomic.Uint64
+	fence                 Fence
 	httpFailures          atomic.Uint64
 }
 
@@ -531,7 +526,7 @@ func (r *Reporter) Observe(ctx context.Context, operation, outcome, code, refere
 	if !r.beginSubmit() {
 		return
 	}
-	defer r.submitMu.RUnlock()
+	defer r.fence.End()
 	ctx = sentry.SetHubOnContext(ctx, r.hub)
 	if r.traces && r.permit(&r.tracesSent, &r.droppedTraces, maxTraces) {
 		span := sentry.StartSpan(ctx, "paperboat."+operation, sentry.WithTransactionName(operation))
@@ -609,7 +604,7 @@ func (r *Reporter) ExportDrops(ctx context.Context) {
 	if !r.beginSubmit() {
 		return
 	}
-	defer r.submitMu.RUnlock()
+	defer r.fence.End()
 	ctx = sentry.SetHubOnContext(ctx, r.hub)
 	meter := sentry.NewMeter(ctx)
 	meter.SetAttributes(attribute.String("component", r.component))
@@ -642,7 +637,7 @@ func (r *Reporter) MetricSnapshots(ctx context.Context, snapshots []Snapshot) {
 	if !r.beginSubmit() {
 		return
 	}
-	defer r.submitMu.RUnlock()
+	defer r.fence.End()
 	valid := make([]Snapshot, 0, len(snapshots))
 	for _, snapshot := range snapshots {
 		if r.validSnapshot(snapshot) {
@@ -723,7 +718,7 @@ func (r *Reporter) ControlTrace(ctx context.Context, operation string) (string, 
 	if !operations[operation] || !r.beginSubmit() {
 		return "", reference, func(string, string) {}
 	}
-	defer r.submitMu.RUnlock()
+	defer r.fence.End()
 	started := time.Now()
 	ctx = sentry.SetHubOnContext(ctx, r.hub)
 	var span *sentry.Span
@@ -743,7 +738,7 @@ func (r *Reporter) ControlTrace(ctx context.Context, operation string) (string, 
 			if !outcomes[outcome] || !codes[code] || !r.beginSubmit() {
 				return
 			}
-			defer r.submitMu.RUnlock()
+			defer r.fence.End()
 			if span != nil {
 				span.SetTag("outcome", outcome)
 				span.SetTag("code", code)
