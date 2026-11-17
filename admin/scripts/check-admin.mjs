@@ -30,9 +30,9 @@ const totp = (secret, offsetSteps = 0) => {
   const at = mac[mac.length - 1] & 15
   return String((mac.readUInt32BE(at) & 0x7fffffff) % 1000000).padStart(6, "0")
 }
-const mfa = { "tok-admin": { enrolled: false, secret: "JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP" }, "tok-support": { enrolled: true, secret: "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ" } }
-const sessions = { "tok-admin": { email: "root@example.test", role: "admin", csrf: "csrf-admin" }, "tok-support": { email: "agent@example.test", role: "support", csrf: "csrf-support" } }
-const seen = { logoutCsrf: undefined, origins: new Set(), cookiesToPaths: [] }
+const mfa = { "tok-admin": { enrolled: false, secret: "JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP" }, "tok-support": { enrolled: true, secret: "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ" }, "tok-new": { enrolled: false, secret: "MFRGGZDFMZTWQ2LKNNWG23TPOBYXE43U" } }
+const sessions = { "tok-admin": { email: "root@example.test", role: "admin", csrf: "csrf-admin" }, "tok-support": { email: "agent@example.test", role: "support", csrf: "csrf-support" }, "tok-new": { email: "new@example.test", role: "billing", csrf: "csrf-new" } }
+const seen = { setup: undefined, logoutCsrf: undefined, origins: new Set(), cookiesToPaths: [] }
 const accounts = Array.from({ length: 120 }, (_, i) => ({
   id: `usr_${String(i).padStart(3, "0")}`,
   primary_email: `person${i}@example.test`,
@@ -62,6 +62,8 @@ function expectedTarget(method, path, body) {
     return { capability: policy.capability, target: decodeURIComponent(String(target ?? "")) }
   }
 }
+// A live operator session: the server lists only sessions that have not expired, so the fixture's are relative to now.
+const fixtureSession = (c) => ({ id: c.repeat(64), created_at: new Date(Date.now() - 3600e3).toISOString(), expires_at: new Date(Date.now() + 7 * 3600e3).toISOString(), mfa_pending: false })
 // What the panel changed, and the state the fixture serves back (so a write is visible on the next read).
 const writes = []
 const world = {
@@ -71,6 +73,11 @@ const world = {
   installs: [],
   serverNodes: [{ id: "srv_1", region: "eu", state: "active", version: "dev-abc1234", commit: "abc1234", started_at: "2026-11-17T09:00:00Z", last_seen_at: "2026-11-17T09:00:00Z", healthy: true, public_address: "203.0.113.9" }],
   policy: { personal_allowance_bytes: 5e9, team_allowance_bytes: null, revision: 3 },
+  operators: [
+    { id: "operator_root", email: "root@example.test", role: "admin", status: "active", mfa_enrolled: true, invited: false, live_sessions: 1, created_at: "2026-11-01T08:00:00Z" },
+    { id: "operator_agent", email: "agent@example.test", role: "support", status: "active", mfa_enrolled: true, invited: false, live_sessions: 2, created_at: "2026-11-05T08:00:00Z" },
+  ],
+  operatorSessions: { operator_agent: ["a", "b"].map((c) => fixtureSession(c)) },
   floor: { schema: "paperboat.client-update-policy/v1", revision: 2, minimum_version: "", reason: "" },
   requests: [],
 }
@@ -84,6 +91,23 @@ const page = (items, key, total, url) => {
 }
 function mutate(method, p, json) {
   const [, , , area, id, action] = p.split("/").map(decodeURIComponent)
+  if (p === "/v1/admin/operators") {
+    world.operators.push({ id: "operator_new", email: json.email, role: json.role, status: "active", mfa_enrolled: false, invited: true, live_sessions: 0, created_at: new Date().toISOString() })
+    return { resource_id: "operator_new", state: "invited", setup_token: "setup-FIXTURE-token", expires_at: "2026-11-20T00:00:00Z" }
+  }
+  if (area === "operators") {
+    const op = world.operators.find((o) => o.id === id)
+    if (!op) return { __status: 404, code: "not_found", message: "The target was not found.", reference: "support_fixture_operator" }
+    if (action === "disable") Object.assign(op, { status: "disabled", live_sessions: 0 })
+    if (action === "enable") op.status = "active"
+    if (action === "mfa-reset") Object.assign(op, { mfa_enrolled: false, live_sessions: 0 })
+    if (p.endsWith("/sessions/revoke")) {
+      const list = world.operatorSessions[id] ?? []
+      world.operatorSessions[id] = json.session_id === "all" ? [] : list.filter((x) => x.id !== json.session_id)
+      op.live_sessions = world.operatorSessions[id].length
+    }
+    return { resource_id: id, state: action }
+  }
   if (p === "/v1/admin/selfhost/enrollments") {
     world.installs.push({ installation_id: "inst_1", node_id: "node_s1", endpoint_host: "", name: "", capability: "relay", ready: false, trust_notice: "", scope_kind: "global", scope_id: "", enrollment_state: "pending", enrolledAt: Date.now() })
     return { installations: [] }
@@ -117,6 +141,11 @@ function route(req, url) {
     const status = url.searchParams.get("status")
     const rows = accounts.filter((a) => (!q || a.primary_email.includes(q) || a.id.includes(q)) && (!status || a.status === status))
     return page(rows, "accounts", rows.length, url)
+  }
+  if (p === "/v1/admin/operators") return page(world.operators, "operators", world.operators.length, url)
+  if (/^\/v1\/admin\/operators\/[^/]+\/sessions$/.test(p)) {
+    const id = p.split("/")[4]
+    return { operator_id: id, email: world.operators.find((o) => o.id === id)?.email ?? "", sessions: world.operatorSessions[id] ?? [] }
   }
   if (p.startsWith("/v1/admin/accounts/")) return accounts.find((a) => a.id === decodeURIComponent(p.split("/").pop())) ?? 404
   if (p === "/v1/admin/teams") return { teams: [{ id: "team_a", owner_account: "usr_001", generation: 2, suspended: false, billing_workspace_id: "bw_t", billing_state: "active" }], total: 1 }
@@ -198,6 +227,12 @@ const fixture = http.createServer((req, res) => {
   req.on("end", () => {
     const json = body ? JSON.parse(body) : {}
     if (url.pathname === "/v1/operator/email") return send(200, { data: { next: "password" } })
+    if (url.pathname === "/v1/operator/setup") {
+      seen.setup = json
+      if (json.token !== "setup-FIXTURE-token" || (json.password ?? "").length < 12) return send(400, { error: { code: "invalid_request", message: "Operator setup was rejected.", request_id: "req_setup" } }, { "request-id": "req_setup" })
+      sessions["tok-new"].pending = true
+      return send(200, { data: { email: json.email, role: "billing", csrf_token: sessions["tok-new"].csrf, mfa: "enroll" } }, { "set-cookie": "pb-operator-session=tok-new; Path=/; HttpOnly; Secure; SameSite=Strict" })
+    }
     if (url.pathname === "/v1/operator/login") {
       const who = json.email === "agent@example.test" ? "tok-support" : "tok-admin"
       if (json.password !== "correct horse battery") return send(401, { error: { code: "invalid_credentials", message: "Operator sign-in failed.", request_id: "req_login_fail" } }, { "request-id": "req_login_fail" })
@@ -232,7 +267,7 @@ const fixture = http.createServer((req, res) => {
       seen.logoutCsrf = req.headers["x-csrf-token"]
       return send(204, {}, { "set-cookie": "pb-operator-session=; Path=/; Max-Age=0" })
     }
-    if (session.role === "support" && ["/v1/admin/audit", "/v1/admin/overview"].includes(url.pathname)) return send(403, { error: { code: "forbidden", message: "This staff role cannot read this resource.", request_id: "req_forbidden" } })
+    if (session.role === "support" && (["/v1/admin/audit", "/v1/admin/overview", "/v1/admin/operators"].includes(url.pathname) || /^\/v1\/admin\/operators\//.test(url.pathname))) return send(403, { error: { code: "forbidden", message: "This staff role cannot read this resource.", request_id: "req_forbidden" } })
     if (req.method !== "GET" && url.pathname.startsWith("/v1/admin/")) {
       const write = { method: req.method, path: url.pathname, target: req.headers["operator-target"], reason: req.headers["operator-reason"], key: req.headers["idempotency-key"], csrf: req.headers["x-csrf-token"], body: json }
       const policy = expectedTarget(req.method, url.pathname, json)
@@ -649,6 +684,67 @@ try {
     expect((await text("[data-failure-group]")).includes("14 occurrences"), "failure group statistics not shown")
     await p.screenshot({ path: `${shots}/support-light.png`, fullPage: true })
   })
+  await step("operators: you are marked and have no buttons on your own row; inviting shows the setup token once and lists the invitation", async () => {
+    await p.goto(`${ORIGIN}/operators`)
+    await waitReady("operators")
+    expect((await text('[data-operator-row="agent@example.test"]')).includes("Reset MFA"), "other operators need actions")
+    expect((await p.locator('[data-operator-row="root@example.test"]').count()) === 0, "your own row has actions (the server refuses them)")
+    expect((await text("main")).includes("You"), "you are not marked")
+    await p.getByRole("button", { name: "Invite an operator" }).click()
+    const d = dialog("Invite an operator")
+    await d.getByLabel("Email").fill("new@example.test")
+    await d.getByLabel("Role").selectOption("billing")
+    await submit(d, "Create invitation")
+    await p.waitForSelector("[data-one-time-secrets]")
+    expect((await text("[data-secret]")) === "setup-FIXTURE-token", "the setup token was not shown")
+    const w = lastWrite()
+    expect(w.path === "/v1/admin/operators" && w.target === "operators" && w.body.email === "new@example.test" && w.body.role === "billing", `invite write ${JSON.stringify(w)}`)
+    await p.getByText("I saved it").click()
+    await p.getByRole("button", { name: "Done" }).click()
+    await p.waitForFunction(() => !document.querySelector("[data-one-time-secrets]") && document.body.textContent.includes("Invited, not set up"))
+    expect(!(await p.content()).includes("setup-FIXTURE-token"), "the setup token stayed on the page")
+    await p.screenshot({ path: `${shots}/operators-light.png`, fullPage: true })
+  })
+  await step("operators: disable and MFA reset need the email typed; enable undoes the disable; sessions can be ended one by one", async () => {
+    const row = p.locator('[data-operator-row="agent@example.test"]')
+    await row.getByRole("button", { name: "Disable", exact: true }).click()
+    const dis = dialog("Disable agent@example.test")
+    await dis.getByLabel("Reference for the audit log").fill("TICKET-50")
+    expect(await dis.getByRole("button", { name: "Disable operator" }).isDisabled(), "disable must need the typed email")
+    await dis.getByLabel(/Type/).fill("agent@example.test")
+    await dis.getByRole("button", { name: "Disable operator" }).click()
+    await p.waitForFunction(() => document.querySelector('[data-operator-row="agent@example.test"]')?.textContent?.includes("Enable"))
+    expect(lastWrite().path === "/v1/admin/operators/operator_agent/disable" && lastWrite().target === "operator_agent", "disable write")
+    await row.getByRole("button", { name: "Enable", exact: true }).click()
+    await submit(dialog("Enable agent@example.test"), "Enable operator")
+    await p.waitForFunction(() => document.querySelector('[data-operator-row="agent@example.test"]')?.textContent?.includes("Disable"))
+    expect(lastWrite().path === "/v1/admin/operators/operator_agent/enable", "enable write")
+    await row.getByRole("button", { name: "Reset MFA" }).click()
+    const reset = dialog("Reset the authenticator of agent@example.test")
+    await reset.getByLabel("Reference for the audit log").fill("TICKET-51")
+    expect(await reset.getByRole("button", { name: "Reset authenticator" }).isDisabled(), "reset must need the typed email")
+    await reset.getByLabel(/Type/).fill("agent@example.test")
+    await reset.getByRole("button", { name: "Reset authenticator" }).click()
+    await p.waitForFunction(() => !document.querySelector('[data-action-dialog="Reset the authenticator of agent@example.test"]'))
+    expect(lastWrite().path === "/v1/admin/operators/operator_agent/mfa-reset" && lastWrite().target === "operator_agent", "reset write")
+    await p.waitForFunction(() => document.querySelector('[data-operator-row="agent@example.test"]')?.textContent?.includes("Sessions (0)"))
+  })
+  await step("operators: a single live session is chosen from the list and ended", async () => {
+    // The fixture's reset above ended the live count; give the operator two sessions again.
+    world.operators.find((o) => o.id === "operator_agent").live_sessions = 2
+    world.operatorSessions.operator_agent = ["a", "b"].map((c) => fixtureSession(c))
+    await p.reload()
+    await waitReady("operators")
+    await p.locator('[data-operator-row="agent@example.test"]').getByRole("button", { name: "Sessions (2)" }).click()
+    const d = dialog("Sessions of agent@example.test")
+    await p.waitForSelector("[data-operator-sessions]")
+    expect((await d.getByLabel("Session", { exact: true }).locator("option").count()) === 3, "all + two sessions expected")
+    await d.getByLabel("Session", { exact: true }).selectOption("b".repeat(64))
+    await submit(d, "End session")
+    await p.waitForFunction(() => document.querySelector('[data-operator-row="agent@example.test"]')?.textContent?.includes("Sessions (1)"))
+    const w = lastWrite()
+    expect(w.path === "/v1/admin/operators/operator_agent/sessions/revoke" && w.body.session_id === "b".repeat(64), `revoke write ${JSON.stringify(w)}`)
+  })
   await step("the relay serves only operator and admin APIs and refuses cross-origin writes", async () => {
     const closed = await p.evaluate(async () => (await fetch("/api/v1/me")).status)
     expect(closed === 404, `/api/v1/me answered ${closed}`)
@@ -695,11 +791,18 @@ try {
   await step("a support-role operator sees only its pages and a refusal says so with a reference", async () => {
     await p.waitForSelector('[data-slot="sidebar-menu"] a')
     const nav = await p.locator('[data-slot="sidebar-menu"] a').allInnerTexts()
-    expect(!nav.some((t) => t.includes("Audit log")) && nav.some((t) => t.includes("Users")), `nav was ${nav.join("|")}`)
+    expect(!nav.some((t) => t.includes("Audit log") || t.includes("Operators")) && nav.some((t) => t.includes("Users")), `nav was ${nav.join("|")}`)
     await p.goto(`${ORIGIN}/audit`)
     await p.waitForSelector("[data-error-block]")
     expect((await text("[data-error-block]")).includes("req_forbidden"), "403 reference missing")
     await p.screenshot({ path: `${shots}/forbidden-light.png`, fullPage: true })
+  })
+  await step("a support-role operator is refused the operators list and its sessions with a reference", async () => {
+    await p.goto(`${ORIGIN}/operators`)
+    await p.waitForSelector("[data-error-block]")
+    expect((await text("[data-error-block]")).includes("req_forbidden"), "403 reference missing")
+    const sessions = await p.evaluate(async () => (await fetch("/api/v1/admin/operators/operator_agent/sessions")).status)
+    expect(sessions === 403, `a support operator read operator sessions: ${sessions}`)
   })
   await step("a support-role operator sees no write buttons", async () => {
     await p.goto(`${ORIGIN}/users/usr_001`)
@@ -711,6 +814,23 @@ try {
     expect((await p.getByRole("button", { name: /Add a product|Edit/ }).count()) === 0, "support sees product writes")
     const refused = await p.evaluate(async () => (await fetch("/api/v1/admin/regions/x/disable", { method: "POST", headers: { "content-type": "application/json", "operator-target": "x", "operator-reason": "ticket-1", "idempotency-key": "key-12345678" }, body: "{}" })).status)
     expect(refused === 403, `a support write answered ${refused}`)
+  })
+  await step("an invited operator is asked for the setup token and a password, a wrong token names its reference, and setup leads to authenticator enrolment", async () => {
+    await p.getByRole("button", { name: "Sign out" }).click()
+    await p.waitForURL(/\/login/)
+    // The email answer never says who has an invitation: the invitee asks for the token step themselves.
+    await p.getByRole("button", { name: "I have a setup token" }).click()
+    await p.waitForSelector('[data-login-step="setup_invited"]')
+    await p.fill("#email", "new@example.test")
+    await p.fill("#token", "wrong-token")
+    await p.fill("#password", "a sufficiently long password")
+    await p.click('button[type="submit"]')
+    await p.waitForSelector("[data-login-error]")
+    expect((await text("[data-login-error]")).includes("req_setup"), "no reference on a wrong token")
+    await p.fill("#token", "setup-FIXTURE-token")
+    await p.click('button[type="submit"]')
+    await p.waitForSelector("[data-mfa-enroll]")
+    expect(seen.setup.token === "setup-FIXTURE-token" && seen.setup.email === "new@example.test", "setup body")
   })
 } catch (error) {
   results.push([false, `check aborted  (${String(error.message ?? error).split("\n")[0]})`])

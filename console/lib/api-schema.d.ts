@@ -5025,6 +5025,130 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/operators": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Operator list
+         * @description Current active operator account and separate operator session required. See docs/runbooks/operator-admin.md. Audited before disclosure; unavailable auditing fails closed. Admin only; operator management never returns passwords, authenticator secrets, recovery codes or stored token hashes.
+         */
+        get: operations["get_v1_admin_operators"];
+        put?: never;
+        /**
+         * Operator create
+         * @description Current active operator account and separate operator session required. See docs/runbooks/operator-admin.md. Mutations require explicit target confirmation, an opaque evidence reference and stable idempotency key. Read current state before retrying an uncertain result. Operator-Target must be `operators`. Creates the operator with no password and returns a single-use setup token (valid 72 hours) once; the receipt never stores it. Inviting an email whose operator has not finished setup issues a fresh token. The invitee sets a password with POST /v1/operator/setup (email, token, password) from the panel's "I have a setup token" step and then enrols an authenticator.
+         */
+        post: operations["post_v1_admin_operators"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/operators/{operator_id}/sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Operator live sessions
+         * @description Current active operator account and separate operator session required. See docs/runbooks/operator-admin.md. Audited before disclosure; unavailable auditing fails closed. Admin only; operator management never returns passwords, authenticator secrets, recovery codes or stored token hashes.
+         */
+        get: operations["get_v1_admin_operator_sessions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/operators/{operator_id}/disable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Operator disable
+         * @description Current active operator account and separate operator session required. See docs/runbooks/operator-admin.md. Mutations require explicit target confirmation, an opaque evidence reference and stable idempotency key. Read current state before retrying an uncertain result. Disables the operator and ends all their sessions at once. Refused for yourself (403) and for the last active admin (409).
+         */
+        post: operations["post_v1_admin_operators_operator_id_disable"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/operators/{operator_id}/enable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Operator enable
+         * @description Current active operator account and separate operator session required. See docs/runbooks/operator-admin.md. Mutations require explicit target confirmation, an opaque evidence reference and stable idempotency key. Read current state before retrying an uncertain result. Re-enables the operator; their old sessions stay ended, they sign in again.
+         */
+        post: operations["post_v1_admin_operators_operator_id_enable"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/operators/{operator_id}/mfa-reset": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Operator MFA reset
+         * @description Current active operator account and separate operator session required. See docs/runbooks/operator-admin.md. Mutations require explicit target confirmation, an opaque evidence reference and stable idempotency key. Read current state before retrying an uncertain result. Deletes the operator's authenticator and recovery codes and ends all their sessions; their next sign-in enrols a new authenticator. Refused for yourself (403).
+         */
+        post: operations["post_v1_admin_operators_operator_id_mfa_reset"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/operators/{operator_id}/sessions/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Operator sessions revoke
+         * @description Current active operator account and separate operator session required. See docs/runbooks/operator-admin.md. Mutations require explicit target confirmation, an opaque evidence reference and stable idempotency key. Read current state before retrying an uncertain result. Body session_id: one id from the sessions list, or `all`. Refused for yourself (403; sign out instead).
+         */
+        post: operations["post_v1_admin_operators_operator_id_sessions_revoke"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/teams/{team_id}/ban": {
         parameters: {
             query?: never;
@@ -5986,7 +6110,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Set first operator password */
+        /** Set an operator password (first operator, or an invited operator with their setup token) */
         post: operations["operator_setup"];
         delete?: never;
         options?: never;
@@ -11669,6 +11793,15 @@ export interface components {
             state: string;
             /** Format: int64 */
             version: number;
+            /** @description operators create: the one-time setup token, returned once. */
+            setup_token?: string;
+            /** Format: date-time */
+            expires_at?: string;
+            /**
+             * Format: int64
+             * @description sessions revoked.
+             */
+            revoked?: number;
         };
         OperatorObservationLayer: {
             states: components["schemas"]["OperatorStateCount"][];
@@ -13631,6 +13764,50 @@ export interface components {
             bytes_in: number;
             /** Format: int64 */
             bytes_out: number;
+        };
+        OperatorStaffInput: {
+            /** @description operators create: the new operator's email. */
+            email?: string;
+            /**
+             * @description operators create: the new operator's role.
+             * @enum {string}
+             */
+            role?: "admin" | "operations" | "billing" | "support";
+            /** @description sessions/revoke: a session id from the sessions list, or `all`. */
+            session_id?: string;
+        };
+        OperatorSummary: {
+            id: string;
+            email: string;
+            role: string;
+            /** @enum {string} */
+            status: "active" | "disabled";
+            mfa_enrolled: boolean;
+            /** @description Has a setup token and no password yet. */
+            invited: boolean;
+            /** Format: int64 */
+            live_sessions: number;
+            /** Format: date-time */
+            created_at: string;
+        };
+        OperatorPage: {
+            operators: components["schemas"]["OperatorSummary"][];
+            next_after?: string;
+            total: number;
+            total_capped?: boolean;
+        };
+        OperatorSession: {
+            id: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            expires_at: string;
+            mfa_pending: boolean;
+        };
+        OperatorSessions: {
+            operator_id: string;
+            email: string;
+            sessions: components["schemas"]["OperatorSession"][];
         };
     };
     responses: {
@@ -25234,6 +25411,510 @@ export interface operations {
             };
         };
     };
+    get_v1_admin_operators: {
+        parameters: {
+            query?: {
+                limit?: number;
+                after?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Audited result. Cache-Control: no-store. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["OperatorPage"];
+                    };
+                };
+            };
+            /** @description Invalid target, body, pagination or confirmation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Browser authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Operator session or capability required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Evidence, provider or audit unavailable; outcome may require checking target state */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    post_v1_admin_operators: {
+        parameters: {
+            query?: never;
+            header: {
+                "Operator-Target": string;
+                "Operator-Reason": string;
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OperatorStaffInput"];
+            };
+        };
+        responses: {
+            /** @description Audited result. Cache-Control: no-store. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["OperatorActionResult"];
+                    };
+                };
+            };
+            /** @description Invalid target, body, pagination or confirmation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Browser authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Operator session or capability required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Stale resource revision or conflicting idempotency request */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Evidence, provider or audit unavailable; outcome may require checking target state */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_v1_admin_operator_sessions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                operator_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Audited result. Cache-Control: no-store. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["OperatorSessions"];
+                    };
+                };
+            };
+            /** @description Invalid target, body, pagination or confirmation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Browser authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Operator session or capability required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Evidence, provider or audit unavailable; outcome may require checking target state */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    post_v1_admin_operators_operator_id_disable: {
+        parameters: {
+            query?: never;
+            header: {
+                "Operator-Target": string;
+                "Operator-Reason": string;
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                operator_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OperatorStaffInput"];
+            };
+        };
+        responses: {
+            /** @description Audited result. Cache-Control: no-store. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["OperatorActionResult"];
+                    };
+                };
+            };
+            /** @description Invalid target, body, pagination or confirmation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Browser authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Operator session or capability required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Stale resource revision or conflicting idempotency request */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Evidence, provider or audit unavailable; outcome may require checking target state */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    post_v1_admin_operators_operator_id_enable: {
+        parameters: {
+            query?: never;
+            header: {
+                "Operator-Target": string;
+                "Operator-Reason": string;
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                operator_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OperatorStaffInput"];
+            };
+        };
+        responses: {
+            /** @description Audited result. Cache-Control: no-store. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["OperatorActionResult"];
+                    };
+                };
+            };
+            /** @description Invalid target, body, pagination or confirmation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Browser authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Operator session or capability required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Stale resource revision or conflicting idempotency request */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Evidence, provider or audit unavailable; outcome may require checking target state */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    post_v1_admin_operators_operator_id_mfa_reset: {
+        parameters: {
+            query?: never;
+            header: {
+                "Operator-Target": string;
+                "Operator-Reason": string;
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                operator_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OperatorStaffInput"];
+            };
+        };
+        responses: {
+            /** @description Audited result. Cache-Control: no-store. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["OperatorActionResult"];
+                    };
+                };
+            };
+            /** @description Invalid target, body, pagination or confirmation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Browser authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Operator session or capability required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Stale resource revision or conflicting idempotency request */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Evidence, provider or audit unavailable; outcome may require checking target state */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    post_v1_admin_operators_operator_id_sessions_revoke: {
+        parameters: {
+            query?: never;
+            header: {
+                "Operator-Target": string;
+                "Operator-Reason": string;
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                operator_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OperatorStaffInput"];
+            };
+        };
+        responses: {
+            /** @description Audited result. Cache-Control: no-store. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["OperatorActionResult"];
+                    };
+                };
+            };
+            /** @description Invalid target, body, pagination or confirmation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Browser authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Operator session or capability required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Stale resource revision or conflicting idempotency request */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Evidence, provider or audit unavailable; outcome may require checking target state */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     post_v1_admin_teams_team_id_ban: {
         parameters: {
             query?: never;
@@ -27625,6 +28306,8 @@ export interface operations {
                     /** Format: email */
                     email: string;
                     password: string;
+                    /** @description The single-use setup token from an admin's invitation. Without it this is the first operator's setup. */
+                    token?: string;
                 };
             };
         };
@@ -27654,6 +28337,13 @@ export interface operations {
             };
             /** @description Invalid credentials */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The first operator is already set up */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

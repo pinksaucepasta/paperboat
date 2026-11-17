@@ -95,6 +95,13 @@ var operatorPolicies = map[string]operatorPolicy{
 	"POST /v1/admin/tunnels/{tunnel_id}/enable":                                     {"operations", "tunnel_id", ""},
 	"POST /v1/admin/publications/{hostname}/block":                                  {"operations", "hostname", ""},
 	"POST /v1/admin/publications/{hostname}/unblock":                                {"operations", "hostname", ""},
+	"GET /v1/admin/operators":                                                       {"admin", "", "operators"},
+	"POST /v1/admin/operators":                                                      {"admin", "", "operators"},
+	"GET /v1/admin/operators/{operator_id}/sessions":                                {"admin", "operator_id", ""},
+	"POST /v1/admin/operators/{operator_id}/disable":                                {"admin", "operator_id", ""},
+	"POST /v1/admin/operators/{operator_id}/enable":                                 {"admin", "operator_id", ""},
+	"POST /v1/admin/operators/{operator_id}/mfa-reset":                              {"admin", "operator_id", ""},
+	"POST /v1/admin/operators/{operator_id}/sessions/revoke":                        {"admin", "operator_id", ""},
 	"GET /v1/admin/abuse-reports":                                                   {"operations", "", "abuse-reports"},
 	"GET /v1/admin/accounts/{account_id}":                                           {"support", "account_id", ""},
 	"GET /v1/admin/teams/{team_id}":                                                 {"support", "team_id", ""},
@@ -299,6 +306,8 @@ func registerOperatorRoutes(mux *http.ServeMux, opts Options) {
 		{"GET /v1/admin/tunnels/{tunnel_id}/status", "tunnel_status", "tunnel_id"},
 		{"GET /v1/admin/overview", "overview", ""},
 		{"GET /v1/admin/accounts", "accounts", ""},
+		{"GET /v1/admin/operators", "operators", ""},
+		{"GET /v1/admin/operators/{operator_id}/sessions", "operator_sessions", "operator_id"},
 		{"GET /v1/admin/teams", "teams", ""},
 		{"GET /v1/admin/machines", "machines", ""},
 		{"GET /v1/admin/machines/{machine_id}", "machine", "machine_id"},
@@ -414,6 +423,11 @@ func registerOperatorMutations(mux *http.ServeMux, opts Options) {
 			{"POST /v1/admin/tunnels/{tunnel_id}/enable", "tunnel_enable", "tunnel_id"},
 			{"POST /v1/admin/publications/{hostname}/block", "publication_block", "hostname"},
 			{"POST /v1/admin/publications/{hostname}/unblock", "publication_unblock", "hostname"},
+			{"POST /v1/admin/operators", "operator_create", ""},
+			{"POST /v1/admin/operators/{operator_id}/disable", "operator_disable", "operator_id"},
+			{"POST /v1/admin/operators/{operator_id}/enable", "operator_enable", "operator_id"},
+			{"POST /v1/admin/operators/{operator_id}/mfa-reset", "operator_mfa_reset", "operator_id"},
+			{"POST /v1/admin/operators/{operator_id}/sessions/revoke", "operator_sessions_revoke", "operator_id"},
 		} {
 			mux.Handle(route.pattern, operatorRoute(opts, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				var input operatoractions.Input
@@ -421,7 +435,11 @@ func registerOperatorMutations(mux *http.ServeMux, opts Options) {
 					return
 				}
 				p, _ := principalFromContext(r.Context())
-				result, err := opts.OperatorActions.Execute(r.Context(), p.User.ID, r.Header.Get("Idempotency-Key"), route.kind, r.PathValue(route.param), r.Header.Get("Operator-Reason"), input)
+				target := r.PathValue(route.param)
+				if route.param == "" {
+					target = r.Header.Get("Operator-Target") // a fixed-target route: the guard checked it against the policy
+				}
+				result, err := opts.OperatorActions.Execute(r.Context(), p.User.ID, r.Header.Get("Idempotency-Key"), route.kind, target, r.Header.Get("Operator-Reason"), input)
 				if operatorMutationError(w, r, err) {
 					return
 				}

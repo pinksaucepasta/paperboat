@@ -9,6 +9,7 @@ import {
   LifebuoyIcon,
   BugIcon,
   UserIcon,
+  UserGearIcon,
   UsersThreeIcon,
 } from "@phosphor-icons/react/dist/ssr"
 import type { Icon } from "@phosphor-icons/react/lib"
@@ -30,6 +31,7 @@ export const sections: Section[] = [
   { href: "/infrastructure", title: "Relays & edges", icon: HardDrivesIcon, roles: ["admin", "operations"] },
   { href: "/billing", title: "Billing & plans", icon: CreditCardIcon, roles: ["admin", "support", "billing"] },
   { href: "/releases", title: "Releases", icon: RocketLaunchIcon, roles: ["admin"] },
+  { href: "/operators", title: "Operators", icon: UserGearIcon, roles: ["admin"] },
   { href: "/audit", title: "Audit log", icon: ClockCounterClockwiseIcon, roles: ["admin"] },
 ]
 

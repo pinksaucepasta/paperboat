@@ -28,7 +28,7 @@ Send that cookie and `X-CSRF-Token` for mutating `/v1/admin` requests.
 `GET /v1/operator/me` checks the operator session; `POST /v1/operator/logout`
 revokes it. Operator sessions last eight hours. Five failed passwords (or
 second-factor codes, together) lock an account for fifteen minutes and end its
-pending sessions. The current backend has no API to add additional operators.
+pending sessions.
 
 ### Second factor (required)
 
@@ -55,6 +55,29 @@ prior art: Teleport `lib/auth/password.go` checkOTP and its used-token store).
   (`DELETE FROM paperboat.operator_totp WHERE operator_id = '…'`); the next
   password sign-in enrols a new authenticator. Do this only after confirming the
   person out of band.
+
+### Managing operators (admin only)
+
+The panel's Operators page (and these routes) let an admin run the staff list. Every write is audited
+(`operator.operator_*` receipts plus the `operator.request` trail) and needs the usual `Operator-Target`,
+`Operator-Reason` and `Idempotency-Key` headers.
+
+- `GET /v1/admin/operators` lists operators with role, status, whether an authenticator is enrolled, whether
+  setup is still pending and how many sessions are live. `GET /v1/admin/operators/{id}/sessions` lists one
+  operator's live sessions.
+- `POST /v1/admin/operators` (target `operators`, body `{"email","role"}`) creates an operator with no
+  password and returns a single-use setup token valid for 72 hours, **once**. Give it to the person out of
+  band. They choose "I have a setup token" on the panel's sign-in page (the email step never reveals who has
+  an invitation), enter their email, the token and a password (`POST /v1/operator/setup` with `token`),
+  then enrol an authenticator. The receipt does not keep the token: if it is lost, invite the same email again
+  with a new Idempotency-Key and a fresh token replaces the old one.
+- `POST /v1/admin/operators/{id}/disable` ends all the operator's sessions at once and blocks every sign-in;
+  `…/enable` allows sign-in again (old sessions stay ended). You cannot disable yourself or the last active admin.
+- `POST /v1/admin/operators/{id}/mfa-reset` deletes the operator's authenticator and recovery codes, clears any lockout and ends
+  their sessions; their next password sign-in enrols a new authenticator. Use it only after confirming the
+  person out of band. You cannot reset your own.
+- `POST /v1/admin/operators/{id}/sessions/revoke` with `{"session_id":"<id from the list>"}` or `"all"`.
+  You cannot revoke your own (sign out).
 
 ## Reads and status
 

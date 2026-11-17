@@ -16,7 +16,7 @@ function safeReturn(value: string | null): string {
   return value && value.startsWith("/") && !value.startsWith("//") && !/[\\\s]/.test(value) && !value.startsWith("/login") ? value : "/"
 }
 
-type Step = "email" | "password" | "setup_password" | "verify" | "enroll" | "codes"
+type Step = "email" | "password" | "setup_password" | "setup_invited" | "verify" | "enroll" | "codes"
 type Enrollment = { secret: string; otpauth_uri: string }
 
 /**
@@ -30,6 +30,7 @@ export function LoginForm() {
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [code, setCode] = useState("")
+  const [token, setToken] = useState("")
   const [enrollment, setEnrollment] = useState<Enrollment>()
   const [qr, setQr] = useState<string>()
   const [recovery, setRecovery] = useState<string[]>([])
@@ -68,10 +69,14 @@ export function LoginForm() {
     try {
       if (step === "email") {
         const answer = await post<{ next: "password" | "setup_password" }>("/v1/operator/email", { email })
-        setStep(answer.next === "setup_password" ? "setup_password" : "password")
-      } else if (step === "password" || step === "setup_password") {
-        const session = await post<{ mfa: MfaState }>(step === "password" ? "/v1/operator/login" : "/v1/operator/setup", { email, password })
+        setStep(answer.next)
+      } else if (step === "password" || step === "setup_password" || step === "setup_invited") {
+        const session = await post<{ mfa: MfaState }>(
+          step === "password" ? "/v1/operator/login" : "/v1/operator/setup",
+          step === "setup_invited" ? { email, token: token.trim(), password } : { email, password },
+        )
         setPassword("")
+        setToken("")
         await startMfa(session.mfa)
       } else if (step === "verify") {
         await post("/v1/operator/mfa/verify", { code })
@@ -91,7 +96,8 @@ export function LoginForm() {
     }
   }
 
-  const credentials = step === "email" || step === "password" || step === "setup_password"
+  const choosing = step === "setup_password" || step === "setup_invited"
+  const credentials = step === "email" || step === "password" || choosing
   return (
     <form onSubmit={submit} className="flex w-full max-w-sm flex-col gap-4" data-login-step={step}>
       <div className="flex items-center gap-2">
@@ -101,19 +107,25 @@ export function LoginForm() {
       {credentials && (
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="email">Email</Label>
-          <Input id="email" type="email" autoComplete="username" required value={email} disabled={step !== "email" || busy} onChange={(e) => setEmail(e.target.value)} />
+          <Input id="email" type="email" autoComplete="username" required value={email} disabled={(step !== "email" && step !== "setup_invited") || busy} onChange={(e) => setEmail(e.target.value)} />
         </div>
       )}
-      {(step === "password" || step === "setup_password") && (
+      {step === "setup_invited" && (
         <div className="flex flex-col gap-1.5">
-          <Label htmlFor="password">{step === "setup_password" ? "Choose a password (12 or more characters)" : "Password"}</Label>
+          <Label htmlFor="token">Setup token from your admin</Label>
+          <Input id="token" autoComplete="off" required autoFocus value={token} onChange={(e) => setToken(e.target.value)} />
+        </div>
+      )}
+      {(step === "password" || choosing) && (
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="password">{choosing ? "Choose a password (12 or more characters)" : "Password"}</Label>
           <Input
             id="password"
             type="password"
-            autoComplete={step === "setup_password" ? "new-password" : "current-password"}
+            autoComplete={choosing ? "new-password" : "current-password"}
             required
-            minLength={step === "setup_password" ? 12 : undefined}
-            autoFocus
+            minLength={choosing ? 12 : undefined}
+            autoFocus={step !== "setup_invited"}
             value={password}
             onChange={(e) => setPassword(e.target.value)}
           />
@@ -142,8 +154,13 @@ export function LoginForm() {
           {error instanceof ApiError && error.reference && <CopyReference reference={error.reference} />}
         </div>
       )}
+      {(step === "email" || step === "setup_invited") && (
+        <Button type="button" variant="link" size="sm" className="self-start px-0" onClick={() => setStep(step === "email" ? "setup_invited" : "email")}>
+          {step === "email" ? "I have a setup token" : "Back to sign-in"}
+        </Button>
+      )}
       <Button type="submit" disabled={busy}>
-        {step === "email" ? "Continue" : step === "setup_password" ? "Set password and continue" : step === "password" ? "Continue" : step === "codes" ? "I saved them, open the panel" : step === "enroll" ? "Confirm and finish" : "Sign in"}
+        {step === "email" ? "Continue" : choosing ? "Set password and continue" : step === "password" ? "Continue" : step === "codes" ? "I saved them, open the panel" : step === "enroll" ? "Confirm and finish" : "Sign in"}
       </Button>
     </form>
   )

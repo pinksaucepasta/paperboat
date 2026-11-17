@@ -40,18 +40,25 @@ func operatorOriginAllowed(r *http.Request, opts Options) bool {
 	return slices.Contains(opts.Config.HTTP.TrustedBrowserOrigins(), origin)
 }
 func operatorCredentialRequest(w http.ResponseWriter, r *http.Request) (string, string, bool) {
+	email, password, _, ok := operatorSetupRequest(w, r, false)
+	return email, password, ok
+}
+
+// operatorSetupRequest also reads the invitation token, which only the setup route accepts.
+func operatorSetupRequest(w http.ResponseWriter, r *http.Request, withToken bool) (email, password, token string, ok bool) {
 	var body struct {
 		Email    string `json:"email"`
 		Password string `json:"password"`
+		Token    string `json:"token"`
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, 2048)
 	decoder := json.NewDecoder(r.Body)
 	decoder.DisallowUnknownFields()
-	if decoder.Decode(&body) != nil || strings.TrimSpace(body.Email) == "" {
+	if decoder.Decode(&body) != nil || strings.TrimSpace(body.Email) == "" || (body.Token != "" && !withToken) {
 		writeError(w, r, 400, "invalid_request", "Valid email and password are required.")
-		return "", "", false
+		return "", "", "", false
 	}
-	return body.Email, body.Password, true
+	return body.Email, body.Password, body.Token, true
 }
 func registerOperatorAuthentication(mux *http.ServeMux, opts Options) {
 	service := opts.OperatorAuth
@@ -91,11 +98,18 @@ func registerOperatorAuthentication(mux *http.ServeMux, opts Options) {
 			writeError(w, r, 403, "origin_failed", "Origin is not allowed.")
 			return
 		}
-		email, password, ok := operatorCredentialRequest(w, r)
+		email, password, token, ok := operatorSetupRequest(w, r, true)
 		if !ok {
 			return
 		}
-		session, err := service.Setup(r.Context(), email, password)
+		// With a token this is an invited operator choosing a password; without, the first operator's setup.
+		var session operatorauth.Session
+		var err error
+		if token != "" {
+			session, err = service.SetupInvited(r.Context(), email, token, password)
+		} else {
+			session, err = service.Setup(r.Context(), email, password)
+		}
 		if expectedHTTPErrorOnly(err, operatorauth.ErrBootstrapConsumed) {
 			writeError(w, r, 409, "setup_complete", "The first operator is already set up.")
 			return

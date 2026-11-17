@@ -11,6 +11,7 @@ import (
 	"reflect"
 
 	"strings"
+	"time"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/audit"
 	"github.com/pinksaucepasta/paperboat/server/internal/config"
@@ -30,11 +31,20 @@ type Input struct {
 	Revision int64 `json:"revision"`
 	// Legal marks a publication_block as a legal takedown: the edge answers 451 instead of 403.
 	Legal bool `json:"legal,omitempty"`
+	// Operator management: operator_create takes Email and Role, operator_sessions_revoke a SessionID (or "all").
+	Email     string `json:"email,omitempty"`
+	Role      string `json:"role,omitempty"`
+	SessionID string `json:"session_id,omitempty"`
 }
 type Result struct {
 	ResourceID string `json:"resource_id"`
 	State      string `json:"state"`
 	Version    int64  `json:"version"`
+	// SetupToken is the operator invitation's one-time token. It is returned once and never stored in the receipt,
+	// so an exact replay returns the result without it: invite again (new key) to issue a fresh token.
+	SetupToken string     `json:"setup_token,omitempty"`
+	ExpiresAt  *time.Time `json:"expires_at,omitempty"`
+	Revoked    int64      `json:"revoked,omitempty"`
 }
 type Service struct {
 	store       *db.DB
@@ -53,7 +63,7 @@ func (s *Service) ConfigureMail(policy config.TransactionalMail, enabled bool) {
 
 func (s *Service) Execute(ctx context.Context, actorID, key, kind, target, reason string, input Input) (Result, error) {
 	actorID, key, kind, target, reason = strings.TrimSpace(actorID), strings.TrimSpace(key), strings.TrimSpace(kind), strings.TrimSpace(target), strings.TrimSpace(reason)
-	if s == nil || s.store == nil || actorID == "" || len(key) < 8 || len(key) > 256 || target == "" || len(target) > 256 || reason == "" || len(reason) > 512 || input.Revision < 1 || !validKind(kind) {
+	if s == nil || s.store == nil || actorID == "" || len(key) < 8 || len(key) > 256 || target == "" || len(target) > 256 || reason == "" || len(reason) > 512 || !validKind(kind) || !inputFits(kind, input) {
 		return Result{}, ErrInvalid
 	}
 	request, _ := json.Marshal(struct {
@@ -103,6 +113,10 @@ func (s *Service) Execute(ctx context.Context, actorID, key, kind, target, reaso
 				state = "suspended"
 			}
 			result = Result{ResourceID: target, State: state, Version: generation}
+		case "operator_create", "operator_disable", "operator_enable", "operator_mfa_reset", "operator_sessions_revoke":
+			if err = staffAction(ctx, tx, actorID, kind, target, input, &result); err != nil {
+				return err
+			}
 		case "relay_drain", "relay_resume":
 			if err = relayAction(ctx, tx, target, kind == "relay_drain", input.Revision, &result); err != nil {
 				return err
@@ -122,11 +136,13 @@ func (s *Service) Execute(ctx context.Context, actorID, key, kind, target, reaso
 			}
 			result = Result{ResourceID: record.Tunnel.ID, State: record.Tunnel.DesiredState, Version: record.Tunnel.Generation}
 		}
-		raw, _ = json.Marshal(result)
+		receipt := result
+		receipt.SetupToken = ""
+		raw, _ = json.Marshal(receipt)
 		if _, err = tx.Exec(ctx, `INSERT INTO operator_actions(actor_user_id,idempotency_key,kind,target,request_hash,result) VALUES($1,$2,$3,$4,$5,$6)`, actorID, key, kind, target, hash[:], raw); err != nil {
 			return err
 		}
-		return s.audit.WriteTx(ctx, tx, audit.Event{ActorUserID: actorID, ActorType: audit.ActorAdmin, EventType: "operator." + kind, ResourceType: resourceType(kind), ResourceID: target, IdempotencyKey: key, Metadata: map[string]any{"reason": reason, "state": result.State, "version": result.Version}})
+		return s.audit.WriteTx(ctx, tx, audit.Event{ActorUserID: actorID, ActorType: audit.ActorAdmin, EventType: "operator." + kind, ResourceType: resourceType(kind), ResourceID: auditResource(kind, target, result), IdempotencyKey: key, Metadata: map[string]any{"reason": reason, "state": result.State, "version": result.Version}})
 	})
 	return result, err
 }
@@ -292,18 +308,24 @@ func relayAction(ctx context.Context, tx *db.Tx, target string, drain bool, revi
 
 func validKind(v string) bool {
 	switch v {
-	case "account_ban", "account_unban", "team_ban", "team_unban", "relay_drain", "relay_resume", "tunnel_disable", "tunnel_enable", "publication_block", "publication_unblock":
+	case "account_ban", "account_unban", "team_ban", "team_unban", "relay_drain", "relay_resume", "tunnel_disable", "tunnel_enable", "publication_block", "publication_unblock", "operator_create", "operator_disable", "operator_enable", "operator_mfa_reset", "operator_sessions_revoke":
 		return true
 	}
 	return false
 }
 func allowed(role, kind string) bool {
+	if isStaffKind(kind) {
+		return role == "admin"
+	}
 	if kind == "account_ban" || kind == "account_unban" || kind == "team_ban" || kind == "team_unban" {
 		return role == "admin"
 	}
 	return role == "admin" || role == "operations"
 }
 func resourceType(kind string) string {
+	if isStaffKind(kind) {
+		return "operator_account"
+	}
 	if strings.HasPrefix(kind, "publication_") {
 		return "publication"
 	}

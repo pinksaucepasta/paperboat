@@ -268,3 +268,17 @@ func TestReadUsesCurrentDatabaseRoleAndAuditsAvailability(t *testing.T) {
 		t.Fatalf("forged role err=%v", err)
 	}
 }
+
+// Operator management reads are for admins only: every other role is refused them by kind, before any query.
+func TestOperatorManagementReadsAreAdminOnly(t *testing.T) {
+	for _, kind := range []string{"operators", "operator_sessions"} {
+		if !validKind(kind) || !allowed("admin", kind) {
+			t.Fatalf("admin cannot read %s", kind)
+		}
+		for _, role := range []string{"support", "billing", "operations", "user"} {
+			if allowed(auth.Role(role), kind) {
+				t.Fatalf("%s can read %s", role, kind)
+			}
+		}
+	}
+}

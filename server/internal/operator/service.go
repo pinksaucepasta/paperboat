@@ -287,11 +287,11 @@ func allowed(role auth.Role, kind string) bool {
 }
 
 func validKind(kind string) bool {
-	return kind == "account" || kind == "team" || kind == "billing" || kind == "infrastructure" || kind == "control_operation" || kind == "billing_operation" || kind == "audit" || kind == "accounts" || kind == "teams" || kind == "workspaces" || kind == "billing_operations" || kind == "control_operations" || kind == "overview" || kind == "tunnel_status" || kind == "audit_events" || kind == "machines" || kind == "machine" || kind == "capacity"
+	return kind == "account" || kind == "team" || kind == "billing" || kind == "infrastructure" || kind == "control_operation" || kind == "billing_operation" || kind == "audit" || kind == "accounts" || kind == "teams" || kind == "workspaces" || kind == "billing_operations" || kind == "control_operations" || kind == "overview" || kind == "tunnel_status" || kind == "audit_events" || kind == "machines" || kind == "machine" || kind == "capacity" || kind == "operators" || kind == "operator_sessions"
 }
 
 func pageKind(kind string) bool {
-	return kind == "infrastructure" || kind == "audit" || kind == "accounts" || kind == "teams" || kind == "workspaces" || kind == "billing_operations" || kind == "control_operations" || kind == "audit_events" || kind == "machines" || kind == "capacity"
+	return kind == "infrastructure" || kind == "audit" || kind == "accounts" || kind == "teams" || kind == "workspaces" || kind == "billing_operations" || kind == "control_operations" || kind == "audit_events" || kind == "machines" || kind == "capacity" || kind == "operators"
 }
 
 func safeID(v string) bool {
@@ -358,6 +358,10 @@ func (s *Service) readTx(ctx context.Context, tx *db.Tx, kind, target, after str
 		return s.readOverview(ctx, tx, target)
 	case "capacity":
 		return s.readCapacity(ctx, tx)
+	case "operators":
+		return readOperators(ctx, tx, after, limit)
+	case "operator_sessions":
+		return readOperatorSessions(ctx, tx, target)
 	case "tunnel_status":
 		return readTunnelStatus(ctx, tx, target)
 	default:

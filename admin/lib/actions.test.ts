@@ -66,6 +66,11 @@ test("only administrators see the release pages", () => {
   expect([has("admin"), has("support"), has("billing"), has("operations")]).toEqual([true, false, false, false])
 })
 
+test("only administrators see the operators page", () => {
+  const has = (role: "admin" | "support" | "billing" | "operations") => sectionsFor(role).some((s) => s.href === "/operators")
+  expect([has("admin"), has("support"), has("billing"), has("operations")]).toEqual([true, false, false, false])
+})
+
 test("a generated usage key pair: the public key is 32 bytes and the seed signs for it", async () => {
   const pair = await generateUsageKeyPair()
   if (!pair) return // a runtime without Ed25519 in WebCrypto: the panel then asks for a pasted key
