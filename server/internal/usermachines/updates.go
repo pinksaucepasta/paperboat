@@ -17,6 +17,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
 	"github.com/pinksaucepasta/paperboat/server/internal/releases"
 	"github.com/pinksaucepasta/paperboat/server/internal/teams"
+	"github.com/pinksaucepasta/paperboat/shared/updateobservation"
 )
 
 const (
@@ -45,20 +46,7 @@ var (
 // UpdateObservation is the machine-authenticated status of the local update
 // supervisor. The machine proof authenticates the sender; ordering fields
 // fence late packets from replacing newer state.
-type UpdateObservation struct {
-	Schema                 string    `json:"schema"`
-	State                  string    `json:"state"`
-	CurrentVersion         string    `json:"current_version"`
-	TargetVersion          string    `json:"target_version,omitempty"`
-	Channel                string    `json:"channel"`
-	OperationID            string    `json:"operation_id"`
-	InstallationGeneration uint64    `json:"installation_generation"`
-	WorkerGeneration       uint64    `json:"worker_generation"`
-	OSBootID               string    `json:"os_boot_id"`
-	RollbackCount          uint64    `json:"rollback_count"`
-	ErrorCode              string    `json:"error_code,omitempty"`
-	ObservedAt             time.Time `json:"observed_at"`
-}
+type UpdateObservation = updateobservation.Observation
 
 // MaintenanceApproval is an explicit account-owner decision for a potentially
 // disruptive maintenance action. Approval is scoped to one machine and one
@@ -104,7 +92,8 @@ type FleetUpdateSummary struct {
 	} `json:"pagination"`
 }
 
-func (o UpdateObservation) Validate(now time.Time) error {
+// ValidateUpdateObservation checks a reported observation; now, when set, also bounds ObservedAt.
+func ValidateUpdateObservation(o UpdateObservation, now time.Time) error {
 	validStates := map[string]bool{
 		"idle": true, "checking": true, "downloading": true, "staged": true,
 		"activating": true, "deferred": true, "healthy": true, "failed": true,
@@ -131,7 +120,7 @@ func (o UpdateObservation) Validate(now time.Time) error {
 
 func (s *Service) RecordUpdateObservation(ctx context.Context, environmentID, userMachineID string, observation UpdateObservation) error {
 	environmentID, userMachineID = strings.TrimSpace(environmentID), strings.TrimSpace(userMachineID)
-	if environmentID == "" || userMachineID == "" || observation.Validate(s.now().UTC()) != nil {
+	if environmentID == "" || userMachineID == "" || ValidateUpdateObservation(observation, s.now().UTC()) != nil {
 		return ErrUpdateObservationInvalid
 	}
 	payloadHash := hashUpdateObservation(observation)

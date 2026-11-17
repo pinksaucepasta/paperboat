@@ -291,7 +291,7 @@ func runtimeObservation(repo runtimeObservationRepository, identities runtimeIde
 		}
 		updateRecorded := false
 		if req.Update != nil {
-			if req.Update.Validate(time.Now().UTC()) != nil {
+			if usermachines.ValidateUpdateObservation(*req.Update, time.Now().UTC()) != nil {
 				auxiliaryRejections = append(auxiliaryRejections, runtimeAuxiliaryRejection{Observation: "update", Code: "update_observation_invalid"})
 			} else if updates == nil {
 				auxiliaryRejections = append(auxiliaryRejections, runtimeAuxiliaryRejection{Observation: "update", Code: "update_observation_unavailable"})

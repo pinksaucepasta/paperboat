@@ -18,7 +18,7 @@ func validUpdateObservation() UpdateObservation {
 
 func TestUpdateObservationValidationFencesUnsafeState(t *testing.T) {
 	observation := validUpdateObservation()
-	if err := observation.Validate(observation.ObservedAt); err != nil {
+	if err := ValidateUpdateObservation(observation, observation.ObservedAt); err != nil {
 		t.Fatalf("valid observation rejected: %v", err)
 	}
 	for name, mutate := range map[string]func(*UpdateObservation){
@@ -31,7 +31,7 @@ func TestUpdateObservationValidationFencesUnsafeState(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			candidate := observation
 			mutate(&candidate)
-			if err := candidate.Validate(observation.ObservedAt); !errors.Is(err, ErrUpdateObservationInvalid) {
+			if err := ValidateUpdateObservation(candidate, observation.ObservedAt); !errors.Is(err, ErrUpdateObservationInvalid) {
 				t.Fatalf("validation error = %v", err)
 			}
 		})

@@ -32,6 +32,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/shared/backoff"
 	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 	"github.com/pinksaucepasta/paperboat/shared/supportref"
+	"github.com/pinksaucepasta/paperboat/shared/updateobservation"
 )
 
 type runtimeObservationService struct {
@@ -548,20 +549,7 @@ func (s *runtimeObservationSender) lazyRuntimeObservation() *lazyRuntimeObservat
 	return &lazyRuntimeObservation{Schema: "paperboat.lazy-runtime/v1", BootID: s.lazyBootID, InstallationGeneration: s.installationGeneration, StartedAt: s.startedOnServerClock()}
 }
 
-type runtimeUpdateObservation struct {
-	Schema                 string    `json:"schema"`
-	State                  string    `json:"state"`
-	CurrentVersion         string    `json:"current_version"`
-	TargetVersion          string    `json:"target_version,omitempty"`
-	Channel                string    `json:"channel"`
-	OperationID            string    `json:"operation_id"`
-	InstallationGeneration uint64    `json:"installation_generation"`
-	WorkerGeneration       uint64    `json:"worker_generation"`
-	OSBootID               string    `json:"os_boot_id"`
-	RollbackCount          uint64    `json:"rollback_count"`
-	ErrorCode              string    `json:"error_code,omitempty"`
-	ObservedAt             time.Time `json:"observed_at"`
-}
+type runtimeUpdateObservation = updateobservation.Observation
 
 func (s *runtimeObservationSender) updateObservation(now time.Time, availabilityState *availability.Observation) *runtimeUpdateObservation {
 	return s.updateObservationFrom(now, availabilityState, nil, nil)
