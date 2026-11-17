@@ -39,7 +39,7 @@ func TestNativeRelayLifecycleRevokesConnectedCarrier(t *testing.T) {
 	subjectGeneration := uint64(1)
 	api := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer "+credential {
-			http.Error(w, "denied", 401)
+			http.Error(w, "denied", http.StatusUnauthorized)
 			return
 		}
 		var in struct {
@@ -269,7 +269,7 @@ func TestNativeRelayStartupStateRetryAndExclusiveOwner(t *testing.T) {
 		calls++
 		if calls == 1 {
 			epoch = in.Epoch
-			http.Error(w, "lost response", 503)
+			http.Error(w, "lost response", http.StatusServiceUnavailable)
 			return
 		}
 		if in.Epoch != epoch {
@@ -296,7 +296,7 @@ func TestNativeRelayStartupStateRetryAndExclusiveOwner(t *testing.T) {
 }
 
 func TestNativeRelayControlRejectionFailsImmediately(t *testing.T) {
-	api := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.Error(w, "fenced", 409) }))
+	api := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.Error(w, "fenced", http.StatusConflict) }))
 	defer api.Close()
 	c, err := New(Config{URL: api.URL, HTTP: api.Client(), Credential: strings.Repeat("test", 16), NodeID: "relay", ExpectedGeneration: 1, StatePath: filepath.Join(t.TempDir(), "state")})
 	if err != nil {
@@ -326,11 +326,11 @@ func TestControlFailurePreservesCauseStatusAndRecovery(t *testing.T) {
 			t.Error("request reference lost")
 		}
 		if calls == 1 {
-			http.Error(w, "PRIVATE_RESPONSE", 503)
+			http.Error(w, "PRIVATE_RESPONSE", http.StatusServiceUnavailable)
 			return
 		}
 		if calls == 2 {
-			http.Error(w, "PRIVATE_RESPONSE", 409)
+			http.Error(w, "PRIVATE_RESPONSE", http.StatusConflict)
 			return
 		}
 		_ = json.NewEncoder(w).Encode(Lease{NodeID: "relay", Generation: 2, ProcessEpoch: "epoch", ExpiresAt: time.Now().Add(10 * time.Second).Unix(), CapacityLimit: 8})

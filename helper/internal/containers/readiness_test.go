@@ -27,7 +27,7 @@ func TestNodeReadinessRejectsRedirectOtherIdentityAndOversizedResponse(t *testin
 					return
 				}
 				if scenario == "redirect" {
-					http.Redirect(w, r, destination.URL, 302)
+					http.Redirect(w, r, destination.URL, http.StatusFound)
 					return
 				}
 				id := "expected_node"

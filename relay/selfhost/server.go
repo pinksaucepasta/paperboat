@@ -42,7 +42,7 @@ func Handler(dir string, onClaim func(), observe func(context.Context, string, e
 			if observe != nil {
 				observe(r.Context(), "selfhost_claim", err)
 			}
-			http.Error(w, "installation busy; retry", 503)
+			http.Error(w, "installation busy; retry", http.StatusServiceUnavailable)
 			return
 		}
 		defer lock.Close()
@@ -51,7 +51,7 @@ func Handler(dir string, onClaim func(), observe func(context.Context, string, e
 			if observe != nil {
 				observe(r.Context(), "selfhost_claim", err)
 			}
-			http.Error(w, "installation state unavailable", 503)
+			http.Error(w, "installation state unavailable", http.StatusServiceUnavailable)
 			return
 		}
 		if !authorized(r, s) {
@@ -68,7 +68,7 @@ func Handler(dir string, onClaim func(), observe func(context.Context, string, e
 			if observe != nil {
 				observe(r.Context(), "selfhost_claim", err)
 			}
-			http.Error(w, "installation identity unavailable", 503)
+			http.Error(w, "installation identity unavailable", http.StatusServiceUnavailable)
 			return
 		}
 		out := Inspection{Version: 1, Nonce: req.Nonce, InstallationKey: encoding.EncodeToString(key.Public().(ed25519.PublicKey)), Name: s.Config.Name, EndpointHost: s.Config.EndpointHost, ExpiresAt: s.ExpiresAt, Components: append([]Component(nil), s.Config.Components...)}
@@ -77,7 +77,7 @@ func Handler(dir string, onClaim func(), observe func(context.Context, string, e
 			if observe != nil {
 				observe(r.Context(), "selfhost_claim", err)
 			}
-			http.Error(w, "installation certificate unavailable", 503)
+			http.Error(w, "installation certificate unavailable", http.StatusServiceUnavailable)
 			return
 		}
 		out.InfrastructureTLSCertificate = string(certPEM)
@@ -85,7 +85,7 @@ func Handler(dir string, onClaim func(), observe func(context.Context, string, e
 		if s.UsagePrivateKey != "" {
 			usage, e := encoding.DecodeString(s.UsagePrivateKey)
 			if e != nil || len(usage) != ed25519.PrivateKeySize {
-				http.Error(w, "usage identity unavailable", 503)
+				http.Error(w, "usage identity unavailable", http.StatusServiceUnavailable)
 				return
 			}
 			for i := range out.Components {
@@ -111,7 +111,7 @@ func Handler(dir string, onClaim func(), observe func(context.Context, string, e
 			if observe != nil {
 				observe(r.Context(), "selfhost_claim", err)
 			}
-			http.Error(w, "installation busy; retry", 503)
+			http.Error(w, "installation busy; retry", http.StatusServiceUnavailable)
 			return
 		}
 		defer lock.Close()
@@ -120,11 +120,11 @@ func Handler(dir string, onClaim func(), observe func(context.Context, string, e
 			if observe != nil {
 				observe(r.Context(), "selfhost_claim", err)
 			}
-			http.Error(w, "installation state unavailable", 503)
+			http.Error(w, "installation state unavailable", http.StatusServiceUnavailable)
 			return
 		}
 		if !authorized(r, s) {
-			http.Error(w, "code invalid", 401)
+			http.Error(w, "code invalid", http.StatusUnauthorized)
 			return
 		}
 		req.ControlURL = strings.TrimRight(req.ControlURL, "/")
@@ -135,7 +135,7 @@ func Handler(dir string, onClaim func(), observe func(context.Context, string, e
 		sum := sha256.Sum256(b)
 		hash := encoding.EncodeToString(sum[:])
 		if s.Claim != nil && s.ClaimHash != hash {
-			http.Error(w, "code has already been claimed", 409)
+			http.Error(w, "code has already been claimed", http.StatusConflict)
 			return
 		}
 		if s.Claim == nil && time.Now().Unix() >= s.ExpiresAt {
@@ -160,7 +160,7 @@ func Handler(dir string, onClaim func(), observe func(context.Context, string, e
 				if observe != nil {
 					observe(r.Context(), "selfhost_claim", err)
 				}
-				http.Error(w, "could not persist claim; retry same claim", 503)
+				http.Error(w, "could not persist claim; retry same claim", http.StatusServiceUnavailable)
 				return
 			}
 		}
@@ -170,7 +170,7 @@ func Handler(dir string, onClaim func(), observe func(context.Context, string, e
 				if observe != nil {
 					observe(r.Context(), "selfhost_claim", err)
 				}
-				http.Error(w, "claim saved; runtime configuration incomplete; retry same claim", 503)
+				http.Error(w, "claim saved; runtime configuration incomplete; retry same claim", http.StatusServiceUnavailable)
 				return
 			}
 		}

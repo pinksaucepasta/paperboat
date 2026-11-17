@@ -595,14 +595,14 @@ func (s *Server) QuotaDenied() []string {
 	return accounts
 }
 
-// Revoke fences an endpoint's grants below minGeneration, the first generation still valid: it
-// closes their connections now, and only a grant of minGeneration or later is admitted again.
 // ValidRevocation is the shape Revoke accepts: both ids present and bounded, and a first valid
 // generation of at least 2 (generation 1 was never revoked).
 func ValidRevocation(account, endpoint string, minGeneration uint64) bool {
 	return account != "" && endpoint != "" && len(account) <= 256 && len(endpoint) <= 256 && minGeneration >= 2
 }
 
+// Revoke fences an endpoint's grants below minGeneration, the first generation still valid: it
+// closes their connections now, and only a grant of minGeneration or later is admitted again.
 func (s *Server) Revoke(account, endpoint string, minGeneration uint64) error {
 	if !ValidRevocation(account, endpoint, minGeneration) {
 		return ErrAdmission

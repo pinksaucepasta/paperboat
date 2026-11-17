@@ -59,7 +59,7 @@ func TestCertificateRenewalPreservesPinAndLiveTLS(t *testing.T) {
 		t.Fatal("renewal changed identity pin")
 	}
 	leaf, _ := x509.ParseCertificate(next.Certificate[0])
-	if leaf.NotAfter.Sub(time.Now()) < 360*24*time.Hour {
+	if time.Until(leaf.NotAfter) < 360*24*time.Hour {
 		t.Fatal("renewal did not extend certificate validity")
 	}
 	status, _ := post(t, client, server.URL+"/v1/selfhost/inspect", secret, InspectRequest{Nonce: "AAAAAAAAAAAAAAAAAAAAAA"})
