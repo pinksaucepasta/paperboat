@@ -22,9 +22,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/releaseindex"
-	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/releasepolicy"
 	"github.com/pinksaucepasta/paperboat/cli/internal/windowsopenssh"
+	"github.com/pinksaucepasta/paperboat/shared/releaseindex"
+	"github.com/pinksaucepasta/paperboat/shared/releasepolicy"
 	"github.com/sigstore/sigstore/pkg/signature"
 	"github.com/theupdateframework/go-tuf/v2/metadata"
 )

@@ -34,11 +34,11 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/installsource"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/nativesignature"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/releaseeligibility"
-	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/releaseindex"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/service"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/updated"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/workerupdate"
 	"github.com/pinksaucepasta/paperboat/shared/peertransport/endpointidentity"
+	"github.com/pinksaucepasta/paperboat/shared/releaseindex"
 )
 
 type task39Transport struct {

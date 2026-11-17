@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/releasepolicy"
+	"github.com/pinksaucepasta/paperboat/shared/releasepolicy"
 )
 
 const SchemaV1 = "paperboat.release-index/v1"
@@ -109,7 +109,7 @@ func Decode(reader io.Reader, now time.Time) (Index, error) {
 }
 
 func (i Index) Validate(now time.Time) error {
-	if i.Schema != SchemaV1 || !valuePattern.MatchString(i.ReleaseID) || !versionPattern.MatchString(i.Version) || i.Channel != expectedChannel(i.Platform, i.Architecture) || i.CreatedAt.IsZero() || i.RolloutPolicyRevision == 0 {
+	if i.Schema != SchemaV1 || i.ReleaseID != "rel_"+i.Version || !versionPattern.MatchString(i.Version) || i.Channel != expectedChannel(i.Platform, i.Architecture) || i.CreatedAt.IsZero() || i.RolloutPolicyRevision == 0 {
 		return ErrInvalid
 	}
 	if i.Severity != "routine" && i.Severity != "security" && i.Severity != "critical" {
@@ -264,7 +264,7 @@ func AssetName(platform, architecture string) string {
 // No server-hosted target or mutable latest/download endpoint is accepted.
 func ValidDownloadURL(raw, repository, version, assetName string) bool {
 	parsed, err := url.Parse(raw)
-	return err == nil && validRepository(repository) && parsed.Scheme == "https" && parsed.Hostname() == "github.com" && parsed.User == nil && parsed.RawQuery == "" && parsed.Fragment == "" && parsed.Path == "/"+repository+"/releases/download/"+version+"/"+assetName
+	return err == nil && validRepository(repository) && raw == "https://github.com/"+repository+"/releases/download/"+version+"/"+assetName && parsed.Scheme == "https" && parsed.Hostname() == "github.com" && parsed.Port() == "" && parsed.User == nil && parsed.RawQuery == "" && parsed.Fragment == "" && parsed.Path == "/"+repository+"/releases/download/"+version+"/"+assetName
 }
 
 func validRepository(value string) bool {

@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hostdproto"
-	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/releasepolicy"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/updateflow"
+	"github.com/pinksaucepasta/paperboat/shared/releasepolicy"
 )
 
 func TestTRK28SignedMetadataFaultsFailClosed(t *testing.T) {

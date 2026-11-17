@@ -27,9 +27,9 @@ import (
 	helperconfig "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/config"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/enrollment"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/identity"
-	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/releaseindex"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/service"
 	"github.com/pinksaucepasta/paperboat/shared/peertransport/endpointidentity"
+	"github.com/pinksaucepasta/paperboat/shared/releaseindex"
 	"golang.org/x/sys/windows"
 )
 

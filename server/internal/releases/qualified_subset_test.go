@@ -1,13 +1,13 @@
 package releases
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/pinksaucepasta/paperboat/shared/releasepolicy"
 )
 
 func qualifiedSubsetBundle(t *testing.T) (string, map[string]any) {
@@ -31,9 +31,16 @@ func qualifiedSubsetBundle(t *testing.T) (string, map[string]any) {
 		t.Fatal(err)
 	}
 	index := custom["release_index"].(map[string]any)
-	plan, _ := json.Marshal(index["deployment_plan"])
-	digest := sha256.Sum256(append(plan, '\n'))
-	index["deployment_plan_sha256"] = hex.EncodeToString(digest[:])
+	planBody, _ := json.Marshal(index["deployment_plan"])
+	var plan releasepolicy.Plan
+	if err := json.Unmarshal(planBody, &plan); err != nil {
+		t.Fatal(err)
+	}
+	digest, err := plan.PlanSHA256()
+	if err != nil {
+		t.Fatal(err)
+	}
+	index["deployment_plan_sha256"] = digest
 	target["custom"] = custom
 	return directory, document
 }

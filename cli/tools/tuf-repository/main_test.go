@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/releaseindex"
-	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/releasepolicy"
+	"github.com/pinksaucepasta/paperboat/shared/releaseindex"
+	"github.com/pinksaucepasta/paperboat/shared/releasepolicy"
 	"github.com/theupdateframework/go-tuf/v2/metadata"
 )
 

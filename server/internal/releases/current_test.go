@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/shared/releasepolicy"
 	"os"
 	"path/filepath"
 	"strings"
@@ -339,33 +340,24 @@ func writeReadyBundle(t *testing.T, directory string, _ bool) {
 
 func testPublishedReleaseIndex(asset Asset, now time.Time) publishedReleaseIndex {
 	manifest := strings.Repeat("a", sha256.Size*2)
-	cohorts := []map[string]any{}
+	targets := []releasepolicy.PlatformTarget{}
 	for _, target := range supportedPlatformArchitectures {
-		for _, wave := range []struct {
-			name  string
-			pct   uint8
-			delay uint32
-			max   uint16
-		}{{"canary", 1, 0, 1}, {"early", 10, 60 * 60, 10}, {"general", 100, 2 * 60 * 60, 100}} {
-			cohorts = append(cohorts, map[string]any{"name": wave.name, "platform": target.platform, "architecture": target.architecture, "failure_domain": "*", "percentage": wave.pct, "start_after_seconds": wave.delay, "max_concurrent": wave.max})
-		}
+		targets = append(targets, releasepolicy.PlatformTarget{Platform: target.platform, Architecture: target.architecture})
 	}
-	plan := map[string]any{
-		"schema": "paperboat.release-deployment/v1", "version": testVersion, "manifest_sha256": manifest,
-		"channel": "stable", "rollout_state": "active", "severity": "routine", "policy_revision": 1, "cohort_seed": "test-seed", "cohorts": cohorts,
-		"canary":            map[string]any{"path": "/healthz", "expected_status": 200, "timeout_seconds": 10, "samples": 3, "require_edge": true, "require_connector": true, "require_route": true, "require_origin": true},
-		"activation":        map[string]any{"drain_timeout_seconds": 30, "stability_window_seconds": 10 * 60, "stability_probe_interval_seconds": 30, "rollback_timeout_seconds": 60},
-		"security_deferral": map[string]any{"max_seconds": 7 * 24 * 60 * 60, "requires_approval": false},
-		"rollback":          map[string]any{"triggers": []string{"crash_loop", "watchdog_failure", "connector_authentication", "snapshot_apply", "edge_canary", "route_protocol", "state_migration", "readiness_regression"}, "quarantine_seconds": 7 * 24 * 60 * 60, "revoke_failed_release": true},
+	plan, err := releasepolicy.Default(testVersion, manifest, 1, "routine", "test-seed", targets)
+	if err != nil {
+		panic(err)
 	}
-	planBody, _ := json.Marshal(plan)
-	planDigest := sha256.Sum256(append(append([]byte(nil), planBody...), '\n'))
+	planDigest, err := plan.PlanSHA256()
+	if err != nil {
+		panic(err)
+	}
 	index := publishedReleaseIndex{
 		Schema: "paperboat.release-index/v1", ReleaseID: "rel_" + testVersion, Version: testVersion, Channel: "stable", Severity: "routine", CreatedAt: now.Add(-time.Minute),
 		Platform: asset.Platform, Architecture: asset.Architecture, BinaryFormat: asset.Format,
 		Targets:     []publishedReleaseTarget{{Component: "pb", TargetPath: testAssetName(asset), AssetName: testAssetName(asset), Repository: testRepository, DownloadURL: asset.URL, SHA256: asset.SHA256, Length: asset.Length, Platform: asset.Platform, Architecture: asset.Architecture, BinaryFormat: asset.Format}},
 		HostdAPIMin: 1, HostdAPIMax: 2, RuntimeAPIMin: 1, RuntimeAPIMax: 2, RolloutPolicyRevision: 1, ManifestSHA256: manifest,
-		DeploymentPlanSHA256: hex.EncodeToString(planDigest[:]), DeploymentPlan: planBody,
+		DeploymentPlanSHA256: planDigest, DeploymentPlan: &plan,
 	}
 	if asset.Platform == "windows" {
 		index.Stability = "stable"

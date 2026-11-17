@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/releasepolicy"
+	"github.com/pinksaucepasta/paperboat/shared/releasepolicy"
 )
 
 func testDeferral(t *testing.T) releasepolicy.Deferral {

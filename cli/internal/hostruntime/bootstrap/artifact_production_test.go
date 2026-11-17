@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/releaseindex"
+	"github.com/pinksaucepasta/paperboat/shared/releaseindex"
 )
 
 func TestProductionTUFRepository(t *testing.T) {

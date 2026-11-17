@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hostdproto"
-	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/releaseindex"
-	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/releasepolicy"
+	"github.com/pinksaucepasta/paperboat/shared/releaseindex"
+	"github.com/pinksaucepasta/paperboat/shared/releasepolicy"
 )
 
 type failureDomainClient struct {
@@ -228,7 +228,7 @@ func validEligibilityIndex(t *testing.T) (releaseindex.Index, time.Time) {
 	}
 	asset := releaseindex.AssetName("linux", "amd64")
 	return releaseindex.Index{
-		Schema: releaseindex.SchemaV1, ReleaseID: "rel_worker_test", Version: plan.Version, Channel: "stable", Severity: "routine",
+		Schema: releaseindex.SchemaV1, ReleaseID: "rel_" + plan.Version, Version: plan.Version, Channel: "stable", Severity: "routine",
 		CreatedAt: now.Add(-3 * time.Hour), Platform: "linux", Architecture: "amd64", BinaryFormat: "elf",
 		Targets:     []releaseindex.Target{{Component: "pb", TargetPath: asset, AssetName: asset, Repository: "example/paperboat-cli", DownloadURL: "https://github.com/example/paperboat-cli/releases/download/" + plan.Version + "/" + asset, SHA256: strings.Repeat("b", 64), Length: 1, Platform: "linux", Architecture: "amd64", BinaryFormat: "elf"}},
 		HostdAPIMin: 1, HostdAPIMax: 2, RuntimeAPIMin: 1, RuntimeAPIMax: 2, RolloutPolicyRevision: plan.PolicyRevision,

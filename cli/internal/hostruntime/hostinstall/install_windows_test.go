@@ -18,10 +18,10 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/bootstrap"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/installsource"
-	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/releaseindex"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/service"
 	"github.com/pinksaucepasta/paperboat/cli/internal/windowsopenssh"
 	"github.com/pinksaucepasta/paperboat/cli/internal/windowssecurity"
+	"github.com/pinksaucepasta/paperboat/shared/releaseindex"
 	"golang.org/x/sys/windows"
 )
 

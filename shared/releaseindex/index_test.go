@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/releasepolicy"
+	"github.com/pinksaucepasta/paperboat/shared/releasepolicy"
 )
 
 func fixture() Index {
@@ -19,7 +19,7 @@ func fixture() Index {
 		panic(err)
 	}
 	planDigest, _ := plan.PlanSHA256()
-	i := Index{Schema: SchemaV1, ReleaseID: "rel_1", Version: "2026.08.18.7", Channel: "stable", Severity: "routine", CreatedAt: time.Now().UTC().Add(-3 * time.Hour), Platform: "linux", Architecture: "amd64", BinaryFormat: "elf", HostdAPIMin: 1, HostdAPIMax: 2, RuntimeAPIMin: 1, RuntimeAPIMax: 2, RolloutPolicyRevision: 1, ManifestSHA256: manifest, DeploymentPlanSHA256: planDigest, DeploymentPlan: &plan}
+	i := Index{Schema: SchemaV1, ReleaseID: "rel_2026.08.18.7", Version: "2026.08.18.7", Channel: "stable", Severity: "routine", CreatedAt: time.Now().UTC().Add(-3 * time.Hour), Platform: "linux", Architecture: "amd64", BinaryFormat: "elf", HostdAPIMin: 1, HostdAPIMax: 2, RuntimeAPIMin: 1, RuntimeAPIMax: 2, RolloutPolicyRevision: 1, ManifestSHA256: manifest, DeploymentPlanSHA256: planDigest, DeploymentPlan: &plan}
 	name := AssetName("linux", "amd64")
 	i.Targets = []Target{{Component: "pb", TargetPath: name, AssetName: name, Repository: "example/paperboat-cli", DownloadURL: "https://github.com/example/paperboat-cli/releases/download/2026.08.18.7/" + name, SHA256: strings.Repeat("a", 64), Length: 100, Platform: "linux", Architecture: "amd64", BinaryFormat: "elf"}}
 	return i

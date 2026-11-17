@@ -17,8 +17,8 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/bootstrap"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/installsource"
-	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/releaseindex"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/service"
+	"github.com/pinksaucepasta/paperboat/shared/releaseindex"
 )
 
 func TestDecodeRejectsUnknownAndTrailingFields(t *testing.T) {

@@ -19,8 +19,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/releasepolicy"
 	"github.com/pinksaucepasta/paperboat/shared/boundedread"
+	"github.com/pinksaucepasta/paperboat/shared/releasepolicy"
 )
 
 const MaxDeferralBytes int64 = 64 << 10

@@ -23,10 +23,10 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hostdproto"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/installsource"
-	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/releasepolicy"
 	updatedruntime "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/updated"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/updateflow"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/workerupdate"
+	"github.com/pinksaucepasta/paperboat/shared/releasepolicy"
 )
 
 // TestLinuxSignedUpdateAcceptance is deliberately opt-in and build-tagged.
