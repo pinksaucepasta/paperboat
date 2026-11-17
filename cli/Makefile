@@ -24,7 +24,7 @@ dependencies:
 	@./tools/verify-peer-dependencies.sh
 
 source-policy:
-	@./tools/verify-source-policy.sh
+	@../tools/verify-source-policy.sh cli
 
 metrics-generate:
 	$(GO) run ./tools/metric-schema -write docs/metrics.json
@@ -101,19 +101,19 @@ fuzz: verify-toolchain
 	@./tools/run-fuzz-targets.sh
 
 reproducible-builds: verify-toolchain
-	@VERSION="$(VERSION)" COMMIT="$(COMMIT)" PROTOCOL_VERSION="$(PROTOCOL_VERSION)" ./tools/verify-reproducible-builds.sh
+	@VERSION="$(VERSION)" COMMIT="$(COMMIT)" PROTOCOL_VERSION="$(PROTOCOL_VERSION)" ../tools/verify-reproducible-builds.sh cli
 
 upstream-foundations:
 	@./tools/verify-upstream-foundations.sh
 
 static-analysis: verify-toolchain source-policy
-	@./tools/verify-static-analysis.sh
+	@../tools/verify-static-analysis.sh cli
 
 vulnerability-check: verify-toolchain
-	@./tools/verify-vulnerabilities.sh
+	@../tools/verify-vulnerabilities.sh cli
 
 license-check: verify-toolchain
-	@./tools/verify-licenses.sh
+	@../tools/verify-licenses.sh cli
 
 binary-size-check: verify-toolchain
 	@LDFLAGS='$(LDFLAGS)' ./tools/verify-binary-sizes.sh

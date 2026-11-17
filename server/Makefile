@@ -25,7 +25,7 @@ dependencies:
 	@./tools/verify-dependencies.sh
 
 source-policy:
-	@./tools/verify-source-policy.sh
+	@../tools/verify-source-policy.sh server
 
 metrics-generate:
 	$(GO) run ./tools/metric-schema -write docs/metrics.json
@@ -77,19 +77,19 @@ race:
 	$(GO) test -race ./...
 
 reproducible-builds: verify-toolchain
-	@./tools/verify-reproducible-builds.sh
+	@../tools/verify-reproducible-builds.sh server
 
 binary-size-check: verify-toolchain
 	@./tools/verify-binary-sizes.sh
 
 static-analysis: verify-toolchain source-policy
-	@./tools/verify-static-analysis.sh
+	@../tools/verify-static-analysis.sh server
 
 vulnerability-check: verify-toolchain
-	@./tools/verify-vulnerabilities.sh
+	@../tools/verify-vulnerabilities.sh server
 
 license-check: verify-toolchain
-	@./tools/verify-licenses.sh
+	@../tools/verify-licenses.sh server
 
 control-storm:
 	@./tools/run-control-storm.sh

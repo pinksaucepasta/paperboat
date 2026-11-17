@@ -1,7 +1,8 @@
 #!/bin/sh
+# usage: tools/verify-source-policy.sh <module>
 set -eu
-
-root=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
+. "$(dirname -- "$0")/verify-lib.sh"
+module_setup "$@"
 cd "$root"
 
 metadata_files=$(find . -path './.git' -prune -o -type f \( -name '._*' -o -name '.DS_Store' \) -print)
@@ -13,7 +14,7 @@ fi
 check() {
 	rule=$1
 	pattern=$2
-	matches=$(rg -n --no-heading --glob '*.go' --glob '!upstream/tailscale/**' --glob '!**/*_test.go' "$pattern" . || true)
+	matches=$(rg -n --no-heading --glob '*.go' --glob '!upstream/tailscale/**' --glob '!vendor/**' --glob '!**/*_test.go' "$pattern" . || true)
 	[ -z "$matches" ] && return 0
 	violations=$(printf '%s\n' "$matches" | while IFS=: read -r file line rest; do
 		previous=$((line - 1))
@@ -31,6 +32,9 @@ check default-http 'http\.Default(Client|Transport)'
 check sensitive-log '(slog\.|log\.(Print|Printf|Println))[^\n]*(candidate|payload|credential|token|private.?key)'
 check metric-label 'WithLabelValues\('
 check tailscale-import '"tailscale\.com/'
-check raw-peercred 'Getsockopt(Ucred|Xucred)|SO_PEERCRED|LOCAL_PEERCRED'
-check raw-user-path 'os\.User(Config|Cache)Dir\('
-check atomic-replacement 'os\.CreateTemp\(|os\.Rename\('
+# The CLI runs on user machines: peer credentials, config dirs and file replacement need an owner.
+if [ "$module" = cli ]; then
+	check raw-peercred 'Getsockopt(Ucred|Xucred)|SO_PEERCRED|LOCAL_PEERCRED'
+	check raw-user-path 'os\.User(Config|Cache)Dir\('
+	check atomic-replacement 'os\.CreateTemp\(|os\.Rename\('
+fi

@@ -12,7 +12,7 @@ dependencies:
 	@./tools/verify-dependencies.sh
 
 source-policy:
-	@./tools/verify-source-policy.sh
+	@../tools/verify-source-policy.sh edge
 
 metrics-generate:
 	$(GO) run ./tools/metric-schema -write docs/metrics.json

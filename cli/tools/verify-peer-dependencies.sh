@@ -130,5 +130,5 @@ fi
 
 # Extracted assembly imports are deliberate and must retain ownership annotations.
 # Other source-policy rules apply to mesh too; it is production source now.
-"$root/tools/verify-source-policy.sh"
+"$root/../tools/verify-source-policy.sh" cli
 echo "peer dependencies: valid"
