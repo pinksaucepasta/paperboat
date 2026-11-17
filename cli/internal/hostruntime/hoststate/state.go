@@ -80,10 +80,6 @@ type TunnelConfigRoute struct {
 	HostOverride    *string `json:"host_override"`
 	TLSVerification string  `json:"tls_verification"`
 	TLSServerName   *string `json:"tls_server_name"`
-	// CAReference is the retired reference column. Snapshots are stored byte for byte and served until the tunnel changes,
-	// so those of every tunnel made before 'tls_ca' still say "ca_reference":null; only null is accepted.
-	// shortcut: legacy stored snapshots; drop when no tunnel snapshot older than 2026-11-12 is left.
-	CAReference *string `json:"ca_reference,omitempty"`
 	// TLSCA is the PEM CA a custom_ca route trusts for its https origin, stored with the route.
 	TLSCA                   *string `json:"tls_ca,omitempty"`
 	MTLSCredentialReference *string `json:"mtls_credential_reference"`
@@ -271,9 +267,6 @@ func validateTunnelConfigRoute(route TunnelConfigRoute) error {
 	switch route.TLSVerification {
 	case "not_applicable", "system", "custom_ca", "insecure", "pinned":
 	default:
-		return ErrInvalidState
-	}
-	if route.CAReference != nil {
 		return ErrInvalidState
 	}
 	if (route.TLSVerification == "pinned") != (route.TLSPin != nil) || route.TLSPin != nil && !tlsPinPattern.MatchString(*route.TLSPin) {

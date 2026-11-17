@@ -60,23 +60,3 @@ func TestParseTunnelConfigSnapshotAcceptsHTTPUnixOrigin(t *testing.T) {
 		t.Fatalf("parsed Unix route = %+v", parsed.Routes)
 	}
 }
-
-// A tunnel's config snapshot is stored byte for byte (its content hash names it) and served again until the tunnel
-// changes. Every tunnel created before the route CA moved into the route ('ca_reference' became 'tls_ca') still has
-// a snapshot with "ca_reference":null: the agent keeps serving those tunnels (the production canary went
-// tunnel_pending when an agent refused this exact stored payload).
-func TestParseTunnelConfigSnapshotAcceptsTheStoredSnapshotsOfTunnelsMadeBeforeTheRouteCAChange(t *testing.T) {
-	stored := []byte(`{"access_mode":"public","desired_state":"active","expires_at":null,"generation":1,"kind":"tunnel_config_snapshot","name":"canary","routes":[{"ca_reference":null,"connect_timeout_ms":10000,"desired_state":"active","host_override":null,"id":"rte_tunnel_f9319d66-a4ad-4b23-a342-60cb3ea6ce03_default","idle_timeout_ms":90000,"match_hostname":"eager-purple-lantern-7514.tunnels.example.test","match_type":"managed_exact","max_concurrent_streams":1024,"mtls_credential_reference":null,"name":"default","origin_address":"127.0.0.1:18099","origin_scheme":"http","path_prefix":null,"preserve_host":true,"protocol":"http","tls_server_name":null,"tls_verification":"not_applicable"}],"schema":"paperboat.preview-tunnel/v1","stable_endpoint":"https://eager-purple-lantern-7514.tunnels.example.test","stable_endpoint_id":"endpoint_23bd453f-0558-4066-9d2e-d7e8a1b16bba","tunnel_id":"tunnel_f9319d66-a4ad-4b23-a342-60cb3ea6ce03"}`)
-	parsed, err := ParseTunnelConfigSnapshot(stored, "tunnel_f9319d66-a4ad-4b23-a342-60cb3ea6ce03", 1)
-	if err != nil {
-		t.Fatalf("stored snapshot with ca_reference:null: %v", err)
-	}
-	if len(parsed.Routes) != 1 || parsed.Routes[0].OriginAddress != "127.0.0.1:18099" {
-		t.Fatalf("parsed routes = %+v", parsed.Routes)
-	}
-	// a legacy route cannot smuggle a reference in: only the null value is accepted
-	withReference := []byte(strings.Replace(string(stored), `"ca_reference":null`, `"ca_reference":"cred_x"`, 1))
-	if _, err := ParseTunnelConfigSnapshot(withReference, "tunnel_f9319d66-a4ad-4b23-a342-60cb3ea6ce03", 1); err == nil {
-		t.Fatal("a non-null ca_reference was accepted")
-	}
-}

@@ -95,16 +95,3 @@ func TestSnapshotRouteTLSEquivalences(t *testing.T) {
 		}
 	}
 }
-
-// A stored config snapshot of a tunnel made before the route CA change carries "ca_reference":null; the shared validator
-// (edge and server side) accepts it as the agent's parser does, and refuses a non-null reference.
-func TestValidateConfigSnapshotPayloadAcceptsTheRetiredNullCAReference(t *testing.T) {
-	stored := []byte(`{"access_mode":"public","desired_state":"active","expires_at":null,"generation":1,"kind":"tunnel_config_snapshot","name":"canary","routes":[{"ca_reference":null,"connect_timeout_ms":10000,"desired_state":"active","host_override":null,"id":"rte_tunnel_f9319d66-a4ad-4b23-a342-60cb3ea6ce03_default","idle_timeout_ms":90000,"match_hostname":"eager-purple-lantern-7514.tunnels.example.test","match_type":"managed_exact","max_concurrent_streams":1024,"mtls_credential_reference":null,"name":"default","origin_address":"127.0.0.1:18099","origin_scheme":"http","path_prefix":null,"preserve_host":true,"protocol":"http","tls_server_name":null,"tls_verification":"not_applicable"}],"schema":"paperboat.preview-tunnel/v1","stable_endpoint":"https://eager-purple-lantern-7514.tunnels.example.test","stable_endpoint_id":"endpoint_23bd453f-0558-4066-9d2e-d7e8a1b16bba","tunnel_id":"tunnel_f9319d66-a4ad-4b23-a342-60cb3ea6ce03"}`)
-	if err := ValidateConfigSnapshotPayload(stored, "tunnel_f9319d66-a4ad-4b23-a342-60cb3ea6ce03", 1); err != nil {
-		t.Fatalf("stored snapshot with ca_reference:null: %v", err)
-	}
-	withReference := []byte(strings.Replace(string(stored), `"ca_reference":null`, `"ca_reference":"cred_x"`, 1))
-	if err := ValidateConfigSnapshotPayload(withReference, "tunnel_f9319d66-a4ad-4b23-a342-60cb3ea6ce03", 1); err == nil {
-		t.Fatal("a non-null ca_reference was accepted")
-	}
-}
