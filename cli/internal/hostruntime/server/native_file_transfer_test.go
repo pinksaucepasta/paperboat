@@ -68,7 +68,7 @@ func TestNativeTransferPolicyUsesAuthorizedReceiver(t *testing.T) {
 	endpoint := httptest.NewServer(handler)
 	defer endpoint.Close()
 	policy := filetransfer.DefaultPolicy
-	expected := clienttransfer.Policy{Revision: policy.Revision, MaxFileBytes: policy.MaxFileBytes, MaxBatchFiles: policy.MaxBatchFiles, MaxBatchBytes: policy.MaxBatchBytes, MaxConcurrentTransfers: policy.MaxConcurrentTransfers, RetentionSeconds: policy.RetentionSeconds, DeliveryTimeoutSeconds: policy.DeliveryTimeoutSeconds, MaxPendingSpoolBytes: policy.MaxPendingSpoolBytes}
+	expected := clienttransfer.Policy{Revision: policy.Revision, MaxBatchFiles: policy.MaxBatchFiles, MaxConcurrentTransfers: policy.MaxConcurrentTransfers, RetentionSeconds: policy.RetentionSeconds, DeliveryTimeoutSeconds: policy.DeliveryTimeoutSeconds, MaxPendingSpoolBytes: policy.MaxPendingSpoolBytes}
 	native, err := clienttransfer.NewNativeClient(endpoint.URL+"/v1/file-transfers", clienttransfer.Auth{Token: "token"}, clienttransfer.Binding{SourceMachineID: "machine_client", DestinationMachineID: "machine_host", InitiatingUserID: "user_1"}, func(ctx context.Context) (net.Conn, error) {
 		return (&net.Dialer{}).DialContext(ctx, "tcp", endpoint.Listener.Addr().String())
 	})

@@ -26,7 +26,7 @@ import (
 // (TestReceiverRefusesNamesItsOwnPlatformCannotStore covers the Windows refusal).
 var reservedOnWindows = map[bool]string{false: "CON", true: "CONSOLE"}[runtime.GOOS == "windows"]
 
-func newService(t *testing.T) (*Service, *store.Store, string) {
+func newService(t *testing.T, options ...func(*Config)) (*Service, *store.Store, string) {
 	t.Helper()
 	root := t.TempDir()
 	durable, err := store.Open(context.Background(), store.Config{Root: filepath.Join(root, "state")})
@@ -35,7 +35,11 @@ func newService(t *testing.T) (*Service, *store.Store, string) {
 	}
 	t.Cleanup(func() { _ = durable.Close() })
 	content := filepath.Join(root, "transfers")
-	service, err := New(Config{Root: content, LocalMachineID: "machine_local", Store: durable, Now: func() time.Time { return time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC) }})
+	config := Config{Root: content, LocalMachineID: "machine_local", Store: durable, Now: func() time.Time { return time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC) }}
+	for _, option := range options {
+		option(&config)
+	}
+	service, err := New(config)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -902,10 +906,15 @@ func TestCancelAndAppendRegistrationRaceLeavesNoWriterOrPartial(t *testing.T) {
 }
 
 func TestCreateEnforcesExactFileAndBatchBoundaries(t *testing.T) {
-	service, _, _ := newService(t)
+	const bound = 10 << 20 // the policy's Automatic bound, small so the boundary needs no 2 GB of disk room
+	service, _, _ := newService(t, func(config *Config) {
+		policy := DefaultPolicy
+		policy.AutomaticMaxBatchBytes, policy.MaxPendingSpoolBytes = bound, bound
+		config.Policy = NewPolicyStore(policy)
+	})
 	files := make([]File, MaxBatchFiles)
 	for index := range files {
-		files[index] = File{Basename: fmt.Sprintf("file-%d.bin", index), Size: MaxFileBytes, SHA256: digest(nil)}
+		files[index] = File{Basename: fmt.Sprintf("file-%d.bin", index), Size: bound / MaxBatchFiles, SHA256: digest(nil)}
 	}
 	files[0].Basename = "résumé 最終.bin"
 	files[1].Basename = reservedOnWindows
@@ -917,7 +926,7 @@ func TestCreateEnforcesExactFileAndBatchBoundaries(t *testing.T) {
 	if _, err := service.Create(context.Background(), CreateRequest{BatchID: "count-over", SourceMachineID: "machine_source", DestinationMachineID: "machine_local", InitiatingUserID: "user_1", SessionID: "ses", Files: tooMany}); !hasCode(err, BatchLimit) {
 		t.Fatalf("eleven files err=%v", err)
 	}
-	if _, err := service.Create(context.Background(), CreateRequest{BatchID: "size-over", SourceMachineID: "machine_source", DestinationMachineID: "machine_local", InitiatingUserID: "user_1", SessionID: "ses", Files: []File{{Basename: "large.bin", Size: MaxFileBytes + 1, SHA256: digest(nil)}}}); !hasCode(err, InvalidSize) {
+	if _, err := service.Create(context.Background(), CreateRequest{BatchID: "size-over", SourceMachineID: "machine_source", DestinationMachineID: "machine_local", InitiatingUserID: "user_1", SessionID: "ses", Files: []File{{Basename: "large.bin", Size: bound + 1, SHA256: digest(nil)}}}); !hasCode(err, InvalidSize) {
 		t.Fatalf("oversized file err=%v", err)
 	}
 }
@@ -1131,8 +1140,8 @@ func TestCreateHonorsTheSignedMaxBytes(t *testing.T) {
 	}
 }
 
-// PLAN 3b File transfer modes: the policy keeps today's caps; a credential that carries the transfer claims sets
-// this batch's bound, and a file over the store's original 50 MiB limit lifts that limit on demand.
+// PLAN 3b File transfer modes: without claims the Automatic bound of the policy applies; a credential that carries
+// the transfer claims sets this batch's bound.
 func TestTransferClaimsReplaceThePolicyCaps(t *testing.T) {
 	service, _, _ := newService(t)
 	create := func(id string, size, maxBytes int64, mode string) error {
@@ -1140,7 +1149,7 @@ func TestTransferClaimsReplaceThePolicyCaps(t *testing.T) {
 		_, err := service.Create(context.Background(), CreateRequest{BatchID: id, SourceMachineID: "machine_source", DestinationMachineID: "machine_remote", InitiatingUserID: "user_1", SessionID: "ses", DeliveryClientID: "client_1", Files: files, MaxBytes: maxBytes, TransferMode: mode})
 		return err
 	}
-	if err := create("caps", MaxBatchBytes+1, 0, ""); !hasCode(err, InvalidSize) && !hasCode(err, BatchLimit) {
+	if err := create("caps", AutomaticTransferLimit+1, 0, ""); !hasCode(err, InvalidSize) && !hasCode(err, BatchLimit) {
 		t.Fatalf("without claims the policy caps apply: %v", err)
 	}
 	if err := create("automatic", 1_500_000_000, 1_500_000_000, "automatic"); err != nil {

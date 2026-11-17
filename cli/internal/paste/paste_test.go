@@ -123,7 +123,7 @@ func (u *blockingUploader) SendBatch(ctx context.Context, _, _ string, sources [
 }
 
 func defaultLimits() transfer.Limits {
-	return transfer.Limits{MaxFileBytes: 50 << 20, MaxBatchFiles: 8, MaxBatchBytes: 500 << 20}
+	return transfer.Limits{MaxFileBytes: transfer.AutomaticLimit, MaxBatchFiles: 8, MaxBatchBytes: transfer.AutomaticLimit}
 }
 
 func New(dest io.Writer, uploader BatchUploader, limits transfer.Limits, opts ...Option) *Interceptor {
@@ -419,7 +419,7 @@ func TestFileTransferPolicyUploadsMixedBatchBeforeRewriting(t *testing.T) {
 		t.Fatal(err)
 	}
 	uploader := &batchUploader{result: transfer.Batch{Paths: []string{"/remote/empty", "/remote/archive.bin"}}}
-	policy := NewPolicy(uploader, "ses_1", transfer.Limits{MaxFileBytes: 50 << 20, MaxBatchFiles: 10, MaxBatchBytes: 500 << 20})
+	policy := NewPolicy(uploader, "ses_1", transfer.Limits{MaxFileBytes: transfer.AutomaticLimit, MaxBatchFiles: 10, MaxBatchBytes: transfer.AutomaticLimit})
 	var dest bytes.Buffer
 	i := NewWithPolicy(&dest, policy, WithPartialFlushDelay(time.Hour))
 	writeInChunks(t, i, wrap(empty+"\n"+binary), 5)
