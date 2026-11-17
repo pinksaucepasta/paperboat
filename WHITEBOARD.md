@@ -287,3 +287,10 @@ own player for launch (v2 is what most tools read; one renderer keeps replay ide
 idle limit in the console player; markers and keyboard shortcuts in our player; optional
 `pb recordings export --format v3` (asciicast v3: relative intervals, marker/exit events, header term metadata) with v2
 staying the default. Not planned: switching to asciinema-player (it brings a second terminal emulator).
+
+## Tunnel redirect and rewrite rules like Cloudflare — after launch (user 2026-11-18)
+
+Today a tunnel has simple path redirects plus header and URL rewrite rules. After launch, research what Cloudflare
+offers (Redirect Rules, Bulk Redirects, Page Rules, Transform Rules: www ↔ apex, HTTP → HTTPS, wildcard and regex
+matches, query-string handling, status codes 301/302/307/308, conditions on host/path/header/country) and implement
+the useful set for tunnels and custom domains.
