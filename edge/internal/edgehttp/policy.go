@@ -345,7 +345,11 @@ func configureProxyDiagnostics(proxy *httputil.ReverseProxy, observe func(contex
 		if err == http.ErrAbortHandler {
 			return
 		}
-		// The edge's own body-idle read deadline also makes the server cancel the context plainly; that client waits.
+		// The edge's own body-idle deadline also makes the server cancel the context plainly, and the transport's
+		// error may not carry errRequestBodyIdle (whichever of its read and write failed first); that client waits.
+		if body, ok := request.Body.(*proxyRequestBody); ok && body.cutIdle() {
+			err = errors.Join(errRequestBodyIdle, err)
+		}
 		if clientLeft(request) && !errors.Is(err, errRequestBodyIdle) {
 			slog.Info("client_closed_request", "status", 499)
 			return

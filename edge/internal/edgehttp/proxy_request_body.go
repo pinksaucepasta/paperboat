@@ -19,6 +19,8 @@ type proxyRequestBody struct {
 	idle        time.Duration // cut the upload after waiting this long for client bytes; zero never
 	deadlineMu  sync.Mutex    // orders the idle deadline against Close's interrupting deadline
 	finished    atomic.Bool
+	idleExpired atomic.Bool  // the idle deadline cut the upload: the error handler answers 408 whatever error surfaced
+	waiting     atomic.Int64 // when the read in progress started waiting for client bytes (unix ns); zero between reads
 	interrupted atomic.Bool
 	once        sync.Once
 	closeErr    error
@@ -29,9 +31,12 @@ type proxyRequestBody struct {
 var errRequestBodyIdle = errors.New("HTTP upload sent no data within the idle timeout")
 
 func (b *proxyRequestBody) Read(payload []byte) (int, error) {
-	b.idleDeadline(time.Now().Add(b.idle))
+	started := time.Now()
+	b.waiting.Store(started.UnixNano())
+	b.idleDeadline(started.Add(b.idle))
 	n, err := b.body.Read(payload)
 	b.idleDeadline(time.Time{})
+	b.waiting.Store(0)
 	if err == io.EOF {
 		b.finished.Store(true)
 	}
@@ -39,6 +44,7 @@ func (b *proxyRequestBody) Read(payload []byte) (int, error) {
 		return n, &proxyUploadStopped{cause: err}
 	}
 	if b.idle > 0 && uploadReadTimeout(err) {
+		b.idleExpired.Store(true)
 		return n, errors.Join(errRequestBodyIdle, err)
 	}
 	return n, err
@@ -134,4 +140,14 @@ func (b *requestUploadBody) preserve(err error) error {
 		return cause
 	}
 	return errors.Join(err, cause)
+}
+
+// cutIdle reports whether the idle deadline cut this upload: its read failed on it, or a read still waits past it
+// (the transport can fail first: net/http cancels the request on the expired read, which aborts the stream).
+func (b *proxyRequestBody) cutIdle() bool {
+	if b.idle <= 0 {
+		return false
+	}
+	waiting := b.waiting.Load()
+	return b.idleExpired.Load() || waiting != 0 && time.Since(time.Unix(0, waiting)) >= b.idle
 }
