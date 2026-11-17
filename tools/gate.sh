@@ -5,6 +5,9 @@
 #      require a device smoke result for a build of HEAD (tools/device-smoke/results/*.json
 #      whose expect_version is dev-<short HEAD>) in which every check that passed in any
 #      earlier result still passes. Feature status in CHECKLIST.md does not matter.
+#      The results are local files, not in git: a checkout without tools/device-smoke/results
+#      (no test devices) skips this step and says so. Symlink that path to the directory that
+#      holds the receipts to share it between worktrees.
 #      server/ edge/ helper/ changes push on unit and PostgreSQL tests; their deploy is what
 #      the next device smoke checks (AGENTS.md "Regression gate").
 # Exit status is non-zero if anything fails.
@@ -26,7 +29,7 @@ step "server performance budgets on the seeded PostgreSQL (internal/perf/budgets
 if [ -n "${PAPERBOAT_PERF_DATABASE_DSN:-}" ]; then
   (cd server && go test -count=1 -timeout 30m -run TestPerformanceBudgetsOnSeededPostgres ./internal/app) || { echo "FAIL: performance budgets"; fail=1; }
 else
-  echo "skipped: set PAPERBOAT_PERF_DATABASE_DSN to an isolated *_test database (tools/perfdb.sh prints it on oracle)"
+  echo "skipped: set PAPERBOAT_PERF_DATABASE_DSN to an isolated *_test database (tools/perfdb.sh prints it on the database host)"
 fi
 
 step "no hardcoded domains (AGENTS.md)"
@@ -65,7 +68,10 @@ if git diff --name-only "$base" HEAD | grep -q '^cli/'; then
   fi
 fi
 
-if [ -n "$changed" ]; then
+if [ -n "$changed" ] && [ ! -d tools/device-smoke/results ]; then
+  step "device smoke for HEAD: skipped"
+  echo "skipped: no tools/device-smoke/results here (receipts are local, not in git); run tools/device-smoke/smoke.sh on the test devices to enforce this step"
+elif [ -n "$changed" ]; then
   step "device smoke for HEAD: no check that ever passed may fail"
   want="dev-$(git rev-parse --short HEAD)"
   python3 - "$want" <<'PY' || fail=1

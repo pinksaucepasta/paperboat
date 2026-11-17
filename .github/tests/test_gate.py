@@ -12,10 +12,13 @@ GATE = Path(__file__).resolve().parents[2] / "tools" / "gate.sh"
 
 
 class SmokePrerequisiteTest(unittest.TestCase):
-    def run_gate(self, checklist, smoke=None, go_status=0, history=(), runtime_changed=True, runtime_path="cli/runtime.go"):
+    def run_gate(self, checklist, smoke=None, go_status=0, history=(), runtime_changed=True, runtime_path="cli/runtime.go",
+                 results=True):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            (root / "tools/device-smoke/results").mkdir(parents=True)
+            (root / "tools").mkdir()
+            if results:
+                (root / "tools/device-smoke/results").mkdir(parents=True)
             (root / "console").mkdir()
             (root / "cli").mkdir()
             (root / "bin").mkdir()
@@ -94,6 +97,11 @@ esac
             with self.subTest(version=version, results=results):
                 result = self.run_gate("", {"expect_version": version, "results": results}, history=history)
                 self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
+
+    def test_checkout_without_local_results_skips_device_smoke(self):
+        result = self.run_gate("", results=False)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("skipped: no tools/device-smoke/results here", result.stdout)
 
     def test_nonruntime_changes_do_not_require_device_smoke(self):
         result = self.run_gate("", runtime_changed=False)
