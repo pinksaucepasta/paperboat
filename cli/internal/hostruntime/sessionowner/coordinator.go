@@ -101,7 +101,7 @@ func (c Coordinator) nativeState(ctx context.Context, d Descriptor) (service.Nat
 	if err != nil {
 		return service.NativeControllerStatus{}, err
 	}
-	controller, err := service.SessionOwnerController(d.Source.Platform, d.Instance, d.Generation, d.UID, c.Catalog.Runner)
+	controller, err := c.Catalog.controller(d)
 	if err != nil {
 		return service.NativeControllerStatus{}, err
 	}

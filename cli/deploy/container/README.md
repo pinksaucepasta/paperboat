@@ -4,8 +4,10 @@
 [operations](../../docs/operations.md#containers-pb-daemon---foreground)). It is one supervisor in Go,
 the only process manager: it checks the state tree, enrolls the machine on the first start from
 `PAPERBOAT_ENROLLMENT_CREDENTIAL` (a token from `pb machine add`) and runs `paperboat hostd` as the
-`paperboat` user (uid/gid `10001`). Hostd owns terminal PTYs, managed SSH channels, file transfers,
-previews and live relay or direct streams. There is no in-container updater: a new version is a new
+`paperboat` user (uid/gid `10001`). It also does what a service install gives hostd: it publishes the
+root-owned session owner descriptor under `/var/lib/paperboat/host`, runs the session owner as a child
+and serves hostd's start request for it with the updater's code. Hostd owns managed SSH channels, file
+transfers, previews and live relay or direct streams; the session owner holds the terminal PTYs. There is no in-container updater: a new version is a new
 image or binary and a restart.
 
 Any Linux container works: install `pb` with the one-liner (on a machine without systemd it only
@@ -17,6 +19,7 @@ The `/var/lib/paperboat` volume is mandatory and holds two ownership domains:
 | Path | Owner | Purpose |
 | --- | --- | --- |
 | `runtime/` and `hostd/` | `paperboat` UID/GID `10001`, mode `0700` | enrollment, durable workload state and the hostd capability token |
+| `host/` | root, mode `0755` | session owner descriptors and the pinned `pb` the owner runs |
 | `/var/lib/paperboat`, `/run/paperboat-updated` | root, mode `0755` | parents only |
 
 `/workspace` is a second persistent volume owned by the `paperboat` runtime user. Never mount
@@ -27,6 +30,14 @@ The root filesystem is read-only in the supplied Compose definition. Only the fi
 workspace volumes plus tmpfs `/run` and `/tmp` are writable. The supervisor pins the runtime paths
 (a deployment cannot select a socket, token or state path) and rejects unexpected ownership,
 symlinks and a malformed capability token.
+
+## Building the image
+
+From the repository root (the cli builds next to the relay and shared modules):
+
+```sh
+docker build -f cli/deploy/container/Dockerfile --build-arg PAPERBOAT_VERSION=2026.11.17.1 -t paperboat .
+```
 
 ## Self-hosted container
 

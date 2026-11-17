@@ -78,8 +78,15 @@ func foregroundFromEnv(environ func(string) string) (foregroundConfig, error) {
 // from PAPERBOAT_ENROLLMENT_CREDENTIAL, then runs hostd as the runtime user until a stop signal or hostd's own exit.
 // It never installs or changes a service. The return value is the process exit status.
 func RunForeground(ctx context.Context, stdout, stderr io.Writer) int {
+	// A stop signal during startup (pairing, the owner's start) ends it cleanly, not with the default kill that
+	// would orphan a child already started.
+	ctx, stopSignals := signal.NotifyContext(ctx, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
+	defer stopSignals()
 	fail := func(err error) int {
 		fmt.Fprintln(stderr, "paperboat container: "+err.Error())
+		if ctx.Err() != nil {
+			return 0 // a stop signal ended the start; the error above is what it interrupted
+		}
 		return foregroundExitConfig
 	}
 	config, err := foregroundFromEnv(os.Getenv)
@@ -123,8 +130,37 @@ func RunForeground(ctx context.Context, stdout, stderr io.Writer) int {
 	if config.machineID != "" && config.machineID != identity.MachineID {
 		return fail(errors.New("PAPERBOAT_MACHINE_ID is not the machine enrolled in this state volume; unset it or use a new volume"))
 	}
-	environ = foregroundEnvironment(environ, map[string]string{"PAPERBOAT_MACHINE_ID": identity.MachineID})
-	return superviseHostd(ctx, executable, account, environ, stdout, stderr)
+	shell := foregroundShell()
+	serveCtx, stopOwnerSocket := context.WithCancel(ctx)
+	defer stopOwnerSocket()
+	owners, catalogRoot, err := startForegroundOwners(ctx, serveCtx, executable, account, runtimeRoot, shell, filepath.Join(foregroundUpdatedDir, "control.sock"), stdout, stderr)
+	if err != nil {
+		return fail(err)
+	}
+	if ctx.Err() != nil {
+		stopOwnerSocket()
+		owners.stop(context.Background())
+		return 0
+	}
+	environ = foregroundEnvironment(environ, map[string]string{"PAPERBOAT_MACHINE_ID": identity.MachineID, "PAPERBOAT_SESSION_OWNER_CATALOG": catalogRoot, "PAPERBOAT_SHELL": shell})
+	status := superviseHostd(ctx, executable, account, environ, stdout, stderr)
+	// The control socket closes first, then the owners stop and refuse new starts: no request can begin a child
+	// that outlives the supervisor.
+	stopOwnerSocket()
+	owners.stop(context.Background())
+	return status
+}
+
+// foregroundShell is the account's login shell, as an absolute path with no symlink.
+func foregroundShell() string {
+	shell := "/bin/sh"
+	if _, err := os.Stat("/bin/bash"); err == nil {
+		shell = "/bin/bash"
+	}
+	if resolved, err := filepath.EvalSymlinks(shell); err == nil {
+		return resolved
+	}
+	return shell
 }
 
 // foregroundEnvironment returns base with the drop keys removed and set applied; it is KEY=value entries.
@@ -159,10 +195,7 @@ func ensureRuntimeUser() (*user.User, error) {
 	if _, err := user.Lookup("paperboat"); err == nil {
 		return nil, errors.New("the account name paperboat exists with another uid; remove it or give it uid " + id)
 	}
-	shell := "/bin/sh"
-	if _, err := os.Stat("/bin/bash"); err == nil {
-		shell = "/bin/bash"
-	}
+	shell := foregroundShell()
 	for path, line := range map[string]string{"/etc/group": "paperboat:x:" + id + ":\n", "/etc/passwd": "paperboat:x:" + id + ":" + id + ":Paperboat:" + foregroundWorkspace + ":" + shell + "\n"} {
 		file, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND, 0)
 		if err != nil {

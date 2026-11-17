@@ -26,6 +26,26 @@ type Catalog struct {
 	Root, ConfigRoot, User, Group, OwnerSID string
 	Maximum                                 int
 	Runner                                  service.Runner
+	// Process, when set, runs each owner as a child of the caller instead of through the platform's service
+	// manager (a container has none). Nil means the native service manager.
+	Process func(Descriptor) (service.Controller, error)
+}
+
+// controller returns the lifecycle controller of one owner generation.
+func (c Catalog) controller(d Descriptor) (service.Controller, error) {
+	if c.Process != nil {
+		return c.Process(d)
+	}
+	return service.SessionOwnerController(d.Source.Platform, d.Instance, d.Generation, d.UID, c.Runner)
+}
+
+// OwnerCommand is the one declaration of how an owner generation starts: its arguments and environment.
+func (c Catalog) OwnerCommand(d Descriptor) (args []string, environment map[string]string) {
+	args = []string{"daemon", "__runtime-session-owner", "--generation", d.Generation}
+	if runtime.GOOS == "windows" {
+		args = append(args, "--instance", d.Instance)
+	}
+	return args, map[string]string{"PAPERBOAT_SESSION_OWNER_CATALOG": c.Root, "PAPERBOAT_RUNTIME_STATE_ROOT": d.RuntimeRoot, "PAPERBOAT_WORKSPACE_ROOT": d.Workspace, "PAPERBOAT_SHELL": d.Shell}
 }
 
 func Find(root, generation string) (string, error) {
@@ -107,15 +127,12 @@ func (c Catalog) installer(d Descriptor, pending bool) (*service.Installer, erro
 	if c.validate() != nil || d.Validate() != nil || d.Source.Platform != runtime.GOOS {
 		return nil, ErrInvalid
 	}
-	controller, err := service.SessionOwnerController(d.Source.Platform, d.Instance, d.Generation, d.UID, c.Runner)
+	controller, err := c.controller(d)
 	if err != nil {
 		return nil, err
 	}
-	args := []string{"daemon", "__runtime-session-owner", "--generation", d.Generation}
-	if runtime.GOOS == "windows" {
-		args = append(args, "--instance", d.Instance)
-	}
-	config := service.Config{Platform: d.Source.Platform, Kind: service.SessionOwnerKind, Instance: d.Instance, Generation: d.Generation, ConfigRoot: c.ConfigRoot, Executable: d.Executable, ExecutableSHA256: d.Source.SHA256, ExecutableLength: d.Source.Length, User: c.User, Group: c.Group, Arguments: args, Environment: map[string]string{"PAPERBOAT_SESSION_OWNER_CATALOG": c.Root, "PAPERBOAT_RUNTIME_STATE_ROOT": d.RuntimeRoot, "PAPERBOAT_WORKSPACE_ROOT": d.Workspace, "PAPERBOAT_SHELL": d.Shell}, Controller: controller}
+	args, environment := c.OwnerCommand(d)
+	config := service.Config{Platform: d.Source.Platform, Kind: service.SessionOwnerKind, Instance: d.Instance, Generation: d.Generation, ConfigRoot: c.ConfigRoot, Executable: d.Executable, ExecutableSHA256: d.Source.SHA256, ExecutableLength: d.Source.Length, User: c.User, Group: c.Group, Arguments: args, Environment: environment, Controller: controller}
 	if pending {
 		return service.NewPending(config)
 	}
@@ -156,7 +173,7 @@ func (c Catalog) Publish(ctx context.Context, d Descriptor) error {
 				return prepareCatalogCapability(d)
 			}
 			// Never change executable authority while a registered owner may exist.
-			controller, e := service.SessionOwnerController(existing.Source.Platform, existing.Instance, existing.Generation, existing.UID, c.Runner)
+			controller, e := c.controller(existing)
 			if e != nil {
 				return e
 			}
@@ -203,7 +220,7 @@ func (c Catalog) Install(ctx context.Context, d Descriptor) error {
 	if err != nil {
 		return err
 	}
-	controller, err := service.SessionOwnerController(d.Source.Platform, d.Instance, d.Generation, d.UID, c.Runner)
+	controller, err := c.controller(d)
 	if err != nil {
 		return err
 	}
@@ -252,7 +269,7 @@ func (c Catalog) Retire(ctx context.Context, d Descriptor, quiescent func(contex
 	if err != nil {
 		return err
 	}
-	controller, err := service.SessionOwnerController(d.Source.Platform, d.Instance, d.Generation, d.UID, c.Runner)
+	controller, err := c.controller(d)
 	if err != nil {
 		return err
 	}

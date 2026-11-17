@@ -9,6 +9,10 @@ test -f "$compose"
 test ! -e deploy/container/entrypoint.sh
 
 test "$(grep -c '^FROM .*@sha256:[0-9a-f]\{64\}' "$dockerfile")" -eq 2
+# The image builds from the repository root: cli needs the relay and shared modules next to it.
+grep -F 'COPY cli/go.mod cli/go.sum cli/' "$dockerfile" >/dev/null
+grep -F 'COPY relay relay' "$dockerfile" >/dev/null
+grep -F 'COPY shared shared' "$dockerfile" >/dev/null
 grep -F 'useradd --uid 10001' "$dockerfile" >/dev/null
 grep -F 'COPY --from=build /out/pb /usr/local/bin/pb' "$dockerfile" >/dev/null
 grep -F 'ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/pb", "daemon", "--foreground"]' "$dockerfile" >/dev/null

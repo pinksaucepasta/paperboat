@@ -10,12 +10,14 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sync"
 	"syscall"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/buildinfo"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/autoupdate"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/installsource"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/sessionowner"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/updateflow"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/workerupdate"
 	"github.com/pinksaucepasta/paperboat/cli/internal/ospeer"
@@ -172,19 +174,7 @@ func (s *controlServer) respond(writer io.Writer, response ControlResponse) erro
 
 func (s *Service) controlRequestWithRequest(ctx context.Context, request ControlRequest) (ControlResponse, error) {
 	if request.Operation == "session-owner-start" {
-		s.controlMu.Lock()
-		defer s.controlMu.Unlock()
-		if s.config.SessionOwners == nil {
-			return ControlResponse{}, ErrUnavailable
-		}
-		coordinator, err := s.config.SessionOwners(ctx)
-		if err != nil {
-			return ControlResponse{}, err
-		}
-		if err := coordinator.Ensure(ctx, request.Generation); err != nil {
-			return ControlResponse{}, err
-		}
-		return ControlResponse{Schema: ControlProtocolV1, Status: "ok"}, nil
+		return startSessionOwner(ctx, &s.controlMu, s.config.SessionOwners, request.Generation)
 	}
 	if err := s.requireCommittedSource(); err != nil {
 		response := ControlResponse{Schema: ControlProtocolV1, Status: "ok", Pending: errors.Is(err, ErrInstallationPending), UpdaterVersion: buildinfo.Version}
@@ -259,6 +249,42 @@ func (s *Service) controlRequestWithRequest(ctx context.Context, request Control
 	default:
 		return ControlResponse{}, ErrInvalidControl
 	}
+}
+
+// startSessionOwner runs the session-owner-start operation: it starts one generation of the enrolled account's
+// session owner through the coordinator the caller resolves.
+func startSessionOwner(ctx context.Context, mu sync.Locker, owners func(context.Context) (sessionowner.Coordinator, error), generation string) (ControlResponse, error) {
+	mu.Lock()
+	defer mu.Unlock()
+	if owners == nil {
+		return ControlResponse{}, ErrUnavailable
+	}
+	coordinator, err := owners(ctx)
+	if err != nil {
+		return ControlResponse{}, err
+	}
+	if err := coordinator.Ensure(ctx, generation); err != nil {
+		return ControlResponse{}, err
+	}
+	return ControlResponse{Schema: ControlProtocolV1, Status: "ok"}, nil
+}
+
+// ServeSessionOwnerStart answers only session-owner-start on the control socket until ctx ends. A host with no
+// updater process (a container) calls it so hostd's start request is served by the same code the updater runs.
+func ServeSessionOwnerStart(ctx context.Context, socketPath string, uid, gid int, owners func(context.Context) (sessionowner.Coordinator, error)) error {
+	var mu sync.Mutex
+	server := controlServer{socketPath: socketPath, uid: uid, gid: gid, invokeRequest: func(ctx context.Context, request ControlRequest) (ControlResponse, error) {
+		if request.Operation != "session-owner-start" {
+			return ControlResponse{}, ErrUnavailable
+		}
+		return startSessionOwner(ctx, &mu, owners, request.Generation)
+	}}
+	listener, err := server.listen()
+	if err != nil {
+		return err
+	}
+	go server.serve(ctx, listener)
+	return nil
 }
 
 // All control operations report the durable activation outcome. A missing

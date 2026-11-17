@@ -258,8 +258,12 @@ Any Linux container can run Paperboat without systemd. `pb daemon --foreground` 
 container's main command, like `tailscaled`: one supervisor that checks the state tree, enrolls
 the machine on its first start and runs `hostd` (which owns terminals, managed SSH, file
 transfers, previews and tunnels) as an unprivileged runtime user (uid 10001, `paperboat`,
-created in a plain container, baked into the supplied image). It never installs or changes a
-service; `SIGTERM` drains hostd and exits 0, and hostd ending by itself exits with its status.
+created in a plain container, baked into the supplied image). It provides what a service install
+and systemd give hostd: it publishes the root-owned session owner descriptor, starts the session
+owner (`pb daemon __runtime-session-owner`, which owns the terminal PTYs) as a child, and answers
+hostd's start request for it on the control socket with the updater's own code. It never installs
+or changes a service; `SIGTERM` drains hostd, stops the session owner and exits 0, and hostd
+ending by itself exits with its status.
 
 ```sh
 curl -fsSL <installer URL> | sh          # on a machine without systemd: installs pb, changes nothing else
@@ -276,7 +280,8 @@ with an init process (`docker run --init`) so orphaned processes are reaped. Wit
 neither changes anything else.
 
 There is no in-container updater: a new version is a new image or binary and a container
-restart, which is supervisor-class maintenance. Use the supplied
+restart, which is supervisor-class maintenance. A start with a new `pb` retires the replaced
+version's session owner records and pinned copy; terminal history stays readable. Use the supplied
 [container deployment guide](../deploy/container/README.md) and Compose definitions; they make the
 root filesystem read-only and publish no host port.
 

@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/buildinfo"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/service"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/sessionowner"
 )
 
 func envMap(values map[string]string) func(string) string {
@@ -173,5 +175,64 @@ func TestInstallBinaryOnlyCopiesThePbAndNothingElse(t *testing.T) {
 	}
 	if _, err := installBinaryOnly(source, "relative/dir", &stderr); err == nil {
 		t.Fatal("a relative install directory was accepted")
+	}
+}
+
+func TestOwnerEnvironmentCarriesNothingOfTheContainers(t *testing.T) {
+	t.Setenv("PAPERBOAT_ENROLLMENT_CREDENTIAL", "secret-token")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "secret-key")
+	t.Setenv("PATH", "/custom/bin")
+	got := ownerEnvironment(&user.User{Username: "paperboat", HomeDir: "/workspace"}, map[string]string{"PAPERBOAT_SHELL": "/bin/sh"})
+	joined := strings.Join(got, "\n")
+	for _, secret := range []string{"secret-token", "secret-key", "ENROLLMENT"} {
+		if strings.Contains(joined, secret) {
+			t.Fatalf("the owner environment carries %q: %v", secret, got)
+		}
+	}
+	for _, want := range []string{"PATH=/custom/bin", "HOME=/workspace", "USER=paperboat", "PAPERBOAT_SHELL=/bin/sh"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("missing %q in %v", want, got)
+		}
+	}
+}
+
+func TestForegroundOwnersKeepOneControllerPerGeneration(t *testing.T) {
+	owners := &foregroundOwners{owners: map[string]*foregroundOwner{}}
+	account := &user.User{Username: "paperboat", HomeDir: "/workspace"}
+	d := sessionowner.Descriptor{Generation: strings.Repeat("a", 32), UID: 1, GID: 1, Executable: "/bin/true"}
+	first, err := owners.controller(sessionowner.Catalog{Root: "/catalog"}, d, account, io.Discard, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second, err := owners.controller(sessionowner.Catalog{Root: "/catalog"}, d, account, io.Discard, io.Discard); err != nil || second != first {
+		t.Fatalf("a second request for the same generation made another controller (%v), so the first child would be lost", err)
+	}
+	owners.stop(context.Background())
+	if _, err := owners.controller(sessionowner.Catalog{Root: "/catalog"}, d, account, io.Discard, io.Discard); err == nil {
+		t.Fatal("a controller was handed out after stop, so a late start request could begin a child that outlives the supervisor")
+	}
+}
+
+func TestForegroundOwnerStartsOnTheLatestPublishedExecutable(t *testing.T) {
+	owners := &foregroundOwners{owners: map[string]*foregroundOwner{}}
+	account := &user.User{Username: "paperboat", HomeDir: "/workspace"}
+	d := sessionowner.Descriptor{Generation: strings.Repeat("a", 32), UID: 1, GID: 1, Executable: "/old/pb"}
+	controller, err := owners.controller(sessionowner.Catalog{Root: "/catalog"}, d, account, io.Discard, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.Executable = "/new/pb"
+	if _, err := owners.controller(sessionowner.Catalog{Root: "/catalog"}, d, account, io.Discard, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if command := controller.(*service.ProcessController).Command(); command.Path != "/new/pb" {
+		t.Fatalf("a republished generation starts %q, not its latest executable", command.Path)
+	}
+}
+
+func TestForegroundShellIsAnAbsolutePathWithoutSymlinks(t *testing.T) {
+	shell := foregroundShell()
+	if resolved, err := filepath.EvalSymlinks(shell); err != nil || resolved != shell {
+		t.Fatalf("shell %q resolves to %q, %v", shell, resolved, err)
 	}
 }

@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 )
 
@@ -30,6 +31,33 @@ func sessionOwnerCatalogAt(paths installPaths, request Request) sessionowner.Cat
 }
 
 func NativeSessionOwnerConfig(ctx context.Context, request Request) (sessionowner.Catalog, sessionowner.Descriptor, error) {
+	if request.UID < 0 || request.GID < 0 || request.User == "" || request.Group == "" {
+		return sessionowner.Catalog{}, sessionowner.Descriptor{}, ErrInvalidRequest
+	}
+	return nativeSessionOwnerConfigAt(ctx, request, platformPaths(request.UID))
+}
+
+// ForegroundSessionOwner is NativeSessionOwnerConfig for a host with no service manager (a container): the
+// catalog and the pinned executable live under root, a protected directory of the caller's choosing, instead of
+// the platform's install layout. It publishes nothing; the caller starts the owner.
+func ForegroundSessionOwner(ctx context.Context, request Request, root string) (sessionowner.Catalog, sessionowner.Descriptor, error) {
+	if request.UID < 0 || request.GID < 0 || request.User == "" || request.Group == "" || !filepath.IsAbs(root) || filepath.Clean(root) != root {
+		return sessionowner.Catalog{}, sessionowner.Descriptor{}, ErrInvalidRequest
+	}
+	return nativeSessionOwnerConfigAt(ctx, request, foregroundPaths(request, root))
+}
+
+func foregroundPaths(request Request, root string) installPaths {
+	return installPaths{instance: "u" + strconv.Itoa(request.UID), root: root, workerRollback: filepath.Join(root, "releases", "pb.rollback")}
+}
+
+// PruneForegroundSessionOwnerPins removes the pinned executables of replaced image versions: every pin that
+// neither the running version nor a catalog descriptor names (the same sweep an install runs).
+func PruneForegroundSessionOwnerPins(ctx context.Context, catalog sessionowner.Catalog, request Request, root string) error {
+	return pruneSessionOwnerPinsAt(ctx, catalog, foregroundPaths(request, root), request.UID, request.StateRoot, request.Source.SHA256)
+}
+
+func nativeSessionOwnerConfigAt(ctx context.Context, request Request, paths installPaths) (sessionowner.Catalog, sessionowner.Descriptor, error) {
 	if ctx == nil {
 		return sessionowner.Catalog{}, sessionowner.Descriptor{}, ErrInvalidRequest
 	}
@@ -42,11 +70,7 @@ func NativeSessionOwnerConfig(ctx context.Context, request Request) (sessionowne
 	if request.Source.Validate() != nil || request.Source.Platform != runtime.GOOS || request.Source.Architecture != runtime.GOARCH {
 		return sessionowner.Catalog{}, sessionowner.Descriptor{}, ErrInvalidRequest
 	}
-	c, instance, err := sessionOwnerCatalog(request)
-	if err != nil {
-		return c, sessionowner.Descriptor{}, err
-	}
-	paths := platformPaths(request.UID)
+	c, instance := sessionOwnerCatalogAt(paths, request), paths.instance
 	pin := filepath.Join(filepath.Dir(paths.workerRollback), "pins", request.Source.SHA256, "pb")
 	if _, err := os.Lstat(pin); err == nil {
 		if err := request.Source.Verify(pin); err != nil {
