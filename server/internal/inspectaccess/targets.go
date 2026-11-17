@@ -3,13 +3,10 @@ package inspectaccess
 import (
 	"context"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/shared/inspector"
 )
 
-type Target struct {
-	ResourceID string `json:"resource_id"`
-	RouteID    string `json:"route_id"`
-	RouteName  string `json:"route_name"`
-}
+type Target = inspector.Target
 
 // Targets exposes bounded routing metadata only to principals holding the exact
 // requested inspector action. It does not grant application use or management.

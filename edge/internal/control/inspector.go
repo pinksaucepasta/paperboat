@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
+	"github.com/pinksaucepasta/paperboat/shared/inspector"
 )
 
 const InspectorAccessPath = "/v1/edge/inspector/access"
@@ -27,41 +28,9 @@ type InspectorAccessRequest struct {
 	Action          string `json:"action"`
 }
 
-type InspectorCarrier struct {
-	AccountID            string `json:"account_id"`
-	MachineID            string `json:"machine_id"`
-	TunnelID             string `json:"tunnel_id"`
-	ConnectorID          string `json:"connector_id"`
-	SessionID            string `json:"session_id"`
-	ProcessGeneration    uint64 `json:"process_generation"`
-	Generation           uint64 `json:"generation"`
-	RouteID              string `json:"route_id"`
-	AssignmentID         string `json:"assignment_id"`
-	AssignmentGeneration uint64 `json:"assignment_generation"`
-	RouteGeneration      uint64 `json:"route_generation"`
-	LeaseGeneration      uint64 `json:"lease_generation,omitempty"`
-	AttachmentGeneration uint64 `json:"attachment_generation,omitempty"`
-	OwnerMachineID       string `json:"owner_machine_id,omitempty"`
-	ConfigContentHash    string `json:"config_content_hash"`
-	EdgeNodeID           string `json:"edge_node_id"`
-	EdgeProcessEpoch     string `json:"edge_process_epoch"`
-}
+type InspectorCarrier = inspector.Carrier
 
-type InspectorAccess struct {
-	CredentialID       string           `json:"credential_id"`
-	OwnerAccountID     string           `json:"owner_account_id"`
-	MachineID          string           `json:"machine_id"`
-	MachineGeneration  uint64           `json:"machine_generation"`
-	ResourceKind       string           `json:"resource_kind"`
-	ResourceID         string           `json:"resource_id"`
-	RouteID            string           `json:"route_id"`
-	ResourceGeneration uint64           `json:"resource_generation"`
-	RouteGeneration    uint64           `json:"route_generation"`
-	TargetGeneration   uint64           `json:"target_generation"`
-	ExpiresAt          time.Time        `json:"expires_at"`
-	EdgeURL            string           `json:"edge_url"`
-	Carrier            InspectorCarrier `json:"carrier"`
-}
+type InspectorAccess = inspector.Access
 
 type InspectorAccessClient struct {
 	HTTP         *HTTPClient

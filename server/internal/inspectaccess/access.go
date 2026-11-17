@@ -4,6 +4,8 @@ import (
 	"context"
 	"net/url"
 	"strings"
+
+	"github.com/pinksaucepasta/paperboat/shared/inspector"
 	"time"
 )
 
@@ -21,40 +23,8 @@ type AccessRequest struct {
 	EdgeNodeID         string `json:"edge_node_id,omitempty"`
 	EdgeProcessEpoch   string `json:"process_epoch,omitempty"`
 }
-type CarrierRoute struct {
-	LeaseGeneration      uint64 `json:"lease_generation"`
-	AttachmentGeneration uint64 `json:"attachment_generation"`
-	OwnerMachineID       string `json:"owner_machine_id"`
-	MachineID            string `json:"machine_id"`
-	RouteGeneration      uint64 `json:"route_generation"`
-	AccountID            string `json:"account_id"`
-	TunnelID             string `json:"tunnel_id"`
-	ConnectorID          string `json:"connector_id"`
-	SessionID            string `json:"session_id"`
-	ProcessGeneration    uint64 `json:"process_generation"`
-	Generation           uint64 `json:"generation"`
-	RouteID              string `json:"route_id"`
-	EdgeNodeID           string `json:"edge_node_id"`
-	EdgeProcessEpoch     string `json:"edge_process_epoch"`
-	AssignmentID         string `json:"assignment_id"`
-	AssignmentGeneration uint64 `json:"assignment_generation"`
-	ConfigContentHash    string `json:"config_content_hash"`
-}
-type AccessResult struct {
-	CredentialID       string       `json:"credential_id"`
-	OwnerAccountID     string       `json:"owner_account_id"`
-	MachineID          string       `json:"machine_id"`
-	MachineGeneration  uint64       `json:"machine_generation"`
-	ResourceKind       string       `json:"resource_kind"`
-	ResourceID         string       `json:"resource_id"`
-	RouteID            string       `json:"route_id"`
-	ResourceGeneration uint64       `json:"resource_generation"`
-	RouteGeneration    uint64       `json:"route_generation"`
-	TargetGeneration   uint64       `json:"target_generation"`
-	ExpiresAt          time.Time    `json:"expires_at"`
-	EdgeURL            string       `json:"edge_url"`
-	Carrier            CarrierRoute `json:"carrier"`
-}
+type CarrierRoute = inspector.Carrier
+type AccessResult = inspector.Access
 
 func (s *Service) ResolveAccess(ctx context.Context, in AccessRequest) (AccessResult, error) {
 	if ctx == nil || (in.Transport != "native" && in.Transport != "edge") || (in.Transport == "native" && !validID(in.CLIClientSessionID)) {

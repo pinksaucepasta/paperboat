@@ -6,43 +6,12 @@ import (
 	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 	"net/http"
 	"net/url"
-	"time"
+
+	"github.com/pinksaucepasta/paperboat/shared/inspector"
 )
 
-type InspectorCarrier struct {
-	LeaseGeneration      uint64 `json:"lease_generation"`
-	AttachmentGeneration uint64 `json:"attachment_generation"`
-	OwnerMachineID       string `json:"owner_machine_id"`
-	MachineID            string `json:"machine_id"`
-	RouteGeneration      uint64 `json:"route_generation"`
-	AccountID            string `json:"account_id"`
-	TunnelID             string `json:"tunnel_id"`
-	ConnectorID          string `json:"connector_id"`
-	SessionID            string `json:"session_id"`
-	ProcessGeneration    uint64 `json:"process_generation"`
-	Generation           uint64 `json:"generation"`
-	RouteID              string `json:"route_id"`
-	EdgeNodeID           string `json:"edge_node_id"`
-	EdgeProcessEpoch     string `json:"edge_process_epoch"`
-	AssignmentID         string `json:"assignment_id"`
-	AssignmentGeneration uint64 `json:"assignment_generation"`
-	ConfigContentHash    string `json:"config_content_hash"`
-}
-type InspectorAccess struct {
-	CredentialID       string           `json:"credential_id"`
-	OwnerAccountID     string           `json:"owner_account_id"`
-	MachineID          string           `json:"machine_id"`
-	MachineGeneration  uint64           `json:"machine_generation"`
-	ResourceKind       string           `json:"resource_kind"`
-	ResourceID         string           `json:"resource_id"`
-	RouteID            string           `json:"route_id"`
-	ResourceGeneration uint64           `json:"resource_generation"`
-	RouteGeneration    uint64           `json:"route_generation"`
-	TargetGeneration   uint64           `json:"target_generation"`
-	ExpiresAt          time.Time        `json:"expires_at"`
-	EdgeURL            string           `json:"edge_url"`
-	Carrier            InspectorCarrier `json:"carrier"`
-}
+type InspectorCarrier = inspector.Carrier
+type InspectorAccess = inspector.Access
 
 func (c *Client) ResolveInspectorAccess(ctx context.Context, token, kind, resource, route, action, transport string) (InspectorAccess, error) {
 	var out InspectorAccess
@@ -63,11 +32,7 @@ func (c *Client) RevokeInspectorCredential(ctx context.Context, id string) error
 	return c.do(ctx, http.MethodDelete, "/v1/inspector/credentials/"+url.PathEscape(id), nil, nil)
 }
 
-type InspectorTarget struct {
-	ResourceID string `json:"resource_id"`
-	RouteID    string `json:"route_id"`
-	RouteName  string `json:"route_name"`
-}
+type InspectorTarget = inspector.Target
 
 func (c *Client) ResolveInspectorTargets(ctx context.Context, selector, action string) ([]InspectorTarget, error) {
 	var out []InspectorTarget
