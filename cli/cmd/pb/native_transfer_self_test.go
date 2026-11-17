@@ -26,8 +26,8 @@ func TestNativeFileTransferClientSkipsConnectingToSameMachine(t *testing.T) {
 	}
 }
 
-// The server's Automatic policy sends max_file_bytes 0 with automatic_max_batch_bytes; a lease sized from
-// MaxFileBytes asked the daemon for 0 bytes, so every pb connect printed "File transfer is unavailable".
+// The server's Automatic policy sends only automatic_max_batch_bytes; a lease sized from
+// the policy's file bound asked the daemon for 0 bytes, so every pb connect printed "File transfer is unavailable".
 func TestConnectFileTransferLeaseFitsTheAutomaticPolicy(t *testing.T) {
 	policy := api.FileTransferPolicy{AutomaticMaxBatchBytes: api.AutomaticTransferLimit}
 	request := fileTransferLeaseRequest("machine_1", "env_1", 1, "operation_1", "token", "session_1", time.Now().Add(2*time.Minute), policy, api.TransferDeclaration{})

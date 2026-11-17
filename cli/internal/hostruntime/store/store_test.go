@@ -853,6 +853,48 @@ func TestFileTransferTableAcceptsLargeFiles(t *testing.T) {
 	}
 }
 
+// Zero compat: a store created with the old 50 MiB per-file CHECK is refused at open (the machine is reinstalled),
+// never accepted under the old bound; a store a retired forward migration left at goose version 2 still opens.
+func TestOldFileTransferTableIsRefusedAndAGooseAheadStoreOpens(t *testing.T) {
+	state, root := openStore(t, nil)
+	for _, statement := range []string{
+		`INSERT INTO goose_db_version(version_id,is_applied) VALUES(2,1)`,
+	} {
+		if _, err := state.db.Exec(statement); err != nil {
+			t.Fatalf("%s: %v", statement, err)
+		}
+	}
+	if err := state.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := Open(context.Background(), Config{Root: root})
+	if err != nil {
+		t.Fatalf("a store ahead of the shipped migrations did not open: %v", err)
+	}
+	var oldTable string
+	for _, line := range strings.Split(canonicalSchema, "\n") {
+		if strings.HasPrefix(line, "CREATE TABLE file_transfers(") {
+			oldTable = strings.Replace(strings.TrimSuffix(line, ";"), "size >= 0", "size BETWEEN 0 AND 52428800", 1)
+		}
+	}
+	if !strings.Contains(oldTable, "52428800") {
+		t.Fatal("the canonical schema no longer has the file_transfers table on one line")
+	}
+	for _, statement := range []string{`DROP TABLE file_transfers`, oldTable,
+		`CREATE INDEX file_transfers_pending ON file_transfers(delivery_client_id,session_id,created_at) WHERE state='pending'`,
+		`CREATE INDEX file_transfers_expiry ON file_transfers(expires_at)`} {
+		if _, err := reopened.db.Exec(statement); err != nil {
+			t.Fatalf("%s: %v", statement, err)
+		}
+	}
+	if err := reopened.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Open(context.Background(), Config{Root: root}); !errors.Is(err, ErrCorrupt) {
+		t.Fatalf("a store with the old 50 MiB CHECK opened or failed differently: %v", err)
+	}
+}
+
 // N11: a burst of typing records its outcomes in one transaction; a row already pruned from the journal is skipped.
 func TestInputDecisionsAreUpdatedTogether(t *testing.T) {
 	state, _ := openStore(t, nil)

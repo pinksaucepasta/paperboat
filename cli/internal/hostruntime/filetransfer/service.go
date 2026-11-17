@@ -182,8 +182,9 @@ func (s *Service) Create(ctx context.Context, request CreateRequest) ([]store.Fi
 	switch {
 	case request.TransferMode == "unlimited":
 		maxFile, maxBatch, spool = math.MaxInt64, math.MaxInt64, math.MaxInt64
-	case request.MaxBytes > 0:
-		maxFile, maxBatch, spool = request.MaxBytes, request.MaxBytes, max(spool, request.MaxBytes)
+	case request.TransferMode == "automatic" && request.MaxBytes > 0:
+		bound := min(request.MaxBytes, AutomaticTransferLimit)
+		maxFile, maxBatch, spool = bound, bound, max(spool, bound)
 	}
 	// Only the receiver knows which names it can store; a relayed batch is checked for the destination by the sender.
 	platform := "other"

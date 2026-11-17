@@ -332,8 +332,8 @@ func batchTotal(sources []filetransfer.Source) int64 {
 }
 
 // fileTransferLeaseRequest is the one daemon lease request for every native transfer (pb send, pb connect,
-// transfer commands). The lease covers the policy bound (the Automatic policy sends max_file_bytes 0 and
-// automatic_max_batch_bytes) or the declared total when larger, plus room for the transfer's own framing,
+// transfer commands). The lease covers the policy bound (automatic_max_batch_bytes) or the declared total when
+// larger, plus room for the transfer's own framing,
 // capped at the daemon's 1 TiB lease limit so an Unlimited send of that size is not refused locally.
 func fileTransferLeaseRequest(machineID, environmentID string, generation uint64, operationID, credential, accessSessionID string, deadline time.Time, policy api.FileTransferPolicy, declared api.TransferDeclaration) localapi.FileTransferRequest {
 	limit, _ := policy.Bounds()
