@@ -1,8 +1,8 @@
 #!/bin/sh
 # C021 (Linux): `pb uninstall` on an enrolled machine removes every Paperboat service, unit, binary,
 # state, configuration, credential and process, and keeps only the Inbox.
-#   tools/qualify-uninstall-inventory.sh --run "ssh pbvm2 sudo docker exec -i CT" --user pbt \
-#     --as-user "ssh pbvm2 sudo docker exec -i -u pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000 CT"
+#   tools/qualify-uninstall-inventory.sh --run "ssh host sudo docker exec -i CT" --user pbt \
+#     --as-user "ssh host sudo docker exec -i -u pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000 CT"
 # --run runs a command as root on the machine (a throwaway container); --as-user runs it as the enrolled user.
 set -eu
 run='' user='' as_user=''

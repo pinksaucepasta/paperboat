@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Prints PAPERBOAT_PERF_DATABASE_DSN for the server performance budgets (tools/gate.sh), creating the database
-# in the isolated test PostgreSQL on oracle if needed. Never point it at production: the check seeds and
+# in the isolated test PostgreSQL on the database host if needed. Never point it at production: the check seeds and
 # truncates the database it is given. Usage: export PAPERBOAT_PERF_DATABASE_DSN=$(tools/perfdb.sh)
 set -euo pipefail
 db=paperboat_perf_test

@@ -1,9 +1,9 @@
 #!/bin/sh
 # F6-05 (full disk): a receiver whose Inbox cannot hold a send refuses it early with a clear message.
 # The receiver's Inbox is moved onto a 4 MiB tmpfs for the test and restored on every exit path.
-#   tools/qualify-full-disk.sh --receiver anvit@hp --sender-command "<command that runs a shell on the sender>" --receiver-name hp
+#   tools/qualify-full-disk.sh --receiver user@host --sender-command "<command that runs a shell on the sender>" --receiver-name host
 # The receiver needs passwordless sudo (mount/umount of its own temporary directory only).
-# The sender command receives a shell script on stdin, e.g. "ssh -o BatchMode=yes anvit@other bash -s".
+# The sender command receives a shell script on stdin, e.g. "ssh -o BatchMode=yes user@other bash -s".
 set -eu
 receiver='' sender='' name='' size_mib=20
 while [ "$#" -gt 0 ]; do

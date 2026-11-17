@@ -2,7 +2,7 @@
 # F2-05: a machine removed from the account loses access at once and says so; its credential
 # refresh does not spin. A throwaway computer (fresh systemd container) is paired with a build of
 # the CLI, revoked from an owner computer by its exact name, and then must report it clearly.
-#   DOCKER="sudo -n docker" tools/qualify-revoked-machine.sh --pb /path/to/pb --owner anvit@hp
+#   DOCKER="sudo -n docker" tools/qualify-revoked-machine.sh --pb /path/to/pb --owner user@host
 # The owner computer needs a signed-in pb (key ssh); nothing but the throwaway's own record is touched.
 set -eu
 base=ubuntu:24.04 platform='' pb='' owner=''

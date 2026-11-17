@@ -2,7 +2,7 @@
 # C066: a changed SSH host key is refused, `pb ssh trust-host --fingerprint` accepts exactly the pending one,
 # and managed SSH works again. A throwaway container machine (with sshd) is the target; its host keys are
 # regenerated inside the container, so no real machine's SSH identity is touched.
-#   DOCKER="sudo -n docker" tools/qualify-ssh-trust-host.sh --pb /path/to/arm64/pb --owner-command "ssh -o BatchMode=yes anvit@hp"
+#   DOCKER="sudo -n docker" tools/qualify-ssh-trust-host.sh --pb /path/to/arm64/pb --owner-command "ssh -o BatchMode=yes user@host"
 # The owner computer runs pb ssh; it needs a signed-in pb. --owner-command is how a shell on it is reached
 # (its arguments are one command string); --prefix names the throwaway (default lanea-); its record is revoked at the end by its exact name.
 set -eu
