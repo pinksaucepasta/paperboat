@@ -87,7 +87,7 @@ func RunForeground(ctx context.Context, stdout, stderr io.Writer) int {
 		return fail(err)
 	}
 	if os.Geteuid() != 0 {
-		return fail(errors.New("pb daemon --foreground must start as root: it runs hostd as an unprivileged runtime user"))
+		return fail(errors.New("pb daemon --foreground must start as root: it runs the Paperboat service as an unprivileged runtime user"))
 	}
 	executable, err := os.Executable()
 	if err == nil {
@@ -195,21 +195,21 @@ func prepareForegroundState(runtimeRoot, tokenFile string) error {
 	if _, err := os.Lstat(tokenFile); errors.Is(err, os.ErrNotExist) {
 		secret := make([]byte, 32)
 		if _, err := rand.Read(secret); err != nil {
-			return fmt.Errorf("creating the hostd capability token failed: %w", err)
+			return fmt.Errorf("creating the service capability token failed: %w", err)
 		}
 		file, err := os.OpenFile(tokenFile, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 		if err != nil {
-			return fmt.Errorf("creating the hostd capability token failed: %w", err)
+			return fmt.Errorf("creating the service capability token failed: %w", err)
 		}
 		_, writeErr := file.Write(secret)
 		chownErr := file.Chown(foregroundUID, foregroundUID)
 		if err := errors.Join(writeErr, chownErr, file.Close()); err != nil {
-			return fmt.Errorf("creating the hostd capability token failed: %w", err)
+			return fmt.Errorf("creating the service capability token failed: %w", err)
 		}
 	}
 	info, err := os.Lstat(tokenFile)
 	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm() != 0o600 || info.Size() != 32 || !ownedBy(info, foregroundUID, foregroundUID) {
-		return errors.New("unsafe hostd capability token: remove " + tokenFile + " and restart to create a new one")
+		return errors.New("unsafe service capability token: remove " + tokenFile + " and restart to create a new one")
 	}
 	return nil
 }
@@ -299,7 +299,7 @@ func superviseHostd(ctx context.Context, executable string, account *user.User, 
 		err = command.Start()
 	}
 	if err != nil {
-		fmt.Fprintln(stderr, "paperboat container: starting hostd failed: "+err.Error())
+		fmt.Fprintln(stderr, "paperboat container: starting the Paperboat service failed: "+err.Error())
 		return foregroundExitConfig
 	}
 	exited := make(chan error, 1)

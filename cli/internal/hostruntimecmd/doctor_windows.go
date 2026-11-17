@@ -137,7 +137,7 @@ func collectWindowsDoctor(ctx context.Context) doctorReport {
 		return report
 	}
 	add("hostd_lifecycle", "ready", "The Windows host supervisor is active.", "")
-	add("runtime_worker", "ready", fmt.Sprintf("The Windows runtime worker is active at fence epoch %d.", status.Epoch), "")
+	add("runtime_worker", "ready", fmt.Sprintf("Paperboat's runtime on this machine is active (fence epoch %d).", status.Epoch), "")
 	return report
 }
 

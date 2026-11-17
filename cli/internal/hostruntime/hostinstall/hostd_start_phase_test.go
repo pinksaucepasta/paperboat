@@ -20,10 +20,10 @@ func TestHostdStartPhaseNamesEachStepOfTheStart(t *testing.T) {
 		err    error
 		want   string
 	}{
-		"owner not serving":  {err: pipe, want: "owner process does not answer"},
-		"no worker":          {status: hostdproto.Status{State: hostdproto.StateEmpty}, want: "no runtime worker has registered"},
-		"worker registered":  {status: hostdproto.Status{State: hostdproto.StateCandidate, WorkerID: "runtime-1"}, want: "runtime-1 registered but was not activated"},
-		"runtime starting":   {status: hostdproto.Status{State: hostdproto.StateActive, WorkerID: "runtime-1"}, want: "runtime has not finished starting"},
+		"owner not serving":  {err: pipe, want: "service does not answer yet"},
+		"no worker":          {status: hostdproto.Status{State: hostdproto.StateEmpty}, want: "its runtime has not registered"},
+		"worker registered":  {status: hostdproto.Status{State: hostdproto.StateCandidate, WorkerID: "runtime-1"}, want: "runtime runtime-1 registered but was not activated"},
+		"runtime starting":   {status: hostdproto.Status{State: hostdproto.StateActive, WorkerID: "runtime-1"}, want: "has not finished starting"},
 		"runtime not served": {status: hostdproto.Status{State: hostdproto.StateActive, WorkerID: "runtime-1", LastHeartbeatUnixMilli: now.Add(-7 * time.Second).UnixMilli()}, want: "last heartbeat 7s ago"},
 	} {
 		got := hostdStartPhase(test.status, test.err, now)

@@ -71,7 +71,7 @@ func NewCommand() *cobra.Command {
 	root.Version = buildinfo.Version
 	root.PersistentFlags().String("config", "", "configuration file")
 	root.PersistentFlags().String("server", "", "Paperboat server URL")
-	root.Flags().Bool("foreground", false, "run hostd in the foreground as a container's main command (Linux)")
+	root.Flags().Bool("foreground", false, "run the Paperboat service in the foreground as a container's main command (Linux)")
 	localDaemon := root.RunE
 	root.RunE = func(command *cobra.Command, args []string) error {
 		if foreground, _ := command.Flags().GetBool("foreground"); foreground {

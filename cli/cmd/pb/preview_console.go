@@ -271,7 +271,7 @@ func (m previewConsoleModel) content() string {
 		fmt.Fprintf(&b, "  %s\n\n", m.pollError)
 	}
 	if m.prompt == "background" {
-		fmt.Fprintf(&b, "  Keep running for (maximum 24h): %s\n  Stops when paperboatd stops; this is not a durable tunnel.\n", m.input.View())
+		fmt.Fprintf(&b, "  Keep running for (maximum 24h): %s\n  Stops when Paperboat stops on this machine; this is not a durable tunnel.\n", m.input.View())
 	}
 	if m.prompt == "tunnel" {
 		fmt.Fprintf(&b, "  Tunnel name: %s\n  Creates a durable tunnel with a new URL, then stops this preview.\n", m.input.View())
@@ -332,7 +332,7 @@ func (m previewConsoleModel) frame() ([]string, []string) {
 		footer = append(footer, m.status)
 	}
 	if m.prompt == "background" {
-		footer = append(footer, "Keep running for (max 24h): "+m.input.View(), "Daemon-owned until expiry; stops if paperboatd stops.")
+		footer = append(footer, "Keep running for (max 24h): "+m.input.View(), "Kept by Paperboat until expiry; stops if Paperboat stops on this machine.")
 	}
 	if m.prompt == "tunnel" {
 		footer = append(footer, "Tunnel name: "+m.input.View(), "Creates a durable tunnel with a new URL.")
@@ -435,7 +435,7 @@ func runPreviewConsole(command *cobra.Command, lease preview.Lease, target previ
 				deadline, err := background(ctx, ttl)
 				result.err = err
 				if err == nil {
-					result.output = fmt.Sprintf("Preview continues in paperboatd until %s: %s\nStop with: pb preview stop %s\n", deadline.Local().Format(time.RFC1123), lease.Endpoint, lease.ID)
+					result.output = fmt.Sprintf("Preview keeps running in Paperboat until %s: %s\nStop with: pb preview stop %s\n", deadline.Local().Format(time.RFC1123), lease.Endpoint, lease.ID)
 				}
 			case "tunnel":
 				result.output, result.err = createTunnelFromPreview(ctx, command, target, visibility, value)

@@ -80,11 +80,11 @@ func actionUpdateSettings(command *cobra.Command, _ []string) error {
 		return fmt.Errorf("read automatic update settings: %w", err)
 	}
 	if response.Settings == nil {
-		return fmt.Errorf("paperboat-updated returned no automatic update settings")
+		return fmt.Errorf("the Paperboat updater returned no automatic update settings")
 	}
 	settings := *response.Settings
 	if err := settings.Validate(); err != nil {
-		return fmt.Errorf("paperboat-updated returned invalid automatic update settings")
+		return fmt.Errorf("the Paperboat updater returned invalid automatic update settings")
 	}
 
 	if autoChanged || timeChanged {
@@ -102,12 +102,12 @@ func actionUpdateSettings(command *cobra.Command, _ []string) error {
 			return updateControlFailure("save automatic update settings", err)
 		}
 		if response.Settings == nil || *response.Settings != settings {
-			return fmt.Errorf("paperboat-updated did not confirm the requested automatic update settings")
+			return fmt.Errorf("the Paperboat updater did not confirm the requested automatic update settings")
 		}
 	}
 
 	if response.Settings == nil {
-		return fmt.Errorf("paperboat-updated returned no automatic update settings")
+		return fmt.Errorf("the Paperboat updater returned no automatic update settings")
 	}
 	result := updateSettingsCommandResult(*response.Settings, response.NextMaintenanceAt)
 	if updateJSON(command) {

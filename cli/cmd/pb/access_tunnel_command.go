@@ -32,7 +32,7 @@ var (
 	ErrAccessTunnelAuthentication        = errors.New("Paperboat authentication is required")
 	ErrAccessTunnelForbidden             = errors.New("Paperboat private access is not allowed")
 	ErrAccessTunnelUnavailable           = errors.New("Paperboat private access is temporarily unavailable")
-	ErrAccessTunnelRuntimeRPCUnavailable = errors.New("installed hostd does not expose private TCP access")
+	ErrAccessTunnelRuntimeRPCUnavailable = errors.New("the installed Paperboat service does not support private TCP access")
 	// ErrAccessTunnelGone: hostd no longer knows the session, so its listener is closed (missed heartbeats or revoked route).
 	ErrAccessTunnelGone = errors.New("private TCP access session is gone")
 	// errAccessTunnelMalformedAnswer: hostd's success answer failed validation (the cause of an ErrAccessTunnelInvalid).

@@ -98,7 +98,7 @@ func actionUpdateCheck(command *cobra.Command, _ []string) error {
 		}
 		return writeUpdateCheckResult(command, response.Version, available)
 	}
-	return updateControlFailure("check with paperboat-updated", err)
+	return updateControlFailure("check with the Paperboat updater", err)
 }
 
 func writeUpdateCheckResult(command *cobra.Command, latest string, available bool) error {
@@ -170,7 +170,7 @@ func actionUpdateStatus(command *cobra.Command, _ []string) error {
 		// The updater socket is gone while the updater restarts to activate an approved update (the test host 2026-10-27).
 		return commandRejection{reason: commandRejectUpdaterRestarting}
 	}
-	return fmt.Errorf("read paperboat-updated status: %w", err)
+	return fmt.Errorf("read the Paperboat updater status: %w", err)
 }
 
 func updateStatusCommandResult(cliVersion string, response updated.ControlResponse, snapshot *localapi.Snapshot) updateStatusResult {

@@ -17,15 +17,15 @@ import (
 func hostdStartPhase(status hostdproto.Status, err error, now time.Time) error {
 	switch {
 	case err != nil:
-		return fmt.Errorf("host service start phase: its owner process does not answer on its pipe (not started, or not past its own start): %w", err)
+		return fmt.Errorf("host service start phase: the Paperboat service does not answer yet (not started, or not past its own start): %w", err)
 	case status.State == hostdproto.StateEmpty:
-		return errors.New("host service start phase: the owner process answers, but no runtime worker has registered with it")
+		return errors.New("host service start phase: the Paperboat service answers, but its runtime has not registered with it")
 	case status.State == hostdproto.StateCandidate:
-		return fmt.Errorf("host service start phase: runtime worker %s registered but was not activated", status.WorkerID)
+		return fmt.Errorf("host service start phase: the Paperboat runtime %s registered but was not activated", status.WorkerID)
 	case status.LastHeartbeatUnixMilli == 0:
-		return fmt.Errorf("host service start phase: runtime worker %s is activated but its runtime has not finished starting (no heartbeat yet)", status.WorkerID)
+		return fmt.Errorf("host service start phase: the Paperboat runtime %s is activated but has not finished starting (no heartbeat yet)", status.WorkerID)
 	default:
 		age := now.Sub(time.UnixMilli(status.LastHeartbeatUnixMilli)).Round(time.Second)
-		return fmt.Errorf("host service start phase: runtime worker %s started (last heartbeat %s ago), but its health endpoint does not answer", status.WorkerID, age)
+		return fmt.Errorf("host service start phase: the Paperboat runtime %s started (last heartbeat %s ago), but its health endpoint does not answer", status.WorkerID, age)
 	}
 }
