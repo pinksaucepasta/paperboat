@@ -3,6 +3,8 @@
  * Copyright (C) 2019-2021 WireGuard LLC. All Rights Reserved.
  */
 
+//lint:file-ignore ST1003 names mirror the Windows Filtering Platform C API, as in wireguard-windows
+
 package wfp
 
 import "golang.org/x/sys/windows"
