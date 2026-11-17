@@ -294,3 +294,24 @@ Today a tunnel has simple path redirects plus header and URL rewrite rules. Afte
 offers (Redirect Rules, Bulk Redirects, Page Rules, Transform Rules: www ↔ apex, HTTP → HTTPS, wildcard and regex
 matches, query-string handling, status codes 301/302/307/308, conditions on host/path/header/country) and implement
 the useful set for tunnels and custom domains.
+
+## Held for after launch — decided 2026-11-18
+
+- **Shared contracts not merged yet** (skipped on purpose by the dedup lane; code health only, no user-visible gain):
+  release index (move release policy to `shared/`, validate at the release gate and in the client), terminal attach
+  descriptor (an optional field becomes required; client and server deploy together), tunnel config snapshot
+  (hash-relevant field tags and two diverging validators must become one). Also still to check: inspector, tunnel view
+  types, config assignment.
+- **Crash-loop restart backoff and candidate-rendered service units** — landing before launch if the device proof
+  passes; otherwise first item after launch (branches `restart-backoff-reapply`, `t3/d55d53e1-candidate-units`).
+- **Errors back to Sentry on 2026-12-02** when the free quota resets (runbook `server/docs/runbooks/glitchtip-errors.md`),
+  then remove GlitchTip. Paid Sentry plan once Paperboat earns money. Until then GlitchTip takes errors only; Sentry logs,
+  traces, release health and cron monitors are paused.
+- **Release safety still post-launch by design:** upgrade matrix (old/new client × server × edge) and release channels
+  (dev, beta, stable).
+- **Admin panel data:** device/browser and country insights need the console and site to send `$browser` /
+  `$device_type` with their events; retention needs new explicit events (privacy decision first).
+- **TUI:** `huh` forms only if a real multi-field form appears (e.g. `pb env set` name + hidden value); a real Windows
+  console check of the narrow-terminal hint (headless runs are fixed at 120 columns).
+- **Edge error pages:** four 401 answers (bad/expired token, duplicate cookies, malformed machine token, anonymous
+  non-navigation) — keep only if they never differ between an existing private name and a missing one.
