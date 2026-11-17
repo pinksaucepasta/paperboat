@@ -76,12 +76,7 @@ if [ -n "$wasm_packages" ]; then
 else
 	cat "$work/unused" >>"$work/findings"
 fi
-if ls "$work"/deadcode.* >/dev/null 2>&1; then
-	# tools/deadcode-allow.txt names the unreachable symbols that must stay, each with its reason
-	every_platform "$work"/deadcode.* | awk -v module="$module" -v allow="$(dirname -- "$0")/deadcode-allow.txt" '
-		BEGIN { while ((getline line < allow) > 0) if (line !~ /^#/ && split(line, f, " ") >= 3 && f[1] == module) ok[f[2] " " f[3]] }
-		{ path = $1; sub(/:[0-9]+:[0-9]+:$/, "", path); name = $NF; if (!((path " " name) in ok)) print }' >>"$work/findings"
-fi
+if ls "$work"/deadcode.* >/dev/null 2>&1; then every_platform "$work"/deadcode.* >>"$work/findings"; fi
 if [ -s "$work/findings" ]; then
 	cat "$work/findings" >&2
 	exit 1

@@ -1,4 +1,0 @@
-# Symbols deadcode reports as unreachable although they must exist. deadcode has no suppression comment, so
-# each exception is named here with its reason: "<module> <path under the module> <symbol> <reason>".
-cli internal/hostruntime/configsync/repository_read.go repositoryReadObserver.OnInflatedObjectContent go-git packfile.Observer requires all four methods
-cli internal/hostruntime/configsync/repository_read.go repositoryReadObserver.OnFooter go-git packfile.Observer requires all four methods

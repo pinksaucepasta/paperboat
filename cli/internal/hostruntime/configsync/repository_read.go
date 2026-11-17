@@ -362,10 +362,6 @@ func (o *repositoryReadObserver) OnInflatedObjectHeader(_ plumbing.ObjectType, s
 	}
 	return nil
 }
-func (*repositoryReadObserver) OnInflatedObjectContent(plumbing.Hash, int64, uint32, []byte) error {
-	return nil
-}
-func (*repositoryReadObserver) OnFooter(plumbing.Hash) error { return nil }
 
 type repositoryContextReadSeeker struct {
 	file *os.File
