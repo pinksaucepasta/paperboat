@@ -253,6 +253,9 @@ func (s *Service) recoverUnderActivationLock(ctx context.Context, periodic bool)
 		// Recover owns reconciliation with an older native-install journal;
 		// refreshing from that journal first would reject the new executable.
 		before, _ := s.currentManager().TransactionState()
+		// A missing journal (pb install deletes it under this lock) is created idle by Recover: first-run
+		// setup, not a dead writer's state, so it must not restart the updater 30 s after every install.
+		missing := before.TransactionID == ""
 		if err := s.currentManager().Recover(ctx); err != nil {
 			if periodic && errors.Is(err, workerupdate.ErrBlocked) {
 				return acted, nil // a cutover record is the activation helper's to recover (its handoff), never this loop's
@@ -260,7 +263,7 @@ func (s *Service) recoverUnderActivationLock(ctx context.Context, periodic bool)
 			return acted, err
 		}
 		after, err := s.currentManager().TransactionState()
-		return acted || err == nil && after != before, nil
+		return acted || err == nil && !missing && after != before, nil
 	}
 	if periodic && !handoff.Started && !handoff.ParticipantsTouched {
 		return acted, nil // queued, or the helper has not begun: its own schedule owns it

@@ -123,6 +123,22 @@ func TestRunningUpdaterResetsATransactionAKilledCheckLeft(t *testing.T) {
 	}
 }
 
+// pb install deletes the journal under the activation lock; the fresh updater's first periodic check creates it
+// idle. That is first-run setup, not a dead writer: no restart (it used to restart every updater 30 s after install).
+func TestRunningUpdaterDoesNotRestartForAJournalAnInstallRemoved(t *testing.T) {
+	requireRoot(t)
+	root, s, _, _ := deadWriterFixture(t)
+	if err := os.Remove(filepath.Join(root, "transaction.json")); err != nil {
+		t.Fatal(err)
+	}
+	if acted, err := s.RecoverDeadWriters(context.Background()); err != nil || acted {
+		t.Fatalf("creating the missing journal counted as a dead-writer recovery: acted=%v err=%v", acted, err)
+	}
+	if got, err := s.currentManager().TransactionState(); err != nil || got.Stage != updateflow.StageIdle || got.TransactionID == "" {
+		t.Fatalf("journal after the check: %+v %v", got, err)
+	}
+}
+
 // A cutover record is the activation helper's to recover, not the updater's: no error, no change, no restart.
 func TestRunningUpdaterLeavesACutoverRecordToTheHelper(t *testing.T) {
 	requireRoot(t)
