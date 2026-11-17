@@ -536,6 +536,24 @@ VALUES ($1,$2,$3,decode(repeat('42',32),'hex'),'route.create','route',$4,'connec
 	if err != nil || restored != 1 {
 		t.Fatalf("engine domain certificate completion = %d, %v; want the projection restored", restored, err)
 	}
+	// A new address (what PATCH subdomain writes: the stable endpoint and the managed route, one route generation
+	// up) reaches the engine mirror and the edge snapshot, and the old host leaves it.
+	renamed := "renamed-" + endpointID[:8] + ".tunnels.example.test"
+	var before int64
+	if err := f.database.SQL().QueryRowContext(f.ctx, `SELECT revision FROM endpoint_routes WHERE id=$1`, route).Scan(&before); err != nil {
+		t.Fatal(err)
+	}
+	f.exec(t, `UPDATE tunnels SET stable_endpoint='https://'||$2 WHERE id=$1`, tunnel, renamed)
+	f.exec(t, `UPDATE tunnel_routes SET match_hostname=$2, generation=generation+1 WHERE id=$1`, route, renamed)
+	sync()
+	var mirrored string
+	var revision int64
+	if err := f.database.SQL().QueryRowContext(f.ctx, `SELECT hostname,revision FROM endpoint_routes WHERE id=$1`, route).Scan(&mirrored, &revision); err != nil || mirrored != renamed || revision != before+1 {
+		t.Fatalf("engine route after the address change = %q rev %d, %v; want %q rev %d", mirrored, revision, err, renamed, before+1)
+	}
+	if rows := snapshot(); len(rows) != 1 || rows[0].PublicHost != renamed || rows[0].RouteGeneration != before+1 {
+		t.Fatalf("edge snapshot after the address change = %+v, want one route at %q", rows, renamed)
+	}
 	attach([]string{runtimewire.CapabilityEndpoints})
 	if endpoint, _, _ := state(); endpoint {
 		t.Fatal("tunnel stayed on the engine after its agent stopped serving tunnels")

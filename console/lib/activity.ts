@@ -144,6 +144,7 @@ const phrases: Record<string, string> = {
   "preview.lease_renewed": "renewed the preview",
   "config.status_recorded": "reported config sync status for",
   "tunnel.updated": "updated the tunnel",
+  "tunnel.address_changed": "changed the address of the tunnel",
   "tunnel.paused": "paused the tunnel",
   "tunnel.route_created": "added a route to",
   "tunnel.route_updated": "changed a route on",

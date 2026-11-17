@@ -133,7 +133,7 @@ func (c *Client) CreateTunnelV1(ctx context.Context, in TunnelCreateInput, key s
 	return out, e
 }
 func (c *Client) PatchTunnelV1(ctx context.Context, id, etag, key string, in TunnelPatchInput) (TunnelMutation, error) {
-	if in.Name == nil && in.AccessMode == nil && in.ExpiresAt == nil {
+	if in.Name == nil && in.AccessMode == nil && in.Subdomain == nil && in.ExpiresAt == nil {
 		return TunnelMutation{}, errors.New("tunnel patch must contain a field")
 	}
 	if in.Name != nil {

@@ -38,6 +38,7 @@ type Service struct {
 	publicTCPPortMin int32
 	publicTCPPortMax int32
 	bandwidthDenied  func(ctx context.Context, accountID string, at time.Time) bool
+	reserved         map[string]struct{}
 }
 
 // API is the narrow lifecycle surface consumed by the HTTP router. Route,
@@ -47,6 +48,7 @@ type API interface {
 	ListTunnels(context.Context, previewtunnelapi.RequestContext, string, int) (TunnelPage, error)
 	GetTunnel(context.Context, previewtunnelapi.RequestContext, string) (TunnelView, error)
 	PatchTunnel(context.Context, previewtunnelapi.RequestContext, string, PatchTunnelRequest) (MutationResult, error)
+	CheckSubdomain(ctx context.Context, request previewtunnelapi.RequestContext, tunnelID, label string) (SubdomainCheck, error)
 	PauseTunnel(context.Context, previewtunnelapi.RequestContext, string, MutationInput) (MutationResult, error)
 	ResumeTunnel(context.Context, previewtunnelapi.RequestContext, string, MutationInput) (MutationResult, error)
 	DeleteTunnel(context.Context, previewtunnelapi.RequestContext, string, MutationInput) (MutationResult, error)
@@ -82,7 +84,11 @@ func NewService(repository TunnelRepository, config Config) (*Service, error) {
 	if config.PublicTCPPortMin < 1024 || config.PublicTCPPortMax > 65535 || config.PublicTCPPortMin > config.PublicTCPPortMax {
 		return nil, errors.New("public TCP port range is invalid")
 	}
-	return &Service{repository: repository, endpoint: config.EndpointBuilder, cursors: cursors, now: now, newID: idGenerator, newEndpointID: endpointIDGenerator, publicTCPPortMin: config.PublicTCPPortMin, publicTCPPortMax: config.PublicTCPPortMax, bandwidthDenied: config.BandwidthDenied}, nil
+	reserved, err := reservedSet(config.ReservedSubdomains)
+	if err != nil {
+		return nil, err
+	}
+	return &Service{reserved: reserved, repository: repository, endpoint: config.EndpointBuilder, cursors: cursors, now: now, newID: idGenerator, newEndpointID: endpointIDGenerator, publicTCPPortMin: config.PublicTCPPortMin, publicTCPPortMax: config.PublicTCPPortMax, bandwidthDenied: config.BandwidthDenied}, nil
 }
 
 // NewEndpointBuilder creates a deployment-specific stable hostname builder.
@@ -275,6 +281,9 @@ func (s *Service) PatchTunnel(ctx context.Context, request previewtunnelapi.Requ
 	if shared && input.AccessMode != nil && strings.TrimSpace(*input.AccessMode) == AccessPublic {
 		return MutationResult{}, ErrMachinePublicationDenied
 	}
+	if shared && input.Subdomain != nil {
+		return MutationResult{}, previewtunnelapi.ErrForbidden // a machine grant manages a tunnel; its owner picks the address
+	}
 	now := s.now().UTC()
 	if err := validateMutationInput(input.MutationInput, true); err != nil {
 		return MutationResult{}, err
@@ -285,6 +294,11 @@ func (s *Service) PatchTunnel(ctx context.Context, request previewtunnelapi.Requ
 			return MutationResult{}, err
 		}
 		input.Name = &name
+	}
+	if input.Subdomain != nil {
+		if err := validateSubdomain(*input.Subdomain, s.reserved); err != nil {
+			return MutationResult{}, err
+		}
 	}
 	if input.AccessMode != nil {
 		if strings.TrimSpace(*input.AccessMode) == "" {
@@ -299,7 +313,7 @@ func (s *Service) PatchTunnel(ctx context.Context, request previewtunnelapi.Requ
 	if input.ExpiresAt != nil && !input.ExpiresAt.After(now) {
 		return MutationResult{}, fmt.Errorf("%w: expires_at must be in the future", ErrInvalidInput)
 	}
-	if input.Name == nil && input.AccessMode == nil && !input.ExpirySet {
+	if input.Name == nil && input.AccessMode == nil && input.Subdomain == nil && !input.ExpirySet {
 		return MutationResult{}, fmt.Errorf("%w: patch must contain a mutable field", ErrInvalidInput)
 	}
 	request, normalizeErr := normalizeRequestContext(request, s.newID)
@@ -317,7 +331,7 @@ func (s *Service) PatchTunnel(ctx context.Context, request previewtunnelapi.Requ
 	}
 	result, err := s.repository.Patch(ctx, PatchRecord{
 		OperationID: operationID, AuditEventID: auditID, TunnelID: tunnelID, AccountID: request.Actor.AccountID,
-		Name: input.Name, AccessMode: input.AccessMode, ExpiresAt: input.ExpiresAt, ExpirySet: input.ExpirySet,
+		Name: input.Name, AccessMode: input.AccessMode, Subdomain: input.Subdomain, ExpiresAt: input.ExpiresAt, ExpirySet: input.ExpirySet,
 		ExpectedGeneration: input.ExpectedGeneration, IdempotencyKey: input.IdempotencyKey, RequestHash: input.RequestHash,
 		ActorID: request.Actor.ActorID, AuditActorID: auditActorIDForActor(request.Actor), ActorType: auditActorType(request.Actor), RequestID: request.RequestID,
 		CorrelationID: request.CorrelationID, SourceMachineID: request.Actor.MachineID, Now: now,

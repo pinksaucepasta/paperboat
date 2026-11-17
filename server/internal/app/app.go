@@ -184,9 +184,10 @@ func New(opts Options) (*App, error) {
 		return nil, fmt.Errorf("configure tunnel endpoint builder: %w", err)
 	}
 	tunnelService, err := tunnelv1.NewService(tunnelRepository, tunnelv1.Config{
-		EndpointBuilder: tunnelEndpointBuilder,
-		CursorKey:       cursorKey[:],
-		BandwidthDenied: bandwidthgate.New(store).Denied,
+		EndpointBuilder:    tunnelEndpointBuilder,
+		CursorKey:          cursorKey[:],
+		BandwidthDenied:    bandwidthgate.New(store).Denied,
+		ReservedSubdomains: opts.Config.Tunnel.ReservedSubdomains,
 	})
 	if err != nil {
 		_ = store.Close()

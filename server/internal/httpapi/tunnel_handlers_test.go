@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -16,6 +17,7 @@ import (
 	serverdiagnostics "github.com/pinksaucepasta/paperboat/server/internal/diagnostics"
 	"github.com/pinksaucepasta/paperboat/server/internal/previewtunnelapi"
 	"github.com/pinksaucepasta/paperboat/server/internal/previewtunnelstore"
+	"github.com/pinksaucepasta/paperboat/server/internal/ratelimit"
 	"github.com/pinksaucepasta/paperboat/server/internal/tunnelv1"
 	"github.com/pinksaucepasta/paperboat/server/internal/workspace"
 )
@@ -31,6 +33,9 @@ type tunnelAPIStub struct {
 	createWorkspace workspace.Scope
 	createSelected  bool
 	patchReq        tunnelv1.PatchTunnelRequest
+	check           tunnelv1.SubdomainCheck
+	checkErr        error
+	checkedLabel    string
 	mutationReq     previewtunnelapi.RequestContext
 	listCalls       int
 	listFilters     workspace.InventoryFilters
@@ -52,11 +57,17 @@ func (s *tunnelAPIStub) GetTunnel(context.Context, previewtunnelapi.RequestConte
 	return tunnelv1.TunnelView{}, nil
 }
 
+func (s *tunnelAPIStub) CheckSubdomain(_ context.Context, _ previewtunnelapi.RequestContext, _, label string) (tunnelv1.SubdomainCheck, error) {
+	s.checkedLabel = label
+	return s.check, s.checkErr
+}
+
 func (s *tunnelAPIStub) PatchTunnel(_ context.Context, request previewtunnelapi.RequestContext, _ string, input tunnelv1.PatchTunnelRequest) (tunnelv1.MutationResult, error) {
 	s.patchReq = input
 	s.patchReq.MutationInput = input.MutationInput
 	s.patchReq.Name = input.Name
 	s.patchReq.AccessMode = input.AccessMode
+	s.patchReq.Subdomain = input.Subdomain
 	s.patchReq.ExpiresAt = input.ExpiresAt
 	s.mutationReq = request
 	return s.patchResult, s.patchErr
@@ -261,7 +272,7 @@ func TestTunnelMalformedDocumentsReturnTypedBadRequest(t *testing.T) {
 		body    string
 	}{
 		{name: "create unknown field", handler: tunnelCreate(service, &tunnelIdentityVerifier{}), path: "/v1/tunnels", body: `{"name":"demo","unexpected":true}`},
-		{name: "patch unknown field", handler: tunnelPatch(service, &tunnelIdentityVerifier{}), path: "/v1/tunnels/tun_1", body: `{"unexpected":true}`},
+		{name: "patch unknown field", handler: tunnelPatch(service, &tunnelIdentityVerifier{}, nil), path: "/v1/tunnels/tun_1", body: `{"unexpected":true}`},
 		{name: "state nonempty", handler: tunnelPause(service, &tunnelIdentityVerifier{}), path: "/v1/tunnels/tun_1/pause", body: `{"unexpected":true}`},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -289,7 +300,7 @@ func TestTunnelPatchDistinguishesExplicitExpiryRemovalAndReturnsCanonicalOperati
 	request.Header.Set("If-Match", previewtunnelapi.ETag("tunnel", "tun_1", 1))
 	request.Header.Set("Idempotency-Key", "op_patch_1")
 	response := httptest.NewRecorder()
-	tunnelPatch(service, &tunnelIdentityVerifier{}).ServeHTTP(response, request)
+	tunnelPatch(service, &tunnelIdentityVerifier{}, nil).ServeHTTP(response, request)
 	if response.Code != http.StatusAccepted || !service.patchReq.ExpirySet || service.patchReq.ExpiresAt != nil {
 		t.Fatalf("status=%d patch=%+v body=%s", response.Code, service.patchReq, response.Body.String())
 	}
@@ -394,7 +405,9 @@ func TestTunnelMutationsAcceptHostMachineProof(t *testing.T) {
 		method, path, body string
 		handler            func(tunnelv1.API, machineRequestVerifier) http.HandlerFunc
 	}{
-		{http.MethodPatch, "/v1/tunnels/tun_1", `{"name":"renamed"}`, tunnelPatch},
+		{http.MethodPatch, "/v1/tunnels/tun_1", `{"name":"renamed"}`, func(service tunnelv1.API, identities machineRequestVerifier) http.HandlerFunc {
+			return tunnelPatch(service, identities, nil)
+		}},
 		{http.MethodPost, "/v1/tunnels/tun_1/pause", ``, tunnelPause},
 		{http.MethodPost, "/v1/tunnels/tun_1/resume", `{}`, tunnelResume},
 		{http.MethodDelete, "/v1/tunnels/tun_1", ``, tunnelDelete},
@@ -429,5 +442,86 @@ func TestTunnelMutationsAcceptHostMachineProof(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestTunnelPatchSubdomainReachesTheServiceAndIsRateLimitedPerAccount(t *testing.T) {
+	service := &tunnelAPIStub{patchResult: tunnelMutationResult("running", "connecting")}
+	limiter := ratelimit.New(1, 1, 1000)
+	patch := func(body string) *httptest.ResponseRecorder {
+		request := tunnelHandlerRequest(http.MethodPatch, "/v1/tunnels/tun_1", []byte(body))
+		request.SetPathValue("tunnel_id", "tun_1")
+		request.Header.Set("If-Match", previewtunnelapi.ETag("tunnel", "tun_1", 1))
+		request.Header.Set("Idempotency-Key", "op_patch_1")
+		response := httptest.NewRecorder()
+		tunnelPatch(service, &tunnelIdentityVerifier{}, limiter).ServeHTTP(response, request)
+		return response
+	}
+	if response := patch(`{"subdomain":"helloworld"}`); response.Code != http.StatusAccepted || service.patchReq.Subdomain == nil || *service.patchReq.Subdomain != "helloworld" {
+		t.Fatalf("status=%d patch=%+v body=%s", response.Code, service.patchReq, response.Body.String())
+	}
+	if response := patch(`{"subdomain":"another"}`); response.Code != http.StatusTooManyRequests || response.Header().Get("Retry-After") == "" {
+		t.Fatalf("second change: status=%d body=%s", response.Code, response.Body.String())
+	}
+	if response := patch(`{"name":"renamed"}`); response.Code != http.StatusAccepted {
+		t.Fatalf("a label change must not use the address limit: status=%d", response.Code)
+	}
+	if response := patch(`{"subdomain":null}`); response.Code != http.StatusBadRequest {
+		t.Fatalf("null subdomain: status=%d", response.Code)
+	}
+}
+
+func TestTunnelErrorsNameTheSubdomainProblem(t *testing.T) {
+	for _, tc := range []struct {
+		err    error
+		status int
+		code   string
+	}{
+		{tunnelv1.ErrSubdomainTaken, http.StatusConflict, "subdomain_taken"},
+		{tunnelv1.ErrSubdomainReserved, http.StatusBadRequest, "subdomain_reserved"},
+		{fmt.Errorf("%w: use 3 to 63 lowercase letters", tunnelv1.ErrSubdomainInvalid), http.StatusBadRequest, "invalid_subdomain"},
+		{tunnelv1.ErrAddressBlocked, http.StatusForbidden, "address_blocked"},
+	} {
+		service := &tunnelAPIStub{patchErr: tc.err}
+		request := tunnelHandlerRequest(http.MethodPatch, "/v1/tunnels/tun_1", []byte(`{"subdomain":"helloworld"}`))
+		request.SetPathValue("tunnel_id", "tun_1")
+		request.Header.Set("If-Match", previewtunnelapi.ETag("tunnel", "tun_1", 1))
+		request.Header.Set("Idempotency-Key", "op_patch_1")
+		response := httptest.NewRecorder()
+		tunnelPatch(service, &tunnelIdentityVerifier{}, nil).ServeHTTP(response, request)
+		var payload ErrorResponse
+		if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil || response.Code != tc.status || payload.Error.Code != tc.code {
+			t.Errorf("%v: status=%d code=%q body=%s", tc.err, response.Code, payload.Error.Code, response.Body.String())
+		}
+	}
+}
+
+func TestTunnelSubdomainAvailabilityAnswersAndIsRateLimited(t *testing.T) {
+	service := &tunnelAPIStub{check: tunnelv1.SubdomainCheck{Subdomain: "helloworld", Available: false, Reason: "taken", Message: "This name is already taken."}}
+	limiter := ratelimit.New(1, 1, 1000)
+	get := func() *httptest.ResponseRecorder {
+		request := tunnelHandlerRequest(http.MethodGet, "/v1/tunnels/tun_1/subdomain-availability?subdomain=helloworld", nil)
+		request.SetPathValue("tunnel_id", "tun_1")
+		response := httptest.NewRecorder()
+		tunnelSubdomainAvailability(service, limiter).ServeHTTP(response, request)
+		return response
+	}
+	response := get()
+	data := decodeTunnelHandlerBody(t, response)
+	var reason string
+	if err := json.Unmarshal(data["reason"], &reason); err != nil || response.Code != http.StatusOK || reason != "taken" || service.checkedLabel != "helloworld" {
+		t.Fatalf("status=%d reason=%q label=%q body=%s", response.Code, reason, service.checkedLabel, response.Body.String())
+	}
+	if again := get(); again.Code != http.StatusTooManyRequests {
+		t.Fatalf("second check: status=%d", again.Code)
+	}
+	// A preview's ID (or any non-tunnel) is just an unknown tunnel here: previews have no address to check or change.
+	service.checkErr = tunnelv1.ErrNotFound
+	request := tunnelHandlerRequest(http.MethodGet, "/v1/tunnels/prv_1/subdomain-availability?subdomain=helloworld", nil)
+	request.SetPathValue("tunnel_id", "prv_1")
+	response = httptest.NewRecorder()
+	tunnelSubdomainAvailability(service, nil).ServeHTTP(response, request)
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("unknown tunnel: status=%d body=%s", response.Code, response.Body.String())
 	}
 }

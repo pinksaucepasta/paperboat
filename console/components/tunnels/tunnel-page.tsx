@@ -20,6 +20,7 @@ import { Detail } from "@/components/machine-overview"
 import { CrumbLink, Crumb, PageHeader } from "@/components/page-header"
 import { Time } from "@/components/time"
 import { useTunnelActions } from "@/components/tunnels/tunnel-actions"
+import { ChangeAddress } from "@/components/tunnels/tunnel-address"
 import { TunnelTitle } from "@/components/tunnels/tunnel-rename"
 import { IpRules } from "@/components/tunnels/ip-rules"
 import { ShareWithTeam } from "@/components/tunnels/share-with-team"
@@ -270,9 +271,12 @@ function FloodNotice({ tunnel }: { tunnel: Tunnel }) {
 function AddressValue({ tunnel }: { tunnel: Tunnel }) {
   const host = hostOf(tunnel.stable_endpoint)
   return (
-    <CopyRow value={host} className="-ml-2.5 min-w-0 font-mono text-code">
-      {host}
-    </CopyRow>
+    <div className="flex min-w-0 items-center gap-1">
+      <CopyRow value={host} className="-ml-2.5 min-w-0 font-mono text-code">
+        {host}
+      </CopyRow>
+      <ChangeAddress tunnel={tunnel} />
+    </div>
   )
 }
 

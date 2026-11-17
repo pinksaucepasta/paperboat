@@ -234,6 +234,10 @@ type RateLimits struct {
 	BrowserBeginGlobalPerMinute int `json:"browser_begin_global_per_minute"`
 	BrowserBeginGlobalBurst     int `json:"browser_begin_global_burst"`
 	BrowserBeginMaxLive         int `json:"browser_begin_max_live"`
+	// TunnelAddressPerMinute/Burst: one account's address changes and availability checks, so the public
+	// names cannot be scanned or churned.
+	TunnelAddressPerMinute int `json:"tunnel_address_per_minute"`
+	TunnelAddressBurst     int `json:"tunnel_address_burst"`
 	// MaxClients bounds the memory of each limiter.
 	MaxClients int `json:"max_clients"`
 }
@@ -342,6 +346,19 @@ type TestFixtures struct {
 
 type Tunnel struct {
 	BaseDomain string `json:"base_domain"`
+	// ReservedSubdomains are labels under BaseDomain no tunnel owner may choose as their address (our own
+	// hostnames and names that read as official). Replacing the list in the configuration replaces these.
+	ReservedSubdomains []string `json:"reserved_subdomains"`
+}
+
+func defaultReservedSubdomains() []string {
+	return []string{
+		"www", "api", "admin", "app", "mail", "edge", "relay", "console", "dashboard", "status", "help", "support",
+		"docs", "blog", "static", "assets", "cdn", "metrics", "health", "smtp", "imap", "ftp", "ns1", "ns2",
+		"login", "signin", "auth", "oauth", "sso", "verify", "secure", "account", "billing", "payment", "paperboat",
+		"security", "abuse", "postmaster", "hostmaster", "dns", "vpn", "portal", "signup", "password", "webmail", "autodiscover",
+		"staging", "dev", "test", "demo", "beta", "root", "ssh", "git", "download", "downloads", "install", "update", "updates",
+	}
 }
 
 // Certificates contains references and public endpoints only. It never
@@ -583,7 +600,7 @@ func Default() Config {
 			Driver: "postgres",
 			DSN:    "postgres://postgres:postgres@127.0.0.1:5432/postgres?sslmode=disable",
 		},
-		RateLimits:        RateLimits{SDKSessionPerMinute: 30, SDKSessionBurst: 10, SDKDescriptorPerMinute: 120, SDKDescriptorBurst: 32, SignInPerMinute: 30, SignInBurst: 10, TokenFailuresPerMinute: 20, TokenFailuresBurst: 10, MachinePeerNetworkConfigPerMinute: 30, MachinePeerNetworkConfigBurst: 20, AbuseReportsPerMinute: 5, AbuseReportsBurst: 10, BrowserBeginPerMinute: 60, BrowserBeginBurst: 20, BrowserBeginGlobalPerMinute: 3000, BrowserBeginGlobalBurst: 500, BrowserBeginMaxLive: 20000, MaxClients: 100000},
+		RateLimits:        RateLimits{SDKSessionPerMinute: 30, SDKSessionBurst: 10, SDKDescriptorPerMinute: 120, SDKDescriptorBurst: 32, SignInPerMinute: 30, SignInBurst: 10, TokenFailuresPerMinute: 20, TokenFailuresBurst: 10, MachinePeerNetworkConfigPerMinute: 30, MachinePeerNetworkConfigBurst: 20, AbuseReportsPerMinute: 5, AbuseReportsBurst: 10, BrowserBeginPerMinute: 60, BrowserBeginBurst: 20, BrowserBeginGlobalPerMinute: 3000, BrowserBeginGlobalBurst: 500, BrowserBeginMaxLive: 20000, TunnelAddressPerMinute: 6, TunnelAddressBurst: 10, MaxClients: 100000},
 		APITokens:         APITokens{MaxLifetimeDays: 365, DefaultLifetimeDays: 90, MaxPerMember: 100, RetrySeconds: 600},
 		Billing:           Billing{TopupMaxQuantity: 100, TeamTrialDays: 14, PersonalAllowanceBytes: new(int64(5_000_000_000)), Limits: PlanLimits{SDK: SDKLimits{SessionsPerToken: 10, SessionsPerAccount: 100, OperationsPerToken: 32, OperationsPerAccount: 128}, Machines: PlanLimit{Free: 100, Pro: 1000, TeamCeiling: 10000}, Publications: PlanLimit{Free: 100, Pro: 1000, TeamCeiling: 10000}, BrowserTerminals: PlanLimit{Free: 10, Pro: 100, TeamCeiling: 1000}, ViewersPerSharedTerminal: 50, PublicTCP: PublicTCPLimit{Free: 1, Pro: 10, TeamPerSeat: 10}}},
 		Business:          defaultBusiness(),
@@ -593,7 +610,7 @@ func Default() Config {
 		UserMachines:      UserMachines{PairingLifetime: 10 * time.Minute, OfflineAfter: 90 * time.Second, ExpiredAccessSessionRetention: 7 * 24 * time.Hour, AllowedPlatforms: []string{"darwin", "linux", "windows"}, RuntimeListenPort: 38080},
 		TerminalSessions:  TerminalSessions{OperationTimeout: 15 * time.Second, RetryBackoff: time.Second, WorkerInterval: time.Second, MaxAttemptsBeforeAlert: 10, OperationMaxAge: 30 * 24 * time.Hour},
 		Preview:           Preview{BaseDomain: "preview.localhost", SharedFileMaxBytes: 2 << 30},
-		Tunnel:            Tunnel{BaseDomain: "tunnels.localhost"},
+		Tunnel:            Tunnel{BaseDomain: "tunnels.localhost", ReservedSubdomains: defaultReservedSubdomains()},
 		ConfigSync: ConfigSync{
 			Mode:             "disabled",
 			ManifestContract: "paperboat-manifest-v1", ManifestMaxBytes: 256 << 10,
@@ -757,7 +774,7 @@ func (c Config) Validate() error {
 	if t := c.APITokens; t.MaxLifetimeDays < 1 || t.DefaultLifetimeDays < 1 || t.DefaultLifetimeDays > t.MaxLifetimeDays || t.MaxPerMember < 1 || t.RetrySeconds < 60 || t.RetrySeconds > 3600 {
 		errs = append(errs, fmt.Errorf("api_tokens limits must be positive, default_lifetime_days at most max_lifetime_days and retry_seconds between 60 and 3600"))
 	}
-	if l := c.RateLimits; l.SDKSessionPerMinute < 1 || l.SDKSessionBurst < 1 || l.SDKDescriptorPerMinute < 1 || l.SDKDescriptorBurst < 1 || l.SignInPerMinute < 1 || l.SignInBurst < 1 || l.TokenFailuresPerMinute < 1 || l.TokenFailuresBurst < 1 || l.MachinePeerNetworkConfigPerMinute < 1 || l.MachinePeerNetworkConfigBurst < 1 || l.AbuseReportsPerMinute < 1 || l.AbuseReportsBurst < 1 || l.BrowserBeginPerMinute < 1 || l.BrowserBeginBurst < 1 || l.BrowserBeginGlobalPerMinute < 1 || l.BrowserBeginGlobalBurst < 1 || l.BrowserBeginMaxLive < 1000 || l.MaxClients < 1000 {
+	if l := c.RateLimits; l.SDKSessionPerMinute < 1 || l.SDKSessionBurst < 1 || l.SDKDescriptorPerMinute < 1 || l.SDKDescriptorBurst < 1 || l.SignInPerMinute < 1 || l.SignInBurst < 1 || l.TokenFailuresPerMinute < 1 || l.TokenFailuresBurst < 1 || l.MachinePeerNetworkConfigPerMinute < 1 || l.MachinePeerNetworkConfigBurst < 1 || l.AbuseReportsPerMinute < 1 || l.AbuseReportsBurst < 1 || l.BrowserBeginPerMinute < 1 || l.BrowserBeginBurst < 1 || l.BrowserBeginGlobalPerMinute < 1 || l.BrowserBeginGlobalBurst < 1 || l.BrowserBeginMaxLive < 1000 || l.TunnelAddressPerMinute < 1 || l.TunnelAddressBurst < 1 || l.MaxClients < 1000 {
 		errs = append(errs, errors.New("rate_limits must be positive, browser_begin_max_live and max_clients at least 1000"))
 	}
 	if c.Billing.TeamTrialDays < 0 || c.Billing.TeamTrialDays > 730 {

@@ -132,7 +132,7 @@ func validatePatchRecord(input PatchRecord) error {
 	if !validActorType(input.ActorType) {
 		return fmt.Errorf("%w: actor type is invalid", ErrInvalidInput)
 	}
-	if input.Name == nil && input.AccessMode == nil && !input.ExpirySet {
+	if input.Name == nil && input.AccessMode == nil && input.Subdomain == nil && !input.ExpirySet {
 		return fmt.Errorf("%w: patch must contain a mutable field", ErrInvalidInput)
 	}
 	if input.Name != nil && strings.TrimSpace(*input.Name) == "" {

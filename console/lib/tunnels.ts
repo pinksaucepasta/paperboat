@@ -244,8 +244,26 @@ export function opensInBrowser(file: { name: string; type: string }) {
 export const pauseTunnel = (tunnel: Tunnel) => change(`${tunnelPath(tunnel.id)}/pause`, "POST", { etag: tunnel.etag })
 export const resumeTunnel = (tunnel: Tunnel) => change(`${tunnelPath(tunnel.id)}/resume`, "POST", { etag: tunnel.etag })
 export const deleteTunnel = (tunnel: Tunnel) => change(tunnelPath(tunnel.id), "DELETE", { etag: tunnel.etag })
-export const patchTunnel = (tunnel: Tunnel, patch: { name?: string; access_mode?: Tunnel["access_mode"] }) =>
-  change<Tunnel>(tunnelPath(tunnel.id), "PATCH", { etag: tunnel.etag, body: patch })
+export const patchTunnel = (
+  tunnel: Tunnel,
+  patch: { name?: string; access_mode?: Tunnel["access_mode"]; subdomain?: string },
+) => change<Tunnel>(tunnelPath(tunnel.id), "PATCH", { etag: tunnel.etag, body: patch })
+
+/** The server's rule for a tunnel address label (tunnelv1 validateSubdomain): 3–63 lowercase letters, digits, hyphens. */
+export const subdomainPattern = /^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/
+
+/** Whether the tunnel could take `subdomain` as its address now: valid, not reserved, not taken by any account. */
+export const subdomainAvailabilityQuery = (id: string, subdomain: string) =>
+  queryOptions({
+    queryKey: ["tunnel", id, "subdomain", subdomain] as const,
+    queryFn: ({ signal }) =>
+      api<Data<"/v1/tunnels/{tunnel_id}/subdomain-availability">>(
+        `${tunnelPath(id)}/subdomain-availability?${new URLSearchParams({ subdomain })}`,
+        { signal },
+      ),
+    retry: false,
+    staleTime: 10_000,
+  })
 
 export type RouteInput = {
   name: string

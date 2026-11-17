@@ -62,6 +62,9 @@ type TunnelRepository interface {
 	List(context.Context, string, *ListPosition, int) ([]dbsqlc.Tunnel, error)
 	Count(context.Context, string) (int, error)
 	Patch(context.Context, PatchRecord) (MutationRecord, error)
+	// CheckAddress says what the tunnel's address would be with this label (under the base domain of its stored
+	// endpoint, not the masked one a self-hosted workspace shows) and whether it could take it.
+	CheckAddress(ctx context.Context, accountID, tunnelID, label string) (AddressCheck, error)
 	Transition(context.Context, StateRecord) (MutationRecord, error)
 	ReconcileExpired(context.Context, ExpiryRecord) ([]MutationRecord, error)
 	HealthFacts(ctx context.Context, accountID, tunnelID string, now time.Time) (HealthFacts, error)
@@ -94,14 +97,16 @@ type CreateRecord struct {
 }
 
 type PatchRecord struct {
-	OperationID        string
-	AuditEventID       string
-	TunnelID           string
-	AccountID          string
-	Name               *string
-	AccessMode         *string
-	ExpiresAt          *time.Time
-	ExpirySet          bool
+	OperationID  string
+	AuditEventID string
+	TunnelID     string
+	AccountID    string
+	Name         *string
+	AccessMode   *string
+	ExpiresAt    *time.Time
+	ExpirySet    bool
+	// Subdomain is the validated new label; the repository derives the host from the tunnel's current base domain.
+	Subdomain          *string
 	ExpectedGeneration int64
 	IdempotencyKey     string
 	RequestHash        [sha256.Size]byte
@@ -478,7 +483,15 @@ func (r *SQLRepository) Patch(ctx context.Context, input PatchRecord) (MutationR
 				return fmt.Errorf("%w: remove TCP and catch-all routes before changing tunnel access mode", ErrInvalidInput)
 			}
 		}
-		changed := patchChanges(current, input)
+		var newHost string
+		if input.Subdomain != nil {
+			if newHost, err = addressHost(current.StableEndpoint, *input.Subdomain); err != nil {
+				return err
+			}
+		}
+		moveAddress := newHost != "" && "https://"+newHost != current.StableEndpoint
+		oldEndpoint := current.StableEndpoint
+		changed := patchChanges(current, input) || moveAddress
 		now := r.now().UTC()
 		if changed {
 			updated, updateErr := updateTunnelFields(ctx, tx, input, now)
@@ -486,6 +499,11 @@ func (r *SQLRepository) Patch(ctx context.Context, input PatchRecord) (MutationR
 				return updateErr
 			}
 			current = updated
+			if moveAddress {
+				if current, err = moveAddressTx(ctx, tx, current, newHost, input.ActorID, now); err != nil {
+					return err
+				}
+			}
 			if err := createResourceConfigGeneration(ctx, queries, current, input.ActorID, now); err != nil {
 				return err
 			}
@@ -511,6 +529,15 @@ func (r *SQLRepository) Patch(ctx context.Context, input PatchRecord) (MutationR
 				"generation": current.Generation, "desired_state": current.DesiredState,
 			}); err != nil {
 			return err
+		}
+		if moveAddress {
+			if err := insertAudit(ctx, queries, input.AuditEventID+".address", input.AccountID, auditActorID(input.ActorID, input.AuditActorID), input.ActorType,
+				"tunnel.address_changed", "update", "changed", current.ID, input.IdempotencyKey, input.RequestID,
+				input.CorrelationID, input.SourceMachineID, now, map[string]any{
+					"generation": current.Generation, "previous_hostname": strings.TrimPrefix(oldEndpoint, "https://"), "hostname": newHost,
+				}); err != nil {
+				return err
+			}
 		}
 		result = MutationRecord{Tunnel: current, Operation: operation, Changed: changed}
 		return nil

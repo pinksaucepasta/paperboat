@@ -210,6 +210,20 @@ func TestTunnelV1MutationBindsETagAndIdempotency(t *testing.T) {
 	}
 }
 
+func TestTunnelV1PatchSendsOnlyTheSubdomain(t *testing.T) {
+	client := tunnelTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if r.Method != http.MethodPatch || string(body) != `{"subdomain":"helloworld"}` {
+			t.Fatalf("request = %s %s %s", r.Method, r.URL.Path, body)
+		}
+		writeTunnelTestData(t, w, TunnelMutation{Tunnel: validTunnelTestValue(), Operation: validTunnelOperationTestValue("tunnel", "tun_1")})
+	})
+	subdomain := "helloworld"
+	if _, err := client.PatchTunnelV1(context.Background(), "tun_1", `"tunnel:tun_1:3"`, "idem_1", TunnelPatchInput{Subdomain: &subdomain}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestCreateTunnelV1ResolvesOperationOnlyResponse(t *testing.T) {
 	var requests []string
 	tunnel := validTunnelTestValue()

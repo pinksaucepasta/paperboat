@@ -34,6 +34,9 @@ type fakeTunnelRepository struct {
 	list             []dbsqlc.Tunnel
 	createResult     MutationRecord
 	patchResult      MutationRecord
+	checkedLabel     string
+	addressTaken     bool
+	addressErr       error
 	stateResult      MutationRecord
 	facts            HealthFacts
 	factsErr         error
@@ -105,6 +108,12 @@ func (f *fakeTunnelRepository) Patch(_ context.Context, input PatchRecord) (Muta
 	return f.patchResult, nil
 }
 
+func (f *fakeTunnelRepository) CheckAddress(_ context.Context, _, _, label string) (AddressCheck, error) {
+	f.checkedLabel = label
+	host := label + ".tunnels.example.test"
+	return AddressCheck{Host: host, Current: "https://"+host == f.tunnel.StableEndpoint, Free: !f.addressTaken}, f.addressErr
+}
+
 func (f *fakeTunnelRepository) Transition(_ context.Context, input StateRecord) (MutationRecord, error) {
 	f.transition = input
 	if f.transitionErr != nil {
@@ -158,6 +167,7 @@ func testService(t *testing.T, repository *fakeTunnelRepository, newID func(pref
 	service, err := NewService(repository, Config{
 		EndpointBuilder: builder,
 		CursorKey:       bytes.Repeat([]byte{7}, 32), Now: func() time.Time { return testNow }, NewID: newID,
+		ReservedSubdomains: []string{"www", "admin"},
 	})
 	if err != nil {
 		t.Fatal(err)

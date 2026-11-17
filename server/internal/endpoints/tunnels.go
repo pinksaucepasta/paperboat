@@ -95,7 +95,7 @@ AND g.activation_state='pending' AND g.generation=(`+newest+`)`, machineID, tunn
 SELECT tr.id,e.id,lower(substring(t.stable_endpoint from 9)),tr.protocol,tr.generation,tr.id
 FROM endpoints e JOIN tunnels t ON t.id=e.tunnel_id JOIN tunnel_routes tr ON tr.tunnel_id=t.id AND tr.desired_state='active' AND tr.deleted_at IS NULL
 WHERE e.kind='tunnel' AND e.agent_machine_id=$1 AND ($2='' OR e.tunnel_id=$2)
-ON CONFLICT(id) DO UPDATE SET revision=EXCLUDED.revision WHERE endpoint_routes.revision<>EXCLUDED.revision`, machineID, tunnelID); err != nil {
+ON CONFLICT(id) DO UPDATE SET revision=EXCLUDED.revision,hostname=EXCLUDED.hostname WHERE endpoint_routes.revision<>EXCLUDED.revision OR endpoint_routes.hostname<>EXCLUDED.hostname`, machineID, tunnelID); err != nil {
 		return err
 	}
 	return reconcile()
