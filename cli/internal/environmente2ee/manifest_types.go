@@ -1,9 +1,7 @@
 package environmente2ee
 
 import (
-	"crypto/ecdh"
 	"crypto/ed25519"
-	"crypto/hpke"
 	"io"
 )
 
@@ -79,16 +77,4 @@ type FirstHostDelivery struct {
 	Global    DecryptedScope
 	Machine   DecryptedScope
 	Effective map[string][]byte
-}
-
-func GenerateRecipientKey() (private, public []byte, err error) {
-	key, err := hpke.DHKEM(ecdh.X25519()).GenerateKey()
-	if err != nil {
-		return nil, nil, err
-	}
-	private, err = key.Bytes()
-	if err != nil {
-		return nil, nil, err
-	}
-	return private, key.PublicKey().Bytes(), nil
 }

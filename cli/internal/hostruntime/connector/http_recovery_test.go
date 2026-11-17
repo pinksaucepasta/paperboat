@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/quic-go/quic-go/http3"
-	"golang.org/x/net/http2"
 )
 
 // The first attempt sees a real UDP blackhole. Re-establishment after UDP is
@@ -22,7 +21,7 @@ func TestHTTPPoolUDPBlackholeFallbackAndPreferredRecovery(t *testing.T) {
 	defer cancel()
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodConnect {
-			http.Error(w, "CONNECT required", 405)
+			http.Error(w, "CONNECT required", http.StatusMethodNotAllowed)
 			return
 		}
 		w.WriteHeader(200)
@@ -41,9 +40,6 @@ func TestHTTPPoolUDPBlackholeFallbackAndPreferredRecovery(t *testing.T) {
 	}
 	serverTLS.NextProtos = []string{"h2"}
 	h2 := &http.Server{Handler: handler, TLSConfig: serverTLS}
-	if err := http2.ConfigureServer(h2, &http2.Server{}); err != nil {
-		t.Fatal(err)
-	}
 	go h2.Serve(tls.NewListener(tcp, serverTLS))
 	defer h2.Close()
 	udp, err := net.ListenPacket("udp", "127.0.0.1:0")

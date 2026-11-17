@@ -43,7 +43,7 @@ func TestDecodePreservesFailureAndEnforcesCompleteRequestBound(t *testing.T) {
 type failedInstallReader struct{ formatted *int }
 
 func (r failedInstallReader) Read([]byte) (int, error) {
-	return 0, privateInstallReadFailure{formatted: r.formatted}
+	return 0, privateInstallReadFailure(r)
 }
 
 type privateInstallReadFailure struct{ formatted *int }

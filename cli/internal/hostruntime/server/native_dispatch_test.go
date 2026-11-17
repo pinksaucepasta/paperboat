@@ -202,10 +202,10 @@ func TestNativeDispatchKeepsAdmissionDuringWorkerMaintenance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = controller.MarkReady(hostdproto.Ready{WorkerID: welcome.WorkerID, APIVersion: welcome.APIVersion, Epoch: welcome.Epoch, Lease: welcome.Lease}); err != nil {
+	if err = controller.MarkReady(hostdproto.Ready(welcome)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = controller.Activate(hostdproto.Activate{WorkerID: welcome.WorkerID, APIVersion: welcome.APIVersion, Epoch: welcome.Epoch, Lease: welcome.Lease}); err != nil {
+	if _, err = controller.Activate(hostdproto.Activate(welcome)); err != nil {
 		t.Fatal(err)
 	}
 	var opened atomic.Int32

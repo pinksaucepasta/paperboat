@@ -467,19 +467,6 @@ func (m *Manager) record(ctx context.Context, phase EventPhase, journal updatefl
 	_ = m.config.Events.RecordUpdateEvent(eventCtx, Event{At: m.now(), Phase: phase, TransactionID: journal.TransactionID, FromVersion: m.active.Version, ToVersion: release.Version, Failure: failure})
 }
 
-func safeFailure(err error) string {
-	if err == nil {
-		return ""
-	}
-	if errors.Is(err, context.DeadlineExceeded) {
-		return "timeout"
-	}
-	if errors.Is(err, context.Canceled) {
-		return "canceled"
-	}
-	return "failed"
-}
-
 func (m *Manager) stage(ctx context.Context, release Release) (Release, error) {
 	stream, err := m.config.Fetcher.Fetch(ctx, release)
 	if err != nil {

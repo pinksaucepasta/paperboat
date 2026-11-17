@@ -77,11 +77,6 @@ func NewProductionOwner(ctx context.Context, version string, environ func(string
 	if err != nil {
 		return nil, err
 	}
-	resources := cfg.Resources
-	if resources == (runtimeconfig.ResourceLimits{}) {
-		resources = runtimeconfig.DefaultResources
-	}
-
 	connections, err := productionSessionOwners(ctx, cfg, environ)
 	if err != nil {
 		return nil, errors.Join(err, durable.Close())

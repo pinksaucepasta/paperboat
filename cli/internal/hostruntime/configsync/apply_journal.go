@@ -230,7 +230,6 @@ func restoreApplyJournalEntry(homeRoot string, entry applyJournalEntry, mappings
 		if !ok || target != entry.Destination {
 			return ErrApplyJournalInvalid
 		}
-		homeRoot = filepath.VolumeName(target) + string(filepath.Separator)
 	}
 	if !entry.Existed {
 		return secureRemoveFile(target)

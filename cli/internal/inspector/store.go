@@ -471,9 +471,6 @@ func (s *Store) Finish(pending *Pending, completed CompletedCapture) (*Record, e
 		// so retaining it does not create a second full raw buffer.
 		raw := completed.RawRequest
 		s.raw[record.ID] = &rawEntry{bytes: raw, expiresAt: record.StartedAt.Add(RawRetention), resourceID: record.ResourceID, size: int64(len(raw))}
-	} else if len(completed.RawRequest) > 0 && policy.CaptureRaw {
-		// Raw bytes still count against budgets only when retained; a
-		// truncated or ineligible raw is not retained.
 	}
 	s.signalCleanupLocked()
 	return record, nil

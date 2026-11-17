@@ -23,9 +23,9 @@ func Dial(ctx context.Context, addr string) (*grpc.ClientConn, error) {
 	}
 	ctx, cancel := context.WithTimeout(ctx, dialTimeout)
 	defer cancel()
-	return grpc.DialContext(
+	return newReadyClient(
 		ctx,
-		sockPath,
+		"passthrough:///"+sockPath,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) {
 			var dialer net.Dialer
@@ -41,6 +41,5 @@ func Dial(ctx context.Context, addr string) (*grpc.ClientConn, error) {
 			}
 			return conn, nil
 		}),
-		grpc.WithBlock(),
 	)
 }

@@ -35,7 +35,8 @@ const releaseDefersPolicy = true
 const portRedirects = false
 
 func requirePrivilege() error {
-	token, err := windows.OpenCurrentProcessToken()
+	var token windows.Token
+	err := windows.OpenProcessToken(windows.CurrentProcess(), windows.TOKEN_QUERY, &token)
 	if err != nil {
 		return err
 	}

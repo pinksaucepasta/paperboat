@@ -350,14 +350,6 @@ func ValidateLatestAfterFirstDelivery(bootstrapGlobal, bootstrapMachine, latestG
 	return FirstHostDelivery{Global: openedGlobal, Machine: openedMachine, Effective: effective}, nil
 }
 
-// ValidateLatestAfterHighWater applies the same monotonic latest-pair rule for
-// an existing host whose durable old pair is already trusted. The caller must
-// first verify and persist every sequential authority document through
-// currentAuthority.
-func ValidateLatestAfterHighWater(oldGlobal, oldMachine, latestGlobal, latestMachine Manifest, oldAuthority, currentAuthority Authority, recipient RecipientPrivate) (FirstHostDelivery, error) {
-	return ValidateLatestAfterFirstDelivery(oldGlobal, oldMachine, latestGlobal, latestMachine, oldAuthority, currentAuthority, recipient)
-}
-
 func validFirstPairTransitionShape(manifest Manifest) bool {
 	if manifest.Mutation == MutationInitialize {
 		return manifest.PreviousVersion == 0 && manifest.Version == 1 && manifest.KeyEpoch == 1 && len(manifest.Names) == 0 && len(manifest.ChangedNames) == 0

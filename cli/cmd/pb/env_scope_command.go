@@ -266,15 +266,6 @@ func unsetEnvironmentVariableForScope(command *cobra.Command, team, requestedMac
 	return err
 }
 
-func vaultScopeConfiguredName(values map[string][]byte, requested string) (string, bool) {
-	for name := range values {
-		if strings.EqualFold(name, requested) {
-			return name, true
-		}
-	}
-	return "", false
-}
-
 func vaultScopeTargetForCommand(command *cobra.Command, client *api.Client, accountID, team, requestedMachine string) (vaultScopeTarget, error) {
 	team = strings.TrimSpace(team)
 	requestedMachine = strings.TrimSpace(requestedMachine)

@@ -268,13 +268,11 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	targetURL := &url.URL{Scheme: "http", Host: net.JoinHostPort(targetIP.String(), strconv.Itoa(targetPort))}
 
-	proxy := httputil.NewSingleHostReverseProxy(targetURL)
-	proxy.Transport = p.transport
+	proxy := &httputil.ReverseProxy{Transport: p.transport}
 	if route.HTTPS {
 		targetURL.Scheme = "https"
 		proxy.Transport = p.httpsTransport(host)
 	}
-	proxy.Director = nil
 	proxy.Rewrite = func(request *httputil.ProxyRequest) {
 		request.SetURL(targetURL)
 		request.Out.Host = request.In.Host

@@ -320,5 +320,5 @@ func TestDarwinGuardKernel(t *testing.T) {
 	if err = client.ReplaceNames(ctx, nil); err != nil {
 		t.Fatal(err)
 	}
-	t.Log(fmt.Sprintf("fixed 127.100/16 range passed; root caller and broker UID70 bytes passed; UID501 denied and disjoint ownership passed; %d authorized accepts", accepted.Load()))
+	t.Logf("fixed 127.100/16 range passed; root caller and broker UID70 bytes passed; UID501 denied and disjoint ownership passed; %d authorized accepts", accepted.Load())
 }

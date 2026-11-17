@@ -24,7 +24,7 @@ func (h *Host) BindOwnerUpdateGate(capability []byte) error {
 	mux.HandleFunc("/v1/local/runtime-update-gate", func(w http.ResponseWriter, r *http.Request) {
 		raw, err := base64.RawURLEncoding.DecodeString(r.Header.Get("X-Paperboat-Owner-Capability"))
 		if r.Method != "POST" || err != nil || subtle.ConstantTimeCompare(raw, token) != 1 {
-			http.Error(w, "unavailable", 403)
+			http.Error(w, "unavailable", http.StatusForbidden)
 			return
 		}
 		var request hostdproto.UpdateGateRequest
@@ -36,7 +36,7 @@ func (h *Host) BindOwnerUpdateGate(capability []byte) error {
 		}
 		result, err := h.updateGate.HandleUpdateGate(r.Context(), request)
 		if err != nil {
-			http.Error(w, "update gate unavailable", 503)
+			http.Error(w, "update gate unavailable", http.StatusServiceUnavailable)
 			return
 		}
 		w.Header().Set("Cache-Control", "no-store")
@@ -46,7 +46,7 @@ func (h *Host) BindOwnerUpdateGate(capability []byte) error {
 	mux.HandleFunc(ownerOpenSSHPath, func(w http.ResponseWriter, r *http.Request) {
 		raw, err := base64.RawURLEncoding.DecodeString(r.Header.Get("X-Paperboat-Owner-Capability"))
 		if r.Method != "GET" || err != nil || subtle.ConstantTimeCompare(raw, token) != 1 {
-			http.Error(w, "unavailable", 403)
+			http.Error(w, "unavailable", http.StatusForbidden)
 			return
 		}
 		w.Header().Set("Cache-Control", "no-store")

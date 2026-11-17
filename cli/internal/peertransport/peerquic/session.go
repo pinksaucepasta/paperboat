@@ -63,14 +63,6 @@ func (c SessionConfig) WithKeepAlive(period time.Duration) (SessionConfig, error
 	return c, nil
 }
 
-func (c SessionConfig) WithInitialPacketSize(size uint16) (SessionConfig, error) {
-	c.InitialPacketSize = size
-	if err := c.validate(); err != nil {
-		return SessionConfig{}, err
-	}
-	return c, nil
-}
-
 func (c SessionConfig) validate() error {
 	if !validClass(c.Class) || c.KeepAlivePeriod <= 0 || c.MaxIdleTimeout <= 2*c.KeepAlivePeriod || c.InitialPacketSize < 1200 || c.HandshakeTimeout < 0 {
 		return errors.New("invalid peer QUIC session configuration")

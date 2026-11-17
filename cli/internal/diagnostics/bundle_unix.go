@@ -175,18 +175,6 @@ func (b *boundedBundleBuffer) Write(value []byte) (int, error) {
 	return b.Buffer.Write(value)
 }
 
-func safeHex(value string) bool {
-	if value == "" {
-		return false
-	}
-	for _, character := range value {
-		if !(character >= '0' && character <= '9' || character >= 'a' && character <= 'f') {
-			return false
-		}
-	}
-	return true
-}
-
 func marshalEvents(events []Event) ([]byte, error) {
 	var result bytes.Buffer
 	for _, event := range events {

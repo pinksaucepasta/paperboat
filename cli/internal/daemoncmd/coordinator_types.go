@@ -180,7 +180,6 @@ func (r *guardedRoute) startForward() bool {
 type guardedWebRoute struct {
 	proxy         *splitdns.Proxy
 	base          string
-	machineID     string
 	browserRoutes map[string]splitdns.BrowserRoute
 	state         *browserGatewayState
 	ports         map[int]bool // machine ports with a per-port listener

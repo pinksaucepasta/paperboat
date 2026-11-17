@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/quic-go/quic-go/http3"
-	"golang.org/x/net/http2"
 )
 
 func TestHTTPServiceAcceptsRealHTTP2AndHTTP3CONNECT(t *testing.T) {
@@ -42,7 +41,7 @@ func TestHTTPServiceAcceptsRealHTTP2AndHTTP3CONNECT(t *testing.T) {
 			var address string
 			if protocol == "h2" {
 				clientTLS.NextProtos = []string{"h2"}
-				transport := &http2.Transport{TLSClientConfig: clientTLS}
+				transport := h2OnlyTransport(clientTLS)
 				roundTripper, closeTransport, address = transport, transport.CloseIdleConnections, service.TCPAddr().String()
 			} else {
 				clientTLS.NextProtos = []string{"h3"}
@@ -104,6 +103,13 @@ type testHTTPLink struct {
 
 func (l *testHTTPLink) Close() error { return nil }
 
+// h2OnlyTransport speaks HTTP/2 only, so a carrier CONNECT is never downgraded to HTTP/1.
+func h2OnlyTransport(config *tls.Config) *http.Transport {
+	protocols := new(http.Protocols)
+	protocols.SetHTTP2(true)
+	return &http.Transport{TLSClientConfig: config, Protocols: protocols}
+}
+
 func TestHTTPServiceRejectsPeerBinding(t *testing.T) {
 	clientTLS, serverTLS, _ := testEndpointCertificates(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -114,7 +120,7 @@ func TestHTTPServiceRejectsPeerBinding(t *testing.T) {
 	}
 	defer service.Close()
 	clientTLS.NextProtos = []string{"h2"}
-	transport := &http2.Transport{TLSClientConfig: clientTLS}
+	transport := h2OnlyTransport(clientTLS)
 	defer transport.CloseIdleConnections()
 	reader, writer := io.Pipe()
 	defer writer.Close()
@@ -181,7 +187,7 @@ func TestHTTPServicePanicAbortPrivacyAndRecovery(t *testing.T) {
 	}
 	cancel()
 	clientTLS.NextProtos = []string{"h2"}
-	transport := &http2.Transport{TLSClientConfig: clientTLS}
+	transport := h2OnlyTransport(clientTLS)
 	defer transport.CloseIdleConnections()
 	ctx, stop := context.WithTimeout(t.Context(), time.Second)
 	defer stop()
@@ -269,7 +275,7 @@ func TestHTTPServiceHoldsMoreCarriersThanItsQueueDepthUpToItsMaximum(t *testing.
 		t.Helper()
 		tlsConfig := clientTLS.Clone()
 		tlsConfig.NextProtos = []string{"h2"}
-		transport := &http2.Transport{TLSClientConfig: tlsConfig}
+		transport := h2OnlyTransport(tlsConfig)
 		t.Cleanup(transport.CloseIdleConnections)
 		body, writer := io.Pipe()
 		t.Cleanup(func() { _ = writer.Close() })
@@ -317,7 +323,7 @@ func TestHTTPServiceClosesACarrierWhoseMachineKeyIsNoLongerAdmitted(t *testing.T
 	}
 	defer service.Close()
 	clientTLS.NextProtos = []string{"h2"}
-	transport := &http2.Transport{TLSClientConfig: clientTLS}
+	transport := h2OnlyTransport(clientTLS)
 	defer transport.CloseIdleConnections()
 	reader, writer := io.Pipe()
 	defer writer.Close()

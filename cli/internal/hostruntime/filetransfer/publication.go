@@ -13,7 +13,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/transfername"
 )
 
-// Inbox changes apply when a transfer first publishes. Its exact destination is
+// PublishedPath: inbox changes apply when a transfer first publishes. Its exact destination is
 // then durable: settings changes and retries must never move or duplicate it.
 func (s *Service) PublishedPath(ctx context.Context, id string) (string, error) {
 	release, err := s.admitMutation(ctx)

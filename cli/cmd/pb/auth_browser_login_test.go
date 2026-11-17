@@ -125,7 +125,7 @@ func TestBrowserLoginAliasesApprovalAndRecovery(t *testing.T) {
 	if _, e = store.Load(srv.URL); !errors.Is(e, config.ErrNoCredentials) {
 		t.Fatalf("unvalidated session saved: %v", e)
 	}
-	out, e = runBrowserLogin(t, context.Background(), path, "auth", "login", "--no-browser")
+	_, e = runBrowserLogin(t, context.Background(), path, "auth", "login", "--no-browser")
 	if e == nil {
 		t.Fatal("failed enrollment activated login")
 	}

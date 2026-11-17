@@ -409,11 +409,9 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 		engineTunnels = &runtimeattachment.EngineTunnels{Service: attachment, Forwarder: *streams, Prober: prober, Events: machineEvents.Subscribe(machineevents.TopicTunnels)}
 	}
 	nativePrivateValidators := []productionNativePrivateValidator{localNativePrivateValidator(previewAssembly.dispatcher)}
-	if machineServiceObserver != nil {
-		nativePrivateValidators = append(nativePrivateValidators, machineServiceObserver.validateMachineService)
-	}
+	nativePrivateValidators = append(nativePrivateValidators, machineServiceObserver.validateMachineService)
 	dependencies.EngineTunnels = engineTunnels
-	if managedSSHIdentity != nil && nativeDispatch == nil {
+	if nativeDispatch == nil {
 		dependencies.NativePeerFactory = func(serve func(net.Conn) error, transferHandler http.Handler) (Service, error) {
 			return newProductionNativePeerService(productionNativePeerConfig{controlURL: controlURL.String(), issuer: issuer, stateRoot: runtimeConfig.StateRoot, machineID: machineID, generation: uint64(machineRegistration.InstallationGeneration), transport: transport, identity: managedSSHIdentity, keys: cache, authorizer: authorizer, serve: serve, transfer: transferHandler, ssh: managedSSHHost, privateCurrent: productionNativeCurrent(nativePrivateValidators...), privateDial: productionNativePrivateDial, inspector: http.HandlerFunc(inspectorService.ServeAuthenticatedHTTP), inspectorStore: inspectorStore, usage: dependencies.Bandwidth, offlineAudit: offlineAudit, networkEvents: machineEvents.Subscribe(hostRenewalTopics...)})
 		}
@@ -428,14 +426,12 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 		}
 		dependencies.NativeDispatch = &dispatchConfig
 	}
-	if managedSSHIdentity != nil {
-		usageControl := clientapi.New(controlURL.String(), clientconfig.Credential{}, &http.Client{Transport: transport, Timeout: 15 * time.Second})
-		usageControl.SetMachineAuth(managedSSHIdentity)
-		observeBandwidth := newBandwidthObservation(ctx)
-		dependencies.Bandwidth, err = bandwidth.Open(filepath.Join(runtimeConfig.StateRoot, "bandwidth-usage.json"), usageControl, observeBandwidth)
-		if err != nil {
-			return nil, err
-		}
+	usageControl := clientapi.New(controlURL.String(), clientconfig.Credential{}, &http.Client{Transport: transport, Timeout: 15 * time.Second})
+	usageControl.SetMachineAuth(managedSSHIdentity)
+	observeBandwidth := newBandwidthObservation(ctx)
+	dependencies.Bandwidth, err = bandwidth.Open(filepath.Join(runtimeConfig.StateRoot, "bandwidth-usage.json"), usageControl, observeBandwidth)
+	if err != nil {
+		return nil, err
 	}
 	dependencies.StoredFiles = productionStoredFiles(controlURL, runtimeConfig.StateRoot, transport, managedSSHIdentity, machineRegistration, operationID, machineEvents)
 	dependencies.RecordingControl = productionRecordingControl(controlURL, runtimeConfig.StateRoot, transport, renewingTokens, operationID, machineEvents, offlineAudit)

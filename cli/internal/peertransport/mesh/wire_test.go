@@ -85,12 +85,12 @@ func TestWireFieldNames(t *testing.T) {
 // trip, unused fields are dropped, and STUN-only nodes disappear.
 func TestWireRegionRoundTrip(t *testing.T) {
 	in := &tailcfg.DERPRegion{
-		RegionID:   10,
-		RegionCode: "sea",
-		RegionName: "Seattle",
-		Latitude:   47.609722,   // dropped
-		Longitude:  -122.333056, // dropped
-		Avoid:      true,        // dropped
+		RegionID:        10,
+		RegionCode:      "sea",
+		RegionName:      "Seattle",
+		Latitude:        47.609722,   // dropped
+		Longitude:       -122.333056, // dropped
+		NoMeasureNoHome: true,        // dropped
 		Nodes: []*tailcfg.DERPNode{
 			{
 				Name:      "10b",

@@ -2,11 +2,13 @@ package daemonrpc
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	pb "github.com/pinksaucepasta/paperboat/cli/internal/daemonrpc/proto"
 	"github.com/pinksaucepasta/paperboat/shared/supportref"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/metadata"
 )
 
@@ -40,6 +42,22 @@ func rpcContext(ctx context.Context) context.Context {
 // dialTimeout bounds a blocking Dial whatever context the caller passes: a socket that exists but never accepts
 // (a wedged daemon) fails the command instead of hanging it. Prior art: tailscale safesocket.ConnectContext (20 s).
 var dialTimeout = 5 * time.Second
+
+// newReadyClient creates the client connection to target and waits until it is connected or ctx ends, as the
+// removed grpc.WithBlock did: grpc.NewClient itself connects lazily.
+func newReadyClient(ctx context.Context, target string, options ...grpc.DialOption) (*grpc.ClientConn, error) {
+	conn, err := grpc.NewClient(target, options...)
+	if err != nil {
+		return nil, err
+	}
+	conn.Connect()
+	for state := conn.GetState(); state != connectivity.Ready; state = conn.GetState() {
+		if !conn.WaitForStateChange(ctx, state) {
+			return nil, errors.Join(ctx.Err(), conn.Close())
+		}
+	}
+	return conn, nil
+}
 
 type daemonDialError struct{ cause error }
 

@@ -335,7 +335,7 @@ func actionHomeTunnelList(command *cobra.Command) error {
 			run := runHomeResult
 			switch action.ID {
 			case "route", "domain":
-				if err := actionHomeTunnelInventory(command, client, choice.ID, action.ID); err != nil && !interactiveCanceled(err) {
+				if err := actionHomeTunnelInventory(command, client, choice.ID, action.ID); !interactiveCanceled(err) {
 					return err
 				}
 				continue
@@ -819,8 +819,8 @@ func actionHomeInvitations(command *cobra.Command, sent bool) error {
 			continue
 		}
 		item := byID[choice.ID]
-		action := "accept"
-		args := []string{"team", "accept", item.InvitationID}
+		var action string
+		var args []string
 		if sent {
 			action = "cancel"
 			args = []string{"team", "cancel-invite", item.TeamID, item.InvitationID}

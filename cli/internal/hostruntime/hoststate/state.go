@@ -27,7 +27,6 @@ var (
 	ErrInvalidState         = errors.New("invalid host state")
 	ErrCredentialMaterial   = errors.New("reusable credential material is forbidden in host state")
 	idPattern               = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`)
-	codePattern             = regexp.MustCompile(`^[a-z][a-z0-9_]{0,127}$`)
 	stableEndpointIDPattern = regexp.MustCompile(`^endpoint_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
 )
 

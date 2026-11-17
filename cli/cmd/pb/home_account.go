@@ -38,7 +38,7 @@ func actionHomeAccount(command *cobra.Command) error {
 		case "status":
 			client, clientErr := backendForCommand(command)
 			if clientErr != nil {
-				if infoErr := showInformation(command, "Account", "Not signed in", nil); infoErr != nil && !errors.Is(infoErr, selector.ErrCanceled) {
+				if infoErr := showInformation(command, "Account", "Not signed in", nil); !errors.Is(infoErr, selector.ErrCanceled) {
 					return infoErr
 				}
 				continue
@@ -52,7 +52,7 @@ func actionHomeAccount(command *cobra.Command) error {
 			if meErr != nil {
 				return friendlyCommandError(meErr)
 			}
-			if infoErr := showInformation(command, "Account", firstNonEmpty(me.Email, me.DisplayName, me.ID), []selector.Item{{ID: "server", Title: "Paperboat server", Description: d.cfg.ServerURL}}); infoErr != nil && !errors.Is(infoErr, selector.ErrCanceled) {
+			if infoErr := showInformation(command, "Account", firstNonEmpty(me.Email, me.DisplayName, me.ID), []selector.Item{{ID: "server", Title: "Paperboat server", Description: d.cfg.ServerURL}}); !errors.Is(infoErr, selector.ErrCanceled) {
 				return infoErr
 			}
 		case "login":
@@ -144,7 +144,7 @@ func actionHomeConfig(command *cobra.Command) error {
 				}
 			}
 		case "path":
-			if infoErr := showInformation(command, "Configuration file", cfg.Path(), nil); infoErr != nil && !errors.Is(infoErr, selector.ErrCanceled) {
+			if infoErr := showInformation(command, "Configuration file", cfg.Path(), nil); !errors.Is(infoErr, selector.ErrCanceled) {
 				return infoErr
 			}
 		}

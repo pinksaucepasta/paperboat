@@ -301,8 +301,6 @@ func (c *Controller) Stop(ctx context.Context) error {
 	return nil
 }
 
-func (c *Controller) Shutdown(ctx context.Context) error { return c.Stop(ctx) }
-
 // Health returns a copy suitable for health endpoints and metrics adapters.
 func (c *Controller) Health() HealthSnapshot {
 	if c == nil {
@@ -314,10 +312,6 @@ func (c *Controller) Health() HealthSnapshot {
 	snapshot.CheckedAt = c.config.Clock.Now()
 	return snapshot
 }
-
-func (c *Controller) Snapshot() HealthSnapshot { return c.Health() }
-
-func (c *Controller) NextRetryAt() (time.Time, bool) { return c.Health().NextRetry() }
 
 func (c *Controller) signal() {
 	select {

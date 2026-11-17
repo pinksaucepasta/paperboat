@@ -88,7 +88,7 @@ func testBrowserIngressMachineProofRefreshAndExactBinding(t *testing.T, native b
 			w.WriteHeader(404)
 			return
 		case "redirect":
-			http.Redirect(w, r, "https://other.example.test", 302)
+			http.Redirect(w, r, "https://other.example.test", http.StatusFound)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")

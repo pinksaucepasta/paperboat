@@ -15,7 +15,8 @@ func TestNativeCarrierLockPublication(t *testing.T) {
 	if !windows.GetCurrentProcessToken().IsElevated() {
 		t.Skip("elevated native Windows fixture required")
 	}
-	token, err := windows.OpenCurrentProcessToken()
+	var token windows.Token
+	err := windows.OpenProcessToken(windows.CurrentProcess(), windows.TOKEN_QUERY, &token)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -17,7 +17,8 @@ import (
 
 // Users may create folders under ProgramData, so C:\ProgramData\Paperboat can be planted before install.
 func TestExecutableDirectoryOwnedByAnotherAccountIsRefusedUnchanged(t *testing.T) {
-	token, err := windows.OpenCurrentProcessToken()
+	var token windows.Token
+	err := windows.OpenProcessToken(windows.CurrentProcess(), windows.TOKEN_QUERY, &token)
 	if err != nil {
 		t.Fatal(err)
 	}

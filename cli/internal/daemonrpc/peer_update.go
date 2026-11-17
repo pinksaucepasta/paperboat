@@ -1,3 +1,5 @@
+//lint:file-ignore ST1003 PeerUpdate keeps the field and getter names of the generated daemon.proto peer messages the coordinator maps it from and to
+
 package daemonrpc
 
 import "slices"

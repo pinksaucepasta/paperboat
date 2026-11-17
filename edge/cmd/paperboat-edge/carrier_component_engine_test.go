@@ -13,8 +13,6 @@ import (
 	"testing"
 	"time"
 
-	"golang.org/x/net/http2"
-
 	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
 
@@ -112,11 +110,11 @@ func TestRuntimeCarrierBecomesTheReplicaOfItsEngineTunnelRoutes(t *testing.T) {
 	clientConfig := datacarrier.DefaultConfig()
 	clientConfig.Identity = identity
 	clientConfig.Authorize = datacarrier.AuthorizerFunc(func(context.Context, datacarrier.Identity, datacarrier.StreamOpen) error { return nil })
-	transport := &http2.Transport{TLSClientConfig: &tls.Config{
+	transport := h2OnlyTransport(&tls.Config{
 		MinVersion: tls.VersionTLS13, Certificates: []tls.Certificate{carrierCertificate},
 		InsecureSkipVerify: true, // This fixture's server certificate is self-signed.
 		NextProtos:         []string{"h2"},
-	}}
+	})
 	defer transport.CloseIdleConnections()
 	reader, writer := io.Pipe()
 	request, err := http.NewRequestWithContext(ctx, http.MethodConnect, "https://"+tcpAddress, reader)
@@ -255,11 +253,11 @@ func TestRuntimeRouteAttachesWhenItsAdmissionArrivesAfterTheEngineCarrierConnect
 	clientConfig := datacarrier.DefaultConfig()
 	clientConfig.Identity = identity
 	clientConfig.Authorize = datacarrier.AuthorizerFunc(func(context.Context, datacarrier.Identity, datacarrier.StreamOpen) error { return nil })
-	transport := &http2.Transport{TLSClientConfig: &tls.Config{
+	transport := h2OnlyTransport(&tls.Config{
 		MinVersion: tls.VersionTLS13, Certificates: []tls.Certificate{carrierCertificate},
 		InsecureSkipVerify: true, // This fixture's server certificate is self-signed.
 		NextProtos:         []string{"h2"},
-	}}
+	})
 	defer transport.CloseIdleConnections()
 	reader, writer := io.Pipe()
 	request, err := http.NewRequestWithContext(ctx, http.MethodConnect, "https://"+tcpAddress, reader)

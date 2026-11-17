@@ -44,7 +44,7 @@ func actionHomeSessionActions(command *cobra.Command, target environmentTarget, 
 			return actionErr
 		}
 		if action.ID == "sharing" {
-			if err := actionHomeSessionSharing(command, session.ID); err != nil && !interactiveCanceled(err) {
+			if err := actionHomeSessionSharing(command, session.ID); !interactiveCanceled(err) {
 				return err
 			}
 			continue

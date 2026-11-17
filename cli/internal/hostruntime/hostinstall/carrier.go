@@ -107,25 +107,6 @@ func carrierInstallerWithPending(c CarrierConfig, pending bool) (*service.Instal
 	return service.New(config)
 }
 
-// PrepareCarrier publishes and starts only the initial carrier. Existing
-// carriers are immutable here; replacement requires the separate drain gate.
-
-func PrepareCarrier(ctx context.Context, request Request) (resultErr error) {
-	if ctx == nil {
-		return ErrInvalidRequest
-	}
-	operationCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
-	defer cancel()
-	lock, err := carrierPublicationLock(operationCtx, request)
-	if err != nil {
-		return err
-	}
-	if lock != nil {
-		defer func() { resultErr = errors.Join(resultErr, lock.Close()) }()
-	}
-	return prepareCarrierLocked(operationCtx, request)
-}
-
 // prepareCarrierLocked requires the existing native installation control lock.
 func prepareCarrierLocked(ctx context.Context, request Request) error {
 	if ctx == nil {
@@ -286,8 +267,6 @@ func carrierEnsureAction(status service.NativeControllerStatus) ensureAction {
 	return ensureNothing
 }
 
-// ReadCarrierConfig accepts retained verified source pins and never consults
-// privileged enrollment metadata or assumes the newest feature source.
 // ReadCarrierDescriptor verifies protected declaration and source custody. It
 // does not require the still-serving primary's native declaration to match a
 // candidate that the installer may already have staged.
@@ -308,7 +287,8 @@ func verifyCarrierDescriptor(c CarrierConfig, err error) (CarrierConfig, error) 
 	return c, nil
 }
 
-// ReadCarrierConfig reads the active carrier generation.
+// ReadCarrierConfig reads the active carrier generation. It accepts retained verified source pins and never consults
+// privileged enrollment metadata or assumes the newest feature source.
 func ReadCarrierConfig(ctx context.Context, instance string) (CarrierConfig, error) {
 	return verifyCarrierNativeConfig(ReadCarrierDescriptor(ctx, instance))
 }

@@ -22,5 +22,6 @@ func OpenEffectiveToken() (windows.Token, error) {
 	if !errors.Is(err, windows.ERROR_NO_TOKEN) {
 		return 0, err
 	}
-	return windows.OpenCurrentProcessToken()
+	err = windows.OpenProcessToken(windows.CurrentProcess(), windows.TOKEN_QUERY, &token)
+	return token, err
 }

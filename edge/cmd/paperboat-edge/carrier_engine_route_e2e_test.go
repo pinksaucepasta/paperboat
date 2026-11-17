@@ -17,8 +17,6 @@ import (
 	"testing"
 	"time"
 
-	"golang.org/x/net/http2"
-
 	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
 
 	"github.com/pinksaucepasta/paperboat/edge/internal/config"
@@ -243,9 +241,9 @@ func dialEngineAgent(t *testing.T, ctx context.Context, address string, public e
 	config := datacarrier.DefaultConfig()
 	config.Identity = identity
 	config.Authorize = datacarrier.AuthorizerFunc(func(context.Context, datacarrier.Identity, datacarrier.StreamOpen) error { return nil })
-	transport := &http2.Transport{TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS13, Certificates: []tls.Certificate{certificate},
+	transport := h2OnlyTransport(&tls.Config{MinVersion: tls.VersionTLS13, Certificates: []tls.Certificate{certificate},
 		InsecureSkipVerify: true, // This fixture's edge certificate is self-signed.
-		NextProtos:         []string{"h2"}}}
+		NextProtos:         []string{"h2"}})
 	t.Cleanup(transport.CloseIdleConnections)
 	reader, writer := io.Pipe()
 	request, err := http.NewRequestWithContext(ctx, http.MethodConnect, "https://"+address, reader)

@@ -18,8 +18,7 @@ func routeKey(root key.NodePublic, namespace [32]byte) key.NodePublic {
 	if namespace == ([32]byte{}) {
 		return root
 	}
-	encoded := root.Raw32()
-	digest := sha256.Sum256(append(encoded[:], namespace[:]...))
+	digest := sha256.Sum256(append(root.AppendTo(nil), namespace[:]...))
 	return key.NodePublicFromRaw32(mem.B(digest[:]))
 }
 
@@ -27,8 +26,7 @@ func authFrame(token []byte, namespace [32]byte, disco key.DiscoPublic) (byte, [
 	if namespace == ([32]byte{}) {
 		return frameAuth, token
 	}
-	encoded := disco.Raw32()
-	body := append(append(namespace[:], encoded[:]...), 0, 0, 0, 1)
+	body := append(append(namespace[:], disco.AppendTo(nil)...), 0, 0, 0, 1)
 	return frameAuthGeneration, append(body, token...)
 }
 

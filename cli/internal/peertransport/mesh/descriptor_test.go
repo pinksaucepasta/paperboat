@@ -4,6 +4,7 @@
 package mesh
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -186,7 +187,7 @@ func TestAddrSeparateDiscoKey(t *testing.T) {
 	if !got.ServerDiscoPublic.Equal(discoPub) {
 		t.Fatalf("disco public key changed in round trip: got %v, want %v", got.ServerDiscoPublic, discoPub)
 	}
-	if got.ServerDiscoPublic.Raw32() == got.ServerPublic.Raw32() {
+	if bytes.Equal(got.ServerDiscoPublic.AppendTo(nil), got.ServerPublic.AppendTo(nil)) {
 		t.Fatal("server disco public key exposes the server node public key")
 	}
 	if again := DiscoPublicForNode(priv); !again.Equal(discoPub) {

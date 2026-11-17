@@ -67,10 +67,10 @@ func TestFileTransferAdmissionEndsAtResponseAndFencesIdleAssociation(t *testing.
 		if e != nil {
 			t.Fatal(e)
 		}
-		if e = controller.MarkReady(hostdproto.Ready{WorkerID: w.WorkerID, APIVersion: w.APIVersion, Epoch: w.Epoch, Lease: w.Lease}); e != nil {
+		if e = controller.MarkReady(hostdproto.Ready(w)); e != nil {
 			t.Fatal(e)
 		}
-		s, e := controller.Activate(hostdproto.Activate{WorkerID: w.WorkerID, APIVersion: w.APIVersion, Epoch: w.Epoch, Lease: w.Lease})
+		s, e := controller.Activate(hostdproto.Activate(w))
 		if e != nil {
 			t.Fatal(e)
 		}

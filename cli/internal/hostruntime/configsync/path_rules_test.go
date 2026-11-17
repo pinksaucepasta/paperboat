@@ -157,7 +157,7 @@ func TestMappedReconcileRetainsUnselectedRepositoryAndRelinquishesPaths(t *testi
 		}
 	}
 	descriptor.PathRules = nil
-	_, revision = reconcile(descriptor, revision)
+	reconcile(descriptor, revision)
 	got, _ := os.ReadFile(filepath.Join(external, "config.json"))
 	if string(got) != "new local" {
 		t.Fatalf("removed rule deleted local: %q", got)

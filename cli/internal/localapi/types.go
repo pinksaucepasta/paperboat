@@ -37,7 +37,7 @@ func (e CredentialExpiredError) Error() string {
 }
 func (CredentialExpiredError) LocalAPICode() string { return "credential_expired" }
 
-// ResumeUnavailableError: the daemon holds no resume secret for the terminal a resume request names (it restarted,
+// ResumeUnavailableError means the daemon holds no resume secret for the terminal a resume request names (it restarted,
 // the entry expired, or the host ended the attachment). The CLI then asks Paperboat for a grant and attaches normally.
 type ResumeUnavailableError struct{}
 
@@ -49,7 +49,7 @@ func (ResumeUnavailableError) LocalAPICode() string { return "resume_unavailable
 // sender then prepares a new lease and resumes at the receiver's committed offset instead of retrying the dead handle.
 const FileTransferUnknownHandleCode = "file_transfer_unknown_handle"
 
-// TransferLeaseUnknownError: no lease is held for the handle a stream request names.
+// TransferLeaseUnknownError means no lease is held for the handle a stream request names.
 type TransferLeaseUnknownError struct{}
 
 func (TransferLeaseUnknownError) Error() string {

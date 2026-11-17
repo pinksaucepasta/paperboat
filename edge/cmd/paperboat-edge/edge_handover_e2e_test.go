@@ -25,7 +25,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"golang.org/x/net/http2"
 
 	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
@@ -313,9 +312,9 @@ func TestEdgeHandoverKeepsThePreviewAndTheHostCarrierUp(t *testing.T) {
 		}
 	}
 	dial = func() {
-		transport := &http2.Transport{TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS13, Certificates: []tls.Certificate{certificate},
+		transport := h2OnlyTransport(&tls.Config{MinVersion: tls.VersionTLS13, Certificates: []tls.Certificate{certificate},
 			InsecureSkipVerify: true, // each fixture edge process makes its own server certificate; a real install keeps the claimed one
-			NextProtos:         []string{"h2"}}}
+			NextProtos:         []string{"h2"}})
 		reader, writer := io.Pipe()
 		request, err := http.NewRequestWithContext(ctx, http.MethodConnect, "https://"+tcpAddress, reader)
 		if err != nil {

@@ -14,7 +14,6 @@ import (
 	"github.com/coder/websocket"
 	"github.com/quic-go/quic-go"
 	"github.com/quic-go/quic-go/http3"
-	"golang.org/x/net/http2"
 )
 
 // TestLiveTunnelEdgeProtocols qualifies a deployed public edge (PLAN S1-09). It
@@ -75,7 +74,12 @@ func TestLiveTunnelEdgeProtocols(t *testing.T) {
 		get(t, h1(), "HTTP/1.1")
 	})
 	t.Run("HTTP/2", func(t *testing.T) {
-		get(t, &http2.Transport{TLSClientConfig: tlsConfig, DialTLSContext: func(ctx context.Context, network, address string, config *tls.Config) (net.Conn, error) {
+		protocols := new(http.Protocols)
+		protocols.SetHTTP2(true)
+		get(t, &http.Transport{Protocols: protocols, DialTLSContext: func(ctx context.Context, network, address string) (net.Conn, error) {
+			config := tlsConfig.Clone()
+			config.NextProtos = []string{"h2"}
+			config.ServerName, _, _ = net.SplitHostPort(address) // the published name, not the pinned IP
 			return (&tls.Dialer{NetDialer: dialer, Config: config}).DialContext(ctx, network, dialAddress(address))
 		}}, "HTTP/2.0")
 	})

@@ -507,7 +507,7 @@ func renderLaunchd(config Config) ([]byte, error) {
 	return plist.MarshalIndent(definition, plist.XMLFormat, "  ")
 }
 
-// Update scheduling leaves interactive runtime work ahead of bulk install I/O.
+// UpdateNice is the update scheduling priority: it leaves interactive runtime work ahead of bulk install I/O.
 const UpdateNice = "10"
 const UpdateIOClass = "idle"
 

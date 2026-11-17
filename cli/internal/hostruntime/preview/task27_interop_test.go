@@ -212,7 +212,7 @@ func TestTask27LazyDaemonInterop(t *testing.T) {
 	})
 	mux.HandleFunc("/replace", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
-			http.Error(w, "method", 405)
+			http.Error(w, "method", http.StatusMethodNotAllowed)
 			return
 		}
 		originMu.Lock()

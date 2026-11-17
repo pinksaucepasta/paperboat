@@ -34,7 +34,8 @@ func TestWindowsRepositoryCredentialSaveLoadProtectedReferences(t *testing.T) {
 	if err := EnsureRepositoryCredentialRoot(root); err != nil {
 		resolved, resolveErr := filepath.EvalSymlinks(root)
 		info, statErr := os.Lstat(root)
-		token, tokenErr := windows.OpenCurrentProcessToken()
+		var token windows.Token
+		tokenErr := windows.OpenProcessToken(windows.CurrentProcess(), windows.TOKEN_QUERY, &token)
 		ownerMatches := false
 		if tokenErr == nil {
 			defer token.Close()
@@ -79,7 +80,8 @@ func TestWindowsRepositoryCredentialSaveLoadProtectedReferences(t *testing.T) {
 		t.Fatal("profile path stage", err)
 	}
 	defer os.Remove(path)
-	token, err := windows.OpenCurrentProcessToken()
+	var token windows.Token
+	err = windows.OpenProcessToken(windows.CurrentProcess(), windows.TOKEN_QUERY, &token)
 	if err != nil {
 		t.Fatal("current token owner stage", err)
 	}
@@ -161,7 +163,8 @@ func TestWindowsRepositoryCredentialCaseOnlySameObject(t *testing.T) {
 }
 
 func TestWindowsRepositoryCredentialExistingForeignOwnerRejected(t *testing.T) {
-	token, err := windows.OpenCurrentProcessToken()
+	var token windows.Token
+	err := windows.OpenProcessToken(windows.CurrentProcess(), windows.TOKEN_QUERY, &token)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -12,7 +12,12 @@ import (
 // Workload payloads have their own typed protocol and never enter lifecycle frames.
 func ListenWorkloads(path string) (net.Listener, error) {
 	s := &Server{config: SocketConfig{SocketPath: path, UID: os.Geteuid(), GID: os.Getegid()}}
-	return s.Listen(path)
+	listener, err := s.Listen(path)
+	if err != nil {
+		// Never wrap a nil *net.UnixListener: callers compare the net.Listener to nil.
+		return nil, err
+	}
+	return listener, nil
 }
 
 // DialWorkloads ignores ownerSID, the Windows account of the server: the socket's directory carries its custody.

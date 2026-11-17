@@ -24,7 +24,10 @@ func (failure observedHTTPFailure) httpAttemptObserved() bool { return failure.o
 
 type observedHTTPNetworkFailure struct {
 	observedHTTPFailure
-	network net.Error
+	network interface {
+		Timeout() bool
+		Temporary() bool
+	}
 }
 
 func (failure observedHTTPNetworkFailure) Timeout() bool   { return failure.network.Timeout() }

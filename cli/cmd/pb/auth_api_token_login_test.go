@@ -17,8 +17,7 @@ import (
 // browser login; the token itself is never saved.
 func TestAPITokenLoginStartsATokenSession(t *testing.T) {
 	const secret = "pbat_" + "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
-	var srv *httptest.Server
-	srv = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/v1/auth/api-token-sessions":
 			var body map[string]string

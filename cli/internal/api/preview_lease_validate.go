@@ -426,14 +426,6 @@ func previewLeaseETag(id, etag string) (int64, error) {
 	return generation, nil
 }
 
-// ValidatePreviewLeaseETag validates the strong preview lease precondition
-// without exposing its generation parser. Host-runtime subpackages use this
-// before signing requests that carry If-Match.
-func ValidatePreviewLeaseETag(id, etag string) error {
-	_, err := previewLeaseETag(id, etag)
-	return err
-}
-
 func validPreviewOwnerSessionKind(kind string) bool {
 	return kind == "local_lease" || kind == "foreground" || kind == "lazy_runtime"
 }

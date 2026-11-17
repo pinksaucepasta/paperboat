@@ -40,11 +40,11 @@ func (h *restartingHost) open(operationID string) (tunnel.ExecConn, error) {
 func TestFirstExecAfterPeerRestartRunsOnceWithTheSameOperation(t *testing.T) {
 	host := &restartingHost{down: 4, starts: map[string]int{}, attached: map[string]bool{}}
 	const operation = "operation_restart"
-	conn, err := host.open(operation)
+	_, err := host.open(operation)
 	if err == nil || !execStartUncertain(err) {
 		t.Fatalf("first open while restarting: %v", err)
 	}
-	conn, err = retryUncertainExecStart(context.Background(), func(context.Context) (tunnel.ExecConn, error) {
+	conn, err := retryUncertainExecStart(context.Background(), func(context.Context) (tunnel.ExecConn, error) {
 		return host.open(operation)
 	})
 	if err != nil || conn == nil {

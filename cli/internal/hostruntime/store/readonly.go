@@ -61,7 +61,7 @@ func OpenReadOnly(ctx context.Context, root string) (_ *Store, resultErr error) 
 	return s, nil
 }
 
-// BoundedSessions observes the count and records in the same read transaction.
+// BoundedSessionMetadata observes the count and records in the same read transaction.
 func (s *Store) BoundedSessionMetadata(ctx context.Context, maximum, maximumBytes int) (_ []Session, resultErr error) {
 	defer protectStoreError(&resultErr)
 	if maximum < 1 || maximumBytes < 1 {

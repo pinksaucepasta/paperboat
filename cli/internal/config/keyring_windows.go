@@ -24,7 +24,7 @@ func windowsSecretMaxBytes(ref string) int {
 	return windowsCredentialBlobMaxBytes
 }
 
-// DPAPI (machine scope, one file per reference) is the only credential store: Set replaces the file atomically
+// Set stores a credential. DPAPI (machine scope, one file per reference) is the only credential store: it replaces the file atomically
 // and every logon type (interactive, scheduled task, S4U owner workload) resolves the same value.
 func (KeyringStore) Set(ref, value string) error {
 	if value == "" {

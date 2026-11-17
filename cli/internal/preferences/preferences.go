@@ -111,9 +111,7 @@ func Path(configPath string) (string, error) {
 			return "", err
 		}
 	}
-	if strings.HasSuffix(configPath, ".json") {
-		configPath = strings.TrimSuffix(configPath, ".json")
-	}
+	configPath = strings.TrimSuffix(configPath, ".json")
 	return configPath + ".preferences.json", nil
 }
 

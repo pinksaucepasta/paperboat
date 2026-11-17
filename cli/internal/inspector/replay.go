@@ -629,7 +629,7 @@ func parseRawRequest(raw []byte) (method, requestURI string, header http.Header,
 		if len(header)+len(connectionTokens) > MaxHeadersPerDirection+16 {
 			return "", "", nil, nil, ErrInvalid
 		}
-		header.Add(http.CanonicalHeaderKey(name), value)
+		header.Add(name, value)
 	}
 	for _, value := range header.Values("Connection") {
 		for _, token := range strings.Split(value, ",") {

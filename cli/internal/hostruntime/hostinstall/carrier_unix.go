@@ -16,7 +16,6 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/atomicfile"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/service"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/sessionowner"
-	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/updated"
 	"golang.org/x/sys/unix"
 )
 
@@ -289,14 +288,4 @@ func LockCarrier(c CarrierConfig) (io.Closer, error) {
 		return nil, errors.Join(err, f.Close())
 	}
 	return f, nil
-}
-
-func carrierPublicationLock(ctx context.Context, r Request) (io.Closer, error) {
-	if os.Geteuid() != 0 {
-		return nil, ErrNotPrivileged
-	}
-	if r.UID < 0 {
-		return nil, ErrInvalidRequest
-	}
-	return updated.LockUnixNativeInstall(ctx, platformPaths(r.UID).updateState)
 }

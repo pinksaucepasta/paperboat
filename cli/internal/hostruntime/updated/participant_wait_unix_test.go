@@ -39,26 +39,26 @@ func TestSignedUpdateWaitsOnlyForTheControlPlane(t *testing.T) {
 	waiting := UnixParticipantProbe{Running: true, Version: "2", UpdaterVersion: "2", State: "degraded", ControlPlaneUnavailableOnly: true, Machines: 1}
 	ready := UnixParticipantProbe{Running: true, Version: "2", UpdaterVersion: "2", State: "ready", Machines: 1}
 	local := UnixParticipantProbe{Running: true, Version: "2", UpdaterVersion: "2", State: "degraded", Machines: 1}
-	wait := func(probes []UnixParticipantProbe, candidate bool, deadline time.Duration) (error, time.Duration) {
+	wait := func(probes []UnixParticipantProbe, candidate bool, deadline time.Duration) (time.Duration, error) {
 		ctx, cancel := context.WithTimeout(t.Context(), deadline)
 		defer cancel()
 		started := time.Now()
 		err := (&unixParticipantReadiness{participants: &sequencedParticipants{probes: probes}, handoff: handoff}).waitReady(ctx, "2", candidate)
-		return err, time.Since(started)
+		return time.Since(started), err
 	}
-	if err, _ := wait([]UnixParticipantProbe{waiting, waiting, ready}, true, 2*time.Second); err != nil {
+	if _, err := wait([]UnixParticipantProbe{waiting, waiting, ready}, true, 2*time.Second); err != nil {
 		t.Fatalf("candidate that reached the server after two degraded answers: %v", err)
 	}
-	if err, _ := wait([]UnixParticipantProbe{waiting}, true, 700*time.Millisecond); !errors.Is(err, ErrParticipantControlPlaneTimeout) || !errors.Is(err, ErrParticipantReadiness) {
+	if _, err := wait([]UnixParticipantProbe{waiting}, true, 700*time.Millisecond); !errors.Is(err, ErrParticipantControlPlaneTimeout) || !errors.Is(err, ErrParticipantReadiness) {
 		t.Fatalf("candidate still waiting for the server at the deadline: %v", err)
 	}
-	if err, took := wait([]UnixParticipantProbe{local}, true, 2*time.Second); err == nil || errors.Is(err, ErrParticipantControlPlaneTimeout) || took > time.Second {
+	if took, err := wait([]UnixParticipantProbe{local}, true, 2*time.Second); err == nil || errors.Is(err, ErrParticipantControlPlaneTimeout) || took > time.Second {
 		t.Fatalf("locally degraded candidate: err=%v after %v, want a failure once the settle window passed", err, took)
 	}
-	if err, _ := wait([]UnixParticipantProbe{local, local, ready}, true, 2*time.Second); err != nil {
+	if _, err := wait([]UnixParticipantProbe{local, local, ready}, true, 2*time.Second); err != nil {
 		t.Fatalf("a candidate that recovers inside the settle window must commit: %v", err)
 	}
-	if err, _ := wait([]UnixParticipantProbe{local, local, ready}, false, 2*time.Second); err != nil {
+	if _, err := wait([]UnixParticipantProbe{local, local, ready}, false, 2*time.Second); err != nil {
 		t.Fatalf("recovery must keep waiting through a transient local degradation: %v", err)
 	}
 }

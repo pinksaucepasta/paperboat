@@ -104,7 +104,13 @@ func newSignalReporter(dsn, release string, transport sentry.Transport, logs, me
 	client, err := sentry.NewClient(sentry.ClientOptions{
 		Dsn: dsn, Release: release, Environment: environment(), Transport: transport,
 		AttachStacktrace: false, EnableTracing: rate > 0, TracesSampleRate: rate, MaxSpans: 64, BeforeSendLog: sanitizeLog, BeforeSendMetric: r.sanitizeMetric, BeforeSendTransaction: sanitizeTransaction, MaxBreadcrumbs: 0,
-		SendDefaultPII: false, BeforeSend: sanitize, DisableTelemetryBuffer: true,
+		BeforeSend: sanitize, DisableTelemetryBuffer: true,
+		DataCollection: &sentry.DataCollection{
+			UserInfo: sentry.Set(false), HTTPBodies: []sentry.BodyType{},
+			Cookies:     &sentry.KeyValueCollectionBehavior{Mode: sentry.CollectionOff},
+			HTTPHeaders: &sentry.HeaderCollectionConfig{Request: &sentry.KeyValueCollectionBehavior{Mode: sentry.CollectionOff}, Response: &sentry.KeyValueCollectionBehavior{Mode: sentry.CollectionOff}},
+			QueryParams: &sentry.KeyValueCollectionBehavior{Mode: sentry.CollectionOff},
+		},
 		// Match the SDK's default HTTP transport/proxy behavior while observing
 		// only response status and network failure at its export boundary.
 		HTTPTransport: sdkHTTPObserver{next: &http.Transport{Proxy: http.ProxyFromEnvironment}, failures: &r.httpFailures},

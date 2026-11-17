@@ -90,7 +90,7 @@ func applyResume(target *resolver.TerminalTarget, machineID string, payload loca
 	return true
 }
 
-// stopping ends when the daemon starts to stop, before it closes its transports.
+// TunnelPeerStreamOpener opens peer streams over the tunnel. stopping ends when the daemon starts to stop, before it closes its transports.
 func TunnelPeerStreamOpener(stopping context.Context, peerTunnel *tunnel.PeerTerminalTunnel) func(context.Context, localapi.Peer, localapi.PeerStreamRequest) (net.Conn, error) {
 	return func(ctx context.Context, _ localapi.Peer, request localapi.PeerStreamRequest) (net.Conn, error) {
 		if ctx == nil || peerTunnel == nil || request.Validate(peerTunnelNow()) != nil {

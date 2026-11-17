@@ -28,7 +28,6 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/identity"
 	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	quic "github.com/quic-go/quic-go"
-	"golang.org/x/net/http2"
 )
 
 // acquireAdmittedCarrier acquires the runtime carrier an admission fixture describes.
@@ -251,7 +250,7 @@ func TestMachineAttachmentNetworkSourceFallsBackAfterStalledHTTP3(t *testing.T) 
 	t.Run("independent cause survives timeout fallback", func(t *testing.T) {
 		independentCause := errors.New("independent dial failure")
 		fallbackCause := errors.New("fallback dial failure")
-		err, attempts := machineAttachmentPrepareAfterHTTP3Timeout(t, errors.Join(context.DeadlineExceeded, independentCause), fallbackCause)
+		attempts, err := machineAttachmentPrepareAfterHTTP3Timeout(t, errors.Join(context.DeadlineExceeded, independentCause), fallbackCause)
 		if attempts != 2 {
 			t.Fatalf("dial attempts = %d, want timeout followed by fallback", attempts)
 		}
@@ -265,7 +264,7 @@ func TestMachineAttachmentNetworkSourceFallsBackAfterStalledHTTP3(t *testing.T) 
 
 	t.Run("QUIC transport error with optional nil unwrap preserves identity", func(t *testing.T) {
 		transportErr := &quic.TransportError{ErrorCode: quic.InternalError}
-		err, attempts := machineAttachmentPrepareAfterHTTP3Timeout(t, transportErr, errors.New("fallback dial failure"))
+		attempts, err := machineAttachmentPrepareAfterHTTP3Timeout(t, transportErr, errors.New("fallback dial failure"))
 		if attempts != 2 {
 			t.Fatalf("dial attempts = %d, want timeout followed by fallback", attempts)
 		}
@@ -282,7 +281,7 @@ func TestMachineAttachmentNetworkSourceFallsBackAfterStalledHTTP3(t *testing.T) 
 
 	t.Run("panicking unwrap is rejected without suppressing fallback", func(t *testing.T) {
 		raw := attachmentDialUnwrapPanicError{}
-		err, attempts := machineAttachmentPrepareAfterHTTP3Timeout(t, raw, errors.New("fallback dial failure"))
+		attempts, err := machineAttachmentPrepareAfterHTTP3Timeout(t, raw, errors.New("fallback dial failure"))
 		if attempts != 2 || !errors.Is(err, errMachineAttachmentDialErrorInvalid) {
 			t.Fatalf("malformed dial error did not fail closed after fallback: attempts=%d err=%v", attempts, err)
 		}
@@ -290,7 +289,7 @@ func TestMachineAttachmentNetworkSourceFallsBackAfterStalledHTTP3(t *testing.T) 
 
 	t.Run("cyclic unwrap is rejected without suppressing fallback", func(t *testing.T) {
 		raw := &attachmentDialCycleError{}
-		err, attempts := machineAttachmentPrepareAfterHTTP3Timeout(t, raw, errors.New("fallback dial failure"))
+		attempts, err := machineAttachmentPrepareAfterHTTP3Timeout(t, raw, errors.New("fallback dial failure"))
 		if attempts != 2 || !errors.Is(err, errMachineAttachmentDialErrorInvalid) {
 			t.Fatalf("cyclic dial error did not fail closed after fallback: attempts=%d err=%v", attempts, err)
 		}
@@ -306,7 +305,7 @@ func TestMachineAttachmentNetworkSourceFallsBackAfterStalledHTTP3(t *testing.T) 
 			children[i] = attachmentDialCountedLeaf{unwraps: &childUnwraps}
 		}
 		raw := attachmentDialWideError{children: children}
-		err, attempts := machineAttachmentPrepareAfterHTTP3Timeout(t, raw, errors.New("fallback dial failure"))
+		attempts, err := machineAttachmentPrepareAfterHTTP3Timeout(t, raw, errors.New("fallback dial failure"))
 		if got := childUnwraps.Load(); got > 32 {
 			t.Fatalf("wide dial error unwrapped %d children, want bounded traversal", got)
 		}
@@ -316,7 +315,7 @@ func TestMachineAttachmentNetworkSourceFallsBackAfterStalledHTTP3(t *testing.T) 
 	})
 }
 
-func machineAttachmentPrepareAfterHTTP3Timeout(t *testing.T, firstErr, fallbackErr error) (error, int) {
+func machineAttachmentPrepareAfterHTTP3Timeout(t *testing.T, firstErr, fallbackErr error) (int, error) {
 	t.Helper()
 	identityValue := testPreviewCarrierIdentity(1)
 	config := connector.DefaultDataCarrierPoolConfig()
@@ -344,7 +343,7 @@ func machineAttachmentPrepareAfterHTTP3Timeout(t *testing.T, firstErr, fallbackE
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	_, prepareErr := source.Prepare(ctx)
-	return prepareErr, attempts
+	return attempts, prepareErr
 }
 
 type attachmentDialUnwrapPanicError struct{}
@@ -484,9 +483,6 @@ func TestMachineAttachmentProductionSourceUsesAuthenticatedHTTP2CONNECT(t *testi
 		handlerErrors <- err
 	})
 	httpServer := &http.Server{Handler: handler, TLSConfig: serverTLS}
-	if err := http2.ConfigureServer(httpServer, &http2.Server{}); err != nil {
-		t.Fatal(err)
-	}
 	go httpServer.Serve(tls.NewListener(listener, serverTLS))
 	defer httpServer.Close()
 

@@ -225,7 +225,7 @@ func TestInspectorEphemeralCaptureAndReplay(t *testing.T) {
 	if hits.Load() != 2 || methods[1] != "GET" || uris[1] != "/items?session=secret" || auths[1] != "Bearer client-secret" {
 		t.Fatalf("replay did not preserve bytes: %+v %+v %+v hits=%d", methods, uris, auths, hits.Load())
 	}
-	status, payload = call(http.MethodPost, "/v1/inspector/replay", map[string]any{"resource_kind": "preview", "resource_id": lease.ID, "route_id": lease.ID, "capture_id": record.ID, "idempotency_key": "replay_ephemeral_01"}, "grant_owner_replay")
+	_, payload = call(http.MethodPost, "/v1/inspector/replay", map[string]any{"resource_kind": "preview", "resource_id": lease.ID, "route_id": lease.ID, "capture_id": record.ID, "idempotency_key": "replay_ephemeral_01"}, "grant_owner_replay")
 	var duplicate struct {
 		OperationID string `json:"operation_id"`
 	}

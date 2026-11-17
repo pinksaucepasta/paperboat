@@ -167,7 +167,7 @@ type ConfigTeamDefault struct {
 	UpdatePending        bool   `json:"update_pending,omitempty"`
 }
 
-// Team default requests go to the team they name, whatever workspace the command selected: the server
+// ConfigTeamDefault sends team default requests to the team they name, whatever workspace the command selected: the server
 // refuses them elsewhere with 409 workspace_target_conflict.
 func (c *Client) ConfigTeamDefault(ctx context.Context, teamID string) (ConfigTeamDefault, error) {
 	var out ConfigTeamDefault
@@ -261,7 +261,6 @@ type ConfigSyncPathSummary struct {
 	Revision string `json:"revision,omitempty"`
 }
 
-// ConfigSyncStatus gets the authenticated account's configuration sync state.
 // ErrConfigStatusInvalid means the server's config status pages did not end or did not advance.
 var ErrConfigStatusInvalid = errors.New("paperboat-server returned an invalid config status page")
 

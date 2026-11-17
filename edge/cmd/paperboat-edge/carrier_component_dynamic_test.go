@@ -10,6 +10,7 @@ import (
 	"io"
 	"math/big"
 	"net"
+	"net/http"
 	"net/url"
 	"testing"
 	"time"
@@ -17,6 +18,13 @@ import (
 	"github.com/pinksaucepasta/paperboat/edge/internal/datacarrier"
 	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 )
+
+// h2OnlyTransport speaks HTTP/2 only, so a carrier CONNECT is never downgraded to HTTP/1.
+func h2OnlyTransport(config *tls.Config) *http.Transport {
+	protocols := new(http.Protocols)
+	protocols.SetHTTP2(true)
+	return &http.Transport{TLSClientConfig: config, Protocols: protocols}
+}
 
 func dynamicCarrierCertificate(t *testing.T, commonName string, public ed25519.PublicKey, private ed25519.PrivateKey) tls.Certificate {
 	t.Helper()

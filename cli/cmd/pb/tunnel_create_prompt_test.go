@@ -25,7 +25,8 @@ func TestTunnelCreateMissingNamePromptsBeforeNetwork(t *testing.T) {
 		}
 		return nil, sentinel
 	}
-	contextKey := struct{}{}
+	type contextKeyType struct{}
+	contextKey := contextKeyType{}
 	ctx := context.WithValue(context.Background(), contextKey, "preferences-context")
 	promptTunnelCreateName = func(options prompt.TextOptions) (string, error) {
 		if options.Context.Value(contextKey) != "preferences-context" || options.Output == nil || options.Validate(".bad") == nil || options.Validate("my-app") != nil {

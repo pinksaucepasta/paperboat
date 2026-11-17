@@ -243,8 +243,6 @@ type DataCarrierSession interface {
 	CloseChan() <-chan struct{}
 }
 
-// DataCarrier owns one transport-native session and its bounded stream
-// permits.
 // DataCarrierCloseReason says, in a finite vocabulary, why a data carrier ended. It is recorded
 // once per carrier and written to the host log, so a stream cut can be tied to the carrier event
 // that caused it.
@@ -270,6 +268,8 @@ const (
 	CloseLocal DataCarrierCloseReason = "local_close"
 )
 
+// DataCarrier owns one transport-native session and its bounded stream
+// permits.
 type DataCarrier struct {
 	id        string
 	ctx       context.Context

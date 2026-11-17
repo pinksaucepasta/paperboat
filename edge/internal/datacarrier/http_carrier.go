@@ -16,7 +16,6 @@ import (
 	"time"
 
 	"github.com/quic-go/quic-go/http3"
-	"golang.org/x/net/http2"
 
 	"github.com/pinksaucepasta/paperboat/edge/internal/handover"
 )
@@ -89,11 +88,7 @@ func NewHTTPService(ctx context.Context, config ServiceConfig) (*HTTPService, er
 		s.h2 = &http.Server{Handler: s.safeHandler(handler), ErrorLog: log.New(carrierHTTPDiagnosticWriter{s}, "", 0), TLSConfig: tlsConfig, ReadHeaderTimeout: carrier.StreamOpenLimit, MaxHeaderBytes: 16 << 10, ConnContext: func(ctx context.Context, connection net.Conn) context.Context {
 			return context.WithValue(ctx, httpTLSConnectionKey{}, connection)
 		}}
-		if err := http2.ConfigureServer(s.h2, &http2.Server{MaxConcurrentStreams: uint32(carrier.MaximumStreams)}); err != nil {
-			_ = listener.Close()
-			cancel()
-			return nil, err
-		}
+		s.h2.HTTP2 = &http.HTTP2Config{MaxConcurrentStreams: carrier.MaximumStreams}
 		go func() {
 			if err := s.h2.Serve(newHandshakeListener(listener, tlsConfig, carrier.StreamOpenLimit, maximum, s.observeFailure)); err != nil && !errors.Is(err, http.ErrServerClosed) && serviceCtx.Err() == nil {
 				s.shutdown(carrierFailure{sentinel: errCarrierListener, cause: err})

@@ -172,7 +172,7 @@ func allTeamRows[T any](ctx context.Context, c *Client, id, list string) ([]T, e
 	return nil, errors.New("the team list is too long to read; narrow it with the console")
 }
 
-// ListTeamMembers, ListTeamGrants and ListTeamMachines read every row of the list, page by page.
+// ListTeamMembers reads every row of the list, page by page. ListTeamGrants and ListTeamMachines do the same.
 func (c *Client) ListTeamMembers(ctx context.Context, id string) ([]TeamMember, error) {
 	return allTeamRows[TeamMember](ctx, c, id, "members")
 }

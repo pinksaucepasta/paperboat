@@ -54,12 +54,3 @@ func MapCanonical(address netip.Addr, cidr string) (netip.Addr, error) {
 	base := prefix.Addr().As4()
 	return netip.AddrFrom4([4]byte{base[0], base[1], source[2], source[3]}), nil
 }
-
-func DNSAddress(cidr string) (netip.Addr, error) {
-	prefix, err := Prefix(cidr)
-	if err != nil {
-		return netip.Addr{}, err
-	}
-	base := prefix.Addr().As4()
-	return netip.AddrFrom4([4]byte{base[0], base[1], 0, 1}), nil
-}

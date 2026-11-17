@@ -448,10 +448,9 @@ func TestResolveMachineProjectsBackendFailuresSafelyAndRecovers(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	conn, err := grpc.DialContext(ctx, "bufnet",
+	conn, err := newReadyClient(ctx, "passthrough:///bufnet",
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return listener.Dial() }),
-		grpc.WithBlock(),
 	)
 	if err != nil {
 		t.Fatalf("dial bufconn: %v", err)
@@ -658,10 +657,9 @@ func TestServerRefusesARawClientWithoutTheAPIVersion(t *testing.T) {
 	defer listener.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	conn, err := grpc.DialContext(ctx, "bufnet",
+	conn, err := newReadyClient(ctx, "passthrough:///bufnet",
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return listener.Dial() }),
-		grpc.WithBlock(),
 	)
 	if err != nil {
 		t.Fatal(err)

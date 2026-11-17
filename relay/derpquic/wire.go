@@ -75,11 +75,7 @@ type packet struct {
 }
 
 func encodeControl(p packet) []byte {
-	k := p.peer.Raw32()
-	b := make([]byte, 32+len(p.data))
-	copy(b, k[:])
-	copy(b[32:], p.data)
-	return b
+	return append(p.peer.AppendTo(make([]byte, 0, 32+len(p.data))), p.data...)
 }
 func decodeControl(b []byte) (packet, error) {
 	if len(b) < 33 || len(b) > 32+MaxPacket {
@@ -94,12 +90,12 @@ func sendPacket(c *quic.Conn, sequence *atomic.Uint64, p packet) error {
 		return ErrProtocol
 	}
 	id := sequence.Add(1)
-	k := p.peer.Raw32()
+	k := p.peer.AppendTo(nil)
 	for off := 0; off < len(p.data); off += fragmentPayload {
 		end := min(off+fragmentPayload, len(p.data))
 		b := make([]byte, fragmentHeader+end-off)
 		binary.BigEndian.PutUint64(b, id)
-		copy(b[8:40], k[:])
+		copy(b[8:40], k)
 		binary.BigEndian.PutUint16(b[40:42], uint16(len(p.data)))
 		b[42] = byte(off / fragmentPayload)
 		copy(b[43:], p.data[off:end])

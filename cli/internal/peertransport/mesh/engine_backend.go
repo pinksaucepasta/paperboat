@@ -384,70 +384,70 @@ func nodeHasAddr(n tailcfg.NodeView, ip netip.Addr) bool {
 	return false
 }
 
-func (lb *locoBackend) Start() error {
-	if err := lb.ns.Start(nil /* no LocalBackend */); err != nil {
+func (b *locoBackend) Start() error {
+	if err := b.ns.Start(nil /* no LocalBackend */); err != nil {
 		return fmt.Errorf("failed to start netstack: %w", err)
 	}
 
-	e := lb.sys.Engine.Get()
-	mc := lb.sys.MagicSock.Get()
-	lb.logf("disco pub key: %v", mc.DiscoPublicKey())
+	e := b.sys.Engine.Get()
+	mc := b.sys.MagicSock.Get()
+	b.logf("disco pub key: %v", mc.DiscoPublicKey())
 
-	mc.SetPrivateKey(lb.priv)
-	mc.SetDERPMap(lb.dm)
+	mc.SetPrivateKey(b.priv)
+	mc.SetDERPMap(b.dm)
 
-	derpRegion := lb.derpRegionID()
+	derpRegion := b.derpRegionID()
 
 	nm := &netmap.NetworkMap{
-		NodeKey: lb.pub,
+		NodeKey: b.pub,
 	}
 	nm.SelfNode = (&tailcfg.Node{
 		ID:         1,
 		StableID:   "1",
 		Name:       "endpoint.paperboat.",
 		User:       100,
-		Key:        lb.pub,
+		Key:        b.pub,
 		DiscoKey:   mc.DiscoPublicKey(),
-		Addresses:  []netip.Prefix{lb.addrPrefix},
-		AllowedIPs: lb.selfAllowedIPs(),
+		Addresses:  []netip.Prefix{b.addrPrefix},
+		AllowedIPs: b.selfAllowedIPs(),
 		HomeDERP:   derpRegion,
 		Cap:        tailcfg.CurrentCapabilityVersion,
 	}).View()
-	lb.appendRelayNodes(nm)
-	lb.mu.Lock()
-	lb.nm = nm
-	lb.mu.Unlock()
+	b.appendRelayNodes(nm)
+	b.mu.Lock()
+	b.nm = nm
+	b.mu.Unlock()
 
 	mc.SetNetworkMap(nm.SelfNode, nm.Peers)
 	e.SetSelfNode(nm.SelfNode)
-	lb.sys.Netstack.Get().UpdateNetstackIPs(nm)
+	b.sys.Netstack.Get().UpdateNetstackIPs(nm)
 	mc.SetNetworkUp(true)
-	lb.logf("NetworkMap: %v", logger.AsJSON(nm))
+	b.logf("NetworkMap: %v", logger.AsJSON(nm))
 
 	// Install the live per-peer config sources. WireGuard peers are
 	// created lazily from these as traffic arrives; there is no
 	// peer list in wgcfg.Config anymore.
-	e.SetPeerConfigFunc(lb.peerConfig)
-	e.SetPeerByIPPacketFunc(lb.peerByIP)
-	e.SetPeerForIPFunc(lb.peerForIP)
-	e.SetStatusCallback(lb.onEngineStatus)
+	e.SetPeerConfigFunc(b.peerConfig)
+	e.SetPeerByIPPacketFunc(b.peerByIP)
+	e.SetPeerForIPFunc(b.peerForIP)
+	e.SetStatusCallback(b.onEngineStatus)
 	// magicsock finds its endpoints as soon as it has a key, often before the callback above existed; that
 	// status was dropped and, with no later change, the backend never learned its endpoints (nothing to
 	// advertise or report; seen as "the engine found no local endpoint" in 2 of 10 runs). Ask once now.
 	e.RequestStatus()
 
 	wgConf := &wgcfg.Config{
-		PrivateKey: lb.priv,
-		Addresses:  []netip.Prefix{lb.addrPrefix},
+		PrivateKey: b.priv,
+		Addresses:  []netip.Prefix{b.addrPrefix},
 	}
 	routerConf := &router.Config{
-		LocalAddrs: []netip.Prefix{lb.addrPrefix},
+		LocalAddrs: []netip.Prefix{b.addrPrefix},
 	}
 	dnsConf := &dns.Config{}
 	if err := e.Reconfig(wgConf, routerConf, dnsConf); err != nil {
 		return fmt.Errorf("e.Reconfig: %w", err)
 	}
-	lb.sys.NetMon.Get().Start()
+	b.sys.NetMon.Get().Start()
 
 	return nil
 }

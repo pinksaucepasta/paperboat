@@ -249,7 +249,10 @@ func retryableTransferFailure(err error) bool {
 		case io.EOF, io.ErrUnexpectedEOF, net.ErrClosed, context.DeadlineExceeded, syscall.EPIPE, syscall.ETIMEDOUT, syscall.ENETUNREACH, syscall.EHOSTUNREACH, hostdproto.ErrMaintenanceBusy, errNativeAuthorizationChanged:
 			return true
 		}
-		if timeout, ok := err.(net.Error); ok {
+		if timeout, ok := err.(interface {
+			Timeout() bool
+			Temporary() bool
+		}); ok {
 			return timeout.Timeout() || timeout.Temporary()
 		}
 		return false

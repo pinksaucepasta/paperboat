@@ -122,8 +122,8 @@ func (t *BodyTap) release() {
 	t.mu.Unlock()
 }
 
-// RequestBodyTap, ResponseBodyTap, and RawBodyTap create bounded taps owned by
-// this admitted capture. Disabled policy modes retain no bytes. RawBodyTap's
+// RequestBodyTap creates a bounded tap owned by this admitted capture; ResponseBodyTap and RawBodyTap do the same.
+// Disabled policy modes retain no bytes. RawBodyTap's
 // limit is the whole raw-request ceiling; callers must still include serialized
 // request headers in that same ceiling when assembling RawRequest.
 func (p *Pending) RequestBodyTap() *BodyTap {

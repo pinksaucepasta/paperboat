@@ -68,7 +68,11 @@ func TestDiscoveryDerivationRemainsPinned(t *testing.T) {
 	for i := range raw {
 		raw[i] = byte(i)
 	}
-	got := discoPrivateForNode(key.NodePrivateFromRaw32(mem.B(raw[:]))).Public()
+	var priv key.NodePrivate
+	if err := priv.UnmarshalText([]byte("privkey:" + hex.EncodeToString(raw[:]))); err != nil {
+		t.Fatal(err)
+	}
+	got := discoPrivateForNode(priv).Public()
 	const want = "586a55ca01992289bc4cf4d6f738e00b4c175fe61be2dcdc576f8dd11ff42b5a"
 	wantRaw, err := hex.DecodeString(want)
 	if err != nil {

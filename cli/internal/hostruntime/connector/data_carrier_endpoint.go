@@ -287,7 +287,10 @@ func dataCarrierDialFallbackEligible(err error) bool {
 	if errors.Is(err, io.EOF) || neterr.Refused(err) {
 		return true
 	}
-	var networkErr net.Error
+	var networkErr interface {
+		Timeout() bool
+		Temporary() bool
+	}
 	return errors.As(err, &networkErr) && (networkErr.Timeout() || networkErr.Temporary())
 }
 

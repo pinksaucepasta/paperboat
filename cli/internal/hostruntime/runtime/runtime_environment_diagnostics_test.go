@@ -16,8 +16,7 @@ import (
 )
 
 type diagnosticEnvironment struct {
-	failed   bool
-	sequence uint64
+	failed bool
 }
 
 func TestRuntimeObservationCanceledStartDoesNotInstallLoop(t *testing.T) {

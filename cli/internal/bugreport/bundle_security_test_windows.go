@@ -13,7 +13,8 @@ func writeTestBundle(path string, content []byte) error {
 	if err := os.WriteFile(path, content, 0o600); err != nil {
 		return err
 	}
-	token, err := windows.OpenCurrentProcessToken()
+	var token windows.Token
+	err := windows.OpenProcessToken(windows.CurrentProcess(), windows.TOKEN_QUERY, &token)
 	if err != nil {
 		return err
 	}

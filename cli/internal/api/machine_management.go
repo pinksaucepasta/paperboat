@@ -9,7 +9,7 @@ import (
 	"strconv"
 )
 
-// Desktop machine operations use the authenticated client and fixed API paths.
+// MachineUpdateStatus is a desktop machine operation: it uses the authenticated client and fixed API paths.
 func (c *Client) MachineUpdateStatus(ctx context.Context, id string) (out map[string]any, err error) {
 	err = c.do(ctx, http.MethodGet, "/v1/machines/"+url.PathEscape(id)+"/update-status", nil, &out)
 	return
@@ -96,7 +96,7 @@ func (c *Client) MachineUpdateSummaryPage(ctx context.Context, limit, offset int
 	return page, nil
 }
 
-// Desktop overview consumes the complete inventory. A failed or inconsistent
+// MachineUpdateSummary consumes the complete inventory for the desktop overview. A failed or inconsistent
 // continuation never becomes a provisional success containing only some rows.
 func (c *Client) MachineUpdateSummary(ctx context.Context) (map[string]any, error) {
 	items := []map[string]any{}

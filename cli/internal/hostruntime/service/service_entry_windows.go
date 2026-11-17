@@ -411,7 +411,7 @@ func onlyServiceErrorDepth(err, expected error, depth int) bool {
 }
 
 func validateServiceEntry(config ServiceEntryConfig) error {
-	if config.Name == "" || len(config.Name) > 256 || !filepath.IsAbs(config.Executable) || strings.EqualFold(filepath.Ext(config.Executable), ".exe") == false || len(config.Arguments) > 32 || !validServiceSID(config.EnrolledSID) {
+	if config.Name == "" || len(config.Name) > 256 || !filepath.IsAbs(config.Executable) || !strings.EqualFold(filepath.Ext(config.Executable), ".exe") || len(config.Arguments) > 32 || !validServiceSID(config.EnrolledSID) {
 		return ErrWindowsServiceEntry
 	}
 	info, err := os.Lstat(config.Executable)

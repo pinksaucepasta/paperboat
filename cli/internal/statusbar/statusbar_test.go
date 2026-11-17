@@ -1026,11 +1026,11 @@ func TestBarRowIsErasedBeforeAClearOfTheMainScreen(t *testing.T) {
 		time.Sleep(200 * time.Millisecond)
 		readPipe(reader)
 		bar.ClearRemoteViewport()
-		if out := readPipe(reader); strings.Index(out, row) < 0 || strings.Index(out, row) > strings.Index(out, "\x1b[2J") {
+		if out := readPipe(reader); !strings.Contains(out, row) || strings.Index(out, row) > strings.Index(out, "\x1b[2J") {
 			t.Fatalf("attach clear does not erase the bar row first: %q", out)
 		}
 		bar.ClearForExit()
-		if out := readPipe(reader); strings.Index(out, row) < 0 || strings.Index(out, row) > strings.Index(out, "\x1b[2J") {
+		if out := readPipe(reader); !strings.Contains(out, row) || strings.Index(out, row) > strings.Index(out, "\x1b[2J") {
 			t.Fatalf("exit clear does not erase the bar row first: %q", out)
 		}
 	})

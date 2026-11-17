@@ -13,7 +13,8 @@ import (
 // A fresh install creates C:\ProgramData\Paperboat and its folders itself. Hosted runners give an elevated token
 // the user as default owner, so a plain create made folders the install then refused as planted (34b8f5d4e).
 func TestFreshInstallFoldersAreCreatedWithAdministratorCustody(t *testing.T) {
-	token, err := windows.OpenCurrentProcessToken()
+	var token windows.Token
+	err := windows.OpenProcessToken(windows.CurrentProcess(), windows.TOKEN_QUERY, &token)
 	if err != nil {
 		t.Fatal(err)
 	}

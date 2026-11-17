@@ -145,7 +145,7 @@ type OriginProbeObservation struct {
 	Code    string
 }
 
-// OriginRedirectLoop: live traffic saw the origin send a visitor back to the URL it asked for (the
+// OriginRedirectLoop means live traffic saw the origin send a visitor back to the URL it asked for (the
 // edge shows the loop page). It is also the origin-health code the control plane accepts.
 const OriginRedirectLoop = "redirect_loop"
 
@@ -273,7 +273,7 @@ func CertificateFingerprint(certificate *x509.Certificate) string {
 	return "sha256:" + hex.EncodeToString(sum[:])
 }
 
-// CertificateChangedError: a pinned origin presented a different certificate. Known-hosts style, it is
+// CertificateChangedError means a pinned origin presented a different certificate. Known-hosts style, it is
 // refused until the owner re-pins the route.
 type CertificateChangedError struct{ Pinned, Presented string }
 

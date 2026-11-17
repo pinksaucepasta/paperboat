@@ -13,7 +13,6 @@ import (
 
 	quic "github.com/quic-go/quic-go"
 	"github.com/quic-go/quic-go/http3"
-	"golang.org/x/net/http2"
 )
 
 func TestHTTPNetworkDialerUsesRealHTTP2AndHTTP3(t *testing.T) {
@@ -56,9 +55,6 @@ func TestHTTPNetworkDialerUsesRealHTTP2AndHTTP3(t *testing.T) {
 					t.Fatal(err)
 				}
 				server := &http.Server{Handler: handler, TLSConfig: serverTLS}
-				if err := http2.ConfigureServer(server, &http2.Server{}); err != nil {
-					t.Fatal(err)
-				}
 				go server.Serve(tls.NewListener(listener, serverTLS))
 				address, closeServer = listener.Addr().String(), func() { _ = server.Close(); _ = listener.Close() }
 			} else {

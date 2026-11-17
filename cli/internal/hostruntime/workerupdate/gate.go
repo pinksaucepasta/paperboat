@@ -34,14 +34,6 @@ type GateRequest struct {
 	Interval      time.Duration
 }
 
-func (r GateRequest) validate(candidateState hostdproto.State) error {
-	if !safeEventID(r.TransactionID) || validateRelease(r.Previous) != nil || validateRelease(r.Candidate) != nil ||
-		r.Worker.State != candidateState || r.Worker.WorkerID == "" || r.Worker.Epoch == 0 || r.Worker.APIVersion == 0 || r.Window < 0 || r.Interval < 0 {
-		return ErrActivationGate
-	}
-	return nil
-}
-
 type EventPhase string
 
 const (

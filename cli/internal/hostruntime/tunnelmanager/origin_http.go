@@ -2,7 +2,6 @@ package tunnelmanager
 
 import (
 	"context"
-	"crypto/tls"
 	"encoding/base64"
 	"errors"
 	"net"
@@ -16,7 +15,6 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hoststate"
 	sharedprotocol "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	"golang.org/x/net/http/httpguts"
-	"golang.org/x/net/http2"
 )
 
 var ErrOriginRequestInvalid = errors.New("invalid origin HTTP request")
@@ -148,7 +146,9 @@ func (t *OriginHTTPTransport) transportFor(ctx context.Context, route hoststate.
 	}
 	transport = standard
 	if route.OriginScheme == "h2c" {
-		transport = &http2.Transport{AllowHTTP: true, MaxHeaderListSize: maximumOriginResponseHeaderBytes, DialTLSContext: func(dialCtx context.Context, network, _ string, _ *tls.Config) (net.Conn, error) {
+		protocols := new(http.Protocols)
+		protocols.SetUnencryptedHTTP2(true)
+		transport = &http.Transport{Protocols: protocols, MaxResponseHeaderBytes: maximumOriginResponseHeaderBytes, DialContext: func(dialCtx context.Context, network, _ string) (net.Conn, error) {
 			return dialer.DialContext(dialCtx, network, route.OriginAddress)
 		}}
 	}

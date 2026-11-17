@@ -264,13 +264,6 @@ func readStagedRegularFile(t *testing.T, path string) []byte {
 	return body
 }
 
-func assertStagedFileEquals(t *testing.T, staged, immutable string) {
-	t.Helper()
-	if !bytes.Equal(readStagedRegularFile(t, staged), readStagedRegularFile(t, immutable)) {
-		t.Fatalf("staged %s differs from immutable GitHub asset %s", filepath.Base(staged), filepath.Base(immutable))
-	}
-}
-
 func stagedTUFServer(t *testing.T, root string) *httptest.Server {
 	t.Helper()
 	return httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {

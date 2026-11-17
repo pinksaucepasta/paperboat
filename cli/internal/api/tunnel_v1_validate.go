@@ -467,23 +467,6 @@ func validateLogEntry(v *TunnelLogEntry, tunnelID string) error {
 	return nil
 }
 
-func validateTunnelCapabilities(capabilities []string) error {
-	if len(capabilities) < 1 || len(capabilities) > 16 {
-		return errors.New("connector capabilities must contain 1-16 values")
-	}
-	seen := make(map[string]struct{}, len(capabilities))
-	for _, capability := range capabilities {
-		if capability == "" || len(capability) > 64 || containsTunnelControl(capability) {
-			return errors.New("connector capability is invalid")
-		}
-		if _, ok := seen[capability]; ok {
-			return errors.New("connector capabilities must be unique")
-		}
-		seen[capability] = struct{}{}
-	}
-	return nil
-}
-
 func validateTunnelEvent(v *TunnelEvent, tunnel string) error {
 	if v == nil || v.Schema != TunnelV1Schema || v.Kind != "event" || !validTunnelID(v.ID) || v.Cursor == "" || len(v.Cursor) > 2048 || v.ResourceKind == "" || v.ResourceID == "" || len(v.ResourceID) > 128 || v.OccurredAt.IsZero() || v.CorrelationID == "" || len(v.CorrelationID) > 128 || containsTunnelControl(v.ID+v.Cursor+v.EventType+v.ResourceKind+v.ResourceID+v.CorrelationID) {
 		return ErrUnsafeTunnelResponse

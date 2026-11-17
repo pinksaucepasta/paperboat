@@ -42,7 +42,7 @@ func TestProxyCountsNoFailureForAClientThatLeft(t *testing.T) {
 		lease := route.NewStreamLease(ctx, route.RouteMatch{})
 		defer lease.Close()
 		observed := 0
-		proxy := &httputil.ReverseProxy{Director: func(r *http.Request) { r.URL = &url.URL{Scheme: "http", Host: "origin.invalid"} },
+		proxy := &httputil.ReverseProxy{Rewrite: func(r *httputil.ProxyRequest) { r.Out.URL = &url.URL{Scheme: "http", Host: "origin.invalid"} },
 			Transport: cancelingTransport{end: func() { end(cancel, lease) }}}
 		configureProxyDiagnostics(proxy, func(context.Context, error) { observed++ })
 		recorder := httptest.NewRecorder()
@@ -63,7 +63,7 @@ func TestProxyCountsNoFailureForAClientThatLeft(t *testing.T) {
 // visitor and a script can act on; every other upstream failure stays a plain 502.
 func TestProxyAnswersQuotaRefusalWithTypedTooManyRequests(t *testing.T) {
 	serve := func(err error) *httptest.ResponseRecorder {
-		proxy := &httputil.ReverseProxy{Director: func(r *http.Request) { r.URL = &url.URL{Scheme: "http", Host: "origin.invalid"} }, Transport: failingTransport{err}}
+		proxy := &httputil.ReverseProxy{Rewrite: func(r *httputil.ProxyRequest) { r.Out.URL = &url.URL{Scheme: "http", Host: "origin.invalid"} }, Transport: failingTransport{err}}
 		configureProxyDiagnostics(proxy, nil)
 		recorder := httptest.NewRecorder()
 		proxy.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "http://tunnel.example.test/", nil))

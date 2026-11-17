@@ -46,7 +46,6 @@ func (s *Service) automaticCheck(ctx context.Context) (autoupdate.Result, error)
 		return autoupdate.Result{}, err
 	}
 	now := time.Now()
-	due := settings.MaintenanceDue(now, state)
 	// Download ahead of the window, retaining normal cohort eligibility. The
 	// same exact verified candidate is reused by preparation and activation.
 	candidate, err := s.downloadWithResolver(ctx, s.source.Resolve)
@@ -64,7 +63,7 @@ func (s *Service) automaticCheck(ctx context.Context) (autoupdate.Result, error)
 	if settings, err = machineUpdateSettings(s.config.StateRoot, s.config.AutomaticUpdates, nil); err != nil {
 		return result, err
 	}
-	if due = settings.MaintenanceDue(time.Now(), state); !due {
+	if !settings.MaintenanceDue(time.Now(), state) {
 		return result, nil
 	}
 	if candidate.ID == "" {

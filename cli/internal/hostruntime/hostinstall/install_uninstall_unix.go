@@ -167,11 +167,8 @@ func uninstallValidated(ctx context.Context, request Request, paths installPaths
 	if err := lifecycle.Recover(ctx); err != nil {
 		return withUninstallStage("uninstall_recover", err)
 	}
-	restorePower := func(context.Context) error { return nil }
-	{
-		restorePower = func(restoreCtx context.Context) error {
-			return hostservice.NewPlatformApplier(filepath.Join(paths.runtimeState, "power-baseline.json")).Apply(restoreCtx, hostservice.AllowSleep)
-		}
+	restorePower := func(restoreCtx context.Context) error {
+		return hostservice.NewPlatformApplier(filepath.Join(paths.runtimeState, "power-baseline.json")).Apply(restoreCtx, hostservice.AllowSleep)
 	}
 	return finalizeUninstall(ctx, request, paths, func(ctx context.Context) error {
 		if err := RetireSessionOwners(ctx, request, true); err != nil {

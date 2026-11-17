@@ -289,7 +289,7 @@ func applyRegionalAuthority(t *testing.T, authority *tailnet.Authority, signer e
 	}
 	scopes := make([]derpquic.Scope, len(config.Peers[0].Scopes))
 	for i, s := range config.Peers[0].Scopes {
-		scopes[i] = derpquic.Scope{ResourceKind: s.ResourceKind, ResourceID: s.ResourceID, ResourceGeneration: s.ResourceGeneration, Capability: s.Capability, Direction: s.Direction, Port: s.Port, ExpiresAt: s.ExpiresAt}
+		scopes[i] = derpquic.Scope(s)
 	}
 	fingerprint := sha256.Sum256(endpointTLS.Certificates[0].Certificate[0])
 	tokens := make([]string, 0, len(nodes))

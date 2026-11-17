@@ -146,7 +146,6 @@ func (s *managedSSHService) run(ctx context.Context) {
 				if candidate != nil {
 					shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), s.timeout)
 					cleanupErr := candidate.Shutdown(shutdownCtx)
-					err = errors.Join(err, cleanupErr)
 					if cleanupErr != nil {
 						authority, cleanupPending = candidate, true
 					}

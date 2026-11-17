@@ -44,7 +44,8 @@ func platformEnvironmentKey(key string) bool {
 // process token without inheriting hostd's own variables (the same call Win32-OpenSSH and runas use), plus the
 // standard variables an S4U/service-created token does not receive from it.
 func BaseEnvironment(shell string) ([]string, error) {
-	token, err := windows.OpenCurrentProcessToken()
+	var token windows.Token
+	err := windows.OpenProcessToken(windows.CurrentProcess(), windows.TOKEN_QUERY, &token)
 	if err != nil {
 		return nil, ErrLaunchRejected
 	}

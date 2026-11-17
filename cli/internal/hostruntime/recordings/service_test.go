@@ -291,12 +291,3 @@ func metaOf(t *testing.T, s *Service, sessionID string) Meta {
 	t.Fatalf("no recording of %s", sessionID)
 	return Meta{}
 }
-
-func mustList(t *testing.T, s *Service) []Meta {
-	t.Helper()
-	metas, err := s.List()
-	if err != nil {
-		t.Fatal(err)
-	}
-	return metas
-}

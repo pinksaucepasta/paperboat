@@ -46,25 +46,6 @@ func BrowserHostname(aliasOrMachine string, port int, suffix string) (string, er
 	return hostname, nil
 }
 
-func validBrowserHost(host, suffix string) bool {
-	host = strings.TrimSuffix(strings.ToLower(host), ".")
-	if !strings.HasSuffix(host, "."+suffix) {
-		return false
-	}
-	prefix := strings.TrimSuffix(host, "."+suffix)
-	if prefix == "" {
-		return false
-	}
-	parts := strings.Split(prefix, ".")
-	if len(parts) == 1 {
-		return validLabel(parts[0])
-	} else if len(parts) == 2 {
-		port, err := strconv.Atoi(parts[0])
-		return err == nil && port >= 1 && port <= 65535 && strconv.Itoa(port) == parts[0] && validLabel(parts[1])
-	}
-	return false
-}
-
 // ValidBrowserLabel reports whether label is one lowercase DNS label.
 func ValidBrowserLabel(label string) bool { return validLabel(label) }
 

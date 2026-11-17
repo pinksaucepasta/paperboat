@@ -28,10 +28,6 @@ func discoPrivateForNode(k key.NodePrivate) key.DiscoPrivate {
 	return key.DiscoPrivateFromRaw32(go4mem.B(discoRaw))
 }
 
-// DiscoPrivateForNode returns the deterministic discovery key used by this
-// engine. Callers use it only to host an authority-approved UDP relay service.
-func DiscoPrivateForNode(k key.NodePrivate) key.DiscoPrivate { return discoPrivateForNode(k) }
-
 // DiscoPublicForNode returns the path-discovery public key derived from a
 // node private key. Code constructing a [ConnInfo] directly must include it
 // as ConnInfo.ServerDiscoPublic.

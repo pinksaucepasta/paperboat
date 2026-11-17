@@ -9,7 +9,7 @@ var Version = "dev"
 // it selects update policy and does not replace verification of downloaded bytes.
 var Distribution = "custom"
 
-// Official release pipelines inject these defaults. Ordinary source builds have
+// DefaultSentryDSN is injected by official release pipelines. Ordinary source builds have
 // no telemetry destination. These public values are not proof of binary origin.
 var DefaultSentryDSN = ""
 var DefaultSentryRelease = ""

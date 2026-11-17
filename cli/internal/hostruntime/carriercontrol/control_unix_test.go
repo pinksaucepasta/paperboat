@@ -237,11 +237,11 @@ func activeControlWorker(t *testing.T) (*hostdproto.Controller, string, uint64) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	ready := hostdproto.Ready{WorkerID: welcome.WorkerID, APIVersion: welcome.APIVersion, Epoch: welcome.Epoch, Lease: welcome.Lease}
+	ready := hostdproto.Ready(welcome)
 	if err := controller.MarkReady(ready); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := controller.Activate(hostdproto.Activate{WorkerID: welcome.WorkerID, APIVersion: welcome.APIVersion, Epoch: welcome.Epoch, Lease: welcome.Lease}); err != nil {
+	if _, err := controller.Activate(hostdproto.Activate(welcome)); err != nil {
 		t.Fatal(err)
 	}
 	return controller, workerID, welcome.Epoch

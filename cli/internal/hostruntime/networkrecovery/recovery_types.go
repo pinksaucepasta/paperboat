@@ -181,14 +181,6 @@ type HealthSnapshot struct {
 	CheckedAt               time.Time    `json:"checked_at"`
 }
 
-// NextRetry reports the exact scheduled retry, if one exists.
-func (h HealthSnapshot) NextRetry() (time.Time, bool) {
-	if h.NextRetryAt.IsZero() {
-		return time.Time{}, false
-	}
-	return h.NextRetryAt, true
-}
-
 type Config struct {
 	Identity          Identity
 	Replacer          CarrierReplacer

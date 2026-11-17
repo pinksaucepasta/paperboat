@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net"
 	"net/http"
 	"time"
 
@@ -132,21 +131,4 @@ func (t LocalPeerTunnel) DialSSH(ctx context.Context, info resolver.ConnectInfo,
 	return &sshStreamConn{ReadWriteCloser: stream}, nil
 }
 
-type localPeerNetConn struct {
-	Conn
-	raw net.Conn
-}
-
-func (*localPeerNetConn) LocalAddr() net.Addr                  { return localPeerAddress("local") }
-func (*localPeerNetConn) RemoteAddr() net.Addr                 { return localPeerAddress("machine") }
-func (c *localPeerNetConn) SetDeadline(v time.Time) error      { return c.raw.SetDeadline(v) }
-func (c *localPeerNetConn) SetReadDeadline(v time.Time) error  { return c.raw.SetReadDeadline(v) }
-func (c *localPeerNetConn) SetWriteDeadline(v time.Time) error { return c.raw.SetWriteDeadline(v) }
-
-type localPeerAddress string
-
-func (localPeerAddress) Network() string  { return "paperboat-local-peer" }
-func (a localPeerAddress) String() string { return string(a) }
-
 var _ Tunnel = LocalPeerTunnel{}
-var _ net.Conn = (*localPeerNetConn)(nil)

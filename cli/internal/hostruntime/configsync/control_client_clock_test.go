@@ -27,7 +27,7 @@ func TestControlClientJudgesExpiryByTheServerClock(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := client.clock().Sub(time.Now()); (got - skew).Abs() > 5*time.Second {
+	if got := time.Until(client.clock()); (got - skew).Abs() > 5*time.Second {
 		t.Fatalf("client clock is %v from local, want the server's %v", got, skew)
 	}
 }

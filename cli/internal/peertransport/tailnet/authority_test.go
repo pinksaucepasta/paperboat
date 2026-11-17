@@ -265,10 +265,10 @@ func networkTokenWithRetiredRelayPairs(t *testing.T, priv ed25519.PrivateKey, c 
 	return data + "." + base64.RawURLEncoding.EncodeToString(ed25519.Sign(priv, []byte(data)))
 }
 func networkTestBinding(role, id, addr string, k key.NodePrivate) NetworkBinding {
-	p := k.Public().Raw32()
+	p := k.Public().AppendTo(nil)
 	fp := sha256.Sum256([]byte("quic:" + id))
 	disco := mesh.DiscoPublicForNode(k).AppendTo(nil)
-	b := NetworkBinding{AccountID: "account_test", EndpointID: id, Role: role, EndpointGeneration: 1, KeyGeneration: 1, WireGuardPublicKey: base64.RawURLEncoding.EncodeToString(p[:]), DiscoPublicKey: base64.RawURLEncoding.EncodeToString(disco), QUICCertificateFingerprint: hex.EncodeToString(fp[:]), QUICPublicKey: base64.RawURLEncoding.EncodeToString(fp[:]), VirtualAddress: addr}
+	b := NetworkBinding{AccountID: "account_test", EndpointID: id, Role: role, EndpointGeneration: 1, KeyGeneration: 1, WireGuardPublicKey: base64.RawURLEncoding.EncodeToString(p), DiscoPublicKey: base64.RawURLEncoding.EncodeToString(disco), QUICCertificateFingerprint: hex.EncodeToString(fp[:]), QUICPublicKey: base64.RawURLEncoding.EncodeToString(fp[:]), VirtualAddress: addr}
 	if role == "machine" {
 		b.MachineID = id
 		b.MachineGeneration = 1
@@ -311,8 +311,7 @@ func TestNetworkAuthorityRejectsInvalidBindingsAndScopes(t *testing.T) {
 			c.Self.QUICCertificateFingerprint = hex.EncodeToString(make([]byte, 32))
 		},
 		"wrong_key": func(c *NetworkConfiguration) {
-			p := key.NewNode().Public().Raw32()
-			c.Self.WireGuardPublicKey = base64.RawURLEncoding.EncodeToString(p[:])
+			c.Self.WireGuardPublicKey = base64.RawURLEncoding.EncodeToString(key.NewNode().Public().AppendTo(nil))
 		},
 		"ungranted":                 func(c *NetworkConfiguration) { c.Peers[0].Scopes = nil },
 		"wrong_direction":           func(c *NetworkConfiguration) { c.Peers[0].Scopes[0].Direction = "accept" },

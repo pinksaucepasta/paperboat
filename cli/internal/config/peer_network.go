@@ -155,7 +155,7 @@ func (s ProfileStore) peerFilePath(prefix, issuer, accountID, endpointID string)
 	return filepath.Join(s.Path, prefix+hex.EncodeToString(digest[:])+".json"), nil
 }
 
-// The relay list and relay grants of the last answered renewal are kept the same way, so a daemon restarted while
+// SavePeerNetworkRelays keeps the relay list and relay grants of the last answered renewal the same way, so a daemon restarted while
 // Paperboat is unreachable can open relayed paths through its last known relays (each grant lasts at most
 // relaylimits.MaxGrantLifetime and the relay enforces it). The reader verifies every claim against the restored
 // configuration.

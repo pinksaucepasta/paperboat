@@ -26,10 +26,10 @@ func TestPendingInboxDoesNotDelayUpdate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = controller.MarkReady(hostdproto.Ready{WorkerID: welcome.WorkerID, APIVersion: welcome.APIVersion, Epoch: welcome.Epoch, Lease: welcome.Lease}); err != nil {
+	if err = controller.MarkReady(hostdproto.Ready(welcome)); err != nil {
 		t.Fatal(err)
 	}
-	active, err := controller.Activate(hostdproto.Activate{WorkerID: welcome.WorkerID, APIVersion: welcome.APIVersion, Epoch: welcome.Epoch, Lease: welcome.Lease})
+	active, err := controller.Activate(hostdproto.Activate(welcome))
 	if err != nil {
 		t.Fatal(err)
 	}

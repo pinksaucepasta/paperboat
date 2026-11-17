@@ -108,7 +108,7 @@ func validSelfhostInstallation(item SelfhostInstallation) bool {
 	return item.InstallationID != "" && item.NodeID != "" && item.Name != "" && item.ScopeID != "" && (item.ScopeKind == "account" || item.ScopeKind == "team" || item.ScopeKind == "global") && (item.EnrollmentState == "pending" || item.EnrollmentState == "enrolled") && !(item.EnrollmentState == "pending" && item.Ready) && (item.Capability == "relay" || item.Capability == "tunnel")
 }
 
-// Pool-policy consumers must discover every authorized installation, rather than
+// SelfhostInventory lets pool-policy consumers discover every authorized installation, rather than
 // applying human display filters or treating one page as the complete pool.
 func (c *Client) SelfhostInventory(ctx context.Context, capability string) ([]SelfhostInstallation, SelfhostPool, error) {
 	return c.selfhostInventory(ctx, capability, nil, nil)

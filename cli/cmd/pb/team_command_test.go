@@ -441,8 +441,7 @@ func TestTeamCreateIsPaidFirstAndWaitsUntilTheTeamExists(t *testing.T) {
 	t.Cleanup(func() { teamCreatePollInterval, openBrowser = previousInterval, previousOpen })
 	var operations []string
 	polls := 0
-	var server *httptest.Server
-	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if teamFixtureUpdatePolicy(w, r) {
 			return
 		}

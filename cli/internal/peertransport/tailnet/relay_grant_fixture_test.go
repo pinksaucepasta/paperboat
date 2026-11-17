@@ -7,7 +7,7 @@ import (
 
 // grantScope is a configured scope as a relay grant membership carries it (the configuration's own values).
 func grantScope(s NetworkScope) derpquic.Scope {
-	return derpquic.Scope{ResourceKind: s.ResourceKind, ResourceID: s.ResourceID, ResourceGeneration: s.ResourceGeneration, Capability: s.Capability, Direction: s.Direction, Port: s.Port, ExpiresAt: s.ExpiresAt}
+	return derpquic.Scope(s)
 }
 
 // grantMemberships are the memberships of a relay grant for scopes of the configuration: each one once, never a

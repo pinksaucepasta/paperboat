@@ -37,11 +37,23 @@ func TestPeerCommandsWireBoundedLocalDaemonReadiness(t *testing.T) {
 	if !ok {
 		t.Fatal("resolve test source path")
 	}
-	packages, err := parser.ParseDir(token.NewFileSet(), filepath.Dir(testFile), func(info os.FileInfo) bool {
-		return !strings.HasSuffix(info.Name(), "_test.go")
-	}, 0)
+	names, err := filepath.Glob(filepath.Join(filepath.Dir(testFile), "*.go"))
 	if err != nil {
 		t.Fatal(err)
+	}
+	fileSet := token.NewFileSet()
+	var files []*ast.File
+	for _, name := range names {
+		if strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		parsed, err := parser.ParseFile(fileSet, name, nil, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if parsed.Name.Name == "main" {
+			files = append(files, parsed)
+		}
 	}
 	want := map[string]string{
 		"runSendCommand":   "requireLocalDaemonService",
@@ -49,7 +61,7 @@ func TestPeerCommandsWireBoundedLocalDaemonReadiness(t *testing.T) {
 		"actionRemoteExec": "requireLocalDaemonService",
 	}
 	found := make(map[string]int, len(want))
-	for _, parsed := range packages["main"].Files {
+	for _, parsed := range files {
 		for _, declaration := range parsed.Decls {
 			function, ok := declaration.(*ast.FuncDecl)
 			if !ok {

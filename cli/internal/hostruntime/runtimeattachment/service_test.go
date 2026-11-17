@@ -155,7 +155,7 @@ func TestBackgroundFailureObservationsKeepSafeTypedClassesAndRecoveryBoundary(t 
 	previous = service.observeFailure(ctx, first, previous)
 	previous = service.observeFailure(ctx, peerConnectFailure(secretCause), previous)
 	previous = service.observeFailure(ctx, errors.Join(context.Canceled, secretCause), previous)
-	previous = service.observeFailure(ctx, context.Canceled, previous)
+	service.observeFailure(ctx, context.Canceled, previous)
 
 	if len(faults) != 3 {
 		t.Fatalf("faults after duplicate and cancellation filtering=%d, want 3", len(faults))

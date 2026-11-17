@@ -176,7 +176,8 @@ func LaunchDetached(ctx context.Context, executable string, arguments []string) 
 // IsCurrentProcessElevated reports whether the current process has a full UAC
 // administrator token. It is used to avoid re-elevating the hidden child.
 func IsCurrentProcessElevated() bool {
-	token, err := windows.OpenCurrentProcessToken()
+	var token windows.Token
+	err := windows.OpenProcessToken(windows.CurrentProcess(), windows.TOKEN_QUERY, &token)
 	if err != nil {
 		return false
 	}

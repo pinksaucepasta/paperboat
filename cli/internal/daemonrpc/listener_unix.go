@@ -17,7 +17,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/ownerpath"
 )
 
-// A process lock fences both stale-socket cleanup and the entire listener
+// Listen takes a process lock that fences both stale-socket cleanup and the entire listener
 // lifetime. The protected parent prevents another OS user replacing either.
 func Listen(addr string) (net.Listener, error) {
 	path := strings.TrimPrefix(addr, "unix://")

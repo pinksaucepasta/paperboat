@@ -557,5 +557,3 @@ func sentence(message string) string {
 	}
 	return message + "."
 }
-
-func isCobraUsageError(err error) bool { return classifyCommandFailure(err).kind == commandUsage }

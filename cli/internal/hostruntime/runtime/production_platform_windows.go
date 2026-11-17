@@ -111,7 +111,6 @@ func initializeProductionManagedSSH(ctx context.Context, host *managedssh.Host, 
 		select {
 		case <-probeCtx.Done():
 			retry.Stop()
-			err = errors.Join(managedssh.ErrSSHTargetUnavailable, probeCtx.Err())
 		case <-retry.C:
 		}
 		if probeCtx.Err() != nil {

@@ -13,7 +13,6 @@ import (
 
 	"github.com/quic-go/quic-go"
 	"github.com/quic-go/quic-go/http3"
-	"golang.org/x/net/http2"
 )
 
 var ErrHTTP3Unavailable = errors.New("HTTP/3 connector establishment timed out")
@@ -101,7 +100,9 @@ func dialHTTPCarrier(ctx context.Context, endpoint DataCarrierEndpointConfig, h3
 		transport = carrierRoundTripper{RoundTripper: rt, close: rt.Close}
 	} else {
 		tlsConfig.NextProtos = []string{"h2"}
-		rt := &http2.Transport{TLSClientConfig: tlsConfig}
+		protocols := new(http.Protocols)
+		protocols.SetHTTP2(true)
+		rt := &http.Transport{TLSClientConfig: tlsConfig, Protocols: protocols}
 		transport = carrierRoundTripper{RoundTripper: rt, close: func() error { rt.CloseIdleConnections(); return nil }}
 	}
 	requestCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))

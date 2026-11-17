@@ -392,7 +392,7 @@ func windowsCarrierLifecycleInstaller(ctx context.Context, layout service.Layout
 		return nil, nil, "", err
 	}
 	// The cold declaration is path-only pending input. Candidate identity is
-	// bound when PrepareCarrier publishes the source-verified declaration.
+	// bound when prepareCarrierLocked publishes the source-verified declaration.
 	i, err := service.NewPending(service.Config{Platform: "windows", Kind: service.CarrierKind, Instance: layout.Instance, Generation: generation, ConfigRoot: root, Executable: layout.Binary, User: "Paperboat", Group: "Paperboat", Arguments: []string{"daemon", "__runtime-carrier", "--instance", layout.Instance, "--generation", generation}, Controller: service.WindowsController{}})
 	return i, nil, carrierGenerationPath(layout.Instance, generation), err
 }

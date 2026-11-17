@@ -11,8 +11,7 @@ import (
 func encodedNodeKey(t testing.TB) (string, key.NodePublic) {
 	t.Helper()
 	public := key.NewNode().Public()
-	raw := public.Raw32()
-	return base64.RawURLEncoding.EncodeToString(raw[:]), public
+	return base64.RawURLEncoding.EncodeToString(public.AppendTo(nil)), public
 }
 
 // The recovery loop validates every peer's key on every pass: a valid key is remembered, an invalid one is always

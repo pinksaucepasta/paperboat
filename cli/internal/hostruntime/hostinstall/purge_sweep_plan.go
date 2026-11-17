@@ -133,9 +133,7 @@ func windowsAccountLeftovers(services []string, processIDs []uint32, directories
 	for _, processID := range processIDs {
 		leftovers = append(leftovers, fmt.Sprintf("process %d", processID))
 	}
-	for _, directory := range directories {
-		leftovers = append(leftovers, directory)
-	}
+	leftovers = append(leftovers, directories...)
 	if pathEntry {
 		leftovers = append(leftovers, "machine PATH entry")
 	}

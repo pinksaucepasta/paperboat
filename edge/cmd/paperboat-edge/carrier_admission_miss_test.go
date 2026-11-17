@@ -13,8 +13,6 @@ import (
 	"testing"
 	"time"
 
-	"golang.org/x/net/http2"
-
 	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
 
@@ -146,11 +144,11 @@ func carrierAdmittedOnFirstDial(t *testing.T, pullDelay, observeDelay time.Durat
 	if err != nil {
 		t.Fatal(err)
 	}
-	transport := &http2.Transport{TLSClientConfig: &tls.Config{
+	transport := h2OnlyTransport(&tls.Config{
 		MinVersion: tls.VersionTLS13, Certificates: []tls.Certificate{certificate},
 		InsecureSkipVerify: true, // This fixture's server certificate is self-signed.
 		NextProtos:         []string{"h2"},
-	}}
+	})
 	defer transport.CloseIdleConnections()
 	reader, writer := io.Pipe()
 	defer writer.Close()

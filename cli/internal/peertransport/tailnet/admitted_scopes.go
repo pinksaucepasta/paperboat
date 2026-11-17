@@ -56,7 +56,6 @@ func (a *Authority) TrackAdmittedCarrier(peerID string) (func(), NetworkScope, e
 			case "machine_network":
 				if scope.Capability == "connect" {
 					backing = scope
-					break
 				}
 			default:
 				if backing.ResourceID == "" && peernetwork.ValidKind(scope.ResourceKind) {

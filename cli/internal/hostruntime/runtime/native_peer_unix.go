@@ -241,7 +241,10 @@ func transientNativePeerStart(err error) bool {
 	if errors.As(err, &refused) {
 		return refused.Transient()
 	}
-	var network net.Error
+	var network interface {
+		Timeout() bool
+		Temporary() bool
+	}
 	return errors.As(err, &network) && (network.Timeout() || network.Temporary())
 }
 

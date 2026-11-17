@@ -91,8 +91,7 @@ func ParseKey(s string) (key.NodePublic, error) {
 	return k, nil
 }
 func KeyString(k key.NodePublic) string {
-	b := k.Raw32()
-	return base64.RawURLEncoding.EncodeToString(b[:])
+	return base64.RawURLEncoding.EncodeToString(k.AppendTo(nil))
 }
 func (v Verifier) Verify(token string, state tls.ConnectionState, now time.Time) (Grant, error) {
 	var g Grant
@@ -205,8 +204,7 @@ func ParseDiscoKey(value string) (key.DiscoPublic, error) {
 	if err != nil {
 		return key.DiscoPublic{}, err
 	}
-	raw := node.Raw32()
-	return key.DiscoPublicFromRaw32(mem.B(raw[:])), nil
+	return key.DiscoPublicFromRaw32(mem.B(node.AppendTo(nil))), nil
 }
 func DiscoKeyString(k key.DiscoPublic) string {
 	return base64.RawURLEncoding.EncodeToString(k.AppendTo(nil))

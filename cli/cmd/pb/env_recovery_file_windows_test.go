@@ -29,7 +29,8 @@ func TestEnvironmentRecoveryFileProtectedBeforeWrite(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer file.Close()
-	token, err := windows.OpenCurrentProcessToken()
+	var token windows.Token
+	err = windows.OpenProcessToken(windows.CurrentProcess(), windows.TOKEN_QUERY, &token)
 	if err != nil {
 		t.Fatal(err)
 	}

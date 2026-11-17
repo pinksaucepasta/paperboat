@@ -60,14 +60,14 @@ func ReattachAttempts(dialRetries int) int { return min(dialRetries, 1) * 600 }
 
 var ErrTransportLost = errors.New("terminal transport lost")
 
-// ErrLocalDaemonLost: the link to the Paperboat daemon on this computer broke (it restarted or stopped).
+// ErrLocalDaemonLost means the link to the Paperboat daemon on this computer broke (it restarted or stopped).
 var ErrLocalDaemonLost = fmt.Errorf("local Paperboat daemon connection lost: %w", ErrTransportLost)
 
-// ErrHandedOver: the host ended this link because the same terminal was attached again (the stalled-link probe resumed
+// ErrHandedOver means the host ended this link because the same terminal was attached again (the stalled-link probe resumed
 // it); the newer link has the terminal. Without an adopted probe it is redialed like a lost link.
 var ErrHandedOver = fmt.Errorf("terminal handed to a newer attachment: %w", ErrTransportLost)
 
-// ErrInputNotSent: a write failed before any of it left this process, so it is safe to send again on the next link.
+// ErrInputNotSent means a write failed before any of it left this process, so it is safe to send again on the next link.
 var ErrInputNotSent = fmt.Errorf("terminal input was not sent: %w", ErrTransportLost)
 
 const terminalOutputBatchWindow = time.Duration(0)
@@ -306,7 +306,7 @@ func (c *ReconnectingConn) supervise(conn Conn) {
 			if c.probeWait != nil {
 				c.probeWait()
 			}
-			c.probing.Lock()
+			c.probing.Lock() // deliberate barrier: waits for the running probe to finish
 			c.probing.Unlock()
 		}
 		cancelProbe()

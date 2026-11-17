@@ -117,8 +117,8 @@ func (p *PresharedKey) UnmarshalText(x []byte) error {
 }
 
 // Equal reports whether a and b represent the same disco public key.
-func (a DiscoPublic) Equal(b DiscoPublic) bool {
-	return a.DiscoPublic == b.DiscoPublic
+func (p DiscoPublic) Equal(b DiscoPublic) bool {
+	return p.DiscoPublic == b.DiscoPublic
 }
 
 // MarshalBinary implements encoding.BinaryMarshaler.
@@ -151,8 +151,8 @@ func (p *NodePublic) UnmarshalBinary(x []byte) error {
 }
 
 // Equal reports whether a and b represent the same public key.
-func (a NodePublic) Equal(b NodePublic) bool {
-	return a == b
+func (p NodePublic) Equal(b NodePublic) bool {
+	return p == b
 }
 
 func (lb *locoBackend) tailcatAddr() Addr {

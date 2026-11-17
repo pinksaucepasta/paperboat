@@ -73,7 +73,7 @@ func (currentUserRegistry) GetAutoConfigURL(context.Context) (valueResult Regist
 	if !errors.Is(err, registry.ErrUnexpectedType) {
 		return RegistryValue{}, err
 	}
-	length, kind, err := key.GetValue("AutoConfigURL", nil)
+	length, _, err := key.GetValue("AutoConfigURL", nil)
 	if errors.Is(err, registry.ErrNotExist) {
 		return RegistryValue{}, nil
 	}

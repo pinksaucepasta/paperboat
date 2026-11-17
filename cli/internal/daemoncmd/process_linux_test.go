@@ -7,7 +7,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -192,5 +191,5 @@ func TestLinuxExecutableLifecycle(t *testing.T) {
 	if _, err := os.Lstat(socket); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("final socket cleanup: %v", err)
 	}
-	t.Log(fmt.Sprintf("candidate executable: %s; status, exclusive owner, drain, crash/restart and foreign-UID denial passed", bin))
+	t.Logf("candidate executable: %s; status, exclusive owner, drain, crash/restart and foreign-UID denial passed", bin)
 }

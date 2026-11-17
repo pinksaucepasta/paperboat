@@ -249,7 +249,7 @@ func TestConfigSyncSourceCommandPreviewConsentAndStaleConfirmation(t *testing.T)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer token" {
 			t.Error("account read missing authentication")
-			http.Error(w, "unauthorized", 401)
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
 		switch r.Method + " " + r.URL.Path {
@@ -303,7 +303,7 @@ func TestConfigSyncSourceCommandPreviewConsentAndStaleConfirmation(t *testing.T)
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", "")
-	execute := func(operation string, extra ...string) (error, string) {
+	execute := func(operation string, extra ...string) (string, error) {
 		command := newRootCommand()
 		command.SetContext(context.Background())
 		leaf, _, err := command.Find([]string{"config", "sync", operation})
@@ -327,19 +327,19 @@ func TestConfigSyncSourceCommandPreviewConsentAndStaleConfirmation(t *testing.T)
 		args := append([]string{"--config", configPath, "config", "sync", operation, "--repository", "repo"}, extra...)
 		command.SetArgs(args)
 		err = command.Execute()
-		return err, output.String()
+		return output.String(), err
 	}
-	err, output := execute("apply")
+	output, err := execute("apply")
 	if err == nil || mutations != 0 || !strings.Contains(output, "ordinary plaintext") {
 		t.Fatalf("preview mutated or omitted consent: %v %s", err, output)
 	}
 	token := previewConfirmationCode(t, output)
 	version = 1
-	if err, _ := execute("apply", "--confirm", token); err == nil || mutations != 0 {
+	if _, err := execute("apply", "--confirm", token); err == nil || mutations != 0 {
 		t.Fatal("stale assignment confirmation accepted")
 	}
 	version = 0
-	err, output = execute("apply")
+	output, err = execute("apply")
 	if err == nil {
 		t.Fatal("preview skipped")
 	}
@@ -347,11 +347,11 @@ func TestConfigSyncSourceCommandPreviewConsentAndStaleConfirmation(t *testing.T)
 	machine := []byte(`"automatic_updates" = true
 `)
 	os.WriteFile(path, machine, 0600)
-	if err, _ := execute("apply", "--confirm", token); err == nil || mutations != 0 {
+	if _, err := execute("apply", "--confirm", token); err == nil || mutations != 0 {
 		t.Fatal("changed file confirmed silently")
 	}
 	os.WriteFile(path, []byte("# Paperboat config sync\n"), 0600)
-	err, output = execute("apply")
+	output, err = execute("apply")
 	if err == nil {
 		t.Fatal("preview skipped")
 	}
@@ -368,15 +368,15 @@ func TestConfigSyncSourceCommandPreviewConsentAndStaleConfirmation(t *testing.T)
 	commit.Encode(encoded)
 	hash, _ := repo.Storer.SetEncodedObject(encoded)
 	repo.Storer.SetReference(plumbing.NewHashReference(plumbing.NewBranchReferenceName("main"), hash))
-	if err, _ := execute("apply", "--confirm", token); err == nil || mutations != 0 {
+	if _, err := execute("apply", "--confirm", token); err == nil || mutations != 0 {
 		t.Fatal("changed observed Git commit confirmed silently")
 	}
-	err, output = execute("apply")
+	output, err = execute("apply")
 	if err == nil {
 		t.Fatal("preview skipped")
 	}
 	token = previewConfirmationCode(t, output)
-	if err, output = execute("apply", "--confirm", token, "--json"); err != nil {
+	if output, err = execute("apply", "--confirm", token, "--json"); err != nil {
 		t.Fatalf("apply failed %v %s", err, output)
 	}
 	if mutations != 1 || consents != 1 || started != 1 {
@@ -396,10 +396,10 @@ func TestConfigSyncSourceCommandPreviewConsentAndStaleConfirmation(t *testing.T)
 	if !ok || len(rules) != 1 || rules[0].(map[string]any)["source"] != "shared" {
 		t.Fatal("rule provenance omitted")
 	}
-	if err, _ := execute("apply", "--confirm", token); err == nil || mutations != 1 {
+	if _, err := execute("apply", "--confirm", token); err == nil || mutations != 1 {
 		t.Fatal("confirmation replay accepted")
 	}
-	err, output = execute("validate", "--json")
+	output, err = execute("validate", "--json")
 	if err != nil || !strings.Contains(output, `"schema_version":"1.0"`) || strings.Contains(output, `"password"`) {
 		t.Fatalf("unsafe JSON validation: %v %s", err, output)
 	}

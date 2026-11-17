@@ -740,13 +740,6 @@ func (c *readinessCarrier) RunWithLease(ctx context.Context, currentLease func()
 
 func (c *readinessCarrier) Close(ctx context.Context) error { return c.inner.Close(ctx) }
 
-func validateReadyLeaseIdentity(expected, observed Lease) error {
-	if !isReadyLease(observed) || !sameLeaseIdentity(expected, observed) || observed.Generation < expected.Generation || leaseGenerationForID(observed.ID, observed.ETag) != observed.Generation {
-		return fmt.Errorf("%w: carrier readiness does not match admitted lease", ErrDispatchInvalid)
-	}
-	return nil
-}
-
 func validateReadyLeaseMutation(expected, updated Lease, previousGeneration int64) error {
 	if !isReadyLease(updated) || !sameLeaseIdentity(expected, updated) || updated.Generation <= previousGeneration || leaseGenerationForID(updated.ID, updated.ETag) != updated.Generation {
 		return ErrDispatchInvalid

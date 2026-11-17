@@ -64,7 +64,7 @@ var ErrExpiredAuthority = errors.New("peer network authority expired; reconnect 
 // instead of latching a final refusal, and relayCredential asks for a fresh grant on demand.
 var ErrRelayGrantExpired = fmt.Errorf("relay grant expired; waiting for a fresh grant from Paperboat: %w", derpquic.ErrExpired)
 
-// NetworkBinding, NetworkScope, NetworkPeer and NetworkConfiguration are the shared signed configuration types
+// NetworkBinding is one of the shared signed configuration types, with NetworkScope, NetworkPeer and NetworkConfiguration
 // (shared/peernetwork), as the server mints them.
 type NetworkBinding = peernetwork.Binding
 type NetworkScope = peernetwork.Scope
@@ -379,8 +379,7 @@ func (a *Authority) PrepareKey(rotate bool) (string, uint64, error) {
 		if err != nil {
 			return err
 		}
-		bytes := k.Public().Raw32()
-		public = base64.RawURLEncoding.EncodeToString(bytes[:])
+		public = base64.RawURLEncoding.EncodeToString(k.Public().AppendTo(nil))
 		return nil
 	})
 	if err != nil {
@@ -392,7 +391,6 @@ func (a *Authority) state(update func(*config.PeerNetworkState) error) error {
 	return a.options.Store.UpdatePeerNetworkState(a.options.Issuer, a.options.Self.AccountID, a.options.Self.EndpointID, update)
 }
 
-// Apply validates and persists authority before changing traffic admission.
 // RelayDenial reports why the latest refresh withheld hosted relay grants (the workspace
 // allowance is used up), or nil. Direct connections keep working; only relayed paths stop.
 func (a *Authority) RelayDenial() *api.APIError {
@@ -407,6 +405,7 @@ func (a *Authority) setRelayDenial(denial *api.APIError) {
 	a.mu.Unlock()
 }
 
+// Apply validates and persists authority before changing traffic admission.
 func (a *Authority) Apply(ctx context.Context, token string) error {
 	if ctx == nil {
 		return ErrAuthority
@@ -442,8 +441,7 @@ func (a *Authority) Apply(ctx context.Context, token string) error {
 			if e != nil {
 				return false
 			}
-			pub := k.Public().Raw32()
-			if base64.RawURLEncoding.EncodeToString(pub[:]) != cfg.Self.WireGuardPublicKey {
+			if base64.RawURLEncoding.EncodeToString(k.Public().AppendTo(nil)) != cfg.Self.WireGuardPublicKey {
 				return false
 			}
 			selected = k
@@ -549,7 +547,7 @@ func (a *Authority) Restore(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if pub := selected.Public().Raw32(); base64.RawURLEncoding.EncodeToString(pub[:]) != cfg.Self.WireGuardPublicKey {
+	if base64.RawURLEncoding.EncodeToString(selected.Public().AppendTo(nil)) != cfg.Self.WireGuardPublicKey {
 		return ErrAuthority
 	}
 	a.updateMu.Lock()

@@ -488,19 +488,6 @@ func newEnvironmentTestCommand(input io.Reader, output io.Writer) *cobra.Command
 	return command
 }
 
-type errorReader struct{}
-
-func (errorReader) Read([]byte) (int, error) { return 0, errors.New("read failed") }
-
-func allZero(value []byte) bool {
-	for _, item := range value {
-		if item != 0 {
-			return false
-		}
-	}
-	return true
-}
-
 func TestENVSafeFailureKeepsRecoveryAndCauseInRealFormatter(t *testing.T) {
 	for _, scenario := range []struct {
 		cause    error

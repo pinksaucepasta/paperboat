@@ -63,7 +63,8 @@ func acquireProcessLock(path, ownerSID string) (*processLock, error) {
 	if err != nil {
 		return closeWith(err)
 	}
-	if err := file.Truncate(0); err == nil {
+	err = file.Truncate(0)
+	if err == nil {
 		_, err = file.Seek(0, 0)
 	}
 	if err == nil {

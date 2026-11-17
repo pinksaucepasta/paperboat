@@ -2,7 +2,6 @@ package privatepreviewproxy
 
 import (
 	"context"
-	"errors"
 	"net"
 	"net/http"
 	"os"
@@ -24,8 +23,6 @@ var (
 	platformPeerOwner func(net.Conn) (uint32, error)
 	platformPeerSID   func(net.Conn) (string, error)
 )
-
-var errOtherUser = errors.New("connection is not from the owning OS user")
 
 type peerGate struct {
 	owner    func(net.Conn) (uint32, error)

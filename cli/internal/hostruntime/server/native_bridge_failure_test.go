@@ -32,11 +32,11 @@ func TestNativeDispatchBridgeFailureReleasesMaintenanceAdmission(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ready := hostdproto.Ready{WorkerID: welcome.WorkerID, APIVersion: welcome.APIVersion, Epoch: welcome.Epoch, Lease: welcome.Lease}
+	ready := hostdproto.Ready(welcome)
 	if err = controller.MarkReady(ready); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = controller.Activate(hostdproto.Activate{WorkerID: ready.WorkerID, APIVersion: ready.APIVersion, Epoch: ready.Epoch, Lease: ready.Lease}); err != nil {
+	if _, err = controller.Activate(hostdproto.Activate(ready)); err != nil {
 		t.Fatal(err)
 	}
 

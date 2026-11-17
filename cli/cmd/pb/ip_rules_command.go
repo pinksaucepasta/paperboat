@@ -34,7 +34,8 @@ func ipRulesCommand(kind string) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			id, resource := args[0], kind+"s"
+			var id string
+			resource := kind + "s"
 			if kind == "tunnel" {
 				if id, err = resolveTunnelSelectorForCommand(command.Context(), client, args[0]); err != nil {
 					return err

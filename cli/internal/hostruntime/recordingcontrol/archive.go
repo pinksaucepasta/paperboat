@@ -27,7 +27,7 @@ const (
 	putLimit       = 90 * time.Second
 )
 
-// ErrNoBucket: the team has no bucket chosen for recordings.
+// ErrNoBucket means the team has no bucket chosen for recordings.
 var ErrNoBucket = errors.New("the team has no bucket for recordings")
 
 // Archive is what the machine asks Paperboat for to copy closed segments to the team bucket. Segment files are
@@ -142,7 +142,7 @@ func (c *Controller) archiveBatch(ctx context.Context, meta recordings.Meta) err
 	return nil
 }
 
-// UploadURLs, Archived: the Archive endpoints, called with the machine's own credential and proof.
+// UploadURLs calls the Archive endpoints with the machine's own credential and proof.
 func (f *Fetcher) UploadURLs(ctx context.Context, recordingID string, segments []teambucket.Segment) ([]teambucket.Authority, error) {
 	var out teambucket.UploadURLs
 	status, err := f.call(ctx, http.MethodPost, teambucket.UploadURLsPath(recordingID), teambucket.UploadRequest{Segments: segments}, &out)

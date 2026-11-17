@@ -154,15 +154,10 @@ func TestAutomaticPeerRelayThenDirectRecovery(t *testing.T) { testAutomaticPeerR
 // reachable only through a peer relay was never reached (CI, 2026-11-04).
 func TestPeerRelayOnlyDialUnderCPUStarvation(t *testing.T) {
 	defer runtime.GOMAXPROCS(runtime.GOMAXPROCS(1))
-	stop := make(chan struct{})
-	defer close(stop)
+	var stopped atomic.Bool
+	defer stopped.Store(true)
 	go func() {
-		for {
-			select {
-			case <-stop:
-				return
-			default:
-			}
+		for !stopped.Load() { // deliberate busy loop: the test starves the CPU
 		}
 	}()
 	testAutomaticPeerRelay(t)

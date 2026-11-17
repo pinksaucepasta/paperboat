@@ -213,7 +213,9 @@ func TestRepositoryHTTPOptInRedirectCredentials(t *testing.T) {
 	contacted := false
 	dst := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { contacted = true; io.WriteString(w, "not a repository") }))
 	defer dst.Close()
-	src := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, dst.URL+"/other.git", 302) }))
+	src := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, dst.URL+"/other.git", http.StatusFound)
+	}))
 	defer src.Close()
 	repo := newTransportRepository(t, src.URL+"/repo.git", "http", root)
 	if _, err := repo.Fetch(context.Background()); err == nil {

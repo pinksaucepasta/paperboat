@@ -263,5 +263,5 @@ func ResolveSavedLocal(request Request) (Authority, error) {
 	return Authority{RootPublic: append(ed25519.PublicKey(nil), localKey.PublicKey...), TrustedKeys: trusted, LocalKeys: keys, LocalCertificate: local, LocalCertificateRaw: localState.Raw}, nil
 }
 
-// ErrNoSavedTrust: no local trust was saved yet (the first resolution after pairing asks Paperboat).
+// ErrNoSavedTrust means no local trust was saved yet (the first resolution after pairing asks Paperboat).
 var ErrNoSavedTrust = errors.New("no saved peer local trust")

@@ -37,7 +37,7 @@ func TestRelayMembershipGrantsMustMatchTheConfiguration(t *testing.T) {
 		return signed + "." + base64.RawURLEncoding.EncodeToString(ed25519.Sign(signer, []byte(signed)))
 	}
 	configured := cfg.Peers[0].Scopes[0]
-	member := derpquic.Scope{ResourceKind: configured.ResourceKind, ResourceID: configured.ResourceID, ResourceGeneration: configured.ResourceGeneration, Capability: configured.Capability, Direction: configured.Direction, Port: configured.Port, ExpiresAt: configured.ExpiresAt}
+	member := derpquic.Scope(configured)
 	if err := a.ApplyRelayGrants(t.Context(), []string{sign([]derpquic.Scope{member})}); err != nil {
 		t.Fatalf("a membership the configuration gives was refused: %v", err)
 	}

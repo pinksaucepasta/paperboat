@@ -18,7 +18,8 @@ import (
 
 func changeFixtureOwnerToAdministrators(t *testing.T, path string) *windows.SID {
 	t.Helper()
-	token, err := windows.OpenCurrentProcessToken()
+	var token windows.Token
+	err := windows.OpenProcessToken(windows.CurrentProcess(), windows.TOKEN_QUERY, &token)
 	if err != nil {
 		t.Fatal(err)
 	}

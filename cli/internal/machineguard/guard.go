@@ -104,11 +104,11 @@ type RuntimeStatus struct {
 	Features []string `json:"features,omitempty"`
 }
 
-// FeatureAddressClaims: acquire takes account and machine and answers with the assigned address; the claims
+// FeatureAddressClaims means acquire takes account and machine and answers with the assigned address; the claims
 // operation releases absent machines (PLAN 3b multi-account hosts).
 const FeatureAddressClaims = "address_claims"
 
-// FeatureGatewayRouting: the guard owns the browser gateway ports for every OS user and routes each connection
+// FeatureGatewayRouting means the guard owns the browser gateway ports for every OS user and routes each connection
 // to its uid's daemon; a gateway acquire must set Handoff.
 const FeatureGatewayRouting = "gateway_routing"
 

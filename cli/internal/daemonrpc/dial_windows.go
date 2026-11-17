@@ -31,13 +31,12 @@ func Dial(ctx context.Context, addr string) (*grpc.ClientConn, error) {
 	}
 	ctx, cancel := context.WithTimeout(ctx, dialTimeout)
 	defer cancel()
-	return grpc.DialContext(
+	return newReadyClient(
 		ctx,
 		"passthrough:///"+addr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) {
 			return pipeauth.DialCurrentUser(ctx, addr)
 		}),
-		grpc.WithBlock(),
 	)
 }

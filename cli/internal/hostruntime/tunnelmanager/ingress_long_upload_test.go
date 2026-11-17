@@ -20,7 +20,6 @@ import (
 // about 4 MB (about 10s).
 func TestIngressForwarderCarriesALongUploadPastTheDecisionLifetime(t *testing.T) {
 	const lifetime = 10 * time.Second
-	const revoke = false
 	if testing.Short() {
 		t.Skip("14s real-time upload")
 	}

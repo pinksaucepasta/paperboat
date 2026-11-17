@@ -50,7 +50,7 @@ func renderWindowsInstaller(t *testing.T, fake []byte, authenticodeMarked bool) 
 
 // runWindowsInstaller runs the rendered installer in real PowerShell with the download replaced by a copy of fake. It returns what the
 // fake pb was asked to do, one call per line, and the installer's own error.
-func runWindowsInstaller(t *testing.T, installer string, fake []byte, served []byte, signature string) (calls []string, runErr error, output string) {
+func runWindowsInstaller(t *testing.T, installer string, fake []byte, served []byte, signature string) (calls []string, output string, runErr error) {
 	t.Helper()
 	shell := ""
 	for _, name := range []string{"pwsh", "powershell"} {
@@ -93,7 +93,7 @@ func runWindowsInstaller(t *testing.T, installer string, fake []byte, served []b
 	command.Env = append(os.Environ(), "FAKE_LOG="+log, "FAKE_SERVED="+servedFile, "FAKE_PB="+pb, "PAPERBOAT_ENROLLMENT_TOKEN=", "FAKE_SIG="+signature)
 	out, err := command.CombinedOutput()
 	data, _ := os.ReadFile(log)
-	return strings.Fields(string(data)), err, string(out)
+	return strings.Fields(string(data)), string(out), err
 }
 
 const fakePB = "#!/bin/sh\necho \"pb $*\" >> \"$FAKE_LOG\"\n" +
@@ -102,7 +102,7 @@ const fakePB = "#!/bin/sh\necho \"pb $*\" >> \"$FAKE_LOG\"\n" +
 func TestInstallPowerShellDownloadsVerifiesInstallsAndLogsIn(t *testing.T) {
 	fake := []byte(fakePB)
 	installer := renderWindowsInstaller(t, fake, false)
-	calls, err, out := runWindowsInstaller(t, installer, fake, fake, "NotSigned|")
+	calls, out, err := runWindowsInstaller(t, installer, fake, fake, "NotSigned|")
 	joined := strings.Join(calls, " ")
 	if err != nil {
 		t.Fatalf("installer failed: %v\n%s", err, out)
@@ -122,7 +122,7 @@ func TestInstallPowerShellRefusesBytesThatMissTheSignedDigest(t *testing.T) {
 	installer := renderWindowsInstaller(t, fake, false)
 	tampered := append([]byte(nil), fake...)
 	tampered[len(tampered)-2] = 'X' // same length, different digest
-	calls, err, out := runWindowsInstaller(t, installer, fake, tampered, "Valid|Paperboat Test Publisher")
+	calls, out, err := runWindowsInstaller(t, installer, fake, tampered, "Valid|Paperboat Test Publisher")
 	if err == nil || !strings.Contains(out, "digest mismatch") {
 		t.Fatalf("tampered download was accepted: %v\n%s", err, out)
 	}
@@ -151,7 +151,7 @@ func TestInstallPowerShellChecksAuthenticodeOnlyWhenTheSignedMetadataMarksIt(t *
 	} {
 		t.Run(name, func(t *testing.T) {
 			installer := renderWindowsInstaller(t, fake, test.marked)
-			calls, err, out := runWindowsInstaller(t, installer, fake, fake, test.signature)
+			calls, out, err := runWindowsInstaller(t, installer, fake, fake, test.signature)
 			joined := strings.Join(calls, " ")
 			if test.installs && (err != nil || !strings.Contains(joined, "pb install")) {
 				t.Fatalf("installer failed: %v\n%s", err, out)

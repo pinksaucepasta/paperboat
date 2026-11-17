@@ -10,7 +10,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/recordings"
 )
 
-// ErrRecordingUnavailable: this host process was started without a recordings store.
+// ErrRecordingUnavailable means this host process was started without a recordings store.
 var ErrRecordingUnavailable = errors.New("session recording is unavailable on this host")
 
 // StartRecording records a running session from its current screen on. The caller has decided that

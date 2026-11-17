@@ -104,7 +104,7 @@ func testIngressForwarderAuthority(t *testing.T, lifetime time.Duration, revoke 
 	wrong.Binding.OriginAddress = "127.0.0.1:1"
 	s := open(wrong, "bad-target")
 	_, _ = io.WriteString(s, "GET / HTTP/1.1\r\nHost: app.example.test\r\n\r\n")
-	_, err = io.ReadAll(s)
+	_, _ = io.ReadAll(s)
 	_ = s.Close()
 	if hits.Load() != 0 {
 		t.Fatal("wrong target dialed origin")

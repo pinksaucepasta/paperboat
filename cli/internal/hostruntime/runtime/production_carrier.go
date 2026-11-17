@@ -251,16 +251,6 @@ func (s *servingCarrier) stop(ctx context.Context) error {
 	return result
 }
 
-// PrepareSSHRetirement fences new SSH only when all accepted bridges ended.
-// The native coordinator must also drain other application operations before
-// replacing the carrier process.
-func (c *ProductionCarrier) PrepareSSHRetirement() error {
-	if c == nil {
-		return ErrProductionInvalid
-	}
-	return c.ssh.Retire()
-}
-
 func (c *ProductionCarrier) Shutdown(ctx context.Context) error {
 	if c == nil || ctx == nil {
 		return ErrProductionInvalid

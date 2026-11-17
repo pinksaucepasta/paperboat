@@ -71,6 +71,9 @@ func TestInspectorDurableRegistersReplayBinding(t *testing.T) {
 	responseBody, err := io.ReadAll(response.Body)
 	_ = response.Body.Close()
 	_ = client.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := <-writeErr; err != nil {
 		t.Fatal(err)
 	}
