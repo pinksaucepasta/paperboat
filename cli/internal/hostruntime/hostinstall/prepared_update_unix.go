@@ -301,7 +301,12 @@ func finalizePreparedUpdateLocked(ctx context.Context, uid int) error {
 	if err = request.Source.Verify(paths.worker); err != nil {
 		return err
 	}
-	hostd, updater, err := installers(request, paths)
+	// The committed build renders its own hostd unit; a signed update's helper is the previous build.
+	rendered, err := renderCandidateWith(ctx, paths.worker, request)
+	if err != nil {
+		return err
+	}
+	hostd, updater, err := installersWithMaintenance(request, paths, false, false, &rendered)
 	if err != nil {
 		return err
 	}

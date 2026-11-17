@@ -29,7 +29,7 @@ func useFakeGuard(t *testing.T, version, domain string, installFails bool) (*str
 	}
 	existingMachineGuardDomain = func(context.Context) string { return domain }
 	prepareMachineGuardForInstall = func() error { return nil }
-	installMissingMachineGuard = func(_ context.Context, _, gotDomain string) (guardUndo, error) {
+	installMissingMachineGuard = func(_ context.Context, _, gotDomain string, _ map[string]string) (guardUndo, error) {
 		if gotDomain != domain {
 			t.Fatalf("installed with domain %q, want the guard's %q", gotDomain, domain)
 		}
@@ -67,7 +67,7 @@ func TestHealMachineGuardRestoresTheOldGuardWhenReplacementFails(t *testing.T) {
 func TestHealMachineGuardLeavesAMissingGuardToInstall(t *testing.T) {
 	request := guardInstallRequest(t)
 	useFakeGuard(t, "previous", "", false)
-	installMissingMachineGuard = func(context.Context, string, string) (guardUndo, error) {
+	installMissingMachineGuard = func(context.Context, string, string, map[string]string) (guardUndo, error) {
 		t.Fatal("installed a guard that did not answer")
 		return nil, nil
 	}

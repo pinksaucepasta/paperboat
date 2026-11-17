@@ -93,7 +93,7 @@ func (u *carrierUpgrade) activate() error {
 	if u == nil {
 		return nil
 	}
-	err := publishCarrierDescriptor(u.candidate)
+	err := activateCarrierGeneration(u.candidate)
 	diagnosticlog.TryInfo("carrier cutover", "stage", "candidate_active", "failed", err != nil)
 	return err
 }

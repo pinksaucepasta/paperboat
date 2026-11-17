@@ -41,7 +41,7 @@ func AddMachineGuardCommand(root *cobra.Command) {
 				return err
 			}
 		}
-		undo, err := machineguard.Install(cmd.Context(), executable, domain)
+		undo, err := machineguard.Install(cmd.Context(), executable, domain, nil)
 		if err != nil {
 			return err
 		}

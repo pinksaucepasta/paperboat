@@ -426,7 +426,7 @@ func replaceWindowsCandidate(ctx context.Context, manager *service.LifecycleMana
 	installGuard := func(ctx context.Context) (guardUndo, error) {
 		var undo guardUndo
 		err := runWindowsInstallPhase(ctx, "install Paperboat machine guard", func() (err error) {
-			undo, err = installMachineGuardReversible(ctx, request)
+			undo, err = installMachineGuardReversible(ctx, request, nil)
 			return err
 		})
 		if err != nil {

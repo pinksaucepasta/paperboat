@@ -23,7 +23,9 @@ func (*Client) ReplaceNames(context.Context, map[string]netip.Addr) error { retu
 func (*Client) Status(context.Context) (RuntimeStatus, error)             { return RuntimeStatus{}, ErrUnsupported }
 func (*Client) Close() error                                              { return nil }
 func Serve(context.Context, Config) error                                 { return ErrUnsupported }
-func Install(context.Context, string, string) (*Undo, error)              { return nil, ErrUnsupported }
+func Install(context.Context, string, string, map[string]string) (*Undo, error) {
+	return nil, ErrUnsupported
+}
 
 const DefaultSocket = ""
 const DefaultStateDir = ""
