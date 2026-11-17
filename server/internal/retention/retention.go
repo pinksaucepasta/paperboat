@@ -78,6 +78,24 @@ var policies = []policy{
 		seconds(func(c config.Retention) time.Duration { return c.ExpiredCredentials })},
 	{"managed_ssh_operations", batchOf("managed_ssh_operations", `created_at < now()-make_interval(secs=>$2)`),
 		seconds(func(c config.Retention) time.Duration { return c.IdempotencyRecords })},
+	// Replay records of retried requests: a retry past the window is a new request. The route record is written and
+	// completed in one transaction, so an unfinished one is never a live row; vault and capability records are
+	// complete when stored.
+	{"control_route_operations", batchOf("control_route_operations", `result_revision IS NOT NULL AND created_at < now()-make_interval(secs=>$2)`),
+		seconds(func(c config.Retention) time.Duration { return c.IdempotencyRecords })},
+	{"environment_vault_operations", batchOf("environment_vault_operations", `created_at < now()-make_interval(secs=>$2)`),
+		seconds(func(c config.Retention) time.Duration { return c.IdempotencyRecords })},
+	{"user_machine_capability_operations", batchOf("user_machine_capability_operations", `created_at < now()-make_interval(secs=>$2)`),
+		seconds(func(c config.Retention) time.Duration { return c.IdempotencyRecords })},
+	// A finished attempt; started and uncertain ones are what the reconciliation depth metric counts.
+	{"control_reconciliation_attempts", batchOf("control_reconciliation_attempts",
+		`state IN ('succeeded','failed','cancelled') AND finished_at < now()-make_interval(secs=>$2)`),
+		seconds(func(c config.Retention) time.Duration { return c.FinishedOperations })},
+	// A publication whose records were withdrawn and verified so (no desired address, no provider record): the owner
+	// is gone; a hostname that comes back gets a fresh row.
+	{"edge_dns_publications", batchOf("edge_dns_publications",
+		`state='verified' AND desired_addresses='[]'::jsonb AND provider_records='[]'::jsonb AND updated_at < now()-make_interval(secs=>$2)`),
+		seconds(func(c config.Retention) time.Duration { return c.EndedPublications })},
 	// An ended preview; its create operation record, endpoint, domains, logs and lazy activations cascade, so it runs
 	// before operations.
 	{"preview_leases", batchOf("preview_leases", `terminal_state <> 'active' AND stopped_at < now()-make_interval(secs=>$2)`),

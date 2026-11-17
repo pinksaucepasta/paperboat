@@ -11,7 +11,7 @@ type Retention struct {
 	// ExpiredCredentials: issued once-only credentials and redemptions past their expiry (config credentials live
 	// 2 minutes; the revocation document lists only unexpired ones).
 	ExpiredCredentials time.Duration `json:"expired_credentials"`
-	// IdempotencyRecords: replay records of retried requests (managed SSH operations).
+	// IdempotencyRecords: replay records of retried requests (managed SSH operations, route, ENV vault and machine capability operations).
 	IdempotencyRecords time.Duration `json:"idempotency_records"`
 	// FinishedOperations: operations in a terminal state, which clients read back to reconcile a result.
 	FinishedOperations time.Duration `json:"finished_operations"`
@@ -19,7 +19,8 @@ type Retention struct {
 	// UserMachines.ExpiredAccessSessionRetention, during which daemons may still name an ended access session.
 	EndedSessions time.Duration `json:"ended_sessions"`
 	// EndedPublications: a preview after it ended (`pb preview list --all` and the console's ended filter show it
-	// until then), and a tunnel, tunnel route or preview/tunnel domain after it was deleted (past its quarantine).
+	// until then), and a tunnel, tunnel route or preview/tunnel domain after it was deleted (past its quarantine), and a DNS
+	// publication after its records were withdrawn.
 	EndedPublications time.Duration `json:"ended_publications"`
 	// AcknowledgedUsageReceipts: edge usage receipts after the server acknowledged them.
 	AcknowledgedUsageReceipts time.Duration `json:"acknowledged_usage_receipts"`

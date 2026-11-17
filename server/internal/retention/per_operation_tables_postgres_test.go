@@ -11,7 +11,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 )
 
-// Every per-operation table is bounded (F21-23); ended previews and deleted tunnels and routes go 30 days later: for each table that had no retention, one pass deletes a row past
+// Every per-operation table is bounded (F21-23); ended previews and deleted tunnels and routes go 30 days later; replay records after a day, finished reconciliation attempts after 7 days, withdrawn DNS publications after 30: for each table that had no retention, one pass deletes a row past
 // its window and keeps a live one (the connector enrollment policy, whose rows need a whole tunnel, runs on the
 // schema in TestRetentionDrainsBacklogsAndKeepsLiveRowsOnPostgres). Fixtures are ordinary rows, so the test runs as
 // a non-superuser app role too. A long-expired peer certificate goes with its revocation, unless an identity
@@ -96,6 +96,24 @@ created_by_actor_id,updated_by_actor_id,created_at,updated_at,deleted_at)
 SELECT $1||k,$1||t,k,'http','catch_all','http','127.0.0.1:3000',1,st,$1,$1,now()-interval '40 days',now(),d
 FROM (VALUES('_r_old','_t_live','deleted',now()-interval '31 days'),('_r_live','_t_live','active',NULL::timestamptz),
  ('_r_of_old','_t_old','active',NULL::timestamptz)) v(k,t,st,d)`, user)
+	// Replay records: one a day old, one fresh, and a route record still waiting for its result.
+	exec(`INSERT INTO paperboat.control_route_operations(operation_key,operation_type,request_hash,route_id,result_revision,created_at)
+SELECT $1||k,'create',sha256(convert_to(k,'UTF8')),'r',rev,c FROM (VALUES('_old',1,now()-interval '25 hours'),('_recent',1,now()),('_pending',NULL::bigint,now()-interval '25 hours')) v(k,rev,c)`, user)
+	exec(`INSERT INTO paperboat.environment_vault_operations(account_id,operation_id,request_digest,result,created_at)
+SELECT $1,$1||k,sha256(convert_to(k,'UTF8')),'\x01',c FROM (VALUES('_old',now()-interval '25 hours'),('_recent',now())) v(k,c)`, user)
+	exec(`INSERT INTO paperboat.user_machine_capability_operations(user_machine_id,user_id,idempotency_key,request_hash,expected_version,resulting_version,configured_capabilities,result,created_at)
+SELECT $1||'_host',$1,k,sha256(convert_to(k,'UTF8')),1,2,ARRAY[]::text[],'{}'::jsonb,c FROM (VALUES('old',now()-interval '25 hours'),('recent',now())) v(k,c)`, user)
+	// Reconciliation attempts: finished 8 days ago, finished now, and one still started.
+	exec(`INSERT INTO paperboat.control_environments(id,workspace_id,owner_user_id) VALUES($1||'_env',$1||'_env',$1)`, user)
+	exec(`INSERT INTO paperboat.control_reconciliation_attempts(id,environment_id,desired_version,state,started_at,finished_at)
+SELECT $1||k,$1||'_env',1,st,now()-interval '9 days',f FROM (VALUES('_old','succeeded',now()-interval '8 days'),('_recent','failed',now()),
+ ('_started','started',NULL::timestamptz)) v(k,st,f)`, user)
+	// DNS publications: withdrawn 31 days ago, withdrawn now, and one 31 days old that still holds a provider record.
+	exec(`INSERT INTO paperboat.edge_dns_publications(hostname,owner_id,resource_generation,readiness_version,observed_at,publication_generation,
+desired_addresses,provider_records,state,created_at,updated_at)
+SELECT $1||k||'.example.test',$1,1,'v',now(),1,'[]'::jsonb,rec,st,now()-interval '40 days',u
+FROM (VALUES('_old','[]'::jsonb,'verified',now()-interval '31 days'),('_recent','[]'::jsonb,'verified',now()),
+ ('_held','[{"id":"x"}]'::jsonb,'verified',now()-interval '31 days')) v(k,rec,st,u)`, user)
 	if err := fixture.Commit(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -122,6 +140,11 @@ FROM (VALUES('_r_old','_t_live','deleted',now()-interval '31 days'),('_r_live','
 		"preview_leases":              {`SELECT string_agg(replace(id,$1,''),',' ORDER BY id) FROM paperboat.preview_leases WHERE account_id=$1`, "_active,_recent"},
 		"tunnels":                     {`SELECT string_agg(replace(id,$1,''),',' ORDER BY id) FROM paperboat.tunnels WHERE account_id=$1`, "_t_live,_t_recent"},
 		"tunnel_routes":               {`SELECT string_agg(replace(id,$1,''),',' ORDER BY id) FROM paperboat.tunnel_routes WHERE id LIKE $1||'%'`, "_r_live"},
+		"control_route_operations":    {`SELECT string_agg(replace(operation_key,$1,''),',' ORDER BY operation_key) FROM paperboat.control_route_operations WHERE operation_key LIKE $1||'%'`, "_pending,_recent"},
+		"vault_operations":            {`SELECT string_agg(replace(operation_id,$1,''),',' ORDER BY operation_id) FROM paperboat.environment_vault_operations WHERE account_id=$1`, "_recent"},
+		"capability_operations":       {`SELECT string_agg(idempotency_key,',' ORDER BY idempotency_key) FROM paperboat.user_machine_capability_operations WHERE user_id=$1`, "recent"},
+		"reconciliation_attempts":     {`SELECT string_agg(replace(id,$1,''),',' ORDER BY id) FROM paperboat.control_reconciliation_attempts WHERE environment_id=$1||'_env'`, "_recent,_started"},
+		"edge_dns_publications":       {`SELECT string_agg(replace(replace(hostname,'.example.test',''),$1,''),',' ORDER BY hostname) FROM paperboat.edge_dns_publications WHERE owner_id=$1`, "_held,_recent"},
 		"peer_mesh_log":               {`SELECT string_agg(mesh_seq::text,',' ORDER BY mesh_seq) FROM paperboat.peer_mesh_log WHERE account_id=$1`, "2,5,6"},
 	} {
 		if got := left(test.query); got != test.want {

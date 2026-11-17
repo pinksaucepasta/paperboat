@@ -1512,19 +1512,6 @@ type HelperIdentityRenewal struct {
 	CreatedAt          time.Time
 }
 
-type HelperRevocationOutbox struct {
-	ID                 string
-	UserID             string
-	ProjectID          string
-	CLIClientSessionID string
-	HttpBaseUrl        string
-	SessionIds         []string
-	Reason             string
-	PropagatedAt       sql.NullTime
-	CreatedAt          time.Time
-	UpdatedAt          time.Time
-}
-
 type InspectorCredential struct {
 	CredentialID            string
 	TokenHash               []byte
@@ -2225,16 +2212,6 @@ type ProviderEvent struct {
 	Payload         []byte
 	ProcessedAt     sql.NullTime
 	CreatedAt       time.Time
-}
-
-type ProviderRouteCleanupOutbox struct {
-	ID           string
-	ProjectID    string
-	Action       string
-	Reason       string
-	PropagatedAt sql.NullTime
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
 }
 
 type PublicationBlock struct {
