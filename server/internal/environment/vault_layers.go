@@ -60,7 +60,7 @@ type vaultLayerClaims struct {
 }
 
 func layerCoordinate(c vaultLayerSourceClaims) VaultLayerCoordinate {
-	return VaultLayerCoordinate{c.WorkspaceID, c.OwnerKind, c.OwnerID, c.MachineID}
+	return VaultLayerCoordinate{WorkspaceID: c.WorkspaceID, OwnerKind: c.OwnerKind, OwnerID: c.OwnerID, MachineID: c.MachineID}
 }
 func validLayerCoordinate(c VaultLayerCoordinate) bool {
 	return validIdentifier(c.WorkspaceID) && validIdentifier(c.OwnerID) && ((c.OwnerKind == "personal" && (c.MachineID == "" || validIdentifier(c.MachineID))) || (c.OwnerKind == "team" && c.WorkspaceID == c.OwnerID && c.WorkspaceID != "personal" && c.MachineID == ""))
