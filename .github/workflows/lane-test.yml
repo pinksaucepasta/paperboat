@@ -121,7 +121,7 @@ jobs:
       - name: server policy checks and static analysis
         if: matrix.module == 'server' && inputs.run == ''
         run: |
-          sudo apt-get update && sudo apt-get install -y --no-install-recommends python3-yaml python3-cryptography
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends python3-yaml python3-cryptography ripgrep
           python3 -m unittest discover -s ../.github/tests -p 'test_*.py'
           make policy-checks static-analysis
       - name: go test -race

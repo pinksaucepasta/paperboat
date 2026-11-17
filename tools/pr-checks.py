@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """R-01: check changed Go packages.
-  pr-checks.py BASE          gofmt of every module, then vet and -race test the changed packages and their workspace reverse dependencies (merge queue groups)
-  pr-checks.py BASE --fast   gofmt of every module, then go vet of the changed packages only (pull requests: seconds, no tests)"""
+  pr-checks.py BASE          gofmt of every module, then vet, -race test and source policy of each module with changed packages or reverse dependencies (merge queue groups)
+  pr-checks.py BASE --fast   gofmt of every module, then go vet and source policy of each module with changed packages only (pull requests: seconds, no tests)"""
 import json
 import os
 import subprocess
@@ -102,6 +102,7 @@ def main():
         if names:
             print(f'{module}: ' + ' '.join(names), flush=True)
             subprocess.run(['go', 'vet'] + names, cwd=ROOT / module, check=True, timeout=1200)
+            subprocess.run([ROOT / 'tools/verify-source-policy.sh', module], check=True, timeout=300)
             if not fast:
                 test_packages(module, names)
     print(f"{'Fast' if fast else 'Targeted'} checks passed ({len(chosen)} packages).")
