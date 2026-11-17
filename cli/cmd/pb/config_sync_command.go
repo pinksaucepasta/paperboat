@@ -350,7 +350,7 @@ func buildConfigSyncProjection(ctx context.Context, backend configSyncSourceBack
 	}
 	projection := configSyncProjection{Revision: effective.Revision, SharedRevision: sharedRevision, Enabled: effective.Enabled, Mode: string(effective.Mode), AutomaticUpdates: effective.AutomaticUpdates, PathRules: []api.ConfigPathRule{}, RepositoryBindings: []api.ConfigRepositoryBinding{}, Warnings: names.unknownSections(shared)}
 	for _, rule := range effective.PathRules {
-		projection.PathRules = append(projection.PathRules, api.ConfigPathRule{ID: rule.ID, Source: rule.Source, RepositoryPath: rule.RepositoryPath, LocalPath: rule.LocalPath, Kind: rule.Kind, Include: rule.Include, Exclude: rule.Exclude})
+		projection.PathRules = append(projection.PathRules, api.ConfigPathRule(rule))
 	}
 	if !effective.Enabled {
 		return projection, nil

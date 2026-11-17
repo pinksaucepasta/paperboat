@@ -24,10 +24,9 @@ const (
 )
 
 var (
-	ErrInvalidState         = errors.New("invalid host state")
-	ErrCredentialMaterial   = errors.New("reusable credential material is forbidden in host state")
-	idPattern               = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`)
-	stableEndpointIDPattern = regexp.MustCompile(`^endpoint_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
+	ErrInvalidState       = errors.New("invalid host state")
+	ErrCredentialMaterial = errors.New("reusable credential material is forbidden in host state")
+	idPattern             = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`)
 )
 
 type ConfigSnapshot struct {
@@ -108,16 +107,6 @@ func snapshotError(err error) error {
 		return safeStoreFailure("tunnel configuration contains an unsafe credential reference", ErrCredentialMaterial, err)
 	}
 	return safeStoreFailure("tunnel configuration snapshot is invalid", ErrInvalidState, err)
-}
-
-// ValidateStableEndpointID accepts only the canonical endpoint_UUIDv4 used as
-// the immutable managed tunnel endpoint identity. Host runtime state must not
-// invent this identity from a display name, host name, or endpoint hash.
-func ValidateStableEndpointID(value string) error {
-	if !stableEndpointIDPattern.MatchString(value) {
-		return ErrInvalidState
-	}
-	return nil
 }
 
 func validID(value string) bool { return idPattern.MatchString(value) }
