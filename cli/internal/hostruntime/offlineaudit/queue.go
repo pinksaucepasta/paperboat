@@ -15,7 +15,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	recording "github.com/pinksaucepasta/paperboat/shared/recording"
+	wire "github.com/pinksaucepasta/paperboat/shared/offlineaudit"
 	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 )
 
@@ -45,30 +45,7 @@ const (
 // ErrFull refuses a new offline session: it needs Paperboat online.
 var ErrFull = errors.New("the offline audit backlog is full; the session needs Paperboat online")
 
-type Event struct {
-	EventID        string    `json:"event_id"`
-	Kind           string    `json:"kind"`
-	Capability     string    `json:"capability"`
-	PeerEndpointID string    `json:"peer_endpoint_id"`
-	PeerAccountID  string    `json:"peer_account_id"`
-	OperationID    string    `json:"operation_id"`
-	OccurredAt     time.Time `json:"occurred_at"`
-	Reason         string    `json:"reason,omitempty"`
-	// The fields below belong to the ssh_session_* kinds: Origin says whether Paperboat was
-	// reachable, SessionID (an end's) is the started event's EventID.
-	Origin     string `json:"origin,omitempty"`
-	Generation uint64 `json:"generation,omitempty"`
-	SessionID  string `json:"session_id,omitempty"`
-	Outcome    string `json:"outcome,omitempty"`
-	BytesIn    int64  `json:"bytes_in,omitempty"`
-	BytesOut   int64  `json:"bytes_out,omitempty"`
-	// ExitCode and DurationMS belong to an exec's offline_session_ended.
-	ExitCode   *int  `json:"exit_code,omitempty"`
-	DurationMS int64 `json:"duration_ms,omitempty"`
-	// Recording belongs to the recording_* kinds, which carry nothing else but the event id, kind
-	// and time.
-	Recording *recording.Report `json:"recording,omitempty"`
-}
+type Event = wire.Event
 
 // Queue is the one owner of the backlog file.
 type Queue struct {

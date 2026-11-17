@@ -165,7 +165,7 @@ func SSHSessionAudit(queue *offlineaudit.Queue) managedssh.SessionAudit {
 		if session.Peer.Offline {
 			origin = offlineaudit.OriginOffline
 		}
-		event := offlineaudit.Event{PeerEndpointID: session.Peer.EndpointID, PeerAccountID: session.Peer.AccountID, OperationID: session.Peer.OperationID, Origin: origin, Generation: session.Generation}
+		event := offlineaudit.Event{PeerEndpointID: session.Peer.EndpointID, PeerAccountID: session.Peer.AccountID, OperationID: session.Peer.OperationID, Origin: origin, Generation: int64(session.Generation)}
 		switch session.Kind {
 		case managedssh.SessionStarted:
 			event.Kind, event.EventID = offlineaudit.KindSSHStarted, session.SessionID
