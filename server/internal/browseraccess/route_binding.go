@@ -32,7 +32,7 @@ func returnRequestPath(returnPath string) (string, error) {
 	return u.Path, nil
 }
 
-func resolveBeginTarget(ctx context.Context, tx *db.Tx, host, path string, now time.Time, machineServiceDomain string) (requestTarget, error) {
+func resolveBeginTarget(ctx context.Context, tx *db.Tx, host, path string, now time.Time) (requestTarget, error) {
 	if a, err := resolveResource(ctx, tx, host, "lazy_policy", "", "", now); err == nil {
 		return requestTarget{kind: a.kind, id: a.id, route: a.route}, nil
 	} else if err != ErrNotAuthorized {
@@ -43,7 +43,7 @@ func resolveBeginTarget(ctx context.Context, tx *db.Tx, host, path string, now t
 		return requestTarget{}, err
 	}
 	if reserved {
-		return requestTarget{}, ErrNotAuthorized
+		return decoyTarget(host), nil
 	}
 	if a, err := resolveResource(ctx, tx, host, "preview", "", "", now); err == nil {
 		return requestTarget{kind: a.kind, id: a.id, route: a.route}, nil
@@ -55,12 +55,15 @@ func resolveBeginTarget(ctx context.Context, tx *db.Tx, host, path string, now t
 	} else if err != ErrNotAuthorized {
 		return requestTarget{}, err
 	}
-	// Machine-service lazy policies are created only after a browser identity is
-	// known. They remain a legacy owner-only flow, outside preview/tunnel policy.
-	if machineServiceDomain != "" && (host == machineServiceDomain || strings.HasSuffix(host, "."+machineServiceDomain)) {
-		return requestTarget{kind: "machine_service_pending", id: host, route: host}, nil
-	}
-	return requestTarget{}, ErrNotAuthorized
+	return decoyTarget(host), nil
+}
+
+// decoyTarget lets Begin answer a name no resource owns exactly as it answers one a signed-in account may not open: the
+// edge shows both the same page, and a 404 here would tell any visitor (anyone can sign up) which names exist. Issue
+// finds no authority for it and marks the transaction denied, so Redeem refuses it with the one answer a denied
+// account gets. Names under the machine-service domain, whose policy is created once an owner signs in, are the same.
+func decoyTarget(host string) requestTarget {
+	return requestTarget{kind: "machine_service_pending", id: host, route: host}
 }
 
 type routeCandidate struct {

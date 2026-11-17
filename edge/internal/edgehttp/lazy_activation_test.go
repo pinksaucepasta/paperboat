@@ -277,8 +277,8 @@ func TestSignedInUnknownHostLooksLikeDeniedPrivateApp(t *testing.T) {
 	}
 }
 
-// The control server answers Begin for a name that does not exist with 404 (ErrBrowserDenied at the edge): a signed-out
-// browser gets the 404 page, never the 403 "no access" page this used to be.
+// Should control refuse Begin (the server answers it for every well-formed name now, as a denied sign-in), the edge
+// answers a signed-out browser with the 404 page, never the 403 "no access" page this used to be.
 type beginDeniedAuthority struct{ lazyAuthorityFixture }
 
 func (*beginDeniedAuthority) Begin(context.Context, string, string) (control.BrowserBegin, error) {

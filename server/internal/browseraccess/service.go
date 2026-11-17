@@ -169,7 +169,7 @@ func (s *Service) Begin(ctx context.Context, in BeginRequest) (BeginResult, erro
 	out := BeginResult{TransactionID: id, State: state, ExpiresAt: now.Add(transactionTTL)}
 	h := digest(state)
 	err = s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-		target, e := resolveBeginTarget(ctx, tx, host, requestPath, now, s.MachineServiceDomain)
+		target, e := resolveBeginTarget(ctx, tx, host, requestPath, now)
 		if e != nil {
 			return e
 		}
@@ -245,7 +245,7 @@ func (s *Service) Issue(ctx context.Context, in IssueRequest) (IssueResult, erro
 		if err := tx.QueryRow(ctx, `SELECT expires_at,version FROM sessions WHERE id=$1 AND user_id=$2 AND revoked_at IS NULL AND expires_at>$3`, in.Principal.ID, in.Principal.UserID, now).Scan(&sessionExpiry, &sessionVersion); err != nil {
 			return mapMissing(err)
 		}
-		selected, err := resolveBeginTarget(ctx, tx, host, requestPath, now, s.MachineServiceDomain)
+		selected, err := resolveBeginTarget(ctx, tx, host, requestPath, now)
 		if err != nil {
 			return err
 		}
