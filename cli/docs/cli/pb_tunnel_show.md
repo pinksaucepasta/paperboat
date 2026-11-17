@@ -4,16 +4,21 @@ Show a durable tunnel
 
 ### Synopsis
 
-Show a durable tunnel
-
-Show one durable tunnel's configured identity, routes, domains, and control state. Use status for current health and logs for event history.
-
-Durable tunnels retain identity, routes, and domains across client sessions. Ephemeral tunnels have a separate lifecycle. Route publication and browser HTTP access require exact authorization; TLS for browser HTTP terminates at the edge.
+Show one durable tunnel's identity, address, access mode and desired state. Name it by ID or
+exact name; if a name is ambiguous, retry with the tunnel's ID. --json prints the whole
+resource. For current health use pb tunnel status; for history use pb tunnel logs.
 
 JSON output is supported with --json.
 
 ```
 pb tunnel show <tunnel> [flags]
+```
+
+### Examples
+
+```
+  pb tunnel show web
+  pb tunnel show tunnel_abc123 --json
 ```
 
 ### Options

@@ -52,5 +52,13 @@ This command does not support --json output; it rejects that mode before executi
 	resource workspace selector: personal or a team slug
 
 
+.SH EXAMPLE
+.EX
+  pb ssh homelab
+  pb ssh deploy@homelab
+  pb ssh homelab -- -L 8080:localhost:80
+.EE
+
+
 .SH SEE ALSO
 \fBpb(1)\fP, \fBpb-ssh-doctor(1)\fP, \fBpb-ssh-trust-host(1)\fP

@@ -4,12 +4,24 @@ Rename a durable tunnel
 
 ### Synopsis
 
-Rename a durable tunnel selected by its exact ID or current name. The command reads the current resource version before changing its name and reports the server's canonical result. The name is a label: the tunnel's public address never changes. Existing routes, connectors and access policy remain attached to the same tunnel. Refresh and retry if another writer changed it.
+Rename a durable tunnel, selected by ID or current name. The name is only a label: the
+tunnel's address, routes, connectors and access rules do not change.
+
+A change returns once the request is accepted, and the tunnel may still be connecting. Pass
+--wait to wait (at most --timeout, default 2m, 1s to 10m) until it finishes, or check pb tunnel
+status.
 
 JSON output is supported with --json.
 
 ```
 pb tunnel rename <tunnel> <name> [flags]
+```
+
+### Examples
+
+```
+  pb tunnel rename web website
+  pb tunnel rename tunnel_abc123 web --wait
 ```
 
 ### Options

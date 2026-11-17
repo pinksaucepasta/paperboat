@@ -10,10 +10,21 @@ pb-preview - Expose a local target through a temporary preview
 
 
 .SH DESCRIPTION
-Expose a local target through a temporary preview
+Expose a local target through a temporary preview URL. The target is a bare port (3000
+means http://127.0.0.1:3000), an http, https, h2c or tcp URL with an explicit port and nothing
+else (no path, query or user), or an absolute Unix socket path (also written unix:///path).
 
 .PP
-Start a temporary preview for a local port, URL, or path. --private or --team controls who may open it; public browser HTTP ends TLS at the edge. Use status and stop to manage its lifecycle.
+A preview is public by default. --private limits it to your account and --team requires an
+explicit team grant (they cannot be combined). --ttl limits its lifetime to at most 24h.
+--host-header sends a different Host to the origin, for servers that allow-list one (http, https
+and h2c targets; give a bare name without a port). --domain attaches a verified custom domain
+and waits up to 15 minutes for its DNS and certificate.
+
+.PP
+The preview runs while the command runs; Ctrl+C stops it. --background hands it to this
+computer's background service and returns once it is ready, with a default lifetime of 30
+minutes.
 
 .PP
 JSON output is supported with --json.
@@ -21,7 +32,7 @@ JSON output is supported with --json.
 
 .SH OPTIONS
 \fB--background\fP[=false]
-	transfer ownership to paperboatd and return after readiness
+	hand the preview to this computer's background service and return once ready (default lifetime 30m)
 
 .PP
 \fB--domain\fP=[]
@@ -67,6 +78,15 @@ JSON output is supported with --json.
 .PP
 \fB--workspace\fP=""
 	resource workspace selector: personal or a team slug
+
+
+.SH EXAMPLE
+.EX
+  pb preview 3000
+  pb preview https://127.0.0.1:8443 --private --ttl 2h
+  pb preview unix:///run/app.sock --host-header myapp.test
+  pb preview 3000 --background --json
+.EE
 
 
 .SH SEE ALSO

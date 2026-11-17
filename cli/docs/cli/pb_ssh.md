@@ -16,6 +16,14 @@ This command does not support --json output; it rejects that mode before executi
 pb ssh [user@]<machine> [-- <OpenSSH arguments...>] [flags]
 ```
 
+### Examples
+
+```
+  pb ssh homelab
+  pb ssh deploy@homelab
+  pb ssh homelab -- -L 8080:localhost:80
+```
+
 ### Options
 
 ```

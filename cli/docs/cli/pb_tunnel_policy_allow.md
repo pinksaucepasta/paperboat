@@ -4,16 +4,24 @@ Allow on-demand access to an exact machine port
 
 ### Synopsis
 
-Allow on-demand access to an exact machine port
-
-Authorize on-demand access to one machine port or URL with an exact access audience and optional expiry. --generation protects updates to an existing policy.
-
-An on-demand policy authorizes an exact machine port for private or team access. A policy does not publish a public URL or grant every port on the machine. Revocation fences subsequent activation.
+Authorize on-demand access to one exact port of a machine: a bare port number or a loopback
+http, https or h2c URL. --access chooses who may use it, private (the default) or team. The
+policy lasts --expires (default 8h, must be positive). To change an existing policy pass its
+--id together with the --generation you last saw. A replacement application on the same port
+inherits the access.
 
 JSON output is supported with --json.
 
 ```
 pb tunnel policy allow <machine> <port|url> [flags]
+```
+
+### Examples
+
+```
+  pb tunnel policy allow homelab 3000
+  pb tunnel policy allow homelab https://127.0.0.1:8443 --access team --expires 1h
+  pb tunnel policy allow homelab 3000 --id pol_abc --generation 3
 ```
 
 ### Options

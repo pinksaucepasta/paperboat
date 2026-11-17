@@ -4,16 +4,21 @@ Manage tunnel routes
 
 ### Synopsis
 
-Manage tunnel routes
-
-List, add, update, or remove exact routes for a durable tunnel. Each route binds protocol, match, and origin settings under the tunnel's authorization boundary.
-
-Durable tunnels retain identity, routes, and domains across client sessions. Ephemeral tunnels have a separate lifecycle. Route publication and browser HTTP access require exact authorization; TLS for browser HTTP terminates at the edge.
+List, add, update or remove the routes of a durable tunnel. A route ties a protocol, a match
+(a hostname and an optional path prefix) and an origin together, and a tunnel can have several.
+Each change may return an operation that is still connecting; see pb tunnel status.
 
 With --json, this command group lists its available commands.
 
 ```
 pb tunnel route [flags]
+```
+
+### Examples
+
+```
+  pb tunnel route list web
+  pb tunnel route add web --name app --to http://127.0.0.1:8080 --domain app.example.com
 ```
 
 ### Options

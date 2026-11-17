@@ -329,13 +329,13 @@ func tunnelCreateCommand() *cobra.Command {
 		}
 		return nil
 	})
-	command.Flags().Int("port", 0, "local TCP port")
-	command.Flags().String("from", "", "origin URL (http, https, h2c, tcp, or unix)")
-	command.Flags().StringSlice("domain", nil, "custom domain to add after creation")
+	command.Flags().Int("port", 0, "local TCP port to serve (or use --from)")
+	command.Flags().String("from", "", "origin URL: http, https, h2c, tcp or unix (instead of --port)")
+	command.Flags().StringSlice("domain", nil, "custom domain to add after creation (repeatable)")
 	command.Flags().Bool("private", false, "require authenticated private access")
 	command.Flags().Bool("team", false, "require an explicit team grant for browser access")
 	command.MarkFlagsMutuallyExclusive("private", "team")
-	command.Flags().Duration("duration", 0, "optional tunnel lifetime")
+	command.Flags().Duration("duration", 0, "tunnel lifetime (default: the tunnel does not expire)")
 	tunnelMutationWaitFlags(command)
 	tunnelJSONFlag(command)
 	return command

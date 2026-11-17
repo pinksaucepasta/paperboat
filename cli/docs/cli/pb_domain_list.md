@@ -4,14 +4,20 @@ List the workspace's domains
 
 ### Synopsis
 
-List the workspace's domains
-
-List the active workspace's domains with their DNS verification state, certificate state and how many tunnel or preview hostnames use each one. Use --json for the full records and uses.
+List the workspace's domains with their DNS verification state, certificate state and how many
+tunnels and previews use each. With --json the output is {"items": [...]}.
 
 JSON output is supported with --json.
 
 ```
 pb domain list [flags]
+```
+
+### Examples
+
+```
+  pb domain list
+  pb domain list --json
 ```
 
 ### Options

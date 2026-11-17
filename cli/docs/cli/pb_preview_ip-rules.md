@@ -12,6 +12,14 @@ JSON output is supported with --json.
 pb preview ip-rules <preview> [flags]
 ```
 
+### Examples
+
+```
+  pb preview ip-rules preview_abc123
+  pb preview ip-rules preview_abc123 --allow 203.0.113.0/24
+  pb preview ip-rules preview_abc123 --clear
+```
+
 ### Options
 
 ```

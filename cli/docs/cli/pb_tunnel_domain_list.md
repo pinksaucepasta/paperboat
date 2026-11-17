@@ -4,16 +4,20 @@ List tunnel domains
 
 ### Synopsis
 
-List tunnel domains
-
-List the hostnames one durable tunnel is served at, with each hostname's certificate state.
-
-Hostnames come from the workspace's verified domains (pb domain). A hostname is one label under a domain, or the domain itself; the domain's verification and certificate cover it.
+List the hostnames a durable tunnel is served at, with the certificate state of each. Add
+hostnames with pb tunnel domain add and withdraw them with pb tunnel domain remove.
 
 JSON output is supported with --json.
 
 ```
 pb tunnel domain list <tunnel> [flags]
+```
+
+### Examples
+
+```
+  pb tunnel domain list web
+  pb tunnel domain list web --json
 ```
 
 ### Options

@@ -10,10 +10,25 @@ pb-exec - Execute an exact command on a machine
 
 
 .SH DESCRIPTION
-Execute an exact command on a machine
+Run a command on a machine without a terminal session: pb exec <machine> -- <command...>\&.
+The -- is required, and the arguments after it run exactly as given, with no shell unless you
+name one. Output and the exit status come from the remote command.
 
 .PP
-Run the exact argv after -- on the selected machine, with optional working directory, environment entries, PTY, and timeout. Output and exit status come from the remote command; use --json for structured events.
+--cwd sets the working directory and must be absolute in the machine's own form: /... on
+Unix, a drive letter on Windows. --env NAME=value sets a variable (repeatable; valid names,
+each once). --timeout bounds the whole run, including its start (at most 24h). --pty allocates
+a remote terminal sized like this one (80x24 when unknown). --json prints
+paperboat.exec-event/v1 events, one JSON object per line.
+
+.PP
+Ctrl-C cancels the remote command; a second Ctrl-C stops waiting and exits at once. A short
+network break is reattached automatically.
+
+.PP
+Exit status: the remote command's own; 124 when --timeout ran out; 130 when cancelled; 125 when
+the machine refused or could not start the command; 255 when the connection failed and the
+command did not run.
 
 .PP
 JSON output is supported with --json.
@@ -21,11 +36,11 @@ JSON output is supported with --json.
 
 .SH OPTIONS
 \fB--cwd\fP=""
-	absolute remote working directory
+	working directory on the machine, absolute in its own form (/... or a drive letter); default: its workspace root
 
 .PP
 \fB--env\fP=[]
-	remote environment name=value
+	set a remote environment variable NAME=value (repeatable; each name once)
 
 .PP
 \fB-h\fP, \fB--help\fP[=false]
@@ -37,11 +52,11 @@ JSON output is supported with --json.
 
 .PP
 \fB--pty\fP[=false]
-	allocate a remote PTY
+	allocate a remote terminal sized like this one
 
 .PP
 \fB--timeout\fP=0s
-	remote execution timeout
+	stop the command after this long, including its start (maximum 24h)
 
 
 .SH OPTIONS INHERITED FROM PARENT COMMANDS
@@ -59,6 +74,15 @@ JSON output is supported with --json.
 .PP
 \fB--workspace\fP=""
 	resource workspace selector: personal or a team slug
+
+
+.SH EXAMPLE
+.EX
+  pb exec homelab -- uname -a
+  pb exec homelab --cwd /srv/app -- systemctl restart app
+  pb exec homelab --timeout 30s -- ./migrate.sh
+  pb exec winbox --cwd 'C:\\Deploy' -- setup.exe /quiet
+.EE
 
 
 .SH SEE ALSO

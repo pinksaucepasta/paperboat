@@ -4,16 +4,27 @@ Update a tunnel route
 
 ### Synopsis
 
-Update a tunnel route
+Change the fields you name on one route; the rest stay as they are. The flags are the ones of
+route add. --clear-* flags remove a single override (the Host override, path prefix, TLS server
+name, header rules, redirects or rewrite), and --enable or --disable switches the route on or
+off. Unlike add, update accepts only http and tcp_private for --protocol.
 
-Change explicit fields of one route, including origin, match, protocol, or TLS options. Clear flags remove individual overrides; check the resulting operation and status before assuming traffic moved.
-
-Routes map a public or private match to a specific origin and protocol. TLS and host-header options affect the trust boundary and should match the origin. Adding or updating a route may return an operation whose readiness must be checked separately.
+A change returns once the request is accepted, and the tunnel may still be connecting. Pass
+--wait to wait (at most --timeout, default 2m, 1s to 10m) until it finishes, or check pb tunnel
+status.
 
 JSON output is supported with --json.
 
 ```
 pb tunnel route update <tunnel> <route> [flags]
+```
+
+### Examples
+
+```
+  pb tunnel route update web route_xyz --to http://127.0.0.1:8081
+  pb tunnel route update web route_xyz --disable
+  pb tunnel route update web route_xyz --clear-host-header --wait
 ```
 
 ### Options

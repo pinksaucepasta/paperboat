@@ -4,14 +4,25 @@ Remove a domain no tunnel or preview uses
 
 ### Synopsis
 
-Remove a domain no tunnel or preview uses
+Remove a domain from the workspace. A domain that a tunnel or preview still uses is refused,
+and the message names the hostnames to remove first (pb tunnel domain remove). DNS records at
+your provider are not touched; delete them there.
 
-Remove a domain after confirmation. Refused while a tunnel or preview uses a name under it; your DNS records stay at your provider.
+Confirmation is two steps. Run the command without --confirm: it changes nothing, shows what
+would happen and prints a six-character code (exit status 2). Run the same command again with
+--confirm CODE within 5 minutes. The code works once and only for that exact command and target.
 
 JSON output is supported with --json.
 
 ```
 pb domain remove <domain> [flags]
+```
+
+### Examples
+
+```
+  pb domain remove dev.example.com
+  pb domain remove dev.example.com --confirm A1B2C3
 ```
 
 ### Options

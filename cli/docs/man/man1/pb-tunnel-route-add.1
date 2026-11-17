@@ -10,13 +10,23 @@ pb-tunnel-route-add - Add a tunnel route
 
 
 .SH DESCRIPTION
-Add a tunnel route
+Add a route to a durable tunnel. --name and --to are required: --to is the origin URL the route forwards to. --domain is
+the hostname it matches (an exact name or a one-label wildcard) and --path an optional HTTP path
+prefix, which may end in *. --protocol is http (the default), tcp, tls passthrough or
+tcp_private.
 
 .PP
-Add a route to one durable tunnel, selecting protocol, match, origin, and optional TLS behavior. The operation can remain connecting after the command returns; use --wait or status to confirm readiness.
+Origin options: --host-header or --preserve-host choose the Host the app sees; --tls-verification
+(system, custom_ca, pinned or insecure) with --tls-ca, --tls-pin and --tls-server-name decide
+how the origin's certificate is trusted; --connect-timeout (default 10s), --idle-timeout
+(default 5m) and --max-streams (default 1024) bound the connection. Header, redirect and
+path-rewrite rules are repeatable (--request-header and --response-header up to 8, --redirect up
+to 4).
 
 .PP
-Routes map a public or private match to a specific origin and protocol. TLS and host-header options affect the trust boundary and should match the origin. Adding or updating a route may return an operation whose readiness must be checked separately.
+A change returns once the request is accepted, and the tunnel may still be connecting. Pass
+--wait to wait (at most --timeout, default 2m, 1s to 10m) until it finishes, or check pb tunnel
+status.
 
 .PP
 JSON output is supported with --json.
@@ -68,7 +78,7 @@ JSON output is supported with --json.
 
 .PP
 \fB--name\fP=""
-	name
+	route name (required)
 
 .PP
 \fB--path\fP=""
@@ -124,7 +134,7 @@ JSON output is supported with --json.
 
 .PP
 \fB--to\fP=""
-	to
+	origin URL the route forwards to (required)
 
 .PP
 \fB--wait\fP[=false]
@@ -150,6 +160,14 @@ JSON output is supported with --json.
 .PP
 \fB--workspace\fP=""
 	resource workspace selector: personal or a team slug
+
+
+.SH EXAMPLE
+.EX
+  pb tunnel route add web --name app --to http://127.0.0.1:8080 --domain app.example.com
+  pb tunnel route add web --name db --protocol tcp --to tcp://127.0.0.1:5432 --domain db.example.com
+  pb tunnel route add web --name docs --to http://127.0.0.1:3000 --domain app.example.com --path /docs --wait
+.EE
 
 
 .SH SEE ALSO

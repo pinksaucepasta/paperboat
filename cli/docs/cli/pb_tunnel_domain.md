@@ -8,8 +8,6 @@ Serve a tunnel at hostnames under your workspace's domains
 
 Serve a durable tunnel at your own hostnames. A hostname must be one level under a verified workspace domain (pb domain add); it needs no DNS step of its own.
 
-Durable tunnels retain identity, routes, and domains across client sessions. Ephemeral tunnels have a separate lifecycle. Route publication and browser HTTP access require exact authorization; TLS for browser HTTP terminates at the edge.
-
 With --json, this command group lists its available commands.
 
 ```

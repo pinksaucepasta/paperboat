@@ -198,8 +198,8 @@ func routeAddCommand() *cobra.Command {
 		}
 		return tunnelOutput(command, out, fmt.Sprintf("Created route %s; status: %s", out.Route.ID, tunnelOperationHuman(out.Operation)))
 	})
-	for _, flag := range []string{"name", "to"} {
-		command.Flags().String(flag, "", flag)
+	for flag, usage := range map[string]string{"name": "route name (required)", "to": "origin URL the route forwards to (required)"} {
+		command.Flags().String(flag, "", usage)
 		_ = command.MarkFlagRequired(flag)
 	}
 	command.Flags().String("domain", "", "exact hostname or one-label wildcard match")

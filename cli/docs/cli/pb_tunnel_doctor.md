@@ -4,16 +4,23 @@ Diagnose tunnel health
 
 ### Synopsis
 
-Diagnose tunnel health
-
-Diagnose placement, machine connection, edge, and origin health for one tunnel. --bundle can prepare bounded supporting diagnostics, and --write-bundle selects a local output file.
-
-Durable tunnels retain identity, routes, and domains across client sessions. Ephemeral tunnels have a separate lifecycle. Route publication and browser HTTP access require exact authorization; TLS for browser HTTP terminates at the edge.
+Diagnose where a tunnel is failing: placement, the machine's connection, the edge and the
+origin. --bundle prints a preview of a bounded support bundle for the absolute path you give,
+and writes nothing; add --write-bundle to write exactly the previewed bundle. --bundle-max-bytes
+bounds its size (64KiB to 8MiB, default 2MiB).
 
 JSON output is supported with --json.
 
 ```
 pb tunnel doctor <tunnel> [flags]
+```
+
+### Examples
+
+```
+  pb tunnel doctor web
+  pb tunnel doctor web --bundle /tmp/bundle.json
+  pb tunnel doctor web --bundle /tmp/bundle.json --write-bundle
 ```
 
 ### Options

@@ -4,16 +4,22 @@ Deliberately replay one retained HTTP request to the same origin
 
 ### Synopsis
 
-Deliberately replay one retained HTTP request to the same origin
-
-Replay one retained HTTP request to the same preview origin by capture ID. This deliberately repeats an HTTP action; use an idempotency key when the origin supports one.
-
-A preview exposes a local target through a temporary Paperboat URL or private/team access policy. Inspect its status before sharing the URL, and stop or delete it when no longer needed. Browser HTTP terminates TLS at the edge.
+Send one captured HTTP request again to the preview's origin, by capture ID (from
+pb preview inspect). This repeats whatever the request did, including side effects. Pass
+--idempotency-key when the origin supports one, to retry safely. A preview has one origin, so
+unlike pb tunnel replay there is no --route.
 
 JSON output is supported with --json.
 
 ```
 pb preview replay <preview> <capture-id> [flags]
+```
+
+### Examples
+
+```
+  pb preview replay preview_abc123 cap_456
+  pb preview replay preview_abc123 cap_456 --idempotency-key order-42
 ```
 
 ### Options

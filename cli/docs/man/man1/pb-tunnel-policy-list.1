@@ -10,13 +10,8 @@ pb-tunnel-policy-list - List on-demand port policies (their IDs and generations)
 
 
 .SH DESCRIPTION
-List on-demand port policies (their IDs and generations)
-
-.PP
-List this account's on-demand port policies with their IDs, targets, generations and expiry, expired ones included. Use the ID and generation to update or revoke a policy whose ID was lost.
-
-.PP
-An on-demand policy authorizes an exact machine port for private or team access. A policy does not publish a public URL or grant every port on the machine. Revocation fences subsequent activation.
+List your on-demand port policies with their IDs, targets, generations and expiry. Expired
+ones are included. Use it to find the ID of a policy you no longer remember.
 
 .PP
 JSON output is supported with --json.
@@ -50,6 +45,13 @@ JSON output is supported with --json.
 .PP
 \fB--workspace\fP=""
 	resource workspace selector: personal or a team slug
+
+
+.SH EXAMPLE
+.EX
+  pb tunnel policy list
+  pb tunnel policy list --json
+.EE
 
 
 .SH SEE ALSO

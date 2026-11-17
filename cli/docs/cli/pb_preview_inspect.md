@@ -4,16 +4,27 @@ Show daemon-local HTTP captures
 
 ### Synopsis
 
-Show daemon-local HTTP captures
+Read or manage the HTTP requests this machine's daemon captured for a preview. Filter with
+--id, and page with --cursor and --limit (1-100, default 20). --enable and --disable turn
+capturing on or off, --purge deletes the captured requests, and --body and --raw (bodies, exact
+requests for replay) apply only together with --enable. A preview has one origin, so unlike
+pb tunnel inspect there is no --route.
 
-Read or manage bounded HTTP captures retained by the local daemon for one preview. --body and --raw expose capture content, while enable, disable, and purge change capture state; treat output as potentially sensitive.
-
-A preview exposes a local target through a temporary Paperboat URL or private/team access policy. Inspect its status before sharing the URL, and stop or delete it when no longer needed. Browser HTTP terminates TLS at the edge.
+Captures can contain sensitive traffic such as tokens and personal data. Treat the output
+accordingly.
 
 JSON output is supported with --json.
 
 ```
 pb preview inspect <preview> [flags]
+```
+
+### Examples
+
+```
+  pb preview inspect preview_abc123 --limit 10
+  pb preview inspect preview_abc123 --enable --body
+  pb preview inspect preview_abc123 --id cap_123 --json
 ```
 
 ### Options

@@ -4,9 +4,10 @@ Add a domain and show its DNS records
 
 ### Synopsis
 
-Add a domain and show its DNS records
-
-Add an apex or subdomain and print the DNS records to create: the _acme-challenge CNAME that proves control, and the wildcard record that sends names under it to Paperboat.
+Add a domain you control to the active workspace and print the DNS records to create at your
+DNS provider: a CNAME that proves you control it, and the records that point names at
+Paperboat. Then run pb domain verify. Once the domain is verified, any name one level under it
+works with --domain on tunnels and previews.
 
 JSON output is supported with --json.
 
@@ -18,6 +19,7 @@ pb domain add <domain> [flags]
 
 ```
   pb domain add dev.example.com
+  pb domain add dev.example.com --json
 ```
 
 ### Options

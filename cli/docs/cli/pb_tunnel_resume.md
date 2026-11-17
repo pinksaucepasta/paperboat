@@ -4,16 +4,23 @@ Resume new traffic for a preserved tunnel
 
 ### Synopsis
 
-Resume new traffic for a preserved tunnel
+Let a paused durable tunnel carry new traffic again, with the same address and routes. If the
+machine is offline or the origin is down it will still fail; check pb tunnel status.
 
-Resume new traffic for a paused durable tunnel without creating a new identity. --wait observes readiness; machine connection and origin failures may still need repair.
-
-Durable tunnels retain identity, routes, and domains across client sessions. Ephemeral tunnels have a separate lifecycle. Route publication and browser HTTP access require exact authorization; TLS for browser HTTP terminates at the edge.
+A change returns once the request is accepted, and the tunnel may still be connecting. Pass
+--wait to wait (at most --timeout, default 2m, 1s to 10m) until it finishes, or check pb tunnel
+status.
 
 JSON output is supported with --json.
 
 ```
 pb tunnel resume <tunnel> [flags]
+```
+
+### Examples
+
+```
+  pb tunnel resume web --wait
 ```
 
 ### Options

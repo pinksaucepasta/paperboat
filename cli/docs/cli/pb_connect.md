@@ -4,14 +4,31 @@ Create and attach to an environment terminal session
 
 ### Synopsis
 
-Create and attach to an environment terminal session
+Open a durable terminal session on a machine (an "environment") and attach this terminal to
+it. Without --session it always creates a fresh session, optionally named with --name; a
+session keeps running when you disconnect. Attach to an existing one with --session (its name
+or ID), or with pb session attach. --name and --session cannot be combined. A second argument
+new is accepted and means the same as leaving --session out; it cannot be combined with
+--session.
 
-Select an environment by name, create or reattach a durable terminal session, and bridge the local terminal. Use --session for a specific session or new to start another one; connection status is reported separately from readiness.
+The status bar shows connection and recording state: --status-bar auto, on or off,
+--status-bar-fullscreen hide or show, --status-bar-theme terminal, dark, light or mono.
+--debug shows the pb versions in use. If the connection drops, pb reconnects; at the start of a
+line, Enter ~ r reconnects now, Enter ~ . disconnects, and ~~ sends a literal ~.
 
 This command does not support --json output; it rejects that mode before execution. Use --help --json for structured command help.
 
 ```
 pb connect <environment> [new] [flags]
+```
+
+### Examples
+
+```
+  pb connect homelab
+  pb connect homelab --name deploy
+  pb connect homelab --session deploy
+  pb connect homelab --status-bar off
 ```
 
 ### Options

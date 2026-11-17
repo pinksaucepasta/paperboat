@@ -4,16 +4,21 @@ Show temporary preview status
 
 ### Synopsis
 
-Show temporary preview status
-
-Show the selected preview's current publication and machine connection state. A URL existing in the account is distinct from a ready, reachable origin.
-
-A preview exposes a local target through a temporary Paperboat URL or private/team access policy. Inspect its status before sharing the URL, and stop or delete it when no longer needed. Browser HTTP terminates TLS at the edge.
+Show one preview's access, target, state and deadline. A preview that exists is not
+necessarily reachable: if nothing answers on the target yet, visitors see "App not responding"
+until your app starts.
 
 JSON output is supported with --json.
 
 ```
 pb preview status <preview> [flags]
+```
+
+### Examples
+
+```
+  pb preview status preview_abc123
+  pb preview status preview_abc123 --json
 ```
 
 ### Options

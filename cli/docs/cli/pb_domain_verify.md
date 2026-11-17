@@ -14,6 +14,13 @@ JSON output is supported with --json.
 pb domain verify <domain> [flags]
 ```
 
+### Examples
+
+```
+  pb domain verify dev.example.com
+  pb domain verify dev.example.com --timeout 10m
+```
+
 ### Options
 
 ```

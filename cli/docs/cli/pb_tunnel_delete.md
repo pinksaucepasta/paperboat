@@ -4,16 +4,25 @@ Delete endpoints and routes while preserving user DNS records
 
 ### Synopsis
 
-Delete endpoints and routes while preserving user DNS records
+Delete a durable tunnel with its endpoints, routes and domain bindings. DNS records you keep
+at your own provider are not touched, and audit history stays. With --ephemeral, stop a
+temporary preview instead.
 
-Delete one durable tunnel's endpoints and routes while preserving user-managed DNS records. the confirmation code confirms removal; inspect the tunnel and domains first.
-
-Durable tunnels retain identity, routes, and domains across client sessions. Ephemeral tunnels have a separate lifecycle. Route publication and browser HTTP access require exact authorization; TLS for browser HTTP terminates at the edge.
+Confirmation is two steps. Run the command without --confirm: it changes nothing, shows what
+would happen and prints a six-character code (exit status 2). Run the same command again with
+--confirm CODE within 5 minutes. The code works once and only for that exact command and target.
 
 JSON output is supported with --json.
 
 ```
 pb tunnel delete <tunnel> [flags]
+```
+
+### Examples
+
+```
+  pb tunnel delete web
+  pb tunnel delete web --confirm A1B2C3 --json
 ```
 
 ### Options

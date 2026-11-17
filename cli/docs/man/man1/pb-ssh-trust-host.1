@@ -10,13 +10,15 @@ pb-ssh-trust-host - Approve a changed SSH host identity
 
 
 .SH DESCRIPTION
-Approve a changed SSH host identity
+Approve a pending SSH host-key change for a machine. Paperboat does not accept a changed
+host identity on its own: check the pending SHA256 fingerprint out of band (for example on the
+machine itself) before you trust it.
 
 .PP
-Approve one pending SSH host-key change by its exact SHA256 fingerprint. Verify the fingerprint out of band before accepting it; this changes trust for the selected machine.
-
-.PP
-Managed SSH resolves the Paperboat machine and then runs OpenSSH with the selected target. Host identity checks remain in force. Standard SSH, SCP, SFTP, and rsync behavior is preserved while Paperboat supplies machine resolution and authorized connectivity.
+With --fingerprint the command trusts only if it equals the pending fingerprint; any other
+value changes nothing. Without it, the command shows the current and pending fingerprints and
+asks [y/N] in a terminal, and refuses outside one. --json needs --fingerprint. It does not run
+OpenSSH.
 
 .PP
 JSON output is supported with --json.
@@ -24,7 +26,7 @@ JSON output is supported with --json.
 
 .SH OPTIONS
 \fB--fingerprint\fP=""
-	exact pending SHA256 fingerprint
+	exact pending SHA256 fingerprint to trust (required outside a terminal and with --json)
 
 .PP
 \fB-h\fP, \fB--help\fP[=false]
@@ -50,6 +52,14 @@ JSON output is supported with --json.
 .PP
 \fB--workspace\fP=""
 	resource workspace selector: personal or a team slug
+
+
+.SH EXAMPLE
+.EX
+  pb ssh trust-host homelab
+  pb ssh trust-host homelab --fingerprint SHA256:abc123
+  pb ssh trust-host homelab --fingerprint SHA256:abc123 --json
+.EE
 
 
 .SH SEE ALSO

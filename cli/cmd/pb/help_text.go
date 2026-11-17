@@ -9,7 +9,7 @@ type helpText struct {
 
 // helpTextGroups holds one map per command group, keyed by command path. A path is
 // owned by one map and never also by commandHelpDetails (TestHelpTextOwnership).
-var helpTextGroups = []map[string]helpText{teamHelpTexts, machineHelpTexts, filesHelpTexts}
+var helpTextGroups = []map[string]helpText{teamHelpTexts, machineHelpTexts, filesHelpTexts, tunnelHelpTexts, accessHelpTexts}
 
 func lookupHelpText(path string) (helpText, bool) {
 	for _, group := range helpTextGroups {

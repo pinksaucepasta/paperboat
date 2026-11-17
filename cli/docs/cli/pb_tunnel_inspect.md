@@ -4,16 +4,28 @@ Show daemon-local HTTP captures
 
 ### Synopsis
 
-Show daemon-local HTTP captures
+Read or manage the HTTP requests this machine's daemon captured for a tunnel. Name the
+route with --route when the tunnel has several; filter with --id, and page with --cursor and
+--limit (1-100, default 20). --enable and --disable turn capturing on or off, --purge deletes
+the captured requests, and --body and --raw (bodies, exact requests for replay) apply only
+together with --enable.
 
-Read or manage bounded HTTP captures for a tunnel, optionally filtered by route. --body and --raw expose retained content; enable, disable, and purge change capture state.
-
-Durable tunnels retain identity, routes, and domains across client sessions. Ephemeral tunnels have a separate lifecycle. Route publication and browser HTTP access require exact authorization; TLS for browser HTTP terminates at the edge.
+Captures can contain sensitive traffic such as tokens and personal data. Treat the output
+accordingly.
 
 JSON output is supported with --json.
 
 ```
 pb tunnel inspect <tunnel> [flags]
+```
+
+### Examples
+
+```
+  pb tunnel inspect web --limit 10
+  pb tunnel inspect web --route route_xyz --id cap_123
+  pb tunnel inspect web --enable --body
+  pb tunnel inspect web --purge
 ```
 
 ### Options

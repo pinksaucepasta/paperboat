@@ -10,10 +10,8 @@ pb-domain-list - List the workspace's domains
 
 
 .SH DESCRIPTION
-List the workspace's domains
-
-.PP
-List the active workspace's domains with their DNS verification state, certificate state and how many tunnel or preview hostnames use each one. Use --json for the full records and uses.
+List the workspace's domains with their DNS verification state, certificate state and how many
+tunnels and previews use each. With --json the output is {"items": [...]}.
 
 .PP
 JSON output is supported with --json.
@@ -43,6 +41,13 @@ JSON output is supported with --json.
 .PP
 \fB--workspace\fP=""
 	resource workspace selector: personal or a team slug
+
+
+.SH EXAMPLE
+.EX
+  pb domain list
+  pb domain list --json
+.EE
 
 
 .SH SEE ALSO

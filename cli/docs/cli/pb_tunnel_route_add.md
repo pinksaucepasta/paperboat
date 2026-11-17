@@ -4,16 +4,34 @@ Add a tunnel route
 
 ### Synopsis
 
-Add a tunnel route
+Add a route to a durable tunnel. --name and --to are required: --to is the origin URL the route forwards to. --domain is
+the hostname it matches (an exact name or a one-label wildcard) and --path an optional HTTP path
+prefix, which may end in *. --protocol is http (the default), tcp, tls passthrough or
+tcp_private.
 
-Add a route to one durable tunnel, selecting protocol, match, origin, and optional TLS behavior. The operation can remain connecting after the command returns; use --wait or status to confirm readiness.
+Origin options: --host-header or --preserve-host choose the Host the app sees; --tls-verification
+(system, custom_ca, pinned or insecure) with --tls-ca, --tls-pin and --tls-server-name decide
+how the origin's certificate is trusted; --connect-timeout (default 10s), --idle-timeout
+(default 5m) and --max-streams (default 1024) bound the connection. Header, redirect and
+path-rewrite rules are repeatable (--request-header and --response-header up to 8, --redirect up
+to 4).
 
-Routes map a public or private match to a specific origin and protocol. TLS and host-header options affect the trust boundary and should match the origin. Adding or updating a route may return an operation whose readiness must be checked separately.
+A change returns once the request is accepted, and the tunnel may still be connecting. Pass
+--wait to wait (at most --timeout, default 2m, 1s to 10m) until it finishes, or check pb tunnel
+status.
 
 JSON output is supported with --json.
 
 ```
 pb tunnel route add <tunnel> [flags]
+```
+
+### Examples
+
+```
+  pb tunnel route add web --name app --to http://127.0.0.1:8080 --domain app.example.com
+  pb tunnel route add web --name db --protocol tcp --to tcp://127.0.0.1:5432 --domain db.example.com
+  pb tunnel route add web --name docs --to http://127.0.0.1:3000 --domain app.example.com --path /docs --wait
 ```
 
 ### Options
@@ -30,7 +48,7 @@ pb tunnel route add <tunnel> [flags]
       --idle-timeout duration                stream idle timeout (default 5m0s)
       --json                                 print canonical JSON
       --max-streams int32                    maximum concurrent streams (default 1024)
-      --name string                          name
+      --name string                          route name (required)
       --path string                          HTTP path prefix, optionally ending in *
       --preserve-host                        preserve the incoming Host header (default true)
       --priority int32                       route priority
@@ -44,7 +62,7 @@ pb tunnel route add <tunnel> [flags]
       --tls-pin string                       pin the origin certificate by its fingerprint (sha256:<hex>), without connecting
       --tls-server-name string               explicit origin TLS server name
       --tls-verification string              origin TLS verification: system, custom_ca, pinned (shows the origin certificate and pins it), or insecure
-      --to string                            to
+      --to string                            origin URL the route forwards to (required)
       --wait                                 wait for the operation to reach a terminal state
 ```
 

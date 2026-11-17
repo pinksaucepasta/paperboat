@@ -4,14 +4,23 @@ Run sftp with Paperboat machine resolution
 
 ### Synopsis
 
-Run sftp with Paperboat machine resolution
-
-Run standard sftp with Paperboat machine-name resolution and authorized connectivity. Interactive file operations and exit behavior remain OpenSSH-compatible; host identity checks stay enabled.
+Run the system sftp with Paperboat machine names. Every argument is passed to sftp
+unchanged; pb parses no flags of its own. The destination is the first argument that is not an
+option (after -- if present), written [user@]machine with an optional :path, and it is replaced
+with the machine's managed SSH address. Host identity checks stay on.
 
 This command does not support --json output; it rejects that mode before execution. Use --help --json for structured command help.
 
 ```
 pb sftp <standard sftp arguments...> [flags]
+```
+
+### Examples
+
+```
+  pb sftp homelab
+  pb sftp deploy@homelab:/srv/app
+  pb sftp -P 2222 homelab
 ```
 
 ### Options

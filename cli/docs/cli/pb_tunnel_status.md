@@ -4,16 +4,22 @@ Show tunnel health
 
 ### Synopsis
 
-Show tunnel health
-
-Show current health for one durable tunnel. --watch refreshes observations at --interval; a configured route is not necessarily ready to serve traffic.
-
-Durable tunnels retain identity, routes, and domains across client sessions. Ephemeral tunnels have a separate lifecycle. Route publication and browser HTTP access require exact authorization; TLS for browser HTTP terminates at the edge.
+Show current health for one durable tunnel, by ID or name. A route that is configured is not
+necessarily ready to serve. --watch keeps refreshing every --interval (250ms to 1m, default 1s)
+until interrupted. With --ephemeral it shows a temporary preview's status instead.
 
 JSON output is supported with --json.
 
 ```
 pb tunnel status <tunnel> [flags]
+```
+
+### Examples
+
+```
+  pb tunnel status web
+  pb tunnel status web --watch --interval 5s
+  pb tunnel status web --json
 ```
 
 ### Options

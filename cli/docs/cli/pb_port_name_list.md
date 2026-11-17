@@ -14,6 +14,13 @@ JSON output is supported with --json.
 pb port name list [flags]
 ```
 
+### Examples
+
+```
+  pb port name list
+  pb port name list --json
+```
+
 ### Options
 
 ```

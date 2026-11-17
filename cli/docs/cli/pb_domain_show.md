@@ -4,14 +4,21 @@ Show a domain's DNS records, status and uses
 
 ### Synopsis
 
-Show a domain's DNS records, status and uses
-
-Show one domain's DNS records, verification and certificate state, the exact fix for a failed check, and the hostnames that use it.
+Show one domain: its DNS records, verification state, certificate state and expiry, the fix
+for a failed check, and the tunnels and previews that use it. Name it by hostname or ID; case
+and a trailing dot are ignored.
 
 JSON output is supported with --json.
 
 ```
 pb domain show <domain> [flags]
+```
+
+### Examples
+
+```
+  pb domain show dev.example.com
+  pb domain show dev.example.com --json
 ```
 
 ### Options

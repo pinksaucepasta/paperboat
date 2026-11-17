@@ -4,12 +4,24 @@ Move a durable tunnel's expiry to now plus a duration
 
 ### Synopsis
 
-Set a durable tunnel's expiry to the current time plus --duration, on the tunnel's current resource version. Use it when `pb tunnel status` says the tunnel expired; the tunnel serves again once the change is applied.
+Move a durable tunnel's expiry to now plus --duration, for example 24h. Use it when
+pb tunnel status says the tunnel expired; it serves again once the change applies.
+
+A change returns once the request is accepted, and the tunnel may still be connecting. Pass
+--wait to wait (at most --timeout, default 2m, 1s to 10m) until it finishes, or check pb tunnel
+status.
 
 JSON output is supported with --json.
 
 ```
 pb tunnel extend <tunnel> --duration <time> [flags]
+```
+
+### Examples
+
+```
+  pb tunnel extend web --duration 720h
+  pb tunnel extend tunnel_abc123 --duration 24h --wait
 ```
 
 ### Options

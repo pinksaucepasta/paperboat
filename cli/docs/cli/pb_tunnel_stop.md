@@ -4,16 +4,20 @@ Stop an ephemeral tunnel
 
 ### Synopsis
 
-Stop an ephemeral tunnel
-
-Stop an ephemeral tunnel or preview by its identity. Durable tunnels have pause, resume, and delete commands with different lifecycle effects.
-
-Durable tunnels retain identity, routes, and domains across client sessions. Ephemeral tunnels have a separate lifecycle. Route publication and browser HTTP access require exact authorization; TLS for browser HTTP terminates at the edge.
+Stop a temporary preview (the ephemeral lifecycle) by its preview ID. A durable tunnel's ID
+(tunnel_...) is refused: use pb tunnel pause or pb tunnel delete for those.
 
 JSON output is supported with --json.
 
 ```
 pb tunnel stop <preview> [flags]
+```
+
+### Examples
+
+```
+  pb tunnel stop preview_abc123
+  pb tunnel --ephemeral stop preview_abc123
 ```
 
 ### Options

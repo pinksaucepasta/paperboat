@@ -4,16 +4,20 @@ Show an on-demand port policy
 
 ### Synopsis
 
-Show an on-demand port policy
-
-Show one on-demand port policy, including its target and authorization state. Use its identity and generation for a deliberate revoke.
-
-An on-demand policy authorizes an exact machine port for private or team access. A policy does not publish a public URL or grant every port on the machine. Revocation fences subsequent activation.
+Show one on-demand port policy: its target, access mode, state, ID and generation. Use the ID
+and generation to update it with pb tunnel policy allow or end it with pb tunnel policy revoke.
 
 JSON output is supported with --json.
 
 ```
 pb tunnel policy get <policy> [flags]
+```
+
+### Examples
+
+```
+  pb tunnel policy get pol_abc
+  pb tunnel policy get pol_abc --json
 ```
 
 ### Options

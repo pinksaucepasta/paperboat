@@ -4,16 +4,21 @@ Stop a temporary preview
 
 ### Synopsis
 
-Stop a temporary preview
-
-Stop the selected temporary preview's active forwarding. Other previews and durable tunnels remain separate resources.
-
-A preview exposes a local target through a temporary Paperboat URL or private/team access policy. Inspect its status before sharing the URL, and stop or delete it when no longer needed. Browser HTTP terminates TLS at the edge.
+Stop one temporary preview, selected by its ID or name, and withdraw its published access. Other
+previews and durable tunnels are not affected. The command prints the stopped preview, or with
+--json the stopped resource. pb preview delete does the same.
 
 JSON output is supported with --json.
 
 ```
 pb preview stop <preview> [flags]
+```
+
+### Examples
+
+```
+  pb preview stop preview_abc123
+  pb preview stop preview_abc123 --json
 ```
 
 ### Options

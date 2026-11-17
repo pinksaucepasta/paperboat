@@ -15,6 +15,13 @@ JSON output is supported with --json.
 pb recipe show <name> [flags]
 ```
 
+### Examples
+
+```
+  pb recipe show ci
+  pb recipe show ci --json
+```
+
 ### Options
 
 ```

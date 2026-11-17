@@ -4,14 +4,24 @@ Run scp with Paperboat machine resolution
 
 ### Synopsis
 
-Run scp with Paperboat machine resolution
-
-Run standard scp with Paperboat machine-name resolution and authorized connectivity. Source and destination syntax remains OpenSSH-compatible; host identity checks still apply.
+Run the system scp with Paperboat machine names. Every argument is passed to scp unchanged:
+pb parses no flags of its own. An operand written [user@]machine:path is replaced with the
+machine's managed SSH address; other operands (local paths, URLs, Windows drive paths) are left
+alone. At least one operand must name a machine. Host identity checks stay on, and you must be
+signed in with the machine paired.
 
 This command does not support --json output; it rejects that mode before execution. Use --help --json for structured command help.
 
 ```
 pb scp <standard scp arguments...> [flags]
+```
+
+### Examples
+
+```
+  pb scp homelab:/var/log/app.log .
+  pb scp ./bundle.tar.gz deploy@homelab:/srv/app/
+  pb scp -r homelab:/srv/data ./backup/
 ```
 
 ### Options

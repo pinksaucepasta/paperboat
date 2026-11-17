@@ -79,7 +79,7 @@ func configureEphemeralLaunchFlags(command *cobra.Command) {
 	command.Flags().Bool("team", false, "require an explicit team grant for browser access")
 	command.MarkFlagsMutuallyExclusive("private", "team")
 	command.Flags().Duration("ttl", 0, "bounded preview lifetime (maximum 24h)")
-	command.Flags().Bool("background", false, "transfer ownership to paperboatd and return after readiness")
+	command.Flags().Bool("background", false, "hand the preview to this computer's background service and return once ready (default lifetime 30m)")
 	command.Flags().StringArray("domain", nil, "attach a verified custom domain (repeatable)")
 	command.Flags().String("host-header", "", "send this Host to the origin instead of the public host (http, https, h2c targets; for dev servers with a host allow-list)")
 	command.Flags().Bool("json", false, "print the canonical preview resource as JSON")

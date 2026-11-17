@@ -4,16 +4,20 @@ List on-demand port policies (their IDs and generations)
 
 ### Synopsis
 
-List on-demand port policies (their IDs and generations)
-
-List this account's on-demand port policies with their IDs, targets, generations and expiry, expired ones included. Use the ID and generation to update or revoke a policy whose ID was lost.
-
-An on-demand policy authorizes an exact machine port for private or team access. A policy does not publish a public URL or grant every port on the machine. Revocation fences subsequent activation.
+List your on-demand port policies with their IDs, targets, generations and expiry. Expired
+ones are included. Use it to find the ID of a policy you no longer remember.
 
 JSON output is supported with --json.
 
 ```
 pb tunnel policy list [flags]
+```
+
+### Examples
+
+```
+  pb tunnel policy list
+  pb tunnel policy list --json
 ```
 
 ### Options

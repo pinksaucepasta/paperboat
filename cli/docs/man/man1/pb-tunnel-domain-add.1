@@ -10,13 +10,15 @@ pb-tunnel-domain-add - Serve a tunnel route at a hostname under a verified works
 
 
 .SH DESCRIPTION
-Serve a tunnel route at a hostname under a verified workspace domain (pb domain add)
+Serve one route of a tunnel at a hostname under a verified workspace domain: for example
+app.example.com when example.com is added and verified with pb domain add and pb domain verify.
+The domain's verification and certificate cover the hostname, so there is no DNS step of its
+own. --route picks the route the hostname serves.
 
 .PP
-Serve one tunnel route at a hostname under a verified workspace domain, such as app.example.com under example.com. HTTPS comes from the domain's certificate.
-
-.PP
-Hostnames come from the workspace's verified domains (pb domain). A hostname is one label under a domain, or the domain itself; the domain's verification and certificate cover it.
+A change returns once the request is accepted, and the tunnel may still be connecting. Pass
+--wait to wait (at most --timeout, default 2m, 1s to 10m) until it finishes, or check pb tunnel
+status.
 
 .PP
 JSON output is supported with --json.
@@ -62,6 +64,13 @@ JSON output is supported with --json.
 .PP
 \fB--workspace\fP=""
 	resource workspace selector: personal or a team slug
+
+
+.SH EXAMPLE
+.EX
+  pb tunnel domain add web app.example.com --route route_xyz
+  pb tunnel domain add web app.example.com --route route_xyz --wait
+.EE
 
 
 .SH SEE ALSO

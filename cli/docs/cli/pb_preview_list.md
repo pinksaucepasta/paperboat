@@ -4,16 +4,23 @@ List temporary previews
 
 ### Synopsis
 
-List temporary previews
-
-List account-visible temporary previews and their state. Select an exact preview identity for status, inspect, replay, stop, or delete.
-
-A preview exposes a local target through a temporary Paperboat URL or private/team access policy. Inspect its status before sharing the URL, and stop or delete it when no longer needed. Browser HTTP terminates TLS at the edge.
+List previews: ID, access, target and state. Only active previews are shown by default;
+--all adds previews that ended in the last 30 days, and --state picks one state. Filter with
+--q and --owner; page with --cursor and --limit (1-200, default 100). Use a preview's ID with
+status, inspect, replay, stop or delete.
 
 JSON output is supported with --json.
 
 ```
 pb preview list [flags]
+```
+
+### Examples
+
+```
+  pb preview list
+  pb preview list --all
+  pb preview list --state active --json
 ```
 
 ### Options

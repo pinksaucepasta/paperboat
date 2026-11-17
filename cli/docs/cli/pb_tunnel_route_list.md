@@ -4,16 +4,20 @@ List tunnel routes
 
 ### Synopsis
 
-List tunnel routes
-
-List routes and their identifiers for one durable tunnel with pagination. Inspect the exact route before updating or removing it.
-
-Routes map a public or private match to a specific origin and protocol. TLS and host-header options affect the trust boundary and should match the origin. Adding or updating a route may return an operation whose readiness must be checked separately.
+List a durable tunnel's routes: ID, name, protocol, match, origin and state. Use the route ID
+with route update, route remove, domain add and inspect. Page with --cursor and --limit.
 
 JSON output is supported with --json.
 
 ```
 pb tunnel route list <tunnel> [flags]
+```
+
+### Examples
+
+```
+  pb tunnel route list web
+  pb tunnel route list web --limit 50 --json
 ```
 
 ### Options

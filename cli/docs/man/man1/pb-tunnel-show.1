@@ -10,13 +10,9 @@ pb-tunnel-show - Show a durable tunnel
 
 
 .SH DESCRIPTION
-Show a durable tunnel
-
-.PP
-Show one durable tunnel's configured identity, routes, domains, and control state. Use status for current health and logs for event history.
-
-.PP
-Durable tunnels retain identity, routes, and domains across client sessions. Ephemeral tunnels have a separate lifecycle. Route publication and browser HTTP access require exact authorization; TLS for browser HTTP terminates at the edge.
+Show one durable tunnel's identity, address, access mode and desired state. Name it by ID or
+exact name; if a name is ambiguous, retry with the tunnel's ID. --json prints the whole
+resource. For current health use pb tunnel status; for history use pb tunnel logs.
 
 .PP
 JSON output is supported with --json.
@@ -50,6 +46,13 @@ JSON output is supported with --json.
 .PP
 \fB--workspace\fP=""
 	resource workspace selector: personal or a team slug
+
+
+.SH EXAMPLE
+.EX
+  pb tunnel show web
+  pb tunnel show tunnel_abc123 --json
+.EE
 
 
 .SH SEE ALSO

@@ -4,16 +4,24 @@ Manage permission to activate a private port on demand
 
 ### Synopsis
 
-Manage on-demand private or team access to an exact host port. A replacement application listening on the same approved port inherits access. Paperboat does not start the application.
-
-Inspect, allow, or revoke exact on-demand private port policies. A policy authorizes a target port but does not publish it as a public tunnel.
-
-Durable tunnels retain identity, routes, and domains across client sessions. Ephemeral tunnels have a separate lifecycle. Route publication and browser HTTP access require exact authorization; TLS for browser HTTP terminates at the edge.
+Manage permission to open a private port on a machine when someone asks for it, without
+making a tunnel first. A policy authorizes one exact machine port for private or team access. It
+never publishes a public URL and never opens other ports of the machine. Revoking a policy
+blocks later activations. If the application behind an approved port is replaced, the new one
+inherits access; Paperboat does not start the application.
 
 With --json, this command group lists its available commands.
 
 ```
 pb tunnel policy [flags]
+```
+
+### Examples
+
+```
+  pb tunnel policy allow homelab 3000
+  pb tunnel policy list
+  pb tunnel policy revoke pol_abc
 ```
 
 ### Options

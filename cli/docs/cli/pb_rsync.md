@@ -4,14 +4,24 @@ Run rsync with Paperboat machine resolution
 
 ### Synopsis
 
-Run rsync with Paperboat machine resolution
-
-Run standard rsync arguments with Paperboat machine-name resolution and authorized connectivity. File selection, deletion flags, and exit behavior remain rsync's responsibility; inspect its command line before synchronizing.
+Run the system rsync with Paperboat machine names. Every argument is passed to rsync
+unchanged; pb parses no flags of its own. An operand written [user@]machine:path is replaced
+with the machine's managed SSH address; at least one operand must name a machine. A drive-letter
+path on a Windows machine is converted to the absolute form rsync reads. What is copied or
+deleted, and the exit status, are rsync's: read the command line before using --delete.
 
 This command does not support --json output; it rejects that mode before execution. Use --help --json for structured command help.
 
 ```
 pb rsync <standard rsync arguments...> [flags]
+```
+
+### Examples
+
+```
+  pb rsync -avz homelab:/srv/app/ ./app/
+  pb rsync -avz ./dist/ deploy@homelab:/srv/app/
+  pb rsync -avz --delete homelab:C:/data/ ./data/
 ```
 
 ### Options

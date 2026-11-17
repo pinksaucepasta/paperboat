@@ -4,16 +4,21 @@ Revoke an on-demand port policy
 
 ### Synopsis
 
-Revoke an on-demand port policy
-
-Revoke one exact on-demand port policy at its expected generation. Subsequent activations are denied; this does not delete unrelated tunnel routes.
-
-An on-demand policy authorizes an exact machine port for private or team access. A policy does not publish a public URL or grant every port on the machine. Revocation fences subsequent activation.
+Revoke one on-demand port policy so later activations are denied. --generation is the
+generation you expect; without it the command reads the current one first. Unrelated tunnel
+routes are not affected.
 
 JSON output is supported with --json.
 
 ```
 pb tunnel policy revoke <policy> [flags]
+```
+
+### Examples
+
+```
+  pb tunnel policy revoke pol_abc
+  pb tunnel policy revoke pol_abc --generation 3
 ```
 
 ### Options

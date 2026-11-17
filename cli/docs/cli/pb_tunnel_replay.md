@@ -4,16 +4,22 @@ Deliberately replay one retained HTTP request to the same origin
 
 ### Synopsis
 
-Deliberately replay one retained HTTP request to the same origin
-
-Replay one retained HTTP request to the same tunnel origin and route. This can repeat a side effect; use the capture identity and optional idempotency key deliberately.
-
-Durable tunnels retain identity, routes, and domains across client sessions. Ephemeral tunnels have a separate lifecycle. Route publication and browser HTTP access require exact authorization; TLS for browser HTTP terminates at the edge.
+Send one captured HTTP request again to the same tunnel origin. This repeats whatever the
+request did, including side effects such as payments or writes. Name the capture by its ID
+(from pb tunnel inspect) and pass --route when the tunnel has several routes. An idempotency
+key is generated unless you pass --idempotency-key; reuse one key to retry safely.
 
 JSON output is supported with --json.
 
 ```
 pb tunnel replay <tunnel> <capture-id> [flags]
+```
+
+### Examples
+
+```
+  pb tunnel replay web cap_123
+  pb tunnel replay web cap_123 --route route_xyz --idempotency-key order-42
 ```
 
 ### Options

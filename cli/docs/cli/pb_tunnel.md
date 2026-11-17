@@ -4,9 +4,13 @@ Manage durable tunnels or start an ephemeral tunnel
 
 ### Synopsis
 
-Manage durable tunnels or start an ephemeral tunnel
+Manage durable tunnels, or start a temporary preview. A durable tunnel keeps its address,
+routes, domains and access rules across sessions and restarts; manage it with create, list,
+show, route, domain, policy, pause, resume and delete. pb tunnel with no subcommand prints help.
 
-Create or manage a durable tunnel, or start an ephemeral tunnel with --ephemeral and a local target. Durable routes, domains, and traffic state have separate subcommands.
+With --ephemeral and a target (a port, URL or path) the command behaves exactly like pb preview:
+a temporary preview with its own lifecycle. pb tunnel stop stops only previews; a durable tunnel
+is paused or deleted.
 
 JSON output is supported with --json.
 
@@ -14,10 +18,19 @@ JSON output is supported with --json.
 pb tunnel [--ephemeral] [<port|url|path>] [flags]
 ```
 
+### Examples
+
+```
+  pb tunnel create web --port 8080
+  pb tunnel list
+  pb tunnel --ephemeral 3000 --private
+  pb tunnel stop preview_abc123
+```
+
 ### Options
 
 ```
-      --background           transfer ownership to paperboatd and return after readiness
+      --background           hand the preview to this computer's background service and return once ready (default lifetime 30m)
       --domain stringArray   attach a verified custom domain (repeatable)
       --ephemeral            use the temporary preview lifecycle
   -h, --help                 help for tunnel

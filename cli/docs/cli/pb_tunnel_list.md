@@ -4,16 +4,24 @@ List durable tunnels
 
 ### Synopsis
 
-List durable tunnels
-
-List durable tunnels visible to this account with cursor and limit pagination. Select an exact tunnel for show, status, routes, domains, or lifecycle commands.
-
-Durable tunnels retain identity, routes, and domains across client sessions. Ephemeral tunnels have a separate lifecycle. Route publication and browser HTTP access require exact authorization; TLS for browser HTTP terminates at the edge.
+List durable tunnels you can see: ID, name, address, access mode and state. Filter with --q
+(name or ID), --state and --owner (mine, shared or an authorized account ID); page with
+--cursor and --limit (1-200, default 100). With --ephemeral the list shows temporary previews
+instead, and --all adds ones that ended in the last 30 days.
 
 JSON output is supported with --json.
 
 ```
 pb tunnel list [flags]
+```
+
+### Examples
+
+```
+  pb tunnel list
+  pb tunnel list --state active --limit 50
+  pb tunnel list --owner mine --json
+  pb tunnel --ephemeral list --all
 ```
 
 ### Options

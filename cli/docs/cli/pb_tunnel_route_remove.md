@@ -4,16 +4,23 @@ Remove a tunnel route
 
 ### Synopsis
 
-Remove a tunnel route
+Remove one route from a durable tunnel. The tunnel and its other routes keep serving.
 
-Remove one route from a durable tunnel after confirmation. The tunnel and its other routes remain available.
-
-Routes map a public or private match to a specific origin and protocol. TLS and host-header options affect the trust boundary and should match the origin. Adding or updating a route may return an operation whose readiness must be checked separately.
+Confirmation is two steps. Run the command without --confirm: it changes nothing, shows what
+would happen and prints a six-character code (exit status 2). Run the same command again with
+--confirm CODE within 5 minutes. The code works once and only for that exact command and target.
 
 JSON output is supported with --json.
 
 ```
 pb tunnel route remove <tunnel> <route> [flags]
+```
+
+### Examples
+
+```
+  pb tunnel route remove web route_xyz
+  pb tunnel route remove web route_xyz --confirm A1B2C3
 ```
 
 ### Options

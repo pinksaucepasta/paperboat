@@ -4,16 +4,22 @@ Show tunnel logs
 
 ### Synopsis
 
-Show tunnel logs
-
-Read recent tunnel events and optionally follow new events at the requested interval. Cursor and limit bound retrieval; logs are diagnostic rather than a substitute for status.
-
-Durable tunnels retain identity, routes, and domains across client sessions. Ephemeral tunnels have a separate lifecycle. Route publication and browser HTTP access require exact authorization; TLS for browser HTTP terminates at the edge.
+Show recent events of a tunnel, 1 to 200 per page (--limit, default 100; --cursor continues).
+--follow waits for new entries every --interval (250ms to 1m, default 1s). Logs explain what
+happened; for the current state use pb tunnel status.
 
 JSON output is supported with --json.
 
 ```
 pb tunnel logs <tunnel> [flags]
+```
+
+### Examples
+
+```
+  pb tunnel logs web
+  pb tunnel logs web --follow --interval 5s
+  pb tunnel logs web --limit 50 --json
 ```
 
 ### Options

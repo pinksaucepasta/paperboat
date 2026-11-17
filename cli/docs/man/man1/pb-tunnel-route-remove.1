@@ -10,13 +10,12 @@ pb-tunnel-route-remove - Remove a tunnel route
 
 
 .SH DESCRIPTION
-Remove a tunnel route
+Remove one route from a durable tunnel. The tunnel and its other routes keep serving.
 
 .PP
-Remove one route from a durable tunnel after confirmation. The tunnel and its other routes remain available.
-
-.PP
-Routes map a public or private match to a specific origin and protocol. TLS and host-header options affect the trust boundary and should match the origin. Adding or updating a route may return an operation whose readiness must be checked separately.
+Confirmation is two steps. Run the command without --confirm: it changes nothing, shows what
+would happen and prints a six-character code (exit status 2). Run the same command again with
+--confirm CODE within 5 minutes. The code works once and only for that exact command and target.
 
 .PP
 JSON output is supported with --json.
@@ -62,6 +61,13 @@ JSON output is supported with --json.
 .PP
 \fB--workspace\fP=""
 	resource workspace selector: personal or a team slug
+
+
+.SH EXAMPLE
+.EX
+  pb tunnel route remove web route_xyz
+  pb tunnel route remove web route_xyz --confirm A1B2C3
+.EE
 
 
 .SH SEE ALSO

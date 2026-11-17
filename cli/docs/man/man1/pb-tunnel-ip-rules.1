@@ -58,5 +58,13 @@ JSON output is supported with --json.
 	resource workspace selector: personal or a team slug
 
 
+.SH EXAMPLE
+.EX
+  pb tunnel ip-rules web
+  pb tunnel ip-rules web --allow 203.0.113.0/24 --deny 203.0.113.7
+  pb tunnel ip-rules web --clear
+.EE
+
+
 .SH SEE ALSO
 \fBpb-tunnel(1)\fP

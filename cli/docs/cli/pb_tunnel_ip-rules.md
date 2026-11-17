@@ -12,6 +12,14 @@ JSON output is supported with --json.
 pb tunnel ip-rules <tunnel> [flags]
 ```
 
+### Examples
+
+```
+  pb tunnel ip-rules web
+  pb tunnel ip-rules web --allow 203.0.113.0/24 --deny 203.0.113.7
+  pb tunnel ip-rules web --clear
+```
+
 ### Options
 
 ```

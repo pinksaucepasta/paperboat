@@ -4,16 +4,23 @@ Pause new traffic while preserving tunnel identity and configuration
 
 ### Synopsis
 
-Pause new traffic while preserving tunnel identity and configuration
+Stop new traffic to a durable tunnel while keeping its address, routes and domains.
+Undo it with pb tunnel resume.
 
-Pause new traffic for one durable tunnel while retaining its identity, routes, and domains. --wait observes the resulting state.
-
-Durable tunnels retain identity, routes, and domains across client sessions. Ephemeral tunnels have a separate lifecycle. Route publication and browser HTTP access require exact authorization; TLS for browser HTTP terminates at the edge.
+A change returns once the request is accepted, and the tunnel may still be connecting. Pass
+--wait to wait (at most --timeout, default 2m, 1s to 10m) until it finishes, or check pb tunnel
+status.
 
 JSON output is supported with --json.
 
 ```
 pb tunnel pause <tunnel> [flags]
+```
+
+### Examples
+
+```
+  pb tunnel pause web --wait
 ```
 
 ### Options
