@@ -22,10 +22,11 @@ for m in shared cli relay edge server helper; do
   (cd "$m" && go vet ./... && go test ./...) || { echo "FAIL: $m"; fail=1; }
 done
 
-step "source policy for every module"
+step "source policy and static analysis (staticcheck, deadcode) for every module"
 command -v rg >/dev/null || { echo "FAIL: ripgrep (rg) is required"; fail=1; }
 for m in shared cli relay edge server helper; do
   tools/verify-source-policy.sh "$m" || { echo "FAIL: source policy: $m"; fail=1; }
+  tools/verify-static-analysis.sh "$m" || { echo "FAIL: static analysis: $m"; fail=1; }
 done
 
 step "shared import boundary"

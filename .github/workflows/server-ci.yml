@@ -73,6 +73,7 @@ jobs:
             go.work.sum
       - run: sudo apt-get install -y --no-install-recommends ripgrep
       - run: ../tools/verify-source-policy.sh ${{ matrix.module }}
+      - run: ../tools/verify-static-analysis.sh ${{ matrix.module }}
       - run: go vet ./...
       - run: go test ./...
       - name: cli tests that need root (under sudo)

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """R-01: check changed Go packages.
-  pr-checks.py BASE          gofmt of every module, then vet, -race test and source policy of each module with changed packages or reverse dependencies (merge queue groups)
+  pr-checks.py BASE          gofmt of every module, then vet, -race test, source policy and static analysis (staticcheck + deadcode) of each module with changed packages or reverse dependencies (merge queue groups)
   pr-checks.py BASE --fast   gofmt of every module, then go vet and source policy of each module with changed packages only (pull requests: seconds, no tests)"""
 import json
 import os
@@ -105,6 +105,8 @@ def main():
             subprocess.run([ROOT / 'tools/verify-source-policy.sh', module], check=True, timeout=300)
             if not fast:
                 test_packages(module, names)
+                # Whole module: removing a shared function can leave code in a dependent module unused.
+                subprocess.run([ROOT / 'tools/verify-static-analysis.sh', module], check=True, timeout=2400)
     print(f"{'Fast' if fast else 'Targeted'} checks passed ({len(chosen)} packages).")
 
 

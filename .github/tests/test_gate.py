@@ -38,6 +38,9 @@ class SmokePrerequisiteTest(unittest.TestCase):
             # Every tool the gate calls is stubbed here; a missing stub fails every gate assertion at once.
             (root / "tools/check-shared-imports.sh").write_text("#!/bin/sh\nexit 0\n")
             (root / "tools/check-shared-imports.sh").chmod(0o755)
+            for name in ("verify-source-policy.sh", "verify-static-analysis.sh"):
+                (root / "tools" / name).write_text("#!/bin/sh\nexit 0\n")
+                (root / "tools" / name).chmod(0o755)
             (root / "CHECKLIST.md").write_text(checklist)
             if smoke is not None:
                 (root / "tools/device-smoke/results/smoke.json").write_text(json.dumps(smoke))
@@ -46,6 +49,7 @@ class SmokePrerequisiteTest(unittest.TestCase):
             scripts = {
                 "go": f"#!/bin/sh\nexit {go_status}\n",
                 "bun": "#!/bin/sh\nexit 0\n",
+                "rg": "#!/bin/sh\nexit 0\n",
                 "git": """#!/bin/sh
 case "$1" in
   merge-base) echo base;;

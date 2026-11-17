@@ -6,13 +6,16 @@ GOFMT := $(GO_ROOT)/bin/gofmt
 BUILD_FLAGS := -trimpath -buildvcs=false
 OWNED_GO_FILES := $(shell find . -path ./vendor -prune -o -name '*.go' -print)
 
-.PHONY: build check clean dependencies fmt fmt-check generate metrics-check metrics-generate source-policy test tidy verify-toolchain vet
+.PHONY: build check clean dependencies fmt fmt-check generate metrics-check metrics-generate source-policy static-analysis test tidy verify-toolchain vet
 
 dependencies:
 	@./tools/verify-dependencies.sh
 
 source-policy:
 	@../tools/verify-source-policy.sh edge
+
+static-analysis: verify-toolchain source-policy
+	@../tools/verify-static-analysis.sh edge
 
 metrics-generate:
 	$(GO) run ./tools/metric-schema -write docs/metrics.json
