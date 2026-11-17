@@ -40,6 +40,7 @@ after each push batch. Each lane keeps one paired pair of test machines and inst
 | `edge/` | public/browser edge for previews and tunnels, Go |
 | `shared/` | code used by more than one module (wire protocols, common packages, helpers), Go |
 | `console/` | web console (Next.js; read `console/AGENTS.md`, `DESIGN.md`, `NOTES.md`) |
+| `admin/` | operator admin panel (Next.js, copied from `console/`'s patterns; operator sign-in, own origin; `tools/admin-prod.sh`) |
 | `marketing/` | marketing site (Astro) |
 | `tools/device-smoke/` | device smoke suite (see below) |
 
@@ -106,9 +107,9 @@ PLAN.md (section 5) and done by that lane. **Only Lane A uses the test devices.*
 |---|---|---|---|
 | A — CLI & devices | Codex | `cli/`, `relay/`, `tools/device-smoke/`, the Tailscale fork (github.com/pinksaucepasta/tailscale) | S0 (except CI rows), F1–F12, F14, F15 device and CLI parts |
 | B — Server & infrastructure | Codex | `server/`, `edge/`, `helper/`, `shared/`, `deploy/`, `.github/` | S0 CI rows, S1, S4, F13, server parts of every feature, S3 |
-| C — Console & marketing | Claude only | `console/`, `marketing/` | all frontend work: console parts of every feature, S2 |
+| C — Console & marketing | Claude only | `console/`, `admin/`, `marketing/` | all frontend work: console parts of every feature, S2 |
 
-**Codex never edits `console/` or `marketing/`.** When a feature needs frontend work, Codex
+**Codex never edits `console/`, `admin/` or `marketing/`.** When a feature needs frontend work, Codex
 finishes and pushes the Go/API side, then writes the frontend request (API, fields, states,
 errors) in the PLAN.md Log; Claude does it. Go changes the frontend needs are done by Codex.
 

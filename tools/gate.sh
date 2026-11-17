@@ -56,6 +56,9 @@ python3 -m unittest discover -s deploy -p 'test_*.py' || { echo "FAIL: deploymen
 step "console lint + build"
 (cd console && bun install --frozen-lockfile >/dev/null && bun run api:check && bun run lint && bun run build) || { echo "FAIL: console"; fail=1; }
 
+step "admin lint + build + tests"
+(cd admin && bun install --frozen-lockfile >/dev/null && bun run api:check && bun run lint && bun test lib && bun run build) || { echo "FAIL: admin"; fail=1; }
+
 base=$(git merge-base HEAD origin/main 2>/dev/null || git rev-list --max-parents=0 HEAD | tail -1)
 changed=$( { git diff --name-only "$base" HEAD; git diff --name-only; } | grep -E '^(cli|relay|shared)/' | head -1)
 # Server first, then client (warning only): a client push must not get ahead of the deployed server.

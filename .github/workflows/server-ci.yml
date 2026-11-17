@@ -95,23 +95,29 @@ jobs:
       - run: cd tools && python3 -m unittest test_progress
 
   console:
-    name: Console lint and types
+    name: ${{ matrix.name }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { app: console, name: Console lint and types }
+          - { app: admin, name: Admin lint and types }
     defaults:
       run:
-        working-directory: console
+        working-directory: ${{ matrix.app }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: oven-sh/setup-bun@3d267786b128fe76c2f16a390aa2448b815359f3 # v2.1.2
         with:
-          bun-version-file: console/package.json
+          bun-version-file: ${{ matrix.app }}/package.json
       - run: bun install --frozen-lockfile
       # Generated code must match its source: the API types come from server/docs/openapi.json (sqlc output
       # is checked by make generate-check in the server job).
       - run: |
           bun run api:types
-          git diff --exit-code -- lib/api-schema.d.ts || { echo "console/lib/api-schema.d.ts is stale, run bun run api:types" >&2; exit 1; }
+          git diff --exit-code -- lib/api-schema.d.ts || { echo "${{ matrix.app }}/lib/api-schema.d.ts is stale, run bun run api:types" >&2; exit 1; }
       - run: bun run lint
       - run: bunx next typegen
       - run: bunx tsc --noEmit

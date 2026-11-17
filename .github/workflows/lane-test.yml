@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
     inputs:
       modules:
-        description: 'Modules to test: shared cli relay edge helper server console smoke e2e (empty = all)'
+        description: 'Modules to test: shared cli relay edge helper server console admin smoke e2e (empty = all)'
         default: ''
       run:
         description: 'go test -run pattern (empty = all tests)'
@@ -38,6 +38,7 @@ jobs:
     outputs:
       go: ${{ steps.plan.outputs.go }}
       console: ${{ steps.plan.outputs.console }}
+      admin: ${{ steps.plan.outputs.admin }}
       smoke: ${{ steps.plan.outputs.smoke }}
       e2e: ${{ steps.plan.outputs.e2e }}
     steps:
@@ -45,16 +46,17 @@ jobs:
         env:
           MODULES: ${{ inputs.modules }}
         run: |
-          all="shared cli relay edge helper server console smoke e2e"
+          all="shared cli relay edge helper server console admin smoke e2e"
           want="${MODULES:-$all}"
           for m in $want; do
             case " $all " in *" $m "*) ;; *) echo "unknown module '$m' (modules: $all)" >&2; exit 1 ;; esac
           done
           # server and edge also run their PostgreSQL suites (a service container below).
-          go=$(for m in $want; do [ "$m" = console ] || [ "$m" = smoke ] || [ "$m" = e2e ] || echo "$m"; done |
+          go=$(for m in $want; do [ "$m" = console ] || [ "$m" = admin ] || [ "$m" = smoke ] || [ "$m" = e2e ] || echo "$m"; done |
             jq -R '{module: ., pg: (. == "server" or . == "edge")}' | jq -sc .)
           echo "go=$go" >> "$GITHUB_OUTPUT"
           case " $want " in *" console "*) echo "console=true" ;; *) echo "console=false" ;; esac >> "$GITHUB_OUTPUT"
+          case " $want " in *" admin "*) echo "admin=true" ;; *) echo "admin=false" ;; esac >> "$GITHUB_OUTPUT"
           case " $want " in *" smoke "*) echo "smoke=true" ;; *) echo "smoke=false" ;; esac >> "$GITHUB_OUTPUT"
           case " $want " in *" e2e "*) echo "e2e=true" ;; *) echo "e2e=false" ;; esac >> "$GITHUB_OUTPUT"
 
@@ -266,6 +268,23 @@ jobs:
       - uses: oven-sh/setup-bun@3d267786b128fe76c2f16a390aa2448b815359f3 # v2.1.2
         with:
           bun-version-file: console/package.json
+      - run: bun install --frozen-lockfile
+      - run: bun run check
+
+  admin:
+    name: admin check
+    needs: plan
+    if: needs.plan.outputs.admin == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: admin
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: oven-sh/setup-bun@3d267786b128fe76c2f16a390aa2448b815359f3 # v2.1.2
+        with:
+          bun-version-file: admin/package.json
       - run: bun install --frozen-lockfile
       - run: bun run check
 

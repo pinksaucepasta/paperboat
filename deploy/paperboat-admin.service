@@ -1,0 +1,19 @@
+[Unit]
+Description=Paperboat admin panel (next start behind the proxy; deployed by tools/admin-prod.sh)
+After=network-online.target docker.service
+
+[Service]
+User=pbadmin
+WorkingDirectory=/opt/paperboat-admin
+# admin.env: ADMIN_ORIGIN (the panel's https origin, also a trusted browser origin of the server) and ADMIN_PAPERBOAT_SERVER_URL.
+# slot.env: NEXT_DIST_DIR.
+EnvironmentFile=/etc/paperboat-admin/admin.env
+EnvironmentFile=/opt/paperboat-admin/slot.env
+Environment=NODE_ENV=production
+# The proxy container reaches the host through the compose network's gateway; nothing listens publicly.
+ExecStart=/usr/local/bin/bun run start -p 3101 -H 172.18.0.1
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

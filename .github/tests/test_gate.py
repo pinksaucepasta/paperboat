@@ -20,6 +20,7 @@ class SmokePrerequisiteTest(unittest.TestCase):
             if results:
                 (root / "tools/device-smoke/results").mkdir(parents=True)
             (root / "console").mkdir()
+            (root / "admin").mkdir()
             (root / "cli").mkdir()
             (root / "bin").mkdir()
             (root / "deploy").mkdir()
