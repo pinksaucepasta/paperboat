@@ -3,7 +3,6 @@ package api
 import (
 	"errors"
 	sharedprotocol "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
-	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 	"net"
 	"net/http"
 	"net/url"
@@ -485,18 +484,6 @@ func validateTunnelCapabilities(capabilities []string) error {
 	return nil
 }
 
-func validTunnelBase64URL(value string, length int) bool {
-	if len(value) != length {
-		return false
-	}
-	for _, r := range value {
-		if !(r >= 'A' && r <= 'Z') && !(r >= 'a' && r <= 'z') && !(r >= '0' && r <= '9') && r != '_' && r != '-' {
-			return false
-		}
-	}
-	return true
-}
-
 func validateTunnelEvent(v *TunnelEvent, tunnel string) error {
 	if v == nil || v.Schema != TunnelV1Schema || v.Kind != "event" || !validTunnelID(v.ID) || v.Cursor == "" || len(v.Cursor) > 2048 || v.ResourceKind == "" || v.ResourceID == "" || len(v.ResourceID) > 128 || v.OccurredAt.IsZero() || v.CorrelationID == "" || len(v.CorrelationID) > 128 || containsTunnelControl(v.ID+v.Cursor+v.EventType+v.ResourceKind+v.ResourceID+v.CorrelationID) {
 		return ErrUnsafeTunnelResponse
@@ -525,60 +512,5 @@ func validateTunnelEvent(v *TunnelEvent, tunnel string) error {
 		return err
 	}
 	v.SafeMetadata = metadata
-	return nil
-}
-
-func validateTunnelPrivateAccessAdmission(v TunnelPrivateAccessAdmission) error {
-	if v.Schema != TunnelV1Schema || v.Kind != "private_access_carrier_admission" {
-		return ErrUnsafeTunnelResponse
-	}
-	for _, value := range []string{v.AccountID, v.MachineID, v.ResourceID, v.CarrierSessionID, v.RouteID, v.AssignmentID, v.EdgeNodeID, v.TunnelID, v.CarrierConnectorID} {
-		if !validTunnelID(value) {
-			return ErrUnsafeTunnelResponse
-		}
-	}
-	if v.InstallationGeneration == 0 || v.RouteGeneration == 0 || v.SessionGeneration == 0 || v.ProcessGeneration == 0 || v.ConfigGeneration == 0 || v.AssignmentGeneration == 0 || v.ExpiresAt.IsZero() || !validTunnelBase64URL(v.AccessorPublicKey, 43) || !validTunnelBase64URL(v.AccessorThumbprint, 43) || len(v.EdgeEndpoints) != 2 || len(v.EdgeCarrierServerCertificateChainPEM) == 0 || len(v.EdgeCarrierServerCertificateChainPEM) > 65536 || !regexp.MustCompile(`^sha256:[0-9a-f]{64}$`).MatchString(v.ConfigContentHash) || !regexp.MustCompile(`^sha256:[0-9a-f]{64}$`).MatchString(v.EdgeCarrierServerSPKISHA256) {
-		return ErrUnsafeTunnelResponse
-	}
-	switch v.ResourceKind {
-	case "preview":
-		if v.ResourceID == "" || v.TunnelName != "" || v.RouteName != "" || v.OperationID != "" || v.ConnectorID != "" || v.Protocol != "http" {
-			return ErrUnsafeTunnelResponse
-		}
-	case "tunnel":
-		if !tunnelNamePatternV1.MatchString(v.TunnelName) || !tunnelRouteNamePatternV1.MatchString(v.RouteName) || !validTunnelID(v.ConnectorID) || v.OperationID != "" {
-			return ErrUnsafeTunnelResponse
-		}
-	default:
-		return ErrUnsafeTunnelResponse
-	}
-	if v.Protocol == "private_tcp" {
-		if v.Hostname != "" || v.MatchType != "catch_all" || v.WildcardSuffix != "" {
-			return ErrUnsafeTunnelResponse
-		}
-	} else if v.Protocol != "http" || v.Hostname == "" {
-		return ErrUnsafeTunnelResponse
-	}
-	if len(v.EdgeProcessEpoch) < 8 || len(v.EdgeProcessEpoch) > 128 || containsTunnelControl(v.EdgeProcessEpoch) || !v.ExpiresAt.After(serverclock.Now().UTC()) {
-		return ErrUnsafeTunnelResponse
-	}
-	for _, endpoint := range v.EdgeEndpoints {
-		u, err := url.Parse(endpoint)
-		if err != nil || (u.Scheme != "tls" && u.Scheme != "quic") || u.Hostname() == "" || u.Port() == "" || u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "" {
-			return ErrUnsafeTunnelResponse
-		}
-	}
-	return nil
-}
-
-func validateTunnelPrivateAccessSnapshot(v *TunnelPrivateAccessSnapshot) error {
-	if v == nil || v.Schema != TunnelV1Schema || v.Kind != "private_access_carrier_snapshot" || !v.Complete || len(v.Admissions) > 4096 {
-		return ErrUnsafeTunnelResponse
-	}
-	for _, admission := range v.Admissions {
-		if err := validateTunnelPrivateAccessAdmission(admission); err != nil {
-			return err
-		}
-	}
 	return nil
 }

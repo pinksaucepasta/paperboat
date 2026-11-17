@@ -501,27 +501,3 @@ func (c *Client) ListTunnelEventsV1(ctx context.Context, tunnel, cursor string, 
 	}
 	return out, nil
 }
-
-// DiscoverTunnelPrivateAccessRoutesV1 obtains the complete host-scoped
-// prerequisite snapshot. The idempotency key is included in both the body and
-// signed header because the endpoint signs the exact request document.
-func (c *Client) DiscoverTunnelPrivateAccessRoutesV1(ctx context.Context, key string) (TunnelPrivateAccessSnapshot, error) {
-	h, err := mutationHeaders("", key)
-	if err != nil {
-		return TunnelPrivateAccessSnapshot{}, err
-	}
-	var out TunnelPrivateAccessSnapshot
-	if err := c.doTunnelRequest(ctx, http.MethodPost, "/v1/private-access/routes", struct {
-		IdempotencyKey string `json:"idempotency_key"`
-	}{IdempotencyKey: key}, &out, h, nil); err != nil {
-		return TunnelPrivateAccessSnapshot{}, err
-	}
-	if err := validateTunnelPrivateAccessSnapshot(&out); err != nil {
-		return TunnelPrivateAccessSnapshot{}, err
-	}
-	return out, nil
-}
-
-func (c *Client) ListTunnelPrivateAccessRoutesV1(ctx context.Context, key string) (TunnelPrivateAccessSnapshot, error) {
-	return c.DiscoverTunnelPrivateAccessRoutesV1(ctx, key)
-}

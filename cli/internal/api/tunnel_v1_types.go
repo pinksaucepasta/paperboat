@@ -297,53 +297,6 @@ type TunnelEventPage struct {
 	NextCursor string        `json:"next_cursor,omitempty"`
 }
 
-// TunnelPrivateAccessAdmission is the server-authoritative prerequisite set
-// needed by a stable host before it can open a private route. It contains
-// public routing and generation fences only, never a reusable grant.
-type TunnelPrivateAccessAdmission struct {
-	Schema                               string    `json:"schema"`
-	Kind                                 string    `json:"kind"`
-	AccountID                            string    `json:"account_id"`
-	MachineID                            string    `json:"machine_id"`
-	InstallationGeneration               uint64    `json:"installation_generation"`
-	AccessorPublicKey                    string    `json:"accessor_public_key"`
-	AccessorThumbprint                   string    `json:"accessor_thumbprint"`
-	ResourceKind                         string    `json:"resource_kind"`
-	ResourceID                           string    `json:"resource_id"`
-	TunnelName                           string    `json:"tunnel_name,omitempty"`
-	RouteName                            string    `json:"route_name,omitempty"`
-	OperationID                          string    `json:"operation_id,omitempty"`
-	ConnectorID                          string    `json:"connector_id,omitempty"`
-	CarrierSessionID                     string    `json:"carrier_session_id"`
-	RouteID                              string    `json:"route_id"`
-	RouteGeneration                      uint64    `json:"route_generation"`
-	SessionGeneration                    uint64    `json:"session_generation"`
-	ProcessGeneration                    uint64    `json:"process_generation"`
-	ConfigGeneration                     uint64    `json:"config_generation"`
-	AssignmentGeneration                 uint64    `json:"assignment_generation"`
-	AssignmentID                         string    `json:"assignment_id"`
-	ConfigContentHash                    string    `json:"config_content_hash"`
-	EdgeNodeID                           string    `json:"edge_node_id"`
-	EdgeProcessEpoch                     string    `json:"edge_process_epoch"`
-	EdgeCarrierServerSPKISHA256          string    `json:"edge_carrier_server_spki_sha256"`
-	EdgeCarrierServerCertificateChainPEM string    `json:"edge_carrier_server_certificate_chain_pem"`
-	Protocol                             string    `json:"protocol"`
-	Hostname                             string    `json:"hostname,omitempty"`
-	MatchType                            string    `json:"match_type"`
-	WildcardSuffix                       string    `json:"wildcard_suffix,omitempty"`
-	EdgeEndpoints                        []string  `json:"edge_endpoints"`
-	ExpiresAt                            time.Time `json:"expires_at"`
-	TunnelID                             string    `json:"tunnel_id"`
-	CarrierConnectorID                   string    `json:"carrier_connector_id"`
-}
-
-type TunnelPrivateAccessSnapshot struct {
-	Schema     string                         `json:"schema"`
-	Kind       string                         `json:"kind"`
-	Complete   bool                           `json:"complete"`
-	Admissions []TunnelPrivateAccessAdmission `json:"admissions"`
-}
-
 type TunnelHealthDimension struct {
 	Status string `json:"status"`
 	Code   string `json:"code"`

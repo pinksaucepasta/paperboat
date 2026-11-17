@@ -470,34 +470,6 @@ func TestTunnelEventsV1WireContractAndRedaction(t *testing.T) {
 	}
 }
 
-func TestTunnelPrivateAccessDiscoveryV1WireContract(t *testing.T) {
-	key := "idem_private_1"
-	client := tunnelTestClient(t, func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost || r.URL.Path != "/v1/private-access/routes" {
-			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
-		}
-		if got := r.Header.Get("Idempotency-Key"); got != key {
-			t.Fatalf("Idempotency-Key = %q", got)
-		}
-		body, readErr := io.ReadAll(r.Body)
-		if readErr != nil || string(body) != `{"idempotency_key":"idem_private_1"}` {
-			t.Fatalf("body = %q, read error = %v", body, readErr)
-		}
-		admission := TunnelPrivateAccessAdmission{
-			Schema: TunnelV1Schema, Kind: "private_access_carrier_admission", AccountID: "acc_1", MachineID: "machine_1", InstallationGeneration: 1,
-			AccessorPublicKey: strings.Repeat("A", 43), AccessorThumbprint: strings.Repeat("B", 43), ResourceKind: "tunnel", ResourceID: "tun_1", TunnelName: "demo", RouteName: "private", ConnectorID: "connector_1", CarrierSessionID: "session_1", RouteID: "route_1", RouteGeneration: 1, SessionGeneration: 1, ProcessGeneration: 1, ConfigGeneration: 1, AssignmentGeneration: 1, AssignmentID: "assignment_1", ConfigContentHash: "sha256:" + strings.Repeat("a", 64), EdgeNodeID: "edge_1", EdgeProcessEpoch: "epoch_001", EdgeCarrierServerSPKISHA256: "sha256:" + strings.Repeat("b", 64), EdgeCarrierServerCertificateChainPEM: "certificate-chain", Protocol: "http", Hostname: "app.example.test", MatchType: "exact", EdgeEndpoints: []string{"tls://edge.example.test:25001", "quic://edge.example.test:25002"}, ExpiresAt: time.Now().UTC().Add(time.Hour), TunnelID: "tun_1", CarrierConnectorID: "connector_1",
-		}
-		writeTunnelTestData(t, w, TunnelPrivateAccessSnapshot{Schema: TunnelV1Schema, Kind: "private_access_carrier_snapshot", Complete: true, Admissions: []TunnelPrivateAccessAdmission{admission}})
-	})
-	out, err := client.DiscoverTunnelPrivateAccessRoutesV1(context.Background(), key)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !out.Complete || len(out.Admissions) != 1 || out.Admissions[0].TunnelID != "tun_1" {
-		t.Fatalf("snapshot = %#v", out)
-	}
-}
-
 func TestTunnelV1RefusesRedirects(t *testing.T) {
 	redirected := 0
 	target := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { redirected++ }))
@@ -610,23 +582,6 @@ func TestTunnelDomainMutationReadsCanonicalResourceAfterOperation(t *testing.T) 
 				t.Fatalf("result=%#v gets=%d error=%v", out, gets, err)
 			}
 		})
-	}
-}
-
-// A clock-skewed machine proof (the 400 clock_skew every machine-proof endpoint answers, private-access routes included)
-// reaches the caller as an APIError with its code and the server's time, and shows the clock guidance.
-func TestTunnelPrivateAccessDiscoveryShowsClockSkewGuidance(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadRequest)
-		io.WriteString(w, `{"error":{"schema":"paperboat.preview-tunnel/v1","kind":"error","code":"clock_skew","message":"This machine's clock is off by more than a minute.","retryable":true,"details":{"server_time":"2026-11-11T01:02:03Z","allowed_skew_seconds":60}}}`)
-	}))
-	defer server.Close()
-	_, err := New(server.URL, config.Credential{}, server.Client()).DiscoverTunnelPrivateAccessRoutesV1(context.Background(), "operation_clock_01")
-	var apiErr *APIError
-	if !errors.As(err, &apiErr) || apiErr.Status != http.StatusBadRequest || apiErr.Code != "clock_skew" || apiErr.Details["server_time"] != "2026-11-11T01:02:03Z" ||
-		!strings.Contains(apiErr.Message, "clock is off") || !strings.Contains(apiErr.Message, "automatic time") {
-		t.Fatalf("clock skew error = %#v (%v)", apiErr, err)
 	}
 }
 
