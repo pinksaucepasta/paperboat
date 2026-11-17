@@ -13,6 +13,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/auth"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/preview"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/protocol"
+	"github.com/pinksaucepasta/paperboat/shared/previewdispatch"
 )
 
 type previewDispatcherFunc func(context.Context, preview.DispatchAuthorization, preview.DispatchRequest) (preview.DispatchOutcome, error)
@@ -24,17 +25,17 @@ func (f previewDispatcherFunc) Dispatch(ctx context.Context, authorization previ
 func previewDispatchHTTPFixture(t *testing.T) (preview.DispatchRequest, auth.Claims, time.Time) {
 	t.Helper()
 	now := time.Date(2098, 1, 2, 3, 4, 5, 0, time.UTC)
-	request := preview.DispatchRequest{
+	request := preview.DispatchRequest{Request: previewdispatch.Request{
 		Schema: preview.PreviewTunnelSchemaV1, Kind: preview.PreviewDispatchKind,
 		PreviewID: "prv_dispatch_1", OperationID: "operation_dispatch_1", AccountID: "account_1", ActorID: "actor_1",
 		OwnerMachineID: "machine_1", OwnerSessionID: "session_dispatch_1", OwnerSessionKind: "foreground",
-		Target: preview.LeaseTarget{Scheme: "http", Address: "127.0.0.1:3000"}, AccessMode: "public",
+		Target: previewdispatch.Target{Scheme: "http", Address: "127.0.0.1:3000"}, AccessMode: "public",
 		Endpoint: "https://preview-dispatch.preview.example.test", LeaseDeadline: now.Add(time.Hour),
 		LeaseETag: `"ptv1:preview_lease:cHJ2X2Rpc3BhdGNoXzE:1"`, ExpectedGeneration: 1,
 		IdempotencyKey: "preview_dispatch_key_1", RequestID: "request_dispatch_1", CorrelationID: "correlation_dispatch_1",
 		State: "allocating", AllocationState: "pending", EdgeState: "pending", OriginState: "unknown",
 		CreatedAt: now, LastRenewedAt: now,
-	}
+	}}
 	hash, err := request.ComputeRequestHash()
 	if err != nil {
 		t.Fatal(err)

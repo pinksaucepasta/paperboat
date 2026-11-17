@@ -25,7 +25,7 @@ func TestLocalOwnerDispatchReleaseRetirementAndNewOperation(t *testing.T) {
 	}
 	defer leases.Close()
 	request := testDispatchRequest(t, now)
-	local, err := leases.Acquire(OwnerSessionLeaseRequest{Target: request.Target}, "local_acquire")
+	local, err := leases.Acquire(OwnerSessionLeaseRequest{Target: leaseTarget(request.Target)}, "local_acquire")
 	if err != nil {
 		t.Fatal(err)
 	}

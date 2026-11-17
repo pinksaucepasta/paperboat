@@ -168,7 +168,7 @@ func (m *DispatchManager) restoreAttempt(ctx context.Context, record BackgroundR
 		RequestHash: hash, ExpiresAt: now.Add(backgroundDispatchValidity),
 	}
 	if !record.Foreground {
-		if _, _, err := registry.RegisterMachineOwnerSession(request.OwnerMachineID, request.OwnerSessionID, request.Target); err != nil {
+		if _, _, err := registry.RegisterMachineOwnerSession(request.OwnerMachineID, request.OwnerSessionID, leaseTarget(request.Target)); err != nil {
 			return errors.Join(ErrDispatchInvalid, err)
 		}
 		// The dispatch takes its own owner reference; this one only bridges the registration.

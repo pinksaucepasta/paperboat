@@ -2,10 +2,7 @@ package previewv1
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/base64"
-	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -14,6 +11,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/previewtunnelstore"
+	"github.com/pinksaucepasta/paperboat/shared/previewdispatch"
 )
 
 const PreviewDispatchKind = "preview_dispatch"
@@ -27,58 +25,18 @@ var (
 )
 
 // LazyBinding pins activation to the current policy, installation and runtime boot.
-type LazyBinding struct {
-	PolicyID               string `json:"policy_id"`
-	PolicyGeneration       int64  `json:"policy_generation"`
-	InstallationGeneration int64  `json:"installation_generation"`
-	BootID                 string `json:"boot_id"`
-}
+type LazyBinding = previewdispatch.LazyBinding
 
-// DispatchRequest is the secret-free, operation-bound lease projection sent
-// to the selected host. Its field order and canonical hash are part of the
-// host/server protocol. RequestHash excludes itself and covers every other
-// field, including LeaseETag.
+// DispatchRequest is the secret-free, operation-bound lease projection sent to the selected host. The wire
+// document and its canonical hash input are shared with the host; RequestHash excludes itself and covers every
+// other field, including LeaseETag.
 type DispatchRequest struct {
-	Lazy               *LazyBinding `json:"lazy,omitempty"`
-	Schema             string       `json:"schema"`
-	Kind               string       `json:"kind"`
-	PreviewID          string       `json:"preview_id"`
-	OperationID        string       `json:"operation_id"`
-	AccountID          string       `json:"account_id"`
-	ActorID            string       `json:"actor_id"`
-	OwnerMachineID     string       `json:"owner_machine_id"`
-	OwnerSessionID     string       `json:"owner_session_id"`
-	OwnerSessionKind   string       `json:"owner_session_kind"`
-	Target             Target       `json:"target"`
-	AccessMode         string       `json:"access_mode"`
-	Endpoint           string       `json:"endpoint"`
-	LeaseDeadline      time.Time    `json:"lease_deadline"`
-	UserDeadline       *time.Time   `json:"user_deadline,omitempty"`
-	LeaseETag          string       `json:"lease_etag"`
-	State              string       `json:"state"`
-	AllocationState    string       `json:"allocation_state"`
-	EdgeState          string       `json:"edge_state"`
-	OriginState        string       `json:"origin_state"`
-	CreatedAt          time.Time    `json:"created_at"`
-	LastRenewedAt      time.Time    `json:"last_renewed_at"`
-	ExpectedGeneration int64        `json:"expected_generation"`
-	IdempotencyKey     string       `json:"idempotency_key"`
-	RequestID          string       `json:"request_id"`
-	CorrelationID      string       `json:"correlation_id"`
-	RequestHash        string       `json:"request_hash"`
+	previewdispatch.Request
 }
 
-// DispatchOutcome is the only response data accepted from a host. A host may
-// accept before readiness; the server's machine-auth readiness observation is
-// the authority that completes the create operation.
-type DispatchOutcome struct {
-	Schema      string `json:"schema"`
-	Kind        string `json:"kind"`
-	PreviewID   string `json:"preview_id"`
-	OperationID string `json:"operation_id"`
-	State       string `json:"state"`
-	Generation  int64  `json:"generation"`
-}
+// DispatchOutcome is the only response data accepted from a host. A host may accept before readiness; the
+// server's machine-auth readiness observation is the authority that completes the create operation.
+type DispatchOutcome = previewdispatch.Outcome
 
 // Dispatcher is deliberately narrow so the preview policy service can be
 // tested without an HTTP server or database. Implementations must perform
@@ -94,8 +52,7 @@ func (r DispatchRequest) ComputeRequestHash() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	digest := sha256.Sum256(canonical)
-	return hex.EncodeToString(digest[:]), nil
+	return previewdispatch.HashOf(canonical), nil
 }
 
 // Validate checks identity, lifecycle, generation, and exact request hash.
@@ -106,9 +63,7 @@ func (r DispatchRequest) Validate(now time.Time) error {
 	if err != nil {
 		return err
 	}
-	digest := sha256.Sum256(canonical)
-	want := hex.EncodeToString(digest[:])
-	if len(r.RequestHash) != sha256.Size*2 || r.RequestHash != want {
+	if r.RequestHash != previewdispatch.HashOf(canonical) {
 		return fmt.Errorf("%w: request hash mismatch", ErrDispatchInvalid)
 	}
 	if !now.IsZero() {
@@ -121,23 +76,7 @@ func (r DispatchRequest) Validate(now time.Time) error {
 }
 
 func (r DispatchRequest) canonicalHashInput(machineID string) ([]byte, error) {
-	r.Schema = strings.TrimSpace(r.Schema)
-	r.Kind = strings.TrimSpace(r.Kind)
-	r.PreviewID = strings.TrimSpace(r.PreviewID)
-	r.OperationID = strings.TrimSpace(r.OperationID)
-	r.AccountID = strings.TrimSpace(r.AccountID)
-	r.ActorID = strings.TrimSpace(r.ActorID)
-	r.OwnerMachineID = strings.TrimSpace(r.OwnerMachineID)
-	r.OwnerSessionID = strings.TrimSpace(r.OwnerSessionID)
-	r.Target.Scheme = strings.ToLower(strings.TrimSpace(r.Target.Scheme))
-	r.Target.Address = strings.TrimSpace(r.Target.Address)
-	r.Target.HostHeader = previewHostHeader(r.Target)
-	r.AccessMode = strings.ToLower(strings.TrimSpace(r.AccessMode))
-	r.Endpoint = strings.TrimSpace(r.Endpoint)
-	r.LeaseETag = strings.TrimSpace(r.LeaseETag)
-	r.IdempotencyKey = strings.TrimSpace(r.IdempotencyKey)
-	r.RequestID = strings.TrimSpace(r.RequestID)
-	r.CorrelationID = strings.TrimSpace(r.CorrelationID)
+	r.Request = previewdispatch.Normalize(r.Request)
 	if (r.OwnerSessionKind == "lazy_runtime") != (r.Lazy != nil) {
 		return nil, ErrDispatchInvalid
 	}
@@ -162,42 +101,7 @@ func (r DispatchRequest) canonicalHashInput(machineID string) ([]byte, error) {
 	if !validDispatchState(r.State, r.AllocationState, r.EdgeState, r.OriginState) || !validDispatchETag(r.LeaseETag, r.PreviewID, r.ExpectedGeneration) {
 		return nil, ErrDispatchInvalid
 	}
-	return json.Marshal(struct {
-		Lazy               *LazyBinding `json:"lazy,omitempty"`
-		Schema             string       `json:"schema"`
-		Kind               string       `json:"kind"`
-		PreviewID          string       `json:"preview_id"`
-		OperationID        string       `json:"operation_id"`
-		AccountID          string       `json:"account_id"`
-		ActorID            string       `json:"actor_id"`
-		OwnerMachineID     string       `json:"owner_machine_id"`
-		OwnerSessionID     string       `json:"owner_session_id"`
-		OwnerSessionKind   string       `json:"owner_session_kind"`
-		Target             Target       `json:"target"`
-		AccessMode         string       `json:"access_mode"`
-		Endpoint           string       `json:"endpoint"`
-		LeaseDeadline      time.Time    `json:"lease_deadline"`
-		UserDeadline       *time.Time   `json:"user_deadline,omitempty"`
-		LeaseETag          string       `json:"lease_etag"`
-		State              string       `json:"state"`
-		AllocationState    string       `json:"allocation_state"`
-		EdgeState          string       `json:"edge_state"`
-		OriginState        string       `json:"origin_state"`
-		CreatedAt          time.Time    `json:"created_at"`
-		LastRenewedAt      time.Time    `json:"last_renewed_at"`
-		ExpectedGeneration int64        `json:"expected_generation"`
-		IdempotencyKey     string       `json:"idempotency_key"`
-		RequestID          string       `json:"request_id"`
-		CorrelationID      string       `json:"correlation_id"`
-	}{r.Lazy, r.Schema, r.Kind, r.PreviewID, r.OperationID, r.AccountID, r.ActorID, r.OwnerMachineID, r.OwnerSessionID, r.OwnerSessionKind, r.Target, r.AccessMode, r.Endpoint, r.LeaseDeadline.UTC(), utcDispatchTime(r.UserDeadline), r.LeaseETag, r.State, r.AllocationState, r.EdgeState, r.OriginState, r.CreatedAt.UTC(), r.LastRenewedAt.UTC(), r.ExpectedGeneration, r.IdempotencyKey, r.RequestID, r.CorrelationID})
-}
-
-func utcDispatchTime(value *time.Time) *time.Time {
-	if value == nil {
-		return nil
-	}
-	result := value.UTC()
-	return &result
+	return previewdispatch.MarshalHashInput(r.Request)
 }
 
 func validDispatchID(value string) bool {

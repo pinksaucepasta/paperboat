@@ -13,6 +13,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/diagnostics"
 	"github.com/pinksaucepasta/paperboat/cli/internal/nativeprivate"
+	"github.com/pinksaucepasta/paperboat/shared/previewdispatch"
 )
 
 func TestDispatchManagerValidatesCurrentNativePrivatePreview(t *testing.T) {
@@ -81,19 +82,39 @@ func (o *dispatchObserver) ObservePreviewReadiness(_ context.Context, readiness 
 	return lease, nil
 }
 
+// The shared previewdispatch golden vector, built with this module's own fixture types: the machine must hash
+// the dispatch the way the server does (shared/previewdispatch TestHashInputIsByteStable pins the same value).
+func TestDispatchRequestHashMatchesTheSharedGoldenVector(t *testing.T) {
+	deadline := time.Date(2030, 1, 1, 0, 30, 0, 0, time.UTC)
+	request := DispatchRequest{Request: previewdispatch.Request{
+		Lazy:   &previewdispatch.LazyBinding{PolicyID: "pol_1", PolicyGeneration: 2, InstallationGeneration: 3, BootID: "boot_0123456789abcdef"},
+		Schema: PreviewTunnelSchemaV1, Kind: PreviewDispatchKind, PreviewID: "prv_1", OperationID: "op_1", AccountID: "acct_1", ActorID: "actor_1",
+		OwnerMachineID: "machine_1", OwnerSessionID: "session_1", OwnerSessionKind: OwnerSessionLazyRuntime,
+		Target:     previewdispatch.Target{Scheme: "http", Address: "127.0.0.1:3000", HostHeader: "App.Local"},
+		AccessMode: "private", Endpoint: "https://app.example.test", LeaseDeadline: time.Date(2030, 1, 1, 1, 0, 0, 0, time.UTC), UserDeadline: &deadline,
+		LeaseETag: formatLeaseETag("prv_1", 7), State: "connecting", AllocationState: "ready", EdgeState: "ready", OriginState: "unknown",
+		CreatedAt: time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC), LastRenewedAt: time.Date(2030, 1, 1, 0, 10, 0, 0, time.UTC), ExpectedGeneration: 7,
+		IdempotencyKey: "idem_1", RequestID: "req_1", CorrelationID: "cor_1",
+	}}
+	got, err := request.ComputeRequestHash()
+	if err != nil || got != "e142084de5fe437e40d9db15cff56f406aed2a4af2c98d314a658b3d3769e1dc" {
+		t.Fatalf("hash = %q, %v", got, err)
+	}
+}
+
 func testDispatchRequest(t *testing.T, now time.Time) DispatchRequest {
 	t.Helper()
-	request := DispatchRequest{
+	request := DispatchRequest{Request: previewdispatch.Request{
 		Schema: PreviewTunnelSchemaV1, Kind: PreviewDispatchKind,
 		PreviewID: "prv_dispatch_1", OperationID: "operation_dispatch_1", AccountID: "account_1", ActorID: "actor_1",
 		OwnerMachineID: "machine_1", OwnerSessionID: "session_dispatch_1", OwnerSessionKind: "foreground",
-		Target: LeaseTarget{Scheme: "http", Address: "127.0.0.1:3000"}, AccessMode: "public",
+		Target: previewdispatch.Target{Scheme: "http", Address: "127.0.0.1:3000"}, AccessMode: "public",
 		Endpoint: "https://dispatch.preview.example.test", LeaseDeadline: now.Add(time.Hour),
 		LeaseETag: formatLeaseETag("prv_dispatch_1", 1), ExpectedGeneration: 1,
 		IdempotencyKey: "preview_dispatch_key_1", RequestID: "request_dispatch_1", CorrelationID: "correlation_dispatch_1",
 		State: "allocating", AllocationState: "pending", EdgeState: "pending", OriginState: "unknown",
 		CreatedAt: now, LastRenewedAt: now,
-	}
+	}}
 	hash, err := request.ComputeRequestHash()
 	if err != nil {
 		t.Fatal(err)
@@ -558,7 +579,7 @@ func TestDispatchFailureRetainsSafeReadinessReason(t *testing.T) {
 func TestDispatchHashAndResumeUseTheServersHostHeader(t *testing.T) {
 	now := time.Date(2098, 1, 2, 3, 4, 5, 0, time.UTC)
 	plain := testDispatchRequest(t, now)
-	plain.Target = LeaseTarget{Scheme: "http", Address: "127.0.0.1:3000", HostHeader: "app.example.test"}
+	plain.Target = previewdispatch.Target{Scheme: "http", Address: "127.0.0.1:3000", HostHeader: "app.example.test"}
 	untidy := plain
 	untidy.Target.HostHeader = "  App.Example.Test "
 	first, err := plain.ComputeRequestHash()

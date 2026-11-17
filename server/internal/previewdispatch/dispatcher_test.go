@@ -18,6 +18,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/mint"
 	"github.com/pinksaucepasta/paperboat/server/internal/previewtunnelapi"
 	"github.com/pinksaucepasta/paperboat/server/internal/previewv1"
+	wire "github.com/pinksaucepasta/paperboat/shared/previewdispatch"
 )
 
 type testRouteResolver struct {
@@ -51,7 +52,7 @@ func (r *testRouteResolver) ResolvePreviewDispatchRoute(context.Context, string,
 
 func testDispatchRequest() previewv1.DispatchRequest {
 	now := time.Date(2026, 8, 30, 12, 0, 0, 0, time.UTC)
-	request := previewv1.DispatchRequest{
+	request := previewv1.DispatchRequest{Request: wire.Request{
 		Schema: previewv1.Schema, Kind: previewv1.PreviewDispatchKind,
 		PreviewID: "prv_1", OperationID: "operation_1", AccountID: "acct_1", ActorID: "user_1",
 		OwnerMachineID: "machine_1", OwnerSessionID: "session_1", OwnerSessionKind: "foreground",
@@ -61,7 +62,7 @@ func testDispatchRequest() previewv1.DispatchRequest {
 		AllocationState: "pending", EdgeState: "pending", OriginState: "unknown",
 		CreatedAt: now, LastRenewedAt: now, ExpectedGeneration: 1,
 		IdempotencyKey: "create_1", RequestID: "req_1", CorrelationID: "cor_1",
-	}
+	}}
 	hash, err := request.ComputeRequestHash()
 	if err != nil {
 		panic(err)

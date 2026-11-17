@@ -2,9 +2,6 @@ package preview
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -15,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/originhealth"
+	"github.com/pinksaucepasta/paperboat/shared/previewdispatch"
 	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/diagnostics"
@@ -33,48 +31,20 @@ var (
 	ErrDispatchUnavailable = errors.New("preview dispatch carrier unavailable")
 )
 
-// DispatchRequest is the secret-free, operation-bound instruction delivered
-// by paperboat-server to the selected online machine. LeaseETag is transport
-// metadata required for generation-safe renew and stop calls.
+// DispatchRequest is the secret-free, operation-bound instruction delivered by paperboat-server to the
+// selected online machine; the wire document is shared with the server. LeaseETag is transport metadata
+// required for generation-safe renew and stop calls.
 type DispatchRequest struct {
-	Lazy               *LazyBinding `json:"lazy,omitempty"`
-	Schema             string       `json:"schema"`
-	Kind               string       `json:"kind"`
-	PreviewID          string       `json:"preview_id"`
-	OperationID        string       `json:"operation_id"`
-	AccountID          string       `json:"account_id"`
-	ActorID            string       `json:"actor_id"`
-	OwnerMachineID     string       `json:"owner_machine_id"`
-	OwnerSessionID     string       `json:"owner_session_id"`
-	OwnerSessionKind   string       `json:"owner_session_kind"`
-	Target             LeaseTarget  `json:"target"`
-	AccessMode         string       `json:"access_mode"`
-	Endpoint           string       `json:"endpoint"`
-	LeaseDeadline      time.Time    `json:"lease_deadline"`
-	UserDeadline       *time.Time   `json:"user_deadline,omitempty"`
-	LeaseETag          string       `json:"lease_etag"`
-	State              string       `json:"state"`
-	AllocationState    string       `json:"allocation_state"`
-	EdgeState          string       `json:"edge_state"`
-	OriginState        string       `json:"origin_state"`
-	CreatedAt          time.Time    `json:"created_at"`
-	LastRenewedAt      time.Time    `json:"last_renewed_at"`
-	ExpectedGeneration int64        `json:"expected_generation"`
-	IdempotencyKey     string       `json:"idempotency_key"`
-	RequestID          string       `json:"request_id"`
-	CorrelationID      string       `json:"correlation_id"`
-	RequestHash        string       `json:"request_hash"`
+	previewdispatch.Request
 }
 
 // DispatchOutcome is safe to return to the control plane. Readiness remains
 // authoritative on paperboat-server and is never inferred from acceptance.
-type DispatchOutcome struct {
-	Schema      string `json:"schema"`
-	Kind        string `json:"kind"`
-	PreviewID   string `json:"preview_id"`
-	OperationID string `json:"operation_id"`
-	State       string `json:"state"`
-	Generation  int64  `json:"generation"`
+type DispatchOutcome = previewdispatch.Outcome
+
+// leaseTarget is the wire target as a lease target (the lease's PublicHost is a local, unserialized field).
+func leaseTarget(t previewdispatch.Target) LeaseTarget {
+	return LeaseTarget{Scheme: t.Scheme, Address: t.Address, HostHeader: t.HostHeader}
 }
 
 // DispatchAuthorization is the verified, short-lived preview_launch claim
@@ -327,7 +297,7 @@ func (m *DispatchManager) dispatch(ctx context.Context, authorization DispatchAu
 	if lazy {
 		ownerDone = lazyLifecycle.Done()
 	} else if targetValidator, ok := m.config.Owners.(DispatchOwnerSessionTargetValidator); ok {
-		ownerDone, err = targetValidator.OwnerSessionDoneForTarget(request.AccountID, request.OwnerMachineID, request.OwnerSessionID, request.OwnerSessionKind, request.Target)
+		ownerDone, err = targetValidator.OwnerSessionDoneForTarget(request.AccountID, request.OwnerMachineID, request.OwnerSessionID, request.OwnerSessionKind, leaseTarget(request.Target))
 	} else if request.OwnerSessionKind == OwnerSessionLocalLease {
 		err = ErrOwnerSessionBinding
 	} else {
@@ -596,9 +566,8 @@ func (r DispatchRequest) Validate(machineID string, now time.Time) (string, erro
 	if err != nil {
 		return "", err
 	}
-	digest := sha256.Sum256(canonical)
-	want := hex.EncodeToString(digest[:])
-	if len(r.RequestHash) != sha256.Size*2 || r.RequestHash != want {
+	want := previewdispatch.HashOf(canonical)
+	if r.RequestHash != want {
 		return "", fmt.Errorf("%w: request hash mismatch", ErrDispatchInvalid)
 	}
 	return want, nil
@@ -611,36 +580,13 @@ func (r DispatchRequest) ComputeRequestHash() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	digest := sha256.Sum256(canonical)
-	return hex.EncodeToString(digest[:]), nil
+	return previewdispatch.HashOf(canonical), nil
 }
 
 func (r DispatchRequest) canonicalHashInput(machineID string, now time.Time) ([]byte, error) {
-	r.Schema = strings.TrimSpace(r.Schema)
-	r.Kind = strings.TrimSpace(r.Kind)
-	r.PreviewID = strings.TrimSpace(r.PreviewID)
-	r.OperationID = strings.TrimSpace(r.OperationID)
-	r.AccountID = strings.TrimSpace(r.AccountID)
-	r.ActorID = strings.TrimSpace(r.ActorID)
-	r.OwnerMachineID = strings.TrimSpace(r.OwnerMachineID)
-	r.OwnerSessionID = strings.TrimSpace(r.OwnerSessionID)
-	r.Target.Scheme = strings.ToLower(strings.TrimSpace(r.Target.Scheme))
-	r.Target.Address = strings.TrimSpace(r.Target.Address)
-	r.Target.HostHeader = strings.ToLower(strings.TrimSpace(r.Target.HostHeader)) // as the server hashes it
-	r.AccessMode = strings.ToLower(strings.TrimSpace(r.AccessMode))
-	r.Endpoint = strings.TrimSpace(r.Endpoint)
-	r.LeaseETag = strings.TrimSpace(r.LeaseETag)
-	r.IdempotencyKey = strings.TrimSpace(r.IdempotencyKey)
-	r.RequestID = strings.TrimSpace(r.RequestID)
-	r.CorrelationID = strings.TrimSpace(r.CorrelationID)
-	if r.Lazy != nil {
-		lazy := *r.Lazy
-		r.Lazy = &lazy
-		r.Lazy.PolicyID = strings.TrimSpace(r.Lazy.PolicyID)
-		r.Lazy.BootID = strings.TrimSpace(r.Lazy.BootID)
-		if !r.Lazy.valid() {
-			return nil, ErrDispatchInvalid
-		}
+	r.Request = previewdispatch.Normalize(r.Request)
+	if r.Lazy != nil && !validLazyBinding(*r.Lazy) {
+		return nil, ErrDispatchInvalid
 	}
 	if r.Schema != PreviewTunnelSchemaV1 || r.Kind != PreviewDispatchKind || !validLeaseID(r.PreviewID) || !validLeaseID(r.OperationID) || !validLeaseID(r.AccountID) || !validLeaseID(r.ActorID) || r.OwnerMachineID != strings.TrimSpace(machineID) || !validLeaseID(r.OwnerSessionID) || !validOwnerSessionKind(r.OwnerSessionKind) || (r.OwnerSessionKind == OwnerSessionLazyRuntime) != (r.Lazy != nil) || r.ExpectedGeneration < 1 {
 		return nil, ErrDispatchInvalid
@@ -648,7 +594,7 @@ func (r DispatchRequest) canonicalHashInput(machineID string, now time.Time) ([]
 	if !validDispatchTrace(r.IdempotencyKey, 1, 256) || !validDispatchTrace(r.RequestID, 3, 128) || !validDispatchTrace(r.CorrelationID, 3, 128) {
 		return nil, ErrDispatchInvalid
 	}
-	if err := validateLeaseTarget(r.Target); err != nil || r.AccessMode != "public" && r.AccessMode != "private" && r.AccessMode != "team" {
+	if err := validateLeaseTarget(leaseTarget(r.Target)); err != nil || r.AccessMode != "public" && r.AccessMode != "private" && r.AccessMode != "team" {
 		return nil, ErrDispatchInvalid
 	}
 	if r.LeaseDeadline.IsZero() || !now.IsZero() && !r.LeaseDeadline.After(now.UTC()) || r.UserDeadline != nil && (r.UserDeadline.IsZero() || !now.IsZero() && !r.UserDeadline.After(now.UTC())) {
@@ -661,34 +607,7 @@ func (r DispatchRequest) canonicalHashInput(machineID string, now time.Time) ([]
 	if generation := leaseGenerationForID(lease.ID, lease.ETag); generation != r.ExpectedGeneration {
 		return nil, fmt.Errorf("%w: lease ETag generation mismatch", ErrDispatchInvalid)
 	}
-	return json.Marshal(struct {
-		Lazy               *LazyBinding `json:"lazy,omitempty"`
-		Schema             string       `json:"schema"`
-		Kind               string       `json:"kind"`
-		PreviewID          string       `json:"preview_id"`
-		OperationID        string       `json:"operation_id"`
-		AccountID          string       `json:"account_id"`
-		ActorID            string       `json:"actor_id"`
-		OwnerMachineID     string       `json:"owner_machine_id"`
-		OwnerSessionID     string       `json:"owner_session_id"`
-		OwnerSessionKind   string       `json:"owner_session_kind"`
-		Target             LeaseTarget  `json:"target"`
-		AccessMode         string       `json:"access_mode"`
-		Endpoint           string       `json:"endpoint"`
-		LeaseDeadline      time.Time    `json:"lease_deadline"`
-		UserDeadline       *time.Time   `json:"user_deadline,omitempty"`
-		LeaseETag          string       `json:"lease_etag"`
-		State              string       `json:"state"`
-		AllocationState    string       `json:"allocation_state"`
-		EdgeState          string       `json:"edge_state"`
-		OriginState        string       `json:"origin_state"`
-		CreatedAt          time.Time    `json:"created_at"`
-		LastRenewedAt      time.Time    `json:"last_renewed_at"`
-		ExpectedGeneration int64        `json:"expected_generation"`
-		IdempotencyKey     string       `json:"idempotency_key"`
-		RequestID          string       `json:"request_id"`
-		CorrelationID      string       `json:"correlation_id"`
-	}{r.Lazy, r.Schema, r.Kind, r.PreviewID, r.OperationID, r.AccountID, r.ActorID, r.OwnerMachineID, r.OwnerSessionID, r.OwnerSessionKind, r.Target, r.AccessMode, r.Endpoint, r.LeaseDeadline.UTC(), utcTimePointer(r.UserDeadline), r.LeaseETag, r.State, r.AllocationState, r.EdgeState, r.OriginState, r.CreatedAt.UTC(), r.LastRenewedAt.UTC(), r.ExpectedGeneration, r.IdempotencyKey, r.RequestID, r.CorrelationID})
+	return previewdispatch.MarshalHashInput(r.Request)
 }
 
 func validDispatchTrace(value string, minimum, maximum int) bool {
@@ -719,7 +638,7 @@ func (r DispatchRequest) Lease() Lease {
 	return Lease{
 		Schema: PreviewTunnelSchemaV1, Kind: PreviewLeaseKind, ID: r.PreviewID,
 		AccountID: r.AccountID, ActorID: r.ActorID, OwnerMachineID: r.OwnerMachineID, OwnerSessionID: r.OwnerSessionID, OwnerSessionKind: r.OwnerSessionKind,
-		Target: r.Target, AccessMode: r.AccessMode, Persistent: false, Endpoint: r.Endpoint, EndpointState: endpointState,
+		Target: leaseTarget(r.Target), AccessMode: r.AccessMode, Persistent: false, Endpoint: r.Endpoint, EndpointState: endpointState,
 		LeaseDeadline: r.LeaseDeadline.UTC(), UserDeadline: utcTimePointer(r.UserDeadline), State: r.State,
 		AllocationState: r.AllocationState, EdgeState: r.EdgeState, OriginState: r.OriginState, CreatedAt: r.CreatedAt.UTC(),
 		LastRenewedAt: r.LastRenewedAt.UTC(), CreateOperationID: r.OperationID, ETag: r.LeaseETag, Generation: r.ExpectedGeneration,

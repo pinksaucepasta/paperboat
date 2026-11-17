@@ -79,7 +79,7 @@ func (r *runtimeRun) dispatchLocal(t *testing.T, now time.Time, background bool)
 	t.Helper()
 	request := testDispatchRequest(t, now)
 	deadline := now.Add(30 * time.Minute)
-	lease := OwnerSessionLeaseRequest{Target: request.Target}
+	lease := OwnerSessionLeaseRequest{Target: leaseTarget(request.Target)}
 	if background {
 		lease.Background, lease.ExpiresAt = true, &deadline
 	}
@@ -197,7 +197,7 @@ func TestForegroundPreviewResumesWhenItsCLIReattachesAfterAHostRuntimeRestart(t 
 	case <-time.After(400 * time.Millisecond):
 	}
 	// The CLI's reattach acquires the same owner session on the new runtime.
-	if _, err := second.owners.Acquire(OwnerSessionLeaseRequest{OwnerSessionID: request.OwnerSessionID, Target: request.Target}, "local_reacquire"); err != nil {
+	if _, err := second.owners.Acquire(OwnerSessionLeaseRequest{OwnerSessionID: request.OwnerSessionID, Target: leaseTarget(request.Target)}, "local_reacquire"); err != nil {
 		t.Fatal(err)
 	}
 	select {

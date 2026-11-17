@@ -4,6 +4,8 @@ import (
 	"context"
 	"sync"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/shared/previewdispatch"
 )
 
 const (
@@ -16,14 +18,9 @@ const (
 // LazyBinding fences a policy activation to the exact installed daemon boot.
 // The policy authorizes the port; application process identity is deliberately
 // outside this contract.
-type LazyBinding struct {
-	PolicyID               string `json:"policy_id"`
-	PolicyGeneration       int64  `json:"policy_generation"`
-	InstallationGeneration int64  `json:"installation_generation"`
-	BootID                 string `json:"boot_id"`
-}
+type LazyBinding = previewdispatch.LazyBinding
 
-func (b LazyBinding) valid() bool {
+func validLazyBinding(b LazyBinding) bool {
 	return validLeaseID(b.PolicyID) && b.PolicyGeneration > 0 && b.InstallationGeneration > 0 && validLazyBootID(b.BootID)
 }
 

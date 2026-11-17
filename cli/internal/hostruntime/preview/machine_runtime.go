@@ -237,7 +237,7 @@ func (r *MachinePreviewRuntime) ResolvePreviewCarrier(ctx context.Context, reque
 	if _, err := request.Validate(r.machineID, serverclock.Now().UTC()); err != nil {
 		return nil, err
 	}
-	return r.NewCarrier(ctx, request.Target, request.OwnerMachineID, request.OwnerSessionID)
+	return r.NewCarrier(ctx, leaseTarget(request.Target), request.OwnerMachineID, request.OwnerSessionID)
 }
 
 // MachineAuthSource returns the same renewable source used by the attachment

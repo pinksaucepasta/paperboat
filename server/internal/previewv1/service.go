@@ -30,6 +30,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/previewtunnelapi"
 	"github.com/pinksaucepasta/paperboat/server/internal/previewtunnelstore"
 	"github.com/pinksaucepasta/paperboat/server/internal/workspace"
+	"github.com/pinksaucepasta/paperboat/shared/previewdispatch"
 )
 
 const (
@@ -122,12 +123,7 @@ type previewDomainProjectionReader interface {
 	ListProjections(context.Context, map[string]string) (map[string][]dbsqlc.PreviewDomain, error)
 }
 
-type Target struct {
-	Scheme  string `json:"scheme"`
-	Address string `json:"address"`
-	// HostHeader is the Host the origin receives instead of the public one (http, https and h2c targets).
-	HostHeader string `json:"host_header,omitempty"`
-}
+type Target = previewdispatch.Target
 
 // CreateRequest is the server-facing form of POST /v1/previews. RequestHash
 // is computed from the original JSON at the HTTP boundary so duplicate-field
@@ -425,7 +421,7 @@ func createOperationNeedsDispatch(operation previewtunnelapi.Operation, replayed
 }
 
 func (s *Service) dispatchCreatedLease(ctx context.Context, request previewtunnelapi.RequestContext, idempotencyKey string, created CreateResult, lazy *LazyBinding, identityEndpoint string) error {
-	dispatch := DispatchRequest{
+	dispatch := DispatchRequest{Request: previewdispatch.Request{
 		Lazy:   lazy,
 		Schema: Schema, Kind: PreviewDispatchKind, PreviewID: created.Preview.ID, OperationID: created.Operation.ID,
 		AccountID: created.Preview.AccountID, ActorID: created.Preview.ActorID, OwnerMachineID: created.Preview.OwnerMachineID,
@@ -435,7 +431,7 @@ func (s *Service) dispatchCreatedLease(ctx context.Context, request previewtunne
 		EdgeState: created.Preview.EdgeState, OriginState: created.Preview.OriginState, CreatedAt: created.Preview.CreatedAt,
 		LastRenewedAt: created.Preview.LastRenewedAt, ExpectedGeneration: generationFromETag(created.ETag),
 		IdempotencyKey: idempotencyKey, RequestID: request.RequestID, CorrelationID: request.CorrelationID,
-	}
+	}}
 	hash, err := dispatch.ComputeRequestHash()
 	if err != nil {
 		return s.recordDispatchFailure(ctx, request, created, err, false)
