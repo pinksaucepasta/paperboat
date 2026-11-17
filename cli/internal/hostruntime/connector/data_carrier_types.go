@@ -14,26 +14,24 @@ import (
 	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 )
 
-// Data-carrier limits bound the number of streams which can hold a connection
-// permit and the number of stream opens waiting for a peer acknowledgement. One
-// carrier serves every publication on the machine, so its stream bound must not
-// refuse a popular preview's page loads (edge abuse plan, section 5).
+// Data-carrier limits bound the number of streams which can hold a connection permit and the number of stream
+// opens waiting for a peer acknowledgement; the values are shared with the edge (connectorprotocol/carrier_limits.go).
 const (
-	defaultDataCarrierStreams      = 1024
-	defaultDataCarrierBacklog      = 16
-	defaultDataCarrierQueue        = 16
-	defaultDataCarrierWindow       = 256 << 10
-	defaultDataCarrierKeepalive    = 30 * time.Second
-	defaultDataCarrierWriteLimit   = 10 * time.Second
-	defaultDataCarrierOpenLimit    = 10 * time.Second
-	defaultDataCarrierCloseLimit   = 5 * time.Second
+	defaultDataCarrierStreams      = connectorprotocol.DataCarrierDefaultStreams
+	defaultDataCarrierBacklog      = connectorprotocol.DataCarrierDefaultAcceptBacklog
+	defaultDataCarrierQueue        = connectorprotocol.DataCarrierDefaultQueueDepth
+	defaultDataCarrierWindow       = connectorprotocol.DataCarrierDefaultStreamWindow
+	defaultDataCarrierKeepalive    = connectorprotocol.DataCarrierDefaultKeepAlive
+	defaultDataCarrierWriteLimit   = connectorprotocol.DataCarrierDefaultWriteLimit
+	defaultDataCarrierOpenLimit    = connectorprotocol.DataCarrierDefaultOpenLimit
+	defaultDataCarrierCloseLimit   = connectorprotocol.DataCarrierDefaultCloseLimit
 	defaultDataCarrierMaxCarriers  = 2
-	maxDataCarrierStreams          = 1024
-	maxDataCarrierBacklog          = 1024
-	maxDataCarrierQueue            = 1024
-	maxDataCarrierWindow           = 16 << 20
-	maxDataCarrierKeepalive        = time.Hour
-	maxDataCarrierOperationTimeout = time.Minute
+	maxDataCarrierStreams          = connectorprotocol.DataCarrierMaxStreams
+	maxDataCarrierBacklog          = connectorprotocol.DataCarrierMaxAcceptBacklog
+	maxDataCarrierQueue            = connectorprotocol.DataCarrierMaxQueueDepth
+	maxDataCarrierWindow           = connectorprotocol.DataCarrierMaxConfiguredWindow
+	maxDataCarrierKeepalive        = connectorprotocol.DataCarrierMaxKeepAlive
+	maxDataCarrierOperationTimeout = connectorprotocol.DataCarrierMaxOperationTimeout
 )
 
 var (
@@ -98,10 +96,8 @@ type DataCarrierIdentity struct {
 	TunnelID    string
 	ConnectorID string
 	SessionID   string
-	// SessionGeneration is the server-issued connector lease/credential
-	// generation. It is distinct from process and configuration generations and
-	// is required by stable-host update fencing.
-	SessionGeneration uint64
+	// There is no session generation here: the stream-open preface (connectorprotocol.StreamOpen) does not carry
+	// one, so nothing could be fenced on it. Update fencing rides ProcessGeneration and Generation.
 	ProcessGeneration uint64
 	Generation        uint64
 }

@@ -20,20 +20,20 @@ import (
 )
 
 const (
-	defaultMaximumStreams    = 1024
-	defaultAcceptBacklog     = 16
-	defaultQueueDepth        = 16
-	defaultStreamWindow      = 256 << 10
-	defaultKeepAliveInterval = 30 * time.Second
-	defaultWriteLimit        = 10 * time.Second
-	defaultOpenLimit         = 10 * time.Second
-	defaultCloseLimit        = 5 * time.Second
-	maxMaximumStreams        = 1024
+	defaultMaximumStreams    = connectorprotocol.DataCarrierDefaultStreams
+	defaultAcceptBacklog     = connectorprotocol.DataCarrierDefaultAcceptBacklog
+	defaultQueueDepth        = connectorprotocol.DataCarrierDefaultQueueDepth
+	defaultStreamWindow      = connectorprotocol.DataCarrierDefaultStreamWindow
+	defaultKeepAliveInterval = connectorprotocol.DataCarrierDefaultKeepAlive
+	defaultWriteLimit        = connectorprotocol.DataCarrierDefaultWriteLimit
+	defaultOpenLimit         = connectorprotocol.DataCarrierDefaultOpenLimit
+	defaultCloseLimit        = connectorprotocol.DataCarrierDefaultCloseLimit
+	maxMaximumStreams        = connectorprotocol.DataCarrierMaxStreams
 	streamPermitWait         = time.Second
-	maxAcceptBacklog         = 1024
-	maxQueueDepth            = 1024
-	maxStreamWindow          = 16 << 20
-	maxOperationTimeout      = time.Minute
+	maxAcceptBacklog         = connectorprotocol.DataCarrierMaxAcceptBacklog
+	maxQueueDepth            = connectorprotocol.DataCarrierMaxQueueDepth
+	maxStreamWindow          = connectorprotocol.DataCarrierMaxConfiguredWindow
+	maxOperationTimeout      = connectorprotocol.DataCarrierMaxOperationTimeout
 )
 
 var (
