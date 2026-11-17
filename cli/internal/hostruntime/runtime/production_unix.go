@@ -389,7 +389,7 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 	}
 	var engineTunnels *runtimeattachment.EngineTunnels
 	{
-		attachment, attachErr := runtimeattachment.New(runtimeattachment.Config{ControlURL: controlURL.String(), StateRoot: runtimeConfig.StateRoot, Transport: transport, MachineID: machineID, WorkerGeneration: bootState.Generation, InstallationGeneration: uint64(machineRegistration.InstallationGeneration), ListenAddress: listen, Wake: machineEvents.Subscribe(machineevents.TopicPreviews, machineevents.TopicPrivateRoutes).Changed()})
+		attachment, attachErr := runtimeattachment.New(runtimeattachment.Config{ControlURL: controlURL.String(), StateRoot: runtimeConfig.StateRoot, Transport: transport, MachineID: machineID, WorkerGeneration: bootState.Generation, InstallationGeneration: uint64(machineRegistration.InstallationGeneration), ListenAddress: listen, Wake: machineEvents.Subscribe(machineevents.TopicPreviews, machineevents.TopicPrivateRoutes, machineevents.TopicTunnels).Changed()})
 		if attachErr != nil {
 			return nil, attachErr
 		}
