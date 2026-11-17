@@ -74,7 +74,7 @@ func TestEmptyRegionalRegistryPreservesDirectAdmissionAndLaterRelayRecovery(t *t
 		t.Fatal("registry without grant admitted relay", err)
 	}
 	grant := peernetwork.RelayGrant{Version: 1, Issuer: cfg.Issuer, Audience: "paperboat-relay", IssuedAt: now, ExpiresAt: now + 60, Generation: cfg.Generation, AccountID: cfg.Self.AccountID, EndpointID: cfg.Self.EndpointID, WireGuardPublicKey: cfg.Self.WireGuardPublicKey, CertificateFingerprint: cfg.Self.QUICCertificateFingerprint, QUICPublicKey: cfg.Self.QUICPublicKey, NodeID: node.NodeID, NodeGeneration: node.NodeGeneration, ProcessEpoch: node.ProcessEpoch}
-	grant.Memberships = peerGrantMemberships(cfg)
+	grant.Memberships = peerGrantMemberships(cfg, now+60)
 	header, _ := json.Marshal(map[string]string{"alg": "EdDSA", "typ": "paperboat-relay-grant+jwt", "kid": "network_test"})
 	body, _ := json.Marshal(grant)
 	signed := base64.RawURLEncoding.EncodeToString(header) + "." + base64.RawURLEncoding.EncodeToString(body)

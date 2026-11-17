@@ -162,3 +162,42 @@ func AccountNetworkID(account string) string {
 	sum := sha256.Sum256([]byte("paperboat-account-network\x00" + account))
 	return "network_" + hex.EncodeToString(sum[:])
 }
+
+// RelayGrantMemberships is every membership a relay grant may carry for the scopes of an endpoint's relayable peers
+// (one scope list per peer), each once, the account mesh first and then the latest expiry first. The server signs a
+// bounded prefix of it (MaxMergedMemberships), for the peers its relay admits; the client builds the whole set from
+// its own signed configuration to refuse any membership of a grant that is not in it, so both must use this one
+// function. A per-pair machine_network scope becomes the account's one network (AccountNetworkID) in the direction
+// the endpoint holds, and a peer with a mesh scope adds nothing else (the mesh pairs it); a peer without one (a team
+// or another account's endpoint) adds its relay scopes (RelayGrantScopes), standing ones stamped with grantExpiry.
+func RelayGrantMemberships(accountID string, peers [][]Scope, grantExpiry int64) []Scope {
+	network := AccountNetworkID(accountID)
+	seen := map[Scope]bool{}
+	out := []Scope{}
+	for _, peerScopes := range peers {
+		mesh := slices.ContainsFunc(peerScopes, func(s Scope) bool { return s.ResourceKind == "machine_network" })
+		for _, scope := range RelayGrantScopes(peerScopes, grantExpiry) {
+			switch {
+			case scope.ResourceKind == "machine_network":
+				scope.ResourceID = network
+			case mesh:
+				continue
+			}
+			if !seen[scope] {
+				seen[scope] = true
+				out = append(out, scope)
+			}
+		}
+	}
+	rank := func(s Scope) int { // the mesh first
+		if s.ResourceKind == "machine_network" {
+			return 0
+		}
+		return 1
+	}
+	slices.SortFunc(out, func(a, b Scope) int {
+		return cmp.Or(cmp.Compare(rank(a), rank(b)), cmp.Compare(b.ExpiresAt, a.ExpiresAt), cmp.Compare(a.ResourceKind, b.ResourceKind), cmp.Compare(a.ResourceID, b.ResourceID),
+			cmp.Compare(a.Capability, b.Capability), cmp.Compare(a.Direction, b.Direction), cmp.Compare(a.ResourceGeneration, b.ResourceGeneration))
+	})
+	return out
+}

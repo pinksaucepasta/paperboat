@@ -1,7 +1,6 @@
 package peersessions
 
 import (
-	"cmp"
 	"context"
 	"crypto/sha256"
 	"database/sql"
@@ -938,37 +937,13 @@ func relayGrantMembershipParts(memberships []networkScope) [][]networkScope {
 // relay's bound the memberships with the latest expiry are kept (the mesh's first), the rule RelayGrantScopes applies
 // to one peer's sessions; a session left out reaches its peer directly only.
 func relayGrantMemberships(self networkBinding, peers []networkPeer, grantExpiry int64) []networkScope {
-	network := peernetwork.AccountNetworkID(self.AccountID)
-	seen := map[networkScope]bool{}
-	out := []networkScope{}
+	relayable := make([][]networkScope, 0, len(peers))
 	for _, peer := range peers {
-		if peer.Identity.WireGuardPublicKey == "" {
-			continue // cannot be relayed
-		}
-		mesh := slices.ContainsFunc(peer.Scopes, func(s networkScope) bool { return s.ResourceKind == "machine_network" })
-		for _, scope := range relayGrantScopes(peer.Scopes, grantExpiry) {
-			switch {
-			case scope.ResourceKind == "machine_network":
-				scope.ResourceID = network
-			case mesh:
-				continue // the mesh membership already pairs this peer
-			}
-			if !seen[scope] {
-				seen[scope] = true
-				out = append(out, scope)
-			}
+		if peer.Identity.WireGuardPublicKey != "" { // one without a key cannot be relayed
+			relayable = append(relayable, peer.Scopes)
 		}
 	}
-	rank := func(s networkScope) int { // the mesh first
-		if s.ResourceKind == "machine_network" {
-			return 0
-		}
-		return 1
-	}
-	slices.SortFunc(out, func(a, b networkScope) int {
-		return cmp.Or(cmp.Compare(rank(a), rank(b)), cmp.Compare(b.ExpiresAt, a.ExpiresAt), cmp.Compare(a.ResourceKind, b.ResourceKind), cmp.Compare(a.ResourceID, b.ResourceID),
-			cmp.Compare(a.Capability, b.Capability), cmp.Compare(a.Direction, b.Direction), cmp.Compare(a.ResourceGeneration, b.ResourceGeneration))
-	})
+	out := peernetwork.RelayGrantMemberships(self.AccountID, relayable, grantExpiry)
 	if len(out) > peernetwork.MaxMergedMemberships {
 		slog.Warn("relay grant keeps the latest memberships within the relay bound", "memberships", len(out), "site", "network.go:relayGrantMemberships")
 		out = out[:peernetwork.MaxMergedMemberships]

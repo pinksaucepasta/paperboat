@@ -149,6 +149,9 @@ func (a *Authority) applyRelayGrants(ctx context.Context, tokens []string, resto
 		if err == nil && chunk && (len(strings.Split(next[g.NodeID], "\n")) >= derpquic.MaxGrantParts || earlier.ExpiresAt != g.ExpiresAt || earlier.IssuedAt != g.IssuedAt) {
 			err = ErrAuthority // the parts of one grant share one issue and one expiry, within the relay's bound
 		}
+		if err == nil && chunk && repeatsMembership(earlier.Memberships, g.Memberships) {
+			err = ErrAuthority // a membership is named once across the parts of one grant
+		}
 		if err != nil {
 			diagnosticlog.TryWarn("a relay grant that does not verify is not used; the other relays still apply", "node", g.NodeID, "error", err)
 			refused[g.NodeID] = true
@@ -245,7 +248,7 @@ func (a *Authority) verifyRelayGrant(ctx context.Context, token string, cfg Netw
 	// A grant names no peers: each membership must be a scope this configuration gives the endpoint (same
 	// resource and direction), and its account mesh membership makes every configured peer of the account a
 	// relay-control peer, as the relay itself decides (derpquic membership.go).
-	if !membershipsConfigured(g.Memberships, cfg) {
+	if !membershipsConfigured(g.Memberships, grantMembershipSet(cfg, g.ExpiresAt)) {
 		return g, nil, ErrAuthority
 	}
 	return g, meshControlPeers(g, cfg), nil
@@ -443,32 +446,45 @@ func (a *Authority) discoveryPublicKey(expected string) (string, error) {
 	return result, err
 }
 
-// membershipsConfigured reports whether every membership of a relay grant is a scope the signed configuration
-// gives this endpoint toward some peer: the same resource kind, id, generation, capability, port and direction.
-func membershipsConfigured(memberships []derpquic.Scope, cfg NetworkConfiguration) bool {
-	type tuple struct {
-		kind, id, capability, direction string
-		generation                      uint64
-		port                            uint16
-	}
-	configured := make(map[tuple]bool)
-	network := peernetwork.AccountNetworkID(cfg.Self.AccountID)
+// grantMembershipSet is every membership the signed configuration lets a relay grant of this expiry carry, built by
+// the one function the server signs with (peernetwork.RelayGrantMemberships). Peers without a key cannot be relayed
+// and are left out, as on the server.
+func grantMembershipSet(cfg NetworkConfiguration, grantExpiry int64) map[derpquic.Scope]bool {
+	peers := make([][]derpquic.Scope, 0, len(cfg.Peers))
 	for _, p := range cfg.Peers {
-		for _, s := range p.Scopes {
-			configured[tuple{s.ResourceKind, s.ResourceID, s.Capability, s.Direction, s.ResourceGeneration, s.Port}] = true
-			// The per-pair mesh scopes of this account are its one network in a grant (the server's
-			// relayGrantMemberships): held in a direction only while some mesh scope holds that direction.
-			if s.ResourceKind == "machine_network" && p.Identity.AccountID == cfg.Self.AccountID {
-				configured[tuple{s.ResourceKind, network, s.Capability, s.Direction, s.ResourceGeneration, s.Port}] = true
-			}
+		if p.Identity.WireGuardPublicKey != "" {
+			peers = append(peers, p.Scopes)
 		}
 	}
+	set := make(map[derpquic.Scope]bool)
+	for _, m := range peernetwork.RelayGrantMemberships(cfg.Self.AccountID, peers, grantExpiry) {
+		set[m] = true
+	}
+	return set
+}
+
+// membershipsConfigured reports whether every membership of a relay grant is exactly one the signed configuration
+// gives this endpoint: the same resource, generation, capability, port, direction and expiry (a standing scope with
+// the grant's own). A relay may carry fewer, because the server withholds peers its relay does not admit (billing),
+// never a different one, and a grant never names one twice.
+func membershipsConfigured(memberships []derpquic.Scope, allowed map[derpquic.Scope]bool) bool {
+	seen := make(map[derpquic.Scope]bool, len(memberships))
 	for _, m := range memberships {
-		if !configured[tuple{m.ResourceKind, m.ResourceID, m.Capability, m.Direction, m.ResourceGeneration, m.Port}] {
+		if !allowed[m] || seen[m] {
 			return false
 		}
+		seen[m] = true
 	}
 	return true
+}
+
+// repeatsMembership reports whether part names a membership that earlier already holds.
+func repeatsMembership(earlier, part []derpquic.Scope) bool {
+	held := make(map[derpquic.Scope]bool, len(earlier))
+	for _, m := range earlier {
+		held[m] = true
+	}
+	return slices.ContainsFunc(part, func(m derpquic.Scope) bool { return held[m] })
 }
 
 // verifyRelayGrantsLocked checks every grant part of node exactly as the relay will.

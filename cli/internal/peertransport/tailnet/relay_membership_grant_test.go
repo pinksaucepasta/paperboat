@@ -85,13 +85,14 @@ func TestRelayGrantMembershipWithoutExpiryTakesTheGrantExpiry(t *testing.T) {
 		signed := base64.RawURLEncoding.EncodeToString(header) + "." + base64.RawURLEncoding.EncodeToString(body)
 		return signed + "." + base64.RawURLEncoding.EncodeToString(ed25519.Sign(signer, []byte(signed)))
 	}
-	scope := derpquic.Scope{ResourceKind: "machine_network", ResourceID: "network_pair", ResourceGeneration: 1, Capability: "connect", Direction: "dial", Port: 443, ExpiresAt: grantExpiry}
+	scope := derpquic.Scope{ResourceKind: "machine_network", ResourceID: peernetwork.AccountNetworkID(cfg.Self.AccountID), ResourceGeneration: 1, Capability: "connect", Direction: "dial", Port: 443, ExpiresAt: grantExpiry}
 	if err := a.ApplyRelayGrants(t.Context(), []string{sign(scope)}); err != nil {
 		t.Fatalf("a grant carrying the grant expiry for an until-revoked scope was refused: %v", err)
 	}
 	for name, mutate := range map[string]func(*derpquic.Scope){
 		"zero in grant":  func(s *derpquic.Scope) { s.ExpiresAt = 0 },
 		"other resource": func(s *derpquic.Scope) { s.ResourceID = "network_other" },
+		"per-pair id":    func(s *derpquic.Scope) { s.ResourceID = "network_pair" },
 	} {
 		changed := scope
 		mutate(&changed)

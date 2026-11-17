@@ -114,7 +114,7 @@ func newUnlistedRelayFixture(t *testing.T) *unlistedRelayFixture {
 		}
 	}
 	g := peernetwork.RelayGrant{Version: 1, Issuer: cfg.Issuer, Audience: "paperboat-relay", IssuedAt: now, ExpiresAt: now + 60, Generation: cfg.Generation, AccountID: cfg.Self.AccountID, EndpointID: cfg.Self.EndpointID, WireGuardPublicKey: cfg.Self.WireGuardPublicKey, CertificateFingerprint: cfg.Self.QUICCertificateFingerprint, QUICPublicKey: cfg.Self.QUICPublicKey, NodeID: f.relay.NodeID, NodeGeneration: f.relay.NodeGeneration, ProcessEpoch: f.relay.ProcessEpoch}
-	g.Memberships = peerGrantMemberships(cfg)
+	g.Memberships = peerGrantMemberships(cfg, now+60)
 	header, _ := json.Marshal(map[string]string{"alg": "EdDSA", "typ": "paperboat-relay-grant+jwt", "kid": "network_test"})
 	body, _ := json.Marshal(g)
 	signed := base64.RawURLEncoding.EncodeToString(header) + "." + base64.RawURLEncoding.EncodeToString(body)

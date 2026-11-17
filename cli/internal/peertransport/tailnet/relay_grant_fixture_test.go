@@ -1,6 +1,9 @@
 package tailnet
 
-import "github.com/pinksaucepasta/paperboat/relay/derpquic"
+import (
+	"github.com/pinksaucepasta/paperboat/relay/derpquic"
+	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
+)
 
 // grantScope is a configured scope as a relay grant membership carries it (the configuration's own values).
 func grantScope(s NetworkScope) derpquic.Scope {
@@ -27,11 +30,11 @@ func grantMemberships(scopes ...NetworkScope) []derpquic.Scope {
 	return out
 }
 
-// peerGrantMemberships are the memberships for every scope the configuration holds toward its peers.
-func peerGrantMemberships(cfg NetworkConfiguration) []derpquic.Scope {
-	var scopes []NetworkScope
+// peerGrantMemberships are the memberships the server signs for the configuration's peers in a grant of this expiry.
+func peerGrantMemberships(cfg NetworkConfiguration, grantExpiry int64) []derpquic.Scope {
+	var peers [][]derpquic.Scope
 	for _, p := range cfg.Peers {
-		scopes = append(scopes, p.Scopes...)
+		peers = append(peers, p.Scopes)
 	}
-	return grantMemberships(scopes...)
+	return peernetwork.RelayGrantMemberships(cfg.Self.AccountID, peers, grantExpiry)
 }
