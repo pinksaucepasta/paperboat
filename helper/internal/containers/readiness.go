@@ -94,6 +94,7 @@ func newNodeClient(capability, dir string) (*nodeClient, error) {
 	if len(node.credential) < 32 {
 		return nil, errors.New("runtime credential is missing")
 	}
+	//paperboat:allow-source-policy default-http owner=helper-containers reason=owned-clone-bounded-timeout-no-redirect
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS13}
 	if caPath != "" {
