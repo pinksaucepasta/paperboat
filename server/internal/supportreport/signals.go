@@ -93,6 +93,11 @@ func (s *Service) configureSignals(cfg Config, options *sentry.ClientOptions) er
 	return nil
 }
 
+// Per minute: logs, traces, snapshot gauges, operation metrics (two items each). The snapshot interval, not the gauge cap,
+// bounds gauges (100 per 2 min). With these a server stays under about 250k metric items and 150k log lines a day, about
+// 2.3 GB and 1.1 GB a month against the 5 GB free caps; the old 600/300/6000/600 sat at the log cap (864k lines/day).
+var signalLimitsPerMinute = [4]int{100, 300, 6000, 60}
+
 func (s *Service) admitSignal(kind int) bool {
 	if s == nil || s.client == nil || s.signals == nil || s.closed.Load() {
 		return false
@@ -105,7 +110,7 @@ func (s *Service) admitSignal(kind int) bool {
 		st.window = now
 		st.counts = [4]int{}
 	}
-	if st.counts[kind] >= [4]int{600, 300, 6000, 600}[kind] {
+	if st.counts[kind] >= signalLimitsPerMinute[kind] {
 		st.dropped[kind].Add(1)
 		s.sdkSubmissionsDropped.Add(1)
 		return false
@@ -213,7 +218,8 @@ func (s *Service) Operation(ctx context.Context, operation, outcome, reference s
 
 func (s *Service) operationAdmitted(ctx context.Context, operation, outcome, reference string, duration time.Duration) {
 	ctx = s.signalContext(ctx, reference)
-	if s.signals.logs && s.admitSignal(0) {
+	// A successful request is counted by the operation metric; a log line per request was 864k lines/day.
+	if s.signals.logs && !(outcome == "success" && strings.HasPrefix(operation, "http_")) && s.admitSignal(0) {
 		logger := sentry.NewLogger(ctx)
 		entry := logger.Info()
 		if outcome == "failed" {
@@ -251,7 +257,9 @@ func (s *Service) SetSnapshot(fn func()) {
 
 const snapshotBatchLimit = 100
 const snapshotCandidateLimit = 2048
-const snapshotInterval = 5 * time.Second
+
+// snapshotInterval: 100 series every 5 s was 1.7M metrics/day (Sentry free trace-metric cap: 5 GB/month, about 400k/day).
+const snapshotInterval = 2 * time.Minute
 
 type snapshotGauge struct {
 	name  string

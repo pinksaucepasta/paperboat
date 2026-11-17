@@ -1136,7 +1136,7 @@ func (l *telemetryLifecycle) routeSink(core route.RouteTelemetrySink) route.Rout
 
 func (l *telemetryLifecycle) runMetricExport(ctx context.Context) {
 	defer close(l.metricDone)
-	ticker := time.NewTicker(15 * time.Second)
+	ticker := time.NewTicker(reporting.SnapshotInterval)
 	defer ticker.Stop()
 	for {
 		select {

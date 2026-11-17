@@ -188,7 +188,7 @@ func (r *Reporter) observeFailure(ctx context.Context, definition string, err er
 }
 
 func (r *Reporter) captureFaultLog(ctx context.Context, fault Fault) {
-	if r == nil || !r.enabled || r.hub == nil || !r.logs || !r.permit(&r.logsSent, &r.droppedLogs, 128) {
+	if r == nil || !r.enabled || r.hub == nil || !r.logs || !r.permit(&r.logsSent, &r.droppedLogs, maxLogs) {
 		return
 	}
 	ctx = sentry.SetHubOnContext(ctx, r.hub)

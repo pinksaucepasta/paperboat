@@ -117,7 +117,7 @@ func TestSignalPrivacyBoundsAndDisabled(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.client.Close()
-	for i := 0; i < 605; i++ {
+	for i := 0; i < signalLimitsPerMinute[0]+5; i++ {
 		s.admitSignal(0)
 	}
 	if s.signals.dropped[0].Load() != 5 {
@@ -194,5 +194,40 @@ func TestLifecycleFailureRecoveryUsesSameLocalEvents(t *testing.T) {
 	defer mu.Unlock()
 	if len(logs) != 2 || logs[0].Attributes["outcome"].AsString() != "failed" || logs[1].Attributes["outcome"].AsString() != "success" {
 		t.Fatalf("lost failure/recovery: %+v", logs)
+	}
+}
+
+// Sentry free caps (5 GB logs, 5 GB trace metrics a month): a log line per successful request filled the log cap.
+func TestSuccessfulRequestsAreCountedNotLogged(t *testing.T) {
+	var mu sync.Mutex
+	var outcomes []string
+	rate := 0.0
+	s, err := New(&memoryStore{}, Config{Enabled: true, DSN: "https://public@example.invalid/1", Release: "test", Environment: "test", TracesSampleRate: &rate})
+	if err != nil {
+		t.Fatal(err)
+	}
+	options := s.client.Options()
+	options.Transport = sentry.NewHTTPTransport()
+	options.BeforeSendLog = func(l *sentry.Log) *sentry.Log {
+		mu.Lock()
+		outcomes = append(outcomes, l.Attributes["operation"].AsString()+"/"+l.Attributes["outcome"].AsString())
+		mu.Unlock()
+		return nil
+	}
+	client, err := sentry.NewClient(options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.client.Close()
+	s.client = client
+	defer client.Close()
+	for _, c := range [][2]string{{"http_auth", "success"}, {"http_auth", "failed"}, {"connector_reconnect", "success"}} {
+		s.Operation(context.Background(), c[0], c[1], NewReference(), -1)
+	}
+	client.Flush(time.Second)
+	mu.Lock()
+	defer mu.Unlock()
+	if len(outcomes) != 2 || outcomes[0] != "http_auth/failed" || outcomes[1] != "connector_reconnect/success" {
+		t.Fatalf("logged %v, want the failed request and the lifecycle recovery only", outcomes)
 	}
 }

@@ -27,12 +27,19 @@ import (
 const (
 	maxEvents = 8
 	maxTraces = 128
+	// maxLogs per minute: edge and relay log every failure and observation once they carry a DSN.
+	maxLogs = 30
 	// The pinned SDK metric queue holds 100 items. Reserve 64 cumulative
 	// snapshots and eight drop/enable gauges; detailed signals get 28 items.
 	maxDetailMetrics = 100 - maxSnapshots - 8
 	maxSnapshots     = 64
 	flushTimeout     = 2 * time.Second
 )
+
+// SnapshotInterval is how often edge and relay export cumulative metric snapshots (up to 72 items each): every 15 s
+// was 280k items/day per process against a 5 GB/month free cap shared by every process; cumulative counters lose
+// nothing at 5 minutes.
+const SnapshotInterval = 5 * time.Minute
 
 // DefaultDSN and DefaultRelease are populated only in official release builds.
 // Ordinary source builds leave both empty and therefore keep reporting disabled.
@@ -523,7 +530,7 @@ func (r *Reporter) Observe(ctx context.Context, operation, outcome, code, refere
 }
 
 func (r *Reporter) emitSignals(ctx context.Context, operation, outcome, code, reference string, duration time.Duration) {
-	if r.logs && r.permit(&r.logsSent, &r.droppedLogs, 128) {
+	if r.logs && r.permit(&r.logsSent, &r.droppedLogs, maxLogs) {
 		entry := sentry.NewLogger(ctx).Info()
 		if outcome == "failed" {
 			entry = sentry.NewLogger(ctx).Error()

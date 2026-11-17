@@ -238,7 +238,7 @@ func runContext(processCtx context.Context, reporters ...*reporting.Reporter) er
 		metricsDone = make(chan struct{})
 		go func() {
 			defer close(metricsDone)
-			ticker := time.NewTicker(15 * time.Second)
+			ticker := time.NewTicker(reporting.SnapshotInterval)
 			defer ticker.Stop()
 			previous := server.Snapshot()
 			for {

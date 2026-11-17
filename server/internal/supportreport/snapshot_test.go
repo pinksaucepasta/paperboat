@@ -141,7 +141,7 @@ func TestCombinedSnapshotSDKBatchBoundAndFullRotation(t *testing.T) {
 	if got := s.SignalStatus()["snapshot_deferred"]; got != wantDeferred {
 		t.Fatalf("deferred=%v want %d", got, wantDeferred)
 	}
-	if snapshotInterval != 5*time.Second {
+	if snapshotInterval != 2*time.Minute {
 		t.Fatal("snapshot cadence differs from qualified interval")
 	}
 	t.Logf("qualified %d combined series in %d SDK batches", len(expected), cycles)
