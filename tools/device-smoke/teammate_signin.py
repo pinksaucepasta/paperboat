@@ -2,7 +2,7 @@
 """Controller side: sign the controlled teammate profile of a container in with an API token of the member account.
 
 The member's console session is a Playwright storage state (mode 600, never printed); the token is minted from it,
-valid one day, and goes straight into the container's `pb login --api-token-file -`. Idempotent: a profile that is
+valid one day, and goes straight into the container's `pb login --api-token -`. Idempotent: a profile that is
 already signed in is left alone.
 Usage: teammate_signin.py HOST CONTAINER USER   env: ORIGIN, STATE, PW_CHROMIUM, [PW_MODULE]
 
@@ -49,7 +49,7 @@ def device_signin(mint_token):
             return False
     except ValueError:
         pass
-    done = pb.run_remote(['--config', str(config), 'login', '--api-token-file', '-'], input=mint_token(), env=env,
+    done = pb.run_remote(['--config', str(config), 'login', '--api-token', '-'], input=mint_token(), env=env,
                          timeout=90)
     if done.returncode:
         raise RuntimeError('teammate sign-in failed: ' + done.stdout[-200:] + done.stderr[-200:])

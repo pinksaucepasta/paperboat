@@ -313,7 +313,7 @@ class Fresh:
         token = self.node('mint_api_token.mjs', work, 'final-recheck')
         code = ssh(self.args.host, 'umask 077; rm -rf {s}; mkdir -p {s}/home {s}/config {s}/data {s}/state {s}/cache; cat > {s}/token'.format(s=scratch), stdin=token)[0]
         code = code or ssh(self.args.host, 'python3 - ' + scratch, stdin=PROFILE)[0]
-        login = 'for i in 1 2 3; do {s}/mint.sh login --api-token-file - < {s}/token >/dev/null && {s}/mint.sh auth status --json | grep -q signed_in..true && exit 0; sleep 10; done; exit 1'
+        login = 'for i in 1 2 3; do {s}/mint.sh login --api-token - < {s}/token >/dev/null && {s}/mint.sh auth status --json | grep -q signed_in..true && exit 0; sleep 10; done; exit 1'
         code = code or ssh(self.args.host, login.format(s=scratch))[0]
         if code:
             raise RuntimeError("could not sign the host's scratch pb in to the fresh account")

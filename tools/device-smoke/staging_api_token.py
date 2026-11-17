@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""A one-day API token of the staging test account, on stdout only (for `pb login --api-token-file -` on a machine paired to staging).
+"""A one-day API token of the staging test account, on stdout only (for `pb login --api-token -` on a machine paired to staging).
 
 Same method as deploy/staging.py enroll: the fixture session cookie is read inside the remote process on the staging host and never
 appears in an argv. Usage: staging_api_token.py NAME   (run from a main checkout; `deploy/staging.py seed` has created the account).

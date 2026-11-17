@@ -59,7 +59,7 @@ def sign_in(dev, token):
         shown = shown.get('data', shown)
         dev.write(dev.home + '/.config/paperboat/config.json',
                   json.dumps({'server_url': shown['server_url'], 'auth': {'allow_file_fallback': True}}).encode())
-    done = dev.pb('login', '--api-token-file', '-', input=token.encode(), timeout=180)
+    done = dev.pb('login', '--api-token', '-', input=token.encode(), timeout=180)
     assert done.rc == 0, '%s sign-in failed: %s' % (dev.name, done.errtext[-200:])
 
 

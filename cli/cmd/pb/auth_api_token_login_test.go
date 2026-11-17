@@ -13,7 +13,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/config"
 )
 
-// pb login --api-token-file exchanges the token for a CLI session and activates it like a
+// pb login --api-token (or PAPERBOAT_API_TOKEN) exchanges the token for a CLI session and activates it like a
 // browser login; the token itself is never saved.
 func TestAPITokenLoginStartsATokenSession(t *testing.T) {
 	const secret = "pbat_" + "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
@@ -60,11 +60,7 @@ func TestAPITokenLoginStartsATokenSession(t *testing.T) {
 	oldStore := authCredentialStoreAvailable
 	t.Cleanup(func() { authCredentialStoreAvailable = oldStore })
 	authCredentialStoreAvailable = func() bool { return false }
-	tokenFile := filepath.Join(t.TempDir(), "token")
-	if err := os.WriteFile(tokenFile, []byte(secret+"\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	out, err := runBrowserLogin(t, context.Background(), path, "login", "--api-token-file", tokenFile)
+	out, err := runBrowserLogin(t, context.Background(), path, "login", "--api-token", secret)
 	if err != nil || !strings.Contains(out, "Signed in as agent@example.test with an API token") {
 		t.Fatalf("login: %v %s", err, out)
 	}
@@ -83,12 +79,14 @@ func TestAPITokenLoginStartsATokenSession(t *testing.T) {
 		}
 		return nil
 	})
-	bad := filepath.Join(t.TempDir(), "bad")
-	_ = os.WriteFile(bad, []byte("not-a-token"), 0o600)
-	if _, err := runBrowserLogin(t, context.Background(), path, "login", "--api-token-file", bad); err == nil {
-		t.Fatal("a file without a pbat_ token was accepted")
+	if _, err := runBrowserLogin(t, context.Background(), path, "login", "--api-token", "not-a-token"); err == nil {
+		t.Fatal("a value without a pbat_ token was accepted")
 	}
-	if _, err := runBrowserLogin(t, context.Background(), path, "login", "--api-token-file", tokenFile, "--fresh"); err == nil {
-		t.Fatal("--api-token-file combined with --fresh")
+	if _, err := runBrowserLogin(t, context.Background(), path, "login", "--api-token", secret, "--fresh"); err == nil {
+		t.Fatal("--api-token combined with --fresh")
+	}
+	t.Setenv("PAPERBOAT_API_TOKEN", secret)
+	if out, err := runBrowserLogin(t, context.Background(), path, "login"); err != nil || !strings.Contains(out, "with an API token") {
+		t.Fatalf("PAPERBOAT_API_TOKEN login: %v %s", err, out)
 	}
 }

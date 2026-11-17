@@ -18,12 +18,18 @@ import (
 
 // apiTokenLogin signs this computer in with an API token instead of browser approval (PLAN
 // F18-06): the server turns the token into a CLI session of its creator that carries the token,
-// so pb works as usual within the token's scope. The token is read from a file or stdin and is
-// never saved; the session ends when the token is revoked or expires.
-func apiTokenLogin(c *command.Context, path string) error {
-	token, err := readAPIToken(c, path)
-	if err != nil {
-		return err
+// so pb works as usual within the token's scope. The token comes from --api-token (- reads stdin) or
+// PAPERBOAT_API_TOKEN and is never saved; the session ends when the token is revoked or expires.
+func apiTokenLogin(c *command.Context, token string) error {
+	if token == "-" { // like docker login --password-stdin: keeps the token out of argv
+		data, err := io.ReadAll(io.LimitReader(os.Stdin, 4096))
+		if err != nil {
+			return fmt.Errorf("read the API token from stdin: %w", err)
+		}
+		token = strings.TrimSpace(string(data))
+	}
+	if !strings.HasPrefix(token, "pbat_") || strings.ContainsAny(token, " \t\r\n") || len(token) > 256 {
+		return localArgumentError("the API token must be one token (pbat_…), as printed by pb api-token create")
 	}
 	cfg, err := config.Load(c.String("config"))
 	if err != nil {
@@ -79,10 +85,10 @@ func apiTokenSignIn(c *command.Context, cfg *config.Config, store config.Profile
 		return e
 	}
 	if _, err = auth.CompleteLogin(c.Context, auth.LoginCompletion{Store: store, Client: client, Issuer: issuer, Credential: credential, SessionID: t.CLIClientSessionID, ExpectedAccountID: me.ID, PreviousSessionID: &previous, AllowAccountChange: true, ServerAuthorized: true}); err != nil {
-		return fmt.Errorf("activate the API token session; retry `pb login --api-token-file`: %w", err)
+		return fmt.Errorf("activate the API token session; retry `pb login --api-token`: %w", err)
 	}
 	if err = cfg.Save(); err != nil {
-		return fmt.Errorf("signed in; retry `pb login --api-token-file` to finish configuration: %w", err)
+		return fmt.Errorf("signed in; retry `pb login --api-token` to finish configuration: %w", err)
 	}
 	if err = refreshSignedInDaemon(c.Context, cfg); err != nil {
 		return browserLoginFailure{message: "Signed in with the API token, but the installed daemon could not refresh. Run the same pb login again, or pb doctor to check recovery.", cause: err}
@@ -92,24 +98,6 @@ func apiTokenSignIn(c *command.Context, cfg *config.Config, store config.Profile
 	}
 	_, err = fmt.Fprintf(c.Writer, "Signed in as %s with an API token. This computer can do only what the token allows.\n", firstNonEmpty(me.Email, me.DisplayName, me.ID))
 	return err
-}
-
-func readAPIToken(c *command.Context, path string) (string, error) {
-	var data []byte
-	var err error
-	if path == "-" {
-		data, err = io.ReadAll(io.LimitReader(os.Stdin, 4096))
-	} else {
-		data, err = os.ReadFile(path)
-	}
-	if err != nil {
-		return "", fmt.Errorf("read the API token: %w", err)
-	}
-	token := strings.TrimSpace(string(data))
-	if !strings.HasPrefix(token, "pbat_") || strings.ContainsAny(token, " \t\r\n") || len(token) > 256 {
-		return "", localArgumentError("the API token file must hold one API token (pbat_…), as printed by pb api-token create")
-	}
-	return token, nil
 }
 
 func apiTokenDeviceType() string {

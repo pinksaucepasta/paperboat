@@ -129,7 +129,7 @@ func TestOnlyTheControlHostIsTrackedWhenOneIsGiven(t *testing.T) {
 	}
 }
 
-// A new sign-in after the previous session was revoked (pb login, pb login --api-token-file) brings
+// A new sign-in after the previous session was revoked (pb login, pb login --api-token) brings
 // a different credential: the rejection of the old one must not hold the new one back, or the
 // daemon's refresh right after the sign-in fails (F18-06 on hp).
 func TestARejectedCredentialDoesNotHoldBackANewOne(t *testing.T) {

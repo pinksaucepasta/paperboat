@@ -31,7 +31,7 @@ def api_token():
 def sign_in_controller(dev):
     shown = fleet.json_pb(dev, 'config', 'show')
     dev.write(dev.home + '/.config/paperboat/config.json', json.dumps({'server_url': shown['server_url'], 'auth': {'allow_file_fallback': True}}).encode())
-    done = dev.pb('login', '--api-token-file', '-', '--json', input=api_token())
+    done = dev.pb('login', '--api-token', '-', '--json', input=api_token())
     assert json.loads(done.text).get('ok'), 'controller login failed: ' + done.text[-200:] + done.errtext[-200:]
 
 

@@ -17,7 +17,7 @@ pb login [flags]
 ### Options
 
 ```
-      --api-token-file string   sign in with an API token read from this file (- for stdin) instead of browser approval
+      --api-token string        sign in with this API token instead of browser approval (- reads it from stdin; or set PAPERBOAT_API_TOKEN)
       --change-account          sign in with another account after browser approval
       --fresh                   remove this computer's setup and machine record, then add it again
   -h, --help                    help for login

@@ -134,7 +134,7 @@ def signin(dev):
     if dev.pb('auth', 'status', '--json').rc == 0 and '"signed_in":true' in dev.pb('auth', 'status', '--json').text.replace(' ', ''):
         return
     token = subprocess.run(['node', str(HERE / 'mint_api_token.mjs'), 'xpe-x31-%s-%d' % (dev.name, time.time())], capture_output=True, env=os.environ, timeout=180).stdout
-    done = dev.pb('login', '--api-token-file', '-', '--json', input=token, timeout=120)
+    done = dev.pb('login', '--api-token', '-', '--json', input=token, timeout=120)
     assert done.rc == 0, 'sign-in on %s: %s' % (dev.name, mask(done.errtext)[-200:])
 
 

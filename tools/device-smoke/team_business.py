@@ -288,7 +288,7 @@ def machine_access(c, start):
         return
     try:
         rc, secret, err = c.run(['cat', '.f19stok'])
-        done = subprocess.run(shlex.split(c.a.peer_cmd) + ['bash -lc ' + shlex.quote(c.a.pb + ' login --api-token-file -')],
+        done = subprocess.run(shlex.split(c.a.peer_cmd) + ['bash -lc ' + shlex.quote(c.a.pb + ' login --api-token -')],
                               input=secret.strip() + '\n', capture_output=True, text=True, timeout=120)
         secret = ''
         c.step('the peer signs in with the scoped token', done.returncode == 0, done.stdout + done.stderr)

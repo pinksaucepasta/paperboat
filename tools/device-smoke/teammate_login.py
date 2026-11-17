@@ -35,7 +35,7 @@ def main():
     if status.returncode == 0 and json.loads(status.stdout or '{}').get('signed_in'):
         print('signed-in')
         return 0
-    return subprocess.run([PB, '--config', str(config), 'login', '--api-token-file', '-'], env=env, stdin=sys.stdin).returncode
+    return subprocess.run([PB, '--config', str(config), 'login', '--api-token', '-'], env=env, stdin=sys.stdin).returncode
 
 
 if __name__ == '__main__':

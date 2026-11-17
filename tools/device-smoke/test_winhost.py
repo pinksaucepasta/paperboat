@@ -1418,7 +1418,7 @@ class TeammateSigninOnTheDevice(unittest.TestCase):
           '"config show --json") echo \'{"data":{"server_url":"https://api.example.test","auth_file_fallback":true}}\';;\n'
           '*"auth status --json") if [ -f "$XDG_CONFIG_HOME/in" ]; then echo \'{"signed_in":true}\'; '
           'else echo \'{"signed_in":false}\'; exit 1; fi;;\n'
-          '*"login --api-token-file -") mkdir -p "$XDG_CONFIG_HOME"; cat > "$XDG_CONFIG_HOME/in"; '
+          '*"login --api-token -") mkdir -p "$XDG_CONFIG_HOME"; cat > "$XDG_CONFIG_HOME/in"; '
           'printf "%s|%s" "$2" "$XDG_STATE_HOME" > "$XDG_CONFIG_HOME/seen";;\n'
           '*) exit 9;;\nesac\n')
 
@@ -1453,7 +1453,7 @@ class TeammateSigninOnTheDevice(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, 'teammate sign-in failed: pb: token refused'):
                 teammate_signin.device_signin(lambda: b'pbt_secret')
         login = fake.calls[2]
-        self.assertEqual(r'--config C:\Users\u\.pb-smoke\teammate\config.json login --api-token-file -', login['payload']['args'])
+        self.assertEqual(r'--config C:\Users\u\.pb-smoke\teammate\config.json login --api-token -', login['payload']['args'])
         self.assertEqual(r'C:\Users\u\.pb-smoke\teammate\state', login['payload']['env']['XDG_STATE_HOME'])
         self.assertNotIn('pbt_secret', ' '.join(login['argv']))
 

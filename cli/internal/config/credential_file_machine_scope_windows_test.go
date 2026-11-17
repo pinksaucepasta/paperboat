@@ -70,7 +70,7 @@ func TestWindowsFileSecretRejectsNonRegularCredentialObject(t *testing.T) {
 
 // An elevated administrator token gives new folders to Administrators with its default DACL (Administrators, SYSTEM,
 // the logon session) when the parent passes nothing down, as the credentials folder login's profile save secured
-// first does. The file store must still create its folder owner-only for the user (pb login --api-token-file with
+// first does. The file store must still create its folder owner-only for the user (pb login --api-token with
 // auth.allow_file_fallback in an isolated profile, X-35).
 func TestFileSecretStoreCreatedFromElevatedTokenIsOwnedByTheUser(t *testing.T) {
 	setFixtureDefaultOwnerToAdministrators(t)

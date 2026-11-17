@@ -4,7 +4,7 @@
 OWNER runs pb signed in as the token's creator (OWNER_CMD); TOKEN runs pb on another machine of the
 same account that this check signs in with the token (TOKEN_CMD; its CLI session is replaced and is
 signed out at the end, when the token is revoked). The check creates a token scoped to `exec` on
---allowed, signs TOKEN in with `pb login --api-token-file -`, and checks that exec on --allowed works,
+--allowed, signs TOKEN in with `pb login --api-token -`, and checks that exec on --allowed works,
 exec on --other is refused as outside the token's scope, a write outside the scope (creating
 another API token) is refused, and revoking the token ends the session. The secret only passes
 from OWNER's stdout to TOKEN's stdin; it is never printed. Then the solo case: a token that may
@@ -80,8 +80,8 @@ def main():
     if not secret:
         return 1
     try:
-        rc, out, err = holder('login', '--api-token-file', '-', stdin=secret + '\n')
-        step('pb login --api-token-file signs in with the token', rc == 0 and 'API token' in out, out + err)
+        rc, out, err = holder('login', '--api-token', '-', stdin=secret + '\n')
+        step('pb login --api-token signs in with the token', rc == 0 and 'API token' in out, out + err)
         secret = ''
         # Access reaches the peer networks asynchronously: retry the allowed exec, bounded.
         for attempt in range(9):
@@ -131,7 +131,7 @@ def tag_scope(a, owner, holder, step, name, marker):
         step('create a token that may only exec on tag:ci', secret.startswith('pbat_'), err)
         if not secret:
             return
-        rc, out, err = holder('login', '--api-token-file', '-', stdin=secret + '\n')
+        rc, out, err = holder('login', '--api-token', '-', stdin=secret + '\n')
         secret = ''
         step('sign in with the tag:ci token', rc == 0, out + err)
         for attempt in range(9):

@@ -11,7 +11,7 @@ const hero = [
 const token = [
   { lines: ["$ pb machine tag build-01 add agents", "$ pb machine tag build-02 add agents"], note: "Mark the machines an agent may touch." },
   { lines: [`$ pb api-token create agent --expires 7d --scope '[{"dst":["tag:agents"],"allow":["exec","files"]}]'`], note: "A token for exec and files on those machines, for a week. The secret prints once." },
-  { lines: ["$ pb login --api-token-file ./agent.token"], note: "Where the agent runs. No browser needed." },
+  { lines: ["$ PAPERBOAT_API_TOKEN=pbat_… pb login"], note: "Where the agent runs. No browser needed." },
   { lines: ["$ pb policy explain --dst machine:db --action exec --api-token agent"], note: "Confirm what it cannot do before you hand it over." },
 ]
 

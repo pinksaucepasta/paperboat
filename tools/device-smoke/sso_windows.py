@@ -121,7 +121,7 @@ def require_sso(pb, log, args):
     member = (whoami(pb).get('account') or {}).get('id') or whoami(pb).get('account_id')
     owner_config, owner_env = profile(pb, 'sso-owner')
     token = mint_token(args.owner_state, 'sso-owner-%d' % int(time.time()))
-    run(pb, log, 'owner_login_token', [owner_config, 'login', '--api-token-file', '-'], owner_env, token)
+    run(pb, log, 'owner_login_token', [owner_config, 'login', '--api-token', '-'], owner_env, token)
     owner = lambda name, *a, **kw: run(pb, log, name, [owner_config, *a], owner_env, **kw)
     team_get = lambda name, **kw: run(pb, log, name, ['team', 'get', args.team, '--json'], **kw)
     try:

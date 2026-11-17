@@ -277,7 +277,7 @@ def login_controller(dev):
     shown = shown.get('data', shown)
     dev.write(dev.home + '/.config/paperboat/config.json', json.dumps({'server_url': shown['server_url'], 'auth': {'allow_file_fallback': True}}).encode())
     token = Path(os.environ['XPLAT_API_TOKEN_FILE']).read_bytes().strip()
-    done = dev.pb('login', '--api-token-file', '-', input=token + b'\n', timeout=120)
+    done = dev.pb('login', '--api-token', '-', input=token + b'\n', timeout=120)
     assert done.rc == 0, 'login failed: ' + (done.text + done.errtext)[-300:]
 
 

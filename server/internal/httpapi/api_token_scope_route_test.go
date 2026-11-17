@@ -45,7 +45,7 @@ func TestScopedTokenRoute(t *testing.T) {
 	r := httptest.NewRequest("POST", "/v1/e2ee/bootstrap", nil)
 	r.Header.Set("X-Paperboat-Fresh-Enrollment", "1")
 	if !scopedTokenRoute(r) {
-		t.Error("a scoped session cannot register its own E2EE certificate, so pb login --api-token-file fails")
+		t.Error("a scoped session cannot register its own E2EE certificate, so pb login --api-token fails")
 	}
 	if scopedTokenRoute(httptest.NewRequest("POST", "/v1/workspaces/acme/api-tokens", nil)) {
 		t.Error("a scoped token may create API tokens")

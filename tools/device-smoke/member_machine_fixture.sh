@@ -3,7 +3,7 @@
 # installed and paired as a machine of the SECOND account (the member of the shared test team): the member side of the
 # two-account team checks (team_two_account.py --member-cmd, tunnel/preview ip-rules observers).
 # The member is the console session STATE (mode 600); its API token is minted from it, lives one day and goes straight
-# into the container's `pb login --api-token-file -`; the enrollment token is piped the same way. Nothing secret is printed.
+# into the container's `pb login --api-token -`; the enrollment token is piped the same way. Nothing secret is printed.
 # env: ORIGIN, STATE, PW_CHROMIUM, PW_MODULE (as mint_api_token.mjs). Prints one JSON line {"name","machine_id"}.
 # Teardown: ssh HOST sudo docker rm -f NAME, then cleanup_test_account.py --prefix <name prefix> --id <machine_id> --apply.
 set -euo pipefail
