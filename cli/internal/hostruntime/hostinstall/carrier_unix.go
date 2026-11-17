@@ -71,7 +71,6 @@ func prepareCarrierConfig(ctx context.Context, r Request) (CarrierConfig, error)
 		return CarrierConfig{}, ErrInvalidRequest
 	}
 	paths := platformPaths(r.UID)
-	root := filepath.Dir(carrierConfigPath(paths.instance))
 	pin := filepath.Join(filepath.Dir(paths.workerRollback), "pins", r.Source.SHA256, "pb")
 	if _, err := os.Lstat(pin); installNotExistOnly(err) {
 		if err := stageBinary(r.Executable, pin, r.Source); err != nil {
@@ -83,6 +82,12 @@ func prepareCarrierConfig(ctx context.Context, r Request) (CarrierConfig, error)
 	if err := r.Source.Verify(pin); err != nil {
 		return CarrierConfig{}, err
 	}
+	return buildCarrierConfig(r, paths, pin)
+}
+
+// buildCarrierConfig is the carrier generation's descriptor for request r run from pin; it touches nothing.
+func buildCarrierConfig(r Request, paths installPaths, pin string) (CarrierConfig, error) {
+	root := filepath.Dir(carrierConfigPath(paths.instance))
 	generation, err := sourceGeneration(r.Source)
 	if err != nil {
 		return CarrierConfig{}, err
@@ -244,6 +249,17 @@ func activateCarrierGeneration(c CarrierConfig) error {
 	if len(body) == 0 || len(body) > carrierDescriptorLimit {
 		return ErrInvalidRequest
 	}
+	// The bytes are the candidate's own, not re-encoded, but they must still be the generation the helper vetted.
+	written, err := decodeCarrier(body)
+	if err != nil {
+		return err
+	}
+	if err := written.Validate(); err != nil {
+		return err
+	}
+	if written.Instance != c.Instance || written.Generation != c.Generation || written.Source != c.Source {
+		return ErrInvalidRequest
+	}
 	return atomicfile.Write(carrierConfigPath(c.Instance), body, atomicfile.Options{Mode: 0640, OwnerUID: 0, OwnerGID: c.GID})
 }
 
@@ -274,7 +290,15 @@ func verifyCarrierNative(c CarrierConfig, i *service.Installer) error {
 // runningAs reports whether this process is executable (a generation's pin).
 func runningAs(executable string) bool {
 	self, err := os.Executable()
-	return err == nil && filepath.Clean(self) == executable
+	if err != nil {
+		return false
+	}
+	have, err := os.Stat(self)
+	if err != nil {
+		return false
+	}
+	want, err := os.Stat(executable)
+	return err == nil && os.SameFile(have, want)
 }
 func verifyCarrierNativeCustody(c CarrierConfig, i *service.Installer) error {
 	pinParent, err := openProtectedPinDirectory(filepath.Dir(c.Executable))

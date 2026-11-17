@@ -86,12 +86,17 @@ func carrierControlEndpoint(hostdEndpoint, generation string) string {
 }
 
 func carrierInstaller(c CarrierConfig) (*service.Installer, error) {
-	return carrierInstallerWithPending(c, false)
+	return carrierInstallerWithPending(c, false, nil)
 }
 func carrierInstallerPending(c CarrierConfig) (*service.Installer, error) {
-	return carrierInstallerWithPending(c, true)
+	return carrierInstallerWithPending(c, true, nil)
 }
-func carrierInstallerWithPending(c CarrierConfig, pending bool) (*service.Installer, error) {
+
+// carrierInstallerRendered writes rendered, the carrier unit as the build that runs it rendered it, instead of this build's render.
+func carrierInstallerRendered(c CarrierConfig, rendered []byte) (*service.Installer, error) {
+	return carrierInstallerWithPending(c, false, rendered)
+}
+func carrierInstallerWithPending(c CarrierConfig, pending bool, rendered []byte) (*service.Installer, error) {
 	controller, err := service.CarrierController(c.Source.Platform, c.Instance, c.Generation, c.UID, service.ExecRunner{})
 	if err != nil {
 		return nil, err
@@ -100,15 +105,16 @@ func carrierInstallerWithPending(c CarrierConfig, pending bool) (*service.Instal
 	if runtime.GOOS == "windows" {
 		args = []string{"daemon", "__runtime-carrier", "--instance", c.Instance, "--generation", c.Generation}
 	}
-	config := service.Config{Platform: c.Source.Platform, Kind: service.CarrierKind, Instance: c.Instance, Generation: c.Generation, ConfigRoot: carrierServiceRoot(c), Executable: c.Executable, ExecutableSHA256: c.Source.SHA256, ExecutableLength: c.Source.Length, User: c.User, Group: c.Group, Arguments: args, Environment: c.Environment, UpgradeMode: service.UpgradeReload, Controller: controller, AccountReadableDefinition: c.Source.Platform != "windows"}
+	config := service.Config{Platform: c.Source.Platform, Kind: service.CarrierKind, Instance: c.Instance, Generation: c.Generation, ConfigRoot: carrierServiceRoot(c), Executable: c.Executable, ExecutableSHA256: c.Source.SHA256, ExecutableLength: c.Source.Length, User: c.User, Group: c.Group, Arguments: args, Environment: c.Environment, UpgradeMode: service.UpgradeReload, Controller: controller, AccountReadableDefinition: c.Source.Platform != "windows", Rendered: rendered}
 	if pending {
 		return service.NewPending(config)
 	}
 	return service.New(config)
 }
 
-// prepareCarrierLocked requires the existing native installation control lock.
-func prepareCarrierLocked(ctx context.Context, request Request) error {
+// prepareCarrierLocked requires the existing native installation control lock. rendered is the new carrier's
+// unit as the build being installed rendered it (nil: this build's).
+func prepareCarrierLocked(ctx context.Context, request Request, rendered []byte) error {
 	if ctx == nil {
 		return ErrInvalidRequest
 	}
@@ -158,7 +164,7 @@ func prepareCarrierLocked(ctx context.Context, request Request) error {
 	if !installNotExistOnly(err) {
 		return err
 	}
-	installer, err := carrierInstaller(c)
+	installer, err := carrierInstallerRendered(c, rendered)
 	if err != nil {
 		return err
 	}

@@ -59,10 +59,10 @@ func installGuard(ctx context.Context, executable, browserDomain string, units m
 	cfg := darwinGuardConfig()
 	cfg.StateDir, cfg.InstallAccount, cfg.Undo = DefaultStateDir, true, undo
 	if units != nil {
-		cfg.Unit = units[filepath.Base(darwinLaunchPath)]
-		if len(units) != 1 || cfg.Unit == "" {
-			return errGuardUnits
+		if err := checkGuardUnits(units, filepath.Base(darwinLaunchPath)); err != nil {
+			return err
 		}
+		cfg.Unit = units[filepath.Base(darwinLaunchPath)]
 	}
 	return installDarwin(ctx, executable, cfg)
 }

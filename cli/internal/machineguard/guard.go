@@ -7,14 +7,31 @@ import (
 	"errors"
 	"net"
 	"net/netip"
+	"path/filepath"
 )
 
 var ErrUnsupported = errors.New("protected machine-name access requires the Linux Paperboat machine guard service; this platform is not qualified")
 
 var ErrPortInUse = errors.New("protected port is already in use")
 
-// errGuardUnits: the guard units handed to Install are not this guard's set of files.
-var errGuardUnits = errors.New("machine guard units do not match the guard's unit files")
+// errGuardUnits: the guard units handed to Install are not a usable set of unit files.
+var errGuardUnits = errors.New("machine guard units are not a usable set of unit files")
+
+// checkGuardUnits accepts the candidate build's own set of guard unit files: it holds the files this installer
+// enables and starts, and every name is a plain file name. The set may differ from the installing build's.
+func checkGuardUnits(units map[string]string, required ...string) error {
+	for _, name := range required {
+		if units[name] == "" {
+			return errGuardUnits
+		}
+	}
+	for name, unit := range units {
+		if name == "" || name != filepath.Base(name) || name == "." || name == ".." || unit == "" {
+			return errGuardUnits
+		}
+	}
+	return nil
+}
 
 // ErrListenerRefused is a refusal of one listener (its name or address belongs to another OS user, the
 // user's reservation limit, a listener another connection holds). The caller skips that item; the rest of

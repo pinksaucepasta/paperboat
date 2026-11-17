@@ -59,14 +59,14 @@ func TestEveryUnitTheUpdateWritesIsTheCandidatesOwnRender(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(own.Guard) == 0 || len(own.Host) == 0 || len(own.Hostd) == 0 || len(own.HostdPending) == 0 || len(own.Updater) == 0 {
+	if len(own.Guard) == 0 || len(own.Host) == 0 || len(own.Hostd) == 0 || len(own.HostdPending) == 0 || len(own.Updater) == 0 || len(own.Carrier) == 0 {
 		t.Fatalf("render report misses a unit: %+v", own)
 	}
 	// A candidate build that renders every unit differently from the installing build.
 	mark := func(b []byte) []byte {
 		return append(append([]byte(nil), b...), "# only the candidate renders this\n"...)
 	}
-	candidate := CandidateRender{HostdPending: mark(own.HostdPending), Hostd: mark(own.Hostd), Updater: mark(own.Updater), Host: mark(own.Host), Guard: map[string]string{}}
+	candidate := CandidateRender{HostdPending: mark(own.HostdPending), Hostd: mark(own.Hostd), Updater: mark(own.Updater), Host: mark(own.Host), Carrier: mark(own.Carrier), Guard: map[string]string{}}
 	for name, unit := range own.Guard {
 		candidate.Guard[name] = unit + "# only the candidate renders this\n"
 	}
@@ -77,9 +77,24 @@ func TestEveryUnitTheUpdateWritesIsTheCandidatesOwnRender(t *testing.T) {
 		return json.Marshal(candidate)
 	}
 	for _, pending := range []bool{true, false} {
-		host, hostd, updater, guard, err := candidateInstallersWith(context.Background(), "/pins/candidate/pb", request, paths, pending)
+		host, hostd, updater, rendered, err := candidateInstallersWith(context.Background(), "/pins/candidate/pb", request, paths, pending)
 		if err != nil {
 			t.Fatal(err)
+		}
+		guard := rendered.Guard
+		if !bytes.Equal(rendered.Carrier, candidate.Carrier) {
+			t.Fatalf("pending=%v: the carrier unit is not the candidate's render", pending)
+		}
+		carrierConfig, err := buildCarrierConfig(request, paths, "/pins/x/pb")
+		if err != nil {
+			t.Fatal(err)
+		}
+		carrier, err := carrierInstallerRendered(carrierConfig, rendered.Carrier)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got, err := carrier.Render(); err != nil || !bytes.Equal(got, candidate.Carrier) {
+			t.Fatalf("pending=%v: the carrier unit written is not the candidate's render: %v", pending, err)
 		}
 		wantHostd := candidate.Hostd
 		if pending {
@@ -125,7 +140,7 @@ func TestInstallRunsTheCandidateExecutableAndInstallsItsReport(t *testing.T) {
 	mark := func(b []byte) []byte {
 		return append(append([]byte(nil), b...), "# rendered by the candidate executable\n"...)
 	}
-	report := CandidateRender{HostdPending: mark(own.HostdPending), Hostd: mark(own.Hostd), Updater: mark(own.Updater), Host: mark(own.Host), Guard: map[string]string{}}
+	report := CandidateRender{HostdPending: mark(own.HostdPending), Hostd: mark(own.Hostd), Updater: mark(own.Updater), Host: mark(own.Host), Carrier: mark(own.Carrier), Guard: map[string]string{}}
 	for name, unit := range own.Guard {
 		report.Guard[name] = unit + "# rendered by the candidate executable\n"
 	}
@@ -143,7 +158,7 @@ func TestInstallRunsTheCandidateExecutableAndInstallsItsReport(t *testing.T) {
 	if err = os.WriteFile(candidate, []byte(script), 0700); err != nil {
 		t.Fatal(err)
 	}
-	host, hostd, updater, guard, err := candidateInstallersWith(context.Background(), candidate, request, paths, true)
+	host, hostd, updater, rendered, err := candidateInstallersWith(context.Background(), candidate, request, paths, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -155,9 +170,20 @@ func TestInstallRunsTheCandidateExecutableAndInstallsItsReport(t *testing.T) {
 			t.Fatalf("the %s unit written is not the candidate executable's render: %v", name, err)
 		}
 	}
+	guard := rendered.Guard
 	for name, unit := range report.Guard {
 		if guard[name] != unit {
 			t.Fatalf("guard unit %s is not the candidate executable's render", name)
 		}
+	}
+}
+
+func TestCandidateReportIsCappedWhileItIsCollected(t *testing.T) {
+	var buffer cappedBuffer
+	if _, err := buffer.Write(make([]byte, renderOutputLimit)); err != nil {
+		t.Fatalf("a report of exactly the limit is refused: %v", err)
+	}
+	if _, err := buffer.Write([]byte{0}); !errors.Is(err, errCandidateReportTooLarge) {
+		t.Fatalf("a report past the limit was collected: %v", err)
 	}
 }
