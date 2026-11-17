@@ -183,10 +183,19 @@ func updatedRuntimeCommand() *cobra.Command {
 	}, SilenceUsage: true, SilenceErrors: true}
 }
 
+// withServerFlag hands --server back to bootstrap: pb's persistent --server flag takes it out of the arguments
+// of a command that disables flag parsing.
+func withServerFlag(command *cobra.Command, args []string) []string {
+	if flag := command.Root().PersistentFlags().Lookup("server"); flag != nil && flag.Value.String() != "" {
+		return append([]string{"--server", flag.Value.String()}, args...)
+	}
+	return args
+}
+
 // bootstrapRuntimeCommand is the container supervisor's first-start pairing, run as the runtime user.
 func bootstrapRuntimeCommand() *cobra.Command {
 	return &cobra.Command{Use: "__runtime-bootstrap", Hidden: true, DisableFlagParsing: true, RunE: func(command *cobra.Command, args []string) error {
-		code := hostruntimecmd.Execute(command.Context(), append([]string{"bootstrap"}, args...), command.InOrStdin(), command.OutOrStdout(), command.ErrOrStderr())
+		code := hostruntimecmd.Execute(command.Context(), append([]string{"bootstrap"}, withServerFlag(command, args)...), command.InOrStdin(), command.OutOrStdout(), command.ErrOrStderr())
 		if code != 0 {
 			return exitCodeError{code: code}
 		}
