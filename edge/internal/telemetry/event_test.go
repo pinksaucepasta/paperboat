@@ -2,6 +2,8 @@ package telemetry
 
 import (
 	"context"
+	"github.com/pinksaucepasta/paperboat/shared/health"
+	"github.com/pinksaucepasta/paperboat/shared/telemetry/safe"
 	"strings"
 	"sync"
 	"testing"
@@ -13,10 +15,10 @@ func TestEventExactJSONAndTypedFields(t *testing.T) {
 	at := time.Date(2026, 8, 31, 1, 2, 3, 456000000, time.FixedZone("offset", 19800))
 	nextRetry := at.Add(time.Minute)
 	event, err := NewEvent(EventInput{
-		At: at, Severity: SeverityWarn, Component: DimensionRoute, Name: "route_transition", Code: "route_stale",
+		At: at, Severity: SeverityWarn, Component: health.DimensionRoute, Name: "route_transition", Code: "route_stale",
 		Outcome: OutcomeStateChange, Message: "Route assignment is stale.", CorrelationID: "corr_event_1",
 		IDs:         SafeIDs{TunnelID: "tunnel_01", RouteID: "route_02", ConnectorID: "connector_03"},
-		Generations: Generations{Config: 4, Route: 5, Assignment: 6}, Retry: RetryScheduled, NextRetryAt: nextRetry,
+		Generations: Generations{Config: 4, Route: 5, Assignment: 6}, Retry: health.RetryScheduled, NextRetryAt: nextRetry,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -34,9 +36,9 @@ func TestEventExactJSONAndTypedFields(t *testing.T) {
 func TestEventRedactsSecretsPersonalDataAndArbitraryIDs(t *testing.T) {
 	secret := "Authorization: Bearer abcdef Cookie=session-secret token=xoxb-123456789012 customer.example.com https://alice:password@example.com/x alice@example.com /Users/alice/private route_customer123 -----BEGIN PRIVATE KEY----- key -----END PRIVATE KEY-----"
 	event, err := NewEvent(EventInput{
-		At: time.Date(2026, 8, 31, 1, 2, 3, 0, time.UTC), Severity: SeverityError, Component: DimensionAccess,
+		At: time.Date(2026, 8, 31, 1, 2, 3, 0, time.UTC), Severity: SeverityError, Component: health.DimensionAccess,
 		Name: "access_decision", Code: "access_denied", Outcome: OutcomeRejected, Message: secret,
-		CorrelationID: "corr_safe_1", IDs: SafeIDs{TunnelID: "tunnel_01", RequestID: "request_02"}, Retry: RetryNotRetryable,
+		CorrelationID: "corr_safe_1", IDs: SafeIDs{TunnelID: "tunnel_01", RequestID: "request_02"}, Retry: health.RetryNotRetryable,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -47,32 +49,32 @@ func TestEventRedactsSecretsPersonalDataAndArbitraryIDs(t *testing.T) {
 			t.Fatalf("unsafe value %q in %s", unsafe, body)
 		}
 	}
-	if !strings.Contains(string(body), RedactedValue) || !strings.Contains(string(body), "tunnel_01") || !strings.Contains(string(body), "request_02") {
+	if !strings.Contains(string(body), safe.RedactedValue) || !strings.Contains(string(body), "tunnel_01") || !strings.Contains(string(body), "request_02") {
 		t.Fatalf("safe identifiers/redaction missing: %s", body)
 	}
 }
 
 func TestEventValidationBoundsAndLogIsolation(t *testing.T) {
-	base := EventInput{At: time.Now(), Severity: SeverityInfo, Component: DimensionService, Name: "service_started", Code: "ready", Outcome: OutcomeSuccess, Message: strings.Repeat("界", 300), CorrelationID: "corr_event_1", Retry: RetryNone}
+	base := EventInput{At: time.Now(), Severity: SeverityInfo, Component: health.DimensionService, Name: "service_started", Code: "ready", Outcome: OutcomeSuccess, Message: strings.Repeat("界", 300), CorrelationID: "corr_event_1", Retry: health.RetryNone}
 	event, err := NewEvent(base)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(event.Message) > maximumMessageBytes || !utf8.ValidString(event.Message) {
+	if len(event.Message) > safe.MaximumMessageBytes || !utf8.ValidString(event.Message) {
 		t.Fatalf("message not safely bounded: %d", len(event.Message))
 	}
 	base.Message = string([]byte{0xff})
-	if _, err := NewEvent(base); errorCode(err) != ErrorInvalidString {
+	if _, err := NewEvent(base); safe.ErrorCodeOf(err) != safe.ErrorInvalidString {
 		t.Fatalf("invalid UTF-8 error = %v", err)
 	}
 	base.Message = "ok"
 	base.IDs.RouteID = "customer.example.com"
-	if _, err := NewEvent(base); errorCode(err) != ErrorInvalidID {
+	if _, err := NewEvent(base); safe.ErrorCodeOf(err) != safe.ErrorInvalidID {
 		t.Fatalf("invalid id error = %v", err)
 	}
 	base.IDs = SafeIDs{}
-	base.Retry = RetryScheduled
-	if _, err := NewEvent(base); errorCode(err) != ErrorInvalidRetry {
+	base.Retry = health.RetryScheduled
+	if _, err := NewEvent(base); safe.ErrorCodeOf(err) != safe.ErrorInvalidRetry {
 		t.Fatalf("invalid retry error = %v", err)
 	}
 
@@ -80,7 +82,7 @@ func TestEventValidationBoundsAndLogIsolation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	base.Retry = RetryNone
+	base.Retry = health.RetryNone
 	base.NextRetryAt = time.Time{}
 	first, _ := log.Record(base)
 	base.Code = "degraded"
@@ -98,7 +100,7 @@ func TestEventLogConcurrentUse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	input := EventInput{At: time.Date(2026, 8, 31, 1, 2, 3, 0, time.UTC), Severity: SeverityInfo, Component: DimensionEdge, Name: "edge_request", Code: "ready", Outcome: OutcomeSuccess, Message: "Request completed.", CorrelationID: "corr_concurrent_1", Retry: RetryNone}
+	input := EventInput{At: time.Date(2026, 8, 31, 1, 2, 3, 0, time.UTC), Severity: SeverityInfo, Component: health.DimensionEdge, Name: "edge_request", Code: "ready", Outcome: OutcomeSuccess, Message: "Request completed.", CorrelationID: "corr_concurrent_1", Retry: health.RetryNone}
 	var group sync.WaitGroup
 	for worker := 0; worker < 32; worker++ {
 		group.Add(1)
@@ -124,7 +126,7 @@ func TestEventLogCountsEvictionAndKeepsEventsRecordedWhileTheRingIsBusy(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	input := EventInput{At: time.Unix(1, 0), Severity: SeverityInfo, Component: DimensionRoute, Name: "activated", Code: "activated", Outcome: OutcomeStateChange, Message: "Route activated.", CorrelationID: "corr_route_1", Retry: RetryNone}
+	input := EventInput{At: time.Unix(1, 0), Severity: SeverityInfo, Component: health.DimensionRoute, Name: "activated", Code: "activated", Outcome: OutcomeStateChange, Message: "Route activated.", CorrelationID: "corr_route_1", Retry: health.RetryNone}
 	if _, err := log.Record(input); err != nil {
 		t.Fatal(err)
 	}

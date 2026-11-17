@@ -1,9 +1,8 @@
 package telemetry
 
 import (
+	"github.com/pinksaucepasta/paperboat/shared/health"
 	"time"
-
-	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/health"
 )
 
 // RecordHealth publishes every canonical dimension with only fixed labels.

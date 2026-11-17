@@ -4,6 +4,7 @@ package runtime
 
 import (
 	"encoding/json"
+	typedhealth "github.com/pinksaucepasta/paperboat/shared/health"
 	"io"
 	"net"
 	"net/http"
@@ -58,12 +59,12 @@ func hostWorkloadCounts(sessions session.Service, transfers *filetransfer.Servic
 // endpoint. Its fields are limited to workload counts, typed health, fixed-label
 // metrics, and construction-time-redacted events.
 type HostDiagnostics struct {
-	Workloads     *HostWorkloadCounts    `json:"workloads,omitempty"`
-	Schema        string                 `json:"schema"`
-	Health        health.HealthSnapshot  `json:"health"`
-	Metrics       []hosttelemetry.Series `json:"metrics"`
-	Events        []hosttelemetry.Event  `json:"events"`
-	DroppedEvents uint64                 `json:"dropped_events"`
+	Workloads     *HostWorkloadCounts        `json:"workloads,omitempty"`
+	Schema        string                     `json:"schema"`
+	Health        typedhealth.HealthSnapshot `json:"health"`
+	Metrics       []hosttelemetry.Series     `json:"metrics"`
+	Events        []hosttelemetry.Event      `json:"events"`
+	DroppedEvents uint64                     `json:"dropped_events"`
 }
 
 type hostDiagnosticsMetric struct {
@@ -89,12 +90,12 @@ func (diagnostics HostDiagnostics) MarshalJSON() ([]byte, error) {
 		events = []hosttelemetry.Event{}
 	}
 	return json.Marshal(struct {
-		Workloads     *HostWorkloadCounts     `json:"workloads,omitempty"`
-		Schema        string                  `json:"schema"`
-		Health        health.HealthSnapshot   `json:"health"`
-		Metrics       []hostDiagnosticsMetric `json:"metrics"`
-		Events        []hosttelemetry.Event   `json:"events"`
-		DroppedEvents uint64                  `json:"dropped_events"`
+		Workloads     *HostWorkloadCounts        `json:"workloads,omitempty"`
+		Schema        string                     `json:"schema"`
+		Health        typedhealth.HealthSnapshot `json:"health"`
+		Metrics       []hostDiagnosticsMetric    `json:"metrics"`
+		Events        []hosttelemetry.Event      `json:"events"`
+		DroppedEvents uint64                     `json:"dropped_events"`
 	}{
 		Workloads: diagnostics.Workloads, Schema: diagnostics.Schema, Health: diagnostics.Health, Metrics: metrics,
 		Events: events, DroppedEvents: diagnostics.DroppedEvents,
@@ -104,14 +105,14 @@ func (diagnostics HostDiagnostics) MarshalJSON() ([]byte, error) {
 // NewHostHealthTracker is the host's typed health, served at /diagnostics for pb doctor. Every dimension starts
 // not applicable: a host reports only what its components own (lifecycle, start failures), and a dimension
 // nothing reports must not read as unknown, which would make the overall state unknown on a healthy host.
-func NewHostHealthTracker() (*health.HealthTracker, error) {
+func NewHostHealthTracker() (*typedhealth.HealthTracker, error) {
 	tracker, err := health.NewHealthTracker(nil)
 	if err != nil {
 		return nil, err
 	}
-	for _, dimension := range health.Dimensions() {
-		if err := tracker.Update(health.HealthUpdate{Dimension: dimension, Status: health.StatusNotApplicable, Code: "not_reported",
-			Summary: "This host does not report this dimension.", RepairAction: "No action is required.", Retry: health.RetryNone}); err != nil {
+	for _, dimension := range typedhealth.Dimensions() {
+		if err := tracker.Update(typedhealth.HealthUpdate{Dimension: dimension, Status: typedhealth.StatusNotApplicable, Code: "not_reported",
+			Summary: "This host does not report this dimension.", RepairAction: "No action is required.", Retry: typedhealth.RetryNone}); err != nil {
 			return nil, err
 		}
 	}
@@ -121,7 +122,7 @@ func NewHostHealthTracker() (*health.HealthTracker, error) {
 type hostDiagnosticsSource struct {
 	workloads     func() HostWorkloadCounts
 	health        *runtimeHealthSource
-	healthTracker *health.HealthTracker
+	healthTracker *typedhealth.HealthTracker
 	metrics       *hosttelemetry.Registry
 	events        *hosttelemetry.EventLog
 }
@@ -129,7 +130,7 @@ type hostDiagnosticsSource struct {
 // registerHostLivenessAndDiagnostics installs the minimal liveness contract
 // and, only when a telemetry or workload source exists, the richer local
 // diagnostics contract. The caller binds HTTPService to literal loopback.
-func registerHostLivenessAndDiagnostics(mux *http.ServeMux, healthSource *runtimeHealthSource, tracker *health.HealthTracker, metrics *hosttelemetry.Registry, events *hosttelemetry.EventLog, workloads func() HostWorkloadCounts) {
+func registerHostLivenessAndDiagnostics(mux *http.ServeMux, healthSource *runtimeHealthSource, tracker *typedhealth.HealthTracker, metrics *hosttelemetry.Registry, events *hosttelemetry.EventLog, workloads func() HostWorkloadCounts) {
 	if mux == nil {
 		return
 	}
@@ -197,7 +198,7 @@ func (handler hostDiagnosticsHandler) ServeHTTP(writer http.ResponseWriter, requ
 		}
 		droppedEvents = handler.source.events.DroppedEvents()
 	}
-	healthSnapshot := health.HealthSnapshot{}
+	healthSnapshot := typedhealth.HealthSnapshot{}
 	if handler.source.health != nil {
 		healthSnapshot = handler.source.health.TypedSnapshot()
 	}
@@ -256,15 +257,15 @@ func hostDiagnosticsLoopback(request *http.Request) bool {
 
 // TypedSnapshot reads the optional shared typed health state without exposing
 // the legacy health registry used by /healthz and existing API handlers.
-func (s *runtimeHealthSource) TypedSnapshot() health.HealthSnapshot {
+func (s *runtimeHealthSource) TypedSnapshot() typedhealth.HealthSnapshot {
 	if s == nil {
-		return health.HealthSnapshot{}
+		return typedhealth.HealthSnapshot{}
 	}
 	s.mu.RLock()
 	runtime := s.runtime
 	s.mu.RUnlock()
 	if runtime == nil {
-		return health.HealthSnapshot{}
+		return typedhealth.HealthSnapshot{}
 	}
 	return runtime.TypedHealth()
 }

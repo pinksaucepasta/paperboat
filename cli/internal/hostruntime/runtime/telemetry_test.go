@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"errors"
+	typedhealth "github.com/pinksaucepasta/paperboat/shared/health"
 	"strings"
 	"testing"
 	"time"
@@ -15,7 +16,7 @@ type telemetryClock struct{ now time.Time }
 
 func (c telemetryClock) Now() time.Time { return c.now }
 
-func newTelemetryConfig(t *testing.T, now time.Time, components []Component, tracker *health.HealthTracker, metrics *hosttelemetry.Registry, events *hosttelemetry.EventLog) Config {
+func newTelemetryConfig(t *testing.T, now time.Time, components []Component, tracker *typedhealth.HealthTracker, metrics *hosttelemetry.Registry, events *hosttelemetry.EventLog) Config {
 	t.Helper()
 	return Config{
 		Version:         "runtime-test",
@@ -29,7 +30,7 @@ func newTelemetryConfig(t *testing.T, now time.Time, components []Component, tra
 	}
 }
 
-func newTelemetrySinks(t *testing.T, now time.Time) (*health.HealthTracker, *hosttelemetry.Registry, *hosttelemetry.EventLog) {
+func newTelemetrySinks(t *testing.T, now time.Time) (*typedhealth.HealthTracker, *hosttelemetry.Registry, *hosttelemetry.EventLog) {
 	t.Helper()
 	tracker, err := health.NewHealthTracker(func() time.Time { return now })
 	if err != nil {
@@ -59,7 +60,7 @@ func TestRuntimeTelemetryLifecycleIsTypedAndExactlyOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	started := runtime.TypedHealth().Dimensions.Service
-	if started.Status != health.StatusReady || started.Code != "ready" || started.CorrelationID != "correlation_runtime_test" {
+	if started.Status != typedhealth.StatusReady || started.Code != "ready" || started.CorrelationID != "correlation_runtime_test" {
 		t.Fatalf("typed start health=%#v", started)
 	}
 	if got := events.Snapshot(); len(got) != 1 || got[0].Name != lifecycleStart || got[0].Code != "ready" || got[0].Outcome != hosttelemetry.OutcomeStateChange {
@@ -76,7 +77,7 @@ func TestRuntimeTelemetryLifecycleIsTypedAndExactlyOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	stopped := runtime.TypedHealth().Dimensions.Service
-	if stopped.Status != health.StatusNotApplicable || stopped.Code != "stopped" {
+	if stopped.Status != typedhealth.StatusNotApplicable || stopped.Code != "stopped" {
 		t.Fatalf("typed shutdown health=%#v", stopped)
 	}
 	if got := events.Snapshot(); len(got) != 2 || got[1].Name != lifecycleShutdown || got[1].Code != "stopped" {
@@ -109,7 +110,7 @@ func TestRuntimeTelemetryOptionalAndRequiredFailuresStaySafe(t *testing.T) {
 			t.Fatal(err)
 		}
 		state := runtime.TypedHealth().Dimensions.Edge
-		if state.Status != health.StatusDegraded || state.Code != "start_failed" || state.Retry != health.RetryScheduled {
+		if state.Status != typedhealth.StatusDegraded || state.Code != "start_failed" || state.Retry != typedhealth.RetryScheduled {
 			t.Fatalf("optional health=%#v", state)
 		}
 		got := events.Snapshot()
@@ -140,10 +141,10 @@ func TestRuntimeTelemetryOptionalAndRequiredFailuresStaySafe(t *testing.T) {
 		if runtime.State() != Failed {
 			t.Fatalf("state=%s", runtime.State())
 		}
-		if got := runtime.TypedHealth().Dimensions.Edge; got.Status != health.StatusDown || got.Code != "start_failed" {
+		if got := runtime.TypedHealth().Dimensions.Edge; got.Status != typedhealth.StatusDown || got.Code != "start_failed" {
 			t.Fatalf("required health=%#v", got)
 		}
-		if got := runtime.TypedHealth().Dimensions.Service; got.Status != health.StatusDown || got.Code != "start_failed" {
+		if got := runtime.TypedHealth().Dimensions.Service; got.Status != typedhealth.StatusDown || got.Code != "start_failed" {
 			t.Fatalf("rollback health=%#v", got)
 		}
 		got := events.Snapshot()
@@ -171,7 +172,7 @@ func TestRuntimeTelemetryShutdownCancellationUsesStableCode(t *testing.T) {
 		t.Fatalf("shutdown error=%v", err)
 	}
 	state := runtime.TypedHealth().Dimensions.Service
-	if state.Status != health.StatusDegraded || state.Code != "shutdown_canceled" || state.Retry != health.RetryScheduled {
+	if state.Status != typedhealth.StatusDegraded || state.Code != "shutdown_canceled" || state.Retry != typedhealth.RetryScheduled {
 		t.Fatalf("shutdown health=%#v", state)
 	}
 	got := events.Snapshot()

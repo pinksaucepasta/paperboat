@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"github.com/pinksaucepasta/paperboat/shared/health"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -117,7 +118,7 @@ func TestLiveCarrierHTTPCompositionPreservesStreamingAndSharesTelemetry(t *testi
 }
 
 func TestTelemetryLifecycleReportsStartupReadinessAndShutdown(t *testing.T) {
-	health, err := edgetelemetry.NewHealthTracker(time.Now)
+	healthTracker, err := edgetelemetry.NewHealthTracker(time.Now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,23 +127,23 @@ func TestTelemetryLifecycleReportsStartupReadinessAndShutdown(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	lifecycle := newTelemetryLifecycle(health, metrics, events)
+	lifecycle := newTelemetryLifecycle(healthTracker, metrics, events)
 	if err := lifecycle.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if state := health.Snapshot().Dimensions.Service; state.Status != edgetelemetry.StatusDegraded || state.Code != "service_starting" {
+	if state := healthTracker.Snapshot().Dimensions.Service; state.Status != health.StatusDegraded || state.Code != "service_starting" {
 		t.Fatalf("starting health = %+v", state)
 	}
 	if err := lifecycle.MarkReady(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if state := health.Snapshot().Dimensions.Service; state.Status != edgetelemetry.StatusReady || state.Code != "service_ready" {
+	if state := healthTracker.Snapshot().Dimensions.Service; state.Status != health.StatusReady || state.Code != "service_ready" {
 		t.Fatalf("ready health = %+v", state)
 	}
 	if err := lifecycle.Shutdown(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if state := health.Snapshot().Dimensions.Service; state.Status != edgetelemetry.StatusDown || state.Code != "service_shutdown" {
+	if state := healthTracker.Snapshot().Dimensions.Service; state.Status != health.StatusDown || state.Code != "service_shutdown" {
 		t.Fatalf("shutdown health = %+v", state)
 	}
 	var names []string
@@ -152,7 +153,7 @@ func TestTelemetryLifecycleReportsStartupReadinessAndShutdown(t *testing.T) {
 	if len(names) != 3 || names[0] != "edge_service_starting" || names[1] != "edge_service_ready" || names[2] != "edge_service_shutdown" {
 		t.Fatalf("lifecycle events = %v", names)
 	}
-	if _, accepted, err := events.TryRecord(edgetelemetry.EventInput{At: time.Now(), Severity: edgetelemetry.SeverityInfo, Component: edgetelemetry.DimensionService, Name: "after_close", Code: "after_close", Outcome: edgetelemetry.OutcomeStateChange, Message: "ignored", CorrelationID: "corr_after_close", Retry: edgetelemetry.RetryNone}); err != nil || accepted {
+	if _, accepted, err := events.TryRecord(edgetelemetry.EventInput{At: time.Now(), Severity: edgetelemetry.SeverityInfo, Component: health.DimensionService, Name: "after_close", Code: "after_close", Outcome: edgetelemetry.OutcomeStateChange, Message: "ignored", CorrelationID: "corr_after_close", Retry: health.RetryNone}); err != nil || accepted {
 		t.Fatalf("event after close accepted=%v err=%v", accepted, err)
 	}
 }

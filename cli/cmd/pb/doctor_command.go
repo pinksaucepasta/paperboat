@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	typedhealth "github.com/pinksaucepasta/paperboat/shared/health"
 	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 	"io"
 	"net"
@@ -27,7 +28,6 @@ import (
 	doctorpkg "github.com/pinksaucepasta/paperboat/cli/internal/doctor"
 	"github.com/pinksaucepasta/paperboat/cli/internal/errorreport"
 	helperconfig "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/config"
-	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/health"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/identity"
 	service "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/service"
 	"github.com/pinksaucepasta/paperboat/cli/internal/inbox"
@@ -824,7 +824,7 @@ func doctorProxyDiagnosis(err error) (proxyDoctorDiagnosis, bool) {
 type localDoctorReport struct {
 	failure error
 	// hostSteps are the host runtime's failing steps (degraded or down typed health dimensions).
-	hostSteps              []health.Alert
+	hostSteps              []typedhealth.Alert
 	StateRoot              string   `json:"state_root,omitempty"`
 	SetupState             string   `json:"setup_state"`
 	MachineID              string   `json:"machine_id,omitempty"`
@@ -1049,11 +1049,11 @@ func inspectLocalRuntimeHealth(parent context.Context, report *localDoctorReport
 // failingHostSteps lists the host's degraded or down health dimensions, the steps pb doctor must name.
 // Unknown (not yet observed) and not applicable dimensions are not failures; a dimension suppressed by a
 // failing dependency is shown through that dependency.
-func failingHostSteps(snapshot health.HealthSnapshot) []health.Alert {
-	var failing []health.Alert
-	for _, dimension := range health.Dimensions() {
+func failingHostSteps(snapshot typedhealth.HealthSnapshot) []typedhealth.Alert {
+	var failing []typedhealth.Alert
+	for _, dimension := range typedhealth.Dimensions() {
 		alert, ok := snapshot.AlertFor(dimension)
-		if ok && (alert.Status == health.StatusDegraded || alert.Status == health.StatusDown) && snapshot.Dimensions.Get(dimension).SuppressedBy == "" {
+		if ok && (alert.Status == typedhealth.StatusDegraded || alert.Status == typedhealth.StatusDown) && snapshot.Dimensions.Get(dimension).SuppressedBy == "" {
 			failing = append(failing, alert)
 		}
 	}
@@ -1062,7 +1062,7 @@ func failingHostSteps(snapshot health.HealthSnapshot) []health.Alert {
 
 // doctorHostStepsCheck fails local_state while the host runtime reports a failing step, naming the first one,
 // its cause and the repair action.
-func doctorHostStepsCheck(steps []health.Alert) (doctorpkg.Check, bool) {
+func doctorHostStepsCheck(steps []typedhealth.Alert) (doctorpkg.Check, bool) {
 	if len(steps) == 0 {
 		return doctorpkg.Check{}, false
 	}
@@ -1077,7 +1077,7 @@ func doctorHostStepsCheck(steps []health.Alert) (doctorpkg.Check, bool) {
 	// Only a dimension that is down fails the machine.
 	status := doctorpkg.StatusWarning
 	for _, step := range steps {
-		if step.Status == health.StatusDown {
+		if step.Status == typedhealth.StatusDown {
 			status = doctorpkg.StatusFail
 		}
 	}

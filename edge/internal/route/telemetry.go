@@ -2,6 +2,8 @@ package route
 
 import (
 	"errors"
+	"github.com/pinksaucepasta/paperboat/shared/health"
+	"github.com/pinksaucepasta/paperboat/shared/telemetry/safe"
 	"sync"
 	"time"
 
@@ -56,18 +58,18 @@ func (f RouteTelemetrySinkFunc) RecordRouteTelemetry(record RouteTelemetryRecord
 // health, fixed-cardinality metrics, and bounded event primitives.
 type CoreTelemetrySink struct {
 	mu         sync.Mutex
-	health     *edgetelemetry.HealthTracker
+	health     *health.HealthTracker
 	metrics    *edgetelemetry.Metrics
 	events     *edgetelemetry.EventLog
 	overloaded bool
 	active     uint64
 }
 
-func NewCoreTelemetrySink(health *edgetelemetry.HealthTracker, metrics *edgetelemetry.Metrics, events *edgetelemetry.EventLog) (*CoreTelemetrySink, error) {
-	if health == nil || metrics == nil || events == nil {
+func NewCoreTelemetrySink(healthTracker *health.HealthTracker, metrics *edgetelemetry.Metrics, events *edgetelemetry.EventLog) (*CoreTelemetrySink, error) {
+	if healthTracker == nil || metrics == nil || events == nil {
 		return nil, ErrInvalid
 	}
-	return &CoreTelemetrySink{health: health, metrics: metrics, events: events}, nil
+	return &CoreTelemetrySink{health: healthTracker, metrics: metrics, events: events}, nil
 }
 
 func (s *CoreTelemetrySink) RecordRouteTelemetry(record RouteTelemetryRecord) error {
@@ -85,37 +87,37 @@ func (s *CoreTelemetrySink) RecordRouteTelemetry(record RouteTelemetryRecord) er
 	var healthErr error
 	switch record.Type {
 	case LifecycleStageAccepted:
-		healthErr = s.updateHealth(edgetelemetry.DimensionConfig, edgetelemetry.StatusDegraded, "generation_staged", "A route generation is staged for readiness checks.", "Complete readiness checks and activate the generation.", record, edgetelemetry.RetryWaitForChange)
+		healthErr = s.updateHealth(health.DimensionConfig, health.StatusDegraded, "generation_staged", "A route generation is staged for readiness checks.", "Complete readiness checks and activate the generation.", record, health.RetryWaitForChange)
 	case LifecycleStageRejected:
-		healthErr = s.updateHealth(edgetelemetry.DimensionConfig, edgetelemetry.StatusDegraded, "generation_rejected", "A route generation was rejected.", "Correct the route generation and stage it again.", record, edgetelemetry.RetryWaitForChange)
+		healthErr = s.updateHealth(health.DimensionConfig, health.StatusDegraded, "generation_rejected", "A route generation was rejected.", "Correct the route generation and stage it again.", record, health.RetryWaitForChange)
 	case LifecycleGenerationReady:
-		healthErr = s.updateHealth(edgetelemetry.DimensionConfig, edgetelemetry.StatusReady, "generation_ready", "The staged route generation passed readiness checks.", "Activate the ready route generation.", record, edgetelemetry.RetryNone)
+		healthErr = s.updateHealth(health.DimensionConfig, health.StatusReady, "generation_ready", "The staged route generation passed readiness checks.", "Activate the ready route generation.", record, health.RetryNone)
 	case LifecycleActivated:
 		s.active = record.Generation
 		s.overloaded = false
-		configErr := s.updateHealth(edgetelemetry.DimensionConfig, edgetelemetry.StatusReady, "generation_active", "The active route configuration is current.", "No action is required.", record, edgetelemetry.RetryNone)
-		routeErr := s.updateHealth(edgetelemetry.DimensionRoute, edgetelemetry.StatusReady, "ready", "Route admission is ready.", "No action is required.", record, edgetelemetry.RetryNone)
+		configErr := s.updateHealth(health.DimensionConfig, health.StatusReady, "generation_active", "The active route configuration is current.", "No action is required.", record, health.RetryNone)
+		routeErr := s.updateHealth(health.DimensionRoute, health.StatusReady, "ready", "Route admission is ready.", "No action is required.", record, health.RetryNone)
 		healthErr = errors.Join(configErr, routeErr)
 	case LifecycleDrainForced:
-		healthErr = s.updateHealth(edgetelemetry.DimensionRoute, edgetelemetry.StatusDegraded, "drain_forced", "An old route generation required forced stream cancellation.", "Inspect slow streams before the next route activation.", record, edgetelemetry.RetryNone)
+		healthErr = s.updateHealth(health.DimensionRoute, health.StatusDegraded, "drain_forced", "An old route generation required forced stream cancellation.", "Inspect slow streams before the next route activation.", record, health.RetryNone)
 	case LifecycleStreamOverloaded:
 		if record.Generation != s.active {
 			break
 		}
 		s.overloaded = true
-		healthErr = s.updateHealth(edgetelemetry.DimensionRoute, edgetelemetry.StatusDegraded, "stream_capacity_reached", "Route stream capacity is exhausted.", "Wait for active streams to finish or increase the configured capacity.", record, edgetelemetry.RetryWaitForChange)
+		healthErr = s.updateHealth(health.DimensionRoute, health.StatusDegraded, "stream_capacity_reached", "Route stream capacity is exhausted.", "Wait for active streams to finish or increase the configured capacity.", record, health.RetryWaitForChange)
 	case LifecycleStreamReleased:
 		if record.Generation == s.active && s.overloaded && record.ActiveStreams < record.MaximumStreams {
 			s.overloaded = false
-			healthErr = s.updateHealth(edgetelemetry.DimensionRoute, edgetelemetry.StatusReady, "ready", "Route stream capacity is available.", "No action is required.", record, edgetelemetry.RetryNone)
+			healthErr = s.updateHealth(health.DimensionRoute, health.StatusReady, "ready", "Route stream capacity is available.", "No action is required.", record, health.RetryNone)
 		}
 	}
 	return errors.Join(eventErr, healthErr)
 }
 
-func (s *CoreTelemetrySink) updateHealth(dimension edgetelemetry.Dimension, status edgetelemetry.HealthStatus, code, summary, repair string, record RouteTelemetryRecord, retry edgetelemetry.RetryDecision) error {
+func (s *CoreTelemetrySink) updateHealth(dimension health.Dimension, status health.HealthStatus, code, summary, repair string, record RouteTelemetryRecord, retry health.RetryDecision) error {
 	before := s.health.Snapshot().Dimensions.Get(dimension)
-	if err := s.health.Update(edgetelemetry.HealthUpdate{
+	if err := s.health.Update(health.HealthUpdate{
 		Dimension: dimension, Status: status, Code: code, Summary: summary, RepairAction: repair,
 		CorrelationID: record.CorrelationID, Retry: retry,
 	}); err != nil {
@@ -144,12 +146,12 @@ func (record RouteTelemetryRecord) EventInput() (edgetelemetry.EventInput, error
 }
 
 func routeEventInput(record RouteTelemetryRecord) (edgetelemetry.EventInput, error) {
-	severity, outcome, message, retry := edgetelemetry.SeverityInfo, edgetelemetry.OutcomeSuccess, "Route lifecycle transition completed.", edgetelemetry.RetryNone
+	severity, outcome, message, retry := edgetelemetry.SeverityInfo, edgetelemetry.OutcomeSuccess, "Route lifecycle transition completed.", health.RetryNone
 	switch record.Type {
 	case LifecycleStageAccepted:
 		message = "Route generation was staged."
 	case LifecycleStageRejected:
-		severity, outcome, message, retry = edgetelemetry.SeverityWarn, edgetelemetry.OutcomeRejected, "Route generation was rejected.", edgetelemetry.RetryWaitForChange
+		severity, outcome, message, retry = edgetelemetry.SeverityWarn, edgetelemetry.OutcomeRejected, "Route generation was rejected.", health.RetryWaitForChange
 	case LifecycleGenerationReady:
 		message = "Route generation passed readiness checks."
 	case LifecycleActivated:
@@ -161,18 +163,18 @@ func routeEventInput(record RouteTelemetryRecord) (edgetelemetry.EventInput, err
 	case LifecycleDrainForced:
 		severity, outcome, message = edgetelemetry.SeverityWarn, edgetelemetry.OutcomeFailed, "Old route generation required forced cancellation."
 	case LifecycleStaleRejected:
-		severity, outcome, message, retry = edgetelemetry.SeverityWarn, edgetelemetry.OutcomeRejected, "Stale route generation was rejected.", edgetelemetry.RetryWaitForChange
+		severity, outcome, message, retry = edgetelemetry.SeverityWarn, edgetelemetry.OutcomeRejected, "Stale route generation was rejected.", health.RetryWaitForChange
 	case LifecycleStreamAcquired:
 		severity, message = edgetelemetry.SeverityDebug, "Route stream was acquired."
 	case LifecycleStreamOverloaded:
-		severity, outcome, message, retry = edgetelemetry.SeverityWarn, edgetelemetry.OutcomeRejected, "Route stream capacity was exhausted.", edgetelemetry.RetryWaitForChange
+		severity, outcome, message, retry = edgetelemetry.SeverityWarn, edgetelemetry.OutcomeRejected, "Route stream capacity was exhausted.", health.RetryWaitForChange
 	case LifecycleStreamReleased:
 		severity, message = edgetelemetry.SeverityDebug, "Route stream was released."
 	default:
 		return edgetelemetry.EventInput{}, ErrInvalid
 	}
 	return edgetelemetry.EventInput{
-		At: record.At, Severity: severity, Component: edgetelemetry.DimensionRoute,
+		At: record.At, Severity: severity, Component: health.DimensionRoute,
 		Name: string(record.Type), Code: string(record.Type), Outcome: outcome, Message: message,
 		CorrelationID: record.CorrelationID, IDs: record.IDs, Generations: record.Generations, Retry: retry,
 	}, nil
@@ -199,7 +201,7 @@ func routeTelemetryIdentity(generation uint64, rules []RouteRule) (string, edget
 }
 
 func allowedTelemetryID(value string) string {
-	if edgetelemetry.SafeOpaqueID(value) {
+	if safe.OpaqueID(value) {
 		return value
 	}
 	return ""

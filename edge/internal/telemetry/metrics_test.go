@@ -1,6 +1,7 @@
 package telemetry
 
 import (
+	"github.com/pinksaucepasta/paperboat/shared/telemetry/safe"
 	"math"
 	"strings"
 	"sync"
@@ -44,32 +45,32 @@ func TestMetricsRejectUnknownAndHighCardinalityLabels(t *testing.T) {
 	tests := []struct {
 		name   string
 		labels MetricLabels
-		code   ErrorCode
+		code   safe.ErrorCode
 	}{
-		{"hostname", MetricLabels{"protocol": "customer.example.com", "outcome": "success"}, ErrorLabelValueRejected},
-		{"url", MetricLabels{"protocol": "https://customer.example.com", "outcome": "success"}, ErrorLabelValueRejected},
-		{"arbitrary id", MetricLabels{"protocol": "route_customer123", "outcome": "success"}, ErrorLabelValueRejected},
-		{"token", MetricLabels{"protocol": "Bearer-secret", "outcome": "success"}, ErrorLabelValueRejected},
-		{"unknown", MetricLabels{"protocol": "https", "outcome": "success", "hostname": "customer.example.com"}, ErrorUnknownLabel},
-		{"missing", MetricLabels{"protocol": "https"}, ErrorMissingLabel},
+		{"hostname", MetricLabels{"protocol": "customer.example.com", "outcome": "success"}, safe.ErrorLabelValueRejected},
+		{"url", MetricLabels{"protocol": "https://customer.example.com", "outcome": "success"}, safe.ErrorLabelValueRejected},
+		{"arbitrary id", MetricLabels{"protocol": "route_customer123", "outcome": "success"}, safe.ErrorLabelValueRejected},
+		{"token", MetricLabels{"protocol": "Bearer-secret", "outcome": "success"}, safe.ErrorLabelValueRejected},
+		{"unknown", MetricLabels{"protocol": "https", "outcome": "success", "hostname": "customer.example.com"}, safe.ErrorUnknownLabel},
+		{"missing", MetricLabels{"protocol": "https"}, safe.ErrorMissingLabel},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			if err := metrics.AddCounter("paperboat_edge_requests_total", test.labels, 1); errorCode(err) != test.code {
+			if err := metrics.AddCounter("paperboat_edge_requests_total", test.labels, 1); safe.ErrorCodeOf(err) != test.code {
 				t.Fatalf("error = %v", err)
 			}
 		})
 	}
-	if err := metrics.SetGauge("paperboat_edge_requests_total", base, 1); errorCode(err) != ErrorMetricKindMismatch {
+	if err := metrics.SetGauge("paperboat_edge_requests_total", base, 1); safe.ErrorCodeOf(err) != safe.ErrorMetricKindMismatch {
 		t.Fatalf("kind mismatch = %v", err)
 	}
-	if err := metrics.AddCounter("paperboat_edge_unknown_total", base, 1); errorCode(err) != ErrorUnknownMetric {
+	if err := metrics.AddCounter("paperboat_edge_unknown_total", base, 1); safe.ErrorCodeOf(err) != safe.ErrorUnknownMetric {
 		t.Fatalf("unknown metric = %v", err)
 	}
 	if err := metrics.AddCounter("paperboat_edge_requests_total", base, math.MaxUint64); err != nil {
 		t.Fatal(err)
 	}
-	if err := metrics.AddCounter("paperboat_edge_requests_total", base, 1); errorCode(err) != ErrorMetricOverflow {
+	if err := metrics.AddCounter("paperboat_edge_requests_total", base, 1); safe.ErrorCodeOf(err) != safe.ErrorMetricOverflow {
 		t.Fatalf("overflow = %v", err)
 	}
 	body, _ := metrics.JSON()

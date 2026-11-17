@@ -5,6 +5,7 @@ package runtime
 import (
 	"bytes"
 	"encoding/json"
+	typedhealth "github.com/pinksaucepasta/paperboat/shared/health"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -21,10 +22,10 @@ func TestHostDiagnosticsIsLoopbackBoundedAndDeterministic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := tracker.Update(health.HealthUpdate{
-		Dimension: health.DimensionService, Status: health.StatusReady, Code: "ready",
+	if err := tracker.Update(typedhealth.HealthUpdate{
+		Dimension: typedhealth.DimensionService, Status: typedhealth.StatusReady, Code: "ready",
 		Summary: "Runtime is ready at /Users/alice and https://runtime.example.test.", RepairAction: "No action is required.",
-		CorrelationID: "correlation_test", Retry: health.RetryNone,
+		CorrelationID: "correlation_test", Retry: typedhealth.RetryNone,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +65,7 @@ func TestHostDiagnosticsIsLoopbackBoundedAndDeterministic(t *testing.T) {
 	if err := json.Unmarshal(first.Body.Bytes(), &diagnostics); err != nil {
 		t.Fatal(err)
 	}
-	if diagnostics.Schema != HostDiagnosticsSchemaV1 || diagnostics.Health.Schema != health.HealthSchemaV1 || len(diagnostics.Metrics) != 1 || len(diagnostics.Events) != 1 || diagnostics.Events[0].Generations.Config != 3 {
+	if diagnostics.Schema != HostDiagnosticsSchemaV1 || diagnostics.Health.Schema != typedhealth.HealthSchemaV1 || len(diagnostics.Metrics) != 1 || len(diagnostics.Events) != 1 || diagnostics.Events[0].Generations.Config != 3 {
 		t.Fatalf("diagnostics=%#v", diagnostics)
 	}
 	if !bytes.Contains(first.Body.Bytes(), []byte(`"name":"paperboat_runtime_connector_retries_total"`)) || bytes.Contains(first.Body.Bytes(), []byte(`"Name"`)) {
@@ -166,7 +167,7 @@ func TestHostDiagnosticsSourceSnapshotDoesNotExposeLegacyHealth(t *testing.T) {
 		t.Fatal(err)
 	}
 	source := hostDiagnosticsSource{healthTracker: tracker}
-	if got := source.healthTracker.Snapshot(); got.Schema != health.HealthSchemaV1 {
+	if got := source.healthTracker.Snapshot(); got.Schema != typedhealth.HealthSchemaV1 {
 		t.Fatalf("typed health schema=%q", got.Schema)
 	}
 	if strings.Contains(string(mustJSON(t, source.healthTracker.Snapshot())), "workloads") {

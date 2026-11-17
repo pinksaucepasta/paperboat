@@ -19,6 +19,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/supportreport"
 	"github.com/pinksaucepasta/paperboat/server/internal/telemetry"
 	"github.com/pinksaucepasta/paperboat/server/internal/workers"
+	"github.com/pinksaucepasta/paperboat/shared/health"
 	"log/slog"
 	"net"
 	"net/http"
@@ -123,7 +124,7 @@ func (a *App) Run(ctx context.Context) error {
 	if a.telemetryMetrics != nil {
 		_ = a.telemetryMetrics.IncCounter(telemetry.MetricServiceRestarts, telemetry.MetricLabels{"outcome": "success"})
 	}
-	a.updateServiceTelemetry(telemetry.StatusReady, "running", "Control-plane service is running.", "", telemetry.RetryNone, time.Time{})
+	a.updateServiceTelemetry(health.StatusReady, "running", "Control-plane service is running.", "", health.RetryNone, time.Time{})
 	serverErrors := make(chan error, 1)
 	workerErrors := make(chan error, 1)
 	go a.runWarmUp(runContext)
@@ -206,7 +207,7 @@ func (a *App) Run(ctx context.Context) error {
 		failureCode = "http_server_failed"
 		if err != nil {
 			runErr = err
-			a.updateServiceTelemetry(telemetry.StatusDown, "http_server_failed", "The control-plane HTTP server stopped unexpectedly.", "Restart paperboat-server and inspect correlated telemetry.", telemetry.RetryScheduled, time.Now().UTC().Add(time.Second))
+			a.updateServiceTelemetry(health.StatusDown, "http_server_failed", "The control-plane HTTP server stopped unexpectedly.", "Restart paperboat-server and inspect correlated telemetry.", health.RetryScheduled, time.Now().UTC().Add(time.Second))
 		}
 	case err := <-workerErrors:
 		failureCode = "worker_failed"
@@ -214,7 +215,7 @@ func (a *App) Run(ctx context.Context) error {
 		workerErr = err
 		if err != nil && supportreport.ProjectFault(ctx, "paperboat-server", "service_lifecycle", "service_error", "service_failed", err).Cause != "context_canceled" {
 			runErr = err
-			a.updateServiceTelemetry(telemetry.StatusDown, "worker_failed", "A required control-plane worker stopped unexpectedly.", "Restart paperboat-server and inspect correlated telemetry.", telemetry.RetryScheduled, time.Now().UTC().Add(time.Second))
+			a.updateServiceTelemetry(health.StatusDown, "worker_failed", "A required control-plane worker stopped unexpectedly.", "Restart paperboat-server and inspect correlated telemetry.", health.RetryScheduled, time.Now().UTC().Add(time.Second))
 		}
 	}
 
@@ -267,7 +268,7 @@ func (a *App) Run(ctx context.Context) error {
 		runtimeCloseErr = a.certificateRuntime.Close()
 	}
 	if runErr == nil || supportreport.ProjectFault(ctx, "paperboat-server", "service_lifecycle", "service_error", "service_failed", runErr).Cause == "context_canceled" {
-		a.updateServiceTelemetry(telemetry.StatusNotApplicable, "stopped", "Control-plane service stopped.", "", telemetry.RetryNone, time.Time{})
+		a.updateServiceTelemetry(health.StatusNotApplicable, "stopped", "Control-plane service stopped.", "", health.RetryNone, time.Time{})
 	}
 	stopReportingAfterTelemetryDrain(telemetryEvents, stopReporting)
 	databaseCloseErr := a.db.Close()
@@ -314,18 +315,18 @@ func captureLifecycleFailure(reporter *supportreport.Service, stage, code string
 	return fault
 }
 
-func (a *App) updateServiceTelemetry(status telemetry.HealthStatus, code, summary, repair string, retry telemetry.RetryDecision, nextRetryAt time.Time) {
+func (a *App) updateServiceTelemetry(status health.HealthStatus, code, summary, repair string, retry health.RetryDecision, nextRetryAt time.Time) {
 	if a == nil {
 		return
 	}
 	if a.telemetryHealth != nil {
-		_ = a.telemetryHealth.Update(telemetry.HealthUpdate{Dimension: telemetry.DimensionService, Status: status, Code: code, Summary: summary, RepairAction: repair, CorrelationID: "cor_server_lifecycle", Retry: retry, NextRetryAt: nextRetryAt})
+		_ = a.telemetryHealth.Update(health.HealthUpdate{Dimension: health.DimensionService, Status: status, Code: code, Summary: summary, RepairAction: repair, CorrelationID: "cor_server_lifecycle", Retry: retry, NextRetryAt: nextRetryAt})
 	}
 	if a.telemetryMetrics != nil {
 		selected := "stopped"
-		if status == telemetry.StatusReady {
+		if status == health.StatusReady {
 			selected = "running"
-		} else if status == telemetry.StatusDegraded || status == telemetry.StatusDown {
+		} else if status == health.StatusDegraded || status == health.StatusDown {
 			selected = "degraded"
 		}
 		uptime := uint64(0)
@@ -345,10 +346,10 @@ func (a *App) updateServiceTelemetry(status telemetry.HealthStatus, code, summar
 	}
 	if a.telemetryEvents != nil {
 		severity, outcome := telemetry.SeverityInfo, telemetry.OutcomeStateChange
-		if status == telemetry.StatusDegraded || status == telemetry.StatusDown {
+		if status == health.StatusDegraded || status == health.StatusDown {
 			severity, outcome = telemetry.SeverityError, telemetry.OutcomeFailed
 		}
-		_, _ = a.telemetryEvents.Record(telemetry.EventInput{At: time.Now().UTC(), Severity: severity, Component: telemetry.DimensionService, Name: "service_lifecycle", Code: code, Outcome: outcome, Message: summary, CorrelationID: "cor_server_lifecycle", Retry: retry, NextRetryAt: nextRetryAt})
+		_, _ = a.telemetryEvents.Record(telemetry.EventInput{At: time.Now().UTC(), Severity: severity, Component: health.DimensionService, Name: "service_lifecycle", Code: code, Outcome: outcome, Message: summary, CorrelationID: "cor_server_lifecycle", Retry: retry, NextRetryAt: nextRetryAt})
 	}
 }
 

@@ -1,9 +1,15 @@
-// Package telemetry provides bounded, typed, construction-safe edge telemetry.
-// It intentionally has no exporter, HTTP handler, filesystem, or network dependency.
-package telemetry
+// Package safe holds what every telemetry producer and the health tracker share:
+// the typed error, secret-safe bounded strings and opaque-ID validation. It is a
+// leaf package so shared/health and shared/telemetry can both import it.
+package safe
 
-import "fmt"
+import (
+	"errors"
+	"fmt"
+)
 
+// ErrorCode is stable enough for callers and tests to branch on. Error strings
+// are generic and never include rejected values.
 type ErrorCode string
 
 const (
@@ -25,8 +31,14 @@ const (
 	ErrorMetricCardinality  ErrorCode = "metric_cardinality"
 	ErrorInvalidObservation ErrorCode = "invalid_observation"
 	ErrorClosed             ErrorCode = "closed"
+	ErrorIdentityRequired   ErrorCode = "identity_required"
+	ErrorIdentityMismatch   ErrorCode = "identity_mismatch"
+	ErrorUnsafeField        ErrorCode = "unsafe_field"
+	ErrorUnsupportedValue   ErrorCode = "unsupported_value"
 )
 
+// Error is a typed validation or bounded-resource error. Operation is generic
+// and never contains an input value.
 type Error struct {
 	Code      ErrorCode
 	Operation string
@@ -42,6 +54,16 @@ func (e *Error) Error() string {
 	return fmt.Sprintf("%s: %s", e.Operation, e.Code)
 }
 
-func newError(code ErrorCode, operation string) error {
+// NewError returns a typed error for operation.
+func NewError(code ErrorCode, operation string) error {
 	return &Error{Code: code, Operation: operation}
+}
+
+// ErrorCodeOf returns the code carried by err, or "" for errors outside this package.
+func ErrorCodeOf(err error) ErrorCode {
+	var typed *Error
+	if errors.As(err, &typed) && typed != nil {
+		return typed.Code
+	}
+	return ""
 }

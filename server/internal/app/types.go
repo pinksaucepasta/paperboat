@@ -11,6 +11,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/telemetry"
 	"github.com/pinksaucepasta/paperboat/server/internal/tunnelv1"
 	"github.com/pinksaucepasta/paperboat/server/internal/workers"
+	"github.com/pinksaucepasta/paperboat/shared/health"
 	"log/slog"
 	"net/http"
 	"sync/atomic"
@@ -58,7 +59,7 @@ type App struct {
 	certificateRuntime   *tunnelv1.CertificateRuntime
 	telemetryEvents      *telemetry.EventLog
 	telemetryMetrics     *telemetry.Metrics
-	telemetryHealth      *telemetry.HealthTracker
+	telemetryHealth      *health.HealthTracker
 	telemetryHTTP        *telemetry.HTTPObserver
 	telemetryDiagnostics *telemetry.Diagnostics
 	telemetryProducer    *telemetry.Producer

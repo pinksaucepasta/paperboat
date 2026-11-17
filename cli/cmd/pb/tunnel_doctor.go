@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	typedhealth "github.com/pinksaucepasta/paperboat/shared/health"
 	"io"
 	"net"
 	"net/http"
@@ -20,7 +21,6 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/api"
 	"github.com/pinksaucepasta/paperboat/cli/internal/buildinfo"
 	"github.com/pinksaucepasta/paperboat/cli/internal/errorreport"
-	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/health"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/supportbundle"
 	"github.com/pinksaucepasta/paperboat/shared/httptransport"
 	"github.com/spf13/cobra"
@@ -486,7 +486,7 @@ func buildTunnelDoctorEvidenceWithHost(ctx context.Context, local localDoctorRep
 	configurationCheck := tunnelDoctorUnavailableCheck("configuration_generation", "Desired and applied generation numbers are not exposed by the tunnel health response.")
 	rollbackCheck := tunnelDoctorUnavailableCheck("rollback_slot", "Detailed rollback-slot evidence is not exposed by the local update contract.")
 	if localDiagnostics != nil {
-		if localDiagnostics.Health.Schema == health.HealthSchemaV1 {
+		if localDiagnostics.Health.Schema == typedhealth.HealthSchemaV1 {
 			runtimeCheck = doctorTypedRuntimeCheck(localDiagnostics.Health)
 			clockCheck = doctorTypedClockCheck(localDiagnostics.Health)
 		}
@@ -500,13 +500,13 @@ func buildTunnelDoctorEvidenceWithHost(ctx context.Context, local localDoctorRep
 	dnsStatus := tunnelHealth.Dimensions.DNS.Status
 	certificateStatus := tunnelHealth.Dimensions.Certificate.Status
 	updateStatus := tunnelHealth.Dimensions.Update.Status
-	if localDiagnostics != nil && localDiagnostics.Health.Schema == health.HealthSchemaV1 {
-		edgeStatus = doctorLocalDimensionStatus(edgeStatus, localDiagnostics.Health, health.DimensionEdge)
-		originStatus = doctorLocalDimensionStatus(originStatus, localDiagnostics.Health, health.DimensionOrigin)
-		routeStatus = doctorLocalDimensionStatus(routeStatus, localDiagnostics.Health, health.DimensionRoute)
-		dnsStatus = doctorLocalDimensionStatus(dnsStatus, localDiagnostics.Health, health.DimensionDNS)
-		certificateStatus = doctorLocalDimensionStatus(certificateStatus, localDiagnostics.Health, health.DimensionCertificate)
-		updateStatus = doctorLocalDimensionStatus(updateStatus, localDiagnostics.Health, health.DimensionUpdate)
+	if localDiagnostics != nil && localDiagnostics.Health.Schema == typedhealth.HealthSchemaV1 {
+		edgeStatus = doctorLocalDimensionStatus(edgeStatus, localDiagnostics.Health, typedhealth.DimensionEdge)
+		originStatus = doctorLocalDimensionStatus(originStatus, localDiagnostics.Health, typedhealth.DimensionOrigin)
+		routeStatus = doctorLocalDimensionStatus(routeStatus, localDiagnostics.Health, typedhealth.DimensionRoute)
+		dnsStatus = doctorLocalDimensionStatus(dnsStatus, localDiagnostics.Health, typedhealth.DimensionDNS)
+		certificateStatus = doctorLocalDimensionStatus(certificateStatus, localDiagnostics.Health, typedhealth.DimensionCertificate)
+		updateStatus = doctorLocalDimensionStatus(updateStatus, localDiagnostics.Health, typedhealth.DimensionUpdate)
 	}
 	checks := []tunnelDoctorEvidenceCheck{
 		{Code: "service_installed", Status: "unavailable", Summary: "Native service installation evidence is not available to this user-scoped command."},
@@ -534,7 +534,7 @@ func buildTunnelDoctorEvidenceWithHost(ctx context.Context, local localDoctorRep
 	return tunnelDoctorEvidence{Schema: "paperboat.tunnel_doctor_evidence.v1", Checks: checks}
 }
 
-func doctorLocalDimensionStatus(remote string, snapshot health.HealthSnapshot, dimension health.Dimension) string {
+func doctorLocalDimensionStatus(remote string, snapshot typedhealth.HealthSnapshot, dimension typedhealth.Dimension) string {
 	if strings.TrimSpace(remote) != "" {
 		return remote
 	}
@@ -545,15 +545,15 @@ func tunnelDoctorUnavailableCheck(code, summary string) tunnelDoctorEvidenceChec
 	return tunnelDoctorEvidenceCheck{Code: code, Status: "unavailable", Summary: summary}
 }
 
-func doctorTypedRuntimeCheck(snapshot health.HealthSnapshot) tunnelDoctorEvidenceCheck {
+func doctorTypedRuntimeCheck(snapshot typedhealth.HealthSnapshot) tunnelDoctorEvidenceCheck {
 	check := tunnelDoctorEvidenceCheck{Code: "service_running", Summary: "The local typed runtime health snapshot is available."}
 	check.Value = snapshot.Overall.Code
 	switch snapshot.Overall.Status {
-	case health.StatusReady, health.StatusNotApplicable:
+	case typedhealth.StatusReady, typedhealth.StatusNotApplicable:
 		check.Status = "ready"
-	case health.StatusDegraded, health.StatusUnknown:
+	case typedhealth.StatusDegraded, typedhealth.StatusUnknown:
 		check.Status = "degraded"
-	case health.StatusDown:
+	case typedhealth.StatusDown:
 		check.Status = "degraded"
 	default:
 		check.Status = "unavailable"
@@ -561,7 +561,7 @@ func doctorTypedRuntimeCheck(snapshot health.HealthSnapshot) tunnelDoctorEvidenc
 	return check
 }
 
-func doctorTypedClockCheck(snapshot health.HealthSnapshot) tunnelDoctorEvidenceCheck {
+func doctorTypedClockCheck(snapshot typedhealth.HealthSnapshot) tunnelDoctorEvidenceCheck {
 	if snapshot.UpdatedAt.IsZero() {
 		return tunnelDoctorUnavailableCheck("clock_sanity", "The local typed health snapshot has no update timestamp.")
 	}

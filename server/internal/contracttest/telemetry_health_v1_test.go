@@ -3,6 +3,7 @@ package contracttest
 import (
 	"bufio"
 	"encoding/json"
+	"github.com/pinksaucepasta/paperboat/shared/health"
 	"os"
 	"path/filepath"
 	"strings"
@@ -92,8 +93,8 @@ func TestTelemetryHealthV1SchemaVectors(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if telemetry.HealthSchemaV1 != "paperboat.health/v1" {
-		t.Fatalf("implementation schema = %q", telemetry.HealthSchemaV1)
+	if health.HealthSchemaV1 != "paperboat.health/v1" {
+		t.Fatalf("implementation schema = %q", health.HealthSchemaV1)
 	}
 	actual, err := tracker.Snapshot().JSON()
 	if err != nil {

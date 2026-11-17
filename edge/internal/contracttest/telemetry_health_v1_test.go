@@ -3,6 +3,7 @@ package contracttest
 import (
 	"bufio"
 	"encoding/json"
+	"github.com/pinksaucepasta/paperboat/shared/health"
 	"os"
 	"regexp"
 	"testing"
@@ -12,8 +13,8 @@ import (
 )
 
 func TestTelemetryHealthV1EdgeSnapshotContract(t *testing.T) {
-	if telemetry.HealthSchemaV1 != "paperboat.health/v1" {
-		t.Fatalf("implementation schema = %q", telemetry.HealthSchemaV1)
+	if health.HealthSchemaV1 != "paperboat.health/v1" {
+		t.Fatalf("implementation schema = %q", health.HealthSchemaV1)
 	}
 
 	file, err := os.Open("../../../shared/testdata/contracts/telemetry-v1/fixtures/health.ndjson")

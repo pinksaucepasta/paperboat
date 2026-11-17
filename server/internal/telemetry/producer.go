@@ -1,6 +1,8 @@
 package telemetry
 
 import (
+	"github.com/pinksaucepasta/paperboat/shared/health"
+	"github.com/pinksaucepasta/paperboat/shared/telemetry/safe"
 	"strings"
 	"sync"
 	"time"
@@ -20,7 +22,7 @@ type Producer struct {
 	Metrics         *Metrics
 	Events          *EventLog
 	EventLog        *EventLog
-	Health          *HealthTracker
+	Health          *health.HealthTracker
 	LifecycleEvents *LifecycleEventLog
 	LifecycleLog    *LifecycleLog
 	Now             func() time.Time
@@ -38,7 +40,7 @@ type ServerTelemetry = Producer
 type ProducerOptions struct {
 	Metrics         *Metrics
 	Events          *EventLog
-	Health          *HealthTracker
+	Health          *health.HealthTracker
 	LifecycleEvents *LifecycleEventLog
 	LifecycleLog    *LifecycleLog
 	Now             func() time.Time
@@ -72,7 +74,7 @@ func NewProducer(options ProducerOptions) *Producer {
 
 func (p *Producer) now() time.Time {
 	if p == nil {
-		return normalizeTime(time.Now())
+		return safe.NormalizeTime(time.Now())
 	}
 	clock := p.Now
 	if clock == nil {
@@ -81,7 +83,7 @@ func (p *Producer) now() time.Time {
 	if clock == nil {
 		clock = time.Now
 	}
-	return normalizeTime(clock())
+	return safe.NormalizeTime(clock())
 }
 
 // ProducerIdentity carries only fields that are already opaque and safe to
@@ -104,7 +106,7 @@ type Identity = ProducerIdentity
 
 func (p *Producer) eventIdentity(identity ProducerIdentity) (string, SafeIDs) {
 	correlationID := identity.CorrelationID
-	if !validCorrelationID(correlationID) {
+	if !safe.CorrelationID(correlationID) {
 		correlationID = "correlation_" + uuid.NewString()
 	}
 	ids := safeProducerIDs(identity.IDs)
@@ -160,18 +162,18 @@ func safeProducerIDs(ids SafeIDs) SafeIDs {
 	return ids
 }
 
-func (p *Producer) recordEvent(identity ProducerIdentity, name, code string, outcome EventOutcome, severity EventSeverity, message string, retry RetryDecision, nextRetryAt time.Time) error {
+func (p *Producer) recordEvent(identity ProducerIdentity, name, code string, outcome EventOutcome, severity EventSeverity, message string, retry health.RetryDecision, nextRetryAt time.Time) error {
 	return p.recordEventWithGenerations(identity, name, code, outcome, severity, message, retry, nextRetryAt, Generations{})
 }
 
-func (p *Producer) recordEventWithGenerations(identity ProducerIdentity, name, code string, outcome EventOutcome, severity EventSeverity, message string, retry RetryDecision, nextRetryAt time.Time, generations Generations) error {
+func (p *Producer) recordEventWithGenerations(identity ProducerIdentity, name, code string, outcome EventOutcome, severity EventSeverity, message string, retry health.RetryDecision, nextRetryAt time.Time, generations Generations) error {
 	if p == nil {
 		return nil
 	}
 	if retry == "" {
-		retry = RetryNone
+		retry = health.RetryNone
 	}
-	if retry == RetryScheduled && nextRetryAt.IsZero() {
+	if retry == health.RetryScheduled && nextRetryAt.IsZero() {
 		nextRetryAt = p.now().Add(time.Minute)
 	}
 	correlationID, ids := p.eventIdentity(identity)
@@ -198,46 +200,46 @@ func (p *Producer) recordEventWithGenerations(identity ProducerIdentity, name, c
 	return nil
 }
 
-func componentForEvent(identity ProducerIdentity, name string) Dimension {
+func componentForEvent(identity ProducerIdentity, name string) health.Dimension {
 	// Event component is selected by the fixed event family, never caller text.
 	switch name {
 	case "dns_verification":
-		return DimensionDNS
+		return health.DimensionDNS
 	case "certificate_lifecycle", "certificate_expiry":
-		return DimensionCertificate
+		return health.DimensionCertificate
 	case "preview_allocation", "preview_cleanup", "route_error", "route_latency":
-		return DimensionRoute
+		return health.DimensionRoute
 	case "connector_session", "connector_connection", "connector_reconnect", "connector_backoff", "connector_handshake", "connector_disconnect":
-		return DimensionEdge
+		return health.DimensionEdge
 	case "config_apply":
-		return DimensionConfig
+		return health.DimensionConfig
 	case "service_lifecycle", "service_watchdog", "service_crash_loop":
-		return DimensionService
+		return health.DimensionService
 	default:
-		if validDimension(identityResourceDimension(identity)) {
+		if health.ValidDimension(identityResourceDimension(identity)) {
 			return identityResourceDimension(identity)
 		}
-		return DimensionService
+		return health.DimensionService
 	}
 }
 
-func identityResourceDimension(identity ProducerIdentity) Dimension {
+func identityResourceDimension(identity ProducerIdentity) health.Dimension {
 	if strings.HasPrefix(identity.ResourceKind, "dns") {
-		return DimensionDNS
+		return health.DimensionDNS
 	}
 	if strings.HasPrefix(identity.ResourceKind, "certificate") {
-		return DimensionCertificate
+		return health.DimensionCertificate
 	}
 	if strings.HasPrefix(identity.ResourceKind, "route") || strings.HasPrefix(identity.ResourceKind, "preview") {
-		return DimensionRoute
+		return health.DimensionRoute
 	}
 	if strings.HasPrefix(identity.ResourceKind, "connector") || strings.HasPrefix(identity.ResourceKind, "tunnel") {
-		return DimensionEdge
+		return health.DimensionEdge
 	}
 	if strings.HasPrefix(identity.ResourceKind, "config") {
-		return DimensionConfig
+		return health.DimensionConfig
 	}
-	return DimensionService
+	return health.DimensionService
 }
 
 func (p *Producer) events() *EventLog {
@@ -250,15 +252,15 @@ func (p *Producer) events() *EventLog {
 	return p.EventLog
 }
 
-func (p *Producer) recordLifecycle(identity ProducerIdentity, name, code string, outcome EventOutcome, severity EventSeverity, message string, retry RetryDecision, nextRetryAt time.Time, correlationID string, generations Generations) {
+func (p *Producer) recordLifecycle(identity ProducerIdentity, name, code string, outcome EventOutcome, severity EventSeverity, message string, retry health.RetryDecision, nextRetryAt time.Time, correlationID string, generations Generations) {
 	if p == nil || p.LifecycleEvents == nil {
 		return
 	}
 	requestID := identity.RequestID
-	if !validOptionalLogIdentity(requestID, "request_", "req_") || !validCorrelationID(correlationID) || !validEventResourceKind(identity.ResourceKind) || !validOpaqueID(identity.ResourceID) || !validOptionalLogIdentity(identity.OperationID, "operation_", "op_") || identity.OperationID == "" {
+	if !validOptionalLogIdentity(requestID, "request_", "req_") || !safe.CorrelationID(correlationID) || !validEventResourceKind(identity.ResourceKind) || !validOpaqueID(identity.ResourceID) || !validOptionalLogIdentity(identity.OperationID, "operation_", "op_") || identity.OperationID == "" {
 		return
 	}
-	if identity.OperationKind != "" && !stableCodePattern.MatchString(identity.OperationKind) {
+	if identity.OperationKind != "" && !safe.StableCode(identity.OperationKind) {
 		return
 	}
 	actorType, actorID := identity.ActorType, identity.ActorID
@@ -316,19 +318,19 @@ func lifecycleEventType(name string) string {
 	}
 }
 
-func (p *Producer) updateHealth(dimension Dimension, status HealthStatus, code, summary, repair, correlationID string, retry RetryDecision, nextRetryAt time.Time) error {
+func (p *Producer) updateHealth(dimension health.Dimension, status health.HealthStatus, code, summary, repair, correlationID string, retry health.RetryDecision, nextRetryAt time.Time) error {
 	if p == nil || p.Health == nil {
 		return nil
 	}
 	if retry == "" {
-		retry = RetryNone
+		retry = health.RetryNone
 	}
-	if retry == RetryScheduled && nextRetryAt.IsZero() {
+	if retry == health.RetryScheduled && nextRetryAt.IsZero() {
 		nextRetryAt = p.now().Add(time.Minute)
 	}
 	p.healthMu.Lock()
 	before := p.Health.Snapshot()
-	err := p.Health.Update(HealthUpdate{Dimension: dimension, Status: status, Code: code, Summary: summary, RepairAction: repair, CorrelationID: correlationID, Retry: retry, NextRetryAt: nextRetryAt})
+	err := p.Health.Update(health.HealthUpdate{Dimension: dimension, Status: status, Code: code, Summary: summary, RepairAction: repair, CorrelationID: correlationID, Retry: retry, NextRetryAt: nextRetryAt})
 	after := p.Health.Snapshot()
 	p.healthMu.Unlock()
 	if err != nil {
@@ -349,13 +351,13 @@ func (p *Producer) updateHealth(dimension Dimension, status HealthStatus, code, 
 
 func boundedSeconds(duration time.Duration) (float64, error) {
 	if duration < 0 || duration > 24*time.Hour {
-		return 0, newError(ErrorInvalidObservation, "record control-plane telemetry")
+		return 0, safe.NewError(safe.ErrorInvalidObservation, "record control-plane telemetry")
 	}
 	return duration.Seconds(), nil
 }
 
 func normalizedCorrelation(identity ProducerIdentity, p *Producer) string {
-	if validCorrelationID(identity.CorrelationID) {
+	if safe.CorrelationID(identity.CorrelationID) {
 		return identity.CorrelationID
 	}
 	return "correlation_" + uuid.NewString()
@@ -386,7 +388,7 @@ type DNSVerificationInput struct {
 	Outcome       DNSVerificationOutcome
 	FailureClass  DNSFailureClass
 	Duration      time.Duration
-	Retry         RetryDecision
+	Retry         health.RetryDecision
 	NextRetryAt   time.Time
 	At            time.Time
 	Identity      ProducerIdentity
@@ -421,7 +423,7 @@ func (p *Producer) RecordDNSVerification(input DNSVerificationInput) error {
 	identity := mergeIdentity(input.Identity, input.RequestID, input.CorrelationID, input.IDs)
 	correlationID := normalizedCorrelation(identity, p)
 	status, code, summary, repair, retry, next := dnsHealth(outcome, failureClass, input.Retry, input.NextRetryAt, p)
-	if err := p.updateHealth(DimensionDNS, status, code, summary, repair, correlationID, retry, next); err != nil {
+	if err := p.updateHealth(health.DimensionDNS, status, code, summary, repair, correlationID, retry, next); err != nil {
 		return err
 	}
 	return p.recordEvent(identity, "dns_verification", code, dnsEventOutcome(outcome), dnsSeverity(outcome), dnsMessage(outcome), retry, next)
@@ -436,27 +438,27 @@ func normalizeDNSFailure(value DNSFailureClass) DNSFailureClass {
 	}
 }
 
-func dnsHealth(outcome DNSVerificationOutcome, failure DNSFailureClass, retry RetryDecision, next time.Time, p *Producer) (HealthStatus, string, string, string, RetryDecision, time.Time) {
+func dnsHealth(outcome DNSVerificationOutcome, failure DNSFailureClass, retry health.RetryDecision, next time.Time, p *Producer) (health.HealthStatus, string, string, string, health.RetryDecision, time.Time) {
 	switch outcome {
 	case DNSVerificationSucceeded:
-		return StatusReady, "dns_verified", "DNS verification is complete.", "No action is required.", RetryNone, time.Time{}
+		return health.StatusReady, "dns_verified", "DNS verification is complete.", "No action is required.", health.RetryNone, time.Time{}
 	case DNSVerificationWaiting:
 		if retry == "" {
-			retry = RetryWaitForChange
+			retry = health.RetryWaitForChange
 		}
-		return StatusDegraded, "dns_verification_waiting", "DNS verification is waiting for an authoritative observation.", "Publish the requested DNS record, then verify again.", retry, next
+		return health.StatusDegraded, "dns_verification_waiting", "DNS verification is waiting for an authoritative observation.", "Publish the requested DNS record, then verify again.", retry, next
 	default:
 		if retry == "" {
 			if failure == DNSFailureConflict || failure == DNSFailureUnauthorized || failure == DNSFailureInvalid {
-				retry = RetryNotRetryable
+				retry = health.RetryNotRetryable
 			} else {
-				retry = RetryScheduled
+				retry = health.RetryScheduled
 			}
 		}
-		if retry == RetryScheduled && next.IsZero() {
+		if retry == health.RetryScheduled && next.IsZero() {
 			next = p.now().Add(time.Minute)
 		}
-		return StatusDegraded, "dns_verification_failed", "DNS verification did not complete.", "Check the DNS instructions and retry verification.", retry, next
+		return health.StatusDegraded, "dns_verification_failed", "DNS verification did not complete.", "Check the DNS instructions and retry verification.", retry, next
 	}
 }
 
@@ -513,7 +515,7 @@ type CertificateLifecycleInput struct {
 	Operation     CertificateOperation
 	Outcome       CertificateOperationOutcome
 	At            time.Time
-	Retry         RetryDecision
+	Retry         health.RetryDecision
 	NextRetryAt   time.Time
 	Identity      ProducerIdentity
 	RequestID     string
@@ -554,7 +556,7 @@ func (p *Producer) RecordCertificateLifecycle(input CertificateLifecycleInput) e
 	identity := mergeIdentity(input.Identity, input.RequestID, input.CorrelationID, input.IDs)
 	correlationID := normalizedCorrelation(identity, p)
 	status, code, summary, repair, retry, next := certificateHealth(outcome, input.Retry, input.NextRetryAt, p)
-	if err := p.updateHealth(DimensionCertificate, status, code, summary, repair, correlationID, retry, next); err != nil {
+	if err := p.updateHealth(health.DimensionCertificate, status, code, summary, repair, correlationID, retry, next); err != nil {
 		return err
 	}
 	return p.recordEvent(identity, "certificate_lifecycle", code, certificateEventOutcome(outcome), certificateSeverity(outcome), certificateMessage(operation, outcome), retry, next)
@@ -578,23 +580,23 @@ func normalizeCertificateOutcome(value CertificateOperationOutcome) CertificateO
 	}
 }
 
-func certificateHealth(outcome CertificateOperationOutcome, retry RetryDecision, next time.Time, p *Producer) (HealthStatus, string, string, string, RetryDecision, time.Time) {
+func certificateHealth(outcome CertificateOperationOutcome, retry health.RetryDecision, next time.Time, p *Producer) (health.HealthStatus, string, string, string, health.RetryDecision, time.Time) {
 	switch outcome {
 	case CertificateSucceeded:
-		return StatusReady, "certificate_ready", "Certificate lifecycle operation completed.", "No action is required.", RetryNone, time.Time{}
+		return health.StatusReady, "certificate_ready", "Certificate lifecycle operation completed.", "No action is required.", health.RetryNone, time.Time{}
 	case CertificateCanceled:
 		if retry == "" {
-			retry = RetryWaitForChange
+			retry = health.RetryWaitForChange
 		}
-		return StatusDegraded, "certificate_canceled", "Certificate lifecycle operation was canceled.", "Retry the certificate operation when the service is available.", retry, next
+		return health.StatusDegraded, "certificate_canceled", "Certificate lifecycle operation was canceled.", "Retry the certificate operation when the service is available.", retry, next
 	default:
 		if retry == "" {
-			retry = RetryScheduled
+			retry = health.RetryScheduled
 		}
-		if retry == RetryScheduled && next.IsZero() {
+		if retry == health.RetryScheduled && next.IsZero() {
 			next = p.now().Add(time.Minute)
 		}
-		return StatusDegraded, "certificate_operation_failed", "Certificate lifecycle operation failed.", "Inspect certificate readiness and retry the operation.", retry, next
+		return health.StatusDegraded, "certificate_operation_failed", "Certificate lifecycle operation failed.", "Inspect certificate readiness and retry the operation.", retry, next
 	}
 }
 
@@ -636,10 +638,10 @@ func (p *Producer) RecordCertificateExpiry(input CertificateExpiryInput) error {
 	identity := mergeIdentity(input.Identity, input.RequestID, input.CorrelationID, input.IDs)
 	correlationID := normalizedCorrelation(identity, p)
 	status, code, summary, repair := certificateExpiryHealth(horizon)
-	if err := p.updateHealth(DimensionCertificate, status, code, summary, repair, correlationID, RetryNone, time.Time{}); err != nil {
+	if err := p.updateHealth(health.DimensionCertificate, status, code, summary, repair, correlationID, health.RetryNone, time.Time{}); err != nil {
 		return err
 	}
-	return p.recordEvent(identity, "certificate_expiry", code, certificateExpiryOutcome(horizon), certificateExpirySeverity(horizon), certificateExpiryMessage(horizon), RetryNone, time.Time{})
+	return p.recordEvent(identity, "certificate_expiry", code, certificateExpiryOutcome(horizon), certificateExpirySeverity(horizon), certificateExpiryMessage(horizon), health.RetryNone, time.Time{})
 }
 
 func normalizeCertificateHorizon(value CertificateExpiryHorizon) CertificateExpiryHorizon {
@@ -651,20 +653,20 @@ func normalizeCertificateHorizon(value CertificateExpiryHorizon) CertificateExpi
 	}
 }
 
-func certificateExpiryHealth(horizon CertificateExpiryHorizon) (HealthStatus, string, string, string) {
+func certificateExpiryHealth(horizon CertificateExpiryHorizon) (health.HealthStatus, string, string, string) {
 	switch horizon {
 	case CertificateExpired:
-		return StatusDown, "certificate_expired", "The certificate has expired.", "Renew or replace the certificate before accepting traffic."
+		return health.StatusDown, "certificate_expired", "The certificate has expired.", "Renew or replace the certificate before accepting traffic."
 	case CertificateUnder1H:
-		return StatusDegraded, "certificate_expiry_imminent", "The certificate expires within one hour.", "Renew the certificate immediately."
+		return health.StatusDegraded, "certificate_expiry_imminent", "The certificate expires within one hour.", "Renew the certificate immediately."
 	case CertificateUnder24H:
-		return StatusDegraded, "certificate_expiry_soon", "The certificate expires within one day.", "Renew the certificate soon."
+		return health.StatusDegraded, "certificate_expiry_soon", "The certificate expires within one day.", "Renew the certificate soon."
 	case CertificateUnder7D:
-		return StatusDegraded, "certificate_expiry_warning", "The certificate expires within seven days.", "Schedule certificate renewal."
+		return health.StatusDegraded, "certificate_expiry_warning", "The certificate expires within seven days.", "Schedule certificate renewal."
 	case CertificateUnder14D:
-		return StatusDegraded, "certificate_expiry_notice", "The certificate expires within fourteen days.", "Ensure renewal is scheduled."
+		return health.StatusDegraded, "certificate_expiry_notice", "The certificate expires within fourteen days.", "Ensure renewal is scheduled."
 	default:
-		return StatusReady, "certificate_expiry_clear", "The certificate expiry horizon is healthy.", "No action is required."
+		return health.StatusReady, "certificate_expiry_clear", "The certificate expiry horizon is healthy.", "No action is required."
 	}
 }
 
@@ -702,7 +704,7 @@ const (
 type PreviewAllocationInput struct {
 	Outcome       PreviewAllocationOutcome
 	At            time.Time
-	Retry         RetryDecision
+	Retry         health.RetryDecision
 	NextRetryAt   time.Time
 	Identity      ProducerIdentity
 	RequestID     string
@@ -721,7 +723,7 @@ const (
 type PreviewCleanupInput struct {
 	Outcome       PreviewCleanupOutcome
 	At            time.Time
-	Retry         RetryDecision
+	Retry         health.RetryDecision
 	NextRetryAt   time.Time
 	Identity      ProducerIdentity
 	RequestID     string
@@ -739,7 +741,7 @@ func (p *Producer) RecordPreviewAllocation(input PreviewAllocationInput) error {
 	identity := mergeIdentity(input.Identity, input.RequestID, input.CorrelationID, input.IDs)
 	correlationID := normalizedCorrelation(identity, p)
 	status, code, summary, repair, retry, next := previewHealth(string(outcome), input.Retry, input.NextRetryAt, p)
-	if err := p.updateHealth(DimensionRoute, status, code, summary, repair, correlationID, retry, next); err != nil {
+	if err := p.updateHealth(health.DimensionRoute, status, code, summary, repair, correlationID, retry, next); err != nil {
 		return err
 	}
 	return p.recordEvent(identity, "preview_allocation", code, previewEventOutcome(string(outcome)), previewSeverity(string(outcome)), previewMessage("allocation", string(outcome)), retry, next)
@@ -764,7 +766,7 @@ func (p *Producer) RecordPreviewCleanup(input PreviewCleanupInput) error {
 	identity := mergeIdentity(input.Identity, input.RequestID, input.CorrelationID, input.IDs)
 	correlationID := normalizedCorrelation(identity, p)
 	status, code, summary, repair, retry, next := previewHealth(string(outcome), input.Retry, input.NextRetryAt, p)
-	if err := p.updateHealth(DimensionRoute, status, code, summary, repair, correlationID, retry, next); err != nil {
+	if err := p.updateHealth(health.DimensionRoute, status, code, summary, repair, correlationID, retry, next); err != nil {
 		return err
 	}
 	return p.recordEvent(identity, "preview_cleanup", code, previewEventOutcome(string(outcome)), previewSeverity(string(outcome)), previewMessage("cleanup", string(outcome)), retry, next)
@@ -779,25 +781,25 @@ func normalizePreviewCleanupOutcome(value PreviewCleanupOutcome) PreviewCleanupO
 	}
 }
 
-func previewHealth(outcome string, retry RetryDecision, next time.Time, p *Producer) (HealthStatus, string, string, string, RetryDecision, time.Time) {
+func previewHealth(outcome string, retry health.RetryDecision, next time.Time, p *Producer) (health.HealthStatus, string, string, string, health.RetryDecision, time.Time) {
 	switch outcome {
 	case string(PreviewAllocationSucceeded), string(PreviewCleanupAlreadyClean):
-		return StatusReady, "route_ready", "Preview route state is healthy.", "No action is required.", RetryNone, time.Time{}
+		return health.StatusReady, "route_ready", "Preview route state is healthy.", "No action is required.", health.RetryNone, time.Time{}
 	case string(PreviewAllocationRejected):
-		return StatusDegraded, "preview_allocation_rejected", "Preview allocation was rejected.", "Correct the request and retry allocation.", RetryNotRetryable, time.Time{}
+		return health.StatusDegraded, "preview_allocation_rejected", "Preview allocation was rejected.", "Correct the request and retry allocation.", health.RetryNotRetryable, time.Time{}
 	case string(PreviewAllocationCanceled):
 		if retry == "" {
-			retry = RetryWaitForChange
+			retry = health.RetryWaitForChange
 		}
-		return StatusDegraded, "preview_allocation_canceled", "Preview allocation was canceled.", "Retry allocation when ready.", retry, next
+		return health.StatusDegraded, "preview_allocation_canceled", "Preview allocation was canceled.", "Retry allocation when ready.", retry, next
 	default:
 		if retry == "" {
-			retry = RetryScheduled
+			retry = health.RetryScheduled
 		}
-		if retry == RetryScheduled && next.IsZero() {
+		if retry == health.RetryScheduled && next.IsZero() {
 			next = p.now().Add(time.Minute)
 		}
-		return StatusDegraded, "preview_operation_failed", "Preview operation failed.", "Retry the preview operation after checking service health.", retry, next
+		return health.StatusDegraded, "preview_operation_failed", "Preview operation failed.", "Retry the preview operation after checking service health.", retry, next
 	}
 }
 
@@ -875,7 +877,7 @@ const (
 type ConnectorReconnectInput struct {
 	Outcome       ConnectorReconnectOutcome
 	At            time.Time
-	Retry         RetryDecision
+	Retry         health.RetryDecision
 	NextRetryAt   time.Time
 	Identity      ProducerIdentity
 	Generations   Generations
@@ -953,7 +955,7 @@ type ConfigApplyInput struct {
 	State         ConfigGenerationState
 	Generation    uint64
 	At            time.Time
-	Retry         RetryDecision
+	Retry         health.RetryDecision
 	NextRetryAt   time.Time
 	Identity      ProducerIdentity
 	Generations   Generations
@@ -975,7 +977,7 @@ func (p *Producer) RecordConfigApply(input ConfigApplyInput) error {
 	identity := mergeIdentity(input.Identity, input.RequestID, input.CorrelationID, input.IDs)
 	correlationID := normalizedCorrelation(identity, p)
 	status, code, summary, repair, retry, next := configHealth(state, input.Retry, input.NextRetryAt, p)
-	if err := p.updateHealth(DimensionConfig, status, code, summary, repair, correlationID, retry, next); err != nil {
+	if err := p.updateHealth(health.DimensionConfig, status, code, summary, repair, correlationID, retry, next); err != nil {
 		return err
 	}
 	generations := input.Generations
@@ -985,14 +987,14 @@ func (p *Producer) RecordConfigApply(input ConfigApplyInput) error {
 	return p.recordEventWithGenerations(identity, "config_apply", code, configEventOutcome(state), configSeverity(state), configMessage(state), retry, next, generations)
 }
 
-func configHealth(state ConfigGenerationState, retry RetryDecision, next time.Time, p *Producer) (HealthStatus, string, string, string, RetryDecision, time.Time) {
+func configHealth(state ConfigGenerationState, retry health.RetryDecision, next time.Time, p *Producer) (health.HealthStatus, string, string, string, health.RetryDecision, time.Time) {
 	if state == ConfigGenerationApplied {
-		return StatusReady, "config_applied", "The desired configuration is applied.", "No action is required.", RetryNone, time.Time{}
+		return health.StatusReady, "config_applied", "The desired configuration is applied.", "No action is required.", health.RetryNone, time.Time{}
 	}
 	if retry == "" {
-		retry = RetryWaitForChange
+		retry = health.RetryWaitForChange
 	}
-	return StatusDegraded, "config_pending", "The desired configuration is waiting to be applied.", "Wait for the configuration worker to apply the desired generation.", retry, next
+	return health.StatusDegraded, "config_pending", "The desired configuration is waiting to be applied.", "Wait for the configuration worker to apply the desired generation.", retry, next
 }
 
 func configEventOutcome(state ConfigGenerationState) EventOutcome {
@@ -1048,7 +1050,7 @@ func (p *Producer) RecordRouteError(input RouteErrorInput) error {
 	correlationID := normalizedCorrelation(identity, p)
 	retry, next := routeErrorRetry(class, p)
 	code, outcome, severity, message := routeErrorProjection(class)
-	if err := p.updateHealth(DimensionRoute, StatusDegraded, code, message, "Check route, edge, and origin health before retrying.", correlationID, retry, next); err != nil {
+	if err := p.updateHealth(health.DimensionRoute, health.StatusDegraded, code, message, "Check route, edge, and origin health before retrying.", correlationID, retry, next); err != nil {
 		return err
 	}
 	return p.recordEvent(identity, "route_error", code, outcome, severity, message, retry, next)
@@ -1082,14 +1084,14 @@ func routeErrorProjection(class RouteErrorClass) (string, EventOutcome, EventSev
 	}
 }
 
-func routeErrorRetry(class RouteErrorClass, p *Producer) (RetryDecision, time.Time) {
+func routeErrorRetry(class RouteErrorClass, p *Producer) (health.RetryDecision, time.Time) {
 	switch class {
 	case RouteErrorNotFound, RouteErrorConflict, RouteErrorUnauthorized:
-		return RetryNotRetryable, time.Time{}
+		return health.RetryNotRetryable, time.Time{}
 	case RouteErrorPaused:
-		return RetryWaitForChange, time.Time{}
+		return health.RetryWaitForChange, time.Time{}
 	default:
-		return RetryScheduled, p.now().Add(time.Minute)
+		return health.RetryScheduled, p.now().Add(time.Minute)
 	}
 }
 
@@ -1126,10 +1128,10 @@ func (p *Producer) RecordRouteLatency(input RouteLatencyInput) error {
 	}
 	identity := mergeIdentity(input.Identity, input.RequestID, input.CorrelationID, input.IDs)
 	correlationID := normalizedCorrelation(identity, p)
-	if err := p.updateHealth(DimensionRoute, StatusReady, "route_ready", "Route connectivity is healthy.", "No action is required.", correlationID, RetryNone, time.Time{}); err != nil {
+	if err := p.updateHealth(health.DimensionRoute, health.StatusReady, "route_ready", "Route connectivity is healthy.", "No action is required.", correlationID, health.RetryNone, time.Time{}); err != nil {
 		return err
 	}
-	return p.recordEvent(identity, "route_latency", "route_latency_observed", OutcomeSuccess, SeverityInfo, "Route latency observed.", RetryNone, time.Time{})
+	return p.recordEvent(identity, "route_latency", "route_latency_observed", OutcomeSuccess, SeverityInfo, "Route latency observed.", health.RetryNone, time.Time{})
 }
 
 func normalizeRouteProtocol(value RouteProtocol) RouteProtocol {
@@ -1179,7 +1181,7 @@ type ServiceRestartInput struct {
 func (p *Producer) RecordServiceLifecycle(input ServiceLifecycleInput) error {
 	state := normalizeServiceState(input.State)
 	if input.Uptime < 0 {
-		return newError(ErrorInvalidObservation, "record control-plane service uptime")
+		return safe.NewError(safe.ErrorInvalidObservation, "record control-plane service uptime")
 	}
 	if p != nil && p.Metrics != nil {
 		uptime := uint64(input.Uptime / time.Second)
@@ -1196,7 +1198,7 @@ func (p *Producer) RecordServiceLifecycle(input ServiceLifecycleInput) error {
 	identity := mergeIdentity(input.Identity, input.RequestID, input.CorrelationID, input.IDs)
 	correlationID := normalizedCorrelation(identity, p)
 	status, code, summary, repair, retry, next := serviceHealth(state, p)
-	if err := p.updateHealth(DimensionService, status, code, summary, repair, correlationID, retry, next); err != nil {
+	if err := p.updateHealth(health.DimensionService, status, code, summary, repair, correlationID, retry, next); err != nil {
 		return err
 	}
 	return p.recordEvent(identity, "service_lifecycle", code, serviceEventOutcome(state), serviceSeverity(state), "Service state is "+string(state)+".", retry, next)
@@ -1215,17 +1217,17 @@ func (p *Producer) RecordServiceRestart(input ServiceRestartInput) error {
 	identity := mergeIdentity(input.Identity, input.RequestID, input.CorrelationID, input.IDs)
 	correlationID := normalizedCorrelation(identity, p)
 	status, code, summary, repair, retry, next := serviceRestartHealth(outcome, p)
-	if err := p.updateHealth(DimensionService, status, code, summary, repair, correlationID, retry, next); err != nil {
+	if err := p.updateHealth(health.DimensionService, status, code, summary, repair, correlationID, retry, next); err != nil {
 		return err
 	}
 	return p.recordEvent(identity, "service_lifecycle", code, serviceRestartEventOutcome(outcome), serviceRestartSeverity(outcome), "Service restart "+string(outcome)+".", retry, next)
 }
 
-func serviceRestartHealth(outcome ServiceRestartOutcome, p *Producer) (HealthStatus, string, string, string, RetryDecision, time.Time) {
+func serviceRestartHealth(outcome ServiceRestartOutcome, p *Producer) (health.HealthStatus, string, string, string, health.RetryDecision, time.Time) {
 	if outcome == ServiceRestartSucceeded {
-		return StatusReady, "service_ready", "The control-plane service restarted successfully.", "No action is required.", RetryNone, time.Time{}
+		return health.StatusReady, "service_ready", "The control-plane service restarted successfully.", "No action is required.", health.RetryNone, time.Time{}
 	}
-	return StatusDegraded, "service_restart_failed", "The control-plane service restart failed.", "Inspect service health before retrying the restart.", RetryScheduled, p.now().Add(time.Minute)
+	return health.StatusDegraded, "service_restart_failed", "The control-plane service restart failed.", "Inspect service health before retrying the restart.", health.RetryScheduled, p.now().Add(time.Minute)
 }
 
 func serviceRestartEventOutcome(outcome ServiceRestartOutcome) EventOutcome {
@@ -1251,14 +1253,14 @@ func normalizeServiceState(value ServiceState) ServiceState {
 	}
 }
 
-func serviceHealth(state ServiceState, p *Producer) (HealthStatus, string, string, string, RetryDecision, time.Time) {
+func serviceHealth(state ServiceState, p *Producer) (health.HealthStatus, string, string, string, health.RetryDecision, time.Time) {
 	switch state {
 	case ServiceRunning:
-		return StatusReady, "service_ready", "The control-plane service is running.", "No action is required.", RetryNone, time.Time{}
+		return health.StatusReady, "service_ready", "The control-plane service is running.", "No action is required.", health.RetryNone, time.Time{}
 	case ServiceStopped:
-		return StatusDown, "service_stopped", "The control-plane service is stopped.", "Start the control-plane service.", RetryNotRetryable, time.Time{}
+		return health.StatusDown, "service_stopped", "The control-plane service is stopped.", "Start the control-plane service.", health.RetryNotRetryable, time.Time{}
 	default:
-		return StatusDegraded, "service_degraded", "The control-plane service is degraded.", "Inspect service health and retry affected operations.", RetryScheduled, p.now().Add(time.Minute)
+		return health.StatusDegraded, "service_degraded", "The control-plane service is degraded.", "Inspect service health and retry affected operations.", health.RetryScheduled, p.now().Add(time.Minute)
 	}
 }
 
@@ -1303,7 +1305,7 @@ func (p *Producer) RecordWatchdog(input WatchdogInput) error {
 	identity := mergeIdentity(input.Identity, input.RequestID, input.CorrelationID, input.IDs)
 	correlationID := normalizedCorrelation(identity, p)
 	status, code, summary, repair, retry, next := watchdogHealth(outcome, p)
-	if err := p.updateHealth(DimensionService, status, code, summary, repair, correlationID, retry, next); err != nil {
+	if err := p.updateHealth(health.DimensionService, status, code, summary, repair, correlationID, retry, next); err != nil {
 		return err
 	}
 	return p.recordEvent(identity, "service_watchdog", code, watchdogEventOutcome(outcome), watchdogSeverity(outcome), "Service watchdog "+string(outcome)+".", retry, next)
@@ -1318,14 +1320,14 @@ func normalizeWatchdogOutcome(value WatchdogOutcome) WatchdogOutcome {
 	}
 }
 
-func watchdogHealth(outcome WatchdogOutcome, p *Producer) (HealthStatus, string, string, string, RetryDecision, time.Time) {
+func watchdogHealth(outcome WatchdogOutcome, p *Producer) (health.HealthStatus, string, string, string, health.RetryDecision, time.Time) {
 	switch outcome {
 	case WatchdogHealthy:
-		return StatusReady, "service_ready", "The service watchdog is healthy.", "No action is required.", RetryNone, time.Time{}
+		return health.StatusReady, "service_ready", "The service watchdog is healthy.", "No action is required.", health.RetryNone, time.Time{}
 	case WatchdogRestarted:
-		return StatusDegraded, "service_restarted", "The service watchdog restarted the service.", "Confirm service stability before retrying.", RetryScheduled, p.now().Add(time.Minute)
+		return health.StatusDegraded, "service_restarted", "The service watchdog restarted the service.", "Confirm service stability before retrying.", health.RetryScheduled, p.now().Add(time.Minute)
 	default:
-		return StatusDegraded, "service_watchdog_failed", "The service watchdog detected a failure.", "Inspect service health and retry after recovery.", RetryScheduled, p.now().Add(time.Minute)
+		return health.StatusDegraded, "service_watchdog_failed", "The service watchdog detected a failure.", "Inspect service health and retry after recovery.", health.RetryScheduled, p.now().Add(time.Minute)
 	}
 }
 
@@ -1372,17 +1374,17 @@ func (p *Producer) RecordCrashLoop(input CrashLoopInput) error {
 	identity := mergeIdentity(input.Identity, input.RequestID, input.CorrelationID, input.IDs)
 	correlationID := normalizedCorrelation(identity, p)
 	status, code, summary, repair, retry, next := crashLoopHealth(state, p)
-	if err := p.updateHealth(DimensionService, status, code, summary, repair, correlationID, retry, next); err != nil {
+	if err := p.updateHealth(health.DimensionService, status, code, summary, repair, correlationID, retry, next); err != nil {
 		return err
 	}
 	return p.recordEvent(identity, "service_crash_loop", code, crashLoopEventOutcome(state), crashLoopSeverity(state), "Service crash-loop state updated.", retry, next)
 }
 
-func crashLoopHealth(state CrashLoopState, p *Producer) (HealthStatus, string, string, string, RetryDecision, time.Time) {
+func crashLoopHealth(state CrashLoopState, p *Producer) (health.HealthStatus, string, string, string, health.RetryDecision, time.Time) {
 	if state == CrashLoopClear {
-		return StatusReady, "service_ready", "The service crash-loop condition is clear.", "No action is required.", RetryNone, time.Time{}
+		return health.StatusReady, "service_ready", "The service crash-loop condition is clear.", "No action is required.", health.RetryNone, time.Time{}
 	}
-	return StatusDown, "service_crash_loop", "The service is restarting repeatedly.", "Stop the crash loop and repair the service before retrying.", RetryNotRetryable, time.Time{}
+	return health.StatusDown, "service_crash_loop", "The service is restarting repeatedly.", "Stop the crash loop and repair the service before retrying.", health.RetryNotRetryable, time.Time{}
 }
 
 func crashLoopEventOutcome(state CrashLoopState) EventOutcome {

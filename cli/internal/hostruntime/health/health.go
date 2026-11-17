@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/shared/backoff"
+	"github.com/pinksaucepasta/paperboat/shared/telemetry/safe"
 )
 
 type State string
@@ -86,8 +87,8 @@ func (r *Registry) Snapshot() Snapshot {
 func (r *Registry) Fail(capability string, err error, retryAfter time.Duration) {
 	reason := "failed"
 	if err != nil {
-		if safe, safeErr := safeBoundedString(err.Error(), maximumMessageBytes, true); safeErr == nil {
-			reason = safe
+		if text, textErr := safe.BoundedString(err.Error(), safe.MaximumMessageBytes, true); textErr == nil {
+			reason = text
 		}
 	}
 	r.Set(capability, Degraded, reason, retryAfter)

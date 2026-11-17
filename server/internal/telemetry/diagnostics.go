@@ -2,6 +2,8 @@ package telemetry
 
 import (
 	"encoding/json"
+	"github.com/pinksaucepasta/paperboat/shared/health"
+	"github.com/pinksaucepasta/paperboat/shared/telemetry/safe"
 	"math"
 	"sort"
 	"sync"
@@ -27,7 +29,7 @@ const (
 // the application creates its per-run event worker.
 type DiagnosticsConfig struct {
 	Metrics *Metrics
-	Health  *HealthTracker
+	Health  *health.HealthTracker
 	Events  *EventLog
 	Now     func() time.Time
 
@@ -41,7 +43,7 @@ type DiagnosticsConfig struct {
 type Diagnostics struct {
 	mu      sync.RWMutex
 	metrics *Metrics
-	health  *HealthTracker
+	health  *health.HealthTracker
 	events  *EventLog
 	now     func() time.Time
 
@@ -64,14 +66,14 @@ func NewDiagnostics(config DiagnosticsConfig) (*Diagnostics, error) {
 		maximumBytes = MaximumDiagnosticsBytes
 	}
 	if maximumEvents < 0 || maximumEvents > maximumEventLogSize || maximumMetrics < 0 || maximumMetrics > defaultMaximumMetricSeries*2 || maximumBytes < 0 || maximumBytes > 16<<20 {
-		return nil, newError(ErrorInvalidCapacity, "construct control-plane diagnostics")
+		return nil, safe.NewError(safe.ErrorInvalidCapacity, "construct control-plane diagnostics")
 	}
 	now := config.Now
 	if now == nil {
 		now = time.Now
 	}
-	if normalizeTime(now()).IsZero() {
-		return nil, newError(ErrorInvalidTime, "construct control-plane diagnostics")
+	if safe.NormalizeTime(now()).IsZero() {
+		return nil, safe.NewError(safe.ErrorInvalidTime, "construct control-plane diagnostics")
 	}
 	return &Diagnostics{
 		metrics:        config.Metrics,
@@ -102,7 +104,7 @@ func (d *Diagnostics) Snapshot() DiagnosticsSnapshot {
 		return DiagnosticsSnapshot{}
 	}
 	d.mu.RLock()
-	metrics, health, events, now := d.metrics, d.health, d.events, d.now
+	metrics, healthTracker, events, now := d.metrics, d.health, d.events, d.now
 	maximumEvents, maximumMetrics := d.maximumEvents, d.maximumMetrics
 	d.mu.RUnlock()
 
@@ -111,14 +113,14 @@ func (d *Diagnostics) Snapshot() DiagnosticsSnapshot {
 	}
 	snapshot := DiagnosticsSnapshot{
 		Schema:     DiagnosticsSchemaV1,
-		CapturedAt: normalizeTime(now()),
+		CapturedAt: safe.NormalizeTime(now()),
 		Metrics:    []MetricSample{},
 		Events:     []Event{},
 	}
-	if health != nil {
-		snapshot.Health = health.Snapshot()
+	if healthTracker != nil {
+		snapshot.Health = healthTracker.Snapshot()
 		snapshot.Retry = snapshot.Health.Overall.Retry
-		snapshot.NextRetryAt = cloneTime(snapshot.Health.Overall.NextRetryAt)
+		snapshot.NextRetryAt = safe.CloneTime(snapshot.Health.Overall.NextRetryAt)
 	}
 	if metrics != nil {
 		snapshot.Metrics = metrics.Snapshot()
@@ -151,7 +153,7 @@ func (d *Diagnostics) SnapshotWithIdentity(requestID, correlationID string) Diag
 // a telemetry lock while encoding JSON.
 func (d *Diagnostics) JSONWithIdentity(requestID, correlationID string) ([]byte, error) {
 	if d == nil {
-		return nil, newError(ErrorInvalidObservation, "serialize control-plane diagnostics")
+		return nil, safe.NewError(safe.ErrorInvalidObservation, "serialize control-plane diagnostics")
 	}
 	snapshot := d.SnapshotWithIdentity(requestID, correlationID)
 	body, err := snapshot.JSON()
@@ -162,7 +164,7 @@ func (d *Diagnostics) JSONWithIdentity(requestID, correlationID string) ([]byte,
 	maximumBytes := d.maximumBytes
 	d.mu.RUnlock()
 	if maximumBytes > 0 && len(body) > maximumBytes {
-		return nil, newError(ErrorMetricCardinality, "serialize control-plane diagnostics")
+		return nil, safe.NewError(safe.ErrorMetricCardinality, "serialize control-plane diagnostics")
 	}
 	return body, nil
 }
@@ -175,10 +177,10 @@ func (s DiagnosticsSnapshot) JSON() ([]byte, error) {
 	}
 	body, err := json.Marshal(s)
 	if err != nil {
-		return nil, newError(ErrorInvalidObservation, "serialize control-plane diagnostics")
+		return nil, safe.NewError(safe.ErrorInvalidObservation, "serialize control-plane diagnostics")
 	}
 	if len(body) > MaximumDiagnosticsBytes {
-		return nil, newError(ErrorMetricCardinality, "serialize control-plane diagnostics")
+		return nil, safe.NewError(safe.ErrorMetricCardinality, "serialize control-plane diagnostics")
 	}
 	return body, nil
 }
@@ -190,21 +192,21 @@ type SupportSnapshot = DiagnosticsSnapshot
 // DiagnosticsSnapshot is intentionally limited to the typed sinks. Metric
 // labels and event fields are already allowlisted/redacted at construction.
 type DiagnosticsSnapshot struct {
-	Schema        string         `json:"schema"`
-	CapturedAt    time.Time      `json:"captured_at"`
-	RequestID     string         `json:"request_id,omitempty"`
-	CorrelationID string         `json:"correlation_id,omitempty"`
-	Health        HealthSnapshot `json:"health"`
-	Retry         RetryDecision  `json:"retry"`
-	NextRetryAt   *time.Time     `json:"next_retry_at,omitempty"`
-	Metrics       []MetricSample `json:"metrics"`
-	Events        []Event        `json:"events"`
-	DroppedEvents uint64         `json:"dropped_events"`
+	Schema        string                `json:"schema"`
+	CapturedAt    time.Time             `json:"captured_at"`
+	RequestID     string                `json:"request_id,omitempty"`
+	CorrelationID string                `json:"correlation_id,omitempty"`
+	Health        health.HealthSnapshot `json:"health"`
+	Retry         health.RetryDecision  `json:"retry"`
+	NextRetryAt   *time.Time            `json:"next_retry_at,omitempty"`
+	Metrics       []MetricSample        `json:"metrics"`
+	Events        []Event               `json:"events"`
+	DroppedEvents uint64                `json:"dropped_events"`
 }
 
 func (s DiagnosticsSnapshot) Validate() error {
-	if s.Schema != DiagnosticsSchemaV1 || normalizeTime(s.CapturedAt).IsZero() || !validOptionalLogIdentity(s.RequestID, "request_", "req_") || (s.CorrelationID != "" && !validCorrelationID(s.CorrelationID)) || !validRetry(s.Retry, timeValue(s.NextRetryAt)) || len(s.Metrics) > MaximumDiagnosticsMetrics || len(s.Events) > MaximumDiagnosticsEvents {
-		return newError(ErrorInvalidObservation, "validate control-plane diagnostics")
+	if s.Schema != DiagnosticsSchemaV1 || safe.NormalizeTime(s.CapturedAt).IsZero() || !validOptionalLogIdentity(s.RequestID, "request_", "req_") || (s.CorrelationID != "" && !safe.CorrelationID(s.CorrelationID)) || !health.ValidRetry(s.Retry, safe.TimeValue(s.NextRetryAt)) || len(s.Metrics) > MaximumDiagnosticsMetrics || len(s.Events) > MaximumDiagnosticsEvents {
+		return safe.NewError(safe.ErrorInvalidObservation, "validate control-plane diagnostics")
 	}
 	if err := s.Health.Validate(); err != nil {
 		return err
@@ -225,26 +227,26 @@ func (s DiagnosticsSnapshot) Validate() error {
 func validateMetricSample(sample MetricSample) error {
 	descriptor, ok := descriptorByName(sample.Name)
 	if !ok || sample.Kind != descriptor.Kind || len(sample.Labels) != len(descriptor.Labels) || math.IsNaN(sample.Sum) || math.IsInf(sample.Sum, 0) || sample.Sum < 0 {
-		return newError(ErrorInvalidObservation, "validate control-plane metric")
+		return safe.NewError(safe.ErrorInvalidObservation, "validate control-plane metric")
 	}
 	for index, label := range sample.Labels {
 		if label.Name != descriptor.Labels[index].Name || !containsString(descriptor.Labels[index].AllowedValues, label.Value) {
-			return newError(ErrorInvalidObservation, "validate control-plane metric")
+			return safe.NewError(safe.ErrorInvalidObservation, "validate control-plane metric")
 		}
 	}
 	if descriptor.Kind == MetricHistogram {
 		if descriptor.Histogram == nil || len(sample.Buckets) != len(descriptor.Histogram.Buckets) {
-			return newError(ErrorInvalidObservation, "validate control-plane metric")
+			return safe.NewError(safe.ErrorInvalidObservation, "validate control-plane metric")
 		}
 		last := 0.0
 		for index, bucket := range sample.Buckets {
 			if bucket.UpperBound != descriptor.Histogram.Buckets[index] || bucket.UpperBound < last {
-				return newError(ErrorInvalidObservation, "validate control-plane metric")
+				return safe.NewError(safe.ErrorInvalidObservation, "validate control-plane metric")
 			}
 			last = bucket.UpperBound
 		}
 	} else if len(sample.Buckets) != 0 {
-		return newError(ErrorInvalidObservation, "validate control-plane metric")
+		return safe.NewError(safe.ErrorInvalidObservation, "validate control-plane metric")
 	}
 	return nil
 }

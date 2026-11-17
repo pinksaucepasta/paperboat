@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/shared/health"
 	"log/slog"
 	"net"
 	"net/http"
@@ -87,7 +88,7 @@ type Options struct {
 	OperatorBackups          *backupreport.Service
 	TestFixtures             *testfixtures.Service
 	OperatorReporting        *operatorreporting.Service
-	OperatorHealth           *telemetry.HealthTracker
+	OperatorHealth           *health.HealthTracker
 	OperatorActions          *operatoractions.Service
 	AbuseReports             *abusereports.Service
 	IPRules                  *accessrules.Store
@@ -208,7 +209,7 @@ func NewRouter(opts Options) http.Handler {
 		}
 		registerOperatorRoutes(mux, opts)
 		registerOperatorAuthentication(mux, opts)
-		mux.HandleFunc("GET /healthz", health)
+		mux.HandleFunc("GET /healthz", healthz)
 		mux.HandleFunc("GET /v1/server-version", serverVersion)
 		if opts.ReleaseFiles != nil {
 			mux.Handle("GET /install", installScript(opts.ReleaseFiles))
@@ -809,7 +810,7 @@ func correlationID(next http.Handler) http.Handler {
 	})
 }
 
-func health(w http.ResponseWriter, _ *http.Request) {
+func healthz(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, SuccessResponse{Data: map[string]any{
 		"status": "healthy",
 	}})

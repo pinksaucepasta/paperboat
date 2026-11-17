@@ -3,6 +3,8 @@ package telemetry
 import (
 	"context"
 	"encoding/json"
+	"github.com/pinksaucepasta/paperboat/shared/health"
+	"github.com/pinksaucepasta/paperboat/shared/telemetry/safe"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -66,7 +68,7 @@ type Generations struct {
 type EventInput struct {
 	At            time.Time
 	Severity      EventSeverity
-	Component     Dimension
+	Component     health.Dimension
 	Name          string
 	Code          string
 	Outcome       EventOutcome
@@ -74,51 +76,51 @@ type EventInput struct {
 	CorrelationID string
 	IDs           SafeIDs
 	Generations   Generations
-	Retry         RetryDecision
+	Retry         health.RetryDecision
 	NextRetryAt   time.Time
 }
 
 type Event struct {
-	Schema        string        `json:"schema"`
-	At            time.Time     `json:"at"`
-	Severity      EventSeverity `json:"severity"`
-	Component     Dimension     `json:"component"`
-	Name          string        `json:"name"`
-	Code          string        `json:"code"`
-	Outcome       EventOutcome  `json:"outcome"`
-	Message       string        `json:"message"`
-	CorrelationID string        `json:"correlation_id"`
-	IDs           SafeIDs       `json:"ids"`
-	Generations   Generations   `json:"generations"`
-	Retry         RetryDecision `json:"retry"`
-	NextRetryAt   *time.Time    `json:"next_retry_at,omitempty"`
+	Schema        string               `json:"schema"`
+	At            time.Time            `json:"at"`
+	Severity      EventSeverity        `json:"severity"`
+	Component     health.Dimension     `json:"component"`
+	Name          string               `json:"name"`
+	Code          string               `json:"code"`
+	Outcome       EventOutcome         `json:"outcome"`
+	Message       string               `json:"message"`
+	CorrelationID string               `json:"correlation_id"`
+	IDs           SafeIDs              `json:"ids"`
+	Generations   Generations          `json:"generations"`
+	Retry         health.RetryDecision `json:"retry"`
+	NextRetryAt   *time.Time           `json:"next_retry_at,omitempty"`
 }
 
 func NewEvent(input EventInput) (Event, error) {
-	if normalizeTime(input.At).IsZero() {
-		return Event{}, newError(ErrorInvalidTime, "construct edge event")
+	if safe.NormalizeTime(input.At).IsZero() {
+		return Event{}, safe.NewError(safe.ErrorInvalidTime, "construct edge event")
 	}
-	if !validEventSeverity(input.Severity) || !validDimension(input.Component) ||
-		!stableCodePattern.MatchString(input.Name) || !stableCodePattern.MatchString(input.Code) ||
+	if !validEventSeverity(input.Severity) || !health.ValidDimension(input.Component) ||
+		!safe.StableCode(input.Name) || !safe.StableCode(input.Code) ||
 		!validEventOutcome(input.Outcome) {
-		return Event{}, newError(ErrorInvalidEvent, "construct edge event")
+		return Event{}, safe.NewError(safe.ErrorInvalidEvent, "construct edge event")
 	}
-	if !validCorrelationID(input.CorrelationID) {
-		return Event{}, newError(ErrorInvalidID, "construct edge event")
+	if !safe.CorrelationID(input.CorrelationID) {
+		return Event{}, safe.NewError(safe.ErrorInvalidID, "construct edge event")
 	}
 	if !validSafeIDs(input.IDs) {
-		return Event{}, newError(ErrorInvalidID, "construct edge event")
+		return Event{}, safe.NewError(safe.ErrorInvalidID, "construct edge event")
 	}
-	if !validRetry(input.Retry, input.NextRetryAt) {
-		return Event{}, newError(ErrorInvalidRetry, "construct edge event")
+	if !health.ValidRetry(input.Retry, input.NextRetryAt) {
+		return Event{}, safe.NewError(safe.ErrorInvalidRetry, "construct edge event")
 	}
-	message, err := safeBoundedString(input.Message, maximumMessageBytes, true)
+	message, err := safe.BoundedString(input.Message, safe.MaximumMessageBytes, true)
 	if err != nil {
 		return Event{}, err
 	}
 	event := Event{
 		Schema:        EventSchemaV1,
-		At:            normalizeTime(input.At),
+		At:            safe.NormalizeTime(input.At),
 		Severity:      input.Severity,
 		Component:     input.Component,
 		Name:          input.Name,
@@ -131,7 +133,7 @@ func NewEvent(input EventInput) (Event, error) {
 		Retry:         input.Retry,
 	}
 	if !input.NextRetryAt.IsZero() {
-		nextRetry := normalizeTime(input.NextRetryAt)
+		nextRetry := safe.NormalizeTime(input.NextRetryAt)
 		event.NextRetryAt = &nextRetry
 	}
 	return event, nil
@@ -145,10 +147,6 @@ func validEventSeverity(value EventSeverity) bool {
 
 func validEventOutcome(value EventOutcome) bool {
 	return value == OutcomeSuccess || value == OutcomeFailed || value == OutcomeRejected || value == OutcomeCanceled || value == OutcomeStateChange
-}
-
-func validCorrelationID(value string) bool {
-	return SafeOpaqueID(value)
 }
 
 func validSafeIDs(ids SafeIDs) bool {
@@ -169,7 +167,7 @@ func validSafeIDs(ids SafeIDs) bool {
 }
 
 func optionalSafeID(value string) bool {
-	return value == "" || SafeOpaqueID(value)
+	return value == "" || safe.OpaqueID(value)
 }
 
 // EventLog is a bounded, nonblocking producer path backed by an owned worker.
@@ -209,7 +207,7 @@ func NewEventLog(capacity int) (*EventLog, error) {
 // a larger retained ring. Both bounds are explicit and finite.
 func NewEventLogWithQueue(capacity, queueCapacity int) (*EventLog, error) {
 	if capacity <= 0 || capacity > maximumEventLogSize || queueCapacity <= 0 || queueCapacity > maximumEventLogSize {
-		return nil, newError(ErrorInvalidCapacity, "construct edge event log")
+		return nil, safe.NewError(safe.ErrorInvalidCapacity, "construct edge event log")
 	}
 	log := &EventLog{
 		capacity: capacity,
@@ -403,6 +401,6 @@ func (l *EventLog) Close() error {
 }
 
 func cloneEvent(event Event) Event {
-	event.NextRetryAt = cloneTime(event.NextRetryAt)
+	event.NextRetryAt = safe.CloneTime(event.NextRetryAt)
 	return event
 }

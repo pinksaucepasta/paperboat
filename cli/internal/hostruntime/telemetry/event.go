@@ -3,12 +3,11 @@ package telemetry
 import (
 	"context"
 	"encoding/json"
+	"github.com/pinksaucepasta/paperboat/shared/health"
 	"regexp"
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/health"
 )
 
 const (

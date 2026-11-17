@@ -11,6 +11,7 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/shared/health"
 	"io"
 	"log/slog"
 	"net"
@@ -789,7 +790,7 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 		}
 		return nil, err
 	}
-	health, err := edgediagnostics.NewHandler(edgediagnostics.Sources{
+	healthHandler, err := edgediagnostics.NewHandler(edgediagnostics.Sources{
 		Node:           state.Snapshot,
 		Manager:        manager.Snapshot,
 		Sessions:       func() int { return durableRoutes.Stats().Sessions },
@@ -820,7 +821,7 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 		ImportCertificates: func(ctx context.Context, records [][]byte) tlscert.ImportReport {
 			return certificateRegistry.ImportEncoded(ctx, cfg.NodeID, processEpoch, records)
 		}}
-	if err := service.SetHealthHandler(health); err != nil {
+	if err := service.SetHealthHandler(healthHandler); err != nil {
 		if carrierCleanup != nil {
 			_ = carrierCleanup()
 		}
@@ -970,7 +971,7 @@ func (s *carrierResponseStream) Close() error {
 }
 
 type telemetryLifecycle struct {
-	health     *edgetelemetry.HealthTracker
+	health     *health.HealthTracker
 	metrics    *edgetelemetry.Metrics
 	events     *edgetelemetry.EventLog
 	clock      func() time.Time
@@ -989,8 +990,8 @@ type telemetryLifecycle struct {
 	processCtx   context.Context
 }
 
-func newTelemetryLifecycle(health *edgetelemetry.HealthTracker, metrics *edgetelemetry.Metrics, events *edgetelemetry.EventLog) *telemetryLifecycle {
-	return &telemetryLifecycle{health: health, metrics: metrics, events: events, clock: time.Now}
+func newTelemetryLifecycle(healthTracker *health.HealthTracker, metrics *edgetelemetry.Metrics, events *edgetelemetry.EventLog) *telemetryLifecycle {
+	return &telemetryLifecycle{health: healthTracker, metrics: metrics, events: events, clock: time.Now}
 }
 
 func (l *telemetryLifecycle) Start(ctx context.Context) error {
@@ -1023,7 +1024,7 @@ func (l *telemetryLifecycle) Start(ctx context.Context) error {
 		go l.runMetricExport(metricCtx)
 	}
 	l.mu.Unlock()
-	if err := l.updateHealth(edgetelemetry.StatusDegraded, "service_starting", "Edge service is starting.", "Wait for the edge service to become ready.", edgetelemetry.RetryWaitForChange); err != nil {
+	if err := l.updateHealth(health.StatusDegraded, "service_starting", "Edge service is starting.", "Wait for the edge service to become ready.", health.RetryWaitForChange); err != nil {
 		_ = l.Shutdown(context.Background())
 		return err
 	}
@@ -1051,7 +1052,7 @@ func (l *telemetryLifecycle) MarkReady(ctx context.Context) error {
 	}
 	l.ready = true
 	l.mu.Unlock()
-	if err := l.updateHealth(edgetelemetry.StatusReady, "service_ready", "Edge service is ready.", "No action is required.", edgetelemetry.RetryNone); err != nil {
+	if err := l.updateHealth(health.StatusReady, "service_ready", "Edge service is ready.", "No action is required.", health.RetryNone); err != nil {
 		return err
 	}
 	return l.record("edge_service_ready", edgetelemetry.SeverityInfo, edgetelemetry.OutcomeStateChange, "Edge service became ready.")
@@ -1086,7 +1087,7 @@ func (l *telemetryLifecycle) Shutdown(ctx context.Context) error {
 		l.exportMetrics(l.processCtx)
 	}
 	if started {
-		if err := l.updateHealth(edgetelemetry.StatusDown, "service_shutdown", "Edge service is shutting down.", "Start the edge service again when it is needed.", edgetelemetry.RetryNotRetryable); err != nil {
+		if err := l.updateHealth(health.StatusDown, "service_shutdown", "Edge service is shutting down.", "Start the edge service again when it is needed.", health.RetryNotRetryable); err != nil {
 			failures = append(failures, err)
 		}
 		if err := l.record("edge_service_shutdown", edgetelemetry.SeverityInfo, edgetelemetry.OutcomeStateChange, "Edge service shutdown began."); err != nil {
@@ -1188,12 +1189,12 @@ func usageQueueDeep(stats usage.QueueStats) bool {
 	return stats.MaxReports > 0 && stats.Reports*2 >= stats.MaxReports
 }
 
-func (l *telemetryLifecycle) updateHealth(status edgetelemetry.HealthStatus, code, summary, repair string, retry edgetelemetry.RetryDecision) error {
+func (l *telemetryLifecycle) updateHealth(status health.HealthStatus, code, summary, repair string, retry health.RetryDecision) error {
 	if l == nil || l.health == nil {
 		return nil
 	}
-	return l.health.Update(edgetelemetry.HealthUpdate{
-		Dimension: edgetelemetry.DimensionService, Status: status, Code: code,
+	return l.health.Update(health.HealthUpdate{
+		Dimension: health.DimensionService, Status: status, Code: code,
 		Summary: summary, RepairAction: repair, CorrelationID: l.correlation(), Retry: retry,
 	})
 }
@@ -1215,9 +1216,9 @@ func (l *telemetryLifecycle) record(name string, severity edgetelemetry.EventSev
 		return nil
 	}
 	_, _, err := l.events.TryRecord(edgetelemetry.EventInput{
-		At: l.now(), Severity: severity, Component: edgetelemetry.DimensionService,
+		At: l.now(), Severity: severity, Component: health.DimensionService,
 		Name: name, Code: name, Outcome: outcome, Message: message,
-		CorrelationID: l.correlation(), Retry: edgetelemetry.RetryNone,
+		CorrelationID: l.correlation(), Retry: health.RetryNone,
 	})
 	return err
 }

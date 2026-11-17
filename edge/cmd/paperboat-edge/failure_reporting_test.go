@@ -85,9 +85,9 @@ func TestLifecycleLocalAndMemoryShareProcessReferenceOffline(t *testing.T) {
 	previous := os.Stderr
 	os.Stderr = writer
 	defer func() { os.Stderr = previous }()
-	health, _ := edgetelemetry.NewHealthTracker(time.Now)
+	healthTracker, _ := edgetelemetry.NewHealthTracker(time.Now)
 	events, _ := edgetelemetry.NewEventLogWithQueue(16, 16)
-	lifecycle := newTelemetryLifecycle(health, edgetelemetry.NewMetrics(), events)
+	lifecycle := newTelemetryLifecycle(healthTracker, edgetelemetry.NewMetrics(), events)
 	lifecycle.reporter = reporter
 	ctx := reporting.WithSupportReference(context.Background(), "support_5b8a43c1-574f-4c56-94e1-a1adf6fc2c83")
 	if err := lifecycle.Start(ctx); err != nil {
@@ -150,13 +150,13 @@ func TestRouteLifecycleExportsSafeProcessReferenceOffline(t *testing.T) {
 	previous := os.Stderr
 	os.Stderr = writer
 	defer func() { os.Stderr = previous }()
-	health, _ := edgetelemetry.NewHealthTracker(time.Now)
+	healthTracker, _ := edgetelemetry.NewHealthTracker(time.Now)
 	events, _ := edgetelemetry.NewEventLogWithQueue(32, 32)
 	defer events.Close()
-	lifecycle := newTelemetryLifecycle(health, edgetelemetry.NewMetrics(), events)
+	lifecycle := newTelemetryLifecycle(healthTracker, edgetelemetry.NewMetrics(), events)
 	lifecycle.reporter = reporter
 	lifecycle.processCtx = reporting.WithSupportReference(t.Context(), "support_5b8a43c1-574f-4c56-94e1-a1adf6fc2c83")
-	core, _ := route.NewCoreTelemetrySink(health, lifecycle.metrics, events)
+	core, _ := route.NewCoreTelemetrySink(healthTracker, lifecycle.metrics, events)
 	sink := lifecycle.routeSink(core)
 	for _, kind := range []route.LifecycleType{route.LifecycleStageRejected, route.LifecycleActivated} {
 		if err := sink.RecordRouteTelemetry(route.RouteTelemetryRecord{At: time.Now(), Type: kind, Generation: 1, CorrelationID: "correlation_resource", IDs: edgetelemetry.SafeIDs{RouteID: "PRIVATE_ROUTE"}}); err != nil {

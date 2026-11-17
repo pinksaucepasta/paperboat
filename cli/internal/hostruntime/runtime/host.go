@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/pinksaucepasta/paperboat/cli/internal/diagnostics"
+	typedhealth "github.com/pinksaucepasta/paperboat/shared/health"
 	"github.com/pinksaucepasta/paperboat/shared/peerconsumer"
 	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 	"io"
@@ -99,7 +100,7 @@ type HostDependencies struct {
 	ConfigSync             Service
 	Random                 io.Reader
 	SessionLauncherFactory func(session.Service) (server.SessionLauncher, error)
-	HealthTracker          *health.HealthTracker
+	HealthTracker          *typedhealth.HealthTracker
 	Metrics                *hosttelemetry.Registry
 	EventLog               *hosttelemetry.EventLog
 	LocalControlToken      string

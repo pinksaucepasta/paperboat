@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	typedhealth "github.com/pinksaucepasta/paperboat/shared/health"
 	"strings"
 	"sync"
 	"time"
@@ -39,7 +40,7 @@ type Config struct {
 	// the stable host telemetry contract. The legacy health registry remains
 	// authoritative for existing callers, and these hooks are never allocated
 	// implicitly so a nil configuration preserves the old behavior.
-	HealthTracker *health.HealthTracker
+	HealthTracker *typedhealth.HealthTracker
 	Metrics       *hosttelemetry.Registry
 	EventLog      *hosttelemetry.EventLog
 	CorrelationID string
@@ -62,14 +63,14 @@ type Runtime struct {
 	state       State
 	started     []Component
 	health      *health.Registry
-	typedHealth *health.HealthTracker
+	typedHealth *typedhealth.HealthTracker
 	metrics     *hosttelemetry.Registry
 	eventLog    *hosttelemetry.EventLog
 	correlation string
 	// typedMu guards typedComponents and typedSequence: stable host component retries report from their own
 	// goroutines.
 	typedMu         sync.Mutex
-	typedComponents map[health.Dimension]map[string]componentHealthState
+	typedComponents map[typedhealth.Dimension]map[string]componentHealthState
 	typedSequence   uint64
 	startedAt       time.Time
 	recorder        *diagnostics.Recorder
@@ -77,7 +78,7 @@ type Runtime struct {
 }
 
 type componentHealthState struct {
-	update   health.HealthUpdate
+	update   typedhealth.HealthUpdate
 	sequence uint64
 }
 
@@ -131,7 +132,7 @@ func NewRuntime(config Config) (*Runtime, error) {
 		metrics:         config.Metrics,
 		eventLog:        config.EventLog,
 		correlation:     stableCorrelationID(config.CorrelationID),
-		typedComponents: make(map[health.Dimension]map[string]componentHealthState),
+		typedComponents: make(map[typedhealth.Dimension]map[string]componentHealthState),
 	}, nil
 }
 
@@ -159,7 +160,7 @@ func (r *Runtime) Start(ctx context.Context) error {
 	}
 	if err := ctx.Err(); err != nil {
 		code, outcome, severity := lifecycleFailure(lifecycleStart, err)
-		r.recordLifecycle(ctx, Component{Capability: "service", Required: true}, lifecycleStart, code, health.StatusDown, health.RetryWaitForChange, time.Time{}, outcome, severity, "Runtime start could not proceed.", err)
+		r.recordLifecycle(ctx, Component{Capability: "service", Required: true}, lifecycleStart, code, typedhealth.StatusDown, typedhealth.RetryWaitForChange, time.Time{}, outcome, severity, "Runtime start could not proceed.", err)
 		r.mu.Lock()
 		r.state = Failed
 		r.mu.Unlock()
@@ -174,9 +175,9 @@ func (r *Runtime) Start(ctx context.Context) error {
 		if err != nil {
 			cleanupErr := r.cleanupFailed(ctx, component)
 			code, outcome, severity := lifecycleFailure(lifecycleStart, err)
-			status := health.StatusDown
+			status := typedhealth.StatusDown
 			if !component.Required {
-				status = health.StatusDegraded
+				status = typedhealth.StatusDegraded
 			}
 			retry, nextRetry := lifecycleRetry(r.telemetryNow(), outcome)
 			if !component.Required {
@@ -196,12 +197,12 @@ func (r *Runtime) Start(ctx context.Context) error {
 		}
 		r.started = append(r.started, component)
 		r.health.Set(component.Capability, health.Ready, "", 0)
-		r.recordLifecycle(ctx, component, lifecycleStart, "ready", health.StatusReady, health.RetryNone, time.Time{}, hosttelemetry.OutcomeStateChange, hosttelemetry.SeverityInfo, "Component started.", nil)
+		r.recordLifecycle(ctx, component, lifecycleStart, "ready", typedhealth.StatusReady, typedhealth.RetryNone, time.Time{}, hosttelemetry.OutcomeStateChange, hosttelemetry.SeverityInfo, "Component started.", nil)
 	}
 	r.mu.Lock()
 	r.state = Running
 	r.mu.Unlock()
-	r.updateServiceHealth(health.StatusReady, "ready", health.RetryNone, time.Time{})
+	r.updateServiceHealth(typedhealth.StatusReady, "ready", typedhealth.RetryNone, time.Time{})
 	r.startedAt = r.telemetryNow()
 	if r.metrics != nil {
 		_ = r.metrics.SetServiceUptime(r.startedAt, r.startedAt)
@@ -242,19 +243,19 @@ func (r *Runtime) Shutdown(ctx context.Context) error {
 			r.health.Set(component.Capability, health.Degraded, "shutdown_failed", 0)
 			code, outcome, severity := lifecycleFailure(lifecycleShutdown, err)
 			retry, nextRetry := lifecycleRetry(r.telemetryNow(), outcome)
-			r.recordLifecycle(ctx, component, lifecycleShutdown, code, health.StatusDegraded, retry, nextRetry, outcome, severity, "Component shutdown failed.", err)
+			r.recordLifecycle(ctx, component, lifecycleShutdown, code, typedhealth.StatusDegraded, retry, nextRetry, outcome, severity, "Component shutdown failed.", err)
 		} else {
 			r.health.Set(component.Capability, health.Unavailable, "stopped", 0)
-			r.recordLifecycle(ctx, component, lifecycleShutdown, "stopped", health.StatusNotApplicable, health.RetryNone, time.Time{}, hosttelemetry.OutcomeStateChange, hosttelemetry.SeverityInfo, "Component stopped.", nil)
+			r.recordLifecycle(ctx, component, lifecycleShutdown, "stopped", typedhealth.StatusNotApplicable, typedhealth.RetryNone, time.Time{}, hosttelemetry.OutcomeStateChange, hosttelemetry.SeverityInfo, "Component stopped.", nil)
 		}
 	}
 	r.started = nil
 	if result == nil {
-		r.updateServiceHealth(health.StatusNotApplicable, "stopped", health.RetryNone, time.Time{})
+		r.updateServiceHealth(typedhealth.StatusNotApplicable, "stopped", typedhealth.RetryNone, time.Time{})
 	} else {
 		code, outcome, _ := lifecycleFailure(lifecycleShutdown, result)
 		retry, nextRetry := lifecycleRetry(r.telemetryNow(), outcome)
-		r.updateServiceHealth(health.StatusDegraded, code, retry, nextRetry)
+		r.updateServiceHealth(typedhealth.StatusDegraded, code, retry, nextRetry)
 	}
 	r.mu.Lock()
 	r.state = Stopped
@@ -270,9 +271,9 @@ func (r *Runtime) Health() health.Snapshot { return r.health.Snapshot() }
 
 // TypedHealth returns the optional shared health contract. A zero snapshot is
 // returned when the runtime was constructed without typed telemetry.
-func (r *Runtime) TypedHealth() health.HealthSnapshot {
+func (r *Runtime) TypedHealth() typedhealth.HealthSnapshot {
 	if r == nil || r.typedHealth == nil {
-		return health.HealthSnapshot{}
+		return typedhealth.HealthSnapshot{}
 	}
 	return r.typedHealth.Snapshot()
 }
@@ -293,13 +294,13 @@ func (r *Runtime) rollback(parent context.Context) error {
 			r.health.Set(component.Capability, health.Degraded, "rollback_failed", 0)
 			code, outcome, severity := lifecycleFailure(lifecycleRollback, err)
 			retry, nextRetry := lifecycleRetry(r.telemetryNow(), outcome)
-			r.recordLifecycle(ctx, component, lifecycleRollback, code, health.StatusDegraded, retry, nextRetry, outcome, severity, "Component rollback failed.", err)
+			r.recordLifecycle(ctx, component, lifecycleRollback, code, typedhealth.StatusDegraded, retry, nextRetry, outcome, severity, "Component rollback failed.", err)
 			if outcome == hosttelemetry.OutcomeCanceled {
 				rollbackOutcome = "canceled"
 			}
 		} else {
 			r.health.Set(component.Capability, health.Unavailable, "stopped", 0)
-			r.recordLifecycle(ctx, component, lifecycleRollback, "stopped", health.StatusNotApplicable, health.RetryNone, time.Time{}, hosttelemetry.OutcomeStateChange, hosttelemetry.SeverityInfo, "Component rolled back.", nil)
+			r.recordLifecycle(ctx, component, lifecycleRollback, "stopped", typedhealth.StatusNotApplicable, typedhealth.RetryNone, time.Time{}, hosttelemetry.OutcomeStateChange, hosttelemetry.SeverityInfo, "Component rolled back.", nil)
 		}
 	}
 	r.started = nil
@@ -322,7 +323,7 @@ func (r *Runtime) cleanupFailed(parent context.Context, component Component) err
 	if err != nil {
 		code, outcome, severity := lifecycleFailure(lifecycleRollback, err)
 		retry, nextRetry := lifecycleRetry(r.telemetryNow(), outcome)
-		r.recordLifecycle(ctx, component, lifecycleRollback, code, health.StatusDegraded, retry, nextRetry, outcome, severity, "Failed-start cleanup could not complete.", err)
+		r.recordLifecycle(ctx, component, lifecycleRollback, code, typedhealth.StatusDegraded, retry, nextRetry, outcome, severity, "Failed-start cleanup could not complete.", err)
 		return fmt.Errorf("cleanup failed start %s: %w", component.Capability, reportedLifecycleError{cause: err})
 	}
 	return nil
@@ -353,14 +354,14 @@ func lifecycleFailure(operation string, err error) (string, hosttelemetry.EventO
 	return prefix + "_failed", hosttelemetry.OutcomeFailed, hosttelemetry.SeverityError
 }
 
-func lifecycleRetry(now time.Time, outcome hosttelemetry.EventOutcome) (health.RetryDecision, time.Time) {
+func lifecycleRetry(now time.Time, outcome hosttelemetry.EventOutcome) (typedhealth.RetryDecision, time.Time) {
 	if outcome == hosttelemetry.OutcomeStateChange || outcome == hosttelemetry.OutcomeSuccess {
-		return health.RetryNone, time.Time{}
+		return typedhealth.RetryNone, time.Time{}
 	}
 	if now.IsZero() {
-		return health.RetryWaitForChange, time.Time{}
+		return typedhealth.RetryWaitForChange, time.Time{}
 	}
-	return health.RetryScheduled, now.Add(time.Second)
+	return typedhealth.RetryScheduled, now.Add(time.Second)
 }
 
 func (r *Runtime) telemetryNow() time.Time {
@@ -384,13 +385,13 @@ func (r *Runtime) diagnosticContext(ctx context.Context) context.Context {
 	return ctx
 }
 
-func (r *Runtime) recordLifecycle(ctx context.Context, component Component, operation, code string, status health.HealthStatus, retry health.RetryDecision, nextRetry time.Time, outcome hosttelemetry.EventOutcome, severity hosttelemetry.EventSeverity, message string, failure error) {
+func (r *Runtime) recordLifecycle(ctx context.Context, component Component, operation, code string, status typedhealth.HealthStatus, retry typedhealth.RetryDecision, nextRetry time.Time, outcome hosttelemetry.EventOutcome, severity hosttelemetry.EventSeverity, message string, failure error) {
 	dimension := componentDimension(component.Capability)
 	correlation := r.correlation
 	if correlation == "" {
 		correlation = "correlation_runtime"
 	}
-	r.updateTypedHealth(component.Capability, health.HealthUpdate{
+	r.updateTypedHealth(component.Capability, typedhealth.HealthUpdate{
 		Dimension:     dimension,
 		Status:        status,
 		Code:          code,
@@ -438,7 +439,7 @@ func (r *Runtime) recordLifecycle(ctx context.Context, component Component, oper
 	})
 }
 
-func (r *Runtime) updateServiceHealth(status health.HealthStatus, code string, retry health.RetryDecision, nextRetry time.Time) {
+func (r *Runtime) updateServiceHealth(status typedhealth.HealthStatus, code string, retry typedhealth.RetryDecision, nextRetry time.Time) {
 	if r == nil {
 		return
 	}
@@ -446,8 +447,8 @@ func (r *Runtime) updateServiceHealth(status health.HealthStatus, code string, r
 	if correlation == "" {
 		correlation = "correlation_runtime"
 	}
-	r.updateTypedHealth("runtime_service", health.HealthUpdate{
-		Dimension:     health.DimensionService,
+	r.updateTypedHealth("runtime_service", typedhealth.HealthUpdate{
+		Dimension:     typedhealth.DimensionService,
 		Status:        status,
 		Code:          code,
 		Summary:       "Host runtime service state changed.",
@@ -458,14 +459,14 @@ func (r *Runtime) updateServiceHealth(status health.HealthStatus, code string, r
 	})
 }
 
-func (r *Runtime) updateTypedHealth(capability string, update health.HealthUpdate) {
+func (r *Runtime) updateTypedHealth(capability string, update typedhealth.HealthUpdate) {
 	if r == nil || r.typedHealth == nil {
 		return
 	}
 	r.typedMu.Lock()
 	defer r.typedMu.Unlock()
 	if r.typedComponents == nil {
-		r.typedComponents = make(map[health.Dimension]map[string]componentHealthState)
+		r.typedComponents = make(map[typedhealth.Dimension]map[string]componentHealthState)
 	}
 	components := r.typedComponents[update.Dimension]
 	if components == nil {
@@ -500,22 +501,22 @@ func (r *Runtime) ReportComponentStep(capability string, err error, retryAfter t
 	if correlation == "" {
 		correlation = "correlation_runtime"
 	}
-	update := health.HealthUpdate{Dimension: componentDimension(capability), Status: health.StatusReady, Code: "ready",
-		Summary: "Host component " + capability + " is running.", RepairAction: "No action is required.", CorrelationID: correlation, Retry: health.RetryNone}
+	update := typedhealth.HealthUpdate{Dimension: componentDimension(capability), Status: typedhealth.StatusReady, Code: "ready",
+		Summary: "Host component " + capability + " is running.", RepairAction: "No action is required.", CorrelationID: correlation, Retry: typedhealth.RetryNone}
 	if err != nil {
-		update.Status, update.Code = health.StatusDegraded, "start_failed"
+		update.Status, update.Code = typedhealth.StatusDegraded, "start_failed"
 		update.Summary = "Host component " + capability + " failed to start: " + err.Error()
 		update.RepairAction = "Restart the Paperboat host service, then run pb doctor again."
-		update.Retry = health.RetryWaitForChange
+		update.Retry = typedhealth.RetryWaitForChange
 		if retryAfter > 0 {
 			update.RepairAction = "Paperboat retries this on its own. If it keeps failing, restart the Paperboat host service, then run pb doctor again."
-			update.Retry, update.NextRetryAt = health.RetryScheduled, r.telemetryNow().Add(retryAfter)
+			update.Retry, update.NextRetryAt = typedhealth.RetryScheduled, r.telemetryNow().Add(retryAfter)
 		}
 	}
 	r.updateTypedHealth(capability, update)
 }
 
-func aggregateHealthUpdate(components map[string]componentHealthState) health.HealthUpdate {
+func aggregateHealthUpdate(components map[string]componentHealthState) typedhealth.HealthUpdate {
 	var selected componentHealthState
 	selectedRank := -1
 	for _, candidate := range components {
@@ -528,50 +529,50 @@ func aggregateHealthUpdate(components map[string]componentHealthState) health.He
 	return selected.update
 }
 
-func healthStatusRank(status health.HealthStatus) int {
+func healthStatusRank(status typedhealth.HealthStatus) int {
 	switch status {
-	case health.StatusDown:
+	case typedhealth.StatusDown:
 		return 5
-	case health.StatusDegraded:
+	case typedhealth.StatusDegraded:
 		return 4
-	case health.StatusUnknown:
+	case typedhealth.StatusUnknown:
 		return 3
-	case health.StatusReady:
+	case typedhealth.StatusReady:
 		return 2
-	case health.StatusNotApplicable:
+	case typedhealth.StatusNotApplicable:
 		return 1
 	default:
 		return 0
 	}
 }
 
-func componentDimension(capability string) health.Dimension {
+func componentDimension(capability string) typedhealth.Dimension {
 	normalized := strings.ToLower(strings.TrimSpace(capability))
 	normalized = strings.NewReplacer(".", "_", "-", "_").Replace(normalized)
 	switch {
 	case normalized == "edge" || strings.Contains(normalized, "connector") || strings.Contains(normalized, "transport") || strings.Contains(normalized, "tunnel") || strings.Contains(normalized, "peer"):
-		return health.DimensionEdge
+		return typedhealth.DimensionEdge
 	case normalized == "config" || strings.Contains(normalized, "config"):
-		return health.DimensionConfig
+		return typedhealth.DimensionConfig
 	case normalized == "route" || strings.Contains(normalized, "route"):
-		return health.DimensionRoute
+		return typedhealth.DimensionRoute
 	case normalized == "origin" || strings.Contains(normalized, "origin") || normalized == "target" || strings.Contains(normalized, "preview") || strings.Contains(normalized, "serve"):
-		return health.DimensionOrigin
+		return typedhealth.DimensionOrigin
 	case normalized == "dns" || strings.Contains(normalized, "dns"):
-		return health.DimensionDNS
+		return typedhealth.DimensionDNS
 	case normalized == "certificate" || strings.Contains(normalized, "cert") || strings.Contains(normalized, "tls"):
-		return health.DimensionCertificate
+		return typedhealth.DimensionCertificate
 	case normalized == "access" || strings.Contains(normalized, "authoriz") || normalized == "auth" || strings.Contains(normalized, "admission"):
-		return health.DimensionAccess
+		return typedhealth.DimensionAccess
 	case normalized == "update" || strings.Contains(normalized, "update"):
-		return health.DimensionUpdate
+		return typedhealth.DimensionUpdate
 	default:
-		return health.DimensionService
+		return typedhealth.DimensionService
 	}
 }
 
-func lifecycleRepairAction(status health.HealthStatus) string {
-	if status == health.StatusReady || status == health.StatusNotApplicable {
+func lifecycleRepairAction(status typedhealth.HealthStatus) string {
+	if status == typedhealth.StatusReady || status == typedhealth.StatusNotApplicable {
 		return "No action is required."
 	}
 	return "Retry or restart the affected host component."

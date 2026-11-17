@@ -3,6 +3,7 @@ package diagnostics
 import (
 	"encoding/json"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/shared/health"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -114,25 +115,25 @@ func TestPrivateHandlerProjectsTypedHealthEventsMetricsAndDrops(t *testing.T) {
 	manager, _ := node.NewManager(state, 8)
 	queue, _ := usage.NewQueue(4, 4096)
 	now := time.Unix(300, 0).UTC()
-	health, err := edgetelemetry.NewHealthTracker(func() time.Time { return now })
+	healthTracker, err := edgetelemetry.NewHealthTracker(func() time.Time { return now })
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := health.Update(edgetelemetry.HealthUpdate{Dimension: edgetelemetry.DimensionRoute, Status: edgetelemetry.StatusReady, Code: "ready", Summary: "Route is ready.", RepairAction: "No action is required.", Retry: edgetelemetry.RetryNone}); err != nil {
+	if err := healthTracker.Update(health.HealthUpdate{Dimension: health.DimensionRoute, Status: health.StatusReady, Code: "ready", Summary: "Route is ready.", RepairAction: "No action is required.", Retry: health.RetryNone}); err != nil {
 		t.Fatal(err)
 	}
 	events, err := edgetelemetry.NewEventLog(4)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := events.Record(edgetelemetry.EventInput{At: now, Severity: edgetelemetry.SeverityInfo, Component: edgetelemetry.DimensionRoute, Name: "activated", Code: "activated", Outcome: edgetelemetry.OutcomeStateChange, Message: "Route generation activated.", CorrelationID: "corr_route_1", Retry: edgetelemetry.RetryNone}); err != nil {
+	if _, err := events.Record(edgetelemetry.EventInput{At: now, Severity: edgetelemetry.SeverityInfo, Component: health.DimensionRoute, Name: "activated", Code: "activated", Outcome: edgetelemetry.OutcomeStateChange, Message: "Route generation activated.", CorrelationID: "corr_route_1", Retry: health.RetryNone}); err != nil {
 		t.Fatal(err)
 	}
 	typedMetrics := edgetelemetry.NewMetrics()
 	if err := typedMetrics.AddCounter(edgetelemetry.MetricRouteRequests, edgetelemetry.MetricLabels{"route_kind": "tunnel_https_wss", "outcome": "success"}, 2); err != nil {
 		t.Fatal(err)
 	}
-	handler, err := NewHandler(Sources{Node: state.Snapshot, Manager: manager.Snapshot, Sessions: func() int { return 0 }, SessionRoutes: func() int { return 0 }, ActiveStreams: func() uint32 { return 0 }, RouteCount: func() int { return 0 }, Usage: queue.Stats, ControlErr: func() error { return nil }, RouteErr: func() error { return nil }, UsageErr: func() error { return nil }, CarrierRunning: func() bool { return true }, Traffic: usage.NewCounters().Snapshot, Health: health.Snapshot, Lifecycle: events.Snapshot, TypedMetrics: typedMetrics.Snapshot, TelemetryDrops: func() uint64 { return 3 }, Now: func() time.Time { return now }})
+	handler, err := NewHandler(Sources{Node: state.Snapshot, Manager: manager.Snapshot, Sessions: func() int { return 0 }, SessionRoutes: func() int { return 0 }, ActiveStreams: func() uint32 { return 0 }, RouteCount: func() int { return 0 }, Usage: queue.Stats, ControlErr: func() error { return nil }, RouteErr: func() error { return nil }, UsageErr: func() error { return nil }, CarrierRunning: func() bool { return true }, Traffic: usage.NewCounters().Snapshot, Health: healthTracker.Snapshot, Lifecycle: events.Snapshot, TypedMetrics: typedMetrics.Snapshot, TelemetryDrops: func() uint64 { return 3 }, Now: func() time.Time { return now }})
 	if err != nil {
 		t.Fatal(err)
 	}

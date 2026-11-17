@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	typedhealth "github.com/pinksaucepasta/paperboat/shared/health"
 	"strings"
 	"testing"
 	"time"
@@ -40,9 +41,9 @@ func TestDoctorNamesAFailingHostStepUntilItRecovers(t *testing.T) {
 	if report, output := run(); report.Overall != "healthy" {
 		t.Fatalf("unobserved dimensions failed doctor:\n%s", output)
 	}
-	update := health.HealthUpdate{Dimension: health.DimensionEdge, Status: health.StatusDegraded, Code: "start_failed",
+	update := typedhealth.HealthUpdate{Dimension: typedhealth.DimensionEdge, Status: typedhealth.StatusDegraded, Code: "start_failed",
 		Summary: "Host component peer_transport failed to start: peer registration refused", RepairAction: "Paperboat retries this on its own.",
-		Retry: health.RetryScheduled, NextRetryAt: time.Now().Add(time.Minute)}
+		Retry: typedhealth.RetryScheduled, NextRetryAt: time.Now().Add(time.Minute)}
 	if err := tracker.Update(update); err != nil {
 		t.Fatal(err)
 	}
@@ -52,7 +53,7 @@ func TestDoctorNamesAFailingHostStepUntilItRecovers(t *testing.T) {
 		!strings.Contains(output, "Recovery: Paperboat retries this on its own.") {
 		t.Fatalf("failing host step: overall=%s output:\n%s", report.Overall, output)
 	}
-	if err := tracker.Update(health.HealthUpdate{Dimension: health.DimensionEdge, Status: health.StatusReady, Code: "ready", Summary: "Host component peer_transport is running.", RepairAction: "No action is required.", Retry: health.RetryNone}); err != nil {
+	if err := tracker.Update(typedhealth.HealthUpdate{Dimension: typedhealth.DimensionEdge, Status: typedhealth.StatusReady, Code: "ready", Summary: "Host component peer_transport is running.", RepairAction: "No action is required.", Retry: typedhealth.RetryNone}); err != nil {
 		t.Fatal(err)
 	}
 	if report, output = run(); report.Overall != "healthy" || strings.Contains(output, "failing step") {
@@ -64,15 +65,15 @@ func TestDoctorNamesAFailingHostStepUntilItRecovers(t *testing.T) {
 // system proxy as a standard user, and doctor called the whole machine unhealthy). A dimension that is down
 // still fails local_state.
 func TestDoctorHostStepsWarnsForADegradedComponentAndFailsWhenDown(t *testing.T) {
-	degraded := health.Alert{Dimension: health.DimensionOrigin, Status: health.StatusDegraded, Code: "start_failed",
+	degraded := typedhealth.Alert{Dimension: typedhealth.DimensionOrigin, Status: typedhealth.StatusDegraded, Code: "start_failed",
 		Summary: "Host component preview_recovery failed to start: private proxy configuration failed", RepairAction: "Restart the Paperboat host service, then run pb doctor again."}
-	check, ok := doctorHostStepsCheck([]health.Alert{degraded})
+	check, ok := doctorHostStepsCheck([]typedhealth.Alert{degraded})
 	if !ok || check.Status != doctorpkg.StatusWarning || check.Recovery == "" {
 		t.Fatalf("degraded optional component: %+v", check)
 	}
 	down := degraded
-	down.Status = health.StatusDown
-	if check, _ := doctorHostStepsCheck([]health.Alert{degraded, down}); check.Status != doctorpkg.StatusFail {
+	down.Status = typedhealth.StatusDown
+	if check, _ := doctorHostStepsCheck([]typedhealth.Alert{degraded, down}); check.Status != doctorpkg.StatusFail {
 		t.Fatalf("a down dimension must fail local_state: %+v", check)
 	}
 }

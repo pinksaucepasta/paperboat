@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/shared/health"
 	"io"
 	"mime"
 	"net"
@@ -19,7 +20,6 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/api"
 	"github.com/pinksaucepasta/paperboat/cli/internal/config"
-	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/health"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/machinecontrol"
 	hostruntime "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/runtime"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntimecmd"

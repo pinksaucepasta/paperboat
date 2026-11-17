@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	typedhealth "github.com/pinksaucepasta/paperboat/shared/health"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -26,10 +27,10 @@ func TestCollectTunnelHostDiagnosticsUsesLoopbackNoProxyAndStrictBounds(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := tracker.Update(health.HealthUpdate{
-		Dimension: health.DimensionService, Status: health.StatusReady, Code: "ready",
+	if err := tracker.Update(typedhealth.HealthUpdate{
+		Dimension: typedhealth.DimensionService, Status: typedhealth.StatusReady, Code: "ready",
 		Summary: "Runtime is ready.", RepairAction: "No action is required.",
-		CorrelationID: "correlation_test", Retry: health.RetryNone,
+		CorrelationID: "correlation_test", Retry: typedhealth.RetryNone,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -145,9 +146,9 @@ func TestTunnelDoctorBundleIncludesTypedHostDiagnosticsAndEvidence(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := tracker.Update(health.HealthUpdate{
-		Dimension: health.DimensionService, Status: health.StatusReady, Code: "ready",
-		Summary: "Runtime is ready.", RepairAction: "No action is required.", CorrelationID: "correlation_test", Retry: health.RetryNone,
+	if err := tracker.Update(typedhealth.HealthUpdate{
+		Dimension: typedhealth.DimensionService, Status: typedhealth.StatusReady, Code: "ready",
+		Summary: "Runtime is ready.", RepairAction: "No action is required.", CorrelationID: "correlation_test", Retry: typedhealth.RetryNone,
 	}); err != nil {
 		t.Fatal(err)
 	}

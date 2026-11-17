@@ -2,6 +2,7 @@ package telemetry
 
 import (
 	"encoding/json"
+	"github.com/pinksaucepasta/paperboat/shared/telemetry/safe"
 	"math"
 	"sort"
 	"strings"
@@ -236,7 +237,7 @@ func (m *Metrics) SetGauge(name string, labels MetricLabels, value uint64) error
 
 func (m *Metrics) ObserveHistogram(name string, labels MetricLabels, observation float64) error {
 	if math.IsNaN(observation) || math.IsInf(observation, 0) || observation < 0 {
-		return newError(ErrorInvalidObservation, "record edge metric")
+		return safe.NewError(safe.ErrorInvalidObservation, "record edge metric")
 	}
 	descriptor, key, err := m.prepare(name, labels, MetricHistogram)
 	if err != nil {
@@ -247,23 +248,23 @@ func (m *Metrics) ObserveHistogram(name string, labels MetricLabels, observation
 	value, exists := m.values[key]
 	if !exists {
 		if len(m.values) >= m.maxSeries {
-			return newError(ErrorMetricCardinality, "record edge metric")
+			return safe.NewError(safe.ErrorMetricCardinality, "record edge metric")
 		}
 		value.buckets = make([]uint64, len(descriptor.Histogram.Buckets))
 	}
 	if value.count == ^uint64(0) {
-		return newError(ErrorMetricOverflow, "record edge metric")
+		return safe.NewError(safe.ErrorMetricOverflow, "record edge metric")
 	}
 	newSum := value.sum + observation
 	if math.IsInf(newSum, 0) {
-		return newError(ErrorMetricOverflow, "record edge metric")
+		return safe.NewError(safe.ErrorMetricOverflow, "record edge metric")
 	}
 	value.count++
 	value.sum = newSum
 	for index, upper := range descriptor.Histogram.Buckets {
 		if observation <= upper {
 			if value.buckets[index] == ^uint64(0) {
-				return newError(ErrorMetricOverflow, "record edge metric")
+				return safe.NewError(safe.ErrorMetricOverflow, "record edge metric")
 			}
 			value.buckets[index]++
 		}
@@ -281,11 +282,11 @@ func (m *Metrics) mutate(name string, labels MetricLabels, kind MetricKind, valu
 	defer m.mu.Unlock()
 	current, exists := m.values[key]
 	if !exists && len(m.values) >= m.maxSeries {
-		return newError(ErrorMetricCardinality, "record edge metric")
+		return safe.NewError(safe.ErrorMetricCardinality, "record edge metric")
 	}
 	if add {
 		if ^uint64(0)-current.value < value {
-			return newError(ErrorMetricOverflow, "record edge metric")
+			return safe.NewError(safe.ErrorMetricOverflow, "record edge metric")
 		}
 		current.value += value
 	} else {
@@ -297,14 +298,14 @@ func (m *Metrics) mutate(name string, labels MetricLabels, kind MetricKind, valu
 
 func (m *Metrics) prepare(name string, labels MetricLabels, kind MetricKind) (MetricDescriptor, metricKey, error) {
 	if m == nil {
-		return MetricDescriptor{}, metricKey{}, newError(ErrorClosed, "record edge metric")
+		return MetricDescriptor{}, metricKey{}, safe.NewError(safe.ErrorClosed, "record edge metric")
 	}
 	descriptor, ok := m.descriptors[name]
 	if !ok {
-		return MetricDescriptor{}, metricKey{}, newError(ErrorUnknownMetric, "record edge metric")
+		return MetricDescriptor{}, metricKey{}, safe.NewError(safe.ErrorUnknownMetric, "record edge metric")
 	}
 	if descriptor.Kind != kind {
-		return MetricDescriptor{}, metricKey{}, newError(ErrorMetricKindMismatch, "record edge metric")
+		return MetricDescriptor{}, metricKey{}, safe.NewError(safe.ErrorMetricKindMismatch, "record edge metric")
 	}
 	key, err := validateMetricLabels(descriptor, labels)
 	return descriptor, key, err
@@ -361,16 +362,16 @@ func validateMetricLabels(descriptor MetricDescriptor, labels MetricLabels) (met
 	for index, label := range descriptor.Labels {
 		value, ok := labels[label.Name]
 		if !ok {
-			return metricKey{}, newError(ErrorMissingLabel, "record edge metric")
+			return metricKey{}, safe.NewError(safe.ErrorMissingLabel, "record edge metric")
 		}
 		if !containsString(label.AllowedValues, value) {
-			return metricKey{}, newError(ErrorLabelValueRejected, "record edge metric")
+			return metricKey{}, safe.NewError(safe.ErrorLabelValueRejected, "record edge metric")
 		}
 		values[index] = value
 	}
 	for name := range labels {
 		if !descriptorHasLabel(descriptor, name) {
-			return metricKey{}, newError(ErrorUnknownLabel, "record edge metric")
+			return metricKey{}, safe.NewError(safe.ErrorUnknownLabel, "record edge metric")
 		}
 	}
 	return metricKey{name: descriptor.Name, values: strings.Join(values, "\x1f")}, nil

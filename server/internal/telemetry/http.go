@@ -2,6 +2,7 @@ package telemetry
 
 import (
 	"context"
+	"github.com/pinksaucepasta/paperboat/shared/health"
 	"net/http"
 	"strings"
 	"time"
@@ -64,9 +65,9 @@ func (o HTTPObserver) WrapFunc(routeFamily func(*http.Request) string, next http
 			return
 		}
 		_, _ = o.Events.Record(EventInput{
-			At: started.Add(captured.Duration), Severity: severity, Component: DimensionService,
+			At: started.Add(captured.Duration), Severity: severity, Component: health.DimensionService,
 			Name: "http_request", Code: code, Outcome: outcome, Message: message,
-			RequestID: requestID, CorrelationID: correlationID, Retry: RetryNone,
+			RequestID: requestID, CorrelationID: correlationID, Retry: health.RetryNone,
 		})
 	})
 }

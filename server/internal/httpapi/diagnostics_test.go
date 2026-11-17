@@ -3,6 +3,7 @@ package httpapi
 import (
 	"bytes"
 	"encoding/json"
+	"github.com/pinksaucepasta/paperboat/shared/health"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -16,15 +17,15 @@ import (
 
 func TestTelemetryDiagnosticsIsLoopbackBoundedAndCorrelated(t *testing.T) {
 	at := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
-	health, err := telemetry.NewHealthTracker(func() time.Time { return at })
+	healthTracker, err := telemetry.NewHealthTracker(func() time.Time { return at })
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := health.Update(telemetry.HealthUpdate{
-		Dimension: telemetry.DimensionOrigin, Status: telemetry.StatusDegraded, Code: "origin_retrying",
+	if err := healthTracker.Update(health.HealthUpdate{
+		Dimension: health.DimensionOrigin, Status: health.StatusDegraded, Code: "origin_retrying",
 		Summary:      "The origin is retrying after a connection failure.",
 		RepairAction: "Retry when the origin is available.", CorrelationID: "corr_diag",
-		Retry: telemetry.RetryScheduled, NextRetryAt: at.Add(time.Minute),
+		Retry: health.RetryScheduled, NextRetryAt: at.Add(time.Minute),
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -38,14 +39,14 @@ func TestTelemetryDiagnosticsIsLoopbackBoundedAndCorrelated(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = events.Close() })
 	if _, err := events.Record(telemetry.EventInput{
-		At: at, Severity: telemetry.SeverityInfo, Component: telemetry.DimensionOrigin,
+		At: at, Severity: telemetry.SeverityInfo, Component: health.DimensionOrigin,
 		Name: "origin_retry", Code: "origin_retrying", Outcome: telemetry.OutcomeStateChange,
-		Message: "Origin is retrying.", CorrelationID: "corr_diag", Retry: telemetry.RetryScheduled,
+		Message: "Origin is retrying.", CorrelationID: "corr_diag", Retry: health.RetryScheduled,
 		NextRetryAt: at.Add(time.Minute),
 	}); err != nil {
 		t.Fatal(err)
 	}
-	diagnostics, err := telemetry.NewDiagnostics(telemetry.DiagnosticsConfig{Metrics: metrics, Health: health, Events: events, Now: func() time.Time { return at }})
+	diagnostics, err := telemetry.NewDiagnostics(telemetry.DiagnosticsConfig{Metrics: metrics, Health: healthTracker, Events: events, Now: func() time.Time { return at }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +65,7 @@ func TestTelemetryDiagnosticsIsLoopbackBoundedAndCorrelated(t *testing.T) {
 	if err := snapshot.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	if snapshot.RequestID != "req_diag" || snapshot.CorrelationID != "corr_diag" || snapshot.Retry != telemetry.RetryScheduled || snapshot.NextRetryAt == nil || len(snapshot.Metrics) != 1 || len(snapshot.Events) != 1 {
+	if snapshot.RequestID != "req_diag" || snapshot.CorrelationID != "corr_diag" || snapshot.Retry != health.RetryScheduled || snapshot.NextRetryAt == nil || len(snapshot.Metrics) != 1 || len(snapshot.Events) != 1 {
 		t.Fatalf("snapshot=%+v", snapshot)
 	}
 	if len(first.Body.Bytes()) > telemetry.MaximumDiagnosticsBytes {
@@ -82,11 +83,11 @@ func TestTelemetryDiagnosticsIsLoopbackBoundedAndCorrelated(t *testing.T) {
 
 func TestTelemetryDiagnosticsRejectsRemoteQueryAndMethods(t *testing.T) {
 	at := time.Unix(10, 0).UTC()
-	health, err := telemetry.NewHealthTracker(func() time.Time { return at })
+	healthTracker, err := telemetry.NewHealthTracker(func() time.Time { return at })
 	if err != nil {
 		t.Fatal(err)
 	}
-	diagnostics, err := telemetry.NewDiagnostics(telemetry.DiagnosticsConfig{Health: health, Now: func() time.Time { return at }})
+	diagnostics, err := telemetry.NewDiagnostics(telemetry.DiagnosticsConfig{Health: healthTracker, Now: func() time.Time { return at }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,7 +118,7 @@ func TestTelemetryDiagnosticsRejectsRemoteQueryAndMethods(t *testing.T) {
 
 func TestRouterTelemetryDiagnosticsUsesLiveEventLog(t *testing.T) {
 	at := time.Unix(11, 0).UTC()
-	health, err := telemetry.NewHealthTracker(func() time.Time { return at })
+	healthTracker, err := telemetry.NewHealthTracker(func() time.Time { return at })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,12 +127,12 @@ func TestRouterTelemetryDiagnosticsUsesLiveEventLog(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = events.Close() })
-	diagnostics, err := telemetry.NewDiagnostics(telemetry.DiagnosticsConfig{Health: health, Now: func() time.Time { return at }})
+	diagnostics, err := telemetry.NewDiagnostics(telemetry.DiagnosticsConfig{Health: healthTracker, Now: func() time.Time { return at }})
 	if err != nil {
 		t.Fatal(err)
 	}
 	diagnostics.SetEventLog(events)
-	if _, err := events.Record(telemetry.EventInput{At: at, Severity: telemetry.SeverityInfo, Component: telemetry.DimensionService, Name: "service_ready", Code: "ready", Outcome: telemetry.OutcomeSuccess, Message: "Service is ready.", CorrelationID: "corr_diag", Retry: telemetry.RetryNone}); err != nil {
+	if _, err := events.Record(telemetry.EventInput{At: at, Severity: telemetry.SeverityInfo, Component: health.DimensionService, Name: "service_ready", Code: "ready", Outcome: telemetry.OutcomeSuccess, Message: "Service is ready.", CorrelationID: "corr_diag", Retry: health.RetryNone}); err != nil {
 		t.Fatal(err)
 	}
 	router := NewRouter(Options{Config: config.Default(), TelemetryDiagnostics: diagnostics})

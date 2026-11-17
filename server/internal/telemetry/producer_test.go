@@ -3,6 +3,8 @@ package telemetry
 import (
 	"context"
 	"encoding/json"
+	"github.com/pinksaucepasta/paperboat/shared/health"
+	"github.com/pinksaucepasta/paperboat/shared/telemetry/safe"
 	"strings"
 	"testing"
 	"time"
@@ -20,14 +22,14 @@ func TestProducerRecordsTypedSignalsWithSafeIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer lifecycle.Close()
-	health, err := NewHealthTracker(func() time.Time { return at })
+	healthTracker, err := NewHealthTracker(func() time.Time { return at })
 	if err != nil {
 		t.Fatal(err)
 	}
 	producer := NewProducer(ProducerOptions{
 		Metrics:         NewMetrics(),
 		Events:          events,
-		Health:          health,
+		Health:          healthTracker,
 		LifecycleEvents: lifecycle,
 		Now:             func() time.Time { return at },
 	})
@@ -124,11 +126,11 @@ func TestProducerRecordsTypedSignalsWithSafeIdentity(t *testing.T) {
 		}
 	}
 
-	if got := health.Snapshot().Dimensions.Route.Status; got != StatusReady {
-		t.Fatalf("route status after recovery = %s, want %s", got, StatusReady)
+	if got := healthTracker.Snapshot().Dimensions.Route.Status; got != health.StatusReady {
+		t.Fatalf("route status after recovery = %s, want %s", got, health.StatusReady)
 	}
-	if got := health.Snapshot().Dimensions.Service.Status; got != StatusReady {
-		t.Fatalf("service status = %s, want %s", got, StatusReady)
+	if got := healthTracker.Snapshot().Dimensions.Service.Status; got != health.StatusReady {
+		t.Fatalf("service status = %s, want %s", got, health.StatusReady)
 	}
 	body, err := producer.Metrics.JSON()
 	if err != nil || !json.Valid(body) {
@@ -147,11 +149,11 @@ func TestProducerFailuresRecoverAndNeverRecordRawInput(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer events.Close()
-	health, err := NewHealthTracker(func() time.Time { return at })
+	healthTracker, err := NewHealthTracker(func() time.Time { return at })
 	if err != nil {
 		t.Fatal(err)
 	}
-	producer := &Producer{Metrics: NewMetrics(), Events: events, Health: health, Now: func() time.Time { return at }}
+	producer := &Producer{Metrics: NewMetrics(), Events: events, Health: healthTracker, Now: func() time.Time { return at }}
 	unsafe := ProducerIdentity{
 		RequestID: "https://alice:password@example.test/path", CorrelationID: "customer.example.test",
 		ResourceKind: "route", ResourceID: "customer.example.test", OperationID: "Bearer-secret",
@@ -183,11 +185,11 @@ func TestProducerFailuresRecoverAndNeverRecordRawInput(t *testing.T) {
 			t.Fatalf("unsafe identity was retained: %#v", event)
 		}
 	}
-	if got := health.Snapshot().Dimensions.Route.Status; got != StatusDegraded {
-		t.Fatalf("route failure status = %s, want %s", got, StatusDegraded)
+	if got := healthTracker.Snapshot().Dimensions.Route.Status; got != health.StatusDegraded {
+		t.Fatalf("route failure status = %s, want %s", got, health.StatusDegraded)
 	}
-	if got := health.Snapshot().Dimensions.DNS.Status; got != StatusDegraded {
-		t.Fatalf("dns failure status = %s, want %s", got, StatusDegraded)
+	if got := healthTracker.Snapshot().Dimensions.DNS.Status; got != health.StatusDegraded {
+		t.Fatalf("dns failure status = %s, want %s", got, health.StatusDegraded)
 	}
 }
 
@@ -203,8 +205,8 @@ func TestProducerUsesOnlyFiniteMetricLabels(t *testing.T) {
 	// caller value is ever used as a label, even when the safe enum is invalid.
 	if err := producer.RecordDNSVerification(DNSVerificationInput{
 		Outcome: DNSVerificationFailed, FailureClass: DNSFailureProvider, Duration: time.Second,
-	}); ErrorCodeOf(err) != ErrorMetricCardinality {
-		t.Fatalf("cardinality error = %v, want %s", err, ErrorMetricCardinality)
+	}); safe.ErrorCodeOf(err) != safe.ErrorMetricCardinality {
+		t.Fatalf("cardinality error = %v, want %s", err, safe.ErrorMetricCardinality)
 	}
 	for _, descriptor := range MetricDescriptors() {
 		for _, label := range descriptor.Labels {
@@ -238,21 +240,21 @@ func TestProducerServiceUptimeIsDurationNotBoolean(t *testing.T) {
 	if values["running"] != 90 || values["degraded"] != 0 || values["stopped"] != 0 {
 		t.Fatalf("uptime values=%v", values)
 	}
-	if err := producer.RecordServiceLifecycle(ServiceLifecycleInput{State: ServiceStopped, Uptime: -time.Second}); ErrorCodeOf(err) != ErrorInvalidObservation {
+	if err := producer.RecordServiceLifecycle(ServiceLifecycleInput{State: ServiceStopped, Uptime: -time.Second}); safe.ErrorCodeOf(err) != safe.ErrorInvalidObservation {
 		t.Fatalf("negative uptime error=%v", err)
 	}
 }
 
 func TestProducerValidatesServiceUptimeWithoutMetricsSink(t *testing.T) {
-	health, err := NewHealthTracker(func() time.Time { return time.Unix(1, 0).UTC() })
+	healthTracker, err := NewHealthTracker(func() time.Time { return time.Unix(1, 0).UTC() })
 	if err != nil {
 		t.Fatal(err)
 	}
-	producer := &Producer{Health: health}
-	if err := producer.RecordServiceLifecycle(ServiceLifecycleInput{State: ServiceDegraded, Uptime: -time.Second}); ErrorCodeOf(err) != ErrorInvalidObservation {
+	producer := &Producer{Health: healthTracker}
+	if err := producer.RecordServiceLifecycle(ServiceLifecycleInput{State: ServiceDegraded, Uptime: -time.Second}); safe.ErrorCodeOf(err) != safe.ErrorInvalidObservation {
 		t.Fatalf("negative uptime without metrics error=%v", err)
 	}
-	if got := producer.Health.Snapshot().Dimensions.Service.Status; got != StatusUnknown {
+	if got := producer.Health.Snapshot().Dimensions.Service.Status; got != health.StatusUnknown {
 		t.Fatalf("invalid observation changed health to %s", got)
 	}
 }
@@ -262,8 +264,8 @@ func TestProducerRejectsUnboundedDurationsWithoutRecording(t *testing.T) {
 	producer := &Producer{Metrics: metrics, Now: time.Now}
 	if err := producer.RecordRouteLatency(RouteLatencyInput{
 		Duration: 25 * time.Hour,
-	}); ErrorCodeOf(err) != ErrorInvalidObservation {
-		t.Fatalf("duration error = %v, want %s", err, ErrorInvalidObservation)
+	}); safe.ErrorCodeOf(err) != safe.ErrorInvalidObservation {
+		t.Fatalf("duration error = %v, want %s", err, safe.ErrorInvalidObservation)
 	}
 	if len(metrics.Snapshot()) != 0 {
 		t.Fatal("invalid duration recorded a metric")

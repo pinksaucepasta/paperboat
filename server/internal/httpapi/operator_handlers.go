@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/shared/health"
 	"io"
 	"net/http"
 	"strconv"
@@ -18,7 +19,6 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/billing"
 	"github.com/pinksaucepasta/paperboat/server/internal/operator"
 	"github.com/pinksaucepasta/paperboat/server/internal/operatoractions"
-	"github.com/pinksaucepasta/paperboat/server/internal/telemetry"
 )
 
 // Staff authority is independent of workspace/team membership. Unknown routes deny.
@@ -485,7 +485,7 @@ func operatorStatus(opts Options) http.Handler {
 		dimensions := map[string]any{}
 		if opts.OperatorHealth != nil {
 			snapshot := opts.OperatorHealth.Snapshot()
-			for _, d := range telemetry.Dimensions() {
+			for _, d := range health.Dimensions() {
 				state := snapshot.Dimensions.Get(d)
 				dimensions[string(d)] = map[string]any{"status": state.Status, "code": state.Code, "since": state.Since, "retry": state.Retry, "next_retry_at": state.NextRetryAt}
 			}

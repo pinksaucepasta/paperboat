@@ -2,6 +2,7 @@ package telemetry
 
 import (
 	"encoding/json"
+	"github.com/pinksaucepasta/paperboat/shared/health"
 	"strings"
 	"testing"
 	"time"
@@ -13,14 +14,14 @@ func TestProjectHealthResourceMatchesCanonicalWireAndCopies(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := tracker.Update(HealthUpdate{Dimension: DimensionOrigin, Status: StatusDegraded, Code: "origin_connection_refused", Summary: "Origin refused connection.", RepairAction: "Start the origin.", CorrelationID: "cor_01", Retry: RetryScheduled, NextRetryAt: now.Add(time.Minute)}); err != nil {
+	if err := tracker.Update(health.HealthUpdate{Dimension: health.DimensionOrigin, Status: health.StatusDegraded, Code: "origin_connection_refused", Summary: "Origin refused connection.", RepairAction: "Start the origin.", CorrelationID: "cor_01", Retry: health.RetryScheduled, NextRetryAt: now.Add(time.Minute)}); err != nil {
 		t.Fatal(err)
 	}
 	resource, err := ProjectHealthResource(tracker.Snapshot(), HealthResourceBinding{ResourceKind: "tunnel", ResourceID: "tun_01", CorrelationID: "cor_01"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resource.Schema != ResourceSchemaV1 || resource.Kind != "health" || resource.OverallCode != "origin_connection_refused" || !resource.Retrying || resource.NextRetryAt == nil || resource.Dimensions.Origin.Status != StatusDegraded {
+	if resource.Schema != ResourceSchemaV1 || resource.Kind != "health" || resource.OverallCode != "origin_connection_refused" || !resource.Retrying || resource.NextRetryAt == nil || resource.Dimensions.Origin.Status != health.StatusDegraded {
 		t.Fatalf("resource = %+v", resource)
 	}
 	*resource.NextRetryAt = time.Time{}
@@ -41,7 +42,7 @@ func TestProjectHealthResourceMatchesCanonicalWireAndCopies(t *testing.T) {
 
 func TestProjectHealthResourceRejectsRelabeledCorrelation(t *testing.T) {
 	tracker, _ := NewHealthTracker(time.Now)
-	if err := tracker.Update(HealthUpdate{Dimension: DimensionRoute, Status: StatusDown, Code: "route_down", Summary: "Route is down.", RepairAction: "Repair the route.", CorrelationID: "cor_original", Retry: RetryWaitForChange}); err != nil {
+	if err := tracker.Update(health.HealthUpdate{Dimension: health.DimensionRoute, Status: health.StatusDown, Code: "route_down", Summary: "Route is down.", RepairAction: "Repair the route.", CorrelationID: "cor_original", Retry: health.RetryWaitForChange}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := ProjectHealthResource(tracker.Snapshot(), HealthResourceBinding{ResourceKind: "tunnel", ResourceID: "tun_01", CorrelationID: "cor_relabel"}); err == nil {
@@ -51,10 +52,10 @@ func TestProjectHealthResourceRejectsRelabeledCorrelation(t *testing.T) {
 
 func TestProjectEventResourceRequiresDurableEnvelopeAndSafeMetadata(t *testing.T) {
 	event, err := NewEvent(EventInput{
-		At: time.Date(2026, 8, 31, 4, 5, 6, 0, time.UTC), Severity: SeverityInfo, Component: DimensionRoute,
+		At: time.Date(2026, 8, 31, 4, 5, 6, 0, time.UTC), Severity: SeverityInfo, Component: health.DimensionRoute,
 		Name: "route_activated", Code: "ready", Outcome: OutcomeStateChange, Message: "Route activated.", CorrelationID: "cor_01",
 		IDs:         SafeIDs{TunnelID: "tunnel_01", RouteID: "route_01", ConnectorID: "connector_01"},
-		Generations: Generations{Config: 2, Route: 3, Assignment: 4}, Retry: RetryNone,
+		Generations: Generations{Config: 2, Route: 3, Assignment: 4}, Retry: health.RetryNone,
 	})
 	if err != nil {
 		t.Fatal(err)

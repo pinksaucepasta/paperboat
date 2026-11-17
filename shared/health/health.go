@@ -1,3 +1,8 @@
+// Package health is the one definition of Paperboat's typed health model. The host
+// runtime, the edge and the control plane all track and export it, so one decoder
+// reads health from every side of the product.
+//
+// Prior art: tailscale health/health.go (one Tracker imported by every binary).
 package health
 
 import (
@@ -8,14 +13,15 @@ import (
 	"sort"
 	"sync"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/shared/telemetry/safe"
 )
 
-// HealthSchemaV1 is shared with the control plane and edge runtime. A single
-// decoder can therefore consume health from either side of the product.
+// HealthSchemaV1 identifies the exported snapshot.
 const HealthSchemaV1 = "paperboat.health/v1"
 
-// Dimension is one independently actionable runtime subsystem. Keep this
-// order stable: it is also used for canonical JSON and overall tie-breaking.
+// Dimension is one independently actionable subsystem. Keep dimensionOrder
+// stable: it is also the canonical JSON order and the overall tie-break.
 type Dimension string
 
 const (
@@ -42,7 +48,8 @@ var dimensionOrder = []Dimension{
 	DimensionUpdate,
 }
 
-// Dimensions returns a copy of the canonical dimension order.
+// Dimensions returns the canonical order used in JSON, metrics and overall
+// tie-breaking. The returned slice is independent of package state.
 func Dimensions() []Dimension { return append([]Dimension(nil), dimensionOrder...) }
 
 type HealthStatus string
@@ -64,10 +71,6 @@ const (
 	RetryNotRetryable  RetryDecision = "not_retryable"
 )
 
-var stableCodePattern = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
-
-// HealthUpdate replaces one dimension's current state. Times are normalized
-// to UTC by HealthTracker; callers cannot supply the authoritative timestamp.
 type HealthUpdate struct {
 	Dimension     Dimension
 	Status        HealthStatus
@@ -173,60 +176,109 @@ type HealthSnapshot struct {
 	ETag       string           `json:"etag"`
 }
 
-func (s HealthSnapshot) JSON() ([]byte, error) { return json.Marshal(s) }
-
-// Alert is an immutable-safe actionable projection for notification adapters.
-type Alert struct {
-	At           time.Time     `json:"at"`
-	Dimension    Dimension     `json:"dimension"`
-	Status       HealthStatus  `json:"status"`
-	Code         string        `json:"code"`
-	BrokenSince  *time.Time    `json:"broken_since,omitempty"`
-	Summary      string        `json:"summary"`
-	RepairAction string        `json:"repair_action"`
-	Correlation  string        `json:"correlation_id,omitempty"`
-	Retry        RetryDecision `json:"retry"`
-	NextRetryAt  *time.Time    `json:"next_retry_at,omitempty"`
+func (s HealthSnapshot) JSON() ([]byte, error) {
+	if err := s.Validate(); err != nil {
+		return nil, err
+	}
+	return json.Marshal(s)
 }
 
+// Validate checks the complete v1 snapshot before it is exported. The ETag is
+// required: a snapshot that did not come from a tracker is not exportable.
+func (s HealthSnapshot) Validate() error {
+	if s.Schema != HealthSchemaV1 || safe.NormalizeTime(s.UpdatedAt).IsZero() || !ValidHealthStatus(s.Overall.Status) || !safe.StableCode(s.Overall.Code) || safe.NormalizeTime(s.Overall.Since).IsZero() || !safe.StoredText(s.Overall.Summary, safe.MaximumSummaryBytes) || !safe.StoredText(s.Overall.RepairAction, safe.MaximumRepairBytes) || !ValidRetry(s.Overall.Retry, safe.TimeValue(s.Overall.NextRetryAt)) {
+		return safe.NewError(safe.ErrorInvalidObservation, "health")
+	}
+	if s.Overall.Dimension != "" && !ValidDimension(s.Overall.Dimension) {
+		return safe.NewError(safe.ErrorInvalidDimension, "health")
+	}
+	if s.Overall.CorrelationID != "" && !safe.CorrelationID(s.Overall.CorrelationID) {
+		return safe.NewError(safe.ErrorInvalidID, "health")
+	}
+	if isBroken(s.Overall.Status) != (s.Overall.BrokenSince != nil) {
+		return safe.NewError(safe.ErrorInvalidObservation, "health")
+	}
+	for _, dimension := range dimensionOrder {
+		state := s.Dimensions.Get(dimension)
+		if !ValidHealthStatus(state.Status) || !safe.StableCode(state.Code) || safe.NormalizeTime(state.Since).IsZero() || !safe.StoredText(state.Summary, safe.MaximumSummaryBytes) || !safe.StoredText(state.RepairAction, safe.MaximumRepairBytes) || !ValidRetry(state.Retry, safe.TimeValue(state.NextRetryAt)) {
+			return safe.NewError(safe.ErrorInvalidObservation, "health")
+		}
+		if state.CorrelationID != "" && !safe.CorrelationID(state.CorrelationID) {
+			return safe.NewError(safe.ErrorInvalidID, "health")
+		}
+		if state.SuppressedBy != "" && (!ValidDimension(state.SuppressedBy) || state.SuppressedBy == dimension) {
+			return safe.NewError(safe.ErrorInvalidDimension, "health")
+		}
+		if isBroken(state.Status) != (state.BrokenSince != nil) {
+			return safe.NewError(safe.ErrorInvalidObservation, "health")
+		}
+	}
+	if !etagPattern.MatchString(s.ETag) {
+		return safe.NewError(safe.ErrorInvalidObservation, "health")
+	}
+	return nil
+}
+
+var etagPattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
+
+// Alert is a safe, actionable projection suitable for a pager or notification
+// adapter. It contains no raw provider or request data.
+type Alert struct {
+	At            time.Time     `json:"at"`
+	Dimension     Dimension     `json:"dimension"`
+	Status        HealthStatus  `json:"status"`
+	Code          string        `json:"code"`
+	BrokenSince   *time.Time    `json:"broken_since,omitempty"`
+	Summary       string        `json:"summary"`
+	RepairAction  string        `json:"repair_action"`
+	CorrelationID string        `json:"correlation_id,omitempty"`
+	Retry         RetryDecision `json:"retry"`
+	NextRetryAt   *time.Time    `json:"next_retry_at,omitempty"`
+	Correlation   string        `json:"-"`
+}
+
+// AlertFor returns an immutable-safe alert projection for one dimension.
 func (s HealthSnapshot) AlertFor(dimension Dimension) (Alert, bool) {
-	if !validDimension(dimension) {
+	if !ValidDimension(dimension) {
 		return Alert{}, false
 	}
 	state := s.Dimensions.Get(dimension)
-	if state.Status == StatusReady || state.Status == StatusNotApplicable {
+	if state.SuppressedBy != "" || state.Status == StatusReady || state.Status == StatusNotApplicable {
 		return Alert{}, false
 	}
-	return Alert{
-		At:           s.UpdatedAt,
-		Dimension:    dimension,
-		Status:       state.Status,
-		Code:         state.Code,
-		BrokenSince:  cloneTime(state.BrokenSince),
-		Summary:      state.Summary,
-		RepairAction: state.RepairAction,
-		Correlation:  state.CorrelationID,
-		Retry:        state.Retry,
-		NextRetryAt:  cloneTime(state.NextRetryAt),
-	}, true
+	return Alert{At: s.UpdatedAt, Dimension: dimension, Status: state.Status, Code: state.Code, BrokenSince: safe.CloneTime(state.BrokenSince), Summary: state.Summary, RepairAction: state.RepairAction, CorrelationID: state.CorrelationID, Correlation: state.CorrelationID, Retry: state.Retry, NextRetryAt: safe.CloneTime(state.NextRetryAt)}, true
 }
 
-// HealthTracker owns mutable health state and emits copy-isolated snapshots.
-// The clock is injected so retry and transition tests stay deterministic.
+// Alerts returns only deterministic actionable root alerts. Failures hidden by
+// a down dependency are omitted so operators receive one repair target.
+func (s HealthSnapshot) Alerts() []Alert {
+	alerts := make([]Alert, 0, len(dimensionOrder))
+	for _, dimension := range dimensionOrder {
+		if alert, ok := s.AlertFor(dimension); ok {
+			alerts = append(alerts, alert)
+		}
+	}
+	return alerts
+}
+
 type HealthTracker struct {
-	mu        sync.RWMutex
-	now       func() time.Time
-	updatedAt time.Time
-	states    HealthDimensions
+	mu           sync.RWMutex
+	now          func() time.Time
+	readySummary string
+	updatedAt    time.Time
+	states       HealthDimensions
 }
 
-func NewHealthTracker(now func() time.Time) (*HealthTracker, error) {
+// NewHealthTracker returns a tracker whose overall status reads readySummary
+// when every applicable dimension is ready (for example "All applicable edge
+// health dimensions are ready."). now is injected for tests.
+func NewHealthTracker(now func() time.Time, readySummary string) (*HealthTracker, error) {
 	if now == nil {
 		now = time.Now
 	}
-	at := normalizeTime(now())
+	at := safe.NormalizeTime(now())
 	if at.IsZero() {
-		return nil, newError(ErrorInvalidTime, "construct host health tracker")
+		return nil, safe.NewError(safe.ErrorInvalidTime, "health")
 	}
 	unknown := DimensionHealth{
 		Status:       StatusUnknown,
@@ -240,25 +292,25 @@ func NewHealthTracker(now func() time.Time) (*HealthTracker, error) {
 	for _, dimension := range dimensionOrder {
 		states.set(dimension, unknown)
 	}
-	return &HealthTracker{now: now, updatedAt: at, states: states}, nil
+	return &HealthTracker{now: now, readySummary: readySummary, updatedAt: at, states: states}, nil
 }
 
 func (t *HealthTracker) Update(update HealthUpdate) error {
 	if t == nil {
-		return newError(ErrorInvalidObservation, "update host health")
+		return safe.NewError(safe.ErrorInvalidObservation, "health")
 	}
 	prepared, err := prepareHealthUpdate(update)
 	if err != nil {
 		return err
 	}
-	at := normalizeTime(t.now())
+	at := safe.NormalizeTime(t.now())
 	if at.IsZero() {
-		return newError(ErrorInvalidTime, "update host health")
+		return safe.NewError(safe.ErrorInvalidTime, "health")
 	}
 
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	previous := t.states.Get(prepared.Dimension)
+	previous := t.states.Get(update.Dimension)
 	next := DimensionHealth{
 		Status:        prepared.Status,
 		Code:          prepared.Code,
@@ -269,7 +321,7 @@ func (t *HealthTracker) Update(update HealthUpdate) error {
 		Retry:         prepared.Retry,
 	}
 	if !prepared.NextRetryAt.IsZero() {
-		nextRetry := normalizeTime(prepared.NextRetryAt)
+		nextRetry := safe.NormalizeTime(prepared.NextRetryAt)
 		next.NextRetryAt = &nextRetry
 	}
 	if previous.Status == next.Status && previous.Code == next.Code {
@@ -285,7 +337,7 @@ func (t *HealthTracker) Update(update HealthUpdate) error {
 	if dimensionHealthEqual(previous, next) {
 		return nil
 	}
-	t.states.set(prepared.Dimension, next)
+	t.states.set(update.Dimension, next)
 	t.updatedAt = at
 	return nil
 }
@@ -303,7 +355,7 @@ func (t *HealthTracker) Snapshot() HealthSnapshot {
 	snapshot := HealthSnapshot{
 		Schema:     HealthSchemaV1,
 		UpdatedAt:  updatedAt,
-		Overall:    projectOverall(states, updatedAt),
+		Overall:    projectOverall(states, updatedAt, t.readySummary),
 		Dimensions: states,
 	}
 	withoutETag, _ := json.Marshal(snapshot)
@@ -315,44 +367,45 @@ func (t *HealthTracker) Snapshot() HealthSnapshot {
 func cloneHealthDimensions(states HealthDimensions) HealthDimensions {
 	for _, dimension := range dimensionOrder {
 		state := states.Get(dimension)
-		state.BrokenSince = cloneTime(state.BrokenSince)
-		state.NextRetryAt = cloneTime(state.NextRetryAt)
+		state.BrokenSince = safe.CloneTime(state.BrokenSince)
+		state.NextRetryAt = safe.CloneTime(state.NextRetryAt)
 		states.set(dimension, state)
 	}
 	return states
 }
 
 func prepareHealthUpdate(update HealthUpdate) (HealthUpdate, error) {
-	if !validDimension(update.Dimension) {
-		return HealthUpdate{}, newError(ErrorInvalidDimension, "update host health")
+	if !ValidDimension(update.Dimension) {
+		return HealthUpdate{}, safe.NewError(safe.ErrorInvalidDimension, "health")
 	}
-	if !validHealthStatus(update.Status) {
-		return HealthUpdate{}, newError(ErrorInvalidStatus, "update host health")
+	if !ValidHealthStatus(update.Status) {
+		return HealthUpdate{}, safe.NewError(safe.ErrorInvalidStatus, "health")
 	}
-	if !stableCodePattern.MatchString(update.Code) {
-		return HealthUpdate{}, newError(ErrorInvalidCode, "update host health")
+	if !safe.StableCode(update.Code) {
+		return HealthUpdate{}, safe.NewError(safe.ErrorInvalidCode, "health")
 	}
-	if !validRetry(update.Retry, update.NextRetryAt) {
-		return HealthUpdate{}, newError(ErrorInvalidRetry, "update host health")
+	if !ValidRetry(update.Retry, update.NextRetryAt) {
+		return HealthUpdate{}, safe.NewError(safe.ErrorInvalidRetry, "health")
 	}
-	summary, err := safeBoundedString(update.Summary, maximumSummaryBytes, true)
+	summary, err := safe.BoundedString(update.Summary, safe.MaximumSummaryBytes, true)
 	if err != nil {
 		return HealthUpdate{}, err
 	}
-	repair, err := safeBoundedString(update.RepairAction, maximumRepairBytes, true)
+	repair, err := safe.BoundedString(update.RepairAction, safe.MaximumRepairBytes, true)
 	if err != nil {
 		return HealthUpdate{}, err
 	}
-	if update.CorrelationID != "" && !validCorrelationID(update.CorrelationID) {
-		return HealthUpdate{}, newError(ErrorInvalidID, "update host health")
+	if update.CorrelationID != "" && !safe.CorrelationID(update.CorrelationID) {
+		return HealthUpdate{}, safe.NewError(safe.ErrorInvalidID, "health")
 	}
 	update.Summary = summary
 	update.RepairAction = repair
-	update.NextRetryAt = normalizeTime(update.NextRetryAt)
+	update.NextRetryAt = safe.NormalizeTime(update.NextRetryAt)
 	return update, nil
 }
 
-func validDimension(value Dimension) bool {
+// ValidDimension reports whether value is a known dimension.
+func ValidDimension(value Dimension) bool {
 	for _, dimension := range dimensionOrder {
 		if value == dimension {
 			return true
@@ -361,11 +414,13 @@ func validDimension(value Dimension) bool {
 	return false
 }
 
-func validHealthStatus(value HealthStatus) bool {
+// ValidHealthStatus reports whether value is a known status.
+func ValidHealthStatus(value HealthStatus) bool {
 	return value == StatusUnknown || value == StatusReady || value == StatusDegraded || value == StatusDown || value == StatusNotApplicable
 }
 
-func validRetry(decision RetryDecision, next time.Time) bool {
+// ValidRetry reports whether decision and next agree: only a scheduled retry carries a time.
+func ValidRetry(decision RetryDecision, next time.Time) bool {
 	switch decision {
 	case RetryScheduled:
 		return !next.IsZero()
@@ -377,13 +432,6 @@ func validRetry(decision RetryDecision, next time.Time) bool {
 }
 
 func isBroken(status HealthStatus) bool { return status == StatusDegraded || status == StatusDown }
-
-func normalizeTime(value time.Time) time.Time {
-	if value.IsZero() {
-		return time.Time{}
-	}
-	return value.UTC().Round(0)
-}
 
 func dimensionHealthEqual(left, right DimensionHealth) bool {
 	left.SuppressedBy, right.SuppressedBy = "", ""
@@ -400,7 +448,7 @@ func timesEqual(left, right *time.Time) bool {
 	return left.Equal(*right)
 }
 
-// A down dependency suppresses dependent noise. Degraded dependencies remain
+// A down dependency suppresses dependent noise. Degraded dependencies stay
 // visible because they may still be actionable independently.
 var dimensionDependencies = map[Dimension][]Dimension{
 	DimensionEdge:        {DimensionService},
@@ -416,18 +464,34 @@ var dimensionDependencies = map[Dimension][]Dimension{
 func suppressDependencies(states HealthDimensions) HealthDimensions {
 	for _, dimension := range dimensionOrder {
 		state := states.Get(dimension)
-		for _, dependency := range dimensionDependencies[dimension] {
-			if states.Get(dependency).Status == StatusDown {
-				state.SuppressedBy = dependency
-				break
-			}
-		}
+		state.SuppressedBy = dependencyRoot(states, dimension, make(map[Dimension]bool))
 		states.set(dimension, state)
 	}
 	return states
 }
 
-func projectOverall(states HealthDimensions, updatedAt time.Time) OverallHealth {
+// dependencyRoot follows the dependency graph to the first independently
+// actionable down dimension. Returning the root, not the local symptom, keeps
+// overall health and alerting stable as more descendants see the same outage.
+func dependencyRoot(states HealthDimensions, dimension Dimension, visiting map[Dimension]bool) Dimension {
+	if visiting[dimension] {
+		return ""
+	}
+	visiting[dimension] = true
+	defer delete(visiting, dimension)
+	for _, dependency := range dimensionDependencies[dimension] {
+		if states.Get(dependency).Status != StatusDown {
+			continue
+		}
+		if root := dependencyRoot(states, dependency, visiting); root != "" {
+			return root
+		}
+		return dependency
+	}
+	return ""
+}
+
+func projectOverall(states HealthDimensions, updatedAt time.Time, readySummary string) OverallHealth {
 	type candidate struct {
 		dimension Dimension
 		state     DimensionHealth
@@ -448,7 +512,7 @@ func projectOverall(states HealthDimensions, updatedAt time.Time) OverallHealth 
 			Status:       StatusReady,
 			Code:         "ready",
 			Since:        updatedAt,
-			Summary:      "All applicable host health dimensions are ready.",
+			Summary:      readySummary,
 			RepairAction: "No action is required.",
 			Retry:        RetryNone,
 		}
@@ -465,11 +529,11 @@ func projectOverall(states HealthDimensions, updatedAt time.Time) OverallHealth 
 		Code:          selected.state.Code,
 		Dimension:     selected.dimension,
 		Since:         selected.state.Since,
-		BrokenSince:   cloneTime(selected.state.BrokenSince),
+		BrokenSince:   safe.CloneTime(selected.state.BrokenSince),
 		Summary:       selected.state.Summary,
 		RepairAction:  selected.state.RepairAction,
 		CorrelationID: selected.state.CorrelationID,
 		Retry:         selected.state.Retry,
-		NextRetryAt:   cloneTime(selected.state.NextRetryAt),
+		NextRetryAt:   safe.CloneTime(selected.state.NextRetryAt),
 	}
 }

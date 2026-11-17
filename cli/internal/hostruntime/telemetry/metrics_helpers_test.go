@@ -1,6 +1,7 @@
 package telemetry
 
 import (
+	typedhealth "github.com/pinksaucepasta/paperboat/shared/health"
 	"testing"
 	"time"
 
@@ -20,7 +21,7 @@ func TestLifecycleMetricsUseFixedLabelsAndHealthProjection(t *testing.T) {
 	if err := registry.RecordHealth(tracker.Snapshot()); err != nil {
 		t.Fatal(err)
 	}
-	if err := registry.RecordHealthTransition(health.DimensionService, health.StatusUnknown, health.StatusReady); err != nil {
+	if err := registry.RecordHealthTransition(typedhealth.DimensionService, typedhealth.StatusUnknown, typedhealth.StatusReady); err != nil {
 		t.Fatal(err)
 	}
 	for _, phase := range []string{"download", "verify", "stage", "activate", "health_gate", "rollback", "quarantine"} {
@@ -60,7 +61,7 @@ func TestLifecycleMetricsUseFixedLabelsAndHealthProjection(t *testing.T) {
 			seen[sample.Labels["dimension"]] = true
 		}
 	}
-	if len(seen) != len(health.Dimensions()) {
+	if len(seen) != len(typedhealth.Dimensions()) {
 		t.Fatalf("health dimensions = %v", seen)
 	}
 }

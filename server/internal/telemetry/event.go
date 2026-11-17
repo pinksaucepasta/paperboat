@@ -3,6 +3,8 @@ package telemetry
 import (
 	"context"
 	"encoding/json"
+	"github.com/pinksaucepasta/paperboat/shared/health"
+	"github.com/pinksaucepasta/paperboat/shared/telemetry/safe"
 	"regexp"
 	"sync"
 	"sync/atomic"
@@ -66,7 +68,7 @@ type Generations struct {
 type EventInput struct {
 	At            time.Time
 	Severity      EventSeverity
-	Component     Dimension
+	Component     health.Dimension
 	Name          string
 	Code          string
 	Outcome       EventOutcome
@@ -74,7 +76,7 @@ type EventInput struct {
 	CorrelationID string
 	IDs           SafeIDs
 	Generations   Generations
-	Retry         RetryDecision
+	Retry         health.RetryDecision
 	NextRetryAt   time.Time
 	// The following fields are optional on the low-level edge-compatible event
 	// shape. NewLifecycleEvent requires all of them and emits the richer
@@ -86,67 +88,67 @@ type EventInput struct {
 }
 
 type Event struct {
-	Schema        string        `json:"schema"`
-	At            time.Time     `json:"at"`
-	Severity      EventSeverity `json:"severity"`
-	Component     Dimension     `json:"component"`
-	Name          string        `json:"name"`
-	Code          string        `json:"code"`
-	Outcome       EventOutcome  `json:"outcome"`
-	Message       string        `json:"message"`
-	CorrelationID string        `json:"correlation_id"`
-	IDs           SafeIDs       `json:"ids"`
-	Generations   Generations   `json:"generations"`
-	Retry         RetryDecision `json:"retry"`
-	NextRetryAt   *time.Time    `json:"next_retry_at,omitempty"`
-	RequestID     string        `json:"request_id,omitempty"`
-	ResourceKind  string        `json:"resource_kind,omitempty"`
-	ResourceID    string        `json:"resource_id,omitempty"`
-	OperationID   string        `json:"operation_id,omitempty"`
+	Schema        string               `json:"schema"`
+	At            time.Time            `json:"at"`
+	Severity      EventSeverity        `json:"severity"`
+	Component     health.Dimension     `json:"component"`
+	Name          string               `json:"name"`
+	Code          string               `json:"code"`
+	Outcome       EventOutcome         `json:"outcome"`
+	Message       string               `json:"message"`
+	CorrelationID string               `json:"correlation_id"`
+	IDs           SafeIDs              `json:"ids"`
+	Generations   Generations          `json:"generations"`
+	Retry         health.RetryDecision `json:"retry"`
+	NextRetryAt   *time.Time           `json:"next_retry_at,omitempty"`
+	RequestID     string               `json:"request_id,omitempty"`
+	ResourceKind  string               `json:"resource_kind,omitempty"`
+	ResourceID    string               `json:"resource_id,omitempty"`
+	OperationID   string               `json:"operation_id,omitempty"`
 }
 
 var safeIDPattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{2,127}$`)
 
 func NewEvent(input EventInput) (Event, error) {
-	if normalizeTime(input.At).IsZero() {
-		return Event{}, newError(ErrorInvalidTime, "construct control-plane event")
+	if safe.NormalizeTime(input.At).IsZero() {
+		return Event{}, safe.NewError(safe.ErrorInvalidTime, "construct control-plane event")
 	}
-	if !validEventSeverity(input.Severity) || !validDimension(input.Component) || !stableCodePattern.MatchString(input.Name) || !stableCodePattern.MatchString(input.Code) || !validEventOutcome(input.Outcome) {
-		return Event{}, newError(ErrorInvalidEvent, "construct control-plane event")
+	if !validEventSeverity(input.Severity) || !health.ValidDimension(input.Component) || !safe.StableCode(input.Name) || !safe.StableCode(input.Code) || !validEventOutcome(input.Outcome) {
+		return Event{}, safe.NewError(safe.ErrorInvalidEvent, "construct control-plane event")
 	}
-	if !validCorrelationID(input.CorrelationID) {
-		return Event{}, newError(ErrorInvalidID, "construct control-plane event")
+	if !safe.CorrelationID(input.CorrelationID) {
+		return Event{}, safe.NewError(safe.ErrorInvalidID, "construct control-plane event")
 	}
 	if !validSafeIDs(input.IDs) {
-		return Event{}, newError(ErrorInvalidID, "construct control-plane event")
+		return Event{}, safe.NewError(safe.ErrorInvalidID, "construct control-plane event")
 	}
-	if !validRetry(input.Retry, input.NextRetryAt) {
-		return Event{}, newError(ErrorInvalidRetry, "construct control-plane event")
+	if !health.ValidRetry(input.Retry, input.NextRetryAt) {
+		return Event{}, safe.NewError(safe.ErrorInvalidRetry, "construct control-plane event")
 	}
 	requestID := input.RequestID
 	if requestID == "" {
 		requestID = input.IDs.RequestID
 	}
 	if input.RequestID != "" && input.IDs.RequestID != "" && input.RequestID != input.IDs.RequestID {
-		return Event{}, newError(ErrorIdentityMismatch, "construct control-plane event")
+		return Event{}, safe.NewError(safe.ErrorIdentityMismatch, "construct control-plane event")
 	}
 	if requestID != "" && !validOptionalLogIdentity(requestID, "request_", "req_") {
-		return Event{}, newError(ErrorInvalidID, "construct control-plane event")
+		return Event{}, safe.NewError(safe.ErrorInvalidID, "construct control-plane event")
 	}
 	if (input.ResourceKind == "") != (input.ResourceID == "") || (input.ResourceKind != "" && !validEventResourceKind(input.ResourceKind)) || (input.ResourceID != "" && !validOpaqueID(input.ResourceID)) || !validOptionalLogIdentity(input.OperationID, "operation_", "op_") {
-		return Event{}, newError(ErrorInvalidID, "construct control-plane event")
+		return Event{}, safe.NewError(safe.ErrorInvalidID, "construct control-plane event")
 	}
-	message, err := safeBoundedString(input.Message, maximumMessageBytes, true)
+	message, err := safe.BoundedString(input.Message, safe.MaximumMessageBytes, true)
 	if err != nil {
 		return Event{}, err
 	}
-	event := Event{Schema: EventSchemaV1, At: normalizeTime(input.At), Severity: input.Severity, Component: input.Component, Name: input.Name, Code: input.Code, Outcome: input.Outcome, Message: message, CorrelationID: input.CorrelationID, IDs: input.IDs, Generations: input.Generations, Retry: input.Retry, RequestID: input.RequestID, ResourceKind: input.ResourceKind, ResourceID: input.ResourceID, OperationID: input.OperationID}
+	event := Event{Schema: EventSchemaV1, At: safe.NormalizeTime(input.At), Severity: input.Severity, Component: input.Component, Name: input.Name, Code: input.Code, Outcome: input.Outcome, Message: message, CorrelationID: input.CorrelationID, IDs: input.IDs, Generations: input.Generations, Retry: input.Retry, RequestID: input.RequestID, ResourceKind: input.ResourceKind, ResourceID: input.ResourceID, OperationID: input.OperationID}
 	if event.RequestID == "" && input.IDs.RequestID != "" {
 		// Keep the existing nested ID as the canonical low-level JSON shape.
 		event.RequestID = ""
 	}
 	if !input.NextRetryAt.IsZero() {
-		nextRetry := normalizeTime(input.NextRetryAt)
+		nextRetry := safe.NormalizeTime(input.NextRetryAt)
 		event.NextRetryAt = &nextRetry
 	}
 	return event, nil
@@ -160,11 +162,11 @@ func (e Event) JSON() ([]byte, error) {
 }
 
 func (e Event) Validate() error {
-	if e.Schema != EventSchemaV1 || e.At.IsZero() || !validEventSeverity(e.Severity) || !validDimension(e.Component) || !stableCodePattern.MatchString(e.Name) || !stableCodePattern.MatchString(e.Code) || !validEventOutcome(e.Outcome) || !validCorrelationID(e.CorrelationID) || !validSafeIDs(e.IDs) || !validRetry(e.Retry, timeValue(e.NextRetryAt)) || !storedSafeText(e.Message, maximumMessageBytes) {
-		return newError(ErrorInvalidEvent, "validate control-plane event")
+	if e.Schema != EventSchemaV1 || e.At.IsZero() || !validEventSeverity(e.Severity) || !health.ValidDimension(e.Component) || !safe.StableCode(e.Name) || !safe.StableCode(e.Code) || !validEventOutcome(e.Outcome) || !safe.CorrelationID(e.CorrelationID) || !validSafeIDs(e.IDs) || !health.ValidRetry(e.Retry, safe.TimeValue(e.NextRetryAt)) || !safe.StoredText(e.Message, safe.MaximumMessageBytes) {
+		return safe.NewError(safe.ErrorInvalidEvent, "validate control-plane event")
 	}
 	if !validOptionalLogIdentity(e.RequestID, "request_", "req_") || (e.ResourceKind == "") != (e.ResourceID == "") || (e.ResourceKind != "" && !validEventResourceKind(e.ResourceKind)) || (e.ResourceID != "" && !validOpaqueID(e.ResourceID)) || !validOptionalLogIdentity(e.OperationID, "operation_", "op_") {
-		return newError(ErrorInvalidID, "validate control-plane event")
+		return safe.NewError(safe.ErrorInvalidID, "validate control-plane event")
 	}
 	return nil
 }
@@ -175,10 +177,6 @@ func validEventSeverity(value EventSeverity) bool {
 
 func validEventOutcome(value EventOutcome) bool {
 	return value == OutcomeSuccess || value == OutcomeFailed || value == OutcomeRejected || value == OutcomeCanceled || value == OutcomeStateChange
-}
-
-func validCorrelationID(value string) bool {
-	return hasSafePrefix(value, "corr_", "cor_", "correlation_", "request_", "req_", "support_")
 }
 
 func validSafeIDs(ids SafeIDs) bool {
@@ -251,7 +249,7 @@ func NewEventLog(capacity int) (*EventLog, error) {
 // a larger retained ring.  Both bounds are explicit and finite.
 func NewEventLogWithQueue(capacity, queueCapacity int) (*EventLog, error) {
 	if capacity <= 0 || capacity > maximumEventLogSize || queueCapacity <= 0 || queueCapacity > maximumEventLogSize {
-		return nil, newError(ErrorInvalidCapacity, "construct control-plane event log")
+		return nil, safe.NewError(safe.ErrorInvalidCapacity, "construct control-plane event log")
 	}
 	log := &EventLog{capacity: capacity, events: make([]Event, 0, capacity), queue: make(chan eventItem, queueCapacity), commands: make(chan flushCommand), stop: make(chan struct{}), done: make(chan struct{})}
 	go log.run()
@@ -418,6 +416,6 @@ func (l *EventLog) Close() error {
 }
 
 func cloneEvent(event Event) Event {
-	event.NextRetryAt = cloneTime(event.NextRetryAt)
+	event.NextRetryAt = safe.CloneTime(event.NextRetryAt)
 	return event
 }

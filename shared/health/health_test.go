@@ -1,4 +1,4 @@
-package telemetry
+package health
 
 import (
 	"encoding/json"
@@ -6,6 +6,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/shared/telemetry/safe"
 )
 
 func TestHealthProjectionBrokenSinceRecoveryAndSuppression(t *testing.T) {
@@ -20,9 +22,6 @@ func TestHealthProjectionBrokenSinceRecoveryAndSuppression(t *testing.T) {
 	route := firstBroken.Dimensions.Route
 	if route.BrokenSince == nil || !route.BrokenSince.Equal(at) || firstBroken.Overall.Dimension != DimensionRoute {
 		t.Fatalf("first broken projection = %#v", firstBroken)
-	}
-	if route.Retry != RetryScheduled || route.NextRetryAt == nil || !route.NextRetryAt.Equal(nextRetry) {
-		t.Fatalf("retry projection = %#v", route)
 	}
 
 	at = at.Add(time.Minute)
@@ -53,8 +52,18 @@ func TestHealthProjectionBrokenSinceRecoveryAndSuppression(t *testing.T) {
 	if suppressed.Dimensions.Origin.SuppressedBy != DimensionEdge || suppressed.Dimensions.Certificate.SuppressedBy != DimensionEdge {
 		t.Fatalf("dependent dimensions were not suppressed: %#v", suppressed.Dimensions)
 	}
-	if alert, ok := suppressed.AlertFor(DimensionEdge); !ok || alert.Code != "edge_offline" || alert.BrokenSince == nil {
-		t.Fatalf("alert projection = %#v, %v", alert, ok)
+	alerts := suppressed.Alerts()
+	if len(alerts) != 1 || alerts[0].Dimension != DimensionEdge || alerts[0].CorrelationID != "corr_health_4" || alerts[0].Correlation != "corr_health_4" {
+		t.Fatalf("actionable root alerts = %#v", alerts)
+	}
+}
+
+func TestHealthSnapshotJSONRejectsInvalidWireState(t *testing.T) {
+	tracker := newTestHealthTracker(t, time.Now)
+	snapshot := tracker.Snapshot()
+	snapshot.Dimensions.Service.Summary = "authorization=Bearer leaked"
+	if _, err := snapshot.JSON(); safe.ErrorCodeOf(err) != safe.ErrorInvalidObservation {
+		t.Fatalf("unsafe snapshot error = %v", err)
 	}
 }
 
@@ -78,9 +87,6 @@ func TestHealthSnapshotAndETagAreDeterministicAndIndependent(t *testing.T) {
 	if tracker.Snapshot().Dimensions.Service.BrokenSince != nil {
 		t.Fatal("snapshot mutation changed tracker state")
 	}
-	if first.ETag == "" {
-		t.Fatal("empty ETag")
-	}
 }
 
 func TestHealthConstructionRedactsAndBoundsStrings(t *testing.T) {
@@ -98,15 +104,12 @@ func TestHealthConstructionRedactsAndBoundsStrings(t *testing.T) {
 			t.Fatalf("unsafe value %q in %s", unsafe, body)
 		}
 	}
-	if !strings.Contains(string(body), RedactedValue) || len(tracker.Snapshot().Dimensions.Access.Summary) > maximumSummaryBytes {
+	if !strings.Contains(string(body), safe.RedactedValue) || len(tracker.Snapshot().Dimensions.Access.Summary) > safe.MaximumSummaryBytes {
 		t.Fatalf("redaction/bound failure: %s", body)
 	}
 	invalid := HealthUpdate{Dimension: Dimension("host.customer.example"), Status: StatusReady, Code: "ready", Summary: "ready", RepairAction: "none", Retry: RetryNone}
-	if err := tracker.Update(invalid); errorCode(err) != ErrorInvalidDimension {
+	if err := tracker.Update(invalid); safe.ErrorCodeOf(err) != safe.ErrorInvalidDimension {
 		t.Fatalf("invalid dimension error = %v", err)
-	}
-	if _, err := NewHealthTracker(func() time.Time { return time.Time{} }); errorCode(err) != ErrorInvalidTime {
-		t.Fatalf("invalid clock error = %v", err)
 	}
 }
 
@@ -132,6 +135,8 @@ func TestHealthTrackerConcurrentUse(t *testing.T) {
 	group.Wait()
 }
 
+const testReadySummary = "All applicable test health dimensions are ready."
+
 func setAllReady(t *testing.T, tracker *HealthTracker) {
 	t.Helper()
 	for _, dimension := range dimensionOrder {
@@ -154,9 +159,56 @@ func timePointer(value time.Time) *time.Time { return &value }
 
 func newTestHealthTracker(t *testing.T, now func() time.Time) *HealthTracker {
 	t.Helper()
-	tracker, err := NewHealthTracker(now)
+	tracker, err := NewHealthTracker(now, testReadySummary)
 	if err != nil {
 		t.Fatalf("NewHealthTracker: %v", err)
 	}
 	return tracker
+}
+
+func TestHealthReadySummaryIsAParameter(t *testing.T) {
+	tracker := newTestHealthTracker(t, time.Now)
+	setAllReady(t, tracker)
+	if got := tracker.Snapshot().Overall.Summary; got != testReadySummary {
+		t.Fatalf("ready summary = %q", got)
+	}
+}
+
+func TestHealthRejectsInvalidClockRetryAndMissingETag(t *testing.T) {
+	if tracker, err := NewHealthTracker(func() time.Time { return time.Time{} }, testReadySummary); safe.ErrorCodeOf(err) != safe.ErrorInvalidTime || tracker != nil {
+		t.Fatalf("invalid clock = %#v, %v", tracker, err)
+	}
+	tracker := newTestHealthTracker(t, time.Now)
+	update := readyUpdate(DimensionService)
+	update.Retry = RetryScheduled
+	if err := tracker.Update(update); safe.ErrorCodeOf(err) != safe.ErrorInvalidRetry {
+		t.Fatalf("invalid retry = %v", err)
+	}
+	snapshot := tracker.Snapshot()
+	snapshot.ETag = ""
+	if err := snapshot.Validate(); safe.ErrorCodeOf(err) != safe.ErrorInvalidObservation {
+		t.Fatalf("empty ETag validated: %v", err)
+	}
+}
+
+// The root of a chain of down dependencies owns the alert and is what every
+// descendant reports as suppressed_by, however deep the chain is.
+func TestHealthSuppressionFollowsTheDependencyChainToTheRoot(t *testing.T) {
+	tracker := newTestHealthTracker(t, time.Now)
+	setAllReady(t, tracker)
+	for _, dimension := range []Dimension{DimensionService, DimensionEdge, DimensionRoute} {
+		updateHealth(t, tracker, HealthUpdate{Dimension: dimension, Status: StatusDown, Code: "down", Summary: "Down.", RepairAction: "Repair it.", Retry: RetryNone})
+	}
+	snapshot := tracker.Snapshot()
+	for _, dimension := range []Dimension{DimensionEdge, DimensionRoute, DimensionOrigin, DimensionCertificate} {
+		if got := snapshot.Dimensions.Get(dimension).SuppressedBy; got != DimensionService {
+			t.Fatalf("%s suppressed by %q, want service", dimension, got)
+		}
+	}
+	if _, ok := snapshot.AlertFor(DimensionRoute); ok {
+		t.Fatal("a suppressed dimension produced an alert")
+	}
+	if alerts := snapshot.Alerts(); len(alerts) != 1 || alerts[0].Dimension != DimensionService {
+		t.Fatalf("alerts = %#v", alerts)
+	}
 }

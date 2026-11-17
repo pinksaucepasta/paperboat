@@ -3,6 +3,8 @@ package datacarrier
 import (
 	"context"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/shared/health"
+	"github.com/pinksaucepasta/paperboat/shared/telemetry/safe"
 	"io"
 	"net"
 	"reflect"
@@ -367,10 +369,10 @@ func (p *CarrierTelemetry) emit(at time.Time, name string, severity edgetelemetr
 		return
 	}
 	_, _, _ = p.events.TryRecord(edgetelemetry.EventInput{
-		At: at, Severity: severity, Component: edgetelemetry.DimensionEdge,
+		At: at, Severity: severity, Component: health.DimensionEdge,
 		Name: name, Code: name, Outcome: outcome, Message: message,
 		CorrelationID: info.CorrelationID, IDs: safeCarrierIDs(info.IDs), Generations: info.Generations,
-		Retry: edgetelemetry.RetryNone,
+		Retry: health.RetryNone,
 	})
 }
 
@@ -739,7 +741,7 @@ func ctxErr(ctx context.Context) error {
 }
 
 func safeCarrierCorrelation(value string) bool {
-	return edgetelemetry.SafeOpaqueID(value)
+	return safe.OpaqueID(value)
 }
 
 func safeCarrierIDs(ids edgetelemetry.SafeIDs) edgetelemetry.SafeIDs {
@@ -761,7 +763,7 @@ func safeCarrierIDs(ids edgetelemetry.SafeIDs) edgetelemetry.SafeIDs {
 }
 
 func safeCarrierID(value string) string {
-	if edgetelemetry.SafeOpaqueID(value) {
+	if safe.OpaqueID(value) {
 		return value
 	}
 	return ""

@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"github.com/google/uuid"
+	"github.com/pinksaucepasta/paperboat/shared/health"
 
 	"fmt"
 	"time"
@@ -31,9 +32,9 @@ func certificateTelemetry(producer *telemetry.Producer) func(context.Context, tu
 		case "revoke":
 			operation = telemetry.CertificateRevoke
 		}
-		outcome, retry := telemetry.CertificateSucceeded, telemetry.RetryNone
+		outcome, retry := telemetry.CertificateSucceeded, health.RetryNone
 		if event.Outcome != "success" {
-			outcome, retry = telemetry.CertificateFailed, telemetry.RetryScheduled
+			outcome, retry = telemetry.CertificateFailed, health.RetryScheduled
 		}
 		_ = producer.RecordCertificateLifecycle(telemetry.CertificateLifecycleInput{
 			Operation: operation, Outcome: outcome, Retry: retry, NextRetryAt: event.NextRetryAt,
@@ -54,15 +55,15 @@ func previewLeaseReconciliationWorker(service previewLeaseReconciler, interval t
 		}
 		_, err = service.Reconcile(ctx, "paperboat-server.preview-lease-reconciler", correlationID, requestID)
 		if err != nil {
-			recordPreviewCleanup(producers, telemetry.PreviewCleanupFailed, requestID, correlationID, telemetry.RetryScheduled, time.Now().UTC().Add(interval))
+			recordPreviewCleanup(producers, telemetry.PreviewCleanupFailed, requestID, correlationID, health.RetryScheduled, time.Now().UTC().Add(interval))
 			return fmt.Errorf("reconcile preview leases: %w", err)
 		}
-		recordPreviewCleanup(producers, telemetry.PreviewCleanupSucceeded, requestID, correlationID, telemetry.RetryNone, time.Time{})
+		recordPreviewCleanup(producers, telemetry.PreviewCleanupSucceeded, requestID, correlationID, health.RetryNone, time.Time{})
 		return nil
 	})
 }
 
-func recordPreviewCleanup(producers []*telemetry.Producer, outcome telemetry.PreviewCleanupOutcome, requestID, correlationID string, retry telemetry.RetryDecision, nextRetryAt time.Time) {
+func recordPreviewCleanup(producers []*telemetry.Producer, outcome telemetry.PreviewCleanupOutcome, requestID, correlationID string, retry health.RetryDecision, nextRetryAt time.Time) {
 	if len(producers) == 0 || producers[0] == nil {
 		return
 	}

@@ -3,6 +3,7 @@ package edgehttp
 import (
 	"context"
 	edgetelemetry "github.com/pinksaucepasta/paperboat/edge/internal/telemetry"
+	"github.com/pinksaucepasta/paperboat/shared/telemetry/safe"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -43,7 +44,7 @@ func TestRequestIdentityPropagatesAndIgnoresUntrustedHeader(t *testing.T) {
 			t.Fatalf("carrier request identity changed: %q", got)
 		}
 		correlation, correlationErr := uuid.Parse(strings.TrimPrefix(info.CorrelationID, "correlation_"))
-		if !edgetelemetry.SafeOpaqueID(info.CorrelationID) || correlationErr != nil || correlation.Version() != 4 || correlation.Variant() != uuid.RFC4122 || "correlation_"+correlation.String() != info.CorrelationID {
+		if !safe.OpaqueID(info.CorrelationID) || correlationErr != nil || correlation.Version() != 4 || correlation.Variant() != uuid.RFC4122 || "correlation_"+correlation.String() != info.CorrelationID {
 			t.Fatalf("correlation invalid: %q", info.CorrelationID)
 		}
 		seen = append(seen, info)

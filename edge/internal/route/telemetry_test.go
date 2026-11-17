@@ -3,6 +3,7 @@ package route
 import (
 	"context"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/shared/health"
 	"strings"
 	"sync"
 	"testing"
@@ -175,7 +176,7 @@ func TestGenerationRegistryTelemetryFailureAndPanicNeverCorruptRouting(t *testin
 
 func TestCoreTelemetrySinkHealthMetricsRedactionAndSafeIDs(t *testing.T) {
 	at := time.Date(2026, 8, 31, 1, 2, 3, 0, time.UTC)
-	health, err := edgetelemetry.NewHealthTracker(func() time.Time { return at })
+	healthTracker, err := edgetelemetry.NewHealthTracker(func() time.Time { return at })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -184,7 +185,7 @@ func TestCoreTelemetrySinkHealthMetricsRedactionAndSafeIDs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sink, err := NewCoreTelemetrySink(health, metrics, events)
+	sink, err := NewCoreTelemetrySink(healthTracker, metrics, events)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -213,8 +214,8 @@ func TestCoreTelemetrySinkHealthMetricsRedactionAndSafeIDs(t *testing.T) {
 	if registry.TelemetryDrops() != 0 {
 		t.Fatalf("core telemetry drops = %d", registry.TelemetryDrops())
 	}
-	snapshot := health.Snapshot()
-	if snapshot.Dimensions.Config.Status != edgetelemetry.StatusReady || snapshot.Dimensions.Route.Status != edgetelemetry.StatusReady {
+	snapshot := healthTracker.Snapshot()
+	if snapshot.Dimensions.Config.Status != health.StatusReady || snapshot.Dimensions.Route.Status != health.StatusReady {
 		t.Fatalf("health was not recovered: %+v", snapshot.Dimensions)
 	}
 	metricJSON, err := metrics.JSON()
@@ -260,10 +261,10 @@ func equalLifecycleTypes(left, right []LifecycleType) bool {
 }
 
 func TestCoreTelemetrySinkGenerationReplacementClearsOverload(t *testing.T) {
-	health, _ := edgetelemetry.NewHealthTracker(time.Now)
+	healthTracker, _ := edgetelemetry.NewHealthTracker(time.Now)
 	events, _ := edgetelemetry.NewEventLog(32)
 	defer events.Close()
-	sink, _ := NewCoreTelemetrySink(health, edgetelemetry.NewMetrics(), events)
+	sink, _ := NewCoreTelemetrySink(healthTracker, edgetelemetry.NewMetrics(), events)
 	for generation := uint64(1); generation <= 32; generation++ {
 		for _, kind := range []LifecycleType{LifecycleActivated, LifecycleStreamOverloaded} {
 			if err := sink.RecordRouteTelemetry(RouteTelemetryRecord{At: time.Now(), Type: kind, Generation: generation, MaximumStreams: 1, ActiveStreams: 1, CorrelationID: "correlation_test"}); err != nil {
@@ -273,14 +274,14 @@ func TestCoreTelemetrySinkGenerationReplacementClearsOverload(t *testing.T) {
 		if err := sink.RecordRouteTelemetry(RouteTelemetryRecord{At: time.Now(), Type: LifecycleStreamReleased, Generation: generation - 1, MaximumStreams: 1, CorrelationID: "correlation_test"}); err != nil {
 			t.Fatal(err)
 		}
-		if health.Snapshot().Dimensions.Route.Status != edgetelemetry.StatusDegraded {
+		if healthTracker.Snapshot().Dimensions.Route.Status != health.StatusDegraded {
 			t.Fatal("old release recovered current overloaded route")
 		}
 	}
 	if err := sink.RecordRouteTelemetry(RouteTelemetryRecord{At: time.Now(), Type: LifecycleActivated, Generation: 33, CorrelationID: "correlation_test"}); err != nil {
 		t.Fatal(err)
 	}
-	if sink.overloaded || health.Snapshot().Dimensions.Route.Status != edgetelemetry.StatusReady {
+	if sink.overloaded || healthTracker.Snapshot().Dimensions.Route.Status != health.StatusReady {
 		t.Fatal("replacement retained old exhaustion")
 	}
 }

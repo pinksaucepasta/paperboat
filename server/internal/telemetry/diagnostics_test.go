@@ -3,6 +3,8 @@ package telemetry
 import (
 	"bytes"
 	"encoding/json"
+	"github.com/pinksaucepasta/paperboat/shared/health"
+	"github.com/pinksaucepasta/paperboat/shared/telemetry/safe"
 	"strings"
 	"testing"
 	"time"
@@ -10,15 +12,15 @@ import (
 
 func TestDiagnosticsSnapshotIsBoundedDeterministicAndSecretSafe(t *testing.T) {
 	at := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
-	health, err := NewHealthTracker(func() time.Time { return at })
+	healthTracker, err := NewHealthTracker(func() time.Time { return at })
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := health.Update(HealthUpdate{
-		Dimension: DimensionRoute, Status: StatusDegraded, Code: "route_retrying",
+	if err := healthTracker.Update(health.HealthUpdate{
+		Dimension: health.DimensionRoute, Status: health.StatusDegraded, Code: "route_retrying",
 		Summary:      "The route is retrying after an origin failure at https://private.example.test.",
 		RepairAction: "Retry after 2026-08-31T12:01:00Z.", CorrelationID: "corr_diag",
-		Retry: RetryScheduled, NextRetryAt: at.Add(time.Minute),
+		Retry: health.RetryScheduled, NextRetryAt: at.Add(time.Minute),
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -34,16 +36,16 @@ func TestDiagnosticsSnapshotIsBoundedDeterministicAndSecretSafe(t *testing.T) {
 	for index := 0; index < 3; index++ {
 		if _, err := events.Record(EventInput{
 			At: at.Add(time.Duration(index) * time.Second), Severity: SeverityInfo,
-			Component: DimensionRoute, Name: "route_retry", Code: "route_retrying",
+			Component: health.DimensionRoute, Name: "route_retry", Code: "route_retrying",
 			Outcome: OutcomeStateChange, Message: "Bearer route-secret at https://private.example.test.",
-			CorrelationID: "corr_diag", IDs: SafeIDs{RouteID: "route_diag"}, Retry: RetryScheduled,
+			CorrelationID: "corr_diag", IDs: SafeIDs{RouteID: "route_diag"}, Retry: health.RetryScheduled,
 			NextRetryAt: at.Add(time.Minute),
 		}); err != nil {
 			t.Fatal(err)
 		}
 	}
 	diagnostics, err := NewDiagnostics(DiagnosticsConfig{
-		Metrics: metrics, Health: health, Events: events, Now: func() time.Time { return at }, MaximumEvents: 2,
+		Metrics: metrics, Health: healthTracker, Events: events, Now: func() time.Time { return at }, MaximumEvents: 2,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -66,7 +68,7 @@ func TestDiagnosticsSnapshotIsBoundedDeterministicAndSecretSafe(t *testing.T) {
 	if err := json.Unmarshal(first, &snapshot); err != nil {
 		t.Fatal(err)
 	}
-	if snapshot.Schema != DiagnosticsSchemaV1 || snapshot.RequestID != "req_diag" || snapshot.CorrelationID != "corr_diag" || snapshot.Retry != RetryScheduled || snapshot.NextRetryAt == nil || len(snapshot.Metrics) != 1 || len(snapshot.Events) != 2 || snapshot.DroppedEvents != 0 {
+	if snapshot.Schema != DiagnosticsSchemaV1 || snapshot.RequestID != "req_diag" || snapshot.CorrelationID != "corr_diag" || snapshot.Retry != health.RetryScheduled || snapshot.NextRetryAt == nil || len(snapshot.Metrics) != 1 || len(snapshot.Events) != 2 || snapshot.DroppedEvents != 0 {
 		t.Fatalf("snapshot=%+v", snapshot)
 	}
 	encoded := string(first)
@@ -75,18 +77,18 @@ func TestDiagnosticsSnapshotIsBoundedDeterministicAndSecretSafe(t *testing.T) {
 			t.Fatalf("snapshot leaked %q: %s", secret, encoded)
 		}
 	}
-	if !strings.Contains(encoded, RedactedValue) {
+	if !strings.Contains(encoded, safe.RedactedValue) {
 		t.Fatalf("snapshot did not retain redaction marker: %s", encoded)
 	}
 }
 
 func TestDiagnosticsEventLogCanBeAttachedAfterConstruction(t *testing.T) {
 	at := time.Unix(10, 0).UTC()
-	health, err := NewHealthTracker(func() time.Time { return at })
+	healthTracker, err := NewHealthTracker(func() time.Time { return at })
 	if err != nil {
 		t.Fatal(err)
 	}
-	diagnostics, err := NewDiagnostics(DiagnosticsConfig{Health: health, Now: func() time.Time { return at }})
+	diagnostics, err := NewDiagnostics(DiagnosticsConfig{Health: healthTracker, Now: func() time.Time { return at }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,8 +102,8 @@ func TestDiagnosticsEventLogCanBeAttachedAfterConstruction(t *testing.T) {
 	t.Cleanup(func() { _ = events.Close() })
 	diagnostics.SetEventLog(events)
 	if _, err := events.Record(EventInput{
-		At: at, Severity: SeverityInfo, Component: DimensionService, Name: "service_ready", Code: "ready",
-		Outcome: OutcomeSuccess, Message: "Service is ready.", CorrelationID: "corr_diag", Retry: RetryNone,
+		At: at, Severity: SeverityInfo, Component: health.DimensionService, Name: "service_ready", Code: "ready",
+		Outcome: OutcomeSuccess, Message: "Service is ready.", CorrelationID: "corr_diag", Retry: health.RetryNone,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -112,21 +114,21 @@ func TestDiagnosticsEventLogCanBeAttachedAfterConstruction(t *testing.T) {
 
 func TestDiagnosticsRejectsUnsafeIdentityAndOversizedConfiguration(t *testing.T) {
 	at := time.Unix(11, 0).UTC()
-	health, err := NewHealthTracker(func() time.Time { return at })
+	healthTracker, err := NewHealthTracker(func() time.Time { return at })
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := NewDiagnostics(DiagnosticsConfig{Health: health, MaximumBytes: 17 << 20}); ErrorCodeOf(err) != ErrorInvalidCapacity {
-		t.Fatalf("oversized config error=%v code=%v", err, ErrorCodeOf(err))
+	if _, err := NewDiagnostics(DiagnosticsConfig{Health: healthTracker, MaximumBytes: 17 << 20}); safe.ErrorCodeOf(err) != safe.ErrorInvalidCapacity {
+		t.Fatalf("oversized config error=%v code=%v", err, safe.ErrorCodeOf(err))
 	}
-	diagnostics, err := NewDiagnostics(DiagnosticsConfig{Health: health, Now: func() time.Time { return at }})
+	diagnostics, err := NewDiagnostics(DiagnosticsConfig{Health: healthTracker, Now: func() time.Time { return at }})
 	if err != nil {
 		t.Fatal(err)
 	}
 	snapshot := diagnostics.SnapshotWithIdentity("req_diag", "corr_diag")
 	snapshot.RequestID = "request/unsafe"
-	if _, err := snapshot.JSON(); ErrorCodeOf(err) != ErrorInvalidObservation {
-		t.Fatalf("unsafe identity error=%v code=%v", err, ErrorCodeOf(err))
+	if _, err := snapshot.JSON(); safe.ErrorCodeOf(err) != safe.ErrorInvalidObservation {
+		t.Fatalf("unsafe identity error=%v code=%v", err, safe.ErrorCodeOf(err))
 	}
 	if _, err := diagnostics.JSONWithIdentity("req_diag", "corr_diag"); err != nil {
 		t.Fatal(err)

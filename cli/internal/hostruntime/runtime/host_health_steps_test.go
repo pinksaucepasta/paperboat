@@ -5,11 +5,10 @@ package runtime
 import (
 	"context"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/shared/health"
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/health"
 )
 
 // The host's typed health (served at /diagnostics for pb doctor) is ready on a healthy host, names a stable

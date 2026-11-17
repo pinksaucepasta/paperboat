@@ -7,6 +7,7 @@ package diagnostics
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/shared/health"
 	"net/http"
 	"sort"
 	"strconv"
@@ -152,7 +153,7 @@ type Sources struct {
 	UsageErr       func() error
 	CarrierRunning func() bool
 	Traffic        func() []usage.CounterRecord
-	Health         func() edgetelemetry.HealthSnapshot
+	Health         func() health.HealthSnapshot
 	Lifecycle      func() []edgetelemetry.Event
 	TypedMetrics   func() []edgetelemetry.MetricSample
 	TelemetryDrops func() uint64
@@ -160,28 +161,28 @@ type Sources struct {
 }
 
 type Snapshot struct {
-	At                    time.Time                     `json:"at"`
-	Node                  node.Snapshot                 `json:"node"`
-	Control               Status                        `json:"control"`
-	Routes                Status                        `json:"routes"`
-	Usage                 Status                        `json:"usage"`
-	Carrier               Status                        `json:"carrier"`
-	Connectors            int                           `json:"connectors"`
-	ActiveStreams         uint32                        `json:"active_streams"`
-	AttachedRoutes        int                           `json:"attached_routes"`
-	SessionRoutes         int                           `json:"session_routes"`
-	RouteDrift            bool                          `json:"route_drift"`
-	UsagePendingReports   int                           `json:"usage_pending_reports"`
-	UsagePendingBytes     int                           `json:"usage_pending_bytes"`
-	UsageOldestAgeSeconds int64                         `json:"usage_oldest_age_seconds"`
-	Capacity              uint32                        `json:"connector_capacity"`
-	FailureCodes          []string                      `json:"failure_codes,omitempty"`
-	TrafficIngressBytes   uint64                        `json:"traffic_ingress_bytes"`
-	TrafficEgressBytes    uint64                        `json:"traffic_egress_bytes"`
-	Health                *edgetelemetry.HealthSnapshot `json:"health,omitempty"`
-	LifecycleEvents       []edgetelemetry.Event         `json:"lifecycle_events,omitempty"`
-	TelemetryDrops        uint64                        `json:"telemetry_drops"`
-	TypedMetrics          []edgetelemetry.MetricSample  `json:"-"`
+	At                    time.Time                    `json:"at"`
+	Node                  node.Snapshot                `json:"node"`
+	Control               Status                       `json:"control"`
+	Routes                Status                       `json:"routes"`
+	Usage                 Status                       `json:"usage"`
+	Carrier               Status                       `json:"carrier"`
+	Connectors            int                          `json:"connectors"`
+	ActiveStreams         uint32                       `json:"active_streams"`
+	AttachedRoutes        int                          `json:"attached_routes"`
+	SessionRoutes         int                          `json:"session_routes"`
+	RouteDrift            bool                         `json:"route_drift"`
+	UsagePendingReports   int                          `json:"usage_pending_reports"`
+	UsagePendingBytes     int                          `json:"usage_pending_bytes"`
+	UsageOldestAgeSeconds int64                        `json:"usage_oldest_age_seconds"`
+	Capacity              uint32                       `json:"connector_capacity"`
+	FailureCodes          []string                     `json:"failure_codes,omitempty"`
+	TrafficIngressBytes   uint64                       `json:"traffic_ingress_bytes"`
+	TrafficEgressBytes    uint64                       `json:"traffic_egress_bytes"`
+	Health                *health.HealthSnapshot       `json:"health,omitempty"`
+	LifecycleEvents       []edgetelemetry.Event        `json:"lifecycle_events,omitempty"`
+	TelemetryDrops        uint64                       `json:"telemetry_drops"`
+	TypedMetrics          []edgetelemetry.MetricSample `json:"-"`
 }
 
 func NewHandler(s Sources) (http.Handler, error) {
@@ -205,8 +206,8 @@ func snapshot(s Sources) Snapshot {
 	routeErr := s.RouteErr()
 	result := Snapshot{At: now, Node: s.Node(), Control: statusFor(s.ControlErr()), Routes: statusFor(routeErr), Usage: statusFor(s.UsageErr()), Carrier: runningStatus(s.CarrierRunning()), Connectors: s.Sessions(), ActiveStreams: s.ActiveStreams(), AttachedRoutes: s.RouteCount(), UsagePendingReports: pending.Reports, UsagePendingBytes: pending.Bytes, Capacity: manager.Capacity}
 	if s.Health != nil {
-		health := s.Health()
-		result.Health = &health
+		healthSnapshot := s.Health()
+		result.Health = &healthSnapshot
 	}
 	if s.Lifecycle != nil {
 		result.LifecycleEvents = s.Lifecycle()

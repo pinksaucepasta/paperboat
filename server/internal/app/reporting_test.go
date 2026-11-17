@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/shared/health"
 	"io"
 	"log/slog"
 	"net/http"
@@ -329,9 +330,9 @@ func TestTelemetryObserverDrainsBeforeReporterAdmissionCloses(t *testing.T) {
 	})
 	ref := supportreport.NewReference()
 	if _, err := events.Record(telemetry.EventInput{
-		At: time.Now().UTC(), Severity: telemetry.SeverityInfo, Component: telemetry.DimensionService,
+		At: time.Now().UTC(), Severity: telemetry.SeverityInfo, Component: health.DimensionService,
 		Name: "http_billing", Code: "shutdown_probe", Outcome: telemetry.OutcomeSuccess,
-		Message: "Operation completed.", CorrelationID: ref, Retry: telemetry.RetryNone,
+		Message: "Operation completed.", CorrelationID: ref, Retry: health.RetryNone,
 	}); err != nil {
 		t.Fatal(err)
 	}

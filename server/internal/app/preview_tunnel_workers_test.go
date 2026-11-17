@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/shared/health"
 	"strings"
 	"testing"
 	"time"
@@ -25,15 +26,15 @@ func TestCertificateTelemetryProjectsLifecycleOutcome(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer events.Close()
-	health, err := telemetry.NewHealthTracker(time.Now)
+	healthTracker, err := telemetry.NewHealthTracker(time.Now)
 	if err != nil {
 		t.Fatal(err)
 	}
-	producer := &telemetry.Producer{Metrics: telemetry.NewMetrics(), Events: events, Health: health, Now: time.Now}
+	producer := &telemetry.Producer{Metrics: telemetry.NewMetrics(), Events: events, Health: healthTracker, Now: time.Now}
 	observe := certificateTelemetry(producer)
 	observe(context.Background(), tunnelv1.CertificateTelemetryEvent{DomainID: "domain_3", CertificateID: "certificate_3", Operation: "renew", Outcome: "success"})
-	state := health.Snapshot().Dimensions.Certificate
-	if state.Status != telemetry.StatusReady || state.Code != "certificate_ready" {
+	state := healthTracker.Snapshot().Dimensions.Certificate
+	if state.Status != health.StatusReady || state.Code != "certificate_ready" {
 		t.Fatalf("certificate health = %+v", state)
 	}
 	if recorded := events.Snapshot(); len(recorded) != 1 || recorded[0].IDs.CertificateID != "certificate_3" || recorded[0].Outcome != telemetry.OutcomeSuccess {
@@ -143,11 +144,11 @@ func TestPreviewLeaseWorkerEmitsCorrelatedCleanupTelemetry(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer events.Close()
-	health, err := telemetry.NewHealthTracker(time.Now)
+	healthTracker, err := telemetry.NewHealthTracker(time.Now)
 	if err != nil {
 		t.Fatal(err)
 	}
-	producer := &telemetry.Producer{Metrics: telemetry.NewMetrics(), Events: events, Health: health, Now: time.Now}
+	producer := &telemetry.Producer{Metrics: telemetry.NewMetrics(), Events: events, Health: healthTracker, Now: time.Now}
 	stop := errors.New("database unavailable")
 	reconciler := &recordingPreviewLeaseReconciler{err: stop}
 	// A failed pass is recorded and retried, never returned: the worker ends only on cancellation (S1).
@@ -169,7 +170,7 @@ func TestPreviewLeaseWorkerEmitsCorrelatedCleanupTelemetry(t *testing.T) {
 	if len(recorded) != 1 || recorded[0].Name != "preview_cleanup" || recorded[0].Outcome != telemetry.OutcomeFailed || recorded[0].RequestID != reconciler.requestID || recorded[0].CorrelationID != reconciler.correlationID {
 		t.Fatalf("events=%+v", recorded)
 	}
-	if state := health.Snapshot().Dimensions.Route; state.Status != telemetry.StatusDegraded || state.Retry != telemetry.RetryScheduled {
+	if state := healthTracker.Snapshot().Dimensions.Route; state.Status != health.StatusDegraded || state.Retry != health.RetryScheduled {
 		t.Fatalf("route health=%+v", state)
 	}
 }

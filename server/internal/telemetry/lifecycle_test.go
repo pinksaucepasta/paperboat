@@ -1,6 +1,8 @@
 package telemetry
 
 import (
+	"github.com/pinksaucepasta/paperboat/shared/health"
+	"github.com/pinksaucepasta/paperboat/shared/telemetry/safe"
 	"strings"
 	"sync"
 	"testing"
@@ -16,7 +18,7 @@ func TestLifecycleEventAndLogAreTypedRedactedAndDeterministic(t *testing.T) {
 	}
 	event, err := NewLifecycleEvent(LifecycleEventInput{
 		ID: "evt_01", Cursor: "cur_0001", At: at, Severity: SeverityInfo,
-		Component: DimensionRoute, EventType: "route.activated", Code: "route_ready",
+		Component: health.DimensionRoute, EventType: "route.activated", Code: "route_ready",
 		Outcome: OutcomeStateChange, Message: "Route activated for https://user:password@example.test.",
 		RequestID: "request_01", CorrelationID: "corr_01",
 		ResourceKind: "route", ResourceID: "route_01", OperationID: "operation_01",
@@ -46,7 +48,7 @@ func TestLifecycleEventAndLogAreTypedRedactedAndDeterministic(t *testing.T) {
 	}
 
 	log, err := NewLogRecord(LogRecordInput{
-		OccurredAt: at, Level: SeverityWarn, Component: DimensionAccess, Code: "access_denied",
+		OccurredAt: at, Level: SeverityWarn, Component: health.DimensionAccess, Code: "access_denied",
 		Message: "Authorization: Bearer secret", RequestID: "req_01", CorrelationID: "cor_01",
 		Resource: ResourceIdentity{Kind: "tunnel", ID: "tun_01"}, Operation: OperationIdentity{Kind: "delete", ID: "op_01"},
 	})
@@ -54,39 +56,39 @@ func TestLifecycleEventAndLogAreTypedRedactedAndDeterministic(t *testing.T) {
 		t.Fatal(err)
 	}
 	logBody, err := log.JSON()
-	if err != nil || !strings.Contains(string(logBody), RedactedValue) || strings.Contains(string(logBody), "secret") {
+	if err != nil || !strings.Contains(string(logBody), safe.RedactedValue) || strings.Contains(string(logBody), "secret") {
 		t.Fatalf("redacted log = %s, err=%v", logBody, err)
 	}
 }
 
 func TestLifecycleRejectsMissingIdentitySecretKeysAndUnsafeControl(t *testing.T) {
 	base := LifecycleEventInput{
-		At: time.Unix(1, 0), Severity: SeverityInfo, Component: DimensionService,
+		At: time.Unix(1, 0), Severity: SeverityInfo, Component: health.DimensionService,
 		EventType: "service.started", Code: "ready", Outcome: OutcomeSuccess, Message: "Ready.",
 		RequestID: "req_01", CorrelationID: "cor_01", ResourceKind: "tunnel", ResourceID: "tun_01", OperationID: "op_01",
 	}
 	tests := []struct {
 		name string
 		edit func(*LifecycleEventInput)
-		code ErrorCode
+		code safe.ErrorCode
 	}{
-		{"missing request", func(input *LifecycleEventInput) { input.RequestID = "" }, ErrorIdentityRequired},
-		{"missing operation", func(input *LifecycleEventInput) { input.OperationID = "" }, ErrorIdentityRequired},
-		{"hostname resource", func(input *LifecycleEventInput) { input.ResourceID = "customer.example.com" }, ErrorIdentityRequired},
-		{"secret metadata key", func(input *LifecycleEventInput) { input.Metadata = map[string]any{"access_token": "never"} }, ErrorInvalidString},
-		{"mismatched resource aliases", func(input *LifecycleEventInput) { input.Resource = ResourceIdentity{Kind: "route", ID: "route_01"} }, ErrorIdentityMismatch},
+		{"missing request", func(input *LifecycleEventInput) { input.RequestID = "" }, safe.ErrorIdentityRequired},
+		{"missing operation", func(input *LifecycleEventInput) { input.OperationID = "" }, safe.ErrorIdentityRequired},
+		{"hostname resource", func(input *LifecycleEventInput) { input.ResourceID = "customer.example.com" }, safe.ErrorIdentityRequired},
+		{"secret metadata key", func(input *LifecycleEventInput) { input.Metadata = map[string]any{"access_token": "never"} }, safe.ErrorInvalidString},
+		{"mismatched resource aliases", func(input *LifecycleEventInput) { input.Resource = ResourceIdentity{Kind: "route", ID: "route_01"} }, safe.ErrorIdentityMismatch},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			input := base
 			test.edit(&input)
-			if _, err := NewLifecycleEvent(input); errorCode(err) != test.code {
+			if _, err := NewLifecycleEvent(input); safe.ErrorCodeOf(err) != test.code {
 				t.Fatalf("error = %v, want %s", err, test.code)
 			}
 		})
 	}
 	if _, err := NewLogRecord(LogRecordInput{
-		OccurredAt: time.Unix(1, 0), Level: SeverityInfo, Component: DimensionService, Code: "ready", Message: "bad\x00line",
+		OccurredAt: time.Unix(1, 0), Level: SeverityInfo, Component: health.DimensionService, Code: "ready", Message: "bad\x00line",
 		RequestID: "req_01", CorrelationID: "cor_01", ResourceKind: "tunnel", ResourceID: "tun_01", OperationID: "op_01",
 	}); err != nil {
 		t.Fatalf("control characters should be normalized safely: %v", err)
@@ -96,7 +98,7 @@ func TestLifecycleRejectsMissingIdentitySecretKeysAndUnsafeControl(t *testing.T)
 func TestLifecycleEventAndLogBuffersAreBoundedAndRaceSafe(t *testing.T) {
 	at := time.Unix(1, 0)
 	eventInput := LifecycleEventInput{
-		At: at, Severity: SeverityInfo, Component: DimensionService, EventType: "service.started", Code: "ready", Outcome: OutcomeSuccess, Message: "Ready.",
+		At: at, Severity: SeverityInfo, Component: health.DimensionService, EventType: "service.started", Code: "ready", Outcome: OutcomeSuccess, Message: "Ready.",
 		RequestID: "req_01", CorrelationID: "cor_01", ResourceKind: "tunnel", ResourceID: "tun_01", OperationID: "op_01",
 	}
 	events, err := NewLifecycleEventLog(8)
@@ -114,7 +116,7 @@ func TestLifecycleEventAndLogBuffersAreBoundedAndRaceSafe(t *testing.T) {
 			defer group.Done()
 			for count := 0; count < 50; count++ {
 				_, _ = events.Record(eventInput)
-				_, _ = logs.Record(LogRecordInput{OccurredAt: at, Level: SeverityInfo, Component: DimensionService, Code: "ready", Message: "Ready.", RequestID: "req_01", CorrelationID: "cor_01", ResourceKind: "tunnel", ResourceID: "tun_01", OperationID: "op_01"})
+				_, _ = logs.Record(LogRecordInput{OccurredAt: at, Level: SeverityInfo, Component: health.DimensionService, Code: "ready", Message: "Ready.", RequestID: "req_01", CorrelationID: "cor_01", ResourceKind: "tunnel", ResourceID: "tun_01", OperationID: "op_01"})
 				_ = events.Snapshot()
 				_ = logs.Snapshot()
 			}

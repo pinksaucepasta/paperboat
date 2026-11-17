@@ -3,6 +3,7 @@ package supportreport
 import (
 	"context"
 	"encoding/json"
+	"github.com/pinksaucepasta/paperboat/shared/health"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -182,7 +183,7 @@ func TestLifecycleFailureRecoveryUsesSameLocalEvents(t *testing.T) {
 	events.SetObserver(s.ObserveEvent)
 	ref := NewReference()
 	for _, outcome := range []telemetry.EventOutcome{telemetry.OutcomeFailed, telemetry.OutcomeSuccess} {
-		_, err = events.Record(telemetry.EventInput{At: time.Now(), Severity: telemetry.SeverityInfo, Component: telemetry.DimensionService, Name: "connector_reconnect", Code: "connection_changed", Outcome: outcome, Message: "Connection state changed.", CorrelationID: ref, Retry: telemetry.RetryNone})
+		_, err = events.Record(telemetry.EventInput{At: time.Now(), Severity: telemetry.SeverityInfo, Component: health.DimensionService, Name: "connector_reconnect", Code: "connection_changed", Outcome: outcome, Message: "Connection state changed.", CorrelationID: ref, Retry: health.RetryNone})
 		if err != nil {
 			t.Fatal(err)
 		}

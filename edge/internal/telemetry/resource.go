@@ -2,6 +2,8 @@ package telemetry
 
 import (
 	"encoding/json"
+	"github.com/pinksaucepasta/paperboat/shared/health"
+	"github.com/pinksaucepasta/paperboat/shared/telemetry/safe"
 	"math"
 	"regexp"
 	"sort"
@@ -35,8 +37,8 @@ var (
 )
 
 type CanonicalHealthDimension struct {
-	Status HealthStatus `json:"status"`
-	Code   string       `json:"code"`
+	Status health.HealthStatus `json:"status"`
+	Code   string              `json:"code"`
 }
 
 type CanonicalHealthDimensions struct {
@@ -51,50 +53,50 @@ type CanonicalHealthDimensions struct {
 	Update      CanonicalHealthDimension `json:"update"`
 }
 
-func (d CanonicalHealthDimensions) Get(dimension Dimension) CanonicalHealthDimension {
+func (d CanonicalHealthDimensions) Get(dimension health.Dimension) CanonicalHealthDimension {
 	switch dimension {
-	case DimensionService:
+	case health.DimensionService:
 		return d.Service
-	case DimensionEdge:
+	case health.DimensionEdge:
 		return d.Edge
-	case DimensionConfig:
+	case health.DimensionConfig:
 		return d.Config
-	case DimensionRoute:
+	case health.DimensionRoute:
 		return d.Route
-	case DimensionOrigin:
+	case health.DimensionOrigin:
 		return d.Origin
-	case DimensionDNS:
+	case health.DimensionDNS:
 		return d.DNS
-	case DimensionCertificate:
+	case health.DimensionCertificate:
 		return d.Certificate
-	case DimensionAccess:
+	case health.DimensionAccess:
 		return d.Access
-	case DimensionUpdate:
+	case health.DimensionUpdate:
 		return d.Update
 	default:
 		return CanonicalHealthDimension{}
 	}
 }
 
-func (d *CanonicalHealthDimensions) set(dimension Dimension, value CanonicalHealthDimension) {
+func (d *CanonicalHealthDimensions) set(dimension health.Dimension, value CanonicalHealthDimension) {
 	switch dimension {
-	case DimensionService:
+	case health.DimensionService:
 		d.Service = value
-	case DimensionEdge:
+	case health.DimensionEdge:
 		d.Edge = value
-	case DimensionConfig:
+	case health.DimensionConfig:
 		d.Config = value
-	case DimensionRoute:
+	case health.DimensionRoute:
 		d.Route = value
-	case DimensionOrigin:
+	case health.DimensionOrigin:
 		d.Origin = value
-	case DimensionDNS:
+	case health.DimensionDNS:
 		d.DNS = value
-	case DimensionCertificate:
+	case health.DimensionCertificate:
 		d.Certificate = value
-	case DimensionAccess:
+	case health.DimensionAccess:
 		d.Access = value
-	case DimensionUpdate:
+	case health.DimensionUpdate:
 		d.Update = value
 	}
 }
@@ -125,9 +127,9 @@ type HealthResource struct {
 	CorrelationID string                   `json:"correlation_id"`
 }
 
-func ProjectHealthResource(snapshot HealthSnapshot, binding HealthResourceBinding) (HealthResource, error) {
-	if snapshot.Schema != HealthSchemaV1 {
-		return HealthResource{}, newError(ErrorInvalidObservation, "project edge health resource")
+func ProjectHealthResource(snapshot health.HealthSnapshot, binding HealthResourceBinding) (HealthResource, error) {
+	if snapshot.Schema != health.HealthSchemaV1 {
+		return HealthResource{}, safe.NewError(safe.ErrorInvalidObservation, "project edge health resource")
 	}
 	return NewHealthResource(HealthResourceInput{
 		ResourceKind:  binding.ResourceKind,
@@ -140,34 +142,34 @@ func ProjectHealthResource(snapshot HealthSnapshot, binding HealthResourceBindin
 type HealthResourceInput struct {
 	ResourceKind  string
 	ResourceID    string
-	Snapshot      HealthSnapshot
+	Snapshot      health.HealthSnapshot
 	CorrelationID string
 }
 
 func NewHealthResource(input HealthResourceInput) (HealthResource, error) {
 	if !validHealthResourceKind(input.ResourceKind) || !resourceIDPattern.MatchString(input.ResourceID) {
-		return HealthResource{}, newError(ErrorInvalidID, "construct health resource")
+		return HealthResource{}, safe.NewError(safe.ErrorInvalidID, "construct health resource")
 	}
 	snapshot := input.Snapshot
-	if snapshot.Schema != "" && snapshot.Schema != HealthSchemaV1 {
-		return HealthResource{}, newError(ErrorInvalidObservation, "construct health resource")
+	if snapshot.Schema != "" && snapshot.Schema != health.HealthSchemaV1 {
+		return HealthResource{}, safe.NewError(safe.ErrorInvalidObservation, "construct health resource")
 	}
-	if snapshot.UpdatedAt.IsZero() || snapshot.Overall.Since.IsZero() || !stableCodePattern.MatchString(snapshot.Overall.Code) {
-		return HealthResource{}, newError(ErrorInvalidObservation, "construct health resource")
+	if snapshot.UpdatedAt.IsZero() || snapshot.Overall.Since.IsZero() || !safe.StableCode(snapshot.Overall.Code) {
+		return HealthResource{}, safe.NewError(safe.ErrorInvalidObservation, "construct health resource")
 	}
 	correlationID := input.CorrelationID
 	if correlationID == "" {
 		correlationID = snapshot.Overall.CorrelationID
 	}
 	if input.CorrelationID != "" && snapshot.Overall.CorrelationID != "" && input.CorrelationID != snapshot.Overall.CorrelationID {
-		return HealthResource{}, newError(ErrorInvalidID, "construct health resource")
+		return HealthResource{}, safe.NewError(safe.ErrorInvalidID, "construct health resource")
 	}
 	if !resourceIDPattern.MatchString(correlationID) {
-		return HealthResource{}, newError(ErrorInvalidID, "construct health resource")
+		return HealthResource{}, safe.NewError(safe.ErrorInvalidID, "construct health resource")
 	}
 	var nextRetryAt *time.Time
 	if snapshot.Overall.NextRetryAt != nil {
-		value := normalizeTime(*snapshot.Overall.NextRetryAt)
+		value := safe.NormalizeTime(*snapshot.Overall.NextRetryAt)
 		nextRetryAt = &value
 	}
 	resource := HealthResource{
@@ -177,13 +179,13 @@ func NewHealthResource(input HealthResourceInput) (HealthResource, error) {
 		ResourceID:    input.ResourceID,
 		OverallCode:   snapshot.Overall.Code,
 		Summary:       snapshot.Overall.Summary,
-		Since:         normalizeTime(snapshot.Overall.Since),
-		Retrying:      snapshot.Overall.Retry == RetryScheduled,
+		Since:         safe.NormalizeTime(snapshot.Overall.Since),
+		Retrying:      snapshot.Overall.Retry == health.RetryScheduled,
 		NextRetryAt:   nextRetryAt,
 		RepairAction:  snapshot.Overall.RepairAction,
 		CorrelationID: correlationID,
 	}
-	for _, dimension := range dimensionOrder {
+	for _, dimension := range health.Dimensions() {
 		state := snapshot.Dimensions.Get(dimension)
 		resource.Dimensions.set(dimension, CanonicalHealthDimension{Status: state.Status, Code: state.Code})
 	}
@@ -193,18 +195,14 @@ func NewHealthResource(input HealthResourceInput) (HealthResource, error) {
 	return resource, nil
 }
 
-func (s HealthSnapshot) AsResource(resourceKind, resourceID, correlationID string) (HealthResource, error) {
-	return NewHealthResource(HealthResourceInput{ResourceKind: resourceKind, ResourceID: resourceID, Snapshot: s, CorrelationID: correlationID})
-}
-
 func (r HealthResource) Validate() error {
-	if r.Schema != ContractSchemaV1 || r.Kind != KindHealth || !validHealthResourceKind(r.ResourceKind) || !resourceIDPattern.MatchString(r.ResourceID) || !stableCodePattern.MatchString(r.OverallCode) || r.Since.IsZero() || !resourceIDPattern.MatchString(r.CorrelationID) || r.Summary == "" || r.RepairAction == "" || r.Retrying != (r.NextRetryAt != nil) || (r.NextRetryAt != nil && r.NextRetryAt.IsZero()) {
-		return newError(ErrorInvalidObservation, "validate health resource")
+	if r.Schema != ContractSchemaV1 || r.Kind != KindHealth || !validHealthResourceKind(r.ResourceKind) || !resourceIDPattern.MatchString(r.ResourceID) || !safe.StableCode(r.OverallCode) || r.Since.IsZero() || !resourceIDPattern.MatchString(r.CorrelationID) || r.Summary == "" || r.RepairAction == "" || r.Retrying != (r.NextRetryAt != nil) || (r.NextRetryAt != nil && r.NextRetryAt.IsZero()) {
+		return safe.NewError(safe.ErrorInvalidObservation, "validate health resource")
 	}
-	for _, dimension := range dimensionOrder {
+	for _, dimension := range health.Dimensions() {
 		state := r.Dimensions.Get(dimension)
-		if !validHealthStatus(state.Status) || !stableCodePattern.MatchString(state.Code) {
-			return newError(ErrorInvalidObservation, "validate health resource")
+		if !health.ValidHealthStatus(state.Status) || !safe.StableCode(state.Code) {
+			return safe.NewError(safe.ErrorInvalidObservation, "validate health resource")
 		}
 	}
 	return nil
@@ -255,20 +253,20 @@ type CanonicalEventInput struct {
 }
 
 func NewCanonicalEvent(input CanonicalEventInput) (CanonicalEventResource, error) {
-	if !resourceIDPattern.MatchString(input.ID) || !resourceIDPattern.MatchString(input.Cursor) || !canonicalEventTypePattern.MatchString(input.EventType) || !validEventResourceKind(input.ResourceKind) || !resourceIDPattern.MatchString(input.ResourceID) || normalizeTime(input.OccurredAt).IsZero() || !validActorType(input.ActorType) || !resourceIDPattern.MatchString(input.ActorID) || !resourceIDPattern.MatchString(input.CorrelationID) {
-		return CanonicalEventResource{}, newError(ErrorInvalidEvent, "construct canonical event")
+	if !resourceIDPattern.MatchString(input.ID) || !resourceIDPattern.MatchString(input.Cursor) || !canonicalEventTypePattern.MatchString(input.EventType) || !validEventResourceKind(input.ResourceKind) || !resourceIDPattern.MatchString(input.ResourceID) || safe.NormalizeTime(input.OccurredAt).IsZero() || !validActorType(input.ActorType) || !resourceIDPattern.MatchString(input.ActorID) || !resourceIDPattern.MatchString(input.CorrelationID) {
+		return CanonicalEventResource{}, safe.NewError(safe.ErrorInvalidEvent, "construct canonical event")
 	}
 	metadata, err := safeMetadata(input.SafeMetadata)
 	if err != nil {
 		return CanonicalEventResource{}, err
 	}
-	event := CanonicalEventResource{Schema: ContractSchemaV1, Kind: KindEvent, ID: input.ID, Cursor: input.Cursor, EventType: input.EventType, ResourceKind: input.ResourceKind, ResourceID: input.ResourceID, OccurredAt: normalizeTime(input.OccurredAt), Actor: CanonicalActor{Type: input.ActorType, ID: input.ActorID}, CorrelationID: input.CorrelationID, SafeMetadata: metadata}
+	event := CanonicalEventResource{Schema: ContractSchemaV1, Kind: KindEvent, ID: input.ID, Cursor: input.Cursor, EventType: input.EventType, ResourceKind: input.ResourceKind, ResourceID: input.ResourceID, OccurredAt: safe.NormalizeTime(input.OccurredAt), Actor: CanonicalActor{Type: input.ActorType, ID: input.ActorID}, CorrelationID: input.CorrelationID, SafeMetadata: metadata}
 	return event, event.Validate()
 }
 
 func (e CanonicalEventResource) Validate() error {
 	if e.Schema != ContractSchemaV1 || e.Kind != KindEvent || !resourceIDPattern.MatchString(e.ID) || !resourceIDPattern.MatchString(e.Cursor) || !canonicalEventTypePattern.MatchString(e.EventType) || !validEventResourceKind(e.ResourceKind) || !resourceIDPattern.MatchString(e.ResourceID) || e.OccurredAt.IsZero() || !validActorType(e.Actor.Type) || !resourceIDPattern.MatchString(e.Actor.ID) || !resourceIDPattern.MatchString(e.CorrelationID) {
-		return newError(ErrorInvalidEvent, "validate canonical event")
+		return safe.NewError(safe.ErrorInvalidEvent, "validate canonical event")
 	}
 	_, err := safeMetadata(e.SafeMetadata)
 	return err
@@ -310,10 +308,10 @@ type LogEntryInput struct {
 }
 
 func NewLogEntry(input LogEntryInput) (LogEntry, error) {
-	if !resourceIDPattern.MatchString(input.ID) || !validEventSeverity(input.Level) || input.Component == "" || len(input.Component) > 40 || !canonicalEventTypePattern.MatchString(input.Code) || !resourceIDPattern.MatchString(input.CorrelationID) || !resourceIDPattern.MatchString(input.Cursor) || normalizeTime(input.OccurredAt).IsZero() {
-		return LogEntry{}, newError(ErrorInvalidEvent, "construct log entry")
+	if !resourceIDPattern.MatchString(input.ID) || !validEventSeverity(input.Level) || input.Component == "" || len(input.Component) > 40 || !canonicalEventTypePattern.MatchString(input.Code) || !resourceIDPattern.MatchString(input.CorrelationID) || !resourceIDPattern.MatchString(input.Cursor) || safe.NormalizeTime(input.OccurredAt).IsZero() {
+		return LogEntry{}, safe.NewError(safe.ErrorInvalidEvent, "construct log entry")
 	}
-	message, err := safeBoundedString(input.Message, 1000, true)
+	message, err := safe.BoundedString(input.Message, 1000, true)
 	if err != nil {
 		return LogEntry{}, err
 	}
@@ -321,17 +319,17 @@ func NewLogEntry(input LogEntryInput) (LogEntry, error) {
 	if err != nil {
 		return LogEntry{}, err
 	}
-	entry := LogEntry{Schema: ContractSchemaV1, Kind: KindLog, ID: input.ID, TunnelID: input.TunnelID, PreviewID: input.PreviewID, RouteID: input.RouteID, ConnectorID: input.ConnectorID, SessionID: input.SessionID, Level: input.Level, Component: input.Component, Code: input.Code, Message: message, Metadata: metadata, CorrelationID: input.CorrelationID, OccurredAt: normalizeTime(input.OccurredAt), Cursor: input.Cursor}
+	entry := LogEntry{Schema: ContractSchemaV1, Kind: KindLog, ID: input.ID, TunnelID: input.TunnelID, PreviewID: input.PreviewID, RouteID: input.RouteID, ConnectorID: input.ConnectorID, SessionID: input.SessionID, Level: input.Level, Component: input.Component, Code: input.Code, Message: message, Metadata: metadata, CorrelationID: input.CorrelationID, OccurredAt: safe.NormalizeTime(input.OccurredAt), Cursor: input.Cursor}
 	return entry, entry.Validate()
 }
 
 func (e LogEntry) Validate() error {
 	if e.Schema != ContractSchemaV1 || e.Kind != KindLog || !resourceIDPattern.MatchString(e.ID) || !validEventSeverity(e.Level) || e.Component == "" || len(e.Component) > 40 || !canonicalEventTypePattern.MatchString(e.Code) || e.Message == "" || !resourceIDPattern.MatchString(e.CorrelationID) || e.OccurredAt.IsZero() || !resourceIDPattern.MatchString(e.Cursor) {
-		return newError(ErrorInvalidEvent, "validate log entry")
+		return safe.NewError(safe.ErrorInvalidEvent, "validate log entry")
 	}
 	for _, id := range []string{e.TunnelID, e.PreviewID, e.RouteID, e.ConnectorID, e.SessionID} {
 		if id != "" && !resourceIDPattern.MatchString(id) {
-			return newError(ErrorInvalidID, "validate log entry")
+			return safe.NewError(safe.ErrorInvalidID, "validate log entry")
 		}
 	}
 	_, err := safeMetadata(e.Metadata)
@@ -341,22 +339,22 @@ func (e LogEntry) Validate() error {
 func (e LogEntry) JSON() ([]byte, error) { return json.Marshal(e) }
 
 type ErrorResource struct {
-	Schema        string     `json:"schema"`
-	Kind          string     `json:"kind"`
-	Code          string     `json:"code"`
-	Component     Dimension  `json:"component"`
-	Message       string     `json:"message"`
-	Outcome       string     `json:"outcome"`
-	Retryable     bool       `json:"retryable"`
-	RetryAt       *time.Time `json:"retry_at"`
-	RepairAction  string     `json:"repair_action"`
-	RequestID     string     `json:"request_id"`
-	CorrelationID string     `json:"correlation_id"`
+	Schema        string           `json:"schema"`
+	Kind          string           `json:"kind"`
+	Code          string           `json:"code"`
+	Component     health.Dimension `json:"component"`
+	Message       string           `json:"message"`
+	Outcome       string           `json:"outcome"`
+	Retryable     bool             `json:"retryable"`
+	RetryAt       *time.Time       `json:"retry_at"`
+	RepairAction  string           `json:"repair_action"`
+	RequestID     string           `json:"request_id"`
+	CorrelationID string           `json:"correlation_id"`
 }
 
 type ErrorResourceInput struct {
 	Code          string
-	Component     Dimension
+	Component     health.Dimension
 	Message       string
 	Outcome       string
 	Retryable     bool
@@ -367,28 +365,28 @@ type ErrorResourceInput struct {
 }
 
 func NewErrorResource(input ErrorResourceInput) (ErrorResource, error) {
-	message, err := safeBoundedString(input.Message, 1000, true)
+	message, err := safe.BoundedString(input.Message, 1000, true)
 	if err != nil {
 		return ErrorResource{}, err
 	}
-	repair, err := safeBoundedString(input.RepairAction, 1000, true)
+	repair, err := safe.BoundedString(input.RepairAction, 1000, true)
 	if err != nil {
 		return ErrorResource{}, err
 	}
-	if !stableCodePattern.MatchString(input.Code) || !validDimension(input.Component) || (input.Outcome != "unchanged" && input.Outcome != "changed" && input.Outcome != "uncertain") || !resourceIDPattern.MatchString(input.RequestID) || !resourceIDPattern.MatchString(input.CorrelationID) {
-		return ErrorResource{}, newError(ErrorInvalidEvent, "construct error resource")
+	if !safe.StableCode(input.Code) || !health.ValidDimension(input.Component) || (input.Outcome != "unchanged" && input.Outcome != "changed" && input.Outcome != "uncertain") || !resourceIDPattern.MatchString(input.RequestID) || !resourceIDPattern.MatchString(input.CorrelationID) {
+		return ErrorResource{}, safe.NewError(safe.ErrorInvalidEvent, "construct error resource")
 	}
 	result := ErrorResource{Schema: ContractSchemaV1, Kind: KindError, Code: input.Code, Component: input.Component, Message: message, Outcome: input.Outcome, Retryable: input.Retryable, RepairAction: repair, RequestID: input.RequestID, CorrelationID: input.CorrelationID}
 	if !input.RetryAt.IsZero() {
-		retryAt := normalizeTime(input.RetryAt)
+		retryAt := safe.NormalizeTime(input.RetryAt)
 		result.RetryAt = &retryAt
 	}
 	return result, result.Validate()
 }
 
 func (e ErrorResource) Validate() error {
-	if e.Schema != ContractSchemaV1 || e.Kind != KindError || !stableCodePattern.MatchString(e.Code) || !validDimension(e.Component) || (e.Outcome != "unchanged" && e.Outcome != "changed" && e.Outcome != "uncertain") || e.Message == "" || e.RepairAction == "" || !resourceIDPattern.MatchString(e.RequestID) || !resourceIDPattern.MatchString(e.CorrelationID) {
-		return newError(ErrorInvalidEvent, "validate error resource")
+	if e.Schema != ContractSchemaV1 || e.Kind != KindError || !safe.StableCode(e.Code) || !health.ValidDimension(e.Component) || (e.Outcome != "unchanged" && e.Outcome != "changed" && e.Outcome != "uncertain") || e.Message == "" || e.RepairAction == "" || !resourceIDPattern.MatchString(e.RequestID) || !resourceIDPattern.MatchString(e.CorrelationID) {
+		return safe.NewError(safe.ErrorInvalidEvent, "validate error resource")
 	}
 	return nil
 }
@@ -396,11 +394,11 @@ func (e ErrorResource) Validate() error {
 func (e ErrorResource) JSON() ([]byte, error) { return json.Marshal(e) }
 
 func ProjectEventResource(event Event, binding EventResourceBinding) (EventResource, error) {
-	if event.Schema != EventSchemaV1 || !stableCodePattern.MatchString(event.Name) || !validWireValue(event.CorrelationID, 3, 128) || event.At.IsZero() {
-		return EventResource{}, newError(ErrorInvalidEvent, "project edge event resource")
+	if event.Schema != EventSchemaV1 || !safe.StableCode(event.Name) || !validWireValue(event.CorrelationID, 3, 128) || event.At.IsZero() {
+		return EventResource{}, safe.NewError(safe.ErrorInvalidEvent, "project edge event resource")
 	}
 	if !validEventResourceKind(binding.ResourceKind) || !validWireValue(binding.ID, 3, 128) || !validWireValue(binding.Cursor, 1, 1000) || !validWireValue(binding.ResourceID, 3, 128) || !validActorType(binding.Actor.Type) || !validWireValue(binding.Actor.ID, 3, 128) {
-		return EventResource{}, newError(ErrorInvalidID, "project edge event resource")
+		return EventResource{}, safe.NewError(safe.ErrorInvalidID, "project edge event resource")
 	}
 	metadata := make(map[string]any, 14)
 	addSafeMetadata(metadata, "account_id", event.IDs.AccountID)
@@ -434,7 +432,7 @@ func ProjectEventResource(event Event, binding EventResourceBinding) (EventResou
 	result := EventResource{
 		Schema: ContractSchemaV1, Kind: KindEvent, ID: binding.ID, Cursor: binding.Cursor,
 		EventType: event.Name, ResourceKind: binding.ResourceKind, ResourceID: binding.ResourceID,
-		OccurredAt: normalizeTime(event.At), Actor: binding.Actor, CorrelationID: event.CorrelationID,
+		OccurredAt: safe.NormalizeTime(event.At), Actor: binding.Actor, CorrelationID: event.CorrelationID,
 		SafeMetadata: metadata,
 	}
 	return result, result.Validate()
@@ -477,7 +475,7 @@ func validWireValue(value string, minimum, maximum int) bool {
 
 func safeMetadata(input map[string]any) (map[string]any, error) {
 	if len(input) > 64 {
-		return nil, newError(ErrorInvalidString, "construct safe metadata")
+		return nil, safe.NewError(safe.ErrorInvalidString, "construct safe metadata")
 	}
 	result, err := sanitizeMetadataMap(input, 0)
 	if err != nil {
@@ -488,7 +486,7 @@ func safeMetadata(input map[string]any) (map[string]any, error) {
 
 func sanitizeMetadataMap(input map[string]any, depth int) (map[string]any, error) {
 	if depth > 8 || len(input) > 64 {
-		return nil, newError(ErrorInvalidString, "construct safe metadata")
+		return nil, safe.NewError(safe.ErrorInvalidString, "construct safe metadata")
 	}
 	result := make(map[string]any, len(input))
 	keys := make([]string, 0, len(input))
@@ -498,7 +496,7 @@ func sanitizeMetadataMap(input map[string]any, depth int) (map[string]any, error
 	sort.Strings(keys)
 	for _, key := range keys {
 		if key == "" || len(key) > 128 || metadataKeyPattern.MatchString(key) {
-			return nil, newError(ErrorInvalidString, "construct safe metadata")
+			return nil, safe.NewError(safe.ErrorInvalidString, "construct safe metadata")
 		}
 		value, err := sanitizeMetadataValue(input[key], depth+1)
 		if err != nil {
@@ -514,7 +512,7 @@ func sanitizeMetadataValue(value any, depth int) (any, error) {
 	case nil:
 		return nil, nil
 	case string:
-		return safeBoundedString(typed, 1000, false)
+		return safe.BoundedString(typed, 1000, false)
 	case bool:
 		return typed, nil
 	case int:
@@ -539,17 +537,17 @@ func sanitizeMetadataValue(value any, depth int) (any, error) {
 		return typed, nil
 	case float32:
 		if math.IsNaN(float64(typed)) || math.IsInf(float64(typed), 0) {
-			return nil, newError(ErrorInvalidString, "construct safe metadata")
+			return nil, safe.NewError(safe.ErrorInvalidString, "construct safe metadata")
 		}
 		return typed, nil
 	case float64:
 		if math.IsNaN(typed) || math.IsInf(typed, 0) {
-			return nil, newError(ErrorInvalidString, "construct safe metadata")
+			return nil, safe.NewError(safe.ErrorInvalidString, "construct safe metadata")
 		}
 		return typed, nil
 	case []any:
 		if len(typed) > 64 {
-			return nil, newError(ErrorInvalidString, "construct safe metadata")
+			return nil, safe.NewError(safe.ErrorInvalidString, "construct safe metadata")
 		}
 		result := make([]any, len(typed))
 		for index, item := range typed {
@@ -563,7 +561,7 @@ func sanitizeMetadataValue(value any, depth int) (any, error) {
 	case map[string]any:
 		return sanitizeMetadataMap(typed, depth)
 	default:
-		return nil, newError(ErrorInvalidString, "construct safe metadata")
+		return nil, safe.NewError(safe.ErrorInvalidString, "construct safe metadata")
 	}
 }
 
