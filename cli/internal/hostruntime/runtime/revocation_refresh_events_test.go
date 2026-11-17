@@ -4,10 +4,13 @@ package runtime
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/auth"
@@ -59,4 +62,62 @@ func waitForRefreshes(t *testing.T, count *atomic.Int32, want int32) {
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
+}
+
+type revocationRoundTripper func(*http.Request) (*http.Response, error)
+
+func (f revocationRoundTripper) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+// A healthy hub: the 15 s poll base does not poll; the 5-minute safety refresh and a push do.
+func TestRevocationRefreshFiveMinuteSafety(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		changes := make(chan map[machineevents.Topic]int64)
+		hub, err := machineevents.NewWithWaiter(func(ctx context.Context, _ map[machineevents.Topic]int64) (map[machineevents.Topic]int64, error) {
+			select {
+			case moved := <-changes:
+				return moved, nil
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		events := hub.Subscribe(machineevents.TopicMachineAccess)
+		if err := hub.Start(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		defer hub.Shutdown(context.Background())
+		changes <- nil
+		synctest.Wait()
+		var fetches atomic.Int32
+		service, err := newRevocationRefreshService("https://control.example.test/v1/helper-trust/revocations", revocationTestAuth{}, revocationTestAuth{}, func() (string, error) { return "operation_test", nil }, auth.NewRevocationCache(), revocationRoundTripper(func(r *http.Request) (*http.Response, error) {
+			fetches.Add(1)
+			return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"jtis":[]}`)), Header: make(http.Header), Request: r}, nil
+		}), 15*time.Second)
+		if err != nil {
+			t.Fatal(err)
+		}
+		service.events = events
+		if err := service.Start(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		defer service.Shutdown(context.Background())
+		synctest.Wait()
+		time.Sleep(5*time.Minute - time.Second)
+		synctest.Wait()
+		if fetches.Load() != 1 {
+			t.Fatalf("early refresh: %d", fetches.Load())
+		}
+		time.Sleep(time.Second)
+		synctest.Wait()
+		if fetches.Load() != 2 {
+			t.Fatalf("five minute refreshes: %d", fetches.Load())
+		}
+		changes <- map[machineevents.Topic]int64{machineevents.TopicMachineAccess: 1}
+		synctest.Wait()
+		if fetches.Load() != 3 {
+			t.Fatalf("push refreshes: %d", fetches.Load())
+		}
+	})
 }

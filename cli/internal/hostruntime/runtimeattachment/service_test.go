@@ -330,6 +330,8 @@ type runtimeCarrierOptions struct {
 	confirmActive bool
 	// failDial fails a carrier dial to edgeID (dial counts that edge's dials from 1).
 	failDial func(edgeID string, dial int) bool
+	// wake is the service's Config.Wake.
+	wake <-chan struct{}
 }
 
 type runtimeCarrierHarness struct {
@@ -384,6 +386,7 @@ func startRuntimeCarrier(t *testing.T, ctx context.Context, options runtimeCarri
 		return &http.Response{StatusCode: options.status(), Header: make(http.Header), Body: io.NopCloser(bytes.NewReader(payload)), Request: request}, nil
 	})
 	service := newRuntimeAttachmentTestService(t, transport)
+	service.config.Wake = options.wake
 	h.service = service
 	store, err := identity.Open(identity.Config{StateRoot: service.config.StateRoot})
 	if err != nil {
@@ -570,6 +573,34 @@ func TestHealthyRuntimeCarrierDoesNotAskForItsAttachmentEverySecond(t *testing.T
 	}
 	if err := edge.Ping(ctx); err != nil {
 		t.Fatal("carrier unusable", err)
+	}
+}
+
+// A preview or private-route event reaches the poll loop through Config.Wake: the next tick asks the
+// control plane at once, not after the 5-minute recheck.
+func TestHealthyRuntimeCarrierAsksAtOnceWhenWakeFires(t *testing.T) {
+	var calls atomic.Int32
+	wake := make(chan struct{}, 1)
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	h := startRuntimeCarrier(t, ctx, runtimeCarrierOptions{expiry: time.Now().Add(time.Hour), wake: wake, status: func() int { calls.Add(1); return http.StatusOK }})
+	select {
+	case <-h.edges:
+	case <-ctx.Done():
+		t.Fatal("runtime carrier was not admitted")
+	}
+	settled := calls.Load()
+	time.Sleep(1500 * time.Millisecond)
+	if calls.Load() != settled {
+		t.Fatal("healthy carrier asked again without a wake")
+	}
+	wake <- struct{}{}
+	deadline := time.Now().Add(3 * time.Second)
+	for calls.Load() == settled && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if calls.Load() == settled {
+		t.Fatal("a wake did not make the next tick ask the control plane")
 	}
 }
 

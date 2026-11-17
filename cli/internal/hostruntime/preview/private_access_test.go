@@ -682,16 +682,31 @@ func TestRoutesSnapshotIsPushDrivenWhileEventsAreHealthy(t *testing.T) {
 	if _, err := client.snapshot(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	for range 10 {
-		clock = clock.Add(accessorSnapshotReuse)
+	clock = clock.Add(time.Second)
+	if _, err := client.snapshot(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	settled := requests.Load() // the first call and the new topic's first wake: at most 2
+	if settled > 2 {
+		t.Fatalf("two checks made %d requests", settled)
+	}
+	for range 298 {
+		clock = clock.Add(time.Second)
 		if _, err := client.snapshot(t.Context()); err != nil {
 			t.Fatal(err)
 		}
 	}
-	settled := requests.Load()
-	if settled > 2 {
-		t.Fatalf("ten unchanged checks, one second apart, made %d requests", settled)
+	if requests.Load() != settled {
+		t.Fatalf("unchanged checks before five minutes made %d more requests", requests.Load()-settled)
 	}
+	clock = now.Add(5 * time.Minute)
+	if _, err := client.snapshot(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if requests.Load() != settled+1 {
+		t.Fatal("snapshot did not refresh at five minutes")
+	}
+	settled = requests.Load()
 	plane.Publish(machineevents.TopicPrivateRoutes)
 	for deadline := time.Now().Add(5 * time.Second); requests.Load() == settled; {
 		if time.Now().After(deadline) {
