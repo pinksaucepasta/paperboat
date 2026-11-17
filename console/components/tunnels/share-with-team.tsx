@@ -7,6 +7,7 @@ import { useApiQuery, workspacesQuery } from "@/lib/api"
 import { attachResource } from "@/lib/teams"
 import { Section, SettingRow } from "@/components/section"
 import { Button } from "@/components/ui/button"
+import { ErrorMessage } from "@/components/error-reference"
 
 /**
  * Attach your preview or tunnel to a team you run, or detach it. Attaching alone lets nobody use it;
@@ -50,7 +51,11 @@ export function ShareWithTeam({ kind, id }: { kind: "preview" | "tunnel"; id: st
           </Button>
         </div>
       </SettingRow>
-      {change.isError && <p className="py-2 text-sm text-destructive">{change.error.message}</p>}
+      {change.isError && (
+        <p className="py-2 text-sm text-destructive">
+          <ErrorMessage error={change.error} />
+        </p>
+      )}
     </Section>
   )
 }

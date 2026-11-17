@@ -9,6 +9,7 @@ import { api, idempotencyKey, useApiQuery, machineQuery, type Data } from "@/lib
 import { Frame, TopBar } from "@/components/terminal/terminal-page"
 import { isLimitReached, LimitReached } from "@/components/limit-reached"
 import { Button } from "@/components/ui/button"
+import { ErrorMessage } from "@/components/error-reference"
 
 /**
  * `/terminals/new?machine=…&workspace=…`: where "New terminal" opens its tab. It starts the shell,
@@ -58,7 +59,7 @@ export function StartTerminal() {
         ) : start.isError ? (
           <Problem
             title={`Couldn’t start a shell on ${name}`}
-            detail={start.error.message}
+            detail={<ErrorMessage error={start.error} />}
             retry={() => {
               setKey(idempotencyKey())
               start.reset()
@@ -76,7 +77,7 @@ export function StartTerminal() {
   )
 }
 
-function Problem({ title, detail, retry }: { title: string; detail: string; retry?: () => void }) {
+function Problem({ title, detail, retry }: { title: string; detail: React.ReactNode; retry?: () => void }) {
   return (
     <div className="flex max-w-sm flex-col items-center gap-2">
       <WarningCircleIcon className="size-6 text-muted-foreground" />

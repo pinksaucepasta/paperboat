@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Field, FieldError, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
+import { ErrorMessage } from "@/components/error-reference"
 
 /** A recovery code is shown once: copy or download it, confirm it is saved, then the change is published. */
 export function RecoveryCodeStep({
@@ -44,7 +45,11 @@ export function RecoveryCodeStep({
       <label className="flex cursor-pointer items-center gap-2.5">
         <Checkbox checked={saved} onCheckedChange={(on) => setSaved(Boolean(on))} />I saved my recovery code
       </label>
-      {error && <FieldError>{error.message}</FieldError>}
+      {error && (
+        <FieldError>
+          <ErrorMessage error={error} />
+        </FieldError>
+      )}
       <div className="flex justify-end gap-2">
         <Button type="button" size="lg" variant="outline" disabled={pending} onClick={onCancel}>
           Cancel
@@ -118,7 +123,11 @@ export function PasswordForm({
         />
         {mismatch && <FieldError>The passwords don’t match.</FieldError>}
       </Field>
-      {error && <FieldError>{error.message}</FieldError>}
+      {error && (
+        <FieldError>
+          <ErrorMessage error={error} />
+        </FieldError>
+      )}
       <div className="flex justify-end gap-2">
         {onCancel && (
           <Button type="button" size="lg" variant="outline" disabled={pending} onClick={onCancel}>

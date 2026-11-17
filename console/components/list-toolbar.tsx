@@ -20,6 +20,7 @@ import { Input } from "@/components/ui/input"
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group"
 import { Skeleton } from "@/components/ui/skeleton"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
+import { ErrorMessage } from "@/components/error-reference"
 
 /*
  * Pieces shared by the machine-scoped lists (Terminals, Previews, Tunnels), so they look and
@@ -211,7 +212,11 @@ export function ConfirmAction<TData>({
             </Field>
           </form>
         )}
-        {run.isError && <p className="text-sm text-destructive">{run.error.message}</p>}
+        {run.isError && (
+          <p className="text-sm text-destructive">
+            <ErrorMessage error={run.error} />
+          </p>
+        )}
         <AlertDialogFooter>
           <AlertDialogCancel disabled={run.isPending}>Cancel</AlertDialogCancel>
           <AlertDialogAction

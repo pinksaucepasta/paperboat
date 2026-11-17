@@ -16,6 +16,7 @@ import { Section, SettingRow } from "@/components/section"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
 import { Skeleton } from "@/components/ui/skeleton"
+import { ErrorMessage } from "@/components/error-reference"
 
 /** The config repository the team's members can adopt on their machines; owners and admins choose it from their own. */
 export function TeamConfigDefault({ team }: { team: string }) {
@@ -94,7 +95,9 @@ export function ChooseTeamDefault({
         <DialogTitle>Choose from your repositories</DialogTitle>
         <div className="flex flex-col">
           {repositories.isError ? (
-            <p className="py-3 text-sm text-muted-foreground">{repositories.error.message}</p>
+            <p className="py-3 text-sm text-muted-foreground">
+              <ErrorMessage error={repositories.error} />
+            </p>
           ) : !repositories.data ? (
             <Skeleton className="my-3 h-4 w-48" />
           ) : repositories.data.items?.length ? (
@@ -124,7 +127,11 @@ export function ChooseTeamDefault({
               go={setPage}
             />
           )}
-          {set.isError && <p className="pt-2 text-sm text-destructive">{set.error.message}</p>}
+          {set.isError && (
+            <p className="pt-2 text-sm text-destructive">
+              <ErrorMessage error={set.error} />
+            </p>
+          )}
         </div>
       </DialogContent>
     </Dialog>

@@ -36,6 +36,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { TableRowsSkeleton } from "@/components/skeletons"
 import { SectionHeading } from "@/components/section"
+import { ErrorMessage, errorToast } from "@/components/error-reference"
 
 const filesOf = (id: string) => `/files?machine=${encodeURIComponent(id)}`
 
@@ -224,7 +225,7 @@ function MachineInbox({ machineId }: { machineId: string }) {
           )}
           {inbox.isError && !outdated && (
             <p className="text-sm text-muted-foreground">
-              Couldn’t read {owner.alias}’s Inbox. {inbox.error.message}{" "}
+              Couldn’t read {owner.alias}’s Inbox. <ErrorMessage error={inbox.error} />{" "}
               <button
                 type="button"
                 className="underline-offset-4 hover:text-foreground hover:underline"
@@ -407,7 +408,7 @@ function RequestRow({ request, destination }: { request: InboxRequest; destinati
       await queryClient.invalidateQueries({ queryKey: fileKeys.requests(workspace?.id ?? "") })
       toast.success(decision === "approve" ? `Approved; it arrives in ${destination}’s Inbox` : "Declined")
     },
-    onError: (error) => toast.error("Couldn’t answer the request", { description: error.message }),
+    onError: (error) => errorToast("Couldn’t answer the request", error),
   })
   const [first, ...rest] = request.files
   const total = request.files.reduce((sum, file) => sum + file.size, 0)

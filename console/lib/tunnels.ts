@@ -2,6 +2,7 @@
 
 import { queryOptions } from "@tanstack/react-query"
 import { cursorPage } from "@/lib/cursor-pages"
+import { traceFrom } from "@/lib/error-reference"
 import { allPages, api, ApiError, idempotencyKey, send, type Data } from "@/lib/api"
 import { keepWithinWorkspace, queryKeys } from "@/lib/query-keys"
 
@@ -155,7 +156,14 @@ export async function stopPreview(id: string) {
   const etag = response.headers.get("etag")
   if (!response.ok || !etag) {
     if (response.status === 404) return
-    throw new ApiError(response.status, "unavailable", "Couldn’t read the preview to stop it. Try again.")
+    throw new ApiError(
+      response.status,
+      "unavailable",
+      "Couldn’t read the preview to stop it. Try again.",
+      undefined,
+      undefined,
+      traceFrom(response),
+    )
   }
   await change(previewPath(id), "DELETE", { etag })
 }

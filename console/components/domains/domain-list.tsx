@@ -29,6 +29,7 @@ import { Field, FieldError, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { Skeleton } from "@/components/ui/skeleton"
+import { ErrorMessage, errorToast } from "@/components/error-reference"
 
 /*
  * Domains you add to the workspace once (ngrok reserved domains, Vercel team domains): verified by
@@ -178,7 +179,9 @@ export function DomainList() {
       </div>
       {list.isPending && <Skeleton className="h-4 w-1/3" />}
       {list.isError && (
-        <p className="py-3 text-sm text-muted-foreground">Couldn’t load domains. {list.error.message}</p>
+        <p className="py-3 text-sm text-muted-foreground">
+          Couldn’t load domains. <ErrorMessage error={list.error} />
+        </p>
       )}
       {list.data?.length === 0 && (
         <p className="text-sm text-muted-foreground">
@@ -295,7 +298,7 @@ function DomainPanel({ domain, onRemoved }: { domain: WorkspaceDomain; onRemoved
   const check = useMutation({
     mutationFn: () => checkWorkspaceDomain(workspace?.id ?? "", domain.id),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["workspace-domains"] }),
-    onError: (error) => toast.error("Couldn’t check DNS", { description: error.message }),
+    onError: (error) => errorToast("Couldn’t check DNS", error),
   })
   const verified = domain.state === "verified"
   return (

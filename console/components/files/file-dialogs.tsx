@@ -14,6 +14,7 @@ import { Choice } from "@/components/choice"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { ErrorMessage } from "@/components/error-reference"
 
 /** A machine can take files while it's online and its Paperboat service receives them. */
 export function canReceive(machine: Machine) {
@@ -365,7 +366,11 @@ export function SendToMachineDialog({
             ? `Sends directly from ${machine.alias} to ${target.alias} (${formatBytes(file.size)}).`
             : "None of your other machines can take files right now."}
         </p>
-        {send.isError && <p className="text-sm text-destructive">{send.error.message}</p>}
+        {send.isError && (
+          <p className="text-sm text-destructive">
+            <ErrorMessage error={send.error} />
+          </p>
+        )}
         <DialogFooter>
           <Button variant="secondary" size="lg" onClick={onClose} disabled={send.isPending}>
             Cancel

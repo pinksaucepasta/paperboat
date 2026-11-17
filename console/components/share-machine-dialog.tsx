@@ -21,6 +21,7 @@ import { moveMachine } from "@/lib/teams"
 import { StatusDot } from "@/components/machine-status"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { Skeleton } from "@/components/ui/skeleton"
+import { ErrorMessage } from "@/components/error-reference"
 
 /**
  * Share one of your machines with a team: machines join a team by being shared from their owner's
@@ -136,7 +137,11 @@ export function ShareMachine({ team, onDone }: { team: Workspace; onDone: () => 
           </li>
         ))}
       </ul>
-      {share.isError && <p className="text-sm text-destructive">{share.error.message}</p>}
+      {share.isError && (
+        <p className="text-sm text-destructive">
+          <ErrorMessage error={share.error} />
+        </p>
+      )}
     </div>
   )
 }

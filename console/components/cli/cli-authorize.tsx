@@ -12,6 +12,7 @@ import { Input } from "@/components/ui/input"
 import { NewMachineAccess } from "@/components/team/new-machine-access"
 import { WorkspacePicker } from "@/components/workspace-picker"
 import { useTrack } from "@/lib/analytics"
+import { ErrorMessage } from "@/components/error-reference"
 
 type DeviceRequest = Data<"/v1/auth/device/requests/{user_code}">
 
@@ -232,7 +233,7 @@ function Failure({ error }: { error: Error }) {
   }
   return (
     <Outcome icon={<XCircleIcon className="size-8 text-white" />} title="Couldn’t load the request">
-      {error.message} Reload the page to try again.
+      <ErrorMessage error={error} /> Reload the page to try again.
     </Outcome>
   )
 }

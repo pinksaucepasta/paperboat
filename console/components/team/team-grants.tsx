@@ -13,6 +13,7 @@ import { Section } from "@/components/section"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogFooter, DialogTitle } from "@/components/ui/dialog"
 import { Field, FieldLabel } from "@/components/ui/field"
+import { ErrorMessage } from "@/components/error-reference"
 
 type Grant = Team["grants"][number]
 const pageSize = 20
@@ -175,7 +176,11 @@ function AddGrant({
             </select>
           </Field>
           {kind !== "env" && <ResourcePicker team={team.team_id} kind={kind} value={resource} onChange={setResource} />}
-          {save.isError && <p className="text-sm text-destructive">{save.error.message}</p>}
+          {save.isError && (
+            <p className="text-sm text-destructive">
+              <ErrorMessage error={save.error} />
+            </p>
+          )}
           <DialogFooter>
             <Button type="button" variant="outline" size="lg" onClick={onClose} disabled={save.isPending}>
               Cancel

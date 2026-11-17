@@ -11,6 +11,7 @@ import { SectionHeading } from "@/components/section"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
+import { ErrorMessage } from "@/components/error-reference"
 
 const schemes = [
   { value: "http", label: "http" },
@@ -84,7 +85,11 @@ function Editor({ machine, current }: { machine: Machine; current: Desk }) {
           {save.isPending ? "Saving…" : "Save"}
         </Button>
       )}
-      {save.isError && <span className="text-destructive">{save.error.message}</span>}
+      {save.isError && (
+        <span className="text-destructive">
+          <ErrorMessage error={save.error} />
+        </span>
+      )}
     </form>
   )
 }

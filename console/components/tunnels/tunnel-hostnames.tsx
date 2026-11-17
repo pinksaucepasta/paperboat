@@ -11,7 +11,6 @@ import {
 } from "@phosphor-icons/react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
-import { toast } from "sonner"
 import { useApiQuery } from "@/lib/api"
 import {
   addDomain,
@@ -45,6 +44,7 @@ import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import { RouteRulesDialog } from "@/components/tunnels/tunnel-route-rules"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
+import { ErrorMessage, errorToast } from "@/components/error-reference"
 
 /*
  * Cloudflare Tunnel's model: a tunnel has public hostnames, each sending one hostname (and
@@ -106,7 +106,7 @@ export function TunnelHostnames({ tunnel }: { tunnel: Tunnel }) {
         </div>
       ) : routes.isError ? (
         <p className="border-b border-divider py-3 text-sm text-muted-foreground">
-          Couldn’t load hostnames. {routes.error.message}
+          Couldn’t load hostnames. <ErrorMessage error={routes.error} />
         </p>
       ) : routes.data.length === 0 ? (
         <p className="border-b border-divider py-3 text-sm text-muted-foreground">No hostnames yet.</p>
@@ -151,7 +151,7 @@ function HostnameRow({
   const toggle = useMutation({
     mutationFn: () => patchRoute(route, { desired_state: off ? "active" : "disabled" }),
     onSuccess: refresh,
-    onError: (error) => toast.error("Couldn’t change the hostname", { description: error.message }),
+    onError: (error) => errorToast("Couldn’t change the hostname", error),
   })
   const state = domain && domainStates[domain.state]
 
@@ -421,7 +421,9 @@ function HostnameDialog({
             (isLimitReached(save.error) ? (
               <LimitReached error={save.error} />
             ) : (
-              <p className="text-sm text-destructive">{save.error.message}</p>
+              <p className="text-sm text-destructive">
+                <ErrorMessage error={save.error} />
+              </p>
             ))}
           <DialogFooter>
             <Button type="button" variant="secondary" size="lg" onClick={onClose} disabled={save.isPending}>

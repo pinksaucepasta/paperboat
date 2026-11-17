@@ -16,6 +16,7 @@ import { ChangesDialog } from "@/components/access/changes-dialog"
 import { Time } from "@/components/time"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
+import { ErrorMessage } from "@/components/error-reference"
 
 const kinds: Record<PolicyVersion["kind"], string> = {
   saved: "Saved",
@@ -32,7 +33,12 @@ export function PolicyHistory({ workspace, policy }: { workspace: string; policy
   const [open, setOpen] = useState<number | null>(null)
   const [restoring, setRestoring] = useState<number | null>(null)
   if (versions.isPending) return <Skeleton className="h-40 w-full" />
-  if (versions.isError) return <p className="text-sm text-destructive">{versions.error.message}</p>
+  if (versions.isError)
+    return (
+      <p className="text-sm text-destructive">
+        <ErrorMessage error={versions.error} />
+      </p>
+    )
   if (!items.length) return <p className="text-sm text-muted-foreground">No versions yet.</p>
   return (
     <div className="flex flex-col border-t border-divider">
@@ -97,7 +103,12 @@ export function PolicyHistory({ workspace, policy }: { workspace: string; policy
 function VersionDiff({ workspace, version, current }: { workspace: string; version: number; current: Policy }) {
   const old = useApiQuery(policyVersionQuery(workspace, version))
   if (old.isPending) return <Skeleton className="mb-3 h-24 w-full" />
-  if (old.isError) return <p className="pb-3 text-sm text-destructive">{old.error.message}</p>
+  if (old.isError)
+    return (
+      <p className="pb-3 text-sm text-destructive">
+        <ErrorMessage error={old.error} />
+      </p>
+    )
   const lines = lineDiff(old.data.policy, current.policy)
   return (
     <div className="mb-3 overflow-x-auto surface rounded-lg py-2 font-mono text-xs leading-5">

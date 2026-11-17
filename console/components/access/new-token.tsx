@@ -24,6 +24,7 @@ import { SectionHeading } from "@/components/section"
 import { Button } from "@/components/ui/button"
 import { Field } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
+import { ErrorMessage } from "@/components/error-reference"
 
 const listPath = "/settings/api-tokens"
 const selectClass =
@@ -355,7 +356,11 @@ function Summary({
           </div>
         ))}
       </dl>
-      {error && <p className="text-sm text-destructive">{error.message}</p>}
+      {error && (
+        <p className="text-sm text-destructive">
+          <ErrorMessage error={error} />
+        </p>
+      )}
       {problems.length > 0 && (
         <ul className="text-sm text-destructive">
           {problems.map((problem, index) => (

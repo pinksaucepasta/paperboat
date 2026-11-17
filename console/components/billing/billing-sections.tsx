@@ -25,6 +25,7 @@ import { Row, Section } from "@/components/section"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { useTimeFormat } from "@/lib/use-time-format"
+import { ErrorMessage } from "@/components/error-reference"
 
 const gigabyte = 1e9
 
@@ -109,7 +110,11 @@ export function Seats({ workspace, billing }: { workspace: Workspace; billing: B
       {quantity < bought && changed && (
         <p className="py-2 text-sm text-muted-foreground">Removed seats stay paid until the billing date.</p>
       )}
-      {save.isError && <p className="py-2 text-sm text-destructive">{save.error.message}</p>}
+      {save.isError && (
+        <p className="py-2 text-sm text-destructive">
+          <ErrorMessage error={save.error} />
+        </p>
+      )}
     </Section>
   )
 }
@@ -142,7 +147,11 @@ export function PlanActions({ workspace, billing }: { workspace: Workspace; bill
           {billing.cancel_at_period_end ? "Keep plan" : "Cancel plan"}
         </Button>
       </Row>
-      {portal.isError && <p className="py-2 text-sm text-destructive">{portal.error.message}</p>}
+      {portal.isError && (
+        <p className="py-2 text-sm text-destructive">
+          <ErrorMessage error={portal.error} />
+        </p>
+      )}
     </>
   )
 }
@@ -235,7 +244,11 @@ export function TopUps({ workspace, billing }: { workspace: Workspace; billing: 
         Adds to this billing period.
         {expires && ` Unused bandwidth ends when your plan renews on ${expires}.`}
       </p>
-      {buy.isError && <p className="py-2 text-sm text-destructive">{buy.error.message}</p>}
+      {buy.isError && (
+        <p className="py-2 text-sm text-destructive">
+          <ErrorMessage error={buy.error} />
+        </p>
+      )}
     </Section>
   )
 }

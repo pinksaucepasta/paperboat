@@ -47,6 +47,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { TableRowsSkeleton } from "@/components/skeletons"
 import { LoadError } from "@/components/load-error"
+import { ErrorMessage, errorToast } from "@/components/error-reference"
 
 /*
  * Your own relays and tunnel servers, and which servers your traffic uses. Machines connect
@@ -193,7 +194,7 @@ function NodeRow({ node }: { node: Node }) {
       await refresh()
       toast.success(`${node.name} answers from the internet`)
     },
-    onError: (error) => toast.error("Public access check failed", { description: error.message }),
+    onError: (error) => errorToast("Public access check failed", error),
   })
   const entries: Entry[] = [
     { kind: "item", label: "Copy address", icon: CopyIcon, onSelect: () => void copyWithToast(node.host, "Address") },
@@ -379,7 +380,7 @@ function RelaysSection({ scope }: { scope: ReturnType<typeof scopeOf> }) {
       await refreshNetwork(queryClient)
       toast.success(on ? "Relayed traffic uses only your relays" : "Relayed traffic can use Paperboat’s relays")
     },
-    onError: (error) => toast.error(`Couldn’t change relays: ${error.message}`),
+    onError: (error) => errorToast("Couldn’t change relays", error),
   })
   // Fastest first; unmeasured ones after, ready before not.
   const rows = [...(relays.data ?? [])].sort(
@@ -775,7 +776,11 @@ function AddServerDialog({ initial, onClose }: { initial: "relay" | "tunnel"; on
                 </p>
               </Field>
             </div>
-            {pair.isError && <p className="text-sm text-destructive">{pair.error.message}</p>}
+            {pair.isError && (
+              <p className="text-sm text-destructive">
+                <ErrorMessage error={pair.error} />
+              </p>
+            )}
             <DialogFooter>
               <Button type="button" variant="secondary" size="lg" onClick={onClose} disabled={pair.isPending}>
                 Cancel

@@ -6,6 +6,7 @@ import { teamAction, teamQuery } from "@/lib/teams"
 import { preferencesQuery } from "@/lib/transfer-mode"
 import { Section, SettingRow } from "@/components/section"
 import { Switch } from "@/components/ui/switch"
+import { ErrorMessage } from "@/components/error-reference"
 
 const label = "Let commands on machines list variable names"
 const helper = (
@@ -99,7 +100,11 @@ function EnvNamesSetting({
           aria-label={label}
         />
       </SettingRow>
-      {error && <p className="py-2 text-sm text-destructive">{error.message}</p>}
+      {error && (
+        <p className="py-2 text-sm text-destructive">
+          <ErrorMessage error={error} />
+        </p>
+      )}
     </Section>
   )
 }

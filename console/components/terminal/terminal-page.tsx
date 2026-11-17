@@ -46,6 +46,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { ErrorMessage } from "@/components/error-reference"
 
 /**
  * A terminal on its own page, outside the console's sidebar: a top bar, the terminal and the
@@ -421,7 +422,11 @@ function CloseTerminal({ session, onClose }: { session: TerminalSession; onClose
             The shell on {session.target.name} ends for everyone, along with anything running in it.
           </AlertDialogDescription>
         </AlertDialogHeader>
-        {close.isError && <p className="text-sm text-destructive">{close.error.message}</p>}
+        {close.isError && (
+          <p className="text-sm text-destructive">
+            <ErrorMessage error={close.error} />
+          </p>
+        )}
         <AlertDialogFooter>
           <AlertDialogCancel disabled={close.isPending}>Cancel</AlertDialogCancel>
           <AlertDialogAction

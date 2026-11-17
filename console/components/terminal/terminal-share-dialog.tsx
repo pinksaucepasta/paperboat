@@ -40,6 +40,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
 import { copyText } from "@/lib/clipboard"
+import { ErrorMessage, errorToast } from "@/components/error-reference"
 
 const emailPattern = /^[^\s@,]+@[^\s@,]+\.[^\s@,]+$/
 const domainPattern = /^\*@[a-z0-9-]+(\.[a-z0-9-]+)+$/
@@ -120,7 +121,7 @@ function Share({ session, onDone }: { session: TerminalSession; onDone: () => vo
         queryClient.setQueryData(terminalKeys.code(session.id), off)
       }
     },
-    onError: (error) => toast.error("Sharing wasn’t changed", { description: error.message }),
+    onError: (error) => errorToast("Sharing wasn’t changed", error),
   })
 
   const stop = useMutation({
@@ -468,7 +469,9 @@ function JoiningInfo({
             </Button>
           </>
         ) : change.isError ? (
-          <span className="min-w-0 flex-1 truncate text-xs text-destructive">{change.error.message}</span>
+          <span className="min-w-0 flex-1 truncate text-xs text-destructive">
+            <ErrorMessage error={change.error} />
+          </span>
         ) : live && guests > 0 ? (
           <>
             <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">

@@ -16,6 +16,7 @@ import { useListScope } from "@/components/list-toolbar"
 import { Button } from "@/components/ui/button"
 import { Section } from "@/components/section"
 import { EnvNamesSwitch } from "@/components/environment/env-names-switch"
+import { ErrorMessage } from "@/components/error-reference"
 
 /** The machine page's Environment tab: that machine's own variables. */
 export function MachineEnvironment() {
@@ -78,7 +79,11 @@ export function EnvironmentList({
   if (!workspace || !me.data || vault.isPending) return <EnvUnlock loading />
   // Only before the first answer: a refetch that fails (focus, a 429) must not replace a form being typed in.
   if (vault.isError && vault.data === undefined) {
-    return <p className="py-16 text-center text-sm text-destructive">{vault.error.message}</p>
+    return (
+      <p className="py-16 text-center text-sm text-destructive">
+        <ErrorMessage error={vault.error} />
+      </p>
+    )
   }
   if (!vault.data) return <EnvVaultSetup />
   if (!unlocked) return <EnvUnlock />

@@ -10,6 +10,7 @@ import {
   type TransferMode,
 } from "@/lib/transfer-mode"
 import { Section } from "@/components/section"
+import { ErrorMessage } from "@/components/error-reference"
 
 /** Settings → File transfers: Automatic or Unlimited, for this account on every machine. */
 export function TransferModeSection() {
@@ -41,7 +42,11 @@ export function TransferModeSection() {
             </span>
           </label>
         ))}
-        {change.isError && <p className="text-destructive">{change.error.message}</p>}
+        {change.isError && (
+          <p className="text-destructive">
+            <ErrorMessage error={change.error} />
+          </p>
+        )}
       </div>
     </Section>
   )

@@ -30,6 +30,7 @@ import { Field, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
+import { ErrorMessage } from "@/components/error-reference"
 
 /** The Git repositories your machines can sync config with: connect one, disconnect one. */
 export function ConfigRepositories() {
@@ -154,7 +155,9 @@ function GitHubPicker({ onDone }: { onDone: () => void }) {
   return (
     <div className="flex flex-col">
       {query.isError ? (
-        <p className="py-3 text-sm text-muted-foreground">{query.error.message}</p>
+        <p className="py-3 text-sm text-muted-foreground">
+          <ErrorMessage error={query.error} />
+        </p>
       ) : !query.data ? (
         <Skeleton className="my-3 h-4 w-48" />
       ) : items.length === 0 ? (
@@ -172,7 +175,11 @@ function GitHubPicker({ onDone }: { onDone: () => void }) {
           </div>
         ))
       )}
-      {connect.isError && <p className="pt-2 text-sm text-destructive">{connect.error.message}</p>}
+      {connect.isError && (
+        <p className="pt-2 text-sm text-destructive">
+          <ErrorMessage error={connect.error} />
+        </p>
+      )}
       {(page > 1 || next) && (
         <div className="flex justify-end gap-2 pt-3">
           <Button variant="outline" size="sm" disabled={page === 1} onClick={() => setCursors(cursors.slice(0, -1))}>
@@ -223,7 +230,11 @@ function GitUrlForm({ onDone, onCancel }: { onDone: () => void; onCancel: () => 
         <FieldLabel htmlFor="repository-branch">Branch</FieldLabel>
         <Input id="repository-branch" value={branch} onChange={(event) => setBranch(event.target.value)} />
       </Field>
-      {connect.isError && <p className="text-sm text-destructive">{connect.error.message}</p>}
+      {connect.isError && (
+        <p className="text-sm text-destructive">
+          <ErrorMessage error={connect.error} />
+        </p>
+      )}
       <DialogFooter>
         <Button type="button" variant="outline" size="lg" onClick={onCancel}>
           Cancel

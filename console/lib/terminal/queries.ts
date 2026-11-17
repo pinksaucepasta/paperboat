@@ -1,6 +1,7 @@
 "use client"
 
 import { queryOptions } from "@tanstack/react-query"
+import { traceFrom } from "@/lib/error-reference"
 import { api, apiAction, ApiError, checked, idempotencyKey, retryAfterMs, send, type Data } from "@/lib/api"
 import { queryKeys } from "@/lib/query-keys"
 import type { TerminalSession } from "@/lib/terminal/use-terminal-connection"
@@ -190,7 +191,7 @@ export async function guestApi<T>(path: string, init?: RequestInit): Promise<T> 
   })
   const body = (await response.json().catch(() => null)) as {
     data?: T
-    error?: { code?: string; message?: string }
+    error?: { code?: string; message?: string; support_reference?: string; request_id?: string }
   } | null
   if (!response.ok || !body || body.data === undefined) {
     throw new ApiError(
@@ -199,6 +200,7 @@ export async function guestApi<T>(path: string, init?: RequestInit): Promise<T> 
       body?.error?.message ?? "Paperboat is temporarily unavailable.",
       undefined,
       retryAfterMs(response),
+      traceFrom(response, body?.error),
     )
   }
   return checked(init?.method, path, body.data)

@@ -18,6 +18,7 @@ import { Section, SettingRow } from "@/components/section"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
 import { Skeleton } from "@/components/ui/skeleton"
+import { ErrorMessage } from "@/components/error-reference"
 
 /** Each team's variables are sealed with the team's own key: create it, give members the key, replace it. */
 export function EnvTeamVaults() {
@@ -42,7 +43,11 @@ function AcceptKeys() {
   })
   return (
     <div className="flex items-center gap-3">
-      {accept.isError && <span className="text-sm text-destructive">{accept.error.message}</span>}
+      {accept.isError && (
+        <span className="text-sm text-destructive">
+          <ErrorMessage error={accept.error} />
+        </span>
+      )}
       {accept.isSuccess && (
         <span className="text-sm text-muted-foreground">
           {accept.data === 0 ? "No new keys." : `${accept.data} accepted.`}
@@ -250,7 +255,11 @@ function MemberPicker({
               </div>
             ))}
         </div>
-        {go.isError && <p className="text-sm text-destructive">{go.error.message}</p>}
+        {go.isError && (
+          <p className="text-sm text-destructive">
+            <ErrorMessage error={go.error} />
+          </p>
+        )}
       </DialogContent>
     </Dialog>
   )

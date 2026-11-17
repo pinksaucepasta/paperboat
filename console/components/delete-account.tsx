@@ -18,6 +18,7 @@ import { Row, Section } from "@/components/section"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
+import { ErrorMessage } from "@/components/error-reference"
 
 const reauthPath = "/auth/sign-in?reauth=1&return_to=%2Faccount%2Fdelete"
 // Set while a sign-in started here has not come back yet: a sign-in that returns still "too old" must not loop.
@@ -32,7 +33,12 @@ export function DeleteAccount() {
   const preview = useApiQuery(deletionPreviewQuery)
   if (!accountDeletionLive) return <p className="text-sm text-muted-foreground">Deleting an account isn’t available yet.</p>
   if (preview.isPending) return <Skeleton className="h-48 w-full" />
-  if (preview.isError) return <p className="text-sm text-destructive">{preview.error.message}</p>
+  if (preview.isError)
+    return (
+      <p className="text-sm text-destructive">
+        <ErrorMessage error={preview.error} />
+      </p>
+    )
   const data = preview.data
   return (
     <>
@@ -162,7 +168,11 @@ function Confirm({ preview }: { preview: DeletionPreview }) {
         spellCheck={false}
         className="max-w-sm"
       />
-      {failure && <p className="text-destructive">{failure.message}</p>}
+      {failure && (
+        <p className="text-destructive">
+          <ErrorMessage error={failure} />
+        </p>
+      )}
       {failure?.teams && <Blocking teams={failure.teams} />}
       <div>
         <Button type="submit" variant="destructive" size="lg" disabled={!matches || remove.isPending}>

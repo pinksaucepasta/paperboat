@@ -24,6 +24,7 @@ import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { useTimeFormat } from "@/lib/use-time-format"
+import { ErrorMessage } from "@/components/error-reference"
 
 const intervals: Record<BillingInterval, string> = { month: "Monthly", year: "Yearly" }
 /** How long the page waits for Stripe's webhook to activate a plan after Checkout returns. */
@@ -35,7 +36,12 @@ export function BillingPage() {
   const confirming = useConfirmingCheckout(workspace, billing.data)
 
   if (!workspace || billing.isPending) return <BillingSkeleton />
-  if (billing.isError) return <p className="text-sm text-muted-foreground">{billing.error.message}</p>
+  if (billing.isError)
+    return (
+      <p className="text-sm text-muted-foreground">
+        <ErrorMessage error={billing.error} />
+      </p>
+    )
   const subscribed = Boolean(billing.data.product_code)
   return (
     <div className="flex flex-col gap-10">
@@ -185,7 +191,11 @@ function Plan({
         </>
       )}
       <PlanActions workspace={workspace} billing={billing} />
-      {portal.isError && <p className="py-2 text-sm text-destructive">{portal.error.message}</p>}
+      {portal.isError && (
+        <p className="py-2 text-sm text-destructive">
+          <ErrorMessage error={portal.error} />
+        </p>
+      )}
     </Section>
   )
 }
@@ -195,7 +205,12 @@ function Plans({ workspace, billing }: { workspace: Workspace; billing: BillingW
   const products = useApiQuery(billingProductsQuery(workspace))
   const [interval, setPeriod] = useState<BillingInterval>("month")
   if (products.isPending) return <Skeleton className="h-24 w-full" />
-  if (products.isError) return <p className="text-sm text-muted-foreground">{products.error.message}</p>
+  if (products.isError)
+    return (
+      <p className="text-sm text-muted-foreground">
+        <ErrorMessage error={products.error} />
+      </p>
+    )
   const shown = products.data.filter((product) => product.interval === interval && product.price_verified)
   if (!products.data.length) return null
   return (
@@ -270,7 +285,11 @@ function PlanOffer({
             : "Upgrade"}
         </Button>
       </div>
-      {checkout.isError && <p className="text-destructive">{checkout.error.message}</p>}
+      {checkout.isError && (
+        <p className="text-destructive">
+          <ErrorMessage error={checkout.error} />
+        </p>
+      )}
     </div>
   )
 }

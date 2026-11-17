@@ -16,6 +16,7 @@ import { ResourceHistory } from "@/components/tunnels/resource-history"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useNow } from "@/lib/use-now"
+import { ErrorMessage } from "@/components/error-reference"
 
 /** A preview's page: whether it answers, where it is and where it forwards to, its domains and IP rules. */
 export function PreviewPage({ id }: { id: string }) {
@@ -30,7 +31,7 @@ export function PreviewPage({ id }: { id: string }) {
       <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-10 px-4 py-6 md:px-8 md:py-8">
         {query.isError ? (
           <div className="flex flex-col items-center gap-4 py-24 text-center text-sm text-muted-foreground">
-            {query.error.message}
+            <ErrorMessage error={query.error} />
             <Button variant="outline" size="sm" render={<Link href="/previews" />} nativeButton={false}>
               All previews
             </Button>

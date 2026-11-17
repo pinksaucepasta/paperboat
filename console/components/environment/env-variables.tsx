@@ -11,6 +11,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { Field, FieldError, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
+import { ErrorMessage, errorToastOf } from "@/components/error-reference"
 
 const namePattern = /^[A-Za-z_][A-Za-z0-9_]*$/
 
@@ -45,7 +46,7 @@ export function EnvVariables({
       toast.message(error.message)
       return refresh()
     }
-    toast.error(error.message)
+    errorToastOf(error)
   }
   return (
     <div className="flex flex-col">
@@ -72,7 +73,11 @@ export function EnvVariables({
             </Button>
           </div>
         ))}
-      {names.isError && <p className="py-4 text-sm text-destructive">{names.error.message}</p>}
+      {names.isError && (
+        <p className="py-4 text-sm text-destructive">
+          <ErrorMessage error={names.error} />
+        </p>
+      )}
       {names.data?.length === 0 && (
         <p className="border-b border-divider py-4 text-sm text-muted-foreground">No variables yet.</p>
       )}
@@ -181,7 +186,11 @@ function SetDialog({
               autoFocus={Boolean(initial)}
             />
             <p className="text-xs text-muted-foreground">You won’t see the value again.</p>
-            {save.isError && !(save.error instanceof DeliveryPending) && <FieldError>{save.error.message}</FieldError>}
+            {save.isError && !(save.error instanceof DeliveryPending) && (
+              <FieldError>
+                <ErrorMessage error={save.error} />
+              </FieldError>
+            )}
           </Field>
           <DialogFooter>
             <Button type="button" variant="ghost" size="lg" onClick={onClose}>

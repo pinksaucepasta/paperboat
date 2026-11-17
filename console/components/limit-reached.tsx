@@ -1,6 +1,7 @@
 import Link from "next/link"
 import { ApiError } from "@/lib/api"
 import { Button } from "@/components/ui/button"
+import { ErrorMessage } from "@/components/error-reference"
 
 const limitCodes = new Set(["machine_limit_reached", "preview_limit_reached", "browser_terminal_limit_reached", "public_tcp_limit_reached"])
 
@@ -17,7 +18,9 @@ function upgradeHref(error: ApiError) {
 export function LimitReached({ error, removeMachines }: { error: ApiError; removeMachines?: boolean }) {
   return (
     <div className="flex flex-col gap-2" role="alert">
-      <p className="text-sm text-destructive">{error.message}</p>
+      <p className="text-sm text-destructive">
+        <ErrorMessage error={error} />
+      </p>
       <div className="flex gap-2">
         {removeMachines && (
           <Button variant="secondary" size="sm" nativeButton={false} render={<Link href="/" />}>

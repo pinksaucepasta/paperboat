@@ -12,6 +12,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { Field, FieldLabel } from "@/components/ui/field"
 import { Textarea } from "@/components/ui/textarea"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
+import { ErrorMessage } from "@/components/error-reference"
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const maxInvites = 20
@@ -173,7 +174,11 @@ function InviteForm({
               )}
               <span className="min-w-0">
                 {email}
-                {error && <span className="block text-muted-foreground">{error.message}</span>}
+                {error && (
+                  <span className="block text-muted-foreground">
+                    <ErrorMessage error={error} />
+                  </span>
+                )}
               </span>
             </li>
           ))}

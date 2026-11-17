@@ -10,6 +10,7 @@ import { PolicyHistory } from "@/components/access/policy-history"
 import { PolicyTest } from "@/components/access/policy-test"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { Skeleton } from "@/components/ui/skeleton"
+import { ErrorMessage } from "@/components/error-reference"
 
 const tabs = [
   { id: "file", title: "Policy file" },
@@ -92,7 +93,11 @@ function PolicyUnavailable({ error }: { error: Error }) {
               ? "No access"
               : "Couldn’t load access"}
         </EmptyTitle>
-        {!missing && <EmptyDescription>{error.message}</EmptyDescription>}
+        {!missing && (
+          <EmptyDescription>
+            <ErrorMessage error={error} />
+          </EmptyDescription>
+        )}
       </EmptyHeader>
     </Empty>
   )

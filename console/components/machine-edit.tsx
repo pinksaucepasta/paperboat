@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Field, FieldError, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
+import { ErrorMessage } from "@/components/error-reference"
 
 /** Name editing shared by the in-place title and the Edit dialog. */
 export function useMachineEdit(machine: Machine, onSaved: () => void) {
@@ -79,7 +80,11 @@ export function EditMachineDialog({ machine, onClose }: { machine: Machine; onCl
               </p>
             )}
           </Field>
-          {edit.save.isError && <p className="text-sm text-destructive">{edit.save.error.message}</p>}
+          {edit.save.isError && (
+            <p className="text-sm text-destructive">
+              <ErrorMessage error={edit.save.error} />
+            </p>
+          )}
           <DialogFooter>
             <Button type="button" variant="outline" size="lg" onClick={onClose} disabled={edit.save.isPending}>
               Cancel

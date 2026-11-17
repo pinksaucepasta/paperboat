@@ -8,6 +8,7 @@ import { bodyText } from "@/lib/inspector/body"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { useTimeFormat } from "@/lib/use-time-format"
+import { errorToast } from "@/components/error-reference"
 
 /** Path and query of a captured URL (the daemon may send an absolute URL or a path). */
 export function pathOf(url: string) {
@@ -162,7 +163,7 @@ export function CaptureDetail({
       await onReplay(record.id)
       toast.success("Replayed")
     } catch (error) {
-      toast.error(error instanceof Error ? `Replay failed: ${error.message}` : "Replay failed")
+      errorToast("Replay failed", error)
     } finally {
       setReplaying(false)
     }

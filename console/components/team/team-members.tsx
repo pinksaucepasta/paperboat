@@ -5,7 +5,6 @@ import { useMutation, useQueryClient } from "@tanstack/react-query"
 import Link from "next/link"
 import { useSearchParams } from "next/navigation"
 import { useState } from "react"
-import { toast } from "sonner"
 import { meQuery, useApiQuery, useWorkspace, workspacesQuery, type Me, type Workspace } from "@/lib/api"
 import { billingKey, billingQuery, notLiveTitle } from "@/lib/billing"
 import {
@@ -54,6 +53,7 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { ErrorMessage, errorToast } from "@/components/error-reference"
 
 /**
  * Who can do what, from the server's rules (teams/service.go Mutate, teams-business.md). A member
@@ -94,7 +94,12 @@ export function TeamManage({ workspace }: { workspace: Workspace }) {
   const tab = tabParam === "security" || tabParam === "recordings" || tabParam === "storage" ? tabParam : "members"
 
   if (team.isPending || me.isPending) return <TeamSkeleton />
-  if (team.isError) return <p className="text-sm text-muted-foreground">{team.error.message}</p>
+  if (team.isError)
+    return (
+      <p className="text-sm text-muted-foreground">
+        <ErrorMessage error={team.error} />
+      </p>
+    )
   if (!me.data) return null
 
   const emails = memberEmails(team.data, invitations.data)
@@ -483,7 +488,11 @@ function MemberRow({
             Managed by directory
           </Badge>
         )}
-        {role.isError && <span className="block text-xs text-destructive">{role.error.message}</span>}
+        {role.isError && (
+          <span className="block text-xs text-destructive">
+            <ErrorMessage error={role.error} />
+          </span>
+        )}
       </td>
       <td className="hidden text-muted-foreground md:table-cell">
         {member.joined_at ? <Time iso={member.joined_at} relative /> : "—"}
@@ -510,12 +519,12 @@ function InvitationsTable({
   const revoke = useMutation({
     mutationFn: (id: string) => cancelInvitation(team, id),
     onSuccess: refresh,
-    onError: (error) => toast.error("The invitation wasn’t revoked", { description: error.message }),
+    onError: (error) => errorToast("The invitation wasn’t revoked", error),
   })
   const resend = useMutation({
     mutationFn: (id: string) => resendInvitation(team, id),
     onSuccess: refresh,
-    onError: (error) => toast.error("The invitation wasn’t sent again", { description: error.message }),
+    onError: (error) => errorToast("The invitation wasn’t sent again", error),
   })
   return (
     <table className="w-full table-fixed text-sm">
@@ -679,7 +688,11 @@ function MachineRequests({ team, admin, me }: { team: Team; admin: boolean; me: 
           )
         })}
       </ul>
-      {answer.isError && <p className="py-2 text-sm text-destructive">{answer.error.message}</p>}
+      {answer.isError && (
+        <p className="py-2 text-sm text-destructive">
+          <ErrorMessage error={answer.error} />
+        </p>
+      )}
     </Section>
   )
 }
@@ -725,7 +738,11 @@ function TeamSettings({ team, owner }: { team: Team; owner: boolean }) {
           aria-label="Approve new machines"
         />
       </SettingRow>
-      {approval.isError && <p className="py-2 text-sm text-destructive">{approval.error.message}</p>}
+      {approval.isError && (
+        <p className="py-2 text-sm text-destructive">
+          <ErrorMessage error={approval.error} />
+        </p>
+      )}
       <SettingRow
         label="Allow private access"
         htmlFor="team-private-access"
@@ -739,7 +756,11 @@ function TeamSettings({ team, owner }: { team: Team; owner: boolean }) {
           aria-label="Allow private access"
         />
       </SettingRow>
-      {privateAccess.isError && <p className="py-2 text-sm text-destructive">{privateAccess.error.message}</p>}
+      {privateAccess.isError && (
+        <p className="py-2 text-sm text-destructive">
+          <ErrorMessage error={privateAccess.error} />
+        </p>
+      )}
       {owner && (
         <SettingRow label="Team name" htmlFor="team-name">
           <form
@@ -769,7 +790,11 @@ function TeamSettings({ team, owner }: { team: Team; owner: boolean }) {
           <CopyButton value={team.team_id} label="Copy team ID" />
         </span>
       </SettingRow>
-      {rename.isError && <p className="py-2 text-sm text-destructive">{rename.error.message}</p>}
+      {rename.isError && (
+        <p className="py-2 text-sm text-destructive">
+          <ErrorMessage error={rename.error} />
+        </p>
+      )}
     </Section>
   )
 }

@@ -15,6 +15,7 @@ import { canPreview } from "@/components/tunnels/machine-choice"
 import { Starting } from "@/components/tunnels/new-preview"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { ErrorMessage } from "@/components/error-reference"
 
 /*
  * Share a file as a link (like Vercel's drop.new), from the Files page: a new file dropped here, or one
@@ -188,7 +189,11 @@ function InboxBody({
         {opens ? "It opens in the browser." : "It downloads when opened."} {source.machine.alias} serves it while the link
         lasts.
       </p>
-      {share.isError && <p className="text-sm text-destructive">{share.error.message}</p>}
+      {share.isError && (
+        <p className="text-sm text-destructive">
+          <ErrorMessage error={share.error} />
+        </p>
+      )}
       <DialogFooter>
         <Button variant="secondary" size="lg" onClick={onCancel} disabled={share.isPending}>
           Cancel

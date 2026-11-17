@@ -3,7 +3,6 @@
 import { CaretDownIcon, PauseIcon, PlayIcon, TrashIcon } from "@phosphor-icons/react"
 import Link from "next/link"
 import { useDeferredValue, useEffect, useState } from "react"
-import { toast } from "sonner"
 import { useApiQuery, useMachine } from "@/lib/api"
 import { useInspectorChannel, type ChannelPhase } from "@/lib/inspector/channel"
 import { useCaptureFeed, type Capture } from "@/lib/inspector/feed"
@@ -24,6 +23,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
 import { ended } from "@/components/tunnels/preview-list"
 import { useNow } from "@/lib/use-now"
+import { ErrorMessage, errorToast } from "@/components/error-reference"
 
 type StatusClass = "all" | "2xx" | "3xx" | "4xx" | "5xx"
 const METHODS = ["All", "GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]
@@ -46,7 +46,7 @@ export function InspectorPage({ id }: { id: string }) {
       </PageHeader>
       <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-4 px-4 py-6 md:px-8 md:py-8">
         {query.isError ? (
-          <State title="Preview not found" detail={query.error.message} />
+          <State title="Preview not found" detail={<ErrorMessage error={query.error} />} />
         ) : !preview ? (
           // What comes next is the connecting state, so the page loads as it.
           <State title="Connecting" detail="Opening an encrypted connection to the machine…" />
@@ -60,7 +60,7 @@ export function InspectorPage({ id }: { id: string }) {
   )
 }
 
-function State({ title, detail, children }: { title: string; detail: string; children?: React.ReactNode }) {
+function State({ title, detail, children }: { title: string; detail: React.ReactNode; children?: React.ReactNode }) {
   return (
     <Empty className="py-16" data-inspector-state={title}>
       <EmptyHeader>
@@ -125,7 +125,7 @@ function Inspector({ preview, onDenied }: { preview: Preview; onDenied: () => un
     try {
       await feed.setPolicy(enabled, bodies)
     } catch (error) {
-      toast.error(error instanceof Error ? `Couldn’t change capture: ${error.message}` : "Couldn’t change capture")
+      errorToast("Couldn’t change capture", error)
     }
   }
 

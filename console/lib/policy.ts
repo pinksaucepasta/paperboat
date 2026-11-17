@@ -1,6 +1,7 @@
 "use client"
 
 import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query"
+import { traceFrom, type ServerTrace } from "@/lib/error-reference"
 import { ApiError, checked, confirmSession, idempotencyKey, send, type Data, type Schemas } from "@/lib/api"
 import { queryKeys } from "@/lib/query-keys"
 
@@ -29,8 +30,9 @@ export class PolicyError extends ApiError {
     code: string,
     message: string,
     readonly details: { errors?: PolicyProblem[]; access_changes?: AccessChange[]; confirm?: string },
+    trace?: ServerTrace,
   ) {
-    super(status, code, message)
+    super(status, code, message, undefined, undefined, trace)
   }
 }
 
@@ -61,7 +63,13 @@ async function call<T>(step: string, path: string, init?: RequestInit & { json?:
   if (response.status === 401) await confirmSession()
   const body = (await response.json().catch(() => null)) as {
     data?: T
-    error?: { code?: string; message?: string; details?: PolicyError["details"] }
+    error?: {
+      code?: string
+      message?: string
+      details?: PolicyError["details"]
+      support_reference?: string
+      request_id?: string
+    }
   } | null
   if (response.ok && body?.data !== undefined) return checked(rest.method, path, body.data)
   const unknownPath = response.status === 401 || (response.status === 404 && !body?.error?.code)
@@ -72,6 +80,7 @@ async function call<T>(step: string, path: string, init?: RequestInit & { json?:
     code,
     message ?? `${step} failed: Paperboat is temporarily unavailable. Try again.`,
     body?.error?.details ?? {},
+    traceFrom(response, body?.error),
   )
 }
 

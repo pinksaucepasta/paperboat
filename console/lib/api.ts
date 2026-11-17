@@ -11,6 +11,7 @@ import { withDeadline } from "@/lib/deadline"
 import { sessionVerdict } from "@/lib/session-verdict"
 import { fetchAllPages, type MachinePages } from "@/lib/machine-pages"
 import { checkResponse } from "@/lib/api-validate"
+import { traceFrom, type ServerTrace } from "@/lib/error-reference"
 
 /** Error envelope returned by the control plane: `{ error: { code, message } }`. */
 export class ApiError extends Error {
@@ -22,10 +23,18 @@ export class ApiError extends Error {
     readonly details?: unknown,
     /** The server's Retry-After, in milliseconds, when it sent one (e.g. 429). */
     readonly retryAfterMs?: number,
+    /** The server's support reference and request id for this answer; absent when no server answered. */
+    trace?: ServerTrace,
   ) {
     super(message)
+    this.reference = trace?.reference
+    this.requestId = trace?.requestId
   }
+  readonly reference?: string
+  readonly requestId?: string
 }
+
+type ErrorBody = { code?: string; message?: string; details?: unknown; support_reference?: string; request_id?: string }
 
 /** A refusal retrying cannot fix, whose sentence the page shows instead of "Couldn't load": a 403 or the quota 409. */
 export const isFinalRefusal = (error: unknown): error is ApiError =>
@@ -83,7 +92,14 @@ async function checkSession(): Promise<void> {
     window.location.assign(`/auth/sign-in?return_to=${encodeURIComponent(here)}`)
     throw new ApiError(401, "unauthenticated", "Your session ended.")
   }
-  throw new ApiError(session.status, "unavailable", "Paperboat is temporarily unavailable. Try again.")
+  throw new ApiError(
+    session.status,
+    "unavailable",
+    "Paperboat is temporarily unavailable. Try again.",
+    undefined,
+    undefined,
+    traceFrom(session),
+  )
 }
 
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
@@ -98,7 +114,7 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   }
   const body = (await response.json().catch(() => null)) as {
     data?: T
-    error?: { code?: string; message?: string; details?: unknown }
+    error?: ErrorBody
   } | null
   if (!response.ok || !body || body.data === undefined) {
     const code = body?.error?.code ?? "unavailable"
@@ -108,6 +124,7 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
       sentences[code] ?? body?.error?.message ?? "Paperboat is temporarily unavailable.",
       body?.error?.details,
       retryAfterMs(response),
+      traceFrom(response, body?.error),
     )
   }
   return checked(init?.method, path, body.data)
@@ -152,11 +169,14 @@ export async function apiAction(path: string, init: RequestInit): Promise<void> 
     headers: { accept: "application/json", "idempotency-key": idempotencyKey(), ...init.headers },
   })
   if (response.ok) return
-  const body = (await response.json().catch(() => null)) as { error?: { code?: string; message?: string } } | null
+  const body = (await response.json().catch(() => null)) as { error?: ErrorBody } | null
   throw new ApiError(
     response.status,
     body?.error?.code ?? "unavailable",
     body?.error?.message ?? "Paperboat is temporarily unavailable.",
+    undefined,
+    undefined,
+    traceFrom(response, body?.error),
   )
 }
 

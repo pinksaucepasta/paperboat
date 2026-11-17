@@ -19,6 +19,7 @@ import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Field, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
+import { ErrorMessage } from "@/components/error-reference"
 
 const selectClass =
   "h-9 rounded-md border border-input bg-transparent px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
@@ -216,7 +217,11 @@ export function PolicyTest({ workspace, policy, draft }: { workspace: string; po
         </div>
       </form>
 
-      {explain.isError && <p className="text-sm text-destructive">{explain.error.message}</p>}
+      {explain.isError && (
+        <p className="text-sm text-destructive">
+          <ErrorMessage error={explain.error} />
+        </p>
+      )}
       {decision && (
         <div
           className="flex flex-col gap-1 surface rounded-lg p-4 text-sm"
@@ -251,7 +256,9 @@ export function PolicyTest({ workspace, policy, draft }: { workspace: string; po
           {tests.isPending ? (
             <span className="text-muted-foreground">Running…</span>
           ) : tests.isError ? (
-            <span className="text-destructive">{tests.error.message}</span>
+            <span className="text-destructive">
+              <ErrorMessage error={tests.error} />
+            </span>
           ) : tests.data.tests.passed + tests.data.tests.failed === 0 ? (
             <span className="text-muted-foreground">The file has no tests.</span>
           ) : (

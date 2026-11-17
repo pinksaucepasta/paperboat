@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/dialog"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { CommandBlock } from "@/components/add-machine-dialog"
+import { ErrorMessage } from "@/components/error-reference"
 
 /** An interrupted update the machine could not finish or undo (withdrawn version, stuck attempt, unreachable updater); the API does not say which. */
 export const updateNeedsAttention = (machine: Machine) =>
@@ -80,7 +81,11 @@ export function MachineUpdate({ machine }: { machine: Machine }) {
               {update.current_version} → {target}. Paperboat restarts on the machine; open sessions reconnect.
             </DialogDescription>
           </DialogHeader>
-          {approve.isError && <p className="text-sm text-destructive">{approve.error.message}</p>}
+          {approve.isError && (
+            <p className="text-sm text-destructive">
+              <ErrorMessage error={approve.error} />
+            </p>
+          )}
           <DialogFooter>
             <DialogClose render={<Button variant="outline" size="lg" disabled={approve.isPending} />}>
               Cancel

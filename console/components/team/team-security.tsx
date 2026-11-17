@@ -34,6 +34,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
+import { ErrorMessage } from "@/components/error-reference"
 
 /**
  * Team → Security: verified domains, single sign-on (require it, session length, sign-up on first
@@ -43,7 +44,12 @@ import { Switch } from "@/components/ui/switch"
 export function TeamSecurity({ team, emails }: { team: Team; emails: Map<string, string> }) {
   const identity = useApiQuery(identityQuery(team.team_id))
   if (identity.isPending) return <SecuritySkeleton />
-  if (identity.isError) return <p className="text-sm text-muted-foreground">{identity.error.message}</p>
+  if (identity.isError)
+    return (
+      <p className="text-sm text-muted-foreground">
+        <ErrorMessage error={identity.error} />
+      </p>
+    )
   const data = identity.data
   if (!data.eligible) {
     return (
@@ -81,7 +87,11 @@ function PortalButton({ team, intent, children }: { team: Team; intent: PortalIn
   const portal = usePortal(team)
   return (
     <span className="flex items-center gap-2">
-      {portal.isError && <span className="text-xs text-destructive">{portal.error.message}</span>}
+      {portal.isError && (
+        <span className="text-xs text-destructive">
+          <ErrorMessage error={portal.error} />
+        </span>
+      )}
       <Button variant="outline" disabled={portal.isPending} onClick={() => portal.mutate(intent)}>
         {children}
         <ArrowSquareOutIcon data-icon="inline-end" />
@@ -233,7 +243,11 @@ function SingleSignOn({ team, identity, emails }: { team: Team; identity: TeamId
           ))}
         </select>
       </Row>
-      {failed && <p className="py-2 text-sm text-destructive">{change.error.message}</p>}
+      {failed && (
+        <p className="py-2 text-sm text-destructive">
+          <ErrorMessage error={change.error} />
+        </p>
+      )}
       <Exemptions team={team} identity={identity} emails={emails} />
 
       <AlertDialog open={Boolean(review)} onOpenChange={(open) => !open && setReview(undefined)}>
@@ -330,7 +344,11 @@ function Exemptions({ team, identity, emails }: { team: Team; identity: TeamIden
           )}
         </div>
       ))}
-      {change.isError && <span className="text-xs text-destructive">{change.error.message}</span>}
+      {change.isError && (
+        <span className="text-xs text-destructive">
+          <ErrorMessage error={change.error} />
+        </span>
+      )}
     </div>
   )
 }
@@ -405,7 +423,11 @@ function Directory({ team, identity }: { team: Team; identity: TeamIdentity }) {
           ) : (
             <p className="py-3 text-sm text-muted-foreground">The directory has no groups yet.</p>
           )}
-          {change.isError && <p className="py-2 text-sm text-destructive">{change.error.message}</p>}
+          {change.isError && (
+            <p className="py-2 text-sm text-destructive">
+              <ErrorMessage error={change.error} />
+            </p>
+          )}
         </>
       )}
       {directory.directory && (

@@ -22,6 +22,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { Field, FieldError, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
+import { ErrorMessage } from "@/components/error-reference"
 
 const lifetimes = [
   { hours: 1, label: "1 hour" },
@@ -179,7 +180,13 @@ function NewPreviewDialog({ machine, onClose }: { machine?: Machine; onClose: ()
             </Field>
             {isLimitReached(create.error) ? (
               <LimitReached error={create.error} />
-            ) : create.isError && <p className="text-sm text-destructive">{create.error.message}</p>}
+            ) : (
+              create.isError && (
+                <p className="text-sm text-destructive">
+                  <ErrorMessage error={create.error} />
+                </p>
+              )
+            )}
             <DialogFooter>
               <Button type="button" variant="secondary" size="lg" onClick={onClose} disabled={create.isPending}>
                 Cancel

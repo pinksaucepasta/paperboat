@@ -8,6 +8,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { Field, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
+import { ErrorMessage } from "@/components/error-reference"
 
 /**
  * Review, then save or restore. Lists who gains and loses access, then runs the change with the
@@ -68,7 +69,9 @@ export function ChangesDialog({
         {review && reviewed.isPending ? (
           <Skeleton className="h-20 w-full" />
         ) : reviewed.isError ? (
-          <p className="text-sm text-destructive">{reviewed.error.message}</p>
+          <p className="text-sm text-destructive">
+            <ErrorMessage error={reviewed.error} />
+          </p>
         ) : invalid ? (
           <p className="text-sm text-destructive">
             The file has {reviewed.data.errors.length} {reviewed.data.errors.length === 1 ? "error" : "errors"}. Fix
@@ -95,7 +98,11 @@ export function ChangesDialog({
             />
           </Field>
         </div>
-        {save.isError && !unconfirmed && <p className="text-sm text-destructive">{save.error.message}</p>}
+        {save.isError && !unconfirmed && (
+          <p className="text-sm text-destructive">
+            <ErrorMessage error={save.error} />
+          </p>
+        )}
         {save.isError && save.error instanceof PolicyError && save.error.details.errors?.length ? (
           <ul className="flex flex-col gap-1 text-sm">
             {save.error.details.errors.map((problem, index) => (

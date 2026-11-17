@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button"
 import { EnvRecover } from "@/components/environment/env-recover"
 import { FieldError } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
+import { ErrorMessage } from "@/components/error-reference"
 
 /**
  * An inline card at the top of the variables: the password opens the vault inside this browser and
@@ -64,7 +65,11 @@ export function EnvUnlock({
           </Button>
         </form>
       </div>
-      {unlock.isError && <FieldError>{unlock.error.message}</FieldError>}
+      {unlock.isError && (
+        <FieldError>
+          <ErrorMessage error={unlock.error} />
+        </FieldError>
+      )}
       <Button
         variant="link"
         className="h-auto self-start p-0 text-muted-foreground"

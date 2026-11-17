@@ -26,6 +26,7 @@ import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
 import { Field, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
+import { ErrorMessage } from "@/components/error-reference"
 
 type Change = "password" | "create" | "replace" | "off" | "key" | "reset"
 
@@ -204,7 +205,11 @@ function CodeDialog({
             onCancel={onClose}
           />
         ) : (
-          make.error && <p className="text-sm text-destructive">{make.error.message}</p>
+          make.error && (
+            <p className="text-sm text-destructive">
+              <ErrorMessage error={make.error} />
+            </p>
+          )
         )}
       </DialogContent>
     </Dialog>
@@ -229,7 +234,11 @@ function TurnOff({ open, onClose, onDone }: { open: boolean; onClose: () => void
             Only your password will unlock your variables. If you forget it, they can’t be recovered.
           </AlertDialogDescription>
         </AlertDialogHeader>
-        {off.isError && <p className="text-sm text-destructive">{off.error.message}</p>}
+        {off.isError && (
+          <p className="text-sm text-destructive">
+            <ErrorMessage error={off.error} />
+          </p>
+        )}
         <AlertDialogFooter>
           <AlertDialogCancel disabled={off.isPending}>Cancel</AlertDialogCancel>
           <AlertDialogAction

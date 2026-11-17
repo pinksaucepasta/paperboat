@@ -35,6 +35,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { roleLabels } from "@/lib/teams"
+import { ErrorMessage } from "@/components/error-reference"
 
 /** Install on a new computer in any workspace; in a team, also share one of your machines. */
 export function AddMachineDialog() {
@@ -275,7 +276,9 @@ function AddMachine({
           ) : isLimitReached(start.error) ? (
             <LimitReached error={start.error} removeMachines />
           ) : start.isError ? (
-            <span className="text-destructive">{start.error.message}</span>
+            <span className="text-destructive">
+              <ErrorMessage error={start.error} />
+            </span>
           ) : (
             <EnrollmentStatus
               state={state}

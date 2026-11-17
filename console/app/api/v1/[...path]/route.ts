@@ -22,6 +22,8 @@ const segment = /^[A-Za-z0-9_.:@~-]{1,256}$/
 const guestWrites = /^terminal-sessions\/[A-Za-z0-9_-]{1,128}\/(code-join|guest-browser-ticket)$/
 const forwardedRequestHeaders = ["accept", "content-type", "idempotency-key", "if-match", "last-event-id"]
 const forwardedResponseHeaders = [
+  "support-reference",
+  "request-id",
   "content-type",
   "cache-control",
   "etag",
@@ -30,17 +32,44 @@ const forwardedResponseHeaders = [
   "content-length",
 ]
 
+/** The route without ids: only word segments (`terminal-sessions`) are kept, so a log line never holds a token or id. */
+const routeOf = (path: string[]) => path.map((part) => (/^[a-z]+(-[a-z]+)*$/.test(part) ? part : ":id")).join("/")
+
+/**
+ * One reference per request: sent to the control plane (which records its failures under it) and returned in the
+ * Support-Reference header, so what the browser shows is what the control plane and this log hold. A 5xx or this
+ * relay's own refusal is logged with it.
+ */
+function logFailure(reference: string, status: number, method: string, path: string[], requestId?: string | null) {
+  if (status < 500 && status !== 403) return
+  console.error(
+    JSON.stringify({
+      msg: "console api failure",
+      support_reference: reference,
+      request_id: requestId,
+      status,
+      method,
+      route: routeOf(path),
+    }),
+  )
+}
+
 async function relay(request: Request, { params }: Context): Promise<Response> {
   const { path } = await params
+  const reference = `support_${crypto.randomUUID()}`
+  const refuse = (status: number, code: string, message: string) => {
+    logFailure(reference, status, request.method, path)
+    return problem(status, code, message, reference)
+  }
   if (path.some((part) => !segment.test(part) || part === "." || part === "..")) {
-    return problem(404, "not_found", "Not found.")
+    return problem(404, "not_found", "Not found.", reference)
   }
   const unsafe = !["GET", "HEAD"].includes(request.method)
   if (unsafe && !isSameOrigin(request)) {
-    return problem(403, "origin_failed", "Request origin is not allowed.")
+    return refuse(403, "origin_failed", "Request origin is not allowed.")
   }
 
-  const headers = new Headers()
+  const headers = new Headers({ "support-reference": reference })
   for (const name of forwardedRequestHeaders) {
     const value = request.headers.get(name)
     if (value) headers.set(name, value)
@@ -51,8 +80,8 @@ async function relay(request: Request, { params }: Context): Promise<Response> {
     headers.set("origin", consoleOrigin())
   } else if (unsafe) {
     const csrf = await csrfCredentials(cookie).catch(() => null)
-    if (csrf === null) return problem(503, "unavailable", "Paperboat is temporarily unavailable.")
-    if (!csrf) return problem(401, "unauthenticated", "Authentication is required.")
+    if (csrf === null) return refuse(503, "unavailable", "Paperboat is temporarily unavailable.")
+    if (!csrf) return problem(401, "unauthenticated", "Authentication is required.", reference)
     cookie = csrf.cookie
     issued = csrf.issued
     headers.set("x-csrf-token", csrf.token)
@@ -83,11 +112,16 @@ async function relay(request: Request, { params }: Context): Promise<Response> {
       },
       { deadline: !open },
     )
-  } catch {
-    return problem(503, "unavailable", "Paperboat is temporarily unavailable.")
+  } catch (error) {
+    logFailure(reference, 503, request.method, path)
+    console.error(
+      JSON.stringify({ msg: "control plane unreachable", support_reference: reference, cause: String(error) }),
+    )
+    return problem(503, "unavailable", "Paperboat is temporarily unavailable.", reference)
   }
+  logFailure(reference, upstream.status, request.method, path, upstream.headers.get("request-id"))
 
-  const responseHeaders = new Headers({ "cache-control": "no-store" })
+  const responseHeaders = new Headers({ "cache-control": "no-store", "support-reference": reference })
   for (const name of forwardedResponseHeaders) {
     const value = upstream.headers.get(name)
     if (value) responseHeaders.set(name, value)
@@ -100,8 +134,11 @@ async function relay(request: Request, { params }: Context): Promise<Response> {
   return response
 }
 
-function problem(status: number, code: string, message: string): Response {
-  return Response.json({ error: { code, message } }, { status, headers: { "cache-control": "no-store" } })
+function problem(status: number, code: string, message: string, reference: string): Response {
+  return Response.json(
+    { error: { code, message, support_reference: reference } },
+    { status, headers: { "cache-control": "no-store", "support-reference": reference } },
+  )
 }
 
 export { relay as GET, relay as POST, relay as PUT, relay as PATCH, relay as DELETE }

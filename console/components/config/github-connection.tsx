@@ -10,6 +10,7 @@ import { Section } from "@/components/section"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
+import { ErrorMessage } from "@/components/error-reference"
 
 /**
  * Your GitHub account link, which lets you pick your GitHub repositories under Repositories:
@@ -43,7 +44,12 @@ export function GitHubConnection() {
         </div>
       </Section>
     )
-  if (status.isError) return <p className="text-sm text-muted-foreground">{status.error.message}</p>
+  if (status.isError)
+    return (
+      <p className="text-sm text-muted-foreground">
+        <ErrorMessage error={status.error} />
+      </p>
+    )
   const data = status.data
   return (
     <Section
@@ -81,7 +87,11 @@ export function GitHubConnection() {
       {data.missing_scopes.length > 0 && (
         <p className="py-2 text-sm text-destructive">GitHub is missing access Paperboat needs; connect again to grant it.</p>
       )}
-      {connect.isError && <p className="py-2 text-sm text-destructive">{connect.error.message}</p>}
+      {connect.isError && (
+        <p className="py-2 text-sm text-destructive">
+          <ErrorMessage error={connect.error} />
+        </p>
+      )}
       <ConfirmAction
         open={disconnecting}
         onOpenChange={setDisconnecting}

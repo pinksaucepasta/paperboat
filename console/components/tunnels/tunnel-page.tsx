@@ -13,7 +13,6 @@ import { useMutation, useQueryClient } from "@tanstack/react-query"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useState } from "react"
-import { toast } from "sonner"
 import { useApiQuery, useMachines } from "@/lib/api"
 import { hostOf, patchTunnel, tunnelHealthQuery, tunnelQuery, type Tunnel } from "@/lib/tunnels"
 import { CopyRow } from "@/components/copy-button"
@@ -47,6 +46,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Skeleton } from "@/components/ui/skeleton"
 import { DangerZone, SectionHeading } from "@/components/section"
+import { ErrorMessage, errorToast } from "@/components/error-reference"
 
 /**
  * A tunnel's page, laid out like a machine's Overview: who and where it serves, the hostnames
@@ -65,7 +65,7 @@ export function TunnelPage({ id }: { id: string }) {
       <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-10 px-4 py-6 md:px-8 md:py-8">
         {query.isError ? (
           <div className="flex flex-col items-center gap-4 py-24 text-center text-sm text-muted-foreground">
-            {query.error.message}
+            <ErrorMessage error={query.error} />
             <Button variant="outline" size="sm" render={<Link href="/tunnels" />} nativeButton={false}>
               All tunnels
             </Button>
@@ -291,7 +291,7 @@ function AccessValue({ tunnel }: { tunnel: Tunnel }) {
       await queryClient.invalidateQueries({ queryKey: ["tunnel", tunnel.id] })
       await queryClient.invalidateQueries({ queryKey: ["tunnels"] })
     },
-    onError: (error) => toast.error("Couldn’t change who can open it", { description: error.message }),
+    onError: (error) => errorToast("Couldn’t change who can open it", error),
   })
   const choose = (mode: string) => {
     if (mode === tunnel.access_mode) return

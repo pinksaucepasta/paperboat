@@ -16,6 +16,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Field, FieldLabel } from "@/components/ui/field"
+import { ErrorMessage } from "@/components/error-reference"
 
 type Grant = NonNullable<Team["machine_grants"]>[number]
 type Audience = { account: string }
@@ -223,7 +224,11 @@ export function AccessForm({
           </li>
         ))}
       </ul>
-      {save.isError && <p className="text-sm text-destructive">{save.error.message}</p>}
+      {save.isError && (
+        <p className="text-sm text-destructive">
+          <ErrorMessage error={save.error} />
+        </p>
+      )}
       <DialogFooter>
         <Button type="submit" size="lg" disabled={save.isPending || unchanged || nothingToRemove}>
           {save.isPending ? "Saving…" : "Save access"}

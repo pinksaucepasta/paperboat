@@ -26,6 +26,7 @@ import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { SectionHeading } from "@/components/section"
+import { ErrorMessage } from "@/components/error-reference"
 
 
 export function TeamPage() {
@@ -212,7 +213,11 @@ function InvitationCard({ id, team, role, expires }: { id: string; team: string;
         <span className="text-muted-foreground">
           Expires <Time iso={expires} relative />
         </span>
-        {answer.isError && <span className="text-destructive">{answer.error.message}</span>}
+        {answer.isError && (
+          <span className="text-destructive">
+            <ErrorMessage error={answer.error} />
+          </span>
+        )}
       </div>
       <Button variant="outline" size="lg" disabled={answer.isPending} onClick={() => answer.mutate("decline")}>
         Decline
@@ -325,7 +330,11 @@ function CreateTeamForm() {
             : `${notLiveTitle}: teams are created free for now.`}
         </span>
       </Field>
-      {create.isError && <p className="text-sm text-destructive">{create.error.message}</p>}
+      {create.isError && (
+        <p className="text-sm text-destructive">
+          <ErrorMessage error={create.error} />
+        </p>
+      )}
       <DialogFooter>
         <Button type="submit" size="lg" disabled={!valid || create.isPending}>
           {create.isPending

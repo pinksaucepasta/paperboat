@@ -10,6 +10,7 @@ import { EditMachineDialog } from "@/components/machine-edit"
 import { RemoveMachineDialog } from "@/components/machine-remove"
 import { RowMenus, type Entry } from "@/components/row-menus"
 import { copyWithToast } from "@/lib/clipboard"
+import { errorToastOf } from "@/components/error-reference"
 
 /** Keep awake and Allow sleep are one availability setting; this switches between them. */
 export function useKeepAwake(machine: Machine) {
@@ -25,7 +26,7 @@ export function useKeepAwake(machine: Machine) {
       toast.success(mode === "keep_awake" ? `${machine.alias} stays awake` : `${machine.alias} may sleep`)
       return queryClient.invalidateQueries({ queryKey: ["machines"] })
     },
-    onError: (error) => toast.error(error.message),
+    onError: (error) => errorToastOf(error),
   })
   return {
     isPending: mutation.isPending,

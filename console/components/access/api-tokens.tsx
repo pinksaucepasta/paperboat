@@ -31,6 +31,7 @@ import { Button } from "@/components/ui/button"
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { ListSkeleton } from "@/components/skeletons"
 import { SectionHeading } from "@/components/section"
+import { ErrorMessage } from "@/components/error-reference"
 
 /** Settings → API tokens: credentials for scripts and agents that act as you in this workspace. */
 export function ApiTokens() {
@@ -70,7 +71,11 @@ export function ApiTokens() {
           <EmptyTitle>
             {missing ? "API tokens aren’t available on this server yet" : "Couldn’t load API tokens"}
           </EmptyTitle>
-          {!missing && <EmptyDescription>{tokens.error.message}</EmptyDescription>}
+          {!missing && (
+            <EmptyDescription>
+              <ErrorMessage error={tokens.error} />
+            </EmptyDescription>
+          )}
         </EmptyHeader>
       </Empty>
     )
@@ -161,7 +166,11 @@ function RevokeToken({ workspace, token, onClose }: { workspace: string; token: 
           <AlertDialogTitle>Revoke {token.name}?</AlertDialogTitle>
         </AlertDialogHeader>
         <p className="text-sm text-muted-foreground">Scripts and agents using it stop working at once.</p>
-        {revoke.isError && <p className="text-sm text-destructive">{revoke.error.message}</p>}
+        {revoke.isError && (
+          <p className="text-sm text-destructive">
+            <ErrorMessage error={revoke.error} />
+          </p>
+        )}
         <AlertDialogFooter>
           <AlertDialogCancel disabled={revoke.isPending}>Cancel</AlertDialogCancel>
           <AlertDialogAction

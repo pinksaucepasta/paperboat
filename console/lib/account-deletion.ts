@@ -1,6 +1,7 @@
 "use client"
 
 import { queryOptions } from "@tanstack/react-query"
+import { traceFrom, type ServerTrace } from "@/lib/error-reference"
 import { api, idempotencyKey, send, type Data } from "@/lib/api"
 
 /** Account deletion (F2-09, server 2026.10.23.71). */
@@ -21,9 +22,12 @@ export class DeletionError extends Error {
     readonly code: string,
     message: string,
     readonly teams?: DeletionPreview["teams_blocking"],
+    trace?: ServerTrace,
   ) {
     super(message)
+    this.reference = trace?.reference
   }
+  readonly reference?: string
 }
 
 const sentences: Record<string, string> = {
@@ -44,12 +48,19 @@ export async function deleteAccount(confirmEmail: string): Promise<void> {
   })
   if (response.ok) return
   const body = (await response.json().catch(() => null)) as {
-    error?: { code?: string; message?: string; details?: { teams?: DeletionPreview["teams_blocking"] } }
+    error?: {
+      code?: string
+      message?: string
+      details?: { teams?: DeletionPreview["teams_blocking"] }
+      support_reference?: string
+      request_id?: string
+    }
   } | null
   const code = body?.error?.code ?? "unavailable"
   throw new DeletionError(
     code,
     sentences[code] ?? body?.error?.message ?? "Paperboat is temporarily unavailable. Try again.",
     body?.error?.details?.teams,
+    traceFrom(response, body?.error),
   )
 }

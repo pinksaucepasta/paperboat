@@ -17,6 +17,7 @@ import { Section, SettingRow } from "@/components/section"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogFooter, DialogTitle } from "@/components/ui/dialog"
 import { Skeleton } from "@/components/ui/skeleton"
+import { ErrorMessage } from "@/components/error-reference"
 
 /** What can be done to a machine's sync from here; conflicts themselves are resolved in Git, on the machine. */
 export function SyncActions({ environment }: { environment: ConfigEnvironment }) {
@@ -33,7 +34,10 @@ export function SyncActions({ environment }: { environment: ConfigEnvironment })
   return (
     <Section title="Manage">
       {pending && (
-        <SettingRow label="Syncing is waiting for you" description="Read what syncing keeps in the repository, then accept.">
+        <SettingRow
+          label="Syncing is waiting for you"
+          description="Read what syncing keeps in the repository, then accept."
+        >
           <Button size="sm" onClick={() => setDialog("terms")}>
             Review and accept
           </Button>
@@ -46,7 +50,11 @@ export function SyncActions({ environment }: { environment: ConfigEnvironment })
           </Button>
         </SettingRow>
       )}
-      {approve.isError && <p className="border-b border-divider py-2 text-sm text-destructive">{approve.error.message}</p>}
+      {approve.isError && (
+        <p className="border-b border-divider py-2 text-sm text-destructive">
+          <ErrorMessage error={approve.error} />
+        </p>
+      )}
       {force && mode !== "push_only" && (
         <SettingRow label="Pull from repository" description="Replace this machine's files with the repository's.">
           <Button variant="outline" size="sm" onClick={() => setDialog("force_pull")}>
@@ -73,7 +81,9 @@ export function SyncActions({ environment }: { environment: ConfigEnvironment })
         <ConfirmAction
           open
           onOpenChange={(open) => !open && setDialog(null)}
-          title={dialog === "force_pull" ? `Pull over ${environment.alias}'s files?` : "Push over the repository's files?"}
+          title={
+            dialog === "force_pull" ? `Pull over ${environment.alias}'s files?` : "Push over the repository's files?"
+          }
           description={
             dialog === "force_pull"
               ? "The repository's version replaces the files here, conflicts included. Replaced versions stay in Git history."
@@ -133,14 +143,20 @@ function Terms({
         <DialogTitle>Sync {environment.alias}’s config</DialogTitle>
         <div className="flex flex-col gap-2 text-sm text-muted-foreground">
           {warning.isError ? (
-            <p className="text-destructive">{warning.error.message}</p>
+            <p className="text-destructive">
+              <ErrorMessage error={warning.error} />
+            </p>
           ) : !warning.data ? (
             Array.from({ length: 4 }, (_, index) => <Skeleton key={index} className="my-0.5 h-4 w-full" />)
           ) : (
             facts.map((fact) => <p key={fact}>{fact}</p>)
           )}
         </div>
-        {accept.isError && <p className="text-sm text-destructive">{accept.error.message}</p>}
+        {accept.isError && (
+          <p className="text-sm text-destructive">
+            <ErrorMessage error={accept.error} />
+          </p>
+        )}
         <DialogFooter>
           <Button variant="outline" size="lg" onClick={onClose} disabled={accept.isPending}>
             Cancel

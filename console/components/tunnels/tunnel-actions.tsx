@@ -9,6 +9,7 @@ import { ConfirmAction } from "@/components/list-toolbar"
 import type { Entry } from "@/components/row-menus"
 import { RenameTunnelDialog } from "@/components/tunnels/tunnel-rename"
 import { copyWithToast } from "@/lib/clipboard"
+import { errorToast } from "@/components/error-reference"
 
 /**
  * What can be done to a tunnel, shared by its row menu (and right-click) in the list and its
@@ -29,10 +30,7 @@ export function useTunnelActions(tunnel: Tunnel, { onDeleted }: { onDeleted?: ()
       await refresh()
       toast.success(paused ? `${tunnel.name} resumed` : `${tunnel.name} paused`)
     },
-    onError: (error) =>
-      toast.error(paused ? "Couldn’t resume the tunnel" : "Couldn’t pause the tunnel", {
-        description: error.message,
-      }),
+    onError: (error) => errorToast(paused ? "Couldn’t resume the tunnel" : "Couldn’t pause the tunnel", error),
   })
 
   const entries: Entry[] = [

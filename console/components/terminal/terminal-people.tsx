@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
+import { ErrorMessage } from "@/components/error-reference"
 
 export const roleLabels = { owner: "Owner", interactive: "Can type", viewer: "Watching" } as const
 
@@ -225,7 +226,11 @@ function RemoveParticipant({
             {name} is disconnected and can’t rejoin until you share this terminal with them again.
           </AlertDialogDescription>
         </AlertDialogHeader>
-        {remove.isError && <p className="text-sm text-destructive">{remove.error.message}</p>}
+        {remove.isError && (
+          <p className="text-sm text-destructive">
+            <ErrorMessage error={remove.error} />
+          </p>
+        )}
         <AlertDialogFooter>
           <AlertDialogCancel disabled={remove.isPending}>Cancel</AlertDialogCancel>
           <AlertDialogAction

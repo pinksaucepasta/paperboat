@@ -21,6 +21,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Field, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
+import { ErrorMessage } from "@/components/error-reference"
 
 /*
  * Activity → Streaming: the team's audit log sent to a SIEM as it happens, at most one HTTPS and
@@ -125,7 +126,11 @@ function Destination({
             <p className="border-b border-divider py-3 text-sm text-destructive">Last error: {stream.last_error}</p>
           )}
           {test.isSuccess && <p className="py-2 text-sm text-muted-foreground">Test event delivered.</p>}
-          {test.isError && <p className="py-2 text-sm text-destructive">{test.error.message}</p>}
+          {test.isError && (
+            <p className="py-2 text-sm text-destructive">
+              <ErrorMessage error={test.error} />
+            </p>
+          )}
           {canConfigure && (
             <Button variant="ghost" className="mt-2 self-start text-destructive" onClick={() => setRemoving(true)}>
               Stop streaming
@@ -285,7 +290,11 @@ function StreamDialog({
                 <p className="text-xs text-muted-foreground">The key only needs permission to put objects under the prefix.</p>
               </>
             )}
-            {save.isError && <p className="text-sm text-destructive">{save.error.message}</p>}
+            {save.isError && (
+              <p className="text-sm text-destructive">
+                <ErrorMessage error={save.error} />
+              </p>
+            )}
             <DialogFooter>
               <Button type="submit" size="lg" disabled={save.isPending}>
                 {save.isPending ? "Checking…" : stream ? "Save" : "Start streaming"}

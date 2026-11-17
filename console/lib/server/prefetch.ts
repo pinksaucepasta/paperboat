@@ -33,11 +33,26 @@ const request = cache(async () => {
         signal: AbortSignal.timeout(3_000),
       })
       if (response.status === 401 && path === "me") state.ended = true
-      if (!response.ok) return
+      if (!response.ok) {
+        // Left out for the browser to ask again; the control plane's reference ties this line to its own records.
+        if (response.status >= 500)
+          console.error(
+            JSON.stringify({
+              msg: "console prefetch failure",
+              support_reference: response.headers.get("support-reference"),
+              status: response.status,
+              path: path.split("/", 1)[0],
+            }),
+          )
+        return
+      }
       const body = (await response.json()) as { data?: T }
       // A wrong shape is left out like any failure: the browser asks again and shows the named error.
       return checkResponse("GET", path, body.data) ? undefined : body.data
-    } catch {
+    } catch (error) {
+      console.error(
+        JSON.stringify({ msg: "console prefetch unreachable", path: path.split("/", 1)[0], cause: String(error) }),
+      )
       return
     }
   }

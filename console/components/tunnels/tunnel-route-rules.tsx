@@ -17,6 +17,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { Field, FieldError, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
+import { ErrorMessage } from "@/components/error-reference"
 
 /*
  * Header and URL rules of one route, shown from the route's "Edit rules…" menu entry. The limits and the
@@ -298,7 +299,11 @@ export function RouteRulesDialog({ tunnel, route, onClose }: { tunnel: Tunnel; r
               )
             })}
           </Field>
-          {save.isError && <p className="text-sm text-destructive">{save.error.message}</p>}
+          {save.isError && (
+            <p className="text-sm text-destructive">
+              <ErrorMessage error={save.error} />
+            </p>
+          )}
           <DialogFooter>
             <Button type="button" variant="secondary" size="lg" onClick={onClose} disabled={save.isPending}>
               Cancel

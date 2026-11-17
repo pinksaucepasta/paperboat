@@ -16,6 +16,7 @@ import {
 import { ChangesDialog } from "@/components/access/changes-dialog"
 import { Time } from "@/components/time"
 import { Button } from "@/components/ui/button"
+import { ErrorMessage } from "@/components/error-reference"
 
 /** The policy as a file: a plain editor with line numbers, checked by the server as you type. */
 export function PolicyEditor({
@@ -115,7 +116,12 @@ function ValidationResult({
   error: Error | null
   checking: boolean
 }) {
-  if (error) return <p className="text-sm text-destructive">{error.message}</p>
+  if (error)
+    return (
+      <p className="text-sm text-destructive">
+        <ErrorMessage error={error} />
+      </p>
+    )
   if (!validation) return <p className="text-sm text-muted-foreground">Checking…</p>
   const { passed, failed } = validation.tests
   return (

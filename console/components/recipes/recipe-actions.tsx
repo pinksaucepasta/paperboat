@@ -20,6 +20,7 @@ import {
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
 import { Field, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
+import { ErrorMessage } from "@/components/error-reference"
 
 const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`
 const names = (impact: Impact) => impact.machines.map((machine) => machine.name).join(", ")
@@ -90,7 +91,11 @@ export function RevokeRecipe({ workspace, recipe, onClose, onDone }: Props & { o
             <Input id="revoke-code" value={typed} autoComplete="off" onChange={(event) => setTyped(event.target.value.trim())} />
           </Field>
         )}
-        {error && <p className="text-sm text-destructive">{error.message}</p>}
+        {error && (
+          <p className="text-sm text-destructive">
+            <ErrorMessage error={error} />
+          </p>
+        )}
         <AlertDialogFooter>
           <AlertDialogCancel disabled={revoke.isPending}>Cancel</AlertDialogCancel>
           <AlertDialogAction
@@ -193,7 +198,11 @@ function RotateHere({ workspace, recipe, onClose }: Props) {
             <Input id="rotate-code" value={typed} autoComplete="off" onChange={(event) => setTyped(event.target.value.trim())} />
           </Field>
         )}
-        {error && <p className="text-sm text-destructive">{error.message}</p>}
+        {error && (
+          <p className="text-sm text-destructive">
+            <ErrorMessage error={error} />
+          </p>
+        )}
         <AlertDialogFooter>
           <AlertDialogCancel disabled={rotate.isPending}>Cancel</AlertDialogCancel>
           <AlertDialogAction
