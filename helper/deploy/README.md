@@ -139,10 +139,17 @@ a retry. Runtime JWKS is loaded at
 startup; issuer-key updates also require a controlled service restart. Existing
 streams close on restart and are not replayed by the data-plane node.
 
-The package builder has no embedded Sentry DSN. Runtime reporting is disabled unless
-explicitly configured with `PAPERBOAT_SENTRY_ENABLED`, `PAPERBOAT_SENTRY_DSN`, and
-`PAPERBOAT_SENTRY_RELEASE` in service environment. Set
-`PAPERBOAT_SENTRY_ENABLED=false` to disable reporting. Runtime reporting excludes
+The package builder has no embedded Sentry DSN, and `pbh` itself reports only when its service
+environment sets `PAPERBOAT_SENTRY_ENABLED`, `PAPERBOAT_SENTRY_DSN` and
+`PAPERBOAT_SENTRY_RELEASE`; `PAPERBOAT_SENTRY_ENABLED=false` disables it. The relay and edge
+containers report when the installation holds an owner-only (mode 0600, at most 4 KiB) file
+`/var/lib/paperboat-selfhost/sentry-dsn` with the DSN: when it starts a container `pbh` passes
+`PAPERBOAT_SENTRY_ENABLED=true` and `PAPERBOAT_SENTRY_DSN_FILE=<that path>` (the path, never the
+DSN, so it is not in the process list or `docker inspect`). The release is the image's own
+(`paperboat-relay:<version>` / `paperboat-edge:<version>`, baked in by the image build). A running
+container with an unchanged image is adopted as it is, so a new DSN file takes effect with the next
+image (`pbh install --relay-image … --edge-image …`) or after removing the container. Runtime
+reporting excludes
 private traffic, credential values, headers, URLs, raw errors, locals, and command
 arguments; public browser traffic still has the edge trust boundary described above.
 

@@ -13,8 +13,7 @@ WORKDIR /src/relay
 RUN printf '%s\n' "${PAPERBOAT_VERSION}" | grep -Eq '^[0-9]{4}\.[0-9]{2}\.[0-9]{2}\.(0|[1-9][0-9]*)$' \
   && case "${PAPERBOAT_SENTRY_DSN}" in '') ;; *[!A-Za-z0-9:/@.-]*) exit 1 ;; esac \
   && { test -z "${PAPERBOAT_SENTRY_DSN}" || printf '%s\n' "${PAPERBOAT_SENTRY_DSN}" | grep -Eq '^https://[A-Za-z0-9]+@[A-Za-z0-9.-]+(:[0-9]+)?/[A-Za-z0-9/.-]+$'; } \
-  && sentry_release= \
-  && if test -n "${PAPERBOAT_SENTRY_DSN}"; then sentry_release="paperboat-relay:${PAPERBOAT_VERSION}"; fi \
+  && sentry_release="paperboat-relay:${PAPERBOAT_VERSION}" \
   && CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -trimpath -ldflags "-s -w -X main.version=${PAPERBOAT_VERSION} -X github.com/pinksaucepasta/paperboat/shared/reporting.DefaultDSN=${PAPERBOAT_SENTRY_DSN} -X github.com/pinksaucepasta/paperboat/shared/reporting.DefaultRelease=${sentry_release}" -o /out/paperboat-relay ./cmd/paperboat-relay \
   && { test -z "${PAPERBOAT_SENTRY_DSN}" || grep -qF "${PAPERBOAT_SENTRY_DSN}" /out/paperboat-relay; } \
   && cp "$(go list -m -f '{{.Dir}}' tailscale.com)/LICENSE" /out/tailscale.LICENSE

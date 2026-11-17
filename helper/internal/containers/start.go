@@ -34,9 +34,34 @@ func (l *Launcher) startContainer(ctx context.Context, capability, image string)
 	return l.startContainerNamed(ctx, capability, image, containerName(installationOwner(l.StateDir), capability))
 }
 
+// SentryDSNFile is the optional owner-only file in the state directory that holds the Sentry DSN for the relay and edge
+// containers. The containers get its path (the state directory is mounted at the same path) and the enabling switch,
+// never the DSN itself: a value in `docker run -e` would show in the process list and `docker inspect`. The release
+// is the image build's (paperboat-<service>:<version>). Without the file the containers report nothing.
+const SentryDSNFile = "sentry-dsn"
+
+const maxSentryDSNBytes = 4096
+
+func sentryEnvironment(stateDir string) ([]string, error) {
+	path := filepath.Join(stateDir, SentryDSNFile)
+	info, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil || !info.Mode().IsRegular() || info.Size() > maxSentryDSNBytes || info.Mode().Perm()&0o077 != 0 {
+		return nil, errors.New("Sentry DSN file " + path + " must be a regular file of at most 4 KiB with owner-only permissions (mode 0600); fix or remove it")
+	}
+	return []string{"--env", "PAPERBOAT_SENTRY_ENABLED=true", "--env", "PAPERBOAT_SENTRY_DSN_FILE=" + path}, nil
+}
+
 func (l *Launcher) startContainerNamed(ctx context.Context, capability, image, name string) error {
 	owner := installationOwner(l.StateDir)
 	args := []string{"run", "-d", "--name", name, "--label", ownerLabel + "=" + owner, "--network", "host", "--user", "0:0", "--cap-drop", "ALL", "--cap-add", "NET_BIND_SERVICE", "--security-opt", "no-new-privileges", "--read-only", "--tmpfs", "/tmp:rw,nosuid,nodev,size=16m", "--mount", bindMount(l.StateDir, false)}
+	sentry, err := sentryEnvironment(l.StateDir)
+	if err != nil {
+		return err
+	}
+	args = append(args, sentry...)
 	seen := map[string]bool{}
 	for _, path := range l.ReadOnlyFiles {
 		if path == "" || seen[path] {

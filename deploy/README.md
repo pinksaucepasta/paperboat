@@ -151,6 +151,11 @@ After each host, check that its node row heartbeats (`control_tunnel_nodes.last_
 the edge logs show no `route_invalid`/`edge_route_reconcile_failed` before touching the next.
 Rolling back is the same command with the previous image tags.
 
+Edge and relay report to Sentry only when the host holds `/var/lib/paperboat-selfhost/sentry-dsn` (root-owned,
+mode 0600, the project DSN); `pbh` passes its path to the containers it starts, the image build supplies the
+release (`paperboat-edge:<version>`). Write the file before the `pbh install` of the new images: a container
+whose image did not change is adopted as it is and would keep running without it.
+
 ## Deploy procedure for any lane (server and edges)
 
 Any lane may deploy its own server or edge change with this procedure. The order is fixed; skip

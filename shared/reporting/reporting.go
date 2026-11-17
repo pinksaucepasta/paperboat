@@ -91,7 +91,11 @@ func New(component string) (*Reporter, error) {
 			return &Reporter{component: component, localFault: writeLocalFault}, nil
 		}
 	}
-	dsn := firstNonempty(os.Getenv("PAPERBOAT_SENTRY_DSN"), DefaultDSN)
+	envDSN, err := dsnFromEnvironment()
+	if err != nil {
+		return nil, err
+	}
+	dsn := firstNonempty(envDSN, DefaultDSN)
 	release := firstNonempty(os.Getenv("PAPERBOAT_SENTRY_RELEASE"), DefaultRelease)
 	if enabledText == "" && strings.TrimSpace(DefaultDSN) == "" {
 		return &Reporter{component: component, localFault: writeLocalFault}, nil
@@ -166,6 +170,28 @@ func (r *Reporter) PersistFloodState(path string) {
 	if r != nil && r.flood != nil {
 		r.flood.SetPath(path)
 	}
+}
+
+// dsnFromEnvironment reads PAPERBOAT_SENTRY_DSN, or the file PAPERBOAT_SENTRY_DSN_FILE names: pbh hands the DSN to
+// its containers as a file so it is not on a command line or in `docker inspect` (the server does the same).
+func dsnFromEnvironment() (string, error) {
+	if dsn := strings.TrimSpace(os.Getenv("PAPERBOAT_SENTRY_DSN")); dsn != "" {
+		return dsn, nil
+	}
+	path := strings.TrimSpace(os.Getenv("PAPERBOAT_SENTRY_DSN_FILE"))
+	if path == "" {
+		return "", nil
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return "", errors.New("PAPERBOAT_SENTRY_DSN_FILE cannot be read")
+	}
+	defer file.Close()
+	data, err := io.ReadAll(io.LimitReader(file, 4097))
+	if err != nil || len(data) > 4096 {
+		return "", errors.New("PAPERBOAT_SENTRY_DSN_FILE must be a readable file of at most 4 KiB")
+	}
+	return strings.TrimSpace(string(data)), nil
 }
 
 func firstNonempty(value, fallback string) string {

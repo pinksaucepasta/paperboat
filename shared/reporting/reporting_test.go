@@ -9,6 +9,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -763,5 +765,34 @@ func TestObserveFailureKeepsTheResponder(t *testing.T) {
 	fault := reporter.ObserveFailure(ctx, "control_request", fmt.Errorf("attempt: %w", answeredFailure{pathedFailure{"/v1/edge/usage-reports"}}))
 	if fault.Responder != "server request req_1" || fault.ResponseBody != `{"code":"x"}` || fault.Path != "/v1/edge/usage-reports" {
 		t.Fatalf("fault = %+v", fault)
+	}
+}
+
+// pbh passes the DSN to relay/edge containers as a file, with the release taken from the image build.
+func TestDSNFileEnablesReportingWithImageRelease(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "dsn")
+	if err := os.WriteFile(file, []byte(" https://public@example.invalid/1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	old := DefaultRelease
+	DefaultRelease = "paperboat-edge:2026.11.17.1"
+	defer func() { DefaultRelease = old }()
+	t.Setenv("PAPERBOAT_SENTRY_ENABLED", "true")
+	t.Setenv("PAPERBOAT_SENTRY_DSN_FILE", file)
+	reporter, err := New("paperboat-edge")
+	if err != nil || !reporter.enabled {
+		t.Fatalf("DSN file rejected: %v", err)
+	}
+	reporter.Close()
+	t.Setenv("PAPERBOAT_SENTRY_DSN_FILE", file+".missing")
+	if _, err := New("paperboat-edge"); err == nil || strings.Contains(err.Error(), "example.invalid") {
+		t.Fatalf("missing DSN file: %v", err)
+	}
+	if err := os.WriteFile(file, []byte(strings.Repeat("x", 5000)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PAPERBOAT_SENTRY_DSN_FILE", file)
+	if _, err := New("paperboat-edge"); err == nil {
+		t.Fatal("oversized DSN file accepted")
 	}
 }
