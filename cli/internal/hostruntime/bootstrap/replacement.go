@@ -37,6 +37,7 @@ type replacementMarker struct {
 
 // ReplacementPath is where the note lives; pb reset keeps it through its wipe.
 func ReplacementPath() (string, error) {
+	//paperboat:allow-source-policy raw-user-path owner=pairing reason=interactive-user-config-note
 	directory, err := os.UserConfigDir()
 	if err != nil {
 		return "", err

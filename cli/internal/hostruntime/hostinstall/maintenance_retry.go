@@ -24,6 +24,7 @@ func completeMaintenanceRetrying(budget, gap time.Duration, attempt func(context
 		if err == nil || !time.Now().Add(gap).Before(deadline) {
 			return err
 		}
+		//paperboat:allow-source-policy sleep owner=hostruntime-install reason=bounded-commit-fence-retry
 		time.Sleep(gap)
 	}
 }

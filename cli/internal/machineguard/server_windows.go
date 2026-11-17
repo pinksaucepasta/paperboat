@@ -223,6 +223,7 @@ func replaceGuardFile(source, target string) error {
 			}
 			return replaceStateFile(source, target)
 		}
+		//paperboat:allow-source-policy sleep owner=machineguard reason=bounded-running-image-replace-retry
 		time.Sleep(100 * time.Millisecond)
 	}
 }

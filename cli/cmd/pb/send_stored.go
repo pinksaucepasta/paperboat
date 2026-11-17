@@ -62,6 +62,7 @@ func sendStoredFiles(ctx context.Context, command *cobra.Command, client *api.Cl
 	if err := client.PutStoredFile(ctx, request.RequestID, metadata); err != nil {
 		return friendlyCommandError(err)
 	}
+	//paperboat:allow-source-policy default-http owner=send-stored reason=per-part-context-timeout-no-redirect
 	bucket := &http.Client{Transport: http.DefaultTransport, CheckRedirect: func(*http.Request, []*http.Request) error { return errors.New("bucket redirects are refused") }}
 	put := recordingcontrol.PutObject(bucket)
 	for first := 0; first < len(prepared.Parts); first += teambucket.MaxSegmentsPerBatch {

@@ -137,6 +137,7 @@ func replaceRetrying(from, to *uint16) error {
 		if err == nil || !busy || time.Now().After(deadline) {
 			return err
 		}
+		//paperboat:allow-source-policy sleep owner=atomicfile reason=bounded-file-replacement-retry
 		time.Sleep(100 * time.Millisecond)
 	}
 }

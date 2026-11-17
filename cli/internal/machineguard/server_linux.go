@@ -36,6 +36,7 @@ func peerUID(conn *net.UnixConn) (uint32, error) {
 	}
 	var cred *unix.Ucred
 	var e error
+	//paperboat:allow-source-policy raw-peercred owner=machineguard reason=peer-uid-binds-connection-owner
 	err = raw.Control(func(fd uintptr) { cred, e = unix.GetsockoptUcred(int(fd), unix.SOL_SOCKET, unix.SO_PEERCRED) })
 	if err != nil || e != nil {
 		return 0, errors.Join(err, e)

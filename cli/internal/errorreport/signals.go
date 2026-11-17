@@ -224,6 +224,7 @@ func Transport(base http.RoundTripper, origin string) http.RoundTripper {
 }
 func TransportOperation(base http.RoundTripper, origin, operation string) http.RoundTripper {
 	if base == nil {
+		//paperboat:allow-source-policy default-http owner=errorreport reason=instrument-standard-transport-fallback
 		base = http.DefaultTransport
 	}
 	u, err := url.Parse(origin)

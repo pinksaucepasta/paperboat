@@ -48,6 +48,7 @@ func removeGuardImage(path string, timeout time.Duration) error {
 		if err == nil || errors.Is(err, os.ErrNotExist) || !lockedGuardImage(err) || time.Now().After(deadline) {
 			return err
 		}
+		//paperboat:allow-source-policy sleep owner=machineguard reason=bounded-locked-image-remove-retry
 		time.Sleep(100 * time.Millisecond)
 	}
 }

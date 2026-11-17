@@ -64,6 +64,7 @@ func peerUID(conn *net.UnixConn) (uint32, error) {
 	var cred *unix.Xucred
 	var optionErr error
 	err = raw.Control(func(fd uintptr) {
+		//paperboat:allow-source-policy raw-peercred owner=machineguard reason=peer-uid-binds-connection-owner
 		cred, optionErr = unix.GetsockoptXucred(int(fd), unix.SOL_LOCAL, unix.LOCAL_PEERCRED)
 	})
 	if err != nil || optionErr != nil || cred == nil {

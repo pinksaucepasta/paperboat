@@ -12,6 +12,7 @@ import (
 
 	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=direct-peer-contacts
 	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
+	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=direct-peer-contacts
 	"tailscale.com/ipn/ipnstate"
 	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=direct-peer-contacts
 	"tailscale.com/tailcfg"

@@ -89,6 +89,7 @@ func attributeOwnerState(tuple socketTuple, lookup lookupOwners, live bool) (uin
 			if wait <= 0 {
 				break
 			}
+			//paperboat:allow-source-policy sleep owner=machineguard reason=bounded-kernel-attribution-retry
 			time.Sleep(wait)
 		}
 		owners, lookupErr := lookup(tuple)

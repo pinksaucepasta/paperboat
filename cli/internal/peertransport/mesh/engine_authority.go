@@ -9,6 +9,7 @@ import (
 	"net/netip"
 	"slices"
 
+	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=network-key-custody
 	"tailscale.com/types/key"
 )
 

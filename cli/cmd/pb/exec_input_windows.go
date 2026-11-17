@@ -123,6 +123,7 @@ func execCoalescePipe(handle windows.Handle, file *os.File, value []byte, n int)
 		}
 		if available == 0 {
 			idle++
+			//paperboat:allow-source-policy sleep owner=exec-input reason=bounded-pipe-coalesce-pacing
 			time.Sleep(time.Millisecond)
 			continue
 		}

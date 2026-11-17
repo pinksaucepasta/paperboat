@@ -22,6 +22,7 @@ func (s *sharedGateway) serve() {
 			}
 			var transient interface{ Temporary() bool }
 			if errors.As(err, &transient) && transient.Temporary() {
+				//paperboat:allow-source-policy sleep owner=machineguard reason=transient-accept-spin-pacing
 				time.Sleep(50 * time.Millisecond)
 				continue
 			}

@@ -116,6 +116,7 @@ func fetchLoopbackPAC(ctx context.Context, url string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	//paperboat:allow-source-policy default-http owner=private-preview reason=bounded-loopback-fetch-context-timeout
 	response, err := http.DefaultClient.Do(request)
 	if err != nil {
 		return "", fmt.Errorf("read the private preview PAC: %w", err)

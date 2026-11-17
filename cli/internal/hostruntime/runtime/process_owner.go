@@ -159,6 +159,7 @@ func (o *ProcessOwner) HandleUpdateGate(ctx context.Context, r hostdproto.Update
 		return hostdproto.UpdateGateResponse{}, err
 	}
 	req.Header.Set("X-Paperboat-Owner-Capability", base64.RawURLEncoding.EncodeToString(o.token))
+	//paperboat:allow-source-policy default-http owner=process-owner reason=socket-timeout-bounds-loopback-call
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return hostdproto.UpdateGateResponse{}, err
@@ -180,6 +181,7 @@ func (o *ProcessOwner) OpenSSHStreams(ctx context.Context) (int, error) {
 		return 0, err
 	}
 	req.Header.Set("X-Paperboat-Owner-Capability", base64.RawURLEncoding.EncodeToString(o.token))
+	//paperboat:allow-source-policy default-http owner=process-owner reason=socket-timeout-bounds-loopback-call
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return 0, err

@@ -9,6 +9,7 @@ import (
 
 	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=authorized-regional-control
 	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
+	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=authorized-regional-control
 	"tailscale.com/types/key"
 )
 

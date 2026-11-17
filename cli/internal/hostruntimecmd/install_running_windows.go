@@ -191,6 +191,7 @@ func removeElevationExecutable(path string) error {
 		if err = os.Remove(path); err == nil || runtimeCausesOnly(err, os.ErrNotExist) {
 			return nil
 		}
+		//paperboat:allow-source-policy sleep owner=hostruntime-install reason=bounded-exiting-helper-delete-retry
 		time.Sleep(elevationExecutableRemoveWait)
 	}
 	return err

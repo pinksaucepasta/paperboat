@@ -143,6 +143,7 @@ func (w *outputWriter) flush(ctx context.Context, session *managedSession) error
 
 func (w *outputWriter) run() {
 	for range w.wake {
+		//paperboat:allow-source-policy sleep owner=hostruntime-session reason=grouped-commit-batch-pacing
 		time.Sleep(outputCommitInterval)
 		w.commit()
 	}

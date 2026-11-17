@@ -94,6 +94,7 @@ func (p *transferProgress) finish(state string, total int64) {
 		if idle {
 			return
 		}
+		//paperboat:allow-source-policy sleep owner=send-progress reason=bounded-background-report-drain
 		time.Sleep(20 * time.Millisecond)
 	}
 }

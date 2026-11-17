@@ -15,23 +15,41 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 	"go4.org/netipx"
+	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=upstream-engine-assembly
 	"tailscale.com/disco"
+	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=upstream-engine-assembly
 	"tailscale.com/net/dns"
+	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=upstream-engine-assembly
 	"tailscale.com/net/tsaddr"
+	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=upstream-engine-assembly
 	"tailscale.com/tailcfg"
+	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=upstream-engine-assembly
 	"tailscale.com/tailcfg/peercap"
+	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=upstream-engine-assembly
 	"tailscale.com/tsd"
+	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=upstream-engine-assembly
 	"tailscale.com/types/key"
+	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=upstream-engine-assembly
 	"tailscale.com/types/logger"
+	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=upstream-engine-assembly
 	"tailscale.com/types/netmap"
+	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=upstream-engine-assembly
 	"tailscale.com/types/nettype"
+	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=upstream-engine-assembly
 	"tailscale.com/util/mak"
+	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=upstream-engine-assembly
 	"tailscale.com/wgengine"
+	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=upstream-engine-assembly
 	"tailscale.com/wgengine/filter"
+	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=upstream-engine-assembly
 	"tailscale.com/wgengine/filter/filtertype"
+	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=upstream-engine-assembly
 	"tailscale.com/wgengine/magicsock"
+	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=upstream-engine-assembly
 	"tailscale.com/wgengine/netstack"
+	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=upstream-engine-assembly
 	"tailscale.com/wgengine/router"
+	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=upstream-engine-assembly
 	"tailscale.com/wgengine/wgcfg"
 )
 

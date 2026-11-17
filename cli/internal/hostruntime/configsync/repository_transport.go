@@ -115,6 +115,7 @@ var installRepositoryTransports sync.Once
 func initRepositoryTransports() {
 	installRepositoryTransports.Do(func() {
 		// Redirects can change the exact granted resource or expose Authorization.
+		//paperboat:allow-source-policy default-http owner=config-sync reason=caller-context-bounds-git-transfer
 		hc := &http.Client{Transport: http.DefaultTransport.(*http.Transport).Clone(), CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 		client.InstallProtocol("https", githttp.NewClient(hc))
 		client.InstallProtocol("http", githttp.NewClient(hc))

@@ -581,6 +581,7 @@ func (connection *browserTerminal) readBroadcast(ws *browserWSConn, machinePubli
 		// decrypted and verified), which starved the worker's timers that post events to the page: the page froze ~0.1 MB
 		// in (W9). Yield after a slice of work; records arriving meanwhile overflow the queue and resync as designed.
 		if time.Since(busySince) > broadcastWorkSlice {
+			//paperboat:allow-source-policy sleep owner=browserterminal reason=wasm-event-loop-cooperative-yield
 			time.Sleep(time.Millisecond)
 			busySince = time.Now()
 		}

@@ -272,6 +272,7 @@ func waitGuardTaskStopped(ctx context.Context) {
 		if err == nil && !bytes.Contains(output, []byte("Running")) {
 			return
 		}
+		//paperboat:allow-source-policy sleep owner=machineguard reason=bounded-task-stop-poll
 		time.Sleep(250 * time.Millisecond)
 	}
 }

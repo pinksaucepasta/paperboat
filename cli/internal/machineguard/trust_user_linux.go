@@ -729,6 +729,7 @@ func clearLinuxUserTrustCache() {
 }
 
 func linuxUserTrustStateDirectory(home string, uid uint32, create bool) (string, error) {
+	//paperboat:allow-source-policy raw-user-path owner=machineguard reason=user-daemon-home-validated
 	config, err := os.UserConfigDir()
 	if err != nil {
 		return "", err

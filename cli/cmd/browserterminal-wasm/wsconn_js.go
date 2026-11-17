@@ -238,6 +238,7 @@ func (connection *browserWSConn) Write(data []byte) (written int, err error) {
 		if !deadline.IsZero() && time.Until(deadline) < delay {
 			delay = time.Until(deadline)
 		}
+		//paperboat:allow-source-policy sleep owner=browserterminal reason=bounded-write-backpressure-poll
 		time.Sleep(delay)
 	}
 	if connection.socket.Get("readyState").Int() != 1 {
