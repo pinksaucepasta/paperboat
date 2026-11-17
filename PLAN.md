@@ -5974,3 +5974,4 @@ Disable accept while `stored_uploaded=false`; show pending, approved/receiving, 
 2026-11-16 | OFFLINE-FILES-2 deploy blocker fixed | main's server image build failed since 00977f271 (server/go.mod lacked BurntSushi/toml); fixed in 81626a639. M/W cells via X-48; console requests list is Lane C.
 
 2026-11-16 | PR-03 ITEM 3 client | 7b887debb, 13c986d21, a1e0c8cc9, 6a9b4e61d: worker-only server wait; local carrier/daemon pushes, active-worker fence and timer/user-only fallback. Linux runtime vet PASS; CI 43854624004 and cross-platform 43854590985 pending; no device/budget ticks.
+2026-11-18 | TUNNEL-SUBDOMAIN | branch tunnel-subdomain (rebased, not pushed: needs server+console+cli together): owner changes a tunnel address (PATCH subdomain, availability check, pb tunnel address, console dialog); History section removed from tunnel and preview pages.
