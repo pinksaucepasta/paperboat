@@ -278,7 +278,8 @@ func (c *Client) doTunnelRequest(ctx context.Context, method, requestPath string
 		}
 	}
 	machineToken := ""
-	if c.machineAuth != nil && (machineAuthorizedRequest(method, req.URL.Path) || hostProofRequested(ctx)) {
+	// The host proof signs the mutation only: the read that follows an operation-only answer has no Idempotency-Key.
+	if c.machineAuth != nil && (machineAuthorizedRequest(method, req.URL.Path) || hostProofRequested(ctx) && method != http.MethodGet) {
 		token, tokenErr := c.machineAuth.Token(ctx)
 		machineToken = token
 		if tokenErr != nil {

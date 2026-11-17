@@ -652,3 +652,27 @@ func TestTunnelDeleteCarriesTheMachineProofOnlyForThisMachinesTunnel(t *testing.
 		t.Fatalf("authorization = %q", auths)
 	}
 }
+
+// A pause answered with only an operation reads the tunnel back in the host-proof context; that read must not
+// demand the mutation's Idempotency-Key (pb tunnel pause/resume of this machine's tunnel exited 1 after the change).
+func TestTunnelPauseWithHostProofReadsTheTunnelBackWithoutAProof(t *testing.T) {
+	tunnel := validTunnelTestValue()
+	var getAuth string
+	client := tunnelTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			getAuth = r.Header.Get("Authorization")
+			w.Header().Set("ETag", tunnel.ETag)
+			writeTunnelTestData(t, w, tunnel)
+			return
+		}
+		writeTunnelTestData(t, w, TunnelMutation{Operation: validTunnelOperationTestValue("tunnel", "tun_1")})
+	})
+	client.SetMachineAuth(machineAuthTestSource{})
+	out, err := client.ChangeTunnelStateV1(WithHostProof(context.Background()), "tun_1", "pause", tunnel.ETag, "idem_1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Tunnel.ID != tunnel.ID || getAuth != "Bearer client-token" {
+		t.Fatalf("tunnel = %q, read authorization = %q", out.Tunnel.ID, getAuth)
+	}
+}
