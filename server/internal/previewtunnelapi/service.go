@@ -4,13 +4,13 @@ import (
 	"bytes"
 	"context"
 	"github.com/google/uuid"
+	"github.com/pinksaucepasta/paperboat/shared/tunnelv1"
 
 	"database/sql"
 
 	"encoding/json"
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
 	"github.com/pinksaucepasta/paperboat/server/internal/previewtunnelstore"
@@ -37,22 +37,7 @@ func NewService(store *previewtunnelstore.Store, cursorKey []byte) (*Service, er
 	return &Service{store: store, cursors: cursors}, nil
 }
 
-type Operation struct {
-	Schema        string     `json:"schema"`
-	Kind          string     `json:"kind"`
-	ID            string     `json:"id"`
-	ResourceKind  string     `json:"resource_kind"`
-	ResourceID    string     `json:"resource_id"`
-	Phase         string     `json:"phase"`
-	State         string     `json:"state"`
-	Progress      int        `json:"progress"`
-	Retrying      bool       `json:"retrying"`
-	NextRetryAt   *time.Time `json:"next_retry_at,omitempty"`
-	Error         *APIError  `json:"error,omitempty"`
-	CorrelationID string     `json:"correlation_id"`
-	CreatedAt     time.Time  `json:"created_at"`
-	UpdatedAt     time.Time  `json:"updated_at"`
-}
+type Operation = tunnelv1.Operation
 
 type RequestContext struct {
 	Actor         Actor
@@ -89,29 +74,11 @@ func (s *Service) CancelOperation(ctx context.Context, request RequestContext, o
 	return operationView(result.Operation, request.RequestID), nil
 }
 
-type EventActor struct {
-	Type string `json:"type"`
-	ID   string `json:"id"`
-}
+type EventActor = tunnelv1.EventActor
 
-type Event struct {
-	Schema        string         `json:"schema"`
-	Kind          string         `json:"kind"`
-	ID            string         `json:"id"`
-	Cursor        string         `json:"cursor"`
-	EventType     string         `json:"event_type"`
-	ResourceKind  string         `json:"resource_kind"`
-	ResourceID    string         `json:"resource_id"`
-	OccurredAt    time.Time      `json:"occurred_at"`
-	Actor         EventActor     `json:"actor"`
-	CorrelationID string         `json:"correlation_id"`
-	SafeMetadata  map[string]any `json:"safe_metadata"`
-}
+type Event = tunnelv1.Event
 
-type EventPage struct {
-	Items      []Event `json:"items"`
-	NextCursor string  `json:"next_cursor,omitempty"`
-}
+type EventPage = tunnelv1.EventPage
 
 func (s *Service) ListEvents(ctx context.Context, request RequestContext, resourceKind, resourceID, rawCursor string, limit int) (EventPage, error) {
 	scope := resourceScope(resourceKind)

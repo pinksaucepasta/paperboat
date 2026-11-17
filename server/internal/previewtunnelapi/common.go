@@ -12,11 +12,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/shared/tunnelv1"
 	"io"
 	"net/http"
 	"strconv"
 	"strings"
-	"time"
 	"unicode"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/canonicaljson"
@@ -42,22 +42,7 @@ var (
 	ErrUnsafeMetadata      = errors.New("unsafe metadata")
 )
 
-// APIError is the shared error contract. Message is safe for users and all
-// branching fields are typed so callers never inspect the message text.
-type APIError struct {
-	Schema        string         `json:"schema"`
-	Kind          string         `json:"kind"`
-	Code          string         `json:"code"`
-	Component     string         `json:"component"`
-	Message       string         `json:"message"`
-	Outcome       string         `json:"outcome"`
-	Retryable     bool           `json:"retryable"`
-	RetryAt       *time.Time     `json:"retry_at,omitempty"`
-	RepairAction  string         `json:"repair_action,omitempty"`
-	RequestID     string         `json:"request_id"`
-	CorrelationID string         `json:"correlation_id"`
-	Details       map[string]any `json:"details,omitempty"`
-}
+type APIError = tunnelv1.APIError
 
 type Actor struct {
 	AccountID string

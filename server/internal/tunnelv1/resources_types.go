@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"database/sql"
+	"github.com/pinksaucepasta/paperboat/shared/tunnelv1"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
@@ -113,91 +114,23 @@ type DomainCreateRequest struct {
 	Mutation            ResourceMutationInput
 }
 
-type RouteHostMatch struct {
-	Type           string `json:"type"`
-	Hostname       string `json:"hostname,omitempty"`
-	WildcardLabels *int   `json:"wildcard_labels,omitempty"`
-}
+type RouteHostMatch = tunnelv1.RouteHostMatch
 
-type RouteTLS struct {
-	Verification              string  `json:"verification"`
-	ServerName                *string `json:"server_name,omitempty"`
-	CA                        *string `json:"ca_pem,omitempty"`
-	ClientCredentialReference *string `json:"client_credential_reference,omitempty"`
-	Pin                       *string `json:"pin,omitempty"`
-}
+type RouteTLS = tunnelv1.RouteTLS
 
-type RouteOrigin struct {
-	Scheme       string    `json:"scheme"`
-	Address      string    `json:"address"`
-	PreserveHost bool      `json:"preserve_host"`
-	HostOverride *string   `json:"host_override,omitempty"`
-	TLS          *RouteTLS `json:"tls,omitempty"`
-}
+type RouteOrigin = tunnelv1.RouteOrigin
 
-type RouteView struct {
-	Schema               string         `json:"schema"`
-	Kind                 string         `json:"kind"`
-	ID                   string         `json:"id"`
-	TunnelID             string         `json:"tunnel_id"`
-	Name                 string         `json:"name"`
-	Protocol             string         `json:"protocol"`
-	HostMatch            RouteHostMatch `json:"host_match"`
-	PathPrefix           *string        `json:"path_prefix,omitempty"`
-	Origin               RouteOrigin    `json:"origin"`
-	Priority             int32          `json:"priority"`
-	ConnectTimeoutMS     int32          `json:"connect_timeout_ms"`
-	IdleTimeoutMS        int32          `json:"idle_timeout_ms"`
-	MaxConcurrentStreams int32          `json:"max_concurrent_streams"`
-	DesiredState         string         `json:"desired_state"`
-	Generation           int64          `json:"generation"`
-	ETag                 string         `json:"etag"`
-	PublicTCPListenerID  string         `json:"public_tcp_listener_id,omitempty"`
-	PublicTCPPort        int32          `json:"public_tcp_port,omitempty"`
-	// RewriteRules are the route's header, path and redirect rules, omitted when there are none.
-	RewriteRules *tunnelrouterules.Rules `json:"rewrite_rules,omitempty"`
-}
+type RouteView = tunnelv1.Route
 
-type RoutePage struct {
-	Items      []RouteView `json:"items"`
-	NextCursor string      `json:"next_cursor,omitempty"`
-}
+type RoutePage = tunnelv1.RoutePage
 
-type DomainDNS struct {
-	Target          string     `json:"target"`
-	ObservedRecords []string   `json:"observed_records"`
-	LastCheckedAt   *time.Time `json:"last_checked_at,omitempty"`
-}
+type DomainDNS = tunnelv1.DomainDNS
 
-type DomainCertificate struct {
-	State     string         `json:"state"`
-	Reference string         `json:"reference,omitempty"`
-	ExpiresAt *time.Time     `json:"expires_at,omitempty"`
-	Failure   map[string]any `json:"failure,omitempty"`
-}
+type DomainCertificate = tunnelv1.DomainCertificate
 
-type DomainView struct {
-	Schema              string            `json:"schema"`
-	Kind                string            `json:"kind"`
-	ID                  string            `json:"id"`
-	AccountID           string            `json:"account_id"`
-	TunnelID            string            `json:"tunnel_id"`
-	RouteID             string            `json:"route_id"`
-	Hostname            string            `json:"hostname"`
-	MatchType           string            `json:"match_type"`
-	WildcardLabels      *int              `json:"wildcard_labels,omitempty"`
-	CertificateStrategy string            `json:"certificate_strategy"`
-	State               string            `json:"state"`
-	DNS                 DomainDNS         `json:"dns"`
-	Certificate         DomainCertificate `json:"certificate"`
-	Generation          int64             `json:"generation"`
-	ETag                string            `json:"etag"`
-}
+type DomainView = tunnelv1.Domain
 
-type DomainPage struct {
-	Items      []DomainView `json:"items"`
-	NextCursor string       `json:"next_cursor,omitempty"`
-}
+type DomainPage = tunnelv1.DomainPage
 
 type RouteMutationResult struct {
 	Route     RouteView                  `json:"route"`
@@ -213,29 +146,9 @@ type DomainMutationResult struct {
 	Changed   bool                       `json:"changed"`
 }
 
-type LogEntry struct {
-	Schema        string         `json:"schema"`
-	Kind          string         `json:"kind"`
-	ID            string         `json:"id"`
-	TunnelID      string         `json:"tunnel_id,omitempty"`
-	PreviewID     string         `json:"preview_id,omitempty"`
-	RouteID       string         `json:"route_id,omitempty"`
-	ConnectorID   string         `json:"connector_id,omitempty"`
-	SessionID     string         `json:"session_id,omitempty"`
-	Level         string         `json:"level"`
-	Component     string         `json:"component"`
-	Code          string         `json:"code"`
-	Message       string         `json:"message"`
-	Metadata      map[string]any `json:"metadata"`
-	CorrelationID string         `json:"correlation_id"`
-	OccurredAt    time.Time      `json:"occurred_at"`
-	Cursor        string         `json:"cursor"`
-}
+type LogEntry = tunnelv1.LogEntry
 
-type LogPage struct {
-	Items      []LogEntry `json:"items"`
-	NextCursor string     `json:"next_cursor,omitempty"`
-}
+type LogPage = tunnelv1.LogPage
 
 type ResourceMutationRecord struct {
 	Route             dbsqlc.TunnelRoute

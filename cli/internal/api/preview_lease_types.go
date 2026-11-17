@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/shared/tunnelv1"
 	"time"
 )
 
@@ -123,20 +124,7 @@ type PreviewLeaseOperation struct {
 	UpdatedAt     time.Time              `json:"updated_at"`
 }
 
-// PreviewTunnelAPIError is the safe typed error carried by v1 operations.
-type PreviewTunnelAPIError struct {
-	Schema        string     `json:"schema"`
-	Kind          string     `json:"kind"`
-	Code          string     `json:"code"`
-	Component     string     `json:"component"`
-	Message       string     `json:"message"`
-	Outcome       string     `json:"outcome"`
-	Retryable     bool       `json:"retryable"`
-	RetryAt       *time.Time `json:"retry_at,omitempty"`
-	RepairAction  string     `json:"repair_action,omitempty"`
-	RequestID     string     `json:"request_id"`
-	CorrelationID string     `json:"correlation_id"`
-}
+type PreviewTunnelAPIError = tunnelv1.APIError
 
 var (
 	ErrPreviewLeaseInvalid      = errors.New("invalid preview lease")

@@ -3,6 +3,7 @@ package tunnelv1
 import (
 	"context"
 	"crypto/sha256"
+	"github.com/pinksaucepasta/paperboat/shared/tunnelv1"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/previewtunnelapi"
@@ -56,27 +57,7 @@ type PatchTunnelRequest struct {
 	MutationInput
 }
 
-// TunnelView is the safe durable tunnel representation. It contains no
-// reusable credential material.
-type TunnelView struct {
-	Schema           string     `json:"schema"`
-	Kind             string     `json:"kind"`
-	ID               string     `json:"id"`
-	AccountID        string     `json:"account_id"`
-	Name             string     `json:"name"`
-	DesiredState     string     `json:"desired_state"`
-	AccessMode       string     `json:"access_mode"`
-	Generation       int64      `json:"generation"`
-	ETag             string     `json:"etag"`
-	StableEndpointID string     `json:"stable_endpoint_id"`
-	StableEndpoint   string     `json:"stable_endpoint"`
-	CreatedByHostID  string     `json:"created_by_host_id"`
-	CreatedByActorID string     `json:"created_by_actor_id"`
-	ExpiresAt        *time.Time `json:"expires_at"`
-	SummaryCode      string     `json:"summary_code"`
-	CreatedAt        time.Time  `json:"created_at"`
-	UpdatedAt        time.Time  `json:"updated_at"`
-}
+type TunnelView = tunnelv1.Tunnel
 
 type MutationResult struct {
 	Tunnel    TunnelView                 `json:"tunnel"`
@@ -85,54 +66,15 @@ type MutationResult struct {
 	Changed   bool                       `json:"changed"`
 }
 
-type TunnelPage struct {
-	Items      []TunnelView `json:"items"`
-	NextCursor string       `json:"next_cursor,omitempty"`
-	Total      int          `json:"total"` // every tunnel the cursor pages through with these filters
-}
+type TunnelPage = tunnelv1.TunnelPage
 
-type HealthDimension struct {
-	Status string `json:"status"`
-	Code   string `json:"code"`
-}
+type HealthDimension = tunnelv1.HealthDimension
 
-type HealthDimensions struct {
-	Service     HealthDimension `json:"service"`
-	Edge        HealthDimension `json:"edge"`
-	Config      HealthDimension `json:"config"`
-	Route       HealthDimension `json:"route"`
-	Origin      HealthDimension `json:"origin"`
-	DNS         HealthDimension `json:"dns"`
-	Certificate HealthDimension `json:"certificate"`
-	Access      HealthDimension `json:"access"`
-	Update      HealthDimension `json:"update"`
-}
+type HealthDimensions = tunnelv1.HealthDimensions
 
-type HealthView struct {
-	Schema        string           `json:"schema"`
-	Kind          string           `json:"kind"`
-	ResourceKind  string           `json:"resource_kind"`
-	ResourceID    string           `json:"resource_id"`
-	OverallCode   string           `json:"overall_code"`
-	Dimensions    HealthDimensions `json:"dimensions"`
-	Summary       string           `json:"summary"`
-	Since         time.Time        `json:"since"`
-	Retrying      bool             `json:"retrying"`
-	NextRetryAt   *time.Time       `json:"next_retry_at,omitempty"`
-	RepairAction  string           `json:"repair_action"`
-	CorrelationID string           `json:"correlation_id"`
-	// FloodProtection is set when Paperboat's own edge limits refused some of this tunnel's traffic
-	// recently, so the owner learns why visitors saw "busy" (edge abuse plan 6.4).
-	FloodProtection *FloodProtection `json:"flood_protection,omitempty"`
-}
+type HealthView = tunnelv1.Health
 
-// FloodProtection counts what the edges refused for flood protection: client addresses over their
-// per-address limit, or the link over its share of an edge.
-type FloodProtection struct {
-	Refused int64     `json:"refused"`
-	Since   time.Time `json:"since"`
-	Summary string    `json:"summary"`
-}
+type FloodProtection = tunnelv1.FloodProtection
 
 // EndpointBuilder allocates a user-facing stable endpoint from the immutable
 // endpoint identity. The name argument is retained at this boundary so callers
