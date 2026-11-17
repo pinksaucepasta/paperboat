@@ -197,3 +197,37 @@ func TestHomeMutationFailureRemainsFailureAfterDisplay(t *testing.T) {
 		t.Fatalf("failure displayed %d times", displayed)
 	}
 }
+
+// Tunnel delete from the home menu must ask in the TUI (naming the tunnel), not
+// print a confirm code the menu cannot pass back.
+func TestConfirmingHomeResultAsksInsteadOfPrintingACode(t *testing.T) {
+	previousRoot, previousViewer := newInteractiveRootCommand, showHomeText
+	t.Cleanup(func() { newInteractiveRootCommand = previousRoot; showHomeText = previousViewer })
+	showHomeText = func(*cobra.Command, string, string) error { return nil }
+	var seen []any
+	newInteractiveRootCommand = func() *cobra.Command {
+		root := &cobra.Command{Use: "pb", SilenceErrors: true, SilenceUsage: true}
+		root.PersistentFlags().Bool("no-customization", false, "")
+		root.AddCommand(&cobra.Command{Use: "mutate", RunE: func(command *cobra.Command, _ []string) error {
+			seen = append(seen, command.Context().Value(homeInteractiveConfirmation{}))
+			return nil
+		}})
+		return root
+	}
+	parent := &cobra.Command{Use: "pb"}
+	parent.SetContext(context.Background())
+	parent.Flags().Bool("no-customization", true, "")
+	parent.SetErr(&bytes.Buffer{})
+	if err := runConfirmingHomeResult(parent, []string{"mutate"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := runHomeResult(parent, []string{"mutate"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(seen) != 2 || seen[0] != true || seen[1] != nil {
+		t.Fatalf("confirmation marker per run = %v, want [true <nil>]", seen)
+	}
+	if parent.Context().Value(homeInteractiveConfirmation{}) != nil {
+		t.Fatal("the marker leaked into the parent context")
+	}
+}

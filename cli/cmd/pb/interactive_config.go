@@ -19,7 +19,7 @@ import (
 
 // Only guided config-sync actions use a terminal confirmation instead of the
 // copy-and-repeat confirmation contract used by noninteractive commands.
-type configSyncInteractiveConfirmation struct{}
+type homeInteractiveConfirmation struct{}
 
 type configSyncRegistrationFailure struct{ cause error }
 
@@ -169,7 +169,7 @@ func actionHomeConfigSync(command *cobra.Command) error {
 		case "configure":
 			err = configureSyncInteractive(command, client, machineID, assignment)
 		case "disable":
-			err = runConfigSyncResult(command, []string{"config", "unassign", machineID})
+			err = runConfirmingHomeResult(command, []string{"config", "unassign", machineID})
 		case "credentials":
 			repository, chooseErr := chooseConfigRepositoryInteractive(command, client, "Repository credentials", nil)
 			err = chooseErr
@@ -226,9 +226,11 @@ func configSyncMenuItems(assignment api.ConfigAssignment) []selector.Item {
 	return append(items, selector.Item{ID: "credentials", Title: "Repository credentials", Description: "Private machine-local HTTPS credentials or SSH key/agent and trusted hosts"}, selector.Item{ID: "custom-repository", Title: "Add custom Git repository", Description: "HTTPS, SSH, or an explicit local repository; GitHub is optional"}, selector.Item{ID: "repositories", Title: "Add repository", Description: "Choose a repository from your connected provider account"}, selector.Item{ID: "github", Title: "Connect GitHub", Description: "Approve account access in your browser, then return here"})
 }
 
-func runConfigSyncResult(parent *cobra.Command, args []string) error {
+// runConfirmingHomeResult runs a command whose mutation confirmation is asked
+// in the home TUI (confirmMutation prompts) instead of by a printed confirm code.
+func runConfirmingHomeResult(parent *cobra.Command, args []string) error {
 	original := parent.Context()
-	parent.SetContext(context.WithValue(original, configSyncInteractiveConfirmation{}, true))
+	parent.SetContext(context.WithValue(original, homeInteractiveConfirmation{}, true))
 	defer parent.SetContext(original)
 	return runHomeResult(parent, args)
 }
@@ -261,7 +263,7 @@ func configureSyncInteractive(command *cobra.Command, client *api.Client, machin
 	if err != nil {
 		return err
 	}
-	return runConfigSyncResult(command, []string{"config", "sync", "apply", "--repository", repository.ID})
+	return runConfirmingHomeResult(command, []string{"config", "sync", "apply", "--repository", repository.ID})
 }
 
 func chooseConfigRepositoryInteractive(command *cobra.Command, client *api.Client, title string, current *string) (api.ConfigRepository, error) {

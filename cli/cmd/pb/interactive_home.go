@@ -331,6 +331,7 @@ func actionHomeTunnelList(command *cobra.Command) error {
 				return err
 			}
 			args := []string{"tunnel", action.ID, choice.ID}
+			run := runHomeResult
 			switch action.ID {
 			case "route", "domain":
 				if err := actionHomeTunnelInventory(command, client, choice.ID, action.ID); err != nil && !interactiveCanceled(err) {
@@ -338,11 +339,23 @@ func actionHomeTunnelList(command *cobra.Command) error {
 				}
 				continue
 			case "delete":
+				// The CLI asks, naming the tunnel and what is removed.
 				args = append(args, "--wait")
+				run = runConfirmingHomeResult
 			case "pause", "resume":
 				args = append(args, "--wait")
+				yes, confirmErr := prompt.Confirm(prompt.ConfirmOptions{Title: strings.ToUpper(action.ID[:1]) + action.ID[1:] + " tunnel " + choice.Title + "?", Description: action.Description, Stdin: os.Stdin, Context: command.Context(), Output: command.ErrOrStderr()})
+				if confirmErr != nil {
+					if interactiveCanceled(confirmErr) {
+						continue
+					}
+					return confirmErr
+				}
+				if !yes {
+					continue
+				}
 			}
-			if err = runHomeResult(command, args); err != nil {
+			if err = run(command, args); err != nil {
 				if errors.Is(err, selector.ErrInterrupted) {
 					return err
 				}
