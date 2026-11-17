@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/errorreport"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntimecmd"
 	"github.com/pinksaucepasta/paperboat/cli/internal/localapi"
 	"github.com/pinksaucepasta/paperboat/cli/internal/machineguard"
 )
@@ -101,5 +102,24 @@ func TestRootMachineGuardInstallDiagnosticsUseGuardStateDirectory(t *testing.T) 
 	processEUID = func() int { return 0 }
 	if directory, err := processDiagnosticsDirectory(command); err != nil || directory != want {
 		t.Fatalf("root machine-guard install diagnostics = %q, %v; want %q", directory, err, want)
+	}
+}
+
+func TestForegroundSupervisorKeepsItsDiagnosticsOnTheStateVolume(t *testing.T) {
+	want := hostruntimecmd.ForegroundDiagnosticsDirectory()
+	if want == "" {
+		t.Skip("the container supervisor is Linux only")
+	}
+	// The command is found from the real arguments, before its flags are parsed.
+	args := []string{"daemon", "--foreground"}
+	command, _, err := newRootCommand().Find(args)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := foregroundDiagnosticsDirectory(command, args); got != want {
+		t.Fatalf("foreground diagnostics directory = %q; want %q (root's home is read-only in the image)", got, want)
+	}
+	if got := foregroundDiagnosticsDirectory(command, []string{"daemon"}); got != "" {
+		t.Fatalf("a daemon without --foreground uses %q", got)
 	}
 }

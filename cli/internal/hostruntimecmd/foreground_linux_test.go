@@ -182,7 +182,7 @@ func TestOwnerEnvironmentCarriesNothingOfTheContainers(t *testing.T) {
 	t.Setenv("PAPERBOAT_ENROLLMENT_CREDENTIAL", "secret-token")
 	t.Setenv("AWS_SECRET_ACCESS_KEY", "secret-key")
 	t.Setenv("PATH", "/custom/bin")
-	got := ownerEnvironment(&user.User{Username: "paperboat", HomeDir: "/workspace"}, map[string]string{"PAPERBOAT_SHELL": "/bin/sh"})
+	got := ownerEnvironment(&user.User{Username: "paperboat", HomeDir: "/home/paperboat"}, map[string]string{"PAPERBOAT_SHELL": "/bin/sh"})
 	joined := strings.Join(got, "\n")
 	for _, secret := range []string{"secret-token", "secret-key", "ENROLLMENT"} {
 		if strings.Contains(joined, secret) {

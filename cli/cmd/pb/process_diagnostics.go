@@ -8,12 +8,14 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/diagnostics"
 	"github.com/pinksaucepasta/paperboat/cli/internal/errorreport"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntimecmd"
 	"github.com/pinksaucepasta/paperboat/cli/internal/machineguard"
 	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 	"github.com/pinksaucepasta/paperboat/shared/supportref"
@@ -40,7 +42,9 @@ func openProcessDiagnostics(ctx context.Context, args []string, reporter *errorr
 		recorder = diagnostics.NewMemoryRecorder()
 	} else {
 		var directory string
-		directory, storageErr = processDiagnosticsDirectory(command)
+		if directory = foregroundDiagnosticsDirectory(command, args); directory == "" {
+			directory, storageErr = processDiagnosticsDirectory(command)
+		}
 		if storageErr == nil {
 			reporter.PersistFloodState(filepath.Join(directory, "sentry-flood.json"))
 			recorder, storageErr = diagnostics.NewRecorder(diagnostics.DiskConfig{Directory: directory, OwnerUID: os.Geteuid()})
@@ -203,6 +207,16 @@ var processEUID = os.Geteuid
 // root update service and its activation helper, and the root machine guard:
 // they run under the service manager with no HOME and own their own state root,
 // so their diagnostics live there instead of failing to save at every start.
+// foregroundDiagnosticsDirectory is the container supervisor's own directory, on the state volume because the
+// supplied image's root filesystem is read-only and root's home is on it. Find does not parse flags, so the
+// request for --foreground is read from the arguments.
+func foregroundDiagnosticsDirectory(command *cobra.Command, args []string) string {
+	if command == nil || command.Name() != "daemon" || !slices.Contains(args, "--foreground") {
+		return ""
+	}
+	return hostruntimecmd.ForegroundDiagnosticsDirectory()
+}
+
 func processDiagnosticsDirectory(command *cobra.Command) (string, error) {
 	if command != nil && command.Name() == "__runtime-updated" {
 		if root := os.Getenv("PAPERBOAT_UPDATE_STATE_ROOT"); filepath.IsAbs(root) && filepath.Clean(root) == root {

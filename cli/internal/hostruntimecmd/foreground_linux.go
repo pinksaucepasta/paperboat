@@ -36,6 +36,10 @@ const (
 	foregroundPairLimit  = 5 * time.Minute
 )
 
+// ForegroundDiagnosticsDirectory is where the supervisor keeps its own diagnostics: on the state volume, because
+// the supplied image's root filesystem is read-only and root's home is on it.
+func ForegroundDiagnosticsDirectory() string { return foregroundState + "/diagnostics" }
+
 // NoSystemd reports a Linux machine that cannot run Paperboat as a service, typically a container. It is a
 // variable so tests choose the answer.
 var NoSystemd = func() bool {

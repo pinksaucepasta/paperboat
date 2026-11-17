@@ -100,13 +100,14 @@ func (o *foregroundOwners) controller(catalog sessionowner.Catalog, d sessionown
 }
 
 // ownerEnvironment is the small environment a service manager would give the owner: nothing of the container's,
-// in particular no enrollment credential.
+// in particular no enrollment credential. HOME is the writable workspace volume, like hostd's, not the image's
+// read-only passwd home.
 func ownerEnvironment(account *user.User, owner map[string]string) []string {
 	path := os.Getenv("PATH")
 	if path == "" {
 		path = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 	}
-	environment := []string{"PATH=" + path, "HOME=" + account.HomeDir, "USER=" + account.Username, "LOGNAME=" + account.Username}
+	environment := []string{"PATH=" + path, "HOME=" + foregroundWorkspace, "USER=" + account.Username, "LOGNAME=" + account.Username}
 	for key, value := range owner {
 		environment = append(environment, key+"="+value)
 	}
