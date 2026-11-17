@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -46,9 +47,23 @@ func configConflictCompare(c *command.Context) error {
 		if err = configConflictCompareOnce(c); !retryableConfigComparison(err) || c.Context.Err() != nil {
 			return err
 		}
-		time.Sleep(time.Second)
+		if !sleepUnlessDone(c.Context, time.Second) {
+			return err
+		}
 	}
 	return err
+}
+
+// sleepUnlessDone waits d and reports false when ctx ended first, so Ctrl-C does not wait out the backoff.
+func sleepUnlessDone(ctx context.Context, d time.Duration) bool {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
 }
 
 func retryableConfigComparison(err error) bool {

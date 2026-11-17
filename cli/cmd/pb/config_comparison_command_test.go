@@ -9,6 +9,7 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 )
 
 func TestConfigComparisonMixedCancellationRetainsCauseUnderStaticMessage(t *testing.T) {
@@ -41,5 +42,17 @@ func TestOnlyAnUncertainPeerStartIsRetriedForAComparison(t *testing.T) {
 		if retryableConfigComparison(err) {
 			t.Fatalf("%v must not be retried", err)
 		}
+	}
+}
+
+func TestSleepUnlessDoneStopsOnCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	start := time.Now()
+	if sleepUnlessDone(ctx, time.Minute) || time.Since(start) > time.Second {
+		t.Fatal("a canceled context must end the backoff at once")
+	}
+	if !sleepUnlessDone(context.Background(), time.Millisecond) {
+		t.Fatal("an uncanceled backoff must report that it elapsed")
 	}
 }
