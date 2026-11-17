@@ -11,7 +11,6 @@ import (
 	"errors"
 	"fmt"
 	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/pinksaucepasta/paperboat/server/internal/accessdescriptor"
 	"github.com/pinksaucepasta/paperboat/server/internal/admission"
 	"github.com/pinksaucepasta/paperboat/server/internal/audit"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
@@ -20,6 +19,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/planlimits"
 	"github.com/pinksaucepasta/paperboat/server/internal/secrets"
 	"github.com/pinksaucepasta/paperboat/server/internal/teams"
+	"github.com/pinksaucepasta/paperboat/shared/terminalprotocol"
 	"slices"
 	"strconv"
 	"strings"
@@ -751,30 +751,9 @@ func (s *Service) OwnedEligibleMachines(ctx context.Context, userID string, mach
 	return result, nil
 }
 
-type ConnectionDescriptor struct {
-	Schema            string         `json:"schema,omitempty"`
-	Capabilities      []string       `json:"capabilities,omitempty"`
-	Issuer            string         `json:"issuer,omitempty"`
-	UserMachineID     string         `json:"machine_id"`
-	UserMachineState  string         `json:"machine_state"`
-	MachineGeneration int64          `json:"machine_generation"`
-	Connectable       bool           `json:"connectable"`
-	ExpiresAt         time.Time      `json:"expires_at"`
-	Environment       map[string]any `json:"environment,omitempty"`
-	Terminal          map[string]any `json:"terminal,omitempty"`
-	FileTransfer      map[string]any `json:"file_transfer,omitempty"`
-	Status            string         `json:"status,omitempty"`
-	Reason            string         `json:"reason,omitempty"`
-	RetryAfterSeconds int            `json:"retry_after_seconds,omitempty"`
-}
+type ConnectionDescriptor = terminalprotocol.Descriptor
 
-type ExecDescriptor struct {
-	OperationID string         `json:"operation_id"`
-	Environment map[string]any `json:"environment"`
-	Endpoints   map[string]any `json:"endpoints"`
-	Auth        map[string]any `json:"auth"`
-	ExpiresAt   time.Time      `json:"expires_at"`
-}
+type ExecDescriptor = terminalprotocol.Operation
 
 // ExecDescriptor issues an exec operation credential. nativeOnly is the client's statement that it can run
 // the operation over its native peer connection alone: when the machine has no current edge route (its edge
@@ -861,7 +840,7 @@ func (s *Service) operationDescriptor(ctx context.Context, kind operationKind, u
 	}
 	// Without an edge route the session has no edge base URL: these signed credentials are fenced by the
 	// environment, never revoked through the edge, and the client runs the operation natively.
-	httpIngressURL, endpoints := "", map[string]any{}
+	httpIngressURL, endpoints := "", terminalprotocol.TerminalEndpoints{}
 	if edge {
 		var ingressErr error
 		if httpIngressURL, ingressErr = s.runtimeIngressURL(ctx, row.EnvironmentID, route.PublicHost); ingressErr != nil {
@@ -878,21 +857,14 @@ func (s *Service) operationDescriptor(ctx context.Context, kind operationKind, u
 	}
 	return ExecDescriptor{
 		OperationID: operationID,
-		Environment: map[string]any{"id": row.EnvironmentID, "kind": accessdescriptor.EnvironmentMachine, "resource_id": row.ID, "alias": row.Alias, "state": "ready", "root": row.WorkspaceRoot},
+		Environment: terminalprotocol.Environment{ID: row.EnvironmentID, Kind: terminalprotocol.EnvironmentMachine, ResourceID: row.ID, Alias: row.Alias, State: "ready", Root: row.WorkspaceRoot},
 		Endpoints:   endpoints,
-		Auth:        map[string]any{"method": "bearer", "token": token, "expires_at": expiresAt, "scopes": []string{kind.scope}, "access_session_id": accessSessionID},
+		Auth:        terminalprotocol.Auth{Method: "bearer", Token: token, ExpiresAt: expiresAt, Scopes: []string{kind.scope}, AccessSessionID: accessSessionID},
 		ExpiresAt:   expiresAt,
 	}, nil
 }
 
-type FileTransferDescriptor struct {
-	Endpoint             string                              `json:"endpoint"`
-	SourceMachineID      string                              `json:"source_machine_id"`
-	DestinationMachineID string                              `json:"destination_machine_id"`
-	InitiatingUserID     string                              `json:"initiating_user_id"`
-	Auth                 map[string]any                      `json:"auth"`
-	Policy               accessdescriptor.FileTransferPolicy `json:"policy"`
-}
+type FileTransferDescriptor = terminalprotocol.FileTransfer
 
 // TransferIntent is the sender's mode and the declared total of its prepared batch (every file
 // summed). Every send declares it; the credential signs the mode and, for Automatic, the total.

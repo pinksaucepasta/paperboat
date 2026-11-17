@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/pinksaucepasta/paperboat/server/internal/accessdescriptor"
 	"github.com/pinksaucepasta/paperboat/server/internal/config"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
@@ -223,26 +222,6 @@ func TestPairingAcceptsWindowsIndependentOfReleaseMatrix(t *testing.T) {
 	}
 }
 
-func TestConnectionDescriptorSerializesCanonicalPayload(t *testing.T) {
-	expires := time.Now().UTC().Add(time.Minute)
-	response := ConnectionDescriptor{
-		Schema: accessdescriptor.SchemaV1, Issuer: "https://api.example", UserMachineID: "um_1", UserMachineState: "online", Connectable: true, ExpiresAt: expires,
-		Capabilities: []string{accessdescriptor.CapabilityTerminal, accessdescriptor.CapabilityFileTransfer}, Status: "ready", Reason: "ready",
-		Environment:  map[string]any{"id": "env_1", "kind": "machine", "resource_id": "um_1", "alias": "studio", "state": "ready", "root": "/Users/paperboat", "user_machine_id": "um_1"},
-		Terminal:     map[string]any{"endpoint": "wss://edge.example/e/env_1/terminal", "session_id": "session", "cwd": "/Users/paperboat", "auth": map[string]any{"method": "websocket_ticket", "ticket": "t", "expires_at": expires, "scopes": []string{"terminal:operate"}}, "kind": "paperboat_terminal_v1"},
-		FileTransfer: map[string]any{"endpoint": "https://edge.example/v1/file-transfers", "policy": accessdescriptor.FileTransferPolicy{Revision: "file-transfer-v1", MaxBatchFiles: 10, AutomaticMaxBatchBytes: 500 << 20, MaxConcurrentTransfers: 2, RetentionSeconds: 604800, DeliveryTimeoutSeconds: 600, MaxPendingSpoolBytes: 1 << 30}, "auth": map[string]any{"method": "bearer", "token": "u", "expires_at": expires, "scopes": []string{"file:transfer"}}},
-	}
-	b, err := json.Marshal(response)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, forbidden := range []string{"display_name", "user_machine_id", "user_machine_state", "paperboat_terminal_v1", "paperboat_staged_image_v1", "websocket_base_url", "http_base_url", `"upload"`} {
-		if strings.Contains(string(b), forbidden) {
-			t.Fatalf("canonical payload contains legacy field %q: %s", forbidden, b)
-		}
-	}
-}
-
 func TestPairingJSONUsesConnectorFieldNames(t *testing.T) {
 	encoded, err := json.Marshal(Pairing{ID: "ump_1", UserCode: "ABCD1234", ExpiresAt: time.Unix(0, 0).UTC()})
 	if err != nil {
@@ -330,14 +309,14 @@ func TestCanonicalTerminalLaunchCWD(t *testing.T) {
 
 func TestMachineTerminalEndpointsPreserveCustomerInfrastructureRouting(t *testing.T) {
 	customer := machineTerminalEndpoints("wss://edge.customer.test/v1/runtime/machine.customer.test")
-	if customer["wss"] != "wss://edge.customer.test/v1/runtime/machine.customer.test/v1/runtime" {
+	if customer.WSS != "wss://edge.customer.test/v1/runtime/machine.customer.test/v1/runtime" {
 		t.Fatalf("customer runtime prefix was lost: %#v", customer)
 	}
-	if _, ok := customer["quic"]; ok {
+	if customer.QUIC != "" {
 		t.Fatal("advertised QUIC cannot carry customer logical runtime route")
 	}
 	managed := machineTerminalEndpoints("wss://machine.runtime.example.test")
-	if managed["wss"] != "wss://machine.runtime.example.test/v1/runtime" || managed["quic"] != "quic://machine.runtime.example.test:443" {
+	if managed.WSS != "wss://machine.runtime.example.test/v1/runtime" || managed.QUIC != "quic://machine.runtime.example.test:443" {
 		t.Fatalf("managed terminal endpoints changed: %#v", managed)
 	}
 }

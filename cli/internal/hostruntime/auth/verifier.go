@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/shared/terminalprotocol"
 	"io"
 	"strings"
 	"time"
@@ -121,7 +122,7 @@ type Claims struct {
 }
 
 // AutomaticTransferLimit is the largest Automatic transfer: 2,000,000,000 bytes (PLAN 3b, File transfer modes).
-const AutomaticTransferLimit = int64(2_000_000_000)
+const AutomaticTransferLimit = terminalprotocol.AutomaticTransferLimit
 
 type Policy struct {
 	Issuer          string

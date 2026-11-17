@@ -140,7 +140,7 @@ func TestValidateReadyAcceptsEnvironmentTerminalBearer(t *testing.T) {
 func readyUserMachineResponse(term *api.Terminal) api.ConnectionDescriptor {
 	expires := time.Now().Add(time.Hour)
 	term.Auth.ExpiresAt = expires.Add(-time.Minute)
-	return api.ConnectionDescriptor{Issuer: "https://api.paperboat.test", UserMachineID: "um_1", UserMachineState: "online", Connectable: true, ExpiresAt: expires, Environment: &api.Environment{EnvironmentID: "env_um_1", UserMachineID: "um_1", ProjectRoot: "/Users/paperboat"}, Terminal: term, FileTransfer: readyFileTransfer(expires)}
+	return api.ConnectionDescriptor{Issuer: "https://api.paperboat.test", Connectable: true, ExpiresAt: expires, Environment: api.Environment{ID: "env_um_1", Kind: "machine", ResourceID: "um_1", Alias: "app", State: "online", Root: "/Users/paperboat"}, Terminal: term, FileTransfer: readyFileTransfer(expires)}
 }
 
 func readyFileTransfer(expires time.Time) *api.FileTransfer {
@@ -265,7 +265,7 @@ func TestResolveUserMachineByAlias(t *testing.T) {
 func TestResolveUserMachineRevocationStopsWithoutPolling(t *testing.T) {
 	fc := &fakeClient{
 		machines:   []api.UserMachine{terminalHost("um_1", "studio-mac", "disconnected")},
-		connectSeq: []api.ConnectionDescriptor{{UserMachineID: "um_1", UserMachineState: "disconnected", Status: "machine_revoked", Reason: "access_revoked"}},
+		connectSeq: []api.ConnectionDescriptor{{Environment: api.Environment{ResourceID: "um_1", State: "disconnected"}, Status: "machine_revoked", Reason: "access_revoked"}},
 	}
 	_, err := newTestResolver(fc).Resolve(context.Background(), ConnectRequest{Machine: "studio-mac"})
 	var apiErr *api.APIError
@@ -281,7 +281,7 @@ func TestResolveRejectsUserMachineDescriptorForDifferentMachine(t *testing.T) {
 	term := readyTerminal()
 	term.Endpoints = api.TerminalEndpoints{QUIC: "quic://edge.paperboat.test:443", WSS: "wss://edge.paperboat.test/v1/runtime"}
 	response := readyUserMachineResponse(term)
-	response.UserMachineID = "um_other"
+	response.Environment.ResourceID = "um_other"
 	fc := &fakeClient{
 		machines:   []api.UserMachine{terminalHost("um_1", "studio-mac", "online")},
 		connectSeq: []api.ConnectionDescriptor{response},
@@ -298,10 +298,10 @@ func TestResolveUserMachineRebrokersAfterReadiness(t *testing.T) {
 	fc := &fakeClient{
 		machines: []api.UserMachine{terminalHost("um_1", "studio-mac", "online")},
 		connectSeq: []api.ConnectionDescriptor{
-			{UserMachineID: "um_1", Connectable: false, Status: "connector_connecting"},
+			{Environment: api.Environment{ResourceID: "um_1"}, Connectable: false, Status: "connector_connecting"},
 			readyUserMachineResponse(term),
 		},
-		statusSeq: []api.ConnectionDescriptor{{UserMachineID: "um_1", Connectable: true}},
+		statusSeq: []api.ConnectionDescriptor{{Environment: api.Environment{ResourceID: "um_1"}, Connectable: true}},
 	}
 	info, err := newTestResolver(fc).Resolve(context.Background(), ConnectRequest{Machine: "um_1"})
 	if err != nil {
@@ -318,10 +318,10 @@ func TestResolveKeepsSelectedUserMachineSessionThroughReadinessPolling(t *testin
 	fc := &fakeClient{
 		machines: []api.UserMachine{terminalHost("um_1", "studio-mac", "online")},
 		connectSeq: []api.ConnectionDescriptor{
-			{UserMachineID: "um_1", Connectable: false, Status: "connector_connecting"},
+			{Environment: api.Environment{ResourceID: "um_1"}, Connectable: false, Status: "connector_connecting"},
 			readyUserMachineResponse(term),
 		},
-		statusSeq: []api.ConnectionDescriptor{{UserMachineID: "um_1", Connectable: true}},
+		statusSeq: []api.ConnectionDescriptor{{Environment: api.Environment{ResourceID: "um_1"}, Connectable: true}},
 	}
 	if _, err := newTestResolver(fc).Resolve(context.Background(), ConnectRequest{Machine: "um_1", TerminalSessionID: "pts_api"}); err != nil {
 		t.Fatal(err)
@@ -493,7 +493,7 @@ func TestResolveRejectsAmbiguousMachineName(t *testing.T) {
 
 func TestResolveAcceptsDistinctEnvironmentIdentity(t *testing.T) {
 	response := readyUserMachineResponse(readyTerminal())
-	response.Environment.EnvironmentID = "env_other"
+	response.Environment.ID = "env_other"
 	fc := &fakeClient{
 		machines:   []api.UserMachine{terminalHost("um_1", "app", "online")},
 		connectSeq: []api.ConnectionDescriptor{response},
@@ -505,7 +505,7 @@ func TestResolveAcceptsDistinctEnvironmentIdentity(t *testing.T) {
 
 func TestResolveRejectsEnvironmentOwnedByAnotherMachine(t *testing.T) {
 	response := readyUserMachineResponse(readyTerminal())
-	response.Environment.UserMachineID = "um_other"
+	response.Environment.ResourceID = "um_other"
 	fc := &fakeClient{machines: []api.UserMachine{terminalHost("um_1", "app", "online")}, connectSeq: []api.ConnectionDescriptor{response}}
 	_, err := newTestResolver(fc).Resolve(context.Background(), ConnectRequest{Machine: "app"})
 	if err == nil || !strings.Contains(err.Error(), "invalid environment") {
@@ -621,7 +621,7 @@ func TestResolveRequiresProfileConnectionPolicy(t *testing.T) {
 }
 
 func TestResolveCapsRetryHintAtReadyDeadline(t *testing.T) {
-	fc := &fakeClient{machines: []api.UserMachine{terminalHost("um_1", "app", "online")}, connectSeq: []api.ConnectionDescriptor{{UserMachineID: "um_1", Connectable: false, RetryAfterSeconds: 300, Status: "starting"}}}
+	fc := &fakeClient{machines: []api.UserMachine{terminalHost("um_1", "app", "online")}, connectSeq: []api.ConnectionDescriptor{{Environment: api.Environment{ResourceID: "um_1"}, Connectable: false, RetryAfterSeconds: 300, Status: "starting"}}}
 	r := newTestResolver(fc)
 	r.readyTimeout = 30 * time.Second
 	var waited time.Duration
@@ -674,7 +674,7 @@ func TestResolveRejectsResolvedMachineDescriptorForDifferentMachine(t *testing.T
 	term := readyTerminal()
 	term.Endpoints = api.TerminalEndpoints{QUIC: "quic://edge.paperboat.test:443", WSS: "wss://edge.paperboat.test/v1/runtime"}
 	response := readyUserMachineResponse(term)
-	response.UserMachineID = "um_other"
+	response.Environment.ResourceID = "um_other"
 	fc := &fakeClient{
 		machinesErr: errors.New("listing must not be called"),
 		connectSeq:  []api.ConnectionDescriptor{response},
@@ -752,8 +752,8 @@ func TestLocalTerminalRejectionsHaveExpectedDiagnosticStatus(t *testing.T) {
 
 func TestResolveStartingMachineChecksReadinessPromptly(t *testing.T) {
 	fc := &fakeClient{machines: []api.UserMachine{terminalHost("um_1", "app", "online")},
-		connectSeq: []api.ConnectionDescriptor{{UserMachineID: "um_1", Status: "starting", RetryAfterSeconds: 2}},
-		statusSeq:  []api.ConnectionDescriptor{{UserMachineID: "um_1", Status: "starting", RetryAfterSeconds: 2}}}
+		connectSeq: []api.ConnectionDescriptor{{Environment: api.Environment{ResourceID: "um_1"}, Status: "starting", RetryAfterSeconds: 2}},
+		statusSeq:  []api.ConnectionDescriptor{{Environment: api.Environment{ResourceID: "um_1"}, Status: "starting", RetryAfterSeconds: 2}}}
 	r := newTestResolver(fc)
 	var waits []time.Duration
 	r.sleep = func(_ context.Context, d time.Duration) error {
@@ -791,7 +791,7 @@ func TestValidateFileTransferSelfHostedEndpointHasNoEdgePrefix(t *testing.T) {
 // A target the server lists online but that never applies the queued terminal operation (it is cut off from the API)
 // ended in a 180 s wait and a generic "could not finish"; it is named, within a bound.
 func TestResolveNamesATargetThatNeverConfirmsTheQueuedOperation(t *testing.T) {
-	pending := api.ConnectionDescriptor{UserMachineID: "um_1", Status: "helper_starting", Reason: terminalOperationPending}
+	pending := api.ConnectionDescriptor{Environment: api.Environment{ResourceID: "um_1"}, Status: "helper_starting", Reason: terminalOperationPending}
 	fc := &fakeClient{machines: []api.UserMachine{terminalHost("um_1", "studio-mac", "online")}, connectSeq: []api.ConnectionDescriptor{pending}, statusSeq: []api.ConnectionDescriptor{pending}}
 	old := pendingOperationBound
 	pendingOperationBound = 30 * time.Millisecond

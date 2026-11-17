@@ -4,11 +4,11 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"github.com/pinksaucepasta/paperboat/server/internal/accessdescriptor"
 	"github.com/pinksaucepasta/paperboat/server/internal/admission"
 	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
 	"github.com/pinksaucepasta/paperboat/server/internal/mint"
 	"github.com/pinksaucepasta/paperboat/server/internal/workspace"
+	"github.com/pinksaucepasta/paperboat/shared/terminalprotocol"
 )
 
 type ConfigCompareDescriptor struct {
@@ -93,5 +93,5 @@ func (s *Service) ConfigCompareDescriptor(ctx context.Context, account, environm
 	if err = tx.Commit(); err != nil {
 		return ConfigCompareDescriptor{}, err
 	}
-	return ConfigCompareDescriptor{ExecDescriptor: ExecDescriptor{OperationID: operationID, Environment: map[string]any{"id": environment, "kind": accessdescriptor.EnvironmentMachine, "resource_id": machineID, "alias": row.Alias, "state": "ready", "root": row.WorkspaceRoot}, Endpoints: machineTerminalEndpoints(runtimeWebsocketBase(httpIngressURL)), Auth: map[string]any{"method": "bearer", "token": token, "access_session_id": jti, "expires_at": expires, "scopes": []string{"config:compare"}}, ExpiresAt: expires}, Binding: binding}, nil
+	return ConfigCompareDescriptor{ExecDescriptor: ExecDescriptor{OperationID: operationID, Environment: terminalprotocol.Environment{ID: environment, Kind: terminalprotocol.EnvironmentMachine, ResourceID: machineID, Alias: row.Alias, State: "ready", Root: row.WorkspaceRoot}, Endpoints: machineTerminalEndpoints(runtimeWebsocketBase(httpIngressURL)), Auth: terminalprotocol.Auth{Method: "bearer", Token: token, AccessSessionID: jti, ExpiresAt: expires, Scopes: []string{"config:compare"}}, ExpiresAt: expires}, Binding: binding}, nil
 }

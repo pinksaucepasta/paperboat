@@ -6,8 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"github.com/google/uuid"
-	"github.com/pinksaucepasta/paperboat/server/internal/accessdescriptor"
 	"github.com/pinksaucepasta/paperboat/server/internal/teams/teamstest"
+	"github.com/pinksaucepasta/paperboat/shared/terminalprotocol"
 	"testing"
 	"time"
 
@@ -55,10 +55,10 @@ func TestWorkspaceTerminalDescriptorDoesNotBorrowPersonalCapabilities(t *testing
 		if !descriptor.Connectable || (descriptor.FileTransfer != nil) != test.wantFiles {
 			t.Fatalf("%s descriptor readiness/files mismatch", test.name)
 		}
-		auth := descriptor.Terminal["auth"].(map[string]any)
+		auth := descriptor.Terminal.Auth
 		var capabilities string
 		var teamID sql.NullString
-		if err := f.store.SQL().QueryRowContext(f.ctx, `SELECT array_to_string(capabilities,','),team_id FROM paperboat.user_machine_access_sessions WHERE id=$1`, auth["access_session_id"]).Scan(&capabilities, &teamID); err != nil {
+		if err := f.store.SQL().QueryRowContext(f.ctx, `SELECT array_to_string(capabilities,','),team_id FROM paperboat.user_machine_access_sessions WHERE id=$1`, auth.AccessSessionID).Scan(&capabilities, &teamID); err != nil {
 			t.Fatal(err)
 		}
 		if test.wantFiles {
@@ -115,7 +115,7 @@ func newWorkspaceDescriptorFixture(t *testing.T) (workspaceMachineFixture, strin
 	}
 	f.service.ConfigureAccess(fakeCredentialIssuer{}, "https://api.paperboat.test")
 	f.service.ConfigureTerminalSessions(signer, nil)
-	f.service.ConfigureFileTransfer(accessdescriptor.FileTransferPolicy{Revision: "file-transfer-v1", MaxBatchFiles: 10, AutomaticMaxBatchBytes: 2_000_000_000})
+	f.service.ConfigureFileTransfer(terminalprotocol.FileTransferPolicy{Revision: "file-transfer-v1", MaxBatchFiles: 10, AutomaticMaxBatchBytes: 2_000_000_000})
 	return f, source, signer
 }
 

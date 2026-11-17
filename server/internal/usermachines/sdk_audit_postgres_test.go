@@ -14,7 +14,7 @@ func TestSDKSessionAuditAttribution(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	credential, _ := descriptor.Auth["token"].(string)
+	credential := descriptor.Auth.Token
 	claims, err := signer.VerifyCredential(credential, f.service.issuer, "exec_operation", time.Now())
 	if err != nil {
 		t.Fatal(err)

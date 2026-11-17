@@ -4,6 +4,7 @@ package access
 import (
 	"context"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/shared/terminalprotocol"
 	"time"
 )
 
@@ -35,8 +36,8 @@ type CredentialRevocationInput struct {
 }
 
 type CLICredentials struct {
-	TerminalAuth      map[string]any
-	FileTransferAuth  map[string]any
+	TerminalAuth      *terminalprotocol.Auth
+	FileTransferAuth  *terminalprotocol.Auth
 	TerminalSessionID string
 	FileSessionID     string
 }

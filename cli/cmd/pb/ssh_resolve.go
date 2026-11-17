@@ -143,7 +143,7 @@ func sshConnectInfo(machine api.UserMachine, descriptor api.SSHDescriptor, selec
 }
 
 func pendingSSHDescriptor(machine api.UserMachine, operationID string) api.SSHDescriptor {
-	return api.SSHDescriptor{OperationID: operationID, ExpiresAt: time.Now().Add(2 * time.Minute), Auth: api.AuthMaterial{ExpiresAt: time.Now().Add(2 * time.Minute)}, Environment: &api.Environment{ID: machine.EnvironmentID, Kind: "machine", ResourceID: machine.ID, Root: machine.WorkspaceRoot}}
+	return api.SSHDescriptor{OperationID: operationID, ExpiresAt: time.Now().Add(2 * time.Minute), Auth: api.AuthMaterial{ExpiresAt: time.Now().Add(2 * time.Minute)}, Environment: api.Environment{ID: machine.EnvironmentID, Kind: "machine", ResourceID: machine.ID, Root: machine.WorkspaceRoot}}
 }
 
 // refreshInventoryForSSHHostKeys is replaced in tests.

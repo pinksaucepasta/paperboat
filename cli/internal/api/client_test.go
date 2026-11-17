@@ -81,7 +81,7 @@ func TestMachineExecDescriptorBindsSourceAndOperation(t *testing.T) {
 			t.Fatalf("body=%#v", body)
 		}
 		expiresAt := time.Now().Add(time.Minute)
-		writeData(w, http.StatusOK, ExecDescriptor{OperationID: "operation_exec_1", Environment: &Environment{ID: "env_1", Kind: "machine", ResourceID: "um_1", State: "ready", Root: "/workspace"}, Endpoints: TerminalEndpoints{QUIC: "quic://machine.test:443", WSS: "wss://machine.test/v1/runtime"}, Auth: AuthMaterial{Method: "bearer", Token: "exec-token", ExpiresAt: expiresAt, Scopes: []string{"exec:operate"}}, ExpiresAt: expiresAt})
+		writeData(w, http.StatusOK, ExecDescriptor{OperationID: "operation_exec_1", Environment: Environment{ID: "env_1", Kind: "machine", ResourceID: "um_1", State: "ready", Root: "/workspace"}, Endpoints: TerminalEndpoints{QUIC: "quic://machine.test:443", WSS: "wss://machine.test/v1/runtime"}, Auth: AuthMaterial{Method: "bearer", Token: "exec-token", ExpiresAt: expiresAt, Scopes: []string{"exec:operate"}}, ExpiresAt: expiresAt})
 	}))
 	defer server.Close()
 	client := New(server.URL, config.Credential{AccessToken: "token"}, nil)
@@ -108,7 +108,7 @@ func TestOperationDescriptorAcceptsNativeOnlyAnswers(t *testing.T) {
 		"wss not the runtime":    {WSS: "wss://machine.test/prefix/other"},
 	} {
 		expiresAt := time.Now().Add(time.Minute)
-		descriptor := ExecDescriptor{OperationID: "operation_exec_1", Environment: &Environment{ID: "env_1", Kind: "machine", ResourceID: "um_1", State: "ready", Root: "/workspace"}, Endpoints: endpoints, Auth: AuthMaterial{Method: "bearer", Token: "exec-token", ExpiresAt: expiresAt, Scopes: []string{"exec:operate"}}, ExpiresAt: expiresAt}
+		descriptor := ExecDescriptor{OperationID: "operation_exec_1", Environment: Environment{ID: "env_1", Kind: "machine", ResourceID: "um_1", State: "ready", Root: "/workspace"}, Endpoints: endpoints, Auth: AuthMaterial{Method: "bearer", Token: "exec-token", ExpiresAt: expiresAt, Scopes: []string{"exec:operate"}}, ExpiresAt: expiresAt}
 		err := validateOperationDescriptor(descriptor, "um_1", "operation_exec_1", "exec:operate", "exec")
 		if (err == nil) == refused[name] {
 			t.Errorf("%s: %v", name, err)
@@ -353,9 +353,9 @@ func TestUserMachineRequestsUseScopedRoutes(t *testing.T) {
 		case "/v1/machines/um_1/connection-descriptor":
 			body, _ := io.ReadAll(r.Body)
 			connectBodies = append(connectBodies, string(body))
-			writeData(w, http.StatusOK, ConnectionDescriptor{Schema: ConnectionSchemaV1, UserMachineID: "um_1", Connectable: false})
+			writeData(w, http.StatusOK, ConnectionDescriptor{Schema: ConnectionSchemaV1, Environment: Environment{ResourceID: "um_1"}, Connectable: false})
 		case "/v1/machines/um_1/connection-readiness":
-			writeData(w, http.StatusOK, ConnectionDescriptor{Schema: ConnectionSchemaV1, UserMachineID: "um_1", Connectable: false})
+			writeData(w, http.StatusOK, ConnectionDescriptor{Schema: ConnectionSchemaV1, Environment: Environment{ResourceID: "um_1"}, Connectable: false})
 		case "/v1/machines/um_1/file-transfer-descriptor":
 			body, _ := io.ReadAll(r.Body)
 			connectBodies = append(connectBodies, string(body))
@@ -701,14 +701,14 @@ func TestNormalizeCanonicalConnectionDescriptor(t *testing.T) {
 	expires := time.Now().Add(time.Minute).UTC()
 	response := ConnectionDescriptor{
 		Schema: ConnectionSchemaV1, Issuer: "https://api.paperboat.test", Connectable: true, ExpiresAt: expires,
-		Environment:  &Environment{ID: "env_1", Kind: "machine", ResourceID: "um_1", Alias: "studio", State: "ready", Root: "/Users/paperboat"},
+		Environment:  Environment{ID: "env_1", Kind: "machine", ResourceID: "um_1", Alias: "studio", State: "ready", Root: "/Users/paperboat"},
 		Terminal:     &Terminal{Protocol: "paperboat.terminal.v1", Endpoints: TerminalEndpoints{QUIC: "quic://edge.paperboat.test:443", WSS: "wss://edge.paperboat.test/v1/runtime"}, SessionID: "session_1"},
 		FileTransfer: &FileTransfer{Endpoint: "https://edge.paperboat.test/v1/file-transfers"},
 	}
-	if err := response.NormalizeConnectionDescriptor(); err != nil {
+	if err := NormalizeConnectionDescriptor(&response); err != nil {
 		t.Fatal(err)
 	}
-	if response.UserMachineID != "um_1" || response.Environment.EnvironmentID != "env_1" || response.Environment.ProjectRoot != "/Users/paperboat" {
+	if response.Environment.ResourceID != "um_1" || response.Environment.ID != "env_1" || response.Environment.Root != "/Users/paperboat" {
 		t.Fatalf("canonical environment was not normalized: %#v", response)
 	}
 	if response.Terminal.Protocol != "paperboat.terminal.v1" || response.Terminal.Endpoints.WSS == "" {
@@ -721,7 +721,7 @@ func TestNormalizeCanonicalConnectionDescriptor(t *testing.T) {
 
 func TestNormalizeConnectionDescriptorRejectsUnknownSchema(t *testing.T) {
 	response := ConnectionDescriptor{Schema: "paperboat.environment-connection/unknown"}
-	if err := response.NormalizeConnectionDescriptor(); err == nil {
+	if err := NormalizeConnectionDescriptor(&response); err == nil {
 		t.Fatal("expected unknown schema to fail closed")
 	}
 }
@@ -746,7 +746,7 @@ func TestUserMachineConnectionDescriptorDecodesCanonicalDescriptor(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if response.UserMachineID != "um_1" || response.Terminal.Endpoints.WSS != "wss://edge.paperboat.test/v1/runtime" || response.FileTransfer.Endpoint != "https://edge.paperboat.test/v1/file-transfers" {
+	if response.Environment.ResourceID != "um_1" || response.Terminal.Endpoints.WSS != "wss://edge.paperboat.test/v1/runtime" || response.FileTransfer.Endpoint != "https://edge.paperboat.test/v1/file-transfers" {
 		t.Fatalf("canonical response not decoded: %#v", response)
 	}
 }

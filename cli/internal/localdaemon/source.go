@@ -128,7 +128,7 @@ func (s AuthenticatedMachineSource) IssuePeerStream(ctx context.Context, request
 		}
 		return request, err
 	}
-	if descriptor.Environment == nil || descriptor.Environment.ID != request.EnvironmentID {
+	if descriptor.Environment.ID != request.EnvironmentID {
 		return request, errors.New("operation descriptor environment mismatch")
 	}
 	token, expires = descriptor.Auth.Token, descriptor.Auth.ExpiresAt

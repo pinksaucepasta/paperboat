@@ -22,7 +22,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/server/internal/accessdescriptor"
 	"github.com/pinksaucepasta/paperboat/server/internal/audit"
 	"github.com/pinksaucepasta/paperboat/server/internal/auth"
 	"github.com/pinksaucepasta/paperboat/server/internal/config"
@@ -34,6 +33,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/teams"
 	"github.com/pinksaucepasta/paperboat/server/internal/testauth"
 	"github.com/pinksaucepasta/paperboat/server/internal/usermachines"
+	"github.com/pinksaucepasta/paperboat/shared/terminalprotocol"
 )
 
 // This opt-in connected gate uses one isolated database, authenticated accounts,
@@ -122,7 +122,7 @@ func TestTask44ConnectedCollaboration(t *testing.T) {
 	machines := usermachines.New(store, writer, usermachines.Policy{}, nil)
 	machines.ConfigureAccess(nil, "https://task44.invalid")
 	machines.ConfigureTerminalSessions(signer, nil)
-	machines.ConfigureFileTransfer(accessdescriptor.FileTransferPolicy{Revision: "task44", MaxBatchFiles: 2, AutomaticMaxBatchBytes: 2 << 20, MaxConcurrentTransfers: 2, RetentionSeconds: 60, DeliveryTimeoutSeconds: 60, MaxPendingSpoolBytes: 2 << 20})
+	machines.ConfigureFileTransfer(terminalprotocol.FileTransferPolicy{Revision: "task44", MaxBatchFiles: 2, AutomaticMaxBatchBytes: 2 << 20, MaxConcurrentTransfers: 2, RetentionSeconds: 60, DeliveryTimeoutSeconds: 60, MaxPendingSpoolBytes: 2 << 20})
 	inbox, err := teaminbox.New(store, config.Default().Access.FileTransfer)
 	if err != nil {
 		t.Fatal(err)
@@ -294,7 +294,7 @@ func TestTask44ConnectedCollaboration(t *testing.T) {
 	if descriptor.MachineGeneration < 1 {
 		t.Fatalf("shared descriptor carries machine_generation %d; the CLI refuses a shared descriptor without one", descriptor.MachineGeneration)
 	}
-	token := descriptor.Terminal["auth"].(map[string]any)["token"].(string)
+	token := descriptor.Terminal.Auth.Token
 	actionWithFields := func(id, operation string, fields map[string]string) {
 		t.Helper()
 		_ = os.Remove(filepath.Join(directory, "result.json"))
@@ -365,7 +365,7 @@ func TestTask44ConnectedCollaboration(t *testing.T) {
 	sendFile := func(id string, descriptor usermachines.FileTransferDescriptor, batchID, requestID string, own bool) {
 		t.Helper()
 		_ = os.Remove(filepath.Join(directory, "result.json"))
-		write("action.json", map[string]any{"id": id, "action": "file", "token": descriptor.Auth["token"], "batch_id": batchID, "source_machine_id": descriptor.SourceMachineID, "initiating_user_id": descriptor.InitiatingUserID, "request_id": requestID, "own_machine": own})
+		write("action.json", map[string]any{"id": id, "action": "file", "token": descriptor.Auth.Token, "batch_id": batchID, "source_machine_id": descriptor.SourceMachineID, "initiating_user_id": descriptor.InitiatingUserID, "request_id": requestID, "own_machine": own})
 		var result struct {
 			ID        string `json:"id"`
 			OK        bool   `json:"ok"`

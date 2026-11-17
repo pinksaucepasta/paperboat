@@ -112,7 +112,7 @@ func actionRemoteExec(c *command.Context, requested string, request tunnel.ExecR
 	// inside the authenticated local API broker.
 	// Reattach and cancel dial with a fresh placeholder too, so the broker decides each attachment's authority.
 	placeholder := func() api.ExecDescriptor {
-		return api.ExecDescriptor{OperationID: request.OperationID, ExpiresAt: time.Now().Add(2 * time.Minute), Auth: api.AuthMaterial{ExpiresAt: time.Now().Add(2 * time.Minute)}, Environment: &api.Environment{ID: machine.EnvironmentID, Kind: "machine", ResourceID: machine.ID, Root: machine.WorkspaceRoot}}
+		return api.ExecDescriptor{OperationID: request.OperationID, ExpiresAt: time.Now().Add(2 * time.Minute), Auth: api.AuthMaterial{ExpiresAt: time.Now().Add(2 * time.Minute)}, Environment: api.Environment{ID: machine.EnvironmentID, Kind: "machine", ResourceID: machine.ID, Root: machine.WorkspaceRoot}}
 	}
 	descriptor := placeholder()
 	if request.CWD == "" {

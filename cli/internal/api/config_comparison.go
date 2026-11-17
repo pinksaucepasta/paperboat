@@ -27,14 +27,14 @@ func (c *Client) ConfigConflictConnection(ctx context.Context, environmentID, co
 	if len(result.OperationID) < 8 || len(result.OperationID) > 128 || !result.ExpiresAt.After(serverclock.Now()) {
 		return ConfigComparisonDescriptor{}, errors.New("invalid conflict comparison lifetime")
 	}
-	if result.Environment == nil {
+	if result.Environment.ID == "" {
 		return ConfigComparisonDescriptor{}, errors.New("invalid conflict comparison environment")
 	}
 	if err := validateOperationDescriptor(result.ExecDescriptor, result.Environment.ResourceID, result.OperationID, "config:compare", "config comparison"); err != nil {
 		return ConfigComparisonDescriptor{}, err
 	}
 	b := result.Binding
-	if b.AssignmentID == "" || b.AssignmentVersion != assignmentVersion || b.Path != path || b.ConflictRevision != conflictRevision || b.ExpectedRemoteRevision != remote || result.Environment == nil || result.Environment.ID != environmentID || result.Environment.ResourceID == "" || result.Auth.AccessSessionID == "" || len(result.Auth.AccessSessionID) > 128 || result.Auth.Token == "" || result.Auth.Method != "bearer" || len(result.Auth.Scopes) != 1 || result.Auth.Scopes[0] != "config:compare" || result.ExpiresAt.IsZero() || !result.ExpiresAt.Equal(result.Auth.ExpiresAt) {
+	if b.AssignmentID == "" || b.AssignmentVersion != assignmentVersion || b.Path != path || b.ConflictRevision != conflictRevision || b.ExpectedRemoteRevision != remote || result.Environment.ID != environmentID || result.Environment.ResourceID == "" || result.Auth.AccessSessionID == "" || len(result.Auth.AccessSessionID) > 128 || result.Auth.Token == "" || result.Auth.Method != "bearer" || len(result.Auth.Scopes) != 1 || result.Auth.Scopes[0] != "config:compare" || result.ExpiresAt.IsZero() || !result.ExpiresAt.Equal(result.Auth.ExpiresAt) {
 		return ConfigComparisonDescriptor{}, errors.New("invalid conflict comparison descriptor")
 	}
 	return result, nil

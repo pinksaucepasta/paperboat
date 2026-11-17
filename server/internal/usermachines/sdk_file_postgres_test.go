@@ -16,7 +16,7 @@ func TestSDKSessionFileSourceAuthorization(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	credential, _ := descriptor.Auth["token"].(string)
+	credential := descriptor.Auth.Token
 	claims, err := signer.VerifyCredential(credential, f.service.issuer, "file_transfer", time.Now())
 	if err != nil || claims.CLIClientSessionID != session || claims.SourceMachineID != "" || descriptor.SourceMachineID != "" || claims.MachineID != f.machine || claims.WorkspaceID != "personal" || claims.TransferDirection != "send" || claims.TransferMode != "automatic" || claims.MaxBytes != 7 || claims.OperationID == "" {
 		t.Fatal("file credential lost source, target, workspace, direction or mode")
@@ -33,7 +33,7 @@ func TestSDKSessionFileSourceAuthorization(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			d, e := f.service.FileTransferDescriptorForRequest(ctx, f.account, tc.source, tc.target, tc.peer, tc.terminal, "", "", tc.intent)
-			if e == nil || d.Auth != nil {
+			if e == nil || d.Auth.Token != "" {
 				t.Fatal("unauthorized file descriptor issued")
 			}
 		})

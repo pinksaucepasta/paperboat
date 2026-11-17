@@ -107,7 +107,7 @@ func TestNativeConfigCompareDescriptorAndMeterPostgres(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	nativeClaims, err := signer.VerifyCredential(native.Auth["token"].(string), "https://api.compare.test", "config_compare", time.Now())
+	nativeClaims, err := signer.VerifyCredential(native.Auth.Token, "https://api.compare.test", "config_compare", time.Now())
 	if err != nil || nativeClaims.SessionID != "" || nativeClaims.AssignmentID != assignment {
 		t.Fatalf("native signed grant: %v", err)
 	}

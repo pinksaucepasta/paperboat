@@ -32,7 +32,6 @@ import (
 
 	"github.com/coder/websocket"
 
-	"github.com/pinksaucepasta/paperboat/server/internal/accessdescriptor"
 	"github.com/pinksaucepasta/paperboat/server/internal/audit"
 	"github.com/pinksaucepasta/paperboat/server/internal/config"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
@@ -44,6 +43,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/teams"
 	"github.com/pinksaucepasta/paperboat/server/internal/usermachines"
 	"github.com/pinksaucepasta/paperboat/server/internal/workspace"
+	"github.com/pinksaucepasta/paperboat/shared/terminalprotocol"
 	"golang.org/x/crypto/curve25519"
 )
 
@@ -371,7 +371,7 @@ func TestNetworkAuthorityProductionIdentityAndAccessLifecycle(t *testing.T) {
 	machineService := usermachines.New(store, audit.NewWriter(store), usermachines.Policy{}, nil)
 	machineService.ConfigureAccess(nil, "https://api.example.test")
 	machineService.ConfigureTerminalSessions(provider, nil)
-	machineService.ConfigureFileTransfer(accessdescriptor.FileTransferPolicy{Revision: "shared-native-v1", MaxBatchFiles: 2, AutomaticMaxBatchBytes: 2 << 20, MaxConcurrentTransfers: 2, RetentionSeconds: 60, DeliveryTimeoutSeconds: 60, MaxPendingSpoolBytes: 2 << 20})
+	machineService.ConfigureFileTransfer(terminalprotocol.FileTransferPolicy{Revision: "shared-native-v1", MaxBatchFiles: 2, AutomaticMaxBatchBytes: 2 << 20, MaxConcurrentTransfers: 2, RetentionSeconds: 60, DeliveryTimeoutSeconds: 60, MaxPendingSpoolBytes: 2 << 20})
 	execOperationID := "operation_shared_exec_" + suffix
 	refreshRuntimeCarrier()
 	hostPeerNetwork := func() (generation int64) {
@@ -391,8 +391,8 @@ func TestNetworkAuthorityProductionIdentityAndAccessLifecycle(t *testing.T) {
 	if execHostAfter := hostPeerNetwork(); execHostAfter <= execHostBefore {
 		t.Fatalf("team exec access session left the host's peer_network generation at %d->%d; the host must be woken", execHostBefore, execHostAfter)
 	}
-	sharedAccess, _ := execDescriptor.Auth["access_session_id"].(string)
-	if sharedAccess == "" || execDescriptor.Auth["token"] == "" {
+	sharedAccess := execDescriptor.Auth.AccessSessionID
+	if sharedAccess == "" || execDescriptor.Auth.Token == "" {
 		t.Fatalf("shared exec descriptor=%#v", execDescriptor)
 	}
 	refreshRuntimeCarrier()
@@ -437,8 +437,8 @@ func TestNetworkAuthorityProductionIdentityAndAccessLifecycle(t *testing.T) {
 		}
 		holdDir := t.TempDir()
 		holdInput := filepath.Join(holdDir, "runtime.json")
-		ownerAuth := ownerSharedTerminalDescriptor.Terminal["auth"].(map[string]any)
-		holdDocument, _ := json.Marshal(map[string]any{"issuer": "https://api.example.test", "key_id": "network-test", "public_key": base64.RawURLEncoding.EncodeToString(signingPublic), "owner_token": ownerAuth["token"], "environment_id": envID, "machine_id": machineID, "session_id": ownerSharedTerminalID, "account_id": userID, "listen_address": listenAddress})
+		ownerAuth := ownerSharedTerminalDescriptor.Terminal.Auth
+		holdDocument, _ := json.Marshal(map[string]any{"issuer": "https://api.example.test", "key_id": "network-test", "public_key": base64.RawURLEncoding.EncodeToString(signingPublic), "owner_token": ownerAuth.Token, "environment_id": envID, "machine_id": machineID, "session_id": ownerSharedTerminalID, "account_id": userID, "listen_address": listenAddress})
 		if err = os.WriteFile(holdInput, holdDocument, 0o600); err != nil {
 			t.Fatal(err)
 		}
@@ -475,7 +475,7 @@ func TestNetworkAuthorityProductionIdentityAndAccessLifecycle(t *testing.T) {
 			t.Fatal(err)
 		}
 		heldRuntime = helperruntime.Client{HTTPClient: &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS13, RootCAs: roots}}, Timeout: 10 * time.Second}}
-		heldRoute, heldOwnerToken = "https://"+ready.PublicHost, ownerAuth["token"].(string)
+		heldRoute, heldOwnerToken = "https://"+ready.PublicHost, ownerAuth.Token
 		machineService.ConfigureTerminalSessions(provider, heldRuntime.HTTPClient)
 	}
 	terminalOwnerConfig, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "operation_terminal_owner_config_" + suffix, UserID: userID, EndpointID: cliID})
@@ -521,7 +521,7 @@ func TestNetworkAuthorityProductionIdentityAndAccessLifecycle(t *testing.T) {
 	if viewerTerminalDescriptor.MachineGeneration < 1 {
 		t.Fatalf("shared terminal descriptor machine_generation = %d; the CLI refuses a shared descriptor without one", viewerTerminalDescriptor.MachineGeneration)
 	}
-	viewerAccessID := viewerTerminalDescriptor.Terminal["auth"].(map[string]any)["access_session_id"].(string)
+	viewerAccessID := viewerTerminalDescriptor.Terminal.Auth.AccessSessionID
 	var viewerJTI string
 	if err = store.SQL().QueryRowContext(ctx, `SELECT helper_terminal_session_id FROM paperboat.user_machine_access_sessions WHERE id=$1`, viewerAccessID).Scan(&viewerJTI); err != nil {
 		t.Fatal(err)
@@ -641,8 +641,8 @@ func TestNetworkAuthorityProductionIdentityAndAccessLifecycle(t *testing.T) {
 		if freshErr != nil || !fresh.Connectable {
 			t.Fatalf("fresh generation connectable=%v status=%q reason=%q err=%v", fresh.Connectable, fresh.Status, fresh.Reason, freshErr)
 		}
-		freshAuth := fresh.Terminal["auth"].(map[string]any)
-		parts := strings.Split(freshAuth["token"].(string), ".")
+		freshAuth := fresh.Terminal.Auth
+		parts := strings.Split(freshAuth.Token, ".")
 		if len(parts) != 3 {
 			t.Fatal("fresh generation credential is malformed")
 		}
@@ -713,9 +713,9 @@ func TestNetworkAuthorityProductionIdentityAndAccessLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertNetworkScope(t, sharedConfig.Configuration, "machine_access", sharedAccess, "exec")
-	terminalAccess := terminalDescriptor.Terminal["auth"].(map[string]any)["access_session_id"].(string)
+	terminalAccess := terminalDescriptor.Terminal.Auth.AccessSessionID
 	assertNetworkScope(t, sharedConfig.Configuration, "machine_access", terminalAccess, "terminal")
-	assertNetworkScope(t, sharedConfig.Configuration, "machine_access", fileDescriptor.Auth["access_session_id"].(string), "file_transfer")
+	assertNetworkScope(t, sharedConfig.Configuration, "machine_access", fileDescriptor.Auth.AccessSessionID, "file_transfer")
 	assertNetworkPeerAccount(t, sharedConfig.Configuration, machineID, userID)
 	assertNoNetworkCapability(t, sharedConfig.Configuration, "private_access")
 	ownerSharedConfig, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "operation_owner_shared_" + suffix, UserID: userID, EndpointID: cliID})
@@ -781,9 +781,9 @@ func TestNetworkAuthorityProductionIdentityAndAccessLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertNetworkScope(t, finalSharedConfig.Configuration, "machine_access", finalSharedExec.Auth["access_session_id"].(string), "exec")
+	assertNetworkScope(t, finalSharedConfig.Configuration, "machine_access", finalSharedExec.Auth.AccessSessionID, "exec")
 	assertNoNetworkPeer(t, removedOwnerConfig.Configuration, machineID)
-	ownerAccessID, _ := ownerExecDescriptor.Auth["access_session_id"].(string)
+	ownerAccessID := ownerExecDescriptor.Auth.AccessSessionID
 	if _, err = store.SQL().ExecContext(ctx, `UPDATE paperboat.user_machine_access_sessions SET state='revoked',revoked_at=$2,revocation_reason='fixture_complete',updated_at=$2 WHERE id=$1`, ownerAccessID, now); err != nil {
 		t.Fatal(err)
 	}

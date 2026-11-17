@@ -3,10 +3,8 @@ package usermachines
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"github.com/pinksaucepasta/paperboat/server/internal/access"
-	"github.com/pinksaucepasta/paperboat/server/internal/accessdescriptor"
 	"github.com/pinksaucepasta/paperboat/server/internal/admission"
 	"github.com/pinksaucepasta/paperboat/server/internal/auth"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
@@ -154,56 +152,8 @@ func (s *Service) fileTransferDescriptor(ctx context.Context, userID, sourceMach
 	return FileTransferDescriptor{
 		Endpoint: nativeFileTransferEndpoint(httpBaseURL), SourceMachineID: sourceMachineID,
 		DestinationMachineID: destination.ID, InitiatingUserID: userID, Policy: s.fileTransferPolicy,
-		Auth: map[string]any{"method": "bearer", "token": token, "expires_at": expiresAt, "scopes": []string{"file:transfer"}, "access_session_id": accessSessionID},
+		Auth: terminalprotocol.Auth{Method: "bearer", Token: token, ExpiresAt: expiresAt, Scopes: []string{"file:transfer"}, AccessSessionID: accessSessionID},
 	}, nil
-}
-
-func (r ConnectionDescriptor) MarshalJSON() ([]byte, error) {
-	if r.Schema != accessdescriptor.SchemaV1 {
-		return nil, errors.New("connection descriptor schema is required")
-	}
-	environment, ok := r.Environment["id"].(string)
-	if !ok || environment == "" {
-		return nil, errors.New("canonical environment descriptor is incomplete")
-	}
-	env := accessdescriptor.Environment{
-		ID: environment, Kind: stringValue(r.Environment, "kind"), ResourceID: stringValue(r.Environment, "resource_id"),
-		Alias: stringValue(r.Environment, "alias"), State: stringValue(r.Environment, "state"), Root: stringValue(r.Environment, "root"),
-	}
-	if env.Kind == "" || env.ResourceID == "" || env.Alias == "" || env.State == "" {
-		return nil, errors.New("canonical environment descriptor is incomplete")
-	}
-	out := accessdescriptor.Descriptor{Schema: r.Schema, Issuer: r.Issuer, MachineGeneration: r.MachineGeneration, Connectable: r.Connectable, ExpiresAt: r.ExpiresAt, Environment: env, Capabilities: slices.Clone(r.Capabilities), Status: r.Status, Reason: r.Reason, RetryAfterSeconds: r.RetryAfterSeconds}
-	if r.Terminal != nil && r.Terminal["auth"] != nil {
-		terminal, err := decodeCanonical[accessdescriptor.Terminal](r.Terminal)
-		if err != nil {
-			return nil, err
-		}
-		out.Terminal = &terminal
-	}
-	if r.FileTransfer != nil && r.FileTransfer["auth"] != nil {
-		transfer, err := decodeCanonical[accessdescriptor.FileTransfer](r.FileTransfer)
-		if err != nil {
-			return nil, err
-		}
-		out.FileTransfer = &transfer
-	}
-	return json.Marshal(out)
-}
-
-func stringValue(value map[string]any, key string) string {
-	result, _ := value[key].(string)
-	return result
-}
-
-func decodeCanonical[T any](value any) (T, error) {
-	var out T
-	b, err := json.Marshal(value)
-	if err != nil {
-		return out, err
-	}
-	err = json.Unmarshal(b, &out)
-	return out, err
 }
 
 func machineConnectionState(connectable bool, state string) string {
@@ -224,9 +174,9 @@ func machineConnectionState(connectable bool, state string) string {
 
 func setCanonicalMachineIdentity(response *ConnectionDescriptor, row dbsqlc.UserMachine) {
 	response.MachineGeneration = row.InstallationGeneration
-	response.Schema = accessdescriptor.SchemaV1
-	response.Capabilities = []string{accessdescriptor.CapabilityTerminal, accessdescriptor.CapabilityFileTransfer, accessdescriptor.CapabilityPreview}
-	response.Environment = map[string]any{"id": row.EnvironmentID, "kind": accessdescriptor.EnvironmentMachine, "resource_id": row.ID, "alias": row.Alias, "state": machineConnectionState(response.Connectable, row.State), "root": row.WorkspaceRoot}
+	response.Schema = terminalprotocol.DescriptorSchemaV1
+	response.Capabilities = []string{terminalprotocol.CapabilityTerminal, terminalprotocol.CapabilityFileTransfer, terminalprotocol.CapabilityPreview}
+	response.Environment = terminalprotocol.Environment{ID: row.EnvironmentID, Kind: terminalprotocol.EnvironmentMachine, ResourceID: row.ID, Alias: row.Alias, State: machineConnectionState(response.Connectable, row.State), Root: row.WorkspaceRoot}
 }
 
 // ConnectSharedTerminalSession issues only the exact current session role. It
@@ -266,7 +216,7 @@ func (s *Service) ConnectSharedTerminalSession(ctx context.Context, userID, sour
 		return ConnectionDescriptor{}, ErrMachineCapabilityUnavailable
 	}
 	expires := admission.Expiry(s.controlSigner, s.now())
-	response := ConnectionDescriptor{Issuer: s.issuer, UserMachineID: row.ID, UserMachineState: row.State, ExpiresAt: expires, Status: "connector_connecting", Reason: "connector_offline", RetryAfterSeconds: 2}
+	response := ConnectionDescriptor{Issuer: s.issuer, ExpiresAt: expires, Status: "connector_connecting", Reason: "connector_offline", RetryAfterSeconds: 2}
 	setCanonicalMachineIdentity(&response, row)
 	if row.State == "revoked" || row.State == "disconnected" || row.State == "deleted" {
 		response.Status, response.Reason = "user_machine_revoked", "access_revoked"
@@ -347,9 +297,9 @@ func (s *Service) ConnectSharedTerminalSession(ctx context.Context, userID, sour
 	setCanonicalMachineIdentity(&response, row)
 	// A session grant is the complete authority: it never advertises file or preview access,
 	// and the CLI refuses a shared descriptor that claims more than the terminal.
-	response.Capabilities = []string{accessdescriptor.CapabilityTerminal}
-	auth := map[string]any{"method": "bearer", "token": token, "expires_at": expires, "scopes": []string{scope}, "access_session_id": accessID}
-	response.Terminal = map[string]any{"protocol": terminalprotocol.TerminalSubprotocol, "endpoints": machineTerminalEndpoints(runtimeWebsocketBase(httpIngressURL)), "session_id": sessionID, "cwd": cwd, "role": decision.Role, "auth": auth}
+	response.Capabilities = []string{terminalprotocol.CapabilityTerminal}
+	response.Terminal = &terminalprotocol.Terminal{Protocol: terminalprotocol.TerminalSubprotocol, Endpoints: machineTerminalEndpoints(runtimeWebsocketBase(httpIngressURL)), SessionID: sessionID, CWD: cwd,
+		Auth: terminalprotocol.Auth{Method: "bearer", Token: token, ExpiresAt: expires, Scopes: []string{scope}, AccessSessionID: accessID}}
 	return response, nil
 }
 
@@ -419,7 +369,7 @@ func (s *Service) ConnectTerminalSession(ctx context.Context, userID, sourceMach
 		return ConnectionDescriptor{}, err
 	}
 	expires := admission.Expiry(s.controlSigner, s.now())
-	response := ConnectionDescriptor{Issuer: s.issuer, UserMachineID: row.ID, UserMachineState: row.State, ExpiresAt: expires, Status: "connector_connecting", Reason: "connector_offline", RetryAfterSeconds: 2}
+	response := ConnectionDescriptor{Issuer: s.issuer, ExpiresAt: expires, Status: "connector_connecting", Reason: "connector_offline", RetryAfterSeconds: 2}
 	setCanonicalMachineIdentity(&response, row)
 	if row.State == "revoked" || row.State == "disconnected" || row.State == "deleted" {
 		response.Status = "user_machine_revoked"
@@ -484,9 +434,9 @@ func (s *Service) ConnectTerminalSession(ctx context.Context, userID, sourceMach
 	if credentials.TerminalAuth == nil || includeFiles && credentials.FileTransferAuth == nil {
 		return ConnectionDescriptor{}, errors.New("user-machine credential issuer returned incomplete authorization")
 	}
-	credentials.TerminalAuth["access_session_id"] = accessSessionID
+	credentials.TerminalAuth.AccessSessionID = accessSessionID
 	if credentials.FileTransferAuth != nil {
-		credentials.FileTransferAuth["access_session_id"] = accessSessionID
+		credentials.FileTransferAuth.AccessSessionID = accessSessionID
 	}
 	capabilities := []string{"terminal"}
 	if includeFiles {
@@ -510,17 +460,17 @@ func (s *Service) ConnectTerminalSession(ctx context.Context, userID, sourceMach
 	}
 	response.Connectable, response.Status, response.Reason, response.RetryAfterSeconds = true, "ready", "ready", 0
 	setCanonicalMachineIdentity(&response, row)
-	response.Terminal = map[string]any{"protocol": terminalprotocol.TerminalSubprotocol, "endpoints": machineTerminalEndpoints(websocketBaseURL), "session_id": terminalSession.ID, "cwd": terminalSession.LaunchCwd, "auth": credentials.TerminalAuth}
+	response.Terminal = &terminalprotocol.Terminal{Protocol: terminalprotocol.TerminalSubprotocol, Endpoints: machineTerminalEndpoints(websocketBaseURL), SessionID: terminalSession.ID, CWD: terminalSession.LaunchCwd, Auth: *credentials.TerminalAuth}
 	if credentials.FileTransferAuth != nil {
-		response.FileTransfer = map[string]any{"endpoint": nativeFileTransferEndpoint(httpBaseURL), "source_machine_id": sourceMachineID, "destination_machine_id": row.ID, "initiating_user_id": userID, "policy": s.fileTransferPolicy, "auth": credentials.FileTransferAuth}
+		response.FileTransfer = &terminalprotocol.FileTransfer{Endpoint: nativeFileTransferEndpoint(httpBaseURL), SourceMachineID: sourceMachineID, DestinationMachineID: row.ID, InitiatingUserID: userID, Policy: s.fileTransferPolicy, Auth: *credentials.FileTransferAuth}
 	}
 	return response, nil
 }
 
-func machineTerminalEndpoints(wss string) map[string]any {
+func machineTerminalEndpoints(wss string) terminalprotocol.TerminalEndpoints {
 	u, err := url.Parse(wss)
 	if err != nil || u.Hostname() == "" {
-		return map[string]any{}
+		return terminalprotocol.TerminalEndpoints{}
 	}
 	host := u.Host
 	if u.Port() == "" {
@@ -528,9 +478,9 @@ func machineTerminalEndpoints(wss string) map[string]any {
 	}
 	endpoint := "wss://" + u.Host + strings.TrimRight(u.Path, "/") + "/v1/runtime"
 	if u.Path != "" {
-		return map[string]any{"wss": endpoint}
+		return terminalprotocol.TerminalEndpoints{WSS: endpoint}
 	}
-	return map[string]any{"quic": "quic://" + host, "wss": endpoint}
+	return terminalprotocol.TerminalEndpoints{QUIC: "quic://" + host, WSS: endpoint}
 }
 
 func (s *Service) issueUserMachineCredentials(ctx context.Context, input access.CredentialInput, terminalSessionID string, includeFiles bool) (access.CLICredentials, machineCredentialKind, error) {
@@ -553,15 +503,15 @@ func (s *Service) issueUserMachineCredentials(ctx context.Context, input access.
 		return access.CLICredentials{}, machineCredentialSigned, err
 	}
 	if !includeFiles {
-		return access.CLICredentials{TerminalAuth: map[string]any{"method": "bearer", "token": terminalToken, "expires_at": input.ExpiresAt, "scopes": []string{"terminal:operate"}}, TerminalSessionID: terminalJTI}, machineCredentialSigned, nil
+		return access.CLICredentials{TerminalAuth: &terminalprotocol.Auth{Method: "bearer", Token: terminalToken, ExpiresAt: input.ExpiresAt, Scopes: []string{"terminal:operate"}}, TerminalSessionID: terminalJTI}, machineCredentialSigned, nil
 	}
 	transferToken, err := sign("file_transfer", []string{"file:transfer"}, transferJTI)
 	if err != nil {
 		return access.CLICredentials{}, machineCredentialSigned, err
 	}
 	return access.CLICredentials{
-		TerminalAuth:      map[string]any{"method": "bearer", "token": terminalToken, "expires_at": input.ExpiresAt, "scopes": []string{"terminal:operate"}},
-		FileTransferAuth:  map[string]any{"method": "bearer", "token": transferToken, "expires_at": input.ExpiresAt, "scopes": []string{"file:transfer"}},
+		TerminalAuth:      &terminalprotocol.Auth{Method: "bearer", Token: terminalToken, ExpiresAt: input.ExpiresAt, Scopes: []string{"terminal:operate"}},
+		FileTransferAuth:  &terminalprotocol.Auth{Method: "bearer", Token: transferToken, ExpiresAt: input.ExpiresAt, Scopes: []string{"file:transfer"}},
 		TerminalSessionID: terminalJTI, FileSessionID: transferJTI,
 	}, machineCredentialSigned, nil
 }
@@ -581,7 +531,7 @@ func (s *Service) ConnectionReadinessForTerminalSession(ctx context.Context, use
 	if _, err := s.terminalSession(ctx, userID, userMachineID, terminalSessionID); err != nil {
 		return ConnectionDescriptor{}, err
 	}
-	response := ConnectionDescriptor{Issuer: s.issuer, UserMachineID: row.ID, UserMachineState: row.State, ExpiresAt: s.now().UTC(), Status: "connector_connecting", Reason: "connector_offline", RetryAfterSeconds: 2}
+	response := ConnectionDescriptor{Issuer: s.issuer, ExpiresAt: s.now().UTC(), Status: "connector_connecting", Reason: "connector_offline", RetryAfterSeconds: 2}
 	setCanonicalMachineIdentity(&response, row)
 	if row.State == "revoked" || row.State == "disconnected" || row.State == "deleted" || row.SeatState != "occupied" {
 		response.Status = "user_machine_revoked"

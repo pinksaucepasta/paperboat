@@ -8,14 +8,14 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/server/internal/accessdescriptor"
 	"github.com/pinksaucepasta/paperboat/server/internal/controlplane"
 	"github.com/pinksaucepasta/paperboat/server/internal/usermachines"
+	"github.com/pinksaucepasta/paperboat/shared/terminalprotocol"
 )
 
 func TestRuntimeObservationReturnsConfiguredTransferPolicyAfterAuthentication(t *testing.T) {
 	machines := &usermachines.Service{}
-	policy := accessdescriptor.FileTransferPolicy{Revision: "task24", MaxBatchFiles: 2, AutomaticMaxBatchBytes: 2048, MaxConcurrentTransfers: 1, RetentionSeconds: 60, DeliveryTimeoutSeconds: 30, MaxPendingSpoolBytes: 4096}
+	policy := terminalprotocol.FileTransferPolicy{Revision: "task24", MaxBatchFiles: 2, AutomaticMaxBatchBytes: 2048, MaxConcurrentTransfers: 1, RetentionSeconds: 60, DeliveryTimeoutSeconds: 30, MaxPendingSpoolBytes: 4096}
 	machines.ConfigureFileTransfer(policy)
 	for _, denied := range []bool{false, true} {
 		identity := &fakeRuntimeIdentity{}
@@ -35,7 +35,7 @@ func TestRuntimeObservationReturnsConfiguredTransferPolicyAfterAuthentication(t 
 		}
 		var got struct {
 			Data struct {
-				Policy accessdescriptor.FileTransferPolicy `json:"file_transfer_policy"`
+				Policy terminalprotocol.FileTransferPolicy `json:"file_transfer_policy"`
 			} `json:"data"`
 		}
 		if w.Code != http.StatusAccepted || json.Unmarshal(w.Body.Bytes(), &got) != nil || got.Data.Policy != policy {

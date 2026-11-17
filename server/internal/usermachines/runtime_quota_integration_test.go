@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/shared/terminalprotocol"
 	"testing"
 	"time"
 
@@ -74,7 +75,7 @@ VALUES ($1,$2,$3,1,1,$4,1,$5,$6,$7,1,$8,$9,'{}',now()+interval '1 hour',true,now
 	if err != nil {
 		t.Fatalf("exec descriptor at the cap: %v", err)
 	}
-	accessSessionID, _ := descriptor.Auth["access_session_id"].(string)
+	accessSessionID := descriptor.Auth.AccessSessionID
 	var cliAuthorities int
 	if err := store.SQL().QueryRowContext(ctx, `SELECT count(*) FROM paperboat.usage_accounting_authorities WHERE authority_id=$1`, accessSessionID).Scan(&cliAuthorities); err != nil || cliAuthorities != 0 {
 		t.Fatalf("CLI descriptor recorded an edge authority: %d err=%v", cliAuthorities, err)
@@ -110,11 +111,11 @@ VALUES ($1,$2,$3,1,1,$4,1,$5,$6,$7,1,$8,$9,'{}',now()+interval '1 hour',true,now
 		t.Fatalf("descriptor without an edge route for a client that needs it: %v", err)
 	}
 	native, err := service.ExecDescriptor(ctx, userID, sourceMachineID, machineID, "cli_rq_1", "operation_rq_native_"+suffix, true)
-	if err != nil || len(native.Endpoints) != 0 || native.Auth["token"] == "" {
+	if err != nil || native.Endpoints != (terminalprotocol.TerminalEndpoints{}) || native.Auth.Token == "" {
 		t.Fatalf("native-only descriptor = %+v err=%v", native, err)
 	}
 	var base string
-	if err := store.SQL().QueryRowContext(ctx, `SELECT http_base_url FROM paperboat.user_machine_access_sessions WHERE id=$1`, native.Auth["access_session_id"]).Scan(&base); err != nil || base != "" {
+	if err := store.SQL().QueryRowContext(ctx, `SELECT http_base_url FROM paperboat.user_machine_access_sessions WHERE id=$1`, native.Auth.AccessSessionID).Scan(&base); err != nil || base != "" {
 		t.Fatalf("native-only access session base=%q err=%v", base, err)
 	}
 }

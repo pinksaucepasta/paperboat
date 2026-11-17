@@ -34,9 +34,9 @@ WHERE id IN(SELECT edge_node_id FROM paperboat.control_connector_generations WHE
 		if err != nil {
 			t.Fatalf("authorized self descriptor rejected: %v", err)
 		}
-		token, _ := descriptor.Auth["token"].(string)
+		token := descriptor.Auth.Token
 		claims, err := signer.VerifyCredential(token, "https://api.paperboat.test", "file_transfer", time.Now().UTC())
-		if err != nil || claims.SourceMachineID != f.machine || claims.MachineID != f.machine || claims.UserID != f.account || claims.CLIClientSessionID != "self-cli" || claims.SessionID != selectedSession || claims.AssignmentID == "" || descriptor.Auth["access_session_id"] != claims.AssignmentID || descriptor.SourceMachineID != f.machine || descriptor.DestinationMachineID != f.machine || descriptor.InitiatingUserID != f.account {
+		if err != nil || claims.SourceMachineID != f.machine || claims.MachineID != f.machine || claims.UserID != f.account || claims.CLIClientSessionID != "self-cli" || claims.SessionID != selectedSession || claims.AssignmentID == "" || descriptor.Auth.AccessSessionID != claims.AssignmentID || descriptor.SourceMachineID != f.machine || descriptor.DestinationMachineID != f.machine || descriptor.InitiatingUserID != f.account {
 			t.Fatal("self descriptor lost exact signed account, source, destination, client or session binding")
 		}
 	}
@@ -63,14 +63,14 @@ WHERE id IN(SELECT edge_node_id FROM paperboat.control_connector_generations WHE
 			for _, selectedSession := range []string{"", session} {
 				refresh()
 				descriptor, err := f.service.FileTransferDescriptorForRequest(ctx, f.account, f.machine, f.machine, "self-cli", selectedSession, "", "", TransferIntent{Mode: "automatic", DeclaredBytes: 1})
-				if !errors.Is(err, test.want) || descriptor.Auth != nil {
+				if !errors.Is(err, test.want) || descriptor.Auth.Token != "" {
 					t.Fatal("self descriptor bypassed current machine authority/readiness")
 				}
 			}
 		})
 	}
 	for _, actor := range []string{"foreign-account", ""} {
-		if descriptor, err := f.service.FileTransferDescriptor(ctx, actor, f.machine, f.machine, "self-cli", "", TransferIntent{Mode: "automatic", DeclaredBytes: 1}); !errors.Is(err, ErrNotFound) || descriptor.Auth != nil {
+		if descriptor, err := f.service.FileTransferDescriptor(ctx, actor, f.machine, f.machine, "self-cli", "", TransferIntent{Mode: "automatic", DeclaredBytes: 1}); !errors.Is(err, ErrNotFound) || descriptor.Auth.Token != "" {
 			t.Fatal("foreign actor received self descriptor")
 		}
 	}
@@ -78,7 +78,7 @@ WHERE id IN(SELECT edge_node_id FROM paperboat.control_connector_generations WHE
 		t.Fatal("transfer fixture ownership failed")
 	}
 	defer exec(`UPDATE paperboat.user_machines SET owner_team_id=NULL WHERE id=$1`)
-	if descriptor, err := f.service.FileTransferDescriptor(ctx, f.account, f.machine, f.machine, "self-cli", "", TransferIntent{Mode: "automatic", DeclaredBytes: 1}); !errors.Is(err, ErrNotFound) || descriptor.Auth != nil {
+	if descriptor, err := f.service.FileTransferDescriptor(ctx, f.account, f.machine, f.machine, "self-cli", "", TransferIntent{Mode: "automatic", DeclaredBytes: 1}); !errors.Is(err, ErrNotFound) || descriptor.Auth.Token != "" {
 		t.Fatal("original issuer bypassed transferred team ownership")
 	}
 }
@@ -103,7 +103,7 @@ func TestFileTransferModesBoundAutomaticAndSignTheModePostgres(t *testing.T) {
 	}
 	signed := func(d FileTransferDescriptor) (string, int64) {
 		t.Helper()
-		token, _ := d.Auth["token"].(string)
+		token := d.Auth.Token
 		claims, err := signer.VerifyCredential(token, "https://api.paperboat.test", "file_transfer", time.Now().UTC())
 		if err != nil {
 			t.Fatalf("verify file transfer credential: %v", err)

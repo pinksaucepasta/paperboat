@@ -63,7 +63,7 @@ func TestSDKSessionExecSourceAuthorization(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	credential, _ := descriptor.Auth["token"].(string)
+	credential := descriptor.Auth.Token
 	claims, err := signer.VerifyCredential(credential, f.service.issuer, "exec_operation", time.Now())
 	if err != nil || claims.SourceMachineID != "" || claims.CLIClientSessionID != session || claims.MachineID != f.machine || claims.WorkspaceID != "personal" || claims.ActorAccountID != f.account {
 		t.Fatal("exec credential lost exact session, target or workspace binding")
@@ -79,7 +79,7 @@ func TestSDKSessionExecSourceAuthorization(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			d, err := f.service.ExecDescriptor(tc.ctx, f.account, tc.source, tc.target, tc.peer, "operation_sdk_denied", true)
-			if err == nil || d.Auth != nil {
+			if err == nil || d.Auth.Token != "" {
 				t.Fatal("unauthorized descriptor issued")
 			}
 		})

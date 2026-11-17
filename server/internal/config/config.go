@@ -9,9 +9,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/pinksaucepasta/paperboat/server/internal/accessdescriptor"
 	"github.com/pinksaucepasta/paperboat/server/internal/admission"
 	"github.com/pinksaucepasta/paperboat/shared/edgelimits"
+	"github.com/pinksaucepasta/paperboat/shared/terminalprotocol"
 	"net"
 	"net/url"
 	"os"
@@ -1133,8 +1133,8 @@ func validEndpointBaseDomain(raw string) bool {
 }
 
 // Published is the file transfer policy as clients receive it (the access descriptor).
-func (p FileTransferPolicy) Published() accessdescriptor.FileTransferPolicy {
-	return accessdescriptor.FileTransferPolicy{
+func (p FileTransferPolicy) Published() terminalprotocol.FileTransferPolicy {
+	return terminalprotocol.FileTransferPolicy{
 		Revision: p.Revision, MaxBatchFiles: p.MaxBatchFiles, AutomaticMaxBatchBytes: p.AutomaticMaxBatchBytes,
 		MaxConcurrentTransfers: p.MaxConcurrentTransfers, RetentionSeconds: int64(p.Retention / time.Second),
 		DeliveryTimeoutSeconds: int64(p.DeliveryTimeout / time.Second), MaxPendingSpoolBytes: p.MaxPendingSpoolBytes,

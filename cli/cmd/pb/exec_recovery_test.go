@@ -228,7 +228,7 @@ func execRecoveryBackend(t *testing.T, machine api.UserMachine, descriptors *ato
 			}
 			n := descriptors.Add(1)
 			expires := time.Now().Add(time.Minute)
-			writeAPIData(t, w, api.ExecDescriptor{OperationID: body.OperationID, Environment: &api.Environment{ID: machine.EnvironmentID, Kind: "machine", ResourceID: machine.ID, State: "ready", Root: machine.WorkspaceRoot}, Endpoints: api.TerminalEndpoints{QUIC: "quic://peer.example.test:443", WSS: "wss://peer.example.test/v1/runtime"}, Auth: api.AuthMaterial{Method: "bearer", Token: fmt.Sprintf("renewed_%d", n), ExpiresAt: expires, Scopes: []string{"exec:operate"}, AccessSessionID: fmt.Sprintf("access_%d", n)}, ExpiresAt: expires})
+			writeAPIData(t, w, api.ExecDescriptor{OperationID: body.OperationID, Environment: api.Environment{ID: machine.EnvironmentID, Kind: "machine", ResourceID: machine.ID, State: "ready", Root: machine.WorkspaceRoot}, Endpoints: api.TerminalEndpoints{QUIC: "quic://peer.example.test:443", WSS: "wss://peer.example.test/v1/runtime"}, Auth: api.AuthMaterial{Method: "bearer", Token: fmt.Sprintf("renewed_%d", n), ExpiresAt: expires, Scopes: []string{"exec:operate"}, AccessSessionID: fmt.Sprintf("access_%d", n)}, ExpiresAt: expires})
 		default:
 			t.Errorf("unexpected API path %s", r.URL.Path)
 			w.WriteHeader(404)

@@ -87,130 +87,49 @@ type TerminalSessionPage struct {
 
 // AuthMaterial is short-lived auth material scoped by paperboat-server for a
 // specific connect descriptor. The protocol contract defines the exact token format.
-type AuthMaterial struct {
-	Method          string    `json:"method"`
-	Ticket          string    `json:"ticket,omitempty"`
-	Token           string    `json:"token,omitempty"`
-	ExpiresAt       time.Time `json:"expires_at"`
-	Scopes          []string  `json:"scopes,omitempty"`
-	AccessSessionID string    `json:"access_session_id,omitempty"`
-}
+type AuthMaterial = terminalprotocol.Auth
 
-const ConnectionSchemaV1 = "paperboat.environment-connection/v1"
+const ConnectionSchemaV1 = terminalprotocol.DescriptorSchemaV1
 
 // Environment identifies the enrolled machine behind a terminal descriptor.
-type Environment struct {
-	ID            string `json:"id"`
-	Kind          string `json:"kind"`
-	ResourceID    string `json:"resource_id"`
-	State         string `json:"state"`
-	Root          string `json:"root"`
-	EnvironmentID string `json:"environment_id"`
-	UserMachineID string `json:"machine_id"`
-	Alias         string `json:"alias"`
-	ProjectRoot   string `json:"project_root"`
-}
+type Environment = terminalprotocol.Environment
 
 // Terminal is the CLI-safe Paperboat WebSocket attach descriptor from
 // cli-connect. It carries client-safe Paperboat route URLs, not raw VM
 // addresses or SSH credentials.
-type Terminal struct {
-	Protocol  string            `json:"protocol"`
-	Endpoints TerminalEndpoints `json:"endpoints"`
-	SessionID string            `json:"session_id"`
-	Auth      AuthMaterial      `json:"auth"`
-	CWD       string            `json:"cwd"`
-}
+type Terminal = terminalprotocol.Terminal
 
-type TerminalEndpoints struct {
-	QUIC string `json:"quic"`
-	WSS  string `json:"wss"`
-}
+type TerminalEndpoints = terminalprotocol.TerminalEndpoints
 
-type FileTransferPolicy struct {
-	Revision               string `json:"revision"`
-	MaxBatchFiles          int    `json:"max_batch_files"`
-	MaxConcurrentTransfers int    `json:"max_concurrent_transfers"`
-	RetentionSeconds       int64  `json:"retention_seconds"`
-	DeliveryTimeoutSeconds int64  `json:"delivery_timeout_seconds"`
-	MaxPendingSpoolBytes   int64  `json:"max_pending_spool_bytes"`
-	AutomaticMaxBatchBytes int64  `json:"automatic_max_batch_bytes,omitempty"`
-}
+type FileTransferPolicy = terminalprotocol.FileTransferPolicy
 
-// AutomaticTransferLimit is the largest Automatic transfer: 2,000,000,000 bytes (PLAN 3b, File transfer modes).
-const AutomaticTransferLimit = int64(2_000_000_000)
+const AutomaticTransferLimit = terminalprotocol.AutomaticTransferLimit
 
-// Bounds is the per-file and per-batch byte bound: the server publishes one Automatic batch bound, which
-// limits every file as well as the batch.
-func (p FileTransferPolicy) Bounds() (file, batch int64) {
-	return p.AutomaticMaxBatchBytes, p.AutomaticMaxBatchBytes
-}
-
-func (p FileTransferPolicy) ValidBounds() bool {
-	file, batch := p.Bounds()
-	return file > 0 && file <= batch && batch <= AutomaticTransferLimit && p.MaxPendingSpoolBytes >= batch
-}
-
-type FileTransfer struct {
-	Endpoint             string             `json:"endpoint"`
-	SourceMachineID      string             `json:"source_machine_id"`
-	DestinationMachineID string             `json:"destination_machine_id"`
-	InitiatingUserID     string             `json:"initiating_user_id"`
-	Auth                 AuthMaterial       `json:"auth"`
-	Policy               FileTransferPolicy `json:"policy"`
-}
+type FileTransfer = terminalprotocol.FileTransfer
 
 // ConnectionDescriptor is the cli-connect / connection-status descriptor. When
 // Connectable is false the machine is not ready yet; Status/Reason explain why
 // and the caller should poll ConnectionReadiness.
-type ConnectionDescriptor struct {
-	MachineGeneration uint64        `json:"machine_generation,omitempty"`
-	Schema            string        `json:"schema"`
-	Issuer            string        `json:"issuer,omitempty"`
-	UserMachineID     string        `json:"machine_id"`
-	UserMachineState  string        `json:"machine_state"`
-	Connectable       bool          `json:"connectable"`
-	ExpiresAt         time.Time     `json:"expires_at"`
-	Environment       *Environment  `json:"environment,omitempty"`
-	Terminal          *Terminal     `json:"terminal,omitempty"`
-	FileTransfer      *FileTransfer `json:"file_transfer,omitempty"`
-	Status            string        `json:"status,omitempty"`
-	Reason            string        `json:"reason,omitempty"`
-	RetryAfterSeconds int           `json:"retry_after_seconds,omitempty"`
-	Capabilities      []string      `json:"capabilities,omitempty"`
-}
+type ConnectionDescriptor = terminalprotocol.Descriptor
 
-type ExecDescriptor struct {
-	OperationID string            `json:"operation_id"`
-	Environment *Environment      `json:"environment"`
-	Endpoints   TerminalEndpoints `json:"endpoints"`
-	Auth        AuthMaterial      `json:"auth"`
-	ExpiresAt   time.Time         `json:"expires_at"`
-}
+type ExecDescriptor = terminalprotocol.Operation
 
 type SSHDescriptor = ExecDescriptor
 
-// NormalizeConnectionDescriptor maps the canonical wire contract onto the
-// internal transport fields.
-func (r *ConnectionDescriptor) NormalizeConnectionDescriptor() error {
+// NormalizeConnectionDescriptor checks the descriptor's schema and the parts the client acts on: the environment kind,
+// the terminal protocol, and a well-formed file-transfer endpoint (trimmed of a trailing slash).
+func NormalizeConnectionDescriptor(r *ConnectionDescriptor) error {
 	if r.Schema != ConnectionSchemaV1 {
 		return errors.New("paperboat-server returned an unsupported connection descriptor schema")
 	}
-	if r.Environment == nil {
+	if r.Environment.ID == "" {
 		return nil
 	}
-	e := r.Environment
-	e.EnvironmentID, e.ProjectRoot = e.ID, e.Root
-	switch e.Kind {
-	case "machine":
-		e.UserMachineID, r.UserMachineID, r.UserMachineState = e.ResourceID, e.ResourceID, e.State
-	default:
+	if r.Environment.Kind != terminalprotocol.EnvironmentMachine {
 		return errors.New("paperboat-server returned an invalid environment kind")
 	}
-	if r.Terminal != nil {
-		if r.Terminal.Protocol != terminalprotocol.TerminalSubprotocol {
-			return errors.New("invalid canonical terminal protocol")
-		}
+	if r.Terminal != nil && r.Terminal.Protocol != terminalprotocol.TerminalSubprotocol {
+		return errors.New("invalid canonical terminal protocol")
 	}
 	if r.FileTransfer != nil {
 		u, err := url.Parse(r.FileTransfer.Endpoint)
@@ -251,7 +170,7 @@ func (c *Client) UserMachineConnectionDescriptorWithSessionCreate(ctx context.Co
 		"create_session":    create,
 	}, &out, false)
 	if err == nil {
-		err = out.Descriptor.NormalizeConnectionDescriptor()
+		err = NormalizeConnectionDescriptor(&out.Descriptor)
 	}
 	if err == nil && out.TerminalSession.ID == "" {
 		err = errors.New("server did not return the created terminal session")
@@ -281,7 +200,7 @@ func (c *Client) UserMachineConnectionDescriptorForSession(ctx context.Context, 
 	// unavailable"); a repeat only issues the connection again.
 	err := c.doIssuance(ctx, http.MethodPost, "/v1/machines/"+url.PathEscape(machineID)+"/connection-descriptor", body, &out, false)
 	if err == nil {
-		err = out.NormalizeConnectionDescriptor()
+		err = NormalizeConnectionDescriptor(&out)
 	}
 	return out, err
 }
@@ -337,7 +256,7 @@ func validEdgeEndpoints(e TerminalEndpoints) bool {
 }
 
 func validateOperationDescriptor(out ExecDescriptor, machineID, operationID, expectedScope, operationKind string) error {
-	if out.OperationID != operationID || out.Environment == nil || out.Environment.ID == "" || out.Environment.Kind != "machine" || out.Environment.ResourceID != machineID || out.Environment.State != "ready" || !remotepath.Absolute(out.Environment.Root) ||
+	if out.OperationID != operationID || out.Environment.ID == "" || out.Environment.Kind != "machine" || out.Environment.ResourceID != machineID || out.Environment.State != "ready" || !remotepath.Absolute(out.Environment.Root) ||
 		!validEdgeEndpoints(out.Endpoints) ||
 		out.Auth.Method != "bearer" || out.Auth.Token == "" || len(out.Auth.Scopes) != 1 || out.Auth.Scopes[0] != expectedScope || out.ExpiresAt.IsZero() || out.Auth.ExpiresAt.IsZero() || !out.ExpiresAt.Equal(out.Auth.ExpiresAt) {
 		return fmt.Errorf("invalid %s descriptor", operationKind)
@@ -392,7 +311,7 @@ func (c *Client) UserMachineConnectionReadinessForSession(ctx context.Context, m
 	}
 	err := c.do(ctx, http.MethodGet, path, nil, &out)
 	if err == nil {
-		err = out.NormalizeConnectionDescriptor()
+		err = NormalizeConnectionDescriptor(&out)
 	}
 	return out, err
 }

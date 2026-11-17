@@ -153,8 +153,8 @@ func (r *APIResolver) Resolve(ctx context.Context, req ConnectRequest) (ConnectI
 	if waitErr != nil {
 		return ConnectInfo{}, waitErr
 	}
-	if resp.Environment != nil {
-		environmentID = resp.Environment.EnvironmentID
+	if resp.Environment.ID != "" {
+		environmentID = resp.Environment.ID
 	}
 
 	if !completeTerminalDescriptor(resp.Terminal) {
@@ -171,7 +171,7 @@ func (r *APIResolver) Resolve(ctx context.Context, req ConnectRequest) (ConnectI
 		Local:             false,
 		Terminal: &TerminalTarget{
 			Protocol:      resp.Terminal.Protocol,
-			EnvironmentID: resp.Environment.EnvironmentID,
+			EnvironmentID: resp.Environment.ID,
 			QUICEndpoint:  resp.Terminal.Endpoints.QUIC,
 			WSSEndpoint:   resp.Terminal.Endpoints.WSS,
 			Auth:          mapAuth(resp.Terminal.Auth),
@@ -471,7 +471,7 @@ func (r *APIResolver) validateDescriptor(resp api.ConnectionDescriptor, target t
 	if !resp.Connectable {
 		return api.ConnectionDescriptor{}, errors.New("server returned a non-connectable descriptor")
 	}
-	if resp.UserMachineID != target.id {
+	if resp.Environment.ResourceID != target.id {
 		return api.ConnectionDescriptor{}, errors.New("server returned a descriptor for the wrong machine")
 	}
 	if resp.ExpiresAt.IsZero() || !serverclock.Now().Before(resp.ExpiresAt) {
@@ -480,10 +480,10 @@ func (r *APIResolver) validateDescriptor(resp api.ConnectionDescriptor, target t
 	if !completeTerminalDescriptor(resp.Terminal) {
 		return api.ConnectionDescriptor{}, errors.New("server returned an incomplete terminal descriptor")
 	}
-	if resp.Terminal.Protocol != terminalprotocol.TerminalSubprotocol || resp.Environment == nil || strings.TrimSpace(resp.Environment.EnvironmentID) == "" || !environmentMatchesTarget(resp.Environment, target) {
+	if resp.Terminal.Protocol != terminalprotocol.TerminalSubprotocol || strings.TrimSpace(resp.Environment.ID) == "" || !environmentMatchesTarget(resp.Environment, target) {
 		return api.ConnectionDescriptor{}, errors.New("server returned an invalid environment descriptor")
 	}
-	if strings.TrimSpace(resp.Environment.ProjectRoot) == "" || strings.TrimSpace(resp.Terminal.SessionID) == "" || strings.TrimSpace(resp.Terminal.CWD) == "" {
+	if strings.TrimSpace(resp.Environment.Root) == "" || strings.TrimSpace(resp.Terminal.SessionID) == "" || strings.TrimSpace(resp.Terminal.CWD) == "" {
 		return api.ConnectionDescriptor{}, errors.New("server returned incomplete environment or terminal identity")
 	}
 	wsURL, err := secureEndpoint(resp.Terminal.Endpoints.WSS, "wss")
@@ -543,13 +543,13 @@ func (r *APIResolver) validateFileTransfer(transfer *api.FileTransfer, terminalU
 	return nil
 }
 
-func environmentMatchesTarget(environment *api.Environment, target target) bool {
-	return environment.UserMachineID == target.id
+func environmentMatchesTarget(environment api.Environment, target target) bool {
+	return environment.ResourceID == target.id
 }
 
 func targetState(target target, resp api.ConnectionDescriptor) string {
-	if strings.TrimSpace(resp.UserMachineState) != "" {
-		return resp.UserMachineState
+	if strings.TrimSpace(resp.Environment.State) != "" {
+		return resp.Environment.State
 	}
 	return target.state
 }

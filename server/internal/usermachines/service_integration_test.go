@@ -28,7 +28,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/pinksaucepasta/paperboat/server/internal/access"
-	"github.com/pinksaucepasta/paperboat/server/internal/accessdescriptor"
 	"github.com/pinksaucepasta/paperboat/server/internal/audit"
 	authservice "github.com/pinksaucepasta/paperboat/server/internal/auth"
 	"github.com/pinksaucepasta/paperboat/server/internal/config"
@@ -38,6 +37,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/helperruntime"
 	"github.com/pinksaucepasta/paperboat/server/internal/mint"
 	"github.com/pinksaucepasta/paperboat/server/internal/secrets"
+	"github.com/pinksaucepasta/paperboat/shared/terminalprotocol"
 )
 
 type testSeatAuthorizer struct{}
@@ -2930,20 +2930,20 @@ VALUES ($1,$2,$3,1,1,$4,1,$5,$6,$7,1,$8,$9,'{}',now()+interval '1 hour',true,now
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !response.Connectable || response.UserMachineID != userMachineID || response.Environment["id"] != environmentID || response.Environment["resource_id"] != userMachineID {
+	if !response.Connectable || response.Environment.ResourceID != userMachineID || response.Environment.ID != environmentID {
 		t.Fatalf("response = %#v", response)
 	}
-	terminalEndpoints, _ := response.Terminal["endpoints"].(map[string]any)
-	if terminalEndpoints["wss"] != "wss://machine-"+suffix+".example.test/v1/runtime" || terminalEndpoints["quic"] != "quic://machine-"+suffix+".example.test:443" || response.FileTransfer["endpoint"] != "https://machine-"+suffix+".example.test/v1/file-transfers" || response.Terminal["auth"] == nil || response.FileTransfer["auth"] == nil {
+	terminalEndpoints := response.Terminal.Endpoints
+	if terminalEndpoints.WSS != "wss://machine-"+suffix+".example.test/v1/runtime" || terminalEndpoints.QUIC != "quic://machine-"+suffix+".example.test:443" || response.FileTransfer.Endpoint != "https://machine-"+suffix+".example.test/v1/file-transfers" || response.Terminal.Auth.Token == "" || response.FileTransfer.Auth.Token == "" {
 		t.Fatalf("descriptor = %#v", response)
 	}
-	terminalAuth := response.Terminal["auth"].(map[string]any)
-	transferAuth := response.FileTransfer["auth"].(map[string]any)
-	accessSessionID, _ := terminalAuth["access_session_id"].(string)
-	if accessSessionID == "" || transferAuth["access_session_id"] != accessSessionID {
+	terminalAuth := response.Terminal.Auth
+	transferAuth := response.FileTransfer.Auth
+	accessSessionID := terminalAuth.AccessSessionID
+	if accessSessionID == "" || transferAuth.AccessSessionID != accessSessionID {
 		t.Fatalf("application credentials do not share access session: terminal=%#v transfer=%#v", terminalAuth, transferAuth)
 	}
-	for class, token := range map[string]string{"terminal_operation": terminalAuth["token"].(string), "file_transfer": transferAuth["token"].(string)} {
+	for class, token := range map[string]string{"terminal_operation": terminalAuth.Token, "file_transfer": transferAuth.Token} {
 		claims, verifyErr := signer.VerifyCredential(token, "https://api.paperboat.test", class, time.Now().UTC())
 		if verifyErr != nil {
 			t.Fatalf("verify %s credential: %v", class, verifyErr)
@@ -3053,8 +3053,8 @@ VALUES ($1,$2,$3,1,1,$4,1,$5,$6,$7,1,$8,$9,'{}',now()+interval '1 hour',true,now
 	if _, err := service.ConnectTerminalSession(ctx, "unauthorized-user", userMachineID, userMachineID, "cls_mc_1", created.ID); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("unauthorized self connection = %v", err)
 	}
-	if !descriptor.Connectable || descriptor.Terminal["session_id"] != created.ID || descriptor.Terminal["cwd"] != "/tmp/local project" {
-		t.Fatalf("descriptor connectable=%v status=%s reason=%s session=%v cwd=%v", descriptor.Connectable, descriptor.Status, descriptor.Reason, descriptor.Terminal["session_id"], descriptor.Terminal["cwd"])
+	if !descriptor.Connectable || descriptor.Terminal.SessionID != created.ID || descriptor.Terminal.CWD != "/tmp/local project" {
+		t.Fatalf("descriptor connectable=%v status=%s reason=%s session=%v cwd=%v", descriptor.Connectable, descriptor.Status, descriptor.Reason, descriptor.Terminal.SessionID, descriptor.Terminal.CWD)
 	}
 	var applied bool
 	if err := store.SQL().QueryRowContext(ctx, `SELECT o.state='applied' AND o.operation='create' AND s.runtime_state='running' FROM paperboat.user_machine_terminal_session_operations o JOIN paperboat.user_machine_terminal_sessions s ON s.id=o.terminal_session_id WHERE o.id=$1 AND s.id=$2`, runtime.operationID, created.ID).Scan(&applied); err != nil || !applied {
@@ -3122,14 +3122,14 @@ VALUES ($1,$2,$3,1,1,$4,1,$5,$6,$7,1,$8,$9,'{}',now()+interval '1 hour',true,now
 	if err != nil {
 		t.Fatal(err)
 	}
-	token, _ := descriptor.Auth["token"].(string)
+	token := descriptor.Auth.Token
 	claims, err := signer.VerifyCredential(token, "https://api.paperboat.test", "exec_operation", time.Now().UTC())
 	if err != nil || claims.OperationID != operationID || claims.MachineID != machineID || claims.UserID != userID || claims.CLIClientSessionID != "cli_exec_1" || claims.WorkspaceID != "personal" || claims.ActorAccountID != userID {
 		t.Fatalf("claims=%#v err=%v", claims, err)
 	}
 	var sessionID, state string
 	var accessSessionID string
-	if err := store.SQL().QueryRowContext(ctx, `SELECT id,helper_terminal_session_id,state FROM paperboat.user_machine_access_sessions WHERE user_machine_id=$1`, machineID).Scan(&accessSessionID, &sessionID, &state); err != nil || sessionID != claims.JTI || state != "active" || claims.AssignmentID != accessSessionID || descriptor.Auth["access_session_id"] != accessSessionID {
+	if err := store.SQL().QueryRowContext(ctx, `SELECT id,helper_terminal_session_id,state FROM paperboat.user_machine_access_sessions WHERE user_machine_id=$1`, machineID).Scan(&accessSessionID, &sessionID, &state); err != nil || sessionID != claims.JTI || state != "active" || claims.AssignmentID != accessSessionID || descriptor.Auth.AccessSessionID != accessSessionID {
 		t.Fatalf("session id=%q state=%q err=%v", sessionID, state, err)
 	}
 	// A local client and machine runtime remain distinct authenticated endpoints
@@ -3139,7 +3139,7 @@ VALUES ($1,$2,$3,1,1,$4,1,$5,$6,$7,1,$8,$9,'{}',now()+interval '1 hour',true,now
 	if err != nil {
 		t.Fatalf("owned self exec descriptor: %v", err)
 	}
-	selfToken, _ := selfDescriptor.Auth["token"].(string)
+	selfToken := selfDescriptor.Auth.Token
 	selfClaims, err := signer.VerifyCredential(selfToken, "https://api.paperboat.test", "exec_operation", time.Now().UTC())
 	if err != nil {
 		t.Fatal(err)
@@ -3150,7 +3150,7 @@ VALUES ($1,$2,$3,1,1,$4,1,$5,$6,$7,1,$8,$9,'{}',now()+interval '1 hour',true,now
 			selfClaims.WorkspaceID == "personal", selfClaims.ActorAccountID == userID, selfClaims.UserID == userID,
 			selfClaims.CLIClientSessionID == "cli_exec_1", selfClaims.AssignmentID != claims.AssignmentID, selfClaims.JTI != claims.JTI)
 	}
-	selfAccessID, _ := selfDescriptor.Auth["access_session_id"].(string)
+	selfAccessID := selfDescriptor.Auth.AccessSessionID
 	if selfAccessID == "" || selfAccessID != selfClaims.AssignmentID {
 		t.Fatal("self exec descriptor does not identify its exact revocable authority")
 	}
@@ -3167,13 +3167,13 @@ VALUES ($1,$2,$3,1,1,$4,1,$5,$6,$7,1,$8,$9,'{}',now()+interval '1 hour',true,now
 	if err != nil {
 		t.Fatalf("ssh descriptor: %v", err)
 	}
-	sshToken, _ := sshDescriptor.Auth["token"].(string)
+	sshToken := sshDescriptor.Auth.Token
 	sshClaims, err := signer.VerifyCredential(sshToken, "https://api.paperboat.test", "ssh_operation", time.Now().UTC())
 	if err != nil || sshClaims.OperationID != sshOperationID || sshClaims.MachineID != machineID || !slices.Contains(sshClaims.Scopes, "ssh:operate") {
 		t.Fatalf("ssh claims=%#v err=%v", sshClaims, err)
 	}
 	var sshCapabilities string
-	if err := store.SQL().QueryRowContext(ctx, `SELECT array_to_string(capabilities, ',') FROM paperboat.user_machine_access_sessions WHERE id=$1`, sshDescriptor.Auth["access_session_id"]).Scan(&sshCapabilities); err != nil || sshCapabilities != "managed_ssh" {
+	if err := store.SQL().QueryRowContext(ctx, `SELECT array_to_string(capabilities, ',') FROM paperboat.user_machine_access_sessions WHERE id=$1`, sshDescriptor.Auth.AccessSessionID).Scan(&sshCapabilities); err != nil || sshCapabilities != "managed_ssh" {
 		t.Fatalf("ssh access session capabilities=%v err=%v", sshCapabilities, err)
 	}
 	if _, err := service.SSHDescriptor(ctx, "usr_unrelated_"+suffix, machineID, machineID, "cli_exec_1", "operation_ssh_foreign_"+suffix, false); !errors.Is(err, ErrNotFound) {
@@ -3192,8 +3192,8 @@ VALUES ($1,$2,$3,1,1,$4,1,$5,$6,$7,1,$8,$9,'{}',now()+interval '1 hour',true,now
 		t.Fatal(err)
 	}
 	blocked, err := service.ExecDescriptor(ctx, userID, machineID, machineID, "cli_exec_1", "operation_exec_revoked_"+suffix, false)
-	if !errors.Is(err, ErrNotFound) || blocked.Auth != nil || blocked.OperationID != "" {
-		t.Fatalf("removed machine must be absent without issuing authority: err=%v credential=%t operation=%t", err, blocked.Auth != nil, blocked.OperationID != "")
+	if !errors.Is(err, ErrNotFound) || blocked.Auth.Token != "" || blocked.OperationID != "" {
+		t.Fatalf("removed machine must be absent without issuing authority: err=%v credential=%t operation=%t", err, blocked.Auth.Token != "", blocked.OperationID != "")
 	}
 }
 
@@ -3260,7 +3260,7 @@ VALUES ($1,$2,$3,1,1,$4,1,$5,$6,$7,1,$8,$9,'{}',now()+interval '1 hour',true,now
 	if err != nil {
 		t.Fatal(err)
 	}
-	policy := accessdescriptor.FileTransferPolicy{Revision: "file-transfer-v1", MaxBatchFiles: 10, AutomaticMaxBatchBytes: 500 << 20, MaxConcurrentTransfers: 2, RetentionSeconds: 604800, DeliveryTimeoutSeconds: 600, MaxPendingSpoolBytes: 1 << 30}
+	policy := terminalprotocol.FileTransferPolicy{Revision: "file-transfer-v1", MaxBatchFiles: 10, AutomaticMaxBatchBytes: 500 << 20, MaxConcurrentTransfers: 2, RetentionSeconds: 604800, DeliveryTimeoutSeconds: 600, MaxPendingSpoolBytes: 1 << 30}
 	service := New(store, audit.NewWriter(store), Policy{}, nil)
 	service.ConfigureAccess(nil, "https://api.paperboat.test")
 	service.ConfigureTerminalSessions(signer, nil)
@@ -3296,12 +3296,12 @@ VALUES ($1,$2,$3,1,1,$4,1,$5,$6,$7,1,$8,$9,'{}',now()+interval '1 hour',true,now
 	if session.Endpoint != "https://host-"+suffix+".example.test/v1/file-transfers" || session.DestinationMachineID != destination.id {
 		t.Fatalf("session descriptor = %+v", session)
 	}
-	token, _ := session.Auth["token"].(string)
+	token := session.Auth.Token
 	claims, err := signer.VerifyCredential(token, "https://api.paperboat.test", "file_transfer", time.Now().UTC())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if claims.MachineID != host.id || claims.SourceMachineID != source.id || claims.SessionID != sessionID || claims.UserID != userID || claims.AssignmentID == "" || session.Auth["access_session_id"] != claims.AssignmentID {
+	if claims.MachineID != host.id || claims.SourceMachineID != source.id || claims.SessionID != sessionID || claims.UserID != userID || claims.AssignmentID == "" || session.Auth.AccessSessionID != claims.AssignmentID {
 		t.Fatalf("session credential bindings = %+v", claims)
 	}
 	if _, err := service.FileTransferDescriptor(ctx, userID, foreign.id, destination.id, "cli_1", "", TransferIntent{Mode: "automatic", DeclaredBytes: 1}); !errors.Is(err, ErrNotFound) {
@@ -3562,8 +3562,8 @@ type fakeCredentialIssuer struct{}
 func (fakeCredentialIssuer) CheckCLI(context.Context, access.CredentialInput) error { return nil }
 func (fakeCredentialIssuer) IssueCLI(_ context.Context, input access.CredentialInput) (access.CLICredentials, error) {
 	return access.CLICredentials{
-		TerminalAuth:      map[string]any{"method": "bearer", "token": "test-terminal", "expires_at": input.ExpiresAt, "scopes": []string{"terminal:operate"}},
-		FileTransferAuth:  map[string]any{"method": "bearer", "token": "test-transfer", "expires_at": input.ExpiresAt, "scopes": []string{"file:transfer"}},
+		TerminalAuth:      &terminalprotocol.Auth{Method: "bearer", Token: "test-terminal", ExpiresAt: input.ExpiresAt, Scopes: []string{"terminal:operate"}},
+		FileTransferAuth:  &terminalprotocol.Auth{Method: "bearer", Token: "test-transfer", ExpiresAt: input.ExpiresAt, Scopes: []string{"file:transfer"}},
 		TerminalSessionID: "test-terminal-session", FileSessionID: "test-file-session",
 	}, nil
 }

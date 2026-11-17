@@ -15,7 +15,7 @@ func (c *Client) SharedTerminalConnectionDescriptor(ctx context.Context, session
 	var out ConnectionDescriptor
 	err := c.do(ctx, http.MethodPost, "/v1/terminal-sessions/"+url.PathEscape(sessionID)+"/connection-descriptor", map[string]string{"source_machine_id": c.sourceMachineID}, &out)
 	if err == nil {
-		err = out.NormalizeConnectionDescriptor()
+		err = NormalizeConnectionDescriptor(&out)
 	}
 	return out, err
 }

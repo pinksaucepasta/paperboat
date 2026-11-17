@@ -13,12 +13,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/server/internal/accessdescriptor"
 	"github.com/pinksaucepasta/paperboat/server/internal/lazyaccess"
 	"github.com/pinksaucepasta/paperboat/server/internal/machineservices"
 	"github.com/pinksaucepasta/paperboat/server/internal/metering"
 	"github.com/pinksaucepasta/paperboat/server/internal/supportreport"
 	"github.com/pinksaucepasta/paperboat/server/internal/usermachines"
+	"github.com/pinksaucepasta/paperboat/shared/terminalprotocol"
 )
 
 type runtimeObservationRepository interface {
@@ -58,7 +58,7 @@ type runtimeAuxiliaryRejection struct {
 
 func runtimeObservation(repo runtimeObservationRepository, identities runtimeIdentityVerifier, _ int, observationSinks ...any) http.HandlerFunc {
 	var transferPolicy interface {
-		RuntimeFileTransferPolicy() accessdescriptor.FileTransferPolicy
+		RuntimeFileTransferPolicy() terminalprotocol.FileTransferPolicy
 	}
 	var lazyRuntime interface {
 		RecordLazyRuntimeObservation(context.Context, string, string, lazyaccess.RuntimeObservation) error
@@ -91,7 +91,7 @@ func runtimeObservation(repo runtimeObservationRepository, identities runtimeIde
 			lazyRuntime = candidate
 		}
 		if candidate, ok := sink.(interface {
-			RuntimeFileTransferPolicy() accessdescriptor.FileTransferPolicy
+			RuntimeFileTransferPolicy() terminalprotocol.FileTransferPolicy
 		}); ok {
 			transferPolicy = candidate
 		}

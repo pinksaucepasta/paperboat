@@ -1,6 +1,7 @@
 package filetransfer
 
 import (
+	"github.com/pinksaucepasta/paperboat/shared/terminalprotocol"
 	"io"
 	"sync"
 	"time"
@@ -29,7 +30,7 @@ type Policy struct {
 }
 
 // AutomaticTransferLimit is the largest Automatic transfer: 2,000,000,000 bytes (PLAN 3b, File transfer modes).
-const AutomaticTransferLimit = int64(2_000_000_000)
+const AutomaticTransferLimit = terminalprotocol.AutomaticTransferLimit
 
 // Bounds is the per-file and per-batch byte bound: the Automatic batch bound for both (an Unlimited batch carries
 // its own signed claim and replaces it, see CreateRequest).

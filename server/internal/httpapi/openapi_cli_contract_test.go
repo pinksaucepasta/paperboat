@@ -67,7 +67,7 @@ func TestOpenAPIFreezesCLIContractSchemas(t *testing.T) {
 	}
 	terminal := objectValue(t, descriptorProperties["terminal"], "EnvironmentConnectionDescriptor.terminal")
 	terminalProperties := objectValue(t, terminal["properties"], "EnvironmentConnectionDescriptor.terminal.properties")
-	for _, field := range []string{"endpoint", "auth", "session_id", "cwd"} {
+	for _, field := range []string{"endpoints", "auth", "session_id", "cwd"} {
 		if _, present := terminalProperties[field]; !present {
 			t.Fatalf("EnvironmentConnectionDescriptor.terminal lacks canonical field %q", field)
 		}

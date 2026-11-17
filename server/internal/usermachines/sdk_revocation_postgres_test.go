@@ -2,6 +2,7 @@ package usermachines
 
 import (
 	"errors"
+	"github.com/pinksaucepasta/paperboat/shared/terminalprotocol"
 	"strings"
 	"testing"
 	"time"
@@ -79,7 +80,7 @@ func TestSDKLiveSessionRevocation(t *testing.T) {
 			t.Fatalf("revocation did not publish %s", topic)
 		}
 	}
-	for _, id := range []any{exec.Auth["access_session_id"], file.Auth["access_session_id"], private.Target.AccessSessionID} {
+	for _, id := range []any{exec.Auth.AccessSessionID, file.Auth.AccessSessionID, private.Target.AccessSessionID} {
 		var revoked bool
 		if err := f.store.SQL().QueryRowContext(ctx, `SELECT state='revoked' AND revoked_at IS NOT NULL FROM paperboat.user_machine_access_sessions WHERE id=$1`, id).Scan(&revoked); err != nil || !revoked {
 			t.Fatal("live operation retained access after recipe revoke")
@@ -87,10 +88,10 @@ func TestSDKLiveSessionRevocation(t *testing.T) {
 	}
 	live := make([]string, 0, 2)
 	for _, d := range []struct {
-		auth  map[string]any
+		auth  terminalprotocol.Auth
 		class string
 	}{{exec.Auth, "exec_operation"}, {file.Auth, "file_transfer"}} {
-		raw, _ := d.auth["token"].(string)
+		raw := d.auth.Token
 		claims, err := signer.VerifyCredential(raw, f.service.issuer, d.class, now)
 		if err != nil {
 			t.Fatal(err)

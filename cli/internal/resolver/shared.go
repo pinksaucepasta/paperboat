@@ -47,17 +47,17 @@ func (r *APIResolver) ResolveShared(ctx context.Context, sessionID string) (Conn
 			}
 			continue
 		}
-		if resp.UserMachineID == "" || resp.MachineGeneration == 0 || resp.Terminal == nil || resp.Terminal.SessionID != sessionID || resp.FileTransfer != nil || len(resp.Capabilities) != 1 || resp.Capabilities[0] != "terminal" {
+		if resp.Environment.ResourceID == "" || resp.MachineGeneration == 0 || resp.Terminal == nil || resp.Terminal.SessionID != sessionID || resp.FileTransfer != nil || len(resp.Capabilities) != 1 || resp.Capabilities[0] != "terminal" {
 			return ConnectInfo{}, fmt.Errorf("%w: capabilities %s", ErrSharedSessionAuthority, strings.Join(resp.Capabilities, ","))
 		}
-		target := target{kind: targetUserMachine, id: resp.UserMachineID, generation: resp.MachineGeneration}
+		target := target{kind: targetUserMachine, id: resp.Environment.ResourceID, generation: uint64(resp.MachineGeneration)}
 		if _, err := r.validateDescriptor(resp, target); err != nil {
 			return ConnectInfo{}, err
 		}
-		terminal := &TerminalTarget{Protocol: resp.Terminal.Protocol, EnvironmentID: resp.Environment.EnvironmentID, QUICEndpoint: resp.Terminal.Endpoints.QUIC, WSSEndpoint: resp.Terminal.Endpoints.WSS, Auth: mapAuth(resp.Terminal.Auth), SessionID: sessionID, CWD: resp.Terminal.CWD, ReplayHistory: true}
+		terminal := &TerminalTarget{Protocol: resp.Terminal.Protocol, EnvironmentID: resp.Environment.ID, QUICEndpoint: resp.Terminal.Endpoints.QUIC, WSSEndpoint: resp.Terminal.Endpoints.WSS, Auth: mapAuth(resp.Terminal.Auth), SessionID: sessionID, CWD: resp.Terminal.CWD, ReplayHistory: true}
 		if !terminal.Shared() || terminal.Auth.ResourceID == "" {
 			return ConnectInfo{}, fmt.Errorf("%w: terminal role", ErrSharedSessionAuthority)
 		}
-		return ConnectInfo{TargetKind: targetUserMachine, MachineID: resp.UserMachineID, Machine: resp.Environment.Alias, MachineState: resp.UserMachineState, MachineGeneration: resp.MachineGeneration, TunnelTarget: resp.Terminal.Endpoints.WSS, Terminal: terminal}, nil
+		return ConnectInfo{TargetKind: targetUserMachine, MachineID: resp.Environment.ResourceID, Machine: resp.Environment.Alias, MachineState: resp.Environment.State, MachineGeneration: uint64(resp.MachineGeneration), TunnelTarget: resp.Terminal.Endpoints.WSS, Terminal: terminal}, nil
 	}
 }

@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"github.com/jackc/pgx/v5"
 	"github.com/pinksaucepasta/paperboat/server/internal/access"
-	"github.com/pinksaucepasta/paperboat/server/internal/accessdescriptor"
 	"github.com/pinksaucepasta/paperboat/server/internal/accountingauthority"
 	"github.com/pinksaucepasta/paperboat/server/internal/audit"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
@@ -23,6 +22,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/teaminbox"
 	"github.com/pinksaucepasta/paperboat/server/internal/workers"
 	"github.com/pinksaucepasta/paperboat/server/internal/workspace"
+	"github.com/pinksaucepasta/paperboat/shared/terminalprotocol"
 	"io"
 	"net/http"
 	"regexp"
@@ -259,7 +259,7 @@ type Service struct {
 	encryptionKey               string
 	credentials                 access.CredentialIssuer
 	issuer                      string
-	fileTransferPolicy          accessdescriptor.FileTransferPolicy
+	fileTransferPolicy          terminalprotocol.FileTransferPolicy
 	teamInbox                   *teaminbox.Service
 	controlSigner               *mint.Provider
 	controlRuntime              userMachineHelperRuntime
@@ -430,14 +430,14 @@ func (s *Service) ConfigureCLIAuth(clientID string, scopes []string, accessLifet
 	s.cliHashKey = []byte(hashKey)
 }
 
-func (s *Service) ConfigureFileTransfer(policy accessdescriptor.FileTransferPolicy) {
+func (s *Service) ConfigureFileTransfer(policy terminalprotocol.FileTransferPolicy) {
 	s.fileTransferPolicy = policy
 }
 
 func (s *Service) ConfigureTeamInbox(service *teaminbox.Service) { s.teamInbox = service }
 
 // RuntimeFileTransferPolicy exposes the configured policy on authenticated runtime heartbeats.
-func (s *Service) RuntimeFileTransferPolicy() accessdescriptor.FileTransferPolicy {
+func (s *Service) RuntimeFileTransferPolicy() terminalprotocol.FileTransferPolicy {
 	return s.fileTransferPolicy
 }
 
