@@ -122,12 +122,27 @@ var policies = []policy{
 	{"control_helper_enrollments", batchOf("control_helper_enrollments", `expires_at < now()-make_interval(secs=>$2)
  AND NOT EXISTS(SELECT 1 FROM paperboat.user_machine_pairings p WHERE p.authenticated_setup_helper_enrollment_id=control_helper_enrollments.id)`),
 		seconds(func(c config.Retention) time.Duration { return c.ExpiredCredentials })},
-	// A pairing nobody can retry any more (failed_retryable, ready, disconnected and auth_consumed stay: a console retry,
-	// a live machine or its recovery still reads them); its reset receipts cascade.
+	// A pairing nobody can retry any more; its reset receipts cascade. Failed and installed pairings follow below.
 	{"user_machine_pairings", batchOf("user_machine_pairings",
 		`installation_state IN ('cancelled','expired','denied','revoked','deleted') AND expires_at < now()-make_interval(secs=>$2)
  AND updated_at < now()-make_interval(secs=>$2)
  AND (installation_config_consumed_at IS NULL OR installation_config_consumed_at < now()-make_interval(secs=>$2))`),
+		seconds(func(c config.Retention) time.Duration { return c.FinishedEnrollments })},
+	// A failed pairing nobody retried for a month (the console's retry reads it until then).
+	{"user_machine_pairings_failed", batchOf("user_machine_pairings",
+		`installation_state = 'failed_retryable' AND updated_at < now()-make_interval(secs=>$2) AND expires_at < now()-make_interval(secs=>$2)
+ AND (installation_config_consumed_at IS NULL OR installation_config_consumed_at < now()-make_interval(secs=>$2))`),
+		seconds(func(c config.Retention) time.Duration { return c.AbandonedEnrollments })},
+	// A finished install whose machine is gone or revoked, or that a newer pairing of the same machine replaced (the
+	// live machine's own row is its newest; "disconnected" and "auth_consumed" are allowed states nothing writes yet).
+	{"user_machine_pairings_replaced", batchOf("user_machine_pairings",
+		`installation_state IN ('ready','disconnected','auth_consumed') AND expires_at < now()-make_interval(secs=>$2)
+ AND updated_at < now()-make_interval(secs=>$2)
+ AND (installation_config_consumed_at IS NULL OR installation_config_consumed_at < now()-make_interval(secs=>$2))
+ AND (NOT EXISTS(SELECT 1 FROM paperboat.live_user_machines m WHERE m.id=user_machine_pairings.user_machine_id)
+  OR EXISTS(SELECT 1 FROM paperboat.user_machine_pairings n WHERE n.user_machine_id=user_machine_pairings.user_machine_id
+   AND (n.created_at,n.id) > (user_machine_pairings.created_at,user_machine_pairings.id)
+   AND n.installation_state IN ('approved','material_issued','installing','connecting','ready')))`),
 		seconds(func(c config.Retention) time.Duration { return c.FinishedEnrollments })},
 	// A receipt replays a reset only while its enrollment still waits for bootstrap; the pairing policy above takes the
 	// receipts of pairings it deletes, this one those of a pairing that lives on (a paired machine).

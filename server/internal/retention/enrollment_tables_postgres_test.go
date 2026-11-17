@@ -66,6 +66,23 @@ SELECT $1||k,st,ist,1,e,e-interval '1 hour',e FROM (VALUES
 	exec(`UPDATE paperboat.user_machine_pairings SET approved_by_user_id=$1,user_machine_id=$1||'_host',authenticated_setup_cli_session_id=$1||'_cli',
 authenticated_setup_operation_id='operation_'||id,authenticated_setup_generation=1,authenticated_setup_helper_enrollment_id=$1||'_h_named'
 WHERE id=$1||'_p_retry'`, user)
+	// Failed pairings (window 30 days): untouched for 40 days (deleted), 10 days (kept). Installed pairings (window 7
+	// days): of a live machine an old one replaced by a newer one (deleted), a replaced one only 2 days old (kept) and the
+	// newest (kept); of a removed machine an old one (deleted) and a recent one (kept).
+	exec(`INSERT INTO paperboat.control_environments(id,workspace_id,owner_user_id,desired_state) VALUES($1||'_env2',$1||'_env2',$1,'revoked')`, user)
+	exec(`INSERT INTO paperboat.user_machines(id,user_id,environment_id,alias,platform,architecture,workspace_root,state,seat_state,revoked_at,deleted_at)
+VALUES($1||'_gone',$1,$1||'_env2','gone','linux','amd64','/workspace','disconnected','released',now()-interval '20 days',now()-interval '20 days')`, user)
+	exec(`INSERT INTO paperboat.user_machine_pairings(id,state,installation_state,generation,expires_at,created_at,updated_at,user_machine_id,
+verifier_hash,user_code,requested_alias,platform,architecture,workspace_root,public_identity_key)
+SELECT $1||k,'expired',ist,1,e,c,e,$1||m,sha256(convert_to($1||k,'UTF8')),upper(substr(md5($1||k),1,8)),'a','linux','amd64','/workspace',repeat(md5($1||k),2)
+FROM (VALUES
+ ('_p_fail_old','failed_retryable','_host',now()-interval '40 days',now()-interval '41 days'),
+ ('_p_fail_recent','failed_retryable','_host',now()-interval '10 days',now()-interval '11 days'),
+ ('_p_ready_old','ready','_host',now()-interval '10 days',now()-interval '20 days'),
+ ('_p_ready_replaced_recent','ready','_host',now()-interval '2 days',now()-interval '15 days'),
+ ('_p_ready_new','ready','_host',now()-interval '1 day',now()-interval '1 day'),
+ ('_p_gone_old','ready','_gone',now()-interval '10 days',now()-interval '20 days'),
+ ('_p_gone_recent','ready','_gone',now()-interval '2 days',now()-interval '3 days')) v(k,ist,m,e,c)`, user)
 	// Reset receipts (window 7 days): an old one of a pairing that lives on, a recent one, one of a pairing still
 	// waiting for bootstrap (a retried reset replays it), and one of a pairing the policy deletes (cascade).
 	exec(`INSERT INTO paperboat.user_machine_pairing_resets(enrollment_id,enrollment_generation,account_id,verifier_hash,request_hash,retired_machine_ids,completed_at)
@@ -110,7 +127,7 @@ FROM (VALUES('old',now()-interval '33 days',now()-interval '40 days'),('hold',no
 	}
 	for name, test := range map[string]struct{ query, want string }{
 		"control_helper_enrollments": {`SELECT string_agg(replace(id,$1,''),',' ORDER BY id) FROM paperboat.control_helper_enrollments WHERE id LIKE $1||'%'`, "_h_live,_h_named,_h_recent"},
-		"user_machine_pairings":      {`SELECT string_agg(replace(id,$1,''),',' ORDER BY id) FROM paperboat.user_machine_pairings WHERE id LIKE $1||'%'`, "_p_live,_p_recent,_p_retry"},
+		"user_machine_pairings":      {`SELECT string_agg(replace(id,$1,''),',' ORDER BY id) FROM paperboat.user_machine_pairings WHERE id LIKE $1||'%'`, "_p_fail_recent,_p_gone_recent,_p_live,_p_ready_new,_p_ready_replaced_recent,_p_recent,_p_retry"},
 		"user_machine_pairing_resets": {`SELECT string_agg(replace(enrollment_id,$1,'')||':'||enrollment_generation,',' ORDER BY enrollment_id,enrollment_generation)
 FROM paperboat.user_machine_pairing_resets WHERE account_id=$1`, "_p_live:1,_p_retry:2"},
 		"account_deletion_jobs": {`SELECT string_agg(replace(id,$1,''),',' ORDER BY id) FROM paperboat.account_deletion_jobs WHERE user_id=$1`, "_j_done_recent,_j_queued_old"},
