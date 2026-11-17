@@ -9,7 +9,7 @@ import { cn } from "@/lib/utils"
 
 export type Column<R> = { header: string; cell: (row: R) => React.ReactNode; className?: string }
 
-type Page = { total?: number; total_capped?: boolean; next_after?: string; next_cursor?: string; next?: string }
+type Page = { total?: number; total_capped?: boolean; next_after?: string; next_cursor?: string; next?: string; pagination?: { total: number; next_offset: number | null } }
 
 /** "51–100 of N" with Previous/Next; N is the server's total (100000+ when it stopped counting). */
 export function PagerBar({ page, count, total, capped, hasNext, go }: { page: number; count: number; total?: number; capped?: boolean; hasNext: boolean; go: (page: number) => void }) {
@@ -98,7 +98,7 @@ export function DataTable<P extends Page, R>({
         </Empty>
       )}
       {list.data && (
-        <PagerBar page={list.page} count={items.length} total={list.data.total} capped={list.data.total_capped} hasNext={list.hasNext} go={list.go} />
+        <PagerBar page={list.page} count={items.length} total={list.data.total ?? list.data.pagination?.total} capped={list.data.total_capped} hasNext={list.hasNext} go={list.go} />
       )}
     </div>
   )

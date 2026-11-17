@@ -73,16 +73,23 @@ export function useApiQuery<T>(key: QueryKey, path: string | null, refetchMs?: n
   })
 }
 
-/** POST JSON through the relay (sign-in, sign-out). */
-export async function post<T>(path: string, body?: unknown): Promise<T> {
-  const response = await fetch(`/api${path}`, {
-    method: "POST",
-    headers: { "content-type": "application/json", accept: "application/json" },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  })
+type Envelope<T> = { data?: T; error?: { code?: string; message?: string; support_reference?: string; request_id?: string } }
+
+/** Send JSON through the relay (sign-in, MFA, operator actions); failures are ApiErrors with a reference. */
+export async function send<T>(method: "POST" | "PUT" | "DELETE", path: string, body?: unknown, headers: Record<string, string> = {}): Promise<T> {
+  let response: Response
+  try {
+    response = await fetch(`/api${path}`, {
+      method,
+      headers: { "content-type": "application/json", accept: "application/json", ...headers },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    })
+  } catch {
+    throw new ApiError(0, "network", "Couldn’t reach the panel server. Check the target before retrying: the action may have been applied.")
+  }
   const reference = response.headers.get("support-reference") ?? response.headers.get("request-id") ?? undefined
   if (response.status === 204) return undefined as T
-  const parsed = (await response.json().catch(() => ({}))) as { data?: T; error?: { code?: string; message?: string; support_reference?: string; request_id?: string } }
+  const parsed = (await response.json().catch(() => ({}))) as Envelope<T>
   if (!response.ok) {
     throw new ApiError(
       response.status,
@@ -94,4 +101,27 @@ export async function post<T>(path: string, body?: unknown): Promise<T> {
   return parsed.data as T
 }
 
+export const post = <T>(path: string, body?: unknown) => send<T>("POST", path, body)
+
+/** What an operator write names: the target it acts on, the opaque reference for the audit log, and the retry key. */
+export type ActionHeaders = { target: string; reason: string; key: string }
+
+/** An operator write: the server requires the target, a reason reference and an idempotency key on every one. */
+export const operatorAction = <T>(method: "POST" | "PUT" | "DELETE", path: string, h: ActionHeaders, body?: unknown) =>
+  send<T>(method, path, body, { "operator-target": h.target, "operator-reason": h.reason, "idempotency-key": h.key })
+
+/** The reference charset the server accepts for Operator-Reason and keys. */
+export const referencePattern = /^[A-Za-z0-9_.:-]{1,128}$/
+
 export const operatorQuery = { key: ["operator"] as const, path: "/v1/operator/me" }
+
+/** The signed-in operator (cached by the shell); undefined while loading. */
+export function useOperator(): Operator | undefined {
+  return useApiQuery<Operator>(operatorQuery.key, operatorQuery.path).data
+}
+
+/** Relay, tunnel, hostname and control-operation writes need the operations role (or admin): the server refuses others. */
+export function useCanOperate(): boolean {
+  const role = useOperator()?.role
+  return role === "admin" || role === "operations"
+}

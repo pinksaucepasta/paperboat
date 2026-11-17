@@ -4,6 +4,7 @@ import Link from "next/link"
 import { use } from "react"
 import { ErrorBlock } from "@/components/error-block"
 import { MachinesOf } from "@/components/machines-of"
+import { TeamActions } from "@/components/account-actions"
 import { Mono, StatusBadge } from "@/components/filters"
 import { Facts, Page, Panel } from "@/components/page"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -32,6 +33,7 @@ export default function TeamPage({ params }: { params: Promise<{ id: string }> }
               ["Billing", t.billing_workspace_id ? <Link key="b" className="underline" href={`/billing?workspace=${encodeURIComponent(t.billing_workspace_id)}`}>{t.billing_state ?? t.billing_workspace_id}</Link> : "—"],
             ]}
           />
+          <TeamActions id={t.id} suspended={t.suspended} generation={t.generation} />
           <Panel title={`Members${t.members_truncated ? " (first page)" : ""}`}>
             <ul className="border-t border-divider text-sm">
               {t.members.map((m) => (

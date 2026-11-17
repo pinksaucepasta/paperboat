@@ -9,6 +9,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Time } from "@/components/time"
 import { useApiQuery, type Data } from "@/lib/api"
 import { MachinesOf } from "@/components/machines-of"
+import { UserActions } from "@/components/account-actions"
 
 type Account = Data<"/v1/admin/accounts/{account_id}">
 
@@ -34,6 +35,7 @@ export default function UserPage({ params }: { params: Promise<{ id: string }> }
               ["Created", <Time key="c" iso={account.data.created_at} />],
             ]}
           />
+          <UserActions id={account.data.id} email={account.data.primary_email} status={account.data.status} version={account.data.version} />
           <Panel title="Machines">
             <MachinesOf owner={{ account: account.data.id }} />
           </Panel>

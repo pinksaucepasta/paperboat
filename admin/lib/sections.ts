@@ -4,6 +4,7 @@ import {
   CreditCardIcon,
   GaugeIcon,
   HardDrivesIcon,
+  RocketLaunchIcon,
   LaptopIcon,
   LifebuoyIcon,
   BugIcon,
@@ -28,6 +29,7 @@ export const sections: Section[] = [
   { href: "/capacity", title: "Capacity", icon: GaugeIcon, roles: ["admin", "operations"] },
   { href: "/infrastructure", title: "Relays & edges", icon: HardDrivesIcon, roles: ["admin", "operations"] },
   { href: "/billing", title: "Billing & plans", icon: CreditCardIcon, roles: ["admin", "support", "billing"] },
+  { href: "/releases", title: "Releases", icon: RocketLaunchIcon, roles: ["admin"] },
   { href: "/audit", title: "Audit log", icon: ClockCounterClockwiseIcon, roles: ["admin"] },
 ]
 

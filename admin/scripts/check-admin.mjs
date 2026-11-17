@@ -6,7 +6,7 @@
 // usage: PW_MODULE=<playwright-core index.mjs> PW_CHROMIUM=<chromium path> node scripts/check-admin.mjs [screenshot dir]
 import { spawn } from "node:child_process"
 import { createHmac } from "node:crypto"
-import { mkdirSync } from "node:fs"
+import { mkdirSync, readFileSync } from "node:fs"
 import http from "node:http"
 
 const { chromium } = await import(process.env.PW_MODULE ?? "playwright-core")
@@ -47,6 +47,33 @@ const machine = (i, owner = "usr_001") => ({
   ready: i % 3 !== 0, stale: i % 3 === 0, last_seen_at: "2026-11-17T09:00:00Z", created_at: "2026-11-01T00:00:00Z", connector_state: "connected",
   update_health: "ok", observed_capabilities: ["terminal_host"], installation_generation: 1,
 })
+// The server's own write policy (capability, where the Operator-Target comes from), read from its source so the
+// fixture refuses exactly what the real guard refuses: a wrong target, an unknown route or a role without authority.
+const policies = [...readFileSync(new URL("../../server/internal/httpapi/operator_handlers.go", import.meta.url), "utf8").matchAll(/^\s*"(POST|PUT|DELETE) (\/v1\/[^"]+)":\s*\{"(\w+)", "([^"]*)", "([^"]*)"\}/gm)].map((m) => ({
+  method: m[1], regex: new RegExp(`^${m[2].replace(/\{(\w+)\}/g, "(?<$1>[^/]+)")}$`), capability: m[3], parameter: m[4], target: m[5],
+}))
+if (policies.length < 40) throw new Error(`parsed only ${policies.length} write policies from the server source`)
+const allowedRole = (role, capability) => role === "admin" || (capability === "support" && ["support", "billing"].includes(role)) || (capability === "billing" && role === "billing") || (capability === "operations" && role === "operations")
+function expectedTarget(method, path, body) {
+  for (const policy of policies) {
+    const m = policy.method === method && policy.regex.exec(path)
+    if (!m) continue
+    const target = policy.parameter === "" ? policy.target : policy.parameter.startsWith("body:") ? body[policy.parameter.slice(5)] : m.groups[policy.parameter]
+    return { capability: policy.capability, target: decodeURIComponent(String(target ?? "")) }
+  }
+}
+// What the panel changed, and the state the fixture serves back (so a write is visible on the next read).
+const writes = []
+const world = {
+  regionsFail: true,
+  regions: [{ id: "eu", display_name: "Europe", enabled: true, revision: 2, updated_at: "2026-11-17T09:00:00Z" }],
+  nodes: [{ id: "node_1", protocol_version: "1.0", region_id: "eu", edge_pool: "a", failure_domain: "x", state: "ready", endpoint_host: "edge.example.test", endpoint_tcp_port: 443, endpoint_quic_port: 443, roles: ["relay"], transports: ["tcp"], capacity_limit: 10, revision: 1, node_generation: 1, registry_expires_at: "2026-11-18T00:00:00Z", ready: true, observed_at: "2026-11-17T09:00:00Z" }],
+  installs: [],
+  serverNodes: [{ id: "srv_1", region: "eu", state: "active", version: "dev-abc1234", commit: "abc1234", started_at: "2026-11-17T09:00:00Z", last_seen_at: "2026-11-17T09:00:00Z", healthy: true, public_address: "203.0.113.9" }],
+  policy: { personal_allowance_bytes: 5e9, team_allowance_bytes: null, revision: 3 },
+  floor: { schema: "paperboat.client-update-policy/v1", revision: 2, minimum_version: "", reason: "" },
+  requests: [],
+}
 const ref = "support_11111111-2222-4333-8444-555555555555"
 const page = (items, key, total, url) => {
   const after = url.searchParams.get("after") ?? ""
@@ -54,6 +81,34 @@ const page = (items, key, total, url) => {
   const start = after ? items.findIndex((x) => x.id === after) + 1 : 0
   const slice = items.slice(start, start + limit)
   return { [key]: slice, total: total ?? items.length, ...(start + limit < items.length ? { next_after: slice.at(-1)?.id } : {}) }
+}
+function mutate(method, p, json) {
+  const [, , , area, id, action] = p.split("/").map(decodeURIComponent)
+  if (p === "/v1/admin/selfhost/enrollments") {
+    world.installs.push({ installation_id: "inst_1", node_id: "node_s1", endpoint_host: "", name: "", capability: "relay", ready: false, trust_notice: "", scope_kind: "global", scope_id: "", enrollment_state: "pending", enrolledAt: Date.now() })
+    return { installations: [] }
+  }
+  if (area === "selfhost" && method === "DELETE") world.installs = world.installs.filter((i) => i.installation_id !== action)
+  if (area === "nodes" && action === "enroll") {
+    world.nodes.push({ ...world.nodes[0], id, region_id: json.region_id, roles: json.roles, transports: json.transports, revision: 1 })
+    return { runtime_credential: "rc-FIXTURE-credential-value" }
+  }
+  if (area === "regions" && action === "create") world.regions.push({ id, display_name: json.display_name, enabled: true, revision: 1, updated_at: new Date().toISOString() })
+  if (area === "regions" && action === "disable") world.regions.find((r) => r.id === id).enabled = false
+  if (p === "/v1/admin/server-nodes/enrollments") world.serverNodes.push({ ...world.serverNodes[0], id: "srv_2", state: "registered", healthy: false })
+  if (area === "server-nodes" && action === "remove") world.serverNodes = world.serverNodes.filter((n) => n.id !== id)
+  if (p === "/v1/admin/config/billing") world.policy = { ...json, revision: json.revision + 1 }
+  if (p === "/v1/admin/client-update-policy") {
+    if (json.expected_revision !== world.floor.revision) return { __status: 409, code: "revision_conflict", message: "The policy changed; reload and try again.", reference: "support_fixture_floor" }
+    world.floor = { schema: world.floor.schema, revision: json.expected_revision + 1, minimum_version: json.minimum_version, reason: json.reason }
+  }
+  if (p === "/v1/admin/release-authority/bundles") return { __status: 403, code: "release_authority_signature_invalid", message: "The bundle does not meet the configured release-authority signing threshold.", reference: "support_fixture_bundle" }
+  if (p === "/v1/admin/release-authority/requests") {
+    const ok = ["promote", "pause", "quarantine", "revoke"].includes(json.action) && /^\d{4}\.\d+\.\d+\.\d+$/.test(json.version) && json.policy_revision > 0 && (json.action === "promote" ? json.rollout_percentage >= 1 && json.rollout_percentage <= 100 : json.rollout_percentage === 0) && Object.keys(json).length === 7
+    if (!ok) return { __status: 400, code: "validation_failed", message: "Release authority request details are invalid.", reference: "support_fixture_request" }
+  }
+  if (p === "/v1/admin/release-authority/requests") world.requests.push({ id: "req_1", ...json, status: "pending", created_at: new Date().toISOString() })
+  return {}
 }
 function route(req, url) {
   const p = url.pathname
@@ -94,8 +149,20 @@ function route(req, url) {
     }
   }
   if (p === "/v1/admin/sentry/issues") return { issues: [{ project: "go", id: "1", short_id: "GO-1", level: "error", status: "unresolved", count: 5, first_seen: "2026-11-16T00:00:00Z", last_seen: "2026-11-17T08:00:00Z" }] }
-  if (p === "/v1/admin/nodes") return { items: [{ id: "node_1", protocol_version: "1.0", region_id: "eu", edge_pool: "a", failure_domain: "x", state: "ready", endpoint_host: "edge.example.test", endpoint_tcp_port: 443, endpoint_quic_port: 443, roles: ["relay"], transports: ["tcp"], capacity_limit: 10, revision: 1, node_generation: 1, registry_expires_at: "2026-11-18T00:00:00Z", ready: true, observed_at: "2026-11-17T09:00:00Z" }], total: 1 }
-  if (p === "/v1/admin/regions") return { __status: 503, code: "infrastructure_unavailable", message: "Infrastructure is unavailable.", reference: "support_fixture_regions" }
+  if (p === "/v1/admin/nodes") return { items: world.nodes, total: world.nodes.length }
+  if (p === "/v1/admin/regions") return world.regionsFail ? { __status: 503, code: "infrastructure_unavailable", message: "Infrastructure is unavailable.", reference: "support_fixture_regions" } : { items: world.regions, total: world.regions.length }
+  if (p === "/v1/admin/selfhost/installations") {
+    // A node enrolled a moment ago is waiting; it becomes ready once it has "heartbeated" (2.5 s later).
+    for (const i of world.installs) if (i.enrollment_state === "pending" && Date.now() - i.enrolledAt > 2500) Object.assign(i, { enrollment_state: "enrolled", ready: true, endpoint_host: "relay-1.example.test", last_heartbeat_at: new Date().toISOString() })
+    const installations = world.installs.map((i) => Object.fromEntries(Object.entries(i).filter(([k]) => k !== "enrolledAt")))
+    const count = (f) => installations.filter(f).length
+    return { installations, counts: { pending: count((i) => i.enrollment_state === "pending"), enrolled: count((i) => i.enrollment_state === "enrolled"), ready: count((i) => i.ready) }, pagination: { limit: 200, offset: 0, total: installations.length, next_offset: null } }
+  }
+  if (p === "/v1/admin/server-nodes") return { nodes: world.serverNodes }
+  if (p === "/v1/admin/config/billing") return world.policy
+  if (p === "/v1/admin/client-update-policy") return world.floor
+  if (p === "/v1/admin/release-authority/requests") return { requests: world.requests, pagination: { limit: 50, offset: 0, total: world.requests.length, next_offset: null } }
+  if (p === "/v1/admin/release-authority/bundles") return { bundles: [], pagination: { limit: 50, offset: 0, total: 0, next_offset: null } }
   if (p === "/v1/admin/infrastructure") return { items: [{ kind: url.searchParams.get("kind"), id: "relay_1", state: "ready", desired_state: "", observed_status: "ready", ready: true, stale: false, revision: 3 }], total: 1 }
   if (p === "/v1/admin/infrastructure/capacity")
     return {
@@ -111,8 +178,8 @@ function route(req, url) {
       ],
     }
   if (p === "/v1/admin/billing/workspaces") return { workspaces: [{ id: "bw_t", scope: "team", scope_id: "team_a", product_code: "team_monthly", state: "active", quantity: 3, period_end: "2026-12-01T00:00:00Z", cancel_at_period_end: false, revision: 1, observed_at: "2026-11-17T09:00:00Z" }], total: 1 }
-  if (p === "/v1/admin/billing/workspace-operations") return { operations: [], total: 0 }
-  if (p === "/v1/admin/billing/products") return { products: [{ code: "team_monthly", display_name: "Team", catalog_type: "subscription", price_id: "price_1", product_id: "prod_1", unit_amount: 1500, currency: "usd", interval: "month", allowance_bytes: null, active: true, version: 1, price_verified: true }] }
+  if (p === "/v1/admin/billing/workspace-operations") return { operations: [{ id: "op_u1", kind: "checkout", workspace_id: "bw_t", state: "uncertain", updated_at: "2026-11-17T09:00:00Z" }, { id: "op_ok", kind: "checkout", workspace_id: "bw_t", state: "succeeded", updated_at: "2026-11-17T09:00:00Z" }], total: 2 }
+  if (p === "/v1/admin/billing/products") return { products: [{ code: "team_monthly", display_name: "Team", catalog_type: "team_subscription", bytes_amount: null, price_id: "price_1", product_id: "prod_1", unit_amount: 1500, currency: "usd", interval: "month", allowance_bytes: null, active: true, version: 1, price_verified: true }] }
   if (p === `/v1/admin/support/${ref}`)
     return { support_reference: ref, status: "available", records_by_owner: { usr_001: [{ id: "rec_1", owner_id: "usr_001", component: "cli", operation: "install", release: "dev-1", stage: "download", code: "network", cause: "dns_failure", error_type: "net.DNSError", outcome: "failed", severity: "error", at: "2026-11-17T08:00:00Z", expires_at: "2026-11-24T08:00:00Z", reporting: "unconfirmed", support_reference: ref, group_first_seen: "2026-11-15T08:00:00Z", group_last_seen: "2026-11-17T08:00:00Z", group_occurrences: 14 }] }, truncated: false, sentry_links: { evt1: "https://sentry.example.test/e/evt1" }, sentry_search_url: "https://sentry.example.test/s", dropped_records: 0, message: "Evidence available." }
   return 404
@@ -166,6 +233,16 @@ const fixture = http.createServer((req, res) => {
       return send(204, {}, { "set-cookie": "pb-operator-session=; Path=/; Max-Age=0" })
     }
     if (session.role === "support" && ["/v1/admin/audit", "/v1/admin/overview"].includes(url.pathname)) return send(403, { error: { code: "forbidden", message: "This staff role cannot read this resource.", request_id: "req_forbidden" } })
+    if (req.method !== "GET" && url.pathname.startsWith("/v1/admin/")) {
+      const write = { method: req.method, path: url.pathname, target: req.headers["operator-target"], reason: req.headers["operator-reason"], key: req.headers["idempotency-key"], csrf: req.headers["x-csrf-token"], body: json }
+      const policy = expectedTarget(req.method, url.pathname, json)
+      if (!policy || !allowedRole(session.role, policy.capability)) return send(403, { error: { code: "forbidden", message: "This staff role cannot perform this action.", request_id: "req_role" } })
+      if (write.target !== policy.target || !/^[A-Za-z0-9_.:-]{1,128}$/.test(write.target ?? "") || !/^[A-Za-z0-9_.:-]{1,128}$/.test(write.reason ?? "") || (write.key ?? "").length < 8) return send(400, { error: { code: "validation_failed", message: "Confirm Operator-Target and provide an opaque Operator-Reason reference and Idempotency-Key.", request_id: "req_headers" } })
+      writes.push(write)
+      const done = mutate(req.method, url.pathname, json)
+      if (done.__status) return send(done.__status, { error: { code: done.code, message: done.message, request_id: "req_x", support_reference: done.reference } }, { "support-reference": done.reference ?? "" })
+      return send(200, { data: done })
+    }
     const out = route(req, url)
     if (out === 404) return send(404, { error: { code: "not_found", message: "The requested resource was not found.", request_id: "req_404" } })
     if (out.__status) return send(out.__status, { error: { code: out.code, message: out.message, request_id: "req_x", support_reference: out.reference } }, { "support-reference": out.reference ?? "" })
@@ -329,12 +406,125 @@ try {
   })
   await step("relays & edges: nodes load; regions failure shows its reference", async () => {
     await p.goto(`${ORIGIN}/infrastructure`)
+    await p.getByRole("tab", { name: "Managed nodes" }).click()
     await waitReady("nodes")
     await p.getByRole("tab", { name: "Regions" }).click()
     await p.waitForSelector("[data-error-block]")
     expect((await text("[data-error-block]")).includes("support_fixture_regions"), "reference missing")
     await p.getByRole("tab", { name: "Relay health" }).click()
     await waitReady("relay health")
+    world.regionsFail = false
+  })
+  // ---- writes -----------------------------------------------------------------------------------
+  const dialog = (title) => p.locator(`[data-action-dialog="${title}"]`)
+  const lastWrite = () => writes.at(-1)
+  const submit = async (d, button, reason = "TICKET-42") => {
+    await d.getByLabel("Reference for the audit log").fill(reason)
+    await d.getByRole("button", { name: button, exact: true }).click()
+  }
+  await step("enrol a node: command is exact, a bad reference blocks submit, the one-time code goes with target/reason/key, the node goes waiting then ready", async () => {
+    await p.goto(`${ORIGIN}/infrastructure`)
+    await p.waitForSelector("[data-enrol-node]")
+    await p.getByLabel("Public hostname or IP").fill("relay-1.example.test")
+    await p.getByLabel("Location / provider label").fill("Hetzner Helsinki")
+    expect((await text("[data-install-command]")) === "sudo pbh install --enable relay --endpoint-host relay-1.example.test --region selfhost --name 'Hetzner Helsinki'", `command was ${await text("[data-install-command]")}`)
+    await p.getByRole("button", { name: "I ran it, enrol the node" }).click()
+    const d = dialog("Enrol the node")
+    await d.waitFor()
+    const code = `pbh1.${"a".repeat(43)}.${"b".repeat(43)}`
+    await d.getByLabel("Self-host code").fill("pbh1.too-short")
+    await d.getByLabel("Reference for the audit log").fill("bad reason!")
+    expect(await d.getByRole("button", { name: "Enrol node", exact: true }).isDisabled(), "submit must be disabled for a malformed code and reference")
+    await d.getByLabel("Self-host code").fill(code)
+    await submit(d, "Enrol node")
+    await p.waitForSelector('[data-installation="inst_1"]')
+    const w = lastWrite()
+    expect(w.method === "POST" && w.path === "/v1/admin/selfhost/enrollments" && w.target === "relay-1.example.test:8443" && w.reason === "TICKET-42" && w.key.length >= 8 && w.body.code === code, `write was ${JSON.stringify({ ...w, body: "…" })}`)
+    expect(w.csrf === "csrf-admin", "the relay did not add the CSRF token")
+    expect((await text("[data-installation-counts]")).includes("1 waiting"), "a new node is waiting")
+    await p.waitForFunction(() => document.querySelector("[data-installation-counts]")?.textContent?.includes("1 ready"), null, { timeout: 20000 })
+    await p.screenshot({ path: `${shots}/enrol-light.png`, fullPage: true })
+  })
+  await step("managed node: the runtime credential is shown once and must be acknowledged", async () => {
+    await p.getByRole("tab", { name: "Managed nodes" }).click()
+    await waitReady("nodes")
+    await p.getByRole("button", { name: "Enrol a managed node" }).click()
+    const d = dialog("Enrol a managed node")
+    await d.getByLabel("Node id").fill("relay-sin-1")
+    await d.getByLabel("Kind").selectOption("relay")
+    await d.getByLabel("Region", { exact: true }).selectOption("eu")
+    await d.getByLabel("Pool").fill("pool-a")
+    await d.getByLabel("Failure domain").fill("rack-1")
+    await d.getByLabel("Public hostname").fill("relay-sin-1.example.test")
+    await d.getByLabel("QUIC port").fill("27446")
+    await submit(d, "Enrol node")
+    await p.waitForSelector("[data-one-time-secrets]")
+    expect((await text("[data-secret]")) === "rc-FIXTURE-credential-value", "credential not shown")
+    const w = lastWrite()
+    expect(w.path === "/v1/admin/nodes/relay-sin-1/enroll" && w.target === "relay-sin-1" && w.body.revision === 0 && w.body.roles.join() === "relay" && w.body.transports.join() === "derp_quic,derp_wss", `managed enrol body ${JSON.stringify(w.body)}`)
+    expect(await p.getByRole("button", { name: "Done" }).isDisabled(), "Done must wait for the acknowledgement")
+    await p.getByText("I saved it").click()
+    await p.getByRole("button", { name: "Done" }).click()
+    await p.waitForFunction(() => !document.querySelector("[data-one-time-secrets]"))
+    expect(!(await p.content()).includes("rc-FIXTURE-credential-value"), "the credential stayed on the page")
+  })
+  await step("managed node: drain and retire need a reference; retire needs the node id typed", async () => {
+    const row = p.locator('[data-node-actions="node_1"]')
+    await row.getByRole("button", { name: "Drain", exact: true }).click()
+    await submit(dialog("Drain node_1"), "Drain")
+    await p.waitForFunction(() => !document.querySelector('[data-action-dialog="Drain node_1"]'))
+    expect(lastWrite().path === "/v1/admin/nodes/node_1/drain" && lastWrite().body.revision === 1, "drain write")
+    await row.getByRole("button", { name: "Retire", exact: true }).click()
+    const d = dialog("Retire node_1")
+    await d.getByLabel("Reference for the audit log").fill("TICKET-43")
+    expect(await d.getByRole("button", { name: "Retire", exact: true }).isDisabled(), "retire must need the typed id")
+    await d.getByLabel(/Type/).fill("node_1")
+    await d.getByRole("button", { name: "Retire", exact: true }).click()
+    await p.waitForFunction(() => !document.querySelector('[data-action-dialog="Retire node_1"]'))
+    expect(lastWrite().path === "/v1/admin/nodes/node_1/retire", "retire write")
+  })
+  await step("regions: create, and disable asks for the region id", async () => {
+    await p.getByRole("tab", { name: "Regions" }).click()
+    await waitReady("regions")
+    await p.getByRole("button", { name: "Create a region" }).click()
+    const d = dialog("Create a region")
+    await d.getByLabel("Region id").fill("sin")
+    await d.getByLabel("Display name").fill("Singapore")
+    await submit(d, "Create region")
+    await p.waitForSelector('[data-region-actions="sin"]')
+    expect(lastWrite().path === "/v1/admin/regions/sin/create" && lastWrite().target === "sin", "create write")
+    await p.locator('[data-region-actions="eu"]').getByRole("button", { name: "Disable" }).click()
+    const x = dialog("Disable eu")
+    await x.getByLabel("Reference for the audit log").fill("TICKET-44")
+    expect(await x.getByRole("button", { name: "Disable region" }).isDisabled(), "disable must need the typed id")
+    await x.getByLabel(/Type/).fill("eu")
+    await x.getByRole("button", { name: "Disable region" }).click()
+    await p.waitForFunction(() => document.querySelector('[data-region-actions="eu"]')?.textContent?.includes("Enable"))
+    expect(lastWrite().path === "/v1/admin/regions/eu/disable" && lastWrite().body.revision === 2, "disable write")
+  })
+  await step("server nodes: the enrol command is exact; enrol, drain and remove are writes", async () => {
+    await p.getByRole("tab", { name: "Server nodes" }).click()
+    await p.waitForSelector("[data-enrol-server-node]")
+    await p.getByLabel("Region", { exact: true }).fill("hel")
+    await p.getByLabel("Hostname").fill("server-3.example.test")
+    expect((await text("[data-enrol-server-node] [data-install-command]")) === "paperboat-server enroll-node -region hel -instance slot-01 -host server-3.example.test -config-out /etc/paperboat/node.json", "server-node command")
+    await p.getByRole("button", { name: "I ran it, enrol the node" }).click()
+    const d = dialog("Enrol the server node")
+    await d.getByLabel("Claim code").fill("pbs1.fixture-code")
+    await submit(d, "Enrol server node")
+    await p.waitForSelector('[data-server-node="srv_2"]')
+    expect(lastWrite().path === "/v1/admin/server-nodes/enrollments" && lastWrite().target === "server-3.example.test:8443", "server enrol write")
+    await p.locator('[data-server-node-actions="srv_2"]').getByRole("button", { name: "Drain" }).click()
+    const drain = dialog("Drain srv_2")
+    await drain.getByLabel("Reference for the audit log").fill("TICKET-44b")
+    expect(await drain.getByRole("button", { name: "Drain node" }).isDisabled(), "drain is one-way and must need the typed id")
+    await drain.getByRole("button", { name: "Cancel" }).click()
+    await p.locator('[data-server-node-actions="srv_1"]').getByRole("button", { name: "Remove" }).click()
+    const r = dialog("Remove srv_1")
+    await r.getByLabel("Reference for the audit log").fill("TICKET-45")
+    await r.getByLabel(/Type/).fill("srv_1")
+    await r.getByRole("button", { name: "Remove node" }).click()
+    await p.waitForFunction(() => !document.querySelector('[data-server-node="srv_1"]'))
   })
   await step("capacity: every node with CPU, memory, traffic and the three warnings", async () => {
     await p.goto(`${ORIGIN}/capacity`)
@@ -348,14 +538,102 @@ try {
     expect((await text('[data-stat="Need attention"]')).includes("2"), "two nodes need attention")
     await p.screenshot({ path: `${shots}/capacity-light.png`, fullPage: true })
   })
-  await step("billing: workspaces, operations (empty) and plans", async () => {
+  await step("billing: workspaces, operations and plans", async () => {
     await p.goto(`${ORIGIN}/billing`)
     await waitReady("billing workspaces")
     await p.getByRole("tab", { name: "Operations" }).click()
-    await p.waitForSelector('[data-table="billing operations"][data-state="empty"]')
+    await waitReady("billing operations")
     await p.getByRole("tab", { name: "Plans & prices" }).click()
     await waitReady("plans and prices")
     expect(await p.getByText("15.00 USD / month").isVisible(), "price")
+  })
+  await step("billing: product edit and policy change are fenced writes; recovery needs evidence and the operation id", async () => {
+    await p.goto(`${ORIGIN}/billing`)
+    await p.getByRole("tab", { name: "Plans & prices" }).click()
+    await p.waitForSelector("[data-billing-policy]")
+    await waitReady("plans and prices")
+    await p.locator('[data-product-action="team_monthly"]').click()
+    const d = dialog("Edit team_monthly")
+    await d.getByLabel("Display name").fill("Team plan")
+    await submit(d, "Save product")
+    await p.waitForFunction(() => !document.querySelector('[data-action-dialog="Edit team_monthly"]'))
+    const w = lastWrite()
+    expect(w.method === "PUT" && w.path === "/v1/admin/billing/products/team_monthly" && w.body.version === 1 && w.body.provider_price_id === "price_1" && w.body.catalog_type === "team_subscription" && w.body.display_name === "Team plan", `product write ${JSON.stringify(w.body)}`)
+    await p.getByRole("button", { name: "Change", exact: true }).click()
+    const q = dialog("Change the monthly allowances")
+    await q.getByLabel("Team allowance (bytes)").fill("20000000000")
+    await submit(q, "Save allowances")
+    await p.waitForFunction(() => document.querySelector("[data-billing-policy]")?.textContent?.includes("revision 4"))
+    expect(lastWrite().body.revision === 3 && lastWrite().body.team_allowance_bytes === 20000000000 && lastWrite().body.personal_allowance_bytes === 5e9, "policy write")
+    await p.getByRole("tab", { name: "Operations" }).click()
+    await waitReady("billing operations")
+    expect((await p.locator('[data-operation-actions="op_ok"]').count()) === 0, "a succeeded operation must offer no recovery")
+    await p.locator('[data-operation-actions="op_u1"]').getByRole("button", { name: "Retire" }).click()
+    const r = dialog("Retire as not applied")
+    await r.getByLabel("Evidence reference").fill("short")
+    await r.getByLabel("Reference for the audit log").fill("TICKET-46")
+    await r.getByLabel(/Type/).fill("op_u1")
+    expect(await r.getByRole("button", { name: "Retire operation" }).isDisabled(), "evidence under 8 characters must block")
+    await r.getByLabel("Evidence reference").fill("evt_stripe_123")
+    await r.getByRole("button", { name: "Retire operation" }).click()
+    await p.waitForFunction(() => !document.querySelector('[data-action-dialog="Retire as not applied"]'))
+    expect(lastWrite().path === "/v1/admin/billing/workspace-operations/op_u1/retire" && lastWrite().body.outcome === "not_applied" && lastWrite().body.evidence_reference === "evt_stripe_123", "retire write")
+  })
+  await step("releases: floor needs a valid version and the typed word; a stale revision shows its reference; a refused bundle keeps its key for the retry", async () => {
+    await p.goto(`${ORIGIN}/releases`)
+    await p.waitForSelector("[data-client-floor]")
+    await p.getByRole("button", { name: "Change minimum version" }).click()
+    const d = dialog("Change the minimum CLI version")
+    await d.getByLabel("Minimum version").fill("not-a-version")
+    await d.getByLabel("Reference for the audit log").fill("TICKET-47")
+    await d.getByLabel(/Type/).fill("update-policy")
+    expect(await d.getByRole("button", { name: "Set minimum" }).isDisabled(), "a malformed version must block")
+    await d.getByLabel("Minimum version").fill("2026.11.18.1")
+    await d.getByLabel("Reason shown to users").fill("Security fix")
+    await d.getByRole("button", { name: "Set minimum" }).click()
+    await p.waitForFunction(() => document.querySelector("[data-client-floor]")?.textContent?.includes("Minimum CLI version 2026.11.18.1"))
+    expect(lastWrite().body.expected_revision === 2 && lastWrite().body.reason === "Security fix" && lastWrite().target === "client-update-policy", "floor write")
+    // A second operator changed the policy meanwhile: this panel's revision is stale and the write is refused.
+    await p.getByRole("button", { name: "Change minimum version" }).click()
+    const stale = dialog("Change the minimum CLI version")
+    await stale.getByLabel("Minimum version").fill("2026.11.19.1")
+    await stale.getByLabel("Reason shown to users").fill("Another fix")
+    await stale.getByLabel("Reference for the audit log").fill("TICKET-49")
+    await stale.getByLabel(/Type/).fill("update-policy")
+    world.floor.revision = 9
+    await stale.getByRole("button", { name: "Set minimum" }).click()
+    await stale.locator("[data-action-error]").waitFor()
+    expect((await stale.locator("[data-action-error]").innerText()).includes("support_fixture_floor"), "stale revision reference missing")
+    await stale.getByRole("button", { name: "Cancel" }).click()
+    await p.getByRole("tab", { name: "Release authority" }).click()
+    await p.waitForSelector("[data-release-authority]")
+    await p.getByRole("button", { name: "Import a signed bundle" }).click()
+    const b = dialog("Import a signed release bundle")
+    await b.getByLabel(/Signed bundle/).fill(JSON.stringify({ release_id: "rel_1", signatures: [] }))
+    await b.getByLabel("Reference for the audit log").fill("TICKET-48")
+    await b.getByLabel(/Type/).fill("rel_1")
+    await b.getByRole("button", { name: "Import bundle" }).click()
+    await b.locator("[data-action-error]").waitFor()
+    expect((await b.locator("[data-action-error]").innerText()).includes("support_fixture_bundle"), "reference missing on the refusal")
+    const first = lastWrite().key
+    await b.getByRole("button", { name: "Import bundle" }).click()
+    await b.locator("[data-action-error]").waitFor()
+    expect(writes.at(-2).key === first && lastWrite().key === first && lastWrite().target === "rel_1", "a retry must keep the idempotency key")
+    // Edited input after a failure is a different action: it gets a new key.
+    await b.getByLabel("Reference for the audit log").fill("TICKET-48b")
+    const before = writes.length
+    await b.getByRole("button", { name: "Import bundle" }).click()
+    for (let i = 0; i < 50 && writes.length === before; i++) await new Promise((r) => setTimeout(r, 100))
+    expect(writes.length === before + 1 && lastWrite().key !== first && lastWrite().reason === "TICKET-48b", "edited input must use a new idempotency key")
+    await b.getByRole("button", { name: "Cancel" }).click()
+    await p.getByRole("button", { name: "Request a release decision" }).click()
+    const r = dialog("Request a release decision")
+    await r.getByLabel("Release id").fill("rel_2")
+    await r.getByLabel("Version").fill("2026.11.18.2")
+    await r.getByLabel("Policy revision").fill("7")
+    await submit(r, "Create request")
+    await p.waitForSelector('[data-table="release requests"] >> text=rel_2')
+    expect(lastWrite().body.action === "promote" && lastWrite().body.rollout_percentage === 100 && lastWrite().body.platform === "linux", "request write")
   })
   await step("support lookup joins the stored fault, Sentry link, owner and machines", async () => {
     await p.goto(`${ORIGIN}/support`)
@@ -422,6 +700,17 @@ try {
     await p.waitForSelector("[data-error-block]")
     expect((await text("[data-error-block]")).includes("req_forbidden"), "403 reference missing")
     await p.screenshot({ path: `${shots}/forbidden-light.png`, fullPage: true })
+  })
+  await step("a support-role operator sees no write buttons", async () => {
+    await p.goto(`${ORIGIN}/users/usr_001`)
+    await p.waitForSelector('[data-table="machines"][data-state="ready"]')
+    expect((await p.getByRole("button", { name: /Suspend account|Rotate SSH user CA/ }).count()) === 0, "support sees account writes")
+    await p.goto(`${ORIGIN}/billing`)
+    await p.getByRole("tab", { name: "Plans & prices" }).click()
+    await waitReady("plans and prices")
+    expect((await p.getByRole("button", { name: /Add a product|Edit/ }).count()) === 0, "support sees product writes")
+    const refused = await p.evaluate(async () => (await fetch("/api/v1/admin/regions/x/disable", { method: "POST", headers: { "content-type": "application/json", "operator-target": "x", "operator-reason": "ticket-1", "idempotency-key": "key-12345678" }, body: "{}" })).status)
+    expect(refused === 403, `a support write answered ${refused}`)
   })
 } catch (error) {
   results.push([false, `check aborted  (${String(error.message ?? error).split("\n")[0]})`])

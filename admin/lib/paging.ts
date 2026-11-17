@@ -6,7 +6,7 @@ import { useApiQuery, type ApiError } from "@/lib/api"
 
 export const pageSize = 50
 
-type Page = { total?: number; total_capped?: boolean; next_after?: string; next_cursor?: string; next?: string }
+type Page = { total?: number; total_capped?: boolean; next_after?: string; next_cursor?: string; next?: string; pagination?: { total: number; next_offset: number | null } }
 
 /**
  * A server-paged list. `filters` (empty values dropped) are query parameters; pages are reached by the cursors
@@ -15,7 +15,7 @@ type Page = { total?: number; total_capped?: boolean; next_after?: string; next_
  */
 export type CursorList<T> = UseQueryResult<T, ApiError> & { page: number; hasNext: boolean; go: (page: number) => void }
 
-export function useCursorList<T extends Page>(path: string, filters: Record<string, string>, cursorParam: "after" | "cursor" = "after"): CursorList<T> {
+export function useCursorList<T extends Page>(path: string, filters: Record<string, string>, cursorParam: "after" | "cursor" | "offset" = "after"): CursorList<T> {
   const query = useMemo(() => {
     const params = new URLSearchParams()
     for (const [key, value] of Object.entries(filters)) if (value) params.set(key, value)
@@ -29,7 +29,8 @@ export function useCursorList<T extends Page>(path: string, filters: Record<stri
   params.set("limit", String(pageSize))
   if (cursor) params.set(cursorParam, cursor)
   const result = useApiQuery<T>(["list", path, query, current.page, cursor], `${path}?${params}`)
-  const next = result.data?.next_after ?? result.data?.next_cursor ?? result.data?.next
+  const offset = result.data?.pagination?.next_offset
+  const next = result.data?.next_after ?? result.data?.next_cursor ?? result.data?.next ?? (offset == null ? undefined : String(offset))
   return {
     ...result,
     page: current.page,

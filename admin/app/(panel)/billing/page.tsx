@@ -2,12 +2,13 @@
 
 import { Suspense, useMemo, useState } from "react"
 import { useSearchParams } from "next/navigation"
+import { BillingPolicy, OperationActions, ProductEditor } from "@/components/billing-actions"
 import { DataTable } from "@/components/data-table"
 import { FilterSelect, Mono, StatusBadge } from "@/components/filters"
 import { Page } from "@/components/page"
 import { Tabs } from "@/components/tabs"
 import { Time } from "@/components/time"
-import type { Data } from "@/lib/api"
+import { useOperator, type Data } from "@/lib/api"
 import { useCursorList } from "@/lib/paging"
 
 type View = "workspaces" | "operations" | "products"
@@ -73,6 +74,7 @@ function Operations() {
           { header: "Workspace", cell: (o) => <Mono>{o.workspace_id}</Mono> },
           { header: "State", cell: (o) => <StatusBadge state={o.state} /> },
           { header: "Updated", cell: (o) => <Time iso={o.updated_at} relative /> },
+          { header: "Recovery", cell: (o) => <OperationActions id={o.id} state={o.state} /> },
         ]}
       />
     </>
@@ -82,21 +84,27 @@ function Operations() {
 function Products() {
   const filters = useMemo(() => ({}), [])
   const list = useCursorList<Data<"/v1/admin/billing/products">>("/v1/admin/billing/products", filters)
+  const admin = useOperator()?.role === "admin"
   return (
-    <DataTable
-      what="plans and prices"
-      list={list}
-      rows={(d) => d.products}
-      rowKey={(p) => p.code}
-      empty="The catalog has no products."
-      columns={[
-        { header: "Code", cell: (p) => <Mono>{p.code}</Mono> },
-        { header: "Name", cell: (p) => p.display_name },
-        { header: "Type", cell: (p) => p.catalog_type },
-        { header: "Price", cell: (p) => `${(p.unit_amount / 100).toFixed(2)} ${p.currency.toUpperCase()}${p.interval ? ` / ${p.interval}` : ""}` },
-        { header: "Active", cell: (p) => <StatusBadge state={p.active ? "active" : "revoked"} /> },
-        { header: "Price verified", cell: (p) => (p.price_verified ? "yes" : "no") },
-      ]}
-    />
+    <div className="flex flex-col gap-4">
+      <BillingPolicy />
+      {admin && <div><ProductEditor /></div>}
+      <DataTable
+        what="plans and prices"
+        list={list}
+        rows={(d) => d.products}
+        rowKey={(p) => p.code}
+        empty="The catalog has no products."
+        columns={[
+          { header: "Code", cell: (p) => <Mono>{p.code}</Mono> },
+          { header: "Name", cell: (p) => p.display_name },
+          { header: "Type", cell: (p) => p.catalog_type },
+          { header: "Price", cell: (p) => `${(p.unit_amount / 100).toFixed(2)} ${p.currency.toUpperCase()}${p.interval ? ` / ${p.interval}` : ""}` },
+          { header: "Active", cell: (p) => <StatusBadge state={p.active ? "active" : "revoked"} /> },
+          { header: "Price verified", cell: (p) => (p.price_verified ? "yes" : "no") },
+          { header: "Actions", cell: (p) => (admin ? <ProductEditor key={`${p.code}-${p.version}`} product={p} /> : "—") },
+        ]}
+      />
+    </div>
   )
 }

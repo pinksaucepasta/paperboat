@@ -11653,9 +11653,11 @@ export interface components {
             display_name: string;
             provider_price_id: string;
             /** @enum {string} */
-            catalog_type: "personal_subscription" | "team_subscription";
+            catalog_type: "personal_subscription" | "team_subscription" | "top_up";
             active: boolean;
             allowance_bytes: number | null;
+            /** @description Top-up products only: the bytes one unit adds (must equal the fixed top-up unit). */
+            bytes_amount?: number | null;
         };
         AdminBillingProduct: {
             code: string;
@@ -11667,12 +11669,13 @@ export interface components {
             unit_amount: number;
             currency: string;
             /** @enum {string} */
-            interval: "" | "month" | "year";
+            interval: "" | "month" | "year" | "one_time";
             allowance_bytes: number | null;
             active: boolean;
             /** Format: int64 */
             version: number;
             price_verified: boolean;
+            bytes_amount: number | null;
         };
         AdminBillingProductPage: {
             products: components["schemas"]["AdminBillingProduct"][];
@@ -11990,7 +11993,7 @@ export interface components {
             runtime_credential?: string;
         };
         RegionCreateRequest: {
-            alias: string;
+            display_name: string;
             /**
              * Format: int64
              * @constant
@@ -11998,7 +12001,7 @@ export interface components {
             revision?: 0;
         };
         RegionUpdateRequest: {
-            alias: string;
+            display_name: string;
             /** Format: int64 */
             revision: number;
         };
@@ -24202,8 +24205,8 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    /** @enum {string} */
-                    outcome: "not_applied";
+                    /** @description The Stripe checkout session that completed the operation. */
+                    provider_session_id: string;
                     /** @description Opaque provider or incident evidence reference; do not include credentials or payment data. */
                     evidence_reference: string;
                 };
@@ -24280,8 +24283,6 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    /** @enum {string} */
-                    outcome: "not_applied";
                     /** @description Opaque provider or incident evidence reference; do not include credentials or payment data. */
                     evidence_reference: string;
                 };

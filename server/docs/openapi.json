@@ -11721,7 +11721,8 @@
             "type": "string",
             "enum": [
               "personal_subscription",
-              "team_subscription"
+              "team_subscription",
+              "top_up"
             ]
           },
           "active": {
@@ -11737,6 +11738,18 @@
                 "type": "null"
               }
             ]
+          },
+          "bytes_amount": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "format": "int64"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Top-up products only: the bytes one unit adds (must equal the fixed top-up unit)."
           }
         },
         "required": [
@@ -11779,7 +11792,8 @@
             "enum": [
               "",
               "month",
-              "year"
+              "year",
+              "one_time"
             ]
           },
           "allowance_bytes": {
@@ -11802,6 +11816,17 @@
           },
           "price_verified": {
             "type": "boolean"
+          },
+          "bytes_amount": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "format": "int64"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -11816,7 +11841,8 @@
           "allowance_bytes",
           "active",
           "version",
-          "price_verified"
+          "price_verified",
+          "bytes_amount"
         ]
       },
       "AdminBillingProductPage": {
@@ -13029,10 +13055,10 @@
         "type": "object",
         "additionalProperties": false,
         "required": [
-          "alias"
+          "display_name"
         ],
         "properties": {
-          "alias": {
+          "display_name": {
             "type": "string"
           },
           "revision": {
@@ -13046,11 +13072,11 @@
         "type": "object",
         "additionalProperties": false,
         "required": [
-          "alias",
+          "display_name",
           "revision"
         ],
         "properties": {
-          "alias": {
+          "display_name": {
             "type": "string"
           },
           "revision": {
@@ -39548,15 +39574,13 @@
                 "type": "object",
                 "additionalProperties": false,
                 "required": [
-                  "outcome",
+                  "provider_session_id",
                   "evidence_reference"
                 ],
                 "properties": {
-                  "outcome": {
+                  "provider_session_id": {
                     "type": "string",
-                    "enum": [
-                      "not_applied"
-                    ]
+                    "description": "The Stripe checkout session that completed the operation."
                   },
                   "evidence_reference": {
                     "type": "string",
@@ -39690,16 +39714,9 @@
                 "type": "object",
                 "additionalProperties": false,
                 "required": [
-                  "outcome",
                   "evidence_reference"
                 ],
                 "properties": {
-                  "outcome": {
-                    "type": "string",
-                    "enum": [
-                      "not_applied"
-                    ]
-                  },
                   "evidence_reference": {
                     "type": "string",
                     "minLength": 8,
