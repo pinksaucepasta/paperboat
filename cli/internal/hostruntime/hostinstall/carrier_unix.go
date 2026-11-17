@@ -4,6 +4,7 @@ package hostinstall
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
@@ -251,8 +252,9 @@ func activateCarrierGeneration(c CarrierConfig) error {
 		return ErrInvalidRequest
 	}
 	// The bytes are the candidate's own, not re-encoded, but they must still be the generation the helper vetted.
-	written, err := decodeCarrier(body)
-	if err != nil {
+	// Unknown fields are ignored: a later build's descriptor may carry fields this helper does not know.
+	var written CarrierConfig
+	if err := json.Unmarshal(body, &written); err != nil {
 		return err
 	}
 	if err := written.Validate(); err != nil {

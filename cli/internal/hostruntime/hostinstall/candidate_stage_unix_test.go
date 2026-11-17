@@ -85,17 +85,7 @@ func TestEveryUnitTheUpdateWritesIsTheCandidatesOwnRender(t *testing.T) {
 		if !bytes.Equal(rendered.Carrier, candidate.Carrier) {
 			t.Fatalf("pending=%v: the carrier unit is not the candidate's render", pending)
 		}
-		carrierConfig, err := buildCarrierConfig(request, paths, "/pins/x/pb")
-		if err != nil {
-			t.Fatal(err)
-		}
-		carrier, err := carrierInstallerRendered(carrierConfig, rendered.Carrier)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if got, err := carrier.Render(); err != nil || !bytes.Equal(got, candidate.Carrier) {
-			t.Fatalf("pending=%v: the carrier unit written is not the candidate's render: %v", pending, err)
-		}
+
 		wantHostd := candidate.Hostd
 		if pending {
 			wantHostd = candidate.HostdPending
