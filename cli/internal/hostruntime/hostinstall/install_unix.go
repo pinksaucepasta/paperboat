@@ -42,7 +42,7 @@ func installWithIntent(ctx context.Context, request Request, nativeLockHeld bool
 	// hostd owns the runtime control plane; the root host service applies only the power policy.
 	// The installing process is often another build (a signed update's helper is the previous
 	// build; pb update --from runs the invoking CLI), so the candidate renders every unit it runs.
-	legacyHost, hostd, updater, guardUnits, err := candidateInstallers(ctx, request, paths, intent != unixEnrollmentInstall)
+	legacyHost, hostd, updater, candidateUnits, err := candidateInstallers(ctx, request, paths, intent != unixEnrollmentInstall)
 	if err != nil {
 		return err
 	}
@@ -125,7 +125,7 @@ func installWithIntent(ctx context.Context, request Request, nativeLockHeld bool
 		}
 		// Every installation and update, signed updates included, brings the guard to this build's
 		// version; the undo puts the prior guard back if the update does not commit.
-		undo, err := installMachineGuardReversible(ctx, request, guardUnits)
+		undo, err := installMachineGuardReversible(ctx, request, candidateUnits.Guard)
 		if err != nil {
 			return err
 		}
@@ -221,11 +221,11 @@ func installWithIntent(ctx context.Context, request Request, nativeLockHeld bool
 			return errors.Join(err, updated.RollbackUnixNativeInstall(paths.updateState), removeJournal(paths.journal))
 		}
 		if coldCarrier {
-			if err := prepareColdUnixCarrier(ctx, request, paths); err != nil {
+			if err := prepareColdUnixCarrier(ctx, request, paths, candidateUnits.Carrier); err != nil {
 				return err
 			}
 		} else if replaceCarrier {
-			if err := replaceUnservingUnixCarrier(ctx, request, paths); err != nil {
+			if err := replaceUnservingUnixCarrier(ctx, request, paths, candidateUnits.Carrier); err != nil {
 				return hostInstallFailure("the installed carrier was not serving and its replacement did not become ready; restoring the previous version", err)
 			}
 		}

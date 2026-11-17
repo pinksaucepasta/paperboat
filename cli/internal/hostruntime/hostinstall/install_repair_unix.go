@@ -206,7 +206,7 @@ func Repair(ctx context.Context, request Request) (resultErr error) {
 			return err
 		}
 		if coldCarrier {
-			if err := prepareColdUnixCarrier(ctx, request, paths); err != nil {
+			if err := prepareColdUnixCarrier(ctx, request, paths, nil); err != nil {
 				return err
 			}
 		}

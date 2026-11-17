@@ -1067,7 +1067,7 @@ func activateWindowsCarrier(ctx context.Context, request Request, layout service
 				return err
 			}
 		}
-		return prepareCarrierLocked(ctx, request)
+		return prepareCarrierLocked(ctx, request, nil)
 	}
 	if err != nil {
 		return err

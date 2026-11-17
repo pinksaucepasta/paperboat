@@ -85,63 +85,6 @@ func PrepareSessionOwner(ctx context.Context, request Request) error {
 	return startPreparedSessionOwner(ctx, c, d)
 }
 
-// PrepareUpdatedSessionOwner prepares the verified promoted runtime without
-// committing installation metadata or restarting the routing daemon.
-func PrepareUpdatedSessionOwner(ctx context.Context, uid int, source installsource.Source) error {
-	if ctx == nil {
-		return ErrInvalidRequest
-	}
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	request, err := LoadEnrolledOwner(uid)
-	if err != nil {
-		return err
-	}
-	paths := platformPaths(uid)
-	request, err = updatedRequestSource(request, paths.worker, source)
-	if err != nil {
-		return err
-	}
-	hostdPending, updaterPending, err := pendingInstallers(request, paths)
-	if err != nil {
-		return err
-	}
-	var legacyHost *service.Installer
-	legacyHost, err = hostInstallerWithMissing(request, paths, true)
-	if err != nil {
-		return err
-	}
-	lifecycle, err := newLifecycleManager(request, paths, legacyHost, hostdPending, updaterPending)
-	if err != nil {
-		return err
-	}
-	if err = lifecycle.RequireRecovered(ctx); err != nil {
-		return hostInstallFailure("native installation recovery is required before updating", err)
-	}
-	cold, err := preflightUnixCarrier(ctx, request, paths)
-	if err != nil {
-		return err
-	}
-	if cold {
-		return hostInstallFailure("signed update requires an existing independent carrier; cold migration must use native installation", ErrInvalidRequest)
-	}
-	if err := PrepareSessionOwner(ctx, request); err != nil {
-		return err
-	}
-	hostd, _, err := installers(request, paths)
-	if err != nil {
-		return err
-	}
-	if err := hostd.PublishDefinition(ctx); err != nil {
-		return err
-	}
-	if runtime.GOOS == "linux" {
-		return (service.ExecRunner{}).Run(ctx, "systemctl", "daemon-reload")
-	}
-	return nil
-}
-
 func InstalledSessionOwnerCoordinator(ctx context.Context, uid int) (sessionowner.Coordinator, error) {
 	request, err := LoadEnrolledOwner(uid)
 	if err != nil {
@@ -301,7 +244,7 @@ func carrierReadiness(ctx context.Context, err error) error {
 // binary could never be updated (dadape 2026-10-22: an old pin that refused its trust file). It runs
 // inside the lifecycle transaction after the drain; if the candidate carrier does not become ready the
 // transaction fails and Restore puts the captured carrier back.
-func replaceUnservingUnixCarrier(ctx context.Context, request Request, paths installPaths) error {
+func replaceUnservingUnixCarrier(ctx context.Context, request Request, paths installPaths, carrierUnit []byte) error {
 	retained, err := readCarrierConfigFile(ctx, paths.instance)
 	if err != nil {
 		return err
@@ -312,10 +255,11 @@ func replaceUnservingUnixCarrier(ctx context.Context, request Request, paths ins
 	if err := os.Remove(carrierConfigPath(paths.instance)); err != nil && !installNotExistOnly(err) {
 		return err
 	}
-	return prepareCarrierLocked(ctx, request)
+	return prepareCarrierLocked(ctx, request, carrierUnit)
 }
 
-func prepareColdUnixCarrier(ctx context.Context, request Request, paths installPaths) error {
+// carrierUnit is the new carrier's unit as the build being installed rendered it (nil: this build's).
+func prepareColdUnixCarrier(ctx context.Context, request Request, paths installPaths, carrierUnit []byte) error {
 	retained, err := readCarrierConfigFile(ctx, paths.instance)
 	if err == nil {
 		return EnsureExistingCarrier(ctx, retained)
@@ -323,5 +267,5 @@ func prepareColdUnixCarrier(ctx context.Context, request Request, paths installP
 	if !installNotExistOnly(err) {
 		return err
 	}
-	return prepareCarrierLocked(ctx, request)
+	return prepareCarrierLocked(ctx, request, carrierUnit)
 }

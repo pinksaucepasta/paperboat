@@ -61,12 +61,13 @@ func (n *ProcessNotifier) WatchdogInterval() time.Duration {
 
 func (n *ProcessNotifier) Starting() error { return n.status("starting") }
 func (n *ProcessNotifier) Ready() error {
-	if n != nil {
+	err := n.notify(daemon.SdNotifyReady + "\nSTATUS=ready")
+	if n != nil && err == nil {
 		n.mu.Lock()
 		n.readyAt = n.now()
 		n.mu.Unlock()
 	}
-	return n.notify(daemon.SdNotifyReady + "\nSTATUS=ready")
+	return err
 }
 func (n *ProcessNotifier) Degraded(reason string) error {
 	if !safeNotificationStatus(reason) {

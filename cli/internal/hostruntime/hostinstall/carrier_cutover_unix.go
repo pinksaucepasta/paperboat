@@ -51,6 +51,9 @@ func stageUnixUpgrade(ctx context.Context, request Request, paths installPaths, 
 	if candidate.Source != request.Source {
 		return nil, ErrInvalidRequest
 	}
+	if err := candidate.Source.Verify(candidate.Executable); err != nil {
+		return nil, err
+	}
 	capability, err := ReadCarrierCapability(ctx, retained)
 	if err != nil {
 		return nil, err

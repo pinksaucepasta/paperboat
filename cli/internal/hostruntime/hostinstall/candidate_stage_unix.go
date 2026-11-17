@@ -20,6 +20,19 @@ import (
 // candidateOutputLimit bounds what a candidate build reports back to the helper.
 const candidateOutputLimit = 16 << 10
 
+// cappedBuffer collects at most renderOutputLimit bytes: a runaway candidate fails its write instead of
+// exhausting the root helper's memory.
+type cappedBuffer struct{ bytes.Buffer }
+
+var errCandidateReportTooLarge = errors.New("the new version's report is too large")
+
+func (b *cappedBuffer) Write(p []byte) (int, error) {
+	if b.Len()+len(p) > renderOutputLimit {
+		return 0, errCandidateReportTooLarge
+	}
+	return b.Buffer.Write(p)
+}
+
 // runCandidate runs an operation of the candidate build's executable as root with
 // the request on stdin and returns its stdout. Tests replace it.
 var runCandidate = func(ctx context.Context, executable string, args []string, request Request) ([]byte, error) {
@@ -32,7 +45,7 @@ var runCandidate = func(ctx context.Context, executable string, args []string, r
 	// save its diagnostics (pbvm1: "Local diagnostics could not be saved" on every update).
 	command.Env = append(os.Environ(), "PAPERBOAT_INVOKING_UID="+strconv.Itoa(request.UID))
 	command.Stdin = bytes.NewReader(body)
-	var stdout bytes.Buffer
+	var stdout cappedBuffer
 	command.Stdout, command.Stderr = &stdout, os.Stderr
 	// Run first: stdout.Bytes() in the same return statement is read before Run executes.
 	err = command.Run()
@@ -91,6 +104,7 @@ type CandidateRender struct {
 	Hostd        []byte            `json:"hostd,omitempty"`
 	Updater      []byte            `json:"updater,omitempty"`
 	Host         []byte            `json:"host,omitempty"`
+	Carrier      []byte            `json:"carrier,omitempty"`
 	Guard        map[string]string `json:"guard"`
 }
 
@@ -130,6 +144,19 @@ func RenderCandidate(request Request) (CandidateRender, error) {
 	if render.Host, err = host.Render(); err != nil {
 		return CandidateRender{}, err
 	}
+	// The unit of a carrier generation the installing process prepares itself (no carrier yet, or one that never served).
+	pin := filepath.Join(filepath.Dir(paths.workerRollback), "pins", request.Source.SHA256, "pb")
+	carrier, err := buildCarrierConfig(request, paths, pin)
+	if err != nil {
+		return CandidateRender{}, err
+	}
+	installer, err := carrierInstaller(carrier)
+	if err != nil {
+		return CandidateRender{}, err
+	}
+	if render.Carrier, err = installer.Render(); err != nil {
+		return CandidateRender{}, err
+	}
 	return render, nil
 }
 
@@ -142,7 +169,7 @@ func renderCandidateWith(ctx context.Context, executable string, request Request
 	if err := json.NewDecoder(io.LimitReader(bytes.NewReader(out), renderOutputLimit)).Decode(&render); err != nil {
 		return CandidateRender{}, errors.Join(ErrInvalidRequest, err)
 	}
-	if len(render.Guard) == 0 || !request.EnrollmentPending && (len(render.Hostd) == 0 || len(render.HostdPending) == 0 || len(render.Updater) == 0 || len(render.Host) == 0) {
+	if len(render.Guard) == 0 || !request.EnrollmentPending && (len(render.Hostd) == 0 || len(render.HostdPending) == 0 || len(render.Updater) == 0 || len(render.Host) == 0 || len(render.Carrier) == 0) {
 		return CandidateRender{}, ErrInvalidRequest
 	}
 	return render, nil
@@ -151,24 +178,24 @@ func renderCandidateWith(ctx context.Context, executable string, request Request
 // candidateInstallers renders the candidate's units with its own executable and
 // builds the installers that write them (privileged host, hostd, updater), plus the
 // candidate's guard units.
-func candidateInstallers(ctx context.Context, request Request, paths installPaths, maintenancePending bool) (host, hostd, updater *service.Installer, guard map[string]string, err error) {
+func candidateInstallers(ctx context.Context, request Request, paths installPaths, maintenancePending bool) (host, hostd, updater *service.Installer, rendered CandidateRender, err error) {
 	pin, err := candidatePin(request)
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, CandidateRender{}, err
 	}
 	return candidateInstallersWith(ctx, pin, request, paths, maintenancePending)
 }
 
-func candidateInstallersWith(ctx context.Context, pin string, request Request, paths installPaths, maintenancePending bool) (host, hostd, updater *service.Installer, guard map[string]string, err error) {
-	rendered, err := renderCandidateWith(ctx, pin, request)
+func candidateInstallersWith(ctx context.Context, pin string, request Request, paths installPaths, maintenancePending bool) (host, hostd, updater *service.Installer, rendered CandidateRender, err error) {
+	rendered, err = renderCandidateWith(ctx, pin, request)
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, CandidateRender{}, err
 	}
 	if host, err = renderedHostInstaller(request, paths, true, rendered.Host); err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, CandidateRender{}, err
 	}
 	if hostd, updater, err = installersWithMaintenance(request, paths, true, maintenancePending, &rendered); err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, CandidateRender{}, err
 	}
-	return host, hostd, updater, rendered.Guard, nil
+	return host, hostd, updater, rendered, nil
 }

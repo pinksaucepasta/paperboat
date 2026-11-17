@@ -124,13 +124,8 @@ func installGuard(ctx context.Context, executable, browserDomain string, units m
 	if units == nil {
 		units = Units()
 	}
-	if len(units) != len(Units()) {
-		return errGuardUnits
-	}
-	for name := range Units() {
-		if units[name] == "" {
-			return errGuardUnits
-		}
+	if err := checkGuardUnits(units, "paperboat-machineguard-deny.service", "paperboat-machineguard.service"); err != nil {
+		return err
 	}
 	for name, unit := range units {
 		path := filepath.Join("/etc/systemd/system", name)

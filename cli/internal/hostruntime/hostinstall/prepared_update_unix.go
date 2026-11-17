@@ -311,7 +311,7 @@ func finalizePreparedUpdateLocked(ctx context.Context, uid int) error {
 		return err
 	}
 	var host *service.Installer
-	host, err = hostInstallerWithMissing(request, paths, true)
+	host, err = renderedHostInstaller(request, paths, true, rendered.Host)
 	if err != nil {
 		return err
 	}
