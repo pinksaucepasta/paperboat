@@ -249,7 +249,7 @@ func options(component, release, dsn string, transport sentry.Transport) sentry.
 	return sentry.ClientOptions{
 		Dsn: dsn, Release: release, Transport: transport, DisableTelemetryBuffer: true,
 		AttachStacktrace: false, EnableTracing: false, TracesSampleRate: 0,
-		SendDefaultPII: false, MaxBreadcrumbs: 0, DataCollection: &sentry.DataCollection{UserInfo: sentry.Set(false), Cookies: &sentry.KeyValueCollectionBehavior{Mode: sentry.CollectionOff}, HTTPHeaders: &sentry.HeaderCollectionConfig{Request: &sentry.KeyValueCollectionBehavior{Mode: sentry.CollectionOff}, Response: &sentry.KeyValueCollectionBehavior{Mode: sentry.CollectionOff}}, HTTPBodies: []sentry.BodyType{}, QueryParams: &sentry.KeyValueCollectionBehavior{Mode: sentry.CollectionOff}},
+		MaxBreadcrumbs: 0, DataCollection: &sentry.DataCollection{UserInfo: sentry.Set(false), Cookies: &sentry.KeyValueCollectionBehavior{Mode: sentry.CollectionOff}, HTTPHeaders: &sentry.HeaderCollectionConfig{Request: &sentry.KeyValueCollectionBehavior{Mode: sentry.CollectionOff}, Response: &sentry.KeyValueCollectionBehavior{Mode: sentry.CollectionOff}}, HTTPBodies: []sentry.BodyType{}, QueryParams: &sentry.KeyValueCollectionBehavior{Mode: sentry.CollectionOff}},
 		Integrations: func([]sentry.Integration) []sentry.Integration { return nil },
 		BeforeSend: func(event *sentry.Event, _ *sentry.EventHint) *sentry.Event {
 			return sanitize(event, component, release)
@@ -478,13 +478,6 @@ func attributeString(values map[string]attribute.Value, key string) string {
 	}
 	text, _ := value.AsInterface().(string)
 	return text
-}
-func validHex(value string, size int) bool {
-	if len(value) != size {
-		return false
-	}
-	_, err := hex.DecodeString(value)
-	return err == nil && strings.Trim(value, "0") != "" && value == strings.ToLower(value)
 }
 
 type metricSpec struct {

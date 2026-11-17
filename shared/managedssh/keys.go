@@ -48,7 +48,7 @@ func LoopbackSources() []netip.Addr {
 	return out
 }
 
-// ValidCAPrincipal: a machine principal as the server makes it ("pb:<machine>"), safe inside principals="".
+// ValidCAPrincipal reports a machine principal as the server makes it ("pb:<machine>"), safe inside principals="".
 func ValidCAPrincipal(value string) bool {
 	return strings.HasPrefix(value, "pb:") && len(value) <= 200 && !strings.ContainsAny(value, "\",\r\n\t\x00 *?!")
 }

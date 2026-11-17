@@ -14,7 +14,7 @@ func TestOffsetAppliesFromAMinute(t *testing.T) {
 	if got := Offset(); got < 9*time.Minute+58*time.Second || got > 10*time.Minute+2*time.Second {
 		t.Fatalf("offset=%v", got)
 	}
-	if skew := Now().Sub(time.Now()); skew < 9*time.Minute {
+	if skew := time.Until(Now()); skew < 9*time.Minute {
 		t.Fatalf("Now does not follow the server: %v", skew)
 	}
 	Observe(sent.Add(20*time.Second).UTC().Format(http.TimeFormat), sent, sent.Add(time.Second))

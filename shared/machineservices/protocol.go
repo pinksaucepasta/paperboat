@@ -146,7 +146,7 @@ type PortNameSet struct {
 	MachineID string `json:"machine_id,omitempty"`
 }
 
-// ValidPortName: one lowercase DNS label that is not a number (numeric labels always mean the port).
+// ValidPortName reports one lowercase DNS label that is not a number (numeric labels always mean the port).
 func ValidPortName(name string) bool {
 	if len(name) < 1 || len(name) > 63 || name[0] == '-' || name[len(name)-1] == '-' {
 		return false

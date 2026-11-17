@@ -84,7 +84,7 @@ type ArchivedRequest struct {
 	Segments int `json:"segments"`
 }
 
-// Paths of the machine-credential endpoints.
+// UploadURLsPath and the other path helpers name the machine-credential endpoints.
 func UploadURLsPath(recordingID string) string {
 	return "/v1/machine/recordings/" + recordingID + "/upload-urls"
 }

@@ -61,7 +61,8 @@ func (c *Client) RefreshToken(ctx context.Context, token, attemptID string) (Tok
 	return out, err
 }
 
-// machineID names the paired machine the caller runs on ("" for an SDK endpoint), so the session can act from it.
+// StartAPITokenSession starts a session from an API token; machineID names the paired machine the caller runs on
+// ("" for an SDK endpoint), so the session can act from it.
 func (c *Client) StartAPITokenSession(ctx context.Context, token, label, deviceType, osName, machineID string) (TokenSet, error) {
 	var out TokenSet
 	body := map[string]string{"client_label": label, "device_type": deviceType, "os": osName}

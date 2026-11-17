@@ -85,7 +85,7 @@ func (r Recipe) Canonical() []byte {
 	return b
 }
 
-// ExpiresIn, OfflineAfter and Lifetime return the parsed durations (0 = not set).
+// ExpiresIn returns the parsed duration (0 = not set); OfflineAfter and Lifetime do the same for their fields.
 func (r Recipe) ExpiresIn() time.Duration    { d, _ := ParseDuration(r.Expires); return d }
 func (r Recipe) OfflineAfter() time.Duration { d, _ := ParseDuration(r.RemoveAfterOffline); return d }
 func (r Recipe) Lifetime() time.Duration     { d, _ := ParseDuration(r.MachineLifetime); return d }

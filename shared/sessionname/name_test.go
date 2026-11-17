@@ -11,7 +11,7 @@ func TestValidate(t *testing.T) {
 			t.Errorf("Validate(%q) = %v", name, err)
 		}
 	}
-	for _, name := range []string{"", "default", " lead", "trail ", "tab\there", "nul\x00", "esc\x1b[31m", "nl\nx", "bad\xffutf8", "zero​width", "sep x", strings.Repeat("é", 65)} {
+	for _, name := range []string{"", "default", " lead", "trail ", "tab\there", "nul\x00", "esc\x1b[31m", "nl\nx", "bad\xffutf8", "zero\u200bwidth", "sep x", strings.Repeat("é", 65)} {
 		if err := Validate(name); err == nil {
 			t.Errorf("Validate(%q) unexpectedly succeeded", name)
 		}

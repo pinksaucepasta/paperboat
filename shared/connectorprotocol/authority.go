@@ -853,7 +853,7 @@ func (f ClockFunc) Now() time.Time { return f() }
 
 type RealClock struct{}
 
-// RealClock is the server's clock as this process has learned it (a machine whose own clock is off).
+// Now is the server's clock as this process has learned it (a machine whose own clock is off).
 func (RealClock) Now() time.Time { return serverclock.Now().UTC() }
 
 // canonicalJSON validates duplicate keys, depth, trailing data and forbidden

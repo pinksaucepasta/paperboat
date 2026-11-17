@@ -18,7 +18,7 @@ var originTLSPinPattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 // MaximumOriginCABytes bounds the CA a route trusts for its https origin (a root plus intermediates).
 const MaximumOriginCABytes = 16 << 10
 
-// ErrOriginCAInvalid: the route CA is not a bounded PEM list of CA certificates.
+// ErrOriginCAInvalid means the route CA is not a bounded PEM list of CA certificates.
 var ErrOriginCAInvalid = errors.New("the origin CA must be PEM CA certificates (at most 8, 16 KiB)")
 
 // ValidateOriginCA accepts what cloudflared's caPool accepts (tlsconfig/origin_ca.go), bounded: one to
