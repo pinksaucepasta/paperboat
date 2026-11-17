@@ -341,6 +341,10 @@ func classifyCommandFailure(err error) (failure commandFailure) {
 		case syscall.ECONNREFUSED, syscall.ECONNRESET, syscall.ETIMEDOUT, syscall.ENETUNREACH, syscall.EHOSTUNREACH:
 			set(commandOperational, current)
 			continue
+		// The machine's disk, not a bug: GO-2S was one daemon on a read-only file system, 4,135 events in 11 hours.
+		case syscall.EROFS, syscall.ENOSPC, syscall.EDQUOT:
+			set(commandOperational, current)
+			continue
 		}
 		// net wraps a cancelled dial/read in the unexported net.canceledError, a leaf that matches by Is, not identity.
 		_, unary := current.(interface{ Unwrap() error })
@@ -373,8 +377,12 @@ func classifyCommandFailure(err error) (failure commandFailure) {
 			continue
 		}
 		// Filesystem errors also implement net.Error. Keep their recovery local.
-		if _, ok := current.(*os.PathError); ok {
-			set(commandUnexpected, current)
+		if pathErr, ok := current.(*os.PathError); ok {
+			if errors.Is(pathErr.Err, syscall.EROFS) || errors.Is(pathErr.Err, syscall.ENOSPC) || errors.Is(pathErr.Err, syscall.EDQUOT) {
+				set(commandOperational, current)
+			} else {
+				set(commandUnexpected, current)
+			}
 			continue
 		}
 		// DNS failures may have no underlying error even though DNSError

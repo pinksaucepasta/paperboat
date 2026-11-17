@@ -14,6 +14,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/shared/supportref"
 	"net"
 	"net/url"
+	"os"
 	"strings"
 	"syscall"
 	"testing"
@@ -223,5 +224,18 @@ func TestCommandNetworkWrappersPreserveCancellationAndMixedCause(t *testing.T) {
 		if strings.Contains(userFacingError(test.cause), "PRIVATE") {
 			t.Fatal("private network metadata exported")
 		}
+	}
+}
+
+// GO-2S: a daemon on a read-only file system sent 4,135 "unexpected" events; the machine's disk is not a bug.
+func TestFullOrReadOnlyDiskIsOperationalNotUnexpected(t *testing.T) {
+	for _, errno := range []syscall.Errno{syscall.EROFS, syscall.ENOSPC, syscall.EDQUOT} {
+		err := fmt.Errorf("start daemon: %w", &os.PathError{Op: "open", Path: "/state/x", Err: errno})
+		if kind := classifyCommandFailure(err).kind; kind != commandOperational {
+			t.Fatalf("%v classified %d, want operational", errno, kind)
+		}
+	}
+	if kind := classifyCommandFailure(&os.PathError{Op: "open", Err: syscall.EIO}).kind; kind != commandUnexpected {
+		t.Fatalf("EIO classified %d, want unexpected", kind)
 	}
 }
