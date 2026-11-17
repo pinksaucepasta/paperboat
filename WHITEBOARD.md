@@ -315,3 +315,11 @@ the useful set for tunnels and custom domains.
   console check of the narrow-terminal hint (headless runs are fixed at 120 columns).
 - **Edge error pages:** four 401 answers (bad/expired token, duplicate cookies, malformed machine token, anonymous
   non-navigation) — keep only if they never differ between an existing private name and a missing one.
+
+## Admin panel: actions with no backend yet — after launch (2026-11-18)
+
+Support, Sentry and abuse dispositions; backup and maintenance writes; selfhost verify-ingress and pools as an operator;
+usage-key and mint-key lists (the panel asks for ids today); release-authority approve/reject and staged rollout; SSH CA
+list and revoke; a server API to pre-mint or cancel a `pbh` enrolment code (today `pbh selfhost code` mints it on the
+node, 15 min). Launch-day operator needs (operator management and MFA reset, session revoke, plan grants, server-node
+resume) are being built before launch.
