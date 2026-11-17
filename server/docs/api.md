@@ -272,8 +272,7 @@ method, path, body hash, operation ID, machine/environment binding, and a maximu
 lifetime.
 
 The strict JSON request contains `operation_id`, `environment_id`, `machine_id`, `connector_id`, `edge_pool`,
-and `protocol_version: "1.0"`. A successful response follows the canonical
-`testdata/contracts/schemas/edge/admission.schema.json` shape and includes one assigned endpoint,
+and `protocol_version: "1.0"`. A successful response includes one assigned endpoint,
 at least one revisioned route handoff, and a short-lived connector credential. Alternate
 node ports, credential expiry internals, provider values, and reusable edge-control secrets
 are never returned.

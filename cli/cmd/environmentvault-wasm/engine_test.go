@@ -723,10 +723,10 @@ func TestBrowserRecoveryInteroperatesWithNativeVault(t *testing.T) {
 	}
 }
 
-// console/lib/envvault/testdata/cli-vault.json is a vault sealed by the CLI's own code with a recovery
+// shared/testdata/contracts/environment-e2ee-v1/cli-vault.json is a vault sealed by the CLI's own code with a recovery
 // code; the console's tests recover it in the browser. It must stay a vault the native code opens.
 func TestConsoleFixtureIsANativeVaultWithRecovery(t *testing.T) {
-	file, err := os.ReadFile("../../../console/lib/envvault/testdata/cli-vault.json")
+	file, err := os.ReadFile("../../../shared/testdata/contracts/environment-e2ee-v1/cli-vault.json")
 	if err != nil {
 		t.Fatal(err)
 	}

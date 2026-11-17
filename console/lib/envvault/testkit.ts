@@ -4,9 +4,11 @@ import { join } from "node:path"
 import type { Vault } from "@/lib/envvault/vault"
 
 // The browser's Worker stood in by the real vault WASM in this process, and a vault the CLI's code sealed
-// (testdata/cli-vault.json), for tests of the console's own vault code.
+// (shared/testdata/contracts/environment-e2ee-v1/cli-vault.json), for tests of the console's own vault code.
 
-export const fixture = JSON.parse(readFileSync(join(import.meta.dir, "testdata", "cli-vault.json"), "utf8")) as {
+const fixturePath = join(import.meta.dir, "../../../shared/testdata/contracts/environment-e2ee-v1/cli-vault.json")
+
+export const fixture = JSON.parse(readFileSync(fixturePath, "utf8")) as {
   password: string
   recovery_code: string
   vault: Vault

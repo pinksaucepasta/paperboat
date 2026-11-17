@@ -14,8 +14,8 @@ import { fixture, loadVaultWasm, WasmWorker } from "@/lib/envvault/testkit"
 import { unlockVault, type Vault } from "@/lib/envvault/vault"
 
 // The console's own vault code (crypto.ts worker client, vault.ts, protection.ts) on the real vault WASM, against a
-// vault the CLI's code sealed (testdata/cli-vault.json, checked natively by TestConsoleFixtureIsANativeVaultWithRecovery
-// in cli/cmd/environmentvault-wasm). Only the browser's Worker and fetch are stood in for.
+// vault the CLI's code sealed (shared/testdata/contracts/environment-e2ee-v1/cli-vault.json, checked natively by
+// TestConsoleFixtureIsANativeVaultWithRecovery in cli/cmd/environmentvault-wasm). Only the browser's Worker and fetch are stood in for.
 
 beforeAll(loadVaultWasm)
 
