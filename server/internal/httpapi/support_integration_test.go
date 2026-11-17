@@ -114,6 +114,9 @@ func TestSupportConnectedReferenceAndRoleRevocation(t *testing.T) {
 			if !strings.Contains(response.Body.String(), "support_integration_test.go") {
 				t.Fatal("initiating code location missing", response.Body.String())
 			}
+			if !strings.Contains(response.Body.String(), `"group_occurrences":1`) || !strings.Contains(response.Body.String(), `"group_first_seen"`) || !strings.Contains(response.Body.String(), `"group_last_seen"`) {
+				t.Fatal("failure group statistics missing", response.Body.String())
+			}
 			break
 		}
 		if time.Now().After(deadline) {

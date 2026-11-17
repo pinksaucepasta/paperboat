@@ -29,15 +29,31 @@ const sessionLifetime = 8 * time.Hour
 type Service struct {
 	Store          *db.DB
 	BootstrapEmail string
+	// SecretKey encrypts operators' TOTP secrets (the server's encryption key).
+	SecretKey string
+	// Now is the clock TOTP codes are checked against; nil means time.Now (tests move it).
+	Now func() time.Time
 }
+
+func (s *Service) clock() time.Time {
+	if s.Now != nil {
+		return s.Now()
+	}
+	return time.Now()
+}
+
 type Account struct {
 	ID, Email, Role string
 	AuthenticatedAt time.Time
 }
+
+// Session is a signed-in operator. After the password step it is pending: MFA says what it still needs
+// (MFAEnroll or MFAVerify) and it expires in fifteen minutes; the API refuses it everywhere but the MFA routes.
 type Session struct {
 	Token, CSRF string
 	ExpiresAt   time.Time
 	Account     Account
+	MFA         MFAState
 }
 
 type operatorAuthCleanupFailure struct {
@@ -152,7 +168,7 @@ func (s *Service) Setup(ctx context.Context, email, password string) (Session, e
 		return Session{}, err
 	}
 	now := time.Now().UTC()
-	expires := now.Add(sessionLifetime)
+	expires := now.Add(pendingLifetime)
 	// The transaction is replayed after a serialization failure; everything it writes was generated above.
 	if err = db.RetrySerializable(ctx, func() error {
 		return s.setupAttempt(ctx, account, encoded, hash(token), hash(csrf), expires)
@@ -160,7 +176,7 @@ func (s *Service) Setup(ctx context.Context, email, password string) (Session, e
 		return Session{}, err
 	}
 	account.AuthenticatedAt = now
-	return Session{Token: token, CSRF: csrf, ExpiresAt: expires, Account: account}, nil
+	return Session{Token: token, CSRF: csrf, ExpiresAt: expires, Account: account, MFA: MFAEnroll}, nil
 }
 
 func (s *Service) setupAttempt(ctx context.Context, account Account, encoded string, tokenHash, csrfHash []byte, expires time.Time) (resultErr error) {
@@ -185,7 +201,7 @@ func (s *Service) setupAttempt(ctx context.Context, account Account, encoded str
 	if _, err = tx.ExecContext(ctx, `INSERT INTO paperboat.operator_bootstrap(singleton,consumed_at,operator_id) VALUES(true,now(),$1)`, account.ID); err != nil {
 		return err
 	}
-	if _, err = tx.ExecContext(ctx, `INSERT INTO paperboat.operator_sessions(token_hash,operator_id,csrf_hash,expires_at) VALUES($1,$2,$3,$4)`, tokenHash, account.ID, csrfHash, expires); err != nil {
+	if _, err = tx.ExecContext(ctx, `INSERT INTO paperboat.operator_sessions(token_hash,operator_id,csrf_hash,expires_at,mfa_pending) VALUES($1,$2,$3,$4,true)`, tokenHash, account.ID, csrfHash, expires); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -253,36 +269,62 @@ func (s *Service) Login(ctx context.Context, email, password string) (session Se
 	if err != nil {
 		return Session{}, err
 	}
-	expires := now.Add(sessionLifetime)
+	expires := now.Add(pendingLifetime)
 	if _, err = tx.ExecContext(ctx, `UPDATE paperboat.operator_accounts SET failed_attempts=0,locked_until=NULL WHERE id=$1`, account.ID); err != nil {
 		return Session{}, err
 	}
-	if _, err = tx.ExecContext(ctx, `INSERT INTO paperboat.operator_sessions(token_hash,operator_id,csrf_hash,expires_at) VALUES($1,$2,$3,$4)`, hash(token), account.ID, hash(csrf), expires); err != nil {
+	if _, err = tx.ExecContext(ctx, `INSERT INTO paperboat.operator_sessions(token_hash,operator_id,csrf_hash,expires_at,mfa_pending) VALUES($1,$2,$3,$4,true)`, hash(token), account.ID, hash(csrf), expires); err != nil {
 		return Session{}, err
+	}
+	mfa := MFAEnroll
+	var enrolled bool
+	if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM paperboat.operator_totp WHERE operator_id=$1 AND confirmed_at IS NOT NULL)`, account.ID).Scan(&enrolled); err != nil {
+		return Session{}, err
+	}
+	if enrolled {
+		mfa = MFAVerify
 	}
 	if err = tx.Commit(); err != nil {
 		return Session{}, err
 	}
 	account.AuthenticatedAt = now
-	return Session{Token: token, CSRF: csrf, ExpiresAt: expires, Account: account}, nil
+	return Session{Token: token, CSRF: csrf, ExpiresAt: expires, Account: account, MFA: mfa}, nil
 }
+
+// Authenticate accepts only a complete session: password and second factor both proven.
 func (s *Service) Authenticate(ctx context.Context, token, csrf string, checkCSRF bool) (Account, error) {
-	if token == "" {
+	account, state, err := s.AuthenticatePending(ctx, token, csrf, checkCSRF)
+	if err == nil && state != MFAVerified {
 		return Account{}, ErrInvalid
+	}
+	return account, err
+}
+
+// AuthenticatePending accepts a session at any stage and says which: the MFA routes and "who am I" use it.
+func (s *Service) AuthenticatePending(ctx context.Context, token, csrf string, checkCSRF bool) (Account, MFAState, error) {
+	if token == "" {
+		return Account{}, "", ErrInvalid
 	}
 	var account Account
 	var csrfHash []byte
-	err := s.Store.SQL().QueryRowContext(ctx, `SELECT a.id,a.email,a.role,s.created_at,s.csrf_hash FROM paperboat.operator_sessions s JOIN paperboat.operator_accounts a ON a.id=s.operator_id WHERE s.token_hash=$1 AND s.revoked_at IS NULL AND s.expires_at>now() AND a.status='active'`, hash(token)).Scan(&account.ID, &account.Email, &account.Role, &account.AuthenticatedAt, &csrfHash)
+	var pending, enrolled bool
+	err := s.Store.SQL().QueryRowContext(ctx, `SELECT a.id,a.email,a.role,s.created_at,s.csrf_hash,s.mfa_pending,EXISTS(SELECT 1 FROM paperboat.operator_totp t WHERE t.operator_id=a.id AND t.confirmed_at IS NOT NULL) FROM paperboat.operator_sessions s JOIN paperboat.operator_accounts a ON a.id=s.operator_id WHERE s.token_hash=$1 AND s.revoked_at IS NULL AND s.expires_at>now() AND a.status='active'`, hash(token)).Scan(&account.ID, &account.Email, &account.Role, &account.AuthenticatedAt, &csrfHash, &pending, &enrolled)
 	if operatorAuthNoRowsOnly(err) {
-		return Account{}, ErrInvalid
+		return Account{}, "", ErrInvalid
 	}
 	if err != nil {
-		return Account{}, err
+		return Account{}, "", err
 	}
 	if checkCSRF && (csrf == "" || subtle.ConstantTimeCompare(hash(csrf), csrfHash) != 1) {
-		return Account{}, ErrInvalid
+		return Account{}, "", ErrInvalid
 	}
-	return account, nil
+	switch {
+	case !pending:
+		return account, MFAVerified, nil
+	case enrolled:
+		return account, MFAVerify, nil
+	}
+	return account, MFAEnroll, nil
 }
 func (s *Service) Logout(ctx context.Context, token string) error {
 	if token == "" {

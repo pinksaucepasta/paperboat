@@ -1948,6 +1948,13 @@ type OperatorInfrastructureOperation struct {
 	CreatedAt      time.Time
 }
 
+type OperatorRecoveryCode struct {
+	OperatorID string
+	CodeHash   []byte
+	UsedAt     sql.NullTime
+	CreatedAt  time.Time
+}
+
 type OperatorRegion struct {
 	ID          string
 	DisplayName string
@@ -1964,6 +1971,15 @@ type OperatorSession struct {
 	CreatedAt  time.Time
 	ExpiresAt  time.Time
 	RevokedAt  sql.NullTime
+	MfaPending bool
+}
+
+type OperatorTotp struct {
+	OperatorID   string
+	SecretCipher []byte
+	ConfirmedAt  sql.NullTime
+	LastUsedStep int64
+	CreatedAt    time.Time
 }
 
 type PeerEndpointCertificate struct {

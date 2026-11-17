@@ -51,8 +51,15 @@ type Reporting struct {
 	IssueURL           string        `json:"issue_url"`
 }
 
+// Analytics locates the PostHog project the operator panel reads (never the capture keys the sites use).
+type Analytics struct {
+	PostHogHost      string `json:"posthog_host"`
+	PostHogProjectID string `json:"posthog_project_id"`
+}
+
 type Config struct {
 	Mail                   TransactionalMail `json:"mail"`
+	Analytics              Analytics         `json:"analytics"`
 	OperatorBootstrapEmail string            `json:"operator_bootstrap_email"`
 	Backups                BackupReporting   `json:"backups"`
 	Reporting              Reporting         `json:"reporting"`
@@ -476,6 +483,7 @@ type ReleaseAuthority struct {
 type Secrets struct {
 	ResendAPIKey          string   `json:"resend_api_key"`
 	SentryAPIToken        string   `json:"sentry_api_token"`
+	PostHogPersonalKey    string   `json:"posthog_personal_api_key"`
 	BackupReportToken     string   `json:"backup_report_token"`
 	TestFixturesToken     string   `json:"test_fixtures_token"`
 	SentryDSN             string   `json:"sentry_dsn"`

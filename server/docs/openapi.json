@@ -10869,6 +10869,21 @@
           "source_line": {
             "type": "integer",
             "minimum": 0
+          },
+          "group_first_seen": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When this failure (same account and fingerprint) first happened."
+          },
+          "group_last_seen": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "group_occurrences": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1,
+            "description": "How many occurrences the failure group holds."
           }
         }
       },
@@ -10992,7 +11007,7 @@
           "primary_email": {
             "type": "string"
           },
-          "alias": {
+          "display_name": {
             "type": "string"
           },
           "status": {
@@ -11013,7 +11028,7 @@
         "required": [
           "id",
           "primary_email",
-          "alias",
+          "display_name",
           "status",
           "version",
           "created_at"
@@ -11350,10 +11365,18 @@
           },
           "next_after": {
             "type": "string"
+          },
+          "total": {
+            "type": "integer",
+            "description": "Rows matching the filters, capped at 100000 (total_capped true)."
+          },
+          "total_capped": {
+            "type": "boolean"
           }
         },
         "required": [
-          "items"
+          "items",
+          "total"
         ]
       },
       "OperatorAuditEvent": {
@@ -11381,6 +11404,12 @@
           "created_at": {
             "type": "string",
             "format": "date-time"
+          },
+          "outcome": {
+            "type": "string"
+          },
+          "request_id": {
+            "type": "string"
           }
         },
         "required": [
@@ -11422,10 +11451,18 @@
           },
           "next_after": {
             "type": "string"
+          },
+          "total": {
+            "type": "integer",
+            "description": "Rows matching the filters, capped at 100000 (total_capped true)."
+          },
+          "total_capped": {
+            "type": "boolean"
           }
         },
         "required": [
-          "accounts"
+          "accounts",
+          "total"
         ]
       },
       "OperatorTeamSummary": {
@@ -11472,10 +11509,18 @@
           },
           "next_after": {
             "type": "string"
+          },
+          "total": {
+            "type": "integer",
+            "description": "Rows matching the filters, capped at 100000 (total_capped true)."
+          },
+          "total_capped": {
+            "type": "boolean"
           }
         },
         "required": [
-          "teams"
+          "teams",
+          "total"
         ]
       },
       "OperatorBillingPage": {
@@ -11490,10 +11535,18 @@
           },
           "next_after": {
             "type": "string"
+          },
+          "total": {
+            "type": "integer",
+            "description": "Rows matching the filters, capped at 100000 (total_capped true)."
+          },
+          "total_capped": {
+            "type": "boolean"
           }
         },
         "required": [
-          "workspaces"
+          "workspaces",
+          "total"
         ]
       },
       "OperatorBillingOperationPage": {
@@ -11508,10 +11561,18 @@
           },
           "next_after": {
             "type": "string"
+          },
+          "total": {
+            "type": "integer",
+            "description": "Rows matching the filters, capped at 100000 (total_capped true)."
+          },
+          "total_capped": {
+            "type": "boolean"
           }
         },
         "required": [
-          "operations"
+          "operations",
+          "total"
         ]
       },
       "OperatorControlOperationPage": {
@@ -11526,10 +11587,18 @@
           },
           "next_after": {
             "type": "string"
+          },
+          "total": {
+            "type": "integer",
+            "description": "Rows matching the filters, capped at 100000 (total_capped true)."
+          },
+          "total_capped": {
+            "type": "boolean"
           }
         },
         "required": [
-          "operations"
+          "operations",
+          "total"
         ]
       },
       "OperatorStateCount": {
@@ -11639,7 +11708,7 @@
             "format": "int64",
             "minimum": 0
           },
-          "alias": {
+          "display_name": {
             "type": "string"
           },
           "provider_price_id": {
@@ -11669,7 +11738,7 @@
         },
         "required": [
           "version",
-          "alias",
+          "display_name",
           "provider_price_id",
           "catalog_type",
           "active",
@@ -11683,7 +11752,7 @@
           "code": {
             "type": "string"
           },
-          "alias": {
+          "display_name": {
             "type": "string"
           },
           "catalog_type": {
@@ -11734,7 +11803,7 @@
         },
         "required": [
           "code",
-          "alias",
+          "display_name",
           "catalog_type",
           "price_id",
           "product_id",
@@ -12775,7 +12844,7 @@
         "additionalProperties": false,
         "required": [
           "id",
-          "alias",
+          "display_name",
           "enabled",
           "revision",
           "updated_at"
@@ -12784,7 +12853,7 @@
           "id": {
             "type": "string"
           },
-          "alias": {
+          "display_name": {
             "type": "string"
           },
           "enabled": {
@@ -12804,7 +12873,8 @@
         "type": "object",
         "additionalProperties": false,
         "required": [
-          "items"
+          "items",
+          "total"
         ],
         "properties": {
           "items": {
@@ -12816,6 +12886,10 @@
           },
           "next_after": {
             "type": "string"
+          },
+          "total": {
+            "type": "integer",
+            "description": "Rows matching the filters."
           }
         }
       },
@@ -12837,7 +12911,8 @@
           "revision",
           "node_generation",
           "registry_expires_at",
-          "ready"
+          "ready",
+          "protocol_version"
         ],
         "properties": {
           "id": {
@@ -12900,6 +12975,9 @@
           },
           "ready": {
             "type": "boolean"
+          },
+          "protocol_version": {
+            "type": "string"
           }
         }
       },
@@ -12907,7 +12985,8 @@
         "type": "object",
         "additionalProperties": false,
         "required": [
-          "items"
+          "items",
+          "total"
         ],
         "properties": {
           "items": {
@@ -12919,6 +12998,10 @@
           },
           "next_after": {
             "type": "string"
+          },
+          "total": {
+            "type": "integer",
+            "description": "Rows matching the filters."
           }
         }
       },
@@ -18536,6 +18619,448 @@
               "connect_on_apply"
             ],
             "description": "connect_on_apply: pb config sync apply connects the repository for the owner."
+          }
+        }
+      },
+      "OperatorMachine": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "alias": {
+            "type": "string"
+          },
+          "account_id": {
+            "type": "string"
+          },
+          "team_id": {
+            "type": "string"
+          },
+          "platform": {
+            "type": "string"
+          },
+          "architecture": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "ready": {
+            "type": "boolean"
+          },
+          "stale": {
+            "type": "boolean"
+          },
+          "last_seen_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "enrolled_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "revoked_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "deleted_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "host_service_version": {
+            "type": "string"
+          },
+          "connector_state": {
+            "type": "string"
+          },
+          "update_health": {
+            "type": "string"
+          },
+          "observed_capabilities": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "installation_generation": {
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "required": [
+          "id",
+          "alias",
+          "account_id",
+          "platform",
+          "architecture",
+          "state",
+          "ready",
+          "stale",
+          "created_at",
+          "connector_state",
+          "update_health",
+          "observed_capabilities",
+          "installation_generation"
+        ]
+      },
+      "OperatorMachinePage": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "machines": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OperatorMachine"
+            }
+          },
+          "next_after": {
+            "type": "string"
+          },
+          "total": {
+            "type": "integer",
+            "description": "Rows matching the filters, capped at 100000 (total_capped true)."
+          },
+          "total_capped": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "machines",
+          "total"
+        ]
+      },
+      "OperatorAuditSearchPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "events": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OperatorAuditEvent"
+            }
+          },
+          "next_after": {
+            "type": "string"
+          },
+          "total": {
+            "type": "integer",
+            "description": "Rows matching the filters, capped at 100000 (total_capped true)."
+          },
+          "total_capped": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "events",
+          "total"
+        ]
+      },
+      "OperatorAnalyticsCount": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "count": {
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "required": [
+          "name",
+          "count"
+        ]
+      },
+      "OperatorAnalyticsStatus": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "configured": {
+            "type": "boolean"
+          },
+          "host": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "configured"
+        ]
+      },
+      "OperatorAnalyticsOverview": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "observed_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "days": {
+            "type": "integer",
+            "enum": [
+              7,
+              30,
+              90
+            ]
+          },
+          "totals": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "visitors": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "page_views": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "console_users": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "signup_clicks": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "add_machine_started": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "machines_paired": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "checkouts": {
+                "type": "integer",
+                "format": "int64"
+              }
+            },
+            "required": [
+              "visitors",
+              "page_views",
+              "console_users",
+              "signup_clicks",
+              "add_machine_started",
+              "machines_paired",
+              "checkouts"
+            ]
+          },
+          "daily": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "day": {
+                  "type": "string"
+                },
+                "page_views": {
+                  "type": "integer",
+                  "format": "int64"
+                },
+                "visitors": {
+                  "type": "integer",
+                  "format": "int64"
+                }
+              },
+              "required": [
+                "day",
+                "page_views",
+                "visitors"
+              ]
+            }
+          },
+          "top_pages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OperatorAnalyticsCount"
+            }
+          },
+          "referrers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OperatorAnalyticsCount"
+            }
+          },
+          "countries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OperatorAnalyticsCount"
+            }
+          },
+          "devices": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OperatorAnalyticsCount"
+            }
+          },
+          "funnel": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "step": {
+                  "type": "string"
+                },
+                "count": {
+                  "type": "integer",
+                  "format": "int64"
+                }
+              },
+              "required": [
+                "step",
+                "count"
+              ]
+            }
+          },
+          "errors": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Insights that failed, by name; the rest are still returned."
+          },
+          "retention": {
+            "type": "array",
+            "description": "Weekly cohorts by first machine pairing; active[n] is how many were active n weeks later (empty until the console sends console_active_day).",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "week",
+                "size",
+                "active"
+              ],
+              "properties": {
+                "week": {
+                  "type": "string"
+                },
+                "size": {
+                  "type": "integer",
+                  "format": "int64"
+                },
+                "active": {
+                  "type": "array",
+                  "items": {
+                    "type": "integer",
+                    "format": "int64"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "required": [
+          "observed_at",
+          "days",
+          "totals",
+          "daily",
+          "top_pages",
+          "referrers",
+          "countries",
+          "devices",
+          "funnel",
+          "retention"
+        ]
+      },
+      "OperatorMfaState": {
+        "type": "string",
+        "enum": [
+          "enroll",
+          "verify",
+          "verified"
+        ],
+        "description": "What the operator's session still needs: enroll an authenticator, enter a code, or nothing."
+      },
+      "OperatorMe": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "email",
+          "role",
+          "mfa"
+        ],
+        "properties": {
+          "email": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "admin",
+              "support",
+              "billing",
+              "operations"
+            ]
+          },
+          "mfa": {
+            "$ref": "#/components/schemas/OperatorMfaState"
+          }
+        }
+      },
+      "OperatorStatus": {
+        "type": "object",
+        "required": [
+          "observed_at",
+          "build",
+          "readiness",
+          "dimensions"
+        ],
+        "properties": {
+          "observed_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "build": {
+            "type": "object",
+            "required": [
+              "version",
+              "commit"
+            ],
+            "properties": {
+              "version": {
+                "type": "string"
+              },
+              "commit": {
+                "type": "string"
+              }
+            }
+          },
+          "readiness": {
+            "type": "string"
+          },
+          "dimensions": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string"
+                },
+                "code": {
+                  "type": "string"
+                },
+                "since": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "providers": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "configuration": {
+            "type": "object",
+            "additionalProperties": true
           }
         }
       }
@@ -39246,7 +39771,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SuccessResponse"
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/OperatorStatus"
+                    }
+                  }
                 }
               }
             }
@@ -39422,12 +39955,25 @@
             }
           },
           {
-            "name": "email",
+            "name": "q",
             "in": "query",
             "required": false,
             "schema": {
               "type": "string",
-              "maxLength": 320
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128,
+              "enum": [
+                "active",
+                "suspended"
+              ]
             }
           }
         ],
@@ -39523,6 +40069,28 @@
             "schema": {
               "type": "string",
               "maxLength": 128
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "suspended",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128,
+              "enum": [
+                "true",
+                "false"
+              ]
             }
           }
         ],
@@ -45254,7 +45822,42 @@
         "summary": "Set first operator password",
         "responses": {
           "200": {
-            "description": "Operator authentication step or session"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "email",
+                        "role",
+                        "csrf_token",
+                        "mfa"
+                      ],
+                      "properties": {
+                        "email": {
+                          "type": "string"
+                        },
+                        "role": {
+                          "type": "string"
+                        },
+                        "csrf_token": {
+                          "type": "string"
+                        },
+                        "mfa": {
+                          "$ref": "#/components/schemas/OperatorMfaState"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
           },
           "400": {
             "description": "Invalid request"
@@ -45295,7 +45898,42 @@
         "summary": "Sign in as operator",
         "responses": {
           "200": {
-            "description": "Operator authentication step or session"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "email",
+                        "role",
+                        "csrf_token",
+                        "mfa"
+                      ],
+                      "properties": {
+                        "email": {
+                          "type": "string"
+                        },
+                        "role": {
+                          "type": "string"
+                        },
+                        "csrf_token": {
+                          "type": "string"
+                        },
+                        "mfa": {
+                          "$ref": "#/components/schemas/OperatorMfaState"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
           },
           "400": {
             "description": "Invalid request"
@@ -45341,7 +45979,22 @@
         ],
         "responses": {
           "200": {
-            "description": "Current operator"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/OperatorMe"
+                    }
+                  }
+                }
+              }
+            }
           },
           "401": {
             "description": "Operator sign-in required"
@@ -56793,6 +57446,891 @@
             "description": "Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field."
           }
         ]
+      }
+    },
+    "/v1/admin/machines": {
+      "get": {
+        "operationId": "get_v1_admin_machines",
+        "summary": "Operator machines",
+        "responses": {
+          "400": {
+            "description": "Invalid target, body, pagination or confirmation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Browser authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Operator session or capability required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Evidence, provider or audit unavailable; outcome may require checking target state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Audited result. Cache-Control: no-store.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/OperatorMachinePage"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "account",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "team",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128,
+              "enum": [
+                "pending",
+                "online",
+                "offline",
+                "disconnected",
+                "revoked",
+                "deleted"
+              ]
+            }
+          },
+          {
+            "name": "platform",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128,
+              "enum": [
+                "linux",
+                "darwin",
+                "windows"
+              ]
+            }
+          },
+          {
+            "name": "stale",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128,
+              "enum": [
+                "true",
+                "false"
+              ]
+            }
+          },
+          {
+            "name": "deleted",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128,
+              "enum": [
+                "true"
+              ]
+            }
+          }
+        ],
+        "security": [
+          {
+            "operatorCookie": []
+          }
+        ],
+        "x-operator-capability": "machines",
+        "description": "Current active operator account and separate operator session required. See docs/runbooks/operator-admin.md. Audited before disclosure; unavailable auditing fails closed."
+      }
+    },
+    "/v1/admin/machines/{machine_id}": {
+      "get": {
+        "operationId": "get_v1_admin_machines_machine_id",
+        "summary": "Operator machine",
+        "responses": {
+          "400": {
+            "description": "Invalid target, body, pagination or confirmation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Browser authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Operator session or capability required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Evidence, provider or audit unavailable; outcome may require checking target state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Audited result. Cache-Control: no-store.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/OperatorMachine"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "machine_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "security": [
+          {
+            "operatorCookie": []
+          }
+        ],
+        "x-operator-capability": "machines",
+        "description": "Current active operator account and separate operator session required. See docs/runbooks/operator-admin.md. Audited before disclosure; unavailable auditing fails closed."
+      }
+    },
+    "/v1/admin/audit": {
+      "get": {
+        "operationId": "get_v1_admin_audit",
+        "summary": "Operator audit search",
+        "responses": {
+          "400": {
+            "description": "Invalid target, body, pagination or confirmation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Browser authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Operator session or capability required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Evidence, provider or audit unavailable; outcome may require checking target state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Audited result. Cache-Control: no-store.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/OperatorAuditSearchPage"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "actor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "event_type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "resource_type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "resource_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "outcome",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128,
+              "enum": [
+                "unchanged",
+                "changed",
+                "uncertain"
+              ]
+            }
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "until",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          }
+        ],
+        "security": [
+          {
+            "operatorCookie": []
+          }
+        ],
+        "x-operator-capability": "admin",
+        "description": "Current active operator account and separate operator session required. See docs/runbooks/operator-admin.md. Audited before disclosure; unavailable auditing fails closed."
+      }
+    },
+    "/v1/admin/analytics/status": {
+      "get": {
+        "operationId": "get_v1_admin_analytics_status",
+        "summary": "Operator analytics status",
+        "responses": {
+          "400": {
+            "description": "Invalid target, body, pagination or confirmation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Browser authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Operator session or capability required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Evidence, provider or audit unavailable; outcome may require checking target state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Audited result. Cache-Control: no-store.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/OperatorAnalyticsStatus"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "parameters": [],
+        "security": [
+          {
+            "operatorCookie": []
+          }
+        ],
+        "x-operator-capability": "admin",
+        "description": "Current active operator account and separate operator session required. See docs/runbooks/operator-admin.md. Audited before disclosure; unavailable auditing fails closed."
+      }
+    },
+    "/v1/admin/analytics/overview": {
+      "get": {
+        "operationId": "get_v1_admin_analytics_overview",
+        "summary": "Operator analytics overview (PostHog, aggregates only)",
+        "responses": {
+          "400": {
+            "description": "Invalid target, body, pagination or confirmation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Browser authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Operator session or capability required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Analytics not configured (analytics_not_configured) or provider unavailable (analytics_unavailable); evidence, provider or audit unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Audited result. Cache-Control: no-store.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/OperatorAnalyticsOverview"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "days",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "enum": [
+                7,
+                30,
+                90
+              ],
+              "default": 30
+            }
+          }
+        ],
+        "security": [
+          {
+            "operatorCookie": []
+          }
+        ],
+        "x-operator-capability": "admin",
+        "description": "Current active operator account and separate operator session required. See docs/runbooks/operator-admin.md. Audited before disclosure; unavailable auditing fails closed."
+      }
+    },
+    "/v1/operator/mfa/enroll": {
+      "post": {
+        "operationId": "operator_mfa_enroll",
+        "summary": "Start authenticator enrolment",
+        "security": [
+          {
+            "operatorCookie": [],
+            "csrfHeader": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "secret",
+                        "otpauth_uri"
+                      ],
+                      "properties": {
+                        "secret": {
+                          "type": "string"
+                        },
+                        "otpauth_uri": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Code not accepted (invalid_code)"
+          },
+          "403": {
+            "description": "Invalid session, CSRF token or origin"
+          },
+          "409": {
+            "description": "Step does not apply to this session (mfa_state)"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        }
+      }
+    },
+    "/v1/operator/mfa/enroll/confirm": {
+      "post": {
+        "operationId": "operator_mfa_enroll_confirm",
+        "summary": "Confirm the authenticator; returns recovery codes once",
+        "security": [
+          {
+            "operatorCookie": [],
+            "csrfHeader": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "mfa",
+                        "recovery_codes"
+                      ],
+                      "properties": {
+                        "mfa": {
+                          "$ref": "#/components/schemas/OperatorMfaState"
+                        },
+                        "recovery_codes": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Code not accepted (invalid_code)"
+          },
+          "403": {
+            "description": "Invalid session, CSRF token or origin"
+          },
+          "409": {
+            "description": "Step does not apply to this session (mfa_state)"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "code"
+                ],
+                "properties": {
+                  "code": {
+                    "type": "string",
+                    "maxLength": 64,
+                    "description": "A six-digit authenticator code or a recovery code."
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/operator/mfa/verify": {
+      "post": {
+        "operationId": "operator_mfa_verify",
+        "summary": "Complete a pending session with a code or recovery code",
+        "security": [
+          {
+            "operatorCookie": [],
+            "csrfHeader": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "mfa"
+                      ],
+                      "properties": {
+                        "mfa": {
+                          "$ref": "#/components/schemas/OperatorMfaState"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Code not accepted (invalid_code)"
+          },
+          "403": {
+            "description": "Invalid session, CSRF token or origin"
+          },
+          "409": {
+            "description": "Step does not apply to this session (mfa_state)"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "code"
+                ],
+                "properties": {
+                  "code": {
+                    "type": "string",
+                    "maxLength": 64,
+                    "description": "A six-digit authenticator code or a recovery code."
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/operator/mfa/recovery-codes": {
+      "post": {
+        "operationId": "operator_mfa_recovery_codes",
+        "summary": "Replace the recovery codes (needs an authenticator code)",
+        "security": [
+          {
+            "operatorCookie": [],
+            "csrfHeader": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "recovery_codes"
+                      ],
+                      "properties": {
+                        "recovery_codes": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Code not accepted (invalid_code)"
+          },
+          "403": {
+            "description": "Invalid session, CSRF token or origin"
+          },
+          "409": {
+            "description": "Step does not apply to this session (mfa_state)"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "code"
+                ],
+                "properties": {
+                  "code": {
+                    "type": "string",
+                    "maxLength": 64,
+                    "description": "A six-digit authenticator code or a recovery code."
+                  }
+                }
+              }
+            }
+          }
+        }
       }
     }
   }

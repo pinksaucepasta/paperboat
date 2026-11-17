@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"regexp"
 	"strings"
@@ -20,6 +21,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/operator"
 	"github.com/pinksaucepasta/paperboat/server/internal/operatoractions"
+	"github.com/pinksaucepasta/paperboat/server/internal/posthogquery"
 )
 
 type operatorAuditFake struct {
@@ -393,6 +395,46 @@ func TestOperatorOpenAPIRequiresSeparateOperatorSurface(t *testing.T) {
 					t.Errorf("missing %s on %s", name, route)
 				}
 			}
+		}
+	}
+}
+
+func TestOperatorFilterTargetKeepsOnlyKnownNonEmptyFirstValues(t *testing.T) {
+	query, _ := url.ParseQuery("q=a&q=b&status=&evil=1&state=online")
+	if got := operatorFilterTarget(query, []string{"q", "status", "state"}); got != "q=a&state=online" {
+		t.Fatalf("target=%q", got)
+	}
+}
+
+func TestMachinesCapabilityIsForSupportBillingAndOperationsStaff(t *testing.T) {
+	for role, want := range map[auth.Role]bool{auth.RoleAdmin: true, auth.RoleSupport: true, auth.RoleBilling: true, auth.RoleOperations: true, auth.RoleUser: false} {
+		if got := operatorAllowed(role, "machines"); got != want {
+			t.Errorf("machines for %s = %v, want %v", role, got, want)
+		}
+	}
+}
+
+func TestAnalyticsRoutesAreAdminOnlyAndSayWhenNotConfigured(t *testing.T) {
+	for _, route := range []string{"GET /v1/admin/analytics/status", "GET /v1/admin/analytics/overview"} {
+		if operatorPolicies[route].capability != "admin" {
+			t.Errorf("%s must be admin only", route)
+		}
+	}
+	for _, tc := range []struct {
+		handler http.Handler
+		path    string
+		code    int
+		body    string
+	}{
+		{analyticsStatus(nil), "/x", 200, `"configured":false`},
+		{analyticsOverview(nil), "/x", 503, `analytics_not_configured`},
+		{analyticsOverview(nil), "/x?days=nope", 400, `invalid_request`},
+		{analyticsOverview(posthogquery.New(posthogquery.Config{Host: "https://posthog.example.test", ProjectID: "1", Key: "k"})), "/x?days=5", 400, `invalid_request`},
+	} {
+		w := httptest.NewRecorder()
+		tc.handler.ServeHTTP(w, httptest.NewRequest("GET", tc.path, nil))
+		if w.Code != tc.code || !strings.Contains(w.Body.String(), tc.body) {
+			t.Errorf("%s: %d %s", tc.path, w.Code, w.Body.String())
 		}
 	}
 }

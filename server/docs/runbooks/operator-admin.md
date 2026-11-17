@@ -1,7 +1,7 @@
 # Operator backend
 
-Paperboat operators use the server's `/v1/admin` APIs. The admin frontend is
-not implemented. Operator accounts and sessions are stored separately from
+Paperboat operators use the server's `/v1/admin` APIs, or the `admin/` web
+panel (a separate Next.js app on its own origin that relays these APIs). Operator accounts and sessions are stored separately from
 customer accounts and WorkOS. Team roles and customer sessions do not grant
 operator access.
 
@@ -26,19 +26,63 @@ restarts and configuration changes. The password is stored as an Argon2id hash.
 Sign-in sets a separate HTTP-only operator cookie and returns a CSRF token.
 Send that cookie and `X-CSRF-Token` for mutating `/v1/admin` requests.
 `GET /v1/operator/me` checks the operator session; `POST /v1/operator/logout`
-revokes it. Operator sessions last eight hours. Five failed passwords lock an
-account for fifteen minutes. The current backend has no API to add additional
-operators; that belongs to the admin panel work.
+revokes it. Operator sessions last eight hours. Five failed passwords (or
+second-factor codes, together) lock an account for fifteen minutes and end its
+pending sessions. The current backend has no API to add additional operators.
+
+### Second factor (required)
+
+The password step alone gives only a pending session (15 minutes) that the API
+refuses everywhere except the MFA routes; `login` and `setup` answer
+`"mfa": "enroll"` or `"verify"`. Every operator must use an authenticator app
+(RFC 6238 TOTP: 30-second steps, 6 digits, SHA-1, one step of clock skew;
+prior art: Teleport `lib/auth/password.go` checkOTP and its used-token store).
+
+- First sign-in: `POST /v1/operator/mfa/enroll` returns the key and an
+  `otpauth://` URI; `POST /v1/operator/mfa/enroll/confirm` with `{"code":"…"}`
+  confirms it, returns ten single-use recovery codes (shown once; only SHA-256
+  hashes are stored) and completes the session.
+- Later sign-ins: `POST /v1/operator/mfa/verify` with a TOTP code or an unused
+  recovery code. A code works once (a replayed step is refused).
+- `POST /v1/operator/mfa/recovery-codes` with a fresh TOTP code (from a complete
+  session) replaces the recovery codes; the old ones stop working.
+- The TOTP secret is encrypted with `PAPERBOAT_ENCRYPTION_KEY`; without a key the
+  MFA routes answer `mfa_unavailable` and nobody can finish signing in.
+- Every enrolment, verification, failure, recovery-code use and replacement is
+  audited (`operator.mfa.*`).
+- Lost authenticator and no recovery codes: an operator cannot recover
+  themselves. With database access, delete the operator's `operator_totp` row
+  (`DELETE FROM paperboat.operator_totp WHERE operator_id = '…'`); the next
+  password sign-in enrols a new authenticator. Do this only after confirming the
+  person out of band.
 
 ## Reads and status
 
 Use `limit` (1–100, default 50) and `after` for list pagination. List cursors are
-opaque resource IDs, not evidence of authorization. Account search accepts only
-an exact `email`. Billing/control lists accept allowlisted `state` filters.
+opaque resource IDs, not evidence of authorization. Every list page also carries
+`total` (rows matching the filters, capped at 100000 with `total_capped: true`) so
+a panel can show "a–b of N". Billing/control lists accept allowlisted `state`
+filters. Accounts take `q` (email, name or id contains) and `status`; teams take
+`q` and `suspended`.
 
 - `/v1/admin/overview`: account, billing, operation and infrastructure counts.
 - `/v1/admin/accounts` and `/{account_id}`: safe identity/status/version and the
   personal billing workspace ID.
+- `/v1/admin/machines` and `/{machine_id}` (support, billing, operations): owner
+  account/team, platform, state, freshness (`ready`/`stale`), versions and
+  capabilities. Filters `q`, `state`, `platform`, `stale`, `deleted`. Removed
+  machines are hidden unless `deleted=true`. No workspace paths or file contents.
+- `/v1/admin/audit` (admin): search the whole audit log, newest first. Filters
+  `actor`, `event_type`, `resource_type`, `resource_id`, `outcome`, `since`, `until`
+  (RFC 3339); `after` is the sequence number of the last row seen.
+- `/v1/admin/analytics/status` and `/overview?days=7|30|90` (admin): product
+  analytics read from PostHog's Query API by the server (visits, page views,
+  console users, funnel, top pages, referrers, countries, devices). Aggregates
+  only, cached for ten minutes. Configure `PAPERBOAT_POSTHOG_HOST` (https origin),
+  `PAPERBOAT_POSTHOG_PROJECT_ID` and `PAPERBOAT_POSTHOG_PERSONAL_API_KEY` (or
+  `_FILE`; a personal key with `query:read` only). Unset: status says not
+  configured and overview answers `analytics_not_configured`. Retention and
+  console country/device views need events the sites do not send yet.
 - `/v1/admin/teams` and `/{team_id}`: ownership/generation, suspension and bounded
   membership pages, plus the team's billing workspace ID.
 - `/v1/admin/billing/workspaces` and `/{workspace_id}`: subscription state, paid

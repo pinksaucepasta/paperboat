@@ -65,6 +65,11 @@ type Record struct {
 	HTTPStatus     int       `json:"http_status,omitempty"`
 	Outcome        string    `json:"outcome"`
 	Severity       string    `json:"severity"`
+	// The occurrence's failure group (one per account and fingerprint): when it first and last happened and how
+	// many occurrences it holds. Set by Lookup only.
+	GroupFirstSeen   *time.Time `json:"group_first_seen,omitempty"`
+	GroupLastSeen    *time.Time `json:"group_last_seen,omitempty"`
+	GroupOccurrences int64      `json:"group_occurrences,omitempty"`
 }
 type Store interface {
 	Save(context.Context, Record) error

@@ -631,6 +631,36 @@ TLIST=($DEVICES)
         out, calls = self.run_new_check('test_update_scheduled', {}, good)
         self.assertNotIn('update-scheduled', out)
 
+    def test_operator_login_completes_the_second_factor_with_the_authenticator_key(self):
+        import update_floor
+        # RFC 6238 appendix B, SHA-1: T=59 is 287082 (six digits of 94287082).
+        self.assertEqual(update_floor.totp('GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ', now=59), '287082')
+        calls = []
+
+        def runner(command, input=None, **kwargs):
+            body = json.loads(input) if input else {}
+            calls.append((command[-1].split(' -X ')[1].split(' ')[0] + ' ' + command[-1].split(' https')[0].split(' ')[-1], body))
+            path = command[-1]
+            if '/v1/operator/login' in path:
+                out = '{"data":{"csrf_token":"c","mfa":"verify"}}\nHTTP 200'
+            elif '/v1/operator/mfa/verify' in path:
+                out = '{"data":{"mfa":"verified"}}\nHTTP 200'
+            else:
+                out = '{}\nHTTP 404'
+            return subprocess.CompletedProcess(command, 0, stdout=out, stderr='')
+        with tempfile.TemporaryDirectory() as directory:
+            cred = pathlib.Path(directory) / "cred"
+            cred.write_text('op@example.test\nsecret pass\nGEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ\n')
+            operator = update_floor.Operator('host', cred, runner=runner)
+            operator.login()
+            self.assertEqual(operator.csrf, 'c')
+            self.assertEqual(len(calls), 2)
+            self.assertEqual(len(calls[1][1]['code']), 6)
+            cred.write_text('op@example.test\nsecret pass\n')
+            with self.assertRaises(RuntimeError) as refused:
+                update_floor.Operator('host', cred, runner=runner).login()
+            self.assertIn('second factor', str(refused.exception))
+
     def test_update_floor_runs_against_staging_only_when_configured_and_needs_every_assertion(self):
         good = {'check': 'update-floor', 'status': 'PASS', 'refused': ['machine list', 'session list', 'exec'],
                 'custom_unaffected': True, 'floor_cleared': True}

@@ -70,7 +70,7 @@ func (s *SQLStore) Lookup(ctx context.Context, actor, owner, ref string, operato
 		}
 
 		// Use the same transaction for lookup and audit.
-		rows, err := tx.Query(ctx, `SELECT o.id,o.support_reference,o.owner_id,o.request_id,g.component,o.release,g.stage,g.code,o.created_at,o.expires_at,o.sentry_event_id,g.source_file,g.source_function,g.source_line,o.reporting,g.operation,o.correlation_id,g.cause,g.error_type,g.error_chain,g.errno,g.http_status,g.outcome,g.severity FROM support_report_occurrences o JOIN support_report_groups g ON g.owner_id=o.owner_id AND g.fingerprint=o.fingerprint WHERE (o.owner_id=$1 OR $3) AND o.support_reference=$2 AND o.expires_at>now() ORDER BY o.created_at,o.id LIMIT 129`, owner, ref, operator && owner == "")
+		rows, err := tx.Query(ctx, `SELECT o.id,o.support_reference,o.owner_id,o.request_id,g.component,o.release,g.stage,g.code,o.created_at,o.expires_at,o.sentry_event_id,g.source_file,g.source_function,g.source_line,o.reporting,g.operation,o.correlation_id,g.cause,g.error_type,g.error_chain,g.errno,g.http_status,g.outcome,g.severity,g.first_seen,g.last_seen,g.occurrences FROM support_report_occurrences o JOIN support_report_groups g ON g.owner_id=o.owner_id AND g.fingerprint=o.fingerprint WHERE (o.owner_id=$1 OR $3) AND o.support_reference=$2 AND o.expires_at>now() ORDER BY o.created_at,o.id LIMIT 129`, owner, ref, operator && owner == "")
 		if err != nil {
 			return err
 		}
@@ -78,7 +78,7 @@ func (s *SQLStore) Lookup(ctx context.Context, actor, owner, ref string, operato
 		records = records[:0]
 		for rows.Next() {
 			var r Record
-			if err := rows.Scan(&r.ID, &r.Reference, &r.OwnerID, &r.RequestID, &r.Component, &r.Release, &r.Stage, &r.Code, &r.At, &r.ExpiresAt, &r.EventID, &r.SourceFile, &r.SourceFunction, &r.SourceLine, &r.Reporting, &r.Operation, &r.CorrelationID, &r.Cause, &r.ErrorType, &r.ErrorChain, &r.Errno, &r.HTTPStatus, &r.Outcome, &r.Severity); err != nil {
+			if err := rows.Scan(&r.ID, &r.Reference, &r.OwnerID, &r.RequestID, &r.Component, &r.Release, &r.Stage, &r.Code, &r.At, &r.ExpiresAt, &r.EventID, &r.SourceFile, &r.SourceFunction, &r.SourceLine, &r.Reporting, &r.Operation, &r.CorrelationID, &r.Cause, &r.ErrorType, &r.ErrorChain, &r.Errno, &r.HTTPStatus, &r.Outcome, &r.Severity, &r.GroupFirstSeen, &r.GroupLastSeen, &r.GroupOccurrences); err != nil {
 				return err
 			}
 			records = append(records, r)

@@ -8530,6 +8530,174 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/machines": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Operator machines
+         * @description Current active operator account and separate operator session required. See docs/runbooks/operator-admin.md. Audited before disclosure; unavailable auditing fails closed.
+         */
+        get: operations["get_v1_admin_machines"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/machines/{machine_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Operator machine
+         * @description Current active operator account and separate operator session required. See docs/runbooks/operator-admin.md. Audited before disclosure; unavailable auditing fails closed.
+         */
+        get: operations["get_v1_admin_machines_machine_id"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/audit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Operator audit search
+         * @description Current active operator account and separate operator session required. See docs/runbooks/operator-admin.md. Audited before disclosure; unavailable auditing fails closed.
+         */
+        get: operations["get_v1_admin_audit"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/analytics/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Operator analytics status
+         * @description Current active operator account and separate operator session required. See docs/runbooks/operator-admin.md. Audited before disclosure; unavailable auditing fails closed.
+         */
+        get: operations["get_v1_admin_analytics_status"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/analytics/overview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Operator analytics overview (PostHog, aggregates only)
+         * @description Current active operator account and separate operator session required. See docs/runbooks/operator-admin.md. Audited before disclosure; unavailable auditing fails closed.
+         */
+        get: operations["get_v1_admin_analytics_overview"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/operator/mfa/enroll": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Start authenticator enrolment */
+        post: operations["operator_mfa_enroll"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/operator/mfa/enroll/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Confirm the authenticator; returns recovery codes once */
+        post: operations["operator_mfa_enroll_confirm"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/operator/mfa/verify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Complete a pending session with a code or recovery code */
+        post: operations["operator_mfa_verify"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/operator/mfa/recovery-codes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Replace the recovery codes (needs an authenticator code) */
+        post: operations["operator_mfa_recovery_codes"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -11241,6 +11409,18 @@ export interface components {
             /** @enum {string} */
             reporting: "disabled" | "filtered" | "unconfirmed";
             source_line?: number;
+            /**
+             * Format: date-time
+             * @description When this failure (same account and fingerprint) first happened.
+             */
+            group_first_seen?: string;
+            /** Format: date-time */
+            group_last_seen?: string;
+            /**
+             * Format: int64
+             * @description How many occurrences the failure group holds.
+             */
+            group_occurrences?: number;
         };
         SupportLookupResponse: {
             data: {
@@ -11273,7 +11453,7 @@ export interface components {
         OperatorAccount: {
             id: string;
             primary_email: string;
-            alias: string;
+            display_name: string;
             status: string;
             /** Format: int64 */
             version: number;
@@ -11358,6 +11538,9 @@ export interface components {
         OperatorInfrastructurePage: {
             items: components["schemas"]["OperatorInfrastructure"][];
             next_after?: string;
+            /** @description Rows matching the filters, capped at 100000 (total_capped true). */
+            total: number;
+            total_capped?: boolean;
         };
         OperatorAuditEvent: {
             id: string;
@@ -11368,6 +11551,8 @@ export interface components {
             resource_id: string;
             /** Format: date-time */
             created_at: string;
+            outcome?: string;
+            request_id?: string;
         };
         OperatorAuditPage: {
             events: components["schemas"]["OperatorAuditEvent"][];
@@ -11376,6 +11561,9 @@ export interface components {
         OperatorAccountPage: {
             accounts: components["schemas"]["OperatorAccount"][];
             next_after?: string;
+            /** @description Rows matching the filters, capped at 100000 (total_capped true). */
+            total: number;
+            total_capped?: boolean;
         };
         OperatorTeamSummary: {
             id: string;
@@ -11389,18 +11577,30 @@ export interface components {
         OperatorTeamPage: {
             teams: components["schemas"]["OperatorTeamSummary"][];
             next_after?: string;
+            /** @description Rows matching the filters, capped at 100000 (total_capped true). */
+            total: number;
+            total_capped?: boolean;
         };
         OperatorBillingPage: {
             workspaces: components["schemas"]["OperatorBilling"][];
             next_after?: string;
+            /** @description Rows matching the filters, capped at 100000 (total_capped true). */
+            total: number;
+            total_capped?: boolean;
         };
         OperatorBillingOperationPage: {
             operations: components["schemas"]["OperatorBillingOperation"][];
             next_after?: string;
+            /** @description Rows matching the filters, capped at 100000 (total_capped true). */
+            total: number;
+            total_capped?: boolean;
         };
         OperatorControlOperationPage: {
             operations: components["schemas"]["OperatorControlOperation"][];
             next_after?: string;
+            /** @description Rows matching the filters, capped at 100000 (total_capped true). */
+            total: number;
+            total_capped?: boolean;
         };
         OperatorStateCount: {
             state: string;
@@ -11429,7 +11629,7 @@ export interface components {
         AdminBillingProductInput: {
             /** Format: int64 */
             version: number;
-            alias: string;
+            display_name: string;
             provider_price_id: string;
             /** @enum {string} */
             catalog_type: "personal_subscription" | "team_subscription";
@@ -11438,7 +11638,7 @@ export interface components {
         };
         AdminBillingProduct: {
             code: string;
-            alias: string;
+            display_name: string;
             catalog_type: string;
             price_id: string;
             product_id: string;
@@ -11718,7 +11918,7 @@ export interface components {
         };
         OperatorRegion: {
             id: string;
-            alias: string;
+            display_name: string;
             enabled: boolean;
             /** Format: int64 */
             revision: number;
@@ -11728,6 +11928,8 @@ export interface components {
         OperatorRegionPage: {
             items: components["schemas"]["OperatorRegion"][];
             next_after?: string;
+            /** @description Rows matching the filters. */
+            total: number;
         };
         OperatorNode: {
             id: string;
@@ -11753,10 +11955,13 @@ export interface components {
             /** Format: date-time */
             registry_expires_at: string;
             ready: boolean;
+            protocol_version: string;
         };
         OperatorNodePage: {
             items: components["schemas"]["OperatorNode"][];
             next_after?: string;
+            /** @description Rows matching the filters. */
+            total: number;
         };
         OperatorNodeMutationResult: {
             node: components["schemas"]["OperatorNode"];
@@ -13258,6 +13463,138 @@ export interface components {
              * @enum {string}
              */
             state: "none" | "connected" | "connect_on_apply";
+        };
+        OperatorMachine: {
+            id: string;
+            alias: string;
+            account_id: string;
+            team_id?: string;
+            platform: string;
+            architecture: string;
+            state: string;
+            ready: boolean;
+            stale: boolean;
+            /** Format: date-time */
+            last_seen_at?: string;
+            /** Format: date-time */
+            enrolled_at?: string;
+            /** Format: date-time */
+            revoked_at?: string;
+            /** Format: date-time */
+            deleted_at?: string;
+            /** Format: date-time */
+            created_at: string;
+            host_service_version?: string;
+            connector_state: string;
+            update_health: string;
+            observed_capabilities: string[];
+            /** Format: int64 */
+            installation_generation: number;
+        };
+        OperatorMachinePage: {
+            machines: components["schemas"]["OperatorMachine"][];
+            next_after?: string;
+            /** @description Rows matching the filters, capped at 100000 (total_capped true). */
+            total: number;
+            total_capped?: boolean;
+        };
+        OperatorAuditSearchPage: {
+            events: components["schemas"]["OperatorAuditEvent"][];
+            next_after?: string;
+            /** @description Rows matching the filters, capped at 100000 (total_capped true). */
+            total: number;
+            total_capped?: boolean;
+        };
+        OperatorAnalyticsCount: {
+            name: string;
+            /** Format: int64 */
+            count: number;
+        };
+        OperatorAnalyticsStatus: {
+            configured: boolean;
+            host?: string;
+        };
+        OperatorAnalyticsOverview: {
+            /** Format: date-time */
+            observed_at: string;
+            /** @enum {integer} */
+            days: 7 | 30 | 90;
+            totals: {
+                /** Format: int64 */
+                visitors: number;
+                /** Format: int64 */
+                page_views: number;
+                /** Format: int64 */
+                console_users: number;
+                /** Format: int64 */
+                signup_clicks: number;
+                /** Format: int64 */
+                add_machine_started: number;
+                /** Format: int64 */
+                machines_paired: number;
+                /** Format: int64 */
+                checkouts: number;
+            };
+            daily: {
+                day: string;
+                /** Format: int64 */
+                page_views: number;
+                /** Format: int64 */
+                visitors: number;
+            }[];
+            top_pages: components["schemas"]["OperatorAnalyticsCount"][];
+            referrers: components["schemas"]["OperatorAnalyticsCount"][];
+            countries: components["schemas"]["OperatorAnalyticsCount"][];
+            devices: components["schemas"]["OperatorAnalyticsCount"][];
+            funnel: {
+                step: string;
+                /** Format: int64 */
+                count: number;
+            }[];
+            /** @description Insights that failed, by name; the rest are still returned. */
+            errors?: {
+                [key: string]: string;
+            };
+            /** @description Weekly cohorts by first machine pairing; active[n] is how many were active n weeks later (empty until the console sends console_active_day). */
+            retention: {
+                week: string;
+                /** Format: int64 */
+                size: number;
+                active: number[];
+            }[];
+        };
+        /**
+         * @description What the operator's session still needs: enroll an authenticator, enter a code, or nothing.
+         * @enum {string}
+         */
+        OperatorMfaState: "enroll" | "verify" | "verified";
+        OperatorMe: {
+            email: string;
+            /** @enum {string} */
+            role: "admin" | "support" | "billing" | "operations";
+            mfa: components["schemas"]["OperatorMfaState"];
+        };
+        OperatorStatus: {
+            /** Format: date-time */
+            observed_at: string;
+            build: {
+                version: string;
+                commit: string;
+            };
+            readiness: string;
+            dimensions: {
+                [key: string]: {
+                    status?: string;
+                    code?: string;
+                    since?: string;
+                };
+            };
+            providers?: {
+                [key: string]: unknown;
+            };
+            configuration?: {
+                [key: string]: unknown;
+            };
         };
     };
     responses: {
@@ -24054,7 +24391,9 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SuccessResponse"];
+                    "application/json": {
+                        data: components["schemas"]["OperatorStatus"];
+                    };
                 };
             };
             /** @description Invalid target, body, pagination or confirmation */
@@ -24158,7 +24497,8 @@ export interface operations {
             query?: {
                 limit?: number;
                 after?: string;
-                email?: string;
+                q?: string;
+                status?: "active" | "suspended";
             };
             header?: never;
             path?: never;
@@ -24220,6 +24560,8 @@ export interface operations {
             query?: {
                 limit?: number;
                 after?: string;
+                q?: string;
+                suspended?: "true" | "false";
             };
             header?: never;
             path?: never;
@@ -27282,12 +27624,21 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Operator authentication step or session */
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        data: {
+                            email: string;
+                            role: string;
+                            csrf_token: string;
+                            mfa: components["schemas"]["OperatorMfaState"];
+                        };
+                    };
+                };
             };
             /** @description Invalid request */
             400: {
@@ -27322,12 +27673,21 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Operator authentication step or session */
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        data: {
+                            email: string;
+                            role: string;
+                            csrf_token: string;
+                            mfa: components["schemas"]["OperatorMfaState"];
+                        };
+                    };
+                };
             };
             /** @description Invalid request */
             400: {
@@ -27354,12 +27714,16 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Current operator */
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["OperatorMe"];
+                    };
+                };
             };
             /** @description Operator sign-in required */
             401: {
@@ -32940,6 +33304,579 @@ export interface operations {
                 };
             };
             404: components["responses"]["Error"];
+        };
+    };
+    get_v1_admin_machines: {
+        parameters: {
+            query?: {
+                limit?: number;
+                after?: string;
+                q?: string;
+                account?: string;
+                team?: string;
+                state?: "pending" | "online" | "offline" | "disconnected" | "revoked" | "deleted";
+                platform?: "linux" | "darwin" | "windows";
+                stale?: "true" | "false";
+                deleted?: "true";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Audited result. Cache-Control: no-store. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["OperatorMachinePage"];
+                    };
+                };
+            };
+            /** @description Invalid target, body, pagination or confirmation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Browser authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Operator session or capability required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Evidence, provider or audit unavailable; outcome may require checking target state */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_v1_admin_machines_machine_id: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                machine_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Audited result. Cache-Control: no-store. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["OperatorMachine"];
+                    };
+                };
+            };
+            /** @description Invalid target, body, pagination or confirmation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Browser authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Operator session or capability required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Evidence, provider or audit unavailable; outcome may require checking target state */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_v1_admin_audit: {
+        parameters: {
+            query?: {
+                limit?: number;
+                after?: string;
+                actor?: string;
+                event_type?: string;
+                resource_type?: string;
+                resource_id?: string;
+                outcome?: "unchanged" | "changed" | "uncertain";
+                since?: string;
+                until?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Audited result. Cache-Control: no-store. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["OperatorAuditSearchPage"];
+                    };
+                };
+            };
+            /** @description Invalid target, body, pagination or confirmation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Browser authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Operator session or capability required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Evidence, provider or audit unavailable; outcome may require checking target state */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_v1_admin_analytics_status: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Audited result. Cache-Control: no-store. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["OperatorAnalyticsStatus"];
+                    };
+                };
+            };
+            /** @description Invalid target, body, pagination or confirmation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Browser authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Operator session or capability required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Evidence, provider or audit unavailable; outcome may require checking target state */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_v1_admin_analytics_overview: {
+        parameters: {
+            query?: {
+                days?: 7 | 30 | 90;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Audited result. Cache-Control: no-store. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["OperatorAnalyticsOverview"];
+                    };
+                };
+            };
+            /** @description Invalid target, body, pagination or confirmation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Browser authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Operator session or capability required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Analytics not configured (analytics_not_configured) or provider unavailable (analytics_unavailable); evidence, provider or audit unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    operator_mfa_enroll: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: {
+                            secret: string;
+                            otpauth_uri: string;
+                        };
+                    };
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Code not accepted (invalid_code) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Invalid session, CSRF token or origin */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Step does not apply to this session (mfa_state) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Rate limited */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    operator_mfa_enroll_confirm: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description A six-digit authenticator code or a recovery code. */
+                    code: string;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: {
+                            mfa: components["schemas"]["OperatorMfaState"];
+                            recovery_codes: string[];
+                        };
+                    };
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Code not accepted (invalid_code) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Invalid session, CSRF token or origin */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Step does not apply to this session (mfa_state) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Rate limited */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    operator_mfa_verify: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description A six-digit authenticator code or a recovery code. */
+                    code: string;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: {
+                            mfa: components["schemas"]["OperatorMfaState"];
+                        };
+                    };
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Code not accepted (invalid_code) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Invalid session, CSRF token or origin */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Step does not apply to this session (mfa_state) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Rate limited */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    operator_mfa_recovery_codes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description A six-digit authenticator code or a recovery code. */
+                    code: string;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: {
+                            recovery_codes: string[];
+                        };
+                    };
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Code not accepted (invalid_code) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Invalid session, CSRF token or origin */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Step does not apply to this session (mfa_state) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Rate limited */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
 }

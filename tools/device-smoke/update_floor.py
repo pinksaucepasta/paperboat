@@ -4,7 +4,8 @@
 Runs on the host that drives the staging environment (never production) and needs:
   * two machines paired to the staging account, each a docker container on STAGING_DOCKER_HOST:
     OFFICIAL (an official release build, its version has four numeric parts) and CUSTOM (a dev build)
-  * the staging operator credential (--cred: line 1 email, line 2 password) and the staging host that holds the CA
+  * the staging operator credential (--cred: line 1 email, line 2 password, line 3 the base32 key of the operator's
+    authenticator: operator sign-in needs a second factor, enrol it once in the admin panel) and the staging host that holds the CA
     (OPERATOR_HOST) from which the operator API is called.
 Steps, each asserted:
   1. both machines work (`pb machine list`) with no floor
@@ -15,6 +16,9 @@ Steps, each asserted:
   4. the floor is cleared (also when a step fails): the official build works again without an update
 """
 import argparse
+import base64
+import hashlib
+import hmac
 import json
 import os
 from pathlib import Path
@@ -28,6 +32,15 @@ import winhost
 API = os.environ.get('STG_API', 'https://api.staging.example.test:8443')  # the staging API base URL (staging.py: https://<region>.stg.<domain>:18443)
 CURL = os.environ.get('STG_CURL', 'curl -sS --cacert ~/stg/ca/ca.pem --resolve api.staging.example.test:8443:127.0.0.1 ') + '-b {jar} -c {jar}'
 WAIT_SECONDS = 180
+
+
+def totp(secret, offset=0, now=None):
+    """The RFC 6238 code (30 s steps, 6 digits, SHA-1) an authenticator shows for a base32 secret."""
+    step = int((time.time() if now is None else now) // 30) + offset
+    key = base64.b32decode(secret.replace(' ', '').upper() + '=' * (-len(secret.replace(' ', '')) % 8))
+    mac = hmac.new(key, step.to_bytes(8, 'big'), hashlib.sha1).digest()
+    at = mac[-1] & 15
+    return '%06d' % ((int.from_bytes(mac[at:at + 4], 'big') & 0x7fffffff) % 1000000)
 
 
 class Operator:
@@ -53,11 +66,24 @@ class Operator:
         return int(status or 0), text
 
     def login(self):
-        email, password = self.cred.read_text().split('\n')[:2]
+        lines = self.cred.read_text().split('\n')
+        email, password, secret = lines[0], lines[1], (lines[2].strip() if len(lines) > 2 else '')
         status, text = self.call('POST', '/v1/operator/login', {'email': email, 'password': password})
         if status != 200:
             raise RuntimeError('staging operator login failed (HTTP %s)' % status)
-        self.csrf = json.loads(text)['data']['csrf_token']
+        data = json.loads(text)['data']
+        self.csrf = data['csrf_token']
+        if data.get('mfa') == 'verified':
+            return
+        if data.get('mfa') != 'verify' or not secret:
+            raise RuntimeError('the staging operator needs a second factor: enrol an authenticator in the admin panel and put its '
+                               'base32 key on line 3 of the credential file (mfa state: %s)' % data.get('mfa'))
+        # A code works once per 30 s step: if the previous run just used this step, the next step's code is also accepted.
+        for offset in (0, 1):
+            status, text = self.call('POST', '/v1/operator/mfa/verify', {'code': totp(secret, offset)})
+            if status == 200:
+                return
+        raise RuntimeError('staging operator second factor was refused (HTTP %s)' % status)
 
     def policy(self):
         status, text = self.call('GET', '/v1/admin/client-update-policy')

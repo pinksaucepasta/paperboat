@@ -129,6 +129,7 @@ type Infrastructure struct {
 }
 
 type InfrastructurePage struct {
+	Counted
 	Items     []Infrastructure `json:"items"`
 	NextAfter string           `json:"next_after,omitempty"`
 }
@@ -140,6 +141,8 @@ type AuditEvent struct {
 	EventType    string    `json:"event_type"`
 	ResourceType string    `json:"resource_type"`
 	ResourceID   string    `json:"resource_id"`
+	Outcome      string    `json:"outcome,omitempty"`
+	RequestID    string    `json:"request_id,omitempty"`
 	CreatedAt    time.Time `json:"created_at"`
 }
 
@@ -149,6 +152,7 @@ type AuditPage struct {
 }
 
 type AccountPage struct {
+	Counted
 	Accounts  []Account `json:"accounts"`
 	NextAfter string    `json:"next_after,omitempty"`
 }
@@ -161,18 +165,22 @@ type TeamSummary struct {
 	BillingState       string `json:"billing_state,omitempty"`
 }
 type TeamPage struct {
+	Counted
 	Teams     []TeamSummary `json:"teams"`
 	NextAfter string        `json:"next_after,omitempty"`
 }
 type BillingPage struct {
+	Counted
 	Workspaces []Billing `json:"workspaces"`
 	NextAfter  string    `json:"next_after,omitempty"`
 }
 type BillingOperationPage struct {
+	Counted
 	Operations []BillingOperation `json:"operations"`
 	NextAfter  string             `json:"next_after,omitempty"`
 }
 type ControlOperationPage struct {
+	Counted
 	Operations []ControlOperation `json:"operations"`
 	NextAfter  string             `json:"next_after,omitempty"`
 }
@@ -225,7 +233,7 @@ func (s *Service) Read(ctx context.Context, actor auth.User, kind, target, after
 	if !pageKind(kind) && kind != "team" && after != "" {
 		return nil, ErrInvalid
 	}
-	if len(target) > 256 || (!pageKind(kind) && kind != "overview" && target == "") || (!pageKind(kind) && kind != "infrastructure" && kind != "audit" && (len(target) > 128 || !safeID(target))) {
+	if len(target) > 1024 || (!pageKind(kind) && kind != "overview" && target == "") || (!pageKind(kind) && kind != "overview" && kind != "infrastructure" && kind != "audit" && (len(target) > 128 || !safeID(target))) {
 		return nil, ErrInvalid
 	}
 
@@ -267,22 +275,22 @@ func allowed(role auth.Role, kind string) bool {
 	case "admin":
 		return validKind(kind)
 	case "support":
-		return kind == "account" || kind == "team" || kind == "billing" || kind == "accounts" || kind == "teams" || kind == "workspaces"
+		return kind == "account" || kind == "team" || kind == "billing" || kind == "accounts" || kind == "teams" || kind == "workspaces" || kind == "machines" || kind == "machine"
 	case "billing":
-		return kind == "account" || kind == "team" || kind == "billing" || kind == "billing_operation" || kind == "workspaces" || kind == "billing_operations"
+		return kind == "account" || kind == "team" || kind == "billing" || kind == "billing_operation" || kind == "workspaces" || kind == "billing_operations" || kind == "machines" || kind == "machine"
 	case "operations":
-		return kind == "infrastructure" || kind == "control_operation" || kind == "control_operations" || kind == "tunnel_status"
+		return kind == "infrastructure" || kind == "control_operation" || kind == "control_operations" || kind == "tunnel_status" || kind == "machines" || kind == "machine"
 	default:
 		return false
 	}
 }
 
 func validKind(kind string) bool {
-	return kind == "account" || kind == "team" || kind == "billing" || kind == "infrastructure" || kind == "control_operation" || kind == "billing_operation" || kind == "audit" || kind == "accounts" || kind == "teams" || kind == "workspaces" || kind == "billing_operations" || kind == "control_operations" || kind == "overview" || kind == "tunnel_status"
+	return kind == "account" || kind == "team" || kind == "billing" || kind == "infrastructure" || kind == "control_operation" || kind == "billing_operation" || kind == "audit" || kind == "accounts" || kind == "teams" || kind == "workspaces" || kind == "billing_operations" || kind == "control_operations" || kind == "overview" || kind == "tunnel_status" || kind == "audit_events" || kind == "machines" || kind == "machine"
 }
 
 func pageKind(kind string) bool {
-	return kind == "infrastructure" || kind == "audit" || kind == "accounts" || kind == "teams" || kind == "workspaces" || kind == "billing_operations" || kind == "control_operations"
+	return kind == "infrastructure" || kind == "audit" || kind == "accounts" || kind == "teams" || kind == "workspaces" || kind == "billing_operations" || kind == "control_operations" || kind == "audit_events" || kind == "machines"
 }
 
 func safeID(v string) bool {
@@ -329,6 +337,12 @@ func (s *Service) readTx(ctx context.Context, tx *db.Tx, kind, target, after str
 		return s.readInfrastructure(ctx, tx, target, after, limit)
 	case "audit":
 		return readAudit(ctx, tx, target, after, limit)
+	case "audit_events":
+		return readAuditEvents(ctx, tx, target, after, limit)
+	case "machines":
+		return s.readMachines(ctx, tx, target, after, limit)
+	case "machine":
+		return s.readMachine(ctx, tx, target)
 	case "accounts":
 		return readAccounts(ctx, tx, target, after, limit)
 	case "teams":
@@ -436,6 +450,12 @@ func readBillingOperation(ctx context.Context, tx *db.Tx, id string) (BillingOpe
 	return v, scanErr(err)
 }
 
+var infrastructureFrom = map[string]string{
+	"host":   `user_machines WHERE deleted_at IS NULL`,
+	"relay":  `control_tunnel_nodes WHERE roles @> ARRAY['relay']::text[]`,
+	"tunnel": `tunnels WHERE deleted_at IS NULL`,
+}
+
 func (s *Service) readInfrastructure(ctx context.Context, tx *db.Tx, target, after string, limit int) (_ InfrastructurePage, resultErr error) {
 	if target != "host" && target != "relay" && target != "tunnel" {
 		return InfrastructurePage{}, ErrInvalid
@@ -457,12 +477,16 @@ func (s *Service) readInfrastructure(ctx context.Context, tx *db.Tx, target, aft
 	if target != "tunnel" {
 		args = append(args, staleMicros)
 	}
+	total, err := countRows(ctx, tx, infrastructureFrom[target])
+	if err != nil {
+		return InfrastructurePage{}, err
+	}
 	rows, err := tx.Query(ctx, query, args...)
 	if err != nil {
 		return InfrastructurePage{}, err
 	}
 	defer func() { resultErr = closeRowsError(rows, resultErr) }()
-	page := InfrastructurePage{Items: make([]Infrastructure, 0, limit)}
+	page := InfrastructurePage{Counted: total, Items: make([]Infrastructure, 0, limit)}
 	for rows.Next() {
 		var v Infrastructure
 		var observed sql.NullTime
@@ -496,16 +520,24 @@ func canonicalInfrastructure(kind string, v Infrastructure) Infrastructure {
 	return v
 }
 
-func readAccounts(ctx context.Context, tx *db.Tx, email, after string, limit int) (_ AccountPage, resultErr error) {
-	if email != "" && (len(email) > 254 || strings.Count(email, "@") != 1 || strings.ContainsAny(email, " \t\r\n")) {
+// readAccounts filters: q (email, name or id contains), status (active|suspended).
+func readAccounts(ctx context.Context, tx *db.Tx, target, after string, limit int) (_ AccountPage, resultErr error) {
+	f, err := parseFilter(target, "q", "status")
+	if err != nil || !oneOf(f["status"], "active", "suspended") {
 		return AccountPage{}, ErrInvalid
 	}
-	rows, err := tx.Query(ctx, `SELECT u.id,u.primary_email,u.display_name,u.status,u.version,coalesce(w.id,''),u.created_at FROM users u LEFT JOIN billing_workspaces w ON w.user_id=u.id WHERE u.id>$1 AND u.role<>'system_worker' AND ($2='' OR lower(u.primary_email)=lower($2)) ORDER BY u.id LIMIT $3`, after, email, limit+1)
+	where := ` users u LEFT JOIN billing_workspaces w ON w.user_id=u.id WHERE u.role<>'system_worker'
+ AND ($1='' OR u.primary_email ILIKE $1 ESCAPE '\' OR u.display_name ILIKE $1 ESCAPE '\' OR u.id ILIKE $1 ESCAPE '\') AND ($2='' OR u.status=$2)`
+	args := []any{contains(f["q"]), f["status"]}
+	p := AccountPage{Accounts: make([]Account, 0, limit)}
+	if p.Counted, err = countRows(ctx, tx, where, args...); err != nil {
+		return p, err
+	}
+	rows, err := tx.Query(ctx, `SELECT u.id,u.primary_email,u.display_name,u.status,u.version,coalesce(w.id,''),u.created_at FROM`+where+` AND u.id>$3 ORDER BY u.id LIMIT $4`, append(args, after, limit+1)...)
 	if err != nil {
-		return AccountPage{}, err
+		return p, err
 	}
 	defer func() { resultErr = closeRowsError(rows, resultErr) }()
-	p := AccountPage{Accounts: make([]Account, 0, limit)}
 	for rows.Next() {
 		var v Account
 		if err := rows.Scan(&v.ID, &v.PrimaryEmail, &v.DisplayName, &v.Status, &v.Version, &v.BillingWorkspaceID, &v.CreatedAt); err != nil {
@@ -520,16 +552,24 @@ func readAccounts(ctx context.Context, tx *db.Tx, email, after string, limit int
 	return p, rows.Err()
 }
 
+// readTeams filters: q (team id or owner account contains), suspended=true|false.
 func readTeams(ctx context.Context, tx *db.Tx, target, after string, limit int) (_ TeamPage, resultErr error) {
-	if target != "" {
+	f, err := parseFilter(target, "q", "suspended")
+	if err != nil || !oneOf(f["suspended"], "true", "false") {
 		return TeamPage{}, ErrInvalid
 	}
-	rows, err := tx.Query(ctx, `SELECT t.team_id,t.owner_account,t.generation,t.suspended,coalesce(w.id,''),coalesce(w.state,'') FROM teams t LEFT JOIN billing_workspaces w ON w.team_id=t.team_id WHERE t.team_id>$1 AND t.deleted_at IS NULL ORDER BY t.team_id LIMIT $2`, after, limit+1)
+	where := ` teams t LEFT JOIN billing_workspaces w ON w.team_id=t.team_id WHERE t.deleted_at IS NULL
+ AND ($1='' OR t.team_id ILIKE $1 ESCAPE '\' OR t.owner_account ILIKE $1 ESCAPE '\') AND ($2='' OR t.suspended=($2='true'))`
+	args := []any{contains(f["q"]), f["suspended"]}
+	p := TeamPage{Teams: make([]TeamSummary, 0, limit)}
+	if p.Counted, err = countRows(ctx, tx, where, args...); err != nil {
+		return p, err
+	}
+	rows, err := tx.Query(ctx, `SELECT t.team_id,t.owner_account,t.generation,t.suspended,coalesce(w.id,''),coalesce(w.state,'') FROM`+where+` AND t.team_id>$3 ORDER BY t.team_id LIMIT $4`, append(args, after, limit+1)...)
 	if err != nil {
-		return TeamPage{}, err
+		return p, err
 	}
 	defer func() { resultErr = closeRowsError(rows, resultErr) }()
-	p := TeamPage{Teams: make([]TeamSummary, 0, limit)}
 	for rows.Next() {
 		var v TeamSummary
 		if err := rows.Scan(&v.ID, &v.OwnerAccount, &v.Generation, &v.Suspended, &v.BillingWorkspaceID, &v.BillingState); err != nil {
@@ -551,12 +591,16 @@ func readWorkspaces(ctx context.Context, tx *db.Tx, state, after string, limit i
 	if state != "" && !billingStates[state] {
 		return BillingPage{}, ErrInvalid
 	}
+	total, err := countRows(ctx, tx, `billing_workspaces WHERE ($1='' OR state=$1)`, state)
+	if err != nil {
+		return BillingPage{}, err
+	}
 	rows, err := tx.Query(ctx, `SELECT id,user_id,team_id,product_code,state,quantity,period_start,period_end,cancel_at_period_end,revision,updated_at FROM billing_workspaces WHERE id>$1 AND ($2='' OR state=$2) ORDER BY id LIMIT $3`, after, state, limit+1)
 	if err != nil {
 		return BillingPage{}, err
 	}
 	defer func() { resultErr = closeRowsError(rows, resultErr) }()
-	p := BillingPage{Workspaces: make([]Billing, 0, limit)}
+	p := BillingPage{Counted: total, Workspaces: make([]Billing, 0, limit)}
 	for rows.Next() {
 		var v Billing
 		var uid, tid, product sql.NullString
@@ -589,12 +633,16 @@ func readBillingOperations(ctx context.Context, tx *db.Tx, state, after string, 
 	if state != "" && !map[string]bool{"pending": true, "succeeded": true, "failed": true, "uncertain": true}[state] {
 		return BillingOperationPage{}, ErrInvalid
 	}
+	total, err := countRows(ctx, tx, `billing_workspace_operations WHERE ($1='' OR state=$1)`, state)
+	if err != nil {
+		return BillingOperationPage{}, err
+	}
 	rows, err := tx.Query(ctx, `SELECT idempotency_key,workspace_id,actor_user_id,kind,state,provider_attempted_at,created_at,updated_at FROM billing_workspace_operations WHERE idempotency_key>$1 AND ($2='' OR state=$2) ORDER BY idempotency_key LIMIT $3`, after, state, limit+1)
 	if err != nil {
 		return BillingOperationPage{}, err
 	}
 	defer func() { resultErr = closeRowsError(rows, resultErr) }()
-	p := BillingOperationPage{Operations: make([]BillingOperation, 0, limit)}
+	p := BillingOperationPage{Counted: total, Operations: make([]BillingOperation, 0, limit)}
 	for rows.Next() {
 		var v BillingOperation
 		var attempted sql.NullTime
@@ -617,12 +665,16 @@ func readControlOperations(ctx context.Context, tx *db.Tx, state, after string, 
 	if state != "" && !operationStates[state] {
 		return ControlOperationPage{}, ErrInvalid
 	}
+	total, err := countRows(ctx, tx, `control_operations WHERE ($1='' OR state=$1)`, state)
+	if err != nil {
+		return ControlOperationPage{}, err
+	}
 	rows, err := tx.Query(ctx, `SELECT id,operation_type,state,attempts,next_attempt_at,uncertain_at,completed_at,created_at,updated_at FROM control_operations WHERE id>$1 AND ($2='' OR state=$2) ORDER BY id LIMIT $3`, after, state, limit+1)
 	if err != nil {
 		return ControlOperationPage{}, err
 	}
 	defer func() { resultErr = closeRowsError(rows, resultErr) }()
-	p := ControlOperationPage{Operations: make([]ControlOperation, 0, limit)}
+	p := ControlOperationPage{Counted: total, Operations: make([]ControlOperation, 0, limit)}
 	for rows.Next() {
 		var v ControlOperation
 		var next, uncertain, completed sql.NullTime

@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -122,6 +123,11 @@ func TestClientUpdatePolicyOperatorPostgres(t *testing.T) {
 		t.Fatal(e)
 	}
 	csrf := payload.Data.CSRF
+	// The password step leaves the session pending; the second factor has its own tests (operatorauth, operator_mfa_test.go).
+	tokenHash := sha256.Sum256([]byte(token))
+	if _, e = store.Pool().Exec(ctx, `UPDATE paperboat.operator_sessions SET mfa_pending=false WHERE token_hash=$1`, tokenHash[:]); e != nil {
+		t.Fatal(e)
+	}
 	if token == "" || csrf == "" {
 		t.Fatal("operator session or CSRF missing")
 	}

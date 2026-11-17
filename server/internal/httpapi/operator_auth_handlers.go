@@ -84,7 +84,7 @@ func registerOperatorAuthentication(mux *http.ServeMux, opts Options) {
 	finish := func(w http.ResponseWriter, r *http.Request, session operatorauth.Session) {
 		setOperatorCookie(w, session)
 		w.Header().Set("Cache-Control", "no-store")
-		writeJSON(w, 200, SuccessResponse{Data: map[string]any{"email": session.Account.Email, "role": session.Account.Role, "csrf_token": session.CSRF}})
+		writeJSON(w, 200, SuccessResponse{Data: map[string]any{"email": session.Account.Email, "role": session.Account.Role, "csrf_token": session.CSRF, "mfa": session.MFA}})
 	}
 	mux.HandleFunc("POST /v1/operator/setup", func(w http.ResponseWriter, r *http.Request) {
 		if !operatorOriginAllowed(r, opts) {
@@ -131,7 +131,7 @@ func registerOperatorAuthentication(mux *http.ServeMux, opts Options) {
 		finish(w, r, session)
 	})
 	mux.HandleFunc("GET /v1/operator/me", func(w http.ResponseWriter, r *http.Request) {
-		account, err := service.Authenticate(r.Context(), operatorCookie(r), "", false)
+		account, state, err := service.AuthenticatePending(r.Context(), operatorCookie(r), "", false)
 		if expectedHTTPErrorOnly(err, operatorauth.ErrInvalid) {
 			writeError(w, r, 401, "unauthenticated", "Operator sign-in is required.")
 			return
@@ -141,14 +141,15 @@ func registerOperatorAuthentication(mux *http.ServeMux, opts Options) {
 			return
 		}
 		w.Header().Set("Cache-Control", "no-store")
-		writeJSON(w, 200, SuccessResponse{Data: map[string]any{"email": account.Email, "role": account.Role}})
+		writeJSON(w, 200, SuccessResponse{Data: map[string]any{"email": account.Email, "role": account.Role, "mfa": state}})
 	})
+	registerOperatorMFA(mux, opts)
 	mux.HandleFunc("POST /v1/operator/logout", func(w http.ResponseWriter, r *http.Request) {
 		if !operatorOriginAllowed(r, opts) {
 			writeError(w, r, 403, "origin_failed", "Origin is not allowed.")
 			return
 		}
-		if _, err := service.Authenticate(r.Context(), operatorCookie(r), r.Header.Get("X-CSRF-Token"), true); expectedHTTPErrorOnly(err, operatorauth.ErrInvalid) {
+		if _, _, err := service.AuthenticatePending(r.Context(), operatorCookie(r), r.Header.Get("X-CSRF-Token"), true); expectedHTTPErrorOnly(err, operatorauth.ErrInvalid) {
 			writeError(w, r, 403, "forbidden", "Operator session or CSRF token is invalid.")
 			return
 		} else if err != nil {

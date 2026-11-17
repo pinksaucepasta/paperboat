@@ -10,6 +10,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/shared/health"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -17,6 +18,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/audit"
 	"github.com/pinksaucepasta/paperboat/server/internal/auth"
 	"github.com/pinksaucepasta/paperboat/server/internal/billing"
+	"github.com/pinksaucepasta/paperboat/server/internal/buildinfo"
 	"github.com/pinksaucepasta/paperboat/server/internal/operator"
 	"github.com/pinksaucepasta/paperboat/server/internal/operatoractions"
 )
@@ -70,6 +72,11 @@ var operatorPolicies = map[string]operatorPolicy{
 	"GET /v1/admin/status":                                                          {"operations", "", "status"},
 	"GET /v1/admin/overview":                                                        {"admin", "", "overview"},
 	"GET /v1/admin/accounts":                                                        {"support", "", "accounts"},
+	"GET /v1/admin/machines":                                                        {"machines", "", "machines"},
+	"GET /v1/admin/machines/{machine_id}":                                           {"machines", "machine_id", ""},
+	"GET /v1/admin/audit":                                                           {"admin", "", "audit-search"},
+	"GET /v1/admin/analytics/status":                                                {"admin", "", "analytics"},
+	"GET /v1/admin/analytics/overview":                                              {"admin", "", "analytics"},
 	"GET /v1/admin/teams":                                                           {"support", "", "teams"},
 	"GET /v1/admin/billing/workspaces":                                              {"support", "", "workspaces"},
 	"GET /v1/admin/billing/workspace-operations":                                    {"billing", "", "billing-operations"},
@@ -126,6 +133,8 @@ func operatorAllowed(role auth.Role, capability string) bool {
 		return role == auth.RoleSupport || role == auth.RoleBilling
 	case "billing":
 		return role == auth.RoleBilling
+	case "machines":
+		return role == auth.RoleSupport || role == auth.RoleBilling || role == auth.RoleOperations
 	case "operations":
 		return role == auth.RoleOperations
 	}
@@ -279,6 +288,7 @@ func registerOperatorRoutes(mux *http.ServeMux, opts Options) {
 	}
 	registerOperatorMutations(mux, opts)
 	registerOperatorDiagnostics(mux, opts)
+	registerOperatorAnalytics(mux, opts)
 	registerOperatorInfrastructure(mux, opts)
 	registerServerNodes(mux, opts)
 	if opts.Operator == nil {
@@ -289,6 +299,9 @@ func registerOperatorRoutes(mux *http.ServeMux, opts Options) {
 		{"GET /v1/admin/overview", "overview", ""},
 		{"GET /v1/admin/accounts", "accounts", ""},
 		{"GET /v1/admin/teams", "teams", ""},
+		{"GET /v1/admin/machines", "machines", ""},
+		{"GET /v1/admin/machines/{machine_id}", "machine", "machine_id"},
+		{"GET /v1/admin/audit", "audit_events", ""},
 		{"GET /v1/admin/billing/workspaces", "workspaces", ""},
 		{"GET /v1/admin/billing/workspace-operations", "billing_operations", ""},
 		{"GET /v1/admin/control-operations", "control_operations", ""},
@@ -318,8 +331,8 @@ func operatorRead(service *operator.Service, kind, param string) http.Handler {
 			limit = n
 		}
 		target := r.PathValue(param)
-		if kind == "accounts" {
-			target = r.URL.Query().Get("email")
+		if keys, ok := operatorListFilters[kind]; ok {
+			target = operatorFilterTarget(r.URL.Query(), keys)
 		}
 		if kind == "workspaces" || kind == "billing_operations" || kind == "control_operations" {
 			target = r.URL.Query().Get("state")
@@ -340,6 +353,24 @@ func operatorRead(service *operator.Service, kind, param string) http.Handler {
 		}
 		writeJSON(w, 200, SuccessResponse{Data: result})
 	})
+}
+
+// Filters each list accepts; the service validates the values.
+var operatorListFilters = map[string][]string{
+	"accounts":     {"q", "status"},
+	"teams":        {"q", "suspended"},
+	"machines":     {"q", "account", "team", "state", "platform", "stale", "deleted"},
+	"audit_events": {"actor", "event_type", "resource_type", "resource_id", "outcome", "since", "until"},
+}
+
+func operatorFilterTarget(query url.Values, keys []string) string {
+	out := url.Values{}
+	for _, k := range keys {
+		if v := query[k]; len(v) > 0 && v[0] != "" {
+			out[k] = v[:1]
+		}
+	}
+	return out.Encode()
 }
 
 func writeOperatorReadError(w http.ResponseWriter, r *http.Request, err error) {
@@ -490,6 +521,6 @@ func operatorStatus(opts Options) http.Handler {
 				dimensions[string(d)] = map[string]any{"status": state.Status, "code": state.Code, "since": state.Since, "retry": state.Retry, "next_retry_at": state.NextRetryAt}
 			}
 		}
-		writeJSON(w, 200, SuccessResponse{Data: map[string]any{"observed_at": time.Now().UTC(), "readiness": readiness, "dimensions": dimensions, "providers": map[string]any{"workos_configured": opts.Config.Secrets.WorkOSClientID != "" && opts.Config.Secrets.WorkOSAPIKey != "", "stripe_configured": opts.Config.Secrets.StripeAPIKey != "", "github_configured": opts.Config.Secrets.GitHubClientID != "", "live_availability": "not_probed"}, "configuration": map[string]any{"host_offline_after_seconds": opts.Config.UserMachines.OfflineAfter.Seconds(), "request_timeout_seconds": opts.Config.HTTP.RequestTimeout.Seconds(), "billing_policy": "/v1/admin/config/billing", "deployment_settings": "managed_by_deployment"}}})
+		writeJSON(w, 200, SuccessResponse{Data: map[string]any{"observed_at": time.Now().UTC(), "build": map[string]string{"version": buildinfo.Version, "commit": buildinfo.Commit}, "readiness": readiness, "dimensions": dimensions, "providers": map[string]any{"workos_configured": opts.Config.Secrets.WorkOSClientID != "" && opts.Config.Secrets.WorkOSAPIKey != "", "stripe_configured": opts.Config.Secrets.StripeAPIKey != "", "github_configured": opts.Config.Secrets.GitHubClientID != "", "live_availability": "not_probed"}, "configuration": map[string]any{"host_offline_after_seconds": opts.Config.UserMachines.OfflineAfter.Seconds(), "request_timeout_seconds": opts.Config.HTTP.RequestTimeout.Seconds(), "billing_policy": "/v1/admin/config/billing", "deployment_settings": "managed_by_deployment"}}})
 	})
 }

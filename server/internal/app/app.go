@@ -65,6 +65,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/peeridentity"
 	"github.com/pinksaucepasta/paperboat/server/internal/peersessions"
 	"github.com/pinksaucepasta/paperboat/server/internal/planlimits"
+	"github.com/pinksaucepasta/paperboat/server/internal/posthogquery"
 	"github.com/pinksaucepasta/paperboat/server/internal/previewattachment"
 	"github.com/pinksaucepasta/paperboat/server/internal/previewdispatch"
 	"github.com/pinksaucepasta/paperboat/server/internal/previewdomain"
@@ -750,8 +751,9 @@ func New(opts Options) (*App, error) {
 		OperatorBackups:          backupService,
 		TestFixtures:             fixturesService,
 		OperatorReporting:        reportingService,
+		OperatorAnalytics:        posthogquery.New(posthogquery.Config{Host: opts.Config.Analytics.PostHogHost, ProjectID: opts.Config.Analytics.PostHogProjectID, Key: opts.Config.Secrets.PostHogPersonalKey}),
 		Operator:                 operatorService,
-		OperatorAuth:             &operatorauth.Service{Store: store, BootstrapEmail: opts.Config.OperatorBootstrapEmail},
+		OperatorAuth:             &operatorauth.Service{Store: store, BootstrapEmail: opts.Config.OperatorBootstrapEmail, SecretKey: opts.Config.Secrets.EncryptionKey},
 		OperatorHealth:           telemetryHealth,
 		OperatorActions:          operatorActions,
 		AbuseReports:             abuseReports,

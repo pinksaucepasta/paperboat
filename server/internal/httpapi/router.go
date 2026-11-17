@@ -47,6 +47,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/operatorreporting"
 	"github.com/pinksaucepasta/paperboat/server/internal/peeridentity"
 	"github.com/pinksaucepasta/paperboat/server/internal/peersessions"
+	"github.com/pinksaucepasta/paperboat/server/internal/posthogquery"
 	"github.com/pinksaucepasta/paperboat/server/internal/previewdomain"
 	"github.com/pinksaucepasta/paperboat/server/internal/privateaccess"
 	"github.com/pinksaucepasta/paperboat/server/internal/recordings"
@@ -88,6 +89,7 @@ type Options struct {
 	OperatorBackups          *backupreport.Service
 	TestFixtures             *testfixtures.Service
 	OperatorReporting        *operatorreporting.Service
+	OperatorAnalytics        *posthogquery.Service
 	OperatorHealth           *health.HealthTracker
 	OperatorActions          *operatoractions.Service
 	AbuseReports             *abusereports.Service

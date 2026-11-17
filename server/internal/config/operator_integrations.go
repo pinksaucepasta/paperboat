@@ -30,6 +30,9 @@ func (c Config) validateOperatorIntegrations() error {
 			return errors.New("Sentry admin API requires an HTTPS origin, organization slug, 1–8 unique project slugs and API token")
 		}
 	}
+	if err := c.validateAnalytics(); err != nil {
+		return err
+	}
 	if c.Backups.DatabaseID != "" && !operatorIntegrationID.MatchString(c.Backups.DatabaseID) || c.Secrets.BackupReportToken != "" && (len(c.Secrets.BackupReportToken) < 32 || len(c.Secrets.BackupReportToken) > 512) {
 		return errors.New("backup reporting requires a valid database ID and a token of 32–512 bytes")
 	}
@@ -44,3 +47,20 @@ func (c Config) validateOperatorIntegrations() error {
 	}
 	return nil
 }
+
+// validateAnalytics: the PostHog read integration is all or nothing, over HTTPS, with a numeric project id.
+func (c Config) validateAnalytics() error {
+	a, key := c.Analytics, c.Secrets.PostHogPersonalKey
+	if a.PostHogHost == "" && a.PostHogProjectID == "" && key == "" {
+		return nil
+	}
+	u, err := url.Parse(a.PostHogHost)
+	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.Path != "" && u.Path != "/" ||
+		!analyticsProjectID.MatchString(a.PostHogProjectID) || len(key) < 1 || len(key) > 512 || strings.ContainsAny(key, " \t\r\n") {
+		return errors.New("PostHog analytics needs an HTTPS origin, a numeric project id (or @current) and a personal API key together")
+	}
+	return nil
+}
+
+// A numeric project id, or @current: PostHog resolves it to the one project a project-scoped personal key belongs to.
+var analyticsProjectID = regexp.MustCompile(`^([0-9]{1,20}|@current)$`)

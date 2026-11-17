@@ -83,7 +83,7 @@ func TestLiveSentryOperationalReadback(t *testing.T) {
 		t.Fatal(err)
 	}
 	operatorEmail := "operator-" + supportreport.NewReference() + "@example.test"
-	operatorService := &operatorauth.Service{Store: store, BootstrapEmail: operatorEmail}
+	operatorService := &operatorauth.Service{Store: store, BootstrapEmail: operatorEmail, SecretKey: "operator-test-encryption-key"}
 	operatorPassword := "operator test password for Sentry readback"
 	var operatorID, operatorCSRF string
 	cookies := map[string]*http.Cookie{}
@@ -146,6 +146,22 @@ func TestLiveSentryOperationalReadback(t *testing.T) {
 		t.Fatalf("operator setup response: %v", err)
 	}
 	operatorCSRF = setupResult.Data.CSRFToken
+	// The password step leaves a pending session; enrol the second factor to complete it.
+	var enrolment struct {
+		Data struct {
+			Secret string `json:"secret"`
+		} `json:"data"`
+	}
+	if r := request("POST", "/v1/operator/mfa/enroll", "", true); r.Code != 200 || json.Unmarshal(r.Body.Bytes(), &enrolment) != nil {
+		t.Fatalf("mfa enroll HTTP %d %s", r.Code, r.Body.String())
+	}
+	code, err := operatorauth.TOTPCode(enrolment.Data.Secret, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r := request("POST", "/v1/operator/mfa/enroll/confirm", `{"code":"`+code+`"}`, true); r.Code != 200 {
+		t.Fatalf("mfa confirm HTTP %d %s", r.Code, r.Body.String())
+	}
 	account, err := operatorService.Authenticate(ctx, cookies[operatorSessionCookie].Value, operatorCSRF, true)
 	if err != nil {
 		t.Fatal(err)

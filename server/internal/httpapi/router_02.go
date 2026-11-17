@@ -354,6 +354,10 @@ var signInRoutes = map[string]bool{
 	"POST /v1/operator/login":          true,
 	"POST /v1/operator/email":          true,
 	"POST /v1/operator/setup":          true,
+	// Second-factor codes are guessable at six digits, so they are limited like passwords.
+	"POST /v1/operator/mfa/verify":         true,
+	"POST /v1/operator/mfa/enroll/confirm": true,
+	"POST /v1/operator/mfa/recovery-codes": true,
 }
 
 // failureLimitedRoutes exchange a secret (enrollment token, pairing verifier, join code) before

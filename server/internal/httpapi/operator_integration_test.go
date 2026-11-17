@@ -223,7 +223,7 @@ func TestOperatorConnectedAuthenticationDisclosureAndRevocation(t *testing.T) {
 		t.Fatal(err)
 	}
 	operatorEmail := "operator-" + supportreport.NewReference() + "@example.test"
-	operatorService := &operatorauth.Service{Store: store, BootstrapEmail: operatorEmail}
+	operatorService := &operatorauth.Service{Store: store, BootstrapEmail: operatorEmail, SecretKey: "operator-test-encryption-key"}
 	operatorPassword := "operator test password for connected flow"
 	var operatorID, operatorCSRF string
 	defer func() {
@@ -300,6 +300,28 @@ func TestOperatorConnectedAuthenticationDisclosureAndRevocation(t *testing.T) {
 			t.Fatalf("operator setup response: %v", err)
 		}
 		operatorCSRF = result.Data.CSRFToken
+	}
+	// The password step leaves a pending session: no admin data until the second factor is enrolled and proven.
+	if r := request("GET", path, "", false); r.Code != 403 {
+		t.Fatalf("a pending operator session read admin data: %d %s", r.Code, r.Body.String())
+	}
+	var enrolment struct {
+		Data struct {
+			Secret string `json:"secret"`
+		} `json:"data"`
+	}
+	if r := request("POST", "/v1/operator/mfa/enroll", "", true); r.Code != 200 || json.Unmarshal(r.Body.Bytes(), &enrolment) != nil || enrolment.Data.Secret == "" {
+		t.Fatalf("mfa enroll: %d %s", r.Code, r.Body.String())
+	}
+	if r := request("POST", "/v1/operator/mfa/enroll/confirm", `{"code":"000000"}`, true); r.Code != 401 || !strings.Contains(r.Body.String(), "invalid_code") {
+		t.Fatalf("a wrong enrolment code: %d %s", r.Code, r.Body.String())
+	}
+	code, err := operatorauth.TOTPCode(enrolment.Data.Secret, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r := request("POST", "/v1/operator/mfa/enroll/confirm", `{"code":"`+code+`"}`, true); r.Code != 200 || !strings.Contains(r.Body.String(), "recovery_codes") {
+		t.Fatalf("mfa confirm: %d %s", r.Code, r.Body.String())
 	}
 	account, err := operatorService.Authenticate(ctx, cookies[operatorSessionCookie].Value, operatorCSRF, true)
 	if err != nil {
@@ -457,6 +479,18 @@ func TestOperatorConnectedAuthenticationDisclosureAndRevocation(t *testing.T) {
 			t.Fatalf("operator login response: %v", err)
 		}
 		operatorCSRF = result.Data.CSRFToken
+	}
+	// Signing in again is pending until the code is given. The enrolment used this step's code, so the next step's
+	// (inside the allowed skew) is the one a real authenticator would show next.
+	if r := request("GET", path, "", false); r.Code != 403 {
+		t.Fatalf("a password-only login read admin data: %d", r.Code)
+	}
+	next, err := operatorauth.TOTPCode(enrolment.Data.Secret, time.Now().Add(30*time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r := request("POST", "/v1/operator/mfa/verify", `{"code":"`+next+`"}`, true); r.Code != 200 {
+		t.Fatalf("mfa verify: %d %s", r.Code, r.Body.String())
 	}
 	if r := request("GET", path, "", false); r.Code != 200 {
 		t.Fatalf("operator login did not restore access: %d %s", r.Code, r.Body.String())

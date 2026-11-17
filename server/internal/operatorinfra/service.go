@@ -63,6 +63,7 @@ type RegionMutation struct {
 	Revision    int64  `json:"revision"`
 }
 type RegionPage struct {
+	Total     int64    `json:"total"`
 	Items     []Region `json:"items"`
 	NextAfter string   `json:"next_after,omitempty"`
 }
@@ -71,6 +72,7 @@ type Node struct {
 	ObservedAt        *time.Time `json:"observed_at,omitempty"`
 	RegistryExpiresAt time.Time  `json:"registry_expires_at"`
 	ID                string     `json:"id"`
+	ProtocolVersion   string     `json:"protocol_version"`
 	RegionID          string     `json:"region_id"`
 	EdgePool          string     `json:"edge_pool"`
 	FailureDomain     string     `json:"failure_domain"`
@@ -109,6 +111,7 @@ type NodeMutationResult struct {
 	RuntimeCredential string `json:"runtime_credential,omitempty"`
 }
 type NodePage struct {
+	Total     int64  `json:"total"`
 	Items     []Node `json:"items"`
 	NextAfter string `json:"next_after,omitempty"`
 }
@@ -372,6 +375,9 @@ func (s *Service) ListRegions(ctx context.Context, actor, after string, limit in
 		if err := allowRead(ctx, tx, actor); err != nil {
 			return err
 		}
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM operator_regions`).Scan(&out.Total); err != nil {
+			return err
+		}
 		rows, err := tx.Query(ctx, `SELECT id,display_name,enabled,revision,updated_at FROM operator_regions WHERE id>$1 ORDER BY id LIMIT $2`, after, limit+1)
 		if err != nil {
 			return err
@@ -413,14 +419,17 @@ func (s *Service) ListNodes(ctx context.Context, actor, region, after string, li
 		if err := allowRead(ctx, tx, actor); err != nil {
 			return err
 		}
-		rows, err := tx.Query(ctx, `SELECT n.id,coalesce(m.region_id,n.region,''),n.edge_pool,n.failure_domain,n.state,n.endpoint_host,n.endpoint_tcp_port,n.endpoint_quic_port,n.roles,n.transports,n.capacity_limit,m.revision,n.node_generation,n.last_heartbeat_at,n.registry_expires_at,(n.ready AND n.registry_expires_at>now() AND n.last_heartbeat_at>$4 AND r.enabled AND m.retired_at IS NULL) FROM control_tunnel_nodes n JOIN managed_node_authority m ON m.node_id=n.id JOIN operator_regions r ON r.id=m.region_id WHERE ($1='' OR m.region_id=$1) AND n.id>$2 ORDER BY n.id LIMIT $3`, region, after, limit+1, time.Now().Add(-controlplane.ControlTunnelNodeStaleAfter()))
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM control_tunnel_nodes n JOIN managed_node_authority m ON m.node_id=n.id WHERE ($1='' OR m.region_id=$1)`, region).Scan(&out.Total); err != nil {
+			return err
+		}
+		rows, err := tx.Query(ctx, `SELECT n.id,n.protocol_version,coalesce(m.region_id,n.region,''),n.edge_pool,n.failure_domain,n.state,n.endpoint_host,n.endpoint_tcp_port,n.endpoint_quic_port,n.roles,n.transports,n.capacity_limit,m.revision,n.node_generation,n.last_heartbeat_at,n.registry_expires_at,(n.ready AND n.registry_expires_at>now() AND n.last_heartbeat_at>$4 AND r.enabled AND m.retired_at IS NULL) FROM control_tunnel_nodes n JOIN managed_node_authority m ON m.node_id=n.id JOIN operator_regions r ON r.id=m.region_id WHERE ($1='' OR m.region_id=$1) AND n.id>$2 ORDER BY n.id LIMIT $3`, region, after, limit+1, time.Now().Add(-controlplane.ControlTunnelNodeStaleAfter()))
 		if err != nil {
 			return err
 		}
 		defer rows.Close()
 		for rows.Next() {
 			var v Node
-			if err = rows.Scan(&v.ID, &v.RegionID, &v.EdgePool, &v.FailureDomain, &v.State, &v.EndpointHost, &v.EndpointTCPPort, &v.EndpointQUICPort, &v.Roles, &v.Transports, &v.CapacityLimit, &v.Revision, &v.NodeGeneration, &v.ObservedAt, &v.RegistryExpiresAt, &v.Ready); err != nil {
+			if err = rows.Scan(&v.ID, &v.ProtocolVersion, &v.RegionID, &v.EdgePool, &v.FailureDomain, &v.State, &v.EndpointHost, &v.EndpointTCPPort, &v.EndpointQUICPort, &v.Roles, &v.Transports, &v.CapacityLimit, &v.Revision, &v.NodeGeneration, &v.ObservedAt, &v.RegistryExpiresAt, &v.Ready); err != nil {
 				rows.Close()
 				return errors.Join(err, rows.Err())
 			}
@@ -579,7 +588,7 @@ func (s *Service) RuntimeCredential(ctx context.Context, node string) (string, e
 
 func (s *Service) IsSelfHosted(context.Context, string) (bool, error) { return false, nil }
 func readNodeTx(ctx context.Context, tx *db.Tx, id string, out *Node) error {
-	return tx.QueryRow(ctx, `SELECT n.id,coalesce(m.region_id,n.region,''),n.edge_pool,n.failure_domain,n.state,n.endpoint_host,n.endpoint_tcp_port,n.endpoint_quic_port,n.roles,n.transports,n.capacity_limit,coalesce(m.revision,0),n.node_generation,n.last_heartbeat_at,n.registry_expires_at,(n.ready AND n.registry_expires_at>now() AND n.last_heartbeat_at>$2 AND coalesce(r.enabled,true) AND m.retired_at IS NULL) FROM control_tunnel_nodes n LEFT JOIN managed_node_authority m ON m.node_id=n.id LEFT JOIN operator_regions r ON r.id=m.region_id WHERE n.id=$1`, id, time.Now().Add(-controlplane.ControlTunnelNodeStaleAfter())).Scan(&out.ID, &out.RegionID, &out.EdgePool, &out.FailureDomain, &out.State, &out.EndpointHost, &out.EndpointTCPPort, &out.EndpointQUICPort, &out.Roles, &out.Transports, &out.CapacityLimit, &out.Revision, &out.NodeGeneration, &out.ObservedAt, &out.RegistryExpiresAt, &out.Ready)
+	return tx.QueryRow(ctx, `SELECT n.id,n.protocol_version,coalesce(m.region_id,n.region,''),n.edge_pool,n.failure_domain,n.state,n.endpoint_host,n.endpoint_tcp_port,n.endpoint_quic_port,n.roles,n.transports,n.capacity_limit,coalesce(m.revision,0),n.node_generation,n.last_heartbeat_at,n.registry_expires_at,(n.ready AND n.registry_expires_at>now() AND n.last_heartbeat_at>$2 AND coalesce(r.enabled,true) AND m.retired_at IS NULL) FROM control_tunnel_nodes n LEFT JOIN managed_node_authority m ON m.node_id=n.id LEFT JOIN operator_regions r ON r.id=m.region_id WHERE n.id=$1`, id, time.Now().Add(-controlplane.ControlTunnelNodeStaleAfter())).Scan(&out.ID, &out.ProtocolVersion, &out.RegionID, &out.EdgePool, &out.FailureDomain, &out.State, &out.EndpointHost, &out.EndpointTCPPort, &out.EndpointQUICPort, &out.Roles, &out.Transports, &out.CapacityLimit, &out.Revision, &out.NodeGeneration, &out.ObservedAt, &out.RegistryExpiresAt, &out.Ready)
 }
 
 var identifier = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$`)
