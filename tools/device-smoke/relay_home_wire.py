@@ -28,7 +28,7 @@ def sudo(*args, **kw):
 
 @contextlib.contextmanager
 def blocked(address):
-    """Drop every packet from this machine to ADDRESS (the relay's host) while the context lasts. A Windows device: a firewall
+    """Silently drop packets between this machine and ADDRESS (the relay's host) while the context lasts. A Windows device: a firewall
     block of its pb.exe to ADDRESS (a timer on the device lifts it whatever happens here)."""
     device = winhost.device()
     if device:
@@ -50,11 +50,8 @@ def blocked(address):
             if token:
                 sudo('pfctl', '-X', token.group(1))
         return
-    sudo('iptables', '-I', 'OUTPUT', '-d', address, '-j', 'DROP')
-    try:
+    with winhost.linux_silent_cut(['-d', address], ['-s', address]):  # an OUTPUT DROP would fail sends with EPERM
         yield
-    finally:
-        sudo('iptables', '-D', 'OUTPUT', '-d', address, '-j', 'DROP')
 
 
 def status():

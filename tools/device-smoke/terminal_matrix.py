@@ -16,6 +16,7 @@ Usage: terminal_matrix.py TARGET [--only ROW,ROW] [--member-cmd CMD [--member-pb
        [--restart-target-cmd CMD --restart-client-cmd CMD]   (N14: commands that restart the target host runtime / this daemon)
 """
 import argparse
+import contextlib
 import hashlib
 import os
 from pathlib import Path
@@ -282,10 +283,9 @@ def drop_all(seconds):
         return DEVICE.cut_network(seconds + 60)
     if DARWIN:
         return pf_block('block drop quick on ! lo0 all\n', seconds + 60)
-    iptables('-I', 'OUTPUT', '-o', 'lo', '-j', 'ACCEPT')
-    iptables('-I', 'OUTPUT', '2', '-j', 'DROP')
-    iptables('-I', 'INPUT', '-i', 'lo', '-j', 'ACCEPT')
-    iptables('-I', 'INPUT', '2', '-j', 'DROP')
+    block = contextlib.ExitStack()  # silent: an OUTPUT DROP fails every send with EPERM, which no real outage does
+    block.enter_context(winhost.linux_silent_cut(['!', '-o', 'lo'], ['!', '-i', 'lo']))
+    return block
 
 
 def drop_restore(block):
@@ -295,9 +295,7 @@ def drop_restore(block):
         return block.release()
     if DARWIN:
         return pf_release(block)
-    for chain, iface in [('OUTPUT', '-o'), ('INPUT', '-i')]:
-        iptables('-D', chain, '-j', 'DROP')
-        iptables('-D', chain, iface, 'lo', '-j', 'ACCEPT')
+    block.close()
 
 
 # Rows. Each takes (args, sessions) and records its own result; sessions collects names to clean up.

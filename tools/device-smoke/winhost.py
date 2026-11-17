@@ -186,6 +186,49 @@ def peer_cut_held(*args):
         capture.append(peer_cut('remove'))
 
 
+@contextlib.contextmanager
+def linux_silent_cut(out_match, in_match):
+    """Drop this Linux machine's packets the way a dead network does: no send fails. An iptables DROP in OUTPUT fails
+    sendmsg with EPERM and magicsock rebinds at once (magicsock_notplan9.go), so a check would measure that fast path
+    instead of the ~6.5 s a real black hole takes. Outgoing packets matching out_match are marked and lost in a netem
+    qdisc on the default-route interfaces (the send succeeds, nothing reaches the wire); incoming ones matching in_match
+    are dropped in INPUT. Yields a list that holds the proof line once the cut is lifted."""
+    sudo = lambda *a: subprocess.run(['sudo', '-n', *a], capture_output=True, text=True, timeout=30)
+    routes = sudo('ip', 'route', 'show', 'default').stdout + sudo('ip', '-6', 'route', 'show', 'default').stdout
+    devs = sorted(set(re.findall(r'\bdev (\S+)', routes)))
+    if not devs:
+        raise RuntimeError('silent cut: no default route on this machine')
+    tag = ['-m', 'comment', '--comment', 'pbsilent']
+    rules = [(t, ['-t', 'mangle'], 'OUTPUT', out_match + tag + ['-j', 'MARK', '--set-mark', '0x70b']) for t in ('iptables', 'ip6tables')]
+    rules += [(t, [], 'INPUT', in_match + tag + ['-j', 'DROP']) for t in ('iptables', 'ip6tables')]
+    proof = []
+    try:
+        for dev in devs:
+            for step in (['qdisc', 'add', 'dev', dev, 'root', 'handle', '70b:', 'prio', 'bands', '3', 'priomap'] + ['0'] * 16,
+                         ['qdisc', 'add', 'dev', dev, 'parent', '70b:3', 'handle', '70c:', 'netem', 'loss', '100%'],
+                         ['filter', 'add', 'dev', dev, 'parent', '70b:', 'protocol', 'all', 'prio', '1', 'handle', '0x70b',
+                          'fw', 'flowid', '70b:3']):
+                done = sudo('tc', *step)
+                if done.returncode:
+                    raise RuntimeError('silent cut: tc %s: %s' % (' '.join(step[:2]), done.stderr.strip()))
+        added = {chain for tool, table, chain, rule in rules if not sudo(tool, *table, '-I', chain, *rule).returncode}
+        if added != {'OUTPUT', 'INPUT'}:  # an address rule goes in for its own family only
+            raise RuntimeError('silent cut: iptables could not add the rules (added: %s)' % ', '.join(sorted(added)))
+        yield proof
+    finally:
+        lost = sum(int(n) for dev in devs for n in re.findall(r'dropped (\d+)', sudo('tc', '-s', 'qdisc', 'show', 'dev', dev,
+                                                                                       'handle', '70c:').stdout))
+        dropped = sum(int(line.split()[0]) for t in ('iptables', 'ip6tables')
+                      for line in sudo(t, '-vnxL', 'INPUT').stdout.splitlines() if 'pbsilent' in line)
+        for tool, table, chain, rule in rules:
+            sudo(tool, *table, '-D', chain, *rule)
+        for dev in devs:
+            sudo('tc', 'qdisc', 'del', 'dev', dev, 'root', 'handle', '70b:')
+        proof.append('silent cut on %s: %d outgoing packets lost after their send succeeded, %d incoming dropped'
+                     % (','.join(devs), lost, dropped))
+        print(proof[0], file=sys.stderr, flush=True)
+
+
 NON_LOOPBACK = ['0.0.0.0-126.255.255.255', '128.0.0.0-255.255.255.255', '2000::/3', 'fe80::/10', 'fc00::/7']
 LISTENING = ("try{$c=New-Object Net.Sockets.TcpClient('127.0.0.1',[int]$req.port);$c.Close();'yes'}catch{'no'}")
 ALIVE = "if(Get-Process -Id $req.pid -ErrorAction SilentlyContinue){'yes'}else{'no'}"

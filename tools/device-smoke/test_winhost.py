@@ -372,6 +372,27 @@ class WindowsChecksRunner(unittest.TestCase):
         self.assertEqual([['add', 'silent', '203.0.113.7'], ['remove']], calls)
         self.assertEqual(['capture sent=0'], capture)
 
+    def test_the_linux_cut_is_silent_and_lifted_on_every_path(self):
+        calls = []
+
+        def run(argv, **kw):
+            calls.append(argv[2:])
+            out = {'route': 'default via 10.0.0.1 dev eth0 \n', '-s': ' Sent 0 bytes 0 pkt (dropped 7, overlimits 0)\n',
+                   '-vnxL': '      3   120 DROP  all  --  !lo  *  0.0.0.0/0  0.0.0.0/0  /* pbsilent */\n'}
+            return subprocess.CompletedProcess(argv, 0, out.get(argv[3], ''), '')
+        with patch.object(winhost.subprocess, "run", run):
+            with self.assertRaises(RuntimeError), winhost.linux_silent_cut(['!', '-o', 'lo'], ['!', '-i', 'lo']) as proof:
+                raise RuntimeError('the check failed')
+        added = [c for c in calls if '-I' in c]
+        # nothing drops in OUTPUT (that fails sendmsg with EPERM): outgoing packets are marked for the netem qdisc
+        self.assertFalse([c for c in added if 'OUTPUT' in c and 'DROP' in c])
+        self.assertIn(['iptables', '-t', 'mangle', '-I', 'OUTPUT', '!', '-o', 'lo', '-m', 'comment', '--comment', 'pbsilent',
+                       '-j', 'MARK', '--set-mark', '0x70b'], calls)
+        self.assertIn(['tc', 'qdisc', 'add', 'dev', 'eth0', 'parent', '70b:3', 'handle', '70c:', 'netem', 'loss', '100%'], calls)
+        self.assertEqual(4, len([c for c in calls if '-D' in c]))
+        self.assertIn(['tc', 'qdisc', 'del', 'dev', 'eth0', 'root', 'handle', '70b:'], calls)
+        self.assertEqual(['silent cut on eth0: 7 outgoing packets lost after their send succeeded, 6 incoming dropped'], proof)
+
     def test_every_check_names_a_script_and_missing_fixtures_are_reported(self):
         import windows_checks
         table = windows_checks.checks(self.args())

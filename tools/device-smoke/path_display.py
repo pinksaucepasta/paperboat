@@ -24,8 +24,8 @@ PB = winhost.pb_path()
 DARWIN = os.uname().sysname == 'Darwin'
 # The stock macOS pf.conf evaluates com.apple/* anchors, so no change to the main ruleset is needed.
 PF_ANCHOR = 'com.apple/pbsmoke-path'
+# silent: macOS pf drops these after sendto succeeded (5/5 sent, 0 on en0; rerun-silentcut-20261117.md)
 PF_RULE = 'block drop out quick on ! lo0 proto udp from any to any port != 53\n'
-BLOCK = ['sudo', '-n', 'iptables', '{}', 'OUTPUT', '-p', 'udp', '!', '--dport', '53', '-j', 'DROP']
 
 
 def pb(*args):
@@ -59,12 +59,9 @@ def udp_blocked():
         finally:
             failsafe.terminate()
         return
-    rule = lambda flag: [flag if part == '{}' else part for part in BLOCK]
-    subprocess.run(rule('-I'), check=True)
-    try:
+    # silent, as on a real dead path: an OUTPUT DROP would fail sendmsg with EPERM and pb would drop the path at once
+    with winhost.linux_silent_cut(['!', '-o', 'lo', '-p', 'udp', '!', '--dport', '53'], ['!', '-i', 'lo', '-p', 'udp', '!', '--sport', '53']):
         yield
-    finally:
-        subprocess.run(rule('-D'), check=False)
 
 
 def bundle_status(path):
