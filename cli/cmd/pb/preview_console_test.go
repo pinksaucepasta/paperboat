@@ -408,3 +408,32 @@ func TestPreviewConsoleThemeAndAccentAreContextLocal(t *testing.T) {
 		t.Fatal("another console theme changed the original instance")
 	}
 }
+
+// Mouse moves, scrolling and poll ticks arrive constantly; none of them may re-wrap the
+// body, and View must draw the viewport as it is instead of laying it out again.
+func TestPreviewConsoleLaysOutOnlyWhenContentChanges(t *testing.T) {
+	model := previewConsoleModel{ctx: context.Background(), lease: preview.Lease{Endpoint: "https://preview.example", State: "ready"}, target: preview.LeaseTarget{Scheme: "http", Address: "127.0.0.1:3000"}, visibility: "private", input: textinput.New()}
+	next, _ := model.Update(tea.WindowSizeMsg{Width: 60, Height: 20})
+	model = next.(previewConsoleModel)
+	if !strings.Contains(model.view.View(), "127.0.0.1:3000") {
+		t.Fatalf("resize did not lay the body out: %q", model.view.View())
+	}
+	model.view.SetContent("SENTINEL")
+	if !strings.Contains(model.View().Content, "SENTINEL") {
+		t.Fatal("View re-laid-out the viewport")
+	}
+	for _, msg := range []tea.Msg{tea.MouseMotionMsg{X: 3, Y: 3}, tea.MouseWheelMsg{Button: tea.MouseWheelDown}, previewConsoleTick{}, tea.KeyPressMsg{Code: tea.KeyDown}} {
+		next, _ = model.Update(msg)
+		if !strings.Contains(next.(previewConsoleModel).view.View(), "SENTINEL") {
+			t.Fatalf("%T re-laid-out the unchanged body", msg)
+		}
+	}
+	next, _ = model.Update(previewConsoleStatus{lease: api.PreviewLease{State: "ready"}})
+	if strings.Contains(next.(previewConsoleModel).view.View(), "SENTINEL") {
+		t.Fatal("a status poll left stale content")
+	}
+	next, _ = model.Update(tea.KeyPressMsg{Text: "b"})
+	if got := next.(previewConsoleModel); got.prompt != "background" || strings.Contains(got.view.View(), "SENTINEL") {
+		t.Fatalf("opening a prompt did not re-lay-out the shorter viewport (prompt %q)", got.prompt)
+	}
+}

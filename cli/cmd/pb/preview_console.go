@@ -56,6 +56,7 @@ type previewConsoleModel struct {
 	domains       []string
 	status        string
 	pollError     string
+	polls         int // status polls applied; part of layoutKey (domain rows change the content)
 	lastPollFault *previewConsoleFailureClass
 	pollObserved  bool
 	domainStatus  []api.PreviewDomainSummary
@@ -74,10 +75,31 @@ type previewConsoleModel struct {
 func (m previewConsoleModel) Init() tea.Cmd {
 	return tea.Batch(selector.RequestBackground(), m.poll, func() tea.Msg { return previewConsoleEnded{<-m.ended} })
 }
+
+// layoutKey holds everything the viewport content and the header/footer height
+// depend on; scrolling, mouse and tick messages leave it unchanged.
+type previewConsoleLayoutKey struct {
+	width, height, polls             int
+	state, status, pollError, prompt string
+}
+
+func (m previewConsoleModel) layoutKey() previewConsoleLayoutKey {
+	return previewConsoleLayoutKey{m.width, m.height, m.polls, m.lease.State, m.status, m.pollError, m.prompt}
+}
+
+// Update lays the viewport out only when something it shows changed, so a mouse move
+// or a tick never re-wraps the whole body; View never mutates the model.
 func (m previewConsoleModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if m.width > 0 {
-		m.prepareViewport()
+	before := m.layoutKey()
+	next, cmd := m.update(msg)
+	if updated, ok := next.(previewConsoleModel); ok && updated.width > 0 && updated.layoutKey() != before {
+		updated.prepareViewport()
+		next = updated
 	}
+	return next, cmd
+}
+
+func (m previewConsoleModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch v := msg.(type) {
 	case tea.BackgroundColorMsg:
 		selector.ObserveBackground(v)
@@ -112,6 +134,7 @@ func (m previewConsoleModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.pollError = previewConsoleFailureText("Status unavailable: "+userFacingError(v.err), fault, m.pollObserved)
 		} else {
+			m.polls++
 			m.lease.State = v.lease.State
 			m.pollError = ""
 			m.domainStatus = v.lease.Domains
@@ -349,7 +372,6 @@ func (m previewConsoleModel) render() string {
 	if m.width == 0 {
 		return m.content()
 	}
-	m.prepareViewport()
 	header, footer := m.frame()
 	if len(header) > 0 && header[0] == "PAPERBOAT PREVIEW" {
 		header[0] = selector.TitleStyle(m.ctx).Render(header[0])
@@ -431,6 +453,7 @@ func runPreviewConsole(command *cobra.Command, lease preview.Lease, target previ
 	input := textinput.New()
 	input.CharLimit = 63
 	model := previewConsoleModel{ctx: ctx, lease: lease, target: target, visibility: visibility, domains: domains, input: input, view: viewport.New(viewport.WithWidth(80), viewport.WithHeight(23)), width: 80, height: 24, perform: perform, poll: poll, ended: ended}
+	model.prepareViewport() // Update lays out only on changes; an unchanged 80x24 resize must not leave it empty
 	result, err := tea.NewProgram(model, tea.WithContext(ctx), tea.WithInput(command.InOrStdin()), tea.WithOutput(command.OutOrStdout())).Run()
 	cancel()
 	workers.Wait()
