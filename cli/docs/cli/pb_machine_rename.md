@@ -4,16 +4,21 @@ Rename a machine
 
 ### Synopsis
 
-Rename a machine
-
-Change the display name of one enrolled machine. The enrollment identity and grants stay attached to the machine; callers should use the returned name for future selection.
-
-Machines are account enrollments with independent names, capabilities, and revocation state. Changes target the selected machine, while pb setup configures the current machine. Revocation disconnects an enrollment rather than just hiding it from the list.
+Rename a machine, selected by its current name or ID. The new name must follow the machine
+name rules; a refused name is explained without echoing what you typed. Its ID and grants
+stay as they are. Afterwards the local machine list refreshes, so the new name resolves at once.
 
 JSON output is supported with --json.
 
 ```
 pb machine rename <machine> <name> [flags]
+```
+
+### Examples
+
+```
+  pb machine rename old-name db-1
+  pb machine rename m_abc123 db-1 --json
 ```
 
 ### Options

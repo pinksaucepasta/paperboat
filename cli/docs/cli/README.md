@@ -9,7 +9,7 @@ Read the [CLI guide](../cli.md) for interactive use, scripting, installation of 
 | [pb](pb.md) | Open Paperboat or connect to an environment terminal |
 | [pb access](pb_access.md) | Open authenticated private access |
 | [pb access machine](pb_access_machine.md) | Forward a local port to an authorized machine service |
-| [pb access tunnel](pb_access_tunnel.md) | Open private TCP access through stable hostd |
+| [pb access tunnel](pb_access_tunnel.md) | Open private TCP access to a private tunnel route |
 | [pb account](pb_account.md) | Manage your Paperboat account |
 | [pb account delete](pb_account_delete.md) | Show where to delete your Paperboat account |
 | [pb api-token](pb_api-token.md) | Create, list and revoke workspace API tokens |
@@ -128,11 +128,11 @@ Read the [CLI guide](../cli.md) for interactive use, scripting, installation of 
 | [pb inbox](pb_inbox.md) | Manage the Paperboat Inbox |
 | [pb inbox approve](pb_inbox_approve.md) | Approve an exact team file request |
 | [pb inbox decline](pb_inbox_decline.md) | Decline an exact team file request |
-| [pb inbox path](pb_inbox_path.md) |  |
+| [pb inbox path](pb_inbox_path.md) | Show this machine's Inbox directory |
 | [pb inbox policy](pb_inbox_policy.md) | Show or update team file acceptance |
 | [pb inbox requests](pb_inbox_requests.md) | List team file requests |
-| [pb inbox reset](pb_inbox_reset.md) |  |
-| [pb inbox set](pb_inbox_set.md) |  |
+| [pb inbox reset](pb_inbox_reset.md) | Restore the default Inbox directory |
+| [pb inbox set](pb_inbox_set.md) | Set this machine's Inbox directory |
 | [pb install](pb_install.md) | Install this executable and its local service |
 | [pb login](pb_login.md) | Add this computer to your account, or sign in again, through browser approval |
 | [pb logout](pb_logout.md) | Revoke and remove the active client session |

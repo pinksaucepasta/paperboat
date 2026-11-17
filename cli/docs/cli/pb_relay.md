@@ -4,14 +4,22 @@ Inspect hosted and self-hosted relays
 
 ### Synopsis
 
-Inspect hosted and self-hosted relays
-
-Inspect relay regions and self-hosted relay installations selected by the account's relay pool. The list measures hosted network latency and labels self-hosted readiness separately.
+Inspect the relays this computer can use. A relay carries traffic between machines when
+they cannot reach each other directly. The list combines the relays Paperboat runs with the
+self-hosted relays your account has selected, and shows how long this machine took to reach
+each one.
 
 With --json, this command group lists its available commands.
 
 ```
 pb relay [flags]
+```
+
+### Examples
+
+```
+  pb relay list
+  pb relay list --json
 ```
 
 ### Options

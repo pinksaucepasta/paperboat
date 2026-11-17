@@ -136,13 +136,12 @@ func accessMachineCobraCommandV1() *cobra.Command {
 	command := &cobra.Command{
 		Use:   "machine <machine>",
 		Short: "Forward a local port to an authorized machine service",
-		Long:  "Forward a loopback TCP port in this process's network namespace to one authorized machine service. The forward runs in the foreground; processes sharing the namespace can connect to it.",
 		Args:  commandArgs(cobra.ExactArgs(1)),
 		RunE:  runAccessMachine,
 	}
-	command.Flags().Int("port", 0, "remote machine TCP port")
+	command.Flags().Int("port", 0, "TCP port on the machine (required, 1-65535)")
 	_ = command.MarkFlagRequired("port")
-	command.Flags().String("listen", "127.0.0.1:0", "literal-loopback listen address")
+	command.Flags().String("listen", "127.0.0.1:0", "loopback address to listen on, 127.0.0.1 or ::1 with optional port (default: a free port)")
 	tunnelJSONFlag(command)
 	return command
 }

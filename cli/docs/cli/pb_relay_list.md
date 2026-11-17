@@ -4,14 +4,19 @@ List hosted and self-hosted relays
 
 ### Synopsis
 
-List relay candidates from the signed native network authority and the
-signed-in account's selected self-hosted relay pool. Mixed mode shows both
-sources. Self-hosted-only mode shows only selected self-hosted relays,
-including unavailable ones. Sign-in and the local daemon are required.
+List the relay candidates this computer can use: the relays from the signed network
+authority and the self-hosted relays your account has selected. In mixed pool mode both appear.
+In self-hosted-only mode only the selected self-hosted relays appear, including unavailable
+ones, and Paperboat's relays are never used instead.
 
-Reported_ready means a recent signed control-plane observation, not a live
-data connection. Use --json for paperboat.relay-list/v1 output with the pool
-mode, relays, and observation timestamps.
+STATUS is reported_ready when a signed control-plane observation of the relay is under 15
+seconds old; it is not a live connection test. LATENCY is the connect time this machine last
+measured to the relay, as its daemon reported it (measured about every 15 minutes, shown while
+under an hour old). It is "-" until a measurement exists. The numbers are for display and never
+choose a path.
+
+Sign-in and the local daemon are required. With --json the output is paperboat.relay-list/v1:
+the pool mode and the relays, each with latency_ms and latency_measured_at once measured.
 
 JSON output is supported with --json.
 

@@ -4,16 +4,25 @@ Print Linux/macOS and Windows machine enrollment commands
 
 ### Synopsis
 
-Print Linux/macOS and Windows machine enrollment commands
+Print the one-shot commands that enroll a new machine: one for Linux and macOS, one for
+Windows. Run the printed command on the new machine soon after: the enrollment token in it is
+single-use and expires (--json shows expires_at). With --workspace the token
+is for that workspace. --name suggests the machine's hostname.
 
-Create an enrollment command for Linux, macOS, or Windows and optionally give the new machine a name. The printed one-shot material should be used on the intended machine.
-
-Machines are account enrollments with independent names, capabilities, and revocation state. Changes target the selected machine, while pb setup configures the current machine. Revocation disconnects an enrollment rather than just hiding it from the list.
+If the printed commands cannot be shown, the unused enrollment is cancelled again.
 
 JSON output is supported with --json.
 
 ```
 pb machine add [flags]
+```
+
+### Examples
+
+```
+  pb machine add
+  pb machine add --name db-1
+  pb machine add --workspace acme --json
 ```
 
 ### Options

@@ -10,10 +10,8 @@ pb-edge - Inspect tunnel edges
 
 
 .SH DESCRIPTION
-Inspect tunnel edges
-
-.PP
-List tunnel edges and their observed state for the active workspace. Managed-only lists Paperboat-managed edges; self-hosted-only lists only selected self-hosted edges and never falls back to managed infrastructure.
+Inspect the tunnel edges that serve the active workspace: edges Paperboat runs, or the
+self-hosted edges you selected. Listing an edge never grants a route admission.
 
 .PP
 With --json, this command group lists its available commands.
@@ -43,6 +41,13 @@ With --json, this command group lists its available commands.
 .PP
 \fB--workspace\fP=""
 	resource workspace selector: personal or a team slug
+
+
+.SH EXAMPLE
+.EX
+  pb edge list
+  pb edge list --workspace acme --json
+.EE
 
 
 .SH SEE ALSO

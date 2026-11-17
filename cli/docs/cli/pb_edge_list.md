@@ -15,7 +15,7 @@ route authorization still apply.
 
 The table identifies each edge's source, region, status, and last heartbeat.
 Self-hosted readiness comes from the control plane; hosted status is an
-	observed node state. Use --json for paperboat.edge-list/v1 output with the
+observed node state. Use --json for paperboat.edge-list/v1 output with the
 active workspace's pool mode and edge list.
 
 JSON output is supported with --json.

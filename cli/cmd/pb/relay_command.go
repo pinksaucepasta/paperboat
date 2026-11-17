@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"slices"
@@ -22,6 +23,9 @@ type relayListResult struct {
 	Source     string `json:"source"`
 	Status     string `json:"status"`
 	ObservedAt int64  `json:"observed_at,omitempty"`
+	// This machine's latest connect time to the relay (under an hour old); absent until measured.
+	LatencyMillis     *int64 `json:"latency_ms,omitempty"`
+	LatencyMeasuredAt int64  `json:"latency_measured_at,omitempty"`
 }
 
 func actionRelayList(command *cobra.Command, _ []string) error {
@@ -43,7 +47,8 @@ func actionRelayList(command *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	selfhost, pool, err := api.New(cfg.ServerURL, credential, nil).SelfhostInventory(command.Context(), "relay")
+	client := api.New(cfg.ServerURL, credential, nil)
+	selfhost, pool, err := client.SelfhostInventory(command.Context(), "relay")
 	if err != nil {
 		return friendlyCommandError(err)
 	}
@@ -64,6 +69,9 @@ func actionRelayList(command *cobra.Command, _ []string) error {
 		return fmt.Errorf("verified native relay inventory: %w", err)
 	}
 	results := relayListResults(inventory, selfhost, pool.Mode, time.Now())
+	if err := addRelayLatency(command.Context(), client, results); err != nil {
+		fmt.Fprintf(command.ErrOrStderr(), "Latency is not shown: %v\n", err)
+	}
 	jsonOutput, _ := command.Flags().GetBool("json")
 	if jsonOutput {
 		return json.NewEncoder(command.OutOrStdout()).Encode(struct {
@@ -73,13 +81,17 @@ func actionRelayList(command *cobra.Command, _ []string) error {
 		}{Schema: "paperboat.relay-list/v1", PoolMode: pool.Mode, Relays: results})
 	}
 	writer := tabwriter.NewWriter(command.OutOrStdout(), 0, 4, 2, ' ', 0)
-	_, _ = fmt.Fprintln(writer, "RELAY\tNAME\tSOURCE\tREGION\tSTATUS")
+	_, _ = fmt.Fprintln(writer, "RELAY\tNAME\tSOURCE\tREGION\tSTATUS\tLATENCY")
 	for _, result := range results {
 		region := result.Region
 		if region == "" {
 			region = "-"
 		}
-		_, _ = fmt.Fprintf(writer, "%s\t%s\t%s\t%s\t%s\n", result.RelayID, result.Name, result.Source, region, result.Status)
+		latency := "-"
+		if result.LatencyMillis != nil {
+			latency = fmt.Sprintf("%d ms", *result.LatencyMillis)
+		}
+		_, _ = fmt.Fprintf(writer, "%s\t%s\t%s\t%s\t%s\t%s\n", result.RelayID, result.Name, result.Source, region, result.Status, latency)
 	}
 	return writer.Flush()
 }
@@ -119,4 +131,33 @@ func relayListResults(inventory localapi.RelayInventory, selfhost []api.Selfhost
 		}
 	}
 	return results
+}
+
+// addRelayLatency fills in this machine's latest connect time to each relay, as its daemon reported it to the server.
+func addRelayLatency(ctx context.Context, client *api.Client, results []relayListResult) error {
+	machineID, err := configuredMachineID()
+	if err != nil {
+		return err
+	}
+	items, err := client.MachineLatencies(ctx, machineID)
+	if err != nil {
+		return err
+	}
+	setRelayLatency(results, items)
+	return nil
+}
+
+func setRelayLatency(results []relayListResult, items []api.MachineLatency) {
+	byNode := make(map[string]api.MachineLatency, len(items))
+	for _, item := range items {
+		if item.Role == "relay" {
+			byNode[item.NodeID] = item
+		}
+	}
+	for i := range results {
+		if item, ok := byNode[results[i].RelayID]; ok {
+			rtt := item.RTTMillis
+			results[i].LatencyMillis, results[i].LatencyMeasuredAt = &rtt, item.MeasuredAt.Unix()
+		}
+	}
 }

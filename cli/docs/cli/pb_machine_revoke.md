@@ -4,16 +4,27 @@ Disconnect and revoke a machine
 
 ### Synopsis
 
-Disconnect and revoke a machine
+Disconnect a machine and revoke its enrollment: its credentials lose authority and it
+leaves your list. Revoking is not undone; the machine has to be enrolled again.
 
-Disconnect and revoke the selected enrollment. Existing machine credentials lose authority; the confirmation code confirms this account-level removal.
+Confirmation is two steps. Run the command without --confirm: it changes nothing, shows what
+would happen and prints a six-character code (exit status 2). Run the same command again with
+--confirm CODE within 5 minutes. The code works once and only for that exact command and target.
 
-Machines are account enrollments with independent names, capabilities, and revocation state. Changes target the selected machine, while pb setup configures the current machine. Revocation disconnects an enrollment rather than just hiding it from the list.
+Revoking a machine that is already disconnected reports success. If the device was lost or
+compromised, rotate your ENV keys afterwards.
 
 JSON output is supported with --json.
 
 ```
 pb machine revoke <machine> [flags]
+```
+
+### Examples
+
+```
+  pb machine revoke old-laptop
+  pb machine revoke old-laptop --confirm K3M9QX --json
 ```
 
 ### Options

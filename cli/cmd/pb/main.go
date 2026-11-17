@@ -476,14 +476,7 @@ recovery instructions before retrying an operation that may have created resourc
 	ping.Flags().Bool("json", false, "print JSON")
 	root.AddCommand(ping)
 	relay := &cobra.Command{Use: "relay", Short: "Inspect hosted and self-hosted relays"}
-	relayList := &cobra.Command{Use: "list", Short: "List hosted and self-hosted relays", Long: `List relay candidates from the signed native network authority and the
-signed-in account's selected self-hosted relay pool. Mixed mode shows both
-sources. Self-hosted-only mode shows only selected self-hosted relays,
-including unavailable ones. Sign-in and the local daemon are required.
-
-Reported_ready means a recent signed control-plane observation, not a live
-data connection. Use --json for paperboat.relay-list/v1 output with the pool
-mode, relays, and observation timestamps.`, Example: "  pb relay list\n  pb relay list --json", Args: commandArgs(cobra.NoArgs), RunE: actionRelayList}
+	relayList := &cobra.Command{Use: "list", Short: "List hosted and self-hosted relays", Args: commandArgs(cobra.NoArgs), RunE: actionRelayList}
 	relayList.Flags().Bool("json", false, "print JSON")
 	relay.AddCommand(relayList)
 	root.AddCommand(relay)
@@ -730,7 +723,7 @@ func addSendManagementCommands(root *cobra.Command) {
 	list.Flags().String("q", "", "filter by file basename or transfer ID")
 	list.Flags().String("state", "", "filter by transfer state")
 	for _, command := range []*cobra.Command{list, status, cancelTransfer} {
-		command.Flags().String("on", "", "destination machine name or ID")
+		command.Flags().String("on", "", "machine the files were sent to, by name or ID (required)")
 		command.Flags().String("session", "", "terminal session ID for destination context")
 		command.Flags().Bool("json", false, "print JSON")
 	}

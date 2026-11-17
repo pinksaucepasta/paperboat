@@ -4,16 +4,28 @@ Set incoming services for a machine
 
 ### Synopsis
 
-Set incoming services for a machine
+Choose which incoming services a machine accepts. Each flag is true or false; at least one
+is required and the others stay as they are:
 
-Enable or disable incoming terminal, managed SSH, file receive, and preview tunnel services for one machine. Disabled services are not made available simply because the machine is online.
+  --terminal        Paperboat terminal and pb exec
+  --managed-ssh     managed SSH, SCP, SFTP and rsync
+  --file-receive    files sent to its Inbox with pb send
+  --preview-tunnel  serving previews and tunnels
 
-Machines are account enrollments with independent names, capabilities, and revocation state. Changes target the selected machine, while pb setup configures the current machine. Revocation disconnects an enrollment rather than just hiding it from the list.
+A disabled service stays unavailable even while the machine is online. The command saves the
+setting and reports how far it has been applied.
 
 JSON output is supported with --json.
 
 ```
 pb machine capabilities <machine> [flags]
+```
+
+### Examples
+
+```
+  pb machine capabilities db --terminal=true --managed-ssh=true
+  pb machine capabilities db --file-receive=false
 ```
 
 ### Options

@@ -4,14 +4,27 @@ Manage machines
 
 ### Synopsis
 
-Manage machines
+List and manage the machines enrolled in your account: print the command that enrolls a new
+one (add), rename it, choose whether it may sleep (availability), choose which incoming services
+it accepts (capabilities), tag it, or revoke it. These commands name any enrolled machine by name
+or ID; pb setup is what configures the machine you are sitting at. Revoking disconnects the
+enrollment, it does not just hide the machine from the list.
 
-List account machines, print a one-shot enrollment command, and manage one machine's name, availability, capabilities, or revocation. All mutations are scoped to an exact enrollment; a machine's online state does not by itself grant a service capability.
+In an interactive terminal, pb machine with no subcommand opens the machine picker. Elsewhere it
+prints this help.
 
 With --json, this command group lists its available commands.
 
 ```
 pb machine [flags]
+```
+
+### Examples
+
+```
+  pb machine list
+  pb machine add --name db-1
+  pb machine revoke old-laptop
 ```
 
 ### Options

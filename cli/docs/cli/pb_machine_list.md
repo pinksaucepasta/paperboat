@@ -4,16 +4,25 @@ List enrolled machines
 
 ### Synopsis
 
-List enrolled machines
+List enrolled machines, one per line: name, ownership (personal or team:<team>), state, your
+permissions on it, its tags and its ID. Filter with --tag (repeat it to require several tags),
+--owner, --q and --state. The list stops at --limit unless you pass --all, and says how many
+more exist.
 
-Show enrolled machines and their current account-visible state. Use the returned machine identity for rename, capabilities, availability, or revoke.
-
-Machines are account enrollments with independent names, capabilities, and revocation state. Changes target the selected machine, while pb setup configures the current machine. Revocation disconnects an enrollment rather than just hiding it from the list.
+With --json the output is {"version", "machines", "total"}.
 
 JSON output is supported with --json.
 
 ```
 pb machine list [flags]
+```
+
+### Examples
+
+```
+  pb machine list
+  pb machine list --tag prod --tag ci
+  pb machine list --state offline --json
 ```
 
 ### Options

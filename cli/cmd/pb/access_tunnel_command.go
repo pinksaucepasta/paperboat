@@ -88,8 +88,8 @@ type accessTunnelRuntime interface {
 var accessTunnelRuntimeForCommand = newProductionAccessTunnelRuntime
 
 func accessTunnelCobraCommandV1() *cobra.Command {
-	command := tunnelCommand("tunnel <tunnel-or-route>", "Open private TCP access through stable hostd", cobra.ExactArgs(1), runAccessTunnel)
-	command.Flags().String("listen", "127.0.0.1:0", "literal-loopback listen address")
+	command := tunnelCommand("tunnel <tunnel-or-route>", "Open private TCP access to a private tunnel route", cobra.ExactArgs(1), runAccessTunnel)
+	command.Flags().String("listen", "127.0.0.1:0", "loopback address to listen on, 127.0.0.1 or ::1 with optional port (default: a free port)")
 	tunnelJSONFlag(command)
 	return command
 }
