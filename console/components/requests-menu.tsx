@@ -28,7 +28,8 @@ import { useTrack } from "@/lib/analytics"
 
 /**
  * The header's Requests: things waiting for you to accept or decline (files teammates want to send,
- * team invitations, machines members asked to add). Nothing shows while nothing waits.
+ * team invitations, machines members asked to add). The bell is always there, like any inbox; the badge
+ * shows only while something waits.
  */
 export function RequestsMenu() {
   const workspace = useWorkspace()?.id ?? ""
@@ -43,16 +44,15 @@ export function RequestsMenu() {
     machines: machines.length,
   }
   const total = counts.files + counts.invitations + counts.machines
-  if (!total) return null
   return (
     <Popover>
       <PopoverTrigger
-        render={<Button variant="ghost" size="icon" className="relative" aria-label={`Requests, ${total} waiting`} />}
+        render={<Button variant="ghost" size="icon" className="relative" aria-label={total ? `Requests, ${total} waiting` : "Requests"} />}
       >
         <BellIcon />
-        <span className="absolute -top-0.5 -right-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[0.625rem] leading-none font-medium text-primary-foreground tabular-nums">
+        {total > 0 && <span className="absolute -top-0.5 -right-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[0.625rem] leading-none font-medium text-primary-foreground tabular-nums">
           {total > 99 ? "99+" : total}
-        </span>
+        </span>}
       </PopoverTrigger>
       <PopoverContent align="end" className="max-h-[min(36rem,calc(100dvh-5rem))] w-[min(26rem,calc(100vw-2rem))] gap-2 overflow-y-auto p-3 text-sm">
         <RequestList counts={counts} machines={machines} workspace={workspace} />
@@ -74,7 +74,17 @@ function RequestList({
   const [chosen, setChosen] = useState<RequestKind>()
   const [asked, setPage] = useState(1)
   const kind = kinds.find((entry) => entry.id === chosen)?.id ?? kinds[0]?.id
-  if (!kind) return null
+  if (!kind) {
+    return (
+      <div className="flex flex-col items-center gap-1 px-4 py-6 text-center">
+        <BellIcon className="size-6 text-muted-foreground" />
+        <p className="font-medium">Nothing waiting</p>
+        <p className="text-muted-foreground">
+          Files teammates send you, team invitations and machine requests that need your answer show up here.
+        </p>
+      </div>
+    )
+  }
   // Answering the last row of the last page leaves that page empty: show the one before it.
   const page = Math.min(asked, Math.ceil(counts[kind] / requestsPageSize))
   return (
