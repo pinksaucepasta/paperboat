@@ -98,7 +98,6 @@ export function LoginForm() {
         <Logo className="size-6" />
         <h1 className="text-lg font-medium">Paperboat admin</h1>
       </div>
-      <p className="text-sm text-muted-foreground">Operator sign-in. Customer accounts cannot sign in here.</p>
       {credentials && (
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="email">Email</Label>
