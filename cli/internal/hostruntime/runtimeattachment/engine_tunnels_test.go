@@ -386,3 +386,32 @@ func TestEngineTunnelRoutesCarryTheirInspectorIdentity(t *testing.T) {
 		t.Fatalf("route inspector identity = %+v", identity)
 	}
 }
+
+// Prod 2026-11-17 (canary-a, then reproduced on a throwaway host): after an in-place update the new
+// worker's first round saw served=false; the served flag and its hubs then changed together, the run
+// loop's select took the hub wake and dropped the fetch, so the worker registered no engine route and
+// every edge stream on its carrier was refused (durable tunnels 502 for minutes, until the 5-minute
+// poll). A served change is seen even when only the hub wake was taken.
+func TestEngineFetchSeesAServedChangeThatCameWithAHubChange(t *testing.T) {
+	var fetch engineFetch
+	if !fetch.due(false) {
+		t.Fatal("first round does not fetch")
+	}
+	fetch.done(false)
+	// The hub wake was taken, the served wake lost: nothing was asked.
+	if !fetch.due(true) {
+		t.Fatal("served became true with a hub change and the round does not fetch the tunnel set")
+	}
+	// A failed fetch is not done: the next round fetches again.
+	if !fetch.due(true) {
+		t.Fatal("a round after a failed fetch does not fetch")
+	}
+	fetch.done(true)
+	if fetch.due(true) {
+		t.Fatal("a hub change alone fetches the tunnel set")
+	}
+	fetch.ask()
+	if !fetch.due(true) {
+		t.Fatal("a tunnels event or the poll does not fetch")
+	}
+}

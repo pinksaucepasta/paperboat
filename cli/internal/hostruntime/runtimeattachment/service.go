@@ -770,7 +770,12 @@ func (s *Service) connect(ctx context.Context, a admissionBinding, key string) (
 	}
 	// One hub owns the carrier's inbound streams and routes them by route id: the runtime route
 	// to the origin forwarder, endpoint routes (previews) to their route carriers.
-	hub, err := preview.NewDataCarrierPreviewHub(ctx, preview.DataCarrierPreviewHubConfig{Active: carrier.Active, Identity: carrier.Identity, EdgeNodeID: b.EdgeNodeID, EdgeProcessEpoch: b.EdgeProcessEpoch})
+	// A stream the hub refuses (a route not registered on it) is logged: a silent refusal hid that a new worker
+	// served none of its engine tunnels (prod 2026-11-17).
+	observe := func(err error) {
+		errorreport.Current().ObserveFailure(ctx, "paperboat-daemon", "runtime_attachment", "stream_open", "transport_failed", err)
+	}
+	hub, err := preview.NewDataCarrierPreviewHub(ctx, preview.DataCarrierPreviewHubConfig{Active: carrier.Active, Identity: carrier.Identity, EdgeNodeID: b.EdgeNodeID, EdgeProcessEpoch: b.EdgeProcessEpoch, ObserveStreamError: observe})
 	if err != nil {
 		cleanup, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()

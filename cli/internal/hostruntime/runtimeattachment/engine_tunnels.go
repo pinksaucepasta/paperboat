@@ -243,31 +243,43 @@ func (e *EngineTunnels) run(ctx context.Context) {
 	if e.Events != nil {
 		events = e.Events.Changed()
 	}
-	refetch := true
+	var fetch engineFetch
 	for {
 		served, servedChanged := e.Service.TunnelEndpointsServed()
 		hubs, hubsChanged := e.Service.Hubs()
-		if refetch {
-			e.refresh(ctx, served)
+		if fetch.due(served) && e.refresh(ctx, served) {
+			fetch.done(served)
 		}
 		e.reconcile(ctx, hubs)
 		select {
 		case <-ctx.Done():
 			return
 		case <-servedChanged:
-			refetch = true
+			fetch.ask()
 		case <-events:
-			refetch = true
+			fetch.ask()
 		case <-ticker.C:
-			refetch = true
+			fetch.ask()
 		case <-hubsChanged:
-			refetch = false
 		}
 	}
 }
 
-// refresh replaces the engine tunnel set; a failed fetch keeps the last good set.
-func (e *EngineTunnels) refresh(ctx context.Context, served bool) {
+// engineFetch decides when a round fetches the engine tunnel set: first, after a tunnels event or
+// the poll, after the served flag changed since the last good fetch, and after a failed one. The flag
+// is compared, not taken from its wake: when it changed together with the hubs (a worker taking over
+// at an update), the select took the hub wake, the served wake was lost, and the new worker served
+// none of its tunnels until the 5-minute poll (prod 2026-11-17: durable tunnels 502 for minutes).
+type engineFetch struct {
+	fetched, asked, served bool
+}
+
+func (f *engineFetch) due(served bool) bool { return !f.fetched || f.asked || served != f.served }
+func (f *engineFetch) ask()                 { f.asked = true }
+func (f *engineFetch) done(served bool)     { f.fetched, f.asked, f.served = true, false, served }
+
+// refresh replaces the engine tunnel set; a failed fetch keeps the last good set and reports false.
+func (e *EngineTunnels) refresh(ctx context.Context, served bool) bool {
 	next := map[string]engineTunnel{}
 	if served {
 		fetchCtx, cancel := context.WithTimeout(ctx, attachmentCheckTimeout)
@@ -275,7 +287,7 @@ func (e *EngineTunnels) refresh(ctx context.Context, served bool) {
 		cancel()
 		if err != nil {
 			errorreport.Current().ObserveFailure(ctx, "paperboat-daemon", "engine_tunnels", "fetch", "service_failed", err)
-			return
+			return false
 		}
 		for _, item := range list {
 			tunnel, err := decodeEngineTunnel(item)
@@ -289,6 +301,7 @@ func (e *EngineTunnels) refresh(ctx context.Context, served bool) {
 	e.mu.Lock()
 	e.tunnels = next
 	e.mu.Unlock()
+	return true
 }
 
 // decodeEngineTunnel verifies the snapshot against the server's content hash and keeps its active
