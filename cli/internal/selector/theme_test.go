@@ -2,6 +2,8 @@ package selector
 
 import (
 	"context"
+	"image/color"
+	"io"
 	"reflect"
 	"strings"
 	"testing"
@@ -127,5 +129,52 @@ func TestStylesAreBuiltOncePerThemeNotPerFrame(t *testing.T) {
 	}
 	if built := styleBuilds.Load() - before; built != 0 {
 		t.Fatalf("styles rebuilt %d times for an unchanged theme", built)
+	}
+}
+
+func resetBackground(t *testing.T) {
+	t.Helper()
+	backgroundKnown.Store(false)
+	backgroundAsked.Store(false)
+	lightBackground.Store(false)
+	t.Cleanup(func() { backgroundKnown.Store(false); backgroundAsked.Store(false); lightBackground.Store(false) })
+}
+
+func TestBackgroundIsQueriedOncePerSession(t *testing.T) {
+	resetBackground(t)
+	if RequestBackground() == nil {
+		t.Fatal("the first program of a session must ask for the background")
+	}
+	for range 3 {
+		if RequestBackground() != nil {
+			t.Fatal("a later submenu asked again")
+		}
+	}
+	end := BeginScreen(io.Discard)
+	if RequestBackground() == nil {
+		t.Fatal("a new screen session must be able to ask again")
+	}
+	end()
+	ObserveBackground(tea.BackgroundColorMsg{Color: color.White})
+	end = BeginScreen(io.Discard)
+	defer end()
+	if RequestBackground() != nil {
+		t.Fatal("an answered background was asked for again")
+	}
+}
+
+func TestFirstPaintHasNoAccentUntilBackgroundIsKnown(t *testing.T) {
+	resetBackground(t)
+	// An unset theme uses the adaptive brand accent (explicit themes pin their own).
+	if got := accentColor(preferences.TUI{}); got != nil {
+		t.Fatalf("accent painted before the background is known: %#v", got)
+	}
+	if !ObserveBackground(tea.BackgroundColorMsg{Color: color.White}) {
+		t.Fatal("the first answer must report a change so the model restyles")
+	}
+	light := accentColor(preferences.TUI{})
+	ObserveBackground(tea.BackgroundColorMsg{Color: color.Black})
+	if dark := accentColor(preferences.TUI{}); light == nil || dark == nil || reflect.DeepEqual(light, dark) {
+		t.Fatalf("light and dark accents = %#v / %#v", light, dark)
 	}
 }

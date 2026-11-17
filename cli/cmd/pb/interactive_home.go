@@ -579,7 +579,7 @@ type homeTextModel struct {
 	interrupted    bool
 }
 
-func (m homeTextModel) Init() tea.Cmd { return tea.RequestBackgroundColor }
+func (m homeTextModel) Init() tea.Cmd { return selector.RequestBackground() }
 func (m homeTextModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := message.(type) {
 	case tea.BackgroundColorMsg:

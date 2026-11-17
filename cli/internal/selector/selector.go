@@ -44,6 +44,7 @@ func BeginScreen(output io.Writer) func() {
 		output = os.Stderr
 	}
 	if persistentScreen.Add(1) == 1 {
+		backgroundAsked.Store(false)
 		writeScreen(output, enterAlternateScreen)
 	}
 	var once sync.Once
@@ -416,7 +417,7 @@ type loadingModel struct {
 }
 
 func (m loadingModel) Init() tea.Cmd {
-	return tea.Batch(tea.RequestBackgroundColor, func() tea.Msg { return loadDoneMsg{err: m.work(context.Background())} }, loadingTick())
+	return tea.Batch(RequestBackground(), func() tea.Msg { return loadDoneMsg{err: m.work(context.Background())} }, loadingTick())
 }
 
 func loadingTick() tea.Cmd {
@@ -564,7 +565,7 @@ func (m chooserModel) Init() tea.Cmd {
 	if m.options.Context != nil {
 		cancellation = func() tea.Msg { <-m.options.Context.Done(); return chooserCanceled{} }
 	}
-	return tea.Batch(tea.RequestBackgroundColor, textinput.Blink, m.refreshTick(), cancellation)
+	return tea.Batch(RequestBackground(), textinput.Blink, m.refreshTick(), cancellation)
 }
 
 func (m chooserModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {

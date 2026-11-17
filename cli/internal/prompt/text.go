@@ -76,7 +76,7 @@ func Text(options TextOptions) (string, error) {
 	return result.value, nil
 }
 
-func (m textModel) Init() tea.Cmd { return tea.Batch(tea.RequestBackgroundColor, textinput.Blink) }
+func (m textModel) Init() tea.Cmd { return tea.Batch(selector.RequestBackground(), textinput.Blink) }
 
 func (m textModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	var command tea.Cmd

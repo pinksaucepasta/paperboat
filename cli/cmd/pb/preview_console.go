@@ -72,7 +72,7 @@ type previewConsoleModel struct {
 }
 
 func (m previewConsoleModel) Init() tea.Cmd {
-	return tea.Batch(tea.RequestBackgroundColor, m.poll, func() tea.Msg { return previewConsoleEnded{<-m.ended} })
+	return tea.Batch(selector.RequestBackground(), m.poll, func() tea.Msg { return previewConsoleEnded{<-m.ended} })
 }
 func (m previewConsoleModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.width > 0 {

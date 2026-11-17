@@ -57,7 +57,7 @@ func Confirm(options ConfirmOptions) (bool, error) {
 	return result.done && result.yes, nil
 }
 
-func (m confirmModel) Init() tea.Cmd { return tea.RequestBackgroundColor }
+func (m confirmModel) Init() tea.Cmd { return selector.RequestBackground() }
 
 func (m confirmModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	selector.ObserveBackground(message)

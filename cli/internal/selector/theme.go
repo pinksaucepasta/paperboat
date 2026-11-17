@@ -31,8 +31,8 @@ type styleSet struct {
 
 // styleKey is everything a styleSet depends on, so a frame costs one map lookup.
 type styleKey struct {
-	theme, accent  string
-	light, noColor bool
+	theme, accent         string
+	known, light, noColor bool
 }
 
 var (
@@ -45,7 +45,7 @@ func noColor() bool { return os.Getenv("NO_COLOR") != "" }
 
 func stylesForContext(ctx context.Context) styleSet {
 	tui := preferences.FromContext(ctx).TUI
-	key := styleKey{theme: tui.Theme, accent: tui.Accent, light: lightBackground.Load(), noColor: noColor()}
+	key := styleKey{theme: tui.Theme, accent: tui.Accent, known: backgroundKnown.Load(), light: lightBackground.Load(), noColor: noColor()}
 	if cached, ok := styleCache.Load(key); ok {
 		return cached.(styleSet)
 	}
@@ -91,9 +91,24 @@ func buildStyles(tui preferences.TUI, mono bool) styleSet {
 	return styles
 }
 
-// lightBackground is learned from the terminal inside a running program
-// (tea.RequestBackgroundColor in Init, ObserveBackground in Update); the brand colour assumes dark until then.
-var lightBackground atomic.Bool
+// The terminal's background is learned from a running program (RequestBackground
+// in Init, ObserveBackground in Update). Until an answer arrives the default
+// theme paints no accent colour, which reads on both light and dark terminals.
+var (
+	lightBackground atomic.Bool
+	backgroundKnown atomic.Bool
+	backgroundAsked atomic.Bool
+)
+
+// RequestBackground returns the OSC 11 query for a program's Init. It asks once
+// per screen session: later programs of the session reuse the stored answer, and a
+// terminal that never answers is not asked again by every submenu.
+func RequestBackground() tea.Cmd {
+	if backgroundKnown.Load() || !backgroundAsked.CompareAndSwap(false, true) {
+		return nil
+	}
+	return tea.RequestBackgroundColor
+}
 
 // ObserveBackground records the terminal's background from a program message
 // and reports whether it changed, so the model can restyle.
@@ -102,10 +117,14 @@ func ObserveBackground(message tea.Msg) bool {
 	if !ok {
 		return false
 	}
-	return lightBackground.Swap(!background.IsDark()) != !background.IsDark()
+	first := !backgroundKnown.Swap(true)
+	return lightBackground.Swap(!background.IsDark()) != !background.IsDark() || first
 }
 
 func brandColor() color.Color {
+	if !backgroundKnown.Load() {
+		return nil
+	}
 	return lipgloss.LightDark(!lightBackground.Load())(lipgloss.Color("#1447E6"), lipgloss.Color("#6F8CFF"))
 }
 

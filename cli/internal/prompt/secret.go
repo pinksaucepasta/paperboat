@@ -85,7 +85,7 @@ func Secret(options SecretOptions) ([]byte, error) {
 	return result.value, nil
 }
 
-func (m secretModel) Init() tea.Cmd { return tea.Batch(tea.RequestBackgroundColor, textinput.Blink) }
+func (m secretModel) Init() tea.Cmd { return tea.Batch(selector.RequestBackground(), textinput.Blink) }
 
 func (m secretModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	var command tea.Cmd
