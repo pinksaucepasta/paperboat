@@ -167,7 +167,11 @@ func TestEngineTunnelServesPublicTCPAndRefusesPlainStreamsOnPrivateTunnels(t *te
 	httpOrigin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { httpHits.Add(1) }))
 	defer httpOrigin.Close()
 	route := func(id, protocol, scheme, address string) string {
-		return fmt.Sprintf(`{"id":%q,"name":%q,"protocol":%q,"match_type":"catch_all","path_prefix":null,"origin_scheme":%q,"origin_address":%q,"preserve_host":true,"host_override":null,"tls_verification":"not_applicable","tls_server_name":null,"mtls_credential_reference":null,"connect_timeout_ms":10000,"idle_timeout_ms":90000,"max_concurrent_streams":16,"desired_state":"active"}`, id, id, protocol, scheme, address)
+		match := `"match_type":"catch_all"`
+		if protocol == "tcp" { // the one snapshot validator requires a public tcp route to be a managed name
+			match = `"match_type":"managed_exact","match_hostname":"brave-blue-beacon-0421.tunnel.example.test"`
+		}
+		return fmt.Sprintf(`{"id":%q,"name":%q,"protocol":%q,`+match+`,"path_prefix":null,"origin_scheme":%q,"origin_address":%q,"preserve_host":true,"host_override":null,"tls_verification":"not_applicable","tls_server_name":null,"mtls_credential_reference":null,"connect_timeout_ms":10000,"idle_timeout_ms":90000,"max_concurrent_streams":16,"desired_state":"active"}`, id, id, protocol, scheme, address)
 	}
 	tunnel := func(id, access, routes string) runtimewire.EngineTunnel {
 		payload := fmt.Sprintf(`{"schema":"paperboat.preview-tunnel/v1","kind":"tunnel_config_snapshot","tunnel_id":%q,"generation":1,"name":%q,"desired_state":"active","access_mode":%q,"stable_endpoint":"https://brave-blue-beacon-0421.tunnel.example.test","stable_endpoint_id":"endpoint_123e4567-e89b-42d3-a456-426614174000","expires_at":null,"routes":[%s]}`, id, id, access, routes)

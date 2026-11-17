@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	"net/url"
 	"strings"
 	"time"
@@ -637,16 +638,16 @@ func resourceConfigSnapshot(tunnel dbsqlc.Tunnel, routes []dbsqlc.TunnelRoute) (
 		value := tunnel.ExpiresAt.Time.UTC()
 		expiresAt = &value
 	}
-	items := make([]initialTunnelRouteSnapshot, 0, len(routes))
+	items := make([]connectorprotocol.ConfigRoute, 0, len(routes))
 	for _, route := range routes {
 		items = append(items, snapshotRoute(route))
 	}
-	encoded, err := json.Marshal(initialTunnelConfigSnapshot{Schema: Schema, Kind: "tunnel_config_snapshot", TunnelID: tunnel.ID, Generation: tunnel.Generation, Name: tunnel.Name, DesiredState: tunnel.DesiredState,
+	encoded, err := json.Marshal(connectorprotocol.ConfigSnapshot{Schema: Schema, Kind: "tunnel_config_snapshot", TunnelID: tunnel.ID, Generation: uint64(tunnel.Generation), Name: tunnel.Name, DesiredState: tunnel.DesiredState,
 		AccessMode: tunnel.AccessMode, StableEndpointID: tunnel.StableEndpointID, StableEndpoint: tunnel.StableEndpoint, ExpiresAt: expiresAt, Routes: items})
 	if err != nil {
 		return nil, err
 	}
-	return canonicalConfigSnapshot(encoded)
+	return canonicalConfigSnapshot(encoded, tunnel.ID, uint64(tunnel.Generation))
 }
 
 type resourceOperationInput struct {

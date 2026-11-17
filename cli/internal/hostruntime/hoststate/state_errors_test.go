@@ -12,7 +12,7 @@ func TestSnapshotParserRetainsCauseWithoutExposingRecord(t *testing.T) {
 	payload := []byte(`{"schema":"paperboat.preview-tunnel/v1","kind":"tunnel_config_snapshot","tunnel_id":"tun_01","generation":1,"private":"` + privateValue + `","broken":@}`)
 	_, err := ParseTunnelConfigSnapshot(payload, "tun_01", 1)
 	var syntaxErr *json.SyntaxError
-	if err == nil || !errors.Is(err, ErrInvalidState) || !errors.As(err, &syntaxErr) || err.Error() != "tunnel configuration snapshot JSON is invalid" || strings.Contains(err.Error(), privateValue) {
+	if err == nil || !errors.Is(err, ErrInvalidState) || !errors.As(err, &syntaxErr) || err.Error() != "tunnel configuration snapshot is invalid" || strings.Contains(err.Error(), privateValue) {
 		t.Fatalf("snapshot error did not safely retain parser cause: %v", err)
 	}
 }

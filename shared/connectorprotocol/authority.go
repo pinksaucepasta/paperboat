@@ -329,21 +329,26 @@ func (s Snapshot) Validate() error {
 
 var stableEndpointIDPattern = regexp.MustCompile(`^endpoint_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
 
-type wireConfigSnapshot struct {
-	Schema           string            `json:"schema"`
-	Kind             string            `json:"kind"`
-	TunnelID         string            `json:"tunnel_id"`
-	Generation       uint64            `json:"generation"`
-	Name             string            `json:"name"`
-	DesiredState     string            `json:"desired_state"`
-	AccessMode       string            `json:"access_mode"`
-	StableEndpointID string            `json:"stable_endpoint_id"`
-	StableEndpoint   string            `json:"stable_endpoint"`
-	ExpiresAt        *time.Time        `json:"expires_at"`
-	Routes           []wireConfigRoute `json:"routes"`
+// ConfigSnapshot is the durable-tunnel configuration the control plane signs into a connector snapshot, the machine
+// caches, and both validate with ParseConfigSnapshot. Its canonical JSON (sorted keys) is what the content hash covers, so
+// the presence of every key is part of the contract: unset pointer members are written as null, and only the three
+// omitempty members are left out when empty.
+type ConfigSnapshot struct {
+	Schema           string        `json:"schema"`
+	Kind             string        `json:"kind"`
+	TunnelID         string        `json:"tunnel_id"`
+	Generation       uint64        `json:"generation"`
+	Name             string        `json:"name"`
+	DesiredState     string        `json:"desired_state"`
+	AccessMode       string        `json:"access_mode"`
+	StableEndpointID string        `json:"stable_endpoint_id"`
+	StableEndpoint   string        `json:"stable_endpoint"`
+	ExpiresAt        *time.Time    `json:"expires_at"`
+	Routes           []ConfigRoute `json:"routes"`
 }
 
-type wireConfigRoute struct {
+// ConfigRoute is one route of a ConfigSnapshot.
+type ConfigRoute struct {
 	ID                      string  `json:"id"`
 	Name                    string  `json:"name"`
 	Protocol                string  `json:"protocol"`
@@ -358,59 +363,70 @@ type wireConfigRoute struct {
 	TLSVerification         string  `json:"tls_verification"`
 	TLSServerName           *string `json:"tls_server_name"`
 	TLSCA                   *string `json:"tls_ca,omitempty"`
-	TLSPin                  *string `json:"tls_pin,omitempty"`
 	MTLSCredentialReference *string `json:"mtls_credential_reference"`
+	TLSPin                  *string `json:"tls_pin"`
 	ConnectTimeoutMs        int32   `json:"connect_timeout_ms"`
 	IdleTimeoutMs           int32   `json:"idle_timeout_ms"`
 	MaxConcurrentStreams    int32   `json:"max_concurrent_streams"`
 	DesiredState            string  `json:"desired_state"`
 }
 
+// ValidateConfigSnapshotPayload checks a snapshot payload without returning it.
 func ValidateConfigSnapshotPayload(payload []byte, tunnelID string, generation uint64) error {
+	_, err := ParseConfigSnapshot(payload, tunnelID, generation)
+	return err
+}
+
+// ParseConfigSnapshot is the one validator of a tunnel configuration snapshot (the control plane before it stores one,
+// the machine and the edge on read): strict shape, identity, access-mode rules, route rules, and no credential material.
+func ParseConfigSnapshot(payload []byte, tunnelID string, generation uint64) (ConfigSnapshot, error) {
+	if err := rejectSnapshotCredentialMaterial(payload); err != nil {
+		return ConfigSnapshot{}, err
+	}
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(payload, &fields); err != nil || fields == nil {
-		return ErrSnapshotRejected
+		return ConfigSnapshot{}, ErrSnapshotRejected
 	}
 	for _, field := range []string{"schema", "kind", "tunnel_id", "generation", "name", "desired_state", "access_mode", "stable_endpoint_id", "stable_endpoint", "expires_at", "routes"} {
 		if _, ok := fields[field]; !ok {
-			return fmt.Errorf("%w: snapshot field %s is required", ErrSnapshotRejected, field)
+			return ConfigSnapshot{}, fmt.Errorf("%w: snapshot field %s is required", ErrSnapshotRejected, field)
 		}
 	}
-	var snapshot wireConfigSnapshot
+	var snapshot ConfigSnapshot
 	decoder := json.NewDecoder(bytes.NewReader(payload))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&snapshot); err != nil {
-		return fmt.Errorf("%w: snapshot shape: %v", ErrSnapshotRejected, err)
+		return ConfigSnapshot{}, fmt.Errorf("%w: snapshot shape: %v", ErrSnapshotRejected, err)
 	}
 	var trailing any
 	if err := decoder.Decode(&trailing); err != io.EOF {
-		return ErrSnapshotRejected
+		return ConfigSnapshot{}, ErrSnapshotRejected
 	}
 	if snapshot.Schema != "paperboat.preview-tunnel/v1" || snapshot.Kind != "tunnel_config_snapshot" || snapshot.TunnelID != tunnelID || snapshot.Generation != generation || strings.TrimSpace(snapshot.Name) != snapshot.Name || len(snapshot.Name) == 0 || len(snapshot.Name) > 80 || snapshot.DesiredState != "active" && snapshot.DesiredState != "paused" && snapshot.DesiredState != "deleted" || snapshot.AccessMode != "public" && snapshot.AccessMode != "private" && snapshot.AccessMode != "team" || snapshot.Routes == nil || !stableEndpointIDPattern.MatchString(snapshot.StableEndpointID) || !validWireStableEndpoint(snapshot.StableEndpoint) {
-		return ErrSnapshotRejected
+		return ConfigSnapshot{}, ErrSnapshotRejected
 	}
 	var rawRoutes []json.RawMessage
 	if err := json.Unmarshal(fields["routes"], &rawRoutes); err != nil || len(rawRoutes) != len(snapshot.Routes) {
-		return ErrSnapshotRejected
+		return ConfigSnapshot{}, ErrSnapshotRejected
 	}
 	for index, route := range snapshot.Routes {
 		var routeFields map[string]json.RawMessage
 		if err := json.Unmarshal(rawRoutes[index], &routeFields); err != nil || routeFields == nil {
-			return ErrSnapshotRejected
+			return ConfigSnapshot{}, ErrSnapshotRejected
 		}
 		for _, field := range []string{"id", "name", "protocol", "match_type", "path_prefix", "origin_scheme", "origin_address", "preserve_host", "host_override", "tls_verification", "tls_server_name", "mtls_credential_reference", "connect_timeout_ms", "idle_timeout_ms", "max_concurrent_streams", "desired_state"} {
 			if _, ok := routeFields[field]; !ok {
-				return fmt.Errorf("%w: route field %s is required", ErrSnapshotRejected, field)
+				return ConfigSnapshot{}, fmt.Errorf("%w: route field %s is required", ErrSnapshotRejected, field)
 			}
 		}
 		if (route.Protocol == "tls" || route.Protocol == "tcp") && snapshot.AccessMode != "public" {
-			return ErrSnapshotRejected
+			return ConfigSnapshot{}, ErrSnapshotRejected
 		}
 		if err := validateWireConfigRoute(route); err != nil {
-			return fmt.Errorf("%w: route %d: %v", ErrSnapshotRejected, index, err)
+			return ConfigSnapshot{}, fmt.Errorf("%w: route %d: %v", ErrSnapshotRejected, index, err)
 		}
 	}
-	return nil
+	return snapshot, nil
 }
 
 func validWireStableEndpoint(value string) bool {
@@ -436,7 +452,7 @@ func wireHostnamePattern(value string) bool {
 	return true
 }
 
-func validateWireConfigRoute(route wireConfigRoute) error {
+func validateWireConfigRoute(route ConfigRoute) error {
 	if ValidateIdentifier(route.ID) != nil || strings.TrimSpace(route.Name) != route.Name || len(route.Name) == 0 || len(route.Name) > 80 || strings.TrimSpace(route.OriginAddress) != route.OriginAddress || len(route.OriginAddress) == 0 || len(route.OriginAddress) > 512 || strings.ContainsAny(route.OriginAddress, "\r\n@") {
 		return ErrInvalidInput
 	}
@@ -462,11 +478,11 @@ func validateWireConfigRoute(route wireConfigRoute) error {
 	}
 	switch route.MatchType {
 	case "managed_exact", "exact":
-		if route.MatchHostname == "" || route.WildcardSuffix != "" || !wireHostnamePattern(route.MatchHostname) {
+		if route.MatchHostname == "" || route.WildcardSuffix != "" || !validSnapshotMatchHostname(route.MatchHostname) {
 			return ErrInvalidInput
 		}
 	case "one_label_wildcard":
-		if route.MatchHostname != "" || route.WildcardSuffix == "" || !wireHostnamePattern(route.WildcardSuffix) {
+		if route.MatchHostname != "" || route.WildcardSuffix == "" || !validSnapshotMatchHostname(route.WildcardSuffix) {
 			return ErrInvalidInput
 		}
 	case "catch_all":
@@ -507,7 +523,7 @@ func validateWireConfigRoute(route wireConfigRoute) error {
 	if route.TLSServerName != nil && (len(*route.TLSServerName) == 0 || len(*route.TLSServerName) > 253 || strings.TrimSpace(*route.TLSServerName) != *route.TLSServerName || strings.ContainsAny(*route.TLSServerName, "\r\n")) {
 		return ErrInvalidInput
 	}
-	if route.MTLSCredentialReference != nil && ValidateCredentialReference(*route.MTLSCredentialReference) != nil || route.TLSCA != nil && ValidateOriginCA(*route.TLSCA) != nil {
+	if route.MTLSCredentialReference != nil && (ValidateCredentialReference(*route.MTLSCredentialReference) != nil || !safeSnapshotCredentialReference(*route.MTLSCredentialReference)) || route.TLSCA != nil && ValidateOriginCA(*route.TLSCA) != nil {
 		return ErrInvalidInput
 	}
 	if route.ConnectTimeoutMs < 100 || route.ConnectTimeoutMs > 120000 || route.IdleTimeoutMs < 1000 || route.IdleTimeoutMs > 3600000 || route.MaxConcurrentStreams < 1 || route.MaxConcurrentStreams > 100000 || route.DesiredState != "active" && route.DesiredState != "disabled" && route.DesiredState != "deleted" {

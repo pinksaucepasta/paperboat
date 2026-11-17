@@ -1,7 +1,6 @@
 package tunnelv1
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"database/sql"
@@ -9,7 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
+	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	"net/url"
 	"strings"
 	"time"
@@ -900,101 +899,42 @@ func createInitialConfigGeneration(ctx context.Context, queries *dbsqlc.Queries,
 	return translate(err)
 }
 
-type initialTunnelConfigSnapshot struct {
-	Schema           string                       `json:"schema"`
-	Kind             string                       `json:"kind"`
-	TunnelID         string                       `json:"tunnel_id"`
-	Generation       int64                        `json:"generation"`
-	Name             string                       `json:"name"`
-	DesiredState     string                       `json:"desired_state"`
-	AccessMode       string                       `json:"access_mode"`
-	StableEndpointID string                       `json:"stable_endpoint_id"`
-	StableEndpoint   string                       `json:"stable_endpoint"`
-	ExpiresAt        *time.Time                   `json:"expires_at"`
-	Routes           []initialTunnelRouteSnapshot `json:"routes"`
-}
-
-type initialTunnelRouteSnapshot struct {
-	ID                      string  `json:"id"`
-	Name                    string  `json:"name"`
-	Protocol                string  `json:"protocol"`
-	MatchType               string  `json:"match_type"`
-	MatchHostname           string  `json:"match_hostname,omitempty"`
-	WildcardSuffix          string  `json:"wildcard_suffix,omitempty"`
-	PathPrefix              *string `json:"path_prefix"`
-	OriginScheme            string  `json:"origin_scheme"`
-	OriginAddress           string  `json:"origin_address"`
-	PreserveHost            bool    `json:"preserve_host"`
-	HostOverride            *string `json:"host_override"`
-	TLSVerification         string  `json:"tls_verification"`
-	TLSServerName           *string `json:"tls_server_name"`
-	TLSCA                   *string `json:"tls_ca,omitempty"`
-	MTLSCredentialReference *string `json:"mtls_credential_reference"`
-	TLSPin                  *string `json:"tls_pin"`
-	ConnectTimeoutMs        int32   `json:"connect_timeout_ms"`
-	IdleTimeoutMs           int32   `json:"idle_timeout_ms"`
-	MaxStreams              int32   `json:"max_concurrent_streams"`
-	DesiredState            string  `json:"desired_state"`
-}
-
 func initialConfigSnapshot(tunnel dbsqlc.Tunnel, route dbsqlc.TunnelRoute) ([]byte, error) {
 	var expiresAt *time.Time
 	if tunnel.ExpiresAt.Valid {
 		value := tunnel.ExpiresAt.Time.UTC()
 		expiresAt = &value
 	}
-	snapshot := initialTunnelConfigSnapshot{
-		Schema: Schema, Kind: "tunnel_config_snapshot", TunnelID: tunnel.ID, Generation: tunnel.Generation,
+	snapshot := connectorprotocol.ConfigSnapshot{
+		Schema: Schema, Kind: "tunnel_config_snapshot", TunnelID: tunnel.ID, Generation: uint64(tunnel.Generation),
 		Name: tunnel.Name, DesiredState: tunnel.DesiredState, AccessMode: tunnel.AccessMode, StableEndpointID: tunnel.StableEndpointID, StableEndpoint: tunnel.StableEndpoint,
 		ExpiresAt: expiresAt,
-		Routes:    []initialTunnelRouteSnapshot{snapshotRoute(route)},
+		Routes:    []connectorprotocol.ConfigRoute{snapshotRoute(route)},
 	}
 	encoded, err := json.Marshal(snapshot)
 	if err != nil {
 		return nil, fmt.Errorf("encode initial tunnel configuration: %w", err)
 	}
-	return canonicalConfigSnapshot(encoded)
+	return canonicalConfigSnapshot(encoded, tunnel.ID, uint64(tunnel.Generation))
 }
 
 // canonicalConfigSnapshot mirrors connectorprotocol's compact JSON hashing
 // boundary. JSONB is a semantic storage type and may reorder object keys or
 // add whitespace, so generation hashes must always describe these canonical
 // bytes before they are persisted as bytea.
-func canonicalConfigSnapshot(payload []byte) ([]byte, error) {
-	if len(payload) == 0 {
-		return nil, fmt.Errorf("empty tunnel configuration snapshot")
-	}
-	decoder := json.NewDecoder(bytes.NewReader(payload))
-	decoder.UseNumber()
-	var value any
-	if err := decoder.Decode(&value); err != nil {
-		return nil, fmt.Errorf("decode tunnel configuration snapshot: %w", err)
-	}
-	if err := ensureJSONEOF(decoder); err != nil {
-		return nil, fmt.Errorf("decode tunnel configuration snapshot: %w", err)
-	}
-	if _, ok := value.(map[string]any); !ok {
-		return nil, fmt.Errorf("tunnel configuration snapshot must be a JSON object")
-	}
-	encoded, err := json.Marshal(value)
+func canonicalConfigSnapshot(payload []byte, tunnelID string, generation uint64) ([]byte, error) {
+	canonical, err := connectorprotocol.CanonicalConfigSnapshot(payload)
 	if err != nil {
-		return nil, fmt.Errorf("encode canonical tunnel configuration snapshot: %w", err)
+		return nil, fmt.Errorf("canonicalize tunnel configuration snapshot: %w", err)
 	}
-	return encoded, nil
+	// The producer validates as strictly as the machines and edges that will read the snapshot.
+	if _, err := connectorprotocol.ParseConfigSnapshot(canonical, tunnelID, generation); err != nil {
+		return nil, fmt.Errorf("tunnel configuration snapshot failed validation: %w", err)
+	}
+	return canonical, nil
 }
 
-func ensureJSONEOF(decoder *json.Decoder) error {
-	var trailing any
-	if err := decoder.Decode(&trailing); err != io.EOF {
-		if err == nil {
-			return fmt.Errorf("trailing JSON value")
-		}
-		return err
-	}
-	return nil
-}
-
-func snapshotRoute(route dbsqlc.TunnelRoute) initialTunnelRouteSnapshot {
+func snapshotRoute(route dbsqlc.TunnelRoute) connectorprotocol.ConfigRoute {
 	var pathPrefix *string
 	if route.PathPrefix.Valid {
 		value := route.PathPrefix.String
@@ -1014,12 +954,12 @@ func snapshotRoute(route dbsqlc.TunnelRoute) initialTunnelRouteSnapshot {
 		value := route.MtlsCredentialReference.String
 		mtlsReference = &value
 	}
-	return initialTunnelRouteSnapshot{
+	return connectorprotocol.ConfigRoute{
 		ID: route.ID, Name: route.Name, Protocol: wireProtocol(route.Protocol), MatchType: wireMatchType(route.MatchType),
 		MatchHostname: nullableStringValue(route.MatchHostname), WildcardSuffix: nullableStringValue(route.WildcardSuffix), PathPrefix: pathPrefix,
 		OriginScheme: route.OriginScheme, OriginAddress: route.OriginAddress, PreserveHost: route.PreserveHost, HostOverride: hostOverride,
 		TLSVerification: route.TlsVerification, TLSServerName: serverName, TLSCA: nullStringPointer(route.TlsCa), MTLSCredentialReference: mtlsReference,
-		TLSPin: nullStringPointer(route.TlsPin), ConnectTimeoutMs: route.ConnectTimeoutMs, IdleTimeoutMs: route.IdleTimeoutMs, MaxStreams: route.MaxConcurrentStreams,
+		TLSPin: nullStringPointer(route.TlsPin), ConnectTimeoutMs: route.ConnectTimeoutMs, IdleTimeoutMs: route.IdleTimeoutMs, MaxConcurrentStreams: route.MaxConcurrentStreams,
 		DesiredState: route.DesiredState,
 	}
 }
