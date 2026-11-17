@@ -1,3 +1,7 @@
+// Package db wraps the PostgreSQL connection pools and transactions the server uses. InTx runs a
+// function in a SERIALIZABLE transaction and retries serialization failures, so callers must be
+// idempotent; Direct provides connections for session state such as advisory locks. It also holds the
+// embedded migrations and small shared tables for observations, replicas and proof nonces.
 package db
 
 import (

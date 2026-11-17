@@ -100,7 +100,7 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 }
 func runObserved(ctx context.Context, args []string, out io.Writer, observe func(context.Context, string, error)) error {
 	if len(args) == 0 {
-		return commandError("use pbh install, pbh configure-tls, pbh selfhost code, pbh status, pbh doctor, or pbh uninstall")
+		return commandError("use pbh install, pbh configure-tls, pbh selfhost code, pbh status, pbh doctor, or pbh uninstall (pbh help lists every command)")
 	}
 	switch args[0] {
 	case "check-host":
@@ -128,8 +128,7 @@ func runObserved(ctx context.Context, args []string, out io.Writer, observe func
 		dir := fs.String("state-dir", defaultState, "installation state directory")
 		if err := fs.Parse(args[2:]); err != nil {
 			if errors.Is(err, flag.ErrHelp) {
-				fs.SetOutput(out)
-				fs.PrintDefaults()
+				printHelp(out, "selfhost code", fs)
 				return nil
 			}
 			return err
@@ -152,8 +151,7 @@ func runObserved(ctx context.Context, args []string, out io.Writer, observe func
 		dir := fs.String("state-dir", defaultState, "installation state directory")
 		if err := fs.Parse(args[1:]); err != nil {
 			if errors.Is(err, flag.ErrHelp) {
-				fs.SetOutput(out)
-				fs.PrintDefaults()
+				printHelp(out, "serve", fs)
 				return nil
 			}
 			return err
@@ -162,7 +160,17 @@ func runObserved(ctx context.Context, args []string, out io.Writer, observe func
 			return commandError("unexpected arguments")
 		}
 		return serve(ctx, *dir, out, observe)
+	case "help", "--help", "-h":
+		fmt.Fprint(out, topHelp)
+		return nil
 	case "status":
+		if len(args) > 1 {
+			if isHelpFlag(args[1]) {
+				fmt.Fprintf(out, "pbh status: %s\n", commandHelp["status"])
+				return nil
+			}
+			return commandError("status accepts no arguments")
+		}
 		cmd := exec.CommandContext(ctx, "systemctl", "status", "--no-pager", "paperboat-selfhost.service")
 		cmd.Stdout = out
 		cmd.Stderr = out
@@ -172,7 +180,7 @@ func runObserved(ctx context.Context, args []string, out io.Writer, observe func
 	case "uninstall":
 		return uninstall(ctx, args[1:], out)
 	default:
-		return commandError("unknown command; use pbh install, pbh configure-tls, pbh selfhost code, pbh status, pbh doctor, or pbh uninstall")
+		return commandError("unknown command; run pbh help")
 	}
 }
 func elevated(ctx context.Context, args []string, out io.Writer) error {
@@ -208,8 +216,7 @@ func install(ctx context.Context, args []string, out io.Writer) (err error) {
 	edgeImage := fs.String("edge-image", defaultEdgeImage, "configured edge container image")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
-			fs.SetOutput(out)
-			fs.PrintDefaults()
+			printHelp(out, "install", fs)
 			return nil
 		}
 		return err
@@ -415,8 +422,7 @@ func configureTLS(ctx context.Context, args []string, out io.Writer) error {
 	noService := fs.Bool("no-service", false, "save configuration for a separately managed process; restart it to apply")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
-			fs.SetOutput(out)
-			fs.PrintDefaults()
+			printHelp(out, "configure-tls", fs)
 			return nil
 		}
 		return err

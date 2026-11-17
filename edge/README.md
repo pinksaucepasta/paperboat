@@ -11,10 +11,67 @@ an authorized connector stream and is sent to the private TLS listener. The infr
 hostname serves health and authenticated installation verification.
 Plain HTTP redirects permanently to HTTPS.
 
+## Run
+
+```sh
+paperboat-edge --node-id <id> --deployment-config /abs/path/deployment.json
+```
+
+`--node-id` and `--deployment-config` are required. The other flags have defaults:
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--node-id` | none | Stable edge identity (`[a-z][a-z0-9_-]{0,127}`). |
+| `--deployment-config` | none | Strict deployment JSON (see below). |
+| `--edge-pool` | `default` | Pool this edge is assigned to. |
+| `--relay-id`, `--relay-region`, `--relay-name` | node id, pool, region | Public relay metadata the edge advertises. |
+| `--health-address` | `127.0.0.1:9090` | Loopback listener for health and metrics. |
+| `--state-path` | `state/edge-state.json` | Private durable state file. |
+| `--shutdown-timeout` | `30s` | Bound for drain and shutdown (at most 5 minutes). |
+
+`paperboat-edge version` prints the build version.
+
+### Deployment document
+
+`deploy/deployment.example.json` shows every field. The loader is strict: unknown fields,
+relative paths, or a missing carrier listener stop startup with a typed error.
+
+- **Control plane:** `control_url`, `credential_issuer`, `control_credential_file`,
+  `control_ca_file`, `jwks_file`, `revocations_file`, `usage_signing_key_file`.
+- **Carrier identity:** `infrastructure_tls_cert_file` and `infrastructure_tls_key_file` are
+  the edge's stable carrier certificate, which hosts and the control plane pin. An install
+  hands it to the replacement process unchanged.
+- **Listeners:** `carrier_tcp_listen_address` and `carrier_quic_listen_address` (both
+  required, distinct ports), `public_https_listen_address`, `public_http_listen_address`
+  (redirects to HTTPS), and `private_https_listen_address` (loopback only).
+- **Public HTTPS certificate:** `public_https_cert_file` and `public_https_key_file`, both or
+  neither.
+- **Names:** `connector_advertise_host`, `preview_base_domain`, `tunnel_base_domain`,
+  `runtime_base_domain`.
+- **Limits:** `node_capacity`, `max_body_bytes` (default 100 MiB), `max_header_bytes`
+  (default 32 KiB, at most 128 KiB), `control_interval`, `control_timeout`, and the optional
+  `preview_carrier_interval`, `public_tcp_idle_timeout`, `request_body_idle_timeout`.
+- **Proxies and fixed routes:** `trusted_proxy_cidrs` and `public_routes` (host, optional path
+  prefix, upstream).
+
+### Health and metrics
+
+The `--health-address` listener serves `GET /livez`, `GET /readyz` (503 until the node is
+ready), `GET /diagnostics` and `GET /metrics`. Metric names and labels are listed in
+[docs/metrics.json](docs/metrics.json). See [docs/operations.md](docs/operations.md) for
+reporting and limits and [docs/runbooks.md](docs/runbooks.md) for failures.
+
+### Replacing a running edge
+
+Starting a new process next to a serving one hands over its sockets and certificates:
+the new process warms up, asks the old one to release, then serves while the old one
+drains. Hosts move their carriers to the new process on their own.
+
 ## Development
 
 ```sh
-make check
+make check   # toolchain, dependency pins, source policy, metrics schema, fmt, vet, tests, build
+make build   # bin/paperboat-edge (CGO off, Go 1.27.4)
 ```
 
 The workspace module includes the shared `relay/selfhost` runtime-file

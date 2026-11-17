@@ -1,3 +1,9 @@
+// Package containers runs the self-host node's relay and edge as Docker containers for pbh. It checks
+// that the host is supported, saves and loads the configured images, starts the containers with a
+// protected state mount, waits until each reports ready for the current installation epoch, supervises
+// them (reporting the last output line when one stops), and hands unchanged containers, and a serving
+// edge of any image, over to an upgrade without dropping them. Teardown removes the containers it
+// owns.
 package containers
 
 import (

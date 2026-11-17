@@ -1,3 +1,8 @@
+// Package browseraccess authorizes browser access to previews and tunnels. It begins, issues and
+// redeems short-lived browser grants, authorizes each request against the viewer policy and the exact
+// route binding, issues machine credentials (valid for at most five minutes, rechecked against current
+// authority on every use) for machine-only clients, and activates dormant routes by materializing the
+// one existing lazy policy after exact authorization.
 package browseraccess
 
 import (

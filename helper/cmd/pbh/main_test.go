@@ -44,7 +44,7 @@ func TestPbhDisabledReporterKeepsSafeFailureAndProcessReference(t *testing.T) {
 		t.Fatal("selfhost diagnostic fields missing")
 	}
 	public.Reset()
-	if code := execute(ctx, reporter, []string{"unknown"}, io.Discard, &public); code != 1 || !strings.Contains(public.String(), "use pbh install") {
+	if code := execute(ctx, reporter, []string{"unknown"}, io.Discard, &public); code != 1 || !strings.Contains(public.String(), "run pbh help") {
 		t.Fatal("owned command guidance lost")
 	}
 }
@@ -54,6 +54,29 @@ func TestUninstallRequiresSeparateDataConfirmationBeforeMutation(t *testing.T) {
 		err := run(context.Background(), args, io.Discard)
 		if err == nil || !strings.Contains(err.Error(), "requires both") {
 			t.Fatal("unconfirmed data deletion reached privileged teardown")
+		}
+	}
+}
+
+// Every command, including the service's own `serve`, has help text and answers --help without
+// touching the host.
+func TestHelpDescribesEveryCommand(t *testing.T) {
+	var top bytes.Buffer
+	if err := run(context.Background(), []string{"help"}, &top); err != nil {
+		t.Fatal(err)
+	}
+	for _, command := range []string{"install", "selfhost code", "status", "doctor", "configure-tls", "uninstall", "serve", "check-host", "version"} {
+		if !strings.Contains(top.String(), command) {
+			t.Fatalf("pbh help does not list %q", command)
+		}
+	}
+	for _, args := range [][]string{{"install", "--help"}, {"selfhost", "code", "--help"}, {"status", "--help"}, {"doctor", "--help"}, {"configure-tls", "--help"}, {"uninstall", "--help"}, {"serve", "--help"}} {
+		var out bytes.Buffer
+		if err := run(context.Background(), args, &out); err != nil {
+			t.Fatalf("%v: %v", args, err)
+		}
+		if !strings.HasPrefix(out.String(), "pbh "+strings.Join(args[:len(args)-1], " ")+": ") {
+			t.Fatalf("%v: help lacks its description: %.80s", args, out.String())
 		}
 	}
 }

@@ -1,3 +1,6 @@
+// Package secrets encrypts and decrypts stored secrets with AES-GCM under a key derived from the
+// configured key material. Decrypt wraps every failure (wrong key, tampered data) in ErrDecrypt, and
+// the byte-slice variants return caller-owned plaintext so sensitive callers can clear it.
 package secrets
 
 import (

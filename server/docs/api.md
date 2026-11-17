@@ -347,7 +347,7 @@ the same key (`409 billing_pending` / `503 provider_outcome_unknown`); membershi
 reconciliation never changes purchased quantity. Other role, resource and
 personal subscription boundaries remain independent of seats.
 
-Stripe test setup is pending. Free and Pro provide the same personal features and differ in count limits
+Free and Pro provide the same personal features and differ in count limits
 (`billing.limits`): machines and concurrent previews plus tunnels 100 and 1000, console browser
 terminals 10 and 100; Teams are advertised as unlimited, with hidden ceilings of 10000, 10000 and
 1000. A new resource past its limit is refused and existing ones keep working. Bandwidth allowances

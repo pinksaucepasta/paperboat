@@ -35,7 +35,7 @@ drain admitted work, restart the native edge, and verify a fresh generation befo
 returning it to service. Never bypass certificate, account, route, or connector checks.
 
 Gateway deployments may set a positive `max_body_bytes` and set `max_header_bytes`
-from 1 KiB through 128 KiB. Defaults are 50 MiB and 32 KiB.
+from 1 KiB through 128 KiB. Defaults are 100 MiB and 32 KiB.
 Choose the smallest values that admit the published applications. The 4,096-entry
 admission and route registries, 4,096-report/64 MiB persisted usage queue, and 250 ms
 quota-feedback interval are fixed workload and recovery budgets rather than deployment

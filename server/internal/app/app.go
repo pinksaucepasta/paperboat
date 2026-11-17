@@ -1,3 +1,8 @@
+// Package app assembles the control-plane server process. New wires the configured database,
+// authentication, billing, tunnel, certificate and DNS services into one App, and its lifecycle runs
+// the supervised background workers (including the leader-elected reconciliation loops), reports
+// operational health, and drains dependencies on shutdown. A worker panic becomes a supervised failure
+// rather than a crash.
 package app
 
 import (

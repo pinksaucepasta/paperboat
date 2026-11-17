@@ -1,5 +1,10 @@
 //go:build topology
 
+// Package testtopology runs a small throwaway container topology for topology tests and exists only
+// under the topology build tag. A Scope creates networks and volumes, runs and execs in containers,
+// disconnects networks or blocks UDP and adds latency and loss to simulate faults, samples resources
+// and logs, and returns Evidence of what it did; Close reports what it cleaned up and can keep
+// resources when a test fails.
 package testtopology
 
 import (

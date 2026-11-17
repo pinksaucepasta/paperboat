@@ -1,3 +1,7 @@
+// Package diagnostics carries the request and correlation identifiers through a context into
+// structured logs, and keeps the process-wide platform counters (device authorization, connect
+// attempts, route readiness) and the instrumented provider HTTP transport. It records counts and codes
+// only, never request or customer data.
 package diagnostics
 
 import (

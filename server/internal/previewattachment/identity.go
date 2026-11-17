@@ -1,3 +1,7 @@
+// Package previewattachment verifies who is calling the preview and tunnel control endpoints. It
+// authenticates an edge's control request against the registered edge identity and credential, and
+// verifies a machine's signed request (authorization, machine identity and proof headers) to name the
+// exact machine and account that sent it.
 package previewattachment
 
 import (

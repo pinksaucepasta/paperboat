@@ -1,3 +1,8 @@
+// Package lazyaccess implements lazy (on-demand) publication policies and activation. A Policy names
+// the target an automatic hostname may wake. Activate wakes that target for one waiter, with admission
+// and waiter counts owned by PostgreSQL across server processes, and never retries a forwarded
+// application request. A signed machine observation is required to restore a forwarding lease; a
+// reservation alone cannot.
 package lazyaccess
 
 import (

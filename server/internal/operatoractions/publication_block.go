@@ -1,3 +1,7 @@
+// Package operatoractions executes the operator's mutating actions: banning or unbanning accounts and
+// teams, draining or resuming relays, disabling or enabling tunnels, and blocking or unblocking a
+// publication. Execute requires an idempotency key and a reason, writes the audit record in the same
+// transaction as the change, and can notify the owner by mail when a takedown applies.
 package operatoractions
 
 import (

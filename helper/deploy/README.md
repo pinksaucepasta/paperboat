@@ -2,9 +2,6 @@
 
 Ubuntu 22.04/24.04 or Debian 12 on amd64/arm64, systemd and public inbound connectivity are required. Install
 first; no account, team, or global scope is assigned by installation.
-The public helper installer/package publication is still pending; these one-liners
-require that qualified release publication. The local package and Docker supervisor
-have been exercised on the configured ARM64 infrastructure.
 
 ```sh
 curl -fsSL https://get.pprbt.dev/selfhost/install | sh
@@ -105,7 +102,7 @@ is a target, put the fallback edge of the pair at a different provider.
 A connected process is not readiness. Dashboard node status reports actual
 control-plane registration, health, and tunnel ingress verification. The service
 starts component runtimes after durable claim configuration and retries runtime
-crashes. `pbh status` shows service status. `pbh uninstall` stops the service,
+crashes (the systemd unit runs `pbh serve`; `pbh help` lists every command). `pbh status` shows service status. `pbh uninstall` stops the service,
 removes its owned containers and helper executables, and retains protected local
 identity, credentials and configuration for reinstall. To permanently delete that
 data, explicitly run `pbh uninstall --remove-data --confirm-remove-data`. Remove

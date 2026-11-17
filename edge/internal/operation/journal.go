@@ -1,3 +1,6 @@
+// Package operation keeps the Journal that binds each single-use credential id (JTI) and operation id
+// to the decision first made for it, so a replayed or retried request gets the original answer instead
+// of a second effect. The journal is bounded and can be restored from durable records.
 package operation
 
 import (

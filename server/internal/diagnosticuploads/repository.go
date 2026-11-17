@@ -1,3 +1,7 @@
+// Package diagnosticuploads implements diagnostic bundle uploads: a user creates an upload Intent, the
+// client uploads the bundle straight to S3-compatible object storage with a presigned request, and the
+// server records its metadata, indexes it by failure reference and cleans up expired or abandoned
+// objects. The Repository and ObjectStore interfaces keep storage replaceable in tests.
 package diagnosticuploads
 
 import (

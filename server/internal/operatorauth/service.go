@@ -1,3 +1,6 @@
+// Package operatorauth authenticates operators for the operator API: first-time password setup, login,
+// and the session token with its CSRF token (stored only as hashes), authentication of each request,
+// and logout. Operator accounts are separate from user accounts.
 package operatorauth
 
 import (

@@ -1,3 +1,6 @@
+// Package testedge is a test double of the control plane's edge-facing API: Fake keeps assignments,
+// usage reports and credentials in memory and Handler serves them over HTTP behind a bearer
+// credential. It is used only by tests.
 package testedge
 
 import (

@@ -1,3 +1,7 @@
+// Package diagnostics serves the edge's private health and metrics endpoints (/livez, /readyz,
+// /diagnostics and /metrics) from a snapshot of node state, control, route and usage status, and
+// defines the fixed set of safe diagnostic events and metrics. Output holds counts and fixed codes
+// only, never customer traffic, hostnames or credentials.
 package diagnostics
 
 import (

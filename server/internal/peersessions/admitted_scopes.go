@@ -1,3 +1,8 @@
+// Package peersessions runs the peer-to-peer network's control side: endpoint registration and the
+// candidate endpoints each engine reports, the personal mesh in which every endpoint of an account is
+// a peer of every other, signed network configurations and the change notifications that publish them,
+// relay node selection, relay quota, admitted-scope reporting and offline access. Requesting an
+// admitted scope never renews a credential or grants new authority.
 package peersessions
 
 import (

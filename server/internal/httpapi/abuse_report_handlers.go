@@ -1,3 +1,8 @@
+// Package httpapi is the server's HTTP surface. NewRouter builds the /v1 handler tree from the product
+// services: authentication and sessions, machines and terminals, previews, tunnels and domains, ENV
+// vaults, config sync, teams and billing, the operator API and the machine, node and edge control
+// endpoints. It owns the success and error envelope, idempotency keys and conditional requests, and
+// per-client rate limits; tests check the OpenAPI document in server/docs against these routes.
 package httpapi
 
 import (

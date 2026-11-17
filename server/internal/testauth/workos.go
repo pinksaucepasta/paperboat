@@ -1,3 +1,5 @@
+// Package testauth provides FakeWorkOSVerifier, a test stand-in for the WorkOS token verifier. The
+// server never selects it at runtime.
 package testauth
 
 import (

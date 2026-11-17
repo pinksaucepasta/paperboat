@@ -1,3 +1,7 @@
+// Package ingressprojection projects the current publication authority into the exact connector and
+// target that an edge may forward to: durable tunnel resources and ephemeral previews each yield a
+// restricted route. The result must be combined with an independently checked browser or native grant;
+// it never authorizes a viewer by itself.
 package ingressprojection
 
 import (

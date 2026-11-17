@@ -1,3 +1,8 @@
+// Package billing implements plans, workspaces and billing on Stripe: Free, Pro and Team subscriptions
+// with seat quantities, checkout and portal sessions, trials and grace periods, bandwidth top-ups and
+// usage periods, and the webhook handlers that reconcile Stripe's state. Operator products and prices
+// are read through the PriceReader. Uncertain provider outcomes are recorded so they can be reconciled
+// instead of repeated.
 package billing
 
 import (

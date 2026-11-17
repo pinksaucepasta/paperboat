@@ -1,3 +1,9 @@
+// Package control is the edge's client of the control plane's private API. It pulls route assignments
+// and snapshots, verifies credentials and fetches current connector authority, reports usage and node
+// observations, pulls certificate distribution actions and requests on-demand certificates, and
+// obtains browser-access, browser-terminal and private-access decisions. Requests and responses are
+// size-bounded and strictly decoded, and a failure is reported as a typed error that says whether
+// control is unavailable or the observation is stale.
 package control
 
 import (

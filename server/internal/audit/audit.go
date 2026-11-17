@@ -1,3 +1,7 @@
+// Package audit records who did what in the audit log. A Writer stores Events (actor, target, result
+// and, for a denial, a stable reason code), either on its own or inside the caller's transaction;
+// request context carries the client, API token or recipe an event is attributed to; List reads back
+// the events matching a Query.
 package audit
 
 import (

@@ -48,7 +48,7 @@ validity is at most 60 seconds; health/capacity freshness and the command's inde
 control lease are 15 seconds. Control loss cannot extend that lease: expiration drains
 and closes relay connections. No application payload or credential enters observations.
 SIGINT/SIGTERM drains for five seconds, publishes drain, then stops and waits for workers.
-The JWKS is read once (at most 128 KiB and 16 keys); key rotation uses a controlled restart.
+The JWKS is read once (at most 128 KiB and 128 keys); key rotation uses a controlled restart.
 
 The [v1 carrier verifier](derpquic/authority.go) enforces
 TLS certificate and signed-grant binding, node/epoch fencing and 60-second grant expiry.

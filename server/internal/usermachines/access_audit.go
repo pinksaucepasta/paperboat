@@ -1,3 +1,7 @@
+// Package usermachines is the control plane's model of a user's machines: enrollment and pairing
+// reset, inventory and availability, capabilities, runtime routes and recovery, terminal sessions with
+// their sharing and browser policy, managed SSH inventory, config comparison, updates, quotas, and the
+// access audit that records every machine access and refusal.
 package usermachines
 
 import (

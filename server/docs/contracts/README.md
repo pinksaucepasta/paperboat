@@ -1,6 +1,6 @@
 # Contract Pack
 
-Status: implemented v1 contract set, pending the final paid-product gate.
+Status: implemented v1 contract set. These docs are the production baseline; a change needs an explicit contract update.
 
 These docs capture the initial contract work for `paperboat-server`.
 They define the implementation baseline for later releases while keeping environment-

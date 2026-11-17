@@ -1,3 +1,6 @@
+// Package store persists the edge's durable state (operation journal, usage counters and the pending
+// usage queue) in one checksummed, versioned file with owner-only permissions. Load refuses a corrupt,
+// over-permissive or unsupported-version file rather than starting from a guess.
 package store
 
 import (

@@ -1,3 +1,8 @@
+// Package mint signs and verifies the control plane's credentials and proofs with Ed25519 keys chosen
+// by key id: runtime credentials, health, revocation and machine-events proofs, visitor assertions for
+// gated routes, network configurations, relay grants and regional relay candidates. Each credential
+// class has its own token type and lifetime bound so one class cannot be mistaken for another, and
+// signing keys rotate in phases.
 package mint
 
 import (

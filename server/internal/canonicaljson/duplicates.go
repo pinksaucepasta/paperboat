@@ -1,3 +1,6 @@
+// Package canonicaljson provides RejectDuplicateFields, which refuses a JSON document that repeats an
+// object key. Documents that are signed or compared canonically must be decoded only after this check,
+// because decoders otherwise keep the last duplicate silently.
 package canonicaljson
 
 import (

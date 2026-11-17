@@ -1,3 +1,6 @@
+// Package machinealias validates and proposes machine aliases, the short names users type to pick a
+// machine. Valid checks the format and refuses names reserved for commands and routes; Candidate
+// derives a unique name from a base name and an ordinal.
 package machinealias
 
 import "strings"

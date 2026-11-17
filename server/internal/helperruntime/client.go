@@ -1,3 +1,7 @@
+// Package helperruntime is the server's client of a machine's host runtime for terminal control: it
+// creates and attaches to terminal sessions, passes terminal modes, dimensions and participants, and
+// reads session snapshots and exit results. Host failures are surfaced as finite codes, never as
+// remote messages.
 package helperruntime
 
 import (

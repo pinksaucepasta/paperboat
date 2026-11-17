@@ -33,8 +33,7 @@ func doctor(ctx context.Context, args []string, out io.Writer) error {
 	dir := fs.String("state-dir", defaultState, "installation state directory")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
-			fs.SetOutput(out)
-			fs.PrintDefaults()
+			printHelp(out, "doctor", fs)
 			return nil
 		}
 		return err

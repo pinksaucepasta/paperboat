@@ -1,3 +1,6 @@
+// Package node holds the edge node's lifecycle state (starting, ready, draining, stopped) and its
+// connector capacity. The Manager assigns connectors up to capacity and drains by fencing new
+// assignments and waiting for existing streams to finish.
 package node
 
 import (

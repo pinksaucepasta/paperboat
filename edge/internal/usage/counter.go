@@ -1,3 +1,8 @@
+// Package usage meters the bytes the edge forwards and reports them to the control plane. Counters
+// keep absolute totals per usage key, the Meter turns them into signed reports, and the Queue holds
+// undelivered reports within fixed limits, coalescing to the latest snapshot per key. Reports the
+// control plane refuses for good move to a bounded dead-letter list. When the control plane
+// acknowledges an exhausted quota, the streams admitted under that authority are ended.
 package usage
 
 import (

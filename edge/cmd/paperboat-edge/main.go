@@ -1,3 +1,7 @@
+// Command paperboat-edge runs the Paperboat edge: server-admitted connector carriers,
+// route reconciliation, TLS HTTP/1.1, HTTP/2 and HTTP/3 ingress, certificate selection, usage
+// accounting and node lifecycle. It reads a strict deployment document and serves private health and
+// metrics on a loopback address.
 package main
 
 import (

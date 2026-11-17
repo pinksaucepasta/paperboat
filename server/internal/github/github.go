@@ -1,3 +1,7 @@
+// Package github talks to GitHub for the control plane: OAuth code exchange and token refresh, the
+// signed-in user and their repositories, creating and reading the config-sync repository and its
+// files, and the CLI-initiated GitHub connect request that the user reviews and approves in the
+// console. The Client interface keeps the API replaceable in tests.
 package github
 
 import (

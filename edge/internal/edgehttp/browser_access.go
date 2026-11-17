@@ -1,3 +1,9 @@
+// Package edgehttp is the edge's public and private HTTP ingress. It applies the route policy to each
+// request (hostname, path, access and IP limits), forwards the request through the host carrier that
+// owns the route, handles upgrades and browser access, bridges browser terminals to host output
+// streams, serves the edge's error pages, and tracks the authenticated connector sessions and route
+// replicas it can forward to. The edge terminates TLS for HTTPS routes only; TLS pass-through bytes
+// are forwarded unchanged.
 package edgehttp
 
 import (

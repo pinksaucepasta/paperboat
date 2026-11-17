@@ -1,3 +1,7 @@
+// Package runtime assembles and runs the edge process: the public HTTP/1.1, HTTP/2 and HTTP/3 servers,
+// the data carrier listeners, certificate selection and distribution, and the control worker loops,
+// all supervised by one Service that starts them in order, reports readiness, and drains and stops
+// them on shutdown or when an install hands the process over to its replacement.
 package runtime
 
 import (

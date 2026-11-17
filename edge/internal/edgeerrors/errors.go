@@ -1,3 +1,6 @@
+// Package edgeerrors defines the edge's typed errors: a stable Code, a message, and the recovery the
+// operator can take, with an optional wrapped cause. Callers branch on the Code (CodeOf) and never on
+// error text.
 package edgeerrors
 
 import (

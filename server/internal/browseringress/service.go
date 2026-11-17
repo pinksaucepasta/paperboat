@@ -1,3 +1,6 @@
+// Package browseringress composes the current viewer's authority with the exact, current connector and
+// route binding for browser ingress, so the edge forwards a browser request only when both hold.
+// Readiness and renewals advance an immutable lease revision.
 package browseringress
 
 import (

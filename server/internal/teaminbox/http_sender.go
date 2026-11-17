@@ -1,3 +1,8 @@
+// Package teaminbox implements the inbox: a sender asks to send files to a recipient's machine, and
+// nothing flows until the recipient decides. Service stores the recipient and sender policies and the
+// requests, bounds manifests, and checks the exact machine capability and current team authority under
+// a team lock; Consume makes an approval single-use just before the file-transfer credential is
+// minted. Delivery receipts go out by mail or HTTP through a worker.
 package teaminbox
 
 import (

@@ -1,3 +1,7 @@
+// Package metering records machine presence and runtime observations: heartbeats from enrolled
+// machines, and the wait on machine events that proves a machine is alive. The repository refreshes
+// last-seen time only when it is older than a configured interval, and detects a second process
+// claiming the same machine identity.
 package metering
 
 import (

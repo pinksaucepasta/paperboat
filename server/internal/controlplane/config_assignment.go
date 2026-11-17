@@ -1,3 +1,8 @@
+// Package controlplane is the control plane's machine-facing core: enrollment, node and machine proof
+// verification, config-sync assignments, leases, conflicts and repository access, edge and relay node
+// inventory and reconciliation, route and ingress assignment, signed usage intake, and the revocation
+// and operation-recovery workers. Every machine request is authenticated against a stored identity
+// before any state changes.
 package controlplane
 
 import (

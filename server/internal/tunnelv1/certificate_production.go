@@ -1,3 +1,8 @@
+// Package tunnelv1 owns durable tunnels and their domains: the tunnel resource service and its
+// PostgreSQL repository, domain bindings, routes with rewrite rules and stream bounds, machine
+// management, health facts projected from observations, and the server-side certificate worker and
+// runtime that issue and distribute certificates to edges. Stable endpoint hostnames are built from a
+// random label independent of the tunnel's id and name.
 package tunnelv1
 
 import (

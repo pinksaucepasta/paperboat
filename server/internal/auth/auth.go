@@ -1,3 +1,7 @@
+// Package auth owns the control plane's sign-in and credential logic: WorkOS-backed browser sessions,
+// the CLI device-authorization flow and its session rotation and recovery, API-token and recipe
+// sessions, team sign-in and sign-up policy, and registration aliases. It stores keyed hashes of
+// secrets, never the secrets themselves.
 package auth
 
 import (

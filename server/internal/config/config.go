@@ -1,3 +1,7 @@
+// Package config loads and validates the server's configuration from its environment (and _FILE secret
+// files): database, HTTP, browser session lifetimes, business-plan values, client discovery,
+// recordings, retention, mail and operator integrations. Changeable values live here once; secrets are
+// redacted when the configuration is printed.
 package config
 
 import (

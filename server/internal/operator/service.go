@@ -1,3 +1,7 @@
+// Package operator provides the read side of the operator API: paged views of accounts, teams,
+// workspaces, billing, control and billing operations, infrastructure, the audit log and an overview.
+// What an operator may read depends on their role, and each read writes an audit event for the acting
+// operator.
 package operator
 
 import (

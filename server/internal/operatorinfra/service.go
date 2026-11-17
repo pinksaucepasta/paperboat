@@ -1,3 +1,7 @@
+// Package operatorinfra manages the infrastructure registry through the operator API: regions and the
+// relay and edge nodes in them, with paged listing and idempotent, audited mutations. It also resolves
+// a runtime node from its credential and issues a node's runtime credential, which it keeps encrypted
+// under the configured key.
 package operatorinfra
 
 import (

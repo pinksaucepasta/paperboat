@@ -1,3 +1,5 @@
+// Package favorites stores a user's favorites. A Service lists them and sets or clears one for a
+// machine, session or preview owned by the signed-in user.
 package favorites
 
 import (

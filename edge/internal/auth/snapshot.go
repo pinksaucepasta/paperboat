@@ -1,3 +1,7 @@
+// Package auth verifies the signed credentials presented to the edge: Ed25519 signature against the
+// issuer's key set, issuer, audience and node binding, lifetime with bounded clock skew, and
+// revocation. It returns admission.Claims for a credential that passes and an error for any that does
+// not; it never trusts a claim before the signature is checked.
 package auth
 
 import (

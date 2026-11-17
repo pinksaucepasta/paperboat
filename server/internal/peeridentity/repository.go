@@ -1,3 +1,7 @@
+// Package peeridentity registers and resolves the signing identity of a machine's endpoint. A machine
+// registers one signing key, proven with its machine-control credential or bootstrapped for the
+// authenticated CLI, and later transport requests are checked against the keys of currently authorized
+// endpoints only. No other endpoint signs or approves a machine's transport identity.
 package peeridentity
 
 import (

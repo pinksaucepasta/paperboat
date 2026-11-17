@@ -1,3 +1,8 @@
+// Package browserterminal serves browser terminals: it admits a terminal ticket after checking the
+// viewer's policy, the machine's observed terminal session, the plan's open-terminal and bandwidth
+// limits, and the machine's route to an edge; it runs the edge-control socket that holds each
+// admission reservation; and it carries the terminal protocol, recording, and the console inspector
+// channel, which is admitted by an inspector credential instead of a terminal session.
 package browserterminal
 
 import (

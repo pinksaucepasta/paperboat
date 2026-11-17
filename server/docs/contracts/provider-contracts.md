@@ -71,8 +71,7 @@ the period before checking it, so an explicit zero blocks the first request. Mac
 browser-terminal counts are limited per plan by `billing.limits`. Bandwidth exhaustion stops new
 admissions and closes affected active streams when signed usage receipts confirm it;
 asynchronous reporting permits in-flight overshoot, not an exact byte ceiling. Usage
-still records all observed bytes, and a new period permits fresh admission. Real Stripe
-acceptance still requires provider test setup.
+still records all observed bytes, and a new period permits fresh admission.
 
 See [Stripe quantities](https://docs.stripe.com/billing/subscriptions/quantities),
 [webhook delivery](https://docs.stripe.com/webhooks), and

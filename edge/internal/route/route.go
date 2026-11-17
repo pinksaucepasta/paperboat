@@ -1,3 +1,8 @@
+// Package route holds the edge's route table. A GenerationRegistry stages complete route generations
+// and activates one atomically, handing each request a StreamLease that fences it to the generation
+// that admitted it. Registry.Match resolves a hostname and path to the active generation's route and
+// tracks which routes each connector attachment serves. A telemetry sink reports route lifecycle
+// events with fixed, non-identifying fields.
 package route
 
 import (

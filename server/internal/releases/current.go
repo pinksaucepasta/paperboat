@@ -1,3 +1,7 @@
+// Package releases reads the release information the server publishes to clients: the Current view
+// derived from the signed release targets (version and per-platform assets), a readiness check of the
+// release directory, and the shared rules for which release versions and platform and architecture
+// pairs are valid.
 package releases
 
 import (

@@ -1,3 +1,7 @@
+// Package previewtunnelapi holds the pieces shared by the preview and tunnel HTTP APIs: the user-safe
+// APIError contract, the Actor and Authorize check that applies account, actor, machine, role,
+// resource-scope and host rules, Idempotency-Key parsing, and RequestHash, which canonicalizes JSON
+// and rejects duplicate fields so equal documents hash equally.
 package previewtunnelapi
 
 import (

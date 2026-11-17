@@ -1,3 +1,7 @@
+// Package previewtunnelstore is the PostgreSQL store for preview and tunnel resources: idempotent
+// operations (BeginOperation returns the earlier operation for a repeated key), preview leases and
+// their lifecycle records, lazy-activation lease authority, the quarantine that holds a released
+// domain before anyone can claim it, and the managed or self-hosted edge mode.
 package previewtunnelstore
 
 import (

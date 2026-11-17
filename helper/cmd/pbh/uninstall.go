@@ -20,6 +20,10 @@ func uninstall(ctx context.Context, args []string, out io.Writer) error {
 	removeData := fs.Bool("remove-data", false, "also delete protected identity, credentials and configuration")
 	confirm := fs.Bool("confirm-remove-data", false, "explicitly confirm permanent data deletion")
 	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			printHelp(out, "uninstall", fs)
+			return nil
+		}
 		return err
 	}
 	if fs.NArg() != 0 {

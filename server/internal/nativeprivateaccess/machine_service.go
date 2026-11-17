@@ -1,3 +1,8 @@
+// Package nativeprivateaccess issues the grants that let a signed-in CLI client reach one machine
+// service privately over the native (peer-to-peer or relayed) path. Service.Issue resolves the exact
+// account, resource, route and protocol through a Resolver, checks that policy allows the port and
+// that the machine currently announces the service, and returns a signed Grant. It never creates
+// access sessions or probes a target.
 package nativeprivateaccess
 
 import (

@@ -1,3 +1,8 @@
+// Package admission defines the verified credential claims and the route, request and response
+// documents the edge admits. Service.Admit verifies a credential through a Verifier, checks the
+// connector's current authority and generation through an Authorizer, records the decision in the
+// operation journal so a retry gets the same answer, and issues a RunID that fences one process
+// generation. Verifying the signed credential itself lives in package auth.
 package admission
 
 import (

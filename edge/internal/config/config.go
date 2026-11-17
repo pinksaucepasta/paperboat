@@ -1,3 +1,7 @@
+// Package config parses the edge's two configuration inputs: the process flags (node and pool
+// identity, loopback health address, state path, shutdown timeout) and the strict deployment document
+// (control plane URL and credentials, listeners, certificates, base domains, limits). Both are
+// validated before the service starts and reject unknown fields, relative paths and unsafe addresses.
 package config
 
 import (

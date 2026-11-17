@@ -1,3 +1,8 @@
+// Package workers runs the server's background workers on exactly one instance at a time. A Leadership
+// (PostgresLeader, a session advisory lock with a refreshed lease) decides which instance may run
+// them; a Supervisor started with NewLeaderSupervisor stops and joins every worker when leadership is
+// lost and waits to acquire it again. Progress detects a stalled worker loop and reports the first
+// retryable fault of an iteration.
 package workers
 
 import (
