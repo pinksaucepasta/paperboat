@@ -1,9 +1,23 @@
+import { execSync } from "node:child_process"
 import type { NextConfig } from "next"
+import { withSentryConfig } from "@sentry/nextjs/config"
 
 // The console is reached through its public origin (WORKOS_REDIRECT_URI), also in development.
 const publicHost = process.env.WORKOS_REDIRECT_URI ? new URL(process.env.WORKOS_REDIRECT_URI).hostname : undefined
 
+// Error reports name the build by its commit (SENTRY_RELEASE overrides it); a build outside a checkout has none.
+const release =
+  process.env.SENTRY_RELEASE ||
+  (() => {
+    try {
+      return execSync("git rev-parse HEAD", { stdio: ["ignore", "pipe", "ignore"] }).toString().trim()
+    } catch {
+      return undefined
+    }
+  })()
+
 const nextConfig: NextConfig = {
+  env: { NEXT_PUBLIC_SENTRY_RELEASE: release ?? "" },
   // tools/console-live.sh builds into the slot the live server is not running from.
   distDir: process.env.NEXT_DIST_DIR || ".next",
   cacheComponents: true,
@@ -40,4 +54,17 @@ const nextConfig: NextConfig = {
   },
 }
 
-export default nextConfig
+// Source maps go to Sentry only when SENTRY_AUTH_TOKEN is set at build time; without it the build is unchanged.
+// SENTRY_URL names the region's host (EU), SENTRY_ORG and SENTRY_PROJECT default to this product's.
+const token = process.env.SENTRY_AUTH_TOKEN
+export default withSentryConfig(nextConfig, {
+  org: process.env.SENTRY_ORG ?? "pprbt",
+  project: process.env.SENTRY_PROJECT ?? "console",
+  authToken: token,
+  sentryUrl: process.env.SENTRY_URL,
+  release: { name: release },
+  sourcemaps: { disable: !token },
+  widenClientFileUpload: true,
+  telemetry: false,
+  silent: true,
+})

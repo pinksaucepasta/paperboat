@@ -1,3 +1,4 @@
+import { captureException, withScope } from "@sentry/core"
 import {
   consoleOrigin,
   controlPlaneFetch,
@@ -114,6 +115,11 @@ async function relay(request: Request, { params }: Context): Promise<Response> {
     )
   } catch (error) {
     logFailure(reference, 503, request.method, path)
+    // The control plane cannot report its own absence; the reference ties this event to the log line and the page.
+    withScope((scope) => {
+      scope.setTag("support_reference", reference)
+      captureException(error)
+    })
     console.error(
       JSON.stringify({ msg: "control plane unreachable", support_reference: reference, cause: String(error) }),
     )

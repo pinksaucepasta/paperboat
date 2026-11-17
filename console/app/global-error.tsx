@@ -1,10 +1,13 @@
 "use client"
 
+import { useEffect } from "react"
 import { errorReference } from "@/lib/error-reference"
+import { reportShownError } from "@/lib/sentry-report"
 
 /** The root layout itself crashed: no theme or components are available, so the page is plain. */
 export default function GlobalError({ error, retry }: { error: Error & { digest?: string }; retry: () => void }) {
   const reference = errorReference(error)
+  useEffect(() => reportShownError(error), [error])
   return (
     <html lang="en">
       <body

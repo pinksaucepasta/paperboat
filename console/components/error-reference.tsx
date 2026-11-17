@@ -1,8 +1,9 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { toast } from "sonner"
 import { errorReference, errorText } from "@/lib/error-reference"
+import { reportShownError } from "@/lib/sentry-report"
 import { CopyIcons, useCopy } from "@/components/copy-button"
 
 /** "Reference: support_…" with a Copy button: the id to send to support, shown under every error. */
@@ -10,6 +11,9 @@ export function ErrorReference({ error, reference }: { error?: unknown; referenc
   // The id is minted at first render and kept, so every render of one error shows the same one.
   const [shown] = useState(() => reference ?? errorReference(error))
   const { copied, copy } = useCopy(shown)
+  useEffect(() => {
+    if (reference === undefined) reportShownError(error)
+  }, [error, reference])
   return (
     <span className="mt-1 flex flex-wrap items-center gap-x-1.5 text-xs font-normal text-muted-foreground">
       Reference:
