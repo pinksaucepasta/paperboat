@@ -51,7 +51,7 @@ func lazyRuleAndDecision(host string) (route.RouteRule, connectorprotocol.Ingres
 
 func newLazyPolicy(t *testing.T, registry *route.GenerationRegistry, authority *lazyAuthorityFixture, next http.Handler) *Policy {
 	t.Helper()
-	p, err := New(Config{BrowserAccess: &BrowserAccess{Authority: authority, LazyAuthority: authority, LoginOrigin: "https://login.example.test"}, PreviewBaseDomain: "preview.example.test", TunnelBaseDomain: "tunnels.example.test", RuntimeBaseDomain: "runtime.example.test", MaxHeaderBytes: 4096, MaxBodyBytes: 4096, Routes: registry, RequestID: func() string { return "request_lazy" }}, next)
+	p, err := New(Config{BrowserAccess: &BrowserAccess{Authority: authority, LazyAuthority: authority}, PreviewBaseDomain: "preview.example.test", TunnelBaseDomain: "tunnels.example.test", RuntimeBaseDomain: "runtime.example.test", MaxHeaderBytes: 4096, MaxBodyBytes: 4096, Routes: registry, RequestID: func() string { return "request_lazy" }}, next)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -287,7 +287,7 @@ func (*beginDeniedAuthority) Begin(context.Context, string, string) (control.Bro
 
 func TestSignedOutUnknownHostNavigationIs404(t *testing.T) {
 	authority := &beginDeniedAuthority{}
-	p, err := New(Config{BrowserAccess: &BrowserAccess{Authority: authority, LoginOrigin: "https://login.example.test"}, PreviewBaseDomain: "preview.example.test", TunnelBaseDomain: "tunnels.example.test", RuntimeBaseDomain: "runtime.example.test", MaxHeaderBytes: 4096, MaxBodyBytes: 4096, Routes: route.NewGenerationRegistry(1)}, http.NotFoundHandler())
+	p, err := New(Config{BrowserAccess: &BrowserAccess{Authority: authority}, PreviewBaseDomain: "preview.example.test", TunnelBaseDomain: "tunnels.example.test", RuntimeBaseDomain: "runtime.example.test", MaxHeaderBytes: 4096, MaxBodyBytes: 4096, Routes: route.NewGenerationRegistry(1)}, http.NotFoundHandler())
 	if err != nil {
 		t.Fatal(err)
 	}

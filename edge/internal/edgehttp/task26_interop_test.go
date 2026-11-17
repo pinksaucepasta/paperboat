@@ -34,7 +34,7 @@ type task26BrowserAuthority struct {
 func (*task26BrowserAuthority) Begin(context.Context, string, string) (control.BrowserBegin, error) {
 	return control.BrowserBegin{}, control.ErrBrowserDenied
 }
-func (*task26BrowserAuthority) Redeem(context.Context, string, string, string, string) (control.BrowserSession, error) {
+func (*task26BrowserAuthority) Redeem(context.Context, string, string, string, string, string) (control.BrowserSession, error) {
 	return control.BrowserSession{}, control.ErrBrowserDenied
 }
 func (a *task26BrowserAuthority) Authorize(_ context.Context, r control.BrowserAuthorizeRequest) (connectorprotocol.IngressDecision, error) {
@@ -174,7 +174,7 @@ func TestTask26CrossRepositoryRestrictedBrowserHTTP2(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	gateway, err := NewGatewayWithTransports(Config{BrowserAccess: &BrowserAccess{Authority: browser, LoginOrigin: "https://login.example.test"}, PreviewBaseDomain: "preview.example.test", TunnelBaseDomain: "tunnels.example.test", RuntimeBaseDomain: "runtime.example.test", MaxHeaderBytes: 4096, MaxBodyBytes: 4096, Routes: NewCompositeRouteMatcher(NewPreviewCarrierRouteMatcher(registry)), RequestID: func() string { return "task26-request" }}, "127.0.0.1:1", transport, nil)
+	gateway, err := NewGatewayWithTransports(Config{BrowserAccess: &BrowserAccess{Authority: browser}, PreviewBaseDomain: "preview.example.test", TunnelBaseDomain: "tunnels.example.test", RuntimeBaseDomain: "runtime.example.test", MaxHeaderBytes: 4096, MaxBodyBytes: 4096, Routes: NewCompositeRouteMatcher(NewPreviewCarrierRouteMatcher(registry)), RequestID: func() string { return "task26-request" }}, "127.0.0.1:1", transport, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

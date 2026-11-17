@@ -29,21 +29,14 @@ func TestLoadDeploymentStrictProfile(t *testing.T) {
 	}
 }
 
-func TestBrowserAccessGateDoesNotNeedPublicSuffixListing(t *testing.T) {
+func TestBrowserAccessNeedsNoLoginOriginHere(t *testing.T) {
 	base := strings.TrimSuffix(validDeploymentJSON(), "}")
-	enabled := func(origin string) string {
-		return base + `,"browser_access_enabled":true,"browser_login_origin":"` + origin + `"}`
+	if _, err := LoadDeployment(writeDeployment(t, base+`,"browser_access_enabled":true}`)); err != nil {
+		t.Fatalf("browser access: %v", err)
 	}
-	if _, err := LoadDeployment(writeDeployment(t, enabled("https://login.example.test"))); err != nil {
-		t.Fatalf("browser access with an exact HTTPS login origin: %v", err)
-	}
-	for _, origin := range []string{"", "http://login.example.test", "https://login.example.test/path", "https://user@login.example.test", "https://app.preview.example.test", "https://preview.example.test", "https://x.tunnels.example.test"} {
-		if _, err := LoadDeployment(writeDeployment(t, enabled(origin))); err == nil {
-			t.Fatalf("browser access accepted login origin %q", origin)
-		}
-	}
-	if _, err := LoadDeployment(writeDeployment(t, base+`,"browser_access_enabled":false,"browser_login_origin":"https://login.example.test"}`)); err != nil {
-		t.Fatal(err)
+	// The server names the console; a deployment file carrying its own copy is refused.
+	if _, err := LoadDeployment(writeDeployment(t, base+`,"browser_access_enabled":true,"browser_login_origin":"https://login.example.test"}`)); err == nil {
+		t.Fatal("deployment accepted its own browser_login_origin")
 	}
 }
 

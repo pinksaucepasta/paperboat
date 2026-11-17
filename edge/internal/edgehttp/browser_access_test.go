@@ -16,6 +16,9 @@ import (
 	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 )
 
+// testLoginOrigin is the one console origin the fake server names; like the real server it refuses a handoff from any other.
+const testLoginOrigin = "https://login.example.test"
+
 type browserAuthorityTest struct {
 	revoked  atomic.Bool
 	calls    atomic.Int32
@@ -25,10 +28,13 @@ type browserAuthorityTest struct {
 
 func (a *browserAuthorityTest) Begin(context.Context, string, string) (control.BrowserBegin, error) {
 	a.calls.Add(1)
-	return control.BrowserBegin{TransactionID: "bat_test", State: "nonce", ExpiresAt: time.Now().Add(time.Minute)}, nil
+	return control.BrowserBegin{TransactionID: "bat_test", State: "nonce", ExpiresAt: time.Now().Add(time.Minute), LoginOrigin: testLoginOrigin}, nil
 }
-func (a *browserAuthorityTest) Redeem(_ context.Context, tx, state, handoff, host string) (control.BrowserSession, error) {
+func (a *browserAuthorityTest) Redeem(_ context.Context, tx, state, handoff, host, origin string) (control.BrowserSession, error) {
 	a.calls.Add(1)
+	if origin != testLoginOrigin {
+		return control.BrowserSession{}, control.ErrControlUnavailable
+	}
 	if handoff == "bah_denied" {
 		return control.BrowserSession{}, control.ErrBrowserDenied
 	}
@@ -55,14 +61,15 @@ func TestBrowserCallbackRejectsForgedReturnBeforeRedemption(t *testing.T) {
 		status, calls              int
 	}{
 		{"valid", "https://login.example.test", "__Host-pb-handoff=bat_test.nonce", "transaction_id=bat_test&handoff=bah_test", 303, 1},
-		{"sibling", "https://evil.example.test", "__Host-pb-handoff=bat_test.nonce", "transaction_id=bat_test&handoff=bah_test", 403, 0},
+		{"sibling", "https://evil.example.test", "__Host-pb-handoff=bat_test.nonce", "transaction_id=bat_test&handoff=bah_test", 503, 1},
+		{"null origin", "null", "__Host-pb-handoff=bat_test.nonce", "transaction_id=bat_test&handoff=bah_test", 403, 0},
 		{"duplicate cookie", "https://login.example.test", "__Host-pb-handoff=bat_test.nonce; __Host-pb-handoff=bat_test.evil", "transaction_id=bat_test&handoff=bah_test", 403, 0},
 		{"wrong transaction", "https://login.example.test", "__Host-pb-handoff=bat_other.nonce", "transaction_id=bat_test&handoff=bah_test", 403, 0},
 		{"duplicate field", "https://login.example.test", "__Host-pb-handoff=bat_test.nonce", "transaction_id=bat_test&handoff=bah_test&handoff=evil", 400, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			a := &browserAuthorityTest{}
-			b := BrowserAccess{Authority: a, LoginOrigin: "https://login.example.test"}
+			b := BrowserAccess{Authority: a}
 			r := httptest.NewRequest("POST", "https://app.example.test"+browserCallbackPath, strings.NewReader(tc.body))
 			r.Header.Set("Origin", tc.origin)
 			r.Header.Set("Cookie", tc.cookie)
@@ -92,7 +99,7 @@ func TestBrowserCallbackRejectsForgedReturnBeforeRedemption(t *testing.T) {
 func TestBrowserNavigationAndWebhookSemantics(t *testing.T) {
 	for _, method := range []string{"POST", "PUT", "DELETE", "OPTIONS", "GET"} {
 		a := &browserAuthorityTest{}
-		b := BrowserAccess{Authority: a, LoginOrigin: "https://login.example.test"}
+		b := BrowserAccess{Authority: a}
 		r := httptest.NewRequest(method, "https://app.example.test/hook", nil)
 		w := httptest.NewRecorder()
 		b.begin(w, r, "app.example.test")
@@ -101,7 +108,7 @@ func TestBrowserNavigationAndWebhookSemantics(t *testing.T) {
 		}
 	}
 	a := &browserAuthorityTest{}
-	b := BrowserAccess{Authority: a, LoginOrigin: "https://login.example.test"}
+	b := BrowserAccess{Authority: a}
 	r := httptest.NewRequest("GET", "https://app.example.test/app?q=1", nil)
 	r.Header.Set("Sec-Fetch-Mode", "navigate")
 	r.Header.Set("Sec-Fetch-Dest", "document")
@@ -177,7 +184,7 @@ func TestBrowserDecisionOnANewerRouteGenerationServesTheActiveRule(t *testing.T)
 func TestBrowserAuthorizationOutlivesTTLUntilRevokedAndDeniesNewAdmissions(t *testing.T) {
 	m, d := browserTestMatch()
 	a := &browserAuthorityTest{decision: d}
-	b := BrowserAccess{Authority: a, LoginOrigin: "https://login.example.test"}
+	b := BrowserAccess{Authority: a}
 	r := httptest.NewRequest("GET", "https://"+m.Host+"/", nil)
 	r.AddCookie(&http.Cookie{Name: browserEdgeCookie, Value: "token"})
 	r.Header.Set("Sec-Fetch-Site", "same-origin")
@@ -245,7 +252,7 @@ func TestBrowserCookieRequestsFromSiblingHostsAreRefused(t *testing.T) {
 		{"cross-site fetch", "cross-site", "cors", "empty", "GET", "", "", false},
 	} {
 		a := &browserAuthorityTest{decision: d}
-		b := BrowserAccess{Authority: a, LoginOrigin: "https://login.example.test"}
+		b := BrowserAccess{Authority: a}
 		r := httptest.NewRequest(c.method, "https://"+m.Host+"/", nil)
 		r.AddCookie(&http.Cookie{Name: browserEdgeCookie, Value: "token"})
 		for k, v := range map[string]string{"Sec-Fetch-Site": c.site, "Sec-Fetch-Mode": c.mode, "Sec-Fetch-Dest": c.dest} {
@@ -273,7 +280,7 @@ func TestBrowserCookieRequestsFromSiblingHostsAreRefused(t *testing.T) {
 
 func TestBrowserCallbackDeniedAnswers404WithSwitchAccountLink(t *testing.T) {
 	a := &browserAuthorityTest{}
-	b := BrowserAccess{Authority: a, LoginOrigin: "https://login.example.test"}
+	b := BrowserAccess{Authority: a}
 	r := httptest.NewRequest("POST", "https://app.example.test"+browserCallbackPath, strings.NewReader("transaction_id=bat_test&handoff=bah_denied"))
 	r.Header.Set("Origin", "https://login.example.test")
 	r.Header.Set("Cookie", "__Host-pb-handoff=bat_test.nonce")
@@ -288,7 +295,7 @@ func TestBrowserCallbackDeniedAnswers404WithSwitchAccountLink(t *testing.T) {
 }
 
 func TestBrowserUnauthenticatedBeginStillRedirectsToSignIn(t *testing.T) {
-	b := BrowserAccess{Authority: &browserAuthorityTest{}, LoginOrigin: "https://login.example.test"}
+	b := BrowserAccess{Authority: &browserAuthorityTest{}}
 	r := httptest.NewRequest("GET", "https://app.example.test/x", nil)
 	r.Header.Set("Sec-Fetch-Mode", "navigate")
 	r.Header.Set("Sec-Fetch-Dest", "document")
@@ -318,5 +325,32 @@ func TestVisitorAssertionReachesOnlyGatedApps(t *testing.T) {
 	setVisitorAssertion(public)
 	if public.Header.Get("Paperboat-Visitor-Assertion") != "" {
 		t.Fatal("a visitor's own assertion reached a public app")
+	}
+}
+
+// The redirect goes to the origin the server names, whatever it is; an origin that is not an exact https one is never followed.
+type loginOriginAuthority struct {
+	browserAuthorityTest
+	origin string
+}
+
+func (a *loginOriginAuthority) Begin(context.Context, string, string) (control.BrowserBegin, error) {
+	return control.BrowserBegin{TransactionID: "bat_test", State: "nonce", ExpiresAt: time.Now().Add(time.Minute), LoginOrigin: a.origin}, nil
+}
+
+func TestBrowserBeginRedirectsToTheServersLoginOrigin(t *testing.T) {
+	for origin, want := range map[string]string{
+		"https://console.example.test": "https://console.example.test/.paperboat/access/login?transaction_id=bat_test",
+		"":                             "", "http://console.example.test": "", "https://console.example.test/x": "", "https://u@console.example.test": "",
+	} {
+		b := BrowserAccess{Authority: &loginOriginAuthority{origin: origin}}
+		r := httptest.NewRequest("GET", "https://app.example.test/app", nil)
+		r.Header.Set("Sec-Fetch-Mode", "navigate")
+		r.Header.Set("Sec-Fetch-Dest", "document")
+		w := httptest.NewRecorder()
+		b.begin(w, r, "app.example.test")
+		if want == "" && (w.Code != 503 || w.Header().Get("Location") != "") || want != "" && (w.Code != 303 || w.Header().Get("Location") != want) {
+			t.Fatalf("login origin %q: status %d location %q", origin, w.Code, w.Header().Get("Location"))
+		}
 	}
 }

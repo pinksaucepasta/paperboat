@@ -30,7 +30,7 @@ func TestSharedTLSBrowserAuthorization(t *testing.T) {
 			if denied {
 				authority.failure = control.ErrBrowserDenied
 			}
-			browser := &BrowserAccess{Authority: authority, LoginOrigin: "https://login.example.test"}
+			browser := &BrowserAccess{Authority: authority}
 			clientTLS, serverTLS, _, _, _ := task24Certificates(t, match.Host)
 			clientTLS.ServerName = match.Host
 			raw, err := net.Listen("tcp", "127.0.0.1:0")
@@ -683,7 +683,7 @@ func TestSharedTLSUnknownNameIsTheDeniedPage(t *testing.T) {
 		t.Fatal(err)
 	}
 	shared.ServeUnknownNamesWithPage(serverTLS)
-	shared.browser = &BrowserAccess{Authority: &browserAuthorityTest{}, LoginOrigin: "https://login.example.test"}
+	shared.browser = &BrowserAccess{Authority: &browserAuthorityTest{}}
 	server := &http.Server{TLSConfig: serverTLS, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { t.Error("an unknown name reached the HTTPS handler") })}
 	defer server.Close()
 	go server.ServeTLS(shared, "", "")

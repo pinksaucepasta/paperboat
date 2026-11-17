@@ -119,7 +119,7 @@ func TestHTTPClientRequestsSurviveRolloutCut(t *testing.T) {
 			return err
 		}, true, 0, nil},
 		{"browser access redeem", "/v1/edge/browser-access/redeem", `{"token":"token_1","return_path":"/","expires_at":"2030-01-01T00:00:00Z"}`, func(ctx context.Context, c *HTTPClient) error {
-			_, err := browser(c).Redeem(ctx, "transaction_1", "state_1", "handoff_1", "app.example.test")
+			_, err := browser(c).Redeem(ctx, "transaction_1", "state_1", "handoff_1", "app.example.test", "https://login.example.test")
 			return err
 		}, true, 0, nil},
 		{"browser access authorize", "/v1/edge/browser-access/authorize", `{"decision_id":"decision_1"}`, func(ctx context.Context, c *HTTPClient) error {

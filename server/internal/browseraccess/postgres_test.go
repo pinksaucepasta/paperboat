@@ -71,6 +71,9 @@ func TestBrowserAccessPostgres(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if begin.LoginOrigin != "https://login.example.test" {
+		t.Fatalf("Begin login origin %q, want the configured one", begin.LoginOrigin)
+	}
 	if _, err = svc.Issue(ctx, IssueRequest{TransactionID: begin.TransactionID, Principal: auth.Session{ID: session, UserID: owner, ExpiresAt: now.Add(2 * time.Hour)}}); err != nil {
 		t.Fatal(err)
 	}
@@ -85,10 +88,10 @@ func TestBrowserAccessPostgres(t *testing.T) {
 	if err != nil || !deniedIssue.Denied || deniedIssue.Handoff == "" {
 		t.Fatalf("viewer without access: %+v %v, want a denied handoff", deniedIssue, err)
 	}
-	if _, err = svc.Redeem(ctx, RedeemRequest{TransactionID: refused.TransactionID, State: refused.State, Handoff: deniedIssue.Handoff, Host: host}); !errors.Is(err, ErrAccessDenied) {
+	if _, err = svc.Redeem(ctx, RedeemRequest{TransactionID: refused.TransactionID, State: refused.State, Handoff: deniedIssue.Handoff, Host: host, Origin: refused.LoginOrigin}); !errors.Is(err, ErrAccessDenied) {
 		t.Fatalf("denied handoff exchange: %v, want ErrAccessDenied", err)
 	}
-	if _, err = svc.Redeem(ctx, RedeemRequest{TransactionID: refused.TransactionID, State: refused.State, Handoff: "bah_wrong", Host: host}); !errors.Is(err, ErrNotAuthorized) {
+	if _, err = svc.Redeem(ctx, RedeemRequest{TransactionID: refused.TransactionID, State: refused.State, Handoff: "bah_wrong", Host: host, Origin: refused.LoginOrigin}); !errors.Is(err, ErrNotAuthorized) {
 		t.Fatalf("denied transaction with a wrong handoff: %v, want ErrNotAuthorized", err)
 	}
 	// Obtain a fresh issued handoff for the redemption race.
@@ -97,7 +100,11 @@ func TestBrowserAccessPostgres(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	req := RedeemRequest{TransactionID: begin.TransactionID, State: begin.State, Handoff: issued.Handoff, Host: host}
+	req := RedeemRequest{TransactionID: begin.TransactionID, State: begin.State, Handoff: issued.Handoff, Host: host, Origin: begin.LoginOrigin}
+	// A handoff posted from another console origin is refused and stays redeemable from the login origin.
+	if _, err = svc.Redeem(ctx, RedeemRequest{TransactionID: req.TransactionID, State: req.State, Handoff: req.Handoff, Host: host, Origin: "https://dev.example.test"}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("redeem from another origin: %v, want ErrInvalid", err)
+	}
 	var wg sync.WaitGroup
 	wg.Add(2)
 	results := make(chan RedeemResult, 2)
@@ -179,7 +186,7 @@ func TestBrowserAccessPostgres(t *testing.T) {
 	if err != nil || teamIssue.Denied {
 		t.Fatalf("team member of a team-owned private tunnel: %+v %v", teamIssue, err)
 	}
-	teamSession, err := svc.Redeem(ctx, RedeemRequest{TransactionID: teamBegin.TransactionID, State: teamBegin.State, Handoff: teamIssue.Handoff, Host: host})
+	teamSession, err := svc.Redeem(ctx, RedeemRequest{TransactionID: teamBegin.TransactionID, State: teamBegin.State, Handoff: teamIssue.Handoff, Host: host, Origin: teamBegin.LoginOrigin})
 	if err != nil {
 		t.Fatalf("redeem for a team-owned private tunnel: %v", err)
 	}

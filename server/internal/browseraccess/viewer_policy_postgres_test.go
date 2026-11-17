@@ -342,7 +342,7 @@ func issueBrowserTokenResult(svc *Service, ctx context.Context, user, session, h
 	if err != nil {
 		return "", err
 	}
-	redeemed, err := svc.Redeem(ctx, RedeemRequest{TransactionID: begin.TransactionID, State: begin.State, Handoff: issued.Handoff, Host: host})
+	redeemed, err := svc.Redeem(ctx, RedeemRequest{TransactionID: begin.TransactionID, State: begin.State, Handoff: issued.Handoff, Host: host, Origin: begin.LoginOrigin})
 	if err != nil {
 		return "", err
 	}

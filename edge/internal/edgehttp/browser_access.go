@@ -26,7 +26,7 @@ const browserHandoffCookie = "__Host-pb-handoff"
 
 type BrowserAuthority interface {
 	Begin(context.Context, string, string) (control.BrowserBegin, error)
-	Redeem(context.Context, string, string, string, string) (control.BrowserSession, error)
+	Redeem(context.Context, string, string, string, string, string) (control.BrowserSession, error)
 	Authorize(context.Context, control.BrowserAuthorizeRequest) (connectorprotocol.IngressDecision, error)
 }
 
@@ -39,7 +39,6 @@ type LazyAuthority interface {
 type BrowserAccess struct {
 	Authority     BrowserAuthority
 	LazyAuthority LazyAuthority
-	LoginOrigin   string
 }
 type browserDecisionKey struct{}
 
@@ -85,11 +84,13 @@ func stripBrowserResponseCredentials(h http.Header) {
 }
 
 func (b *BrowserAccess) validate() bool {
-	if b == nil || b.Authority == nil {
-		return false
-	}
-	u, err := url.Parse(b.LoginOrigin)
-	return err == nil && u.Scheme == "https" && u.Host != "" && u.User == nil && u.Path == "" && u.RawQuery == "" && u.Fragment == "" && u.String() == b.LoginOrigin
+	return b != nil && b.Authority != nil
+}
+
+// validLoginOrigin accepts only an exact https origin: the server names the console, never the edge's own settings.
+func validLoginOrigin(origin string) bool {
+	u, err := url.Parse(origin)
+	return err == nil && u.Scheme == "https" && u.Host != "" && u.User == nil && u.Path == "" && u.RawQuery == "" && u.Fragment == "" && u.String() == origin
 }
 
 func browserCookie(r *http.Request, name string) (string, bool) {
@@ -132,7 +133,7 @@ func (b *BrowserAccess) callback(w http.ResponseWriter, r *http.Request) {
 		writeErrorPage(w, 503, "Paperboat could not check your access just now. Wait a moment and reload the page.")
 		return
 	}
-	if r.Method != http.MethodPost || len(r.Header.Values("Origin")) != 1 || r.Header.Get("Origin") != b.LoginOrigin || browserReservedDuplicates(r) {
+	if r.Method != http.MethodPost || len(r.Header.Values("Origin")) != 1 || !validLoginOrigin(r.Header.Get("Origin")) || browserReservedDuplicates(r) {
 		writeErrorPage(w, 403, "This sign-in link is not valid. Open the address again to start a new sign-in.")
 		return
 	}
@@ -158,7 +159,7 @@ func (b *BrowserAccess) callback(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 	defer cancel()
-	session, err := b.Authority.Redeem(ctx, transaction, nonce, r.PostForm.Get("handoff"), host)
+	session, err := b.Authority.Redeem(ctx, transaction, nonce, r.PostForm.Get("handoff"), host, r.Header.Get("Origin"))
 	clearBrowserHandoff(w)
 	if errors.Is(err, control.ErrBrowserDenied) {
 		b.notFoundPage(r.Context(), w, host)
@@ -188,12 +189,12 @@ func (b *BrowserAccess) notFoundPage(ctx context.Context, w http.ResponseWriter,
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 	tx, err := b.Authority.Begin(ctx, host, "/")
-	if err != nil || tx.TransactionID == "" || tx.State == "" || strings.Contains(tx.TransactionID, ".") || !tx.ExpiresAt.After(time.Now()) {
+	if err != nil || tx.TransactionID == "" || tx.State == "" || strings.Contains(tx.TransactionID, ".") || !tx.ExpiresAt.After(time.Now()) || !validLoginOrigin(tx.LoginOrigin) {
 		writeErrorPage(w, http.StatusNotFound, "")
 		return
 	}
 	http.SetCookie(w, &http.Cookie{Name: browserHandoffCookie, Value: tx.TransactionID + "." + tx.State, Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteNoneMode, Expires: tx.ExpiresAt})
-	writeErrorPageLink(w, http.StatusNotFound, "", "Use a different account", b.LoginOrigin+"/.paperboat/access/login?switch=1&transaction_id="+url.QueryEscape(tx.TransactionID))
+	writeErrorPageLink(w, http.StatusNotFound, "", "Use a different account", tx.LoginOrigin+"/.paperboat/access/login?switch=1&transaction_id="+url.QueryEscape(tx.TransactionID))
 }
 
 // invalidCredentials answers 401 for a request whose own cookies or access token are malformed, before any name is looked
@@ -332,12 +333,12 @@ func (b *BrowserAccess) begin(w http.ResponseWriter, r *http.Request, host strin
 		browserError(w, r, err)
 		return
 	}
-	if tx.TransactionID == "" || tx.State == "" || strings.Contains(tx.TransactionID, ".") || !tx.ExpiresAt.After(time.Now()) {
+	if tx.TransactionID == "" || tx.State == "" || strings.Contains(tx.TransactionID, ".") || !tx.ExpiresAt.After(time.Now()) || !validLoginOrigin(tx.LoginOrigin) {
 		writeErrorPage(w, 503, "Paperboat could not check your access just now. Wait a moment and reload the page.")
 		return
 	}
 	http.SetCookie(w, &http.Cookie{Name: browserHandoffCookie, Value: tx.TransactionID + "." + tx.State, Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteNoneMode, Expires: tx.ExpiresAt})
-	http.Redirect(w, r, b.LoginOrigin+"/.paperboat/access/login?transaction_id="+url.QueryEscape(tx.TransactionID), http.StatusSeeOther)
+	http.Redirect(w, r, tx.LoginOrigin+"/.paperboat/access/login?transaction_id="+url.QueryEscape(tx.TransactionID), http.StatusSeeOther)
 }
 
 // A decision on a newer route generation than the active rule (a route update the edge has not activated yet) still serves it:

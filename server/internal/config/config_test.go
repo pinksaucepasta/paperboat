@@ -518,3 +518,36 @@ func TestValidationRejectsAnAutomaticBoundOver2GB(t *testing.T) {
 		t.Fatalf("a bound over 2 GB validated: %v", err)
 	}
 }
+
+func TestBrowserLoginOriginMustStayOutOfPreviewAndTunnelDomains(t *testing.T) {
+	for _, origin := range []string{"https://app.preview.example.test", "https://preview.example.test", "https://x.tunnels.example.test"} {
+		cfg := Default()
+		cfg.Preview.BaseDomain, cfg.Tunnel.BaseDomain = "preview.example.test", "tunnels.example.test"
+		cfg.HTTP.BrowserLoginOrigin = origin
+		if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "inside a preview or tunnel domain") {
+			t.Fatalf("login origin %q: %v, want refusal", origin, err)
+		}
+	}
+	cfg := Default()
+	cfg.Preview.BaseDomain, cfg.Tunnel.BaseDomain = "preview.example.test", "tunnels.example.test"
+	cfg.HTTP.BrowserLoginOrigin = "https://app.example.test"
+	if err := cfg.Validate(); err != nil && strings.Contains(err.Error(), "browser_login_origin") {
+		t.Fatalf("console outside the route domains refused: %v", err)
+	}
+}
+
+func TestBrowserLoginOriginMustBeWrittenAsABrowserSendsIt(t *testing.T) {
+	for _, origin := range []string{"https://App.Example.Test", "https://app.example.test:443", "https://app.example.test.", "https://APP.PREVIEW.EXAMPLE.TEST"} {
+		cfg := Default()
+		cfg.Preview.BaseDomain = "preview.example.test"
+		cfg.HTTP.BrowserLoginOrigin = origin
+		if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "as a browser sends it") {
+			t.Fatalf("login origin %q: %v, want refusal", origin, err)
+		}
+	}
+	cfg := Default()
+	cfg.HTTP.BrowserLoginOrigin = "https://app.example.test:8443"
+	if err := cfg.Validate(); err != nil && strings.Contains(err.Error(), "browser_login_origin") {
+		t.Fatalf("a non-default port refused: %v", err)
+	}
+}
