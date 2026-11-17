@@ -12,7 +12,7 @@ import (
 
 // An install waits guardAttemptTimeout for the machine guard's pipe after the scheduled task was run and, when it
 // has not come, stops and runs the task again, up to guardStartAttempts times. On a machine whose cores are all busy
-// the first start of the guard can get no CPU at all (a Windows test VM, one spinner per core: 5 of 5 fresh installs, the
+// the first start of the guard can get no CPU at all (winpool-6, one spinner per core: 5 of 5 fresh installs, the
 // process existed for 56 s at 0 CPU and the pipe never appeared, then 'open \\.\pipe\PaperboatMachineGuard: The
 // system cannot find the file specified' and a rollback that failed on the guard's image), while a restart under the same
 // load answered in 2 s once its image was warm. The cause (spark/guard-blocked-diag.md): the BelowNormal cold loader

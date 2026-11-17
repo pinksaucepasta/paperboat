@@ -278,7 +278,7 @@ func waitGuardTaskStopped(ctx context.Context) {
 
 // warmGuardImage reads the installed guard image once so it is in the page cache when the task starts it: on a
 // machine whose cores are all busy the cold loader's page faults, not the guard's own work, took over a minute
-// (a Windows test VM, spark/guard-blocked-diag.md). Best effort: a failed read changes nothing but the start-up time.
+// (winpool-6, spark/guard-blocked-diag.md). Best effort: a failed read changes nothing but the start-up time.
 func warmGuardImage(path string) {
 	file, err := os.Open(path)
 	if err != nil {
