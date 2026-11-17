@@ -26,12 +26,13 @@ import (
 	serverdiagnostics "github.com/pinksaucepasta/paperboat/server/internal/diagnostics"
 	"github.com/pinksaucepasta/paperboat/server/internal/nodeauth"
 	"github.com/pinksaucepasta/paperboat/server/internal/supportreport"
+	"github.com/pinksaucepasta/paperboat/shared/tlscertwire"
 )
 
 const (
-	CertificateDistributionPullPath    = "/v1/edge/certificates/distributions/pull"
-	CertificateDistributionAckPath     = "/v1/edge/certificates/distributions/ack"
-	CertificateDistributionRequestPath = "/v1/edge/certificates/distributions/request"
+	CertificateDistributionPullPath    = tlscertwire.PullPath
+	CertificateDistributionAckPath     = tlscertwire.AckPath
+	CertificateDistributionRequestPath = tlscertwire.RequestPath
 	maxDistributionBody                = 16 << 20
 	maxDistributionMessages            = 128
 	maxDistributionLifetime            = 10 * time.Minute
@@ -48,83 +49,15 @@ var (
 // PrivateKeyPEM are only present on this authenticated control transport;
 // callers must never marshal this type into a public response, audit event,
 // or log line.
-type DistributionMessage struct {
-	Version               int       `json:"version"`
-	Action                string    `json:"action"`
-	CertificateID         string    `json:"certificate_id"`
-	AccountID             string    `json:"account_id"`
-	TunnelID              string    `json:"tunnel_id"`
-	DomainID              string    `json:"domain_id"`
-	TargetKind            string    `json:"target_kind"`
-	RouteID               string    `json:"route_id"`
-	PreviewID             string    `json:"preview_id"`
-	PreviewGeneration     uint64    `json:"preview_generation"`
-	PreviewState          string    `json:"preview_state"`
-	PreviewExpiresAt      time.Time `json:"preview_expires_at"`
-	Hostname              string    `json:"hostname"`
-	OnDemandLeaf          bool      `json:"on_demand_leaf"`
-	DomainGeneration      uint64    `json:"domain_generation"`
-	CertificateGeneration uint64    `json:"certificate_generation"`
-	EdgeNodeID            string    `json:"edge_node_id"`
-	EdgeProcessEpoch      string    `json:"edge_process_epoch"`
-	AssignmentGeneration  uint64    `json:"assignment_generation"`
-	Fingerprint           string    `json:"fingerprint"`
-	Issuer                string    `json:"issuer"`
-	NotBefore             time.Time `json:"not_before"`
-	// ExpiresAt is the short-lived transport envelope deadline.  It is
-	// deliberately independent from the certificate's validity interval so a
-	// queued message can never be replayed for the lifetime of a leaf.
-	ExpiresAt            time.Time `json:"expires_at"`
-	CertificateExpiresAt time.Time `json:"certificate_expires_at"`
-	CertificatePEM       []byte    `json:"certificate_pem"`
-	PrivateKeyPEM        []byte    `json:"private_key_pem"`
-	IssuedAt             time.Time `json:"issued_at"`
-	Proof                string    `json:"proof"`
-}
+type DistributionMessage = tlscertwire.DistributionMessage
 
-type distributionAck struct {
-	Version               int       `json:"version"`
-	Action                string    `json:"action"`
-	CertificateID         string    `json:"certificate_id"`
-	AccountID             string    `json:"account_id"`
-	TunnelID              string    `json:"tunnel_id"`
-	DomainID              string    `json:"domain_id"`
-	TargetKind            string    `json:"target_kind"`
-	RouteID               string    `json:"route_id"`
-	PreviewID             string    `json:"preview_id"`
-	PreviewGeneration     uint64    `json:"preview_generation"`
-	PreviewState          string    `json:"preview_state"`
-	PreviewExpiresAt      time.Time `json:"preview_expires_at"`
-	Hostname              string    `json:"hostname"`
-	DomainGeneration      uint64    `json:"domain_generation"`
-	CertificateGeneration uint64    `json:"certificate_generation"`
-	EdgeNodeID            string    `json:"edge_node_id"`
-	EdgeProcessEpoch      string    `json:"edge_process_epoch"`
-	AssignmentGeneration  uint64    `json:"assignment_generation"`
-	Fingerprint           string    `json:"fingerprint"`
-	Status                string    `json:"status"`
-	Code                  string    `json:"code,omitempty"`
-}
+type distributionAck = tlscertwire.DistributionAck
 
-type distributionPull struct {
-	EdgeNodeID       string `json:"edge_node_id"`
-	EdgeProcessEpoch string `json:"edge_process_epoch"`
-	Limit            int    `json:"limit,omitempty"`
-	Cursor           string `json:"cursor,omitempty"`
-}
+type distributionPull = tlscertwire.DistributionPull
 
-// distributionPage is the pull response. The edge treats a complete page with
-// no messages as nothing to install.
-type distributionPage struct {
-	Version    int                   `json:"version"`
-	Complete   bool                  `json:"complete"`
-	NextCursor string                `json:"next_cursor,omitempty"`
-	Messages   []DistributionMessage `json:"messages"`
-}
+type distributionPage = tlscertwire.DistributionPage
 
-type distributionRequest struct {
-	Hostname string `json:"hostname"`
-}
+type distributionRequest = tlscertwire.DistributionRequest
 
 // DistributionHub is both the CertificateDistributor transport used by the
 // server coordinator and the authenticated pull/ack endpoint consumed by an
@@ -613,7 +546,7 @@ func (h *DistributionHub) handleAck(w http.ResponseWriter, r *http.Request) {
 		writeDistributionError(w, http.StatusForbidden)
 		return
 	}
-	if input.Version != 1 || input.Action != "stage" && input.Action != "activate" && input.Action != "retire" && input.Action != "revoke" || input.Status != "ready" && input.Status != "active" && input.Status != "retired" && input.Status != "revoked" && input.Status != "failed" || !distributionAckStatusMatchesAction(input.Action, input.Status) {
+	if input.Version != 1 || input.Action != "stage" && input.Action != "activate" && input.Action != "retire" && input.Action != "revoke" || input.Status != "ready" && input.Status != "active" && input.Status != "retired" && input.Status != "revoked" && input.Status != "failed" || !tlscertwire.AckStatusMatchesAction(input.Action, input.Status) {
 		writeDistributionError(w, http.StatusBadRequest)
 		return
 	}
@@ -739,12 +672,6 @@ func pureDistributionError(err, expected error) (matched bool) {
 }
 
 func (h *DistributionHub) sign(ctx context.Context, message DistributionMessage) (string, error) {
-	message.Proof = ""
-	canonical, err := json.Marshal(message)
-	if err != nil {
-		return "", ErrDistributionTransportFailed
-	}
-	defer clear(canonical)
 	h.credentialMu.RLock()
 	credential := append([]byte(nil), h.credential...)
 	h.credentialMu.RUnlock()
@@ -773,9 +700,11 @@ func (h *DistributionHub) sign(ctx context.Context, message DistributionMessage)
 	if len(credential) < 32 {
 		return "", ErrDistributionTransportAuth
 	}
-	hash := hmac.New(sha256.New, credential)
-	_, _ = hash.Write(canonical)
-	return base64.RawURLEncoding.EncodeToString(hash.Sum(nil)), nil
+	mac, err := tlscertwire.ProofMAC(message, credential)
+	if err != nil {
+		return "", ErrDistributionTransportFailed
+	}
+	return base64.RawURLEncoding.EncodeToString(mac), nil
 }
 
 func VerifyDistributionMessageProof(message DistributionMessage, credential []byte) error {
@@ -787,15 +716,8 @@ func VerifyDistributionMessageProof(message DistributionMessage, credential []by
 		return ErrDistributionTransportAuth
 	}
 	defer clear(proof)
-	message.Proof = ""
-	canonical, err := json.Marshal(message)
-	if err != nil {
-		return ErrDistributionTransportAuth
-	}
-	defer clear(canonical)
-	hash := hmac.New(sha256.New, credential)
-	_, _ = hash.Write(canonical)
-	if !hmac.Equal(proof, hash.Sum(nil)) {
+	expected, err := tlscertwire.ProofMAC(message, credential)
+	if err != nil || !hmac.Equal(proof, expected) {
 		return ErrDistributionTransportAuth
 	}
 	return nil
@@ -862,24 +784,6 @@ func decodeDistributionCursor(cursor string) (string, bool) {
 
 func encodeDistributionCursor(cursor string) string {
 	return base64.RawURLEncoding.EncodeToString([]byte(cursor))
-}
-
-func distributionAckStatusMatchesAction(action, status string) bool {
-	if status == "failed" {
-		return true
-	}
-	switch action {
-	case "stage":
-		return status == "ready"
-	case "activate":
-		return status == "active"
-	case "retire":
-		return status == "retired"
-	case "revoke":
-		return status == "revoked"
-	default:
-		return false
-	}
 }
 
 func decodeDistributionBody(w http.ResponseWriter, r *http.Request, target any) bool {

@@ -13,12 +13,13 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
+	"github.com/pinksaucepasta/paperboat/shared/tlscertwire"
 )
 
 const (
-	CertificateDistributionPullPath    = "/v1/edge/certificates/distributions/pull"
-	CertificateDistributionAckPath     = "/v1/edge/certificates/distributions/ack"
-	CertificateDistributionRequestPath = "/v1/edge/certificates/distributions/request"
+	CertificateDistributionPullPath    = tlscertwire.PullPath
+	CertificateDistributionAckPath     = tlscertwire.AckPath
+	CertificateDistributionRequestPath = tlscertwire.RequestPath
 	distributionProofTimestampHeader   = "X-Paperboat-Edge-Proof-Issued-At"
 	distributionProofNonceHeader       = "X-Paperboat-Edge-Proof-Nonce"
 	distributionProofSignatureHeader   = "X-Paperboat-Edge-Proof"

@@ -16,18 +16,16 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"net"
-	"regexp"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
-	"golang.org/x/net/idna"
+	"github.com/pinksaucepasta/paperboat/shared/tlscertwire"
 )
 
 var (
-	ErrInvalid             = errors.New("invalid TLS certificate binding")
+	ErrInvalid             = tlscertwire.ErrInvalid
 	ErrCertificateInvalid  = errors.New("invalid TLS certificate bundle")
 	ErrGenerationConflict  = errors.New("TLS certificate generation conflict")
 	ErrHostnameConflict    = errors.New("TLS certificate hostname conflict")
@@ -63,82 +61,35 @@ const (
 	StateFailed  State = "failed"
 )
 
-// TargetKind is the owner namespace for a certificate binding. A durable
-// route and a foreground preview lease may use the same hostname only after
-// the control plane has applied its global claim rules, so the edge keeps the
-// namespace in the immutable binding and in its replay key.
-type TargetKind string
+// TargetKind is the owner namespace for a certificate binding; the edge keeps it in the immutable binding
+// and in its replay key. The definitions are the wire package's.
+type TargetKind = tlscertwire.TargetKind
 
 const (
-	TargetDurableRoute TargetKind = "durable_route"
-	TargetPreviewLease TargetKind = "preview_lease"
-	// TargetPlatformWildcard identifies the two Paperboat-owned wildcard
-	// bundles (preview and tunnel). They are distributed to every eligible
-	// edge process, rather than being owned by a tunnel route or preview
-	// lease, so their binding must carry no route/lease identity.
-	TargetPlatformWildcard     TargetKind = "platform_wildcard"
-	TargetKindDurableRoute                = TargetDurableRoute
-	TargetKindPreviewLease                = TargetPreviewLease
-	TargetKindPlatformWildcard            = TargetPlatformWildcard
+	TargetDurableRoute     = tlscertwire.TargetDurableRoute
+	TargetPreviewLease     = tlscertwire.TargetPreviewLease
+	TargetPlatformWildcard = tlscertwire.TargetPlatformWildcard
+
+	TargetKindDurableRoute     = TargetDurableRoute
+	TargetKindPreviewLease     = TargetPreviewLease
+	TargetKindPlatformWildcard = TargetPlatformWildcard
 )
 
-type CertificateTarget struct {
-	Kind              TargetKind
-	DomainID          string
-	AccountID         string
-	TunnelID          string
-	RouteID           string
-	PreviewID         string
-	PreviewGeneration uint64
-	PreviewState      string
-	PreviewExpiresAt  time.Time
-}
+type CertificateTarget = tlscertwire.CertificateTarget
 
-func (t CertificateTarget) normalizedKind() TargetKind {
-	if t.Kind != "" {
-		return t.Kind
-	}
-	if t.PreviewID != "" || t.PreviewGeneration != 0 {
-		return TargetPreviewLease
-	}
-	return TargetDurableRoute
-}
-
-// KindValue returns the canonical target discriminator, inferring the legacy
-// durable value only when no preview identity is present.
-func (t CertificateTarget) KindValue() TargetKind { return t.normalizedKind() }
-
-func (t CertificateTarget) Validate() error {
-	if !validIdentifier(t.DomainID) || !validIdentifier(t.AccountID) {
-		return fmt.Errorf("%w: target identity is invalid", ErrInvalid)
-	}
-	switch t.normalizedKind() {
-	case TargetDurableRoute:
-		if !validIdentifier(t.TunnelID) {
-			return fmt.Errorf("%w: durable target tunnel is invalid", ErrInvalid)
-		}
-		if t.Kind != "" && !validIdentifier(t.RouteID) {
-			return fmt.Errorf("%w: durable target route is invalid", ErrInvalid)
-		}
-		if t.PreviewID != "" || t.PreviewGeneration != 0 || t.PreviewState != "" || !t.PreviewExpiresAt.IsZero() {
-			return fmt.Errorf("%w: durable target contains preview identity", ErrInvalid)
-		}
-	case TargetPreviewLease:
-		if t.TunnelID != "" || t.RouteID != "" || !validIdentifier(t.PreviewID) || t.PreviewGeneration == 0 || t.PreviewState != "active" || t.PreviewExpiresAt.IsZero() {
-			return fmt.Errorf("%w: preview target identity is invalid", ErrInvalid)
-		}
-	case TargetPlatformWildcard:
-		if t.TunnelID != "" || t.RouteID != "" || t.PreviewID != "" || t.PreviewGeneration != 0 || t.PreviewState != "" || !t.PreviewExpiresAt.IsZero() {
-			return fmt.Errorf("%w: platform wildcard target contains route or lease identity", ErrInvalid)
-		}
-	default:
+// validateTarget is the shared shape check plus the edge's policy: a target it holds is an active preview lease
+// or a distributed kind (the server never distributes a workspace-domain order).
+func validateTarget(t CertificateTarget) error {
+	if t.KindValue() == tlscertwire.TargetWorkspaceDomain {
 		return fmt.Errorf("%w: target kind is invalid", ErrInvalid)
 	}
+	if err := t.Validate(); err != nil {
+		return err
+	}
+	if t.KindValue() == TargetPreviewLease && !t.PreviewActive() {
+		return fmt.Errorf("%w: preview target identity is invalid", ErrInvalid)
+	}
 	return nil
-}
-
-func (t CertificateTarget) Key() string {
-	return strings.Join([]string{string(t.normalizedKind()), t.DomainID, t.AccountID, t.TunnelID, t.RouteID, t.PreviewID, fmt.Sprint(t.PreviewGeneration)}, "\x00")
 }
 
 // Binding is the immutable identity of one certificate distribution target.
@@ -171,7 +122,7 @@ func (b Binding) Target() CertificateTarget {
 }
 
 func (b Binding) validate() (string, bool, error) {
-	if err := b.Target().Validate(); err != nil {
+	if err := validateTarget(b.Target()); err != nil {
 		return "", false, err
 	}
 	for name, value := range map[string]string{"edge_node_id": b.EdgeNodeID, "edge_process_epoch": b.EdgeProcessEpoch} {
@@ -182,7 +133,7 @@ func (b Binding) validate() (string, bool, error) {
 	if b.DomainGeneration == 0 || b.CertificateGeneration == 0 || b.AssignmentGeneration == 0 {
 		return "", false, fmt.Errorf("%w: generations are required", ErrInvalid)
 	}
-	host, wildcard, err := normalizeHostname(b.Hostname)
+	host, wildcard, err := NormalizeHostname(b.Hostname)
 	if err != nil {
 		return "", false, err
 	}
@@ -192,7 +143,7 @@ func (b Binding) validate() (string, bool, error) {
 	if b.OnDemandLeaf && !wildcard {
 		return "", false, fmt.Errorf("%w: on-demand policy requires a wildcard parent", ErrInvalid)
 	}
-	if b.Target().normalizedKind() == TargetPlatformWildcard && (!wildcard || b.OnDemandLeaf) {
+	if b.Target().KindValue() == TargetPlatformWildcard && (!wildcard || b.OnDemandLeaf) {
 		return "", false, fmt.Errorf("%w: platform wildcard target requires a non-on-demand wildcard hostname", ErrInvalid)
 	}
 	return host, wildcard, nil
@@ -293,7 +244,7 @@ func (r *Registry) stage(ctx context.Context, binding Binding, bundle Bundle, ex
 	}
 	binding.Hostname = host
 	now := r.now().UTC()
-	if binding.Target().normalizedKind() == TargetPreviewLease && !binding.PreviewExpiresAt.After(now) {
+	if binding.Target().KindValue() == TargetPreviewLease && !binding.PreviewExpiresAt.After(now) {
 		return ErrCertificateExpired
 	}
 	parsed, fingerprint, notBefore, notAfter, err := validateBundle(bundle, host, wildcard, now, r.maxLife)
@@ -359,7 +310,7 @@ func (r *Registry) stage(ctx context.Context, binding Binding, bundle Bundle, ex
 		// intentional exception: it changes only the target generation and is
 		// allowed when the exact certificate bytes are unchanged.
 		if binding.CertificateGeneration == current.binding.CertificateGeneration && current.binding.EdgeNodeID == binding.EdgeNodeID && current.binding.EdgeProcessEpoch == binding.EdgeProcessEpoch {
-			if binding.Target().normalizedKind() != TargetPreviewLease || current.binding.Target().Key() == binding.Target().Key() || current.fingerprint != fingerprint {
+			if binding.Target().KindValue() != TargetPreviewLease || current.binding.Target().Key() == binding.Target().Key() || current.fingerprint != fingerprint {
 				return ErrGenerationConflict
 			}
 		}
@@ -403,7 +354,7 @@ func (r *Registry) markReady(ctx context.Context, binding Binding, expectedFinge
 	if expectedFingerprint != nil && *expectedFingerprint != [sha256.Size]byte{} && e.fingerprint != *expectedFingerprint {
 		return fmt.Errorf("%w: certificate fingerprint does not match distribution", ErrGenerationConflict)
 	}
-	if !e.notAfter.After(r.now().UTC()) || binding.Target().normalizedKind() == TargetPreviewLease && !binding.PreviewExpiresAt.After(r.now().UTC()) {
+	if !e.notAfter.After(r.now().UTC()) || binding.Target().KindValue() == TargetPreviewLease && !binding.PreviewExpiresAt.After(r.now().UTC()) {
 		e.state = StateExpired
 		if r.active[hostKey(e.hostname, e.wildcard)] == bindingKey(binding) {
 			delete(r.active, hostKey(e.hostname, e.wildcard))
@@ -449,7 +400,7 @@ func (r *Registry) activate(ctx context.Context, binding Binding, expectedFinger
 	if expectedFingerprint != nil && *expectedFingerprint != [sha256.Size]byte{} && e.fingerprint != *expectedFingerprint {
 		return fmt.Errorf("%w: certificate fingerprint does not match distribution", ErrGenerationConflict)
 	}
-	if !e.notAfter.After(now) || binding.Target().normalizedKind() == TargetPreviewLease && !binding.PreviewExpiresAt.After(now) {
+	if !e.notAfter.After(now) || binding.Target().KindValue() == TargetPreviewLease && !binding.PreviewExpiresAt.After(now) {
 		e.state = StateExpired
 		if r.active[hostKey(e.hostname, e.wildcard)] == bindingKey(binding) {
 			delete(r.active, hostKey(e.hostname, e.wildcard))
@@ -478,7 +429,7 @@ func (r *Registry) activate(ctx context.Context, binding Binding, expectedFinger
 				return ErrGenerationConflict
 			}
 			if previous.binding.CertificateGeneration == binding.CertificateGeneration && previous.binding.EdgeNodeID == binding.EdgeNodeID && previous.binding.EdgeProcessEpoch == binding.EdgeProcessEpoch {
-				if binding.Target().normalizedKind() != TargetPreviewLease || previous.binding.Target().Key() == binding.Target().Key() || previous.fingerprint != e.fingerprint {
+				if binding.Target().KindValue() != TargetPreviewLease || previous.binding.Target().Key() == binding.Target().Key() || previous.fingerprint != e.fingerprint {
 					return ErrGenerationConflict
 				}
 			}
@@ -488,7 +439,7 @@ func (r *Registry) activate(ctx context.Context, binding Binding, expectedFinger
 		if previous := r.entries[previousKey]; previous != nil && previous.state == StateActive {
 			previous.state = StateRetired
 			previous.retiredAt = now
-			if previous.restored || previous.binding.CertificateGeneration == binding.CertificateGeneration && previous.binding.Target().normalizedKind() == TargetPreviewLease && previous.fingerprint == e.fingerprint {
+			if previous.restored || previous.binding.CertificateGeneration == binding.CertificateGeneration && previous.binding.Target().KindValue() == TargetPreviewLease && previous.fingerprint == e.fingerprint {
 				// The replacement is already ready, so discard the old target's
 				// private-key copy immediately. A later retire message is safely
 				// idempotent because the entry is gone. A restored entry has no
@@ -577,7 +528,7 @@ func (r *Registry) revoke(ctx context.Context, binding Binding, expectedFingerpr
 	// renewals, so the revoke names a newer generation than the one it serves. The older generations of the same
 	// lease are revoked with it, or the served one outlives the preview and blocks the hostname's next owner.
 	for key, old := range r.entries {
-		if key == bindingKey(binding) || binding.Target().normalizedKind() != TargetPreviewLease || !supersededPreview(old.binding, binding) {
+		if key == bindingKey(binding) || binding.Target().KindValue() != TargetPreviewLease || !supersededPreview(old.binding, binding) {
 			continue
 		}
 		job = r.revokeEntryLocked(key, old, now, job)
@@ -591,7 +542,7 @@ func (r *Registry) revoke(ctx context.Context, binding Binding, expectedFingerpr
 // supersededPreview reports whether old is an earlier generation of the preview lease binding names, on the same
 // edge process, with the same domain binding.
 func supersededPreview(old, binding Binding) bool {
-	return old.Target().normalizedKind() == TargetPreviewLease && old.PreviewID == binding.PreviewID && old.DomainID == binding.DomainID &&
+	return old.Target().KindValue() == TargetPreviewLease && old.PreviewID == binding.PreviewID && old.DomainID == binding.DomainID &&
 		old.AccountID == binding.AccountID && old.Hostname == binding.Hostname && old.EdgeNodeID == binding.EdgeNodeID &&
 		old.EdgeProcessEpoch == binding.EdgeProcessEpoch && old.PreviewGeneration < binding.PreviewGeneration
 }
@@ -613,7 +564,7 @@ func (r *Registry) GetCertificate(hello *tls.ClientHelloInfo) (*tls.Certificate,
 	if hello == nil {
 		return nil, ErrCertificateMissing
 	}
-	host, wildcard, err := normalizeHostname(hello.ServerName)
+	host, wildcard, err := NormalizeHostname(hello.ServerName)
 	if err != nil || wildcard {
 		return nil, ErrCertificateMissing
 	}
@@ -645,7 +596,7 @@ func (r *Registry) GetCertificate(hello *tls.ClientHelloInfo) (*tls.Certificate,
 // on-demand exact-certificate policy. The edge uses it only to answer TLS for a known route
 // that is temporarily unavailable, so the visitor sees an error page instead of a dropped handshake.
 func (r *Registry) WildcardCertificate(host string) (*tls.Certificate, error) {
-	host, wildcard, err := normalizeHostname(host)
+	host, wildcard, err := NormalizeHostname(host)
 	if err != nil || wildcard {
 		return nil, ErrCertificateMissing
 	}
@@ -684,7 +635,7 @@ func (r *Registry) RequiresExactCertificate(hostname string) bool {
 	if r == nil {
 		return false
 	}
-	host, wildcard, err := normalizeHostname(hostname)
+	host, wildcard, err := NormalizeHostname(hostname)
 	if err != nil || wildcard {
 		return false
 	}
@@ -778,7 +729,7 @@ func (r *Registry) onDemandWildcardActiveLocked(host string) bool {
 
 func (r *Registry) expireLocked(now time.Time) {
 	for _, e := range r.entries {
-		if e.state != StateActive || e.notAfter.After(now) && (e.binding.Target().normalizedKind() != TargetPreviewLease || e.binding.PreviewExpiresAt.After(now)) {
+		if e.state != StateActive || e.notAfter.After(now) && (e.binding.Target().KindValue() != TargetPreviewLease || e.binding.PreviewExpiresAt.After(now)) {
 			continue
 		}
 		e.state = StateExpired
@@ -903,69 +854,11 @@ func wildcardMatches(pattern, host string) bool {
 	return strings.EqualFold(strings.Join(hostLabels[1:], "."), strings.Join(patternLabels, "."))
 }
 
-func normalizeHostname(raw string) (string, bool, error) {
-	host := strings.ToLower(strings.TrimSuffix(strings.TrimSpace(raw), "."))
-	if host == "" || len(host) > 253 || strings.ContainsAny(host, "/:@?#\r\n\x00") {
-		return "", false, fmt.Errorf("%w: hostname is invalid", ErrInvalid)
-	}
-	wildcard := strings.HasPrefix(host, "*.")
-	base := host
-	if wildcard {
-		base = host[2:]
-	}
-	ascii, err := idna.Lookup.ToASCII(base)
-	if err != nil {
-		return "", false, certificateFailure{ErrInvalid, err}
-	}
-	base = strings.ToLower(strings.TrimSuffix(ascii, "."))
-	// Persist and compare the ASCII IDNA form. Keeping the original Unicode
-	// spelling here would make a valid internationalized name fail the ASCII
-	// matcher and would let equivalent spellings diverge across edge policy.
-	if wildcard {
-		host = "*." + base
-	} else {
-		host = base
-	}
-	if strings.Contains(base, "*") || net.ParseIP(base) != nil || !dnsNamePattern.MatchString(base) {
-		return "", false, fmt.Errorf("%w: hostname is invalid", ErrInvalid)
-	}
-	if wildcard && strings.Count(base, ".") < 1 {
-		return "", false, fmt.Errorf("%w: wildcard hostname is invalid", ErrInvalid)
-	}
-	if !wildcard && !dnsNamePattern.MatchString(host) {
-		return "", false, fmt.Errorf("%w: hostname is invalid", ErrInvalid)
-	}
-	return host, wildcard, nil
-}
+// NormalizeHostname returns the canonical DNS wire-form hostname used by the edge registry and broker. The
+// bool reports a leading-label wildcard.
+var NormalizeHostname = tlscertwire.NormalizeHostname
 
-// NormalizeHostname returns the canonical DNS wire-form hostname used by the
-// edge registry and broker. The bool reports a leading-label wildcard.
-func NormalizeHostname(raw string) (string, bool, error) {
-	return normalizeHostname(raw)
-}
-
-var dnsNamePattern = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$`)
-
-func validIdentifier(value string) bool {
-	if len(value) < 3 || len(value) > 128 || strings.TrimSpace(value) != value || strings.ContainsAny(value, "\r\n\x00") {
-		return false
-	}
-	for _, r := range value {
-		if !(r >= 'A' && r <= 'Z' || r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '_' || r == '-' || r == '.') {
-			return false
-		}
-	}
-	return true
-}
-
-func validEpoch(value string) bool {
-	if len(value) < 8 || len(value) > 128 || strings.TrimSpace(value) != value {
-		return false
-	}
-	for _, char := range value {
-		if !(char >= 'A' && char <= 'Z' || char >= 'a' && char <= 'z' || char >= '0' && char <= '9' || char == '_' || char == '-') {
-			return false
-		}
-	}
-	return true
-}
+var (
+	validIdentifier = tlscertwire.ValidIdentifier
+	validEpoch      = tlscertwire.ValidEpoch
+)

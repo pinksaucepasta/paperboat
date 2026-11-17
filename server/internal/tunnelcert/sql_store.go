@@ -299,7 +299,7 @@ func (s *SQLStore) PutStaged(ctx context.Context, value StoredCertificate) error
 	if s == nil || s.db == nil || !validIdentifier(value.ID) || !validIdentifier(value.DomainID) || !validIdentifier(value.AccountID) || !validKeyReference(value.MasterKeyReference) || value.DomainGeneration == 0 || value.CertificateGeneration == 0 || len(value.Envelope) < 29 || len(value.Fingerprint) != 32 {
 		return ErrInvalid
 	}
-	if err := value.Target().ValidateActive(value.UpdatedAt); err != nil {
+	if err := validateActiveTarget(value.Target(), value.UpdatedAt); err != nil {
 		return err
 	}
 	host, wildcard, err := normalizeHostname(value.Hostname)
@@ -321,7 +321,7 @@ func (s *SQLStore) PutStaged(ctx context.Context, value StoredCertificate) error
 		privateKeyCiphertext = value.Envelope
 	}
 	var createErr error
-	if value.Target().normalizedKind() == TargetPreviewLease {
+	if value.Target().KindValue() == TargetPreviewLease {
 		_, createErr = s.db.Queries().CreatePreviewTunnelCertificateRecordV1(ctx, dbsqlc.CreatePreviewTunnelCertificateRecordV1Params{
 			ID: value.ID, DomainID: sql.NullString{String: value.DomainID, Valid: true}, AccountID: value.AccountID,
 			PreviewID: sql.NullString{String: value.PreviewID, Valid: true}, PreviewGeneration: sql.NullInt64{Int64: int64(value.PreviewGeneration), Valid: true}, PreviewExpiresAt: sql.NullTime{Time: value.PreviewExpiresAt, Valid: true},
@@ -416,7 +416,7 @@ func (s *SQLStore) Activate(ctx context.Context, id string, domainGeneration uin
 // existing certificate. The query rechecks current ownership, generation and
 // all ready assignment/distribution tuples without completing create work.
 func (s *SQLStore) RecoverDomainCertificateReady(ctx context.Context, domain Domain, certificate StoredCertificate, now time.Time) error {
-	if s == nil || s.db == nil || domain.Validate() != nil || domain.Target().normalizedKind() != TargetDurableRoute || domain.RenewalDue || len(domain.EdgeTargets) == 0 || certificate.State != StateActive || !activeCertificateMatchesDomain(certificate, domain) || certificate.DomainGeneration > domain.Generation || !certificate.ExpiresAt.After(now) || !certificate.RenewalAt.After(now) {
+	if s == nil || s.db == nil || domain.Validate() != nil || domain.Target().KindValue() != TargetDurableRoute || domain.RenewalDue || len(domain.EdgeTargets) == 0 || certificate.State != StateActive || !activeCertificateMatchesDomain(certificate, domain) || certificate.DomainGeneration > domain.Generation || !certificate.ExpiresAt.After(now) || !certificate.RenewalAt.After(now) {
 		return ErrCertificateNotReady
 	}
 	return s.db.InTx(ctx, func(txCtx context.Context, tx *db.Tx) error {
@@ -1122,7 +1122,7 @@ func (d *SQLDistributor) RevokeCertificate(ctx context.Context, certificate Stor
 		if transportCertificate.State == StateRevoked || transportCertificate.State == StateFailed {
 			transportCertificate.State = StateActive
 		}
-		if certificate.State == StateFailed && certificate.Target().normalizedKind() == TargetPreviewLease && row.State != "active" {
+		if certificate.State == StateFailed && certificate.Target().KindValue() == TargetPreviewLease && row.State != "active" {
 			// A failed preview renewal never served on this edge. The edge reads a revoke of a preview generation as "the
 			// preview ended" and drops the older generation it still serves, so remove only this staged copy (L397).
 			if err := d.transport.Retire(ctx, transportCertificate, target); err != nil {

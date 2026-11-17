@@ -16,17 +16,15 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
-	"net"
-	"regexp"
 	"sort"
 	"strings"
 	"time"
 
-	"golang.org/x/net/idna"
+	"github.com/pinksaucepasta/paperboat/shared/tlscertwire"
 )
 
 var (
-	ErrInvalid                 = errors.New("invalid tunnel certificate request")
+	ErrInvalid                 = tlscertwire.ErrInvalid
 	ErrMasterKeyUnavailable    = errors.New("certificate master key is unavailable")
 	ErrIssuanceLocked          = errors.New("certificate issuance is already locked")
 	ErrCAAUnavailable          = errors.New("certificate authority policy is unavailable")
@@ -69,24 +67,13 @@ const (
 	StateFailed     State = "failed"
 )
 
-// TargetKind identifies the owner of a domain/certificate binding. A
-// certificate is always bound to exactly one durable route or one foreground
-// preview lease. Keeping this discriminator in the TLS contract prevents a
-// preview identifier from being interpreted as a durable tunnel route (or
-// vice versa) when a binding is retried or distributed.
-type TargetKind string
+type TargetKind = tlscertwire.TargetKind
 
 const (
-	TargetDurableRoute TargetKind = "durable_route"
-	TargetPreviewLease TargetKind = "preview_lease"
-	// TargetPlatformWildcard identifies a server-owned preview/tunnel
-	// wildcard. It is distributed to exact edge process targets, but is not
-	// owned by a tunnel route or preview lease.
-	TargetPlatformWildcard TargetKind = "platform_wildcard"
-	// TargetWorkspaceDomain is a workspace domain's own wildcard order. Its
-	// certificate is never distributed under this kind: each tunnel or preview
-	// hostname under the domain stores and distributes a copy as its own target.
-	TargetWorkspaceDomain TargetKind = "workspace_domain"
+	TargetDurableRoute     = tlscertwire.TargetDurableRoute
+	TargetPreviewLease     = tlscertwire.TargetPreviewLease
+	TargetPlatformWildcard = tlscertwire.TargetPlatformWildcard
+	TargetWorkspaceDomain  = tlscertwire.TargetWorkspaceDomain
 
 	// These aliases keep the meaning obvious at call sites that refer to the
 	// field rather than the target value.
@@ -95,80 +82,18 @@ const (
 	TargetKindPlatformWildcard = TargetPlatformWildcard
 )
 
-// CertificateTarget is the immutable target identity shared by issuance,
-// persistence, distribution, and readiness checks. DomainID is the custom
-// domain binding in either target family. Exactly one of RouteID or PreviewID
-// is populated according to Kind; preview generations fence lease reuse.
-type CertificateTarget struct {
-	Kind              TargetKind
-	DomainID          string
-	AccountID         string
-	TunnelID          string
-	RouteID           string
-	PreviewID         string
-	PreviewGeneration uint64
-	PreviewState      string
-	PreviewExpiresAt  time.Time
-}
+// CertificateTarget is the immutable target identity shared by issuance, persistence, distribution, and
+// readiness checks; the definition is the wire package's.
+type CertificateTarget = tlscertwire.CertificateTarget
 
-func (t CertificateTarget) normalizedKind() TargetKind {
-	if t.Kind != "" {
-		return t.Kind
-	}
-	if t.PreviewID != "" || t.PreviewGeneration != 0 {
-		return TargetPreviewLease
-	}
-	return TargetDurableRoute
-}
-
-func (t CertificateTarget) Validate() error {
-	if !validIdentifier(t.DomainID) || !validIdentifier(t.AccountID) {
-		return fmt.Errorf("%w: target identity is invalid", ErrInvalid)
-	}
-	kind := t.normalizedKind()
-	switch kind {
-	case TargetDurableRoute:
-		if !validIdentifier(t.TunnelID) {
-			return fmt.Errorf("%w: durable target tunnel is invalid", ErrInvalid)
-		}
-		// An omitted route ID is accepted only for legacy in-memory fixtures.
-		// Persisted/explicit durable targets must identify the route.
-		if t.Kind != "" && !validIdentifier(t.RouteID) {
-			return fmt.Errorf("%w: durable target route is invalid", ErrInvalid)
-		}
-		if t.PreviewID != "" || t.PreviewGeneration != 0 || t.PreviewState != "" || !t.PreviewExpiresAt.IsZero() {
-			return fmt.Errorf("%w: durable target contains preview-lease fields", ErrInvalid)
-		}
-	case TargetPreviewLease:
-		if t.TunnelID != "" || t.RouteID != "" || !validIdentifier(t.PreviewID) || t.PreviewGeneration == 0 {
-			return fmt.Errorf("%w: preview target identity is invalid", ErrInvalid)
-		}
-	case TargetPlatformWildcard:
-		if t.TunnelID != "" || t.RouteID != "" || t.PreviewID != "" || t.PreviewGeneration != 0 || t.PreviewState != "" || !t.PreviewExpiresAt.IsZero() {
-			return fmt.Errorf("%w: platform wildcard target contains route or lease identity", ErrInvalid)
-		}
-	case TargetWorkspaceDomain:
-		if t.TunnelID != "" || t.RouteID != "" || t.PreviewID != "" || t.PreviewGeneration != 0 || t.PreviewState != "" || !t.PreviewExpiresAt.IsZero() {
-			return fmt.Errorf("%w: workspace domain target contains route or lease identity", ErrInvalid)
-		}
-	default:
-		return fmt.Errorf("%w: target kind is invalid", ErrInvalid)
-	}
-	return nil
-}
-
-func (t CertificateTarget) ValidateActive(now time.Time) error {
+func validateActiveTarget(t CertificateTarget, now time.Time) error {
 	if err := t.Validate(); err != nil {
 		return err
 	}
-	if t.normalizedKind() == TargetPreviewLease && (t.PreviewState != "active" || t.PreviewExpiresAt.IsZero() || !t.PreviewExpiresAt.After(now.UTC())) {
+	if t.KindValue() == TargetPreviewLease && (t.PreviewState != "active" || t.PreviewExpiresAt.IsZero() || !t.PreviewExpiresAt.After(now.UTC())) {
 		return fmt.Errorf("%w: preview lease is not active", ErrCertificateRevoked)
 	}
 	return nil
-}
-
-func (t CertificateTarget) Key() string {
-	return strings.Join([]string{string(t.normalizedKind()), t.DomainID, t.AccountID, t.TunnelID, t.RouteID, t.PreviewID, fmt.Sprint(t.PreviewGeneration)}, "\x00")
 }
 
 // Domain is the immutable input fence captured from tunnel_domains.  Edge
@@ -272,7 +197,7 @@ func WorkspaceChallengeTarget(scopeKey, hostname, challengeZone string) (string,
 // zones and deliberately write the ACME TXT directly at their authorization
 // name; they must not depend on a customer-managed CNAME.
 func DelegatedChallengeTargetForDomain(domain Domain, challengeZone string) (string, error) {
-	kind := domain.Target().normalizedKind()
+	kind := domain.Target().KindValue()
 	targetID := domain.TunnelID
 	if kind == TargetPreviewLease {
 		targetID = domain.PreviewID
@@ -312,7 +237,7 @@ func DelegatedChallengeTargetForDomain(domain Domain, challengeZone string) (str
 // record name but not for a certificate hostname, so it is validated against
 // the already-normalized wildcard base rather than normalizeHostname.
 func PlatformDNSChallengeTargetForDomain(domain Domain) (string, error) {
-	if domain.Target().normalizedKind() != TargetPlatformWildcard {
+	if domain.Target().KindValue() != TargetPlatformWildcard {
 		return "", fmt.Errorf("%w: platform wildcard target is required", ErrDNSChallengeUnavailable)
 	}
 	host, wildcard, err := normalizeHostname(domain.Hostname)
@@ -373,13 +298,13 @@ func (d Domain) Validate() error {
 	switch d.Strategy {
 	case StrategyDelegatedDNS01, StrategyProvided, StrategyOnDemandLeaf, StrategyWildcard:
 	case StrategyPlatformDNS01:
-		if d.Target().normalizedKind() != TargetPlatformWildcard {
+		if d.Target().KindValue() != TargetPlatformWildcard {
 			return fmt.Errorf("%w: platform DNS-01 strategy requires a platform wildcard target", ErrInvalid)
 		}
 	default:
 		return fmt.Errorf("%w: certificate strategy is invalid", ErrInvalid)
 	}
-	if d.Target().normalizedKind() == TargetPlatformWildcard && d.Strategy != StrategyPlatformDNS01 {
+	if d.Target().KindValue() == TargetPlatformWildcard && d.Strategy != StrategyPlatformDNS01 {
 		return fmt.Errorf("%w: platform wildcard target requires platform DNS-01 strategy", ErrInvalid)
 	}
 	if d.OwnershipState != "verified" {
@@ -422,65 +347,11 @@ func OneLabelUnderWildcard(leaf, wildcard string) bool {
 	return oneLabelUnderWildcard(leaf, wildcard)
 }
 
-func normalizeHostname(raw string) (string, bool, error) {
-	host := strings.ToLower(strings.TrimSuffix(strings.TrimSpace(raw), "."))
-	if host == "" || len(host) > 253 || strings.ContainsAny(host, "/:@?#\r\n\x00") {
-		return "", false, fmt.Errorf("%w: hostname is invalid", ErrInvalid)
-	}
-	wildcard := strings.HasPrefix(host, "*.")
-	base := host
-	if wildcard {
-		base = host[2:]
-	}
-	// Domains are stored and compared in their DNS wire form.  Convert
-	// internationalized input before applying the ASCII label constraints so
-	// ownership, certificate SANs, and edge matchers share one representation.
-	ascii, err := idna.Lookup.ToASCII(base)
-	if err != nil {
-		return "", false, fmt.Errorf("%w: hostname is invalid", ErrInvalid)
-	}
-	base = strings.ToLower(strings.TrimSuffix(ascii, "."))
-	if wildcard {
-		host = "*." + base
-	} else {
-		host = base
-	}
-	if host == "" || len(host) > 253 {
-		return "", false, fmt.Errorf("%w: hostname is invalid", ErrInvalid)
-	}
-	if strings.Contains(base, "*") || net.ParseIP(base) != nil {
-		return "", false, fmt.Errorf("%w: hostname is invalid", ErrInvalid)
-	}
-	if wildcard {
-		suffix := strings.TrimPrefix(host, "*.")
-		if strings.Count(suffix, ".") < 1 || !dnsNamePattern.MatchString(suffix) {
-			return "", false, fmt.Errorf("%w: wildcard hostname is invalid", ErrInvalid)
-		}
-		return host, true, nil
-	}
-	if !dnsNamePattern.MatchString(host) {
-		return "", false, fmt.Errorf("%w: hostname is invalid", ErrInvalid)
-	}
-	return host, false, nil
-}
-
-var dnsNamePattern = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$`)
-
-func validIdentifier(value string) bool {
-	if len(value) < 3 || len(value) > 128 || strings.TrimSpace(value) != value || strings.ContainsAny(value, "\r\n\x00") {
-		return false
-	}
-	for _, r := range value {
-		if !(r >= 'A' && r <= 'Z' || r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '_' || r == '-' || r == '.') {
-			return false
-		}
-	}
-	return true
-}
-
-func validEpoch(value string) bool {
-	return len(value) >= 8 && len(value) <= 128 && strings.Trim(value, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-") == ""
-}
+var (
+	normalizeHostname = tlscertwire.NormalizeHostname
+	validIdentifier   = tlscertwire.ValidIdentifier
+	validEpoch        = tlscertwire.ValidEpoch
+)
 
 // CertificateBundle is deliberately not JSON serializable.  It exists only at
 // the issuer-to-envelope and envelope-to-authenticated-edge boundaries.

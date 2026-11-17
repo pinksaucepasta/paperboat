@@ -395,7 +395,7 @@ func (i *ACMEIssuer) issueDNS01CSR(ctx context.Context, domain Domain, names []s
 	}
 	var challengeTarget string
 	if i.dns != nil {
-		if domain.Target().normalizedKind() == TargetPlatformWildcard {
+		if domain.Target().KindValue() == TargetPlatformWildcard {
 			challengeTarget, err = PlatformDNSChallengeTargetForDomain(domain)
 		} else {
 			if i.challengeZone == "" {

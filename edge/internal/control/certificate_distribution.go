@@ -11,13 +11,13 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"strings"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/edge/internal/tlscert"
 	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
+	"github.com/pinksaucepasta/paperboat/shared/tlscertwire"
 )
 
 var (
@@ -101,60 +101,9 @@ func (c *CertificateDistributionClient) Close() error {
 	return nil
 }
 
-type certificateDistributionWire struct {
-	Version               int       `json:"version"`
-	Action                string    `json:"action"`
-	CertificateID         string    `json:"certificate_id"`
-	AccountID             string    `json:"account_id"`
-	TunnelID              string    `json:"tunnel_id"`
-	DomainID              string    `json:"domain_id"`
-	TargetKind            string    `json:"target_kind"`
-	RouteID               string    `json:"route_id"`
-	PreviewID             string    `json:"preview_id"`
-	PreviewGeneration     uint64    `json:"preview_generation"`
-	PreviewState          string    `json:"preview_state"`
-	PreviewExpiresAt      time.Time `json:"preview_expires_at"`
-	Hostname              string    `json:"hostname"`
-	OnDemandLeaf          bool      `json:"on_demand_leaf"`
-	DomainGeneration      uint64    `json:"domain_generation"`
-	CertificateGeneration uint64    `json:"certificate_generation"`
-	EdgeNodeID            string    `json:"edge_node_id"`
-	EdgeProcessEpoch      string    `json:"edge_process_epoch"`
-	AssignmentGeneration  uint64    `json:"assignment_generation"`
-	Fingerprint           string    `json:"fingerprint"`
-	Issuer                string    `json:"issuer"`
-	NotBefore             time.Time `json:"not_before"`
-	ExpiresAt             time.Time `json:"expires_at"`
-	CertificateExpiresAt  time.Time `json:"certificate_expires_at"`
-	CertificatePEM        []byte    `json:"certificate_pem"`
-	PrivateKeyPEM         []byte    `json:"private_key_pem"`
-	IssuedAt              time.Time `json:"issued_at"`
-	Proof                 string    `json:"proof"`
-}
+type certificateDistributionWire = tlscertwire.DistributionMessage
 
-type certificateDistributionAckWire struct {
-	Version               int       `json:"version"`
-	Action                string    `json:"action"`
-	CertificateID         string    `json:"certificate_id"`
-	AccountID             string    `json:"account_id"`
-	TunnelID              string    `json:"tunnel_id"`
-	DomainID              string    `json:"domain_id"`
-	TargetKind            string    `json:"target_kind"`
-	RouteID               string    `json:"route_id"`
-	PreviewID             string    `json:"preview_id"`
-	PreviewGeneration     uint64    `json:"preview_generation"`
-	PreviewState          string    `json:"preview_state"`
-	PreviewExpiresAt      time.Time `json:"preview_expires_at"`
-	Hostname              string    `json:"hostname"`
-	DomainGeneration      uint64    `json:"domain_generation"`
-	CertificateGeneration uint64    `json:"certificate_generation"`
-	EdgeNodeID            string    `json:"edge_node_id"`
-	EdgeProcessEpoch      string    `json:"edge_process_epoch"`
-	AssignmentGeneration  uint64    `json:"assignment_generation"`
-	Fingerprint           string    `json:"fingerprint"`
-	Status                string    `json:"status"`
-	Code                  string    `json:"code,omitempty"`
-}
+type certificateDistributionAckWire = tlscertwire.DistributionAck
 
 // Pull obtains a bounded, complete set of pending actions for exactly one
 // edge process. The server may page a large set with a stable key cursor; an
@@ -167,12 +116,7 @@ func (c *CertificateDistributionClient) Pull(ctx context.Context, nodeID, proces
 	cursor := ""
 	now := time.Now().UTC()
 	for page := 0; page < certificateDistributionMaximumPages; page++ {
-		var response struct {
-			Version    int                           `json:"version"`
-			Complete   bool                          `json:"complete"`
-			NextCursor string                        `json:"next_cursor"`
-			Messages   []certificateDistributionWire `json:"messages"`
-		}
+		var response tlscertwire.DistributionPage
 		if err := c.client.postNodeWithMaximumAndIdentity(ctx, CertificateDistributionPullPath, nodeID, processEpoch, struct {
 			EdgeNodeID       string `json:"edge_node_id"`
 			EdgeProcessEpoch string `json:"edge_process_epoch"`
@@ -213,7 +157,7 @@ func (c *CertificateDistributionClient) Pull(ctx context.Context, nodeID, proces
 }
 
 func (c *CertificateDistributionClient) Ack(ctx context.Context, envelope tlscert.DistributionEnvelope, status, code string) error {
-	if c == nil || c.client == nil || status != "ready" && status != "active" && status != "retired" && status != "revoked" && status != "failed" || !certificateDistributionAckStatusMatchesAction(envelope.Action, status) {
+	if c == nil || c.client == nil || status != "ready" && status != "active" && status != "retired" && status != "revoked" && status != "failed" || !tlscertwire.AckStatusMatchesAction(envelope.Action, status) {
 		return ErrCertificateDistributionInvalid
 	}
 	if code != "" && (len(code) > 128 || strings.ContainsAny(code, "\r\n\x00")) || status == "failed" && code == "" || status != "failed" && code != "" {
@@ -238,9 +182,7 @@ func (c *CertificateDistributionClient) RequestCertificate(ctx context.Context, 
 	if err != nil || wildcard || host != hostname {
 		return ErrCertificateDistributionInvalid
 	}
-	return c.client.postNodeWithMaximumAndIdentity(ctx, CertificateDistributionRequestPath, nodeID, processEpoch, struct {
-		Hostname string `json:"hostname"`
-	}{Hostname: host}, nil, 8<<10)
+	return c.client.postNodeWithMaximumAndIdentity(ctx, CertificateDistributionRequestPath, nodeID, processEpoch, tlscertwire.DistributionRequest{Hostname: host}, nil, 8<<10)
 }
 
 // OnDemandCertificateRequester binds a distribution client to the current
@@ -269,24 +211,6 @@ func (r *OnDemandCertificateRequester) RequestCertificate(ctx context.Context, h
 		return err
 	}
 	return r.client.RequestCertificate(ctx, r.nodeID, r.processEpoch, hostname)
-}
-
-func certificateDistributionAckStatusMatchesAction(action, status string) bool {
-	if status == "failed" {
-		return true
-	}
-	switch action {
-	case "stage":
-		return status == "ready"
-	case "activate":
-		return status == "active"
-	case "retire":
-		return status == "retired"
-	case "revoke":
-		return status == "revoked"
-	default:
-		return false
-	}
 }
 
 func decodeCertificateDistribution(message certificateDistributionWire, nodeID, processEpoch string, credential []byte, now time.Time) (tlscert.DistributionEnvelope, error) {
@@ -318,15 +242,8 @@ func verifyDistributionProof(message certificateDistributionWire, credential []b
 		return ErrCertificateDistributionAuth
 	}
 	defer clear(proof)
-	message.Proof = ""
-	canonical, err := json.Marshal(message)
-	if err != nil {
-		return ErrCertificateDistributionAuth
-	}
-	defer clear(canonical)
-	hash := hmac.New(sha256.New, credential)
-	_, _ = hash.Write(canonical)
-	if !hmac.Equal(proof, hash.Sum(nil)) {
+	expected, err := tlscertwire.ProofMAC(message, credential)
+	if err != nil || !hmac.Equal(proof, expected) {
 		return ErrCertificateDistributionAuth
 	}
 	return nil

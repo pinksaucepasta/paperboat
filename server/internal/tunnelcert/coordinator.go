@@ -332,7 +332,7 @@ func (c *Coordinator) RefreshPreviewIssuanceTarget(ctx context.Context, captured
 	if err != nil {
 		return Domain{}, err
 	}
-	if !samePreviewIssuanceBinding(captured, current) || current.PreviewGeneration < captured.PreviewGeneration || current.Target().ValidateActive(now) != nil {
+	if !samePreviewIssuanceBinding(captured, current) || current.PreviewGeneration < captured.PreviewGeneration || validateActiveTarget(current.Target(), now) != nil {
 		return Domain{}, ErrGenerationConflict
 	}
 	return current, nil
@@ -486,7 +486,7 @@ func (c *Coordinator) CommitDomainCertificateReady(ctx context.Context, accountI
 }
 
 func (c *Coordinator) RecoverDomainCertificateReady(ctx context.Context, domain Domain, certificate StoredCertificate, now time.Time) error {
-	if c == nil || c.config.Store == nil || domain.Validate() != nil || domain.Target().normalizedKind() != TargetDurableRoute || domain.RenewalDue || len(domain.EdgeTargets) == 0 || certificate.State != StateActive || !activeCertificateMatchesDomain(certificate, domain) || !certificate.ExpiresAt.After(now) || !certificate.RenewalAt.After(now) {
+	if c == nil || c.config.Store == nil || domain.Validate() != nil || domain.Target().KindValue() != TargetDurableRoute || domain.RenewalDue || len(domain.EdgeTargets) == 0 || certificate.State != StateActive || !activeCertificateMatchesDomain(certificate, domain) || !certificate.ExpiresAt.After(now) || !certificate.RenewalAt.After(now) {
 		return ErrCertificateNotReady
 	}
 	recovery, ok := c.config.Store.(CertificateDomainRecovery)
@@ -565,7 +565,7 @@ func (c *Coordinator) ReconcileRevocations(ctx context.Context, limit int) (int,
 // A false result means there was no old-generation active certificate to
 // rebind; the caller may proceed with ordinary issuance.
 func (c *Coordinator) RebindPreviewCertificate(ctx context.Context, domain Domain, now time.Time) (bool, error) {
-	if c == nil || c.config.Store == nil || domain.Target().normalizedKind() != TargetPreviewLease || domain.PreviewGeneration == 0 {
+	if c == nil || c.config.Store == nil || domain.Target().KindValue() != TargetPreviewLease || domain.PreviewGeneration == 0 {
 		return false, ErrInvalid
 	}
 	rebinder, ok := c.config.Store.(PreviewCertificateRebinder)
@@ -691,7 +691,7 @@ func (c *Coordinator) workspaceBundle(ctx context.Context, domain Domain, curren
 
 func (c *Coordinator) recoverDistributionBundle(ctx context.Context, domain Domain, now time.Time) (CertificateBundle, error) {
 	source, ok := c.config.Store.(DistributionCertificateSource)
-	kind := domain.Target().normalizedKind()
+	kind := domain.Target().KindValue()
 	if !ok || (kind != TargetDurableRoute && kind != TargetPreviewLease) || domain.LeafHostname != "" {
 		return CertificateBundle{}, nil
 	}
@@ -757,10 +757,10 @@ func (c *Coordinator) Ensure(ctx context.Context, domain Domain) (result Result,
 	}
 	domain.EdgeTargets = SortEdgeTargets(domain.EdgeTargets)
 	now := c.config.Now().UTC()
-	if err := domain.Target().ValidateActive(now); err != nil {
+	if err := validateActiveTarget(domain.Target(), now); err != nil {
 		return Result{}, err
 	}
-	if domain.Target().normalizedKind() == TargetPreviewLease {
+	if domain.Target().KindValue() == TargetPreviewLease {
 		refreshed, err := c.RefreshPreviewIssuanceTarget(ctx, domain, now)
 		if err != nil {
 			return Result{}, err
@@ -997,7 +997,7 @@ func (c *Coordinator) Ensure(ctx context.Context, domain Domain) (result Result,
 	// race. A changed owner/domain binding is rejected by the authority source.
 	capturedDomain := domain
 	for attempt := 0; ; attempt++ {
-		if domain.Target().normalizedKind() == TargetPreviewLease {
+		if domain.Target().KindValue() == TargetPreviewLease {
 			refreshed, refreshErr := c.RefreshPreviewIssuanceTarget(ctx, capturedDomain, c.config.Now().UTC())
 			if refreshErr != nil {
 				return Result{}, refreshErr
@@ -1011,7 +1011,7 @@ func (c *Coordinator) Ensure(ctx context.Context, domain Domain) (result Result,
 		if stageErr == nil {
 			break
 		}
-		if domain.Target().normalizedKind() != TargetPreviewLease || !errors.Is(stageErr, ErrGenerationConflict) || attempt >= 2 {
+		if domain.Target().KindValue() != TargetPreviewLease || !errors.Is(stageErr, ErrGenerationConflict) || attempt >= 2 {
 			return Result{}, stageErr
 		}
 	}
@@ -1058,7 +1058,7 @@ func (c *Coordinator) Ensure(ctx context.Context, domain Domain) (result Result,
 		}
 		return Result{}, c.failStaged(ctx, stored.ID, "certificate_activate_failed", cause, now)
 	}
-	if domain.Target().normalizedKind() == TargetPreviewLease {
+	if domain.Target().KindValue() == TargetPreviewLease {
 		// Preview renewal may briefly leave an active row on the previous
 		// generation when an older server is still finishing the transaction.
 		// Surface that row as a stale generation rather than minting a second
@@ -1104,7 +1104,7 @@ func (c *Coordinator) Ensure(ctx context.Context, domain Domain) (result Result,
 }
 
 func (c *Coordinator) currentCertificate(ctx context.Context, domain Domain) (StoredCertificate, bool, error) {
-	if domain.Target().normalizedKind() == TargetPreviewLease {
+	if domain.Target().KindValue() == TargetPreviewLease {
 		previewStore, ok := c.config.Store.(PreviewCertificateLookup)
 		if !ok {
 			return StoredCertificate{}, false, fmt.Errorf("%w: preview certificate store is unavailable", ErrDistributionUnavailable)
@@ -1162,7 +1162,7 @@ func (c *Coordinator) rollbackStaged(certificate StoredCertificate, staged []Dis
 	for i, request := range staged {
 		var err error
 		// The first `activated` staged targets activated; the rest only hold the staged copy.
-		if rollback, ok := c.config.Distributor.(CertificateDistributionRollback); ok && (i < activated || certificate.Target().normalizedKind() != TargetPreviewLease) {
+		if rollback, ok := c.config.Distributor.(CertificateDistributionRollback); ok && (i < activated || certificate.Target().KindValue() != TargetPreviewLease) {
 			err = rollback.Revoke(rollbackCtx, certificate, request.Target)
 		} else {
 			err = c.config.Distributor.Retire(rollbackCtx, certificate, request.Target)
@@ -1335,7 +1335,7 @@ func validateChallenge(domain Domain, challenge DNSChallenge) error {
 	if !strings.EqualFold(strings.TrimSuffix(challenge.Name, "."), strings.TrimSuffix(targetName, ".")) {
 		return fmt.Errorf("%w: challenge write target mismatch", ErrDNSChallengeUnavailable)
 	}
-	if domain.ChallengeReference != "" && domain.Target().normalizedKind() != TargetPlatformWildcard {
+	if domain.ChallengeReference != "" && domain.Target().KindValue() != TargetPlatformWildcard {
 		// The coordinator cannot know the configured challenge zone, but it can
 		// still reject the unsafe legacy direct-customer target whenever the
 		// issuer supplied a distinct authorization name.
@@ -1349,7 +1349,7 @@ func validateChallenge(domain Domain, challenge DNSChallenge) error {
 func certificateID(domain Domain, generation uint64, fingerprint [sha256.Size]byte) string {
 	hash := sha256.New()
 	for _, value := range []string{
-		string(domain.Target().normalizedKind()), domain.ID, domain.AccountID,
+		string(domain.Target().KindValue()), domain.ID, domain.AccountID,
 		domain.TunnelID, domain.RouteID, domain.PreviewID,
 		fmt.Sprint(domain.PreviewGeneration), fmt.Sprint(generation), domain.Hostname,
 		domain.LeafHostname,
@@ -1386,7 +1386,7 @@ func (s *MemoryStore) RefreshPreviewIssuanceTarget(_ context.Context, captured D
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	current, ok := s.previewAuthorities[captured.ID]
-	if !ok || !samePreviewIssuanceBinding(captured, current) || current.PreviewGeneration < captured.PreviewGeneration || current.Target().ValidateActive(now) != nil {
+	if !ok || !samePreviewIssuanceBinding(captured, current) || current.PreviewGeneration < captured.PreviewGeneration || validateActiveTarget(current.Target(), now) != nil {
 		return Domain{}, ErrGenerationConflict
 	}
 	refreshed := captured
@@ -1486,7 +1486,7 @@ func (s *MemoryStore) CurrentPreviewForRebind(_ context.Context, accountID, doma
 	var selected StoredCertificate
 	found := false
 	for _, value := range s.all {
-		if value.AccountID != accountID || value.DomainID != domainID || value.PreviewID != previewID || value.Target().normalizedKind() != TargetPreviewLease || value.LeafHostname != "" || value.State != StateActive {
+		if value.AccountID != accountID || value.DomainID != domainID || value.PreviewID != previewID || value.Target().KindValue() != TargetPreviewLease || value.LeafHostname != "" || value.State != StateActive {
 			continue
 		}
 		if !found || value.PreviewGeneration > selected.PreviewGeneration || value.CertificateGeneration > selected.CertificateGeneration {
@@ -1505,7 +1505,7 @@ func (s *MemoryStore) CurrentPreviewForHostnameRebind(_ context.Context, account
 	var selected StoredCertificate
 	found := false
 	for _, value := range s.all {
-		if value.AccountID != accountID || value.DomainID != domainID || value.PreviewID != previewID || value.Target().normalizedKind() != TargetPreviewLease || value.LeafHostname != hostname || value.State != StateActive {
+		if value.AccountID != accountID || value.DomainID != domainID || value.PreviewID != previewID || value.Target().KindValue() != TargetPreviewLease || value.LeafHostname != hostname || value.State != StateActive {
 			continue
 		}
 		if !found || value.PreviewGeneration > selected.PreviewGeneration || value.CertificateGeneration > selected.CertificateGeneration {
@@ -1521,12 +1521,12 @@ func (s *MemoryStore) CurrentPreviewForHostnameRebind(_ context.Context, account
 func (s *MemoryStore) PutStaged(_ context.Context, value StoredCertificate) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if err := value.Target().ValidateActive(value.UpdatedAt); err != nil {
+	if err := validateActiveTarget(value.Target(), value.UpdatedAt); err != nil {
 		return err
 	}
-	if value.Target().normalizedKind() == TargetPreviewLease {
+	if value.Target().KindValue() == TargetPreviewLease {
 		current, ok := s.previewAuthorities[value.DomainID]
-		if !ok || current.AccountID != value.AccountID || current.PreviewID != value.PreviewID || current.PreviewGeneration != value.PreviewGeneration || current.Generation != value.DomainGeneration || current.Hostname != value.Hostname || current.Target().ValidateActive(value.UpdatedAt) != nil {
+		if !ok || current.AccountID != value.AccountID || current.PreviewID != value.PreviewID || current.PreviewGeneration != value.PreviewGeneration || current.Generation != value.DomainGeneration || current.Hostname != value.Hostname || validateActiveTarget(current.Target(), value.UpdatedAt) != nil {
 			return ErrGenerationConflict
 		}
 	}
@@ -1566,7 +1566,7 @@ func (s *MemoryStore) Activate(_ context.Context, id string, domainGeneration ui
 	value.State = StateActive
 	value.UpdatedAt = now
 	s.all[id] = value
-	if value.Target().normalizedKind() == TargetPreviewLease {
+	if value.Target().KindValue() == TargetPreviewLease {
 		key := previewTargetKey(value.AccountID, value.DomainID, value.PreviewID)
 		if value.LeafHostname == "" {
 			s.previewCurrent[key] = value
@@ -1585,7 +1585,7 @@ func (s *MemoryStore) SupersedeOlder(_ context.Context, domainID string, generat
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for id, value := range s.all {
-		kind := value.Target().normalizedKind()
+		kind := value.Target().KindValue()
 		if value.DomainID == domainID && (kind == TargetDurableRoute || kind == TargetPlatformWildcard) && value.LeafHostname == "" && value.CertificateGeneration < generation && value.State == StateActive {
 			value.State = StateSuperseded
 			value.UpdatedAt = now
@@ -1599,7 +1599,7 @@ func (s *MemoryStore) SupersedeOlderForHostname(_ context.Context, domainID, hos
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for id, value := range s.all {
-		if value.DomainID == domainID && value.Target().normalizedKind() == TargetDurableRoute && value.LeafHostname == hostname && value.CertificateGeneration < generation && value.State == StateActive {
+		if value.DomainID == domainID && value.Target().KindValue() == TargetDurableRoute && value.LeafHostname == hostname && value.CertificateGeneration < generation && value.State == StateActive {
 			value.State = StateSuperseded
 			value.UpdatedAt = now
 			s.all[id] = value
@@ -1612,7 +1612,7 @@ func (s *MemoryStore) RebindPreviewCertificateTarget(_ context.Context, certific
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	value, ok := s.all[certificateID]
-	if !ok || value.AccountID != accountID || value.DomainID != domainID || value.PreviewID != previewID || value.Target().normalizedKind() != TargetPreviewLease || value.PreviewGeneration != previousGeneration || value.State != StateActive && value.State != StateStaged {
+	if !ok || value.AccountID != accountID || value.DomainID != domainID || value.PreviewID != previewID || value.Target().KindValue() != TargetPreviewLease || value.PreviewGeneration != previousGeneration || value.State != StateActive && value.State != StateStaged {
 		return StoredCertificate{}, ErrGenerationConflict
 	}
 	if previousGeneration == 0 || previewGeneration == 0 || previousGeneration == previewGeneration || expiresAt.IsZero() || !expiresAt.After(now.UTC()) {
@@ -1660,7 +1660,7 @@ func (s *MemoryStore) Revoke(_ context.Context, id, reason string, now time.Time
 	}
 	value.State, value.FailureCode, value.RevokedAt, value.UpdatedAt = StateRevoked, reason, &now, now
 	s.all[id] = value
-	if value.Target().normalizedKind() == TargetPreviewLease {
+	if value.Target().KindValue() == TargetPreviewLease {
 		if value.LeafHostname == "" {
 			if current, ok := s.previewCurrent[previewTargetKey(value.AccountID, value.DomainID, value.PreviewID)]; ok && current.ID == value.ID {
 				delete(s.previewCurrent, previewTargetKey(value.AccountID, value.DomainID, value.PreviewID))
