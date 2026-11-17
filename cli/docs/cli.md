@@ -161,6 +161,11 @@ not perform shell expansion or execute local shell statements.
 
 ## Authentication and recovery
 
+See [install.md](install.md) for installing, updating, repairing and uninstalling `pb`,
+and [security.md](security.md) for what Paperboat protects. API tokens (`pb api-token`) call the
+HTTP API described in [server/docs/api.md](../../server/docs/api.md) and
+[server/docs/openapi.json](../../server/docs/openapi.json).
+
 Install and enroll using the dashboard command, or generate both Linux/macOS and
 Windows install commands with `pb machine add [--name NAME]` on an authenticated machine.
 There is no shell selector. An installer run without an enrollment token finishes by

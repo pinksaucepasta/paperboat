@@ -18,7 +18,9 @@ Install and enroll with a command from the dashboard or from `pb machine add` on
 an authenticated machine. If Paperboat is already installed, `pb login` signs in (and
 adds the computer to your account if it is not on it yet) through browser approval.
 
-See the [CLI guide](docs/cli.md), [complete command reference](docs/cli/README.md),
+See [installing Paperboat](docs/install.md), the [CLI guide](docs/cli.md),
+[how Paperboat protects your machines](docs/security.md), the
+[complete command reference](docs/cli/README.md),
 and [man pages](docs/man/man1) for all public commands. The Linux and macOS installers
 install bundled manuals automatically. For source installs, use
 `make install` or `make install-man`; see the guide for custom manual paths.
@@ -353,7 +355,7 @@ pinned Go toolchain and runs the pinned `sqlc` generator. Run these from the
 ```sh
 make build      # -> bin/pb
 make check      # dependency and source policy, formatting, generated code, vet, tests, and build
-make release-assets   # Linux amd64/arm64 and macOS arm64 release assets in dist/ (macOS arm64 host only)
+make release-assets   # Linux and macOS release assets in dist/ (macOS arm64 host only); the release workflow builds the Windows assets on native Windows runners
 make install    # install pb
 make test       # Go test suite
 ```
@@ -361,22 +363,22 @@ make test       # Go test suite
 Release packaging additionally needs the platform signing and publishing credentials.
 It is not required for a local development build.
 
-`YYYY.MM.DD.X` tags build and publish the three native assets after their platform checks and
+`YYYY.MM.DD.X` tags build and publish the five native assets after their platform checks and
 GitHub API digest verification. Use `tools/release-version.sh next` to generate the next tag;
 tags have no `v` prefix.
 
 Releases contain one complete `pb` asset per released platform and architecture:
-Linux amd64/arm64 raw ELF executables and one ad-hoc-signed macOS arm64 executable.
-Windows is not part of the release yet. Users install through
-[`https://get.pprbt.dev/install`](https://get.pprbt.dev/install). The trusted HTTPS
+Linux amd64/arm64 raw ELF executables, one ad-hoc-signed macOS arm64 executable, and Windows
+amd64/arm64 PE executables. The Windows executables are not Authenticode-signed: trust comes from the
+signed TUF metadata and the pinned SHA-256. Users install through
+[`https://get.pprbt.dev/install`](https://get.pprbt.dev/install) (`/install.ps1` on Windows). The trusted HTTPS
 installer pins the selected product's exact URL, version, SHA-256, and length before
 execution. First installation does not locally verify a TUF signature; the installed
 updater continues to use full TUF verification for future updates and rollback.
 
 ## Stack
 
-Go (Cobra, Go 1.27.4) - released as native static binaries for Linux and macOS.
-Windows builds from source but is not released yet.
+Go (Cobra, Go 1.27.4) - released as native static binaries for Linux, macOS and Windows.
 
 ## Layout
 

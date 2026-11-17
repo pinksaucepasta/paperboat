@@ -35,6 +35,7 @@ const domain = [
 const routes = [
   { lines: ["$ pb tunnel route add api --name web --to http://127.0.0.1:3000 --path / --wait"], note: "A second app behind the same tunnel. The longest matching path wins." },
   { lines: ["$ pb tunnel route add api --name db --to 127.0.0.1:5432 --protocol tcp --wait"], note: "Raw TCP on a public port of its own. Your service does its own authentication." },
+  { lines: ["$ pb tunnel route add api --name secure --to 127.0.0.1:8443 --protocol tls --wait"], note: "TLS pass-through on port 443: the edge forwards the encrypted bytes and your app keeps its own certificate." },
   { lines: ["$ pb tunnel route add api --name db --to 127.0.0.1:5432 --protocol tcp_private --wait"], note: "TCP that is never public: only your signed-in machines can open it." },
 ]
 
@@ -71,7 +72,7 @@ const faq = [
   },
   {
     q: "Where does TLS end?",
-    a: "At the edge, as with any public HTTPS service you do not host yourself. From the edge to your machine the traffic is encrypted again. You can run the edge on your own server.",
+    a: "At the edge, as with any public HTTPS service you do not host yourself. From the edge to your machine the traffic is encrypted again. A <code>tls</code> route is the exception: the edge forwards the encrypted bytes unchanged and your app ends TLS with its own certificate. You can run the edge on your own server.",
   },
 ]
 ---

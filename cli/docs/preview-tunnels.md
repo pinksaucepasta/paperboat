@@ -142,11 +142,12 @@ command. Run the displayed command within five minutes to proceed.
 
 ## Routes and origins
 
-A tunnel can have multiple HTTP, public TCP, or private TCP routes:
+A tunnel can have multiple HTTP, public TCP, TLS pass-through, or private TCP routes:
 
 ```console
 pb tunnel route add api --name web --to http://127.0.0.1:3000 --domain api.example.com --path / --wait
 pb tunnel route add api --name database --to 127.0.0.1:5432 --protocol tcp --wait
+pb tunnel route add api --name secure --to 127.0.0.1:8443 --protocol tls --wait
 pb tunnel route add api --name database --to 127.0.0.1:5432 --protocol tcp_private --wait
 pb tunnel route list api
 ```
@@ -173,6 +174,17 @@ Exact hosts beat one-label wildcards. Within one host, the longest path prefix
 then route priority wins. A public `tcp` route reserves a stable managed-hostname
 port and carries opaque bytes; the application supplies its own authentication and
 optional TLS. It has no HTTP path and does not use Paperboat's private-access helper.
+A `tls` route is TLS pass-through: the edge reads only the TLS ClientHello, picks the route by
+the server name (SNI) the client sends, and forwards the encrypted bytes unchanged. Your origin
+presents its own certificate and ends TLS, so Paperboat cannot read the traffic or add its own login
+to it, and it issues no certificate for the route; authentication (including client certificates)
+is up to your application. Clients connect on the standard HTTPS port 443 of the tunnel's managed
+hostname, with no extra port. The origin is `host:port` (`tcp://`), without `--domain` or `--path`.
+Serve it at your own hostname with `pb tunnel domain add <tunnel> <hostname> --route <route>`, after
+the domain is verified; wildcards are not supported. A hostname is either HTTPS or TLS pass-through,
+never both. Clients must send a server name: raw TCP, STARTTLS and UDP/QUIC pass-through are not
+supported.
+
 A `tcp_private` route has no public listener or HTTP hostname/path matcher and never
 enters the public route table.
 

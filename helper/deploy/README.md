@@ -39,7 +39,7 @@ remain Personal-scoped and retain mixed or self-hosted-only modes.
 Set each self-hosted hostname's A/AAAA records to exactly the verified public
 ingress addresses Paperboat selects for that publication. After changing a pool
 or placement, explicitly verify DNS again in the dashboard (or run
-`pb tunnel domain verify <tunnel> <domain>` for a tunnel) and wait for the
+`pb domain verify <domain>`) and wait for the
 certificate to become ready. Stop active previews and tunnels in that workspace
 before switching between managed-only and self-hosted-only; the control plane
 rejects a live mode change.

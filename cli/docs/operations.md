@@ -63,8 +63,8 @@ SBOM/provenance, and revocation propagation evidence remain release work in the
 owning repositories.
 
 Pushing a validated `YYYY.MM.DD.X` tag runs `.github/workflows/release.yml`. It builds the
-three native assets (Linux amd64 and arm64, macOS arm64), verifies their GitHub API-reported
-size and digest, signs the three TUF asset targets, and atomically publishes the installer and
+five native assets (Linux amd64 and arm64, macOS arm64, Windows amd64 and arm64), verifies their
+GitHub API-reported size and digest, signs the five TUF asset targets, and atomically publishes the installer and
 TUF metadata. The
 server publishes metadata only; installers and runtime updates download executable bytes from
 the immutable GitHub release URLs recorded in the signed metadata.

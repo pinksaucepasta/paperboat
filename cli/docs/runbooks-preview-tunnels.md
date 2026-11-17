@@ -52,8 +52,9 @@ the requested TTL can end startup earlier. Waiting never extends `--ttl`.
 
 ## Connector offline, drain, or rotation stuck
 
-1. Use `pb tunnel connector list <tunnel> --json` and record the exact
-   connector, session, process, and credential generations.
+1. Use `pb tunnel status <tunnel> --json` and `pb tunnel doctor <tunnel> --json`
+   and record the exact connector, session, process, and credential generations
+   from the health dimensions.
 2. Add and confirm a replacement before draining the old connector. A final
    connector going offline does not delete durable state.
 3. For rotation, verify every captured target has installed and proved the new
@@ -66,11 +67,11 @@ the requested TTL can end startup earlier. Waiting never extends `--ttl`.
 
 ## DNS verification or certificate issuance fails
 
-1. Run `pb tunnel domain instructions <tunnel> <domain> --json` and compare the
+1. Run `pb domain show <domain>` and compare the
    authoritative records exactly, including provider proxy mode, DNSSEC, CAA,
    and delegated `_acme-challenge` CNAME target.
-2. Correct DNS at the authoritative provider, then run `pb tunnel domain verify
-   <tunnel> <domain> --wait --timeout 10m --json`.
+2. Correct DNS at the authoritative provider, then run `pb domain verify
+   <domain> --timeout 10m --json`, which waits for verification and the certificate.
 3. Separate ownership, ACME, renewal, and edge-distribution failure. Keep the
    previous valid certificate and managed Paperboat hostname active.
 4. Do not retry issuance concurrently, move provider credentials to an edge,

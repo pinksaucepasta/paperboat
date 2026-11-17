@@ -5,7 +5,7 @@ exec, SSH/SCP/rsync, file transfer, preview links and tunnels, and encrypted env
 variables. Connections are end-to-end encrypted and peer-to-peer where the network allows.
 Paperboat runs in userspace, so it works alongside your existing VPN instead of replacing it.
 
-Paperboat is in beta. Linux and macOS (Apple Silicon) are supported; Windows is in progress.
+Paperboat is in beta. Linux (amd64 and arm64), macOS (Apple Silicon) and Windows (amd64 and arm64) are supported.
 
 ## Using
 
@@ -18,7 +18,10 @@ pb <machine>          # open a terminal on one
 pb preview 3000       # share a local port as a preview link
 ```
 
-The [CLI guide](cli/docs/cli.md) and [command reference](cli/docs/cli/README.md) cover the rest.
+The [install guide](cli/docs/install.md), [CLI guide](cli/docs/cli.md) and
+[command reference](cli/docs/cli/README.md) cover the rest; [how Paperboat protects your machines](cli/docs/security.md)
+says what is encrypted and what is not. To host the relay or the preview edge yourself, see
+[`helper/`](helper/README.md). Release notes are in [CHANGELOG.md](CHANGELOG.md).
 
 ## Repository
 
