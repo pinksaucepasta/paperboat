@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"github.com/pinksaucepasta/paperboat/edge/internal/route"
+	edgetelemetry "github.com/pinksaucepasta/paperboat/edge/internal/telemetry"
 	"io"
 	"net"
 	"sync/atomic"
@@ -51,6 +52,7 @@ func TestForwardPublicTCPValidatesAuthorityAndPreservesHalfClose(t *testing.T) {
 		return decision, nil
 	}
 	forwardDone := make(chan error, 1)
+	trafficIn, trafficOut := edgetelemetry.TrafficTotals()
 	go func() { forwardDone <- registry.ForwardPublicTCP(context.Background(), accepted, decision, current) }()
 	stream, open, err := connector.AcceptStream(context.Background())
 	if err != nil {
@@ -91,6 +93,10 @@ func TestForwardPublicTCPValidatesAuthorityAndPreservesHalfClose(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("forward did not release")
+	}
+	// The node's traffic totals (sent in its heartbeat) include raw TCP: the upload as ingress, the reply as egress.
+	if in, out := edgetelemetry.TrafficTotals(); in-trafficIn < uint64(len(uploadBytes)) || out-trafficOut < uint64(len(replyBytes)) {
+		t.Fatalf("traffic totals moved ingress +%d (upload %d), egress +%d (reply %d)", in-trafficIn, len(uploadBytes), out-trafficOut, len(replyBytes))
 	}
 }
 

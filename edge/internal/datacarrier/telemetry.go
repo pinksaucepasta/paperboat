@@ -523,7 +523,11 @@ func (s *TelemetryStream) StreamID() uint32 {
 }
 
 func (p *CarrierTelemetry) addBytes(direction string, count uint64) {
-	if p == nil || p.metrics == nil || count == 0 {
+	if p == nil || count == 0 {
+		return
+	}
+	edgetelemetry.RecordTraffic(direction, count)
+	if p.metrics == nil {
 		return
 	}
 	_ = p.metrics.AddCounter(edgetelemetry.MetricTrafficBytes, sharedmetrics.Labels{"direction": direction}, count)

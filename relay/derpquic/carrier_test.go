@@ -327,7 +327,7 @@ func TestMismatchedScopeDenied(t *testing.T) {
 
 func TestCrossAccountExactScopeForwarded(t *testing.T) {
 	f := newFixture(t)
-	_, address, _ := f.start("127.0.0.1:0")
+	server, address, _ := f.start("127.0.0.1:0")
 	ka, kb := key.NewNode().Public(), key.NewNode().Public()
 	ca, cb := certificate(t), certificate(t)
 	ga, gb := f.grant(ka, ca, "shared_client"), f.grant(kb, cb, "shared_machine")
@@ -341,6 +341,14 @@ func TestCrossAccountExactScopeForwarded(t *testing.T) {
 		t.Fatal(err)
 	}
 	receive(t, b, ka, payload)
+	// The node report counts the forwarded payload bytes (the counter moves just after the write).
+	deadline := time.Now().Add(time.Second)
+	for server.Snapshot().BytesForwarded < uint64(len(payload)) && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if got := server.Snapshot().BytesForwarded; got < uint64(len(payload)) {
+		t.Fatalf("BytesForwarded = %d, want at least %d", got, len(payload))
+	}
 }
 func TestCancellationAndPacketBounds(t *testing.T) {
 	f := newFixture(t)

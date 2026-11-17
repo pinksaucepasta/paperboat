@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/shared/nodemetrics"
 	"io"
 	"net/http"
 	"net/url"
@@ -40,6 +41,8 @@ type Config struct {
 	// Trust remembers withdrawn issuer key ids for the process; main shares the one that read the startup
 	// file. Nil starts empty.
 	Trust *jwks.Trust
+	// Version is the relay's software release, reported with each observation.
+	Version string
 }
 type Lease struct {
 	NodeID        string                      `json:"node_id"`
@@ -87,6 +90,7 @@ type Client struct {
 	// observation sends only the digest while the set is unchanged (~400 KB every 3 s at 4,096
 	// connections otherwise).
 	sentSubjects string
+	sampler      *nodemetrics.Sampler
 }
 
 // subjectsDigest is the hex SHA-256 of the sorted "account\x00endpoint\n" membership lines (the
@@ -117,7 +121,7 @@ func New(cfg Config) (*Client, error) {
 	if cfg.Trust == nil {
 		cfg.Trust = &jwks.Trust{}
 	}
-	return &Client{cfg: cfg}, nil
+	return &Client{cfg: cfg, sampler: nodemetrics.NewSampler()}, nil
 }
 
 func (c *Client) post(ctx context.Context, path string, in any) (out Lease, resultErr error) {
@@ -322,6 +326,7 @@ func (c *Client) Observe(ctx context.Context, server *derpquic.Server, draining 
 	subjects := server.AuthoritySubjects()
 	digest := subjectsDigest(subjects)
 	body := map[string]any{"node_id": c.lease.NodeID, "node_generation": c.lease.Generation, "process_epoch": c.lease.ProcessEpoch, "ready": server.Ready() && !draining, "draining": draining, "capacity_used": stats.Connections, "subjects_digest": digest, "quota_denied_supported": true}
+	body["metrics"] = c.metrics(stats)
 	full := digest != c.sentSubjects
 	if full {
 		body["subjects"] = append([]derpquic.AuthoritySubject{}, subjects...)
@@ -368,6 +373,13 @@ func (c *Client) Observe(ctx context.Context, server *derpquic.Server, draining 
 	}
 	c.lease = out
 	return nil
+}
+
+// metrics is the report sent with each observation. A relay forwards payload and has no separate inbound count, so
+// everything it carried is reported as bytes out.
+func (c *Client) metrics(stats derpquic.Stats) nodemetrics.Report {
+	cpu, rss := c.sampler.Sample(time.Now())
+	return nodemetrics.Report{Version: c.cfg.Version, CPUPercent: cpu, RSSBytes: rss, BytesOut: stats.BytesForwarded}
 }
 
 func (c *Client) leaseExpiry() int64 {

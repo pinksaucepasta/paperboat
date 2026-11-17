@@ -154,8 +154,8 @@ func bridgePublicTCP(ctx context.Context, connection net.Conn, stream io.ReadWri
 	if closer, ok := connection.(interface{ CloseWrite() error }); ok {
 		connectionCloseWrite = closer.CloseWrite
 	}
-	go copyDirection(stream, connection, streamCloseWrite)
-	go copyDirection(connection, stream, connectionCloseWrite)
+	go copyDirection(trafficWriter{stream, "ingress"}, connection, streamCloseWrite)
+	go copyDirection(trafficWriter{connection, "egress"}, stream, connectionCloseWrite)
 	idled := make(chan struct{})
 	if idle > 0 {
 		stopIdle := closeWhenIdle(idle, &last, idled, func() {
