@@ -240,7 +240,7 @@ func installUpdateSource(ctx context.Context, executable string, source installs
 	if err = link.Commit(); err != nil {
 		return "", err
 	}
-	if err = inventory(ctx); err != nil {
+	if err = retryInventory(ctx, inventory); err != nil {
 		return "", err
 	}
 	if runtime.GOOS == "darwin" {

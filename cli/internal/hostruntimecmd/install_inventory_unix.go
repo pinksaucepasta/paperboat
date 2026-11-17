@@ -517,5 +517,34 @@ func runInventoryCommand(ctx context.Context, command *exec.Cmd, executable stri
 	if errors.As(err, &incomplete) && len(incomplete.Remaining) > 0 {
 		return runtimeFailure("items of another Paperboat version are still on this machine and could not be removed: "+strings.Join(incomplete.Remaining, ", ")+"; run pb doctor, then pb install again", err)
 	}
+	if errors.As(err, &incomplete) {
+		// Faults without leftovers: the inventory could not look (a systemctl or /proc read failed while the
+		// services restarted). Authored, so the user is not shown "could not finish the command" for an
+		// installation that is complete (dev-e723c114e over dev-b112b2a4a, canary-b, 2026-11-17).
+		return runtimeFailure("Paperboat is installed, but the install inventory could not finish checking this machine for other versions; run pb doctor, then pb install again", errInventoryUnconfirmed, err)
+	}
+	return err
+}
+
+// errInventoryUnconfirmed marks an inventory that failed without naming leftovers: a retry may succeed.
+var errInventoryUnconfirmed = errors.New("the install inventory could not look")
+
+const inventoryAttempts = 3
+
+// inventoryRetryWait lets the service manager settle between attempts; a variable so a test does not wait.
+var inventoryRetryWait = 2 * time.Second
+
+// retryInventory runs the final inventory again when it only failed to look: the services it lists were
+// being restarted by the install that just finished. Leftovers, refusals and cancellation return at once.
+func retryInventory(ctx context.Context, run func(context.Context) error) error {
+	err := run(ctx)
+	for attempt := 1; attempt < inventoryAttempts && errors.Is(err, errInventoryUnconfirmed) && ctx.Err() == nil; attempt++ {
+		select {
+		case <-ctx.Done():
+			return err
+		case <-time.After(inventoryRetryWait):
+		}
+		err = run(ctx)
+	}
 	return err
 }
