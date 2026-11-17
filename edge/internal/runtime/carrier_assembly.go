@@ -94,19 +94,6 @@ func NewCarrierAssembly(config CarrierAssemblyConfig) (*CarrierAssembly, error) 
 	}, nil
 }
 
-// NewDataCarrierAssembly makes the production ownership explicit while
-// retaining NewCarrierAssembly's narrow interface for tests and adapters.
-func NewDataCarrierAssembly(service *datacarrier.Service, handle CarrierHandler, maximumHandlers int, observeError func(error)) (*CarrierAssembly, error) {
-	return NewDataCarrierAssemblyWithTelemetry(service, handle, maximumHandlers, observeError, nil)
-}
-
-// NewDataCarrierAssemblyWithTelemetry keeps the authenticated accept boundary
-// in the runtime composition while leaving datacarrier's transport semantics
-// unchanged. The legacy constructor delegates here with telemetry disabled.
-func NewDataCarrierAssemblyWithTelemetry(service *datacarrier.Service, handle CarrierHandler, maximumHandlers int, observeError func(error), telemetry *datacarrier.CarrierTelemetry) (*CarrierAssembly, error) {
-	return NewCarrierAssembly(CarrierAssemblyConfig{Service: service, Handle: handle, MaximumHandlers: maximumHandlers, ObserveError: observeError, Telemetry: telemetry})
-}
-
 func (a *CarrierAssembly) Start(ctx context.Context) error {
 	if a == nil || ctx == nil {
 		return ErrCarrierAssemblyInvalid

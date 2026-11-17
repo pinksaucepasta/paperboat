@@ -89,7 +89,7 @@ type HTTPClient struct {
 	// already in flight (an ACME leaf takes seconds), longer than the control timeout.
 	onDemand *http.Client
 	// ingress sends the ingress decisions fetch with its own, longer timeout (connectorprotocol.IngressFetchTimeout).
-	ingress        *http.Client
+	ingress *http.Client
 	// longPoll sends the held endpoint pull (EdgeRequest.WaitMilliseconds): it has no fixed timeout, the caller's
 	// context bounds it at the wait plus the control timeout.
 	longPoll       *http.Client

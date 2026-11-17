@@ -51,7 +51,7 @@ func main() {
 func execute(ctx context.Context, reporter *reporting.Reporter, args []string, out, diagnostic io.Writer) (code int) {
 	defer func() {
 		if recover() != nil {
-			fault := reporter.CaptureFailure(ctx, "process_panic", pbhPanic{})
+			fault := reporter.CaptureFailure(ctx, "process_panic", reporting.PanicFailure{})
 			fmt.Fprintf(diagnostic, "pbh stopped (%s); support reference %s\n", fault.Cause, fault.SupportReference)
 			code = 2
 		}
@@ -89,11 +89,6 @@ func reportChildExit(w io.Writer, ctx context.Context, definition string, err er
 	}
 	fmt.Fprintf(w, "pbh: selfhost_child_failed support reference %s; last output %q\n", reference, exit.LastLine)
 }
-
-type pbhPanic struct{}
-
-func (pbhPanic) Error() string { return "panic" }
-func (pbhPanic) processPanic() {}
 
 func run(ctx context.Context, args []string, out io.Writer) error {
 	return runObserved(ctx, args, out, nil)

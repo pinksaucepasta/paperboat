@@ -148,10 +148,6 @@ func (v Verifier) Verify(token string, state tls.ConnectionState, now time.Time)
 	return g.withIndex(), nil
 }
 
-func controlAllowed(a, b Grant, now time.Time) bool {
-	return a.ExpiresAt > now.Unix() && b.ExpiresAt > now.Unix() && controlAdmitted(a, b)
-}
-
 func allowed(a, b Grant, now time.Time) bool { return allowedPairExpiry(a, b, now) > now.Unix() }
 
 // A pair can continue while any exact reciprocal scope remains live. Its

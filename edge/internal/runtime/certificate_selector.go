@@ -26,18 +26,6 @@ type OnDemandCertificateRequester interface {
 	RequestCertificate(context.Context, string) error
 }
 type OnDemandCertificateMatcher interface{ RequiresExactCertificate(string) bool }
-type OnDemandCertificateRequesterFunc func(context.Context, string) error
-
-func (f OnDemandCertificateRequesterFunc) RequestCertificate(ctx context.Context, hostname string) error {
-	return f(ctx, hostname)
-}
-
-type OnDemandCertificateMatcherFunc func(string) bool
-
-func (f OnDemandCertificateMatcherFunc) RequiresExactCertificate(hostname string) bool {
-	return f(hostname)
-}
-
 type CertificateSelectorConfig struct {
 	Source            CertificateSource
 	OnDemandRequester OnDemandCertificateRequester

@@ -419,9 +419,6 @@ func ComponentDirectories(dir string) ([]string, error) {
 	}
 	return out, nil
 }
-func tlsConfig(cert tls.Certificate) *tls.Config {
-	return &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS13}
-}
 
 // RemoveLocal deletes only files beneath a protected, stopped installation directory.
 func RemoveLocal(dir string) error {

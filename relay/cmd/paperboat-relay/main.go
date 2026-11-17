@@ -38,10 +38,6 @@ import (
 
 var version = "development"
 
-func run(reporters ...*reporting.Reporter) error {
-	return runContext(context.Background(), reporters...)
-}
-
 func runContext(processCtx context.Context, reporters ...*reporting.Reporter) error {
 	var reporter *reporting.Reporter
 	if len(reporters) > 0 {
@@ -347,15 +343,11 @@ func main() {
 	os.Exit(code)
 }
 
-func execute(reporter *reporting.Reporter) int {
-	return executeContext(reporting.WithSupportReference(context.Background(), reporting.Reference()), reporter)
-}
-
 func executeContext(ctx context.Context, reporter *reporting.Reporter) (code int) {
 	started := time.Now()
 	defer func() {
 		if recovered := recover(); recovered != nil {
-			fault := reporter.CaptureFailure(ctx, "process_panic", recoveredPanic{})
+			fault := reporter.CaptureFailure(ctx, "process_panic", reporting.PanicFailure{})
 			if fault.CorrelationID != "" {
 				fmt.Fprintf(os.Stderr, "paperboat-relay stopped during %s (%s); support reference %s\n", fault.Stage, fault.Cause, fault.CorrelationID)
 			}
@@ -397,11 +389,6 @@ func failureStage(definition string) string {
 		return "unknown"
 	}
 }
-
-type recoveredPanic struct{}
-
-func (recoveredPanic) Error() string { return "panic" }
-func (recoveredPanic) processPanic() {}
 
 // SDK drain is local completion of export attempts; receipt remains unconfirmed.
 func logReportingShutdown(ctx context.Context, reporter *reporting.Reporter) {

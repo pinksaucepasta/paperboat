@@ -124,12 +124,6 @@ func NewCarrierTelemetry(config CarrierTelemetryConfig) (*CarrierTelemetry, erro
 	return &CarrierTelemetry{metrics: config.Metrics, events: config.Events, clock: config.Clock, base: base, observe: config.Observe}, nil
 }
 
-// NewTelemetry is a concise constructor for callers assembling edge
-// telemetry producers.
-func NewTelemetry(config CarrierTelemetryConfig) (*CarrierTelemetry, error) {
-	return NewCarrierTelemetry(config)
-}
-
 // StreamOpenFunc is the narrow seam used to instrument either Server.OpenStream
 // or Client.OpenStream without changing the carrier implementation.
 type StreamOpenFunc func(context.Context) (io.ReadWriteCloser, error)

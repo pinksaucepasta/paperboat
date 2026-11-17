@@ -122,10 +122,6 @@ func failureStage(definition string) string {
 	}
 }
 
-func run(args []string, reporters ...*reporting.Reporter) error {
-	return runContext(context.Background(), args, reporters...)
-}
-
 func runContext(processCtx context.Context, args []string, reporters ...*reporting.Reporter) error {
 	if len(args) == 1 && (args[0] == "version" || args[0] == "--version") {
 		fmt.Fprintf(os.Stdout, "paperboat-edge %s\n", version)
@@ -260,23 +256,12 @@ func takeOver(ctx context.Context, service *edgeruntime.Service, inheritance *ha
 	return nil
 }
 
-func buildService(cfg config.Config, deployment config.Deployment) (*edgeruntime.Service, error) {
-	return buildServiceWithCarrier(cfg, deployment, nil)
-}
-
 // buildServiceWithReporter builds the edge process; a non-empty epoch is the inherited process
 // epoch of an install handover.
 func buildServiceWithReporter(cfg config.Config, deployment config.Deployment, reporter *reporting.Reporter, epoch string) (*edgeruntime.Service, error) {
 	return buildServiceAssembly(cfg, deployment, nil, reporter, epoch)
 }
 
-// buildServiceWithCarrier is the explicit deployment assembly seam for the
-// connector-v1 edge carrier. A supplied carrier is useful for deterministic
-// composition tests; the normal path constructs the authenticated carrier
-// listener from the dedicated deployment certificate and addresses.
-func buildServiceWithCarrier(cfg config.Config, deployment config.Deployment, carrier edgeruntime.Component) (*edgeruntime.Service, error) {
-	return buildServiceAssembly(cfg, deployment, carrier, nil, "")
-}
 func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carrier edgeruntime.Component, reporter *reporting.Reporter, inheritedEpoch string) (*edgeruntime.Service, error) {
 	credential, err := readCredential(deployment.ControlCredentialFile)
 	if err != nil {

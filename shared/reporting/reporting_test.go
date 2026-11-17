@@ -301,6 +301,16 @@ func TestCaptureFailureKeepsSafeMetadataWhenSentryIsDisabled(t *testing.T) {
 	}
 }
 
+// A panic marker declared in another package cannot satisfy the unexported processPanic interface, which
+// is why relay and pbh must report reporting.PanicFailure to be classified as a process panic.
+func TestPanicFailureProjectsAsProcessPanic(t *testing.T) {
+	const reference = "support_01234567-89ab-4def-8123-456789abcdef"
+	fault := projectFault("paperboat-relay", failureDefinitions["process_panic"], reference, PanicFailure{})
+	if fault.Cause != "process_panic" || fault.Code != "process_panic" {
+		t.Fatalf("panic fault=%+v", fault)
+	}
+}
+
 func TestConfigurationFailureIsLocalRejection(t *testing.T) {
 	var local Fault
 	reporter := &Reporter{localFault: func(fault Fault) { local = fault }}

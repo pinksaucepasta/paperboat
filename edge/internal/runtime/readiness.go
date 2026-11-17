@@ -41,5 +41,3 @@ func (r Readiness) Start(ctx context.Context) error {
 		}
 	}
 }
-
-func (Readiness) Shutdown(context.Context) error { return nil }

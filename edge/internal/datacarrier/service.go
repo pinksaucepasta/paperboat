@@ -190,20 +190,6 @@ func (s *Service) TCPAddr() net.Addr {
 	return s.tcp.Addr()
 }
 
-func (s *Service) QUICAddr() net.Addr {
-	if s == nil || s.quic == nil || s.quic.Addr() == nil {
-		return nil
-	}
-	return s.quic.Addr()
-}
-
-func (s *Service) Done() <-chan struct{} {
-	if s == nil {
-		return closedChannel()
-	}
-	return s.done
-}
-
 // Close stops listener accepts and closes every carrier owned by the service,
 // including servers already returned by Accept. This gives runtime shutdown a
 // single leak-free ownership boundary; callers may still close a returned

@@ -113,12 +113,6 @@ func NewRequestTelemetry(config RequestTelemetryConfig) (*RequestTelemetry, erro
 	return &RequestTelemetry{metrics: config.Metrics, events: config.Events, clock: config.Clock, base: base}, nil
 }
 
-// NewTelemetry is a concise constructor for callers that assemble several
-// edge producers in one package.
-func NewTelemetry(config RequestTelemetryConfig) (*RequestTelemetry, error) {
-	return NewRequestTelemetry(config)
-}
-
 type requestInfoContextKey struct{}
 
 // WithRequestTelemetryInfo associates safe route identity with a request. The

@@ -891,17 +891,6 @@ func (c *Client) OpenStream(ctx context.Context, open StreamOpen) (*Stream, erro
 	return stream, nil
 }
 
-func (c *Client) OpenControlStream(ctx context.Context) (*Stream, error) {
-	if c == nil || ctx == nil {
-		return nil, ErrInvalidConfig
-	}
-	raw, err := c.openRaw(ctx)
-	if err != nil {
-		return nil, err
-	}
-	return wrapStream(raw, ctx, c.releasePermit), nil
-}
-
 func (c *Client) openRaw(ctx context.Context) (StreamLink, error) {
 	if c.closed() {
 		return nil, ErrCarrierClosed
@@ -987,13 +976,6 @@ func (c *Client) ActiveStreams() int {
 		return 0
 	}
 	return int(active)
-}
-
-func (c *Client) Done() <-chan struct{} {
-	if c == nil {
-		return closedChannel()
-	}
-	return c.done
 }
 
 func (c *Client) releasePermit() {
