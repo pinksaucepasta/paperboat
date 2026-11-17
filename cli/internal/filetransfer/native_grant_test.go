@@ -85,7 +85,7 @@ func TestNativeTransferReauthorizesLostConnectionWithoutNewBatch(t *testing.T) {
 			data := bytes.Repeat([]byte("bounded"), protocol.FileTransferChunkBytes/7+17)
 			item := source(data)
 			manifest := Manifest{TransferID: "ft_renew", BatchID: "batch_renew", SourceMachineID: "machine_source", DestinationMachineID: "machine_destination", InitiatingUserID: "user_1", Basename: item.Basename, Size: item.Size, SHA256: hex.EncodeToString(item.SHA256[:])}
-			policy := Policy{Revision: "fixture", MaxFileBytes: 50 << 20, MaxBatchFiles: 10, MaxBatchBytes: 500 << 20, MaxConcurrentTransfers: 2, RetentionSeconds: 604800, DeliveryTimeoutSeconds: 600, MaxPendingSpoolBytes: 1 << 30}
+			policy := Policy{Revision: "fixture", MaxBatchFiles: 10, MaxConcurrentTransfers: 2, RetentionSeconds: 604800, DeliveryTimeoutSeconds: 600, MaxPendingSpoolBytes: 1 << 30}
 			var mu sync.Mutex
 			var content []byte
 			var client *NativeClient

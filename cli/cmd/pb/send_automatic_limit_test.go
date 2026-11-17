@@ -63,17 +63,16 @@ func TestTransferLeaseCoversTheDeclaredTotal(t *testing.T) {
 	}
 }
 
-// Round 33: pb send revalidated the files against the descriptor policy's 50 MiB caps after the server had
-// signed a larger declared total, refusing every Automatic send over 50 MiB. A declared send is bounded by
-// what was signed: its total for Automatic, nothing for Unlimited.
+// A send is bounded by its mode: the Automatic bound (2 GB) for Automatic, nothing for Unlimited.
 func TestDeclaredSendsAreBoundedByTheirDeclaration(t *testing.T) {
-	policy := filetransfer.Limits{MaxFileBytes: 50 << 20, MaxBatchFiles: 10, MaxBatchBytes: 500 << 20}
+	policy := automaticTransferLimits
 	big := []filetransfer.Source{{Basename: "big.bin", Size: 1_500_000_000, Reader: strings.NewReader("")}}
 	if err := filetransfer.ValidateSources(big, declaredTransferLimits(policy, api.TransferDeclaration{Mode: "automatic", Bytes: 1_500_000_000})); err != nil {
 		t.Fatalf("a declared 1.5 GB Automatic send was refused: %v", err)
 	}
-	if err := filetransfer.ValidateSources(big, declaredTransferLimits(policy, api.TransferDeclaration{})); err == nil {
-		t.Fatal("an undeclared send was not bounded by the policy")
+	over := []filetransfer.Source{{Basename: "over.bin", Size: 2_500_000_000, Reader: strings.NewReader("")}}
+	if err := filetransfer.ValidateSources(over, declaredTransferLimits(policy, api.TransferDeclaration{Mode: "automatic", Bytes: 2_500_000_000})); err == nil {
+		t.Fatal("an Automatic send over 2 GB was not refused")
 	}
 	huge := []filetransfer.Source{{Basename: "huge.bin", Size: 9_000_000_000, Reader: strings.NewReader("")}}
 	if err := filetransfer.ValidateSources(huge, declaredTransferLimits(policy, api.TransferDeclaration{Mode: "unlimited", Bytes: 9_000_000_000})); err != nil {

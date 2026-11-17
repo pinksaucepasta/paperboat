@@ -101,10 +101,10 @@ func TestSendToAFullDiskNamesTheComputerAndStopsRetrying(t *testing.T) {
 
 // F6-05: a team policy stricter than the CLI default is reported as the limit that was exceeded.
 func TestServerTransferLimitNamesTheExceededLimit(t *testing.T) {
-	refusal := &api.APIError{Status: http.StatusRequestEntityTooLarge, Code: "file_transfer_limit_exceeded", Details: map[string]any{"max_file_bytes": float64(10 << 20), "max_batch_files": float64(10), "max_batch_bytes": float64(500 << 20)}}
-	sources := []filetransfer.Source{{Basename: "movie.mp4", Size: 30 << 20, Reader: strings.NewReader("x")}}
+	refusal := &api.APIError{Status: http.StatusRequestEntityTooLarge, Code: "file_transfer_limit_exceeded", Details: map[string]any{"max_batch_files": float64(2)}}
+	sources := []filetransfer.Source{{Basename: "a", Reader: strings.NewReader("x")}, {Basename: "b", Reader: strings.NewReader("x")}, {Basename: "c", Reader: strings.NewReader("x")}}
 	err := serverTransferLimit(refusal, sources)
-	if err == nil || !strings.Contains(commandFailureMessage(err, classifyCommandFailure(err)), "movie.mp4 is 30 MiB and a single file can be at most 10 MiB") {
+	if err == nil || !strings.Contains(commandFailureMessage(err, classifyCommandFailure(err)), "That is 3 files and one send takes at most 2") {
 		t.Fatalf("limit = %v", err)
 	}
 	if serverTransferLimit(&api.APIError{Code: "something_else"}, sources) != nil || serverTransferLimit(refusal, nil) != nil {

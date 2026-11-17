@@ -205,7 +205,7 @@ func TestStatusDecodesFullSourceVisibleManifest(t *testing.T) {
 }
 
 func TestProactiveRefreshAppliesToBodyAndHeaderOnlyOperations(t *testing.T) {
-	policy := Policy{Revision: "file-transfer-v1", MaxFileBytes: 50 << 20, MaxBatchFiles: 10, MaxBatchBytes: 500 << 20, MaxConcurrentTransfers: 2, RetentionSeconds: 604800, DeliveryTimeoutSeconds: 600, MaxPendingSpoolBytes: 1 << 30}
+	policy := Policy{Revision: "file-transfer-v1", MaxBatchFiles: 10, MaxConcurrentTransfers: 2, RetentionSeconds: 604800, DeliveryTimeoutSeconds: 600, MaxPendingSpoolBytes: 1 << 30}
 	var requests int
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		requests++

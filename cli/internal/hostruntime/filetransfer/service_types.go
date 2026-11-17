@@ -9,8 +9,6 @@ import (
 )
 
 const (
-	MaxFileBytes  = int64(50 << 20)
-	MaxBatchBytes = int64(500 << 20)
 	MaxBatchFiles = 10
 	Retention     = 7 * 24 * time.Hour
 
@@ -22,9 +20,7 @@ const (
 
 type Policy struct {
 	Revision               string `json:"revision"`
-	MaxFileBytes           int64  `json:"max_file_bytes"`
 	MaxBatchFiles          int    `json:"max_batch_files"`
-	MaxBatchBytes          int64  `json:"max_batch_bytes"`
 	MaxConcurrentTransfers int    `json:"max_concurrent_transfers"`
 	RetentionSeconds       int64  `json:"retention_seconds"`
 	DeliveryTimeoutSeconds int64  `json:"delivery_timeout_seconds"`
@@ -35,13 +31,10 @@ type Policy struct {
 // AutomaticTransferLimit is the largest Automatic transfer: 2,000,000,000 bytes (PLAN 3b, File transfer modes).
 const AutomaticTransferLimit = int64(2_000_000_000)
 
-// Bounds is the per-file and per-batch byte bound: the Automatic batch bound for both when a server policy sets it,
-// otherwise the policy's own MaxFileBytes and MaxBatchBytes (DefaultPolicy, in force until the server's policy arrives).
+// Bounds is the per-file and per-batch byte bound: the Automatic batch bound for both (an Unlimited batch carries
+// its own signed claim and replaces it, see CreateRequest).
 func (p Policy) Bounds() (file, batch int64) {
-	if p.AutomaticMaxBatchBytes > 0 {
-		return p.AutomaticMaxBatchBytes, p.AutomaticMaxBatchBytes
-	}
-	return p.MaxFileBytes, p.MaxBatchBytes
+	return p.AutomaticMaxBatchBytes, p.AutomaticMaxBatchBytes
 }
 
 func (p Policy) ValidBounds() bool {
@@ -49,7 +42,8 @@ func (p Policy) ValidBounds() bool {
 	return file > 0 && file <= batch && batch <= AutomaticTransferLimit && p.MaxPendingSpoolBytes >= batch
 }
 
-var DefaultPolicy = Policy{Revision: "file-transfer-v1", MaxFileBytes: MaxFileBytes, MaxBatchFiles: MaxBatchFiles, MaxBatchBytes: MaxBatchBytes, MaxConcurrentTransfers: 2, RetentionSeconds: int64(Retention / time.Second), DeliveryTimeoutSeconds: 600, MaxPendingSpoolBytes: 1 << 30}
+// DefaultPolicy is in force until the server's policy arrives: the Automatic bound, never unbounded.
+var DefaultPolicy = Policy{Revision: "file-transfer-v1", AutomaticMaxBatchBytes: AutomaticTransferLimit, MaxBatchFiles: MaxBatchFiles, MaxConcurrentTransfers: 2, RetentionSeconds: int64(Retention / time.Second), DeliveryTimeoutSeconds: 600, MaxPendingSpoolBytes: AutomaticTransferLimit}
 
 type PolicyStore struct {
 	mu     sync.RWMutex

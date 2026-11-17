@@ -47,17 +47,21 @@ func (e *LimitError) Error() string {
 	return fmt.Sprintf("file %s is %d bytes; limit is %d", e.Name, e.Value, e.Limit)
 }
 
+// AutomaticLimit is the largest Automatic transfer (2,000,000,000 bytes, PLAN 3b File transfer modes): the bound
+// when a caller sets none. An Unlimited send passes its own larger limits.
+const AutomaticLimit = int64(2_000_000_000)
+
 // ValidateSources applies a server-returned policy to an already opened and
 // hashed batch without reopening caller paths after an approval wait.
 func ValidateSources(sources []Source, limits Limits) error {
 	if limits.MaxFileBytes <= 0 {
-		limits.MaxFileBytes = 50 << 20
+		limits.MaxFileBytes = AutomaticLimit
 	}
 	if limits.MaxBatchFiles <= 0 {
 		limits.MaxBatchFiles = 10
 	}
 	if limits.MaxBatchBytes <= 0 {
-		limits.MaxBatchBytes = 500 << 20
+		limits.MaxBatchBytes = AutomaticLimit
 	}
 	if len(sources) < 1 || len(sources) > limits.MaxBatchFiles {
 		return &LimitError{Scope: LimitBatchFiles, Value: int64(len(sources)), Limit: int64(limits.MaxBatchFiles)}
@@ -97,13 +101,13 @@ func (e *NotRegularError) Error() string { return e.Path + " is not a regular fi
 
 func Prepare(paths []string, limits Limits) (*PreparedBatch, error) {
 	if limits.MaxFileBytes <= 0 {
-		limits.MaxFileBytes = 50 << 20
+		limits.MaxFileBytes = AutomaticLimit
 	}
 	if limits.MaxBatchFiles <= 0 {
 		limits.MaxBatchFiles = 10
 	}
 	if limits.MaxBatchBytes <= 0 {
-		limits.MaxBatchBytes = 500 << 20
+		limits.MaxBatchBytes = AutomaticLimit
 	}
 	if len(paths) < 1 || len(paths) > limits.MaxBatchFiles {
 		return nil, &LimitError{Scope: LimitBatchFiles, Value: int64(len(paths)), Limit: int64(limits.MaxBatchFiles)}
@@ -189,13 +193,13 @@ func PrepareDescriptors(paths []string, files []*os.File, limits Limits) ([]Sour
 		return nil, errors.New("file descriptors do not match paths")
 	}
 	if limits.MaxFileBytes <= 0 {
-		limits.MaxFileBytes = 50 << 20
+		limits.MaxFileBytes = AutomaticLimit
 	}
 	if limits.MaxBatchFiles <= 0 {
 		limits.MaxBatchFiles = 10
 	}
 	if limits.MaxBatchBytes <= 0 {
-		limits.MaxBatchBytes = 500 << 20
+		limits.MaxBatchBytes = AutomaticLimit
 	}
 	if len(paths) > limits.MaxBatchFiles {
 		return nil, &LimitError{Scope: LimitBatchFiles, Value: int64(len(paths)), Limit: int64(limits.MaxBatchFiles)}

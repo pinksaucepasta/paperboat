@@ -4,11 +4,11 @@
 
 `/v1/file-transfers` accepts opaque regular files between identified machines with resumable
 HEAD/PATCH content, SHA-256 verification, idempotent operation IDs, and atomic batch
-publication. Defaults are 50 MiB per file, ten files and 500 MiB per batch, and two active
-streams. MIME is not inspected or restricted. `pb send <path> --to <machine>` obtains an
+publication. Automatic mode bounds one send at 2,000,000,000 bytes (every file summed), ten files per batch and two active
+streams; Unlimited mode has no size bound but only runs directly or through a self-hosted relay. MIME is not inspected or restricted. `pb send <path> --to <machine>` obtains an
 exact `file:transfer` credential bound to the owned source and destination machine IDs.
 Files remain for seven days. Pending deliveries to an attached interactive machine remain
-for ten minutes within a 1 GiB spool and are pinned
+for ten minutes within a 2 GB spool and are pinned
 to one active writer. Cancellation, rejection, checksum failure, expiry, and typed storage
 failures clean partial content.
 

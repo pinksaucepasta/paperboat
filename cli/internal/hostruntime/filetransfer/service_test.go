@@ -318,7 +318,7 @@ func TestPendingSpoolLimitRejectsWholeBatch(t *testing.T) {
 	}
 	defer durable.Close()
 	policy := DefaultPolicy
-	policy.MaxFileBytes, policy.MaxBatchBytes, policy.MaxPendingSpoolBytes = 5, 5, 5
+	policy.AutomaticMaxBatchBytes, policy.MaxPendingSpoolBytes = 5, 5
 	service, err := New(Config{Root: filepath.Join(root, "transfers"), LocalMachineID: "machine_local", Store: durable, Policy: NewPolicyStore(policy)})
 	if err != nil {
 		t.Fatal(err)
@@ -352,7 +352,7 @@ func TestAcceptedPolicyUpdateChangesCreateEnforcement(t *testing.T) {
 	}
 	updated := DefaultPolicy
 	updated.Revision = "file-transfer-tight"
-	updated.MaxFileBytes = 2
+	updated.AutomaticMaxBatchBytes = 2
 	if err := policies.Update(updated); err != nil {
 		t.Fatal(err)
 	}

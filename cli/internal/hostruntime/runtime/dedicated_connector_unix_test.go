@@ -24,8 +24,7 @@ func (*dedicatedTestProofSource) Proof(context.Context, string, string, string, 
 
 func TestRuntimeObservationUpdatesTransferPolicyWithoutTunnel(t *testing.T) {
 	policy := filetransfer.DefaultPolicy
-	policy.MaxFileBytes = 1024
-	policy.MaxBatchBytes = 10240
+	policy.AutomaticMaxBatchBytes = 10240
 	response := map[string]any{"data": map[string]any{"accepted": true, "file_transfer_policy": policy}}
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("X-Paperboat-Machine-Proof") == "" || r.Header.Get("Authorization") == "" {

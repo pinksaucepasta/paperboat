@@ -499,7 +499,7 @@ func task44TransferFile(t *testing.T, parent context.Context, verifier auth.Veri
 	}
 	defer durable.Close()
 	defer func() { cancel(); workers.Wait() }()
-	policy := hosttransfer.Policy{Revision: "task44", MaxFileBytes: 1024, MaxBatchFiles: 1, MaxBatchBytes: 1024, MaxConcurrentTransfers: 1, RetentionSeconds: 60, DeliveryTimeoutSeconds: 20, MaxPendingSpoolBytes: 1024}
+	policy := hosttransfer.Policy{Revision: "task44", AutomaticMaxBatchBytes: 1024, MaxBatchFiles: 1, MaxConcurrentTransfers: 1, RetentionSeconds: 60, DeliveryTimeoutSeconds: 20, MaxPendingSpoolBytes: 1024}
 	if !policy.Valid() {
 		t.Fatal("invalid bounded file fixture policy")
 	}

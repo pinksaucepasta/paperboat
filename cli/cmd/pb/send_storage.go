@@ -147,7 +147,7 @@ func serverTransferLimit(err error, sources []filetransfer.Source) error {
 		}
 		return 0
 	}
-	limits := filetransfer.Limits{MaxFileBytes: number("max_file_bytes"), MaxBatchFiles: int(number("max_batch_files")), MaxBatchBytes: number("max_batch_bytes")}
+	limits := filetransfer.Limits{MaxBatchFiles: int(number("max_batch_files"))}
 	var limit *filetransfer.LimitError
 	if errors.As(filetransfer.ValidateSources(sources, limits), &limit) {
 		return limit

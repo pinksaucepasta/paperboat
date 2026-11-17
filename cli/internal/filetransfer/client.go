@@ -38,9 +38,7 @@ type Binding struct {
 }
 type Policy struct {
 	Revision               string `json:"revision"`
-	MaxFileBytes           int64  `json:"max_file_bytes"`
 	MaxBatchFiles          int    `json:"max_batch_files"`
-	MaxBatchBytes          int64  `json:"max_batch_bytes"`
 	MaxConcurrentTransfers int    `json:"max_concurrent_transfers"`
 	RetentionSeconds       int64  `json:"retention_seconds"`
 	DeliveryTimeoutSeconds int64  `json:"delivery_timeout_seconds"`

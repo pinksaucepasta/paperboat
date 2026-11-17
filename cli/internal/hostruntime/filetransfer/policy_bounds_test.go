@@ -2,23 +2,25 @@ package filetransfer
 
 import "testing"
 
-// PLAN 3b File transfer modes: the server replaces max_file_bytes/max_batch_bytes with one
-// automatic_max_batch_bytes (2,000,000,000) and raises the spool to it; the old form stays valid until it stops.
-func TestPolicyAcceptsTheAutomaticBatchBound(t *testing.T) {
-	automatic := DefaultPolicy
-	automatic.MaxFileBytes, automatic.MaxBatchBytes = 0, 0
-	automatic.AutomaticMaxBatchBytes, automatic.MaxPendingSpoolBytes = AutomaticTransferLimit, AutomaticTransferLimit
-	if !automatic.Valid() || !DefaultPolicy.Valid() {
-		t.Fatalf("automatic=%v legacy=%v, want both valid", automatic.Valid(), DefaultPolicy.Valid())
+// With no server policy yet the host is bounded by the Automatic bound (2,000,000,000), never unbounded; a policy
+// without automatic_max_batch_bytes is invalid and falls back to it.
+func TestPolicyIsBoundedByTheAutomaticBatchBound(t *testing.T) {
+	if !DefaultPolicy.Valid() {
+		t.Fatal("DefaultPolicy is not valid")
 	}
-	if file, batch := automatic.Bounds(); file != AutomaticTransferLimit || batch != AutomaticTransferLimit {
+	if file, batch := DefaultPolicy.Bounds(); file != AutomaticTransferLimit || batch != AutomaticTransferLimit {
 		t.Fatalf("bounds=%d/%d", file, batch)
 	}
-	over := automatic
+	if got := NewPolicyStore(Policy{}).Current(); got.AutomaticMaxBatchBytes != AutomaticTransferLimit {
+		t.Fatalf("a store without a valid policy bounds at %d, want the Automatic bound", got.AutomaticMaxBatchBytes)
+	}
+	over := DefaultPolicy
 	over.AutomaticMaxBatchBytes = AutomaticTransferLimit + 1
-	smallSpool := automatic
+	smallSpool := DefaultPolicy
 	smallSpool.MaxPendingSpoolBytes = 1 << 30
-	if over.Valid() || smallSpool.Valid() {
-		t.Fatal("accepted a bound over 2,000,000,000 or a spool smaller than the bound")
+	none := DefaultPolicy
+	none.AutomaticMaxBatchBytes = 0
+	if over.Valid() || smallSpool.Valid() || none.Valid() {
+		t.Fatal("accepted a bound over 2,000,000,000, a spool smaller than the bound, or no bound")
 	}
 }

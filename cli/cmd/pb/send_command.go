@@ -369,14 +369,10 @@ func sendTransferMode(ctx context.Context, command *cobra.Command, client *api.C
 	return "automatic"
 }
 
-// declaredTransferLimits widens the descriptor policy's size bounds to what the server signed for this
-// declared send (its total for Automatic, none for Unlimited); the policy still carries today's 50 MiB caps.
+// declaredTransferLimits widens the descriptor policy's Automatic size bound to none for an Unlimited send.
 func declaredTransferLimits(policy filetransfer.Limits, declared api.TransferDeclaration) filetransfer.Limits {
-	switch {
-	case declared.Mode == "unlimited":
+	if declared.Mode == "unlimited" {
 		policy.MaxFileBytes, policy.MaxBatchBytes = unlimitedTransferLimits.MaxFileBytes, unlimitedTransferLimits.MaxBatchBytes
-	case declared.Bytes > 0:
-		policy.MaxFileBytes, policy.MaxBatchBytes = max(policy.MaxFileBytes, declared.Bytes), max(policy.MaxBatchBytes, declared.Bytes)
 	}
 	return policy
 }
