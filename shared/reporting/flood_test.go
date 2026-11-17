@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/getsentry/sentry-go"
 )
 
 func testGuard(path string, clock *time.Time) *FloodGuard {
@@ -102,5 +104,16 @@ func TestFloodGuardRemembersBoundedKeys(t *testing.T) {
 	var nilGuard *FloodGuard
 	if ok, _ := nilGuard.Admit("x"); !ok {
 		t.Fatal("nil guard must admit")
+	}
+}
+
+func TestSuppressedCountSurvivesEventSanitizing(t *testing.T) {
+	event := &sentry.Event{Tags: map[string]string{"operation": "service_lifecycle", "outcome": "failed", "stage": "unknown", "code": "internal_failure", "cause": "internal", "error_type": "Error", "support_reference": Reference(), "suppressed_events": "17"}}
+	if out := sanitizeEnvironment(event, "paperboat-edge", "paperboat-edge:1", "production"); out != nil && out.Tags["suppressed_events"] != "17" {
+		t.Fatalf("tags %v", out.Tags)
+	}
+	event.Tags["suppressed_events"] = "secret"
+	if out := sanitizeEnvironment(event, "paperboat-edge", "paperboat-edge:1", "production"); out != nil && out.Tags["suppressed_events"] != "" {
+		t.Fatal("unvalidated suppressed_events exported")
 	}
 }

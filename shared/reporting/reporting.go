@@ -336,11 +336,7 @@ func sanitizeLog(log *sentry.Log, component, release, environment string, fleet 
 		attrs["cause"] = attribute.StringValue(cause)
 		attrs["error_type"] = attribute.StringValue(errorType)
 	}
-	suppressed := event.Tags["suppressed_events"]
-	if suppressed != "" && !validErrno(suppressed) {
-		suppressed = ""
-	}
-	for key, value := range map[string]string{"error_chain": errorChain, "errno": errno, "http_status": httpStatus, "source_file": sourceFile, "source_function": sourceFunction, "source_line": sourceLine, "suppressed_events": suppressed} {
+	for key, value := range map[string]string{"error_chain": errorChain, "errno": errno, "http_status": httpStatus, "source_file": sourceFile, "source_function": sourceFunction, "source_line": sourceLine} {
 		if value != "" {
 			attrs[key] = attribute.StringValue(value)
 		}
@@ -888,7 +884,11 @@ func sanitizeEnvironment(event *sentry.Event, component, release, environment st
 			"outcome": outcome, "support_reference": reference, "correlation_id": reference,
 		},
 	}
-	for key, value := range map[string]string{"error_chain": errorChain, "errno": errno, "http_status": httpStatus, "source_file": sourceFile, "source_function": sourceFunction, "source_line": sourceLine} {
+	suppressed := event.Tags["suppressed_events"]
+	if !validErrno(suppressed) {
+		suppressed = ""
+	}
+	for key, value := range map[string]string{"error_chain": errorChain, "errno": errno, "http_status": httpStatus, "source_file": sourceFile, "source_function": sourceFunction, "source_line": sourceLine, "suppressed_events": suppressed} {
 		if value != "" {
 			clean.Tags[key] = value
 		}

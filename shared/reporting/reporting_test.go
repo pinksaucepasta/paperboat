@@ -506,7 +506,7 @@ func TestOperationRateLimitDropsAndRecoversNextWindow(t *testing.T) {
 		t.Fatal(err)
 	}
 	reporter := &Reporter{client: client, hub: sentry.NewHub(client, sentry.NewScope()), enabled: true, logs: true, component: "paperboat-relay"}
-	for range 129 {
+	for range maxLogs + 1 {
 		reporter.Observe(context.Background(), "relay_session", "success", "ok", "", 0)
 	}
 	if reporter.droppedLogs.Load() != 1 {
