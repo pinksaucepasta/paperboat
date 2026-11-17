@@ -15,19 +15,12 @@ import (
 
 	"github.com/bmatcuk/doublestar/v4"
 	"github.com/go-git/go-git/v5/plumbing/format/gitignore"
+	"github.com/pinksaucepasta/paperboat/shared/configsync"
 )
 
 // PathRule records a user's explicit repository-to-machine mapping. It never
 // derives a destination from a platform or from a repository filename.
-type PathRule struct {
-	ID             string   `json:"id"`
-	Source         string   `json:"source"`
-	RepositoryPath string   `json:"repository_path"`
-	LocalPath      string   `json:"local_path"`
-	Kind           string   `json:"kind"`
-	Include        []string `json:"include"`
-	Exclude        []string `json:"exclude"`
-}
+type PathRule = configsync.PathRule
 
 var ErrPathRuleInvalid = errors.New("invalid config path rule")
 

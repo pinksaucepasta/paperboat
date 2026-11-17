@@ -2,6 +2,7 @@ package controlplane
 
 import (
 	"encoding/json"
+	"github.com/pinksaucepasta/paperboat/shared/configsync"
 	"net/url"
 	"path"
 	"strings"
@@ -10,19 +11,8 @@ import (
 
 // ConfigPathRule grants a machine an explicit mapping. Repository data cannot
 // supply or expand the destination; the worker verifies native filesystem safety.
-type ConfigPathRule struct {
-	ID             string   `json:"id"`
-	Source         string   `json:"source"`
-	RepositoryPath string   `json:"repository_path"`
-	LocalPath      string   `json:"local_path"`
-	Kind           string   `json:"kind"`
-	Include        []string `json:"include"`
-	Exclude        []string `json:"exclude"`
-}
-type ConfigRepositoryBinding struct {
-	RepositoryID string `json:"repository_id"`
-	URL          string `json:"url"`
-}
+type ConfigPathRule = configsync.PathRule
+type ConfigRepositoryBinding = configsync.RepositoryBinding
 
 func safeCoordinateText(s string) bool {
 	return s != "" && len(s) <= 4096 && !strings.ContainsFunc(s, func(r rune) bool { return unicode.IsControl(r) }) && strings.TrimSpace(s) == s

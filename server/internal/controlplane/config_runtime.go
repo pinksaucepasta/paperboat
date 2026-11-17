@@ -4,55 +4,18 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"time"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/config"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
+	"github.com/pinksaucepasta/paperboat/shared/configsync"
 )
 
 var ErrConfigRuntimeInvalid = errors.New("config runtime request is invalid")
 
-type ConfigRuntimePolicy struct {
-	Format                  string        `json:"format"`
-	Revision                string        `json:"revision"`
-	ManifestContract        string        `json:"manifest_contract"`
-	ManifestMaxBytes        int           `json:"manifest_max_bytes"`
-	ManifestMaxLines        int           `json:"manifest_max_lines"`
-	ManifestMaxPatternBytes int           `json:"manifest_max_pattern_bytes"`
-	MaxFileBytes            int64         `json:"max_file_bytes"`
-	MaxBatchBytes           int64         `json:"max_batch_bytes"`
-	Debounce                time.Duration `json:"debounce"`
-	MinimumPushInterval     time.Duration `json:"minimum_push_interval"`
-	MaximumDirtyDelay       time.Duration `json:"maximum_dirty_delay"`
-	RemotePollInterval      time.Duration `json:"remote_poll_interval"`
-	RetryLimit              int           `json:"retry_limit"`
-	ShutdownFlushTimeout    time.Duration `json:"shutdown_flush_timeout"`
-	SummaryLimit            int           `json:"summary_limit"`
-}
+type ConfigRuntimePolicy = configsync.RuntimePolicy
 
-type ConfigRuntimeDescriptor struct {
-	PathRules             []ConfigPathRule          `json:"path_rules"`
-	RepositoryBindings    []ConfigRepositoryBinding `json:"repository_bindings"`
-	ConfigurationRevision string                    `json:"configuration_revision"`
-	AssignmentVersion     int64                     `json:"assignment_version"`
-	WriteMode             string                    `json:"write_mode"`
-	Mode                  string                    `json:"mode"`
-	RepositoryID          string                    `json:"repository_id"`
-	PullRepositoryID      string                    `json:"pull_repository_id,omitempty"`
-	PushRepositoryID      string                    `json:"push_repository_id,omitempty"`
-	AutomaticUpdates      bool                      `json:"automatic_updates"`
-	ApprovedPullRevision  string                    `json:"approved_pull_revision,omitempty"`
-	AssignmentID          string                    `json:"assignment_id"`
-	EnvironmentID         string                    `json:"environment_id"`
-	MachineID             string                    `json:"machine_id"`
-	// MachineAlias selects the shared file's [machine.<name>] section.
-	MachineAlias           string              `json:"machine_alias"`
-	InstallationGeneration int64               `json:"installation_generation"`
-	SyncRevisionFloor      int64               `json:"sync_revision_floor"`
-	WarningRevision        string              `json:"warning_revision"`
-	Policy                 ConfigRuntimePolicy `json:"policy"`
-}
+type ConfigRuntimeDescriptor = configsync.RuntimeDescriptor
 
 type ConfigRuntimeService struct {
 	store  *db.DB
@@ -101,7 +64,7 @@ func (s *ConfigRuntimeService) Get(ctx context.Context, identityToken, credentia
 		return ConfigRuntimeDescriptor{}, err
 	}
 	return ConfigRuntimeDescriptor{
-		WriteMode: s.policy.Mode, Mode: assignment.Mode, PathRules: ConfigAssignmentRules(assignment.PathRules), RepositoryBindings: ConfigAssignmentBindings(assignment.RepositoryBindings), AssignmentVersion: assignment.Version, ConfigurationRevision: assignment.ConfigurationRevision,
+		WriteMode: s.policy.Mode, Mode: configsync.AssignmentMode(assignment.Mode), PathRules: ConfigAssignmentRules(assignment.PathRules), RepositoryBindings: ConfigAssignmentBindings(assignment.RepositoryBindings), AssignmentVersion: assignment.Version, ConfigurationRevision: assignment.ConfigurationRevision,
 		RepositoryID: statusRepositoryID(assignment), PullRepositoryID: pullRepositoryID(assignment), PushRepositoryID: pushRepositoryID(assignment),
 		AutomaticUpdates: assignment.AutomaticUpdates, ApprovedPullRevision: nullStringValue(assignment.ApprovedPullRevision),
 		AssignmentID: holder.AssignmentID, EnvironmentID: holder.EnvironmentID,

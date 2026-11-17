@@ -47,7 +47,7 @@ func validateRuntimeDescriptor(descriptor RuntimeDescriptor, credential Credenti
 		policy.ShutdownFlushTimeout < time.Second || policy.ShutdownFlushTimeout > 10*time.Minute ||
 		policy.SummaryLimit < 1 || policy.SummaryLimit > 1000 ||
 		policy.ManifestContract != ManifestContractVersion ||
-		!validManifestLimits(policy.ManifestLimits()) {
+		!validManifestLimits(manifestLimits(policy)) {
 		return ErrPolicyInvalid
 	}
 	for _, root := range policy.AbsoluteRuntimeExclusionRoots {

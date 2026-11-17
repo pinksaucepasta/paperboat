@@ -7,21 +7,19 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+
+	"github.com/pinksaucepasta/paperboat/shared/configsync"
 )
 
 var ErrBaselineInvalid = errors.New("invalid config sync baseline")
 
-type AssignmentMode string
+type AssignmentMode = configsync.AssignmentMode
 
 const (
-	ModePullOnly      AssignmentMode = "pull_only"
-	ModePushOnly      AssignmentMode = "push_only"
-	ModeBidirectional AssignmentMode = "bidirectional"
+	ModePullOnly      = configsync.ModePullOnly
+	ModePushOnly      = configsync.ModePushOnly
+	ModeBidirectional = configsync.ModeBidirectional
 )
-
-func (m AssignmentMode) Valid() bool {
-	return m == ModePullOnly || m == ModePushOnly || m == ModeBidirectional
-}
 
 type ReconcilePlan struct {
 	PublishUpdates []string
