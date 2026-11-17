@@ -330,9 +330,9 @@ func TestTelemetryObserverDrainsBeforeReporterAdmissionCloses(t *testing.T) {
 	})
 	ref := supportreport.NewReference()
 	if _, err := events.Record(sharedtelemetry.EventInput{
-		At: time.Now().UTC(), Severity: sharedtelemetry.SeverityInfo, Component: health.DimensionService,
-		Name: "http_billing", Code: "shutdown_probe", Outcome: sharedtelemetry.OutcomeSuccess,
-		Message: "Operation completed.", CorrelationID: ref, Retry: health.RetryNone,
+		At: time.Now().UTC(), Severity: sharedtelemetry.SeverityError, Component: health.DimensionService,
+		Name: "http_billing", Code: "shutdown_probe", Outcome: sharedtelemetry.OutcomeFailed,
+		Message: "Operation failed.", CorrelationID: ref, Retry: health.RetryNone,
 	}); err != nil {
 		t.Fatal(err)
 	}
