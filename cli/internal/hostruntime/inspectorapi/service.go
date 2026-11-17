@@ -26,6 +26,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/cli/internal/inspector"
+	"github.com/pinksaucepasta/paperboat/shared/boundedread"
 )
 
 const (
@@ -371,8 +372,8 @@ func decodeStrict(body io.Reader, out any) error {
 	if body == nil {
 		return ErrInvalid
 	}
-	raw, err := io.ReadAll(io.LimitReader(body, maxRequestBytes+1))
-	if err != nil || int64(len(raw)) > maxRequestBytes {
+	raw, err := boundedread.All(body, maxRequestBytes)
+	if err != nil {
 		return ErrInvalid
 	}
 	if len(bytes.TrimSpace(raw)) == 0 {

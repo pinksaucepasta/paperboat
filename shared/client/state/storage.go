@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+
+	"github.com/pinksaucepasta/paperboat/shared/boundedread"
 )
 
 const MaxSessionBytes = 2 << 20
@@ -71,12 +73,12 @@ func (s *Directory) Load() (Session, error) {
 	if err = validatePrivate(file); err != nil {
 		return Session{}, err
 	}
-	raw, err := io.ReadAll(io.LimitReader(file, MaxSessionBytes+1))
+	raw, err := boundedread.All(file, MaxSessionBytes)
+	if errors.Is(err, boundedread.ErrTooLarge) {
+		return Session{}, errors.New("SDK session state exceeds its size limit")
+	}
 	if err != nil {
 		return Session{}, err
-	}
-	if len(raw) > MaxSessionBytes {
-		return Session{}, errors.New("SDK session state exceeds its size limit")
 	}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()

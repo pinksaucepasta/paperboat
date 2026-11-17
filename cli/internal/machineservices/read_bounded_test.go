@@ -10,6 +10,9 @@ import (
 	"testing/iotest"
 )
 
+// readBufferBytes mirrors boundedread's first buffer so the cases straddle it.
+const readBufferBytes = 64 << 10
+
 // readBounded returns exactly what a reader holds up to the limit, reads in large steps, and refuses one byte over.
 func TestReadBoundedKeepsItsLimitAndErrors(t *testing.T) {
 	for _, size := range []int{0, 1, readBufferBytes - 1, readBufferBytes, readBufferBytes + 1, 3*readBufferBytes + 7} {

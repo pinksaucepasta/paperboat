@@ -20,6 +20,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/atomicfile"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/releaseindex"
+	"github.com/pinksaucepasta/paperboat/shared/boundedread"
 	"github.com/theupdateframework/go-tuf/v2/metadata"
 	"github.com/theupdateframework/go-tuf/v2/metadata/config"
 	"github.com/theupdateframework/go-tuf/v2/metadata/fetcher"
@@ -217,14 +218,11 @@ func readBoundedRegular(path string, limit int64) ([]byte, error) {
 	if err != nil || !os.SameFile(info, opened) {
 		return nil, ErrArtifactMismatch
 	}
-	b, err := io.ReadAll(io.LimitReader(f, limit+1))
-	if err != nil {
-		return nil, err
-	}
-	if int64(len(b)) > limit {
+	b, err := boundedread.All(f, limit)
+	if errors.Is(err, boundedread.ErrTooLarge) {
 		return nil, ErrArtifactMismatch
 	}
-	return b, nil
+	return b, err
 }
 
 // ExportUpdateBundle writes an untrusted transport container around unchanged

@@ -7,8 +7,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/shared/boundedread"
 	"github.com/pinksaucepasta/paperboat/shared/supportref"
-	"io"
 	"net/http"
 	"strings"
 )
@@ -140,9 +140,12 @@ func Call(ctx context.Context, baseURL, method, path string, body any, bearer st
 		}
 		return nil
 	}
-	raw, readErr := io.ReadAll(io.LimitReader(resp.Body, MaxResponseBytes+1))
+	raw, readErr := boundedread.All(resp.Body, MaxResponseBytes)
 	closeErr := resp.Body.Close()
-	tooLarge := len(raw) > MaxResponseBytes
+	tooLarge := errors.Is(readErr, boundedread.ErrTooLarge)
+	if tooLarge {
+		readErr = nil
+	}
 	var env Envelope
 	var decodeErr error
 	if readErr == nil && !tooLarge {

@@ -20,6 +20,7 @@ import (
 	"path/filepath"
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/releasepolicy"
+	"github.com/pinksaucepasta/paperboat/shared/boundedread"
 )
 
 const MaxDeferralBytes int64 = 64 << 10
@@ -379,26 +380,24 @@ func readBounded(ctx context.Context, reader io.Reader, maximum int64) ([]byte, 
 	if maximum <= 0 || maximum > MaxDeferralBytes {
 		return nil, ErrInvalidStore
 	}
-	buffer := make([]byte, 0, minInt64(maximum, 4096))
-	chunk := make([]byte, 4096)
-	for {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		read, err := reader.Read(chunk)
-		if read > 0 {
-			if int64(len(buffer))+int64(read) > maximum {
-				return nil, ErrRecordTooLarge
-			}
-			buffer = append(buffer, chunk[:read]...)
-		}
-		if err == io.EOF {
-			return buffer, nil
-		}
-		if err != nil {
-			return nil, err
-		}
+	body, err := boundedread.All(contextReader{ctx, reader}, maximum)
+	if errors.Is(err, boundedread.ErrTooLarge) {
+		return nil, ErrRecordTooLarge
 	}
+	return body, err
+}
+
+// contextReader stops a read of a stalled record when its context ends.
+type contextReader struct {
+	ctx    context.Context
+	reader io.Reader
+}
+
+func (r contextReader) Read(p []byte) (int, error) {
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return r.reader.Read(p)
 }
 
 func writeBounded(ctx context.Context, writer io.Writer, body []byte) error {
@@ -457,11 +456,4 @@ func validateRecordInfo(path string, info os.FileInfo) error {
 
 func sameFile(left, right os.FileInfo) bool {
 	return left != nil && right != nil && os.SameFile(left, right) && left.Size() == right.Size() && left.ModTime().Equal(right.ModTime()) && left.Mode().Perm() == right.Mode().Perm()
-}
-
-func minInt64(value, maximum int64) int {
-	if value < maximum {
-		return int(value)
-	}
-	return int(maximum)
 }

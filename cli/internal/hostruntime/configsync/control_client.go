@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/errorreport"
+	"github.com/pinksaucepasta/paperboat/shared/boundedread"
 	"github.com/pinksaucepasta/paperboat/shared/httptransport"
 	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 )
@@ -785,12 +786,12 @@ func (c *ControlClient) request(ctx context.Context, path string, body []byte, i
 }
 
 func decodeBoundedJSON(reader io.Reader, target any) error {
-	data, err := io.ReadAll(io.LimitReader(reader, maxControlResponseBytes+1))
+	data, err := boundedread.All(reader, maxControlResponseBytes)
+	if errors.Is(err, boundedread.ErrTooLarge) {
+		return ErrControlClientInvalid
+	}
 	if err != nil {
 		return err
-	}
-	if len(data) > maxControlResponseBytes {
-		return ErrControlClientInvalid
 	}
 	// The server may add response fields; older workers must keep syncing.
 	if err := wirejson.Decode(data, target); err != nil {

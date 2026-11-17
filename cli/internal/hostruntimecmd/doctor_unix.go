@@ -25,6 +25,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hostinstall"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hostservice"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/runtimeport"
+	"github.com/pinksaucepasta/paperboat/shared/boundedread"
 )
 
 type doctorCheck struct {
@@ -291,12 +292,12 @@ func decodeStrictFile(path string, limit int64, target any) (resultErr error) {
 		return runtimeFailure("opening runtime state file failed", err)
 	}
 	defer func() { resultErr = withCleanup("closing runtime state file failed", resultErr, file.Close()) }()
-	body, err := io.ReadAll(io.LimitReader(file, limit+1))
+	body, err := boundedread.All(file, limit)
+	if errors.Is(err, boundedread.ErrTooLarge) {
+		return runtimeFailure("runtime state file exceeded its limit")
+	}
 	if err != nil {
 		return runtimeFailure("reading runtime state file failed", err)
-	}
-	if int64(len(body)) > limit {
-		return runtimeFailure("runtime state file exceeded its limit")
 	}
 	decoder := json.NewDecoder(bytes.NewReader(body))
 	decoder.DisallowUnknownFields()

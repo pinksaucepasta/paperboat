@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/releasepolicy"
+	"github.com/pinksaucepasta/paperboat/shared/boundedread"
 )
 
 const (
@@ -626,13 +627,16 @@ func readRegularFile(path string, max int64) ([]byte, error) {
 	if err != nil {
 		return nil, fileFailure("release file could not be opened safely", ErrUnsafePath, err)
 	}
-	body, err := io.ReadAll(io.LimitReader(file, max+1))
+	body, err := boundedread.All(file, max)
 	changed, changeErr := regularFileChanged(file, info)
 	closeErr := file.Close()
+	if errors.Is(err, boundedread.ErrTooLarge) {
+		return nil, ErrUnsafePath
+	}
 	if err != nil || changeErr != nil || closeErr != nil {
 		return nil, fileFailure("release file could not be read safely", ErrUnsafePath, err, changeErr, closeErr)
 	}
-	if int64(len(body)) != info.Size() || int64(len(body)) > max || changed {
+	if int64(len(body)) != info.Size() || changed {
 		return nil, ErrUnsafePath
 	}
 	return body, nil
