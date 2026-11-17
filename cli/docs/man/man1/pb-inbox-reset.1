@@ -2,7 +2,7 @@
 .TH "PB-INBOX-RESET" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
 
 .SH NAME
-pb-inbox-reset -
+pb-inbox-reset - Restore the default Inbox directory
 
 
 .SH SYNOPSIS
@@ -10,10 +10,9 @@ pb-inbox-reset -
 
 
 .SH DESCRIPTION
-Restore ~/Paperboat/Inbox as the local receiving directory for future files. The account's team request acceptance policy and already delivered files are unchanged.
-
-.PP
-The Paperboat Inbox receives verified files and exact team requests. Files remain until removed by the user. The receiving path is a local machine setting; team request acceptance is an account policy. A sender manages outgoing batches with pb send.
+Restore the default receiving directory, ~/Paperboat/Inbox, for future files. Files already
+delivered stay where they are, and the account's team request policy is unchanged. Use
+pb inbox set to choose another directory.
 
 .PP
 JSON output is supported with --json.
@@ -25,6 +24,7 @@ JSON output is supported with --json.
 
 .PP
 \fB--json\fP[=false]
+	print JSON
 
 
 .SH OPTIONS INHERITED FROM PARENT COMMANDS
@@ -42,6 +42,12 @@ JSON output is supported with --json.
 .PP
 \fB--workspace\fP=""
 	resource workspace selector: personal or a team slug
+
+
+.SH EXAMPLE
+.EX
+  pb inbox reset
+.EE
 
 
 .SH SEE ALSO

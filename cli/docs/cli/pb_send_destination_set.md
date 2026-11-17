@@ -4,16 +4,20 @@ Set the default transfer destination
 
 ### Synopsis
 
-Set the default transfer destination
-
-Save one enrolled machine as the default recipient for future sends. A command's explicit --to selection takes precedence over this local default.
-
-Send publishes a batch to a machine's Paperboat Inbox. Completion means the receiver verified and recorded the files; status and cancel act on a transfer ID. A default destination can be set separately, while --to chooses one for the current send.
+Save a machine, by name or ID, as the default destination for pb send: account-wide, or for
+one terminal session with --session. The machine is looked up first, so a wrong name is refused.
 
 JSON output is supported with --json.
 
 ```
 pb send destination set <machine> [flags]
+```
+
+### Examples
+
+```
+  pb send destination set laptop
+  pb send destination set laptop --session S123
 ```
 
 ### Options

@@ -4,16 +4,19 @@ Clear the default transfer destination
 
 ### Synopsis
 
-Clear the default transfer destination
-
-Remove the saved default recipient for future sends. Existing transfers and received files are unaffected; a later send must specify --to or set another default.
-
-Send publishes a batch to a machine's Paperboat Inbox. Completion means the receiver verified and recorded the files; status and cancel act on a transfer ID. A default destination can be set separately, while --to chooses one for the current send.
+Clear the saved default send destination, account-wide or for one --session. Transfers
+already made and files already received are unaffected; later sends need --to again.
 
 JSON output is supported with --json.
 
 ```
 pb send destination clear [flags]
+```
+
+### Examples
+
+```
+  pb send destination clear
 ```
 
 ### Options

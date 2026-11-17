@@ -4,14 +4,24 @@ List and replay terminal recordings
 
 ### Synopsis
 
-List and replay terminal recordings
-
-List the terminal recordings you may see (your own, or a team's), start or stop recording a session you are attached to, and replay or export one from the machine that recorded it. Each replay is audited first; the recording key opens with your unlocked vault on this computer.
+List, replay and export terminal recordings, and start or stop recording a session you are
+attached to. Team recordings are made on the recorded machine and stay there, encrypted for the
+team; the team's bucket can hold an archived copy. Replay and export are audited by Paperboat
+before any data moves, travel over the end-to-end encrypted machine connection, and are
+decrypted on your computer with your unlocked ENV vault (pb env unlock).
 
 With --json, this command group lists its available commands.
 
 ```
 pb recordings [flags]
+```
+
+### Examples
+
+```
+  pb recordings list
+  pb recordings play rec_abc123 --speed 2
+  pb recordings export rec_abc123 -o session.cast
 ```
 
 ### Options

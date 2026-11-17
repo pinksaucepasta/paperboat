@@ -4,16 +4,21 @@ Show the default transfer destination
 
 ### Synopsis
 
-Show the default transfer destination
-
-Show the saved default machine for outgoing sends. This setting does not affect the Inbox receiving directory and can be overridden for one send with --to.
-
-Send publishes a batch to a machine's Paperboat Inbox. Completion means the receiver verified and recorded the files; status and cancel act on a transfer ID. A default destination can be set separately, while --to chooses one for the current send.
+Show the saved default machine for pb send, or with --session the destination saved for one
+terminal session. --to on a single send overrides it. This setting only chooses where your
+sends go; it does not change any Inbox directory.
 
 JSON output is supported with --json.
 
 ```
 pb send destination [flags]
+```
+
+### Examples
+
+```
+  pb send destination
+  pb send destination --session S123 --json
 ```
 
 ### Options

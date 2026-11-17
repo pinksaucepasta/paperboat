@@ -10,13 +10,11 @@ pb-recordings-list - List the recordings you may see
 
 
 .SH DESCRIPTION
-List the recordings you may see
-
-.PP
-List a team's terminal recordings you may see: admins see all of them, other members those they may replay. Each row shows the recording ID, machine, start time, length, why it started and whether the machine still holds it.
-
-.PP
-Team terminal recordings are made on the recorded machine and stay there, encrypted to the team recording key. Replay is audited by Paperboat before any bytes move, then streams over the end-to-end encrypted machine connection; your unlocked vault opens the key locally.
+List recordings you may replay, one per line: ID, machine, start time, length (or
+"recording" while it runs), trigger and state. Team admins see all of a team's recordings;
+other members see the ones they may replay. --team defaults to the active workspace (in
+Personal, your own); --machine limits the list to one machine ID. The list stops at --limit
+unless you pass --all.
 
 .PP
 JSON output is supported with --json.
@@ -62,6 +60,14 @@ JSON output is supported with --json.
 .PP
 \fB--workspace\fP=""
 	resource workspace selector: personal or a team slug
+
+
+.SH EXAMPLE
+.EX
+  pb recordings list
+  pb recordings list --team acme --machine m_abc123
+  pb recordings list --json
+.EE
 
 
 .SH SEE ALSO

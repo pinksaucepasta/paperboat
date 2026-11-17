@@ -2,7 +2,7 @@
 .TH "PB-INBOX-SET" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
 
 .SH NAME
-pb-inbox-set -
+pb-inbox-set - Set this machine's Inbox directory
 
 
 .SH SYNOPSIS
@@ -10,10 +10,10 @@ pb-inbox-set -
 
 
 .SH DESCRIPTION
-Set an explicit local directory for future received files. The command configures the receiving side; it does not move already delivered files.
-
-.PP
-The Paperboat Inbox receives verified files and exact team requests. Files remain until removed by the user. The receiving path is a local machine setting; team request acceptance is an account policy. A sender manages outgoing batches with pb send.
+Set the directory received files are written to. Give a full path on this computer, written
+the way this computer writes paths; ~ at the start means your home directory. A relative path is
+refused. The directory is created if it does not exist and must be writable only by you.
+Files already delivered stay where they are.
 
 .PP
 JSON output is supported with --json.
@@ -25,6 +25,7 @@ JSON output is supported with --json.
 
 .PP
 \fB--json\fP[=false]
+	print JSON
 
 
 .SH OPTIONS INHERITED FROM PARENT COMMANDS
@@ -42,6 +43,13 @@ JSON output is supported with --json.
 .PP
 \fB--workspace\fP=""
 	resource workspace selector: personal or a team slug
+
+
+.SH EXAMPLE
+.EX
+  pb inbox set ~/Inbox
+  pb inbox set /srv/incoming --json
+.EE
 
 
 .SH SEE ALSO

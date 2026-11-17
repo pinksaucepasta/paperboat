@@ -10,13 +10,10 @@ pb-inbox-requests - List team file requests
 
 
 .SH DESCRIPTION
-List team file requests
-
-.PP
-List pending team file requests and their identities for review. Use approve or decline with the exact request ID and current generation.
-
-.PP
-The Paperboat Inbox receives verified files and exact team requests. Files remain until removed by the user. The receiving path is a local machine setting; team request acceptance is an account policy. A sender manages outgoing batches with pb send.
+List team file requests, one per line: request ID, sender account, number of files,
+status and expiry. A request is a sender asking to deliver an exact set of files; approve or
+decline it by its request ID. Filter with --owner, --q and --state; the list stops at --limit
+unless you pass --all.
 
 .PP
 JSON output is supported with --json.
@@ -32,6 +29,7 @@ JSON output is supported with --json.
 
 .PP
 \fB--json\fP[=false]
+	print JSON
 
 .PP
 \fB--limit\fP=50
@@ -65,6 +63,13 @@ JSON output is supported with --json.
 .PP
 \fB--workspace\fP=""
 	resource workspace selector: personal or a team slug
+
+
+.SH EXAMPLE
+.EX
+  pb inbox requests
+  pb inbox requests --state pending --json
+.EE
 
 
 .SH SEE ALSO

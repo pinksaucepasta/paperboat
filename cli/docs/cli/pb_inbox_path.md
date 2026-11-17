@@ -1,12 +1,11 @@
 ## pb inbox path
 
-
+Show this machine's Inbox directory
 
 ### Synopsis
 
-Print the current local Inbox directory used for received files. This is a receiver setting; it does not choose a destination for outgoing sends.
-
-The Paperboat Inbox receives verified files and exact team requests. Files remain until removed by the user. The receiving path is a local machine setting; team request acceptance is an account policy. A sender manages outgoing batches with pb send.
+Print the directory on this machine where received files are written. It is a setting of
+this machine only and has nothing to do with where your own sends go.
 
 JSON output is supported with --json.
 
@@ -14,11 +13,18 @@ JSON output is supported with --json.
 pb inbox path [flags]
 ```
 
+### Examples
+
+```
+  pb inbox path
+  pb inbox path --json
+```
+
 ### Options
 
 ```
   -h, --help   help for path
-      --json   
+      --json   print JSON
 ```
 
 ### Options inherited from parent commands

@@ -4,16 +4,23 @@ Write a recording as an asciicast v2 file
 
 ### Synopsis
 
-Write a recording as an asciicast v2 file
-
-Write one recording as an asciicast v2 file that standard players read. The machine sends it encrypted and your unlocked vault decrypts it here; Paperboat records the export as a replay first.
-
-Team terminal recordings are made on the recorded machine and stay there, encrypted to the team recording key. Replay is audited by Paperboat before any bytes move, then streams over the end-to-end encrypted machine connection; your unlocked vault opens the key locally.
+Write one recording as an asciicast v2 file that standard players read. -o names the file;
+without it the recording goes to standard output. The file is created readable by you only and
+an existing file is never overwritten; a partial file is removed if the export fails. Like a
+replay, the export is audited and needs your unlocked ENV vault. --archive reads the archived
+copy in the team bucket instead of asking the machine.
 
 This command does not support --json output; it rejects that mode before execution. Use --help --json for structured command help.
 
 ```
 pb recordings export <recording-id> [flags]
+```
+
+### Examples
+
+```
+  pb recordings export rec_abc123 -o session.cast
+  pb recordings export rec_abc123 --archive > session.cast
 ```
 
 ### Options

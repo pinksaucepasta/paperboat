@@ -4,11 +4,12 @@ Approve an exact team file request
 
 ### Synopsis
 
-Approve an exact team file request
+Approve one pending team file request. The sender can then deliver exactly the files in the
+request, no others. File names are checked against this computer's rules first, and a request
+this system cannot store is refused before it is approved.
 
-Approve one exact pending team file request at its expected generation. The approved sender can deliver only the requested batch; review request details before accepting.
-
-The Paperboat Inbox receives verified files and exact team requests. Files remain until removed by the user. The receiving path is a local machine setting; team request acceptance is an account policy. A sender manages outgoing batches with pb send.
+--generation is optional: without it the command uses the request's current generation. Pass it
+to approve only if the request has not changed since you looked at it.
 
 JSON output is supported with --json.
 
@@ -16,12 +17,19 @@ JSON output is supported with --json.
 pb inbox approve <request-id> [flags]
 ```
 
+### Examples
+
+```
+  pb inbox requests
+  pb inbox approve request_abc123
+```
+
 ### Options
 
 ```
-      --generation uint   
+      --generation uint   expected request generation (default: the request's current one)
   -h, --help              help for approve
-      --json              
+      --json              print JSON
 ```
 
 ### Options inherited from parent commands

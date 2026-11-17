@@ -4,16 +4,25 @@ Start recording the terminal session you are attached to
 
 ### Synopsis
 
-Start recording the terminal session you are attached to
+Start recording the terminal session that a pb connect on this computer is attached to.
+Everyone attached sees a REC mark while it records. The session ID is optional; name it when
+you are attached to more than one session.
 
-Start recording the terminal session a pb connect on this computer is attached to, as your account. Everyone attached sees REC. The team decides who may: anyone with terminal access, or admins only.
-
-Team terminal recordings are made on the recorded machine and stay there, encrypted to the team recording key. Replay is audited by Paperboat before any bytes move, then streams over the end-to-end encrypted machine connection; your unlocked vault opens the key locally.
+Only admins start recordings (on a personal machine, its owner). The machine needs a recording
+key (set up in the console under Terminals > Recordings) and a team also needs the Teams plan;
+a refusal says which condition is missing.
 
 JSON output is supported with --json.
 
 ```
 pb recordings start [session-id] [flags]
+```
+
+### Examples
+
+```
+  pb recordings start
+  pb recordings start S123 --json
 ```
 
 ### Options

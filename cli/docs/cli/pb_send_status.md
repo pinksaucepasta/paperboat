@@ -4,11 +4,9 @@ Inspect a file transfer
 
 ### Synopsis
 
-Inspect a file transfer
-
-Inspect one outgoing batch's delivery progress and receipt by transfer ID. --on selects the machine when needed; successful publication is distinct from final receiver verification.
-
-Send publishes a batch to a machine's Paperboat Inbox. Completion means the receiver verified and recorded the files; status and cancel act on a transfer ID. A default destination can be set separately, while --to chooses one for the current send.
+Show one outgoing transfer: its delivery progress and receipt. --on is required: name the
+machine the files were sent to. Delivered to the receiver is not the same as verified by it;
+only the receiver's verified receipt means done.
 
 JSON output is supported with --json.
 
@@ -16,12 +14,19 @@ JSON output is supported with --json.
 pb send status <transfer-id> [flags]
 ```
 
+### Examples
+
+```
+  pb send status transfer_abc --on laptop
+  pb send status transfer_abc --on laptop --json
+```
+
 ### Options
 
 ```
   -h, --help             help for status
       --json             print JSON
-      --on string        destination machine name or ID
+      --on string        machine the files were sent to, by name or ID (required)
       --session string   terminal session ID for destination context
 ```
 

@@ -4,16 +4,22 @@ List file transfers
 
 ### Synopsis
 
-List file transfers
-
-List outgoing transfer batches, optionally limited by machine, terminal session, or result count. Use a returned transfer ID with status or cancel.
-
-Send publishes a batch to a machine's Paperboat Inbox. Completion means the receiver verified and recorded the files; status and cancel act on a transfer ID. A default destination can be set separately, while --to chooses one for the current send.
+List outgoing transfers to one machine. --on is required: name the machine the
+files were sent to. Filter with --q (file name or transfer ID), --state and --session; page
+with --limit (default 50) and --offset. Use a listed transfer ID with status or cancel. For
+sends to this computer the history is read from the local Inbox.
 
 JSON output is supported with --json.
 
 ```
 pb send list [flags]
+```
+
+### Examples
+
+```
+  pb send list --on laptop
+  pb send list --on laptop --state failed --json
 ```
 
 ### Options
@@ -23,7 +29,7 @@ pb send list [flags]
       --json             print JSON
       --limit int        maximum transfers to return (default 50)
       --offset int       continue at a transfer history offset
-      --on string        destination machine name or ID
+      --on string        machine the files were sent to, by name or ID (required)
       --q string         filter by file basename or transfer ID
       --session string   terminal session ID for destination context
       --state string     filter by transfer state

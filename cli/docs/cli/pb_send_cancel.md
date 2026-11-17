@@ -4,11 +4,9 @@ Cancel a file transfer batch
 
 ### Synopsis
 
-Cancel a file transfer batch
-
-Cancel an outgoing transfer by its exact transfer ID, optionally selecting a machine with --on. Cancellation reports the resulting batch state; already delivered files are not silently deleted.
-
-Send publishes a batch to a machine's Paperboat Inbox. Completion means the receiver verified and recorded the files; status and cancel act on a transfer ID. A default destination can be set separately, while --to chooses one for the current send.
+Cancel one outgoing transfer batch by its transfer ID. --on is required: name the machine
+the files were sent to. The command prints the batch's resulting state; files that were already
+delivered are not deleted.
 
 JSON output is supported with --json.
 
@@ -16,12 +14,18 @@ JSON output is supported with --json.
 pb send cancel <transfer-id> [flags]
 ```
 
+### Examples
+
+```
+  pb send cancel transfer_abc --on laptop
+```
+
 ### Options
 
 ```
   -h, --help             help for cancel
       --json             print JSON
-      --on string        destination machine name or ID
+      --on string        machine the files were sent to, by name or ID (required)
       --session string   terminal session ID for destination context
 ```
 

@@ -10,10 +10,11 @@ pb-inbox - Manage the Paperboat Inbox
 
 
 .SH DESCRIPTION
-Manage the Paperboat Inbox
-
-.PP
-Inspect or set the local receiving directory, the account's team request acceptance policy, and pending team file requests. Approve or decline an exact request by ID; outgoing transfers are sent and managed under pb send.
+Manage this machine's Paperboat Inbox, where files sent to it arrive. Three settings and one
+queue live here: the local directory received files are written to (path, set, reset), the
+account's rule for team file requests (policy), and the team file requests waiting for your
+decision (requests, approve, decline). Files stay in the Inbox until you remove them. Sending
+is pb send.
 
 .PP
 With --json, this command group lists its available commands.
@@ -43,6 +44,14 @@ With --json, this command group lists its available commands.
 .PP
 \fB--workspace\fP=""
 	resource workspace selector: personal or a team slug
+
+
+.SH EXAMPLE
+.EX
+  pb inbox path
+  pb inbox requests
+  pb inbox policy automatic
+.EE
 
 
 .SH SEE ALSO

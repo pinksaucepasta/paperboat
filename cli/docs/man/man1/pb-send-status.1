@@ -10,13 +10,9 @@ pb-send-status - Inspect a file transfer
 
 
 .SH DESCRIPTION
-Inspect a file transfer
-
-.PP
-Inspect one outgoing batch's delivery progress and receipt by transfer ID. --on selects the machine when needed; successful publication is distinct from final receiver verification.
-
-.PP
-Send publishes a batch to a machine's Paperboat Inbox. Completion means the receiver verified and recorded the files; status and cancel act on a transfer ID. A default destination can be set separately, while --to chooses one for the current send.
+Show one outgoing transfer: its delivery progress and receipt. --on is required: name the
+machine the files were sent to. Delivered to the receiver is not the same as verified by it;
+only the receiver's verified receipt means done.
 
 .PP
 JSON output is supported with --json.
@@ -32,7 +28,7 @@ JSON output is supported with --json.
 
 .PP
 \fB--on\fP=""
-	destination machine name or ID
+	machine the files were sent to, by name or ID (required)
 
 .PP
 \fB--session\fP=""
@@ -54,6 +50,13 @@ JSON output is supported with --json.
 .PP
 \fB--workspace\fP=""
 	resource workspace selector: personal or a team slug
+
+
+.SH EXAMPLE
+.EX
+  pb send status transfer_abc --on laptop
+  pb send status transfer_abc --on laptop --json
+.EE
 
 
 .SH SEE ALSO

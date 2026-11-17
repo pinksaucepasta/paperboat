@@ -4,11 +4,9 @@ Decline an exact team file request
 
 ### Synopsis
 
-Decline an exact team file request
-
-Reject one exact pending team file request at its expected generation. The sender receives a decline rather than an implicit timeout.
-
-The Paperboat Inbox receives verified files and exact team requests. Files remain until removed by the user. The receiving path is a local machine setting; team request acceptance is an account policy. A sender manages outgoing batches with pb send.
+Decline one pending team file request. The sender is told it was declined and cannot
+deliver those files. --generation is optional: without it the command uses the request's
+current generation.
 
 JSON output is supported with --json.
 
@@ -16,12 +14,19 @@ JSON output is supported with --json.
 pb inbox decline <request-id> [flags]
 ```
 
+### Examples
+
+```
+  pb inbox decline request_abc123
+  pb inbox decline request_abc123 --json
+```
+
 ### Options
 
 ```
-      --generation uint   
+      --generation uint   expected request generation (default: the request's current one)
   -h, --help              help for decline
-      --json              
+      --json              print JSON
 ```
 
 ### Options inherited from parent commands

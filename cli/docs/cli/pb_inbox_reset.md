@@ -1,12 +1,12 @@
 ## pb inbox reset
 
-
+Restore the default Inbox directory
 
 ### Synopsis
 
-Restore ~/Paperboat/Inbox as the local receiving directory for future files. The account's team request acceptance policy and already delivered files are unchanged.
-
-The Paperboat Inbox receives verified files and exact team requests. Files remain until removed by the user. The receiving path is a local machine setting; team request acceptance is an account policy. A sender manages outgoing batches with pb send.
+Restore the default receiving directory, ~/Paperboat/Inbox, for future files. Files already
+delivered stay where they are, and the account's team request policy is unchanged. Use
+pb inbox set to choose another directory.
 
 JSON output is supported with --json.
 
@@ -14,11 +14,17 @@ JSON output is supported with --json.
 pb inbox reset [flags]
 ```
 
+### Examples
+
+```
+  pb inbox reset
+```
+
 ### Options
 
 ```
   -h, --help   help for reset
-      --json   
+      --json   print JSON
 ```
 
 ### Options inherited from parent commands

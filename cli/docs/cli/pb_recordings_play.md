@@ -4,16 +4,24 @@ Replay a recording in this terminal
 
 ### Synopsis
 
-Replay a recording in this terminal
-
-Replay one recording in this terminal at its recorded pace, with long pauses shortened by --idle-limit. Paperboat records the replay before the machine sends the encrypted recording; your unlocked vault decrypts it here.
-
-Team terminal recordings are made on the recorded machine and stay there, encrypted to the team recording key. Replay is audited by Paperboat before any bytes move, then streams over the end-to-end encrypted machine connection; your unlocked vault opens the key locally.
+Replay one recording in this terminal at its recorded pace. --speed scales the pace and
+--idle-limit caps any pause between frames (default 2s); both must be positive. The replay
+is audited and needs your ENV vault unlocked; if it is locked the command says to run
+pb env unlock. --archive replays the archived copy in the team bucket instead of asking the
+machine, which is useful when the machine is offline.
 
 This command does not support --json output; it rejects that mode before execution. Use --help --json for structured command help.
 
 ```
 pb recordings play <recording-id> [flags]
+```
+
+### Examples
+
+```
+  pb recordings play rec_abc123
+  pb recordings play rec_abc123 --speed 2 --idle-limit 1s
+  pb recordings play rec_abc123 --archive
 ```
 
 ### Options

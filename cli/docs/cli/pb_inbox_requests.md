@@ -4,11 +4,10 @@ List team file requests
 
 ### Synopsis
 
-List team file requests
-
-List pending team file requests and their identities for review. Use approve or decline with the exact request ID and current generation.
-
-The Paperboat Inbox receives verified files and exact team requests. Files remain until removed by the user. The receiving path is a local machine setting; team request acceptance is an account policy. A sender manages outgoing batches with pb send.
+List team file requests, one per line: request ID, sender account, number of files,
+status and expiry. A request is a sender asking to deliver an exact set of files; approve or
+decline it by its request ID. Filter with --owner, --q and --state; the list stops at --limit
+unless you pass --all.
 
 JSON output is supported with --json.
 
@@ -16,12 +15,19 @@ JSON output is supported with --json.
 pb inbox requests [flags]
 ```
 
+### Examples
+
+```
+  pb inbox requests
+  pb inbox requests --state pending --json
+```
+
 ### Options
 
 ```
       --all            show every item, up to 10000
   -h, --help           help for requests
-      --json           
+      --json           print JSON
       --limit int      show at most this many items (1-200) (default 50)
       --owner string   filter owner: mine, shared, or an authorized account ID
       --q string       filter by resource name or ID

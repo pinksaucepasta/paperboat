@@ -4,16 +4,21 @@ Stop the recording of the terminal session you are attached to
 
 ### Synopsis
 
-Stop the recording of the terminal session you are attached to
-
-Stop the recording of the terminal session a pb connect on this computer is attached to. You may stop a recording you started; a recording a team rule started stops only for an admin.
-
-Team terminal recordings are made on the recorded machine and stay there, encrypted to the team recording key. Replay is audited by Paperboat before any bytes move, then streams over the end-to-end encrypted machine connection; your unlocked vault opens the key locally.
+Stop recording the terminal session that a pb connect on this computer is attached to. The
+session ID is optional; name it when you are attached to more than one session. A recording a
+rule started can only be stopped by an admin.
 
 JSON output is supported with --json.
 
 ```
 pb recordings stop [session-id] [flags]
+```
+
+### Examples
+
+```
+  pb recordings stop
+  pb recordings stop S123 --json
 ```
 
 ### Options

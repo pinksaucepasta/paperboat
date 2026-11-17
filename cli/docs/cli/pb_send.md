@@ -4,14 +4,33 @@ Send files or folders to a machine's Paperboat Inbox
 
 ### Synopsis
 
-Send files or folders to a machine's Paperboat Inbox
+Send files or folders to a machine's Paperboat Inbox. Name the machine with --to. Without
+--to the command uses the saved default (pb send destination set) or, inside a terminal
+session, that session's destination; it refuses to guess when more than one machine fits.
 
-Send one or more paths to the selected machine's Inbox. The command succeeds only after receiver verification and a durable receipt; --session associates the transfer with a terminal session. Sending to the computer you are on copies the files into its own Inbox without a transfer. A folder arrives as a folder of the same name, empty folders included; links and special files inside it are not sent, and the command lists them.
+A folder arrives as a folder of the same name. Links and special files are not sent and are
+listed as skipped. The destination must be enrolled, not revoked, and accept incoming files
+(pb machine capabilities --file-receive). Sending to this computer copies into its own Inbox.
+
+On a team that approves incoming files, the command waits for the recipient's decision and
+exits with an error if it is declined. The command succeeds only once the receiver has verified
+and recorded the files. --unlimited lifts the size limit by sending only directly between the
+two machines or through your own relay, and waits while neither is available; without it your
+account's transfer mode applies.
 
 JSON output is supported with --json.
 
 ```
 pb send <path>... --to <machine> [flags]
+```
+
+### Examples
+
+```
+  pb send report.pdf --to db
+  pb send ./dist --to laptop
+  pb send notes.txt
+  pb send big.iso --to db --unlimited
 ```
 
 ### Options
