@@ -25,6 +25,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/admission"
 	"github.com/pinksaucepasta/paperboat/shared/edgelimits"
 	"github.com/pinksaucepasta/paperboat/shared/jwks"
+	"github.com/pinksaucepasta/paperboat/shared/routeobservation"
 
 	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
 
@@ -188,27 +189,9 @@ type RevokedConnectorGeneration struct {
 	Generation  uint64 `json:"connector_generation"`
 }
 
-type RouteObservation struct {
-	RouteID                    string `json:"route_id"`
-	AssignmentID               string `json:"assignment_id,omitempty"`
-	AssignmentGeneration       int64  `json:"assignment_generation,omitempty"`
-	RouteRevision              int64  `json:"route_revision"`
-	EdgeNodeID                 string `json:"edge_node_id"`
-	EdgeProcessEpoch           string `json:"edge_process_epoch,omitempty"`
-	ConnectorID                string `json:"connector_id,omitempty"`
-	HostID                     string `json:"host_id,omitempty"`
-	ConnectorGeneration        int64  `json:"connector_generation"`
-	ConnectorSessionID         string `json:"connector_session_id,omitempty"`
-	ConnectorProcessGeneration int64  `json:"connector_process_generation,omitempty"`
-	ConfigGeneration           int64  `json:"config_generation,omitempty"`
-	ConfigContentHash          string `json:"config_content_hash,omitempty"`
-	AccessMode                 string `json:"access_mode,omitempty"`
-	ViewerPolicyGeneration     int64  `json:"viewer_policy_generation,omitempty"`
-	State                      string `json:"state,omitempty"`
-	ObservedState              string `json:"observed_state,omitempty"`
-}
+type RouteObservation = routeobservation.RouteObservation
 
-func (o RouteObservation) canonicalObservedState() (string, error) {
+func canonicalObservedState(o RouteObservation) (string, error) {
 	state := strings.TrimSpace(o.State)
 	observed := strings.TrimSpace(o.ObservedState)
 	if state != "" && observed != "" && state != observed {
@@ -262,7 +245,7 @@ func (s *EdgeService) ObserveRoutes(ctx context.Context, nodeID string, observat
 					return invalidUsage("edge.go:242")
 				}
 				observedCanonical[observation.AssignmentID] = struct{}{}
-				state, err := observation.canonicalObservedState()
+				state, err := canonicalObservedState(observation)
 				if err != nil {
 					return err
 				}

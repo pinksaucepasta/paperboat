@@ -27,7 +27,7 @@ func TestCanonicalRouteObservationRequiresOneExplicitState(t *testing.T) {
 		{name: "conflicting aliases", state: "ready", observed: "degraded", wantErr: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			got, err := (RouteObservation{State: test.state, ObservedState: test.observed}).canonicalObservedState()
+			got, err := canonicalObservedState(RouteObservation{State: test.state, ObservedState: test.observed})
 			if test.wantErr {
 				if !errors.Is(err, ErrInvalidUsageReport) {
 					t.Fatalf("error = %v, want ErrInvalidUsageReport", err)

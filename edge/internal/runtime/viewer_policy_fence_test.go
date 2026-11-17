@@ -83,7 +83,7 @@ func TestRouteWorkerFencesChangedViewerPolicyWithoutDroppingOtherRoutes(t *testi
 	seenDetached := false
 	for _, observation := range observer.observations {
 		if observation.AssignmentID == public.AssignmentID && observation.ObservedState == "detached" {
-			seenDetached = observation.AccessMode == "public" && observation.ViewerPolicyGeneration == public.ViewerPolicyGeneration
+			seenDetached = observation.AccessMode == "public" && uint64(observation.ViewerPolicyGeneration) == public.ViewerPolicyGeneration
 		}
 	}
 	if !seenDetached {
@@ -107,7 +107,7 @@ func TestRouteWorkerFencesChangedViewerPolicyWithoutDroppingOtherRoutes(t *testi
 	seenReady := false
 	for _, observation := range observer.observations {
 		if observation.AssignmentID == restricted.AssignmentID && observation.ObservedState == "ready" {
-			seenReady = observation.AccessMode == "team" && observation.ViewerPolicyGeneration == restricted.ViewerPolicyGeneration
+			seenReady = observation.AccessMode == "team" && uint64(observation.ViewerPolicyGeneration) == restricted.ViewerPolicyGeneration
 		}
 	}
 	if !seenReady {

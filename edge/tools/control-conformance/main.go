@@ -89,7 +89,7 @@ func run(ctx context.Context, path string, output io.Writer) error {
 	if err != nil || len(routes) != 1 || routes[0].RouteID != value.RouteID || routes[0].Revision != value.RouteRevision || routes[0].Environment != value.EnvironmentID || routes[0].Generation != value.ConnectorGeneration || routes[0].NodeID != value.NodeID {
 		return fmt.Errorf("route mismatch: %w", errors.Join(errInvalid, err))
 	}
-	if err := client.ObserveRoutes(ctx, value.NodeID, []control.RouteObservation{{RouteID: value.RouteID, RouteRevision: value.RouteRevision, EdgeNodeID: value.NodeID, ConnectorGeneration: value.ConnectorGeneration}}); err != nil {
+	if err := client.ObserveRoutes(ctx, value.NodeID, []control.RouteObservation{{RouteID: value.RouteID, RouteRevision: int64(value.RouteRevision), EdgeNodeID: value.NodeID, ConnectorGeneration: int64(value.ConnectorGeneration)}}); err != nil {
 		return fmt.Errorf("observe route: %w", err)
 	}
 	revocations, err := client.Revocations(ctx)

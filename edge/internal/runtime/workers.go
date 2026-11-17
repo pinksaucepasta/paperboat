@@ -1058,7 +1058,7 @@ func (w *RouteWorker) reconcileRoutes(ctx context.Context) (result error) {
 	}
 	observations := make([]control.RouteObservation, 0, len(legacyDesired))
 	for _, assignment := range legacyDesired {
-		observations = append(observations, control.RouteObservation{RouteID: assignment.RouteID, RouteRevision: assignment.Revision, EdgeNodeID: assignment.NodeID, ConnectorGeneration: assignment.Generation})
+		observations = append(observations, control.RouteObservation{RouteID: assignment.RouteID, RouteRevision: int64(assignment.Revision), EdgeNodeID: assignment.NodeID, ConnectorGeneration: int64(assignment.Generation)})
 	}
 	return w.Observer.ObserveRoutes(ctx, w.NodeID, observations)
 }
@@ -1490,13 +1490,13 @@ func canonicalRouteObservations(assignments []control.RouteAssignment, observedS
 	result := make([]control.RouteObservation, 0, len(assignments))
 	for _, assignment := range assignments {
 		result = append(result, control.RouteObservation{
-			RouteID: assignment.RouteID, RouteRevision: assignment.Revision, AssignmentID: assignment.AssignmentID,
-			AssignmentGeneration: assignment.AssignmentGeneration, EdgeNodeID: assignment.NodeID,
+			RouteID: assignment.RouteID, RouteRevision: int64(assignment.Revision), AssignmentID: assignment.AssignmentID,
+			AssignmentGeneration: int64(assignment.AssignmentGeneration), EdgeNodeID: assignment.NodeID,
 			EdgeProcessEpoch: assignment.EdgeProcessEpoch,
-			ConnectorID:      assignment.ConnectorID, HostID: assignment.HostID, ConnectorGeneration: assignment.Generation,
-			ConnectorSessionID: assignment.ConnectorSessionID, ConnectorProcessGeneration: assignment.ConnectorProcessGeneration,
-			ConfigGeneration: assignment.ConfigGeneration, ConfigContentHash: assignment.ConfigContentHash,
-			AccessMode: assignment.AccessMode, ViewerPolicyGeneration: assignment.ViewerPolicyGeneration,
+			ConnectorID:      assignment.ConnectorID, HostID: assignment.HostID, ConnectorGeneration: int64(assignment.Generation),
+			ConnectorSessionID: assignment.ConnectorSessionID, ConnectorProcessGeneration: int64(assignment.ConnectorProcessGeneration),
+			ConfigGeneration: int64(assignment.ConfigGeneration), ConfigContentHash: assignment.ConfigContentHash,
+			AccessMode: assignment.AccessMode, ViewerPolicyGeneration: int64(assignment.ViewerPolicyGeneration),
 			State: observedState, ObservedState: observedState,
 		})
 	}

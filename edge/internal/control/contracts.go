@@ -17,6 +17,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/edge/internal/admission"
 	"github.com/pinksaucepasta/paperboat/edge/internal/usage"
 	"github.com/pinksaucepasta/paperboat/shared/edgelimits"
+	"github.com/pinksaucepasta/paperboat/shared/routeobservation"
 	"github.com/pinksaucepasta/paperboat/shared/tunnelrouterules"
 )
 
@@ -131,25 +132,7 @@ type RouteSnapshotSource interface {
 	DesiredRouteSnapshot(context.Context, string, string) (RouteSnapshot, error)
 }
 
-type RouteObservation struct {
-	RouteID                    string `json:"route_id"`
-	RouteRevision              uint64 `json:"route_revision"`
-	AssignmentID               string `json:"assignment_id,omitempty"`
-	AssignmentGeneration       uint64 `json:"assignment_generation,omitempty"`
-	EdgeNodeID                 string `json:"edge_node_id"`
-	EdgeProcessEpoch           string `json:"edge_process_epoch,omitempty"`
-	ConnectorID                string `json:"connector_id,omitempty"`
-	HostID                     string `json:"host_id,omitempty"`
-	ConnectorGeneration        uint64 `json:"connector_generation"`
-	ConnectorSessionID         string `json:"connector_session_id,omitempty"`
-	ConnectorProcessGeneration uint64 `json:"connector_process_generation,omitempty"`
-	ConfigGeneration           uint64 `json:"config_generation,omitempty"`
-	ConfigContentHash          string `json:"config_content_hash,omitempty"`
-	AccessMode                 string `json:"access_mode,omitempty"`
-	ViewerPolicyGeneration     uint64 `json:"viewer_policy_generation,omitempty"`
-	State                      string `json:"state,omitempty"`
-	ObservedState              string `json:"observed_state,omitempty"`
-}
+type RouteObservation = routeobservation.RouteObservation
 
 type RouteObserver interface {
 	ObserveRoutes(context.Context, string, []RouteObservation) error
