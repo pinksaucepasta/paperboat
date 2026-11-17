@@ -676,6 +676,7 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 	var browserAccess *edgehttp.BrowserAccess
 	if deployment.BrowserAccessEnabled {
 		browserAccess = &edgehttp.BrowserAccess{Authority: &control.BrowserAccessClient{HTTP: client, NodeID: cfg.NodeID, ProcessEpoch: processEpoch}, LoginOrigin: deployment.BrowserLoginOrigin}
+		publicTCP.SetBrowserAccess(browserAccess)
 	}
 	inspectorAccess := &edgehttp.InspectorEdgeAccess{OnFailure: func(ctx context.Context, cause error) {
 		if reporting.SupportReference(ctx) == "" {

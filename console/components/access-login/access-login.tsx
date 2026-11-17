@@ -10,7 +10,8 @@ import { Button } from "@/components/ui/button"
 
 /**
  * POST /v1/browser-access/issue: a one-use handoff for the preview or tunnel host. `denied`: the account
- * has no access; the handoff is posted all the same and the edge answers 403 with its own page.
+ * has no access; the handoff is posted all the same and the edge answers the same 404 page as for a name that does not
+ * exist.
  */
 type Issue = Data<"/v1/browser-access/issue", "post">
 

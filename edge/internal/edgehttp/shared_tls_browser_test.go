@@ -666,6 +666,67 @@ func TestSharedTLSUnknownNameCompletesTLSWithNotFoundPageOnly(t *testing.T) {
 	}
 }
 
+// A signed-in visitor of a name that completes TLS only on the unknown-name page gets the page a denied private app
+// gets (the same link), and a signed-out page load starts sign-in like any name behind it.
+func TestSharedTLSUnknownNameIsTheDeniedPage(t *testing.T) {
+	match, _ := browserTestMatch()
+	clientTLS, serverTLS, _, _, _ := task24Certificates(t, match.Host)
+	clientTLS.ServerName = match.Host
+	raw, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry, _ := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 4})
+	defer registry.Close()
+	shared, err := NewSharedTLSListener(raw, &quotaDeniedAuthority{}, registry, func(string) bool { return false }, 4, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	shared.ServeUnknownNamesWithPage(serverTLS)
+	shared.browser = &BrowserAccess{Authority: &browserAuthorityTest{}, LoginOrigin: "https://login.example.test"}
+	server := &http.Server{TLSConfig: serverTLS, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { t.Error("an unknown name reached the HTTPS handler") })}
+	defer server.Close()
+	go server.ServeTLS(shared, "", "")
+	client := &http.Client{Timeout: 5 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }, Transport: &http.Transport{TLSClientConfig: clientTLS, DisableKeepAlives: true, DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, "tcp", raw.Addr().String())
+	}}}
+	get := func(signedIn bool) (*http.Response, string) {
+		request, _ := http.NewRequest("GET", "https://"+match.Host+"/", nil)
+		request.Header.Set("Sec-Fetch-Mode", "navigate")
+		request.Header.Set("Sec-Fetch-Dest", "document")
+		if signedIn {
+			request.AddCookie(&http.Cookie{Name: browserEdgeCookie, Value: "token"})
+		}
+		response, err := client.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer response.Body.Close()
+		body, _ := io.ReadAll(response.Body)
+		return response, string(body)
+	}
+	response, body := get(true)
+	if response.StatusCode != 404 || !strings.Contains(body, notFoundMessage) || !strings.Contains(body, "Use a different account") || response.Header.Get("Set-Cookie") == "" {
+		t.Fatalf("signed-in: %d %q", response.StatusCode, body)
+	}
+	// The sign-in callback runs on this page too: a refused handoff ends on the same 404 with the link.
+	callback, _ := http.NewRequest("POST", "https://"+match.Host+browserCallbackPath, strings.NewReader("transaction_id=bat_test&handoff=bah_denied"))
+	callback.Header.Set("Origin", "https://login.example.test")
+	callback.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	callback.AddCookie(&http.Cookie{Name: browserHandoffCookie, Value: "bat_test.nonce"})
+	if response, err = client.Do(callback); err != nil {
+		t.Fatal(err)
+	}
+	callbackBody, _ := io.ReadAll(response.Body)
+	response.Body.Close()
+	if response.StatusCode != 404 || !strings.Contains(string(callbackBody), "Use a different account") {
+		t.Fatalf("callback: %d %q", response.StatusCode, callbackBody)
+	}
+	if response, _ = get(false); response.StatusCode != 303 || !strings.HasPrefix(response.Header.Get("Location"), "https://login.example.test/.paperboat/access/login?transaction_id=") {
+		t.Fatalf("signed-out: %d %q", response.StatusCode, response.Header.Get("Location"))
+	}
+}
+
 // Right after a handover takeover a host re-attaches its carrier late (the test host 2026-11-09: 404s for up to 6 s):
 // its name is held until admitted, and answered not-found only when the grace ends or nothing is held for it.
 func TestSharedTLSNameAdmittedAfterTakeoverIsServedNotAnswered404(t *testing.T) {

@@ -59,6 +59,15 @@ type PublicTCPListeners struct {
 	listeners   map[string]*publicTCPListener
 	connections chan struct{}
 	sharedTLS   *SharedTLSListener
+	browser     *BrowserAccess
+}
+
+// SetBrowserAccess makes the unknown-name page of listeners wrapped afterwards the one the HTTP handler answers
+// (nil keeps the plain not-found page). Call it before WrapTLSListener.
+func (p *PublicTCPListeners) SetBrowserAccess(b *BrowserAccess) {
+	p.mu.Lock()
+	p.browser = b
+	p.mu.Unlock()
 }
 
 type publicTCPListener struct {
@@ -377,6 +386,7 @@ func (p *PublicTCPListeners) WrapTLSListener(listener net.Listener, httpsHostnam
 		p.observe(ctx, phase, cause)
 	})
 	shared.ServeUnknownNamesWithPage(p.cfg.UnknownNameTLS)
+	shared.browser = p.browser
 	shared.routeGrace = p.cfg.RouteGrace
 	shared.holdableName = p.cfg.HoldableName
 	p.sharedTLS = shared

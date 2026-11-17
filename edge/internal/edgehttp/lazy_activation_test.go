@@ -193,8 +193,9 @@ func TestSignedInUnknownHostLooksLikeDeniedPrivateApp(t *testing.T) {
 	if err := registry.ApplyGeneration(context.Background(), 1, []route.RouteRule{rule}, func(context.Context, []route.RouteRule) error { return nil }, time.Second); err != nil {
 		t.Fatal(err)
 	}
+	controlErr := control.ErrBrowserDenied
 	authority := &lazyAuthorityFixture{activate: func(context.Context, control.BrowserAuthorizeRequest) (connectorprotocol.IngressDecision, error) {
-		return connectorprotocol.IngressDecision{}, control.ErrBrowserDenied
+		return connectorprotocol.IngressDecision{}, controlErr
 	}}
 	authority.decision, authority.failure = decision, control.ErrBrowserDenied
 	p := newLazyPolicy(t, registry, authority, http.HandlerFunc(func(http.ResponseWriter, *http.Request) { t.Fatal("reached the app") }))
@@ -230,11 +231,42 @@ func TestSignedInUnknownHostLooksLikeDeniedPrivateApp(t *testing.T) {
 	}
 	// A request the edge refuses before asking control (another site's subresource) and a machine token's page load are
 	// answered alike for every name too.
+	// Malformed credentials, a session control does not know, and an anonymous request that is no page load: the same
+	// for every name.
+	machine := func(r *http.Request) { r.Header.Set("Paperboat-Access-Token", "machine-token") }
+	dupCookie := func(r *http.Request) {
+		r.Header.Add("Cookie", "__Host-pb-x=1; __Host-pb-x=2")
+	}
+	badToken := func(r *http.Request) { r.Header.Set("Paperboat-Access-Token", " padded") }
+	noPage := func(r *http.Request) { r.Header.Del("Sec-Fetch-Mode"); r.Header.Del("Sec-Fetch-Dest") }
+	for name, tc := range map[string]struct {
+		signedIn bool
+		edit     func(*http.Request)
+		err      error
+	}{
+		"duplicate cookie":   {true, dupCookie, control.ErrBrowserDenied},
+		"malformed token":    {true, badToken, control.ErrBrowserDenied},
+		"anonymous no page":  {false, noPage, control.ErrBrowserDenied},
+		"unknown session":    {true, nil, control.ErrBrowserUnauthenticated},
+		"unknown machine id": {true, machine, control.ErrBrowserUnauthenticated},
+	} {
+		authority.failure, controlErr = tc.err, tc.err
+		edit := tc.edit
+		if edit == nil {
+			edit = func(*http.Request) {}
+		}
+		want := shape(get(denied, tc.signedIn, edit))
+		for _, host := range []string{lazy, "nothing.custom.example.test"} {
+			if got := shape(get(host, tc.signedIn, edit)); got != want {
+				t.Fatalf("%s, %s differs from a private app:\n%s\n%s", name, host, got, want)
+			}
+		}
+	}
+	authority.failure, controlErr = control.ErrBrowserDenied, control.ErrBrowserDenied
 	crossSite := func(r *http.Request) {
 		r.Header.Set("Sec-Fetch-Site", "cross-site")
 		r.Header.Set("Sec-Fetch-Mode", "cors")
 	}
-	machine := func(r *http.Request) { r.Header.Set("Paperboat-Access-Token", "machine-token") }
 	for name, edit := range map[string]func(*http.Request){"cross-site": crossSite, "machine token": machine} {
 		want := shape(get(denied, true, edit))
 		for _, host := range []string{lazy, "nothing.custom.example.test"} {

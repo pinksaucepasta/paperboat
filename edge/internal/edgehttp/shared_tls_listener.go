@@ -52,6 +52,8 @@ type SharedTLSListener struct {
 	// unknown completes TLS for a name with no live decision (a stopped or unknown preview) and answers
 	// only the branded "does not exist" page; it never reaches the HTTPS handler or an origin.
 	unknown *tls.Config
+	// browser, when set, makes the unknown-name page the same one the HTTP handler answers (see serveNotFoundPage).
+	browser *BrowserAccess
 	// routeGrace and held: right after a handover takeover a name whose host has not re-attached its carrier
 	// yet is held until it is admitted or the grace ends, instead of answering the not-found page at once (the test host
 	// 2026-11-09: 404s up to 6 s after every edge swap). Only a name that can be ours is held (holdableName: under
@@ -329,7 +331,7 @@ func (l *SharedTLSListener) dispatch(conn net.Conn) {
 			authorizedHTTPS = true
 		} else {
 			if l.unknown != nil {
-				serveNotFoundPage(replay, l.unknown)
+				serveNotFoundPage(replay, l.unknown, l.browser, host)
 			}
 			return
 		}
@@ -467,11 +469,17 @@ func (l *SharedTLSListener) observe(phase string, err error) {
 }
 
 // serveNotFoundPage answers one connection with the branded not-found page over TLS, bounded to 10 s.
-// The handshake fails for a name the fallback certificate does not cover.
-func serveNotFoundPage(conn net.Conn, config *tls.Config) {
+// The handshake fails for a name the fallback certificate does not cover. With browser access on, the page is the
+// one a name behind sign-in gets (BrowserAccess.unknownName), so nothing on it tells the two apart. host is the
+// TLS server name, never the request's Host header.
+func serveNotFoundPage(conn net.Conn, config *tls.Config, browser *BrowserAccess, host string) {
 	_ = conn.SetDeadline(time.Now().Add(10 * time.Second))
-	server := &http.Server{ReadHeaderTimeout: 5 * time.Second, Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	server := &http.Server{ReadHeaderTimeout: 5 * time.Second, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Connection", "close")
+		if browser != nil {
+			browser.unknownName(w, r, host)
+			return
+		}
 		writeErrorPage(w, http.StatusNotFound, notFoundMessage)
 	})}
 	server.SetKeepAlivesEnabled(false)

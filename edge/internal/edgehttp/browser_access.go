@@ -196,6 +196,48 @@ func (b *BrowserAccess) notFoundPage(ctx context.Context, w http.ResponseWriter,
 	writeErrorPageLink(w, http.StatusNotFound, "", "Use a different account", b.LoginOrigin+"/.paperboat/access/login?switch=1&transaction_id="+url.QueryEscape(tx.TransactionID))
 }
 
+// invalidCredentials answers 401 for a request whose own cookies or access token are malformed, before any name is looked
+// up, so every name (existing or not) gets the same answer. It reports whether it answered.
+func invalidCredentials(w http.ResponseWriter, r *http.Request) bool {
+	values := r.Header.Values("Paperboat-Access-Token")
+	switch {
+	case browserReservedDuplicates(r):
+		writeErrorPage(w, 401, "Your Paperboat sign-in cookie is not valid. Clear cookies for this site and open the address again.")
+	case len(values) > 0 && (len(values) != 1 || values[0] == "" || strings.TrimSpace(values[0]) != values[0]):
+		writeErrorPage(w, 401, "The access credential sent with this request is not valid. Create a new one and try again.")
+	default:
+		return false
+	}
+	return true
+}
+
+// unknownName answers a request for a name that no route serves and that never reached the HTTP handler (the shared TLS
+// listener's unknown-name page). It gives what Policy gives such a name: a signed-out page load starts sign-in, a
+// signed-in one gets notFoundPage, anything else the plain 404, and the sign-in callback still runs. Keep it in step
+// with the unknown-host branch of Policy.ServeHTTP, except lazy preview activation: a name only reaches the HTTP
+// handler (and so Activate) once the listener admits it, and a name admitted nowhere never could activate.
+// host (the TLS server name) replaces the Host header, so begin and the callback act on the name that was reached.
+func (b *BrowserAccess) unknownName(w http.ResponseWriter, r *http.Request, host string) {
+	r.Host = host
+	if r.URL.Path == browserCallbackPath {
+		b.callback(w, r)
+		return
+	}
+	if b.validate() && invalidCredentials(w, r) {
+		return
+	}
+	_, hasSession := browserCookie(r, browserEdgeCookie)
+	machine := len(r.Header.Values("Paperboat-Access-Token")) > 0
+	switch {
+	case !hasSession && !machine && b.validate() && browserNavigation(r):
+		b.begin(w, r, host)
+	case hasSession && !machine:
+		b.navigationNotFound(w, r, host)
+	default:
+		writeErrorPage(w, http.StatusNotFound, "")
+	}
+}
+
 // navigationNotFound answers a browser page load with notFoundPage and anything else (fetch, xhr, websocket) with the
 // plain 404, so a script gets no Set-Cookie it cannot use. A machine access token never gets the link either.
 func (b *BrowserAccess) navigationNotFound(w http.ResponseWriter, r *http.Request, host string) {
@@ -228,8 +270,6 @@ func browserError(w http.ResponseWriter, r *http.Request, err error) {
 
 func lazyActivationError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
-	case errors.Is(err, control.ErrBrowserUnauthenticated):
-		writeErrorPage(w, http.StatusUnauthorized, signInMessage)
 	case errors.Is(err, control.ErrLazyGenerationConflict):
 		writeErrorPage(w, http.StatusConflict, "This preview was just updated. Reload the page.")
 	case errors.Is(err, control.ErrLazyCapacity):
@@ -322,21 +362,22 @@ func (b *BrowserAccess) authorize(w http.ResponseWriter, r *http.Request, m rout
 		writeErrorPage(w, 503, "Paperboat could not check your access just now. Wait a moment and reload the page.")
 		return r, func() {}, false
 	}
-	if browserReservedDuplicates(r) {
-		writeErrorPage(w, 401, "Your Paperboat sign-in cookie is not valid. Clear cookies for this site and open the address again.")
+	if invalidCredentials(w, r) {
 		return r, func() {}, false
 	}
 	token, ok := browserCookie(r, browserEdgeCookie)
 	machine := false
 	if values := r.Header.Values("Paperboat-Access-Token"); len(values) > 0 {
-		if len(values) != 1 || values[0] == "" || strings.TrimSpace(values[0]) != values[0] {
-			writeErrorPage(w, 401, "The access credential sent with this request is not valid. Create a new one and try again.")
-			return r, func() {}, false
-		}
 		token, ok, machine = values[0], true, true
 	}
 	if !ok {
-		b.begin(w, r, m.Host)
+		// Only a page load can sign in. Anything else gets what a name that does not exist gets: a 401 here would tell
+		// an anonymous caller which private names exist.
+		if browserNavigation(r) {
+			b.begin(w, r, m.Host)
+		} else {
+			writeErrorPage(w, http.StatusNotFound, "")
+		}
 		return r, func() {}, false
 	}
 	// These checks answer before control is asked, so they answer a name that does not exist alike (404): a 403 here
@@ -369,7 +410,8 @@ func (b *BrowserAccess) authorize(w http.ResponseWriter, r *http.Request, m rout
 	lookup, stop := context.WithTimeout(r.Context(), 2*time.Second)
 	d, err := b.Authority.Authorize(lookup, input)
 	stop()
-	if errors.Is(err, control.ErrBrowserDenied) {
+	// A session control no longer knows (expired, revoked, made up) answers like a denial, as it does for a missing name.
+	if errors.Is(err, control.ErrBrowserDenied) || errors.Is(err, control.ErrBrowserUnauthenticated) {
 		b.navigationNotFound(w, r, m.Host)
 		return r, func() {}, false
 	}

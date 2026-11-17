@@ -664,6 +664,10 @@ func (p *Policy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				writeErrorPage(w, http.StatusServiceUnavailable, previewOwnerOfflineMessage)
 				return
 			}
+			// Malformed cookies or tokens answer before any name is looked up, as they do for a route that exists.
+			if p.config.BrowserAccess.validate() && invalidCredentials(w, r) {
+				return
+			}
 			token, hasSession := browserCookie(r, browserEdgeCookie)
 			machine := false
 			if values := r.Header.Values("Paperboat-Access-Token"); len(values) == 1 && values[0] != "" && strings.TrimSpace(values[0]) == values[0] {
@@ -673,7 +677,7 @@ func (p *Policy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				activate, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 				activationErr := p.config.BrowserAccess.activateLazy(activate, candidateHost, token, machine)
 				cancel()
-				if errors.Is(activationErr, control.ErrBrowserDenied) {
+				if errors.Is(activationErr, control.ErrBrowserDenied) || errors.Is(activationErr, control.ErrBrowserUnauthenticated) {
 					p.config.BrowserAccess.navigationNotFound(w, r, candidateHost)
 					return
 				}
@@ -705,7 +709,7 @@ func (p *Policy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			// A signed-in visitor gets the very page a denied private app gets (navigationNotFound).
-			if hasSession && !machine && !browserReservedDuplicates(r) && p.config.BrowserAccess != nil {
+			if hasSession && !machine && p.config.BrowserAccess != nil {
 				p.config.BrowserAccess.navigationNotFound(w, r, candidateHost)
 				return
 			}
