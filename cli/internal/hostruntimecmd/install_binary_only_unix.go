@@ -47,6 +47,7 @@ func copyExecutable(source, target string) (resultErr error) {
 		return err
 	}
 	defer in.Close()
+	//paperboat:allow-source-policy atomic-replacement owner=hostruntime-install reason=streamed-binary-activation
 	out, err := os.CreateTemp(filepath.Dir(target), ".pb-install-*")
 	if err != nil {
 		return err
@@ -62,5 +63,6 @@ func copyExecutable(source, target string) (resultErr error) {
 	if err := errors.Join(out.Chmod(0o755), out.Sync(), out.Close()); err != nil {
 		return err
 	}
+	//paperboat:allow-source-policy atomic-replacement owner=hostruntime-install reason=streamed-binary-activation
 	return os.Rename(out.Name(), target)
 }

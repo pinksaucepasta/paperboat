@@ -215,6 +215,7 @@ func replaceGuardFile(source, target string) error {
 		}
 		if time.Now().After(deadline) {
 			retired := target + guardRetiredSuffix + strconv.FormatInt(time.Now().UnixNano(), 36)
+			//paperboat:allow-source-policy atomic-replacement owner=machineguard reason=running-image-rename-aside
 			if moveErr := os.Rename(target, retired); moveErr != nil {
 				return errors.Join(err, fmt.Errorf("move the running machine guard executable aside: %w", moveErr))
 			}

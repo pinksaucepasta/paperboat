@@ -23,4 +23,6 @@ func syncRepositoryDirectory(path string) error {
 	defer file.Close()
 	return file.Sync()
 }
+
+//paperboat:allow-source-policy atomic-replacement owner=config-sync reason=git-reference-lock-publication
 func renameRepositoryReference(source, target string) error { return os.Rename(source, target) }

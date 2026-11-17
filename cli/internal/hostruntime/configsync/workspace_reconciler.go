@@ -487,6 +487,7 @@ func (r *PlaintextWorkspaceReconciler) Reconcile(ctx context.Context, repository
 	if len(applyPaths) > 0 {
 		// Retain exactly one bounded, private pre-apply image for deliberate
 		// rollback. A later successful apply atomically replaces it.
+		//paperboat:allow-source-policy atomic-replacement owner=config-sync reason=journal-to-rollback-retention
 		if err := os.Rename(journalPath, filepath.Join(r.stateRoot, "rollback.json")); err != nil {
 			return PreparedPublication{}, err
 		}

@@ -473,6 +473,7 @@ func allowedSuffix(suffix string) string {
 }
 
 func stageReader(ctx context.Context, directory, suffix string, source io.Reader, contentLength int64) (staged StagedInput, retErr error) {
+	//paperboat:allow-source-policy atomic-replacement owner=install-source reason=verified-input-staging
 	temporary, err := os.CreateTemp(directory, "input-*"+suffix)
 	if err != nil {
 		return StagedInput{}, inputFailure(err)

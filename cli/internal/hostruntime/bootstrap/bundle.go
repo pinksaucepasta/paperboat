@@ -271,6 +271,7 @@ func exportUpdateBundle(ctx context.Context, repositoryURL, stateDirectory, outp
 	if err != nil {
 		return releaseindex.Index{}, err
 	}
+	//paperboat:allow-source-policy atomic-replacement owner=release-bootstrap reason=exclusive-verified-bundle-export
 	pending, err := os.CreateTemp(filepath.Dir(outputPath), ".pb-update-")
 	if err != nil {
 		return releaseindex.Index{}, err
@@ -458,6 +459,7 @@ func importUpdateBundle(ctx context.Context, repositoryURL, stateDirectory, bund
 	if err != nil || !os.SameFile(info, opened) {
 		return result, ErrArtifactMismatch
 	}
+	//paperboat:allow-source-policy atomic-replacement owner=release-bootstrap reason=verified-bundle-staging
 	pending, err := os.CreateTemp(destinationDirectory, ".pb-bundle-")
 	if err != nil {
 		return result, err

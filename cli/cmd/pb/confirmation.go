@@ -201,6 +201,7 @@ func confirmMutationWithArgs(command *cobra.Command, scope, impact string, expli
 		return localArgumentError("invalid confirmation code; run the command without --confirm again")
 	}
 	claimed := fmt.Sprintf("%s.used.%d", path, os.Getpid())
+	//paperboat:allow-source-policy atomic-replacement owner=confirmation reason=challenge-claim-transition
 	if err := os.Rename(path, claimed); err != nil {
 		if onlyNotExistCause(err) {
 			return localArgumentError("confirmation code missing or already used; run the command without --confirm again")

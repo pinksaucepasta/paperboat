@@ -45,6 +45,7 @@ func rotateDaemonLog(path string, limit int64, fds ...int) error {
 	if !ok || !info.Mode().IsRegular() || uint64(file.Dev) != uint64(current.Dev) || file.Ino != current.Ino || info.Size() <= limit {
 		return nil
 	}
+	//paperboat:allow-source-policy atomic-replacement owner=localdaemon reason=bounded-log-rotation
 	if err := os.Rename(path, path+".1"); err != nil {
 		return err
 	}

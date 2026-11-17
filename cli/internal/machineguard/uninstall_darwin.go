@@ -329,6 +329,7 @@ func copyDarwinRecoveryExecutable(source, target string) (err error) {
 		return err
 	}
 	defer in.Close()
+	//paperboat:allow-source-policy atomic-replacement owner=machineguard reason=streamed-recovery-executable-staging
 	out, err := os.CreateTemp(filepath.Dir(target), ".paperboat-recovery-")
 	if err != nil {
 		return err
@@ -344,6 +345,7 @@ func copyDarwinRecoveryExecutable(source, target string) (err error) {
 	if err != nil {
 		return err
 	}
+	//paperboat:allow-source-policy atomic-replacement owner=machineguard reason=streamed-recovery-executable-staging
 	return os.Rename(out.Name(), target)
 }
 

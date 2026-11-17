@@ -95,6 +95,7 @@ func teamActivityExportCommand() *cobra.Command {
 			return client.ExportActivity(c.Context(), args[0], format, filters, c.OutOrStdout())
 		}
 		// Write next to the target and rename, so a failed download never leaves a partial file.
+		//paperboat:allow-source-policy atomic-replacement owner=team-business reason=streamed-export-staging
 		tmp, err := os.CreateTemp(dirOf(output), ".pb-audit-*")
 		if err != nil {
 			return fmt.Errorf("create the export file: %w", err)
@@ -109,6 +110,7 @@ func teamActivityExportCommand() *cobra.Command {
 		if err = tmp.Close(); err != nil {
 			return err
 		}
+		//paperboat:allow-source-policy atomic-replacement owner=team-business reason=streamed-export-staging
 		if err = os.Rename(tmp.Name(), output); err != nil {
 			return fmt.Errorf("save the export as %s: %w", output, err)
 		}

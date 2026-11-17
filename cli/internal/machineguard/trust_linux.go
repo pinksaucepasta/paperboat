@@ -72,6 +72,7 @@ func writeLinuxSystemTrustFile(path string, certificatePEM []byte, requiredUID u
 	} else if !os.IsNotExist(err) {
 		return err
 	}
+	//paperboat:allow-source-policy atomic-replacement owner=machineguard reason=exclusive-link-trust-publication
 	temporary, err := os.CreateTemp(filepath.Dir(path), ".paperboat-trust-")
 	if err != nil {
 		return err

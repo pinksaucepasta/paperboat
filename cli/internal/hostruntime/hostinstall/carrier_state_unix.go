@@ -234,6 +234,7 @@ func (s unixCarrierInstallation) Restore(ctx context.Context, body []byte) (resu
 		if err := stageBinary(pin, s.paths.workerNext, source); err != nil {
 			return err
 		}
+		//paperboat:allow-source-policy atomic-replacement owner=host-install reason=verified-binary-activation
 		if err := os.Rename(s.paths.workerNext, s.paths.worker); err != nil {
 			return err
 		}

@@ -225,6 +225,7 @@ type repositoryReadStorage struct {
 }
 
 func (s *repositoryReadStorage) PackfileWriter() (io.WriteCloser, error) {
+	//paperboat:allow-source-policy atomic-replacement owner=config-sync reason=bounded-pack-scratch
 	file, err := os.CreateTemp(s.root, ".bounded-pack-")
 	if err != nil {
 		return nil, err

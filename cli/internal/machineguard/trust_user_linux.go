@@ -870,6 +870,7 @@ func writeLinuxUserTrustState(path string, data []byte, uid uint32, mode os.File
 	} else if !os.IsNotExist(err) {
 		return err
 	}
+	//paperboat:allow-source-policy atomic-replacement owner=machineguard reason=user-owned-trust-preservation
 	temporary, err := os.CreateTemp(filepath.Dir(path), ".trust-*")
 	if err != nil {
 		return err
@@ -885,6 +886,7 @@ func writeLinuxUserTrustState(path string, data []byte, uid uint32, mode os.File
 	if err != nil {
 		return err
 	}
+	//paperboat:allow-source-policy atomic-replacement owner=machineguard reason=user-owned-trust-preservation
 	if err = os.Rename(temporary.Name(), path); err != nil {
 		return err
 	}

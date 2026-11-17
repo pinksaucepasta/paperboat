@@ -332,6 +332,7 @@ func (r *GitRepository) open(ctx context.Context) (accessResult RepositoryAccess
 		if cloneErr != nil {
 			return RepositoryAccess{}, nil, sanitizeGitError(cloneErr)
 		}
+		//paperboat:allow-source-policy atomic-replacement owner=config-sync reason=cloned-directory-publication
 		if err := os.Rename(staging, r.root); err != nil {
 			return RepositoryAccess{}, nil, repositoryUnavailableFailure(err)
 		}

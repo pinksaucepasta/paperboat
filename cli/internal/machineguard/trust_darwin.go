@@ -125,6 +125,7 @@ func writeOwnedTrustState(path string, data []byte, mode os.FileMode) (resultErr
 	} else if !os.IsNotExist(err) {
 		return err
 	}
+	//paperboat:allow-source-policy atomic-replacement owner=machineguard reason=conflicting-trust-preservation
 	temporary, err := os.CreateTemp(filepath.Dir(path), ".trust-*")
 	if err != nil {
 		return err
@@ -148,6 +149,7 @@ func writeOwnedTrustState(path string, data []byte, mode os.FileMode) (resultErr
 	} else if !os.IsNotExist(readErr) {
 		return readErr
 	}
+	//paperboat:allow-source-policy atomic-replacement owner=machineguard reason=conflicting-trust-preservation
 	if err = os.Rename(temporary.Name(), path); err != nil {
 		return err
 	}

@@ -103,6 +103,7 @@ func installDarwin(ctx context.Context, executable string, cfg darwinInstallConf
 		return err
 	}
 	defer source.Close()
+	//paperboat:allow-source-policy atomic-replacement owner=machineguard reason=streamed-helper-binary-staging
 	target, err := os.CreateTemp(filepath.Dir(cfg.HelperPath), ".paperboat-helper-")
 	if err != nil {
 		return err
@@ -166,6 +167,7 @@ func installDarwin(ctx context.Context, executable string, cfg darwinInstallConf
 	if _, err = darwinRun(ctx, "", "/usr/bin/plutil", "-lint", cfg.LaunchPath); err != nil {
 		return err
 	}
+	//paperboat:allow-source-policy atomic-replacement owner=machineguard reason=streamed-helper-binary-staging
 	err = os.Rename(temp, cfg.HelperPath)
 	rollback.record(cfg.HelperPath)
 	if err != nil {

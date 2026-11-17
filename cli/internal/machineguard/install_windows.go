@@ -55,6 +55,7 @@ func installGuard(ctx context.Context, executable, browserDomain string, undo **
 		return err
 	}
 	defer source.Close()
+	//paperboat:allow-source-policy atomic-replacement owner=machineguard reason=streamed-guard-binary-staging
 	target, err := os.CreateTemp(directory, ".pb-*.exe")
 	if err != nil {
 		return err
@@ -236,6 +237,7 @@ func decodeTaskXML(output []byte) string {
 // writeGuardTaskFile writes a task definition as `schtasks /Create /XML` reads it (UTF-16 with a byte order
 // mark) into directory and returns the file; the caller removes it.
 func writeGuardTaskFile(directory, definition string) (string, error) {
+	//paperboat:allow-source-policy atomic-replacement owner=machineguard reason=schtasks-consumed-definition-staging
 	file, err := os.CreateTemp(directory, ".task-*.xml")
 	if err != nil {
 		return "", err

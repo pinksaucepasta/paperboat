@@ -199,6 +199,7 @@ func removeElevationExecutable(path string) error {
 
 func stageWindowsElevationExecutable(sourcePath string) (string, func() error, error) {
 	sweepStaleElevationExecutables(os.TempDir(), time.Now())
+	//paperboat:allow-source-policy atomic-replacement owner=hostruntime-install reason=staged-elevation-execution-copy
 	temporary, err := os.CreateTemp("", elevationExecutablePattern)
 	if err != nil {
 		return "", func() error { return nil }, runtimeFailure("creating the elevation executable failed", err)

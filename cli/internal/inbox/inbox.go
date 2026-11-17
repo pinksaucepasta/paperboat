@@ -663,6 +663,7 @@ func loadJournal(root string) (journal, error) {
 		// Keep it aside (each one under its own name) for diagnosis and start a new one; the cost is that an old transfer replayed later is
 		// delivered again under a new name.
 		path := filepath.Join(root, journalName)
+		//paperboat:allow-source-policy atomic-replacement owner=inbox reason=unreadable-journal-quarantine
 		if err := os.Rename(path, fmt.Sprintf("%s.rejected-%d", path, time.Now().UnixNano())); err != nil {
 			return journal{}, err
 		}

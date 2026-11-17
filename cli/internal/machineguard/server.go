@@ -558,6 +558,7 @@ func (g *guardServer) persist() error {
 	if err != nil {
 		return err
 	}
+	//paperboat:allow-source-policy atomic-replacement owner=machineguard reason=inherited-acl-state-publication
 	file, err := os.CreateTemp(g.cfg.StateDir, ".reservations-")
 	if err != nil {
 		return err

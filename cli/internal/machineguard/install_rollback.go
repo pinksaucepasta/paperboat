@@ -57,6 +57,7 @@ func snapshotGuardFilesValidated(validate func(string, string, os.FileInfo) erro
 			rollback.cleanup()
 			return nil, errors.New("guard installation changed while taking rollback copy")
 		}
+		//paperboat:allow-source-policy atomic-replacement owner=machineguard reason=guard-rollback-snapshot-staging
 		file, err := os.CreateTemp(filepath.Dir(path), ".paperboat-guard-prior-")
 		if err != nil {
 			source.Close()

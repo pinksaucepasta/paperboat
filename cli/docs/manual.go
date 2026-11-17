@@ -95,6 +95,7 @@ func writePage(path string, page []byte) (resultErr error) {
 	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
+	//paperboat:allow-source-policy atomic-replacement owner=manual reason=unfsynced-batch-page-refresh
 	temporary, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*")
 	if err != nil {
 		return err
@@ -113,6 +114,7 @@ func writePage(path string, page []byte) (resultErr error) {
 	if err := temporary.Close(); err != nil {
 		return err
 	}
+	//paperboat:allow-source-policy atomic-replacement owner=manual reason=unfsynced-batch-page-refresh
 	return os.Rename(temporary.Name(), path)
 }
 

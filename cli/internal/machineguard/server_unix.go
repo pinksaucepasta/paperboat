@@ -195,9 +195,12 @@ func listenControl(path string) (controlListener, error) {
 	return unixControlListener{listener}, nil
 }
 
+//paperboat:allow-source-policy atomic-replacement owner=machineguard reason=platform-state-publication
 func replaceStateFile(source, target string) error { return os.Rename(source, target) }
 
 // replaceGuardFile puts an installed guard file in place; only Windows cannot replace a running executable.
+//
+//paperboat:allow-source-policy atomic-replacement owner=machineguard reason=platform-guard-publication
 func replaceGuardFile(source, target string) error { return os.Rename(source, target) }
 func syncDirectory(path string) error {
 	directory, err := os.Open(path)
