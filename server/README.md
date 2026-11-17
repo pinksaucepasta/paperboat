@@ -67,7 +67,7 @@ Billing products are managed in Postgres through the operator billing API, which
 verifies each Stripe price before writing it. Deployments do not import a billing
 catalog file.
 
-Release container tags use `YYYY.MM.DD.X`. Run `tools/release-version.sh next`, create
+Release container tags use `YYYY.MM.DD.X`. Run `tools/release-version.sh next` (repository root), create
 that exact tag without a `v` prefix, and push it.
 
 The server image contains only `paperboat-server`. `PAPERBOAT_RELEASES_ROOT_PATH` is the

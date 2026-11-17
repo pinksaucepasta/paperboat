@@ -49,7 +49,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          ./cli/tools/release-version.sh validate-format "$RELEASE_TAG"
+          ./tools/release-version.sh validate-format "$RELEASE_TAG"
           tag_ref="refs/tags/$RELEASE_TAG"
           source_sha=$(git ls-remote origin "$tag_ref" "$tag_ref^{}" | awk '$2 ~ /\^\{\}$/ { peeled=$1 } $2 !~ /\^\{\}$/ { commit=$1 } END { print peeled ? peeled : commit }')
           test -n "$source_sha"

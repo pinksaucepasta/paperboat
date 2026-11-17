@@ -13,13 +13,13 @@ custom destination overrides remain supported. Previously published artifacts do
 change until a new release is built and installed.
 
 The release workflow does not talk to the Sentry API. After the release is published, an
-operator may run `tools/sentry-release.py release` (with `SENTRY_ORG`, `SENTRY_PROJECT` and
+operator may run `tools/sentry-release.py release` (repository root) (with `SENTRY_ORG`, `SENTRY_PROJECT` and
 `SENTRY_AUTH_TOKEN` or `SENTRY_AUTH_TOKEN_FILE`, plus `--release`, `--repository`, `--commit` and
 `--source-url`) to create and finalize the release in Sentry and associate the repository and exact
 source commit. Use the identifier the binaries embed (`paperboat:<version>` for `pb`).
 
 Artifact publication does not create a Sentry deploy. A rollout owner may run
-`tools/sentry-release.py deploy` only after the rollout's own checks succeed. The
+`tools/sentry-release.py deploy` (repository root) only after the rollout's own checks succeed. The
 tool also requires the deployed service's HTTPS `--readiness-url` to return 200
 and JSON whose `release` field exactly matches the release being recorded.
 

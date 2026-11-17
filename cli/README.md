@@ -364,7 +364,7 @@ Release packaging additionally needs the platform signing and publishing credent
 It is not required for a local development build.
 
 `YYYY.MM.DD.X` tags build and publish the five native assets after their platform checks and
-GitHub API digest verification. Use `tools/release-version.sh next` to generate the next tag;
+GitHub API digest verification. Use `tools/release-version.sh next` (repository root) to generate the next tag;
 tags have no `v` prefix.
 
 Releases contain one complete `pb` asset per released platform and architecture:

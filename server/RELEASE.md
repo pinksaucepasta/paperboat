@@ -5,7 +5,7 @@
 must remain private. Relay and tunnel image publication does not authorize any
 change to the server package visibility.
 
-Use `tools/release-version.sh next` to select a `YYYY.MM.DD.X` tag. Daily sequence
+Use `tools/release-version.sh next` (repository root) to select a `YYYY.MM.DD.X` tag. Daily sequence
 numbers start at zero and are contiguous, and the tagged commit must be contained
 in `main`. The common service workflow refuses to overwrite a version tag,
 publishes that immutable version and moves `latest`, attaches OCI source/revision/
