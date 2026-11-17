@@ -144,6 +144,12 @@ func newCarrierComponentWithTelemetry(
 		identity := server.Identity()
 		durableRegistered := false
 		runtimeAttached := runtimeWorker != nil && len(runtimeWorker.Expected.ForIdentity(identity, time.Now().UTC())) != 0
+		// engine is whether this carrier serves its tunnel routes as the agent's runtime carrier (no ingress decision
+		// preface on public streams). It becomes true when a runtime admission names the carrier, also after it
+		// connected: at a machine update the new worker's carrier reached one edge before its runtime admission, was
+		// fixed as a plain replica, and every public stream got a preface its engine forwarder could not parse (prod
+		// 2026-11-17: durable tunnels 502 "unexpected EOF" on that edge until the worker restarted).
+		engine := runtimeAttached
 		// A runtime carrier serving tunnel routes is an engine replica however its routes were first
 		// attached, including when the engine admissions already named it as it connected.
 		syncDurable := func(now time.Time) error {
@@ -153,6 +159,9 @@ func newCarrierComponentWithTelemetry(
 					durableRegistered = false
 				}
 				return nil
+			}
+			if !engine && runtimeWorker != nil && len(runtimeWorker.Expected.ForIdentity(identity, now)) != 0 {
+				engine = true
 			}
 			publicKey, thumbprint, ok := durableExpected.MachineBinding(identity, now)
 			if !ok {
@@ -170,7 +179,7 @@ func newCarrierComponentWithTelemetry(
 			if len(routeIDs) == 0 {
 				return datacarrier.ErrDurableAdmissionMissing
 			}
-			state := edgehttp.ReplicaState{Ready: true, Generation: identity.Generation, RouteIDs: routeIDs, HealthyRoutes: routeIDs, RouteBindings: routeBindings, FailureDomain: identity.HostID, Latency: time.Nanosecond, Capacity: deployment.NodeCapacity, Engine: runtimeAttached}
+			state := edgehttp.ReplicaState{Ready: true, Generation: identity.Generation, RouteIDs: routeIDs, HealthyRoutes: routeIDs, RouteBindings: routeBindings, FailureDomain: identity.HostID, Latency: time.Nanosecond, Capacity: deployment.NodeCapacity, Engine: engine}
 			if durableRegistered {
 				if err := durableRoutes.UpdateReplicaState(server, state); err != nil {
 					return fmt.Errorf("refresh durable carrier: %w", err)
@@ -221,15 +230,21 @@ func newCarrierComponentWithTelemetry(
 				ticker := time.NewTicker(deployment.ControlInterval)
 				defer ticker.Stop()
 				for {
+					// A runtime admission naming this carrier makes it an engine replica at once, not at the next tick.
+					var runtimeChanged <-chan struct{}
+					if runtimeWorker != nil && !engine {
+						runtimeChanged = runtimeWorker.Expected.Changed()
+					}
 					select {
 					case <-handlerCtx.Done():
 						results <- handlerCtx.Err()
 						return
-					case now := <-ticker.C:
-						if err := syncDurable(now.UTC()); err != nil {
-							results <- err
-							return
-						}
+					case <-ticker.C:
+					case <-runtimeChanged:
+					}
+					if err := syncDurable(time.Now().UTC()); err != nil {
+						results <- err
+						return
 					}
 				}
 			}()

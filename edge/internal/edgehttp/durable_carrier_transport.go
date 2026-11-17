@@ -385,6 +385,22 @@ func (r *DataCarrierRouteRegistry) Len() int {
 	return len(r.byKey)
 }
 
+// EngineReplicas counts the attached carriers that serve their tunnel routes as an agent's runtime carrier.
+func (r *DataCarrierRouteRegistry) EngineReplicas() int {
+	if r == nil {
+		return 0
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	count := 0
+	for _, entry := range r.byKey {
+		if entry.state.Engine {
+			count++
+		}
+	}
+	return count
+}
+
 func carrierRouteIdentityKey(identity datacarrier.Identity) string {
 	return strings.Join([]string{identity.AccountID, identity.HostID, identity.TunnelID, identity.ConnectorID, identity.SessionID, fmt.Sprint(identity.ProcessGeneration), fmt.Sprint(identity.Generation)}, "\x00")
 }

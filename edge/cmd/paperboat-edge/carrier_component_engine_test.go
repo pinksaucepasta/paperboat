@@ -284,4 +284,7 @@ func TestRuntimeRouteAttachesWhenItsAdmissionArrivesAfterTheEngineCarrierConnect
 		t.Fatalf("publish runtime admission: %v", err)
 	}
 	waitDynamicCondition(t, ctx, func() bool { _, ok := runtimeRoutes.Lookup("machine.runtime.example.test"); return ok })
+	// Prod 2026-11-17: the carrier stayed a plain replica, so its public tunnel streams carried an ingress decision
+	// preface the agent's engine forwarder could not parse (502 unexpected EOF until the worker restarted).
+	waitDynamicCondition(t, ctx, func() bool { return routes.EngineReplicas() == 1 })
 }
