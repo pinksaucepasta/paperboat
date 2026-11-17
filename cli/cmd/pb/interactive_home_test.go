@@ -134,6 +134,19 @@ func TestHomeTextResizeAndBack(t *testing.T) {
 	}
 }
 
+// Menus type "q" into their filter, so the viewer one Esc away must not quit on it.
+func TestHomeTextQDoesNotQuit(t *testing.T) {
+	model := homeTextModel{title: "Details", content: "result", view: viewport.New(viewport.WithWidth(80), viewport.WithHeight(20)), width: 80, height: 24}
+	if _, quit := model.Update(tea.KeyPressMsg{Code: 'q', Text: "q"}); quit != nil {
+		t.Fatal("q quit the result viewer")
+	}
+	for _, key := range []tea.KeyPressMsg{{Code: tea.KeyEnter}, {Code: tea.KeyEscape}} {
+		if _, quit := model.Update(key); quit == nil {
+			t.Fatalf("%v no longer leaves the viewer", key)
+		}
+	}
+}
+
 func TestHomeTextFitsTinyTerminal(t *testing.T) {
 	for _, height := range []int{1, 2, 3} {
 		model := homeTextModel{title: "Long title", content: "long result\nnext line", view: viewport.New(viewport.WithWidth(80), viewport.WithHeight(20)), width: 80, height: 24}

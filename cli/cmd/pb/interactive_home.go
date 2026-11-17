@@ -602,11 +602,8 @@ func (m homeTextModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.view.ScrollDown(1)
 			return m, nil
 		}
-		switch msg.String() {
-		case "ctrl+c":
+		if msg.String() == "ctrl+c" {
 			m.interrupted = true
-			return m, tea.Quit
-		case "esc", "q", "enter":
 			return m, tea.Quit
 		}
 	}
