@@ -180,10 +180,10 @@ func TestPrivateAccessSnapshotNeverPublishesPrivateTCPToPACAndTakesARouteOnBothE
 		tcpAdmission.AssignmentID = "assignment_10"
 		fallback := httpAdmission // the same route through the second edge of the account's pair
 		fallback.EdgeNodeID = "edge_02"
-		if err := httpAdmission.validate(now); err != nil {
+		if err := validateAccessorAdmission(httpAdmission, now); err != nil {
 			t.Fatalf("http admission fixture: %v", err)
 		}
-		if err := tcpAdmission.validate(now); err != nil {
+		if err := validateAccessorAdmission(tcpAdmission, now); err != nil {
 			t.Fatalf("tcp admission fixture: %v", err)
 		}
 		body, err := json.Marshal(accessorSnapshot{Schema: connectorprotocol.PrivateAccessSchema, Kind: "private_access_carrier_snapshot", Complete: true, Admissions: []accessorAdmission{httpAdmission, fallback, tcpAdmission}})
@@ -211,6 +211,17 @@ func TestPrivateAccessSnapshotNeverPublishesPrivateTCPToPACAndTakesARouteOnBothE
 	}
 }
 
+// The server admits a private HTTP catch-all route under its stable endpoint hostname (private_access_routes.sql
+// passes match_type through), so a machine must accept it, as the edge and server do.
+func TestAccessorAdmissionAcceptsHTTPCatchAll(t *testing.T) {
+	now := time.Now().UTC()
+	a := validAccessorAdmission(t, now, "http")
+	a.MatchType = "catch_all"
+	if err := validateAccessorAdmission(a, now); err != nil {
+		t.Fatalf("HTTP catch_all admission rejected: %v", err)
+	}
+}
+
 func TestAccessorAdmissionRejectsMalformedWireFields(t *testing.T) {
 	now := time.Now().UTC()
 	for name, mutate := range map[string]func(*accessorAdmission){
@@ -219,7 +230,6 @@ func TestAccessorAdmissionRejectsMalformedWireFields(t *testing.T) {
 		"missing port":   func(a *accessorAdmission) { a.EdgeEndpoints[0] = "h2://edge.example.test" },
 		"zero port":      func(a *accessorAdmission) { a.EdgeEndpoints[0] = "h2://edge.example.test:0" },
 		"unknown match":  func(a *accessorAdmission) { a.MatchType = "recursive" },
-		"http catch all": func(a *accessorAdmission) { a.MatchType = "catch_all" },
 		"missing tunnel name": func(a *accessorAdmission) {
 			a.TunnelName = ""
 		},
@@ -253,7 +263,7 @@ func TestAccessorAdmissionRejectsMalformedWireFields(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			a := validAccessorAdmission(t, now, "http")
 			mutate(&a)
-			if a.validate(now) == nil {
+			if validateAccessorAdmission(a, now) == nil {
 				t.Fatal("malformed admission accepted")
 			}
 		})
@@ -304,7 +314,7 @@ func TestAccessorDiscoveryRejectsAmbiguousURLContentTypeAndDuplicates(t *testing
 		"duplicate":            jsonResponse(accessorSnapshot{Schema: connectorprotocol.PrivateAccessSchema, Kind: "private_access_carrier_snapshot", Complete: true, Admissions: []accessorAdmission{admission, admission}}),
 		"incomplete":           jsonResponse(accessorSnapshot{Schema: connectorprotocol.PrivateAccessSchema, Kind: "private_access_carrier_snapshot", Complete: false, Admissions: []accessorAdmission{admission}}),
 		"stale duplicate name": jsonResponse(accessorSnapshot{Schema: connectorprotocol.PrivateAccessSchema, Kind: "private_access_carrier_snapshot", Complete: true, Admissions: []accessorAdmission{admission, stale}}),
-		"limit plus one":       jsonResponse(accessorSnapshot{Schema: connectorprotocol.PrivateAccessSchema, Kind: "private_access_carrier_snapshot", Complete: true, Admissions: make([]accessorAdmission, privateAccessMaximumAdmissions+1)}),
+		"limit plus one":       jsonResponse(accessorSnapshot{Schema: connectorprotocol.PrivateAccessSchema, Kind: "private_access_carrier_snapshot", Complete: true, Admissions: make([]accessorAdmission, connectorprotocol.MaxPrivateAccessAdmissions+1)}),
 	} {
 		t.Run(name, func(t *testing.T) {
 			client, err := newAccessorDiscoveryClient("https://api.example.test", privateAccessTestAuth{}, privateAccessRoundTripper(func(request *http.Request) (*http.Response, error) { response.Request = request; return response, nil }))

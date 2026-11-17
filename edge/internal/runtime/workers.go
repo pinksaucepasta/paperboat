@@ -732,7 +732,7 @@ func (w *RouteWorker) reconcileAccessor(ctx context.Context) error {
 		}
 		mapped := make([]datacarrier.DurableAdmission, 0, len(values))
 		for _, value := range values {
-			mapped = append(mapped, value.Durable())
+			mapped = append(mapped, control.PrivateAccessCarrierDurable(value))
 		}
 		if err = w.AccessorAdmissions.Replace(mapped, time.Now().UTC()); err != nil {
 			return err

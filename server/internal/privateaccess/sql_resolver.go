@@ -46,7 +46,7 @@ func (r *SQLResolver) ResolvePrivate(ctx context.Context, lookup Lookup) (Bindin
 	if err := lookup.Edge.Validate(); err != nil {
 		return Binding{}, newDenied(ReasonIdentityInvalid)
 	}
-	if err := lookup.Request.Validate(); err != nil {
+	if err := validateRequest(lookup.Request); err != nil {
 		return Binding{}, err
 	}
 	if lookup.AccountID == "" || lookup.AccountID != lookup.Request.AccountID {

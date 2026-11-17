@@ -14,6 +14,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/server/internal/canonicaljson"
 	"github.com/pinksaucepasta/paperboat/server/internal/controlplane"
+	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 )
 
 const GrantPath = "/v1/edge/private-access/grants"
@@ -21,33 +22,9 @@ const GrantPath = "/v1/edge/private-access/grants"
 // GrantIssueRequest deliberately omits account, machine, and session fields.
 // They are derived from the renewable identity proof and never accepted from
 // the request body as authority.
-type GrantIssueRequest struct {
-	ResourceKind         string    `json:"resource_kind"`
-	ResourceID           string    `json:"resource_id"`
-	RouteID              string    `json:"route_id"`
-	Audience             string    `json:"audience"`
-	ExpiresAt            time.Time `json:"expires_at"`
-	Nonce                string    `json:"nonce"`
-	OperationID          string    `json:"operation_id,omitempty"`
-	ConnectorID          string    `json:"connector_id,omitempty"`
-	CarrierSessionID     string    `json:"carrier_session_id"`
-	RouteGeneration      uint64    `json:"route_generation"`
-	ProcessGeneration    uint64    `json:"process_generation"`
-	ConfigGeneration     uint64    `json:"config_generation"`
-	SessionGeneration    uint64    `json:"session_generation"`
-	AssignmentGeneration uint64    `json:"assignment_generation"`
-	EdgeNodeID           string    `json:"edge_node_id"`
-	EdgeProcessEpoch     string    `json:"edge_process_epoch"`
-	Protocol             string    `json:"protocol"`
-	Method               string    `json:"method,omitempty"`
-	Host                 string    `json:"host,omitempty"`
-	Path                 string    `json:"path,omitempty"`
-	IdempotencyKey       string    `json:"idempotency_key"`
-	RequestID            string    `json:"request_id"`
-	CorrelationID        string    `json:"correlation_id"`
-}
+type GrantIssueRequest = connectorprotocol.PrivateAccessGrantIssue
 
-func (r GrantIssueRequest) bind(identity Identity) Request {
+func bindGrantIssue(r GrantIssueRequest, identity Identity) Request {
 	return Request{
 		AccountID: identity.AccountID, ResourceKind: r.ResourceKind, ResourceID: r.ResourceID,
 		RouteID: r.RouteID, Audience: r.Audience, MachineID: identity.MachineID,
@@ -62,19 +39,9 @@ func (r GrantIssueRequest) bind(identity Identity) Request {
 	}
 }
 
-type GrantIssueResponse struct {
-	Schema        string    `json:"schema"`
-	Kind          string    `json:"kind"`
-	Grant         string    `json:"grant"`
-	ExpiresAt     time.Time `json:"expires_at"`
-	RequestID     string    `json:"request_id"`
-	CorrelationID string    `json:"correlation_id"`
-	// Request is the server-normalized signed request. It contains only
-	// binding metadata, never proof bytes or a private credential. Returning it
-	// lets the edge perform the second authorize call without guessing the
-	// accessor's renewable session identity.
-	Request Request `json:"request"`
-}
+// GrantIssueResponse's Request is the server-normalized signed request: binding metadata only, never
+// proof bytes or a private credential, so the edge can make the second authorize call.
+type GrantIssueResponse = connectorprotocol.PrivateAccessGrantResponse
 
 type GrantHTTPHandler struct {
 	service *Service
@@ -158,7 +125,7 @@ func (h *GrantHTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// original bytes so the request hash, signed expiry and response agree.
 	issueRequest.ExpiresAt = issueRequest.ExpiresAt.UTC().Truncate(time.Second)
 	identity := Identity{AccountID: claims.UserID, UserID: claims.UserID, MachineID: claims.MachineID, SessionID: claims.CredentialJTI, InstallationGeneration: uint64(claims.InstallationGeneration), ExpiresAt: issueRequest.ExpiresAt, Method: "machine"}
-	request := issueRequest.bind(identity)
+	request := bindGrantIssue(issueRequest, identity)
 	grant, err := h.service.IssueGrant(r.Context(), identity, EdgeIdentity{NodeID: request.EdgeNodeID, ProcessEpoch: request.EdgeProcessEpoch}, request)
 	if err != nil {
 		if denied, ok := privateAccessDenial(err); ok {

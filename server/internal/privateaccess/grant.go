@@ -52,7 +52,7 @@ func (g *MintGrantIssuer) MintGrant(_ context.Context, request Request, issuedAt
 	if g == nil || g.provider == nil {
 		return "", fmt.Errorf("%w: grant issuer is unavailable", ErrIdentityUnavailable)
 	}
-	if err := request.Validate(); err != nil {
+	if err := validateRequest(request); err != nil {
 		return "", err
 	}
 	if issuedAt.IsZero() {
@@ -62,7 +62,7 @@ func (g *MintGrantIssuer) MintGrant(_ context.Context, request Request, issuedAt
 	if !request.ExpiresAt.After(issuedAt) || request.ExpiresAt.Sub(issuedAt) > admission.Lifetime(g.provider) {
 		return "", fmt.Errorf("%w: grant expiry is out of bounds", ErrInvalid)
 	}
-	hash, err := request.Hash()
+	hash, err := requestHash(request)
 	if err != nil {
 		return "", err
 	}
@@ -124,10 +124,10 @@ func (g *MintGrantIssuer) verifyGrant(_ context.Context, token string, now time.
 		Protocol: claims.Protocol, Method: claims.Method, Host: claims.Host, Path: claims.Path,
 		IdempotencyKey: claims.IdempotencyKey, RequestID: claims.RequestID, CorrelationID: claims.CorrelationID,
 	}
-	if err := request.Validate(); err != nil {
+	if err := validateRequest(request); err != nil {
 		return Request{}, ErrIdentityUnavailable
 	}
-	hash, err := request.Hash()
+	hash, err := requestHash(request)
 	if err != nil || hash != claims.RequestHash {
 		return Request{}, ErrIdentityUnavailable
 	}

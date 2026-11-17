@@ -90,7 +90,7 @@ func TestPrivateAccessGrantClientMapsAuthorizationStatus(t *testing.T) {
 
 func TestAccessorAdmissionCarriesAuthoritativeAssignment(t *testing.T) {
 	a := PrivateAccessCarrierAdmission{AccountID: "account_1", MachineID: "machine_1", TunnelID: "tunnel_1", CarrierConnectorID: "connector_1", CarrierSessionID: "session_1", ProcessGeneration: 2, ConfigGeneration: 3, EdgeNodeID: "edge_1", EdgeProcessEpoch: "epoch_1", AssignmentID: "assignment_1", RouteID: "route_1", AssignmentGeneration: 9, RouteGeneration: 7, ConfigContentHash: "sha256:" + strings.Repeat("a", 64), AccessorPublicKey: "key", AccessorThumbprint: "thumb", ExpiresAt: time.Now().Add(time.Minute)}
-	got := a.Durable()
+	got := PrivateAccessCarrierDurable(a)
 	if got.AssignmentID != a.AssignmentID || got.ConfigContentHash != a.ConfigContentHash || got.AssignmentID == got.RouteID {
 		t.Fatalf("durable admission fabricated assignment binding: %#v", got)
 	}
@@ -141,7 +141,7 @@ func TestAccessorAdmissionRejectsMalformedWireFields(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			a := valid()
 			mutate(&a)
-			if a.Validate("edge_1", "epoch_1", now) == nil {
+			if ValidatePrivateAccessCarrierAdmission(a, "edge_1", "epoch_1", now) == nil {
 				t.Fatal("malformed admission accepted")
 			}
 		})

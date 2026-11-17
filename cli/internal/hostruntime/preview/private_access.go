@@ -37,7 +37,7 @@ func newAttachmentTraceID(noun string) (string, error) {
 }
 
 const (
-	privateAccessGrantKind = "private_access_authorization"
+	privateAccessGrantKind = connectorprotocol.PrivateAccessGrantKind
 	privateAccessGrantPath = "/v1/edge/private-access/grants"
 	privateAccessMaxBody   = 64 << 10
 	privateAccessGrantTTL  = 2 * time.Minute
@@ -45,41 +45,9 @@ const (
 
 var ErrPrivateAccessInvalid = errors.New("invalid private preview access configuration")
 
-type privateAccessGrantIssue struct {
-	ResourceKind         string    `json:"resource_kind"`
-	ResourceID           string    `json:"resource_id"`
-	RouteID              string    `json:"route_id"`
-	Audience             string    `json:"audience"`
-	ExpiresAt            time.Time `json:"expires_at"`
-	Nonce                string    `json:"nonce"`
-	OperationID          string    `json:"operation_id,omitempty"`
-	ConnectorID          string    `json:"connector_id,omitempty"`
-	CarrierSessionID     string    `json:"carrier_session_id"`
-	RouteGeneration      uint64    `json:"route_generation"`
-	ProcessGeneration    uint64    `json:"process_generation"`
-	ConfigGeneration     uint64    `json:"config_generation"`
-	SessionGeneration    uint64    `json:"session_generation"`
-	AssignmentGeneration uint64    `json:"assignment_generation"`
-	EdgeNodeID           string    `json:"edge_node_id"`
-	EdgeProcessEpoch     string    `json:"edge_process_epoch"`
-	Protocol             string    `json:"protocol"`
-	Method               string    `json:"method,omitempty"`
-	Host                 string    `json:"host,omitempty"`
-	Path                 string    `json:"path,omitempty"`
-	IdempotencyKey       string    `json:"idempotency_key"`
-	RequestID            string    `json:"request_id"`
-	CorrelationID        string    `json:"correlation_id"`
-}
+type privateAccessGrantIssue = connectorprotocol.PrivateAccessGrantIssue
 
-type privateAccessGrantResponse struct {
-	Schema        string                                 `json:"schema"`
-	Kind          string                                 `json:"kind"`
-	Grant         string                                 `json:"grant"`
-	ExpiresAt     time.Time                              `json:"expires_at"`
-	RequestID     string                                 `json:"request_id"`
-	CorrelationID string                                 `json:"correlation_id"`
-	Request       connectorprotocol.PrivateAccessRequest `json:"request"`
-}
+type privateAccessGrantResponse = connectorprotocol.PrivateAccessGrantResponse
 
 type privateAccessGrantClient struct {
 	endpoint *url.URL

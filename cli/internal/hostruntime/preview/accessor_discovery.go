@@ -3,7 +3,6 @@ package preview
 import (
 	"bytes"
 	"context"
-	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
 	"github.com/pinksaucepasta/paperboat/cli/internal/errorreport"
@@ -12,9 +11,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"regexp"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -25,118 +22,33 @@ import (
 )
 
 const (
-	privateAccessRoutesPath        = "/v1/private-access/routes"
-	privateAccessMaximumAdmissions = 4096
+	privateAccessRoutesPath = "/v1/private-access/routes"
 )
 
-var (
-	accessorConfigHashPattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
-	accessorNamePattern       = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
-)
+type accessorAdmission = connectorprotocol.PrivateAccessAdmission
 
-type accessorAdmission struct {
-	Schema                               string    `json:"schema"`
-	Kind                                 string    `json:"kind"`
-	AccountID                            string    `json:"account_id"`
-	MachineID                            string    `json:"machine_id"`
-	InstallationGeneration               uint64    `json:"installation_generation"`
-	AccessorPublicKey                    string    `json:"accessor_public_key"`
-	AccessorThumbprint                   string    `json:"accessor_thumbprint"`
-	ResourceKind                         string    `json:"resource_kind"`
-	ResourceID                           string    `json:"resource_id"`
-	TunnelName                           string    `json:"tunnel_name,omitempty"`
-	RouteName                            string    `json:"route_name,omitempty"`
-	OperationID                          string    `json:"operation_id,omitempty"`
-	ConnectorID                          string    `json:"connector_id,omitempty"`
-	CarrierSessionID                     string    `json:"carrier_session_id"`
-	RouteID                              string    `json:"route_id"`
-	RouteGeneration                      uint64    `json:"route_generation"`
-	SessionGeneration                    uint64    `json:"session_generation"`
-	ProcessGeneration                    uint64    `json:"process_generation"`
-	ConfigGeneration                     uint64    `json:"config_generation"`
-	AssignmentGeneration                 uint64    `json:"assignment_generation"`
-	AssignmentID                         string    `json:"assignment_id"`
-	ConfigContentHash                    string    `json:"config_content_hash"`
-	EdgeNodeID                           string    `json:"edge_node_id"`
-	EdgeProcessEpoch                     string    `json:"edge_process_epoch"`
-	EdgeCarrierServerSPKISHA256          string    `json:"edge_carrier_server_spki_sha256"`
-	EdgeCarrierServerCertificateChainPEM string    `json:"edge_carrier_server_certificate_chain_pem"`
-	Protocol                             string    `json:"protocol"`
-	Hostname                             string    `json:"hostname"`
-	MatchType                            string    `json:"match_type"`
-	WildcardSuffix                       string    `json:"wildcard_suffix,omitempty"`
-	EdgeEndpoints                        []string  `json:"edge_endpoints"`
-	ExpiresAt                            time.Time `json:"expires_at"`
-	TunnelID                             string    `json:"tunnel_id"`
-	CarrierConnectorID                   string    `json:"carrier_connector_id"`
-}
-
-func (a accessorAdmission) validate(now time.Time) error {
-	for _, value := range []string{a.AccountID, a.MachineID, a.ResourceID, a.CarrierSessionID, a.RouteID, a.AssignmentID, a.EdgeNodeID, a.TunnelID, a.CarrierConnectorID} {
-		if connectorprotocol.ValidateIdentifier(value) != nil {
-			return ErrPrivateAccessInvalid
-		}
-	}
-	if connectorprotocol.ValidateOpaqueEpoch(a.EdgeProcessEpoch) != nil || a.InstallationGeneration == 0 || a.RouteGeneration == 0 || a.SessionGeneration == 0 || a.ProcessGeneration == 0 || a.ConfigGeneration == 0 || a.AssignmentGeneration == 0 || !a.ExpiresAt.After(now) || !accessorConfigHashPattern.MatchString(a.ConfigContentHash) || !validEdgeCarrierServerCertificateChainPEM(a.EdgeCarrierServerCertificateChainPEM, a.EdgeCarrierServerSPKISHA256) || len(a.EdgeEndpoints) != 2 {
-		return ErrPrivateAccessInvalid
-	}
-	key, err := base64.RawURLEncoding.Strict().DecodeString(a.AccessorPublicKey)
-	if err != nil || len(key) != ed25519.PublicKeySize {
-		return ErrPrivateAccessInvalid
-	}
-	thumb, err := connectorprotocol.IdentityThumbprint(ed25519.PublicKey(key))
-	if err != nil || thumb != a.AccessorThumbprint {
-		return ErrPrivateAccessInvalid
-	}
-	for index, scheme := range []string{"h2", "h3"} {
-		u, err := url.Parse(a.EdgeEndpoints[index])
-		port, portErr := strconv.ParseUint(u.Port(), 10, 16)
-		if err != nil || u.Scheme != scheme || u.Hostname() == "" || portErr != nil || port == 0 || u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "" {
-			return ErrPrivateAccessInvalid
-		}
-	}
-	if !validAccessorMatch(a.Protocol, a.Hostname, a.MatchType, a.WildcardSuffix) {
-		return ErrPrivateAccessInvalid
-	}
-	if a.ResourceKind == "preview" {
-		if a.TunnelName != "" || a.RouteName != "" || connectorprotocol.ValidateIdentifier(a.OperationID) != nil || a.ConnectorID != "" || a.Protocol != "http" {
-			return ErrPrivateAccessInvalid
-		}
-	} else if a.ResourceKind != "tunnel" || !validAccessorName(a.TunnelName, 63) || !validAccessorName(a.RouteName, 80) || connectorprotocol.ValidateIdentifier(a.ConnectorID) != nil || a.OperationID != "" {
+// validateAccessorAdmission is the shared admission check plus this machine's own: the carrier
+// certificate chain must parse and match its pin, and an HTTP host must be in canonical IDNA form.
+func validateAccessorAdmission(a accessorAdmission, now time.Time) error {
+	if a.Validate(now) != nil || !validEdgeCarrierServerCertificateChainPEM(a.EdgeCarrierServerCertificateChainPEM, a.EdgeCarrierServerSPKISHA256) || !canonicalAccessorHost(a) {
 		return ErrPrivateAccessInvalid
 	}
 	return nil
 }
 
-func validAccessorName(value string, maximum int) bool {
-	return value == strings.TrimSpace(value) && len(value) >= 1 && len(value) <= maximum && accessorNamePattern.MatchString(value)
-}
-
-func validAccessorMatch(protocol, hostname, matchType, suffix string) bool {
-	if protocol == "private_tcp" {
-		return hostname == "" && matchType == "catch_all" && suffix == ""
-	}
-	if protocol != "http" || hostname == "" {
-		return false
-	}
-	switch matchType {
+func canonicalAccessorHost(a accessorAdmission) bool {
+	switch a.MatchType {
 	case "exact", "managed_exact":
-		normalized, err := privateAccessEndpointHost("https://" + hostname)
-		return err == nil && suffix == "" && normalized == hostname
+		normalized, err := privateAccessEndpointHost("https://" + a.Hostname)
+		return err == nil && normalized == a.Hostname
 	case "one_label_wildcard":
-		normalized, err := privateAccessEndpointHost("https://" + suffix)
-		return err == nil && normalized == suffix && strings.Contains(suffix, ".") && hostname == "*."+suffix
-	default:
-		return false
+		normalized, err := privateAccessEndpointHost("https://" + a.WildcardSuffix)
+		return err == nil && normalized == a.WildcardSuffix && strings.Contains(a.WildcardSuffix, ".")
 	}
+	return true
 }
 
-type accessorSnapshot struct {
-	Schema     string              `json:"schema"`
-	Kind       string              `json:"kind"`
-	Complete   bool                `json:"complete"`
-	Admissions []accessorAdmission `json:"admissions"`
-}
+type accessorSnapshot = connectorprotocol.PrivateAccessSnapshot
 
 type accessorDiscoveryClient struct {
 	endpoint *url.URL
@@ -250,12 +162,12 @@ func (c *accessorDiscoveryClient) fetchSnapshot(ctx context.Context) ([]accessor
 	}
 	d := json.NewDecoder(bytes.NewReader(raw))
 	var out accessorSnapshot
-	if d.Decode(&out) != nil || d.Decode(&struct{}{}) != io.EOF || !out.Complete || out.Schema != "paperboat.preview-tunnel/v1" || out.Kind != "private_access_carrier_snapshot" || out.Admissions == nil || len(out.Admissions) > privateAccessMaximumAdmissions {
+	if d.Decode(&out) != nil || d.Decode(&struct{}{}) != io.EOF || out.ValidateEnvelope() != nil {
 		return nil, privatepreviewproxy.ErrAccessTemporarilyUnavailable
 	}
 	seen := make(map[string]struct{}, len(out.Admissions))
 	for _, admission := range out.Admissions {
-		if admission.validate(serverclock.Now().UTC()) != nil {
+		if validateAccessorAdmission(admission, serverclock.Now().UTC()) != nil {
 			return nil, privatepreviewproxy.ErrAccessTemporarilyUnavailable
 		}
 		// A route is admitted once per edge of the account's pair (primary and fallback).

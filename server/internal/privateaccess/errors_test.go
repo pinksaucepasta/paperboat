@@ -125,7 +125,7 @@ func TestPrivateAccessAuthorityOutagePreservesCauseAndRecovers(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &denied); err != nil {
 		t.Fatal(err)
 	}
-	if denied.Allowed || denied.Reason != ReasonInternal {
+	if denied.Allowed || denied.Reason != string(ReasonInternal) {
 		t.Fatalf("public denial projection changed during outage: %#v", denied)
 	}
 	for _, value := range []string{"connection_refused", `"http_status":503`, reference, "correlation_private_access_01"} {
@@ -180,7 +180,7 @@ func TestPrivateAccessMixedMissingAndOperationalCauseRemainsUnavailable(t *testi
 	if err := json.Unmarshal(response.Body.Bytes(), &denied); err != nil {
 		t.Fatal(err)
 	}
-	if denied.Allowed || denied.Reason != ReasonInternal {
+	if denied.Allowed || denied.Reason != string(ReasonInternal) {
 		t.Fatalf("mixed error was projected as a benign resource denial: %#v", denied)
 	}
 	for _, value := range []string{"Errno", `"http_status":503`, reference} {

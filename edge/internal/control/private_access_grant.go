@@ -23,29 +23,7 @@ var (
 	ErrPrivateAccessGrantUnavailable  = errors.New("private access authorization unavailable")
 )
 
-type PrivateAccessGrantDecision struct {
-	Ingress              *connectorprotocol.IngressDecision `json:"ingress,omitempty"`
-	Schema               string                             `json:"schema"`
-	Kind                 string                             `json:"kind"`
-	DecisionID           string                             `json:"decision_id"`
-	Allowed              bool                               `json:"allowed"`
-	Reason               string                             `json:"reason"`
-	ExpiresAt            time.Time                          `json:"expires_at"`
-	RequestID            string                             `json:"request_id"`
-	CorrelationID        string                             `json:"correlation_id"`
-	ResourceKind         string                             `json:"resource_kind,omitempty"`
-	ResourceID           string                             `json:"resource_id,omitempty"`
-	RouteID              string                             `json:"route_id,omitempty"`
-	OperationID          string                             `json:"operation_id,omitempty"`
-	ConnectorID          string                             `json:"connector_id,omitempty"`
-	CarrierSessionID     string                             `json:"carrier_session_id,omitempty"`
-	RouteGeneration      uint64                             `json:"route_generation,omitempty"`
-	SessionGeneration    uint64                             `json:"session_generation,omitempty"`
-	ProcessGeneration    uint64                             `json:"process_generation,omitempty"`
-	ConfigGeneration     uint64                             `json:"config_generation,omitempty"`
-	AssignmentGeneration uint64                             `json:"assignment_generation,omitempty"`
-	Protocol             string                             `json:"protocol,omitempty"`
-}
+type PrivateAccessGrantDecision = connectorprotocol.PrivateAccessDecision
 
 type PrivateAccessGrantAuthorizer interface {
 	AuthorizePrivateAccessGrant(context.Context, string, connectorprotocol.PrivateAccessRequest) (PrivateAccessGrantDecision, error)

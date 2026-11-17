@@ -64,11 +64,14 @@ func (r PrivateAccessRequest) Validate(now time.Time) error {
 	if r.ResourceKind != "preview" && r.ResourceKind != "tunnel" || r.Protocol != "http" && r.Protocol != "tcp" || r.ExpiresAt.IsZero() || !now.IsZero() && !r.ExpiresAt.After(now) || r.InstallationGeneration == 0 || r.RouteGeneration == 0 || r.ProcessGeneration == 0 || r.ConfigGeneration == 0 || r.SessionGeneration == 0 || r.AssignmentGeneration == 0 {
 		return ErrInvalidInput
 	}
+	if len(r.RequestID) < 3 || len(r.CorrelationID) < 3 {
+		return ErrInvalidInput
+	}
 	if r.ResourceKind == "preview" {
 		if ValidateIdentifier(r.OperationID) != nil || r.ConnectorID != "" {
 			return ErrInvalidInput
 		}
-	} else if ValidateIdentifier(r.ConnectorID) != nil {
+	} else if ValidateIdentifier(r.ConnectorID) != nil || r.OperationID != "" && ValidateIdentifier(r.OperationID) != nil {
 		return ErrInvalidInput
 	}
 	wantAudience := "paperboat-tunnel-tcp"

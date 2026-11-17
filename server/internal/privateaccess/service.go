@@ -128,7 +128,7 @@ func (s *Service) IssueGrant(ctx context.Context, identity Identity, edge EdgeId
 	if err := edge.Validate(); err != nil {
 		return deny(ReasonIdentityInvalid, nil)
 	}
-	if err := request.Validate(); err != nil {
+	if err := validateRequest(request); err != nil {
 		return "", err
 	}
 	if request.AccountID != identity.AccountID || request.MachineID != identity.MachineID || request.SessionID != identity.SessionID {
@@ -202,14 +202,14 @@ func (s *Service) Authorize(ctx context.Context, input AuthorizeInput) (Decision
 	if err != nil {
 		return s.deny(ctx, input, ReasonUnauthenticated, now, "grant")
 	}
-	submittedHash, submittedErr := input.Request.Hash()
-	signedHash, signedErr := signed.Hash()
+	submittedHash, submittedErr := requestHash(input.Request)
+	signedHash, signedErr := requestHash(signed)
 	if submittedErr != nil || signedErr != nil || submittedHash != signedHash {
 		return s.deny(ctx, input, ReasonIdentityInvalid, now, "grant_request_binding")
 	}
 	input.Request = signed
 	input.Identity = Identity{AccountID: signed.AccountID, UserID: signed.AccountID, MachineID: signed.MachineID, SessionID: signed.SessionID, InstallationGeneration: signed.InstallationGeneration, ExpiresAt: signed.ExpiresAt, Method: "machine"}
-	if err := input.Request.Validate(); err != nil {
+	if err := validateRequest(input.Request); err != nil {
 		return Decision{}, err
 	}
 	if input.Request.EdgeNodeID != input.Edge.NodeID || input.Request.EdgeProcessEpoch != input.Edge.ProcessEpoch {
@@ -295,7 +295,7 @@ func (s *Service) Authorize(ctx context.Context, input AuthorizeInput) (Decision
 	}
 	decision := Decision{
 		Schema: Schema, Kind: Kind, DecisionID: decisionID(fingerprint), Allowed: true,
-		Reason: DenyReason(DecisionAllowed), ExpiresAt: expiresAt,
+		Reason: DecisionAllowed, ExpiresAt: expiresAt,
 		RequestID: input.Request.RequestID, CorrelationID: input.Request.CorrelationID,
 		ResourceKind: binding.ResourceKind, ResourceID: binding.ResourceID, RouteID: binding.RouteID,
 		OperationID: binding.OperationID, ConnectorID: binding.ConnectorID,
@@ -304,7 +304,7 @@ func (s *Service) Authorize(ctx context.Context, input AuthorizeInput) (Decision
 		AssignmentGeneration: binding.AssignmentGeneration,
 		Protocol:             binding.Protocol,
 	}
-	if err := decision.Validate(now); err != nil {
+	if err := validateDecision(decision, now); err != nil {
 		return Decision{}, err
 	}
 	if err := s.record(ctx, AuditRecord{Allowed: true, Reason: DenyReason(DecisionAllowed), AccountID: input.Identity.AccountID, UserID: input.Identity.UserID, MachineID: input.Identity.MachineID, SessionID: input.Identity.SessionID, ResourceKind: binding.ResourceKind, ResourceID: binding.ResourceID, RouteID: binding.RouteID, OperationID: binding.OperationID, ConnectorID: binding.ConnectorID, CarrierSessionID: binding.CarrierSessionID, Protocol: binding.Protocol, RequestID: input.Request.RequestID, CorrelationID: input.Request.CorrelationID, IdempotencyKey: input.Request.IdempotencyKey}); err != nil {
@@ -331,8 +331,8 @@ func (s *Service) denyWithBinding(ctx context.Context, input AuthorizeInput, bin
 	if input.Request.ExpiresAt.After(now) && input.Request.ExpiresAt.Before(expiresAt) {
 		expiresAt = input.Request.ExpiresAt
 	}
-	decision := Decision{Schema: Schema, Kind: Kind, DecisionID: decisionID(fingerprint), Allowed: false, Reason: reason, ExpiresAt: expiresAt, RequestID: input.Request.RequestID, CorrelationID: input.Request.CorrelationID}
-	if err := decision.Validate(now); err != nil {
+	decision := Decision{Schema: Schema, Kind: Kind, DecisionID: decisionID(fingerprint), Allowed: false, Reason: string(reason), ExpiresAt: expiresAt, RequestID: input.Request.RequestID, CorrelationID: input.Request.CorrelationID}
+	if err := validateDecision(decision, now); err != nil {
 		// A malformed request is reported before this method. This fallback keeps
 		// malformed identity errors from turning into a credential-bearing error.
 		return Decision{}, err

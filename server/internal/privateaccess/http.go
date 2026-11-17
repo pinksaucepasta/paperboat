@@ -256,7 +256,7 @@ func decodeRequest(raw []byte) (Request, error) {
 	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
 		return Request{}, ErrInvalid
 	}
-	if err := request.Validate(); err != nil {
+	if err := validateRequest(request); err != nil {
 		return Request{}, err
 	}
 	return request, nil

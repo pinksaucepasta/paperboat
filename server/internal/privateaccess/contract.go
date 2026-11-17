@@ -19,8 +19,8 @@ import (
 )
 
 const (
-	Schema = "paperboat.preview-tunnel/v1"
-	Kind   = "private_access_authorization"
+	Schema = connectorprotocol.PrivateAccessSchema
+	Kind   = connectorprotocol.PrivateAccessGrantKind
 
 	ResourcePreview = "preview"
 	ResourceTunnel  = "tunnel"
@@ -183,98 +183,15 @@ func (e EdgeIdentity) Validate() error {
 }
 
 // Request contains the exact route and carrier fence supplied by the edge.
-// Account identity comes exclusively from Identity and the server resolver.
-type Request struct {
-	// AccountID is copied into the signed grant, but it is never trusted until
-	// it equals the verifier's server-derived identity and the resolver result.
-	AccountID              string    `json:"account_id"`
-	ResourceKind           string    `json:"resource_kind"`
-	ResourceID             string    `json:"resource_id"`
-	RouteID                string    `json:"route_id"`
-	Audience               string    `json:"audience"`
-	MachineID              string    `json:"machine_id"`
-	SessionID              string    `json:"session_id"`
-	InstallationGeneration uint64    `json:"installation_generation"`
-	ExpiresAt              time.Time `json:"expires_at"`
-	Nonce                  string    `json:"nonce"`
-	OperationID            string    `json:"operation_id,omitempty"`
-	ConnectorID            string    `json:"connector_id,omitempty"`
-	CarrierSessionID       string    `json:"carrier_session_id"`
-	RouteGeneration        uint64    `json:"route_generation"`
-	ProcessGeneration      uint64    `json:"process_generation"`
-	ConfigGeneration       uint64    `json:"config_generation"`
-	SessionGeneration      uint64    `json:"session_generation"`
-	AssignmentGeneration   uint64    `json:"assignment_generation"`
-	EdgeNodeID             string    `json:"edge_node_id"`
-	EdgeProcessEpoch       string    `json:"edge_process_epoch"`
-	Protocol               string    `json:"protocol"`
-	Method                 string    `json:"method,omitempty"`
-	Host                   string    `json:"host,omitempty"`
-	Path                   string    `json:"path,omitempty"`
-	IdempotencyKey         string    `json:"idempotency_key"`
-	RequestID              string    `json:"request_id"`
-	CorrelationID          string    `json:"correlation_id"`
-}
+// Account identity comes exclusively from Identity and the server resolver. It is the signed
+// carrier envelope the edge verifies, so both sides share one definition and one validation.
+type Request = connectorprotocol.PrivateAccessRequest
 
-func (r Request) Validate() error {
-	if r.ResourceKind != ResourcePreview && r.ResourceKind != ResourceTunnel {
-		return fmt.Errorf("%w: unsupported resource kind", ErrInvalid)
-	}
-	for name, value := range map[string]string{
-		"account_id": r.AccountID, "resource_id": r.ResourceID, "route_id": r.RouteID,
-		"audience": r.Audience, "machine_id": r.MachineID, "session_id": r.SessionID,
-		"carrier_session_id": r.CarrierSessionID,
-		"idempotency_key":    r.IdempotencyKey, "request_id": r.RequestID,
-		"correlation_id": r.CorrelationID,
-		"edge_node_id":   r.EdgeNodeID, "edge_process_epoch": r.EdgeProcessEpoch,
-	} {
-		if !validID(value) {
-			return fmt.Errorf("%w: invalid %s", ErrInvalid, name)
-		}
-	}
-	if r.ResourceKind == ResourcePreview && !validID(r.OperationID) {
-		return fmt.Errorf("%w: preview operation_id is required", ErrInvalid)
-	}
-	if r.ResourceKind == ResourceTunnel && r.OperationID != "" && !validID(r.OperationID) {
-		return fmt.Errorf("%w: invalid operation_id", ErrInvalid)
-	}
-	if r.ResourceKind == ResourceTunnel && !validID(r.ConnectorID) {
-		return fmt.Errorf("%w: tunnel connector_id is required", ErrInvalid)
-	}
-	if r.ExpiresAt.IsZero() || !r.ExpiresAt.After(time.Unix(0, 0)) {
-		return fmt.Errorf("%w: grant expiry is required", ErrInvalid)
-	}
-	if !validID(r.Nonce) {
-		return fmt.Errorf("%w: grant nonce is required", ErrInvalid)
-	}
-	wantAudience := audienceFor(r.ResourceKind, r.Protocol)
-	if r.Audience != wantAudience {
-		return fmt.Errorf("%w: grant audience does not match protocol", ErrInvalid)
-	}
-	if r.Protocol != ProtocolHTTP && r.Protocol != ProtocolTCP {
-		return fmt.Errorf("%w: unsupported protocol", ErrInvalid)
-	}
-	if r.InstallationGeneration == 0 || r.RouteGeneration == 0 || r.SessionGeneration == 0 || r.ProcessGeneration == 0 || r.ConfigGeneration == 0 || r.AssignmentGeneration == 0 {
-		return fmt.Errorf("%w: carrier generations must be positive", ErrInvalid)
-	}
-	if len(r.IdempotencyKey) > 256 || len(r.RequestID) < 3 || len(r.RequestID) > 128 || len(r.CorrelationID) < 3 || len(r.CorrelationID) > 128 {
-		return fmt.Errorf("%w: trace fields are out of bounds", ErrInvalid)
-	}
-	if hasControl(r.IdempotencyKey) || hasControl(r.RequestID) || hasControl(r.CorrelationID) {
-		return fmt.Errorf("%w: trace fields contain control characters", ErrInvalid)
-	}
-	if r.Protocol == ProtocolHTTP {
-		if len(r.Method) == 0 || len(r.Method) > 32 || hasControl(r.Method) || strings.ContainsAny(r.Method, " \t") {
-			return fmt.Errorf("%w: invalid HTTP method", ErrInvalid)
-		}
-		if len(r.Host) == 0 || len(r.Host) > MaximumHostBytes || hasControl(r.Host) {
-			return fmt.Errorf("%w: invalid HTTP host", ErrInvalid)
-		}
-		if len(r.Path) == 0 || len(r.Path) > MaximumPathBytes || !strings.HasPrefix(r.Path, "/") || hasControl(r.Path) {
-			return fmt.Errorf("%w: invalid HTTP path", ErrInvalid)
-		}
-	} else if r.Method != "" || r.Host != "" || r.Path != "" {
-		return fmt.Errorf("%w: HTTP fields are not valid for TCP", ErrInvalid)
+// validateRequest is the shared wire validation with no expiry check (the service checks expiry
+// against its own clock).
+func validateRequest(r Request) error {
+	if err := r.Validate(time.Time{}); err != nil {
+		return fmt.Errorf("%w: invalid private access request", ErrInvalid)
 	}
 	return nil
 }
@@ -375,38 +292,16 @@ func (b Binding) Validate(now time.Time) error {
 	return nil
 }
 
-// Decision is safe to send to an edge.  It carries no access token, bearer,
-// credential, private key, or target secret.  The edge must ask again after
-// ExpiresAt and must close active streams when its policy cache expires.
-type Decision struct {
-	Ingress              *connectorprotocol.IngressDecision `json:"ingress,omitempty"`
-	Schema               string                             `json:"schema"`
-	Kind                 string                             `json:"kind"`
-	DecisionID           string                             `json:"decision_id"`
-	Allowed              bool                               `json:"allowed"`
-	Reason               DenyReason                         `json:"reason"`
-	ExpiresAt            time.Time                          `json:"expires_at"`
-	RequestID            string                             `json:"request_id"`
-	CorrelationID        string                             `json:"correlation_id"`
-	ResourceKind         string                             `json:"resource_kind,omitempty"`
-	ResourceID           string                             `json:"resource_id,omitempty"`
-	RouteID              string                             `json:"route_id,omitempty"`
-	OperationID          string                             `json:"operation_id,omitempty"`
-	ConnectorID          string                             `json:"connector_id,omitempty"`
-	CarrierSessionID     string                             `json:"carrier_session_id,omitempty"`
-	RouteGeneration      uint64                             `json:"route_generation,omitempty"`
-	SessionGeneration    uint64                             `json:"session_generation,omitempty"`
-	ProcessGeneration    uint64                             `json:"process_generation,omitempty"`
-	ConfigGeneration     uint64                             `json:"config_generation,omitempty"`
-	AssignmentGeneration uint64                             `json:"assignment_generation,omitempty"`
-	Protocol             string                             `json:"protocol,omitempty"`
-}
+// Decision is safe to send to an edge: it carries no access token, bearer, credential, private key
+// or target secret. The edge must ask again after ExpiresAt and must close active streams when its
+// policy cache expires. Reason is a DenyReason on the wire.
+type Decision = connectorprotocol.PrivateAccessDecision
 
-func (d Decision) Validate(now time.Time) error {
-	if d.Schema != Schema || d.Kind != Kind || !validID(d.DecisionID) || !d.Reason.valid() || d.ExpiresAt.IsZero() || (!now.IsZero() && !d.ExpiresAt.After(now)) {
+func validateDecision(d Decision, now time.Time) error {
+	if d.Schema != Schema || d.Kind != Kind || !validID(d.DecisionID) || !DenyReason(d.Reason).valid() || d.ExpiresAt.IsZero() || (!now.IsZero() && !d.ExpiresAt.After(now)) {
 		return fmt.Errorf("%w: malformed decision", ErrInvalid)
 	}
-	if d.Allowed != (d.Reason == DecisionAllowed) {
+	if d.Allowed != (d.Reason == string(DecisionAllowed)) {
 		return fmt.Errorf("%w: decision allow/reason mismatch", ErrInvalid)
 	}
 	if len(d.RequestID) < 3 || len(d.RequestID) > 128 || len(d.CorrelationID) < 3 || len(d.CorrelationID) > 128 {
@@ -479,11 +374,11 @@ func requestFingerprint(in AuthorizeInput) (string, error) {
 	return hex.EncodeToString(sum[:]), nil
 }
 
-// Hash returns the canonical digest bound into a signed private-access grant.
+// requestHash returns the canonical digest bound into a signed private-access grant.
 // It includes route, identity, expiry, nonce, and trace fields but never any
 // bearer or proof bytes.
-func (r Request) Hash() (string, error) {
-	if err := r.Validate(); err != nil {
+func requestHash(r Request) (string, error) {
+	if err := validateRequest(r); err != nil {
 		return "", err
 	}
 	b, err := json.Marshal(r)
