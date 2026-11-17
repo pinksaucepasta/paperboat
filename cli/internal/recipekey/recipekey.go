@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/pinksaucepasta/paperboat/cli/internal/atomicfile"
 	"github.com/pinksaucepasta/paperboat/shared/recipe"
 )
 
@@ -52,15 +53,17 @@ func Save(configPath string, f File) error {
 	if err != nil {
 		return err
 	}
-	path := Path(configPath)
+	path, err := filepath.Abs(Path(configPath))
+	if err != nil {
+		return err
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
-	temporary := path + ".tmp"
-	if err := os.WriteFile(temporary, data, 0o600); err != nil {
+	if err := atomicfile.Write(path, data, atomicfile.Options{Mode: 0o600, OwnerUID: -1, OwnerGID: -1}); err != nil {
 		return fmt.Errorf("save the recipe key: %w", err)
 	}
-	return os.Rename(temporary, path)
+	return nil
 }
 
 // Load reads the file; ok is false on a machine not paired from a recipe.

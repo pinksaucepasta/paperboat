@@ -98,6 +98,7 @@ func installGuard(ctx context.Context, executable, browserDomain string, undo **
 		return err
 	}
 	defer source.Close()
+	//paperboat:allow-source-policy atomic-replacement owner=machineguard reason=streamed-guard-binary-staging
 	target, err := os.CreateTemp(directory, ".pb-")
 	if err != nil {
 		return err
@@ -116,6 +117,7 @@ func installGuard(ctx context.Context, executable, browserDomain string, undo **
 	}
 	endCopy()
 	endCopy = func() {}
+	//paperboat:allow-source-policy atomic-replacement owner=machineguard reason=streamed-guard-binary-staging
 	err = os.Rename(temporary, filepath.Join(directory, "pb"))
 	rollback.record(filepath.Join(directory, "pb"))
 	if err != nil {
@@ -192,25 +194,7 @@ func writeGuardUnit(path, unit string) error {
 	if err := validateGuardUnit(path); err != nil {
 		return err
 	}
-	file, err := os.CreateTemp(filepath.Dir(path), ".paperboat-unit-")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(file.Name())
-	if _, err = file.WriteString(guardUnitMarker + unit); err == nil {
-		err = file.Chmod(0644)
-	}
-	if err == nil {
-		err = file.Sync()
-	}
-	closeErr := file.Close()
-	if err != nil {
-		return err
-	}
-	if closeErr != nil {
-		return closeErr
-	}
-	return os.Rename(file.Name(), path)
+	return atomicfile.Write(path, []byte(guardUnitMarker+unit), atomicfile.CurrentOwnerOptions(0644))
 }
 
 const guardDenyUnit = `[Unit]

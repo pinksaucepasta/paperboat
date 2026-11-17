@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/api"
+	"github.com/pinksaucepasta/paperboat/cli/internal/atomicfile"
 	sessionauth "github.com/pinksaucepasta/paperboat/cli/internal/auth"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/health"
 	"github.com/pinksaucepasta/paperboat/cli/internal/localapi"
@@ -186,11 +187,11 @@ func (a *recipeApplier) save(state recipeApplyState) error {
 	if err != nil {
 		return err
 	}
-	temporary := a.statePath + ".tmp"
-	if err := os.WriteFile(temporary, data, 0o600); err != nil {
+	path, err := filepath.Abs(a.statePath)
+	if err != nil {
 		return err
 	}
-	return os.Rename(temporary, a.statePath)
+	return atomicfile.Write(path, data, atomicfile.Options{Mode: 0o600, OwnerUID: -1, OwnerGID: -1})
 }
 
 // apply ensures every section of r and returns each section's outcome for the server.

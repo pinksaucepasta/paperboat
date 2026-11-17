@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/pinksaucepasta/paperboat/cli/internal/atomicfile"
 	wire "github.com/pinksaucepasta/paperboat/shared/offlineaudit"
 	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 )
@@ -171,18 +172,5 @@ func writeAtomic(path string, events []Event) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
-	temporary, err := os.CreateTemp(filepath.Dir(path), ".offline-audit-*")
-	if err != nil {
-		return err
-	}
-	name := temporary.Name()
-	_, err = temporary.Write(data)
-	err = errors.Join(err, temporary.Sync(), temporary.Close())
-	if err == nil {
-		err = os.Rename(name, path)
-	}
-	if err != nil {
-		_ = os.Remove(name)
-	}
-	return err
+	return atomicfile.Write(path, data, atomicfile.Options{Mode: 0o600, OwnerUID: -1, OwnerGID: -1})
 }

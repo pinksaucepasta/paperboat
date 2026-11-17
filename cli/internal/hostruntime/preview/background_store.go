@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/cli/internal/atomicfile"
 	"os"
 	"path/filepath"
 	"sort"
@@ -106,23 +107,11 @@ func (s *BackgroundStore) write(records []BackgroundRecord) error {
 	if err := os.MkdirAll(filepath.Dir(s.path), 0o700); err != nil {
 		return fmt.Errorf("create background previews directory: %w", err)
 	}
-	temp, err := os.CreateTemp(filepath.Dir(s.path), ".background-previews-*")
-	if err != nil {
-		return fmt.Errorf("write background previews: %w", err)
-	}
-	_, writeErr := temp.Write(data)
-	closeErr := temp.Close()
-	if err := errors.Join(writeErr, closeErr); err != nil {
-		_ = os.Remove(temp.Name())
-		return fmt.Errorf("write background previews: %w", err)
-	}
-	if err := os.Rename(temp.Name(), s.path); err != nil {
-		_ = os.Remove(temp.Name())
+	if err := atomicfile.Write(s.path, data, atomicfile.Options{Mode: 0o600, OwnerUID: -1, OwnerGID: -1}); err != nil {
 		return fmt.Errorf("write background previews: %w", err)
 	}
 	return nil
 }
-
 func sortedBackgroundRecords(records map[string]BackgroundRecord) []BackgroundRecord {
 	sorted := make([]BackgroundRecord, 0, len(records))
 	for _, record := range records {

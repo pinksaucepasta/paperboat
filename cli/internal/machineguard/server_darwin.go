@@ -16,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/cli/internal/atomicfile"
 	"github.com/pinksaucepasta/paperboat/cli/internal/machineloopback"
 	"github.com/pinksaucepasta/paperboat/cli/internal/splitdns"
 	"golang.org/x/sys/unix"
@@ -340,29 +341,5 @@ func darwinRun(ctx context.Context, input string, program string, args ...string
 }
 
 func darwinWrite(path string, data []byte, mode os.FileMode) error {
-	file, err := os.CreateTemp(filepath.Dir(path), ".paperboat-")
-	if err != nil {
-		return err
-	}
-	name := file.Name()
-	defer os.Remove(name)
-	if err = file.Chmod(mode); err == nil {
-		_, err = file.Write(data)
-	}
-	if err == nil {
-		err = file.Sync()
-	}
-	err = errors.Join(err, file.Close())
-	if err != nil {
-		return err
-	}
-	if err = os.Rename(name, path); err != nil {
-		return err
-	}
-	dir, err := os.Open(filepath.Dir(path))
-	if err != nil {
-		return err
-	}
-	defer dir.Close()
-	return dir.Sync()
+	return atomicfile.Write(path, data, atomicfile.CurrentOwnerOptions(mode))
 }
