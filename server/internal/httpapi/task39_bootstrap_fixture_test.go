@@ -22,7 +22,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/server/internal/accessdescriptor"
 	"github.com/pinksaucepasta/paperboat/server/internal/audit"
 	"github.com/pinksaucepasta/paperboat/server/internal/auth"
 	"github.com/pinksaucepasta/paperboat/server/internal/billing"
@@ -95,7 +94,7 @@ func TestTask39ServeAuthenticatedEnrollment(t *testing.T) {
 	machines := usermachines.New(database, writer, usermachines.Policy{PairingLifetime: 30 * time.Minute, OfflineAfter: cfg.UserMachines.OfflineAfter, AllowedPlatforms: cfg.UserMachines.AllowedPlatforms}, billingService)
 	machines.ConfigureInstallationEncryption(secret)
 	machines.ConfigureAccess(nil, base)
-	machines.ConfigureFileTransfer(accessdescriptor.FileTransferPolicy(cfg.Access.FileTransfer.Published()))
+	machines.ConfigureFileTransfer(cfg.Access.FileTransfer.Published())
 	machines.ConfigureCLIAuth(cfg.CLIAuth.ClientID, cfg.CLIAuth.AllowedScopes, cfg.CLIAuth.AccessTokenLifetime, cfg.CLIAuth.RefreshTokenLifetime, secret)
 	machines.ConfigureMachineControl(signer, base)
 	helperPort := int64(38080)

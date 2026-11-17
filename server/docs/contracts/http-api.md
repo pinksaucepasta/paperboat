@@ -455,17 +455,6 @@ Adding or renaming public codes after approval requires explicit contract approv
 The following endpoints are private service-to-service contracts and are not browser or
 CLI APIs:
 
-- `POST /v1/connectors/admission` requires the renewable machine-control bearer credential and an
-  unpadded base64url `X-Paperboat-Machine-Proof` envelope signed by that machine's enrolled
-  Ed25519 key. The proof binds `POST`, the exact path and body hash, machine/environment,
-  operation ID, and a lifetime of at most one minute. The strict body contains
-  `operation_id`, `environment_id`, `machine_id`, `connector_id`, `edge_pool`, and protocol version `1.0`.
-  The response is the canonical connector-admission document: the same operation and
-  identity bindings, generation, assigned node/pool, one `{host,port}` endpoint, at least
-  one revisioned route handoff, protocol version, optional capabilities, and the scoped
-  connector credential. It contains no provider credential or internal alternate port.
-  Exact retries replay the encrypted recorded document; changed body or proof bindings
-  fail before a new admission is minted.
 - `POST /v1/tunnels/{tunnel_id}/connectors/enrollments` and
   `POST /v1/tunnels/{tunnel_id}/connectors/enrollments/exchange` are stable-host-only
   mutations. Both require the renewable `machine_control` bearer credential,

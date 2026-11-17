@@ -67,7 +67,7 @@ func TestEnrollBindsKeyAndPersistsPrivateIdentity(t *testing.T) {
 	if err != nil || token != result.Credential {
 		t.Fatalf("token=%q err=%v", token, err)
 	}
-	proof, err := (ProofSource{StateRoot: stateRoot, Clock: func() time.Time { return time.Date(2098, 1, 1, 0, 0, 0, 0, time.UTC) }}).Proof(context.Background(), "op_admission_0001", http.MethodPost, "/v1/connectors/admission", []byte(`{"edge_pool":"default"}`))
+	proof, err := (ProofSource{StateRoot: stateRoot, Clock: func() time.Time { return time.Date(2098, 1, 1, 0, 0, 0, 0, time.UTC) }}).Proof(context.Background(), "op_admission_0001", http.MethodPost, "/v1/config/credentials", []byte(`{"edge_pool":"default"}`))
 	if err != nil {
 		t.Fatal(err)
 	}

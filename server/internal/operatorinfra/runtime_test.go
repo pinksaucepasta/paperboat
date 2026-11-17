@@ -68,7 +68,7 @@ func TestManagedRelayRuntimeLifecycleAndAudit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	edge.SetCredentialIssuer(signer, "https://issuer.example.test", "")
+	edge.SetSigner(signer)
 	handler := edge.Handler()
 	request := func(path, token string, body any) *httptest.ResponseRecorder {
 		raw, _ := json.Marshal(body)

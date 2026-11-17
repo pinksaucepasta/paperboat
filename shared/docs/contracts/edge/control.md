@@ -5,20 +5,6 @@ entitlement, and node assignment. The edge owns live connector observations, att
 forwarding, and byte counters. Messages are authenticated with the exact credential class
 declared by their schema and use a unique operation ID.
 
-Connector admission consumes a single-use `connector_admission` credential atomically with
-recording `(environment_id, machine_id, connector_id, connector_generation, edge_pool)`. The generation
-must equal current desired state. A retry of the same operation and canonical request returns
-the recorded decision. Reuse with different data, a stale generation, wrong node/pool, or a
-revoked environment fails before a connector is accepted. Replacing a connector advances
-generation, drains the old connection, detaches its routes, and rejects late traffic from it.
-
-Admission responses include the assigned `edge_node_id`, an authenticated HTTP/3 and
-HTTP/2 CONNECT endpoint, and at least one operation-bound route handoff. The connector
-configures only those handoffs and never derives endpoint or public-host values. Readiness
-is reported only after the native carrier and every route are active. Reconnects resume the
-generation only while admission remains unexpired and unrevoked. A new generation requires
-a fresh single-use admission.
-
 Route attachment requires an admitted live connector with matching environment, generation,
 edge node, route revision, and protocol. Preview host ownership is exclusive. Duplicate
 attachment is idempotent; another environment receives `route_conflict` without disclosing

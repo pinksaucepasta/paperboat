@@ -18,7 +18,6 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/abusereports"
-	"github.com/pinksaucepasta/paperboat/server/internal/accessdescriptor"
 	"github.com/pinksaucepasta/paperboat/server/internal/accessrules"
 	"github.com/pinksaucepasta/paperboat/server/internal/accountdeletion"
 	"github.com/pinksaucepasta/paperboat/server/internal/accountprefs"
@@ -292,7 +291,7 @@ func New(opts Options) (*App, error) {
 		userMachineService.ConfigureCLIAuth(opts.Config.CLIAuth.ClientID, opts.Config.CLIAuth.AllowedScopes, opts.Config.CLIAuth.AccessTokenLifetime, opts.Config.CLIAuth.RefreshTokenLifetime, opts.Config.Secrets.SessionKeys[0])
 	}
 	userMachineService.ConfigureAccess(nil, normalizeHelperIssuer(opts.Config.HTTP.PublicBaseURL))
-	userMachineService.ConfigureFileTransfer(accessdescriptor.FileTransferPolicy(opts.Config.Access.FileTransfer.Published()))
+	userMachineService.ConfigureFileTransfer(opts.Config.Access.FileTransfer.Published())
 	userMachineService.ConfigureTerminalSessions(mintKeys, helperHTTPClient(store, opts.Config.TerminalSessions.OperationTimeout))
 	userMachineService.ConfigureMachineControl(mintKeys, normalizeHelperIssuer(opts.Config.HTTP.PublicBaseURL))
 	publicBaseURL := strings.TrimRight(config.NormalizeIssuer(opts.Config.HTTP.PublicBaseURL), "/")
@@ -495,7 +494,7 @@ func New(opts Options) (*App, error) {
 	}
 	selfhostService.ControlURL = publicBaseURL
 	trustService := controlplane.NewEdgeService(store, opts.Config.Secrets.EdgeControlCredential)
-	trustService.SetCredentialIssuer(mintKeys, config.NormalizeIssuer(opts.Config.HTTP.PublicBaseURL), opts.Config.Secrets.EncryptionKey)
+	trustService.SetSigner(mintKeys)
 	selfhostService.TrustDocuments = trustService.TrustDocuments
 	infrastructureService := operatorinfra.NewService(store, opts.Config.Secrets.EncryptionKey)
 	nodeCredentials := nodeauth.Composite{infrastructureService, selfhostService}
@@ -515,8 +514,7 @@ func New(opts Options) (*App, error) {
 		edgeControlService.SetScopedBandwidthDebiter(workspaceBilling)
 		edgeControlService.SetRelayQuotaGate(bandwidthgate.New(store))
 		edgeControlService.SetAuditWriter(auditWriter)
-		edgeControlService.SetCredentialIssuer(mintKeys, config.NormalizeIssuer(opts.Config.HTTP.PublicBaseURL), opts.Config.Secrets.EncryptionKey)
-		edgeControlService.SetFileTransferPolicy(opts.Config.Access.FileTransfer.Published())
+		edgeControlService.SetSigner(mintKeys)
 		edgeControlHandler = edgeControlService.Handler()
 	}
 	previewAttachmentMachineVerifier, err := httpapi.NewPreviewAttachmentMachineProofVerifier(enrollmentService)

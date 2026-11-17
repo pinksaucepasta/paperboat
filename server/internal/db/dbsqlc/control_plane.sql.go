@@ -3243,56 +3243,6 @@ func (q *Queries) ListControlConfigRepositoryAccessPendingProviderRevoke(ctx con
 	return items, nil
 }
 
-const listControlRoutesForEnvironmentAdmission = `-- name: ListControlRoutesForEnvironmentAdmission :many
-SELECT r.id AS route_id, r.desired_revision AS route_revision, r.kind, r.public_host, r.target_host, r.target_port
-FROM control_routes r
-WHERE r.environment_id = $1 AND r.connector_id = $2
-  AND r.desired_state IN ('attached','replacing')
-ORDER BY r.id
-LIMIT 128
-`
-
-type ListControlRoutesForEnvironmentAdmissionParams struct {
-	EnvironmentID string
-	ConnectorID   string
-}
-
-type ListControlRoutesForEnvironmentAdmissionRow struct {
-	RouteID       string
-	RouteRevision int64
-	Kind          string
-	PublicHost    string
-	TargetHost    string
-	TargetPort    int32
-}
-
-func (q *Queries) ListControlRoutesForEnvironmentAdmission(ctx context.Context, arg ListControlRoutesForEnvironmentAdmissionParams) ([]ListControlRoutesForEnvironmentAdmissionRow, error) {
-	rows, err := q.db.Query(ctx, listControlRoutesForEnvironmentAdmission, arg.EnvironmentID, arg.ConnectorID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []ListControlRoutesForEnvironmentAdmissionRow
-	for rows.Next() {
-		var i ListControlRoutesForEnvironmentAdmissionRow
-		if err := rows.Scan(
-			&i.RouteID,
-			&i.RouteRevision,
-			&i.Kind,
-			&i.PublicHost,
-			&i.TargetHost,
-			&i.TargetPort,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listControlRoutesForNode = `-- name: ListControlRoutesForNode :many
 SELECT r.id AS route_id, r.desired_revision AS route_revision, r.environment_id, c.connector_id,
        c.generation AS connector_generation, c.edge_node_id, r.kind, r.public_host,
@@ -5376,72 +5326,6 @@ func (q *Queries) RevokeUnboundAuthenticatedHostHelperEnrollment(ctx context.Con
 	return safe, err
 }
 
-const selectReadyControlTunnelNode = `-- name: SelectReadyControlTunnelNode :one
-SELECT id, edge_pool, protocol_version, process_epoch, endpoint_host, endpoint_tcp_port, endpoint_quic_port, state, ready, capacity, observation, last_heartbeat_at, drain_deadline, version, created_at, updated_at, carrier_endpoint_host, carrier_endpoint_tcp_port, carrier_endpoint_quic_port, carrier_server_spki_sha256, carrier_server_certificate_chain_pem, node_generation, region, failure_domain, roles, transports, capacity_limit, capacity_used, capacity_observed_at, registry_expires_at, allowed_account_ids, peer_relay_wireguard_public_key, peer_relay_disco_public_key, peer_relay_virtual_address, public_ingress_ipv4, public_ingress_ipv6, public_ingress_verified_at, tls_spki_sha256, endpoints_epoch, tunnel_endpoints_epoch, tunnel_snapshot_at, site, public_https_port FROM control_tunnel_nodes
-WHERE (edge_pool = $1 OR EXISTS (SELECT 1 FROM selfhost_installations i WHERE i.node_id=control_tunnel_nodes.id)) AND state = 'ready' AND ready = true
-  AND EXISTS (SELECT 1 FROM tunnels t JOIN tunnel_routes r ON r.tunnel_id=t.id WHERE t.account_id=$2::text AND t.deleted_at IS NULL AND r.deleted_at IS NULL AND paperboat.node_route_eligible(control_tunnel_nodes.id,t.account_id,r.id))
-  AND last_heartbeat_at > $3
-ORDER BY last_heartbeat_at DESC, id
-LIMIT 1
-`
-
-type SelectReadyControlTunnelNodeParams struct {
-	EdgePool   string
-	AccountID  string
-	StaleAfter sql.NullTime
-}
-
-func (q *Queries) SelectReadyControlTunnelNode(ctx context.Context, arg SelectReadyControlTunnelNodeParams) (ControlTunnelNode, error) {
-	row := q.db.QueryRow(ctx, selectReadyControlTunnelNode, arg.EdgePool, arg.AccountID, arg.StaleAfter)
-	var i ControlTunnelNode
-	err := row.Scan(
-		&i.ID,
-		&i.EdgePool,
-		&i.ProtocolVersion,
-		&i.ProcessEpoch,
-		&i.EndpointHost,
-		&i.EndpointTcpPort,
-		&i.EndpointQuicPort,
-		&i.State,
-		&i.Ready,
-		&i.Capacity,
-		&i.Observation,
-		&i.LastHeartbeatAt,
-		&i.DrainDeadline,
-		&i.Version,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.CarrierEndpointHost,
-		&i.CarrierEndpointTcpPort,
-		&i.CarrierEndpointQuicPort,
-		&i.CarrierServerSpkiSha256,
-		&i.CarrierServerCertificateChainPem,
-		&i.NodeGeneration,
-		&i.Region,
-		&i.FailureDomain,
-		&i.Roles,
-		&i.Transports,
-		&i.CapacityLimit,
-		&i.CapacityUsed,
-		&i.CapacityObservedAt,
-		&i.RegistryExpiresAt,
-		&i.AllowedAccountIds,
-		&i.PeerRelayWireguardPublicKey,
-		&i.PeerRelayDiscoPublicKey,
-		&i.PeerRelayVirtualAddress,
-		&i.PublicIngressIpv4,
-		&i.PublicIngressIpv6,
-		&i.PublicIngressVerifiedAt,
-		&i.TlsSpkiSha256,
-		&i.EndpointsEpoch,
-		&i.TunnelEndpointsEpoch,
-		&i.TunnelSnapshotAt,
-		&i.Site,
-		&i.PublicHttpsPort,
-	)
-	return i, err
-}
-
 const setControlConfigAssignment = `-- name: SetControlConfigAssignment :one
 INSERT INTO control_config_assignments (id, machine_id, environment_id, repository_id, push_repository_id, mode, consent_state, warning_revision, automatic_updates, path_rules, repository_bindings, configuration_revision, source)
 SELECT $1, machine.id, $2, $3,
@@ -5525,64 +5409,6 @@ func (q *Queries) SetControlConfigAssignment(ctx context.Context, arg SetControl
 		&i.RepositoryBindings,
 		&i.ConfigurationRevision,
 		&i.Source,
-	)
-	return i, err
-}
-
-const setControlConnectorAdmission = `-- name: SetControlConnectorAdmission :one
-UPDATE control_connector_generations
-SET edge_node_id = $1, state = 'admitted', admission_jti_hash = $2,
-    admission_operation_key = $3, admission_request_hash = $4,
-    admission_credential_ciphertext = $5, expires_at = $6,
-    version = version + 1, updated_at = $7
-WHERE environment_id = $8 AND connector_id = $9
-  AND generation = $10
-RETURNING environment_id, machine_id, generation, edge_pool, edge_node_id, state, admission_jti_hash, admission_operation_key, admission_request_hash, admission_credential_ciphertext, expires_at, revoked_at, version, updated_at, connector_id
-`
-
-type SetControlConnectorAdmissionParams struct {
-	EdgeNodeID                    sql.NullString
-	AdmissionJtiHash              []byte
-	AdmissionOperationKey         sql.NullString
-	AdmissionRequestHash          []byte
-	AdmissionCredentialCiphertext []byte
-	ExpiresAt                     sql.NullTime
-	UpdatedAt                     time.Time
-	EnvironmentID                 string
-	ConnectorID                   string
-	Generation                    int64
-}
-
-func (q *Queries) SetControlConnectorAdmission(ctx context.Context, arg SetControlConnectorAdmissionParams) (ControlConnectorGeneration, error) {
-	row := q.db.QueryRow(ctx, setControlConnectorAdmission,
-		arg.EdgeNodeID,
-		arg.AdmissionJtiHash,
-		arg.AdmissionOperationKey,
-		arg.AdmissionRequestHash,
-		arg.AdmissionCredentialCiphertext,
-		arg.ExpiresAt,
-		arg.UpdatedAt,
-		arg.EnvironmentID,
-		arg.ConnectorID,
-		arg.Generation,
-	)
-	var i ControlConnectorGeneration
-	err := row.Scan(
-		&i.EnvironmentID,
-		&i.MachineID,
-		&i.Generation,
-		&i.EdgePool,
-		&i.EdgeNodeID,
-		&i.State,
-		&i.AdmissionJtiHash,
-		&i.AdmissionOperationKey,
-		&i.AdmissionRequestHash,
-		&i.AdmissionCredentialCiphertext,
-		&i.ExpiresAt,
-		&i.RevokedAt,
-		&i.Version,
-		&i.UpdatedAt,
-		&i.ConnectorID,
 	)
 	return i, err
 }

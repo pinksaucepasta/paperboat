@@ -21,7 +21,7 @@ func tokenFor(t testing.TB, private ed25519.PrivateKey, keyID string, mutate fun
 	t.Helper()
 	now := time.Unix(1000, 0)
 	header := map[string]any{"alg": "EdDSA", "kid": keyID, "typ": "paperboat-credential+jwt"}
-	claims := map[string]any{"iss": "https://api.paperboat.test", "aud": "paperboat-edge", "sub": "machine", "jti": "jti_admit_01", "iat": now.Unix(), "exp": now.Add(time.Minute).Unix(), "scope": []string{"connector:admit"}, "credential_class": "connector_admission", "environment_id": "env", "machine_id": "machine", "installation_generation": 1, "connector_id": "runtime", "connector_generation": 3, "edge_pool": "default", "edge_node_id": "edge", "route_binding": base64.RawURLEncoding.EncodeToString(make([]byte, 32)), "file_transfer_policy": map[string]any{"revision": "file-transfer-v1", "automatic_max_batch_bytes": 2000000000, "max_batch_files": 10, "max_concurrent_transfers": 2, "retention_seconds": 604800, "delivery_timeout_seconds": 600, "max_pending_spool_bytes": 2000000000}}
+	claims := map[string]any{"iss": "https://api.paperboat.test", "aud": "paperboat-edge", "sub": "machine", "jti": "jti_admit_01", "iat": now.Unix(), "exp": now.Add(time.Minute).Unix(), "scope": []string{"connector:admit"}, "credential_class": "connector_admission", "environment_id": "env", "machine_id": "machine", "installation_generation": 1, "connector_id": "runtime", "connector_generation": 3, "edge_pool": "default", "edge_node_id": "edge"}
 	if mutate != nil {
 		mutate(claims)
 	}
@@ -115,7 +115,6 @@ func TestVerifierAcceptsExactHelperAccessCredential(t *testing.T) {
 		delete(claims, "connector_generation")
 		delete(claims, "edge_pool")
 		delete(claims, "edge_node_id")
-		delete(claims, "file_transfer_policy")
 	})
 	claims, err := verifier.VerifyHelperAccess(context.Background(), token)
 	if err != nil || claims.JTI != "jti_admit_01" || claims.EnvironmentID != "env" || claims.MachineID != "machine_1" || claims.CredentialClass != "terminal_operation" {
@@ -166,7 +165,6 @@ func TestVerifierAcceptsExactHelperAccessCredential(t *testing.T) {
 		delete(claims, "connector_generation")
 		delete(claims, "edge_pool")
 		delete(claims, "edge_node_id")
-		delete(claims, "file_transfer_policy")
 	})
 	claims, err = verifier.VerifyHelperAccess(context.Background(), fileToken)
 	if err != nil || claims.CredentialClass != "file_transfer" || len(claims.Scopes) != 1 || claims.Scopes[0] != "file:transfer" {
@@ -186,7 +184,6 @@ func TestVerifierAcceptsExactHelperAccessCredential(t *testing.T) {
 		delete(claims, "connector_generation")
 		delete(claims, "edge_pool")
 		delete(claims, "edge_node_id")
-		delete(claims, "file_transfer_policy")
 	})
 	if _, err := verifier.VerifyHelperAccess(context.Background(), missingTerminalSession); err == nil {
 		t.Fatal("terminal credential without session accepted")
@@ -203,7 +200,6 @@ func TestVerifierAcceptsExactHelperAccessCredential(t *testing.T) {
 		delete(claims, "connector_generation")
 		delete(claims, "edge_pool")
 		delete(claims, "edge_node_id")
-		delete(claims, "file_transfer_policy")
 	})
 	if _, err := verifier.VerifyHelperAccess(context.Background(), wrongScope); err == nil {
 		t.Fatal("retired file:stage scope accepted")
@@ -222,7 +218,6 @@ func TestVerifierRejectsRetiredHelperCredentials(t *testing.T) {
 			claims["user_id"] = "usr_1"
 			claims["cli_client_session_id"] = "cls_1"
 			claims["session_id"] = "ret_1"
-			delete(claims, "file_transfer_policy")
 		})
 		_, err := verifier.VerifyHelperAccess(context.Background(), token)
 		if code, _ := edgeerrors.CodeOf(err); code != edgeerrors.CodeCredentialInvalid {
@@ -270,7 +265,6 @@ func TestVerifierAcceptsPreviewLaunchWithoutCLIClientSession(t *testing.T) {
 		delete(claims, "connector_generation")
 		delete(claims, "edge_pool")
 		delete(claims, "edge_node_id")
-		delete(claims, "file_transfer_policy")
 	})
 	claims, err := verifier.VerifyHelperAccess(context.Background(), token)
 	if err != nil || claims.CredentialClass != "preview_launch" || claims.MachineID != "machine_22222222-2222-4222-8222-222222222222" {
@@ -490,7 +484,6 @@ func TestVerifierAcceptsInboxCredentialsWithoutCLIClientSession(t *testing.T) {
 			delete(claims, "connector_generation")
 			delete(claims, "edge_pool")
 			delete(claims, "edge_node_id")
-			delete(claims, "file_transfer_policy")
 		})
 	}
 	for class, scope := range map[string]string{"inbox_list": "inbox:list", "inbox_read": "inbox:read", "inbox_delete": "inbox:delete"} {

@@ -803,7 +803,6 @@ func TestOpenAPIDocumentCoversPublicAndFrozenTargetPaths(t *testing.T) {
 		"/v1/nodes/heartbeat":                                                {"post"},
 		"/v1/edge/routes/desired-state":                                      {"post"},
 		"/v1/edge/usage-reports":                                             {"post"},
-		"/v1/connectors/admission":                                           {"post"},
 		"/v1/helper-enrollments":                                             {"post"},
 		"/v1/helper-identity-renewals":                                       {"post"},
 		"/v1/machine-installation-failures":                                  {"post"},

@@ -40,7 +40,7 @@ func newRelaySubjectsNode(t *testing.T, name string) *relaySubjectsNode {
 	ctx := t.Context()
 	x := fmt.Sprint(time.Now().UnixNano())
 	service := NewEdgeService(store, "relay-subjects-test-credential-0123456789")
-	service.SetCredentialIssuer(testMintProvider(t, "k1", "k1"), "https://issuer.example.test", "")
+	service.SetSigner(testMintProvider(t, "k1", "k1"))
 	n := &relaySubjectsNode{t: t, store: store, service: service, id: name + "_node_" + x, epoch: name + "_epoch_" + x, account: name + "_acct_" + x, generation: 1}
 	t.Cleanup(func() {
 		bg := context.Background()
@@ -465,7 +465,7 @@ func trustWithdrawn(t *testing.T, raw []byte) []string {
 func TestRevokedSigningKeyReachesRelayTrustPostgres(t *testing.T) {
 	n := newRelaySubjectsNode(t, "relay_revoked_key")
 	ctx := t.Context()
-	n.service.SetCredentialIssuer(testMintProvider(t, "k2", "k1", "k2"), "https://issuer.example.test", "")
+	n.service.SetSigner(testMintProvider(t, "k2", "k1", "k2"))
 	n.exec(ctx, `UPDATE control_tunnel_nodes SET transports=ARRAY['derp_quic','derp_wss'] WHERE id=$1`, n.id)
 	operator := "opr_" + n.account
 	n.exec(ctx, `INSERT INTO operator_accounts (id,email,password_hash,role) VALUES ($1,$1||'@example.test','unused-test-password-hash','admin')`, operator)

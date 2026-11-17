@@ -985,24 +985,6 @@ SELECT * FROM control_connector_generations
 WHERE environment_id = sqlc.arg(environment_id) AND connector_id = sqlc.arg(connector_id)
 FOR UPDATE;
 
--- name: SelectReadyControlTunnelNode :one
-SELECT * FROM control_tunnel_nodes
-WHERE (edge_pool = sqlc.arg(edge_pool) OR EXISTS (SELECT 1 FROM selfhost_installations i WHERE i.node_id=control_tunnel_nodes.id)) AND state = 'ready' AND ready = true
-  AND EXISTS (SELECT 1 FROM tunnels t JOIN tunnel_routes r ON r.tunnel_id=t.id WHERE t.account_id=sqlc.arg(account_id)::text AND t.deleted_at IS NULL AND r.deleted_at IS NULL AND paperboat.node_route_eligible(control_tunnel_nodes.id,t.account_id,r.id))
-  AND last_heartbeat_at > sqlc.arg(stale_after)
-ORDER BY last_heartbeat_at DESC, id
-LIMIT 1;
-
--- name: SetControlConnectorAdmission :one
-UPDATE control_connector_generations
-SET edge_node_id = sqlc.arg(edge_node_id), state = 'admitted', admission_jti_hash = sqlc.arg(admission_jti_hash),
-    admission_operation_key = sqlc.arg(admission_operation_key), admission_request_hash = sqlc.arg(admission_request_hash),
-    admission_credential_ciphertext = sqlc.arg(admission_credential_ciphertext), expires_at = sqlc.arg(expires_at),
-    version = version + 1, updated_at = sqlc.arg(updated_at)
-WHERE environment_id = sqlc.arg(environment_id) AND connector_id = sqlc.arg(connector_id)
-  AND generation = sqlc.arg(generation)
-RETURNING *;
-
 -- name: ListControlRoutesForNode :many
 SELECT r.id AS route_id, r.desired_revision AS route_revision, r.environment_id, c.connector_id,
        c.generation AS connector_generation, c.edge_node_id, r.kind, r.public_host,
@@ -1030,14 +1012,6 @@ WHERE c.edge_node_id = sqlc.arg(edge_node_id)
   AND c.state IN ('pending','admitted')
   AND m.revoked_at IS NULL AND m.deleted_at IS NULL
 ORDER BY r.id;
-
--- name: ListControlRoutesForEnvironmentAdmission :many
-SELECT r.id AS route_id, r.desired_revision AS route_revision, r.kind, r.public_host, r.target_host, r.target_port
-FROM control_routes r
-WHERE r.environment_id = sqlc.arg(environment_id) AND r.connector_id = sqlc.arg(connector_id)
-  AND r.desired_state IN ('attached','replacing')
-ORDER BY r.id
-LIMIT 128;
 
 -- name: HeartbeatControlTunnelNode :one
 UPDATE control_tunnel_nodes

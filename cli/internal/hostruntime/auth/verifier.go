@@ -50,66 +50,64 @@ type Claims struct {
 	PolicyGeneration       int64  `json:"policy_generation,omitempty"`
 	AnnouncementGeneration int64  `json:"announcement_generation,omitempty"`
 
-	Issuer                 string              `json:"iss"`
-	Audience               string              `json:"aud"`
-	Subject                string              `json:"sub"`
-	JTI                    string              `json:"jti"`
-	IssuedAt               int64               `json:"iat"`
-	ExpiresAt              int64               `json:"exp"`
-	Scope                  []string            `json:"scope"`
-	CredentialClass        string              `json:"credential_class"`
-	EnvironmentID          string              `json:"environment_id,omitempty"`
-	AccountID              string              `json:"account_id,omitempty"`
-	UserID                 string              `json:"user_id,omitempty"`
-	BrowserAttachmentID    string              `json:"browser_attachment_id,omitempty"`
-	BrowserPublicKeySHA256 string              `json:"browser_public_key_sha256,omitempty"`
-	ActorID                string              `json:"actor_id,omitempty"`
-	CLIClientSessionID     string              `json:"cli_client_session_id,omitempty"`
-	HelperID               string              `json:"helper_id,omitempty"`
-	MachineID              string              `json:"machine_id,omitempty"`
-	InstallationGeneration int64               `json:"installation_generation,omitempty"`
-	SourceMachineID        string              `json:"source_machine_id,omitempty"`
-	SessionID              string              `json:"session_id,omitempty"`
-	OperationID            string              `json:"operation_id,omitempty"`
-	PreviewID              string              `json:"preview_id,omitempty"`
-	OwnerSessionID         string              `json:"owner_session_id,omitempty"`
-	OwnerSessionKind       string              `json:"owner_session_kind,omitempty"`
-	TargetScheme           string              `json:"target_scheme,omitempty"`
-	TargetAddress          string              `json:"target_address,omitempty"`
-	ResourceKind           string              `json:"resource_kind,omitempty"`
-	ResourceID             string              `json:"resource_id,omitempty"`
-	RouteID                string              `json:"route_id,omitempty"`
-	Protocol               string              `json:"protocol,omitempty"`
-	RouteGeneration        int64               `json:"route_generation,omitempty"`
-	TargetGeneration       int64               `json:"target_generation,omitempty"`
-	AccessMode             string              `json:"access_mode,omitempty"`
-	Endpoint               string              `json:"endpoint,omitempty"`
-	LeaseDeadline          int64               `json:"lease_deadline,omitempty"`
-	UserDeadline           *int64              `json:"user_deadline,omitempty"`
-	LeaseETag              string              `json:"lease_etag,omitempty"`
-	State                  string              `json:"state,omitempty"`
-	AllocationState        string              `json:"allocation_state,omitempty"`
-	EdgeState              string              `json:"edge_state,omitempty"`
-	OriginState            string              `json:"origin_state,omitempty"`
-	CreatedAt              int64               `json:"created_at,omitempty"`
-	LastRenewedAt          int64               `json:"last_renewed_at,omitempty"`
-	ExpectedGeneration     int64               `json:"expected_generation,omitempty"`
-	IdempotencyKey         string              `json:"idempotency_key,omitempty"`
-	RequestID              string              `json:"request_id,omitempty"`
-	CorrelationID          string              `json:"correlation_id,omitempty"`
-	RequestHash            string              `json:"request_hash,omitempty"`
-	AssignmentID           string              `json:"assignment_id,omitempty"`
-	AssignmentVersion      int64               `json:"assignment_version,omitempty"`
-	ConfigPath             string              `json:"config_path,omitempty"`
-	ConflictRevision       string              `json:"conflict_revision,omitempty"`
-	ExpectedRemoteRevision string              `json:"expected_remote_revision,omitempty"`
-	WarningRevision        string              `json:"warning_revision,omitempty"`
-	ConnectorID            string              `json:"connector_id,omitempty"`
-	ConnectorGeneration    uint64              `json:"connector_generation,omitempty"`
-	EdgePool               string              `json:"edge_pool,omitempty"`
-	EdgeNodeID             string              `json:"edge_node_id,omitempty"`
-	RouteBinding           string              `json:"route_binding,omitempty"`
-	FileTransferPolicy     *FileTransferPolicy `json:"file_transfer_policy,omitempty"`
+	Issuer                 string   `json:"iss"`
+	Audience               string   `json:"aud"`
+	Subject                string   `json:"sub"`
+	JTI                    string   `json:"jti"`
+	IssuedAt               int64    `json:"iat"`
+	ExpiresAt              int64    `json:"exp"`
+	Scope                  []string `json:"scope"`
+	CredentialClass        string   `json:"credential_class"`
+	EnvironmentID          string   `json:"environment_id,omitempty"`
+	AccountID              string   `json:"account_id,omitempty"`
+	UserID                 string   `json:"user_id,omitempty"`
+	BrowserAttachmentID    string   `json:"browser_attachment_id,omitempty"`
+	BrowserPublicKeySHA256 string   `json:"browser_public_key_sha256,omitempty"`
+	ActorID                string   `json:"actor_id,omitempty"`
+	CLIClientSessionID     string   `json:"cli_client_session_id,omitempty"`
+	HelperID               string   `json:"helper_id,omitempty"`
+	MachineID              string   `json:"machine_id,omitempty"`
+	InstallationGeneration int64    `json:"installation_generation,omitempty"`
+	SourceMachineID        string   `json:"source_machine_id,omitempty"`
+	SessionID              string   `json:"session_id,omitempty"`
+	OperationID            string   `json:"operation_id,omitempty"`
+	PreviewID              string   `json:"preview_id,omitempty"`
+	OwnerSessionID         string   `json:"owner_session_id,omitempty"`
+	OwnerSessionKind       string   `json:"owner_session_kind,omitempty"`
+	TargetScheme           string   `json:"target_scheme,omitempty"`
+	TargetAddress          string   `json:"target_address,omitempty"`
+	ResourceKind           string   `json:"resource_kind,omitempty"`
+	ResourceID             string   `json:"resource_id,omitempty"`
+	RouteID                string   `json:"route_id,omitempty"`
+	Protocol               string   `json:"protocol,omitempty"`
+	RouteGeneration        int64    `json:"route_generation,omitempty"`
+	TargetGeneration       int64    `json:"target_generation,omitempty"`
+	AccessMode             string   `json:"access_mode,omitempty"`
+	Endpoint               string   `json:"endpoint,omitempty"`
+	LeaseDeadline          int64    `json:"lease_deadline,omitempty"`
+	UserDeadline           *int64   `json:"user_deadline,omitempty"`
+	LeaseETag              string   `json:"lease_etag,omitempty"`
+	State                  string   `json:"state,omitempty"`
+	AllocationState        string   `json:"allocation_state,omitempty"`
+	EdgeState              string   `json:"edge_state,omitempty"`
+	OriginState            string   `json:"origin_state,omitempty"`
+	CreatedAt              int64    `json:"created_at,omitempty"`
+	LastRenewedAt          int64    `json:"last_renewed_at,omitempty"`
+	ExpectedGeneration     int64    `json:"expected_generation,omitempty"`
+	IdempotencyKey         string   `json:"idempotency_key,omitempty"`
+	RequestID              string   `json:"request_id,omitempty"`
+	CorrelationID          string   `json:"correlation_id,omitempty"`
+	RequestHash            string   `json:"request_hash,omitempty"`
+	AssignmentID           string   `json:"assignment_id,omitempty"`
+	AssignmentVersion      int64    `json:"assignment_version,omitempty"`
+	ConfigPath             string   `json:"config_path,omitempty"`
+	ConflictRevision       string   `json:"conflict_revision,omitempty"`
+	ExpectedRemoteRevision string   `json:"expected_remote_revision,omitempty"`
+	WarningRevision        string   `json:"warning_revision,omitempty"`
+	ConnectorID            string   `json:"connector_id,omitempty"`
+	ConnectorGeneration    uint64   `json:"connector_generation,omitempty"`
+	EdgePool               string   `json:"edge_pool,omitempty"`
+	EdgeNodeID             string   `json:"edge_node_id,omitempty"`
 	// TransferMode and MaxBytes bind a file_transfer credential to its mode (PLAN 3b, File transfer modes):
 	// "automatic" carries MaxBytes, the declared batch total (at most AutomaticTransferLimit); "unlimited" has none.
 	TransferMode string `json:"transfer_mode,omitempty"`
@@ -122,29 +120,8 @@ type Claims struct {
 	} `json:"cnf,omitempty"`
 }
 
-type FileTransferPolicy struct {
-	Revision               string `json:"revision"`
-	MaxBatchFiles          int    `json:"max_batch_files"`
-	MaxConcurrentTransfers int    `json:"max_concurrent_transfers"`
-	RetentionSeconds       int64  `json:"retention_seconds"`
-	DeliveryTimeoutSeconds int64  `json:"delivery_timeout_seconds"`
-	MaxPendingSpoolBytes   int64  `json:"max_pending_spool_bytes"`
-	AutomaticMaxBatchBytes int64  `json:"automatic_max_batch_bytes,omitempty"`
-}
-
 // AutomaticTransferLimit is the largest Automatic transfer: 2,000,000,000 bytes (PLAN 3b, File transfer modes).
 const AutomaticTransferLimit = int64(2_000_000_000)
-
-// Bounds is the per-file and per-batch byte bound: the server publishes one Automatic batch bound, which
-// limits every file as well as the batch.
-func (p FileTransferPolicy) Bounds() (file, batch int64) {
-	return p.AutomaticMaxBatchBytes, p.AutomaticMaxBatchBytes
-}
-
-func (p FileTransferPolicy) ValidBounds() bool {
-	file, batch := p.Bounds()
-	return file > 0 && file <= batch && batch <= AutomaticTransferLimit && p.MaxPendingSpoolBytes >= batch
-}
 
 type Policy struct {
 	Issuer          string

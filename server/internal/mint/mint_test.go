@@ -1166,3 +1166,16 @@ func TestSignVisitorAssertion(t *testing.T) {
 		t.Fatal("signed an assertion longer than MaxProofTTL")
 	}
 }
+
+// connector_admission was retired with the endpoint that issued it: nothing may sign one.
+func TestRetiredConnectorAdmissionClassIsNotSigned(t *testing.T) {
+	provider, err := New([]Key{{ID: "retired-key", PrivateKey: testKey(12)}}, "retired-key", time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Unix(1_700_000_000, 0)
+	input := CredentialInput{Issuer: "https://api.example.test", Audience: "paperboat-edge", Subject: "machine_1", JTI: "jti_retired_1", IssuedAt: now, ExpiresAt: now.Add(time.Minute), CredentialClass: "connector_admission", Scopes: []string{"connector:admit"}, MachineID: "machine_1", InstallationGeneration: 1, ConnectorID: "runtime", EdgeNodeID: "edge_1"}
+	if _, err := provider.SignCredential(input); err == nil {
+		t.Fatal("signed a retired connector_admission credential")
+	}
+}

@@ -9,12 +9,10 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"database/sql"
-	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
-	serverconfig "github.com/pinksaucepasta/paperboat/server/internal/config"
 	"io"
 	"math/big"
 	"net/http"
@@ -110,13 +108,6 @@ type stormDatabaseProfile struct {
 	BlocksHit          int64 `json:"blocks_hit"`
 }
 
-type stormHelperIdentity struct {
-	Credential string
-	PrivateKey ed25519.PrivateKey
-	HelperID   string
-	MachineID  string
-}
-
 func TestControlPlaneStorm(t *testing.T) {
 	if os.Getenv("PAPERBOAT_CONTROL_STORM") != "1" {
 		t.Skip("set PAPERBOAT_CONTROL_STORM=1 to run the PostgreSQL control storm")
@@ -161,8 +152,7 @@ func runControlStorm(t *testing.T, machines int) controlStormReport {
 	if err != nil {
 		t.Fatal(err)
 	}
-	service.SetCredentialIssuer(signer, "https://control-storm.paperboat.test", "paperboat-control-storm-encryption-key")
-	service.SetFileTransferPolicy(serverconfig.Default().Access.FileTransfer.Published())
+	service.SetSigner(signer)
 	server := httptest.NewTLSServer(service.Handler())
 	defer server.Close()
 	transport := server.Client().Transport.(*http.Transport).Clone()
@@ -206,7 +196,7 @@ func runControlStorm(t *testing.T, machines int) controlStormReport {
 			t.Fatal(err)
 		}
 	}
-	helpers := seedStormAssignments(t, ctx, store.SQL(), signer, prefix, machines)
+	seedStormAssignments(t, ctx, store.SQL(), prefix, machines)
 	report.Phases = append(report.Phases,
 		runStormPhase(t, ctx, "route_snapshot", machines, func(index int) (int64, int64, error) {
 			return stormRequest(ctx, client, http.MethodPost, server.URL+"/v1/edge/routes/desired-state", controlStormCredential, map[string]string{"edge_node_id": prefix + strconv.Itoa(index)})
@@ -228,9 +218,6 @@ func runControlStorm(t *testing.T, machines int) controlStormReport {
 		}),
 		runStormPhase(t, ctx, "post_fence_snapshot", machines, func(index int) (int64, int64, error) {
 			return stormRequest(ctx, client, http.MethodPost, server.URL+"/v1/edge/routes/desired-state", controlStormCredential, map[string]string{"edge_node_id": prefix + strconv.Itoa(index)})
-		}),
-		runStormPhase(t, ctx, "replacement_admission", stale, func(index int) (int64, int64, error) {
-			return stormAdmissionRequest(ctx, client, server.URL, prefix, index*2, helpers[index*2])
 		}),
 	)
 	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.control_signing_key_revocations (key_id,reason,revoked_at)
@@ -477,7 +464,7 @@ type stormSQL interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 }
 
-func seedStormAssignments(t *testing.T, ctx context.Context, database stormSQL, signer *mint.Provider, prefix string, machines int) []stormHelperIdentity {
+func seedStormAssignments(t *testing.T, ctx context.Context, database stormSQL, prefix string, machines int) {
 	t.Helper()
 	statements := []string{
 		`INSERT INTO paperboat.users (id,workos_subject,primary_email,status)
@@ -504,61 +491,29 @@ func seedStormAssignments(t *testing.T, ctx context.Context, database stormSQL, 
 			t.Fatal(err)
 		}
 	}
-	helpers := make([]stormHelperIdentity, machines)
-	now := time.Now().UTC()
-	for index := range helpers {
-		seed := sha256Sum(prefix + "helper-key-" + strconv.Itoa(index))
-		privateKey := ed25519.NewKeyFromSeed(seed)
-		publicKey := privateKey.Public().(ed25519.PublicKey)
-		thumbprintHash := sha256.Sum256(publicKey)
-		thumbprint := "sha256:" + base64.RawURLEncoding.EncodeToString(thumbprintHash[:])
-		helperID := prefix + "helper_" + strconv.Itoa(index)
-		machineID := prefix + "machine_" + strconv.Itoa(index)
-		if _, err := database.ExecContext(ctx, `UPDATE paperboat.user_machines SET public_identity_key=$2 WHERE id=$1`,
-			machineID, base64.RawURLEncoding.EncodeToString(publicKey)); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := database.ExecContext(ctx, `INSERT INTO paperboat.control_helpers
-			(id,environment_id,key_thumbprint,public_key,state) VALUES ($1,$2,$3,$4,'active')`,
-			helperID, prefix+"env_"+strconv.Itoa(index), thumbprint, publicKey); err != nil {
-			t.Fatal(err)
-		}
-		credential, err := signer.SignCredential(mint.CredentialInput{
-			Issuer: "https://control-storm.paperboat.test", Audience: "paperboat-control",
-			Subject: helperID, JTI: prefix + "identity_" + strconv.Itoa(index), IssuedAt: now,
-			ExpiresAt: now.Add(time.Hour), CredentialClass: "helper_identity",
-			Scopes: []string{"helper:connect", "helper:renew"}, EnvironmentID: prefix + "env_" + strconv.Itoa(index),
-			HelperID: helperID, MachineID: machineID, KeyThumbprint: thumbprint,
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		helpers[index] = stormHelperIdentity{Credential: credential, PrivateKey: privateKey, HelperID: helperID, MachineID: machineID}
-	}
-	return helpers
 }
 
 func assertStormReplacement(t *testing.T, ctx context.Context, database stormSQL, prefix string, machines, stale int) {
 	t.Helper()
-	var staleNodes, replacedConnectors, advancedRoutes, liveConnectors, liveRoutes int
+	var staleNodes, fencedConnectors, advancedRoutes, liveConnectors, liveRoutes int
 	err := database.QueryRowContext(ctx, `SELECT
 		(SELECT count(*) FROM paperboat.control_tunnel_nodes node WHERE node.id LIKE $1 || '%' AND mod(substring(node.id from length($1) + 1)::integer,2)=0 AND node.state='offline' AND NOT node.ready),
-		(SELECT count(*) FROM paperboat.control_connector_generations connector JOIN paperboat.control_tunnel_nodes node ON node.id=connector.edge_node_id
+		(SELECT count(*) FROM paperboat.control_connector_generations connector
 		 WHERE connector.machine_id LIKE $1 || 'machine_%' AND mod(substring(connector.machine_id from length($1 || 'machine_') + 1)::integer,2)=0
-		   AND connector.state='admitted' AND connector.generation=2 AND node.state='ready' AND node.ready),
+		   AND connector.state='pending' AND connector.generation=2 AND connector.edge_node_id IS NULL),
 		(SELECT count(*) FROM paperboat.control_routes route WHERE route.id LIKE $1 || 'route_%'
 		   AND mod(substring(route.id from length($1 || 'route_') + 1)::integer,2)=0 AND route.desired_revision=2 AND route.applied_revision=0 AND route.applied_node_id IS NULL AND route.applied_generation IS NULL),
 		(SELECT count(*) FROM paperboat.control_connector_generations connector JOIN paperboat.control_tunnel_nodes node ON node.id=connector.edge_node_id
 		 WHERE connector.machine_id LIKE $1 || 'machine_%' AND mod(substring(connector.machine_id from length($1 || 'machine_') + 1)::integer,2)=1
 		   AND connector.state='admitted' AND connector.generation=1 AND node.state='ready' AND node.ready),
 		(SELECT count(*) FROM paperboat.control_routes route WHERE route.id LIKE $1 || 'route_%'
-		   AND mod(substring(route.id from length($1 || 'route_') + 1)::integer,2)=1 AND route.desired_revision=1 AND route.applied_revision=1 AND route.applied_generation=1)`, prefix).Scan(&staleNodes, &replacedConnectors, &advancedRoutes, &liveConnectors, &liveRoutes)
+		   AND mod(substring(route.id from length($1 || 'route_') + 1)::integer,2)=1 AND route.desired_revision=1 AND route.applied_revision=1 AND route.applied_generation=1)`, prefix).Scan(&staleNodes, &fencedConnectors, &advancedRoutes, &liveConnectors, &liveRoutes)
 	if err != nil {
 		t.Fatal(err)
 	}
 	live := machines - stale
-	if staleNodes != stale || replacedConnectors != stale || advancedRoutes != stale || liveConnectors != live || liveRoutes != live {
-		t.Fatalf("replacement stale_nodes=%d admitted=%d advanced=%d live_connectors=%d live_routes=%d want stale=%d live=%d", staleNodes, replacedConnectors, advancedRoutes, liveConnectors, liveRoutes, stale, live)
+	if staleNodes != stale || fencedConnectors != stale || advancedRoutes != stale || liveConnectors != live || liveRoutes != live {
+		t.Fatalf("replacement stale_nodes=%d fenced=%d advanced=%d live_connectors=%d live_routes=%d want stale=%d live=%d", staleNodes, fencedConnectors, advancedRoutes, liveConnectors, liveRoutes, stale, live)
 	}
 }
 
@@ -613,57 +568,6 @@ func stormPhaseCeiling(name string) time.Duration {
 	default:
 		return 2 * time.Second
 	}
-}
-
-func stormAdmissionRequest(ctx context.Context, client *http.Client, baseURL, prefix string, index int, helper stormHelperIdentity) (int64, int64, error) {
-	operationID := prefix + "replacement_" + strconv.Itoa(index)
-	payload, err := json.Marshal(connectorAdmissionRequest{
-		OperationID: operationID, EnvironmentID: prefix + "env_" + strconv.Itoa(index), MachineID: helper.MachineID,
-		ConnectorID: "runtime", EdgePool: "default", ProtocolVersion: "1.0",
-	})
-	if err != nil {
-		return 0, 0, err
-	}
-	bodyHash := sha256.Sum256(payload)
-	now := time.Now().UTC()
-	claims := HelperProofClaims{HelperID: helper.HelperID, EnvironmentID: prefix + "env_" + strconv.Itoa(index), OperationID: operationID, Nonce: proofTestNonce(),
-		Method: http.MethodPost, Path: "/v1/connectors/admission", BodySHA256: base64.RawURLEncoding.EncodeToString(bodyHash[:]), IssuedAt: now, ExpiresAt: now.Add(time.Minute)}
-	proofPayload, err := json.Marshal(claims)
-	if err != nil {
-		return int64(len(payload)), 0, err
-	}
-	proof, err := json.Marshal(helperProofEnvelope{Algorithm: "EdDSA", Payload: base64.RawURLEncoding.EncodeToString(proofPayload), Signature: base64.RawURLEncoding.EncodeToString(ed25519.Sign(helper.PrivateKey, proofPayload))})
-	if err != nil {
-		return int64(len(payload)), 0, err
-	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/v1/connectors/admission", bytes.NewReader(payload))
-	if err != nil {
-		return int64(len(payload)), 0, err
-	}
-	request.Header.Set("Authorization", "Bearer "+helper.Credential)
-	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("Accept", "application/json")
-	request.Header.Set("X-Paperboat-Machine-Proof", base64.RawURLEncoding.EncodeToString(proof))
-	response, err := client.Do(request)
-	if err != nil {
-		return int64(len(payload)), 0, err
-	}
-	defer response.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(response.Body, maxEdgeDocument+1))
-	if err != nil {
-		return int64(len(payload)), int64(len(body)), err
-	}
-	if response.StatusCode != http.StatusOK {
-		return int64(len(payload)), int64(len(body)), fmt.Errorf("status=%d body=%s", response.StatusCode, strings.TrimSpace(string(body)))
-	}
-	var admission ConnectorAdmission
-	if err := json.Unmarshal(body, &admission); err != nil {
-		return int64(len(payload)), int64(len(body)), err
-	}
-	if admission.ConnectorGeneration != 2 || admission.EdgeNodeID == "" || admission.EdgeNodeID == prefix+strconv.Itoa(index) || len(admission.Routes) != 1 || admission.Routes[0].RouteRevision != 2 {
-		return int64(len(payload)), int64(len(body)), fmt.Errorf("invalid replacement admission generation=%d node=%q routes=%d", admission.ConnectorGeneration, admission.EdgeNodeID, len(admission.Routes))
-	}
-	return int64(len(payload)), int64(len(body)), nil
 }
 
 func sha256Sum(value string) []byte {

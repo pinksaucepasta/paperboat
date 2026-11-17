@@ -664,26 +664,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/connectors/admission": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Issue connector admission
-         * @description Consumes an environment/helper-bound identity and Ed25519 proof over the exact request body. Exact operation replays return the encrypted recorded decision.
-         */
-        post: operations["post_v1_connectors_admission"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/v1/helper-enrollments": {
         parameters: {
             query?: never;
@@ -10261,49 +10241,6 @@ export interface components {
             }[];
             pagination?: components["schemas"]["InventoryCursorPagination"];
         };
-        ConnectorAdmissionRequest: {
-            operation_id: string;
-            environment_id: string;
-            machine_id: string;
-            connector_id: string;
-            edge_pool: string;
-            /** @constant */
-            protocol_version: "1.0";
-        };
-        ConnectorRouteHandoff: {
-            route_id: string;
-            route_revision: number;
-            /** @enum {string} */
-            kind: "runtime_https_wss";
-            /** Format: hostname */
-            public_host: string;
-            proxy_name: string;
-            target: {
-                /** @enum {string} */
-                host: "127.0.0.1" | "::1";
-                port: number;
-            };
-        };
-        ConnectorAdmission: {
-            operation_id: string;
-            environment_id: string;
-            machine_id: string;
-            connector_id: string;
-            connector_generation: number;
-            edge_pool: string;
-            edge_node_id: string;
-            /** Format: uri */
-            relay_http_endpoint: string;
-            edge_endpoint: {
-                host: string;
-                port: number;
-            };
-            routes: components["schemas"]["ConnectorRouteHandoff"][];
-            /** @constant */
-            protocol_version: "1.0";
-            capabilities?: string[];
-            credential: string;
-        };
         AvailabilityPolicy: {
             /** @constant */
             schema: "paperboat.availability-policy/v1";
@@ -15216,35 +15153,6 @@ export interface operations {
                 };
                 content?: never;
             };
-            401: components["responses"]["Error"];
-            409: components["responses"]["Error"];
-        };
-    };
-    post_v1_connectors_admission: {
-        parameters: {
-            query?: never;
-            header: {
-                "X-Paperboat-Machine-Proof": string;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ConnectorAdmissionRequest"];
-            };
-        };
-        responses: {
-            /** @description Connector admission credential, assigned endpoint, and route handoffs. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ConnectorAdmission"];
-                };
-            };
-            400: components["responses"]["Error"];
             401: components["responses"]["Error"];
             409: components["responses"]["Error"];
         };

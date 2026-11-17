@@ -8,7 +8,6 @@ import (
 	"crypto/x509"
 	"database/sql"
 	"encoding/base64"
-	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
@@ -24,7 +23,6 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/pinksaucepasta/paperboat/server/internal/admission"
 	"github.com/pinksaucepasta/paperboat/shared/edgelimits"
 	"github.com/pinksaucepasta/paperboat/shared/jwks"
 	"github.com/pinksaucepasta/paperboat/shared/routeobservation"
@@ -39,7 +37,6 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/endpoints"
 	"github.com/pinksaucepasta/paperboat/server/internal/mint"
 	"github.com/pinksaucepasta/paperboat/server/internal/nodeauth"
-	"github.com/pinksaucepasta/paperboat/server/internal/secrets"
 	"github.com/pinksaucepasta/paperboat/server/internal/supportreport"
 	"github.com/pinksaucepasta/paperboat/server/internal/tunnelv1"
 )
@@ -47,7 +44,6 @@ import (
 const maxEdgeDocument = 1 << 20
 
 var (
-	ErrEdgeNodeUnavailable               = errors.New("no ready edge node is available")
 	errEdgeFailureCauseMissing           = errors.New("edge request failed without a diagnostic cause")
 	errBrowserTerminalControlUnavailable = errors.New("browser terminal edge control is unavailable")
 )
@@ -64,9 +60,6 @@ type EdgeService struct {
 	ingressLimits           edgelimits.IngressLimits
 	audit                   *audit.Writer
 	signer                  *mint.Provider
-	issuer                  string
-	encryptionKey           string
-	fileTransferPolicy      mint.FileTransferPolicy
 	certificateDistribution http.Handler
 	http01                  HTTP01Source
 	browserTerminal         interface {
@@ -90,12 +83,7 @@ func (s *EdgeService) SetScopedBandwidthDebiter(debiter ScopedBandwidthDebiter) 
 
 func (s *EdgeService) SetBandwidthDebiter(debiter BandwidthDebiter) { s.bandwidth = debiter }
 func (s *EdgeService) SetAuditWriter(writer *audit.Writer)          { s.audit = writer }
-func (s *EdgeService) SetCredentialIssuer(signer *mint.Provider, issuer, encryptionKey string) {
-	s.signer, s.issuer, s.encryptionKey = signer, strings.TrimRight(strings.TrimSpace(issuer), "/"), encryptionKey
-}
-func (s *EdgeService) SetFileTransferPolicy(policy mint.FileTransferPolicy) {
-	s.fileTransferPolicy = policy
-}
+func (s *EdgeService) SetSigner(signer *mint.Provider)              { s.signer = signer }
 
 // SetCertificateDistribution mounts the internal certificate distribution
 // transport beneath the already authenticated edge-control handler. The
@@ -113,68 +101,6 @@ func (s *EdgeService) SetBrowserTerminalGateway(gateway interface {
 	ServeEdgeControl(http.ResponseWriter, *http.Request, string, string)
 }) {
 	s.browserTerminal = gateway
-}
-
-type ConnectorAdmission struct {
-	OperationID         string `json:"operation_id"`
-	Credential          string `json:"credential"`
-	EnvironmentID       string `json:"environment_id"`
-	MachineID           string `json:"machine_id"`
-	ConnectorID         string `json:"connector_id"`
-	ConnectorGeneration int64  `json:"connector_generation"`
-	EdgePool            string `json:"edge_pool"`
-	EdgeNodeID          string `json:"edge_node_id"`
-	EdgeEndpoint        struct {
-		Host     string `json:"host"`
-		Port     int32  `json:"port"`
-		TCPPort  int32  `json:"tcp_port"`
-		QUICPort int32  `json:"quic_port"`
-	} `json:"edge_endpoint"`
-	Routes             []ConnectorRouteHandoff `json:"routes"`
-	ProtocolVersion    string                  `json:"protocol_version"`
-	Capabilities       []string                `json:"capabilities,omitempty"`
-	FileTransferPolicy mint.FileTransferPolicy `json:"file_transfer_policy"`
-	ExpiresAt          time.Time               `json:"-"`
-}
-
-type ConnectorRouteHandoff struct {
-	RouteID       string `json:"route_id"`
-	RouteRevision int64  `json:"route_revision"`
-	Kind          string `json:"kind"`
-	PublicHost    string `json:"public_host"`
-	ProxyName     string `json:"proxy_name"`
-	Target        struct {
-		Host string `json:"host"`
-		Port int32  `json:"port"`
-	} `json:"target"`
-}
-
-func connectorRouteBinding(routes []ConnectorRouteHandoff) string {
-	hash := sha256.New()
-	var size [8]byte
-	binary.BigEndian.PutUint64(size[:], uint64(len(routes)))
-	_, _ = hash.Write(size[:])
-	for _, route := range routes {
-		for _, value := range []string{route.RouteID, route.Kind, route.PublicHost, route.ProxyName, route.Target.Host} {
-			binary.BigEndian.PutUint64(size[:], uint64(len(value)))
-			_, _ = hash.Write(size[:])
-			_, _ = io.WriteString(hash, value)
-		}
-		binary.BigEndian.PutUint64(size[:], uint64(route.RouteRevision))
-		_, _ = hash.Write(size[:])
-		binary.BigEndian.PutUint64(size[:], uint64(route.Target.Port))
-		_, _ = hash.Write(size[:])
-	}
-	return base64.RawURLEncoding.EncodeToString(hash.Sum(nil))
-}
-
-type connectorAdmissionRequest struct {
-	OperationID     string `json:"operation_id"`
-	EnvironmentID   string `json:"environment_id"`
-	MachineID       string `json:"machine_id"`
-	ConnectorID     string `json:"connector_id"`
-	EdgePool        string `json:"edge_pool"`
-	ProtocolVersion string `json:"protocol_version"`
 }
 
 type RevocationDocument struct {
@@ -365,107 +291,6 @@ func (s *EdgeService) RevokeSigningKey(ctx context.Context, actorID, idempotency
 		}
 		return s.audit.WriteTx(ctx, tx, audit.Event{ActorUserID: actorID, ActorType: audit.ActorAdmin, EventType: "mint.signing_key_revoked", ResourceType: "mint_signing_key", ResourceID: keyID, IdempotencyKey: idempotencyKey, Metadata: map[string]any{"reason": reason}})
 	})
-}
-
-func (s *EdgeService) IssueConnectorAdmission(ctx context.Context, identityToken string, proof, body []byte, edgePool, method, path string) (ConnectorAdmission, error) {
-	if s.signer == nil || s.issuer == "" || s.encryptionKey == "" || edgePool == "" {
-		return ConnectorAdmission{}, ErrHelperProof
-	}
-	claims, err := (&EnrollmentService{store: s.store, signer: s.signer, issuer: s.issuer, clock: s.clock}).VerifyMachineRequest(ctx, identityToken, proof, method, path, body)
-	if err != nil {
-		return ConnectorAdmission{}, err
-	}
-	var request connectorAdmissionRequest
-	if strictProofJSON(body, &request) != nil || request.OperationID != claims.OperationID || request.EnvironmentID != claims.EnvironmentID || request.MachineID != claims.MachineID || !validConnectorID(request.ConnectorID) || request.EdgePool != edgePool || request.ProtocolVersion != "1.0" {
-		return ConnectorAdmission{}, ErrHelperProof
-	}
-	now := s.clock().UTC()
-	requestHash := sha256.Sum256(append([]byte(claims.MachineID+"\x00"+claims.EnvironmentID+"\x00"+request.ConnectorID+"\x00"+edgePool+"\x00"), body...))
-	operationKey := "connector-admission:" + claims.MachineID + ":" + request.ConnectorID + ":" + claims.OperationID
-	var result ConnectorAdmission
-	// The connector generation row lock serializes admission for the same
-	// connector. Node selection is observational and does not require SSI
-	// predicate protection across otherwise independent connectors.
-	err = s.store.InReadCommittedTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-		routes, err := tx.Queries().ListControlRoutesForEnvironmentAdmission(ctx, dbsqlc.ListControlRoutesForEnvironmentAdmissionParams{EnvironmentID: claims.EnvironmentID, ConnectorID: request.ConnectorID})
-		if err != nil {
-			return err
-		}
-		if len(routes) == 0 || len(routes) > 128 {
-			return ErrHelperProof
-		}
-		generation, err := tx.Queries().GetControlConnectorGenerationForUpdate(ctx, dbsqlc.GetControlConnectorGenerationForUpdateParams{EnvironmentID: claims.EnvironmentID, ConnectorID: request.ConnectorID})
-		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, pgx.ErrNoRows) {
-			generation, err = tx.Queries().EnsureControlConnectorMachine(ctx, dbsqlc.EnsureControlConnectorMachineParams{EnvironmentID: claims.EnvironmentID, ConnectorID: request.ConnectorID, MachineID: claims.MachineID, EdgePool: edgePool})
-		}
-		if err != nil {
-			return err
-		}
-		if generation.MachineID != claims.MachineID || generation.State == "revoked" {
-			return ErrHelperProof
-		}
-		if generation.AdmissionOperationKey.Valid {
-			if generation.AdmissionOperationKey.String == operationKey {
-				if !bytes.Equal(generation.AdmissionRequestHash, requestHash[:]) {
-					return ErrUsageOperationConflict
-				}
-				plaintext, decryptErr := secrets.Decrypt(s.encryptionKey, generation.AdmissionCredentialCiphertext)
-				if decryptErr != nil || json.Unmarshal([]byte(plaintext), &result) != nil {
-					return ErrHelperProof
-				}
-				return nil
-			}
-		}
-		node, err := tx.Queries().SelectReadyControlTunnelNode(ctx, dbsqlc.SelectReadyControlTunnelNodeParams{AccountID: claims.UserID, EdgePool: edgePool, StaleAfter: sql.NullTime{Time: now.Add(-controlTunnelNodeStaleAfter), Valid: true}})
-		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, pgx.ErrNoRows) {
-			return ErrEdgeNodeUnavailable
-		}
-		if err != nil {
-			return err
-		}
-		if !node.EndpointHost.Valid || !node.EndpointTcpPort.Valid || !node.EndpointQuicPort.Valid {
-			return ErrEdgeNodeUnavailable
-		}
-		jti, err := randomHex("token")
-		if err != nil {
-			return err
-		}
-		expiresAt := admission.Expiry(s.signer, now)
-		policy := s.fileTransferPolicy
-		handoffs := make([]ConnectorRouteHandoff, 0, len(routes))
-		for _, route := range routes {
-			handoff := ConnectorRouteHandoff{RouteID: route.RouteID, RouteRevision: route.RouteRevision, Kind: route.Kind, PublicHost: route.PublicHost, ProxyName: route.RouteID}
-			handoff.Target.Host, handoff.Target.Port = route.TargetHost, route.TargetPort
-			handoffs = append(handoffs, handoff)
-		}
-		binding := connectorRouteBinding(handoffs)
-		token, err := admission.Sign(s.signer, mint.CredentialInput{Issuer: s.issuer, Audience: "paperboat-edge", Subject: claims.MachineID, JTI: jti, IssuedAt: now, ExpiresAt: expiresAt, CredentialClass: "connector_admission", Scopes: []string{"connector:admit"}, EnvironmentID: claims.EnvironmentID, MachineID: claims.MachineID, InstallationGeneration: claims.InstallationGeneration, ConnectorID: request.ConnectorID, ConnectorGeneration: generation.Generation, EdgePool: edgePool, EdgeNodeID: node.ID, RouteBinding: binding, FileTransferPolicy: &policy})
-		if err != nil {
-			return err
-		}
-		result = ConnectorAdmission{OperationID: claims.OperationID, Credential: token, EnvironmentID: claims.EnvironmentID, MachineID: claims.MachineID, ConnectorID: request.ConnectorID, ConnectorGeneration: generation.Generation, EdgePool: edgePool, EdgeNodeID: node.ID, Routes: handoffs, ProtocolVersion: "1.0", FileTransferPolicy: policy, ExpiresAt: expiresAt}
-		result.EdgeEndpoint.Host, result.EdgeEndpoint.Port = node.EndpointHost.String, node.EndpointTcpPort.Int32
-		result.EdgeEndpoint.TCPPort, result.EdgeEndpoint.QUICPort = node.EndpointTcpPort.Int32, node.EndpointQuicPort.Int32
-		resultJSON, err := json.Marshal(result)
-		if err != nil {
-			return err
-		}
-		ciphertext, err := secrets.Encrypt(s.encryptionKey, string(resultJSON))
-		if err != nil {
-			return err
-		}
-		jtiHash := sha256.Sum256([]byte(jti))
-		_, err = tx.Queries().SetControlConnectorAdmission(ctx, dbsqlc.SetControlConnectorAdmissionParams{EnvironmentID: claims.EnvironmentID, ConnectorID: request.ConnectorID, Generation: generation.Generation, EdgeNodeID: sql.NullString{String: node.ID, Valid: true}, AdmissionJtiHash: jtiHash[:], AdmissionOperationKey: sql.NullString{String: operationKey, Valid: true}, AdmissionRequestHash: requestHash[:], AdmissionCredentialCiphertext: ciphertext, ExpiresAt: sql.NullTime{Time: expiresAt, Valid: true}, UpdatedAt: now})
-		return err
-	})
-	return result, err
-}
-
-func validConnectorID(value string) bool {
-	if value == "runtime" {
-		return true
-	}
-	return strings.HasPrefix(value, "p-") && len(value) == 28
 }
 
 func (s *EdgeService) ProvisionUsageKey(ctx context.Context, actorID, idempotencyKey, keyID, nodeID string, publicKey []byte, notBefore, expiresAt time.Time) error {
@@ -812,10 +637,6 @@ func (s *EdgeService) Handler() http.Handler {
 		mux.Handle("/v1/edge/certificates/distributions/", s.certificateDistribution)
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodPost && r.URL.Path == "/v1/connectors/admission" {
-			s.handleConnectorAdmission(w, r)
-			return
-		}
 		authorized, authErr := s.authorizeNodeRequest(r)
 		if authErr != nil {
 			writeEdgeError(w, r, http.StatusServiceUnavailable, "control_unavailable", true, 1000, authErr)
@@ -918,42 +739,6 @@ func (s *EdgeService) handleJWKS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeEdgeJSON(w, http.StatusOK, document)
-}
-
-func (s *EdgeService) handleConnectorAdmission(w http.ResponseWriter, r *http.Request) {
-	defer r.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(r.Body, maxEdgeDocument+1))
-	if err != nil || len(body) > maxEdgeDocument || !strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
-		writeEdgeError(w, r, http.StatusBadRequest, "invalid_request", false, 0)
-		return
-	}
-	var input connectorAdmissionRequest
-	decoder := json.NewDecoder(bytes.NewReader(body))
-	decoder.DisallowUnknownFields()
-	if decoder.Decode(&input) != nil || decoder.Decode(&struct{}{}) != io.EOF {
-		writeEdgeError(w, r, http.StatusBadRequest, "invalid_request", false, 0)
-		return
-	}
-	identity := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
-	proof, err := base64.RawURLEncoding.DecodeString(r.Header.Get("X-Paperboat-Machine-Proof"))
-	if err != nil {
-		writeEdgeError(w, r, http.StatusUnauthorized, "credential_invalid", false, 0)
-		return
-	}
-	result, err := s.IssueConnectorAdmission(r.Context(), identity, proof, body, input.EdgePool, r.Method, r.URL.Path)
-	if err != nil {
-		if errors.Is(err, ErrUsageOperationConflict) {
-			writeEdgeError(w, r, http.StatusConflict, "operation_conflict", false, 0, err)
-			return
-		}
-		if errors.Is(err, ErrHelperProof) {
-			writeEdgeError(w, r, http.StatusUnauthorized, "credential_invalid", false, 0, err)
-			return
-		}
-		writeEdgeError(w, r, http.StatusServiceUnavailable, "control_unavailable", true, 1000, err)
-		return
-	}
-	writeEdgeJSON(w, http.StatusOK, result)
 }
 
 func (s *EdgeService) decode(w http.ResponseWriter, r *http.Request, target any) bool {

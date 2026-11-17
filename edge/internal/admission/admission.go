@@ -19,7 +19,6 @@ type Claims struct {
 	ConnectorGeneration    uint64
 	EdgePool               string
 	EdgeNodeID             string
-	RouteBinding           string
 	// AssignmentID is a runtime credential's access session: the server's usage
 	// accounting authority for the session's bytes through the edge.
 	AssignmentID string

@@ -37,7 +37,7 @@ func TestEdgeServesMintTrustDocumentThroughRotation(t *testing.T) {
 	const credential = "managed-control-credential-012345678901"
 	signer := testMintProvider(t, "new", "old", "new")
 	service := NewEdgeService(nil, credential)
-	service.SetCredentialIssuer(signer, "https://issuer.example.test", "")
+	service.SetSigner(signer)
 	fetch := func(token string) *httptest.ResponseRecorder {
 		request := httptest.NewRequest(http.MethodGet, "/v1/trust/jwks", nil)
 		if token != "" {
@@ -85,7 +85,7 @@ func TestEdgeServesMintTrustDocumentThroughRotation(t *testing.T) {
 // active kid is refused before it can reach a served trust document (and make every client refuse it).
 func TestRevokeSigningKeyRefusesUnknownOverlongAndActiveKeys(t *testing.T) {
 	service := NewEdgeService(nil, "managed-control-credential-012345678901")
-	service.SetCredentialIssuer(testMintProvider(t, "new", "old", "new"), "https://issuer.example.test", "")
+	service.SetSigner(testMintProvider(t, "new", "old", "new"))
 	for _, kid := range []string{"unknown", strings.Repeat("k", 200), "new"} {
 		if err := service.RevokeSigningKey(t.Context(), "opr_1", "op-"+kid[:3], kid, "compromise", time.Now()); !errors.Is(err, ErrInvalidUsageReport) {
 			t.Errorf("RevokeSigningKey(%.12q) = %v, want ErrInvalidUsageReport", kid, err)

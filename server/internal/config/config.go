@@ -9,8 +9,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/server/internal/accessdescriptor"
 	"github.com/pinksaucepasta/paperboat/server/internal/admission"
-	"github.com/pinksaucepasta/paperboat/server/internal/mint"
 	"github.com/pinksaucepasta/paperboat/shared/edgelimits"
 	"net"
 	"net/url"
@@ -1132,9 +1132,9 @@ func validEndpointBaseDomain(raw string) bool {
 	return true
 }
 
-// Published is the file transfer policy as clients receive it (descriptor and connector admission).
-func (p FileTransferPolicy) Published() mint.FileTransferPolicy {
-	return mint.FileTransferPolicy{
+// Published is the file transfer policy as clients receive it (the access descriptor).
+func (p FileTransferPolicy) Published() accessdescriptor.FileTransferPolicy {
+	return accessdescriptor.FileTransferPolicy{
 		Revision: p.Revision, MaxBatchFiles: p.MaxBatchFiles, AutomaticMaxBatchBytes: p.AutomaticMaxBatchBytes,
 		MaxConcurrentTransfers: p.MaxConcurrentTransfers, RetentionSeconds: int64(p.Retention / time.Second),
 		DeliveryTimeoutSeconds: int64(p.DeliveryTimeout / time.Second), MaxPendingSpoolBytes: p.MaxPendingSpoolBytes,
