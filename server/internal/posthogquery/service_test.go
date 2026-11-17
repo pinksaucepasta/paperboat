@@ -145,7 +145,7 @@ func TestQueryNeverFollowsARedirectWithTheKey(t *testing.T) {
 		w.Write([]byte(`{"results":[]}`))
 	}))
 	defer other.Close()
-	redirect := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, other.URL, 302) }))
+	redirect := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, other.URL, http.StatusFound) }))
 	defer redirect.Close()
 	s := New(Config{Host: redirect.URL, ProjectID: "1", Key: "k", Client: redirect.Client()})
 	if _, err := s.Overview(context.Background(), 7); !errors.Is(err, ErrProvider) || leaked.Load() {
