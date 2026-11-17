@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"go4.org/mem"
+	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=namespaced-generation-key-derivation
 	"tailscale.com/types/key"
 )
 

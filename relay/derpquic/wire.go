@@ -11,6 +11,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
 	"github.com/quic-go/quic-go"
 	"go4.org/mem"
+	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=keyed-packet-wire-format
 	"tailscale.com/types/key"
 )
 

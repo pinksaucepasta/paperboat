@@ -9,6 +9,7 @@ import (
 	"math"
 	"time"
 
+	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=batched-grant-auth-frames
 	"tailscale.com/types/key"
 )
 

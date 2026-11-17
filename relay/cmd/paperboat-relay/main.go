@@ -30,7 +30,9 @@ import (
 	"github.com/pinksaucepasta/paperboat/shared/jwks"
 	"github.com/pinksaucepasta/paperboat/shared/reporting"
 	"go4.org/mem"
+	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=stun-server-and-disco-keys
 	"tailscale.com/net/stunserver"
+	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=stun-server-and-disco-keys
 	"tailscale.com/types/key"
 )
 

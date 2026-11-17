@@ -19,6 +19,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/shared/relaylimits"
 	"github.com/quic-go/quic-go"
+	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=keyed-peer-connection-registry
 	"tailscale.com/types/key"
 )
 

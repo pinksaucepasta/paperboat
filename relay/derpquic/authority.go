@@ -17,6 +17,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
 	"github.com/pinksaucepasta/paperboat/shared/relaylimits"
+	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=relay-grant-key-custody
 	"tailscale.com/types/key"
 )
 

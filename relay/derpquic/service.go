@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"time"
 
+	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=authorized-pair-control-service
 	"tailscale.com/types/key"
 )
 

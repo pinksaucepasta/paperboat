@@ -14,8 +14,11 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=wss-fallback-carrier-client
 	"tailscale.com/derp"
+	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=wss-fallback-carrier-client
 	"tailscale.com/net/wsconn"
+	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=wss-fallback-carrier-client
 	"tailscale.com/types/key"
 )
 

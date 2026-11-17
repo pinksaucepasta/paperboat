@@ -12,7 +12,9 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/shared/quicdial"
 	"github.com/quic-go/quic-go"
+	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=quic-derp-carrier-client
 	"tailscale.com/derp"
+	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=quic-derp-carrier-client
 	"tailscale.com/types/key"
 )
 

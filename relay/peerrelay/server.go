@@ -9,10 +9,15 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/relay/derpquic"
+	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=authorized-udp-relay-endpoints
 	"tailscale.com/disco"
+	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=authorized-udp-relay-endpoints
 	"tailscale.com/net/udprelay"
+	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=authorized-udp-relay-endpoints
 	"tailscale.com/types/key"
+	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=authorized-udp-relay-endpoints
 	"tailscale.com/types/views"
+	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=authorized-udp-relay-endpoints
 	"tailscale.com/util/usermetric"
 )
 

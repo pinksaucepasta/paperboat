@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/coder/websocket"
+	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=websocket-conn-adapter
 	"tailscale.com/net/wsconn"
 )
 

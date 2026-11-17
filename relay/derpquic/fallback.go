@@ -8,7 +8,9 @@ import (
 	"sync"
 	"time"
 
+	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=derp-carrier-fallback
 	"tailscale.com/derp"
+	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=derp-carrier-fallback
 	"tailscale.com/types/key"
 )
 
