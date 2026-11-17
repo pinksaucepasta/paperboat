@@ -10,12 +10,12 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	runtimeconfig "github.com/pinksaucepasta/paperboat/internal/hostruntime/config"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/controlbackoff"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/enrollment"
-	runtimeidentity "github.com/pinksaucepasta/paperboat/internal/hostruntime/identity"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machineevents"
-	peeridentityenrollment "github.com/pinksaucepasta/paperboat/internal/hostruntime/peeridentity"
+	runtimeconfig "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/config"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/controlbackoff"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/enrollment"
+	runtimeidentity "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/identity"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/machineevents"
+	peeridentityenrollment "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/peeridentity"
 	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 )
 

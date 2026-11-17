@@ -8,7 +8,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/mesh"
+	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/mesh"
 	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 )
 

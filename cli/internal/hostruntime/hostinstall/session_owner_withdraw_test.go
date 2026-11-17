@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/sessionowner"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/sessionowner"
 )
 
 type orderedGuardUndo struct{ note func(string) }

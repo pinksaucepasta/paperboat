@@ -9,11 +9,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/errorreport"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/browserbroadcastserver"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/operation"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/pty"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/session"
+	"github.com/pinksaucepasta/paperboat/cli/internal/errorreport"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/browserbroadcastserver"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/operation"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/pty"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/session"
 )
 
 // terminalResumeGrace is how long a native owner attachment outlives its closed connection, so the client can move it

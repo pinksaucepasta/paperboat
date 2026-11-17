@@ -7,7 +7,7 @@ import (
 	"time"
 
 	xterm "github.com/gitpod-io/xterm-go"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/recordings"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/recordings"
 )
 
 // ErrRecordingUnavailable: this host process was started without a recordings store.

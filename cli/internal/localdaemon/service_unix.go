@@ -5,8 +5,8 @@ package localdaemon
 import (
 	"context"
 	"errors"
-	"github.com/pinksaucepasta/paperboat/internal/daemonrpc"
-	"github.com/pinksaucepasta/paperboat/internal/endpointbinary"
+	"github.com/pinksaucepasta/paperboat/cli/internal/daemonrpc"
+	"github.com/pinksaucepasta/paperboat/cli/internal/endpointbinary"
 	"os"
 	"os/user"
 	"path/filepath"
@@ -14,7 +14,7 @@ import (
 	"strconv"
 	"strings"
 
-	hostservice "github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
+	hostservice "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/service"
 )
 
 type serviceConfig struct {

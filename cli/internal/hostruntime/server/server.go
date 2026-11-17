@@ -11,9 +11,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	helperconfig "github.com/pinksaucepasta/paperboat/internal/hostruntime/config"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/operation"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
+	helperconfig "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/config"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/operation"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/protocol"
 )
 
 type Server struct {

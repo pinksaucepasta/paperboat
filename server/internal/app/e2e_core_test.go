@@ -286,7 +286,7 @@ func (e *e2eCore) certificates() error {
 }
 
 func (e *e2eCore) buildPB() error {
-	p, url := "github.com/pinksaucepasta/paperboat/internal/buildinfo", "https://"+e.host+":"+e.port
+	p, url := "github.com/pinksaucepasta/paperboat/cli/internal/buildinfo", "https://"+e.host+":"+e.port
 	commit, err := e.run(time.Minute, "git", "rev-parse", "HEAD")
 	if err != nil {
 		return err

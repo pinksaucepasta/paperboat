@@ -7,7 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/pinksaucepasta/paperboat/internal/shorttemp"
+	"github.com/pinksaucepasta/paperboat/cli/internal/shorttemp"
 	"io"
 	"net"
 	"path/filepath"
@@ -17,8 +17,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/autoupdate"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/updated"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/autoupdate"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/updated"
 	"github.com/spf13/cobra"
 )
 

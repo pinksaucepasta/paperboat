@@ -4,15 +4,15 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"github.com/pinksaucepasta/paperboat/internal/shorttemp"
+	"github.com/pinksaucepasta/paperboat/cli/internal/shorttemp"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/config"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/bootstrap"
+	"github.com/pinksaucepasta/paperboat/cli/internal/config"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/bootstrap"
 )
 
 // Recovery must use current account custody rather than replaying the old

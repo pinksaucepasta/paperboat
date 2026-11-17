@@ -71,7 +71,7 @@ if [ -e "$output" ] || [ -L "$output" ]; then
   exit 1
 fi
 
-ldflags="-s -w -X github.com/pinksaucepasta/paperboat/internal/buildinfo.DefaultSentryDSN=$SENTRY_DSN -X github.com/pinksaucepasta/paperboat/internal/buildinfo.DefaultSentryRelease=paperboat:$version -X github.com/pinksaucepasta/paperboat/internal/buildinfo.Distribution=official -X github.com/pinksaucepasta/paperboat/internal/buildinfo.Version=$version -X github.com/pinksaucepasta/paperboat/internal/buildinfo.Commit=${GITHUB_SHA:-unknown} -X github.com/pinksaucepasta/paperboat/internal/buildinfo.ProtocolVersion=1 -X github.com/pinksaucepasta/paperboat/internal/buildinfo.DefaultServerURL=$server_url -X github.com/pinksaucepasta/paperboat/internal/buildinfo.DefaultReleaseURL=$release_url"
+ldflags="-s -w -X github.com/pinksaucepasta/paperboat/cli/internal/buildinfo.DefaultSentryDSN=$SENTRY_DSN -X github.com/pinksaucepasta/paperboat/cli/internal/buildinfo.DefaultSentryRelease=paperboat:$version -X github.com/pinksaucepasta/paperboat/cli/internal/buildinfo.Distribution=official -X github.com/pinksaucepasta/paperboat/cli/internal/buildinfo.Version=$version -X github.com/pinksaucepasta/paperboat/cli/internal/buildinfo.Commit=${GITHUB_SHA:-unknown} -X github.com/pinksaucepasta/paperboat/cli/internal/buildinfo.ProtocolVersion=1 -X github.com/pinksaucepasta/paperboat/cli/internal/buildinfo.DefaultServerURL=$server_url -X github.com/pinksaucepasta/paperboat/cli/internal/buildinfo.DefaultReleaseURL=$release_url"
 CGO_ENABLED=0 GOOS="$platform" GOARCH="$architecture" go build \
   -buildvcs=false \
   -trimpath \

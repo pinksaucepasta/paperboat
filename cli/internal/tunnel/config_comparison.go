@@ -8,9 +8,9 @@ import (
 	"errors"
 	"io"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/configsync"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
-	"github.com/pinksaucepasta/paperboat/internal/resolver"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/configsync"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/protocol"
+	"github.com/pinksaucepasta/paperboat/cli/internal/resolver"
 )
 
 const MaxComparisonSideBytes = 100 << 20

@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/atomicfile"
+	"github.com/pinksaucepasta/paperboat/cli/internal/atomicfile"
 )
 
 // Text lists the distinct leaf errors under err, each with the step names above it ("install services: start

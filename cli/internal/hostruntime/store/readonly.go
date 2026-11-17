@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/store/storesqlc"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/store/storesqlc"
 )
 
 // OpenReadOnly reads an existing store without creating, migrating, changing

@@ -9,7 +9,7 @@ import (
 	"io"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hostdproto"
 )
 
 var errWorkerSilent = errors.New("runtime worker stopped sending heartbeats")

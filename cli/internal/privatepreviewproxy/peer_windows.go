@@ -3,7 +3,7 @@
 package privatepreviewproxy
 
 import (
-	"github.com/pinksaucepasta/paperboat/internal/machineguard"
+	"github.com/pinksaucepasta/paperboat/cli/internal/machineguard"
 	"golang.org/x/sys/windows"
 )
 

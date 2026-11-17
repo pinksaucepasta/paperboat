@@ -19,7 +19,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/auth"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/auth"
 )
 
 type sharedPreviewKey struct {

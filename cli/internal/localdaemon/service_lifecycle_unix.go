@@ -7,7 +7,7 @@ import (
 	"os"
 	"runtime"
 
-	hostservice "github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
+	hostservice "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/service"
 )
 
 // CreateCurrentUserService is pb service install. Linux and macOS install the unit the way a

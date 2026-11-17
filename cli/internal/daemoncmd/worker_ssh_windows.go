@@ -6,10 +6,10 @@ import (
 	"context"
 	"os"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
-	"github.com/pinksaucepasta/paperboat/internal/localapi"
-	"github.com/pinksaucepasta/paperboat/internal/localdaemon"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hostdproto"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hostinstall"
+	"github.com/pinksaucepasta/paperboat/cli/internal/localapi"
+	"github.com/pinksaucepasta/paperboat/cli/internal/localdaemon"
 )
 
 // runLocalDaemon starts the user daemon. On Windows the managed SSH sessions are bridged by the hostd worker, a

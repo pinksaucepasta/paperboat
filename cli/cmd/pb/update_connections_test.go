@@ -7,7 +7,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/liveconnections"
+	"github.com/pinksaucepasta/paperboat/cli/internal/liveconnections"
 )
 
 // F14-02 (X-36): an inbound `pb ssh` into this machine is carried by its carrier, not its daemon; the update check must

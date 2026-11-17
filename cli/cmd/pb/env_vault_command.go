@@ -6,10 +6,10 @@ import (
 	"os"
 	"strings"
 
-	"github.com/pinksaucepasta/paperboat/internal/config"
-	"github.com/pinksaucepasta/paperboat/internal/environmente2ee"
-	"github.com/pinksaucepasta/paperboat/internal/environmentmanager"
-	"github.com/pinksaucepasta/paperboat/internal/prompt"
+	"github.com/pinksaucepasta/paperboat/cli/internal/config"
+	"github.com/pinksaucepasta/paperboat/cli/internal/environmente2ee"
+	"github.com/pinksaucepasta/paperboat/cli/internal/environmentmanager"
+	"github.com/pinksaucepasta/paperboat/cli/internal/prompt"
 	"github.com/spf13/cobra"
 )
 

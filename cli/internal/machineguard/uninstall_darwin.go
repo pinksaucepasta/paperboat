@@ -20,7 +20,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/machineloopback"
+	"github.com/pinksaucepasta/paperboat/cli/internal/machineloopback"
 )
 
 // ServeDenyOnly retains the cached-address boundary without exposing machine

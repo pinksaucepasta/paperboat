@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/releasepolicy"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/releasepolicy"
 )
 
 // ProviderSchema identifies the signed, machine-bound activation inputs. The

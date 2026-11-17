@@ -6,7 +6,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/workerupdate"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/workerupdate"
 )
 
 // Manuals change only after the durable runtime commit. Before that boundary,

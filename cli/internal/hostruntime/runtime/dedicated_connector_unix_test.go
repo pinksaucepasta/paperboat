@@ -9,7 +9,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/filetransfer"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/filetransfer"
 )
 
 type dedicatedTestTokenSource struct{}

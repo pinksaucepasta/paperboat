@@ -15,8 +15,8 @@ import (
 	"testing"
 	"time"
 
-	pb "github.com/pinksaucepasta/paperboat/internal/daemonrpc/proto"
-	"github.com/pinksaucepasta/paperboat/internal/errorreport"
+	pb "github.com/pinksaucepasta/paperboat/cli/internal/daemonrpc/proto"
+	"github.com/pinksaucepasta/paperboat/cli/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/shared/supportref"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"

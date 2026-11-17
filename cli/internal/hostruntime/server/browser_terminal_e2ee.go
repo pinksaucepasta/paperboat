@@ -24,9 +24,9 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
-	"github.com/pinksaucepasta/paperboat/internal/bandwidth"
-	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
+	"github.com/pinksaucepasta/paperboat/cli/internal/bandwidth"
+	"github.com/pinksaucepasta/paperboat/cli/internal/diagnostics"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/protocol"
 	"github.com/pinksaucepasta/paperboat/shared/peertransport/endpointidentity"
 	"github.com/pinksaucepasta/paperboat/shared/recording"
 )

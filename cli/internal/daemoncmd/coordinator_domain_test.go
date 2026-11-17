@@ -3,13 +3,13 @@ package daemoncmd
 import (
 	"context"
 	"errors"
-	"github.com/pinksaucepasta/paperboat/internal/daemonrpc"
-	"github.com/pinksaucepasta/paperboat/internal/shorttemp"
+	"github.com/pinksaucepasta/paperboat/cli/internal/daemonrpc"
+	"github.com/pinksaucepasta/paperboat/cli/internal/shorttemp"
 	"net"
 	"os"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/machineguard"
+	"github.com/pinksaucepasta/paperboat/cli/internal/machineguard"
 )
 
 // guardDomainClient answers like the machine guard: it reports the domain

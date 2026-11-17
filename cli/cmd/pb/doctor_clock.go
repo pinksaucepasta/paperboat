@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/config"
-	doctorpkg "github.com/pinksaucepasta/paperboat/internal/doctor"
-	"github.com/pinksaucepasta/paperboat/internal/errorreport"
+	"github.com/pinksaucepasta/paperboat/cli/internal/config"
+	doctorpkg "github.com/pinksaucepasta/paperboat/cli/internal/doctor"
+	"github.com/pinksaucepasta/paperboat/cli/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 	"github.com/spf13/cobra"
 )

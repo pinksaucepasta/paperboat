@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/connector"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/connector"
 )
 
 func TestMachinePreviewRuntimeOwnsSharedCarrierReferences(t *testing.T) {

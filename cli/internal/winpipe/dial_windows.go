@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/Microsoft/go-winio"
-	"github.com/pinksaucepasta/paperboat/internal/windows/pipeauth"
+	"github.com/pinksaucepasta/paperboat/cli/internal/windows/pipeauth"
 	"golang.org/x/sys/windows"
 )
 

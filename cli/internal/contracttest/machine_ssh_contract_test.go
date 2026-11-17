@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/api"
+	"github.com/pinksaucepasta/paperboat/cli/internal/api"
 )
 
 // Every field the client reads from a listed machine's ssh object is one the server documents for it, so a

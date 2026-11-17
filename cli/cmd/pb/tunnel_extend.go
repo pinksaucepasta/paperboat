@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/api"
+	"github.com/pinksaucepasta/paperboat/cli/internal/api"
 	"github.com/spf13/cobra"
 )
 

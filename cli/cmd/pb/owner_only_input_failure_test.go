@@ -8,7 +8,7 @@ import (
 	"syscall"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/environmentmanager"
+	"github.com/pinksaucepasta/paperboat/cli/internal/environmentmanager"
 )
 
 func TestUserInputFileRejectionRequiresPureExpectedCause(t *testing.T) {

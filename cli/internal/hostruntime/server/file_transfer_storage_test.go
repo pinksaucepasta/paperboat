@@ -9,7 +9,7 @@ import (
 	"syscall"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/filetransfer"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/filetransfer"
 )
 
 // F6-05: the receiver's "no room" answer is 507, not retryable, and says how much was needed.

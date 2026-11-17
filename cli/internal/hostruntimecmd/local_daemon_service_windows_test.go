@@ -3,7 +3,7 @@
 package hostruntimecmd
 
 import (
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hostinstall"
 	"reflect"
 	"testing"
 )

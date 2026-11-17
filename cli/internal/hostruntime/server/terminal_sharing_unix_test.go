@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/pty"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/session"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/pty"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/session"
 )
 
 func TestSharedTerminalRolesAndAttachmentIdentity(t *testing.T) {

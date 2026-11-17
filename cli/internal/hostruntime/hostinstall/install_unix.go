@@ -10,7 +10,7 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/updated"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/updated"
 )
 
 func Install(ctx context.Context, request Request) error { return install(ctx, request, false) }

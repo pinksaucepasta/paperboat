@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
-	hostauth "github.com/pinksaucepasta/paperboat/internal/hostruntime/auth"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
-	"github.com/pinksaucepasta/paperboat/internal/nativeprivate"
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/streamauth"
+	hostauth "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/auth"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/protocol"
+	"github.com/pinksaucepasta/paperboat/cli/internal/nativeprivate"
+	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/streamauth"
 )
 
 type streamCredentialAuthorizer struct {

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hostinstall"
 )
 
 // The caller of the privileged install says the failing step "is printed above": a not-ready rollback must

@@ -8,8 +8,8 @@ import (
 
 	clientapi "github.com/pinksaucepasta/paperboat/shared/client/api"
 
-	"github.com/pinksaucepasta/paperboat/internal/auth"
-	"github.com/pinksaucepasta/paperboat/internal/config"
+	"github.com/pinksaucepasta/paperboat/cli/internal/auth"
+	"github.com/pinksaucepasta/paperboat/cli/internal/config"
 )
 
 type failingAuth struct{ err error }

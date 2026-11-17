@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/managedssh"
+	"github.com/pinksaucepasta/paperboat/cli/internal/managedssh"
 )
 
 func TestSSHDoctorNamesMissingOpenSSHAndRecovery(t *testing.T) {

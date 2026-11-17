@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/pty"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/pty"
 )
 
 func nativeWindowsManager(t *testing.T) (*Manager, string) {

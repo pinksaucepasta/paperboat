@@ -4,7 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
-	"github.com/pinksaucepasta/paperboat/internal/daemonrpc"
+	"github.com/pinksaucepasta/paperboat/cli/internal/daemonrpc"
 	"net"
 	"testing"
 )

@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/config"
+	"github.com/pinksaucepasta/paperboat/cli/internal/config"
 )
 
 // pb login --api-token (or PAPERBOAT_API_TOKEN) exchanges the token for a CLI session and activates it like a

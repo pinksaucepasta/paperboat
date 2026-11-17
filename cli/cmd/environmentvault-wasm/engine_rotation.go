@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 	"crypto/rand"
-	env "github.com/pinksaucepasta/paperboat/internal/environmente2ee"
+	env "github.com/pinksaucepasta/paperboat/cli/internal/environmente2ee"
 )
 
 func (e *engine) rotatePersonal(ctx context.Context, r request) (any, error) {

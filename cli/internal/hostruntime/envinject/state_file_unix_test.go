@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/atomicfile"
+	"github.com/pinksaucepasta/paperboat/cli/internal/atomicfile"
 )
 
 func TestSecureStateFileUnixPreservesExact0600Rule(t *testing.T) {

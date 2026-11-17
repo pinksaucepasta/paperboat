@@ -5,7 +5,7 @@ package hostruntimecmd
 import (
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hostinstall"
 )
 
 // Clean Windows Sandbox, paired official install: `pb update --from official.pb-update` failed with "elevated

@@ -3,7 +3,7 @@ package daemoncmd
 import (
 	"context"
 	"errors"
-	"github.com/pinksaucepasta/paperboat/internal/daemonrpc"
+	"github.com/pinksaucepasta/paperboat/cli/internal/daemonrpc"
 	"io"
 	"maps"
 	"net"
@@ -11,7 +11,7 @@ import (
 	"sync"
 	"syscall"
 
-	"github.com/pinksaucepasta/paperboat/internal/liveconnections"
+	"github.com/pinksaucepasta/paperboat/cli/internal/liveconnections"
 )
 
 func (c *Coordinator) serveRoute(route *guardedRoute) {

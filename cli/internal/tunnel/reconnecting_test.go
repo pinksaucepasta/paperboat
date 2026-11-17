@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/telemetry"
+	"github.com/pinksaucepasta/paperboat/cli/internal/telemetry"
 )
 
 type tunnelEventSink struct{ events []telemetry.Event }

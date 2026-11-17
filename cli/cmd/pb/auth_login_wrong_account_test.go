@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/command"
-	"github.com/pinksaucepasta/paperboat/internal/config"
+	"github.com/pinksaucepasta/paperboat/cli/internal/command"
+	"github.com/pinksaucepasta/paperboat/cli/internal/config"
 )
 
 // pbmac 2026-11-05: pb login --reauth approved by a different account ended with only "Paperboat could not

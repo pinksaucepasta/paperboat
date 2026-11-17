@@ -14,9 +14,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/pinksaucepasta/paperboat/internal/atomicfile"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/store"
-	"github.com/pinksaucepasta/paperboat/internal/recording"
+	"github.com/pinksaucepasta/paperboat/cli/internal/atomicfile"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/store"
+	"github.com/pinksaucepasta/paperboat/cli/internal/recording"
 	wire "github.com/pinksaucepasta/paperboat/shared/recording"
 )
 

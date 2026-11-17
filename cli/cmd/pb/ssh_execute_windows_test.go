@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/command"
-	"github.com/pinksaucepasta/paperboat/internal/config"
+	"github.com/pinksaucepasta/paperboat/cli/internal/command"
+	"github.com/pinksaucepasta/paperboat/cli/internal/config"
 )
 
 func TestWindowsSSHRemoteCommandMatchesOpenSSHJoinSemantics(t *testing.T) {

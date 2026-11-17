@@ -2,7 +2,7 @@
 
 package privatepreviewproxy
 
-import "github.com/pinksaucepasta/paperboat/internal/machineguard"
+import "github.com/pinksaucepasta/paperboat/cli/internal/machineguard"
 
 func init() { platformPeerOwner = machineguard.ConnectionOwnerUID }
 

@@ -5,7 +5,7 @@ import (
 	"errors"
 	"os"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/store"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/store"
 )
 
 func (s *Service) Get(ctx context.Context, id string) (store.FileTransfer, error) {

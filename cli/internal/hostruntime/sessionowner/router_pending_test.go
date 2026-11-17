@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/session"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/workloadbridge"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/session"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/workloadbridge"
 )
 
 func TestPublishingAnUnstartedOwnerDoesNotInterruptAHeldTerminal(t *testing.T) {

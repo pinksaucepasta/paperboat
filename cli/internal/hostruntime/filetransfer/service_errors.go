@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"reflect"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/store"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/store"
 
-	"github.com/pinksaucepasta/paperboat/internal/diskspace"
+	"github.com/pinksaucepasta/paperboat/cli/internal/diskspace"
 )
 
 type Code string

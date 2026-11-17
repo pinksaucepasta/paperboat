@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/tailnet"
-	"github.com/pinksaucepasta/paperboat/internal/resolver"
+	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/tailnet"
+	"github.com/pinksaucepasta/paperboat/cli/internal/resolver"
 )
 
 // FIX-EXECLAT (pbvm2 dev-8aafdbab9): every warm `pb exec` to the caller's own machine waited 875-1457 ms for a signed

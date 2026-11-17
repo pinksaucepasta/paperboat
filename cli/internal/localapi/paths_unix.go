@@ -9,7 +9,7 @@ import (
 	"runtime"
 	"strconv"
 
-	"github.com/pinksaucepasta/paperboat/internal/ownerpath"
+	"github.com/pinksaucepasta/paperboat/cli/internal/ownerpath"
 )
 
 type Paths struct {

@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/auth"
-	"github.com/pinksaucepasta/paperboat/internal/nativeprivate"
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/streamauth"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/auth"
+	"github.com/pinksaucepasta/paperboat/cli/internal/nativeprivate"
+	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/streamauth"
 )
 
 func TestNativeNetworkPrivateAuthorizerUsesVerifiedAccessSession(t *testing.T) {

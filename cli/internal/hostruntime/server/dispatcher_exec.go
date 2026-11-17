@@ -3,9 +3,9 @@ package server
 import (
 	"context"
 	"encoding/json"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/execprocess"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/operation"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/pty"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/execprocess"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/operation"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/pty"
 	"time"
 )
 

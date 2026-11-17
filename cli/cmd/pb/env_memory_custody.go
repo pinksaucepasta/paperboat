@@ -10,9 +10,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/config"
-	"github.com/pinksaucepasta/paperboat/internal/environmentmanager"
-	"github.com/pinksaucepasta/paperboat/internal/localapi"
+	"github.com/pinksaucepasta/paperboat/cli/internal/config"
+	"github.com/pinksaucepasta/paperboat/cli/internal/environmentmanager"
+	"github.com/pinksaucepasta/paperboat/cli/internal/localapi"
 	"github.com/spf13/cobra"
 )
 

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/managedssh"
+	"github.com/pinksaucepasta/paperboat/cli/internal/managedssh"
 )
 
 // victus 2026-11-10: interactive `pb ssh hp` ended at once with the generic failure text. The loopback connection

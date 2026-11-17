@@ -10,9 +10,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/api"
-	"github.com/pinksaucepasta/paperboat/internal/localdaemon"
-	"github.com/pinksaucepasta/paperboat/internal/recipekey"
+	"github.com/pinksaucepasta/paperboat/cli/internal/api"
+	"github.com/pinksaucepasta/paperboat/cli/internal/localdaemon"
+	"github.com/pinksaucepasta/paperboat/cli/internal/recipekey"
 	"github.com/pinksaucepasta/paperboat/shared/recipe"
 )
 

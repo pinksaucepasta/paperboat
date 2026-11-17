@@ -12,9 +12,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
-	"github.com/pinksaucepasta/paperboat/internal/windowssecurity"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hostdproto"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hostinstall"
+	"github.com/pinksaucepasta/paperboat/cli/internal/windowssecurity"
 	"golang.org/x/sys/windows"
 )
 

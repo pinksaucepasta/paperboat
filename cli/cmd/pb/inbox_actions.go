@@ -12,8 +12,8 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/command"
-	"github.com/pinksaucepasta/paperboat/internal/inbox"
+	"github.com/pinksaucepasta/paperboat/cli/internal/command"
+	"github.com/pinksaucepasta/paperboat/cli/internal/inbox"
 )
 
 var errOwnerOnlyFileInvalid = errors.New("invalid owner-only file")

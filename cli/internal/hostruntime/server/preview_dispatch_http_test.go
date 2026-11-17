@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/auth"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/preview"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/auth"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/preview"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/protocol"
 )
 
 type previewDispatcherFunc func(context.Context, preview.DispatchAuthorization, preview.DispatchRequest) (preview.DispatchOutcome, error)

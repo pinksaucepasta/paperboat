@@ -5,14 +5,14 @@ import (
 	"encoding/binary"
 	"encoding/json"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/auth"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/auth"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/protocol"
 	"github.com/pinksaucepasta/paperboat/shared/recording"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/operation"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/recordingcontrol"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/recordings"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/session"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/operation"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/recordingcontrol"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/recordings"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/session"
 )
 
 // RecordingControl decides and carries out recording starts and stops (recordingcontrol.Controller).

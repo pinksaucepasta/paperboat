@@ -16,7 +16,7 @@ export PATH := $(GO_ROOT)/bin:$(PATH)
 GO          := GOTOOLCHAIN=local go
 GOFMT       := $(GO_ROOT)/bin/gofmt
 GO_FILES    := $(shell find . \( -path ./.git -o -path ./upstream -o -path ./.build -o -path ./.codex-build \) -prune -o -name '*.go' -print)
-LDFLAGS     := -X github.com/pinksaucepasta/paperboat/internal/buildinfo.Version=$(VERSION) -X github.com/pinksaucepasta/paperboat/internal/buildinfo.Commit=$(COMMIT) -X github.com/pinksaucepasta/paperboat/internal/buildinfo.ProtocolVersion=$(PROTOCOL_VERSION) -X github.com/pinksaucepasta/paperboat/internal/buildinfo.DefaultServerURL=$(DEFAULT_SERVER_URL) -X github.com/pinksaucepasta/paperboat/internal/buildinfo.DefaultReleaseURL=$(DEFAULT_RELEASE_URL)
+LDFLAGS     := -X github.com/pinksaucepasta/paperboat/cli/internal/buildinfo.Version=$(VERSION) -X github.com/pinksaucepasta/paperboat/cli/internal/buildinfo.Commit=$(COMMIT) -X github.com/pinksaucepasta/paperboat/cli/internal/buildinfo.ProtocolVersion=$(PROTOCOL_VERSION) -X github.com/pinksaucepasta/paperboat/cli/internal/buildinfo.DefaultServerURL=$(DEFAULT_SERVER_URL) -X github.com/pinksaucepasta/paperboat/cli/internal/buildinfo.DefaultReleaseURL=$(DEFAULT_RELEASE_URL)
 
 .PHONY: binary-size-check build check clean complete container-compose-check container-image-check cross-build dependencies fmt fmt-check fuzz generate generate-check install license-check lint metrics-check metrics-generate preflight race release-assets release-binaries release-macos reproducible-builds source-policy static-analysis test tidy tidy-check uninstall upstream-foundations verification verify-toolchain vet vulnerability-check
 

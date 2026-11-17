@@ -7,7 +7,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/workerupdate"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/workerupdate"
 )
 
 // A nil context used to become context.Background(): an activation then waited without bound on the native

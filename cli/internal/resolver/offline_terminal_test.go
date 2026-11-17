@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/api"
+	"github.com/pinksaucepasta/paperboat/cli/internal/api"
 )
 
 // F21-11: with Paperboat unreachable, a NEW terminal session on a machine the daemon resolved opens offline: no

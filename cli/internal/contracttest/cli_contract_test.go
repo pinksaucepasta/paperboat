@@ -6,7 +6,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/doctor"
+	"github.com/pinksaucepasta/paperboat/cli/internal/doctor"
 )
 
 func TestDoctorResultVectorsMatchProductionContract(t *testing.T) {

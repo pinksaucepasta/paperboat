@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/command"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/identity"
+	"github.com/pinksaucepasta/paperboat/cli/internal/command"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/identity"
 	"github.com/spf13/cobra"
 )
 

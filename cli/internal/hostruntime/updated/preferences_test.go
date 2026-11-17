@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/autoupdate"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/autoupdate"
 )
 
 func TestMachineSettingsPersistAndRespectOptOut(t *testing.T) {

@@ -2,7 +2,7 @@ package configsync
 
 import (
 	"errors"
-	"github.com/pinksaucepasta/paperboat/internal/shorttemp"
+	"github.com/pinksaucepasta/paperboat/cli/internal/shorttemp"
 	"os"
 	"path/filepath"
 	"reflect"

@@ -16,7 +16,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/api"
+	"github.com/pinksaucepasta/paperboat/cli/internal/api"
 )
 
 type quotaTransportError struct{ message string }

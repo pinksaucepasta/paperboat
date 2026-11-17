@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/preview"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/preview"
 	"github.com/spf13/cobra"
 )
 

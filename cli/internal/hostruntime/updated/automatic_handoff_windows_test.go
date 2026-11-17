@@ -5,7 +5,7 @@ package updated
 import (
 	"context"
 	"errors"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/autoupdate"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/autoupdate"
 	"sync"
 	"testing"
 )

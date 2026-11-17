@@ -15,7 +15,7 @@ import (
 
 	"github.com/Microsoft/go-winio"
 
-	"github.com/pinksaucepasta/paperboat/internal/splitdns"
+	"github.com/pinksaucepasta/paperboat/cli/internal/splitdns"
 )
 
 type Client struct {

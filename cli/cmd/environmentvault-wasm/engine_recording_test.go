@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/recording"
+	"github.com/pinksaucepasta/paperboat/cli/internal/recording"
 )
 
 func sharingPublic(t *testing.T, e *engine) string {

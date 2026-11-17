@@ -18,7 +18,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/splitdns"
+	"github.com/pinksaucepasta/paperboat/cli/internal/splitdns"
 )
 
 func TestDarwinGuardSocketChild(t *testing.T) {

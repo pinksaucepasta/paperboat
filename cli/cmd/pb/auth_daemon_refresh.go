@@ -4,8 +4,8 @@ import (
 	"context"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/config"
-	"github.com/pinksaucepasta/paperboat/internal/localapi"
+	"github.com/pinksaucepasta/paperboat/cli/internal/config"
+	"github.com/pinksaucepasta/paperboat/cli/internal/localapi"
 )
 
 // signedInDaemonRefreshTimeout bounds starting the daemon and its first inventory refresh after a

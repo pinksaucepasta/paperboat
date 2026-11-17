@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/resolver"
+	"github.com/pinksaucepasta/paperboat/cli/internal/resolver"
 )
 
 // The login user an `ssh` stream names reaches the host in its authorization header; other consumers never carry one.

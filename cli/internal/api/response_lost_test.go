@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/config"
+	"github.com/pinksaucepasta/paperboat/cli/internal/config"
 )
 
 // dropAfterHandling applies the request, then closes the connection without a response (Lane S:

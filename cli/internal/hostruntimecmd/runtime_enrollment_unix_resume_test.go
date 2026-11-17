@@ -12,9 +12,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/bootstrap"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/enrollment"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/bootstrap"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/enrollment"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/installsource"
 )
 
 type countingRuntimeEnrollmentClient struct {

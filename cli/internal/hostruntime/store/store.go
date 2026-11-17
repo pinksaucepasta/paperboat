@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/store/storesqlc"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/store/storesqlc"
 )
 
 const (

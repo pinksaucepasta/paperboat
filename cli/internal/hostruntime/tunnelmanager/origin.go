@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hoststate"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hoststate"
 )
 
 // OriginDialer is the context-aware subset of net.Dialer used by readiness

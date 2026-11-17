@@ -6,8 +6,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/pinksaucepasta/paperboat/internal/preferences"
-	"github.com/pinksaucepasta/paperboat/internal/selector"
+	"github.com/pinksaucepasta/paperboat/cli/internal/preferences"
+	"github.com/pinksaucepasta/paperboat/cli/internal/selector"
 	"github.com/spf13/cobra"
 )
 

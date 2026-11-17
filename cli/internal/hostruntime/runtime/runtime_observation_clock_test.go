@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/machineservices"
+	"github.com/pinksaucepasta/paperboat/cli/internal/machineservices"
 	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 )
 

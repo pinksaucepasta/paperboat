@@ -5,9 +5,9 @@ import (
 	"net"
 	"os"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/bootstrap"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/identity"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/runtimeport"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/bootstrap"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/identity"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/runtimeport"
 )
 
 // chooseBootstrapLoopbackAddress returns the first candidate nothing listens on.

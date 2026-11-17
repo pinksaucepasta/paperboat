@@ -11,7 +11,7 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/pinksaucepasta/paperboat/internal/machineguard"
+	"github.com/pinksaucepasta/paperboat/cli/internal/machineguard"
 )
 
 func workerEnvironment(request Request) map[string]string {

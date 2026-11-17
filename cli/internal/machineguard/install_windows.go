@@ -17,8 +17,8 @@ import (
 	"time"
 	"unicode/utf16"
 
-	"github.com/pinksaucepasta/paperboat/internal/processlaunch"
-	"github.com/pinksaucepasta/paperboat/internal/windows/elevation"
+	"github.com/pinksaucepasta/paperboat/cli/internal/processlaunch"
+	"github.com/pinksaucepasta/paperboat/cli/internal/windows/elevation"
 )
 
 const windowsGuardTask = `\Paperboat\MachineGuard`

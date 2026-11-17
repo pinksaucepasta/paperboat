@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"runtime"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/environmentkey"
-	runtimeidentity "github.com/pinksaucepasta/paperboat/internal/hostruntime/identity"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/environmentkey"
+	runtimeidentity "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/identity"
 )
 
 // newPortableEnvironmentKeySource binds portable ENV custody to the existing

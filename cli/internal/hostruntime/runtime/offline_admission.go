@@ -8,12 +8,12 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/pinksaucepasta/paperboat/internal/errorreport"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/enrollment"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/offlineaudit"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/server"
-	"github.com/pinksaucepasta/paperboat/internal/managedssh"
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/native"
+	"github.com/pinksaucepasta/paperboat/cli/internal/errorreport"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/enrollment"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/offlineaudit"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/server"
+	"github.com/pinksaucepasta/paperboat/cli/internal/managedssh"
+	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/native"
 	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 	"github.com/pinksaucepasta/paperboat/shared/sessionname"
 )

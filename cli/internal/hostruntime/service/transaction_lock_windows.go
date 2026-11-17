@@ -4,8 +4,8 @@ package service
 
 import (
 	"errors"
-	"github.com/pinksaucepasta/paperboat/internal/atomicfile"
-	"github.com/pinksaucepasta/paperboat/internal/windowssecurity"
+	"github.com/pinksaucepasta/paperboat/cli/internal/atomicfile"
+	"github.com/pinksaucepasta/paperboat/cli/internal/windowssecurity"
 	"golang.org/x/sys/windows"
 	"os"
 	"path/filepath"

@@ -9,9 +9,9 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/bootstrap"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/releaseindex"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/releasepolicy"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/bootstrap"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/releaseindex"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/releasepolicy"
 )
 
 var (

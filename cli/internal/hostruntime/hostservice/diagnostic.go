@@ -7,7 +7,7 @@ import (
 	"os"
 	"reflect"
 
-	"github.com/pinksaucepasta/paperboat/internal/errorreport"
+	"github.com/pinksaucepasta/paperboat/cli/internal/errorreport"
 )
 
 type operationFailure struct {

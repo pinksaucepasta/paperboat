@@ -17,8 +17,8 @@ import (
 	"testing"
 	"time"
 
-	documentation "github.com/pinksaucepasta/paperboat/docs"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
+	documentation "github.com/pinksaucepasta/paperboat/cli/docs"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/service"
 )
 
 // purgeFake stands in for systemctl, launchctl, the process table, signals and

@@ -15,8 +15,8 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/pty"
-	"github.com/pinksaucepasta/paperboat/internal/processlaunch"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/pty"
+	"github.com/pinksaucepasta/paperboat/cli/internal/processlaunch"
 	"golang.org/x/sys/windows"
 )
 

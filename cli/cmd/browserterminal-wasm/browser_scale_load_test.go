@@ -36,8 +36,8 @@ import (
 	"github.com/coder/websocket"
 	"github.com/google/uuid"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/browserbroadcast"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/browserbroadcast"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/protocol"
 )
 
 type loadAPI struct {

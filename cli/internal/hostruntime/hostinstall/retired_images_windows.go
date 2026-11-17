@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"regexp"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/service"
 )
 
 // retiredImageName is exactly what removeWindowsFileWithRetry produces for the two rollback slots: the account's

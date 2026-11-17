@@ -16,9 +16,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/pinksaucepasta/paperboat/internal/machineguard"
-	"github.com/pinksaucepasta/paperboat/internal/machineservices"
-	"github.com/pinksaucepasta/paperboat/internal/splitdns"
+	"github.com/pinksaucepasta/paperboat/cli/internal/machineguard"
+	"github.com/pinksaucepasta/paperboat/cli/internal/machineservices"
+	"github.com/pinksaucepasta/paperboat/cli/internal/splitdns"
 	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 )
 

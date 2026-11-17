@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/windows/elevation"
+	"github.com/pinksaucepasta/paperboat/cli/internal/windows/elevation"
 )
 
 func TestReadinessContextOutlivesAnExhaustedInstallBudget(t *testing.T) {

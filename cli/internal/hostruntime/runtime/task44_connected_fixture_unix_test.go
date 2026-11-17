@@ -28,17 +28,17 @@ import (
 	"testing"
 	"time"
 
-	clienttransfer "github.com/pinksaucepasta/paperboat/internal/filetransfer"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/auth"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/configsync"
-	hosttransfer "github.com/pinksaucepasta/paperboat/internal/hostruntime/filetransfer"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/health"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/operation"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/pty"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/server"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/session"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/store"
+	clienttransfer "github.com/pinksaucepasta/paperboat/cli/internal/filetransfer"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/auth"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/configsync"
+	hosttransfer "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/filetransfer"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/health"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/operation"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/protocol"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/pty"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/server"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/session"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/store"
 )
 
 type task44RuntimeKeys struct {

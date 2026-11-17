@@ -12,10 +12,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/atomicfile/atomicfiletest"
-	"github.com/pinksaucepasta/paperboat/internal/shorttemp"
+	"github.com/pinksaucepasta/paperboat/cli/internal/atomicfile/atomicfiletest"
+	"github.com/pinksaucepasta/paperboat/cli/internal/shorttemp"
 
-	"github.com/pinksaucepasta/paperboat/internal/atomicfile"
+	"github.com/pinksaucepasta/paperboat/cli/internal/atomicfile"
 )
 
 func TestRepositoryCredentialProfileFailuresKeepCausesAndHidePaths(t *testing.T) {

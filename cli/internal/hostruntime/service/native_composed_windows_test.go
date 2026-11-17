@@ -23,7 +23,7 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/pinksaucepasta/paperboat/internal/atomicfile"
+	"github.com/pinksaucepasta/paperboat/cli/internal/atomicfile"
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/svc/mgr"
 )

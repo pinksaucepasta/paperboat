@@ -5,7 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"github.com/pinksaucepasta/paperboat/internal/atomicfile/atomicfiletest"
+	"github.com/pinksaucepasta/paperboat/cli/internal/atomicfile/atomicfiletest"
 	"io"
 	"os"
 	"path/filepath"
@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/atomicfile"
+	"github.com/pinksaucepasta/paperboat/cli/internal/atomicfile"
 )
 
 func TestResumeRecordSurvivesMaterialDeliveryAndRequiresExactBinding(t *testing.T) {

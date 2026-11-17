@@ -3,7 +3,7 @@ package session
 import (
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/history"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/history"
 )
 
 func FuzzFanoutMatchesQueueModel(f *testing.F) {

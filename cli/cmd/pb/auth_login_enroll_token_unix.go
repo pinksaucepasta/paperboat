@@ -2,7 +2,7 @@
 
 package main
 
-import "github.com/pinksaucepasta/paperboat/internal/atomicfile"
+import "github.com/pinksaucepasta/paperboat/cli/internal/atomicfile"
 
 // writeLoginEnrollmentToken writes a new owner-only file atomically; a symlink or other non-regular file planted at
 // path is refused, never followed (the Windows build writes the same way with an owner-only descriptor).

@@ -6,8 +6,8 @@ import (
 	"encoding/hex"
 	"errors"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/releasepolicy"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hostdproto"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/releasepolicy"
 )
 
 // HostdFailureDomainSource resolves the failure domain from the current

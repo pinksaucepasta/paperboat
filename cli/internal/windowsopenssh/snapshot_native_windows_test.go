@@ -7,7 +7,7 @@ import (
 	"crypto/rand"
 	"encoding/binary"
 	"fmt"
-	hostservice "github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
+	hostservice "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/service"
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/svc/mgr"
 	"os"

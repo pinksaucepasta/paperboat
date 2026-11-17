@@ -4,7 +4,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/pinksaucepasta/paperboat/internal/errorreport"
+	"github.com/pinksaucepasta/paperboat/cli/internal/errorreport"
 )
 
 // RecordFault stores the already redacted fault projection. It only enqueues;

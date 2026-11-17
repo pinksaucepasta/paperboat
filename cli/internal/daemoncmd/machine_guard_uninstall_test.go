@@ -10,7 +10,7 @@ import (
 	"syscall"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/machineguard"
+	"github.com/pinksaucepasta/paperboat/cli/internal/machineguard"
 )
 
 func TestMachineGuardUninstallReportsRetainedStateOnFailure(t *testing.T) {

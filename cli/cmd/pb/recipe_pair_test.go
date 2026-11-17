@@ -12,11 +12,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/api"
-	"github.com/pinksaucepasta/paperboat/internal/command"
-	"github.com/pinksaucepasta/paperboat/internal/config"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntimecmd"
-	"github.com/pinksaucepasta/paperboat/internal/recipekey"
+	"github.com/pinksaucepasta/paperboat/cli/internal/api"
+	"github.com/pinksaucepasta/paperboat/cli/internal/command"
+	"github.com/pinksaucepasta/paperboat/cli/internal/config"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntimecmd"
+	"github.com/pinksaucepasta/paperboat/cli/internal/recipekey"
 	"github.com/pinksaucepasta/paperboat/shared/recipe"
 )
 

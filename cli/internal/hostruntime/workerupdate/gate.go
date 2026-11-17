@@ -6,7 +6,7 @@ import (
 	"regexp"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hostdproto"
 )
 
 var ErrActivationGate = errors.New("worker update activation gate failed")

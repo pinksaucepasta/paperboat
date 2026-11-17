@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/api"
+	"github.com/pinksaucepasta/paperboat/cli/internal/api"
 )
 
 // A renewal that the server answers 429 (the account's live operations or sessions are at their cap: other sends

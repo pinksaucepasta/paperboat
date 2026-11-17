@@ -18,12 +18,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/atomicfile"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/enrollment"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/envinject"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/environmentkey"
-	runtimeidentity "github.com/pinksaucepasta/paperboat/internal/hostruntime/identity"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machinecontrol"
+	"github.com/pinksaucepasta/paperboat/cli/internal/atomicfile"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/enrollment"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/envinject"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/environmentkey"
+	runtimeidentity "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/identity"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/machinecontrol"
 )
 
 // TestEnvironmentLiveExistingCustody exercises production transport and OS key

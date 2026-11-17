@@ -3,7 +3,7 @@
 package endpointbinary
 
 import (
-	"github.com/pinksaucepasta/paperboat/internal/windowssecurity"
+	"github.com/pinksaucepasta/paperboat/cli/internal/windowssecurity"
 	"os"
 	"path/filepath"
 	"runtime"

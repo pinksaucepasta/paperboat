@@ -13,13 +13,13 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/carriercontrol"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
-	hostruntime "github.com/pinksaucepasta/paperboat/internal/hostruntime/runtime"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/server"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/workloadbridge"
-	"github.com/pinksaucepasta/paperboat/internal/managedssh"
+	"github.com/pinksaucepasta/paperboat/cli/internal/buildinfo"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/carriercontrol"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hostinstall"
+	hostruntime "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/runtime"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/server"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/workloadbridge"
+	"github.com/pinksaucepasta/paperboat/cli/internal/managedssh"
 )
 
 func runCarrier(ctx context.Context, args []string, _ io.Writer, stderr io.Writer) error {

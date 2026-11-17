@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	runtimehealth "github.com/pinksaucepasta/paperboat/internal/hostruntime/health"
+	runtimehealth "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/health"
 )
 
 func TestTelemetryHealthV1HostSnapshotContract(t *testing.T) {

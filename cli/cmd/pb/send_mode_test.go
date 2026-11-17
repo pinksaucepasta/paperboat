@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/api"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/identity"
+	"github.com/pinksaucepasta/paperboat/cli/internal/api"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/identity"
 )
 
 // Commit 04ecd8c5 hard-coded "automatic" into the descriptor request, so `pb send --unlimited` never reached the daemon

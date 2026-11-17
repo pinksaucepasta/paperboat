@@ -7,7 +7,7 @@ import (
 	"crypto/rand"
 	"testing"
 
-	env "github.com/pinksaucepasta/paperboat/internal/environmente2ee"
+	env "github.com/pinksaucepasta/paperboat/cli/internal/environmente2ee"
 )
 
 func hostRecipient(t *testing.T, account, machine string) (layerRecipient, *ecdh.PrivateKey) {

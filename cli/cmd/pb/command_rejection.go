@@ -3,12 +3,12 @@ package main
 import (
 	"errors"
 
-	"github.com/pinksaucepasta/paperboat/internal/daemoncmd"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/preview"
-	"github.com/pinksaucepasta/paperboat/internal/localdaemon"
-	servepkg "github.com/pinksaucepasta/paperboat/internal/serve"
-	"github.com/pinksaucepasta/paperboat/internal/windows/elevation"
+	"github.com/pinksaucepasta/paperboat/cli/internal/daemoncmd"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hostinstall"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/preview"
+	"github.com/pinksaucepasta/paperboat/cli/internal/localdaemon"
+	servepkg "github.com/pinksaucepasta/paperboat/cli/internal/serve"
+	"github.com/pinksaucepasta/paperboat/cli/internal/windows/elevation"
 	"reflect"
 )
 

@@ -5,7 +5,7 @@ package configsync
 import (
 	"io/fs"
 
-	"github.com/pinksaucepasta/paperboat/internal/atomicfile"
+	"github.com/pinksaucepasta/paperboat/cli/internal/atomicfile"
 )
 
 func restoreRegularFile(target string, content []byte, _ fs.FileMode) error {

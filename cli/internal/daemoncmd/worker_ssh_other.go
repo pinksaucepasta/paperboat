@@ -5,7 +5,7 @@ package daemoncmd
 import (
 	"context"
 
-	"github.com/pinksaucepasta/paperboat/internal/localdaemon"
+	"github.com/pinksaucepasta/paperboat/cli/internal/localdaemon"
 )
 
 // runLocalDaemon starts the user daemon. The Unix updater service asks the worker for its SSH count itself.

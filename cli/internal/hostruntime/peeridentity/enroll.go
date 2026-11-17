@@ -16,11 +16,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/api"
-	"github.com/pinksaucepasta/paperboat/internal/errorreport"
-	identitystore "github.com/pinksaucepasta/paperboat/internal/hostruntime/identity"
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/identitybootstrap"
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/trustedkeys"
+	"github.com/pinksaucepasta/paperboat/cli/internal/api"
+	"github.com/pinksaucepasta/paperboat/cli/internal/errorreport"
+	identitystore "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/identity"
+	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/identitybootstrap"
+	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/trustedkeys"
 	"github.com/pinksaucepasta/paperboat/shared/peertransport/endpointidentity"
 	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 )

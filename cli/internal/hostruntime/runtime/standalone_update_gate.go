@@ -14,8 +14,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/atomicfile"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
+	"github.com/pinksaucepasta/paperboat/cli/internal/atomicfile"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hostdproto"
 )
 
 var errStandaloneUpdateGate = errors.New("standalone update gate unavailable")

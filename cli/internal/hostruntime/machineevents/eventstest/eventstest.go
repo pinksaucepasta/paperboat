@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machineevents"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/machineevents"
 )
 
 // Hold is how long the stand-in keeps a wait open (the real endpoint holds 30 s).

@@ -3,12 +3,12 @@ package session
 import (
 	"context"
 	"errors"
-	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
+	"github.com/pinksaucepasta/paperboat/cli/internal/diagnostics"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/history"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/pty"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/recordings"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/history"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/pty"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/recordings"
 )
 
 // ownerStallBound is how long the PTY waits for an owner that drains nothing before treating its link as gone.

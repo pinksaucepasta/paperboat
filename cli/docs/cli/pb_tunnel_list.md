@@ -19,6 +19,7 @@ pb tunnel list [flags]
 ### Options
 
 ```
+      --all             with --ephemeral, include ended previews (kept 30 days after they end)
       --cursor string   continue a previous page
   -h, --help            help for list
       --json            print canonical JSON

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/localdaemon"
+	"github.com/pinksaucepasta/paperboat/cli/internal/localdaemon"
 )
 
 // pb service stop/start/restart and pb uninstall, from a terminal that is not elevated, say that the step

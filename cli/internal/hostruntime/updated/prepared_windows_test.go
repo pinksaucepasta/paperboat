@@ -12,7 +12,7 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/workerupdate"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/workerupdate"
 )
 
 func TestWindowsPreparedCandidateRevalidatesActualExecutable(t *testing.T) {

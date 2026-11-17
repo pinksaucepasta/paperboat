@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/api"
+	"github.com/pinksaucepasta/paperboat/cli/internal/api"
 )
 
 // pb preview reports the server's answer when it is the only cause (team_limit on a full team workspace), keeps a

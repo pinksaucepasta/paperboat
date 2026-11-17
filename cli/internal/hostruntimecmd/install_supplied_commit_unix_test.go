@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hostinstall"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/installsource"
 )
 
 // A .pb-update bundle is installed with an empty source in the request: its real identity is

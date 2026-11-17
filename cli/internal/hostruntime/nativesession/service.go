@@ -10,8 +10,8 @@ import (
 	"reflect"
 	"sync"
 
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/native"
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/streamauth"
+	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/native"
+	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/streamauth"
 )
 
 var ErrInvalid = errors.New("invalid native application session")

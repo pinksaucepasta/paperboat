@@ -5,8 +5,8 @@ import (
 	"errors"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/updateflow"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/installsource"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/updateflow"
 )
 
 // PreparedActivation separates signed artifact approval from native installation.

@@ -2,9 +2,9 @@ package main
 
 import (
 	"fmt"
-	"github.com/pinksaucepasta/paperboat/internal/filetransfer"
-	"github.com/pinksaucepasta/paperboat/internal/prompt"
-	"github.com/pinksaucepasta/paperboat/internal/selector"
+	"github.com/pinksaucepasta/paperboat/cli/internal/filetransfer"
+	"github.com/pinksaucepasta/paperboat/cli/internal/prompt"
+	"github.com/pinksaucepasta/paperboat/cli/internal/selector"
 	"github.com/spf13/cobra"
 	"os"
 	"strconv"

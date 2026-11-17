@@ -2,7 +2,7 @@ package main
 
 import (
 	"errors"
-	"github.com/pinksaucepasta/paperboat/internal/localapi"
+	"github.com/pinksaucepasta/paperboat/cli/internal/localapi"
 	"net/http"
 	"strings"
 	"syscall"

@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/store"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/store"
 )
 
 func TestCanonicalHashIgnoresWhitespaceAndObjectOrder(t *testing.T) {

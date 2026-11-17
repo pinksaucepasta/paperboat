@@ -6,9 +6,9 @@ import (
 	"io/fs"
 	"path/filepath"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/session"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/store"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/workloadbridge"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/session"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/store"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/workloadbridge"
 )
 
 // NewArchiveReader runs inside the current account-user owner. Root hostd

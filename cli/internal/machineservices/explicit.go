@@ -3,7 +3,7 @@ package machineservices
 import (
 	"context"
 	"errors"
-	"github.com/pinksaucepasta/paperboat/internal/neterr"
+	"github.com/pinksaucepasta/paperboat/cli/internal/neterr"
 	"net"
 	"reflect"
 	"strconv"

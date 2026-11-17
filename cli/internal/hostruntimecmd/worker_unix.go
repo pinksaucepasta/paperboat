@@ -17,10 +17,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
-	hostruntime "github.com/pinksaucepasta/paperboat/internal/hostruntime/runtime"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
+	"github.com/pinksaucepasta/paperboat/cli/internal/buildinfo"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hostdproto"
+	hostruntime "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/runtime"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/service"
 	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
 )
 

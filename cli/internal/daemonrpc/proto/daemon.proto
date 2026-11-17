@@ -1,7 +1,7 @@
 syntax = "proto3";
 
 package daemonrpc;
-option go_package = "github.com/pinksaucepasta/paperboat/internal/daemonrpc/proto;proto";
+option go_package = "github.com/pinksaucepasta/paperboat/cli/internal/daemonrpc/proto;proto";
 
 message Empty {}
 

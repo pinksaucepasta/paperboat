@@ -7,7 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"github.com/pinksaucepasta/paperboat/internal/errorreport"
+	"github.com/pinksaucepasta/paperboat/cli/internal/errorreport"
 	"io"
 	"net/http"
 	"net/url"
@@ -16,7 +16,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/pinksaucepasta/paperboat/internal/atomicfile"
+	"github.com/pinksaucepasta/paperboat/cli/internal/atomicfile"
 
 	"github.com/pinksaucepasta/paperboat/shared/httptransport"
 	"sync"

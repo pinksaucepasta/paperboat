@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/autoupdate"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/autoupdate"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hostdproto"
 )
 
 var ErrHostdActivationProvider = errors.New("hostd update activation provider failed")

@@ -6,8 +6,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/localapi"
-	"github.com/pinksaucepasta/paperboat/internal/localdaemon"
+	"github.com/pinksaucepasta/paperboat/cli/internal/localapi"
+	"github.com/pinksaucepasta/paperboat/cli/internal/localdaemon"
 )
 
 // R-X-39: a logged-out Linux user (no user bus) printed not-installed while the daemon served exec.

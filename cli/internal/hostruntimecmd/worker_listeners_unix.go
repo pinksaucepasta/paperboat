@@ -12,8 +12,8 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
-	hostruntime "github.com/pinksaucepasta/paperboat/internal/hostruntime/runtime"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hostdproto"
+	hostruntime "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/runtime"
 )
 
 // hostdListeners are the sockets one hostd generation serves. The fixed ones

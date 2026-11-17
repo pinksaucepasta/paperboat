@@ -1,4 +1,4 @@
-module github.com/pinksaucepasta/paperboat
+module github.com/pinksaucepasta/paperboat/cli
 
 go 1.27.4
 

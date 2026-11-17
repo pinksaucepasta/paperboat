@@ -12,12 +12,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/auth"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/operation"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/recordingcontrol"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/recordings"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/session"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/auth"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/operation"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/protocol"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/recordingcontrol"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/recordings"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/session"
 	wire "github.com/pinksaucepasta/paperboat/shared/recording"
 )
 

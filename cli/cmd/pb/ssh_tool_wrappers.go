@@ -6,8 +6,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/pinksaucepasta/paperboat/internal/command"
-	"github.com/pinksaucepasta/paperboat/internal/managedssh"
+	"github.com/pinksaucepasta/paperboat/cli/internal/command"
+	"github.com/pinksaucepasta/paperboat/cli/internal/managedssh"
 	"github.com/spf13/cobra"
 )
 

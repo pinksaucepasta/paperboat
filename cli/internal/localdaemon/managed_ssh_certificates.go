@@ -5,8 +5,8 @@ import (
 	"slices"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/api"
-	"github.com/pinksaucepasta/paperboat/internal/managedssh"
+	"github.com/pinksaucepasta/paperboat/cli/internal/api"
+	"github.com/pinksaucepasta/paperboat/cli/internal/managedssh"
 )
 
 // renewManagedSSHCertificates keeps the certificates of machines a connection used in the last day under an hour

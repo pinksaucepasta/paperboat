@@ -7,9 +7,9 @@ import (
 	"syscall"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/localapi"
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/native"
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/tailnet"
+	"github.com/pinksaucepasta/paperboat/cli/internal/localapi"
+	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/native"
+	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/tailnet"
 )
 
 func TestNativeProbeRejectsOnlyProvenAuthorityFailures(t *testing.T) {

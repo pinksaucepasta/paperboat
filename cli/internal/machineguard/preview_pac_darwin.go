@@ -12,7 +12,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/privateproxyconfig"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/privateproxyconfig"
 )
 
 const previewProxyJournal = "system-proxy.json"

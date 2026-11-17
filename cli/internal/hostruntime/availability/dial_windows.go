@@ -4,13 +4,13 @@ package availability
 
 import (
 	"context"
-	"github.com/pinksaucepasta/paperboat/internal/winpipe"
+	"github.com/pinksaucepasta/paperboat/cli/internal/winpipe"
 	"net"
 	"strings"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostservice"
-	hostruntimeservice "github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hostservice"
+	hostruntimeservice "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/service"
 	"golang.org/x/sys/windows"
 )
 

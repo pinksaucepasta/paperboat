@@ -7,7 +7,7 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machineevents"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/machineevents"
 )
 
 // MachineEventPush carries only invalidation hints, never cached account data.

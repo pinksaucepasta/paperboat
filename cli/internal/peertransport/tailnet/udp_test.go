@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/mesh"
+	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/mesh"
 	"net/netip"
 	"tailscale.com/tailcfg"
 	"tailscale.com/tstest/integration"

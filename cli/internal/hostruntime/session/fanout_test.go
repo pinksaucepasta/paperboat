@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/history"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/history"
 )
 
 func TestWaitNextWakesForOutputDetachEvictionAndCancellation(t *testing.T) {

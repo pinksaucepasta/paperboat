@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/api"
-	"github.com/pinksaucepasta/paperboat/internal/config"
+	"github.com/pinksaucepasta/paperboat/cli/internal/api"
+	"github.com/pinksaucepasta/paperboat/cli/internal/config"
 )
 
 // X-24: a session id Paperboat does not list used to fail with "Paperboat could not finish the command" and no step.

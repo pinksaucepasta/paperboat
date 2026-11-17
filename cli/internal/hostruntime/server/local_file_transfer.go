@@ -13,8 +13,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/filetransfer"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/store"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/filetransfer"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/store"
 )
 
 type LocalFileTransferConfig struct {

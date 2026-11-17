@@ -11,10 +11,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/atomicfile/atomicfiletest"
+	"github.com/pinksaucepasta/paperboat/cli/internal/atomicfile/atomicfiletest"
 
-	"github.com/pinksaucepasta/paperboat/internal/api"
-	"github.com/pinksaucepasta/paperboat/internal/config"
+	"github.com/pinksaucepasta/paperboat/cli/internal/api"
+	"github.com/pinksaucepasta/paperboat/cli/internal/config"
 )
 
 func TestDiagnosticConfigSyncPreservesMissingServiceAndUnknownAssignment(t *testing.T) {

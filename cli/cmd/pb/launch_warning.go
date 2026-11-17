@@ -1,6 +1,6 @@
 package main
 
-import "github.com/pinksaucepasta/paperboat/internal/hostruntime/envinject"
+import "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/envinject"
 
 // launchWarning is the typed form of a launch notice in JSON output.
 type launchWarning struct {

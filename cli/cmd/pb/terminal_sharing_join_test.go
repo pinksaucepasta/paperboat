@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/api"
-	"github.com/pinksaucepasta/paperboat/internal/resolver"
-	"github.com/pinksaucepasta/paperboat/internal/tunnel"
+	"github.com/pinksaucepasta/paperboat/cli/internal/api"
+	"github.com/pinksaucepasta/paperboat/cli/internal/resolver"
+	"github.com/pinksaucepasta/paperboat/cli/internal/tunnel"
 )
 
 type joinTestConn struct{ tunnel.Conn }

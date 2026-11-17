@@ -3,8 +3,8 @@ package tunnel
 import (
 	"context"
 	"crypto/rand"
-	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
-	"github.com/pinksaucepasta/paperboat/internal/errorreport"
+	"github.com/pinksaucepasta/paperboat/cli/internal/diagnostics"
+	"github.com/pinksaucepasta/paperboat/cli/internal/errorreport"
 )
 
 // Keep attempt timestamps and typed failures locally, without terminal content

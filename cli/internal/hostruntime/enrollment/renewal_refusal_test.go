@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/errorreport"
+	"github.com/pinksaucepasta/paperboat/cli/internal/errorreport"
 )
 
 // enrolledRoot enrolls a machine through a throwaway control plane (which then answers renewals as handler says) and

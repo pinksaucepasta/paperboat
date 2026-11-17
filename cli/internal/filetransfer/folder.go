@@ -11,7 +11,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/transfername"
+	"github.com/pinksaucepasta/paperboat/cli/internal/transfername"
 )
 
 // A folder is sent as one transfer whose bytes are a tar stream of its files and folders, written while it is sent

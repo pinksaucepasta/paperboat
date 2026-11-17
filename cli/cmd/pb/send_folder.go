@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/pinksaucepasta/paperboat/internal/filetransfer"
+	"github.com/pinksaucepasta/paperboat/cli/internal/filetransfer"
 )
 
 // folderNotice says what a folder send carries and, once, what was left out (links and special files are skipped the

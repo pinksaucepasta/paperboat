@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/windows/pipeauth"
+	"github.com/pinksaucepasta/paperboat/cli/internal/windows/pipeauth"
 )
 
 var dialTrustedLocalPipe = pipeauth.DialCurrentUser

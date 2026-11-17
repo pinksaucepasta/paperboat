@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/inspector"
+	"github.com/pinksaucepasta/paperboat/cli/internal/inspector"
 )
 
 func forwardInspectorRequest(t *testing.T, policy inspector.ResourcePolicy, request *http.Request, handler http.HandlerFunc) (*inspector.Store, inspector.Record) {

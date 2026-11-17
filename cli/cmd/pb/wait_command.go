@@ -12,11 +12,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/config"
-	"github.com/pinksaucepasta/paperboat/internal/localapi"
-	"github.com/pinksaucepasta/paperboat/internal/localdaemon"
-	"github.com/pinksaucepasta/paperboat/internal/localwait"
-	"github.com/pinksaucepasta/paperboat/internal/resolver"
+	"github.com/pinksaucepasta/paperboat/cli/internal/config"
+	"github.com/pinksaucepasta/paperboat/cli/internal/localapi"
+	"github.com/pinksaucepasta/paperboat/cli/internal/localdaemon"
+	"github.com/pinksaucepasta/paperboat/cli/internal/localwait"
+	"github.com/pinksaucepasta/paperboat/cli/internal/resolver"
 	"github.com/spf13/cobra"
 )
 

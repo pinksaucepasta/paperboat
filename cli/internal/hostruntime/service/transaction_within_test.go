@@ -9,7 +9,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/shorttemp"
+	"github.com/pinksaucepasta/paperboat/cli/internal/shorttemp"
 )
 
 // The updater recovers an interrupted install from inside its own service. Its rollback stops every role that

@@ -6,7 +6,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/configapply"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/configapply"
 )
 
 func TestDispatcherConfigApplyConformance(t *testing.T) {

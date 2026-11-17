@@ -7,12 +7,12 @@ import (
 	"encoding/json"
 	"os"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/updated"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/service"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/updated"
 	"runtime"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/localdaemon"
+	"github.com/pinksaucepasta/paperboat/cli/internal/localdaemon"
 	"github.com/spf13/cobra"
 )
 

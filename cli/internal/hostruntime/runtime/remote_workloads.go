@@ -4,11 +4,11 @@ package runtime
 
 import (
 	"context"
-	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/envinject"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/execprocess"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/server"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/session"
+	"github.com/pinksaucepasta/paperboat/cli/internal/diagnostics"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/envinject"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/execprocess"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/server"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/session"
 )
 
 // NewProductionFeatureHost constructs the actual replaceable feature runtime.

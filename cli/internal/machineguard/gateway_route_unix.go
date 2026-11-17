@@ -14,7 +14,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	"github.com/pinksaucepasta/paperboat/internal/splitdns"
+	"github.com/pinksaucepasta/paperboat/cli/internal/splitdns"
 )
 
 // One host gateway routed by the caller's uid (PLAN 3b multi-account hosts, F23-01; Linux and macOS). The guard owns one listener

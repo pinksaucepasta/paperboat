@@ -17,7 +17,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/releaseindex"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/releaseindex"
 )
 
 // TestStagedTUFRepository runs the same signed release-index and component

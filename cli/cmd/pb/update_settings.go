@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/autoupdate"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/updated"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/autoupdate"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/updated"
 	"github.com/spf13/cobra"
 )
 

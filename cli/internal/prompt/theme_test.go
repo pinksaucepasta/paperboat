@@ -7,7 +7,7 @@ import (
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
-	"github.com/pinksaucepasta/paperboat/internal/preferences"
+	"github.com/pinksaucepasta/paperboat/cli/internal/preferences"
 )
 
 func TestPromptContextKeysKeepSafetyControlsAndCompactLayout(t *testing.T) {

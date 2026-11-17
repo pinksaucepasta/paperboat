@@ -4,12 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/protocol"
 	"sync"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/auth"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/configsync"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/operation"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/auth"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/configsync"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/operation"
 )
 
 type ConfigComparisonReader func(context.Context, configsync.ConflictComparisonRequest) (configsync.ConflictComparison, error)

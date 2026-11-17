@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	doctorpkg "github.com/pinksaucepasta/paperboat/internal/doctor"
+	doctorpkg "github.com/pinksaucepasta/paperboat/cli/internal/doctor"
 )
 
 // pb doctor warns, with the fix, when the machine guard's managed SSH source addresses are missing (every user's

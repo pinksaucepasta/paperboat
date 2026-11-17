@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
+	"github.com/pinksaucepasta/paperboat/cli/internal/diagnostics"
 )
 
 type failedStalledConn struct{ stalledReconnectConn }

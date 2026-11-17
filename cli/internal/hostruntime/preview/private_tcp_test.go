@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	peerpreview "github.com/pinksaucepasta/paperboat/internal/peertransport/privatepreview"
+	peerpreview "github.com/pinksaucepasta/paperboat/cli/internal/peertransport/privatepreview"
 )
 
 func TestStartPrivateTCPProxyUsesAuthorizedCarrierAndLiteralLoopback(t *testing.T) {

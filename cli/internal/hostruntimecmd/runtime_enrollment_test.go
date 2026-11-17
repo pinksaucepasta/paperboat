@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/bootstrap"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/enrollment"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/bootstrap"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/enrollment"
 )
 
 func TestPlanRuntimeEnrollment(t *testing.T) {

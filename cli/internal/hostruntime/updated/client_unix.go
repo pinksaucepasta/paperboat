@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/ospeer"
+	"github.com/pinksaucepasta/paperboat/cli/internal/ospeer"
 )
 
 // Client exposes only the fixed local updater operations. It cannot submit a

@@ -11,16 +11,16 @@ import (
 	"sync/atomic"
 	"time"
 
-	runtimeconfig "github.com/pinksaucepasta/paperboat/internal/hostruntime/config"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/envinject"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/execprocess"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/pty"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/recordings"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/session"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/sessionowner"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/store"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/workloadbridge"
+	runtimeconfig "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/config"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/envinject"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/execprocess"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hostdproto"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/pty"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/recordings"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/session"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/sessionowner"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/store"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/workloadbridge"
 )
 
 // IndependentSessionOwner has native service custody separate from hostd.

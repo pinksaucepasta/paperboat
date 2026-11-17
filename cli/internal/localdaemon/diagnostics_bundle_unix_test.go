@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
-	"github.com/pinksaucepasta/paperboat/internal/localapi"
+	"github.com/pinksaucepasta/paperboat/cli/internal/diagnostics"
+	"github.com/pinksaucepasta/paperboat/cli/internal/localapi"
 )
 
 type fixedSnapshot localapi.Snapshot

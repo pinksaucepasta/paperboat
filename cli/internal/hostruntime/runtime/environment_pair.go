@@ -10,10 +10,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/enrollment"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/envinject"
-	runtimeidentity "github.com/pinksaucepasta/paperboat/internal/hostruntime/identity"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machinecontrol"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/enrollment"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/envinject"
+	runtimeidentity "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/identity"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/machinecontrol"
 )
 
 // PreparePairEnvironment provisions the installation's normal ENV recipient

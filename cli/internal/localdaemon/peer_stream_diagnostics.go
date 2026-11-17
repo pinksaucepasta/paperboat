@@ -6,7 +6,7 @@ import (
 	"net"
 	"reflect"
 
-	"github.com/pinksaucepasta/paperboat/internal/errorreport"
+	"github.com/pinksaucepasta/paperboat/cli/internal/errorreport"
 )
 
 func reportLocalPeerBridgeFailure(ctx context.Context, err error) {

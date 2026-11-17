@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/history"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/history"
 )
 
 var (

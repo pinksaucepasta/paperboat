@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/execprocess"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/execprocess"
 )
 
 func maintenanceExecManager(t *testing.T) (*execprocess.Manager, string) {

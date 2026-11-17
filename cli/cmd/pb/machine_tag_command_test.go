@@ -10,8 +10,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/api"
-	"github.com/pinksaucepasta/paperboat/internal/localapi"
+	"github.com/pinksaucepasta/paperboat/cli/internal/api"
+	"github.com/pinksaucepasta/paperboat/cli/internal/localapi"
 )
 
 // tagServer answers the machine list, the policy version and the machine tag PUT; the PUT is

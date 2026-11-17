@@ -4,7 +4,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/pty"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/pty"
 )
 
 // sizeWindowRetention is how long a detached window keeps its activity, so a reconnect (the connection drops and the

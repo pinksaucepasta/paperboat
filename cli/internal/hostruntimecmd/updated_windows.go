@@ -8,10 +8,10 @@ import (
 	"io"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/sessionowner"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/updated"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hostinstall"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/service"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/sessionowner"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/updated"
 )
 
 func runUpdated(ctx context.Context, args []string, _ io.Writer, stderr io.Writer) error {

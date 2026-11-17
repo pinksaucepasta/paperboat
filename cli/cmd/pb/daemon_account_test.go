@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/daemoncmd"
-	"github.com/pinksaucepasta/paperboat/internal/daemonrpc"
+	"github.com/pinksaucepasta/paperboat/cli/internal/daemoncmd"
+	"github.com/pinksaucepasta/paperboat/cli/internal/daemonrpc"
 )
 
 func TestDaemonAccountMismatchIsExplainedToThePerson(t *testing.T) {

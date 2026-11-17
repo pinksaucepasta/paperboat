@@ -19,13 +19,13 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/api"
-	env "github.com/pinksaucepasta/paperboat/internal/environmente2ee"
-	"github.com/pinksaucepasta/paperboat/internal/errorreport"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/envinject"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/environmentkey"
-	runtimeidentity "github.com/pinksaucepasta/paperboat/internal/hostruntime/identity"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/pty"
+	"github.com/pinksaucepasta/paperboat/cli/internal/api"
+	env "github.com/pinksaucepasta/paperboat/cli/internal/environmente2ee"
+	"github.com/pinksaucepasta/paperboat/cli/internal/errorreport"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/envinject"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/environmentkey"
+	runtimeidentity "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/identity"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/pty"
 )
 
 func TestLayerEnvironmentLaunchRequiresFreshProofBoundWorkspaceActor(t *testing.T) {

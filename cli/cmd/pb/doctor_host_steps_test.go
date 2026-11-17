@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	doctorpkg "github.com/pinksaucepasta/paperboat/internal/doctor"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/health"
+	doctorpkg "github.com/pinksaucepasta/paperboat/cli/internal/doctor"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/health"
 )
 
 // A host runtime step that failed (a degraded typed health dimension) makes pb doctor unhealthy, naming the

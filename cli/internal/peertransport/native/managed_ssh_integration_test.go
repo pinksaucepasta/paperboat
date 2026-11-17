@@ -19,15 +19,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/shorttemp"
+	"github.com/pinksaucepasta/paperboat/cli/internal/shorttemp"
 
-	"github.com/pinksaucepasta/paperboat/internal/managedssh"
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/native"
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/peerquic"
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/streamauth"
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/tailnet"
-	"github.com/pinksaucepasta/paperboat/internal/resolver"
-	"github.com/pinksaucepasta/paperboat/internal/tunnel"
+	"github.com/pinksaucepasta/paperboat/cli/internal/managedssh"
+	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/native"
+	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/peerquic"
+	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/streamauth"
+	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/tailnet"
+	"github.com/pinksaucepasta/paperboat/cli/internal/resolver"
+	"github.com/pinksaucepasta/paperboat/cli/internal/tunnel"
 	"tailscale.com/tstest/integration"
 )
 

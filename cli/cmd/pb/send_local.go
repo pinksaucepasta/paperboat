@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/filetransfer"
-	"github.com/pinksaucepasta/paperboat/internal/inbox"
+	"github.com/pinksaucepasta/paperboat/cli/internal/filetransfer"
+	"github.com/pinksaucepasta/paperboat/cli/internal/inbox"
 )
 
 // deliverToThisComputer is `pb send --to <this computer>`: the files are copied into this

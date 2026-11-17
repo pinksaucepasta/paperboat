@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/identity"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/identity"
 )
 
 func writeRuntimeIdentityFile(t *testing.T, root, keyID string, rename bool) {

@@ -10,10 +10,10 @@ import (
 	"path/filepath"
 	"testing"
 
-	runtimeconfig "github.com/pinksaucepasta/paperboat/internal/hostruntime/config"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/process"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/server"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/session"
+	runtimeconfig "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/config"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/process"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/server"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/session"
 )
 
 type machineServiceStub struct{}

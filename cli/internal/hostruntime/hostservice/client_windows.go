@@ -6,12 +6,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/pinksaucepasta/paperboat/internal/winpipe"
+	"github.com/pinksaucepasta/paperboat/cli/internal/winpipe"
 	"io"
 	"regexp"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/bootstrap"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/bootstrap"
 )
 
 const defaultSocketPath = `\\.\pipe\PaperboatHostService`

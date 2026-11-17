@@ -5,8 +5,8 @@ import (
 	"database/sql"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/store/storesqlc"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/protocol"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/store/storesqlc"
 )
 
 type FileTransfer struct {

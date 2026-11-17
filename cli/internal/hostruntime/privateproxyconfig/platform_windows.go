@@ -5,7 +5,7 @@ package privateproxyconfig
 import (
 	"context"
 	"errors"
-	"github.com/pinksaucepasta/paperboat/internal/windowssecurity"
+	"github.com/pinksaucepasta/paperboat/cli/internal/windowssecurity"
 	"os"
 	"path/filepath"
 	"runtime"

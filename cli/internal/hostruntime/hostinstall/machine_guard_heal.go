@@ -7,8 +7,8 @@ import (
 	"errors"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
-	"github.com/pinksaucepasta/paperboat/internal/machineguard"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/installsource"
+	"github.com/pinksaucepasta/paperboat/cli/internal/machineguard"
 )
 
 // HealMachineGuard runs in the privileged updater on start. When the machine guard answers but runs

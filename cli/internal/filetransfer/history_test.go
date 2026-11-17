@@ -2,7 +2,7 @@ package filetransfer
 
 import (
 	"encoding/json"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/protocol"
 	"net/http"
 	"net/http/httptest"
 	"testing"

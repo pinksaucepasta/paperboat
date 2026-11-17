@@ -6,11 +6,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/history"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/operation"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/session"
-	hosttelemetry "github.com/pinksaucepasta/paperboat/internal/hostruntime/telemetry"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/history"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/operation"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/protocol"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/session"
+	hosttelemetry "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/telemetry"
 	"io"
 	"net"
 	"strings"
@@ -19,8 +19,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/errorreport"
-	hostauth "github.com/pinksaucepasta/paperboat/internal/hostruntime/auth"
+	"github.com/pinksaucepasta/paperboat/cli/internal/errorreport"
+	hostauth "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/auth"
 )
 
 type authorizerFunc func(context.Context, protocol.Frame) (Authorization, error)

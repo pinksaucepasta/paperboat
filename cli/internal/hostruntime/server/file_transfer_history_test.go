@@ -3,8 +3,8 @@ package server
 import (
 	"context"
 	"fmt"
-	clienttransfer "github.com/pinksaucepasta/paperboat/internal/filetransfer"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/store"
+	clienttransfer "github.com/pinksaucepasta/paperboat/cli/internal/filetransfer"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/store"
 	"net"
 	"net/http"
 	"net/http/httptest"

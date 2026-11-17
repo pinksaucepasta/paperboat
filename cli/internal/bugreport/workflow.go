@@ -13,8 +13,8 @@ import (
 	"slices"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/api"
-	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
+	"github.com/pinksaucepasta/paperboat/cli/internal/api"
+	"github.com/pinksaucepasta/paperboat/cli/internal/diagnostics"
 )
 
 const ResultSchemaV1 = "paperboat.bugreport/v1"

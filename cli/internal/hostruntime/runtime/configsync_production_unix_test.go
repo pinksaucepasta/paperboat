@@ -5,14 +5,14 @@ package runtime
 import (
 	"context"
 	"errors"
-	"github.com/pinksaucepasta/paperboat/internal/shorttemp"
+	"github.com/pinksaucepasta/paperboat/cli/internal/shorttemp"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/configsync"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/configsync"
 )
 
 func TestProductionConfigRepositoryDefersMappedIOAndPreservesOutputObservation(t *testing.T) {

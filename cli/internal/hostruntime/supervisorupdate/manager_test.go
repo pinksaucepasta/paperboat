@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/workerupdate"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/workerupdate"
 )
 
 type testFetcher struct{ content map[string][]byte }

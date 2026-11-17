@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/execprocess"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/execprocess"
 )
 
 // A working directory the target refuses is reported with its own code, not as a generic invalid request that the

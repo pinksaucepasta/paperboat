@@ -19,7 +19,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/releaseindex"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/releaseindex"
 	"github.com/pinksaucepasta/paperboat/shared/httptransport"
 	"github.com/theupdateframework/go-tuf/v2/metadata/updater"
 )

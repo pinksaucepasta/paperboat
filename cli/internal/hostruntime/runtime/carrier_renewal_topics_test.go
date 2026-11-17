@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machineevents"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machineevents/eventstest"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/machineevents"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/machineevents/eventstest"
 )
 
 // F21-18: the carrier renews on an access or peer network change, so it needs no per-minute fallback, but not on

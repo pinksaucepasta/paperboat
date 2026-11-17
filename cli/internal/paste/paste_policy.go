@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	transfer "github.com/pinksaucepasta/paperboat/internal/filetransfer"
+	transfer "github.com/pinksaucepasta/paperboat/cli/internal/filetransfer"
 )
 
 type Policy struct {

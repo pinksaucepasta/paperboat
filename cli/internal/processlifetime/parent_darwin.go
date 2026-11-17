@@ -9,7 +9,7 @@ import (
 	"os"
 	"syscall"
 
-	"github.com/pinksaucepasta/paperboat/internal/errorreport"
+	"github.com/pinksaucepasta/paperboat/cli/internal/errorreport"
 	"golang.org/x/sys/unix"
 )
 

@@ -15,8 +15,8 @@ import (
 	"testing"
 	"time"
 
-	transfer "github.com/pinksaucepasta/paperboat/internal/filetransfer"
-	"github.com/pinksaucepasta/paperboat/internal/tunnel"
+	transfer "github.com/pinksaucepasta/paperboat/cli/internal/filetransfer"
+	"github.com/pinksaucepasta/paperboat/cli/internal/tunnel"
 )
 
 // fixedUploader returns a constant VM path.

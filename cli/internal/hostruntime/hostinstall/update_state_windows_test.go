@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/releaseeligibility"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/releaseeligibility"
 	"golang.org/x/sys/windows"
 )
 

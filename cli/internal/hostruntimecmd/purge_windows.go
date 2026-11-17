@@ -8,8 +8,8 @@ import (
 	"io"
 	"os"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
-	"github.com/pinksaucepasta/paperboat/internal/windows/elevation"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hostinstall"
+	"github.com/pinksaucepasta/paperboat/cli/internal/windows/elevation"
 )
 
 func runPurgeCommand(ctx context.Context, args []string, _ io.Reader, _, _ io.Writer) error {

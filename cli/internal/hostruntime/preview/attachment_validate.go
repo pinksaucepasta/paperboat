@@ -14,7 +14,7 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/pinksaucepasta/paperboat/internal/inbox"
+	"github.com/pinksaucepasta/paperboat/cli/internal/inbox"
 )
 
 func validateAttachmentTarget(target LeaseTarget) error {

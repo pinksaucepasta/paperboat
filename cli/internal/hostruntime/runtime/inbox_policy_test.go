@@ -5,7 +5,7 @@ package runtime
 import (
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/protocol"
 )
 
 func TestStaticPolicyBindsInboxCredentialsToTheirOperationAndSingleUse(t *testing.T) {

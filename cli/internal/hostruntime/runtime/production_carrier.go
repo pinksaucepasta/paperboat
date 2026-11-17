@@ -11,13 +11,13 @@ import (
 	"sync"
 	"time"
 
-	clientapi "github.com/pinksaucepasta/paperboat/internal/api"
-	"github.com/pinksaucepasta/paperboat/internal/bandwidth"
-	clientconfig "github.com/pinksaucepasta/paperboat/internal/config"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machineevents"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/offlineaudit"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/server"
-	"github.com/pinksaucepasta/paperboat/internal/managedssh"
+	clientapi "github.com/pinksaucepasta/paperboat/cli/internal/api"
+	"github.com/pinksaucepasta/paperboat/cli/internal/bandwidth"
+	clientconfig "github.com/pinksaucepasta/paperboat/cli/internal/config"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/machineevents"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/offlineaudit"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/server"
+	"github.com/pinksaucepasta/paperboat/cli/internal/managedssh"
 	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 )
 

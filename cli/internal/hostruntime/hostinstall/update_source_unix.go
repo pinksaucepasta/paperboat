@@ -4,7 +4,7 @@ package hostinstall
 
 import (
 	"context"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/installsource"
 	"os"
 	"runtime"
 )

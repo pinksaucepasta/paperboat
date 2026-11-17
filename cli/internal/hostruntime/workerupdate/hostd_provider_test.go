@@ -3,12 +3,12 @@ package workerupdate
 import (
 	"context"
 	"errors"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/autoupdate"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/autoupdate"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hostdproto"
 )
 
 type recordingHostdGateClient struct {

@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hoststate"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/originhealth"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hoststate"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/originhealth"
 	sharedprotocol "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 )
 

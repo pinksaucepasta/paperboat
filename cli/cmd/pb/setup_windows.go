@@ -10,8 +10,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/windows/elevation"
-	"github.com/pinksaucepasta/paperboat/internal/windowsopenssh"
+	"github.com/pinksaucepasta/paperboat/cli/internal/windows/elevation"
+	"github.com/pinksaucepasta/paperboat/cli/internal/windowsopenssh"
 )
 
 // setupOpenSSHBudget bounds the OpenSSH step like an install or pair does: the package may only be reachable through

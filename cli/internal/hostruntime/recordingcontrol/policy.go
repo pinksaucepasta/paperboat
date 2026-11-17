@@ -16,7 +16,7 @@ import (
 	"os"
 	"sync"
 
-	"github.com/pinksaucepasta/paperboat/internal/atomicfile"
+	"github.com/pinksaucepasta/paperboat/cli/internal/atomicfile"
 	wire "github.com/pinksaucepasta/paperboat/shared/recording"
 	"github.com/pinksaucepasta/paperboat/shared/wirejson"
 )

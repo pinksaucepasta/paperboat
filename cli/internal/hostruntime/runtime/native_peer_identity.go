@@ -8,8 +8,8 @@ import (
 	"errors"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/peerquic"
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/tailnet"
+	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/peerquic"
+	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/tailnet"
 	"github.com/pinksaucepasta/paperboat/shared/peertransport/endpointidentity"
 	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 )

@@ -18,7 +18,7 @@ import (
 	"syscall"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/installsource"
 )
 
 func TestCarrierProtectedCapabilityAndLifetimeLock(t *testing.T) {

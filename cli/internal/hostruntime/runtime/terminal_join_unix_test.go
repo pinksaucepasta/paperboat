@@ -12,7 +12,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/server"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/server"
 )
 
 func TestTerminalJoinSenderSignsExactBodyAndRequiresReceipt(t *testing.T) {

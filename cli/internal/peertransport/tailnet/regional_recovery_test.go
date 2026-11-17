@@ -10,7 +10,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
 
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/mesh"
+	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/mesh"
 	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=regional-recovery-test
 	"tailscale.com/tailcfg"
 	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=regional-recovery-test

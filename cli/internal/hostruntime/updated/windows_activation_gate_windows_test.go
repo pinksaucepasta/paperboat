@@ -3,7 +3,7 @@
 package updated
 
 import (
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/updateflow"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/updateflow"
 	"testing"
 	"time"
 )

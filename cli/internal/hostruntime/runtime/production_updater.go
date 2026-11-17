@@ -5,7 +5,7 @@ package runtime
 import (
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/updated"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/updated"
 )
 
 // newProductionUpdaterClient talks to this installation's updater. Each installation has its own updater

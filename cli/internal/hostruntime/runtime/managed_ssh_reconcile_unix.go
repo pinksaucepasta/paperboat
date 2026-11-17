@@ -14,12 +14,12 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machineevents"
-	"github.com/pinksaucepasta/paperboat/internal/managedssh"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/machineevents"
+	"github.com/pinksaucepasta/paperboat/cli/internal/managedssh"
 
-	clientapi "github.com/pinksaucepasta/paperboat/internal/api"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/health"
-	runtimeidentity "github.com/pinksaucepasta/paperboat/internal/hostruntime/identity"
+	clientapi "github.com/pinksaucepasta/paperboat/cli/internal/api"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/health"
+	runtimeidentity "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/identity"
 )
 
 type managedSSHKeyReconciler struct {

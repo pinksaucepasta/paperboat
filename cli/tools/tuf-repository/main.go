@@ -17,10 +17,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/releaseindex"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/releasepolicy"
-	"github.com/pinksaucepasta/paperboat/internal/selfupdate"
-	"github.com/pinksaucepasta/paperboat/tools/releaseplan"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/releaseindex"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/releasepolicy"
+	"github.com/pinksaucepasta/paperboat/cli/internal/selfupdate"
+	"github.com/pinksaucepasta/paperboat/cli/tools/releaseplan"
 	"github.com/theupdateframework/go-tuf/v2/metadata"
 )
 

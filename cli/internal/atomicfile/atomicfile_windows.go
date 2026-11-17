@@ -14,7 +14,7 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/pinksaucepasta/paperboat/internal/windowssecurity"
+	"github.com/pinksaucepasta/paperboat/cli/internal/windowssecurity"
 	"golang.org/x/sys/windows"
 )
 

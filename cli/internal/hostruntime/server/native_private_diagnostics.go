@@ -6,10 +6,10 @@ import (
 	"io"
 	"net"
 
-	"github.com/pinksaucepasta/paperboat/internal/errorreport"
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/native"
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/streamauth"
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/tailnet"
+	"github.com/pinksaucepasta/paperboat/cli/internal/errorreport"
+	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/native"
+	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/streamauth"
+	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/tailnet"
 )
 
 type nativePrivateFailure struct {

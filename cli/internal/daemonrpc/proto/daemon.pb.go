@@ -636,7 +636,7 @@ const file_daemon_proto_rawDesc = "" +
 	"\rDaemonService\x12=\n" +
 	"\fStreamStatus\x12\x10.daemonrpc.Empty\x1a\x19.daemonrpc.StatusResponse0\x01\x12D\n" +
 	"\x0eResolveMachine\x12\x17.daemonrpc.MachineQuery\x1a\x19.daemonrpc.MachineAddress\x12L\n" +
-	"\vApprovePeer\x12\x1d.daemonrpc.ApprovePeerRequest\x1a\x1e.daemonrpc.ApprovePeerResponseBDZBgithub.com/pinksaucepasta/paperboat/internal/daemonrpc/proto;protob\x06proto3"
+	"\vApprovePeer\x12\x1d.daemonrpc.ApprovePeerRequest\x1a\x1e.daemonrpc.ApprovePeerResponseBHZFgithub.com/pinksaucepasta/paperboat/cli/internal/daemonrpc/proto;protob\x06proto3"
 
 var (
 	file_daemon_proto_rawDescOnce sync.Once

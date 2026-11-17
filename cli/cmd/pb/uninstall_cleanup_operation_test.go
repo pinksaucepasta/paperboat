@@ -2,7 +2,7 @@ package main
 
 import (
 	"errors"
-	"github.com/pinksaucepasta/paperboat/internal/machineguard"
+	"github.com/pinksaucepasta/paperboat/cli/internal/machineguard"
 	"reflect"
 	"testing"
 )

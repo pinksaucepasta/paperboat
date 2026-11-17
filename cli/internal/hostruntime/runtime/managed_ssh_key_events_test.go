@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	runtimeidentity "github.com/pinksaucepasta/paperboat/internal/hostruntime/identity"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machineevents"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machineevents/eventstest"
+	runtimeidentity "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/identity"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/machineevents"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/machineevents/eventstest"
 )
 
 func TestManagedSSHRequiresMachineAccessSubscription(t *testing.T) {

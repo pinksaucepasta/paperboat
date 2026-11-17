@@ -5,14 +5,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/pinksaucepasta/paperboat/internal/atomicfile/atomicfiletest"
+	"github.com/pinksaucepasta/paperboat/cli/internal/atomicfile/atomicfiletest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/environmente2ee"
-	"github.com/pinksaucepasta/paperboat/internal/environmentmanager"
+	"github.com/pinksaucepasta/paperboat/cli/internal/environmente2ee"
+	"github.com/pinksaucepasta/paperboat/cli/internal/environmentmanager"
 	"github.com/spf13/cobra"
 )
 

@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/managedssh"
+	"github.com/pinksaucepasta/paperboat/cli/internal/managedssh"
 )
 
 func TestManagedSSHRuntimeRejectsIncompleteConfiguration(t *testing.T) {

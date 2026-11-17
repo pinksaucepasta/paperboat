@@ -18,11 +18,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/binarytarget"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/nativesignature"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/updateflow"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/binarytarget"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hostdproto"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/installsource"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/nativesignature"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/updateflow"
 )
 
 const maxRuntimeBytes int64 = 512 << 20

@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/updateflow"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/updateflow"
 )
 
 func TestTRK35UpdateJournalClockBoundaryIsInclusive(t *testing.T) {

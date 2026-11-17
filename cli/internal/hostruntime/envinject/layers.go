@@ -10,9 +10,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/api"
-	env "github.com/pinksaucepasta/paperboat/internal/environmente2ee"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/environmentkey"
+	"github.com/pinksaucepasta/paperboat/cli/internal/api"
+	env "github.com/pinksaucepasta/paperboat/cli/internal/environmente2ee"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/environmentkey"
 )
 
 type LayerConfig struct {

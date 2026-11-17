@@ -3,10 +3,10 @@ package tunnel
 import (
 	"context"
 
-	"github.com/pinksaucepasta/paperboat/internal/api"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/preview"
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/clientauthority"
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/peerquic"
+	"github.com/pinksaucepasta/paperboat/cli/internal/api"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/preview"
+	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/clientauthority"
+	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/peerquic"
 )
 
 // DialPrivateSession shares the daemon's root-verified native runtime. Callers

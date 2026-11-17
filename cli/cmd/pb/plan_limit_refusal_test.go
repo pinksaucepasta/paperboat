@@ -4,14 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/pinksaucepasta/paperboat/internal/localapi"
+	"github.com/pinksaucepasta/paperboat/cli/internal/localapi"
 	"net"
 	"net/http"
 	"strings"
 	"syscall"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/api"
+	"github.com/pinksaucepasta/paperboat/cli/internal/api"
 )
 
 // A send cut at the plan limit by a refused authorization renewal names the limit and the Billing link,

@@ -14,11 +14,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/atomicfile/atomicfiletest"
+	"github.com/pinksaucepasta/paperboat/cli/internal/atomicfile/atomicfiletest"
 
-	"github.com/pinksaucepasta/paperboat/internal/api"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/health"
-	hosttelemetry "github.com/pinksaucepasta/paperboat/internal/hostruntime/telemetry"
+	"github.com/pinksaucepasta/paperboat/cli/internal/api"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/health"
+	hosttelemetry "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/telemetry"
 )
 
 func TestCollectTunnelHostDiagnosticsUsesLoopbackNoProxyAndStrictBounds(t *testing.T) {

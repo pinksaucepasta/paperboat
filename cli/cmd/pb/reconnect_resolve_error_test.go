@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/api"
-	"github.com/pinksaucepasta/paperboat/internal/tunnel"
+	"github.com/pinksaucepasta/paperboat/cli/internal/api"
+	"github.com/pinksaucepasta/paperboat/cli/internal/tunnel"
 )
 
 // X-21: after a team grant was revoked the member's `pb connect` kept reconnecting for minutes, because only

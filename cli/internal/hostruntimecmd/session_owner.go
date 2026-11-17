@@ -12,8 +12,8 @@ import (
 	"runtime"
 	"time"
 
-	hostruntime "github.com/pinksaucepasta/paperboat/internal/hostruntime/runtime"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/sessionowner"
+	hostruntime "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/runtime"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/sessionowner"
 )
 
 func sessionOwnerInvocation(args []string, stderr io.Writer) (string, string, error) {

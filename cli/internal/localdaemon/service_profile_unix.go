@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"path/filepath"
 
-	hostservice "github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
+	hostservice "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/service"
 )
 
 // OtherProfileError is the refusal to install the local daemon service for one profile (config file) over the service

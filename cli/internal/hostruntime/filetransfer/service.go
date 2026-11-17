@@ -18,10 +18,10 @@ import (
 	"unicode/utf8"
 
 	"github.com/google/uuid"
-	"github.com/pinksaucepasta/paperboat/internal/diskspace"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/store"
-	"github.com/pinksaucepasta/paperboat/internal/transfername"
+	"github.com/pinksaucepasta/paperboat/cli/internal/diskspace"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/protocol"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/store"
+	"github.com/pinksaucepasta/paperboat/cli/internal/transfername"
 )
 
 func New(config Config) (*Service, error) {

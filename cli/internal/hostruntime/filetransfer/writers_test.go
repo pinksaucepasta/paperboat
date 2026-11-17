@@ -2,7 +2,7 @@ package filetransfer
 
 import (
 	"errors"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/session"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/session"
 	"testing"
 	"time"
 )

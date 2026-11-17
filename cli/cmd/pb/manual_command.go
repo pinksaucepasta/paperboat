@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"runtime"
 
-	documentation "github.com/pinksaucepasta/paperboat/docs"
+	documentation "github.com/pinksaucepasta/paperboat/cli/docs"
 	"github.com/spf13/cobra"
 )
 

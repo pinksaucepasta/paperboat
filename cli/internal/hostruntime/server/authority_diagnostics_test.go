@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/auth"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/auth"
 )
 
 func TestExpectedCredentialRejectionDoesNotHideMixedFailure(t *testing.T) {

@@ -5,7 +5,7 @@ package main
 import (
 	"context"
 	"errors"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/protocol"
 	"golang.org/x/sys/windows"
 	"os"
 	"os/exec"

@@ -7,10 +7,10 @@ import (
 	"path/filepath"
 	"time"
 
-	runtimeconfig "github.com/pinksaucepasta/paperboat/internal/hostruntime/config"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/sessionowner"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/updated"
+	runtimeconfig "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/config"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/installsource"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/sessionowner"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/updated"
 )
 
 func productionSessionOwners(ctx context.Context, cfg runtimeconfig.Config, environ func(string) string) (*sessionowner.Connections, error) {

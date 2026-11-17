@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/health"
-	hosttelemetry "github.com/pinksaucepasta/paperboat/internal/hostruntime/telemetry"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/health"
+	hosttelemetry "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/telemetry"
 )
 
 type telemetryClock struct{ now time.Time }

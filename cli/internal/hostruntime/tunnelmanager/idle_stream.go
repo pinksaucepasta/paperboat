@@ -4,7 +4,7 @@ import (
 	"io"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hoststate"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hoststate"
 )
 
 // idleOriginStream applies the authoritative route's inactivity bound to each

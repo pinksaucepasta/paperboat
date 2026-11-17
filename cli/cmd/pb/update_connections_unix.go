@@ -7,9 +7,9 @@ import (
 	"os"
 	"strconv"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
-	"github.com/pinksaucepasta/paperboat/internal/liveconnections"
-	"github.com/pinksaucepasta/paperboat/internal/localdaemon"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hostinstall"
+	"github.com/pinksaucepasta/paperboat/cli/internal/liveconnections"
+	"github.com/pinksaucepasta/paperboat/cli/internal/localdaemon"
 )
 
 func daemonConnectionsForUpdate(ctx context.Context) (liveconnections.Counts, error) {

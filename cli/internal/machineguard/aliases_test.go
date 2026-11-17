@@ -11,7 +11,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/splitdns"
+	"github.com/pinksaucepasta/paperboat/cli/internal/splitdns"
 )
 
 func TestBrowserAliasesRequireOwnedHTTPSGatewayAndCanonicalShape(t *testing.T) {

@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/api"
+	"github.com/pinksaucepasta/paperboat/cli/internal/api"
 )
 
 func failingHealth(code, dimension, dimensionCode, summary, action string, retrying bool) api.TunnelHealth {

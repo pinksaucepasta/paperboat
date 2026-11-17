@@ -5,7 +5,7 @@ package hostinstall
 import (
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/service"
 )
 
 // A carrier that is declared but not running (stopped, or exited and never restarted) is started by the updater's

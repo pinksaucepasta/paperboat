@@ -3,10 +3,10 @@ package main
 import (
 	"context"
 	"errors"
-	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
-	doctorpkg "github.com/pinksaucepasta/paperboat/internal/doctor"
+	"github.com/pinksaucepasta/paperboat/cli/internal/diagnostics"
+	doctorpkg "github.com/pinksaucepasta/paperboat/cli/internal/doctor"
 
-	"github.com/pinksaucepasta/paperboat/internal/errorreport"
+	"github.com/pinksaucepasta/paperboat/cli/internal/errorreport"
 )
 
 var errLocalDoctorHealthInvalid = errors.New("local runtime returned an invalid health response")

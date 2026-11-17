@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machineevents"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machineevents/eventstest"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/machineevents"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/machineevents/eventstest"
 )
 
 // A peer joining, leaving or changing keys is published by the server; the machine renews its signed

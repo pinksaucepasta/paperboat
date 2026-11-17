@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/service"
 )
 
 // Review of 083679b72: a carrier service registered without its generation descriptor is removed by the sweep;

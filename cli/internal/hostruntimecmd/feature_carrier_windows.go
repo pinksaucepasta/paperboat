@@ -2,7 +2,7 @@
 
 package hostruntimecmd
 
-import "github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
+import "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hostinstall"
 
 func featureCarrierInstance() (string, error) {
 	sid, err := currentWindowsSID()

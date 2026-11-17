@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/recording"
+	"github.com/pinksaucepasta/paperboat/cli/internal/recording"
 	"github.com/pinksaucepasta/paperboat/shared/teambucket"
 )
 

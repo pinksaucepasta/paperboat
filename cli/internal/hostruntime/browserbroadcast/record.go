@@ -11,7 +11,7 @@ import (
 	"errors"
 
 	"github.com/fxamacker/cbor/v2"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/protocol"
 	"golang.org/x/crypto/chacha20poly1305"
 )
 

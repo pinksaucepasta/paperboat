@@ -11,7 +11,7 @@ import (
 
 	"golang.org/x/sys/windows"
 
-	"github.com/pinksaucepasta/paperboat/internal/windowssecurity"
+	"github.com/pinksaucepasta/paperboat/cli/internal/windowssecurity"
 )
 
 // lockCarrierFile takes the serving role's lock: an exclusive LockFileEx on the role file, refused at once while

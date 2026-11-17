@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	documentation "github.com/pinksaucepasta/paperboat/docs"
+	documentation "github.com/pinksaucepasta/paperboat/cli/docs"
 )
 
 func TestUserStateIsRetainedWhenSystemPurgeIsNotConfirmed(t *testing.T) {

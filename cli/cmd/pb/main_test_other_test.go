@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/adrg/xdg"
-	"github.com/pinksaucepasta/paperboat/internal/localapi"
+	"github.com/pinksaucepasta/paperboat/cli/internal/localapi"
 )
 
 func commandLocalAPIServerConfig(path string, source localapi.SnapshotSource) (localapi.ServerConfig, error) {

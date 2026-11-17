@@ -4,7 +4,7 @@ package service
 
 import (
 	"errors"
-	"github.com/pinksaucepasta/paperboat/internal/atomicfile"
+	"github.com/pinksaucepasta/paperboat/cli/internal/atomicfile"
 	"golang.org/x/sys/unix"
 	"os"
 	"path/filepath"

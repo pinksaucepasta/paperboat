@@ -3,11 +3,11 @@ package tunnel
 import (
 	"encoding/json"
 	"errors"
-	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
+	"github.com/pinksaucepasta/paperboat/cli/internal/diagnostics"
 	"strings"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/protocol"
 )
 
 func (c *helperTerminalConn) decodeHelperBinary(data []byte) (helperOutput, error) {

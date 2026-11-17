@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hostdproto"
 )
 
 // hostdStartPhase says how far the host service's start got when its health check gave up, from what the service

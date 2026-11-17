@@ -2,7 +2,7 @@ package main
 
 import (
 	"errors"
-	"github.com/pinksaucepasta/paperboat/internal/environmentmanager"
+	"github.com/pinksaucepasta/paperboat/cli/internal/environmentmanager"
 	"github.com/spf13/cobra"
 )
 

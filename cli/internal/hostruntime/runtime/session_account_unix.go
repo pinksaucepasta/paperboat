@@ -3,7 +3,7 @@
 package runtime
 
 import (
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/sessionowner"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/sessionowner"
 	"os"
 )
 

@@ -3,7 +3,7 @@ package main
 import (
 	"errors"
 
-	"github.com/pinksaucepasta/paperboat/internal/causetext"
+	"github.com/pinksaucepasta/paperboat/cli/internal/causetext"
 )
 
 // lastUnexpectedFailureFile keeps the cause text of the latest unexpected command failure next to the

@@ -18,8 +18,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/recording"
-	"github.com/pinksaucepasta/paperboat/internal/tunnel"
+	"github.com/pinksaucepasta/paperboat/cli/internal/recording"
+	"github.com/pinksaucepasta/paperboat/cli/internal/tunnel"
 )
 
 const testRecordingID = "rec_00000000-0000-4000-8000-000000000001"

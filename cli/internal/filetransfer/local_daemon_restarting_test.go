@@ -9,7 +9,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/localapi"
+	"github.com/pinksaucepasta/paperboat/cli/internal/localapi"
 )
 
 // F14-02 on Windows: during an update the local API named pipe is missing; the renewal must wait for the daemon, not fail the send.

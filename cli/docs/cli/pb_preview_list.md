@@ -19,6 +19,7 @@ pb preview list [flags]
 ### Options
 
 ```
+      --all             include ended previews (kept 30 days after they end)
       --cursor string   continue a previous page
   -h, --help            help for list
       --json            print canonical preview resources as JSON

@@ -9,8 +9,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/localapi"
-	"github.com/pinksaucepasta/paperboat/internal/resolver"
+	"github.com/pinksaucepasta/paperboat/cli/internal/localapi"
+	"github.com/pinksaucepasta/paperboat/cli/internal/resolver"
 	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 )
 

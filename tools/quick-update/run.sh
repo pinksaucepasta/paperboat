@@ -21,7 +21,7 @@ docker build -q -t gap5-systemd -f "$root/tools/device-smoke/ubuntu24-systemd.Do
 
 # Builds: linux/amd64, from the checkout under test (QV_SRC); the harness (this directory) is the dispatched ref's.
 for pair in "baseline:$V" "candidate:$V-r1"; do
- ld="-X github.com/pinksaucepasta/paperboat/internal/buildinfo.Version=${pair#*:} -X github.com/pinksaucepasta/paperboat/internal/buildinfo.Commit=$sha -X github.com/pinksaucepasta/paperboat/internal/buildinfo.ProtocolVersion=1 -X github.com/pinksaucepasta/paperboat/internal/buildinfo.DefaultServerURL=$QV_SERVER -X github.com/pinksaucepasta/paperboat/internal/buildinfo.DefaultReleaseURL=$QV_SERVER"
+ ld="-X github.com/pinksaucepasta/paperboat/cli/internal/buildinfo.Version=${pair#*:} -X github.com/pinksaucepasta/paperboat/cli/internal/buildinfo.Commit=$sha -X github.com/pinksaucepasta/paperboat/cli/internal/buildinfo.ProtocolVersion=1 -X github.com/pinksaucepasta/paperboat/cli/internal/buildinfo.DefaultServerURL=$QV_SERVER -X github.com/pinksaucepasta/paperboat/cli/internal/buildinfo.DefaultReleaseURL=$QV_SERVER"
  (cd "$QV_SRC/cli" && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "$ld" -o ~/gap5/${pair%%:*} ./cmd/pb)
 done
 file ~/gap5/baseline | grep -q "ELF 64-bit.*x86-64"

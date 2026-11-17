@@ -12,8 +12,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/networkadaptation"
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/portmapping"
+	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/networkadaptation"
+	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/portmapping"
 	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=selected-network-monitor
 	"tailscale.com/net/netmon"
 	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=selected-portmapper-client

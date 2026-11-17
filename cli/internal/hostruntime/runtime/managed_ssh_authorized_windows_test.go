@@ -4,14 +4,14 @@ package runtime
 
 import (
 	"context"
-	hostruntimeservice "github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
+	hostruntimeservice "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/service"
 	"golang.org/x/sys/windows"
 	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hostinstall"
 )
 
 type recordingWindowsAuthorizedKeysClient struct {

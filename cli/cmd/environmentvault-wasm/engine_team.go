@@ -8,7 +8,7 @@ import (
 	"errors"
 	"sort"
 
-	env "github.com/pinksaucepasta/paperboat/internal/environmente2ee"
+	env "github.com/pinksaucepasta/paperboat/cli/internal/environmente2ee"
 )
 
 type teamMember struct {

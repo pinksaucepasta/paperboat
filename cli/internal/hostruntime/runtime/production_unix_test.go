@@ -20,10 +20,10 @@ import (
 	"testing"
 	"time"
 
-	clientapi "github.com/pinksaucepasta/paperboat/internal/api"
-	runtimeidentity "github.com/pinksaucepasta/paperboat/internal/hostruntime/identity"
-	peeridentityenrollment "github.com/pinksaucepasta/paperboat/internal/hostruntime/peeridentity"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/preview"
+	clientapi "github.com/pinksaucepasta/paperboat/cli/internal/api"
+	runtimeidentity "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/identity"
+	peeridentityenrollment "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/peeridentity"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/preview"
 	"golang.org/x/crypto/ssh"
 )
 

@@ -4,8 +4,8 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"errors"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/browserbroadcast"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/browserbroadcast"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/protocol"
 	"testing"
 	"time"
 )

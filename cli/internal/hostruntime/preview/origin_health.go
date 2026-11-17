@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/originhealth"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/originhealth"
 )
 
 // originReportHub carries origin-health changes from the carrier that dials the app to the

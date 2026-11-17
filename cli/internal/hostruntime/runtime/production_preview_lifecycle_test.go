@@ -7,7 +7,7 @@ import (
 	"syscall"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/privateproxyconfig"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/privateproxyconfig"
 )
 
 type failingPreviewPrivateAccess struct {

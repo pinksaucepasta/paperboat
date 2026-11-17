@@ -3,9 +3,9 @@ package workerupdate
 import (
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/releaseindex"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/releasepolicy"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/updateflow"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/releaseindex"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/releasepolicy"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/updateflow"
 )
 
 // The signed index's Authenticode mark must survive every hop to the native verifier: index -> release ->

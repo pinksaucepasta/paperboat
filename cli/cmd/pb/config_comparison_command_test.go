@@ -3,8 +3,8 @@ package main
 import (
 	"context"
 	"errors"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/configsync"
-	"github.com/pinksaucepasta/paperboat/internal/tunnel"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/configsync"
+	"github.com/pinksaucepasta/paperboat/cli/internal/tunnel"
 	"io"
 	"strings"
 	"syscall"

@@ -14,7 +14,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/envinject"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/envinject"
 )
 
 // ShellEnvironmentPath serves managed ENV to `pb env hook` shells started

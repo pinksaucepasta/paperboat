@@ -8,7 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/health"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/health"
 )
 
 const (

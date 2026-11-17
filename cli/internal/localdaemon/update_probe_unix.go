@@ -17,8 +17,8 @@ import (
 	"time"
 
 	"github.com/coreos/go-systemd/v22/unit"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
-	"github.com/pinksaucepasta/paperboat/internal/localapi"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/service"
+	"github.com/pinksaucepasta/paperboat/cli/internal/localapi"
 	"howett.net/plist"
 )
 

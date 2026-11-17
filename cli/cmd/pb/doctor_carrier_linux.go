@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	doctorpkg "github.com/pinksaucepasta/paperboat/internal/doctor"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
+	doctorpkg "github.com/pinksaucepasta/paperboat/cli/internal/doctor"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hostinstall"
 )
 
 // doctorCarrierProbes reports a native carrier that keeps failing to start. The carrier holds every private

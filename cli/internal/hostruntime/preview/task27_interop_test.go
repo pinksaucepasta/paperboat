@@ -16,8 +16,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/connector"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/tunnelmanager"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/connector"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/tunnelmanager"
 )
 
 type task27Descriptor struct {

@@ -3,7 +3,7 @@ package availability
 import (
 	"reflect"
 
-	"github.com/pinksaucepasta/paperboat/internal/errorreport"
+	"github.com/pinksaucepasta/paperboat/cli/internal/errorreport"
 )
 
 const (

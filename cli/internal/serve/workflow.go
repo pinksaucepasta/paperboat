@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/preview"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/preview"
 )
 
 var ErrPreviewReadinessTimeout = errors.New("preview readiness timed out")

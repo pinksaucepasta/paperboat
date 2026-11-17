@@ -13,8 +13,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/ospeer"
-	"github.com/pinksaucepasta/paperboat/internal/ownerpath"
+	"github.com/pinksaucepasta/paperboat/cli/internal/ospeer"
+	"github.com/pinksaucepasta/paperboat/cli/internal/ownerpath"
 )
 
 // A process lock fences both stale-socket cleanup and the entire listener

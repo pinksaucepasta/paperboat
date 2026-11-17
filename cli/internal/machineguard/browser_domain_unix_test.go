@@ -12,7 +12,7 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/splitdns"
+	"github.com/pinksaucepasta/paperboat/cli/internal/splitdns"
 )
 
 func TestBrowserDomainCallerRequiresInvokingUID(t *testing.T) {

@@ -12,7 +12,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/server"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/server"
 	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 )
 

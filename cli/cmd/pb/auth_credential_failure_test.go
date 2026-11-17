@@ -10,10 +10,10 @@ import (
 	"syscall"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/api"
-	sessionauth "github.com/pinksaucepasta/paperboat/internal/auth"
-	"github.com/pinksaucepasta/paperboat/internal/config"
-	doctorpkg "github.com/pinksaucepasta/paperboat/internal/doctor"
+	"github.com/pinksaucepasta/paperboat/cli/internal/api"
+	sessionauth "github.com/pinksaucepasta/paperboat/cli/internal/auth"
+	"github.com/pinksaucepasta/paperboat/cli/internal/config"
+	doctorpkg "github.com/pinksaucepasta/paperboat/cli/internal/doctor"
 	"github.com/spf13/cobra"
 )
 

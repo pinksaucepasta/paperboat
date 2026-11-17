@@ -9,7 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/pinksaucepasta/paperboat/internal/preferences"
+	"github.com/pinksaucepasta/paperboat/cli/internal/preferences"
 )
 
 func TestThemeAndKeysStayIsolatedPerContext(t *testing.T) {

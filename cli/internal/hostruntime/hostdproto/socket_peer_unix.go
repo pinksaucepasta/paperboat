@@ -5,7 +5,7 @@ package hostdproto
 import (
 	"net"
 
-	"github.com/pinksaucepasta/paperboat/internal/ospeer"
+	"github.com/pinksaucepasta/paperboat/cli/internal/ospeer"
 )
 
 func peerUID(connection *net.UnixConn) (int, error) {

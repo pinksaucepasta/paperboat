@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/api"
+	"github.com/pinksaucepasta/paperboat/cli/internal/api"
 )
 
 // A preview renews its lease every PreviewLeaseDefaultRenewInterval; N previews would be N requests

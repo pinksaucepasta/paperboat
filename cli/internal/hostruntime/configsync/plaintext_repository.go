@@ -2,7 +2,7 @@ package configsync
 
 import (
 	"errors"
-	"github.com/pinksaucepasta/paperboat/internal/atomicfile"
+	"github.com/pinksaucepasta/paperboat/cli/internal/atomicfile"
 	"io/fs"
 	"os"
 	"path/filepath"

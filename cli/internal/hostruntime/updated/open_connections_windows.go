@@ -5,10 +5,10 @@ package updated
 import (
 	"context"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/autoupdate"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
-	"github.com/pinksaucepasta/paperboat/internal/liveconnections"
-	"github.com/pinksaucepasta/paperboat/internal/localapi"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/autoupdate"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hostinstall"
+	"github.com/pinksaucepasta/paperboat/cli/internal/liveconnections"
+	"github.com/pinksaucepasta/paperboat/cli/internal/localapi"
 )
 
 // openConnectionsForAutomatic is the controller's seam for the user daemon's open connections.

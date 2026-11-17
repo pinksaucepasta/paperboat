@@ -7,7 +7,7 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/userpaths"
+	"github.com/pinksaucepasta/paperboat/cli/internal/userpaths"
 )
 
 type Limits struct {

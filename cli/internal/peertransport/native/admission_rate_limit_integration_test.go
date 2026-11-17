@@ -13,12 +13,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/api"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/nativesession"
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/native"
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/peerquic"
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/streamauth"
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/tailnet"
+	"github.com/pinksaucepasta/paperboat/cli/internal/api"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/nativesession"
+	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/native"
+	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/peerquic"
+	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/streamauth"
+	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/tailnet"
 	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=native-admission-rate-limit-regression
 	"tailscale.com/tstest/integration"
 )

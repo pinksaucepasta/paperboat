@@ -15,10 +15,10 @@ import (
 
 	"net/url"
 
-	"github.com/pinksaucepasta/paperboat/internal/inspector"
-	"github.com/pinksaucepasta/paperboat/internal/nativeprivate"
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/native"
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/streamauth"
+	"github.com/pinksaucepasta/paperboat/cli/internal/inspector"
+	"github.com/pinksaucepasta/paperboat/cli/internal/nativeprivate"
+	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/native"
+	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/streamauth"
 	"github.com/quic-go/quic-go/http3"
 )
 

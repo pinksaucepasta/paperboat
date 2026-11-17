@@ -6,8 +6,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/history"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/pty"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/history"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/pty"
 )
 
 func (m *Manager) recover(ctx context.Context) error {

@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/localdaemon"
+	"github.com/pinksaucepasta/paperboat/cli/internal/localdaemon"
 )
 
 // Pairing waited for the new daemon to be "ready" and reported "Machine pairing failed while binding the

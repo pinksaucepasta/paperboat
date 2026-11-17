@@ -8,8 +8,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/machineguard"
-	"github.com/pinksaucepasta/paperboat/internal/selfupdate"
+	"github.com/pinksaucepasta/paperboat/cli/internal/machineguard"
+	"github.com/pinksaucepasta/paperboat/cli/internal/selfupdate"
 )
 
 // Per-user installation reuses an authenticated ready machine-wide guard.

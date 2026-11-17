@@ -7,7 +7,7 @@ import (
 	"errors"
 	"os"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/sessionowner"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/sessionowner"
 )
 
 // candidateSessionOwner is the session owner an install attempt starts for its

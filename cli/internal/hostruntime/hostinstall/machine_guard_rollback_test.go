@@ -6,7 +6,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/installsource"
 )
 
 type recordingGuardUndo struct{ restored, discarded int }

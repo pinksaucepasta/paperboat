@@ -6,8 +6,8 @@ import (
 	"context"
 	"io"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hostinstall"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/service"
 )
 
 func runLocalDaemonService(_ context.Context, args []string, _ io.Writer, _ io.Writer) error {

@@ -3,7 +3,7 @@ package hostinstall
 import (
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/localapi"
+	"github.com/pinksaucepasta/paperboat/cli/internal/localapi"
 )
 
 func TestLocalDaemonServingAcceptsASignedOutDaemonOnlyOnAnEnrolledMachine(t *testing.T) {

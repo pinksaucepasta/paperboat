@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/filetransfer"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/filetransfer"
 )
 
 // A receiver replacing its runtime answers 503 update_in_progress, which senders retry; 429 resource_limit is the

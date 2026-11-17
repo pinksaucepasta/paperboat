@@ -16,9 +16,9 @@ import (
 
 	"github.com/godbus/dbus/v5"
 	"github.com/godbus/dbus/v5/prop"
-	clientconfig "github.com/pinksaucepasta/paperboat/internal/config"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/environmentkey"
-	runtimeidentity "github.com/pinksaucepasta/paperboat/internal/hostruntime/identity"
+	clientconfig "github.com/pinksaucepasta/paperboat/cli/internal/config"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/environmentkey"
+	runtimeidentity "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/identity"
 )
 
 func TestPortableEnvironmentKeySourceUsesDefaultStateAndRetainsIdentity(t *testing.T) {

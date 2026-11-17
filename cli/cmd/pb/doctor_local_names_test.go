@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	doctorpkg "github.com/pinksaucepasta/paperboat/internal/doctor"
-	"github.com/pinksaucepasta/paperboat/internal/splitdns"
+	doctorpkg "github.com/pinksaucepasta/paperboat/cli/internal/doctor"
+	"github.com/pinksaucepasta/paperboat/cli/internal/splitdns"
 )
 
 // F21-50: local browser names are a public wildcard answering the loopback gateway; with no DNS or behind a

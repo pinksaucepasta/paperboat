@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/tailnet"
+	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/tailnet"
 )
 
 // X-41: streams refused for scope ask for a fresh signed network, at most once per spacing.

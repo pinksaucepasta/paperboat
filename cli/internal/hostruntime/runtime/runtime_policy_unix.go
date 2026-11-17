@@ -7,7 +7,7 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/filetransfer"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/filetransfer"
 )
 
 func applyRuntimeTransferPolicy(body []byte, policy *filetransfer.PolicyStore) error {

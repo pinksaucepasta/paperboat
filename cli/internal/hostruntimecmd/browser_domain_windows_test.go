@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/windows/elevation"
+	"github.com/pinksaucepasta/paperboat/cli/internal/windows/elevation"
 )
 
 func TestBrowserDomainDispatchBindsPayloadOwnerToRequester(t *testing.T) {

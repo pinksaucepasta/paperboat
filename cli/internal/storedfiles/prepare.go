@@ -16,9 +16,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/pinksaucepasta/paperboat/internal/diskspace"
-	"github.com/pinksaucepasta/paperboat/internal/filetransfer"
-	receiver "github.com/pinksaucepasta/paperboat/internal/hostruntime/filetransfer"
+	"github.com/pinksaucepasta/paperboat/cli/internal/diskspace"
+	"github.com/pinksaucepasta/paperboat/cli/internal/filetransfer"
+	receiver "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/filetransfer"
 	wire "github.com/pinksaucepasta/paperboat/shared/storedfiles"
 	"github.com/pinksaucepasta/paperboat/shared/teambucket"
 )

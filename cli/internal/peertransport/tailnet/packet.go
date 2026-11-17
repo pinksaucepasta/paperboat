@@ -3,14 +3,14 @@ package tailnet
 
 import (
 	"errors"
-	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
+	"github.com/pinksaucepasta/paperboat/cli/internal/diagnostics"
 	"github.com/quic-go/quic-go/qlog"
 	"net"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/mesh"
+	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/mesh"
 	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 )
 

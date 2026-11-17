@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/errorreport"
+	"github.com/pinksaucepasta/paperboat/cli/internal/errorreport"
 )
 
 func (s *Server) serveDiagnostics(writer http.ResponseWriter, request *http.Request, requestID string) {

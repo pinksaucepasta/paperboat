@@ -4,8 +4,8 @@ import (
 	"context"
 	"net/url"
 
-	"github.com/pinksaucepasta/paperboat/internal/api"
-	"github.com/pinksaucepasta/paperboat/internal/localapi"
+	"github.com/pinksaucepasta/paperboat/cli/internal/api"
+	"github.com/pinksaucepasta/paperboat/cli/internal/localapi"
 )
 
 func previewCompletionItems(ctx context.Context, client *api.Client, machines []api.UserMachine, maximum int) ([]localapi.CompletionItem, error) {

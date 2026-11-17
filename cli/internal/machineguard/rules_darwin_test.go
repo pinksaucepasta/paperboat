@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/splitdns"
+	"github.com/pinksaucepasta/paperboat/cli/internal/splitdns"
 )
 
 // TestDarwinRulesLetAnyUIDReachTheRoutedGateway: the routed gateway accepts every uid (attribution then refuses

@@ -8,8 +8,8 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/pinksaucepasta/paperboat/internal/machineguard"
-	"github.com/pinksaucepasta/paperboat/internal/privatepreviewproxy"
+	"github.com/pinksaucepasta/paperboat/cli/internal/machineguard"
+	"github.com/pinksaucepasta/paperboat/cli/internal/privatepreviewproxy"
 )
 
 // newPlatformPrivatePAC registers hostd's PAC with the machine guard over one long-lived connection (the guard

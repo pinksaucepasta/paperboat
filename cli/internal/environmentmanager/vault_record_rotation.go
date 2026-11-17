@@ -4,8 +4,8 @@ import (
 	"context"
 	"sort"
 
-	"github.com/pinksaucepasta/paperboat/internal/api"
-	env "github.com/pinksaucepasta/paperboat/internal/environmente2ee"
+	"github.com/pinksaucepasta/paperboat/cli/internal/api"
+	env "github.com/pinksaucepasta/paperboat/cli/internal/environmente2ee"
 )
 
 // prepareRecordReplacement freezes the exact old live inventory and encrypts

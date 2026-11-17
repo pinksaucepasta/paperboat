@@ -9,7 +9,7 @@ import (
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
-	"github.com/pinksaucepasta/paperboat/internal/selector"
+	"github.com/pinksaucepasta/paperboat/cli/internal/selector"
 )
 
 // SecretOptions describes a hidden, raw single-line input. Unlike Text, Secret

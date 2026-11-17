@@ -11,8 +11,8 @@ import (
 	"strings"
 	"testing"
 
-	doctorpkg "github.com/pinksaucepasta/paperboat/internal/doctor"
-	"github.com/pinksaucepasta/paperboat/internal/localdaemon"
+	doctorpkg "github.com/pinksaucepasta/paperboat/cli/internal/doctor"
+	"github.com/pinksaucepasta/paperboat/cli/internal/localdaemon"
 )
 
 // doctorWithoutADaemon runs `pb args...` as on goos with no local service answering and a service start that fails.

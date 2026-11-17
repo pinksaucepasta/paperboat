@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/peerquic"
+	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/peerquic"
 )
 
 // A listener serves the leaf its GetCertificate issues now, not the static one it started with: peers send no SNI,

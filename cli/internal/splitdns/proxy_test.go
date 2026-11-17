@@ -6,7 +6,7 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
-	"github.com/pinksaucepasta/paperboat/internal/testcert"
+	"github.com/pinksaucepasta/paperboat/cli/internal/testcert"
 	"io"
 	"net"
 	"net/http"

@@ -3,7 +3,7 @@ package preview
 import (
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/api"
+	"github.com/pinksaucepasta/paperboat/cli/internal/api"
 )
 
 func TestLeaseFromAPIPreservesETagGeneration(t *testing.T) {

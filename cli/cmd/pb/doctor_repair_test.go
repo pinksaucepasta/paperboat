@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/windows/elevation"
+	"github.com/pinksaucepasta/paperboat/cli/internal/windows/elevation"
 )
 
 // withDoctorRepair runs --repair as Windows does: the privileged repair only for a paired installation.

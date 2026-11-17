@@ -6,7 +6,7 @@ import (
 	"net/netip"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/daemonrpc"
+	"github.com/pinksaucepasta/paperboat/cli/internal/daemonrpc"
 )
 
 // claimingNameClient assigns addresses per machine id like the guard: an id keeps its claim, and a held

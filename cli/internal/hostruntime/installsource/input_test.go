@@ -391,7 +391,7 @@ func buildPaperboatFixture(t *testing.T, root, name, goos, goarch string) string
 			t.Fatal(err)
 		}
 	}
-	writeFixture("go.mod", "module github.com/pinksaucepasta/paperboat\n\ngo 1.27.1\n")
+	writeFixture("go.mod", "module github.com/pinksaucepasta/paperboat/cli\n\ngo 1.27.1\n")
 	writeFixture("internal/buildinfo/buildinfo.go", "package buildinfo\nvar Version = \"dev\"\n")
 	writeFixture("cmd/pb/main.go", `package main
 import (
@@ -399,7 +399,7 @@ import (
 	"os"
 	"strings"
 	"time"
-	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
+	"github.com/pinksaucepasta/paperboat/cli/internal/buildinfo"
 )
 func main() {
 	if marker := os.Getenv("PB_INSPECT_MARKER"); marker != "" {
@@ -431,7 +431,7 @@ func main() {
 		name += ".exe"
 	}
 	binary := filepath.Join(root, name)
-	ldflags := "-X github.com/pinksaucepasta/paperboat/internal/buildinfo.Version=fixture-version"
+	ldflags := "-X github.com/pinksaucepasta/paperboat/cli/internal/buildinfo.Version=fixture-version"
 	command := exec.Command("go", "build", "-trimpath", "-o", binary, "-ldflags", ldflags, "./cmd/pb")
 	command.Dir = root
 	command.Env = append(os.Environ(), "GOWORK=off", "GOOS="+goos, "GOARCH="+goarch, "CGO_ENABLED=0")

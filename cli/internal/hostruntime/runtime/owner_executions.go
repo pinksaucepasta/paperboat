@@ -6,10 +6,10 @@ import (
 	"context"
 	"time"
 
-	runtimeconfig "github.com/pinksaucepasta/paperboat/internal/hostruntime/config"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/execprocess"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/process"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/store"
+	runtimeconfig "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/config"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/execprocess"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/process"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/store"
 )
 
 // ownerExecutions builds a session owner's command manager. hostd adds its

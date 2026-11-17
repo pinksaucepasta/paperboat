@@ -5,7 +5,7 @@ package main
 import (
 	"context"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntimecmd"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntimecmd"
 )
 
 func platformDoctorRepair(ctx context.Context) error {

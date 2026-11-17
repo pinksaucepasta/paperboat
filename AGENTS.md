@@ -248,7 +248,7 @@ Goal: every main-path row on L and M `[x]`, as fast as possible.
 - Device builds are made from a clean, committed tree, once for all platforms:
   ```sh
   V=dev-$(git rev-parse --short HEAD)
-  L="-X github.com/pinksaucepasta/paperboat/internal/buildinfo.Version=$V -X github.com/pinksaucepasta/paperboat/internal/buildinfo.Commit=$(git rev-parse HEAD) -X github.com/pinksaucepasta/paperboat/internal/buildinfo.ProtocolVersion=1 -X github.com/pinksaucepasta/paperboat/internal/buildinfo.DefaultServerURL=https://api.pprbt.dev -X github.com/pinksaucepasta/paperboat/internal/buildinfo.DefaultReleaseURL=https://api.pprbt.dev"
+  L="-X github.com/pinksaucepasta/paperboat/cli/internal/buildinfo.Version=$V -X github.com/pinksaucepasta/paperboat/cli/internal/buildinfo.Commit=$(git rev-parse HEAD) -X github.com/pinksaucepasta/paperboat/cli/internal/buildinfo.ProtocolVersion=1 -X github.com/pinksaucepasta/paperboat/cli/internal/buildinfo.DefaultServerURL=https://api.pprbt.dev -X github.com/pinksaucepasta/paperboat/cli/internal/buildinfo.DefaultReleaseURL=https://api.pprbt.dev"
   cd cli && for t in linux/amd64 darwin/arm64 windows/amd64; do CGO_ENABLED=0 GOOS=${t%/*} GOARCH=${t#*/} go build -trimpath -ldflags "$L" -o ../.build/$V/pb-${t%/*}-${t#*/}$([ ${t%/*} = windows ] && echo .exe) ./cmd/pb; done
   ```
 

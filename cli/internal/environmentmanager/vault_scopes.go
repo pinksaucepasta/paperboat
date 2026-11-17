@@ -11,10 +11,10 @@ import (
 	"github.com/google/uuid"
 	"sort"
 
-	"github.com/pinksaucepasta/paperboat/internal/api"
-	"github.com/pinksaucepasta/paperboat/internal/config"
-	"github.com/pinksaucepasta/paperboat/internal/environmente2ee"
-	"github.com/pinksaucepasta/paperboat/internal/recording"
+	"github.com/pinksaucepasta/paperboat/cli/internal/api"
+	"github.com/pinksaucepasta/paperboat/cli/internal/config"
+	"github.com/pinksaucepasta/paperboat/cli/internal/environmente2ee"
+	"github.com/pinksaucepasta/paperboat/cli/internal/recording"
 )
 
 var ErrVaultTeamGrantRequired = errors.New("ENV team key grant is required")

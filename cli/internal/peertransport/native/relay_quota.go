@@ -5,7 +5,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/api"
+	"github.com/pinksaucepasta/paperboat/cli/internal/api"
 )
 
 // RelayQuotaError is a failed peer connection made while the workspace's hosted relay allowance is

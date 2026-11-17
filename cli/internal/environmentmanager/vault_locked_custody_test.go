@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	environmente2e "github.com/pinksaucepasta/paperboat/internal/environmente2ee"
+	environmente2e "github.com/pinksaucepasta/paperboat/cli/internal/environmente2ee"
 )
 
 // After a restart of the user daemon its in-memory custody is gone: opening a recording key (and every other call that

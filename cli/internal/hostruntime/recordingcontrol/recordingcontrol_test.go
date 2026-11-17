@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/offlineaudit"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/recordings"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/session"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/offlineaudit"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/recordings"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/session"
 	wire "github.com/pinksaucepasta/paperboat/shared/recording"
 )
 

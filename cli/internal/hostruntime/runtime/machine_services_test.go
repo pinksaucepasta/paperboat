@@ -13,10 +13,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/api"
-	"github.com/pinksaucepasta/paperboat/internal/errorreport"
-	"github.com/pinksaucepasta/paperboat/internal/machineservices"
-	"github.com/pinksaucepasta/paperboat/internal/nativeprivate"
+	"github.com/pinksaucepasta/paperboat/cli/internal/api"
+	"github.com/pinksaucepasta/paperboat/cli/internal/errorreport"
+	"github.com/pinksaucepasta/paperboat/cli/internal/machineservices"
+	"github.com/pinksaucepasta/paperboat/cli/internal/nativeprivate"
 	"github.com/pinksaucepasta/paperboat/shared/admission"
 	"syscall"
 )

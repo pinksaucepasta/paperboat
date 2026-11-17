@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/configsync"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/configsync"
 )
 
 // A repository too large to read is refused with what to do, not "could not finish" (pbmac2:

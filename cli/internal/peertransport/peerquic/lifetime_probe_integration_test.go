@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/peerquic"
+	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/peerquic"
 )
 
 func TestProbeOnlyQUICCarriesAuthenticatedLifetimeExchange(t *testing.T) {

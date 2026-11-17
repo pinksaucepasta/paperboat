@@ -3,7 +3,7 @@ package preferences
 import (
 	"context"
 	"errors"
-	"github.com/pinksaucepasta/paperboat/internal/atomicfile/atomicfiletest"
+	"github.com/pinksaucepasta/paperboat/cli/internal/atomicfile/atomicfiletest"
 	"os"
 	"path/filepath"
 	"testing"

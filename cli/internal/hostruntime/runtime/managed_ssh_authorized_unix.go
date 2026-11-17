@@ -2,7 +2,7 @@
 
 package runtime
 
-import "github.com/pinksaucepasta/paperboat/internal/managedssh"
+import "github.com/pinksaucepasta/paperboat/cli/internal/managedssh"
 
 // reconcilePlatformAuthorizedKeys writes the CA lines; the revoked list is enforced by the host bridge on Linux and
 // macOS (every managed certificate is bound to its loopback connection), not by the system sshd.

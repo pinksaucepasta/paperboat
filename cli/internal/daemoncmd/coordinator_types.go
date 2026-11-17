@@ -9,9 +9,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/errorreport"
-	"github.com/pinksaucepasta/paperboat/internal/machineguard"
-	"github.com/pinksaucepasta/paperboat/internal/splitdns"
+	"github.com/pinksaucepasta/paperboat/cli/internal/errorreport"
+	"github.com/pinksaucepasta/paperboat/cli/internal/machineguard"
+	"github.com/pinksaucepasta/paperboat/cli/internal/splitdns"
 )
 
 // coordinatorFailure retains original independent causes without exposing peer

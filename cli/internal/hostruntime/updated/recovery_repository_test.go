@@ -3,7 +3,7 @@ package updated
 import (
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
+	"github.com/pinksaucepasta/paperboat/cli/internal/buildinfo"
 )
 
 // Release 2026.11.09.7 in a clean Windows Sandbox: the published one-liner installed, then pairing failed with

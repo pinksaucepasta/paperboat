@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/preferences"
+	"github.com/pinksaucepasta/paperboat/cli/internal/preferences"
 	"github.com/spf13/cobra"
 )
 

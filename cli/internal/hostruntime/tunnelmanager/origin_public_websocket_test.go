@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/inspector"
+	"github.com/pinksaucepasta/paperboat/cli/internal/inspector"
 )
 
 // F7-05 device finding: a WebSocket through a public preview ended in 502. The

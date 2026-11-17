@@ -3,7 +3,7 @@ package errorreport
 import (
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
+	"github.com/pinksaucepasta/paperboat/cli/internal/buildinfo"
 )
 
 // Dev device builds stamp DefaultSentryEnvironment=dev and report through the same reporter as releases; an

@@ -7,7 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 
-	"github.com/pinksaucepasta/paperboat/internal/managedssh"
+	"github.com/pinksaucepasta/paperboat/cli/internal/managedssh"
 )
 
 func executeManagedSSHTool(ctx context.Context, tool string, arguments, environment []string) error {

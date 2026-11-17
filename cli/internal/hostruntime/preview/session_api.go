@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/pinksaucepasta/paperboat/internal/api"
+	"github.com/pinksaucepasta/paperboat/cli/internal/api"
 )
 
 // APILeaseClient adapts the authenticated Paperboat client to the foreground

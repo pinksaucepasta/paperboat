@@ -8,7 +8,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hostdproto"
 )
 
 // workerStartRequest is fixed native hostd startup data, never update policy.

@@ -14,7 +14,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/ownerpath"
+	"github.com/pinksaucepasta/paperboat/cli/internal/ownerpath"
 	"github.com/pinksaucepasta/paperboat/shared/supportref"
 )
 

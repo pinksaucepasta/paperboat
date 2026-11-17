@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	clientapi "github.com/pinksaucepasta/paperboat/internal/api"
-	peeridentityenrollment "github.com/pinksaucepasta/paperboat/internal/hostruntime/peeridentity"
+	clientapi "github.com/pinksaucepasta/paperboat/cli/internal/api"
+	peeridentityenrollment "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/peeridentity"
 )
 
 // Every fresh pair on the shared account failed at "installing system services" once the server

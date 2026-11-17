@@ -8,7 +8,7 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/configsync"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/configsync"
 )
 
 type AvailabilityPolicy struct {

@@ -13,7 +13,7 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/pinksaucepasta/paperboat/internal/atomicfile"
+	"github.com/pinksaucepasta/paperboat/cli/internal/atomicfile"
 	"golang.org/x/crypto/ssh"
 )
 

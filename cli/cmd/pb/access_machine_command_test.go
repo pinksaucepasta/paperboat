@@ -13,9 +13,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/api"
-	daemonpb "github.com/pinksaucepasta/paperboat/internal/daemonrpc/proto"
-	"github.com/pinksaucepasta/paperboat/internal/resolver"
+	"github.com/pinksaucepasta/paperboat/cli/internal/api"
+	daemonpb "github.com/pinksaucepasta/paperboat/cli/internal/daemonrpc/proto"
+	"github.com/pinksaucepasta/paperboat/cli/internal/resolver"
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"

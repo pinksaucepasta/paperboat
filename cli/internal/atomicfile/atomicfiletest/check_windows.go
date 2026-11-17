@@ -6,8 +6,8 @@ import (
 	"errors"
 	"os"
 
-	"github.com/pinksaucepasta/paperboat/internal/atomicfile"
-	"github.com/pinksaucepasta/paperboat/internal/windowssecurity"
+	"github.com/pinksaucepasta/paperboat/cli/internal/atomicfile"
+	"github.com/pinksaucepasta/paperboat/cli/internal/windowssecurity"
 )
 
 func checkOwnerOnly(path string, _ os.FileMode) error {

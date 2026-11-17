@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/windows/elevation"
+	"github.com/pinksaucepasta/paperboat/cli/internal/windows/elevation"
 )
 
 // A config sync service step that fails names that step instead of the generic "could not finish the command"

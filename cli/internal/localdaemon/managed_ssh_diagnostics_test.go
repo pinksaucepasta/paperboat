@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/api"
-	"github.com/pinksaucepasta/paperboat/internal/managedssh"
+	"github.com/pinksaucepasta/paperboat/cli/internal/api"
+	"github.com/pinksaucepasta/paperboat/cli/internal/managedssh"
 )
 
 func TestManagedSSHHealthCodeUsesOnlyGenuineAuthenticationRejections(t *testing.T) {

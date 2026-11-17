@@ -5,7 +5,7 @@ package hostruntimecmd
 import (
 	"context"
 	"errors"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hostdproto"
 	"os"
 	"path/filepath"
 	"strings"

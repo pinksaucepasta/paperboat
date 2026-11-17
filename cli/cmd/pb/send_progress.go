@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/api"
+	"github.com/pinksaucepasta/paperboat/cli/internal/api"
 )
 
 // transferProgressInterval is the most often a sending transfer reports committed bytes; state changes

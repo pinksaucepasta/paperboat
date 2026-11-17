@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/errorreport"
+	"github.com/pinksaucepasta/paperboat/cli/internal/errorreport"
 )
 
 func TestLocalCommandArgumentsFailBeforeAuthenticationWithoutFaultCapture(t *testing.T) {

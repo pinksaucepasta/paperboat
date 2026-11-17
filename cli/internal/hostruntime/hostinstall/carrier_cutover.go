@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/carriercontrol"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/carriercontrol"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/service"
 	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 )
 

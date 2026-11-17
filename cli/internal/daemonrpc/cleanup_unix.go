@@ -12,7 +12,7 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/pinksaucepasta/paperboat/internal/localapi"
+	"github.com/pinksaucepasta/paperboat/cli/internal/localapi"
 )
 
 // cleanupCanonicalAddress removes the persistent RPC lock only after its caller

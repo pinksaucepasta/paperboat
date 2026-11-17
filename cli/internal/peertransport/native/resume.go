@@ -6,8 +6,8 @@ import (
 	"net"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/streamauth"
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/tailnet"
+	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/streamauth"
+	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/tailnet"
 )
 
 // ResumeConn is a terminal stream admitted to move an existing attachment without a fresh

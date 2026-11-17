@@ -8,7 +8,7 @@ version=${VERSION:?VERSION is required}
 commit=${COMMIT:?COMMIT is required}
 protocol_version=${PROTOCOL_VERSION:?PROTOCOL_VERSION is required}
 package=./cmd/pb
-module=github.com/pinksaucepasta/paperboat/internal/buildinfo
+module=github.com/pinksaucepasta/paperboat/cli/internal/buildinfo
 ldflags="-s -w -X $module.Version=$version -X $module.Commit=$commit -X $module.ProtocolVersion=$protocol_version"
 
 work=$(mktemp -d "${TMPDIR:-/tmp}/paperboat-reproducible.XXXXXX")

@@ -4,7 +4,7 @@ package hostruntimecmd
 
 import (
 	"context"
-	"github.com/pinksaucepasta/paperboat/internal/windows/elevation"
+	"github.com/pinksaucepasta/paperboat/cli/internal/windows/elevation"
 	"os"
 )
 

@@ -15,8 +15,8 @@ import (
 	"fmt"
 	"os/exec"
 
-	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
-	"github.com/pinksaucepasta/paperboat/internal/processlaunch"
+	"github.com/pinksaucepasta/paperboat/cli/internal/buildinfo"
+	"github.com/pinksaucepasta/paperboat/cli/internal/processlaunch"
 )
 
 var ErrInvalid = errors.New("native executable signature verification failed")

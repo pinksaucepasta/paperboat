@@ -5,7 +5,7 @@ import (
 	"net"
 	"net/netip"
 
-	doctorpkg "github.com/pinksaucepasta/paperboat/internal/doctor"
+	doctorpkg "github.com/pinksaucepasta/paperboat/cli/internal/doctor"
 	wire "github.com/pinksaucepasta/paperboat/shared/managedssh"
 )
 

@@ -20,11 +20,11 @@ import (
 	"strings"
 	"time"
 
-	helperconfig "github.com/pinksaucepasta/paperboat/internal/hostruntime/config"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/health"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostservice"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/runtimeport"
+	helperconfig "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/config"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/health"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hostinstall"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hostservice"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/runtimeport"
 )
 
 type doctorCheck struct {

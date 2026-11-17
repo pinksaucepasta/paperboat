@@ -7,7 +7,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	"github.com/pinksaucepasta/paperboat/internal/command"
+	"github.com/pinksaucepasta/paperboat/cli/internal/command"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )

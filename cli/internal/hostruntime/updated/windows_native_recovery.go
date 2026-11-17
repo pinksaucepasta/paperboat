@@ -7,7 +7,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/windows/elevation"
+	"github.com/pinksaucepasta/paperboat/cli/internal/windows/elevation"
 )
 
 // These operations isolate the native boundary for transaction/recovery tests;

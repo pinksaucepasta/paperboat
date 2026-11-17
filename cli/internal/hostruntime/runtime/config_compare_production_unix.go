@@ -9,8 +9,8 @@ import (
 	"errors"
 	"path/filepath"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/configsync"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/server"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/configsync"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/server"
 )
 
 func productionConfigComparison(config productionConfigSyncConfig) (server.ConfigComparisonReader, error) {

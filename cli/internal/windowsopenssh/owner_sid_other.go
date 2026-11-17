@@ -5,7 +5,7 @@ package windowsopenssh
 import (
 	"os"
 
-	"github.com/pinksaucepasta/paperboat/internal/atomicfile"
+	"github.com/pinksaucepasta/paperboat/cli/internal/atomicfile"
 )
 
 func validOwnerSID(owner string) bool { return owner != "" }

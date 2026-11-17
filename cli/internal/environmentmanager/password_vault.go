@@ -5,9 +5,9 @@ import (
 	"context"
 	"errors"
 
-	"github.com/pinksaucepasta/paperboat/internal/api"
-	"github.com/pinksaucepasta/paperboat/internal/config"
-	"github.com/pinksaucepasta/paperboat/internal/environmente2ee"
+	"github.com/pinksaucepasta/paperboat/cli/internal/api"
+	"github.com/pinksaucepasta/paperboat/cli/internal/config"
+	"github.com/pinksaucepasta/paperboat/cli/internal/environmente2ee"
 )
 
 var ErrVaultChanged = errors.New("ENV vault changed; unlock the current vault before retrying")

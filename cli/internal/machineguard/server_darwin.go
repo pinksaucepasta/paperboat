@@ -16,8 +16,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/machineloopback"
-	"github.com/pinksaucepasta/paperboat/internal/splitdns"
+	"github.com/pinksaucepasta/paperboat/cli/internal/machineloopback"
+	"github.com/pinksaucepasta/paperboat/cli/internal/splitdns"
 	"golang.org/x/sys/unix"
 )
 

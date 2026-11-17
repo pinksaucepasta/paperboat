@@ -13,7 +13,7 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/pinksaucepasta/paperboat/internal/diskspace"
+	"github.com/pinksaucepasta/paperboat/cli/internal/diskspace"
 )
 
 // ErrLegacyCarrierRunning is a refusal to perform the first independent

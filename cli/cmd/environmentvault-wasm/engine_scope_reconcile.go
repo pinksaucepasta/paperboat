@@ -2,7 +2,7 @@ package main
 
 import (
 	"crypto/ed25519"
-	env "github.com/pinksaucepasta/paperboat/internal/environmente2ee"
+	env "github.com/pinksaucepasta/paperboat/cli/internal/environmente2ee"
 )
 
 func (e *engine) reconcileScope(r request) (any, error) {

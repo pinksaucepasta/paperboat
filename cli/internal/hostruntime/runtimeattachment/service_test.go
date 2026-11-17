@@ -24,11 +24,11 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 
-	"github.com/pinksaucepasta/paperboat/internal/errorreport"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/connector"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/edgeplacement"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/identity"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/preview"
+	"github.com/pinksaucepasta/paperboat/cli/internal/errorreport"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/connector"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/edgeplacement"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/identity"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/preview"
 	"github.com/pinksaucepasta/paperboat/shared/supportref"
 )
 

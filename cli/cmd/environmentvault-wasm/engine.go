@@ -9,8 +9,8 @@ import (
 	"errors"
 	"sync"
 
-	env "github.com/pinksaucepasta/paperboat/internal/environmente2ee"
-	"github.com/pinksaucepasta/paperboat/internal/recording"
+	env "github.com/pinksaucepasta/paperboat/cli/internal/environmente2ee"
+	"github.com/pinksaucepasta/paperboat/cli/internal/recording"
 )
 
 type vaultState struct {

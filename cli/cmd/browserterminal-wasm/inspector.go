@@ -3,7 +3,7 @@ package main
 import (
 	"encoding/json"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/protocol"
 	wire "github.com/pinksaucepasta/paperboat/shared/recording"
 )
 

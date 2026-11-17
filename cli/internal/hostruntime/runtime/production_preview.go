@@ -5,7 +5,7 @@ package runtime
 import (
 	"context"
 	"errors"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machineevents"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/machineevents"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -16,15 +16,15 @@ import (
 	"sync"
 	"time"
 
-	clientapi "github.com/pinksaucepasta/paperboat/internal/api"
-	clientconfig "github.com/pinksaucepasta/paperboat/internal/config"
-	"github.com/pinksaucepasta/paperboat/internal/errorreport"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/connector"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/preview"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/privateproxyconfig"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/tunnelmanager"
-	"github.com/pinksaucepasta/paperboat/internal/inspector"
-	"github.com/pinksaucepasta/paperboat/internal/privatepreviewproxy"
+	clientapi "github.com/pinksaucepasta/paperboat/cli/internal/api"
+	clientconfig "github.com/pinksaucepasta/paperboat/cli/internal/config"
+	"github.com/pinksaucepasta/paperboat/cli/internal/errorreport"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/connector"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/preview"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/privateproxyconfig"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/tunnelmanager"
+	"github.com/pinksaucepasta/paperboat/cli/internal/inspector"
+	"github.com/pinksaucepasta/paperboat/cli/internal/privatepreviewproxy"
 )
 
 // productionPreviewAssembly owns the single preview carrier runtime used by

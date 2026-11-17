@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/resolver"
+	"github.com/pinksaucepasta/paperboat/cli/internal/resolver"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )

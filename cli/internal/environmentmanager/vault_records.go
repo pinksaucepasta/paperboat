@@ -8,9 +8,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/pinksaucepasta/paperboat/internal/api"
-	"github.com/pinksaucepasta/paperboat/internal/config"
-	env "github.com/pinksaucepasta/paperboat/internal/environmente2ee"
+	"github.com/pinksaucepasta/paperboat/cli/internal/api"
+	"github.com/pinksaucepasta/paperboat/cli/internal/config"
+	env "github.com/pinksaucepasta/paperboat/cli/internal/environmente2ee"
 )
 
 func (v PasswordVault) mutateScopeRecords(ctx context.Context, kind, owner, machine string, mutate func(map[string][]byte) error) error {

@@ -12,8 +12,8 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/installsource"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/service"
 )
 
 // MaxCatalogEntries is the ceiling of Catalog.Maximum: the configured session

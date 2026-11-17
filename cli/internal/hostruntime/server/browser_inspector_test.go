@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/inspectorapi"
-	"github.com/pinksaucepasta/paperboat/internal/inspector"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/inspectorapi"
+	"github.com/pinksaucepasta/paperboat/cli/internal/inspector"
 )
 
 func browserInspectorFixture(t *testing.T, principal string) (*Dispatcher, Authorization) {

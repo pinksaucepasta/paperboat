@@ -5,8 +5,8 @@ import (
 	"io"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
-	"github.com/pinksaucepasta/paperboat/internal/resolver"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/protocol"
+	"github.com/pinksaucepasta/paperboat/cli/internal/resolver"
 )
 
 func TestHelperFinalSequenceWaitsForUnreadOutput(t *testing.T) {

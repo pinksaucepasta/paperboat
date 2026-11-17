@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/config"
+	"github.com/pinksaucepasta/paperboat/cli/internal/config"
 )
 
 func TestNormalizePreviewDomainsCanonicalizesIDNAAndOrdering(t *testing.T) {

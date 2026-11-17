@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/config"
+	"github.com/pinksaucepasta/paperboat/cli/internal/config"
 )
 
 func inspectorIssueServer(t *testing.T, status int, body string, seen *map[string]any) *httptest.Server {

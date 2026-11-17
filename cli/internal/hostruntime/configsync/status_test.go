@@ -3,8 +3,8 @@ package configsync
 import (
 	"encoding/json"
 	"errors"
-	"github.com/pinksaucepasta/paperboat/internal/atomicfile/atomicfiletest"
-	"github.com/pinksaucepasta/paperboat/internal/shorttemp"
+	"github.com/pinksaucepasta/paperboat/cli/internal/atomicfile/atomicfiletest"
+	"github.com/pinksaucepasta/paperboat/cli/internal/shorttemp"
 	"os"
 	"path/filepath"
 	"strings"

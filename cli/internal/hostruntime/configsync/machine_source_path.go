@@ -1,7 +1,7 @@
 package configsync
 
 import (
-	"github.com/pinksaucepasta/paperboat/internal/userpaths"
+	"github.com/pinksaucepasta/paperboat/cli/internal/userpaths"
 	"runtime"
 )
 

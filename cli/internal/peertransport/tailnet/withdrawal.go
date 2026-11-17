@@ -3,7 +3,7 @@ package tailnet
 import (
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/api"
+	"github.com/pinksaucepasta/paperboat/cli/internal/api"
 )
 
 // withdrawalGrace bounds how long a withdrawn peer keeps its packet path (F5-10: close, then cut). The newer

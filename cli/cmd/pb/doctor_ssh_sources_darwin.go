@@ -5,7 +5,7 @@ package main
 import (
 	"context"
 
-	doctorpkg "github.com/pinksaucepasta/paperboat/internal/doctor"
+	doctorpkg "github.com/pinksaucepasta/paperboat/cli/internal/doctor"
 )
 
 // Only macOS needs the machine guard to alias the managed SSH source addresses; Linux and Windows route all of 127/8.

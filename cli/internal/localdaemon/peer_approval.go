@@ -5,10 +5,10 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/pinksaucepasta/paperboat/internal/api"
-	"github.com/pinksaucepasta/paperboat/internal/config"
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/identitybootstrap"
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/trustedkeys"
+	"github.com/pinksaucepasta/paperboat/cli/internal/api"
+	"github.com/pinksaucepasta/paperboat/cli/internal/config"
+	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/identitybootstrap"
+	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/trustedkeys"
 )
 
 // Refusal codes of ApproveOwnedMachineEnrollment. The caller can act on each, so

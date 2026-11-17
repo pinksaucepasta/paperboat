@@ -5,7 +5,7 @@ package main
 import (
 	"context"
 
-	"github.com/pinksaucepasta/paperboat/internal/liveconnections"
+	"github.com/pinksaucepasta/paperboat/cli/internal/liveconnections"
 )
 
 // Only Linux, macOS and Windows count open connections.

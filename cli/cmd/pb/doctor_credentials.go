@@ -10,10 +10,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
-	doctorpkg "github.com/pinksaucepasta/paperboat/internal/doctor"
-	helperconfig "github.com/pinksaucepasta/paperboat/internal/hostruntime/config"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/enrollment"
+	"github.com/pinksaucepasta/paperboat/cli/internal/diagnostics"
+	doctorpkg "github.com/pinksaucepasta/paperboat/cli/internal/doctor"
+	helperconfig "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/config"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/enrollment"
 )
 
 // credentialRefusalWindow and credentialRefusalThreshold decide when refusals are a pattern, not one blip.

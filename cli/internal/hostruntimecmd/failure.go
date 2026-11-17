@@ -9,8 +9,8 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/pinksaucepasta/paperboat/internal/errorreport"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
+	"github.com/pinksaucepasta/paperboat/cli/internal/errorreport"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hostinstall"
 )
 
 // CommandFailure carries only package-authored public prose; diagnostic causes remain inspectable.

@@ -3,7 +3,7 @@ package inspectorauth
 import (
 	"errors"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/inspectorapi"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/inspectorapi"
 )
 
 const (

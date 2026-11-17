@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/api"
+	"github.com/pinksaucepasta/paperboat/cli/internal/api"
 )
 
 // ownerRefusalWindow is how long renewals that the server refuses with 401, 403 or 412 are retried. A host just back

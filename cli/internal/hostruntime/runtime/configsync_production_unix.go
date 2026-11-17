@@ -18,9 +18,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/configsync"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machinecontrol"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machineevents"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/configsync"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/machinecontrol"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/machineevents"
 	"github.com/pinksaucepasta/paperboat/shared/httptransport"
 )
 

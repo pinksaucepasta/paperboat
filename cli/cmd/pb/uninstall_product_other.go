@@ -8,8 +8,8 @@ import (
 	"io"
 	"os"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntimecmd"
-	"github.com/pinksaucepasta/paperboat/internal/managedssh"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntimecmd"
+	"github.com/pinksaucepasta/paperboat/cli/internal/managedssh"
 	"github.com/spf13/cobra"
 )
 

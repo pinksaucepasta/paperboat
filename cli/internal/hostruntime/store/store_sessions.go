@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/store/storesqlc"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/store/storesqlc"
 )
 
 func (s *Store) CreateSession(ctx context.Context, session Session) (resultErr error) {

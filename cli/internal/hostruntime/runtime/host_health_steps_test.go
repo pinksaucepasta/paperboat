@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/health"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/health"
 )
 
 // The host's typed health (served at /diagnostics for pb doctor) is ready on a healthy host, names a stable

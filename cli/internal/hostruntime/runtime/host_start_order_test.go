@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	runtimeconfig "github.com/pinksaucepasta/paperboat/internal/hostruntime/config"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/configapply"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/server"
+	runtimeconfig "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/config"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/configapply"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/server"
 )
 
 // blockedStart waits in Start the way a component does while it waits out a control-plane request timeout.

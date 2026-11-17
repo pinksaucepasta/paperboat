@@ -12,8 +12,8 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/pinksaucepasta/paperboat/internal/machineloopback"
-	"github.com/pinksaucepasta/paperboat/internal/windows/elevation"
+	"github.com/pinksaucepasta/paperboat/cli/internal/machineloopback"
+	"github.com/pinksaucepasta/paperboat/cli/internal/windows/elevation"
 	"golang.org/x/sys/windows"
 )
 

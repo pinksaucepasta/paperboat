@@ -7,8 +7,8 @@ import (
 	"syscall"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/errorreport"
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/native"
+	"github.com/pinksaucepasta/paperboat/cli/internal/errorreport"
+	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/native"
 )
 
 func TestCLINativePeerEventsProjectSafeAttemptAndWorkerFailures(t *testing.T) {

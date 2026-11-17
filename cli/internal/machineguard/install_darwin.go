@@ -15,7 +15,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/service"
 )
 
 const darwinHelperPath = "/Library/PrivilegedHelperTools/io.paperboat.machineguard"

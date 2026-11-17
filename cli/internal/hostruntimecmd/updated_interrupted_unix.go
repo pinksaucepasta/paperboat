@@ -8,8 +8,8 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hostinstall"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/service"
 )
 
 // recoverDeadWriters recovers, in this order, an interrupted install (hostinstall.RecoverInterrupted, with the

@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/splitdns"
+	"github.com/pinksaucepasta/paperboat/cli/internal/splitdns"
 )
 
 func gatewayCRLExchange(t *testing.T, request string, lookup func(string) []byte) (reply string, replayed []byte, served bool) {

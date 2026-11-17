@@ -7,7 +7,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/streamauth"
+	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/streamauth"
 )
 
 // A host that refuses an SSH stream writes one refusal line in place of sshd's banner (streamauth.WriteSSHRefusal).

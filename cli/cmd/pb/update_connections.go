@@ -5,7 +5,7 @@ package main
 import (
 	"context"
 
-	"github.com/pinksaucepasta/paperboat/internal/liveconnections"
+	"github.com/pinksaucepasta/paperboat/cli/internal/liveconnections"
 )
 
 // The two probes an update asks, as variables so a test can answer for them.

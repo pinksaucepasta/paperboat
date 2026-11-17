@@ -2,7 +2,7 @@ package prompt
 
 import (
 	"context"
-	"github.com/pinksaucepasta/paperboat/internal/preferences"
+	"github.com/pinksaucepasta/paperboat/cli/internal/preferences"
 	"strings"
 	"testing"
 

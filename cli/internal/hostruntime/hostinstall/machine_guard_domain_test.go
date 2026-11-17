@@ -8,7 +8,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/installsource"
 )
 
 // discoveredFrom is the control plane the last stubbed discovery asked.

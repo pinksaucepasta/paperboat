@@ -13,7 +13,7 @@ import (
 	"testing"
 
 	"github.com/coder/websocket"
-	"github.com/pinksaucepasta/paperboat/internal/resolver"
+	"github.com/pinksaucepasta/paperboat/cli/internal/resolver"
 )
 
 // A redial after a clean close attaches with the host's resume secret, no create and no credential, from the delivered

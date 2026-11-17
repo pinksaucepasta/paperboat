@@ -12,7 +12,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/config"
+	"github.com/pinksaucepasta/paperboat/cli/internal/config"
 )
 
 func TestFleetInventoryExhaustsPagesAndRejectsPartialResults(t *testing.T) {

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/filetransfer"
+	"github.com/pinksaucepasta/paperboat/cli/internal/filetransfer"
 )
 
 func TestSendNamesAMissingSource(t *testing.T) {

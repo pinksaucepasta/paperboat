@@ -4,8 +4,8 @@ import (
 	"context"
 
 	xterm "github.com/gitpod-io/xterm-go"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/history"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/history"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/protocol"
 )
 
 func (m *Manager) Attach(sessionID, attachmentID string, fromSequence uint64) (AttachResult, error) {

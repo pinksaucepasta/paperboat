@@ -11,7 +11,7 @@ import (
 	"sort"
 	"strings"
 
-	hosttelemetry "github.com/pinksaucepasta/paperboat/internal/hostruntime/telemetry"
+	hosttelemetry "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/telemetry"
 )
 
 const schemaVersion = 1

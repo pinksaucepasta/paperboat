@@ -5,9 +5,9 @@ package runtime
 import (
 	"context"
 	"encoding/json"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/inspectorauth"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/server"
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/streamauth"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/inspectorauth"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/server"
+	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/streamauth"
 	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 	"net"
 	"net/http"

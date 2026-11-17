@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/config"
+	"github.com/pinksaucepasta/paperboat/cli/internal/config"
 )
 
 func TestMachineMaintenanceInventoryForwardsContinuationAndLiteralQuery(t *testing.T) {

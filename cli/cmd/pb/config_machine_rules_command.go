@@ -12,7 +12,7 @@ import (
 	"time"
 
 	gittransport "github.com/go-git/go-git/v5/plumbing/transport"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/configsync"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/configsync"
 	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 	"github.com/spf13/cobra"
 )

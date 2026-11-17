@@ -9,8 +9,8 @@ import (
 	"io"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/preview"
-	"github.com/pinksaucepasta/paperboat/internal/privatepreviewproxy"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/preview"
+	"github.com/pinksaucepasta/paperboat/cli/internal/privatepreviewproxy"
 )
 
 // windowsRegressionAccessSource is intentionally inert. The PAC failure is

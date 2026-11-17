@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/causetext"
+	"github.com/pinksaucepasta/paperboat/cli/internal/causetext"
 )
 
 // A wait that ends without any daemon process says so, instead of a bare deadline.

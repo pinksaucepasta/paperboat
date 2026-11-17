@@ -5,7 +5,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/protocol"
 )
 
 // Initial output and the attachment response use independent QUIC streams.

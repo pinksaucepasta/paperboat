@@ -12,14 +12,14 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
+	"github.com/pinksaucepasta/paperboat/cli/internal/diagnostics"
 	"github.com/pinksaucepasta/paperboat/shared/wirejson"
 
 	"github.com/coder/websocket"
 	"github.com/google/uuid"
-	hostconfig "github.com/pinksaucepasta/paperboat/internal/hostruntime/config"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
-	"github.com/pinksaucepasta/paperboat/internal/resolver"
+	hostconfig "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/config"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/protocol"
+	"github.com/pinksaucepasta/paperboat/cli/internal/resolver"
 	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 	wire "github.com/pinksaucepasta/paperboat/shared/recording"
 	"github.com/pinksaucepasta/paperboat/shared/supportref"

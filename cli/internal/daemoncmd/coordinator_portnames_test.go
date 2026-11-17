@@ -11,10 +11,10 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/api"
-	"github.com/pinksaucepasta/paperboat/internal/daemonrpc"
-	"github.com/pinksaucepasta/paperboat/internal/splitdns"
-	"github.com/pinksaucepasta/paperboat/internal/testcert"
+	"github.com/pinksaucepasta/paperboat/cli/internal/api"
+	"github.com/pinksaucepasta/paperboat/cli/internal/daemonrpc"
+	"github.com/pinksaucepasta/paperboat/cli/internal/splitdns"
+	"github.com/pinksaucepasta/paperboat/cli/internal/testcert"
 )
 
 // Server port names route on this computer with nothing configured here: <name>.<machine>.<domain> opens the

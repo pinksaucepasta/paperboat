@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/managedssh"
-	"github.com/pinksaucepasta/paperboat/internal/processlaunch"
+	"github.com/pinksaucepasta/paperboat/cli/internal/managedssh"
+	"github.com/pinksaucepasta/paperboat/cli/internal/processlaunch"
 )
 
 // targetRsyncPath is the form of a drive-letter path (C:/Users/me/x) that rsync on a Windows target reads as absolute.

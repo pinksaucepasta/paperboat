@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	pb "github.com/pinksaucepasta/paperboat/internal/daemonrpc/proto"
+	pb "github.com/pinksaucepasta/paperboat/cli/internal/daemonrpc/proto"
 )
 
 // ErrMachineNotFound identifies the only expected negative result from a

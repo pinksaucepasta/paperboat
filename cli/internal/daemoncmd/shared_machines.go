@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/api"
+	"github.com/pinksaucepasta/paperboat/cli/internal/api"
 )
 
 // privateAccessPermission is the team machine capability that lets a member reach the machine's

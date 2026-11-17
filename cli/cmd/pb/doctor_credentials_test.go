@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	doctorpkg "github.com/pinksaucepasta/paperboat/internal/doctor"
+	doctorpkg "github.com/pinksaucepasta/paperboat/cli/internal/doctor"
 )
 
 // lanep-r26b logged machine_control 401s all day while doctor said healthy (Lane P, 2026-10-26).

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	doctorpkg "github.com/pinksaucepasta/paperboat/internal/doctor"
+	doctorpkg "github.com/pinksaucepasta/paperboat/cli/internal/doctor"
 )
 
 // Lane H's round-33 finding: after an unsupported downgrade the carrier unit restarted every few seconds,

@@ -5,7 +5,7 @@ import (
 	"os/exec"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/processlaunch"
+	"github.com/pinksaucepasta/paperboat/cli/internal/processlaunch"
 )
 
 type CommandRunner interface {

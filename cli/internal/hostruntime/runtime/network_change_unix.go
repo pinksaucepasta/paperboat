@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/networkmonitor"
+	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/networkmonitor"
 )
 
 type networkObserver interface {

@@ -3,7 +3,7 @@ package service
 import (
 	"encoding/base64"
 	"encoding/json"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/installsource"
 	"path/filepath"
 	"strconv"
 	"strings"

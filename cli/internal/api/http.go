@@ -3,7 +3,7 @@ package api
 import (
 	"crypto/tls"
 	"errors"
-	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
+	"github.com/pinksaucepasta/paperboat/cli/internal/buildinfo"
 	"net"
 	"net/http"
 	"net/http/httptrace"

@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/resolver"
+	"github.com/pinksaucepasta/paperboat/cli/internal/resolver"
 )
 
 // F3-15: after a full redial the same pb connect keeps its unanswered input: same queue, same attachment.

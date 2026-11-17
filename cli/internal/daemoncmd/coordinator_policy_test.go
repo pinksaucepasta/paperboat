@@ -7,7 +7,7 @@ import (
 	"net"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/daemonrpc"
+	"github.com/pinksaucepasta/paperboat/cli/internal/daemonrpc"
 )
 
 func manyPeers(n int) []*daemonrpc.PeerUpdate {

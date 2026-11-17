@@ -7,7 +7,7 @@ import (
 	"io/fs"
 	"os"
 
-	"github.com/pinksaucepasta/paperboat/internal/windowssecurity"
+	"github.com/pinksaucepasta/paperboat/cli/internal/windowssecurity"
 )
 
 // Windows does not expose meaningful POSIX permission bits. The atomic writer

@@ -11,9 +11,9 @@ import (
 	"net/http"
 	"time"
 
-	receiver "github.com/pinksaucepasta/paperboat/internal/hostruntime/filetransfer"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/store"
+	receiver "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/filetransfer"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/protocol"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/store"
 	wire "github.com/pinksaucepasta/paperboat/shared/storedfiles"
 	"github.com/pinksaucepasta/paperboat/shared/teambucket"
 )

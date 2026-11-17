@@ -27,7 +27,7 @@ printf 'subjectAltName=DNS:%s\n' "$host" >"$work/san"
 openssl x509 -req -in "$work/tls.csr" -CA "$work/ca.pem" -CAkey "$work/ca.key" -CAcreateserial -days 1 -extfile "$work/san" -out "$work/tls.pem" 2>/dev/null
 
 step "build pb"
-v=dev-e2e; p=github.com/pinksaucepasta/paperboat/internal/buildinfo
+v=dev-e2e; p=github.com/pinksaucepasta/paperboat/cli/internal/buildinfo
 (cd cli && CGO_ENABLED=0 go build -trimpath -ldflags "-X $p.Version=$v -X $p.Commit=$(git rev-parse HEAD) -X $p.ProtocolVersion=1 -X $p.DefaultServerURL=https://$host:$port -X $p.DefaultReleaseURL=https://$host:$port" -o "$work/pb" ./cmd/pb)
 
 step "server"

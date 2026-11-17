@@ -5,7 +5,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
-	"github.com/pinksaucepasta/paperboat/internal/neterr"
+	"github.com/pinksaucepasta/paperboat/cli/internal/neterr"
 	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	"github.com/pinksaucepasta/paperboat/shared/quicdial"
 	"io"

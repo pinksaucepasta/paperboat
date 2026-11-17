@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/splitdns"
+	"github.com/pinksaucepasta/paperboat/cli/internal/splitdns"
 )
 
 // One host gateway routed by the caller's OS user (PLAN 3b multi-account hosts, F23-01), as on Linux and macOS.

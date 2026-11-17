@@ -12,9 +12,9 @@ import (
 	"strings"
 	"unsafe"
 
-	"github.com/pinksaucepasta/paperboat/internal/machineguard/wfp"
-	"github.com/pinksaucepasta/paperboat/internal/windows/elevation"
-	"github.com/pinksaucepasta/paperboat/internal/windowssecurity"
+	"github.com/pinksaucepasta/paperboat/cli/internal/machineguard/wfp"
+	"github.com/pinksaucepasta/paperboat/cli/internal/windows/elevation"
+	"github.com/pinksaucepasta/paperboat/cli/internal/windowssecurity"
 	"golang.org/x/sys/windows"
 )
 

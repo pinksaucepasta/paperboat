@@ -4,7 +4,7 @@ import (
 	"context"
 	"sync"
 
-	"github.com/pinksaucepasta/paperboat/internal/errorreport"
+	"github.com/pinksaucepasta/paperboat/cli/internal/errorreport"
 )
 
 // A terminal attachment owns one inbox poller. Replacement and terminal exit

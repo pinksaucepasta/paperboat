@@ -4,8 +4,8 @@ package machineguard
 
 import (
 	"errors"
-	"github.com/pinksaucepasta/paperboat/internal/atomicfile"
-	"github.com/pinksaucepasta/paperboat/internal/windows/elevation"
+	"github.com/pinksaucepasta/paperboat/cli/internal/atomicfile"
+	"github.com/pinksaucepasta/paperboat/cli/internal/windows/elevation"
 )
 
 // Installation runs in the administrator's elevation bridge. The signer

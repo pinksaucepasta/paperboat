@@ -2,8 +2,8 @@ package main
 
 import (
 	"fmt"
-	"github.com/pinksaucepasta/paperboat/internal/command"
-	"github.com/pinksaucepasta/paperboat/internal/selector"
+	"github.com/pinksaucepasta/paperboat/cli/internal/command"
+	"github.com/pinksaucepasta/paperboat/cli/internal/selector"
 	"github.com/spf13/cobra"
 	"net/url"
 	"strconv"

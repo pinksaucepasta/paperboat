@@ -6,8 +6,8 @@ import (
 	"context"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/availability"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/updated"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/availability"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/updated"
 )
 
 // updateHealthAvailability fills the availability observation's update health from the updater. The unix host

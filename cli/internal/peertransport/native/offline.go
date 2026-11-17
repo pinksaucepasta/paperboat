@@ -6,8 +6,8 @@ import (
 	"net"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/streamauth"
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/tailnet"
+	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/streamauth"
+	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/tailnet"
 )
 
 // OfflineAdmission is one request to start a session without Paperboat (F21-11): the peer is the

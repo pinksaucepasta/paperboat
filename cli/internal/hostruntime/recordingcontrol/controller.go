@@ -5,9 +5,9 @@ import (
 	"errors"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/offlineaudit"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/recordings"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/session"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/offlineaudit"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/recordings"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/session"
 	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 	wire "github.com/pinksaucepasta/paperboat/shared/recording"
 )

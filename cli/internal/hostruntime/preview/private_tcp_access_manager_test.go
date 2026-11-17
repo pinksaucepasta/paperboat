@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/privatepreviewproxy"
+	"github.com/pinksaucepasta/paperboat/cli/internal/privatepreviewproxy"
 )
 
 type privateTCPAccessTestProxy struct {

@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/localdaemon"
+	"github.com/pinksaucepasta/paperboat/cli/internal/localdaemon"
 )
 
 // A daemon started at install, before pairing, is replaced at bind and must be seen serving.

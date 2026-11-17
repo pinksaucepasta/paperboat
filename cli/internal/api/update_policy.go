@@ -11,7 +11,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/pinksaucepasta/paperboat/internal/selfupdate"
+	"github.com/pinksaucepasta/paperboat/cli/internal/selfupdate"
 )
 
 type UpdatePolicy struct {

@@ -2,7 +2,7 @@ package tunnel
 
 import (
 	"bytes"
-	"github.com/pinksaucepasta/paperboat/internal/resolver"
+	"github.com/pinksaucepasta/paperboat/cli/internal/resolver"
 	"testing"
 	"time"
 )

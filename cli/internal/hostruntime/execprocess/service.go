@@ -2,7 +2,7 @@ package execprocess
 
 import (
 	"context"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/pty"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/pty"
 )
 
 // Service owns executions independently of a feature runtime's connections.

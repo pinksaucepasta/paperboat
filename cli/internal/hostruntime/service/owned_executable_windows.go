@@ -4,8 +4,8 @@ package service
 
 import (
 	"errors"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
-	"github.com/pinksaucepasta/paperboat/internal/windowssecurity"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/installsource"
+	"github.com/pinksaucepasta/paperboat/cli/internal/windowssecurity"
 	"os"
 	"path/filepath"
 	"strings"

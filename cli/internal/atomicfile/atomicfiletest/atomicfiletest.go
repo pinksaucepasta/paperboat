@@ -7,7 +7,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/atomicfile"
+	"github.com/pinksaucepasta/paperboat/cli/internal/atomicfile"
 )
 
 // WriteOwnerOnly creates a fixture the product will accept as private: mode 0600 on Unix, a protected owner-only

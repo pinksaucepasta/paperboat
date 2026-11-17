@@ -1,6 +1,6 @@
 package workerupdate
 
-import "github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
+import "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/installsource"
 
 // InstalledBaseline verifies administrator-approved installed bytes without
 // claiming they were derived from signed update metadata. Candidate releases

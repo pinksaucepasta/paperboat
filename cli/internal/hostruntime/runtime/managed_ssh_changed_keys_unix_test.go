@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	runtimeidentity "github.com/pinksaucepasta/paperboat/internal/hostruntime/identity"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machineevents"
+	runtimeidentity "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/identity"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/machineevents"
 )
 
 // C066: the owner regenerates the machine's SSH host keys while change delivery is healthy (no event

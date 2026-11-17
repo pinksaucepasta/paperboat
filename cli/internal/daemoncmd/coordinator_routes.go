@@ -4,14 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/pinksaucepasta/paperboat/internal/daemonrpc"
+	"github.com/pinksaucepasta/paperboat/cli/internal/daemonrpc"
 	"net/netip"
 	"strconv"
 	"strings"
 
-	"github.com/pinksaucepasta/paperboat/internal/machineguard"
-	"github.com/pinksaucepasta/paperboat/internal/machineloopback"
-	"github.com/pinksaucepasta/paperboat/internal/splitdns"
+	"github.com/pinksaucepasta/paperboat/cli/internal/machineguard"
+	"github.com/pinksaucepasta/paperboat/cli/internal/machineloopback"
+	"github.com/pinksaucepasta/paperboat/cli/internal/splitdns"
 	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 )
 

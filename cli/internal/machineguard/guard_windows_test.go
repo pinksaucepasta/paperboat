@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"github.com/Microsoft/go-winio"
-	"github.com/pinksaucepasta/paperboat/internal/machineguard/wfp"
+	"github.com/pinksaucepasta/paperboat/cli/internal/machineguard/wfp"
 	"golang.org/x/sys/windows"
 )
 

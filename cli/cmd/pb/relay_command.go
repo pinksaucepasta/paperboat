@@ -8,10 +8,10 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/api"
-	sessionauth "github.com/pinksaucepasta/paperboat/internal/auth"
-	"github.com/pinksaucepasta/paperboat/internal/config"
-	"github.com/pinksaucepasta/paperboat/internal/localapi"
+	"github.com/pinksaucepasta/paperboat/cli/internal/api"
+	sessionauth "github.com/pinksaucepasta/paperboat/cli/internal/auth"
+	"github.com/pinksaucepasta/paperboat/cli/internal/config"
+	"github.com/pinksaucepasta/paperboat/cli/internal/localapi"
 	"github.com/spf13/cobra"
 )
 

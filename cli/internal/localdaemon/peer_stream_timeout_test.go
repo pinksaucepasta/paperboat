@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/tunnel"
+	"github.com/pinksaucepasta/paperboat/cli/internal/tunnel"
 )
 
 // On a 30% loss link a terminal stream open hung ~110 s (ltc-j1). It is now aborted after the

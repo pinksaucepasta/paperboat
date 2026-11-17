@@ -1,7 +1,7 @@
 package runtime
 
 import (
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/auth"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/auth"
 	"net/http"
 	"net/url"
 	"time"

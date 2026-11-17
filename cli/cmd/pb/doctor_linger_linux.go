@@ -9,7 +9,7 @@ import (
 	"os/user"
 	"path/filepath"
 
-	doctorpkg "github.com/pinksaucepasta/paperboat/internal/doctor"
+	doctorpkg "github.com/pinksaucepasta/paperboat/cli/internal/doctor"
 )
 
 const (

@@ -3,7 +3,7 @@
 package daemoncmd
 
 import (
-	"github.com/pinksaucepasta/paperboat/internal/machineguard"
+	"github.com/pinksaucepasta/paperboat/cli/internal/machineguard"
 	"github.com/spf13/cobra"
 )
 

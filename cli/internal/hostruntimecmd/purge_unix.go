@@ -18,10 +18,10 @@ import (
 	"syscall"
 	"time"
 
-	documentation "github.com/pinksaucepasta/paperboat/docs"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
-	"github.com/pinksaucepasta/paperboat/internal/machineguard"
+	documentation "github.com/pinksaucepasta/paperboat/cli/docs"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hostinstall"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/service"
+	"github.com/pinksaucepasta/paperboat/cli/internal/machineguard"
 )
 
 func runPurgeCommand(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) error {

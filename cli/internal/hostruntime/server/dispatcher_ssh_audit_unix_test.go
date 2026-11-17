@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/managedssh"
+	"github.com/pinksaucepasta/paperboat/cli/internal/managedssh"
 )
 
 // F5-12: an SSH stream served through the dispatcher is audited with who opened it, the target generation and

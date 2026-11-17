@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/preferences"
+	"github.com/pinksaucepasta/paperboat/cli/internal/preferences"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 )

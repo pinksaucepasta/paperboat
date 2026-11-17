@@ -2,7 +2,7 @@ package api
 
 import (
 	"fmt"
-	hostconfig "github.com/pinksaucepasta/paperboat/internal/hostruntime/config"
+	hostconfig "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/config"
 	"net/http"
 	"net/url"
 	"regexp"

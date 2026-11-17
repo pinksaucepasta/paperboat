@@ -6,8 +6,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/pinksaucepasta/paperboat/internal/localapi"
-	"github.com/pinksaucepasta/paperboat/internal/tunnel"
+	"github.com/pinksaucepasta/paperboat/cli/internal/localapi"
+	"github.com/pinksaucepasta/paperboat/cli/internal/tunnel"
 )
 
 // attachedTerminals are the terminal links this daemon carries for pb connect, newest last, so that

@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/networkadaptation"
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/portmapping"
+	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/networkadaptation"
+	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/portmapping"
 	"tailscale.com/net/netmon"
 )
 

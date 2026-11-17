@@ -20,7 +20,7 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/pinksaucepasta/paperboat/internal/atomicfile"
+	"github.com/pinksaucepasta/paperboat/cli/internal/atomicfile"
 )
 
 const (

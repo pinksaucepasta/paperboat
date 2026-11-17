@@ -21,7 +21,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hoststate"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hoststate"
 	sharedprotocol "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 )
 

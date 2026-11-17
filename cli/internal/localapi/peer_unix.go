@@ -6,7 +6,7 @@ import (
 	"errors"
 	"net"
 
-	"github.com/pinksaucepasta/paperboat/internal/ospeer"
+	"github.com/pinksaucepasta/paperboat/cli/internal/ospeer"
 )
 
 func peerIdentity(connection net.Conn) (Peer, error) {

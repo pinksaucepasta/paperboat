@@ -4,7 +4,7 @@ import (
 	"net"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/protocol"
 )
 
 func sendRequest(t *testing.T, connection net.Conn, frame protocol.Frame) protocol.Frame {

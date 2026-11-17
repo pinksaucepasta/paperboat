@@ -12,7 +12,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/installsource"
 )
 
 // stubStagedRuntime writes plainly and fails the named step (once its call count reaches failAt); the real write

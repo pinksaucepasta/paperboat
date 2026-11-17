@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
-	peerpreview "github.com/pinksaucepasta/paperboat/internal/peertransport/privatepreview"
+	peerpreview "github.com/pinksaucepasta/paperboat/cli/internal/peertransport/privatepreview"
 )
 
 func TestProxyPreflightsAndForwardsFreshTCPConnections(t *testing.T) {

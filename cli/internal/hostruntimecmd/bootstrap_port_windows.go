@@ -7,7 +7,7 @@ import (
 	"errors"
 	"path/filepath"
 
-	"github.com/pinksaucepasta/paperboat/internal/windowsopenssh"
+	"github.com/pinksaucepasta/paperboat/cli/internal/windowsopenssh"
 )
 
 func checkWindowsBootstrapSSHPort(ctx context.Context, config windowsopenssh.Config) error {

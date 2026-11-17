@@ -9,7 +9,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/networkmonitor"
+	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/networkmonitor"
 )
 
 type fakeNetworkObserver struct {

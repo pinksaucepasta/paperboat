@@ -14,9 +14,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/api"
-	env "github.com/pinksaucepasta/paperboat/internal/environmente2ee"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/environmentkey"
+	"github.com/pinksaucepasta/paperboat/cli/internal/api"
+	env "github.com/pinksaucepasta/paperboat/cli/internal/environmente2ee"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/environmentkey"
 )
 
 type recordPageFunc func(context.Context, LaunchContext, api.VaultLayerSource, uint64, uint64, string) (api.VaultRecordsPage, error)

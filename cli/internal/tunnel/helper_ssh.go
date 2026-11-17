@@ -4,7 +4,7 @@ import (
 	"context"
 	"io"
 
-	"github.com/pinksaucepasta/paperboat/internal/resolver"
+	"github.com/pinksaucepasta/paperboat/cli/internal/resolver"
 )
 
 // DialSSH opens one authorized application stream. Once authorized, the

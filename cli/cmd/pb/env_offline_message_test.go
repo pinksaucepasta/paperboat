@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/config"
-	"github.com/pinksaucepasta/paperboat/internal/localapi"
+	"github.com/pinksaucepasta/paperboat/cli/internal/config"
+	"github.com/pinksaucepasta/paperboat/cli/internal/localapi"
 )
 
 // Offline, a computer without an ENV vault cannot tell "never set up" from "this account uses ENV": it says ENV needs Paperboat online.

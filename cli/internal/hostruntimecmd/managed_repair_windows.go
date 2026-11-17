@@ -6,8 +6,8 @@ import (
 	"context"
 	"os"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
-	"github.com/pinksaucepasta/paperboat/internal/windows/elevation"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hostinstall"
+	"github.com/pinksaucepasta/paperboat/cli/internal/windows/elevation"
 )
 
 // EnrolledInstallation reports whether the current user has a paired Paperboat installation: the one thing the

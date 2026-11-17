@@ -7,7 +7,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/localapi"
+	"github.com/pinksaucepasta/paperboat/cli/internal/localapi"
 )
 
 // vaultHandoffWindow bounds how long a replacement waits for the new daemon's socket to take the

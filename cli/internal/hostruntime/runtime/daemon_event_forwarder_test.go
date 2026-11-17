@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machineevents"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machineevents/eventstest"
-	"github.com/pinksaucepasta/paperboat/internal/localapi"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/machineevents"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/machineevents/eventstest"
+	"github.com/pinksaucepasta/paperboat/cli/internal/localapi"
 )
 
 func TestWorkerForwardsDaemonTopicsFromSingleWait(t *testing.T) {

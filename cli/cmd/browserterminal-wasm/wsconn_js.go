@@ -10,7 +10,7 @@ import (
 	"syscall/js"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/browserbroadcast"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/browserbroadcast"
 )
 
 func newBrowserWSConn(url string, protocols []string, depth int) (*browserWSConn, error) {

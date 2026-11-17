@@ -3,7 +3,7 @@ package workerupdate
 import (
 	"context"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/autoupdate"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/autoupdate"
 )
 
 // MandatoryScheduler checks release availability only. Installation requires a

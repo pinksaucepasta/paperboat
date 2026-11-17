@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	documentation "github.com/pinksaucepasta/paperboat/docs"
+	documentation "github.com/pinksaucepasta/paperboat/cli/docs"
 )
 
 // F1-09 (pbmac, dev-6b9ea3ba3): a failed re-pair left a half-installed Mac that

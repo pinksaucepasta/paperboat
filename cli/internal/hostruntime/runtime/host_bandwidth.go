@@ -4,7 +4,7 @@ package runtime
 
 import (
 	"context"
-	"github.com/pinksaucepasta/paperboat/internal/bandwidth"
+	"github.com/pinksaucepasta/paperboat/cli/internal/bandwidth"
 	"sync"
 	"time"
 )

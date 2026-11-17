@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	transfer "github.com/pinksaucepasta/paperboat/internal/filetransfer"
+	transfer "github.com/pinksaucepasta/paperboat/cli/internal/filetransfer"
 	"github.com/pinksaucepasta/paperboat/shared/supportref"
 )
 

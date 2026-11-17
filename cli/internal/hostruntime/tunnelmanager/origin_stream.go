@@ -15,10 +15,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/connector"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hoststate"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/originhealth"
-	"github.com/pinksaucepasta/paperboat/internal/inspector"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/connector"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hoststate"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/originhealth"
+	"github.com/pinksaucepasta/paperboat/cli/internal/inspector"
 	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 )
 

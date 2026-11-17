@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/liveconnections"
+	"github.com/pinksaucepasta/paperboat/cli/internal/liveconnections"
 )
 
 // F14-02 on Windows: the signed `pb update` refuses too (the Windows updater service cannot ask for the user's

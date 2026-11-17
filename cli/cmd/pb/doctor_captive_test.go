@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	doctorpkg "github.com/pinksaucepasta/paperboat/internal/doctor"
+	doctorpkg "github.com/pinksaucepasta/paperboat/cli/internal/doctor"
 )
 
 // X-38 (Windows guest, 12 minutes after pairing): the access token had expired and could not refresh because a captive

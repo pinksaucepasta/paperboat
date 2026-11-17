@@ -4,7 +4,7 @@ import (
 	"context"
 	"strings"
 
-	"github.com/pinksaucepasta/paperboat/internal/localapi"
+	"github.com/pinksaucepasta/paperboat/cli/internal/localapi"
 )
 
 // sshTargetNotReadyError is a managed SSH connection to a machine whose SSH the daemon already knows is

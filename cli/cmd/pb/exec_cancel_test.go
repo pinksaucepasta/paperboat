@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/tunnel"
+	"github.com/pinksaucepasta/paperboat/cli/internal/tunnel"
 )
 
 // A dial that opened just as the user pressed Ctrl-C was closed and reported as "did not run", though the host may

@@ -4,8 +4,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/pinksaucepasta/paperboat/internal/api"
-	"github.com/pinksaucepasta/paperboat/internal/managedssh"
+	"github.com/pinksaucepasta/paperboat/cli/internal/api"
+	"github.com/pinksaucepasta/paperboat/cli/internal/managedssh"
 )
 
 // managedSSHAliasTargets builds the OpenSSH aliases from the machines the inventory refresh just

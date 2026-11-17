@@ -3,13 +3,13 @@ package hostruntimecmd
 import (
 	"context"
 	"encoding/base64"
-	"github.com/pinksaucepasta/paperboat/internal/shorttemp"
+	"github.com/pinksaucepasta/paperboat/cli/internal/shorttemp"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/bootstrap"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/bootstrap"
 )
 
 // serverBootstrapOutcome returns the error shape produced by a real control

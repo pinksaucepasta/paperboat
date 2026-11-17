@@ -5,13 +5,13 @@ package localdaemon
 import (
 	"context"
 	"errors"
-	"github.com/pinksaucepasta/paperboat/internal/shorttemp"
+	"github.com/pinksaucepasta/paperboat/cli/internal/shorttemp"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
-	hostservice "github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
+	hostservice "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/service"
 	"howett.net/plist"
 )
 

@@ -5,8 +5,8 @@ package daemoncmd
 import (
 	"path/filepath"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
-	"github.com/pinksaucepasta/paperboat/internal/windowsopenssh"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hostinstall"
+	"github.com/pinksaucepasta/paperboat/cli/internal/windowsopenssh"
 )
 
 func runWindowsSSHService(instance string) error {

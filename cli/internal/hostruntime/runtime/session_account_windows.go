@@ -4,7 +4,7 @@ package runtime
 
 import (
 	"errors"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/sessionowner"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/sessionowner"
 	"golang.org/x/sys/windows"
 )
 

@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
+	"github.com/pinksaucepasta/paperboat/cli/internal/buildinfo"
 	"github.com/spf13/cobra"
 )
 

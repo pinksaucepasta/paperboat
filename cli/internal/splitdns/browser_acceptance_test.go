@@ -7,7 +7,7 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
-	"github.com/pinksaucepasta/paperboat/internal/testcert"
+	"github.com/pinksaucepasta/paperboat/cli/internal/testcert"
 	"net"
 	"net/http"
 	"net/http/httptest"

@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/machineservices"
+	"github.com/pinksaucepasta/paperboat/cli/internal/machineservices"
 )
 
 // policyObservationTransport accepts observations and answers with a policy that allows automatic

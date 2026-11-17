@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	doctorpkg "github.com/pinksaucepasta/paperboat/internal/doctor"
+	doctorpkg "github.com/pinksaucepasta/paperboat/cli/internal/doctor"
 )
 
 // pbvm1 F14-03: no hostd ran and the machine was offline, yet pb doctor reported healthy.

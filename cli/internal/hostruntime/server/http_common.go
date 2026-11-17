@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"net/http"
 
-	pberrors "github.com/pinksaucepasta/paperboat/internal/hostruntime/errors"
+	pberrors "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/errors"
 )
 
 const (

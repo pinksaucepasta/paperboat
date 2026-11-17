@@ -10,8 +10,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/pty"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/store"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/pty"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/store"
 )
 
 func (m *Manager) Write(sessionID string, key InputKey, data []byte) (InputDecision, error) {

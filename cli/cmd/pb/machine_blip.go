@@ -5,7 +5,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/api"
+	"github.com/pinksaucepasta/paperboat/cli/internal/api"
 )
 
 // machineBlipGrace is how long a command that has not started its work waits for a machine the server calls offline.

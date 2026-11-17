@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/privateproxyconfig"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/privateproxyconfig"
 )
 
 func TestGuardPACHandsTheProxyPACToTheGuardAndWithdrawsIt(t *testing.T) {

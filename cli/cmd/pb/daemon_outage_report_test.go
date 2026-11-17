@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/localapi"
+	"github.com/pinksaucepasta/paperboat/cli/internal/localapi"
 )
 
 func TestDaemonReportsControlPlaneUnavailableOnlyForItsOwnOutageHealth(t *testing.T) {

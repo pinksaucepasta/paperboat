@@ -8,16 +8,16 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"github.com/pinksaucepasta/paperboat/internal/winpipe"
+	"github.com/pinksaucepasta/paperboat/cli/internal/winpipe"
 	"io"
 	"os"
 	"strings"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostservice"
-	"github.com/pinksaucepasta/paperboat/internal/windows/elevation"
-	"github.com/pinksaucepasta/paperboat/internal/windowsopenssh"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hostdproto"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hostservice"
+	"github.com/pinksaucepasta/paperboat/cli/internal/windows/elevation"
+	"github.com/pinksaucepasta/paperboat/cli/internal/windowsopenssh"
 )
 
 type doctorCheck struct {

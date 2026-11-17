@@ -11,8 +11,8 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/pinksaucepasta/paperboat/internal/atomicfile"
-	"github.com/pinksaucepasta/paperboat/internal/config"
+	"github.com/pinksaucepasta/paperboat/cli/internal/atomicfile"
+	"github.com/pinksaucepasta/paperboat/cli/internal/config"
 	"github.com/spf13/cobra"
 )
 

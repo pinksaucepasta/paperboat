@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/api"
-	"github.com/pinksaucepasta/paperboat/internal/command"
+	"github.com/pinksaucepasta/paperboat/cli/internal/api"
+	"github.com/pinksaucepasta/paperboat/cli/internal/command"
 )
 
 const uninstallServerRecordTimeout = 15 * time.Second

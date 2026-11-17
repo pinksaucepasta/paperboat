@@ -6,7 +6,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/config"
+	"github.com/pinksaucepasta/paperboat/cli/internal/config"
 )
 
 func TestWindowsLocalDaemonLaunchUsesOwnedServiceConfiguration(t *testing.T) {

@@ -4,8 +4,8 @@ package process
 
 import (
 	"context"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/envinject"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/pty"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/envinject"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/pty"
 	"golang.org/x/sys/windows"
 	"os"
 	"os/exec"

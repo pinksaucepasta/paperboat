@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/tools/releaseplan"
+	"github.com/pinksaucepasta/paperboat/cli/tools/releaseplan"
 )
 
 func TestReleasePlanCommandEndToEnd(t *testing.T) {

@@ -1,7 +1,7 @@
 package daemonrpc
 
 import (
-	"github.com/pinksaucepasta/paperboat/internal/localapi"
+	"github.com/pinksaucepasta/paperboat/cli/internal/localapi"
 	"os"
 	"path/filepath"
 )

@@ -6,7 +6,7 @@ import (
 	"context"
 	"io"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/service"
 )
 
 func runActivator(context.Context, []string, io.Writer, io.Writer) error {

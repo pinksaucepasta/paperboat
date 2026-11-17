@@ -11,10 +11,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/daemonrpc"
-	"github.com/pinksaucepasta/paperboat/internal/machineguard"
-	"github.com/pinksaucepasta/paperboat/internal/shorttemp"
-	"github.com/pinksaucepasta/paperboat/internal/testcert"
+	"github.com/pinksaucepasta/paperboat/cli/internal/daemonrpc"
+	"github.com/pinksaucepasta/paperboat/cli/internal/machineguard"
+	"github.com/pinksaucepasta/paperboat/cli/internal/shorttemp"
+	"github.com/pinksaucepasta/paperboat/cli/internal/testcert"
 )
 
 // A guard connection that stops answering because the guard restarted.

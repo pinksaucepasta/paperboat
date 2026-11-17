@@ -3,7 +3,7 @@ package tailnet
 import (
 	"context"
 	"crypto/ed25519"
-	"github.com/pinksaucepasta/paperboat/internal/api"
+	"github.com/pinksaucepasta/paperboat/cli/internal/api"
 	"testing"
 	"time"
 

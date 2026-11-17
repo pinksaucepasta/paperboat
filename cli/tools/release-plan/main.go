@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/tools/releaseplan"
+	"github.com/pinksaucepasta/paperboat/cli/tools/releaseplan"
 )
 
 func main() {

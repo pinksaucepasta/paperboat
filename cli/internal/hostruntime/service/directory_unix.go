@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"syscall"
 
-	"github.com/pinksaucepasta/paperboat/internal/ownerpath"
+	"github.com/pinksaucepasta/paperboat/cli/internal/ownerpath"
 )
 
 func prepareAtomicDirectory(directory string) error {

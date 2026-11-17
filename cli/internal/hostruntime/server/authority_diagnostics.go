@@ -4,8 +4,8 @@ import (
 	"context"
 	"reflect"
 
-	"github.com/pinksaucepasta/paperboat/internal/errorreport"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/auth"
+	"github.com/pinksaucepasta/paperboat/cli/internal/errorreport"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/auth"
 )
 
 func expectedCredentialRejection(err error) bool {

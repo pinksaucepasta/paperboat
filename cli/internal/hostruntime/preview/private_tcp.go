@@ -5,8 +5,8 @@ import (
 	"errors"
 	"io"
 
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/privatepreview"
-	"github.com/pinksaucepasta/paperboat/internal/privatepreviewproxy"
+	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/privatepreview"
+	"github.com/pinksaucepasta/paperboat/cli/internal/privatepreviewproxy"
 )
 
 var (

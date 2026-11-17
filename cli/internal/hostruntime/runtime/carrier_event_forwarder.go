@@ -4,7 +4,7 @@ package runtime
 
 import (
 	"context"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machineevents"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/machineevents"
 	"time"
 )
 

@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	runtimehealth "github.com/pinksaucepasta/paperboat/internal/hostruntime/health"
-	runtimeobs "github.com/pinksaucepasta/paperboat/internal/hostruntime/telemetry"
+	runtimehealth "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/health"
+	runtimeobs "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/telemetry"
 )
 
 func TestHealthProjectionMatchesCanonicalShapeAndFixedDimensions(t *testing.T) {

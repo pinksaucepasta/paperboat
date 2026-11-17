@@ -10,8 +10,8 @@ import (
 	"runtime"
 	"time"
 
-	doctorpkg "github.com/pinksaucepasta/paperboat/internal/doctor"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
+	doctorpkg "github.com/pinksaucepasta/paperboat/cli/internal/doctor"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/service"
 )
 
 // doctorHostdProbes checks that the native host supervisor answers. Exec, files, terminals and the machine's

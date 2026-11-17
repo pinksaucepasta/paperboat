@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/pinksaucepasta/paperboat/internal/transfername"
+	"github.com/pinksaucepasta/paperboat/cli/internal/transfername"
 )
 
 // A folder arrives as one transfer holding a tar stream (see internal/filetransfer/folder.go). The receiver stores it as

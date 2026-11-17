@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/nativeprivate"
+	"github.com/pinksaucepasta/paperboat/cli/internal/nativeprivate"
 )
 
 type NativePrivateGrantRequest struct {

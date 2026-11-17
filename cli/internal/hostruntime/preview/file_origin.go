@@ -11,8 +11,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/inbox"
-	"github.com/pinksaucepasta/paperboat/internal/transfername"
+	"github.com/pinksaucepasta/paperboat/cli/internal/inbox"
+	"github.com/pinksaucepasta/paperboat/cli/internal/transfername"
 )
 
 // ErrSharedFileUnavailable means a file preview's Inbox file is gone or the Inbox cannot be read.

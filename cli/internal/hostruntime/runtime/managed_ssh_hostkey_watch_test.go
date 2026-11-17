@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	runtimeidentity "github.com/pinksaucepasta/paperboat/internal/hostruntime/identity"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machineevents"
+	runtimeidentity "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/identity"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/machineevents"
 )
 
 func signalled(t *testing.T, signals <-chan struct{}, within time.Duration) bool {

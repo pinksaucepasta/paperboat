@@ -8,8 +8,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
-	"github.com/pinksaucepasta/paperboat/internal/processlaunch"
+	"github.com/pinksaucepasta/paperboat/cli/internal/diagnostics"
+	"github.com/pinksaucepasta/paperboat/cli/internal/processlaunch"
 	"io"
 	"net/http"
 	"net/url"
@@ -35,8 +35,8 @@ const (
 	maxInputProbeOutput  = 4 << 10
 	maxInputRedirects    = 5
 	inputCopyBufferSize  = 32 << 10
-	paperboatModulePath  = "github.com/pinksaucepasta/paperboat"
-	paperboatCommandPath = "github.com/pinksaucepasta/paperboat/cmd/pb"
+	paperboatModulePath  = "github.com/pinksaucepasta/paperboat/cli"
+	paperboatCommandPath = "github.com/pinksaucepasta/paperboat/cli/cmd/pb"
 )
 
 var ErrInput = errors.New("manual input is invalid or could not be staged")

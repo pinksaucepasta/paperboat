@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	doctorpkg "github.com/pinksaucepasta/paperboat/internal/doctor"
-	"github.com/pinksaucepasta/paperboat/internal/localapi"
+	doctorpkg "github.com/pinksaucepasta/paperboat/cli/internal/doctor"
+	"github.com/pinksaucepasta/paperboat/cli/internal/localapi"
 )
 
 // A failing daemon step makes pb doctor unhealthy and names the step, its cause and the action; once the step

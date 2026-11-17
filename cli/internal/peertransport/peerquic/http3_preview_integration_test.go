@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/peerquic"
-	peerpreview "github.com/pinksaucepasta/paperboat/internal/peertransport/privatepreview"
+	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/peerquic"
+	peerpreview "github.com/pinksaucepasta/paperboat/cli/internal/peertransport/privatepreview"
 	"github.com/quic-go/quic-go/http3"
 )
 

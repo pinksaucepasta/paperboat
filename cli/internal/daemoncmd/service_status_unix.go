@@ -7,8 +7,8 @@ import (
 	"net"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostservice"
-	"github.com/pinksaucepasta/paperboat/internal/localdaemon"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hostservice"
+	"github.com/pinksaucepasta/paperboat/cli/internal/localdaemon"
 )
 
 // hostServiceServing: the machine's host service (system LaunchDaemon/unit) answers its socket, which is

@@ -6,16 +6,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/pinksaucepasta/paperboat/internal/errorreport"
-	hostruntime "github.com/pinksaucepasta/paperboat/internal/hostruntime/runtime"
+	"github.com/pinksaucepasta/paperboat/cli/internal/errorreport"
+	hostruntime "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/runtime"
 	"github.com/pinksaucepasta/paperboat/shared/supportref"
 	"io"
 	"strings"
 	"syscall"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hostdproto"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hostinstall"
 )
 
 func TestRunVersion(t *testing.T) {

@@ -15,9 +15,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/pinksaucepasta/paperboat/internal/api"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/preview"
-	servepkg "github.com/pinksaucepasta/paperboat/internal/serve"
+	"github.com/pinksaucepasta/paperboat/cli/internal/api"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/preview"
+	servepkg "github.com/pinksaucepasta/paperboat/cli/internal/serve"
 	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	"github.com/spf13/cobra"
 )

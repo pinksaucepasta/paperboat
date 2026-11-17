@@ -17,8 +17,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/config"
-	env "github.com/pinksaucepasta/paperboat/internal/environmente2ee"
+	"github.com/pinksaucepasta/paperboat/cli/internal/config"
+	env "github.com/pinksaucepasta/paperboat/cli/internal/environmente2ee"
 )
 
 func vaultCustodyFixture(t *testing.T) (string, []byte) {

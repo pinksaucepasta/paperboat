@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/api"
+	"github.com/pinksaucepasta/paperboat/cli/internal/api"
 )
 
 // pb team sso status prints settings as words: on/off, "none" for no exemptions, and the

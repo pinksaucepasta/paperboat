@@ -1,6 +1,6 @@
 package main
 
-import "github.com/pinksaucepasta/paperboat/internal/machineguard"
+import "github.com/pinksaucepasta/paperboat/cli/internal/machineguard"
 
 func uninstallCleanupOperations(err error) []string {
 	var operations []string

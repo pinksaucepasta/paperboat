@@ -5,7 +5,7 @@ package hostinstall
 import (
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/service"
 )
 
 // The repair reconcile must accept the command lines the install plan registers (hostd carries its generation) and

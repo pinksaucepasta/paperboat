@@ -6,7 +6,7 @@ import (
 	"os/user"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/installsource"
 )
 
 // A fresh host has no recorded local access domain, so the privileged install

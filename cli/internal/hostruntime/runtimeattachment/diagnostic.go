@@ -3,7 +3,7 @@ package runtimeattachment
 import (
 	"errors"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/preview"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/preview"
 )
 
 const (

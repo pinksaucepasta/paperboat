@@ -9,7 +9,7 @@ RUN go mod download
 COPY . .
 RUN printf '%s\n' "${PAPERBOAT_VERSION}" | grep -Eq '^[0-9]{4}\.[0-9]{2}\.[0-9]{2}\.(0|[1-9][0-9]*)$' \
   && CGO_ENABLED=0 go build -trimpath \
-    -ldflags "-s -w -X github.com/pinksaucepasta/paperboat/internal/buildinfo.Version=${PAPERBOAT_VERSION} -X github.com/pinksaucepasta/paperboat/internal/buildinfo.ProtocolVersion=1" \
+    -ldflags "-s -w -X github.com/pinksaucepasta/paperboat/cli/internal/buildinfo.Version=${PAPERBOAT_VERSION} -X github.com/pinksaucepasta/paperboat/cli/internal/buildinfo.ProtocolVersion=1" \
     -o /out/paperboat ./cmd/pb \
   && cp /out/paperboat /out/paperboat-hostd \
   && cp /out/paperboat /out/paperboat-updated \

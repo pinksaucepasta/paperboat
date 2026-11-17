@@ -17,13 +17,13 @@ pb login [flags]
 ### Options
 
 ```
-      --api-token string        sign in with this API token instead of browser approval (- reads it from stdin; or set PAPERBOAT_API_TOKEN)
-      --change-account          sign in with another account after browser approval
-      --fresh                   remove this computer's setup and machine record, then add it again
-  -h, --help                    help for login
-      --json                    print approval and sign-in states as JSON
-      --no-browser              print the approval link without opening a browser
-      --reauth                  authenticate the current account again
+      --api-token string   sign in with this API token instead of browser approval (- reads it from stdin; or set PAPERBOAT_API_TOKEN)
+      --change-account     sign in with another account after browser approval
+      --fresh              remove this computer's setup and machine record, then add it again
+  -h, --help               help for login
+      --json               print approval and sign-in states as JSON
+      --no-browser         print the approval link without opening a browser
+      --reauth             authenticate the current account again
 ```
 
 ### Options inherited from parent commands

@@ -12,8 +12,8 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/pinksaucepasta/paperboat/internal/processlaunch"
-	winenv "github.com/pinksaucepasta/paperboat/internal/windowsenvironment"
+	"github.com/pinksaucepasta/paperboat/cli/internal/processlaunch"
+	winenv "github.com/pinksaucepasta/paperboat/cli/internal/windowsenvironment"
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/svc"
 )

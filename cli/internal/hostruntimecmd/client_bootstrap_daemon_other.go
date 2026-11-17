@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/config"
-	"github.com/pinksaucepasta/paperboat/internal/localdaemon"
+	"github.com/pinksaucepasta/paperboat/cli/internal/config"
+	"github.com/pinksaucepasta/paperboat/cli/internal/localdaemon"
 )
 
 func bootstrapLocalDaemonInstaller(cfg *config.Config) func(context.Context) error {

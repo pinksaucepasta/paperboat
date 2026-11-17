@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	runtimeidentity "github.com/pinksaucepasta/paperboat/internal/hostruntime/identity"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machineevents"
+	runtimeidentity "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/identity"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/machineevents"
 )
 
 // PR-03: while key changes are delivered, an idle host does not ask for its managed SSH keys on a

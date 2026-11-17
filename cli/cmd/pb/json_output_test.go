@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/preview"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/preview"
 	"github.com/pinksaucepasta/paperboat/shared/supportref"
 	"os"
 	"path/filepath"
@@ -14,7 +14,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/api"
+	"github.com/pinksaucepasta/paperboat/cli/internal/api"
 )
 
 func TestJSONParseFailureIsOneStructuredValue(t *testing.T) {

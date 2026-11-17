@@ -2,7 +2,7 @@ package hostinstall
 
 import (
 	"errors"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/installsource"
 	"os"
 	"path/filepath"
 	"strings"

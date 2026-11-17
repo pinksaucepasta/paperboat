@@ -5,7 +5,7 @@ package hostruntimeentry
 import (
 	"context"
 
-	hostruntime "github.com/pinksaucepasta/paperboat/internal/hostruntime/runtime"
+	hostruntime "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/runtime"
 )
 
 type ConfigWorkerConfig = hostruntime.ProductionConfigWorkerConfig

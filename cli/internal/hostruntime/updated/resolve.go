@@ -3,7 +3,7 @@ package updated
 import (
 	"context"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/workerupdate"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/workerupdate"
 )
 
 // resolveRelease verifies signed release metadata without staging or

@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hoststate"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hoststate"
 )
 
 // A quiet WebSocket (a server without pings) stays open for upgradedStreamIdle once upgraded, not the

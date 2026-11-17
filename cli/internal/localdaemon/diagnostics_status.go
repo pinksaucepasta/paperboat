@@ -3,7 +3,7 @@ package localdaemon
 import (
 	"encoding/json"
 
-	"github.com/pinksaucepasta/paperboat/internal/localapi"
+	"github.com/pinksaucepasta/paperboat/cli/internal/localapi"
 )
 
 // bugreportStatus is the daemon status a support bundle holds. Each peer keeps only how this machine reaches it (path,

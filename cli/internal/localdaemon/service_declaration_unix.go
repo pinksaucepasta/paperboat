@@ -10,8 +10,8 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/pinksaucepasta/paperboat/internal/endpointbinary"
-	hostservice "github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
+	"github.com/pinksaucepasta/paperboat/cli/internal/endpointbinary"
+	hostservice "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/service"
 	"howett.net/plist"
 )
 

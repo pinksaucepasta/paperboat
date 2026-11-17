@@ -7,9 +7,9 @@ import (
 	"github.com/pinksaucepasta/paperboat/shared/peerconsumer"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/native"
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/streamauth"
-	"github.com/pinksaucepasta/paperboat/internal/resolver"
+	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/native"
+	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/streamauth"
+	"github.com/pinksaucepasta/paperboat/cli/internal/resolver"
 )
 
 // TailnetTerminalTunnel adapts the real terminal protocol to a direct native

@@ -3,7 +3,7 @@ package updated
 import (
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/installsource"
 )
 
 func TestWindowsNativeInstallRetiresOnlyCompletedTransactions(t *testing.T) {

@@ -4,7 +4,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/resolver"
+	"github.com/pinksaucepasta/paperboat/cli/internal/resolver"
 )
 
 // inputOwners lets one pb connect keep its terminal input across a full redial: the next peer stream from the same

@@ -8,7 +8,7 @@ import (
 	"io/fs"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/carriercontrol"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/carriercontrol"
 )
 
 // A retained carrier that verifies but never answers (dadape, 2026-10-22: its old pin refused its own

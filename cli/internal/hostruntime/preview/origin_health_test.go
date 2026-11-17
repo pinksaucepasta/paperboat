@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/originhealth"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/originhealth"
 )
 
 // A preview whose app stops must say so: the carrier probes the app after the preview is ready

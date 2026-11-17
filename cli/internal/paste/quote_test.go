@@ -2,7 +2,7 @@ package paste
 
 import (
 	"bytes"
-	transfer "github.com/pinksaucepasta/paperboat/internal/filetransfer"
+	transfer "github.com/pinksaucepasta/paperboat/cli/internal/filetransfer"
 	"os/exec"
 	"runtime"
 	"strings"

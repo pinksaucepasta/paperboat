@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/controlbackoff"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/controlbackoff"
 )
 
 // controlDownFor is how long one failed control request marks Paperboat unreachable for the commands that would

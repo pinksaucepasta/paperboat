@@ -3,7 +3,7 @@ package preview
 import (
 	"context"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/connector"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/connector"
 )
 
 // AttachmentSession is the source-owned authenticated carrier projection.

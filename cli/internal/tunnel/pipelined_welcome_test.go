@@ -6,8 +6,8 @@ import (
 	"io"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/tailnet"
-	"github.com/pinksaucepasta/paperboat/internal/resolver"
+	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/tailnet"
+	"github.com/pinksaucepasta/paperboat/cli/internal/resolver"
 )
 
 // pipelinedExec sends hello and starts an exec over a pipelined welcome; first answers in place of the welcome.

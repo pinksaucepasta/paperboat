@@ -7,7 +7,7 @@ import (
 	"crypto/subtle"
 	"errors"
 	"fmt"
-	"github.com/pinksaucepasta/paperboat/internal/winpipe"
+	"github.com/pinksaucepasta/paperboat/cli/internal/winpipe"
 	"io"
 	"net"
 	"os"
@@ -20,7 +20,7 @@ import (
 	"unsafe"
 
 	"github.com/Microsoft/go-winio"
-	"github.com/pinksaucepasta/paperboat/internal/atomicfile"
+	"github.com/pinksaucepasta/paperboat/cli/internal/atomicfile"
 	"github.com/pinksaucepasta/paperboat/shared/supportref"
 	"golang.org/x/sys/windows"
 )

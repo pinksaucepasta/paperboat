@@ -3,7 +3,7 @@
 package service
 
 import (
-	"github.com/pinksaucepasta/paperboat/internal/atomicfile"
+	"github.com/pinksaucepasta/paperboat/cli/internal/atomicfile"
 	"os"
 	"os/user"
 	"path/filepath"

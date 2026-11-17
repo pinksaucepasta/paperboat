@@ -7,7 +7,7 @@ import (
 	"net"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/streamauth"
+	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/streamauth"
 )
 
 type observedHandlerFailure struct {

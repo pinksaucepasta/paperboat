@@ -6,7 +6,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/configsync"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/configsync"
 )
 
 // A comparison frame is written after Next returns; Close clears the comparison as soon as the

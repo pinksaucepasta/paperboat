@@ -8,7 +8,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hoststate"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hoststate"
 )
 
 type originDialer struct {

@@ -4,16 +4,16 @@ package runtime
 
 import (
 	"context"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machineevents"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/machineevents"
 	"net/http"
 	"os/user"
 	"strconv"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/availability"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostservice"
-	runtimeidentity "github.com/pinksaucepasta/paperboat/internal/hostruntime/identity"
-	"github.com/pinksaucepasta/paperboat/internal/managedssh"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/availability"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hostservice"
+	runtimeidentity "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/identity"
+	"github.com/pinksaucepasta/paperboat/cli/internal/managedssh"
 )
 
 func initializeProductionManagedSSH(ctx context.Context, host *managedssh.Host, controlURL string, transport http.RoundTripper, registration runtimeidentity.Registration, identity managedSSHIdentitySource, generation uint64, workerEpoch uint64, keyEvents *machineevents.Subscription) (Service, error) {

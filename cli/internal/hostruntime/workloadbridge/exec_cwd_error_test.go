@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/execprocess"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/execprocess"
 )
 
 // The workspace refusal crosses the owner boundary as itself and still matches ErrInvalid.

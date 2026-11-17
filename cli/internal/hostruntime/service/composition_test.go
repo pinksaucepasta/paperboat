@@ -12,7 +12,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/shorttemp"
+	"github.com/pinksaucepasta/paperboat/cli/internal/shorttemp"
 )
 
 type fakeNativeController struct {

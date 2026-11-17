@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"io"
 
-	"github.com/pinksaucepasta/paperboat/internal/paste"
+	"github.com/pinksaucepasta/paperboat/cli/internal/paste"
 )
 
 var (

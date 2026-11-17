@@ -5,7 +5,7 @@ package hostruntimecmd
 import (
 	"context"
 
-	"github.com/pinksaucepasta/paperboat/internal/config"
+	"github.com/pinksaucepasta/paperboat/cli/internal/config"
 )
 
 func bootstrapLocalDaemonInstaller(*config.Config) func(context.Context) error {

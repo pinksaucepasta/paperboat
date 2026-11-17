@@ -13,9 +13,9 @@ import (
 	"strconv"
 	"syscall"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
-	"github.com/pinksaucepasta/paperboat/internal/machineguard"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hostinstall"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/service"
+	"github.com/pinksaucepasta/paperboat/cli/internal/machineguard"
 )
 
 func runServiceCommand(ctx context.Context, args []string, stdin io.Reader, stdout, _ io.Writer) error {

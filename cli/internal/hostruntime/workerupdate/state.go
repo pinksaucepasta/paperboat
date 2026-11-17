@@ -6,7 +6,7 @@ import (
 	"reflect"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/updateflow"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/updateflow"
 )
 
 const TransactionSchemaV1 = "paperboat.update-transaction/v1"

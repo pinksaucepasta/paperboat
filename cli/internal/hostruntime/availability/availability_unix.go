@@ -14,8 +14,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/errorreport"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostservice"
+	"github.com/pinksaucepasta/paperboat/cli/internal/errorreport"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hostservice"
 	"github.com/pinksaucepasta/paperboat/shared/supportref"
 	"github.com/pinksaucepasta/paperboat/shared/wirejson"
 )

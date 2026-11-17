@@ -8,7 +8,7 @@ import (
 	"io"
 	"net"
 
-	"github.com/pinksaucepasta/paperboat/internal/errorreport"
+	"github.com/pinksaucepasta/paperboat/cli/internal/errorreport"
 )
 
 // A named pipe has no half-close. When either direction of a bridged stream ends, the other side cannot be told

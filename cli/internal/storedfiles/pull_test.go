@@ -16,9 +16,9 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/filetransfer"
-	receiver "github.com/pinksaucepasta/paperboat/internal/hostruntime/filetransfer"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/store"
+	"github.com/pinksaucepasta/paperboat/cli/internal/filetransfer"
+	receiver "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/filetransfer"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/store"
 	wire "github.com/pinksaucepasta/paperboat/shared/storedfiles"
 	"github.com/pinksaucepasta/paperboat/shared/teambucket"
 )

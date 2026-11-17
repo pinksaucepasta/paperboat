@@ -10,7 +10,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/pinksaucepasta/paperboat/internal/transfername"
+	"github.com/pinksaucepasta/paperboat/cli/internal/transfername"
 )
 
 // maxDeliveredNames bounds the " (n)" suffixes tried when a name is taken.

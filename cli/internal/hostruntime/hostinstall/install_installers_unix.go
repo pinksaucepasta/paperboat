@@ -12,8 +12,8 @@ import (
 	"runtime"
 	"strconv"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/environmentkey"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/environmentkey"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/service"
 )
 
 func installers(request Request, paths installPaths) (*service.Installer, *service.Installer, error) {

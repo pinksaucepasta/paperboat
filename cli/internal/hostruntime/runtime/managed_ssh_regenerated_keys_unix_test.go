@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	clientapi "github.com/pinksaucepasta/paperboat/internal/api"
-	runtimeidentity "github.com/pinksaucepasta/paperboat/internal/hostruntime/identity"
+	clientapi "github.com/pinksaucepasta/paperboat/cli/internal/api"
+	runtimeidentity "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/identity"
 )
 
 // A machine whose cloned host keys the server refused (Lane H, official 2026.10.23.5) publishes its

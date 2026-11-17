@@ -18,8 +18,8 @@ import (
 	"syscall/js"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/browserbroadcast"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/browserbroadcast"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/protocol"
 	wire "github.com/pinksaucepasta/paperboat/shared/recording"
 )
 

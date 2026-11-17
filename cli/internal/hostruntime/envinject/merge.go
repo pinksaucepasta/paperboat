@@ -1,7 +1,7 @@
 package envinject
 
 import (
-	env "github.com/pinksaucepasta/paperboat/internal/environmente2ee"
+	env "github.com/pinksaucepasta/paperboat/cli/internal/environmente2ee"
 	"sort"
 	"strings"
 	"unicode/utf8"

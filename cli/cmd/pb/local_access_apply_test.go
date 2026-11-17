@@ -3,8 +3,8 @@ package main
 import (
 	"context"
 	"errors"
-	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
-	"github.com/pinksaucepasta/paperboat/internal/localapi"
+	"github.com/pinksaucepasta/paperboat/cli/internal/buildinfo"
+	"github.com/pinksaucepasta/paperboat/cli/internal/localapi"
 	"testing"
 	"time"
 )

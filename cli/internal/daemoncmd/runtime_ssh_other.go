@@ -4,7 +4,7 @@ package daemoncmd
 
 import (
 	"context"
-	"github.com/pinksaucepasta/paperboat/internal/windowsopenssh"
+	"github.com/pinksaucepasta/paperboat/cli/internal/windowsopenssh"
 )
 
 func runWindowsSSHGeneration(context.Context, string, string) error {

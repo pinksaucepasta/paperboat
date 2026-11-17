@@ -1,6 +1,6 @@
 package workloadbridge
 
-import "github.com/pinksaucepasta/paperboat/internal/hostruntime/session"
+import "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/session"
 
 // ownerHTTPFailure preserves only the private bridge response status. The
 // response body may contain private application data and is never an error.

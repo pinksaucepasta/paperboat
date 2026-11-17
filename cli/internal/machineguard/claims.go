@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/splitdns"
+	"github.com/pinksaucepasta/paperboat/cli/internal/splitdns"
 )
 
 // claimHold is how long a released address stays reserved for its previous (uid, account, machine) before

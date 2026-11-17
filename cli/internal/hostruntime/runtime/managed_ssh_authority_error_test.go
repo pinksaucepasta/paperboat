@@ -8,7 +8,7 @@ import (
 	"net/url"
 	"testing"
 
-	clientapi "github.com/pinksaucepasta/paperboat/internal/api"
+	clientapi "github.com/pinksaucepasta/paperboat/cli/internal/api"
 )
 
 // Paperboat being unreachable keeps the managed keys whatever shape the network failure takes; only an explicit answer

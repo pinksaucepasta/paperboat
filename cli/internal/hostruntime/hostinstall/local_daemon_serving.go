@@ -1,6 +1,6 @@
 package hostinstall
 
-import "github.com/pinksaucepasta/paperboat/internal/localapi"
+import "github.com/pinksaucepasta/paperboat/cli/internal/localapi"
 
 // localDaemonServing says the local daemon of this install is up: ready, or signed out (the account revoked this
 // computer's sign-in) on a machine whose registration is on disk. An install replaces code and cannot sign anyone

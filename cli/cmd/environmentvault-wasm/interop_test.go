@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	env "github.com/pinksaucepasta/paperboat/internal/environmente2ee"
-	"github.com/pinksaucepasta/paperboat/internal/recording"
+	env "github.com/pinksaucepasta/paperboat/cli/internal/environmente2ee"
+	"github.com/pinksaucepasta/paperboat/cli/internal/recording"
 )
 
 // wasmPeer talks to a built wasm module through testdata/harness.mjs.

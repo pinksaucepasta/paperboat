@@ -337,7 +337,7 @@ jobs:
           $env:GOOS = 'windows'
           $env:GOARCH = 'amd64'
           if ($env:SENTRY_DSN -cnotmatch '\Ahttps://[A-Za-z0-9]+@[A-Za-z0-9.-]+(:[0-9]+)?/[0-9]+\z') { throw 'Official candidate requires a valid HTTPS SENTRY_DSN.' }
-          $ldflags = "-s -w -X github.com/pinksaucepasta/paperboat/internal/buildinfo.DefaultSentryDSN=$env:SENTRY_DSN -X github.com/pinksaucepasta/paperboat/internal/buildinfo.DefaultSentryRelease=paperboat:$env:RELEASE_VERSION -X github.com/pinksaucepasta/paperboat/internal/buildinfo.Distribution=official -X github.com/pinksaucepasta/paperboat/internal/buildinfo.Version=$env:RELEASE_VERSION -X github.com/pinksaucepasta/paperboat/internal/buildinfo.Commit=$env:GITHUB_SHA -X github.com/pinksaucepasta/paperboat/internal/buildinfo.ProtocolVersion=1 -X github.com/pinksaucepasta/paperboat/internal/buildinfo.DefaultServerURL=$env:DEFAULT_SERVER_URL -X github.com/pinksaucepasta/paperboat/internal/buildinfo.DefaultReleaseURL=$env:DEFAULT_SERVER_URL"
+          $ldflags = "-s -w -X github.com/pinksaucepasta/paperboat/cli/internal/buildinfo.DefaultSentryDSN=$env:SENTRY_DSN -X github.com/pinksaucepasta/paperboat/cli/internal/buildinfo.DefaultSentryRelease=paperboat:$env:RELEASE_VERSION -X github.com/pinksaucepasta/paperboat/cli/internal/buildinfo.Distribution=official -X github.com/pinksaucepasta/paperboat/cli/internal/buildinfo.Version=$env:RELEASE_VERSION -X github.com/pinksaucepasta/paperboat/cli/internal/buildinfo.Commit=$env:GITHUB_SHA -X github.com/pinksaucepasta/paperboat/cli/internal/buildinfo.ProtocolVersion=1 -X github.com/pinksaucepasta/paperboat/cli/internal/buildinfo.DefaultServerURL=$env:DEFAULT_SERVER_URL -X github.com/pinksaucepasta/paperboat/cli/internal/buildinfo.DefaultReleaseURL=$env:DEFAULT_SERVER_URL"
           & go build -buildvcs=false -trimpath -ldflags $ldflags -o $output ./cmd/pb
           if ($LASTEXITCODE -ne 0) { throw 'Unified Windows candidate build failed.' }
       # Release 2026.11.09.7: the published installer confirmed `pb reset` with a host name pb rejected.
@@ -432,7 +432,7 @@ jobs:
           $env:GOOS = 'windows'
           $env:GOARCH = 'arm64'
           if ($env:SENTRY_DSN -cnotmatch '\Ahttps://[A-Za-z0-9]+@[A-Za-z0-9.-]+(:[0-9]+)?/[0-9]+\z') { throw 'Official candidate requires a valid HTTPS SENTRY_DSN.' }
-          $ldflags = "-s -w -X github.com/pinksaucepasta/paperboat/internal/buildinfo.DefaultSentryDSN=$env:SENTRY_DSN -X github.com/pinksaucepasta/paperboat/internal/buildinfo.DefaultSentryRelease=paperboat:$env:RELEASE_VERSION -X github.com/pinksaucepasta/paperboat/internal/buildinfo.Distribution=official -X github.com/pinksaucepasta/paperboat/internal/buildinfo.Version=$env:RELEASE_VERSION -X github.com/pinksaucepasta/paperboat/internal/buildinfo.Commit=$env:GITHUB_SHA -X github.com/pinksaucepasta/paperboat/internal/buildinfo.ProtocolVersion=1 -X github.com/pinksaucepasta/paperboat/internal/buildinfo.DefaultServerURL=$env:DEFAULT_SERVER_URL -X github.com/pinksaucepasta/paperboat/internal/buildinfo.DefaultReleaseURL=$env:DEFAULT_SERVER_URL"
+          $ldflags = "-s -w -X github.com/pinksaucepasta/paperboat/cli/internal/buildinfo.DefaultSentryDSN=$env:SENTRY_DSN -X github.com/pinksaucepasta/paperboat/cli/internal/buildinfo.DefaultSentryRelease=paperboat:$env:RELEASE_VERSION -X github.com/pinksaucepasta/paperboat/cli/internal/buildinfo.Distribution=official -X github.com/pinksaucepasta/paperboat/cli/internal/buildinfo.Version=$env:RELEASE_VERSION -X github.com/pinksaucepasta/paperboat/cli/internal/buildinfo.Commit=$env:GITHUB_SHA -X github.com/pinksaucepasta/paperboat/cli/internal/buildinfo.ProtocolVersion=1 -X github.com/pinksaucepasta/paperboat/cli/internal/buildinfo.DefaultServerURL=$env:DEFAULT_SERVER_URL -X github.com/pinksaucepasta/paperboat/cli/internal/buildinfo.DefaultReleaseURL=$env:DEFAULT_SERVER_URL"
           & go build -buildvcs=false -trimpath -ldflags $ldflags -o $output ./cmd/pb
           if ($LASTEXITCODE -ne 0) { throw 'Unified Windows candidate build failed.' }
       # Release 2026.11.09.7: the published installer confirmed `pb reset` with a host name pb rejected.
@@ -678,6 +678,23 @@ jobs:
           if ! gh release view "$RELEASE_VERSION" --repo "$PAPERBOAT_GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release create "$RELEASE_VERSION" --repo "$PAPERBOAT_GITHUB_REPOSITORY" --verify-tag --title "Paperboat $RELEASE_VERSION" --notes "Paperboat $RELEASE_VERSION; source $RELEASE_SOURCE_SHA" --draft --latest=false
           fi
+      - name: Tag the Go modules on the same commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # 2026.11.13.52 -> <module>/v0.20261113.52: the Go proxy needs a semver tag with the module's folder prefix.
+          # Only the MIT modules; server is AGPL and is not published as a Go module.
+          IFS=. read -r year month day sequence <<< "$RELEASE_VERSION"
+          for module in cli shared relay edge helper; do
+            module_tag="$module/v0.$year$month$day.$sequence"
+            if gh api "repos/$PAPERBOAT_GITHUB_REPOSITORY/git/ref/tags/$module_tag" --jq .object.sha >/dev/null 2>&1; then
+              test "$(git ls-remote origin "refs/tags/$module_tag" | cut -f1)" = "$RELEASE_SOURCE_SHA" || { echo "$module_tag exists on another commit" >&2; exit 1; }
+            else
+              gh api -X POST "repos/$PAPERBOAT_GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$module_tag" -f sha="$RELEASE_SOURCE_SHA" >/dev/null
+            fi
+          done
       - name: Upload only missing draft assets; never replace published bytes
         env:
           GH_TOKEN: ${{ github.token }}

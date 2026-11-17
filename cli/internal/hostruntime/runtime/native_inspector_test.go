@@ -5,7 +5,7 @@ package runtime
 import (
 	"bufio"
 	"context"
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/streamauth"
+	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/streamauth"
 	"io"
 	"net"
 	"net/http"

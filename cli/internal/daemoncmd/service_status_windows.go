@@ -5,7 +5,7 @@ package daemoncmd
 import (
 	"context"
 
-	"github.com/pinksaucepasta/paperboat/internal/localdaemon"
+	"github.com/pinksaucepasta/paperboat/cli/internal/localdaemon"
 )
 
 // Windows asks the service manager, which is machine-wide and not tied to a session, so it is already the

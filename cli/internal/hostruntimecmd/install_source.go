@@ -1,6 +1,6 @@
 package hostruntimecmd
 
-import "github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
+import "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/installsource"
 
 // VerifyInstallSource checks the executable that enrollment will install.
 // Download authenticity belongs to the initial installer or the TUF updater.

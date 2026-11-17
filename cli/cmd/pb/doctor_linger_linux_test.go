@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	doctorpkg "github.com/pinksaucepasta/paperboat/internal/doctor"
+	doctorpkg "github.com/pinksaucepasta/paperboat/cli/internal/doctor"
 )
 
 func TestDoctorWarnsWhenTheDaemonStopsAtLogout(t *testing.T) {

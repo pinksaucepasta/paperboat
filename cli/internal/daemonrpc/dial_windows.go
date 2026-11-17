@@ -7,7 +7,7 @@ import (
 	"errors"
 	"net"
 
-	"github.com/pinksaucepasta/paperboat/internal/windows/pipeauth"
+	"github.com/pinksaucepasta/paperboat/cli/internal/windows/pipeauth"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )

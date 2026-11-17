@@ -10,8 +10,8 @@ import (
 	"time"
 	"unicode/utf8"
 
-	runtimehealth "github.com/pinksaucepasta/paperboat/internal/hostruntime/health"
-	runtimeobs "github.com/pinksaucepasta/paperboat/internal/hostruntime/telemetry"
+	runtimehealth "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/health"
+	runtimeobs "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/telemetry"
 )
 
 // ContractSchemaV1 is the shared preview/tunnel resource schema. It is kept

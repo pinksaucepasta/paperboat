@@ -8,7 +8,7 @@ import (
 	"net/url"
 	"strconv"
 
-	env "github.com/pinksaucepasta/paperboat/internal/environmente2ee"
+	env "github.com/pinksaucepasta/paperboat/cli/internal/environmente2ee"
 )
 
 type VaultRecordState struct {

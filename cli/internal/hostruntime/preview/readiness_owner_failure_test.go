@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
+	"github.com/pinksaucepasta/paperboat/cli/internal/diagnostics"
 )
 
 func TestReadinessOwnerFailuresSurviveMutationAndRetryExhaustion(t *testing.T) {

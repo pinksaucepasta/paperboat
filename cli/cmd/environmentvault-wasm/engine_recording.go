@@ -7,8 +7,8 @@ import (
 	"encoding/hex"
 	"errors"
 
-	env "github.com/pinksaucepasta/paperboat/internal/environmente2ee"
-	"github.com/pinksaucepasta/paperboat/internal/recording"
+	env "github.com/pinksaucepasta/paperboat/cli/internal/environmente2ee"
+	"github.com/pinksaucepasta/paperboat/cli/internal/recording"
 )
 
 // Team session recordings: the team recording key is made, shared and opened only inside this worker.

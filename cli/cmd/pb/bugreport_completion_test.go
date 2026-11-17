@@ -6,7 +6,7 @@ import (
 	"syscall"
 	"testing"
 
-	bugreportpkg "github.com/pinksaucepasta/paperboat/internal/bugreport"
+	bugreportpkg "github.com/pinksaucepasta/paperboat/cli/internal/bugreport"
 )
 
 func TestBugreportFailurePresentationPreservesConfirmedUpload(t *testing.T) {

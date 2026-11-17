@@ -7,8 +7,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/pinksaucepasta/paperboat/internal/api"
-	env "github.com/pinksaucepasta/paperboat/internal/environmente2ee"
+	"github.com/pinksaucepasta/paperboat/cli/internal/api"
+	env "github.com/pinksaucepasta/paperboat/cli/internal/environmente2ee"
 )
 
 // openRecords builds a complete replacement in memory. Neither partial pages nor

@@ -5,7 +5,7 @@ import (
 	"slices"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/session"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/session"
 )
 
 var ErrNoActiveWriter = errors.New("no_active_writer")

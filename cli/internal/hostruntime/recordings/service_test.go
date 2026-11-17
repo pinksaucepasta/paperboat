@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/recording"
+	"github.com/pinksaucepasta/paperboat/cli/internal/recording"
 )
 
 func testService(t *testing.T, config Config) (*Service, *ecdh.PrivateKey) {

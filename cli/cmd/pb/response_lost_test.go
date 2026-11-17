@@ -8,7 +8,7 @@ import (
 	"syscall"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/api"
+	"github.com/pinksaucepasta/paperboat/cli/internal/api"
 )
 
 // A team action the server applied but whose answer was lost (Lane S, support_5ed29c4f) says it may
