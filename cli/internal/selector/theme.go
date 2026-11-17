@@ -4,6 +4,7 @@ import (
 	"context"
 	"image/color"
 	"os"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -104,11 +105,15 @@ var (
 // per screen session: later programs of the session reuse the stored answer, and a
 // terminal that never answers is not asked again by every submenu.
 func RequestBackground() tea.Cmd {
-	if backgroundKnown.Load() || !backgroundAsked.CompareAndSwap(false, true) {
+	if !backgroundQueryable(runtime.GOOS) || backgroundKnown.Load() || !backgroundAsked.CompareAndSwap(false, true) {
 		return nil
 	}
 	return tea.RequestBackgroundColor
 }
+
+// backgroundQueryable is false on Windows: conhost and older Windows Terminal builds do
+// not answer OSC 11, and the colour only picks an optional accent.
+func backgroundQueryable(goos string) bool { return goos != "windows" }
 
 // ObserveBackground records the terminal's background from a program message
 // and reports whether it changed, so the model can restyle.

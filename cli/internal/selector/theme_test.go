@@ -208,3 +208,9 @@ func TestFooterIsDrawnFromTheBindingsThatHandleKeys(t *testing.T) {
 		t.Errorf("footer is %d wide at width 30: %q", ansi.StringWidth(got), got)
 	}
 }
+
+func TestBackgroundIsNotQueriedOnWindows(t *testing.T) {
+	if backgroundQueryable("windows") || !backgroundQueryable("linux") || !backgroundQueryable("darwin") {
+		t.Fatal("OSC 11 must be skipped on Windows only")
+	}
+}
