@@ -15,6 +15,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
 	"github.com/pinksaucepasta/paperboat/server/internal/secrets"
 	"github.com/pinksaucepasta/paperboat/server/internal/workers"
+	"github.com/pinksaucepasta/paperboat/shared/configsync"
 )
 
 var (
@@ -42,20 +43,7 @@ func (f ConfigRepositoryAccessIssuerFuncs) IssueRepositoryAccess(ctx context.Con
 	return f.Issue(ctx, userID, repositoryID, contentsPermission)
 }
 
-type ConfigRepositoryAccess struct {
-	RepositoryID  string    `json:"repository_id"`
-	AssignmentID  string    `json:"assignment_id"`
-	EnvironmentID string    `json:"environment_id"`
-	MachineID     string    `json:"machine_id"`
-	CloneURL      string    `json:"clone_url"`
-	PublishURL    string    `json:"publish_url"`
-	Branch        string    `json:"branch"`
-	Transport     string    `json:"transport"`
-	Username      string    `json:"username"`
-	Password      string    `json:"password"`
-	Capability    string    `json:"capability"`
-	ExpiresAt     time.Time `json:"expires_at"`
-}
+type ConfigRepositoryAccess = configsync.RepositoryAccess
 
 type ConfigRepositoryAccessService struct {
 	store         *db.DB

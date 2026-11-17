@@ -18,6 +18,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/shared/boundedread"
+	"github.com/pinksaucepasta/paperboat/shared/configsync"
 	"github.com/pinksaucepasta/paperboat/shared/httptransport"
 	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 )
@@ -97,20 +98,7 @@ type RepositoryBinding struct {
 	URL          string `json:"url"`
 }
 
-type RepositoryAccess struct {
-	Transport     string    `json:"transport"`
-	RepositoryID  string    `json:"repository_id"`
-	AssignmentID  string    `json:"assignment_id"`
-	EnvironmentID string    `json:"environment_id"`
-	MachineID     string    `json:"machine_id"`
-	CloneURL      string    `json:"clone_url"`
-	PublishURL    string    `json:"publish_url"`
-	Branch        string    `json:"branch"`
-	Username      string    `json:"username"`
-	Password      string    `json:"password"`
-	Capability    string    `json:"capability"`
-	ExpiresAt     time.Time `json:"expires_at"`
-}
+type RepositoryAccess = configsync.RepositoryAccess
 
 type RuntimePolicy struct {
 	Format                        string        `json:"format"`
