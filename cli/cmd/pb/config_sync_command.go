@@ -49,7 +49,11 @@ func configSyncCobraCommand() *cobra.Command {
 	init.Flags().Bool("json", false, "print the initialized path as JSON")
 	group.AddCommand(path, init)
 	for _, operation := range []string{"validate", "apply"} {
-		cmd := &cobra.Command{Use: operation, Short: "Review the effective file configuration on this machine", Args: commandArgs(cobra.NoArgs)}
+		short := "Review the effective file configuration on this machine"
+		if operation == "apply" {
+			short = "Apply the reviewed file configuration to this machine"
+		}
+		cmd := &cobra.Command{Use: operation, Short: short, Args: commandArgs(cobra.NoArgs)}
 		cmd.Flags().String("repository", "", "registered repository ID or name for initial bootstrap")
 		cmd.Flags().Bool("json", false, "print safe effective projection as JSON")
 		if operation == "apply" {

@@ -14,6 +14,12 @@ JSON output is supported with --json.
 pb reset [flags]
 ```
 
+### Examples
+
+```
+  pb reset --confirmation "RESET PAPERBOAT" --hostname "$(hostname)" --enrollment-token-file /root/pb-token
+```
+
 ### Options
 
 ```

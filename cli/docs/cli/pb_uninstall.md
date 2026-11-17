@@ -14,6 +14,13 @@ JSON output is supported with --json.
 pb uninstall [flags]
 ```
 
+### Examples
+
+```
+  pb uninstall
+  pb uninstall --confirmation "UNINSTALL PAPERBOAT" --hostname "$(hostname)"
+```
+
 ### Options
 
 ```

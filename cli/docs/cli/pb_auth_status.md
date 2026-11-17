@@ -20,7 +20,7 @@ pb auth status [flags]
 
 ```
   -h, --help   help for status
-      --json   
+      --json   print JSON
 ```
 
 ### Options inherited from parent commands

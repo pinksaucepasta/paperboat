@@ -84,15 +84,15 @@ func sessionCobraCommand() *cobra.Command {
 	addListPaging(list)
 	group.AddCommand(list)
 	for _, child := range []struct {
-		name, short string
-		args        cobra.PositionalArgs
-		run         command.Action
+		name, use, short string
+		args             cobra.PositionalArgs
+		run              command.Action
 	}{
-		{"rename", "Rename a terminal session", cobra.ExactArgs(3), sessionRename},
-		{"close", "Close one or all terminal sessions", cobra.RangeArgs(1, 2), sessionClose},
-		{"delete", "Delete a closed terminal session record", cobra.RangeArgs(1, 2), sessionDelete},
+		{"rename", "rename <environment> <session> <new-name>", "Rename a terminal session", cobra.ExactArgs(3), sessionRename},
+		{"close", "close <environment> [<session>]", "Close one or all terminal sessions", cobra.RangeArgs(1, 2), sessionClose},
+		{"delete", "delete <environment> [<session>]", "Delete a closed terminal session record", cobra.RangeArgs(1, 2), sessionDelete},
 	} {
-		entry := &cobra.Command{Use: child.name, Short: child.short, Args: commandArgs(child.args), RunE: actionRun(child.run)}
+		entry := &cobra.Command{Use: child.use, Short: child.short, Args: commandArgs(child.args), RunE: actionRun(child.run)}
 		if child.name == "rename" {
 			entry.Flags().Bool("json", false, "print JSON")
 		} else {

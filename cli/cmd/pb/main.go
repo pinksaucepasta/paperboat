@@ -425,6 +425,7 @@ recovery instructions before retrying an operation that may have created resourc
 		},
 	}
 	addConnectFlags(newTerminal)
+	_ = newTerminal.Flags().MarkHidden("session") // pb new always creates a fresh session; the flag is refused
 	root.AddCommand(newTerminal)
 	execCommand := &cobra.Command{Use: "exec <machine> [flags] -- <argv...>", Short: "Execute an exact command on a machine", Args: commandArgs(cobra.ArbitraryArgs), RunE: func(command *cobra.Command, args []string) error {
 		return actionExecCobra(command, args, false)

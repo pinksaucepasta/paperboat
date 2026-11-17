@@ -4,14 +4,23 @@ Show local Paperboat machine status
 
 ### Synopsis
 
-Show local Paperboat machine status
-
-Show the local endpoint's Paperboat state or the selected machine's observed status. This is a snapshot rather than a readiness wait; use doctor for a deeper check, service status for supervisor state, and pb wait for a named readiness condition.
+Show this machine's Paperboat state, or the observed status of the machine you name. It is
+a snapshot, not a wait: use pb doctor for a deeper check, pb service status for the background
+service and pb wait to wait for a condition. On a machine that is waiting to be added, status
+reports the signed-out state; run pb login.
 
 JSON output is supported with --json.
 
 ```
 pb status [machine] [flags]
+```
+
+### Examples
+
+```
+  pb status
+  pb status studio
+  pb status --json
 ```
 
 ### Options

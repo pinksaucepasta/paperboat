@@ -20,7 +20,7 @@ pb config show [flags]
 
 ```
   -h, --help   help for show
-      --json   
+      --json   print JSON
 ```
 
 ### Options inherited from parent commands

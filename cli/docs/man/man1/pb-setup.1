@@ -10,10 +10,15 @@ pb-setup - Set up this machine for Paperboat
 
 
 .SH DESCRIPTION
-Set up this machine for Paperboat
+Enroll this machine in the signed-in account and set it up: create its Inbox, install the
+running executable as the Paperboat service, and register its managed SSH target. Sign in with
+pb login first. Flags choose the machine name and which incoming services it accepts, and
+--ssh-port names the loopback port of the SSH server already running here (default 22). A recovery key is written only where
+--recovery-output says; store it carefully.
 
 .PP
-Enroll and configure this machine, create its Inbox, and install the running executable as the Paperboat service. Capability flags choose incoming services; recovery output must be stored carefully.
+On Windows, setup prepares OpenSSH first and may ask for administrator approval. On macOS a
+hostname such as Name.local is shortened to its first label for the machine name.
 
 .PP
 JSON output is supported with --json.
@@ -75,6 +80,14 @@ JSON output is supported with --json.
 .PP
 \fB--workspace\fP=""
 	resource workspace selector: personal or a team slug
+
+
+.SH EXAMPLE
+.EX
+  pb setup --name studio
+  pb setup --name studio --ssh-port 2222 --managed-ssh=false
+  pb setup --recovery-output /root/pb-recovery.txt --json
+.EE
 
 
 .SH SEE ALSO

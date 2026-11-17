@@ -49,7 +49,7 @@ func configCobraCommand() *cobra.Command {
 }
 
 // jsonFlag registers the unlabeled --json flag of the older config commands.
-func jsonFlag(command *cobra.Command) { command.Flags().Bool("json", false, "") }
+func jsonFlag(command *cobra.Command) { command.Flags().Bool("json", false, "print JSON") }
 
 func configSet(c *command.Context) error {
 	if c.Args().Len() != 2 {

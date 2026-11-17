@@ -20,7 +20,7 @@ pb config team-default-set <team> <repository> [flags]
 
 ```
   -h, --help   help for team-default-set
-      --json   
+      --json   print JSON
 ```
 
 ### Options inherited from parent commands

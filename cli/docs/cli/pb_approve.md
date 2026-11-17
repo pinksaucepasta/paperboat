@@ -1,10 +1,10 @@
 ## pb approve
 
-Approve a peer machine over gRPC IPC
+Approve a peer machine for local access
 
 ### Synopsis
 
-Approve a peer machine over gRPC IPC
+Approve a peer machine for local access
 
 Approve an exact peer machine ID for local access. Inspect the ID before approving an unfamiliar peer. Withdrawing a machine is `pb machine revoke`, which asks for confirmation; pb approve never revokes.
 
@@ -12,6 +12,13 @@ JSON output is supported with --json.
 
 ```
 pb approve <machine-id> [flags]
+```
+
+### Examples
+
+```
+  pb approve 01JABCDEF
+  pb approve 01JABCDEF --json
 ```
 
 ### Options

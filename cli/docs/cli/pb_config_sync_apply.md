@@ -1,10 +1,10 @@
 ## pb config sync apply
 
-Review the effective file configuration on this machine
+Apply the reviewed file configuration to this machine
 
 ### Synopsis
 
-Review the effective file configuration on this machine
+Apply the reviewed file configuration to this machine
 
 Read and resolve the machine configuration, preview its effective assignment, then apply the confirmed revision. Use --confirm with the displayed code in noninteractive use. Synced files are plaintext in Git, and prior content remains in repository history.
 
@@ -14,6 +14,13 @@ JSON output is supported with --json.
 
 ```
 pb config sync apply [flags]
+```
+
+### Examples
+
+```
+  pb config sync apply
+  pb config sync apply --confirm A1B2C3
 ```
 
 ### Options

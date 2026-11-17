@@ -13,7 +13,15 @@ Terminal sessions persist independently of a single connection and can be reatta
 JSON output is supported with --json.
 
 ```
-pb session close [flags]
+pb session close <environment> [<session>] [flags]
+```
+
+### Examples
+
+```
+  pb session close Studio sess-1234
+  pb session close Studio --all
+  pb session close Studio --all --confirm A1B2C3
 ```
 
 ### Options

@@ -20,7 +20,7 @@ pb auth logout [flags]
 
 ```
   -h, --help   help for logout
-      --json   
+      --json   print JSON
 ```
 
 ### Options inherited from parent commands

@@ -6,14 +6,14 @@ pb-session-delete - Delete a closed terminal session record
 
 
 .SH SYNOPSIS
-\fBpb session delete [flags]\fP
+\fBpb session delete <environment> [<session>] [flags]\fP
 
 
 .SH DESCRIPTION
 Delete a closed terminal session record
 
 .PP
-Delete a closed non-default terminal session record, or use --all for all such records in the environment. Close a running terminal first. With --all, run the command once to receive a short-lived confirmation token, then run the displayed command to proceed. the confirmation code confirms only single-session deletion.
+Delete a closed non-default terminal session record, or use --all for all such records in the environment. Close a running terminal first. With --all, run the command once to receive a short-lived confirmation token, then run the displayed command to proceed. The confirmation code confirms only single-session deletion.
 
 .PP
 Terminal sessions persist independently of a single connection and can be reattached after a disconnect. Sharing grants explicit access to a named session. Closing, deleting, and removing a participant have different effects; inspect the selected session before acting.
@@ -54,6 +54,13 @@ JSON output is supported with --json.
 .PP
 \fB--workspace\fP=""
 	resource workspace selector: personal or a team slug
+
+
+.SH EXAMPLE
+.EX
+  pb session delete Studio sess-1234
+  pb session delete Studio --all --confirm A1B2C3
+.EE
 
 
 .SH SEE ALSO

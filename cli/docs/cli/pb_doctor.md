@@ -4,14 +4,23 @@ Check Paperboat connectivity and readiness
 
 ### Synopsis
 
-Check Paperboat connectivity and readiness
-
-Check authentication, local runtime, and connectivity for the current setup or one selected machine. --repair performs supported local fixes; without it, the command reports findings and recovery guidance.
+Check authentication, the local runtime and connectivity for this machine, or for one
+machine you name. Without --repair the command only reports findings and how to recover; --repair
+performs the supported local fixes (on Windows it includes a privileged step). Exit status is 0
+when everything is healthy and 1 otherwise, so scripts should use --json and the exit status.
 
 JSON output is supported with --json.
 
 ```
 pb doctor [machine] [flags]
+```
+
+### Examples
+
+```
+  pb doctor
+  pb doctor studio --json
+  pb doctor --repair
 ```
 
 ### Options

@@ -20,7 +20,7 @@ pb config approve <environment> [flags]
 
 ```
   -h, --help   help for approve
-      --json   
+      --json   print JSON
 ```
 
 ### Options inherited from parent commands

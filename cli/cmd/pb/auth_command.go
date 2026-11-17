@@ -29,9 +29,9 @@ func authCobraCommand() *cobra.Command {
 		return actionHomeAccount(command)
 	}}
 	status := &cobra.Command{Use: "status", Short: "Show the active Paperboat account", Args: commandArgs(cobra.NoArgs), RunE: actionRun(authStatus)}
-	status.Flags().Bool("json", false, "")
+	status.Flags().Bool("json", false, "print JSON")
 	logout := &cobra.Command{Use: "logout", Short: "Revoke and remove the active client session", Args: commandArgs(cobra.NoArgs), RunE: actionRun(authLogout)}
-	logout.Flags().Bool("json", false, "")
+	logout.Flags().Bool("json", false, "print JSON")
 	auth.AddCommand(authLoginCommand(), status, logout, workspaceSwitchCommand())
 	return auth
 }

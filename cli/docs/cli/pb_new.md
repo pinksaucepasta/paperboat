@@ -12,13 +12,19 @@ This command does not support --json output; it rejects that mode before executi
 pb new [flags]
 ```
 
+### Examples
+
+```
+  pb new
+  pb new --name demo
+```
+
 ### Options
 
 ```
       --debug                          show the pb versions used by this terminal session
   -h, --help                           help for new
       --name string                    name for the fresh terminal session
-      --session string                 attach an existing terminal session by name or ID
       --status-bar string              status bar for this attach: auto, on, or off
       --status-bar-fullscreen string   status bar in full-screen applications: hide or show
       --status-bar-theme string        status bar theme: terminal, dark, light, or mono

@@ -4,14 +4,24 @@ Measure authenticated connectivity to a machine
 
 ### Synopsis
 
-Measure authenticated connectivity to a machine
-
-Send authenticated health exchanges to one enrolled machine. --count and --timeout bound the measurements; a reachable transport alone is not a claim that the target service is ready.
+Send authenticated health exchanges to one machine and print, per sample, the path used
+(direct, peer_relay, regional_relay or unknown) and the connect time, then a loss summary.
+--count sets the number of samples (1-100, default 4) and --timeout bounds each (default 10s,
+at most 1m). Exit status is 1 when every sample is lost. An offline machine is an error, not a
+lost sample. A reachable transport does not mean the service on the machine is ready.
 
 JSON output is supported with --json.
 
 ```
 pb ping <machine> [flags]
+```
+
+### Examples
+
+```
+  pb ping studio
+  pb ping studio --count 10 --timeout 5s
+  pb ping studio --json
 ```
 
 ### Options

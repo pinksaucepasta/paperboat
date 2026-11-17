@@ -6,7 +6,7 @@ pb-session-close - Close one or all terminal sessions
 
 
 .SH SYNOPSIS
-\fBpb session close [flags]\fP
+\fBpb session close <environment> [<session>] [flags]\fP
 
 
 .SH DESCRIPTION
@@ -54,6 +54,14 @@ JSON output is supported with --json.
 .PP
 \fB--workspace\fP=""
 	resource workspace selector: personal or a team slug
+
+
+.SH EXAMPLE
+.EX
+  pb session close Studio sess-1234
+  pb session close Studio --all
+  pb session close Studio --all --confirm A1B2C3
+.EE
 
 
 .SH SEE ALSO

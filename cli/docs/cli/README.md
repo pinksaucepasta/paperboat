@@ -16,7 +16,7 @@ Read the [CLI guide](../cli.md) for interactive use, scripting, installation of 
 | [pb api-token create](pb_api-token_create.md) | Create an API token and print its secret once |
 | [pb api-token list](pb_api-token_list.md) | List API tokens |
 | [pb api-token revoke](pb_api-token_revoke.md) | Revoke an API token |
-| [pb approve](pb_approve.md) | Approve a peer machine over gRPC IPC |
+| [pb approve](pb_approve.md) | Approve a peer machine for local access |
 | [pb auth](pb_auth.md) | Manage Paperboat sign-in |
 | [pb auth login](pb_auth_login.md) | Add this computer to your account, or sign in again, through browser approval |
 | [pb auth logout](pb_auth_logout.md) | Revoke and remove the active client session |
@@ -64,7 +64,7 @@ Read the [CLI guide](../cli.md) for interactive use, scripting, installation of 
 | [pb config status-bar set](pb_config_status-bar_set.md) | Set a status-bar preference |
 | [pb config status-bar show](pb_config_status-bar_show.md) | Show the effective status-bar configuration |
 | [pb config sync](pb_config_sync.md) | Validate and apply this machine's configuration file |
-| [pb config sync apply](pb_config_sync_apply.md) | Review the effective file configuration on this machine |
+| [pb config sync apply](pb_config_sync_apply.md) | Apply the reviewed file configuration to this machine |
 | [pb config sync init](pb_config_sync_init.md) | Create an empty machine configuration without overwriting existing files |
 | [pb config sync path](pb_config_sync_path.md) | Show the authoritative machine configuration path |
 | [pb config sync validate](pb_config_sync_validate.md) | Review the effective file configuration on this machine |
@@ -185,7 +185,7 @@ Read the [CLI guide](../cli.md) for interactive use, scripting, installation of 
 | [pb relay](pb_relay.md) | Inspect hosted and self-hosted relays |
 | [pb relay list](pb_relay_list.md) | List hosted and self-hosted relays |
 | [pb reset](pb_reset.md) | Remove the current Paperboat setup before fresh enrollment |
-| [pb resolve](pb_resolve.md) | Resolve a peer machine IP, port forwardings over gRPC IPC |
+| [pb resolve](pb_resolve.md) | Resolve a peer machine's loopback address and forwarded ports |
 | [pb rsync](pb_rsync.md) | Run rsync with Paperboat machine resolution |
 | [pb scp](pb_scp.md) | Run scp with Paperboat machine resolution |
 | [pb send](pb_send.md) | Send files or folders to a machine's Paperboat Inbox |

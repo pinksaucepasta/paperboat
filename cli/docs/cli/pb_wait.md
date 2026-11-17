@@ -4,14 +4,25 @@ Wait for a machine readiness condition
 
 ### Synopsis
 
-Wait for a machine readiness condition
+Wait until a machine satisfies a readiness condition chosen with --for. runtime waits for an
+eligible runtime that is ready or degraded. transport (the default) also probes an authenticated
+connection to the machine. ssh also waits for managed SSH to be ready. --timeout bounds the wait
+(up to 24h); mere connectivity is never treated as readiness.
 
-Wait for the selected machine to satisfy a named readiness condition from --for. --timeout bounds the wait, and an expired wait reports a failure instead of treating mere connectivity as readiness.
+Exit status: 0 ready, 203 timed out, 205 cancelled, 1 any other failure.
 
 JSON output is supported with --json.
 
 ```
 pb wait <machine> [flags]
+```
+
+### Examples
+
+```
+  pb wait studio
+  pb wait studio --for ssh --timeout 10m
+  pb wait studio --json
 ```
 
 ### Options

@@ -14,6 +14,13 @@ JSON output is supported with --json.
 pb install [flags]
 ```
 
+### Examples
+
+```
+  pb install
+  pb install --install-dir /usr/local/bin --json
+```
+
 ### Options
 
 ```

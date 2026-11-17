@@ -13,7 +13,13 @@ Terminal sessions persist independently of a single connection and can be reatta
 JSON output is supported with --json.
 
 ```
-pb session rename [flags]
+pb session rename <environment> <session> <new-name> [flags]
+```
+
+### Examples
+
+```
+  pb session rename Studio sess-1234 demo
 ```
 
 ### Options

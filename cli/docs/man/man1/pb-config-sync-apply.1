@@ -2,7 +2,7 @@
 .TH "PB-CONFIG-SYNC-APPLY" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
 
 .SH NAME
-pb-config-sync-apply - Review the effective file configuration on this machine
+pb-config-sync-apply - Apply the reviewed file configuration to this machine
 
 
 .SH SYNOPSIS
@@ -10,7 +10,7 @@ pb-config-sync-apply - Review the effective file configuration on this machine
 
 
 .SH DESCRIPTION
-Review the effective file configuration on this machine
+Apply the reviewed file configuration to this machine
 
 .PP
 Read and resolve the machine configuration, preview its effective assignment, then apply the confirmed revision. Use --confirm with the displayed code in noninteractive use. Synced files are plaintext in Git, and prior content remains in repository history.
@@ -54,6 +54,13 @@ JSON output is supported with --json.
 .PP
 \fB--workspace\fP=""
 	resource workspace selector: personal or a team slug
+
+
+.SH EXAMPLE
+.EX
+  pb config sync apply
+  pb config sync apply --confirm A1B2C3
+.EE
 
 
 .SH SEE ALSO

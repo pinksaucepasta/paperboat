@@ -4,11 +4,10 @@ Set a local configuration value
 
 ### Synopsis
 
-Set a local configuration value
-
-Write one supported local configuration key. The change affects this CLI installation; inspect pb config show afterward to confirm the effective value.
-
-Configuration commands distinguish local CLI settings from synchronized repository content. Inspect current state before changing it; synchronization reports conflicts instead of silently overwriting one side. The --json option provides structured output for scripts where supported.
+Set one local configuration key of this CLI installation. The keys are server (the
+Paperboat server URL: absolute http or https, without credentials, query or fragment) and
+ssh-target-port (1-65535, the port registered for this machine's managed SSH target). Check the
+effective value afterwards with pb config show; pb config unset server removes the setting.
 
 JSON output is supported with --json.
 
@@ -16,11 +15,19 @@ JSON output is supported with --json.
 pb config set <key> <value> [flags]
 ```
 
+### Examples
+
+```
+  pb config set server https://api.example.test
+  pb config set ssh-target-port 2222
+  pb config set server https://api.example.test --json
+```
+
 ### Options
 
 ```
   -h, --help   help for set
-      --json   
+      --json   print JSON
 ```
 
 ### Options inherited from parent commands

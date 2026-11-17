@@ -16,6 +16,14 @@ With --json, this command group lists its available commands.
 pb config sync [flags]
 ```
 
+### Examples
+
+```
+  pb config sync path
+  pb config sync validate
+  pb config sync apply
+```
+
 ### Options
 
 ```
@@ -35,7 +43,7 @@ pb config sync [flags]
 ### SEE ALSO
 
 * [pb config](pb_config.md)	 - Inspect the local CLI config
-* [pb config sync apply](pb_config_sync_apply.md)	 - Review the effective file configuration on this machine
+* [pb config sync apply](pb_config_sync_apply.md)	 - Apply the reviewed file configuration to this machine
 * [pb config sync init](pb_config_sync_init.md)	 - Create an empty machine configuration without overwriting existing files
 * [pb config sync path](pb_config_sync_path.md)	 - Show the authoritative machine configuration path
 * [pb config sync validate](pb_config_sync_validate.md)	 - Review the effective file configuration on this machine

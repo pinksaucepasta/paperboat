@@ -16,6 +16,13 @@ JSON output is supported with --json.
 pb config sync validate [flags]
 ```
 
+### Examples
+
+```
+  pb config sync validate
+  pb config sync validate --repository config-repo --json
+```
+
 ### Options
 
 ```

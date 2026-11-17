@@ -20,7 +20,7 @@ pb config team-default-unadopt <team> [flags]
 
 ```
   -h, --help   help for team-default-unadopt
-      --json   
+      --json   print JSON
 ```
 
 ### Options inherited from parent commands

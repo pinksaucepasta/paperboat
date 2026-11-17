@@ -20,7 +20,7 @@ pb config team-default-adopt <team> [flags]
 
 ```
   -h, --help   help for team-default-adopt
-      --json   
+      --json   print JSON
 ```
 
 ### Options inherited from parent commands

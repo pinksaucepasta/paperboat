@@ -20,7 +20,7 @@ pb config unset server [flags]
 
 ```
   -h, --help   help for unset
-      --json   
+      --json   print JSON
 ```
 
 ### Options inherited from parent commands

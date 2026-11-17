@@ -38,7 +38,7 @@ func rpcResolveCommand() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "resolve <query>",
-		Short: "Resolve a peer machine IP, port forwardings over gRPC IPC",
+		Short: "Resolve a peer machine's loopback address and forwarded ports",
 		Args:  commandArgs(cobra.ExactArgs(1)),
 		RunE: func(cmd *cobra.Command, args []string) (resultErr error) {
 			ctx, cancel := context.WithTimeout(cmd.Context(), 5*time.Second)
@@ -94,7 +94,7 @@ func rpcResolveCommand() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().BoolVar(&jsonOutput, "json", false, "output JSON format")
+	cmd.Flags().BoolVar(&jsonOutput, "json", false, "print JSON")
 	return cmd
 }
 
@@ -105,7 +105,7 @@ func rpcApproveCommand() *cobra.Command {
 	var revoke bool
 	cmd := &cobra.Command{
 		Use:   "approve <machine-id>",
-		Short: "Approve a peer machine over gRPC IPC",
+		Short: "Approve a peer machine for local access",
 		Args:  commandArgs(cobra.ExactArgs(1)),
 		RunE: func(cmd *cobra.Command, args []string) (resultErr error) {
 			ctx, cancel := context.WithTimeout(cmd.Context(), 5*time.Second)

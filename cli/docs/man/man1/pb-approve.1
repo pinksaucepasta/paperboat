@@ -2,7 +2,7 @@
 .TH "PB-APPROVE" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
 
 .SH NAME
-pb-approve - Approve a peer machine over gRPC IPC
+pb-approve - Approve a peer machine for local access
 
 
 .SH SYNOPSIS
@@ -10,7 +10,7 @@ pb-approve - Approve a peer machine over gRPC IPC
 
 
 .SH DESCRIPTION
-Approve a peer machine over gRPC IPC
+Approve a peer machine for local access
 
 .PP
 Approve an exact peer machine ID for local access. Inspect the ID before approving an unfamiliar peer. Withdrawing a machine is \fBpb machine revoke\fR, which asks for confirmation; pb approve never revokes.
@@ -43,6 +43,13 @@ JSON output is supported with --json.
 .PP
 \fB--workspace\fP=""
 	resource workspace selector: personal or a team slug
+
+
+.SH EXAMPLE
+.EX
+  pb approve 01JABCDEF
+  pb approve 01JABCDEF --json
+.EE
 
 
 .SH SEE ALSO

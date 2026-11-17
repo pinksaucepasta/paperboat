@@ -6,7 +6,7 @@ pb-session-rename - Rename a terminal session
 
 
 .SH SYNOPSIS
-\fBpb session rename [flags]\fP
+\fBpb session rename <environment> <session> <new-name> [flags]\fP
 
 
 .SH DESCRIPTION
@@ -46,6 +46,12 @@ JSON output is supported with --json.
 .PP
 \fB--workspace\fP=""
 	resource workspace selector: personal or a team slug
+
+
+.SH EXAMPLE
+.EX
+  pb session rename Studio sess-1234 demo
+.EE
 
 
 .SH SEE ALSO

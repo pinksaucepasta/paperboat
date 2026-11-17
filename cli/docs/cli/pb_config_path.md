@@ -20,7 +20,7 @@ pb config path [flags]
 
 ```
   -h, --help   help for path
-      --json   
+      --json   print JSON
 ```
 
 ### Options inherited from parent commands

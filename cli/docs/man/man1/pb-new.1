@@ -29,10 +29,6 @@ This command does not support --json output; it rejects that mode before executi
 	name for the fresh terminal session
 
 .PP
-\fB--session\fP=""
-	attach an existing terminal session by name or ID
-
-.PP
 \fB--status-bar\fP=""
 	status bar for this attach: auto, on, or off
 
@@ -64,6 +60,13 @@ This command does not support --json output; it rejects that mode before executi
 .PP
 \fB--workspace\fP=""
 	resource workspace selector: personal or a team slug
+
+
+.SH EXAMPLE
+.EX
+  pb new
+  pb new --name demo
+.EE
 
 
 .SH SEE ALSO

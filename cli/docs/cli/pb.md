@@ -66,7 +66,7 @@ pb [environment] [new] [flags]
 * [pb access](pb_access.md)	 - Open authenticated private access
 * [pb account](pb_account.md)	 - Manage your Paperboat account
 * [pb api-token](pb_api-token.md)	 - Create, list and revoke workspace API tokens
-* [pb approve](pb_approve.md)	 - Approve a peer machine over gRPC IPC
+* [pb approve](pb_approve.md)	 - Approve a peer machine for local access
 * [pb auth](pb_auth.md)	 - Manage Paperboat sign-in
 * [pb bugreport](pb_bugreport.md)	 - Create a redacted Paperboat diagnostic bundle
 * [pb completion](pb_completion.md)	 - Generate the autocompletion script for the specified shell
@@ -94,7 +94,7 @@ pb [environment] [new] [flags]
 * [pb recordings](pb_recordings.md)	 - List and replay terminal recordings
 * [pb relay](pb_relay.md)	 - Inspect hosted and self-hosted relays
 * [pb reset](pb_reset.md)	 - Remove the current Paperboat setup before fresh enrollment
-* [pb resolve](pb_resolve.md)	 - Resolve a peer machine IP, port forwardings over gRPC IPC
+* [pb resolve](pb_resolve.md)	 - Resolve a peer machine's loopback address and forwarded ports
 * [pb rsync](pb_rsync.md)	 - Run rsync with Paperboat machine resolution
 * [pb scp](pb_scp.md)	 - Run scp with Paperboat machine resolution
 * [pb send](pb_send.md)	 - Send files or folders to a machine's Paperboat Inbox

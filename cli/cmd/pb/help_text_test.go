@@ -48,7 +48,7 @@ func TestHelpTextExamplesParse(t *testing.T) {
 					continue
 				}
 				line, _, _ = strings.Cut(line, " > ") // a shell redirect is not an argument
-				fields := strings.Fields(strings.NewReplacer("'", "").Replace(line))
+				fields := exampleFields(line)
 				command, rest, err := root.Find(fields[1:])
 				if err != nil || command == root {
 					t.Errorf("%s: example %q does not reach a command (%v)", path, line, err)
@@ -72,4 +72,34 @@ func TestHelpTextExamplesParse(t *testing.T) {
 			}
 		}
 	}
+}
+
+// exampleFields splits an example line the way a shell would for plain words and quotes.
+func exampleFields(line string) []string {
+	var fields []string
+	var word strings.Builder
+	var quote rune
+	started := false
+	for _, r := range line {
+		switch {
+		case quote != 0 && r == quote:
+			quote = 0
+		case quote != 0:
+			word.WriteRune(r)
+		case r == '"' || r == '\'':
+			quote, started = r, true
+		case r == ' ':
+			if started || word.Len() > 0 {
+				fields = append(fields, word.String())
+				word.Reset()
+				started = false
+			}
+		default:
+			word.WriteRune(r)
+		}
+	}
+	if started || word.Len() > 0 {
+		fields = append(fields, word.String())
+	}
+	return fields
 }
