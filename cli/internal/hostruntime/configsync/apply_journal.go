@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 )
 
 var ErrApplyJournalInvalid = errors.New("invalid config apply journal")
@@ -238,31 +237,6 @@ func restoreApplyJournalEntry(homeRoot string, entry applyJournalEntry, mappings
 		return ErrApplyJournalInvalid
 	}
 	return secureWriteFile(target, entry.Content, entry.Mode.Perm())
-}
-
-func ensurePrivateParent(root, parent string) error {
-	relative, err := filepath.Rel(root, parent)
-	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
-		return ErrApplyJournalInvalid
-	}
-	current := root
-	for _, part := range strings.Split(relative, string(filepath.Separator)) {
-		if part == "" || part == "." {
-			continue
-		}
-		current = filepath.Join(current, part)
-		info, statErr := os.Lstat(current)
-		if errors.Is(statErr, os.ErrNotExist) {
-			if mkdirErr := os.Mkdir(current, 0o700); mkdirErr != nil {
-				return mkdirErr
-			}
-			continue
-		}
-		if statErr != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-			return errors.Join(ErrApplyJournalInvalid, statErr)
-		}
-	}
-	return nil
 }
 
 func deduplicatePaths(paths []string) []string {

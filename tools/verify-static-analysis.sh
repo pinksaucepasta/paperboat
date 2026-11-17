@@ -14,7 +14,7 @@ targets='linux/amd64 darwin/arm64 windows/amd64'
 deadcode_filter=
 wasm_packages= # packages built only for js/wasm: their unused code must be unused there too
 case $module in
-cli) deadcode_packages='./cmd/pb ./internal/...'; wasm_packages='./cmd/browserterminal-wasm ./cmd/environmentvault-wasm' ;;
+cli) deadcode_packages='./cmd/... ./internal/... ./tools/...' ; wasm_packages='./cmd/browserterminal-wasm ./cmd/environmentvault-wasm' ;; # tools/metric-schema calls telemetry.HistogramBuckets
 server) deadcode_packages='./cmd/... ./internal/... ./tools/...'; targets=linux/amd64 ;;
 edge) deadcode_packages='./cmd/... ./internal/... ./tools/...'; targets=linux/amd64 ;;
 relay) deadcode_packages='./... github.com/pinksaucepasta/paperboat/helper/cmd/pbh'; deadcode_filter='^github.com/pinksaucepasta/paperboat/relay'; targets=linux/amd64 ;; # helper/cmd/pbh calls selfhost.RemoveLocal
@@ -76,7 +76,12 @@ if [ -n "$wasm_packages" ]; then
 else
 	cat "$work/unused" >>"$work/findings"
 fi
-if ls "$work"/deadcode.* >/dev/null 2>&1; then every_platform "$work"/deadcode.* >>"$work/findings"; fi
+if ls "$work"/deadcode.* >/dev/null 2>&1; then
+	# tools/deadcode-allow.txt names the unreachable symbols that must stay, each with its reason
+	every_platform "$work"/deadcode.* | awk -v module="$module" -v allow="$(dirname -- "$0")/deadcode-allow.txt" '
+		BEGIN { while ((getline line < allow) > 0) if (line !~ /^#/ && split(line, f, " ") >= 3 && f[1] == module) ok[f[2] " " f[3]] }
+		{ path = $1; sub(/:[0-9]+:[0-9]+:$/, "", path); name = $NF; if (!((path " " name) in ok)) print }' >>"$work/findings"
+fi
 if [ -s "$work/findings" ]; then
 	cat "$work/findings" >&2
 	exit 1

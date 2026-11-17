@@ -155,16 +155,16 @@ func (p NodePublic) Equal(b NodePublic) bool {
 	return p == b
 }
 
-func (lb *locoBackend) tailcatAddr() Addr {
-	lb.mu.Lock()
-	defer lb.mu.Unlock()
-	if lb.dm == nil || len(lb.dm.Regions) == 0 {
+func (b *locoBackend) tailcatAddr() Addr {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.dm == nil || len(b.dm.Regions) == 0 {
 		return "" // Live authority removal has no usable bootstrap descriptor.
 	}
 	var ci ConnInfo
-	ci.ServerPublic = NodePublic{lb.pub}
-	ci.ServerDiscoPublic = DiscoPublic{lb.discoPublic()}
-	for _, r := range lb.dm.Regions {
+	ci.ServerPublic = NodePublic{b.pub}
+	ci.ServerDiscoPublic = DiscoPublic{b.discoPublic()}
+	for _, r := range b.dm.Regions {
 		ci.Region = append(ci.Region, r)
 	}
 	return ci.Addr()
