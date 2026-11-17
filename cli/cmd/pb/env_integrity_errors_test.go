@@ -31,7 +31,7 @@ func (envIntegrityEmptyStore) Delete(string) error        { return nil }
 func TestENVDecodedIntegrityKeepsHelpfulPresentationAndOneFaultOwner(t *testing.T) {
 	const reference = "support_01234567-89ab-4def-8123-456789abcdef"
 	const canary = "PRIVATE-ENCRYPTED-INPUT"
-	state := api.PasswordVaultState{Issuer: "https://control.example.test", AccountID: "account_1", Generation: 1, DocumentID: environmente2ee.DocumentID{}.String(), Envelope: "!" + canary}
+	state := api.PasswordVaultHead{Issuer: "https://control.example.test", AccountID: "account_1", Generation: 1, DocumentID: environmente2ee.DocumentID{}.String(), Envelope: "!" + canary}
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("Content-Type", "application/json")

@@ -93,8 +93,8 @@ func TestBuiltWasmInteroperatesWithNativeCode(t *testing.T) {
 		t.Fatalf("native code rejected the wasm scope anchor: %v", err)
 	}
 	c := anchorDoc.Claims
-	anchor := scopeState{WorkspaceID: c.WorkspaceID, WriterPublic: encoded(protection.WriterPublic), Kind: c.OwnerKind, Owner: c.OwnerID, Machine: c.MachineID, Epoch: c.KeyEpoch, Revision: c.Revision, DocumentID: digest(anchorDoc.ID), Envelope: anchorRaw}
-	scope := map[string]any{"workspace_id": anchor.WorkspaceID, "writer_public": anchor.WriterPublic, "owner_kind": anchor.Kind, "owner_id": anchor.Owner, "machine_id": anchor.Machine, "key_epoch": anchor.Epoch, "revision": anchor.Revision, "document_id": anchor.DocumentID, "envelope": anchor.Envelope}
+	anchor := scopeState{WorkspaceID: c.WorkspaceID, WriterPublic: encoded(protection.WriterPublic), OwnerKind: c.OwnerKind, OwnerID: c.OwnerID, MachineID: c.MachineID, KeyEpoch: c.KeyEpoch, Revision: c.Revision, DocumentID: digest(anchorDoc.ID), Envelope: anchorRaw}
+	scope := map[string]any{"workspace_id": anchor.WorkspaceID, "writer_public": anchor.WriterPublic, "owner_kind": anchor.OwnerKind, "owner_id": anchor.OwnerID, "machine_id": anchor.MachineID, "key_epoch": anchor.KeyEpoch, "revision": anchor.Revision, "document_id": anchor.DocumentID, "envelope": anchor.Envelope}
 	written := peer.call(map[string]any{"action": "record-write", "vault": vault, "scope": scope, "workspace_id": "personal", "kind": "personal", "owner": v.Account, "machine": "", "name": "WASM_NAME", "value": "wasm value"})
 	recordRaw, _ := decode(written["envelope"].(string))
 	record, err := env.ParseVaultRecord(recordRaw, protection.WriterPublic)

@@ -169,9 +169,9 @@ func b64Vault(raw []byte) string { return base64.RawURLEncoding.EncodeToString(r
 
 func TestVaultTeamRotationAuthorization(t *testing.T) {
 	team := VaultTeamState{OwnerAccount: "owner", KeyEpoch: 2, Members: []VaultTeamMember{
-		{AccountID: "owner", Role: "owner", Active: true, GrantEpoch: 2, ENVPermission: "write"},
-		{AccountID: "admin", Role: "admin", Active: true, GrantEpoch: 2, ENVPermission: "write"},
-		{AccountID: "member", Role: "member", Active: true, GrantEpoch: 2, ENVPermission: "write"},
+		{AccountID: "owner", Role: "owner", Active: true, GrantEpoch: 2, EnvPermission: "write"},
+		{AccountID: "admin", Role: "admin", Active: true, GrantEpoch: 2, EnvPermission: "write"},
+		{AccountID: "member", Role: "member", Active: true, GrantEpoch: 2, EnvPermission: "write"},
 		{AccountID: "pending", Role: "admin", Active: true},
 		{AccountID: "removed", Role: "admin", GrantEpoch: 2},
 		{AccountID: "revoked-member", Role: "member"},

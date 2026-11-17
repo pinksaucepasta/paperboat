@@ -165,7 +165,7 @@ func readVaultTeamTx(ctx context.Context, tx *db.Tx, team string) (VaultTeamStat
 	}
 	for rows.Next() {
 		var m VaultTeamMember
-		if err := rows.Scan(&m.AccountID, &m.MembershipGeneration, &m.Role, &m.Active, &m.GrantEpoch, &m.ENVPermission); err != nil {
+		if err := rows.Scan(&m.AccountID, &m.MembershipGeneration, &m.Role, &m.Active, &m.GrantEpoch, &m.EnvPermission); err != nil {
 			rows.Close()
 			return out, err
 		}
@@ -193,7 +193,7 @@ func vaultMember(team VaultTeamState, account string) (VaultTeamMember, bool) {
 }
 func authorizedVaultMember(team VaultTeamState, account string) bool {
 	m, ok := vaultMember(team, account)
-	return ok && m.Active && m.GrantEpoch == team.KeyEpoch && (m.ENVPermission == "read" || m.ENVPermission == "write")
+	return ok && m.Active && m.GrantEpoch == team.KeyEpoch && (m.EnvPermission == "read" || m.EnvPermission == "write")
 }
 func authorizeVaultScopeTx(ctx context.Context, tx *db.Tx, account, kind, owner, machine string) (uint64, error) {
 	if !validIdentifier(account) || !validIdentifier(owner) || (machine != "" && !validIdentifier(machine)) {
@@ -291,7 +291,7 @@ func (s *Service) PutVaultScope(ctx context.Context, account, workspace, kind, o
 				return err
 			}
 			member, ok := vaultMember(team, account)
-			if !ok || !member.Active || member.ENVPermission != "write" {
+			if !ok || !member.Active || member.EnvPermission != "write" {
 				return ErrKeyAuthorizationRequired
 			}
 		}
@@ -445,7 +445,7 @@ func (s *Service) GrantVaultTeamMember(ctx context.Context, account, teamID stri
 		}
 		if replay {
 			member, ok := vaultMember(team, request.AccountID)
-			if !ok || !member.Active || (member.ENVPermission != "read" && member.ENVPermission != "write") {
+			if !ok || !member.Active || (member.EnvPermission != "read" && member.EnvPermission != "write") {
 				return ErrKeyAuthorizationRequired
 			}
 			if team.Generation != out.Generation || member.MembershipGeneration != request.ExpectedMembershipGeneration {
@@ -460,7 +460,7 @@ func (s *Service) GrantVaultTeamMember(ctx context.Context, account, teamID stri
 		if (!exists && request.ExpectedMembershipGeneration != 0) || (exists && member.MembershipGeneration != request.ExpectedMembershipGeneration) {
 			return ErrVersionConflict
 		}
-		if !exists || !member.Active || (member.ENVPermission != "read" && member.ENVPermission != "write") {
+		if !exists || !member.Active || (member.EnvPermission != "read" && member.EnvPermission != "write") {
 			return ErrKeyAuthorizationRequired
 		}
 		generation := member.MembershipGeneration
@@ -569,7 +569,7 @@ func (s *Service) RotateVaultTeam(ctx context.Context, account, teamID string, r
 		}
 		remaining := map[string]VaultTeamMember{}
 		for _, m := range team.Members {
-			if m.Active && (m.ENVPermission == "read" || m.ENVPermission == "write") && !removed[m.AccountID] {
+			if m.Active && (m.EnvPermission == "read" || m.EnvPermission == "write") && !removed[m.AccountID] {
 				remaining[m.AccountID] = m
 			}
 		}

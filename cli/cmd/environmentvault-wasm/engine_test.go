@@ -38,17 +38,17 @@ func createAnchor(t *testing.T, e *engine, v vaultState, workspace, kind, owner,
 		t.Fatal(err)
 	}
 	c := scope.Claims
-	return scopeState{WorkspaceID: c.WorkspaceID, WriterPublic: encoded(protection.WriterPublic), Kind: c.OwnerKind, Owner: c.OwnerID, Machine: c.MachineID, Epoch: c.KeyEpoch, Revision: c.Revision, DocumentID: digest(scope.ID), Envelope: encoded(raw)}
+	return scopeState{WorkspaceID: c.WorkspaceID, WriterPublic: encoded(protection.WriterPublic), OwnerKind: c.OwnerKind, OwnerID: c.OwnerID, MachineID: c.MachineID, KeyEpoch: c.KeyEpoch, Revision: c.Revision, DocumentID: digest(scope.ID), Envelope: encoded(raw)}
 }
 
 func writeRecord(t *testing.T, e *engine, v vaultState, anchor scopeState, name, value string, previous *recordState) recordState {
 	t.Helper()
-	idResult, err := e.run(context.Background(), request{Action: "record-id", Vault: v, WorkspaceID: anchor.WorkspaceID, Kind: anchor.Kind, Owner: anchor.Owner, Machine: anchor.Machine, Name: name})
+	idResult, err := e.run(context.Background(), request{Action: "record-id", Vault: v, WorkspaceID: anchor.WorkspaceID, Kind: anchor.OwnerKind, Owner: anchor.OwnerID, Machine: anchor.MachineID, Name: name})
 	if err != nil {
 		t.Fatal(err)
 	}
 	id := idResult.(map[string]string)["record_id"]
-	out, err := e.run(context.Background(), request{Action: "record-write", Vault: v, Scope: &anchor, WorkspaceID: anchor.WorkspaceID, Kind: anchor.Kind, Owner: anchor.Owner, Machine: anchor.Machine, Name: name, Value: value, Record: previous})
+	out, err := e.run(context.Background(), request{Action: "record-write", Vault: v, Scope: &anchor, WorkspaceID: anchor.WorkspaceID, Kind: anchor.OwnerKind, Owner: anchor.OwnerID, Machine: anchor.MachineID, Name: name, Value: value, Record: previous})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -230,15 +230,15 @@ func TestBrowserTeamMembershipAndNativeScope(t *testing.T) {
 		t.Fatal(err)
 	}
 	team.Epoch = 1
-	team.Members = []teamMember{{Account: v.Account, Membership: 1, Role: "owner", Active: true, Permission: "write", GrantEpoch: 1}}
-	team.Scope = scopeState{WorkspaceID: team.ID, Kind: "team", Owner: team.ID, Epoch: 1, Revision: 1, DocumentID: digest(scope.ID), Envelope: encoded(raw), WriterPublic: encoded(protection.WriterPublic)}
+	team.Members = []teamMember{{AccountID: v.Account, MembershipGeneration: 1, Role: "owner", Active: true, EnvPermission: "write", GrantEpoch: 1}}
+	team.Scope = scopeState{WorkspaceID: team.ID, OwnerKind: "team", OwnerID: team.ID, KeyEpoch: 1, Revision: 1, DocumentID: digest(scope.ID), Envelope: encoded(raw), WriterPublic: encoded(protection.WriterPublic)}
 	teamRecord := writeRecord(t, e, next, team.Scope, "TEAM_TOKEN", "private", nil)
-	team.Members[0].Membership = 2
+	team.Members[0].MembershipGeneration = 2
 	if _, _, err = e.teamKey(team, "read"); err == nil {
 		t.Fatal("stale membership accepted")
 	}
-	team.Members[0].Membership = 1
-	team.Members[0].Permission = "read"
+	team.Members[0].MembershipGeneration = 1
+	team.Members[0].EnvPermission = "read"
 	if _, _, err = e.teamKey(team, "write"); err == nil {
 		t.Fatal("read-only mutation accepted")
 	}
@@ -252,7 +252,7 @@ func TestBrowserResetRejectsInvalidInventoryAndReplacesKeys(t *testing.T) {
 	defer e.clear()
 	oldKey := append([]byte(nil), e.keys.PersonalKey...)
 	defer clear(oldKey)
-	bad := scopeState{WorkspaceID: "personal", Kind: "personal", Owner: "another-account", Epoch: 1, Revision: 1}
+	bad := scopeState{WorkspaceID: "personal", OwnerKind: "personal", OwnerID: "another-account", KeyEpoch: 1, Revision: 1}
 	if _, err := e.run(ctx, request{Action: "reset-vault", Vault: v, Password: "new password", KeyEpoch: 1, Inventory: []scopeState{bad}}); err == nil {
 		t.Fatal("foreign reset scope accepted")
 	}
@@ -379,8 +379,8 @@ func TestBrowserTeamGrantAcceptAndRotation(t *testing.T) {
 	}
 	team.Epoch = 1
 	team.Generation = 2
-	team.Members = []teamMember{{Account: a.Account, Membership: 1, Role: "owner", Active: true, Permission: "write", GrantEpoch: 1}, {Account: b.Account, Membership: 1, Role: "member", Active: true, Permission: "read", GrantEpoch: 1}}
-	team.Scope = scopeState{WorkspaceID: team.ID, Kind: "team", Owner: team.ID, Epoch: 1, Revision: 1, DocumentID: digest(scope.ID), Envelope: encoded(raw), WriterPublic: encoded(writer.WriterPublic)}
+	team.Members = []teamMember{{AccountID: a.Account, MembershipGeneration: 1, Role: "owner", Active: true, EnvPermission: "write", GrantEpoch: 1}, {AccountID: b.Account, MembershipGeneration: 1, Role: "member", Active: true, EnvPermission: "read", GrantEpoch: 1}}
+	team.Scope = scopeState{WorkspaceID: team.ID, OwnerKind: "team", OwnerID: team.ID, KeyEpoch: 1, Revision: 1, DocumentID: digest(scope.ID), Envelope: encoded(raw), WriterPublic: encoded(writer.WriterPublic)}
 	teamRecord := writeRecord(t, alice, a, team.Scope, "SHARED_TOKEN", "shared value", nil)
 	teamRecord.Sequence = 1
 	team.RecordSequence = 1
@@ -583,13 +583,13 @@ func TestBrowserScopeConflictReconciliationVerifiesSignedHeads(t *testing.T) {
 		t.Fatal(err)
 	}
 	epoch := candidate
-	epoch.Epoch = claims.KeyEpoch
+	epoch.KeyEpoch = claims.KeyEpoch
 	epoch.Revision = 1
 	epoch.DocumentID = digest(document.ID)
 	epoch.Envelope = encoded(document.Raw)
 	check(epoch, "superseded")
 	invalid := competing
-	invalid.Owner = "other-account"
+	invalid.OwnerID = "other-account"
 	check(invalid, "invalid")
 	invalid = competing
 	raw, _ := decode(invalid.Envelope)

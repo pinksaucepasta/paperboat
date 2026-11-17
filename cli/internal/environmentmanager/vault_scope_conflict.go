@@ -80,7 +80,7 @@ func (v PasswordVault) reconcileScopeConflict(ctx context.Context, local *config
 	if err != nil {
 		return pending(err)
 	}
-	current, err := currentState.Decode()
+	current, err := api.DecodeVaultScope(currentState)
 	if err != nil {
 		return pending(ErrIntegrity)
 	}

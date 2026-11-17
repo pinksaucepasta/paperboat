@@ -153,7 +153,7 @@ func TestSingleRecordMutationSkipsSnapshotAndResumesExactCiphertext(t *testing.T
 		t.Fatal(err)
 	}
 	defer keys.Clear()
-	scope, err := anchor.Decode()
+	scope, err := api.DecodeVaultScope(anchor)
 	if err != nil {
 		t.Fatal(err)
 	}

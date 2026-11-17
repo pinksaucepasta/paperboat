@@ -101,9 +101,9 @@ func TestHostLayerRefusesForgedOrUnboundRecipients(t *testing.T) {
 
 func TestTeamLayerRecipientMustBeActiveReader(t *testing.T) {
 	team := &teamState{ID: "team-one", Members: []teamMember{
-		{Account: "reader", Active: true, Permission: "read"},
-		{Account: "gone", Active: false, Permission: "write"},
-		{Account: "none", Active: true, Permission: ""},
+		{AccountID: "reader", Active: true, EnvPermission: "read"},
+		{AccountID: "gone", Active: false, EnvPermission: "write"},
+		{AccountID: "none", Active: true, EnvPermission: ""},
 	}}
 	claims := env.VaultScopeClaims{OwnerKind: "team", OwnerID: "team-one", WorkspaceID: "team-one"}
 	for account, ok := range map[string]bool{"reader": true, "gone": false, "none": false, "stranger": false} {

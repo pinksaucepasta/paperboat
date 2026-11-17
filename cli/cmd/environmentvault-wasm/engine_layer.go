@@ -4,18 +4,10 @@ import (
 	"context"
 	"errors"
 	env "github.com/pinksaucepasta/paperboat/cli/internal/environmente2ee"
+	"github.com/pinksaucepasta/paperboat/shared/vaultprotocol"
 )
 
-type layerRecipient struct {
-	RecipientAccount       string `json:"recipient_account"`
-	MachineID              string `json:"machine_id"`
-	InstallationGeneration uint64 `json:"installation_generation"`
-	HostKeyGeneration      uint64 `json:"host_key_generation"`
-	HostPublic             string `json:"host_public"`
-	DeliveryGeneration     uint64 `json:"delivery_generation"`
-	DocumentID             string `json:"document_id"`
-	FenceGeneration        uint64 `json:"fence_generation"`
-}
+type layerRecipient = vaultprotocol.VaultLayerRecipient
 
 // hostLayer encrypts exactly one authorized source for one enrolled recipient.
 // It does not combine workspaces, select variable names, or grant host access.

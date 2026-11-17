@@ -30,7 +30,7 @@ func TestHeadlessVaultUnlockSurvivesCLIExitUntilLock(t *testing.T) {
 	t.Setenv("DBUS_SESSION_BUS_ADDRESS", "")
 	t.Setenv("XDG_STATE_HOME", root)
 	t.Setenv("XDG_RUNTIME_DIR", root)
-	var vault api.PasswordVaultState
+	var vault api.PasswordVaultHead
 	var remoteMu sync.Mutex
 	control := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		remoteMu.Lock()
@@ -63,7 +63,7 @@ func TestHeadlessVaultUnlockSurvivesCLIExitUntilLock(t *testing.T) {
 				w.WriteHeader(400)
 				return
 			}
-			vault = api.PasswordVaultState{Issuer: head.Issuer, AccountID: head.AccountID, Generation: head.Generation, DocumentID: head.ID.String(), Envelope: in.Envelope}
+			vault = api.PasswordVaultHead{Issuer: head.Issuer, AccountID: head.AccountID, Generation: head.Generation, DocumentID: head.ID.String(), Envelope: in.Envelope}
 		}
 		if vault.DocumentID == "" {
 			w.WriteHeader(404)

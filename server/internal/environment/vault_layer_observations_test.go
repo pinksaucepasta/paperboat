@@ -19,7 +19,7 @@ func layerObservationFixture() (VaultLayerObservation, VaultLayerDelivery) {
 }
 func TestLayerObservationRequiresExactCurrentBinding(t *testing.T) {
 	o, d := layerObservationFixture()
-	if !o.Valid() || !layerObservationMatches(o, d) {
+	if !validLayerObservation(o) || !layerObservationMatches(o, d) {
 		t.Fatal("current applied report rejected")
 	}
 	for _, which := range []string{"workspace", "owner", "source_machine", "delivery", "document", "fence", "recipient", "pending"} {
@@ -54,7 +54,7 @@ func TestLayerObservationRejectsUnboundedOrUntrustedFailureState(t *testing.T) {
 	code := "environment_projection_invalid"
 	o.State = "failed"
 	o.ErrorCode = &code
-	if !o.Valid() {
+	if !validLayerObservation(o) {
 		t.Fatal("typed failure rejected")
 	}
 	for _, which := range []string{"state", "error", "applied_error", "zero_sequence", "overflow", "document", "timestamp", "coordinate"} {
@@ -80,7 +80,7 @@ func TestLayerObservationRejectsUnboundedOrUntrustedFailureState(t *testing.T) {
 				changed.OwnerKind = "team"
 				changed.WorkspaceID = "personal"
 			}
-			if changed.Valid() {
+			if validLayerObservation(changed) {
 				t.Fatal("invalid metadata accepted")
 			}
 		})

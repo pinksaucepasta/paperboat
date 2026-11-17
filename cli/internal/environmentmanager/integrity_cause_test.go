@@ -35,7 +35,7 @@ func TestENVDecodeIntegrityRetainsParserCauseAndRecovers(t *testing.T) {
 		t.Fatal("vault fixture sealing failed")
 	}
 	defer clear(raw)
-	validVault := api.PasswordVaultState{Issuer: head.Issuer, AccountID: head.AccountID, Generation: head.Generation, DocumentID: head.ID.String(), Envelope: base64.RawURLEncoding.EncodeToString(raw)}
+	validVault := api.PasswordVaultHead{Issuer: head.Issuer, AccountID: head.AccountID, Generation: head.Generation, DocumentID: head.ID.String(), Envelope: base64.RawURLEncoding.EncodeToString(raw)}
 	sealed, err := environmente2ee.SealVaultScope(t.Context(), environmente2ee.VaultScopeClaims{WorkspaceID: "personal", Issuer: head.Issuer, OwnerKind: "personal", OwnerID: head.AccountID, KeyEpoch: 1, Revision: 1, Previous: make([]byte, 32), WriterAccount: head.AccountID, WriterVaultGeneration: 1}, keys.PersonalKey, keys.WriterSeed, map[string][]byte{})
 	if err != nil {
 		t.Fatal("scope fixture sealing failed")
@@ -132,7 +132,7 @@ func TestENVDecodeIntegrityRetainsParserCauseAndRecovers(t *testing.T) {
 
 func TestENVIntegrityOwnershipDoesNotAuthorizeMixedFailure(t *testing.T) {
 	state := api.VaultScopeState{Envelope: "!"}
-	_, decodeErr := state.Decode()
+	_, decodeErr := api.DecodeVaultScope(state)
 	owned := wrapVaultIntegrityFailure(decodeErr)
 	if !OwnsIntegrityFailure(owned) || !errors.Is(owned, ErrIntegrity) {
 		t.Fatal("known memory decode not owned")

@@ -27,8 +27,8 @@ type personalRotationControl struct {
 	records    map[string]api.VaultRecordsResult
 }
 
-func (c *personalRotationControl) GetVaultPersonalScopes(context.Context) (api.VaultPersonalInventory, error) {
-	out := api.VaultPersonalInventory{KeyEpoch: c.epoch, Scopes: []api.VaultScopeState{}}
+func (c *personalRotationControl) GetVaultPersonalScopes(context.Context) (api.VaultPersonalScopes, error) {
+	out := api.VaultPersonalScopes{KeyEpoch: c.epoch, Scopes: []api.VaultScopeState{}}
 	for _, scope := range c.scopes {
 		if scope.OwnerKind == "personal" {
 			scope.Envelope = ""
@@ -74,29 +74,29 @@ func (c *personalRotationControl) StageVaultPersonalScope(_ context.Context, op 
 	}
 	return api.VaultScopeDocument{WorkspaceID: in.WorkspaceID, MachineID: in.MachineID, DocumentID: scope.DocumentID}, nil
 }
-func (c *personalRotationControl) RotateVaultPersonal(_ context.Context, in api.VaultPersonalRotate) (api.PasswordVaultState, error) {
+func (c *personalRotationControl) RotateVaultPersonal(_ context.Context, in api.VaultPersonalRotate) (api.PasswordVaultHead, error) {
 	c.finalCalls = append(c.finalCalls, in)
 	if c.state.Envelope == in.VaultEnvelope {
 		return c.state, nil
 	}
 	if in.ExpectedVaultDocumentID != c.state.DocumentID || len(in.ScopeDocuments) != len(c.stages) {
-		return api.PasswordVaultState{}, errors.New("incorrect full inventory")
+		return api.PasswordVaultHead{}, errors.New("incorrect full inventory")
 	}
 	for _, ref := range in.ScopeDocuments {
 		stage, ok := c.stages[ref.MachineID]
 		if !ok {
-			return api.PasswordVaultState{}, errors.New("unstaged scope")
+			return api.PasswordVaultHead{}, errors.New("unstaged scope")
 		}
 		scope, err := c.scopeState("personal", c.account, ref.MachineID, stage.Envelope)
 		if err != nil || scope.DocumentID != ref.DocumentID {
-			return api.PasswordVaultState{}, errors.New("wrong scope digest")
+			return api.PasswordVaultHead{}, errors.New("wrong scope digest")
 		}
 		c.scopes[scopeControlKey("personal", c.account, ref.MachineID)] = scope
 		result := api.VaultRecordsResult{Sequence: 1, Records: []api.VaultRecordState{}}
 		for _, envelope := range stage.Records.Envelopes {
 			state, err := rotationRecordState(envelope, c.writerPublic, 1)
 			if err != nil {
-				return api.PasswordVaultState{}, err
+				return api.PasswordVaultHead{}, err
 			}
 			result.Records = append(result.Records, state)
 		}
@@ -104,16 +104,16 @@ func (c *personalRotationControl) RotateVaultPersonal(_ context.Context, in api.
 	}
 	raw, err := decodeVaultTestEnvelope(in.VaultEnvelope)
 	if err != nil {
-		return api.PasswordVaultState{}, err
+		return api.PasswordVaultHead{}, err
 	}
 	c.state, err = passwordVaultState(raw)
 	if err != nil {
-		return api.PasswordVaultState{}, err
+		return api.PasswordVaultHead{}, err
 	}
 	c.epoch++
 	if c.failFinal {
 		c.failFinal = false
-		return api.PasswordVaultState{}, errors.New("lost final response")
+		return api.PasswordVaultHead{}, errors.New("lost final response")
 	}
 	return c.state, nil
 }
@@ -187,7 +187,7 @@ func TestPersonalRotationResumesBoundedUploadsAfterLockAndLostCommit(t *testing.
 		t.Fatal("final retry changed request")
 	}
 	for _, state := range control.scopes {
-		scope, err := state.Decode()
+		scope, err := api.DecodeVaultScope(state)
 		if err != nil {
 			t.Fatal(err)
 		}

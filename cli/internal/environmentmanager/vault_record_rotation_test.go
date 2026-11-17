@@ -186,7 +186,7 @@ func TestTeamRecordRotationPreservesLiveValuesAndTotalLossSkipsCiphertext(t *tes
 				t.Fatal("vault successor not committed")
 			}
 			out := control.teams[team]
-			anchor, err := out.Scope.Decode()
+			anchor, err := api.DecodeVaultScope(out.Scope)
 			if err != nil {
 				t.Fatal(err)
 			}

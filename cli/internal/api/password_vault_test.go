@@ -19,7 +19,7 @@ func TestPasswordVaultHTTPBoundary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var state PasswordVaultState
+	var state PasswordVaultHead
 	if err := json.Unmarshal(fixture, &state); err != nil {
 		t.Fatal(err)
 	}
@@ -70,18 +70,18 @@ func TestPasswordVaultResetHTTPBoundary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var state PasswordVaultState
+	var state PasswordVaultHead
 	if err := json.Unmarshal(fixture, &state); err != nil {
 		t.Fatal(err)
 	}
-	input := VaultReset{OperationID: "reset_contract_operation", ExpectedVaultDocumentID: state.DocumentID, VaultEnvelope: state.Envelope, ScopeEnvelopes: []string{}, ConfirmTotalLoss: true}
+	input := VaultPersonalReset{OperationID: "reset_contract_operation", ExpectedVaultDocumentID: state.DocumentID, VaultEnvelope: state.Envelope, ScopeEnvelopes: []string{}, ConfirmTotalLoss: true}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost || r.URL.Path != "/v1/environment-vault/reset" {
 			t.Error("reset must target the password-vault route")
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
-		var got VaultReset
+		var got VaultPersonalReset
 		if err := json.NewDecoder(r.Body).Decode(&got); err != nil || got.OperationID != input.OperationID || got.VaultEnvelope != input.VaultEnvelope || got.ExpectedVaultDocumentID != input.ExpectedVaultDocumentID || !got.ConfirmTotalLoss {
 			t.Error("reset transaction changed")
 		}

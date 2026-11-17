@@ -6,29 +6,17 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/shared/vaultprotocol"
 	"slices"
-	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 )
 
+type VaultLayerObservation = vaultprotocol.VaultLayerObservation
+
 const MaximumVaultLayerObservations = 128
 
-type VaultLayerObservation struct {
-	WorkspaceID        string    `json:"workspace_id"`
-	OwnerKind          string    `json:"owner_kind"`
-	OwnerID            string    `json:"owner_id"`
-	SourceMachineID    string    `json:"source_machine_id"`
-	DeliveryGeneration uint64    `json:"delivery_generation"`
-	DocumentID         string    `json:"document_id"`
-	FenceGeneration    uint64    `json:"fence_generation"`
-	HostRecipientKeyID string    `json:"host_recipient_key_id"`
-	ObservationSeq     uint64    `json:"observation_seq"`
-	State              string    `json:"state"`
-	ErrorCode          *string   `json:"error_code"`
-	ObservedAt         time.Time `json:"observed_at"`
-}
 type VaultLayerObservationsPut struct {
 	OperationID  string                  `json:"operation_id"`
 	Observations []VaultLayerObservation `json:"observations"`
@@ -38,15 +26,12 @@ type VaultLayerObservationsAck struct {
 	Accepted    bool   `json:"accepted"`
 }
 
-func (o VaultLayerObservation) coordinate() VaultLayerCoordinate {
-	return VaultLayerCoordinate{o.WorkspaceID, o.OwnerKind, o.OwnerID, o.SourceMachineID}
-}
-func (o VaultLayerObservation) Valid() bool {
-	return validLayerCoordinate(o.coordinate()) && validCounter(o.DeliveryGeneration) && digestExpression.MatchString(o.DocumentID) && validCounter(o.FenceGeneration) && stringsVaultKeyID(o.HostRecipientKeyID) && validCounter(o.ObservationSeq) && !o.ObservedAt.IsZero() && ((o.State == "applied" && o.ErrorCode == nil) || (o.State == "failed" && o.ErrorCode != nil && *o.ErrorCode == "environment_projection_invalid"))
+func validLayerObservation(o VaultLayerObservation) bool {
+	return validLayerCoordinate(o.Coordinate()) && validCounter(o.DeliveryGeneration) && digestExpression.MatchString(o.DocumentID) && validCounter(o.FenceGeneration) && stringsVaultKeyID(o.HostRecipientKeyID) && validCounter(o.ObservationSeq) && !o.ObservedAt.IsZero() && ((o.State == "applied" && o.ErrorCode == nil) || (o.State == "failed" && o.ErrorCode != nil && *o.ErrorCode == "environment_projection_invalid"))
 }
 func layerObservationMatches(o VaultLayerObservation, d VaultLayerDelivery) bool {
 	public, err := DecodeCanonicalBase64URL(d.Recipient.HostPublic, 32)
-	return err == nil && len(public) == 32 && d.State == "ready" && o.coordinate() == d.Source.VaultLayerCoordinate && o.DeliveryGeneration == d.Recipient.DeliveryGeneration && o.DocumentID == d.Recipient.DocumentID && o.FenceGeneration == d.Recipient.FenceGeneration && o.HostRecipientKeyID == vaultHostKeyID(public)
+	return err == nil && len(public) == 32 && d.State == "ready" && o.Coordinate() == d.Source.VaultLayerCoordinate && o.DeliveryGeneration == d.Recipient.DeliveryGeneration && o.DocumentID == d.Recipient.DocumentID && o.FenceGeneration == d.Recipient.FenceGeneration && o.HostRecipientKeyID == vaultHostKeyID(public)
 }
 
 // RecordVaultLayerObservations records metadata only. Authenticate the current recipient before replaying
@@ -58,10 +43,10 @@ func (s *Service) RecordVaultLayerObservations(ctx context.Context, account, mac
 	}
 	seen := make(map[VaultLayerCoordinate]bool, len(in.Observations))
 	for _, o := range in.Observations {
-		if !o.Valid() || seen[o.coordinate()] {
+		if !validLayerObservation(o) || seen[o.Coordinate()] {
 			return out, ErrObservationInvalid
 		}
-		seen[o.coordinate()] = true
+		seen[o.Coordinate()] = true
 	}
 	err := s.db.InReadCommittedTx(ctx, func(ctx context.Context, tx *db.Tx) error {
 		// Observations update only this host's layer rows: they wait for the writers of each team they name and
@@ -86,7 +71,7 @@ func (s *Service) RecordVaultLayerObservations(ctx context.Context, account, mac
 			return err
 		}
 		for _, o := range in.Observations {
-			c := o.coordinate()
+			c := o.Coordinate()
 			delivery, err := readVaultLayerTx(ctx, tx, machine, c)
 			if err != nil {
 				return err
@@ -156,7 +141,7 @@ func layerObservationTx(ctx context.Context, tx *db.Tx, d *VaultLayerDelivery) e
 		return ErrObservationInvalid
 	}
 	var o VaultLayerObservation
-	if json.Unmarshal(raw, &o) != nil || !o.Valid() {
+	if json.Unmarshal(raw, &o) != nil || !validLayerObservation(o) {
 		return ErrObservationInvalid
 	}
 	d.Observation = &o

@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/shared/vaultprotocol"
 	"sync"
 
 	env "github.com/pinksaucepasta/paperboat/cli/internal/environmente2ee"
@@ -20,17 +21,7 @@ type vaultState struct {
 	DocumentID string `json:"document_id"`
 	Envelope   string `json:"envelope"`
 }
-type scopeState struct {
-	WorkspaceID  string `json:"workspace_id"`
-	WriterPublic string `json:"writer_public"`
-	Kind         string `json:"owner_kind"`
-	Owner        string `json:"owner_id"`
-	Machine      string `json:"machine_id"`
-	Epoch        uint64 `json:"key_epoch"`
-	Revision     uint64 `json:"revision"`
-	DocumentID   string `json:"document_id"`
-	Envelope     string `json:"envelope"`
-}
+type scopeState = vaultprotocol.VaultScopeState
 type request struct {
 	Records        []recordState   `json:"records"`
 	RecordSequence uint64          `json:"record_sequence"`
@@ -272,17 +263,17 @@ func (e *engine) run(ctx context.Context, r request) (any, error) {
 		replacements := []string{}
 		seen := map[string]bool{}
 		for _, state := range r.Inventory {
-			if state.Kind != "personal" || state.Owner != old.AccountID || state.Epoch != r.KeyEpoch || state.Revision == 0 || seen[state.WorkspaceID+"\x00"+state.Machine] {
+			if state.OwnerKind != "personal" || state.OwnerID != old.AccountID || state.KeyEpoch != r.KeyEpoch || state.Revision == 0 || seen[state.WorkspaceID+"\x00"+state.MachineID] {
 				e.clear()
 				return nil, env.ErrInvalid
 			}
-			seen[state.WorkspaceID+"\x00"+state.Machine] = true
+			seen[state.WorkspaceID+"\x00"+state.MachineID] = true
 			previous, err := env.ParseDocumentID(state.DocumentID)
 			if err != nil {
 				e.clear()
 				return nil, err
 			}
-			scope, err := env.SealVaultScope(ctx, env.VaultScopeClaims{Issuer: old.Issuer, OwnerKind: "personal", OwnerID: old.AccountID, MachineID: state.Machine, WorkspaceID: state.WorkspaceID, KeyEpoch: keys.PersonalEpoch, Revision: state.Revision + 1, Previous: previous[:], WriterAccount: old.AccountID, WriterVaultGeneration: h.Generation}, keys.PersonalKey, keys.WriterSeed, map[string][]byte{})
+			scope, err := env.SealVaultScope(ctx, env.VaultScopeClaims{Issuer: old.Issuer, OwnerKind: "personal", OwnerID: old.AccountID, MachineID: state.MachineID, WorkspaceID: state.WorkspaceID, KeyEpoch: keys.PersonalEpoch, Revision: state.Revision + 1, Previous: previous[:], WriterAccount: old.AccountID, WriterVaultGeneration: h.Generation}, keys.PersonalKey, keys.WriterSeed, map[string][]byte{})
 			if err != nil {
 				e.clear()
 				return nil, err

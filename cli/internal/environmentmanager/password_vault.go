@@ -20,8 +20,8 @@ var ErrVaultNotSetUp = errors.New("ENV is not set up on this computer")
 var ErrNoRotationInProgress = errors.New("no personal ENV key rotation is in progress")
 
 type PasswordVaultClient interface {
-	GetPasswordVault(context.Context) (api.PasswordVaultState, error)
-	PutPasswordVault(context.Context, []byte) (api.PasswordVaultState, error)
+	GetPasswordVault(context.Context) (api.PasswordVaultHead, error)
+	PutPasswordVault(context.Context, []byte) (api.PasswordVaultHead, error)
 }
 
 // PasswordVault owns local custody and publication reconciliation. None of these
@@ -78,7 +78,7 @@ func (v PasswordVault) current(ctx context.Context) (environmente2ee.VaultHead, 
 	if err != nil {
 		return environmente2ee.VaultHead{}, nil, wrapVaultIntegrityFailure(err)
 	}
-	head, raw, err := state.Decode()
+	head, raw, err := api.DecodePasswordVaultHead(state)
 	if err != nil {
 		return environmente2ee.VaultHead{}, nil, wrapVaultIntegrityFailure(err)
 	}
@@ -286,7 +286,7 @@ func (v PasswordVault) publish(ctx context.Context, local *config.PasswordVaultR
 	if err != nil {
 		return wrapVaultIntegrityFailure(err)
 	} // Keep exact pending bytes for an idempotent retry.
-	head, _, err := state.Decode()
+	head, _, err := api.DecodePasswordVaultHead(state)
 	if err != nil {
 		return wrapVaultIntegrityFailure(err)
 	}

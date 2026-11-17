@@ -35,7 +35,7 @@ func (e *engine) reconcileScope(r request) (any, error) {
 		if c.WorkspaceID != r.WorkspaceID || c.Issuer != e.head.Issuer || c.OwnerKind != r.Kind || c.OwnerID != r.Owner || c.MachineID != r.Machine || c.WriterAccount != e.head.AccountID || c.WriterVaultGeneration == 0 || c.WriterVaultGeneration > e.head.Generation {
 			return nil, env.ErrInvalid
 		}
-		return scopeState{WorkspaceID: c.WorkspaceID, WriterPublic: encoded(writer), Kind: c.OwnerKind, Owner: c.OwnerID, Machine: c.MachineID, Epoch: c.KeyEpoch, Revision: c.Revision, DocumentID: digest(document.ID), Envelope: r.Envelope}, nil
+		return scopeState{WorkspaceID: c.WorkspaceID, WriterPublic: encoded(writer), OwnerKind: c.OwnerKind, OwnerID: c.OwnerID, MachineID: c.MachineID, KeyEpoch: c.KeyEpoch, Revision: c.Revision, DocumentID: digest(document.ID), Envelope: r.Envelope}, nil
 	}
 	if r.Scope == nil || r.Candidate == nil {
 		return nil, env.ErrInvalid

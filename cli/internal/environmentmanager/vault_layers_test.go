@@ -220,8 +220,8 @@ func TestVaultLayerRejectedDeliveryReleasesOnlyProvenLayerJournal(t *testing.T) 
 	}
 }
 
-func (c *layerControl) GetVaultPersonalScopes(context.Context) (api.VaultPersonalInventory, error) {
-	return api.VaultPersonalInventory{}, nil
+func (c *layerControl) GetVaultPersonalScopes(context.Context) (api.VaultPersonalScopes, error) {
+	return api.VaultPersonalScopes{}, nil
 }
 
 func TestVaultLayerReconcileAcceptsAndReusesAcknowledgedTeamGrant(t *testing.T) {

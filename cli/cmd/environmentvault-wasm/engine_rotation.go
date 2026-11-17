@@ -16,13 +16,13 @@ func (e *engine) rotatePersonal(ctx context.Context, r request) (any, error) {
 		}
 		seen := map[string]bool{}
 		for _, state := range r.Inventory {
-			if state.Kind != "personal" || state.Owner != e.head.AccountID || state.Epoch != e.keys.PersonalEpoch || state.Revision == 0 || seen[state.WorkspaceID+"\x00"+state.Machine] {
+			if state.OwnerKind != "personal" || state.OwnerID != e.head.AccountID || state.KeyEpoch != e.keys.PersonalEpoch || state.Revision == 0 || seen[state.WorkspaceID+"\x00"+state.MachineID] {
 				return nil, env.ErrInvalid
 			}
 			if _, err := env.ParseDocumentID(state.DocumentID); err != nil {
 				return nil, err
 			}
-			seen[state.WorkspaceID+"\x00"+state.Machine] = true
+			seen[state.WorkspaceID+"\x00"+state.MachineID] = true
 		}
 		keys, err := cloneKeys(e.keys)
 		if err != nil {
@@ -48,7 +48,7 @@ func (e *engine) rotatePersonal(ctx context.Context, r request) (any, error) {
 	}
 	state := *r.Scope
 	scope, err := scopeDocument(state)
-	if err != nil || state.Kind != "personal" || state.Owner != h.AccountID || state.Epoch != e.keys.PersonalEpoch || scope.Claims.Issuer != h.Issuer {
+	if err != nil || state.OwnerKind != "personal" || state.OwnerID != h.AccountID || state.KeyEpoch != e.keys.PersonalEpoch || scope.Claims.Issuer != h.Issuer {
 		return nil, env.ErrInvalid
 	}
 	values, err := env.OpenVaultScope(ctx, scope, e.keys.PersonalKey)
@@ -67,7 +67,7 @@ func (e *engine) rotatePersonal(ctx context.Context, r request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	next, err := env.SealVaultScope(ctx, env.VaultScopeClaims{Issuer: h.Issuer, OwnerKind: "personal", OwnerID: h.AccountID, MachineID: state.Machine, WorkspaceID: state.WorkspaceID, KeyEpoch: e.pendingKeys.PersonalEpoch, Revision: scope.Claims.Revision + 1, Previous: scope.ID[:], WriterAccount: h.AccountID, WriterVaultGeneration: e.pendingHead.Generation}, e.pendingKeys.PersonalKey, e.pendingKeys.WriterSeed, values)
+	next, err := env.SealVaultScope(ctx, env.VaultScopeClaims{Issuer: h.Issuer, OwnerKind: "personal", OwnerID: h.AccountID, MachineID: state.MachineID, WorkspaceID: state.WorkspaceID, KeyEpoch: e.pendingKeys.PersonalEpoch, Revision: scope.Claims.Revision + 1, Previous: scope.ID[:], WriterAccount: h.AccountID, WriterVaultGeneration: e.pendingHead.Generation}, e.pendingKeys.PersonalKey, e.pendingKeys.WriterSeed, values)
 	if err != nil {
 		return nil, err
 	}

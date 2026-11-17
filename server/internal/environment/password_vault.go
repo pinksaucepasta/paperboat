@@ -9,6 +9,7 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/shared/vaultprotocol"
 	"slices"
 	"unicode/utf8"
 
@@ -16,17 +17,11 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 )
 
+type PasswordVaultHead = vaultprotocol.PasswordVaultHead
+
 const MaximumPasswordVaultBytes = (256 << 10) + (2 << 10)
 
 var ErrPasswordVaultConflict = errors.New("environment password vault changed")
-
-type PasswordVaultHead struct {
-	Issuer     string `json:"issuer"`
-	AccountID  string `json:"account_id"`
-	Generation uint64 `json:"generation"`
-	DocumentID string `json:"document_id"`
-	Envelope   string `json:"envelope"`
-}
 
 // PasswordVaultMetadata is authenticated public transition state. It contains
 // no password, recovery seed, decrypted key, or private writer material.

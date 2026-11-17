@@ -421,7 +421,7 @@ func readVaultScopeMetadata(ctx context.Context, manager environmentmanager.Pass
 	if err != nil {
 		return vaultScopeMetadata{}, err
 	}
-	scope, err := state.Decode()
+	scope, err := api.DecodeVaultScope(state)
 	if err != nil || scope.Claims.Issuer != manager.Issuer || scope.Claims.OwnerKind != target.kind || scope.Claims.OwnerID != target.owner || scope.Claims.MachineID != target.machine {
 		return vaultScopeMetadata{}, environmentmanager.ErrIntegrity
 	}

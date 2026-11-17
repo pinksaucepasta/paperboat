@@ -15,8 +15,8 @@ import (
 )
 
 type VaultResetClient interface {
-	GetVaultPersonalScopes(context.Context) (api.VaultPersonalInventory, error)
-	ResetVault(context.Context, api.VaultReset) (api.PasswordVaultState, error)
+	GetVaultPersonalScopes(context.Context) (api.VaultPersonalScopes, error)
+	ResetVault(context.Context, api.VaultPersonalReset) (api.PasswordVaultHead, error)
 }
 
 // ResetPersonal is the explicitly destructive, normally authenticated total-loss
@@ -117,13 +117,13 @@ func (v PasswordVault) ResetPersonal(ctx context.Context, password, recoveryCode
 	}
 	local.Clear()
 	local = config.PasswordVaultRecord{Head: head, Envelope: raw, Pending: &config.PasswordVaultPending{Head: next, Envelope: envelope, Payload: payload}}
-	return v.stageOperation(ctx, &local, "reset", "personal", v.AccountID, "", api.VaultReset{OperationID: op, ExpectedVaultDocumentID: head.ID.String(), VaultEnvelope: vaultEncoded(envelope), ScopeEnvelopes: replacements, ConfirmTotalLoss: true})
+	return v.stageOperation(ctx, &local, "reset", "personal", v.AccountID, "", api.VaultPersonalReset{OperationID: op, ExpectedVaultDocumentID: head.ID.String(), VaultEnvelope: vaultEncoded(envelope), ScopeEnvelopes: replacements, ConfirmTotalLoss: true})
 }
 
 type VaultPersonalRotationClient interface {
-	GetVaultPersonalScopes(context.Context) (api.VaultPersonalInventory, error)
+	GetVaultPersonalScopes(context.Context) (api.VaultPersonalScopes, error)
 	StageVaultPersonalScope(context.Context, string, api.VaultPersonalScopeStage) (api.VaultScopeDocument, error)
-	RotateVaultPersonal(context.Context, api.VaultPersonalRotate) (api.PasswordVaultState, error)
+	RotateVaultPersonal(context.Context, api.VaultPersonalRotate) (api.PasswordVaultHead, error)
 	AbortVaultPersonalRotation(context.Context, string) error
 }
 type personalRotationJournal struct {
@@ -221,7 +221,7 @@ func (v PasswordVault) publishPersonalRotation(ctx context.Context, local *confi
 				nextKeys.Clear()
 				return err
 			}
-			scope, err := oldState.Decode()
+			scope, err := api.DecodeVaultScope(oldState)
 			if err != nil || scope.ID.String() != state.DocumentID || scope.Claims.Revision != state.Revision || scope.Claims.Issuer != v.Issuer || scope.Claims.WorkspaceID != state.WorkspaceID || scope.Claims.OwnerKind != "personal" || scope.Claims.OwnerID != v.AccountID || scope.Claims.MachineID != state.MachineID || scope.Claims.KeyEpoch != oldKeys.PersonalEpoch {
 				oldKeys.Clear()
 				nextKeys.Clear()

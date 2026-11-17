@@ -106,31 +106,31 @@ func TestVaultExpectedAbsenceProofRejectsMixedAndUnboundedCauses(t *testing.T) {
 
 type vaultControl struct {
 	store           config.ProfileStore
-	state           api.PasswordVaultState
+	state           api.PasswordVaultHead
 	failAfterCommit bool
 }
 
-func (c *vaultControl) GetPasswordVault(context.Context) (api.PasswordVaultState, error) {
+func (c *vaultControl) GetPasswordVault(context.Context) (api.PasswordVaultHead, error) {
 	if c.state.DocumentID == "" {
-		return api.PasswordVaultState{}, &api.APIError{Status: 404}
+		return api.PasswordVaultHead{}, &api.APIError{Status: 404}
 	}
 	return c.state, nil
 }
-func (c *vaultControl) PutPasswordVault(_ context.Context, raw []byte) (api.PasswordVaultState, error) {
+func (c *vaultControl) PutPasswordVault(_ context.Context, raw []byte) (api.PasswordVaultHead, error) {
 	// Publication must be durable locally before a network write is attempted.
 	local, err := c.store.LoadPasswordVault("https://control.example", "account_1")
 	if err != nil {
-		return api.PasswordVaultState{}, err
+		return api.PasswordVaultHead{}, err
 	}
 	defer local.Clear()
 	if local.Pending == nil || !bytes.Equal(raw, local.Pending.Envelope) {
-		return api.PasswordVaultState{}, errors.New("publication was not durably staged")
+		return api.PasswordVaultHead{}, errors.New("publication was not durably staged")
 	}
 	head := local.Pending.Head
-	c.state = api.PasswordVaultState{Issuer: head.Issuer, AccountID: head.AccountID, Generation: head.Generation, DocumentID: head.ID.String(), Envelope: base64.RawURLEncoding.EncodeToString(raw)}
+	c.state = api.PasswordVaultHead{Issuer: head.Issuer, AccountID: head.AccountID, Generation: head.Generation, DocumentID: head.ID.String(), Envelope: base64.RawURLEncoding.EncodeToString(raw)}
 	if c.failAfterCommit {
 		c.failAfterCommit = false
-		return api.PasswordVaultState{}, errors.New("connection lost after commit")
+		return api.PasswordVaultHead{}, errors.New("connection lost after commit")
 	}
 	return c.state, nil
 }
@@ -220,7 +220,7 @@ func TestPasswordVaultOfflineMachineAndInterruptedRewrap(t *testing.T) {
 		t.Fatal(err)
 	}
 	authoritative := control.state
-	control.state = api.PasswordVaultState{Issuer: forkHead.Issuer, AccountID: forkHead.AccountID, Generation: forkHead.Generation, DocumentID: forkHead.ID.String(), Envelope: base64.RawURLEncoding.EncodeToString(forkRaw)}
+	control.state = api.PasswordVaultHead{Issuer: forkHead.Issuer, AccountID: forkHead.AccountID, Generation: forkHead.Generation, DocumentID: forkHead.ID.String(), Envelope: base64.RawURLEncoding.EncodeToString(forkRaw)}
 	forkErr := a.Unlock(ctx, newPassword)
 	control.state = authoritative
 	if !errors.Is(forkErr, ErrVaultChanged) {
@@ -265,7 +265,7 @@ func TestPasswordVaultOfflineMachineAndInterruptedRewrap(t *testing.T) {
 	if !bytes.Equal(current.Payload, initial.Payload) || current.Head.Generation != 2 || current.Pending != nil {
 		t.Fatal("rewrap did not preserve key inventory")
 	}
-	control.state = api.PasswordVaultState{Issuer: initial.Head.Issuer, AccountID: initial.Head.AccountID, Generation: 1, DocumentID: initial.Head.ID.String(), Envelope: base64.RawURLEncoding.EncodeToString(initial.Envelope)}
+	control.state = api.PasswordVaultHead{Issuer: initial.Head.Issuer, AccountID: initial.Head.AccountID, Generation: 1, DocumentID: initial.Head.ID.String(), Envelope: base64.RawURLEncoding.EncodeToString(initial.Envelope)}
 	if err := a.Unlock(ctx, password); !errors.Is(err, ErrAuthorityFork) {
 		t.Fatal("rollback accepted")
 	}

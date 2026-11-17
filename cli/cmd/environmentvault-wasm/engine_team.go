@@ -6,19 +6,13 @@ import (
 	"crypto/ecdh"
 	"crypto/rand"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/shared/vaultprotocol"
 	"sort"
 
 	env "github.com/pinksaucepasta/paperboat/cli/internal/environmente2ee"
 )
 
-type teamMember struct {
-	Account    string `json:"account_id"`
-	Membership uint64 `json:"membership_generation"`
-	Role       string `json:"role"`
-	Active     bool   `json:"active"`
-	GrantEpoch uint64 `json:"grant_epoch"`
-	Permission string `json:"env_permission"`
-}
+type teamMember = vaultprotocol.VaultTeamMember
 type teamState struct {
 	RecordSequence uint64       `json:"record_sequence"`
 	ID             string       `json:"team_id"`
@@ -44,8 +38,8 @@ type grantState struct {
 
 func (t teamState) actor(account, permission string) (teamMember, bool) {
 	for _, m := range t.Members {
-		if m.Account == account {
-			return m, m.Active && (m.Permission == "write" || (permission == "read" && m.Permission == "read"))
+		if m.AccountID == account {
+			return m, m.Active && (m.EnvPermission == "write" || (permission == "read" && m.EnvPermission == "read"))
 		}
 	}
 	return teamMember{}, false
@@ -94,7 +88,7 @@ func (e *engine) teamKey(t teamState, permission string) ([]byte, teamMember, er
 		return nil, actor, errors.New("Current Team ENV membership and permission are required.")
 	}
 	for _, key := range e.keys.Teams {
-		if key.TeamID == t.ID && key.Epoch == t.Epoch && key.MembershipGeneration == actor.Membership {
+		if key.TeamID == t.ID && key.Epoch == t.Epoch && key.MembershipGeneration == actor.MembershipGeneration {
 			return key.Key, actor, nil
 		}
 	}
@@ -114,7 +108,7 @@ func scopeDocument(state scopeState) (env.VaultScope, error) {
 		return scope, err
 	}
 	c := scope.Claims
-	if c.WorkspaceID != state.WorkspaceID || c.OwnerKind != state.Kind || c.OwnerID != state.Owner || c.MachineID != state.Machine || c.KeyEpoch != state.Epoch || c.Revision != state.Revision || digest(scope.ID) != state.DocumentID {
+	if c.WorkspaceID != state.WorkspaceID || c.OwnerKind != state.OwnerKind || c.OwnerID != state.OwnerID || c.MachineID != state.MachineID || c.KeyEpoch != state.KeyEpoch || c.Revision != state.Revision || digest(scope.ID) != state.DocumentID {
 		return scope, env.ErrInvalid
 	}
 	return scope, nil
@@ -182,7 +176,7 @@ func (e *engine) teamOperation(ctx context.Context, r request) (any, error) {
 			return nil, env.ErrInvalid
 		}
 		recipient, ok := t.actor(r.Recipient, "read")
-		if !ok || recipient.Membership == 0 || len(r.Sharing) != 1 || r.Sharing[0].Account != r.Recipient {
+		if !ok || recipient.MembershipGeneration == 0 || len(r.Sharing) != 1 || r.Sharing[0].Account != r.Recipient {
 			return nil, env.ErrInvalid
 		}
 		target := r.Sharing[0]
@@ -190,18 +184,18 @@ func (e *engine) teamOperation(ctx context.Context, r request) (any, error) {
 		if err != nil {
 			return nil, err
 		}
-		grant, err := env.SealTeamGrant(ctx, env.TeamGrantClaims{Issuer: e.head.Issuer, TeamID: t.ID, TeamEpoch: t.Epoch, MembershipGeneration: recipient.Membership, SenderAccount: e.head.AccountID, RecipientAccount: target.Account, RecipientVaultGeneration: target.Generation, RecipientSharingPublic: public, OperationID: r.Operation}, key, e.keys.WriterSeed)
+		grant, err := env.SealTeamGrant(ctx, env.TeamGrantClaims{Issuer: e.head.Issuer, TeamID: t.ID, TeamEpoch: t.Epoch, MembershipGeneration: recipient.MembershipGeneration, SenderAccount: e.head.AccountID, RecipientAccount: target.Account, RecipientVaultGeneration: target.Generation, RecipientSharingPublic: public, OperationID: r.Operation}, key, e.keys.WriterSeed)
 		if err != nil {
 			return nil, err
 		}
-		return map[string]any{"operation_id": r.Operation, "account_id": target.Account, "expected_team_generation": t.Generation, "expected_membership_generation": recipient.Membership, "grant_envelope": encoded(grant.Raw)}, nil
+		return map[string]any{"operation_id": r.Operation, "account_id": target.Account, "expected_team_generation": t.Generation, "expected_membership_generation": recipient.MembershipGeneration, "grant_envelope": encoded(grant.Raw)}, nil
 	case "team-accept":
 		if r.Grant == nil {
 			return nil, env.ErrInvalid
 		}
 		item := *r.Grant
 		member, ok := t.actor(e.head.AccountID, "read")
-		if !ok || item.Team != t.ID || item.Epoch != t.Epoch || item.Membership != member.Membership || member.GrantEpoch != item.Epoch {
+		if !ok || item.Team != t.ID || item.Epoch != t.Epoch || item.Membership != member.MembershipGeneration || member.GrantEpoch != item.Epoch {
 			return nil, env.ErrInvalid
 		}
 		raw, err := decode(item.Envelope)
@@ -255,7 +249,7 @@ func (e *engine) teamOperation(ctx context.Context, r request) (any, error) {
 			return nil, env.ErrInvalid
 		}
 		old, err := scopeDocument(t.Scope)
-		if err != nil || old.Claims.Issuer != e.head.Issuer || t.Scope.Kind != "team" || t.Scope.Owner != t.ID || t.Scope.Epoch != t.Epoch {
+		if err != nil || old.Claims.Issuer != e.head.Issuer || t.Scope.OwnerKind != "team" || t.Scope.OwnerID != t.ID || t.Scope.KeyEpoch != t.Epoch {
 			return nil, env.ErrInvalid
 		}
 		values := map[string][]byte{}
@@ -282,7 +276,7 @@ func (e *engine) teamOperation(ctx context.Context, r request) (any, error) {
 		}
 		found := 0
 		for _, m := range t.Members {
-			if removed[m.Account] {
+			if removed[m.AccountID] {
 				if actor.Role == "admin" && (m.Role == "owner" || m.Role == "admin") {
 					return nil, env.ErrInvalid
 				}
@@ -318,10 +312,10 @@ func (e *engine) teamOperation(ctx context.Context, r request) (any, error) {
 		grants := []string{}
 		var membership uint64
 		for _, m := range t.Members {
-			if !m.Active || removed[m.Account] || (m.Permission != "read" && m.Permission != "write") {
+			if !m.Active || removed[m.AccountID] || (m.EnvPermission != "read" && m.EnvPermission != "write") {
 				continue
 			}
-			recipient, ok := sharing[m.Account]
+			recipient, ok := sharing[m.AccountID]
 			if !ok {
 				return nil, env.ErrInvalid
 			}
@@ -329,14 +323,14 @@ func (e *engine) teamOperation(ctx context.Context, r request) (any, error) {
 			if err != nil {
 				return nil, err
 			}
-			if m.Account == e.head.AccountID {
+			if m.AccountID == e.head.AccountID {
 				if recipient.Generation != e.head.Generation {
 					return nil, env.ErrInvalid
 				}
 				recipient.Generation++
-				membership = m.Membership
+				membership = m.MembershipGeneration
 			}
-			grant, err := env.SealTeamGrant(ctx, env.TeamGrantClaims{Issuer: e.head.Issuer, TeamID: t.ID, TeamEpoch: t.Epoch + 1, MembershipGeneration: m.Membership, SenderAccount: e.head.AccountID, RecipientAccount: m.Account, RecipientVaultGeneration: recipient.Generation, RecipientSharingPublic: public, OperationID: r.Operation}, key, e.keys.WriterSeed)
+			grant, err := env.SealTeamGrant(ctx, env.TeamGrantClaims{Issuer: e.head.Issuer, TeamID: t.ID, TeamEpoch: t.Epoch + 1, MembershipGeneration: m.MembershipGeneration, SenderAccount: e.head.AccountID, RecipientAccount: m.AccountID, RecipientVaultGeneration: recipient.Generation, RecipientSharingPublic: public, OperationID: r.Operation}, key, e.keys.WriterSeed)
 			if err != nil {
 				return nil, err
 			}

@@ -71,7 +71,7 @@ func TestPostgresLayerObservationsReceiptFencesAndRevocation(t *testing.T) {
 		t.Helper()
 		err := store.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
 			var err error
-			delivery, err = readVaultLayerTx(ctx, tx, machine, observation.coordinate())
+			delivery, err = readVaultLayerTx(ctx, tx, machine, observation.Coordinate())
 			return err
 		})
 		if err != nil {

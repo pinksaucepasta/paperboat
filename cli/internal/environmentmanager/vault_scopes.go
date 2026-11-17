@@ -118,7 +118,7 @@ func (v PasswordVault) readVaultScope(ctx context.Context, c VaultDataClient, ke
 	if err != nil {
 		return environmente2ee.VaultScope{}, nil, wrapVaultIntegrityFailure(err)
 	}
-	scope, err := state.Decode()
+	scope, err := api.DecodeVaultScope(state)
 	if err != nil {
 		return environmente2ee.VaultScope{}, nil, wrapVaultIntegrityFailure(err)
 	}
@@ -244,7 +244,7 @@ func (v PasswordVault) publishOperation(ctx context.Context, local *config.Passw
 		if !ok {
 			return environmente2ee.ErrInvalid
 		}
-		var in api.VaultReset
+		var in api.VaultPersonalReset
 		if json.Unmarshal(op.Request, &in) != nil {
 			return ErrIntegrity
 		}
@@ -512,7 +512,7 @@ func (v PasswordVault) RotateTeam(ctx context.Context, teamID string, remove []s
 		}
 		values := map[string][]byte{}
 		if !totalLoss {
-			previous, err = team.Scope.Decode()
+			previous, err = api.DecodeVaultScope(team.Scope)
 			if err != nil {
 				return wrapVaultIntegrityFailure(err)
 			}

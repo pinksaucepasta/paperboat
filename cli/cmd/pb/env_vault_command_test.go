@@ -81,7 +81,7 @@ type commandVaultControl struct {
 	recordRequests   []api.VaultRecordsPut
 	hostRefreshError error
 	store            config.ProfileStore
-	state            api.PasswordVaultState
+	state            api.PasswordVaultHead
 	scopes           map[string]api.VaultScopeState
 	failAfterCommit  bool
 	puts             int
@@ -93,31 +93,31 @@ func commandVaultScopeKey(kind, owner, machine string) string {
 	return kind + "\x00" + owner + "\x00" + machine
 }
 
-func (c *commandVaultControl) GetPasswordVault(context.Context) (api.PasswordVaultState, error) {
+func (c *commandVaultControl) GetPasswordVault(context.Context) (api.PasswordVaultHead, error) {
 	if c.state.DocumentID == "" {
-		return api.PasswordVaultState{}, &api.APIError{Status: 404}
+		return api.PasswordVaultHead{}, &api.APIError{Status: 404}
 	}
 	return c.state, nil
 }
 
-func (c *commandVaultControl) PutPasswordVault(_ context.Context, raw []byte) (api.PasswordVaultState, error) {
+func (c *commandVaultControl) PutPasswordVault(_ context.Context, raw []byte) (api.PasswordVaultHead, error) {
 	local, err := c.store.LoadPasswordVault(commandVaultIssuer, commandVaultAccount)
 	if err != nil {
-		return api.PasswordVaultState{}, err
+		return api.PasswordVaultHead{}, err
 	}
 	defer local.Clear()
 	if local.Pending == nil || !bytes.Equal(raw, local.Pending.Envelope) {
-		return api.PasswordVaultState{}, errors.New("publication was not durably staged")
+		return api.PasswordVaultHead{}, errors.New("publication was not durably staged")
 	}
 	if c.beforePut != nil {
 		if err := c.beforePut(raw); err != nil {
-			return api.PasswordVaultState{}, err
+			return api.PasswordVaultHead{}, err
 		}
 	}
 	c.puts++
 	c.envelopes = append(c.envelopes, bytes.Clone(raw))
 	head := local.Pending.Head
-	c.state = api.PasswordVaultState{
+	c.state = api.PasswordVaultHead{
 		Issuer:     head.Issuer,
 		AccountID:  head.AccountID,
 		Generation: head.Generation,
@@ -126,7 +126,7 @@ func (c *commandVaultControl) PutPasswordVault(_ context.Context, raw []byte) (a
 	}
 	if c.failAfterCommit {
 		c.failAfterCommit = false
-		return api.PasswordVaultState{}, errors.New("connection lost after commit")
+		return api.PasswordVaultHead{}, errors.New("connection lost after commit")
 	}
 	return c.state, nil
 }
@@ -577,9 +577,9 @@ func TestPasswordVaultUnlockRefreshesRecipientsAndKeepsPendingRecovery(t *testin
 	}
 }
 
-func (c *commandVaultControl) GetVaultPersonalScopes(context.Context) (api.VaultPersonalInventory, error) {
+func (c *commandVaultControl) GetVaultPersonalScopes(context.Context) (api.VaultPersonalScopes, error) {
 	c.hostRefreshes++
-	out := api.VaultPersonalInventory{Scopes: []api.VaultScopeState{}}
+	out := api.VaultPersonalScopes{Scopes: []api.VaultScopeState{}}
 	for _, scope := range c.scopes {
 		if scope.OwnerKind == "personal" {
 			out.Scopes = append(out.Scopes, scope)

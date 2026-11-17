@@ -163,7 +163,7 @@ func (v PasswordVault) readScopeRecords(ctx context.Context, keys *env.VaultKeys
 func (v PasswordVault) ensureRecordAnchor(ctx context.Context, local *config.PasswordVaultRecord, keys *env.VaultKeys, c VaultDataClient, kind, owner, machine string) (env.VaultScope, error) {
 	state, err := readScopedVaultSource(ctx, c, v.scopeWorkspace(kind, owner), kind, owner, machine)
 	if err == nil {
-		scope, err := state.Decode()
+		scope, err := api.DecodeVaultScope(state)
 		if err != nil {
 			return env.VaultScope{}, ErrIntegrity
 		}

@@ -55,7 +55,7 @@ type vaultScopesControl struct {
 	issuer  string
 	account string
 
-	state  api.PasswordVaultState
+	state  api.PasswordVaultHead
 	scopes map[string]api.VaultScopeState
 	teams  map[string]api.VaultTeamState
 	grants []api.VaultGrantState
@@ -87,12 +87,12 @@ func scopeControlKey(kind, owner, machine string) string {
 	return kind + "\x00" + owner + "\x00" + machine
 }
 
-func passwordVaultState(raw []byte) (api.PasswordVaultState, error) {
+func passwordVaultState(raw []byte) (api.PasswordVaultHead, error) {
 	head, _, err := environmente2ee.InspectPasswordVault(raw)
 	if err != nil {
-		return api.PasswordVaultState{}, err
+		return api.PasswordVaultHead{}, err
 	}
-	return api.PasswordVaultState{
+	return api.PasswordVaultHead{
 		Issuer:     head.Issuer,
 		AccountID:  head.AccountID,
 		Generation: head.Generation,
@@ -105,25 +105,25 @@ func decodeVaultTestEnvelope(encoded string) ([]byte, error) {
 	return base64.RawURLEncoding.Strict().DecodeString(encoded)
 }
 
-func (c *vaultScopesControl) GetPasswordVault(context.Context) (api.PasswordVaultState, error) {
+func (c *vaultScopesControl) GetPasswordVault(context.Context) (api.PasswordVaultHead, error) {
 	if c.state.DocumentID == "" {
-		return api.PasswordVaultState{}, &api.APIError{Status: 404}
+		return api.PasswordVaultHead{}, &api.APIError{Status: 404}
 	}
 	return c.state, nil
 }
 
-func (c *vaultScopesControl) PutPasswordVault(_ context.Context, raw []byte) (api.PasswordVaultState, error) {
+func (c *vaultScopesControl) PutPasswordVault(_ context.Context, raw []byte) (api.PasswordVaultHead, error) {
 	local, err := c.store.LoadPasswordVault(c.issuer, c.account)
 	if err != nil {
-		return api.PasswordVaultState{}, err
+		return api.PasswordVaultHead{}, err
 	}
 	defer local.Clear()
 	if local.Pending == nil || !bytes.Equal(raw, local.Pending.Envelope) {
-		return api.PasswordVaultState{}, errors.New("password vault was not staged before publication")
+		return api.PasswordVaultHead{}, errors.New("password vault was not staged before publication")
 	}
 	state, err := passwordVaultState(raw)
 	if err != nil {
-		return api.PasswordVaultState{}, err
+		return api.PasswordVaultHead{}, err
 	}
 	c.state = state
 	c.putVaultCount++
@@ -399,7 +399,7 @@ func TestVaultScopesCreateStagesAtomicOperationAndResumesExactRequest(t *testing
 }
 
 func controlStateHead(control *vaultScopesControl) environmente2ee.VaultHead {
-	head, _, err := control.state.Decode()
+	head, _, err := api.DecodePasswordVaultHead(control.state)
 	if err != nil {
 		return environmente2ee.VaultHead{}
 	}
@@ -480,7 +480,7 @@ func TestVaultScopesMutationPublishesCiphertextWithoutPlaintext(t *testing.T) {
 	}
 
 	state := control.scopes[scopeControlKey("personal", vaultScopesTestAccount, "")]
-	scope, err := state.Decode()
+	scope, err := api.DecodeVaultScope(state)
 	if err != nil {
 		t.Fatal(err)
 	}

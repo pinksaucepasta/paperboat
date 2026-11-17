@@ -5,18 +5,13 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/shared/vaultprotocol"
 	"net/http"
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/environmente2ee"
 )
 
-type PasswordVaultState struct {
-	Issuer     string `json:"issuer"`
-	AccountID  string `json:"account_id"`
-	Generation uint64 `json:"generation"`
-	DocumentID string `json:"document_id"`
-	Envelope   string `json:"envelope"`
-}
+type PasswordVaultHead = vaultprotocol.PasswordVaultHead
 
 // envStateDecodeFailure owns only in-memory decoding/verification. It keeps
 // original typed parser causes without exposing encrypted inputs in prose.
@@ -45,7 +40,7 @@ func OwnsENVIntegrityFailure(err error) bool {
 	return ok && failure != nil && failure.cause != nil
 }
 
-func (s PasswordVaultState) Decode() (environmente2ee.VaultHead, []byte, error) {
+func DecodePasswordVaultHead(s PasswordVaultHead) (environmente2ee.VaultHead, []byte, error) {
 	invalid := &envStateDecodeFailure{message: "server returned invalid ENV vault state", cause: environmente2ee.ErrInvalid}
 	if len(s.Envelope) > base64.RawURLEncoding.EncodedLen(environmente2ee.MaximumVaultBytes) {
 		return environmente2ee.VaultHead{}, nil, invalid
@@ -74,30 +69,30 @@ func (s PasswordVaultState) Decode() (environmente2ee.VaultHead, []byte, error) 
 	return head, raw, nil
 }
 
-func (c *Client) GetPasswordVault(ctx context.Context) (PasswordVaultState, error) {
+func (c *Client) GetPasswordVault(ctx context.Context) (PasswordVaultHead, error) {
 	return c.passwordVaultRequest(ctx, http.MethodGet, nil)
 }
 
-func (c *Client) PutPasswordVault(ctx context.Context, raw []byte) (PasswordVaultState, error) {
+func (c *Client) PutPasswordVault(ctx context.Context, raw []byte) (PasswordVaultHead, error) {
 	if len(raw) == 0 || len(raw) > environmente2ee.MaximumVaultBytes {
-		return PasswordVaultState{}, errors.New("invalid ENV vault envelope size")
+		return PasswordVaultHead{}, errors.New("invalid ENV vault envelope size")
 	}
 	return c.passwordVaultRequest(ctx, http.MethodPut, struct {
 		Envelope string `json:"envelope"`
 	}{base64.RawURLEncoding.EncodeToString(raw)})
 }
 
-func (c *Client) passwordVaultRequest(ctx context.Context, method string, body any) (PasswordVaultState, error) {
-	var state PasswordVaultState
+func (c *Client) passwordVaultRequest(ctx context.Context, method string, body any) (PasswordVaultHead, error) {
+	var state PasswordVaultHead
 	var headers http.Header
 	if err := c.doRequestMeta(ctx, method, "/v1/environment-vault", body, &state, environmentNoStoreRequestHeaders(nil), true, &headers); err != nil {
-		return PasswordVaultState{}, err
+		return PasswordVaultHead{}, err
 	}
 	if err := validateEnvironmentNoStore(headers); err != nil {
-		return PasswordVaultState{}, err
+		return PasswordVaultHead{}, err
 	}
-	if _, _, err := state.Decode(); err != nil {
-		return PasswordVaultState{}, err
+	if _, _, err := DecodePasswordVaultHead(state); err != nil {
+		return PasswordVaultHead{}, err
 	}
 	return state, nil
 }

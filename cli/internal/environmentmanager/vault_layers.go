@@ -179,7 +179,7 @@ func (v PasswordVault) ReconcileLayers(ctx context.Context) (int, error) {
 		return 0, err
 	}
 	inventory, ok := v.Client.(interface {
-		GetVaultPersonalScopes(context.Context) (api.VaultPersonalInventory, error)
+		GetVaultPersonalScopes(context.Context) (api.VaultPersonalScopes, error)
 	})
 	if !ok {
 		return 0, env.ErrInvalid
@@ -271,7 +271,7 @@ func (v PasswordVault) reconcileLayerConflict(ctx context.Context, local *config
 	if err != nil {
 		return pending(err)
 	}
-	source, err := state.Decode()
+	source, err := api.DecodeVaultScope(state)
 	if err != nil || source.Claims.WorkspaceID != claims.Source.WorkspaceID || source.Claims.OwnerKind != claims.Source.OwnerKind || source.Claims.OwnerID != claims.Source.OwnerID || source.Claims.MachineID != claims.Source.MachineID || source.Claims.KeyEpoch < claims.Source.KeyEpoch || source.Claims.KeyEpoch == claims.Source.KeyEpoch && source.Claims.Revision < claims.Source.Revision {
 		return pending(ErrIntegrity)
 	}

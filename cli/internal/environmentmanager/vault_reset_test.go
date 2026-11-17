@@ -14,27 +14,27 @@ type resetControl struct {
 	resets int
 }
 
-func (c *resetControl) ResetVault(_ context.Context, in api.VaultReset) (api.PasswordVaultState, error) {
+func (c *resetControl) ResetVault(_ context.Context, in api.VaultPersonalReset) (api.PasswordVaultHead, error) {
 	if !in.ConfirmTotalLoss || in.ExpectedVaultDocumentID != c.state.DocumentID {
-		return api.PasswordVaultState{}, errors.New("reset not fenced to the current vault")
+		return api.PasswordVaultHead{}, errors.New("reset not fenced to the current vault")
 	}
 	raw, err := decodeVaultTestEnvelope(in.VaultEnvelope)
 	if err != nil {
-		return api.PasswordVaultState{}, err
+		return api.PasswordVaultHead{}, err
 	}
 	protection, err := environmente2ee.PasswordVaultProtection(raw)
 	if err != nil {
-		return api.PasswordVaultState{}, err
+		return api.PasswordVaultHead{}, err
 	}
 	inventory, _ := c.GetVaultPersonalScopes(context.Background())
 	if len(in.ScopeEnvelopes) != len(inventory.Scopes) {
-		return api.PasswordVaultState{}, errors.New("reset does not replace every personal scope")
+		return api.PasswordVaultHead{}, errors.New("reset does not replace every personal scope")
 	}
 	c.writerPublic = protection.WriterPublic
 	for i, state := range inventory.Scopes {
 		scope, err := c.scopeState("personal", c.account, state.MachineID, in.ScopeEnvelopes[i])
 		if err != nil {
-			return api.PasswordVaultState{}, err
+			return api.PasswordVaultHead{}, err
 		}
 		key := scopeControlKey("personal", c.account, state.MachineID)
 		c.scopes[key] = scope
@@ -42,7 +42,7 @@ func (c *resetControl) ResetVault(_ context.Context, in api.VaultReset) (api.Pas
 		delete(c.vaultScopesControl.records, key)
 	}
 	if c.state, err = passwordVaultState(raw); err != nil {
-		return api.PasswordVaultState{}, err
+		return api.PasswordVaultHead{}, err
 	}
 	c.epoch++
 	c.resets++
