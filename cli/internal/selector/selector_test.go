@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"regexp"
 	"strings"
@@ -622,5 +623,58 @@ func TestLoadingSpinnerAdvancesThroughBubblesSpinner(t *testing.T) {
 	}
 	if len(seen) != 4 {
 		t.Fatalf("spinner showed %d distinct frames, want the 4 line frames: %v", len(seen), seen)
+	}
+}
+
+// canceledLike is how the net package reports a canceled dial: not context.Canceled
+// itself, but Is-equal to it.
+type canceledLike struct{}
+
+func (canceledLike) Error() string        { return "operation was canceled" }
+func (canceledLike) Is(target error) bool { return target == context.Canceled }
+
+func TestLoadingEscStaysCleanWhenWorkerReportsItsOwnCancellation(t *testing.T) {
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reader.Close()
+	defer writer.Close()
+	started := make(chan struct{})
+	go func() {
+		<-started
+		_, _ = writer.Write([]byte{27})
+	}()
+	err = Loading(context.Background(), "Machines", "Loading", reader, io.Discard, func(ctx context.Context) error {
+		close(started)
+		<-ctx.Done()
+		return fmt.Errorf("list machines: %w", &net.OpError{Op: "dial", Net: "tcp", Err: canceledLike{}})
+	})
+	var failure selectorFailure
+	if errors.As(err, &failure) || !errors.Is(err, ErrCanceled) {
+		t.Fatalf("Esc during a slow cancel became a failure: %v", err)
+	}
+}
+
+func TestLoadingKeepsRealWorkerFailureAfterEsc(t *testing.T) {
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reader.Close()
+	defer writer.Close()
+	started := make(chan struct{})
+	go func() {
+		<-started
+		_, _ = writer.Write([]byte{27})
+	}()
+	real := errors.New("disk full")
+	err = Loading(context.Background(), "Machines", "Loading", reader, io.Discard, func(ctx context.Context) error {
+		close(started)
+		<-ctx.Done()
+		return errors.Join(canceledLike{}, real)
+	})
+	if !errors.Is(err, real) {
+		t.Fatalf("a real failure was hidden behind the cancel: %v", err)
 	}
 }

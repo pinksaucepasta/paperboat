@@ -42,6 +42,10 @@ func cancellationOnly(err error, status error, program bool) (pure bool) {
 		if current == status || (program && current == tea.ErrProgramKilled) {
 			return true
 		}
+		// net reports a canceled dial as its own error that is Is-equal to context.Canceled.
+		if is, ok := current.(interface{ Is(error) bool }); ok && is.Is(status) {
+			return true
+		}
 		if joined, ok := current.(interface{ Unwrap() []error }); ok {
 			children := joined.Unwrap()
 			if len(children) == 0 || len(children) > remaining {
