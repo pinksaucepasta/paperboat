@@ -231,10 +231,12 @@ var policies = []policy{
 		seconds(func(c config.Retention) time.Duration { return c.InboxRequests })},
 	{"stripe_events", batchOf("stripe_events", `processed_at < now()-make_interval(secs=>$2)`),
 		seconds(func(c config.Retention) time.Duration { return c.StripeEvents })},
-	{"support_reports_expired", batchOf("support_reports", `expires_at < now()`), none},
-	// Past an account's newest SupportReportsPerAccount reports.
-	{"support_reports_per_account", `DELETE FROM paperboat.support_reports WHERE id IN (SELECT id FROM (
- SELECT id,row_number() OVER (PARTITION BY owner_id ORDER BY created_at DESC,id DESC) n FROM paperboat.support_reports) r WHERE n > $2 LIMIT $1)`,
+	{"support_reports_expired", batchOf("support_report_occurrences", `expires_at < now()`), none},
+	// A group's expires_at is its newest occurrence's, so it goes after the occurrences it explains.
+	{"support_report_groups_expired", batchOf("support_report_groups", `expires_at < now()`), none},
+	// Past an account's newest SupportReportsPerAccount occurrences.
+	{"support_reports_per_account", `DELETE FROM paperboat.support_report_occurrences WHERE id IN (SELECT id FROM (
+ SELECT id,row_number() OVER (PARTITION BY owner_id ORDER BY created_at DESC,id DESC) n FROM paperboat.support_report_occurrences) r WHERE n > $2 LIMIT $1)`,
 		count(func(c config.Retention) int { return c.SupportReportsPerAccount })},
 }
 

@@ -366,17 +366,22 @@ func TestOperatorReportingDatabaseAndSentryReads(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = store.Pool().Exec(t.Context(), `INSERT INTO support_reports(id,support_reference,owner_id,request_id,component,release,stage,code,created_at,expires_at,sentry_event_id,source_file,source_function,source_line,reporting) VALUES($1,$2,$3,'req','paperboat-server','dev','serve','panic',now(),now()+interval '1 hour',$4,'main.go','serve',10,'unconfirmed')`, "pb-report-"+suffix, ref, ownerID, eventID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = store.Pool().Exec(t.Context(), `INSERT INTO support_reports(id,support_reference,owner_id,request_id,component,release,stage,code,created_at,expires_at,sentry_event_id,source_file,source_function,source_line,reporting) VALUES($1,$2,$3,'req2','paperboat-server','dev','serve','panic',now(),now()+interval '1 hour','','main.go','serve',10,'disabled')`, "pb-report2-"+suffix, ref, ownerID2)
-	if err != nil {
-		t.Fatal(err)
+	// The support_reference's two reports belong to two owners, each in its own group.
+	for i, report := range []struct{ owner, event, reporting string }{{ownerID, eventID, "unconfirmed"}, {ownerID2, "", "disabled"}} {
+		fingerprint := "fp-" + suffix
+		if _, err = store.Pool().Exec(t.Context(), `INSERT INTO support_report_groups(owner_id,fingerprint,component,operation,stage,code,cause,error_type,http_status,outcome,source_file,source_function,source_line,severity,errno,first_seen,last_seen,occurrences,expires_at) VALUES($1,$2,'paperboat-server','http_other','serve','panic','none','none',0,'failed','main.go','serve',10,'error',0,now(),now(),1,now()+interval '1 hour')`, report.owner, fingerprint); err != nil {
+			t.Fatal(err)
+		}
+		if _, err = store.Pool().Exec(t.Context(), `INSERT INTO support_report_occurrences(id,owner_id,support_reference,fingerprint,request_id,correlation_id,release,created_at,expires_at,sentry_event_id,reporting) VALUES($1,$2,$3,$4,'req','','dev',now(),now()+interval '1 hour',$5,$6)`, fmt.Sprintf("pb-report%d-%s", i, suffix), report.owner, ref, fingerprint, report.event, report.reporting); err != nil {
+			t.Fatal(err)
+		}
 	}
 	t.Cleanup(func() {
-		if _, err := store.Pool().Exec(context.Background(), `DELETE FROM support_reports WHERE support_reference=$1`, ref); err != nil {
+		if _, err := store.Pool().Exec(context.Background(), `DELETE FROM support_report_occurrences WHERE support_reference=$1`, ref); err != nil {
 			t.Errorf("remove support reference fixture: %v", err)
+		}
+		if _, err := store.Pool().Exec(context.Background(), `DELETE FROM support_report_groups WHERE fingerprint=$1`, "fp-"+suffix); err != nil {
+			t.Errorf("remove support group fixture: %v", err)
 		}
 		// Audit rows are append-only and retain their actors. The acceptance
 		// runner owns and drops the isolated database; never bypass that policy.

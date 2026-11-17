@@ -38,7 +38,8 @@ func TestSupportPostgresIsolationRetentionAndAudit(t *testing.T) {
 		}
 	}
 	defer func() {
-		database.Pool().Exec(ctx, `DELETE FROM support_reports WHERE support_reference=$1`, ref)
+		database.Pool().Exec(ctx, `DELETE FROM support_report_occurrences WHERE support_reference=$1`, ref)
+		database.Pool().Exec(ctx, `DELETE FROM support_report_groups WHERE owner_id IN ($1,$2)`, ownerA, ownerB)
 		database.Pool().Exec(ctx, `DELETE FROM audit_events WHERE resource_id=$1`, ref)
 		database.Pool().Exec(ctx, `DELETE FROM users WHERE id IN ($1,$2)`, ownerA, ownerB)
 		database.Pool().Exec(ctx, `DELETE FROM operator_accounts WHERE id=$1`, operator)
@@ -73,6 +74,16 @@ func TestSupportPostgresIsolationRetentionAndAudit(t *testing.T) {
 	if err != nil || len(a) != 32 || a[0].Stage != "authorize" || len(a[0].ErrorChain) != 0 {
 		t.Fatalf("first failure/cap: %d %v", len(a), err)
 	}
+	// Occurrences of one failure are one group: the 31 retries that fit under the cap count once each, and a retry
+	// the cap refused is not counted.
+	var groups, retries int
+	var first_, last_ time.Time
+	if err = database.Pool().QueryRow(ctx, `SELECT count(*), coalesce(sum(occurrences) FILTER (WHERE stage='retry'),0) FROM support_report_groups WHERE owner_id=$1`, ownerA).Scan(&groups, &retries); err != nil || groups != 2 || retries != 31 {
+		t.Fatalf("rollup: %d groups, %d retries counted, %v; want 2 groups and 31", groups, retries, err)
+	}
+	if err = database.Pool().QueryRow(ctx, `SELECT first_seen,last_seen FROM support_report_groups WHERE owner_id=$1 AND stage='retry'`, ownerA).Scan(&first_, &last_); err != nil || !last_.After(first_) {
+		t.Fatalf("rollup first/last seen: %v %v %v", first_, last_, err)
+	}
 	b, err := service.Lookup(ctx, ownerB, ownerB, ref, false)
 	if err != nil || len(b) != 1 || b[0].Code != "other_owner" {
 		t.Fatal("owner collision was not isolated", err)
@@ -101,7 +112,10 @@ func TestSupportPostgresIsolationRetentionAndAudit(t *testing.T) {
 	if err = database.Pool().QueryRow(ctx, `SELECT count(*) FROM audit_events WHERE resource_id=$1 AND event_type='support.self_lookup'`, ref).Scan(&auditCount); err != nil || auditCount != 2 {
 		t.Fatal("lookup audit missing", err, auditCount)
 	}
-	if _, err = database.Pool().Exec(ctx, `UPDATE support_reports SET expires_at=now()-interval '1 second' WHERE support_reference=$1`, ref); err != nil {
+	if _, err = database.Pool().Exec(ctx, `UPDATE support_report_occurrences SET expires_at=now()-interval '1 second' WHERE support_reference=$1`, ref); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = database.Pool().Exec(ctx, `UPDATE support_report_groups SET expires_at=now()-interval '1 second' WHERE owner_id IN ($1,$2)`, ownerA, ownerB); err != nil {
 		t.Fatal(err)
 	}
 	a, err = service.Lookup(ctx, ownerA, ownerA, ref, false)
@@ -112,7 +126,7 @@ func TestSupportPostgresIsolationRetentionAndAudit(t *testing.T) {
 		t.Fatal(err)
 	}
 	var count int
-	database.Pool().QueryRow(ctx, `SELECT count(*) FROM support_reports WHERE support_reference=$1`, ref).Scan(&count)
+	database.Pool().QueryRow(ctx, `SELECT (SELECT count(*) FROM support_report_occurrences WHERE support_reference=$1)+(SELECT count(*) FROM support_report_groups WHERE owner_id IN ($2,$3))`, ref, ownerA, ownerB).Scan(&count)
 	if count != 0 {
 		t.Fatal("retained expired data")
 	}

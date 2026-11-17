@@ -52,7 +52,8 @@ func TestSupportConnectedReferenceAndRoleRevocation(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() {
-		database.Pool().Exec(ctx, `DELETE FROM support_reports WHERE support_reference=$1`, ref)
+		database.Pool().Exec(ctx, `DELETE FROM support_report_occurrences WHERE support_reference=$1`, ref)
+		database.Pool().Exec(ctx, `DELETE FROM support_report_groups WHERE owner_id=$1`, owner)
 		database.Pool().Exec(ctx, `DELETE FROM audit_events WHERE actor_user_id=$1`, owner)
 		database.Pool().Exec(ctx, `DELETE FROM sessions WHERE user_id=$1`, owner)
 		database.Pool().Exec(ctx, `DELETE FROM users WHERE id=$1`, owner)

@@ -2522,6 +2522,43 @@ type SupportReport struct {
 	Severity         string
 }
 
+type SupportReportGroup struct {
+	OwnerID        string
+	Fingerprint    string
+	Component      string
+	Operation      string
+	Stage          string
+	Code           string
+	Cause          string
+	ErrorType      string
+	HttpStatus     int32
+	Outcome        string
+	SourceFile     string
+	SourceFunction string
+	SourceLine     int32
+	Severity       string
+	Errno          int32
+	ErrorChain     []string
+	FirstSeen      time.Time
+	LastSeen       time.Time
+	Occurrences    int64
+	ExpiresAt      time.Time
+}
+
+type SupportReportOccurrence struct {
+	ID               string
+	OwnerID          string
+	SupportReference string
+	Fingerprint      string
+	RequestID        string
+	CorrelationID    string
+	Release          string
+	CreatedAt        time.Time
+	ExpiresAt        time.Time
+	SentryEventID    string
+	Reporting        string
+}
+
 type Team struct {
 	TeamID               string
 	OwnerAccount         string

@@ -169,7 +169,7 @@ func (s *Service) ListLocalReferences(ctx context.Context, actor auth.User, afte
 		if err := authorize(ctx, tx, actor.ID); err != nil {
 			return err
 		}
-		rows, err := tx.Query(ctx, `SELECT support_reference,owner_id,min(created_at),max(created_at),count(*),coalesce((array_agg(sentry_event_id ORDER BY created_at DESC,id DESC) FILTER (WHERE sentry_event_id<>''))[1],''),CASE WHEN bool_or(reporting='unconfirmed') THEN 'unconfirmed' WHEN bool_or(reporting='filtered') THEN 'filtered' ELSE 'disabled' END FROM support_reports WHERE expires_at>now() AND (support_reference,owner_id)>($1,$2) GROUP BY support_reference,owner_id ORDER BY support_reference,owner_id LIMIT $3`, cursor.Reference, cursor.OwnerID, limit+1)
+		rows, err := tx.Query(ctx, `SELECT support_reference,owner_id,min(created_at),max(created_at),count(*),coalesce((array_agg(sentry_event_id ORDER BY created_at DESC,id DESC) FILTER (WHERE sentry_event_id<>''))[1],''),CASE WHEN bool_or(reporting='unconfirmed') THEN 'unconfirmed' WHEN bool_or(reporting='filtered') THEN 'filtered' ELSE 'disabled' END FROM support_report_occurrences WHERE expires_at>now() AND (support_reference,owner_id)>($1,$2) GROUP BY support_reference,owner_id ORDER BY support_reference,owner_id LIMIT $3`, cursor.Reference, cursor.OwnerID, limit+1)
 		if err != nil {
 			return err
 		}
@@ -298,7 +298,7 @@ func (s *Service) ResolveReference(ctx context.Context, actor auth.User, referen
 		}
 		local = LocalReference{}
 		found = false
-		err := tx.QueryRow(ctx, `SELECT support_reference,owner_id,min(created_at),max(created_at),count(*),coalesce((array_agg(sentry_event_id ORDER BY created_at DESC,id DESC) FILTER (WHERE sentry_event_id<>''))[1],''),CASE WHEN bool_or(reporting='unconfirmed') THEN 'unconfirmed' WHEN bool_or(reporting='filtered') THEN 'filtered' ELSE 'disabled' END FROM support_reports WHERE expires_at>now() AND support_reference=$1 AND owner_id=$2 GROUP BY support_reference,owner_id`, reference, owner).Scan(&local.Reference, &local.OwnerID, &local.FirstSeen, &local.LastSeen, &local.Reports, &local.EventID, &local.Reporting)
+		err := tx.QueryRow(ctx, `SELECT support_reference,owner_id,min(created_at),max(created_at),count(*),coalesce((array_agg(sentry_event_id ORDER BY created_at DESC,id DESC) FILTER (WHERE sentry_event_id<>''))[1],''),CASE WHEN bool_or(reporting='unconfirmed') THEN 'unconfirmed' WHEN bool_or(reporting='filtered') THEN 'filtered' ELSE 'disabled' END FROM support_report_occurrences WHERE expires_at>now() AND support_reference=$1 AND owner_id=$2 GROUP BY support_reference,owner_id`, reference, owner).Scan(&local.Reference, &local.OwnerID, &local.FirstSeen, &local.LastSeen, &local.Reports, &local.EventID, &local.Reporting)
 		if reportingErrorOnly(err, pgx.ErrNoRows) {
 			return nil
 		}

@@ -53,11 +53,14 @@ func TestRetentionDrainsBacklogsAndKeepsLiveRowsOnPostgres(t *testing.T) {
 	exec(`INSERT INTO paperboat.managed_ssh_operations(operation_id,user_id,operation_kind,request_hash,resource_id,result_revision,created_at)
 SELECT 'retention-op-'||$2||'-'||g,$1,'target_update',sha256(convert_to(g::text,'UTF8')),'r'||g,1,CASE WHEN g<=5000 THEN now()-interval '2 days' ELSE now() END
 FROM generate_series(1,5010) g`, user, s)
-	// 1,050 support reports for one account (cap 1,000) and 3 expired ones.
-	exec(`INSERT INTO paperboat.support_reports(id,support_reference,owner_id,request_id,component,release,stage,code,created_at,expires_at,sentry_event_id,
-source_file,source_function,source_line,reporting)
-SELECT 'ret_report_'||$2||'_'||g,'support_'||gen_random_uuid(),$1,'request_'||g,'paperboat-server','dev','http_handler','internal_error',
- now()-make_interval(secs=>g),CASE WHEN g>1050 THEN now()-interval '1 minute' ELSE now()+interval '7 days' END,'','f.go','f',1,'disabled'
+	// 1,050 support report occurrences for one account (cap 1,000) and 3 expired ones, in a live group and a dead one.
+	exec(`INSERT INTO paperboat.support_report_groups(owner_id,fingerprint,component,operation,stage,code,cause,error_type,http_status,outcome,
+source_file,source_function,source_line,severity,errno,first_seen,last_seen,occurrences,expires_at)
+VALUES ($1,'live','paperboat-server','op','http_handler','internal_error','none','none',500,'failed','f.go','f',1,'error',0,now(),now(),1050,now()+interval '7 days'),
+($1,'dead','paperboat-server','op','http_handler','internal_error','none','none',500,'failed','f.go','f',2,'error',0,now()-interval '8 days',now()-interval '1 minute',3,now()-interval '1 minute')`, user)
+	exec(`INSERT INTO paperboat.support_report_occurrences(id,owner_id,support_reference,fingerprint,request_id,correlation_id,release,created_at,expires_at,sentry_event_id,reporting)
+SELECT 'ret_report_'||$2||'_'||g,$1,'support_'||gen_random_uuid(),CASE WHEN g>1050 THEN 'dead' ELSE 'live' END,'request_'||g,'','dev',
+ now()-make_interval(secs=>g),CASE WHEN g>1050 THEN now()-interval '1 minute' ELSE now()+interval '7 days' END,'','disabled'
 FROM generate_series(1,1053) g`, user, s)
 
 	cfg := config.Default().Retention
@@ -68,13 +71,19 @@ FROM generate_series(1,1053) g`, user, s)
 	if n := count(`SELECT count(*) FROM paperboat.managed_ssh_operations WHERE user_id=$1`, user); n != 10 || result["managed_ssh_operations"] < 5000 {
 		t.Fatalf("managed_ssh_operations: %d left (want the 10 fresh), %d deleted", n, result["managed_ssh_operations"])
 	}
-	if n := count(`SELECT count(*) FROM paperboat.support_reports WHERE owner_id=$1`, user); n != cfg.SupportReportsPerAccount {
+	if n := count(`SELECT count(*) FROM paperboat.support_report_occurrences WHERE owner_id=$1`, user); n != cfg.SupportReportsPerAccount {
 		t.Fatalf("support_reports: %d left for the account, want its newest %d", n, cfg.SupportReportsPerAccount)
 	}
-	if n := count(`SELECT count(*) FROM paperboat.support_reports WHERE owner_id=$1 AND expires_at<now()`, user); n != 0 {
+	if n := count(`SELECT count(*) FROM paperboat.support_report_occurrences WHERE owner_id=$1 AND expires_at<now()`, user); n != 0 {
 		t.Fatalf("%d expired support reports kept", n)
 	}
-	if newest := count(`SELECT min(source_line+0*0) FROM paperboat.support_reports WHERE owner_id=$1 AND id='ret_report_'||$2||'_1'`, user, s); newest != 1 {
+	if n := count(`SELECT count(*) FROM paperboat.support_report_groups WHERE owner_id=$1 AND fingerprint='dead'`, user); n != 0 {
+		t.Fatal("a support report group with no live occurrence was kept")
+	}
+	if n := count(`SELECT count(*) FROM paperboat.support_report_groups WHERE owner_id=$1 AND fingerprint='live'`, user); n != 1 {
+		t.Fatal("the live support report group was deleted")
+	}
+	if newest := count(`SELECT count(*) FROM paperboat.support_report_occurrences WHERE owner_id=$1 AND id='ret_report_'||$2||'_1'`, user, s); newest != 1 {
 		t.Fatal("the account's newest report was deleted")
 	}
 	// A second pass finds nothing more.
