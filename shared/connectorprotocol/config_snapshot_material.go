@@ -81,6 +81,12 @@ func visitSnapshotCredentialMaterial(value any) error {
 	return nil
 }
 
+// ValidConfigCredentialReference reports whether reference is a clean paperboat credential handle, the one shape a
+// snapshot may carry; the control plane applies it when a route is written, so a stored route never fails snapshot validation.
+func ValidConfigCredentialReference(reference string) bool {
+	return safeSnapshotCredentialReference(reference)
+}
+
 // safeSnapshotCredentialReference is the one shape of a credential reference in a snapshot: a clean paperboat handle.
 func safeSnapshotCredentialReference(reference string) bool {
 	if len(reference) == 0 || len(reference) > MaxCredentialRef || strings.TrimSpace(reference) != reference {

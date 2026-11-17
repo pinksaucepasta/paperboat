@@ -1067,6 +1067,9 @@ func validateWriteOnlyReference(value string) error {
 		}
 		return fmt.Errorf("%w: write-only reference contains invalid characters", ErrInvalidInput)
 	}
+	if !wire.ValidConfigCredentialReference(value) {
+		return fmt.Errorf("%w: write-only reference must be a clean Paperboat handle (no dot segments or trailing slash)", ErrInvalidInput)
+	}
 	return nil
 }
 

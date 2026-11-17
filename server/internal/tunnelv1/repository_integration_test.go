@@ -579,7 +579,7 @@ func TestSQLRepositoryTRK07ConfigChainScopeAndConflictsOnPostgres(t *testing.T) 
 	routeID := "rte_trk07_chain_" + fixture.suffix
 	route := trk07RouteInput(fixture, accountID, hostID, tunnelID, routeID, "api", "api-"+fixture.suffix+".example.test")
 	pathPrefix := "/v1"
-	serverName, caReference, mtlsReference := "backend.example.test", testOriginCA, "ref://mtls/"+fixture.suffix
+	serverName, caReference, mtlsReference := "backend.example.test", testOriginCA, "keychain://paperboat/mtls/"+fixture.suffix
 	route.PathPrefix = nullableString(pathPrefix)
 	route.Origin = RouteOriginRequest{Scheme: "https", Address: "backend.example.test:443", PreserveHost: false,
 		HostOverride: resourceStringPtr("origin.example.test"), TLS: &RouteTLSRequest{Verification: "custom_ca", ServerName: &serverName, CA: &caReference, ClientCredentialReference: &mtlsReference}}

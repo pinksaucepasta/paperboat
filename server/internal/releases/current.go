@@ -6,12 +6,11 @@ package releases
 
 import (
 	"bytes"
-	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"github.com/pinksaucepasta/paperboat/shared/releaseindex"
+	"github.com/pinksaucepasta/paperboat/shared/releasepolicy"
 	"io"
-	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -26,8 +25,7 @@ const CurrentSchemaV1 = "paperboat.release-current/v1"
 const tufAssetSchemaV1 = "paperboat.tuf-asset/v1"
 
 var (
-	githubReleaseAssetPattern = regexp.MustCompile(`^/[^/]+/[^/]+/releases/download/[^/]+/[^/]+$`)
-	githubRepositoryPattern   = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
+	githubRepositoryPattern = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
 )
 
 var supportedPlatformArchitectures = [...]struct {
@@ -237,9 +235,9 @@ func (c Current) Validate() error {
 		return errors.New("invalid current release manifest")
 	}
 	for _, targetPlatform := range supportedPlatformArchitectures {
-		name := assetName(targetPlatform.platform, targetPlatform.architecture)
+		name := releaseindex.AssetName(targetPlatform.platform, targetPlatform.architecture)
 		asset, ok := c.Assets[name]
-		if !ok || !validVersion(asset.Version) || asset.Platform != targetPlatform.platform || asset.Architecture != targetPlatform.architecture || asset.Format != assetFormat(targetPlatform.platform) || asset.Length < 1 || asset.Length > 512<<20 || !validSHA256(asset.SHA256) || !validGitHubReleaseAssetURL(asset.URL, c.Repository, asset.Version, name) {
+		if !ok || !validVersion(asset.Version) || asset.Platform != targetPlatform.platform || asset.Architecture != targetPlatform.architecture || asset.Format != assetFormat(targetPlatform.platform) || asset.Length < 1 || asset.Length > 512<<20 || !releasepolicy.IsDigest(asset.SHA256) || !releaseindex.ValidDownloadURL(asset.URL, c.Repository, asset.Version, name) {
 			return errors.New("invalid current release asset")
 		}
 	}
@@ -301,32 +299,6 @@ func decodePublishedReleaseIndex(raw json.RawMessage, now time.Time) (publishedR
 
 func validCurrentRepository(value string) bool {
 	return githubRepositoryPattern.MatchString(value)
-}
-
-func validGitHubReleaseAssetURL(raw, repository, version, name string) bool {
-	parsed, err := url.Parse(raw)
-	canonical := "https://github.com/" + repository + "/releases/download/" + version + "/" + name
-	return err == nil && raw == canonical && parsed.Scheme == "https" && parsed.Hostname() == "github.com" && parsed.Port() == "" && parsed.User == nil && parsed.RawQuery == "" && parsed.Fragment == "" && parsed.Path == "/"+repository+"/releases/download/"+version+"/"+name && githubReleaseAssetPattern.MatchString(parsed.Path)
-}
-
-func validSHA256(value string) bool {
-	if len(value) != sha256.Size*2 {
-		return false
-	}
-	for _, char := range value {
-		if !(char >= '0' && char <= '9' || char >= 'a' && char <= 'f') {
-			return false
-		}
-	}
-	return true
-}
-
-func assetName(platform, architecture string) string {
-	name := "pb-" + platform + "-" + architecture
-	if platform == "windows" {
-		name += ".exe"
-	}
-	return name
 }
 
 func assetFormat(platform string) string {
