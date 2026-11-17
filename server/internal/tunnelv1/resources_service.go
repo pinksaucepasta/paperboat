@@ -973,7 +973,7 @@ func normalizePathPrefix(value *string) (sql.NullString, error) {
 	if *value == "" {
 		return sql.NullString{}, nil
 	}
-	if len(*value) > 2048 || !strings.HasPrefix(*value, "/") || strings.ContainsAny(*value, "\r\n\x00") {
+	if len(*value) > 512 || !strings.HasPrefix(*value, "/") || strings.ContainsAny(*value, "\r\n\x00") {
 		return sql.NullString{}, fmt.Errorf("%w: path_prefix is invalid", ErrInvalidInput)
 	}
 	return nullableString(*value), nil

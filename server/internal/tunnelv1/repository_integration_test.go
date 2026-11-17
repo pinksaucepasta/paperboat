@@ -510,7 +510,7 @@ func trk07RouteInput(f *trk07PostgresFixture, accountID, hostID, tunnelID, route
 	hash := sha256.Sum256([]byte("route:" + routeID))
 	return RouteRecord{
 		OperationID: "op_" + routeID, AuditEventID: "aud_" + routeID, AccountID: accountID, TunnelID: tunnelID,
-		RouteID: routeID, Name: name, Protocol: "http", MatchType: "exact", Hostname: nullableString(hostname),
+		RouteID: routeID, Name: name, Protocol: "http", MatchType: "exact", Hostname: nullableString(strings.ReplaceAll(hostname, "_", "-")), // a DNS name has no underscore (the API refuses one)
 		PathPrefix: sql.NullString{}, Origin: RouteOriginRequest{Scheme: "http", Address: "127.0.0.1:8080", PreserveHost: true},
 		Priority: 10, ConnectTimeoutMS: 10000, IdleTimeoutMS: 90000, MaxConcurrentStreams: 128, DesiredState: "active",
 		IdempotencyKey: "route:" + routeID, RequestHash: hash, ActorID: accountID, AuditActorID: accountID, ActorType: "user",

@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"strings"
 	"testing"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
@@ -38,5 +39,26 @@ func TestInitialConfigSnapshotRefusesWhatConsumersRefuse(t *testing.T) {
 		OriginScheme: "http", OriginAddress: "127.0.0.1:3000", TlsVerification: "not_applicable", ConnectTimeoutMs: 10000, IdleTimeoutMs: 300000, MaxConcurrentStreams: 1024, DesiredState: "active"}
 	if _, err := initialConfigSnapshot(tunnel, route); err == nil {
 		t.Fatal("a snapshot with an invalid stable endpoint id was produced")
+	}
+}
+
+// The API refuses at write time what the snapshot validator would refuse at store time, so an accepted route can never
+// fail its own snapshot: a path prefix over 512 bytes and a credential reference that is not a clean handle.
+func TestRouteInputsAreNoLooserThanTheSnapshotValidator(t *testing.T) {
+	long := "/" + strings.Repeat("a", 512)
+	if _, err := normalizePathPrefix(&long); err == nil {
+		t.Error("a 513-byte path_prefix was accepted")
+	}
+	ok := "/" + strings.Repeat("a", 511)
+	if _, err := normalizePathPrefix(&ok); err != nil {
+		t.Errorf("a 512-byte path_prefix was refused: %v", err)
+	}
+	for _, reference := range []string{"keychain://paperboat/origins/rte_1/client/", "keychain://paperboat/origins/../rte_1/client", "keychain://paperboat//origins/rte_1/client"} {
+		if validateWriteOnlyReference(reference) == nil {
+			t.Errorf("unclean reference %q accepted", reference)
+		}
+	}
+	if err := validateWriteOnlyReference("keychain://paperboat/origins/rte_1/client"); err != nil {
+		t.Errorf("clean reference refused: %v", err)
 	}
 }
