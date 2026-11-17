@@ -81,11 +81,11 @@ func TestTask26CrossRepositoryRestrictedBrowserHTTP2(t *testing.T) {
 	authority := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		machineCalls.Add(1)
 		if r.Method != "POST" || r.URL.Path != "/v1/browser-access/ingress/authorize" || r.Header.Get("Authorization") != "Bearer task26-machine-fixture" || r.Header.Get("X-Paperboat-Machine-Identity") != "task26-machine-fixture" || r.Header.Get("X-Paperboat-Machine-Proof") == "" || r.Header.Get("Idempotency-Key") == "" {
-			http.Error(w, "invalid machine proof fixture", 401)
+			http.Error(w, "invalid machine proof fixture", http.StatusUnauthorized)
 			return
 		}
 		if controlLost.Load() {
-			http.Error(w, "control unavailable", 503)
+			http.Error(w, "control unavailable", http.StatusServiceUnavailable)
 			return
 		}
 		if daemonDenied.Load() || browser.revoked.Load() {

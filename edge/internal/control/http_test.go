@@ -429,8 +429,7 @@ func TestHeartbeatAnswerCarriesIngressLimits(t *testing.T) {
 // server answers "unchanged", so an idle edge does not re-receive its whole route set.
 func TestHTTPClientRouteSnapshotAsksForAVersion(t *testing.T) {
 	var sent []string
-	var client *HTTPClient
-	client = controlClient(t, func(r *http.Request) (*http.Response, error) {
+	client := controlClient(t, func(r *http.Request) (*http.Response, error) {
 		var in struct {
 			Version string `json:"version"`
 		}

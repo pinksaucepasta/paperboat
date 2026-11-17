@@ -426,6 +426,4 @@ func TestTask365ServerIssuedTLSProcesses(t *testing.T) {
 		}
 	}
 	t.Log("shared TCP443 HTTPS HTTP/2, WebSocket upgrade bytes and two distinct TLS origins, self-hosted-only TLS forwarding, managed isolation, pairing revocation and re-pair recovery passed")
-	return
-
 }

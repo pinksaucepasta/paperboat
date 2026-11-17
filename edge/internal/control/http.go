@@ -171,7 +171,7 @@ func NewHTTPClient(config HTTPConfig) (*HTTPClient, error) {
 	return &HTTPClient{base: base, credential: config.Credential, client: client, onDemand: &onDemand, ingress: &ingress, longPoll: &longPoll, controlTrace: config.ControlTrace, controlFailure: config.ControlFailure, nodeReady: config.NodeReady}, nil
 }
 
-// ErrNodeNotReady: the request was not sent because the edge process is not ready yet.
+// ErrNodeNotReady means the request was not sent because the edge process is not ready yet.
 var ErrNodeNotReady = errors.New("edge node is not ready yet")
 
 // awaitNodeReady holds a request the server would refuse from an unready node; it sends nothing.

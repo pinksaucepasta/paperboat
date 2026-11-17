@@ -1330,8 +1330,8 @@ func (w *RouteWorker) probeCanonicalGroup(ctx context.Context, assignments []con
 		if err := w.Carrier.ProbeRoutes(ctx, tcpRules); err != nil {
 			return err
 		}
-		binder, ok := w.PublicTCP.(PublicTCPRouteBinder)
-		if !ok {
+		binder := w.PublicTCP
+		if binder == nil {
 			return route.ErrGenerationNotReady
 		}
 		if err := binder.PrepareTCPRoutes(ctx, tcpRules); err != nil {

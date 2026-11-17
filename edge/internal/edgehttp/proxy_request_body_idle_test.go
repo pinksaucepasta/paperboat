@@ -43,7 +43,7 @@ func TestRequestBodyIdleTimeoutCutsOnlyAStalledUpload(t *testing.T) {
 		} else {
 			server.Start()
 		}
-		upload := func(path string, send func(*io.PipeWriter)) (error, time.Duration) {
+		upload := func(path string, send func(*io.PipeWriter)) (time.Duration, error) {
 			t.Helper()
 			reader, writer := io.Pipe()
 			defer writer.Close() // a failed check must not leave the handler waiting on the upload
@@ -57,17 +57,17 @@ func TestRequestBodyIdleTimeoutCutsOnlyAStalledUpload(t *testing.T) {
 			}()
 			select {
 			case err := <-results:
-				return err, time.Since(started)
+				return time.Since(started), err
 			case <-time.After(5 * time.Second):
 				t.Fatalf("h2=%t %s: handler never finished reading", h2, path)
-				return nil, 0
+				return 0, nil
 			}
 		}
-		err, took := upload("/stalled", func(w *io.PipeWriter) { _, _ = w.Write([]byte("x")) }) // then silence
+		took, err := upload("/stalled", func(w *io.PipeWriter) { _, _ = w.Write([]byte("x")) }) // then silence
 		if !errors.Is(err, errRequestBodyIdle) || took > 2*time.Second {
 			t.Fatalf("h2=%t stalled upload: err=%v after %s, want errRequestBodyIdle soon after %s", h2, err, took, idle)
 		}
-		if err, _ := upload("/slow", func(w *io.PipeWriter) {
+		if _, err := upload("/slow", func(w *io.PipeWriter) {
 			for range 6 {
 				_, _ = w.Write([]byte("x"))
 				time.Sleep(idle / 2)
@@ -76,7 +76,7 @@ func TestRequestBodyIdleTimeoutCutsOnlyAStalledUpload(t *testing.T) {
 		}); err != nil {
 			t.Fatalf("h2=%t slow but moving upload was cut: %v", h2, err)
 		}
-		if err, _ := upload("/backpressure", func(w *io.PipeWriter) {
+		if _, err := upload("/backpressure", func(w *io.PipeWriter) {
 			_, _ = io.Copy(w, strings.NewReader("abc"))
 			_ = w.Close()
 		}); err != nil {

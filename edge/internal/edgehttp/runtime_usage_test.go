@@ -19,7 +19,6 @@ import (
 
 type recordingUsage struct {
 	mu       sync.Mutex
-	records  []string
 	exhaust  map[string]func()
 	recorded map[string][2]uint64
 }

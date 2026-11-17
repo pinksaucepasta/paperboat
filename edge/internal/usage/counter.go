@@ -105,7 +105,7 @@ func (c *Counters) Snapshot() []CounterRecord {
 	return result
 }
 
-// Restore accepts durable revision partitions, deduplicates identical records by
+// RestoreCounters accepts durable revision partitions, deduplicates identical records by
 // their maximum absolute value, and sums distinct partitions once. The next
 // snapshot writes exactly one cumulative record per server counter identity.
 func RestoreCounters(records []CounterRecord) *Counters {

@@ -293,6 +293,8 @@ func offer(conn *net.UnixConn, epoch string, certificates func() ([][]byte, erro
 
 // held keeps the released exchange's connection open (and out of the collector's reach) until
 // this process exits.
+//
+//lint:ignore U1000 only the assignment matters: the package variable keeps the connection reachable
 var held *net.UnixConn
 
 // peerUID is the user a handover peer must be; a variable so a test can name another one.

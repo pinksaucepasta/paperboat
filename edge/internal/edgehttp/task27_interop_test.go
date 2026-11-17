@@ -203,7 +203,7 @@ func TestTask27CrossRepositoryLazyActivation(t *testing.T) {
 	machineAuthority := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		machineCalls.Add(1)
 		if r.Method != http.MethodPost || r.URL.Path != "/v1/browser-access/ingress/authorize" || r.Header.Get("X-Paperboat-Machine-Proof") == "" {
-			http.Error(w, "invalid machine proof", 401)
+			http.Error(w, "invalid machine proof", http.StatusUnauthorized)
 			return
 		}
 		var input struct {

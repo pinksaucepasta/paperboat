@@ -15,12 +15,12 @@ import (
 	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 )
 
-// ForwardPublicTCP forwards one connection already accepted by the listener
-// named in a current server decision. Listener allocation and lifecycle remain
-// with the caller. This method takes ownership of connection and closes it on return.
 // ErrAddressRestricted reports a client address the owner's IP lists refuse; the stream is closed.
 var ErrAddressRestricted = errors.New("client address refused by the owner's IP rules")
 
+// ForwardPublicTCP forwards one connection already accepted by the listener
+// named in a current server decision. Listener allocation and lifecycle remain
+// with the caller. This method takes ownership of connection and closes it on return.
 func (r *DataCarrierRouteRegistry) ForwardPublicTCP(ctx context.Context, connection net.Conn, decision connectorprotocol.IngressDecision, currentAuthority func(context.Context, connectorprotocol.IngressDecision) (connectorprotocol.IngressDecision, error)) error {
 	if connection != nil {
 		defer connection.Close()

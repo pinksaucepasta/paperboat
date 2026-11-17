@@ -600,11 +600,7 @@ func TestTask30DockerEdgeRecovery(t *testing.T) {
 		return
 	}
 	before := client("before", ips, ips)
-	failed := 0
-	if before.Edge == nodes[1].NodeID {
-		failed = 1
-	}
-	survivor := 1 - failed
+	var failed, survivor int // which edge the held client reached decides, below, which one is killed
 	var interrupted task30ClientResult
 	heldContainer := ""
 	{

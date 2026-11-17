@@ -457,7 +457,7 @@ func TestPrivatePreviewGrantReachesTLSHTTPIngress(t *testing.T) {
 			if !revoked.Load() {
 				t.Errorf("private origin transport: %v", err)
 			}
-			http.Error(w, "origin failed", 502)
+			http.Error(w, "origin failed", http.StatusBadGateway)
 			return
 		}
 		defer response.Body.Close()

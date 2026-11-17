@@ -17,10 +17,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/shared/terminalend"
 )
 
-// BrowserTerminalAdmission is a live control-plane grant. Closing it releases
-// the control plane's attachment reservation; Closed also fires on revocation,
-// a failed policy check, or a missing heartbeat.
-// BrowserTerminalRefused: the control plane refused the admission and said why (the reason the server closed the
+// BrowserTerminalRefused means the control plane refused the admission and said why (the reason the server closed the
 // control channel with). The edge closes the browser's WebSocket with that reason.
 type BrowserTerminalRefused struct{ Reason terminalend.Reason }
 
@@ -37,6 +34,9 @@ func controlReason(closed websocket.CloseError) terminalend.Reason {
 	return terminalend.EdgeUnavailable
 }
 
+// BrowserTerminalAdmission is a live control-plane grant. Closing it releases
+// the control plane's attachment reservation; Closed also fires on revocation,
+// a failed policy check, or a missing heartbeat.
 type BrowserTerminalAdmission struct {
 	Credential        string
 	TerminalSessionID string

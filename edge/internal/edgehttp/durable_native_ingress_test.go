@@ -117,7 +117,7 @@ func testPrivateDurableGrantReachesTLSHTTPIngress(t *testing.T, afterExpiry bool
 			if !refused {
 				t.Errorf("private origin transport: %v", err)
 			}
-			http.Error(w, "origin failed", 502)
+			http.Error(w, "origin failed", http.StatusBadGateway)
 			return
 		}
 		defer response.Body.Close()
