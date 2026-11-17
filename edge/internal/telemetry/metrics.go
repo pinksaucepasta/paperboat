@@ -103,8 +103,3 @@ func MetricDescriptors() []sharedmetrics.Descriptor {
 
 // NewMetrics returns the metric store for this binary's descriptors.
 func NewMetrics() *sharedmetrics.Metrics { return sharedmetrics.New(fixedMetricDescriptors, 0) }
-
-// NewMetricsWithLimit is NewMetrics with at most maxSeries live series.
-func NewMetricsWithLimit(maxSeries int) *sharedmetrics.Metrics {
-	return sharedmetrics.New(fixedMetricDescriptors, maxSeries)
-}

@@ -20,6 +20,7 @@ func flushPendingOutput(master int) { flushPeer(master, 0x0002) } // FWRITE: the
 
 func flushPeer(master int, queue int32) {
 	var name [128]byte
+	//lint:ignore SA1019 x/sys has no wrapper that reads TIOCPTYGNAME's name buffer (no IoctlGetString); only the SYS_ constants are deprecated
 	if _, _, errno := unix.Syscall(unix.SYS_IOCTL, uintptr(master), unix.TIOCPTYGNAME, uintptr(unsafe.Pointer(&name[0]))); errno != 0 {
 		return
 	}
@@ -32,5 +33,5 @@ func flushPeer(master int, queue int32) {
 		return
 	}
 	defer unix.Close(peer)
-	_, _, _ = unix.Syscall(unix.SYS_IOCTL, uintptr(peer), unix.TIOCFLUSH, uintptr(unsafe.Pointer(&queue)))
+	_ = unix.IoctlSetPointerInt(peer, unix.TIOCFLUSH, int(queue)) // TIOCFLUSH takes an int *
 }
