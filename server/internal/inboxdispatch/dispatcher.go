@@ -328,6 +328,7 @@ func (d *Dispatcher) call(ctx context.Context, method, class, scope string, requ
 	httpRequest.Header.Set("X-Paperboat-Operation-Id", request.OperationID)
 	httpRequest.Header.Set("Cache-Control", "no-store")
 	client := *d.client
+	//paperboat:allow-source-policy default-http owner=inboxdispatch reason=owned-clone-header-timeout-no-redirect
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	if base, ok := d.client.Transport.(*http.Transport); ok && base != nil {
 		transport = base.Clone()

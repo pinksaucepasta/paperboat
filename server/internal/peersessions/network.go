@@ -980,6 +980,7 @@ func (s *NetworkService) regionalCandidates(rows []relayNodeRow, accountID, endp
 		observed, expires, capacityAt, drain, selfHosted := r.observed, r.expires, r.capacityAt, r.drain, r.selfHosted
 		// A node whose row clients would refuse is left out; it never withholds the other relays.
 		if json.Unmarshal(roles, &n.Roles) != nil || json.Unmarshal(transports, &n.Transports) != nil || tcpPort < 0 || tcpPort > 65535 || quicPort < 0 || quicPort > 65535 || len(pin) != 0 && len(pin) != sha256.Size {
+			//paperboat:allow-source-policy sensitive-log owner=peersessions reason=node-id-only-no-secret
 			slog.Warn("regional candidates omit a relay with an invalid registry row", "site", "network.go:regionalCandidates", "node", n.NodeID)
 			continue
 		}
@@ -1032,6 +1033,7 @@ func boundGrants[T any](grants []T) []T {
 	if len(grants) <= maximumNetworkGrants {
 		return grants
 	}
+	//paperboat:allow-source-policy sensitive-log owner=peersessions reason=counts-only-no-secret-values
 	slog.Warn("peer network configuration dropped the oldest access sessions", "kept", maximumNetworkGrants, "candidates", len(grants))
 	return grants[:maximumNetworkGrants]
 }

@@ -89,6 +89,7 @@ func warnNodeRefusal(r *http.Request) {
 		node = claimed.EdgeNodeID
 	}
 	slog.WarnContext(r.Context(), "node request refused", "path", r.URL.Path, "remote_addr", r.RemoteAddr,
+		//paperboat:allow-source-policy proxy-header owner=server-controlplane reason=refusal-log-only-no-auth
 		"forwarded_for", r.Header.Get("X-Forwarded-For"), "claimed_node_id", node,
 		"bearer_present", nodeauth.Bearer(r) != "", "user_agent", r.UserAgent())
 }
