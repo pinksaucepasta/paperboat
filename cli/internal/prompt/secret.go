@@ -140,6 +140,6 @@ func (m secretModel) render() string {
 	if m.err != nil {
 		lines = append(lines, "", styles.err.Render(promptLine("  "+m.err.Error(), width)))
 	}
-	lines = append(lines, "", styles.help.Render(promptLine(promptFooter(m.options.Context, "continue", "cancel"), width)))
+	lines = append(lines, "", styles.help.Render(promptLine(promptFooter(m.options.Context, width, "continue", "cancel"), width)))
 	return strings.Join(lines, "\n")
 }

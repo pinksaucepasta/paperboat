@@ -472,7 +472,7 @@ func actionHomeSendToMachine(command *cobra.Command, machine api.UserMachine) er
 		}
 		items = append(items, selector.Item{ID: path, Title: display, Description: "File"})
 	}
-	selection, err := selector.ChooseWithAction(selector.Options{Title: "Send files to " + machine.Alias, Subtitle: "Type to fuzzy-search files in your home folder", Items: items, Empty: "Start typing to search", RequireFilter: true, Footer: "type to search  enter/click send  ctrl+p paste or drop paths  esc back", Actions: map[string]string{"ctrl+p": "paths"}, Stdin: os.Stdin, Context: command.Context(), Output: command.ErrOrStderr()})
+	selection, err := selector.ChooseWithAction(selector.Options{Title: "Send files to " + machine.Alias, Subtitle: "Type to fuzzy-search files in your home folder", Items: items, Empty: "Start typing to search", RequireFilter: true, Footer: "type to search  enter send  ctrl+p paste or drop paths  esc back", Actions: map[string]string{"ctrl+p": "paths"}, Stdin: os.Stdin, Context: command.Context(), Output: command.ErrOrStderr()})
 	if err != nil {
 		return err
 	}

@@ -4,8 +4,10 @@ import (
 	"context"
 	"io"
 	"os"
+	"slices"
 	"strings"
 
+	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -71,20 +73,21 @@ func (m confirmModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.description.SetContent(wrapped)
 		return m, nil
 	}
-	if key, ok := message.(tea.KeyPressMsg); ok {
-		value := strings.ToLower(key.String())
+	if press, ok := message.(tea.KeyPressMsg); ok {
+		value := strings.ToLower(press.String())
+		yes, no := m.bindings()
 		if value == "ctrl+c" || selector.KeyMatches(m.options.Context, "back", value) {
 			m.done = true
 			return m, tea.Quit
 		}
-		if selector.KeyMatches(m.options.Context, "select", value) || value == "y" {
+		if slices.Contains(yes.Keys(), value) {
 			if m.height > 0 && m.height < 8 {
 				return m, nil
 			}
 			m.yes, m.done = true, true
 			return m, tea.Quit
 		}
-		if value == "n" {
+		if slices.Contains(no.Keys(), value) {
 			m.done = true
 			return m, tea.Quit
 		}
@@ -117,14 +120,20 @@ func (m confirmModel) render() string {
 		// including compact mode. Keep all text available through scrolling.
 		lines = append(lines, "", styles.help.Render(m.description.View()))
 	}
-	lines = append(lines, "", promptLine("  Confirm", width), "", styles.help.Render(promptLine(promptConfirmFooter(m.options.Context), width)))
+	lines = append(lines, "", promptLine("  Confirm", width), "", styles.help.Render(promptLine(promptConfirmFooter(m, width), width)))
 	if m.description.TotalLineCount() > m.description.Height() {
-		lines = append(lines, styles.help.Render(promptLine(selector.HelpKeys(m.options.Context)["up"]+"/"+selector.HelpKeys(m.options.Context)["down"]+" · PgUp/PgDn scroll", width)))
+		lines = append(lines, styles.help.Render(promptLine(selector.Footer(width, selector.Move(m.options.Context, "scroll"), selector.Hint("PgUp/PgDn", "page", "pgup", "pgdown")), width)))
 	}
 	return strings.Join(lines, "\n")
 }
 
-func promptConfirmFooter(ctx context.Context) string {
-	keys := selector.HelpKeys(ctx)
-	return keys["select"] + "/y confirm  n/" + keys["back"] + "/" + keys["interrupt"] + " cancel"
+// bindings are the confirm and cancel keys: matching and the footer both use them.
+func (m confirmModel) bindings() (yes, no key.Binding) {
+	ctx := m.options.Context
+	return selector.Extend(selector.Binding(ctx, "select", "confirm"), "confirm", "y"), selector.Extend(selector.Leave(ctx, "cancel"), "cancel", "n")
+}
+
+func promptConfirmFooter(m confirmModel, width int) string {
+	yes, no := m.bindings()
+	return selector.Footer(width, yes, no)
 }

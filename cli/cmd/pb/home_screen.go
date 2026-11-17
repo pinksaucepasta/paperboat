@@ -38,16 +38,17 @@ func actionHome(command *cobra.Command) error {
 	primeHomeFileIndex(command.Context())
 	revealEmail := false
 	for {
-		emailAction := "ctrl+e show email"
+		emailAction := "show email"
 		if revealEmail {
-			emailAction = "ctrl+e hide email"
+			emailAction = "hide email"
 		}
+		ctx := command.Context()
 		selection, err := selector.ChooseWithAction(selector.Options{
 			Header:  homeBrand(command, revealEmail),
 			Title:   "What do you want to do?",
 			Stdin:   os.Stdin,
 			Context: command.Context(), Output: command.ErrOrStderr(),
-			Footer:        "↑/↓ move  enter/click select  " + emailAction + "  esc exit",
+			Footer:        selector.Footer(0, selector.Move(ctx, "move"), selector.Binding(ctx, "select", "select"), selector.Hint("Ctrl+E", emailAction, "ctrl+e"), selector.Binding(ctx, "back", "exit")),
 			Actions:       map[string]string{"ctrl+e": "toggle-email"},
 			HeaderActions: map[int]string{2: "toggle-email"},
 			Items:         personalizedHomeItems(preferences.FromContext(command.Context())),

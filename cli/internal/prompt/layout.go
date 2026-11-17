@@ -2,7 +2,6 @@ package prompt
 
 import (
 	"context"
-	"fmt"
 	"strings"
 
 	"charm.land/bubbles/v2/textinput"
@@ -39,9 +38,8 @@ func configureInputStyles(input *textinput.Model, ctx context.Context) {
 	input.SetStyles(styles)
 }
 
-func promptFooter(ctx context.Context, confirm, cancel string) string {
-	keys := selector.HelpKeys(ctx)
-	return fmt.Sprintf("%s %s  %s/%s %s", keys["select"], confirm, keys["back"], keys["interrupt"], cancel)
+func promptFooter(ctx context.Context, width int, confirm, cancel string) string {
+	return selector.Footer(width, selector.Binding(ctx, "select", confirm), selector.Leave(ctx, cancel))
 }
 
 func promptWidth(width int) int {

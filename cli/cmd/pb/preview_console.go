@@ -12,6 +12,7 @@ import (
 	"time"
 	"unicode"
 
+	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textinput"
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
@@ -172,22 +173,22 @@ func (m previewConsoleModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.input, cmd = m.input.Update(v)
 		return m, cmd
 	case tea.KeyPressMsg:
-		key := v.String()
-		if key == "ctrl+c" {
+		pressed := v.String()
+		if pressed == "ctrl+c" {
 			return m, tea.Quit
 		}
 		if m.busy {
-			if key == "esc" {
+			if pressed == "esc" {
 				return m, tea.Quit
 			}
 			return m, nil
 		}
 		if m.prompt != "" {
-			if key == "esc" {
+			if pressed == "esc" {
 				m.prompt = ""
 				return m, nil
 			}
-			if key == "enter" {
+			if pressed == "enter" {
 				value := strings.TrimSpace(m.input.Value())
 				if value == "" {
 					return m, nil
@@ -202,19 +203,19 @@ func (m previewConsoleModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.input, cmd = m.input.Update(v)
 			return m, cmd
 		}
-		keys := previewConsoleKeys(m.ctx)
+		open, background, tunnel, stop, leave := m.bindings()
 		switch {
-		case key == keys["preview_stop"] || key == "esc":
+		case key.Matches(v, stop, leave):
 			return m, tea.Quit
-		case key == keys["preview_open"]:
+		case key.Matches(v, open):
 			m.busy = true
 			return m, m.perform("open", "")
-		case key == keys["preview_background"]:
+		case key.Matches(v, background):
 			m.prompt = "background"
 			m.input.SetValue("30m")
 			m.input.Focus()
 			return m, textinput.Blink
-		case key == keys["preview_tunnel"]:
+		case key.Matches(v, tunnel):
 			if len(m.domains) > 0 {
 				m.status = "Custom domains cannot be moved automatically. Keep this preview, or create a tunnel with a different domain."
 				return m, nil
@@ -314,6 +315,13 @@ func previewConsoleKeys(ctx context.Context) map[string]string {
 	return keys
 }
 
+// bindings are the console's keys: Update matches them and the footer is drawn from them.
+func (m previewConsoleModel) bindings() (open, background, tunnel, stop, leave key.Binding) {
+	keys := previewConsoleKeys(m.ctx)
+	bind := func(action, desc string) key.Binding { return selector.Hint(keys[action], desc, keys[action]) }
+	return bind("preview_open", "open"), bind("preview_background", "background"), bind("preview_tunnel", "tunnel"), bind("preview_stop", "stop"), selector.Leave(m.ctx, "stop")
+}
+
 func (m previewConsoleModel) frame() ([]string, []string) {
 	header := []string{"PAPERBOAT PREVIEW", m.lease.Endpoint, "Status  " + m.lease.State}
 	footer := []string{}
@@ -329,10 +337,10 @@ func (m previewConsoleModel) frame() ([]string, []string) {
 	if m.prompt == "tunnel" {
 		footer = append(footer, "Tunnel name: "+m.input.View(), "Creates a durable tunnel with a new URL.")
 	}
-	keys := previewConsoleKeys(m.ctx)
-	actions := fmt.Sprintf("%s open · %s background · %s tunnel · %s stop", keys["preview_open"], keys["preview_background"], keys["preview_tunnel"], keys["preview_stop"])
+	open, background, tunnel, stop, leave := m.bindings()
+	actions := selector.Footer(0, open, background, tunnel, stop)
 	footer = append(footer, strings.Split(ansi.Hardwrap(actions, max(1, m.width), true), "\n")...)
-	footer = append(footer, "Esc/Ctrl+C stop · ↑/↓ scroll · pgup/pgdn page")
+	footer = append(footer, selector.Footer(m.width, leave, selector.Move(m.ctx, "scroll"), selector.Hint("PgUp/PgDn", "page", "pgup", "pgdown")))
 	for i := range header {
 		header[i] = ansi.Truncate(previewConsoleLine(header[i]), m.width, "…")
 	}

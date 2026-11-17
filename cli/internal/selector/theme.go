@@ -182,12 +182,7 @@ func KeyMatches(ctx context.Context, action, key string) bool {
 	if action == "interrupt" {
 		return key == "ctrl+c"
 	}
-	for _, candidate := range actionKeys(ctx, action) {
-		if key == candidate {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(Binding(ctx, action, "").Keys(), key)
 }
 
 func actionKeys(ctx context.Context, action string) []string {
@@ -219,7 +214,7 @@ func actionKeys(ctx context.Context, action string) []string {
 func HelpKeys(ctx context.Context) map[string]string {
 	keys := make(map[string]string, 8)
 	for _, action := range []string{"up", "down", "select", "back", "interrupt"} {
-		keys[action] = joinKeyLabels(actionKeys(ctx, action))
+		keys[action] = Binding(ctx, action, "").Help().Key
 	}
 	for action := range preferences.FromContext(ctx).TUI.Keys {
 		if _, ok := keys[action]; !ok {
@@ -274,7 +269,6 @@ func keyLabel(key string) string {
 	return key
 }
 
-func loadingFooter(ctx context.Context) string {
-	keys := HelpKeys(ctx)
-	return keys["back"] + "/" + keys["interrupt"] + " cancel"
+func loadingFooter(ctx context.Context, width int) string {
+	return Footer(width, Leave(ctx, "cancel"))
 }

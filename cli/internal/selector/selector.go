@@ -459,13 +459,13 @@ func (m loadingModel) render() string {
 	}
 	lines = append(lines, "", truncateLine(fmt.Sprintf("  %c  %s", "|/-\\"[m.frame], SanitizeText(m.detail)), lineWidth))
 	if height == 1 {
-		return styles.help.Render(truncateLine(loadingFooter(m.ctx), lineWidth))
+		return styles.help.Render(loadingFooter(m.ctx, lineWidth))
 	}
 	lines = lines[:min(len(lines), height-1)]
 	for len(lines) < height-1 {
 		lines = append(lines, "")
 	}
-	lines = append(lines, styles.help.Render(truncateLine(loadingFooter(m.ctx), lineWidth)))
+	lines = append(lines, styles.help.Render(loadingFooter(m.ctx, lineWidth)))
 	return strings.Join(lines, "\n")
 }
 
@@ -837,8 +837,8 @@ func (m chooserModel) render() string {
 	}
 	footer := m.options.Footer
 	if footer == "" {
-		keys := HelpKeys(m.options.Context)
-		footer = fmt.Sprintf("%s/%s move  %s/click select  backspace filter  %s back  %s interrupt", keys["up"], keys["down"], keys["select"], keys["back"], keys["interrupt"])
+		ctx := m.options.Context
+		footer = Footer(lineWidth, Move(ctx, "move"), Binding(ctx, "select", "select"), Hint("type", "filter", "type"), Binding(ctx, "back", "back"), Binding(ctx, "interrupt", "interrupt"))
 	}
 	filterLabel := "Filter"
 	if m.choices.requireFilter {

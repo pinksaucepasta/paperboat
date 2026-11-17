@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -176,5 +177,34 @@ func TestFirstPaintHasNoAccentUntilBackgroundIsKnown(t *testing.T) {
 	ObserveBackground(tea.BackgroundColorMsg{Color: color.Black})
 	if dark := accentColor(preferences.TUI{}); light == nil || dark == nil || reflect.DeepEqual(light, dark) {
 		t.Fatalf("light and dark accents = %#v / %#v", light, dark)
+	}
+}
+
+func TestFooterIsDrawnFromTheBindingsThatHandleKeys(t *testing.T) {
+	ctx := preferences.WithContext(context.Background(), preferences.Document{Version: 1, TUI: preferences.TUI{Keys: map[string]string{"select": "ctrl+j", "back": "alt+left"}}})
+	footer := Footer(0, Move(ctx, "move"), Binding(ctx, "select", "select"), Binding(ctx, "back", "back"), Leave(ctx, "cancel"))
+	for _, want := range []string{"↑/↓ move", "Enter/Ctrl+J select", "Esc/Alt+← back", "Esc/Alt+←/Ctrl+C cancel"} {
+		if !strings.Contains(footer, want) {
+			t.Errorf("footer %q lacks %q", footer, want)
+		}
+	}
+	custom := preferences.WithContext(context.Background(), preferences.Document{Version: 1, TUI: preferences.TUI{Keys: map[string]string{"up": "ctrl+u"}}})
+	if got := Move(custom, "move"); got.Help().Key != "↑/↓/Ctrl+U" || !key.Matches(tea.KeyPressMsg{Code: 'k', Mod: tea.ModCtrl}, got) {
+		t.Errorf("move label %q must name the added key and still match the built-in aliases", got.Help().Key)
+	}
+	// every key a footer names is matched by the handler, and the reverse.
+	for _, key := range []string{"enter", "ctrl+j"} {
+		if !KeyMatches(ctx, "select", key) {
+			t.Errorf("footer names %q but select ignores it", key)
+		}
+	}
+	if KeyMatches(ctx, "select", "y") || KeyMatches(ctx, "select", "q") {
+		t.Error("select matched a key the footer does not name")
+	}
+	if got := Footer(30, Move(ctx, "move"), Binding(ctx, "select", "select")); strings.Contains(got, "sele") && !strings.Contains(got, "select") {
+		t.Errorf("footer cut an item in half: %q", got)
+	}
+	if got := Footer(30, Move(ctx, "move"), Binding(ctx, "select", "select")); ansi.StringWidth(got) > 30 {
+		t.Errorf("footer is %d wide at width 30: %q", ansi.StringWidth(got), got)
 	}
 }

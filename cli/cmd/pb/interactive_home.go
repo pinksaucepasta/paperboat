@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -604,7 +605,8 @@ func (m homeTextModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.view.SetHeight(max(1, m.height-4))
 		m.view.SetContent(ansi.Hardwrap(m.content, m.width, true))
 	case tea.KeyPressMsg:
-		if selector.KeyMatches(m.ctx, "back", msg.String()) || selector.KeyMatches(m.ctx, "select", msg.String()) {
+		leave, _, _ := m.bindings()
+		if key.Matches(msg, leave) {
 			return m, tea.Quit
 		}
 		if selector.KeyMatches(m.ctx, "up", msg.String()) {
@@ -624,11 +626,19 @@ func (m homeTextModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	m.view, cmd = m.view.Update(message)
 	return m, cmd
 }
+
+// bindings are the viewer's keys: Update matches them and the footer is drawn from them.
+func (m homeTextModel) bindings() (leave, scroll, page key.Binding) {
+	back := selector.Binding(m.ctx, "back", "back")
+	leave = selector.Extend(back, "back", selector.Binding(m.ctx, "select", "").Keys()...)
+	return leave, selector.Move(m.ctx, "scroll"), selector.Hint("PgUp/PgDn", "page", "pgup", "pgdown")
+}
+
 func (m homeTextModel) View() tea.View { return selector.NewView(m.render()) }
 func (m homeTextModel) render() string {
 	title := selector.TitleStyle(m.ctx).Render(ansi.Truncate(m.title, m.width, "…"))
-	keys := selector.HelpKeys(m.ctx)
-	rendered := title + "\n\n" + m.view.View() + "\n" + ansi.Truncate(keys["up"]+"/"+keys["down"]+" scroll · PgUp/PgDn page · "+keys["back"]+" back", m.width, "…")
+	leave, scroll, page := m.bindings()
+	rendered := title + "\n\n" + m.view.View() + "\n" + ansi.Truncate(selector.Footer(m.width, scroll, page, leave), m.width, "…")
 	lines := strings.Split(rendered, "\n")
 	return strings.Join(lines[:min(len(lines), max(1, m.height))], "\n")
 }
