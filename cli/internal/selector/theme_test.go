@@ -93,3 +93,39 @@ func TestChooserResizeUsesDensityForMouseRows(t *testing.T) {
 func containsPlain(value, want string) bool {
 	return strings.Contains(ansi.Strip(value), want)
 }
+
+func TestNoColorEnvironmentStripsEveryThemeColor(t *testing.T) {
+	ctx := preferences.WithContext(context.Background(), preferences.Document{Version: 1, TUI: preferences.TUI{Theme: "dark", Accent: "#123456"}})
+	if _, ok := TitleStyle(ctx).GetForeground().(lipgloss.NoColor); ok {
+		t.Fatal("test needs a coloured baseline")
+	}
+	t.Setenv("NO_COLOR", "1")
+	styles := stylesForContext(ctx)
+	for name, style := range map[string]lipgloss.Style{"title": styles.title, "accent": styles.accent, "action": styles.action, "filter": styles.filter, "error": styles.error} {
+		if _, ok := style.GetForeground().(lipgloss.NoColor); !ok {
+			t.Errorf("NO_COLOR left a %s foreground: %#v", name, style.GetForeground())
+		}
+		if _, ok := style.GetBackground().(lipgloss.NoColor); !ok {
+			t.Errorf("NO_COLOR left a %s background: %#v", name, style.GetBackground())
+		}
+	}
+	if !styles.selected.GetReverse() || !styles.title.GetBold() {
+		t.Fatal("NO_COLOR must keep the non-colour emphasis")
+	}
+	t.Setenv("NO_COLOR", "")
+	if _, ok := TitleStyle(ctx).GetForeground().(lipgloss.NoColor); ok {
+		t.Fatal("an empty NO_COLOR must not strip colour")
+	}
+}
+
+func TestStylesAreBuiltOncePerThemeNotPerFrame(t *testing.T) {
+	ctx := preferences.WithContext(context.Background(), preferences.Document{Version: 1, TUI: preferences.TUI{Theme: "light", Accent: "#0a0b0c"}})
+	stylesForContext(ctx)
+	before := styleBuilds.Load()
+	for range 100 {
+		stylesForContext(ctx)
+	}
+	if built := styleBuilds.Load() - before; built != 0 {
+		t.Fatalf("styles rebuilt %d times for an unchanged theme", built)
+	}
+}

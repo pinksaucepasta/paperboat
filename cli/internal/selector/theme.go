@@ -3,8 +3,10 @@ package selector
 import (
 	"context"
 	"image/color"
+	"os"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 
 	tea "charm.land/bubbletea/v2"
@@ -27,8 +29,37 @@ type styleSet struct {
 	error          lipgloss.Style
 }
 
+// styleKey is everything a styleSet depends on, so a frame costs one map lookup.
+type styleKey struct {
+	theme, accent  string
+	light, noColor bool
+}
+
+var (
+	styleCache  sync.Map // styleKey -> styleSet
+	styleBuilds atomic.Int64
+)
+
+// noColor follows https://no-color.org: any non-empty NO_COLOR means mono.
+func noColor() bool { return os.Getenv("NO_COLOR") != "" }
+
 func stylesForContext(ctx context.Context) styleSet {
-	doc := preferences.FromContext(ctx)
+	tui := preferences.FromContext(ctx).TUI
+	key := styleKey{theme: tui.Theme, accent: tui.Accent, light: lightBackground.Load(), noColor: noColor()}
+	if cached, ok := styleCache.Load(key); ok {
+		return cached.(styleSet)
+	}
+	styles := buildStyles(tui, key.noColor)
+	styleCache.Store(key, styles)
+	return styles
+}
+
+func buildStyles(tui preferences.TUI, mono bool) styleSet {
+	styleBuilds.Add(1)
+	doc := preferences.Document{TUI: tui}
+	if mono {
+		doc.TUI.Theme = "mono"
+	}
 	accent := accentColor(doc.TUI)
 	accentStyle := lipgloss.NewStyle()
 	if accent != nil {
