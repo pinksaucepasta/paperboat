@@ -236,6 +236,11 @@ func TestFailedStepAfterACommittedUpdateKeepsTheNewVersionAndNamesTheStep(t *tes
 	if err == nil || !strings.Contains(err.Error(), "new Paperboat version is installed") || errors.Is(err, hostinstall.ErrNoPendingInstallation) {
 		t.Fatalf("update failing after its commit = %v, want the installed version and no rollback error", err)
 	}
+	// The inventory fails here too (/bin/false): the error must still have one authored owner, or pb prints the
+	// generic "could not finish the command" (canary 11-17, support_cd1b8af1 and support_8224ed32).
+	if failure, ok := err.(*CommandFailure); !ok || !strings.Contains(failure.message, "new Paperboat version is installed") {
+		t.Fatalf("update failing after its commit has no single authored owner: %T %v", err, err)
+	}
 	if want := []string{"install-supplied", "rollback-supplied", "inventory"}; !reflect.DeepEqual(operations, want) {
 		t.Fatalf("privileged steps = %v, want %v", operations, want)
 	}

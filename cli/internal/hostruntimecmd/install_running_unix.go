@@ -187,8 +187,9 @@ func installUpdateSource(ctx context.Context, executable string, source installs
 			if link != nil {
 				linkErr = link.Commit()
 			}
-			failure := runtimeFailure("the new Paperboat version is installed, but a later step failed; run pb doctor to see why, then rerun pb install", cause)
-			return "", errors.Join(failure, linkErr, inventory(recovery))
+			failure := runtimeFailure("the new Paperboat version is installed, but a later step failed; run pb doctor to see why, then rerun pb install", cause, linkErr)
+			// One owner: a bare join with the inventory's own error rendered as the generic "could not finish".
+			return "", KeepInstallFailureOwner(failure, inventory(recovery))
 		}
 		var linkErr error
 		if link != nil {
@@ -198,7 +199,7 @@ func installUpdateSource(ctx context.Context, executable string, source installs
 		if restoreService != nil {
 			serviceErr = restoreService(recovery)
 		}
-		return "", errors.Join(cause, binaryErr, serviceErr, linkErr, inventory(recovery))
+		return "", KeepInstallFailureOwner(cause, errors.Join(binaryErr, serviceErr, linkErr, inventory(recovery)))
 	}
 	if err != nil {
 		return rollback(err)
@@ -238,7 +239,7 @@ func installUpdateSource(ctx context.Context, executable string, source installs
 		return "", runtimeFailure("installation commit could not be confirmed; keep the installed files and run pb doctor before retrying", err)
 	}
 	if err = link.Commit(); err != nil {
-		return "", err
+		return "", runtimeFailure("the new Paperboat version is installed, but its pb command link could not be finished; rerun pb install", err)
 	}
 	if err = retryInventory(ctx, inventory); err != nil {
 		return "", err
