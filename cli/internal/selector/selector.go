@@ -534,7 +534,11 @@ type chooserModel struct {
 	canceled      bool
 	interrupted   bool
 	refreshFailed bool
+	lastClickRow  int // 1-based visible row of the last click, 0 for none
+	lastClickAt   time.Time
 }
+
+const doubleClickWindow = 500 * time.Millisecond
 
 type chooserCanceled struct{}
 
@@ -695,8 +699,12 @@ func (m chooserModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			if !ok {
 				break
 			}
+			// A click moves the selection; only a second click on the same row
+			// confirms, so a stray click never opens or runs anything.
+			doubleClick := m.lastClickRow == index+1 && time.Since(m.lastClickAt) <= doubleClickWindow
 			m.choices.selected = index
-			if item, selected := m.choices.Selected(); selected {
+			m.lastClickRow, m.lastClickAt = index+1, time.Now()
+			if item, selected := m.choices.Selected(); selected && doubleClick {
 				m.selected, m.confirmed = item, true
 				return m, tea.Quit
 			}

@@ -11,6 +11,7 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
@@ -270,8 +271,23 @@ func TestChooserSupportsMouseWheelAndClick(t *testing.T) {
 	}
 	updated, command := base.Update(tea.MouseClickMsg{Button: tea.MouseLeft, Y: 6})
 	clicked := updated.(chooserModel)
-	if command == nil || !clicked.confirmed || clicked.selected.ID != "two" {
-		t.Fatalf("click confirmed=%t selected=%q command=%v", clicked.confirmed, clicked.selected.ID, command)
+	if command != nil || clicked.confirmed {
+		t.Fatalf("a single click confirmed: confirmed=%t command=%v", clicked.confirmed, command)
+	}
+	if selected, _ := clicked.choices.Selected(); selected.ID != "two" {
+		t.Fatalf("a single click selected %q, want the clicked row", selected.ID)
+	}
+	updated, command = clicked.Update(tea.MouseClickMsg{Button: tea.MouseLeft, Y: 6})
+	double := updated.(chooserModel)
+	if command == nil || !double.confirmed || double.selected.ID != "two" {
+		t.Fatalf("double click confirmed=%t selected=%q command=%v", double.confirmed, double.selected.ID, command)
+	}
+	clicked.lastClickAt = time.Now().Add(-2 * doubleClickWindow)
+	if updated, command = clicked.Update(tea.MouseClickMsg{Button: tea.MouseLeft, Y: 6}); command != nil || updated.(chooserModel).confirmed {
+		t.Fatal("two slow clicks confirmed")
+	}
+	if updated, command = clicked.Update(tea.MouseClickMsg{Button: tea.MouseLeft, Y: 4}); command != nil || updated.(chooserModel).confirmed {
+		t.Fatal("clicks on different rows confirmed")
 	}
 }
 
