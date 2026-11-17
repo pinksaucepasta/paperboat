@@ -37,7 +37,8 @@ gate, hook, doc or other script names it. Add a row when you add a file.
 | `branch-protection.sh`, `branch-protection.json`, `merge-queue.json` | the required-checks and merge-queue rule | manual (repo admin); `deploy/README.md`, `e2e.yml` cite the json |
 | `verify-main-protection.py` | checks the rule on GitHub | **unreferenced** |
 | `sentry-release.py` | creates a Sentry release and deploy | manual (`cli/docs/release-deployment.md`) |
-| `test-sentry-release.py` | its tests | **unreferenced**: `python3 tools/test-sentry-release.py` |
+| `test_sentry_release.py` | its tests | **unreferenced**: `python3 tools/test_sentry_release.py` |
+| `release-version.sh` | release version format check | `release.yml`, `selfhost-release.yml`, `server-container.yml` |
 | `console-live.sh` | builds and restarts the live console | manual (AGENTS.md) |
 | `console-prod.sh` | production console deploy | manual; `deploy/Caddyfile`, `deploy/paperboat-console.service` mention it |
 
