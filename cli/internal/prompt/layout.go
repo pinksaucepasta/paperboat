@@ -52,7 +52,11 @@ func promptLine(value string, width int) string {
 	if width <= 0 {
 		return ""
 	}
-	return ansi.Truncate(selector.SanitizeText(value), width, "...")
+	tail := "..."
+	if width <= len(tail) {
+		tail = "" // an ellipsis must never be wider than the screen
+	}
+	return ansi.Truncate(selector.SanitizeText(value), width, tail)
 }
 
 func promptInputWidth(width int) int {

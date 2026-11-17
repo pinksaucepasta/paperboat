@@ -478,3 +478,51 @@ func TestFilterLineHasNoTruncationMarker(t *testing.T) {
 		t.Fatalf("filter line truncated: %q", view)
 	}
 }
+
+func TestChooserTooSmallShowsHintAndNeverSelects(t *testing.T) {
+	items := []Item{{ID: "one", Title: "One"}}
+	for _, size := range [][2]int{{30, 24}, {80, 4}, {1, 1}} {
+		model := chooserModel{options: Options{Title: "Machines"}, choices: NewModel(items, 8), width: size[0], height: size[1]}
+		view := ansi.Strip(model.View().Content)
+		if size[0] >= 30 && !strings.Contains(view, "Enlarge terminal") {
+			t.Errorf("%v: no hint in %q", size, view)
+		}
+		if ansi.StringWidth(view) > size[0] || strings.Contains(view, "\n") {
+			t.Errorf("%v: hint overflows or wraps: %q", size, view)
+		}
+		updated, quit := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+		if quit != nil || updated.(chooserModel).confirmed {
+			t.Errorf("%v: Enter selected an unreadable menu", size)
+		}
+		updated, _ = model.Update(tea.MouseClickMsg{Button: tea.MouseLeft, Y: 3})
+		if updated.(chooserModel).confirmed {
+			t.Errorf("%v: a click selected an unreadable menu", size)
+		}
+		if updated, quit = model.Update(tea.KeyPressMsg{Code: tea.KeyEscape}); quit == nil || !updated.(chooserModel).canceled {
+			t.Errorf("%v: Esc must still go back", size)
+		}
+		if _, quit = model.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl}); quit == nil {
+			t.Errorf("%v: Ctrl+C must still interrupt", size)
+		}
+	}
+	model := chooserModel{options: Options{Title: "Machines"}, choices: NewModel(items, 8), width: 40, height: 5}
+	if strings.Contains(model.View().Content, "Enlarge terminal") {
+		t.Fatal("the smallest supported size showed the hint")
+	}
+}
+
+func TestTruncateLineNeverWiderThanTheScreen(t *testing.T) {
+	for width := 1; width <= 4; width++ {
+		if got := ansi.StringWidth(truncateLine("a long line of text", width)); got > width {
+			t.Errorf("width %d: truncated line is %d wide", width, got)
+		}
+	}
+}
+
+func TestChooserKeepsLastSizeWhenTerminalReportsNone(t *testing.T) {
+	model := chooserModel{options: Options{Title: "Machines"}, choices: NewModel([]Item{{ID: "one"}}, 8), width: 80, height: 24}
+	updated, _ := model.Update(tea.WindowSizeMsg{})
+	if got := updated.(chooserModel); got.width != 80 || got.height != 24 || got.tooSmall() {
+		t.Fatalf("a 0x0 report resized the menu to %dx%d", got.width, got.height)
+	}
+}

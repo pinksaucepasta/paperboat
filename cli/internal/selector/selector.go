@@ -569,6 +569,12 @@ func (m chooserModel) Init() tea.Cmd {
 }
 
 func (m chooserModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
+	switch message.(type) {
+	case tea.PasteMsg, tea.MouseClickMsg, tea.MouseMotionMsg, tea.MouseWheelMsg:
+		if m.tooSmall() {
+			return m, nil
+		}
+	}
 	switch message := message.(type) {
 	case chooserCanceled:
 		return m, tea.Quit
@@ -622,6 +628,9 @@ func (m chooserModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.BackgroundColorMsg:
 		ObserveBackground(message)
 	case tea.WindowSizeMsg:
+		if message.Width <= 0 || message.Height <= 0 {
+			break // the terminal reports no size (some ptys): keep the last known one
+		}
 		m.width, m.height = viewWidth(message.Width), viewHeight(message.Height)
 		m.input.SetWidth(filterInputWidth(m.width, m.options.RequireFilter))
 		bodyLines := headerLineCount(sanitizeHeader(m.options.Header)) + 2
@@ -641,6 +650,9 @@ func (m chooserModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if KeyMatches(m.options.Context, "back", key) {
 			m.canceled = true
 			return m, tea.Quit
+		}
+		if m.tooSmall() {
+			return m, nil // never select or type into a menu that cannot be read
 		}
 		if KeyMatches(m.options.Context, "select", key) {
 			if item, ok := m.choices.Selected(); ok {
@@ -743,6 +755,9 @@ func (m chooserModel) render() string {
 	lineWidth := viewWidth(m.width)
 	height := viewHeight(m.height)
 	styles := stylesForContext(m.options.Context)
+	if m.tooSmall() {
+		return styles.help.Render(truncateLine("Enlarge terminal to use this menu; Esc goes back", lineWidth))
+	}
 	body := make([]string, 0, height)
 	header := sanitizeHeader(m.options.Header)
 	if header != "" {
@@ -835,11 +850,23 @@ func viewHeight(height int) int {
 	return max(1, height)
 }
 
+// minWidth and minHeight are the smallest terminal a menu can be read and used in.
+const (
+	minWidth  = 40
+	minHeight = 5
+)
+
+func (m chooserModel) tooSmall() bool { return m.width < minWidth || m.height < minHeight }
+
 func truncateLine(value string, width int) string {
 	if width <= 0 {
 		return ""
 	}
-	return ansi.Truncate(value, width, "...")
+	tail := "..."
+	if width <= len(tail) {
+		tail = "" // an ellipsis must never be wider than the screen
+	}
+	return ansi.Truncate(value, width, tail)
 }
 
 func filterInputWidth(width int, requireFilter bool) int {
