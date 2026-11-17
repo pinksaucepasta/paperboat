@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	sharedtelemetry "github.com/pinksaucepasta/paperboat/shared/telemetry"
 	"io"
 	"time"
 
@@ -130,7 +131,7 @@ func newCarrierComponentWithTelemetry(
 			if errors.Is(err, datacarrier.ErrCarrierHTTPPanic) {
 				reporter.CaptureFailure(ctx, "process_panic", reporting.PanicFailure{})
 			} else {
-				edgetelemetry.Log(ctx, edgetelemetry.SeverityWarn, "carrier_connection_failed", edgetelemetry.OutcomeRejected, "reason", datacarrier.FailureReason(err))
+				edgetelemetry.Log(ctx, sharedtelemetry.SeverityWarn, "carrier_connection_failed", sharedtelemetry.OutcomeRejected, "reason", datacarrier.FailureReason(err))
 				reporter.ObserveFailure(ctx, "http_server", err)
 			}
 		},

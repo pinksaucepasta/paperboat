@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
+	sharedtelemetry "github.com/pinksaucepasta/paperboat/shared/telemetry"
 	"log/slog"
 	"sort"
 	"sync"
@@ -703,7 +704,7 @@ func logRuntimeAttachFailure(a datacarrier.ExpectedAdmission, err error) {
 	if !attachFailureIsRefusal(err) {
 		return
 	}
-	edgetelemetry.Log(context.Background(), edgetelemetry.SeverityWarn, "runtime_route_attach_refused", edgetelemetry.OutcomeRejected, "route_id", a.RouteID, "host_id", a.Identity.HostID, "session_id", a.Identity.SessionID, "attachment_generation", a.AttachmentGeneration, "error", err.Error())
+	edgetelemetry.Log(context.Background(), sharedtelemetry.SeverityWarn, "runtime_route_attach_refused", sharedtelemetry.OutcomeRejected, "route_id", a.RouteID, "host_id", a.Identity.HostID, "session_id", a.Identity.SessionID, "attachment_generation", a.AttachmentGeneration, "error", err.Error())
 }
 
 // attachFailureIsRefusal is false for a registry that closed because this process is shutting down:

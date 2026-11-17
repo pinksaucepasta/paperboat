@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"github.com/pinksaucepasta/paperboat/shared/health"
+	sharedmetrics "github.com/pinksaucepasta/paperboat/shared/metrics"
+	sharedtelemetry "github.com/pinksaucepasta/paperboat/shared/telemetry"
 	"github.com/pinksaucepasta/paperboat/shared/telemetry/safe"
 	"strings"
 	"testing"
@@ -25,20 +27,20 @@ func TestDiagnosticsSnapshotIsBoundedDeterministicAndSecretSafe(t *testing.T) {
 		t.Fatal(err)
 	}
 	metrics := NewMetrics()
-	if err := metrics.IncCounter(MetricHTTPRequests, MetricLabels{"method": "get", "route_family": "health", "status_class": "2xx"}); err != nil {
+	if err := metrics.IncCounter(MetricHTTPRequests, sharedmetrics.Labels{"method": "get", "route_family": "health", "status_class": "2xx"}); err != nil {
 		t.Fatal(err)
 	}
-	events, err := NewEventLog(8)
+	events, err := sharedtelemetry.NewEventLog(8)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = events.Close() })
 	for index := 0; index < 3; index++ {
-		if _, err := events.Record(EventInput{
-			At: at.Add(time.Duration(index) * time.Second), Severity: SeverityInfo,
+		if _, err := events.Record(sharedtelemetry.EventInput{
+			At: at.Add(time.Duration(index) * time.Second), Severity: sharedtelemetry.SeverityInfo,
 			Component: health.DimensionRoute, Name: "route_retry", Code: "route_retrying",
-			Outcome: OutcomeStateChange, Message: "Bearer route-secret at https://private.example.test.",
-			CorrelationID: "corr_diag", IDs: SafeIDs{RouteID: "route_diag"}, Retry: health.RetryScheduled,
+			Outcome: sharedtelemetry.OutcomeStateChange, Message: "Bearer route-secret at https://private.example.test.",
+			CorrelationID: "corr_diag", IDs: sharedtelemetry.SafeIDs{RouteID: "route_diag"}, Retry: health.RetryScheduled,
 			NextRetryAt: at.Add(time.Minute),
 		}); err != nil {
 			t.Fatal(err)
@@ -95,15 +97,15 @@ func TestDiagnosticsEventLogCanBeAttachedAfterConstruction(t *testing.T) {
 	if got := len(diagnostics.Snapshot().Events); got != 0 {
 		t.Fatalf("events before attach=%d", got)
 	}
-	events, err := NewEventLog(2)
+	events, err := sharedtelemetry.NewEventLog(2)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = events.Close() })
 	diagnostics.SetEventLog(events)
-	if _, err := events.Record(EventInput{
-		At: at, Severity: SeverityInfo, Component: health.DimensionService, Name: "service_ready", Code: "ready",
-		Outcome: OutcomeSuccess, Message: "Service is ready.", CorrelationID: "corr_diag", Retry: health.RetryNone,
+	if _, err := events.Record(sharedtelemetry.EventInput{
+		At: at, Severity: sharedtelemetry.SeverityInfo, Component: health.DimensionService, Name: "service_ready", Code: "ready",
+		Outcome: sharedtelemetry.OutcomeSuccess, Message: "Service is ready.", CorrelationID: "corr_diag", Retry: health.RetryNone,
 	}); err != nil {
 		t.Fatal(err)
 	}

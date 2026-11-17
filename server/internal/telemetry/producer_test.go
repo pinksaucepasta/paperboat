@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"github.com/pinksaucepasta/paperboat/shared/health"
+	sharedtelemetry "github.com/pinksaucepasta/paperboat/shared/telemetry"
 	"github.com/pinksaucepasta/paperboat/shared/telemetry/safe"
 	"strings"
 	"testing"
@@ -12,7 +13,7 @@ import (
 
 func TestProducerRecordsTypedSignalsWithSafeIdentity(t *testing.T) {
 	at := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
-	events, err := NewEventLogWithQueue(128, 128)
+	events, err := sharedtelemetry.NewEventLogWithQueue(128, 128)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -37,7 +38,7 @@ func TestProducerRecordsTypedSignalsWithSafeIdentity(t *testing.T) {
 	identity := ProducerIdentity{
 		RequestID: "req_01", CorrelationID: "cor_01", ResourceKind: "route", ResourceID: "route_01",
 		OperationKind: "verify", OperationID: "op_01", ActorType: "system", ActorID: "actor_01",
-		IDs: SafeIDs{DomainID: "domain_01", RouteID: "route_01"},
+		IDs: sharedtelemetry.SafeIDs{DomainID: "domain_01", RouteID: "route_01"},
 	}
 	if err := producer.RecordDNSVerification(DNSVerificationInput{
 		Outcome: DNSVerificationSucceeded, Duration: 2 * time.Second, Identity: identity,
@@ -144,7 +145,7 @@ func TestProducerRecordsTypedSignalsWithSafeIdentity(t *testing.T) {
 
 func TestProducerFailuresRecoverAndNeverRecordRawInput(t *testing.T) {
 	at := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
-	events, err := NewEventLogWithQueue(32, 32)
+	events, err := sharedtelemetry.NewEventLogWithQueue(32, 32)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -157,7 +158,7 @@ func TestProducerFailuresRecoverAndNeverRecordRawInput(t *testing.T) {
 	unsafe := ProducerIdentity{
 		RequestID: "https://alice:password@example.test/path", CorrelationID: "customer.example.test",
 		ResourceKind: "route", ResourceID: "customer.example.test", OperationID: "Bearer-secret",
-		IDs: SafeIDs{RouteID: "customer.example.test", RequestID: "token=never"},
+		IDs: sharedtelemetry.SafeIDs{RouteID: "customer.example.test", RequestID: "token=never"},
 	}
 	if err := producer.RecordDNSVerification(DNSVerificationInput{
 		Outcome: DNSVerificationFailed, FailureClass: DNSFailureTimeout, Duration: time.Second,
@@ -273,7 +274,7 @@ func TestProducerRejectsUnboundedDurationsWithoutRecording(t *testing.T) {
 }
 
 func TestProducerRouteErrorsPreserveFiniteClassAndExpectedRejections(t *testing.T) {
-	events, err := NewEventLog(8)
+	events, err := sharedtelemetry.NewEventLog(8)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -282,16 +283,16 @@ func TestProducerRouteErrorsPreserveFiniteClassAndExpectedRejections(t *testing.
 	cases := []struct {
 		class    RouteErrorClass
 		code     string
-		outcome  EventOutcome
-		severity EventSeverity
+		outcome  sharedtelemetry.EventOutcome
+		severity sharedtelemetry.EventSeverity
 	}{
-		{RouteErrorNotFound, "route_not_found", OutcomeRejected, SeverityWarn},
-		{RouteErrorConflict, "route_conflict", OutcomeRejected, SeverityWarn},
-		{RouteErrorPaused, "route_paused", OutcomeRejected, SeverityWarn},
-		{RouteErrorUnauthorized, "route_unauthorized", OutcomeRejected, SeverityWarn},
-		{RouteErrorOrigin, "route_origin_failure", OutcomeFailed, SeverityError},
-		{RouteErrorEdge, "route_edge_failure", OutcomeFailed, SeverityError},
-		{RouteErrorInternal, "route_internal_failure", OutcomeFailed, SeverityError},
+		{RouteErrorNotFound, "route_not_found", sharedtelemetry.OutcomeRejected, sharedtelemetry.SeverityWarn},
+		{RouteErrorConflict, "route_conflict", sharedtelemetry.OutcomeRejected, sharedtelemetry.SeverityWarn},
+		{RouteErrorPaused, "route_paused", sharedtelemetry.OutcomeRejected, sharedtelemetry.SeverityWarn},
+		{RouteErrorUnauthorized, "route_unauthorized", sharedtelemetry.OutcomeRejected, sharedtelemetry.SeverityWarn},
+		{RouteErrorOrigin, "route_origin_failure", sharedtelemetry.OutcomeFailed, sharedtelemetry.SeverityError},
+		{RouteErrorEdge, "route_edge_failure", sharedtelemetry.OutcomeFailed, sharedtelemetry.SeverityError},
+		{RouteErrorInternal, "route_internal_failure", sharedtelemetry.OutcomeFailed, sharedtelemetry.SeverityError},
 	}
 	for _, test := range cases {
 		if err := producer.RecordRouteError(RouteErrorInput{Class: test.class, Identity: ProducerIdentity{CorrelationID: "cor_route_error"}}); err != nil {

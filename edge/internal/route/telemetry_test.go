@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"github.com/pinksaucepasta/paperboat/shared/health"
+	sharedtelemetry "github.com/pinksaucepasta/paperboat/shared/telemetry"
 	"strings"
 	"sync"
 	"testing"
@@ -181,7 +182,7 @@ func TestCoreTelemetrySinkHealthMetricsRedactionAndSafeIDs(t *testing.T) {
 		t.Fatal(err)
 	}
 	metrics := edgetelemetry.NewMetrics()
-	events, err := edgetelemetry.NewEventLog(64)
+	events, err := sharedtelemetry.NewEventLog(64)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -262,7 +263,7 @@ func equalLifecycleTypes(left, right []LifecycleType) bool {
 
 func TestCoreTelemetrySinkGenerationReplacementClearsOverload(t *testing.T) {
 	healthTracker, _ := edgetelemetry.NewHealthTracker(time.Now)
-	events, _ := edgetelemetry.NewEventLog(32)
+	events, _ := sharedtelemetry.NewEventLog(32)
 	defer events.Close()
 	sink, _ := NewCoreTelemetrySink(healthTracker, edgetelemetry.NewMetrics(), events)
 	for generation := uint64(1); generation <= 32; generation++ {

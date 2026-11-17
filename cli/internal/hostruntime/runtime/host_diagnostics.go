@@ -5,6 +5,7 @@ package runtime
 import (
 	"encoding/json"
 	typedhealth "github.com/pinksaucepasta/paperboat/shared/health"
+	sharedtelemetry "github.com/pinksaucepasta/paperboat/shared/telemetry"
 	"io"
 	"net"
 	"net/http"
@@ -63,7 +64,7 @@ type HostDiagnostics struct {
 	Schema        string                     `json:"schema"`
 	Health        typedhealth.HealthSnapshot `json:"health"`
 	Metrics       []hosttelemetry.Series     `json:"metrics"`
-	Events        []hosttelemetry.Event      `json:"events"`
+	Events        []sharedtelemetry.Event    `json:"events"`
 	DroppedEvents uint64                     `json:"dropped_events"`
 }
 
@@ -87,14 +88,14 @@ func (diagnostics HostDiagnostics) MarshalJSON() ([]byte, error) {
 	}
 	events := diagnostics.Events
 	if events == nil {
-		events = []hosttelemetry.Event{}
+		events = []sharedtelemetry.Event{}
 	}
 	return json.Marshal(struct {
 		Workloads     *HostWorkloadCounts        `json:"workloads,omitempty"`
 		Schema        string                     `json:"schema"`
 		Health        typedhealth.HealthSnapshot `json:"health"`
 		Metrics       []hostDiagnosticsMetric    `json:"metrics"`
-		Events        []hosttelemetry.Event      `json:"events"`
+		Events        []sharedtelemetry.Event    `json:"events"`
 		DroppedEvents uint64                     `json:"dropped_events"`
 	}{
 		Workloads: diagnostics.Workloads, Schema: diagnostics.Schema, Health: diagnostics.Health, Metrics: metrics,
@@ -124,13 +125,13 @@ type hostDiagnosticsSource struct {
 	health        *runtimeHealthSource
 	healthTracker *typedhealth.HealthTracker
 	metrics       *hosttelemetry.Registry
-	events        *hosttelemetry.EventLog
+	events        *sharedtelemetry.EventLog
 }
 
 // registerHostLivenessAndDiagnostics installs the minimal liveness contract
 // and, only when a telemetry or workload source exists, the richer local
 // diagnostics contract. The caller binds HTTPService to literal loopback.
-func registerHostLivenessAndDiagnostics(mux *http.ServeMux, healthSource *runtimeHealthSource, tracker *typedhealth.HealthTracker, metrics *hosttelemetry.Registry, events *hosttelemetry.EventLog, workloads func() HostWorkloadCounts) {
+func registerHostLivenessAndDiagnostics(mux *http.ServeMux, healthSource *runtimeHealthSource, tracker *typedhealth.HealthTracker, metrics *hosttelemetry.Registry, events *sharedtelemetry.EventLog, workloads func() HostWorkloadCounts) {
 	if mux == nil {
 		return
 	}
@@ -189,7 +190,7 @@ func (handler hostDiagnosticsHandler) ServeHTTP(writer http.ResponseWriter, requ
 			metrics = metrics[:hostDiagnosticsMaximumMetrics]
 		}
 	}
-	events := []hosttelemetry.Event{}
+	events := []sharedtelemetry.Event{}
 	droppedEvents := uint64(0)
 	if handler.source.events != nil {
 		events = handler.source.events.Snapshot()

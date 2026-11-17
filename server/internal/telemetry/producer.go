@@ -2,6 +2,8 @@ package telemetry
 
 import (
 	"github.com/pinksaucepasta/paperboat/shared/health"
+	sharedmetrics "github.com/pinksaucepasta/paperboat/shared/metrics"
+	sharedtelemetry "github.com/pinksaucepasta/paperboat/shared/telemetry"
 	"github.com/pinksaucepasta/paperboat/shared/telemetry/safe"
 	"strings"
 	"sync"
@@ -19,9 +21,9 @@ import (
 // stages. A nil sink makes the corresponding operation a no-op while keeping
 // the input validation and event construction policy identical.
 type Producer struct {
-	Metrics         *Metrics
-	Events          *EventLog
-	EventLog        *EventLog
+	Metrics         *sharedmetrics.Metrics
+	Events          *sharedtelemetry.EventLog
+	EventLog        *sharedtelemetry.EventLog
 	Health          *health.HealthTracker
 	LifecycleEvents *LifecycleEventLog
 	LifecycleLog    *LifecycleLog
@@ -38,8 +40,8 @@ type TelemetryProducer = Producer
 type ServerTelemetry = Producer
 
 type ProducerOptions struct {
-	Metrics         *Metrics
-	Events          *EventLog
+	Metrics         *sharedmetrics.Metrics
+	Events          *sharedtelemetry.EventLog
 	Health          *health.HealthTracker
 	LifecycleEvents *LifecycleEventLog
 	LifecycleLog    *LifecycleLog
@@ -63,7 +65,7 @@ func NewProducer(options ProducerOptions) *Producer {
 		producer.Metrics = NewMetrics()
 	}
 	if producer.Events == nil {
-		producer.Events, _ = NewEventLog(256)
+		producer.Events, _ = sharedtelemetry.NewEventLog(256)
 		producer.ownedEvents = producer.Events != nil
 	}
 	if producer.Health == nil {
@@ -98,25 +100,25 @@ type ProducerIdentity struct {
 	OperationID   string
 	ActorType     string
 	ActorID       string
-	IDs           SafeIDs
+	IDs           sharedtelemetry.SafeIDs
 }
 
 // Identity is a shorter alias used by operation input types.
 type Identity = ProducerIdentity
 
-func (p *Producer) eventIdentity(identity ProducerIdentity) (string, SafeIDs) {
+func (p *Producer) eventIdentity(identity ProducerIdentity) (string, sharedtelemetry.SafeIDs) {
 	correlationID := identity.CorrelationID
 	if !safe.CorrelationID(correlationID) {
 		correlationID = "correlation_" + uuid.NewString()
 	}
 	ids := safeProducerIDs(identity.IDs)
-	if validOptionalLogIdentity(identity.RequestID, "request_", "req_") {
+	if sharedtelemetry.ValidOptionalLogIdentity(identity.RequestID, "request_", "req_") {
 		ids.RequestID = ""
 	}
 	return correlationID, ids
 }
 
-func safeProducerIDs(ids SafeIDs) SafeIDs {
+func safeProducerIDs(ids sharedtelemetry.SafeIDs) sharedtelemetry.SafeIDs {
 	if !optionalSafeID(ids.AccountID, "account_") {
 		ids.AccountID = ""
 	}
@@ -162,11 +164,11 @@ func safeProducerIDs(ids SafeIDs) SafeIDs {
 	return ids
 }
 
-func (p *Producer) recordEvent(identity ProducerIdentity, name, code string, outcome EventOutcome, severity EventSeverity, message string, retry health.RetryDecision, nextRetryAt time.Time) error {
-	return p.recordEventWithGenerations(identity, name, code, outcome, severity, message, retry, nextRetryAt, Generations{})
+func (p *Producer) recordEvent(identity ProducerIdentity, name, code string, outcome sharedtelemetry.EventOutcome, severity sharedtelemetry.EventSeverity, message string, retry health.RetryDecision, nextRetryAt time.Time) error {
+	return p.recordEventWithGenerations(identity, name, code, outcome, severity, message, retry, nextRetryAt, sharedtelemetry.Generations{})
 }
 
-func (p *Producer) recordEventWithGenerations(identity ProducerIdentity, name, code string, outcome EventOutcome, severity EventSeverity, message string, retry health.RetryDecision, nextRetryAt time.Time, generations Generations) error {
+func (p *Producer) recordEventWithGenerations(identity ProducerIdentity, name, code string, outcome sharedtelemetry.EventOutcome, severity sharedtelemetry.EventSeverity, message string, retry health.RetryDecision, nextRetryAt time.Time, generations sharedtelemetry.Generations) error {
 	if p == nil {
 		return nil
 	}
@@ -178,13 +180,13 @@ func (p *Producer) recordEventWithGenerations(identity ProducerIdentity, name, c
 	}
 	correlationID, ids := p.eventIdentity(identity)
 	requestID := identity.RequestID
-	if !validOptionalLogIdentity(requestID, "request_", "req_") {
+	if !sharedtelemetry.ValidOptionalLogIdentity(requestID, "request_", "req_") {
 		requestID = ""
 	}
 	if requestID != "" {
 		identity.IDs.RequestID = ""
 	}
-	input := EventInput{
+	input := sharedtelemetry.EventInput{
 		At: p.now(), Severity: severity, Component: componentForEvent(identity, name), Name: name,
 		Code: code, Outcome: outcome, Message: message, CorrelationID: correlationID,
 		IDs: ids, Generations: generations, RequestID: requestID, Retry: retry, NextRetryAt: nextRetryAt,
@@ -242,7 +244,7 @@ func identityResourceDimension(identity ProducerIdentity) health.Dimension {
 	return health.DimensionService
 }
 
-func (p *Producer) events() *EventLog {
+func (p *Producer) events() *sharedtelemetry.EventLog {
 	if p == nil {
 		return nil
 	}
@@ -252,12 +254,12 @@ func (p *Producer) events() *EventLog {
 	return p.EventLog
 }
 
-func (p *Producer) recordLifecycle(identity ProducerIdentity, name, code string, outcome EventOutcome, severity EventSeverity, message string, retry health.RetryDecision, nextRetryAt time.Time, correlationID string, generations Generations) {
+func (p *Producer) recordLifecycle(identity ProducerIdentity, name, code string, outcome sharedtelemetry.EventOutcome, severity sharedtelemetry.EventSeverity, message string, retry health.RetryDecision, nextRetryAt time.Time, correlationID string, generations sharedtelemetry.Generations) {
 	if p == nil || p.LifecycleEvents == nil {
 		return
 	}
 	requestID := identity.RequestID
-	if !validOptionalLogIdentity(requestID, "request_", "req_") || !safe.CorrelationID(correlationID) || !validEventResourceKind(identity.ResourceKind) || !validOpaqueID(identity.ResourceID) || !validOptionalLogIdentity(identity.OperationID, "operation_", "op_") || identity.OperationID == "" {
+	if !sharedtelemetry.ValidOptionalLogIdentity(requestID, "request_", "req_") || !safe.CorrelationID(correlationID) || !sharedtelemetry.ValidEventResourceKind(identity.ResourceKind) || !sharedtelemetry.ValidOpaqueID(identity.ResourceID) || !sharedtelemetry.ValidOptionalLogIdentity(identity.OperationID, "operation_", "op_") || identity.OperationID == "" {
 		return
 	}
 	if identity.OperationKind != "" && !safe.StableCode(identity.OperationKind) {
@@ -265,7 +267,7 @@ func (p *Producer) recordLifecycle(identity ProducerIdentity, name, code string,
 	}
 	actorType, actorID := identity.ActorType, identity.ActorID
 	if actorType != "" || actorID != "" {
-		if !validActorType(actorType) || !validOpaqueID(actorID) {
+		if !sharedtelemetry.ValidActorType(actorType) || !sharedtelemetry.ValidOpaqueID(actorID) {
 			return
 		}
 	}
@@ -343,10 +345,10 @@ func (p *Producer) updateHealth(dimension health.Dimension, status health.Health
 	if stateBefore.Status == stateAfter.Status && stateBefore.Code == stateAfter.Code {
 		return nil
 	}
-	if err := p.Metrics.SetGauge(MetricHealthDimension, MetricLabels{"dimension": string(dimension), "status": string(stateAfter.Status)}, 1); err != nil {
+	if err := p.Metrics.SetGauge(MetricHealthDimension, sharedmetrics.Labels{"dimension": string(dimension), "status": string(stateAfter.Status)}, 1); err != nil {
 		return err
 	}
-	return p.Metrics.IncCounter(MetricHealthTransitions, MetricLabels{"dimension": string(dimension), "from": string(stateBefore.Status), "to": string(stateAfter.Status)})
+	return p.Metrics.IncCounter(MetricHealthTransitions, sharedmetrics.Labels{"dimension": string(dimension), "from": string(stateBefore.Status), "to": string(stateAfter.Status)})
 }
 
 func boundedSeconds(duration time.Duration) (float64, error) {
@@ -394,7 +396,7 @@ type DNSVerificationInput struct {
 	Identity      ProducerIdentity
 	RequestID     string
 	CorrelationID string
-	IDs           SafeIDs
+	IDs           sharedtelemetry.SafeIDs
 }
 
 type DNSVerificationObservation = DNSVerificationInput
@@ -411,11 +413,11 @@ func (p *Producer) RecordDNSVerification(input DNSVerificationInput) error {
 	failureClass := normalizeDNSFailure(input.FailureClass)
 	metricOutcome := string(outcome)
 	if p != nil && p.Metrics != nil {
-		if err := p.Metrics.ObserveHistogram(MetricDNSVerificationDuration, MetricLabels{"outcome": metricOutcome}, duration); err != nil {
+		if err := p.Metrics.ObserveHistogram(MetricDNSVerificationDuration, sharedmetrics.Labels{"outcome": metricOutcome}, duration); err != nil {
 			return err
 		}
 		if outcome == DNSVerificationFailed {
-			if err := p.Metrics.IncCounter(MetricDNSVerificationFailures, MetricLabels{"failure_class": string(failureClass)}); err != nil {
+			if err := p.Metrics.IncCounter(MetricDNSVerificationFailures, sharedmetrics.Labels{"failure_class": string(failureClass)}); err != nil {
 				return err
 			}
 		}
@@ -462,24 +464,24 @@ func dnsHealth(outcome DNSVerificationOutcome, failure DNSFailureClass, retry he
 	}
 }
 
-func dnsEventOutcome(outcome DNSVerificationOutcome) EventOutcome {
+func dnsEventOutcome(outcome DNSVerificationOutcome) sharedtelemetry.EventOutcome {
 	if outcome == DNSVerificationSucceeded {
-		return OutcomeSuccess
+		return sharedtelemetry.OutcomeSuccess
 	}
 	if outcome == DNSVerificationWaiting {
-		return OutcomeStateChange
+		return sharedtelemetry.OutcomeStateChange
 	}
-	return OutcomeFailed
+	return sharedtelemetry.OutcomeFailed
 }
 
-func dnsSeverity(outcome DNSVerificationOutcome) EventSeverity {
+func dnsSeverity(outcome DNSVerificationOutcome) sharedtelemetry.EventSeverity {
 	if outcome == DNSVerificationSucceeded {
-		return SeverityInfo
+		return sharedtelemetry.SeverityInfo
 	}
 	if outcome == DNSVerificationWaiting {
-		return SeverityWarn
+		return sharedtelemetry.SeverityWarn
 	}
-	return SeverityError
+	return sharedtelemetry.SeverityError
 }
 
 func dnsMessage(outcome DNSVerificationOutcome) string {
@@ -520,7 +522,7 @@ type CertificateLifecycleInput struct {
 	Identity      ProducerIdentity
 	RequestID     string
 	CorrelationID string
-	IDs           SafeIDs
+	IDs           sharedtelemetry.SafeIDs
 }
 
 type CertificateInput = CertificateLifecycleInput
@@ -542,14 +544,14 @@ type CertificateExpiryInput struct {
 	Identity      ProducerIdentity
 	RequestID     string
 	CorrelationID string
-	IDs           SafeIDs
+	IDs           sharedtelemetry.SafeIDs
 }
 
 func (p *Producer) RecordCertificateLifecycle(input CertificateLifecycleInput) error {
 	operation := normalizeCertificateOperation(input.Operation)
 	outcome := normalizeCertificateOutcome(input.Outcome)
 	if p != nil && p.Metrics != nil {
-		if err := p.Metrics.IncCounter(MetricCertificateOps, MetricLabels{"operation": string(operation), "outcome": string(outcome)}); err != nil {
+		if err := p.Metrics.IncCounter(MetricCertificateOps, sharedmetrics.Labels{"operation": string(operation), "outcome": string(outcome)}); err != nil {
 			return err
 		}
 	}
@@ -600,22 +602,22 @@ func certificateHealth(outcome CertificateOperationOutcome, retry health.RetryDe
 	}
 }
 
-func certificateEventOutcome(value CertificateOperationOutcome) EventOutcome {
+func certificateEventOutcome(value CertificateOperationOutcome) sharedtelemetry.EventOutcome {
 	switch value {
 	case CertificateSucceeded:
-		return OutcomeSuccess
+		return sharedtelemetry.OutcomeSuccess
 	case CertificateCanceled:
-		return OutcomeCanceled
+		return sharedtelemetry.OutcomeCanceled
 	default:
-		return OutcomeFailed
+		return sharedtelemetry.OutcomeFailed
 	}
 }
 
-func certificateSeverity(value CertificateOperationOutcome) EventSeverity {
+func certificateSeverity(value CertificateOperationOutcome) sharedtelemetry.EventSeverity {
 	if value == CertificateSucceeded {
-		return SeverityInfo
+		return sharedtelemetry.SeverityInfo
 	}
-	return SeverityError
+	return sharedtelemetry.SeverityError
 }
 
 func certificateMessage(operation CertificateOperation, outcome CertificateOperationOutcome) string {
@@ -631,7 +633,7 @@ func certificateMessage(operation CertificateOperation, outcome CertificateOpera
 func (p *Producer) RecordCertificateExpiry(input CertificateExpiryInput) error {
 	horizon := normalizeCertificateHorizon(input.Horizon)
 	if p != nil && p.Metrics != nil {
-		if err := p.Metrics.SetGauge(MetricCertificateExpiryHorizon, MetricLabels{"horizon": string(horizon)}, 1); err != nil {
+		if err := p.Metrics.SetGauge(MetricCertificateExpiryHorizon, sharedmetrics.Labels{"horizon": string(horizon)}, 1); err != nil {
 			return err
 		}
 	}
@@ -670,18 +672,18 @@ func certificateExpiryHealth(horizon CertificateExpiryHorizon) (health.HealthSta
 	}
 }
 
-func certificateExpiryOutcome(horizon CertificateExpiryHorizon) EventOutcome {
+func certificateExpiryOutcome(horizon CertificateExpiryHorizon) sharedtelemetry.EventOutcome {
 	if horizon == CertificateOver14D {
-		return OutcomeSuccess
+		return sharedtelemetry.OutcomeSuccess
 	}
-	return OutcomeStateChange
+	return sharedtelemetry.OutcomeStateChange
 }
 
-func certificateExpirySeverity(horizon CertificateExpiryHorizon) EventSeverity {
+func certificateExpirySeverity(horizon CertificateExpiryHorizon) sharedtelemetry.EventSeverity {
 	if horizon == CertificateOver14D {
-		return SeverityInfo
+		return sharedtelemetry.SeverityInfo
 	}
-	return SeverityWarn
+	return sharedtelemetry.SeverityWarn
 }
 
 func certificateExpiryMessage(horizon CertificateExpiryHorizon) string {
@@ -709,7 +711,7 @@ type PreviewAllocationInput struct {
 	Identity      ProducerIdentity
 	RequestID     string
 	CorrelationID string
-	IDs           SafeIDs
+	IDs           sharedtelemetry.SafeIDs
 }
 
 type PreviewCleanupOutcome string
@@ -728,13 +730,13 @@ type PreviewCleanupInput struct {
 	Identity      ProducerIdentity
 	RequestID     string
 	CorrelationID string
-	IDs           SafeIDs
+	IDs           sharedtelemetry.SafeIDs
 }
 
 func (p *Producer) RecordPreviewAllocation(input PreviewAllocationInput) error {
 	outcome := normalizePreviewAllocationOutcome(input.Outcome)
 	if p != nil && p.Metrics != nil {
-		if err := p.Metrics.IncCounter(MetricPreviewAllocation, MetricLabels{"outcome": string(outcome)}); err != nil {
+		if err := p.Metrics.IncCounter(MetricPreviewAllocation, sharedmetrics.Labels{"outcome": string(outcome)}); err != nil {
 			return err
 		}
 	}
@@ -759,7 +761,7 @@ func normalizePreviewAllocationOutcome(value PreviewAllocationOutcome) PreviewAl
 func (p *Producer) RecordPreviewCleanup(input PreviewCleanupInput) error {
 	outcome := normalizePreviewCleanupOutcome(input.Outcome)
 	if p != nil && p.Metrics != nil {
-		if err := p.Metrics.IncCounter(MetricPreviewLeaseCleanup, MetricLabels{"outcome": string(outcome)}); err != nil {
+		if err := p.Metrics.IncCounter(MetricPreviewLeaseCleanup, sharedmetrics.Labels{"outcome": string(outcome)}); err != nil {
 			return err
 		}
 	}
@@ -803,27 +805,27 @@ func previewHealth(outcome string, retry health.RetryDecision, next time.Time, p
 	}
 }
 
-func previewEventOutcome(outcome string) EventOutcome {
+func previewEventOutcome(outcome string) sharedtelemetry.EventOutcome {
 	switch outcome {
 	case string(PreviewAllocationSucceeded), string(PreviewCleanupAlreadyClean):
-		return OutcomeSuccess
+		return sharedtelemetry.OutcomeSuccess
 	case string(PreviewAllocationRejected):
-		return OutcomeRejected
+		return sharedtelemetry.OutcomeRejected
 	case string(PreviewAllocationCanceled):
-		return OutcomeCanceled
+		return sharedtelemetry.OutcomeCanceled
 	default:
-		return OutcomeFailed
+		return sharedtelemetry.OutcomeFailed
 	}
 }
 
-func previewSeverity(outcome string) EventSeverity {
+func previewSeverity(outcome string) sharedtelemetry.EventSeverity {
 	if outcome == string(PreviewAllocationSucceeded) || outcome == string(PreviewCleanupSucceeded) || outcome == string(PreviewCleanupAlreadyClean) {
-		return SeverityInfo
+		return sharedtelemetry.SeverityInfo
 	}
 	if outcome == string(PreviewAllocationRejected) {
-		return SeverityWarn
+		return sharedtelemetry.SeverityWarn
 	}
-	return SeverityError
+	return sharedtelemetry.SeverityError
 }
 
 func previewMessage(operation, outcome string) string {
@@ -843,10 +845,10 @@ type ConnectorSessionInput struct {
 	State         ConnectorSessionState
 	At            time.Time
 	Identity      ProducerIdentity
-	Generations   Generations
+	Generations   sharedtelemetry.Generations
 	RequestID     string
 	CorrelationID string
-	IDs           SafeIDs
+	IDs           sharedtelemetry.SafeIDs
 }
 
 type ConnectorConnectionOutcome string
@@ -861,10 +863,10 @@ type ConnectorConnectionInput struct {
 	Outcome       ConnectorConnectionOutcome
 	At            time.Time
 	Identity      ProducerIdentity
-	Generations   Generations
+	Generations   sharedtelemetry.Generations
 	RequestID     string
 	CorrelationID string
-	IDs           SafeIDs
+	IDs           sharedtelemetry.SafeIDs
 }
 
 type ConnectorReconnectOutcome string
@@ -880,10 +882,10 @@ type ConnectorReconnectInput struct {
 	Retry         health.RetryDecision
 	NextRetryAt   time.Time
 	Identity      ProducerIdentity
-	Generations   Generations
+	Generations   sharedtelemetry.Generations
 	RequestID     string
 	CorrelationID string
-	IDs           SafeIDs
+	IDs           sharedtelemetry.SafeIDs
 }
 
 type ConnectorBackoffState string
@@ -898,10 +900,10 @@ type ConnectorBackoffInput struct {
 	Duration      time.Duration
 	At            time.Time
 	Identity      ProducerIdentity
-	Generations   Generations
+	Generations   sharedtelemetry.Generations
 	RequestID     string
 	CorrelationID string
-	IDs           SafeIDs
+	IDs           sharedtelemetry.SafeIDs
 }
 
 type ConnectorHandshakeOutcome string
@@ -916,10 +918,10 @@ type ConnectorHandshakeInput struct {
 	Duration      time.Duration
 	At            time.Time
 	Identity      ProducerIdentity
-	Generations   Generations
+	Generations   sharedtelemetry.Generations
 	RequestID     string
 	CorrelationID string
-	IDs           SafeIDs
+	IDs           sharedtelemetry.SafeIDs
 }
 
 type ConnectorDisconnectReason string
@@ -937,10 +939,10 @@ type ConnectorDisconnectInput struct {
 	Reason        ConnectorDisconnectReason
 	At            time.Time
 	Identity      ProducerIdentity
-	Generations   Generations
+	Generations   sharedtelemetry.Generations
 	RequestID     string
 	CorrelationID string
-	IDs           SafeIDs
+	IDs           sharedtelemetry.SafeIDs
 }
 
 // ConfigGenerationState reports whether a configuration generation is desired or applied.
@@ -958,10 +960,10 @@ type ConfigApplyInput struct {
 	Retry         health.RetryDecision
 	NextRetryAt   time.Time
 	Identity      ProducerIdentity
-	Generations   Generations
+	Generations   sharedtelemetry.Generations
 	RequestID     string
 	CorrelationID string
-	IDs           SafeIDs
+	IDs           sharedtelemetry.SafeIDs
 }
 
 func (p *Producer) RecordConfigApply(input ConfigApplyInput) error {
@@ -970,7 +972,7 @@ func (p *Producer) RecordConfigApply(input ConfigApplyInput) error {
 		state = ConfigGenerationDesired
 	}
 	if p != nil && p.Metrics != nil {
-		if err := p.Metrics.SetGauge(MetricConfigGenerations, MetricLabels{"state": string(state)}, input.Generation); err != nil {
+		if err := p.Metrics.SetGauge(MetricConfigGenerations, sharedmetrics.Labels{"state": string(state)}, input.Generation); err != nil {
 			return err
 		}
 	}
@@ -997,18 +999,18 @@ func configHealth(state ConfigGenerationState, retry health.RetryDecision, next 
 	return health.StatusDegraded, "config_pending", "The desired configuration is waiting to be applied.", "Wait for the configuration worker to apply the desired generation.", retry, next
 }
 
-func configEventOutcome(state ConfigGenerationState) EventOutcome {
+func configEventOutcome(state ConfigGenerationState) sharedtelemetry.EventOutcome {
 	if state == ConfigGenerationApplied {
-		return OutcomeSuccess
+		return sharedtelemetry.OutcomeSuccess
 	}
-	return OutcomeStateChange
+	return sharedtelemetry.OutcomeStateChange
 }
 
-func configSeverity(state ConfigGenerationState) EventSeverity {
+func configSeverity(state ConfigGenerationState) sharedtelemetry.EventSeverity {
 	if state == ConfigGenerationApplied {
-		return SeverityInfo
+		return sharedtelemetry.SeverityInfo
 	}
-	return SeverityWarn
+	return sharedtelemetry.SeverityWarn
 }
 
 func configMessage(state ConfigGenerationState) string {
@@ -1036,13 +1038,13 @@ type RouteErrorInput struct {
 	Identity      ProducerIdentity
 	RequestID     string
 	CorrelationID string
-	IDs           SafeIDs
+	IDs           sharedtelemetry.SafeIDs
 }
 
 func (p *Producer) RecordRouteError(input RouteErrorInput) error {
 	class := normalizeRouteErrorClass(input.Class)
 	if p != nil && p.Metrics != nil {
-		if err := p.Metrics.IncCounter(MetricRouteErrors, MetricLabels{"class": string(class)}); err != nil {
+		if err := p.Metrics.IncCounter(MetricRouteErrors, sharedmetrics.Labels{"class": string(class)}); err != nil {
 			return err
 		}
 	}
@@ -1065,22 +1067,22 @@ func normalizeRouteErrorClass(value RouteErrorClass) RouteErrorClass {
 	}
 }
 
-func routeErrorProjection(class RouteErrorClass) (string, EventOutcome, EventSeverity, string) {
+func routeErrorProjection(class RouteErrorClass) (string, sharedtelemetry.EventOutcome, sharedtelemetry.EventSeverity, string) {
 	switch class {
 	case RouteErrorNotFound:
-		return "route_not_found", OutcomeRejected, SeverityWarn, "Route request was rejected."
+		return "route_not_found", sharedtelemetry.OutcomeRejected, sharedtelemetry.SeverityWarn, "Route request was rejected."
 	case RouteErrorConflict:
-		return "route_conflict", OutcomeRejected, SeverityWarn, "Route request was rejected."
+		return "route_conflict", sharedtelemetry.OutcomeRejected, sharedtelemetry.SeverityWarn, "Route request was rejected."
 	case RouteErrorPaused:
-		return "route_paused", OutcomeRejected, SeverityWarn, "Route request was rejected."
+		return "route_paused", sharedtelemetry.OutcomeRejected, sharedtelemetry.SeverityWarn, "Route request was rejected."
 	case RouteErrorUnauthorized:
-		return "route_unauthorized", OutcomeRejected, SeverityWarn, "Route request was rejected."
+		return "route_unauthorized", sharedtelemetry.OutcomeRejected, sharedtelemetry.SeverityWarn, "Route request was rejected."
 	case RouteErrorOrigin:
-		return "route_origin_failure", OutcomeFailed, SeverityError, "Route request failed."
+		return "route_origin_failure", sharedtelemetry.OutcomeFailed, sharedtelemetry.SeverityError, "Route request failed."
 	case RouteErrorEdge:
-		return "route_edge_failure", OutcomeFailed, SeverityError, "Route request failed."
+		return "route_edge_failure", sharedtelemetry.OutcomeFailed, sharedtelemetry.SeverityError, "Route request failed."
 	default:
-		return "route_internal_failure", OutcomeFailed, SeverityError, "Route request failed."
+		return "route_internal_failure", sharedtelemetry.OutcomeFailed, sharedtelemetry.SeverityError, "Route request failed."
 	}
 }
 
@@ -1112,7 +1114,7 @@ type RouteLatencyInput struct {
 	Identity      ProducerIdentity
 	RequestID     string
 	CorrelationID string
-	IDs           SafeIDs
+	IDs           sharedtelemetry.SafeIDs
 }
 
 func (p *Producer) RecordRouteLatency(input RouteLatencyInput) error {
@@ -1122,7 +1124,7 @@ func (p *Producer) RecordRouteLatency(input RouteLatencyInput) error {
 		return err
 	}
 	if p != nil && p.Metrics != nil {
-		if err := p.Metrics.ObserveHistogram(MetricRouteLatency, MetricLabels{"protocol": string(protocol)}, duration); err != nil {
+		if err := p.Metrics.ObserveHistogram(MetricRouteLatency, sharedmetrics.Labels{"protocol": string(protocol)}, duration); err != nil {
 			return err
 		}
 	}
@@ -1131,7 +1133,7 @@ func (p *Producer) RecordRouteLatency(input RouteLatencyInput) error {
 	if err := p.updateHealth(health.DimensionRoute, health.StatusReady, "route_ready", "Route connectivity is healthy.", "No action is required.", correlationID, health.RetryNone, time.Time{}); err != nil {
 		return err
 	}
-	return p.recordEvent(identity, "route_latency", "route_latency_observed", OutcomeSuccess, SeverityInfo, "Route latency observed.", health.RetryNone, time.Time{})
+	return p.recordEvent(identity, "route_latency", "route_latency_observed", sharedtelemetry.OutcomeSuccess, sharedtelemetry.SeverityInfo, "Route latency observed.", health.RetryNone, time.Time{})
 }
 
 func normalizeRouteProtocol(value RouteProtocol) RouteProtocol {
@@ -1159,7 +1161,7 @@ type ServiceLifecycleInput struct {
 	Identity      ProducerIdentity
 	RequestID     string
 	CorrelationID string
-	IDs           SafeIDs
+	IDs           sharedtelemetry.SafeIDs
 }
 
 type ServiceRestartOutcome string
@@ -1175,7 +1177,7 @@ type ServiceRestartInput struct {
 	Identity      ProducerIdentity
 	RequestID     string
 	CorrelationID string
-	IDs           SafeIDs
+	IDs           sharedtelemetry.SafeIDs
 }
 
 func (p *Producer) RecordServiceLifecycle(input ServiceLifecycleInput) error {
@@ -1190,7 +1192,7 @@ func (p *Producer) RecordServiceLifecycle(input ServiceLifecycleInput) error {
 			if candidate == state {
 				value = uptime
 			}
-			if err := p.Metrics.SetGauge(MetricServiceUptime, MetricLabels{"state": string(candidate)}, value); err != nil {
+			if err := p.Metrics.SetGauge(MetricServiceUptime, sharedmetrics.Labels{"state": string(candidate)}, value); err != nil {
 				return err
 			}
 		}
@@ -1210,7 +1212,7 @@ func (p *Producer) RecordServiceRestart(input ServiceRestartInput) error {
 		outcome = ServiceRestartFailed
 	}
 	if p != nil && p.Metrics != nil {
-		if err := p.Metrics.IncCounter(MetricServiceRestarts, MetricLabels{"outcome": string(outcome)}); err != nil {
+		if err := p.Metrics.IncCounter(MetricServiceRestarts, sharedmetrics.Labels{"outcome": string(outcome)}); err != nil {
 			return err
 		}
 	}
@@ -1230,18 +1232,18 @@ func serviceRestartHealth(outcome ServiceRestartOutcome, p *Producer) (health.He
 	return health.StatusDegraded, "service_restart_failed", "The control-plane service restart failed.", "Inspect service health before retrying the restart.", health.RetryScheduled, p.now().Add(time.Minute)
 }
 
-func serviceRestartEventOutcome(outcome ServiceRestartOutcome) EventOutcome {
+func serviceRestartEventOutcome(outcome ServiceRestartOutcome) sharedtelemetry.EventOutcome {
 	if outcome == ServiceRestartSucceeded {
-		return OutcomeSuccess
+		return sharedtelemetry.OutcomeSuccess
 	}
-	return OutcomeFailed
+	return sharedtelemetry.OutcomeFailed
 }
 
-func serviceRestartSeverity(outcome ServiceRestartOutcome) EventSeverity {
+func serviceRestartSeverity(outcome ServiceRestartOutcome) sharedtelemetry.EventSeverity {
 	if outcome == ServiceRestartSucceeded {
-		return SeverityInfo
+		return sharedtelemetry.SeverityInfo
 	}
-	return SeverityError
+	return sharedtelemetry.SeverityError
 }
 
 func normalizeServiceState(value ServiceState) ServiceState {
@@ -1264,18 +1266,18 @@ func serviceHealth(state ServiceState, p *Producer) (health.HealthStatus, string
 	}
 }
 
-func serviceEventOutcome(state ServiceState) EventOutcome {
+func serviceEventOutcome(state ServiceState) sharedtelemetry.EventOutcome {
 	if state == ServiceRunning {
-		return OutcomeSuccess
+		return sharedtelemetry.OutcomeSuccess
 	}
-	return OutcomeStateChange
+	return sharedtelemetry.OutcomeStateChange
 }
 
-func serviceSeverity(state ServiceState) EventSeverity {
+func serviceSeverity(state ServiceState) sharedtelemetry.EventSeverity {
 	if state == ServiceRunning {
-		return SeverityInfo
+		return sharedtelemetry.SeverityInfo
 	}
-	return SeverityWarn
+	return sharedtelemetry.SeverityWarn
 }
 
 type WatchdogOutcome string
@@ -1292,13 +1294,13 @@ type WatchdogInput struct {
 	Identity      ProducerIdentity
 	RequestID     string
 	CorrelationID string
-	IDs           SafeIDs
+	IDs           sharedtelemetry.SafeIDs
 }
 
 func (p *Producer) RecordWatchdog(input WatchdogInput) error {
 	outcome := normalizeWatchdogOutcome(input.Outcome)
 	if p != nil && p.Metrics != nil {
-		if err := p.Metrics.IncCounter(MetricServiceWatchdog, MetricLabels{"outcome": string(outcome)}); err != nil {
+		if err := p.Metrics.IncCounter(MetricServiceWatchdog, sharedmetrics.Labels{"outcome": string(outcome)}); err != nil {
 			return err
 		}
 	}
@@ -1331,18 +1333,18 @@ func watchdogHealth(outcome WatchdogOutcome, p *Producer) (health.HealthStatus, 
 	}
 }
 
-func watchdogEventOutcome(value WatchdogOutcome) EventOutcome {
+func watchdogEventOutcome(value WatchdogOutcome) sharedtelemetry.EventOutcome {
 	if value == WatchdogHealthy {
-		return OutcomeSuccess
+		return sharedtelemetry.OutcomeSuccess
 	}
-	return OutcomeFailed
+	return sharedtelemetry.OutcomeFailed
 }
 
-func watchdogSeverity(value WatchdogOutcome) EventSeverity {
+func watchdogSeverity(value WatchdogOutcome) sharedtelemetry.EventSeverity {
 	if value == WatchdogHealthy {
-		return SeverityInfo
+		return sharedtelemetry.SeverityInfo
 	}
-	return SeverityError
+	return sharedtelemetry.SeverityError
 }
 
 type CrashLoopState string
@@ -1358,7 +1360,7 @@ type CrashLoopInput struct {
 	Identity      ProducerIdentity
 	RequestID     string
 	CorrelationID string
-	IDs           SafeIDs
+	IDs           sharedtelemetry.SafeIDs
 }
 
 func (p *Producer) RecordCrashLoop(input CrashLoopInput) error {
@@ -1367,7 +1369,7 @@ func (p *Producer) RecordCrashLoop(input CrashLoopInput) error {
 		state = CrashLoopDetected
 	}
 	if p != nil && p.Metrics != nil {
-		if err := p.Metrics.SetGauge(MetricServiceCrashLoop, MetricLabels{"state": string(state)}, 1); err != nil {
+		if err := p.Metrics.SetGauge(MetricServiceCrashLoop, sharedmetrics.Labels{"state": string(state)}, 1); err != nil {
 			return err
 		}
 	}
@@ -1387,21 +1389,21 @@ func crashLoopHealth(state CrashLoopState, p *Producer) (health.HealthStatus, st
 	return health.StatusDown, "service_crash_loop", "The service is restarting repeatedly.", "Stop the crash loop and repair the service before retrying.", health.RetryNotRetryable, time.Time{}
 }
 
-func crashLoopEventOutcome(state CrashLoopState) EventOutcome {
+func crashLoopEventOutcome(state CrashLoopState) sharedtelemetry.EventOutcome {
 	if state == CrashLoopClear {
-		return OutcomeSuccess
+		return sharedtelemetry.OutcomeSuccess
 	}
-	return OutcomeFailed
+	return sharedtelemetry.OutcomeFailed
 }
 
-func crashLoopSeverity(state CrashLoopState) EventSeverity {
+func crashLoopSeverity(state CrashLoopState) sharedtelemetry.EventSeverity {
 	if state == CrashLoopClear {
-		return SeverityInfo
+		return sharedtelemetry.SeverityInfo
 	}
-	return SeverityError
+	return sharedtelemetry.SeverityError
 }
 
-func mergeIdentity(identity ProducerIdentity, requestID, correlationID string, ids SafeIDs) ProducerIdentity {
+func mergeIdentity(identity ProducerIdentity, requestID, correlationID string, ids sharedtelemetry.SafeIDs) ProducerIdentity {
 	if identity.RequestID == "" {
 		identity.RequestID = requestID
 	}
@@ -1412,7 +1414,7 @@ func mergeIdentity(identity ProducerIdentity, requestID, correlationID string, i
 	return identity
 }
 
-func mergeSafeIDs(left, right SafeIDs) SafeIDs {
+func mergeSafeIDs(left, right sharedtelemetry.SafeIDs) sharedtelemetry.SafeIDs {
 	if left.AccountID == "" {
 		left.AccountID = right.AccountID
 	}
@@ -1456,4 +1458,11 @@ func mergeSafeIDs(left, right SafeIDs) SafeIDs {
 		left.EdgeNodeID = right.EdgeNodeID
 	}
 	return left
+}
+
+// optionalSafeID is the control plane's producer policy: an ID it attaches to an
+// event carries the prefix of its kind. The shared event only bounds and
+// secret-checks IDs, because the edge and host mint others (UUIDs, tun_, rte_).
+func optionalSafeID(value string, prefixes ...string) bool {
+	return value == "" || safe.HasPrefix(value, prefixes...)
 }

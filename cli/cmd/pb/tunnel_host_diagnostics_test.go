@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	typedhealth "github.com/pinksaucepasta/paperboat/shared/health"
+	sharedtelemetry "github.com/pinksaucepasta/paperboat/shared/telemetry"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -41,16 +42,16 @@ func TestCollectTunnelHostDiagnosticsUsesLoopbackNoProxyAndStrictBounds(t *testi
 	if err := metrics.Record("paperboat_runtime_connector_retries_total", 1, map[string]string{"transport": "quic", "result": "connected"}); err != nil {
 		t.Fatal(err)
 	}
-	events, err := hosttelemetry.NewEventLog(8)
+	events, err := sharedtelemetry.NewEventLog(8)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = events.Close() })
-	if _, err := events.Record(hosttelemetry.EventInput{
-		At: time.Unix(100, 0).UTC(), Severity: hosttelemetry.SeverityInfo,
-		Component: hosttelemetry.DimensionConfig, Name: "config_applied", Code: "ready",
-		Outcome: hosttelemetry.OutcomeStateChange, Message: "Configuration applied.",
-		CorrelationID: "correlation_test", Generations: hosttelemetry.Generations{Config: 7}, Retry: hosttelemetry.RetryNone,
+	if _, err := events.Record(sharedtelemetry.EventInput{
+		At: time.Unix(100, 0).UTC(), Severity: sharedtelemetry.SeverityInfo,
+		Component: typedhealth.DimensionConfig, Name: "config_applied", Code: "ready",
+		Outcome: sharedtelemetry.OutcomeStateChange, Message: "Configuration applied.",
+		CorrelationID: "correlation_test", Generations: sharedtelemetry.Generations{Config: 7}, Retry: typedhealth.RetryNone,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -159,15 +160,15 @@ func TestTunnelDoctorBundleIncludesTypedHostDiagnosticsAndEvidence(t *testing.T)
 	if err := metrics.Record("paperboat_runtime_connector_retries_total", 1, map[string]string{"transport": "tcp_mux", "result": "connected"}); err != nil {
 		t.Fatal(err)
 	}
-	events, err := hosttelemetry.NewEventLog(8)
+	events, err := sharedtelemetry.NewEventLog(8)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = events.Close() })
-	if _, err := events.Record(hosttelemetry.EventInput{
-		At: time.Unix(100, 0).UTC(), Severity: hosttelemetry.SeverityInfo, Component: hosttelemetry.DimensionConfig,
-		Name: "config_applied", Code: "ready", Outcome: hosttelemetry.OutcomeStateChange, Message: "Configuration applied.",
-		CorrelationID: "correlation_test", Generations: hosttelemetry.Generations{Config: 7}, Retry: hosttelemetry.RetryNone,
+	if _, err := events.Record(sharedtelemetry.EventInput{
+		At: time.Unix(100, 0).UTC(), Severity: sharedtelemetry.SeverityInfo, Component: typedhealth.DimensionConfig,
+		Name: "config_applied", Code: "ready", Outcome: sharedtelemetry.OutcomeStateChange, Message: "Configuration applied.",
+		CorrelationID: "correlation_test", Generations: sharedtelemetry.Generations{Config: 7}, Retry: typedhealth.RetryNone,
 	}); err != nil {
 		t.Fatal(err)
 	}

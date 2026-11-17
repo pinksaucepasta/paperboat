@@ -1,11 +1,9 @@
 package telemetry
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"math"
 	"net/http"
 	"sort"
@@ -26,119 +24,6 @@ var (
 	ErrInvalidLabels   = errors.New("invalid metric labels")
 	ErrDiagnosticLimit = errors.New("diagnostic size limit")
 )
-
-type Event struct {
-	// Canonical event envelope. These fields are intentionally the same shape
-	// as server and edge telemetry so host events can be forwarded unchanged.
-	Schema        string        `json:"schema"`
-	At            time.Time     `json:"at"`
-	Severity      EventSeverity `json:"severity"`
-	Component     Dimension     `json:"component"`
-	Name          string        `json:"name"`
-	Code          string        `json:"code"`
-	Outcome       EventOutcome  `json:"outcome"`
-	Message       string        `json:"message"`
-	CorrelationID string        `json:"correlation_id"`
-	IDs           SafeIDs       `json:"ids"`
-	Generations   Generations   `json:"generations"`
-	Retry         RetryDecision `json:"retry"`
-	NextRetryAt   *time.Time    `json:"next_retry_at,omitempty"`
-
-	// Legacy runtime logger projection. They remain part of the in-process
-	// value for existing callers, but are excluded from canonical JSON.
-	Operation  string        `json:"-"`
-	Result     string        `json:"-"`
-	ErrorCode  string        `json:"-"`
-	ResourceID string        `json:"-"`
-	Duration   time.Duration `json:"-"`
-	Bytes      uint64        `json:"-"`
-	Count      uint64        `json:"-"`
-	MachineID  string        `json:"-"`
-	State      string        `json:"-"`
-	Role       string        `json:"-"`
-	Generation uint64        `json:"-"`
-}
-type Logger struct{ logger *slog.Logger }
-
-func NewLogger(logger *slog.Logger) (*Logger, error) {
-	if logger == nil {
-		return nil, ErrUnsafeValue
-	}
-	return &Logger{logger: logger}, nil
-}
-func (l *Logger) Log(ctx context.Context, event Event) error {
-	component := string(event.Component)
-	operation := event.Operation
-	if operation == "" {
-		operation = event.Name
-	}
-	result := event.Result
-	if result == "" {
-		result = string(event.Outcome)
-	}
-	errorCode := event.ErrorCode
-	if errorCode == "" {
-		errorCode = event.Code
-	}
-	if component == "" || operation == "" || result == "" {
-		return ErrUnsafeValue
-	}
-	for _, value := range []string{component, operation, result, errorCode, event.CorrelationID, event.ResourceID, event.MachineID, event.State, event.Role} {
-		if value != "" && !safeValue(value) {
-			return ErrUnsafeValue
-		}
-	}
-	if !validSafeIDs(event.IDs) {
-		return ErrUnsafeValue
-	}
-	message := event.Message
-	if message != "" {
-		var err error
-		message, err = safeBoundedString(message, maximumMessageBytes, false)
-		if err != nil {
-			return ErrUnsafeValue
-		}
-	}
-	attributes := []any{"component", component, "operation", operation, "result", result, "duration_ms", event.Duration.Milliseconds(), "bytes", event.Bytes, "count", event.Count}
-	if errorCode != "" {
-		attributes = append(attributes, "error_code", errorCode)
-	}
-	if event.CorrelationID != "" {
-		attributes = append(attributes, "correlation_id", event.CorrelationID)
-	}
-	if event.ResourceID != "" {
-		attributes = append(attributes, "resource_id", event.ResourceID)
-	}
-	if event.IDs.ResourceID != "" && event.ResourceID == "" {
-		attributes = append(attributes, "resource_id", event.IDs.ResourceID)
-	}
-	if event.IDs.SessionID != "" {
-		attributes = append(attributes, "session_id", event.IDs.SessionID)
-	}
-	if event.IDs.ProcessID != "" {
-		attributes = append(attributes, "process_id", event.IDs.ProcessID)
-	}
-	if event.IDs.ConfigID != "" {
-		attributes = append(attributes, "config_id", event.IDs.ConfigID)
-	}
-	if message != "" {
-		attributes = append(attributes, "message", message)
-	}
-	if event.MachineID != "" {
-		attributes = append(attributes, "machine_id", event.MachineID)
-	}
-	if event.State != "" {
-		attributes = append(attributes, "state", event.State)
-	}
-	if event.Role != "" {
-		attributes = append(attributes, "role", event.Role)
-	}
-	if event.Generation != 0 {
-		attributes = append(attributes, "generation", event.Generation)
-	}
-	l.logger.InfoContext(ctx, "runtime_event", attributes...)
-	return nil
-}
 
 type Kind string
 
@@ -200,6 +85,12 @@ type histogramSeries struct {
 }
 
 var histogramBounds = [...]float64{0.01, 0.05, 0.1, 0.5, 1, 5, 15, 30, math.Inf(1)}
+
+// HistogramBuckets returns the finite histogram bounds every histogram uses (the
+// +Inf bucket is implicit), for the metric schema document.
+func HistogramBuckets() []float64 {
+	return append([]float64(nil), histogramBounds[:len(histogramBounds)-1]...)
+}
 
 const (
 	maximumMetricDescriptors = 128

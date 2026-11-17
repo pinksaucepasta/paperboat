@@ -3,11 +3,11 @@ package runtime
 import (
 	"context"
 	"errors"
+	sharedtelemetry "github.com/pinksaucepasta/paperboat/shared/telemetry"
 	"testing"
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/diagnostics"
 	"github.com/pinksaucepasta/paperboat/cli/internal/errorreport"
-	hosttelemetry "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/telemetry"
 	"github.com/pinksaucepasta/paperboat/shared/supportref"
 )
 
@@ -64,7 +64,7 @@ func TestRuntimeDiagnosticFailureAndRollbackPublishOnceWithOriginalCause(t *test
 				}
 			})
 			defer restoreObserver()
-			events, err := hosttelemetry.NewEventLog(8)
+			events, err := sharedtelemetry.NewEventLog(8)
 			if err != nil {
 				t.Fatal(err)
 			}

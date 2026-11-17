@@ -130,8 +130,457 @@
       "kind": "counter"
     },
     {
+      "name": "paperboat_edge_access_decisions_total",
+      "kind": "counter",
+      "labels": {
+        "decision": [
+          "allowed",
+          "denied",
+          "unavailable"
+        ]
+      }
+    },
+    {
+      "name": "paperboat_edge_certificate_operations_total",
+      "kind": "counter",
+      "labels": {
+        "operation": [
+          "issue",
+          "renew",
+          "replace",
+          "revoke"
+        ],
+        "outcome": [
+          "canceled",
+          "failed",
+          "success"
+        ]
+      }
+    },
+    {
+      "name": "paperboat_edge_health_dimension",
+      "kind": "gauge",
+      "labels": {
+        "dimension": [
+          "access",
+          "certificate",
+          "config",
+          "dns",
+          "edge",
+          "origin",
+          "route",
+          "service",
+          "update"
+        ],
+        "status": [
+          "degraded",
+          "down",
+          "not_applicable",
+          "ready",
+          "unknown"
+        ]
+      }
+    },
+    {
+      "name": "paperboat_edge_health_transitions_total",
+      "kind": "counter",
+      "labels": {
+        "dimension": [
+          "access",
+          "certificate",
+          "config",
+          "dns",
+          "edge",
+          "origin",
+          "route",
+          "service",
+          "update"
+        ],
+        "from": [
+          "degraded",
+          "down",
+          "not_applicable",
+          "ready",
+          "unknown"
+        ],
+        "to": [
+          "degraded",
+          "down",
+          "not_applicable",
+          "ready",
+          "unknown"
+        ]
+      }
+    },
+    {
+      "name": "paperboat_edge_operation_latency_seconds",
+      "kind": "histogram",
+      "labels": {
+        "operation": [
+          "access",
+          "certificate",
+          "create",
+          "delete",
+          "reconcile",
+          "update"
+        ]
+      },
+      "buckets": [
+        0.005,
+        0.01,
+        0.025,
+        0.05,
+        0.1,
+        0.25,
+        0.5,
+        1,
+        2,
+        5,
+        10
+      ]
+    },
+    {
+      "name": "paperboat_edge_origin_connections_total",
+      "kind": "counter",
+      "labels": {
+        "outcome": [
+          "canceled",
+          "failed",
+          "success",
+          "timeout"
+        ],
+        "protocol": [
+          "h2c",
+          "http1",
+          "http2",
+          "tcp",
+          "websocket"
+        ]
+      }
+    },
+    {
+      "name": "paperboat_edge_requests_total",
+      "kind": "counter",
+      "labels": {
+        "outcome": [
+          "canceled",
+          "failed",
+          "rejected",
+          "success"
+        ],
+        "protocol": [
+          "http",
+          "https",
+          "tcp",
+          "websocket"
+        ]
+      }
+    },
+    {
+      "name": "paperboat_edge_route_requests_total",
+      "kind": "counter",
+      "labels": {
+        "outcome": [
+          "canceled",
+          "failed",
+          "rejected",
+          "success"
+        ],
+        "route_kind": [
+          "preview_public_https_wss",
+          "tunnel_https_wss",
+          "tunnel_private_tcp",
+          "tunnel_tcp"
+        ]
+      }
+    },
+    {
+      "name": "paperboat_edge_update_operations_total",
+      "kind": "counter",
+      "labels": {
+        "outcome": [
+          "canceled",
+          "failed",
+          "success"
+        ],
+        "phase": [
+          "activate",
+          "download",
+          "health_gate",
+          "quarantine",
+          "rollback",
+          "stage",
+          "verify"
+        ]
+      }
+    },
+    {
       "name": "paperboat_runtime_update_rollbacks_total",
       "kind": "counter"
+    },
+    {
+      "name": "paperboat_server_certificate_expiry_horizon_seconds",
+      "kind": "gauge",
+      "labels": {
+        "horizon": [
+          "expired",
+          "over_14d",
+          "under_14d",
+          "under_1h",
+          "under_24h",
+          "under_7d"
+        ]
+      }
+    },
+    {
+      "name": "paperboat_server_config_generations",
+      "kind": "gauge",
+      "labels": {
+        "state": [
+          "applied",
+          "desired"
+        ]
+      }
+    },
+    {
+      "name": "paperboat_server_dns_verification_duration_seconds",
+      "kind": "histogram",
+      "labels": {
+        "outcome": [
+          "failed",
+          "success",
+          "waiting"
+        ]
+      },
+      "buckets": [
+        1,
+        5,
+        10,
+        30,
+        60,
+        120,
+        300,
+        600
+      ]
+    },
+    {
+      "name": "paperboat_server_dns_verification_failures_total",
+      "kind": "counter",
+      "labels": {
+        "failure_class": [
+          "conflict",
+          "invalid",
+          "nxdomain",
+          "provider",
+          "timeout",
+          "unauthorized",
+          "unknown"
+        ]
+      }
+    },
+    {
+      "name": "paperboat_server_http_request_duration_seconds",
+      "kind": "histogram",
+      "labels": {
+        "route_family": [
+          "edge_control",
+          "health",
+          "internal",
+          "other",
+          "public_api",
+          "release"
+        ],
+        "status_class": [
+          "1xx",
+          "2xx",
+          "3xx",
+          "4xx",
+          "5xx"
+        ]
+      },
+      "buckets": [
+        0.001,
+        0.005,
+        0.01,
+        0.025,
+        0.05,
+        0.1,
+        0.25,
+        0.5,
+        1,
+        2,
+        5,
+        10
+      ]
+    },
+    {
+      "name": "paperboat_server_http_requests_total",
+      "kind": "counter",
+      "labels": {
+        "method": [
+          "delete",
+          "get",
+          "other",
+          "patch",
+          "post",
+          "put"
+        ],
+        "route_family": [
+          "edge_control",
+          "health",
+          "internal",
+          "other",
+          "public_api",
+          "release"
+        ],
+        "status_class": [
+          "1xx",
+          "2xx",
+          "3xx",
+          "4xx",
+          "5xx"
+        ]
+      }
+    },
+    {
+      "name": "paperboat_server_operation_idempotency_total",
+      "kind": "counter",
+      "labels": {
+        "outcome": [
+          "conflict",
+          "new",
+          "reused"
+        ]
+      }
+    },
+    {
+      "name": "paperboat_server_preview_allocations_total",
+      "kind": "counter",
+      "labels": {
+        "outcome": [
+          "canceled",
+          "expired",
+          "failed",
+          "rejected",
+          "success"
+        ]
+      }
+    },
+    {
+      "name": "paperboat_server_preview_lease_cleanup_total",
+      "kind": "counter",
+      "labels": {
+        "outcome": [
+          "already_clean",
+          "failed",
+          "success"
+        ]
+      }
+    },
+    {
+      "name": "paperboat_server_relay_subject_observations_total",
+      "kind": "counter",
+      "labels": {
+        "shape": [
+          "digest_only",
+          "full",
+          "required"
+        ]
+      }
+    },
+    {
+      "name": "paperboat_server_route_errors_total",
+      "kind": "counter",
+      "labels": {
+        "class": [
+          "conflict",
+          "edge",
+          "internal",
+          "not_found",
+          "origin",
+          "paused",
+          "unauthorized"
+        ]
+      }
+    },
+    {
+      "name": "paperboat_server_route_latency_seconds",
+      "kind": "histogram",
+      "labels": {
+        "protocol": [
+          "h2c",
+          "http",
+          "https",
+          "tcp",
+          "websocket"
+        ]
+      },
+      "buckets": [
+        0.005,
+        0.01,
+        0.025,
+        0.05,
+        0.1,
+        0.25,
+        0.5,
+        1,
+        2,
+        5,
+        10
+      ]
+    },
+    {
+      "name": "paperboat_server_service_crash_loop",
+      "kind": "gauge",
+      "labels": {
+        "state": [
+          "clear",
+          "detected"
+        ]
+      }
+    },
+    {
+      "name": "paperboat_server_service_restarts_total",
+      "kind": "counter",
+      "labels": {
+        "outcome": [
+          "failed",
+          "success"
+        ]
+      }
+    },
+    {
+      "name": "paperboat_server_service_uptime_seconds",
+      "kind": "gauge",
+      "labels": {
+        "state": [
+          "degraded",
+          "running",
+          "stopped"
+        ]
+      }
+    },
+    {
+      "name": "paperboat_server_service_watchdog_total",
+      "kind": "counter",
+      "labels": {
+        "outcome": [
+          "failed",
+          "healthy",
+          "restarted"
+        ]
+      }
+    },
+    {
+      "name": "paperboat_server_worker_mode",
+      "kind": "gauge",
+      "labels": {
+        "mode": [
+          "drained",
+          "leader",
+          "standby"
+        ]
+      }
     },
     {
       "name": "provider_github_errors_total",

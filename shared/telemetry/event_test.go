@@ -1,6 +1,7 @@
 package telemetry
 
 import (
+	"context"
 	"github.com/pinksaucepasta/paperboat/shared/health"
 	"github.com/pinksaucepasta/paperboat/shared/telemetry/safe"
 	"strings"
@@ -163,5 +164,43 @@ func TestEventLogCloseDrainsEveryAcceptedEvent(t *testing.T) {
 		if queued := len(log.queue); queued != 0 {
 			t.Fatalf("iteration %d left %d accepted events after close", iteration, queued)
 		}
+	}
+}
+
+func TestEventLogCountsEvictionAndKeepsEventsRecordedWhileTheRingIsBusy(t *testing.T) {
+	log, err := NewEventLog(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := EventInput{At: time.Unix(1, 0), Severity: SeverityInfo, Component: health.DimensionRoute, Name: "activated", Code: "activated", Outcome: OutcomeStateChange, Message: "Route activated.", CorrelationID: "corr_route_1", Retry: health.RetryNone}
+	if _, err := log.Record(input); err != nil {
+		t.Fatal(err)
+	}
+	input.At = time.Unix(2, 0)
+	if _, err := log.Record(input); err != nil {
+		t.Fatal(err)
+	}
+	if got := log.DroppedEvents(); got != 1 {
+		t.Fatalf("eviction drops = %d, want 1", got)
+	}
+
+	if err := log.Flush(context.Background()); err != nil { // an empty queue: the busy ring must be the only obstacle
+		t.Fatal(err)
+	}
+	log.mu.Lock()
+	input.At = time.Unix(3, 0)
+	_, stored, err := log.TryRecord(input)
+	log.mu.Unlock()
+	if err != nil || !stored {
+		t.Fatalf("TryRecord while the ring is busy = stored %v, err %v", stored, err)
+	}
+	if err := log.Flush(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if events := log.Snapshot(); len(events) != 1 || !events[0].At.Equal(time.Unix(3, 0)) {
+		t.Fatalf("retained events = %v, want the one recorded while the ring was busy", events)
+	}
+	if got := log.DroppedEvents(); got != 2 {
+		t.Fatalf("total drops = %d, want 2", got)
 	}
 }

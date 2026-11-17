@@ -3,6 +3,8 @@ package route
 import (
 	"errors"
 	"github.com/pinksaucepasta/paperboat/shared/health"
+	sharedmetrics "github.com/pinksaucepasta/paperboat/shared/metrics"
+	sharedtelemetry "github.com/pinksaucepasta/paperboat/shared/telemetry"
 	"github.com/pinksaucepasta/paperboat/shared/telemetry/safe"
 	"sync"
 	"time"
@@ -37,8 +39,8 @@ type RouteTelemetryRecord struct {
 	ActiveStreams      int
 	MaximumStreams     int
 	CorrelationID      string
-	IDs                edgetelemetry.SafeIDs
-	Generations        edgetelemetry.Generations
+	IDs                sharedtelemetry.SafeIDs
+	Generations        sharedtelemetry.Generations
 }
 
 type RouteTelemetrySink interface {
@@ -59,13 +61,13 @@ func (f RouteTelemetrySinkFunc) RecordRouteTelemetry(record RouteTelemetryRecord
 type CoreTelemetrySink struct {
 	mu         sync.Mutex
 	health     *health.HealthTracker
-	metrics    *edgetelemetry.Metrics
-	events     *edgetelemetry.EventLog
+	metrics    *sharedmetrics.Metrics
+	events     *sharedtelemetry.EventLog
 	overloaded bool
 	active     uint64
 }
 
-func NewCoreTelemetrySink(healthTracker *health.HealthTracker, metrics *edgetelemetry.Metrics, events *edgetelemetry.EventLog) (*CoreTelemetrySink, error) {
+func NewCoreTelemetrySink(healthTracker *health.HealthTracker, metrics *sharedmetrics.Metrics, events *sharedtelemetry.EventLog) (*CoreTelemetrySink, error) {
 	if healthTracker == nil || metrics == nil || events == nil {
 		return nil, ErrInvalid
 	}
@@ -126,14 +128,14 @@ func (s *CoreTelemetrySink) updateHealth(dimension health.Dimension, status heal
 	after := s.health.Snapshot().Dimensions.Get(dimension)
 	var metricErr error
 	if before.Status != after.Status {
-		metricErr = s.metrics.AddCounter(edgetelemetry.MetricHealthTransitions, edgetelemetry.MetricLabels{
+		metricErr = s.metrics.AddCounter(edgetelemetry.MetricHealthTransitions, sharedmetrics.Labels{
 			"dimension": string(dimension), "from": string(before.Status), "to": string(after.Status),
 		}, 1)
 	}
-	oldGaugeErr := s.metrics.SetGauge(edgetelemetry.MetricHealthDimension, edgetelemetry.MetricLabels{
+	oldGaugeErr := s.metrics.SetGauge(edgetelemetry.MetricHealthDimension, sharedmetrics.Labels{
 		"dimension": string(dimension), "status": string(before.Status),
 	}, 0)
-	newGaugeErr := s.metrics.SetGauge(edgetelemetry.MetricHealthDimension, edgetelemetry.MetricLabels{
+	newGaugeErr := s.metrics.SetGauge(edgetelemetry.MetricHealthDimension, sharedmetrics.Labels{
 		"dimension": string(dimension), "status": string(after.Status),
 	}, 1)
 	return errors.Join(metricErr, oldGaugeErr, newGaugeErr)
@@ -141,49 +143,49 @@ func (s *CoreTelemetrySink) updateHealth(dimension health.Dimension, status heal
 
 // EventInput projects only the finite route lifecycle catalog. Operational IDs
 // remain available to the local route owner; exporters select their own fields.
-func (record RouteTelemetryRecord) EventInput() (edgetelemetry.EventInput, error) {
+func (record RouteTelemetryRecord) EventInput() (sharedtelemetry.EventInput, error) {
 	return routeEventInput(record)
 }
 
-func routeEventInput(record RouteTelemetryRecord) (edgetelemetry.EventInput, error) {
-	severity, outcome, message, retry := edgetelemetry.SeverityInfo, edgetelemetry.OutcomeSuccess, "Route lifecycle transition completed.", health.RetryNone
+func routeEventInput(record RouteTelemetryRecord) (sharedtelemetry.EventInput, error) {
+	severity, outcome, message, retry := sharedtelemetry.SeverityInfo, sharedtelemetry.OutcomeSuccess, "Route lifecycle transition completed.", health.RetryNone
 	switch record.Type {
 	case LifecycleStageAccepted:
 		message = "Route generation was staged."
 	case LifecycleStageRejected:
-		severity, outcome, message, retry = edgetelemetry.SeverityWarn, edgetelemetry.OutcomeRejected, "Route generation was rejected.", health.RetryWaitForChange
+		severity, outcome, message, retry = sharedtelemetry.SeverityWarn, sharedtelemetry.OutcomeRejected, "Route generation was rejected.", health.RetryWaitForChange
 	case LifecycleGenerationReady:
 		message = "Route generation passed readiness checks."
 	case LifecycleActivated:
-		outcome, message = edgetelemetry.OutcomeStateChange, "Route generation was activated."
+		outcome, message = sharedtelemetry.OutcomeStateChange, "Route generation was activated."
 	case LifecycleDrainStarted:
-		outcome, message = edgetelemetry.OutcomeStateChange, "Old route generation started draining."
+		outcome, message = sharedtelemetry.OutcomeStateChange, "Old route generation started draining."
 	case LifecycleDrainCompleted:
 		message = "Old route generation completed draining."
 	case LifecycleDrainForced:
-		severity, outcome, message = edgetelemetry.SeverityWarn, edgetelemetry.OutcomeFailed, "Old route generation required forced cancellation."
+		severity, outcome, message = sharedtelemetry.SeverityWarn, sharedtelemetry.OutcomeFailed, "Old route generation required forced cancellation."
 	case LifecycleStaleRejected:
-		severity, outcome, message, retry = edgetelemetry.SeverityWarn, edgetelemetry.OutcomeRejected, "Stale route generation was rejected.", health.RetryWaitForChange
+		severity, outcome, message, retry = sharedtelemetry.SeverityWarn, sharedtelemetry.OutcomeRejected, "Stale route generation was rejected.", health.RetryWaitForChange
 	case LifecycleStreamAcquired:
-		severity, message = edgetelemetry.SeverityDebug, "Route stream was acquired."
+		severity, message = sharedtelemetry.SeverityDebug, "Route stream was acquired."
 	case LifecycleStreamOverloaded:
-		severity, outcome, message, retry = edgetelemetry.SeverityWarn, edgetelemetry.OutcomeRejected, "Route stream capacity was exhausted.", health.RetryWaitForChange
+		severity, outcome, message, retry = sharedtelemetry.SeverityWarn, sharedtelemetry.OutcomeRejected, "Route stream capacity was exhausted.", health.RetryWaitForChange
 	case LifecycleStreamReleased:
-		severity, message = edgetelemetry.SeverityDebug, "Route stream was released."
+		severity, message = sharedtelemetry.SeverityDebug, "Route stream was released."
 	default:
-		return edgetelemetry.EventInput{}, ErrInvalid
+		return sharedtelemetry.EventInput{}, ErrInvalid
 	}
-	return edgetelemetry.EventInput{
+	return sharedtelemetry.EventInput{
 		At: record.At, Severity: severity, Component: health.DimensionRoute,
 		Name: string(record.Type), Code: string(record.Type), Outcome: outcome, Message: message,
 		CorrelationID: record.CorrelationID, IDs: record.IDs, Generations: record.Generations, Retry: retry,
 	}, nil
 }
 
-func routeTelemetryIdentity(generation uint64, rules []RouteRule) (string, edgetelemetry.SafeIDs, edgetelemetry.Generations) {
+func routeTelemetryIdentity(generation uint64, rules []RouteRule) (string, sharedtelemetry.SafeIDs, sharedtelemetry.Generations) {
 	correlationID := "correlation_" + uuid.NewString()
-	ids := edgetelemetry.SafeIDs{}
-	generations := edgetelemetry.Generations{Route: generation}
+	ids := sharedtelemetry.SafeIDs{}
+	generations := sharedtelemetry.Generations{Route: generation}
 	if len(rules) == 0 {
 		return correlationID, ids, generations
 	}

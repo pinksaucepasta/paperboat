@@ -8,7 +8,9 @@ import (
 	"github.com/pinksaucepasta/paperboat/edge/internal/edgeerrors"
 	"github.com/pinksaucepasta/paperboat/edge/internal/route"
 	edgetelemetry "github.com/pinksaucepasta/paperboat/edge/internal/telemetry"
+	sharedmetrics "github.com/pinksaucepasta/paperboat/shared/metrics"
 	"github.com/pinksaucepasta/paperboat/shared/reporting"
+	sharedtelemetry "github.com/pinksaucepasta/paperboat/shared/telemetry"
 	"reflect"
 )
 
@@ -72,9 +74,9 @@ func routeLifecycle(code, outcome string) (string, string, bool) {
 		return "", "", false
 	}
 	switch input.Severity {
-	case edgetelemetry.SeverityWarn:
+	case sharedtelemetry.SeverityWarn:
 		return string(input.Retry), "warn", true
-	case edgetelemetry.SeverityDebug:
+	case sharedtelemetry.SeverityDebug:
 		return string(input.Retry), "debug", true
 	}
 	return string(input.Retry), "", true
@@ -88,11 +90,11 @@ func metrics() []reporting.Metric {
 			labels[label.Name] = label.AllowedValues
 		}
 		switch descriptor.Kind {
-		case edgetelemetry.MetricGauge:
+		case sharedmetrics.Gauge:
 			out = append(out, reporting.Metric{Name: descriptor.Name, Kind: sentry.MetricTypeGauge, Labels: labels})
-		case edgetelemetry.MetricCounter:
+		case sharedmetrics.Counter:
 			out = append(out, reporting.Metric{Name: descriptor.Name + "_snapshot", Kind: sentry.MetricTypeGauge, Labels: labels})
-		case edgetelemetry.MetricHistogram:
+		case sharedmetrics.Histogram:
 			out = append(out,
 				reporting.Metric{Name: descriptor.Name + "_sum_snapshot", Kind: sentry.MetricTypeGauge, Labels: labels},
 				reporting.Metric{Name: descriptor.Name + "_count_snapshot", Kind: sentry.MetricTypeGauge, Labels: labels})

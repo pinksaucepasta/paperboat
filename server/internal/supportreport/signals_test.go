@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"github.com/pinksaucepasta/paperboat/shared/health"
+	sharedmetrics "github.com/pinksaucepasta/paperboat/shared/metrics"
+	sharedtelemetry "github.com/pinksaucepasta/paperboat/shared/telemetry"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -61,8 +63,8 @@ func TestAllSignalEnvelopesAndOwnedTraceCorrelation(t *testing.T) {
 	s.process(ctx, <-s.queue)
 	finish("failed")
 	registry := telemetry.NewMetrics()
-	registry.AddCounter(telemetry.MetricHTTPRequests, telemetry.MetricLabels{"method": "post", "route_family": "public_api", "status_class": "5xx"}, 17)
-	registry.ObserveHistogram(telemetry.MetricHTTPDuration, telemetry.MetricLabels{"route_family": "public_api", "status_class": "5xx"}, .2)
+	registry.AddCounter(telemetry.MetricHTTPRequests, sharedmetrics.Labels{"method": "post", "route_family": "public_api", "status_class": "5xx"}, 17)
+	registry.ObserveHistogram(telemetry.MetricHTTPDuration, sharedmetrics.Labels{"route_family": "public_api", "status_class": "5xx"}, .2)
 	s.RegistrySnapshot(registry.Snapshot())
 	age := 12.0
 	s.WorkerProgress("worker_machines", 3, &age)
@@ -178,12 +180,12 @@ func TestLifecycleFailureRecoveryUsesSameLocalEvents(t *testing.T) {
 	s.client = client
 	old.Close()
 	defer client.Close()
-	events, _ := telemetry.NewEventLog(8)
+	events, _ := sharedtelemetry.NewEventLog(8)
 	defer events.Close()
 	events.SetObserver(s.ObserveEvent)
 	ref := NewReference()
-	for _, outcome := range []telemetry.EventOutcome{telemetry.OutcomeFailed, telemetry.OutcomeSuccess} {
-		_, err = events.Record(telemetry.EventInput{At: time.Now(), Severity: telemetry.SeverityInfo, Component: health.DimensionService, Name: "connector_reconnect", Code: "connection_changed", Outcome: outcome, Message: "Connection state changed.", CorrelationID: ref, Retry: health.RetryNone})
+	for _, outcome := range []sharedtelemetry.EventOutcome{sharedtelemetry.OutcomeFailed, sharedtelemetry.OutcomeSuccess} {
+		_, err = events.Record(sharedtelemetry.EventInput{At: time.Now(), Severity: sharedtelemetry.SeverityInfo, Component: health.DimensionService, Name: "connector_reconnect", Code: "connection_changed", Outcome: outcome, Message: "Connection state changed.", CorrelationID: ref, Retry: health.RetryNone})
 		if err != nil {
 			t.Fatal(err)
 		}

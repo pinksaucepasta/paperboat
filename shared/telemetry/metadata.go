@@ -8,7 +8,6 @@ import (
 )
 
 const (
-	maximumEventLogSize  = 4096
 	maximumMetadataBytes = 1000
 	maximumMetadataItems = 64
 	maximumMetadataDepth = 8

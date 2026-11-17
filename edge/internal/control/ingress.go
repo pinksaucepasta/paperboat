@@ -2,6 +2,7 @@ package control
 
 import (
 	"context"
+	sharedtelemetry "github.com/pinksaucepasta/paperboat/shared/telemetry"
 	"strings"
 	"time"
 
@@ -85,7 +86,7 @@ func (c *HTTPClient) IngressDecisions(ctx context.Context, nodeID, epoch, versio
 		// The server's version covers the rejected decisions too; holding it would let an "unchanged"
 		// answer's expiries pair with the wrong decisions, so the next refresh fetches the whole set.
 		output.Version = ""
-		edgetelemetry.Log(ctx, edgetelemetry.SeverityWarn, "ingress_decisions_rejected", edgetelemetry.OutcomeRejected, "count", len(rejected), "route_ids", strings.Join(rejected[:min(len(rejected), 8)], ","))
+		edgetelemetry.Log(ctx, sharedtelemetry.SeverityWarn, "ingress_decisions_rejected", sharedtelemetry.OutcomeRejected, "count", len(rejected), "route_ids", strings.Join(rejected[:min(len(rejected), 8)], ","))
 	}
 	for _, r := range output.HTTP01Responses {
 		if r.Validate() != nil {

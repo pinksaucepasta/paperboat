@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	typedhealth "github.com/pinksaucepasta/paperboat/shared/health"
+	sharedtelemetry "github.com/pinksaucepasta/paperboat/shared/telemetry"
 	"strings"
 	"testing"
 	"time"
@@ -16,7 +17,7 @@ type telemetryClock struct{ now time.Time }
 
 func (c telemetryClock) Now() time.Time { return c.now }
 
-func newTelemetryConfig(t *testing.T, now time.Time, components []Component, tracker *typedhealth.HealthTracker, metrics *hosttelemetry.Registry, events *hosttelemetry.EventLog) Config {
+func newTelemetryConfig(t *testing.T, now time.Time, components []Component, tracker *typedhealth.HealthTracker, metrics *hosttelemetry.Registry, events *sharedtelemetry.EventLog) Config {
 	t.Helper()
 	return Config{
 		Version:         "runtime-test",
@@ -30,7 +31,7 @@ func newTelemetryConfig(t *testing.T, now time.Time, components []Component, tra
 	}
 }
 
-func newTelemetrySinks(t *testing.T, now time.Time) (*typedhealth.HealthTracker, *hosttelemetry.Registry, *hosttelemetry.EventLog) {
+func newTelemetrySinks(t *testing.T, now time.Time) (*typedhealth.HealthTracker, *hosttelemetry.Registry, *sharedtelemetry.EventLog) {
 	t.Helper()
 	tracker, err := health.NewHealthTracker(func() time.Time { return now })
 	if err != nil {
@@ -40,7 +41,7 @@ func newTelemetrySinks(t *testing.T, now time.Time) (*typedhealth.HealthTracker,
 	if err != nil {
 		t.Fatal(err)
 	}
-	events, err := hosttelemetry.NewEventLog(32)
+	events, err := sharedtelemetry.NewEventLog(32)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,7 +64,7 @@ func TestRuntimeTelemetryLifecycleIsTypedAndExactlyOnce(t *testing.T) {
 	if started.Status != typedhealth.StatusReady || started.Code != "ready" || started.CorrelationID != "correlation_runtime_test" {
 		t.Fatalf("typed start health=%#v", started)
 	}
-	if got := events.Snapshot(); len(got) != 1 || got[0].Name != lifecycleStart || got[0].Code != "ready" || got[0].Outcome != hosttelemetry.OutcomeStateChange {
+	if got := events.Snapshot(); len(got) != 1 || got[0].Name != lifecycleStart || got[0].Code != "ready" || got[0].Outcome != sharedtelemetry.OutcomeStateChange {
 		t.Fatalf("start events=%#v", got)
 	}
 	if got := events.Snapshot()[0]; got.IDs.ResourceID != "resource_service" || got.IDs.SessionID != "session_runtime" || got.IDs.ProcessID != "process_runtime" || got.IDs.ConfigID != "config_runtime-test" {
@@ -114,7 +115,7 @@ func TestRuntimeTelemetryOptionalAndRequiredFailuresStaySafe(t *testing.T) {
 			t.Fatalf("optional health=%#v", state)
 		}
 		got := events.Snapshot()
-		if len(got) != 1 || got[0].Outcome != hosttelemetry.OutcomeFailed || got[0].Severity != hosttelemetry.SeverityError {
+		if len(got) != 1 || got[0].Outcome != sharedtelemetry.OutcomeFailed || got[0].Severity != sharedtelemetry.SeverityError {
 			t.Fatalf("optional events=%#v", got)
 		}
 		body, marshalErr := got[0].JSON()
@@ -176,7 +177,7 @@ func TestRuntimeTelemetryShutdownCancellationUsesStableCode(t *testing.T) {
 		t.Fatalf("shutdown health=%#v", state)
 	}
 	got := events.Snapshot()
-	if len(got) != 2 || got[1].Outcome != hosttelemetry.OutcomeCanceled || got[1].Code != "shutdown_canceled" {
+	if len(got) != 2 || got[1].Outcome != sharedtelemetry.OutcomeCanceled || got[1].Code != "shutdown_canceled" {
 		t.Fatalf("shutdown events=%#v", got)
 	}
 	body, marshalErr := got[1].JSON()

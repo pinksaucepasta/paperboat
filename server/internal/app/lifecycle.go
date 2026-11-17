@@ -20,6 +20,8 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/telemetry"
 	"github.com/pinksaucepasta/paperboat/server/internal/workers"
 	"github.com/pinksaucepasta/paperboat/shared/health"
+	sharedmetrics "github.com/pinksaucepasta/paperboat/shared/metrics"
+	sharedtelemetry "github.com/pinksaucepasta/paperboat/shared/telemetry"
 	"log/slog"
 	"net"
 	"net/http"
@@ -108,7 +110,7 @@ func (a *App) Run(ctx context.Context) error {
 	}
 	runContext, cancelRun := context.WithCancel(ctx)
 	defer cancelRun()
-	telemetryEvents, telemetryErr := telemetry.NewEventLog(1024)
+	telemetryEvents, telemetryErr := sharedtelemetry.NewEventLog(1024)
 	if telemetryErr != nil {
 		return fmt.Errorf("start telemetry event log: %w", telemetryErr)
 	}
@@ -122,7 +124,7 @@ func (a *App) Run(ctx context.Context) error {
 	defer telemetryEvents.Close()
 	a.telemetryStartedAt = time.Now().UTC()
 	if a.telemetryMetrics != nil {
-		_ = a.telemetryMetrics.IncCounter(telemetry.MetricServiceRestarts, telemetry.MetricLabels{"outcome": "success"})
+		_ = a.telemetryMetrics.IncCounter(telemetry.MetricServiceRestarts, sharedmetrics.Labels{"outcome": "success"})
 	}
 	a.updateServiceTelemetry(health.StatusReady, "running", "Control-plane service is running.", "", health.RetryNone, time.Time{})
 	serverErrors := make(chan error, 1)
@@ -292,7 +294,7 @@ func (a *App) beginShutdown() {
 	}
 }
 
-func stopReportingAfterTelemetryDrain(events *telemetry.EventLog, stopReporting func()) {
+func stopReportingAfterTelemetryDrain(events *sharedtelemetry.EventLog, stopReporting func()) {
 	if events != nil {
 		_ = events.Close()
 	}
@@ -341,15 +343,15 @@ func (a *App) updateServiceTelemetry(status health.HealthStatus, code, summary, 
 			if state == selected {
 				value = uptime
 			}
-			_ = a.telemetryMetrics.SetGauge(telemetry.MetricServiceUptime, telemetry.MetricLabels{"state": state}, value)
+			_ = a.telemetryMetrics.SetGauge(telemetry.MetricServiceUptime, sharedmetrics.Labels{"state": state}, value)
 		}
 	}
 	if a.telemetryEvents != nil {
-		severity, outcome := telemetry.SeverityInfo, telemetry.OutcomeStateChange
+		severity, outcome := sharedtelemetry.SeverityInfo, sharedtelemetry.OutcomeStateChange
 		if status == health.StatusDegraded || status == health.StatusDown {
-			severity, outcome = telemetry.SeverityError, telemetry.OutcomeFailed
+			severity, outcome = sharedtelemetry.SeverityError, sharedtelemetry.OutcomeFailed
 		}
-		_, _ = a.telemetryEvents.Record(telemetry.EventInput{At: time.Now().UTC(), Severity: severity, Component: health.DimensionService, Name: "service_lifecycle", Code: code, Outcome: outcome, Message: summary, CorrelationID: "cor_server_lifecycle", Retry: retry, NextRetryAt: nextRetryAt})
+		_, _ = a.telemetryEvents.Record(sharedtelemetry.EventInput{At: time.Now().UTC(), Severity: severity, Component: health.DimensionService, Name: "service_lifecycle", Code: code, Outcome: outcome, Message: summary, CorrelationID: "cor_server_lifecycle", Retry: retry, NextRetryAt: nextRetryAt})
 	}
 }
 
@@ -380,7 +382,7 @@ func (r readinessChecker) Ready(ctx context.Context) error {
 }
 
 // workerLeader elects the one instance that runs background workers (F21-04).
-func workerLeader(store *db.DB, metrics *telemetry.Metrics, logger *slog.Logger) *workers.PostgresLeader {
+func workerLeader(store *db.DB, metrics *sharedmetrics.Metrics, logger *slog.Logger) *workers.PostgresLeader {
 	host, _ := os.Hostname()
 	return &workers.PostgresLeader{
 		DB: store.Direct(), Instance: fmt.Sprintf("%s/%d", host, os.Getpid()), Version: buildinfo.Version,
@@ -389,7 +391,7 @@ func workerLeader(store *db.DB, metrics *telemetry.Metrics, logger *slog.Logger)
 	}
 }
 
-func setWorkerMode(metrics *telemetry.Metrics, mode string) {
+func setWorkerMode(metrics *sharedmetrics.Metrics, mode string) {
 	if metrics == nil {
 		return
 	}
@@ -398,6 +400,6 @@ func setWorkerMode(metrics *telemetry.Metrics, mode string) {
 		if m == mode {
 			value = 1
 		}
-		_ = metrics.SetGauge(telemetry.MetricWorkerMode, telemetry.MetricLabels{"mode": m}, value)
+		_ = metrics.SetGauge(telemetry.MetricWorkerMode, sharedmetrics.Labels{"mode": m}, value)
 	}
 }

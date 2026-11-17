@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"github.com/pinksaucepasta/paperboat/shared/health"
+	sharedtelemetry "github.com/pinksaucepasta/paperboat/shared/telemetry"
 	"io"
 	"log/slog"
 	"net/http"
@@ -14,7 +15,6 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/supportreport"
-	"github.com/pinksaucepasta/paperboat/server/internal/telemetry"
 	"github.com/pinksaucepasta/paperboat/server/internal/workers"
 )
 
@@ -318,20 +318,20 @@ func TestTelemetryObserverDrainsBeforeReporterAdmissionCloses(t *testing.T) {
 	go func() { _ = reporter.Run(runCtx); close(reporterDone) }()
 	defer func() { cancelReporter(); <-reporterDone; reporter.Close() }()
 
-	events, err := telemetry.NewEventLog(8)
+	events, err := sharedtelemetry.NewEventLog(8)
 	if err != nil {
 		t.Fatal(err)
 	}
 	entered, release := make(chan struct{}), make(chan struct{})
-	events.SetObserver(func(event telemetry.Event) {
+	events.SetObserver(func(event sharedtelemetry.Event) {
 		close(entered)
 		<-release
 		reporter.ObserveEvent(event)
 	})
 	ref := supportreport.NewReference()
-	if _, err := events.Record(telemetry.EventInput{
-		At: time.Now().UTC(), Severity: telemetry.SeverityInfo, Component: health.DimensionService,
-		Name: "http_billing", Code: "shutdown_probe", Outcome: telemetry.OutcomeSuccess,
+	if _, err := events.Record(sharedtelemetry.EventInput{
+		At: time.Now().UTC(), Severity: sharedtelemetry.SeverityInfo, Component: health.DimensionService,
+		Name: "http_billing", Code: "shutdown_probe", Outcome: sharedtelemetry.OutcomeSuccess,
 		Message: "Operation completed.", CorrelationID: ref, Retry: health.RetryNone,
 	}); err != nil {
 		t.Fatal(err)

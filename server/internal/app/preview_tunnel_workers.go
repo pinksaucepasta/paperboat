@@ -4,6 +4,7 @@ import (
 	"context"
 	"github.com/google/uuid"
 	"github.com/pinksaucepasta/paperboat/shared/health"
+	sharedtelemetry "github.com/pinksaucepasta/paperboat/shared/telemetry"
 
 	"fmt"
 	"time"
@@ -38,7 +39,7 @@ func certificateTelemetry(producer *telemetry.Producer) func(context.Context, tu
 		}
 		_ = producer.RecordCertificateLifecycle(telemetry.CertificateLifecycleInput{
 			Operation: operation, Outcome: outcome, Retry: retry, NextRetryAt: event.NextRetryAt,
-			Identity: telemetry.ProducerIdentity{IDs: telemetry.SafeIDs{DomainID: event.DomainID, CertificateID: event.CertificateID}},
+			Identity: telemetry.ProducerIdentity{IDs: sharedtelemetry.SafeIDs{DomainID: event.DomainID, CertificateID: event.CertificateID}},
 		})
 	}
 }

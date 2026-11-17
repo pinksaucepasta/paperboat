@@ -3,6 +3,7 @@ package supportreport
 import (
 	"context"
 	"encoding/json"
+	sharedmetrics "github.com/pinksaucepasta/paperboat/shared/metrics"
 	"testing"
 	"time"
 
@@ -14,8 +15,8 @@ import (
 func TestCombinedSnapshotSDKBatchBoundAndFullRotation(t *testing.T) {
 	registry := telemetry.NewMetrics()
 	for _, descriptor := range telemetry.MetricDescriptors() {
-		var populate func(int, telemetry.MetricLabels)
-		populate = func(index int, labels telemetry.MetricLabels) {
+		var populate func(int, sharedmetrics.Labels)
+		populate = func(index int, labels sharedmetrics.Labels) {
 			if index < len(descriptor.Labels) {
 				label := descriptor.Labels[index]
 				for _, value := range label.AllowedValues {
@@ -27,9 +28,9 @@ func TestCombinedSnapshotSDKBatchBoundAndFullRotation(t *testing.T) {
 			}
 			var err error
 			switch descriptor.Kind {
-			case telemetry.MetricCounter:
+			case sharedmetrics.Counter:
 				err = registry.AddCounter(descriptor.Name, labels, 17)
-			case telemetry.MetricHistogram:
+			case sharedmetrics.Histogram:
 				err = registry.ObserveHistogram(descriptor.Name, labels, .5)
 			default:
 				err = registry.SetGauge(descriptor.Name, labels, 23)
@@ -38,7 +39,7 @@ func TestCombinedSnapshotSDKBatchBoundAndFullRotation(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		populate(0, telemetry.MetricLabels{})
+		populate(0, sharedmetrics.Labels{})
 	}
 	samples := registry.Snapshot()
 	platform := serverdiagnostics.MetricsSnapshot()
@@ -70,9 +71,9 @@ func TestCombinedSnapshotSDKBatchBoundAndFullRotation(t *testing.T) {
 			labels[label.Name] = label.Value
 		}
 		switch sample.Kind {
-		case telemetry.MetricCounter:
+		case sharedmetrics.Counter:
 			expected[snapshotIdentity(sample.Name+"_snapshot", labels)] = float64(sample.Value)
-		case telemetry.MetricHistogram:
+		case sharedmetrics.Histogram:
 			expected[snapshotIdentity(sample.Name+"_sum_snapshot", labels)] = sample.Sum
 			expected[snapshotIdentity(sample.Name+"_count_snapshot", labels)] = float64(sample.Count)
 		default:

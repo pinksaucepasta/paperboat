@@ -2,7 +2,7 @@ package edgehttp
 
 import (
 	"context"
-	edgetelemetry "github.com/pinksaucepasta/paperboat/edge/internal/telemetry"
+	sharedtelemetry "github.com/pinksaucepasta/paperboat/shared/telemetry"
 	"github.com/pinksaucepasta/paperboat/shared/telemetry/safe"
 	"net/http"
 	"net/http/httptest"
@@ -58,7 +58,7 @@ func TestRequestIdentityPropagatesAndIgnoresUntrustedHeader(t *testing.T) {
 		t.Fatal("independent requests reused identity")
 	}
 	id := "request_" + uuid.NewString()
-	request := httptest.NewRequest(http.MethodGet, "https://example.test/", nil).WithContext(WithRequestTelemetryInfo(context.Background(), RequestInfo{IDs: edgetelemetry.SafeIDs{RequestID: id}}))
+	request := httptest.NewRequest(http.MethodGet, "https://example.test/", nil).WithContext(WithRequestTelemetryInfo(context.Background(), RequestInfo{IDs: sharedtelemetry.SafeIDs{RequestID: id}}))
 	if got := requestIDFor(request); got != id {
 		t.Fatalf("trusted identity not preserved: %q", got)
 	}

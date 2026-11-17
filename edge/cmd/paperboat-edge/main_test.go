@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"github.com/pinksaucepasta/paperboat/shared/health"
+	sharedmetrics "github.com/pinksaucepasta/paperboat/shared/metrics"
+	sharedtelemetry "github.com/pinksaucepasta/paperboat/shared/telemetry"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -36,7 +38,7 @@ func TestCarrierEndpointFromDeploymentIsSeparateAndComplete(t *testing.T) {
 
 func TestLiveCarrierHTTPCompositionPreservesStreamingAndSharesTelemetry(t *testing.T) {
 	metrics := edgetelemetry.NewMetrics()
-	events, err := edgetelemetry.NewEventLogWithQueue(64, 64)
+	events, err := sharedtelemetry.NewEventLogWithQueue(64, 64)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,18 +47,18 @@ func TestLiveCarrierHTTPCompositionPreservesStreamingAndSharesTelemetry(t *testi
 		Metrics: metrics,
 		Events:  events,
 		Info: datacarrier.StreamInfo{
-			IDs:           edgetelemetry.SafeIDs{EdgeNodeID: "edge_1"},
+			IDs:           sharedtelemetry.SafeIDs{EdgeNodeID: "edge_1"},
 			CorrelationID: "corr_edge_carrier",
 		},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	requestTelemetry, err := edgehttp.NewRequestTelemetry(edgehttp.RequestTelemetryConfig{Metrics: metrics, Events: events, Info: edgehttp.RequestInfo{IDs: edgetelemetry.SafeIDs{EdgeNodeID: "edge_1"}, RouteKind: "tunnel_https_wss"}})
+	requestTelemetry, err := edgehttp.NewRequestTelemetry(edgehttp.RequestTelemetryConfig{Metrics: metrics, Events: events, Info: edgehttp.RequestInfo{IDs: sharedtelemetry.SafeIDs{EdgeNodeID: "edge_1"}, RouteKind: "tunnel_https_wss"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	gatewayTelemetry, err := edgehttp.NewRequestTelemetry(edgehttp.RequestTelemetryConfig{Metrics: metrics, Events: events, Info: edgehttp.RequestInfo{IDs: edgetelemetry.SafeIDs{EdgeNodeID: "edge_1"}}})
+	gatewayTelemetry, err := edgehttp.NewRequestTelemetry(edgehttp.RequestTelemetryConfig{Metrics: metrics, Events: events, Info: edgehttp.RequestInfo{IDs: sharedtelemetry.SafeIDs{EdgeNodeID: "edge_1"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,7 +125,7 @@ func TestTelemetryLifecycleReportsStartupReadinessAndShutdown(t *testing.T) {
 		t.Fatal(err)
 	}
 	metrics := edgetelemetry.NewMetrics()
-	events, err := edgetelemetry.NewEventLogWithQueue(16, 16)
+	events, err := sharedtelemetry.NewEventLogWithQueue(16, 16)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -153,7 +155,7 @@ func TestTelemetryLifecycleReportsStartupReadinessAndShutdown(t *testing.T) {
 	if len(names) != 3 || names[0] != "edge_service_starting" || names[1] != "edge_service_ready" || names[2] != "edge_service_shutdown" {
 		t.Fatalf("lifecycle events = %v", names)
 	}
-	if _, accepted, err := events.TryRecord(edgetelemetry.EventInput{At: time.Now(), Severity: edgetelemetry.SeverityInfo, Component: health.DimensionService, Name: "after_close", Code: "after_close", Outcome: edgetelemetry.OutcomeStateChange, Message: "ignored", CorrelationID: "corr_after_close", Retry: health.RetryNone}); err != nil || accepted {
+	if _, accepted, err := events.TryRecord(sharedtelemetry.EventInput{At: time.Now(), Severity: sharedtelemetry.SeverityInfo, Component: health.DimensionService, Name: "after_close", Code: "after_close", Outcome: sharedtelemetry.OutcomeStateChange, Message: "ignored", CorrelationID: "corr_after_close", Retry: health.RetryNone}); err != nil || accepted {
 		t.Fatalf("event after close accepted=%v err=%v", accepted, err)
 	}
 }
@@ -162,7 +164,7 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) { return f(request) }
 
-func requestMetricValue(samples []edgetelemetry.MetricSample, name string, labels ...string) uint64 {
+func requestMetricValue(samples []sharedmetrics.Sample, name string, labels ...string) uint64 {
 	for _, sample := range samples {
 		if sample.Name != name || len(sample.Labels) != len(labels) {
 			continue
@@ -193,19 +195,19 @@ func (o *upgradeOrigin) Close() error                      { return nil }
 // the origin: the carrier telemetry stream used to refuse every write on a 101.
 func TestLiveCarrierCompositionCarriesClientBytesAfterUpgrade(t *testing.T) {
 	metrics := edgetelemetry.NewMetrics()
-	events, err := edgetelemetry.NewEventLogWithQueue(64, 64)
+	events, err := sharedtelemetry.NewEventLogWithQueue(64, 64)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = events.Close() })
 	carrierTelemetry, err := datacarrier.NewCarrierTelemetry(datacarrier.CarrierTelemetryConfig{
 		Metrics: metrics, Events: events,
-		Info: datacarrier.StreamInfo{IDs: edgetelemetry.SafeIDs{EdgeNodeID: "edge_1"}, CorrelationID: "corr_edge_carrier"},
+		Info: datacarrier.StreamInfo{IDs: sharedtelemetry.SafeIDs{EdgeNodeID: "edge_1"}, CorrelationID: "corr_edge_carrier"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	requestTelemetry, err := edgehttp.NewRequestTelemetry(edgehttp.RequestTelemetryConfig{Metrics: metrics, Events: events, Info: edgehttp.RequestInfo{IDs: edgetelemetry.SafeIDs{EdgeNodeID: "edge_1"}, RouteKind: "tunnel_https_wss"}})
+	requestTelemetry, err := edgehttp.NewRequestTelemetry(edgehttp.RequestTelemetryConfig{Metrics: metrics, Events: events, Info: edgehttp.RequestInfo{IDs: sharedtelemetry.SafeIDs{EdgeNodeID: "edge_1"}, RouteKind: "tunnel_https_wss"}})
 	if err != nil {
 		t.Fatal(err)
 	}

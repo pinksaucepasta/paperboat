@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"github.com/pinksaucepasta/paperboat/shared/health"
+	sharedmetrics "github.com/pinksaucepasta/paperboat/shared/metrics"
 	"log/slog"
 	"net"
 	"net/http"
@@ -170,7 +171,7 @@ type Options struct {
 	MachineEventWaiter     machineEventWaiter
 	MachineEventSigning    MachineEventSigning
 	TelemetryHTTP          *telemetry.HTTPObserver
-	TelemetryMetrics       *telemetry.Metrics
+	TelemetryMetrics       *sharedmetrics.Metrics
 	TelemetryDiagnostics   *telemetry.Diagnostics
 }
 
@@ -827,7 +828,7 @@ func serverVersion(w http.ResponseWriter, _ *http.Request) {
 	}})
 }
 
-func metrics(diagnostics *controlplane.DiagnosticsService, typed *telemetry.Metrics) http.HandlerFunc {
+func metrics(diagnostics *controlplane.DiagnosticsService, typed *sharedmetrics.Metrics) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		host, _, err := net.SplitHostPort(r.RemoteAddr)
 		if err != nil || !net.ParseIP(host).IsLoopback() {

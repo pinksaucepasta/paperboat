@@ -4,6 +4,9 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/pinksaucepasta/paperboat/shared/health"
+	sharedmetrics "github.com/pinksaucepasta/paperboat/shared/metrics"
+	"github.com/pinksaucepasta/paperboat/shared/metrics/schema"
+	sharedtelemetry "github.com/pinksaucepasta/paperboat/shared/telemetry"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -122,15 +125,15 @@ func TestPrivateHandlerProjectsTypedHealthEventsMetricsAndDrops(t *testing.T) {
 	if err := healthTracker.Update(health.HealthUpdate{Dimension: health.DimensionRoute, Status: health.StatusReady, Code: "ready", Summary: "Route is ready.", RepairAction: "No action is required.", Retry: health.RetryNone}); err != nil {
 		t.Fatal(err)
 	}
-	events, err := edgetelemetry.NewEventLog(4)
+	events, err := sharedtelemetry.NewEventLog(4)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := events.Record(edgetelemetry.EventInput{At: now, Severity: edgetelemetry.SeverityInfo, Component: health.DimensionRoute, Name: "activated", Code: "activated", Outcome: edgetelemetry.OutcomeStateChange, Message: "Route generation activated.", CorrelationID: "corr_route_1", Retry: health.RetryNone}); err != nil {
+	if _, err := events.Record(sharedtelemetry.EventInput{At: now, Severity: sharedtelemetry.SeverityInfo, Component: health.DimensionRoute, Name: "activated", Code: "activated", Outcome: sharedtelemetry.OutcomeStateChange, Message: "Route generation activated.", CorrelationID: "corr_route_1", Retry: health.RetryNone}); err != nil {
 		t.Fatal(err)
 	}
 	typedMetrics := edgetelemetry.NewMetrics()
-	if err := typedMetrics.AddCounter(edgetelemetry.MetricRouteRequests, edgetelemetry.MetricLabels{"route_kind": "tunnel_https_wss", "outcome": "success"}, 2); err != nil {
+	if err := typedMetrics.AddCounter(edgetelemetry.MetricRouteRequests, sharedmetrics.Labels{"route_kind": "tunnel_https_wss", "outcome": "success"}, 2); err != nil {
 		t.Fatal(err)
 	}
 	handler, err := NewHandler(Sources{Node: state.Snapshot, Manager: manager.Snapshot, Sessions: func() int { return 0 }, SessionRoutes: func() int { return 0 }, ActiveStreams: func() uint32 { return 0 }, RouteCount: func() int { return 0 }, Usage: queue.Stats, ControlErr: func() error { return nil }, RouteErr: func() error { return nil }, UsageErr: func() error { return nil }, CarrierRunning: func() bool { return true }, Traffic: usage.NewCounters().Snapshot, Health: healthTracker.Snapshot, Lifecycle: events.Snapshot, TypedMetrics: typedMetrics.Snapshot, TelemetryDrops: func() uint64 { return 3 }, Now: func() time.Time { return now }})
@@ -155,7 +158,7 @@ func TestPrivateHandlerProjectsTypedHealthEventsMetricsAndDrops(t *testing.T) {
 
 func TestMetricDescriptorsFollowTypedTelemetryCatalog(t *testing.T) {
 	descriptors := MetricDescriptors()
-	byName := make(map[string]MetricDescriptor, len(descriptors))
+	byName := make(map[string]schema.Metric, len(descriptors))
 	for _, descriptor := range descriptors {
 		byName[descriptor.Name] = descriptor
 	}

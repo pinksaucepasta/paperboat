@@ -12,6 +12,8 @@ import (
 	"errors"
 	"fmt"
 	"github.com/pinksaucepasta/paperboat/shared/health"
+	sharedmetrics "github.com/pinksaucepasta/paperboat/shared/metrics"
+	sharedtelemetry "github.com/pinksaucepasta/paperboat/shared/telemetry"
 	"io"
 	"log/slog"
 	"net"
@@ -412,7 +414,7 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 	if err != nil {
 		return nil, fmt.Errorf("create edge health tracker: %w", err)
 	}
-	typedEvents, err := edgetelemetry.NewEventLog(1024)
+	typedEvents, err := sharedtelemetry.NewEventLog(1024)
 	if err != nil {
 		return nil, fmt.Errorf("create edge event log: %w", err)
 	}
@@ -480,7 +482,7 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 		}
 	}, Reporter: reporter, Source: client, Expected: runtimeExpected, Routes: runtimeRoutes, Endpoints: previewRoutes, BrowserTerminalHub: browserTerminalHub, Interval: deployment.ControlInterval, EndpointInterval: deployment.PreviewCarrierPollInterval(), Timeout: deployment.ControlTimeout,
 		OnPull: func(pull uint64, admissions, previous int) {
-			edgetelemetry.Log(context.Background(), edgetelemetry.SeverityInfo, "runtime_admission_pull", edgetelemetry.OutcomeSuccess, "pull", pull, "admissions", admissions, "previous", previous)
+			edgetelemetry.Log(context.Background(), sharedtelemetry.SeverityInfo, "runtime_admission_pull", sharedtelemetry.OutcomeSuccess, "pull", pull, "admissions", admissions, "previous", previous)
 		}}
 	accessorAdmissions, err := datacarrier.NewDurableAdmissionRegistry(datacarrier.DurableAdmissionRegistryConfig{NodeID: cfg.NodeID, ProcessEpoch: processEpoch, MaximumAdmissions: 4096})
 	if err != nil {
@@ -617,7 +619,7 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 		Events:  typedEvents,
 		Clock:   time.Now,
 		Info: datacarrier.StreamInfo{
-			IDs:                edgetelemetry.SafeIDs{EdgeNodeID: cfg.NodeID},
+			IDs:                sharedtelemetry.SafeIDs{EdgeNodeID: cfg.NodeID},
 			ReadDirection:      "ingress",
 			WriteDirection:     "egress",
 			CancellationReason: "shutdown",
@@ -636,7 +638,7 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 		Events:  typedEvents,
 		Clock:   time.Now,
 		Info: edgehttp.RequestInfo{
-			IDs:       edgetelemetry.SafeIDs{EdgeNodeID: cfg.NodeID},
+			IDs:       sharedtelemetry.SafeIDs{EdgeNodeID: cfg.NodeID},
 			RouteKind: "preview_public_https_wss",
 		},
 	})
@@ -648,7 +650,7 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 		Events:  typedEvents,
 		Clock:   time.Now,
 		Info: edgehttp.RequestInfo{
-			IDs:       edgetelemetry.SafeIDs{EdgeNodeID: cfg.NodeID},
+			IDs:       sharedtelemetry.SafeIDs{EdgeNodeID: cfg.NodeID},
 			RouteKind: "tunnel_https_wss",
 		},
 	})
@@ -744,7 +746,7 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 		Events:  typedEvents,
 		Clock:   time.Now,
 		Info: edgehttp.RequestInfo{
-			IDs: edgetelemetry.SafeIDs{EdgeNodeID: cfg.NodeID},
+			IDs: sharedtelemetry.SafeIDs{EdgeNodeID: cfg.NodeID},
 		},
 	})
 	if err != nil {
@@ -806,7 +808,7 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 		Health:         typedHealth.Snapshot,
 		Lifecycle:      typedEvents.Snapshot,
 		TypedMetrics:   typedMetrics.Snapshot,
-		TelemetryDrops: func() uint64 { return canonicalRoutes.TelemetryDrops() + typedEvents.Dropped() },
+		TelemetryDrops: func() uint64 { return canonicalRoutes.TelemetryDrops() + typedEvents.DroppedEvents() },
 	})
 	if err != nil {
 		if carrierCleanup != nil {
@@ -915,7 +917,7 @@ func (t *carrierTelemetryRoundTripper) streamInfo(request *http.Request) datacar
 	}
 	correlationID := "correlation_" + uuid.NewString()
 	info := datacarrier.StreamInfo{
-		IDs:           edgetelemetry.SafeIDs{EdgeNodeID: t.NodeID},
+		IDs:           sharedtelemetry.SafeIDs{EdgeNodeID: t.NodeID},
 		CorrelationID: correlationID, RouteKind: t.RouteKind,
 		Protocol: protocol, Kind: kind, ReadDirection: "ingress", WriteDirection: "egress",
 		CancellationReason: "shutdown",
@@ -924,10 +926,10 @@ func (t *carrierTelemetryRoundTripper) streamInfo(request *http.Request) datacar
 		return info
 	}
 	if requestInfo, ok := edgehttp.RequestTelemetryInfo(request.Context()); ok {
-		if requestInfo.IDs != (edgetelemetry.SafeIDs{}) {
+		if requestInfo.IDs != (sharedtelemetry.SafeIDs{}) {
 			info.IDs = requestInfo.IDs
 		}
-		if requestInfo.Generations != (edgetelemetry.Generations{}) {
+		if requestInfo.Generations != (sharedtelemetry.Generations{}) {
 			info.Generations = requestInfo.Generations
 		}
 		if requestInfo.CorrelationID != "" {
@@ -972,8 +974,8 @@ func (s *carrierResponseStream) Close() error {
 
 type telemetryLifecycle struct {
 	health     *health.HealthTracker
-	metrics    *edgetelemetry.Metrics
-	events     *edgetelemetry.EventLog
+	metrics    *sharedmetrics.Metrics
+	events     *sharedtelemetry.EventLog
 	clock      func() time.Time
 	reporter   *reporting.Reporter
 	usageQueue func() usage.QueueStats
@@ -990,7 +992,7 @@ type telemetryLifecycle struct {
 	processCtx   context.Context
 }
 
-func newTelemetryLifecycle(healthTracker *health.HealthTracker, metrics *edgetelemetry.Metrics, events *edgetelemetry.EventLog) *telemetryLifecycle {
+func newTelemetryLifecycle(healthTracker *health.HealthTracker, metrics *sharedmetrics.Metrics, events *sharedtelemetry.EventLog) *telemetryLifecycle {
 	return &telemetryLifecycle{health: healthTracker, metrics: metrics, events: events, clock: time.Now}
 }
 
@@ -1028,7 +1030,7 @@ func (l *telemetryLifecycle) Start(ctx context.Context) error {
 		_ = l.Shutdown(context.Background())
 		return err
 	}
-	return l.record("edge_service_starting", edgetelemetry.SeverityInfo, edgetelemetry.OutcomeStateChange, "Edge service startup began.")
+	return l.record("edge_service_starting", sharedtelemetry.SeverityInfo, sharedtelemetry.OutcomeStateChange, "Edge service startup began.")
 }
 
 func (l *telemetryLifecycle) MarkReady(ctx context.Context) error {
@@ -1055,7 +1057,7 @@ func (l *telemetryLifecycle) MarkReady(ctx context.Context) error {
 	if err := l.updateHealth(health.StatusReady, "service_ready", "Edge service is ready.", "No action is required.", health.RetryNone); err != nil {
 		return err
 	}
-	return l.record("edge_service_ready", edgetelemetry.SeverityInfo, edgetelemetry.OutcomeStateChange, "Edge service became ready.")
+	return l.record("edge_service_ready", sharedtelemetry.SeverityInfo, sharedtelemetry.OutcomeStateChange, "Edge service became ready.")
 }
 
 func (l *telemetryLifecycle) Shutdown(ctx context.Context) error {
@@ -1090,7 +1092,7 @@ func (l *telemetryLifecycle) Shutdown(ctx context.Context) error {
 		if err := l.updateHealth(health.StatusDown, "service_shutdown", "Edge service is shutting down.", "Start the edge service again when it is needed.", health.RetryNotRetryable); err != nil {
 			failures = append(failures, err)
 		}
-		if err := l.record("edge_service_shutdown", edgetelemetry.SeverityInfo, edgetelemetry.OutcomeStateChange, "Edge service shutdown began."); err != nil {
+		if err := l.record("edge_service_shutdown", sharedtelemetry.SeverityInfo, sharedtelemetry.OutcomeStateChange, "Edge service shutdown began."); err != nil {
 			failures = append(failures, err)
 		}
 	}
@@ -1120,13 +1122,13 @@ func (l *telemetryLifecycle) routeSink(core route.RouteTelemetrySink) route.Rout
 		// The private in-memory record keeps its resource correlation and IDs.
 		// Export only producer-owned lifecycle labels and the invocation reference.
 		level := slog.LevelInfo
-		if input.Severity == edgetelemetry.SeverityWarn {
+		if input.Severity == sharedtelemetry.SeverityWarn {
 			level = slog.LevelWarn
-		} else if input.Severity == edgetelemetry.SeverityDebug {
+		} else if input.Severity == sharedtelemetry.SeverityDebug {
 			level = slog.LevelDebug
 		}
 		slog.New(slog.NewJSONHandler(os.Stderr, nil)).Log(ctx, level, "route_lifecycle",
-			"schema", edgetelemetry.EventSchemaV1, "at", record.At, "severity", string(input.Severity),
+			"schema", sharedtelemetry.EventSchemaV1, "at", record.At, "severity", string(input.Severity),
 			"component", "paperboat-edge", "operation", "route_lifecycle", "name", input.Name,
 			"code", input.Code, "outcome", string(input.Outcome), "retry", string(input.Retry),
 			"support_reference", reference, "correlation_id", reference)
@@ -1160,11 +1162,11 @@ func (l *telemetryLifecycle) exportMetrics(ctx context.Context) {
 			labels[label.Name] = label.Value
 		}
 		switch sample.Kind {
-		case edgetelemetry.MetricCounter:
+		case sharedmetrics.Counter:
 			snapshots = append(snapshots, reporting.Snapshot{Name: sample.Name, Kind: "counter", Value: float64(sample.Value), Labels: labels})
-		case edgetelemetry.MetricGauge:
+		case sharedmetrics.Gauge:
 			snapshots = append(snapshots, reporting.Snapshot{Name: sample.Name, Kind: "gauge", Value: float64(sample.Value), Labels: labels})
-		case edgetelemetry.MetricHistogram:
+		case sharedmetrics.Histogram:
 			snapshots = append(snapshots, reporting.Snapshot{Name: sample.Name, Kind: "histogram_sum", Value: sample.Sum, Labels: labels}, reporting.Snapshot{Name: sample.Name, Kind: "histogram_count", Value: float64(sample.Count), Labels: labels})
 		}
 	}
@@ -1199,7 +1201,7 @@ func (l *telemetryLifecycle) updateHealth(status health.HealthStatus, code, summ
 	})
 }
 
-func (l *telemetryLifecycle) record(name string, severity edgetelemetry.EventSeverity, outcome edgetelemetry.EventOutcome, message string) error {
+func (l *telemetryLifecycle) record(name string, severity sharedtelemetry.EventSeverity, outcome sharedtelemetry.EventOutcome, message string) error {
 	code := ""
 	switch name {
 	case "edge_service_starting":
@@ -1215,7 +1217,7 @@ func (l *telemetryLifecycle) record(name string, severity edgetelemetry.EventSev
 	if l == nil || l.events == nil {
 		return nil
 	}
-	_, _, err := l.events.TryRecord(edgetelemetry.EventInput{
+	_, _, err := l.events.TryRecord(sharedtelemetry.EventInput{
 		At: l.now(), Severity: severity, Component: health.DimensionService,
 		Name: name, Code: name, Outcome: outcome, Message: message,
 		CorrelationID: l.correlation(), Retry: health.RetryNone,
@@ -1336,7 +1338,7 @@ func logReportingShutdown(ctx context.Context, reporter *reporting.Reporter) {
 	}
 	reference := reporting.SupportReference(ctx)
 	slog.New(slog.NewJSONHandler(os.Stderr, nil)).Log(ctx, level, "reporting_shutdown",
-		"schema", "paperboat.edge_event.v1", "at", time.Now().UTC(), "severity", severity, "name", "reporting_shutdown", "outcome", "state_change", "component", "paperboat-edge",
+		"schema", sharedtelemetry.EventSchemaV1, "at", time.Now().UTC(), "severity", severity, "name", "reporting_shutdown", "outcome", "state_change", "component", "paperboat-edge",
 		"operation", "service_lifecycle", "stage", "shutdown", "code", "telemetry_shutdown",
 		"support_reference", reference, "correlation_id", reference,
 		"flush_status", reporter.FlushStatus(), "sdk_http_failures", reporter.SDKHTTPFailures(),
@@ -1362,7 +1364,7 @@ func serviceEvent(ctx context.Context, reporter *reporting.Reporter, code string
 		ctx = context.Background()
 	}
 	slog.New(slog.NewJSONHandler(os.Stderr, nil)).InfoContext(ctx, "edge_service_lifecycle",
-		"schema", "paperboat.edge_event.v1", "at", time.Now().UTC(), "severity", "info",
+		"schema", sharedtelemetry.EventSchemaV1, "at", time.Now().UTC(), "severity", "info",
 		"component", "paperboat-edge", "operation", "service_lifecycle", "stage", "serve",
 		"name", "edge_service_lifecycle", "code", code, "outcome", "success",
 		"support_reference", reference, "correlation_id", reference)

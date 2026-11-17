@@ -2,6 +2,7 @@ package telemetry
 
 import (
 	"github.com/pinksaucepasta/paperboat/shared/health"
+	sharedtelemetry "github.com/pinksaucepasta/paperboat/shared/telemetry"
 	"github.com/pinksaucepasta/paperboat/shared/telemetry/safe"
 	"strings"
 	"sync"
@@ -17,9 +18,9 @@ func TestLifecycleEventAndLogAreTypedRedactedAndDeterministic(t *testing.T) {
 		"nested":     map[string]any{"note": "safe"},
 	}
 	event, err := NewLifecycleEvent(LifecycleEventInput{
-		ID: "evt_01", Cursor: "cur_0001", At: at, Severity: SeverityInfo,
+		ID: "evt_01", Cursor: "cur_0001", At: at, Severity: sharedtelemetry.SeverityInfo,
 		Component: health.DimensionRoute, EventType: "route.activated", Code: "route_ready",
-		Outcome: OutcomeStateChange, Message: "Route activated for https://user:password@example.test.",
+		Outcome: sharedtelemetry.OutcomeStateChange, Message: "Route activated for https://user:password@example.test.",
 		RequestID: "request_01", CorrelationID: "corr_01",
 		ResourceKind: "route", ResourceID: "route_01", OperationID: "operation_01",
 		Metadata: metadata,
@@ -48,7 +49,7 @@ func TestLifecycleEventAndLogAreTypedRedactedAndDeterministic(t *testing.T) {
 	}
 
 	log, err := NewLogRecord(LogRecordInput{
-		OccurredAt: at, Level: SeverityWarn, Component: health.DimensionAccess, Code: "access_denied",
+		OccurredAt: at, Level: sharedtelemetry.SeverityWarn, Component: health.DimensionAccess, Code: "access_denied",
 		Message: "Authorization: Bearer secret", RequestID: "req_01", CorrelationID: "cor_01",
 		Resource: ResourceIdentity{Kind: "tunnel", ID: "tun_01"}, Operation: OperationIdentity{Kind: "delete", ID: "op_01"},
 	})
@@ -63,8 +64,8 @@ func TestLifecycleEventAndLogAreTypedRedactedAndDeterministic(t *testing.T) {
 
 func TestLifecycleRejectsMissingIdentitySecretKeysAndUnsafeControl(t *testing.T) {
 	base := LifecycleEventInput{
-		At: time.Unix(1, 0), Severity: SeverityInfo, Component: health.DimensionService,
-		EventType: "service.started", Code: "ready", Outcome: OutcomeSuccess, Message: "Ready.",
+		At: time.Unix(1, 0), Severity: sharedtelemetry.SeverityInfo, Component: health.DimensionService,
+		EventType: "service.started", Code: "ready", Outcome: sharedtelemetry.OutcomeSuccess, Message: "Ready.",
 		RequestID: "req_01", CorrelationID: "cor_01", ResourceKind: "tunnel", ResourceID: "tun_01", OperationID: "op_01",
 	}
 	tests := []struct {
@@ -88,7 +89,7 @@ func TestLifecycleRejectsMissingIdentitySecretKeysAndUnsafeControl(t *testing.T)
 		})
 	}
 	if _, err := NewLogRecord(LogRecordInput{
-		OccurredAt: time.Unix(1, 0), Level: SeverityInfo, Component: health.DimensionService, Code: "ready", Message: "bad\x00line",
+		OccurredAt: time.Unix(1, 0), Level: sharedtelemetry.SeverityInfo, Component: health.DimensionService, Code: "ready", Message: "bad\x00line",
 		RequestID: "req_01", CorrelationID: "cor_01", ResourceKind: "tunnel", ResourceID: "tun_01", OperationID: "op_01",
 	}); err != nil {
 		t.Fatalf("control characters should be normalized safely: %v", err)
@@ -98,7 +99,7 @@ func TestLifecycleRejectsMissingIdentitySecretKeysAndUnsafeControl(t *testing.T)
 func TestLifecycleEventAndLogBuffersAreBoundedAndRaceSafe(t *testing.T) {
 	at := time.Unix(1, 0)
 	eventInput := LifecycleEventInput{
-		At: at, Severity: SeverityInfo, Component: health.DimensionService, EventType: "service.started", Code: "ready", Outcome: OutcomeSuccess, Message: "Ready.",
+		At: at, Severity: sharedtelemetry.SeverityInfo, Component: health.DimensionService, EventType: "service.started", Code: "ready", Outcome: sharedtelemetry.OutcomeSuccess, Message: "Ready.",
 		RequestID: "req_01", CorrelationID: "cor_01", ResourceKind: "tunnel", ResourceID: "tun_01", OperationID: "op_01",
 	}
 	events, err := NewLifecycleEventLog(8)
@@ -116,7 +117,7 @@ func TestLifecycleEventAndLogBuffersAreBoundedAndRaceSafe(t *testing.T) {
 			defer group.Done()
 			for count := 0; count < 50; count++ {
 				_, _ = events.Record(eventInput)
-				_, _ = logs.Record(LogRecordInput{OccurredAt: at, Level: SeverityInfo, Component: health.DimensionService, Code: "ready", Message: "Ready.", RequestID: "req_01", CorrelationID: "cor_01", ResourceKind: "tunnel", ResourceID: "tun_01", OperationID: "op_01"})
+				_, _ = logs.Record(LogRecordInput{OccurredAt: at, Level: sharedtelemetry.SeverityInfo, Component: health.DimensionService, Code: "ready", Message: "Ready.", RequestID: "req_01", CorrelationID: "cor_01", ResourceKind: "tunnel", ResourceID: "tun_01", OperationID: "op_01"})
 				_ = events.Snapshot()
 				_ = logs.Snapshot()
 			}

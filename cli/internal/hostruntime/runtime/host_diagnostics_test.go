@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"encoding/json"
 	typedhealth "github.com/pinksaucepasta/paperboat/shared/health"
+	sharedtelemetry "github.com/pinksaucepasta/paperboat/shared/telemetry"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -36,16 +37,16 @@ func TestHostDiagnosticsIsLoopbackBoundedAndDeterministic(t *testing.T) {
 	if err := metrics.Record("paperboat_runtime_connector_retries_total", 2, map[string]string{"transport": "tcp_mux", "result": "connected"}); err != nil {
 		t.Fatal(err)
 	}
-	events, err := hosttelemetry.NewEventLog(4)
+	events, err := sharedtelemetry.NewEventLog(4)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = events.Close() })
-	if _, err := events.Record(hosttelemetry.EventInput{
-		At: now, Severity: hosttelemetry.SeverityInfo, Component: hosttelemetry.DimensionService,
-		Name: "runtime_ready", Code: "ready", Outcome: hosttelemetry.OutcomeStateChange,
+	if _, err := events.Record(sharedtelemetry.EventInput{
+		At: now, Severity: sharedtelemetry.SeverityInfo, Component: typedhealth.DimensionService,
+		Name: "runtime_ready", Code: "ready", Outcome: sharedtelemetry.OutcomeStateChange,
 		Message: "Runtime is ready.", CorrelationID: "correlation_test",
-		Generations: hosttelemetry.Generations{Config: 3}, Retry: hosttelemetry.RetryNone,
+		Generations: sharedtelemetry.Generations{Config: 3}, Retry: typedhealth.RetryNone,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -127,18 +128,18 @@ func TestHostDiagnosticsAbsentWhenOptionalSourcesAreNil(t *testing.T) {
 }
 
 func TestHostDiagnosticsEventLimitIsBounded(t *testing.T) {
-	events, err := hosttelemetry.NewEventLog(hostDiagnosticsMaximumEvents + 32)
+	events, err := sharedtelemetry.NewEventLog(hostDiagnosticsMaximumEvents + 32)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = events.Close() })
 	at := time.Unix(101, 0).UTC()
 	for index := 0; index < hostDiagnosticsMaximumEvents+32; index++ {
-		if _, err := events.Record(hosttelemetry.EventInput{
-			At: at.Add(time.Duration(index) * time.Second), Severity: hosttelemetry.SeverityInfo,
-			Component: hosttelemetry.DimensionService, Name: "runtime_ready", Code: "ready",
-			Outcome: hosttelemetry.OutcomeSuccess, Message: "ready", CorrelationID: "correlation_test",
-			Retry: hosttelemetry.RetryNone,
+		if _, err := events.Record(sharedtelemetry.EventInput{
+			At: at.Add(time.Duration(index) * time.Second), Severity: sharedtelemetry.SeverityInfo,
+			Component: typedhealth.DimensionService, Name: "runtime_ready", Code: "ready",
+			Outcome: sharedtelemetry.OutcomeSuccess, Message: "ready", CorrelationID: "correlation_test",
+			Retry: typedhealth.RetryNone,
 		}); err != nil {
 			t.Fatal(err)
 		}

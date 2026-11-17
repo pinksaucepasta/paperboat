@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"github.com/pinksaucepasta/paperboat/shared/health"
+	sharedmetrics "github.com/pinksaucepasta/paperboat/shared/metrics"
+	sharedtelemetry "github.com/pinksaucepasta/paperboat/shared/telemetry"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -30,17 +32,17 @@ func TestTelemetryDiagnosticsIsLoopbackBoundedAndCorrelated(t *testing.T) {
 		t.Fatal(err)
 	}
 	metrics := telemetry.NewMetrics()
-	if err := metrics.IncCounter(telemetry.MetricHTTPRequests, telemetry.MetricLabels{"method": "get", "route_family": "health", "status_class": "2xx"}); err != nil {
+	if err := metrics.IncCounter(telemetry.MetricHTTPRequests, sharedmetrics.Labels{"method": "get", "route_family": "health", "status_class": "2xx"}); err != nil {
 		t.Fatal(err)
 	}
-	events, err := telemetry.NewEventLog(4)
+	events, err := sharedtelemetry.NewEventLog(4)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = events.Close() })
-	if _, err := events.Record(telemetry.EventInput{
-		At: at, Severity: telemetry.SeverityInfo, Component: health.DimensionOrigin,
-		Name: "origin_retry", Code: "origin_retrying", Outcome: telemetry.OutcomeStateChange,
+	if _, err := events.Record(sharedtelemetry.EventInput{
+		At: at, Severity: sharedtelemetry.SeverityInfo, Component: health.DimensionOrigin,
+		Name: "origin_retry", Code: "origin_retrying", Outcome: sharedtelemetry.OutcomeStateChange,
 		Message: "Origin is retrying.", CorrelationID: "corr_diag", Retry: health.RetryScheduled,
 		NextRetryAt: at.Add(time.Minute),
 	}); err != nil {
@@ -122,7 +124,7 @@ func TestRouterTelemetryDiagnosticsUsesLiveEventLog(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	events, err := telemetry.NewEventLog(4)
+	events, err := sharedtelemetry.NewEventLog(4)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,7 +134,7 @@ func TestRouterTelemetryDiagnosticsUsesLiveEventLog(t *testing.T) {
 		t.Fatal(err)
 	}
 	diagnostics.SetEventLog(events)
-	if _, err := events.Record(telemetry.EventInput{At: at, Severity: telemetry.SeverityInfo, Component: health.DimensionService, Name: "service_ready", Code: "ready", Outcome: telemetry.OutcomeSuccess, Message: "Service is ready.", CorrelationID: "corr_diag", Retry: health.RetryNone}); err != nil {
+	if _, err := events.Record(sharedtelemetry.EventInput{At: at, Severity: sharedtelemetry.SeverityInfo, Component: health.DimensionService, Name: "service_ready", Code: "ready", Outcome: sharedtelemetry.OutcomeSuccess, Message: "Service is ready.", CorrelationID: "corr_diag", Retry: health.RetryNone}); err != nil {
 		t.Fatal(err)
 	}
 	router := NewRouter(Options{Config: config.Default(), TelemetryDiagnostics: diagnostics})

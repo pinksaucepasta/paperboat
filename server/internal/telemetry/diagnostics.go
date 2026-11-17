@@ -3,8 +3,11 @@ package telemetry
 import (
 	"encoding/json"
 	"github.com/pinksaucepasta/paperboat/shared/health"
+	sharedmetrics "github.com/pinksaucepasta/paperboat/shared/metrics"
+	sharedtelemetry "github.com/pinksaucepasta/paperboat/shared/telemetry"
 	"github.com/pinksaucepasta/paperboat/shared/telemetry/safe"
 	"math"
+	"slices"
 	"sort"
 	"sync"
 	"time"
@@ -28,9 +31,9 @@ const (
 // diagnostics snapshot. EventLog may be attached later with SetEventLog when
 // the application creates its per-run event worker.
 type DiagnosticsConfig struct {
-	Metrics *Metrics
+	Metrics *sharedmetrics.Metrics
 	Health  *health.HealthTracker
-	Events  *EventLog
+	Events  *sharedtelemetry.EventLog
 	Now     func() time.Time
 
 	MaximumEvents  int
@@ -42,9 +45,9 @@ type DiagnosticsConfig struct {
 // telemetry sinks. It owns no sink and never closes one supplied by callers.
 type Diagnostics struct {
 	mu      sync.RWMutex
-	metrics *Metrics
+	metrics *sharedmetrics.Metrics
 	health  *health.HealthTracker
-	events  *EventLog
+	events  *sharedtelemetry.EventLog
 	now     func() time.Time
 
 	maximumEvents  int
@@ -65,7 +68,7 @@ func NewDiagnostics(config DiagnosticsConfig) (*Diagnostics, error) {
 	if maximumBytes == 0 {
 		maximumBytes = MaximumDiagnosticsBytes
 	}
-	if maximumEvents < 0 || maximumEvents > maximumEventLogSize || maximumMetrics < 0 || maximumMetrics > defaultMaximumMetricSeries*2 || maximumBytes < 0 || maximumBytes > 16<<20 {
+	if maximumEvents < 0 || maximumEvents > sharedtelemetry.MaximumEventLogSize || maximumMetrics < 0 || maximumMetrics > sharedmetrics.DefaultMaximumSeries*2 || maximumBytes < 0 || maximumBytes > 16<<20 {
 		return nil, safe.NewError(safe.ErrorInvalidCapacity, "construct control-plane diagnostics")
 	}
 	now := config.Now
@@ -88,7 +91,7 @@ func NewDiagnostics(config DiagnosticsConfig) (*Diagnostics, error) {
 
 // SetEventLog attaches the current application-run event log. It is safe to
 // call while a diagnostics request is taking a snapshot.
-func (d *Diagnostics) SetEventLog(events *EventLog) {
+func (d *Diagnostics) SetEventLog(events *sharedtelemetry.EventLog) {
 	if d == nil {
 		return
 	}
@@ -114,8 +117,8 @@ func (d *Diagnostics) Snapshot() DiagnosticsSnapshot {
 	snapshot := DiagnosticsSnapshot{
 		Schema:     DiagnosticsSchemaV1,
 		CapturedAt: safe.NormalizeTime(now()),
-		Metrics:    []MetricSample{},
-		Events:     []Event{},
+		Metrics:    []sharedmetrics.Sample{},
+		Events:     []sharedtelemetry.Event{},
 	}
 	if healthTracker != nil {
 		snapshot.Health = healthTracker.Snapshot()
@@ -192,20 +195,20 @@ type SupportSnapshot = DiagnosticsSnapshot
 // DiagnosticsSnapshot is intentionally limited to the typed sinks. Metric
 // labels and event fields are already allowlisted/redacted at construction.
 type DiagnosticsSnapshot struct {
-	Schema        string                `json:"schema"`
-	CapturedAt    time.Time             `json:"captured_at"`
-	RequestID     string                `json:"request_id,omitempty"`
-	CorrelationID string                `json:"correlation_id,omitempty"`
-	Health        health.HealthSnapshot `json:"health"`
-	Retry         health.RetryDecision  `json:"retry"`
-	NextRetryAt   *time.Time            `json:"next_retry_at,omitempty"`
-	Metrics       []MetricSample        `json:"metrics"`
-	Events        []Event               `json:"events"`
-	DroppedEvents uint64                `json:"dropped_events"`
+	Schema        string                  `json:"schema"`
+	CapturedAt    time.Time               `json:"captured_at"`
+	RequestID     string                  `json:"request_id,omitempty"`
+	CorrelationID string                  `json:"correlation_id,omitempty"`
+	Health        health.HealthSnapshot   `json:"health"`
+	Retry         health.RetryDecision    `json:"retry"`
+	NextRetryAt   *time.Time              `json:"next_retry_at,omitempty"`
+	Metrics       []sharedmetrics.Sample  `json:"metrics"`
+	Events        []sharedtelemetry.Event `json:"events"`
+	DroppedEvents uint64                  `json:"dropped_events"`
 }
 
 func (s DiagnosticsSnapshot) Validate() error {
-	if s.Schema != DiagnosticsSchemaV1 || safe.NormalizeTime(s.CapturedAt).IsZero() || !validOptionalLogIdentity(s.RequestID, "request_", "req_") || (s.CorrelationID != "" && !safe.CorrelationID(s.CorrelationID)) || !health.ValidRetry(s.Retry, safe.TimeValue(s.NextRetryAt)) || len(s.Metrics) > MaximumDiagnosticsMetrics || len(s.Events) > MaximumDiagnosticsEvents {
+	if s.Schema != DiagnosticsSchemaV1 || safe.NormalizeTime(s.CapturedAt).IsZero() || !sharedtelemetry.ValidOptionalLogIdentity(s.RequestID, "request_", "req_") || (s.CorrelationID != "" && !safe.CorrelationID(s.CorrelationID)) || !health.ValidRetry(s.Retry, safe.TimeValue(s.NextRetryAt)) || len(s.Metrics) > MaximumDiagnosticsMetrics || len(s.Events) > MaximumDiagnosticsEvents {
 		return safe.NewError(safe.ErrorInvalidObservation, "validate control-plane diagnostics")
 	}
 	if err := s.Health.Validate(); err != nil {
@@ -224,17 +227,17 @@ func (s DiagnosticsSnapshot) Validate() error {
 	return nil
 }
 
-func validateMetricSample(sample MetricSample) error {
+func validateMetricSample(sample sharedmetrics.Sample) error {
 	descriptor, ok := descriptorByName(sample.Name)
 	if !ok || sample.Kind != descriptor.Kind || len(sample.Labels) != len(descriptor.Labels) || math.IsNaN(sample.Sum) || math.IsInf(sample.Sum, 0) || sample.Sum < 0 {
 		return safe.NewError(safe.ErrorInvalidObservation, "validate control-plane metric")
 	}
 	for index, label := range sample.Labels {
-		if label.Name != descriptor.Labels[index].Name || !containsString(descriptor.Labels[index].AllowedValues, label.Value) {
+		if label.Name != descriptor.Labels[index].Name || !slices.Contains(descriptor.Labels[index].AllowedValues, label.Value) {
 			return safe.NewError(safe.ErrorInvalidObservation, "validate control-plane metric")
 		}
 	}
-	if descriptor.Kind == MetricHistogram {
+	if descriptor.Kind == sharedmetrics.Histogram {
 		if descriptor.Histogram == nil || len(sample.Buckets) != len(descriptor.Histogram.Buckets) {
 			return safe.NewError(safe.ErrorInvalidObservation, "validate control-plane metric")
 		}
@@ -251,13 +254,13 @@ func validateMetricSample(sample MetricSample) error {
 	return nil
 }
 
-func descriptorByName(name string) (MetricDescriptor, bool) {
+func descriptorByName(name string) (sharedmetrics.Descriptor, bool) {
 	for _, descriptor := range fixedMetricDescriptors {
 		if descriptor.Name == name {
 			return descriptor, true
 		}
 	}
-	return MetricDescriptor{}, false
+	return sharedmetrics.Descriptor{}, false
 }
 
 // Sort keeps deterministic ordering explicit for callers that provide a copied
@@ -274,7 +277,7 @@ func (s *DiagnosticsSnapshot) Sort() {
 	})
 }
 
-func metricLabelsKey(labels []MetricLabel) string {
+func metricLabelsKey(labels []sharedmetrics.Label) string {
 	key := ""
 	for _, label := range labels {
 		key += label.Name + "\x1f" + label.Value + "\x1e"

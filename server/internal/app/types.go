@@ -12,6 +12,8 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/tunnelv1"
 	"github.com/pinksaucepasta/paperboat/server/internal/workers"
 	"github.com/pinksaucepasta/paperboat/shared/health"
+	sharedmetrics "github.com/pinksaucepasta/paperboat/shared/metrics"
+	sharedtelemetry "github.com/pinksaucepasta/paperboat/shared/telemetry"
 	"log/slog"
 	"net/http"
 	"sync/atomic"
@@ -57,8 +59,8 @@ type App struct {
 	worker               *workers.Supervisor
 	listeners            *workers.Supervisor // per process, outlives a drain
 	certificateRuntime   *tunnelv1.CertificateRuntime
-	telemetryEvents      *telemetry.EventLog
-	telemetryMetrics     *telemetry.Metrics
+	telemetryEvents      *sharedtelemetry.EventLog
+	telemetryMetrics     *sharedmetrics.Metrics
 	telemetryHealth      *health.HealthTracker
 	telemetryHTTP        *telemetry.HTTPObserver
 	telemetryDiagnostics *telemetry.Diagnostics

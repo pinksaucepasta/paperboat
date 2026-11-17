@@ -2,9 +2,7 @@ package telemetry
 
 import (
 	"bytes"
-	"context"
 	"errors"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -43,26 +41,6 @@ func TestMetricsHandlerRendersDeterministicPrometheusText(t *testing.T) {
 	want := "paperboat_runtime_connector_retries_total{result=\"failed\",transport=\"none\"} 1\npaperboat_runtime_restart_total 4\n"
 	if body := recorder.Body.String(); body != want || !strings.Contains(recorder.Header().Get("Content-Type"), "text/plain") {
 		t.Fatalf("body=%q content-type=%q", body, recorder.Header().Get("Content-Type"))
-	}
-}
-
-func TestLoggerAcceptsOnlySafeStructuredFields(t *testing.T) {
-	var output bytes.Buffer
-	logger, _ := NewLogger(slog.New(slog.NewJSONHandler(&output, nil)))
-	event := Event{Component: "session", Operation: "attach", Result: "ok", CorrelationID: "req_123", ResourceID: "ses_123", Duration: time.Second, Bytes: 10}
-	if err := logger.Log(context.Background(), event); err != nil {
-		t.Fatal(err)
-	}
-	encoded := output.String()
-	if !strings.Contains(encoded, `"msg":"runtime_event"`) || strings.Contains(encoded, "terminal bytes") {
-		t.Fatalf("log=%s", encoded)
-	}
-	event.ResourceID = "Bearer secret token"
-	if err := logger.Log(context.Background(), event); !errors.Is(err, ErrUnsafeValue) {
-		t.Fatalf("err=%v", err)
-	}
-	if strings.Contains(output.String(), "secret token") {
-		t.Fatal("unsafe value entered log")
 	}
 }
 

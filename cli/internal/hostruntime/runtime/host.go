@@ -13,6 +13,7 @@ import (
 	typedhealth "github.com/pinksaucepasta/paperboat/shared/health"
 	"github.com/pinksaucepasta/paperboat/shared/peerconsumer"
 	"github.com/pinksaucepasta/paperboat/shared/serverclock"
+	sharedtelemetry "github.com/pinksaucepasta/paperboat/shared/telemetry"
 	"io"
 	"net"
 	"net/http"
@@ -102,7 +103,7 @@ type HostDependencies struct {
 	SessionLauncherFactory func(session.Service) (server.SessionLauncher, error)
 	HealthTracker          *typedhealth.HealthTracker
 	Metrics                *hosttelemetry.Registry
-	EventLog               *hosttelemetry.EventLog
+	EventLog               *sharedtelemetry.EventLog
 	LocalControlToken      string
 	// Inspector is the daemon-local inspector HTTP service (bounded
 	// sanitized retrieval and deliberate audited replay). It is mounted at

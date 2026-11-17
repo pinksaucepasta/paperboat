@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	sharedtelemetry "github.com/pinksaucepasta/paperboat/shared/telemetry"
 	"io"
 	"os"
 	"path/filepath"
@@ -86,7 +87,7 @@ func TestLifecycleLocalAndMemoryShareProcessReferenceOffline(t *testing.T) {
 	os.Stderr = writer
 	defer func() { os.Stderr = previous }()
 	healthTracker, _ := edgetelemetry.NewHealthTracker(time.Now)
-	events, _ := edgetelemetry.NewEventLogWithQueue(16, 16)
+	events, _ := sharedtelemetry.NewEventLogWithQueue(16, 16)
 	lifecycle := newTelemetryLifecycle(healthTracker, edgetelemetry.NewMetrics(), events)
 	lifecycle.reporter = reporter
 	ctx := reporting.WithSupportReference(context.Background(), "support_5b8a43c1-574f-4c56-94e1-a1adf6fc2c83")
@@ -151,7 +152,7 @@ func TestRouteLifecycleExportsSafeProcessReferenceOffline(t *testing.T) {
 	os.Stderr = writer
 	defer func() { os.Stderr = previous }()
 	healthTracker, _ := edgetelemetry.NewHealthTracker(time.Now)
-	events, _ := edgetelemetry.NewEventLogWithQueue(32, 32)
+	events, _ := sharedtelemetry.NewEventLogWithQueue(32, 32)
 	defer events.Close()
 	lifecycle := newTelemetryLifecycle(healthTracker, edgetelemetry.NewMetrics(), events)
 	lifecycle.reporter = reporter
@@ -159,7 +160,7 @@ func TestRouteLifecycleExportsSafeProcessReferenceOffline(t *testing.T) {
 	core, _ := route.NewCoreTelemetrySink(healthTracker, lifecycle.metrics, events)
 	sink := lifecycle.routeSink(core)
 	for _, kind := range []route.LifecycleType{route.LifecycleStageRejected, route.LifecycleActivated} {
-		if err := sink.RecordRouteTelemetry(route.RouteTelemetryRecord{At: time.Now(), Type: kind, Generation: 1, CorrelationID: "correlation_resource", IDs: edgetelemetry.SafeIDs{RouteID: "PRIVATE_ROUTE"}}); err != nil {
+		if err := sink.RecordRouteTelemetry(route.RouteTelemetryRecord{At: time.Now(), Type: kind, Generation: 1, CorrelationID: "correlation_resource", IDs: sharedtelemetry.SafeIDs{RouteID: "PRIVATE_ROUTE"}}); err != nil {
 			t.Fatal(err)
 		}
 	}

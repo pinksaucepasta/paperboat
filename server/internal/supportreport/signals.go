@@ -2,6 +2,8 @@ package supportreport
 
 import (
 	"context"
+	sharedmetrics "github.com/pinksaucepasta/paperboat/shared/metrics"
+	sharedtelemetry "github.com/pinksaucepasta/paperboat/shared/telemetry"
 	"math"
 	"regexp"
 	"slices"
@@ -27,7 +29,7 @@ type signalState struct {
 	window           time.Time
 	counts           [4]int
 	dropped          [4]atomic.Uint64
-	metricRules      map[string]telemetry.MetricDescriptor
+	metricRules      map[string]sharedmetrics.Descriptor
 	snapshot         func()
 	snapshotMu       sync.Mutex
 	collecting       bool
@@ -58,12 +60,12 @@ func (s *Service) configureSignals(cfg Config, options *sentry.ClientOptions) er
 	if !(rate >= 0 && rate <= 1) {
 		return ErrInvalid
 	}
-	state := &signalState{logs: cfg.LogsEnabled == nil || *cfg.LogsEnabled, metrics: cfg.MetricsEnabled == nil || *cfg.MetricsEnabled, sampleRate: rate, metricRules: make(map[string]telemetry.MetricDescriptor)}
+	state := &signalState{logs: cfg.LogsEnabled == nil || *cfg.LogsEnabled, metrics: cfg.MetricsEnabled == nil || *cfg.MetricsEnabled, sampleRate: rate, metricRules: make(map[string]sharedmetrics.Descriptor)}
 	for _, d := range telemetry.MetricDescriptors() {
 		switch d.Kind {
-		case telemetry.MetricCounter:
+		case sharedmetrics.Counter:
 			state.metricRules[d.Name+"_snapshot"] = d
-		case telemetry.MetricHistogram:
+		case sharedmetrics.Histogram:
 			state.metricRules[d.Name+"_sum_snapshot"] = d
 			state.metricRules[d.Name+"_count_snapshot"] = d
 		default:
@@ -72,14 +74,14 @@ func (s *Service) configureSignals(cfg Config, options *sentry.ClientOptions) er
 	}
 	for _, name := range cfg.PlatformMetricNames {
 		if tokenPattern.MatchString(name) {
-			state.metricRules["paperboat_server_"+name+"_snapshot"] = telemetry.MetricDescriptor{}
+			state.metricRules["paperboat_server_"+name+"_snapshot"] = sharedmetrics.Descriptor{}
 		}
 	}
 	for _, name := range strings.Fields("paperboat.backup.state paperboat.restore.state paperboat.backup.age_seconds paperboat.restore.age_seconds paperboat.database.connections paperboat.database.acquired paperboat.database.idle paperboat.database.acquire_wait_seconds_snapshot paperboat.database.acquire_canceled_snapshot paperboat.runtime.goroutines paperboat.runtime.heap_bytes paperboat.reporting.dropped paperboat.reporting.cleanup_failures") {
-		state.metricRules[name] = telemetry.MetricDescriptor{}
+		state.metricRules[name] = sharedmetrics.Descriptor{}
 	}
 	for _, name := range []string{"paperboat.worker.state", "paperboat.worker.progress_age_seconds"} {
-		state.metricRules[name] = telemetry.MetricDescriptor{Labels: []telemetry.LabelDescriptor{{Name: "worker", AllowedValues: workers.ProgressNames()}}}
+		state.metricRules[name] = sharedmetrics.Descriptor{Labels: []sharedmetrics.LabelDescriptor{{Name: "worker", AllowedValues: workers.ProgressNames()}}}
 	}
 	s.signals = state
 	options.EnableTracing = rate > 0
@@ -239,7 +241,7 @@ func (s *Service) operationAdmitted(ctx context.Context, operation, outcome, ref
 	}
 }
 
-func (s *Service) ObserveEvent(event telemetry.Event) {
+func (s *Service) ObserveEvent(event sharedtelemetry.Event) {
 	if !validOperation(event.Name) || !validOutcome(string(event.Outcome)) {
 		return
 	}
@@ -305,7 +307,7 @@ func (s *Service) snapshotMetrics() {
 	}
 }
 
-func (s *Service) RegistrySnapshot(samples []telemetry.MetricSample) {
+func (s *Service) RegistrySnapshot(samples []sharedmetrics.Sample) {
 	for _, v := range samples {
 		attrs := make([]attribute.Builder, 0, len(v.Labels)+1)
 		attrs = append(attrs, attribute.String("component", "paperboat-server"))
@@ -313,9 +315,9 @@ func (s *Service) RegistrySnapshot(samples []telemetry.MetricSample) {
 			attrs = append(attrs, attribute.String(l.Name, l.Value))
 		}
 		switch v.Kind {
-		case telemetry.MetricCounter:
+		case sharedmetrics.Counter:
 			s.gauge(v.Name+"_snapshot", float64(v.Value), attrs)
-		case telemetry.MetricHistogram:
+		case sharedmetrics.Histogram:
 			s.gauge(v.Name+"_sum_snapshot", v.Sum, attrs)
 			s.gauge(v.Name+"_count_snapshot", float64(v.Count), attrs)
 		default:

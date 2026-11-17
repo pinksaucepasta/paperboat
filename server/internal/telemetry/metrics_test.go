@@ -1,6 +1,7 @@
 package telemetry
 
 import (
+	sharedmetrics "github.com/pinksaucepasta/paperboat/shared/metrics"
 	"github.com/pinksaucepasta/paperboat/shared/telemetry/safe"
 	"math"
 	"strings"
@@ -10,16 +11,16 @@ import (
 
 func TestMetricsAreFixedCardinalityDeterministicAndExactJSON(t *testing.T) {
 	metrics := NewMetrics()
-	if err := metrics.AddCounter(MetricEdgeRequests, MetricLabels{"protocol": "https", "outcome": "success"}, 3); err != nil {
+	if err := metrics.AddCounter(MetricEdgeRequests, sharedmetrics.Labels{"protocol": "https", "outcome": "success"}, 3); err != nil {
 		t.Fatal(err)
 	}
-	if err := metrics.AddCounter(MetricAccessDecisions, MetricLabels{"decision": "denied"}, 2); err != nil {
+	if err := metrics.AddCounter(MetricAccessDecisions, sharedmetrics.Labels{"decision": "denied"}, 2); err != nil {
 		t.Fatal(err)
 	}
-	if err := metrics.SetGauge(MetricHealthDimension, MetricLabels{"dimension": "route", "status": "degraded"}, 1); err != nil {
+	if err := metrics.SetGauge(MetricHealthDimension, sharedmetrics.Labels{"dimension": "route", "status": "degraded"}, 1); err != nil {
 		t.Fatal(err)
 	}
-	if err := metrics.ObserveHistogram(MetricOperationLatency, MetricLabels{"operation": "reconcile"}, 0.2); err != nil {
+	if err := metrics.ObserveHistogram(MetricOperationLatency, sharedmetrics.Labels{"operation": "reconcile"}, 0.2); err != nil {
 		t.Fatal(err)
 	}
 	body, err := metrics.JSON()
@@ -43,18 +44,18 @@ func TestMetricsAreFixedCardinalityDeterministicAndExactJSON(t *testing.T) {
 
 func TestMetricsRejectUnknownAndHighCardinalityLabels(t *testing.T) {
 	metrics := NewMetricsWithLimit(1)
-	base := MetricLabels{"protocol": "https", "outcome": "success"}
+	base := sharedmetrics.Labels{"protocol": "https", "outcome": "success"}
 	tests := []struct {
 		name   string
-		labels MetricLabels
+		labels sharedmetrics.Labels
 		code   safe.ErrorCode
 	}{
-		{"hostname", MetricLabels{"protocol": "customer.example.com", "outcome": "success"}, safe.ErrorLabelValueRejected},
-		{"url", MetricLabels{"protocol": "https://customer.example.com", "outcome": "success"}, safe.ErrorLabelValueRejected},
-		{"arbitrary id", MetricLabels{"protocol": "route_customer123", "outcome": "success"}, safe.ErrorLabelValueRejected},
-		{"token", MetricLabels{"protocol": "Bearer-secret", "outcome": "success"}, safe.ErrorLabelValueRejected},
-		{"unknown", MetricLabels{"protocol": "https", "outcome": "success", "hostname": "customer.example.com"}, safe.ErrorUnknownLabel},
-		{"missing", MetricLabels{"protocol": "https"}, safe.ErrorMissingLabel},
+		{"hostname", sharedmetrics.Labels{"protocol": "customer.example.com", "outcome": "success"}, safe.ErrorLabelValueRejected},
+		{"url", sharedmetrics.Labels{"protocol": "https://customer.example.com", "outcome": "success"}, safe.ErrorLabelValueRejected},
+		{"arbitrary id", sharedmetrics.Labels{"protocol": "route_customer123", "outcome": "success"}, safe.ErrorLabelValueRejected},
+		{"token", sharedmetrics.Labels{"protocol": "Bearer-secret", "outcome": "success"}, safe.ErrorLabelValueRejected},
+		{"unknown", sharedmetrics.Labels{"protocol": "https", "outcome": "success", "hostname": "customer.example.com"}, safe.ErrorUnknownLabel},
+		{"missing", sharedmetrics.Labels{"protocol": "https"}, safe.ErrorMissingLabel},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -75,17 +76,17 @@ func TestMetricsRejectUnknownAndHighCardinalityLabels(t *testing.T) {
 	if err := metrics.AddCounter(MetricEdgeRequests, base, 1); safe.ErrorCodeOf(err) != safe.ErrorMetricOverflow {
 		t.Fatalf("overflow = %v", err)
 	}
-	if err := metrics.AddCounter(MetricAccessDecisions, MetricLabels{"decision": "allowed"}, 1); safe.ErrorCodeOf(err) != safe.ErrorMetricCardinality {
+	if err := metrics.AddCounter(MetricAccessDecisions, sharedmetrics.Labels{"decision": "allowed"}, 1); safe.ErrorCodeOf(err) != safe.ErrorMetricCardinality {
 		t.Fatalf("cardinality = %v", err)
 	}
-	if err := metrics.ObserveHistogram(MetricOperationLatency, MetricLabels{"operation": "reconcile"}, math.NaN()); safe.ErrorCodeOf(err) != safe.ErrorInvalidObservation {
+	if err := metrics.ObserveHistogram(MetricOperationLatency, sharedmetrics.Labels{"operation": "reconcile"}, math.NaN()); safe.ErrorCodeOf(err) != safe.ErrorInvalidObservation {
 		t.Fatalf("nan = %v", err)
 	}
 }
 
 func TestMetricsConcurrentUse(t *testing.T) {
 	metrics := NewMetrics()
-	labels := MetricLabels{"protocol": "https", "outcome": "success"}
+	labels := sharedmetrics.Labels{"protocol": "https", "outcome": "success"}
 	var group sync.WaitGroup
 	for worker := 0; worker < 64; worker++ {
 		group.Add(1)

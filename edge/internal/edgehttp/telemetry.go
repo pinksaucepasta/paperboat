@@ -6,6 +6,8 @@ import (
 	"crypto/tls"
 	"errors"
 	"github.com/pinksaucepasta/paperboat/shared/health"
+	sharedmetrics "github.com/pinksaucepasta/paperboat/shared/metrics"
+	sharedtelemetry "github.com/pinksaucepasta/paperboat/shared/telemetry"
 	"github.com/pinksaucepasta/paperboat/shared/telemetry/safe"
 	"io"
 	"net"
@@ -59,8 +61,8 @@ var (
 // and body data never enter telemetry by accident. Values with an unknown
 // identifier prefix are discarded before an event is constructed.
 type RequestInfo struct {
-	IDs           edgetelemetry.SafeIDs
-	Generations   edgetelemetry.Generations
+	IDs           sharedtelemetry.SafeIDs
+	Generations   sharedtelemetry.Generations
 	CorrelationID string
 	RouteKind     string
 	Protocol      string
@@ -70,12 +72,12 @@ type RequestInfo struct {
 // primitives. Metrics and events may independently be nil for composition in
 // tests or in a process that only enables one sink.
 type RequestTelemetryConfig struct {
-	Metrics       *edgetelemetry.Metrics
-	Events        *edgetelemetry.EventLog
+	Metrics       *sharedmetrics.Metrics
+	Events        *sharedtelemetry.EventLog
 	Clock         func() time.Time
 	Info          RequestInfo
-	IDs           edgetelemetry.SafeIDs
-	Generations   edgetelemetry.Generations
+	IDs           sharedtelemetry.SafeIDs
+	Generations   sharedtelemetry.Generations
 	CorrelationID string
 	RouteKind     string
 }
@@ -83,8 +85,8 @@ type RequestTelemetryConfig struct {
 // RequestTelemetry records terminal request/origin outcomes and wraps live
 // HTTP forwarding without buffering request or response bodies.
 type RequestTelemetry struct {
-	metrics *edgetelemetry.Metrics
-	events  *edgetelemetry.EventLog
+	metrics *sharedmetrics.Metrics
+	events  *sharedtelemetry.EventLog
 	clock   func() time.Time
 	base    RequestInfo
 }
@@ -96,10 +98,10 @@ func NewRequestTelemetry(config RequestTelemetryConfig) (*RequestTelemetry, erro
 		config.Clock = time.Now
 	}
 	base := config.Info
-	if base.IDs == (edgetelemetry.SafeIDs{}) {
+	if base.IDs == (sharedtelemetry.SafeIDs{}) {
 		base.IDs = config.IDs
 	}
-	if base.Generations == (edgetelemetry.Generations{}) {
+	if base.Generations == (sharedtelemetry.Generations{}) {
 		base.Generations = config.Generations
 	}
 	if base.CorrelationID == "" {
@@ -256,10 +258,10 @@ type upgradedResponseBody struct {
 func (p *RequestTelemetry) infoFor(ctx context.Context) RequestInfo {
 	info := p.base
 	if contextInfo, ok := RequestTelemetryInfo(ctx); ok {
-		if contextInfo.IDs != (edgetelemetry.SafeIDs{}) {
+		if contextInfo.IDs != (sharedtelemetry.SafeIDs{}) {
 			info.IDs = contextInfo.IDs
 		}
-		if contextInfo.Generations != (edgetelemetry.Generations{}) {
+		if contextInfo.Generations != (sharedtelemetry.Generations{}) {
 			info.Generations = contextInfo.Generations
 		}
 		if contextInfo.CorrelationID != "" {
@@ -300,7 +302,7 @@ func (p *RequestTelemetry) startRequest(ctx context.Context, info RequestInfo, p
 	}
 	started := p.now()
 	lifecycle := &requestLifecycle{producer: p, ctx: ctx, info: info, protocol: protocol, started: started, upgraded: upgraded}
-	p.emit(started, requestEventStarted, edgetelemetry.SeverityDebug, edgetelemetry.OutcomeStateChange, requestMessageStarted, info)
+	p.emit(started, requestEventStarted, sharedtelemetry.SeverityDebug, sharedtelemetry.OutcomeStateChange, requestMessageStarted, info)
 	return lifecycle
 }
 
@@ -315,11 +317,11 @@ func (p *RequestTelemetry) now() time.Time {
 	return at.UTC()
 }
 
-func (p *RequestTelemetry) emit(at time.Time, name string, severity edgetelemetry.EventSeverity, outcome edgetelemetry.EventOutcome, message string, info RequestInfo) {
+func (p *RequestTelemetry) emit(at time.Time, name string, severity sharedtelemetry.EventSeverity, outcome sharedtelemetry.EventOutcome, message string, info RequestInfo) {
 	if p == nil || p.events == nil {
 		return
 	}
-	_, _, _ = p.events.TryRecord(edgetelemetry.EventInput{
+	_, _, _ = p.events.TryRecord(sharedtelemetry.EventInput{
 		At: at, Severity: severity, Component: health.DimensionEdge,
 		Name: name, Code: name, Outcome: outcome, Message: message,
 		CorrelationID: info.CorrelationID, IDs: safeRequestIDs(info.IDs), Generations: info.Generations,
@@ -327,11 +329,11 @@ func (p *RequestTelemetry) emit(at time.Time, name string, severity edgetelemetr
 	})
 }
 
-func (p *RequestTelemetry) emitOrigin(at time.Time, name string, severity edgetelemetry.EventSeverity, outcome edgetelemetry.EventOutcome, message string, info RequestInfo) {
+func (p *RequestTelemetry) emitOrigin(at time.Time, name string, severity sharedtelemetry.EventSeverity, outcome sharedtelemetry.EventOutcome, message string, info RequestInfo) {
 	if p == nil || p.events == nil {
 		return
 	}
-	_, _, _ = p.events.TryRecord(edgetelemetry.EventInput{
+	_, _, _ = p.events.TryRecord(sharedtelemetry.EventInput{
 		At: at, Severity: severity, Component: health.DimensionOrigin,
 		Name: name, Code: name, Outcome: outcome, Message: message,
 		CorrelationID: info.CorrelationID, IDs: safeRequestIDs(info.IDs), Generations: info.Generations,
@@ -345,11 +347,11 @@ func (p *RequestTelemetry) recordOriginConnected(info RequestInfo, protocol stri
 	}
 	protocol = normalizeOriginProtocol(protocol)
 	if p.metrics != nil {
-		_ = p.metrics.IncCounter(edgetelemetry.MetricOriginConnections, edgetelemetry.MetricLabels{
+		_ = p.metrics.IncCounter(edgetelemetry.MetricOriginConnections, sharedmetrics.Labels{
 			"protocol": protocol, "outcome": "success",
 		})
 	}
-	p.emitOrigin(p.now(), originEventConnected, edgetelemetry.SeverityDebug, edgetelemetry.OutcomeSuccess, originMessageConnected, info)
+	p.emitOrigin(p.now(), originEventConnected, sharedtelemetry.SeverityDebug, sharedtelemetry.OutcomeSuccess, originMessageConnected, info)
 }
 
 func (p *RequestTelemetry) recordOriginFailure(ctx context.Context, info RequestInfo, protocol string, err error) {
@@ -358,21 +360,21 @@ func (p *RequestTelemetry) recordOriginFailure(ctx context.Context, info Request
 	}
 	reason := originFailureReason(err)
 	outcome := "failed"
-	eventOutcome := edgetelemetry.OutcomeFailed
-	severity := edgetelemetry.SeverityError
+	eventOutcome := sharedtelemetry.OutcomeFailed
+	severity := sharedtelemetry.SeverityError
 	if requestCanceled(ctx, err) {
 		outcome = "canceled"
-		eventOutcome = edgetelemetry.OutcomeCanceled
-		severity = edgetelemetry.SeverityInfo
+		eventOutcome = sharedtelemetry.OutcomeCanceled
+		severity = sharedtelemetry.SeverityInfo
 	} else if reason == "timeout" {
 		outcome = "timeout"
 	}
 	if p.metrics != nil {
-		_ = p.metrics.IncCounter(edgetelemetry.MetricOriginConnections, edgetelemetry.MetricLabels{
+		_ = p.metrics.IncCounter(edgetelemetry.MetricOriginConnections, sharedmetrics.Labels{
 			"protocol": normalizeOriginProtocol(protocol), "outcome": outcome,
 		})
 		if outcome != "canceled" {
-			_ = p.metrics.IncCounter(edgetelemetry.MetricOriginFailures, edgetelemetry.MetricLabels{
+			_ = p.metrics.IncCounter(edgetelemetry.MetricOriginFailures, sharedmetrics.Labels{
 				"protocol": normalizeOriginProtocol(protocol), "reason": reason,
 			})
 		}
@@ -387,7 +389,7 @@ func (p *RequestTelemetry) recordProtocolUpgrade(request *http.Request, response
 	if request != nil && isWebSocketUpgrade(request.Header) && response != nil && response.StatusCode == http.StatusSwitchingProtocols {
 		from = upgradeFromRequest(request, from)
 		if from != "" {
-			_ = p.metrics.IncCounter(edgetelemetry.MetricProtocolUpgrades, edgetelemetry.MetricLabels{"from": from, "to": "websocket"})
+			_ = p.metrics.IncCounter(edgetelemetry.MetricProtocolUpgrades, sharedmetrics.Labels{"from": from, "to": "websocket"})
 		}
 		return
 	}
@@ -396,7 +398,7 @@ func (p *RequestTelemetry) recordProtocolUpgrade(request *http.Request, response
 	if from == "" || to == "" || from == to {
 		return
 	}
-	_ = p.metrics.IncCounter(edgetelemetry.MetricProtocolUpgrades, edgetelemetry.MetricLabels{"from": from, "to": to})
+	_ = p.metrics.IncCounter(edgetelemetry.MetricProtocolUpgrades, sharedmetrics.Labels{"from": from, "to": to})
 }
 
 func (p *RequestTelemetry) recordInboundUpgrade(info RequestInfo, request *http.Request) {
@@ -407,7 +409,7 @@ func (p *RequestTelemetry) recordInboundUpgrade(info RequestInfo, request *http.
 	if from == "" {
 		from = "http1"
 	}
-	_ = p.metrics.IncCounter(edgetelemetry.MetricProtocolUpgrades, edgetelemetry.MetricLabels{"from": from, "to": "websocket"})
+	_ = p.metrics.IncCounter(edgetelemetry.MetricProtocolUpgrades, sharedmetrics.Labels{"from": from, "to": "websocket"})
 }
 
 func upgradeFromRequest(request *http.Request, fallback string) string {
@@ -427,7 +429,7 @@ func (p *RequestTelemetry) incrementBytes(direction string, count uint64) {
 	if p == nil || p.metrics == nil || count == 0 {
 		return
 	}
-	_ = p.metrics.AddCounter(edgetelemetry.MetricTrafficBytes, edgetelemetry.MetricLabels{"direction": direction}, count)
+	_ = p.metrics.AddCounter(edgetelemetry.MetricTrafficBytes, sharedmetrics.Labels{"direction": direction}, count)
 }
 
 type requestLifecycle struct {
@@ -467,45 +469,45 @@ func (l *requestLifecycle) finishWith(cause error) {
 		return
 	}
 	l.once.Do(func() {
-		outcome := edgetelemetry.OutcomeSuccess
+		outcome := sharedtelemetry.OutcomeSuccess
 		name := requestEventCompleted
-		severity := edgetelemetry.SeverityDebug
+		severity := sharedtelemetry.SeverityDebug
 		message := requestMessageComplete
 		if requestCanceled(l.ctx, cause) {
-			outcome = edgetelemetry.OutcomeCanceled
+			outcome = sharedtelemetry.OutcomeCanceled
 			name = requestEventCanceled
-			severity = edgetelemetry.SeverityInfo
+			severity = sharedtelemetry.SeverityInfo
 			message = requestMessageCanceled
 		} else if errors.Is(ctxErr(l.ctx), context.DeadlineExceeded) || requestCauseMatches(cause, func(err error) bool { return err == context.DeadlineExceeded }) || cause != nil && !requestErrorLeaves(cause, func(err error) bool { return err == io.EOF }, true) {
-			outcome = edgetelemetry.OutcomeFailed
+			outcome = sharedtelemetry.OutcomeFailed
 			name = requestEventFailed
-			severity = edgetelemetry.SeverityError
+			severity = sharedtelemetry.SeverityError
 			message = requestMessageFailed
 		} else if status := int(l.status.Load()); status >= http.StatusBadRequest && status < http.StatusInternalServerError {
-			outcome = edgetelemetry.OutcomeRejected
+			outcome = sharedtelemetry.OutcomeRejected
 			name = requestEventRejected
-			severity = edgetelemetry.SeverityWarn
+			severity = sharedtelemetry.SeverityWarn
 			message = requestMessageRejected
 		} else if status := int(l.status.Load()); status >= http.StatusInternalServerError {
-			outcome = edgetelemetry.OutcomeFailed
+			outcome = sharedtelemetry.OutcomeFailed
 			name = requestEventFailed
-			severity = edgetelemetry.SeverityError
+			severity = sharedtelemetry.SeverityError
 			message = requestMessageFailed
 		}
 		if l.producer != nil {
 			if l.producer.metrics != nil {
 				if l.route != "" {
-					_ = l.producer.metrics.IncCounter(edgetelemetry.MetricRouteRequests, edgetelemetry.MetricLabels{
+					_ = l.producer.metrics.IncCounter(edgetelemetry.MetricRouteRequests, sharedmetrics.Labels{
 						"route_kind": l.route, "outcome": string(outcome),
 					})
-					_ = l.producer.metrics.ObserveHistogram(edgetelemetry.MetricStreamDuration, edgetelemetry.MetricLabels{"route_kind": l.info.RouteKind}, l.durationSeconds())
+					_ = l.producer.metrics.ObserveHistogram(edgetelemetry.MetricStreamDuration, sharedmetrics.Labels{"route_kind": l.info.RouteKind}, l.durationSeconds())
 				} else {
-					_ = l.producer.metrics.IncCounter(edgetelemetry.MetricEdgeRequests, edgetelemetry.MetricLabels{
+					_ = l.producer.metrics.IncCounter(edgetelemetry.MetricEdgeRequests, sharedmetrics.Labels{
 						"protocol": normalizeEdgeProtocol(l.protocol), "outcome": string(outcome),
 					})
 				}
-				if outcome == edgetelemetry.OutcomeCanceled {
-					_ = l.producer.metrics.IncCounter(edgetelemetry.MetricStreamCancellations, edgetelemetry.MetricLabels{"reason": cancellationReason(l.ctx, cause)})
+				if outcome == sharedtelemetry.OutcomeCanceled {
+					_ = l.producer.metrics.IncCounter(edgetelemetry.MetricStreamCancellations, sharedmetrics.Labels{"reason": cancellationReason(l.ctx, cause)})
 				}
 			}
 			l.producer.emit(l.producer.now(), name, severity, outcome, message, l.info)
@@ -1019,7 +1021,7 @@ func safeRequestCorrelation(value string) bool {
 	return safe.OpaqueID(value)
 }
 
-func safeRequestIDs(ids edgetelemetry.SafeIDs) edgetelemetry.SafeIDs {
+func safeRequestIDs(ids sharedtelemetry.SafeIDs) sharedtelemetry.SafeIDs {
 	ids.AccountID = safeRequestID(ids.AccountID)
 	ids.ActorID = safeRequestID(ids.ActorID)
 	ids.TunnelID = safeRequestID(ids.TunnelID)

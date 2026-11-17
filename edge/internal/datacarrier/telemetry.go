@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"github.com/pinksaucepasta/paperboat/shared/health"
+	sharedmetrics "github.com/pinksaucepasta/paperboat/shared/metrics"
+	sharedtelemetry "github.com/pinksaucepasta/paperboat/shared/telemetry"
 	"github.com/pinksaucepasta/paperboat/shared/telemetry/safe"
 	"io"
 	"net"
@@ -63,8 +65,8 @@ var (
 // data-carrier stream. It deliberately has no address, URL, header, body, or
 // error fields.
 type StreamInfo struct {
-	IDs                edgetelemetry.SafeIDs
-	Generations        edgetelemetry.Generations
+	IDs                sharedtelemetry.SafeIDs
+	Generations        sharedtelemetry.Generations
 	CorrelationID      string
 	RouteKind          string
 	Protocol           string
@@ -77,12 +79,12 @@ type StreamInfo struct {
 // CarrierTelemetryConfig wires the producer to bounded core telemetry. A
 // single producer is normally shared by all streams for one edge process.
 type CarrierTelemetryConfig struct {
-	Metrics       *edgetelemetry.Metrics
-	Events        *edgetelemetry.EventLog
+	Metrics       *sharedmetrics.Metrics
+	Events        *sharedtelemetry.EventLog
 	Clock         func() time.Time
 	Info          StreamInfo
-	IDs           edgetelemetry.SafeIDs
-	Generations   edgetelemetry.Generations
+	IDs           sharedtelemetry.SafeIDs
+	Generations   sharedtelemetry.Generations
 	CorrelationID string
 	RouteKind     string
 	Observe       func(context.Context, string, string, string, time.Duration)
@@ -91,8 +93,8 @@ type CarrierTelemetryConfig struct {
 // CarrierTelemetry observes stream lifecycle and byte flow around existing
 // carrier operations. It owns no transport goroutines.
 type CarrierTelemetry struct {
-	metrics  *edgetelemetry.Metrics
-	events   *edgetelemetry.EventLog
+	metrics  *sharedmetrics.Metrics
+	events   *sharedtelemetry.EventLog
 	clock    func() time.Time
 	base     StreamInfo
 	active   atomic.Int64
@@ -107,10 +109,10 @@ func NewCarrierTelemetry(config CarrierTelemetryConfig) (*CarrierTelemetry, erro
 		config.Clock = time.Now
 	}
 	base := config.Info
-	if base.IDs == (edgetelemetry.SafeIDs{}) {
+	if base.IDs == (sharedtelemetry.SafeIDs{}) {
 		base.IDs = config.IDs
 	}
-	if base.Generations == (edgetelemetry.Generations{}) {
+	if base.Generations == (sharedtelemetry.Generations{}) {
 		base.Generations = config.Generations
 	}
 	if base.CorrelationID == "" {
@@ -183,7 +185,7 @@ func (p *CarrierTelemetry) open(ctx context.Context, supplied StreamInfo, operat
 		failName, failMessage = carrierStreamAcceptFailed, carrierMessageAcceptFailed
 	}
 	if p != nil {
-		p.emit(started, startName, edgetelemetry.SeverityDebug, edgetelemetry.OutcomeStateChange, startMessage, info)
+		p.emit(started, startName, sharedtelemetry.SeverityDebug, sharedtelemetry.OutcomeStateChange, startMessage, info)
 	}
 	if err := ctx.Err(); err != nil {
 		if p != nil {
@@ -214,7 +216,7 @@ func (p *CarrierTelemetry) open(ctx context.Context, supplied StreamInfo, operat
 		if accepted {
 			name, message = carrierStreamAccepted, carrierMessageAccepted
 		}
-		p.emit(p.now(), name, edgetelemetry.SeverityDebug, edgetelemetry.OutcomeSuccess, message, wrapped.info)
+		p.emit(p.now(), name, sharedtelemetry.SeverityDebug, sharedtelemetry.OutcomeSuccess, message, wrapped.info)
 		p.observeOperation(ctx, accepted, "success", "ok", p.now().Sub(started))
 	}
 	return wrapped, nil
@@ -284,7 +286,7 @@ func (p *CarrierTelemetry) SetQueueDepth(queue string, depth int) error {
 	if p == nil || p.metrics == nil {
 		return nil
 	}
-	return p.metrics.SetGauge(edgetelemetry.MetricQueueDepth, edgetelemetry.MetricLabels{"queue": queue}, uint64(depth))
+	return p.metrics.SetGauge(edgetelemetry.MetricQueueDepth, sharedmetrics.Labels{"queue": queue}, uint64(depth))
 }
 
 // QueueDepth is an alias for SetQueueDepth.
@@ -301,7 +303,7 @@ func (p *CarrierTelemetry) RecordFlowStall(direction string) error {
 	if p == nil || p.metrics == nil {
 		return nil
 	}
-	return p.metrics.IncCounter(edgetelemetry.MetricFlowControlStalls, edgetelemetry.MetricLabels{"direction": direction})
+	return p.metrics.IncCounter(edgetelemetry.MetricFlowControlStalls, sharedmetrics.Labels{"direction": direction})
 }
 
 // FlowStall is an alias for RecordFlowStall.
@@ -314,10 +316,10 @@ func (p *CarrierTelemetry) infoFor(supplied StreamInfo) StreamInfo {
 	if p != nil {
 		info = p.base
 	}
-	if supplied.IDs != (edgetelemetry.SafeIDs{}) {
+	if supplied.IDs != (sharedtelemetry.SafeIDs{}) {
 		info.IDs = supplied.IDs
 	}
-	if supplied.Generations != (edgetelemetry.Generations{}) {
+	if supplied.Generations != (sharedtelemetry.Generations{}) {
 		info.Generations = supplied.Generations
 	}
 	if supplied.CorrelationID != "" {
@@ -364,11 +366,11 @@ var carrierCancellationReasons = map[string]struct{}{
 	"client": {}, "origin": {}, "edge": {}, "timeout": {}, "shutdown": {}, "unknown": {},
 }
 
-func (p *CarrierTelemetry) emit(at time.Time, name string, severity edgetelemetry.EventSeverity, outcome edgetelemetry.EventOutcome, message string, info StreamInfo) {
+func (p *CarrierTelemetry) emit(at time.Time, name string, severity sharedtelemetry.EventSeverity, outcome sharedtelemetry.EventOutcome, message string, info StreamInfo) {
 	if p == nil || p.events == nil {
 		return
 	}
-	_, _, _ = p.events.TryRecord(edgetelemetry.EventInput{
+	_, _, _ = p.events.TryRecord(sharedtelemetry.EventInput{
 		At: at, Severity: severity, Component: health.DimensionEdge,
 		Name: name, Code: name, Outcome: outcome, Message: message,
 		CorrelationID: info.CorrelationID, IDs: safeCarrierIDs(info.IDs), Generations: info.Generations,
@@ -377,18 +379,18 @@ func (p *CarrierTelemetry) emit(at time.Time, name string, severity edgetelemetr
 }
 
 func (p *CarrierTelemetry) recordOpenFailure(info StreamInfo, name, message string, ctx context.Context, err error) {
-	outcome := edgetelemetry.OutcomeFailed
-	severity := edgetelemetry.SeverityError
+	outcome := sharedtelemetry.OutcomeFailed
+	severity := sharedtelemetry.SeverityError
 	if allCarrierLeaves(err, func(leaf error) bool { return leaf == context.Canceled }) {
-		outcome, severity = edgetelemetry.OutcomeCanceled, edgetelemetry.SeverityInfo
+		outcome, severity = sharedtelemetry.OutcomeCanceled, sharedtelemetry.SeverityInfo
 	}
 	p.emit(p.now(), name, severity, outcome, message, info)
-	if (outcome == edgetelemetry.OutcomeCanceled || carrierHasDeadline(err)) && p.metrics != nil {
+	if (outcome == sharedtelemetry.OutcomeCanceled || carrierHasDeadline(err)) && p.metrics != nil {
 		reason := contextCancellationReason(ctx)
 		if reason == "" {
 			reason = carrierCancellationReasonFromError(err)
 		}
-		_ = p.metrics.IncCounter(edgetelemetry.MetricStreamCancellations, edgetelemetry.MetricLabels{"reason": reason})
+		_ = p.metrics.IncCounter(edgetelemetry.MetricStreamCancellations, sharedmetrics.Labels{"reason": reason})
 	}
 }
 
@@ -530,7 +532,7 @@ func (p *CarrierTelemetry) addBytes(direction string, count uint64) {
 	if p == nil || p.metrics == nil || count == 0 {
 		return
 	}
-	_ = p.metrics.AddCounter(edgetelemetry.MetricTrafficBytes, edgetelemetry.MetricLabels{"direction": direction}, count)
+	_ = p.metrics.AddCounter(edgetelemetry.MetricTrafficBytes, sharedmetrics.Labels{"direction": direction}, count)
 }
 
 func (p *CarrierTelemetry) finishStream(stream *TelemetryStream, reason string, closeErr error) {
@@ -546,11 +548,11 @@ func (p *CarrierTelemetry) finishStream(stream *TelemetryStream, reason string, 
 	p.setActiveGauge()
 	p.activeMu.Unlock()
 	if p.metrics != nil && stream.info.RouteKind != "" {
-		_ = p.metrics.ObserveHistogram(edgetelemetry.MetricStreamDuration, edgetelemetry.MetricLabels{"route_kind": stream.info.RouteKind}, stream.durationSeconds())
+		_ = p.metrics.ObserveHistogram(edgetelemetry.MetricStreamDuration, sharedmetrics.Labels{"route_kind": stream.info.RouteKind}, stream.durationSeconds())
 	}
-	outcome := edgetelemetry.OutcomeSuccess
+	outcome := sharedtelemetry.OutcomeSuccess
 	if closeErr != nil && !isExpectedStreamClose(closeErr) {
-		outcome = edgetelemetry.OutcomeFailed
+		outcome = sharedtelemetry.OutcomeFailed
 	}
 	reason = normalizeCarrierCancellationReason(reason)
 	if reason == "" {
@@ -565,32 +567,32 @@ func (p *CarrierTelemetry) finishStream(stream *TelemetryStream, reason string, 
 		reason = "timeout"
 	}
 	if reason != "" {
-		if outcome != edgetelemetry.OutcomeFailed {
+		if outcome != sharedtelemetry.OutcomeFailed {
 			if reason == "timeout" {
-				outcome = edgetelemetry.OutcomeFailed
+				outcome = sharedtelemetry.OutcomeFailed
 			} else {
-				outcome = edgetelemetry.OutcomeCanceled
+				outcome = sharedtelemetry.OutcomeCanceled
 			}
 		}
 		if p.metrics != nil {
-			_ = p.metrics.IncCounter(edgetelemetry.MetricStreamCancellations, edgetelemetry.MetricLabels{"reason": reason})
+			_ = p.metrics.IncCounter(edgetelemetry.MetricStreamCancellations, sharedmetrics.Labels{"reason": reason})
 		}
 	}
-	severity := edgetelemetry.SeverityDebug
-	if outcome == edgetelemetry.OutcomeFailed {
-		severity = edgetelemetry.SeverityError
-	} else if outcome == edgetelemetry.OutcomeCanceled {
-		severity = edgetelemetry.SeverityInfo
+	severity := sharedtelemetry.SeverityDebug
+	if outcome == sharedtelemetry.OutcomeFailed {
+		severity = sharedtelemetry.SeverityError
+	} else if outcome == sharedtelemetry.OutcomeCanceled {
+		severity = sharedtelemetry.SeverityInfo
 	}
 	p.emit(p.now(), carrierStreamClosed, severity, outcome, carrierMessageClosed, stream.info)
 	if p.observe != nil {
 		observed, code := string(outcome), "ok"
-		if outcome == edgetelemetry.OutcomeFailed {
+		if outcome == sharedtelemetry.OutcomeFailed {
 			code = "internal"
 			if reason == "timeout" || carrierHasDeadline(closeErr) {
 				code = "timeout"
 			}
-		} else if outcome == edgetelemetry.OutcomeCanceled {
+		} else if outcome == sharedtelemetry.OutcomeCanceled {
 			code = "shutdown"
 		}
 		p.observe(stream.ctx, "connector_stream", observed, code, time.Duration(stream.durationSeconds()*float64(time.Second)))
@@ -744,7 +746,7 @@ func safeCarrierCorrelation(value string) bool {
 	return safe.OpaqueID(value)
 }
 
-func safeCarrierIDs(ids edgetelemetry.SafeIDs) edgetelemetry.SafeIDs {
+func safeCarrierIDs(ids sharedtelemetry.SafeIDs) sharedtelemetry.SafeIDs {
 	ids.AccountID = safeCarrierID(ids.AccountID)
 	ids.ActorID = safeCarrierID(ids.ActorID)
 	ids.TunnelID = safeCarrierID(ids.TunnelID)

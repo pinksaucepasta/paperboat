@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	sharedmetrics "github.com/pinksaucepasta/paperboat/shared/metrics"
 	"github.com/pinksaucepasta/paperboat/shared/nodemetrics"
 	"github.com/pinksaucepasta/paperboat/shared/relaylimits"
 	"net/http"
@@ -292,7 +293,7 @@ func (s *EdgeService) countRelayObservation(in relayNodeObservation, required bo
 			shape = "required"
 		}
 	}
-	_ = s.relayMetrics.IncCounter(telemetry.MetricRelaySubjectObservations, telemetry.MetricLabels{"shape": shape})
+	_ = s.relayMetrics.IncCounter(telemetry.MetricRelaySubjectObservations, sharedmetrics.Labels{"shape": shape})
 }
 
 // relayQuotaFreshLookups bounds the uncached allowance reads one relay observation may cost.

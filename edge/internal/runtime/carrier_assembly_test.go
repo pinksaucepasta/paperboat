@@ -3,6 +3,8 @@ package runtime
 import (
 	"context"
 	"errors"
+	sharedmetrics "github.com/pinksaucepasta/paperboat/shared/metrics"
+	sharedtelemetry "github.com/pinksaucepasta/paperboat/shared/telemetry"
 	"reflect"
 	"sync"
 	"testing"
@@ -121,7 +123,7 @@ func TestCarrierAssemblyTelemetryWrapsAuthenticatedPeerLifetime(t *testing.T) {
 	}
 	service := newTelemetryCarrierService(server)
 	metrics := edgetelemetry.NewMetrics()
-	events, err := edgetelemetry.NewEventLogWithQueue(32, 32)
+	events, err := sharedtelemetry.NewEventLogWithQueue(32, 32)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -281,7 +283,7 @@ func (s *telemetryCarrierService) Close() error {
 	return nil
 }
 
-func runtimeMetricValue(samples []edgetelemetry.MetricSample, name string) uint64 {
+func runtimeMetricValue(samples []sharedmetrics.Sample, name string) uint64 {
 	for _, sample := range samples {
 		if sample.Name == name {
 			return sample.Value

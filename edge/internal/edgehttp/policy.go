@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"errors"
+	sharedtelemetry "github.com/pinksaucepasta/paperboat/shared/telemetry"
 	"io"
 	"log"
 	"log/slog"
@@ -218,7 +219,7 @@ func NewGatewayWithTransports(config Config, privateUpstream string, previewTran
 		if config.RuntimeCarrierTransport != nil {
 			proxy := &httputil.ReverseProxy{Transport: config.RuntimeCarrierTransport, FlushInterval: -1, Rewrite: rewriteToCarrier, ModifyResponse: func(response *http.Response) error {
 				if response.Request != nil && response.Request.URL.Path == "/v1/browser-terminal" {
-					edgetelemetry.Log(response.Request.Context(), edgetelemetry.SeverityInfo, "browser_terminal_host_response", edgetelemetry.OutcomeSuccess, "status", response.StatusCode)
+					edgetelemetry.Log(response.Request.Context(), sharedtelemetry.SeverityInfo, "browser_terminal_host_response", sharedtelemetry.OutcomeSuccess, "status", response.StatusCode)
 				}
 				return legacy.ModifyResponse(response)
 			}}

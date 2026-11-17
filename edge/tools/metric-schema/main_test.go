@@ -1,42 +1,15 @@
 package main
 
 import (
-	"encoding/json"
+	"io"
 	"testing"
+
+	"github.com/pinksaucepasta/paperboat/shared/metrics/schema"
 )
 
-func TestCanonicalDocumentIsBounded(t *testing.T) {
-	data, err := canonicalDocument()
-	if err != nil {
+// The committed docs/metrics.json is current and the real handler exposes exactly it.
+func TestCommittedSchemaMatchesDescriptorsAndHandler(t *testing.T) {
+	if err := schema.Run([]string{"../../docs/metrics.json"}, io.Discard, buildMetrics, verifyHandler); err != nil {
 		t.Fatal(err)
-	}
-	var value document
-	if err := json.Unmarshal(data, &value); err != nil || value.SchemaVersion != schemaVersion || len(value.Metrics) == 0 {
-		t.Fatalf("document=%+v error=%v", value, err)
-	}
-	for _, item := range value.Metrics {
-		for label, values := range item.Labels {
-			if len(values) == 0 {
-				t.Fatalf("metric %q label %q is unbounded", item.Name, label)
-			}
-		}
-	}
-}
-
-func TestRealMetricsHandlerMatchesSchema(t *testing.T) {
-	if err := verifyHandler(); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestParseLabelsRejectsDuplicateAndMalformedValues(t *testing.T) {
-	labels, err := parseLabels(`kind="stream",result="success"`)
-	if err != nil || labels["kind"] != "stream" || labels["result"] != "success" {
-		t.Fatalf("labels=%v error=%v", labels, err)
-	}
-	for _, value := range []string{`kind`, `kind=stream`, `kind="stream",kind="route"`} {
-		if _, err := parseLabels(value); err == nil {
-			t.Fatalf("invalid labels %q accepted", value)
-		}
 	}
 }

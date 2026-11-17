@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"errors"
+	sharedtelemetry "github.com/pinksaucepasta/paperboat/shared/telemetry"
 	"io"
 	"log/slog"
 	"sync"
@@ -10,7 +11,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/pinksaucepasta/paperboat/edge/internal/datacarrier"
-	edgetelemetry "github.com/pinksaucepasta/paperboat/edge/internal/telemetry"
 	"github.com/pinksaucepasta/paperboat/shared/reporting"
 )
 
@@ -201,14 +201,14 @@ func (a *CarrierAssembly) acceptLoop(ctx context.Context) {
 
 func carrierPeerStreamInfo(identity datacarrier.Identity) datacarrier.StreamInfo {
 	return datacarrier.StreamInfo{
-		IDs: edgetelemetry.SafeIDs{
+		IDs: sharedtelemetry.SafeIDs{
 			AccountID:   identity.AccountID,
 			HostID:      identity.HostID,
 			TunnelID:    identity.TunnelID,
 			ConnectorID: identity.ConnectorID,
 			SessionID:   identity.SessionID,
 		},
-		Generations: edgetelemetry.Generations{
+		Generations: sharedtelemetry.Generations{
 			Connector: identity.ProcessGeneration,
 			Session:   identity.Generation,
 		},

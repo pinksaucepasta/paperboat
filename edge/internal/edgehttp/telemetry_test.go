@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	sharedmetrics "github.com/pinksaucepasta/paperboat/shared/metrics"
+	sharedtelemetry "github.com/pinksaucepasta/paperboat/shared/telemetry"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -24,10 +26,10 @@ func (f telemetryRoundTripFunc) RoundTrip(request *http.Request) (*http.Response
 	return f(request)
 }
 
-func newTestRequestTelemetry(t *testing.T) (*RequestTelemetry, *edgetelemetry.Metrics, *edgetelemetry.EventLog) {
+func newTestRequestTelemetry(t *testing.T) (*RequestTelemetry, *sharedmetrics.Metrics, *sharedtelemetry.EventLog) {
 	t.Helper()
 	metrics := edgetelemetry.NewMetrics()
-	events, err := edgetelemetry.NewEventLogWithQueue(128, 128)
+	events, err := sharedtelemetry.NewEventLogWithQueue(128, 128)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -37,8 +39,8 @@ func newTestRequestTelemetry(t *testing.T) (*RequestTelemetry, *edgetelemetry.Me
 		Events:  events,
 		Clock:   func() time.Time { return time.Date(2026, 8, 31, 1, 2, 3, 0, time.UTC) },
 		Info: RequestInfo{
-			IDs:           edgetelemetry.SafeIDs{TunnelID: "tunnel_1", RouteID: "route_1", ConnectorID: "connector_1"},
-			Generations:   edgetelemetry.Generations{Route: 4, Connector: 2},
+			IDs:           sharedtelemetry.SafeIDs{TunnelID: "tunnel_1", RouteID: "route_1", ConnectorID: "connector_1"},
+			Generations:   sharedtelemetry.Generations{Route: 4, Connector: 2},
 			CorrelationID: "corr_edge_test_1",
 			RouteKind:     "tunnel_https_wss",
 		},
@@ -252,7 +254,7 @@ func (b *blockingResponseBody) Close() error {
 	return nil
 }
 
-func metricValue(samples []edgetelemetry.MetricSample, name string, labels ...string) uint64 {
+func metricValue(samples []sharedmetrics.Sample, name string, labels ...string) uint64 {
 	for _, sample := range samples {
 		if sample.Name != name || len(sample.Labels) != len(labels) {
 			continue
@@ -299,7 +301,7 @@ func TestRequestTelemetryMixedFailuresAndDeadlineRemainFailures(t *testing.T) {
 				t.Fatal("terminal outcome lost")
 			}
 			for _, event := range events.Snapshot() {
-				if event.Name == requestEventFailed && event.Severity != edgetelemetry.SeverityError {
+				if event.Name == requestEventFailed && event.Severity != sharedtelemetry.SeverityError {
 					t.Fatal("failure severity lost")
 				}
 			}

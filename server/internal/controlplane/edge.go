@@ -14,6 +14,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	sharedmetrics "github.com/pinksaucepasta/paperboat/shared/metrics"
 	"github.com/pinksaucepasta/paperboat/shared/nodemetrics"
 	"io"
 	"log/slog"
@@ -40,7 +41,6 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/nodeauth"
 	"github.com/pinksaucepasta/paperboat/server/internal/secrets"
 	"github.com/pinksaucepasta/paperboat/server/internal/supportreport"
-	"github.com/pinksaucepasta/paperboat/server/internal/telemetry"
 	"github.com/pinksaucepasta/paperboat/server/internal/tunnelv1"
 )
 
@@ -60,7 +60,7 @@ type EdgeService struct {
 	bandwidth               BandwidthDebiter
 	scopedBandwidth         ScopedBandwidthDebiter
 	relayQuota              *bandwidthgate.Gate
-	relayMetrics            *telemetry.Metrics
+	relayMetrics            *sharedmetrics.Metrics
 	ingressLimits           edgelimits.IngressLimits
 	audit                   *audit.Writer
 	signer                  *mint.Provider
@@ -82,7 +82,7 @@ func (s *EdgeService) SetRelayQuotaGate(gate *bandwidthgate.Gate) { s.relayQuota
 func (s *EdgeService) SetIngressLimits(limits edgelimits.IngressLimits) { s.ingressLimits = limits }
 
 // SetRelayMetrics counts how relay observations carried their subjects (MetricRelaySubjectObservations).
-func (s *EdgeService) SetRelayMetrics(metrics *telemetry.Metrics) { s.relayMetrics = metrics }
+func (s *EdgeService) SetRelayMetrics(metrics *sharedmetrics.Metrics) { s.relayMetrics = metrics }
 
 func (s *EdgeService) SetScopedBandwidthDebiter(debiter ScopedBandwidthDebiter) {
 	s.scopedBandwidth = debiter

@@ -3,6 +3,8 @@ package telemetry
 import (
 	"context"
 	"github.com/pinksaucepasta/paperboat/shared/health"
+	sharedmetrics "github.com/pinksaucepasta/paperboat/shared/metrics"
+	sharedtelemetry "github.com/pinksaucepasta/paperboat/shared/telemetry"
 	"net/http"
 	"strings"
 	"time"
@@ -18,8 +20,8 @@ type HTTPIdentity func(context.Context) (requestID, correlationID string)
 // caller-supplied from a finite allowlist so user-controlled paths and
 // hostnames can never become metric labels.
 type HTTPObserver struct {
-	Metrics  *Metrics
-	Events   *EventLog
+	Metrics  *sharedmetrics.Metrics
+	Events   *sharedtelemetry.EventLog
 	Identity HTTPIdentity
 	Now      func() time.Time
 }
@@ -42,20 +44,20 @@ func (o HTTPObserver) WrapFunc(routeFamily func(*http.Request) string, next http
 		started := o.now()
 		captured := httpsnoop.CaptureMetrics(next, w, r)
 		statusClass := httpStatusClass(captured.Code)
-		outcome := OutcomeSuccess
-		severity := SeverityInfo
+		outcome := sharedtelemetry.OutcomeSuccess
+		severity := sharedtelemetry.SeverityInfo
 		code := "http_request_succeeded"
 		message := "HTTP request completed."
 		if captured.Code >= http.StatusBadRequest && captured.Code < http.StatusInternalServerError {
-			outcome, severity, code, message = OutcomeRejected, SeverityWarn, "http_request_rejected", "HTTP request was rejected."
+			outcome, severity, code, message = sharedtelemetry.OutcomeRejected, sharedtelemetry.SeverityWarn, "http_request_rejected", "HTTP request was rejected."
 		} else if captured.Code >= http.StatusInternalServerError {
-			outcome, severity, code, message = OutcomeFailed, SeverityError, "http_request_failed", "HTTP request failed."
+			outcome, severity, code, message = sharedtelemetry.OutcomeFailed, sharedtelemetry.SeverityError, "http_request_failed", "HTTP request failed."
 		}
 		if o.Metrics != nil {
-			_ = o.Metrics.IncCounter(MetricHTTPRequests, MetricLabels{
+			_ = o.Metrics.IncCounter(MetricHTTPRequests, sharedmetrics.Labels{
 				"method": methodLabel(r.Method), "route_family": family, "status_class": statusClass,
 			})
-			_ = o.Metrics.ObserveHistogram(MetricHTTPDuration, MetricLabels{"route_family": family, "status_class": statusClass}, captured.Duration.Seconds())
+			_ = o.Metrics.ObserveHistogram(MetricHTTPDuration, sharedmetrics.Labels{"route_family": family, "status_class": statusClass}, captured.Duration.Seconds())
 		}
 		if o.Events == nil || o.Identity == nil {
 			return
@@ -64,7 +66,7 @@ func (o HTTPObserver) WrapFunc(routeFamily func(*http.Request) string, next http
 		if requestID == "" || correlationID == "" {
 			return
 		}
-		_, _ = o.Events.Record(EventInput{
+		_, _ = o.Events.Record(sharedtelemetry.EventInput{
 			At: started.Add(captured.Duration), Severity: severity, Component: health.DimensionService,
 			Name: "http_request", Code: code, Outcome: outcome, Message: message,
 			RequestID: requestID, CorrelationID: correlationID, Retry: health.RetryNone,

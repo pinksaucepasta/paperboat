@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"github.com/pinksaucepasta/paperboat/shared/health"
+	sharedtelemetry "github.com/pinksaucepasta/paperboat/shared/telemetry"
 	"github.com/pinksaucepasta/paperboat/shared/telemetry/safe"
 	"sync"
 	"sync/atomic"
@@ -13,7 +14,7 @@ import (
 // LifecycleSchemaV1 identifies the version used by lifecycle records. Lifecycle records use the same versioned resource envelope as the rest of
 // the preview/tunnel API. They are intentionally richer than Event, which is
 // the small edge-compatible transport event retained for existing producers.
-const LifecycleSchemaV1 = ContractSchemaV1
+const LifecycleSchemaV1 = sharedtelemetry.ContractSchemaV1
 
 const (
 	maximumLifecycleEventType = 80
@@ -32,14 +33,14 @@ type LifecycleEventInput struct {
 	At         time.Time
 	OccurredAt time.Time
 
-	Severity  EventSeverity
-	Level     EventSeverity
+	Severity  sharedtelemetry.EventSeverity
+	Level     sharedtelemetry.EventSeverity
 	Component health.Dimension
 
 	EventType string
 	Name      string
 	Code      string
-	Outcome   EventOutcome
+	Outcome   sharedtelemetry.EventOutcome
 	Message   string
 
 	RequestID     string
@@ -56,7 +57,7 @@ type LifecycleEventInput struct {
 	ActorType string
 	ActorID   string
 
-	Generations  Generations
+	Generations  sharedtelemetry.Generations
 	Retry        health.RetryDecision
 	NextRetryAt  time.Time
 	Metadata     map[string]any
@@ -80,26 +81,26 @@ type OperationIdentity struct {
 // LifecycleEvent is the immutable structured record retained in the
 // lifecycle stream. Metadata is a deep copy made by the constructor.
 type LifecycleEvent struct {
-	Schema        string               `json:"schema"`
-	Kind          string               `json:"kind"`
-	ID            string               `json:"id,omitempty"`
-	Cursor        string               `json:"cursor,omitempty"`
-	EventType     string               `json:"event_type"`
-	OccurredAt    time.Time            `json:"occurred_at"`
-	Severity      EventSeverity        `json:"severity"`
-	Component     health.Dimension     `json:"component"`
-	Code          string               `json:"code"`
-	Outcome       EventOutcome         `json:"outcome"`
-	Message       string               `json:"message"`
-	RequestID     string               `json:"request_id"`
-	CorrelationID string               `json:"correlation_id"`
-	Resource      ResourceIdentity     `json:"resource"`
-	Operation     OperationIdentity    `json:"operation"`
-	Actor         *CanonicalActor      `json:"actor,omitempty"`
-	Generations   Generations          `json:"generations,omitempty"`
-	Retry         health.RetryDecision `json:"retry"`
-	NextRetryAt   *time.Time           `json:"next_retry_at,omitempty"`
-	Metadata      map[string]any       `json:"metadata"`
+	Schema        string                          `json:"schema"`
+	Kind          string                          `json:"kind"`
+	ID            string                          `json:"id,omitempty"`
+	Cursor        string                          `json:"cursor,omitempty"`
+	EventType     string                          `json:"event_type"`
+	OccurredAt    time.Time                       `json:"occurred_at"`
+	Severity      sharedtelemetry.EventSeverity   `json:"severity"`
+	Component     health.Dimension                `json:"component"`
+	Code          string                          `json:"code"`
+	Outcome       sharedtelemetry.EventOutcome    `json:"outcome"`
+	Message       string                          `json:"message"`
+	RequestID     string                          `json:"request_id"`
+	CorrelationID string                          `json:"correlation_id"`
+	Resource      ResourceIdentity                `json:"resource"`
+	Operation     OperationIdentity               `json:"operation"`
+	Actor         *sharedtelemetry.CanonicalActor `json:"actor,omitempty"`
+	Generations   sharedtelemetry.Generations     `json:"generations,omitempty"`
+	Retry         health.RetryDecision            `json:"retry"`
+	NextRetryAt   *time.Time                      `json:"next_retry_at,omitempty"`
+	Metadata      map[string]any                  `json:"metadata"`
 }
 
 // LifecycleEventRecord is a descriptive alias used by persistence adapters.
@@ -114,7 +115,7 @@ func NewLifecycleEvent(input LifecycleEventInput) (LifecycleEvent, error) {
 	}
 	event := LifecycleEvent{
 		Schema:        LifecycleSchemaV1,
-		Kind:          KindLifecycleEvent,
+		Kind:          sharedtelemetry.KindLifecycleEvent,
 		ID:            normalized.id,
 		Cursor:        normalized.cursor,
 		EventType:     normalized.eventType,
@@ -144,13 +145,13 @@ func NewLifecycleEvent(input LifecycleEventInput) (LifecycleEvent, error) {
 }
 
 func (e LifecycleEvent) Validate() error {
-	if e.Schema != LifecycleSchemaV1 || e.Kind != KindLifecycleEvent || !validOptionalOpaqueID(e.ID) || !validOptionalOpaqueID(e.Cursor) || !canonicalEventTypePattern.MatchString(e.EventType) || len(e.EventType) > maximumLifecycleEventType || e.OccurredAt.IsZero() || !validEventSeverity(e.Severity) || !health.ValidDimension(e.Component) || !safe.StableCode(e.Code) || len(e.Code) > maximumLifecycleCode || !validEventOutcome(e.Outcome) || !safe.StoredText(e.Message, safe.MaximumMessageBytes) || !validOptionalLogIdentity(e.RequestID, "request_", "req_") || !safe.CorrelationID(e.CorrelationID) || !validEventResourceKind(e.Resource.Kind) || !validOpaqueID(e.Resource.ID) || !validOptionalLogIdentity(e.Operation.ID, "operation_", "op_") || e.Operation.ID == "" || (e.Operation.Kind != "" && !safe.StableCode(e.Operation.Kind)) || !health.ValidRetry(e.Retry, safe.TimeValue(e.NextRetryAt)) {
+	if e.Schema != LifecycleSchemaV1 || e.Kind != sharedtelemetry.KindLifecycleEvent || !validOptionalOpaqueID(e.ID) || !validOptionalOpaqueID(e.Cursor) || !sharedtelemetry.ValidEventType(e.EventType) || len(e.EventType) > maximumLifecycleEventType || e.OccurredAt.IsZero() || !sharedtelemetry.ValidEventSeverity(e.Severity) || !health.ValidDimension(e.Component) || !safe.StableCode(e.Code) || len(e.Code) > maximumLifecycleCode || !sharedtelemetry.ValidEventOutcome(e.Outcome) || !safe.StoredText(e.Message, safe.MaximumMessageBytes) || !sharedtelemetry.ValidOptionalLogIdentity(e.RequestID, "request_", "req_") || !safe.CorrelationID(e.CorrelationID) || !sharedtelemetry.ValidEventResourceKind(e.Resource.Kind) || !sharedtelemetry.ValidOpaqueID(e.Resource.ID) || !sharedtelemetry.ValidOptionalLogIdentity(e.Operation.ID, "operation_", "op_") || e.Operation.ID == "" || (e.Operation.Kind != "" && !safe.StableCode(e.Operation.Kind)) || !health.ValidRetry(e.Retry, safe.TimeValue(e.NextRetryAt)) {
 		return safe.NewError(safe.ErrorInvalidEvent, "validate lifecycle event")
 	}
 	if e.RequestID == "" {
 		return safe.NewError(safe.ErrorIdentityRequired, "validate lifecycle event")
 	}
-	if e.Actor != nil && (!validActorType(e.Actor.Type) || !validOpaqueID(e.Actor.ID)) {
+	if e.Actor != nil && (!sharedtelemetry.ValidActorType(e.Actor.Type) || !sharedtelemetry.ValidOpaqueID(e.Actor.ID)) {
 		return safe.NewError(safe.ErrorInvalidID, "validate lifecycle event")
 	}
 	if !metadataIsSafe(e.Metadata) {
@@ -170,23 +171,23 @@ func (e LifecycleEvent) JSON() ([]byte, error) {
 // It carries the same required identities so an operator can correlate logs,
 // events, and API requests without searching unstructured text.
 type LogRecord struct {
-	Schema        string               `json:"schema"`
-	Kind          string               `json:"kind"`
-	ID            string               `json:"id,omitempty"`
-	Cursor        string               `json:"cursor,omitempty"`
-	OccurredAt    time.Time            `json:"occurred_at"`
-	Level         EventSeverity        `json:"level"`
-	Component     health.Dimension     `json:"component"`
-	Code          string               `json:"code"`
-	Message       string               `json:"message"`
-	RequestID     string               `json:"request_id"`
-	CorrelationID string               `json:"correlation_id"`
-	Resource      ResourceIdentity     `json:"resource"`
-	Operation     OperationIdentity    `json:"operation"`
-	Generations   Generations          `json:"generations,omitempty"`
-	Retry         health.RetryDecision `json:"retry"`
-	NextRetryAt   *time.Time           `json:"next_retry_at,omitempty"`
-	Metadata      map[string]any       `json:"metadata"`
+	Schema        string                        `json:"schema"`
+	Kind          string                        `json:"kind"`
+	ID            string                        `json:"id,omitempty"`
+	Cursor        string                        `json:"cursor,omitempty"`
+	OccurredAt    time.Time                     `json:"occurred_at"`
+	Level         sharedtelemetry.EventSeverity `json:"level"`
+	Component     health.Dimension              `json:"component"`
+	Code          string                        `json:"code"`
+	Message       string                        `json:"message"`
+	RequestID     string                        `json:"request_id"`
+	CorrelationID string                        `json:"correlation_id"`
+	Resource      ResourceIdentity              `json:"resource"`
+	Operation     OperationIdentity             `json:"operation"`
+	Generations   sharedtelemetry.Generations   `json:"generations,omitempty"`
+	Retry         health.RetryDecision          `json:"retry"`
+	NextRetryAt   *time.Time                    `json:"next_retry_at,omitempty"`
+	Metadata      map[string]any                `json:"metadata"`
 }
 
 type LifecycleLogRecord = LogRecord
@@ -198,8 +199,8 @@ type LogRecordInput struct {
 
 	At         time.Time
 	OccurredAt time.Time
-	Level      EventSeverity
-	Severity   EventSeverity
+	Level      sharedtelemetry.EventSeverity
+	Severity   sharedtelemetry.EventSeverity
 	Component  health.Dimension
 	Code       string
 	Message    string
@@ -213,7 +214,7 @@ type LogRecordInput struct {
 	OperationKind string
 	Operation     OperationIdentity
 
-	Generations Generations
+	Generations sharedtelemetry.Generations
 	Retry       health.RetryDecision
 	NextRetryAt time.Time
 	Metadata    map[string]any
@@ -228,7 +229,7 @@ func NewLogRecord(input LogRecordInput) (LogRecord, error) {
 	}
 	record := LogRecord{
 		Schema:        LifecycleSchemaV1,
-		Kind:          KindLifecycleLog,
+		Kind:          sharedtelemetry.KindLifecycleLog,
 		ID:            normalized.id,
 		Cursor:        normalized.cursor,
 		OccurredAt:    normalized.at,
@@ -252,7 +253,7 @@ func NewLogRecord(input LogRecordInput) (LogRecord, error) {
 }
 
 func (r LogRecord) Validate() error {
-	if r.Schema != LifecycleSchemaV1 || r.Kind != KindLifecycleLog || !validOptionalOpaqueID(r.ID) || !validOptionalOpaqueID(r.Cursor) || r.OccurredAt.IsZero() || !validEventSeverity(r.Level) || !health.ValidDimension(r.Component) || !safe.StableCode(r.Code) || !safe.StoredText(r.Message, safe.MaximumMessageBytes) || !validOptionalLogIdentity(r.RequestID, "request_", "req_") || !safe.CorrelationID(r.CorrelationID) || !validEventResourceKind(r.Resource.Kind) || !validOpaqueID(r.Resource.ID) || !validOptionalLogIdentity(r.Operation.ID, "operation_", "op_") || r.Operation.ID == "" || (r.Operation.Kind != "" && !safe.StableCode(r.Operation.Kind)) || !health.ValidRetry(r.Retry, safe.TimeValue(r.NextRetryAt)) {
+	if r.Schema != LifecycleSchemaV1 || r.Kind != sharedtelemetry.KindLifecycleLog || !validOptionalOpaqueID(r.ID) || !validOptionalOpaqueID(r.Cursor) || r.OccurredAt.IsZero() || !sharedtelemetry.ValidEventSeverity(r.Level) || !health.ValidDimension(r.Component) || !safe.StableCode(r.Code) || !safe.StoredText(r.Message, safe.MaximumMessageBytes) || !sharedtelemetry.ValidOptionalLogIdentity(r.RequestID, "request_", "req_") || !safe.CorrelationID(r.CorrelationID) || !sharedtelemetry.ValidEventResourceKind(r.Resource.Kind) || !sharedtelemetry.ValidOpaqueID(r.Resource.ID) || !sharedtelemetry.ValidOptionalLogIdentity(r.Operation.ID, "operation_", "op_") || r.Operation.ID == "" || (r.Operation.Kind != "" && !safe.StableCode(r.Operation.Kind)) || !health.ValidRetry(r.Retry, safe.TimeValue(r.NextRetryAt)) {
 		return safe.NewError(safe.ErrorInvalidEvent, "validate lifecycle log")
 	}
 	if r.RequestID == "" {
@@ -274,15 +275,15 @@ func (r LogRecord) JSON() ([]byte, error) {
 type lifecycleNormalized struct {
 	id, cursor, eventType, requestID, correlationID string
 	at                                              time.Time
-	severity                                        EventSeverity
+	severity                                        sharedtelemetry.EventSeverity
 	component                                       health.Dimension
 	code                                            string
-	outcome                                         EventOutcome
+	outcome                                         sharedtelemetry.EventOutcome
 	message                                         string
 	resource                                        ResourceIdentity
 	operation                                       OperationIdentity
-	actor                                           *CanonicalActor
-	generations                                     Generations
+	actor                                           *sharedtelemetry.CanonicalActor
+	generations                                     sharedtelemetry.Generations
 	retry                                           health.RetryDecision
 	nextRetryAt                                     time.Time
 	metadata                                        map[string]any
@@ -291,12 +292,12 @@ type lifecycleNormalized struct {
 type logNormalized struct {
 	id, cursor, requestID, correlationID string
 	at                                   time.Time
-	level                                EventSeverity
+	level                                sharedtelemetry.EventSeverity
 	component                            health.Dimension
 	code, message                        string
 	resource                             ResourceIdentity
 	operation                            OperationIdentity
-	generations                          Generations
+	generations                          sharedtelemetry.Generations
 	retry                                health.RetryDecision
 	nextRetryAt                          time.Time
 	metadata                             map[string]any
@@ -315,14 +316,14 @@ func normalizeLifecycleInput(input LifecycleEventInput) (lifecycleNormalized, er
 	if severity == "" {
 		severity = input.Level
 	}
-	if !validEventSeverity(severity) || !health.ValidDimension(input.Component) {
+	if !sharedtelemetry.ValidEventSeverity(severity) || !health.ValidDimension(input.Component) {
 		return lifecycleNormalized{}, safe.NewError(safe.ErrorInvalidEvent, "construct lifecycle event")
 	}
 	eventType := input.EventType
 	if eventType == "" {
 		eventType = input.Name
 	}
-	if !canonicalEventTypePattern.MatchString(eventType) || len(eventType) > maximumLifecycleEventType || !safe.StableCode(input.Code) || len(input.Code) > maximumLifecycleCode || !validEventOutcome(input.Outcome) {
+	if !sharedtelemetry.ValidEventType(eventType) || len(eventType) > maximumLifecycleEventType || !safe.StableCode(input.Code) || len(input.Code) > maximumLifecycleCode || !sharedtelemetry.ValidEventOutcome(input.Outcome) {
 		return lifecycleNormalized{}, safe.NewError(safe.ErrorInvalidEvent, "construct lifecycle event")
 	}
 	requestID, correlationID, resource, operation, err := normalizeIdentities(input.RequestID, input.CorrelationID, input.ResourceKind, input.ResourceID, input.Resource, input.OperationID, input.OperationKind, input.Operation)
@@ -344,12 +345,12 @@ func normalizeLifecycleInput(input LifecycleEventInput) (lifecycleNormalized, er
 	if !health.ValidRetry(retry, input.NextRetryAt) {
 		return lifecycleNormalized{}, safe.NewError(safe.ErrorInvalidRetry, "construct lifecycle event")
 	}
-	var actor *CanonicalActor
+	var actor *sharedtelemetry.CanonicalActor
 	if input.ActorType != "" || input.ActorID != "" {
-		if !validActorType(input.ActorType) || !validOpaqueID(input.ActorID) {
+		if !sharedtelemetry.ValidActorType(input.ActorType) || !sharedtelemetry.ValidOpaqueID(input.ActorID) {
 			return lifecycleNormalized{}, safe.NewError(safe.ErrorInvalidID, "construct lifecycle event")
 		}
-		actor = &CanonicalActor{Type: input.ActorType, ID: input.ActorID}
+		actor = &sharedtelemetry.CanonicalActor{Type: input.ActorType, ID: input.ActorID}
 	}
 	return lifecycleNormalized{id: input.ID, cursor: input.Cursor, eventType: eventType, at: at, severity: severity, component: input.Component, code: input.Code, outcome: input.Outcome, message: message, requestID: requestID, correlationID: correlationID, resource: resource, operation: operation, actor: actor, generations: input.Generations, retry: retry, nextRetryAt: safe.NormalizeTime(input.NextRetryAt), metadata: metadata}, nil
 }
@@ -367,7 +368,7 @@ func normalizeLogInput(input LogRecordInput) (logNormalized, error) {
 	if level == "" {
 		level = input.Severity
 	}
-	if !validEventSeverity(level) || !health.ValidDimension(input.Component) || !safe.StableCode(input.Code) {
+	if !sharedtelemetry.ValidEventSeverity(level) || !health.ValidDimension(input.Component) || !safe.StableCode(input.Code) {
 		return logNormalized{}, safe.NewError(safe.ErrorInvalidEvent, "construct lifecycle log")
 	}
 	requestID, correlationID, resource, operation, err := normalizeIdentities(input.RequestID, input.CorrelationID, input.ResourceKind, input.ResourceID, input.Resource, input.OperationID, input.OperationKind, input.Operation)
@@ -378,7 +379,7 @@ func normalizeLogInput(input LogRecordInput) (logNormalized, error) {
 	if err != nil {
 		return logNormalized{}, err
 	}
-	metadata, err := safeMetadata(input.Metadata)
+	metadata, err := sharedtelemetry.SafeMetadata(input.Metadata)
 	if err != nil {
 		return logNormalized{}, err
 	}
@@ -415,7 +416,7 @@ func normalizeIdentities(requestID, correlationID, resourceKind, resourceID stri
 			operationKind = operation.Kind
 		}
 	}
-	if !validOptionalLogIdentity(requestID, "request_", "req_") || requestID == "" || !safe.CorrelationID(correlationID) || !validEventResourceKind(resourceKind) || !validOpaqueID(resourceID) || !validOptionalLogIdentity(operationID, "operation_", "op_") || operationID == "" || (operationKind != "" && !safe.StableCode(operationKind)) {
+	if !sharedtelemetry.ValidOptionalLogIdentity(requestID, "request_", "req_") || requestID == "" || !safe.CorrelationID(correlationID) || !sharedtelemetry.ValidEventResourceKind(resourceKind) || !sharedtelemetry.ValidOpaqueID(resourceID) || !sharedtelemetry.ValidOptionalLogIdentity(operationID, "operation_", "op_") || operationID == "" || (operationKind != "" && !safe.StableCode(operationKind)) {
 		return "", "", ResourceIdentity{}, OperationIdentity{}, safe.NewError(safe.ErrorIdentityRequired, "construct lifecycle telemetry")
 	}
 	return requestID, correlationID, ResourceIdentity{Kind: resourceKind, ID: resourceID}, OperationIdentity{Kind: operationKind, ID: operationID}, nil
@@ -423,11 +424,11 @@ func normalizeIdentities(requestID, correlationID, resourceKind, resourceID stri
 
 func selectMetadata(metadata, safeValues map[string]any) (map[string]any, error) {
 	if metadata != nil && safeValues != nil {
-		left, err := safeMetadata(metadata)
+		left, err := sharedtelemetry.SafeMetadata(metadata)
 		if err != nil {
 			return nil, err
 		}
-		right, err := safeMetadata(safeValues)
+		right, err := sharedtelemetry.SafeMetadata(safeValues)
 		if err != nil {
 			return nil, err
 		}
@@ -439,17 +440,17 @@ func selectMetadata(metadata, safeValues map[string]any) (map[string]any, error)
 		return left, nil
 	}
 	if safeValues != nil {
-		return safeMetadata(safeValues)
+		return sharedtelemetry.SafeMetadata(safeValues)
 	}
-	return safeMetadata(metadata)
+	return sharedtelemetry.SafeMetadata(metadata)
 }
 
 func validOptionalOpaqueID(value string) bool {
-	return value == "" || validOpaqueID(value)
+	return value == "" || sharedtelemetry.ValidOpaqueID(value)
 }
 
 func metadataIsSafe(metadata map[string]any) bool {
-	clean, err := safeMetadata(metadata)
+	clean, err := sharedtelemetry.SafeMetadata(metadata)
 	if err != nil {
 		return false
 	}
@@ -614,7 +615,7 @@ func cloneLifecycleEvent(event LifecycleEvent) LifecycleEvent {
 		actor := *event.Actor
 		event.Actor = &actor
 	}
-	event.Metadata, _ = safeMetadata(event.Metadata)
+	event.Metadata, _ = sharedtelemetry.SafeMetadata(event.Metadata)
 	return event
 }
 
@@ -622,6 +623,6 @@ func cloneLogRecord(record LogRecord) LogRecord {
 	if record.NextRetryAt != nil {
 		record.NextRetryAt = safe.CloneTime(record.NextRetryAt)
 	}
-	record.Metadata, _ = safeMetadata(record.Metadata)
+	record.Metadata, _ = sharedtelemetry.SafeMetadata(record.Metadata)
 	return record
 }

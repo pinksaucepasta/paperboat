@@ -3,6 +3,8 @@ package telemetry
 import (
 	"bufio"
 	"context"
+	sharedmetrics "github.com/pinksaucepasta/paperboat/shared/metrics"
+	sharedtelemetry "github.com/pinksaucepasta/paperboat/shared/telemetry"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -13,7 +15,7 @@ import (
 
 func TestHTTPObserverRecordsFiniteLabelsAndSafeEvent(t *testing.T) {
 	metrics := NewMetrics()
-	events, err := NewEventLog(4)
+	events, err := sharedtelemetry.NewEventLog(4)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,7 +125,7 @@ func (w *interfaceWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	return left, bufio.NewReadWriter(bufio.NewReader(left), bufio.NewWriter(left)), nil
 }
 
-func metricLabelMap(labels []MetricLabel) map[string]string {
+func metricLabelMap(labels []sharedmetrics.Label) map[string]string {
 	result := make(map[string]string, len(labels))
 	for _, label := range labels {
 		result[label.Name] = label.Value

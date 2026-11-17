@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"github.com/pinksaucepasta/paperboat/shared/health"
+	sharedtelemetry "github.com/pinksaucepasta/paperboat/shared/telemetry"
 	"strings"
 	"testing"
 	"time"
@@ -21,7 +22,7 @@ type recordingPreviewLeaseReconciler struct {
 }
 
 func TestCertificateTelemetryProjectsLifecycleOutcome(t *testing.T) {
-	events, err := telemetry.NewEventLog(4)
+	events, err := sharedtelemetry.NewEventLog(4)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -37,7 +38,7 @@ func TestCertificateTelemetryProjectsLifecycleOutcome(t *testing.T) {
 	if state.Status != health.StatusReady || state.Code != "certificate_ready" {
 		t.Fatalf("certificate health = %+v", state)
 	}
-	if recorded := events.Snapshot(); len(recorded) != 1 || recorded[0].IDs.CertificateID != "certificate_3" || recorded[0].Outcome != telemetry.OutcomeSuccess {
+	if recorded := events.Snapshot(); len(recorded) != 1 || recorded[0].IDs.CertificateID != "certificate_3" || recorded[0].Outcome != sharedtelemetry.OutcomeSuccess {
 		t.Fatalf("certificate events = %+v", recorded)
 	}
 }
@@ -139,7 +140,7 @@ func TestPreviewTunnelWorkersSupplyDurableAuditIdentity(t *testing.T) {
 }
 
 func TestPreviewLeaseWorkerEmitsCorrelatedCleanupTelemetry(t *testing.T) {
-	events, err := telemetry.NewEventLog(8)
+	events, err := sharedtelemetry.NewEventLog(8)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -167,7 +168,7 @@ func TestPreviewLeaseWorkerEmitsCorrelatedCleanupTelemetry(t *testing.T) {
 		t.Fatalf("worker error=%v, want cancellation only", err)
 	}
 	recorded := events.Snapshot()
-	if len(recorded) != 1 || recorded[0].Name != "preview_cleanup" || recorded[0].Outcome != telemetry.OutcomeFailed || recorded[0].RequestID != reconciler.requestID || recorded[0].CorrelationID != reconciler.correlationID {
+	if len(recorded) != 1 || recorded[0].Name != "preview_cleanup" || recorded[0].Outcome != sharedtelemetry.OutcomeFailed || recorded[0].RequestID != reconciler.requestID || recorded[0].CorrelationID != reconciler.correlationID {
 		t.Fatalf("events=%+v", recorded)
 	}
 	if state := healthTracker.Snapshot().Dimensions.Route; state.Status != health.StatusDegraded || state.Retry != health.RetryScheduled {

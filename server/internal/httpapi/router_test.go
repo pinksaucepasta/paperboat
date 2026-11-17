@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	sharedmetrics "github.com/pinksaucepasta/paperboat/shared/metrics"
+	sharedtelemetry "github.com/pinksaucepasta/paperboat/shared/telemetry"
 	"io"
 	"log/slog"
 	"net/http"
@@ -81,7 +83,7 @@ func TestTelemetryRouteFamilyIsFinite(t *testing.T) {
 }
 
 func TestRouterTelemetryUsesTrustedRequestCorrelation(t *testing.T) {
-	events, err := telemetry.NewEventLog(4)
+	events, err := sharedtelemetry.NewEventLog(4)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,7 +121,7 @@ func TestRouterTelemetryUsesTrustedRequestCorrelation(t *testing.T) {
 }
 
 func TestRouterTelemetryRecordsTimeoutResponse(t *testing.T) {
-	events, err := telemetry.NewEventLog(8)
+	events, err := sharedtelemetry.NewEventLog(8)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -185,7 +187,7 @@ func TestRouterTelemetryRecordsTimeoutResponse(t *testing.T) {
 		t.Fatalf("timeout response was not recorded as 5xx: %#v", metrics.Snapshot())
 	}
 	recorded := events.Snapshot()
-	if len(recorded) != 1 || recorded[0].Code != "http_request_failed" || recorded[0].Outcome != telemetry.OutcomeFailed {
+	if len(recorded) != 1 || recorded[0].Code != "http_request_failed" || recorded[0].Outcome != sharedtelemetry.OutcomeFailed {
 		t.Fatalf("timeout event=%#v", recorded)
 	}
 }
@@ -220,7 +222,7 @@ func TestRequestIDRejectsUnsafeClientValue(t *testing.T) {
 
 func TestMetricsAreLocalOnly(t *testing.T) {
 	typed := telemetry.NewMetrics()
-	if err := typed.IncCounter(telemetry.MetricHTTPRequests, telemetry.MetricLabels{"method": "get", "route_family": "health", "status_class": "2xx"}); err != nil {
+	if err := typed.IncCounter(telemetry.MetricHTTPRequests, sharedmetrics.Labels{"method": "get", "route_family": "health", "status_class": "2xx"}); err != nil {
 		t.Fatal(err)
 	}
 	router := NewRouter(Options{Config: config.Default(), Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), TelemetryMetrics: typed})

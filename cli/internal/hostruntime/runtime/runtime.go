@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	typedhealth "github.com/pinksaucepasta/paperboat/shared/health"
+	sharedtelemetry "github.com/pinksaucepasta/paperboat/shared/telemetry"
 	"strings"
 	"sync"
 	"time"
@@ -42,7 +43,7 @@ type Config struct {
 	// implicitly so a nil configuration preserves the old behavior.
 	HealthTracker *typedhealth.HealthTracker
 	Metrics       *hosttelemetry.Registry
-	EventLog      *hosttelemetry.EventLog
+	EventLog      *sharedtelemetry.EventLog
 	CorrelationID string
 }
 type State string
@@ -65,7 +66,7 @@ type Runtime struct {
 	health      *health.Registry
 	typedHealth *typedhealth.HealthTracker
 	metrics     *hosttelemetry.Registry
-	eventLog    *hosttelemetry.EventLog
+	eventLog    *sharedtelemetry.EventLog
 	correlation string
 	// typedMu guards typedComponents and typedSequence: stable host component retries report from their own
 	// goroutines.
@@ -197,7 +198,7 @@ func (r *Runtime) Start(ctx context.Context) error {
 		}
 		r.started = append(r.started, component)
 		r.health.Set(component.Capability, health.Ready, "", 0)
-		r.recordLifecycle(ctx, component, lifecycleStart, "ready", typedhealth.StatusReady, typedhealth.RetryNone, time.Time{}, hosttelemetry.OutcomeStateChange, hosttelemetry.SeverityInfo, "Component started.", nil)
+		r.recordLifecycle(ctx, component, lifecycleStart, "ready", typedhealth.StatusReady, typedhealth.RetryNone, time.Time{}, sharedtelemetry.OutcomeStateChange, sharedtelemetry.SeverityInfo, "Component started.", nil)
 	}
 	r.mu.Lock()
 	r.state = Running
@@ -246,7 +247,7 @@ func (r *Runtime) Shutdown(ctx context.Context) error {
 			r.recordLifecycle(ctx, component, lifecycleShutdown, code, typedhealth.StatusDegraded, retry, nextRetry, outcome, severity, "Component shutdown failed.", err)
 		} else {
 			r.health.Set(component.Capability, health.Unavailable, "stopped", 0)
-			r.recordLifecycle(ctx, component, lifecycleShutdown, "stopped", typedhealth.StatusNotApplicable, typedhealth.RetryNone, time.Time{}, hosttelemetry.OutcomeStateChange, hosttelemetry.SeverityInfo, "Component stopped.", nil)
+			r.recordLifecycle(ctx, component, lifecycleShutdown, "stopped", typedhealth.StatusNotApplicable, typedhealth.RetryNone, time.Time{}, sharedtelemetry.OutcomeStateChange, sharedtelemetry.SeverityInfo, "Component stopped.", nil)
 		}
 	}
 	r.started = nil
@@ -295,12 +296,12 @@ func (r *Runtime) rollback(parent context.Context) error {
 			code, outcome, severity := lifecycleFailure(lifecycleRollback, err)
 			retry, nextRetry := lifecycleRetry(r.telemetryNow(), outcome)
 			r.recordLifecycle(ctx, component, lifecycleRollback, code, typedhealth.StatusDegraded, retry, nextRetry, outcome, severity, "Component rollback failed.", err)
-			if outcome == hosttelemetry.OutcomeCanceled {
+			if outcome == sharedtelemetry.OutcomeCanceled {
 				rollbackOutcome = "canceled"
 			}
 		} else {
 			r.health.Set(component.Capability, health.Unavailable, "stopped", 0)
-			r.recordLifecycle(ctx, component, lifecycleRollback, "stopped", typedhealth.StatusNotApplicable, typedhealth.RetryNone, time.Time{}, hosttelemetry.OutcomeStateChange, hosttelemetry.SeverityInfo, "Component rolled back.", nil)
+			r.recordLifecycle(ctx, component, lifecycleRollback, "stopped", typedhealth.StatusNotApplicable, typedhealth.RetryNone, time.Time{}, sharedtelemetry.OutcomeStateChange, sharedtelemetry.SeverityInfo, "Component rolled back.", nil)
 		}
 	}
 	r.started = nil
@@ -343,19 +344,19 @@ func (e reportedLifecycleError) Error() string                      { return "Ru
 func (e reportedLifecycleError) Unwrap() error                      { return e.cause }
 func (e reportedLifecycleError) RuntimeLifecycleFailureOwned() bool { return true }
 
-func lifecycleFailure(operation string, err error) (string, hosttelemetry.EventOutcome, hosttelemetry.EventSeverity) {
+func lifecycleFailure(operation string, err error) (string, sharedtelemetry.EventOutcome, sharedtelemetry.EventSeverity) {
 	prefix := strings.TrimPrefix(operation, "component_")
 	if errors.Is(err, context.Canceled) {
-		return prefix + "_canceled", hosttelemetry.OutcomeCanceled, hosttelemetry.SeverityInfo
+		return prefix + "_canceled", sharedtelemetry.OutcomeCanceled, sharedtelemetry.SeverityInfo
 	}
 	if errors.Is(err, context.DeadlineExceeded) {
-		return prefix + "_deadline", hosttelemetry.OutcomeFailed, hosttelemetry.SeverityError
+		return prefix + "_deadline", sharedtelemetry.OutcomeFailed, sharedtelemetry.SeverityError
 	}
-	return prefix + "_failed", hosttelemetry.OutcomeFailed, hosttelemetry.SeverityError
+	return prefix + "_failed", sharedtelemetry.OutcomeFailed, sharedtelemetry.SeverityError
 }
 
-func lifecycleRetry(now time.Time, outcome hosttelemetry.EventOutcome) (typedhealth.RetryDecision, time.Time) {
-	if outcome == hosttelemetry.OutcomeStateChange || outcome == hosttelemetry.OutcomeSuccess {
+func lifecycleRetry(now time.Time, outcome sharedtelemetry.EventOutcome) (typedhealth.RetryDecision, time.Time) {
+	if outcome == sharedtelemetry.OutcomeStateChange || outcome == sharedtelemetry.OutcomeSuccess {
 		return typedhealth.RetryNone, time.Time{}
 	}
 	if now.IsZero() {
@@ -385,7 +386,7 @@ func (r *Runtime) diagnosticContext(ctx context.Context) context.Context {
 	return ctx
 }
 
-func (r *Runtime) recordLifecycle(ctx context.Context, component Component, operation, code string, status typedhealth.HealthStatus, retry typedhealth.RetryDecision, nextRetry time.Time, outcome hosttelemetry.EventOutcome, severity hosttelemetry.EventSeverity, message string, failure error) {
+func (r *Runtime) recordLifecycle(ctx context.Context, component Component, operation, code string, status typedhealth.HealthStatus, retry typedhealth.RetryDecision, nextRetry time.Time, outcome sharedtelemetry.EventOutcome, severity sharedtelemetry.EventSeverity, message string, failure error) {
 	dimension := componentDimension(component.Capability)
 	correlation := r.correlation
 	if correlation == "" {
@@ -419,16 +420,16 @@ func (r *Runtime) recordLifecycle(ctx context.Context, component Component, oper
 		return
 	}
 	now := r.telemetryNow()
-	_, _ = r.eventLog.Record(hosttelemetry.EventInput{
+	_, _ = r.eventLog.Record(sharedtelemetry.EventInput{
 		At:            now,
 		Severity:      severity,
-		Component:     string(dimension),
+		Component:     dimension,
 		Name:          operation,
 		Code:          code,
 		Outcome:       outcome,
 		Message:       message,
 		CorrelationID: correlation,
-		IDs: hosttelemetry.SafeIDs{
+		IDs: sharedtelemetry.SafeIDs{
 			ResourceID: resourceID(component.Capability),
 			SessionID:  "session_runtime",
 			ProcessID:  "process_runtime",
@@ -602,14 +603,14 @@ func metricComponent(capability string) string {
 	}
 }
 
-func metricResult(outcome hosttelemetry.EventOutcome, code string) string {
+func metricResult(outcome sharedtelemetry.EventOutcome, code string) string {
 	if strings.HasSuffix(code, "_deadline") {
 		return "deadline"
 	}
 	switch outcome {
-	case hosttelemetry.OutcomeCanceled:
+	case sharedtelemetry.OutcomeCanceled:
 		return "canceled"
-	case hosttelemetry.OutcomeFailed, hosttelemetry.OutcomeRejected:
+	case sharedtelemetry.OutcomeFailed, sharedtelemetry.OutcomeRejected:
 		return "unavailable"
 	default:
 		return "ok"

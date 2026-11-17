@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	sharedmetrics "github.com/pinksaucepasta/paperboat/shared/metrics"
+	sharedtelemetry "github.com/pinksaucepasta/paperboat/shared/telemetry"
 	"io"
 	"net"
 	"strings"
@@ -16,10 +18,10 @@ import (
 	edgetelemetry "github.com/pinksaucepasta/paperboat/edge/internal/telemetry"
 )
 
-func newTestCarrierTelemetry(t *testing.T) (*CarrierTelemetry, *edgetelemetry.Metrics, *edgetelemetry.EventLog) {
+func newTestCarrierTelemetry(t *testing.T) (*CarrierTelemetry, *sharedmetrics.Metrics, *sharedtelemetry.EventLog) {
 	t.Helper()
 	metrics := edgetelemetry.NewMetrics()
-	events, err := edgetelemetry.NewEventLogWithQueue(128, 128)
+	events, err := sharedtelemetry.NewEventLogWithQueue(128, 128)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -29,8 +31,8 @@ func newTestCarrierTelemetry(t *testing.T) (*CarrierTelemetry, *edgetelemetry.Me
 		Events:  events,
 		Clock:   func() time.Time { return time.Date(2026, 8, 31, 1, 2, 3, 0, time.UTC) },
 		Info: StreamInfo{
-			IDs:           edgetelemetry.SafeIDs{TunnelID: "tunnel_1", RouteID: "route_1", ConnectorID: "connector_1"},
-			Generations:   edgetelemetry.Generations{Route: 4, Connector: 2},
+			IDs:           sharedtelemetry.SafeIDs{TunnelID: "tunnel_1", RouteID: "route_1", ConnectorID: "connector_1"},
+			Generations:   sharedtelemetry.Generations{Route: 4, Connector: 2},
 			CorrelationID: "corr_carrier_test_1",
 			RouteKind:     "tunnel_https_wss",
 		},
@@ -192,7 +194,7 @@ func TestCarrierTelemetryCancellationAndOpenFailure(t *testing.T) {
 		if event.Name == carrierStreamClosed {
 			closed++
 		}
-		if event.Name == carrierStreamAcceptFailed && event.Outcome == edgetelemetry.OutcomeFailed && event.Severity == edgetelemetry.SeverityError {
+		if event.Name == carrierStreamAcceptFailed && event.Outcome == sharedtelemetry.OutcomeFailed && event.Severity == sharedtelemetry.SeverityError {
 			timedOutOpen++
 		}
 		encoded, _ := json.Marshal(event)
@@ -224,7 +226,7 @@ func TestCarrierTelemetryQueueAndFlowStallLabels(t *testing.T) {
 	}
 }
 
-func carrierMetricValue(samples []edgetelemetry.MetricSample, name string, labels ...string) uint64 {
+func carrierMetricValue(samples []sharedmetrics.Sample, name string, labels ...string) uint64 {
 	for _, sample := range samples {
 		if sample.Name != name || len(sample.Labels) != len(labels) {
 			continue
@@ -339,7 +341,7 @@ func TestCarrierTelemetryCloseFailureOutranksCleanupCancellation(t *testing.T) {
 		for _, event := range events.Snapshot() {
 			if event.Name == carrierStreamClosed {
 				closed++
-				if event.Outcome != edgetelemetry.OutcomeFailed || event.Severity != edgetelemetry.SeverityError {
+				if event.Outcome != sharedtelemetry.OutcomeFailed || event.Severity != sharedtelemetry.SeverityError {
 					t.Fatal("cleanup suppressed local close failure")
 				}
 			}

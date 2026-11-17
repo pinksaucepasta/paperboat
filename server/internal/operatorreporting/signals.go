@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/pinksaucepasta/paperboat/server/internal/supportreport"
+	sharedmetrics "github.com/pinksaucepasta/paperboat/shared/metrics"
 	"math"
 	"net/url"
 	"regexp"
@@ -479,12 +480,12 @@ func metricAllowlist() map[string]metricSpec {
 	}
 	for _, d := range telemetry.MetricDescriptors() {
 		switch d.Kind {
-		case telemetry.MetricCounter:
+		case sharedmetrics.Counter:
 			addGauge(d.Name + "_snapshot")
-		case telemetry.MetricHistogram:
+		case sharedmetrics.Histogram:
 			addGauge(d.Name + "_sum_snapshot")
 			addGauge(d.Name + "_count_snapshot")
-		case telemetry.MetricGauge:
+		case sharedmetrics.Gauge:
 			addGauge(d.Name)
 		}
 	}

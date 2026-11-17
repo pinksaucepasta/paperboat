@@ -8,6 +8,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/pinksaucepasta/paperboat/shared/health"
+	sharedmetrics "github.com/pinksaucepasta/paperboat/shared/metrics"
+	"github.com/pinksaucepasta/paperboat/shared/metrics/schema"
+	sharedtelemetry "github.com/pinksaucepasta/paperboat/shared/telemetry"
 	"net/http"
 	"sort"
 	"strconv"
@@ -78,15 +81,10 @@ func Error(err error) SafeError {
 	return SafeError{Code: "internal_error", Recovery: "retry or inspect private diagnostics"}
 }
 
-type MetricDescriptor struct {
-	Name    string
-	Kind    string
-	Labels  map[string][]string
-	Buckets []float64
-}
-
-func MetricDescriptors() []MetricDescriptor {
-	result := []MetricDescriptor{
+// MetricDescriptors returns every metric the edge exposes: the process gauges
+// and counters below plus the typed telemetry catalog.
+func MetricDescriptors() []schema.Metric {
+	result := []schema.Metric{
 		{Name: "paperboat_edge_telemetry_dropped_total", Kind: "counter"},
 		{Name: "paperboat_tunnel_active_streams", Kind: "gauge"},
 		{Name: "paperboat_tunnel_attached_routes", Kind: "gauge"},
@@ -101,22 +99,7 @@ func MetricDescriptors() []MetricDescriptor {
 		{Name: "paperboat_tunnel_usage_pending_bytes", Kind: "gauge"},
 		{Name: "paperboat_tunnel_usage_pending_reports", Kind: "gauge"},
 	}
-	for _, descriptor := range edgetelemetry.MetricDescriptors() {
-		labels := make(map[string][]string, len(descriptor.Labels))
-		var buckets []float64
-		for _, label := range descriptor.Labels {
-			values := append([]string(nil), label.AllowedValues...)
-			sort.Strings(values)
-			labels[label.Name] = values
-		}
-		if descriptor.Histogram != nil {
-			buckets = append([]float64(nil), descriptor.Histogram.Buckets...)
-		}
-		result = append(result, MetricDescriptor{
-			Name: descriptor.Name, Kind: string(descriptor.Kind), Labels: labels,
-			Buckets: buckets,
-		})
-	}
+	result = append(result, schema.FromDescriptors(edgetelemetry.MetricDescriptors())...)
 	sort.Slice(result, func(i, j int) bool { return result[i].Name < result[j].Name })
 	return result
 }
@@ -154,35 +137,35 @@ type Sources struct {
 	CarrierRunning func() bool
 	Traffic        func() []usage.CounterRecord
 	Health         func() health.HealthSnapshot
-	Lifecycle      func() []edgetelemetry.Event
-	TypedMetrics   func() []edgetelemetry.MetricSample
+	Lifecycle      func() []sharedtelemetry.Event
+	TypedMetrics   func() []sharedmetrics.Sample
 	TelemetryDrops func() uint64
 	Now            func() time.Time
 }
 
 type Snapshot struct {
-	At                    time.Time                    `json:"at"`
-	Node                  node.Snapshot                `json:"node"`
-	Control               Status                       `json:"control"`
-	Routes                Status                       `json:"routes"`
-	Usage                 Status                       `json:"usage"`
-	Carrier               Status                       `json:"carrier"`
-	Connectors            int                          `json:"connectors"`
-	ActiveStreams         uint32                       `json:"active_streams"`
-	AttachedRoutes        int                          `json:"attached_routes"`
-	SessionRoutes         int                          `json:"session_routes"`
-	RouteDrift            bool                         `json:"route_drift"`
-	UsagePendingReports   int                          `json:"usage_pending_reports"`
-	UsagePendingBytes     int                          `json:"usage_pending_bytes"`
-	UsageOldestAgeSeconds int64                        `json:"usage_oldest_age_seconds"`
-	Capacity              uint32                       `json:"connector_capacity"`
-	FailureCodes          []string                     `json:"failure_codes,omitempty"`
-	TrafficIngressBytes   uint64                       `json:"traffic_ingress_bytes"`
-	TrafficEgressBytes    uint64                       `json:"traffic_egress_bytes"`
-	Health                *health.HealthSnapshot       `json:"health,omitempty"`
-	LifecycleEvents       []edgetelemetry.Event        `json:"lifecycle_events,omitempty"`
-	TelemetryDrops        uint64                       `json:"telemetry_drops"`
-	TypedMetrics          []edgetelemetry.MetricSample `json:"-"`
+	At                    time.Time               `json:"at"`
+	Node                  node.Snapshot           `json:"node"`
+	Control               Status                  `json:"control"`
+	Routes                Status                  `json:"routes"`
+	Usage                 Status                  `json:"usage"`
+	Carrier               Status                  `json:"carrier"`
+	Connectors            int                     `json:"connectors"`
+	ActiveStreams         uint32                  `json:"active_streams"`
+	AttachedRoutes        int                     `json:"attached_routes"`
+	SessionRoutes         int                     `json:"session_routes"`
+	RouteDrift            bool                    `json:"route_drift"`
+	UsagePendingReports   int                     `json:"usage_pending_reports"`
+	UsagePendingBytes     int                     `json:"usage_pending_bytes"`
+	UsageOldestAgeSeconds int64                   `json:"usage_oldest_age_seconds"`
+	Capacity              uint32                  `json:"connector_capacity"`
+	FailureCodes          []string                `json:"failure_codes,omitempty"`
+	TrafficIngressBytes   uint64                  `json:"traffic_ingress_bytes"`
+	TrafficEgressBytes    uint64                  `json:"traffic_egress_bytes"`
+	Health                *health.HealthSnapshot  `json:"health,omitempty"`
+	LifecycleEvents       []sharedtelemetry.Event `json:"lifecycle_events,omitempty"`
+	TelemetryDrops        uint64                  `json:"telemetry_drops"`
+	TypedMetrics          []sharedmetrics.Sample  `json:"-"`
 }
 
 func NewHandler(s Sources) (http.Handler, error) {
@@ -308,14 +291,14 @@ func writeMetrics(w http.ResponseWriter, s Snapshot) {
 	for _, sample := range s.TypedMetrics {
 		labels := metricLabels(sample.Labels)
 		switch sample.Kind {
-		case edgetelemetry.MetricCounter, edgetelemetry.MetricGauge:
+		case sharedmetrics.Counter, sharedmetrics.Gauge:
 			lines = append(lines, sample.Name+labels+" "+strconv.FormatUint(sample.Value, 10))
-		case edgetelemetry.MetricHistogram:
+		case sharedmetrics.Histogram:
 			for _, bucket := range sample.Buckets {
-				bucketLabels := append(append([]edgetelemetry.MetricLabel(nil), sample.Labels...), edgetelemetry.MetricLabel{Name: "le", Value: strconv.FormatFloat(bucket.UpperBound, 'g', -1, 64)})
+				bucketLabels := append(append([]sharedmetrics.Label(nil), sample.Labels...), sharedmetrics.Label{Name: "le", Value: strconv.FormatFloat(bucket.UpperBound, 'g', -1, 64)})
 				lines = append(lines, sample.Name+"_bucket"+metricLabels(bucketLabels)+" "+strconv.FormatUint(bucket.Count, 10))
 			}
-			bucketLabels := append(append([]edgetelemetry.MetricLabel(nil), sample.Labels...), edgetelemetry.MetricLabel{Name: "le", Value: "+Inf"})
+			bucketLabels := append(append([]sharedmetrics.Label(nil), sample.Labels...), sharedmetrics.Label{Name: "le", Value: "+Inf"})
 			lines = append(lines, sample.Name+"_bucket"+metricLabels(bucketLabels)+" "+strconv.FormatUint(sample.Count, 10))
 			lines = append(lines, sample.Name+"_sum"+labels+" "+strconv.FormatFloat(sample.Sum, 'g', -1, 64))
 			lines = append(lines, sample.Name+"_count"+labels+" "+strconv.FormatUint(sample.Count, 10))
@@ -325,7 +308,7 @@ func writeMetrics(w http.ResponseWriter, s Snapshot) {
 	_, _ = w.Write([]byte(strings.Join(lines, "\n") + "\n"))
 }
 
-func metricLabels(labels []edgetelemetry.MetricLabel) string {
+func metricLabels(labels []sharedmetrics.Label) string {
 	if len(labels) == 0 {
 		return ""
 	}
