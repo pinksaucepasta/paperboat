@@ -672,6 +672,10 @@ func (p *Policy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				activate, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 				activationErr := p.config.BrowserAccess.activateLazy(activate, candidateHost, token, machine)
 				cancel()
+				if errors.Is(activationErr, control.ErrBrowserDenied) {
+					p.config.BrowserAccess.navigationNotFound(w, r, candidateHost)
+					return
+				}
 				if activationErr != nil {
 					lazyActivationError(w, r, activationErr)
 					return
@@ -697,6 +701,11 @@ func (p *Policy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			if p.config.RouteUnavailable != nil && p.config.RouteUnavailable(candidateHost) {
 				w.Header().Set("X-Paperboat-Error", "upstream_unavailable")
 				writeErrorPage(w, http.StatusBadGateway, upstreamUnavailableMessage)
+				return
+			}
+			// A signed-in visitor gets the very page a denied private app gets (navigationNotFound).
+			if hasSession && !machine && !browserReservedDuplicates(r) {
+				p.config.BrowserAccess.navigationNotFound(w, r, candidateHost)
 				return
 			}
 			writeErrorPage(w, http.StatusNotFound, "")

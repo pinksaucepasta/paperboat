@@ -203,7 +203,7 @@ func TestBrowserAuthorizationOutlivesTTLUntilRevokedAndDeniesNewAdmissions(t *te
 	w = httptest.NewRecorder()
 	_, finish, ok = b.authorize(w, r, m)
 	finish()
-	if ok || w.Code != 403 {
+	if ok || w.Code != 404 {
 		t.Fatal("denial forwarded")
 	}
 	a.failure = errors.New("control lost")
@@ -271,7 +271,7 @@ func TestBrowserCookieRequestsFromSiblingHostsAreRefused(t *testing.T) {
 	}
 }
 
-func TestBrowserCallbackDeniedAnswers403WithSwitchAccountLink(t *testing.T) {
+func TestBrowserCallbackDeniedAnswers404WithSwitchAccountLink(t *testing.T) {
 	a := &browserAuthorityTest{}
 	b := BrowserAccess{Authority: a, LoginOrigin: "https://login.example.test"}
 	r := httptest.NewRequest("POST", "https://app.example.test"+browserCallbackPath, strings.NewReader("transaction_id=bat_test&handoff=bah_denied"))
@@ -281,7 +281,7 @@ func TestBrowserCallbackDeniedAnswers403WithSwitchAccountLink(t *testing.T) {
 	w := httptest.NewRecorder()
 	b.callback(w, r)
 	body := w.Body.String()
-	if w.Code != 403 || !strings.Contains(body, deniedMessage) || !strings.Contains(body, "Use a different account") ||
+	if w.Code != 404 || !strings.Contains(body, notFoundMessage) || !strings.Contains(body, "Use a different account") ||
 		!strings.Contains(body, "https://login.example.test/.paperboat/access/login?switch=1&amp;transaction_id=bat_test") {
 		t.Fatalf("status=%d body=%s", w.Code, body)
 	}

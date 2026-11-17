@@ -72,11 +72,6 @@ body{background:#121212;color:#f5f5f5}
 </main></body></html>
 `))
 
-// deniedMessage is the 403 sentence for a signed-in account without access. Prior art: cloudflared answers a failed
-// Access JWT check with 403 on the app address (~/ref/cloudflared/ingress/middleware/jwtvalidator.go); Teleport app
-// access expects 403 for a denied user (~/ref/teleport/lib/web/app/handler_test.go).
-const deniedMessage = "This account does not have access to this app."
-
 const (
 	signInMessage     = "Sign in to Paperboat in your browser, then open this address again."
 	retryMessage      = "Wait a moment and try again. If it keeps failing, send the reference below to Paperboat support."

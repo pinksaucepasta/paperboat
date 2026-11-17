@@ -161,7 +161,7 @@ func (b *BrowserAccess) callback(w http.ResponseWriter, r *http.Request) {
 	session, err := b.Authority.Redeem(ctx, transaction, nonce, r.PostForm.Get("handoff"), host)
 	clearBrowserHandoff(w)
 	if errors.Is(err, control.ErrBrowserDenied) {
-		b.deniedPage(ctx, w, host)
+		b.notFoundPage(ctx, w, host)
 		return
 	}
 	if err != nil {
@@ -176,16 +176,32 @@ func (b *BrowserAccess) callback(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, session.ReturnPath, http.StatusSeeOther)
 }
 
-// deniedPage is the 403 for a signed-in account without access. "Use a different account" starts a fresh sign-in
-// with switch=1 for the console to offer an account change; without a new transaction the page has no link.
-func (b *BrowserAccess) deniedPage(ctx context.Context, w http.ResponseWriter, host string) {
+// notFoundPage is the one answer for a signed-in visitor who cannot open a name: it does not exist, or it is a private
+// app this account may not open. The two must be indistinguishable (anyone can sign up, so a different answer would let
+// them enumerate private names). Prior art: GitHub answers 404 for a private repository the viewer cannot see, and
+// cloudflared Access answers a denied user with one generic page (~/ref/cloudflared/ingress/middleware/jwtvalidator.go).
+// "Use a different account" starts a fresh sign-in with switch=1 for the console to offer an account change; without a
+// new transaction the page has no link.
+func (b *BrowserAccess) notFoundPage(ctx context.Context, w http.ResponseWriter, host string) {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
 	tx, err := b.Authority.Begin(ctx, host, "/")
 	if err != nil || tx.TransactionID == "" || tx.State == "" || strings.Contains(tx.TransactionID, ".") || !tx.ExpiresAt.After(time.Now()) {
-		writeErrorPage(w, http.StatusForbidden, deniedMessage)
+		writeErrorPage(w, http.StatusNotFound, "")
 		return
 	}
 	http.SetCookie(w, &http.Cookie{Name: browserHandoffCookie, Value: tx.TransactionID + "." + tx.State, Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteNoneMode, Expires: tx.ExpiresAt})
-	writeErrorPageLink(w, http.StatusForbidden, deniedMessage, "Use a different account", b.LoginOrigin+"/.paperboat/access/login?switch=1&transaction_id="+url.QueryEscape(tx.TransactionID))
+	writeErrorPageLink(w, http.StatusNotFound, "", "Use a different account", b.LoginOrigin+"/.paperboat/access/login?switch=1&transaction_id="+url.QueryEscape(tx.TransactionID))
+}
+
+// navigationNotFound answers a browser page load with notFoundPage and anything else (fetch, xhr, websocket) with the
+// plain 404, so a script gets no Set-Cookie it cannot use.
+func (b *BrowserAccess) navigationNotFound(w http.ResponseWriter, r *http.Request, host string) {
+	if b.validate() && browserNavigation(r) {
+		b.notFoundPage(r.Context(), w, host)
+		return
+	}
+	writeErrorPage(w, http.StatusNotFound, "")
 }
 func safeBrowserReturn(path string) bool {
 	if len(path) == 0 || len(path) > 2048 || !strings.HasPrefix(path, "/") || strings.HasPrefix(path, "//") || strings.ContainsAny(path, "\\\r\n\x00") {
@@ -202,7 +218,7 @@ func browserError(w http.ResponseWriter, r *http.Request, err error) {
 	case errors.Is(err, control.ErrBrowserUnauthenticated):
 		writeErrorPage(w, 401, signInMessage)
 	case errors.Is(err, control.ErrBrowserDenied):
-		writeErrorPage(w, http.StatusForbidden, deniedMessage)
+		writeErrorPage(w, http.StatusNotFound, "")
 	default:
 		writeErrorPage(w, 503, "Paperboat could not check your access just now. Wait a moment and reload the page.")
 	}
@@ -212,8 +228,6 @@ func lazyActivationError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, control.ErrBrowserUnauthenticated):
 		writeErrorPage(w, http.StatusUnauthorized, signInMessage)
-	case errors.Is(err, control.ErrBrowserDenied):
-		writeErrorPage(w, http.StatusForbidden, deniedMessage)
 	case errors.Is(err, control.ErrLazyGenerationConflict):
 		writeErrorPage(w, http.StatusConflict, "This preview was just updated. Reload the page.")
 	case errors.Is(err, control.ErrLazyCapacity):
@@ -351,6 +365,10 @@ func (b *BrowserAccess) authorize(w http.ResponseWriter, r *http.Request, m rout
 	lookup, stop := context.WithTimeout(r.Context(), 2*time.Second)
 	d, err := b.Authority.Authorize(lookup, input)
 	stop()
+	if errors.Is(err, control.ErrBrowserDenied) {
+		b.navigationNotFound(w, r, m.Host)
+		return r, func() {}, false
+	}
 	if err != nil {
 		browserError(w, r, err)
 		return r, func() {}, false

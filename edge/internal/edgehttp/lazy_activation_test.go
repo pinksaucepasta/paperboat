@@ -2,9 +2,12 @@ package edgehttp
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -170,5 +173,58 @@ func TestLazyActivationErrorResponses(t *testing.T) {
 				t.Fatalf("status=%d retry=%q", w.Code, w.Header().Get("Retry-After"))
 			}
 		})
+	}
+}
+
+var (
+	refMask  = regexp.MustCompile(`support_[0-9a-f-]{36}`)
+	timeMask = regexp.MustCompile(`\d{4}-\d\d-\d\d \d\d:\d\d:\d\d UTC`)
+)
+
+// Anyone can sign up, so a signed-in visitor must not tell a name that does not exist from a private app they may not
+// open: same status, headers and body (reference and time aside), whether the name is a lazy preview or any other host.
+func TestSignedInUnknownHostLooksLikeDeniedPrivateApp(t *testing.T) {
+	const denied = "secret.custom.example.test"
+	const lazy = "p3000-abcdefghijklmnop.preview.example.test"
+	rule, decision := lazyRuleAndDecision(denied)
+	registry := route.NewGenerationRegistry(4)
+	if err := registry.ApplyGeneration(context.Background(), 1, []route.RouteRule{rule}, func(context.Context, []route.RouteRule) error { return nil }, time.Second); err != nil {
+		t.Fatal(err)
+	}
+	authority := &lazyAuthorityFixture{activate: func(context.Context, control.BrowserAuthorizeRequest) (connectorprotocol.IngressDecision, error) {
+		return connectorprotocol.IngressDecision{}, control.ErrBrowserDenied
+	}}
+	authority.decision, authority.failure = decision, control.ErrBrowserDenied
+	p := newLazyPolicy(t, registry, authority, http.HandlerFunc(func(http.ResponseWriter, *http.Request) { t.Fatal("reached the app") }))
+	get := func(host string, signedIn bool) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(http.MethodGet, "https://"+host+"/", nil)
+		r.Host = host
+		r.Header.Set("Sec-Fetch-Mode", "navigate")
+		r.Header.Set("Sec-Fetch-Dest", "document")
+		r.Header.Set("Sec-Fetch-Site", "none")
+		if signedIn {
+			r.AddCookie(&http.Cookie{Name: browserEdgeCookie, Value: "browser-token"})
+		}
+		w := httptest.NewRecorder()
+		p.ServeHTTP(w, r)
+		return w
+	}
+	shape := func(w *httptest.ResponseRecorder) string {
+		h := w.Header().Clone()
+		h.Del(referenceHeader)
+		return fmt.Sprint(w.Code, h, timeMask.ReplaceAllString(refMask.ReplaceAllString(w.Body.String(), "REF"), "TIME"))
+	}
+	want := shape(get(denied, true))
+	if w := get(denied, true); w.Code != 404 || !strings.Contains(w.Body.String(), "Use a different account") || !strings.Contains(w.Body.String(), notFoundMessage) {
+		t.Fatalf("denied private app: status=%d body=%s", w.Code, w.Body.String())
+	}
+	for _, host := range []string{lazy, "nothing.custom.example.test"} {
+		if got := shape(get(host, true)); got != want {
+			t.Fatalf("%s differs from a denied private app:\n%s\n%s", host, got, want)
+		}
+	}
+	// Anonymous visitors are sent to sign in for every name alike; a name that does not exist is a plain 404 for them.
+	if a, b := get(denied, false), get("nothing.custom.example.test", false); a.Code != b.Code || a.Header().Get("Location") != b.Header().Get("Location") {
+		t.Fatalf("anonymous answers differ: %d %q vs %d %q", a.Code, a.Header().Get("Location"), b.Code, b.Header().Get("Location"))
 	}
 }

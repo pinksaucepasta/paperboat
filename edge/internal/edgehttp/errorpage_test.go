@@ -204,7 +204,7 @@ func TestErrorPageReferenceIsPerRequest(t *testing.T) {
 
 func TestErrorPageLinkIsTheAction(t *testing.T) {
 	w := httptest.NewRecorder()
-	writeErrorPageLink(w, 403, deniedMessage, "Use a different account", "https://login.example.test/x?a=1&b=2")
+	writeErrorPageLink(w, 404, "", "Use a different account", "https://login.example.test/x?a=1&b=2")
 	body := w.Body.String()
 	if !strings.Contains(body, `href="https://login.example.test/x?a=1&amp;b=2">Use a different account</a>`) {
 		t.Fatalf("link action missing: %q", body)
