@@ -345,6 +345,11 @@ func configureProxyDiagnostics(proxy *httputil.ReverseProxy, observe func(contex
 		if err == http.ErrAbortHandler {
 			return
 		}
+		// The edge's own body-idle read deadline also makes the server cancel the context plainly; that client waits.
+		if clientLeft(request) && !errors.Is(err, errRequestBodyIdle) {
+			slog.Info("client_closed_request", "status", 499)
+			return
+		}
 		if observe != nil {
 			observe(request.Context(), err)
 		}
@@ -426,6 +431,18 @@ func (f originFailure) page() (int, string) {
 
 // errOriginRedirectLoop: the origin sent the visitor back to the URL it asked for (IsSelfRedirect).
 var errOriginRedirectLoop = errors.New("origin redirects to the URL it was asked for")
+
+// errHelperAccessRevoked is the cause of a helper stream's context the edge ended (its credential was revoked).
+var errHelperAccessRevoked = errors.New("helper access revoked")
+
+// clientLeft reports whether the request failed because its client went away: the server canceled its context
+// with no edge cause (a route, lease or credential the edge ended carries one). Nobody receives an answer then, so
+// it is no edge 5xx: nginx logs it as 499 (NGX_HTTP_CLIENT_CLOSED_REQUEST) and Caddy's reverse proxy maps
+// context.Canceled to 499 instead of 502.
+func clientLeft(request *http.Request) bool {
+	ctx := request.Context()
+	return ctx.Err() != nil && context.Cause(ctx) == context.Canceled
+}
 
 const originRedirectLoopMessage = "This app redirects to HTTPS, but Paperboat already serves it over HTTPS, so the browser would loop forever. " +
 	"Its owner can point the route at the app's HTTPS port (for example https://localhost:443) or turn off the app's own HTTP-to-HTTPS redirect."
@@ -888,7 +905,8 @@ func (p *Policy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			writeErrorPage(w, http.StatusForbidden, "")
 			return
 		}
-		ctx, cancel := context.WithCancel(r.Context())
+		ctx, cancelCause := context.WithCancelCause(r.Context())
+		cancel := func() { cancelCause(errHelperAccessRevoked) }
 		defer cancel()
 		slog.InfoContext(ctx, "runtime_helper_access", "path", r.URL.Path, "credential_class", claims.CredentialClass, "assignment_present", claims.AssignmentID != "")
 		// The edge accounts no helper stream: what a CLI or host carries (exec, ssh, terminal,

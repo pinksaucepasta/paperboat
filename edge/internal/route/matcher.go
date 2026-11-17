@@ -33,6 +33,9 @@ var (
 	ErrGenerationClosed   = errors.New("route generation registry is closed")
 	ErrDrainTimeout       = errors.New("route generation drain timed out")
 	ErrStreamOverloaded   = errors.New("route generation stream capacity exhausted")
+	// ErrStreamLeaseEnded is the cause of a request context the edge ended (its route generation, carrier or
+	// lease went away), so a failure it causes is told apart from a client that left (context.Canceled).
+	ErrStreamLeaseEnded = errors.New("route stream lease ended")
 )
 
 type GenerationRegistryOptions struct {
@@ -120,7 +123,7 @@ type RouteIdentity struct {
 // releases the active-stream count automatically.
 type StreamLease struct {
 	ctx      context.Context
-	cancel   context.CancelFunc
+	cancel   context.CancelCauseFunc
 	registry *GenerationRegistry
 	state    *generationState
 	match    RouteMatch
@@ -140,7 +143,7 @@ func (l *StreamLease) Close() error {
 	}
 	l.once.Do(func() {
 		if l.cancel != nil {
-			l.cancel()
+			l.cancel(ErrStreamLeaseEnded)
 		}
 		if l.registry != nil && l.state != nil {
 			l.registry.release(l.state, l)
@@ -676,7 +679,7 @@ func (g *GenerationRegistry) Acquire(ctx context.Context, host, requestPath stri
 		g.emitLifecycle(LifecycleStreamOverloaded, generation, 0, rulesForTelemetryRule(rules, rule), activeStreams)
 		return nil, RouteMatch{}, ErrStreamOverloaded
 	}
-	streamCtx, cancel := context.WithCancel(ctx)
+	streamCtx, cancel := context.WithCancelCause(ctx)
 	lease := &StreamLease{ctx: streamCtx, cancel: cancel, registry: g, state: active, match: RouteMatch{Rule: rule, Host: host, Path: requestPath, Generation: active.generation}, done: make(chan struct{})}
 	active.streams++
 	active.leases[lease] = struct{}{}
@@ -1005,7 +1008,7 @@ func newNoopStreamLease(ctx context.Context, match RouteMatch) *StreamLease {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	streamCtx, cancel := context.WithCancel(ctx)
+	streamCtx, cancel := context.WithCancelCause(ctx)
 	return &StreamLease{ctx: streamCtx, cancel: cancel, match: match, done: make(chan struct{})}
 }
 

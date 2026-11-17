@@ -114,19 +114,19 @@ func (m *PreviewCarrierRouteMatcher) Acquire(ctx context.Context, host, requestP
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	streamContext, cancel := context.WithCancel(ctx)
+	streamContext, cancel := context.WithCancelCause(ctx)
 	match := previewRouteMatch(preview)
 	match.Path = requestPath
 	lease := route.NewStreamLease(streamContext, match)
 	go func() {
 		select {
 		case <-preview.Server.Done():
-			cancel()
+			cancel(route.ErrStreamLeaseEnded)
 		case <-entryDone:
-			cancel()
+			cancel(route.ErrStreamLeaseEnded)
 		case <-streamContext.Done():
 		case <-lease.Done():
-			cancel()
+			cancel(route.ErrStreamLeaseEnded)
 		}
 	}()
 	return lease, match, nil
