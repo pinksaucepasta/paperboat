@@ -2,7 +2,7 @@ Copyright (c) 2026 Paperboat contributors
 
 Portions of this software are licensed as follows:
 
-* Everything under the "server/" and "console/" directories is licensed under the
+* Everything under the "server/", "console/" and "admin/" directories is licensed under the
   GNU Affero General Public License version 3.0 (AGPLv3), as defined in the LICENSE file in
   each of those directories. For a commercial licence to those parts, contact
   hello@paperboat.cloud.
