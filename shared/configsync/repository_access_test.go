@@ -25,3 +25,11 @@ func TestRuntimeDescriptorWire(t *testing.T) {
 		t.Fatal("assignment mode validity")
 	}
 }
+
+func TestAssignmentWire(t *testing.T) {
+	raw, err := json.Marshal(Assignment{ID: "a", MachineID: "m", EnvironmentID: "e", ConsentState: "accepted", Mode: "pull_only", ConfigurationRevision: "r", Version: 2, PathRules: []PathRule{{ID: "p"}}, Source: "user"})
+	want := `{"id":"a","machine_id":"m","environment_id":"e","automatic_updates":false,"consent_state":"accepted","mode":"pull_only","configuration_revision":"r","version":2,"path_rules":[{"id":"p","source":"","repository_path":"","local_path":"","kind":"","include":null,"exclude":null}],"repository_bindings":null,"source":"user"}`
+	if err != nil || string(raw) != want {
+		t.Fatalf("assignment = %s, %v", raw, err)
+	}
+}

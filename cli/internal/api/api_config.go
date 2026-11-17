@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	wireconfig "github.com/pinksaucepasta/paperboat/shared/configsync"
 	"net/http"
 	"net/url"
 	"time"
@@ -34,37 +35,11 @@ type ConfigRepository struct {
 	DisplayName string `json:"display_name"`
 }
 
-type ConfigPathRule struct {
-	Source         string   `json:"source"`
-	ID             string   `json:"id"`
-	RepositoryPath string   `json:"repository_path"`
-	LocalPath      string   `json:"local_path"`
-	Kind           string   `json:"kind"`
-	Include        []string `json:"include,omitempty"`
-	Exclude        []string `json:"exclude,omitempty"`
-}
+type ConfigPathRule = wireconfig.PathRule
 
-type ConfigRepositoryBinding struct {
-	RepositoryID string `json:"repository_id"`
-	URL          string `json:"url"`
-}
+type ConfigRepositoryBinding = wireconfig.RepositoryBinding
 
-type ConfigAssignment struct {
-	ConfigurationRevision string                    `json:"configuration_revision"`
-	PathRules             []ConfigPathRule          `json:"path_rules"`
-	RepositoryBindings    []ConfigRepositoryBinding `json:"repository_bindings"`
-	ID                    string                    `json:"id"`
-	MachineID             string                    `json:"machine_id"`
-	EnvironmentID         string                    `json:"environment_id"`
-	PullRepositoryID      *string                   `json:"pull_repository_id"`
-	PushRepositoryID      *string                   `json:"push_repository_id"`
-	AutomaticUpdates      bool                      `json:"automatic_updates"`
-	ConsentState          string                    `json:"consent_state"`
-	Mode                  string                    `json:"mode"`
-	WarningRevision       *string                   `json:"warning_revision"`
-	Version               int64                     `json:"version"`
-	Source                string                    `json:"source"`
-}
+type ConfigAssignment = wireconfig.Assignment
 
 // ConfigMachineRule is the workspace policy config_sync rule that picks a machine's repository
 // when its owner made no explicit choice (GET /v1/machines/{id}/config-rule).

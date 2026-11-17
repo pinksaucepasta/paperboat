@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"errors"
+	"github.com/pinksaucepasta/paperboat/shared/configsync"
 	"net/http"
 	"strconv"
 	"strings"
@@ -21,22 +22,7 @@ type configRepositoryResponse struct {
 	TeamDefault  bool `json:"team_default"`
 }
 
-type configAssignmentResponse struct {
-	ID                    string                                 `json:"id"`
-	MachineID             string                                 `json:"machine_id"`
-	EnvironmentID         string                                 `json:"environment_id"`
-	PullRepositoryID      *string                                `json:"pull_repository_id,omitempty"`
-	PushRepositoryID      *string                                `json:"push_repository_id,omitempty"`
-	AutomaticUpdates      bool                                   `json:"automatic_updates"`
-	ConsentState          string                                 `json:"consent_state"`
-	Mode                  string                                 `json:"mode"`
-	WarningRevision       *string                                `json:"warning_revision,omitempty"`
-	ConfigurationRevision string                                 `json:"configuration_revision"`
-	Version               int64                                  `json:"version"`
-	PathRules             []controlplane.ConfigPathRule          `json:"path_rules"`
-	RepositoryBindings    []controlplane.ConfigRepositoryBinding `json:"repository_bindings"`
-	Source                string                                 `json:"source"`
-}
+type configAssignmentResponse = configsync.Assignment
 
 func repositoryResponse(item dbsqlc.ControlConfigRepository) configRepositoryResponse {
 	return configRepositoryResponse{ID: item.ID, Provider: item.Provider, ExternalRef: item.ExternalRef, DisplayName: item.DisplayName, State: item.State}

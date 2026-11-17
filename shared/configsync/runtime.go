@@ -79,3 +79,22 @@ type RuntimeDescriptor struct {
 	WarningRevision        string        `json:"warning_revision"`
 	Policy                 RuntimePolicy `json:"policy"`
 }
+
+// Assignment is a config assignment as the control plane serves it to the account (user session). Pull is omitted
+// for a push-only assignment, and an unset warning revision is omitted.
+type Assignment struct {
+	ID                    string              `json:"id"`
+	MachineID             string              `json:"machine_id"`
+	EnvironmentID         string              `json:"environment_id"`
+	PullRepositoryID      *string             `json:"pull_repository_id,omitempty"`
+	PushRepositoryID      *string             `json:"push_repository_id,omitempty"`
+	AutomaticUpdates      bool                `json:"automatic_updates"`
+	ConsentState          string              `json:"consent_state"`
+	Mode                  string              `json:"mode"`
+	WarningRevision       *string             `json:"warning_revision,omitempty"`
+	ConfigurationRevision string              `json:"configuration_revision"`
+	Version               int64               `json:"version"`
+	PathRules             []PathRule          `json:"path_rules"`
+	RepositoryBindings    []RepositoryBinding `json:"repository_bindings"`
+	Source                string              `json:"source"`
+}
