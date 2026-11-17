@@ -168,7 +168,7 @@ func TestBackgroundPreviewResumesWithTheSameLeaseAfterAHostRuntimeRestart(t *tes
 	}
 }
 
-// pbvm4 feat5: pb update restarted the host runtime and both foreground
+// a test VM feat5: pb update restarted the host runtime and both foreground
 // units (pb preview, pb tunnel) died 30 s later: nothing in the new runtime
 // renewed their leases, so the server marked them owner_lost. A foreground
 // preview now keeps its lease across the restart and resumes as soon as its

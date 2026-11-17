@@ -7,7 +7,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// macpool 2026-11-13: pb uninstall left ~/Library/Logs/Paperboat (the per-user daemon's log) behind.
+// a Mac test VM 2026-11-13: pb uninstall left ~/Library/Logs/Paperboat (the per-user daemon's log) behind.
 func TestUninstallRemovesTheDaemonLogFolder(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

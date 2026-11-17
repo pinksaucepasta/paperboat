@@ -87,7 +87,7 @@ func TestWaitDaemonReadyReportsLastStateOnCancellation(t *testing.T) {
 	}
 }
 
-// pbvm2, 2026-11-09: a restart onto a degraded daemon printed "The operation timed out"; it now names the daemon's own
+// a test VM, 2026-11-09: a restart onto a degraded daemon printed "The operation timed out"; it now names the daemon's own
 // health item, and the deadline is not part of the error.
 func TestWaitDaemonReadyReportsTheDegradedDaemonHealth(t *testing.T) {
 	snapshot := readinessSnapshot(1, "degraded")

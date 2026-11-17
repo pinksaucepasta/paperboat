@@ -158,7 +158,7 @@ func TestLoadingViewFitsNarrowTerminal(t *testing.T) {
 func TestModelFiltersMetadataAndWraps(t *testing.T) {
 	m := NewModel([]Item{
 		{ID: "env_1", Title: "api", Description: "machine · online · darwin/amd64"},
-		{ID: "env_2", Title: "dadape", Description: "machine · online · linux/arm64"},
+		{ID: "env_2", Title: "laptop", Description: "machine · online · linux/arm64"},
 	}, 1)
 	m.Type('a')
 	m.Type('r')

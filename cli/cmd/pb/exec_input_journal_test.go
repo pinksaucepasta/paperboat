@@ -72,7 +72,7 @@ func (c *cutConn) Signal(string) error             { return nil }
 func (c *cutConn) CloseWrite() error               { c.eof = true; return nil }
 func (c *cutConn) Detach() error                   { return nil }
 
-// pbvm4 update check: exec_stdin output did not equal its input. The old forwarder dropped the chunk a cut
+// a test VM update check: exec_stdin output did not equal its input. The old forwarder dropped the chunk a cut
 // connection failed on, and bytes the transport had accepted but never delivered; the journal resends both.
 func TestExecStdinSurvivesAConnectionCutMidStream(t *testing.T) {
 	host := &hostStdin{}

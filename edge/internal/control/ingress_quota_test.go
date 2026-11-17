@@ -204,7 +204,7 @@ func TestIngressAuthorityAppliesOwnerIPRules(t *testing.T) {
 	}
 }
 
-// 2026-11-11 anvit: one decision the edge cannot accept (a file-origin preview on an older edge) made it
+// 2026-11-11 the test host: one decision the edge cannot accept (a file-origin preview on an older edge) made it
 // reject the whole snapshot, so every name created afterwards 404ed. Now only that decision is dropped,
 // the others serve, and the edge does not hold the server's version while it drops one, so the next
 // refresh is a full fetch instead of an "unchanged" answer whose expiries would pair with the wrong set.

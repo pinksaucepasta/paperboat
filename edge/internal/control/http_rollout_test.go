@@ -21,7 +21,7 @@ import (
 )
 
 // A server rollout reloads Caddy, which closes its kept-alive client connections; a request the
-// edge had already written onto one gets no answer (production 2026-11-05 10:22:31.515 on anvit:
+// edge had already written onto one gets no answer (production 2026-11-05 10:22:31.515 on the test host:
 // POST /v1/edge/certificates/distributions/pull, end_of_stream, gate failure). The test server
 // answers the first request, then cuts the next `cuts` ones without an answer: the first on the
 // kept-alive connection, later ones on fresh connections. Every idempotent request survives up to

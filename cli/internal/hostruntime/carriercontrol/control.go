@@ -296,7 +296,7 @@ func (s *Server) Run(ctx context.Context) (resultErr error) {
 	}
 	// The write deadline covers the whole handler: it must outlast the longest
 	// operation (terminal move) or the client only sees EOF and the
-	// update rolls back (pbvm4 feat2). Each operation bounds itself.
+	// update rolls back (a test VM feat2). Each operation bounds itself.
 	server := &http.Server{Handler: s.handler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 5 * time.Second, WriteTimeout: controlWriteTimeout, IdleTimeout: 15 * time.Second, MaxHeaderBytes: 4096, BaseContext: func(net.Listener) context.Context { return ctx }}
 	stop := context.AfterFunc(ctx, func() { _ = server.Close() })
 	defer stop()

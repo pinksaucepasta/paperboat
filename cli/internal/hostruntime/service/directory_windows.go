@@ -23,7 +23,7 @@ const windowsDirectoryWriteRights = windows.FILE_WRITE_DATA | windows.FILE_APPEN
 	windows.DELETE | windows.WRITE_DAC | windows.WRITE_OWNER | windows.GENERIC_ALL | windows.GENERIC_WRITE
 
 // prepareAtomicDirectory makes directory SYSTEM-owned with the canonical SYSTEM/Administrators DACL, like the
-// declarations in it: pin cleanup requires SYSTEM custody (winpool-4). Users may create folders under ProgramData,
+// declarations in it: pin cleanup requires SYSTEM custody (a Windows test VM). Users may create folders under ProgramData,
 // so an existing directory is adopted only if SYSTEM or Administrators owns it with exactly that DACL, inside a
 // parent no other account can write; everything is checked through handles that do not follow reparse points.
 func prepareAtomicDirectory(directory string) error {

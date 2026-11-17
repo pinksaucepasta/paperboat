@@ -16,7 +16,7 @@ const (
 var errDeadWriterRecovered = errors.New("state a dead writer left was recovered; the updater restarts to read the restored installation")
 
 // superviseDeadWriters runs the updater and, beside it, recovers what a killed installer, activation helper or
-// update left (pbvm1 F14-03: the killed client left its journals and the new machine guard, and nothing recovered
+// update left (a test VM F14-03: the killed client left its journals and the new machine guard, and nothing recovered
 // them because recovery ran only when the updater started). check reports whether it changed state; the updater
 // then stops with errDeadWriterRecovered, so its supervisor starts it on the restored installation and the start
 // path heals the guard. A failing check is reported and retried with backoff; the updater keeps serving.

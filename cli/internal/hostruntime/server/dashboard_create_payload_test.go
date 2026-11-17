@@ -7,9 +7,9 @@ import (
 )
 
 func TestDashboardTerminalCreationPayloadIsAccepted(t *testing.T) {
-	root := "/home/anvit"
+	root := "/home/user"
 	if runtime.GOOS == "windows" {
-		root = `C:\Users\anvit` // an absolute path there has a drive
+		root = `C:\Users\user` // an absolute path there has a drive
 	}
 	payload, err := json.Marshal(map[string]any{"action": "create", "session_id": "umts_example", "name": "probe-a", "cwd": root, "columns": 80, "rows": 24, "existing_snapshot": true})
 	if err != nil {

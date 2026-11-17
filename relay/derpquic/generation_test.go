@@ -177,7 +177,7 @@ func TestCachedMultipartGrantAdmitsGenerationWithoutNarrowingServingAuthority(t 
 	}
 }
 
-// pbvm4 run3b/run8: a staged carrier refreshes its own copy of the machine's
+// a test VM run3b/run8: a staged carrier refreshes its own copy of the machine's
 // grant. Same generation and authority, newer issue time, so a different
 // signature. The relay must admit it beside the serving generation; a
 // same-generation grant with different authority stays refused.

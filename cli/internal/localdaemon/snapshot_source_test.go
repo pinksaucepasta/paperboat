@@ -181,7 +181,7 @@ func TestFailingStepsReachTheSnapshotUntilTheyRecover(t *testing.T) {
 	}
 }
 
-// pbmac 2026-11-05: pb status said Path none for a machine every connection to which failed, and pb doctor said
+// a test Mac 2026-11-05: pb status said Path none for a machine every connection to which failed, and pb doctor said
 // healthy. A machine whose last dial failed is a no_path error health item; an idle machine is not.
 func TestFailedDialMakesANoPathHealthItem(t *testing.T) {
 	now := time.Date(2026, 11, 5, 9, 20, 0, 0, time.UTC)

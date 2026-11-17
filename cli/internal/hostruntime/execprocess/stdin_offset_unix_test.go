@@ -10,7 +10,7 @@ import (
 )
 
 // A client that lost a connection resends its stdin journal from an earlier offset; the execution must receive each
-// byte once, in order, and never a gap (the pbvm4 update check's exec_stdin mismatch).
+// byte once, in order, and never a gap (the a test VM update check's exec_stdin mismatch).
 func TestResentStdinIsReceivedOnceAndNeverOutOfOrder(t *testing.T) {
 	root := t.TempDir()
 	manager := testManager(t, root, nil)

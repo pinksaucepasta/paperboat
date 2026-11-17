@@ -47,13 +47,13 @@ func (w *leaseWorker) client(t *testing.T) *LocalOwnerSessionClient {
 	return c
 }
 
-// pbvm4: pb update replaced the worker holding a foreground `pb tunnel` /
+// a test VM: pb update replaced the worker holding a foreground `pb tunnel` /
 // `pb preview` owner-session lease; the CLI's next heartbeat was refused and
 // the tunnel exited. It must reattach the same owner session to the new worker
 // (new endpoint and control token) and keep serving.
 func TestForegroundOwnerLeaseReattachesAcrossWorkerRestart(t *testing.T) {
 	t.Run("new endpoint and token", func(t *testing.T) { testForegroundReattach(t, false) })
-	// pbvm4 run20c: the restarted worker kept its endpoint and control token.
+	// a test VM run20c: the restarted worker kept its endpoint and control token.
 	t.Run("same endpoint and token", func(t *testing.T) { testForegroundReattach(t, true) })
 }
 

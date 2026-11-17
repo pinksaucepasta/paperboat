@@ -19,7 +19,7 @@ import (
 
 // pruneSessionOwnerPinsAt removes every pin of paths that neither the active source, a catalogue descriptor nor a
 // carrier names. The caller holds the native installation lock: an install holds it for its whole run and stages
-// its candidate's pin before publishing the descriptor that names it (pbvm4 run20), so no window is needed.
+// its candidate's pin before publishing the descriptor that names it (a test VM run20), so no window is needed.
 func pruneSessionOwnerPinsAt(ctx context.Context, catalog sessionowner.Catalog, paths installPaths, uid int, runtimeRoot, active string) error {
 	var descriptors []sessionowner.Descriptor
 	if _, err := os.Lstat(catalog.Root); !installNotExistOnly(err) {

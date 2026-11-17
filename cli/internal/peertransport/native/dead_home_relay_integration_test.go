@@ -18,7 +18,7 @@ import (
 	"tailscale.com/wgengine/magicsock"
 )
 
-// pbmac 2026-11-05 (dev-751282416): a daemon whose peer had signed direct endpoints that did not answer looped
+// a test Mac 2026-11-05 (dev-751282416): a daemon whose peer had signed direct endpoints that did not answer looped
 // disco pings for 7 minutes and never used the relay. Two relays are granted; the first one is unreachable from
 // this machine. The dial must reach the peer through the live relay within a few seconds.
 func TestNativeDialFallsBackToTheLiveRelayWhenDirectAndFirstRelayAreDead(t *testing.T) {

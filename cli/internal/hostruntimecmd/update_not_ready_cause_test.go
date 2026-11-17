@@ -11,7 +11,7 @@ import (
 )
 
 // The caller of the privileged install says the failing step "is printed above": a not-ready rollback must
-// print the validation cause (pbmac: dev-13e7cb882 install rolled back three times with no step shown).
+// print the validation cause (a test Mac: dev-13e7cb882 install rolled back three times with no step shown).
 func TestUpdateNotReadyPrintsTheFailingStep(t *testing.T) {
 	cause := errors.New(`Paperboat local daemon did not become ready; last state was "awaiting_enrollment"`)
 	var output bytes.Buffer

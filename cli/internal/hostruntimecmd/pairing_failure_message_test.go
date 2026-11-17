@@ -72,7 +72,7 @@ func TestRuntimeFailureMessageNamesLockedCredentialStore(t *testing.T) {
 	}
 }
 
-// pbvm4: `pb update` said "its reason is printed above" while the privileged
+// a test VM: `pb update` said "its reason is printed above" while the privileged
 // step printed only the generic line. An unclassified failure of that step
 // must print its cause; classified ones keep their own message.
 func TestPrivilegedInstallStepPrintsUnclassifiedCause(t *testing.T) {

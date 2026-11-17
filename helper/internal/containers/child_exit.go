@@ -105,7 +105,7 @@ const (
 
 // writeLogTail writes the last handoverLogLines lines of a container's output (timestamped,
 // stdout and stderr merged) to w before the container is removed. A failed handover, an exit or a
-// deadline, must never leave no evidence (oracle, 2026-11-05: three deadline failures and the
+// deadline, must never leave no evidence (the test host, 2026-11-05: three deadline failures and the
 // replacement's output was gone). Best effort: a failed log read writes nothing.
 func writeLogTail(w io.Writer, name string) {
 	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)

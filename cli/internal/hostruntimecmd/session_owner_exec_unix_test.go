@@ -22,7 +22,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/sessionowner"
 )
 
-// pbvm4 feat3/feat4: pb update refused ("hostd owner maintenance is busy") or
+// a test VM feat3/feat4: pb update refused ("hostd owner maintenance is busy") or
 // would have cut a running exec, because commands ran inside hostd, which the
 // update replaces. Commands now run in session owners: a command started
 // through one hostd keeps running and streaming when that hostd goes away and

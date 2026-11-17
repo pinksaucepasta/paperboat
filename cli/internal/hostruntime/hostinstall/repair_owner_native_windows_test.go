@@ -125,7 +125,7 @@ func TestNativeRepairWindowsTreeAcceptsAReceivedFile(t *testing.T) {
 
 // A shared credential lock directory is checked against its exact creation DACL (no inheritance flags). The repair
 // gave it the tree's inheritable DACL, so the lock could no longer be released or cleared and the carrier stayed
-// down after pb doctor --repair on winpool-5 (2026-11-13).
+// down after pb doctor --repair on a Windows test VM (2026-11-13).
 func TestNativeRepairWindowsTreeLeavesSharedLockDirectoriesAlone(t *testing.T) {
 	tokenUser, err := windows.GetCurrentProcessToken().GetTokenUser()
 	if err != nil {

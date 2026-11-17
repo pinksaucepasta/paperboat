@@ -268,7 +268,7 @@ func TestInstallInventoryRollbackLeavesNoNewVersionItems(t *testing.T) {
 	h.assertExactlyActive(keep, newer, 4001, 4004)
 }
 
-// pbvm1: every update that failed at service apply left its candidate's session owner running, with its
+// a test VM: every update that failed at service apply left its candidate's session owner running, with its
 // catalogue descriptor, so the catalogue "retained" it. A descriptor written after the active slot was
 // activated belongs to a failed candidate, not to history: it goes, while older retained owners stay.
 func TestInstallInventoryRemovesAFailedUpdatesCandidateSessionOwner(t *testing.T) {

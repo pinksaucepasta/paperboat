@@ -222,7 +222,7 @@ func TestAdmissionRefreshSkipsTheBudgetButHonoursA429(t *testing.T) {
 }
 
 // A 429 on a stream's admission renewal waits only the server's Retry-After and retries, instead of refusing the
-// stream and holding every admission for the 12 s refill (pbvm4 feat9: 20:35:55.3 refusal, then 11.8 s sends).
+// stream and holding every admission for the 12 s refill (a test VM feat9: 20:35:55.3 refusal, then 11.8 s sends).
 // Cadence renewals still keep the refill floor.
 func TestAdmissionRefreshRetriesAfterTheServersRetryAfter(t *testing.T) {
 	b := &tokenBucket{refill: time.Hour, burst: 1}

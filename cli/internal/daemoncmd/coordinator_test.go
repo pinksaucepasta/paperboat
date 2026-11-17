@@ -1036,7 +1036,7 @@ func TestCoordinatorUsesTheGuardAssignedAddressAndSendsTheCompleteSet(t *testing
 	if got.String() != "127.100.0.77" {
 		t.Fatalf("published %v, want the guard-assigned 127.100.0.77", got)
 	}
-	// pbvm1, 2026-11-05: pb resolve printed the server's preferred address (.3) while the port listened on the
+	// a test VM, 2026-11-05: pb resolve printed the server's preferred address (.3) while the port listened on the
 	// guard's (.18). The RPC status pb resolve reads names the bound address.
 	status, err := c.rpcBackend.GetStatus(t.Context())
 	if err != nil {

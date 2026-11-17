@@ -18,7 +18,7 @@ func generationRequest(digit string) Request {
 		Source: installsource.Source{Version: "dev-" + digit, Platform: runtime.GOOS, Architecture: runtime.GOARCH, SHA256: strings.Repeat(digit, 64), Length: 1, Distribution: installsource.Custom}}
 }
 
-// pbvm4 2026-11-04: the update restarted the one carrier unit in place, so new
+// a test VM 2026-11-04: the update restarted the one carrier unit in place, so new
 // SSH was refused ~40 s. Two generations must now be able to serve side by side:
 // nothing they bind or lock may be shared.
 func TestCarrierGenerationsShareNoUnitLockOrControlSocket(t *testing.T) {

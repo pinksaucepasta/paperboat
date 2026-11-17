@@ -83,7 +83,7 @@ func TestInventoryNamesTheFailingLocalAccessStep(t *testing.T) {
 	}
 }
 
-// pbvm2, 2026-11-09: a server 401 or a signed-out credential during the reconcile said "repair the installation".
+// a test VM, 2026-11-09: a server 401 or a signed-out credential during the reconcile said "repair the installation".
 // It is the signed-out state; a 403 and local failures stay local access failures.
 func TestInventoryReconcileSignedOutIsNotALocalAccessFailure(t *testing.T) {
 	for name, c := range map[string]struct {

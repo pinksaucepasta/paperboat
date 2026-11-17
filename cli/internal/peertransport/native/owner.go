@@ -256,7 +256,7 @@ func (e *PathNotReadyError) Error() string {
 func (e *PathNotReadyError) Unwrap() error { return e.cause }
 
 // pathReadyBudget bounds how long a dial waits for a relay when the peer has no direct endpoints: a relay handshake takes
-// well under a second, a cold one from a slow host a few (dadape relay1d); past it nothing is coming.
+// well under a second, a cold one from a slow host a few (the test host relay1d); past it nothing is coming.
 const pathReadyBudget = 5 * time.Second
 
 func (o *Owner) dialFailure(ctx context.Context, peerID, stage, code string, err error) error {

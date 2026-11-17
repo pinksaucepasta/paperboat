@@ -44,7 +44,7 @@ func apiTokenLogin(c *command.Context, token string) error {
 	}
 	cfg.ServerURL = issuer
 	// A headless machine (SSH or CI, no unlocked Keychain) keeps the session in owner-only files, as a
-	// browser sign-in and a recipe pairing do (pbmac2 over SSH: Keychain exit 36).
+	// browser sign-in and a recipe pairing do (a test Mac over SSH: Keychain exit 36).
 	store, err := loginProfileStore(cfg, issuer)
 	if err != nil {
 		return err

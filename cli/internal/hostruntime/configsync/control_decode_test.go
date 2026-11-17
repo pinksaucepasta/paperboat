@@ -11,11 +11,11 @@ func TestControlResponseIgnoresUnknownFieldsButNotTrailingData(t *testing.T) {
 	var envelope struct {
 		Data RuntimeDescriptor `json:"data"`
 	}
-	body := `{"data":{"machine_id":"m1","machine_alias":"pbvm1","added_later":{"x":1}}}`
+	body := `{"data":{"machine_id":"m1","machine_alias":"devbox","added_later":{"x":1}}}`
 	if err := decodeBoundedJSON(strings.NewReader(body), &envelope); err != nil {
 		t.Fatalf("unknown field refused: %v", err)
 	}
-	if envelope.Data.MachineID != "m1" || envelope.Data.MachineAlias != "pbvm1" {
+	if envelope.Data.MachineID != "m1" || envelope.Data.MachineAlias != "devbox" {
 		t.Fatalf("decoded %+v", envelope.Data)
 	}
 	if err := decodeBoundedJSON(strings.NewReader(body+`{}`), &envelope); !errors.Is(err, ErrControlClientInvalid) {

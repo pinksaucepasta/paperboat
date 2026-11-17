@@ -241,7 +241,7 @@ func TestJWKSRefreshCooldownCollapsesUnknownKeyMisses(t *testing.T) {
 	}
 }
 
-// pbvm4 run8: a restarted carrier began with an empty key cache, because the persisted document was dropped after the
+// a test VM run8: a restarted carrier began with an empty key cache, because the persisted document was dropped after the
 // 5 minute default although the server had said it stays current for an hour (a running process trusts it that long),
 // so the first stream's credential check waited for a network fetch (stream_authorize 2.2 s).
 func TestJWKSPersistedDocumentKeepsTheServersLifetimeAcrossRestart(t *testing.T) {

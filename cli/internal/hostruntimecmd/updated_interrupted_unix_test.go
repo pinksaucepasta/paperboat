@@ -12,7 +12,7 @@ import (
 
 func noReport(error) {}
 
-// pbvm1 F14-03: an install killed while the updater kept running left its journals and the candidate's guard,
+// a test VM F14-03: an install killed while the updater kept running left its journals and the candidate's guard,
 // and the updater never recovered them (it did only when it started). The running updater looks for them.
 func TestARunningUpdaterStopsToRestartOnceADeadWritersStateWasRecovered(t *testing.T) {
 	checks := 0

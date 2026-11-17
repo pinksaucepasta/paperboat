@@ -33,7 +33,7 @@ func TestWaitGuardReadyOutlastsALateStartAndNamesATimeout(t *testing.T) {
 	}
 }
 
-// A guard whose first start gets no CPU never answers; a restart does (winpool-6 under one spinner per core).
+// A guard whose first start gets no CPU never answers; a restart does (a Windows test VM under one spinner per core).
 func TestStartGuardWithRetryRestartsAStarvedStart(t *testing.T) {
 	previous, previousAttempts := guardAttemptTimeout, guardStartAttempts
 	t.Cleanup(func() { guardAttemptTimeout, guardStartAttempts = previous, previousAttempts })

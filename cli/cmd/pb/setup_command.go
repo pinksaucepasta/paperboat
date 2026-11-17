@@ -340,7 +340,7 @@ func setupCommand() *cobra.Command {
 				registration.SSHUser, registration.SSHPort = previousRegistration.SSHUser, previousRegistration.SSHPort
 				if runtime.GOOS == "windows" {
 					// SetupMachine's answer carries no SSH target and neither does GetUserMachine's for a personal
-					// machine (winpool-2 debug run: ssh nil, setup 409 with HOST\\user and the default port); the
+					// machine (a Windows test VM debug run: ssh nil, setup 409 with HOST\\user and the default port); the
 					// inventory list does, but it is personal-only: a team-enrolled machine is read by id.
 					registered, lookupErr := resolveRegisteredSSHTarget(machine.ID, machine.InstallationGeneration,
 						func() ([]api.UserMachine, error) {

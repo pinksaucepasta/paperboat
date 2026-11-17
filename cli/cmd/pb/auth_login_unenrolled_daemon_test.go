@@ -9,7 +9,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/config"
 )
 
-// pbmac 2026-11-05: the CLI session was valid but the daemon said awaiting_enrollment, and pb login answered
+// a test Mac 2026-11-05: the CLI session was valid but the daemon said awaiting_enrollment, and pb login answered
 // "Already signed in" (and --reauth could not fix it). It must ask for an approval again (that is how a removed
 // computer is added back), never "Already signed in".
 func TestLoginOnASignedInComputerWhoseDaemonIsNotEnrolledAsksForApprovalAgain(t *testing.T) {

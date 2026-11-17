@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// pbvm4 prefix1 07:48:07.888: `pb exec -- true` exited before the client's stdin EOF arrived; os/exec's
+// a test VM prefix1 07:48:07.888: `pb exec -- true` exited before the client's stdin EOF arrived; os/exec's
 // Wait had already closed the stdin pipe, the second Close failed and the owner ended the exec stream,
 // so the CLI reattached and the call took 1.3 s more.
 func TestPipeProcessCloseInputAfterExitSucceeds(t *testing.T) {

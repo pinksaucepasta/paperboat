@@ -189,7 +189,7 @@ func TestPowerReplacementCompletesBeforeTerminalAdmissionPauses(t *testing.T) {
 	}
 }
 
-// pbmac 2026-11-05 (F2-06): macOS never installed the root host service, so availability was never applied.
+// a test Mac 2026-11-05 (F2-06): macOS never installed the root host service, so availability was never applied.
 // Both platforms declare it as a boot-domain system service on the immutable candidate pin.
 func TestPowerServiceUsesTheImmutableCandidatePin(t *testing.T) {
 	for platform, definition := range map[string]string{
@@ -258,7 +258,7 @@ func (r *unitRecorder) Run(_ context.Context, name string, args ...string) error
 }
 func (r *unitRecorder) Output(context.Context, string, ...string) (string, error) { return "", nil }
 
-// pbvm4 2026-11-04: restarting the one hostd unit paused every exec, preview and
+// a test VM 2026-11-04: restarting the one hostd unit paused every exec, preview and
 // tunnel for 5 s. An update now addresses only the candidate generation's unit;
 // the serving generation keeps running and hands its listeners over.
 func TestUpdateCutoverNeverStopsTheServingHostdGeneration(t *testing.T) {

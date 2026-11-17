@@ -79,7 +79,7 @@ func TestInventoryRefreshesWhenAsked(t *testing.T) {
 	}
 }
 
-// Round 7 regression (dadape, 2026-10-23): the owner started managed SSH on the refresh's 15 s context,
+// Round 7 regression (the test host, 2026-10-23): the owner started managed SSH on the refresh's 15 s context,
 // and the agent serves on the context it is started with, so it stopped as soon as that refresh ended:
 // no agent socket, `pb ssh` denied. Managed SSH starts on the daemon's lifetime, whether the server
 // answers quickly or the refresh's own context ends first (slow server), and stays up afterwards.

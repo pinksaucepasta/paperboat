@@ -246,7 +246,7 @@ func TestArchivedHistoryAdmitsNewTerminalWithoutNativeStartup(t *testing.T) {
 		t.Fatal(e)
 	}
 	// A just-published generation is an update's staged candidate: the
-	// active updater must not retire it (pbvm4 run1 lost its carrier).
+	// active updater must not retire it (a test VM run1 lost its carrier).
 	if e = coordinator.Reconcile(ctx); e != nil {
 		t.Fatal(e)
 	}

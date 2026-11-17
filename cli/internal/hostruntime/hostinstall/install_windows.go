@@ -900,7 +900,7 @@ func newWindowsActivation(request Request, layout service.Layout, instanceRoot, 
 			}
 			// The new carrier takes the network next and serves through this generation's worker: it must already
 			// serve (design: the new hostd serves, then the network switches). Moving the network while the
-			// handed-over worker port was still unbound left the new carrier unreachable (winpool-14 r5).
+			// handed-over worker port was still unbound left the new carrier unreachable (a Windows test VM r5).
 			return runWindowsInstallPhase(ctx, "wait for the new hostd generation to serve", func() error {
 				return ops.awaitHostd(ctx, config.HostdSocket, config.TokenFile, config.OwnerSID)
 			})
@@ -3411,7 +3411,7 @@ func validateWindowsRuntimeSecurity(path string, owner *windows.SID, dacl, stage
 	defer func() {
 		resultErr = withCleanup("validating Windows runtime security failed", resultErr, windows.CloseHandle(handle))
 	}()
-	// The stage names the object whose owner or DACL is wrong (pin cleanup refused silently on winpool-4).
+	// The stage names the object whose owner or DACL is wrong (pin cleanup refused silently on a Windows test VM).
 	return hostInstallFailure("Windows runtime owner or DACL check failed at "+stage, checkWindowsRuntimeHandleSecurity(handle, owner, dacl))
 }
 func checkWindowsRuntimeHandleSecurity(handle windows.Handle, owner *windows.SID, dacl string) error {
@@ -3683,7 +3683,7 @@ func stageWindowsBinary(ctx context.Context, source, current, rollback string, i
 }
 
 // prepareStagedWindowsBinary writes and verifies source next to current, without touching the slot, so an activation
-// can do it while the runtime still serves (t4 on winpool-4: 1.36 s inside the outage). publish then rotates the
+// can do it while the runtime still serves (t4 on a Windows test VM: 1.36 s inside the outage). publish then rotates the
 // slot: current to rollback, the staged file to current. discard removes a staged file that was not published.
 func prepareStagedWindowsBinary(ctx context.Context, source, current, rollback string, installSource installsource.Source, ownerSID string, expectedTarget *releaseindex.Target) (publish func(context.Context) error, discard func() error, resultErr error) {
 	none := func() error { return nil }

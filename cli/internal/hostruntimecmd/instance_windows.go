@@ -37,7 +37,7 @@ var recordServiceEntryFailure = recordWindowsServiceLaunchFailure
 
 // resolveWindowsServiceInstance is resolveWindowsRuntimeInstance for a service's entry point. Under the service
 // manager nobody reads stderr: a service that cannot read its own installation exited and left only "did not respond
-// to the start request" (winpool 2026-11-10). The cause goes to that service's log, which the account's uninstall
+// to the start request" (a Windows test VM 2026-11-10). The cause goes to that service's log, which the account's uninstall
 // removes; a name that is not an instance has no installation and no log.
 func resolveWindowsServiceInstance(service string, args []string) (windowsRuntimeInstance, error) {
 	instance, err := resolveWindowsRuntimeInstance(args)

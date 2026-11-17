@@ -354,7 +354,7 @@ func (b *cappedOutput) Write(p []byte) (int, error) {
 // readinessBaseline is the process epoch a container must differ from to count as ready. A fresh
 // start must show a new epoch. An adopted container, and a replacement that took over by handover,
 // serve under the epoch they already have (the handover inherits it on purpose), so any epoch is
-// fine (oracle, 2026-11-05: a handed-over tunnel was killed 45 s later for "not becoming ready").
+// fine (the test host, 2026-11-05: a handed-over tunnel was killed 45 s later for "not becoming ready").
 func readinessBaseline(servingEpoch string, adopted, handedOver bool) string {
 	if adopted || handedOver {
 		return ""

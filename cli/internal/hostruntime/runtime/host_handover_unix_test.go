@@ -28,7 +28,7 @@ func (a drainingAttachment) Shutdown(ctx context.Context) error {
 }
 
 // A retiring generation stops accepting on the runtime listener it shares with the next one before any
-// slow drain: pbvm4 prefix1 (2026-11-05) the old daemon accepted exec streams for 2.7 s after the new one
+// slow drain: a test VM prefix1 (2026-11-05) the old daemon accepted exec streams for 2.7 s after the new one
 // was ready, while its runtime attachment drained, and cut them when it closed its listener last.
 func TestRetiringHostStopsAcceptingBeforeItsAttachmentDrains(t *testing.T) {
 	root := t.TempDir()

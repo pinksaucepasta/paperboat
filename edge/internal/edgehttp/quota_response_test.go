@@ -31,7 +31,7 @@ func (c cancelingTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	return nil, errors.Join(ErrDataCarrierPreviewTransport, errors.New("stream reset"), r.Context().Err())
 }
 
-// Edge .32 roll on oracle, 2026-11-17 00:03:55Z: the server's terminal snapshot gave up on its /v1/runtime request
+// Edge .32 roll on the test host, 2026-11-17 00:03:55Z: the server's terminal snapshot gave up on its /v1/runtime request
 // while the old edge was handing over; the edge answered the departed client a 502 and logged edge_http_5xx, which
 // the deploy gate counts as a user-visible failure. A client that left gets nothing and is no 5xx; a request the
 // edge itself ended (its route lease, carrier or helper credential went away) still is one.

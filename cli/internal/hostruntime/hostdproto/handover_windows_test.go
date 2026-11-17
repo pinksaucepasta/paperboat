@@ -19,7 +19,7 @@ import (
 // The Windows handover (W21 Part B step 3): a new generation that dies before its commit leaves the old one serving
 // without ever stopping; one that fails after the old one stopped accepting makes the old one serve again; one that
 // acknowledges ends the old one's handover. Each generation has its own pipes, so nothing is bound again by name
-// (a pipe with a connected instance cannot be: winpool-4 2026-11-11).
+// (a pipe with a connected instance cannot be: a Windows test VM 2026-11-11).
 func TestWindowsHandoverStopsOnlyAtCommitAndResumesWithoutAnAck(t *testing.T) {
 	suffix := make([]byte, 8)
 	_, _ = rand.Read(suffix)

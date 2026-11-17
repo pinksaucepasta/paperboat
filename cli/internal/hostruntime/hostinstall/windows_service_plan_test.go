@@ -432,7 +432,7 @@ func TestWindowsServiceCleanupRetainsFirstFailureWithoutRepeatingMutation(t *tes
 	}
 }
 
-// winpool-3: a machine where OpenSSH is only reachable through the PowerShell Gallery spent the whole 3 min of the
+// a Windows test VM: a machine where OpenSSH is only reachable through the PowerShell Gallery spent the whole 3 min of the
 // bridge in that step and the pair rolled back. The step has its own budget; its expiry is announced and skips managed
 // SSH, but a trust failure never is, whether it comes before or after the budget.
 func TestWindowsSSHPreparationOutOfTimeIsAnnouncedAndTrustFailuresStillAbort(t *testing.T) {

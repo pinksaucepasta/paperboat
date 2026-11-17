@@ -14,7 +14,7 @@ import (
 
 // The role lock is this account's file with a protected DACL (the carrier runs as the enrolled owner's workload; a
 // non-administrator could not create an Administrators-owned file). A lock file an older build left with an
-// inherited DACL is replaced, not refused forever (winpool-13: the new carrier spun silently until its deadline and
+// inherited DACL is replaced, not refused forever (a Windows test VM: the new carrier spun silently until its deadline and
 // the rollback's carrier could not start). A lock another carrier holds is busy, and only busy is waited for.
 func TestWindowsCarrierRoleLockCustody(t *testing.T) {
 	dir := t.TempDir()

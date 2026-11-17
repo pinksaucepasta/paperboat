@@ -133,13 +133,13 @@ func TestSSHHeaderCarriesAPortableLoginUserAndOnlyForSSH(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	header.LoginUser = "pbmac2"
+	header.LoginUser = "macuser"
 	encoded, err := header.MarshalBinary()
 	if err != nil {
 		t.Fatal(err)
 	}
 	parsed, err := Parse(encoded, time.Time{})
-	if err != nil || parsed.LoginUser != "pbmac2" {
+	if err != nil || parsed.LoginUser != "macuser" {
 		t.Fatalf("round trip: %+v %v", parsed, err)
 	}
 	for _, user := range []string{"-oProxyCommand=x", ".hidden", "a b", "a/b", "a\nb", strings.Repeat("a", 65)} {
@@ -148,7 +148,7 @@ func TestSSHHeaderCarriesAPortableLoginUserAndOnlyForSSH(t *testing.T) {
 			t.Errorf("login user %q was accepted", user)
 		}
 	}
-	header.LoginUser, header.Consumer = "pbmac2", "terminal"
+	header.LoginUser, header.Consumer = "macuser", "terminal"
 	if _, err := header.MarshalBinary(); err == nil {
 		t.Error("a terminal stream carried a login user")
 	}

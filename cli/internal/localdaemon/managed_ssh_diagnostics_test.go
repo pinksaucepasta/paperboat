@@ -65,7 +65,7 @@ func TestManagedSSHHealthCodeBoundsCyclicCause(t *testing.T) {
 }
 
 // A .ssh folder Windows OpenSSH would not trust is its own health item pointing at the doctor, not "SSH target is
-// not ready" on every peer (winpool-4 2026-11-11: the Windows client refused SSH to a healthy Linux machine).
+// not ready" on every peer (a Windows test VM 2026-11-11: the Windows client refused SSH to a healthy Linux machine).
 func TestManagedSSHUnsafeDirectoryIsNamed(t *testing.T) {
 	startup := fmt.Errorf("install config: %w", &managedssh.UnsafeSSHPathError{Path: `C:\Users\me\.ssh`, Problem: "Everyone can change it"})
 	if code := managedSSHHealthCode(startup); code != "ssh_directory_unsafe" {

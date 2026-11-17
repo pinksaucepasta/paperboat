@@ -184,7 +184,7 @@ func TestLoadOrCreateConstrainedCARejectsWrongOrUnconstrainedRoot(t *testing.T) 
 	}
 }
 
-// reg-a/reg-b (anvit, load 24-46 on 4 cores), 2026-11-12: after a guard reset the daemon re-issues every machine's
+// reg-a/reg-b (the test host, load 24-46 on 4 cores), 2026-11-12: after a guard reset the daemon re-issues every machine's
 // browser leaf inside one 15 s reconcile; each RSA-2048 keygen took seconds there, the guard call hit its 5 s
 // deadline and local access never came back. Leaves use P-256, whose keygen is microseconds.
 func TestIssuedLeafUsesAP256Key(t *testing.T) {

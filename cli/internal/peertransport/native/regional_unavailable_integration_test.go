@@ -16,7 +16,7 @@ import (
 
 // F9-02/F9-05 device finding: the provisional rendezvous used only the first
 // granted relay, so one relay answering "relay authorization rejected" failed
-// every native dial (pbvm2 self-access) while another granted relay was healthy.
+// every native dial (a test VM self-access) while another granted relay was healthy.
 func TestNativeDialTriesTheNextRegionalRelayWhenTheFirstRefusesAuthorization(t *testing.T) {
 	if testing.Short() {
 		t.Skip("real DERP/QUIC integration")

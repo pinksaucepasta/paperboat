@@ -17,7 +17,7 @@ import (
 
 // A carrier that restarts keeps its keys and its UDP port, so nothing tells a peer that the WireGuard session it holds
 // is gone: the peer's next flow went out on dead keys and wireguard-go only re-handshakes 15 s later. QUIC gave up at
-// its 1 s handshake idle timeout and a retry got through (pbvm2 q1-a -> q1-b, 9 of 10 execs right after the target's
+// its 1 s handshake idle timeout and a retry got through (a test VM q1-a -> q1-b, 9 of 10 execs right after the target's
 // carrier restarted took 1001 ms + retry; asking for a handshake on each new flow still lost 1 s in 3 of 28, since
 // wireguard-go allows one initiation per 5 s). The restarted peer's meowed carries a new start id and the client drops
 // its dead session at once (Tailscale's per-start disco key), so every first flow right after a restart gets through
@@ -89,7 +89,7 @@ func TestNewFlowToARestartedPeerWithUnchangedContactsIsReachedQuickly(t *testing
 		}
 	}
 	// The other way round: the host never dialed the client, so it knows the client's start id only from the
-	// client's pings. When the client restarts, the host's first flow to it gets through as quickly (pbvm2 q2-b's
+	// client's pings. When the client restarts, the host's first flow to it gets through as quickly (a test VM q2-b's
 	// first exec to a restarted q2-a lost 1 s while q2-b had only ever been dialed).
 	host = start(hostKey, hostAddr, clientKey.Public(), clientAddr)
 	contacts(host, client)
@@ -129,7 +129,7 @@ func echoWithin(t *testing.T, from, to *Server, limit time.Duration) {
 }
 
 // A handshake whose first relay send fails (the region's connect is held or in its backoff) sends again after the
-// connect backoff, not a whole second later: on pbvm2 a fresh dialer's first send failed, the answer with the
+// connect backoff, not a whole second later: on a test VM a fresh dialer's first send failed, the answer with the
 // restarted peer's start id came 1 s later, and the exec lost QUIC's 1 s handshake.
 func TestHandshakeWhoseFirstSendFailedIsAnsweredWithinOneBackoffStep(t *testing.T) {
 	envknob.Setenv("TS_DEBUG_ALWAYS_USE_DERP", "true")

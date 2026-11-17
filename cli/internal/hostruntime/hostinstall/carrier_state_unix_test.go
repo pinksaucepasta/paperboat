@@ -88,7 +88,7 @@ func TestRestoreBaselineCarrierPublishesItsDescriptorBeforeStartingIt(t *testing
 	}
 }
 
-// pbvm1 F14-03: a killed install's lifecycle journal records the hostd of its CANDIDATE generation, but a recovery
+// a test VM F14-03: a killed install's lifecycle journal records the hostd of its CANDIDATE generation, but a recovery
 // builds its services from the installed record (the previous generation). Restoring "not installed" through that
 // unit stopped and removed the serving hostd, and nothing started it again: the machine went offline with no hostd.
 // The recovery must address the journaled candidate's unit.

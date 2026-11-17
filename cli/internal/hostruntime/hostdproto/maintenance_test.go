@@ -144,7 +144,7 @@ func TestRestartedCandidateAdmitsWorkButKeepsCommitFence(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The candidate took over serving; refusing here would leave no generation
-	// admitting until the native commit (pbvm4 feat8).
+	// admitting until the native commit (a test VM feat8).
 	admitted, err := candidate.AcquireActive(next.WorkerID, next.Epoch)
 	if err != nil {
 		t.Fatalf("candidate refused work while its native commit is pending: %v", err)

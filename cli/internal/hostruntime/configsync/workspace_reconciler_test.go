@@ -244,7 +244,7 @@ func TestWorkspaceReconcilerPublishesCleanMergeFromPersistedBase(t *testing.T) {
 		t.Fatalf("resolution by path not acknowledged: %#v, %v", byPath.acknowledged, err)
 	}
 	// A confirmed force of the whole configuration takes the current remote, even when the
-	// repository moved after the status the user saw (pbvm3 lanel-a, 2026-10-23: it was never applied).
+	// repository moved after the status the user saw (a test VM lanel-a, 2026-10-23: it was never applied).
 	authority = &testResolutionAuthority{items: []ConflictResolution{{
 		ID: "force-resolution", Path: ".", Scope: "config", Action: "force_pull",
 		ConflictRevision:       diagnostics.Conflicts[0].Revision,

@@ -9,7 +9,7 @@ import (
 )
 
 // machineBlipGrace is how long a command that has not started its work waits for a machine the server calls offline.
-// A host restarting its runtime (pb update) is reported unobserved or offline for a few seconds; pbvm4 update checks
+// A host restarting its runtime (pb update) is reported unobserved or offline for a few seconds; a test VM update checks
 // failed sends with machine_offline for the whole network handover. The wait only covers the offline answer: any
 // other error returns at once, and a machine that stays offline reports it when the grace ends.
 var machineBlipGrace = 15 * time.Second

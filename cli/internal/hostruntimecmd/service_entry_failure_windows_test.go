@@ -4,7 +4,7 @@ package hostruntimecmd
 
 import "testing"
 
-// winpool, 2026-11-10: the local daemon's service could not read its installation and exited before the service
+// a Windows test VM, 2026-11-10: the local daemon's service could not read its installation and exited before the service
 // dispatcher. SCM logged "did not respond to the start request", the install timed out after 30 s, and the cause was
 // written nowhere.
 func TestAServiceThatCannotReadItsInstallationLeavesTheCauseInItsLog(t *testing.T) {

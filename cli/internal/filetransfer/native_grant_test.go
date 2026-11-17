@@ -63,7 +63,7 @@ func TestNativeTransferReauthorizesLostConnectionWithoutNewBatch(t *testing.T) {
 	// waiting: an Unlimited transfer's daemon refuses the stream while only a hosted relay reaches the
 	// destination (no_eligible_path); the upload waits, says so, and resumes at the committed offset.
 	// offline: after the carrier is lost the server answers the renewal machine_offline twice (the destination's path
-	// blipped; F14-02 on winpool-12 failed the send here); the transfer waits and resumes instead of failing.
+	// blipped; F14-02 on a Windows test VM failed the send here); the transfer waits and resumes instead of failing.
 	// unreachable: the renewal fails on the network twice (the PC just woke from sleep); the transfer waits and resumes.
 	// gone: the server says the destination was removed or revoked (404 user_machine_not_found): the send stops at once.
 	for _, mode := range []string{"allowed", "denied", "restarting", "stopping", "waiting", "lease-lost", "offline", "unreachable", "gone"} {

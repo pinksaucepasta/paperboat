@@ -24,7 +24,7 @@ var secretWords = []string{"secret", "token", "password", "passwd", "bearer", "c
 
 // serviceDiagnostic is the operator-readable summary of a service failure. Besides the content-free
 // projection it names the failing components of a start failure, and the text of a leaf error whose
-// type is known to hold only addresses, paths and syscall errors (oracle, 2026-11-05: three failed
+// type is known to hold only addresses, paths and syscall errors (the test host, 2026-11-05: three failed
 // handovers showed only "StartError, StartError, errorString").
 func serviceDiagnostic(err error) string {
 	cause, errorType, httpStatus := reporting.SafeFailureDetails(err)

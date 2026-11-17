@@ -11,7 +11,7 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// winpool (GitHub windows-latest; the account is the built-in Administrator, RID 500): `pb install` failed at "apply
+// a Windows test VM (GitHub windows-latest; the account is the built-in Administrator, RID 500): `pb install` failed at "apply
 // service declaration: context deadline exceeded". The local daemon's service, LocalSystem, refused its own
 // installation: the API writes that account's entry as "LA", and the expected ACL was rewritten to match only when
 // the checking process itself ran as that account. The check must hold whoever makes it.

@@ -1285,7 +1285,7 @@ const routeHoldPoll = 50 * time.Millisecond
 
 // holdForRoute retries acquire until it succeeds, the grace passes or the request ends, so a request
 // that arrives in the gap after a handover is answered by the route the host attaches a moment later
-// (anvit, 2026-11-05: three 404s in 490 ms, 2 s after the replacement started). With no grace it is a
+// (the test host, 2026-11-05: three 404s in 490 ms, 2 s after the replacement started). With no grace it is a
 // single call.
 func holdForRoute(ctx context.Context, grace time.Duration, acquire func() (*route.StreamLease, route.RouteMatch, error)) (*route.StreamLease, route.RouteMatch, error) {
 	lease, matched, err := acquire()

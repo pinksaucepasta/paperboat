@@ -166,7 +166,7 @@ func (a *Authority) Refresh(ctx context.Context, client NetworkAPI) error {
 //
 // Like Tailscale's controlclient updateRoutine, a 429 waits the server's Retry-After and retries within ctx
 // instead of refusing the stream, and every admission whose stream arrived before a renewal started shares
-// that renewal: a burst of new operations is one request, not one each (pbvm4 feat9: per-stream renewals hit
+// that renewal: a burst of new operations is one request, not one each (a test VM feat9: per-stream renewals hit
 // the machine's 429, refused a stream and held every admission 12 s).
 func (a *Authority) RefreshForAdmission(ctx context.Context, client NetworkAPI) error {
 	asked := time.Now()

@@ -148,7 +148,7 @@ func (s *Server) LocalEndpoints() []netip.AddrPort {
 //
 // A new handshake (none answered yet in this engine) is not released by a direct answer alone until the relay
 // handshake is acknowledged or newHandshakeHold passes: a disco answer does not show the peer's WireGuard side is
-// ready for us (pbvm2 q3: after a target restart the direct answer came in 4 ms, the flow's first initiation was
+// ready for us (a test VM q3: after a target restart the direct answer came in 4 ms, the flow's first initiation was
 // lost, and wireguard-go allows the next one only 5 s later, so QUIC's 1 s handshake failed; held until the
 // acknowledgment, 30 of 30 got through).
 func (s *Server) awaitRelayOrDirect(ctx context.Context, peer key.NodePublic) error {

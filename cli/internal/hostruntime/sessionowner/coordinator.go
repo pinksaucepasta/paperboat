@@ -256,7 +256,7 @@ func (c Coordinator) candidate(d Descriptor) bool {
 // staging reports a possible update candidate: a generation that runs other code than the active one and was
 // published after it. Like nginx's new workers starting before the old ones drain
 // (~/ref/nginx/src/os/unix/ngx_process_cycle.c), the candidate must not be retired by the still-active updater while
-// the installer prepares it (pbvm4 run1: retiring it stopped its carrier mid-move), however long that takes: Reconcile
+// the installer prepares it (a test VM run1: retiring it stopped its carrier mid-move), however long that takes: Reconcile
 // keeps it while Coordinator.Installing, the installation lock, says an install may own it. A crashed install's
 // orphan is withdrawn by its recovery, or retired once no installation runs. The generation an update replaced was
 // published before the active one, and once republished as an archive reader it carries the active code

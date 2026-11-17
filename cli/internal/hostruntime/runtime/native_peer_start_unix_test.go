@@ -45,7 +45,7 @@ type scriptedPeerEnrollment struct{ err error }
 func (e scriptedPeerEnrollment) Ensure(context.Context) error { return e.err }
 
 // A fresh pair on round 26 failed at "installing system services" because the carrier's first peer
-// identity registration hit one DNS timeout and the carrier exited (pbvm2, 2026-10-24). A transient
+// identity registration hit one DNS timeout and the carrier exited (a test VM, 2026-10-24). A transient
 // control-plane failure is left to the enrollment service that retries every 2 s, like a pending
 // approval; an authorization refusal or invalid state still fails the start closed.
 func TestTransientPeerEnrollmentFailureKeepsTheCarrierStarting(t *testing.T) {

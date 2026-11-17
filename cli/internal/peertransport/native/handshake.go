@@ -98,7 +98,7 @@ func (o *Owner) acquireHandshake(ctx context.Context, peerID string) (func(), er
 
 // A peer that closes a dialed session on purpose (its carrier is stopping for an update) takes its
 // WireGuard keys with it, so the next dial's first flight on the cached lease would go out on dead keys
-// and be lost until the 1 s handshake idle timeout retires the lease (pbvm4 run8: 1001 ms, then 6 ms).
+// and be lost until the 1 s handshake idle timeout retires the lease (a test VM run8: 1001 ms, then 6 ms).
 // Retire the idle lease up front instead, as that timeout would.
 func (o *Owner) watchPeerClose(s *Session) {
 	<-s.quic.Connection.Context().Done()
@@ -111,7 +111,7 @@ func (o *Owner) watchPeerClose(s *Session) {
 }
 
 // peerRestartHandshake is the floor of the handshake timeout of dials to a peer that just closed cleanly: the restarted
-// peer may not be answering yet, and the dial that follows a lost first flight completes in milliseconds (pbvm4: 1.0 s
+// peer may not be answering yet, and the dial that follows a lost first flight completes in milliseconds (a test VM: 1.0 s
 // lost, then 28 ms). The wait grows with the peer's own measured handshake (restartHandshake): a fixed 300 ms can never
 // complete on a relay or long-haul path.
 // Prior art for a fixed short reconnect cadence: EternalTerminal retries every second (~/ref/EternalTerminal/src/base/
@@ -156,10 +156,10 @@ func (o *Owner) freshClientAfterPeerClose(descriptor mesh.Addr, peerID string, c
 	}
 	// Other sessions to the peer still own the client (an exec loop's, not released yet), so it cannot be retired, but
 	// the peer restarted and took its WireGuard keys with it: data on the old keys is dropped until WireGuard's own 15 s
-	// no-reply rekey (pbvm4 update: 7 handshake failures at 1 s, then success at +12 s). Reset the peer's WireGuard
+	// no-reply rekey (a test VM update: 7 handshake failures at 1 s, then success at +12 s). Reset the peer's WireGuard
 	// state so the next flow handshakes at once; the client and its sessions stay. Another session that still looks
 	// alive does not mean the peer did not restart: the same restart closed it, and its close is a few milliseconds
-	// behind (pbvm4: 2 of 5 updates paused 16 s when this was skipped).
+	// behind (a test VM: 2 of 5 updates paused 16 s when this was skipped).
 	o.authority.ResetPeerPath(client)
 	return client, nil
 }

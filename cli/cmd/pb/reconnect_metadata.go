@@ -35,7 +35,7 @@ func retainReconnectMetadata(record slog.Record, fields map[string]string) bool 
 		"carrier control call":    "/internal/hostruntime/carriercontrol.",
 		"hostd maintenance busy":  "/internal/hostruntime/hostdproto.",
 		"preview owner lease":     "/internal/hostruntime/preview.",
-		// Bounded reason codes of the handover admission path (pbvm4 feat8).
+		// Bounded reason codes of the handover admission path (a test VM feat8).
 		"native worker admission refused":   "/internal/hostruntime/server.",
 		"native dispatch admission refused": "/internal/hostruntime/server.",
 		"native owner admission refused":    "/internal/hostruntime/workloadbridge.",

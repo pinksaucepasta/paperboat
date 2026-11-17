@@ -13,7 +13,7 @@ import (
 	doctorpkg "github.com/pinksaucepasta/paperboat/cli/internal/doctor"
 )
 
-// pbvm1 F14-03: no hostd ran and the machine was offline, yet pb doctor reported healthy.
+// a test VM F14-03: no hostd ran and the machine was offline, yet pb doctor reported healthy.
 func TestDoctorFailsWhenTheInstalledHostServiceDoesNotAnswer(t *testing.T) {
 	installed := filepath.Join(t.TempDir(), "pb")
 	if err := os.WriteFile(installed, []byte("x"), 0o755); err != nil {

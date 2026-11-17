@@ -84,7 +84,7 @@ func TestSSHHandoverBlipIsATransportLossNotARefusalOrATimeout(t *testing.T) {
 }
 
 // pb exec reattaches for about 30 s when its stream is cut; the server answering machine_offline to the new descriptor
-// while the host restarts must not end that (pbvm4 update: exec_short exit 1 at the handover).
+// while the host restarts must not end that (a test VM update: exec_short exit 1 at the handover).
 func TestExecReattachmentRetriesMachineOffline(t *testing.T) {
 	if !retryableExecReattachment(&api.APIError{Code: "machine_offline"}) {
 		t.Fatal("machine_offline ended the exec reattachment")

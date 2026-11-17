@@ -59,7 +59,7 @@ func TestSSHToolsNameTheClientKeyLimit(t *testing.T) {
 	}
 }
 
-// pb ssh doctor on a machine whose SSH is not ready (pbvm2: host keys cloned from another machine, so the server
+// pb ssh doctor on a machine whose SSH is not ready (a test VM: host keys cloned from another machine, so the server
 // publishes none and answers 404) names the reason like pb ssh, not "The requested Paperboat resource was not found".
 func TestSSHDoctorNamesWhySSHIsNotReadyInsteadOfNotFound(t *testing.T) {
 	previous := readDaemonSnapshot

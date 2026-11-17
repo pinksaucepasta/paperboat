@@ -55,7 +55,7 @@ type relayAuthority struct {
 	nodes        map[tailcfg.DERPRegionID]RegionalNode
 	// listed is the last relay each region was listed with. magicsock builds a region's carrier lazily and keeps
 	// it while the region is unchanged, so a carrier built while its relay was momentarily missing from nodes
-	// took an empty relay (no address, no pin) for good (pbmac 2026-11-05). Written by setRelayNodesLocked.
+	// took an empty relay (no address, no pin) for good (a test Mac 2026-11-05). Written by setRelayNodesLocked.
 	listed          map[tailcfg.DERPRegionID]RegionalNode
 	usagePeers      map[key.NodePublic]*relayUsageObservation
 	generationUsage map[[32]byte]map[key.NodePublic]*relayUsageObservation
@@ -527,7 +527,7 @@ func (a *Authority) relayCredential(node RegionalNode) func(context.Context) (st
 // errRelayNotCurrent is a relay missing from this machine's current relay set, or a grant not yet issued for
 // its current process: a refresh that landed in a heartbeat gap, a relay marked draining or full, or a set that
 // expired before its refresh. derpquic latches every credential error except ErrExpired for the carrier's
-// lifetime and magicsock's reader stops on it, so this was a relay dead until a restart (pbmac 2026-11-05,
+// lifetime and magicsock's reader stops on it, so this was a relay dead until a restart (a test Mac 2026-11-05,
 // F3-15 N13). As expired authority it is refetched and retried under magicsock's relay reconnect backoff, as
 // Tailscale's DERP client redials after every failure (wgengine/magicsock/derp.go runDerpReader). A relay
 // that is listed again under another identity stays refused: its region changes and gets a new carrier.

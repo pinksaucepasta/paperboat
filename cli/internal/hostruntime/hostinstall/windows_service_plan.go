@@ -35,7 +35,7 @@ func reportWindowsSSHSkipped(ctx context.Context, err error) {
 
 // windowsSSHPreparationBudget bounds the OpenSSH step of an install, pair or repair: obtaining the package may fall
 // back to the PowerShell Gallery (5 min) and Install-WinGetPackage (10 min), which exceed the 3 min the elevated
-// bridge allows the whole operation (winpool-3, 2026-11-10: three minutes of silence, then a rollback).
+// bridge allows the whole operation (a Windows test VM, 2026-11-10: three minutes of silence, then a rollback).
 var windowsSSHPreparationBudget = 75 * time.Second
 
 // windowsSSHTimeoutNotice tells the user, once per expiry, that managed SSH was skipped and how to get it later.

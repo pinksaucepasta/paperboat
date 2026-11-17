@@ -594,7 +594,7 @@ func (w *RouteWorker) recordReconcile(ctx context.Context, err error) {
 
 // reportRouteReconcileFailure is false once the worker's own context is done or this process is quiet (it released
 // to its replacement, or has not taken over yet): a control request cut by a process's own handover and shutdown is
-// not a control failure. The old oracle edge logged control_unavailable on carrier-admissions 0.145 s before its
+// not a control failure. The old the test host edge logged control_unavailable on carrier-admissions 0.145 s before its
 // shutdown even with the context check, because the handover release (and the drain that follows) comes before
 // the workers' context is cancelled; the deploy gate counted it.
 func reportRouteReconcileFailure(ctx context.Context, err error, quiet bool) bool {

@@ -69,7 +69,7 @@ func (c *HTTPClient) IngressDecisions(ctx context.Context, nodeID, epoch, versio
 	}
 	// A decision this edge cannot accept refuses only its own name. Rejecting the whole snapshot would
 	// freeze every other name on the last good one (2026-11-11: one file-origin preview the edge did not
-	// know made anvit 404 every name created after it). Prior art: tailscale's netmap drops one invalid
+	// know made the test host 404 every name created after it). Prior art: tailscale's netmap drops one invalid
 	// peer, not the map (ipn/ipnlocal).
 	now := time.Now().UTC()
 	valid := output.Decisions[:0]

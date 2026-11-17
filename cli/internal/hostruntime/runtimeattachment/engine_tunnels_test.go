@@ -368,7 +368,7 @@ func TestEngineTunnelsRefuseToStartWithoutAnOriginTransport(t *testing.T) {
 	}
 }
 
-// pbvm3 2026-10-26: `pb tunnel replay` answered inspector_expired on engine tunnels because their
+// a test VM 2026-10-26: `pb tunnel replay` answered inspector_expired on engine tunnels because their
 // captures had no replay identity. Each route now carries the tunnel and route generations the
 // server's inspector credential binds.
 func TestEngineTunnelRoutesCarryTheirInspectorIdentity(t *testing.T) {

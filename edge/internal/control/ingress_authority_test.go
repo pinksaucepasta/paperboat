@@ -413,7 +413,7 @@ func TestIngressAuthorityAcceptNeverWaitsOnAHangingControlPlane(t *testing.T) {
 
 // After a handover the server issues the replacement's preview decision a moment after the host's carrier attaches.
 // A miss is remembered for the refresh interval; during the takeover grace it is asked again after 500 ms, so the
-// late decision is found within about a second, not after 5 s (anvit 2026-11-09: one request per swap waited 5 s).
+// late decision is found within about a second, not after 5 s (the test host 2026-11-09: one request per swap waited 5 s).
 func TestIngressAuthorityPreviewMissIsRecheckedDuringTakeoverGrace(t *testing.T) {
 	for _, grace := range []bool{true, false} {
 		t.Run(map[bool]string{true: "in grace", false: "no takeover"}[grace], func(t *testing.T) {

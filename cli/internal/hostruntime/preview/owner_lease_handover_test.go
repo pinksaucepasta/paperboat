@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-// pbvm4 feat8: foreground previews paused ~9 s at pb update until the CLI
+// a test VM feat8: foreground previews paused ~9 s at pb update until the CLI
 // reattached. The next generation must hold the lease, and pass its owner
 // session to the preview restore, before the CLI talks to it.
 func TestForegroundLeaseIsTakenOverByTheNextGeneration(t *testing.T) {

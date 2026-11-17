@@ -34,7 +34,7 @@ func (h *restartingHost) open(operationID string) (tunnel.ExecConn, error) {
 	return &cutConn{host: &hostStdin{}}, nil
 }
 
-// hop-89 / winpool pb install: the first exec while the peer restarted (worker unavailable 41 s) gave up after three
+// hop-89 / a Windows test VM pb install: the first exec while the peer restarted (worker unavailable 41 s) gave up after three
 // 10 s opens with exec_start_uncertain. The start is now retried with the same operation ID for the reattach window, so
 // the exec runs once the machine answers, and only once.
 func TestFirstExecAfterPeerRestartRunsOnceWithTheSameOperation(t *testing.T) {

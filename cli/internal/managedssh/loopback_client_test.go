@@ -327,7 +327,7 @@ func TestRunOneShotSSHLoopbackReturnsTheProcessExitWhenItResetsItsSocket(t *test
 	}
 }
 
-// winpool-4 2026-11-11: an interactive session ended with `exit`, ssh.exe exited 0 and reset its socket; the
+// a Windows test VM 2026-11-11: an interactive session ended with `exit`, ssh.exe exited 0 and reset its socket; the
 // bridge's reset was returned in place of that clean exit, so pb printed its generic failure after every session.
 func TestRunOneShotSSHLoopbackCleanExitWithASocketResetSucceeds(t *testing.T) {
 	process := newLoopbackTestProcess()

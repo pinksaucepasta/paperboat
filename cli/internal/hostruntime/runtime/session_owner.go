@@ -107,7 +107,7 @@ func NewIndependentSessionOwner(ctx context.Context, d sessionowner.Descriptor, 
 		return nil, err
 	}
 	// Explicit executions live here, not in hostd, so an update that replaces
-	// hostd never waits for or cuts a running command (pbvm4 feat3/feat4).
+	// hostd never waits for or cuts a running command (a test VM feat3/feat4).
 	executions, err := ownerExecutions(ctx, d.Workspace, d.Shell, durable)
 	if err != nil {
 		return nil, errors.Join(err, manager.Shutdown(ctx))

@@ -87,7 +87,7 @@ func TestNativeWindowsDeclarationPublishedWithSystemOwner(t *testing.T) {
 	}
 	system := wellKnownSID(t, windows.WinLocalSystemSid)
 	requireCustody(t, path, system, "D:P(A;;FA;;;SY)(A;;FA;;;BA)")
-	// Pin cleanup refuses a declaration directory an administrator owns (winpool-4, 2026-11-11: old pins never pruned).
+	// Pin cleanup refuses a declaration directory an administrator owns (a Windows test VM, 2026-11-11: old pins never pruned).
 	requireCustody(t, root, system, declarationDirectoryDACL)
 	found, err := os.ReadFile(path)
 	if err != nil || string(found) != string(body) {

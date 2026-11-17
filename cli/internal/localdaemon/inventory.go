@@ -403,7 +403,7 @@ func (i *Inventory) refresh(ctx context.Context, reuse, forceReconcile bool, fre
 				switch {
 				case inventoryAuthenticationRequired(reconcileErr):
 					// A server 401 or a signed-out credential during the reconcile is the signed-out state, not a
-					// broken installation: "repair the installation" cannot fix it (pbvm2, 2026-11-09).
+					// broken installation: "repair the installation" cannot fix it (a test VM, 2026-11-09).
 					signedOutSnapshot(&desired)
 				case controlPlaneUnreachable(reconcileErr, i.apiHost()):
 					desired.Health = controlPlaneUnavailableHealth(current, now, reconcileErr, portal)
@@ -698,7 +698,7 @@ const managedSSHWindowsTargetRecovery = "If this stays, install \"App Installer\
 const sshHostKeysUnpublishedWindowsRecovery = "A newly set up machine publishes them within a minute or two. " + managedSSHWindowsTargetRecovery
 
 // A machine shows this from pairing until its host service has installed and published the keys (about a minute
-// on a fresh container, dadape ltc-d7 2026-10-27).
+// on a fresh container, the test host ltc-d7 2026-10-27).
 const sshHostKeysUnpublishedRecovery = "A newly set up machine publishes them within a minute or two. If this stays, " +
 	"start an SSH server (sshd) on the machine"
 

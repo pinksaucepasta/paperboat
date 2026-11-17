@@ -11,7 +11,7 @@ func managedSSHProxyCommand(quotedExecutable string) string {
 // in the same ~/.ssh config, ProxyCommand and KnownHostsCommand alike. The built-in Microsoft OpenSSH takes any
 // drive path; Git for Windows' MSYS ssh refuses C:\ and C:/ for KnownHostsCommand ("path is not absolute") and
 // runs a ProxyCommand starting with a drive path through cmd.exe, which mis-parses it. `//?/C:/…` passed every
-// check and ran in both (winpool-11, OpenSSH_for_Windows_10.0p2 and MSYS OpenSSH_10.6p1, 2026-11-12). A path that is
+// check and ran in both (a Windows test VM, OpenSSH_for_Windows_10.0p2 and MSYS OpenSSH_10.6p1, 2026-11-12). A path that is
 // not a drive path is only slashed.
 func windowsOpenSSHExecutable(path string) string {
 	slashed := strings.ReplaceAll(path, `\`, "/")

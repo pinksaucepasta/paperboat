@@ -11,7 +11,7 @@ import (
 // windowsUninstallInFlight is the refusal of a pb install while a pb uninstall helper still removes Paperboat: the
 // uninstall command returns at once (state pending) and the helper finishes later; an install started in that gap
 // reinstalled the machine guard and roots the helper was deleting and died 'operation_failed / local_io' inside its
-// first elevated step, 3 of 3 (winpool-6, spark/install-after-uninstall-diag.md). Failing at once and saying why is the
+// first elevated step, 3 of 3 (a Windows test VM, spark/install-after-uninstall-diag.md). Failing at once and saying why is the
 // pending contract's counterpart: no wait the user did not ask for.
 func windowsUninstallInFlight() error {
 	root := windowsUninstallRoot()

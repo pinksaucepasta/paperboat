@@ -23,7 +23,7 @@ type statusHostd struct{ workerupdate.Hostd }
 type statusHealth struct{ workerupdate.HealthChecker }
 type statusGate struct{ workerupdate.ActivationGate }
 
-// dadape rolled back 2026.10.28.1→.2: the restarted daemon's readiness probe reads updater status, and status
+// the test host rolled back 2026.10.28.1→.2: the restarted daemon's readiness probe reads updater status, and status
 // failed with candidate_changed on every probe because the approved payload no longer verified mid-activation.
 func TestControlStatusAnswersDuringApprovedActivationWithUnverifiablePayload(t *testing.T) {
 	if os.Geteuid() != 0 {
@@ -57,7 +57,7 @@ func TestControlStatusAnswersDuringApprovedActivationWithUnverifiablePayload(t *
 		t.Fatal(err)
 	}
 	approval := strings.Repeat("b", 64)
-	j := updateflow.Journal{Schema: updateflow.SchemaV1, TransactionID: "dadape", BootID: "hostd", Stage: updateflow.StageAwaitingApproval, StageUpdatedAt: time.Now().UTC(), ActiveVersion: active.Version, ActiveDigest: active.SHA256, ActiveLength: active.Length, ActiveHostdAPIMin: 1, ActiveHostdAPIMax: 1, ActiveRuntimeAPIMin: 1, ActiveRuntimeAPIMax: 1, CandidateID: approval, ApprovedCandidateID: approval, ArtifactDigest: strings.Repeat("c", 64), ArtifactLength: 1, ArtifactPlatform: runtime.GOOS, ArtifactArchitecture: runtime.GOARCH, CandidateVersion: "2026.10.28.2", CandidateDigest: strings.Repeat("c", 64), CandidateLength: 1, StagedPath: filepath.Join(root, "staged"), NativeActivation: true}
+	j := updateflow.Journal{Schema: updateflow.SchemaV1, TransactionID: "transaction", BootID: "hostd", Stage: updateflow.StageAwaitingApproval, StageUpdatedAt: time.Now().UTC(), ActiveVersion: active.Version, ActiveDigest: active.SHA256, ActiveLength: active.Length, ActiveHostdAPIMin: 1, ActiveHostdAPIMax: 1, ActiveRuntimeAPIMin: 1, ActiveRuntimeAPIMax: 1, CandidateID: approval, ApprovedCandidateID: approval, ArtifactDigest: strings.Repeat("c", 64), ArtifactLength: 1, ArtifactPlatform: runtime.GOOS, ArtifactArchitecture: runtime.GOARCH, CandidateVersion: "2026.10.28.2", CandidateDigest: strings.Repeat("c", 64), CandidateLength: 1, StagedPath: filepath.Join(root, "staged"), NativeActivation: true}
 	if err := updateflow.Write(journal, j, os.Geteuid(), os.Getegid()); err != nil {
 		t.Fatal(err)
 	}

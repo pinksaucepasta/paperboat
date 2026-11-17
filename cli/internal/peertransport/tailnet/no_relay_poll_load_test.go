@@ -5,7 +5,7 @@ package tailnet
 // Scale check (PLAN 3b, Lane W): a machine with no usable relay node (none configured in its region, all relays down,
 // or hosted relays withheld for an exhausted bandwidth quota) must not ask for its signed peer configuration every
 // second. The regional recovery loop requests an on-demand refresh every regionalStaleRetry (1 s) while it finds no
-// node, so during a relay outage the whole fleet would poll the control plane once a second. Found on staging (pbvm4,
+// node, so during a relay outage the whole fleet would poll the control plane once a second. Found on staging (a test VM,
 // no relays): the carrier of a build with 0e560ffd sent 565 POST /v1/machine-peer-network/config in 10 min.
 //
 //	go test -tags load -run TestLoadNoRelayNodeDoesNotPollConfigurationEverySecond -v ./internal/peertransport/tailnet/

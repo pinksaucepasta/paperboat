@@ -61,7 +61,7 @@ func TestExitErrorAttachesLineOnlyForContainerExit(t *testing.T) {
 }
 
 // A runtime that fails to start prints its reason, then shutdown records; the reason is what the
-// journal must carry (oracle, 2026-11-05: address_in_use was hidden behind reporting_shutdown).
+// journal must carry (the test host, 2026-11-05: address_in_use was hidden behind reporting_shutdown).
 func TestLastOutputLinePrefersTheRuntimeFailureLineOverShutdownRecords(t *testing.T) {
 	bin := t.TempDir()
 	script := "#!/bin/sh\necho '{\"level\":\"ERROR\"}'\necho 'service failure stage=configure cause=address_in_use error_type=Errno'\necho 'paperboat-edge stopped; support reference x'\necho '{\"msg\":\"reporting_shutdown\"}'\n"

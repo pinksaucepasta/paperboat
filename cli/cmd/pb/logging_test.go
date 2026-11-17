@@ -138,7 +138,7 @@ func TestProcessLoggerRetainsOnlyAuthoredReconnectMetadata(t *testing.T) {
 	}
 }
 
-// pbvm4 feat8: the handover admission refusals arrived without their reason codes.
+// a test VM feat8: the handover admission refusals arrived without their reason codes.
 func TestProcessLoggerRetainsHandoverAdmissionReasons(t *testing.T) {
 	recorder := diagnostics.NewMemoryRecorder()
 	handler := processDiagnosticHandler{recorder: recorder, component: "pb"}

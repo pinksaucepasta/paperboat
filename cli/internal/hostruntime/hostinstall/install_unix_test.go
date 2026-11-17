@@ -553,7 +553,7 @@ func TestResetNativeCleanupRetainsOnlyCLI(t *testing.T) {
 }
 
 // Reset on a machine that never paired keeps the CLI slot, and the ~/.local/bin/pb link to it with it
-// (pbvm2: `pb pair` after the reset found no pb); a plain uninstall of the same machine removes the link.
+// (a test VM: `pb pair` after the reset found no pb); a plain uninstall of the same machine removes the link.
 func TestResetOfAnEnrollmentPendingMachineKeepsTheCommandLink(t *testing.T) {
 	for name, keepSlot := range map[string]bool{"reset": true, "uninstall": false} {
 		t.Run(name, func(t *testing.T) {
@@ -682,7 +682,7 @@ func TestUninstallRemovesTheInstalledCommandLinkOnly(t *testing.T) {
 }
 
 // Regression (e33aec9f3): the root uninstall removed ~/.local/bin/pb even for `pb reset`, which keeps its CLI slot, so
-// the pairing that follows a reset found no `pb` (reset_lifecycle.py on pbvm2: FileNotFoundError ~/.local/bin/pb).
+// the pairing that follows a reset found no `pb` (reset_lifecycle.py on a test VM: FileNotFoundError ~/.local/bin/pb).
 func TestResetKeepsTheCommandLinkOfTheRetainedCLI(t *testing.T) {
 	home, root := t.TempDir(), t.TempDir()
 	worker := filepath.Join(root, "pb")

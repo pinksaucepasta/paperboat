@@ -14,7 +14,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/sessionowner"
 )
 
-// pbvm1 F14-03: an update killed after it started its candidate's session owner left that descriptor and the
+// a test VM F14-03: an update killed after it started its candidate's session owner left that descriptor and the
 // candidate's pin behind; once recovery reactivated the previous worker, the inventory took the descriptor for
 // history and kept both through a later good update. Recovery withdraws them like a failed attempt does.
 func TestInterruptedUpdateLeavesNoCandidateSessionOwnerOrPin(t *testing.T) {

@@ -17,7 +17,7 @@ func (c *countingSyncer) Write(p []byte) (int, error) {
 }
 func (c *countingSyncer) Sync() error { c.syncs++; c.unsynced = 0; return nil }
 
-// dadape direct2c/direct1d: one unsynced 90 MB copy stalled every terminal for 6 s.
+// the test host direct2c/direct1d: one unsynced 90 MB copy stalled every terminal for 6 s.
 func TestSyncedCopyNeverLeavesMoreThanOneChunkUnsynced(t *testing.T) {
 	src := bytes.Repeat([]byte{7}, 3*SyncBytes+123)
 	var dst countingSyncer

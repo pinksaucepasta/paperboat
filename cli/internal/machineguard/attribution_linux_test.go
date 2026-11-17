@@ -177,7 +177,7 @@ func TestGatewayAttributesAnIPv6LoopbackConnection(t *testing.T) {
 	}
 }
 
-// Device check (F23-02, pbvm2 two-user container): run the test binary as root with PB_TWO_USER_UIDS=<a>,<b>.
+// Device check (F23-02, a test VM two-user container): run the test binary as root with PB_TWO_USER_UIDS=<a>,<b>.
 // Each client connects as its own OS user; every accepted connection is attributed to exactly that user.
 func TestGatewayAttributesTwoOSUsers(t *testing.T) {
 	uids := strings.Split(os.Getenv("PB_TWO_USER_UIDS"), ",")

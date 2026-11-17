@@ -53,7 +53,7 @@ type SharedTLSListener struct {
 	// only the branded "does not exist" page; it never reaches the HTTPS handler or an origin.
 	unknown *tls.Config
 	// routeGrace and held: right after a handover takeover a name whose host has not re-attached its carrier
-	// yet is held until it is admitted or the grace ends, instead of answering the not-found page at once (anvit
+	// yet is held until it is admitted or the grace ends, instead of answering the not-found page at once (the test host
 	// 2026-11-09: 404s up to 6 s after every edge swap). Only a name that can be ours is held (holdableName: under
 	// our preview, tunnel or runtime domain; or one the authority snapshot names), and held bounds how many.
 	routeGrace   func() time.Duration

@@ -122,7 +122,7 @@ func TestPeerEndpointRecoversMalformedUnsignedState(t *testing.T) {
 	}
 }
 
-// An account with many computers sends a trust set of one key per machine and CLI session. On pbvm2 a
+// An account with many computers sends a trust set of one key per machine and CLI session. On a test VM a
 // 92-key set (23.7 KB) was saved but refused on the next load (16 KiB cap), so the carrier exited 1 on
 // every fresh pair. Every size up to the supported maximum must round-trip; one more key is refused at
 // save, leaving the file that was there.

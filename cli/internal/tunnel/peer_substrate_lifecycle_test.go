@@ -97,7 +97,7 @@ func TestCachedNativeRuntimeSkipsRefreshWhenItAlreadyAdmitsTheTarget(t *testing.
 	}
 }
 
-// pbvm4 prefix1 07:48:03: `pb ssh` needed no refresh (refresh_skipped at 04.925) but waited on the daemon's
+// a test VM prefix1 07:48:03: `pb ssh` needed no refresh (refresh_skipped at 04.925) but waited on the daemon's
 // runtime lock behind two exec refreshes (03.633-04.105, 04.105-04.922) and took 1.9 s against 0.7 s. A
 // refresh in flight must not hold up an operation the runtime already admits.
 func TestCachedNativeRuntimeRefreshDoesNotHoldAdmittedOperations(t *testing.T) {

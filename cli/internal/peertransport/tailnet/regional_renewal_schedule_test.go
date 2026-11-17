@@ -38,7 +38,7 @@ func TestRegionalRenewalFollowsTheEarliestObservation(t *testing.T) {
 	}
 }
 
-// On pbvm2 a machine in regional recovery withdrew every relay region, and with it every relay connection, about every 17 s:
+// On a test VM a machine in regional recovery withdrew every relay region, and with it every relay connection, about every 17 s:
 // the refresh scheduled the regional renewal before the relays' observations ended, but the configuration it
 // had just applied woke the loop again, and that wake re-armed the timer at the 24-36 s cadence. A renewal
 // must come before the observations end, whichever path armed the timer.

@@ -33,7 +33,7 @@ func TestDoctorReportsAMachineGuardOnAnotherVersion(t *testing.T) {
 }
 
 // A dev update keeps a guard of the same code revision (installer rule); doctor must not call that degraded
-// (winpool-7 2026-11-16: windows:update FAIL "doctor healthy after the update").
+// (a Windows test VM 2026-11-16: windows:update FAIL "doctor healthy after the update").
 func TestDoctorAcceptsADevGuardOfTheSameRevision(t *testing.T) {
 	previous := readMachineGuardStatus
 	t.Cleanup(func() { readMachineGuardStatus = previous })

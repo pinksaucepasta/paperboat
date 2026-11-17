@@ -13,7 +13,7 @@ import (
 )
 
 // macOS sun_path holds 104 bytes including the terminating NUL (Linux 108); a
-// longer socket path fails bind with EINVAL. pbmac: the per-generation carrier
+// longer socket path fails bind with EINVAL. a test Mac: the per-generation carrier
 // control socket was 115 bytes, so the first carrier never became ready.
 const darwinSunPath = 104
 
@@ -50,7 +50,7 @@ func TestDarwinHostServiceSocketIsUnderTheRunRoot(t *testing.T) {
 	if got := hostservice.SocketPath("darwin", 501); filepath.Dir(filepath.Dir(got)) != runRoot || filepath.Base(filepath.Dir(got)) != "paperboat-host-u501" {
 		t.Fatalf("darwin host service socket %s is not the user's own under %s", got, runRoot)
 	}
-	// Each OS user's host service has its own socket (pbmac C032: a shared one was taken over by the last user).
+	// Each OS user's host service has its own socket (a test Mac C032: a shared one was taken over by the last user).
 	if hostservice.SocketPath("darwin", 501) == hostservice.SocketPath("darwin", 502) || hostservice.SocketPath("linux", 1000) == hostservice.SocketPath("linux", 1001) {
 		t.Fatal("two OS users share a host service socket")
 	}

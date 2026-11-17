@@ -76,7 +76,7 @@ func TestWindowsConfigNamesItsHostdGenerationPipes(t *testing.T) {
 
 // A carrier descriptor pairs with the hostd generation of its source: its hostd endpoint is that generation's pipe,
 // and it validates (its control endpoint derives from that pipe). The first per-generation build failed every
-// install on winpool-13 because the control endpoint still derived from the account pipe.
+// install on a Windows test VM because the control endpoint still derived from the account pipe.
 func TestWindowsCarrierDescriptorPairsWithItsHostdGeneration(t *testing.T) {
 	ownerSID := "S-1-5-21-1-2-3-1001"
 	layout, err := service.WindowsUserLayout(ownerSID)
@@ -99,7 +99,7 @@ func TestWindowsCarrierDescriptorPairsWithItsHostdGeneration(t *testing.T) {
 }
 
 // An upgrade's standby carrier may differ from the serving one only in what belongs to its generation, now
-// including its hostd pipe; account custody and endpoints stay. winpool-13: every per-generation upgrade failed
+// including its hostd pipe; account custody and endpoints stay. a Windows test VM: every per-generation upgrade failed
 // staging the standby because the hostd endpoint counted as custody.
 func TestWindowsCarrierUpgradeKeepsCustodyButNotTheHostdPipe(t *testing.T) {
 	ownerSID := "S-1-5-21-1-2-3-1001"

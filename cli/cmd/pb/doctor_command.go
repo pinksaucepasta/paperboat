@@ -91,7 +91,7 @@ func machineNoPath(machine localapi.MachineStatus) (localapi.HealthItem, bool) {
 }
 
 // doctorPeerPathsCheck reports, with no machine selected, the path to every machine in use: a machine this
-// computer failed to reach is a failure (pbmac 2026-11-05: pb doctor said healthy while pb status said
+// computer failed to reach is a failure (a test Mac 2026-11-05: pb doctor said healthy while pb status said
 // Path none and every connection failed).
 func doctorPeerPathsCheck(machines []localapi.MachineStatus, now time.Time) doctorpkg.Check {
 	check := doctorpkg.Check{Category: "transport", Code: "peer_paths", Status: doctorpkg.StatusPass}

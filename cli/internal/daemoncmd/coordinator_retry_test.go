@@ -13,7 +13,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/testcert"
 )
 
-// A browser certificate that fails once at start (a second macOS user's daemon on pbmac timed out issuing it)
+// A browser certificate that fails once at start (a second macOS user's daemon on a test Mac timed out issuing it)
 // comes back by the coordinator's own retry: no restart and no new topology snapshot.
 func TestCoordinatorRetriesTheBrowserGatewayAfterAFailedCertificate(t *testing.T) {
 	restoreBase, restoreMax := reconcileRetryBase, reconcileRetryMax

@@ -10,7 +10,7 @@ import (
 
 // persistedRelays is the relay list and the relay grants of the last answered renewal, kept with the configuration so
 // a daemon restarted while Paperboat is unreachable opens relayed paths through its last known relays (behind NAT a
-// restart otherwise reached no peer until Paperboat answered: winpool runner, 2026-11-16). Both last at most
+// restart otherwise reached no peer until Paperboat answered: a Windows test VM runner, 2026-11-16). Both last at most
 // relaylimits.MaxGrantLifetime and each relay enforces its grant; on restore every claim is checked against the
 // restored configuration (generation, binding, peers), so a stale file applies nothing. Prior art: Tailscale keeps its
 // DERP map in the cached netmap it loads before contacting control (ipn/ipnlocal/local.go:2118-2126).

@@ -35,7 +35,7 @@ func TestSharedSessionAuthorityMismatchIsExplained(t *testing.T) {
 }
 
 // pb ssh doctor names the .ssh folder OpenSSH would not trust, why, and the fix, instead of "could not finish the
-// command" (winpool-4 2026-11-11).
+// command" (a Windows test VM 2026-11-11).
 func TestUnsafeSSHFolderIsExplained(t *testing.T) {
 	err := fmt.Errorf("managed OpenSSH configuration is not ready; rerun `pb login`: %w", &managedssh.UnsafeSSHPathError{Path: `C:\Users\me\.ssh`, Problem: `BUILTIN\Users can change it`})
 	message := commandFailureMessage(err, classifyCommandFailure(err))

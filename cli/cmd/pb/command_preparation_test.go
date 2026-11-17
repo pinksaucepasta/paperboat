@@ -148,7 +148,7 @@ func TestFriendlyCommandErrorPreservesStatusAndReference(t *testing.T) {
 	}
 }
 
-// pb ssh doctor names the local step that failed and what to do instead of the generic "could not finish": on pbvm2 the
+// pb ssh doctor names the local step that failed and what to do instead of the generic "could not finish": on a test VM the
 // managed SSH agent socket refused the probe (errors.Join(ErrAgentDenied, ECONNREFUSED)) and the user saw only the
 // generic text with a support reference.
 func TestSSHDoctorStepFailuresNameTheStep(t *testing.T) {

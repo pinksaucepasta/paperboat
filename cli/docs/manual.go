@@ -50,7 +50,7 @@ func Install(directory string) (resultErr error) {
 		}
 		page, path := append([]byte(manualMarker), data...), filepath.Join(section, entry.Name())
 		if unchanged(path, page) {
-			current[entry.Name()] = true // 268 pages with two fsyncs each outlasted the updater's deadline on a loaded 1-vCPU VM (pbvm1 F14-09)
+			current[entry.Name()] = true // 268 pages with two fsyncs each outlasted the updater's deadline on a loaded 1-vCPU VM (a test VM F14-09)
 			continue
 		}
 		if err := writePage(path, page); err != nil {
@@ -88,7 +88,7 @@ func syncDirectory(path string) error {
 
 // writePage replaces path with page through a temporary file in the same directory and a rename: readers see the
 // old or the new page. Like atomicfile it refuses a destination that is not a regular file; unlike it, it does
-// not sync (a refresh of 268 pages with two fsyncs each outlasted the updater's deadline, pbvm1 F14-09).
+// not sync (a refresh of 268 pages with two fsyncs each outlasted the updater's deadline, a test VM F14-09).
 func writePage(path string, page []byte) (resultErr error) {
 	if info, err := os.Lstat(path); err == nil && !info.Mode().IsRegular() {
 		return errors.New("destination is not a regular file")

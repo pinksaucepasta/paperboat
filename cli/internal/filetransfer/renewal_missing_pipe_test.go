@@ -18,7 +18,7 @@ func (e pipeStepFailure) Unwrap() error { return e.cause }
 
 // The renewal of a send started before an update on Windows: PrepareFileTransfer's dial fails on the missing pipe, and
 // localapi types it exactly like this (localDialFailure: ErrTransportUnavailable joined with the pipe dial failure).
-// It must be retried as a restarting daemon, not become a refusal that fails the transfer (update_survival, winpool-11).
+// It must be retried as a restarting daemon, not become a refusal that fails the transfer (update_survival, a Windows test VM).
 func TestRenewalOverAMissingWindowsPipeWaitsForTheDaemon(t *testing.T) {
 	first := &nativeTestLease{expires: time.Now().Add(time.Minute)}
 	initial := NativeGrant{Endpoint: "http://fixture/v1/file-transfers", Auth: Auth{Token: "first", ExpiresAt: first.expires}, Binding: testBinding(), Lease: first}

@@ -35,7 +35,7 @@ import (
 // handoverAckTimeout is a ceiling: the new worker has started every component before its commit and only binds the
 // address after it, which takes milliseconds. It was 5 s while the bind waited for the components that call the
 // control plane; a slow control plane then made the old generation take the address back before the new one bound
-// it ("address already in use", the install timed out: winpool-7, 2026-11-12, staging server).
+// it ("address already in use", the install timed out: a Windows test VM, 2026-11-12, staging server).
 const handoverAckTimeout = time.Minute
 
 // HandoverConfig is the old generation's side: Listener is the handover pipe it serves now, StopAccepting gives the

@@ -278,7 +278,7 @@ func helperStartedDespite(helperPath string) bool {
 // pendingWindowsUninstallHandoff reports a handoff that ran out of time while its helper is alive. Windows certifies
 // the start of the cleanup, not its completion ("Windows cleanup was started..."); a helper that is slow to write its
 // acknowledgement (UAC consent, a loaded machine) goes on and completes, and the CLI had exited 1 for it although
-// status.json later read completed (winpool-9, winpool-5/6). A helper that is gone, or any other failure, stays one.
+// status.json later read completed (Windows test VMs). A helper that is gone, or any other failure, stays one.
 func pendingWindowsUninstallHandoff(waitErr error, helperPath string) bool {
 	if !errors.Is(waitErr, context.DeadlineExceeded) {
 		return false
@@ -735,7 +735,7 @@ func waitForWindowsUninstallHandoff(ctx context.Context, statusPath string) erro
 		if err != nil {
 			// The helper (SYSTEM) replaces status.json while this reads it: an open that hits a sharing violation
 			// or half a file is not a verdict. Keep reading until the acknowledgement or the timeout; a file
-			// that stays unreadable or invalid fails with its own error when time runs out (winpool-12: the
+			// that stays unreadable or invalid fails with its own error when time runs out (a Windows test VM: the
 			// first failed read printed an 'incomplete' error for an uninstall that completed).
 			readErr = err
 			select {

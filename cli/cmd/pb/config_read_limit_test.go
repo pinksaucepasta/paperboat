@@ -8,7 +8,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/configsync"
 )
 
-// A repository too large to read is refused with what to do, not "could not finish" (pbmac2:
+// A repository too large to read is refused with what to do, not "could not finish" (a test Mac:
 // connecting github/gitignore).
 func TestConfigRepositoryReadLimitNamesTheLimit(t *testing.T) {
 	err := configRepositoryReadFailure(fmt.Errorf("read: %w", configsync.ErrRepositoryReadLimit))

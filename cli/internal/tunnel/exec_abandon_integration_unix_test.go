@@ -31,7 +31,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/shorttemp"
 )
 
-// dadape: a killed `pb exec <target> -- cat` client left cat running in its
+// the test host: a killed `pb exec <target> -- cat` client left cat running in its
 // session owner, and the owner could never retire. The real client -> hostd ->
 // owner bridge path: once the client is gone past the linger, the owner ends
 // the process and retirement succeeds.

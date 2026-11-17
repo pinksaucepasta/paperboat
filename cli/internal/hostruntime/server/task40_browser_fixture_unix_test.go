@@ -74,7 +74,7 @@ func TestTask40HoldBrowserRuntime(t *testing.T) {
 		t.Fatal("runtime fixture input unavailable or invalid")
 	}
 	if in.ListenAddress != "100.95.70.63:15442" && in.ListenAddress != "100.95.70.63:15443" && in.ListenAddress != "127.0.0.1:0" {
-		t.Fatal("runtime must bind an approved private Oracle address or ephemeral loopback")
+		t.Fatal("runtime must bind an approved private fixture address or ephemeral loopback")
 	}
 	key, err := base64.RawURLEncoding.DecodeString(in.PublicKey)
 	if err != nil || len(key) != ed25519.PublicKeySize {

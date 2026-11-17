@@ -301,7 +301,7 @@ func carrierReadiness(ctx context.Context, err error) error {
 
 // replaceUnservingUnixCarrier swaps a retained carrier that did not become ready for the candidate's
 // pin. Update would otherwise keep that carrier and wait for it forever, so a carrier broken by its own
-// binary could never be updated (dadape 2026-10-22: an old pin that refused its trust file). It runs
+// binary could never be updated (the test host 2026-10-22: an old pin that refused its trust file). It runs
 // inside the lifecycle transaction after the drain; if the candidate carrier does not become ready the
 // transaction fails and Restore puts the captured carrier back.
 func replaceUnservingUnixCarrier(ctx context.Context, request Request, paths installPaths) error {

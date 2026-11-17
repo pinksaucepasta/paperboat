@@ -12,7 +12,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/sessionowner"
 )
 
-// pbvm1 F14-04: after a successful update the previous build's pin stayed with nothing running from it. The
+// a test VM F14-04: after a successful update the previous build's pin stayed with nothing running from it. The
 // install's own inventory ran while the previous generation drained, and the updater's sweep kept every pin younger
 // than a 10-minute window. The updater's carrier reconciliation, which holds the native installation lock an install
 // holds for its whole run, now removes an unreferenced pin, however new, in its pass.

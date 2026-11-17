@@ -177,7 +177,7 @@ func runContext(processCtx context.Context, args []string, reporters ...*reporti
 	if inheritance != nil {
 		service.Handover.SetSilent(true) // the serving process reports until it releases
 		// The server sends each certificate once per epoch, so the serving process hands its over;
-		// the routes' first reconcile needs them (oracle, 2026-11-05: "TLS certificate is not available").
+		// the routes' first reconcile needs them (the test host, 2026-11-05: "TLS certificate is not available").
 		report := service.Handover.ImportCertificates(processCtx, inheritance.Certificates)
 		inheritance.Certificates = nil
 		fmt.Fprintf(os.Stderr, "handover certificates imported=%d dropped=%v\n", report.Imported, report.Dropped)

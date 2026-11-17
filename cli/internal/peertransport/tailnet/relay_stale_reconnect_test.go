@@ -21,7 +21,7 @@ import (
 	"tailscale.com/types/key"
 )
 
-// pbmac 2026-11-05 (dev-9cda93a1c): one engine's relay carrier failed every send for 15 minutes while the
+// a test Mac 2026-11-05 (dev-9cda93a1c): one engine's relay carrier failed every send for 15 minutes while the
 // host engine on the same Mac used the same relay, and only a daemon restart cured it. A carrier that
 // redials while this machine's relay authority is momentarily not current (an idle daemon's health
 // observation is 15 s fresh and renewed about every 30 s; a black hole kills the relay connection) was

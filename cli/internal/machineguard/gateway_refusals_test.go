@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// Every gateway connection not handed to a daemon is counted by its reason (pbmac F23-02: one empty answer
+// Every gateway connection not handed to a daemon is counted by its reason (a test Mac F23-02: one empty answer
 // under churn could not be told apart from a timeout).
 func TestGatewayRefusalsAreCountedByReason(t *testing.T) {
 	before := gatewayRefusalSnapshot()

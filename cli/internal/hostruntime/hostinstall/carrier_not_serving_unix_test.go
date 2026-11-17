@@ -11,7 +11,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/carriercontrol"
 )
 
-// A retained carrier that verifies but never answers (dadape, 2026-10-22: its old pin refused its own
+// A retained carrier that verifies but never answers (the test host, 2026-10-22: its old pin refused its own
 // trust file and exited every 5 s) used to fail preflight, so every install aborted and the carrier
 // could never be replaced. "Never answered" (its readiness wait ran out with the control endpoint
 // unavailable, the install still live) is now a typed result the install replaces after the drain.

@@ -3,7 +3,7 @@ package atomicfile
 import "io"
 
 // SyncBytes bounds how much unwritten data one large copy leaves to the kernel.
-// One unsynced 90 MB binary copy saturated dadape's SD card for ~10 s, and
+// One unsynced 90 MB binary copy saturated the test host SD card for ~10 s, and
 // processes faulting in their own pages (session owners, hostd) stalled 5-6 s,
 // pausing every running terminal (direct2c, direct1d). dpkg bounds writeback
 // the same way (sync_file_range after each file).

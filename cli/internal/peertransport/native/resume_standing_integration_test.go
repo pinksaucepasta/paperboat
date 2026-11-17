@@ -17,7 +17,7 @@ import (
 	"tailscale.com/tstest/integration"
 )
 
-// pbvm4 update check: the held terminal's resume was refused on the client at stream_authorize ("internal") because
+// a test VM update check: the held terminal's resume was refused on the client at stream_authorize ("internal") because
 // its access session had left the signed scope (native scope admission: resource_found=false), although the host's
 // standing rule for the peer was still in force, which is what admits the resume on the host. The client must dial
 // with the same standing rule, and a withdrawn standing rule must still refuse it.

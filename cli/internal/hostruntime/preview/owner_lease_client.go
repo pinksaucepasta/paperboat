@@ -336,7 +336,7 @@ func ownerSessionLeaseHTTPError(status int, data []byte) error {
 }
 
 // leaseStepFailed records why a foreground preview or tunnel lost or could not
-// regain its owner lease (pbvm4 feat4: both exited with only a generic error).
+// regain its owner lease (a test VM feat4: both exited with only a generic error).
 func leaseStepFailed(stage string, err error) {
 	kind := fmt.Sprintf("%T", err)
 	var transport *ownerSessionLeaseTransportError

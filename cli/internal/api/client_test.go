@@ -995,7 +995,7 @@ func TestConfigSyncStatusRefusesAPageThatDoesNotAdvance(t *testing.T) {
 }
 
 // Team default calls go to the team they name: in the personal workspace the server refused them with
-// 409 workspace_target_conflict, so `pb config team-default-set/adopt/unadopt` never worked (Lane L, pbvm3).
+// 409 workspace_target_conflict, so `pb config team-default-set/adopt/unadopt` never worked (Lane L, a test VM).
 func TestConfigTeamDefaultCallsUseTheNamedTeamWorkspace(t *testing.T) {
 	seen := map[string]string{}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -9,7 +9,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/config"
 )
 
-// pbmac 2026-11-05: pb login --reauth approved by a different account ended with only "Paperboat could not
+// a test Mac 2026-11-05: pb login --reauth approved by a different account ended with only "Paperboat could not
 // finish the command". The refusal is right; the message must name both accounts and the way out.
 func TestReauthApprovedByAnotherAccountNamesBothAccounts(t *testing.T) {
 	f := &loginDeviceFixture{}

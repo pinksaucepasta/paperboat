@@ -21,7 +21,7 @@ import (
 // A grant the relay would refuse (here: more than its 256 memberships in one grant, as until_revoked
 // session rights produced on prod) makes only that relay unusable: with every relay refused the
 // engine starts direct-only instead of failing the runtime and with it pairing ("relay
-// authorization rejected", pbvm2 2026-10-26). An explicitly requested relay still reports it.
+// authorization rejected", a test VM 2026-10-26). An explicitly requested relay still reports it.
 func TestARefusedRelayGrantLeavesDirectAdmission(t *testing.T) {
 	a, cfg, signer, _ := networkTestAuthority(t)
 	now := time.Now().Unix()

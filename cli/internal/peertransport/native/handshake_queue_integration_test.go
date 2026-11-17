@@ -20,8 +20,8 @@ import (
 
 // Dials to one peer take turns on its handshake lease (it keeps a failed attempt's stale WireGuard state from outliving
 // the retry). After the peer closed cleanly the first dial gives a silent handshake 300 ms, but the dials queued behind
-// it waited out a full second each: on the pbvm3 update the held terminal and a probe took turns for 1018, 1005 and
-// 1004 ms (pbvm4: 2.0 s). The restart is already known, so the queue shares the short wait.
+// it waited out a full second each: on the a test VM update the held terminal and a probe took turns for 1018, 1005 and
+// 1004 ms (a test VM: 2.0 s). The restart is already known, so the queue shares the short wait.
 func TestDialsQueuedBehindARestartedPeersLostHandshakeShareItsShortWait(t *testing.T) {
 	t.Setenv("IN_TS_TEST", "true")
 	regions := integration.RunDERPAndSTUN(t, func(string, ...any) {}, "127.0.0.1")

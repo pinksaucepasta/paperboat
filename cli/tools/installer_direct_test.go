@@ -109,7 +109,7 @@ esac
 				if strings.Contains(string(output), "fixture-token") {
 					t.Fatal("installer exposed the enrollment token")
 				}
-				// A failed reset names pb's own reason (pbmac F1-01 printed only "pb reset failed").
+				// A failed reset names pb's own reason (a test Mac F1-01 printed only "pb reset failed").
 				if scenario == "reset-failure" && !strings.Contains(string(output), "pb reset failed: private fixture detail;") {
 					t.Fatalf("reset failure did not say why: %q", output)
 				}
@@ -133,7 +133,7 @@ esac
 	}
 }
 
-// F1-01 (pbmac, 2026-11-06): macOS TMPDIR ends with "/", the installer staged its token file at ".../T//paperboat-install.X/enrollment-token"
+// F1-01 (a test Mac, 2026-11-06): macOS TMPDIR ends with "/", the installer staged its token file at ".../T//paperboat-install.X/enrollment-token"
 // and pb reset rejected the unclean path with a bare "could not finish the command".
 func TestInstallerStagesACleanTokenFilePathWhenTMPDIRHasATrailingSlash(t *testing.T) {
 	if runtime.GOOS == "windows" {

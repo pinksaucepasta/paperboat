@@ -10,7 +10,7 @@ import (
 	"testing"
 )
 
-// pbvm2 (Ubuntu 24.04, passwordless sudo) failed `pb pair`: its sudoers has a
+// a test VM (Ubuntu 24.04, passwordless sudo) failed `pb pair`: its sudoers has a
 // stock `(ALL:ALL) ALL` rule before `NOPASSWD: ALL`, so `sudo -n true` works but
 // `sudo -v` still demands a password.
 func TestApproveAdministratorSkipsApprovalWhenSudoIsPasswordless(t *testing.T) {

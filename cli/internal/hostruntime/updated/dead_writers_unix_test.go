@@ -68,7 +68,7 @@ func requireRoot(t *testing.T) {
 	}
 }
 
-// pbvm1 F14-03: an installer killed after it wrote native-install.json left the marker, and only an updater
+// a test VM F14-03: an installer killed after it wrote native-install.json left the marker, and only an updater
 // START rolled it back. A running updater does it too, once the installer's lock is free; never before.
 func TestRunningUpdaterRollsBackTheMarkerOfADeadInstallerAndLeavesALiveOne(t *testing.T) {
 	requireRoot(t)

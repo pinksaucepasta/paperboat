@@ -15,7 +15,7 @@ import (
 )
 
 // doctorHostdProbes checks that the native host supervisor answers. Exec, files, terminals and the machine's
-// online state all go through it, but the local daemon reports itself ready without it (pbvm1 F14-03: a failed
+// online state all go through it, but the local daemon reports itself ready without it (a test VM F14-03: a failed
 // update's rollback left no hostd, the machine was offline, and doctor said healthy). A stale socket file from a
 // stopped hostd survives (RuntimeDirectoryPreserve), so the check connects instead of looking for the file.
 func doctorHostdProbes() []doctorpkg.Probe {

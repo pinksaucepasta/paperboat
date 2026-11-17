@@ -25,7 +25,7 @@ func (s failingMachineSource) ListUserMachines(context.Context) ([]api.UserMachi
 
 // The login's daemon refresh goes through the real chain: the daemon's inventory refresh, the local API handler, the
 // client and the message. A signed-out daemon (a revoked machine) says to run pb login --fresh, because signing in
-// again cannot restore its enrollment; any other refresh failure keeps the generic advice (pbvm2, 2026-11-09).
+// again cannot restore its enrollment; any other refresh failure keeps the generic advice (a test VM, 2026-11-09).
 func TestLoginDaemonRefreshFailureAfterRevocationPointsToFreshLogin(t *testing.T) {
 	for name, c := range map[string]struct {
 		err   error

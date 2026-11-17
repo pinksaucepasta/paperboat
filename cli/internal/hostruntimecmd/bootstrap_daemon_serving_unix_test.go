@@ -13,7 +13,7 @@ import (
 
 // Pairing waited for the new daemon to be "ready" and reported "Machine pairing failed while binding the
 // local daemon" when its first inventory refresh could not reach a slow control plane, though the machine
-// was bound and worked (pbvm2/pbvm3 containers, 2026-10-22).
+// was bound and worked (a test VM/a test VM containers, 2026-10-22).
 func TestBoundDaemonServesWhenOnlyTheControlPlaneIsUnreachable(t *testing.T) {
 	const version = "dev-test"
 	for name, test := range map[string]struct {
@@ -23,7 +23,7 @@ func TestBoundDaemonServesWhenOnlyTheControlPlaneIsUnreachable(t *testing.T) {
 		"ready":                     {localdaemon.UpdateProbe{Running: true, Version: version, State: "ready"}, true},
 		"control plane unreachable": {localdaemon.UpdateProbe{Running: true, Version: version, State: "degraded", ControlPlaneUnavailableOnly: true}, true},
 		"degraded otherwise":        {localdaemon.UpdateProbe{Running: true, Version: version, State: "degraded"}, false},
-		// pbvm1, 2026-11-05: a second OS user's pair failed on a daemon whose only item was its local access.
+		// a test VM, 2026-11-05: a second OS user's pair failed on a daemon whose only item was its local access.
 		"local access only":      {localdaemon.UpdateProbe{Running: true, Version: version, State: "degraded", Health: []string{"local_access_unavailable"}}, true},
 		"local access and other": {localdaemon.UpdateProbe{Running: true, Version: version, State: "degraded", Health: []string{"local_access_unavailable", "machine_list_unavailable"}}, false},
 		"still starting":         {localdaemon.UpdateProbe{Running: true, Version: version, State: "starting"}, true},
@@ -76,7 +76,7 @@ func TestPairingWaitsForAStartingDaemonToSettle(t *testing.T) {
 	}
 }
 
-// pbvm1, 2026-11-05: a pair bound to a daemon degraded in its local access names the failing step instead of
+// a test VM, 2026-11-05: a pair bound to a daemon degraded in its local access names the failing step instead of
 // claiming the runtime is ready (or failing as an unexpected error).
 func TestPairingOnADegradedDaemonNamesTheFailingStep(t *testing.T) {
 	title := "Local machine access is unavailable: the machine names step failed"

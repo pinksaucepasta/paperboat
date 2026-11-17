@@ -553,7 +553,7 @@ func TestConfigSyncValidateNamesARepositoryThisMachineCannotReach(t *testing.T) 
 
 // After a team-default unadopt the machine keeps a revoked assignment naming the team's repository;
 // apply read shared config from it and the server refused read access with 404, so every
-// `pb config sync apply` on that machine failed (Lane H, pbvm3). Only the file decides now.
+// `pb config sync apply` on that machine failed (Lane H, a test VM). Only the file decides now.
 func TestConfigSyncSourceIgnoresARevokedAssignmentsRepositories(t *testing.T) {
 	t.Setenv("PATH", "")
 	backend := configSyncSourceBackendFixture(t, map[string]string{"one": ""})

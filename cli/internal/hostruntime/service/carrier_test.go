@@ -15,7 +15,7 @@ func testGeneration(kind string) string {
 	return ""
 }
 
-// pbvm4 2026-11-04: replacing the one carrier unit refused new SSH for ~40 s.
+// a test VM 2026-11-04: replacing the one carrier unit refused new SSH for ~40 s.
 // Each generation now has its own unit, so the new one serves before the old
 // one retires, and a retired generation that exits 0 stays down.
 func TestCarrierGenerationNativeDefinition(t *testing.T) {

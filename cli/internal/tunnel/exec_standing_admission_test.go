@@ -14,7 +14,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/resolver"
 )
 
-// FIX-EXECLAT (pbvm2 dev-8aafdbab9): every warm `pb exec` to the caller's own machine waited 875-1457 ms for a signed
+// FIX-EXECLAT (a test VM dev-8aafdbab9): every warm `pb exec` to the caller's own machine waited 875-1457 ms for a signed
 // network refresh, because the exec's new access session was not in the cached document. The host admits it by its
 // standing rule for its own account, and the client dials on the personal pair that stands for it: no request.
 func TestWarmExecToOwnMachineSkipsTheNetworkRefresh(t *testing.T) {

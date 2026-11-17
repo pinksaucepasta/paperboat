@@ -56,7 +56,7 @@ func TestSudoRefusalNamesTheStepForEveryKindOfRefusal(t *testing.T) {
 	}
 }
 
-// A user without sudo rights saw "privileged cleanup returned an invalid result" (FLEET4, pbt2 on pbvm2): the install
+// A user without sudo rights saw "privileged cleanup returned an invalid result" (FLEET4, pbt2 on a test VM): the install
 // inventory read sudo's empty stdout as a broken report.
 func TestInventoryUnderARefusedSudoNamesSudoNotAnInvalidResult(t *testing.T) {
 	command := exec.CommandContext(t.Context(), "/bin/sh", "-c", "echo 'pbt2 is not in the sudoers file.' >&2; exit 1")

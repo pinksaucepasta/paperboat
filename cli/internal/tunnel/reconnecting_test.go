@@ -464,7 +464,7 @@ func TestReconnectingConnStalledLinkMovesToAFreshLink(t *testing.T) {
 	}
 }
 
-// F3-15 N13 (pbvm2, 2026-11-05): access to the terminal was revoked while its link was silent. The stalled-link
+// F3-15 N13 (a test VM, 2026-11-05): access to the terminal was revoked while its link was silent. The stalled-link
 // probe was refused for good, stopped probing, and kept the dead link: the terminal said nothing for about
 // 150 s until the transport gave up. A permanent refusal while stalled ends the terminal at once with it.
 func TestReconnectingConnStalledLinkEndsAtOnceWhenTheReattachIsRefused(t *testing.T) {
@@ -536,7 +536,7 @@ func (c *handoverConn) exit() {
 	_ = c.Close()
 }
 
-// F3-15 N4/N13 (pbvm2 -> pbvm3, dev-ab41be003, 2026-11-05): after a 45 s drop and a 60 s black hole the terminal
+// F3-15 N4/N13 (a test VM -> a test VM, dev-ab41be003, 2026-11-05): after a 45 s drop and a 60 s black hole the terminal
 // printed nothing for 120 s and 150 s. The stalled-link probe reattached once the network was back
 // (13:40:08.484, 13:43:16.359), but the host's handover to it cleared the old link's stall, so the probe discarded
 // its fresh link (probe_discarded) and the host then ended the old one: no link was left and nothing redialed.

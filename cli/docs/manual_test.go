@@ -125,7 +125,7 @@ func TestManualRemovalPreservesUnreadablePageAndRecovers(t *testing.T) {
 	}
 }
 
-// pbvm1 F14-09: the activation helper's manual refresh rewrote all pages (two fsyncs each) on every update and was
+// a test VM F14-09: the activation helper's manual refresh rewrote all pages (two fsyncs each) on every update and was
 // killed by its 30 s deadline three times on a loaded 1-vCPU VM. An installed, identical page is not rewritten.
 func TestManualInstallLeavesIdenticalPagesUntouched(t *testing.T) {
 	dir := t.TempDir()
@@ -158,7 +158,7 @@ func TestManualInstallLeavesIdenticalPagesUntouched(t *testing.T) {
 	}
 }
 
-// pbvm1 F14-09: a version hop changes the pages, and every changed page cost a temp file, an fsync and a directory
+// a test VM F14-09: a version hop changes the pages, and every changed page cost a temp file, an fsync and a directory
 // fsync (about 540 for 268 pages), which outlasted the helper's 30 s deadline on a loaded 1-vCPU VM. A refresh of
 // every page syncs once, and leaves no temporary file.
 func TestManualRefreshOfEveryPageSyncsOnce(t *testing.T) {

@@ -17,7 +17,7 @@ import (
 	"tailscale.com/tstest/integration"
 )
 
-// FIX-EXECLAT (pbvm2 dev-8aafdbab9): every warm `pb exec` to the caller's own machine refreshed the signed network
+// FIX-EXECLAT (a test VM dev-8aafdbab9): every warm `pb exec` to the caller's own machine refreshed the signed network
 // first (875-1457 ms) because the new exec's access session was not in the cached document, although the host admits
 // it by its standing rule for its own account. The client dials on the personal mesh pair that stands for that rule;
 // once the pair is withdrawn the stream is refused again.

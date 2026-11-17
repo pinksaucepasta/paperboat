@@ -262,7 +262,7 @@ func (s unixSweep) versionLeftovers(ctx context.Context, sources hostinstall.Inv
 
 // retainedOwner reports a catalogue generation whose session owner may stay:
 // one published before the active slot was activated. A descriptor written
-// after it belongs to an update that never committed (pbvm1: each failed
+// after it belongs to an update that never committed (a test VM: each failed
 // update left its candidate's session owner running), not to history.
 func retainedOwner(sources hostinstall.InventorySources, digest string) bool {
 	written, ok := sources.Retained[digest]

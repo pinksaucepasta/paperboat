@@ -18,7 +18,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/edge/internal/edgehttp"
 )
 
-// pbvm4 feat9: at pb update the old worker's preview carrier closed while the edge still routed
+// a test VM feat9: at pb update the old worker's preview carrier closed while the edge still routed
 // the preview to it, and 21 preview GETs failed. The handover is make-before-break: the old
 // worker sends a goaway and keeps serving, the server names the new worker's carrier, the edge
 // keeps the old one serving until the new one attaches, then the old one closes. A GET every

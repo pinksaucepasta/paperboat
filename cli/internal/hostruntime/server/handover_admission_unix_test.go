@@ -158,7 +158,7 @@ func startHandoverGeneration(t *testing.T, ctx context.Context, name string, sha
 	return g
 }
 
-// pbvm4 feat8: a pb update left 3-10 s in which no generation admitted new
+// a test VM feat8: a pb update left 3-10 s in which no generation admitted new
 // native work and foreground previews lost their owner. Every 50 ms a stream
 // opens through the shared listener while a second generation starts with the
 // update-pending fence, takes the listener over and the old one stops

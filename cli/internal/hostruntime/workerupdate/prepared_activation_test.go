@@ -193,7 +193,7 @@ func TestCompletedNativeRollbackRetiresItsGateTransaction(t *testing.T) {
 
 // The native move consumes the staged payload. A helper that restarts after a failed finish
 // (manual refresh, ledger commit) must complete it from the installed worker; it cannot ask
-// for the staged file again. pbvm1 looped forever here with the update installed but pending.
+// for the staged file again. a test VM looped forever here with the update installed but pending.
 func TestRetryAfterInterruptedFinishCompletesWithoutTheStagedPayload(t *testing.T) {
 	f := newFixture(t)
 	var completeErr error

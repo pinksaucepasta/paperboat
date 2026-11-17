@@ -61,7 +61,7 @@ func TestRuntimeObservationBacksOffWhileTheServerFails(t *testing.T) {
 	healthy := &livenessObservationTransport{notify: make(chan struct{}, 1024)}
 	run(healthy)
 	// A machine whose network is down keeps the interval: its retries cost the server nothing, and a
-	// backoff kept it offline at the server for up to 90 s after the network came back (N3 on pbvm2).
+	// backoff kept it offline at the server for up to 90 s after the network came back (N3 on a test VM).
 	unreachable := &failingObservationTransport{start: livenessObservationTransport{notify: make(chan struct{}, 4)}, unreachable: true}
 	run(unreachable)
 	t.Logf("unreachable server %d", unreachable.calls.Load())

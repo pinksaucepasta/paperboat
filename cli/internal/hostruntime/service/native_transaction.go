@@ -11,7 +11,7 @@ import (
 const maxNativeServiceDefinitionSize = 128 << 10
 
 // nativeServiceOperationTimeout matches systemd's DefaultTimeoutStartSec (90 s).
-// At 30 s, systemctl was killed while dadape's update service was still
+// At 30 s, systemctl was killed while the test host update service was still
 // starting (34.7 s with the SD card busy) and the whole update failed.
 const nativeServiceOperationTimeout = 90 * time.Second
 

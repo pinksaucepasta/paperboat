@@ -14,7 +14,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// C066 on pbmac 2026-11-05: pb ssh reads the machine's host keys from the daemon's machine list (F5-07), so
+// C066 on a test Mac 2026-11-05: pb ssh reads the machine's host keys from the daemon's machine list (F5-07), so
 // right after `pb ssh trust-host` it still offered the old keys and failed. trust-host refreshes that list
 // after the promotion succeeds, and only then.
 func TestSSHTrustHostRefreshesTheMachineListAfterPromotion(t *testing.T) {

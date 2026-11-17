@@ -220,7 +220,7 @@ func (c *scriptCapture) Run(_ context.Context, _ string, arguments ...string) ([
 }
 
 // The SYSTEM-context package install must turn winget's progress bar off before it adds the source, or the add
-// hangs on a headless machine (winpool-4 paired without managed SSH for this reason).
+// hangs on a headless machine (a Windows test VM paired without managed SSH for this reason).
 func TestSystemWingetInstallDisablesTheProgressBarBeforeAddingTheSource(t *testing.T) {
 	runner := &scriptCapture{}
 	if err := installWithSystemWinget(context.Background(), Config{Runner: runner, ApprovedVersion: ApprovedVersion}, false); err != nil {

@@ -509,9 +509,9 @@ func TestWindowsNativeSignedRollbackRecovery(t *testing.T) {
 	}
 }
 
-// hop-910 (winpool-6, 2026-11-11): a scheduled update left the host unavailable for 41 s. Maintenance and the update
+// hop-910 (a Windows test VM, 2026-11-11): a scheduled update left the host unavailable for 41 s. Maintenance and the update
 // gates were taken before the candidate's session owner and OpenSSH generation started, the generation was prepared
-// three times, and the carrier was replaced in a second outage after the install (winpool-4: 10.5 s). The activation
+// three times, and the carrier was replaced in a second outage after the install (a Windows test VM: 10.5 s). The activation
 // that installWindows runs now prepares while hostd serves, cuts over, and replaces the carrier while the runtime is
 // stopped, before the roles start again.
 func TestWindowsActivationOrder(t *testing.T) {

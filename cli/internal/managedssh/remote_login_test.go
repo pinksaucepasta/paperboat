@@ -32,13 +32,13 @@ func TestRemoteLoginDeniedOnlyWhenTheGroupExistsAndTheUserIsNotInIt(t *testing.T
 		runner ExitRunner
 		denied bool
 	}{
-		{"no group: every user may log in", "pbmac2", run(false, 67, nil), false},
-		{"member of the group", "pbmac2", run(true, 0, nil), false},
-		{"group exists, user not in it", "pbmac2", run(true, 67, nil), true},
-		{"dseditgroup cannot run: sshd stays the authority", "pbmac2", run(true, 0, errors.New("not found")), false},
+		{"no group: every user may log in", "macuser", run(false, 67, nil), false},
+		{"member of the group", "macuser", run(true, 0, nil), false},
+		{"group exists, user not in it", "macuser", run(true, 67, nil), true},
+		{"dseditgroup cannot run: sshd stays the authority", "macuser", run(true, 0, errors.New("not found")), false},
 		{"no user", "", run(true, 67, nil), false},
 		{"a user name is never an option", "-o", run(true, 67, nil), false},
-		{"no runner", "pbmac2", nil, false},
+		{"no runner", "macuser", nil, false},
 	} {
 		if got := RemoteLoginDenied(test.user, test.runner); got != test.denied {
 			t.Errorf("%s: denied=%v want %v", test.name, got, test.denied)
@@ -53,7 +53,7 @@ func remoteLoginHost(t *testing.T, log *auditLog, checks map[string]int) *Host {
 	go echoConnections(listener)
 	var mu sync.Mutex
 	host, err := NewHost(HostConfig{ProbeTimeout: time.Second, DialTimeout: time.Second, Audit: log.record,
-		LoginDenied: func(user string) bool { mu.Lock(); checks[user]++; mu.Unlock(); return user == "pbmac2" }})
+		LoginDenied: func(user string) bool { mu.Lock(); checks[user]++; mu.Unlock(); return user == "macuser" }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,12 +73,12 @@ func TestServeRefusesOnlyTheLoginUserTheMachinesRemoteLoginDenies(t *testing.T) 
 	defer client.Close()
 	read := make(chan error, 1)
 	go func() { read <- ReadRefusal(bufio.NewReader(client)) }()
-	denied := WithLoginUser(WithPeer(context.Background(), auditPeer), "pbmac2")
+	denied := WithLoginUser(WithPeer(context.Background(), auditPeer), "macuser")
 	if _, err := host.Serve(denied, 4, server); !errors.Is(err, ErrSSHLoginNotAllowed) {
 		t.Fatalf("serve: %v", err)
 	}
 	var refused *RefusedError
-	if err := <-read; !errors.As(err, &refused) || refused.Reason != RefusedLoginNotAllowed+":pbmac2" || !strings.Contains(err.Error(), "pbmac2 isn't allowed to log in over SSH") || !strings.Contains(err.Error(), "Remote Login") {
+	if err := <-read; !errors.As(err, &refused) || refused.Reason != RefusedLoginNotAllowed+":macuser" || !strings.Contains(err.Error(), "macuser isn't allowed to log in over SSH") || !strings.Contains(err.Error(), "Remote Login") {
 		t.Fatalf("client read %v", err)
 	}
 	if event := log.wait(t, 1)[0]; event.Kind != SessionRefused || event.Reason != RefusedLoginNotAllowed {
@@ -104,7 +104,7 @@ func TestServeRefusesOnlyTheLoginUserTheMachinesRemoteLoginDenies(t *testing.T) 
 			t.Fatalf("%s was refused", name)
 		}
 	}
-	if checks["pbmac2"] != 1 || checks["bob"] != 1 || len(checks) != 2 {
+	if checks["macuser"] != 1 || checks["bob"] != 1 || len(checks) != 2 {
 		t.Fatalf("the Remote Login lookup ran %v: once per user, never without one", checks)
 	}
 }

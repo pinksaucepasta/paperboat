@@ -109,7 +109,7 @@ func (s unixCarrierInstallation) Capture(ctx context.Context) ([]byte, error) {
 
 // restoreBaselineCarrier brings the previous generation back as the serving one. Its descriptor names it active before
 // its process starts: a carrier started while the failed candidate is still the active generation waits as a standby
-// for a network handover that never comes, and the machine stays offline (pbvm4 rollback injection, 31 s exec failures
+// for a network handover that never comes, and the machine stays offline (a test VM rollback injection, 31 s exec failures
 // for minutes after "previous version restored").
 func restoreBaselineCarrier(ctx context.Context, baseline CarrierConfig, publish func(CarrierConfig) error, start func(context.Context, CarrierConfig) error) error {
 	if err := publish(baseline); err != nil {
@@ -470,7 +470,7 @@ func reconcileInstalledCarrier(ctx context.Context, instance string, _ ...func(c
 		return err
 	}
 	err = sweepGenerations(ctx, request, active.Generation, false)
-	// Pins go last in the same pass: a generation's pin outlives it until nothing names it any more (pbvm1 F14-04:
+	// Pins go last in the same pass: a generation's pin outlives it until nothing names it any more (a test VM F14-04:
 	// the replaced build's pin stayed after its drain, once the install's own inventory had run).
 	catalog, _, catalogErr := sessionOwnerCatalog(request)
 	if catalogErr != nil {

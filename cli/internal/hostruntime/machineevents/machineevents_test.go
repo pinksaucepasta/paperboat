@@ -183,7 +183,7 @@ func TestShutdownRightAfterStartStopsTheLoopWithoutPanicking(t *testing.T) {
 }
 
 // A newly paired machine enters the peer mesh when it first comes online, which moves only inventory;
-// a host engine waiting on peer_network alone learned of it at its next periodic refresh (N2 on pbvm2:
+// a host engine waiting on peer_network alone learned of it at its next periodic refresh (N2 on a test VM:
 // the first exec from a fresh machine waited 12 s for the relay to forward to the existing one). One
 // subscription to several topics wakes on any of them.
 func TestSubscriptionToSeveralTopicsWakesOnEach(t *testing.T) {

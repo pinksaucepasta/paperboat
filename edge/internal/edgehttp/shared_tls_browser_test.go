@@ -666,7 +666,7 @@ func TestSharedTLSUnknownNameCompletesTLSWithNotFoundPageOnly(t *testing.T) {
 	}
 }
 
-// Right after a handover takeover a host re-attaches its carrier late (anvit 2026-11-09: 404s for up to 6 s):
+// Right after a handover takeover a host re-attaches its carrier late (the test host 2026-11-09: 404s for up to 6 s):
 // its name is held until admitted, and answered not-found only when the grace ends or nothing is held for it.
 func TestSharedTLSNameAdmittedAfterTakeoverIsServedNotAnswered404(t *testing.T) {
 	for _, tc := range []struct {
@@ -740,7 +740,7 @@ func (a *lateDecisionAuthority) ResolveDecision(_ context.Context, d connectorpr
 }
 
 // A public preview is authorized by its ingress decision, not by HasAdmittedHTTPSHostname (restricted routes only):
-// the held name must be re-authorized the same way (anvit 2026-11-09: a name held 14 s after its route attached).
+// the held name must be re-authorized the same way (the test host 2026-11-09: a name held 14 s after its route attached).
 func TestSharedTLSPublicPreviewDecisionAfterTakeoverIsServed(t *testing.T) {
 	match, _ := browserTestMatch()
 	clientTLS, serverTLS, _, _, _ := task24Certificates(t, match.Host)

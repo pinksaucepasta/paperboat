@@ -137,7 +137,7 @@ func retire(generation *transferGeneration) <-chan error {
 }
 
 // A pb send in flight during an update finishes on the generation that holds it, byte-exact and without a
-// reconnect or resume (pbvm4: +2.95 s while the old worker cut its stream at Shutdown). A send started
+// reconnect or resume (a test VM: +2.95 s while the old worker cut its stream at Shutdown). A send started
 // mid-update lands on the new generation, and the old one finishes once its last transfer ended.
 func TestRetiringGenerationDrainsInFlightTransfer(t *testing.T) {
 	root := t.TempDir()

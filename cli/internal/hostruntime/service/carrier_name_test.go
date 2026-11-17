@@ -27,7 +27,7 @@ func TestWindowsCarrierGenerationNames(t *testing.T) {
 	}
 }
 
-// winpool-4 (Part A device run): pairing failed twice with "invalid service definition": the Windows definition
+// a Windows test VM (Part A device run): pairing failed twice with "invalid service definition": the Windows definition
 // path check still expected one carrier per account, and a Windows carrier was not a generational unit. A carrier generation's installer is built like a session
 // owner's and declares PaperboatCarrier-<instance>-<generation>.
 func TestWindowsCarrierGenerationInstallerPath(t *testing.T) {

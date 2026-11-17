@@ -91,7 +91,7 @@ func awaitBoundDaemon(ctx context.Context, probe func(context.Context) (localdae
 // bound; on a slow server either can last longer than any fixed wait, and pairing reported failure on
 // machines that worked (2026-10-22). A daemon degraded only in its local access to other machines is bound
 // too: that item appears only after it read the machine list with the new enrollment, and the daemon retries
-// it by itself (pbvm1, 2026-11-05: a second OS user's pair failed and left an unfinished enrollment). The
+// it by itself (a test VM, 2026-11-05: a second OS user's pair failed and left an unfinished enrollment). The
 // daemon's state stays visible in pb status and pb doctor. Not enrolled, degraded for another reason, the
 // wrong version, or not running is not bound.
 func boundDaemonServing(probe localdaemon.UpdateProbe, expectedVersion string) bool {

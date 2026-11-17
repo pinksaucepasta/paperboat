@@ -258,7 +258,7 @@ func TestPreparedUpdateRecoveryProofBindsProtectedInstallation(t *testing.T) {
 
 // The staged candidate is consumed when it becomes the worker. Pins for the
 // new generation are copied after that point, so the request must name the
-// installed worker; the staging path is gone (pbvm1 official update failed
+// installed worker; the staging path is gone (a test VM official update failed
 // with lstat ENOENT on it, rolling every update back).
 func TestPreparedCandidateActivationLeavesTheRequestPointingAtTheWorker(t *testing.T) {
 	request := validRequest(t)

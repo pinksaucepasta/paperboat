@@ -240,7 +240,7 @@ func installWithIntent(ctx context.Context, request Request, nativeLockHeld bool
 			return err
 		}
 		// A supplied install whose new roles do not come up is rolled back like one that fails validation below
-		// (macpool-8, F14-03: killing the new daemon as it starts ended with a generic "installing failed" message).
+		// (a Mac test VM, F14-03: killing the new daemon as it starts ended with a generic "installing failed" message).
 		if err := activateUnixNativeRoles(ctx, nil, hostd, updater, request.HelperListenAddress, runtime.GOOS != "linux"); err != nil {
 			return notReadyIfSupplied(intent, err)
 		}

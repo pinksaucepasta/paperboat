@@ -70,7 +70,7 @@ func (c *rateLimitedControl) PeerNetworkConfiguration(ctx context.Context, _ api
 	return api.PeerNetworkConfigurationResult{Configuration: testConfigurationToken(c.config, c.signer)}, nil
 }
 
-// A machine whose peer-network budget other engines already spent (pbvm4 feat9, after an update: old and new
+// A machine whose peer-network budget other engines already spent (a test VM feat9, after an update: old and new
 // carrier generations on one machine credential) keeps admitting a loop of new operations: none is refused, an
 // open stream is never blocked behind a renewal, and a burst of operations shares renewals instead of sending one
 // each. Before, the first 429 refused the stream and held every admission for the 12 s refill, so 20 MB sends took

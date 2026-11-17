@@ -61,7 +61,7 @@ func TestDoctorNamesAFailingHostStepUntilItRecovers(t *testing.T) {
 	}
 }
 
-// A failed optional host component degrades only that item (pbmac2: preview_recovery could not set the
+// A failed optional host component degrades only that item (a test Mac: preview_recovery could not set the
 // system proxy as a standard user, and doctor called the whole machine unhealthy). A dimension that is down
 // still fails local_state.
 func TestDoctorHostStepsWarnsForADegradedComponentAndFailsWhenDown(t *testing.T) {

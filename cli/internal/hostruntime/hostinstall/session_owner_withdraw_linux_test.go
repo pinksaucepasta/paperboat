@@ -35,7 +35,7 @@ func (r *withdrawRunner) Output(ctx context.Context, name string, args ...string
 	return "LoadState=loaded\nUnitFileState=enabled\nActiveState=active\nSubState=running\n", r.Run(ctx, name, args...)
 }
 
-// pbvm1: every `pb update` that failed at "apply service declaration" left the
+// a test VM: every `pb update` that failed at "apply service declaration" left the
 // candidate's session owner running, with its catalogue descriptor. The failed
 // attempt withdraws exactly the session owner it published, never one that was
 // already there.

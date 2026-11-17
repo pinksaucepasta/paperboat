@@ -51,7 +51,7 @@ func TestTwoOSUsersPublishTheSameMachineNameAndAClashDegradesOnlyThatName(t *tes
 	}
 }
 
-// pbvm1, 2026-11-05: a second OS user paired into the SAME account went degraded ("Local machine access is
+// a test VM, 2026-11-05: a second OS user paired into the SAME account went degraded ("Local machine access is
 // unavailable", local_access_machine_names_failed): both daemons publish every machine of the account under the
 // same names, and the guard refused the second user's whole names batch. Each uid gets its own address for the
 // same (account, machine) claim and publishes the account's names without a clash.

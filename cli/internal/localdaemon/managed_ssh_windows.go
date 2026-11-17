@@ -206,7 +206,7 @@ func installWindowsOpenSSHConfig(cfg ManagedSSHConfig, agentSocket, publicKey, d
 	executable := quoteWindowsOpenSSH(windowsOpenSSHExecutable(cfg.Executable))
 	// Match exec takes one quoted word, so the path there has no spaces: its 8.3 short form, slashed but without the
 	// `//?/` prefix the ProxyCommand needs: the built-in OpenSSH cannot start a Match exec command by that name (the
-	// Match never applied and `ssh -G` hung on winpool-7, 2026-11-16).
+	// Match never applied and `ssh -G` hung on a Windows test VM, 2026-11-16).
 	short, err := windowsShortPath(cfg.Executable)
 	if err != nil {
 		return err

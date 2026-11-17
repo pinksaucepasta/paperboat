@@ -51,7 +51,7 @@ func TestAPITokenLoginStartsATokenSession(t *testing.T) {
 	loginHTTPClient = srv.Client
 	path, store := browserLoginFixture(t, srv.URL)
 	// A headless Mac or container has no usable credential store: the session goes to owner-only files
-	// (pbmac2 over SSH refused the Keychain write, exit 36).
+	// (a test Mac over SSH refused the Keychain write, exit 36).
 	headless, _ := config.Load(path)
 	headless.Auth.AllowFileFallback = false
 	if err := headless.Save(); err != nil {

@@ -303,7 +303,7 @@ func (s *Service) populateControlState(response *ControlResponse) error {
 	if state.Stage == updateflow.StageAwaitingApproval {
 		candidate, candidateErr := s.currentManager().PreparedCandidate()
 		// The approved activation moved this exact candidate's staged payload into place; its readiness probe
-		// reads this status, so that must not fail it (dadape rolled back .1→.2 on 170 candidate_changed probes).
+		// reads this status, so that must not fail it (the test host rolled back .1→.2 on 170 candidate_changed probes).
 		// Any other verification failure, or a handoff for another candidate, still fails status.
 		consumedByActivation := handoff != nil && handoff.Candidate == state.CandidateVersion && errors.Is(candidateErr, workerupdate.ErrStagedPayloadConsumed)
 		// A candidate that no longer verifies is never offered for approval (the approval re-verifies it) and must not make

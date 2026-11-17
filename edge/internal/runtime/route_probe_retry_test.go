@@ -72,7 +72,7 @@ func TestRouteWorkerReprobesARouteItsMachineServesJustAfterTheTunnelWake(t *test
 	assertReprobedAfterTunnelWake(t, &lateServingCarrier{})
 }
 
-// The wake's probe can also fail on a carrier stream cut (prod oracle edge, 00:21:56Z: route_probe end_of_stream);
+// The wake's probe can also fail on a carrier stream cut (prod the test host edge, 00:21:56Z: route_probe end_of_stream);
 // that route was staged only on the next 5 s tick (`pb tunnel create --wait` 5.9 s instead of 1.5 s).
 func TestRouteWorkerReprobesARouteWhoseWakeProbeHitAStreamCut(t *testing.T) {
 	assertReprobedAfterTunnelWake(t, &lateServingCarrier{failure: io.ErrUnexpectedEOF})

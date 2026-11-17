@@ -18,7 +18,7 @@ import (
 
 // A new worker whose activation outlasts the old step deadline and the old 5 s acknowledgement window (its control
 // plane component starts after components that call a slow control plane) still completes the handover: the old
-// generation does not take its address back, and the acknowledgement is written (winpool-7, 2026-11-12).
+// generation does not take its address back, and the acknowledgement is written (a Windows test VM, 2026-11-12).
 func TestWindowsHandoverSurvivesAnActivationLongerThanTheStepDeadline(t *testing.T) {
 	suffix := make([]byte, 8)
 	_, _ = rand.Read(suffix)

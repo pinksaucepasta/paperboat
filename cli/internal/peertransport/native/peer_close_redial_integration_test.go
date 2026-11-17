@@ -17,7 +17,7 @@ import (
 	"tailscale.com/tailcfg"
 )
 
-// pbvm4 run8: after `pb update` the target's carrier closes the held session and restarts under the
+// a test VM run8: after `pb update` the target's carrier closes the held session and restarts under the
 // same node key. The client's cached lease still holds the old WireGuard session, so the first QUIC
 // flight of the redial was lost and the handshake failed after 1 s before the retry took 6 ms.
 func TestRedialAfterPeerClosedSessionDoesNotLoseFirstHandshake(t *testing.T) {
@@ -26,14 +26,14 @@ func TestRedialAfterPeerClosedSessionDoesNotLoseFirstHandshake(t *testing.T) {
 
 // The same restart while another flow still owns the cached client (the exec probe loop's dial in flight, or a session
 // not released yet): the client cannot be retired, and the redial must still hand the restarted peer a handshake, not
-// data on the old keys. pbvm4 update check: 7 handshake failures at 1 s each, then success at +12 s, when WireGuard's
+// data on the old keys. a test VM update check: 7 handshake failures at 1 s each, then success at +12 s, when WireGuard's
 // own no-reply rekey fired.
 func TestRedialAfterPeerCloseWhileAnotherFlowOwnsTheClient(t *testing.T) {
 	redialAfterPeerClose(t, true, false)
 }
 
 // The restart also killed a second session to the peer, but its close has not reached the client when the redial
-// starts (pbvm4 update check, 2 of 5 runs: the exec loop's session was still "live" for a few milliseconds, so the
+// starts (a test VM update check, 2 of 5 runs: the exec loop's session was still "live" for a few milliseconds, so the
 // reset was skipped and the held terminal waited 16 s for WireGuard's own rekey). The peer's clean close is the restart
 // signal; another session that looks alive does not cancel it.
 func TestRedialAfterPeerCloseWhileASecondSessionLooksAlive(t *testing.T) {

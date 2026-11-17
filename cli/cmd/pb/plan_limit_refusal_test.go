@@ -32,7 +32,7 @@ func TestARenewalRefusedAtThePlanLimitNamesIt(t *testing.T) {
 }
 
 // A send the relay cut at the limit fails like a lost connection; while the daemon's latest refresh
-// says relays are withheld at the limit, the command names it (Lane O, pbvm3 relay-only send).
+// says relays are withheld at the limit, the command names it (Lane O, a test VM relay-only send).
 func TestAStreamCutByTheRelayAtThePlanLimitNamesIt(t *testing.T) {
 	const limit = "This workspace's hosted relay and edge bandwidth is used up. Add bandwidth: https://console.example.test/billing"
 	previous := readDaemonSnapshot

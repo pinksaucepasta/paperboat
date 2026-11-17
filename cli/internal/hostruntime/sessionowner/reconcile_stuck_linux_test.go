@@ -16,7 +16,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/workloadbridge"
 )
 
-// dadape: the updater's reconcile pass hit its 2-minute deadline on every
+// the test host: the updater's reconcile pass hit its 2-minute deadline on every
 // update. Each old owner that did not answer retirement held the pass for
 // the bridge's 30 s call timeout. An owner that never confirms retirement is
 // now bounded, named in the error, and left running for the next pass.

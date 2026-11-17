@@ -12,7 +12,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// pbmac 2026-11-05 (support_d1317b73): pb status said Path none and every connection to the peer failed, while
+// a test Mac 2026-11-05 (support_d1317b73): pb status said Path none and every connection to the peer failed, while
 // pb doctor said healthy. With no machine selected, doctor names the path to each machine in use and fails on
 // a machine this computer could not reach.
 func TestDoctorReportsNoPathToAPeerAsUnhealthy(t *testing.T) {

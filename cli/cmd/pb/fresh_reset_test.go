@@ -354,7 +354,7 @@ func TestFreshEnrollmentCleanupRetainsStateAfterServiceFailure(t *testing.T) {
 	}
 }
 
-// F1-09 (pbmac): a failed re-pair left an unfinished enrollment; reset's root
+// F1-09 (a test Mac): a failed re-pair left an unfinished enrollment; reset's root
 // purge failed, so the journal was retained and pb pair kept demanding pb reset.
 func TestFreshEnrollmentResetDiscardsTheUnfinishedEnrollmentWhenTheRuntimePurgeFails(t *testing.T) {
 	root := t.TempDir()

@@ -119,7 +119,7 @@ func TestGatewayRoutesEachConnectionToItsUsersDaemon(t *testing.T) {
 	}
 }
 
-// F23-01 on a device: as root with PB_TWO_USER_UIDS=<a>,<b> (the pbvm2 two-user container), each OS user's own
+// F23-01 on a device: as root with PB_TWO_USER_UIDS=<a>,<b> (the a test VM two-user container), each OS user's own
 // process connects to one shared gateway listener on 127.100.0.1 and the kernel-attributed handoff must reach
 // only that user's daemon end, 20 rounds each.
 func TestGatewayRoutesTwoOSUsersOnDevice(t *testing.T) {

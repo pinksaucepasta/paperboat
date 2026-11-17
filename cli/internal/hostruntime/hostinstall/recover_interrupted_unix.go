@@ -180,7 +180,7 @@ var errPendingUnreadable = errors.New("the interrupted first enrollment's reques
 
 // withdrawInterruptedCandidate undoes the session owner a killed install started for its candidate source and the
 // candidate's pin, as the install's own failure path does (candidateSessionOwner.withdraw, then the inventory): the
-// inventory cannot tell that descriptor from history once recovery reactivates the previous worker (pbvm1 F14-03:
+// inventory cannot tell that descriptor from history once recovery reactivates the previous worker (a test VM F14-03:
 // both stayed through a later good update). request and active are recoveryRequest's. It runs under the install
 // lock, so no install is staging a pin. A descriptor of that generation on other code is history republished on the
 // active code, not the candidate.

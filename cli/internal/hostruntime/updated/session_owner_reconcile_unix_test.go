@@ -84,7 +84,7 @@ func TestCarrierReconcileRunsAfterOwnerReconcileFailure(t *testing.T) {
 	}
 }
 
-// dadape: an owner pass waiting on old owners that will not retire held
+// the test host: an owner pass waiting on old owners that will not retire held
 // controlMu until its 2-minute deadline, delaying the update's owner start.
 // The pass yields: a control request that needs the lock cancels it.
 func TestOwnerReconcileYieldsControlLockToOwnerStart(t *testing.T) {

@@ -39,7 +39,7 @@ func newCandidateSessionOwner(request Request) (candidateSessionOwner, error) {
 }
 
 // withdrawUnless undoes the candidate after an attempt that did not commit: its unit
-// is stopped and removed and its descriptor forgotten (pbvm1: every update that
+// is stopped and removed and its descriptor forgotten (a test VM: every update that
 // failed at service apply left one running). A generation that was already
 // published, or that the installation record now names (committed), is not this attempt's.
 func (o candidateSessionOwner) withdrawUnless(ctx context.Context, committed string) error {

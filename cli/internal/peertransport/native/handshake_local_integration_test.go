@@ -19,7 +19,7 @@ import (
 
 // A peer on this machine answers a handshake in milliseconds, so a silent first flight (its carrier is replaced by an
 // update) is worth 300 ms, not a second. The updated daemon is a new process with no restart mark for the peer, so the
-// wait cannot depend on one: on the pbvm3 pair every failed handshake of the held terminal's redial cost the full second.
+// wait cannot depend on one: on the a test VM pair every failed handshake of the held terminal's redial cost the full second.
 func TestSameHostPeerGivesASilentFirstFlightOnlyTheShortWait(t *testing.T) {
 	t.Setenv("IN_TS_TEST", "true")
 	regions := integration.RunDERPAndSTUN(t, func(string, ...any) {}, "127.0.0.1")

@@ -187,7 +187,7 @@ func (s *Server) Start() error {
 					s.recordPeerStart(src, start)
 					// The peer reached us through regionID, so it is a rendezvous both ends hold: answer it there
 					// rather than on the peer's default region, which may be a relay this engine cannot reach
-					// (pbmac 2026-11-05). Tailscale replies on the region it heard a peer from (magicsock
+					// (a test Mac 2026-11-05). Tailscale replies on the region it heard a peer from (magicsock
 					// derp.go derpRoute, issue 150).
 					_ = lb.setPeerRelayRegion(src, regionID)
 					if _, err := mc.SendDERPPacketTo(src, regionID, EncodeMeowed(nonce, s.startID)); err == nil {
@@ -394,7 +394,7 @@ func (s *Server) recordPeerStart(peer key.NodePublic, start [meowNonceLen]byte) 
 
 // resetRestartedPeer drops the WireGuard session held with a peer that restarted with the same keys and port: the
 // session died with the old process, and wireguard-go allows a new initiation only 5 s after the last one, so a
-// flow could lose QUIC's 1 s handshake (pbvm2: 3 of 28 execs right after a target restart lost 1 s with
+// flow could lose QUIC's 1 s handshake (a test VM: 3 of 28 execs right after a target restart lost 1 s with
 // MarkDevicePeerForHandshake alone). The next packet re-creates the peer, which handshakes at once, as Tailscale
 // resets a peer whose per-start disco key changed (ipn/ipnlocal/local.go:2579, magicsock endpoint.go updateFromNode).
 func (s *Server) resetRestartedPeer(peer key.NodePublic) {
@@ -404,7 +404,7 @@ func (s *Server) resetRestartedPeer(peer key.NodePublic) {
 
 // resetUnheardPeer drops the WireGuard session held with a peer whose start id this engine never heard, before a new
 // handshake's dial sends anything: the session (from the peer dialing us) may have died with a restart since, and no
-// answer can tell (pbvm2 q3-b's first exec to a restarted q3-a lost 1 s that way). Resetting later, on the answer,
+// answer can tell (a test VM q3-b's first exec to a restarted q3-a lost 1 s that way). Resetting later, on the answer,
 // would drop the dial's queued packets once a direct answer released it.
 func (s *Server) resetUnheardPeer(peer key.NodePublic) {
 	diagnosticlog.TryInfo("native underlay session", "stage", "peer_start_unheard")
@@ -490,7 +490,7 @@ func (s *Server) awaitMeow(ctx context.Context, peer key.NodePublic) error {
 		}
 		// A send that failed (relay connect held, or in its backoff) is retried after the connect backoff, not a
 		// whole second: the dial may already be released by a direct answer, and only this handshake's answer tells
-		// a restarted peer's start id before QUIC's 1 s handshake timeout (pbvm2 q3: a fresh dialer's first send
+		// a restarted peer's start id before QUIC's 1 s handshake timeout (a test VM q3: a fresh dialer's first send
 		// failed, the answer came 1 s later and the exec lost 1 s).
 		wait := time.Second
 		if lastSendErr != nil {

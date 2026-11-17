@@ -21,7 +21,7 @@ func TestServiceDiagnosticExcludesPrivateErrorData(t *testing.T) {
 }
 
 // A start failure names the components it passed through and the text of the leaf error, so the
-// journal says which listener or component refused to start (oracle, 2026-11-05).
+// journal says which listener or component refused to start (the test host, 2026-11-05).
 func TestServiceDiagnosticNamesTheFailingComponentAndItsError(t *testing.T) {
 	bind := &net.OpError{Op: "listen", Net: "tcp", Addr: &net.TCPAddr{IP: net.IPv4(10, 0, 0, 221), Port: 443}, Err: syscall.EADDRINUSE}
 	err := errors.Join(&edgeruntime.StartError{Component: "*runtime.DataPlane", Err: errors.Join(&edgeruntime.StartError{Component: "*runtime.HTTPServer", Err: bind}, nil)}, nil)

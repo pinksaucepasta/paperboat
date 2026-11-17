@@ -257,7 +257,7 @@ func actionRemoteExec(c *command.Context, requested string, request tunnel.ExecR
 	lastEventSequence := uint64(0)
 	// The command keeps running in its session owner through pb update; the
 	// stream may be gone while the runtime restarts, so reattach for up to
-	// execReattachWindow instead of 300 ms (pbvm4 feat runs: update restarts take seconds).
+	// execReattachWindow instead of 300 ms (a test VM feat runs: update restarts take seconds).
 	recovery := reattach.New(reattach.Policy{Attempts: execReattachAttempts, Backoff: execRecoveryBackoff, Retryable: retryableExecReattachment})
 	var code int
 	var inputCloseFailure error
@@ -393,7 +393,7 @@ const execReattachAttempts = 40
 var execReattachAttemptTimeout = 15 * time.Second
 
 // execReattachWindow bounds one recovery: it outlasts a machine restarting for an update (a Windows worker was
-// unavailable 41 and 48 s through pb install on winpool-8; 40 s dropped the exec 2 s before it was back). Attempts alone
+// unavailable 41 and 48 s through pb install on a Windows test VM; 40 s dropped the exec 2 s before it was back). Attempts alone
 // do not bound time: 40 attempts that each hang to 15 s take 10 min.
 var execReattachWindow = 90 * time.Second
 
@@ -484,7 +484,7 @@ func execStartUncertain(err error) bool {
 
 // retryUncertainExecStart retries an exec whose start is uncertain, with the same operation ID (the host runs it at
 // most once), for as long as a running exec may reattach: a machine restarting for an update answers again within that
-// window, where three 10 s peer opens gave up first (winpool pb install: worker unavailable 41 s, pb exec failed at 31 s).
+// window, where three 10 s peer opens gave up first (a Windows test VM pb install: worker unavailable 41 s, pb exec failed at 31 s).
 // startExec opens the exec and retries an uncertain start (retryUncertainExecStart), all within the user's --timeout
 // when one is set: the timeout bounds the whole exec, its start included (W1: --timeout 2s waited out a peer update
 // for 10 s). A start that has not opened when it ends is reported as uncertain: the open may have reached the host.

@@ -797,7 +797,7 @@ func TestClosingRuntimeCarrierSendsHostGoaway(t *testing.T) {
 	}
 }
 
-// pbvm4 feat9: the old worker closed its carriers right after its goaway while the edge still
+// a test VM feat9: the old worker closed its carriers right after its goaway while the edge still
 // sent it the preview's requests. Make-before-break: after the goaway the worker keeps serving
 // as long as the edge opens streams on its carrier, and closes once the edge has moved to the
 // next worker's carrier (handoverQuiet without a stream), never later than carrierDrainGrace.
@@ -944,7 +944,7 @@ func TestRetiringWorkerKeepsItsCarrierForHeldBrowserTerminals(t *testing.T) {
 	}
 }
 
-// pbvm1 vm1-1a6479a4-124638: the held browser terminal ended at 12:51:13.7, so the drain returned and
+// a test VM vm1-1a6479a4-124638: the held browser terminal ended at 12:51:13.7, so the drain returned and
 // Shutdown closed the old carriers at once, while the edge still had the tunnel route on the old carrier
 // until 20.86: a request hung 5 s and failed. Shutdown keeps serving until the edge has opened no stream
 // for handoverQuiet, never longer than carrierDrainGrace.
@@ -1015,7 +1015,7 @@ func TestShutdownAfterTheHandoverServesWhileTheEdgeStillSendsRequests(t *testing
 	}
 }
 
-// pbvm4 update check: a browser terminal held by the retiring worker stayed attached to silence for 19-25 s (the
+// a test VM update check: a browser terminal held by the retiring worker stayed attached to silence for 19-25 s (the
 // page never left "attached"): the drain waited for it to leave while the worker could no longer serve it. After the
 // goaways the worker ends the terminals it holds, so the edge moves each browser to the successor at once.
 func TestDrainEndsTheBrowserTerminalsItHoldsAfterTheHandover(t *testing.T) {

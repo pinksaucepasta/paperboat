@@ -638,7 +638,7 @@ func (c *Controller) AcquireActive(workerID string, epoch uint64) (func(), error
 	// The startup fence (maintenancePending) does not refuse work: this
 	// generation already took the listeners over and the previous one stopped
 	// admitting, so refusing here leaves no generation serving until the native
-	// commit (pbvm4 feat8: 3 s of refused exec/SSH/dispatch). It still gates
+	// commit (a test VM feat8: 3 s of refused exec/SSH/dispatch). It still gates
 	// the owner commit below. Prior art: Teleport lib/service/signals.go, nginx
 	// binary upgrade: the new process serves as soon as it is ready.
 	if c.replacing || c.maintenanceHeldLocked() {
@@ -688,7 +688,7 @@ func (c *Controller) PrepareMaintenance(ctx context.Context, force bool, workloa
 // requests and the supplied naturally completing workloads, then applies the
 // existing protected-workload policy.
 // maintenanceBusy names the step that refused maintenance in the diagnostics
-// (pbvm4 feat3/feat4 rolled back with only "maintenance is busy").
+// (a test VM feat3/feat4 rolled back with only "maintenance is busy").
 func maintenanceBusy(step string) error {
 	diagnosticlog.TryWarn("hostd maintenance busy", "stage", step)
 	return ErrMaintenanceBusy

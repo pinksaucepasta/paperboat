@@ -5,7 +5,7 @@ package tailnet
 // Scale check (PLAN 3b, Lane W): an idle machine holding one live native connection (an open `pb ssh`, a terminal, a
 // carrier to a peer) must not call the signed peer configuration once a second. That endpoint returns the machine's
 // whole peer set, so a fleet of 100k connected machines would cost ~100k requests/s and grow with peers per account.
-// Found on staging (pbvm4): one machine with a live carrier sent 549 POST /v1/machine-peer-network/config in 10 min.
+// Found on staging (a test VM): one machine with a live carrier sent 549 POST /v1/machine-peer-network/config in 10 min.
 //
 //	go test -tags load -run TestLoadLiveScopeDoesNotPollConfigurationEverySecond -v ./internal/peertransport/tailnet/
 

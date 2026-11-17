@@ -337,7 +337,7 @@ func (s *Service) DrainBrowserTerminals(ctx context.Context) error {
 func (s *Service) Shutdown(ctx context.Context) error {
 	s.handOver(ctx)
 	// An earlier drain (browser terminals) may have ended while an edge still holds a route only on this
-	// worker's carrier (pbvm1 vm1-1a6479a4-124638, the tunnel route for 7 s): serve until it stops sending.
+	// worker's carrier (a test VM vm1-1a6479a4-124638, the tunnel route for 7 s): serve until it stops sending.
 	s.awaitHandover(ctx, time.Now(), time.Time{})
 	// Canceling closes the carriers.
 	s.mu.Lock()

@@ -18,7 +18,7 @@ import (
 // while the current one still serves. Each foreground lease is kept in one
 // owner-only file, its token only as SHA-256, so the next generation registers
 // the same owner session at start and resumes the preview at once; the CLI's
-// next heartbeat, to whichever generation accepts it, proves the token (pbvm4
+// next heartbeat, to whichever generation accepts it, proves the token (a test VM
 // feat8: previews and tunnels paused ~9 s until the CLI reattached).
 // Prior art: Envoy hot restart hands shared state to the new process before
 // the old one drains.

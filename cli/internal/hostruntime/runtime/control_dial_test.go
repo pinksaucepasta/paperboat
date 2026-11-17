@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-// pbvm4 run14: one DNS timeout stopped the staged carrier from starting.
+// a test VM run14: one DNS timeout stopped the staged carrier from starting.
 func TestControlDialSurvivesOneDNSTimeoutAndReusesAddresses(t *testing.T) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

@@ -19,7 +19,7 @@ const managedSSHInstallTimeout = 15 * time.Second
 // fails is retried on the next refresh instead of leaving managed SSH off until a restart. The outcome
 // is reported when it changes. The runtime is started on lifetime, the daemon's context: its agent
 // serves on that context, and starting it on a refresh's bounded context stopped the agent as soon as
-// that refresh ended (round 7, dadape: no agent socket, `pb ssh` denied).
+// that refresh ended (round 7, the test host: no agent socket, `pb ssh` denied).
 type managedSSHOwner struct {
 	lifetime  context.Context
 	config    ManagedSSHConfig

@@ -32,7 +32,7 @@ func writeHostKey(t *testing.T, dir string) string {
 }
 
 // pb doctor --repair recreates deleted managed sshd host keys while hostd runs: the reader must return the new key and
-// the watch must say so, or the server keeps the old key and every client refuses the machine (winpool, 2026-11-13).
+// the watch must say so, or the server keeps the old key and every client refuses the machine (a Windows test VM, 2026-11-13).
 func TestWindowsHostKeysFollowRecreatedFiles(t *testing.T) {
 	dir := t.TempDir()
 	first := writeHostKey(t, dir)

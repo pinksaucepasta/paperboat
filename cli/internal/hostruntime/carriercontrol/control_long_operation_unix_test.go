@@ -14,7 +14,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/shorttemp"
 )
 
-// pbvm4 feat2: pb update failed with `Post "http://carrier/v1/carrier/control":
+// a test VM feat2: pb update failed with `Post "http://carrier/v1/carrier/control":
 // EOF` because the control server's 5 s write timeout cut off a legitimately
 // longer operation (terminal move up to 15 s).
 func TestCarrierControlAnswersOperationsLongerThanFiveSeconds(t *testing.T) {

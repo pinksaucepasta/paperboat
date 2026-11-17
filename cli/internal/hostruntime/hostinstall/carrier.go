@@ -80,7 +80,7 @@ func sourceGeneration(s installsource.Source) (string, error) {
 func carrierControlEndpoint(hostdEndpoint, generation string) string {
 	// A short generation suffix: macOS sun_path holds 104 bytes, and the full
 	// 32-hex name made bind fail with EINVAL under /Library/Application Support
-	// (pbmac: "initial carrier did not become ready"). 16 hex stay unique
+	// (a test Mac: "initial carrier did not become ready"). 16 hex stay unique
 	// among the few generations alive at once.
 	return hostdEndpoint + ".c" + generation[:16]
 }

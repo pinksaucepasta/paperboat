@@ -7,7 +7,7 @@ import (
 )
 
 // Different hosts can advertise the same private Docker/LAN addresses. An address match must not
-// skip regional relay preparation for a remote machine (dadape -> hp, 2026-10-27).
+// skip regional relay preparation for a remote machine (the test host -> hp, 2026-10-27).
 func TestPeerLocalityUsesMachineIdentityDespiteOverlappingAddresses(t *testing.T) {
 	addresses, err := net.InterfaceAddrs()
 	if err != nil {
