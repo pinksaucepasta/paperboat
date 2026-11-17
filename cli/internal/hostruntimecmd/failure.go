@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"reflect"
+	"strings"
 	"syscall"
 
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
@@ -302,6 +303,33 @@ var errRecipeNeedsRoot = errors.New("a recipe install needs root or passwordless
 
 const recipeNeedsRootMessage = "Installing needs root or passwordless sudo, and this shell has neither. Run the installer as root (in Docker the default user is root), or allow passwordless sudo for this user. Recipe installs never ask for a password, so they never hang a CI job."
 
+// privilegedStepError is a privileged service step (sudo ... __runtime-service) that exited non-zero. Output is what
+// it printed last: its own cause line, for example why the daemon it started exited.
+type privilegedStepError struct {
+	Err    error
+	Output string
+}
+
+func (e *privilegedStepError) Error() string {
+	return "administrator approval or service installation failed: " + e.Err.Error()
+}
+func (e *privilegedStepError) Unwrap() error { return e.Err }
+
+// privilegedReason is the last line the privileged step printed (its "pb: cause:" line when it ended in failure),
+// bounded; "" when there is none.
+func privilegedReason(err error) string {
+	var step *privilegedStepError
+	if !errors.As(err, &step) {
+		return ""
+	}
+	lines := strings.Split(strings.TrimSpace(step.Output), "\n")
+	reason := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(lines[len(lines)-1]), "pb:")), "cause:"))
+	if len(reason) > 400 {
+		reason = reason[:400] + "..."
+	}
+	return reason
+}
+
 type installationStageError struct {
 	Stage string
 	Cause error
@@ -320,6 +348,9 @@ func (e *installationStageError) Error() string {
 		case "artifact_verification":
 			step = "verifying the runtime artifact"
 		case "service_install":
+			if reason := privilegedReason(e.Cause); reason != "" {
+				return "Machine pairing failed while installing system services: " + reason + ". Run pb doctor, then retry pairing with the same enrollment token file."
+			}
 			step = "installing system services"
 		case "service_readiness":
 			step = "confirming system service readiness"

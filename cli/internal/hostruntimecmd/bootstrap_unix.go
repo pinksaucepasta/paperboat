@@ -563,7 +563,7 @@ func authorizeServiceOperation(ctx context.Context, executable, operation string
 		if refused := sudoRefusal("Installing the Paperboat system service", err, reason.String()); refused != nil {
 			return refused
 		}
-		return fmt.Errorf("administrator approval or service installation failed: %w", err)
+		return &privilegedStepError{Err: err, Output: reason.String()}
 	}
 	return nil
 }

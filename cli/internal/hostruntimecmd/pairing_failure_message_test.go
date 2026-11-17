@@ -95,3 +95,18 @@ func TestRuntimeFailureMessageNamesAWrappedStep(t *testing.T) {
 		t.Fatalf("message = %q", got)
 	}
 }
+
+// DEP3: a daemon that exited while `pb pair` installed the service ended as "installing system services" with the
+// real reason (the privileged step's last "pb: cause:" line) hidden.
+func TestPairNamesWhyThePrivilegedInstallStepFailed(t *testing.T) {
+	output := "pb: Paperboat could not start\npb: cause: the runtime worker exited without being stopped: exit status 1; last output: relay grant refused\n"
+	err := &installationStageError{Stage: "service_install", Cause: &privilegedStepError{Err: errors.New("exit status 1"), Output: output}}
+	message := runtimeFailureMessage(err)
+	if !strings.Contains(message, "while installing system services: the runtime worker exited without being stopped") || !strings.Contains(message, "relay grant refused") || !strings.Contains(message, "pb doctor") {
+		t.Fatalf("message = %q", message)
+	}
+	silent := &installationStageError{Stage: "service_install", Cause: &privilegedStepError{Err: errors.New("exit status 1")}}
+	if got := runtimeFailureMessage(silent); !strings.Contains(got, "while installing system services. Run pb doctor") {
+		t.Fatalf("silent step message = %q", got)
+	}
+}
