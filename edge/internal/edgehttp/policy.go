@@ -926,6 +926,7 @@ func (p *Policy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		ctx, cancelCause := context.WithCancelCause(r.Context())
 		cancel := func() { cancelCause(errHelperAccessRevoked) }
 		defer cancel()
+		//paperboat:allow-source-policy sensitive-log owner=edgehttp reason=path-class-presence-only
 		slog.InfoContext(ctx, "runtime_helper_access", "path", r.URL.Path, "credential_class", claims.CredentialClass, "assignment_present", claims.AssignmentID != "")
 		// The edge accounts no helper stream: what a CLI or host carries (exec, ssh, terminal,
 		// file transfer, inbox, private access) is reported natively by the host runtime, which
