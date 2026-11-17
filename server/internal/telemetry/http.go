@@ -5,6 +5,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/shared/health"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/felixge/httpsnoop"
@@ -18,7 +19,10 @@ type HTTPIdentity func(context.Context) (requestID, correlationID string)
 // caller-supplied from a finite allowlist so user-controlled paths and
 // hostnames can never become metric labels.
 type HTTPObserver struct {
-	Metrics  *Metrics
+	Metrics *Metrics
+	// Routes, when set, receives the per-route-template request counter and duration. It is a registry of its
+	// own: hundreds of route series must not share the series cap or the Sentry snapshot of Metrics.
+	Routes   *Metrics
 	Events   *EventLog
 	Identity HTTPIdentity
 	Now      func() time.Time
@@ -40,7 +44,8 @@ func (o HTTPObserver) WrapFunc(routeFamily func(*http.Request) string, next http
 			family = normalizeHTTPRouteFamily(routeFamily(r))
 		}
 		started := o.now()
-		captured := httpsnoop.CaptureMetrics(next, w, r)
+		matched := &routeCapture{}
+		captured := httpsnoop.CaptureMetrics(next, w, r.WithContext(context.WithValue(r.Context(), routeCaptureKey{}, matched)))
 		statusClass := httpStatusClass(captured.Code)
 		outcome := OutcomeSuccess
 		severity := SeverityInfo
@@ -57,6 +62,7 @@ func (o HTTPObserver) WrapFunc(routeFamily func(*http.Request) string, next http
 			})
 			_ = o.Metrics.ObserveHistogram(MetricHTTPDuration, MetricLabels{"route_family": family, "status_class": statusClass}, captured.Duration.Seconds())
 		}
+		o.recordRoute(r.Method, matched, statusClass, captured.Duration)
 		if o.Events == nil || o.Identity == nil {
 			return
 		}
@@ -70,6 +76,53 @@ func (o HTTPObserver) WrapFunc(routeFamily func(*http.Request) string, next http
 			RequestID: requestID, CorrelationID: correlationID, Retry: health.RetryNone,
 		})
 	})
+}
+
+// UnmatchedRoute is the route label of a request no registered pattern matched.
+const UnmatchedRoute = "unmatched"
+
+type routeCaptureKey struct{}
+
+// routeCapture carries the mux pattern a request matched from the router, which knows it, out to the observer,
+// which wraps the router: the mux sets the pattern on its own copy of the request, not on the observer's.
+type routeCapture struct{ pattern atomic.Pointer[string] }
+
+// SetMatchedRoute records the mux pattern the request matched, for the route metrics of the observer that wraps it.
+// pattern must come from the mux (http.ServeMux.Handler), never from the request.
+func SetMatchedRoute(r *http.Request, pattern string) {
+	if capture, ok := r.Context().Value(routeCaptureKey{}).(*routeCapture); ok {
+		capture.pattern.Store(&pattern)
+	}
+}
+
+// routeTemplate turns a mux pattern ("GET /v1/machines/{id}/events") into its path template.
+func routeTemplate(pattern string) string {
+	if _, path, found := strings.Cut(pattern, " "); found {
+		pattern = path
+	}
+	if pattern == "" {
+		return UnmatchedRoute
+	}
+	return pattern
+}
+
+func (o HTTPObserver) recordRoute(method string, matched *routeCapture, statusClass string, duration time.Duration) {
+	if o.Routes == nil {
+		return
+	}
+	route := UnmatchedRoute
+	if pattern := matched.pattern.Load(); pattern != nil {
+		route = routeTemplate(*pattern)
+	}
+	if _, seen := o.Routes.routeSeen.Load(route); !seen {
+		if o.Routes.AllowLabelValue(MetricHTTPRouteRequests, "route", route) != nil || o.Routes.AllowLabelValue(MetricHTTPRouteDuration, "route", route) != nil {
+			route = UnmatchedRoute
+		} else {
+			o.Routes.routeSeen.Store(route, true)
+		}
+	}
+	_ = o.Routes.IncCounter(MetricHTTPRouteRequests, MetricLabels{"method": methodLabel(method), "route": route, "status_class": statusClass})
+	_ = o.Routes.ObserveHistogram(MetricHTTPRouteDuration, MetricLabels{"route": route, "status_class": statusClass}, duration.Seconds())
 }
 
 func (o HTTPObserver) now() time.Time {

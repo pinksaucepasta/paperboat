@@ -61,7 +61,11 @@ const (
 	MetricHealthProbes              = "paperboat_server_health_probes_total"
 	MetricHTTPRequests              = "paperboat_server_http_requests_total"
 	MetricHTTPDuration              = "paperboat_server_http_request_duration_seconds"
-	MetricRelaySubjectObservations  = "paperboat_server_relay_subject_observations_total"
+	// Per matched route template (a registered mux pattern without its method, never a raw path or id). The route
+	// label values are added as routes are first seen, see AllowLabelValue; unmatched requests count as "unmatched".
+	MetricHTTPRouteRequests        = "paperboat_server_http_route_requests_total"
+	MetricHTTPRouteDuration        = "paperboat_server_http_route_duration_seconds"
+	MetricRelaySubjectObservations = "paperboat_server_relay_subject_observations_total"
 )
 
 // Singular/plural aliases keep producer code readable without introducing a
@@ -148,6 +152,15 @@ var fixedMetricDescriptors = []MetricDescriptor{
 		{Name: "route_family", AllowedValues: []string{"health", "public_api", "edge_control", "release", "internal", "other"}},
 		{Name: "status_class", AllowedValues: []string{"1xx", "2xx", "3xx", "4xx", "5xx"}},
 	}, Histogram: &HistogramDescriptor{Buckets: []float64{0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10}}},
+	{Name: MetricHTTPRouteRequests, Kind: MetricCounter, Labels: []LabelDescriptor{
+		{Name: "method", AllowedValues: []string{"get", "post", "put", "patch", "delete", "other"}},
+		{Name: "route", AllowedValues: []string{UnmatchedRoute}},
+		{Name: "status_class", AllowedValues: []string{"1xx", "2xx", "3xx", "4xx", "5xx"}},
+	}},
+	{Name: MetricHTTPRouteDuration, Kind: MetricHistogram, Labels: []LabelDescriptor{
+		{Name: "route", AllowedValues: []string{UnmatchedRoute}},
+		{Name: "status_class", AllowedValues: []string{"1xx", "2xx", "3xx", "4xx", "5xx"}},
+	}, Histogram: &HistogramDescriptor{Buckets: []float64{0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10}}},
 }
 
 func MetricDescriptors() []MetricDescriptor {
@@ -197,6 +210,8 @@ type Metrics struct {
 	descriptors map[string]MetricDescriptor
 	values      map[metricKey]metricValue
 	maxSeries   int
+	// routeSeen remembers the route values already added by AllowLabelValue (see HTTPObserver).
+	routeSeen sync.Map
 }
 
 const defaultMaximumMetricSeries = 1024
@@ -212,6 +227,38 @@ func NewMetricsWithLimit(maxSeries int) *Metrics {
 		descriptors[descriptor.Name] = cloneDescriptor(descriptor)
 	}
 	return &Metrics{descriptors: descriptors, values: make(map[metricKey]metricValue), maxSeries: maxSeries}
+}
+
+// maximumLabelValues bounds a label whose values are added at run time.
+const maximumLabelValues = 1024
+
+// AllowLabelValue makes value acceptable for a label whose values are registered names (route templates) the
+// process itself defines, not anything a request carries. It fails once the label holds maximumLabelValues.
+func (m *Metrics) AllowLabelValue(name, label, value string) error {
+	if m == nil {
+		return safe.NewError(safe.ErrorClosed, "record control-plane metric")
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	descriptor, ok := m.descriptors[name]
+	if !ok {
+		return safe.NewError(safe.ErrorUnknownMetric, "record control-plane metric")
+	}
+	for index := range descriptor.Labels {
+		if descriptor.Labels[index].Name != label {
+			continue
+		}
+		if containsString(descriptor.Labels[index].AllowedValues, value) {
+			return nil
+		}
+		if len(descriptor.Labels[index].AllowedValues) >= maximumLabelValues {
+			return safe.NewError(safe.ErrorMetricCardinality, "record control-plane metric")
+		}
+		descriptor.Labels[index].AllowedValues = append(descriptor.Labels[index].AllowedValues, value)
+		m.descriptors[name] = descriptor
+		return nil
+	}
+	return safe.NewError(safe.ErrorUnknownLabel, "record control-plane metric")
 }
 
 func (m *Metrics) AddCounter(name string, labels MetricLabels, delta uint64) error {
@@ -291,6 +338,8 @@ func (m *Metrics) prepare(name string, labels MetricLabels, kind MetricKind) (Me
 	if m == nil {
 		return MetricDescriptor{}, metricKey{}, safe.NewError(safe.ErrorClosed, "record control-plane metric")
 	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	descriptor, ok := m.descriptors[name]
 	if !ok {
 		return MetricDescriptor{}, metricKey{}, safe.NewError(safe.ErrorUnknownMetric, "record control-plane metric")

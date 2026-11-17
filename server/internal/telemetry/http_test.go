@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -129,4 +130,60 @@ func metricLabelMap(labels []MetricLabel) map[string]string {
 		result[label.Name] = label.Value
 	}
 	return result
+}
+
+// Per-route metrics carry the registered template, never the ids a request put in its path.
+func TestHTTPObserverRouteLabelsAreTemplatesNeverIDs(t *testing.T) {
+	routes := NewMetricsWithLimit(64)
+	mux := http.NewServeMux()
+	ok := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
+	mux.Handle("GET /v1/machines/{id}/events", ok)
+	mux.Handle("POST /v1/files/{path...}", ok)
+	mux.Handle("/healthz", ok)
+	handler := (HTTPObserver{Routes: routes}).WrapFunc(nil, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, pattern := mux.Handler(r)
+		SetMatchedRoute(r, pattern)
+		mux.ServeHTTP(w, r)
+	}))
+	for _, target := range []struct{ method, path string }{
+		{"GET", "/v1/machines/mach_secret123/events"}, {"GET", "/v1/machines/mach_other456/events"},
+		{"POST", "/v1/files/a/b/customer.example/c"}, {"GET", "/healthz"}, {"GET", "/nope/user_42"}, {"GET", "/v1/machines/mach_x/unknown"},
+	} {
+		handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(target.method, target.path, nil))
+	}
+	counts := map[string]uint64{}
+	for _, sample := range routes.Snapshot() {
+		if sample.Name != MetricHTTPRouteRequests {
+			continue
+		}
+		counts[metricLabelMap(sample.Labels)["route"]] += sample.Value
+	}
+	want := map[string]uint64{"/v1/machines/{id}/events": 2, "/v1/files/{path...}": 1, "/healthz": 1, UnmatchedRoute: 2}
+	if len(counts) != len(want) {
+		t.Fatalf("route labels = %v, want %v", counts, want)
+	}
+	for route, n := range want {
+		if counts[route] != n {
+			t.Fatalf("route labels = %v, want %v", counts, want)
+		}
+	}
+	for route := range counts {
+		if strings.Contains(route, "secret") || strings.Contains(route, "user_42") || strings.Contains(route, "customer") {
+			t.Fatalf("an id became a label value: %q", route)
+		}
+	}
+}
+
+// A request whose pattern cannot be added (label full) still counts, as unmatched.
+func TestHTTPObserverRouteLabelCardinalityIsBounded(t *testing.T) {
+	routes := NewMetricsWithLimit(4096)
+	for i := range maximumLabelValues + 5 {
+		_ = routes.AllowLabelValue(MetricHTTPRouteRequests, "route", "/r"+strconv.Itoa(i))
+	}
+	if err := routes.AllowLabelValue(MetricHTTPRouteRequests, "route", "/one-more"); err == nil {
+		t.Fatal("route label grew past its bound")
+	}
+	if err := routes.IncCounter(MetricHTTPRouteRequests, MetricLabels{"method": "get", "route": "/one-more", "status_class": "2xx"}); err == nil {
+		t.Fatal("a route value that was never allowed was recorded")
+	}
 }
