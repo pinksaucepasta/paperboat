@@ -231,3 +231,35 @@ func TestConfirmingHomeResultAsksInsteadOfPrintingACode(t *testing.T) {
 		t.Fatal("the marker leaked into the parent context")
 	}
 }
+
+// A one-line success is a notice on the next menu; longer output and failures are
+// still results to read.
+func TestHomeResultShowsOneLineSuccessAsNoticeNotViewer(t *testing.T) {
+	previousRoot, previousViewer := newInteractiveRootCommand, showHomeText
+	t.Cleanup(func() { newInteractiveRootCommand = previousRoot; showHomeText = previousViewer })
+	var output string
+	newInteractiveRootCommand = func() *cobra.Command {
+		root := &cobra.Command{Use: "pb", SilenceErrors: true, SilenceUsage: true}
+		root.PersistentFlags().Bool("no-customization", false, "")
+		root.AddCommand(&cobra.Command{Use: "mutate", RunE: func(command *cobra.Command, _ []string) error {
+			_, _ = command.OutOrStdout().Write([]byte(output))
+			return nil
+		}})
+		return root
+	}
+	var viewed []string
+	showHomeText = func(_ *cobra.Command, _, content string) error { viewed = append(viewed, content); return nil }
+	parent := &cobra.Command{Use: "pb"}
+	parent.SetContext(context.Background())
+	parent.Flags().Bool("no-customization", true, "")
+	parent.SetErr(&bytes.Buffer{})
+	for out, wantViewer := range map[string]bool{"Paused tunnel tun_1; status: paused\n": false, "": false, "line one\nline two\n": true, strings.Repeat("x", 120): true} {
+		output, viewed = out, nil
+		if err := runHomeResult(parent, []string{"mutate"}); err != nil {
+			t.Fatal(err)
+		}
+		if (len(viewed) == 1) != wantViewer {
+			t.Errorf("output %q: viewer shown %d times, want shown=%v", out, len(viewed), wantViewer)
+		}
+	}
+}

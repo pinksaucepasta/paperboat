@@ -376,6 +376,7 @@ func ChooseWithAction(options Options) (selection Result, err error) {
 	input.Focus()
 	model := chooserModel{options: options, choices: NewModel(options.Items, 8), input: input, width: 80, height: 24}
 	model.choices.requireFilter = options.RequireFilter
+	model.notice = takeNotice()
 	model.choices.SetFilter(options.Initial)
 	refreshParent := options.Context
 	if refreshParent == nil {
@@ -536,6 +537,7 @@ type chooserModel struct {
 	lastClickAt   time.Time
 	filterSeq     int  // latest scheduled debounced filter
 	filterPending bool // the input changed but the filter has not run yet
+	notice        string
 }
 
 // Lists longer than debounceAbove filter 50 ms after the last keystroke; shorter ones
@@ -586,7 +588,11 @@ func (m chooserModel) Init() tea.Cmd {
 	if m.options.Context != nil {
 		cancellation = func() tea.Msg { <-m.options.Context.Done(); return chooserCanceled{} }
 	}
-	return tea.Batch(RequestBackground(), textinput.Blink, m.refreshTick(), cancellation)
+	var fade tea.Cmd
+	if m.notice != "" {
+		fade = tea.Tick(noticeLifetime, func(time.Time) tea.Msg { return noticeExpired{} })
+	}
+	return tea.Batch(RequestBackground(), textinput.Blink, m.refreshTick(), cancellation, fade)
 }
 
 func (m chooserModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
@@ -599,6 +605,9 @@ func (m chooserModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	switch message := message.(type) {
 	case chooserCanceled:
 		return m, tea.Quit
+	case noticeExpired:
+		m.notice = ""
+		return m, nil
 	case filterDebounced:
 		if message.seq == m.filterSeq {
 			m.flushFilter()
@@ -659,6 +668,7 @@ func (m chooserModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.choices.ensureVisible()
 	case tea.KeyPressMsg:
 		key := message.String()
+		m.notice = ""
 		// Ctrl+C remains an unconditional interrupt even when a caller or a
 		// preference maps another action to the same key.
 		if key == "ctrl+c" {
@@ -857,7 +867,11 @@ func (m chooserModel) render() string {
 	for len(body) < bodyLimit {
 		body = append(body, "")
 	}
-	lines := append(body, filter, styles.help.Render(truncateLine(footer, lineWidth)))
+	footerLine := styles.help.Render(truncateLine(footer, lineWidth))
+	if m.notice != "" {
+		footerLine = styles.accent.Bold(true).Render(truncateLine(m.notice, lineWidth))
+	}
+	lines := append(body, filter, footerLine)
 	if len(lines) > height {
 		lines = lines[:height]
 	}

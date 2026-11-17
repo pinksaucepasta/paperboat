@@ -694,3 +694,31 @@ func TestLoadingKeepsRealWorkerFailureAfterEsc(t *testing.T) {
 		t.Fatalf("a real failure was hidden behind the cancel: %v", err)
 	}
 }
+
+func TestNoticeShowsInFooterAndFades(t *testing.T) {
+	SetNotice("Paused tunnel demo\x1b[31m")
+	model := chooserModel{options: Options{Title: "Machines"}, choices: NewModel([]Item{{ID: "one", Title: "One"}}, 8), width: 80, height: 24, notice: takeNotice()}
+	view := ansi.Strip(model.View().Content)
+	lines := strings.Split(view, "\n")
+	if got := strings.TrimSpace(lines[len(lines)-1]); got != "Paused tunnel demo" {
+		t.Fatalf("footer = %q, want the sanitized notice", got)
+	}
+	if takeNotice() != "" {
+		t.Fatal("a notice was shown twice")
+	}
+	if command := model.Init(); command == nil {
+		t.Fatal("a notice must schedule its fade")
+	}
+	faded, _ := model.Update(noticeExpired{})
+	if strings.Contains(ansi.Strip(faded.(chooserModel).View().Content), "Paused tunnel") {
+		t.Fatal("the notice outlived its timer")
+	}
+	pressed, _ := model.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	if strings.Contains(ansi.Strip(pressed.(chooserModel).View().Content), "Paused tunnel") {
+		t.Fatal("the notice outlived the next key press")
+	}
+	pendingNotice.Store(&queuedNotice{text: "old", at: time.Now().Add(-time.Hour)})
+	if takeNotice() != "" {
+		t.Fatal("a stale notice was shown")
+	}
+}

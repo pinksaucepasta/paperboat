@@ -554,8 +554,9 @@ func runHomeResult(parent *cobra.Command, args []string) error {
 		if message := homeFailureMessage(parent, err); message != "" {
 			text += "\n\n" + message
 		}
-	} else if text == "" {
-		text = "Completed successfully."
+	} else if line, ok := homeNotice(text); ok {
+		selector.SetNotice(line)
+		return nil
 	}
 	if displayErr := showHomeText(parent, "pb "+strings.Join(args[:min(2, len(args))], " "), text); displayErr != nil {
 		return errors.Join(err, displayErr)
@@ -565,6 +566,18 @@ func runHomeResult(parent *cobra.Command, args []string) error {
 		return &homeResultError{Err: err}
 	}
 	return nil
+}
+
+// homeNotice reports a successful command's output as a one-line notice for the next
+// menu when it is empty or a single short line; anything longer is a result to read.
+func homeNotice(text string) (string, bool) {
+	if text == "" {
+		return "Completed successfully.", true
+	}
+	if strings.ContainsRune(text, '\n') || ansi.StringWidth(text) > 100 {
+		return "", false
+	}
+	return text, true
 }
 
 type homeResultError struct{ Err error }
