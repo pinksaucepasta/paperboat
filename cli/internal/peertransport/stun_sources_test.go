@@ -14,12 +14,9 @@ import (
 // endpoint comes from a relay's STUN answer, like Tailscale's DERP map (netcheck probes the map's nodes only).
 func TestNoProductionFileNamesAStunServer(t *testing.T) {
 	pattern := regexp.MustCompile(`(?i)"stun[0-9]*:|\bstun[0-9]*\.[a-z0-9-]+\.[a-z]{2,}|:3478\b|:19302\b`)
-	for _, root := range []string{".", "../daemoncmd", "../hostruntime/native", "../../../shared/peernetwork"} {
+	for _, root := range []string{".", "../daemoncmd", "../../../shared/peernetwork"} {
 		err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 			if err != nil {
-				if os.IsNotExist(err) {
-					return nil
-				}
 				return err
 			}
 			if d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
