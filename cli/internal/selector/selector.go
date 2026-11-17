@@ -173,30 +173,32 @@ type Model struct {
 	requireFilter bool
 }
 
+// NewModel sanitizes the items once; rendering and filtering then use them as they are.
 func NewModel(items []Item, rows int) *Model {
-	searchable := make([]string, len(items))
-	primary := make([]string, len(items))
-	searchChars := make([]util.Chars, len(items))
-	for index, item := range items {
-		primary[index] = strings.ToLower(item.Title)
-		searchable[index] = strings.ToLower(strings.TrimSpace(strings.Join([]string{item.Title, item.Search, item.Description}, " ")))
-		searchChars[index] = util.ToChars([]byte(searchable[index]))
-	}
-	workerCount := min(max(1, runtime.GOMAXPROCS(0)), 8, max(1, len(items)))
-	workerMatches := make([][]rankedMatch, workerCount)
-	workerSlabs := make([]*util.Slab, workerCount)
-	for index := range workerCount {
-		workerMatches[index] = make([]rankedMatch, 0, (len(items)+workerCount-1)/workerCount)
-		workerSlabs[index] = util.MakeSlab(100*1024, 2048)
-	}
-	m := &Model{
-		items: items, primary: primary, searchable: searchable, searchChars: searchChars,
-		matches: make([]rankedMatch, 0, len(items)), workerMatches: workerMatches, workerSlabs: workerSlabs,
-		rows: max(1, rows),
-	}
-	m.applyFilter()
+	m := &Model{rows: max(1, rows)}
+	m.SetItems(items)
 	return m
 }
+
+// SetItems replaces the rows (sanitizing each once) and re-applies the filter. The
+// per-row search buffers and the fzf slabs are reused, so a refresh allocates only
+// for rows that are new.
+func (m *Model) SetItems(items []Item) {
+	m.items = slices.Grow(m.items[:0], len(items))
+	m.primary, m.searchable = m.primary[:0], m.searchable[:0]
+	m.searchChars = m.searchChars[:0]
+	for _, item := range items {
+		item.Title, item.Description, item.Search = SanitizeText(item.Title), SanitizeText(item.Description), SanitizeText(item.Search)
+		search := strings.ToLower(strings.TrimSpace(strings.Join([]string{item.Title, item.Search, item.Description}, " ")))
+		m.items = append(m.items, item)
+		m.primary = append(m.primary, strings.ToLower(item.Title))
+		m.searchable = append(m.searchable, search)
+		m.searchChars = append(m.searchChars, util.ToChars([]byte(search)))
+	}
+	m.applyFilter()
+}
+
+const maxFilterWorkers = 8
 
 func (m *Model) applyFilter() {
 	query := strings.ToLower(string(m.filter))
@@ -212,13 +214,18 @@ func (m *Model) applyFilter() {
 	} else {
 		pattern := []rune(query)
 		m.matches = m.matches[:0]
+		workerCount := min(max(1, runtime.GOMAXPROCS(0)), maxFilterWorkers, max(1, len(m.items)))
+		for len(m.workerSlabs) < workerCount { // allocated on the first search, then kept
+			m.workerSlabs = append(m.workerSlabs, util.MakeSlab(100*1024, 2048))
+			m.workerMatches = append(m.workerMatches, nil)
+		}
 		var workers sync.WaitGroup
-		for workerIndex := range m.workerMatches {
+		for workerIndex := range workerCount {
 			workers.Add(1)
 			go func(workerIndex int) {
 				defer workers.Done()
 				matches := m.workerMatches[workerIndex][:0]
-				for index := workerIndex; index < len(m.searchChars); index += len(m.workerMatches) {
+				for index := workerIndex; index < len(m.searchChars); index += workerCount {
 					result, _ := algo.FuzzyMatchV2(false, false, true, &m.searchChars[index], pattern, false, m.workerSlabs[workerIndex])
 					if result.Start >= 0 {
 						matches = append(matches, rankedMatch{index: index, class: matchClass(m.primary[index], query), score: result.Score, start: result.Start, length: len(m.searchable[index])})
@@ -228,7 +235,7 @@ func (m *Model) applyFilter() {
 			}(workerIndex)
 		}
 		workers.Wait()
-		for _, matches := range m.workerMatches {
+		for _, matches := range m.workerMatches[:workerCount] {
 			m.matches = append(m.matches, matches...)
 		}
 		slices.SortFunc(m.matches, func(a, b rankedMatch) int {
@@ -345,14 +352,6 @@ func ChooseWithAction(options Options) (selection Result, err error) {
 	options.Empty = SanitizeText(options.Empty)
 	options.Footer = SanitizeText(options.Footer)
 	options.Initial = SanitizeText(options.Initial)
-	items := make([]Item, len(options.Items))
-	copy(items, options.Items)
-	for index := range items {
-		items[index].Title = SanitizeText(items[index].Title)
-		items[index].Description = SanitizeText(items[index].Description)
-		items[index].Search = SanitizeText(items[index].Search)
-	}
-	options.Items = items
 	if options.Output == nil {
 		options.Output = os.Stderr
 	}
@@ -536,6 +535,25 @@ type chooserModel struct {
 	refreshFailed bool
 	lastClickRow  int // 1-based visible row of the last click, 0 for none
 	lastClickAt   time.Time
+	filterSeq     int  // latest scheduled debounced filter
+	filterPending bool // the input changed but the filter has not run yet
+}
+
+// Lists longer than debounceAbove filter 50 ms after the last keystroke; shorter ones
+// filter on every keystroke (well under a frame).
+const (
+	debounceAbove  = 500
+	filterDebounce = 50 * time.Millisecond
+)
+
+type filterDebounced struct{ seq int }
+
+// flushFilter runs a pending debounced filter before anything acts on the list.
+func (m *chooserModel) flushFilter() {
+	if m.filterPending {
+		m.choices.SetFilter(m.input.Value())
+		m.filterPending = false
+	}
 }
 
 const doubleClickWindow = 500 * time.Millisecond
@@ -582,6 +600,11 @@ func (m chooserModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	switch message := message.(type) {
 	case chooserCanceled:
 		return m, tea.Quit
+	case filterDebounced:
+		if message.seq == m.filterSeq {
+			m.flushFilter()
+		}
+		return m, nil
 	case choicesRefreshTick:
 		if m.options.Refresh == nil {
 			return m, nil
@@ -601,16 +624,8 @@ func (m chooserModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if message.err == nil {
 			m.refreshFailed = false
 			selected, _ := m.choices.Selected()
-			items := slices.Clone(message.items)
-			for index := range items {
-				items[index].Title = SanitizeText(items[index].Title)
-				items[index].Description = SanitizeText(items[index].Description)
-				items[index].Search = SanitizeText(items[index].Search)
-			}
-			rows := m.choices.rows
-			m.choices = NewModel(items, rows)
-			m.choices.requireFilter = m.options.RequireFilter
-			m.choices.SetFilter(m.input.Value())
+			m.choices.SetItems(message.items)
+			m.choices.selected, m.choices.offset = 0, 0
 			for position, index := range m.choices.visible {
 				if m.choices.items[index].ID == selected.ID {
 					m.choices.selected = position
@@ -637,7 +652,7 @@ func (m chooserModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.width, m.height = viewWidth(message.Width), viewHeight(message.Height)
 		m.input.SetWidth(filterInputWidth(m.width, m.options.RequireFilter))
-		bodyLines := headerLineCount(sanitizeHeader(m.options.Header)) + 2
+		bodyLines := headerLineCount(m.options.Header) + 2
 		if m.options.Subtitle != "" {
 			bodyLines++
 		}
@@ -659,30 +674,26 @@ func (m chooserModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil // never select or type into a menu that cannot be read
 		}
 		if KeyMatches(m.options.Context, "select", key) {
+			m.flushFilter()
 			if item, ok := m.choices.Selected(); ok {
 				m.selected, m.confirmed = item, true
 				return m, tea.Quit
 			}
 		}
 		if action, ok := m.options.Actions[key]; ok {
+			m.flushFilter()
 			m.action = action
 			m.selected, _ = m.choices.Selected()
 			m.confirmed = true
 			return m, tea.Quit
 		}
-		switch message.String() {
-		case "up", "ctrl+k":
-			m.choices.Move(-1)
-			return m, nil
-		case "down", "ctrl+n":
-			m.choices.Move(1)
-			return m, nil
-		}
 		if KeyMatches(m.options.Context, "up", key) {
+			m.flushFilter()
 			m.choices.Move(-1)
 			return m, nil
 		}
 		if KeyMatches(m.options.Context, "down", key) {
+			m.flushFilter()
 			m.choices.Move(1)
 			return m, nil
 		}
@@ -733,7 +744,14 @@ func (m chooserModel) typed(message tea.Msg) (tea.Model, tea.Cmd) {
 	if value != m.input.Value() {
 		m.input.SetValue(value)
 	}
-	m.choices.SetFilter(value)
+	if len(m.choices.items) > debounceAbove {
+		m.filterSeq++
+		m.filterPending = true
+		seq := m.filterSeq
+		command = tea.Batch(command, tea.Tick(filterDebounce, func(time.Time) tea.Msg { return filterDebounced{seq} }))
+	} else {
+		m.choices.SetFilter(value)
+	}
 	if m.options.InputSelection != nil {
 		if selected, ok := m.options.InputSelection(value); ok {
 			m.selected, m.confirmed = selected, true
@@ -744,7 +762,7 @@ func (m chooserModel) typed(message tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m chooserModel) itemAtRow(row int) (int, bool) {
-	first := headerLineCount(sanitizeHeader(m.options.Header)) + 2
+	first := headerLineCount(m.options.Header) + 2
 	if m.options.Subtitle != "" {
 		first++
 	}
@@ -767,15 +785,15 @@ func (m chooserModel) render() string {
 		return styles.help.Render(truncateLine("Enlarge terminal to use this menu; Esc goes back", lineWidth))
 	}
 	body := make([]string, 0, height)
-	header := sanitizeHeader(m.options.Header)
+	header := m.options.Header // sanitized once by ChooseWithAction
 	if header != "" {
 		for _, line := range strings.Split(header, "\n") {
 			body = append(body, truncateLine(line, lineWidth))
 		}
 		body = append(body, "")
 	}
-	body = append(body, styles.title.Render(truncateLine(SanitizeText(m.options.Title), lineWidth)))
-	if subtitle := SanitizeText(m.options.Subtitle); subtitle != "" {
+	body = append(body, styles.title.Render(truncateLine(m.options.Title, lineWidth)))
+	if subtitle := m.options.Subtitle; subtitle != "" {
 		body = append(body, styles.subtitle.Render(truncateLine(subtitle, lineWidth)))
 	}
 	body = append(body, "")
@@ -787,18 +805,18 @@ func (m chooserModel) render() string {
 		if visibleIndex == m.choices.selected {
 			prefix = "  >  "
 		}
-		plainTitle := prefix + SanitizeText(item.Title)
+		plainTitle := prefix + item.Title
 		if item.Favorite {
 			plainTitle += " ◆"
 		}
 		title := truncateLine(plainTitle, lineWidth)
-		detail := truncateLine("     "+SanitizeText(item.Description), lineWidth)
+		detail := truncateLine("     "+item.Description, lineWidth)
 		if visibleIndex == m.choices.selected {
 			title = styles.selected.Render(title + strings.Repeat(" ", max(0, lineWidth-ansi.StringWidth(title))))
 		} else if item.Action {
 			title = styles.action.Render(title)
 		} else if item.Favorite {
-			name := truncateLine(prefix+SanitizeText(item.Title), max(1, lineWidth-2))
+			name := truncateLine(prefix+item.Title, max(1, lineWidth-2))
 			title = styles.favorite.Render(name) + " " + styles.favoriteMarker.Render("◆")
 		}
 		body = append(body, truncateLine(title, lineWidth))
@@ -814,7 +832,7 @@ func (m chooserModel) render() string {
 			if len(m.choices.items) == 0 {
 				empty = m.options.Empty
 			}
-			body = append(body, styles.subtitle.Render(truncateLine("  "+SanitizeText(empty), lineWidth)), "")
+			body = append(body, styles.subtitle.Render(truncateLine("  "+empty, lineWidth)), "")
 		}
 	}
 	footer := m.options.Footer
@@ -826,10 +844,7 @@ func (m chooserModel) render() string {
 	if m.choices.requireFilter {
 		filterLabel = "Search files"
 	}
-	input := m.input
-	input.SetWidth(filterInputWidth(lineWidth, m.options.RequireFilter))
-	input.SetValue(SanitizeText(input.Value()))
-	filterLine := filterLabel + "  " + input.View()
+	filterLine := filterLabel + "  " + m.input.View()
 	filterLine = truncateLine(filterLine, max(1, lineWidth-2))
 	filterLine += strings.Repeat(" ", max(0, lineWidth-2-ansi.StringWidth(filterLine)))
 	filter := filterLine
@@ -843,7 +858,7 @@ func (m chooserModel) render() string {
 	for len(body) < bodyLimit {
 		body = append(body, "")
 	}
-	lines := append(body, filter, styles.help.Render(truncateLine(SanitizeText(footer), lineWidth)))
+	lines := append(body, filter, styles.help.Render(truncateLine(footer, lineWidth)))
 	if len(lines) > height {
 		lines = lines[:height]
 	}

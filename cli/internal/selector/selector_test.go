@@ -542,3 +542,66 @@ func TestChooserKeepsLastSizeWhenTerminalReportsNone(t *testing.T) {
 		t.Fatalf("a 0x0 report resized the menu to %dx%d", got.width, got.height)
 	}
 }
+
+func manyItems(n int) []Item {
+	items := make([]Item, n)
+	for i := range items {
+		items[i] = Item{ID: fmt.Sprintf("id%d", i), Title: fmt.Sprintf("machine-%04d", i)}
+	}
+	return items
+}
+
+func TestSetItemsReusesFilterBuffersAndSanitizesOnce(t *testing.T) {
+	m := NewModel(manyItems(50), 8)
+	if len(m.workerSlabs) != 0 {
+		t.Fatal("fzf slabs were allocated before any search")
+	}
+	m.SetFilter("machine-004")
+	slab, matches := m.workerSlabs[0], cap(m.matches)
+	items := manyItems(50)
+	items[7].Title = "\x1b[31mmachine-0047\x1b]8;;x\x07"
+	m.SetItems(items)
+	if m.workerSlabs[0] != slab || cap(m.matches) < matches {
+		t.Fatal("a refresh rebuilt the filter buffers")
+	}
+	if m.items[7].Title != "machine-0047" || m.primary[7] != "machine-0047" {
+		t.Fatalf("SetItems stored unsanitized text: %q / %q", m.items[7].Title, m.primary[7])
+	}
+	if item, ok := m.Selected(); !ok || item.ID == "" || m.Filter() != "machine-004" {
+		t.Fatalf("the filter was lost across SetItems: %q %v", m.Filter(), ok)
+	}
+}
+
+func TestLargeListFiltersAfterDebounceAndFlushesBeforeSelecting(t *testing.T) {
+	model := chooserModel{options: Options{Title: "Machines"}, choices: NewModel(manyItems(debounceAbove+100), 8), input: textinput.New(), width: 80, height: 24}
+	model.input.Focus()
+	var next tea.Model = model
+	var command tea.Cmd
+	for _, r := range "0599" {
+		next, command = next.Update(tea.KeyPressMsg{Code: r, Text: string(r)})
+	}
+	typed := next.(chooserModel)
+	if len(typed.choices.visible) != debounceAbove+100 || command == nil || !typed.filterPending {
+		t.Fatalf("filter ran per keystroke on a large list: visible=%d pending=%v", len(typed.choices.visible), typed.filterPending)
+	}
+	if stale, _ := typed.Update(filterDebounced{seq: typed.filterSeq - 1}); len(stale.(chooserModel).choices.visible) != debounceAbove+100 {
+		t.Fatal("a superseded debounce ran the filter")
+	}
+	done, _ := typed.Update(filterDebounced{seq: typed.filterSeq})
+	if got := done.(chooserModel); len(got.choices.visible) != 1 || got.filterPending {
+		t.Fatalf("debounce did not apply the filter: visible=%d", len(got.choices.visible))
+	}
+	entered, quit := typed.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if got := entered.(chooserModel); quit == nil || got.selected.Title != "machine-0599" {
+		t.Fatalf("Enter selected %q from a stale list", got.selected.Title)
+	}
+	small := chooserModel{options: Options{Title: "Machines"}, choices: NewModel(manyItems(20), 8), input: textinput.New(), width: 80, height: 24}
+	small.input.Focus()
+	next, _ = small.Update(tea.KeyPressMsg{Code: '0', Text: "0"})
+	next, _ = next.Update(tea.KeyPressMsg{Code: '0', Text: "0"})
+	next, _ = next.Update(tea.KeyPressMsg{Code: '1', Text: "1"})
+	next, _ = next.Update(tea.KeyPressMsg{Code: '5', Text: "5"})
+	if got := next.(chooserModel); len(got.choices.visible) != 1 || got.filterPending {
+		t.Fatalf("a short list must filter on every keystroke: visible=%d", len(got.choices.visible))
+	}
+}
