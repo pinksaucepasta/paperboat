@@ -49,7 +49,6 @@ func TestGrantCheckRefusesEachBrokenRule(t *testing.T) {
 		"scope port":           func(g *RelayGrant) { g.Memberships[0].Port = 22 },
 		"scope without expiry": func(g *RelayGrant) { g.Memberships[0].ExpiresAt = 0 },
 		"unknown scope":        func(g *RelayGrant) { g.Memberships[0].Capability = "teleport" },
-		"per-peer list":        func(g *RelayGrant) { g.Peers = []struct{}{{}} },
 		"membership twice":     func(g *RelayGrant) { g.Memberships = append(g.Memberships, g.Memberships[0]) },
 		"too many memberships": func(g *RelayGrant) {
 			for len(g.Memberships) <= MaxGrantMemberships {
@@ -95,18 +94,9 @@ func TestDecodeSignedRefusesUnknownClaimsAndTrailingData(t *testing.T) {
 		t.Fatalf("round trip: %v", err)
 	}
 	extra := append(bytes.TrimSuffix(raw, []byte("}")), []byte(`,"restriction":true}`)...)
-	// Server .49 signs an empty "peers" list: it decodes and checks; a filled per-peer entry is refused.
+	// The retired per-peer list is an unknown claim now, empty or not.
 	empty := append(bytes.TrimSuffix(raw, []byte("}")), []byte(`,"peers":[]}`)...)
-	var legacy RelayGrant
-	if err := DecodeSigned(empty, &legacy); err != nil || legacy.Check(now) != nil {
-		t.Errorf("empty peers list: decode %v, check %v", err, legacy.Check(now))
-	}
-	filled := append(bytes.TrimSuffix(raw, []byte("}")), []byte(`,"peers":[{"wireguard_public_key":"x"}]}`)...)
-	var perPeer RelayGrant
-	if err := DecodeSigned(filled, &perPeer); err == nil && perPeer.Check(now) == nil {
-		t.Error("a per-peer entry was accepted")
-	}
-	for name, body := range map[string][]byte{"unknown claim": extra, "trailing": append(raw, []byte(`{}`)...)} {
+	for name, body := range map[string][]byte{"unknown claim": extra, "retired peers list": empty, "trailing": append(raw, []byte(`{}`)...)} {
 		if err := DecodeSigned(body, new(RelayGrant)); !errors.Is(err, ErrInvalidDocument) {
 			t.Errorf("%s: DecodeSigned = %v", name, err)
 		}

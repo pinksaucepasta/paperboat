@@ -88,8 +88,6 @@ func (g RelayGrant) Check(now time.Time) error {
 		return invalid("grant key encoding")
 	case !ValidKey(g.WireGuardPublicKey) || g.DiscoPublicKey != "" && !ValidKey(g.DiscoPublicKey):
 		return invalid("grant endpoint keys")
-	case len(g.Peers) != 0:
-		return invalid("grant per-peer list")
 	case g.PeerRelay != nil && (!g.PeerRelay.Valid() || g.DiscoPublicKey == "" || g.PeerRelay.WireGuardPublicKey == g.WireGuardPublicKey):
 		return invalid("grant peer relay")
 	}
