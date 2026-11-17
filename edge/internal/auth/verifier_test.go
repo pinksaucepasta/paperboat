@@ -308,7 +308,9 @@ func TestVerifierRejectsMissingOrInvalidFileTransferPolicy(t *testing.T) {
 	verifier := &Verifier{Issuer: "https://api.paperboat.test", Keys: StaticKeys{"key-1": public}, Now: func() time.Time { return time.Unix(1000, 0) }, ClockSkew: time.Minute}
 	for _, mutate := range []func(map[string]any){
 		func(claims map[string]any) { delete(claims, "file_transfer_policy") },
-		func(claims map[string]any) { claims["file_transfer_policy"].(map[string]any)["max_file_bytes"] = 0 },
+		func(claims map[string]any) {
+			claims["file_transfer_policy"].(map[string]any)["automatic_max_batch_bytes"] = 0
+		},
 	} {
 		if _, err := verifier.Verify(context.Background(), tokenFor(t, private, "key-1", mutate)); err == nil {
 			t.Fatal("invalid file transfer policy accepted")

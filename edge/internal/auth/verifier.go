@@ -38,9 +38,8 @@ type header struct {
 }
 type fileTransferPolicy struct {
 	Revision               string `json:"revision"`
-	MaxFileBytes           int64  `json:"max_file_bytes"`
 	MaxBatchFiles          int    `json:"max_batch_files"`
-	MaxBatchBytes          int64  `json:"max_batch_bytes"`
+	AutomaticMaxBatchBytes int64  `json:"automatic_max_batch_bytes"`
 	MaxConcurrentTransfers int    `json:"max_concurrent_transfers"`
 	RetentionSeconds       int64  `json:"retention_seconds"`
 	DeliveryTimeoutSeconds int64  `json:"delivery_timeout_seconds"`
@@ -304,8 +303,10 @@ func (v *Verifier) Verify(ctx context.Context, token string) (admission.Claims, 
 	return result, nil
 }
 
+// validFileTransferPolicy accepts the policy the server mints (an Automatic send is at most 2,000,000,000 bytes,
+// the product bound of transfer modes) and refuses anything else, since signed claims stay exact.
 func validFileTransferPolicy(policy *fileTransferPolicy) bool {
-	return policy != nil && policy.Revision != "" && policy.MaxFileBytes > 0 && policy.MaxFileBytes <= 50<<20 && policy.MaxBatchFiles > 0 && policy.MaxBatchFiles <= 10 && policy.MaxBatchBytes >= policy.MaxFileBytes && policy.MaxBatchBytes <= 500<<20 && policy.MaxConcurrentTransfers > 0 && policy.MaxConcurrentTransfers <= 2 && policy.RetentionSeconds > 0 && policy.DeliveryTimeoutSeconds > 0 && policy.MaxPendingSpoolBytes >= policy.MaxBatchBytes
+	return policy != nil && policy.Revision != "" && policy.AutomaticMaxBatchBytes > 0 && policy.AutomaticMaxBatchBytes <= 2_000_000_000 && policy.MaxBatchFiles > 0 && policy.MaxBatchFiles <= 10 && policy.MaxConcurrentTransfers > 0 && policy.MaxConcurrentTransfers <= 2 && policy.RetentionSeconds > 0 && policy.DeliveryTimeoutSeconds > 0 && policy.MaxPendingSpoolBytes >= policy.AutomaticMaxBatchBytes
 }
 
 func strictJSON(data []byte, target any) error {
