@@ -4,16 +4,22 @@ Share your personal machine with a team; grants are separate. A team that approv
 
 ### Synopsis
 
-Share your personal machine with a team; grants are separate. A team that approves new machines holds it until an owner or admin accepts it
-
-Share a personal machine with one team while keeping personal ownership. A team that approves new machines holds a member's machine until an owner or admin accepts it; owners and admins share directly. Members need explicit capability grants before they can use it.
-
-A personal machine can be shared with a team while ownership stays personal, or explicitly transferred to team ownership and back to the personal account that enrolled it. Sharing and capability grants are separate decisions. Removing a team-owned machine revokes its enrollment; unsharing a personal machine withdraws that team's access.
+Share your personal machine with the team. You keep ownership; sharing alone lets nobody
+use the machine, so add a grant with pb team machine grant. If the team requires approval for
+new machines (pb team machine approval), the machine waits until an owner or admin accepts it.
+Pass the team's current generation with --generation (read it with pb team get). A stale
+generation is rejected, so two people editing the team never overwrite each other.
 
 JSON output is supported with --json.
 
 ```
 pb team machine share <team> <machine-id> [flags]
+```
+
+### Examples
+
+```
+  pb team machine share acme m_abc123 --generation 9
 ```
 
 ### Options

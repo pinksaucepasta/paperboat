@@ -4,16 +4,21 @@ Show one team and its current generation
 
 ### Synopsis
 
-Show one team and its current generation
-
-Read one team's current membership, permissions, and generation. Use the returned generation for the next mutation to avoid overwriting a newer change.
-
-Teams use explicit membership and resource grants. Membership alone does not grant machine use, ENV values, previews, or tunnels. Mutations use the current team generation to reject stale edits; read pb team get before retrying a conflicting change.
+Show one team: its owner, current generation, state (active, suspended or deleted), the
+members and resource grants, the machines shared with or owned by the team, and the team's ENV
+status. Every change to the team needs the generation printed here.
 
 JSON output is supported with --json.
 
 ```
 pb team get <team> [flags]
+```
+
+### Examples
+
+```
+  pb team get acme
+  pb team get acme --json
 ```
 
 ### Options

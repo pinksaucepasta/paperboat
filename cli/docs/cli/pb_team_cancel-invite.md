@@ -4,16 +4,22 @@ Cancel an outstanding invitation
 
 ### Synopsis
 
-Cancel an outstanding invitation
-
-Cancel one outstanding invitation for the selected team at its expected generation. The invited account cannot accept that invitation afterward.
-
-Teams use explicit membership and resource grants. Membership alone does not grant machine use, ENV values, previews, or tunnels. Mutations use the current team generation to reject stale edits; read pb team get before retrying a conflicting change.
+Cancel an invitation that has not been accepted yet, so it can no longer be used. Team
+administrators can cancel invitations of their team; find the ID with pb team invitations <team>.
+Pass the team's current generation with --generation (read it with pb team get). A stale
+generation is rejected, so two people editing the team never overwrite each other.
 
 JSON output is supported with --json.
 
 ```
 pb team cancel-invite <team> <invitation> [flags]
+```
+
+### Examples
+
+```
+  pb team invitations acme
+  pb team cancel-invite acme inv_abc123 --generation 8
 ```
 
 ### Options

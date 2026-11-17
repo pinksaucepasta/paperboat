@@ -4,16 +4,21 @@ Return a team-owned machine to the personal account that enrolled it
 
 ### Synopsis
 
-Return a team-owned machine to the personal account that enrolled it
-
-Return a team-owned machine to the personal account that enrolled it, after exact confirmation and generation check. Needs a team owner or admin; the enroller must still be in the team. The machine keeps its id, keys and history and is not re-enrolled; the team's grants and shares for it end, and previews and tunnels the team owns on it must be ended first. Accounts other than the enroller cannot take it: its credentials belong to the enroller.
-
-A personal machine can be shared with a team while ownership stays personal, or explicitly transferred to team ownership and back to the personal account that enrolled it. Sharing and capability grants are separate decisions. Removing a team-owned machine revokes its enrollment; unsharing a personal machine withdraws that team's access.
+Return a team-owned machine to the personal account that enrolled it. --confirm must
+repeat the exact machine ID.
+Pass the team's current generation with --generation (read it with pb team get). A stale
+generation is rejected, so two people editing the team never overwrite each other.
 
 JSON output is supported with --json.
 
 ```
 pb team machine transfer-to-personal <team> <machine-id> [flags]
+```
+
+### Examples
+
+```
+  pb team machine transfer-to-personal acme m_abc123 --confirm m_abc123 --generation 9
 ```
 
 ### Options

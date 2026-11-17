@@ -16,6 +16,14 @@ JSON output is supported with --json.
 pb team machine grant <team> <machine-id> [flags]
 ```
 
+### Examples
+
+```
+  pb team machine grant acme m_abc123 --all-members --capability terminal --capability exec --generation 9
+  pb team machine grant acme m_abc123 --member ana --capability terminal --generation 10
+  pb team machine grant acme m_abc123 --all-members --capability terminal --active=false --generation 11
+```
+
 ### Options
 
 ```

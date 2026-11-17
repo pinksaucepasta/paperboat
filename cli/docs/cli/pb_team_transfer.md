@@ -4,16 +4,20 @@ Transfer team ownership
 
 ### Synopsis
 
-Transfer team ownership
-
-Transfer team ownership to the named account at the expected generation. Review the target account and current team state before changing owner authority.
-
-Teams use explicit membership and resource grants. Membership alone does not grant machine use, ENV values, previews, or tunnels. Mutations use the current team generation to reject stale edits; read pb team get before retrying a conflicting change.
+Transfer team ownership to another member's account. Only an owner can transfer ownership.
+Pass the team's current generation with --generation (read it with pb team get). A stale
+generation is rejected, so two people editing the team never overwrite each other.
 
 JSON output is supported with --json.
 
 ```
 pb team transfer <team> <account> [flags]
+```
+
+### Examples
+
+```
+  pb team transfer acme ana --generation 9
 ```
 
 ### Options

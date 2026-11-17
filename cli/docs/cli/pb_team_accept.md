@@ -4,16 +4,20 @@ Accept an invitation bound to this account
 
 ### Synopsis
 
-Accept an invitation bound to this account
-
-Accept an invitation explicitly addressed to this account. The resulting membership does not automatically grant access to every resource owned or shared by the team.
-
-Teams use explicit membership and resource grants. Membership alone does not grant machine use, ENV values, previews, or tunnels. Mutations use the current team generation to reject stale edits; read pb team get before retrying a conflicting change.
+Accept an invitation addressed to this account and join the team. Find the invitation ID
+with pb team invitations. The command prints the team as it is after you joined.
 
 JSON output is supported with --json.
 
 ```
 pb team accept <invitation> [flags]
+```
+
+### Examples
+
+```
+  pb team invitations
+  pb team accept inv_abc123
 ```
 
 ### Options

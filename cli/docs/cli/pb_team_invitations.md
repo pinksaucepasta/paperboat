@@ -4,16 +4,22 @@ Discover pending invitations received by you or administered for a team
 
 ### Synopsis
 
-Discover pending invitations received by you or administered for a team
-
-Discover pending invitations addressed to your account, or list pending invitations for a team you administer. Inventory pagination is followed to completion. Use the exact invitation identity to inspect, accept or decline a received invitation, or cancel an invitation you administer.
-
-Teams use explicit membership and resource grants. Membership alone does not grant machine use, ENV values, previews, or tunnels. Mutations use the current team generation to reject stale edits; read pb team get before retrying a conflicting change.
+List pending invitations: the ones addressed to you, or with a team argument the ones
+that team has outstanding (owners and admins). Each line shows invitation ID, team, recipient,
+state and expiry. Filter with --q (email or ID); the list stops at --limit unless you pass --all.
 
 JSON output is supported with --json.
 
 ```
 pb team invitations [team] [flags]
+```
+
+### Examples
+
+```
+  pb team invitations
+  pb team invitations acme --q ana
+  pb team invitations --all --json
 ```
 
 ### Options

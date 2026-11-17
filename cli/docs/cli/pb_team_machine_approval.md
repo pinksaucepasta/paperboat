@@ -4,16 +4,20 @@ Set whether machines members add wait for an owner or admin
 
 ### Synopsis
 
-Set whether machines members add wait for an owner or admin
-
-Choose whether machines that members add to the team wait for an owner or admin (on, the default) or join right away (off). Owners and admins add machines directly either way. Pending requests stay pending when the rule is switched off.
-
-A personal machine can be shared with a team while ownership stays personal, or explicitly transferred to team ownership and back to the personal account that enrolled it. Sharing and capability grants are separate decisions. Removing a team-owned machine revokes its enrollment; unsharing a personal machine withdraws that team's access.
+Choose whether machines members add to the team wait for an owner or admin. With on, a new
+machine waits until pb team machine approve; with off, it joins right away.
 
 This command does not support --json output; it rejects that mode before execution. Use --help --json for structured command help.
 
 ```
 pb team machine approval <team> <on|off> [flags]
+```
+
+### Examples
+
+```
+  pb team machine approval acme on
+  pb team machine approval acme off
 ```
 
 ### Options

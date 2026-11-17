@@ -4,16 +4,19 @@ Decline a machine a member asked to add to the team
 
 ### Synopsis
 
-Decline a machine a member asked to add to the team
-
-Decline a machine a member asked to add to the team. The owner of the machine sees that it was declined and can ask again or withdraw. Owners and admins only.
-
-A personal machine can be shared with a team while ownership stays personal, or explicitly transferred to team ownership and back to the personal account that enrolled it. Sharing and capability grants are separate decisions. Removing a team-owned machine revokes its enrollment; unsharing a personal machine withdraws that team's access.
+Decline a machine a member asked to add to the team. Only owners and admins can.
+--generation is optional: without it the command uses the team's current generation.
 
 JSON output is supported with --json.
 
 ```
 pb team machine decline <team> <machine-id> [flags]
+```
+
+### Examples
+
+```
+  pb team machine decline acme m_abc123
 ```
 
 ### Options

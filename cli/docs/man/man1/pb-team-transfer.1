@@ -10,13 +10,9 @@ pb-team-transfer - Transfer team ownership
 
 
 .SH DESCRIPTION
-Transfer team ownership
-
-.PP
-Transfer team ownership to the named account at the expected generation. Review the target account and current team state before changing owner authority.
-
-.PP
-Teams use explicit membership and resource grants. Membership alone does not grant machine use, ENV values, previews, or tunnels. Mutations use the current team generation to reject stale edits; read pb team get before retrying a conflicting change.
+Transfer team ownership to another member's account. Only an owner can transfer ownership.
+Pass the team's current generation with --generation (read it with pb team get). A stale
+generation is rejected, so two people editing the team never overwrite each other.
 
 .PP
 JSON output is supported with --json.
@@ -50,6 +46,12 @@ JSON output is supported with --json.
 .PP
 \fB--workspace\fP=""
 	resource workspace selector: personal or a team slug
+
+
+.SH EXAMPLE
+.EX
+  pb team transfer acme ana --generation 9
+.EE
 
 
 .SH SEE ALSO

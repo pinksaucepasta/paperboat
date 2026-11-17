@@ -4,16 +4,23 @@ Delete a team
 
 ### Synopsis
 
-Delete a team
+Delete a team. Team-owned machines are revoked; personal resources stay with their owners.
+Check pb team get first for machines and attached resources.
 
-Delete a team after exact confirmation and a matching generation. This affects team ownership and grants; inspect attached resources and enrolled team machines first.
-
-Teams use explicit membership and resource grants. Membership alone does not grant machine use, ENV values, previews, or tunnels. Mutations use the current team generation to reject stale edits; read pb team get before retrying a conflicting change.
+--confirm must repeat the exact team ID, so a typo cannot delete the wrong team.
+Pass the team's current generation with --generation (read it with pb team get). A stale
+generation is rejected, so two people editing the team never overwrite each other.
 
 JSON output is supported with --json.
 
 ```
 pb team delete <team> [flags]
+```
+
+### Examples
+
+```
+  pb team delete acme --confirm acme --generation 9
 ```
 
 ### Options

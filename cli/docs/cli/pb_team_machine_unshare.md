@@ -4,16 +4,20 @@ Withdraw the team's grants while retaining personal ownership
 
 ### Synopsis
 
-Withdraw the team's grants while retaining personal ownership
-
-Withdraw one team's access to a personally owned machine while retaining that enrollment. Other independent personal ownership remains intact.
-
-A personal machine can be shared with a team while ownership stays personal, or explicitly transferred to team ownership and back to the personal account that enrolled it. Sharing and capability grants are separate decisions. Removing a team-owned machine revokes its enrollment; unsharing a personal machine withdraws that team's access.
+Withdraw the team's access to a machine of yours. Its grants end and you stay the owner.
+Pass the team's current generation with --generation (read it with pb team get). A stale
+generation is rejected, so two people editing the team never overwrite each other.
 
 JSON output is supported with --json.
 
 ```
 pb team machine unshare <team> <machine-id> [flags]
+```
+
+### Examples
+
+```
+  pb team machine unshare acme m_abc123 --generation 9
 ```
 
 ### Options

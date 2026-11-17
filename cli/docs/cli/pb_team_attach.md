@@ -4,16 +4,22 @@ Attach or detach an explicitly selected personal resource
 
 ### Synopsis
 
-Attach or detach an explicitly selected personal resource
-
-Attach or detach an exact personal preview or tunnel to a team. --generation guards against stale changes, and --active chooses the desired attachment state.
-
-Teams use explicit membership and resource grants. Membership alone does not grant machine use, ENV values, previews, or tunnels. Mutations use the current team generation to reject stale edits; read pb team get before retrying a conflicting change.
+Attach one of your personal previews or tunnels to the team so team grants can refer to it,
+or detach it with --active=false. Only previews and tunnels can be attached.
+Pass the team's current generation with --generation (read it with pb team get). A stale
+generation is rejected, so two people editing the team never overwrite each other.
 
 JSON output is supported with --json.
 
 ```
 pb team attach <team> <preview|tunnel> <resource> [flags]
+```
+
+### Examples
+
+```
+  pb team attach acme preview blog --generation 9
+  pb team attach acme preview blog --active=false --generation 10
 ```
 
 ### Options

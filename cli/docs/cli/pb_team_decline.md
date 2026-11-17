@@ -4,16 +4,20 @@ Decline an invitation bound to this account
 
 ### Synopsis
 
-Decline an invitation bound to this account
-
-Decline a pending invitation explicitly addressed to this account without joining the team. The invitation is cancelled; completed or changed invitations require reloading their current status. Invitations for other accounts cannot be declined.
-
-Teams use explicit membership and resource grants. Membership alone does not grant machine use, ENV values, previews, or tunnels. Mutations use the current team generation to reject stale edits; read pb team get before retrying a conflicting change.
+Decline an invitation addressed to this account, so you do not join the team. The invitation
+ID comes from pb team invitations. Invitations addressed to other accounts cannot be declined.
 
 JSON output is supported with --json.
 
 ```
 pb team decline <invitation> [flags]
+```
+
+### Examples
+
+```
+  pb team invitations
+  pb team decline inv_abc123
 ```
 
 ### Options

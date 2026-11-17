@@ -4,16 +4,26 @@ Create a team by paying for its seats
 
 ### Synopsis
 
-Create a team. Teams are paid for first: this prints a secure Checkout link for the seats, and the team exists as soon as payment completes. Running the same command again reuses the same order.
+Create a team by paying for its seats. The command prints a Checkout link, opens it in a
+browser when it can, and then waits until payment completes and the team exists. The owner uses
+one of the seats.
 
-Create a named team with this account as its initial owner. Membership and resource grants are managed separately after creation.
-
-Teams use explicit membership and resource grants. Membership alone does not grant machine use, ENV values, previews, or tunnels. Mutations use the current team generation to reject stale edits; read pb team get before retrying a conflicting change.
+Use --no-wait to print the link and return. Ctrl+C or --wait-timeout stops only the waiting; the
+team is still created once you pay, and pb team get shows it. Running the same command again
+reuses the same order instead of billing twice.
 
 JSON output is supported with --json.
 
 ```
 pb team create <team> [flags]
+```
+
+### Examples
+
+```
+  pb team create acme --seats 5
+  pb team create acme --seats 5 --interval year --no-wait
+  pb team create acme --json
 ```
 
 ### Options
@@ -23,7 +33,7 @@ pb team create <team> [flags]
       --interval string         billing interval: month or year (default "month")
       --json                    print canonical JSON
       --no-wait                 print the Checkout link and return without waiting for payment
-      --seats int               seats to buy, including the owner's (default 1)
+      --seats int               seats to buy, including the owner's (1-128) (default 1)
       --wait-timeout duration   how long to wait for payment before returning (default 15m0s)
 ```
 

@@ -4,16 +4,20 @@ List machines waiting for a team owner or admin
 
 ### Synopsis
 
-List machines waiting for a team owner or admin
-
-List machines waiting for a team owner or admin, with who asked and when. Owners and admins see every request; other members see their own, including declined ones.
-
-A personal machine can be shared with a team while ownership stays personal, or explicitly transferred to team ownership and back to the personal account that enrolled it. Sharing and capability grants are separate decisions. Removing a team-owned machine revokes its enrollment; unsharing a personal machine withdraws that team's access.
+List machines waiting for an owner or admin to accept them, one line each with machine ID,
+name, state and who asked. Prints "No machines are waiting." when there are none.
 
 JSON output is supported with --json.
 
 ```
 pb team machine requests <team> [flags]
+```
+
+### Examples
+
+```
+  pb team machine requests acme
+  pb team machine requests acme --json
 ```
 
 ### Options

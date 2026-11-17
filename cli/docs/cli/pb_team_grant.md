@@ -4,16 +4,25 @@ Set or revoke an explicit resource permission
 
 ### Synopsis
 
-Set or revoke an explicit resource permission
-
-Set or revoke an explicit ENV, preview, or tunnel permission for one account and resource. --active selects grant state, and --generation rejects stale team edits.
-
-Teams use explicit membership and resource grants. Membership alone does not grant machine use, ENV values, previews, or tunnels. Mutations use the current team generation to reject stale edits; read pb team get before retrying a conflicting change.
+Give one member a permission on one resource, or revoke it with --active=false. The
+permission is read or write for an ENV vault (env), and use, manage, inspect or replay for a
+preview or tunnel. Each permission stands alone: manage does not imply inspect, and inspect does
+not imply replay. Team membership alone grants none of them.
+Pass the team's current generation with --generation (read it with pb team get). A stale
+generation is rejected, so two people editing the team never overwrite each other.
 
 JSON output is supported with --json.
 
 ```
 pb team grant <team> <account> <env|preview|tunnel> <resource> <permission> [flags]
+```
+
+### Examples
+
+```
+  pb team grant acme ana env vault1 read --generation 9
+  pb team grant acme ana preview blog manage --generation 9
+  pb team grant acme ana preview blog manage --active=false --generation 10
 ```
 
 ### Options

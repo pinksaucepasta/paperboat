@@ -4,16 +4,21 @@ Remove a team member
 
 ### Synopsis
 
-Remove a team member
-
-Remove one member from a team at the expected generation. Team resource access supplied through membership is withdrawn for that account.
-
-Teams use explicit membership and resource grants. Membership alone does not grant machine use, ENV values, previews, or tunnels. Mutations use the current team generation to reject stale edits; read pb team get before retrying a conflicting change.
+Remove a member from the team. Their team access and adopted defaults end at once.
+Independently granted Git access and files or secrets they already received remain with them.
+Pass the team's current generation with --generation (read it with pb team get). A stale
+generation is rejected, so two people editing the team never overwrite each other.
 
 JSON output is supported with --json.
 
 ```
 pb team remove <team> <account> [flags]
+```
+
+### Examples
+
+```
+  pb team remove acme ana --generation 9
 ```
 
 ### Options

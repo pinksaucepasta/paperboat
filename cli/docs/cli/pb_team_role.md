@@ -4,16 +4,22 @@ Change a team member's role
 
 ### Synopsis
 
-Change a team member's role
-
-Set one member's role to admin, billing, auditor or member at the expected generation; admins may change only billing admins, auditors and members. This changes team management authority, not the member's explicit resource grants.
-
-Teams use explicit membership and resource grants. Membership alone does not grant machine use, ENV values, previews, or tunnels. Mutations use the current team generation to reject stale edits; read pb team get before retrying a conflicting change.
+Change one member's role: admin, billing, auditor or member. Admins may only change
+billing admins, auditors and members; appointing admins is an owner's job. The role changes who
+manages the team, not the resource grants the member already has.
+Pass the team's current generation with --generation (read it with pb team get). A stale
+generation is rejected, so two people editing the team never overwrite each other.
 
 JSON output is supported with --json.
 
 ```
 pb team role <team> <account> <admin|billing|auditor|member> [flags]
+```
+
+### Examples
+
+```
+  pb team role acme ana auditor --generation 8
 ```
 
 ### Options

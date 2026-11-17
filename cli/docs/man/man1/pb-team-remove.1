@@ -10,13 +10,10 @@ pb-team-remove - Remove a team member
 
 
 .SH DESCRIPTION
-Remove a team member
-
-.PP
-Remove one member from a team at the expected generation. Team resource access supplied through membership is withdrawn for that account.
-
-.PP
-Teams use explicit membership and resource grants. Membership alone does not grant machine use, ENV values, previews, or tunnels. Mutations use the current team generation to reject stale edits; read pb team get before retrying a conflicting change.
+Remove a member from the team. Their team access and adopted defaults end at once.
+Independently granted Git access and files or secrets they already received remain with them.
+Pass the team's current generation with --generation (read it with pb team get). A stale
+generation is rejected, so two people editing the team never overwrite each other.
 
 .PP
 JSON output is supported with --json.
@@ -50,6 +47,12 @@ JSON output is supported with --json.
 .PP
 \fB--workspace\fP=""
 	resource workspace selector: personal or a team slug
+
+
+.SH EXAMPLE
+.EX
+  pb team remove acme ana --generation 9
+.EE
 
 
 .SH SEE ALSO

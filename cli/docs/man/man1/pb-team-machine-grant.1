@@ -68,5 +68,13 @@ JSON output is supported with --json.
 	resource workspace selector: personal or a team slug
 
 
+.SH EXAMPLE
+.EX
+  pb team machine grant acme m_abc123 --all-members --capability terminal --capability exec --generation 9
+  pb team machine grant acme m_abc123 --member ana --capability terminal --generation 10
+  pb team machine grant acme m_abc123 --all-members --capability terminal --active=false --generation 11
+.EE
+
+
 .SH SEE ALSO
 \fBpb-team-machine(1)\fP

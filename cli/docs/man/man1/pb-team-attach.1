@@ -10,13 +10,10 @@ pb-team-attach - Attach or detach an explicitly selected personal resource
 
 
 .SH DESCRIPTION
-Attach or detach an explicitly selected personal resource
-
-.PP
-Attach or detach an exact personal preview or tunnel to a team. --generation guards against stale changes, and --active chooses the desired attachment state.
-
-.PP
-Teams use explicit membership and resource grants. Membership alone does not grant machine use, ENV values, previews, or tunnels. Mutations use the current team generation to reject stale edits; read pb team get before retrying a conflicting change.
+Attach one of your personal previews or tunnels to the team so team grants can refer to it,
+or detach it with --active=false. Only previews and tunnels can be attached.
+Pass the team's current generation with --generation (read it with pb team get). A stale
+generation is rejected, so two people editing the team never overwrite each other.
 
 .PP
 JSON output is supported with --json.
@@ -54,6 +51,13 @@ JSON output is supported with --json.
 .PP
 \fB--workspace\fP=""
 	resource workspace selector: personal or a team slug
+
+
+.SH EXAMPLE
+.EX
+  pb team attach acme preview blog --generation 9
+  pb team attach acme preview blog --active=false --generation 10
+.EE
 
 
 .SH SEE ALSO

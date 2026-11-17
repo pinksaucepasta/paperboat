@@ -12,6 +12,14 @@ With --json, this command group lists its available commands.
 pb team machine [flags]
 ```
 
+### Examples
+
+```
+  pb team machine share acme m_abc123 --generation 9
+  pb team machine grant acme m_abc123 --all-members --capability terminal --generation 10
+  pb team machine requests acme
+```
+
 ### Options
 
 ```

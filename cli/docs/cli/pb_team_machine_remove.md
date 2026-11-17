@@ -4,16 +4,22 @@ Revoke a team-owned machine without personal takeover
 
 ### Synopsis
 
-Revoke a team-owned machine without personal takeover
-
-Revoke a team-owned machine enrollment after exact confirmation. Ownership does not return to the personal enroller (use transfer-to-personal for that); access is withdrawn from team members.
-
-A personal machine can be shared with a team while ownership stays personal, or explicitly transferred to team ownership and back to the personal account that enrolled it. Sharing and capability grants are separate decisions. Removing a team-owned machine revokes its enrollment; unsharing a personal machine withdraws that team's access.
+Revoke a team-owned machine's enrollment without handing it to a person. --confirm must
+repeat the exact machine ID. If the device was lost or compromised, rotate the team's ENV keys
+afterwards.
+Pass the team's current generation with --generation (read it with pb team get). A stale
+generation is rejected, so two people editing the team never overwrite each other.
 
 JSON output is supported with --json.
 
 ```
 pb team machine remove <team> <machine-id> [flags]
+```
+
+### Examples
+
+```
+  pb team machine remove acme m_abc123 --confirm m_abc123 --generation 9
 ```
 
 ### Options

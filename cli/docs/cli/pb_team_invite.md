@@ -4,16 +4,25 @@ Invite a member by email, including before signup
 
 ### Synopsis
 
-Invite a member by email, including before signup
+Invite a person by email address. They do not need an account yet: they sign in, verify
+that email address, then accept the invitation. The invitation is for the member role and
+expires; change the role afterwards with pb team role.
 
-Invite one exact account to the selected team at its current generation. The recipient must accept; an invitation is not immediate membership or a resource grant.
-
-Teams use explicit membership and resource grants. Membership alone does not grant machine use, ENV values, previews, or tunnels. Mutations use the current team generation to reject stale edits; read pb team get before retrying a conflicting change.
+The team needs a spare seat, otherwise the invitation is refused and you must add seats first.
+Pass the team's current generation with --generation (read it with pb team get). A stale
+generation is rejected, so two people editing the team never overwrite each other.
 
 JSON output is supported with --json.
 
 ```
 pb team invite <team> <email> [flags]
+```
+
+### Examples
+
+```
+  pb team get acme
+  pb team invite acme ana@example.test --generation 7
 ```
 
 ### Options

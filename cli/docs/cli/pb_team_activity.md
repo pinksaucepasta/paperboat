@@ -16,6 +16,14 @@ JSON output is supported with --json.
 pb team activity <team> [flags]
 ```
 
+### Examples
+
+```
+  pb team activity acme --limit 20
+  pb team activity acme --action billing --since 7d
+  pb team activity acme --result denied --json
+```
+
 ### Options
 
 ```

@@ -130,7 +130,7 @@ func startPaidTeamCreate(ctx context.Context, client *api.Client, team string, s
 }
 
 func teamCreateCommand() *cobra.Command {
-	c := &cobra.Command{Use: "create <team>", Short: "Create a team by paying for its seats", Long: "Create a team. Teams are paid for first: this prints a secure Checkout link for the seats, and the team exists as soon as payment completes. Running the same command again reuses the same order.", Args: commandArgs(cobra.ExactArgs(1)), RunE: func(c *cobra.Command, args []string) error {
+	c := &cobra.Command{Use: "create <team>", Short: "Create a team by paying for its seats", Args: commandArgs(cobra.ExactArgs(1)), RunE: func(c *cobra.Command, args []string) error {
 		if !validTeamCLIIdentifier(args[0]) {
 			return localArgumentError("team must be a valid identifier")
 		}
@@ -168,7 +168,7 @@ func teamCreateCommand() *cobra.Command {
 		timeout, _ := c.Flags().GetDuration("wait-timeout")
 		return waitForPaidTeam(c, client, args[0], timeout, jsonOutput)
 	}}
-	c.Flags().Int("seats", 1, "seats to buy, including the owner's")
+	c.Flags().Int("seats", 1, "seats to buy, including the owner's (1-128)")
 	c.Flags().String("interval", "month", "billing interval: month or year")
 	c.Flags().Bool("no-wait", false, "print the Checkout link and return without waiting for payment")
 	c.Flags().Duration("wait-timeout", 15*time.Minute, "how long to wait for payment before returning")

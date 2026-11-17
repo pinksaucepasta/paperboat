@@ -10,13 +10,8 @@ pb-team-accept - Accept an invitation bound to this account
 
 
 .SH DESCRIPTION
-Accept an invitation bound to this account
-
-.PP
-Accept an invitation explicitly addressed to this account. The resulting membership does not automatically grant access to every resource owned or shared by the team.
-
-.PP
-Teams use explicit membership and resource grants. Membership alone does not grant machine use, ENV values, previews, or tunnels. Mutations use the current team generation to reject stale edits; read pb team get before retrying a conflicting change.
+Accept an invitation addressed to this account and join the team. Find the invitation ID
+with pb team invitations. The command prints the team as it is after you joined.
 
 .PP
 JSON output is supported with --json.
@@ -46,6 +41,13 @@ JSON output is supported with --json.
 .PP
 \fB--workspace\fP=""
 	resource workspace selector: personal or a team slug
+
+
+.SH EXAMPLE
+.EX
+  pb team invitations
+  pb team accept inv_abc123
+.EE
 
 
 .SH SEE ALSO

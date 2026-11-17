@@ -4,16 +4,21 @@ Accept a machine a member asked to add to the team
 
 ### Synopsis
 
-Accept a machine a member asked to add to the team
-
-Accept a machine a member asked to add to the team (see pb team machine requests). The machine is then shared with the team; access still needs explicit capability grants. Owners and admins only.
-
-A personal machine can be shared with a team while ownership stays personal, or explicitly transferred to team ownership and back to the personal account that enrolled it. Sharing and capability grants are separate decisions. Removing a team-owned machine revokes its enrollment; unsharing a personal machine withdraws that team's access.
+Accept a machine a member asked to add to the team (see pb team machine requests). Only
+owners and admins can. --generation is optional here: without it the command uses the team's
+current generation.
 
 JSON output is supported with --json.
 
 ```
 pb team machine approve <team> <machine-id> [flags]
+```
+
+### Examples
+
+```
+  pb team machine requests acme
+  pb team machine approve acme m_abc123
 ```
 
 ### Options

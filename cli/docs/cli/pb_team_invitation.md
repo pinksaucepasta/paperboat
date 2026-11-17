@@ -4,16 +4,19 @@ Show an invitation you may receive or administer
 
 ### Synopsis
 
-Show an invitation you may receive or administer
-
-Read one exact invitation visible to your account or team administration authority. This command displays metadata and does not accept or cancel it. Use the corresponding explicit invitation action after reviewing its team and recipient.
-
-Teams use explicit membership and resource grants. Membership alone does not grant machine use, ENV values, previews, or tunnels. Mutations use the current team generation to reject stale edits; read pb team get before retrying a conflicting change.
+Show one invitation you received or administer, as JSON. The invitation ID comes from pb team
+invitations. This only displays it; use accept, decline or cancel-invite to act on it.
 
 This command does not support --json output; it rejects that mode before execution. Use --help --json for structured command help.
 
 ```
 pb team invitation <invitation> [flags]
+```
+
+### Examples
+
+```
+  pb team invitation inv_abc123
 ```
 
 ### Options

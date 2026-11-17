@@ -12,6 +12,14 @@ With --json, this command group lists its available commands.
 pb team [flags]
 ```
 
+### Examples
+
+```
+  pb team list
+  pb team get acme
+  pb team invite acme ana@example.test --generation 7
+```
+
 ### Options
 
 ```

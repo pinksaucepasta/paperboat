@@ -84,5 +84,13 @@ JSON output is supported with --json.
 	resource workspace selector: personal or a team slug
 
 
+.SH EXAMPLE
+.EX
+  pb team activity acme --limit 20
+  pb team activity acme --action billing --since 7d
+  pb team activity acme --result denied --json
+.EE
+
+
 .SH SEE ALSO
 \fBpb-team(1)\fP, \fBpb-team-activity-export(1)\fP

@@ -4,16 +4,21 @@ Explicitly transfer your enrollment to team ownership
 
 ### Synopsis
 
-Explicitly transfer your enrollment to team ownership
-
-Transfer a personal machine enrollment into team ownership after exact confirmation and generation check. This is different from sharing and withdraws unrelated personal team shares.
-
-A personal machine can be shared with a team while ownership stays personal, or explicitly transferred to team ownership and back to the personal account that enrolled it. Sharing and capability grants are separate decisions. Removing a team-owned machine revokes its enrollment; unsharing a personal machine withdraws that team's access.
+Give ownership of a machine you enrolled to the team. This changes who owns and can
+revoke the machine, so --confirm must repeat the exact machine ID.
+Pass the team's current generation with --generation (read it with pb team get). A stale
+generation is rejected, so two people editing the team never overwrite each other.
 
 JSON output is supported with --json.
 
 ```
 pb team machine transfer-to-team <team> <machine-id> [flags]
+```
+
+### Examples
+
+```
+  pb team machine transfer-to-team acme m_abc123 --confirm m_abc123 --generation 9
 ```
 
 ### Options
