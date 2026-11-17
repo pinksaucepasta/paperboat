@@ -306,8 +306,8 @@ func (c *ReconnectingConn) supervise(conn Conn) {
 			if c.probeWait != nil {
 				c.probeWait()
 			}
-			//lint:ignore SA2001 deliberate barrier: Lock waits for the running probe, which holds this mutex
-			c.probing.Lock()
+			c.probing.Lock() // deliberate barrier: waits for the running probe, which holds this mutex
+			//lint:ignore SA2001 the empty critical section is the barrier
 			c.probing.Unlock()
 		}
 		cancelProbe()
