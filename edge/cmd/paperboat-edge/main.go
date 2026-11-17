@@ -36,7 +36,6 @@ import (
 	"github.com/pinksaucepasta/paperboat/edge/internal/edgehttp"
 	"github.com/pinksaucepasta/paperboat/edge/internal/handover"
 	"github.com/pinksaucepasta/paperboat/edge/internal/node"
-	"github.com/pinksaucepasta/paperboat/edge/internal/operation"
 	"github.com/pinksaucepasta/paperboat/edge/internal/route"
 	edgeruntime "github.com/pinksaucepasta/paperboat/edge/internal/runtime"
 	"github.com/pinksaucepasta/paperboat/edge/internal/store"
@@ -308,7 +307,7 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 	if err != nil {
 		return nil, fmt.Errorf("create control client: %w", err)
 	}
-	journal, counters, queue, err := restoreState(cfg.StatePath)
+	counters, queue, err := restoreState(cfg.StatePath)
 	if err != nil {
 		return nil, fmt.Errorf("restore edge state: %w", err)
 	}
@@ -441,7 +440,7 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 		return nil, fmt.Errorf("create durable carrier admission registry: %w", err)
 	}
 	snapshotState := func() store.State {
-		return store.State{Version: store.CurrentVersion, CounterEpoch: epoch, Operations: journal.Snapshot(), Counters: counters.Snapshot(), PendingUsage: queue.Snapshot()}
+		return store.State{Version: store.CurrentVersion, CounterEpoch: epoch, Counters: counters.Snapshot(), PendingUsage: queue.Snapshot()}
 	}
 	verifier := &auth.Verifier{Issuer: deployment.CredentialIssuer, NodeID: cfg.NodeID, Keys: trust.Snapshot, Revocations: trust.Snapshot, ClockSkew: 30 * time.Second}
 	var ingressAuthority *control.IngressAuthority // set below; the preview registry asks it which route a host is admitted on
@@ -1271,22 +1270,17 @@ func controlTLS(caPath string) (*tls.Config, error) {
 	return &tls.Config{MinVersion: tls.VersionTLS13, RootCAs: pool}, nil
 }
 
-func restoreState(path string) (*operation.Journal, *usage.Counters, *usage.Queue, error) {
+func restoreState(path string) (*usage.Counters, *usage.Queue, error) {
 	saved, err := store.Load(path)
 	if errors.Is(err, os.ErrNotExist) {
-		journal, journalErr := operation.NewJournal(4096)
 		queue, queueErr := usage.NewQueue(usage.QueueReports, usage.QueueBytes)
-		return journal, usage.NewCounters(), queue, errors.Join(journalErr, queueErr)
+		return usage.NewCounters(), queue, queueErr
 	}
 	if err != nil {
-		return nil, nil, nil, err
-	}
-	journal, err := operation.Restore(saved.Operations, 4096)
-	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
 	queue, err := usage.RestoreQueue(saved.PendingUsage, usage.QueueReports, usage.QueueBytes)
-	return journal, usage.RestoreCounters(saved.Counters), queue, err
+	return usage.RestoreCounters(saved.Counters), queue, err
 }
 
 func readCredential(path string) (string, error) {

@@ -35,12 +35,12 @@ func FuzzReplaceJWKS(f *testing.F) {
 	})
 }
 
-func FuzzVerifyCredential(f *testing.F) {
+func FuzzVerifyHelperAccess(f *testing.F) {
 	public, private, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		f.Fatal(err)
 	}
-	valid := tokenFor(f, private, "key-1", nil)
+	valid := terminalToken(f, private, "key-1", nil)
 	f.Add(valid)
 	f.Add("")
 	f.Add(strings.Repeat("x", maxCredentialBytes+1))
@@ -52,11 +52,11 @@ func FuzzVerifyCredential(f *testing.F) {
 	}
 
 	f.Fuzz(func(t *testing.T, token string) {
-		claims, err := verifier.Verify(context.Background(), token)
+		claims, err := verifier.VerifyHelperAccess(context.Background(), token)
 		if err != nil {
 			return
 		}
-		if claims.KeyID != "key-1" || claims.Issuer != verifier.Issuer || claims.Audience != "paperboat-edge" || claims.JTI == "" || claims.CredentialClass != "connector_admission" || claims.EnvironmentID == "" || claims.MachineID == "" || claims.ConnectorGeneration == 0 || claims.ExpiresAt.IsZero() {
+		if claims.KeyID != "key-1" || claims.Issuer != verifier.Issuer || claims.Audience != "paperboat-machine" || claims.JTI == "" || claims.CredentialClass == "" || claims.EnvironmentID == "" || claims.MachineID == "" || claims.ExpiresAt.IsZero() {
 			t.Fatalf("accepted credential escaped binding: %+v", claims)
 		}
 	})

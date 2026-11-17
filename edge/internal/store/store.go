@@ -1,4 +1,4 @@
-// Package store persists the edge's durable state (operation journal, usage counters and the pending
+// Package store persists the edge's durable state (usage counters and the pending
 // usage queue) in one checksummed, versioned file with owner-only permissions. Load refuses a corrupt,
 // over-permissive or unsupported-version file rather than starting from a guess.
 package store
@@ -14,7 +14,6 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/pinksaucepasta/paperboat/edge/internal/operation"
 	"github.com/pinksaucepasta/paperboat/edge/internal/usage"
 )
 
@@ -33,7 +32,6 @@ var (
 type State struct {
 	Version      uint32                `json:"version"`
 	CounterEpoch string                `json:"counter_epoch"`
-	Operations   []operation.Record    `json:"operations"`
 	Counters     []usage.CounterRecord `json:"counters"`
 	PendingUsage usage.QueueState      `json:"pending_usage"`
 }
@@ -45,7 +43,7 @@ type envelope struct {
 }
 
 func Save(path string, state State) error {
-	if path == "" || state.Version != CurrentVersion || state.CounterEpoch == "" || len(state.Operations) > 100000 || len(state.Counters) > 100000 || len(state.PendingUsage.Reports) > 100000 {
+	if path == "" || state.Version != CurrentVersion || state.CounterEpoch == "" || len(state.Counters) > 100000 || len(state.PendingUsage.Reports) > 100000 {
 		return ErrCorrupt
 	}
 	stateBytes, err := json.Marshal(state)
@@ -131,7 +129,7 @@ func Load(path string) (State, error) {
 		return State{}, ErrCorrupt
 	}
 	var state State
-	if err := strictJSON(wrapped.State, &state); err != nil || state.Version != CurrentVersion || state.CounterEpoch == "" || len(state.Operations) > 100000 || len(state.Counters) > 100000 || len(state.PendingUsage.Reports) > 100000 {
+	if err := strictJSON(wrapped.State, &state); err != nil || state.Version != CurrentVersion || state.CounterEpoch == "" || len(state.Counters) > 100000 || len(state.PendingUsage.Reports) > 100000 {
 		return State{}, ErrCorrupt
 	}
 	return state, nil

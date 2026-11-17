@@ -31,22 +31,10 @@ func tokenFor(t testing.TB, private ed25519.PrivateKey, keyID string, mutate fun
 	return signing + "." + base64.RawURLEncoding.EncodeToString(ed25519.Sign(private, []byte(signing)))
 }
 
-func TestVerifierAcceptsExactConnectorCredential(t *testing.T) {
-	public, private, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		t.Fatal(err)
-	}
-	verifier := &Verifier{Issuer: "https://api.paperboat.test", Keys: StaticKeys{"key-1": public}, Now: func() time.Time { return time.Unix(1000, 0) }, ClockSkew: time.Minute}
-	claims, err := verifier.Verify(context.Background(), tokenFor(t, private, "key-1", nil))
-	if err != nil || claims.JTI != "jti_admit_01" || claims.ConnectorGeneration != 3 || claims.EdgeNodeID != "edge" {
-		t.Fatalf("claims = %+v, %v", claims, err)
-	}
-}
-
 func TestVerifierRejectsDuplicateSignedHeaderAndClaims(t *testing.T) {
 	public, private, _ := ed25519.GenerateKey(rand.Reader)
 	verifier := &Verifier{Issuer: "https://api.paperboat.test", Keys: StaticKeys{"key-1": public}, Now: func() time.Time { return time.Unix(1000, 0) }, ClockSkew: time.Minute}
-	canonical := tokenFor(t, private, "key-1", nil)
+	canonical := terminalToken(t, private, "key-1", nil)
 	parts := strings.Split(canonical, ".")
 
 	header, err := base64.RawURLEncoding.DecodeString(parts[0])
@@ -57,7 +45,7 @@ func TestVerifierRejectsDuplicateSignedHeaderAndClaims(t *testing.T) {
 	if duplicateHeader == string(header) {
 		t.Fatal("header fixture did not mutate")
 	}
-	if _, err := verifier.Verify(context.Background(), resignToken(duplicateHeader, string(mustDecodeSegment(t, parts[1])), private)); err == nil {
+	if _, err := verifier.VerifyHelperAccess(context.Background(), resignToken(duplicateHeader, string(mustDecodeSegment(t, parts[1])), private)); err == nil {
 		t.Fatal("duplicate signed header accepted")
 	}
 
@@ -66,13 +54,30 @@ func TestVerifierRejectsDuplicateSignedHeaderAndClaims(t *testing.T) {
 	if duplicateClaims == payload {
 		t.Fatal("claims fixture did not mutate")
 	}
-	if _, err := verifier.Verify(context.Background(), resignToken(string(header), duplicateClaims, private)); err == nil {
+	if _, err := verifier.VerifyHelperAccess(context.Background(), resignToken(string(header), duplicateClaims, private)); err == nil {
 		t.Fatal("duplicate signed claims accepted")
 	}
 
-	if _, err := verifier.Verify(context.Background(), parts[0]+"=."+parts[1]+"."+parts[2]); err == nil {
+	if _, err := verifier.VerifyHelperAccess(context.Background(), parts[0]+"=."+parts[1]+"."+parts[2]); err == nil {
 		t.Fatal("non-canonical base64url header accepted")
 	}
+}
+
+// terminalToken is a valid terminal_operation helper credential; tests mutate it to break one binding.
+func terminalToken(t testing.TB, private ed25519.PrivateKey, keyID string, mutate func(map[string]any)) string {
+	return tokenFor(t, private, keyID, func(c map[string]any) {
+		c["aud"] = "paperboat-machine"
+		c["credential_class"] = "terminal_operation"
+		c["workspace_id"] = "personal"
+		c["actor_account_id"] = "usr_1"
+		c["scope"] = []string{"terminal:operate"}
+		c["user_id"] = "usr_1"
+		c["cli_client_session_id"] = "acs_1"
+		c["session_id"] = "pts_1"
+		if mutate != nil {
+			mutate(c)
+		}
+	})
 }
 
 func resignToken(header, payload string, private ed25519.PrivateKey) string {
@@ -295,32 +300,13 @@ func TestVerifierRejectsMalformedWrongKeySignatureAndClaims(t *testing.T) {
 	public, private, _ := ed25519.GenerateKey(rand.Reader)
 	_, otherPrivate, _ := ed25519.GenerateKey(rand.Reader)
 	verifier := &Verifier{Issuer: "https://api.paperboat.test", Keys: StaticKeys{"key-1": public}, Now: func() time.Time { return time.Unix(1000, 0) }, ClockSkew: time.Minute}
-	tokens := []string{"not-a-token", tokenFor(t, private, "unknown", nil), tokenFor(t, otherPrivate, "key-1", nil), tokenFor(t, private, "key-1", func(claims map[string]any) { claims["aud"] = "other" }), tokenFor(t, private, "key-1", func(claims map[string]any) { claims["exp"] = int64(999) }), tokenFor(t, private, "key-1", func(claims map[string]any) { claims["unknown"] = true })}
-	for _, token := range tokens {
-		if _, err := verifier.Verify(context.Background(), token); err == nil {
-			t.Fatal("invalid token accepted")
-		}
+	tokens := []string{"not-a-token", terminalToken(t, private, "unknown", nil), terminalToken(t, otherPrivate, "key-1", nil), terminalToken(t, private, "key-1", func(claims map[string]any) { claims["aud"] = "other" }), terminalToken(t, private, "key-1", func(claims map[string]any) { claims["exp"] = int64(999) }), terminalToken(t, private, "key-1", func(claims map[string]any) { claims["unknown"] = true })}
+	if _, err := verifier.VerifyHelperAccess(context.Background(), terminalToken(t, private, "key-1", nil)); err != nil {
+		t.Fatalf("valid token rejected: %v", err)
 	}
-}
-
-func TestVerifierRejectsMissingOrInvalidFileTransferPolicy(t *testing.T) {
-	public, private, _ := ed25519.GenerateKey(rand.Reader)
-	verifier := &Verifier{Issuer: "https://api.paperboat.test", Keys: StaticKeys{"key-1": public}, Now: func() time.Time { return time.Unix(1000, 0) }, ClockSkew: time.Minute}
-	for _, mutate := range []func(map[string]any){
-		func(claims map[string]any) { delete(claims, "file_transfer_policy") },
-		func(claims map[string]any) {
-			claims["file_transfer_policy"].(map[string]any)["automatic_max_batch_bytes"] = 0
-		},
-		func(claims map[string]any) {
-			claims["file_transfer_policy"].(map[string]any)["automatic_max_batch_bytes"] = 2_000_000_001
-			claims["file_transfer_policy"].(map[string]any)["max_pending_spool_bytes"] = 3_000_000_000
-		},
-		func(claims map[string]any) {
-			claims["file_transfer_policy"].(map[string]any)["max_pending_spool_bytes"] = 1 << 30
-		},
-	} {
-		if _, err := verifier.Verify(context.Background(), tokenFor(t, private, "key-1", mutate)); err == nil {
-			t.Fatal("invalid file transfer policy accepted")
+	for _, token := range tokens {
+		if _, err := verifier.VerifyHelperAccess(context.Background(), token); err == nil {
+			t.Fatal("invalid token accepted")
 		}
 	}
 }
@@ -332,12 +318,12 @@ func (revokedSource) Revoked(context.Context, admission.Claims) (bool, error) { 
 func TestVerifierPropagatesRevocationAndFailsClosedOnSourceError(t *testing.T) {
 	public, private, _ := ed25519.GenerateKey(rand.Reader)
 	verifier := &Verifier{Issuer: "https://api.paperboat.test", Keys: StaticKeys{"key-1": public}, Revocations: revokedSource{}, Now: func() time.Time { return time.Unix(1000, 0) }}
-	claims, err := verifier.Verify(context.Background(), tokenFor(t, private, "key-1", nil))
+	claims, err := verifier.VerifyHelperAccess(context.Background(), terminalToken(t, private, "key-1", nil))
 	if err != nil || !claims.Revoked {
 		t.Fatalf("revocation = %+v, %v", claims, err)
 	}
 	verifier.Keys = failingKeys{}
-	if _, err := verifier.Verify(context.Background(), tokenFor(t, private, "key-1", nil)); err == nil {
+	if _, err := verifier.VerifyHelperAccess(context.Background(), terminalToken(t, private, "key-1", nil)); err == nil {
 		t.Fatal("key source failure accepted")
 	}
 }
@@ -432,22 +418,12 @@ func TestVerifierPreservesUnavailableSourceCausesAndRecovers(t *testing.T) {
 	}
 	cause := &os.PathError{Op: "open", Path: "PRIVATE_KEY_PATH", Err: syscall.EACCES}
 	v := &Verifier{Issuer: "https://api.paperboat.test", Keys: StaticKeys{"key-1": public}, Now: func() time.Time { return time.Unix(1000, 0) }}
-	connector := tokenFor(t, private, "key-1", nil)
-	helper := tokenFor(t, private, "key-1", func(c map[string]any) {
-		c["aud"] = "paperboat-machine"
-		c["credential_class"] = "terminal_operation"
-		c["workspace_id"] = "personal"
-		c["actor_account_id"] = "usr_1"
-		c["scope"] = []string{"terminal:operate"}
-		c["user_id"] = "usr_1"
-		c["cli_client_session_id"] = "acs_1"
-		c["session_id"] = "pts_1"
-	})
+	helper := terminalToken(t, private, "key-1", nil)
 	for _, verify := range []struct {
 		name  string
 		call  func(context.Context, string) (admission.Claims, error)
 		token string
-	}{{"connector", v.Verify, connector}, {"helper", v.VerifyHelperAccess, helper}} {
+	}{{"helper", v.VerifyHelperAccess, helper}} {
 		t.Run(verify.name, func(t *testing.T) {
 			for _, code := range []edgeerrors.Code{edgeerrors.CodeCredentialKeyUnavailable, edgeerrors.CodeCredentialRevocationUnavailable} {
 				v.Keys = StaticKeys{"key-1": public}

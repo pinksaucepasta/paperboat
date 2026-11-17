@@ -1,5 +1,5 @@
-// Package testedge is a test double of the control plane's edge-facing API: Fake keeps assignments,
-// usage reports and credentials in memory and Handler serves them over HTTP behind a bearer
+// Package testedge is a test double of the control plane's edge-facing API: Fake keeps assignments
+// and usage reports in memory and Handler serves them over HTTP behind a bearer
 // credential. It is used only by tests.
 package testedge
 
@@ -19,7 +19,6 @@ import (
 )
 
 var (
-	ErrUnknownCredential = errors.New("unknown fake credential")
 	ErrUnknownAssignment = errors.New("unknown fake assignment")
 	ErrOperationConflict = errors.New("fake control operation conflict")
 	ErrAckLost           = errors.New("fake control acknowledgment lost")
@@ -28,7 +27,6 @@ var (
 
 type Fake struct {
 	mu            sync.Mutex
-	credentials   map[string]admission.Claims
 	assignments   map[string]admission.Current
 	operations    map[string]fakeOperation
 	maximum       map[usage.Key]uint64
@@ -45,28 +43,13 @@ type fakeOperation struct {
 }
 
 func New() *Fake {
-	return &Fake{credentials: map[string]admission.Claims{}, assignments: map[string]admission.Current{}, operations: map[string]fakeOperation{}, maximum: map[usage.Key]uint64{}, nodes: map[string]control.NodeObservation{}, registrations: map[string]control.NodeRegistration{}, routes: map[string]control.RouteAssignment{}, usageKeys: map[string]ed25519.PublicKey{}}
+	return &Fake{assignments: map[string]admission.Current{}, operations: map[string]fakeOperation{}, maximum: map[usage.Key]uint64{}, nodes: map[string]control.NodeObservation{}, registrations: map[string]control.NodeRegistration{}, routes: map[string]control.RouteAssignment{}, usageKeys: map[string]ed25519.PublicKey{}}
 }
 
-func (f *Fake) SetCredential(token string, claims admission.Claims) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.credentials[token] = claims
-}
 func (f *Fake) SetAssignment(environment, machine, connector string, current admission.Current) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.assignments[environment+"\x00"+machine+"\x00"+connector] = current
-}
-
-func (f *Fake) Verify(_ context.Context, token string) (admission.Claims, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	claims, ok := f.credentials[token]
-	if !ok {
-		return admission.Claims{}, ErrUnknownCredential
-	}
-	return claims, nil
 }
 
 func (f *Fake) Current(_ context.Context, environment, machine, connector string) (admission.Current, error) {

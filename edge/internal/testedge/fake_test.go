@@ -52,17 +52,8 @@ func TestFakeUsageReconcilesMaximumByEpochAndRevision(t *testing.T) {
 	}
 }
 
-func TestFakeCredentialAssignmentAndNodeLifecycle(t *testing.T) {
+func TestFakeAssignmentAndNodeLifecycle(t *testing.T) {
 	fake := New()
-	claims := admission.Claims{JTI: "jti_1"}
-	fake.SetCredential("token", claims)
-	got, err := fake.Verify(context.Background(), "token")
-	if err != nil || got.JTI != claims.JTI {
-		t.Fatalf("claims = %+v, %v", got, err)
-	}
-	if _, err := fake.Verify(context.Background(), "unknown"); !errors.Is(err, ErrUnknownCredential) {
-		t.Fatalf("unknown = %v", err)
-	}
 	fake.SetAssignment("env", "machine", "runtime", admission.Current{Generation: 3})
 	if current, err := fake.Current(context.Background(), "env", "machine", "runtime"); err != nil || current.Generation != 3 {
 		t.Fatalf("current = %+v, %v", current, err)

@@ -14,20 +14,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/edge/internal/admission"
 	"github.com/pinksaucepasta/paperboat/edge/internal/usage"
 	"github.com/pinksaucepasta/paperboat/shared/edgelimits"
 	"github.com/pinksaucepasta/paperboat/shared/routeobservation"
 	"github.com/pinksaucepasta/paperboat/shared/tunnelrouterules"
 )
-
-type CredentialVerifier interface {
-	Verify(context.Context, string) (admission.Claims, error)
-}
-
-type AssignmentSource interface {
-	Current(context.Context, string, string, string) (admission.Current, error)
-}
 
 type UsageReport struct {
 	OperationID string       `json:"operation_id"`

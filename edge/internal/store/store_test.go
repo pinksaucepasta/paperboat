@@ -9,14 +9,12 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 
-	"github.com/pinksaucepasta/paperboat/edge/internal/operation"
 	"github.com/pinksaucepasta/paperboat/edge/internal/usage"
 )
 
 func testState() State {
-	return State{Version: CurrentVersion, CounterEpoch: "epoch_test_01", Operations: []operation.Record{{OperationID: "op_1", JTI: "jti_1", RequestHash: "0000000000000000000000000000000000000000000000000000000000000000", Decision: []byte("decision"), RetainUntil: time.Unix(100, 0)}}, Counters: []usage.CounterRecord{{Key: usage.Key{Node: "n", Epoch: "e", Environment: "env", Route: "r", Direction: "egress"}, Bytes: 12}}, PendingUsage: usage.QueueState{Reports: []usage.Report{{OperationID: "usage_1", Payload: []byte("signed")}}}}
+	return State{Version: CurrentVersion, CounterEpoch: "epoch_test_01", Counters: []usage.CounterRecord{{Key: usage.Key{Node: "n", Epoch: "e", Environment: "env", Route: "r", Direction: "egress"}, Bytes: 12}}, PendingUsage: usage.QueueState{Reports: []usage.Report{{OperationID: "usage_1", Payload: []byte("signed")}}}}
 }
 
 func TestSaveLoadAndPermissions(t *testing.T) {
@@ -36,7 +34,7 @@ func TestSaveLoadAndPermissions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if loaded.CounterEpoch != "epoch_test_01" || len(loaded.Operations) != 1 || len(loaded.PendingUsage.Reports) != 1 {
+	if loaded.CounterEpoch != "epoch_test_01" || len(loaded.PendingUsage.Reports) != 1 {
 		t.Fatalf("loaded = %+v", loaded)
 	}
 }
