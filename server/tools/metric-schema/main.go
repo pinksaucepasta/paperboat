@@ -20,10 +20,10 @@ import (
 
 func main() { schema.Main(buildMetrics, verifyHandler) }
 
-// buildMetrics is every metric the control plane exposes: the platform counters
-// and control-plane diagnostics (flat names) and the typed telemetry catalog.
+// buildMetrics is every metric the control plane exposes: the durable control-plane
+// diagnostics (flat names) and the registry (typed catalog plus flat platform metrics).
 func buildMetrics() ([]schema.Metric, error) {
-	names := append(serverdiagnostics.MetricNames(), controlplane.DiagnosticMetricNames()...)
+	names := controlplane.DiagnosticMetricNames()
 	metrics := make([]schema.Metric, 0, len(names))
 	for _, name := range names {
 		kind := "gauge"
@@ -32,7 +32,7 @@ func buildMetrics() ([]schema.Metric, error) {
 		}
 		metrics = append(metrics, schema.Metric{Name: name, Kind: kind})
 	}
-	return append(metrics, schema.FromDescriptors(telemetry.MetricDescriptors())...), nil
+	return append(metrics, schema.FromDescriptors(telemetry.RegistryDescriptors())...), nil
 }
 
 // verifyHandler checks that the localhost /metrics JSON carries exactly the

@@ -66,15 +66,23 @@ var localMetricDescriptors = []sharedmetrics.Descriptor{
 
 var fixedMetricDescriptors = append(sharedmetrics.ContractDescriptors(), localMetricDescriptors...)
 
-// MetricDescriptors returns an independent copy of every descriptor the control plane exports.
+// registryDescriptors is every series the one server registry accepts: the typed catalog and the flat platform metrics.
+var registryDescriptors = append(append([]sharedmetrics.Descriptor(nil), fixedMetricDescriptors...), platformMetrics...)
+
+// RegistryDescriptors returns the typed catalog and the flat platform metrics.
+func RegistryDescriptors() []sharedmetrics.Descriptor {
+	return sharedmetrics.Clone(registryDescriptors)
+}
+
+// MetricDescriptors returns an independent copy of the typed catalog (not the flat platform metrics).
 func MetricDescriptors() []sharedmetrics.Descriptor {
 	return sharedmetrics.Clone(fixedMetricDescriptors)
 }
 
 // NewMetrics returns the control plane's metric store.
-func NewMetrics() *sharedmetrics.Metrics { return sharedmetrics.New(fixedMetricDescriptors, 0) }
+func NewMetrics() *sharedmetrics.Metrics { return sharedmetrics.New(registryDescriptors, 0) }
 
 // NewMetricsWithLimit is NewMetrics with at most maxSeries live series.
 func NewMetricsWithLimit(maxSeries int) *sharedmetrics.Metrics {
-	return sharedmetrics.New(fixedMetricDescriptors, maxSeries)
+	return sharedmetrics.New(registryDescriptors, maxSeries)
 }

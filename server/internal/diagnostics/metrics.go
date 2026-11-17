@@ -1,111 +1,77 @@
 package diagnostics
 
 import (
-	"sort"
 	"sync/atomic"
+
+	"github.com/pinksaucepasta/paperboat/server/internal/telemetry"
+	sharedmetrics "github.com/pinksaucepasta/paperboat/shared/metrics"
 )
 
-var platformMetrics struct {
-	deviceRequested           atomic.Int64
-	deviceCompleted           atomic.Int64
-	deviceLoginLatencyMS      atomic.Int64
-	deviceLoginLatencyMax     atomic.Int64
-	connectAttempts           atomic.Int64
-	connectApproved           atomic.Int64
-	connectDenied             atomic.Int64
-	routeReady                atomic.Int64
-	credentialsMinted         atomic.Int64
-	revocationsPropagated     atomic.Int64
-	terminalSessionsCreated   atomic.Int64
-	terminalSessionsClosed    atomic.Int64
-	terminalSessionsDeleted   atomic.Int64
-	terminalOperationsApplied atomic.Int64
-	terminalOperationRetries  atomic.Int64
-	terminalOperationAlerts   atomic.Int64
-	terminalSnapshots         atomic.Int64
-	terminalSnapshotFailures  atomic.Int64
-	controlRouteObservations  atomic.Int64
-	controlRouteDetaches      atomic.Int64
-	controlNodeStale          atomic.Int64
-	controlUsageReceipts      atomic.Int64
-	controlCredentialIssues   atomic.Int64
-	controlRevocationFetches  atomic.Int64
-}
+// The platform counters are series of the control plane's one metrics registry
+// (telemetry.PlatformMetricDescriptors). The registry is created here with a
+// default instance so packages can count before the app exists; the app binds its
+// own so a single instance carries typed and platform series.
+var process atomic.Pointer[sharedmetrics.Metrics]
 
-func DeviceRequested() { platformMetrics.deviceRequested.Add(1) }
-func DeviceCompleted(latencyMS int64) {
-	platformMetrics.deviceCompleted.Add(1)
-	platformMetrics.deviceLoginLatencyMS.Add(max(0, latencyMS))
-	updateMax(&platformMetrics.deviceLoginLatencyMax, latencyMS)
-}
-func ConnectAttempted()                { platformMetrics.connectAttempts.Add(1) }
-func ConnectApproved()                 { platformMetrics.connectApproved.Add(1) }
-func ConnectDenied()                   { platformMetrics.connectDenied.Add(1) }
-func RouteReady()                      { platformMetrics.routeReady.Add(1) }
-func CredentialsMinted()               { platformMetrics.credentialsMinted.Add(1) }
-func RevocationPropagated()            { platformMetrics.revocationsPropagated.Add(1) }
-func TerminalSessionCreated()          { platformMetrics.terminalSessionsCreated.Add(1) }
-func TerminalSessionClosed()           { platformMetrics.terminalSessionsClosed.Add(1) }
-func TerminalSessionDeleted()          { platformMetrics.terminalSessionsDeleted.Add(1) }
-func TerminalOperationApplied()        { platformMetrics.terminalOperationsApplied.Add(1) }
-func TerminalOperationRetried()        { platformMetrics.terminalOperationRetries.Add(1) }
-func TerminalOperationAlerted()        { platformMetrics.terminalOperationAlerts.Add(1) }
-func TerminalSnapshot()                { platformMetrics.terminalSnapshots.Add(1) }
-func TerminalSnapshotFailed()          { platformMetrics.terminalSnapshotFailures.Add(1) }
-func ControlRouteObserved(count int64) { platformMetrics.controlRouteObservations.Add(max(0, count)) }
-func ControlRouteDetached(count int64) { platformMetrics.controlRouteDetaches.Add(max(0, count)) }
-func ControlNodeStale(count int64)     { platformMetrics.controlNodeStale.Add(max(0, count)) }
-func ControlUsageReceipt()             { platformMetrics.controlUsageReceipts.Add(1) }
-func ControlCredentialIssued()         { platformMetrics.controlCredentialIssues.Add(1) }
-func ControlRevocationFetched()        { platformMetrics.controlRevocationFetches.Add(1) }
+func init() { process.Store(telemetry.NewMetrics()) }
 
-func MetricsSnapshot() map[string]int64 {
-	result := map[string]int64{
-		"device_requested_total":            platformMetrics.deviceRequested.Load(),
-		"device_completed_total":            platformMetrics.deviceCompleted.Load(),
-		"device_login_latency_ms_total":     platformMetrics.deviceLoginLatencyMS.Load(),
-		"device_login_latency_ms_max":       platformMetrics.deviceLoginLatencyMax.Load(),
-		"connect_attempts_total":            platformMetrics.connectAttempts.Load(),
-		"connect_approved_total":            platformMetrics.connectApproved.Load(),
-		"connect_denied_total":              platformMetrics.connectDenied.Load(),
-		"route_ready_total":                 platformMetrics.routeReady.Load(),
-		"credentials_minted_total":          platformMetrics.credentialsMinted.Load(),
-		"revocations_propagated_total":      platformMetrics.revocationsPropagated.Load(),
-		"terminal_sessions_created_total":   platformMetrics.terminalSessionsCreated.Load(),
-		"terminal_sessions_closed_total":    platformMetrics.terminalSessionsClosed.Load(),
-		"terminal_sessions_deleted_total":   platformMetrics.terminalSessionsDeleted.Load(),
-		"terminal_operations_applied_total": platformMetrics.terminalOperationsApplied.Load(),
-		"terminal_operation_retries_total":  platformMetrics.terminalOperationRetries.Load(),
-		"terminal_operation_alerts_total":   platformMetrics.terminalOperationAlerts.Load(),
-		"terminal_snapshots_total":          platformMetrics.terminalSnapshots.Load(),
-		"terminal_snapshot_failures_total":  platformMetrics.terminalSnapshotFailures.Load(),
-		"control_route_observations_total":  platformMetrics.controlRouteObservations.Load(),
-		"control_route_detaches_total":      platformMetrics.controlRouteDetaches.Load(),
-		"control_node_stale_total":          platformMetrics.controlNodeStale.Load(),
-		"control_usage_receipts_total":      platformMetrics.controlUsageReceipts.Load(),
-		"control_credentials_issued_total":  platformMetrics.controlCredentialIssues.Load(),
-		"control_revocation_fetches_total":  platformMetrics.controlRevocationFetches.Load(),
+// Bind makes registry the one that platform counters write to and /metrics reads.
+func Bind(registry *sharedmetrics.Metrics) { process.Store(registry) }
+
+func count(name string, delta int64) {
+	if delta > 0 {
+		_ = process.Load().AddCounter(name, nil, uint64(delta))
 	}
-	for key, value := range providerMetricsSnapshot() {
-		result[key] = value
+}
+
+func raise(name string, value int64) {
+	if value > 0 {
+		_ = process.Load().RaiseGauge(name, nil, uint64(value))
+	}
+}
+
+func DeviceRequested() { count("device_requested_total", 1) }
+func DeviceCompleted(latencyMS int64) {
+	count("device_completed_total", 1)
+	count("device_login_latency_ms_total", latencyMS)
+	raise("device_login_latency_ms_max", latencyMS)
+}
+func ConnectAttempted()                 { count("connect_attempts_total", 1) }
+func ConnectApproved()                  { count("connect_approved_total", 1) }
+func ConnectDenied()                    { count("connect_denied_total", 1) }
+func RouteReady()                       { count("route_ready_total", 1) }
+func CredentialsMinted()                { count("credentials_minted_total", 1) }
+func RevocationPropagated()             { count("revocations_propagated_total", 1) }
+func TerminalSessionCreated()           { count("terminal_sessions_created_total", 1) }
+func TerminalSessionClosed()            { count("terminal_sessions_closed_total", 1) }
+func TerminalSessionDeleted()           { count("terminal_sessions_deleted_total", 1) }
+func TerminalOperationApplied()         { count("terminal_operations_applied_total", 1) }
+func TerminalOperationRetried()         { count("terminal_operation_retries_total", 1) }
+func TerminalOperationAlerted()         { count("terminal_operation_alerts_total", 1) }
+func TerminalSnapshot()                 { count("terminal_snapshots_total", 1) }
+func TerminalSnapshotFailed()           { count("terminal_snapshot_failures_total", 1) }
+func ControlRouteObserved(count_ int64) { count("control_route_observations_total", count_) }
+func ControlRouteDetached(count_ int64) { count("control_route_detaches_total", count_) }
+func ControlNodeStale(count_ int64)     { count("control_node_stale_total", count_) }
+func ControlUsageReceipt()              { count("control_usage_receipts_total", 1) }
+func ControlCredentialIssued()          { count("control_credentials_issued_total", 1) }
+func ControlRevocationFetched()         { count("control_revocation_fetches_total", 1) }
+
+// MetricsSnapshot returns every platform metric by its flat name; a metric not
+// yet counted reads 0.
+func MetricsSnapshot() map[string]int64 {
+	names := telemetry.PlatformMetricNames()
+	result := make(map[string]int64, len(names))
+	for _, name := range names {
+		result[name] = 0
+	}
+	for _, sample := range process.Load().Snapshot() {
+		if _, ok := result[sample.Name]; ok {
+			result[sample.Name] = int64(sample.Value)
+		}
 	}
 	return result
 }
 
-func MetricNames() []string {
-	snapshot := MetricsSnapshot()
-	names := make([]string, 0, len(snapshot))
-	for name := range snapshot {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	return names
-}
-
-func updateMax(value *atomic.Int64, candidate int64) {
-	for current := value.Load(); candidate > current; current = value.Load() {
-		if value.CompareAndSwap(current, candidate) {
-			return
-		}
-	}
-}
+// MetricNames returns the sorted flat names of the platform metrics.
+func MetricNames() []string { return telemetry.PlatformMetricNames() }

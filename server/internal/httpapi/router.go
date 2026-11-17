@@ -851,7 +851,7 @@ func metrics(diagnostics *controlplane.DiagnosticsService, typed *sharedmetrics.
 			result[key] = value
 		}
 		if typed != nil {
-			result["typed"] = typed.Snapshot()
+			result["typed"] = telemetry.TypedSamples(typed)
 		}
 		writeJSON(w, http.StatusOK, SuccessResponse{Data: result})
 	}

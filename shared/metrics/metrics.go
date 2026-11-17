@@ -150,6 +150,26 @@ func (m *Metrics) ObserveHistogram(name string, labels Labels, observation float
 	return nil
 }
 
+// RaiseGauge sets the gauge to value when value is higher than the current
+// reading (a high-water mark such as a maximum latency).
+func (m *Metrics) RaiseGauge(name string, labels Labels, value uint64) error {
+	_, key, err := m.prepare(name, labels, Gauge)
+	if err != nil {
+		return err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	current, exists := m.values[key]
+	if !exists && len(m.values) >= m.maxSeries {
+		return safe.NewError(safe.ErrorMetricCardinality, "record metric")
+	}
+	if !exists || value > current.value {
+		current.value = value
+		m.values[key] = current
+	}
+	return nil
+}
+
 func (m *Metrics) mutate(name string, labels Labels, kind Kind, value uint64, add bool) error {
 	_, key, err := m.prepare(name, labels, kind)
 	if err != nil {

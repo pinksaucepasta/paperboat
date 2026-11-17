@@ -574,6 +574,7 @@ func New(opts Options) (*App, error) {
 		privateAccessRoutesHandler = privateAccessProduction.AccessorRoutes
 	}
 	telemetryMetrics := telemetry.NewMetrics()
+	serverdiagnostics.Bind(telemetryMetrics)
 	if edgeControlService != nil {
 		edgeControlService.SetRelayMetrics(telemetryMetrics)
 		edgeControlService.SetIngressLimits(opts.Config.EdgeIngressLimits)
@@ -641,7 +642,7 @@ func New(opts Options) (*App, error) {
 		return supportService.Begin(ctx, "database_operation", "", "")
 	})
 	supportService.SetSnapshot(func() {
-		supportService.RegistrySnapshot(telemetryMetrics.Snapshot())
+		supportService.RegistrySnapshot(telemetry.TypedSamples(telemetryMetrics))
 		supportService.PlatformSnapshot(serverdiagnostics.MetricsSnapshot())
 		stats := store.Pool().Stat()
 		supportService.Gauge("paperboat.database.connections", float64(stats.TotalConns()))

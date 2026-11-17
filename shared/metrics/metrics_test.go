@@ -82,3 +82,18 @@ func TestContractDescriptorsAreWellFormed(t *testing.T) {
 		t.Fatalf("dimension values = %d, want %d", got, len(health.Dimensions()))
 	}
 }
+
+func TestRaiseGaugeKeepsTheHighWaterMark(t *testing.T) {
+	m := New(testDescriptors, 0)
+	for _, v := range []uint64{5, 9, 3} {
+		if err := m.RaiseGauge("t_depth", nil, v); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := m.Snapshot(); len(got) != 1 || got[0].Value != 9 {
+		t.Fatalf("snapshot = %+v, want one gauge at 9", got)
+	}
+	if err := m.RaiseGauge("t_requests_total", Labels{"outcome": "success"}, 1); safe.ErrorCodeOf(err) != safe.ErrorMetricKindMismatch {
+		t.Fatalf("raising a counter error = %v", err)
+	}
+}

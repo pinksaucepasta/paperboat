@@ -1,6 +1,11 @@
 package diagnostics
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/pinksaucepasta/paperboat/server/internal/telemetry"
+	sharedmetrics "github.com/pinksaucepasta/paperboat/shared/metrics"
+)
 
 func TestMetricsSnapshotTracksBoundedPlatformCounters(t *testing.T) {
 	before := MetricsSnapshot()
@@ -45,5 +50,32 @@ func TestMetricsSnapshotTracksBoundedPlatformCounters(t *testing.T) {
 		if after[key] != before[key]+1 {
 			t.Fatalf("%s not tracked", key)
 		}
+	}
+}
+
+// Platform counters are series of the bound registry: the same instance serves the
+// typed catalog, every flat name is always present, and an unbound-then-bound
+// registry starts from zero.
+func TestPlatformCountersLiveInTheBoundRegistry(t *testing.T) {
+	registry := telemetry.NewMetrics()
+	Bind(registry)
+	DeviceCompleted(7)
+	DeviceCompleted(3)
+	snapshot := MetricsSnapshot()
+	if len(snapshot) != len(telemetry.PlatformMetricNames()) {
+		t.Fatalf("snapshot has %d names, want %d", len(snapshot), len(telemetry.PlatformMetricNames()))
+	}
+	if snapshot["device_completed_total"] != 2 || snapshot["device_login_latency_ms_total"] != 10 || snapshot["device_login_latency_ms_max"] != 7 {
+		t.Fatalf("device metrics = %v", snapshot)
+	}
+	if err := registry.IncCounter(telemetry.MetricAccessDecisions, sharedmetrics.Labels{"decision": "allowed"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(telemetry.TypedSamples(registry)); got != 1 {
+		t.Fatalf("typed samples = %d, want only the access decision", got)
+	}
+	Bind(telemetry.NewMetrics())
+	if MetricsSnapshot()["device_completed_total"] != 0 {
+		t.Fatal("a freshly bound registry did not start at zero")
 	}
 }

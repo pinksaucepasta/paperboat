@@ -3,6 +3,7 @@ package diagnostics
 import (
 	"context"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/server/internal/telemetry"
 	"net/http"
 	"testing"
 	"time"
@@ -15,9 +16,7 @@ func (fn roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error)
 }
 
 func TestProviderTransportRecordsBoundedLatencyAndErrors(t *testing.T) {
-	providerMetrics.Lock()
-	providerMetrics.values = make(map[string]providerMetric)
-	providerMetrics.Unlock()
+	Bind(telemetry.NewMetrics())
 
 	clock := []time.Time{time.Unix(100, 0), time.Unix(100, 2*int64(time.Millisecond))}
 	clockIndex := 0
@@ -45,9 +44,7 @@ func TestProviderTransportRecordsBoundedLatencyAndErrors(t *testing.T) {
 }
 
 func TestProviderTransportCountsNetworkFailureAndBoundsUnknownProvider(t *testing.T) {
-	providerMetrics.Lock()
-	providerMetrics.values = make(map[string]providerMetric)
-	providerMetrics.Unlock()
+	Bind(telemetry.NewMetrics())
 
 	transport := InstrumentProviderTransport("user-controlled-value", roundTripFunc(func(*http.Request) (*http.Response, error) {
 		return nil, errors.New("network unavailable")
@@ -103,9 +100,7 @@ func TestProviderTransportKeepsDeadlinesFailedAndCancellationExpected(t *testing
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			providerMetrics.Lock()
-			providerMetrics.values = make(map[string]providerMetric)
-			providerMetrics.Unlock()
+			Bind(telemetry.NewMetrics())
 
 			ctx, cancel := test.context()
 			defer cancel()

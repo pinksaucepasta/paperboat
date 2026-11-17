@@ -1,24 +1,14 @@
 package diagnostics
 
 import (
+	"slices"
+
 	"context"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/server/internal/telemetry"
 	"net/http"
-	"sync"
 	"time"
 )
-
-type providerMetric struct {
-	requests       int64
-	errors         int64
-	latencyMSTotal int64
-	latencyMSMax   int64
-}
-
-var providerMetrics = struct {
-	sync.Mutex
-	values map[string]providerMetric
-}{values: make(map[string]providerMetric)}
 
 type providerTransport struct {
 	provider string
@@ -62,46 +52,21 @@ func (t providerTransport) RoundTrip(request *http.Request) (*http.Response, err
 	}
 	finish(outcome)
 	latency := max(0, now().Sub(started).Milliseconds())
-	failed := outcome == "failed"
-
-	providerMetrics.Lock()
-	metric := providerMetrics.values[t.provider]
-	metric.requests++
-	metric.latencyMSTotal += latency
-	if latency > metric.latencyMSMax {
-		metric.latencyMSMax = latency
+	prefix := "provider_" + t.provider
+	count(prefix+"_requests_total", 1)
+	count(prefix+"_latency_ms_total", latency)
+	raise(prefix+"_latency_ms_max", latency)
+	if outcome == "failed" {
+		count(prefix+"_errors_total", 1)
 	}
-	if failed {
-		metric.errors++
-	}
-	providerMetrics.values[t.provider] = metric
-	providerMetrics.Unlock()
 	return response, err
 }
 
 func normalizeProvider(provider string) string {
-	switch provider {
-	case "workos", "stripe", "github", "provider_route", "helper":
+	if slices.Contains(telemetry.PlatformProviders, provider) {
 		return provider
-	default:
-		return "unknown"
 	}
-}
-
-func providerMetricsSnapshot() map[string]int64 {
-	providerMetrics.Lock()
-	defer providerMetrics.Unlock()
-	providers := [...]string{"workos", "stripe", "github", "provider_route", "helper", "unknown"}
-	result := make(map[string]int64, len(providers)*4)
-	for _, provider := range providers {
-		metric := providerMetrics.values[provider]
-		prefix := "provider_" + provider
-		result[prefix+"_requests_total"] = metric.requests
-		result[prefix+"_errors_total"] = metric.errors
-		result[prefix+"_latency_ms_total"] = metric.latencyMSTotal
-		result[prefix+"_latency_ms_max"] = metric.latencyMSMax
-	}
-	return result
+	return "unknown"
 }
 
 type ProviderObserver func(context.Context, string) (context.Context, func(string))
