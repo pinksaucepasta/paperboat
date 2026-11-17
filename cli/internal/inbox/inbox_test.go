@@ -745,3 +745,19 @@ func TestPendingRetryWaitBacksOffWithJitterToAMinute(t *testing.T) {
 		t.Fatalf("capped wait %v", late)
 	}
 }
+
+// A file over the old 50 MiB cap is a valid manifest: the size is bounded by the transfer mode, not by the Inbox.
+func TestManifestOfMoreThan50MiBIsValid(t *testing.T) {
+	receiver, err := New(Config{Client: &fakeClient{}, MachineID: "machine_local", SessionID: "session_1", Path: filepath.Join(t.TempDir(), "Paperboat Inbox")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest := filetransfer.Manifest{TransferID: "t", DestinationMachineID: "machine_local", Basename: "big.bin", Size: 3_000_000_000, SHA256: strings.Repeat("a", 64)}
+	if err := receiver.validateManifest(manifest); err != nil {
+		t.Fatalf("a 3 GB manifest: %v", err)
+	}
+	manifest.Size = -1
+	if err := receiver.validateManifest(manifest); !errors.Is(err, errInvalidSize) {
+		t.Fatalf("a negative size: %v", err)
+	}
+}

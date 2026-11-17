@@ -598,7 +598,7 @@ func fileDigestMatches(path, expected string) (bool, error) {
 }
 
 func (i *Inbox) validateManifest(manifest filetransfer.Manifest) error {
-	if manifest.TransferID == "" || manifest.DestinationMachineID != i.config.MachineID || manifest.Size < 0 || manifest.Size > 50<<20 || len(manifest.SHA256) != 64 {
+	if manifest.TransferID == "" || manifest.DestinationMachineID != i.config.MachineID || manifest.Size < 0 || len(manifest.SHA256) != 64 {
 		return errInvalidSize
 	}
 	if _, err := hex.DecodeString(manifest.SHA256); err != nil || manifest.SHA256 != strings.ToLower(manifest.SHA256) {

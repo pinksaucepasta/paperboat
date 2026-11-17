@@ -55,13 +55,16 @@ func awaitBlob(promise js.Value) (js.Value, error) {
 	return r.value, r.err
 }
 
+// browserFileLimit is the Automatic bound (2,000,000,000 bytes): a web terminal upload is an Automatic send.
+const browserFileLimit = 2_000_000_000
+
 func apiHashFile(_ js.Value, args []js.Value) any {
 	if len(args) != 1 || args[0].Type() != js.TypeObject || args[0].Get("size").Type() != js.TypeNumber {
 		return errorObject("invalid_file", "Select a file to upload.")
 	}
 	file := args[0]
 	size := file.Get("size").Float()
-	if size < 0 || size > 50<<20 || size != float64(int64(size)) {
+	if size < 0 || size > browserFileLimit || size != float64(int64(size)) {
 		return errorObject("file_limit", "The selected file exceeds the upload limit.")
 	}
 	select {
