@@ -3,7 +3,8 @@
 
   relay_home_wire.py PEER --relay-ip NAME=ADDRESS --relay-ip NAME=ADDRESS    (a paired Linux or macOS machine; sudo -n iptables or pfctl;
   with PB_SMOKE_WINDOWS_PB the Windows device, blocked with a firewall rule on its pb.exe)
-  NAME is a relay's name in `pb relay list`, ADDRESS the public IPv4 of its host (two relays are needed).
+  NAME is a relay's name in `pb relay list`, ADDRESS the public IPv4 of its host (two relays are needed). Relays on one host
+  (a staging stack) are told apart by TCP port: ADDRESS may be IP:PORT, which cuts only that port (Linux).
   1. UDP is dropped (path_display.udp_blocked) so PEER is reached through a relay; `pb status --json` names the home relay
      (home_relay.node_id, which is one of the relay ids of `pb relay list`) once a pair is bound;
   2. the relay that is NOT home is blocked (TCP and UDP to its address): the home relay is unchanged and PEER still answers;
@@ -50,7 +51,12 @@ def blocked(address):
             if token:
                 sudo('pfctl', '-X', token.group(1))
         return
-    with winhost.linux_silent_cut(['-d', address], ['-s', address]):  # an OUTPUT DROP would fail sends with EPERM
+    ip, _, port = address.partition(':')
+    out, inn = ['-d', ip], ['-s', ip]
+    if port:
+        out += ['-p', 'tcp', '--dport', port]
+        inn += ['-p', 'tcp', '--sport', port]
+    with winhost.linux_silent_cut(out, inn):  # an OUTPUT DROP would fail sends with EPERM
         yield
 
 
