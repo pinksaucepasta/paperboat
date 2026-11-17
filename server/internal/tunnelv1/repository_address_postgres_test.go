@@ -4,16 +4,21 @@ import (
 	"context"
 	"crypto/sha256"
 	"errors"
+	"fmt"
 	"strings"
+	"sync/atomic"
 	"testing"
 )
 
+var addressAttempts atomic.Uint64
+
 func (f *trk07PostgresFixture) changeAddress(t *testing.T, accountID, tunnelID, label string, generation int64) (MutationRecord, error) {
 	t.Helper()
-	hash := sha256.Sum256([]byte("address:" + tunnelID + label))
+	n := fmt.Sprint(addressAttempts.Add(1)) // a fresh key per call: a repeated key is an idempotent replay, not a second change
+	hash := sha256.Sum256([]byte("address:" + tunnelID + label + n))
 	return f.repository.Patch(context.Background(), PatchRecord{
-		OperationID: "op_addr_" + tunnelID + label, AuditEventID: "aud_addr_" + tunnelID + label, TunnelID: tunnelID, AccountID: accountID,
-		Subdomain: &label, ExpectedGeneration: generation, IdempotencyKey: "address:" + tunnelID + label, RequestHash: hash,
+		OperationID: "op_addr_" + tunnelID + label + n, AuditEventID: "aud_addr_" + tunnelID + label + n, TunnelID: tunnelID, AccountID: accountID,
+		Subdomain: &label, ExpectedGeneration: generation, IdempotencyKey: "address:" + tunnelID + label + n, RequestHash: hash,
 		ActorID: accountID, AuditActorID: accountID, ActorType: "user", RequestID: "req_addr_" + label,
 		CorrelationID: "corr_addr_" + label, SourceMachineID: "", Now: f.now,
 	})
