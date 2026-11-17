@@ -196,19 +196,6 @@ func validateRequest(r Request) error {
 	return nil
 }
 
-func audienceFor(resourceKind, protocol string) string {
-	switch {
-	case resourceKind == ResourcePreview && protocol == ProtocolHTTP:
-		return AudiencePreviewHTTP
-	case resourceKind == ResourceTunnel && protocol == ProtocolHTTP:
-		return AudienceTunnelHTTP
-	case resourceKind == ResourceTunnel && protocol == ProtocolTCP:
-		return AudienceTunnelTCP
-	default:
-		return ""
-	}
-}
-
 // Lookup is the account-scoped query sent to the durable resolver.
 type Lookup struct {
 	AccountID string

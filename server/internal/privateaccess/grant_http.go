@@ -39,8 +39,8 @@ func bindGrantIssue(r GrantIssueRequest, identity Identity) Request {
 	}
 }
 
-// GrantIssueResponse's Request is the server-normalized signed request: binding metadata only, never
-// proof bytes or a private credential, so the edge can make the second authorize call.
+// GrantIssueResponse carries the server-normalized signed request: binding metadata only, never proof bytes or a
+// private credential, so the edge can make the second authorize call.
 type GrantIssueResponse = connectorprotocol.PrivateAccessGrantResponse
 
 type GrantHTTPHandler struct {
