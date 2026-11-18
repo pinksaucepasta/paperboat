@@ -57,14 +57,19 @@ const endpointPublishInterval = time.Minute
 // NULL and an empty set are the same set. The delivered set's change publishes peer_network (migration 186).
 const endpointsUpdate = `UPDATE paperboat.peer_network_identities SET config_generation=config_generation+1,updated_at=$1,
  endpoints=coalesce($4::text[],endpoints),
- published_endpoints=CASE WHEN ` + endpointsDiffer + ` AND ` + endpointsOpen + ` THEN coalesce($4::text[],endpoints) ELSE published_endpoints END,
- endpoints_published_at=CASE WHEN ` + endpointsDiffer + ` AND ` + endpointsOpen + ` THEN $1 ELSE endpoints_published_at END,
- endpoints_due_at=CASE WHEN ` + endpointsDiffer + ` AND NOT ` + endpointsOpen + ` THEN endpoints_published_at+make_interval(secs=>$5) END
+ published_endpoints=CASE WHEN ` + endpointsDiffer + ` AND ` + endpointsOpen + ` AND NOT ` + endpointsVanish + ` THEN coalesce($4::text[],endpoints) ELSE published_endpoints END,
+ endpoints_published_at=CASE WHEN ` + endpointsDiffer + ` AND ` + endpointsOpen + ` AND NOT ` + endpointsVanish + ` THEN $1 ELSE endpoints_published_at END,
+ endpoints_due_at=CASE WHEN ` + endpointsVanish + ` THEN coalesce(CASE WHEN coalesce(endpoints,'{}')<>'{}' THEN NULL ELSE endpoints_due_at END,$1::timestamptz+make_interval(secs=>$5))
+  WHEN ` + endpointsDiffer + ` AND NOT ` + endpointsOpen + ` THEN endpoints_published_at+make_interval(secs=>$5) END
  WHERE user_id=$2 AND endpoint_id=$3 RETURNING config_generation`
 
 const (
 	endpointsDiffer = `coalesce($4::text[],endpoints,'{}') IS DISTINCT FROM coalesce(published_endpoints,'{}')`
 	endpointsOpen   = `(endpoints_published_at IS NULL OR coalesce(published_endpoints,'{}')='{}' OR endpoints_published_at<=$1::timestamptz-make_interval(secs=>$5))`
+	// endpointsVanish: the latest set is empty over a delivered one that is not. A replaced carrier reports no candidate
+	// before it has found one while the old generation's endpoints are still the peers' way in: the empty set waits a
+	// whole interval for a real one (which replaces it at once, or equals the delivered set and clears it).
+	endpointsVanish = `(coalesce($4::text[],endpoints,'{}')='{}' AND coalesce(published_endpoints,'{}')<>'{}')`
 )
 
 // dueEndpointsBatch bounds one PublishDueEndpoints statement.
