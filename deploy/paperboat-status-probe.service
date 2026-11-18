@@ -1,0 +1,11 @@
+[Unit]
+Description=Paperboat status page probe (one vantage point: checks, then a signed report to the status Worker)
+
+[Service]
+Type=oneshot
+# User unit on anvit (status/README.md). The mode-0600 EnvironmentFile sets STATUS_PROBE_CONFIG; the config names the vantage point,
+# the signing key file and the checks (tools/probe/status_report.py).
+EnvironmentFile=%h/.config/paperboat-status/probe.env
+ExecStart=/usr/bin/python3 %h/paperboat/tools/probe/status_run.py
+TimeoutStartSec=150
+Nice=10
