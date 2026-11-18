@@ -22,6 +22,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/environmentkey"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/installsource"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/service"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/sessionowner"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/updated"
 )
 
@@ -36,6 +37,10 @@ type installJournal struct {
 	// Pending is the request a first enrollment installs (no PreviousMetadata): recovery of a killed enrollment
 	// rebuilds its services and catalogue from it, since no installation record exists yet.
 	Pending json.RawMessage `json:"pending,omitempty"`
+	// PreviousSessionOwner is the catalogue row of the candidate's generation as it was before the attempt, when one
+	// existed (a retired owner's archive, which a downgrade rewrites). It is journaled before the rewrite so that the
+	// recovery of a killed attempt puts the row back instead of forgetting it.
+	PreviousSessionOwner *sessionowner.Descriptor `json:"previous_session_owner,omitempty"`
 }
 
 func newInstallJournal(paths installPaths, source installsource.Source) (installJournal, error) {

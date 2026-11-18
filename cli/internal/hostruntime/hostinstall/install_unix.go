@@ -165,6 +165,12 @@ func installWithIntent(ctx context.Context, request Request, nativeLockHeld bool
 		if candidateOwner, err = newCandidateSessionOwner(request); err != nil {
 			return err
 		}
+		if intent != unixPreparedUpdate && candidateOwner.previous != nil {
+			journal.PreviousSessionOwner = candidateOwner.previous
+			if err := writeJournal(paths.journal, journal); err != nil {
+				return err
+			}
+		}
 		carrierUpgrade, err = stageUnixUpgrade(ctx, request, paths, !coldCarrier && !replaceCarrier)
 		if err != nil {
 			return err

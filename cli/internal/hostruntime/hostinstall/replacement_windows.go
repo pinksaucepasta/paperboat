@@ -18,6 +18,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/atomicfile"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/installsource"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/service"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/sessionowner"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/workerupdate"
 	"github.com/pinksaucepasta/paperboat/cli/internal/windowsopenssh"
 )
@@ -416,7 +417,7 @@ func replaceWindowsCandidate(ctx context.Context, manager *service.LifecycleMana
 	if err != nil {
 		return err
 	}
-	body, err := json.Marshal(windowsCandidateRecord{Source: request.Source, Existed: candidate.existed})
+	body, err := json.Marshal(windowsCandidateRecord{Source: request.Source, Existed: candidate.existed, Previous: candidate.previous})
 	if err != nil {
 		return err
 	}
@@ -461,6 +462,8 @@ func replaceWindowsCandidate(ctx context.Context, manager *service.LifecycleMana
 type windowsCandidateRecord struct {
 	Source  installsource.Source `json:"source"`
 	Existed bool                 `json:"existed"`
+	// Previous is the catalogue row that existed before the attempt (candidateSessionOwner.previous).
+	Previous *sessionowner.Descriptor `json:"previous,omitempty"`
 }
 
 func windowsCandidateRecordPath(ownerSID string) (string, error) {
@@ -520,7 +523,7 @@ func withdrawRecordedWindowsCandidate(ctx context.Context, ownerSID string) erro
 	if err != nil {
 		return err
 	}
-	if err := withdrawRecordedCandidate(ctx, request, candidateSessionOwner{catalog: catalog, generation: generation, existed: record.Existed}); err != nil {
+	if err := withdrawRecordedCandidate(ctx, request, candidateSessionOwner{catalog: catalog, generation: generation, existed: record.Existed, previous: record.Previous}); err != nil {
 		return err
 	}
 	return removeInstallFile(path)

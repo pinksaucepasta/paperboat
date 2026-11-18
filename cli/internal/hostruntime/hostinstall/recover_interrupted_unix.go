@@ -124,7 +124,7 @@ func recoverInterruptedInstall(ctx context.Context, paths installPaths, uid int,
 	if err != nil {
 		return Recovery{}, err
 	}
-	cleanup = errors.Join(cleanup, withdrawInterruptedCandidate(ctx, paths, request, active, runner, journal.Source))
+	cleanup = errors.Join(cleanup, withdrawInterruptedCandidate(ctx, paths, request, active, runner, journal.Source, journal.PreviousSessionOwner))
 	finishSelf, err := restoreServices(ctx, request)
 	if err != nil {
 		return Recovery{}, err
@@ -184,7 +184,7 @@ var errPendingUnreadable = errors.New("the interrupted first enrollment's reques
 // both stayed through a later good update). request and active are recoveryRequest's. It runs under the install
 // lock, so no install is staging a pin. A descriptor of that generation on other code is history republished on the
 // active code, not the candidate.
-func withdrawInterruptedCandidate(ctx context.Context, paths installPaths, request Request, active string, runner service.Runner, candidate installsource.Source) error {
+func withdrawInterruptedCandidate(ctx context.Context, paths installPaths, request Request, active string, runner service.Runner, candidate installsource.Source, previous *sessionowner.Descriptor) error {
 	if request.Schema == "" || active == candidate.SHA256 {
 		return nil
 	}
@@ -193,13 +193,13 @@ func withdrawInterruptedCandidate(ctx context.Context, paths installPaths, reque
 	if _, err := os.Lstat(catalog.Root); installNotExistOnly(err) {
 		return nil // no catalogue: no session owner was ever staged
 	}
-	return errors.Join(withdrawCandidateOwner(ctx, paths.metadata, request.UID, catalog, candidate),
+	return errors.Join(withdrawCandidateOwner(ctx, paths.metadata, request.UID, catalog, candidate, previous),
 		pruneSessionOwnerPinsAt(ctx, catalog, paths, request.UID, request.StateRoot, active))
 }
 
 // withdrawCandidateOwner withdraws the session owner of candidate unless its descriptor is history republished on
 // other code.
-func withdrawCandidateOwner(ctx context.Context, metadata string, uid int, catalog sessionowner.Catalog, candidate installsource.Source) error {
+func withdrawCandidateOwner(ctx context.Context, metadata string, uid int, catalog sessionowner.Catalog, candidate installsource.Source, previous *sessionowner.Descriptor) error {
 	generation, err := sourceGeneration(candidate)
 	if err != nil {
 		return err
@@ -210,5 +210,9 @@ func withdrawCandidateOwner(ctx context.Context, metadata string, uid int, catal
 	}
 	d, err := sessionowner.Read(path)
 	owner := candidateSessionOwner{catalog: catalog, generation: generation, existed: err == nil && d.Source.SHA256 != candidate.SHA256}
+	if previous != nil && previous.Generation == generation {
+		// The killed attempt rewrote a row that existed: the row names the candidate now, but it is that history.
+		owner.existed, owner.previous = true, previous
+	}
 	return owner.withdraw(ctx, metadata, uid)
 }

@@ -4,6 +4,7 @@ package hostinstall
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -34,10 +35,19 @@ func (r *restoreRunner) Output(_ context.Context, _ string, _ ...string) (string
 	return "LoadState=not-found\n", nil
 }
 
-// A downgrade rewrites a retired owner's archive row to name the older build. When the attempt then fails, the row
-// goes back in the same step, with the owner the attempt started stopped first: there is no window in which the
-// archive names code the installation does not run. A committed attempt keeps its row.
-func TestAFailedDowngradeRestoresTheArchiveRowItRewrote(t *testing.T) {
+type restoreFixture struct {
+	catalog sessionowner.Catalog
+	runner  *restoreRunner
+	sources map[string]installsource.Source
+	owner   func(build, code string, initial bool) sessionowner.Descriptor
+	archive sessionowner.Descriptor
+	path    string
+}
+
+// newRestoreFixture publishes a retired owner's archive row (the older generation on the newer code) next to the
+// newer build's own owner, in a root-owned catalogue.
+func newRestoreFixture(t *testing.T) restoreFixture {
+	t.Helper()
 	if os.Geteuid() != 0 {
 		t.Skip("requires protected native catalog custody")
 	}
@@ -45,7 +55,7 @@ func TestAFailedDowngradeRestoresTheArchiveRowItRewrote(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(root)
+	t.Cleanup(func() { os.RemoveAll(root) })
 	if err = os.Chmod(root, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -77,13 +87,12 @@ func TestAFailedDowngradeRestoresTheArchiveRowItRewrote(t *testing.T) {
 	}
 	runner := &restoreRunner{}
 	catalog := sessionowner.Catalog{Root: filepath.Join(root, "catalog"), ConfigRoot: root, User: "root", Group: "root", Maximum: 4, Runner: runner}
-	owner := func(build string, code string, initial bool) sessionowner.Descriptor {
+	owner := func(build, code string, initial bool) sessionowner.Descriptor {
 		return sessionowner.Descriptor{Schema: sessionowner.Schema, Generation: sources[build].SHA256[:32], Instance: "u0", Source: sources[code], Executable: pins[code], RuntimeRoot: runtimeRoot, InitialStore: initial, Endpoint: filepath.Join(root, build+".sock"), UID: 0, GID: os.Getgid(), Workspace: root, Shell: "/bin/sh"}
 	}
-	ctx := context.Background()
 	archive := owner("older", "newer", true) // the older owner's history, on the newer code (Coordinator.recordRetired)
 	for _, d := range []sessionowner.Descriptor{archive, owner("newer", "newer", false)} {
-		if err = catalog.Publish(ctx, d); err != nil {
+		if err = catalog.Publish(context.Background(), d); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -91,47 +100,87 @@ func TestAFailedDowngradeRestoresTheArchiveRowItRewrote(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	return restoreFixture{catalog: catalog, runner: runner, sources: sources, owner: owner, archive: archive, path: path}
+}
+
+// startDowngrade is the attempt up to its failure: the older build takes the archive row back and its owner starts.
+func (f restoreFixture) startDowngrade(t *testing.T) sessionowner.Descriptor {
+	t.Helper()
+	ctx := context.Background()
+	bound, err := bindInitialSessionStore(ctx, f.catalog, f.owner("older", "older", false), f.sources["newer"].SHA256[:32])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = f.catalog.Publish(ctx, bound); err != nil {
+		t.Fatal(err)
+	}
+	f.runner.running, f.runner.commands = true, nil
+	return bound
+}
+
+// A downgrade rewrites a retired owner's archive row to name the older build. When the attempt then fails, the row
+// goes back in the same step, with the owner the attempt started stopped first: there is no window in which the
+// archive names code the installation does not run. A committed attempt keeps its row.
+func TestAFailedDowngradeRestoresTheArchiveRowItRewrote(t *testing.T) {
+	f := newRestoreFixture(t)
+	ctx := context.Background()
 	for _, committed := range []bool{false, true} {
-		// The attempt: take back the archive row for the older build and start its owner.
-		candidate := candidateSessionOwner{catalog: catalog, generation: archive.Generation, existed: true, previous: &archive}
-		bound, err := bindInitialSessionStore(ctx, catalog, owner("older", "older", false), sources["newer"].SHA256[:32])
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err = catalog.Publish(ctx, bound); err != nil {
-			t.Fatal(err)
-		}
-		runner.running, runner.commands = true, nil
+		candidate := candidateSessionOwner{catalog: f.catalog, generation: f.archive.Generation, existed: true, previous: &f.archive}
+		bound := f.startDowngrade(t)
 		installed := ""
 		if committed {
-			installed = archive.Generation
+			installed = f.archive.Generation
 		}
 		// The attempt fails here: nothing names the older build in the installation record.
-		if err = candidate.withdrawUnless(ctx, installed); err != nil {
+		if err := candidate.withdrawUnless(ctx, installed); err != nil {
 			t.Fatalf("committed=%v: %v", committed, err)
 		}
-		row, err := sessionowner.Read(path)
+		row, err := sessionowner.Read(f.path)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if committed {
-			if row != bound || len(runner.commands) != 0 {
-				t.Fatalf("a committed attempt's row was touched: %+v %v", row, runner.commands)
+			if row != bound || len(f.runner.commands) != 0 {
+				t.Fatalf("a committed attempt's row was touched: %+v %v", row, f.runner.commands)
 			}
 			continue
 		}
-		if row != archive {
-			t.Fatalf("the failed downgrade left the archive row changed:\n got %+v\nwant %+v", row, archive)
+		if row != f.archive {
+			t.Fatalf("the failed downgrade left the archive row changed:\n got %+v\nwant %+v", row, f.archive)
 		}
-		if !strings.Contains(strings.Join(runner.commands, "\n"), "systemctl disable --now paperboat-session-owner-u0-"+archive.Generation) {
-			t.Fatalf("the owner the attempt started was not stopped: %v", runner.commands)
+		if !strings.Contains(strings.Join(f.runner.commands, "\n"), "systemctl disable --now paperboat-session-owner-u0-"+f.archive.Generation) {
+			t.Fatalf("the owner the attempt started was not stopped: %v", f.runner.commands)
 		}
 		// The row is the archive again, so the next attempt can take it back.
-		if err = catalog.Publish(ctx, bound); err != nil {
+		if err = f.catalog.Publish(ctx, bound); err != nil {
 			t.Fatalf("the restored archive cannot be taken back again: %v", err)
 		}
-		if err = catalog.Publish(ctx, archive); err != nil {
+		if err = f.catalog.Publish(ctx, f.archive); err != nil {
 			t.Fatal(err)
 		}
+	}
+}
+
+// A downgrade killed between rewriting the row and failing leaves the row naming the older build; the install journal
+// carries the row it found, and the recovery of the killed attempt puts it back instead of forgetting it.
+func TestRecoveryOfAKilledDowngradeRestoresTheArchiveRow(t *testing.T) {
+	f := newRestoreFixture(t)
+	ctx := context.Background()
+	body, err := json.Marshal(installJournal{PreviousSessionOwner: &f.archive})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var journal installJournal
+	if err = json.Unmarshal(body, &journal); err != nil || journal.PreviousSessionOwner == nil || *journal.PreviousSessionOwner != f.archive {
+		t.Fatalf("the journal does not carry the row it found: %v %+v", err, journal.PreviousSessionOwner)
+	}
+	f.startDowngrade(t)
+	// The attempt's process died: no installation record names the older build.
+	if err = withdrawCandidateOwner(ctx, filepath.Join(filepath.Dir(f.path), "no-install-metadata.json"), 0, f.catalog, f.sources["older"], journal.PreviousSessionOwner); err != nil {
+		t.Fatal(err)
+	}
+	row, err := sessionowner.Read(f.path)
+	if err != nil || row != f.archive {
+		t.Fatalf("the recovery of the killed downgrade left the row changed or forgot it: %v\n got %+v\nwant %+v", err, row, f.archive)
 	}
 }

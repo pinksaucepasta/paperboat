@@ -5,6 +5,7 @@ package hostinstall
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/sessionowner"
@@ -113,7 +114,10 @@ func (o candidateSessionOwner) restorePrevious(ctx context.Context) error {
 	if err := installer.Uninstall(ctx); err != nil {
 		return err
 	}
-	return o.catalog.Publish(ctx, *o.previous)
+	if err := o.catalog.Publish(ctx, *o.previous); err != nil {
+		return fmt.Errorf("the failed attempt's session owner %s was stopped but its retired history could not be restored (run pb install again): %w", o.generation, err)
+	}
+	return nil
 }
 
 // replaceCandidate runs one replacement of an installation by a candidate version. The machine guard moves to the
