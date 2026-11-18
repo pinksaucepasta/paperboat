@@ -99,12 +99,29 @@ function Insights() {
   )
 }
 
+/** posthogquery's errorCode values, in words; the code stays visible below for support. */
+const insightFailure: Record<string, string> = {
+  unauthorized: "PostHog refused the API key.",
+  rate_limited: "PostHog is rate limiting; try again in a minute.",
+  provider_unavailable: "PostHog is down; try again later.",
+  rejected: "PostHog rejected the query.",
+  timeout: "PostHog took too long; try again.",
+  unexpected_response: "PostHog sent an answer the server couldn’t read.",
+}
+
 function AnalyticsView({ data }: { data: Analytics }) {
   const failed = Object.keys(data.errors ?? {})
   const peak = Math.max(1, ...data.daily.map((d) => d.page_views))
   return (
     <div className="flex flex-col gap-6" data-analytics-state="ready">
-      {failed.length > 0 && <p role="alert" className="text-sm text-destructive">Couldn’t load {failed.map((k) => `${k} (${data.errors?.[k]})`).join(", ")}.</p>}
+      {failed.map((k) => (
+        <p key={k} role="alert" className="flex flex-col text-sm text-destructive" data-insight-error={k}>
+          Couldn’t load {k}. {insightFailure[data.errors?.[k] ?? ""] ?? "Try again later."}
+          <span className="text-xs text-muted-foreground">
+            Code: <code className="font-mono">{data.errors?.[k]}</code>
+          </span>
+        </p>
+      ))}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         <Stat label="Site visits" value={data.totals.visitors} />
         <Stat label="Page views" value={data.totals.page_views} />

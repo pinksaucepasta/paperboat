@@ -404,7 +404,7 @@ try {
     expect((await text('[data-stat="Accounts"]')).includes("120"), "accounts total")
     await p.waitForSelector('[data-analytics-state="ready"]')
     expect((await text('[data-analytics-state="ready"]')).includes("/pricing"), "top pages")
-    expect((await text('[data-analytics-state="ready"]')).includes("countries (provider_unavailable)"), "partial insight failure is named")
+    expect((await text('[data-insight-error="countries"]')).includes("Couldn’t load countries. PostHog is down") && (await text('[data-insight-error="countries"]')).includes("provider_unavailable"), "partial insight failure is named in words with its code")
     expect((await text("[data-build]")).includes("dev-abc1234"), "server build version not shown")
     expect((await text('[data-retention-state="ready"]')).includes("80%"), "retention percentage")
     await p.getByRole("button", { name: "7 days" }).click()
