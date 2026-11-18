@@ -89,7 +89,7 @@ export function putManualStart(teamId: string, manual_start: ManualStart) {
 }
 
 // The server's JSON carries bytes as standard base64 (Go encoding/json); the vault worker speaks base64url.
-const byteFields = new Set(["sharing_public_key", "sealed", "sealed_previous", "public_key", "signing_public_key", "rotation_signature", "file"])
+const byteFields = new Set(["sharing_public_key", "sealed", "sealed_previous", "public_key", "signing_public_key", "rotation_signature", "reset_public_key", "reset_signature", "file"])
 
 /** Rewrites every byte field (by name, at any depth) between standard base64 and unpadded base64url. */
 export function convertBytes<T>(value: T, to: "url" | "std"): T {
@@ -174,12 +174,40 @@ export async function rotateRecordingKey(teamId: string, state: RecordingKeyStat
     team_id: recordingScope(teamId, state.viewers),
     generation: state.my_key.generation,
     sealed: state.my_key.sealed,
+    reset_public_key: state.key.reset_public_key,
     viewers: viewers.map(({ account_id, sharing_public_key }) => ({ account_id, sharing_public_key })),
   })
   return api<RecordingKey>(`${team(teamId)}/recording-key`, {
     method: "POST",
     headers: json,
     body: JSON.stringify({ key: made.key, sealed_previous: made.sealed_previous, grants: made.grants }),
+  })
+}
+
+/** Nobody holds the key: no viewer has a copy of the current generation. */
+export const keyHeld = (state: RecordingKeyState) => state.viewers.some((viewer) => viewer.has_grant)
+
+/**
+ * Resets a recording key nobody holds (team owner only): the vault worker signs the next generation with this account's
+ * ENV writer key, the identity the ENV team-vault reset uses, and seals it for every viewer with a vault. Machines accept
+ * it only because that signature verifies under the reset key generation 1 pinned. There is no previous bundle, so every
+ * recording made before becomes unreadable. Only public keys, the signature and sealed copies reach the server.
+ */
+export async function resetRecordingKey(teamId: string, state: RecordingKeyState, vault: typeof recordingVault = recordingVault) {
+  if (!state.key?.reset_public_key) throw new ApiError(409, "recording_key_conflict", recordingSentences.recording_key_conflict)
+  const viewers = state.viewers.filter((viewer): viewer is Required<RecordingViewer> => Boolean(viewer.sharing_public_key))
+  if (viewers.length === 0) throw new Error(recordingSentences.recording_key_conflict)
+  const made = await vault<{ key: RecordingKey; grants: RecordingGrant[] }>({
+    action: "recording-key-reset",
+    team_id: recordingScope(teamId, state.viewers),
+    generation: state.key.generation,
+    reset_public_key: state.key.reset_public_key,
+    viewers: viewers.map(({ account_id, sharing_public_key }) => ({ account_id, sharing_public_key })),
+  })
+  return api<RecordingKey>(`${team(teamId)}/recording-key`, {
+    method: "POST",
+    headers: json,
+    body: JSON.stringify({ key: made.key, grants: made.grants }),
   })
 }
 

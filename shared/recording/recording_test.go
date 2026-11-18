@@ -16,7 +16,7 @@ func key(t *testing.T, gen int64, signer ed25519.PrivateKey, team string) (Key, 
 	k := Key{Generation: gen, PublicKey: make([]byte, 32), SigningPublicKey: pub}
 	rand.Read(k.PublicKey)
 	if signer != nil {
-		k.RotationSignature = ed25519.Sign(signer, RotationMessage(team, gen, k.PublicKey, k.SigningPublicKey))
+		k.RotationSignature = ed25519.Sign(signer, RotationMessage(team, gen, k.PublicKey, k.SigningPublicKey, k.ResetPublicKey))
 	}
 	return k, priv
 }
@@ -44,6 +44,55 @@ func TestRotationAcceptsOnlyASuccessorSignedByThePreviousSigningKey(t *testing.T
 	}
 	if (Key{Generation: 1, PublicKey: make([]byte, 32), SigningPublicKey: make([]byte, 32), RotationSignature: make([]byte, 64)}).ValidKey() {
 		t.Fatal("generation 1 with a rotation signature accepted")
+	}
+}
+
+// A reset generation is accepted only on a signature by the reset key the previous generation carries (the owner's ENV
+// writer key), never on the signature of the new key itself or of a key nobody pinned; a rotation signature is not a
+// reset signature and the other way round.
+func TestResetAcceptsOnlyASuccessorSignedByThePinnedResetKey(t *testing.T) {
+	ownerPub, owner, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	g1, _ := key(t, 1, nil, "team_a")
+	g1.ResetPublicKey = ownerPub
+	next := func(signer ed25519.PrivateKey, gen int64) Key {
+		pub, _, _ := ed25519.GenerateKey(rand.Reader)
+		k := Key{Generation: gen, PublicKey: make([]byte, 32), SigningPublicKey: pub, ResetPublicKey: ownerPub}
+		rand.Read(k.PublicKey)
+		k.ResetSignature = ed25519.Sign(signer, ResetMessage("team_a", gen, k.PublicKey, k.SigningPublicKey, k.ResetPublicKey))
+		return k
+	}
+	g2 := next(owner, 2)
+	if !g2.ValidKey() || !VerifyReset("team_a", g1, g2) || !VerifyLink("team_a", g1, g2) || VerifyRotation("team_a", g1, g2) {
+		t.Fatal("a reset signed by the pinned reset key was refused")
+	}
+	if VerifyReset("team_b", g1, g2) {
+		t.Fatal("reset accepted for another team")
+	}
+	_, other, _ := ed25519.GenerateKey(rand.Reader)
+	if VerifyLink("team_a", g1, next(other, 2)) {
+		t.Fatal("a reset signed by a key nobody pinned was accepted")
+	}
+	if VerifyLink("team_a", g1, next(owner, 3)) {
+		t.Fatal("a generation skip was accepted")
+	}
+	noReset, _ := key(t, 1, nil, "team_a")
+	if VerifyReset("team_a", noReset, g2) {
+		t.Fatal("a key without a reset key was reset")
+	}
+	both := g2
+	both.RotationSignature = make([]byte, 64)
+	if both.ValidKey() {
+		t.Fatal("a generation with both a rotation and a reset signature is valid")
+	}
+	// A rotation signature binds the reset key it carries: changing it breaks the signature.
+	r2, s := key(t, 1, nil, "team_a")
+	r3, _ := key(t, 2, s, "team_a")
+	r3.ResetPublicKey = ownerPub
+	if VerifyRotation("team_a", r2, r3) {
+		t.Fatal("a rotation still verified after the reset key it carries was changed")
 	}
 }
 

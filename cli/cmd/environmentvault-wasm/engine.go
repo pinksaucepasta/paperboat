@@ -56,16 +56,18 @@ type request struct {
 	KeyEpoch       uint64       `json:"key_epoch"`
 	EnableRecovery bool         `json:"enable_recovery"`
 
-	TeamID        string            `json:"team_id"`
-	Viewers       []recordingViewer `json:"viewers"`
-	Generation    int64             `json:"generation"`
-	Sealed        string            `json:"sealed"`
-	RecordingID   string            `json:"recording_id"`
-	KeyGeneration int64             `json:"key_generation"`
-	ViewerKey     *recordingSealed  `json:"viewer_key"`
-	Chain         []recordingLink   `json:"chain"`
-	Handle        string            `json:"handle"`
-	File          string            `json:"file"` // recording-segment: one segment file
+	TeamID     string            `json:"team_id"`
+	Viewers    []recordingViewer `json:"viewers"`
+	Generation int64             `json:"generation"`
+	Sealed     string            `json:"sealed"`
+	// ResetPublicKey is the reset key the recording key being replaced carries (the team owner's ENV writer key).
+	ResetPublicKey string           `json:"reset_public_key"`
+	RecordingID    string           `json:"recording_id"`
+	KeyGeneration  int64            `json:"key_generation"`
+	ViewerKey      *recordingSealed `json:"viewer_key"`
+	Chain          []recordingLink  `json:"chain"`
+	Handle         string           `json:"handle"`
+	File           string           `json:"file"` // recording-segment: one segment file
 
 	// Named vaults (PLAN F26), byte fields standard base64 as the server sends them.
 	VaultWraps      []env.NamedVaultWrap `json:"vault_wraps"`
@@ -354,7 +356,7 @@ func (e *engine) run(ctx context.Context, r request) (any, error) {
 		return e.hostLayer(ctx, r)
 	case "team-create", "team-grant", "team-accept", "team-rotate":
 		return e.teamOperation(ctx, r)
-	case "recording-key-create", "recording-key-grant", "recording-key-rotate", "recording-open", "recording-segment", "recording-close":
+	case "recording-key-create", "recording-key-grant", "recording-key-rotate", "recording-key-reset", "recording-open", "recording-segment", "recording-close":
 		return e.recordingOperation(r)
 
 	}

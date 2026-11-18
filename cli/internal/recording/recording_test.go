@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	wire "github.com/pinksaucepasta/paperboat/shared/recording"
 	"strings"
 	"testing"
@@ -175,7 +176,7 @@ func TestRotateMakesASignedSuccessorThatKeepsOldRecordingsReadable(t *testing.T)
 	first, firstPublic := newBundle(t)
 	firstSigningPublic := ed25519.PrivateKey(first.Signing).Public().(ed25519.PublicKey)
 	gen1 := wire.Key{Generation: 1, PublicKey: firstPublic, SigningPublicKey: firstSigningPublic}
-	rotation, err := Rotate("team_1", 1, first)
+	rotation, err := Rotate("team_1", 1, first, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -187,7 +188,7 @@ func TestRotateMakesASignedSuccessorThatKeepsOldRecordingsReadable(t *testing.T)
 		t.Fatal("the rotation verified for another team")
 	}
 	forged := gen2
-	forged.RotationSignature = ed25519.Sign(rotation.Bundle.Signing, wire.RotationMessage("team_1", 2, gen2.PublicKey, gen2.SigningPublicKey))
+	forged.RotationSignature = ed25519.Sign(rotation.Bundle.Signing, wire.RotationMessage("team_1", 2, gen2.PublicKey, gen2.SigningPublicKey, nil))
 	if wire.VerifyRotation("team_1", gen1, forged) {
 		t.Fatal("a signature by the new key itself verified: only generation 1's signing key may replace it")
 	}
@@ -202,10 +203,10 @@ func TestRotateMakesASignedSuccessorThatKeepsOldRecordingsReadable(t *testing.T)
 	if got, err := OpenRecordingKey(member.Bytes(), "team_1", 2, copy2, nil, 2); err != nil || !bytes.Equal(got, rotation.Bundle.Private) {
 		t.Fatalf("the new generation opens with the member's copy: %v", err)
 	}
-	if _, err := Rotate("", 1, first); err == nil {
+	if _, err := Rotate("", 1, first, nil); err == nil {
 		t.Fatal("a rotation without a team was made")
 	}
-	if _, err := Rotate("team_1", 1, Bundle{Private: first.Private}); err == nil {
+	if _, err := Rotate("team_1", 1, Bundle{Private: first.Private}, nil); err == nil {
 		t.Fatal("a rotation without the signing key was made")
 	}
 }
@@ -256,5 +257,46 @@ func TestReplaceKeyForACallerWhoHoldsTheCurrentKey(t *testing.T) {
 	}
 	if _, err := ReplaceKey(other.Bytes(), "team_1", state); err == nil {
 		t.Fatal("a copy sealed to another vault was opened")
+	}
+}
+
+// The owner resets a key nobody holds: the team owner's ENV writer key signs the next generation, every viewer with a
+// vault gets a copy of it, nothing links it to the old key (older recordings stay unreadable), and any other writer
+// key, or a key made without a reset key, cannot do it.
+func TestResetKeyIsSignedByTheOwnersWriterKeyAndSealsOnlyTheNewKey(t *testing.T) {
+	seed := make([]byte, ed25519.SeedSize)
+	if _, err := rand.Read(seed); err != nil {
+		t.Fatal(err)
+	}
+	ownerPub := ed25519.NewKeyFromSeed(seed).Public().(ed25519.PublicKey)
+	viewer, noVault := teamKey(t), "novault"
+	first, firstPublic := newBundle(t)
+	gen1 := wire.Key{Generation: 1, PublicKey: firstPublic, SigningPublicKey: ed25519.PrivateKey(first.Signing).Public().(ed25519.PublicKey), ResetPublicKey: ownerPub}
+	state := wire.KeyState{Key: &gen1, Viewers: []wire.Viewer{{AccountID: "v", SharingPublicKey: viewer.PublicKey().Bytes()}, {AccountID: noVault}}}
+	request, err := ResetKey(seed, "team_1", state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if request.Key.Generation != 2 || !wire.VerifyReset("team_1", gen1, request.Key) || wire.VerifyRotation("team_1", gen1, request.Key) {
+		t.Fatal("the reset is not a reset successor signed by the pinned owner key")
+	}
+	if len(request.SealedPrevious) != 0 || len(request.Grants) != 1 || request.Grants[0].AccountID != "v" {
+		t.Fatalf("a reset seals only the new key for viewers with a vault: %+v", request)
+	}
+	if got, err := OpenRecordingKey(viewer.Bytes(), "team_1", 2, request.Grants[0].Sealed, nil, 2); err != nil || len(got) != 32 {
+		t.Fatalf("a viewer opens the new generation: %v", err)
+	}
+	if _, err := OpenRecordingKey(viewer.Bytes(), "team_1", 2, request.Grants[0].Sealed, nil, 1); err == nil {
+		t.Fatal("generation 1 opened after a reset: there must be no link to it")
+	}
+	otherSeed := make([]byte, ed25519.SeedSize)
+	rand.Read(otherSeed)
+	if _, err := ResetKey(otherSeed, "team_1", state); !errors.Is(err, ErrNotResetAuthority) {
+		t.Fatalf("another writer key reset the team's key: %v", err)
+	}
+	noReset := gen1
+	noReset.ResetPublicKey = nil
+	if _, err := ResetKey(seed, "team_1", wire.KeyState{Key: &noReset, Viewers: state.Viewers}); !errors.Is(err, ErrNotResetAuthority) {
+		t.Fatalf("a key without a reset key was reset: %v", err)
 	}
 }

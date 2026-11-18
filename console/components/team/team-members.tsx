@@ -190,7 +190,7 @@ export function TeamManage({ workspace }: { workspace: Workspace }) {
       {securityTab && tab === "security" ? (
         <TeamSecurity team={team.data} emails={emails} />
       ) : recordingsTab && tab === "recordings" ? (
-        <RecordingSettings team={team.data} emails={emails} admin={admin} />
+        <RecordingSettings team={team.data} emails={emails} admin={admin} owner={actor === "owner"} />
       ) : storageTab && tab === "storage" ? (
         <TeamStorage team={team.data.team_id} admin={admin} />
       ) : (

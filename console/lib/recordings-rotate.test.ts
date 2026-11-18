@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, expect, test } from "bun:test"
-import { rotateRecordingKey } from "@/lib/recordings"
+import { keyHeld, resetRecordingKey, rotateRecordingKey } from "@/lib/recordings"
 
 // The vault worker is replaced by a stub that records what the page asks of it: this test is about what the page
 // sends to the worker and to the server, not the crypto (cli/cmd/environmentvault-wasm and cli/internal/recording
@@ -60,4 +60,25 @@ test("a member without a copy of the current key, or with an older one, cannot r
   await expect(rotateRecordingKey("team_1", state({ my_key: { generation: 1, sealed: "x" }, key: { generation: 2, public_key: "A", signing_public_key: "B" } }), vault)).rejects.toThrow()
   await expect(rotateRecordingKey("team_1", state({ viewers: [{ account_id: "acct_b", has_grant: false }] }), vault)).rejects.toThrow()
   expect(asked).toHaveLength(0)
+})
+
+test("a reset asks the vault worker to sign with the owner's writer key and posts no previous bundle", async () => {
+  asked.length = 0
+  sent.length = 0
+  const held = state({ key: { generation: 2, public_key: "AAAA", signing_public_key: "BBBB", reset_public_key: "cmVzZXQ+/==" }, my_key: undefined })
+  await resetRecordingKey("team_1", held, vault)
+  expect(asked).toHaveLength(1)
+  expect(asked[0]).toMatchObject({ action: "recording-key-reset", team_id: "team_1", generation: 2, reset_public_key: "cmVzZXQ+/==" })
+  expect(asked[0]).not.toHaveProperty("sealed")
+  const body = JSON.parse(sent[0].body)
+  expect(Object.keys(body).sort()).toEqual(["grants", "key"])
+  expect(sent[0].url).toContain("teams/team_1/recording-key")
+})
+
+test("a key made without a reset key cannot be reset, and the key counts as held while any viewer has a copy", async () => {
+  asked.length = 0
+  await expect(resetRecordingKey("team_1", state(), vault)).rejects.toThrow()
+  expect(asked).toHaveLength(0)
+  expect(keyHeld(state())).toBe(true)
+  expect(keyHeld(state({ viewers: [{ account_id: "acct_a", sharing_public_key: "c2hh+/==", has_grant: false }] }))).toBe(false)
 })
