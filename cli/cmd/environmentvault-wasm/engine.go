@@ -354,7 +354,7 @@ func (e *engine) run(ctx context.Context, r request) (any, error) {
 		return e.hostLayer(ctx, r)
 	case "team-create", "team-grant", "team-accept", "team-rotate":
 		return e.teamOperation(ctx, r)
-	case "recording-key-create", "recording-key-grant", "recording-open", "recording-segment", "recording-close":
+	case "recording-key-create", "recording-key-grant", "recording-key-rotate", "recording-open", "recording-segment", "recording-close":
 		return e.recordingOperation(r)
 
 	}
