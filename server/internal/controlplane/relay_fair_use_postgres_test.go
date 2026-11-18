@@ -102,6 +102,7 @@ func TestRelayLeaseCarriesAccountSpeedAndPlanSlowTiersPostgres(t *testing.T) {
 	shared.SetRelayVolumeGate(gate)
 	observe(shared, node2, both, paid120)
 	observe(shared, own, both)
+	shared.relayCountsAt = time.Time{} // the relay counts are cached for a few seconds; read them again
 	first := observe(shared, node, append(users[:4:4], both)...)
 	speeds := map[string]float64{}
 	for _, a := range first.AccountSpeeds {
