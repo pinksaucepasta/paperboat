@@ -228,7 +228,7 @@ func (s *EdgeService) ObserveRelayNode(ctx context.Context, in relayNodeObservat
 // read failure, so the relay keeps its list.
 func (s *EdgeService) relayPoolHandovers(ctx context.Context, node string) *[]relayPoolHandover {
 	rows, err := s.store.SQL().QueryContext(ctx, `WITH expired AS (DELETE FROM paperboat.relay_pool_handovers WHERE node_id=$1 AND close_at<now()-make_interval(secs=>$2::float8))
-SELECT account_id,extract(epoch from close_at)::bigint FROM paperboat.relay_pool_handovers WHERE node_id=$1 AND close_at>=now()-make_interval(secs=>$2::float8) ORDER BY account_id LIMIT 256`, node, (relaylimits.MaxGrantLifetime + peernetwork.MaxClockSkew).Seconds())
+SELECT account_id,floor(extract(epoch from close_at))::bigint FROM paperboat.relay_pool_handovers WHERE node_id=$1 AND close_at>=now()-make_interval(secs=>$2::float8) ORDER BY account_id LIMIT 256`, node, (relaylimits.MaxGrantLifetime + peernetwork.MaxClockSkew).Seconds())
 	if err != nil {
 		slog.WarnContext(ctx, "relay_pool_handover_read_failed", "node_id", node, "error", err)
 		return nil
