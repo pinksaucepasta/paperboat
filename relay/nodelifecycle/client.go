@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/relay/derpquic"
+	"github.com/pinksaucepasta/paperboat/shared/capver"
 	"github.com/pinksaucepasta/paperboat/shared/jwks"
 	"github.com/pinksaucepasta/paperboat/shared/wirejson"
 )
@@ -126,6 +127,7 @@ func New(cfg Config) (*Client, error) {
 		copy.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 		cfg.HTTP = &copy
 	}
+	cfg.HTTP.Transport = capver.Transport(cfg.HTTP.Transport)
 	cfg.URL = strings.TrimRight(cfg.URL, "/")
 	if cfg.Trust == nil {
 		cfg.Trust = &jwks.Trust{}
@@ -287,7 +289,9 @@ func (c *Client) Start(ctx context.Context) (Lease, error) {
 	if err != nil {
 		return Lease{}, err
 	}
-	if out.Generation != s.Generation+1 || out.ProcessEpoch != s.PendingEpoch {
+	// The control plane may hand a higher generation than the one remembered here (it adopts the node's
+	// generation when this state file was lost or restored); it never hands a lower one.
+	if out.Generation <= s.Generation || out.ProcessEpoch != s.PendingEpoch {
 		return Lease{}, ErrControl
 	}
 	// The control plane's current trust document outranks the startup file the process was given.

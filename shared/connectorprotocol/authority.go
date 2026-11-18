@@ -57,7 +57,7 @@ func AuthProofPayload(request AuthRequest) ([]byte, error) {
 		return nil, err
 	}
 	return json.Marshal(authProofTranscript{
-		Domain: "paperboat.connector.auth.v1", Protocol: ProtocolName, Version: ProtocolVersion,
+		Domain: "paperboat.connector.auth.v1", Protocol: ProtocolName, Version: transcriptVersion,
 		AccountID: request.AccountID, TunnelID: request.TunnelID, ConnectorID: request.ConnectorID,
 		HostID: request.HostID, IdentityKeyID: request.IdentityKeyID, IdentityKeyThumbprint: request.IdentityKeyThumbprint,
 		ProcessGeneration: request.ProcessGeneration, CredentialGeneration: request.CredentialGeneration,
@@ -70,7 +70,7 @@ func RenewalProofPayload(request RenewalRequest) ([]byte, error) {
 		return nil, err
 	}
 	return json.Marshal(authProofTranscript{
-		Domain: "paperboat.connector.auth.renew.v1", Protocol: ProtocolName, Version: ProtocolVersion,
+		Domain: "paperboat.connector.auth.renew.v1", Protocol: ProtocolName, Version: transcriptVersion,
 		AccountID: request.AccountID, TunnelID: request.TunnelID, ConnectorID: request.ConnectorID,
 		HostID: request.HostID, IdentityKeyID: request.IdentityKeyID, IdentityKeyThumbprint: request.IdentityKeyThumbprint,
 		ProcessGeneration: request.ProcessGeneration, CredentialGeneration: request.CredentialGeneration,
@@ -269,7 +269,7 @@ type Welcome struct {
 }
 
 func (w Welcome) Validate(now time.Time) error {
-	if w.Protocol != ProtocolName || w.Version != ProtocolVersion || ValidateIdentifier(w.SessionID) != nil || !w.RequiresSnapshot || ValidateCapabilities(w.Capabilities) != nil || w.ServerTime.IsZero() || w.Lease.SessionID != w.SessionID {
+	if w.Protocol != ProtocolName || !compatibleVersion(w.Version) || ValidateIdentifier(w.SessionID) != nil || !w.RequiresSnapshot || ValidateCapabilities(w.Capabilities) != nil || w.ServerTime.IsZero() || w.Lease.SessionID != w.SessionID {
 		return ErrInvalidInput
 	}
 	return w.Lease.Validate(now)

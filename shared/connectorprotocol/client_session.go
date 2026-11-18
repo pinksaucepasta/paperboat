@@ -113,11 +113,9 @@ func (c *ClientSession) AcceptWelcome(welcome Welcome) error {
 	if c.state != SessionNew {
 		return CodeError(ErrSessionConflict, ReasonProtocolClosed, false, nil)
 	}
-	if welcome.Version != ProtocolVersion || welcome.Protocol != ProtocolName {
+	// The server picks inside the range this client offered; any version there is acceptable.
+	if welcome.Protocol != ProtocolName || !versionInRange(welcome.Version, c.config.Hello.MinVersion, c.config.Hello.MaxVersion) {
 		return CodeError(ErrProtocolIncompatible, ReasonProtocolMismatch, false, nil)
-	}
-	if _, err := NegotiateVersion(c.config.Hello.MinVersion, c.config.Hello.MaxVersion); err != nil {
-		return err
 	}
 	if _, err := NegotiateCapabilities(c.config.Hello.Capabilities, welcome.Capabilities); err != nil {
 		return err

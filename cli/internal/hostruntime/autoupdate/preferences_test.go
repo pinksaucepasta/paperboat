@@ -91,8 +91,9 @@ func TestMachinePreferencesAndMaintenanceSurviveRestart(t *testing.T) {
 	if err = os.WriteFile(path, []byte(`{"schema":"paperboat.update-settings/v1","enabled":true,"local_time":"04:00","unknown":1}`), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = LoadPreferences(path, true); err == nil {
-		t.Fatal("unknown settings silently accepted")
+	// A newer build may have written a field before an update rolled back to this one.
+	if _, err = LoadPreferences(path, true); err != nil {
+		t.Fatalf("settings with a newer field refused: %v", err)
 	}
 	for _, value := range []string{"4:00", "24:00", "04:60", "-1:00", "aa:bb", "04:00:00"} {
 		p.LocalTime = value

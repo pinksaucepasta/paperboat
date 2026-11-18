@@ -115,7 +115,7 @@ func e2eeBootstrap(service e2eeBootstrapper) http.HandlerFunc {
 				status, code = http.StatusServiceUnavailable, "temporarily_unavailable"
 			case expectedHTTPErrorOnly(err, wire.ErrNotCurrent):
 				status, code = http.StatusBadRequest, "certificate_expired"
-			case expectedHTTPErrorOnly(err, wire.ErrInvalid, wire.ErrIdentity, wire.ErrSignature):
+			case expectedHTTPErrorOnly(err, wire.ErrInvalid, wire.ErrIdentity, wire.ErrSignature, wire.ErrUnsupportedVersion):
 				status, code = http.StatusBadRequest, "invalid_identity"
 			default:
 				status, code = http.StatusServiceUnavailable, "temporarily_unavailable"
@@ -246,7 +246,7 @@ func endpointCertificateRegister(service endpointCertificateRegistrar) http.Hand
 			case expectedHTTPErrorOnly(err, wire.ErrNotCurrent):
 				code = "certificate_expired"
 				status = http.StatusBadRequest
-			case expectedHTTPErrorOnly(err, wire.ErrInvalid, wire.ErrIdentity, wire.ErrSignature):
+			case expectedHTTPErrorOnly(err, wire.ErrInvalid, wire.ErrIdentity, wire.ErrSignature, wire.ErrUnsupportedVersion):
 				status, code = http.StatusBadRequest, "invalid_certificate"
 			}
 			logIdentityRejection(r, status, err)

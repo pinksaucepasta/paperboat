@@ -24,18 +24,23 @@ func TestHeaderCanonicalRoundTrip(t *testing.T) {
 	}
 }
 
-func TestHeaderRejectsExpiredNoncanonicalUnknownAndOversizedInput(t *testing.T) {
+func TestHeaderRejectsExpiredTrailingOtherVersionAndOversizedInput(t *testing.T) {
 	now := time.Unix(1_800_000_000, 0).UTC()
 	header, _ := New("operation_1", "exec", "native-control", "credential", now.Add(time.Minute), 1)
 	encoded, _ := header.MarshalBinary()
 	for _, invalid := range [][]byte{
-		append([]byte(" "), encoded...),
-		bytes.Replace(encoded, []byte(`"version":1`), []byte(`"version":1,"unknown":1`), 1),
+		append(append([]byte(nil), encoded...), []byte(`{}`)...),
+		bytes.Replace(encoded, []byte(`"version":1`), []byte(`"version":2`), 1),
+		bytes.Replace(encoded, []byte(`"version":1`), []byte(`"version":1,"credential":"other"`), 1),
 		bytes.Repeat([]byte{'x'}, MaximumHeaderSize+1),
 	} {
 		if _, err := Parse(invalid, now); err == nil {
 			t.Fatalf("accepted %q", invalid[:min(len(invalid), 64)])
 		}
+	}
+	// A header from a newer client (an added field) is read: the host must keep serving later clients.
+	if parsed, err := Parse(bytes.Replace(encoded, []byte(`"version":1`), []byte(`"version":1,"later":1`), 1), now); err != nil || parsed != header {
+		t.Fatalf("newer client header: %+v %v", parsed, err)
 	}
 	header.DeadlineUnix = now.Unix()
 	expired, _ := header.MarshalBinary()

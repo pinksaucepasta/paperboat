@@ -960,7 +960,7 @@ func decodeHelperFrame(data []byte) (helperFrame, error) {
 	} else if err != nil {
 		return helperFrame{}, err
 	}
-	if frame.Version != helperProtocolVersion || frame.Type == "" || frame.RequestID == "" {
+	if !protocol.CompatibleVersion(frame.Version) || frame.Type == "" || frame.RequestID == "" {
 		return helperFrame{}, errors.New("helper structured frame is invalid")
 	}
 	return frame, nil

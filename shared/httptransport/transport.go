@@ -11,10 +11,12 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/shared/capver"
 	"golang.org/x/net/http/httpproxy"
 )
 
@@ -142,9 +144,14 @@ func (t *Transport) RoundTrip(request *http.Request) (*http.Response, error) {
 	if t == nil || request == nil {
 		return nil, errors.New("invalid HTTP transport request")
 	}
-	if t.config.UserAgent != "" && request.Header.Get("User-Agent") == "" {
+	if t.config.UserAgent != "" && request.Header.Get("User-Agent") == "" || request.Header.Get(capver.Header) == "" {
 		request = request.Clone(request.Context()) // a RoundTripper must not modify the caller's request
-		request.Header.Set("User-Agent", t.config.UserAgent)
+		if t.config.UserAgent != "" && request.Header.Get("User-Agent") == "" {
+			request.Header.Set("User-Agent", t.config.UserAgent)
+		}
+		if request.Header.Get(capver.Header) == "" {
+			request.Header.Set(capver.Header, strconv.Itoa(capver.Version))
+		}
 	}
 	snapshot, err := t.config.ProxySource.Snapshot(request.Context())
 	if err != nil {

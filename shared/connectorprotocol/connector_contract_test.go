@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -153,13 +154,40 @@ func TestWireToleratesUnknownFieldsAndMinorVersions(t *testing.T) {
 	if err := decodeStrict([]byte(`{"x":1}`), &IngressDecision{}); err == nil {
 		t.Fatal("unknown field in an authorization claim accepted")
 	}
-	for version, want := range map[string]bool{"1.0": true, "1.7": true, "2.0": false, "0.9": false, "1": false, "1.x": false, "": false} {
+	// A frame stamp is the sender's build version; the hello exchange is the gate, so a newer
+	// release's stamp (another minor or major) never cuts a released peer off.
+	for version, want := range map[string]bool{"1.0": true, "1.7": true, "2.0": true, "0.9": true, "1": false, "1.x": false, "": false} {
 		if compatibleVersion(version) != want {
 			t.Errorf("compatibleVersion(%q) = %v, want %v", version, !want, want)
 		}
 	}
-	frame := Frame{Type: MessageAck, Version: "2.0", RequestID: "req_1", Payload: json.RawMessage(`{"account_id":"acct_1"}`)}
-	if frame.Validate() == nil {
-		t.Fatal("frame of another major accepted")
+	current := Frame{Type: MessageAck, Version: ProtocolVersion, RequestID: "req_1", Payload: json.RawMessage(`{"account_id":"acct_1"}`)}
+	newer := current
+	newer.Version = "2.0"
+	if fmt.Sprint(newer.Validate()) != fmt.Sprint(current.Validate()) {
+		t.Fatalf("frame stamped by a newer major judged differently: %v vs %v", newer.Validate(), current.Validate())
+	}
+}
+
+// TestVersionNegotiationPicksInsideBothRanges: a newer peer offering a wider range still meets a
+// released one, and a welcome inside the range the client offered is accepted even when it is not
+// this build's own version.
+func TestVersionNegotiationPicksInsideBothRanges(t *testing.T) {
+	for _, c := range []struct{ min, max, want string }{
+		{ProtocolVersion, ProtocolVersion, ProtocolVersion},
+		{MinProtocolVersion, "1.9", ProtocolVersion},
+		{"0.1", "7.0", ProtocolVersion},
+	} {
+		if got, err := NegotiateVersion(c.min, c.max); err != nil || got != c.want {
+			t.Errorf("NegotiateVersion(%s, %s) = %q, %v; want %q", c.min, c.max, got, err, c.want)
+		}
+	}
+	for _, c := range [][2]string{{"7.0", "7.3"}, {"0.1", "0.9"}, {"1.9", "1.0"}, {"x", "1.0"}} {
+		if _, err := NegotiateVersion(c[0], c[1]); !errors.Is(err, ErrProtocolIncompatible) {
+			t.Errorf("NegotiateVersion(%s, %s) err=%v, want incompatible", c[0], c[1], err)
+		}
+	}
+	if !versionInRange("1.4", "1.0", "1.9") || versionInRange("2.0", "1.0", "1.9") || versionInRange("0.9", "1.0", "1.9") {
+		t.Fatal("versionInRange bounds are wrong")
 	}
 }

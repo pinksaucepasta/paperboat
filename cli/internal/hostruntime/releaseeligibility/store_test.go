@@ -74,7 +74,6 @@ func TestFileStoreRejectsMalformedDuplicateTrailingAndOversized(t *testing.T) {
 		body string
 	}{
 		{name: "duplicate", body: strings.TrimSpace(string(valid))[:len(strings.TrimSpace(string(valid)))-1] + `,"version":"2026.08.31.9"}`},
-		{name: "unknown", body: strings.TrimSpace(string(valid))[:len(strings.TrimSpace(string(valid)))-1] + `,"extra":true}`},
 		{name: "trailing", body: strings.TrimSpace(string(valid)) + ` {}`},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -85,6 +84,13 @@ func TestFileStoreRejectsMalformedDuplicateTrailingAndOversized(t *testing.T) {
 				t.Fatalf("present=%v err=%v", present, err)
 			}
 		})
+	}
+	// A newer build may have written a field before an update rolled back to this one.
+	if err := os.WriteFile(store.Path, []byte(strings.TrimSpace(string(valid))[:len(strings.TrimSpace(string(valid)))-1]+`,"extra":true}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, present, err := store.CurrentDeferral(context.Background()); err != nil || !present {
+		t.Fatalf("record with a newer field: present=%v err=%v", present, err)
 	}
 	if err := os.WriteFile(store.Path, bytesOfSize(MaxDeferralBytes+1), 0o600); err != nil {
 		t.Fatal(err)

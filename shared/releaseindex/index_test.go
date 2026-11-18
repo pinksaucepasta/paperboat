@@ -105,7 +105,7 @@ func TestNewInstallRejectsSignedGlobalStops(t *testing.T) {
 		}
 	}
 }
-func TestRejectsMissingDuplicateAndUnknown(t *testing.T) {
+func TestRejectsMissingAndDuplicateButReadsNewerFields(t *testing.T) {
 	i := fixture()
 	i.Targets = nil
 	if i.Validate(time.Now()) == nil {
@@ -118,8 +118,12 @@ func TestRejectsMissingDuplicateAndUnknown(t *testing.T) {
 	}
 	body, _ := json.Marshal(fixture())
 	body = append(body[:len(body)-1], []byte(`,"unknown":true}`)...)
-	if _, err := Decode(strings.NewReader(string(body)), time.Now()); err == nil {
-		t.Fatal("unknown accepted")
+	// A later publication's field is ignored, so a released updater can still update.
+	if _, err := Decode(strings.NewReader(string(body)), time.Now()); err != nil {
+		t.Fatalf("index with a newer field refused: %v", err)
+	}
+	if _, err := DecodePublished(strings.NewReader(string(body)), time.Now()); err == nil {
+		t.Fatal("publisher accepted a field released updaters refuse")
 	}
 }
 func TestManualBypassDoesNotBypassSafety(t *testing.T) {

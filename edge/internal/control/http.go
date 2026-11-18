@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/edge/internal/admission"
+	"github.com/pinksaucepasta/paperboat/shared/capver"
 	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	"github.com/pinksaucepasta/paperboat/shared/edgelimits"
 	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
@@ -160,6 +161,7 @@ func NewHTTPClient(config HTTPConfig) (*HTTPClient, error) {
 		cloned := *client
 		client = &cloned
 	}
+	client.Transport = capver.Transport(client.Transport)
 	client.Timeout = config.Timeout
 	client.CheckRedirect = func(*http.Request, []*http.Request) error { return ErrControlUnavailable }
 	onDemand := *client

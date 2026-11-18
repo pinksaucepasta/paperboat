@@ -155,10 +155,10 @@ func (c *webSocketConnection) ReadApplication() (protocol.Frame, []byte, error) 
 	if messageType != websocket.MessageText || len(data) == 0 || len(data) > protocol.MaxStructuredFrame {
 		return protocol.Frame{}, nil, &protocol.Error{Code: protocol.InvalidFrame, Cause: errors.New("invalid structured message")}
 	}
+	// Frames are not authorization claims: a field a newer peer adds is ignored (AGENTS.md).
 	decoder := json.NewDecoder(strings.NewReader(string(data)))
-	decoder.DisallowUnknownFields()
 	var frame protocol.Frame
-	if err := decoder.Decode(&frame); err != nil || frame.Type == "" || frame.RequestID == "" || frame.Version != protocol.ProtocolVersion {
+	if err := decoder.Decode(&frame); err != nil || frame.Type == "" || frame.RequestID == "" || !protocol.CompatibleVersion(frame.Version) {
 		return protocol.Frame{}, nil, &protocol.Error{Code: protocol.InvalidFrame, Cause: errors.New("invalid structured message")}
 	}
 	return frame, nil, nil

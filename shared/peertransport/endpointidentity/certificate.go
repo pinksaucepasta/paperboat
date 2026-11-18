@@ -21,6 +21,9 @@ const (
 	maximumCertificateBytes = encodedClaimsLen + ed25519.SignatureSize
 )
 
+// ErrUnsupportedVersion: the certificate uses a layout newer than this build; update Paperboat.
+var ErrUnsupportedVersion = errors.New("endpoint certificate uses a newer format; update Paperboat on this machine")
+
 // ValidIdentifier reports whether value is 1 to 128 ASCII letters, digits, "_" or "-", not
 // starting with "_" or "-". It is a plain scan, not a regexp, so the browser build (TinyGo)
 // does not compile one at start-up.
@@ -175,8 +178,14 @@ func marshalClaims(claims Claims) ([]byte, error) {
 }
 
 func unmarshalClaims(payload []byte) (Claims, error) {
-	if len(payload) < 5 || string(payload[:4]) != "PBEC" || payload[4] != ProtocolVersion {
+	if len(payload) < 5 || string(payload[:4]) != "PBEC" {
 		return Claims{}, errors.New("invalid endpoint certificate protocol")
+	}
+	// One case per layout this build reads; a later layout is added as a new case, never in place.
+	switch payload[4] {
+	case ProtocolVersion:
+	default:
+		return Claims{}, ErrUnsupportedVersion
 	}
 	offset := 5
 	accountID, err := readString(payload, &offset)

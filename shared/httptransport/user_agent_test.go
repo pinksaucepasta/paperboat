@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/pinksaucepasta/paperboat/shared/capver"
 )
 
 // A request with no User-Agent gets the configured one (so the server log counts every machine process under the
@@ -12,6 +14,9 @@ func TestTransportSetsTheConfiguredUserAgentOnlyWhenMissing(t *testing.T) {
 	var seen []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		seen = append(seen, r.Header.Get("User-Agent"))
+		if capver.FromRequest(r) != capver.Version {
+			t.Errorf("capability version = %q", r.Header.Get(capver.Header))
+		}
 	}))
 	defer server.Close()
 	config := DevelopmentConfig()
@@ -35,7 +40,7 @@ func TestTransportSetsTheConfiguredUserAgentOnlyWhenMissing(t *testing.T) {
 	if len(seen) != 2 || seen[0] != "paperboat/test-build" || seen[1] != "paperboat/explicit" {
 		t.Fatalf("user agents = %q", seen)
 	}
-	if plain.Header.Get("User-Agent") != "" {
+	if plain.Header.Get("User-Agent") != "" || plain.Header.Get(capver.Header) != "" {
 		t.Fatal("the caller's request was modified")
 	}
 }

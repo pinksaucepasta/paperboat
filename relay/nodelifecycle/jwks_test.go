@@ -165,7 +165,6 @@ func TestObservationRefusesMalformedIssuerTrustDocument(t *testing.T) {
 		"overlong kid":           `{"keys":[` + jwk(`"good"`, `"`+strings.Repeat("k", 129)+`"`) + `]}`,
 		"empty kid":              `{"keys":[` + jwk(`"good"`, `""`) + `]}`,
 		"withdraws every key":    r.document(`["good"]`, "good"),
-		"unknown field":          `{"keys":[` + r.key("good") + `],"extra":1}`,
 		"nested beyond depth":    `{"keys":[` + r.key("good") + `],"withdrawn_key_ids":` + strings.Repeat("[", 70) + strings.Repeat("]", 70) + `}`,
 		"non-canonical x":        `{"keys":[` + jwk(x, nonCanonical) + `]}`,
 	}
