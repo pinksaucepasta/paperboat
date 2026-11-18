@@ -6,6 +6,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { getPlatformProxy } from "wrangler"
 import { handle } from "../lib/api.ts"
+import { BACKOFF_MS, MAX_ABANDONED, deliverDue, validUrl } from "../lib/webhook.ts"
 import { tick } from "../lib/tick.ts"
 import { sign } from "../lib/probe.ts"
 import { admitProbe, buildSnapshot, catalog, evaluate, minute, readSnapshot, saveReport, type Reported } from "../lib/store.ts"
@@ -312,4 +313,92 @@ test("admin: a retried write with the same idempotency key creates one incident;
   assert.equal(closed.status, 503)
   const multiline = await admin("/api/admin/incidents", { title: "two\nlines", body: "x", components: ["api"] })
   assert.equal(multiline.status, 400)
+})
+
+// ---- webhooks
+const hook = (path: string, body: object) => call(new Request(`https://status.test/api/webhook/${path}`, { method: "POST", body: JSON.stringify(body) }), env())
+type Call = { url: string; init: RequestInit }
+/** Replace fetch for the webhook endpoint "https://hooks.example.test/x": answers the challenge, then follows `mode`. */
+function fakeEndpoint(mode: { ok: boolean }) {
+  const calls: Call[] = []
+  const real = globalThis.fetch
+  globalThis.fetch = (async (url: string, init: RequestInit) => {
+    calls.push({ url: String(url), init })
+    const body = JSON.parse(String(init.body))
+    if (body.type === "verification") return new Response(JSON.stringify({ challenge: body.challenge }))
+    return new Response("{}", { status: mode.ok ? 200 : 500 })
+  }) as typeof fetch
+  return { calls, restore: () => { globalThis.fetch = real } }
+}
+
+test("webhook urls: https on a named public host only", () => {
+  assert.ok(validUrl("https://hooks.example.test/x"))
+  for (const bad of ["http://hooks.example.test/x", "https://127.0.0.1/x", "https://localhost/x", "https://user:pw@hooks.example.test/x", "https://[::1]/x", "https://intranet/x", "ftp://a.test/x", 5, "x".repeat(600)]) assert.equal(validUrl(bad), null, String(bad))
+})
+
+test("webhook subscribe needs the challenge answered; deliveries are signed; retries back off; success clears the queue", async () => {
+  const mode = { ok: false }
+  const fake = fakeEndpoint(mode)
+  try {
+    const bad = await hook("subscribe", { url: "http://hooks.example.test/x" })
+    assert.equal(bad.status, 400)
+    const sub = (await (await hook("subscribe", { url: "https://hooks.example.test/x" })).json()) as { id: string; secret: string; unsubscribe_token: string }
+    assert.match(sub.secret, /^whsec_[0-9a-f]{48}$/)
+    assert.equal((await hook("subscribe", { url: "https://hooks.example.test/x" })).status, 409)
+    // an incident: the first delivery is tried at once and fails (endpoint down)
+    const t = Date.now()
+    const created = await admin("/api/admin/incidents", { title: "Hook test", body: "Testing webhooks.", components: ["api"] })
+    assert.equal(created.status, 201)
+    const delivery = fake.calls.filter((c) => JSON.parse(String(c.init.body)).type === "incident.created")
+    assert.equal(delivery.length, 1)
+    const sent = delivery[0]
+    const headers = sent.init.headers as Record<string, string>
+    const [tPart, vPart] = headers["x-paperboat-signature"].split(",")
+    const stamp = tPart.slice(2)
+    assert.equal(vPart.slice(3), await sign(sub.secret, `${stamp}.${String(sent.init.body)}`)) // the receiver can verify the body
+    let row = (await db.prepare("SELECT attempts, next_at FROM webhook_queue").first<{ attempts: number; next_at: number }>())!
+    assert.equal(row.attempts, 1)
+    assert.ok(row.next_at >= t + BACKOFF_MS[0] - 5000 && row.next_at <= Date.now() + BACKOFF_MS[0])
+    // not due yet: nothing is sent; due and still down: the next backoff step
+    const before = fake.calls.length
+    await deliverDue(env(), t + 30_000)
+    assert.equal(fake.calls.length, before)
+    await deliverDue(env(), row.next_at + 1)
+    row = (await db.prepare("SELECT attempts, next_at FROM webhook_queue").first<{ attempts: number; next_at: number }>())!
+    assert.equal(row.attempts, 2)
+    // the endpoint recovers: the same delivery id arrives and the queue empties
+    mode.ok = true
+    const firstId = (fake.calls[before].init.headers as Record<string, string>)["x-paperboat-delivery"]
+    await deliverDue(env(), row.next_at + 1)
+    assert.equal((fake.calls[fake.calls.length - 1].init.headers as Record<string, string>)["x-paperboat-delivery"], firstId)
+    assert.equal((await db.prepare("SELECT COUNT(*) AS n FROM webhook_queue").first<{ n: number }>())!.n, 0)
+    // unsubscribe by token
+    assert.equal((await hook("unsubscribe", { token: "0".repeat(32) })).status, 404)
+    assert.equal((await hook("unsubscribe", { token: sub.unsubscribe_token })).status, 200)
+    assert.equal((await db.prepare("SELECT COUNT(*) AS n FROM webhooks").first<{ n: number }>())!.n, 0)
+  } finally { fake.restore() }
+})
+
+test("a webhook that never answers is given up on after the last backoff step and removed after repeated give-ups", async () => {
+  const mode = { ok: false }
+  const fake = fakeEndpoint(mode)
+  try {
+    await hook("subscribe", { url: "https://dead.example.test/x" })
+    let now = Date.now()
+    for (let event = 0; event < MAX_ABANDONED; event++) {
+      await admin("/api/admin/incidents", { title: `Dead ${event}`, body: "x", components: ["api"] })
+      for (let step = 0; step <= BACKOFF_MS.length; step++) { now += 13 * 3600_000; await deliverDue(env(), now) } // every retry becomes due
+    }
+    assert.equal((await db.prepare("SELECT COUNT(*) AS n FROM webhooks WHERE url LIKE '%dead.example.test%'").first<{ n: number }>())!.n, 0)
+    assert.equal((await db.prepare("SELECT COUNT(*) AS n FROM webhook_queue").first<{ n: number }>())!.n, 0)
+  } finally { fake.restore() }
+})
+
+test("a webhook endpoint that does not answer the challenge is refused and nothing is stored", async () => {
+  const real = globalThis.fetch
+  try {
+    globalThis.fetch = (async () => new Response("no", { status: 200 })) as typeof fetch
+    assert.equal((await hook("subscribe", { url: "https://silent.example.test/x" })).status, 422)
+    assert.equal((await db.prepare("SELECT COUNT(*) AS n FROM webhooks WHERE url LIKE '%silent%'").first<{ n: number }>())!.n, 0)
+  } finally { globalThis.fetch = real }
 })

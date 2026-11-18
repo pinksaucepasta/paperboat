@@ -10,6 +10,19 @@
     </div>
     <p id="subscribe-message" class="muted" role="status" aria-live="polite"></p>
   </form>
+  <form id="webhook-form" class="sub-form" novalidate>
+    <label for="webhook-url">Webhook</label>
+    <div class="sub-row">
+      <input id="webhook-url" name="url" type="url" required maxlength="500" placeholder="https://example.com/hooks/paperboat" />
+      <button type="submit" class="btn btn-quiet">Add</button>
+    </div>
+    <p id="webhook-message" class="muted" role="status" aria-live="polite"></p>
+    <div id="webhook-secret" class="webhook-secret" hidden>
+      <p class="muted">Save these now; the secret is shown once. Each delivery carries an <code>x-paperboat-signature</code> header, <code>t=&lt;unix seconds&gt;,v1=&lt;hex HMAC-SHA256 of "t.body" with the secret&gt;</code>. Your address must answer the verification request with 200 and <code>&#123;"challenge": "..."&#125;</code>.</p>
+      <label>Secret <input id="webhook-secret-value" readonly /></label>
+      <label>Removal token <input id="webhook-token-value" readonly /></label>
+    </div>
+  </form>
   <div class="sub-feed">
     <span class="sub-feed-label">RSS</span>
     <input id="subscribe-feed" readonly aria-label="RSS feed address" value="" />
