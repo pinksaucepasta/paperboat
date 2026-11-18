@@ -295,6 +295,11 @@ func TestMachineTrustsOldAndNewKeysDuringTheOverlapAndRefusesTheOldAfterRetire(t
 
 	run := w.start(operator, "")
 	w.until(run.ID, StagePublish)
+	// Each CA change wakes the account's machines (machine_access topic) so they fetch now, not at their next timer.
+	var woken int
+	if err := w.store.SQL().QueryRowContext(context.Background(), `SELECT count(*) FROM paperboat.machine_topic_generations WHERE machine_id=$1 AND topic='machine_access' AND updated_at >= $2`, m.id, w.clock.Add(-time.Hour)).Scan(&woken); err != nil || woken != 1 {
+		t.Fatalf("publish must wake the account's machines: %d %v", woken, err)
+	}
 	// (a) published: the machine's next fetch holds the old and the pending CA, and still accepts the old one.
 	w.clock = w.clock.Add(time.Minute)
 	set := w.fetch(m)
