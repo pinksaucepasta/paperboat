@@ -119,7 +119,7 @@ func newWorld(t *testing.T) *world {
 	w.cfg = Config{
 		Store: store, SSH: w.ssh, Mint: fakeMint{active: "mint-new", published: []string{"mint-new", "mint-old"}}, Floor: w.floor, TOTP: w.totp,
 		EncryptionKey: ring, SessionKeys: []string{"session-key-new-0123456789-0123456789", "session-key-old-0123456789-0123456789"},
-		PickupThreshold: 1, PickupTimeout: time.Hour, MintDrain: 2 * time.Hour, OnlineWindow: time.Hour, Batch: 2, Now: func() time.Time { return w.clock },
+		PickupThreshold: 1, PickupTimeout: time.Hour, MintDrain: 30 * time.Minute, OnlineWindow: time.Hour, Batch: 2, Now: func() time.Time { return w.clock },
 	}
 	w.rebuild()
 	// One run at a time per database: a run another test left behind must not block this one.
