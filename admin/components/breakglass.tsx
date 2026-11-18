@@ -75,6 +75,9 @@ function RunView({ run }: { run: Run }) {
             </div>
             <span className="text-xs text-muted-foreground">{stageTitles[stage.name][1]}</span>
             {stage.state !== "pending" && stage.state !== "skipped" && <span className="font-mono text-xs">{counts(stage.detail)}</span>}
+            {stage.name === "retire" && typeof stage.detail.mint_withdraw_at === "string" && stage.state !== "done" && (
+              <span className="text-xs" data-mint-countdown>Old mint keys are withdrawn <Time iso={stage.detail.mint_withdraw_at} relative /> (machines renew their credentials first)</span>
+            )}
           </li>
         ))}
       </ol>
