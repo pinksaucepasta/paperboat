@@ -1,5 +1,6 @@
 // The status page: one Worker with static assets (the Astro build in dist/), the /api routes, the D1 binding and the cron trigger.
-// Deployed by Workers Builds from git (root directory status/; build: install marketing's packages, bun run build; deploy: npx wrangler deploy).
+// Deployed by Workers Builds from git: root directory status, build `bun install --frozen-lockfile && bun run build`, deploy `npx wrangler deploy`,
+// watch paths status/**, brand/**, package.json, bun.lock (the page imports ../brand; brand, marketing and status are one Bun workspace).
 // Secrets (set once, kept across deploys): PROBE_KEYS, ADMIN_TOKEN, CHECKS, MAIL_KEY. Vars (kept across deploys, set by deploy.sh):
 // PUBLIC_ORIGIN, NET_CHECK_URL, MAIL_ENDPOINT, MAIL_FROM.
 {
