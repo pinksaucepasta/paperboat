@@ -841,6 +841,8 @@ try {
   await step("team: the plan shows its seats, a team grant asks for seats, and a paid team has nothing to revoke", async () => {
     await p.goto(`${ORIGIN}/teams/team_a`)
     await p.waitForSelector("[data-plan-actions]")
+    // The plan comes from its own query, which can land after the plan actions render.
+    await p.waitForFunction(() => document.querySelector("main")?.textContent?.includes("team_monthly"))
     expect((await text("main")).includes("team_monthly"), "the team plan is not shown")
     expect((await p.locator("[data-plan-actions]").getByRole("button", { name: "Revoke grant" }).count()) === 0, "a Stripe team offers revoke")
     await p.getByRole("button", { name: "Grant a plan" }).click()
