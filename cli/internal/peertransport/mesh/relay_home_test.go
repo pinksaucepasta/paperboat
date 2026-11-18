@@ -388,7 +388,7 @@ func TestHeardOnRenewsTheReplyRoute(t *testing.T) {
 		s.lb.heardOn(peer, two.RegionID)
 		time.Sleep(100 * time.Millisecond)
 	}
-	awaitRegion(t, s, peer, two.RegionID, 100*time.Millisecond)
+	awaitRegion(t, s, peer, two.RegionID, time.Second)
 	for range 14 {
 		s.lb.heardOn(peer, three.RegionID)
 		time.Sleep(100 * time.Millisecond)
@@ -415,6 +415,22 @@ func TestSignedHomeClearedByTheServerFallsBackToTheEnginesOwn(t *testing.T) {
 	renew(0)
 	awaitRegion(t, s, peer, two.RegionID, time.Second) // this engine's own home answers
 	awaitRegion(t, s, pinned, three.RegionID, time.Second)
+}
+
+// A route that ran out (the node went back to the home) is made live again by the peer's next packet on its region.
+func TestHeardOnRevivesAnExpiredReplyRoute(t *testing.T) {
+	peer := key.NewNode().Public()
+	s, one, two, _ := startRoutesServer(t, 200*time.Millisecond, peer)
+	if err := s.SetPeerContacts(map[key.NodePublic]PeerContact{peer: {Disco: key.NewDisco().Public(), Home: one.RegionID}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetPeerRelayRegion(peer, two.RegionID); err != nil {
+		t.Fatal(err)
+	}
+	awaitRegion(t, s, peer, one.RegionID, 5*time.Second)
+	s.lb.heardOn(peer, two.RegionID)
+	awaitRegion(t, s, peer, two.RegionID, time.Second)
+	awaitRegion(t, s, peer, one.RegionID, 5*time.Second) // and, unheard again, runs out again: a timer is pending
 }
 
 // A signed home whose relay this engine no longer has is not reinstalled on a peer by later renewals (the server keeps

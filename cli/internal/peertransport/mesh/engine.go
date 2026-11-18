@@ -184,10 +184,10 @@ func (s *Server) Start() error {
 	sys.Set(store)
 
 	lb.onDERPRecv = func(regionID tailcfg.DERPRegionID, src key.NodePublic, pkt []byte) bool {
+		lb.heardOn(src, regionID) // every non-disco packet, WireGuard data and relay control too (magicsock OnDERPRecv)
 		if s.OnRelayControl != nil && s.OnRelayControl(regionID, src, pkt) {
 			return true
 		}
-		lb.heardOn(src, regionID) // every non-disco packet, WireGuard data too (magicsock OnDERPRecv)
 		if !IsMeowPacket(pkt) {
 			return false
 		}
