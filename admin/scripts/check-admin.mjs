@@ -91,6 +91,8 @@ const world = {
     { id: "ann_2", kind: "banner", title: "Paperboat is in beta", body: "Tell us what breaks.", severity: "info", dismissible: true, audience_kind: "all", starts_at: "2026-11-16T08:00:00Z", created_by: "operator_root", created_at: "2026-11-16T08:00:00Z", updated_at: "2026-11-16T08:00:00Z", state: "live", reads: 0, dismissals: 12 },
     { id: "ann_1", kind: "notice", title: "Relays in Singapore", body: "", audience_kind: "plan", audience_value: "pro_monthly", starts_at: "2026-11-10T08:00:00Z", ends_at: "2026-11-11T08:00:00Z", created_by: "operator_root", created_at: "2026-11-10T08:00:00Z", updated_at: "2026-11-10T08:00:00Z", state: "ended", severity: "info", dismissible: true, reads: 31, dismissals: 0 },
   ],
+  notices: [],
+  auditExtra: [],
   floor: { schema: "paperboat.client-update-policy/v1", revision: 2, minimum_version: "", reason: "" },
   requests: [],
 }
@@ -129,6 +131,16 @@ function mutate(method, p, json) {
   if (area === "teams" && (action === "ban" || action === "unban")) {
     world.teamBan = action === "ban" ? { reason: writes.at(-1).reason, at: new Date().toISOString() } : undefined
     return { resource_id: id, state: action === "ban" ? "suspended" : "active", version: json.revision + 1 }
+  }
+  if (area === "notices") {
+    // The server refuses a price increase under 30 days away and renders the mail; a dry run sends nothing.
+    if (json.kind === "price_increase" && !(Date.parse(json.effective) >= Date.now() + 29 * 86400e3)) return { __status: 400, code: "invalid_request", message: "The effective date must be at least 30 days away.", reference: "support_fixture_notice" }
+    const notice = { kind: json.kind, audience_kind: json.audience_kind, audience_value: json.audience_value || undefined, subject: `Paperboat: prices change on ${json.effective}`, html: `<p>${json.detail}</p>`, recipients: json.audience_kind === "user" ? 1 : 2 }
+    if (json.dry_run) return notice
+    const sent = { id: `notice_${world.notices.length + 1}`, ...notice, created_by: "operator_root", created_at: new Date().toISOString(), queued_at: new Date().toISOString() }
+    world.notices.unshift(sent)
+    world.auditExtra.unshift({ id: `aud_notice_${world.notices.length}`, actor_user_id: "operator_root", actor_type: "admin", event_type: "operator.customer_notice_send", resource_type: "customer_notice", resource_id: sent.id, outcome: "success", request_id: "req_notice", created_at: sent.created_at })
+    return sent
   }
   if (area === "announcements") {
     const now = new Date().toISOString()
@@ -224,6 +236,7 @@ function route(req, url) {
     const state = url.searchParams.get("state")
     return page(world.announcements.filter((a) => !state || a.state === state), "announcements", undefined, url)
   }
+  if (p === "/v1/admin/notices") return page(world.notices, "notices", undefined, url)
   if (p === "/v1/admin/ip-blocks") {
     const state = url.searchParams.get("state")
     return page(world.ipBlocks.filter((b) => !state || (state === "running") === b.running), "blocks", undefined, url)
@@ -246,7 +259,8 @@ function route(req, url) {
   if (p.startsWith("/v1/admin/machines/")) return machine(Number(p.split("-").pop()))
   if (p === "/v1/admin/audit") {
     const rows = Array.from({ length: 3 }, (_, i) => ({ id: `aud_${i}`, actor_user_id: "operator_1", actor_type: "admin", event_type: "operator.request", resource_type: "operator_target", resource_id: "usr_001", outcome: "unchanged", request_id: `req_${i}`, created_at: "2026-11-17T09:00:00Z" }))
-    return { events: url.searchParams.get("event_type") === "nothing" ? [] : rows, total: url.searchParams.get("event_type") === "nothing" ? 0 : 3 }
+    const all = [...world.auditExtra, ...rows]
+    return { events: url.searchParams.get("event_type") === "nothing" ? [] : all, total: url.searchParams.get("event_type") === "nothing" ? 0 : all.length }
   }
   if (p === "/v1/admin/overview")
     return { accounts: [{ state: "active", count: 110 }, { state: "suspended", count: 10 }], billing_workspaces: [{ state: "active", count: 4 }], control_operations: [{ state: "succeeded", count: 9 }], hosts: 7, hosts_ready: 5, hosts_stale: 2, relays: 2, relays_ready: 2, relays_stale: 0 }
@@ -1301,6 +1315,38 @@ try {
     await p.setViewportSize({ width: 390, height: 844 })
     await p.screenshot({ path: `${shots}/announcements-phone.png` })
     await p.setViewportSize({ width: 1280, height: 800 })
+  })
+  await step("notices: a price increase is previewed by the server (refused under 30 days, then rendered with its recipient count), sent to a test user with target, reference and key, listed, and its audit entry appears", async () => {
+    await p.goto(`${ORIGIN}/notices`)
+    await waitReady("notices")
+    expect((await text('[data-table="notices"]')).includes("No notices sent"), "the list is not empty before sending")
+    await p.getByRole("button", { name: "New notice" }).click()
+    const d = dialog("New customer notice")
+    await d.getByLabel("Who gets it").selectOption("user")
+    await d.getByLabel("Search users").fill("person3")
+    await d.getByRole("button", { name: /person3@example.test/ }).click()
+    const day = (n) => new Date(Date.now() + n * 86400e3).toISOString().slice(0, 10)
+    await d.getByLabel("Takes effect on").fill(day(10))
+    await d.getByLabel("What changes").fill("Pro goes from $9 to $12 a month.")
+    await d.locator("[data-notice-preview]").getByText("at least 30 days").waitFor()
+    await d.getByLabel("Reference", { exact: true }).fill("TICKET-42")
+    expect(await d.getByRole("button", { name: "Send", exact: true }).isDisabled(), "send is enabled while the server refuses the notice")
+    await d.getByLabel("Takes effect on").fill(day(31))
+    await d.locator("[data-notice-preview]").getByText("1 recipient").waitFor()
+    expect((await d.locator("[data-notice-preview]").innerText()).includes("prices change"), "the server's subject is not shown")
+    const dry = lastWrite()
+    expect(dry.body.dry_run === true && dry.target === "notices" && dry.reason === "preview" && dry.key.length >= 8, `preview write ${JSON.stringify(dry)}`)
+    expect(await d.getByRole("button", { name: "Send to 1", exact: true }).isEnabled(), "send stays disabled after a good preview")
+    await p.setViewportSize({ width: 1280, height: 1500 })
+    await p.screenshot({ path: `${shots}/notice-dialog.png` })
+    await p.setViewportSize({ width: 1280, height: 800 })
+    await submit(d, "Send to 1")
+    await p.waitForFunction(() => document.querySelector('[data-table="notices"]')?.textContent?.includes("prices change"))
+    const w = lastWrite()
+    expect(w.method === "POST" && w.path === "/v1/admin/notices" && w.target === "notices" && w.reason === "TICKET-42" && w.key.length >= 8 && !w.body.dry_run && w.body.kind === "price_increase" && w.body.audience_kind === "user" && w.body.audience_value === "usr_003" && w.body.effective === day(31), `send write ${JSON.stringify(w)}`)
+    await p.goto(`${ORIGIN}/audit`)
+    await waitReady("audit events")
+    expect((await text('[data-table="audit events"]')).includes("operator.customer_notice_send"), "the send has no audit entry")
   })
   await step("operators: you are marked and have no buttons on your own row; inviting shows the setup token once and lists the invitation", async () => {
     await p.goto(`${ORIGIN}/operators`)
