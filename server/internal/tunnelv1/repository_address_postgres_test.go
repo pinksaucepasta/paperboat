@@ -9,6 +9,9 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/server/internal/testutil"
+	"github.com/pinksaucepasta/paperboat/server/internal/workspace"
 )
 
 var addressAttempts atomic.Uint64
@@ -163,28 +166,42 @@ func TestSQLRepositoryRefusesAnAddressChangeInASelfHostedWorkspaceOnPostgres(t *
 func TestSQLRepositoryRefusesAnAddressChangeInASelfHostedTeamWorkspaceOnPostgres(t *testing.T) {
 	f := newTRK07PostgresFixture(t)
 	ctx := context.Background()
-	account := f.accounts[0]
-	team := "team_addr_sh_" + f.suffix
-	tunnelID := "tun_addr_tsh_" + f.suffix
-	created := f.createTunnel(t, account, "mch_trk07_primary_"+f.suffix, tunnelID, "addr-tsh-"+f.suffix)
+	owner, host := f.addAccount(t, "team-address-owner")
+	team := "ws-t-" + strings.ReplaceAll(f.suffix, "_", "-")
+	id := "tun_addr_tsh_" + f.suffix
 	exec := func(query string, args ...any) {
 		t.Helper()
 		if _, err := f.database.SQL().ExecContext(ctx, query, args...); err != nil {
 			t.Fatal(err)
 		}
 	}
-	exec(`INSERT INTO paperboat.teams(team_id,owner_account,generation) VALUES($1,$2,1)`, team, account)
 	t.Cleanup(func() {
 		_, _ = f.database.SQL().ExecContext(ctx, `DELETE FROM paperboat.selfhost_pool_policies WHERE scope_kind='team' AND scope_id=$1`, team)
-		_, _ = f.database.SQL().ExecContext(ctx, `UPDATE paperboat.tunnels SET owner_team_id=NULL WHERE id=$1`, tunnelID)
+		_, _ = f.database.SQL().ExecContext(ctx, `DELETE FROM paperboat.tunnels WHERE id=$1`, id)
+		_, _ = f.database.SQL().ExecContext(ctx, `DELETE FROM paperboat.managed_hostnames WHERE resource_id=$1`, id)
+		_, _ = f.database.SQL().ExecContext(ctx, `DELETE FROM paperboat.billing_workspaces WHERE team_id=$1`, team)
 		_, _ = f.database.SQL().ExecContext(ctx, `DELETE FROM paperboat.teams WHERE team_id=$1`, team)
 	})
-	exec(`UPDATE paperboat.tunnels SET owner_team_id=$1 WHERE id=$2`, team, tunnelID)
+	exec(`UPDATE paperboat.user_machines SET online=true WHERE id=$1`, host)
+	exec(`INSERT INTO paperboat.teams(team_id,owner_account,generation) VALUES($1,$2,1)`, team, owner)
+	exec(`INSERT INTO paperboat.team_members(team_id,account_id,membership_generation,role,active) VALUES($1,$2,1,'admin',true)`, team, owner)
+	exec(`INSERT INTO paperboat.billing_workspaces(id,team_id,state,product_code,quantity,period_start,period_end) VALUES($1,$2,'active','team-pro',2,now()-interval '1 hour',now()+interval '1 hour')`, "team:"+team, team)
+	exec(`INSERT INTO paperboat.team_resource_bindings(team_id,resource_kind,resource_id,owner_account) VALUES($1,'machine',$2,$3)`, team, host, owner)
+	scope, err := workspace.Parse(team)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hash := sha256.Sum256([]byte(id))
+	endpoint := testutil.EndpointID(id)
+	created, err := f.repository.Create(workspace.WithContext(ctx, scope), CreateRecord{OperationID: "op-" + id, TunnelID: id, AccountID: owner, Name: "team-address", AccessMode: AccessTeam, StableEndpointID: endpoint, StableEndpoint: "https://" + testutil.EndpointLabel(endpoint) + ".tunnels.example.test", HostID: host, ActorID: owner, AuditActorID: owner, ActorType: "host", AuditEventID: "audit-" + id, Origin: OriginRequest{Scheme: "http", Address: "127.0.0.1:3000"}, IdempotencyKey: id, RequestHash: hash, CorrelationID: id, RequestID: id})
+	if err != nil {
+		t.Fatal(err)
+	}
 	exec(`INSERT INTO paperboat.selfhost_pool_policies(scope_kind,scope_id,capability,mode,installation_ids) VALUES('team',$1,'tunnel','self-hosted-only','{}')`, team)
-	if _, err := f.changeAddress(t, account, tunnelID, "hello"+f.suffix[len(f.suffix)-6:], created.Tunnel.Generation); !errors.Is(err, ErrAddressUnavailable) {
+	if _, err := f.changeAddress(t, owner, id, "hello"+f.suffix[len(f.suffix)-6:], created.Tunnel.Generation); !errors.Is(err, ErrAddressUnavailable) {
 		t.Fatalf("changing the address of a self-hosted team tunnel = %v, want ErrAddressUnavailable", err)
 	}
-	if c, err := f.repository.CheckAddress(ctx, account, tunnelID, "helloworld"); err != nil || !c.SelfHosted {
+	if c, err := f.repository.CheckAddress(ctx, owner, id, "helloworld"); err != nil || !c.SelfHosted {
 		t.Fatalf("availability for a self-hosted team tunnel = %+v, %v", c, err)
 	}
 }
