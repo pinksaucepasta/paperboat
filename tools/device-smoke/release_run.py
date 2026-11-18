@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """S3-04: run the full device smoke suite on an OFFICIAL release, Linux pair (hp + dadape).
 
-  release_run.py --version 2026.10.19.17 --installer-url https://<get host>/install [--dry-run]
+  release_run.py --version 2026.10.19.17 [--repository owner/repo] [--dry-run]
                  [-- smoke.sh options, e.g. --long-seconds 60]
 
-1. Reads the published one-liner and requires it to pin exactly --version for linux-amd64 and
-   linux-arm64 (the release users get), then downloads those binaries from the pinned URLs and
-   verifies length and SHA-256 the way the installer does.
+1. Downloads the release's SHA256SUMS and SHA256SUMS.sig from GitHub, verifies the signature with the release key
+   embedded in cli/tools/install.sh (the key the installer trusts), requires it to name exactly --version, then
+   downloads pb-linux-amd64 and pb-linux-arm64 and verifies their SHA-256 the way the installer does.
 2. Installs each binary on its device with deploy.py (hp amd64, dadape arm64): the same `pb install`
    a user runs, no identity or account change.
 3. Runs smoke.sh --targets hp,dadape --expect-version VERSION (all checks, no skip list) and prints
@@ -28,8 +28,8 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 DEVICES = {'hp': ('linux-amd64', 'anvit@hp'), 'dadape': ('linux-arm64', 'anvit@dadape')}
 MAX_ASSET = 512 << 20
-BLOCK = re.compile(r"^\s*(linux-(?:amd64|arm64))\)\s*\n\s*product_version='([^']+)'\s*\n\s*product_url='([^']+)'\s*\n"
-                   r"\s*product_sha='([0-9a-f]{64})'\s*\n\s*product_length='([0-9]+)'", re.M)
+INSTALLER = HERE.parents[1] / 'cli' / 'tools' / 'install.sh'
+RELEASE_KEY = re.compile(r'paperboat-release namespaces="paperboat-release" ssh-ed25519 [A-Za-z0-9+/=]+')
 
 
 def fetch(url, limit):
@@ -43,25 +43,43 @@ def fetch(url, limit):
     return data
 
 
-def pins(installer_text):
-    found = {name: dict(version=v, url=u, sha256=s, length=int(n)) for name, v, u, s, n in BLOCK.findall(installer_text)}
-    if set(found) != {'linux-amd64', 'linux-arm64'}:
-        raise SystemExit('the published installer does not pin both Linux binaries')
+def verified_sums(version, base):
+    """The release's SHA256SUMS as {asset: sha256}, only after the signature verifies with the installer's embedded key."""
+    sums, signature = fetch(base + '/SHA256SUMS', 1 << 20), fetch(base + '/SHA256SUMS.sig', 1 << 16)
+    key = RELEASE_KEY.search(INSTALLER.read_text())
+    if not key:
+        raise SystemExit('cli/tools/install.sh embeds no release key')
+    with tempfile.TemporaryDirectory(prefix='pb-release-sig-') as directory:
+        allowed, sig = Path(directory) / 'allowed_signers', Path(directory) / 'SHA256SUMS.sig'
+        allowed.write_text(key.group(0) + '\n')
+        sig.write_bytes(signature)
+        check = subprocess.run(['ssh-keygen', '-Y', 'verify', '-f', str(allowed), '-I', 'paperboat-release', '-n', 'paperboat-release', '-s', str(sig)],
+                               input=sums, capture_output=True)
+    if check.returncode != 0:
+        raise SystemExit('the release signature on SHA256SUMS is not valid')
+    lines = sums.decode().splitlines()
+    if not lines or lines[0] != f'# paperboat-release {version}':
+        raise SystemExit(f'SHA256SUMS is not signed for {version}; run the suite on what users get')
+    found = {}
+    for line in lines[1:]:
+        digest, _, name = line.partition('  ')
+        if re.fullmatch(r'[0-9a-f]{64}', digest) and name:
+            found[name] = digest
     return found
 
 
-def download(version, installer_url, directory):
-    pinned = pins(fetch(installer_url, 1 << 20).decode())
+def download(version, repository, directory):
+    base = f'https://github.com/{repository}/releases/download/{version}'
+    sums = verified_sums(version, base)
     files = {}
-    for name, pin in sorted(pinned.items()):
-        if pin['version'] != version:
-            raise SystemExit(f"the one-liner pins {pin['version']} for {name}, not {version}; run the suite on what users get")
-        if not 0 < pin['length'] <= MAX_ASSET or not pin['url'].startswith('https://'):
-            raise SystemExit('invalid pin for ' + name)
-        data = fetch(pin['url'], pin['length'])
-        if len(data) != pin['length'] or hashlib.sha256(data).hexdigest() != pin['sha256']:
-            raise SystemExit(f'{name} does not match the published length and SHA-256')
-        path = directory / ('pb-' + name)
+    for name in ('linux-amd64', 'linux-arm64'):
+        asset = 'pb-' + name
+        if asset not in sums:
+            raise SystemExit(f'SHA256SUMS does not list {asset}')
+        data = fetch(f'{base}/{asset}', MAX_ASSET)
+        if hashlib.sha256(data).hexdigest() != sums[asset]:
+            raise SystemExit(f'{name} does not match the signed SHA-256')
+        path = directory / asset
         path.write_bytes(data)
         path.chmod(0o700)
         files[name] = path
@@ -78,17 +96,17 @@ def summary(result_file):
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--version', required=True)
-    parser.add_argument('--installer-url', default=os.environ.get('PAPERBOAT_INSTALLER_URL', ''))
+    parser.add_argument('--repository', default=os.environ.get('PB_REPO', 'pinksaucepasta/paperboat'), help='owner/repo that publishes the releases')
     parser.add_argument('--dry-run', action='store_true')
     parser.add_argument('smoke', nargs=argparse.REMAINDER, help='options passed to smoke.sh after --')
     args = parser.parse_args()
-    if not args.installer_url:
-        raise SystemExit('--installer-url or PAPERBOAT_INSTALLER_URL is required')
+    if not re.fullmatch(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+', args.repository):
+        raise SystemExit('--repository must look like owner/repo')
     extra = args.smoke[1:] if args.smoke[:1] == ['--'] else args.smoke
     if '--skip' in extra or '--only-check' in extra or '--only-list' in extra:
         raise SystemExit('the release run executes every check; do not skip or select checks')
     with tempfile.TemporaryDirectory(prefix='pb-release-run-') as directory:
-        files = download(args.version, args.installer_url, Path(directory))
+        files = download(args.version, args.repository, Path(directory))
         print(json.dumps({'phase': 'verified', 'version': args.version, 'assets': sorted(files)}), flush=True)
         if args.dry_run:
             return 0

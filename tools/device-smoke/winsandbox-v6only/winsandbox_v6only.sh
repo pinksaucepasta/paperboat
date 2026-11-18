@@ -7,7 +7,7 @@
 # the mangle FORWARD chain): without it HTTPS through NAT64 times out on the first full-size segment (tayga's +20 byte
 # header exceeds the tunnel MTU) and pb install fails in the machine guard phase. bed-nat.sh does that and the IPv4 NAT.
 # usage: winsandbox_v6only.sh start|status|cmd <script.ps1> [s]|stop
-# env: PB_EXE (windows pb.exe), WG_MSI_URL, INSTALL_URL (installer host, see TOKEN), API_URL (server URL), TOKEN (a one-shot
+# env: PB_EXE (windows pb.exe), WG_MSI_URL, API_URL (server URL), TOKEN (a one-shot
 # enrollment token; minted from the Linux peer when unset)
 set -eu
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -23,8 +23,7 @@ start)
   # one-shot enrollment token for the new machine, minted by the Linux peer (pb machine add) and read from the installer
   # page it returns; never printed. TOKEN=... overrides.
   if [ -z "${TOKEN:-}" ]; then
-    code=$(ssh "$BED" "$LPB machine add --json --name ${MACHINE_NAME:-rx38q-w}" | python3 -c 'import sys,json,re; print(re.search(r"p=([^\x27]+)",json.load(sys.stdin)["data"]["windows_command"]).group(1))')
-    TOKEN=$(curl -fsS "${INSTALL_URL:?installer base URL, the host of windows_command in pb machine add}/install.ps1?p=$code" | sed -n "1s/.*PAPERBOAT_ENROLLMENT_TOKEN='\([^']*\)'.*/\1/p")
+    TOKEN=$(ssh "$BED" "$LPB machine add --json --name ${MACHINE_NAME:-rx38q-w}" | python3 -c 'import sys,json,re; print(re.search(r"PB_TOKEN=\x27([^\x27]+)\x27",json.load(sys.stdin)["data"]["windows_command"]).group(1))')
   fi
   umask 077; T=$(mktemp -d)
   # client key pair and bed peer; the bed adds the peer, the private key only travels into the conf below.

@@ -34,8 +34,8 @@ from xplat_tunnel import confirm_delete  # noqa: E402
 
 results = {}
 PREFIX = os.environ.get('XPLAT_PREFIX', 'xpe')
-POSIX_SHAPE = re.compile(r"^curl -fsSL '(https://[^'?]+/install)\?p=[A-Za-z0-9_.-]+' \| bash$")
-PS_SHAPE = re.compile(r"""^powershell -c "iex \(irm '(https://[^'?]+/install\.ps1)\?p=[A-Za-z0-9_.-]+'\)"$""")
+POSIX_SHAPE = re.compile(r"^curl -fsSL (https://[^\s'?|]+) \| PB_TOKEN='[A-Za-z0-9_.-]+' (?:PB_NAME='[A-Za-z0-9_.-]+' )?sh$")
+PS_SHAPE = re.compile(r"""^\$env:PB_TOKEN='[A-Za-z0-9_.-]+'; (?:\$env:PB_NAME='[A-Za-z0-9_.-]+'; )?irm (https://[^\s'?|]+) \| iex$""")
 GIT_BASH = r'C:\Program Files\Git\bin\bash.exe'
 BUILD = Path(os.environ.get('XPE_BUILD_DIR', '/home/ubuntu/pb-wt/xe-build/dev-9864c05bd'))
 BINARIES = {'L': 'pb-linux-amd64', 'M': 'pb-darwin-arm64', 'W': 'pb-windows-amd64.exe'}
@@ -43,7 +43,7 @@ NAMES = {'L': PREFIX + '-l', 'M': PREFIX + '-m', 'W': PREFIX + '-w'}
 
 
 def mask(text):
-    return re.sub(r'(p=|token=|ENROLLMENT_TOKEN\W{1,3})[A-Za-z0-9_.-]{12,}', r'\1<token>', text)
+    return re.sub(r'(p=|token=|ENROLLMENT_TOKEN\W{1,3}|PB_TOKEN\W{1,3})[A-Za-z0-9_.-]{12,}', r'\1<token>', text)
 
 
 def devices(keys):
@@ -77,17 +77,17 @@ def printed(dev):
 
 def paste(dev, command, shell=None):
     """The printed `command` run as a user pastes it into the shell of dev (`shell`: 'bash' on Windows pastes it into Git bash, 'pwsh' into pwsh)."""
-    env = {'PAPERBOAT_MACHINE_NAME': dev.name}
+    env = {'PB_NAME': dev.name}
     if dev.os == 'windows':
         target = dev.device.target
         if shell == 'bash':
-            line = 'set PAPERBOAT_MACHINE_NAME=%s&& "%s" -c "%s"' % (dev.name, GIT_BASH, command)
-        else:
-            line = 'set PAPERBOAT_MACHINE_NAME=%s&& %s' % (dev.name, command)
+            line = 'set PB_NAME=%s&& "%s" -c "%s"' % (dev.name, GIT_BASH, command)
+        else:  # the printed PowerShell command, pasted into PowerShell
+            line = 'powershell -NoProfile -Command "$env:PB_NAME=\'%s\'; %s"' % (dev.name, command)
         done = subprocess.run(['ssh', target, line], capture_output=True, timeout=900)
         return fleet.Result(done.returncode, done.stdout, done.stderr)
-    if shell == 'pwsh':  # the printed `powershell -c "..."` with the PowerShell this OS has
-        command = re.sub(r'^powershell', 'pwsh', command)
+    if shell == 'pwsh':  # the printed PowerShell command, pasted into the PowerShell this OS has
+        return dev.run(['pwsh', '-NoProfile', '-Command', command], env=env, timeout=900)
     return dev.run(['bash', '-c', command], env=env, timeout=900)
 
 

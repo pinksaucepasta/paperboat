@@ -175,9 +175,7 @@ def mint_token(kind, name=None, controller_dev=None):
               'out=subprocess.run([sys.argv[3],"machine","add","--name",name,"--json"],capture_output=True,text=True).stdout\n'
               'data=json.loads(out)["data"]\n'
               'cmd=data["windows_command" if kind=="windows" else "linux_macos_command"]\n'
-              'url=re.search(r"\'(https?://[^\']+)\'",cmd).group(1)\n'
-              'body=subprocess.run(["curl","-fsSL",url],capture_output=True,text=True).stdout\n'
-              'print(re.search(r"ENROLLMENT_TOKEN\\W+([A-Za-z0-9]+)",body).group(1))\n')
+              'print(re.search(r"PB_TOKEN=\'([A-Za-z0-9]+)\'",cmd).group(1))\n')
     name = name or os.environ.get('XPLAT_W_NAME' if kind == 'windows' else 'XPLAT_L_NAME') or PREFIX + '-' + ('w' if kind == 'windows' else 'l')
     ctl = controller_dev or controller()
     done = ctl.run(['python3', '-', name, kind, ctl.pb_path], input=script.encode(), timeout=90)

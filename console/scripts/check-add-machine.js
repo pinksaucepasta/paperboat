@@ -49,7 +49,7 @@
   const command = () => dialog()?.querySelector("code")?.textContent ?? ""
 
   const overview = await get("machines/overview")
-  const installUrl = overview.bootstrap_command?.match(/https:\/\/[^\s'"]+\/install\b/)?.[0]
+  const installUrl = overview.bootstrap_command?.match(/https:\/\/[^\s'"|]+/)?.[0]
   pass("the server publishes an install address", Boolean(installUrl))
 
   // The dialog creates its enrollment with POST machine-enrollments; remember its id (not the token).
@@ -78,14 +78,14 @@
     pass("Add machine is on the page", Boolean(add))
     if (!add || !installUrl) return steps
     add.click()
-    let withToken = await until(() => /\?p=/.test(command()) && command())
+    let withToken = await until(() => /PB_TOKEN=/.test(command()) && command())
     pass("the dialog shows a pairing command", Boolean(withToken))
     if (!withToken) return steps
     // The first command is the POSIX one-liner; Windows has its own switch below.
     const escapedUrl = installUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-    const shape = new RegExp(`^curl -fsSL '${escapedUrl}\\?p=[A-Za-z0-9_.-]+' \\| bash$`)
-    pass("the command is the published install address with the token, piped to bash", shape.test(withToken))
-    const token = withToken.match(/\?p=([^']+)'/)?.[1] ?? ""
+    const shape = new RegExp(`^curl -fsSL ${escapedUrl} \\| PB_TOKEN='[A-Za-z0-9_.-]+' (PB_NAME='[a-z0-9-]+' )?sh$`)
+    pass("the command is the published install address, piped to sh with the token in its environment", shape.test(withToken))
+    const token = withToken.match(/PB_TOKEN='([^']+)'/)?.[1] ?? ""
 
     // The enrollment the dialog created is waiting for a machine.
     await until(() => enrollmentId)
@@ -98,31 +98,31 @@
     const label = await until(() => /Waiting for the machine/.test(dialog()?.innerText ?? "") || null)
     pass("the dialog says it is waiting for the machine", Boolean(label))
 
-    // One token for every computer: Windows shows the same token on the PowerShell installer path (/install.ps1),
-    // and the enrollment is neither replaced nor revoked.
+    // One token for every computer: Windows shows the same token in $env:PB_TOKEN for the same install address
+    // (it serves install.ps1 to PowerShell), and the enrollment is neither replaced nor revoked.
     const posixId = enrollmentId
     button(dialog(), (t) => t === "Windows")?.click()
-    const windowsCommand = await until(() => /^powershell -c "iex \(irm '/.test(command()) && command())
+    const windowsCommand = await until(() => /^\$env:PB_TOKEN=/.test(command()) && command())
     pass("Windows shows a PowerShell command", Boolean(windowsCommand))
-    const windowsShape = new RegExp(`^powershell -c "iex \\(irm '${escapedUrl}\\.ps1\\?p=[A-Za-z0-9_.-]+'\\)"$`)
-    pass("it is the PowerShell installer address with a token, run by PowerShell", windowsShape.test(windowsCommand ?? ""))
-    const windowsToken = windowsCommand?.match(/\?p=([^']+)'/)?.[1] ?? ""
+    const windowsShape = new RegExp(`^\\$env:PB_TOKEN='[A-Za-z0-9_.-]+'; (\\$env:PB_NAME='[a-z0-9-]+'; )?irm ${escapedUrl} \\| iex$`)
+    pass("it is the install address with the token in the environment, run by PowerShell", windowsShape.test(windowsCommand ?? ""))
+    const windowsToken = windowsCommand?.match(/PB_TOKEN='([^']+)'/)?.[1] ?? ""
     pass("it carries the same token", Boolean(windowsToken) && windowsToken === token)
     await sleep(1500)
     const kept = await get(`machine-enrollments/${posixId}`)
     pass("choosing Windows neither replaces nor revokes the enrollment", enrollmentId === posixId && kept?.state === "awaiting_bootstrap", kept?.state ?? "")
     button(dialog(), (t) => t === "macOS and Linux")?.click()
-    const posixAgain = await until(() => /^curl -fsSL .*\?p=/.test(command()) && command())
+    const posixAgain = await until(() => /^curl -fsSL .*PB_TOKEN=/.test(command()) && command())
     pass("switching back shows a macOS and Linux command", Boolean(posixAgain))
     withToken = posixAgain || withToken
 
     // "Approve in browser instead": the plain command, no token, nothing to cancel on the server.
     button(dialog(), (t) => t === "Approve in browser instead")?.click()
-    const plain = await until(() => command() && !/\?p=/.test(command()) && command())
+    const plain = await until(() => command() && !/PB_TOKEN=/.test(command()) && command())
     pass("the browser-approval command has no token", Boolean(plain) && plain.includes(installUrl))
     pass("it says what happens next", /opens your browser to sign in/.test(dialog().innerText))
     button(dialog(), (t) => t === "Use a pairing command")?.click()
-    pass("switching back shows the pairing command", Boolean(await until(() => /\?p=/.test(command()))))
+    pass("switching back shows the pairing command", Boolean(await until(() => /PB_TOKEN=/.test(command()))))
 
     if (sink) {
       await fetch(sink, { method: "POST", mode: "no-cors", body: sinkWindows ? windowsCommand : withToken })

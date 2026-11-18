@@ -7,7 +7,7 @@ import { pauseTunnelById, stopPreview } from "@/lib/tunnels"
 
 /*
  * Self-hosted relays and tunnel servers (`/v1/selfhost/...`). A node is installed on a Linux
- * server (`curl -fsSL <installer>/selfhost/install | sh`), prints a claim address and a
+ * server (`curl -fsSL <installer>/selfhost | sh`), prints a claim address and a
  * one-time code, and is paired here to your personal workspace or a team. A node running both
  * components appears as two installations with the same node ID. Pools say which nodes to use:
  * relays mix with Paperboat's or replace them (account-only); tunnel servers are either Paperboat's
@@ -149,7 +149,7 @@ export function groupNodes(installations: Installation[]): Node[] {
 
 /** The installer for a node, run on the server. */
 export const installCommand = (installerBaseUrl: string, components: "relay" | "tunnel" | "both") =>
-  `curl -fsSL ${installerBaseUrl}/selfhost/install | sh${components === "relay" ? "" : ` -s -- --enable ${components}`}`
+  `curl -fsSL ${installerBaseUrl}/selfhost | sh${components === "relay" ? "" : ` -s -- --enable ${components}`}`
 
 /** One of a workspace's two edges: a Paperboat edge or one of your tunnel servers. */
 export type PairEdge = Data<"/v1/edges/pair">["primary"]

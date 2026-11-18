@@ -81,8 +81,9 @@ canonical variable is `PAPERBOAT_RELEASES_ROOT_PATH` and it takes precedence.
 
 The release publisher validates the parent mount and atomically exchanges the complete
 `current` directory only after staged consumer verification. Because the server resolves
-files through `current` for every request, `/install` and `/tuf/` switch
-together without restarting the container. Do not bind-mount the `current` child directly:
+files through `current` for every request, the `/tuf/` metadata switches
+atomically without restarting the container. The server serves no install script: first
+install comes from GitHub (`cli/tools/install.sh`, `install.ps1`). Do not bind-mount the `current` child directly:
 Docker would keep serving its old inode after an exchange. The server never receives TUF
 signing keys or signing state. Release URLs use `PAPERBOAT_RELEASE_BASE_URL` (or the public
 base URL when omitted).
