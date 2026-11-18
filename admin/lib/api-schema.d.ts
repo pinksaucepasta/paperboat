@@ -12171,6 +12171,8 @@ export interface components {
             mint_active_key: string;
             mint_keys_published: string[];
             mint_keys_to_withdraw: string[];
+            /** @description The old mint keys are withdrawn this long after the run starts, so machines can renew credentials signed by them first. */
+            mint_withdraw_after_minutes: number;
             encryption_key_ids: string[];
             session_key_ids: string[];
             client_update_floor_now: string;

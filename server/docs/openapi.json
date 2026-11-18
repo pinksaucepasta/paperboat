@@ -10943,6 +10943,7 @@
           "mint_active_key",
           "mint_keys_published",
           "mint_keys_to_withdraw",
+          "mint_withdraw_after_minutes",
           "encryption_key_ids",
           "session_key_ids",
           "client_update_floor_now",
@@ -10995,6 +10996,10 @@
             "items": {
               "type": "string"
             }
+          },
+          "mint_withdraw_after_minutes": {
+            "type": "integer",
+            "description": "The old mint keys are withdrawn this long after the run starts, so machines can renew credentials signed by them first."
           },
           "encryption_key_ids": {
             "type": "array",
