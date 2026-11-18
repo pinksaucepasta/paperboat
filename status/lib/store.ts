@@ -1,9 +1,9 @@
-import catalogJson from "../config/components.json" with { type: "json" }
+import catalogData from "../config/components.ts"
 import { decideComponent, decideUnit, WINDOW_MS, type Evidence, type Sample, type Series, type State } from "./decide.ts"
 import type { Catalog, Incident, Maintenance, Snapshot, UptimeDay } from "./types.ts"
 import { uptimePercent } from "./uptime.ts"
 
-export const catalog = catalogJson as Catalog
+export const catalog = catalogData as Catalog
 const UNITS = new Map(catalog.components.flatMap((c) => c.units.map((u) => [u.id, { c, u }] as const)))
 export const unitKnown = (id: string) => UNITS.has(id)
 
