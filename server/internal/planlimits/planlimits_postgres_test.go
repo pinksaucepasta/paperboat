@@ -198,16 +198,15 @@ func TestPublicationAndBrowserTerminalLimitsPostgres(t *testing.T) {
 	}
 	refused(t, browser("term_b_"+x), Free, 1)
 
-	// A workspace on its own edges has no plan limit on either kind, only the internal ceiling (config, never a plan limit).
+	// A workspace on its own edges has no plan limit on previews and tunnels, only the internal ceiling (config, never a plan limit).
 	exec(`INSERT INTO paperboat.tunnels(id,account_id,name,stable_endpoint_id,stable_endpoint,created_by_host_id,created_by_actor_id,desired_state) VALUES($1,$2,'t',$5,$4,$3,$2,'active')`, "pl_tn2_"+x, user, machine, "https://pltn2-"+x+".tunnel.example.test", "endpoint_"+uuid.NewString())
 	refused(t, check(t, store, personal, Publications), Free, 2)
 	exec(`INSERT INTO paperboat.selfhost_pool_policies(capability,mode,scope_kind,scope_id,installation_ids) VALUES('tunnel','self-hosted-only','account',$1,'{}')`, user)
 	if err := check(t, store, personal, Publications); err != nil {
 		t.Fatalf("a self-hosted workspace was limited to its plan's previews and tunnels: %v", err)
 	}
-	if err := browser("term_b_" + x); err != nil {
-		t.Fatalf("a self-hosted workspace was limited to its plan's browser terminals: %v", err)
-	}
+	// Browser terminals always go through Paperboat's edges: the plan's limit still applies on your own edges.
+	refused(t, browser("term_b_"+x), Free, 1)
 	usage := func(kind Kind) Usage {
 		t.Helper()
 		var out map[Kind]Usage
@@ -220,10 +219,13 @@ func TestPublicationAndBrowserTerminalLimitsPostgres(t *testing.T) {
 		}
 		return out[kind]
 	}
-	for _, kind := range []Kind{Publications, BrowserTerminals, PublicTCP} {
+	for _, kind := range []Kind{Publications, PublicTCP} {
 		if u := usage(kind); u.Limit != nil || !u.SelfHosted {
 			t.Fatalf("%s usage on its own edges = %+v, want no limit and self_hosted", kind, u)
 		}
+	}
+	if u := usage(BrowserTerminals); u.Limit == nil || *u.Limit != 1 || u.SelfHosted {
+		t.Fatalf("browser terminals keep the plan limit on your own edges: %+v", u)
 	}
 	if u := usage(Machines); u.Limit == nil || u.SelfHosted {
 		t.Fatalf("machines are not an edge limit: %+v", u)
@@ -239,7 +241,6 @@ func TestPublicationAndBrowserTerminalLimitsPostgres(t *testing.T) {
 	Configure(limits, "")
 	exec(`DELETE FROM paperboat.selfhost_pool_policies WHERE scope_id=$1`, user)
 	refused(t, check(t, store, personal, Publications), Free, 2)
-	refused(t, browser("term_b_"+x), Free, 1)
 }
 
 // Public raw-TCP tunnels (user decision 2026-10-27): Free 1, Pro 10 per account, a team 10 per paid seat

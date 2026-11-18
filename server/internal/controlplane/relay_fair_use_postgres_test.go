@@ -12,7 +12,7 @@ import (
 )
 
 // A Paperboat-operated relay's lease carries the account speed and names the connected accounts that carried their plan's included
-// relay bytes this month, each with its plan's slower speed (Free 10 GB then 512 kbit/s, paid 100 GB then 1 Mbit/s); a customer-owned
+// relay bytes this month, each with its plan's slower speed (Free 5 GB then 512 kbit/s, paid 100 GB then 1 Mbit/s); a customer-owned
 // relay gets neither, and nothing is listed without the gate.
 func TestRelayLeaseCarriesAccountSpeedAndPlanSlowTiersPostgres(t *testing.T) {
 	store := openControlPlaneTestDB(t)
@@ -53,7 +53,7 @@ func TestRelayLeaseCarriesAccountSpeedAndPlanSlowTiersPostgres(t *testing.T) {
 		exec(`INSERT INTO resource_bandwidth_events(operation_id,workspace_id,resource_kind,resource_id,resource_name,machine_id,machine_name,mode,hosting,node_id,node_name,upload_bytes,download_bytes,interval_start,interval_end,actor_account_id)
  VALUES($1,'personal:'||$2,'machine','m','m','m','m','relay','managed',$3,'n',$4,0,$5,$5,$2)`, key+x, user, node, bytes, end)
 	}
-	event(free12, "f12", 12_000_000_000, now.Add(-time.Minute))
+	event(free12, "f12", 7_000_000_000, now.Add(-time.Minute))
 	event(paid60, "p60", 60_000_000_000, now.Add(-time.Minute))
 	event(paid120, "p120", 120_000_000_000, now.Add(-time.Minute))
 	event(light, "l1", 1_000_000_000, now.Add(-time.Minute))
@@ -87,7 +87,7 @@ func TestRelayLeaseCarriesAccountSpeedAndPlanSlowTiersPostgres(t *testing.T) {
 		got[a.Account] = a.Mbit
 	}
 	if len(got) != 2 || got[free12] != 0.512 || got[paid120] != 1 {
-		t.Fatalf("slow accounts = %v, want %s at 0.512 (12 of 10 GB, Free) and %s at 1 (120 of 100 GB, paid); %s is under its plan's amount", got, free12, paid120, paid60)
+		t.Fatalf("slow accounts = %v, want %s at 0.512 (7 of 5 GB, Free) and %s at 1 (120 of 100 GB, paid); %s is under its plan's amount", got, free12, paid120, paid60)
 	}
 	if out := observe(gated, own); out.AccountMbit != 0 || len(out.SlowAccounts) != 0 {
 		t.Fatalf("a customer-owned relay was given limits: %+v", out)

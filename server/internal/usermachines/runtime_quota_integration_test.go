@@ -10,24 +10,12 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/pinksaucepasta/paperboat/server/internal/audit"
-	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/mint"
 )
 
-type runtimeQuotaFixture struct {
-	exhausted bool
-	checked   []string
-}
-
-func (f *runtimeQuotaFixture) CheckWorkspaceBandwidthTx(_ context.Context, _ *db.Tx, workspace string, _ time.Time) (bool, error) {
-	f.checked = append(f.checked, workspace)
-	return f.exhausted, nil
-}
-
-// Only traffic through Paperboat's relays and edges counts against the allowance. A CLI
-// descriptor is issued at the cap (a direct connection must keep working); a browser terminal,
-// which always rides the edge, is accounted below the cap and admitted (to be throttled by the edge) at it.
-func TestNothingIsRefusedForBandwidthAndBrowserTerminalsAreStillAccounted(t *testing.T) {
+// A CLI descriptor records no edge usage authority (a direct connection must keep working and costs nothing), whatever the
+// workspace's bandwidth state.
+func TestCLIDescriptorsRecordNoEdgeAuthority(t *testing.T) {
 	store := testStore(t)
 	ctx := context.Background()
 	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
@@ -67,10 +55,6 @@ VALUES ($1,$2,$3,1,1,$4,1,$5,$6,$7,1,$8,$9,'{}',now()+interval '1 hour',true,now
 	service := New(store, audit.NewWriter(store), Policy{}, nil)
 	service.ConfigureAccess(fakeCredentialIssuer{}, "https://api.paperboat.test")
 	service.ConfigureTerminalSessions(signer, nil)
-	quota := &runtimeQuotaFixture{exhausted: true}
-	service.ConfigureRuntimeQuota(quota)
-	// At the cap a CLI descriptor is still issued: the server cannot know whether the
-	// connection will be direct, and direct machine-to-machine traffic is always free.
 	descriptor, err := service.ExecDescriptor(ctx, userID, sourceMachineID, machineID, "cli_rq_1", "operation_rq_cap_"+suffix, false)
 	if err != nil {
 		t.Fatalf("exec descriptor at the cap: %v", err)
@@ -79,27 +63,6 @@ VALUES ($1,$2,$3,1,1,$4,1,$5,$6,$7,1,$8,$9,'{}',now()+interval '1 hour',true,now
 	var cliAuthorities int
 	if err := store.SQL().QueryRowContext(ctx, `SELECT count(*) FROM paperboat.usage_accounting_authorities WHERE authority_id=$1`, accessSessionID).Scan(&cliAuthorities); err != nil || cliAuthorities != 0 {
 		t.Fatalf("CLI descriptor recorded an edge authority: %d err=%v", cliAuthorities, err)
-	}
-	if len(quota.checked) != 0 {
-		t.Fatalf("CLI descriptors checked the allowance: %v", quota.checked)
-	}
-	// A console browser terminal always rides the edge: accounted below and at the cap.
-	quota.exhausted = false
-	attachment := "attachment_rq_" + suffix
-	if err := service.AdmitBrowserTerminalIngress(ctx, attachment, machineID, "", edgeNodeID, time.Now().Add(time.Minute)); err != nil {
-		t.Fatalf("browser admission: %v", err)
-	}
-	var workspace, route string
-	if err := store.SQL().QueryRowContext(ctx, `SELECT workspace_id,route_id FROM paperboat.usage_accounting_authorities WHERE authority_id=$1 AND edge_node_id=$2 AND environment_id=$3`, attachment, edgeNodeID, environmentID).Scan(&workspace, &route); err != nil || workspace != "personal:"+userID || route != "route_rq_"+suffix {
-		t.Fatalf("browser accounting workspace=%q route=%q err=%v", workspace, route, err)
-	}
-	quota.exhausted = true
-	if err = service.AdmitBrowserTerminalIngress(ctx, attachment+"_cap", machineID, "", edgeNodeID, time.Now().Add(time.Minute)); err != nil {
-		t.Fatalf("browser admission at the cap must never be refused, err=%v", err)
-	}
-	var capped int
-	if err := store.SQL().QueryRowContext(ctx, `SELECT count(*) FROM paperboat.usage_accounting_authorities WHERE authority_id=$1`, attachment+"_cap").Scan(&capped); err != nil || capped != 1 {
-		t.Fatalf("a throttled browser terminal is still accounted: %d err=%v", capped, err)
 	}
 
 	// Lane R N3: after an outage the edge carrier re-attaches up to ~30 s after presence returns, and

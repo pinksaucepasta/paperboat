@@ -99,7 +99,7 @@ func (s Scope) workspaceID() string {
 }
 
 // Usage is one kind's count against its limit; Limit is nil for Teams (advertised unlimited) and, for
-// previews and tunnels, console terminals and public TCP tunnels, for a workspace on its own (self-hosted) edges.
+// previews and tunnels and public TCP tunnels, for a workspace on its own (self-hosted) edges.
 type Usage struct {
 	Used  int  `json:"used"`
 	Limit *int `json:"limit"`
@@ -140,8 +140,9 @@ func CheckTx(ctx context.Context, tx *db.Tx, scope Scope, kind Kind) error {
 		if limit, exempt, err = publicTCPLimitTx(ctx, tx, set.limits.PublicTCP, scope, plan); err != nil || exempt {
 			return err
 		}
-	case kind == Publications || kind == BrowserTerminals:
-		// A workspace on its own edges has no plan limit here, only the internal ceiling that protects the database.
+	case kind == Publications:
+		// A workspace on its own edges has no plan limit here, only the internal ceiling that protects the database. Browser terminals
+		// are not exempt: they always go through Paperboat's edges, so the plan's limit applies to every workspace.
 		own, err := ownEdgesTx(ctx, tx, scope)
 		if err != nil {
 			return err
@@ -225,7 +226,7 @@ func UsageTx(ctx context.Context, tx *db.Tx, scope Scope) (map[Kind]Usage, error
 				u.Limit = &limit
 			}
 			u.SelfHosted = exempt
-		case own && (kind == Publications || kind == BrowserTerminals):
+		case own && kind == Publications:
 			u.SelfHosted = true
 		case overridden:
 			limit, _ := effective(override, overridden, 0)
