@@ -26,7 +26,9 @@ ssh_port=
 recovery_output=
 unset PB_TOKEN || true
 [ -z "$token" ] || pair=true
-case $repository in */*/*|*[!A-Za-z0-9_./-]*|/*|*/) echo "pb installer: PB_REPO must look like owner/repo" >&2; exit 2 ;; esac
+case $repository in */*) ;; *) echo "pb installer: PB_REPO must look like owner/repo" >&2; exit 2 ;; esac
+case /$repository/ in *//*|*/./*|*/../*|*[!A-Za-z0-9_./-]*) echo "pb installer: PB_REPO must look like owner/repo" >&2; exit 2 ;; esac
+case $repository in */*/*) echo "pb installer: PB_REPO must look like owner/repo" >&2; exit 2 ;; esac
 # PB_RECIPE pairs this computer from a recipe token. It refuses at once, before anything is installed, when
 # the value is not a recipe token (PLAN F26).
 recipe=false
