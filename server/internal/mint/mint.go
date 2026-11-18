@@ -1456,3 +1456,25 @@ func validFileSource(machine, direction, mode, operation string, maxBytes int64)
 	}
 	return machine != "" || direction == "send" && ValidOperationID(operation) && validTransferMode(mode, maxBytes)
 }
+
+// KeyState is one signing key as an operator sees it: never key material.
+type KeyState struct {
+	ID        string `json:"key_id"`
+	Active    bool   `json:"active"`
+	Withdrawn bool   `json:"withdrawn"`
+}
+
+// KeyStates lists the keys this mint publishes or withdrew, sorted by id.
+func (p *Provider) KeyStates() []KeyState {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	out := make([]KeyState, 0, len(p.keys)+len(p.withdrawn))
+	for id := range p.keys {
+		out = append(out, KeyState{ID: id, Active: id == p.activeID})
+	}
+	for id := range p.withdrawn {
+		out = append(out, KeyState{ID: id, Withdrawn: true})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out
+}

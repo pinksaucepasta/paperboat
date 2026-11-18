@@ -12773,6 +12773,177 @@
           }
         }
       },
+      "OperatorPublicationBlock": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "hostname",
+          "blocked",
+          "legal",
+          "reason",
+          "version",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "hostname": {
+            "type": "string"
+          },
+          "blocked": {
+            "type": "boolean"
+          },
+          "legal": {
+            "type": "boolean"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "version": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The revision the next block or unblock sends."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "OperatorPublicationBlockPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "total"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/OperatorPublicationBlock"
+            }
+          },
+          "next_after": {
+            "type": "string"
+          },
+          "total": {
+            "type": "integer",
+            "description": "Rows matching the filters."
+          }
+        }
+      },
+      "OperatorUsageKey": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "key_id",
+          "edge_node_id",
+          "not_before",
+          "expires_at",
+          "created_at"
+        ],
+        "properties": {
+          "key_id": {
+            "type": "string"
+          },
+          "edge_node_id": {
+            "type": "string"
+          },
+          "not_before": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "revoked_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "OperatorUsageKeyPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "total"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/OperatorUsageKey"
+            }
+          },
+          "next_after": {
+            "type": "string"
+          },
+          "total": {
+            "type": "integer",
+            "description": "All usage keys."
+          }
+        }
+      },
+      "OperatorSigningKey": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "key_id",
+          "active",
+          "withdrawn"
+        ],
+        "properties": {
+          "key_id": {
+            "type": "string"
+          },
+          "active": {
+            "type": "boolean",
+            "description": "The key the mint signs with now; it cannot be revoked."
+          },
+          "withdrawn": {
+            "type": "boolean",
+            "description": "Withdrawn by configuration."
+          },
+          "revoked_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "reason": {
+            "type": "string"
+          }
+        }
+      },
+      "OperatorSigningKeyPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "total"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OperatorSigningKey"
+            }
+          },
+          "total": {
+            "type": "integer"
+          }
+        }
+      },
       "OperatorRegionPage": {
         "type": "object",
         "additionalProperties": false,
@@ -27204,6 +27375,52 @@
         "operationId": "patch_v1_routes_route_id"
       }
     },
+    "/v1/admin/mint/signing-keys": {
+      "get": {
+        "operationId": "get_admin_mint_signing_keys",
+        "summary": "List mint signing keys",
+        "security": [
+          {
+            "operatorCookie": []
+          }
+        ],
+        "x-operator-capability": "admin",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Audited list of the mint's configured signing keys with their revocations. Never key material.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/OperatorSigningKeyPage"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/admin/mint/signing-keys/{key_id}/revoke": {
       "post": {
         "summary": "Revoke mint signing key",
@@ -27786,6 +28003,69 @@
       }
     },
     "/v1/admin/edge/usage-keys": {
+      "get": {
+        "operationId": "get_admin_edge_usage_keys",
+        "summary": "List edge usage verification keys",
+        "security": [
+          {
+            "operatorCookie": []
+          }
+        ],
+        "x-operator-capability": "admin",
+        "parameters": [
+          {
+            "name": "after",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Audited page of usage verification keys, by key id. Public keys are not returned.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/OperatorUsageKeyPage"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
       "post": {
         "summary": "Provision edge usage verification key",
         "security": [
@@ -42752,6 +43032,82 @@
                 "$ref": "#/components/schemas/OperatorActionInput"
               }
             }
+          }
+        }
+      }
+    },
+    "/v1/admin/publications": {
+      "get": {
+        "operationId": "get_admin_publications",
+        "summary": "List publication blocks",
+        "security": [
+          {
+            "operatorCookie": []
+          }
+        ],
+        "x-operator-capability": "operations",
+        "parameters": [
+          {
+            "name": "after",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 253
+            }
+          },
+          {
+            "name": "blocked",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "true",
+                "false"
+              ]
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Audited page of blocked (and formerly blocked) hostnames, by hostname.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/OperatorPublicationBlockPage"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }

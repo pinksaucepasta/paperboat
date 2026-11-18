@@ -995,6 +995,8 @@ func registerAuthRoutes(mux *http.ServeMux, opts Options) {
 		mux.Handle("DELETE /v1/auth/cli-client-sessions/{cli_client_session_id}", requireAnyAuth(opts.Auth, opts.DeviceAuth, requireCSRF(opts.Auth, requireScope("clients:revoke", cliClientSessionDelete(opts.DeviceAuth)))))
 	}
 	if opts.EdgeControlAdmin != nil {
+		mux.Handle("GET /v1/admin/edge/usage-keys", operatorRoute(opts, adminListUsageKeys(opts.EdgeControlAdmin)))
+		mux.Handle("GET /v1/admin/mint/signing-keys", operatorRoute(opts, adminListSigningKeys(opts.EdgeControlAdmin)))
 		mux.Handle("POST /v1/admin/edge/usage-keys", operatorRoute(opts, adminProvisionUsageKey(opts.EdgeControlAdmin)))
 		mux.Handle("POST /v1/admin/edge/usage-keys/{key_id}/revoke", operatorRoute(opts, adminRevokeUsageKey(opts.EdgeControlAdmin)))
 		mux.Handle("POST /v1/admin/mint/signing-keys/{key_id}/revoke", operatorRoute(opts, adminRevokeSigningKey(opts.EdgeControlAdmin)))

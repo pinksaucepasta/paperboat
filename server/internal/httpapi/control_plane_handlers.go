@@ -144,3 +144,31 @@ func adminRecoverControlOperation(service *controlplane.OperationRecoveryService
 		}
 	})
 }
+
+func adminListUsageKeys(service *controlplane.EdgeService) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		limit, ok := operatorPageLimit(w, r, 100)
+		if !ok {
+			return
+		}
+		p, _ := principalFromContext(r.Context())
+		out, err := service.ListUsageKeys(r.Context(), p.User.ID, r.URL.Query().Get("after"), limit)
+		if err != nil {
+			writeAdminUsageKeyMutationError(w, r, err, "Use a valid key id cursor.", "", "Usage keys could not be listed. Please retry.")
+			return
+		}
+		writeJSON(w, http.StatusOK, SuccessResponse{Data: out})
+	})
+}
+
+func adminListSigningKeys(service *controlplane.EdgeService) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p, _ := principalFromContext(r.Context())
+		out, err := service.ListSigningKeys(r.Context(), p.User.ID)
+		if err != nil {
+			writeAdminUsageKeyMutationError(w, r, err, "Signing keys are not configured on this server.", "", "Signing keys could not be listed. Please retry.")
+			return
+		}
+		writeJSON(w, http.StatusOK, SuccessResponse{Data: out})
+	})
+}

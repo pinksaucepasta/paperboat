@@ -54,6 +54,24 @@ func registerOperatorInfrastructure(mux *http.ServeMux, opts Options) {
 			writeJSON(w, 200, SuccessResponse{Data: out})
 		})))
 	}
+	mux.Handle("GET /v1/admin/publications", operatorRoute(opts, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		limit, ok := operatorPageLimit(w, r, 100)
+		if !ok {
+			return
+		}
+		blocked := r.URL.Query().Get("blocked")
+		if blocked != "" && blocked != "true" && blocked != "false" {
+			writeError(w, r, 400, "invalid_request", "blocked must be true or false.")
+			return
+		}
+		p, _ := principalFromContext(r.Context())
+		out, err := service.ListPublicationBlocks(r.Context(), p.User.ID, blocked == "true", r.URL.Query().Get("after"), limit)
+		if err != nil {
+			operatorInfrastructureError(w, r, err)
+			return
+		}
+		writeJSON(w, 200, SuccessResponse{Data: out})
+	})))
 	for _, action := range []string{"create", "update", "enable", "disable"} {
 		mux.Handle("POST /v1/admin/regions/{region_id}/"+action, operatorRoute(opts, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var in operatorRegionInput

@@ -1847,6 +1847,23 @@ export interface paths {
         patch: operations["patch_v1_routes_route_id"];
         trace?: never;
     };
+    "/v1/admin/mint/signing-keys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List mint signing keys */
+        get: operations["get_admin_mint_signing_keys"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/mint/signing-keys/{key_id}/revoke": {
         parameters: {
             query?: never;
@@ -1942,7 +1959,8 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /** List edge usage verification keys */
+        get: operations["get_admin_edge_usage_keys"];
         put?: never;
         /**
          * Provision edge usage verification key
@@ -5243,6 +5261,23 @@ export interface paths {
          * @description Current active operator account and separate operator session required. See docs/runbooks/operator-admin.md. Mutations require explicit target confirmation, an opaque evidence reference and stable idempotency key. Read current state before retrying an uncertain result.
          */
         post: operations["post_v1_admin_relays_node_id_resume"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/publications": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List publication blocks */
+        get: operations["get_admin_publications"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -12125,6 +12160,59 @@ export interface components {
             /** Format: date-time */
             updated_at: string;
         };
+        OperatorPublicationBlock: {
+            hostname: string;
+            blocked: boolean;
+            legal: boolean;
+            reason: string;
+            /**
+             * Format: int64
+             * @description The revision the next block or unblock sends.
+             */
+            version: number;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        OperatorPublicationBlockPage: {
+            items: components["schemas"]["OperatorPublicationBlock"][];
+            next_after?: string;
+            /** @description Rows matching the filters. */
+            total: number;
+        };
+        OperatorUsageKey: {
+            key_id: string;
+            edge_node_id: string;
+            /** Format: date-time */
+            not_before: string;
+            /** Format: date-time */
+            expires_at: string;
+            /** Format: date-time */
+            revoked_at?: string;
+            /** Format: date-time */
+            created_at: string;
+        };
+        OperatorUsageKeyPage: {
+            items: components["schemas"]["OperatorUsageKey"][];
+            next_after?: string;
+            /** @description All usage keys. */
+            total: number;
+        };
+        OperatorSigningKey: {
+            key_id: string;
+            /** @description The key the mint signs with now; it cannot be revoked. */
+            active: boolean;
+            /** @description Withdrawn by configuration. */
+            withdrawn: boolean;
+            /** Format: date-time */
+            revoked_at?: string;
+            reason?: string;
+        };
+        OperatorSigningKeyPage: {
+            items: components["schemas"]["OperatorSigningKey"][];
+            total: number;
+        };
         OperatorRegionPage: {
             items: components["schemas"]["OperatorRegion"][];
             next_after?: string;
@@ -18202,6 +18290,32 @@ export interface operations {
             409: components["responses"]["Error"];
         };
     };
+    get_admin_mint_signing_keys: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Audited list of the mint's configured signing keys with their revocations. Never key material. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["OperatorSigningKeyPage"];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
     post_v1_admin_mint_signing_keys_key_id_revoke: {
         parameters: {
             query?: never;
@@ -18594,6 +18708,35 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
+        };
+    };
+    get_admin_edge_usage_keys: {
+        parameters: {
+            query?: {
+                after?: string;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Audited page of usage verification keys, by key id. Public keys are not returned. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["OperatorUsageKeyPage"];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            503: components["responses"]["Error"];
         };
     };
     post_v1_admin_edge_usage_keys: {
@@ -26393,6 +26536,36 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
+        };
+    };
+    get_admin_publications: {
+        parameters: {
+            query?: {
+                after?: string;
+                blocked?: "true" | "false";
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Audited page of blocked (and formerly blocked) hostnames, by hostname. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["OperatorPublicationBlockPage"];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            503: components["responses"]["Error"];
         };
     };
     post_v1_admin_publications_hostname_block: {

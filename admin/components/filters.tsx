@@ -112,8 +112,8 @@ export function Filters({ items }: { items: Filter[] }) {
   )
 }
 
-const good = new Set(["active", "online", "ready", "succeeded", "enabled", "connected", "resolved"])
-const bad = new Set(["suspended", "failed", "dead_letter", "past_due", "unpaid", "revoked", "stale", "uncertain", "disabled", "offline", "unhealthy", "draining"])
+const good = new Set(["signing", "active", "online", "ready", "succeeded", "enabled", "connected", "resolved"])
+const bad = new Set(["suspended", "failed", "dead_letter", "past_due", "unpaid", "revoked", "stale", "uncertain", "disabled", "offline", "unhealthy", "draining", "blocked", "legal_block", "expired"])
 
 /** A state as the console shows one: a dot and the word. */
 export function StatusBadge({ state }: { state: string }) {

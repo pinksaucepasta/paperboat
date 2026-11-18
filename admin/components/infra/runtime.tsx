@@ -72,45 +72,83 @@ function RowActions({ item, kind }: { item: Item; kind: "relay" | "tunnel" }) {
   return <RowMenu label={item.id} actions={actions} data-row-actions={item.id} />
 }
 
-/** Block or unblock a published hostname (abuse, legal takedown). There is no list of publications: name the host. */
-export function Publications() {
+type Blocks = Data<"/v1/admin/publications">
+type Block = Blocks["items"][number]
+const hostPattern = /^[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?$/
+
+/** Block a hostname never blocked before: its revision is 1. */
+function BlockHostname() {
   const [host, setHost] = useState("")
-  const [revision, setRevision] = useState("1")
   const [legal, setLegal] = useState(false)
-  const hostOk = /^[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?$/.test(host)
-  const revisionOk = Number.isInteger(+revision) && +revision >= 1
+  return (
+    <ActionDialog
+      title="Block a hostname"
+      description="The edge refuses it until it is unblocked."
+      target={host || "-"}
+      destructive
+      confirmWord={host || undefined}
+      submitLabel="Block hostname"
+      valid={hostPattern.test(host)}
+      trigger={(open) => <Button size="lg" onClick={open}>Block hostname</Button>}
+      run={(h) => operatorAction("POST", `/v1/admin/publications/${encodeURIComponent(host)}/block`, h, { revision: 1, ...(legal ? { legal: true } : {}) })}
+      onDone={() => { setHost(""); setLegal(false) }}
+    >
+      <TextField label="Hostname" value={host} onChange={(v) => setHost(v.trim().toLowerCase())} placeholder="demo.pub.example.test" />
+      <label className="flex items-center gap-2 text-sm"><Checkbox checked={legal} onCheckedChange={(v) => setLegal(v === true)} />Legal takedown (the owner is notified)</label>
+    </ActionDialog>
+  )
+}
+
+function BlockActions({ b }: { b: Block }) {
+  const [legal, setLegal] = useState(b.legal)
+  const path = (a: string) => `/v1/admin/publications/${encodeURIComponent(b.hostname)}/${a}`
+  const actions: RowAction[] = b.blocked
+    ? [{
+        key: "unblock",
+        label: "Unblock",
+        dialog: (c) => <ActionDialog {...c} title={`Unblock ${b.hostname}`} description="The edge serves it again. The block stays in the history." target={b.hostname} submitLabel="Unblock hostname" run={(h) => operatorAction("POST", path("unblock"), h, { revision: b.version })} />,
+      }]
+    : [{
+        key: "block",
+        label: "Block again",
+        destructive: true,
+        dialog: (c) => (
+          <ActionDialog {...c} title={`Block ${b.hostname}`} description="The edge refuses it until it is unblocked." target={b.hostname} destructive confirmWord={b.hostname} submitLabel="Block hostname" run={(h) => operatorAction("POST", path("block"), h, { revision: b.version, ...(legal ? { legal: true } : {}) })}>
+            <label className="flex items-center gap-2 text-sm"><Checkbox checked={legal} onCheckedChange={(v) => setLegal(v === true)} />Legal takedown (the owner is notified)</label>
+          </ActionDialog>
+        ),
+      }]
+  return <RowMenu label={b.hostname} actions={actions} data-block-actions={b.hostname} />
+}
+
+/** Blocked hostnames (abuse, legal takedowns), and the ones unblocked since; each row offers the opposite action. */
+export function Publications() {
   const can = useCanOperate()
+  const [blocked, setBlocked] = useState("")
+  const filters = useMemo(() => ({ blocked }), [blocked])
+  const list = useCursorList<Blocks>("/v1/admin/publications", filters)
   if (!can) return <p className="py-12 text-center text-sm text-muted-foreground">Operations role only.</p>
   return (
-    <section className="flex max-w-md flex-col gap-4" data-publications>
-      <div className="grid gap-3">
-        <TextField label="Hostname" value={host} onChange={(v) => setHost(v.trim().toLowerCase())} placeholder="demo.pub.example.test" />
-        <TextField label="Revision" inputMode="numeric" value={revision} onChange={setRevision} hint="1 for a name never blocked, else its current block version." />
-        <label className="flex items-center gap-2 text-sm"><Checkbox checked={legal} onCheckedChange={(v) => setLegal(v === true)} />Legal takedown (the owner is notified)</label>
+    <div className="flex flex-col gap-3" data-publications>
+      <div className="flex flex-wrap items-center gap-2">
+        <Filters items={[{ label: "State", value: blocked, onChange: setBlocked, options: [["true", "Blocked"], ["false", "Unblocked"]] }]} />
+        <div className="ml-auto"><BlockHostname /></div>
       </div>
-      <div className="flex gap-2">
-        <ActionDialog
-          title={`Block ${host}`}
-          description={legal ? "The edge refuses it with a legal notice, and the owner is told. Reversible." : "The edge refuses this hostname. Reversible."}
-          target={host}
-          destructive
-          confirmWord={host}
-          submitLabel="Block hostname"
-          valid={hostOk && revisionOk}
-          trigger={(open) => <Button size="lg" disabled={!hostOk || !revisionOk} onClick={open}>Block</Button>}
-          run={(h) => operatorAction("POST", `/v1/admin/publications/${encodeURIComponent(host)}/block`, h, { revision: +revision, ...(legal ? { legal: true } : {}) })}
-        />
-        <ActionDialog
-          title={`Unblock ${host}`}
-          description="The edge serves it again. The block stays in the history."
-          target={host}
-          submitLabel="Unblock hostname"
-          valid={hostOk && revisionOk}
-          trigger={(open) => <Button size="lg" variant="outline" disabled={!hostOk || !revisionOk} onClick={open}>Unblock</Button>}
-          run={(h) => operatorAction("POST", `/v1/admin/publications/${encodeURIComponent(host)}/unblock`, h, { revision: +revision })}
-        />
-      </div>
-    </section>
+      <DataTable
+        what="hostname blocks"
+        list={list}
+        rows={(d) => d.items}
+        rowKey={(b) => b.hostname}
+        empty={blocked ? "No hostnames match." : "No hostname has been blocked."}
+        columns={[
+          { header: "Hostname", cell: (b) => <span className="font-medium">{b.hostname}</span> },
+          { header: "State", cell: (b) => <StatusBadge state={b.blocked ? (b.legal ? "legal_block" : "blocked") : "unblocked"} /> },
+          { header: "Reason", className: "hidden md:table-cell", cell: (b) => <span className="text-muted-foreground">{b.reason}</span> },
+          { header: "Updated", className: "hidden md:table-cell", cell: (b) => <Time iso={b.updated_at} relative /> },
+          { header: "", className: "w-12", cell: (b) => <BlockActions b={b} /> },
+        ]}
+      />
+    </div>
   )
 }
 
