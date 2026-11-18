@@ -11992,6 +11992,15 @@ export interface components {
             throttle_lifted: boolean;
             /** @description The speed in Mbit/s a throttled workspace's edge traffic runs at. */
             throttle_mbit: number;
+            /** @description The speed in Mbit/s of one account on a Paperboat relay. Relays are never cut off and do not count against the edge allowance. */
+            relay_mbit: number;
+            /**
+             * Format: int64
+             * @description Relayed bytes an account carries a month at relay_mbit before relay_slow_mbit applies (the plan's tier).
+             */
+            relay_included_bytes: number;
+            /** @description The speed in Mbit/s of an account on a Paperboat relay after relay_included_bytes in the month. */
+            relay_slow_mbit: number;
             /** @description An operator's override of the team's seats. */
             seats_granted?: number;
         };

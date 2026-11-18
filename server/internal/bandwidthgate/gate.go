@@ -58,18 +58,38 @@ func New(store *db.DB) *Gate {
 	return g
 }
 
-// NewRelayVolume is a gate with the same cache and fail-safe rules whose question is another: has the account carried at
-// least included bytes through Paperboat's managed relays this calendar month (UTC)? A relay slows such an account to its
-// second tier. A failed lookup answers "not over" (full tier), so a slow database never slows an account on its own.
-func NewRelayVolume(store *db.DB, included int64) *Gate {
+// accountPaid is whether account $1 is on a paid plan: its personal workspace has a paid period, or it is an active member of a
+// team with a paid entitlement.
+const accountPaid = `(EXISTS(SELECT 1 FROM paperboat.billing_workspaces w WHERE w.user_id=$1 AND w.team_id IS NULL AND w.product_code IS NOT NULL AND paperboat.billing_workspace_paid_until(w)>now())
+ OR EXISTS(SELECT 1 FROM paperboat.team_members m WHERE m.account_id=$1 AND m.active AND paperboat.team_paid_entitled(m.team_id)))`
+
+// NewRelayVolume is a gate with the same cache and fail-safe rules whose question is another: has the account carried at least its
+// plan's included bytes (freeIncluded, or paidIncluded on a paid plan) through Paperboat's managed relays this calendar month (UTC)?
+// A relay then holds it to the plan's slow speed. A failed lookup answers "not over" (full speed), so a slow database never slows an
+// account on its own.
+func NewRelayVolume(store *db.DB, freeIncluded, paidIncluded int64) *Gate {
 	g := &Gate{store: store, timeout: defaultLookupTimeout}
 	g.lookup = func(ctx context.Context, account string, at time.Time) (bool, error) {
 		var over bool
-		err := store.SQL().QueryRowContext(ctx, `SELECT coalesce(sum(upload_bytes+download_bytes),0) >= $2 FROM paperboat.resource_bandwidth_events
-WHERE actor_account_id=$1 AND mode='relay' AND hosting='managed' AND interval_end >= date_trunc('month',$3::timestamptz AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'`, account, included, at).Scan(&over)
+		err := store.SQL().QueryRowContext(ctx, `SELECT coalesce(sum(upload_bytes+download_bytes),0) >= CASE WHEN `+accountPaid+` THEN $2::bigint ELSE $3::bigint END
+FROM paperboat.resource_bandwidth_events
+WHERE actor_account_id=$1 AND mode='relay' AND hosting='managed' AND interval_end >= date_trunc('month',$4::timestamptz AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'`, account, paidIncluded, freeIncluded, at).Scan(&over)
 		return over, err
 	}
 	return g
+}
+
+// PaidAccounts is the subset of accounts on a paid plan (see accountPaid).
+func PaidAccounts(ctx context.Context, store *db.DB, accounts []string) (map[string]bool, error) {
+	paid := map[string]bool{}
+	for _, account := range accounts {
+		var is bool
+		if err := store.SQL().QueryRowContext(ctx, `SELECT `+accountPaid, account).Scan(&is); err != nil {
+			return nil, err
+		}
+		paid[account] = is
+	}
+	return paid, nil
 }
 
 // SetLookupTimeout changes how long one lookup may take before the gate fails open; tests
