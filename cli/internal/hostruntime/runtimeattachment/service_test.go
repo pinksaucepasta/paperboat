@@ -864,6 +864,7 @@ func TestGoawayCarrierServesUntilTheEdgeStopsOpeningStreams(t *testing.T) {
 	var lastRequest time.Time // the quiet period runs from the last request, not from the pause after it
 	for index := 0; time.Now().Before(until); index++ {
 		request.RequestID = fmt.Sprintf("request-%d", index)
+		sentAt := time.Now() // before the open: the worker's quiet timer starts when it sees the stream, not when this write returns
 		stream, err := edge.OpenStream(ctx)
 		if err == nil {
 			err = connectorprotocol.WriteStreamOpen(stream, request)
@@ -872,7 +873,7 @@ func TestGoawayCarrierServesUntilTheEdgeStopsOpeningStreams(t *testing.T) {
 		if err != nil {
 			t.Fatalf("the draining worker stopped serving while the edge still sent it requests: %v", err)
 		}
-		lastRequest = time.Now()
+		lastRequest = sentAt
 		select {
 		case <-shutdown:
 			t.Fatal("the worker closed while the edge still sent it requests")

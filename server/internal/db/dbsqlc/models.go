@@ -185,6 +185,21 @@ type BackupReport struct {
 	ReceivedAt    time.Time
 }
 
+type Ban struct {
+	ID             string
+	SubjectKind    string
+	SubjectID      string
+	Reason         string
+	BannedBy       string
+	BannedAt       time.Time
+	CanonicalEmail sql.NullString
+	WorkosSubject  sql.NullString
+	Subscriptions  string
+	CauseBanID     sql.NullString
+	LiftedAt       sql.NullTime
+	LiftedBy       sql.NullString
+}
+
 type BillingCheckoutReservation struct {
 	ID                 string
 	UserID             string
@@ -292,6 +307,19 @@ type BillingWorkspace struct {
 	ScheduledQuantity      sql.NullInt32
 	ScheduledQuantityAt    sql.NullTime
 	GrantUntil             sql.NullTime
+}
+
+type BillingWorkspaceGrant struct {
+	ID          string
+	WorkspaceID string
+	Kind        string
+	Amount      int64
+	EndsAt      sql.NullTime
+	Reason      string
+	CreatedBy   string
+	CreatedAt   time.Time
+	RevokedAt   sql.NullTime
+	RevokedBy   sql.NullString
 }
 
 type BillingWorkspaceOperation struct {
@@ -1550,6 +1578,18 @@ type InspectorNativeAdmission struct {
 	NativeCLISessionID sql.NullString
 	NativeMachineID    sql.NullString
 	ExpiresAt          time.Time
+}
+
+type IpBlock struct {
+	ID        string
+	Seq       sql.NullInt64
+	Cidr      netip.Prefix
+	Reason    string
+	CreatedBy string
+	CreatedAt time.Time
+	ExpiresAt sql.NullTime
+	RevokedAt sql.NullTime
+	RevokedBy sql.NullString
 }
 
 type LazyAccessPolicy struct {
