@@ -213,6 +213,7 @@ function route(req, url) {
       retention: { size: 8, retained: 5, previous_size: 6, previous_retained: 2 }, adoption: [{ name: "terminal", count: 7 }, { name: "tunnel", count: 2 }],
     }
   }
+  if (p === "/v1/admin/sentry/issues" && process.env.__FIXTURE_SENTRY === "off") return { __status: 503, code: "sentry_not_configured", message: "The Sentry admin API has not been configured." }
   if (p === "/v1/admin/sentry/issues") return { issues: [{ project: "go", id: "1", short_id: "GO-1", level: "error", status: "unresolved", count: 5, first_seen: "2026-11-16T00:00:00Z", last_seen: "2026-11-17T08:00:00Z" }] }
   if (p === "/v1/admin/nodes") return { items: world.nodes, total: world.nodes.length }
   if (p === "/v1/admin/abuse-reports") {
@@ -534,6 +535,17 @@ try {
       expect(await p.locator(`[data-table="${what}"] tbody tr`).count() > 0, "no rows")
     })
   }
+  await step("an unconfigured service says so, without Retry", async () => {
+    process.env.__FIXTURE_SENTRY = "off"
+    try {
+      await p.goto(`${ORIGIN}/sentry`)
+      await p.waitForSelector("[data-error-block]")
+      const shown = await text("[data-error-block]")
+      expect(shown.includes("has not been configured") && !shown.includes("Retry"), `shown: ${shown}`)
+    } finally {
+      delete process.env.__FIXTURE_SENTRY
+    }
+  })
   await step("audit: a filter with no events shows the empty state", async () => {
     await p.goto(`${ORIGIN}/audit`)
     await p.fill('[aria-label="Event type"]', "nothing")

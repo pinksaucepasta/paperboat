@@ -14,8 +14,9 @@ export function Providers({ children }: { children: React.ReactNode }) {
         defaultOptions: {
           queries: {
             staleTime: 10_000,
-            // Client errors will not change on retry; transient failures get two more tries.
-            retry: (count, error) => count < 2 && !(error instanceof ApiError && error.status >= 400 && error.status < 500),
+            // Client errors and unconfigured services will not change on retry; transient failures get two more tries.
+            retry: (count, error) =>
+              count < 2 && !(error instanceof ApiError && ((error.status >= 400 && error.status < 500) || error.code.endsWith("_not_configured"))),
           },
         },
       }),

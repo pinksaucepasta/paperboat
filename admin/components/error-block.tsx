@@ -5,12 +5,12 @@ import { ApiError } from "@/lib/api"
 import { CopyReference } from "@/components/copy-reference"
 
 /**
- * The console's LoadError: one muted line with Retry and the reference. A refusal (403) will not change on retry, so it
- * shows the server's sentence instead.
+ * The console's LoadError: one muted line with Retry and the reference. A refusal (403) or a service this server has not
+ * configured (`*_not_configured`) will not change on retry, so it shows the server's sentence instead.
  */
 export function ErrorBlock({ what, error, retry }: { what: string; error: Error; retry?: () => void }) {
   const api = error instanceof ApiError ? error : undefined
-  const refused = api?.status === 403
+  const refused = api?.status === 403 || api?.code.endsWith("_not_configured")
   return (
     <div role="alert" className="flex flex-col items-center justify-center gap-1 py-12 text-sm text-muted-foreground" data-error-block>
       {refused ? (
