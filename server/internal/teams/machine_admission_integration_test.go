@@ -44,27 +44,6 @@ func TestPostgresMachineAdmission(t *testing.T) {
 	defer func() {
 		clean, done := context.WithTimeout(context.Background(), 10*time.Second)
 		defer done()
-		// The test fills the plan ceilings (thousands of bindings). Deleting them fires two per-row publish/access
-		// triggers each, which took 5.4 s unloaded and past the 10 s bound under load; nothing listens at cleanup, so the
-		// bindings go with user triggers off, in one transaction (a failure rolls the trigger change back too).
-		if tx, e := store.SQL().BeginTx(clean, nil); e != nil {
-			t.Error(e)
-		} else {
-			for _, q := range []string{`ALTER TABLE paperboat.team_resource_bindings DISABLE TRIGGER USER`, `DELETE FROM paperboat.team_resource_bindings WHERE team_id='` + team + `'`, `ALTER TABLE paperboat.team_resource_bindings ENABLE TRIGGER USER`} {
-				if _, e = tx.ExecContext(clean, q); e != nil {
-					t.Error(e)
-					break
-				}
-			}
-			if e == nil {
-				e = tx.Commit()
-			} else {
-				_ = tx.Rollback()
-			}
-			if e != nil {
-				t.Error(e)
-			}
-		}
 		for _, q := range []string{`ALTER TABLE paperboat.audit_events DISABLE TRIGGER audit_events_append_only`, `DELETE FROM paperboat.audit_events WHERE actor_user_id IN ('` + owner + `','` + member2 + `')`, `DELETE FROM paperboat.user_machines WHERE user_id IN ('` + owner + `','` + member2 + `')`, `DELETE FROM paperboat.control_environments WHERE owner_user_id IN ('` + owner + `','` + member2 + `')`, `DELETE FROM paperboat.billing_workspaces WHERE team_id='` + team + `'`, `DELETE FROM paperboat.teams WHERE team_id='` + team + `'`, `DELETE FROM paperboat.users WHERE id IN ('` + owner + `','` + member2 + `','` + outsider + `')`, `ALTER TABLE paperboat.audit_events ENABLE TRIGGER audit_events_append_only`} {
 			if _, e := store.SQL().ExecContext(clean, q); e != nil {
 				t.Error(e)
