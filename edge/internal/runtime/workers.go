@@ -854,6 +854,11 @@ func (w *RouteWorker) reconcileRoutes(ctx context.Context) (result error) {
 			if w.Unavailable != nil {
 				hosts := make([]string, 0, len(failedAssignments))
 				for _, a := range failedAssignments {
+					// A route that failed to take a change (an address move staging its new name) keeps serving its
+					// last-known-good rule: only a host nothing serves is reported unavailable.
+					if _, serving := w.Registry.Match(a.PublicHost, "/"); serving == nil {
+						continue
+					}
 					hosts = append(hosts, a.PublicHost)
 				}
 				w.Unavailable.Replace(hosts)

@@ -1026,7 +1026,7 @@ func observeEngineTunnelRoute(ctx context.Context, tx *db.Tx, nodeID string, obs
 	accepted, err := endpoints.ObserveTx(ctx, tx, nodeID, observation.EdgeProcessEpoch, runtimewire.Observation{
 		RouteID: observation.RouteID, SessionID: observation.ConnectorSessionID,
 		AttachmentGeneration: uint64(observation.AssignmentGeneration), Ready: ready,
-	})
+	}, observation.RouteRevision)
 	if err != nil || !accepted {
 		return err
 	}

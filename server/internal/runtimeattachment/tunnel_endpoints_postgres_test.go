@@ -604,6 +604,23 @@ VALUES ($1,$2,$3,decode(repeat('42',32),'hex'),'route.create','route',$4,'connec
 	if len(rows) != 1 || rows[0].PublicHost != oldHost || !strings.Contains(rows[0].DomainBindings, renamed) || rows[0].ObservedState != "pending" || rows[0].RouteGeneration != before+1 {
 		t.Fatalf("edge snapshot while the address moves = %+v, want the old host with %q as a second name", rows, renamed)
 	}
+	// The edge keeps reporting the revision it still serves while it stages the change: that never counts as ready.
+	observeAs := func(row dbsqlc.ListTunnelEdgeRouteAssignmentsForNodeV1Row, revision int64) {
+		t.Helper()
+		if err := control.ObserveRoutes(f.ctx, f.node, []controlplane.RouteObservation{{
+			RouteID: route, AssignmentID: row.AssignmentID, AssignmentGeneration: row.AssignmentGeneration, RouteRevision: revision,
+			EdgeNodeID: f.node, EdgeProcessEpoch: f.edge.ProcessEpoch, ConnectorID: row.ConnectorID, HostID: row.HostID,
+			ConnectorGeneration: 1, ConnectorSessionID: row.ConnectorSessionID, ConnectorProcessGeneration: row.ConnectorProcessGeneration,
+			ConfigGeneration: row.ConfigGeneration, ConfigContentHash: "sha256:" + hex.EncodeToString(row.ConfigContentHash),
+			AccessMode: row.AccessMode, ViewerPolicyGeneration: row.ViewerPolicyGeneration, ObservedState: "ready",
+		}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	observeAs(rows[0], before)
+	if got := snapshot(); got[0].ObservedState != "pending" {
+		t.Fatal("an edge still serving the previous revision made the changed route ready")
+	}
 	settle(time.Now().UTC())
 	if endpoint() != "https://"+oldHost || holds() != "incoming:"+renamed {
 		t.Fatalf("a move no edge confirmed yet settled: address %q holds %q", endpoint(), holds())

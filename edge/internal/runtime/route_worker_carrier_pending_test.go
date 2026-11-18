@@ -188,3 +188,59 @@ func TestCarrierConnectBurstCoalescesIntoOneWake(t *testing.T) {
 		t.Fatalf("pending wakes after 3 connects = %d, want 1", pending)
 	}
 }
+
+// A change to a route that is already served (an address move staging its new name) that the carrier cannot take yet
+// keeps the route serving as it was: its host is not reported unavailable while the last-known-good rule answers.
+func TestRouteWorkerKeepsServingARouteWhoseChangeIsNotReadyYet(t *testing.T) {
+	publicKey, thumbprint := durableWorkerIdentity(t)
+	a := durableWorkerAssignmentForTunnel(publicKey, thumbprint, "a")
+	durable, err := datacarrier.NewDurableAdmissionRegistry(datacarrier.DurableAdmissionRegistryConfig{NodeID: "edge_1", ProcessEpoch: "edge_epoch_1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	carrier := &workerCarrierProbe{probeErrors: map[string]error{}}
+	registry := route.NewRegistry("", "")
+	state := node.New("edge_1")
+	state.MarkReady()
+	unavailable := &route.UnavailableHosts{}
+	source := &workerSnapshotSource{snapshot: control.RouteSnapshot{Routes: []control.RouteAssignment{a}, Complete: true, Canonical: true}}
+	worker := &RouteWorker{
+		Registry: registry, Observer: &appendRouteObserver{}, State: state, Carrier: carrier, Source: source,
+		NodeID: "edge_1", ProcessEpoch: "edge_epoch_1", DurableAdmissions: durable, Unavailable: unavailable,
+		Pulse: make(chan time.Time), DrainTimeout: time.Second,
+	}
+	if err := worker.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = worker.Shutdown(ctx)
+	}()
+	if _, err := registry.Match(a.PublicHost, "/"); err != nil {
+		t.Fatalf("route not served before the change: %v", err)
+	}
+	changed := a
+	changed.Revision++
+	changed.DomainBindings = []control.DomainBinding{{ID: "mvmoved", Hostname: "moved.example.test", MatchType: route.MatchExact, Generation: 2}}
+	source.snapshot = control.RouteSnapshot{Routes: []control.RouteAssignment{changed}, Complete: true, Canonical: true}
+	carrier.probeErrors[a.TunnelID] = fmt.Errorf("%w: exact route binding mismatch", edgehttp.ErrDataCarrierRouteUnavailable)
+	if err := worker.reconcile(context.Background()); err != nil {
+		t.Fatalf("reconcile with the change not ready: %v", err)
+	}
+	if _, err := registry.Match(a.PublicHost, "/"); err != nil {
+		t.Fatalf("route stopped serving while its change staged: %v", err)
+	}
+	if unavailable.Has(a.PublicHost) {
+		t.Fatal("a served host was reported unavailable while its change staged")
+	}
+	delete(carrier.probeErrors, a.TunnelID)
+	if err := worker.reconcile(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	for _, host := range []string{a.PublicHost, "moved.example.test"} {
+		if _, err := registry.Match(host, "/"); err != nil {
+			t.Fatalf("%s not served once the change was ready: %v", host, err)
+		}
+	}
+}

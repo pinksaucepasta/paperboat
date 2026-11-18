@@ -358,9 +358,12 @@ def edge(image, second=False):
     No HTTP/3 (UDP is closed)."""
     EDGE_NAME, EDGE_DIR, EDGE_PORT, EDGE_QUIC_PORT = globals()["EDGE_NAME"], globals()["EDGE_DIR"], globals()["EDGE_PORT"], globals()["EDGE_QUIC_PORT"]
     https_port, http_port, edge_node = 18446, 18447, "stg_managed_edge"
+    # A machine carries to a second edge only in another failure domain (runtimeattachment/service.go).
+    failure_domain = REGION
     if second:
         EDGE_NAME, EDGE_DIR, EDGE_PORT, EDGE_QUIC_PORT = EDGE_B["name"], EDGE_B["dir"], EDGE_B["port"], EDGE_B["quic"]
         https_port, http_port, edge_node = EDGE_B["https"], EDGE_B["http"], EDGE_B["node"]
+        failure_domain = REGION + "-b"
     from cryptography.hazmat.primitives import serialization
     from cryptography.hazmat.primitives.asymmetric import ed25519
     host = f"{REGION}.{domain()}"
@@ -433,9 +436,9 @@ except (OSError,subprocess.CalledProcessError,KeyError):
         "ON CONFLICT(id) DO UPDATE SET enabled=true")
     sql(f"INSERT INTO control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,endpoint_host,endpoint_tcp_port,endpoint_quic_port,carrier_endpoint_host,carrier_endpoint_tcp_port,carrier_endpoint_quic_port,state,region,failure_domain,"
         f"roles,transports,capacity_limit,capacity_observed_at,registry_expires_at,tls_spki_sha256) VALUES('{node}','{install}','1.0','initial_fixture','{host}',{EDGE_PORT},{EDGE_QUIC_PORT},'{host}',{EDGE_PORT},{EDGE_QUIC_PORT},"
-        f"'registered','{REGION}','{REGION}',ARRAY['edge'],ARRAY['http2','http3'],2048,now(),now()+interval '1 hour',decode('{pin}','hex')) "
+        f"'registered','{REGION}','{failure_domain}',ARRAY['edge'],ARRAY['http2','http3'],2048,now(),now()+interval '1 hour',decode('{pin}','hex')) "
         "ON CONFLICT(id) DO UPDATE SET capacity_limit=excluded.capacity_limit,"
-        "carrier_endpoint_host=excluded.carrier_endpoint_host,carrier_endpoint_tcp_port=excluded.carrier_endpoint_tcp_port,"
+        "failure_domain=excluded.failure_domain,carrier_endpoint_host=excluded.carrier_endpoint_host,carrier_endpoint_tcp_port=excluded.carrier_endpoint_tcp_port,"
         "carrier_endpoint_quic_port=excluded.carrier_endpoint_quic_port")
     sql(f"INSERT INTO managed_node_authority(node_id,region_id,runtime_hash,runtime_ciphertext,config) "
         f"VALUES('{node}','{REGION}',decode('{hashlib.sha256(credential.encode()).hexdigest()}','hex'),decode('{sealed}','hex'),'{{}}') "

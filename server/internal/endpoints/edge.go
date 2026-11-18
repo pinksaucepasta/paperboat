@@ -144,9 +144,13 @@ func scanEdgeAdmissionsWithRemovals(rows pgx.Rows, expiresAt time.Time) ([]runti
 // last pull); such observations are dropped, never an error, so they cannot fail the observations
 // of other routes in the same report.
 //
+// routeRevision, when not zero, is the revision of the route the edge observed: an observation of another revision
+// (the edge still serves the route as it was before a change) is dropped, so a changed route counts as ready only
+// once an edge serves the new revision.
+//
 // Edges repeat every observation every few seconds; an unchanged one is written only to refresh observed_at
 // once it is older than ObservationRefresh, otherwise it is only read.
-func ObserveTx(ctx context.Context, tx *db.Tx, nodeID, epoch string, o runtimewire.Observation) (bool, error) {
+func ObserveTx(ctx context.Context, tx *db.Tx, nodeID, epoch string, o runtimewire.Observation, routeRevision int64) (bool, error) {
 	var current bool
 	// A route is ready on an edge only while the agent's carrier session there is ready too: after a
 	// host restart an edge kept reporting its routes on a carrier that was gone (ready=false), and
@@ -157,6 +161,7 @@ SELECT x.route_id,x.edge_node_id,x.observed_ready AS was,x.observed_ready,x.obse
   AND ra.edge_process_epoch=x.edge_process_epoch AND ra.session_id=x.carrier_session_id AND ra.ready)) AS want
 FROM endpoint_edge_assignments x
 WHERE x.route_id=$1 AND x.edge_node_id=$2 AND x.edge_process_epoch=$3 AND x.carrier_session_id=$4 AND x.generation=$5
+ AND ($8::bigint=0 OR EXISTS(SELECT 1 FROM endpoint_routes er WHERE er.id=x.route_id AND er.revision=$8))
 ), written AS (
 UPDATE endpoint_edge_assignments x SET observed_ready=a.want,observed_at=now()
 FROM assignment a WHERE (a.observed_ready IS DISTINCT FROM a.want OR a.observed_at IS NULL OR a.observed_at<now()-$7::interval)
@@ -173,7 +178,7 @@ FROM assignment a JOIN written w ON w.route_id=a.route_id JOIN endpoint_routes r
 WHERE e.kind='tunnel' AND r.tunnel_route_id IS NOT NULL AND coalesce(a.was,false) IS DISTINCT FROM a.want
 )
 SELECT EXISTS(SELECT 1 FROM assignment)`,
-		o.RouteID, nodeID, epoch, o.SessionID, int64(o.AttachmentGeneration), o.Ready, ObservationRefresh.String()).Scan(&current)
+		o.RouteID, nodeID, epoch, o.SessionID, int64(o.AttachmentGeneration), o.Ready, ObservationRefresh.String(), routeRevision).Scan(&current)
 	return current, err
 }
 
