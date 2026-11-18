@@ -102,6 +102,8 @@ var operatorPolicies = map[string]operatorPolicy{
 	"POST /v1/admin/announcements":                                                  {"admin", "", "announcements"},
 	"PUT /v1/admin/announcements/{announcement_id}":                                 {"admin", "announcement_id", ""},
 	"POST /v1/admin/announcements/{announcement_id}/retract":                        {"admin", "announcement_id", ""},
+	"GET /v1/admin/notices":                                                         {"admin", "", "notices"},
+	"POST /v1/admin/notices":                                                        {"admin", "", "notices"},
 	"GET /v1/admin/ip-blocks":                                                       {"admin", "", "ip-blocks"},
 	"POST /v1/admin/ip-blocks":                                                      {"admin", "", "ip-blocks"},
 	"POST /v1/admin/ip-blocks/{block_id}/remove":                                    {"admin", "block_id", ""},
@@ -325,6 +327,9 @@ func registerOperatorRoutes(mux *http.ServeMux, opts Options) {
 	registerServerNodes(mux, opts)
 	if opts.Announcements != nil {
 		registerOperatorAnnouncements(mux, opts)
+	}
+	if opts.CustomerNotices != nil {
+		registerOperatorNotices(mux, opts)
 	}
 	if opts.Operator == nil {
 		return

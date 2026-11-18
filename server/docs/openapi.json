@@ -20762,6 +20762,167 @@
           }
         }
       },
+      "OperatorNoticeInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "audience_kind"
+        ],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "price_increase",
+              "terms_change",
+              "subprocessor",
+              "breach"
+            ]
+          },
+          "audience_kind": {
+            "type": "string",
+            "enum": [
+              "all",
+              "paid",
+              "plan",
+              "team",
+              "user"
+            ]
+          },
+          "audience_value": {
+            "type": "string",
+            "maxLength": 128,
+            "description": "A plan code (or free), a team ID or a user ID; empty for all and paid."
+          },
+          "dry_run": {
+            "type": "boolean"
+          },
+          "effective": {
+            "type": "string",
+            "description": "YYYY-MM-DD the change takes effect (price_increase, terms_change, subprocessor)."
+          },
+          "detail": {
+            "type": "string",
+            "maxLength": 1000
+          },
+          "link": {
+            "type": "string",
+            "format": "uri",
+            "description": "https address of the new text; required for terms_change."
+          },
+          "urgent_reason": {
+            "type": "string",
+            "maxLength": 1000,
+            "description": "Why a terms change takes effect in under 30 days (the law or a security problem)."
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 1000
+          },
+          "purpose": {
+            "type": "string",
+            "maxLength": 1000
+          },
+          "location": {
+            "type": "string",
+            "maxLength": 1000
+          },
+          "aware_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When we became aware of the breach (breach)."
+          },
+          "what": {
+            "type": "string",
+            "maxLength": 1000
+          },
+          "data": {
+            "type": "string",
+            "maxLength": 1000
+          },
+          "actions": {
+            "type": "string",
+            "maxLength": 1000
+          },
+          "contact": {
+            "type": "string",
+            "format": "email",
+            "description": "Who to contact (subprocessor, breach)."
+          }
+        }
+      },
+      "OperatorNotice": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "audience_kind",
+          "subject",
+          "html",
+          "recipients"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "audience_kind": {
+            "type": "string"
+          },
+          "audience_value": {
+            "type": "string"
+          },
+          "subject": {
+            "type": "string"
+          },
+          "html": {
+            "type": "string"
+          },
+          "recipients": {
+            "type": "integer"
+          },
+          "late": {
+            "type": "boolean",
+            "description": "A breach notice sent more than 48 hours after the operator became aware."
+          },
+          "deadline": {
+            "type": "string",
+            "format": "date-time",
+            "description": "The 48-hour breach deadline."
+          },
+          "created_by": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "queued_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "OperatorNoticePage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "notices"
+        ],
+        "properties": {
+          "notices": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OperatorNotice"
+            }
+          },
+          "next_after": {
+            "type": "string"
+          }
+        }
+      },
       "OperatorAnnouncementInput": {
         "type": "object",
         "additionalProperties": false,
@@ -63421,6 +63582,221 @@
             "description": "Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field."
           }
         ]
+      }
+    },
+    "/v1/admin/notices": {
+      "get": {
+        "operationId": "get_v1_admin_notices",
+        "summary": "Customer notices",
+        "responses": {
+          "400": {
+            "description": "Invalid target, body, pagination or confirmation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Browser authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Operator session or capability required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Evidence, provider or audit unavailable; outcome may require checking target state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Audited result. Cache-Control: no-store.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/OperatorNoticePage"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9]{1,18}$",
+              "description": "The next_after of the previous page."
+            }
+          }
+        ],
+        "security": [
+          {
+            "operatorCookie": []
+          }
+        ],
+        "x-operator-capability": "admin",
+        "description": "Current active operator account and separate operator session required. See docs/runbooks/operator-admin.md. Audited before disclosure; unavailable auditing fails closed. Admin only. Customer notices (price increase, terms change, new subprocessor, breach) already sent by email, newest first."
+      },
+      "post": {
+        "operationId": "post_v1_admin_notices",
+        "summary": "Send a customer notice",
+        "responses": {
+          "400": {
+            "description": "Invalid target, body, pagination or confirmation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Browser authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Operator session or capability required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Evidence, provider or audit unavailable; outcome may require checking target state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Stale resource revision or conflicting idempotency request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Audited result. Cache-Control: no-store.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/OperatorNotice"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "Operator-Target",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_.:-]+$"
+            }
+          },
+          {
+            "name": "Operator-Reason",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_.:-]+$"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "security": [
+          {
+            "csrfHeader": [],
+            "operatorCookie": []
+          }
+        ],
+        "x-operator-capability": "admin",
+        "description": "Current active operator account and separate operator session required. See docs/runbooks/operator-admin.md. Audited before disclosure; unavailable auditing fails closed. Admin only. Emails a legally promised notice to an audience (all, paid, a plan, a team or one user). With dry_run it renders the mail and counts the recipients and sends nothing; without it the mails are queued once per recipient and the notice is recorded. A price increase, a terms change and a new subprocessor need an effective date at least 30 days away (a terms change may be sooner with urgent_reason); a breach notice reports whether it goes out more than 48 hours after aware_at.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OperatorNoticeInput"
+              }
+            }
+          }
+        }
       }
     },
     "/v1/admin/announcements": {

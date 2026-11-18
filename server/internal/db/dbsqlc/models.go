@@ -1075,6 +1075,23 @@ type CurrentTunnelRouteViewerPolicy struct {
 	ViewerPolicyGeneration int64
 }
 
+type CustomerNotice struct {
+	ID             string
+	Seq            sql.NullInt64
+	Kind           string
+	AudienceKind   string
+	AudienceValue  string
+	Subject        string
+	Html           string
+	RequestHash    string
+	Recipients     int32
+	Late           bool
+	CreatedBy      string
+	IdempotencyKey string
+	CreatedAt      time.Time
+	QueuedAt       sql.NullTime
+}
+
 type DeviceGrant struct {
 	ID                  string
 	ClientID            string
