@@ -12,36 +12,10 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 )
 
-type recordedDebit struct {
-	workspace string
-	bytes     int64
-}
-
-type fakeDebiter struct {
-	mu    sync.Mutex
-	calls []recordedDebit
-}
-
-func (f *fakeDebiter) DebitWorkspaceBandwidthTx(_ context.Context, _ *db.Tx, workspace string, bytes int64, _ time.Time) (int64, bool, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.calls = append(f.calls, recordedDebit{workspace, bytes})
-	return bytes, false, nil
-}
-
-func (f *fakeDebiter) total() (sum int64) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	for _, c := range f.calls {
-		sum += c.bytes
-	}
-	return sum
-}
-
-// F13-02: native relay bytes on a hosted node are charged to the workspace allowance, once,
-// by the growth of each cumulative per-minute record; direct bytes and customer-run or
-// unidentified relays are not.
-func TestNativeRelayBytesAreDebitedOnceByGrowthPostgres(t *testing.T) {
+// Native relay bytes on a hosted node are recorded for history and capacity statistics, once, as the
+// greatest cumulative counters of each per-minute record, and never charged to the workspace allowance
+// (a relay caps each account's speed instead).
+func TestNativeRelayBytesAreRecordedButNeverChargedPostgres(t *testing.T) {
 	dsn := os.Getenv("PAPERBOAT_TEST_DATABASE_DSN")
 	if dsn == "" {
 		t.Skip("isolated PostgreSQL required")
@@ -87,9 +61,7 @@ func TestNativeRelayBytesAreDebitedOnceByGrowthPostgres(t *testing.T) {
 	exec(`INSERT INTO user_machine_access_sessions(credential_kind,id,user_machine_id,user_id,environment_id,cli_client_session_id,http_base_url,helper_terminal_session_id,expires_at,created_at,capabilities) VALUES('control_plane_signed',$1,$2,$3,$2,$4,'','fixture',$5,$6,ARRAY['files'])`, session, machine, user, client, now.Add(time.Hour), now.Add(-time.Minute))
 	exec(`INSERT INTO control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch) VALUES($1,'default','1.0',$1)`, node)
 
-	debiter := &fakeDebiter{}
 	service := New(store)
-	service.Debiter = debiter
 	report := func(stream, mode, nodeID string, up, down int64) NativeReport {
 		return NativeReport{AccessSessionID: session, StreamID: stream, Consumer: "file_transfer", Mode: mode, NodeID: nodeID, IntervalStart: now, IntervalEnd: now.Add(20 * time.Second), UploadBytes: up, DownloadBytes: down}
 	}
@@ -100,27 +72,28 @@ func TestNativeRelayBytesAreDebitedOnceByGrowthPostgres(t *testing.T) {
 			t.Fatalf("report %+v: %+v %v", r, receipt, err)
 		}
 	}
-	want := func(total int64, why string) {
+	want := func(up, down int64, why string) {
 		t.Helper()
-		if got := debiter.total(); got != total {
-			t.Fatalf("%s: debited %d bytes, want %d (calls %v)", why, got, total, debiter.calls)
+		var gotUp, gotDown int64
+		if err := store.SQL().QueryRowContext(ctx, `SELECT coalesce(sum(upload_bytes),0),coalesce(sum(download_bytes),0) FROM resource_bandwidth_events WHERE machine_id=$1`, machine).Scan(&gotUp, &gotDown); err != nil {
+			t.Fatal(err)
+		}
+		if gotUp != up || gotDown != down {
+			t.Fatalf("%s: recorded %d up %d down, want %d/%d", why, gotUp, gotDown, up, down)
 		}
 	}
 
-	send(report("direct", "direct", "", 1000, 1000))
-	want(0, "direct bytes are free")
-	send(report("unnamed", "relay", "", 500, 500))
-	want(0, "a relay that names no node cannot be shown to be hosted")
 	send(report("hosted", "relay", node, 100, 50))
-	want(150, "first hosted relay report")
+	want(100, 50, "first hosted relay report")
 	send(report("hosted", "relay", node, 100, 50))
-	want(150, "a replayed report charges nothing")
+	want(100, 50, "a replayed report records nothing more")
 	send(report("hosted", "relay", node, 80, 20))
-	want(150, "a lower out-of-order report charges nothing")
+	want(100, 50, "a lower out-of-order report keeps the greater counters")
 	send(report("hosted", "relay", node, 300, 50))
-	want(350, "only the growth of the cumulative record is charged")
-	// The same report posted by several connections at once (a resend while the first is in flight) is charged
-	// once: the batches of one machine run one at a time, so none reads the record before its predecessor wrote it.
+	want(300, 50, "the cumulative record grows")
+	send(report("direct", "direct", "", 1000, 1000))
+	want(1300, 1050, "direct bytes are recorded")
+	// The same report posted by several connections at once is recorded once: the batches of one machine run one at a time.
 	var wg sync.WaitGroup
 	for range 8 {
 		wg.Add(1)
@@ -133,10 +106,9 @@ func TestNativeRelayBytesAreDebitedOnceByGrowthPostgres(t *testing.T) {
 		}()
 	}
 	wg.Wait()
-	want(650, "a report replayed concurrently is charged once")
-	for _, c := range debiter.calls {
-		if c.workspace != "personal:"+user {
-			t.Fatalf("charged workspace %q, want the host owner's personal workspace", c.workspace)
-		}
+	want(1500, 1150, "a report replayed concurrently is recorded once")
+	var periods int
+	if err := store.SQL().QueryRowContext(ctx, `SELECT count(*) FROM billing_workspace_usage_periods WHERE workspace_id='personal:'||$1 AND (consumed_bytes>0 OR observed_bytes>0)`, user).Scan(&periods); err != nil || periods != 0 {
+		t.Fatalf("native relay bytes were charged to the workspace allowance: %d periods, err %v", periods, err)
 	}
 }

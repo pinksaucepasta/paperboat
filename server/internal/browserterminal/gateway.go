@@ -25,12 +25,6 @@ var ErrMachineEdgeUnavailable = errors.New("the machine's edge connection is dow
 // ErrSessionClosed means the owner's terminal has ended or been closed, so no ticket can open it.
 var ErrSessionClosed = errors.New("terminal session is closed")
 
-// BandwidthChecker refuses a terminal ticket while the paying workspace's hosted allowance is
-// used up, so the browser learns the plan limit from the ticket API before it connects.
-type BandwidthChecker interface {
-	CheckBandwidth(context.Context, Decision) error
-}
-
 // LimitChecker refuses a newly opened browser terminal past the plan's open terminals limit.
 type LimitChecker interface {
 	CheckBrowserTerminalLimit(context.Context, Decision) error
@@ -133,14 +127,6 @@ func (g *Gateway) issue(ctx context.Context, in Ticket) (Ticket, string, Decisio
 			return Ticket{}, "", Decision{}, ErrHostUnavailable
 		}
 		return Ticket{}, "", Decision{}, ErrMachineEdgeUnavailable
-	}
-	if checker, ok := g.Authorizer.(BandwidthChecker); ok && !in.terminalLess() {
-		if err := checker.CheckBandwidth(ctx, decision); err != nil {
-			if errors.Is(err, usermachines.ErrBandwidthQuotaExhausted) {
-				return Ticket{}, "", Decision{}, err
-			}
-			return Ticket{}, "", Decision{}, unavailableCause(err)
-		}
 	}
 	if checker, ok := g.Authorizer.(LimitChecker); ok && !in.terminalLess() {
 		if err := checker.CheckBrowserTerminalLimit(ctx, decision); err != nil {

@@ -23,24 +23,30 @@ const DeliveryWindow = 7 * 24 * time.Hour
 // admitted one short-lived preview a minute for DeliveryWindow+ refused every new one (2026-11-12, prod previews 404).
 const MaximumPerNode = 4096
 
-var ErrQuotaExhausted = errors.New("workspace bandwidth allowance is exhausted")
+// ErrThrottled is the answer for a binding whose workspace used its fair-use bandwidth: the binding is admitted
+// and recorded (its bytes are still counted), but the edge carries its traffic at the throttled rate until the
+// allowance period ends. Nothing is ever refused for bandwidth.
+var ErrThrottled = errors.New("workspace fair-use bandwidth is used; traffic is throttled until the allowance period ends")
 
-// QuotaExhaustedError is ErrQuotaExhausted with the end of the allowance period it applies to, so
-// the edge can tell a visitor when the address resumes.
-type QuotaExhaustedError struct{ ResetsAt time.Time }
+// ThrottledError is ErrThrottled with the workspace and the end of the allowance period it applies to, so the
+// edge can share one rate limit across the workspace's routes and tell a visitor when full speed resumes.
+type ThrottledError struct {
+	Workspace string
+	ResetsAt  time.Time
+}
 
-func (e *QuotaExhaustedError) Error() string { return ErrQuotaExhausted.Error() }
-func (e *QuotaExhaustedError) Unwrap() error { return ErrQuotaExhausted }
+func (e *ThrottledError) Error() string { return ErrThrottled.Error() }
+func (e *ThrottledError) Unwrap() error { return ErrThrottled }
 
-// quotaExhaustedTx is the exhaustion answer with the current period's end, read from the period row
+// throttledTx is the throttle answer with the current period's end, read from the period row
 // the quota check just found or created.
-func quotaExhaustedTx(ctx context.Context, tx *db.Tx, workspace string, at time.Time) error {
+func throttledTx(ctx context.Context, tx *db.Tx, workspace string, at time.Time) error {
 	var end sql.NullTime
 	if err := tx.QueryRow(ctx, `SELECT max(period_end) FROM billing_workspace_usage_periods WHERE workspace_id=$1 AND period_start<=$2 AND period_end>$2`, workspace, at).Scan(&end); err != nil {
 		return err
 	}
-	// No covering row: the reset time is unknown, the refusal stands.
-	return &QuotaExhaustedError{ResetsAt: end.Time.UTC()}
+	// No covering row: the reset time is unknown, the throttle stands.
+	return &ThrottledError{Workspace: workspace, ResetsAt: end.Time.UTC()}
 }
 
 var ErrUnavailable = errors.New("usage accounting authority is unavailable; retry after retained usage expires")

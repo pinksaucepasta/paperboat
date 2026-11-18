@@ -68,7 +68,6 @@ func TestBrowserTerminalControlChannelIsNodeBoundAndFailClosed(t *testing.T) {
 // edge_unavailable, a retry.
 func TestBrowserTerminalAdmissionRefusalsAreTyped(t *testing.T) {
 	for _, tc := range []struct{ closeReason, want string }{
-		{"bandwidth_quota_exhausted", "bandwidth_quota_exhausted"},
 		{"no_access", "no_access"},
 		{"machine_unavailable", "machine_unavailable"},
 		{"expired", "expired"},

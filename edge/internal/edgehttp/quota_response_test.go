@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/http/httputil"
@@ -59,19 +58,14 @@ func TestProxyCountsNoFailureForAClientThatLeft(t *testing.T) {
 	}
 }
 
-// F13-03: a stream refused because the workspace is out of allowance gets the typed answer a
-// visitor and a script can act on; every other upstream failure stays a plain 502.
-func TestProxyAnswersQuotaRefusalWithTypedTooManyRequests(t *testing.T) {
+// A full carrier, a takedown and any other upstream failure each get their typed answer; the rest stay a plain 502.
+func TestProxyAnswersTypedRefusals(t *testing.T) {
 	serve := func(err error) *httptest.ResponseRecorder {
 		proxy := &httputil.ReverseProxy{Rewrite: func(r *httputil.ProxyRequest) { r.Out.URL = &url.URL{Scheme: "http", Host: "origin.invalid"} }, Transport: failingTransport{err}}
 		configureProxyDiagnostics(proxy, nil)
 		recorder := httptest.NewRecorder()
 		proxy.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "http://tunnel.example.test/", nil))
 		return recorder
-	}
-	quota := serve(fmt.Errorf("open stream: %w", ErrIngressQuotaExhausted))
-	if quota.Code != http.StatusTooManyRequests || quota.Header().Get("X-Paperboat-Error") != "bandwidth_quota_exhausted" || !strings.Contains(quota.Body.String(), "bandwidth allowance") {
-		t.Fatalf("quota refusal: %d %q %q", quota.Code, quota.Header().Get("X-Paperboat-Error"), quota.Body.String())
 	}
 	busy := serve(errors.Join(ErrDataCarrierRouteTransport, datacarrier.ErrStreamLimit))
 	if busy.Code != http.StatusServiceUnavailable || busy.Header().Get("X-Paperboat-Error") != "carrier_stream_limit" || busy.Header().Get("Retry-After") != "2" {
@@ -90,19 +84,16 @@ func TestProxyAnswersQuotaRefusalWithTypedTooManyRequests(t *testing.T) {
 }
 
 // Edge abuse plan 3.8 and 6.4: a refusal carries Retry-After and the typed code; a browser gets the
-// branded page that reloads itself, an API client RFC 9457 problem JSON; the quota answer waits until
-// the allowance resets and prints the date.
-func TestRefusalNegotiatesPageOrProblemAndQuotaResetDate(t *testing.T) {
-	now := time.Date(2026, 11, 11, 12, 0, 0, 0, time.UTC)
-	resets := now.Add(36 * time.Hour)
+// branded page that reloads itself, an API client RFC 9457 problem JSON.
+func TestRefusalNegotiatesPageOrProblem(t *testing.T) {
 	api := httptest.NewRecorder()
-	writeQuotaRefusal(api, httptest.NewRequest(http.MethodGet, "https://app.example.test/v1/x", nil), resets, now)
+	writeRefusal(api, httptest.NewRequest(http.MethodGet, "https://app.example.test/v1/x", nil), http.StatusTooManyRequests, "edge_rate_limited", busyTitle, busyMessage, 1500*time.Millisecond)
 	var body problem
 	if err := json.Unmarshal(api.Body.Bytes(), &body); err != nil {
 		t.Fatalf("problem json: %v %q", err, api.Body.String())
 	}
-	if api.Code != http.StatusTooManyRequests || api.Header().Get("Content-Type") != "application/problem+json" || api.Header().Get("Retry-After") != "129600" ||
-		body.Type != "urn:paperboat:error:bandwidth_quota_exhausted" || body.Status != 429 || body.RetryAfter != 129600 || body.Reference == "" || !strings.Contains(body.Detail, "13 Nov 2026 00:00 UTC") {
+	if api.Code != http.StatusTooManyRequests || api.Header().Get("Content-Type") != "application/problem+json" || api.Header().Get("Retry-After") != "2" ||
+		body.Type != "urn:paperboat:error:edge_rate_limited" || body.Status != 429 || body.RetryAfter != 2 || body.Reference == "" {
 		t.Fatalf("api refusal: %d %v %+v", api.Code, api.Header(), body)
 	}
 	browser := httptest.NewRecorder()
@@ -113,11 +104,6 @@ func TestRefusalNegotiatesPageOrProblemAndQuotaResetDate(t *testing.T) {
 	if browser.Code != 429 || browser.Header().Get("Retry-After") != "2" || !strings.HasPrefix(browser.Header().Get("Content-Type"), "text/html") ||
 		!strings.Contains(page, `<meta http-equiv="refresh" content="2">`) || !strings.Contains(page, busyMessage) || strings.Contains(page, "edge_rate_limited") {
 		t.Fatalf("browser refusal: %d %v\n%s", browser.Code, browser.Header(), page)
-	}
-	unknown := httptest.NewRecorder()
-	writeQuotaRefusal(unknown, request, time.Time{}, now)
-	if unknown.Header().Get("Retry-After") != "" || strings.Contains(unknown.Body.String(), "http-equiv") {
-		t.Fatalf("quota without a reset time: %v", unknown.Header())
 	}
 }
 

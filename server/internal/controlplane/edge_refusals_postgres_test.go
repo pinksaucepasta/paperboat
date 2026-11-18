@@ -41,7 +41,7 @@ func TestEdgeRefusalsAccumulateHourlyAndExpire(t *testing.T) {
 	}
 }
 
-// A taken-down hostname's decisions and quota denials are withheld from the edge snapshot and the
+// A taken-down hostname's decisions and throttles are withheld from the edge snapshot and the
 // name is listed with its legal flag; other names are untouched.
 func TestWithholdBlockedRemovesTakenDownNames(t *testing.T) {
 	store := openControlPlaneTestDB(t)
@@ -60,13 +60,13 @@ func TestWithholdBlockedRemovesTakenDownNames(t *testing.T) {
 		return d
 	}
 	decisions := []wire.IngressDecision{decision(taken), decision(open), decision(restored)}
-	denied := []wire.IngressQuotaDenial{{Hostname: quota}}
-	blocked, err := withholdBlocked(ctx, store, &decisions, &denied)
+	throttled := []wire.IngressThrottle{{Hostname: quota}}
+	blocked, err := withholdBlocked(ctx, store, &decisions, &throttled)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(decisions) != 2 || decisions[0].Binding.Hostname != open || decisions[1].Binding.Hostname != restored || len(denied) != 0 {
-		t.Fatalf("decisions=%v denied=%v", decisions, denied)
+	if len(decisions) != 2 || decisions[0].Binding.Hostname != open || decisions[1].Binding.Hostname != restored || len(throttled) != 0 {
+		t.Fatalf("decisions=%v throttled=%v", decisions, throttled)
 	}
 	got := map[string]bool{}
 	for _, b := range blocked {
@@ -199,8 +199,8 @@ func TestWithholdBlockedListsBannedOwnersHostnames(t *testing.T) {
 	}
 	// This edge holds decisions for a banned name, a free one and a lifted one: only the banned one is withheld.
 	decisions := []wire.IngressDecision{decision(hosts["banned"]), decision(hosts["free"]), decision(hosts["lifted"]), decision(hosts["team"])}
-	var denied []wire.IngressQuotaDenial
-	blocked, err := withholdBlocked(ctx, store, &decisions, &denied)
+	var throttled []wire.IngressThrottle
+	blocked, err := withholdBlocked(ctx, store, &decisions, &throttled)
 	if err != nil {
 		t.Fatal(err)
 	}

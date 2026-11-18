@@ -30,17 +30,17 @@ import (
 var tunnelNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$`)
 
 type Service struct {
-	repository       TunnelRepository
-	endpoint         EndpointBuilder
-	cursors          *tunnelCursorCodec
-	now              func() time.Time
-	newID            func(prefix string) (string, error)
-	newEndpointID    func() (string, error)
-	publicTCPPortMin int32
-	publicTCPPortMax int32
-	bandwidthDenied  func(ctx context.Context, accountID string, at time.Time) bool
-	reserved         map[string]struct{}
-	addressPolicy    AddressPolicy
+	repository         TunnelRepository
+	endpoint           EndpointBuilder
+	cursors            *tunnelCursorCodec
+	now                func() time.Time
+	newID              func(prefix string) (string, error)
+	newEndpointID      func() (string, error)
+	publicTCPPortMin   int32
+	publicTCPPortMax   int32
+	bandwidthThrottled func(ctx context.Context, accountID string, at time.Time) bool
+	reserved           map[string]struct{}
+	addressPolicy      AddressPolicy
 }
 
 // API is the narrow lifecycle surface consumed by the HTTP router. Route,
@@ -90,7 +90,7 @@ func NewService(repository TunnelRepository, config Config) (*Service, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Service{addressPolicy: config.AddressPolicy, reserved: reserved, repository: repository, endpoint: config.EndpointBuilder, cursors: cursors, now: now, newID: idGenerator, newEndpointID: endpointIDGenerator, publicTCPPortMin: config.PublicTCPPortMin, publicTCPPortMax: config.PublicTCPPortMax, bandwidthDenied: config.BandwidthDenied}, nil
+	return &Service{addressPolicy: config.AddressPolicy, reserved: reserved, repository: repository, endpoint: config.EndpointBuilder, cursors: cursors, now: now, newID: idGenerator, newEndpointID: endpointIDGenerator, publicTCPPortMin: config.PublicTCPPortMin, publicTCPPortMax: config.PublicTCPPortMax, bandwidthThrottled: config.BandwidthThrottled}, nil
 }
 
 // NewEndpointBuilder creates a deployment-specific stable hostname builder.
@@ -446,8 +446,8 @@ func (s *Service) Status(ctx context.Context, request previewtunnelapi.RequestCo
 	if err != nil {
 		return HealthView{}, err
 	}
-	if s.bandwidthDenied != nil {
-		facts.BandwidthExhausted = s.bandwidthDenied(ctx, request.Actor.AccountID, now)
+	if s.bandwidthThrottled != nil {
+		facts.BandwidthThrottled = s.bandwidthThrottled(ctx, request.Actor.AccountID, now)
 	}
 	view = explainHealth(view, facts)
 	if facts.EdgeRefused > 0 {

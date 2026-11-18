@@ -191,7 +191,7 @@ func New(opts Options) (*App, error) {
 	tunnelService, err := tunnelv1.NewService(tunnelRepository, tunnelv1.Config{
 		EndpointBuilder:    tunnelEndpointBuilder,
 		CursorKey:          cursorKey[:],
-		BandwidthDenied:    bandwidthgate.New(store).Denied,
+		BandwidthThrottled: bandwidthgate.New(store).Denied,
 		ReservedSubdomains: opts.Config.Tunnel.ReservedSubdomains,
 		AddressPolicy:      tunnelv1.AddressPolicy{MoveTimeout: opts.Config.Tunnel.AddressMoveTimeout, Cooldown: opts.Config.Tunnel.AddressCooldown},
 	})
@@ -458,7 +458,6 @@ func New(opts Options) (*App, error) {
 	}
 	// Relay grants are withheld, with the typed reason and Billing page, for an account out of
 	// allowance in every workspace; without this the refusal only happened at the relay node.
-	peerNetworkService.ConfigureQuota(consoleBillingURL(opts.Config.Mail.ConsoleOrigin))
 	nativePrivateResolver, err := nativeprivateaccess.NewSQLResolver(store)
 	if err != nil {
 		_ = store.Close()
@@ -523,7 +522,6 @@ func New(opts Options) (*App, error) {
 			edgeControlService.SetHTTP01Responses(opts.CertificateRuntime.HTTP01)
 		}
 		edgeControlService.SetScopedBandwidthDebiter(workspaceBilling)
-		edgeControlService.SetRelayQuotaGate(bandwidthgate.New(store))
 		edgeControlService.SetAuditWriter(auditWriter)
 		edgeControlService.SetSigner(mintKeys)
 		edgeControlHandler = edgeControlService.Handler()
@@ -696,6 +694,7 @@ func New(opts Options) (*App, error) {
 	teamService.ConfigureMail(opts.Config.Mail, opts.Config.Secrets.ResendAPIKey != "")
 	teamService.ConfigurePolicy(opts.Config.WorkspacePolicy)
 	workspaceBilling.ConfigureNotificationMail(opts.Config.Mail, opts.Config.Secrets.ResendAPIKey != "")
+	workspaceBilling.SetThrottleRate(opts.Config.EdgeIngressLimits.Throttled.BytesPerSecond)
 	operatorActions := operatoractions.NewService(store)
 	operatorActions.ConfigureMail(opts.Config.Mail, opts.Config.Secrets.ResendAPIKey != "")
 	abuseReports := abusereports.New(store)
@@ -705,7 +704,7 @@ func New(opts Options) (*App, error) {
 	workspaceBilling.ConfigureTeamTrial(opts.Config.Billing.TeamTrialDays)
 	planlimits.Configure(opts.Config.Billing.Limits, consoleBillingURL(opts.Config.Mail.ConsoleOrigin))
 	planlimits.ConfigureSDKRates(opts.Config.RateLimits)
-	userMachineService.ConfigureRuntimeQuota(workspaceBilling, consoleBillingURL(opts.Config.Mail.ConsoleOrigin))
+	userMachineService.ConfigureRuntimeQuota(workspaceBilling)
 	mailService := &transactionalmail.Service{DB: store, Endpoint: opts.Config.Mail.Endpoint, Key: opts.Config.Secrets.ResendAPIKey}
 
 	operatorService := operator.NewService(store)
@@ -716,7 +715,6 @@ func New(opts Options) (*App, error) {
 	operatorService.SetNodeCapacity(opts.Config.NodeCapacity)
 	resourceUsageService := resourceusage.New(store)
 	resourceUsageService.Analytics = analyticsCapture
-	resourceUsageService.Debiter = workspaceBilling
 	recordingService := recordings.New(store, opts.Config.Recordings, mintKeys, config.NormalizeIssuer(opts.Config.HTTP.PublicBaseURL))
 	teamBuckets := teambucket.New(store, opts.Config.Secrets.EncryptionKey)
 	recordingService.SetBuckets(teamBuckets)

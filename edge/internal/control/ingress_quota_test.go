@@ -15,99 +15,51 @@ import (
 	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 )
 
-// F13-03: a public route the server withheld only for bandwidth quota is refused with the
-// typed reason at admission (never forwarded), and ordinary denial stays generic.
-func TestIngressAuthorityRefusesQuotaDeniedRouteWithTypedReasonAndRecovers(t *testing.T) {
+// A route whose workspace used its fair-use bandwidth keeps its decision (never refused) and the throttle list
+// reaches OnThrottled with the workspace and reset time; recovery empties the list.
+func TestIngressAuthorityKeepsThrottledRouteAdmittedAndReportsThrottle(t *testing.T) {
 	decision := ingressAuthorityTestDecision(time.Now().UTC())
 	resets := time.Date(2026, 12, 1, 0, 0, 0, 0, time.UTC)
-	var exhausted atomic.Bool
+	var throttledNow atomic.Bool
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		denied := []connectorprotocol.IngressQuotaDenial{}
-		decisions := []connectorprotocol.IngressDecision{}
-		if exhausted.Load() {
-			denied = append(denied, connectorprotocol.IngressQuotaDenial{RouteID: decision.Binding.RouteID, Hostname: decision.Binding.Hostname, ResetsAt: resets})
-		} else {
-			decisions = append(decisions, decision)
+		throttled := []connectorprotocol.IngressThrottle{}
+		if throttledNow.Load() {
+			throttled = append(throttled, connectorprotocol.IngressThrottle{Hostname: decision.Binding.Hostname, Workspace: "personal:account_1", ResetsAt: resets})
 		}
-		json.NewEncoder(w).Encode(map[string]any{"complete": true, "decisions": decisions, "quota_denied": denied})
+		json.NewEncoder(w).Encode(map[string]any{"complete": true, "decisions": []connectorprotocol.IngressDecision{decision}, "throttled": throttled})
 	}))
 	defer server.Close()
 	client, err := NewHTTPClient(HTTPConfig{BaseURL: server.URL, Client: server.Client(), Credential: strings.Repeat("x", 32), Timeout: time.Second})
 	if err != nil {
 		t.Fatal(err)
 	}
-	authority := &IngressAuthority{Client: client, NodeID: decision.EdgeNodeID, ProcessEpoch: decision.EdgeProcessEpoch}
+	var reported []connectorprotocol.IngressThrottle
+	authority := &IngressAuthority{Client: client, NodeID: decision.EdgeNodeID, ProcessEpoch: decision.EdgeProcessEpoch, OnThrottled: func(t []connectorprotocol.IngressThrottle) { reported = t }}
 	rule := route.RouteRule{RouteID: decision.Binding.RouteID, TunnelID: decision.Binding.TunnelID, AccountID: decision.Binding.AccountID, ConnectorID: decision.ConnectorID, ConnectorSessionID: decision.SessionID, ConnectorProcessGeneration: decision.ProcessGeneration, ConfigGeneration: decision.ConfigGeneration, AssignmentGeneration: decision.AssignmentGeneration, RouteGeneration: decision.Binding.RouteGeneration, AccessMode: decision.Binding.Audience, ViewerPolicyGeneration: decision.PolicyGeneration, Hostname: decision.Binding.Hostname}
-	if _, err := authority.Resolve(context.Background(), rule); err != nil {
-		t.Fatalf("route with allowance was refused: %v", err)
+	if _, err := authority.Resolve(context.Background(), rule); err != nil || len(reported) != 0 {
+		t.Fatalf("unthrottled route: %v, throttle list %v", err, reported)
 	}
-
-	exhausted.Store(true)
-	authority.Invalidate()
-	if _, err := authority.Resolve(context.Background(), rule); !errors.Is(err, connectorprotocol.ErrIngressQuotaExhausted) || errors.Is(err, connectorprotocol.ErrIngressDenied) {
-		t.Fatalf("quota-denied route: %v, want ErrIngressQuotaExhausted only", err)
-	}
-	var quota connectorprotocol.IngressQuotaError
-	if _, err := authority.Resolve(context.Background(), rule); !errors.As(err, &quota) || !quota.ResetsAt.Equal(resets) {
-		t.Fatalf("quota refusal lost the reset time: %v", err)
-	}
-	other := rule
-	other.Hostname = "unpublished.customer.test"
-	if _, err := authority.Resolve(context.Background(), other); !errors.Is(err, connectorprotocol.ErrIngressDenied) || errors.Is(err, connectorprotocol.ErrIngressQuotaExhausted) {
-		t.Fatalf("unrelated host: %v, want generic denial", err)
-	}
-
-	exhausted.Store(false)
+	throttledNow.Store(true)
 	authority.Invalidate()
 	if _, err := authority.Resolve(context.Background(), rule); err != nil {
-		t.Fatalf("route stayed refused after allowance recovery: %v", err)
+		t.Fatalf("throttled route was refused: %v", err)
+	}
+	if len(reported) != 1 || reported[0].Workspace != "personal:account_1" || !reported[0].ResetsAt.Equal(resets) {
+		t.Fatalf("throttle list = %+v", reported)
+	}
+	throttledNow.Store(false)
+	authority.Invalidate()
+	if _, err := authority.Resolve(context.Background(), rule); err != nil || len(reported) != 0 {
+		t.Fatalf("after recovery: %v, throttle list %v", err, reported)
 	}
 }
 
-// Previews are published through a different projection but get the same typed refusal.
-func TestIngressAuthorityRefusesQuotaDeniedPreviewWithTypedReason(t *testing.T) {
-	var exhausted atomic.Bool
-	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		denied := []connectorprotocol.IngressQuotaDenial{}
-		if exhausted.Load() {
-			denied = append(denied, connectorprotocol.IngressQuotaDenial{RouteID: "route_preview_01", Hostname: "open-amber-road.preview.test"})
-		}
-		json.NewEncoder(w).Encode(map[string]any{"complete": true, "decisions": []connectorprotocol.IngressDecision{}, "quota_denied": denied})
-	}))
-	defer server.Close()
-	client, err := NewHTTPClient(HTTPConfig{BaseURL: server.URL, Client: server.Client(), Credential: strings.Repeat("x", 32), Timeout: time.Second})
-	if err != nil {
-		t.Fatal(err)
-	}
-	authority := &IngressAuthority{Client: client, NodeID: "edge_01", ProcessEpoch: "epoch_0001"}
-	open := connectorprotocol.StreamOpen{Protocol: connectorprotocol.ProtocolName, Version: connectorprotocol.ProtocolVersion, AccountID: "account_01", TunnelID: "tunnel_01", ConnectorID: "connector_01", SessionID: "session_live_01", ProcessGeneration: 1, Generation: 1, RouteID: "route_preview_01", RequestID: "preview-authority", Kind: "http"}
-	resolve := func(host string) error {
-		_, err := authority.ResolvePreview(context.Background(), "preview_01", host, 1, open)
-		return err
-	}
-	exhausted.Store(true)
-	authority.Invalidate()
-	if err := resolve("open-amber-road.preview.test"); !errors.Is(err, connectorprotocol.ErrIngressQuotaExhausted) || errors.Is(err, connectorprotocol.ErrIngressDenied) {
-		t.Fatalf("quota-denied preview: %v, want ErrIngressQuotaExhausted only", err)
-	}
-	if err := resolve("other.preview.test"); !errors.Is(err, connectorprotocol.ErrIngressDenied) || errors.Is(err, connectorprotocol.ErrIngressQuotaExhausted) {
-		t.Fatalf("unrelated preview: %v, want generic denial", err)
-	}
-	exhausted.Store(false)
-	authority.Invalidate()
-	if err := resolve("open-amber-road.preview.test"); errors.Is(err, connectorprotocol.ErrIngressQuotaExhausted) {
-		t.Fatalf("preview stayed quota-denied after recovery: %v", err)
-	}
-}
-
-// A taken-down hostname is withheld with the typed takedown refusal (legal or not), wins over a quota
-// denial for the same name, and still counts as withheld for TLS.
+// A taken-down hostname is withheld with the typed takedown refusal (legal or not), and still counts as withheld for TLS.
 func TestIngressAuthorityRefusesBlockedHostname(t *testing.T) {
 	decision := ingressAuthorityTestDecision(time.Now().UTC())
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]any{"complete": true, "decisions": []connectorprotocol.IngressDecision{},
-			"quota_denied": []connectorprotocol.IngressQuotaDenial{{RouteID: decision.Binding.RouteID, Hostname: decision.Binding.Hostname}},
-			"blocked":      []connectorprotocol.IngressBlock{{Hostname: decision.Binding.Hostname, Legal: true}, {Hostname: "other.customer.test"}}})
+			"blocked": []connectorprotocol.IngressBlock{{Hostname: decision.Binding.Hostname, Legal: true}, {Hostname: "other.customer.test"}}})
 	}))
 	defer server.Close()
 	client, err := NewHTTPClient(HTTPConfig{BaseURL: server.URL, Client: server.Client(), Credential: strings.Repeat("x", 32), Timeout: time.Second})
@@ -117,10 +69,10 @@ func TestIngressAuthorityRefusesBlockedHostname(t *testing.T) {
 	authority := &IngressAuthority{Client: client, NodeID: decision.EdgeNodeID, ProcessEpoch: decision.EdgeProcessEpoch}
 	rule := route.RouteRule{RouteID: decision.Binding.RouteID, Hostname: decision.Binding.Hostname}
 	var blocked connectorprotocol.PublicationBlockedError
-	if _, err := authority.Resolve(context.Background(), rule); !errors.As(err, &blocked) || !blocked.Legal || errors.Is(err, connectorprotocol.ErrIngressQuotaExhausted) {
+	if _, err := authority.Resolve(context.Background(), rule); !errors.As(err, &blocked) || !blocked.Legal {
 		t.Fatalf("blocked route: %v", err)
 	}
-	if !authority.QuotaDenied("other.customer.test") || authority.QuotaDenied("open.customer.test") {
+	if !authority.Withheld("other.customer.test") || authority.Withheld("open.customer.test") {
 		t.Fatal("withheld set wrong for TLS")
 	}
 	other := rule

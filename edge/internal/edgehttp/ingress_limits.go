@@ -22,10 +22,8 @@ const (
 
 // ErrIngressDecisionInvalid reports a decision the edge cannot admit (expired, malformed).
 var ErrIngressDecisionInvalid = errors.New("ingress decision invalid")
-var ErrIngressQuotaExhausted = connectorprotocol.ErrIngressQuotaExhausted
 
 type IngressUsage interface {
-	SubscribeQuota(string, time.Time, func()) func()
 	Record(environment, route string, revision uint64, ingress, egress uint64, authorityID string) error
 }
 
@@ -38,6 +36,9 @@ type IngressLimitConfig struct {
 type IngressLimits struct {
 	Publication IngressLimitConfig
 	Account     IngressLimitConfig
+	// Throttled is the pace of a workspace that used its fair-use bandwidth; Throttles holds the buckets.
+	Throttled IngressLimitConfig
+	Throttles *Throttles
 
 	mu sync.Mutex
 	// reported is set once the applied set has been logged: the first heartbeat answer is logged even when it
@@ -57,7 +58,7 @@ type ingressLimitState struct {
 // heartbeat answer carries the configured one.
 func DefaultIngressLimits() *IngressLimits {
 	set := edgelimits.Default()
-	return &IngressLimits{Publication: ingressLimitConfig(set.Publication), Account: ingressLimitConfig(set.Account)}
+	return &IngressLimits{Publication: ingressLimitConfig(set.Publication), Account: ingressLimitConfig(set.Account), Throttled: ingressLimitConfig(set.Throttled)}
 }
 
 func ingressLimitConfig(l edgelimits.Limit) IngressLimitConfig {
@@ -69,24 +70,26 @@ func (r *DataCarrierRouteRegistry) SetIngressLimits(set edgelimits.IngressLimits
 	if r == nil || r.ingressLimits == nil || set.Validate() != nil {
 		return edgelimits.ErrInvalid
 	}
-	return r.ingressLimits.apply(ingressLimitConfig(set.Publication), ingressLimitConfig(set.Account))
+	return r.ingressLimits.apply(ingressLimitConfig(set.Publication), ingressLimitConfig(set.Account), ingressLimitConfig(set.Throttled))
 }
 
-func (l *IngressLimits) apply(publication, account IngressLimitConfig) error {
-	if !validIngressLimit(publication) || !validIngressLimit(account) {
+func (l *IngressLimits) apply(publication, account, throttled IngressLimitConfig) error {
+	if !validIngressLimit(publication) || !validIngressLimit(account) || !validIngressLimit(throttled) {
 		return edgelimits.ErrInvalid
 	}
 	now := time.Now()
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if l.Publication == publication && l.Account == account && l.reported {
+	if l.Publication == publication && l.Account == account && l.Throttled == throttled && l.reported {
 		return nil
 	}
 	l.reported = true
 	slog.Info("ingress_limits_applied",
 		"publication_bytes_per_second", float64(publication.ByteRate), "publication_byte_burst", publication.ByteBurst,
-		"account_bytes_per_second", float64(account.ByteRate), "account_byte_burst", account.ByteBurst)
-	l.Publication, l.Account = publication, account
+		"account_bytes_per_second", float64(account.ByteRate), "account_byte_burst", account.ByteBurst,
+		"throttled_bytes_per_second", float64(throttled.ByteRate), "throttled_byte_burst", throttled.ByteBurst)
+	l.Publication, l.Account, l.Throttled = publication, account, throttled
+	l.Throttles.configure(throttled, now)
 	for _, state := range l.publications {
 		state.reconfigure(publication, now)
 	}
@@ -105,10 +108,10 @@ func newIngressLimits(config *IngressLimits) (*IngressLimits, error) {
 	if config == nil {
 		config = DefaultIngressLimits()
 	}
-	if !validIngressLimit(config.Publication) || !validIngressLimit(config.Account) {
+	if !validIngressLimit(config.Publication) || !validIngressLimit(config.Account) || !validIngressLimit(config.Throttled) {
 		return nil, edgelimits.ErrInvalid
 	}
-	return &IngressLimits{Publication: config.Publication, Account: config.Account, publications: make(map[string]*ingressLimitState), accounts: make(map[string]*ingressLimitState)}, nil
+	return &IngressLimits{Publication: config.Publication, Account: config.Account, Throttled: config.Throttled, Throttles: newThrottles(config.Throttled), publications: make(map[string]*ingressLimitState), accounts: make(map[string]*ingressLimitState)}, nil
 }
 
 func validIngressLimit(config IngressLimitConfig) bool {
@@ -132,6 +135,13 @@ func (r *DataCarrierRouteRegistry) AcquireIngress(ctx context.Context, decision 
 		return nil, ErrIngressDecisionInvalid
 	}
 	return r.ingressLimits.acquire(decision, r.usage), nil
+}
+
+// SetThrottled makes the registry's ingress carry the listed workspaces' traffic at the throttled rate.
+func (r *DataCarrierRouteRegistry) SetThrottled(entries []connectorprotocol.IngressThrottle) {
+	if r != nil && r.ingressLimits != nil {
+		r.ingressLimits.Throttles.Set(entries)
+	}
 }
 
 // AcquireAdmittedIngress is only for a registered private connection after a
@@ -192,12 +202,9 @@ func (l *IngressLease) Wrap(ctx context.Context, stream io.ReadWriteCloser) io.R
 		l.Release()
 		return stream
 	}
-	streamCtx, cancelCause := context.WithCancelCause(lease.Context())
-	cancel := func() { cancelCause(context.Canceled); lease.Close() }
+	streamCtx, cancelStream := context.WithCancel(lease.Context())
+	cancel := func() { cancelStream(); lease.Close() }
 	s := &meteredIngressStream{ctx: streamCtx, stream: stream, lease: l, cancel: cancel}
-	if l.usage != nil {
-		s.unsubscribeQuota = l.usage.SubscribeQuota(ingressUsageAuthority(l.decision), l.decision.IssuedAt, func() { cancelCause(ErrIngressQuotaExhausted) })
-	}
 	context.AfterFunc(streamCtx, func() { _ = s.Close() })
 	return s
 }
@@ -217,22 +224,18 @@ func (l *IngressLease) Release() {
 }
 
 type meteredIngressStream struct {
-	unsubscribeQuota func()
-	cancel           context.CancelFunc
-	ctx              context.Context
-	stream           io.ReadWriteCloser
-	lease            *IngressLease
-	once             sync.Once
-	closeErr         error
+	cancel   context.CancelFunc
+	ctx      context.Context
+	stream   io.ReadWriteCloser
+	lease    *IngressLease
+	once     sync.Once
+	closeErr error
 }
 
 func (s *meteredIngressStream) Read(payload []byte) (int, error)  { return s.transfer(payload, false) }
 func (s *meteredIngressStream) Write(payload []byte) (int, error) { return s.transfer(payload, true) }
 
 func (s *meteredIngressStream) transfer(payload []byte, ingress bool) (int, error) {
-	if errors.Is(context.Cause(s.ctx), ErrIngressQuotaExhausted) {
-		return 0, ErrIngressQuotaExhausted
-	}
 	total := 0
 	for len(payload) > 0 {
 		chunk := len(payload)
@@ -240,9 +243,6 @@ func (s *meteredIngressStream) transfer(payload []byte, ingress bool) (int, erro
 			chunk = ingressPacingChunk
 		}
 		if err := s.wait(chunk); err != nil {
-			if errors.Is(context.Cause(s.ctx), ErrIngressQuotaExhausted) {
-				return total, ErrIngressQuotaExhausted
-			}
 			return total, err
 		}
 		var n int
@@ -268,9 +268,6 @@ func (s *meteredIngressStream) transfer(payload []byte, ingress bool) (int, erro
 		}
 		payload = payload[n:]
 		if err != nil {
-			if errors.Is(context.Cause(s.ctx), ErrIngressQuotaExhausted) {
-				return total, ErrIngressQuotaExhausted
-			}
 			return total, err
 		}
 		if n == 0 {
@@ -287,7 +284,10 @@ func (s *meteredIngressStream) wait(bytes int) error {
 	if err := s.lease.publication.bytes.WaitN(s.ctx, bytes); err != nil {
 		return err
 	}
-	return s.lease.account.bytes.WaitN(s.ctx, bytes)
+	if err := s.lease.account.bytes.WaitN(s.ctx, bytes); err != nil {
+		return err
+	}
+	return s.lease.limits.Throttles.Wait(s.ctx, s.lease.decision.Binding.Hostname, bytes)
 }
 
 func (s *meteredIngressStream) CloseWrite() error {
@@ -299,9 +299,6 @@ func (s *meteredIngressStream) CloseWrite() error {
 
 func (s *meteredIngressStream) Close() error {
 	s.once.Do(func() {
-		if s.unsubscribeQuota != nil {
-			s.unsubscribeQuota()
-		}
 		s.closeErr = s.stream.Close()
 		s.lease.Release()
 	})

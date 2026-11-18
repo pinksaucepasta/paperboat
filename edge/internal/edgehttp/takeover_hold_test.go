@@ -74,7 +74,7 @@ func TestSharedTLSNameThatCannotBeOursIsNotHeld(t *testing.T) {
 	defer registry.Close()
 	var admitted atomic.Bool
 	time.AfterFunc(700*time.Millisecond, func() { admitted.Store(true) })
-	shared := newSharedTLSListener(raw, &quotaDeniedAuthority{}, registry, func(string) bool { return false }, make(chan struct{}, 4), "", func(string) bool { return admitted.Load() }, nil, nil)
+	shared := newSharedTLSListener(raw, &takedownAuthority{}, registry, func(string) bool { return false }, make(chan struct{}, 4), "", func(string) bool { return admitted.Load() }, nil, nil)
 	shared.ServeUnknownNamesWithPage(serverTLS)
 	shared.routeGrace = func() time.Duration { return 5 * time.Second }
 	shared.holdableName = func(string) bool { return false }
@@ -107,7 +107,7 @@ func TestSharedTLSHoldEndsWhenTheClientLeaves(t *testing.T) {
 	}
 	registry, _ := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 4})
 	defer registry.Close()
-	shared := newSharedTLSListener(raw, &quotaDeniedAuthority{}, registry, func(string) bool { return false }, make(chan struct{}, 4), "", func(string) bool { return false }, nil, nil)
+	shared := newSharedTLSListener(raw, &takedownAuthority{}, registry, func(string) bool { return false }, make(chan struct{}, 4), "", func(string) bool { return false }, nil, nil)
 	defer shared.Close()
 	shared.ServeUnknownNamesWithPage(serverTLS)
 	shared.routeGrace = func() time.Duration { return time.Minute }
@@ -175,7 +175,7 @@ func TestSharedTLSNameShareIsBounded(t *testing.T) {
 	}
 	registry, _ := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 4})
 	defer registry.Close()
-	shared := newSharedTLSListener(raw, &quotaDeniedAuthority{}, registry, func(string) bool { return false }, make(chan struct{}, 4), "", func(string) bool { return true }, nil, nil)
+	shared := newSharedTLSListener(raw, &takedownAuthority{}, registry, func(string) bool { return false }, make(chan struct{}, 4), "", func(string) bool { return true }, nil, nil)
 	server := &http.Server{TLSConfig: serverTLS, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) })}
 	defer server.Close()
 	go server.ServeTLS(shared, "", "")

@@ -22,8 +22,8 @@ type HealthFacts struct {
 	PendingCertificates []string
 	// OriginReason is why the local app is unreachable (refused, timeout, unreachable, tls), or "".
 	OriginReason string
-	// BandwidthExhausted reports that the workspace has used its bandwidth allowance.
-	BandwidthExhausted bool
+	// BandwidthThrottled reports that the workspace used its fair-use bandwidth: its edge traffic is slowed, not stopped.
+	BandwidthThrottled bool
 	// HostConnected reports that the machine running the tunnel holds a live carrier to an edge.
 	HostConnected bool
 	// EngineServed reports that the endpoint engine serves the tunnel: an active tunnel endpoint
@@ -122,10 +122,10 @@ func explainHealth(view HealthView, facts HealthFacts) HealthView {
 		view.OverallCode, view.Summary, view.RepairAction, view.Retrying = code, summary, action, retrying
 		return view
 	}
-	if facts.BandwidthExhausted {
-		view.Dimensions.Access = HealthDimension{Status: "down", Code: "bandwidth_exhausted"}
-		return set("bandwidth_exhausted", "Your workspace has used its bandwidth allowance, so traffic is not forwarded.",
-			"Add bandwidth or change plan on the Billing page; traffic resumes when the allowance is available.", false)
+	if facts.BandwidthThrottled {
+		view.Dimensions.Access = HealthDimension{Status: "degraded", Code: "bandwidth_throttled"}
+		return set("bandwidth_throttled", "Your workspace used its fair-use bandwidth, so public traffic is slowed down. Nothing is stopped.",
+			"Add bandwidth or change plan on the Billing page, or wait for the next billing period; full speed returns then.", false)
 	}
 	if view.OverallCode == "ready" && facts.InsecureRemoteRoute != "" {
 		// Not a failure, but never silent: traffic to a remote origin can be intercepted unseen.

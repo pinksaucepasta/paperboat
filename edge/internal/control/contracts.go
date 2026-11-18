@@ -34,9 +34,8 @@ type UsageSink interface {
 }
 
 type UsageResult struct {
-	QuotaExhausted bool   `json:"quota_exhausted"`
-	Disposition    string `json:"disposition"`
-	Delta          uint64 `json:"delta"`
+	Disposition string `json:"disposition"`
+	Delta       uint64 `json:"delta"`
 }
 
 type RouteAssignment struct {

@@ -7,14 +7,16 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/server/internal/announcements"
 	"github.com/pinksaucepasta/paperboat/server/internal/billing"
 	"github.com/pinksaucepasta/paperboat/server/internal/config"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 )
 
-// F13-03: when a debit uses up the allowance, the owner (personal) or owner and admins (team)
-// get one Activity event and one mail per allowance period, and nobody else does.
-func TestBandwidthExhaustionNoticeGoesOnceToOwnerAndAdminsPostgres(t *testing.T) {
+// F13-03: when a debit uses up the fair-use bandwidth, the owner (personal) or owner and admins (team)
+// get one Activity event and one mail per allowance period, and nobody else does; the bell notice goes to the
+// owner (personal) or every team member, once.
+func TestBandwidthThrottleNoticeGoesOnceToOwnerAndAdminsPostgres(t *testing.T) {
 	store := testStore(t)
 	ctx := context.Background()
 	x := fmt.Sprint(time.Now().UnixNano())
@@ -34,6 +36,7 @@ func TestBandwidthExhaustionNoticeGoesOnceToOwnerAndAdminsPostgres(t *testing.T)
 		for _, q := range []string{
 			`DELETE FROM paperboat.transactional_mail_outbox WHERE mail_id LIKE '%'||$1||'%'`,
 			`DELETE FROM paperboat.audit_events WHERE idempotency_key LIKE '%'||$1||'%'`,
+			`DELETE FROM paperboat.announcements WHERE created_by='system' AND idempotency_key LIKE '%'||$1||'%'`,
 			`DELETE FROM paperboat.billing_workspace_usage_periods WHERE workspace_id LIKE '%'||$1||'%'`,
 			`DELETE FROM paperboat.billing_workspaces WHERE id LIKE '%'||$1||'%'`,
 			`DELETE FROM paperboat.team_members WHERE team_id=$2`,
@@ -65,6 +68,7 @@ func TestBandwidthExhaustionNoticeGoesOnceToOwnerAndAdminsPostgres(t *testing.T)
 
 	s := billing.NewWorkspaceService(store, nil, "")
 	s.ConfigureNotificationMail(config.TransactionalMail{From: "Paperboat <noreply@example.test>", ConsoleOrigin: "https://console.example.test"}, true)
+	s.SetThrottleRate(125_000)
 	debit := func(workspace string, n int64) bool {
 		t.Helper()
 		var exhausted bool
@@ -85,10 +89,10 @@ func TestBandwidthExhaustionNoticeGoesOnceToOwnerAndAdminsPostgres(t *testing.T)
 		return n
 	}
 	notices := func(workspace string) int {
-		return count(`SELECT count(*) FROM paperboat.audit_events WHERE event_type=$1 AND idempotency_key LIKE $2`, billing.BandwidthExhaustedEvent, "bandwidth-exhausted:"+workspace+":%")
+		return count(`SELECT count(*) FROM paperboat.audit_events WHERE event_type=$1 AND idempotency_key LIKE $2`, billing.BandwidthThrottledEvent, "bandwidth-throttled:"+workspace+":%")
 	}
 	mails := func(workspace, account string) int {
-		return count(`SELECT count(*) FROM paperboat.transactional_mail_outbox WHERE mail_id LIKE $1`, "bandwidth-exhausted:"+workspace+":%:"+account)
+		return count(`SELECT count(*) FROM paperboat.transactional_mail_outbox WHERE mail_id LIKE $1`, "bandwidth-throttled:"+workspace+":%:"+account)
 	}
 
 	if debit(soloWorkspace, 60) || notices(soloWorkspace) != 0 {
@@ -106,11 +110,35 @@ func TestBandwidthExhaustionNoticeGoesOnceToOwnerAndAdminsPostgres(t *testing.T)
 		t.Fatal("repeated debits in the same period sent the notice again")
 	}
 	var activityWorkspace string
-	if err := store.SQL().QueryRowContext(ctx, `SELECT activity_workspace_id FROM paperboat.audit_events WHERE event_type=$1 AND resource_id=$2`, billing.BandwidthExhaustedEvent, solo).Scan(&activityWorkspace); err != nil || activityWorkspace != soloWorkspace {
+	if err := store.SQL().QueryRowContext(ctx, `SELECT activity_workspace_id FROM paperboat.audit_events WHERE event_type=$1 AND resource_id=$2`, billing.BandwidthThrottledEvent, solo).Scan(&activityWorkspace); err != nil || activityWorkspace != soloWorkspace {
 		t.Fatalf("event is not in the workspace's Activity feed: %q %v", activityWorkspace, err)
 	}
 
+	bell := func(account string) []string {
+		t.Helper()
+		view, err := announcements.New(store).ForUser(ctx, account)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var titles []string
+		for _, n := range view.Notices {
+			titles = append(titles, n.Title)
+		}
+		return titles
+	}
+	if got := bell(solo); len(got) != 2 || got[0] == got[1] {
+		t.Fatalf("personal bell = %v, want the 80%% notice and the throttled notice once each", got)
+	}
+	if got := bell(owner); len(got) != 0 {
+		t.Fatalf("a personal workspace's notice reached another account: %v", got)
+	}
+
 	debit(teamWorkspace, 150)
+	for _, account := range []string{owner, admin, member} {
+		if got := bell(account); len(got) != 2 {
+			t.Fatalf("team member %s bell = %v, want the team's two notices", account, got)
+		}
+	}
 	if notices(teamWorkspace) != 1 {
 		t.Fatalf("team events=%d, want 1", notices(teamWorkspace))
 	}
@@ -118,7 +146,7 @@ func TestBandwidthExhaustionNoticeGoesOnceToOwnerAndAdminsPostgres(t *testing.T)
 		t.Fatalf("team mails owner=%d admin=%d member=%d, want 1/1/0", mails(teamWorkspace, owner), mails(teamWorkspace, admin), mails(teamWorkspace, member))
 	}
 	var body string
-	if err := store.SQL().QueryRowContext(ctx, `SELECT payload->>'html' FROM paperboat.transactional_mail_outbox WHERE mail_id LIKE $1`, "bandwidth-exhausted:"+teamWorkspace+":%:"+admin).Scan(&body); err != nil || !strings.Contains(body, "https://console.example.test/billing") || !strings.Contains(body, "Direct machine-to-machine traffic keeps working") {
+	if err := store.SQL().QueryRowContext(ctx, `SELECT payload->>'html' FROM paperboat.transactional_mail_outbox WHERE mail_id LIKE $1`, "bandwidth-throttled:"+teamWorkspace+":%:"+admin).Scan(&body); err != nil || !strings.Contains(body, "https://console.example.test/billing") || !strings.Contains(body, "Direct machine-to-machine traffic, relays") {
 		t.Fatalf("mail lacks the billing link or the direct-traffic note: %q %v", body, err)
 	}
 }

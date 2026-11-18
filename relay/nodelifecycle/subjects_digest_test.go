@@ -21,7 +21,7 @@ import (
 
 // Each observation (~3 s) carried every admitted endpoint as a subject: ~400 KB at 4,096 connections.
 // A steady node sends the list once and then only its digest; the control plane asks for it again with
-// subjects_required, and such an answer keeps the node's last quota list.
+// subjects_required.
 func TestObservationSendsSubjectsOnlyWhenTheSetChanged(t *testing.T) {
 	credential := strings.Repeat("test", 16)
 	var mu sync.Mutex
@@ -51,8 +51,6 @@ func TestObservationSendsSubjectsOnlyWhenTheSetChanged(t *testing.T) {
 			digests = append(digests, in.Digest)
 			if require {
 				out.SubjectsRequired, require = true, false
-			} else {
-				out.QuotaDenied = []string{"account_q"}
 			}
 		}
 		mu.Unlock()
@@ -89,9 +87,6 @@ func TestObservationSendsSubjectsOnlyWhenTheSetChanged(t *testing.T) {
 	require = true
 	mu.Unlock()
 	observe() // answered with subjects_required
-	if got := server.QuotaDenied(); !slices.Equal(got, []string{"account_q"}) {
-		t.Fatalf("subjects_required answer replaced the quota list with %v", got)
-	}
 	observe() // resends the list in full
 	observe()
 	mu.Lock()

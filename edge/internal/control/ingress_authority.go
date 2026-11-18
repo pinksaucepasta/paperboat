@@ -25,14 +25,16 @@ type IngressAuthority struct {
 	// Grace, when set and positive, is the remaining window after a handover takeover: a preview miss is asked
 	// again after previewRecheckInGrace instead of IngressRefreshInterval, because the server issues the
 	// replacement's decision a moment after the host's carrier attaches there.
-	Grace         func() time.Duration
+	Grace func() time.Duration
+	// OnThrottled, when set, receives every applied snapshot's throttle list (the edge's byte limiter follows it).
+	OnThrottled   func([]connectorprotocol.IngressThrottle)
 	mu            sync.RWMutex // AdmitsPreview, asked on every missed request, only reads
 	decisions     []connectorprotocol.IngressDecision
-	quotaDenied   map[string]time.Time                        // hostnames withheld only for bandwidth quota (to their reset time), from the same fetch
-	blocked       map[string]bool                             // hostnames taken down by an operator (to whether the takedown is legal), from the same fetch
-	ipRules       map[string]addressRule                      // owner IP allow/deny lists per hostname, from the same fetch
-	offline       map[string]bool                             // preview hostnames whose owner machine is asleep, from the same fetch
-	http01        map[string]connectorprotocol.HTTP01Response // by token, from the same fetch
+	throttled     map[string]connectorprotocol.IngressThrottle // hostnames whose workspace used its fair-use bandwidth, from the same fetch
+	blocked       map[string]bool                              // hostnames taken down by an operator (to whether the takedown is legal), from the same fetch
+	ipRules       map[string]addressRule                       // owner IP allow/deny lists per hostname, from the same fetch
+	offline       map[string]bool                              // preview hostnames whose owner machine is asleep, from the same fetch
+	http01        map[string]connectorprotocol.HTTP01Response  // by token, from the same fetch
 	fetched       time.Time
 	invalidated   bool
 	invalidations uint64 // a fetch started before the latest Invalidate does not clear it
@@ -332,9 +334,12 @@ func (a *IngressAuthority) recordLocked(now time.Time, snapshot IngressSnapshot,
 		a.invalidated = false
 	}
 	a.failures, a.retryAt, a.lastErr, a.outOfSync = 0, time.Time{}, nil, time.Time{}
-	a.quotaDenied = make(map[string]time.Time, len(snapshot.QuotaDenied))
-	for _, d := range snapshot.QuotaDenied {
-		a.quotaDenied[d.Hostname] = d.ResetsAt
+	a.throttled = make(map[string]connectorprotocol.IngressThrottle, len(snapshot.Throttled))
+	for _, t := range snapshot.Throttled {
+		a.throttled[t.Hostname] = t
+	}
+	if a.OnThrottled != nil {
+		a.OnThrottled(snapshot.Throttled)
 	}
 	a.blocked = make(map[string]bool, len(snapshot.Blocked))
 	for _, b := range snapshot.Blocked {
@@ -493,16 +498,14 @@ func (a *IngressAuthority) OwnerOffline(hostname string) bool {
 	return a.offline[hostname]
 }
 
-// QuotaDenied reports whether the last server snapshot withheld the hostname with a typed refusal: its
-// workspace is out of bandwidth allowance, or an operator took it down. The edge then still completes
-// TLS for that name so the request is answered with the typed page (429, or 451/403), instead of a
-// silent connection close.
-func (a *IngressAuthority) QuotaDenied(hostname string) bool {
+// Withheld reports whether the last server snapshot withheld the hostname because an operator took it down.
+// The edge still completes TLS for that name so the request is answered with the takedown page (451 or 403)
+// instead of a silent connection close.
+func (a *IngressAuthority) Withheld(hostname string) bool {
 	return a.withheldError(hostname) != nil
 }
 
-// withheldError is the typed refusal for a taken-down hostname, or for a quota-denied one with its reset time;
-// nil otherwise. A takedown wins over the quota.
+// withheldError is the typed refusal for a taken-down hostname; nil otherwise.
 func (a *IngressAuthority) withheldError(hostname string) error {
 	if a == nil {
 		return nil
@@ -512,11 +515,7 @@ func (a *IngressAuthority) withheldError(hostname string) error {
 	if legal, blocked := a.blocked[hostname]; blocked {
 		return connectorprotocol.PublicationBlockedError{Legal: legal}
 	}
-	resetsAt, denied := a.quotaDenied[hostname]
-	if !denied {
-		return nil
-	}
-	return connectorprotocol.IngressQuotaError{ResetsAt: resetsAt}
+	return nil
 }
 
 func (a *IngressAuthority) Resolve(ctx context.Context, r route.RouteRule) (connectorprotocol.IngressDecision, error) {
@@ -542,7 +541,7 @@ func (a *IngressAuthority) Resolve(ctx context.Context, r route.RouteRule) (conn
 			}
 		}
 	}
-	// The route exists but its workspace is out of allowance: say so, never forward.
+	// The route exists but an operator took it down: say so, never forward.
 	if err := a.withheldError(r.Hostname); err != nil {
 		return connectorprotocol.IngressDecision{}, err
 	}
@@ -575,8 +574,8 @@ func (a *IngressAuthority) ResolvePreview(ctx context.Context, publication, host
 	if d, ok := selectDecision(decisions); ok {
 		return d, nil
 	}
-	// Withheld only because the workspace is out of allowance: refuse with the typed reason,
-	// without the readiness refresh below (nothing about origin readiness can change it).
+	// Taken down by an operator: refuse with the typed reason, without the readiness refresh
+	// below (nothing about origin readiness can change it).
 	if err := a.withheldError(hostname); err != nil {
 		return connectorprotocol.IngressDecision{}, err
 	}

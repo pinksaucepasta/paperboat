@@ -99,9 +99,9 @@ type Config struct {
 	ReservedSubdomains []string
 	// AddressPolicy bounds an address change (move timeout, cooldown of the old name); required to change an address.
 	AddressPolicy AddressPolicy
-	// BandwidthDenied, when set, reports whether the account's workspaces are out of bandwidth
-	// allowance so status can say so. It must fail open.
-	BandwidthDenied func(ctx context.Context, accountID string, at time.Time) bool
+	// BandwidthThrottled, when set, reports whether the account's workspaces used their fair-use
+	// bandwidth, so status can say traffic is slowed. It must fail open.
+	BandwidthThrottled func(ctx context.Context, accountID string, at time.Time) bool
 }
 
 type ExpiryReconcileRequest struct {

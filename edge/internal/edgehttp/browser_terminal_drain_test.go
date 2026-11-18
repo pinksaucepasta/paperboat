@@ -230,7 +230,7 @@ func TestMovedByHandOverOnlyForASessionTheHubEnded(t *testing.T) {
 	if !hub.MovedByHandOver(bridgeEnd{"shared_output", ErrBrowserTerminalHubEnded}) || !hub.MovedByHandOver(errors.Join(errors.New("x"), ErrBrowserTerminalHubEnded)) {
 		t.Fatal("a session the hub ended after the hand over is not a move")
 	}
-	for _, cause := range []error{nil, context.Canceled, bridgeEnd{"browser_read", errors.New("eof")}, ErrIngressQuotaExhausted} {
+	for _, cause := range []error{nil, context.Canceled, bridgeEnd{"browser_read", errors.New("eof")}} {
 		if hub.MovedByHandOver(cause) {
 			t.Fatalf("%v counted as moved by the hand over", cause)
 		}

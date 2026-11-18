@@ -6,6 +6,7 @@ package browseringress
 import (
 	"context"
 	"database/sql"
+	"errors"
 	wire "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	"log/slog"
 	"net"
@@ -148,11 +149,16 @@ func (s *Service) recordUsage(ctx context.Context, a browseraccess.Authorization
 	if team != "" {
 		actor = a.AccountID
 	}
-	return accountingauthority.Record(ctx, s.DB, accountingauthority.Binding{
+	// A throttled workspace is still admitted: its edge carries the traffic at the throttled rate.
+	err := accountingauthority.Record(ctx, s.DB, accountingauthority.Binding{
 		ID: "grant:" + a.GrantID, Node: d.EdgeNodeID, Environment: b.EnvironmentID,
 		Route: b.RouteID, Revision: int64(b.RouteGeneration), User: actor, Team: team,
 		IssuedAt: d.IssuedAt, ExpiresAt: d.ExpiresAt,
 	}, s.Quota)
+	if errors.Is(err, accountingauthority.ErrThrottled) {
+		return nil
+	}
+	return err
 }
 
 func (s *Service) preview(ctx context.Context, a browseraccess.Authorization, node, epoch string) (wire.IngressDecision, error) {
