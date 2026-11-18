@@ -276,7 +276,13 @@ func (s *Service) MutateNode(ctx context.Context, actor, key string, in NodeMuta
 				return err
 			}
 		case "update":
-			if in.Revision < 1 || !validNode(in) || in.Site != "" {
+			// The shape is checked before the stored state is read, so bad input is a 400 even on a stale revision;
+			// the usage key (kept from the stored configuration when left out) is checked once it is known.
+			shape := in
+			if len(shape.UsagePublicKey) == 0 {
+				shape.UsagePublicKey = make([]byte, 32)
+			}
+			if in.Revision < 1 || in.Site != "" || !validNode(shape) {
 				return ErrInvalid
 			}
 			var previousRaw []byte
@@ -288,6 +294,14 @@ func (s *Service) MutateNode(ctx context.Context, actor, key string, in NodeMuta
 			var previous nodeConfig
 			if err := json.Unmarshal(previousRaw, &previous); err != nil {
 				return err
+			}
+			// The usage key is write-only (the read model never returns it) and immutable, so an update that leaves it
+			// out keeps the enrolled one; a different key still conflicts below. Enrolment always needs it.
+			if len(in.UsagePublicKey) == 0 {
+				in.UsagePublicKey = previous.UsagePublicKey
+			}
+			if !validNode(in) {
+				return ErrInvalid
 			}
 			if !bytes.Equal(previous.UsagePublicKey, in.UsagePublicKey) || !bytes.Equal(previous.PeerWireGuardPublicKey, in.PeerWireGuardPublicKey) || !bytes.Equal(previous.PeerDiscoPublicKey, in.PeerDiscoPublicKey) || previous.PeerVirtualAddress != in.PeerVirtualAddress {
 				return ErrConflict

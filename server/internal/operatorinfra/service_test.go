@@ -1,6 +1,7 @@
 package operatorinfra
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
@@ -210,5 +211,72 @@ func TestOperatorNodeSiteIsSetByTheSiteAction(t *testing.T) {
 	in.Action, in.Revision, in.Site = "update", enrolled.Node.Revision, "Mumbai"
 	if _, err = s.MutateNode(ctx, admin, "update-site-"+x, in); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("update carrying a site: %v", err)
+	}
+}
+
+// The usage key is write-only: the read model never returns it, so an update that leaves it out keeps the enrolled
+// one, the same key is still accepted, a different key is refused as immutable, and enrolling needs the key.
+func TestOperatorNodeUpdateKeepsStoredUsageKey(t *testing.T) {
+	store := infraTestDB(t)
+	ctx := context.Background()
+	x := fmt.Sprint(time.Now().UnixNano())
+	admin := "infra_admin_" + x
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.operator_accounts(id,email,password_hash,status,role) VALUES($1,$1||'@test.invalid','unused test login','active','admin')`, admin); err != nil {
+		t.Fatal(err)
+	}
+	s := NewService(store, "operator-infrastructure-test-key-32-bytes")
+	region, err := s.MutateRegion(ctx, admin, "region-create-"+x, RegionMutation{Action: "create", ID: "region_" + x, DisplayName: "Test region", Reason: "case:test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := bytes.Repeat([]byte{7}, 32)
+	in := NodeMutation{Action: "enroll", NodeID: "managed_" + x, RegionID: region.ID, EdgePool: "managed:" + region.ID, FailureDomain: "zone-a", EndpointHost: "edge.example.test", EndpointTCPPort: 24443, EndpointQUICPort: 24444, Reason: "case:test", Roles: []string{"edge"}, Transports: []string{"http3"}, CapacityLimit: 8, UsagePublicKey: key}
+	noKey := in
+	noKey.UsagePublicKey = nil
+	if _, err = s.MutateNode(ctx, admin, "enroll-nokey-"+x, noKey); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("enrolling an edge without the usage key: %v", err)
+	}
+	enrolled, err := s.MutateNode(ctx, admin, "enroll-"+x, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored := func() []byte {
+		var raw []byte
+		if err := store.SQL().QueryRowContext(ctx, `SELECT config FROM paperboat.managed_node_authority WHERE node_id=$1`, in.NodeID).Scan(&raw); err != nil {
+			t.Fatal(err)
+		}
+		var config nodeConfig
+		if err := json.Unmarshal(raw, &config); err != nil {
+			t.Fatal(err)
+		}
+		return config.UsagePublicKey
+	}
+	update := in
+	update.Action, update.Revision, update.EndpointHost = "update", enrolled.Node.Revision, "edge-2.example.test"
+	update.UsagePublicKey = nil
+	changed, err := s.MutateNode(ctx, admin, "update-nokey-"+x, update)
+	if err != nil || changed.Node.EndpointHost != "edge-2.example.test" || !bytes.Equal(stored(), key) {
+		t.Fatalf("update without the key: %+v err=%v stored=%x", changed.Node, err, stored())
+	}
+	update.Revision, update.EndpointHost, update.UsagePublicKey = changed.Node.Revision, "edge-3.example.test", key
+	changed, err = s.MutateNode(ctx, admin, "update-same-"+x, update)
+	if err != nil || !bytes.Equal(stored(), key) {
+		t.Fatalf("update with the same key: err=%v", err)
+	}
+	// Bad input is a 400 even when the revision is stale.
+	bad := update
+	bad.Revision, bad.EndpointHost, bad.UsagePublicKey = 1, "", nil
+	if _, err = s.MutateNode(ctx, admin, "update-bad-"+x, bad); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("invalid input on a stale revision: %v", err)
+	}
+	update.Revision, update.UsagePublicKey = changed.Node.Revision, bytes.Repeat([]byte{9}, 32)
+	if _, err = s.MutateNode(ctx, admin, "update-other-"+x, update); !errors.Is(err, ErrConflict) || !bytes.Equal(stored(), key) {
+		t.Fatalf("update with a different key: %v", err)
+	}
+	// Everything else in the update still validates against the kept key.
+	update.UsagePublicKey = nil
+	update.Roles, update.Transports, update.CapacityLimit = []string{"edge", "relay"}, []string{"http3", "derp_quic", "derp_wss"}, 8
+	if _, err = s.MutateNode(ctx, admin, "update-roles-"+x, update); err != nil {
+		t.Fatalf("keyless update adding a relay role: %v", err)
 	}
 }

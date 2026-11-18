@@ -69,7 +69,8 @@ const writes = []
 const world = {
   regionsFail: true,
   regions: [{ id: "eu", display_name: "Europe", enabled: true, revision: 2, updated_at: "2026-11-17T09:00:00Z" }],
-  nodes: [{ id: "node_1", protocol_version: "1.0", region_id: "eu", edge_pool: "a", failure_domain: "x", state: "ready", endpoint_host: "edge.example.test", endpoint_tcp_port: 443, endpoint_quic_port: 443, roles: ["relay"], transports: ["tcp"], capacity_limit: 10, revision: 1, node_generation: 1, registry_expires_at: "2026-11-18T00:00:00Z", ready: true, observed_at: "2026-11-17T09:00:00Z" }],
+  nodes: [{ id: "node_1", protocol_version: "1.0", region_id: "eu", edge_pool: "a", failure_domain: "x", state: "ready", endpoint_host: "edge.example.test", endpoint_tcp_port: 443, endpoint_quic_port: 443, roles: ["relay"], transports: ["tcp"], capacity_limit: 10, revision: 1, node_generation: 1, registry_expires_at: "2026-11-18T00:00:00Z", ready: true, observed_at: "2026-11-17T09:00:00Z" },
+    { id: "edge_1", protocol_version: "1.0", region_id: "eu", edge_pool: "a", failure_domain: "x", state: "ready", endpoint_host: "edge-1.example.test", endpoint_tcp_port: 443, endpoint_quic_port: 8443, roles: ["edge"], transports: ["http3", "http2"], capacity_limit: 10, revision: 4, node_generation: 1, registry_expires_at: "2026-11-18T00:00:00Z", ready: true, observed_at: "2026-11-17T09:00:00Z" }],
   installs: [],
   serverNodes: [{ id: "srv_1", region: "eu", state: "active", version: "dev-abc1234", commit: "abc1234", started_at: "2026-11-17T09:00:00Z", last_seen_at: "2026-11-17T09:00:00Z", healthy: true, public_address: "203.0.113.9" }],
   policy: { personal_allowance_bytes: 5e9, team_allowance_bytes: null, revision: 3 },
@@ -523,6 +524,19 @@ try {
     await d.getByRole("button", { name: "Retire", exact: true }).click()
     await p.waitForFunction(() => !document.querySelector('[data-action-dialog="Retire node_1"]'))
     expect(lastWrite().path === "/v1/admin/nodes/node_1/retire", "retire write")
+  })
+  await step("managed node: editing keeps the enrolled usage key, so there is nothing to paste and none is sent", async () => {
+    await p.getByRole("tab", { name: "Managed nodes" }).click()
+    await waitReady("nodes")
+    await p.locator('[data-node-actions="edge_1"]').getByRole("button", { name: "Edit" }).click()
+    const d = dialog("Update edge_1")
+    expect((await d.getByLabel(/Usage public key/).count()) === 0, "the edit form asks for the usage key")
+    expect((await d.innerText()).includes("enrolled usage public key is kept"), "the hint does not say the key is kept")
+    await d.getByLabel("Public hostname").fill("edge-1b.example.test")
+    await submit(d, "Save configuration")
+    await p.waitForFunction(() => !document.querySelector('[data-action-dialog="Update edge_1"]'))
+    const w = lastWrite()
+    expect(w.path === "/v1/admin/nodes/edge_1/update" && w.body.revision === 4 && w.body.endpoint_host === "edge-1b.example.test" && !("usage_public_key" in w.body), `update body ${JSON.stringify(w.body)}`)
   })
   await step("regions: create, and disable asks for the region id", async () => {
     await p.getByRole("tab", { name: "Regions" }).click()

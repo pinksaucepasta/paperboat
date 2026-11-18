@@ -26,17 +26,18 @@ function shape(kind: string) {
 type Config = { region: string; pool: string; domain: string; host: string; tcp: string; quic: string; capacity: string; kind: string; usageKey: string }
 const empty: Config = { region: "", pool: "", domain: "", host: "", tcp: "443", quic: "27446", capacity: "1000", kind: "edge", usageKey: "" }
 const slug = /^[a-z][a-z0-9_-]{0,62}$/
-const configValid = (c: Config) => slug.test(c.region) && c.pool !== "" && c.domain !== "" && c.host !== "" && +c.tcp > 0 && +c.tcp < 65536 && +c.quic > 0 && +c.quic < 65536 && c.tcp !== c.quic && +c.capacity > 0 && (c.kind === "relay" || c.usageKey !== "")
+/** The usage key is needed to enrol; an update keeps the enrolled one (the server holds it, write-only). */
+const configValid = (c: Config, enrolling = true) => slug.test(c.region) && c.pool !== "" && c.domain !== "" && c.host !== "" && +c.tcp > 0 && +c.tcp < 65536 && +c.quic > 0 && +c.quic < 65536 && c.tcp !== c.quic && +c.capacity > 0 && (!enrolling || c.kind === "relay" || c.usageKey !== "")
 const body = (c: Config, revision: number, withKey: boolean) => ({
   revision, region_id: c.region, edge_pool: c.pool, failure_domain: c.domain, endpoint_host: c.host, endpoint_tcp_port: +c.tcp, endpoint_quic_port: +c.quic,
   capacity_limit: +c.capacity, ...shape(c.kind), ...(withKey && c.usageKey ? { usage_public_key: c.usageKey } : {}),
 })
 
-function ConfigFields({ c, set, regions, keyHint, onSeed }: { c: Config; set: (c: Config) => void; regions: string[]; keyHint?: React.ReactNode; onSeed?: (seed: string, key: string) => void }) {
+function ConfigFields({ c, set, regions, keyHint, onSeed, lockKind }: { c: Config; set: (c: Config) => void; regions: string[]; keyHint?: React.ReactNode; onSeed?: (seed: string, key: string) => void; lockKind?: boolean }) {
   const [generated, setGenerated] = useState(false)
   return (
     <>
-      <SelectField label="Kind" value={c.kind} onChange={(kind) => set({ ...c, kind })} options={kinds} />
+      <SelectField label="Kind" value={c.kind} onChange={(kind) => set({ ...c, kind })} options={kinds} disabled={lockKind} hint={lockKind ? "A relay cannot become an edge: an edge needs a usage key at enrolment. Retire it and enrol an edge." : undefined} />
       <SelectField label="Region" value={c.region} onChange={(region) => set({ ...c, region })} options={[["", "Choose a region"], ...regions.map((r): [string, string] => [r, r])]} hint="Create the region first on the Regions tab." />
       <TextField label="Pool" value={c.pool} onChange={(pool) => set({ ...c, pool })} hint="Edge pool or relay pool name." />
       <TextField label="Failure domain" value={c.domain} onChange={(domain) => set({ ...c, domain })} hint="A name for what fails together (a rack, a provider zone)." />
@@ -48,7 +49,7 @@ function ConfigFields({ c, set, regions, keyHint, onSeed }: { c: Config; set: (c
       </div>
       {c.kind !== "relay" && (
         <>
-          <TextField label="Usage public key (base64, 32 bytes)" value={c.usageKey} onChange={(usageKey) => set({ ...c, usageKey })} hint="Signs the edge's traffic reports. Immutable after enrolment." />
+          {!keyHint && <TextField label="Usage public key (base64, 32 bytes)" value={c.usageKey} onChange={(usageKey) => set({ ...c, usageKey })} hint="Signs the edge's traffic reports. Immutable after enrolment." />}
           {keyHint ?? (
             <Button
               type="button"
@@ -141,14 +142,14 @@ function NodeActions({ node, regions, admin }: { node: Node; regions: string[]; 
       </ActionDialog>
       <ActionDialog
         title={`Update ${node.id}`}
-        description="Changes the approved configuration. The old process epoch is fenced: deploy the new configuration with the returned generation. The usage key cannot change."
+        description="Changes the approved configuration. The old process epoch is fenced: deploy the new configuration with the returned generation. The usage key is kept and cannot change."
         target={node.id}
         submitLabel="Save configuration"
-        valid={configValid(c)}
+        valid={configValid(c, false)}
         trigger={(open) => <Button size="xs" variant="outline" onClick={open}>Edit</Button>}
-        run={(h) => operatorAction("POST", path("update"), h, body(c, node.revision, true))}
+        run={(h) => operatorAction("POST", path("update"), h, body(c, node.revision, false))}
       >
-        <ConfigFields c={c} set={setC} regions={regions} keyHint={<span className="text-xs text-muted-foreground">The server needs the usage public key sent again, exactly as enrolled; it cannot change and is not shown back.</span>} />
+        <ConfigFields c={c} set={setC} regions={regions} lockKind={nodeKind(node) === "relay"} keyHint={<span className="text-xs text-muted-foreground">The enrolled usage public key is kept: nothing to paste. It cannot change.</span>} />
       </ActionDialog>
       <ActionDialog
         title={`Rotate the credential of ${node.id}`}
