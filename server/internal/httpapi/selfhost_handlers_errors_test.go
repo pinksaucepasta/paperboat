@@ -94,6 +94,44 @@ func TestSelfhostPureDenialKeepsPublicRejection(t *testing.T) {
 	}
 }
 
+// A refusal carries the same identity as a failure: support_reference, request_id and correlation_id in the body
+// and no-store, so what a customer quotes from a 4xx or a 401 can be looked up.
+func TestSelfhostDenialCarriesSupportIdentity(t *testing.T) {
+	for _, c := range []struct {
+		err    error
+		status int
+		code   string
+	}{
+		{selfhost.ErrInvalid, 400, "invalid_request"},
+		{selfhost.ErrUnauthorized, 403, "installation_unauthorized"},
+		{selfhost.ErrInstallationNotFound, 404, "installation_not_found"},
+		{selfhost.ErrUsed, 409, "enrollment_used"},
+		{selfhost.ErrExpired, 410, "enrollment_expired"},
+		{selfhost.ErrLimit, 429, "selfhost_limit"},
+	} {
+		request, _, reference := diagnosticRequest("/v1/network/selfhost/installations")
+		response := httptest.NewRecorder()
+		selfhostError(response, request, c.err)
+		var body ErrorResponse
+		if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+			t.Fatalf("%v: %v", c.err, err)
+		}
+		if response.Code != c.status || body.Error.Code != c.code || body.Error.SupportReference != reference || body.Error.RequestID != "request_fault_01" || body.Error.CorrelationID != "correlation_fault_01" {
+			t.Fatalf("%v: %d %+v", c.err, response.Code, body.Error)
+		}
+		if response.Header().Get("Cache-Control") != "no-store" {
+			t.Fatalf("%v: Cache-Control = %q", c.err, response.Header().Get("Cache-Control"))
+		}
+	}
+	request, _, reference := diagnosticRequest("/v1/network/selfhost/installations")
+	response := httptest.NewRecorder()
+	(&SelfhostHandlers{Service: &selfhost.Service{}}).Account(response, request)
+	var body ErrorResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil || response.Code != 401 || body.Error.Code != "unauthenticated" || body.Error.SupportReference != reference || response.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("unauthenticated: %d %s", response.Code, response.Body.String())
+	}
+}
+
 func openSelfhostClosedPostgres(t *testing.T) *db.DB {
 	t.Helper()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")

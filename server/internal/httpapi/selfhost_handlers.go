@@ -21,6 +21,7 @@ func selfhostJSON(w http.ResponseWriter, status int, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 func selfhostError(w http.ResponseWriter, r *http.Request, e error) {
+	w.Header().Set("Cache-Control", "no-store")
 	status, code, message := 503, "selfhost_unavailable", "Server enrollment is unavailable; retry shortly."
 	switch {
 	case expectedHTTPErrorOnly(e, selfhost.ErrInvalid):
@@ -44,13 +45,9 @@ func selfhostError(w http.ResponseWriter, r *http.Request, e error) {
 	case expectedHTTPErrorOnly(e, selfhost.ErrIncompatibleTopology):
 		status, code, message = 409, "selfhost_topology_incompatible", e.Error()
 	}
-	if status >= http.StatusInternalServerError {
-		w.Header().Set("Cache-Control", "no-store")
-		writeError(w, r, status, code, message, e)
-		return
-	}
-	logHTTPRejection(r, status, code, e)
-	selfhostJSON(w, status, map[string]any{"error": map[string]any{"code": code, "message": message}})
+	// Every answer, a refusal too, carries the support reference and request id in its body and is recorded
+	// under that reference, so a customer who quotes it from a 4xx can be found.
+	writeError(w, r, status, code, message, e)
 }
 func selfhostRead(w http.ResponseWriter, r *http.Request) ([]byte, error) {
 	if !strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
@@ -79,7 +76,8 @@ func (h *SelfhostHandlers) handle(w http.ResponseWriter, r *http.Request, operat
 	}
 	principal, ok := principalFromContext(r.Context())
 	if !ok || principal.User.ID == "" {
-		selfhostJSON(w, 401, map[string]any{"error": map[string]string{"code": "unauthenticated", "message": "Sign into Paperboat."}})
+		w.Header().Set("Cache-Control", "no-store")
+		writeError(w, r, 401, "unauthenticated", "Sign into Paperboat.")
 		return
 	}
 	actor := principal.User.ID
