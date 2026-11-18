@@ -1,9 +1,6 @@
 package tools
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,183 +9,188 @@ import (
 	"testing"
 )
 
-// renderWindowsInstaller renders install.ps1 from signed-looking metadata that pins fake. Every product pins the same bytes,
-// so the architecture PowerShell reports on this machine does not matter.
-func renderWindowsInstaller(t *testing.T, fake []byte, authenticodeMarked bool) string {
-	t.Helper()
-	if _, err := exec.LookPath("python3"); err != nil {
-		t.Skip("python3 unavailable")
-	}
-	sum := sha256.Sum256(fake)
-	digest := hex.EncodeToString(sum[:])
-	const version = "2026.11.09.1"
-	targets := map[string]any{}
-	for _, product := range []struct{ name, platform, arch, format string }{
-		{"pb-linux-amd64", "linux", "amd64", "elf"}, {"pb-linux-arm64", "linux", "arm64", "elf"}, {"pb-darwin-arm64", "darwin", "arm64", "macho"},
-		{"pb-windows-amd64.exe", "windows", "amd64", "pe"}, {"pb-windows-arm64.exe", "windows", "arm64", "pe"},
-	} {
-		custom := map[string]any{"schema": "paperboat.tuf-asset/v1", "kind": "github-release-asset", "version": version, "platform": product.platform, "architecture": product.arch, "format": product.format, "asset_name": product.name, "repository": "example/paperboat", "url": "https://github.com/example/paperboat/releases/download/" + version + "/" + product.name, "sha256": digest, "length": len(fake)}
-		if product.platform == "windows" && authenticodeMarked {
-			custom["release_index"] = map[string]any{"targets": []any{map[string]any{"authenticode_signed": true}}}
-		}
-		targets[product.name] = map[string]any{"custom": custom, "hashes": map[string]any{"sha256": digest}, "length": len(fake)}
-	}
-	root := t.TempDir()
-	body, _ := json.Marshal(map[string]any{"signed": map[string]any{"targets": targets}})
-	metadata := filepath.Join(root, "targets.json")
-	if err := os.WriteFile(metadata, body, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	windows := filepath.Join(root, "windows")
-	render := exec.Command("python3", "render-installers.py", metadata, filepath.Join(root, "install"), windows)
-	render.Env = append(os.Environ(), "PAPERBOAT_WINDOWS_PUBLISHER=Paperboat Test Publisher")
-	if out, err := render.CombinedOutput(); err != nil {
-		t.Fatalf("render: %v: %s", err, out)
-	}
-	return windows
-}
+// fakePB answers like pb for the calls the PowerShell installer makes and logs each one.
+const fakePB = "#!/bin/sh\necho \"pb $*\" >> \"$FAKE_LOG\"\n" +
+	"case \"$1\" in\n" +
+	"install) printf '{\"ok\":true,\"data\":{\"executable\":\"%s\"}}' \"$FAKE_PB\" ;;\n" +
+	"reset) printf '{\"ok\":true,\"data\":{\"resume\":false,\"executable\":\"\"}}' ;;\n" +
+	"esac\n"
 
-// runWindowsInstaller runs the rendered installer in real PowerShell with the download replaced by a copy of fake. It returns what the
-// fake pb was asked to do, one call per line, and the installer's own error.
-func runWindowsInstaller(t *testing.T, installer string, fake []byte, served []byte, signature string) (calls []string, output string, runErr error) {
+func findPwsh(t *testing.T) string {
 	t.Helper()
-	shell := ""
 	for _, name := range []string{"pwsh", "powershell"} {
 		if path, err := exec.LookPath(name); err == nil {
-			shell = path
-			break
+			return path
 		}
 	}
-	if shell == "" {
-		t.Skip("PowerShell not installed")
-	}
+	t.Skip("PowerShell not installed")
+	return ""
+}
+
+// windowsRelease is a signed fake release holding both Windows products.
+func windowsRelease(t *testing.T) *fakeRelease {
+	t.Helper()
+	r := newFakeRelease(t, "Linux", "x86_64", "pb-windows-amd64.exe", fakePB)
+	r.addAsset(t, "pb-windows-arm64.exe", fakePB)
+	return r
+}
+
+// runWindowsInstaller runs install.ps1 in real PowerShell with GitHub replaced by the fake release. It returns the calls
+// the fake pb and the fake downloads saw, one per line, and the installer's own error.
+func runWindowsInstaller(t *testing.T, r *fakeRelease, noSshKeygen bool, env ...string) (calls []string, output string, runErr error) {
+	t.Helper()
+	shell := findPwsh(t)
 	if runtime.GOOS == "windows" {
 		t.Skip("the fake pb is a shell script; the Windows path is checked on a Windows machine")
 	}
-	dir := t.TempDir()
-	pb := filepath.Join(dir, "pb")
-	log := filepath.Join(dir, "calls")
-	if err := os.WriteFile(pb, fake, 0o755); err != nil {
+	log := filepath.Join(r.root, "calls")
+	pb := filepath.Join(r.root, "pb")
+	if err := os.WriteFile(pb, []byte(fakePB), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	servedFile := filepath.Join(dir, "served")
-	if err := os.WriteFile(servedFile, served, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	harness := filepath.Join(dir, "harness.ps1")
-	script := "function Invoke-WebRequest { param([string]$Uri, [string]$OutFile, [switch]$UseBasicParsing, $TimeoutSec, $MaximumRedirection)\n" +
-		"  Add-Content -LiteralPath $env:FAKE_LOG -Value ('download ' + $Uri); Copy-Item -LiteralPath $env:FAKE_SERVED -Destination $OutFile; & chmod 0755 $OutFile }\n" +
+	harness := filepath.Join(r.root, "harness.ps1")
+	script := "function Invoke-WebRequest { param([string]$Uri, [string]$OutFile, [switch]$UseBasicParsing, $TimeoutSec, $MaximumRedirection, $Method)\n" +
+		"  Add-Content -LiteralPath $env:FAKE_LOG -Value ('download ' + $Uri)\n" +
+		"  if ($Uri -eq ('https://github.com/' + $env:PB_REPO + '/releases/latest')) {\n" +
+		"    $resolved = [uri]('https://github.com/' + $env:PB_REPO + '/releases/tag/' + $env:FAKE_LATEST)\n" +
+		"    return [pscustomobject]@{ BaseResponse = [pscustomobject]@{ ResponseUri = $resolved } } }\n" +
+		"  $parts = $Uri -split '/'\n" +
+		"  $source = Join-Path (Join-Path $env:FAKE_RELEASES $parts[-2]) $parts[-1]\n" +
+		"  if (-not (Test-Path -LiteralPath $source)) { throw ('404 ' + $Uri) }\n" +
+		"  Copy-Item -LiteralPath $source -Destination $OutFile; if ($OutFile -like '*pb-windows-*') { & chmod 0755 $OutFile } }\n" +
 		"function Unblock-File { param($LiteralPath) }\n" +
-		// The signature check is a Windows cmdlet: FAKE_SIG is "<status>|<signer>".
-		"function Get-AuthenticodeSignature { param($LiteralPath) $p = $env:FAKE_SIG -split '[|]'; $c = New-Object psobject; " +
-		"$c | Add-Member -MemberType ScriptMethod -Name GetNameInfo -Value { param($t, $f) $p[1] }.GetNewClosure(); " +
-		"[pscustomobject]@{ Status = $p[0]; SignerCertificate = $c } }\n" +
-		"$env:FAKE_SIGNATURE_CHECKED = ''\n$ErrorActionPreference = 'Stop'\n" +
-		// pwsh on Linux is not Windows: the installer's OS guard (checked by its own test) is cut out so its download logic runs here.
-		"$text = (Get-Content -Raw -LiteralPath '" + installer + "') -replace '(?m)^if \\(\\$PSVersionTable\\.PSEdition -eq ''Core'' -and -not \\$IsWindows\\).*$', ''\nInvoke-Expression $text\n"
+		"$ErrorActionPreference = 'Stop'\n"
+	if noSshKeygen {
+		script += "$env:PATH = '" + filepath.Join(r.root, "empty") + "'\n"
+	}
+	// pwsh on Linux is not Windows: the installer's OS guard (checked by its own test) is cut out so its download logic runs here.
+	script += "$text = (Get-Content -Raw -LiteralPath '" + r.powershell + "') -replace '(?m)^if \\(\\$PSVersionTable\\.PSEdition -eq ''Core'' -and -not \\$IsWindows\\).*$', ''\nInvoke-Expression $text\n"
 	if err := os.WriteFile(harness, []byte(script), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.MkdirAll(filepath.Join(r.root, "empty"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	command := exec.Command(shell, "-NoLogo", "-NoProfile", "-NonInteractive", "-File", harness)
-	command.Env = append(os.Environ(), "FAKE_LOG="+log, "FAKE_SERVED="+servedFile, "FAKE_PB="+pb, "PAPERBOAT_ENROLLMENT_TOKEN=", "FAKE_SIG="+signature)
+	command.Env = append(os.Environ(), "FAKE_LOG="+log, "FAKE_PB="+pb, "FAKE_RELEASES="+r.releases, "FAKE_LATEST="+r.version, "PB_REPO="+fakeRepo,
+		"PB_TOKEN=", "PB_RECIPE=", "PB_VERSION=", "PB_NAME=", "TMPDIR="+r.root)
+	command.Env = append(command.Env, env...)
 	out, err := command.CombinedOutput()
 	data, _ := os.ReadFile(log)
-	return strings.Fields(string(data)), string(out), err
+	return strings.Split(strings.TrimSpace(string(data)), "\n"), string(out), err
 }
 
-const fakePB = "#!/bin/sh\necho \"pb $*\" >> \"$FAKE_LOG\"\n" +
-	"if [ \"$1\" = install ]; then printf '{\"ok\":true,\"data\":{\"executable\":\"%s\"}}' \"$FAKE_PB\"; fi\n"
-
 func TestInstallPowerShellDownloadsVerifiesInstallsAndLogsIn(t *testing.T) {
-	fake := []byte(fakePB)
-	installer := renderWindowsInstaller(t, fake, false)
-	calls, out, err := runWindowsInstaller(t, installer, fake, fake, "NotSigned|")
-	joined := strings.Join(calls, " ")
+	r := windowsRelease(t)
+	calls, out, err := runWindowsInstaller(t, r, false)
 	if err != nil {
 		t.Fatalf("installer failed: %v\n%s", err, out)
 	}
-	for _, want := range []string{"download https://github.com/example/paperboat/releases/download/2026.11.09.1/pb-windows-", "pb install --json", "pb login"} {
-		if !strings.Contains(joined, want) {
-			t.Fatalf("calls %q lack %q\n%s", joined, want, out)
+	want := []string{
+		"download https://github.com/" + fakeRepo + "/releases/latest",
+		"download https://github.com/" + fakeRepo + "/releases/download/" + fakeVersion + "/SHA256SUMS",
+		"download https://github.com/" + fakeRepo + "/releases/download/" + fakeVersion + "/SHA256SUMS.sig",
+	}
+	for i, line := range want {
+		if calls[i] != line {
+			t.Fatalf("call %d = %q, want %q\nall: %q", i, calls[i], line, calls)
 		}
+	}
+	joined := strings.Join(calls, "\n")
+	if !strings.Contains(joined, "/releases/download/"+fakeVersion+"/pb-windows-") || !strings.Contains(joined, "pb install --json") || !strings.Contains(joined, "pb login") {
+		t.Fatalf("calls lack the product download, install or login: %q", calls)
 	}
 	if strings.Index(joined, "pb install") > strings.Index(joined, "pb login") {
 		t.Fatalf("login ran before install: %q", joined)
 	}
 }
 
+func TestInstallPowerShellPinnedVersionSkipsTheLatestLookup(t *testing.T) {
+	r := windowsRelease(t)
+	calls, out, err := runWindowsInstaller(t, r, false, "PB_VERSION="+fakeVersion, "FAKE_LATEST=2030.01.01.1")
+	if err != nil || strings.Contains(strings.Join(calls, "\n"), "/releases/latest") {
+		t.Fatalf("pinned install: %v %q\n%s", err, calls, out)
+	}
+}
+
 func TestInstallPowerShellRefusesBytesThatMissTheSignedDigest(t *testing.T) {
-	fake := []byte(fakePB)
-	installer := renderWindowsInstaller(t, fake, false)
-	tampered := append([]byte(nil), fake...)
-	tampered[len(tampered)-2] = 'X' // same length, different digest
-	calls, out, err := runWindowsInstaller(t, installer, fake, tampered, "Valid|Paperboat Test Publisher")
+	r := windowsRelease(t)
+	write(t, r.file("pb-windows-amd64.exe"), strings.Replace(fakePB, "echo", "ech0", 1), 0o755)
+	write(t, r.file("pb-windows-arm64.exe"), strings.Replace(fakePB, "echo", "ech0", 1), 0o755)
+	calls, out, err := runWindowsInstaller(t, r, false)
 	if err == nil || !strings.Contains(out, "digest mismatch") {
 		t.Fatalf("tampered download was accepted: %v\n%s", err, out)
 	}
 	for _, call := range calls {
-		if call == "pb" {
+		if strings.HasPrefix(call, "pb ") {
 			t.Fatalf("tampered binary was executed: %q", calls)
 		}
 	}
 }
 
-// Unmarked, the signature is never consulted (the digest is the trust root); marked, the installer needs a valid
-// signature from exactly the expected publisher before it runs anything.
-func TestInstallPowerShellChecksAuthenticodeOnlyWhenTheSignedMetadataMarksIt(t *testing.T) {
-	fake := []byte(fakePB)
-	for name, test := range map[string]struct {
-		marked    bool
-		signature string
-		installs  bool
-	}{
-		"unmarked, unsigned binary installs":        {false, "NotSigned|", true},
-		"unmarked, signature ignored even if bad":   {false, "HashMismatch|Someone Else", true},
-		"marked, valid and expected publisher":      {true, "Valid|Paperboat Test Publisher", true},
-		"marked, unsigned binary refused":           {true, "NotSigned|", false},
-		"marked, tampered after signing refused":    {true, "HashMismatch|Paperboat Test Publisher", false},
-		"marked, valid signature of another signer": {true, "Valid|Evil Paperboat Test Publisher", false},
+// Nothing is trusted before the signature verifies: no product is downloaded and pb never runs.
+func TestInstallPowerShellRefusesAReleaseWhoseSignatureIsWrong(t *testing.T) {
+	for name, damage := range map[string]func(*testing.T, *fakeRelease){
+		"sums edited after signing": func(t *testing.T, r *fakeRelease) {
+			body, _ := os.ReadFile(r.file("SHA256SUMS"))
+			write(t, r.file("SHA256SUMS"), strings.Replace(string(body), "0", "1", 1), 0o644)
+		},
+		"signed for another release": func(t *testing.T, r *fakeRelease) {
+			older := filepath.Join(r.releases, "2026.11.01.0")
+			if err := os.MkdirAll(older, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			write(t, filepath.Join(older, "pb-windows-amd64.exe"), fakePB, 0o755)
+			write(t, filepath.Join(older, "pb-windows-arm64.exe"), fakePB, 0o755)
+			r.sign(t, "2026.11.01.0", "")
+			for _, file := range []string{"SHA256SUMS", "SHA256SUMS.sig"} {
+				body, _ := os.ReadFile(filepath.Join(older, file))
+				write(t, r.file(file), string(body), 0o644)
+			}
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			installer := renderWindowsInstaller(t, fake, test.marked)
-			calls, out, err := runWindowsInstaller(t, installer, fake, fake, test.signature)
-			joined := strings.Join(calls, " ")
-			if test.installs && (err != nil || !strings.Contains(joined, "pb install")) {
-				t.Fatalf("installer failed: %v\n%s", err, out)
+			r := windowsRelease(t)
+			damage(t, r)
+			calls, out, err := runWindowsInstaller(t, r, false)
+			if err == nil || !(strings.Contains(out, "release signature on SHA256SUMS is not valid") || strings.Contains(out, "signed for a different release")) {
+				t.Fatalf("a wrong release was accepted: %v\n%s", err, out)
 			}
-			if !test.installs && (err == nil || !strings.Contains(out, "Authenticode") || strings.Contains(joined, "pb install") || strings.Contains(joined, "pb login")) {
-				t.Fatalf("installer ran a binary it should have refused: %v %q\n%s", err, joined, out)
+			for _, call := range calls {
+				if strings.HasPrefix(call, "pb ") || strings.Contains(call, "/pb-windows-") {
+					t.Fatalf("the product was fetched or run before the signature was trusted: %q", calls)
+				}
 			}
 		})
 	}
 }
 
-func TestRenderingASignedWindowsTargetNeedsTheExpectedPublisher(t *testing.T) {
-	renderWindowsInstaller(t, []byte(fakePB), true) // supplies a publisher
-	// Without one, the renderer refuses rather than shipping an installer that cannot name its signer.
-	root := t.TempDir()
-	sum := sha256.Sum256([]byte("x"))
-	digest := hex.EncodeToString(sum[:])
-	targets := map[string]any{}
-	for _, p := range []struct{ name, platform, arch, format string }{
-		{"pb-linux-amd64", "linux", "amd64", "elf"}, {"pb-linux-arm64", "linux", "arm64", "elf"}, {"pb-darwin-arm64", "darwin", "arm64", "macho"},
-		{"pb-windows-amd64.exe", "windows", "amd64", "pe"}, {"pb-windows-arm64.exe", "windows", "arm64", "pe"},
-	} {
-		custom := map[string]any{"schema": "paperboat.tuf-asset/v1", "kind": "github-release-asset", "version": "2026.11.09.1", "platform": p.platform, "architecture": p.arch, "format": p.format, "asset_name": p.name, "repository": "example/paperboat", "url": "https://github.com/example/paperboat/releases/download/2026.11.09.1/" + p.name, "sha256": digest, "length": 1}
-		if p.platform == "windows" {
-			custom["release_index"] = map[string]any{"targets": []any{map[string]any{"authenticode_signed": true}}}
+func TestInstallPowerShellStopsWhenSshKeygenIsMissing(t *testing.T) {
+	r := windowsRelease(t)
+	calls, out, err := runWindowsInstaller(t, r, true)
+	if err == nil || !strings.Contains(out, "ssh-keygen is required to verify the release signature") {
+		t.Fatalf("missing ssh-keygen was not refused: %v\n%s", err, out)
+	}
+	for _, call := range calls {
+		if strings.HasPrefix(call, "pb ") || strings.Contains(call, "/pb-windows-") {
+			t.Fatalf("nothing may be downloaded or run without verification: %q", calls)
 		}
-		targets[p.name] = map[string]any{"custom": custom, "hashes": map[string]any{"sha256": digest}, "length": 1}
 	}
-	body, _ := json.Marshal(map[string]any{"signed": map[string]any{"targets": targets}})
-	metadata := filepath.Join(root, "targets.json")
-	if err := os.WriteFile(metadata, body, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	command := exec.Command("python3", "render-installers.py", metadata, filepath.Join(root, "install"), filepath.Join(root, "windows"))
-	command.Env = append(os.Environ(), "PAPERBOAT_WINDOWS_PUBLISHER=")
-	if out, err := command.CombinedOutput(); err == nil || !strings.Contains(string(out), "PAPERBOAT_WINDOWS_PUBLISHER") {
-		t.Fatalf("signed targets rendered without a publisher: %v %s", err, out)
+}
+
+func TestInstallPowerShellRefusesAMalformedRecipeTokenAndABadRepository(t *testing.T) {
+	r := windowsRelease(t)
+	for env, want := range map[string]string{
+		"PB_RECIPE=pbr_short":    "PB_RECIPE is not a recipe token",
+		"PB_REPO=not a repo":     "PB_REPO must look like owner/repo",
+		"PB_VERSION=latest-ish":  "is not a release version",
+		"PB_VERSION=2026.11.18":  "is not a release version",
+		"PB_VERSION=2026.11.018": "is not a release version",
+	} {
+		_, out, err := runWindowsInstaller(t, r, false, env)
+		if err == nil || !strings.Contains(out, want) {
+			t.Fatalf("%s: err=%v\n%s", env, err, out)
+		}
 	}
 }
 
@@ -216,13 +218,12 @@ func TestInstallPowerShellConfirmsTheResetWithTheHostNamePbReads(t *testing.T) {
 
 // The PowerShell one-liner pasted on macOS or Linux (pwsh) stops before it downloads anything and says which command is for that machine.
 func TestInstallPowerShellRefusesANonWindowsHostBeforeDownloading(t *testing.T) {
-	installer := renderWindowsInstaller(t, []byte("fake pb"), false)
-	text, err := os.ReadFile(installer)
+	text, err := os.ReadFile("install.ps1")
 	if err != nil {
 		t.Fatal(err)
 	}
 	guard := strings.Index(string(text), "-not $IsWindows")
-	download := strings.Index(string(text), "Download-HttpsFile")
+	download := strings.Index(string(text), "Download-HttpsFile ")
 	if guard < 0 || download < 0 || guard > download || !strings.Contains(string(text), "macOS and Linux paste the curl command") {
 		t.Fatalf("guard at %d, first download at %d", guard, download)
 	}
@@ -237,8 +238,7 @@ func TestInstallPowerShellOnANonWindowsHostSaysWhichCommandToUse(t *testing.T) {
 	if err != nil {
 		t.Skip("pwsh not installed")
 	}
-	installer := renderWindowsInstaller(t, []byte("fake pb"), false)
-	out, err := exec.Command(shell, "-NoLogo", "-NoProfile", "-NonInteractive", "-File", installer).CombinedOutput()
+	out, err := exec.Command(shell, "-NoLogo", "-NoProfile", "-NonInteractive", "-File", "install.ps1").CombinedOutput()
 	if err == nil || !strings.Contains(string(out), "this command is for Windows") || strings.Contains(string(out), "Download") {
 		t.Fatalf("pwsh on this host: err %v, output %q", err, out)
 	}
