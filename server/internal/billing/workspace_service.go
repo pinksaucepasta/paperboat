@@ -518,13 +518,6 @@ func (s *WorkspaceService) HandleWebhook(ctx context.Context, event StripeWebhoo
 	if subscriptionID == "" {
 		return false, nil
 	}
-	if event.Type == TrialWillEndEvent {
-		// Before reconciling: reconciliation records the event, and a redelivery
-		// after a failed notice must still queue it (the notice is idempotent).
-		if err := s.noticeTeamTrialEnding(ctx, subscriptionID); err != nil {
-			return false, err
-		}
-	}
 	return s.reconcileSubscription(ctx, subscriptionID, &event)
 }
 

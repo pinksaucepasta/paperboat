@@ -17,7 +17,7 @@ var eventTypeSource = regexp.MustCompile(`(EventType|eventType|[A-Za-z]+Event)\s
 
 // notAuditEvents are strings that match the pattern but are not audit event types.
 var notAuditEvents = map[string]string{
-	"customer": "Stripe webhook event names (billing.TrialWillEndEvent)",
+	"customer": "Stripe webhook event names",
 	"policy":   `the verb part of "personal." / "team." policy events`,
 }
 
