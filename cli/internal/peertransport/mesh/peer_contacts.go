@@ -258,13 +258,3 @@ func (b *locoBackend) signedRegionLocked(peer key.NodePublic) tailcfg.DERPRegion
 	}
 	return 0
 }
-
-// signedHomeKnown reports whether the signed configuration gives peer's home relay and this engine has that relay:
-// it outranks a region learned from an answer, as magicsock's control-plane HomeDERP outranks a learned derpRoute
-// (wgengine/magicsock/derp.go fallbackDERPRegionForPeer).
-func (b *locoBackend) signedHomeKnown(peer key.NodePublic) bool {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	home := b.contacts[peer].Home
-	return home != 0 && b.dm.Regions[home].HasDERP()
-}

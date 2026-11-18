@@ -381,9 +381,7 @@ func (s *Server) meowed(src key.NodePublic, regionID tailcfg.DERPRegionID, nonce
 	if restarted {
 		s.resetRestartedPeer(src) // before the dial is released, so its first packets handshake at once
 	}
-	if !s.lb.signedHomeKnown(src) { // takes b.mu: never under peerReadyMu
-		_ = s.lb.setPeerRelayRegion(src, regionID)
-	}
+	_ = s.lb.learnPeerRelayRegion(src, regionID) // takes policyMu and b.mu: never under peerReadyMu
 	s.peerReadyMu.Lock()
 	defer s.peerReadyMu.Unlock()
 	if s.peerReady[src] == w { // not invalidated meanwhile

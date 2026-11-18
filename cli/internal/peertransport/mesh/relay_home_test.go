@@ -3,7 +3,9 @@ package mesh
 import (
 	"context"
 	"fmt"
+	"maps"
 	"net/netip"
+	"sync"
 	"testing"
 	"time"
 
@@ -212,6 +214,52 @@ func TestSignedHomeOutranksAnAnsweredRegion(t *testing.T) {
 	}
 	if got := s.lb.peerDERPRegion(peer); got != one.RegionID {
 		t.Fatalf("an answered region (%d) outranked the signed home (%d)", got, one.RegionID)
+	}
+}
+
+// An answer that arrives while a renewal installs the peer's signed home never leaves its learned region in place of it,
+// whichever of the two takes the locks first (learnPeerRelayRegion checks and writes under one hold).
+func TestAnsweredRegionRacingASignedHomeNeverOverwritesIt(t *testing.T) {
+	regions := integration.RunDERPAndSTUN(t, logger.Discard, "127.0.0.1")
+	one, two := regions.Regions[1], relayRegionCopy(regions.Regions[1], 2)
+	const peers = 40
+	keys := make([]key.NodePublic, peers)
+	allowed := map[key.NodePublic]netip.Addr{}
+	contacts := map[key.NodePublic]PeerContact{}
+	for i := range keys {
+		keys[i] = key.NewNode().Public()
+		allowed[keys[i]] = netip.AddrFrom16([16]byte{0xfd, 0x7a, 0x11, 0x5c, 0xa1, 0xe0, 15: byte(i + 1)})
+		contacts[keys[i]] = PeerContact{Disco: key.NewDisco().Public()}
+	}
+	s := &Server{Key: key.NewNode(), LocalAddr: netip.MustParseAddr("fd7a:115c:a1e0::80"), AllowedPeers: allowed}
+	if err := s.SetRelayRegions([]*tailcfg.DERPRegion{two, one}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	if err := s.SetPeerContacts(contacts); err != nil {
+		t.Fatal(err)
+	}
+	for _, peer := range keys {
+		c := contacts[peer]
+		c.Home = one.RegionID
+		contacts[peer] = c
+		next := maps.Clone(contacts)
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() { defer wg.Done(); _ = s.lb.learnPeerRelayRegion(peer, two.RegionID) }()
+		go func() {
+			defer wg.Done()
+			if err := s.SetPeerContacts(next); err != nil {
+				t.Error(err)
+			}
+		}()
+		wg.Wait()
+		if got := s.lb.peerDERPRegion(peer); got != one.RegionID {
+			t.Fatalf("peer %v is on region %d, want its signed home %d", peer.ShortString(), got, one.RegionID)
+		}
 	}
 }
 
