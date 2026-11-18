@@ -159,10 +159,16 @@ type Admission struct {
 }
 type HostAdmission struct {
 	Admission
-	EdgeCandidates         []EdgeCandidate `json:"edge_candidates"`
-	Backup                 *Admission      `json:"backup,omitempty"`
-	ActiveEdgeNodeID       string          `json:"active_edge_node_id,omitempty"`
-	ActiveEdgeProcessEpoch string          `json:"active_edge_process_epoch,omitempty"`
+	EdgeCandidates []EdgeCandidate `json:"edge_candidates"`
+	Backup         *Admission      `json:"backup,omitempty"`
+	// More are the carriers after the primary and the backup: a self-hosted-only workspace holds a managed edge for
+	// terminals next to its own two servers.
+	More []Admission `json:"more,omitempty"`
+	// TerminalEdgeNodeIDs are the edges whose carriers may carry browser terminals (the runtime route's streams):
+	// Paperboat's managed edges, never a customer-run one. The machine serves terminals on no other carrier.
+	TerminalEdgeNodeIDs    []string `json:"terminal_edge_node_ids,omitempty"`
+	ActiveEdgeNodeID       string   `json:"active_edge_node_id,omitempty"`
+	ActiveEdgeProcessEpoch string   `json:"active_edge_process_epoch,omitempty"`
 	// EndpointsServed: every edge of this attachment admits endpoint routes, so the agent serves
 	// its previews as endpoint routes on these carriers (PLAN 3a).
 	EndpointsServed bool `json:"endpoints_served,omitempty"`
@@ -170,6 +176,19 @@ type HostAdmission struct {
 	// carriers, so the agent serves its tunnels here instead of running their connectors.
 	TunnelEndpointsServed bool `json:"tunnel_endpoints_served,omitempty"`
 }
+
+// Place sets the i-th carrier of the answer: the primary, the backup, then More.
+func (h *HostAdmission) Place(i int, a Admission) {
+	switch i {
+	case 0:
+		h.Admission = a
+	case 1:
+		h.Backup = &a
+	default:
+		h.More = append(h.More, a)
+	}
+}
+
 type Observation struct {
 	RouteID              string `json:"route_id"`
 	AttachmentGeneration uint64 `json:"attachment_generation"`

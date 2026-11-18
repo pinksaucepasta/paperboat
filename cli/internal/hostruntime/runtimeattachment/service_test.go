@@ -76,9 +76,9 @@ func TestUnlistedReadyCarrierStaysUpWhilePairHasRoom(t *testing.T) {
 		held          int
 		retired       bool
 	}{
-		{ready: true, wanted: true, held: 2, retired: false},
-		{ready: true, wanted: false, held: 2, retired: false}, // edge cut from control: server stopped listing it
-		{ready: true, wanted: false, held: 3, retired: true},  // placement moved on to another pair
+		{ready: true, wanted: true, held: 3, retired: false},
+		{ready: true, wanted: false, held: 3, retired: false}, // edge cut from control: server stopped listing it
+		{ready: true, wanted: false, held: 4, retired: true},  // placement moved on to another set
 		{ready: false, wanted: true, held: 1, retired: true},
 		{ready: false, wanted: false, held: 1, retired: true},
 	} {
@@ -1115,5 +1115,25 @@ func TestPacerRunsARoundAtOnceWhenAnEventWakesIt(t *testing.T) {
 	pacer.wake()
 	if !pacer.due(now.Add(time.Second), true) {
 		t.Fatal("a woken pacer did not run a round at once")
+	}
+}
+
+// A self-hosted-only workspace is admitted a managed edge for terminals next to its own servers: every admitted
+// carrier is held, and only the edges the server names may carry terminals (an answer naming none allows all).
+func TestAdmissionNamesTheCarriersThatMayCarryTerminals(t *testing.T) {
+	at := func(node string) admissionBinding { return admissionBinding{Binding: binding{EdgeNodeID: node}} }
+	a := admission{Binding: binding{EdgeNodeID: "managed"}, Backup: &admissionBinding{Binding: binding{EdgeNodeID: "own-1"}}, More: []admissionBinding{at("own-2")}, TerminalEdgeNodeIDs: []string{"managed"}}
+	var got []string
+	for _, c := range a.carriers() {
+		got = append(got, c.Binding.EdgeNodeID)
+	}
+	if len(got) != 3 || got[0] != "managed" || got[1] != "own-1" || got[2] != "own-2" {
+		t.Fatalf("carriers = %v", got)
+	}
+	if !a.terminalCapable("managed") || a.terminalCapable("own-1") || a.terminalCapable("own-2") {
+		t.Fatal("only the managed edge may carry terminals")
+	}
+	if !(admission{}).terminalCapable("any") {
+		t.Fatal("an answer naming no terminal edges allows every carrier")
 	}
 }

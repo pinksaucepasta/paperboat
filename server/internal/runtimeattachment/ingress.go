@@ -4,14 +4,12 @@ import (
 	"context"
 	"github.com/jackc/pgx/v5"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
-	"net"
 	"net/url"
-	"strconv"
-	"strings"
 )
 
-// IngressURL preserves the runtime's authenticated logical hostname while
-// customer traffic uses the enrolled edge's infrastructure TLS hostname.
+// IngressURL is the runtime route's address: Paperboat's own hostname for the machine, whatever the workspace's edge
+// mode. Browser terminals and the rest of the runtime route (file inbox, preview dispatch) never use a customer-run
+// edge, so a self-hosted-only workspace is reached the same way through its machine's managed carrier.
 func IngressURL(ctx context.Context, database *db.DB, environmentID, publicHost string) (string, error) {
 	found, err := IngressURLs(ctx, database, map[string]string{environmentID: publicHost})
 	if err != nil {
@@ -27,7 +25,7 @@ type Ingress struct {
 	Err error
 }
 
-// IngressURLs is IngressURL for several environments (environment -> runtime public host) in two queries,
+// IngressURLs is IngressURL for several environments (environment -> runtime public host) in one query,
 // whatever their number; every environment asked about has an entry.
 func IngressURLs(ctx context.Context, database *db.DB, hosts map[string]string) (map[string]Ingress, error) {
 	out := make(map[string]Ingress, len(hosts))
@@ -36,7 +34,7 @@ func IngressURLs(ctx context.Context, database *db.DB, hosts map[string]string) 
 		out[environment] = Ingress{Err: pgx.ErrNoRows}
 		environments, publicHosts = append(environments, environment), append(publicHosts, host)
 	}
-	rows, err := database.Pool().Query(ctx, `SELECT m.environment_id,paperboat.workspace_edge_mode(m.user_id,m.owner_team_id),r.managed_public_host
+	rows, err := database.Pool().Query(ctx, `SELECT m.environment_id,r.managed_public_host
  FROM unnest($1::text[],$2::text[]) AS w(environment_id,public_host)
  JOIN paperboat.user_machines m ON m.environment_id=w.environment_id AND m.revoked_at IS NULL AND m.deleted_at IS NULL
  JOIN paperboat.control_routes r ON r.environment_id=m.environment_id AND r.connector_id='runtime' AND r.kind='runtime_https_wss' AND r.public_host=w.public_host`,
@@ -44,58 +42,17 @@ func IngressURLs(ctx context.Context, database *db.DB, hosts map[string]string) 
 	if err != nil {
 		return nil, err
 	}
-	var selfHosted, selfHostedHosts []string
-	for rows.Next() {
-		var environment, mode, managedHost string
-		if err := rows.Scan(&environment, &mode, &managedHost); err != nil {
-			rows.Close()
-			return nil, err
-		}
-		publicHost := hosts[environment]
-		switch {
-		case mode == "managed-only" && publicHost != "" && publicHost == managedHost:
-			out[environment] = Ingress{URL: (&url.URL{Scheme: "https", Host: publicHost}).String()}
-		case mode == "self-hosted-only" && publicHost != managedHost:
-			out[environment] = Ingress{Err: ErrUnavailable} // until an edge carrier is found below
-			selfHosted, selfHostedHosts = append(selfHosted, environment), append(selfHostedHosts, publicHost)
-		default:
-			out[environment] = Ingress{Err: ErrUnavailable}
-		}
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	if len(selfHosted) == 0 {
-		return out, nil
-	}
-	// The active carrier's edge first; any other valid carrier serves while that edge restarts.
-	rows, err = database.Pool().Query(ctx, `SELECT DISTINCT ON (r.environment_id) r.environment_id,n.endpoint_host,coalesce(n.public_https_port,0)
- FROM unnest($1::text[],$2::text[]) AS w(environment_id,public_host)
- JOIN paperboat.control_routes r ON r.environment_id=w.environment_id AND r.public_host=w.public_host
- JOIN paperboat.runtime_carrier_attachments a ON a.route_id=r.id
- JOIN paperboat.control_tunnel_nodes n ON n.id=a.edge_node_id
- WHERE paperboat.runtime_carrier_valid(a.route_id,a.edge_node_id,a.edge_process_epoch,true)
- ORDER BY r.environment_id,a.active DESC,a.edge_node_id`, selfHosted, selfHostedHosts)
-	if err != nil {
-		return nil, err
-	}
 	defer rows.Close()
 	for rows.Next() {
-		var environment, edgeHost string
-		var port int
-		if err := rows.Scan(&environment, &edgeHost, &port); err != nil {
+		var environment, managedHost string
+		if err := rows.Scan(&environment, &managedHost); err != nil {
 			return nil, err
 		}
 		publicHost := hosts[environment]
-		if edgeHost == "" || publicHost == "" || strings.ContainsAny(edgeHost+publicHost, "/:@?# \t\r\n") {
-			continue
+		out[environment] = Ingress{Err: ErrUnavailable}
+		if publicHost != "" && publicHost == managedHost {
+			out[environment] = Ingress{URL: (&url.URL{Scheme: "https", Host: publicHost}).String()}
 		}
-		host := edgeHost
-		if port != 0 && port != 443 {
-			host = net.JoinHostPort(edgeHost, strconv.Itoa(port))
-		}
-		out[environment] = Ingress{URL: (&url.URL{Scheme: "https", Host: host, Path: "/v1/runtime/" + publicHost}).String()}
 	}
 	return out, rows.Err()
 }

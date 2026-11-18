@@ -86,6 +86,7 @@ SELECT DISTINCT ON (r.id,a.edge_node_id) r.id route_id,e.id endpoint_id,a.edge_n
 FROM endpoints e JOIN endpoint_routes r ON r.endpoint_id=e.id
 JOIN runtime_carrier_attachments a ON a.machine_id=e.agent_machine_id AND a.agent_capabilities @> CASE WHEN e.kind='tunnel'
  THEN ARRAY['endpoints','tunnel_endpoints'] ELSE ARRAY['endpoints'] END::text[]
+JOIN user_machines um ON um.id=e.agent_machine_id AND paperboat.node_edge_eligible_core(a.edge_node_id,um.user_id,um.owner_team_id)
 WHERE e.agent_machine_id=$1 AND ($2='' OR e.id=$2) AND `+liveEndpoint+`
 ORDER BY r.id,a.edge_node_id,a.active DESC
 ), upserted AS (
