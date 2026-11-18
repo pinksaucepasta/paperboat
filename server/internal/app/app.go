@@ -762,7 +762,7 @@ func New(opts Options) (*App, error) {
 		Store: store, SSH: managedSSHService, Mint: mintKeys, Floor: clientUpdatePolicy, TOTP: operatorAuthService,
 		EncryptionKey: opts.Config.Secrets.EncryptionKey, SessionKeys: opts.Config.Secrets.SessionKeys,
 		PickupThreshold: opts.Config.BreakGlass.PickupThreshold, PickupTimeout: opts.Config.BreakGlass.PickupTimeout,
-		OnlineWindow: opts.Config.BreakGlass.OnlineWindow, Batch: opts.Config.BreakGlass.Batch,
+		OnlineWindow: opts.Config.BreakGlass.OnlineWindow, MintDrain: opts.Config.BreakGlass.MintDrain, Batch: opts.Config.BreakGlass.Batch,
 	})
 	if err != nil {
 		_ = store.Close()

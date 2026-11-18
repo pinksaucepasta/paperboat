@@ -355,22 +355,12 @@ func (s *Service) raiseFloor(ctx context.Context, run Run, stage *StageState) (b
 }
 
 // retire refuses the old keys: the retiring CAs are removed at once (not when their certificates expire: they may
-// be forged), the old mint keys are withdrawn, and the stage ends when the machines fetched the CA set without them.
+// be forged) and the stage waits until machines fetched the CA set without them. The old mint keys are withdrawn
+// last, MintDrain after the run began: before that, machines still hold credentials signed by them and would be
+// refused by the server until they renew (the drill of 2026-11-18 left both machines offline for the credential's
+// remaining life). The window is the price of not reinstalling machines; the operator who must cut it short revokes
+// the key by hand (control-plane-credential-rotation.md, Emergency revocation).
 func (s *Service) retire(ctx context.Context, run Run, stage *StageState) (bool, error) {
-	if _, done := stage.Detail["mint_withdrawn"]; !done {
-		active, published := s.cfg.Mint.KeyIDs()
-		withdrawn := []string{}
-		for _, id := range published {
-			if id == active {
-				continue
-			}
-			if err := mintwithdrawal.Withdraw(ctx, s.cfg.Store.Pool(), id, active, run.OperatorID, "break-glass "+run.ID); err != nil {
-				return false, err
-			}
-			withdrawn = append(withdrawn, id)
-		}
-		stage.Detail["mint_withdrawn"] = withdrawn
-	}
 	if done, _ := stage.Detail["cas_removed_all"].(bool); !done {
 		moved, committed, err := s.advanceAccounts(ctx, stage, `HAVING bool_or(state = 'retiring')`, "cas_removed")
 		if err != nil {
@@ -386,6 +376,30 @@ func (s *Service) retire(ctx context.Context, run Run, stage *StageState) (bool,
 		stage.Detail["cas_removed_all"] = true
 		return false, nil
 	}
-	since, _ := detailTime(stage.Detail, "removed_at")
-	return s.pickupDone(ctx, stage, since, false)
+	if done, _ := stage.Detail["ca_pickup_done"].(bool); !done {
+		since, _ := detailTime(stage.Detail, "removed_at")
+		finished, err := s.pickupDone(ctx, stage, since, false)
+		if err != nil || !finished {
+			return false, err
+		}
+		stage.Detail["ca_pickup_done"] = true
+	}
+	drainAt := run.StartedAt.Add(s.cfg.MintDrain)
+	stage.Detail["mint_withdraw_at"] = drainAt.UTC().Format(time.RFC3339Nano)
+	if s.now().Before(drainAt) {
+		return false, nil
+	}
+	active, published := s.cfg.Mint.KeyIDs()
+	withdrawn := []string{}
+	for _, id := range published {
+		if id == active {
+			continue
+		}
+		if err := mintwithdrawal.Withdraw(ctx, s.cfg.Store.Pool(), id, active, run.OperatorID, "break-glass "+run.ID); err != nil {
+			return false, err
+		}
+		withdrawn = append(withdrawn, id)
+	}
+	stage.Detail["mint_withdrawn"] = withdrawn
+	return true, nil
 }
