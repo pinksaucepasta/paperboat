@@ -696,6 +696,28 @@ path = pathlib.Path(sys.argv[1]); document = json.loads(path.read_text())
 del document["signed"]["targets"]["pb-freebsd-amd64"]
 path.write_text(json.dumps(document) + "\n")
 PY_UNKNOWN
+  # The self-host bundle's targets: a bad download URL is refused, and a live bundle may only be replaced, never dropped.
+  selfhost_target() {
+    python3 - "$1" "$2" "$3" <<'PY_SELFHOST'
+import json, pathlib, sys
+path, action, url_repository = pathlib.Path(sys.argv[1]), sys.argv[2], sys.argv[3]
+document = json.loads(path.read_text())
+name = "selfhost/2026.08.22.9/paperboat-selfhost-linux-amd64.tar.gz"
+if action == "add":
+    document["signed"]["targets"][name] = {"length": 10, "hashes": {"sha256": "2" * 64}, "custom": {"repository": "example/paperboat", "url": f"https://github.com/{url_repository}/releases/download/selfhost-2026.08.22.9/paperboat-selfhost-linux-amd64.tar.gz"}}
+else:
+    document["signed"]["targets"].pop(name, None)
+path.write_text(json.dumps(document) + "\n")
+PY_SELFHOST
+  }
+  selfhost_target "$candidate/tuf/metadata/targets.json" add elsewhere/paperboat
+  before=$(snapshot)
+  expect_candidate_rejection selfhost-bad-url "self-host TUF target download URL is invalid"
+  selfhost_target "$candidate/tuf/metadata/targets.json" remove -
+  selfhost_target "$release_root/current/tuf/metadata/targets.json" add example/paperboat
+  before=$(snapshot)
+  expect_candidate_rejection selfhost-dropped "candidate TUF targets drop the live self-host bundle"
+  selfhost_target "$release_root/current/tuf/metadata/targets.json" remove -
 
   expected="$temporary/expected"
   cp -R "$candidate" "$expected"

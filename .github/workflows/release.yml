@@ -906,7 +906,8 @@ jobs:
           set -euo pipefail
           python3 - "$RUNNER_TEMP/tuf-candidate/metadata/targets.json" "$RUNNER_TEMP/candidate-artifacts" "$RUNNER_TEMP/paperboat-update-candidate-inputs/manifest.json" <<'PYCOMMITTED' >> "$GITHUB_OUTPUT"
           import hashlib, json, os, pathlib, sys
-          targets = json.loads(pathlib.Path(sys.argv[1]).read_text())['signed']['targets']
+          # The self-host bundle's targets (selfhost-release.yml) are not part of pb's release.
+          targets = {name: target for name, target in json.loads(pathlib.Path(sys.argv[1]).read_text())['signed']['targets'].items() if not name.startswith('selfhost/')}
           artifacts = pathlib.Path(sys.argv[2])
           version = os.environ['RELEASE_VERSION']
           selected = [target['custom']['version'] == version for target in targets.values()]
