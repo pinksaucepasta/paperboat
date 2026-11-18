@@ -242,6 +242,18 @@ export function opensInBrowser(file: { name: string; type: string }) {
   )
 }
 
+/** Pauses a tunnel known only by id (its ETag comes from reading it); one already paused or gone is left as it is. */
+export async function pauseTunnelById(id: string) {
+  let tunnel: Tunnel
+  try {
+    tunnel = await api<Tunnel>(tunnelPath(id))
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 404) return
+    throw error
+  }
+  if (tunnel.desired_state === "active") await pauseTunnel(tunnel)
+}
+
 export const pauseTunnel = (tunnel: Tunnel) => change(`${tunnelPath(tunnel.id)}/pause`, "POST", { etag: tunnel.etag })
 export const resumeTunnel = (tunnel: Tunnel) => change(`${tunnelPath(tunnel.id)}/resume`, "POST", { etag: tunnel.etag })
 export const deleteTunnel = (tunnel: Tunnel) => change(tunnelPath(tunnel.id), "DELETE", { etag: tunnel.etag })

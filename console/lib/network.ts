@@ -3,6 +3,8 @@
 import { infiniteQueryOptions, keepPreviousData, queryOptions } from "@tanstack/react-query"
 import { api, ApiError, idempotencyKey, type Data, type Schemas, type Workspace } from "@/lib/api"
 import { cursorPage, cursorPageSize } from "@/lib/cursor-pages"
+import { closeTerminal } from "@/lib/terminal/queries"
+import { pauseTunnelById, stopPreview } from "@/lib/tunnels"
 
 /*
  * Self-hosted relays and tunnel servers (`/v1/selfhost/...`). A node is installed on a Linux
@@ -170,3 +172,47 @@ export const saveEdgePair = (workspace: string, primaryId: string, fallbackId: s
     primary_id: primaryId,
     fallback_id: fallbackId,
   })
+
+/** A preview, tunnel or browser terminal still running on the current edges: what blocks a switch (409 previews_running). */
+export type LiveItem = { kind: "preview" | "tunnel" | "terminal"; id: string; name: string; machine_id?: string }
+
+/** What the server refused a switch for, from its 409 `previews_running` error; undefined for any other error. */
+export function liveOf(error: unknown): { count: number; items: LiveItem[] } | undefined {
+  if (!(error instanceof ApiError) || error.code !== "previews_running") return undefined
+  const details = (error.details ?? {}) as { count?: number; items?: LiveItem[] }
+  const items = Array.isArray(details.items) ? details.items : []
+  return { count: Number(details.count ?? items.length), items }
+}
+
+/** Ends what is running: previews stop, tunnels pause (they keep their routes), terminals close. */
+const stopLive = (items: LiveItem[]) =>
+  Promise.all(
+    items.map((item) =>
+      item.kind === "preview"
+        ? stopPreview(item.id)
+        : item.kind === "tunnel"
+          ? pauseTunnelById(item.id)
+          : closeTerminal(item.machine_id ?? "", item.id),
+    ),
+  )
+
+/**
+ * Switches the pair, stopping whatever the server names as running first and asking again. The server names at
+ * most 50 at a time, so a larger workspace takes a few rounds; the stopped items come back so the dialog can
+ * say what to start again.
+ */
+export async function switchEdgesStoppingLive(workspace: string, primaryId: string, fallbackId: string) {
+  const stopped: LiveItem[] = []
+  for (let round = 0; ; round++) {
+    try {
+      return { pair: await saveEdgePair(workspace, primaryId, fallbackId), stopped }
+    } catch (error) {
+      const live = liveOf(error)
+      if (!live || live.items.length === 0 || round >= 10) throw error
+      await stopLive(live.items)
+      stopped.push(...live.items)
+      // A closed terminal leaves the edge within a couple of seconds; asking at once would still find it.
+      if (live.items.some((item) => item.kind === "terminal")) await new Promise((resolve) => setTimeout(resolve, 2_000))
+    }
+  }
+}

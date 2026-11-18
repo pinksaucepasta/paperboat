@@ -4,7 +4,7 @@ import { CaretUpDownIcon, CheckCircleIcon, CopyIcon, PlusIcon, ShieldCheckIcon, 
 import { useInfiniteQuery, useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query"
 import { useDeferredValue, useState } from "react"
 import { toast } from "sonner"
-import { ApiError, clientConfigQuery, edgesQuery, relaysQuery, useApiQuery, useWorkspace } from "@/lib/api"
+import { clientConfigQuery, edgesQuery, relaysQuery, useApiQuery, useWorkspace } from "@/lib/api"
 import { copyWithToast } from "@/lib/clipboard"
 import { cursorPageSize } from "@/lib/cursor-pages"
 import { placeName } from "@/lib/format"
@@ -17,18 +17,23 @@ import {
   poolQuery,
   poolServersQuery,
   removeInstallation,
+  liveOf,
   saveEdgePair,
   savePool,
   scopeOf,
+  switchEdgesStoppingLive,
   verifyIngress,
   type EdgePair,
+  type LiveItem,
   type PairEdge,
   type Node,
 } from "@/lib/network"
+import { terminalKeys } from "@/lib/terminal/queries"
 import { usePageParam } from "@/lib/use-page-param"
 import { CommandBlock } from "@/components/add-machine-dialog"
 import { DomainList } from "@/components/domains/domain-list"
 import { PortNames } from "@/components/network/port-names"
+import { StopAndSwitch, SwitchedEdges } from "@/components/network/switch-edges"
 import { pickerOption } from "@/components/crumb-picker"
 import { ListPager } from "@/components/list-pager"
 import { ConfirmAction, SearchField } from "@/components/list-toolbar"
@@ -624,24 +629,45 @@ function ChangeEdgesDialog({
         : kindOf(primary) !== kindOf(fallback)
           ? "Choose two Paperboat edges or two of your servers."
           : undefined
-  const save = useMutation({
-    mutationFn: () => saveEdgePair(workspace, primary, fallback),
-    onSuccess: (pair) => {
-      queryClient.setQueryData(edgePairQuery(workspace).queryKey, pair)
+  const [switched, setSwitched] = useState<LiveItem[]>()
+  // Changing kind strands domains and what runs, so it ends on the cutover view; a reorder just closes.
+  const changed = (pair: EdgePair, stopped: LiveItem[]) => {
+    queryClient.setQueryData(edgePairQuery(workspace).queryKey, pair)
+    queryClient.invalidateQueries({ queryKey: ["previews"] })
+    queryClient.invalidateQueries({ queryKey: ["tunnels"] })
+    queryClient.invalidateQueries({ queryKey: terminalKeys.list })
+    if (kindOf(primary) === current?.primary.kind) {
       toast.success("Edges changed")
       onClose()
-    },
+    } else setSwitched(stopped)
+  }
+  const save = useMutation({
+    mutationFn: () => saveEdgePair(workspace, primary, fallback),
+    onSuccess: (pair) => changed(pair, []),
   })
-  const running =
-    save.error instanceof ApiError && save.error.code === "previews_running"
-      ? Number((save.error.details as { count?: number } | undefined)?.count ?? 0)
-      : undefined
-  const failure =
-    running === undefined
-      ? save.error && <ErrorMessage error={save.error} />
-      : running
-        ? `Stop ${running} running ${running === 1 ? "preview or tunnel" : "previews and tunnels"} first.`
-        : "Stop running previews and tunnels first."
+  const stopAndSwitch = useMutation({
+    mutationFn: () => switchEdgesStoppingLive(workspace, primary, fallback),
+    onSuccess: ({ pair, stopped }) => changed(pair, stopped),
+  })
+  const live = liveOf(save.error)
+  const failed = stopAndSwitch.error ?? (live ? null : save.error)
+  const failure = failed && <ErrorMessage error={failed} />
+  if (switched)
+    return (
+      <Dialog open onOpenChange={(open) => !open && onClose()}>
+        <DialogContent className="gap-4 sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Edges changed</DialogTitle>
+          </DialogHeader>
+          <SwitchedEdges
+            workspace={workspace}
+            stopped={switched}
+            toOwnServers={kindOf(primary) === "self_hosted"}
+            onClose={onClose}
+          />
+        </DialogContent>
+      </Dialog>
+    )
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="sm:max-w-lg">
@@ -656,14 +682,25 @@ function ChangeEdgesDialog({
           <FieldLabel htmlFor="edge-fallback">Fallback</FieldLabel>
           <EdgeChoice id="edge-fallback" options={options} value={fallback} onChange={setFallback} />
         </Field>
-        {(problem ?? failure) && <p className="text-sm text-destructive">{problem ?? failure}</p>}
+        {problem && <p className="text-sm text-destructive">{problem}</p>}
+        {failure && <p className="text-sm text-destructive">{failure}</p>}
+        {live && live.items.length > 0 ? (
+          <StopAndSwitch
+            items={live.items}
+            count={live.count}
+            pending={stopAndSwitch.isPending}
+            onConfirm={() => stopAndSwitch.mutate()}
+          />
+        ) : (
+          live && <p className="text-sm text-destructive">Stop running previews, tunnels and browser terminals first.</p>
+        )}
         <DialogFooter>
           <Button variant="ghost" size="lg" onClick={onClose}>
             Cancel
           </Button>
           <Button
             size="lg"
-            disabled={!primary || !fallback || Boolean(problem) || save.isPending}
+            disabled={!primary || !fallback || Boolean(problem) || save.isPending || stopAndSwitch.isPending}
             onClick={() => save.mutate()}
           >
             {save.isPending ? "Saving…" : "Save"}
