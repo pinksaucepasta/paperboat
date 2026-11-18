@@ -287,7 +287,7 @@ WHERE tr.tunnel_id=$1 AND tr.protocol='http' AND tr.match_type='managed' AND tr.
 			return err
 		}
 	} else {
-		eventType, outcome = "tunnel.address_change_failed", "failed"
+		eventType, outcome = "tunnel.address_change_failed", "unchanged"
 		if _, err := tx.Exec(ctx, `DELETE FROM paperboat.tunnel_address_holds WHERE hostname=$1 AND kind='incoming'`, newHost); err != nil {
 			return translate(err)
 		}
