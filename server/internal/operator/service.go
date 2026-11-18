@@ -66,6 +66,7 @@ type Team struct {
 	Suspended          bool         `json:"suspended"`
 	DeletedAt          *time.Time   `json:"deleted_at,omitempty"`
 	Members            []TeamMember `json:"members"`
+	MembersTotal       int64        `json:"members_total"`
 	MembersTruncated   bool         `json:"members_truncated"`
 	MembersNextAfter   string       `json:"members_next_after,omitempty"`
 	BillingWorkspaceID string       `json:"billing_workspace_id,omitempty"`
@@ -359,7 +360,7 @@ func (s *Service) readTx(ctx context.Context, tx *db.Tx, kind, target, after str
 	case "overview":
 		return s.readOverview(ctx, tx, target)
 	case "capacity":
-		return s.readCapacity(ctx, tx)
+		return s.readCapacity(ctx, tx, after, limit)
 	case "operators":
 		return readOperators(ctx, tx, after, limit)
 	case "operator_sessions":
@@ -378,7 +379,7 @@ func readAccount(ctx context.Context, tx *db.Tx, id string) (Account, error) {
 }
 
 func readTeam(ctx context.Context, tx *db.Tx, id, after string, limit int) (_ Team, resultErr error) {
-	var v Team
+	v := Team{Members: []TeamMember{}}
 	var deleted sql.NullTime
 	err := tx.QueryRow(ctx, `SELECT t.team_id,t.owner_account,t.generation,t.suspended,t.deleted_at,coalesce(w.id,''),coalesce(w.state,'') FROM teams t LEFT JOIN billing_workspaces w ON w.team_id=t.team_id WHERE t.team_id=$1`, id).Scan(&v.ID, &v.OwnerAccount, &v.Generation, &v.Suspended, &deleted, &v.BillingWorkspaceID, &v.BillingState)
 	if err != nil {
@@ -386,6 +387,9 @@ func readTeam(ctx context.Context, tx *db.Tx, id, after string, limit int) (_ Te
 	}
 	if deleted.Valid {
 		v.DeletedAt = &deleted.Time
+	}
+	if err := tx.QueryRow(ctx, `SELECT count(*) FROM team_members WHERE team_id=$1`, id).Scan(&v.MembersTotal); err != nil {
+		return v, err
 	}
 	rows, err := tx.Query(ctx, `SELECT account_id,role,active,membership_generation FROM team_members WHERE team_id=$1 AND account_id>$2 ORDER BY account_id LIMIT $3`, id, after, limit+1)
 	if err != nil {

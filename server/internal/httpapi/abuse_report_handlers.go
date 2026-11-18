@@ -61,7 +61,11 @@ func abuseReportList(service *abusereports.Service) http.Handler {
 			}
 			before = parsed
 		}
-		reports, err := service.List(r.Context(), r.URL.Query().Get("hostname"), before, limit)
+		reports, err := service.List(r.Context(), r.URL.Query().Get("hostname"), before, r.URL.Query().Get("before_id"), limit)
+		if errors.Is(err, abusereports.ErrInvalid) {
+			writeError(w, r, http.StatusBadRequest, "invalid_request", "Use before and before_id from the previous page.")
+			return
+		}
 		if err != nil {
 			writeError(w, r, http.StatusServiceUnavailable, "abuse_reports_unavailable", "Abuse reports are unavailable. Try again later.", err)
 			return

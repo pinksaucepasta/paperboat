@@ -68,25 +68,46 @@ RETURNING state`, n.ID, n.Region, n.Version, n.Commit, n.StartedAt).Scan(&state)
 	return nil
 }
 
-// List returns every node that is not removed, healthy when seen within HealthyWithin and not draining.
-func List(ctx context.Context, pool *pgxpool.Pool) ([]Status, error) {
+// Page is one page of server nodes by id, with the count of all nodes that are not removed.
+type Page struct {
+	Total     int64    `json:"total"`
+	Nodes     []Status `json:"nodes"`
+	NextAfter string   `json:"next_after,omitempty"`
+}
+
+// List pages the nodes that are not removed by id (after the id `after`, at most limit): healthy when seen within
+// HealthyWithin and not draining.
+func List(ctx context.Context, pool *pgxpool.Pool, after string, limit int) (Page, error) {
+	out := Page{Nodes: []Status{}}
+	if limit < 1 || limit > 100 || len(after) > 128 {
+		return Page{}, ErrInvalidPage
+	}
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM paperboat.control_server_nodes WHERE state <> 'removed'`).Scan(&out.Total); err != nil {
+		return Page{}, err
+	}
 	rows, err := pool.Query(ctx, `SELECT id, region, state, coalesce(public_address, ''), version, commit, started_at, last_seen_at,
   state='active' AND last_seen_at > now() - make_interval(secs => $1)
-FROM paperboat.control_server_nodes WHERE state <> 'removed' ORDER BY region, id`, HealthyWithin.Seconds())
+FROM paperboat.control_server_nodes WHERE state <> 'removed' AND id > $2 ORDER BY id LIMIT $3`, HealthyWithin.Seconds(), after, limit+1)
 	if err != nil {
-		return nil, err
+		return Page{}, err
 	}
 	defer rows.Close()
-	var out []Status
 	for rows.Next() {
 		var s Status
 		if err := rows.Scan(&s.ID, &s.Region, &s.State, &s.PublicAddress, &s.Version, &s.Commit, &s.StartedAt, &s.LastSeenAt, &s.Healthy); err != nil {
-			return nil, err
+			return Page{}, err
 		}
-		out = append(out, s)
+		if len(out.Nodes) == limit {
+			out.NextAfter = out.Nodes[len(out.Nodes)-1].ID
+			break
+		}
+		out.Nodes = append(out.Nodes, s)
 	}
 	return out, rows.Err()
 }
+
+// ErrInvalidPage is a page size outside 1..100 or an over-long cursor.
+var ErrInvalidPage = errors.New("server node page is invalid")
 
 // Run heartbeats until ctx ends. Every node runs it (not a leader job). A failed beat is retried at the next
 // tick; a removed node stops beating; drained is called once when an operator drains the node.

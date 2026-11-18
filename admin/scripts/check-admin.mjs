@@ -164,7 +164,7 @@ function route(req, url) {
   }
   if (p.startsWith("/v1/admin/accounts/")) return accounts.find((a) => a.id === decodeURIComponent(p.split("/").pop())) ?? 404
   if (p === "/v1/admin/teams") return { teams: [{ id: "team_a", owner_account: "usr_001", generation: 2, suspended: false, billing_workspace_id: "bw_t", billing_state: "active" }], total: 1 }
-  if (p === "/v1/admin/teams/team_a") return { id: "team_a", owner_account: "usr_001", generation: 2, suspended: false, members: [{ account_id: "usr_001", role: "admin", active: true, generation: 1 }], members_truncated: false, billing_workspace_id: "bw_t", billing_state: "active" }
+  if (p === "/v1/admin/teams/team_a") return { id: "team_a", owner_account: "usr_001", generation: 2, suspended: false, members: [{ account_id: "usr_001", role: "admin", active: true, generation: 1 }], members_total: 1, members_truncated: false, billing_workspace_id: "bw_t", billing_state: "active" }
   if (p === "/v1/admin/machines") {
     const owner = url.searchParams.get("account")
     const q = url.searchParams.get("q") ?? ""
@@ -207,9 +207,14 @@ function route(req, url) {
     for (const i of world.installs) if (i.enrollment_state === "pending" && Date.now() - i.enrolledAt > 2500) Object.assign(i, { enrollment_state: "enrolled", ready: true, endpoint_host: "relay-1.example.test", last_heartbeat_at: new Date().toISOString() })
     const installations = world.installs.map((i) => Object.fromEntries(Object.entries(i).filter(([k]) => k !== "enrolledAt")))
     const count = (f) => installations.filter(f).length
-    return { installations, counts: { pending: count((i) => i.enrollment_state === "pending"), enrolled: count((i) => i.enrollment_state === "enrolled"), ready: count((i) => i.ready) }, pagination: { limit: 200, offset: 0, total: installations.length, next_offset: null } }
+    // Like the server: an opaque cursor for keyset paging, and next_offset (a number) beside it on the first page.
+    const limit = Number(url.searchParams.get("limit") ?? 50), cursor = url.searchParams.get("cursor") ?? ""
+    if (cursor && !/^c\d+$/.test(cursor)) return { __status: 400, code: "invalid_request", message: "Use the cursor from the previous page." }
+    const start = cursor ? Number(cursor.slice(1)) : 0
+    const more = start + limit < installations.length
+    return { installations: installations.slice(start, start + limit), counts: { pending: count((i) => i.enrollment_state === "pending"), enrolled: count((i) => i.enrollment_state === "enrolled"), ready: count((i) => i.ready) }, pagination: { limit, offset: start, total: installations.length, next_offset: more && !cursor ? start + limit : null, ...(more ? { next_cursor: `c${start + limit}` } : {}) } }
   }
-  if (p === "/v1/admin/server-nodes") return { nodes: world.serverNodes }
+  if (p === "/v1/admin/server-nodes") return { nodes: world.serverNodes, total: world.serverNodes.length }
   if (p === "/v1/admin/config/billing") return world.policy
   if (p === "/v1/admin/client-update-policy") return world.floor
   if (p === "/v1/admin/release-authority/requests") return { requests: world.requests, pagination: { limit: 50, offset: 0, total: world.requests.length, next_offset: null } }
@@ -581,6 +586,16 @@ try {
     await x.getByRole("button", { name: "Disable region" }).click()
     await p.waitForSelector('[data-region-actions="eu"][data-actions~="enable"]')
     expect(lastWrite().path === "/v1/admin/regions/eu/disable" && lastWrite().body.revision === 2, "disable write")
+  })
+  await step("self-hosted nodes page with the server's cursor", async () => {
+    const saved = world.installs
+    world.installs = [...saved, ...Array.from({ length: 55 }, (_, n) => ({ ...saved[0], installation_id: `inst_x${n}`, node_id: `node_x${n}`, name: `extra ${n}` }))]
+    await p.getByRole("tab", { name: "Self-hosted" }).click()
+    await p.waitForSelector('[data-table="installed nodes"] [data-list-range]')
+    expect((await text('[data-table="installed nodes"] [data-list-range]')).replace(/\s+/g, " ").startsWith("1–50 of"), "first self-hosted page range")
+    await p.locator('[data-table="installed nodes"]').getByRole("button", { name: "Next" }).click()
+    await p.waitForFunction(() => document.querySelector('[data-table="installed nodes"] [data-list-range]')?.textContent?.startsWith("51"))
+    world.installs = saved
   })
   await step("keys and hostname blocks are lists: rows revoke or unblock with their own id and revision", async () => {
     await p.getByRole("tab", { name: "Keys" }).click()

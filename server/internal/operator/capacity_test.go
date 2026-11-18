@@ -125,13 +125,27 @@ func TestCapacityPageJoinsRegistryReportsAndDayTotalsOnPostgres(t *testing.T) {
 	exec(`INSERT INTO node_capacity_daily(node_id,day,bytes_in,bytes_out) VALUES($1,$2::date,$3,$4),($1,$5::date,$6,0)`, edgeID, now.Format("2006-01-02"), int64(1e12), int64(2e12), now.Format("2006-01")+"-01", int64(14e12))
 	service := NewService(store)
 	service.nodeStaleAfter = time.Hour
-	v, err := service.Read(ctx, auth.User{ID: actorID, Role: auth.Role("operations")}, "capacity", "", "", 100)
-	if err != nil {
-		t.Fatal(err)
-	}
+	// Walks every page three at a time: the shared database holds other tests' nodes, and paging is under test too.
 	byID := map[string]NodeCapacity{}
-	for _, n := range v.(CapacityPage).Items {
-		byID[n.ID] = n
+	for after := ""; ; {
+		v, err := service.Read(ctx, auth.User{ID: actorID, Role: auth.Role("operations")}, "capacity", "", after, 3)
+		if err != nil {
+			t.Fatal(err)
+		}
+		page := v.(CapacityPage)
+		if len(page.Items) > 3 || page.Total < int64(len(byID)+len(page.Items)) {
+			t.Fatalf("page of %d items, total %d, after %d seen", len(page.Items), page.Total, len(byID))
+		}
+		for _, n := range page.Items {
+			if n.ID <= after {
+				t.Fatalf("page out of order: %q after %q", n.ID, after)
+			}
+			byID[n.ID] = n
+		}
+		if page.NextAfter == "" {
+			break
+		}
+		after = page.NextAfter
 	}
 	edge, relay, silent, server := byID[edgeID], byID[relayID], byID[silentID], byID[serverID]
 	if edge.Kind != "edge" || relay.Kind != "relay" || server.Kind != "server" || edge.Site != "Helsinki" || edge.Region != "hel" || edge.Version != "dev-x" {

@@ -195,7 +195,7 @@ func TestBackupReportsPostgres(t *testing.T) {
 		t.Fatalf("failure hidden by health %+v", h)
 	}
 	page, err := s.List(ctx, actor, "", 1)
-	if err != nil || len(page.Runs) != 1 || page.NextAfter == "" {
+	if err != nil || len(page.Runs) != 1 || page.NextAfter == "" || page.Total != 3 {
 		t.Fatalf("pagination %+v %v", page, err)
 	}
 	next, err := s.List(ctx, actor, page.NextAfter, 100)

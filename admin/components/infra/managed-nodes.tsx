@@ -9,7 +9,7 @@ import { SelectField, TextField } from "@/components/fields"
 import { Time } from "@/components/time"
 import { Button } from "@/components/ui/button"
 import { operatorAction, useOperator, type Data } from "@/lib/api"
-import { useCursorList } from "@/lib/paging"
+import { useAllPages, useCursorList } from "@/lib/paging"
 import { generateUsageKeyPair } from "@/lib/use-key-pair"
 
 type Nodes = Data<"/v1/admin/nodes">
@@ -194,11 +194,13 @@ export function ManagedNodes() {
   const admin = useOperator()?.role === "admin"
   const filters = useMemo(() => ({}), [])
   const list = useCursorList<Nodes>("/v1/admin/nodes", filters)
-  const regionList = useCursorList<Regions>("/v1/admin/regions", filters)
+  const regionList = useAllPages<Regions["items"][number]>("/v1/admin/regions", (page) => (page as unknown as Regions).items)
   const regions = (regionList.data?.items ?? []).filter((r) => r.enabled).map((r) => r.id)
   return (
     <div className="flex flex-col gap-3">
       {admin && <div className="flex justify-end"><EnrolManagedNode regions={regions} /></div>}
+      {regionList.isError && <p role="alert" className="text-sm text-destructive">Couldn’t load the regions, so enrolment can’t offer one. Reload to try again.</p>}
+      {regionList.data?.capped && <p className="text-sm text-muted-foreground">Enrolment offers the first 1000 regions.</p>}
       <DataTable
         what="nodes"
         list={list}

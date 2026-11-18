@@ -16,12 +16,20 @@ func registerServerNodes(mux *http.ServeMux, opts Options) {
 		return
 	}
 	mux.Handle("GET /v1/admin/server-nodes", operatorRoute(opts, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		nodes, err := servernodes.List(r.Context(), replicaRead(r, enroller.DB))
+		limit, ok := operatorPageLimit(w, r, 100)
+		if !ok {
+			return
+		}
+		page, err := servernodes.List(r.Context(), replicaRead(r, enroller.DB), r.URL.Query().Get("after"), limit)
+		if errors.Is(err, servernodes.ErrInvalidPage) {
+			writeError(w, r, 400, "invalid_request", "Use a bounded positive limit and a node id cursor.")
+			return
+		}
 		if err != nil {
 			writeError(w, r, 503, "server_nodes_unavailable", "Server nodes could not be read. Retry shortly.", err)
 			return
 		}
-		writeJSON(w, 200, SuccessResponse{Data: map[string]any{"nodes": nodes}})
+		writeJSON(w, 200, SuccessResponse{Data: page})
 	})))
 	mux.Handle("POST /v1/admin/server-nodes/enrollments", operatorRoute(opts, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var in struct {

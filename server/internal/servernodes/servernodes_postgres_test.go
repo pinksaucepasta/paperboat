@@ -44,16 +44,32 @@ func TestServerNodesHeartbeatHealthAndRemovalOnPostgres(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	// Walks every page two at a time, so paging (cursor, next_after, total) is exercised too.
 	health := func() map[string]bool {
-		list, err := List(ctx, store.Pool())
-		if err != nil {
-			t.Fatal(err)
-		}
 		out := map[string]bool{}
-		for _, s := range list {
-			out[s.ID] = s.Healthy
+		after := ""
+		for {
+			page, err := List(ctx, store.Pool(), after, 2)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(page.Nodes) > 2 || page.Total < int64(len(out)+len(page.Nodes)) {
+				t.Fatalf("page %+v after %d nodes", page, len(out))
+			}
+			for _, s := range page.Nodes {
+				if s.ID <= after {
+					t.Fatalf("page out of order: %q after %q", s.ID, after)
+				}
+				out[s.ID] = s.Healthy
+			}
+			if page.NextAfter == "" {
+				return out
+			}
+			after = page.NextAfter
 		}
-		return out
+	}
+	if _, err := List(ctx, store.Pool(), "", 101); !errors.Is(err, ErrInvalidPage) {
+		t.Fatalf("limit 101 err = %v", err)
 	}
 	if h := health(); !h[a.ID] || !h[b.ID] {
 		t.Fatalf("fresh nodes not healthy: %v", h)

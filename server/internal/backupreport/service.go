@@ -215,6 +215,7 @@ type Status struct {
 	StorageDurability           string    `json:"storage_durability"`
 }
 type Page struct {
+	Total     int64    `json:"total"`
 	Runs      []Record `json:"runs"`
 	NextAfter string   `json:"next_after,omitempty"`
 }
@@ -303,6 +304,9 @@ func (s *Service) List(ctx context.Context, actor, after string, limit int) (Pag
 	var out Page
 	err := s.read(ctx, actor, s.cfg.DatabaseID, func(ctx context.Context, tx *db.Tx) error {
 		out = Page{Runs: []Record{}}
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM backup_reports WHERE database_id=$1`, s.cfg.DatabaseID).Scan(&out.Total); err != nil {
+			return err
+		}
 		rows, err := tx.Query(ctx, `SELECT `+columns+` FROM backup_reports WHERE database_id=$1 AND ($2='' OR run_id>$2) ORDER BY run_id LIMIT $3`, s.cfg.DatabaseID, after, limit+1)
 		if err != nil {
 			return err

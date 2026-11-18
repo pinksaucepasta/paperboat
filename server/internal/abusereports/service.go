@@ -124,30 +124,48 @@ func (s *Service) Submit(ctx context.Context, in Input) (Report, error) {
 	return report, nil
 }
 
-// List returns reports newest first, optionally for one hostname, older than before (zero: now).
-func (s *Service) List(ctx context.Context, hostname string, before time.Time, limit int) ([]Report, error) {
-	if limit < 1 || limit > 100 {
-		return nil, ErrInvalid
+// Page is one page of reports, newest first. The next page starts before (NextBefore, NextBeforeID): created_at
+// alone would skip reports filed in the same instant.
+type Page struct {
+	Total        int64      `json:"total"`
+	Reports      []Report   `json:"reports"`
+	NextBefore   *time.Time `json:"next_before,omitempty"`
+	NextBeforeID string     `json:"next_before_id,omitempty"`
+}
+
+// List returns reports newest first, optionally for one hostname, older than (before, beforeID) (zero: now).
+func (s *Service) List(ctx context.Context, hostname string, before time.Time, beforeID string, limit int) (Page, error) {
+	if limit < 1 || limit > 100 || len(beforeID) > 64 {
+		return Page{}, ErrInvalid
 	}
 	if before.IsZero() {
-		before = s.now().Add(time.Second)
+		before, beforeID = s.now().Add(time.Second), ""
+	}
+	host := strings.ToLower(strings.TrimSpace(hostname))
+	out := Page{Reports: []Report{}}
+	if err := s.store.Pool().QueryRow(ctx, `SELECT count(*) FROM abuse_reports WHERE ($1='' OR hostname=$1)`, host).Scan(&out.Total); err != nil {
+		return Page{}, err
 	}
 	rows, err := s.store.Pool().Query(ctx, `SELECT id,hostname,url,reason,details,reporter_email,created_at FROM abuse_reports
-WHERE ($1='' OR hostname=$1) AND created_at<$2 ORDER BY created_at DESC, id DESC LIMIT $3`, strings.ToLower(strings.TrimSpace(hostname)), before, limit)
+WHERE ($1='' OR hostname=$1) AND (created_at<$2 OR ($3<>'' AND created_at=$2 AND id<$3)) ORDER BY created_at DESC, id DESC LIMIT $4`, host, before, beforeID, limit+1)
 	if err != nil {
-		return nil, err
+		return Page{}, err
 	}
 	defer rows.Close()
-	reports := []Report{}
 	for rows.Next() {
 		var r Report
 		if err := rows.Scan(&r.ID, &r.Hostname, &r.URL, &r.Reason, &r.Details, &r.ReporterEmail, &r.CreatedAt); err != nil {
-			return nil, err
+			return Page{}, err
+		}
+		if len(out.Reports) == limit {
+			last := out.Reports[limit-1]
+			out.NextBefore, out.NextBeforeID = &last.CreatedAt, last.ID
+			break
 		}
 		r.CreatedAt = r.CreatedAt.UTC()
-		reports = append(reports, r)
+		out.Reports = append(out.Reports, r)
 	}
-	return reports, rows.Err()
+	return out, rows.Err()
 }
 
 // alertMessage is the operator's copy of one report. Every reporter-supplied value is escaped.

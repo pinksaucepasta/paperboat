@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import { ActionDialog } from "@/components/action-dialog"
 import { CommandBlock } from "@/components/command-block"
 import { Panel } from "@/components/page"
@@ -11,7 +11,9 @@ import { SelectField, TextField } from "@/components/fields"
 import { Time } from "@/components/time"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
-import { operatorAction, useApiQuery, useOperator, type Data } from "@/lib/api"
+import { PagerBar } from "@/components/data-table"
+import { useCursorList } from "@/lib/paging"
+import { operatorAction, useOperator, type Data } from "@/lib/api"
 
 type Inventory = Data<"/v1/admin/selfhost/installations">
 type Installation = Inventory["installations"][number]
@@ -113,7 +115,8 @@ function Row({ i, admin }: { i: Installation; admin: boolean }) {
 
 export function SelfhostTab() {
   const admin = useOperator()?.role === "admin"
-  const q = useApiQuery<Inventory>(["selfhost"], "/v1/admin/selfhost/installations?limit=200&sort=newest", 5000)
+  const filters = useMemo(() => ({ sort: "newest" }), [])
+  const q = useCursorList<Inventory>("/v1/admin/selfhost/installations", filters, "cursor", 5000)
   return (
     <div className="flex flex-col gap-8">
       {admin && <EnrolFlow />}
@@ -137,7 +140,7 @@ export function SelfhostTab() {
             </table>
           </div>
           {q.data.installations.length === 0 && <p className="py-12 text-center text-sm text-muted-foreground">No nodes yet.</p>}
-          {q.data.pagination.total > q.data.installations.length && <p className="py-3 text-right text-sm text-muted-foreground tabular-nums">1–{q.data.installations.length} of {q.data.pagination.total}</p>}
+          <PagerBar page={q.page} count={q.data.installations.length} total={q.data.pagination.total} hasNext={q.hasNext} go={q.go} />
         </div>
       )}
     </div>

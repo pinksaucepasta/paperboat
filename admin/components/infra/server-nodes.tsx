@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import { ActionDialog } from "@/components/action-dialog"
 import { CommandBlock } from "@/components/command-block"
 import { Panel } from "@/components/page"
@@ -11,7 +11,9 @@ import { TextField } from "@/components/fields"
 import { Time } from "@/components/time"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
-import { operatorAction, useApiQuery, useOperator, type Data } from "@/lib/api"
+import { PagerBar } from "@/components/data-table"
+import { useCursorList } from "@/lib/paging"
+import { operatorAction, useOperator, type Data } from "@/lib/api"
 
 type Nodes = Data<"/v1/admin/server-nodes">
 type ServerNode = Nodes["nodes"][number]
@@ -119,7 +121,8 @@ function Actions({ n }: { n: ServerNode }) {
 
 export function ServerNodesTab() {
   const admin = useOperator()?.role === "admin"
-  const q = useApiQuery<Nodes>(["server-nodes"], "/v1/admin/server-nodes", 5000)
+  const filters = useMemo(() => ({}), [])
+  const q = useCursorList<Nodes>("/v1/admin/server-nodes", filters, "after", 5000)
   return (
     <div className="flex flex-col gap-8">
       {admin && <Enrol />}
@@ -149,6 +152,7 @@ export function ServerNodesTab() {
             </tbody>
           </table>
           {q.data.nodes.length === 0 && <p className="py-12 text-center text-sm text-muted-foreground">No server nodes yet.</p>}
+          <PagerBar page={q.page} count={q.data.nodes.length} total={q.data.total} hasNext={q.hasNext} go={q.go} />
         </div>
       )}
     </div>

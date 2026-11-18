@@ -2,11 +2,12 @@
 
 import { useMemo, useState } from "react"
 import type { UseQueryResult } from "@tanstack/react-query"
-import { useApiQuery, type ApiError } from "@/lib/api"
+import { useQuery } from "@tanstack/react-query"
+import { api, useApiQuery, type ApiError } from "@/lib/api"
 
 export const pageSize = 50
 
-type Page = { total?: number; total_capped?: boolean; next_after?: string; next_cursor?: string; next?: string; pagination?: { total: number; next_offset: number | null } }
+type Page = { total?: number; total_capped?: boolean; next_after?: string; next_cursor?: string; next?: string; pagination?: { total: number; next_offset: number | null; next_cursor?: string } }
 
 /**
  * A server-paged list. `filters` (empty values dropped) are query parameters; pages are reached by the cursors
@@ -15,7 +16,7 @@ type Page = { total?: number; total_capped?: boolean; next_after?: string; next_
  */
 export type CursorList<T> = UseQueryResult<T, ApiError> & { page: number; hasNext: boolean; go: (page: number) => void }
 
-export function useCursorList<T extends Page>(path: string, filters: Record<string, string>, cursorParam: "after" | "cursor" | "offset" = "after"): CursorList<T> {
+export function useCursorList<T extends Page>(path: string, filters: Record<string, string>, cursorParam: "after" | "cursor" | "offset" = "after", refetchMs?: number): CursorList<T> {
   const query = useMemo(() => {
     const params = new URLSearchParams()
     for (const [key, value] of Object.entries(filters)) if (value) params.set(key, value)
@@ -28,9 +29,9 @@ export function useCursorList<T extends Page>(path: string, filters: Record<stri
   const params = new URLSearchParams(query)
   params.set("limit", String(pageSize))
   if (cursor) params.set(cursorParam, cursor)
-  const result = useApiQuery<T>(["list", path, query, current.page, cursor], `${path}?${params}`)
+  const result = useApiQuery<T>(["list", path, query, current.page, cursor], `${path}?${params}`, refetchMs)
   const offset = result.data?.pagination?.next_offset
-  const next = result.data?.next_after ?? result.data?.next_cursor ?? result.data?.next ?? (offset == null ? undefined : String(offset))
+  const next = result.data?.next_after ?? result.data?.next_cursor ?? result.data?.next ?? (cursorParam === "cursor" ? result.data?.pagination?.next_cursor : offset == null ? undefined : String(offset))
   return {
     ...result,
     page: current.page,
@@ -41,3 +42,27 @@ export function useCursorList<T extends Page>(path: string, filters: Record<stri
   }
 }
 
+
+/**
+ * Every item of a small, operator-defined list (regions, the plan catalog) for a picker: follows next_after a page at a
+ * time. shortcut: stops after maxPages (1000 items) and says so through `capped`; use a server-searched picker if a
+ * list like this ever grows past that.
+ */
+export function useAllPages<T>(path: string | null, items: (page: { next_after?: string; next?: string } & Record<string, unknown>) => T[], maxPages = 10) {
+  return useQuery<{ items: T[]; capped: boolean }, ApiError>({
+    queryKey: ["all-pages", path],
+    enabled: path !== null,
+    queryFn: async ({ signal }) => {
+      const out: T[] = []
+      let after = ""
+      for (let i = 0; i < maxPages; i++) {
+        const sep = path!.includes("?") ? "&" : "?"
+        const page = await api<{ next_after?: string; next?: string } & Record<string, unknown>>(`${path}${sep}limit=100${after ? `&after=${encodeURIComponent(after)}` : ""}`, signal)
+        out.push(...items(page))
+        after = page.next_after ?? page.next ?? ""
+        if (!after) return { items: out, capped: false }
+      }
+      return { items: out, capped: true }
+    },
+  })
+}

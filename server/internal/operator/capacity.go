@@ -51,10 +51,9 @@ type CapacityPage struct {
 	Today      string             `json:"today"`       // the UTC day "today" means
 	MonthStart string             `json:"month_start"` // the first UTC day of the month "this month" means
 	Thresholds CapacityThresholds `json:"thresholds"`
-	Total      int64              `json:"total"`
-	// Truncated: more nodes exist than the page lists (it holds the first 1000).
-	Truncated bool           `json:"truncated,omitempty"`
-	Items     []NodeCapacity `json:"items"`
+	Total      int64              `json:"total"` // every node the page could list
+	Items      []NodeCapacity     `json:"items"`
+	NextAfter  string             `json:"next_after,omitempty"`
 }
 
 // SetNodeCapacity sets the warning thresholds (one place: config.NodeCapacity).
@@ -63,30 +62,38 @@ func (s *Service) SetNodeCapacity(c config.NodeCapacity) { s.capacity = c }
 // serverStaleAfter: the control plane records itself every 30 s; a gap this long means the loop stopped.
 const serverStaleAfter = 2 * time.Minute
 
-// capacityPageLimit is how many nodes the capacity page lists (a fleet is tens of nodes; one more is read to know more exist).
-const capacityPageLimit = 1000
-
 // cpuSustainedWindow mirrors controlplane.CPUSustainedWindow (the operator package does not import controlplane).
 const cpuSustainedWindow = 5 * time.Minute
 
-// readCapacity lists every edge and relay in the node registry and every control-plane instance that recorded itself,
-// with their latest report, today's and this month's bytes, and the warnings the thresholds produce.
-func (s *Service) readCapacity(ctx context.Context, tx *db.Tx) (CapacityPage, error) {
+// capacityNodes is the set the capacity page lists: every edge and relay in the node registry that is not retired, and
+// every control-plane instance that recorded itself.
+const capacityNodes = ` FROM paperboat.control_tunnel_nodes n
+ FULL JOIN paperboat.node_capacity c ON c.node_id=n.id
+ WHERE ((n.id IS NOT NULL AND n.state<>'retired' AND (cardinality(n.roles)=0 OR n.roles && ARRAY['edge','relay']::text[])) OR (n.id IS NULL AND c.role='server'))`
+
+// readCapacity pages those nodes by id (after the id `after`), with their latest report, today's and this month's
+// bytes, and the warnings the thresholds produce.
+func (s *Service) readCapacity(ctx context.Context, tx *db.Tx, after string, limit int) (CapacityPage, error) {
 	now := time.Now().UTC()
 	today, monthStart := now.Format("2006-01-02"), now.Format("2006-01")+"-01"
 	page := CapacityPage{ObservedAt: now, Today: today, MonthStart: monthStart, Items: []NodeCapacity{},
 		Thresholds: CapacityThresholds{s.capacity.MonthlyTrafficBytes, s.capacity.TrafficWarnFraction, s.capacity.EdgeCPUWarnPercent, s.capacity.RelayRSSWarnBytes, int64(cpuSustainedWindow.Seconds())}}
-	rows, err := tx.Query(ctx, `WITH d AS (SELECT node_id,
+	if err := tx.QueryRow(ctx, `SELECT count(*)`+capacityNodes).Scan(&page.Total); err != nil {
+		return page, err
+	}
+	// The day totals are summed for this page's nodes only (the (node_id, day) primary key serves the lookup).
+	rows, err := tx.Query(ctx, `WITH p AS (SELECT coalesce(n.id,c.node_id) AS id`+capacityNodes+` AND coalesce(n.id,c.node_id)>$3 ORDER BY 1 LIMIT $4),
+ d AS (SELECT node_id,
    sum(bytes_in+bytes_out) FILTER (WHERE day=$1::date) AS today, sum(bytes_in+bytes_out) AS month
-  FROM paperboat.node_capacity_daily WHERE day>=$2::date GROUP BY node_id)
+  FROM paperboat.node_capacity_daily WHERE day>=$2::date AND node_id IN (SELECT id FROM p) GROUP BY node_id)
  SELECT coalesce(n.id,c.node_id), coalesce(n.roles,'{}'), coalesce(c.role,''), coalesce(n.state,''), coalesce(n.region,''), coalesce(n.site,''),
    coalesce(c.version,''), c.cpu_percent, c.cpu_sustained_percent, c.rss_bytes, coalesce(c.connections, n.capacity_used), coalesce(n.capacity_limit,0),
    coalesce(d.today,0), coalesce(d.month,0), n.last_heartbeat_at, c.reported_at, (c.node_id IS NOT NULL)
  FROM paperboat.control_tunnel_nodes n
  FULL JOIN paperboat.node_capacity c ON c.node_id=n.id
  LEFT JOIN d ON d.node_id=coalesce(n.id,c.node_id)
- WHERE (n.id IS NOT NULL AND n.state<>'retired' AND (cardinality(n.roles)=0 OR n.roles && ARRAY['edge','relay']::text[])) OR (n.id IS NULL AND c.role='server')
- ORDER BY coalesce(c.role,''), coalesce(n.id,c.node_id) LIMIT 1001`, today, monthStart)
+ WHERE coalesce(n.id,c.node_id) IN (SELECT id FROM p)
+ ORDER BY coalesce(n.id,c.node_id)`, today, monthStart, after, limit+1)
 	if err != nil {
 		return page, err
 	}
@@ -136,10 +143,9 @@ func (s *Service) readCapacity(ctx context.Context, tx *db.Tx) (CapacityPage, er
 		v.Warnings = s.nodeWarnings(v, now, reports)
 		page.Items = append(page.Items, v)
 	}
-	if len(page.Items) > capacityPageLimit {
-		page.Items, page.Truncated = page.Items[:capacityPageLimit], true
+	if len(page.Items) > limit {
+		page.Items, page.NextAfter = page.Items[:limit], page.Items[limit-1].ID
 	}
-	page.Total = int64(len(page.Items))
 	return page, rows.Err()
 }
 

@@ -10936,6 +10936,10 @@
               "$ref": "#/components/schemas/OperatorTeamMember"
             }
           },
+          "members_total": {
+            "type": "integer",
+            "description": "All of the team's members."
+          },
           "members_truncated": {
             "type": "boolean"
           },
@@ -11778,6 +11782,34 @@
           }
         }
       },
+      "AbuseReportPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "total",
+          "reports"
+        ],
+        "properties": {
+          "total": {
+            "type": "integer",
+            "description": "Reports matching the hostname filter."
+          },
+          "reports": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/AbuseReport"
+            }
+          },
+          "next_before": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "next_before_id": {
+            "type": "string"
+          }
+        }
+      },
       "AbuseReport": {
         "type": "object",
         "additionalProperties": false,
@@ -12199,9 +12231,14 @@
         "type": "object",
         "additionalProperties": false,
         "required": [
-          "runs"
+          "runs",
+          "total"
         ],
         "properties": {
+          "total": {
+            "type": "integer",
+            "description": "Every run reported for this database."
+          },
           "runs": {
             "type": "array",
             "maxItems": 100,
@@ -17032,9 +17069,17 @@
             "type": "object",
             "additionalProperties": false,
             "required": [
-              "nodes"
+              "nodes",
+              "total"
             ],
             "properties": {
+              "total": {
+                "type": "integer",
+                "description": "Every server node that is not removed."
+              },
+              "next_after": {
+                "type": "string"
+              },
               "nodes": {
                 "type": "array",
                 "items": {
@@ -19302,9 +19347,9 @@
               "$ref": "#/components/schemas/OperatorNodeCapacity"
             }
           },
-          "truncated": {
-            "type": "boolean",
-            "description": "More nodes exist than listed (the page holds the first 1000)."
+          "next_after": {
+            "type": "string",
+            "description": "The cursor of the next page; absent on the last one."
           }
         }
       },
@@ -43432,10 +43477,7 @@
                   ],
                   "properties": {
                     "data": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/components/schemas/AbuseReport"
-                      }
+                      "$ref": "#/components/schemas/AbuseReportPage"
                     }
                   }
                 }
@@ -43470,6 +43512,15 @@
             "schema": {
               "type": "string",
               "format": "date-time"
+            }
+          },
+          {
+            "name": "before_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 64
             }
           }
         ],
@@ -57018,6 +57069,26 @@
       "get": {
         "operationId": "get_v1_admin_server_nodes",
         "summary": "Operator-only: List server nodes",
+        "parameters": [
+          {
+            "name": "after",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          }
+        ],
         "security": [
           {
             "operatorCookie": [],
@@ -60202,6 +60273,26 @@
       "get": {
         "operationId": "get_v1_admin_infrastructure_capacity",
         "summary": "Operator node capacity",
+        "parameters": [
+          {
+            "name": "after",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          }
+        ],
         "responses": {
           "400": {
             "description": "Invalid target, body, pagination or confirmation",
@@ -60262,7 +60353,6 @@
             }
           }
         },
-        "parameters": [],
         "security": [
           {
             "operatorCookie": []

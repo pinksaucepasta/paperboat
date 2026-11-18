@@ -148,6 +148,29 @@ func TestAdminListsSearchTotalsAndAuditSearch(t *testing.T) {
 	if _, err := service.Read(ctx, actor, "audit_events", "", "not-a-number", 5); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("bad cursor err=%v", err)
 	}
+
+	// A team's members are paged with the team: a total, a page and the cursor to the next one.
+	teamID := "team_adm_" + suffix
+	exec(`INSERT INTO teams(team_id,owner_account,generation) VALUES($1,$2,1)`, teamID, activeID)
+	exec(`INSERT INTO team_members(team_id,account_id,membership_generation,role,active) VALUES($1,$2,1,'admin',true),($1,$3,1,'member',true)`, teamID, activeID, bannedID)
+	t.Cleanup(func() {
+		store.Pool().Exec(context.Background(), `DELETE FROM team_members WHERE team_id=$1`, teamID)
+		store.Pool().Exec(context.Background(), `DELETE FROM teams WHERE team_id=$1`, teamID)
+	})
+	first, err := service.Read(ctx, actor, "team", teamID, "", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if team := first.(Team); team.MembersTotal != 2 || len(team.Members) != 1 || team.Members[0].AccountID != activeID || team.MembersNextAfter != activeID {
+		t.Fatalf("first member page = %+v", team)
+	}
+	second, err := service.Read(ctx, actor, "team", teamID, activeID, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if team := second.(Team); team.MembersTotal != 2 || len(team.Members) != 1 || team.Members[0].AccountID != bannedID || team.MembersNextAfter != "" {
+		t.Fatalf("second member page = %+v", team)
+	}
 }
 
 func TestMachinesAndAuditSearchRoles(t *testing.T) {

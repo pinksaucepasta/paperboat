@@ -7,6 +7,7 @@ import { Facts, Panel } from "@/components/page"
 import { StatusBadge } from "@/components/filters"
 import { Time } from "@/components/time"
 import { Button } from "@/components/ui/button"
+import { useAllPages } from "@/lib/paging"
 import { ApiError, operatorAction, useApiQuery, useOperator, type Data } from "@/lib/api"
 
 type Workspace = Data<"/v1/admin/billing/workspaces/{workspace_id}">
@@ -21,8 +22,8 @@ export function PlanGrant({ scope, id }: { scope: "personal" | "team"; id: strin
   const admin = useOperator()?.role === "admin"
   const workspaceId = `${scope}:${id}`
   const workspace = useApiQuery<Workspace>(["workspace", workspaceId], admin ? `/v1/admin/billing/workspaces/${encodeURIComponent(workspaceId)}` : null)
-  const products = useApiQuery<Products>(["grant-products"], admin ? "/v1/admin/billing/products?limit=100" : null)
-  const choices = (products.data?.products ?? []).filter((p) => p.active && p.catalog_type === `${scope}_subscription`)
+  const products = useAllPages<Products["products"][number]>(admin ? "/v1/admin/billing/products" : null, (page) => (page as unknown as Products).products)
+  const choices = (products.data?.items ?? []).filter((p) => p.active && p.catalog_type === `${scope}_subscription`)
   const [code, setCode] = useState("")
   const [days, setDays] = useState("30")
   const [seats, setSeats] = useState("5")
@@ -48,7 +49,7 @@ export function PlanGrant({ scope, id }: { scope: "personal" | "team"; id: strin
           trigger={(open) => <Button variant="outline" size="lg" onClick={open} data-action="grant-plan">Grant a plan</Button>}
           run={(h) => operatorAction("POST", `/v1/admin/billing/workspaces/${encodeURIComponent(workspaceId)}/grant`, h, { revision, product_code: product, days: +days, ...(scope === "team" ? { quantity: +seats } : {}) })}
         >
-          <SelectField label="Plan" value={product} onChange={setCode} options={choices.length ? choices.map((p): [string, string] => [p.code, `${p.display_name} (${p.code})`]) : [["", "No active plan"]]} />
+          <SelectField label="Plan" value={product} onChange={setCode} options={choices.length ? choices.map((p): [string, string] => [p.code, `${p.display_name} (${p.code})`]) : [["", products.isError ? "Couldn’t load plans" : products.isPending ? "Loading…" : "No active plan"]]} hint={products.data?.capped ? "Showing the first 1000 plans." : undefined} />
           <TextField label="Days" value={days} onChange={setDays} inputMode="numeric" hint="1–366" />
           {scope === "team" && <TextField label="Seats" value={seats} onChange={setSeats} inputMode="numeric" hint="1–128" />}
         </ActionDialog>

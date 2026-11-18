@@ -11691,6 +11691,8 @@ export interface components {
             suspended: boolean;
             deleted_at?: string | null;
             members: components["schemas"]["OperatorTeamMember"][];
+            /** @description All of the team's members. */
+            members_total?: number;
             members_truncated: boolean;
             members_next_after?: string;
             billing_workspace_id?: string;
@@ -11891,6 +11893,14 @@ export interface components {
             details?: string;
             reporter_email?: string;
         };
+        AbuseReportPage: {
+            /** @description Reports matching the hostname filter. */
+            total: number;
+            reports: components["schemas"]["AbuseReport"][];
+            /** Format: date-time */
+            next_before?: string;
+            next_before_id?: string;
+        };
         AbuseReport: {
             id: string;
             hostname: string;
@@ -12011,6 +12021,8 @@ export interface components {
             storage_durability: string;
         };
         BackupPage: {
+            /** @description Every run reported for this database. */
+            total: number;
             runs: components["schemas"]["BackupRecord"][];
             next_after?: string;
         };
@@ -13311,6 +13323,9 @@ export interface components {
         };
         ServerNodeListEnvelope: {
             data: {
+                /** @description Every server node that is not removed. */
+                total: number;
+                next_after?: string;
                 nodes: components["schemas"]["ServerNode"][];
             };
         };
@@ -13933,8 +13948,8 @@ export interface components {
                 cpu_sustained_seconds: number;
             };
             items: components["schemas"]["OperatorNodeCapacity"][];
-            /** @description More nodes exist than listed (the page holds the first 1000). */
-            truncated?: boolean;
+            /** @description The cursor of the next page; absent on the last one. */
+            next_after?: string;
         };
         /** @description What an edge or relay reports about itself with a heartbeat. Bytes are cumulative since the process started. */
         NodeMetricsReport: {
@@ -26728,6 +26743,7 @@ export interface operations {
                 limit?: number;
                 hostname?: string;
                 before?: string;
+                before_id?: string;
             };
             header?: never;
             path?: never;
@@ -26742,7 +26758,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        data: components["schemas"]["AbuseReport"][];
+                        data: components["schemas"]["AbuseReportPage"];
                     };
                 };
             };
@@ -33445,7 +33461,10 @@ export interface operations {
     };
     get_v1_admin_server_nodes: {
         parameters: {
-            query?: never;
+            query?: {
+                after?: string;
+                limit?: number;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -35115,7 +35134,10 @@ export interface operations {
     };
     get_v1_admin_infrastructure_capacity: {
         parameters: {
-            query?: never;
+            query?: {
+                after?: string;
+                limit?: number;
+            };
             header?: never;
             path?: never;
             cookie?: never;
