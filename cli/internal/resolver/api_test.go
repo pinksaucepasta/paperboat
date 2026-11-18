@@ -508,7 +508,7 @@ func TestResolveRejectsEnvironmentOwnedByAnotherMachine(t *testing.T) {
 	response.Environment.ResourceID = "um_other"
 	fc := &fakeClient{machines: []api.UserMachine{terminalHost("um_1", "app", "online")}, connectSeq: []api.ConnectionDescriptor{response}}
 	_, err := newTestResolver(fc).Resolve(context.Background(), ConnectRequest{Machine: "app"})
-	if err == nil || !strings.Contains(err.Error(), "invalid environment") {
+	if err == nil || !strings.Contains(err.Error(), "wrong machine") {
 		t.Fatalf("err = %v", err)
 	}
 }

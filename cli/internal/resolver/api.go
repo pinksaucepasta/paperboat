@@ -480,7 +480,7 @@ func (r *APIResolver) validateDescriptor(resp api.ConnectionDescriptor, target t
 	if !completeTerminalDescriptor(resp.Terminal) {
 		return api.ConnectionDescriptor{}, errors.New("server returned an incomplete terminal descriptor")
 	}
-	if resp.Terminal.Protocol != terminalprotocol.TerminalSubprotocol || strings.TrimSpace(resp.Environment.ID) == "" || !environmentMatchesTarget(resp.Environment, target) {
+	if resp.Terminal.Protocol != terminalprotocol.TerminalSubprotocol || strings.TrimSpace(resp.Environment.ID) == "" {
 		return api.ConnectionDescriptor{}, errors.New("server returned an invalid environment descriptor")
 	}
 	if strings.TrimSpace(resp.Environment.Root) == "" || strings.TrimSpace(resp.Terminal.SessionID) == "" || strings.TrimSpace(resp.Terminal.CWD) == "" {
@@ -541,10 +541,6 @@ func (r *APIResolver) validateFileTransfer(transfer *api.FileTransfer, terminalU
 		return errors.New("file transfer descriptor has invalid policy")
 	}
 	return nil
-}
-
-func environmentMatchesTarget(environment api.Environment, target target) bool {
-	return environment.ResourceID == target.id
 }
 
 func targetState(target target, resp api.ConnectionDescriptor) string {
