@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Paperboat status</title>
+<meta name="description" content="Live status of Paperboat: sign-in, machine connections, relays, edges, transfers, console, updates and website.">
+
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header><div class="wrap"><span class="brand">paperboat <span>status</span></span></div></header>
+<main class="wrap">
+  <section id="banner" class="banner unknown" role="status" aria-live="polite"><span class="dot"></span><span id="banner-text">Checking status…</span></section>
+  <p id="updated" class="muted"></p>
+  <section id="active" aria-label="Incidents and maintenance"></section>
+  <section id="components" aria-label="Components"></section>
+  <section id="past"><h2>Past incidents</h2><div id="past-list"></div></section>
+  <section id="subscribe">
+    <h2>Get updates</h2>
+    <form id="sub-form"><label for="email" class="sr">Email address</label>
+      <input id="email" type="email" required maxlength="254" placeholder="you@example.com" autocomplete="email">
+      <button type="submit">Subscribe</button></form>
+    <p id="sub-msg" class="muted" role="status"></p>
+    <p class="muted"><a id="feed" href="#">RSS feed</a></p>
+  </section>
+</main>
+<script src="/app.js" type="module"></script>
+</body>
+</html>

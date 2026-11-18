@@ -1,0 +1,27 @@
+:root{--ink:#14171f;--muted:#5d6472;--line:#e6e8ee;--bg:#fff;--panel:#f6f7f9;--brand:#1d52eb;--ok:#1a9d5c;--warn:#d98a00;--bad:#d6322f;--none:#c9ced8}
+*{box-sizing:border-box}
+body{margin:0;font:16px/1.5 "Figtree",system-ui,-apple-system,"Segoe UI",sans-serif;color:var(--ink);background:var(--bg);font-variant-numeric:tabular-nums}
+.wrap{max-width:760px;margin:0 auto;padding:0 20px}
+header{border-bottom:1px solid var(--line);padding:18px 0}
+.brand{font-weight:600;letter-spacing:-.025em;font-size:20px}.brand span{color:var(--muted);font-weight:500}
+main{padding-bottom:64px}
+h2{font-size:18px;margin:40px 0 12px}
+.muted{color:var(--muted);font-size:14px}
+.banner{display:flex;align-items:center;gap:12px;margin-top:28px;padding:18px 20px;border-radius:12px;font-weight:600;font-size:18px;background:var(--panel)}
+.dot{width:12px;height:12px;border-radius:50%;flex:none;background:var(--none)}
+.operational .dot,.dot.operational{background:var(--ok)}.degraded .dot,.dot.degraded,.maintenance .dot,.dot.maintenance{background:var(--warn)}
+.major .dot,.dot.major{background:var(--bad)}.unknown .dot,.delayed .dot,.dot.delayed{background:var(--none)}
+.component{padding:18px 0;border-bottom:1px solid var(--line)}
+.row{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.name{font-weight:600}.state{display:flex;align-items:center;gap:8px;font-size:14px;white-space:nowrap}
+.note{color:var(--muted);font-size:14px;margin:2px 0 10px}
+.bars{display:flex;gap:2px;height:30px}
+.bar{flex:1;min-width:1px;border-radius:2px;background:var(--none)}.bar.up{background:var(--ok)}.bar.degraded{background:var(--warn)}.bar.down{background:var(--bad)}
+.axis{display:flex;justify-content:space-between;color:var(--muted);font-size:12px;margin-top:4px}
+.units{margin:10px 0 0;padding:0;list-style:none;font-size:14px}.units li{display:flex;justify-content:space-between;padding:3px 0}
+.card{border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-top:12px}
+.card h3{margin:0 0 4px;font-size:16px}.update{margin:10px 0 0;font-size:14px}.update b{text-transform:capitalize}
+form{display:flex;gap:8px}input{flex:1;padding:10px 12px;border:1px solid var(--line);border-radius:8px;font:inherit}
+button{padding:10px 16px;border:0;border-radius:8px;background:var(--brand);color:#fff;font:inherit;font-weight:600;cursor:pointer}
+button:disabled{opacity:.6;cursor:default}
+a{color:var(--brand)}.sr{position:absolute;left:-9999px}
