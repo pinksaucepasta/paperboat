@@ -11,6 +11,7 @@ import {
   ProhibitIcon,
   BugIcon,
   DatabaseIcon,
+  HeartbeatIcon,
   WarningIcon,
   UserIcon,
   UserGearIcon,
@@ -35,6 +36,7 @@ export const sections: Section[] = [
   { href: "/abuse", title: "Abuse reports", icon: WarningIcon, roles: ["admin", "operations"] },
   { href: "/capacity", title: "Capacity", icon: GaugeIcon, roles: ["admin", "operations"] },
   { href: "/backups", title: "Backups", icon: DatabaseIcon, roles: ["admin", "operations"] },
+  { href: "/status", title: "Status page", icon: HeartbeatIcon, roles: ["admin", "operations"] },
   { href: "/infrastructure", title: "Servers", icon: HardDrivesIcon, roles: ["admin", "operations"] },
   { href: "/billing", title: "Billing", icon: CreditCardIcon, roles: ["admin", "support", "billing"] },
   { href: "/releases", title: "Releases", icon: RocketLaunchIcon, roles: ["admin"] },
@@ -49,7 +51,7 @@ const groups: { label?: string; hrefs: Section["href"][] }[] = [
   { hrefs: ["/overview", "/analytics"] },
   { label: "Customers", hrefs: ["/users", "/teams", "/machines", "/billing"] },
   { label: "Support", hrefs: ["/support", "/sentry", "/abuse"] },
-  { label: "Infrastructure", hrefs: ["/infrastructure", "/capacity", "/backups", "/releases"] },
+  { label: "Infrastructure", hrefs: ["/infrastructure", "/capacity", "/backups", "/status", "/releases"] },
   { label: "Admin", hrefs: ["/ip-blocks", "/operators", "/audit"] },
 ]
 

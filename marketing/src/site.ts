@@ -21,6 +21,8 @@ export const apiBaseUrl = apiUrl
 /** Where abuse is reported by email; undefined when the server publishes none. */
 export const abuseMailbox = config.abuse_mailbox
 export const consoleUrl = config.console_url
+/** The status page's address (PAPERBOAT_STATUS_URL), when this deployment has one. */
+export const statusUrl: string | undefined = import.meta.env.PAPERBOAT_STATUS_URL || undefined
 export const installUrl = `${config.installer_base_url}/install`
 export const selfhostInstallUrl = `${config.installer_base_url}/selfhost/install`
 export const localDomain = config.local_access_base_domain
