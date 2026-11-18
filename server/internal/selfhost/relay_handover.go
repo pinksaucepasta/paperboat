@@ -2,6 +2,7 @@ package selfhost
 
 import (
 	"context"
+	"strconv"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/shared/relaylimits"
@@ -13,7 +14,7 @@ import (
 // non-fatal overload code so the clients reconnect through the new relays. Relays the pool includes again drop
 // their entry, so switching back cancels the handover.
 func handOverRelays(ctx context.Context, tx *db.Tx, account string, p Policy) error {
-	const eligibleRelays = `SELECT n.id FROM paperboat.control_tunnel_nodes n WHERE n.roles @> ARRAY['relay']::text[] AND n.state<>'retired' AND paperboat.node_pool_eligible(n.id,$1,'relay') ORDER BY n.id LIMIT 256`
+	eligibleRelays := `SELECT n.id FROM paperboat.control_tunnel_nodes n WHERE n.roles @> ARRAY['relay']::text[] AND n.state<>'retired' AND paperboat.node_pool_eligible(n.id,$1,'relay') ORDER BY n.id LIMIT ` + strconv.Itoa(relaylimits.MaxConnectionsPerNode)
 	rows, err := tx.Query(ctx, eligibleRelays, account)
 	if err != nil {
 		return err
