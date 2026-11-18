@@ -118,6 +118,10 @@ func newWorld(t *testing.T) *world {
 		PickupThreshold: 1, PickupTimeout: time.Hour, OnlineWindow: time.Hour, Batch: 2, Now: func() time.Time { return w.clock },
 	}
 	w.rebuild()
+	// One run at a time per database: a run another test left behind must not block this one.
+	end := func() { w.exec(`UPDATE paperboat.breakglass_runs SET state = 'cancelled', finished_at = now() WHERE state = 'running'`) }
+	end()
+	t.Cleanup(end)
 	return w
 }
 
@@ -266,6 +270,7 @@ func TestMachineTrustsOldAndNewKeysDuringTheOverlapAndRefusesTheOldAfterRetire(t
 		t.Fatalf("setup: the machine must trust the one CA that signed %+v", set)
 	}
 	w.fetch(other)
+	w.clock = w.clock.Add(time.Minute)
 
 	run := w.start(operator, "")
 	w.until(run.ID, StagePublish)
@@ -545,6 +550,7 @@ func TestPickupEndsAtTheTimeoutForMachinesThatStayOffline(t *testing.T) {
 	m, offline := w.machine("on"), w.machine("off")
 	w.fetch(m)
 	w.fetch(offline)
+	w.clock = w.clock.Add(time.Minute)
 	run := w.start(operator, "")
 	w.until(run.ID, StagePublish)
 	w.fetch(m)
