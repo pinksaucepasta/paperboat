@@ -38,7 +38,7 @@ import { ErrorMessage, errorToast } from "@/components/error-reference"
  * tunnel addresses and custom domains are Public.
  */
 
-function State({ tone, label }: { tone: Tone; label: string }) {
+export function State({ tone, label }: { tone: Tone; label: string }) {
   return (
     <span
       className={cn(
