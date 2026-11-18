@@ -20,7 +20,21 @@ import (
 	"time"
 )
 
-func (s *Service) fileTransferDescriptor(ctx context.Context, userID, sourceMachineID, destinationMachineID, cliClientSessionID, sessionID, requestID, manifestDigest string, intent TransferIntent) (descriptor FileTransferDescriptor, returnErr error) {
+func (s *Service) fileTransferDescriptor(ctx context.Context, userID, sourceMachineID, destinationMachineID, cliClientSessionID, sessionID, requestID, manifestDigest string, intent TransferIntent) (FileTransferDescriptor, error) {
+	return s.issueFileTransferDescriptor(ctx, userID, sourceMachineID, destinationMachineID, cliClientSessionID, sessionID, requestID, manifestDigest, intent, fileTransferOperationID(ctx, sessionID, requestID))
+}
+
+// PrepareFileTransferDescriptor mints a descriptor for a send the
+// POST /v1/sends/prepare handler already resolved and inbox-approved. Its
+// checks, single Consume and single SDK audit are the descriptor route's:
+// callers must not duplicate them.
+func (s *Service) PrepareFileTransferDescriptor(ctx context.Context, userID, sourceMachineID, destinationMachineID, cliClientSessionID, sessionID, requestID, manifestDigest string, intent TransferIntent) (FileTransferDescriptor, error) {
+	return s.issueFileTransferDescriptor(ctx, userID, sourceMachineID, destinationMachineID, cliClientSessionID, sessionID, requestID, manifestDigest, intent, fileTransferOperationID(ctx, sessionID, requestID))
+}
+
+// fileTransferOperationID binds the SDK audit to the inbox request when the
+// descriptor serves one, else to the terminal session or a fresh operation.
+func fileTransferOperationID(ctx context.Context, sessionID, requestID string) string {
 	operationID := sessionID
 	if _, token := auth.SDKSessionFromContext(ctx); token {
 		operationID = newID("operation")
@@ -28,6 +42,14 @@ func (s *Service) fileTransferDescriptor(ctx context.Context, userID, sourceMach
 	if requestID != "" {
 		operationID = requestID
 	}
+	return operationID
+}
+
+// issueFileTransferDescriptor is the single place that checks authority,
+// consumes an approved Team Inbox request and mints the credential, so the
+// descriptor route and the sends/prepare handler cannot Consume or audit
+// twice. The audit records the passed operationID exactly once.
+func (s *Service) issueFileTransferDescriptor(ctx context.Context, userID, sourceMachineID, destinationMachineID, cliClientSessionID, sessionID, requestID, manifestDigest string, intent TransferIntent, operationID string) (descriptor FileTransferDescriptor, returnErr error) {
 	defer func() {
 		auditErr := s.recordSDKAuthorization(ctx, userID, cliClientSessionID, destinationMachineID, operationID, "files", returnErr)
 		if auditErr != nil {

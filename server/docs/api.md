@@ -224,12 +224,27 @@ attachment uses a new browser key and ticket.
 - `DELETE /v1/auth/cli-client-sessions/{cli_client_session_id}`
 - `POST /v1/machines/{machine_id}/connection-descriptor`
 - `GET /v1/machines/{machine_id}/connection-readiness`
+- `POST /v1/sends/prepare`
 - `GET /v1/terminal-sessions/{session_id}/browser-access-policy`
 - `PUT /v1/terminal-sessions/{session_id}/browser-access-policy`
 
 Native connection descriptors are short-lived and bound to the authorized machine,
 resource and current installation generation. Readiness reports a usable target;
 pending reconciliation is retryable and does not authorize an unrelated target.
+
+`POST /v1/sends/prepare` folds the small-file `pb send` setup into one call:
+it resolves `destination_ref` (exact machine ID or alias) against the selected
+workspace inventory, defaults an empty `transfer_mode` from the sender's account
+preferences, creates the Team Inbox request, and mints the file-transfer
+descriptor inline when the request is approved or needs no approval. Approved
+and no-approval sends return `201` with the descriptor; manual-approval sends
+return `202` with a null descriptor (poll
+`GET /v1/team-inbox/requests/{request_id}`, then mint through the existing
+descriptor route). Stored sends return `201` with `stored:true` and a null
+descriptor. The `operation_id` idempotency key makes byte-identical retries
+return the same request. It needs the descriptor's `machines:connect` bearer
+scope; error codes are the inbox and descriptor routes' own codes, with an
+offline destination answering `409 machine_offline`.
 
 ## Error Codes
 

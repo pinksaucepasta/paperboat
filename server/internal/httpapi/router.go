@@ -692,6 +692,9 @@ func NewRouter(opts Options) http.Handler {
 				mux.Handle("POST /v1/machines/{machine_id}/exec-descriptor", requireBearerAuth(opts.DeviceAuth, requireScope("machines:connect", requireWorkspaceSelection(opts.Workspaces, userMachineExecDescriptor(opts.Machines)))))
 				mux.Handle("POST /v1/machines/{machine_id}/ssh-descriptor", requireBearerAuth(opts.DeviceAuth, requireScope("machines:connect", requireWorkspaceSelection(opts.Workspaces, userMachineSSHDescriptor(opts.Machines)))))
 				mux.Handle("POST /v1/machines/{machine_id}/file-transfer-descriptor", requireBearerAuth(opts.DeviceAuth, requireScope("machines:connect", requireWorkspaceSelection(opts.Workspaces, userMachineFileTransferDescriptor(opts.Machines)))))
+				if opts.TeamInbox != nil && opts.AccountPreferences != nil {
+					mux.Handle("POST /v1/sends/prepare", requireBearerAuth(opts.DeviceAuth, requireScope("machines:connect", requireWorkspaceSelection(opts.Workspaces, sendPrepare(opts.Machines, opts.TeamInbox, opts.AccountPreferences)))))
+				}
 				mux.Handle("GET /v1/machines/{machine_id}/connection-readiness", requireBearerAuth(opts.DeviceAuth, requireScope("machines:connect", requireWorkspaceSelection(opts.Workspaces, userMachineConnectionReadiness(opts.Machines)))))
 				mux.Handle("GET /v1/terminal-sessions/{session_id}/transfer-destinations", requireBearerAuth(opts.DeviceAuth, requireScope("machines:read", requireWorkspaceSelection(opts.Workspaces, terminalSessionTransferDestinations(opts.Machines)))))
 			}

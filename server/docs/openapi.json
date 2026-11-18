@@ -18385,6 +18385,131 @@
           }
         ]
       },
+      "SendPrepareRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "destination_ref",
+          "source_machine_id",
+          "request_id",
+          "operation_id",
+          "batch_id",
+          "files",
+          "expires_at",
+          "declared_bytes"
+        ],
+        "properties": {
+          "destination_ref": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Exact machine ID or alias, resolved against the selected workspace inventory."
+          },
+          "source_machine_id": {
+            "type": "string"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "request_id": {
+            "type": "string"
+          },
+          "operation_id": {
+            "type": "string",
+            "description": "Idempotency key: a byte-identical retry returns the same request."
+          },
+          "batch_id": {
+            "type": "string"
+          },
+          "files": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 10,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "basename",
+                "size",
+                "sha256"
+              ],
+              "properties": {
+                "basename": {
+                  "type": "string",
+                  "maxLength": 255
+                },
+                "size": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "sha256": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                }
+              }
+            }
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "transfer_mode": {
+            "type": "string",
+            "description": "automatic or unlimited; empty reads the sender's account preference."
+          },
+          "declared_bytes": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Prepared batch total; must equal the accepted inbox request's total for team sends."
+          }
+        }
+      },
+      "SendPrepareResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "machine",
+          "request",
+          "file_transfer_mode",
+          "descriptor"
+        ],
+        "properties": {
+          "machine": {
+            "$ref": "#/components/schemas/Machine"
+          },
+          "request": {
+            "$ref": "#/components/schemas/TeamInboxRequest"
+          },
+          "file_transfer_mode": {
+            "type": "string",
+            "enum": [
+              "automatic",
+              "unlimited"
+            ]
+          },
+          "descriptor": {
+            "description": "Null for pending and stored requests.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FileTransfer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "SendPrepareResponse": {
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/SendPrepareResult"
+          }
+        }
+      },
       "TeamInboxRequest": {
         "type": "object",
         "additionalProperties": false,
@@ -32797,6 +32922,86 @@
               "maxLength": 63
             },
             "description": "Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field."
+          }
+        ]
+      }
+    },
+    "/v1/sends/prepare": {
+      "post": {
+        "summary": "Prepare a file send in one call",
+        "description": "Resolves destination_ref (exact machine ID or alias), defaults an empty transfer_mode from the sender's account preferences, creates the Team Inbox request, and mints the file-transfer descriptor inline when the request is approved or needs no approval. Pending requests return 202 without a descriptor: poll GET /v1/team-inbox/requests/{request_id} and then POST /v1/machines/{machine_id}/file-transfer-descriptor. Stored requests return 201 without a descriptor and use the existing stored upload branch.",
+        "security": [
+          {
+            "bearerAccess": []
+          }
+        ],
+        "x-required-bearer-scopes": [
+          "machines:connect"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SendPrepareRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Approved or no-approval send: request plus inline file-transfer descriptor. Stored sends omit the descriptor.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SendPrepareResponse"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Pending manual approval: request without a descriptor.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SendPrepareResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "413": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "operationId": "create_send_prepare",
+        "parameters": [
+          {
+            "name": "workspace",
+            "in": "query",
+            "required": false,
+            "description": "Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field.",
+            "schema": {
+              "type": "string",
+              "maxLength": 63
+            }
           }
         ]
       }
