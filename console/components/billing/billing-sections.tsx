@@ -68,12 +68,13 @@ export function Seats({ workspace, billing }: { workspace: Workspace; billing: B
   if (billing.granted)
     return (
       <Section title="Seats">
-        <Row label="Seats">{`${bought} granted · ${used} used`}</Row>
+        <Row label="Seats">{`${billing.seats_granted ?? bought} granted · ${used} used`}</Row>
         <p className="py-2 text-sm text-muted-foreground">Subscribe to change seats.</p>
       </Section>
     )
   return (
     <Section title="Seats">
+      {billing.seats_granted != null && <Row label="Seats granted">{`${billing.seats_granted} · ${used} used`}</Row>}
       <div className="flex min-h-12 flex-wrap items-center justify-between gap-x-6 gap-y-2 border-b border-divider py-2 text-sm">
         <span className="flex items-center gap-2">
           <Button

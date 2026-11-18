@@ -80,6 +80,7 @@ const world = {
   ],
   operatorSessions: { operator_agent: ["a", "b"].map((c) => fixtureSession(c)) },
   grants: {},
+  entitlementGrants: {},
   floor: { schema: "paperboat.client-update-policy/v1", revision: 2, minimum_version: "", reason: "" },
   requests: [],
 }
@@ -93,6 +94,21 @@ const page = (items, key, total, url) => {
 }
 function mutate(method, p, json) {
   const [, , , area, id, action] = p.split("/").map(decodeURIComponent)
+  const entitlementRoute = /^\/v1\/admin\/billing\/workspaces\/([^/]+)\/entitlements(\/revoke)?$/.exec(p)
+  if (entitlementRoute) {
+    const workspace = decodeURIComponent(entitlementRoute[1])
+    const grants = (world.entitlementGrants[workspace] ??= [])
+    if (entitlementRoute[2]) {
+      const grant = grants.find((g) => g.id === json.grant_id && g.running)
+      if (!grant) return { __status: 404, code: "not_found", message: "The target was not found.", reference: "support_fixture_grant" }
+      Object.assign(grant, { running: false, revoked_at: new Date().toISOString() })
+      return { resource_id: workspace, state: "revoked", version: 0, grant_id: grant.id }
+    }
+    if (json.entitlement !== "bandwidth") for (const g of grants) if (g.kind === json.entitlement && g.running) Object.assign(g, { running: false, revoked_at: new Date().toISOString() })
+    const grant = { id: `grant_${grants.length + 1}`, workspace_id: workspace, kind: json.entitlement, amount: json.amount, ends_at: json.ends_at, reason: "x", created_by: "operator_root", created_at: new Date().toISOString(), running: true }
+    grants.push(grant)
+    return { resource_id: workspace, state: "granted", version: 0, grant_id: grant.id }
+  }
   const grantRoute = /^\/v1\/admin\/billing\/workspaces\/([^/]+)\/(grant|revoke)$/.exec(p)
   if (grantRoute) {
     const workspace = decodeURIComponent(grantRoute[1])
@@ -255,6 +271,22 @@ function route(req, url) {
         { id: "server-main", kind: "server", version: "dev-abc1234", cpu_percent: 3, cpu_sustained_percent: 3, rss_bytes: 500e6, last_heartbeat_at: "2026-11-18T08:59:40Z", metrics_at: "2026-11-18T08:59:40Z", warnings: [] },
       ],
     }
+  const entitlementRead = /^\/v1\/admin\/billing\/workspaces\/([^/]+)\/entitlements$/.exec(p)
+  if (entitlementRead) {
+    const workspace = decodeURIComponent(entitlementRead[1])
+    const grants = world.entitlementGrants[workspace] ?? []
+    const running = (kind) => grants.filter((g) => g.kind === kind && g.running).at(-1)
+    const team = workspace.startsWith("team:")
+    const limit = (kind, used, plan) => ({ kind, used, plan, ...(running(kind) ? { override: running(kind).amount } : {}), limit: running(kind)?.amount ?? (team ? null : plan) })
+    const granted = grants.filter((g) => g.kind === "bandwidth" && g.running).reduce((sum, g) => sum + g.amount, 0)
+    return {
+      workspace_id: workspace,
+      bandwidth: { plan_bytes: 5e9, granted_bytes: granted, usage_bytes: 1.2e9 },
+      limits: [limit("machines", 2, 100), limit("publications", 1, 100), limit("browser_terminals", 0, 10), limit("public_tcp", 0, 1)],
+      ...(team ? { seats: { bought: 3, used: 4, ...(running("seats") ? { override: running("seats").amount } : {}) } } : {}),
+      grants: [...grants].reverse(),
+    }
+  }
   if (p.startsWith("/v1/admin/billing/workspaces/")) {
     const workspace = decodeURIComponent(p.split("/").pop())
     if (workspace === "team:team_a") return { id: workspace, scope: "team", scope_id: "team_a", product_code: "team_monthly", state: "active", quantity: 3, period_end: "2026-12-01T00:00:00Z", cancel_at_period_end: false, granted: false, revision: 1, observed_at: "2026-11-17T09:00:00Z" }
@@ -361,6 +393,7 @@ const step = async (name, fn) => {
     await fn()
     results.push([true, name])
   } catch (error) {
+    if (process.env.CHECK_DEBUG) console.error(`--- ${name}\n${error.stack ?? error}`)
     results.push([false, `${name}  (${String(error.message ?? error).split("\n")[0]})`])
   }
 }
@@ -909,6 +942,61 @@ try {
     expect((await g.getByLabel("Seats").count()) === 1, "a team grant needs seats")
     await g.getByRole("button", { name: "Cancel" }).click()
   })
+  await step("entitlements: bandwidth is granted in GB with an end date, shows in the numbers, and is revoked; each write has its target, reason and key", async () => {
+    await p.goto(`${ORIGIN}/users/usr_001`)
+    await p.waitForSelector("[data-entitlements]")
+    expect((await text("[data-entitlement-bandwidth]")).includes("1.2 GB of 5.0 GB"), `bandwidth before: ${await text("[data-entitlement-bandwidth]")}`)
+    await p.getByRole("button", { name: "Grant bandwidth" }).click()
+    const d = dialog("Grant bandwidth to personal:usr_001")
+    await d.getByLabel("Amount (GB)").fill("250")
+    const ends = new Date(Date.now() + 5 * 864e5).toISOString().slice(0, 16)
+    await d.getByLabel("Ends").fill(ends)
+    await submit(d, "Grant bandwidth")
+    await p.waitForFunction(() => document.querySelector("[data-entitlement-bandwidth]")?.textContent?.includes("granted"))
+    const w = lastWrite()
+    expect(w.path === "/v1/admin/billing/workspaces/personal%3Ausr_001/entitlements" && w.target === "personal:usr_001" && w.body.entitlement === "bandwidth" && w.body.amount === 250e9 && /^\d{4}-\d\d-\d\dT/.test(w.body.ends_at) && !("revision" in w.body), `bandwidth write ${JSON.stringify(w)}`)
+    expect((await text("[data-entitlement-bandwidth]")).includes("1.2 GB of 255 GB") && (await text("[data-entitlement-bandwidth]")).includes("250 GB granted"), "the numbers do not show the grant")
+    expect((await p.locator("[data-grants] li").count()) === 1 && (await text("[data-grants]")).includes("Ends"), "the grant is not listed with its end")
+    await p.locator("[data-grants]").getByRole("button", { name: "Revoke" }).click()
+    const r = dialog("Revoke the Bandwidth grant")
+    await submit(r, "Revoke grant")
+    await p.waitForFunction(() => !document.querySelector("[data-entitlement-bandwidth]")?.textContent?.includes("granted"))
+    expect(lastWrite().path.endsWith("/entitlements/revoke") && lastWrite().body.grant_id === "grant_1", "revoke write")
+    await p.getByRole("button", { name: "Grant bandwidth" }).click()
+    const bad = dialog("Grant bandwidth to personal:usr_001")
+    await bad.getByLabel("Ends").fill("2001-01-01T00:00")
+    await bad.getByLabel("Reference", { exact: true }).fill("TICKET-70")
+    expect(await bad.getByRole("button", { name: "Grant bandwidth", exact: true }).isDisabled(), "a past end date can be submitted")
+    await bad.getByRole("button", { name: "Cancel" }).click()
+  })
+  await step("entitlements: a limit is overridden for a team (seats are offered only there), shows as granted, and a newer override replaces it", async () => {
+    await p.goto(`${ORIGIN}/teams/team_a`)
+    await p.waitForSelector("[data-entitlements]")
+    expect((await text('[data-entitlement-limit="seats"]')).includes("4 used of 3"), "team seats row")
+    expect((await text('[data-entitlement-limit="machines"]')).includes("2 of no limit"), "a team limit without an override reads no limit")
+    await p.getByRole("button", { name: "Override a limit" }).click()
+    const d = dialog("Override a limit of team:team_a")
+    expect((await d.getByLabel("Limit").locator("option").allInnerTexts()).includes("Seats"), "a team can override seats")
+    await d.getByLabel("Limit").selectOption("machines")
+    await d.getByLabel("Value").fill("500")
+    await submit(d, "Set limit")
+    await p.waitForFunction(() => document.querySelector('[data-entitlement-limit="machines"]')?.textContent?.includes("granted"))
+    expect((await text('[data-entitlement-limit="machines"]')).includes("2 of 500") && (await text('[data-entitlement-limit="machines"]')).includes("plan 100"), "the override is not shown against the plan")
+    const w = lastWrite()
+    expect(w.target === "team:team_a" && w.body.entitlement === "machines" && w.body.amount === 500 && !("ends_at" in w.body), `override write ${JSON.stringify(w.body)}`)
+    await p.getByRole("button", { name: "Override a limit" }).click()
+    const again = dialog("Override a limit of team:team_a")
+    await again.getByLabel("Limit").selectOption("machines")
+    await again.getByLabel("Value").fill("800")
+    await submit(again, "Set limit")
+    await p.waitForFunction(() => document.querySelector('[data-entitlement-limit="machines"]')?.textContent?.includes("of 800"))
+    await p.waitForFunction(() => [...document.querySelectorAll("[data-grants] li")].filter((li) => li.textContent.includes("Revoked")).length === 1)
+    await p.goto(`${ORIGIN}/users/usr_001`)
+    await p.waitForSelector("[data-entitlements]")
+    await p.getByRole("button", { name: "Override a limit" }).click()
+    expect(!(await dialog("Override a limit of personal:usr_001").getByLabel("Limit").locator("option").allInnerTexts()).includes("Seats"), "a person is offered seats")
+    await dialog("Override a limit of personal:usr_001").getByRole("button", { name: "Cancel" }).click()
+  })
   await step("operators: you are marked and have no buttons on your own row; inviting shows the setup token once and lists the invitation", async () => {
     await p.goto(`${ORIGIN}/operators`)
     await waitReady("operators")
@@ -1037,7 +1125,7 @@ try {
   await step("a support-role operator sees no write buttons", async () => {
     await p.goto(`${ORIGIN}/users/usr_001`)
     await p.waitForSelector('[data-table="machines"][data-state="ready"]')
-    expect((await p.getByRole("button", { name: /Suspend account|Rotate SSH user CA|Sign out everywhere|Grant a plan/ }).count()) === 0, "support sees account writes")
+    expect((await p.getByRole("button", { name: /Suspend account|Rotate SSH user CA|Sign out everywhere|Grant a plan|Grant bandwidth|Override a limit/ }).count()) === 0, "support sees account writes")
     await p.goto(`${ORIGIN}/billing`)
     await p.getByRole("tab", { name: "Plans" }).click()
     await waitReady("plans and prices")

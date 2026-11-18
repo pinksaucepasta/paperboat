@@ -270,7 +270,11 @@ function Allowance({ billing, workspace }: { billing: BillingWorkspace; workspac
         {/* Two short rows so the card stays as tall as its neighbours. */}
         <div className="flex items-center justify-between gap-3 whitespace-nowrap text-xs text-muted-foreground">
           <span className="truncate tabular-nums">
-            {allowance === null ? "No limit" : `${formatBytes(used)} of ${formatBytes(allowance)}`}
+            {allowance === null
+              ? "No limit"
+              : `${formatBytes(used)} of ${formatBytes(allowance)}${
+                  billing.allowance_granted_bytes ? ` · ${formatBytes(billing.allowance_granted_bytes)} granted` : ""
+                }`}
           </span>
           {window.end && <span className="shrink-0">Resets {time.date(window.end, "day")}</span>}
         </div>

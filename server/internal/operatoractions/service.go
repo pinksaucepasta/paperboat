@@ -39,6 +39,12 @@ type Input struct {
 	ProductCode string `json:"product_code,omitempty"`
 	Days        int    `json:"days,omitempty"`
 	Quantity    int    `json:"quantity,omitempty"`
+	// Entitlements: entitlement_grant takes Entitlement (bandwidth or a limit kind), Amount (bytes or the limit) and an
+	// optional EndsAt (RFC 3339); entitlement_revoke takes GrantID.
+	Entitlement string `json:"entitlement,omitempty"`
+	Amount      int64  `json:"amount,omitempty"`
+	EndsAt      string `json:"ends_at,omitempty"`
+	GrantID     string `json:"grant_id,omitempty"`
 }
 type Result struct {
 	ResourceID string `json:"resource_id"`
@@ -49,6 +55,8 @@ type Result struct {
 	SetupToken string     `json:"setup_token,omitempty"`
 	ExpiresAt  *time.Time `json:"expires_at,omitempty"`
 	Revoked    int64      `json:"revoked,omitempty"`
+	// GrantID is the entitlement the action created or ended.
+	GrantID string `json:"grant_id,omitempty"`
 }
 type Service struct {
 	store       *db.DB
@@ -105,6 +113,10 @@ func (s *Service) Execute(ctx context.Context, actorID, key, kind, target, reaso
 		switch kind {
 		case "account_ban", "account_unban":
 			if err = accountAction(ctx, tx, actorID, target, kind == "account_ban", input.Revision, &result); err != nil {
+				return err
+			}
+		case "entitlement_grant", "entitlement_revoke":
+			if err = entitlementAction(ctx, tx, actorID, kind, target, reason, input, &result); err != nil {
 				return err
 			}
 		case "plan_grant", "plan_revoke":
@@ -362,7 +374,7 @@ func relayAction(ctx context.Context, tx *db.Tx, target string, drain bool, revi
 
 func validKind(v string) bool {
 	switch v {
-	case "account_ban", "account_unban", "account_sessions_revoke", "plan_grant", "plan_revoke", "team_ban", "team_unban", "relay_drain", "relay_resume", "tunnel_disable", "tunnel_enable", "publication_block", "publication_unblock", "operator_create", "operator_disable", "operator_enable", "operator_mfa_reset", "operator_sessions_revoke":
+	case "account_ban", "account_unban", "account_sessions_revoke", "plan_grant", "plan_revoke", "entitlement_grant", "entitlement_revoke", "team_ban", "team_unban", "relay_drain", "relay_resume", "tunnel_disable", "tunnel_enable", "publication_block", "publication_unblock", "operator_create", "operator_disable", "operator_enable", "operator_mfa_reset", "operator_sessions_revoke":
 		return true
 	}
 	return false
@@ -371,7 +383,7 @@ func allowed(role, kind string) bool {
 	if isStaffKind(kind) {
 		return role == "admin"
 	}
-	if kind == "account_ban" || kind == "account_unban" || kind == "account_sessions_revoke" || isGrantKind(kind) || kind == "team_ban" || kind == "team_unban" {
+	if kind == "account_ban" || kind == "account_unban" || kind == "account_sessions_revoke" || isGrantKind(kind) || isEntitlementKind(kind) || kind == "team_ban" || kind == "team_unban" {
 		return role == "admin"
 	}
 	return role == "admin" || role == "operations"
@@ -386,7 +398,7 @@ func resourceType(kind string) string {
 	if strings.HasPrefix(kind, "account_") {
 		return "account"
 	}
-	if isGrantKind(kind) {
+	if isGrantKind(kind) || isEntitlementKind(kind) {
 		return "billing_workspace"
 	}
 	if strings.HasPrefix(kind, "team_") {

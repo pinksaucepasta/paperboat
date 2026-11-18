@@ -82,7 +82,11 @@ func CheckResourceCapTx(ctx context.Context, tx *db.Tx, team, kind string) error
 		AND NOT (b.resource_kind='tunnel' AND NOT EXISTS(SELECT 1 FROM tunnels t WHERE t.id=b.resource_id AND t.deleted_at IS NULL))`, team, kinds).Scan(&count); err != nil {
 		return err
 	}
-	if limit := planlimits.TeamCeiling(planKind); count >= limit {
+	limit, err := planlimits.TeamCeilingFor(ctx, tx, team, planKind)
+	if err != nil {
+		return err
+	}
+	if count >= limit {
 		return &LimitError{Kind: kind, Used: count, Limit: limit}
 	}
 	return nil

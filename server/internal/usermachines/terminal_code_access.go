@@ -71,8 +71,12 @@ func (s *Service) TerminalCodeAccess(ctx context.Context, accountID, sessionID s
 		return TerminalCodeAccess{}, err
 	}
 	if out.Enabled {
+		viewers, err := terminalViewerCap(ctx, s.db.Pool(), sessionID)
+		if err != nil {
+			return TerminalCodeAccess{}, err
+		}
 		rows, err := s.db.Pool().Query(ctx, `SELECT g.id,g.display_name,g.expires_at FROM terminal_guest_sessions g JOIN terminal_code_access c ON c.terminal_session_id=g.terminal_session_id
-    WHERE g.terminal_session_id=$1 AND g.expires_at>now() AND c.enabled AND c.expires_at>now() AND c.generation=g.code_generation ORDER BY g.created_at LIMIT $2`, sessionID, planlimits.ViewersPerSharedTerminal())
+    WHERE g.terminal_session_id=$1 AND g.expires_at>now() AND c.enabled AND c.expires_at>now() AND c.generation=g.code_generation ORDER BY g.created_at LIMIT $2`, sessionID, viewers)
 		if err != nil {
 			return TerminalCodeAccess{}, err
 		}
@@ -213,7 +217,11 @@ func (s *Service) JoinTerminalWithCode(ctx context.Context, sessionID, code, dis
 		if err = tx.QueryRow(ctx, `SELECT count(*) FROM terminal_guest_sessions WHERE terminal_session_id=$1 AND expires_at>now()`, sessionID).Scan(&count); err != nil {
 			return err
 		}
-		if count >= planlimits.ViewersPerSharedTerminal() {
+		viewers, err := terminalViewerCap(ctx, tx, sessionID)
+		if err != nil {
+			return err
+		}
+		if count >= viewers {
 			return ErrTerminalGuestCapacity
 		}
 		var secret [32]byte
@@ -338,4 +346,19 @@ func normalizeTerminalJoinCode(value string) (string, bool) {
 func terminalJoinCodeHash(sessionID, code string) [32]byte {
 	normalized, _ := normalizeTerminalJoinCode(code)
 	return sha256.Sum256([]byte("paperboat.terminal-code.v1\x00" + sessionID + "\x00" + normalized))
+}
+
+// terminalViewerCap is the viewer cap of the shared terminal: the configured one, or the override of the workspace the
+// terminal's machine belongs to (its team, else its owner's personal workspace).
+func terminalViewerCap(ctx context.Context, q interface {
+	QueryRow(context.Context, string, ...any) pgx.Row
+}, sessionID string) (int, error) {
+	var owner, team string
+	if err := q.QueryRow(ctx, `SELECT t.owner_account,coalesce(m.owner_team_id,'') FROM user_machine_terminal_sessions t JOIN user_machines m ON m.id=t.user_machine_id WHERE t.id=$1`, sessionID).Scan(&owner, &team); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return planlimits.ViewersPerSharedTerminal(), nil
+		}
+		return 0, err
+	}
+	return planlimits.ViewersPerSharedTerminalFor(ctx, q, planlimits.Scope{Account: owner, Team: team})
 }

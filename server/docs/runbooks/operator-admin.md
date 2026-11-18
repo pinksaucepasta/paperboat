@@ -179,6 +179,19 @@ While a grant runs (`grant_until`), a Stripe event for the workspace is applied 
 (active or trialing, read from Stripe at the time, not from the event), so a retried or replayed event of any age for an old
 subscription cannot overwrite the grant.
 Revoke only ends a grant; a paid plan is cancelled in Stripe. The audit event records product, days and seats.
+
+Entitlements (extra bandwidth and limit overrides): `GET /v1/admin/billing/workspaces/{workspace_id}/entitlements` reads the
+workspace's bandwidth (plan allowance, granted bytes, usage), every counted limit (machines, previews and tunnels, browser
+terminals, public TCP tunnels, viewers per shared terminal) with the plan's value and any override, a team's seats, and the
+grants. `POST .../entitlements` with target `personal:<account>` or `team:<team>` and `{"entitlement","amount"[,"ends_at"]}`
+grants `bandwidth` (bytes, running grants add up and add to the period's allowance; an unlimited allowance stays unlimited) or
+overrides one limit kind (a value of at least 1, higher or lower than the plan's; a newer override of the same kind replaces
+the older one; `seats` only for teams). `ends_at` is optional and must be in the future; the grant stops counting at that
+instant by itself. `POST .../entitlements/revoke` with `{"grant_id"}` ends one grant now. Enforcement (machine, preview,
+tunnel, terminal and seat admission, the bandwidth gate, and the usage the customer sees as "granted") reads plan plus grant
+from one place, `internal/planlimits`; an override that lowers a limit below current use deletes nothing, it only refuses new
+use. A seats override sets what invitations may fill; it does not grow the team's public TCP pool (override `public_tcp` too) and directory sync still buys seats from the bought count. SDK limits are the same for every plan and cannot be overridden. Each write needs the operator's reference and an
+idempotency key and is audited as `operator.entitlement_grant` or `operator.entitlement_revoke` in the same transaction.
 Relay drain stops new scheduling; resume requires a new heartbeat before ready.
 Tunnel disable/enable uses the normal configuration-generation and operation
 pipeline, so acceptance is distinct from runtime convergence. Team suspension

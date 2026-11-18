@@ -123,6 +123,12 @@ func grantAction(ctx context.Context, tx *db.Tx, kind, target string, in Input, 
 // auditMetadata is what the audit event records: the reason and outcome, and for a plan grant what was granted.
 func auditMetadata(kind, reason string, in Input, result Result) map[string]any {
 	metadata := map[string]any{"reason": reason, "state": result.State, "version": result.Version}
+	if kind == "entitlement_grant" {
+		metadata["entitlement"], metadata["amount"], metadata["ends_at"], metadata["grant_id"] = in.Entitlement, in.Amount, in.EndsAt, result.GrantID
+	}
+	if kind == "entitlement_revoke" {
+		metadata["grant_id"] = result.GrantID
+	}
 	if kind == "plan_grant" {
 		metadata["product_code"], metadata["days"], metadata["quantity"], metadata["expires_at"] = in.ProductCode, in.Days, in.Quantity, result.ExpiresAt
 	}

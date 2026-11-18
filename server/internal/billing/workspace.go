@@ -44,22 +44,26 @@ type Workspace struct {
 	Product              *WorkspaceProduct `json:"product,omitempty"`
 	UsageBytes           int64             `json:"usage_bytes"`
 	AllowanceBytes       *int64            `json:"allowance_bytes"`
-	ID                   string            `json:"id"`
-	UserID               string            `json:"user_id,omitempty"`
-	TeamID               string            `json:"team_id,omitempty"`
-	State                string            `json:"state"`
-	ProductCode          string            `json:"product_code,omitempty"`
-	SeatsUsed            int               `json:"seats_used"`
-	ScheduledQuantity    *int              `json:"scheduled_seats,omitempty"`
-	ScheduledAt          *time.Time        `json:"scheduled_seats_at,omitempty"`
-	Quantity             int               `json:"seats_bought"`
-	Members              int               `json:"members"`
-	CanManage            bool              `json:"can_manage"`
-	RenewalGraceUntil    *time.Time        `json:"renewal_grace_until,omitempty"`
-	PaidBenefitsUntil    *time.Time        `json:"paid_benefits_until,omitempty"`
-	PeriodStart          *time.Time        `json:"period_start,omitempty"`
-	PeriodEnd            *time.Time        `json:"period_end,omitempty"`
-	CancelAtPeriodEnd    bool              `json:"cancel_at_period_end"`
+	// AllowanceGrantedBytes is the part of AllowanceBytes an operator granted (it is included in AllowanceBytes).
+	AllowanceGrantedBytes int64 `json:"allowance_granted_bytes,omitempty"`
+	// SeatsGranted is an operator's override of the team's seats, replacing what it bought.
+	SeatsGranted      *int       `json:"seats_granted,omitempty"`
+	ID                string     `json:"id"`
+	UserID            string     `json:"user_id,omitempty"`
+	TeamID            string     `json:"team_id,omitempty"`
+	State             string     `json:"state"`
+	ProductCode       string     `json:"product_code,omitempty"`
+	SeatsUsed         int        `json:"seats_used"`
+	ScheduledQuantity *int       `json:"scheduled_seats,omitempty"`
+	ScheduledAt       *time.Time `json:"scheduled_seats_at,omitempty"`
+	Quantity          int        `json:"seats_bought"`
+	Members           int        `json:"members"`
+	CanManage         bool       `json:"can_manage"`
+	RenewalGraceUntil *time.Time `json:"renewal_grace_until,omitempty"`
+	PaidBenefitsUntil *time.Time `json:"paid_benefits_until,omitempty"`
+	PeriodStart       *time.Time `json:"period_start,omitempty"`
+	PeriodEnd         *time.Time `json:"period_end,omitempty"`
+	CancelAtPeriodEnd bool       `json:"cancel_at_period_end"`
 	// Granted is a running support grant: an active plan with no Stripe subscription behind it, ending at GrantedUntil.
 	Granted      bool       `json:"granted"`
 	GrantedUntil *time.Time `json:"granted_until,omitempty"`

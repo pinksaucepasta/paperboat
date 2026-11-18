@@ -38,6 +38,7 @@ const states = {
   failed: (kind) => ({ ...states.paid(kind), state: "past_due", period_start: iso(-31 * day), period_end: iso(-day), paid_benefits_until: iso(5 * day) }),
   member: (kind) => ({ ...states.granted(kind), can_manage: false }),
   exhaustedPaid: (kind) => ({ ...states.paid(kind), usage_bytes: 1e12 }),
+  extras: (kind) => ({ ...states.paid(kind), allowance_granted_bytes: 2.5e11, allowance_bytes: 1.25e12, limits: { ...limits, machines: { used: 2, limit: 500, granted: true } }, ...(kind === "team" ? { seats_granted: 20 } : {}) }),
   paid: (kind) => ({ ...states.granted(kind), cancel_at_period_end: false, granted: false, granted_until: undefined, period_end: iso(20 * day), paid_benefits_until: iso(20 * day) }),
 }
 const world = { mode: "granted" }
@@ -164,6 +165,14 @@ try {
     expect(/used its bandwidth|used its bandwidth for this period/.test(banner), `banner: ${banner.slice(0, 160)}`)
     expect(/Subscribe/.test(banner) && !/Add bandwidth/.test(banner) && !/Change plan/.test(banner), `banner links on a grant: ${banner}`)
     await shot("exhausted-granted")
+  })
+  await step("operator grants on a paid plan: extra bandwidth and an overridden limit read as granted, in the numbers", async () => {
+    const text = await open("personal", "extras", /Hosted allowance/)
+    expect(/5\.0 GB of 1\.3 TB used · 250 GB granted/.test(text) || /of 1\.25 TB used · 250 GB granted/.test(text), `allowance row: ${text.slice(0, 400)}`)
+    expect(/Machines 2 of 500 · Granted/.test(text), `machines row: ${text.slice(0, 400)}`)
+    expect((text.match(/ · Granted/g) ?? []).length === 1, "an unchanged limit reads as granted")
+    const team = await open("tg", "extras", /Seats/)
+    expect(/Seats granted 20 · 12 used/.test(team), `team seats: ${team.slice(0, 400)}`)
   })
   await step("control: a paid plan shows Manage billing, Renews and top-ups, so the checks above can fail", async () => {
     const text = await open("personal", "paid", /Renews/)

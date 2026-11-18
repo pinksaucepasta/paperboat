@@ -6,6 +6,7 @@ import { SelectField, TextField } from "@/components/fields"
 import { Facts, Panel } from "@/components/page"
 import { StatusBadge } from "@/components/filters"
 import { Time } from "@/components/time"
+import { Entitlements } from "@/components/entitlements"
 import { Button } from "@/components/ui/button"
 import { useAllPages } from "@/lib/paging"
 import { ApiError, operatorAction, useApiQuery, useOperator, type Data } from "@/lib/api"
@@ -75,6 +76,7 @@ export function PlanGrant({ scope, id }: { scope: "personal" | "team"; id: strin
           ...(scope === "team" && w ? [["Seats", w.quantity] as [string, React.ReactNode]] : []),
         ]}
       />
+      <Entitlements workspaceId={workspaceId} scope={scope} />
     </Panel>
   )
 }

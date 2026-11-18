@@ -31,10 +31,18 @@ FROM billing_workspace_usage_periods p JOIN billing_workspace_usage_periods u
  ON u.workspace_id=p.workspace_id AND u.paid=p.paid
  AND coalesce(u.budget_start,u.period_start)=coalesce(p.budget_start,p.period_start)
 WHERE p.workspace_id=$1 AND p.period_start<=$2 AND p.period_end>$2`, w.ID, at).Scan(&w.UsageBytes, &allowance)
-	if allowance.Valid {
-		w.AllowanceBytes = &allowance.Int64
+	if err != nil {
+		return err
 	}
-	return err
+	if allowance.Valid {
+		// An unlimited allowance stays unlimited; a limited one grows by the bytes an operator granted.
+		if err = tx.QueryRow(ctx, `SELECT workspace_granted_bytes($1)`, w.ID).Scan(&w.AllowanceGrantedBytes); err != nil {
+			return err
+		}
+		total := allowance.Int64 + w.AllowanceGrantedBytes
+		w.AllowanceBytes = &total
+	}
+	return nil
 }
 
 // InitializeAllowancePolicy seeds first-boot configuration without replacing
@@ -83,6 +91,14 @@ WHERE workspace_id=$1 AND paid=$2 AND coalesce(budget_start,period_start)=$3`, w
 		return 0, false, err
 	}
 	included := window.included
+	if included.Valid {
+		// Extra bandwidth an operator granted is part of the allowance while it runs.
+		var extra int64
+		if err = tx.QueryRow(ctx, `SELECT workspace_granted_bytes($1)`, workspaceID).Scan(&extra); err != nil {
+			return 0, false, err
+		}
+		included.Int64 += extra
+	}
 
 	granted := bytes
 	if included.Valid {

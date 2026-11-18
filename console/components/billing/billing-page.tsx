@@ -7,6 +7,7 @@ import { ApiError, idempotencyKey, useApiQuery, useWorkspace, type Workspace } f
 import {
   billingProductsQuery,
   allowanceWindow,
+  formatAllowance,
   planEnded,
   billingQuery,
   formatPrice,
@@ -17,7 +18,6 @@ import {
   type BillingWorkspace,
   formatLimit,
 } from "@/lib/billing"
-import { formatBytes } from "@/lib/format"
 import { PlanActions, Seats, TopUps } from "@/components/billing/billing-sections"
 import { Row, Section } from "@/components/section"
 import { useTrack } from "@/lib/analytics"
@@ -187,11 +187,7 @@ function Plan({
       {resets && resets !== billing.period_end && billing.product_code && (
         <Row label="Bandwidth resets">{time.date(resets, "date")}</Row>
       )}
-      <Row label="Hosted allowance">
-        {billing.allowance_bytes === null
-          ? `${formatBytes(billing.usage_bytes)} used`
-          : `${formatBytes(billing.usage_bytes)} of ${formatBytes(billing.allowance_bytes)} used`}
-      </Row>
+      <Row label="Hosted allowance">{formatAllowance(billing)}</Row>
       {billing.limits && (
         <>
           <Row label="Machines">{formatLimit(billing.limits.machines)}</Row>

@@ -5524,6 +5524,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/billing/workspaces/{workspace_id}/entitlements": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Operator workspace entitlements
+         * @description Current active operator account and separate operator session required. See docs/runbooks/operator-admin.md. Audited before disclosure; unavailable auditing fails closed. Operator-visible numbers for one workspace: its bandwidth allowance with what operators granted, every counted limit with the plan's value and any override, team seats, and the grants (running first). Unknown workspace 404.
+         */
+        get: operations["get_v1_admin_billing_workspaces_workspace_id_entitlements"];
+        put?: never;
+        /**
+         * Operator grant bandwidth or override a limit
+         * @description Current active operator account and separate operator session required. See docs/runbooks/operator-admin.md. Mutations require explicit target confirmation, an opaque evidence reference and stable idempotency key. Read current state before retrying an uncertain result. Operator-Target is the workspace id (`personal:<account>` or `team:<team>`). `entitlement` is `bandwidth` (amount in bytes, added to the allowance together with other running bandwidth grants) or one of machines, publications, browser_terminals, public_tcp, seats (teams), viewers_per_terminal (amount is the limit; it replaces the plan's value and an earlier override of that kind). `ends_at` (RFC 3339, in the future) ends it by itself; without it the grant runs until revoked. Enforcement reads the grants table: no other change is needed.
+         */
+        post: operations["post_v1_admin_billing_workspaces_workspace_id_entitlements"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/billing/workspaces/{workspace_id}/entitlements/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Operator revoke an entitlement grant
+         * @description Current active operator account and separate operator session required. See docs/runbooks/operator-admin.md. Mutations require explicit target confirmation, an opaque evidence reference and stable idempotency key. Read current state before retrying an uncertain result. Ends a running grant of the workspace now (grant_id from the entitlements read). A grant that already ended or was revoked is 404.
+         */
+        post: operations["post_v1_admin_billing_workspaces_workspace_id_entitlements_revoke"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/infrastructure": {
         parameters: {
             query?: never;
@@ -11451,21 +11495,29 @@ export interface components {
                     used: number;
                     /** @description Plan limit; null for Teams (advertised unlimited). */
                     limit: number | null;
+                    /** @description The limit is an operator's override, not the plan's. */
+                    granted?: boolean;
                 };
                 publications: {
                     used: number;
                     /** @description Plan limit; null for Teams (advertised unlimited). */
                     limit: number | null;
+                    /** @description The limit is an operator's override, not the plan's. */
+                    granted?: boolean;
                 };
                 browser_terminals: {
                     used: number;
                     /** @description Plan limit; null for Teams (advertised unlimited). */
                     limit: number | null;
+                    /** @description The limit is an operator's override, not the plan's. */
+                    granted?: boolean;
                 };
                 public_tcp: {
                     used: number;
                     /** @description Plan limit on concurrent public TCP tunnels (per seat, pooled, for a team); null when the workspace's tunnel edge is self-hosted (not limited). */
                     limit: number | null;
+                    /** @description The limit is an operator's override, not the plan's. */
+                    granted?: boolean;
                 };
             };
             /** @description Personal overview only: the Team trial a new team would get (0 once used). */
@@ -11527,6 +11579,13 @@ export interface components {
              * @description When the running grant ends.
              */
             granted_until?: string;
+            /**
+             * Format: int64
+             * @description The part of allowance_bytes an operator granted.
+             */
+            allowance_granted_bytes?: number;
+            /** @description An operator's override of the team's seats. */
+            seats_granted?: number;
         };
         WorkspaceBillingProduct: {
             code: string;
@@ -11992,6 +12051,8 @@ export interface components {
              * @description sessions revoked.
              */
             revoked?: number;
+            /** @description entitlement grant created or ended. */
+            grant_id?: string;
         };
         OperatorObservationLayer: {
             states: components["schemas"]["OperatorStateCount"][];
@@ -14090,6 +14151,64 @@ export interface components {
             errors?: {
                 [key: string]: string;
             };
+        };
+        OperatorEntitlementInput: {
+            /**
+             * @description grant only.
+             * @enum {string}
+             */
+            entitlement?: "bandwidth" | "machines" | "publications" | "browser_terminals" | "public_tcp" | "seats" | "viewers_per_terminal";
+            /**
+             * Format: int64
+             * @description grant only: bytes for bandwidth, else the limit; at least 1, and seats at most 128 (the most a team can hold).
+             */
+            amount?: number;
+            /**
+             * Format: date-time
+             * @description grant only: when it ends by itself; omit to run until revoked.
+             */
+            ends_at?: string;
+            /** @description revoke only. */
+            grant_id?: string;
+        };
+        OperatorEntitlementGrant: {
+            id: string;
+            workspace_id: string;
+            kind: string;
+            /** Format: int64 */
+            amount: number;
+            /** Format: date-time */
+            ends_at?: string;
+            reason: string;
+            created_by: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            revoked_at?: string;
+            running: boolean;
+        };
+        OperatorEntitlements: {
+            workspace_id: string;
+            bandwidth: {
+                plan_bytes: number | null;
+                /** Format: int64 */
+                granted_bytes: number;
+                /** Format: int64 */
+                usage_bytes: number;
+            };
+            limits: {
+                kind: string;
+                used: number;
+                plan: number;
+                override?: number;
+                limit: number | null;
+            }[];
+            seats?: {
+                bought: number;
+                used: number;
+                override?: number;
+            };
+            grants: components["schemas"]["OperatorEntitlementGrant"][];
         };
     };
     responses: {
@@ -27457,6 +27576,220 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["OperatorActionInput"];
+            };
+        };
+        responses: {
+            /** @description Audited result. Cache-Control: no-store. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["OperatorActionResult"];
+                    };
+                };
+            };
+            /** @description Invalid target, body, pagination or confirmation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Browser authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Operator session or capability required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Stale resource revision or conflicting idempotency request */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Evidence, provider or audit unavailable; outcome may require checking target state */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_v1_admin_billing_workspaces_workspace_id_entitlements: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Audited result. Cache-Control: no-store. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["OperatorEntitlements"];
+                    };
+                };
+            };
+            /** @description Invalid target, body, pagination or confirmation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Browser authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Operator session or capability required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Evidence, provider or audit unavailable; outcome may require checking target state */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    post_v1_admin_billing_workspaces_workspace_id_entitlements: {
+        parameters: {
+            query?: never;
+            header: {
+                "Operator-Target": string;
+                "Operator-Reason": string;
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OperatorEntitlementInput"];
+            };
+        };
+        responses: {
+            /** @description Audited result. Cache-Control: no-store. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["OperatorActionResult"];
+                    };
+                };
+            };
+            /** @description Invalid target, body, pagination or confirmation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Browser authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Operator session or capability required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Stale resource revision or conflicting idempotency request */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Evidence, provider or audit unavailable; outcome may require checking target state */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    post_v1_admin_billing_workspaces_workspace_id_entitlements_revoke: {
+        parameters: {
+            query?: never;
+            header: {
+                "Operator-Target": string;
+                "Operator-Reason": string;
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OperatorEntitlementInput"];
             };
         };
         responses: {

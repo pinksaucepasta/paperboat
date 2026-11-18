@@ -1,19 +1,28 @@
 "use client"
 
 import { queryOptions } from "@tanstack/react-query"
+import { formatBytes } from "@/lib/format"
 import { queryKeys } from "@/lib/query-keys"
 import { api, idempotencyKey, type Data, type Schemas, type Workspace } from "@/lib/api"
 import type { components } from "@/lib/api-schema"
 
 /** `limit` is null where the plan is unlimited (public_tcp: only on your own tunnel edge). */
-type Limit = { used: number; limit: number | null }
+type Limit = { used: number; limit: number | null; granted?: boolean }
 export type BillingWorkspace = components["schemas"]["BillingWorkspace"]
 
 /** "6 of 1,000", or "6 · Unlimited" when the plan has no limit. */
-export const formatLimit = ({ used, limit }: Limit) =>
+export const formatLimit = ({ used, limit, granted }: Limit) =>
   limit === null
     ? `${used.toLocaleString("en-US")} · Unlimited`
-    : `${used.toLocaleString("en-US")} of ${limit.toLocaleString("en-US")}`
+    : `${used.toLocaleString("en-US")} of ${limit.toLocaleString("en-US")}${granted ? " · Granted" : ""}`
+
+/** The allowance sentence: "5.0 GB of 1.0 TB used", with what support granted when some of it is. */
+export const formatAllowance = (billing: BillingWorkspace) =>
+  billing.allowance_bytes === null
+    ? `${formatBytes(billing.usage_bytes)} used`
+    : `${formatBytes(billing.usage_bytes)} of ${formatBytes(billing.allowance_bytes)} used${
+        billing.allowance_granted_bytes ? ` · ${formatBytes(billing.allowance_granted_bytes)} granted` : ""
+      }`
 export type BillingProduct = components["schemas"]["WorkspaceBillingProduct"]
 export type BillingInterval = "month" | "year"
 

@@ -290,7 +290,7 @@ func allowed(role auth.Role, kind string) bool {
 }
 
 func validKind(kind string) bool {
-	return kind == "account" || kind == "team" || kind == "billing" || kind == "infrastructure" || kind == "control_operation" || kind == "billing_operation" || kind == "audit" || kind == "accounts" || kind == "teams" || kind == "workspaces" || kind == "billing_operations" || kind == "control_operations" || kind == "overview" || kind == "tunnel_status" || kind == "audit_events" || kind == "machines" || kind == "machine" || kind == "capacity" || kind == "operators" || kind == "operator_sessions"
+	return kind == "account" || kind == "team" || kind == "billing" || kind == "infrastructure" || kind == "control_operation" || kind == "billing_operation" || kind == "audit" || kind == "accounts" || kind == "teams" || kind == "workspaces" || kind == "billing_operations" || kind == "control_operations" || kind == "overview" || kind == "tunnel_status" || kind == "audit_events" || kind == "machines" || kind == "machine" || kind == "capacity" || kind == "operators" || kind == "operator_sessions" || kind == "entitlements"
 }
 
 func pageKind(kind string) bool {
@@ -361,6 +361,8 @@ func (s *Service) readTx(ctx context.Context, tx *db.Tx, kind, target, after str
 		return s.readOverview(ctx, tx, target)
 	case "capacity":
 		return s.readCapacity(ctx, tx, after, limit)
+	case "entitlements":
+		return readEntitlements(ctx, tx, target)
 	case "operators":
 		return readOperators(ctx, tx, after, limit)
 	case "operator_sessions":

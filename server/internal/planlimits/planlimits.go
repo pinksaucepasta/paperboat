@@ -103,6 +103,8 @@ func (s Scope) workspaceID() string {
 type Usage struct {
 	Used  int  `json:"used"`
 	Limit *int `json:"limit"`
+	// Granted says the limit is an operator's override, not the plan's.
+	Granted bool `json:"granted,omitempty"`
 }
 
 // lockSeed and lockKey name the one lock per workspace and kind (hashtextextended(lockKey, lockSeed)).
@@ -138,6 +140,11 @@ func CheckTx(ctx context.Context, tx *db.Tx, scope Scope, kind Kind) error {
 	} else {
 		limit = limitFor(set.limits, kind, plan)
 	}
+	override, overridden, err := OverrideTx(ctx, tx, scope.workspaceID(), kind)
+	if err != nil {
+		return err
+	}
+	limit, _ = effective(override, overridden, limit)
 	used, err := countTx(ctx, tx, scope, kind)
 	if err != nil {
 		return err
@@ -186,6 +193,10 @@ func UsageTx(ctx context.Context, tx *db.Tx, scope Scope) (map[Kind]Usage, error
 	out := make(map[Kind]Usage, len(kinds))
 	for i, kind := range kinds {
 		u := Usage{Used: used[i]}
+		override, overridden, err := OverrideTx(ctx, tx, scope.workspaceID(), kind)
+		if err != nil {
+			return nil, err
+		}
 		switch {
 		case kind == PublicTCP:
 			// Per plan, and per paid seat for a team; nil when the workspace's tunnel edge is self-hosted.
@@ -194,8 +205,12 @@ func UsageTx(ctx context.Context, tx *db.Tx, scope Scope) (map[Kind]Usage, error
 				return nil, err
 			}
 			if !exempt {
+				limit, u.Granted = effective(override, overridden, limit)
 				u.Limit = &limit
 			}
+		case overridden:
+			limit, _ := effective(override, overridden, 0)
+			u.Limit, u.Granted = &limit, true
 		case plan != Team:
 			limit := limitFor(set.limits, kind, plan)
 			u.Limit = &limit

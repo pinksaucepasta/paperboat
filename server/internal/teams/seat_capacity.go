@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/planlimits"
 )
 
 var ErrSeatRequired = errors.New("buy a seat before inviting another member")
@@ -29,6 +30,14 @@ func reserveInvitationSeatTx(ctx context.Context, tx *db.Tx, team string) error 
  FROM billing_workspaces WHERE team_id=$1 AND team_paid_entitled($1)),0)`, team).Scan(&capacity)
 	if err != nil {
 		return err
+	}
+	// An operator's seat override replaces what the team bought (a paid team's too).
+	override, overridden, err := planlimits.SeatsOverrideTx(ctx, tx, team)
+	if err != nil {
+		return err
+	}
+	if overridden {
+		capacity = override
 	}
 	if used >= capacity {
 		return ErrSeatRequired

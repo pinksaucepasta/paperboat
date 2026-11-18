@@ -98,6 +98,13 @@ func (s *WorkspaceService) Overview(ctx context.Context, account, team string) (
 			}
 			out.TeamTrialDays = &days
 		}
+		if team != "" {
+			if seats, overridden, err := planlimits.SeatsOverrideTx(ctx, tx, team); err != nil {
+				return err
+			} else if overridden {
+				out.SeatsGranted = &seats
+			}
+		}
 		return s.usageOverviewTx(ctx, tx, &out)
 	})
 	return out, err

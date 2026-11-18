@@ -24,8 +24,12 @@ func auditResource(kind, target string, result Result) string {
 // inputFits refuses what a kind does not take: an operator action has no revision, no legal flag, and only the
 // fields of its own kind; every other kind needs a revision and none of the operator fields.
 func inputFits(kind string, in Input) bool {
+	if isEntitlementKind(kind) {
+		return in.Revision == 0 && !in.Legal && in.Email == "" && in.Role == "" && in.SessionID == "" && in.ProductCode == "" && in.Days == 0 && in.Quantity == 0 &&
+			(kind == "entitlement_grant") == (in.Entitlement != "") && (kind == "entitlement_grant" || (in.Amount == 0 && in.EndsAt == "")) && (kind == "entitlement_revoke") == (in.GrantID != "")
+	}
 	if !isStaffKind(kind) {
-		noOperatorFields := in.Email == "" && in.Role == "" && in.SessionID == ""
+		noOperatorFields := in.Email == "" && in.Role == "" && in.SessionID == "" && in.Entitlement == "" && in.Amount == 0 && in.EndsAt == "" && in.GrantID == ""
 		grant := in.ProductCode != "" || in.Days != 0 || in.Quantity != 0
 		switch kind {
 		case "plan_grant":
