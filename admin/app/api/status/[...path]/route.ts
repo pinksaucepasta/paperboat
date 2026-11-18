@@ -37,10 +37,11 @@ async function relay(request: NextRequest, { params }: { params: Promise<{ path:
   }
   try {
     const input = post ? await request.json().catch(() => ({})) : undefined
+    const key = request.headers.get("idempotency-key") ?? undefined
     const out =
       route === "state" ? { configured: true, ...((await statusProvider.state()) as object) }
-      : route === "createIncident" ? await statusProvider.createIncident(input)
-      : route === "updateIncident" ? await statusProvider.updateIncident(a, input)
+      : route === "createIncident" ? await statusProvider.createIncident(input, key)
+      : route === "updateIncident" ? await statusProvider.updateIncident(a, input, key)
       : route === "createMaintenance" ? await statusProvider.createMaintenance(input)
       : await statusProvider.cancelMaintenance(a)
     return NextResponse.json({ data: out }, { headers: { "cache-control": "no-store" } })
