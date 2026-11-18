@@ -478,7 +478,7 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 		return nil, fmt.Errorf("restore usage baseline: %w", err)
 	}
 	telemetryLifecycle.usageCounters = meter.CounterPressure
-	runtimeTransport, err := edgehttp.NewDataCarrierPreviewTransport(edgehttp.DataCarrierPreviewTransportConfig{Registry: runtimeRoutes, StreamOpenTimeout: deployment.ControlTimeout})
+	runtimeTransport, err := edgehttp.NewDataCarrierPreviewTransport(edgehttp.DataCarrierPreviewTransportConfig{Registry: runtimeRoutes, StreamOpenTimeout: deployment.ControlTimeout, RuntimeUsage: meter})
 	if err != nil {
 		return nil, err
 	}
@@ -693,7 +693,7 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 			slog.Warn("tunnel_forward_failed", "reference", reporting.SupportReference(ctx), "error", detail)
 		}
 		reporter.ObserveFailure(ctx, "upstream_request", cause)
-	}, RouteUnavailable: unavailableRoutes.Has, RouteGrace: routeGrace, SelfHosted: deployment.SelfHosted, RuntimeCarrierTransport: runtimeTransport, BrowserTerminalHub: browserTerminalHub, BrowserTerminalEdgeHost: deployment.ConnectorAdvertiseHost, BrowserAccess: browserAccess, BrowserTerminal: &control.BrowserTerminalClient{HTTP: client, NodeID: cfg.NodeID, ProcessEpoch: processEpoch}, InspectorAccess: inspectorAccess, PreviewBaseDomain: deployment.PreviewBaseDomain, TunnelBaseDomain: deployment.TunnelBaseDomain, RuntimeBaseDomain: deployment.RuntimeBaseDomain, TrustedProxies: trusted, MaxHeaderBytes: deployment.MaxHeaderBytes, MaxBodyBytes: deployment.MaxBodyBytes, BodyIdleTimeout: deployment.RequestBodyIdle(), Routes: routeMatcher, PrivateAccessConnections: privateConnections, Readiness: previewReadiness{Canonical: previewRoutes, Fallback: routes}, PreviewPending: func(host string) bool {
+	}, RouteUnavailable: unavailableRoutes.Has, RouteGrace: routeGrace, SelfHosted: deployment.SelfHosted, RuntimeCarrierTransport: runtimeTransport, BrowserTerminalHub: browserTerminalHub, Throttles: durableRoutes.Throttles(), BrowserTerminalEdgeHost: deployment.ConnectorAdvertiseHost, BrowserAccess: browserAccess, BrowserTerminal: &control.BrowserTerminalClient{HTTP: client, NodeID: cfg.NodeID, ProcessEpoch: processEpoch}, InspectorAccess: inspectorAccess, PreviewBaseDomain: deployment.PreviewBaseDomain, TunnelBaseDomain: deployment.TunnelBaseDomain, RuntimeBaseDomain: deployment.RuntimeBaseDomain, TrustedProxies: trusted, MaxHeaderBytes: deployment.MaxHeaderBytes, MaxBodyBytes: deployment.MaxBodyBytes, BodyIdleTimeout: deployment.RequestBodyIdle(), Routes: routeMatcher, PrivateAccessConnections: privateConnections, Readiness: previewReadiness{Canonical: previewRoutes, Fallback: routes}, PreviewPending: func(host string) bool {
 		now := time.Now()
 		return runtimeExpected.Expects(host, now)
 	}, PreviewAdmitted: ingressAuthority.AdmitsPreview, PreviewOwnerOffline: ingressAuthority.OwnerOffline, HelperAccess: verifier, Revocations: trust.Snapshot, RevocationCheckInterval: deployment.ControlInterval, AddressAllowed: ingressAuthority.AddressAllowed}, "", previewForwarder, durableForwarder)

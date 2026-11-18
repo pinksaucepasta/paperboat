@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"github.com/jackc/pgx/v5"
 	"github.com/pinksaucepasta/paperboat/server/internal/access"
+	"github.com/pinksaucepasta/paperboat/server/internal/accountingauthority"
 	"github.com/pinksaucepasta/paperboat/server/internal/audit"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
@@ -247,6 +248,7 @@ type Policy struct {
 }
 type Service struct {
 	inventoryFlights            inventoryFlights
+	runtimeQuota                accountingauthority.QuotaChecker
 	nameRandom                  io.Reader
 	db                          *db.DB
 	audit                       *audit.Writer
