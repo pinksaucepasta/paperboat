@@ -124,14 +124,14 @@ const sections: [string, string][] = [
         <thead><tr><th scope="col">Traffic</th><th scope="col">Free</th><th scope="col">Pro and Team</th></tr></thead>
         <tbody>
           <tr>
-            <th scope="row">Public previews and tunnels (our edge)</th>
-            <td>{fairUse.edge.free} a month at full speed, then {fairUse.edge.slowFree}</td>
-            <td>{fairUse.edge.paid} a month (on Team, per seat) at full speed, then {fairUse.edge.slowPaid}</td>
+            <th scope="row">Public previews, tunnels and terminals in the web console (our edge)</th>
+            <td>{fairUse.free.edge} a month at full speed, then {fairUse.free.slow}</td>
+            <td>{fairUse.paid.edge} a month (on Team, per seat) at full speed, then {fairUse.paid.slow}</td>
           </tr>
           <tr>
             <th scope="row">Relayed connections (our relay)</th>
-            <td>Up to {fairUse.relay.speed} for {fairUse.relay.free} a month, then {fairUse.edge.slowFree}</td>
-            <td>Up to {fairUse.relay.speed} for {fairUse.relay.paid} a month, then {fairUse.edge.slowPaid}</td>
+            <td>Up to {fairUse.relaySpeed} for {fairUse.free.relay} a month, then {fairUse.free.slow}</td>
+            <td>Up to {fairUse.relaySpeed} for {fairUse.paid.relay} a month (on Team, per seat), then {fairUse.paid.slow}</td>
           </tr>
           <tr>
             <th scope="row">Direct connections, and relays or edges you run yourself</th>
@@ -143,7 +143,8 @@ const sections: [string, string][] = [
     </div>
     <div class="prose">
       <p>
-        On paid plans you can <a href="/pricing/">add bandwidth</a> at full speed. The console and <code>pb</code> show how much you have used.
+        Edge and relay traffic are counted separately: using up one does not slow the other. On paid plans you can
+        <a href="/pricing/">add bandwidth</a> at full speed. The console and <code>pb</code> show how much you have used.
         If one account's traffic harms the service for others, for example a sustained flood far beyond normal use, we may slow it further or
         ask you to move it to your own relay or edge.
       </p>

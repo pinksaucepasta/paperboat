@@ -7,17 +7,17 @@ const sections: [string, string][] = [
   ["not-used", "What we do not use"],
   ["changes", "Changes to this list"],
 ]
-// [provider, purpose, data it receives, location]. A TODO-USER cell is a fact only the company can confirm.
+// [provider, purpose, data it receives, location] (user-confirmed 2026-11-19). Self-hosted GlitchTip runs on our own server and is not a subprocessor.
 const providers = [
-  ["Hetzner Online GmbH", "Hosting of the control plane, its database and the private diagnostics store", "All data the control plane holds (see the Privacy Policy); diagnostic bundles users send", "Germany (EU)"],
-  ["TODO-USER: provider of the hosted relays and edges at launch", "Hosting of relays and edges", "Ciphertext of relayed traffic; requests to public previews and tunnels while they pass; network addresses", "TODO-USER: locations"],
+  ["Hetzner Online GmbH", "Hosting of the control plane, the hosted relays and edges, and the private diagnostics store", "Data the control plane works with (see the Privacy Policy); ciphertext of relayed traffic; requests to public previews and tunnels while they pass; network addresses; diagnostic bundles users send", "Germany and Finland (EU)"],
+  ["PlanetScale, Inc.", "The control plane's database", "All data the control plane stores (see the Privacy Policy)", "Germany (EU, Frankfurt)"],
   ["WorkOS, Inc.", "Sign-in, single sign-on and directory sync", "Email address, name, sign-in identifiers and sessions", "United States"],
   ["Stripe, Inc. / Stripe Payments Europe, Ltd.", "Payments, invoices and tax", "Billing name, email, address, tax id and payment card (Stripe holds the card; we never see it)", "United States, Ireland (EU)"],
   ["Resend, Inc.", "Service email: invitations, notices and receipts", "Recipient email address and the content of the email", "United States"],
   ["PostHog, Inc.", "Product analytics for the website and console", "Pseudonymous events: random visit or account id, page, coarse browser, operating system and country (network address discarded)", "EU (Frankfurt)"],
+  ["Functional Software, Inc. (Sentry)", "Error reports from our servers, from about 2 December 2026", "Error messages and stack traces, scrubbed of content, tokens and secrets", "EU (Germany)"],
   ["Cloudflare, Inc.", "DNS records that prove domain ownership for certificates", "Domain names; no personal data about users", "United States, global network"],
   ["GitHub, Inc. (Microsoft)", "Hosting of pb release downloads", "The network address and user agent of whoever downloads a release", "United States"],
-  ["TODO-USER: Sentry (Functional Software, Inc.) or self-hosted GlitchTip, if enabled at launch", "Error reports from our servers", "Error messages and stack traces, scrubbed of content, tokens and secrets", "TODO-USER: region"],
 ]
 ---
 
@@ -33,19 +33,7 @@ const providers = [
       <table class="facts">
         <thead><tr><th scope="col">Provider</th><th scope="col">Purpose</th><th scope="col">Data</th><th scope="col">Location</th></tr></thead>
         <tbody>
-          {
-            providers.map((row) => (
-              <tr>
-                {row.map((cell, i) =>
-                  i === 0 ? (
-                    <th scope="row">{cell.startsWith("TODO-USER") ? <mark class="todo">{cell}</mark> : cell}</th>
-                  ) : (
-                    <td>{cell.startsWith("TODO-USER") ? <mark class="todo">{cell}</mark> : cell}</td>
-                  ),
-                )}
-              </tr>
-            ))
-          }
+          {providers.map(([provider, ...cells]) => <tr><th scope="row">{provider}</th>{cells.map((cell) => <td>{cell}</td>)}</tr>)}
         </tbody>
       </table>
     </div>
@@ -53,7 +41,7 @@ const providers = [
       <p>
         Certificates for preview, tunnel and custom domains come from Let's Encrypt (Internet Security Research Group, United States), which
         receives the domain names only. A team that connects its own storage bucket for recordings chooses that provider itself; it receives
-        only ciphertext.
+        only ciphertext. Our own error tracker runs on our own servers and shares nothing with a third party.
       </p>
     </div>
   </section>

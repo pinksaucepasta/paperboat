@@ -74,7 +74,7 @@ export const faq = [
   },
   {
     q: "What happens when the bandwidth runs out?",
-    a: `Nothing stops. Relayed connections, previews and tunnels keep working at a lower speed (${fairUse.edge.slowFree} on Free, ${fairUse.edge.slowPaid} on paid plans) until the next month, or until you add more on a paid plan (${topUp.price} per ${topUp.size}). Direct connections are never slowed. The <a href="/legal/acceptable-use/#fair-use">fair-use rules</a> have the details.`,
+    a: `Nothing stops. Relayed connections, previews and tunnels keep working at a lower speed (${fairUse.free.slow} on Free, ${fairUse.paid.slow} on paid plans) until the next month, or until you add more on a paid plan (${topUp.price} per ${topUp.size}). Direct connections are never slowed. The <a href="/legal/acceptable-use/#fair-use">fair-use rules</a> have the details.`,
   },
   {
     q: "Are features locked behind a paid plan?",
