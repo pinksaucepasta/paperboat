@@ -37,6 +37,8 @@ type Installation struct {
 	// below the update floor (both set by the HTTP layer from the release and the floor).
 	UpdateAvailable string `json:"update_available,omitempty"`
 	UpdateRequired  string `json:"update_required,omitempty"`
+	// Update is the node's latest update request (pressed Update), absent when there never was one.
+	Update *UpdateStatus `json:"update,omitempty"`
 }
 type Policy struct {
 	Mode            string   `json:"mode"`
