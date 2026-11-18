@@ -13,6 +13,7 @@ import {
   ProhibitIcon,
   BugIcon,
   DatabaseIcon,
+  EnvelopeSimpleIcon,
   WarningIcon,
   UserIcon,
   UserGearIcon,
@@ -42,6 +43,7 @@ export const sections: Section[] = [
   { href: "/billing", title: "Billing", icon: CreditCardIcon, roles: ["admin", "support", "billing"] },
   { href: "/releases", title: "Releases", icon: RocketLaunchIcon, roles: ["admin"] },
   { href: "/announcements", title: "Announcements", icon: MegaphoneIcon, roles: ["admin"] },
+  { href: "/notices", title: "Customer notices", icon: EnvelopeSimpleIcon, roles: ["admin"] },
   { href: "/ip-blocks", title: "IP blocks", icon: ProhibitIcon, roles: ["admin"] },
   { href: "/operators", title: "Operators", icon: UserGearIcon, roles: ["admin"] },
   { href: "/audit", title: "Audit log", icon: ClockCounterClockwiseIcon, roles: ["admin"] },
@@ -54,7 +56,7 @@ const groups: { label?: string; hrefs: Section["href"][] }[] = [
   { label: "Customers", hrefs: ["/users", "/teams", "/machines", "/billing"] },
   { label: "Support", hrefs: ["/support", "/sentry", "/abuse"] },
   { label: "Infrastructure", hrefs: ["/infrastructure", "/capacity", "/backups", "/releases"] },
-  { label: "Admin", hrefs: ["/announcements", "/ip-blocks", "/operators", "/audit"] },
+  { label: "Admin", hrefs: ["/announcements", "/notices", "/ip-blocks", "/operators", "/audit"] },
 ]
 
 /** The sidebar's groups, each holding only the pages this role can open. */
