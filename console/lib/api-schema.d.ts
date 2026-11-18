@@ -8702,6 +8702,86 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/breakglass/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Preview a break-glass run
+         * @description What a run would do, with counts, and whether the next keys are deployed (mint signing keys, session keys, the encryption key ring). Names no secret.
+         */
+        get: operations["get_v1_admin_breakglass_preview"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/breakglass/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start a break-glass run
+         * @description Rotates every key machines trust, signs every session and token out except the caller's, re-seals stored secrets and retires the old keys, in stages a worker runs and records. The confirmation is the phrase BREAK GLASS, a reason and a current authenticator code, checked now (not a recent sign-in). Refused until the next keys are deployed.
+         */
+        post: operations["post_v1_admin_breakglass_runs"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/breakglass/runs/{run_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read a break-glass run
+         * @description The run with each stage's state and counts and, while it waits for machines, which machines hold the new keys.
+         */
+        get: operations["get_v1_admin_breakglass_runs_run_id"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/breakglass/runs/{run_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel a break-glass run
+         * @description Stops the run. What was done stays done (every stage is idempotent); a new run finishes the rest.
+         */
+        post: operations["post_v1_admin_breakglass_runs_run_id_cancel"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/managed-ssh/accounts/{account_id}/rotate-user-ca": {
         parameters: {
             query?: never;
@@ -12041,6 +12121,95 @@ export interface components {
                 /** @enum {string} */
                 reporting: "disabled" | "filtered" | "unconfirmed" | "unavailable";
                 message: string;
+            };
+        };
+        BreakGlassCheck: {
+            name: string;
+            ok: boolean;
+            detail: string;
+        };
+        BreakGlassProvider: {
+            name: string;
+            what: string;
+            where: string;
+            /** @description Provider dashboard; empty when it has none. */
+            link: string;
+        };
+        /** @description Exactly what a break-glass run would do, with counts. */
+        BreakGlassPreview: {
+            accounts_with_ssh_ca: number;
+            ssh_cas: number;
+            accounts_mid_rotation: number;
+            machines: number;
+            machines_expected_to_pick_up: number;
+            sessions_and_tokens_to_revoke: {
+                [key: string]: number;
+            };
+            other_operator_sessions_to_revoke: number;
+            /** @description table.column to rows still sealed under an older encryption key. */
+            sealed_rows_to_reseal: {
+                [key: string]: number;
+            };
+            mint_active_key: string;
+            mint_keys_published: string[];
+            mint_keys_to_withdraw: string[];
+            /** @description The old mint keys are withdrawn this long after the run starts, so machines can renew credentials signed by them first. */
+            mint_withdraw_after_minutes: number;
+            encryption_key_ids: string[];
+            session_key_ids: string[];
+            client_update_floor_now: string;
+            checks: components["schemas"]["BreakGlassCheck"][];
+            third_party_checklist: components["schemas"]["BreakGlassProvider"][];
+        };
+        BreakGlassStage: {
+            /** @enum {string} */
+            name: "publish" | "pickup" | "switch" | "revoke" | "reseal" | "floor" | "retire";
+            /** @enum {string} */
+            state: "pending" | "running" | "done" | "skipped";
+            /** Format: date-time */
+            started_at?: string;
+            /** Format: date-time */
+            finished_at?: string;
+            /** @description Counts the stage recorded. */
+            detail: {
+                [key: string]: unknown;
+            };
+        };
+        BreakGlassMachine: {
+            machine_id: string;
+            platform: string;
+            /** Format: date-time */
+            fetched_at: string;
+            picked_up: boolean;
+        };
+        /** @description Online machines and whether each fetched its key set since it was published (not yet first). */
+        BreakGlassPickup: {
+            /** Format: date-time */
+            since: string;
+            expected: number;
+            picked_up: number;
+            machines: components["schemas"]["BreakGlassMachine"][];
+        };
+        BreakGlassRun: {
+            id: string;
+            /** @enum {string} */
+            state: "running" | "done" | "cancelled";
+            operator_id: string;
+            reason: string;
+            floor_version?: string;
+            preview: components["schemas"]["BreakGlassPreview"];
+            stages: components["schemas"]["BreakGlassStage"][];
+            /** @description The last step's failure; the worker retries it. */
+            last_error?: string;
+            /** Format: date-time */
+            started_at: string;
+            /** Format: date-time */
+            updated_at: string;
+            /** Format: date-time */
+            finished_at?: string;
+            /** @description Live pickup state of the stage that waits for machines (pickup, retire), by stage name. */
+            pickups?: {
+                [key: string]: components["schemas"]["BreakGlassPickup"];
             };
         };
         OperatorAccount: {
@@ -35736,6 +35905,208 @@ export interface operations {
             401: components["responses"]["Error"];
             404: components["responses"]["Error"];
             503: components["responses"]["Error"];
+        };
+    };
+    get_v1_admin_breakglass_preview: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The preview. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data?: components["schemas"]["BreakGlassPreview"];
+                    };
+                };
+            };
+            /** @description Operator session or capability required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Break-glass unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    post_v1_admin_breakglass_runs: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                "Operator-Target": string;
+                /** @description Opaque incident, ticket, or change reference; do not send prose or secrets. */
+                "Operator-Reason": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    phrase: "BREAK GLASS";
+                    reason: string;
+                    /** @description A current six-digit authenticator code; spent by this request. */
+                    totp_code: string;
+                    /** @description Optional: also raise the client update floor to this version. */
+                    floor_version?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The run, started. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data?: components["schemas"]["BreakGlassRun"];
+                    };
+                };
+            };
+            /** @description Wrong phrase, reason or floor version */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Wrong, expired or used authenticator code, or staff role refused */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description A run is already in progress, or the next keys are not deployed yet */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Break-glass unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_v1_admin_breakglass_runs_run_id: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A run id, or latest. */
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The run. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data?: components["schemas"]["BreakGlassRun"];
+                    };
+                };
+            };
+            /** @description No such run */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Break-glass unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    post_v1_admin_breakglass_runs_run_id_cancel: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                "Operator-Target": string;
+                /** @description Opaque incident, ticket, or change reference; do not send prose or secrets. */
+                "Operator-Reason": string;
+            };
+            path: {
+                /** @description A run id, or latest. */
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Cancelled. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The run is not running */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Break-glass unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     post_v1_admin_managed_ssh_rotate_user_ca: {
