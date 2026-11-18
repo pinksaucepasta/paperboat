@@ -24,7 +24,7 @@ func TestIngressAuthorityKeepsThrottledRouteAdmittedAndReportsThrottle(t *testin
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		throttled := []connectorprotocol.IngressThrottle{}
 		if throttledNow.Load() {
-			throttled = append(throttled, connectorprotocol.IngressThrottle{Hostname: decision.Binding.Hostname, Workspace: "personal:account_1", ResetsAt: resets})
+			throttled = append(throttled, connectorprotocol.IngressThrottle{Hostname: decision.Binding.Hostname, Workspace: "personal:account_1", BytesPerSecond: 125000, ResetsAt: resets})
 		}
 		json.NewEncoder(w).Encode(map[string]any{"complete": true, "decisions": []connectorprotocol.IngressDecision{decision}, "throttled": throttled})
 	}))
@@ -44,7 +44,7 @@ func TestIngressAuthorityKeepsThrottledRouteAdmittedAndReportsThrottle(t *testin
 	if _, err := authority.Resolve(context.Background(), rule); err != nil {
 		t.Fatalf("throttled route was refused: %v", err)
 	}
-	if len(reported) != 1 || reported[0].Workspace != "personal:account_1" || !reported[0].ResetsAt.Equal(resets) {
+	if len(reported) != 1 || reported[0].Workspace != "personal:account_1" || reported[0].BytesPerSecond != 125000 || !reported[0].ResetsAt.Equal(resets) {
 		t.Fatalf("throttle list = %+v", reported)
 	}
 	throttledNow.Store(false)

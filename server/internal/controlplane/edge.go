@@ -30,6 +30,8 @@ import (
 	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/audit"
+	"github.com/pinksaucepasta/paperboat/server/internal/bandwidthgate"
+	"github.com/pinksaucepasta/paperboat/server/internal/config"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
 	serverdiagnostics "github.com/pinksaucepasta/paperboat/server/internal/diagnostics"
@@ -56,6 +58,8 @@ type EdgeService struct {
 	scopedBandwidth         ScopedBandwidthDebiter
 	relayMetrics            *sharedmetrics.Metrics
 	ingressLimits           edgelimits.IngressLimits
+	fairUse                 config.FairUse
+	relayVolume             *bandwidthgate.Gate
 	audit                   *audit.Writer
 	signer                  *mint.Provider
 	certificateDistribution http.Handler
@@ -64,6 +68,13 @@ type EdgeService struct {
 		ServeEdgeControl(http.ResponseWriter, *http.Request, string, string)
 	}
 }
+
+// SetRelayVolumeGate makes relay observations list the connected accounts past the month's included relay bytes (the relay's
+// second speed tier). Nil lists none.
+func (s *EdgeService) SetRelayVolumeGate(gate *bandwidthgate.Gate) { s.relayVolume = gate }
+
+// SetFairUse sets the slowdown speeds the edges' throttle entries carry.
+func (s *EdgeService) SetFairUse(fair config.FairUse) { s.fairUse = fair }
 
 // SetIngressLimits sets the ingress limits edges receive in every heartbeat answer (T11).
 func (s *EdgeService) SetIngressLimits(limits edgelimits.IngressLimits) { s.ingressLimits = limits }
@@ -351,7 +362,7 @@ func reserveUsageKeyOperation(ctx context.Context, tx *db.Tx, operationKey, acti
 }
 
 func NewEdgeService(store *db.DB, credential string) *EdgeService {
-	return &EdgeService{store: store, credential: credential, ingressLimits: edgelimits.Default(), audit: audit.NewWriter(store), clock: func() time.Time { return time.Now().UTC() }}
+	return &EdgeService{store: store, credential: credential, ingressLimits: edgelimits.Default(), fairUse: config.Default().Billing.FairUse, audit: audit.NewWriter(store), clock: func() time.Time { return time.Now().UTC() }}
 }
 
 func (s *EdgeService) SetClock(clock func() time.Time) {

@@ -581,6 +581,8 @@ func New(opts Options) (*App, error) {
 	if edgeControlService != nil {
 		edgeControlService.SetRelayMetrics(telemetryMetrics)
 		edgeControlService.SetIngressLimits(opts.Config.EdgeIngressLimits)
+		edgeControlService.SetFairUse(opts.Config.Billing.FairUse)
+		edgeControlService.SetRelayVolumeGate(bandwidthgate.NewRelayVolume(store, opts.Config.Billing.FairUse.RelayIncludedBytes))
 	}
 	telemetryHealth, telemetryErr := telemetry.NewHealthTracker(time.Now)
 	if telemetryErr != nil {
@@ -682,7 +684,7 @@ func New(opts Options) (*App, error) {
 	teamService.ConfigureMail(opts.Config.Mail, opts.Config.Secrets.ResendAPIKey != "")
 	teamService.ConfigurePolicy(opts.Config.WorkspacePolicy)
 	workspaceBilling.ConfigureNotificationMail(opts.Config.Mail, opts.Config.Secrets.ResendAPIKey != "")
-	workspaceBilling.SetThrottleRate(opts.Config.EdgeIngressLimits.Throttled.BytesPerSecond)
+	workspaceBilling.SetThrottleRates(opts.Config.Billing.FairUse)
 	operatorActions := operatoractions.NewService(store)
 	operatorActions.ConfigureMail(opts.Config.Mail, opts.Config.Secrets.ResendAPIKey != "")
 	abuseReports := abusereports.New(store)

@@ -56,9 +56,6 @@ func exportRuntime(ctx context.Context, dir string, s Setup, r Registration, usa
 		if s.ControlCA != "" {
 			args = append(args, "-control-ca", s.ControlCA)
 		}
-		if s.ScopeType != "global" {
-			args = append(args, "-account-mbit", "0") // a customer's own relay is never limited by Paperboat
-		}
 	} else {
 		if r.UsageKeyID == "" || r.EdgePool == "" {
 			return errors.New("control plane omitted tunnel usage key or edge pool")

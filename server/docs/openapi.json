@@ -9930,6 +9930,10 @@
                   "granted": {
                     "type": "boolean",
                     "description": "The limit is an operator's override, not the plan's."
+                  },
+                  "self_hosted": {
+                    "type": "boolean",
+                    "description": "The workspace runs its own edges, so what goes through them is not limited (limit is null)."
                   }
                 }
               },
@@ -9958,6 +9962,10 @@
                   "granted": {
                     "type": "boolean",
                     "description": "The limit is an operator's override, not the plan's."
+                  },
+                  "self_hosted": {
+                    "type": "boolean",
+                    "description": "The workspace runs its own edges, so what goes through them is not limited (limit is null)."
                   }
                 }
               },
@@ -9986,6 +9994,10 @@
                   "granted": {
                     "type": "boolean",
                     "description": "The limit is an operator's override, not the plan's."
+                  },
+                  "self_hosted": {
+                    "type": "boolean",
+                    "description": "The workspace runs its own edges, so what goes through them is not limited (limit is null)."
                   }
                 }
               },
@@ -10014,6 +10026,10 @@
                   "granted": {
                     "type": "boolean",
                     "description": "The limit is an operator's override, not the plan's."
+                  },
+                  "self_hosted": {
+                    "type": "boolean",
+                    "description": "The workspace runs its own edges, so what goes through them is not limited (limit is null)."
                   }
                 }
               }

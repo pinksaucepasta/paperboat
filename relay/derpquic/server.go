@@ -67,7 +67,8 @@ type Server struct {
 	handover                                             map[string]time.Time
 	handoverTimer                                        *time.Timer
 	accounts                                             map[string]*budget
-	accountRate                                          float64 // bytes per second each account may use here
+	accountRate, slowRate                                float64 // bytes per second an account, and a slow account, may use here
+	slowAccounts                                         map[string]bool
 	connections                                          map[*quic.Conn]struct{}
 	wssConnections                                       map[*peerConn]struct{}
 	draining                                             bool
@@ -128,7 +129,7 @@ func NewServer(v Verifier) (*Server, error) {
 		return nil, err
 	}
 	v.Keys = nil
-	s := &Server{connectionLimit: MaxConnections, verifier: v, peers: make(map[key.NodePublic]*peerConn), fences: make(map[string]*grantFence), accounts: make(map[string]*budget), accountRate: DefaultAccountMbit * 1e6 / 8, connections: make(map[*quic.Conn]struct{}), wssConnections: make(map[*peerConn]struct{})}
+	s := &Server{connectionLimit: MaxConnections, verifier: v, peers: make(map[key.NodePublic]*peerConn), fences: make(map[string]*grantFence), accounts: make(map[string]*budget), accountRate: float64(accountBytesPerSecond), slowRate: float64(accountBytesPerSecond), connections: make(map[*quic.Conn]struct{}), wssConnections: make(map[*peerConn]struct{})}
 	s.keys.Store(&keys)
 	return s, nil
 }
@@ -454,7 +455,7 @@ func (s *Server) admit(p *peerConn, g Grant, now time.Time) error {
 				}
 			}
 		}
-		s.accounts[g.AccountID] = newBudget(s.accountRate)
+		s.accounts[g.AccountID] = newBudget(s.rateForLocked(g.AccountID))
 	}
 	return nil
 }
@@ -568,25 +569,67 @@ func (s *Server) writePackets(p *peerConn) {
 	}
 }
 
-// SetAccountMbit sets the speed one account may use on this relay, shared by all its carriers (a token bucket per
-// account: Tailscale's DERP applies one per client the same way, derpserver.go rateLimit). Traffic above it is
-// dropped and the carrier stays up, so the account's own transport slows down. 0 lifts the fair-use cap, leaving only
-// the relay's overload ceiling (a self-hosted relay is never limited by Paperboat).
-func (s *Server) SetAccountMbit(mbit float64) error {
-	if mbit < 0 || mbit > MaxAccountMbit {
+// SetAccountSpeeds sets the speed one account may use on this relay, shared by all its carriers (a token bucket per account:
+// Tailscale's DERP applies one per client the same way, derpserver.go rateLimit), and the lower speed of the accounts
+// SetSlowAccounts names. Traffic above it is dropped and the carrier stays up, so the account's own transport slows down.
+// 0 lifts a cap to the relay's own overload ceiling (a customer-owned relay is never limited by Paperboat).
+func (s *Server) SetAccountSpeeds(mbit, slowMbit float64) error {
+	if mbit < 0 || mbit > MaxAccountMbit || slowMbit < 0 || slowMbit > MaxAccountMbit {
 		return ErrProtocol
-	}
-	rate := float64(accountBytesPerSecond)
-	if mbit > 0 {
-		rate = min(rate, mbit*1e6/8)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.accountRate = rate
-	for _, b := range s.accounts {
-		b.setRate(rate)
-	}
+	s.accountRate, s.slowRate = speedBytes(mbit), speedBytes(slowMbit)
+	s.applyAccountRatesLocked()
 	return nil
+}
+
+// SetSlowAccounts replaces the set of accounts held to the lower speed (those that carried the month's included relay bytes);
+// an empty set returns every account to the normal one.
+func (s *Server) SetSlowAccounts(accounts []string) error {
+	if len(accounts) > MaxConnections {
+		return ErrProtocol
+	}
+	slow := make(map[string]bool, len(accounts))
+	for _, account := range accounts {
+		if account == "" || len(account) > 256 {
+			return ErrProtocol
+		}
+		slow[account] = true
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.slowAccounts = slow
+	s.applyAccountRatesLocked()
+	return nil
+}
+
+// AccountMbit is the speed in Mbit/s the account is held to on this relay now (the ceiling when it is not limited).
+func (s *Server) AccountMbit(account string) float64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.rateForLocked(account) * 8 / 1e6
+}
+
+// speedBytes is a cap in Mbit/s as bytes per second, 0 meaning the ceiling.
+func speedBytes(mbit float64) float64 {
+	if mbit <= 0 {
+		return float64(accountBytesPerSecond)
+	}
+	return min(float64(accountBytesPerSecond), mbit*1e6/8)
+}
+
+func (s *Server) rateForLocked(account string) float64 {
+	if s.slowAccounts[account] {
+		return min(s.accountRate, s.slowRate)
+	}
+	return s.accountRate
+}
+
+func (s *Server) applyAccountRatesLocked() {
+	for account, b := range s.accounts {
+		b.setRate(s.rateForLocked(account))
+	}
 }
 
 // ValidRevocation is the shape Revoke accepts: both ids present and bounded, and a first valid
