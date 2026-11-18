@@ -15,6 +15,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -169,18 +170,22 @@ type binding struct {
 	MachineIdentityThumbprint            string `json:"machine_identity_thumbprint"`
 }
 type admission struct {
-	Schema                 string                    `json:"schema"`
-	Binding                binding                   `json:"binding"`
-	EdgeEndpoints          []string                  `json:"edge_endpoints"`
-	Hostname               string                    `json:"hostname"`
-	RouteKind              string                    `json:"route_kind"`
-	ExpiresAt              time.Time                 `json:"expires_at"`
-	EdgeCandidates         []edgeplacement.Candidate `json:"edge_candidates"`
-	Backup                 *admissionBinding         `json:"backup,omitempty"`
-	ActiveEdgeNodeID       string                    `json:"active_edge_node_id,omitempty"`
-	ActiveEdgeProcessEpoch string                    `json:"active_edge_process_epoch,omitempty"`
-	EndpointsServed        bool                      `json:"endpoints_served,omitempty"`
-	TunnelEndpointsServed  bool                      `json:"tunnel_endpoints_served,omitempty"`
+	Schema         string                    `json:"schema"`
+	Binding        binding                   `json:"binding"`
+	EdgeEndpoints  []string                  `json:"edge_endpoints"`
+	Hostname       string                    `json:"hostname"`
+	RouteKind      string                    `json:"route_kind"`
+	ExpiresAt      time.Time                 `json:"expires_at"`
+	EdgeCandidates []edgeplacement.Candidate `json:"edge_candidates"`
+	Backup         *admissionBinding         `json:"backup,omitempty"`
+	// More are the carriers after the backup; TerminalEdgeNodeIDs the edges whose carriers may carry browser
+	// terminals (Paperboat's managed edges). Empty means every carrier may.
+	More                   []admissionBinding `json:"more,omitempty"`
+	TerminalEdgeNodeIDs    []string           `json:"terminal_edge_node_ids,omitempty"`
+	ActiveEdgeNodeID       string             `json:"active_edge_node_id,omitempty"`
+	ActiveEdgeProcessEpoch string             `json:"active_edge_process_epoch,omitempty"`
+	EndpointsServed        bool               `json:"endpoints_served,omitempty"`
+	TunnelEndpointsServed  bool               `json:"tunnel_endpoints_served,omitempty"`
 }
 
 type admissionBinding struct {
@@ -452,10 +457,7 @@ func (s *Service) run(ctx context.Context) {
 			}
 			s.hubsMu.Unlock()
 			s.answeredOnce.Do(func() { close(s.answered) })
-			ordered := []admissionBinding{response.primary()}
-			if response.Backup != nil {
-				ordered = append(ordered, *response.Backup)
-			}
+			ordered := response.carriers()
 			wanted := make(map[string]bool, len(ordered))
 			for _, admission := range ordered {
 				key := carrierKey(admission)
@@ -483,7 +485,7 @@ func (s *Service) run(ctx context.Context) {
 				if retry := retries[key]; time.Now().Before(retry.next) {
 					continue
 				}
-				item, connectErr := s.connect(ctx, admission, key)
+				item, connectErr := s.connect(ctx, admission, key, response.terminalCapable(admission.Binding.EdgeNodeID))
 				if connectErr != nil {
 					err = connectErr
 					s.lastProbe = time.Time{}
@@ -523,7 +525,8 @@ func (s *Service) run(ctx context.Context) {
 					}
 				}
 			}
-			if chosen == nil || response.ActiveEdgeNodeID != chosenAdmission.Binding.EdgeNodeID || response.ActiveEdgeProcessEpoch != chosenAdmission.Binding.EdgeProcessEpoch {
+			// A carrier that cannot carry terminals (a customer-run edge) never publishes their output.
+			if chosen == nil || chosen.open == nil || response.ActiveEdgeNodeID != chosenAdmission.Binding.EdgeNodeID || response.ActiveEdgeProcessEpoch != chosenAdmission.Binding.EdgeProcessEpoch {
 				if publisherKey != "" && s.broadcaster != nil {
 					diagnosticlog.TryInfo("browser output publisher stopped: no live carrier for the active edge", "chosen", chosen != nil)
 					s.broadcaster.SetPublisher(nil)
@@ -555,8 +558,10 @@ func (s *Service) run(ctx context.Context) {
 			delete(lives, key)
 		}
 		expiresAt := response.ExpiresAt
-		if response.Backup != nil && response.Backup.ExpiresAt.Before(expiresAt) {
-			expiresAt = response.Backup.ExpiresAt
+		for _, other := range response.carriers() {
+			if other.ExpiresAt.Before(expiresAt) {
+				expiresAt = other.ExpiresAt
+			}
 		}
 		var refused *refusedAttachment
 		switch {
@@ -599,8 +604,8 @@ func carriersReady(lives map[string]*live, publisherKey string) bool {
 	return true
 }
 
-// maxHeldCarriers is the admitted pair: a ready carrier the server no longer lists stays up while the pair has room.
-const maxHeldCarriers = 2
+// maxHeldCarriers is the admitted carriers (a pair, and a managed edge for terminals next to a self-hosted pair): a ready carrier the server no longer lists stays up while the pair has room.
+const maxHeldCarriers = 3
 
 // carrierRetired reports whether a live carrier is closed. The server stops listing an edge whose control heartbeat
 // went stale (30 s), which is also what a control outage between that edge and the server looks like, while the
@@ -713,8 +718,10 @@ func (s *Service) fetch(ctx context.Context, activeNode, activeEpoch string) (ou
 	if out.Schema != "paperboat.runtime-carrier/v1" || out.Binding.HostID != s.config.MachineID || out.Binding.InstallationGeneration != s.config.InstallationGeneration || out.Binding.ProcessGeneration != s.config.WorkerGeneration || out.Binding.RouteID == "" || out.Binding.SessionID == "" || out.RouteKind != "runtime_https_wss" || !out.ExpiresAt.After(serverclock.Now()) {
 		return admission{}, controlFailure(preview.ErrMachineAttachmentSessionInvalid)
 	}
-	if out.Backup != nil && (out.Backup.Schema != out.Schema || out.Backup.Binding.HostID != out.Binding.HostID || out.Backup.Binding.AccountID != out.Binding.AccountID || out.Backup.Binding.RouteID != out.Binding.RouteID || out.Backup.Binding.EdgeNodeID == out.Binding.EdgeNodeID || out.Backup.Binding.EdgeProcessEpoch == "" || out.Backup.Binding.InstallationGeneration != out.Binding.InstallationGeneration || out.Backup.Binding.ProcessGeneration != out.Binding.ProcessGeneration || out.Backup.RouteKind != out.RouteKind || !out.Backup.ExpiresAt.After(serverclock.Now())) {
-		return admission{}, controlFailure(preview.ErrMachineAttachmentSessionInvalid)
+	for _, other := range out.carriers()[1:] {
+		if other.Schema != out.Schema || other.Binding.HostID != out.Binding.HostID || other.Binding.AccountID != out.Binding.AccountID || other.Binding.RouteID != out.Binding.RouteID || other.Binding.EdgeNodeID == out.Binding.EdgeNodeID || other.Binding.EdgeProcessEpoch == "" || other.Binding.InstallationGeneration != out.Binding.InstallationGeneration || other.Binding.ProcessGeneration != out.Binding.ProcessGeneration || other.RouteKind != out.RouteKind || !other.ExpiresAt.After(serverclock.Now()) {
+			return admission{}, controlFailure(preview.ErrMachineAttachmentSessionInvalid)
+		}
 	}
 	return out, nil
 }
@@ -758,11 +765,26 @@ func (a admission) primary() admissionBinding {
 	return admissionBinding{Schema: a.Schema, Binding: a.Binding, EdgeEndpoints: a.EdgeEndpoints, Hostname: a.Hostname, RouteKind: a.RouteKind, ExpiresAt: a.ExpiresAt}
 }
 
+// carriers is every carrier the server admitted: the primary, the backup, then the rest.
+func (a admission) carriers() []admissionBinding {
+	out := []admissionBinding{a.primary()}
+	if a.Backup != nil {
+		out = append(out, *a.Backup)
+	}
+	return append(out, a.More...)
+}
+
+// terminalCapable reports whether browser terminals may use the carrier to this edge: only Paperboat's managed
+// edges, never a customer-run one. A server that names none (the workspace uses managed edges) allows every carrier.
+func (a admission) terminalCapable(edgeNodeID string) bool {
+	return len(a.TerminalEdgeNodeIDs) == 0 || slices.Contains(a.TerminalEdgeNodeIDs, edgeNodeID)
+}
+
 func carrierKey(a admissionBinding) string {
 	return a.Binding.SessionID + "/" + a.Binding.EdgeProcessEpoch + "/" + a.Binding.RouteID
 }
 
-func (s *Service) connect(ctx context.Context, a admissionBinding, key string) (*live, error) {
+func (s *Service) connect(ctx context.Context, a admissionBinding, key string, terminal bool) (*live, error) {
 	b := a.Binding
 	carrier, err := s.sessions.AcquireRuntimeCarrier(ctx, preview.RuntimeCarrierAdmission{AccountID: b.AccountID, MachineID: b.HostID, MachineIdentityPublicKey: b.MachineIdentityPublicKey, MachineIdentityThumbprint: b.MachineIdentityThumbprint, TunnelID: b.TunnelID, ConnectorID: b.ConnectorID, SessionID: b.SessionID, ProcessGeneration: b.ProcessGeneration, ConfigGeneration: b.ConfigGeneration, EdgeNodeID: b.EdgeNodeID, EdgeProcessEpoch: b.EdgeProcessEpoch, EdgeCarrierServerSPKISHA256: b.EdgeCarrierServerSPKISHA256, EdgeCarrierServerCertificateChainPEM: b.EdgeCarrierServerCertificateChainPEM, EdgeEndpoints: a.EdgeEndpoints, ExpiresAt: a.ExpiresAt})
 	if err != nil {
@@ -781,34 +803,41 @@ func (s *Service) connect(ctx context.Context, a admissionBinding, key string) (
 		defer cancel()
 		return nil, streamOpenFailure(errors.Join(err, carrier.Release(cleanup)))
 	}
-	registration, err := hub.Register(b.RouteID)
-	if err != nil {
-		_ = hub.Close()
-		cleanup, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		return nil, streamOpenFailure(errors.Join(err, carrier.Release(cleanup)))
-	}
-	forwarder := runtimeOriginForwarder()
-	route := hoststate.TunnelConfigRoute{ID: b.RouteID, Protocol: "http", MatchType: "exact", MatchHostname: a.Hostname, OriginScheme: "http", OriginAddress: s.config.ListenAddress, PreserveHost: true, TLSVerification: "not_applicable", ConnectTimeoutMs: 5000, IdleTimeoutMs: 3600000, MaxConcurrentStreams: 256, DesiredState: "active"}
-	streams, err := forwarder.StartFrom(ctx, registration, carrier.Identity, []hoststate.TunnelConfigRoute{route})
-	if err != nil {
-		_ = hub.Close()
-		cleanup, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		releaseErr := carrier.Release(cleanup)
-		return nil, streamOpenFailure(errors.Join(err, releaseErr))
-	}
-	opener := browserbroadcastserver.OpenPublisher(func(openCtx context.Context, terminalSessionID string) (io.WriteCloser, error) {
-		if err := openCtx.Err(); err != nil {
-			return nil, err
+	// Browser terminals (and the rest of the runtime route) are served on Paperboat's managed edges only: a carrier to
+	// a customer-run edge gets no runtime route and no terminal output stream, so that edge cannot reach them.
+	var streams *tunnelmanager.RunningOriginStreams
+	var opener browserbroadcastserver.OpenPublisher
+	if terminal {
+		registration, registerErr := hub.Register(b.RouteID)
+		if registerErr != nil {
+			_ = hub.Close()
+			cleanup, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			return nil, streamOpenFailure(errors.Join(registerErr, carrier.Release(cleanup)))
 		}
-		return carrier.Active.OpenStream(openCtx, connector.StreamOpen{
-			Protocol: connectorprotocol.ProtocolName, Version: connectorprotocol.ProtocolVersion, AccountID: b.AccountID,
-			TunnelID: b.TunnelID, ConnectorID: b.ConnectorID, SessionID: b.SessionID,
-			ProcessGeneration: b.ProcessGeneration, Generation: b.ConfigGeneration,
-			RouteID: b.RouteID, RequestID: terminalSessionID, Kind: "browser_terminal_output",
+		forwarder := runtimeOriginForwarder()
+		route := hoststate.TunnelConfigRoute{ID: b.RouteID, Protocol: "http", MatchType: "exact", MatchHostname: a.Hostname, OriginScheme: "http", OriginAddress: s.config.ListenAddress, PreserveHost: true, TLSVerification: "not_applicable", ConnectTimeoutMs: 5000, IdleTimeoutMs: 3600000, MaxConcurrentStreams: 256, DesiredState: "active"}
+		var startErr error
+		streams, startErr = forwarder.StartFrom(ctx, registration, carrier.Identity, []hoststate.TunnelConfigRoute{route})
+		if startErr != nil {
+			_ = hub.Close()
+			cleanup, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			releaseErr := carrier.Release(cleanup)
+			return nil, streamOpenFailure(errors.Join(startErr, releaseErr))
+		}
+		opener = browserbroadcastserver.OpenPublisher(func(openCtx context.Context, terminalSessionID string) (io.WriteCloser, error) {
+			if err := openCtx.Err(); err != nil {
+				return nil, err
+			}
+			return carrier.Active.OpenStream(openCtx, connector.StreamOpen{
+				Protocol: connectorprotocol.ProtocolName, Version: connectorprotocol.ProtocolVersion, AccountID: b.AccountID,
+				TunnelID: b.TunnelID, ConnectorID: b.ConnectorID, SessionID: b.SessionID,
+				ProcessGeneration: b.ProcessGeneration, Generation: b.ConfigGeneration,
+				RouteID: b.RouteID, RequestID: terminalSessionID, Kind: "browser_terminal_output",
+			})
 		})
-	})
+	}
 	goaway := func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()

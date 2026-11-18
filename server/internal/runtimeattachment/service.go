@@ -179,68 +179,66 @@ ORDER BY r.id LIMIT 1 FOR UPDATE OF m,r`, proof.MachineID, proof.UserID, proof.I
 		type edgeRow struct {
 			node, epoch, domain, endpoint, browserHost, pin, chain string
 			tcp, quic                                              int64
+			// terminal: browser terminals may use this carrier, which only Paperboat's managed edges allow.
+			terminal bool
 		}
-		selected := make([]edgeRow, 0, 2)
-		rows, err := tx.Query(ctx, `SELECT n.id,n.process_epoch,coalesce(n.failure_domain,''),n.carrier_endpoint_host,coalesce(n.endpoint_host,''),n.carrier_endpoint_tcp_port,n.carrier_endpoint_quic_port,n.carrier_server_spki_sha256,n.carrier_server_certificate_chain_pem
+		// pick reads up to limit live edges, the machine's preferred first, that satisfy eligible.
+		pick := func(eligible string, limit int, terminal bool) ([]edgeRow, error) {
+			rows, err := tx.Query(ctx, `SELECT n.id,n.process_epoch,coalesce(n.failure_domain,''),n.carrier_endpoint_host,coalesce(n.endpoint_host,''),n.carrier_endpoint_tcp_port,n.carrier_endpoint_quic_port,n.carrier_server_spki_sha256,n.carrier_server_certificate_chain_pem
 FROM control_tunnel_nodes n LEFT JOIN machine_edge_placements p ON p.machine_id=$3 AND p.account_id=$1
 AND p.installation_generation=$4 AND p.worker_generation=$5 AND p.observed_at>now()-interval '2 minutes'
 WHERE n.ready AND n.state='ready' AND n.roles @> ARRAY['edge']::text[]
 AND n.transports @> ARRAY['http2','http3']::text[] AND n.last_heartbeat_at>now()-interval '30 seconds' AND n.registry_expires_at>now()
 AND n.capacity_observed_at>now()-interval '30 seconds' AND n.capacity_used<n.capacity_limit-n.capacity_limit/10
-AND (n.drain_deadline IS NULL OR n.drain_deadline>now()) AND paperboat.node_workspace_edge_eligible(n.id,$1,$6)
-AND paperboat.workspace_edge_set_allows(n.id,$1,$6)
+AND (n.drain_deadline IS NULL OR n.drain_deadline>now()) AND `+eligible+`
 AND n.carrier_endpoint_host IS NOT NULL AND n.carrier_endpoint_tcp_port IS NOT NULL AND n.carrier_endpoint_quic_port IS NOT NULL
 AND n.carrier_server_spki_sha256 IS NOT NULL AND n.carrier_server_certificate_chain_pem IS NOT NULL
 ORDER BY CASE WHEN n.id=p.primary_node_id AND n.process_epoch=p.primary_process_epoch THEN 0
 WHEN n.id=p.secondary_node_id AND n.process_epoch=p.secondary_process_epoch THEN 1
 WHEN n.id=$2 THEN 2 ELSE 3 END,n.id LIMIT 32 FOR SHARE OF n`, proof.UserID, activeNode, proof.MachineID, request.InstallationGeneration, request.WorkerGeneration, teamID)
+			if err != nil {
+				return nil, err
+			}
+			defer rows.Close()
+			var picked []edgeRow
+			for rows.Next() {
+				edge := edgeRow{terminal: terminal}
+				if err = rows.Scan(&edge.node, &edge.epoch, &edge.domain, &edge.endpoint, &edge.browserHost, &edge.tcp, &edge.quic, &edge.pin, &edge.chain); err != nil {
+					return nil, err
+				}
+				if edge.tcp < 1 || edge.tcp > 65535 || edge.quic < 1 || edge.quic > 65535 || connectorprotocol.ValidateOpaqueEpoch(edge.epoch) != nil {
+					continue
+				}
+				if len(picked) == 0 || (picked[0].domain != "" && edge.domain != "" && edge.domain != picked[0].domain) {
+					picked = append(picked, edge)
+				}
+				if len(picked) == limit {
+					break
+				}
+			}
+			return picked, rows.Err()
+		}
+		// The workspace's edges carry its tunnels and previews. Whatever the mode, browser terminals use one of
+		// Paperboat's managed edges at its own domain, never a customer-run one: in a self-hosted-only workspace
+		// that is an extra carrier of its own, first so it is the machine's active (terminal) edge.
+		selected, err := pick(`paperboat.node_workspace_edge_eligible(n.id,$1,$6) AND paperboat.workspace_edge_set_allows(n.id,$1,$6)`, 2, mode == "managed-only")
 		if err != nil {
 			return err
 		}
-		for rows.Next() {
-			var edge edgeRow
-			if err = rows.Scan(&edge.node, &edge.epoch, &edge.domain, &edge.endpoint, &edge.browserHost, &edge.tcp, &edge.quic, &edge.pin, &edge.chain); err != nil {
-				break
+		if mode == "self-hosted-only" {
+			terminal, err := pick(`paperboat.node_managed_edge_eligible(n.id,$1,$6)`, 1, true)
+			if err != nil {
+				return err
 			}
-			if edge.tcp < 1 || edge.tcp > 65535 || edge.quic < 1 || edge.quic > 65535 || connectorprotocol.ValidateOpaqueEpoch(edge.epoch) != nil {
-				continue
-			}
-			if len(selected) == 0 || (selected[0].domain != "" && edge.domain != "" && edge.domain != selected[0].domain) {
-				selected = append(selected, edge)
-			}
-			if len(selected) == 2 {
-				break
-			}
-		}
-		rows.Close()
-		if err == nil {
-			err = rows.Err()
-		}
-		if err != nil {
-			return err
+			selected = append(terminal, selected...)
 		}
 		if len(selected) == 0 {
 			return ErrUnavailable
 		}
 
+		// The route's host is Paperboat's in every mode: terminals and the rest of the runtime route never use a customer's.
 		nextHost := managedHost
-		switch mode {
-		case "managed-only":
-			if managedHost == "" {
-				return ErrUnavailable
-			}
-		case "self-hosted-only":
-			// A customer alias is a signed routing key. All public TLS uses the
-			// selected edge's enrolled infrastructure hostname, not this alias.
-			nextHost = host
-			if host == managedHost {
-				label := sha256.Sum256([]byte(proof.MachineID))
-				nextHost = "machine-" + hex.EncodeToString(label[:16]) + "." + selected[0].browserHost
-			}
-			if nextHost == "" || len(nextHost) > 253 || nextHost == managedHost || selected[0].browserHost == "" {
-				return ErrUnavailable
-			}
-		default:
+		if nextHost == "" || (mode != "managed-only" && mode != "self-hosted-only") {
 			return ErrUnavailable
 		}
 		if nextHost != host {
@@ -291,12 +289,7 @@ WHEN n.id=$2 THEN 2 ELSE 3 END,n.id LIMIT 32 FOR SHARE OF n`, proof.UserID, acti
 				keptJSON, keptErr := json.Marshal(kept)
 				priorJSON, priorErr := json.Marshal(prior)
 				if keptErr == nil && priorErr == nil && bytes.Equal(keptJSON, priorJSON) {
-					if i == 0 {
-						out.Admission = prior
-					} else {
-						kept := prior
-						out.Backup = &kept
-					}
+					out.Place(i, prior)
 					continue
 				}
 			}
@@ -308,10 +301,9 @@ previous_until=CASE WHEN runtime_carrier_attachments.session_id<>EXCLUDED.sessio
 			if err != nil {
 				return err
 			}
-			if i == 0 {
-				out.Admission = admission
-			} else {
-				out.Backup = &admission
+			out.Place(i, admission)
+			if edge.terminal {
+				out.TerminalEdgeNodeIDs = append(out.TerminalEdgeNodeIDs, edge.node)
 			}
 		}
 		// Keep a working active carrier during replacement, but immediately
@@ -321,17 +313,29 @@ previous_until=CASE WHEN runtime_carrier_attachments.session_id<>EXCLUDED.sessio
 			if err = tx.QueryRow(ctx, `SELECT paperboat.runtime_carrier_valid($1,$2,$3,false)`, route, activeNode, activeEpoch).Scan(&valid); err != nil {
 				return err
 			}
-			if !valid {
+			// An active carrier on an edge that cannot carry terminals (a customer-run one) is retired too.
+			terminalEdge := false
+			for _, edge := range selected {
+				terminalEdge = terminalEdge || edge.terminal && edge.node == activeNode
+			}
+			if !valid || !terminalEdge {
 				if _, err = tx.Exec(ctx, `UPDATE runtime_carrier_attachments SET active=false WHERE route_id=$1 AND active`, route); err != nil {
 					return err
 				}
 				activeNode, activeEpoch = "", ""
 			}
 		}
+		// The active carrier is the route's terminal edge, so only a terminal-capable (managed) edge may be it; a
+		// self-hosted-only workspace with no managed edge ready has none, and its terminals are unavailable.
 		if activeNode == "" {
-			activeNode, activeEpoch = selected[0].node, selected[0].epoch
-			if _, err = tx.Exec(ctx, `UPDATE runtime_carrier_attachments SET active=true WHERE route_id=$1 AND edge_node_id=$2`, route, activeNode); err != nil {
-				return err
+			for _, edge := range selected {
+				if edge.terminal {
+					activeNode, activeEpoch = edge.node, edge.epoch
+					if _, err = tx.Exec(ctx, `UPDATE runtime_carrier_attachments SET active=true WHERE route_id=$1 AND edge_node_id=$2`, route, activeNode); err != nil {
+						return err
+					}
+					break
+				}
 			}
 		}
 		readyAt := func(node, epoch string) (bool, error) {
@@ -355,7 +359,7 @@ previous_until=CASE WHEN runtime_carrier_attachments.session_id<>EXCLUDED.sessio
 		}
 		if request.ActiveEdgeNodeID != "" && (request.ActiveEdgeNodeID != activeNode || request.ActiveEdgeProcessEpoch != activeEpoch) {
 			for _, edge := range selected {
-				if edge.node == request.ActiveEdgeNodeID && edge.epoch == request.ActiveEdgeProcessEpoch {
+				if edge.terminal && edge.node == request.ActiveEdgeNodeID && edge.epoch == request.ActiveEdgeProcessEpoch {
 					ready, err := readyAt(edge.node, edge.epoch)
 					if err != nil {
 						return err
@@ -371,11 +375,11 @@ previous_until=CASE WHEN runtime_carrier_attachments.session_id<>EXCLUDED.sessio
 		}
 		// An active carrier its edge reports not ready gives way to the pair's other edge when that
 		// one is ready; otherwise the machine is unreachable although one of its edges serves it.
-		if ready, err := readyAt(activeNode, activeEpoch); err != nil {
+		if ready, err := readyAt(activeNode, activeEpoch); activeNode != "" && err != nil {
 			return err
-		} else if !ready {
+		} else if activeNode != "" && !ready {
 			for _, edge := range selected {
-				if edge.node == activeNode {
+				if edge.node == activeNode || !edge.terminal {
 					continue
 				}
 				other, err := readyAt(edge.node, edge.epoch)
@@ -390,18 +394,20 @@ previous_until=CASE WHEN runtime_carrier_attachments.session_id<>EXCLUDED.sessio
 				}
 			}
 		}
-		if _, err = tx.Exec(ctx, `DELETE FROM runtime_carrier_attachments WHERE route_id=$1 AND NOT active AND edge_node_id<>ALL($2::text[])`, route, []string{selected[0].node, func() string {
-			if len(selected) > 1 {
-				return selected[1].node
-			}
-			return selected[0].node
-		}()}); err != nil {
+		kept := make([]string, 0, len(selected))
+		for _, edge := range selected {
+			kept = append(kept, edge.node)
+		}
+		if _, err = tx.Exec(ctx, `DELETE FROM runtime_carrier_attachments WHERE route_id=$1 AND NOT active AND edge_node_id<>ALL($2::text[])`, route, kept); err != nil {
 			return err
 		}
 		out.ActiveEdgeNodeID, out.ActiveEdgeProcessEpoch = activeNode, activeEpoch
+		// Endpoints (previews, tunnels) ride the workspace's own edges, not the managed one that only carries terminals.
 		nodes, epochs := []string{}, []string{}
 		for _, edge := range selected {
-			nodes, epochs = append(nodes, edge.node), append(epochs, edge.epoch)
+			if mode == "managed-only" || !edge.terminal {
+				nodes, epochs = append(nodes, edge.node), append(epochs, edge.epoch)
+			}
 		}
 		if len(capabilities) != 0 {
 			if out.EndpointsServed, err = endpoints.EdgesServeTx(ctx, tx, nodes, epochs, false); err != nil {
