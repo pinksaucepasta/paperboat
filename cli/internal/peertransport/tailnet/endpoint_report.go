@@ -14,6 +14,11 @@ import (
 const (
 	endpointReportDebounce = 5 * time.Second
 	endpointReportSpacing  = 30 * time.Second
+	// endpointFirstReportHold bounds how long a new engine's first report waits for its first candidates. A carrier replaced
+	// by an update has found none yet when its first renewal goes out; an empty report then tells every peer the machine
+	// has no endpoint while the old generation's are still valid (Tailscale's magicsock sends no update before it has
+	// gathered endpoints, and debounces the first one).
+	endpointFirstReportHold = 2 * time.Second
 )
 
 // localEndpointReport is the engine's current candidate set as the server stores it: valid unicast ip:port,
@@ -57,10 +62,35 @@ func (a *Authority) endpointReportDue() *[]string {
 	if a.reported != nil && slices.Equal(*a.reported, current) {
 		return nil
 	}
+	if a.reported == nil && current != nil && len(current) == 0 && a.holdFirstReportLocked() {
+		return nil
+	}
 	// The first report goes out even when empty: a request carrying `endpoints` is how the server learns
 	// this client accepts endpoints on delivered peer entries (agreed with Lane Q), and a machine with no
 	// candidate must still receive its peers'.
 	return &current
+}
+
+// holdFirstReportLocked reports whether the first report still waits for candidates: until endpointFirstReportHold has
+// passed since this engine was first asked. A discovery asks for the report at once (endpointsChanged), and a timer
+// asks when the hold ends, so a machine that really has no candidate still says so after the bound. reportMu is held.
+func (a *Authority) holdFirstReportLocked() bool {
+	if a.firstReportAsked.IsZero() {
+		a.firstReportAsked = time.Now()
+	}
+	left := endpointFirstReportHold - time.Since(a.firstReportAsked)
+	if left <= 0 {
+		return false
+	}
+	if a.reportTimer == nil {
+		a.reportTimer = time.AfterFunc(left, func() {
+			a.reportMu.Lock()
+			a.reportTimer = nil
+			a.reportMu.Unlock()
+			a.RequestRefresh()
+		})
+	}
+	return true
 }
 
 // restunSpacing is magicsock's own periodic STUN interval (20-26 s, wgengine/magicsock/magicsock.go

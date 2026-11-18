@@ -129,18 +129,19 @@ type Authority struct {
 	// clientRelay: the client engine was started with at least one relay region (from a descriptor or configured nodes).
 	clientRelay bool
 	// reportMu guards the endpoint report schedule (endpoint_report.go).
-	reportMu        sync.Mutex
-	reportTimer     *time.Timer
-	lastReport      time.Time
-	startupReported bool
-	reported        *[]string // the last endpoint set the server accepted; nil before the first
-	clients         map[string]authorizedClient
-	withdrawing     map[string]withdrawnPeer // withdrawal.go
-	clientSlots     chan struct{}
-	regional        *RegionalCandidates
-	relay           relayAuthority
-	recoveryWorkers sync.WaitGroup
-	refreshSlot     chan struct{}
+	reportMu         sync.Mutex
+	reportTimer      *time.Timer
+	lastReport       time.Time
+	startupReported  bool
+	firstReportAsked time.Time // when the first report was first asked for (holdFirstReportLocked)
+	reported         *[]string // the last endpoint set the server accepted; nil before the first
+	clients          map[string]authorizedClient
+	withdrawing      map[string]withdrawnPeer // withdrawal.go
+	clientSlots      chan struct{}
+	regional         *RegionalCandidates
+	relay            relayAuthority
+	recoveryWorkers  sync.WaitGroup
+	refreshSlot      chan struct{}
 	// refreshedFrom is when the last applied renewal sent its request (guarded by refreshSlot).
 	refreshedFrom time.Time
 	refreshWake   chan struct{}
@@ -603,7 +604,7 @@ func (a *Authority) dropLocked() {
 		a.reportTimer.Stop()
 		a.reportTimer = nil
 	}
-	a.reported, a.lastReport, a.startupReported = nil, time.Time{}, false
+	a.reported, a.lastReport, a.startupReported, a.firstReportAsked = nil, time.Time{}, false, time.Time{}
 	a.reportMu.Unlock()
 }
 func (a *Authority) Close() error {

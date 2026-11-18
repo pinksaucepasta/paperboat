@@ -162,3 +162,32 @@ func TestReSTUNIsSpacedAndNeedsAnEngine(t *testing.T) {
 		t.Fatal("a ReSTUN after the spacing did not run")
 	}
 }
+
+// A new engine (a carrier replaced by an update) has found no candidate when its first renewal goes out. An empty first
+// report would tell every peer the machine has no endpoint while the old generation's are still valid, so the first report
+// waits for candidates, at most endpointFirstReportHold; after the bound a machine that really has none says so.
+func TestTheFirstEndpointReportWaitsForCandidatesButNotLongerThanTheBound(t *testing.T) {
+	a, _, _, _ := networkTestAuthority(t)
+	engine := &mesh.Server{Key: key.NewNode(), LocalAddr: netip.MustParseAddr("fd7a:115c:a1e0::31"), AllowedPeers: map[key.NodePublic]netip.Addr{}, Logf: func(string, ...any) {}}
+	a.mu.Lock()
+	a.clientEngine = engine // never started: it has found no candidate
+	a.mu.Unlock()
+	t.Cleanup(func() { a.mu.Lock(); a.clientEngine = nil; a.mu.Unlock() })
+	if due := a.endpointReportDue(); due != nil {
+		t.Fatalf("the first report went out empty at once: %v", *due)
+	}
+	if a.reportTimer == nil {
+		t.Fatal("nothing asks for the report when the hold ends")
+	}
+	a.reportMu.Lock()
+	a.firstReportAsked = time.Now().Add(-endpointFirstReportHold - time.Second)
+	a.reportMu.Unlock()
+	if due := a.endpointReportDue(); due == nil || len(*due) != 0 {
+		t.Fatalf("after the bound a machine without candidates reports %v, want an explicit empty set", due)
+	}
+	// Once a first set has been reported the hold never applies again: a later empty set goes out at once.
+	a.endpointsReported([]string{"192.0.2.1:1234"})
+	if due := a.endpointReportDue(); due == nil || len(*due) != 0 {
+		t.Fatalf("a later empty set was held back: %v", due)
+	}
+}
