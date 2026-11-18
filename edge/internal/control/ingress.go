@@ -88,6 +88,14 @@ func (c *HTTPClient) IngressDecisions(ctx context.Context, nodeID, epoch, versio
 		output.Version = ""
 		edgetelemetry.Log(ctx, sharedtelemetry.SeverityWarn, "ingress_decisions_rejected", sharedtelemetry.OutcomeRejected, "count", len(rejected), "route_ids", strings.Join(rejected[:min(len(rejected), 8)], ","))
 	}
+	// A throttle entry without a hostname or workspace would merge unrelated routes into one bucket: dropped.
+	throttled := output.Throttled[:0]
+	for _, t := range output.Throttled {
+		if t.Hostname != "" && t.Workspace != "" && len(t.Hostname) <= 253 && len(t.Workspace) <= 256 {
+			throttled = append(throttled, t)
+		}
+	}
+	output.Throttled = throttled
 	for _, r := range output.HTTP01Responses {
 		if r.Validate() != nil {
 			return IngressSnapshot{}, ErrControlUnavailable
