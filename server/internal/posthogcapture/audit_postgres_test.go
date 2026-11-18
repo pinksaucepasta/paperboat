@@ -43,6 +43,13 @@ func TestPostgresTailMapsAuditRowsToEvents(t *testing.T) {
 	if err := store.Pool().QueryRow(ctx, `SELECT coalesce(max(cursor_sequence),0) FROM audit_events`).Scan(&start); err != nil {
 		t.Fatal(err)
 	}
+	// audit_events.actor_user_id names a real account.
+	for _, id := range []string{"acct_" + x, "operator_" + x} {
+		if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.users (id, workos_subject, primary_email, canonical_email, email_verified, display_name, status, created_at, updated_at)
+ VALUES ($1, $1, $1||'@example.test', $1||'@example.test', true, '', 'active', now(), now())`, id); err != nil {
+			t.Fatal(err)
+		}
+	}
 	w := audit.NewWriter(store)
 	write := func(e audit.Event) {
 		t.Helper()
