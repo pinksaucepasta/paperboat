@@ -254,7 +254,7 @@ function CreateTeamForm() {
   const personal = useApiQuery(workspacesQuery).data?.find((workspace) => workspace.kind === "personal")
   const trial = teamTrialDays(useApiQuery(billingQuery(personal)).data)
   // One operation per distinct order: changing the team, seats or interval is a new order.
-  const key = useMemo(() => idempotencyKey(), [id, seats, period]) // eslint-disable-line react-hooks/exhaustive-deps
+  const key = useMemo(() => idempotencyKey(), [id, seats, period, terms]) // eslint-disable-line react-hooks/exhaustive-deps
   const valid = teamIdPattern.test(id)
   const create = useMutation({
     mutationFn: async () => {
