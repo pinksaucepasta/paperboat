@@ -22,3 +22,11 @@ CREATE TABLE IF NOT EXISTS snapshot (id INTEGER PRIMARY KEY CHECK (id = 1), at I
 CREATE TABLE IF NOT EXISTS subscribers (
   email TEXT PRIMARY KEY, token TEXT NOT NULL UNIQUE, confirmed INTEGER NOT NULL DEFAULT 0,
   created INTEGER NOT NULL, last_mail INTEGER NOT NULL DEFAULT 0);
+-- webhook subscribers: confirmed by an answered challenge before they are stored; secret signs every delivery; token removes the subscription.
+CREATE TABLE IF NOT EXISTS webhooks (
+  id TEXT PRIMARY KEY, url TEXT NOT NULL UNIQUE, secret TEXT NOT NULL, token TEXT NOT NULL UNIQUE,
+  created INTEGER NOT NULL, abandoned INTEGER NOT NULL DEFAULT 0);
+-- deliveries still owed: one row per (event, webhook), retried with backoff by the cron until delivered or given up.
+CREATE TABLE IF NOT EXISTS webhook_queue (
+  id TEXT PRIMARY KEY, webhook_id TEXT NOT NULL, body TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, next_at INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS webhook_queue_next ON webhook_queue (next_at);
