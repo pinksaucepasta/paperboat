@@ -46,7 +46,7 @@ func TestSelfhostUpdateRequestOnPostgres(t *testing.T) {
 	}
 	t.Cleanup(func() {
 		cleanup := context.Background()
-		for _, q := range []string{`DELETE FROM paperboat.selfhost_update_requests WHERE node_id=$1`, `DELETE FROM paperboat.selfhost_installations WHERE node_id=$1`, `DELETE FROM paperboat.control_tunnel_nodes WHERE id=$1`} {
+		for _, q := range []string{`DELETE FROM paperboat.announcements WHERE created_by='system' AND idempotency_key LIKE '%'||$1||'%'`, `DELETE FROM paperboat.node_capacity WHERE node_id=$1`, `DELETE FROM paperboat.selfhost_update_requests WHERE node_id=$1`, `DELETE FROM paperboat.selfhost_installations WHERE node_id=$1`, `DELETE FROM paperboat.control_tunnel_nodes WHERE id=$1`} {
 			if _, err := store.SQL().ExecContext(cleanup, q, node); err != nil {
 				t.Errorf("cleanup: %v", err)
 			}
@@ -100,5 +100,38 @@ VALUES($1,'default','1.0','epoch','ready',true,now(),'fsn1',$1,ARRAY['relay'],AR
 	}
 	if again, err := service.RequestUpdate(ctx, owner, installation, false, "2026.11.18.2"); err != nil || again.ID == first.ID || again.State != "requested" {
 		t.Fatalf("request after a finished one = %+v, %v", again, err)
+	}
+
+	// The owner's bell: the rolled-back update (with why and the reference), then, once, that the node is outdated.
+	notices := func() (out []string) {
+		rows, err := store.SQL().QueryContext(ctx, `SELECT title||' | '||body FROM paperboat.announcements WHERE created_by='system' AND kind='notice' AND audience_kind='user' AND audience_value=$1 ORDER BY seq`, owner)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var s string
+			_ = rows.Scan(&s)
+			out = append(out, s)
+		}
+		return out
+	}
+	if got := notices(); len(got) != 1 || !strings.HasPrefix(got[0], "Update failed: Relay") || !strings.Contains(got[0], "support_ref_1") || !strings.Contains(got[0], "rolled back") {
+		t.Fatalf("bell after the rollback = %q", got)
+	}
+	exec(`INSERT INTO paperboat.node_capacity(node_id,role,process_epoch,version,reported_at) VALUES($1,'relay','epoch','2026.11.16.2',now())`, node)
+	state := func(_ context.Context, component, version string) (string, string) {
+		if component != "relay" || version != "2026.11.16.2" {
+			t.Errorf("state asked for %s %s", component, version)
+		}
+		return "2026.11.18.2", ""
+	}
+	for range 2 {
+		if err := service.NotifyNodeUpdates(ctx, state); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := notices(); len(got) != 2 || !strings.HasPrefix(got[1], "Update available: Relay") || !strings.Contains(got[1], "2026.11.18.2") {
+		t.Fatalf("bell after the outdated check (twice) = %q", got)
 	}
 }

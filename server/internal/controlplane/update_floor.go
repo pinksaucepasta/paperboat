@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/clientupdate"
 	serverdiagnostics "github.com/pinksaucepasta/paperboat/server/internal/diagnostics"
@@ -17,6 +18,31 @@ type NodeUpdateFloor interface {
 
 // SetUpdateFloors sets the floor per node component ("edge", "relay").
 func (s *EdgeService) SetUpdateFloors(floors map[string]NodeUpdateFloor) { s.updateFloors = floors }
+
+// NodeRelease is one node component's update floor and newest published release (clientupdate.NewNode).
+type NodeRelease interface {
+	NodeUpdateFloor
+	Latest() (string, error)
+}
+
+// NodeUpdateState says, for a node reporting version, the newer published release it can update to (available)
+// and, when it is below its floor, why and how to update (required). Development builds, and a floor or release
+// that cannot be read, report nothing.
+func NodeUpdateState(ctx context.Context, release NodeRelease, component, version string, now time.Time) (available, required string) {
+	current, ok := clientupdate.ParseVersion(version)
+	if release == nil || !ok {
+		return "", ""
+	}
+	if latest, err := release.Latest(); err == nil {
+		if newest, ok := clientupdate.ParseVersion(latest); ok && clientupdate.Compare(current, newest) < 0 {
+			available = latest
+		}
+	}
+	if policy, err := release.Get(ctx); err == nil && clientupdate.RequiresUpdate(policy, version, now) {
+		required = UpdateRequiredMessage(component, version, policy)
+	}
+	return available, required
+}
 
 // UpdateRequiredMessage is the one text a node below its floor is told, and that console and admin show.
 func UpdateRequiredMessage(component, version string, p clientupdate.Policy) string {
