@@ -1,4 +1,4 @@
-web_terminal_matrix.mjs --only w15,w16 vs live console https://oracle.newt-mermaid.ts.net at 220c876a5 (prod console 220c876)
+web_terminal_matrix.mjs --only w15,w16 vs the live dev console at 220c876a5 (prod console 220c876)
 machine fixbt-ct (machine_6612e1dd-282b-4e85-a32b-f748804d0842), pbvm2 container, pb dev-220c876a5; freeze = docker pause/unpause (< 30 s)
 PASS W15 shell killed: the closed terminal shows its exit status: terminal_10922da6-d918-4d0f-994a-0afe99613f7b exited 137 (SIGKILL) phase closed close 'closed' Terminal closed / This terminal has ended: exited 137 (SIGKILL). [22:31:57Z]
 PASS W16 frozen machine: stall flagged at 10 s and shown: terminal_25ddcc93-e9bb-422e-9f4c-2ff4e368cb9d 10.3 s, close 'connection_stalled', shown true [22:32:17Z]
