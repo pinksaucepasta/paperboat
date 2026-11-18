@@ -12,12 +12,12 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"os"
 	"path"
 	"path/filepath"
 	"strings"
 
+	"github.com/pinksaucepasta/paperboat/shared/releaseindex"
 	"github.com/theupdateframework/go-tuf/v2/metadata"
 	"github.com/theupdateframework/go-tuf/v2/metadata/config"
 	"github.com/theupdateframework/go-tuf/v2/metadata/updater"
@@ -89,14 +89,11 @@ func Target(ctx context.Context, repositoryURL string, root []byte, cacheDir, ve
 		return nil, "", fmt.Errorf("%w: %s is not a signed target", ErrSignature, TargetName(version, arch))
 	}
 	var custom struct {
-		URL string `json:"url"`
+		Repository string `json:"repository"`
+		URL        string `json:"url"`
 	}
-	file := path.Base(TargetName(version, arch))
-	if info.Custom == nil || json.Unmarshal(*info.Custom, &custom) != nil {
-		return nil, "", fmt.Errorf("%w: %s names no download URL", ErrSignature, TargetName(version, arch))
-	}
-	if parsed, err := url.Parse(custom.URL); err != nil || parsed.Scheme != "https" || parsed.Host == "" || path.Base(parsed.Path) != file {
-		return nil, "", fmt.Errorf("%w: %s names an invalid download URL", ErrSignature, TargetName(version, arch))
+	if info.Custom == nil || json.Unmarshal(*info.Custom, &custom) != nil || !releaseindex.ValidDownloadURL(custom.URL, custom.Repository, "selfhost-"+version, path.Base(TargetName(version, arch))) {
+		return nil, "", fmt.Errorf("%w: %s names no valid release download URL", ErrSignature, TargetName(version, arch))
 	}
 	return info, custom.URL, nil
 }

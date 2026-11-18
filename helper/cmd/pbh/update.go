@@ -106,7 +106,15 @@ func updateApply(ctx context.Context, args []string, out io.Writer) error {
 			if err != nil {
 				return "", err
 			}
-			return path, downloadBundle(ctx, node.DownloadClient(), url, path)
+			// The signed URL is a GitHub release asset, which redirects to its storage host: follow HTTPS redirects
+			// (the request carries no credentials; Verify checks the bytes against the signed target).
+			client := &http.Client{Timeout: 10 * time.Minute, CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				if req.URL.Scheme != "https" || len(via) > 5 {
+					return errors.New("the release download redirected to a non-HTTPS or too-long chain")
+				}
+				return nil
+			}}
+			return path, downloadBundle(ctx, client, url, path)
 		},
 		verify: func(ctx context.Context, bundle string) error {
 			return selfupdate.Verify(ctx, node.ControlURL()+"/tuf", tufroot.TrustedRoot, filepath.Join(work, "tuf"), *target, arch, bundle, node.DownloadClient())
