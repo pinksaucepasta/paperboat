@@ -92,7 +92,7 @@ func TestBandwidthThrottleTransitionLiftAndResetPostgres(t *testing.T) {
 		t.Fatalf("80 of 100 bytes: throttled=%v notices=%v, want the 80%% notice and no throttle", throttled(at), titles())
 	}
 	debit(20, at)
-	debit(5, at) // beyond the amount: observed, not admitted
+	debit(5, at) // beyond the amount: observed and recorded, no longer admitted at full speed
 	if !throttled(at) || titles()[slowed] != 1 || titles()[eighty] != 1 {
 		t.Fatalf("100 of 100 bytes: throttled=%v notices=%v, want one throttled notice", throttled(at), titles())
 	}

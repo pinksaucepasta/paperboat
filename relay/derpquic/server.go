@@ -289,9 +289,16 @@ func (s *Server) servePeer(p *peerConn) {
 		s.mu.Lock()
 		accountBudget := s.accounts[p.grant.AccountID]
 		s.mu.Unlock()
-		if now := time.Now(); !p.rate.allow(now, len(b)) || accountBudget == nil || !accountBudget.allow(now, len(b)) {
+		now := time.Now()
+		if !p.rate.allow(now, len(b)) || accountBudget == nil {
 			s.reject(p, ErrOverload)
 			return
+		}
+		// Payload over the account's fair-use speed is dropped and the carrier stays up, as for datagrams; control
+		// frames are bounded by the carrier's own budget only, so a saturated account can still ping and re-authenticate.
+		if kind == framePacket && !accountBudget.allow(now, len(b)) {
+			s.dropped.Add(1)
+			continue
 		}
 		switch kind {
 		case frameAuth, frameAuthGeneration, frameAuthBatch:

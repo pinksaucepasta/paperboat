@@ -95,8 +95,8 @@ func (f *gateFixture) topup(workspace string, remaining int64) {
 	f.exec(`INSERT INTO paperboat.billing_workspace_topups(provider_session_id,operation_key,workspace_id,purchased_bytes,remaining_bytes,purchased_at,expires_at) VALUES($1,$1,$2,10,$3,$4,$5)`, key, workspace, remaining, time.Now().UTC().Add(-time.Minute), time.Now().UTC().Add(time.Hour))
 }
 
-// F13-03: bandwidth is refused only when every workspace the account can use is out of
-// allowance, judged from stored usage by one read-only statement.
+// F13-03: an account is throttled only when every workspace it can use used its fair-use
+// bandwidth, judged from stored usage by one read-only statement.
 func TestGateJudgesEveryWorkspacePostgres(t *testing.T) {
 	store := gateStore(t)
 	f := newGateFixture(t, store)
