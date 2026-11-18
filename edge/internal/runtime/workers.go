@@ -263,6 +263,14 @@ func (w *NodeWorker) heartbeat(ctx context.Context, at time.Time) error {
 		observation.Metrics = w.Metrics(at)
 	}
 	answer, err := w.Sink.Heartbeat(ctx, observation)
+	if errors.Is(err, control.ErrUpdateRequired) {
+		reason := ""
+		var failure *control.RequestFailure
+		if errors.As(err, &failure) {
+			_, reason = failure.DiagnosticResponse()
+		}
+		slog.Warn("update_required", "message", control.ErrUpdateRequired.Error(), "server", reason)
+	}
 	if errors.Is(err, control.ErrNodeObservationStale) {
 		answer, err = w.Manager.RegisterAndHeartbeat(ctx, w.Sink, w.Registration, at)
 	}

@@ -37,6 +37,9 @@ var (
 	ErrControlInvalid       = errors.New("private control configuration is invalid")
 	ErrControlUnavailable   = errors.New("private control is unavailable")
 	ErrNodeObservationStale = errors.New("node observation is stale")
+	// ErrUpdateRequired: the server answered 426, this release is below the minimum supported version. The edge
+	// keeps serving; the response excerpt carries the server's reason.
+	ErrUpdateRequired = errors.New("this Paperboat edge release is below the minimum supported version: press Update for this node in the console (self-hosted) or admin (Paperboat-managed), or run the pbh install command on the host again")
 	// ErrRuntimeCarrierStale: the server stored the current carrier observations and some
 	// reported carriers were already replaced (409 runtime_carrier_stale); the next pull
 	// replaces them here, so it is an expected answer, not a control failure.
@@ -622,6 +625,8 @@ func (c *HTTPClient) postNodeWithMaximumAndIdentity(ctx context.Context, path, n
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		failure := responseFailure(ctx, path, response, int64(maximum))
 		switch {
+		case response.StatusCode == http.StatusUpgradeRequired:
+			failure.Err = ErrUpdateRequired
 		case path == "/v1/nodes/heartbeat" && response.StatusCode == http.StatusConflict:
 			failure.Err = ErrNodeObservationStale
 		case path == runtimewire.EdgeObservePath && response.StatusCode == http.StatusConflict:

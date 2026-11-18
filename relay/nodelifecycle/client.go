@@ -12,6 +12,7 @@ import (
 	"errors"
 	"github.com/pinksaucepasta/paperboat/shared/nodemetrics"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -29,6 +30,12 @@ import (
 
 var ErrControl = errors.New("relay control authority unavailable or expired")
 var ErrFenced = errors.New("relay node authority rejected")
+
+// ErrUpdateRequired: the server answered 426, this release is below the minimum supported version. The relay
+// keeps serving and asks again every updateRequiredRetry; the server's answer says why.
+var ErrUpdateRequired = errors.New("this Paperboat relay release is below the minimum supported version: press Update for this node in the console (self-hosted) or admin (Paperboat-managed), or run the pbh install command on the host again")
+
+const updateRequiredRetry = time.Minute
 
 const Interval = 3 * time.Second
 const leaseLimit = 15 * time.Second
@@ -183,6 +190,9 @@ func (c *Client) post(ctx context.Context, path string, in any) (out Lease, resu
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusBadRequest || resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusConflict {
 		return out, failure(nil, resp.StatusCode, true)
+	}
+	if resp.StatusCode == http.StatusUpgradeRequired {
+		return out, failure(ErrUpdateRequired, resp.StatusCode, false)
 	}
 	if resp.StatusCode != http.StatusOK {
 		return out, failure(nil, resp.StatusCode, false)
@@ -442,6 +452,10 @@ func (c *Client) Run(ctx context.Context, server *derpquic.Server) error {
 		delay := Interval
 		if remain := time.Until(time.Unix(c.leaseExpiry(), 0)); remain > 0 && remain < delay {
 			delay = remain
+		}
+		if errors.Is(err, ErrUpdateRequired) {
+			slog.Warn("update_required", "message", ErrUpdateRequired.Error())
+			delay = updateRequiredRetry
 		}
 		timer.Reset(delay)
 	}

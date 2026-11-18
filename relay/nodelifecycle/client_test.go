@@ -333,6 +333,10 @@ func TestControlFailurePreservesCauseStatusAndRecovery(t *testing.T) {
 			http.Error(w, "PRIVATE_RESPONSE", http.StatusConflict)
 			return
 		}
+		if calls == 3 {
+			http.Error(w, `{"code":"update_required"}`, http.StatusUpgradeRequired)
+			return
+		}
 		_ = json.NewEncoder(w).Encode(Lease{NodeID: "relay", Generation: 2, ProcessEpoch: "epoch", ExpiresAt: time.Now().Add(10 * time.Second).Unix(), CapacityLimit: 8})
 	}))
 	defer api.Close()
@@ -351,7 +355,7 @@ func TestControlFailurePreservesCauseStatusAndRecovery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, status := range []int{503, 409} {
+	for _, status := range []int{503, 409, 426} {
 		_, err = c.post(context.Background(), "/v1/relay/nodes/observe", struct{}{})
 		var failure *RequestFailure
 		if !errors.As(err, &failure) || failure.Status != status || strings.Contains(err.Error(), "PRIVATE") {
@@ -360,8 +364,12 @@ func TestControlFailurePreservesCauseStatusAndRecovery(t *testing.T) {
 		if status == 409 && !errors.Is(err, ErrFenced) || status == 503 && !errors.Is(err, ErrControl) {
 			t.Fatal("authority decision lost")
 		}
+		// Below the update floor: keep serving (not fenced), told to update.
+		if status == 426 && (errors.Is(err, ErrFenced) || !errors.Is(err, ErrUpdateRequired)) {
+			t.Fatalf("426 = %v, want update required and not fenced", err)
+		}
 	}
-	if _, err = c.post(context.Background(), "/v1/relay/nodes/observe", struct{}{}); err != nil || len(observed) != 2 {
+	if _, err = c.post(context.Background(), "/v1/relay/nodes/observe", struct{}{}); err != nil || len(observed) != 3 {
 		t.Fatalf("recovery=%v faults=%d", err, len(observed))
 	}
 	ctx, cancel := context.WithCancel(context.Background())
