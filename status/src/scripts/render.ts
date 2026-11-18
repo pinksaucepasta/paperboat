@@ -104,7 +104,7 @@ function row(c: Component, o: Overall, p: Payload, ix: number): HTMLElement {
   const more = el("span", "comp-more"); more.append(chevron())
   if (c.units.length > 1) more.prepend(`${c.units.length} checks`)
   head.append(more)
-  head.append(el("span", "comp-up", shown === "unknown" || c.uptime === null ? "—" : `${c.uptime}% uptime`))
+  head.append(el("span", "comp-up", shown === "unknown" ? "—" : c.uptime === null ? "Collecting data" : `${c.uptime}% uptime`))
   head.addEventListener("click", () => { const open = head.getAttribute("aria-expanded") !== "true"; head.setAttribute("aria-expanded", String(open)); panel.hidden = !open })
   box.append(head, el("p", "comp-note", c.note))
   const days = lastDays(c.days, p.now)
