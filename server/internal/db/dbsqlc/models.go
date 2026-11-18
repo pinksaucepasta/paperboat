@@ -2977,11 +2977,12 @@ type Tunnel struct {
 }
 
 type TunnelAddressHold struct {
-	Hostname  string
-	TunnelID  string
-	Kind      string
-	Until     time.Time
-	CreatedAt time.Time
+	Hostname    string
+	TunnelID    string
+	OperationID sql.NullString
+	Kind        string
+	Until       time.Time
+	CreatedAt   time.Time
 }
 
 type TunnelCertificateDistributionAction struct {
