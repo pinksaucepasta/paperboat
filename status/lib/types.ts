@@ -1,4 +1,6 @@
 import type { Evidence, State } from "./decide.ts"
+import type { UptimeDay } from "./uptime.ts"
+export type { UptimeDay }
 
 export interface Env {
   DB: D1Database
@@ -29,8 +31,6 @@ export interface Incident {
   updates: { status: string; body: string; ts: number }[]
 }
 export interface Maintenance { id: string; title: string; body: string; components: string[]; starts: number; ends: number }
-/** Minutes of one day by state; delayed minutes are not measured, so they are neither up nor down. */
-export interface UptimeDay { day: string; up: number; degraded: number; down: number; delayed: number }
 export interface PublicComponent {
   id: string; name: string; note: string; state: Shown; since: number
   units: { id: string; name: string; state: State }[]

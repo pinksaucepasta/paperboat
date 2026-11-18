@@ -1,4 +1,6 @@
-import type { UptimeDay } from "./types.ts"
+/** Minutes of one day by state; delayed minutes are not measured, so they are neither up nor down. */
+export interface UptimeDay { day: string; up: number; degraded: number; down: number; delayed: number }
+
 
 /** Measured minutes only: delayed minutes are not in the denominator, degraded counts 30% as down (the page's footnote says so). */
 export const DEGRADED_WEIGHT = 0.3
