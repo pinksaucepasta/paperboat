@@ -14,7 +14,7 @@ case \$1 in
   exec) [ -z "\${FAKE_FAIL:-}" ] || { echo 'machine unreachable' >&2; exit 1; }; shift 3; "\$@" ;;
   ssh) shift 3; "\$@" ;;
   machine) echo '{"data":{"items":[{"name":"b"},{"name":"a"}]}}' ;;
-  send) cp "\$2" "\$HOME/inbox/" ;;
+  send) cp "\$2" "\$HOME/inbox/"; echo "\$(basename \$2): delivered to \$HOME/inbox on peer" ;;
   inbox) echo '{"data":{"path":"'"\$HOME"'/inbox"}}' ;;
   preview) [ "\$2" = stop ] || echo '{"data":{"id":"p1","endpoint":"http://127.0.0.1:$port"}}' ;;
 esac

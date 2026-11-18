@@ -13,6 +13,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         code, body = {"/ok": (200, b"ready"), "/down": (503, b"no"), "/relay": (401, b"relay authorization required"),
                       "/tuf": (200, b'{"signed":{"expires":"2999-01-01T00:00:00Z"}}'),
+                      "/tuf-nanos": (200, b'{"signed":{"expires":"2999-01-01T07:36:26.610746564+00:00"}}'),
                       "/tuf-naive": (200, b'{"signed":{"expires":"2999-01-01T00:00:00"}}'),
                       "/redirect": (302, b""),
                       "/tuf-old": (200, b'{"signed":{"expires":"2001-01-01T00:00:00Z"}}')}.get(self.path, (404, b""))
@@ -51,6 +52,9 @@ class Checks(unittest.TestCase):
 
     def test_naive_expiry_is_read_as_utc_not_a_crash(self):
         self.assertTrue(self.run_one(kind="tuf", url=self.base + "/tuf-naive")["ok"])
+
+    def test_nanosecond_expiry_parses_on_any_python(self):
+        self.assertTrue(self.run_one(kind="tuf", url=self.base + "/tuf-nanos")["ok"])
 
     def test_redirect_is_a_pass_only_when_the_check_says_so(self):
         self.assertFalse(self.run_one(kind="http", url=self.base + "/redirect")["ok"])
