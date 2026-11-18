@@ -1,5 +1,6 @@
 "use client"
 
+import { toast } from "sonner"
 import { CheckIcon, PencilSimpleIcon, WarningIcon } from "@phosphor-icons/react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useState } from "react"
@@ -61,9 +62,12 @@ function ChangeAddressDialog({ tunnel, onClose }: { tunnel: Tunnel; onClose: () 
   })
   const save = useMutation({
     mutationFn: () => patchTunnel(tunnel, { subdomain: label }),
-    onSuccess: async () => {
+    onSuccess: async (result) => {
       await queryClient.invalidateQueries({ queryKey: ["tunnels"] })
       await queryClient.invalidateQueries({ queryKey: ["tunnel", tunnel.id] })
+      // A move nothing serves finishes while the request answers; a running one is followed on the tunnel page.
+      const moved = (result as { stable_endpoint?: string } | undefined)?.stable_endpoint
+      if (moved && hostOf(moved) === `${label}.${base}`) toast.success("Address changed", { description: `The tunnel is now at ${hostOf(moved)}.` })
       onClose()
     },
   })

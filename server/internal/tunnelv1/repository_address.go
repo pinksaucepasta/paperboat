@@ -279,8 +279,8 @@ WHERE h.hostname=$1 AND h.kind='incoming' FOR UPDATE OF h SKIP LOCKED`, newHost)
 	}
 	oldHost := strings.TrimPrefix(tunnel.StableEndpoint, "https://")
 	failOperation := func(code string) error {
-		_, err := tx.Exec(ctx, `UPDATE paperboat.operations SET state='failed',phase='failed',progress=100,retrying=false,next_retry_at=NULL,error_code=$3,completed_at=$2,updated_at=$2
-WHERE id=$1 AND state IN ('pending','running')`, operationID, input.Now, code)
+		_, err := tx.Exec(ctx, `UPDATE paperboat.operations SET state='failed',phase='failed',progress=100,retrying=false,next_retry_at=NULL,error_code=$3,result_reference=$4,completed_at=$2,updated_at=$2
+WHERE id=$1 AND state IN ('pending','running')`, operationID, input.Now, code, newHost)
 		return translate(err)
 	}
 	if tunnel.DesiredState == DesiredDeleted {
@@ -344,7 +344,7 @@ WHERE tr.tunnel_id=$1 AND tr.protocol='http' AND tr.match_type='managed' AND tr.
 }
 
 // AddressChanges returns the address change in progress, or the one that failed last, of each tunnel of the account
-// that has one (keyed by tunnel id). A failure counts until the tunnel's next patch operation: any later change
+// that has one (keyed by tunnel id). The target of a failed move is the operation's result reference. A failure counts until the tunnel's next patch operation: any later change
 // to the tunnel (or a new address change) replaces it.
 func (r *SQLRepository) AddressChanges(ctx context.Context, accountID string, tunnelIDs []string) (map[string]tunnelshared.AddressChange, error) {
 	if len(tunnelIDs) == 0 {
@@ -354,12 +354,10 @@ func (r *SQLRepository) AddressChanges(ctx context.Context, accountID string, tu
 FROM paperboat.tunnel_address_holds h JOIN paperboat.tunnels t ON t.id=h.tunnel_id
 WHERE t.account_id=$1 AND h.tunnel_id=ANY($2::text[]) AND h.kind='incoming'
 UNION ALL
-SELECT o.resource_id,'failed',coalesce(a.hostname,''),o.error_code,o.completed_at
-FROM (SELECT DISTINCT ON (resource_id) resource_id,state,error_code,completed_at FROM paperboat.operations
+SELECT o.resource_id,'failed',coalesce(o.result_reference,''),o.error_code,o.completed_at
+FROM (SELECT DISTINCT ON (resource_id) resource_id,state,error_code,result_reference,completed_at FROM paperboat.operations
  WHERE account_id=$1 AND resource_kind='tunnel' AND resource_id=ANY($2::text[]) AND operation_type='tunnel.patch'
- ORDER BY resource_id,created_at DESC) o
-LEFT JOIN LATERAL (SELECT metadata->>'hostname' AS hostname FROM paperboat.audit_events
- WHERE resource_id=o.resource_id AND event_type='tunnel.address_change_failed' ORDER BY created_at DESC LIMIT 1) a ON true
+ ORDER BY resource_id,created_at DESC,id DESC) o
 WHERE o.state='failed' AND o.error_code IN ('tunnel_address_not_ready','subdomain_taken','address_blocked','tunnel_paused','tunnel_deleted')`, accountID, tunnelIDs)
 	if err != nil {
 		return nil, translate(err)

@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"github.com/google/uuid"
 	"github.com/pinksaucepasta/paperboat/shared/edgeports"
+	tunnelshared "github.com/pinksaucepasta/paperboat/shared/tunnelv1"
 
 	"errors"
 	"fmt"
@@ -279,14 +280,21 @@ func (s *Service) GetTunnel(ctx context.Context, request previewtunnelapi.Reques
 }
 
 // addAddressChanges sets AddressChange on the views of tunnels that are moving to a new address or whose last move failed.
-func (s *Service) addAddressChanges(ctx context.Context, accountID string, views []TunnelView) error {
-	ids := make([]string, len(views))
+// A page can hold tunnels of several owners (a team's, one shared with the viewer): each owner's are asked for together.
+func (s *Service) addAddressChanges(ctx context.Context, _ string, views []TunnelView) error {
+	byOwner := map[string][]string{}
 	for i := range views {
-		ids[i] = views[i].ID
+		byOwner[views[i].AccountID] = append(byOwner[views[i].AccountID], views[i].ID)
 	}
-	changes, err := s.repository.AddressChanges(ctx, accountID, ids)
-	if err != nil {
-		return err
+	changes := map[string]tunnelshared.AddressChange{}
+	for owner, ids := range byOwner {
+		found, err := s.repository.AddressChanges(ctx, owner, ids)
+		if err != nil {
+			return err
+		}
+		for id, change := range found {
+			changes[id] = change
+		}
 	}
 	for i := range views {
 		if change, ok := changes[views[i].ID]; ok {
