@@ -503,7 +503,7 @@ func (r *SQLRepository) Patch(ctx context.Context, input PatchRecord) (MutationR
 			}
 			current = updated
 			if moveAddress {
-				if current, addressMoving, err = startAddressMoveTx(ctx, tx, current, newHost, input.ActorID, input.AddressPolicy, now); err != nil {
+				if current, addressMoving, err = startAddressMoveTx(ctx, tx, current, newHost, input.ActorID, operation.ID, input.AddressPolicy, now); err != nil {
 					return err
 				}
 			}

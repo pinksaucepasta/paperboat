@@ -230,6 +230,8 @@ func translate(err error) error {
 			switch pgErr.ConstraintName {
 			case "tunnels_stable_endpoint_key", "managed_hostname_reserved":
 				return ErrEndpointConflict
+			case "tunnel_address_holds_incoming":
+				return ErrAddressChangePending
 			case "shared_443_hostname_mode_conflict":
 				return fmt.Errorf("%w: %w", ErrRouteConflict, ErrHostnameModeConflict)
 			case "tunnels_account_id_name_personal", "tunnels_account_id_name_team":

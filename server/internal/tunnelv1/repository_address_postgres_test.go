@@ -87,6 +87,10 @@ func TestSQLRepositoryChangesTunnelAddressOnPostgres(t *testing.T) {
 	if c, err := f.repository.CheckAddress(ctx, account, tunnelID, oldLabel); err != nil || !c.Free {
 		t.Fatalf("own old name check = %+v err=%v", c, err)
 	}
+	// Nothing else may mint it meanwhile either (a new resource claiming the name).
+	if _, err := f.database.SQL().ExecContext(ctx, `SELECT paperboat.claim_managed_hostname($1,'preview',$2)`, oldHost, "pre_hold_"+f.suffix); err == nil {
+		t.Fatal("a name in its cooldown was claimed by a new resource")
+	}
 	if _, err := f.database.SQL().ExecContext(ctx, `UPDATE paperboat.tunnel_address_holds SET until=now()-interval '1 second' WHERE hostname=$1`, oldHost); err != nil {
 		t.Fatal(err)
 	}

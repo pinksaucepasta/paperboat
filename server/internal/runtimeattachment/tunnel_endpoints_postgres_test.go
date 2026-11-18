@@ -628,7 +628,7 @@ VALUES ($1,$2,$3,decode(repeat('42',32),'hex'),'route.create','route',$4,'connec
 	// A move the edges never confirm is undone at its deadline: the old address keeps serving, the new name is
 	// dropped and the operation fails.
 	second := patch("never-" + endpointID[:8])
-	if holds() != "incoming:never-"+endpointID[:8]+".tunnels.example.test,retired:"+oldHost || second.Tunnel.StableEndpoint != "https://"+renamed {
+	if holds() != "retired:"+oldHost+",incoming:never-"+endpointID[:8]+".tunnels.example.test" || second.Tunnel.StableEndpoint != "https://"+renamed {
 		t.Fatalf("second move: address %q holds %q", second.Tunnel.StableEndpoint, holds())
 	}
 	settle(time.Now().UTC().Add(policy.MoveTimeout + time.Minute))
@@ -642,6 +642,32 @@ VALUES ($1,$2,$3,decode(repeat('42',32),'hex'),'route.create','route',$4,'connec
 	if rows := snapshot(); len(rows) != 1 || rows[0].PublicHost != renamed || strings.Contains(rows[0].DomainBindings, "never-") {
 		t.Fatalf("edge snapshot after the undone move = %+v", rows)
 	}
+	// A tunnel paused (or deleted) during a move has no edge to confirm the name: the move is undone at once and its
+	// operation fails, instead of waiting out the timeout (or hanging).
+	for _, state := range []string{"paused", "deleted"} {
+		f.exec(t, `UPDATE tunnels SET desired_state='active',deleted_at=NULL WHERE id=$1`, tunnel)
+		allReady()
+		label := state + "-" + endpointID[:8]
+		patch(label)
+		if h := holds(); !strings.Contains(h, "incoming:"+label) {
+			t.Fatalf("%s: holds %q", state, h)
+		}
+		if state == "paused" {
+			f.exec(t, `UPDATE tunnels SET desired_state='paused' WHERE id=$1`, tunnel)
+		} else {
+			f.exec(t, `UPDATE tunnels SET desired_state='deleted',deleted_at=now() WHERE id=$1`, tunnel)
+		}
+		settle(time.Now().UTC())
+		var opState string
+		if err := f.database.SQL().QueryRowContext(f.ctx, `SELECT state FROM operations WHERE id=$1`, "op_addr-"+label+"-"+f.prefix).Scan(&opState); err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(holds(), "incoming") || opState != "failed" || endpoint() != "https://"+renamed {
+			t.Fatalf("%s during a move: holds %q operation %q address %q", state, holds(), opState, endpoint())
+		}
+	}
+	f.exec(t, `UPDATE tunnels SET desired_state='active',deleted_at=NULL WHERE id=$1`, tunnel)
+	sync()
 	attach([]string{runtimewire.CapabilityEndpoints})
 	if endpoint, _, _ := state(); endpoint {
 		t.Fatal("tunnel stayed on the engine after its agent stopped serving tunnels")

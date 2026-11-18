@@ -29,7 +29,7 @@ func (r *SQLRepository) CheckAddress(ctx context.Context, accountID, tunnelID, l
 	err := r.db.Pool().QueryRow(ctx, `SELECT h.host, h.host=substring(t.stable_endpoint from 9),
  NOT EXISTS(SELECT 1 FROM paperboat.managed_hostnames WHERE hostname=h.host AND NOT (resource_kind='tunnel' AND resource_id=t.id))
  AND NOT EXISTS(SELECT 1 FROM paperboat.publication_blocks WHERE hostname=h.host AND blocked)
- AND NOT EXISTS(SELECT 1 FROM paperboat.tunnel_address_holds WHERE hostname=h.host AND until>now() AND tunnel_id<>t.id)
+ AND NOT EXISTS(SELECT 1 FROM paperboat.tunnel_address_holds WHERE hostname=h.host AND until>now() AND (tunnel_id<>t.id OR kind='incoming'))
 FROM paperboat.tunnels t, LATERAL (SELECT $3::text||substring(t.stable_endpoint from position('.' in t.stable_endpoint)) AS host) h
 WHERE t.id=$2 AND t.account_id=$1`, accountID, tunnelID, label).Scan(&check.Host, &check.Current, &check.Free)
 	return check, translate(err)
@@ -52,9 +52,14 @@ func (p AddressPolicy) valid() bool { return p.MoveTimeout > 0 && p.Cooldown > 0
 // the old and the new address serve together. SettleAddressMoves finishes the move once every live edge serves
 // both. With nothing serving there is nothing to keep up, and the move finishes here. An operator-blocked address
 // cannot move, or a rename would shed the block.
-func startAddressMoveTx(ctx context.Context, tx *db.Tx, tunnel dbsqlc.Tunnel, newHost, actorID string, policy AddressPolicy, now time.Time) (dbsqlc.Tunnel, bool, error) {
+func startAddressMoveTx(ctx context.Context, tx *db.Tx, tunnel dbsqlc.Tunnel, newHost, actorID, operationID string, policy AddressPolicy, now time.Time) (dbsqlc.Tunnel, bool, error) {
 	if !policy.valid() {
 		return tunnel, false, fmt.Errorf("%w: the address policy is not configured", ErrInvalidInput)
+	}
+	// The same lock every tunnel route write takes (lock_shared_443_names_v1): the claim below and a concurrent
+	// move that finishes onto the same name see each other.
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(1885686843)`); err != nil {
+		return tunnel, false, translate(err)
 	}
 	oldHost := strings.TrimPrefix(tunnel.StableEndpoint, "https://")
 	var blocked, newBlocked, pending, inManagedNames bool
@@ -74,9 +79,9 @@ func startAddressMoveTx(ctx context.Context, tx *db.Tx, tunnel dbsqlc.Tunnel, ne
 	}
 	// A live hold of another tunnel (a move in progress to the name, or its previous owner's cooldown) blocks the
 	// claim; an expired hold, or one of this tunnel's own (it may take its old name back), is replaced.
-	claimed, err := tx.Exec(ctx, `INSERT INTO paperboat.tunnel_address_holds(hostname,tunnel_id,kind,until) VALUES($1,$2,'incoming',$3)
-ON CONFLICT(hostname) DO UPDATE SET tunnel_id=EXCLUDED.tunnel_id,kind='incoming',until=EXCLUDED.until,created_at=$4
-WHERE paperboat.tunnel_address_holds.tunnel_id=EXCLUDED.tunnel_id OR paperboat.tunnel_address_holds.until<=$4`, newHost, tunnel.ID, now.Add(policy.MoveTimeout), now)
+	claimed, err := tx.Exec(ctx, `INSERT INTO paperboat.tunnel_address_holds(hostname,tunnel_id,operation_id,kind,until) VALUES($1,$2,$5,'incoming',$3)
+ON CONFLICT(hostname) DO UPDATE SET tunnel_id=EXCLUDED.tunnel_id,operation_id=EXCLUDED.operation_id,kind='incoming',until=EXCLUDED.until,created_at=$4
+WHERE paperboat.tunnel_address_holds.tunnel_id=EXCLUDED.tunnel_id OR paperboat.tunnel_address_holds.until<=$4`, newHost, tunnel.ID, now.Add(policy.MoveTimeout), now, operationID)
 	if err != nil {
 		return tunnel, false, translate(err)
 	}
@@ -115,6 +120,13 @@ WHERE tunnel_id=$1 AND protocol='http' AND match_type='managed' AND match_hostna
 // with the old link must not land on another account's tunnel meanwhile).
 func finishAddressMoveTx(ctx context.Context, tx *db.Tx, tunnel dbsqlc.Tunnel, newHost, actorID string, policy AddressPolicy, now time.Time) (dbsqlc.Tunnel, error) {
 	oldHost := strings.TrimPrefix(tunnel.StableEndpoint, "https://")
+	var newBlocked bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM paperboat.publication_blocks WHERE hostname=$1 AND blocked)`, newHost).Scan(&newBlocked); err != nil {
+		return tunnel, translate(err)
+	}
+	if newBlocked {
+		return tunnel, ErrSubdomainTaken // an operator blocked the name while the move was in progress
+	}
 	moved, err := tx.Exec(ctx, `UPDATE paperboat.managed_hostnames SET hostname=$2 WHERE hostname=$1 AND resource_kind='tunnel' AND resource_id=$3`, oldHost, newHost, tunnel.ID)
 	if err != nil {
 		var pgErr *pgconn.PgError
@@ -140,7 +152,8 @@ WHERE tunnel_id=$1 AND match_hostname=$2 AND deleted_at IS NULL`, tunnel.ID, old
 		return tunnel, translate(err)
 	}
 	if _, err := tx.Exec(ctx, `INSERT INTO paperboat.tunnel_address_holds(hostname,tunnel_id,kind,until) VALUES($1,$2,'retired',$3)
-ON CONFLICT(hostname) DO UPDATE SET tunnel_id=EXCLUDED.tunnel_id,kind='retired',until=EXCLUDED.until,created_at=$4`, oldHost, tunnel.ID, now.Add(policy.Cooldown), now); err != nil {
+ON CONFLICT(hostname) DO UPDATE SET tunnel_id=EXCLUDED.tunnel_id,operation_id=NULL,kind='retired',until=EXCLUDED.until,created_at=$4
+WHERE paperboat.tunnel_address_holds.tunnel_id=EXCLUDED.tunnel_id OR paperboat.tunnel_address_holds.until<=$4`, oldHost, tunnel.ID, now.Add(policy.Cooldown), now); err != nil {
 		return tunnel, translate(err)
 	}
 	tunnel.StableEndpoint = "https://" + newHost
@@ -218,10 +231,13 @@ func settleAddressMoveTx(ctx context.Context, tx *db.Tx, newHost string, input A
 	if err := authorizeTunnelManagementTx(ctx, tx); err != nil {
 		return err
 	}
-	var tunnelID, accountID string
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(1885686843)`); err != nil {
+		return translate(err)
+	}
+	var tunnelID, accountID, operationID string
 	var until time.Time
-	err := tx.QueryRow(ctx, `SELECT h.tunnel_id,t.account_id,h.until FROM paperboat.tunnel_address_holds h JOIN paperboat.tunnels t ON t.id=h.tunnel_id
-WHERE h.hostname=$1 AND h.kind='incoming' FOR UPDATE OF h SKIP LOCKED`, newHost).Scan(&tunnelID, &accountID, &until)
+	err := tx.QueryRow(ctx, `SELECT h.tunnel_id,t.account_id,coalesce(h.operation_id,''),h.until FROM paperboat.tunnel_address_holds h JOIN paperboat.tunnels t ON t.id=h.tunnel_id
+WHERE h.hostname=$1 AND h.kind='incoming' FOR UPDATE OF h SKIP LOCKED`, newHost).Scan(&tunnelID, &accountID, &operationID, &until)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil // settled by another pass, or the tunnel row is gone
 	}
@@ -234,9 +250,20 @@ WHERE h.hostname=$1 AND h.kind='incoming' FOR UPDATE OF h SKIP LOCKED`, newHost)
 		return translate(err)
 	}
 	oldHost := strings.TrimPrefix(tunnel.StableEndpoint, "https://")
-	if tunnel.DesiredState == DesiredDeleted {
-		_, err = tx.Exec(ctx, `DELETE FROM paperboat.tunnel_address_holds WHERE hostname=$1 AND kind='incoming'`, newHost)
+	failOperation := func() error {
+		_, err := tx.Exec(ctx, `UPDATE paperboat.operations SET state='failed',phase='failed',progress=100,retrying=false,next_retry_at=NULL,error_code='tunnel_address_not_ready',completed_at=$2,updated_at=$2
+WHERE id=$1 AND state IN ('pending','running')`, operationID, input.Now)
 		return translate(err)
+	}
+	if tunnel.DesiredState == DesiredDeleted {
+		// Nothing serves the tunnel any more; the move is moot.
+		if _, err := tx.Exec(ctx, `DELETE FROM paperboat.tunnel_address_holds WHERE hostname=$1 AND kind='incoming'`, newHost); err != nil {
+			return translate(err)
+		}
+		return failOperation()
+	}
+	if tunnel.DesiredState != DesiredActive {
+		undo = true // a paused tunnel has no edge to confirm the new name: undo now instead of waiting out the timeout
 	}
 	ready := false
 	if !undo {
@@ -267,9 +294,8 @@ WHERE tr.tunnel_id=$1 AND tr.protocol='http' AND tr.match_type='managed' AND tr.
 		if err := touchAddressRoutesTx(ctx, tx, tunnelID, oldHost, input.ActorID, input.Now); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(ctx, `UPDATE paperboat.operations SET state='failed',phase='failed',progress=100,retrying=false,next_retry_at=NULL,error_code='tunnel_address_not_ready',completed_at=$3,updated_at=$3
-WHERE account_id=$1 AND resource_kind='tunnel' AND resource_id=$2 AND operation_type='tunnel.patch' AND state IN ('pending','running')`, accountID, tunnelID, input.Now); err != nil {
-			return translate(err)
+		if err := failOperation(); err != nil {
+			return err
 		}
 	}
 	if err := createResourceConfigGeneration(ctx, queries, tunnel, input.ActorID, input.Now); err != nil {
