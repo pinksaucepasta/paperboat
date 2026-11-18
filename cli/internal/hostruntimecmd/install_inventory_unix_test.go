@@ -293,6 +293,24 @@ func TestInstallInventoryRemovesAFailedUpdatesCandidateSessionOwner(t *testing.T
 	}
 }
 
+// F14-04: a retired session owner whose exited sessions stay readable keeps only its descriptor, republished on the
+// active code after the activation. It is no uncommitted candidate (that one is removed above), so an update that
+// retired its owner leaves nothing for the inventory to name.
+func TestInstallInventoryKeepsARetiredOwnersArchiveReaderDescriptor(t *testing.T) {
+	activated := time.Unix(1_800_000_000, 0)
+	archive := invRoot + "/session-owners/" + digestC[:32] + ".json"
+	keep := append(append(append([]string(nil), versionFiles(digestA)...), sessionOwnerFiles(digestA)...), archive)
+	h := newInventoryHost(t, digestA, activated, activated.Add(time.Hour), keep,
+		managedProcess(4001, invPin(digestA), "paperboat-session-owner-u1001-"+digestA[:32]+".service", activated.Add(time.Second)),
+	)
+	h.sources.Retained[digestA] = activated.Add(10 * time.Minute) // the archive's source is the active one, written after the activation
+	h.sources.Archives = map[string]bool{digestC[:32]: true}
+	if err := h.sweep.settleInventory(context.Background(), false); err != nil {
+		t.Fatal(err)
+	}
+	h.assertExactlyActive(keep, nil, 4001)
+}
+
 // soft-g-11051952: a downgrade to dev-ab41be003, a build older than pb.previous's removal, left that build's
 // releases/pb.previous; the install inventory listed only today's slot names and missed it. Every release
 // slot other than pins/ is a leftover once no installation is pending, whatever an older build called it.

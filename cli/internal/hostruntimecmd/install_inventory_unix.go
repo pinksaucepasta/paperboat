@@ -256,6 +256,10 @@ func (s unixSweep) versionLeftovers(ctx context.Context, sources hostinstall.Inv
 			retained[digest] = true
 		}
 	}
+	// A retired owner's archive reader keeps its descriptor (and nothing else) for the session history it serves.
+	for generation := range sources.Archives {
+		retained[generation] = true
+	}
 	files, err := s.versionFiles(paths, owned, retained, referenced)
 	return append(findings, files...), err
 }

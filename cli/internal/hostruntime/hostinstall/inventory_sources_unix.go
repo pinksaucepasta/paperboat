@@ -27,6 +27,10 @@ type InventorySources struct {
 	// Retained maps each catalogue-referenced source digest to when its
 	// descriptor was written.
 	Retained map[string]time.Time
+	// Archives holds the generations of retired session owners that stay as archive readers: their descriptor was
+	// republished on the active code (it names another source than its own generation) so their session history
+	// stays readable. They run no process and belong to no update in progress, whenever they were written.
+	Archives map[string]bool
 	// Pending names the record of an unfinished transaction: the installation journal, or a signed
 	// update's native-install receipt. Its release slots and candidate are still in use.
 	Pending string
@@ -38,7 +42,7 @@ func LoadInventorySources(ctx context.Context, uid int) (InventorySources, error
 		return InventorySources{}, ErrNotPrivileged
 	}
 	paths := platformPaths(uid)
-	sources := InventorySources{Retained: map[string]time.Time{}}
+	sources := InventorySources{Retained: map[string]time.Time{}, Archives: map[string]bool{}}
 	for _, record := range []string{paths.journal, filepath.Join(paths.updateState, "native-install.json")} {
 		if _, err := os.Lstat(record); err == nil {
 			sources.Pending = record
@@ -75,6 +79,9 @@ func LoadInventorySources(ctx context.Context, uid int) (InventorySources, error
 		info, statErr := os.Lstat(path)
 		if err = errors.Join(err, findErr, statErr); findErr == nil && statErr == nil {
 			sources.Retained[d.Source.SHA256] = info.ModTime()
+			if len(d.Source.SHA256) >= len(d.Generation) && d.Source.SHA256[:len(d.Generation)] != d.Generation {
+				sources.Archives[d.Generation] = true
+			}
 		}
 	}
 	return sources, err
