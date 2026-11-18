@@ -272,6 +272,10 @@ func TestSelfhostHTTPTopologyPolicyOnPostgres(t *testing.T) {
 	if _, err = service.SetPool(ctx, account, "tunnel", Policy{Mode: "managed-only", InstallationIDs: []string{}}); !errors.Is(err, ErrLiveEdgeModeChange) {
 		t.Fatalf("active preview did not fence mode switch: %v", err)
 	}
+	// Domains can only be pointed at servers with a verified address, so the servers are back before the flips.
+	if _, err = database.SQL().ExecContext(ctx, `UPDATE paperboat.control_tunnel_nodes SET ready=true,state='ready',last_heartbeat_at=now(),registry_expires_at=now()+interval '1 hour' WHERE id IN(SELECT node_id FROM paperboat.selfhost_installations WHERE id=ANY($1))`, ids); err != nil {
+		t.Fatal(err)
+	}
 	for _, terminal := range []string{"owner_lost", "failed"} {
 		if _, err = database.SQL().ExecContext(ctx, `UPDATE paperboat.preview_leases SET terminal_state=$2,stopped_at=now() WHERE id=$1`, preview, terminal); err != nil {
 			t.Fatal(err)
