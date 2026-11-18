@@ -1004,6 +1004,9 @@ func (c Config) Validate() error {
 	if len(c.Secrets.SessionKeys) == 0 || c.Secrets.EncryptionKey == "" {
 		errs = append(errs, fmt.Errorf("session and encryption secrets are required"))
 	}
+	if c.Secrets.EncryptionKey != "" && !secrets.ValidRing(c.Secrets.EncryptionKey) {
+		errs = append(errs, fmt.Errorf("the encryption key ring must be keys separated by single commas, newest first, none empty"))
+	}
 	if c.Secrets.EdgeControlCredential != "" && len(c.Secrets.EdgeControlCredential) < 32 {
 		errs = append(errs, fmt.Errorf("edge control credential must be at least 32 characters"))
 	}

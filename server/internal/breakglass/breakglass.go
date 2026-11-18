@@ -116,6 +116,9 @@ func New(cfg Config) (*Service, error) {
 	if cfg.Store == nil || cfg.SSH == nil || cfg.Mint == nil || cfg.TOTP == nil || cfg.EncryptionKey == "" {
 		return nil, errors.New("break-glass needs the store, managed SSH, mint keys, TOTP check and encryption key")
 	}
+	if !secrets.ValidRing(cfg.EncryptionKey) {
+		return nil, errors.New("break-glass: the encryption key ring has an empty key")
+	}
 	if cfg.PickupThreshold <= 0 || cfg.PickupThreshold > 1 || cfg.PickupTimeout <= 0 || cfg.OnlineWindow <= 0 || cfg.Batch <= 0 {
 		return nil, errors.New("break-glass pickup and batch settings must be positive")
 	}
