@@ -91,7 +91,7 @@ func (c *HTTPClient) IngressDecisions(ctx context.Context, nodeID, epoch, versio
 	// A throttle entry without a hostname or workspace would merge unrelated routes into one bucket: dropped.
 	throttled := output.Throttled[:0]
 	for _, t := range output.Throttled {
-		if t.Hostname != "" && t.Workspace != "" && len(t.Hostname) <= 253 && len(t.Workspace) <= 256 {
+		if t.Hostname != "" && t.Workspace != "" && len(t.Hostname) <= 253 && len(t.Workspace) <= 256 && t.BytesPerSecond >= 1 {
 			throttled = append(throttled, t)
 		}
 	}

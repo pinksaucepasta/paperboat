@@ -84,11 +84,14 @@ const (
 var ErrIngressDenied = errors.New("connector ingress authority denied")
 
 // IngressThrottle names a public route that stays in the ingress snapshot but whose workspace used its
-// fair-use bandwidth: the edge carries the workspace's traffic at the throttled rate until ResetsAt. It is
+// fair-use bandwidth: the edge carries the workspace's traffic at BytesPerSecond until ResetsAt. It is
 // never a refusal and grants no authority. Routes of one Workspace share one rate limit on the edge.
 type IngressThrottle struct {
 	Hostname  string `json:"hostname"`
 	Workspace string `json:"workspace"`
+	// BytesPerSecond is this edge's share of the workspace's throttled speed: the plan's rate divided by the
+	// number of edges that carry the workspace, so the workspace as a whole stays at the plan's rate.
+	BytesPerSecond int64 `json:"bytes_per_second"`
 	// ResetsAt is when the workspace's allowance period ends and full speed resumes; zero when unknown.
 	ResetsAt time.Time `json:"resets_at,omitzero"`
 }

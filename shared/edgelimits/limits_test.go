@@ -17,16 +17,14 @@ func TestDefaultLimitsAreValidAndKeepOneStreamAbove150Mbps(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	const want = `{"publication":{"bytes_per_second":25165824,"byte_burst":1048576},"account":{"bytes_per_second":33554432,"byte_burst":1048576},"throttled":{"bytes_per_second":125000,"byte_burst":32768}}`
+	const want = `{"publication":{"bytes_per_second":25165824,"byte_burst":1048576},"account":{"bytes_per_second":33554432,"byte_burst":1048576}}`
 	if string(raw) != want {
 		t.Fatalf("wire = %s", raw)
 	}
 	for name, bad := range map[string]func(*IngressLimits){
-		"zero byte rate":           func(l *IngressLimits) { l.Publication.BytesPerSecond = 0 },
-		"tiny byte burst":          func(l *IngressLimits) { l.Account.ByteBurst = 1024 },
-		"account below its route":  func(l *IngressLimits) { l.Account.BytesPerSecond = l.Publication.BytesPerSecond - 1 },
-		"no throttle rate":         func(l *IngressLimits) { l.Throttled = Limit{} },
-		"throttle above its route": func(l *IngressLimits) { l.Throttled.BytesPerSecond = l.Publication.BytesPerSecond + 1 },
+		"zero byte rate":          func(l *IngressLimits) { l.Publication.BytesPerSecond = 0 },
+		"tiny byte burst":         func(l *IngressLimits) { l.Account.ByteBurst = 1024 },
+		"account below its route": func(l *IngressLimits) { l.Account.BytesPerSecond = l.Publication.BytesPerSecond - 1 },
 	} {
 		l := Default()
 		bad(&l)

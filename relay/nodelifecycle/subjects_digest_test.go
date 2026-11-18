@@ -42,7 +42,7 @@ func TestObservationSendsSubjectsOnlyWhenTheSetChanged(t *testing.T) {
 			return
 		}
 		gen := in.Generation
-		out := Lease{NodeID: in.NodeID, ProcessEpoch: in.Epoch, ExpiresAt: time.Now().Add(10 * time.Second).Unix(), CapacityLimit: 256, Revocations: []Revocation{}}
+		out := Lease{AccountMbit: 20, SlowMbit: 2, SlowAccounts: []string{"account_slow"}, NodeID: in.NodeID, ProcessEpoch: in.Epoch, ExpiresAt: time.Now().Add(10 * time.Second).Unix(), CapacityLimit: 256, Revocations: []Revocation{}}
 		mu.Lock()
 		if r.URL.Path == "/v1/relay/nodes/start" {
 			gen = in.Expected + 1
@@ -83,10 +83,16 @@ func TestObservationSendsSubjectsOnlyWhenTheSetChanged(t *testing.T) {
 	for range 3 {
 		observe()
 	}
+	if server.AccountMbit("account_slow") != 2 || server.AccountMbit("account_fast") != 20 {
+		t.Fatalf("the lease's speeds were not applied: slow %v fast %v", server.AccountMbit("account_slow"), server.AccountMbit("account_fast"))
+	}
 	mu.Lock()
 	require = true
 	mu.Unlock()
-	observe() // answered with subjects_required
+	observe() // answered with subjects_required (it carries no slow list: the last one stays)
+	if server.AccountMbit("account_slow") != 2 {
+		t.Fatalf("a subjects_required answer cleared the slow list")
+	}
 	observe() // resends the list in full
 	observe()
 	mu.Lock()

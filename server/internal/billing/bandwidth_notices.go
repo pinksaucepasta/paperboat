@@ -30,10 +30,16 @@ func (s *WorkspaceService) ConfigureNotificationMail(policy config.Transactional
 	s.mail, s.mailEnabled = policy, enabled
 }
 
-// SetThrottleRate tells the notices how fast a throttled workspace's edge traffic runs (bytes per second; the edges
-// get the same value from the same server configuration).
-func (s *WorkspaceService) SetThrottleRate(bytesPerSecond int64) {
-	s.throttleMbit = float64(bytesPerSecond) * 8 / 1e6
+// SetThrottleRates tells the notices and the overview how fast a throttled workspace's public traffic runs (the edges get
+// the same values, as per-edge shares, from the same server configuration).
+func (s *WorkspaceService) SetThrottleRates(fair config.FairUse) { s.throttle = fair }
+
+// throttleMbit is the speed of a throttled workspace in Mbit/s: Free's, or a paid plan's.
+func (s *WorkspaceService) throttleMbit(paid bool) float64 {
+	if paid {
+		return float64(s.throttle.EdgeBytesPerSecond) * 8 / 1e6
+	}
+	return float64(s.throttle.EdgeFreeBytesPerSecond) * 8 / 1e6
 }
 
 func gigabytes(bytes int64) string { return fmt.Sprintf("%g GB", float64(bytes)/1e9) }
@@ -53,6 +59,7 @@ func workspaceAudience(workspaceID string) (kind, id string, ok bool) {
 
 // noticeBandwidthWarningTx puts "80% of fair-use bandwidth used" in the workspace's bell, once per allowance period.
 func (s *WorkspaceService) noticeBandwidthWarningTx(ctx context.Context, tx *db.Tx, workspaceID string, window usageWindow, allowance int64) error {
+	mbit := s.throttleMbit(window.paid)
 	audience, id, ok := workspaceAudience(workspaceID)
 	// A delayed usage report can debit a period that is over already: nothing to warn about then.
 	if !ok || !window.end.After(time.Now()) {
@@ -60,7 +67,7 @@ func (s *WorkspaceService) noticeBandwidthWarningTx(ctx context.Context, tx *db.
 	}
 	return announcements.SystemNoticeTx(ctx, tx, audience, id, "bandwidth-80:"+workspaceID+":"+window.budget.UTC().Format(time.RFC3339),
 		"80% of fair-use traffic used",
-		fmt.Sprintf("After %s a month, public traffic through Paperboat's edges slows to %g Mbit/s. Add bandwidth to keep full speed.", gigabytes(allowance), s.throttleMbit),
+		fmt.Sprintf("After %s a month, public traffic through Paperboat's edges slows to %g Mbit/s. Add bandwidth to keep full speed.", gigabytes(allowance), mbit),
 		"/billing", &window.end)
 }
 
@@ -91,6 +98,7 @@ WHERE workspace_id=$1 AND coalesce(budget_start,period_start)<$2`, workspaceID, 
 // every later debit or retry is a no-op. It runs in the debit's transaction, so a notice exists if and only if the debit
 // committed.
 func (s *WorkspaceService) noticeBandwidthThrottledTx(ctx context.Context, tx *db.Tx, workspaceID string, window usageWindow, allowance int64) error {
+	mbit := s.throttleMbit(window.paid)
 	kind, id, found := strings.Cut(workspaceID, ":")
 	// A delayed usage report can debit a period that is over already: its notices would never expire.
 	if !found || (kind != "personal" && kind != "team") || id == "" || !window.end.After(time.Now()) {
@@ -99,7 +107,7 @@ func (s *WorkspaceService) noticeBandwidthThrottledTx(ctx context.Context, tx *d
 	period := window.budget.UTC().Format(time.RFC3339)
 	audience, _, _ := workspaceAudience(workspaceID)
 	if err := announcements.SystemNoticeTx(ctx, tx, audience, id, "bandwidth-throttled:"+workspaceID+":"+period,
-		fmt.Sprintf("Public traffic slowed to %g Mbit/s", s.throttleMbit),
+		fmt.Sprintf("Public traffic slowed to %g Mbit/s", mbit),
 		fmt.Sprintf("This workspace used its %s fair-use amount. Full speed returns on %s, or sooner if you add bandwidth.", gigabytes(allowance), window.end.UTC().Format("2 Jan")),
 		"/billing", &window.end); err != nil {
 		return err
@@ -147,7 +155,7 @@ AND u.status='active' AND u.email_verified AND u.primary_email<>'' ORDER BY u.id
 		message := transactionalmail.Message{
 			From: s.mail.From, To: []string{r.address}, Subject: "Paperboat: public traffic slowed down",
 			HTML: fmt.Sprintf("<p>Public traffic through Paperboat's edges for %s now runs at %g Mbit/s because its fair-use bandwidth is used up. Nothing is stopped. Direct machine-to-machine traffic, relays, and your own edges and relays are not slowed.</p><p>Full speed returns on %s (UTC), or as soon as you add bandwidth.</p><p><a href=\"%s\">Add bandwidth or upgrade</a></p>",
-				html.EscapeString(r.name), s.throttleMbit, window.end.UTC().Format("2 Jan 2006"), html.EscapeString(billing)),
+				html.EscapeString(r.name), mbit, window.end.UTC().Format("2 Jan 2006"), html.EscapeString(billing)),
 		}
 		if _, err := transactionalmail.EnqueueOnceTx(ctx, tx, "bandwidth-throttled:"+workspaceID+":"+period+":"+r.account, message); err != nil {
 			return err

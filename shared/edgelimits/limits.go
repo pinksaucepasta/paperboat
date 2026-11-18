@@ -1,8 +1,7 @@
 // Package edgelimits is the edge's byte pacing on public ingress: how fast one publication and
-// one account may move bytes on one edge process, and the slow rate of a workspace that used its
-// fair-use bandwidth. It shapes and never refuses: popularity is not abuse, so request and
-// connection counts are not capped here (floods are stopped per client IP at the edge, and the
-// plan's fair-use bandwidth is the user-facing limit). It is one server
+// one account may move bytes on one edge process. It shapes and never refuses: popularity is not
+// abuse, so request and connection counts are not capped here (floods are stopped per client IP
+// at the edge, and the plan's bandwidth allowance is the user-facing limit). It is one server
 // configuration set, the same for every plan, sent to every edge in its heartbeat answer. Prior
 // art: frp's per-proxy transport.bandwidthLimit; zrok computes per-account limits centrally.
 package edgelimits
@@ -25,9 +24,6 @@ type Limit struct {
 type IngressLimits struct {
 	Publication Limit `json:"publication"`
 	Account     Limit `json:"account"`
-	// Throttled is the rate all routes of one workspace share on one edge after the workspace used its
-	// fair-use bandwidth, until its allowance period ends: 1 Mbit/s.
-	Throttled Limit `json:"throttled"`
 }
 
 // Default is the set used until the server sends one, and the server's own default. One
@@ -36,7 +32,6 @@ func Default() IngressLimits {
 	return IngressLimits{
 		Publication: Limit{BytesPerSecond: 24 << 20, ByteBurst: 1 << 20},
 		Account:     Limit{BytesPerSecond: 32 << 20, ByteBurst: 1 << 20},
-		Throttled:   Limit{BytesPerSecond: 125_000, ByteBurst: minimumByteBurst},
 	}
 }
 
@@ -47,10 +42,10 @@ func (l Limit) validate() error {
 	return nil
 }
 
-// Validate rejects a set with a missing, zero or absurd value, an account rate below its
-// publication's, or a throttle rate above the publication's.
+// Validate rejects a set with a missing, zero or absurd value, or an account rate below its
+// publication's.
 func (l IngressLimits) Validate() error {
-	if l.Publication.validate() != nil || l.Account.validate() != nil || l.Throttled.validate() != nil || l.Account.BytesPerSecond < l.Publication.BytesPerSecond || l.Throttled.BytesPerSecond > l.Publication.BytesPerSecond {
+	if l.Publication.validate() != nil || l.Account.validate() != nil || l.Account.BytesPerSecond < l.Publication.BytesPerSecond {
 		return ErrInvalid
 	}
 	return nil

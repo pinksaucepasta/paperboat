@@ -58,6 +58,20 @@ func New(store *db.DB) *Gate {
 	return g
 }
 
+// NewRelayVolume is a gate with the same cache and fail-safe rules whose question is another: has the account carried at
+// least included bytes through Paperboat's managed relays this calendar month (UTC)? A relay slows such an account to its
+// second tier. A failed lookup answers "not over" (full tier), so a slow database never slows an account on its own.
+func NewRelayVolume(store *db.DB, included int64) *Gate {
+	g := &Gate{store: store, timeout: defaultLookupTimeout}
+	g.lookup = func(ctx context.Context, account string, at time.Time) (bool, error) {
+		var over bool
+		err := store.SQL().QueryRowContext(ctx, `SELECT coalesce(sum(upload_bytes+download_bytes),0) >= $2 FROM paperboat.resource_bandwidth_events
+WHERE actor_account_id=$1 AND mode='relay' AND hosting='managed' AND interval_end >= date_trunc('month',$3::timestamptz AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'`, account, included, at).Scan(&over)
+		return over, err
+	}
+	return g
+}
+
 // SetLookupTimeout changes how long one lookup may take before the gate fails open; tests
 // whose database is slower than a production one use it.
 func (g *Gate) SetLookupTimeout(d time.Duration) { g.timeout = d }

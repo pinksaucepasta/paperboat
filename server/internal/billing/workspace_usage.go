@@ -24,7 +24,6 @@ func (s *WorkspaceService) usageOverviewTx(ctx context.Context, tx *db.Tx, w *Wo
 	}
 	w.AllowancePeriodStart = window.budget
 	w.AllowancePeriodEnd = policy.end
-	w.ThrottleMbit = s.throttleMbit
 	w.AllowanceBytes = nil
 	var allowance sql.NullInt64
 	var consumed int64
@@ -47,6 +46,7 @@ WHERE p.workspace_id=$1 AND p.period_start<=$2 AND p.period_end>$2`, w.ID, at).S
 		if err = tx.QueryRow(ctx, `SELECT workspace_throttle_lifted($1)`, w.ID).Scan(&w.ThrottleLifted); err != nil {
 			return err
 		}
+		w.ThrottleMbit = s.throttleMbit(window.paid)
 		w.Throttled = consumed >= total && !w.ThrottleLifted
 		if w.Throttled && policy.paid && window.paid {
 			remaining, err := WorkspaceTopupRemainingTx(ctx, tx, w.ID, at)
