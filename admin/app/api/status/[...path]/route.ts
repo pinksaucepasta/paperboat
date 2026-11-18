@@ -22,13 +22,13 @@ async function relay(request: NextRequest, { params }: { params: Promise<{ path:
 
   const session = readCookie(request.headers.get("cookie"), sessionCookie)
   if (!session) return err(401, "unauthenticated", "Sign in again.")
-  let me: Response
+  let role: string | undefined
   try {
-    me = await controlPlaneFetch("/v1/operator/me", { headers: { origin: adminOrigin(), cookie: `${sessionCookie}=${session}` } })
+    const me = await controlPlaneFetch("/v1/operator/me", { headers: { origin: adminOrigin(), cookie: `${sessionCookie}=${session}` } })
+    role = me.ok ? ((await me.json()) as { data?: { role?: string } }).data?.role : undefined
   } catch {
     return err(502, "control_plane_unreachable", "The control plane did not answer.")
   }
-  const role = me.ok ? ((await me.json()) as { data?: { role?: string } }).data?.role : undefined
   if (!role) return err(401, "unauthenticated", "Sign in again.")
   if (role !== "admin" && role !== "operations") return err(403, "forbidden", "This role cannot change the status page.")
 

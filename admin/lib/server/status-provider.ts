@@ -44,7 +44,7 @@ export const ownStatusProvider: StatusProvider = (() => {
     return parsed
   }
   return {
-    configured: () => Boolean(base() && token()),
+    configured: () => Boolean(token() && URL.canParse(base() ?? "")), // a garbage address reads as "not set up", never as an error
     state: () => call("state", "GET"),
     createIncident: (input, key) => call("incidents", "POST", input, key),
     updateIncident: (id, input, key) => call(`incidents/${encodeURIComponent(id)}/updates`, "POST", input, key),
