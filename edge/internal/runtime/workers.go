@@ -1299,9 +1299,21 @@ func (w *RouteWorker) probeCanonicalGroup(ctx context.Context, assignments []con
 
 	if len(httpRules) != 0 {
 		if w.Certificates != nil {
+			// The managed names a route serves share its primary's parent domain: a second name there (the new
+			// address of a tunnel being moved, published as a domain binding) needs the same certificate before
+			// the route counts as ready. A customer's own domain has its own certificate and is not gated here.
+			managedParent := make(map[string]string, len(httpRules))
+			for _, rule := range httpRules {
+				if rule.MatchType == route.MatchManagedExact {
+					_, managedParent[rule.RouteID], _ = strings.Cut(rule.Hostname, ".")
+				}
+			}
 			for _, rule := range httpRules {
 				if rule.MatchType != route.MatchManagedExact {
-					continue
+					_, parent, _ := strings.Cut(rule.Hostname, ".")
+					if want, ok := managedParent[rule.RouteID]; !ok || rule.MatchType != route.MatchExact || rule.ID == rule.RouteID || parent != want {
+						continue
+					}
 				}
 				certificate, err := w.Certificates.GetCertificate(&tls.ClientHelloInfo{ServerName: rule.Hostname})
 				if err != nil {

@@ -1,5 +1,6 @@
 "use client"
 
+import { toast } from "sonner"
 import { CheckIcon, PencilSimpleIcon, WarningIcon } from "@phosphor-icons/react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useState } from "react"
@@ -63,6 +64,9 @@ function ChangeAddressDialog({ tunnel, onClose }: { tunnel: Tunnel; onClose: () 
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["tunnels"] })
       await queryClient.invalidateQueries({ queryKey: ["tunnel", tunnel.id] })
+      toast.success(`Moving to ${label}.${base}`, {
+        description: "The current address keeps working until the new one is ready everywhere.",
+      })
       onClose()
     },
   })

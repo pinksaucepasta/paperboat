@@ -243,15 +243,16 @@ func tunnelPatch(service tunnelv1.API, identities machineRequestVerifier, addres
 	}
 }
 
-// tunnelSubdomainAvailability tells the owner whether the tunnel could take ?subdomain= as its address; the same
-// per-account limiter as address changes bounds it, since it answers which public names are taken.
+// tunnelSubdomainAvailability tells the owner whether the tunnel could take ?subdomain= as its address; a per-account
+// limiter (the address changes' rates) bounds it, since it answers which public names are taken.
 func tunnelSubdomainAvailability(service tunnelv1.API, addressLimiter *ratelimit.Limiter) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		request, ok := tunnelRequestFromHTTP(w, r)
 		if !ok {
 			return
 		}
-		if ok, wait := addressLimiter.Allow("tunnel-address:" + request.Actor.AccountID); !ok {
+		// Its own bucket per account: typing ahead in the console must not use up the budget of the change itself.
+		if ok, wait := addressLimiter.Allow("tunnel-address-check:" + request.Actor.AccountID); !ok {
 			writeRateLimited(w, r, wait)
 			return
 		}
