@@ -13,6 +13,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/previewtunnelstore"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -604,6 +605,26 @@ VALUES ($1,$2,$3,decode(repeat('42',32),'hex'),'route.create','route',$4,'connec
 	if len(rows) != 1 || rows[0].PublicHost != oldHost || !strings.Contains(rows[0].DomainBindings, renamed) || rows[0].ObservedState != "pending" || rows[0].RouteGeneration != before+1 {
 		t.Fatalf("edge snapshot while the address moves = %+v, want the old host with %q as a second name", rows, renamed)
 	}
+	// Both names have an ingress decision (the edge admits TLS per hostname), the same route behind each; after the
+	// move only the new one has.
+	hostsWithDecision := func() string {
+		t.Helper()
+		got, err := ingressprojection.SQLIngressSource{DB: f.database, Quota: openQuota{}}.Edge(f.ctx, f.node, f.edge.ProcessEpoch)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var hosts []string
+		for _, d := range got {
+			if d.Binding.RouteID == route {
+				hosts = append(hosts, d.Binding.Hostname)
+			}
+		}
+		sort.Strings(hosts)
+		return strings.Join(hosts, ",")
+	}
+	if want := strings.Join([]string{oldHost, renamed}, ","); hostsWithDecision() != want && hostsWithDecision() != strings.Join([]string{renamed, oldHost}, ",") {
+		t.Fatalf("ingress decisions while the address moves = %q, want both %q and %q", hostsWithDecision(), oldHost, renamed)
+	}
 	// The edge keeps reporting the revision it still serves while it stages the change: that never counts as ready.
 	observeAs := func(row dbsqlc.ListTunnelEdgeRouteAssignmentsForNodeV1Row, revision int64) {
 		t.Helper()
@@ -629,6 +650,9 @@ VALUES ($1,$2,$3,decode(repeat('42',32),'hex'),'route.create','route',$4,'connec
 	settle(time.Now().UTC())
 	if endpoint() != "https://"+renamed || holds() != "retired:"+oldHost {
 		t.Fatalf("after the edges confirmed: address %q holds %q; want the new address and the old name held", endpoint(), holds())
+	}
+	if got := hostsWithDecision(); got != renamed {
+		t.Fatalf("ingress decisions after the move = %q, want only %q", got, renamed)
 	}
 	var mirrored string
 	var revision int64
