@@ -7,7 +7,8 @@ import { lockVault, subscribeVaultLock, vaultUnlocked } from "@/lib/envvault/cry
 import { readVault, type EnvScope } from "@/lib/envvault/vault"
 import { CommandBlock } from "@/components/add-machine-dialog"
 import { EnvUnlock } from "@/components/environment/env-unlock"
-import { EnvVariables } from "@/components/environment/env-variables"
+import { EnvVariables, scopeStore, vaultStore } from "@/components/environment/env-variables"
+import { EnvVaultFooter, EnvVaultSwitcher } from "@/components/environment/env-named-vaults"
 import { EnvTeamVaults } from "@/components/environment/env-team-vaults"
 import { EnvVaultSettings } from "@/components/environment/env-vault-settings"
 import { EnvVaultSetup } from "@/components/environment/env-vault-setup"
@@ -29,9 +30,11 @@ export function MachineEnvironment() {
  */
 export function EnvironmentPage() {
   const [adding, setAdding] = useState(false)
+  // The named vault shown instead of the default variables.
+  const [vault, setVault] = useState<string | null>(null)
   return (
     <div className="flex flex-col gap-10">
-      <EnvironmentList adding={adding} onAddingChange={setAdding} />
+      <EnvironmentList adding={adding} onAddingChange={setAdding} vault={vault} onVaultChange={setVault} />
       <EnvNamesSwitch />
       <EnvVaultSettings />
       <EnvTeamVaults />
@@ -64,10 +67,14 @@ export function EnvironmentList({
   machine: tabMachine,
   adding,
   onAddingChange,
+  vault: named = null,
+  onVaultChange,
 }: {
   machine?: Machine
   adding?: boolean
   onAddingChange?: (adding: boolean) => void
+  vault?: string | null
+  onVaultChange?: (vault: string | null) => void
 }) {
   const workspace = useWorkspace()
   const me = useApiQuery(meQuery)
@@ -95,24 +102,31 @@ export function EnvironmentList({
     workspace: workspace.id,
   }
   const title = machineId ? "Variables for this machine" : team ? `${workspace.name} variables` : "Variables"
+  const store = named ? vaultStore(workspace.id, named) : scopeStore(scope)
   return (
-    <Section
-      title={title}
-      action={
-        <span className="flex items-center gap-2">
-          <Button variant="ghost" className="text-muted-foreground" onClick={lockVault}>
-            <LockSimpleIcon /> Lock
-          </Button>
-          {onAddingChange && (
-            <Button size="lg" onClick={() => onAddingChange(true)}>
-              <PlusIcon data-icon="inline-start" />
-              Add variable
+    <>
+      <Section
+        title={named ? `Vault ${named}` : title}
+        action={
+          <span className="flex items-center gap-2">
+            <Button variant="ghost" className="text-muted-foreground" onClick={lockVault}>
+              <LockSimpleIcon /> Lock
             </Button>
-          )}
-        </span>
-      }
-    >
-      <EnvVariables key={JSON.stringify(scope)} scope={scope} adding={adding} onAddingChange={onAddingChange} />
-    </Section>
+            {onAddingChange && (
+              <Button size="lg" onClick={() => onAddingChange(true)}>
+                <PlusIcon data-icon="inline-start" />
+                Add variable
+              </Button>
+            )}
+          </span>
+        }
+      >
+        {onVaultChange && <EnvVaultSwitcher workspace={workspace} selected={named} onSelect={onVaultChange} />}
+        <EnvVariables key={JSON.stringify(store.key)} store={store} adding={adding} onAddingChange={onAddingChange} />
+      </Section>
+      {named && onVaultChange && (
+        <EnvVaultFooter workspace={workspace} vault={named} onDeleted={() => onVaultChange(null)} />
+      )}
+    </>
   )
 }
