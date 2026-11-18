@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/transfername"
@@ -108,37 +109,57 @@ func scanFolder(root string) ([]folderEntry, *Folder, error) {
 type folderStream struct {
 	root    string
 	entries []folderEntry
+	mu      sync.Mutex
 	pos     int64
 	reader  *io.PipeReader
 }
 
 func (s *folderStream) Read(p []byte) (int, error) {
+	s.mu.Lock()
 	if s.reader == nil {
 		reader, writer := io.Pipe()
 		s.reader = reader
 		go func() { writer.CloseWithError(writeFolderTar(writer, s.root, s.entries)) }()
 	}
-	n, err := s.reader.Read(p)
-	s.pos += int64(n)
+	reader := s.reader
+	s.mu.Unlock()
+	// Never under the lock: a Close from another goroutine must be able to unblock this read.
+	n, err := reader.Read(p)
+	s.mu.Lock()
+	if s.reader == reader {
+		s.pos += int64(n)
+	}
+	s.mu.Unlock()
 	return n, err
+}
+
+func (s *folderStream) position() int64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.pos
 }
 
 func (s *folderStream) Seek(offset int64, whence int) (int64, error) {
 	if whence != io.SeekStart || offset < 0 {
 		return 0, errors.New("folder stream: only seeking from the start is supported")
 	}
-	if offset < s.pos {
+	if offset < s.position() {
 		_ = s.Close()
 	}
-	if offset > s.pos {
-		if _, err := io.CopyN(io.Discard, s, offset-s.pos); err != nil {
-			return s.pos, err
+	if pos := s.position(); offset > pos {
+		if _, err := io.CopyN(io.Discard, s, offset-pos); err != nil {
+			return s.position(), err
 		}
 	}
-	return s.pos, nil
+	return s.position(), nil
 }
 
+// Close stops the tar writer, which may be blocked on a full pipe (that also releases the file it was copying), and
+// rewinds. Safe to repeat and to call while another goroutine is reading: an abandoned send ends the stream at once
+// instead of holding the goroutine and the open file until the batch is closed.
 func (s *folderStream) Close() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.reader != nil {
 		_ = s.reader.CloseWithError(io.ErrClosedPipe)
 		s.reader = nil

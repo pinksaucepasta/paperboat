@@ -254,7 +254,7 @@ func (c *Client) sendBatchPlaintext(ctx context.Context, batchID, sessionID stri
 	var batch Batch
 	if err := c.retryJSONRequest(ctx, http.MethodPost, c.Endpoint, operationID("create", batchID), "application/json", 0, payload, &batch); err != nil {
 		if c.native {
-			if !retryableTransferFailure(err) || errors.Is(ctx.Err(), context.Canceled) {
+			if errors.Is(ctx.Err(), context.Canceled) || (!retryableTransferFailure(err) && !receiverBusy(err)) {
 				return Batch{BatchID: batchID}, err
 			}
 			return Batch{BatchID: batchID}, &ResumeRequiredError{BatchID: batchID, Err: err}
@@ -658,7 +658,7 @@ func (c *Client) retryJSONRequest(ctx context.Context, method, url, operation, m
 			return nil
 		}
 		if c.native {
-			if !retryableTransferFailure(err) {
+			if !retryableTransferFailure(err) && !receiverBusy(err) {
 				return err
 			}
 			c.noteWaiting(err)
@@ -751,6 +751,10 @@ func (c *Client) requestWithBody(ctx context.Context, method, url, operation, me
 		request, err := http.NewRequestWithContext(ctx, method, url, requestBody)
 		if err != nil {
 			return nil, err
+		}
+		// A body that knows its length (native segmentReader) sends Content-Length instead of chunked.
+		if sized, ok := requestBody.(interface{ Length() int64 }); ok {
+			request.ContentLength = sized.Length()
 		}
 		credential := c.currentAuth()
 		request.Header.Set("Authorization", "Bearer "+credential.Token)

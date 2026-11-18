@@ -51,6 +51,9 @@ func NewNativeClient(endpoint string, auth Auth, binding Binding, open func(cont
 func (c *Client) uploadNative(ctx context.Context, manifest Manifest, source Source) error {
 	state := newNativeRecovery(ctx)
 	ctx = context.WithValue(ctx, nativeRecoveryKey{}, state)
+	// A folder streams from a tar-writer goroutine; a terminal outcome releases it (and the in-flight file fd) now
+	// instead of holding both until PreparedBatch.Close at batch end.
+	defer closeFolderSource(source)
 	// A successful PATCH returns the committed offset, so the next chunk follows
 	// without a HEAD; the offset is asked again only after a failure.
 	var previous, committed int64 = -1, -1
@@ -189,7 +192,7 @@ func (c *Client) patchNative(ctx context.Context, id string, offset int64, sourc
 		if _, err := source.Reader.Seek(offset, io.SeekStart); err != nil {
 			return nil, &nativeSourceFailure{err}
 		}
-		b := &segmentReader{reader: source.Reader, remaining: length, lastReset: -nativeStallStep, done: make(chan struct{})}
+		b := &segmentReader{reader: source.Reader, remaining: length, total: length, lastReset: -nativeStallStep, done: make(chan struct{})}
 		body = b
 		b.onRead = func(sent int64) {
 			// Once the last byte is handed over, the receiver's answer is bounded by the response-header timeout. Until
@@ -229,14 +232,17 @@ func (c *Client) patchNative(ctx context.Context, id string, offset int64, sourc
 // failure, never a transport one, so the send does not retry a file that changed under it. onRead gets the bytes
 // handed out so far after every read.
 type segmentReader struct {
-	reader                io.Reader
-	remaining, sent       int64
-	lastReset, lastReport int64
-	onRead                func(sent int64)
-	started               atomic.Bool
-	done                  chan struct{} // closed by the transport when it has finished with the body
-	once                  sync.Once
+	reader                 io.Reader
+	remaining, sent, total int64
+	lastReset, lastReport  int64
+	onRead                 func(sent int64)
+	started                atomic.Bool
+	done                   chan struct{} // closed by the transport when it has finished with the body
+	once                   sync.Once
 }
+
+// Length reports the bytes this body will hand out, so HTTP sends a Content-Length instead of chunked.
+func (r *segmentReader) Length() int64 { return r.total }
 
 // Close is the transport's signal that it will not read the body again.
 func (r *segmentReader) Close() error {
@@ -312,6 +318,14 @@ func (c *Client) failedBatch(ctx context.Context, batch Batch, err error) (Batch
 		return batch, &ResumeRequiredError{BatchID: batch.BatchID, Err: err}
 	}
 	return batch, errors.Join(err, c.cancelBatch(batch.Transfers))
+}
+
+// closeFolderSource releases a folder's tar writer on a terminal send outcome. Regular files need nothing (*os.File
+// double-close errors, so only folders). Idempotent: folderStream.Close and PreparedBatch.Close tolerate repeats.
+func closeFolderSource(source Source) {
+	if folder, ok := source.Reader.(*folderStream); ok {
+		_ = folder.Close()
+	}
 }
 
 // Thirty minutes of signed stability plus the bounded two-minute drain is the

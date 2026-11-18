@@ -430,6 +430,14 @@ func (h *FileTransferHandler) serveContent(writer http.ResponseWriter, request *
 			writeHTTPError(writer, requestID, "invalid_request", http.StatusBadRequest, false)
 			return
 		}
+		// Declared-length pre-reject: fail before AppendSegment opens the spool, so nothing is written.
+		// Chunked/unknown bodies (ContentLength < 0) skip this and rely on the streaming cap in Service.append.
+		if offset == transfer.CommittedOffset && request.ContentLength >= 0 {
+			if request.ContentLength > protocol.FileTransferSegmentBytes || offset+request.ContentLength > transfer.Size {
+				writeFileTransferError(request.Context(), "delivery", writer, requestID, &filetransfer.Error{Code: filetransfer.InvalidSize})
+				return
+			}
+		}
 		stopClose := make(chan struct{})
 		go func() {
 			select {

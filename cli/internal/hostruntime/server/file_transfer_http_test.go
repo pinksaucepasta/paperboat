@@ -210,12 +210,45 @@ func TestFileTransferHTTPResumesCompletesAndRangesOpaqueContent(t *testing.T) {
 		request = transferRequest(http.MethodPatch, "http://helper.test/v1/file-transfers/"+id+"/content", part.chunk)
 		request.Header.Set("Content-Type", "application/offset+octet-stream")
 		request.Header.Set(HeaderUploadOffset, strconv.FormatInt(part.offset, 10))
-		request.Header.Set(HeaderUploadDigest, "sha256="+transferDigest(part.chunk))
 		response = httptest.NewRecorder()
 		handler.ServeHTTP(response, request)
 		if response.Code != http.StatusNoContent {
 			t.Fatalf("patch=%d %s", response.Code, response.Body.String())
 		}
+	}
+	// PATCH carries no digest by design: the whole-file sha256 is verified once,
+	// at Complete. Wrong bytes must fail there, not at any PATCH.
+	bad := []byte("abcXefgh")
+	badInput, _ := json.Marshal(addressedTransferRequest("fb_bad", "ses_1", []filetransfer.File{{Basename: "corrupt.dat", Size: int64(len(bad)), SHA256: transferDigest(data)}}))
+	request = transferRequest(http.MethodPost, "http://helper.test/v1/file-transfers", badInput)
+	request.Header.Set(HeaderOperationID, "operation_ft_bad")
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusCreated {
+		t.Fatalf("bad create=%d %s", response.Code, response.Body.String())
+	}
+	var badCreated createFileTransferResponse
+	_ = json.Unmarshal(response.Body.Bytes(), &badCreated)
+	badID := badCreated.Transfers[0].ID
+	request = transferRequest(http.MethodPatch, "http://helper.test/v1/file-transfers/"+badID+"/content", bad)
+	request.Header.Set("Content-Type", "application/offset+octet-stream")
+	request.Header.Set(HeaderUploadOffset, "0")
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("bad patch=%d %s", response.Code, response.Body.String())
+	}
+	request = transferRequest(http.MethodPost, "http://helper.test/v1/file-transfers/"+badID+"/complete", nil)
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusUnprocessableEntity || !strings.Contains(response.Body.String(), "digest_mismatch") {
+		t.Fatalf("bad complete=%d %s", response.Code, response.Body.String())
+	}
+	if manifest, err := handler.config.Service.Get(context.Background(), badID); err != nil || manifest.State != "canceled" {
+		t.Fatalf("bad manifest=%#v err=%v", manifest, err)
+	}
+	if _, err := handler.config.Service.PublishedPath(context.Background(), badID); err == nil {
+		t.Fatal("corrupt upload was published")
 	}
 	request = transferRequest(http.MethodHead, "http://helper.test/v1/file-transfers/"+id+"/content", nil)
 	response = httptest.NewRecorder()

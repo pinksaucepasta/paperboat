@@ -285,8 +285,7 @@ func testNativeTransferResume(t *testing.T, relayed bool) {
 		t.Fatalf("created transfers=%d", len(initial.Transfers))
 	}
 	id := initial.Transfers[0].TransferID
-	prefixDigest := sha256.Sum256(data[:17])
-	response = request(http.MethodPatch, "/"+id+"/content", data[:17], map[string]string{"Content-Type": "application/offset+octet-stream", "Upload-Offset": "0", "Upload-Digest": "sha256=" + hex.EncodeToString(prefixDigest[:])})
+	response = request(http.MethodPatch, "/"+id+"/content", data[:17], map[string]string{"Content-Type": "application/offset+octet-stream", "Upload-Offset": "0"})
 	_ = response.Body.Close()
 	if offset, e := client.Offset(ctx, id); e != nil || offset != 17 {
 		t.Fatalf("committed offset=%d err=%v", offset, e)
@@ -331,6 +330,41 @@ func testNativeTransferResume(t *testing.T, relayed bool) {
 	}
 	if _, err = os.Stat(filepath.Join(root, "spool", id+".part")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("upload partial remains: %v", err)
+	}
+
+	// Whole-file integrity is decided at Complete, not per chunk: bytes whose
+	// sha256 differs from the declared manifest must fail there with
+	// digest_mismatch (422) and cancel the batch instead of publishing.
+	corrupt := bytes.Clone(data)
+	corrupt[len(corrupt)-1] ^= 0xff
+	corruptPayload, _ := json.Marshal(map[string]any{"batch_id": "batch_corrupt", "source_machine_id": "cli_transfer", "destination_machine_id": "machine_transfer", "initiating_user_id": "account_transfer", "session_id": "session_transfer", "files": []map[string]any{{"basename": "corrupt.bin", "size": len(data), "sha256": hex.EncodeToString(sum[:])}}})
+	response = request(http.MethodPost, "", corruptPayload, map[string]string{"Content-Type": "application/json"})
+	var corruptBatch clienttransfer.Batch
+	if err = json.NewDecoder(response.Body).Decode(&corruptBatch); err != nil {
+		t.Fatal(err)
+	}
+	_ = response.Body.Close()
+	corruptID := corruptBatch.Transfers[0].TransferID
+	response = request(http.MethodPatch, "/"+corruptID+"/content", corrupt, map[string]string{"Content-Type": "application/offset+octet-stream", "Upload-Offset": "0"})
+	_ = response.Body.Close()
+	completeReq, _ := http.NewRequestWithContext(ctx, http.MethodPost, client.Endpoint+"/"+corruptID+"/complete", nil)
+	completeReq.Header.Set("Authorization", "Bearer file-token")
+	completeReq.Header.Set("X-Paperboat-Request-ID", "request_transfer_corrupt")
+	completeReq.Header.Set("X-Paperboat-Operation-ID", "operation_transfer_corrupt")
+	completeResp, err := client.HTTPClient.Do(completeReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	completeBody, _ := io.ReadAll(completeResp.Body)
+	_ = completeResp.Body.Close()
+	if completeResp.StatusCode != http.StatusUnprocessableEntity || !strings.Contains(string(completeBody), "digest_mismatch") {
+		t.Fatalf("corrupt complete status=%d body=%s", completeResp.StatusCode, completeBody)
+	}
+	if current, err := service.Get(ctx, corruptID); err != nil || current.State != "canceled" {
+		t.Fatalf("corrupt batch state=%#v err=%v", current, err)
+	}
+	if _, err := service.PublishedPath(ctx, corruptID); err == nil {
+		t.Fatal("corrupt upload was published")
 	}
 
 	// Reverse data is staged through the source endpoint's real local API.
