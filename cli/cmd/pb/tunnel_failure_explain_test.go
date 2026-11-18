@@ -45,7 +45,7 @@ func TestTunnelStatusDoctorAndLogsExplainEachFailure(t *testing.T) {
 		"dns_pending":         failingHealth("dns_pending", "dns", "dns_pending", "Waiting for DNS: api.example.test is not verified yet.", "Add the DNS records shown by `pb tunnel domain instructions`.", true),
 		"certificate_pending": failingHealth("certificate_pending", "certificate", "certificate_pending", "The certificate for api.example.test is still being issued.", "Wait a few minutes.", true),
 		"route_unavailable":   failingHealth("route_unavailable", "route", "route_rejected", "The edge could not forward a tunnel route.", "Run `pb tunnel route list` to review the route.", true),
-		"bandwidth_exhausted": failingHealth("bandwidth_exhausted", "access", "bandwidth_exhausted", "Your workspace has used its bandwidth allowance, so traffic is not forwarded.", "Add bandwidth or change plan on the Billing page.", false),
+		"bandwidth_throttled": failingHealth("bandwidth_throttled", "access", "bandwidth_throttled", "Your workspace used its fair-use bandwidth, so public traffic is slowed down. Nothing is stopped.", "Add bandwidth or change plan on the Billing page, or wait for the next billing period.", false),
 	} {
 		t.Run(name, func(t *testing.T) {
 			withTunnelCommandClient(t, func(w http.ResponseWriter, r *http.Request) {

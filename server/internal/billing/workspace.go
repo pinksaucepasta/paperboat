@@ -50,6 +50,8 @@ type Workspace struct {
 	// ThrottleLifted: an operator lifted it (the workspace runs at full speed meanwhile).
 	Throttled      bool `json:"throttled"`
 	ThrottleLifted bool `json:"throttle_lifted"`
+	// ThrottleMbit is the speed a throttled workspace's edge traffic runs at (the edges' configured rate).
+	ThrottleMbit float64 `json:"throttle_mbit"`
 	// SeatsGranted is an operator's override of the team's seats, replacing what it bought.
 	SeatsGranted      *int       `json:"seats_granted,omitempty"`
 	ID                string     `json:"id"`

@@ -22,7 +22,7 @@ import {
   type TrafficSource,
   type Usage,
 } from "@/lib/api"
-import { allowanceWindow, billingQuery, usageWindowStart, type BillingWorkspace } from "@/lib/billing"
+import { allowanceWindow, billingQuery, fairUse, usageWindowStart, type BillingWorkspace } from "@/lib/billing"
 import { formatBytes, formatPlatform } from "@/lib/format"
 import { filterKeys, parseQuery, withFilter, type FilterKey } from "@/lib/machine-filter"
 import { cn } from "@/lib/utils"
@@ -69,7 +69,7 @@ export function UsageLimits() {
   }
 
   return (
-    // Machines and what is left of the hosted allowance first, then bandwidth across the other half.
+    // Machines and the fair-use traffic first, then bandwidth across the other half.
     <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
       <Card
         label="Machines"
@@ -80,12 +80,12 @@ export function UsageLimits() {
         {summary.data && <Machines summary={summary.data} />}
       </Card>
       <Card
-        label="Hosted allowance"
+        label="Fair-use traffic"
         loading={!workspace || billing.isPending}
         failed={billing.isError}
         skeleton={<AllowanceSkeleton />}
       >
-        {billing.data && workspace && <Allowance billing={billing.data} workspace={workspace.id} />}
+        {billing.data && workspace && <Allowance billing={billing.data} />}
       </Card>
       <Card
         label="Bandwidth"
@@ -218,80 +218,50 @@ function Stat({
 }
 
 /**
- * What is left of this period's allowance for traffic through Paperboat's hosted relays and
- * edge. Direct and self-hosted traffic are free and not counted here.
+ * Edge traffic (public previews, tunnels, browser terminals) is "Unlimited*": the fair-use amount and what is used
+ * of it, and past it the slower speed with the date full speed returns. Direct, relay and self-hosted traffic are
+ * not counted here.
  */
-function Allowance({ billing, workspace }: { billing: BillingWorkspace; workspace: string }) {
-  const used = billing.usage_bytes
-  const allowance = billing.allowance_bytes
-  const window = allowanceWindow(billing)
+function Allowance({ billing }: { billing: BillingWorkspace }) {
+  const fair = fairUse(billing)
   const time = useTimeFormat()
-  // The period's hosted traffic by path, from the same start as the bandwidth card's default.
-  const usage = useApiQuery(usageSinceQuery(workspace, usageWindowStart(billing)))
-  const split = usage.data && trafficBreakdown(usage.data.totals.by_path, "managed").byPath
-  const hosted = split ? split.relay + split.edge : 0
-  const share = allowance === null ? 0 : allowance > 0 ? Math.min(1, used / allowance) : 1
-  const out = allowance !== null && used >= allowance
-
+  if (!fair) {
+    return (
+      <div className="flex flex-1 flex-col gap-3">
+        <span className="flex items-baseline gap-2">
+          <Figure>{formatBytes(billing.usage_bytes)}</Figure>
+          <span className="text-sm text-muted-foreground">used</span>
+        </span>
+        <span className="mt-auto text-xs text-muted-foreground">No limit</span>
+      </div>
+    )
+  }
   return (
-    <div className="flex flex-1 flex-col gap-3">
+    <div className="flex flex-1 flex-col gap-3" data-fair-use-card data-throttled={fair.throttled}>
       <span className="flex items-baseline gap-2">
-        <Figure>{formatBytes(allowance === null ? used : Math.max(0, allowance - used))}</Figure>
-        <span className="text-sm text-muted-foreground">{allowance === null ? "used" : "left"}</span>
+        <Figure>Unlimited*</Figure>
+        <span className="text-sm text-muted-foreground">
+          {fair.throttled ? `${fair.mbit} Mbit/s` : "full speed"}
+        </span>
       </span>
-      {/* The floor: the meter, split by path in the bandwidth card's colours, then one row per fact,
-          label left and value right, so no line depends on the card's width. */}
       <div className="mt-auto flex flex-col gap-2.5">
-        {allowance !== null && (
-          <div
-            role="meter"
-            aria-label="Hosted allowance used"
-            aria-valuemin={0}
-            aria-valuemax={allowance}
-            aria-valuenow={Math.min(used, allowance)}
-            className="flex h-1.5 overflow-hidden rounded-full bg-muted"
-          >
-            {out || !hosted ? (
-              <div className={out ? "bg-destructive" : "bg-primary"} style={{ width: `${share * 100}%` }} />
-            ) : (
-              paths
-                .filter((path) => path.mode !== "direct")
-                .map((path) => (
-                  <div
-                    key={path.mode}
-                    title={`${path.label} ${formatBytes(split![path.mode])}`}
-                    className={path.dot}
-                    style={{ width: `${(share * 100 * split![path.mode as "relay" | "edge"]) / hosted}%` }}
-                  />
-                ))
-            )}
-          </div>
-        )}
-        {/* Two short rows so the card stays as tall as its neighbours. */}
-        <div className="flex items-center justify-between gap-3 whitespace-nowrap text-xs text-muted-foreground">
-          <span className="truncate tabular-nums">
-            {allowance === null
-              ? "No limit"
-              : `${formatBytes(used)} of ${formatBytes(allowance)}${
-                  billing.allowance_granted_bytes ? ` · ${formatBytes(billing.allowance_granted_bytes)} granted` : ""
-                }`}
-          </span>
-          {window.end && <span className="shrink-0">Resets {time.date(window.end, "day")}</span>}
+        <div
+          role="meter"
+          aria-label="Fair-use traffic used"
+          aria-valuemin={0}
+          aria-valuemax={fair.amount}
+          aria-valuenow={Math.min(fair.used, fair.amount)}
+          className="flex h-1.5 overflow-hidden rounded-full bg-muted"
+        >
+          <div className={fair.throttled ? "bg-muted-foreground" : "bg-primary"} style={{ width: `${fair.share * 100}%` }} />
         </div>
-        <div className="flex items-center gap-4 whitespace-nowrap text-xs text-muted-foreground">
-          {paths
-            .filter((path) => path.mode !== "direct")
-            .map((path) => (
-              <span key={path.mode} className="flex items-center gap-1.5">
-                {allowance !== null && <span className={cn("size-2 shrink-0 rounded-full", path.dot)} />}
-                {path.label}
-                {split ? (
-                  <span className="text-foreground tabular-nums">{formatBytes(split[path.mode])}</span>
-                ) : (
-                  <Skeleton className="h-2.5 w-10" />
-                )}
-              </span>
-            ))}
+        <div className="flex items-center justify-between gap-3 whitespace-nowrap text-xs text-muted-foreground">
+          <span className="truncate tabular-nums">{`${formatBytes(fair.used)} of ${formatBytes(fair.amount)} fair use`}</span>
+          {fair.ends && (
+            <span className="shrink-0">
+              {fair.throttled ? "Full speed" : "Resets"} {time.date(fair.ends, "day")}
+            </span>
+          )}
         </div>
       </div>
     </div>

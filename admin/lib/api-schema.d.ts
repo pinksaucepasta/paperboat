@@ -5543,7 +5543,7 @@ export interface paths {
         put?: never;
         /**
          * Operator grant bandwidth or override a limit
-         * @description Current active operator account and separate operator session required. See docs/runbooks/operator-admin.md. Mutations require explicit target confirmation, an opaque evidence reference and stable idempotency key. Read current state before retrying an uncertain result. Operator-Target is the workspace id (`personal:<account>` or `team:<team>`). `entitlement` is `bandwidth` (amount in bytes, added to the allowance together with other running bandwidth grants) or one of machines, publications, browser_terminals, public_tcp, seats (teams), viewers_per_terminal (amount is the limit; it replaces the plan's value and an earlier override of that kind). `ends_at` (RFC 3339, in the future) ends it by itself; without it the grant runs until revoked. Enforcement reads the grants table: no other change is needed.
+         * @description Current active operator account and separate operator session required. See docs/runbooks/operator-admin.md. Mutations require explicit target confirmation, an opaque evidence reference and stable idempotency key. Read current state before retrying an uncertain result. Operator-Target is the workspace id (`personal:<account>` or `team:<team>`). `entitlement` is `bandwidth` (amount in bytes, added to the allowance together with other running bandwidth grants), `throttle_lift` (amount 1: lifts the workspace's bandwidth throttle while it runs) or one of machines, publications, browser_terminals, public_tcp, seats (teams), viewers_per_terminal (amount is the limit; it replaces the plan's value and an earlier override of that kind). `ends_at` (RFC 3339, in the future) ends it by itself; without it the grant runs until revoked. Enforcement reads the grants table: no other change is needed.
          */
         post: operations["post_v1_admin_billing_workspaces_workspace_id_entitlements"];
         delete?: never;
@@ -11978,6 +11978,12 @@ export interface components {
              * @description The part of allowance_bytes an operator granted.
              */
             allowance_granted_bytes?: number;
+            /** @description The fair-use amount is used up: edge traffic runs at the throttled rate until allowance_period_end. Nothing is stopped. */
+            throttled: boolean;
+            /** @description An operator lifted the throttle; the workspace runs at full speed meanwhile. */
+            throttle_lifted: boolean;
+            /** @description The speed in Mbit/s a throttled workspace's edge traffic runs at. */
+            throttle_mbit: number;
             /** @description An operator's override of the team's seats. */
             seats_granted?: number;
         };
@@ -14551,6 +14557,8 @@ export interface components {
             servers: number;
             /** @description Nodes with a warning or critical warning. */
             attention: number;
+            /** @description Workspaces whose edge traffic is throttled now: fair-use bandwidth used and no operator lift. */
+            throttled_workspaces: number;
         };
         OperatorCapacityPage: {
             summary: components["schemas"]["OperatorCapacitySummary"];
@@ -14750,7 +14758,7 @@ export interface components {
              * @description grant only.
              * @enum {string}
              */
-            entitlement?: "bandwidth" | "machines" | "publications" | "browser_terminals" | "public_tcp" | "seats" | "viewers_per_terminal";
+            entitlement?: "bandwidth" | "throttle_lift" | "machines" | "publications" | "browser_terminals" | "public_tcp" | "seats" | "viewers_per_terminal";
             /**
              * Format: int64
              * @description grant only: bytes for bandwidth, else the limit; at least 1, and seats at most 128 (the most a team can hold).
@@ -14788,6 +14796,15 @@ export interface components {
                 granted_bytes: number;
                 /** Format: int64 */
                 usage_bytes: number;
+                /** @description The fair-use amount is used up: the workspace's edge traffic runs at the throttled rate until resets_at. */
+                throttled: boolean;
+                /** @description An operator's throttle_lift grant is running. */
+                throttle_lifted: boolean;
+                /**
+                 * Format: date-time
+                 * @description End of the current allowance period, when full speed returns.
+                 */
+                resets_at?: string;
             };
             limits: {
                 kind: string;

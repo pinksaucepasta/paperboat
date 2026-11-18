@@ -37,9 +37,10 @@ export default function CapacityPage() {
         <Skeleton className="h-64 w-full" />
       ) : (
         <div className="flex flex-col gap-4" data-capacity-ready>
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
             <Stat label="Nodes" value={data.total} note={`${data.summary.edges} edges · ${data.summary.relays} relays · ${data.summary.servers} servers`} />
             <Stat label="Need attention" value={data.summary.attention} />
+            <Stat label="Throttled workspaces" value={data.summary.throttled_workspaces} note="Edge traffic slowed past fair use; lift one on its workspace page" />
             <Stat label="Monthly allowance per server" value={formatBytes(data.thresholds.monthly_traffic_bytes)} note={`Warns at ${Math.round(data.thresholds.traffic_warn_fraction * 100)}%`} />
             <Stat label="Edge CPU warning" value={`${data.thresholds.edge_cpu_warn_percent}%`} note={`For ${Math.round(data.thresholds.cpu_sustained_seconds / 60)} min · relay memory ${memory(data.thresholds.relay_rss_warn_bytes)}`} />
           </div>
