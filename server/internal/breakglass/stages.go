@@ -56,18 +56,20 @@ func (s *Service) execute(ctx context.Context, run Run, stage *StageState) (bool
 
 // advanceAccounts moves up to a batch of accounts one CA step (publish adds the pending CA, retire removes the
 // retiring one) and returns how many it moved. having selects the accounts still waiting for the step.
-func (s *Service) advanceAccounts(ctx context.Context, stage *StageState, having, key string) (int, error) {
+func (s *Service) advanceAccounts(ctx context.Context, stage *StageState, having, key string) (moved int, committed time.Time, err error) {
 	ids, err := s.accounts(ctx, `SELECT account_id FROM paperboat.managed_ssh_user_cas GROUP BY account_id `+having+` ORDER BY account_id LIMIT $1`)
 	if err != nil {
-		return 0, err
+		return 0, time.Time{}, err
 	}
 	for _, id := range ids {
 		if _, err := s.cfg.SSH.AdvanceUserCA(ctx, id, s.now(), 0, 0); err != nil {
-			return 0, fmt.Errorf("account %s: %w", id, err)
+			return 0, time.Time{}, fmt.Errorf("account %s: %w", id, err)
 		}
 		add(stage.Detail, key, 1)
 	}
-	return len(ids), s.wake(ctx, ids)
+	// Taken after the changes committed and before the wake: a fetch at or after it holds them.
+	committed = s.now()
+	return len(ids), committed, s.wake(ctx, ids)
 }
 
 // wake tells every machine of the accounts to fetch its CA set now. Without it a host refreshes on its own timer
@@ -108,7 +110,7 @@ func (s *Service) wake(ctx context.Context, accountIDs []string) error {
 // publish adds the pending CA to every account that has only an active one. Accounts already mid-rotation (a
 // retiring CA) are counted, not touched: that rotation finishes through retire.
 func (s *Service) publish(ctx context.Context, stage *StageState) (bool, error) {
-	moved, err := s.advanceAccounts(ctx, stage, `HAVING count(*) = 1 AND bool_and(state = 'active')`, "published")
+	moved, _, err := s.advanceAccounts(ctx, stage, `HAVING count(*) = 1 AND bool_and(state = 'active')`, "published")
 	if err != nil || moved > 0 {
 		return false, err
 	}
@@ -156,8 +158,9 @@ func (s *Service) switchAccounts(ctx context.Context, stage *StageState) (bool, 
 func (s *Service) pickupSince(run Run, stage StageState) (time.Time, bool) {
 	switch stage.Name {
 	case StagePickup:
-		if published := run.Stages[indexOf(StagePublish)]; published.FinishedAt != nil {
-			return *published.FinishedAt, true
+		// Only the window of "online" is anchored here; each machine is compared with its own account's pending CA.
+		if stage.StartedAt != nil {
+			return *stage.StartedAt, true
 		}
 	case StageRetire:
 		return detailTime(stage.Detail, "removed_at")
@@ -165,18 +168,19 @@ func (s *Service) pickupSince(run Run, stage StageState) (time.Time, bool) {
 	return time.Time{}, false
 }
 
-// pickup counts the online machines (fetched their CA set within OnlineWindow before since) and those that fetched
-// it since: a fetch after the change returns the changed set, so it is the proof a machine holds it. onlyPending
-// limits the machines to those whose account has a pending CA.
+// pickup counts the online machines (fetched their CA set within OnlineWindow before since) and those that hold
+// the change. A fetch after a change returns the changed set, so it is the proof a machine holds it. With
+// onlyPending the change is the account's pending CA, and a machine holds it when it fetched at or after that CA
+// was created (accounts without a pending CA are left out); otherwise the change is the removal at since.
 func (s *Service) pickup(ctx context.Context, since time.Time, onlyPending bool) (PickupState, error) {
 	state := PickupState{Since: since, Machines: []MachinePickup{}}
-	filter := ""
+	held, join, args := `f.fetched_at >= $2`, ``, []any{since.Add(-s.cfg.OnlineWindow), since}
 	if onlyPending {
-		filter = ` AND m.user_id IN (SELECT account_id FROM paperboat.managed_ssh_user_cas WHERE state = 'pending')`
+		held, join, args = `f.fetched_at >= c.state_changed_at`, ` JOIN paperboat.managed_ssh_user_cas c ON c.account_id = m.user_id AND c.state = 'pending'`, args[:1]
 	}
-	rows, err := s.cfg.Store.Pool().Query(ctx, `SELECT f.machine_id, m.platform, f.fetched_at, f.fetched_at >= $2
-		FROM paperboat.managed_ssh_ca_fetches f JOIN paperboat.user_machines m ON m.id = f.machine_id
-		WHERE m.revoked_at IS NULL AND m.deleted_at IS NULL AND f.fetched_at >= $1`+filter+` ORDER BY f.fetched_at >= $2, f.machine_id`, since.Add(-s.cfg.OnlineWindow), since)
+	rows, err := s.cfg.Store.Pool().Query(ctx, `SELECT f.machine_id, m.platform, f.fetched_at, `+held+`
+		FROM paperboat.managed_ssh_ca_fetches f JOIN paperboat.user_machines m ON m.id = f.machine_id`+join+`
+		WHERE m.revoked_at IS NULL AND m.deleted_at IS NULL AND f.fetched_at >= $1 ORDER BY `+held+`, f.machine_id`, args...)
 	if err != nil {
 		return state, err
 	}
@@ -367,12 +371,19 @@ func (s *Service) retire(ctx context.Context, run Run, stage *StageState) (bool,
 		}
 		stage.Detail["mint_withdrawn"] = withdrawn
 	}
-	if _, removed := detailTime(stage.Detail, "removed_at"); !removed {
-		moved, err := s.advanceAccounts(ctx, stage, `HAVING bool_or(state = 'retiring')`, "cas_removed")
-		if err != nil || moved > 0 {
+	if done, _ := stage.Detail["cas_removed_all"].(bool); !done {
+		moved, committed, err := s.advanceAccounts(ctx, stage, `HAVING bool_or(state = 'retiring')`, "cas_removed")
+		if err != nil {
 			return false, err
 		}
-		stage.Detail["removed_at"] = s.now().Format(time.RFC3339Nano)
+		if moved > 0 {
+			stage.Detail["removed_at"] = committed.Format(time.RFC3339Nano)
+			return false, nil
+		}
+		if _, any := detailTime(stage.Detail, "removed_at"); !any {
+			stage.Detail["removed_at"] = committed.Format(time.RFC3339Nano) // nothing was left to remove
+		}
+		stage.Detail["cas_removed_all"] = true
 		return false, nil
 	}
 	since, _ := detailTime(stage.Detail, "removed_at")
