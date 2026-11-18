@@ -18,10 +18,11 @@ digits. Some names are reserved, and a name another tunnel uses is refused with 
 .PP
 The new address is published first and the previous one keeps serving until every Paperboat edge serves the
 new one (usually seconds, at most five minutes; a change the edges do not confirm in time is undone and
-reported as failed; with --wait pass --timeout 6m for slow edges). This holds for the managed HTTP address;
-a TLS or TCP route, or a tunnel nothing serves yet, moves at once. Then the previous address stops working and stays reserved for you for a day before
-anyone else may take it, so update every link, webhook and bookmark that uses it. Routes, connectors and
-access rules stay with the tunnel. Address changes are rate limited per account.
+reported as failed; with --wait pass --timeout 6m for slow edges). Until then the new address may answer
+"not found" on some edges. This holds for the managed HTTP address; a TLS or TCP route, or a tunnel nothing
+serves yet, moves at once. Then the previous address stops working and stays reserved to the tunnel for a
+cooldown (a day by default) before anyone else may take it, so update every link, webhook and bookmark that
+uses it. Routes, connectors and access rules stay with the tunnel. Address changes are rate limited per account.
 
 .PP
 A change returns once the request is accepted, and the tunnel may still be connecting. Pass
