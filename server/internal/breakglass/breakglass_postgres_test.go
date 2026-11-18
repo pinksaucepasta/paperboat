@@ -99,6 +99,8 @@ type world struct {
 	floor *fakeFloor
 	clock time.Time
 	sfx   string
+	// fetching lists the machines that fetch their CAs after every step, a second apart, as hosts do.
+	fetching []machine
 }
 
 func newWorld(t *testing.T) *world {
@@ -121,6 +123,7 @@ func newWorld(t *testing.T) *world {
 	// One run at a time per database: a run another test left behind must not block this one.
 	end := func() { w.exec(`UPDATE paperboat.breakglass_runs SET state = 'cancelled', finished_at = now() WHERE state = 'running'`) }
 	end()
+	w.exec(`DELETE FROM paperboat.managed_ssh_ca_fetches`) // machines of earlier tests do not fetch any more
 	t.Cleanup(end)
 	return w
 }
@@ -220,6 +223,10 @@ func (w *world) step(id string) Run {
 	if err := w.svc.Step(context.Background()); err != nil {
 		w.t.Fatal(err)
 	}
+	w.clock = w.clock.Add(time.Second)
+	for _, m := range w.fetching {
+		w.fetch(m)
+	}
 	run, err := w.svc.Get(context.Background(), id)
 	if err != nil {
 		w.t.Fatal(err)
@@ -285,6 +292,7 @@ func TestMachineTrustsOldAndNewKeysDuringTheOverlapAndRefusesTheOldAfterRetire(t
 		t.Fatal("pickup finished before the second online machine fetched the new CAs")
 	}
 	w.fetch(other)
+	w.fetching = []machine{m, other}
 	run = w.until(run.ID, StagePickup)
 	if d := stageOf(run, StagePickup).Detail; detailInt(d, "expected") != 2 || detailInt(d, "picked_up") != 2 {
 		t.Fatalf("pickup detail = %v", d)
@@ -300,15 +308,6 @@ func TestMachineTrustsOldAndNewKeysDuringTheOverlapAndRefusesTheOldAfterRetire(t
 		t.Fatal("the switch must sign with a different CA")
 	}
 	// (e) retire: once the machines fetched the set again the old CA is gone and refused.
-	for range 3 {
-		run = w.step(run.ID)
-		w.fetch(m)
-		w.fetch(other)
-		w.clock = w.clock.Add(time.Second)
-		if run.State != "running" {
-			break
-		}
-	}
 	run = w.until(run.ID, StageRetire)
 	set = w.fetch(m)
 	if len(set.Keys) != 1 || w.accepts(set, before) || !w.accepts(set, after) {
@@ -424,7 +423,10 @@ func TestResealStageMovesEverySealedValueToTheNewestKeyAndReportsUnreadableRows(
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := recovered.IssueCertificate(context.Background(), managedssh.IssueCertificateRequest{UserID: m.user, CLIClientSessionID: m.session, UserMachineID: m.id, MachineGeneration: 1, PublicKey: strings.TrimSpace(string(ssh.MarshalAuthorizedKey(clientKey(t)))), Now: w.clock}); err != nil {
+	// The run signed the old CLI session out; the account signs in again.
+	fresh := "bg_cli_again_" + w.sfx
+	w.exec(`INSERT INTO paperboat.cli_client_sessions (id,user_id,client_id,client_label,device_type,os,scopes,state,created_at,approved_at) VALUES ($1,$2,$1,'t','desktop','test',ARRAY['account:read'],'active',now(),now())`, fresh, m.user)
+	if _, err := recovered.IssueCertificate(context.Background(), managedssh.IssueCertificateRequest{UserID: m.user, CLIClientSessionID: fresh, UserMachineID: m.id, MachineGeneration: 1, PublicKey: strings.TrimSpace(string(ssh.MarshalAuthorizedKey(clientKey(t)))), Now: w.clock}); err != nil {
 		t.Fatalf("issuing with only the new encryption key: %v", err)
 	}
 }
@@ -443,16 +445,15 @@ func TestRunResumesAfterARestartAndEveryStageIsAudited(t *testing.T) {
 	w.step(run.ID)
 	w.step(run.ID)
 	w.rebuild() // the server crashed and came back
+	w.fetching = []machine{m}
 	for range 400 {
-		w.clock = w.clock.Add(time.Second)
-		w.fetch(m)
 		run = w.step(run.ID)
 		if run.State != "running" {
 			break
 		}
 	}
 	if run.State != "done" {
-		t.Fatalf("run state = %s, error %q", run.State, run.LastError)
+		t.Fatalf("run state = %s, error %q, stages %+v", run.State, run.LastError, run.Stages)
 	}
 	for _, stage := range run.Stages {
 		if stage.State != stageDone || stage.StartedAt == nil || stage.FinishedAt == nil {
