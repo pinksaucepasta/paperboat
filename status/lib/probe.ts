@@ -53,7 +53,7 @@ async function bodyHead(res: Response): Promise<string> {
 
 /** The cron Worker's own vantage point: plain HTTP fetches of the CHECKS targets, after its own internet check (rule 2). */
 export async function cloudflareReport(env: Env): Promise<Parsed> {
-  const netOk = await fetch(env.NET_CHECK_URL ?? "", { method: "HEAD", signal: AbortSignal.timeout(5000) }).then((r) => r.ok, () => false)
+  const netOk = await fetch(env.NET_CHECK_URL ?? "", { signal: AbortSignal.timeout(5000) }).then((r) => { void r.body?.cancel(); return r.ok }, () => false)
   const results: Reported = {}
   if (netOk) {
     let checks: { unit: string; url: string; expect?: string; redirect?: boolean }[] = []

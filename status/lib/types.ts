@@ -4,6 +4,8 @@ export type { UptimeDay }
 
 export interface Env {
   DB: D1Database
+  /** static assets of the page (absent in the local staging/demo Workers) */
+  ASSETS?: Fetcher
   /** secret: JSON {"<vantage>": "<hex key>"} for the probe hosts that may write results */
   PROBE_KEYS: string
   /** secret: bearer token of the admin panel */

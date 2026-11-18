@@ -20,7 +20,7 @@ const call = (request: unknown, e: Env, c = ctx) => handle(request as Request, e
 const T0 = minute(Date.UTC(2026, 10, 18, 12, 0, 0))
 
 before(async () => {
-  const p = await getPlatformProxy<{ DB: D1Database }>({ configPath: new URL("../cron/wrangler.jsonc", import.meta.url).pathname, persist: { path: mkdtempSync(join(tmpdir(), "status-")) } })
+  const p = await getPlatformProxy<{ DB: D1Database }>({ configPath: new URL("../dev/wrangler.jsonc", import.meta.url).pathname, persist: { path: mkdtempSync(join(tmpdir(), "status-")) } })
   db = p.env.DB
   dispose = p.dispose
   for (const stmt of readFileSync(new URL("../schema.sql", import.meta.url), "utf8").replace(/^--.*$/gm, "").split(";").map((s) => s.trim()).filter(Boolean)) await db.prepare(stmt).run()

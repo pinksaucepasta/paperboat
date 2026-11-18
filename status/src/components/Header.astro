@@ -1,13 +1,12 @@
 ---
 import Lockup from "../../../marketing/src/components/Lockup.astro"
-// The Paperboat site, when this deployment knows it (PAPERBOAT_SITE_URL, a build setting); the page itself does not need it.
-const site = import.meta.env.PAPERBOAT_SITE_URL || "/"
+// The logo links to the Paperboat site: status.<domain> is served beside <domain>, so the address is worked out in the browser (Base.astro).
 ---
 
 <header class="top">
   <div class="col top-row">
     <div class="brand">
-      <Lockup href={site} />
+      <Lockup href="/" />
       <span class="brand-sep" aria-hidden="true">/</span>
       <span class="brand-page">Status</span>
     </div>
