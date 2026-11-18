@@ -271,8 +271,6 @@ func TestTunnelMalformedDocumentsReturnTypedBadRequest(t *testing.T) {
 		path    string
 		body    string
 	}{
-		{name: "create unknown field", handler: tunnelCreate(service, &tunnelIdentityVerifier{}), path: "/v1/tunnels", body: `{"name":"demo","unexpected":true}`},
-		{name: "patch unknown field", handler: tunnelPatch(service, &tunnelIdentityVerifier{}, nil), path: "/v1/tunnels/tun_1", body: `{"unexpected":true}`},
 		{name: "state nonempty", handler: tunnelPause(service, &tunnelIdentityVerifier{}), path: "/v1/tunnels/tun_1/pause", body: `{"unexpected":true}`},
 	} {
 		t.Run(test.name, func(t *testing.T) {

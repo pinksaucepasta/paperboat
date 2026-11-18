@@ -155,7 +155,8 @@ func TestRuntimeCarrierVerifierFailuresKeepExpectedDenialsAndReportOutages(t *te
 }
 
 func TestRuntimeAttachmentRejectsAmbiguousRequests(t *testing.T) {
-	for _, body := range []string{`{"operation_id":"a","operation_id":"b"}`, `{"operation_id":"a","target":"127.0.0.1:22"}`, `{} {}`} {
+	// A field the request does not have (a client-chosen target) is ignored, never honoured; duplicates and trailing data are refused.
+	for _, body := range []string{`{"operation_id":"a","operation_id":"b"}`, `{} {}`} {
 		var request runtimewire.Request
 		if decode([]byte(body), &request) == nil {
 			t.Fatalf("accepted ambiguous request %s", body)

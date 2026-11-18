@@ -798,7 +798,6 @@ func decodeDistributionBody(w http.ResponseWriter, r *http.Request, target any) 
 		return false
 	}
 	decoder := json.NewDecoder(bytes.NewReader(body))
-	decoder.DisallowUnknownFields()
 	if decoder.Decode(target) != nil {
 		writeDistributionError(w, http.StatusBadRequest)
 		return false

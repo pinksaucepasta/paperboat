@@ -22,7 +22,6 @@ func helperRevocations(edge *controlplane.EdgeService, identities *controlplane.
 			return
 		}
 		decoder := json.NewDecoder(bytes.NewReader(body))
-		decoder.DisallowUnknownFields()
 		var input struct {
 			ActiveJTIs []string `json:"active_jtis"`
 		}

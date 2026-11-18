@@ -26,7 +26,6 @@ func nativePrivateGrant(service *nativeprivateaccess.Service) http.HandlerFunc {
 		}
 		var body request
 		decoder := json.NewDecoder(io.LimitReader(r.Body, 4097))
-		decoder.DisallowUnknownFields()
 		if decoder.Decode(&body) != nil || decoder.Decode(&struct{}{}) != io.EOF {
 			writeError(w, r, http.StatusBadRequest, "invalid_request", "Native private access request is invalid.")
 			return

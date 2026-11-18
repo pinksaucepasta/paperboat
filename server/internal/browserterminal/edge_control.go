@@ -251,7 +251,6 @@ func (g *Gateway) ServeEdgeControl(w http.ResponseWriter, r *http.Request, nodeI
 	}
 	var input EdgeControlRequest
 	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&input); err != nil || decoder.Decode(new(any)) != io.EOF {
 		warnInvalidEdgeAdmission(r.Context(), "decode", err)
 		_ = connection.Close(websocket.StatusPolicyViolation, "invalid admission")

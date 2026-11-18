@@ -133,7 +133,6 @@ func readMachineEventsRequest(w http.ResponseWriter, r *http.Request) (machineEv
 	}
 	var request machineEventsRequest
 	decoder := json.NewDecoder(strings.NewReader(string(body)))
-	decoder.DisallowUnknownFields()
 	if decoder.Decode(&request) != nil || decoder.Decode(&struct{}{}) != io.EOF || request.Topics == nil {
 		writePreviewTunnelError(w, r, http.StatusBadRequest, "invalid_request", "Machine events request is invalid.", "unchanged", false, "fix_request")
 		return machineEventsRequest{}, nil, false

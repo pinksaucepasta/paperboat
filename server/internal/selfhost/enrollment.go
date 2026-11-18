@@ -218,7 +218,6 @@ func requestNode(ctx context.Context, c *http.Client, target, secret string, in,
 		return requestNodeStatusFailure(resp.StatusCode)
 	}
 	dec := json.NewDecoder(io.LimitReader(resp.Body, (1<<20)+1))
-	dec.DisallowUnknownFields()
 	if err := dec.Decode(out); err != nil {
 		return &requestNodeFailure{status: resp.StatusCode, cause: err}
 	}

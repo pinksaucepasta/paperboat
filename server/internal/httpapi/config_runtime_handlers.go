@@ -22,7 +22,6 @@ func configRuntimeGet(service *controlplane.ConfigRuntimeService) http.HandlerFu
 		}
 		var input struct{}
 		decoder := json.NewDecoder(bytes.NewReader(body))
-		decoder.DisallowUnknownFields()
 		if decoder.Decode(&input) != nil || !errors.Is(decoder.Decode(&struct{}{}), io.EOF) {
 			writeError(w, r, http.StatusBadRequest, "runtime_invalid", "Configuration runtime request is invalid.")
 			return
