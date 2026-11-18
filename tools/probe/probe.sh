@@ -13,6 +13,7 @@
 #   CANARY_ENV_NAME/_VALUE  one managed ENV value set once for the pair's workspace (fixture); the env_exec step needs both
 #   CANARY_TEAM / CANARY_TEAM_MACHINE  a team the canary account owns and a machine the team owns with an exact exec
 #                        grant to that account (fixture); when set, team_exec runs A -> that machine in the team workspace
+#   ssh_b_to_a send_b_to_a api_auth_b  (opt-in) the same actions driven from B, for the vantage point that hosts B (tools/probe/status_run.py)
 #   CANARY_EDGES         every managed edge address (space separated); each must serve the canary tunnel
 #                        directly, so an edge that dropped out of DNS or was null-routed still fails a step
 set -uo pipefail
@@ -59,12 +60,20 @@ env_exec() { # A runs a command on B: the managed ENV value must arrive (never p
 }
 team_exec() { on A "$pb --workspace ${CANARY_TEAM:?} exec $CANARY_TEAM_MACHINE -- echo $marker" >"$tmp/got" && want; }
 ssh_ab() { on A "$pb ssh $b -- echo $marker" >"$tmp/got" && want; }
-send_ab() { # A sends a file, B finds it in its Inbox with the marker inside, then removes it
-  on A "echo $marker >/tmp/$marker.txt && $pb send /tmp/$marker.txt --to $b >/dev/null; rc=\$?; rm -f /tmp/$marker.txt; exit \$rc" &&
-    on B "i=\$($pb inbox path --json | python3 -c 'import json,sys;d=json.load(sys.stdin);print(d.get(\"data\",d)[\"path\"])') || exit 1
+send_dir() { # FROM TO: FROM sends a file to machine TO, which finds it in its Inbox with the marker inside, then removes it
+  local from=$1 to=$2 fromname=$3 toname=$4
+  on "$from" "echo $marker >/tmp/$marker.txt && $pb send /tmp/$marker.txt --to $toname >/dev/null; rc=\$?; rm -f /tmp/$marker.txt; exit \$rc" &&
+    on "$to" "i=\$($pb inbox path --json | python3 -c 'import json,sys;d=json.load(sys.stdin);print(d.get(\"data\",d)[\"path\"])') || exit 1
 for _ in \$(seq 20); do f=\$(find \"\$i\" -name '$marker.txt' -print -quit); [ -n \"\$f\" ] && break; sleep 1; done
 [ -n \"\$f\" ] || { echo 'file not in the Inbox after 20 s' >&2; exit 1; }
 cat \"\$f\"; rm -f \"\$f\"" >"$tmp/got" && want
+}
+send_ab() { send_dir A B "$a" "$b"; }
+send_ba() { send_dir B A "$b" "$a"; }
+ssh_ba() { on B "$pb ssh $a -- echo $marker" >"$tmp/got" && want; }
+api_auth() { # X peer: an authenticated read of the account's machines from machine X must list the other canary machine
+  on "$1" "$pb machine list --json" >"$tmp/got" 2>"$tmp/execerr" || { tail -c 200 "$tmp/execerr" >&2; return 1; }
+  grep -qF "$2" "$tmp/got" || { echo "machine list does not show $2" >&2; return 1; }
 }
 preview() { # a new preview of A's origin, fetched from here without credentials, then stopped
   on A "$pb preview $port --background --ttl 2m --json" >"$tmp/preview.json" || return 1
@@ -93,8 +102,14 @@ step exec_b_to_a exec_ba
 step ssh_a_to_b ssh_ab
 step env_exec env_exec
 [ -z "${CANARY_TEAM_MACHINE:-}" ] || step team_exec team_exec
+step api_auth_a api_auth A "$b"
 step send_a_to_b send_ab
 step preview preview
 step tunnel tunnel
 [ -z "${CANARY_EDGES:-}" ] || step edges edges
+# Steps driven from machine B for a second vantage point (the host that runs B): run only when PROBE_STEPS names them.
+optional() { [[ " ${PROBE_STEPS:-} " == *" $1 "* ]] && step "$@"; return 0; }
+optional ssh_b_to_a ssh_ba
+optional send_b_to_a send_ba
+optional api_auth_b api_auth B "$a"
 exit $failed

@@ -152,6 +152,17 @@ def account_steps():
     return steps
 
 
+def status_report(run):
+    """Post this run's steps and the host's own checks to the status page (tools/probe/status_report.py), when configured."""
+    try:
+        import status_report as report
+        cfg = report.load_config()
+        if cfg:
+            report.report(cfg, report.step_results(run["steps"], cfg.get("steps", {})))
+    except Exception as error:  # the canary's own result is already recorded; the status page must never fail it
+        print(f"status report failed: {error}", file=sys.stderr)
+
+
 def main():
     started = now()
     clock = time.monotonic()
@@ -169,6 +180,8 @@ def main():
            "ok": all(s["ok"] for s in steps), "steps": steps,
            "group": "account" if "--account" in sys.argv[1:] else "access"}
     record(run, send_alert)
+    if run["group"] == "access":
+        status_report(run)
     print(json.dumps(run))
     return 0 if run["ok"] else 1
 
