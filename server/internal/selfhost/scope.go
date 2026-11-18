@@ -278,6 +278,10 @@ func (s *Service) storePool(ctx context.Context, tx *db.Tx, actor, capability st
 		if err = repointWorkspaceDomains(ctx, tx, actor, team, p.Mode); err != nil {
 			return false, err
 		}
+		// The stored edge set follows the mode at once (a pair change stores it too), not at some later reconcile.
+		if _, err = edgeset.ReconcileScope(ctx, tx, edgeset.Scope{Kind: scope.Kind, ID: scope.ID, Account: actor}, time.Now().UTC()); err != nil {
+			return false, err
+		}
 	}
 	_, err = tx.Exec(ctx, revokeIneligibleSQL, scope.Kind, scope.ID)
 	return flipped, err
