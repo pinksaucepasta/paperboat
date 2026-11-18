@@ -28,7 +28,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 )
 
-const MaxBodyBytes = 8 << 20
+const MaxBodyBytes = execprocess.MaxMessageBytes
 
 var ErrFenced = errors.New("terminal owner runtime is fenced")
 

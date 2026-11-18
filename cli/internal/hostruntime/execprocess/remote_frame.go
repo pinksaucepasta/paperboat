@@ -11,7 +11,12 @@ import (
 // payload (output bytes or stdin bytes). Bytes cross the session owner, hostd and worker hops as they are, never as
 // base64 inside JSON (which cost two string scans and a base64 pass per hop and capped exec output near 17 MB/s).
 // Terminal-output limits and the per-event acknowledgement are unchanged: this only replaces the encoding.
-const maxRemoteHeaderBytes = 1 << 20
+//
+// MaxMessageBytes bounds one message, header and payload, and is the owner bridge's body limit. The header may use all
+// of it, so the cap can never refuse a message the bridge would have taken. What fills a header is bounded below it:
+// a list holds at most MaximumActive (validated <= 1024) snapshots of ~0.5 KiB, a start the validated request
+// (arguments and environment <= 64 KiB each, 6x when escaped).
+const MaxMessageBytes = 8 << 20
 
 // EncodeMessage frames header (as JSON) and payload.
 func EncodeMessage(header any, payload []byte) ([]byte, error) {
@@ -19,8 +24,8 @@ func EncodeMessage(header any, payload []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if len(head) > maxRemoteHeaderBytes {
-		return nil, ErrInvalid
+	if 4+len(head)+len(payload) > MaxMessageBytes {
+		return nil, ErrCapacity
 	}
 	frame := make([]byte, 4, 4+len(head)+len(payload))
 	binary.BigEndian.PutUint32(frame, uint32(len(head)))
@@ -38,7 +43,7 @@ func decodeMessage(frame []byte, header any, strict bool) ([]byte, error) {
 		return nil, ErrInvalid
 	}
 	size := binary.BigEndian.Uint32(frame)
-	if size > maxRemoteHeaderBytes || uint64(size) > uint64(len(frame)-4) {
+	if size > MaxMessageBytes || uint64(size) > uint64(len(frame)-4) {
 		return nil, ErrInvalid
 	}
 	head := frame[4 : 4+size]

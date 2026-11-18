@@ -5,6 +5,10 @@ package execprocess
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
+	"errors"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 )
@@ -70,5 +74,50 @@ func TestReaderOutputCrossesBothHopsAsRawFrames(t *testing.T) {
 	}
 	if limit := 128<<10 + 4<<10; largest > limit {
 		t.Fatalf("largest reader_next answer is %d bytes: the data was re-encoded (limit %d for a 128 KiB chunk)", largest, limit)
+	}
+}
+
+// The header cap equals the bridge's body cap, so it can never refuse a legitimate message; the largest list and
+// start requests the validation allows must also leave room well under it.
+func TestWorstCaseListAndStartMessagesFitTheMessageCap(t *testing.T) {
+	started := time.Now()
+	worst := Snapshot{OperationID: strings.Repeat("a", 128), State: StateRunning, StartedAt: &started, Result: &Result{Code: -1, Signal: "SIGKILL", ExitedAt: started}, ErrorCode: strings.Repeat("e", 64), NextSequence: 1<<64 - 1}
+	snapshots := make([]Snapshot, 1024) // MaximumActive is validated to at most 1024 per owner
+	for i := range snapshots {
+		snapshots[i] = worst
+	}
+	list, err := EncodeMessage(remoteResponse{Snapshots: snapshots}, nil)
+	if err != nil || len(list) > MaxMessageBytes/8 {
+		t.Fatalf("a list of 1024 snapshots is %d bytes (err %v), want room for 8 owners under %d", len(list), err, MaxMessageBytes)
+	}
+	argv := []string{strings.Repeat("\x01", 64<<10-1)} // validated total 64 KiB; JSON escapes each byte to 6
+	environment := map[string]string{}
+	for i := 0; i < 16; i++ {
+		environment[fmt.Sprintf("K%03d", i)] = strings.Repeat("\x01", 4096)
+	}
+	start, err := EncodeMessage(remoteRequest{Request: &Request{OperationID: strings.Repeat("o", 128), Argv: argv, CWD: strings.Repeat("c", 4096), Environment: environment}}, nil)
+	if err != nil || len(start) > MaxMessageBytes/4 {
+		t.Fatalf("the largest start request is %d bytes (err %v), want under %d", len(start), err, MaxMessageBytes/4)
+	}
+}
+
+func TestMessageBeyondTheCapIsRefusedOnBothSides(t *testing.T) {
+	if _, err := EncodeMessage(struct{}{}, make([]byte, MaxMessageBytes)); !errors.Is(err, ErrCapacity) {
+		t.Fatalf("oversized message encoded: %v", err)
+	}
+	huge := make([]byte, 8)
+	binary.BigEndian.PutUint32(huge, MaxMessageBytes+1)
+	if _, err := DecodeMessage(huge, &struct{}{}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("header length beyond the cap accepted: %v", err)
+	}
+	if _, err := DecodeMessage([]byte{0, 0, 0, 9, '{'}, &struct{}{}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("header longer than the frame accepted: %v", err)
+	}
+}
+
+// MaximumActive is what bounds a list answer: a configuration above the tested worst case never starts.
+func TestMaximumActiveAboveTheListBoundIsRefused(t *testing.T) {
+	if _, err := New(Config{WorkspaceRoot: t.TempDir(), BaseEnvironment: []string{"PATH=/usr/bin:/bin"}, MaximumActive: 1025, MaximumOperations: 2048}); err == nil {
+		t.Fatal("MaximumActive 1025 accepted: a list could outgrow the message cap")
 	}
 }
