@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/server/internal/audit"
 	"github.com/pinksaucepasta/paperboat/server/internal/config"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 )
@@ -50,23 +49,21 @@ func TestPostgresTailMapsAuditRowsToEvents(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	w := audit.NewWriter(store)
-	write := func(e audit.Event) {
+	// audit_events is append-only (no UPDATE), so each row is inserted with the age it should have.
+	write := func(id, actor, actorType, kind, resourceID, result, metadata, age string) {
 		t.Helper()
-		if err := w.Write(ctx, e); err != nil {
+		if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.audit_events (id, actor_user_id, actor_type, event_type, resource_type, resource_id, metadata, created_at, result)
+ VALUES ($1, $2, $3, $4, 'test', $5, $6::jsonb, now() - $7::interval, $8)`, id+"_"+x, actor, actorType, kind, resourceID, metadata, age, result); err != nil {
 			t.Fatal(err)
 		}
 	}
-	write(audit.Event{ID: "login_" + x, ActorUserID: "acct_" + x, ActorType: audit.ActorUser, EventType: "auth.login", ResourceType: "user", ResourceID: "acct_" + x})
-	write(audit.Event{ID: "grant_" + x, ActorUserID: "operator_" + x, ActorType: audit.ActorAdmin, EventType: "operator.plan_grant", ResourceType: "billing_workspace", ResourceID: "personal:owner_" + x,
-		Metadata: map[string]any{"product_code": "pro", "state": "granted"}})
-	write(audit.Event{ID: "team_" + x, ActorUserID: "operator_" + x, ActorType: audit.ActorAdmin, EventType: "operator.plan_revoke", ResourceType: "billing_workspace", ResourceID: "team:missing_" + x})
-	write(audit.Event{ID: "logout_" + x, ActorUserID: "acct_" + x, ActorType: audit.ActorUser, EventType: "auth.logout", ResourceType: "user", ResourceID: "acct_" + x})
-	write(audit.Event{ID: "denied_" + x, ActorUserID: "acct_" + x, ActorType: audit.ActorUser, EventType: "auth.login", ResourceType: "user", ResourceID: "acct_" + x, Result: audit.ResultDenied})
-	if _, err := store.SQL().ExecContext(ctx, `UPDATE audit_events SET created_at = now() - interval '5 minutes' WHERE id LIKE '%\_'||$1`, x); err != nil {
-		t.Fatal(err)
-	}
-	write(audit.Event{ID: "young_" + x, ActorUserID: "acct_" + x, ActorType: audit.ActorUser, EventType: "auth.login", ResourceType: "user", ResourceID: "acct_" + x})
+	old := "5 minutes"
+	write("login", "acct_"+x, "user", "auth.login", "acct_"+x, "success", `{}`, old)
+	write("grant", "operator_"+x, "admin", "operator.plan_grant", "personal:owner_"+x, "success", `{"product_code":"pro","state":"granted"}`, old)
+	write("team", "operator_"+x, "admin", "operator.plan_revoke", "team:missing_"+x, "success", `{}`, old)
+	write("logout", "acct_"+x, "user", "auth.logout", "acct_"+x, "success", `{}`, old)
+	write("denied", "acct_"+x, "user", "auth.login", "acct_"+x, "denied", `{}`, old)
+	write("young", "acct_"+x, "user", "auth.login", "acct_"+x, "success", `{}`, "0 seconds")
 
 	c := New(Config{Host: "https://posthog.example.test", Key: "k"})
 	types := make([]string, 0, len(auditEvents))
