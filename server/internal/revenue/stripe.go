@@ -71,12 +71,23 @@ type wireCoupon struct {
 	Duration   string  `json:"duration"`
 }
 
+// wireDiscount: Stripe's discount object. Its coupon is an object, or a bare id when the coupon was not expanded (in the
+// current API it sits under source.coupon; older shapes put it directly on the discount).
 type wireDiscount struct {
-	End    int64       `json:"end"`
-	Coupon *wireCoupon `json:"coupon"`
+	End    int64           `json:"end"`
+	Coupon json.RawMessage `json:"coupon"`
 	Source *struct {
-		Coupon *wireCoupon `json:"coupon"`
+		Coupon json.RawMessage `json:"coupon"`
 	} `json:"source"`
+}
+
+// coupon reads the discount's coupon; known is false when only its id came back, so its value is unknown.
+func (d wireDiscount) coupon() (c wireCoupon, known bool) {
+	raw := d.Coupon
+	if len(raw) == 0 && d.Source != nil {
+		raw = d.Source.Coupon
+	}
+	return c, len(raw) > 0 && raw[0] == '{' && json.Unmarshal(raw, &c) == nil
 }
 
 // UnmarshalJSON accepts an unexpanded discount (a bare id string) as "no known discount".
@@ -177,12 +188,10 @@ func (w wireSub) sub() Sub {
 		ds = append(ds, *w.Discount)
 	}
 	for _, d := range ds {
-		c := d.Coupon
-		if c == nil && d.Source != nil {
-			c = d.Source.Coupon
-		}
-		if c != nil {
+		if c, known := d.coupon(); known {
 			s.Discounts = append(s.Discounts, Discount{Percent: c.PercentOff, AmountOff: c.AmountOff, Currency: strings.ToLower(c.Currency), Duration: c.Duration, End: d.End})
+		} else {
+			s.DiscountUnknown = true
 		}
 	}
 	if i := w.LatestInvoice; i != nil && i.ID != "" {
@@ -197,7 +206,7 @@ func decodeStrict(raw []byte, out any) error {
 
 // Subscriptions reads every subscription of any status, with discounts and the latest invoice expanded.
 func Subscriptions(ctx context.Context, g Getter) (subs []Sub, partial bool, err error) {
-	q := url.Values{"status": {"all"}, "expand[]": {"data.discounts", "data.latest_invoice"}}
+	q := url.Values{"status": {"all"}, "expand[]": {"data.discounts.source.coupon", "data.latest_invoice"}}
 	partial, err = walk(ctx, g, "/v1/subscriptions", q, maxPages*pageLimit, func(raw json.RawMessage) (string, error) {
 		var w wireSub
 		if err := decodeStrict(raw, &w); err != nil {

@@ -50,6 +50,7 @@ type Sub struct {
 	Items                          []Item
 	Discounts                      []Discount
 	Invoice                        *Invoice
+	DiscountUnknown                bool // a discount whose coupon Stripe did not return: this MRR may be too high
 }
 
 // counts reports whether a status is part of MRR: Stripe counts active and past_due.

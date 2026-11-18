@@ -131,6 +131,9 @@ func (s *Service) load(ctx context.Context) (*state, error) {
 	if err != nil {
 		return nil, err
 	}
+	for _, sub := range kept {
+		partial = partial || sub.DiscountUnknown && counts(sub.Status)
+	}
 	s.st = &state{at: s.now(), subs: kept, partial: partial, currency: cur, skipped: skipped, plans: plans, ws: ws}
 	return s.st, nil
 }

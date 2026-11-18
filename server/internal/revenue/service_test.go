@@ -342,3 +342,23 @@ func TestNilDirectoryKnowsNothingInsteadOfPanicking(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// Captured from the Stripe sandbox (API 2026-09-30): a discount's coupon is a bare id unless source.coupon is expanded.
+func TestABareCouponIdIsUnknownNotAParseFailure(t *testing.T) {
+	raw := `{"id":"sub_1","customer":"cus_1","status":"active","currency":"usd","start_date":5,
+	"discounts":[{"id":"di_1","object":"discount","end":null,"source":{"coupon":"0C5d7UkF","type":"coupon"},"start":9}],
+	"items":{"data":[{"id":"si_1","quantity":1,"current_period_end":99,"price":{"id":"price_x","unit_amount":15000,"recurring":{"interval":"year","interval_count":1,"usage_type":"licensed"}}}]}}`
+	var w wireSub
+	if err := decodeStrict([]byte(raw), &w); err != nil {
+		t.Fatalf("a real sandbox subscription must parse: %v", err)
+	}
+	if s := w.sub(); !s.DiscountUnknown || len(s.Discounts) != 0 {
+		t.Fatalf("%+v", s)
+	}
+	f := baseFixture()
+	f["/v1/subscriptions"] = lst(json.RawMessage(raw))
+	r, err := newService(f).Report(context.Background(), 7)
+	if err != nil || !r.Partial {
+		t.Fatalf("a discount we cannot value must mark the report as a floor: %v partial=%v", err, r.Partial)
+	}
+}
