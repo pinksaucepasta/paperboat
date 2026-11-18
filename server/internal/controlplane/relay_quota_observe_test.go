@@ -80,3 +80,51 @@ func TestRelayObservationNamesAccountsOutOfBandwidthPostgres(t *testing.T) {
 		t.Fatalf("after allowance recovered the observation still listed %v", got)
 	}
 }
+
+// A relay's observation carries the account handovers recorded for its node (selfhost.handOverRelays), keeps one
+// whose old grants have not all expired, drops the rest, and sends an empty list (not nothing) when there are none,
+// so the relay clears what it held.
+func TestRelayObservationCarriesPoolHandoversPostgres(t *testing.T) {
+	store := openControlPlaneTestDB(t)
+	ctx := t.Context()
+	x := fmt.Sprint(time.Now().UnixNano())
+	soon, old, node, epoch := "relay_ho_soon_"+x, "relay_ho_old_"+x, "relay_ho_node_"+x, "relay_ho_epoch_"+x
+	exec := func(q string, args ...any) {
+		t.Helper()
+		if _, err := store.SQL().ExecContext(ctx, q, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Cleanup(func() {
+		bg := context.Background()
+		_, _ = store.SQL().ExecContext(bg, `DELETE FROM control_tunnel_nodes WHERE id=$1`, node)
+		_, _ = store.SQL().ExecContext(bg, `DELETE FROM users WHERE id IN ($1,$2)`, soon, old)
+	})
+	for _, user := range []string{soon, old} {
+		exec(`INSERT INTO users(id,workos_subject,primary_email,status) VALUES($1,$1,$1||'@example.test','active')`, user)
+	}
+	now := time.Now().UTC()
+	exec(`INSERT INTO control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,endpoint_host,endpoint_tcp_port,endpoint_quic_port,state,ready,last_heartbeat_at,node_generation,region,failure_domain,roles,transports,capacity_limit,capacity_used,capacity_observed_at,registry_expires_at) VALUES($1,'default','v1',$2,'relay.example.test',443,444,'ready',true,$3,1,'hel','hel-a',ARRAY['relay'],ARRAY['derp_quic'],100,0,$3,$4)`, node, epoch, now, now.Add(time.Hour))
+	service := NewEdgeService(store, "relay-observe-test-credential-0123456789")
+	observe := func() relayNodeLeaseDocument {
+		t.Helper()
+		out, err := service.ObserveRelayNode(ctx, relayNodeObservation{NodeID: node, Generation: 1, ProcessEpoch: epoch, Ready: true})
+		if err != nil {
+			t.Fatalf("observation failed: %v", err)
+		}
+		return out
+	}
+	if got := observe().PoolHandover; got == nil || len(*got) != 0 {
+		t.Fatalf("no handovers must be an empty list, got %v", got)
+	}
+	closeAt := now.Add(5 * time.Minute)
+	exec(`INSERT INTO relay_pool_handovers(node_id,account_id,close_at) VALUES($1,$2,$4),($1,$3,now()-interval '13 hours')`, node, soon, old, closeAt)
+	got := observe().PoolHandover
+	if got == nil || len(*got) != 1 || (*got)[0].AccountID != soon || (*got)[0].CloseAt != closeAt.Unix() {
+		t.Fatalf("handovers = %v, want only %s closing at %d", got, soon, closeAt.Unix())
+	}
+	var rows int
+	if err := store.SQL().QueryRowContext(ctx, `SELECT count(*) FROM relay_pool_handovers WHERE node_id=$1`, node).Scan(&rows); err != nil || rows != 1 {
+		t.Fatalf("an expired handover was kept: %d rows %v", rows, err)
+	}
+}

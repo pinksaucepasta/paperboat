@@ -61,6 +61,7 @@ func TestEdgePairErrorsAreTheDocumentedStatuses(t *testing.T) {
 		count  string
 	}{
 		{"running", fmt.Errorf("switch: %w", &selfhost.LivePublicationsError{Count: 3}), http.StatusConflict, "previews_running", `"count":3`},
+		{"running names", &selfhost.LivePublicationsError{Count: 1, Items: []selfhost.LiveItem{{Kind: "terminal", ID: "t1", Name: "Terminal on laptop", MachineID: "m1"}}}, http.StatusConflict, "previews_running", `"items":[{"kind":"terminal","id":"t1","name":"Terminal on laptop","machine_id":"m1"}]`},
 		{"forbidden", selfhost.ErrUnauthorized, http.StatusForbidden, "forbidden", ""},
 		{"invalid", fmt.Errorf("%w: same edge", selfhost.ErrInvalid), http.StatusBadRequest, "invalid_request", ""},
 		{"unassigned", selfhost.ErrEdgePairUnassigned, http.StatusNotFound, "edge_pair_unassigned", ""},

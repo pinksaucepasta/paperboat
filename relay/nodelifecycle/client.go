@@ -55,12 +55,21 @@ type Lease struct {
 	// QuotaDenied lists accounts the control plane reports out of bandwidth allowance; the relay
 	// refuses them (derpquic.ErrQuota) until a later observation no longer lists them.
 	QuotaDenied []string `json:"quota_denied,omitempty"`
+	// PoolHandover lists accounts whose pool no longer includes this relay and when to close their carriers; nil
+	// (absent) keeps the list the relay holds, an empty list clears it.
+	PoolHandover *[]PoolHandover `json:"pool_handover,omitempty"`
 	// SubjectsRequired asks for the full subjects list on the next observation: the control plane has
 	// no stored set for this process or its digest differs. Such an answer carries no quota list.
 	SubjectsRequired bool `json:"subjects_required,omitempty"`
 	// JWKS is the issuer trust document (keys plus withdrawn_key_ids); the relay trusts exactly its keys,
 	// so a rotation or withdrawal applies within one observation.
 	JWKS json.RawMessage `json:"jwks,omitempty"`
+}
+
+// PoolHandover is one account moving off this relay: its carriers close at CloseAt (Unix seconds).
+type PoolHandover struct {
+	AccountID string `json:"account_id"`
+	CloseAt   int64  `json:"close_at"`
 }
 
 // Revocation fences one endpoint this relay holds: grants below MinGeneration, the first
@@ -357,6 +366,15 @@ func (c *Client) Observe(ctx context.Context, server *derpquic.Server, draining 
 			return ErrControl
 		}
 		c.jwks = out.JWKS
+	}
+	if out.PoolHandover != nil {
+		list := make([]derpquic.Handover, 0, len(*out.PoolHandover))
+		for _, h := range *out.PoolHandover {
+			list = append(list, derpquic.Handover{AccountID: h.AccountID, CloseAt: time.Unix(h.CloseAt, 0)})
+		}
+		if server.SetPoolHandover(list) != nil {
+			return ErrControl
+		}
 	}
 	if out.SubjectsRequired {
 		// The control plane lost or never had this set: send it in full next time, and keep the

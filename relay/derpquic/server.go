@@ -66,6 +66,8 @@ type Server struct {
 	peers                                                map[key.NodePublic]*peerConn
 	fences                                               map[string]*grantFence
 	quotaDenied                                          map[string]bool
+	handover                                             map[string]time.Time
+	handoverTimer                                        *time.Timer
 	accounts                                             map[string]*budget
 	connections                                          map[*quic.Conn]struct{}
 	wssConnections                                       map[*peerConn]struct{}
@@ -369,6 +371,9 @@ func (s *Server) admit(p *peerConn, g Grant, now time.Time) error {
 	}
 	if s.quotaDenied[g.AccountID] {
 		return ErrQuota
+	}
+	if s.handedOver(g.AccountID, now) {
+		return ErrOverload
 	}
 	id := g.AccountID + "\x00" + g.EndpointID
 	for id, old := range s.fences {
@@ -680,6 +685,9 @@ func (s *Server) Close() error {
 	s.deadline = time.Now()
 	if s.drainTimer != nil {
 		s.drainTimer.Stop()
+	}
+	if s.handoverTimer != nil {
+		s.handoverTimer.Stop()
 	}
 	ln, tr := s.listener, s.transport
 	for c := range s.connections {

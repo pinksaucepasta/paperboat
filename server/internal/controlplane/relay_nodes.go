@@ -8,7 +8,9 @@ import (
 	"errors"
 	sharedmetrics "github.com/pinksaucepasta/paperboat/shared/metrics"
 	"github.com/pinksaucepasta/paperboat/shared/nodemetrics"
+	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
 	"github.com/pinksaucepasta/paperboat/shared/relaylimits"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -71,12 +73,20 @@ type relayNodeLeaseDocument struct {
 	// the relay refuses their new admissions and closes their carriers (typed), until a later
 	// observation no longer lists them. It never carries authority.
 	QuotaDenied []string `json:"quota_denied,omitempty"`
+	// PoolHandover lists accounts whose relay pool no longer includes this node and when the relay closes their
+	// carriers (Unix seconds): the old relay serves them until clients have moved to the new ones. Nil leaves the
+	// relay's list as it is (the read failed); an empty list clears it.
+	PoolHandover *[]relayPoolHandover `json:"pool_handover,omitempty"`
 	// SubjectsRequired asks a relay that sent SubjectsDigest for its full list; no revocations are given with it.
 	// Only relays that sent a digest are ever sent the field.
 	SubjectsRequired bool `json:"subjects_required,omitempty"`
 	// JWKS is the mint trust document (keys plus withdrawn_key_ids). The relay replaces its trusted grant
 	// keys with it, so a rotation or withdrawal applies within one observation.
 	JWKS json.RawMessage `json:"jwks,omitempty"`
+}
+type relayPoolHandover struct {
+	AccountID string `json:"account_id"`
+	CloseAt   int64  `json:"close_at"`
 }
 type relayServiceIdentity struct {
 	WireGuardPublicKey string `json:"wireguard_public_key"`
@@ -209,7 +219,34 @@ func (s *EdgeService) ObserveRelayNode(ctx context.Context, in relayNodeObservat
 		}
 		out.QuotaDenied = s.relayQuota.DeniedAmong(ctx, accounts, now, relayQuotaFreshLookups)
 	}
+	out.PoolHandover = s.relayPoolHandovers(ctx, in.NodeID)
 	return out, nil
+}
+
+// relayPoolHandovers reads the accounts handed over off a node (selfhost.handOverRelays writes them) and drops the
+// ones every grant minted before the handover has expired for: the old relay then needs no refusal. Nil on a
+// read failure, so the relay keeps its list.
+func (s *EdgeService) relayPoolHandovers(ctx context.Context, node string) *[]relayPoolHandover {
+	rows, err := s.store.SQL().QueryContext(ctx, `WITH expired AS (DELETE FROM paperboat.relay_pool_handovers WHERE node_id=$1 AND close_at<now()-make_interval(secs=>$2::float8))
+SELECT account_id,extract(epoch from close_at)::bigint FROM paperboat.relay_pool_handovers WHERE node_id=$1 AND close_at>=now()-make_interval(secs=>$2::float8) ORDER BY account_id LIMIT 256`, node, (relaylimits.MaxGrantLifetime + peernetwork.MaxClockSkew).Seconds())
+	if err != nil {
+		slog.WarnContext(ctx, "relay_pool_handover_read_failed", "node_id", node, "error", err)
+		return nil
+	}
+	defer rows.Close()
+	list := []relayPoolHandover{}
+	for rows.Next() {
+		var h relayPoolHandover
+		if err = rows.Scan(&h.AccountID, &h.CloseAt); err != nil {
+			slog.WarnContext(ctx, "relay_pool_handover_read_failed", "node_id", node, "error", err)
+			return nil
+		}
+		list = append(list, h)
+	}
+	if rows.Err() != nil {
+		return nil
+	}
+	return &list
 }
 
 // observeRelayNodeTx is one attempt of ObserveRelayNode's transaction; RetrySerializable may replay it.

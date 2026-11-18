@@ -1388,7 +1388,7 @@ export interface paths {
         get: operations["get_v1_edges_pair"];
         /**
          * Choose a workspace's primary and fallback edge
-         * @description Pass ids from GET /v1/edges (Paperboat edges) or self-hosted tunnel installation ids; both must be of the same kind. The change goes through the tunnel pool policy and the workspace edge set, and the workspace's machines are told to look again. Switching between Paperboat's edges and your own servers is refused with 409 previews_running (details.count) while the workspace has running previews or tunnels. Only the owner or an admin of a team can change its pair.
+         * @description Pass ids from GET /v1/edges (Paperboat edges) or self-hosted tunnel installation ids; both must be of the same kind. The change goes through the tunnel pool policy and the workspace edge set, and the workspace's machines are told to look again. Switching between Paperboat's edges and your own servers is refused with 409 previews_running (details.count, and details.items: the first 50 running things as {kind: preview|tunnel|terminal, id, name, machine_id?}) while the workspace has running previews, tunnels or browser terminals. Only the owner or an admin of a team can change its pair.
          */
         put: operations["put_v1_edges_pair"];
         post?: never;
@@ -17835,7 +17835,7 @@ export interface operations {
             };
             401: components["responses"]["Error"];
             403: components["responses"]["Error"];
-            /** @description previews_running: the switch would strand running previews or tunnels; details.count says how many. */
+            /** @description previews_running: the switch would strand running previews, tunnels or browser terminals; details.count says how many and details.items names them. */
             409: {
                 headers: {
                     [name: string]: unknown;

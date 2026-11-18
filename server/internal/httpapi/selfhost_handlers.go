@@ -23,6 +23,12 @@ func selfhostJSON(w http.ResponseWriter, status int, v any) {
 func selfhostError(w http.ResponseWriter, r *http.Request, e error) {
 	w.Header().Set("Cache-Control", "no-store")
 	status, code, message := 503, "selfhost_unavailable", "Server enrollment is unavailable; retry shortly."
+	var live *selfhost.LivePublicationsError
+	if errors.As(e, &live) {
+		w.Header().Set("Cache-Control", "no-store")
+		writeLiveEdgeChange(w, r, live)
+		return
+	}
 	switch {
 	case expectedHTTPErrorOnly(e, selfhost.ErrInvalid):
 		status, code, message = 400, "invalid_request", e.Error()
