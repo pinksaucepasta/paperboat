@@ -427,9 +427,9 @@ code it prints, `POST /v1/selfhost/enrollments` with the workspace scope), Check
   is the only health signal. Tunnel readiness doesn't say whether public access was verified.
 - Per-tunnel placement (`/v1/selfhost/placements/...`) isn't in the console yet; it belongs on
   the tunnel's page once a workspace uses its own tunnel servers.
-- The server rejects switching tunnel servers while previews, tunnels or browser terminals run
-  (409 `previews_running`, `details.items` names them). Change edges lists them and, after a typed
-  confirmation, stops them (previews end, tunnels pause, terminals close) and switches; then it shows
+- The server rejects switching tunnel servers while previews or tunnels run
+  (409 `previews_running`, `details.items` names them; browser terminals always use Paperboat's edges and never block it). Change edges lists them and, after a typed
+  confirmation, stops them (previews end, tunnels pause) and switches; then it shows
   the workspace's tunnel hostnames with their DNS and certificate state, as the server points them at
   the new edges. It lists the first ten tunnels' hostnames: there is no workspace-wide hostname list.
 

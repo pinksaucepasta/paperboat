@@ -11,15 +11,14 @@ import (
 )
 
 // ErrLiveEdgeModeChange refuses a change of edge ownership while anything the edges serve is still running.
-var ErrLiveEdgeModeChange = fmt.Errorf("%w: stop the workspace's running previews, tunnels and browser terminals before changing edge ownership; configure customer DNS and certificates before restarting them", ErrInvalid)
+var ErrLiveEdgeModeChange = fmt.Errorf("%w: stop the workspace's running previews and tunnels before changing edge ownership; configure customer DNS and certificates before restarting them", ErrInvalid)
 
-// LiveItem is one running preview, tunnel or browser terminal an edge ownership change would strand.
-// MachineID is set for a terminal, which is closed per machine.
+// LiveItem is one running preview or tunnel an edge ownership change would strand. Browser terminals are not
+// listed: they always use Paperboat's edges, whatever the mode.
 type LiveItem struct {
-	Kind      string `json:"kind"` // preview | tunnel | terminal
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	MachineID string `json:"machine_id,omitempty"`
+	Kind string `json:"kind"` // preview | tunnel
+	ID   string `json:"id"`
+	Name string `json:"name"`
 }
 
 // LivePublicationsError is ErrLiveEdgeModeChange with how many things are still running and the first few by name.
@@ -31,14 +30,11 @@ type LivePublicationsError struct {
 func (e *LivePublicationsError) Error() string { return ErrLiveEdgeModeChange.Error() }
 func (e *LivePublicationsError) Unwrap() error { return ErrLiveEdgeModeChange }
 
-// liveEdgeSQL lists a workspace's running previews, tunnels and attached browser terminals (args: account, team or
-// NULL): everything a change of edge ownership would strand. A terminal counts as the planlimits BrowserTerminals
-// rule does: a live edge attachment, once per terminal session.
-const liveEdgeSQL = `SELECT kind,id,name,machine_id,count(*) OVER () FROM (
- SELECT 'preview' AS kind,id,endpoint AS name,'' AS machine_id FROM paperboat.preview_leases WHERE ($2::text IS NOT NULL OR account_id=$1) AND owner_team_id IS NOT DISTINCT FROM $2::text AND terminal_state='active' AND lease_deadline>now()
- UNION ALL SELECT 'tunnel',t.id,t.name,'' FROM paperboat.tunnels t WHERE ($2::text IS NOT NULL OR t.account_id=$1) AND paperboat.publication_workspace_team('tunnel',t.id) IS NOT DISTINCT FROM $2::text AND desired_state='active' AND deleted_at IS NULL
- UNION ALL SELECT 'terminal',resource_id,coalesce(nullif(resource_name,''),'Terminal')||' on '||coalesce(nullif(machine_name,''),machine_id),machine_id FROM (SELECT DISTINCT ON(resource_id) * FROM paperboat.native_usage_authorities
-  WHERE workspace_id=CASE WHEN $2::text IS NOT NULL THEN 'team:'||$2::text ELSE 'personal:'||$1 END AND resource_kind='terminal' AND edge_node_id IS NOT NULL AND coalesce(attached_until,expires_at)>now() ORDER BY resource_id) terminals
+// liveEdgeSQL lists a workspace's running previews and tunnels (args: account, team or NULL): everything a
+// change of edge ownership would strand.
+const liveEdgeSQL = `SELECT kind,id,name,count(*) OVER () FROM (
+ SELECT 'preview' AS kind,id,endpoint AS name FROM paperboat.preview_leases WHERE ($2::text IS NOT NULL OR account_id=$1) AND owner_team_id IS NOT DISTINCT FROM $2::text AND terminal_state='active' AND lease_deadline>now()
+ UNION ALL SELECT 'tunnel',t.id,t.name FROM paperboat.tunnels t WHERE ($2::text IS NOT NULL OR t.account_id=$1) AND paperboat.publication_workspace_team('tunnel',t.id) IS NOT DISTINCT FROM $2::text AND desired_state='active' AND deleted_at IS NULL
 ) live ORDER BY kind,name,id LIMIT 50`
 
 // refuseLiveEdgeChange returns a LivePublicationsError (the first 50 running things, and the full count) when the workspace still has running resources.
@@ -51,7 +47,7 @@ func refuseLiveEdgeChange(ctx context.Context, tx *db.Tx, account string, team a
 	live := &LivePublicationsError{}
 	for rows.Next() {
 		var item LiveItem
-		if err = rows.Scan(&item.Kind, &item.ID, &item.Name, &item.MachineID, &live.Count); err != nil {
+		if err = rows.Scan(&item.Kind, &item.ID, &item.Name, &live.Count); err != nil {
 			return err
 		}
 		live.Items = append(live.Items, item)

@@ -87,5 +87,5 @@ func writeLiveEdgeChange(w http.ResponseWriter, r *http.Request, live *selfhost.
 	if items == nil {
 		items = []selfhost.LiveItem{}
 	}
-	writeErrorDetails(w, r, http.StatusConflict, "previews_running", "Stop this workspace's running previews, tunnels and browser terminals before switching between Paperboat's edges and your own servers.", map[string]any{"count": live.Count, "items": items})
+	writeErrorDetails(w, r, http.StatusConflict, "previews_running", "Stop this workspace's running previews and tunnels before switching between Paperboat's edges and your own servers.", map[string]any{"count": live.Count, "items": items})
 }

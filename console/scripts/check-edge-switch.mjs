@@ -1,8 +1,8 @@
 // Browser check for Network > Edges > Change: switching between Paperboat's edges and your own servers while
-// previews, tunnels and browser terminals run. The server API is stubbed (no account or server needed), so the
+// previews and tunnels run. The server API is stubbed (no account or server needed), so the
 // check shows what the dialog does with the 409 `previews_running` answer and the three follow-ups: the refusal
 // lists what runs by name, "Stop these and switch" stays disabled until "switch edges" is typed, confirming
-// stops each (preview ended, tunnel paused, terminal closed) before asking again, and the dialog then shows the
+// stops each (preview ended, tunnel paused) before asking again, and the dialog then shows the
 // cutover view with each tunnel hostname's DNS state.
 //   ORIGIN=<console origin, e.g. http://localhost:3199> CHROME=<Chromium> [PW_MODULE=<playwright-core index.mjs>] node check-edge-switch.mjs
 // The console only needs any session cookie (proxy.ts); every /api/v1 call is answered here.
@@ -27,7 +27,6 @@ const state = {
   live: [
     { kind: "preview", id: "pv1", name: "https://calm-otter.preview.example.test" },
     { kind: "tunnel", id: "tn1", name: "api tunnel" },
-    { kind: "terminal", id: "term1", name: "build shell on Work laptop", machine_id: "m1" },
   ],
   stopped: [],
   asked: 0,
@@ -57,7 +56,7 @@ await context.route("**/api/v1/**", async (route) => {
     if (state.stopped.length < state.live.length)
       return route.fulfill({
         status: 409, contentType: "application/json",
-        body: JSON.stringify({ error: { code: "previews_running", message: "Stop this workspace's running previews, tunnels and browser terminals first.", details: { count: state.live.length, items: state.live } } }),
+        body: JSON.stringify({ error: { code: "previews_running", message: "Stop this workspace's running previews and tunnels first.", details: { count: state.live.length, items: state.live } } }),
       })
     state.kind = "self_hosted"
     return ok(route, { primary: { ...edge("s1", "Server A"), kind: "self_hosted" }, fallback: { ...edge("s2", "Server B"), kind: "self_hosted" } })
@@ -75,7 +74,6 @@ await context.route("**/api/v1/**", async (route) => {
   if (path === "previews/pv1" && method === "DELETE") { state.stopped.push("preview"); return ok(route, {}) }
   if (path === "tunnels/tn1" && method === "GET") return ok(route, tunnel(state.stopped.includes("tunnel") ? "paused" : "active"))
   if (path === "tunnels/tn1/pause") { state.stopped.push("tunnel"); return ok(route, tunnel("paused")) }
-  if (path === "machines/m1/terminal-sessions/term1/close") { state.stopped.push("terminal"); return ok(route, {}) }
   if (path === "tunnels") return ok(route, { items: [tunnel("paused")], total: 1 })
   if (path === "tunnels/tn1/domains")
     return ok(route, { items: [{ schema: "paperboat.preview-tunnel/v1", kind: "domain_binding", id: "d1", account_id: "user", tunnel_id: "tn1", hostname: "api.myapp.example.test", route_id: "r1", state: state.kind === "managed" ? "ready" : "waiting_dns", match_type: "exact", dns: { target: "198.51.100.7" }, certificate: { state: "pending" }, generation: 2, etag: '"2"' }], total: 1 })
@@ -102,9 +100,8 @@ try {
   await dialog.getByText("have to stop before you switch").waitFor()
   const list = dialog.getByRole("list", { name: "Running on the current edges" })
   const items = (await list.locator("li").allInnerTexts()).map((text) => text.replace(/\s+/g, " "))
-  log(items.length === 3 && items.some((t) => t.includes("Preview") && t.includes("calm-otter.preview.example.test") && t.includes("ends")), "preview named by its address", items[0])
+  log(items.length === 2 && items.some((t) => t.includes("Preview") && t.includes("calm-otter.preview.example.test") && t.includes("ends")), "preview named by its address", items[0])
   log(items.some((t) => t.includes("Tunnel") && t.includes("api tunnel") && t.includes("is paused")), "tunnel named, and said to pause")
-  log(items.some((t) => t.includes("Terminal") && t.includes("build shell on Work laptop") && t.includes("closes")), "browser terminal named, and said to close")
 
   const confirm = dialog.getByRole("button", { name: "Stop these and switch" })
   log(await confirm.isDisabled(), "Stop these and switch is disabled until the confirmation is typed")
@@ -116,7 +113,7 @@ try {
   await confirm.click()
 
   await page.getByRole("heading", { name: "Edges changed" }).waitFor()
-  log(state.stopped.slice().sort().join() === "preview,terminal,tunnel", "preview ended, tunnel paused and terminal closed before the switch", state.stopped.join())
+  log(state.stopped.slice().sort().join() === "preview,tunnel", "preview ended and tunnel paused before the switch", state.stopped.join())
   const cutover = dialog.getByRole("list", { name: "Domains on the new edges" })
   await cutover.waitFor()
   const row = (await cutover.locator("li").first().innerText()).replace(/\s+/g, " ")
