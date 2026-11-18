@@ -23,7 +23,7 @@ const stageTitles: Record<Stage["name"], [string, string]> = {
   publish: ["Publish next keys", "Add the next SSH CA beside the active one for every account. Machines trust both."],
   pickup: ["Wait for machines", "Until online machines fetched the next keys, or the timeout."],
   switch: ["Switch signing", "The next CAs sign; the old ones stay trusted while certificates run out."],
-  revoke: ["Sign everyone out", "Every browser, CLI, API token and recipe session ends, except yours."],
+  revoke: ["Sign everyone out", "Every browser, CLI, API token and recipe session ends, and unused enrollment tokens are cancelled, except your own session."],
   reseal: ["Re-seal secrets", "Stored secrets move to the newest encryption key."],
   floor: ["Raise the update floor", "Clients older than the floor are told to update."],
   retire: ["Retire old keys", "The old CAs are removed at once. The old mint keys are withdrawn about an hour after the run starts, once machine credentials signed by them have expired."],
