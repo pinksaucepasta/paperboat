@@ -20,8 +20,7 @@ ALTER TABLE paperboat.announcements ADD CONSTRAINT announcements_audience_value_
 
 -- +goose Down
 SET LOCAL lock_timeout = '5s';
-DELETE FROM paperboat.announcements WHERE audience_kind = 'operators';
 ALTER TABLE paperboat.announcements DROP CONSTRAINT announcements_audience_kind_check;
 ALTER TABLE paperboat.announcements DROP CONSTRAINT announcements_audience_value_check;
-ALTER TABLE paperboat.announcements ADD CONSTRAINT announcements_audience_kind_check CHECK (audience_kind IN ('all', 'plan', 'team', 'user'));
-ALTER TABLE paperboat.announcements ADD CONSTRAINT announcements_audience_value_check CHECK (length(audience_value) <= 128 AND ((audience_kind = 'all') = (audience_value = '')));
+ALTER TABLE paperboat.announcements ADD CONSTRAINT announcements_audience_kind_check CHECK (audience_kind IN ('all', 'plan', 'team', 'user')) NOT VALID;
+ALTER TABLE paperboat.announcements ADD CONSTRAINT announcements_audience_value_check CHECK (length(audience_value) <= 128 AND ((audience_kind = 'all') = (audience_value = ''))) NOT VALID;
