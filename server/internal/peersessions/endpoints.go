@@ -50,7 +50,7 @@ const endpointPublishInterval = time.Minute
 // endpointsUpdate is the identity row write of a configuration request (one statement, the generation bump): it
 // stores the reported set ($4, NULL when none was sent) and a machine's home relay ($6, kept when NULL or not an
 // eligible relay of the account, so a machine cannot send peers to a relay that is not theirs; shortcut: a machine
-// that loses every relay keeps its last home here, which peers ignore once their own engine lacks that relay).
+// that reports none or loses every relay keeps its last home here until its next report names one: a window of one renewal; peers ignore a home their own engine lacks).
 // When
 // the latest set differs from the delivered one it is published now if the last publication is older than $5
 // seconds, else held back until then (endpoints_due_at); a set equal to the delivered one clears a held-back one.

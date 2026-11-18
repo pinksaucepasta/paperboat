@@ -251,4 +251,7 @@ func TestSignedHomeOfAWithdrawnRelayIsNotReinstalled(t *testing.T) {
 	if got := signed(); got != 0 {
 		t.Fatalf("a withdrawn relay's region %d is still the signed home", got)
 	}
+	if got := s.lb.peerDERPRegion(peer); got != two.RegionID {
+		t.Fatalf("handshakes go to region %d, a withdrawn relay's, not the remaining %d", got, two.RegionID)
+	}
 }

@@ -132,7 +132,7 @@ func (b *locoBackend) peerDERPRegion(peer key.NodePublic) tailcfg.DERPRegionID {
 	defer b.mu.Unlock()
 	if b.nm != nil {
 		for _, n := range b.nm.Peers {
-			if n.Key() == peer && n.HomeDERP() != 0 {
+			if n.Key() == peer && n.HomeDERP() != 0 && b.dm.Regions[n.HomeDERP()].HasDERP() { // a withdrawn relay's region has no carrier
 				return n.HomeDERP()
 			}
 		}
