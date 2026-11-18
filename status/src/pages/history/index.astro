@@ -1,0 +1,14 @@
+---
+import Base from "../../layouts/Base.astro"
+---
+
+<Base title="Incident history | Paperboat status" description="Past Paperboat incidents and maintenance, by month.">
+  <section>
+    <h1 class="banner-title" style="margin-bottom: var(--s4)">Incident history</h1>
+    <div id="history-list" class="grid" style="display: grid; gap: var(--s5)"><div class="skeleton"></div></div>
+  </section>
+  <div class="center"><a class="btn btn-quiet" href="/">Back to status</a></div>
+  <script>
+    import "../../scripts/status.ts"
+  </script>
+</Base>

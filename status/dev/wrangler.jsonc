@@ -1,0 +1,7 @@
+// Local demo (wrangler dev --local): the whole API and the cron in one process with the production catalog.
+{
+  "name": "paperboat-status-dev",
+  "main": "worker.ts",
+  "compatibility_date": "2026-11-01",
+  "d1_databases": [{ "binding": "DB", "database_name": "paperboat-status-dev", "database_id": "local" }]
+}
