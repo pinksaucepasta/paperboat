@@ -33,8 +33,8 @@ export const company = {
   euRepresentative: "TODO-USER: EU and UK representative (name and address)",
   /** India's Consumer Protection (E-Commerce) Rules 2020 require a named grievance officer. */
   grievanceOfficer: "TODO-USER: grievance officer name",
-  /** The date these terms take effect, e.g. "20 November 2026". */
-  effective: "TODO-USER: effective date",
+  /** The user's final answer (2026-11-19). */
+  effective: "14 November 2026",
 }
 
 /** True while any company fact is still missing: the pages are then drafts. */
