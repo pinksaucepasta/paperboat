@@ -107,7 +107,7 @@ VALUES($1,'default','1.0','epoch','ready',true,now(),'fsn1',$1,ARRAY['edge'],ARR
 
 	domain := func(table, id string) (target, recordType, value string, generation int64) {
 		t.Helper()
-		if err := store.SQL().QueryRowContext(ctx, `SELECT dns_target,expected_records->0->>'type',coalesce(expected_records->0->>'value',''),generation FROM paperboat.`+table+` WHERE id=$1`, id).Scan(&target, &recordType, &value, &generation); err != nil {
+		if err := store.SQL().QueryRowContext(ctx, `SELECT dns_target,coalesce(expected_records->0->>'type',''),coalesce(expected_records->0->>'value',''),generation FROM paperboat.`+table+` WHERE id=$1`, id).Scan(&target, &recordType, &value, &generation); err != nil {
 			t.Fatal(err)
 		}
 		return
