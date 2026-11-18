@@ -96,7 +96,9 @@ func LoadDeployment(path string) (Deployment, error) {
 		return Deployment{}, invalid("deployment config", errors.New("document is oversized"))
 	}
 	deployment := Deployment{MaxBodyBytes: defaultGatewayBodyBytes, MaxHeaderBytes: defaultGatewayHeaderBytes}
-	if err := strictjson.Decode(data, &deployment, 64); err != nil {
+	// Written by pbh or deploy tooling of another release: unknown fields are ignored (a rollback or an update must
+	// still start), duplicates stay refused, and every value this build uses is validated below.
+	if err := strictjson.DecodeResponse(data, &deployment, 64); err != nil {
 		return Deployment{}, invalid("deployment config", err)
 	}
 	if deployment.CredentialIssuer == "" {

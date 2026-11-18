@@ -50,6 +50,10 @@ func installRuntimeImages(ctx context.Context, dir string, c selfhost.Config, im
 			delete(before, role)
 		}
 	}
+	// The edge's durable store as the running image wrote it: a failed upgrade puts it back with the old image,
+	// which may not read what the new edge writes into it meanwhile.
+	edgeStore := filepath.Join(dir, "state", "state.json")
+	previousStore, storeErr := os.ReadFile(edgeStore)
 	if err := containers.SaveImages(dir, images); err != nil {
 		return err
 	}
@@ -76,6 +80,11 @@ func installRuntimeImages(ctx context.Context, dir string, c selfhost.Config, im
 	}
 	if saveErr := containers.SaveImages(dir, old); saveErr != nil {
 		return errors.Join(primary, saveErr)
+	}
+	if storeErr == nil {
+		if restoreErr := os.WriteFile(edgeStore, previousStore, 0o600); restoreErr != nil { // in place: owner kept
+			return errors.Join(primary, fmt.Errorf("restore the edge store for the previous image: %w", restoreErr))
+		}
 	}
 	if recoveryErr := restartInstallation(recovery, dir, c, claimed, before); recoveryErr != nil {
 		return errors.Join(primary, fmt.Errorf("%w: %w", commandError("previous images restored but service recovery failed; restart the service"), recoveryErr))

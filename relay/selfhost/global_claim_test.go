@@ -101,3 +101,38 @@ func TestBrowserAccessFlagEnablesBrowserAccessInExportedDeployment(t *testing.T)
 		}
 	}
 }
+
+// A 2026.11.16.2 install (testdata written by that release's Initialize) recorded browser access as a login
+// origin: it loads with browser access on, and the edge deployment regenerated from it still carries the origin
+// that release's edge image requires, so a failed upgrade that rolls the image back leaves it a config it reads.
+func TestPreviousReleaseInstallationKeepsBrowserAccessAndItsOrigin(t *testing.T) {
+	raw, err := os.ReadFile("testdata/selfhost-2026.11.16.2.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "selfhost.json"), raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s, err := load(dir)
+	if err != nil || !s.Config.BrowserAccess || s.Config.BrowserLoginOrigin != "https://console.example.test" {
+		t.Fatalf("previous release's installation = %+v, %v", s.Config, err)
+	}
+	setup := Setup{ScopeType: "account", Capability: "tunnel", ControlURL: "https://api.example.test", BrowserAccess: s.Config.BrowserAccess, BrowserLoginOrigin: s.Config.BrowserLoginOrigin}
+	_, usage, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := t.TempDir()
+	if err := exportRuntime(context.Background(), out, setup, Registration{NodeID: "node_x", UsageKeyID: "key", EdgePool: "pool", RuntimeCredential: "c"}, usage, json.RawMessage(`{}`)); err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(filepath.Join(out, "deployment.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var deployment map[string]any
+	if err := json.Unmarshal(body, &deployment); err != nil || deployment["browser_access_enabled"] != true || deployment["browser_login_origin"] != "https://console.example.test" {
+		t.Fatalf("deployment = %v, %v", deployment, err)
+	}
+}

@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "config": {
+    "name": "fixture",
+    "endpoint_host": "edge.example.test",
+    "listen": "0.0.0.0:8443",
+    "components": [
+      {
+        "capability": "tunnel",
+        "tcp_port": 27443,
+        "quic_port": 27444,
+        "region": "test",
+        "failure_domain": "test-host",
+        "capacity_limit": 128
+      }
+    ],
+    "browser_login_origin": "https://console.example.test"
+  },
+  "private_key": "WIRR92b8g-x8Ll5g-uaX3EHDnkQmIN65viKzYfBhMXVOAOa710TY6l96sA-777TYMGhXLFI9FgAMK7C-uN57mQ",
+  "usage_private_key": "JejPP2sEiVhj24UF0pD_a2gzyqhLYZ8jH6P7ZEJn6GFCXhxEcUYFCProbwzIdMILzTHGpcO4xXTMVj5OwUKbeQ",
+  "runtime_ready": false
+}

@@ -34,9 +34,10 @@ func TestBrowserAccessNeedsNoLoginOriginHere(t *testing.T) {
 	if _, err := LoadDeployment(writeDeployment(t, base+`,"browser_access_enabled":true}`)); err != nil {
 		t.Fatalf("browser access: %v", err)
 	}
-	// The server names the console; a deployment file carrying its own copy is refused.
-	if _, err := LoadDeployment(writeDeployment(t, base+`,"browser_access_enabled":true,"browser_login_origin":"https://login.example.test"}`)); err == nil {
-		t.Fatal("deployment accepted its own browser_login_origin")
+	// The server names the console; a login origin in the file (what 2026.11.16.2's pbh still writes for its own
+	// edge image) is ignored, never used.
+	if _, err := LoadDeployment(writeDeployment(t, base+`,"browser_access_enabled":true,"browser_login_origin":"https://login.example.test"}`)); err != nil {
+		t.Fatalf("deployment with a login origin: %v", err)
 	}
 }
 
@@ -58,7 +59,6 @@ func TestLoadDeploymentRejectsUnsafeProfiles(t *testing.T) {
 		func(value string) string {
 			return strings.Replace(value, `"tunnel_base_domain":"tunnels.example.test"`, `"tunnel_base_domain":"example.test"`, 1)
 		},
-		func(value string) string { return strings.TrimSuffix(value, "}") + `,"unknown":true}` },
 		func(value string) string {
 			return strings.TrimSuffix(value, "}") + `,"node_capacity":64}`
 		},
