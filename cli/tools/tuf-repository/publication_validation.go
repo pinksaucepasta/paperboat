@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/shared/releaseindex"
@@ -120,6 +121,12 @@ func verifyPublishedDeploymentPoliciesAt(targets *metadata.Metadata[metadata.Tar
 	type binding struct{ manifest, plan string }
 	versions := make(map[string]binding)
 	for name, info := range targets.Signed.Targets {
+		if strings.HasPrefix(name, selfhostTargetPrefix) {
+			if err := validateSelfhostTarget(name, info); err != nil {
+				return err
+			}
+			continue
+		}
 		// The signed schema validates platform and asset names independently of
 		// which products the next release ships.
 		if info == nil || info.Custom == nil {

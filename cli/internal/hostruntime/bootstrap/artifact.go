@@ -3,7 +3,6 @@ package bootstrap
 import (
 	"context"
 	"crypto/sha256"
-	_ "embed"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -21,6 +20,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/shared/httptransport"
 	"github.com/pinksaucepasta/paperboat/shared/releaseindex"
+	"github.com/pinksaucepasta/paperboat/shared/tufroot"
 	"github.com/theupdateframework/go-tuf/v2/metadata/updater"
 )
 
@@ -37,8 +37,7 @@ var (
 	// ErrReleasePlatformUnpublished: the verified official release lists no build for this platform.
 	ErrReleasePlatformUnpublished = errors.New("the official release has no build for this platform")
 
-	//go:embed trusted-root.json
-	trustedRoot []byte
+	trustedRoot = tufroot.TrustedRoot
 )
 
 type ArtifactTarget struct {

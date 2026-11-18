@@ -109,6 +109,14 @@ export async function pairNode(input: { address: string; code: string; scope: Re
 export const removeInstallation = (installation: Installation) =>
   write(`selfhost/installations/${encodeURIComponent(installation.installation_id)}`, "DELETE")
 
+/** Asks the node to update to the newest self-host release at its next check-in (within a minute). */
+export const requestUpdate = (installation: Installation) =>
+  write(`selfhost/installations/${encodeURIComponent(installation.installation_id)}/update`, "POST", {})
+
+/** An update the node is still running (the server records each step it reports). */
+export const updating = (installation: Installation) =>
+  Boolean(installation.update && !["succeeded", "rolled_back", "failed"].includes(installation.update.state))
+
 /** Tunnel servers: checks the node's public ingress answers before it's used for publications. */
 export const verifyIngress = (installation: Installation) =>
   write(`selfhost/installations/${encodeURIComponent(installation.installation_id)}/verify-ingress`, "POST", {})

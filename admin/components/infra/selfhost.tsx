@@ -4,7 +4,7 @@ import { useMemo, useState } from "react"
 import { ActionDialog } from "@/components/action-dialog"
 import { CommandBlock } from "@/components/command-block"
 import { Panel } from "@/components/page"
-import { RowMenu } from "@/components/row-menu"
+import { RowMenu, type DialogControl, type RowAction } from "@/components/row-menu"
 import { ErrorBlock } from "@/components/error-block"
 import { StatusBadge } from "@/components/filters"
 import { SelectField, TextField } from "@/components/fields"
@@ -14,6 +14,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { PagerBar } from "@/components/data-table"
 import { useCursorList } from "@/lib/paging"
 import { operatorAction, useOperator, type Data } from "@/lib/api"
+import { useNow } from "@/lib/use-now"
 
 type Inventory = Data<"/v1/admin/selfhost/installations">
 type Installation = Inventory["installations"][number]
@@ -74,13 +75,50 @@ function EnrolFlow() {
   )
 }
 
+const updateSteps: Record<string, string> = {
+  requested: "waiting for check-in",
+  downloading: "downloading",
+  verifying: "verifying signature",
+  swapping: "keeping current version",
+  checking: "installing, health check",
+  succeeded: "updated",
+  rolled_back: "rolled back",
+  failed: "update failed",
+}
+
+/** The node's release, how its last update went (live while it runs), and whether it is outdated or below the floor. */
+function VersionCell({ i }: { i: Installation }) {
+  const update = i.update
+  const now = useNow()
+  const recent = update && now - Date.parse(update.updated_at) < 86_400_000
+  const failure = update && (update.state === "failed" || update.state === "rolled_back")
+  return (
+    <td data-node-version={i.version ?? ""}>
+      <div className="tabular-nums">{i.version || "—"}</div>
+      {update && recent ? (
+        <div className={failure ? "text-xs text-destructive" : "text-xs text-muted-foreground"} title={failure ? `${update.detail ?? ""} ${update.support_reference ?? ""}`.trim() : undefined} data-node-update={update.state}>
+          {update.target_version}: {updateSteps[update.state] ?? update.state}
+          {failure && update.support_reference ? ` · ${update.support_reference}` : ""}
+        </div>
+      ) : i.update_required ? (
+        <div className="text-xs text-destructive" title={i.update_required}>Update required</div>
+      ) : i.update_available ? (
+        <div className="text-xs text-muted-foreground">Outdated: {i.update_available} published</div>
+      ) : null}
+    </td>
+  )
+}
+
 function Row({ i, admin }: { i: Installation; admin: boolean }) {
+  const running = i.update && !["succeeded", "rolled_back", "failed"].includes(i.update.state)
+  const target = i.update_available
   return (
     <tr className="[&>td]:h-14 [&>td]:px-3" data-installation={i.installation_id}>
       <td><div className="font-medium">{i.name || i.node_id}</div><div className="text-xs text-muted-foreground">{i.endpoint_host || "Address pending"}</div></td>
       <td className="first-letter:uppercase">{i.capability}</td>
       <td><StatusBadge state={i.enrollment_state === "pending" ? "waiting" : i.ready ? "ready" : "stale"} /></td>
       <td className="first-letter:uppercase">{i.scope_kind}</td>
+      <VersionCell i={i} />
       <td>{i.last_heartbeat_at ? <Time iso={i.last_heartbeat_at} relative /> : "Waiting"}</td>
       <td>
         {admin && (
@@ -88,6 +126,25 @@ function Row({ i, admin }: { i: Installation; admin: boolean }) {
             label={i.name || i.node_id}
             data-installation-actions={i.installation_id}
             actions={[
+              ...(target && !running
+                ? ([
+                    {
+                      key: "update",
+                      label: `Update to ${target}`,
+                      dialog: (c: DialogControl) => (
+                        <ActionDialog
+                          {...c}
+                          title={`Update ${i.name || i.node_id} to ${target}`}
+                          description="The node checks in within a minute, verifies the signed release, keeps the current version, and rolls back on its own if the new one fails its health check. Progress shows in this row."
+                          target={i.installation_id}
+                          confirmWord={i.installation_id}
+                          submitLabel="Update"
+                          run={(h) => operatorAction("POST", `/v1/admin/selfhost/installations/${encodeURIComponent(i.installation_id)}/update`, h)}
+                        />
+                      ),
+                    },
+                  ] satisfies RowAction[])
+                : []),
               {
                 key: "remove",
                 label: "Remove",
@@ -133,7 +190,7 @@ export function SelfhostTab() {
             <table className="w-full min-w-[40rem] border-collapse text-sm">
               <thead>
                 <tr className="border-b border-divider text-left text-xs text-muted-foreground">
-                  {["Node", "Runs", "State", "Scope", "Seen", ""].map((h) => <th key={h} scope="col" className="h-9 px-3 font-normal">{h}</th>)}
+                  {["Node", "Runs", "State", "Scope", "Version", "Seen", ""].map((h) => <th key={h} scope="col" className="h-9 px-3 font-normal">{h}</th>)}
                 </tr>
               </thead>
               <tbody className="divide-y divide-divider">{q.data.installations.map((i) => <Row key={i.installation_id} i={i} admin={admin} />)}</tbody>
