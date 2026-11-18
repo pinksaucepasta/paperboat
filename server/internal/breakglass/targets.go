@@ -42,5 +42,9 @@ var revocations = []struct{ name, table, live, created, set string }{
 	{"api_tokens", "api_tokens", `revoked_at IS NULL`, "created_at", `revoked_at = now(), revoked_by = 'break_glass'`},
 	{"recipes", "recipes", `revoked_at IS NULL`, "created_at", `revoked_at = now(), revoked_by = 'break_glass'`},
 	{"device_grants", "device_grants", `state IN ('pending', 'approved')`, "issued_at", `state = 'denied', denied_at = now(), version = version + 1`},
+	// A breach exposes unused enrollment tokens (`pb machine add`) and unredeemed install material; owners issue new ones.
+	// The same end states the product gives a pairing when its machine is removed (machine_cleanup.sql).
+	{"enrollment_tokens", "user_machine_pairings", `installation_state = 'awaiting_bootstrap' AND bootstrap_token_hash IS NOT NULL`, "created_at", `installation_state = 'deleted', bootstrap_token_hash = NULL, bootstrap_token_ciphertext = NULL, expires_at = least(expires_at, now()), updated_at = now()`},
+	{"pairing_install_material", "user_machine_pairings", `state IN ('pending', 'approved') AND installation_config_ciphertext IS NOT NULL`, "created_at", `state = 'denied', denied_at = now(), installation_state = 'cancelled', installation_config_ciphertext = NULL, installation_config_nonce = NULL, installation_config_consumed_at = NULL, installation_recovery_operation_key = NULL, expires_at = least(expires_at, now()), updated_at = now()`},
 	{"machine_access_sessions", "user_machine_access_sessions", `state = 'active'`, "created_at", `state = 'revoked', revoked_at = now(), revocation_reason = 'break_glass', updated_at = now()`},
 }
