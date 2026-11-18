@@ -102,6 +102,7 @@ type world struct {
 	sfx   string
 	// fetching lists the machines that fetch their CAs after every step, a second apart, as hosts do.
 	fetching []machine
+	jumped   bool
 }
 
 func newWorld(t *testing.T) *world {
@@ -118,7 +119,7 @@ func newWorld(t *testing.T) *world {
 	w.cfg = Config{
 		Store: store, SSH: w.ssh, Mint: fakeMint{active: "mint-new", published: []string{"mint-new", "mint-old"}}, Floor: w.floor, TOTP: w.totp,
 		EncryptionKey: ring, SessionKeys: []string{"session-key-new-0123456789-0123456789", "session-key-old-0123456789-0123456789"},
-		PickupThreshold: 1, PickupTimeout: time.Hour, OnlineWindow: time.Hour, Batch: 2, Now: func() time.Time { return w.clock },
+		PickupThreshold: 1, PickupTimeout: time.Hour, MintDrain: 2 * time.Hour, OnlineWindow: time.Hour, Batch: 2, Now: func() time.Time { return w.clock },
 	}
 	w.rebuild()
 	// One run at a time per database: a run another test left behind must not block this one.
@@ -127,6 +128,7 @@ func newWorld(t *testing.T) *world {
 	}
 	end()
 	w.exec(`DELETE FROM paperboat.managed_ssh_ca_fetches`) // machines of earlier tests do not fetch any more
+	w.exec(`DELETE FROM paperboat.mint_withdrawn_keys`)
 	t.Cleanup(end)
 	return w
 }
@@ -243,6 +245,15 @@ func (w *world) step(id string) Run {
 	run, err := w.svc.Get(context.Background(), id)
 	if err != nil {
 		w.t.Fatal(err)
+	}
+	// Retire removes the CAs at once but keeps the old mint key until machine credentials signed by it have
+	// expired: it is still published here, and the clock then jumps past the drain.
+	if retire := stageOf(run, StageRetire); retire.Detail["ca_pickup_done"] == true && retire.State != stageDone && !w.jumped {
+		if slices.Contains(w.mintWithdrawn(), "mint-old") {
+			w.t.Fatal("the old mint key was withdrawn before machines could renew their credentials")
+		}
+		w.jumped = true
+		w.clock = w.clock.Add(w.cfg.MintDrain)
 	}
 	return run
 }
