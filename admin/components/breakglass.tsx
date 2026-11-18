@@ -55,7 +55,7 @@ export function BreakGlass() {
 }
 
 function RunView({ run }: { run: Run }) {
-  const waiting = run.stages.find((s) => s.state === "running" && run.pickups?.[s.name])
+  const waiting = run.state !== "running" ? undefined : run.stages.find((s) => s.state === "running" && run.pickups?.[s.name])
   const pickup = waiting ? run.pickups?.[waiting.name] : undefined
   return (
     <div className="flex flex-col gap-4" data-breakglass-run={run.state}>
@@ -71,7 +71,7 @@ function RunView({ run }: { run: Run }) {
           <li key={stage.name} className="flex flex-col gap-1 px-4 py-3" data-stage={stage.name} data-stage-state={stage.state}>
             <div className="flex items-center justify-between gap-3">
               <span className="text-sm font-medium">{index + 1}. {stageTitles[stage.name][0]}</span>
-              <StatusBadge state={stage.state} />
+              <StatusBadge state={run.state === "cancelled" && stage.state === "running" ? "stopped" : stage.state} />
             </div>
             <span className="text-xs text-muted-foreground">{stageTitles[stage.name][1]}</span>
             {stage.state !== "pending" && stage.state !== "skipped" && <span className="font-mono text-xs">{counts(stage.detail)}</span>}
@@ -146,7 +146,7 @@ function PreviewView({ preview, onStarted }: { preview: Preview; onStarted: () =
       </ul>
       <Facts
         rows={[
-          ["Accounts with an SSH CA", `${preview.accounts_with_ssh_ca} (${preview.ssh_cas} CAs${preview.accounts_mid_rotation ? `, ${preview.accounts_mid_rotation} mid-rotation are left alone` : ""})`],
+          ["Accounts with an SSH CA", `${preview.accounts_with_ssh_ca} (${preview.ssh_cas} ${preview.ssh_cas === 1 ? "CA" : "CAs"}${preview.accounts_mid_rotation ? `, ${preview.accounts_mid_rotation} mid-rotation are left alone` : ""})`],
           ["Machines expected to pick up the new keys", `${preview.machines_expected_to_pick_up} online of ${preview.machines}`],
           ["Sessions and tokens revoked", `${total(preview.sessions_and_tokens_to_revoke)} (${Object.entries(preview.sessions_and_tokens_to_revoke).map(([k, v]) => `${k.replaceAll("_", " ")} ${v}`).join(", ")})`],
           ["Other operator sessions revoked", String(preview.other_operator_sessions_to_revoke)],
