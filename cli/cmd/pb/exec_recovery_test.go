@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/api"
+	"github.com/pinksaucepasta/paperboat/cli/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/identity"
 	"github.com/pinksaucepasta/paperboat/cli/internal/localapi"
 	"github.com/pinksaucepasta/paperboat/cli/internal/tunnel"
@@ -197,15 +198,28 @@ func runExecRecoveryHandshake(t *testing.T, transient bool) {
 	command.SetOut(out)
 	command.SetErr(&stderr)
 	command.SetArgs([]string{"--config", configPath, "--no-customization", "exec", "target", "--", "fixture-command"})
+	// The command prints only a safe sentence; the observed failures carry what ended each attachment, which is the one
+	// thing a failing Windows runner cannot otherwise show (this test failed there without a visible cause).
+	var faultsMu sync.Mutex
+	var faults []string
+	restoreFaults := errorreport.InstallFaultObserver(func(_ context.Context, f errorreport.Fault) {
+		faultsMu.Lock()
+		faults = append(faults, fmt.Sprintf("%s errno=%d chain=%v", f.ErrorType, f.Errno, f.ErrorChain))
+		faultsMu.Unlock()
+	})
+	defer restoreFaults()
 	commandCtx, finish := context.WithTimeout(t.Context(), 5*time.Second)
 	defer finish()
 	err = command.ExecuteContext(commandCtx)
+	faultsMu.Lock()
+	observed := strings.Join(faults, " | ")
+	faultsMu.Unlock()
 	if transient {
 		if err != nil || opens.Load() != 3 || descriptors.Load() != 0 || out.String() != "beforeafter" {
-			t.Fatalf("replacement handshake consumed recovery: opens=%d descriptors=%d output=%q err=%v", opens.Load(), descriptors.Load(), out.String(), err)
+			t.Fatalf("replacement handshake consumed recovery: opens=%d descriptors=%d output=%q err=%v observed=%s", opens.Load(), descriptors.Load(), out.String(), err, observed)
 		}
 	} else if err == nil || opens.Load() != 2 || descriptors.Load() != 0 || out.String() != "before" {
-		t.Fatalf("authoritative rejection was retried: opens=%d descriptors=%d output=%q err=%v", opens.Load(), descriptors.Load(), out.String(), err)
+		t.Fatalf("authoritative rejection was retried: opens=%d descriptors=%d output=%q err=%v observed=%s", opens.Load(), descriptors.Load(), out.String(), err, observed)
 	}
 }
 
