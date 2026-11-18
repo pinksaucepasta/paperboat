@@ -191,7 +191,7 @@ func validateUsageReport(r UsageReport) error {
 	return nil
 }
 
-func sameUsageReport(existing dbsqlc.GetControlUsageReceiptRow, r UsageReport) bool {
+func sameUsageReport(existing dbsqlc.ControlUsageReceipt, r UsageReport) bool {
 	return existing.AuthorityID == r.AuthorityID && existing.EdgeNodeID == r.EdgeNodeID && existing.CounterEpoch == r.CounterEpoch &&
 		existing.EnvironmentID == r.EnvironmentID && existing.RouteID == r.RouteID &&
 		existing.RouteRevision == r.RouteRevision && existing.Direction == r.Direction &&
