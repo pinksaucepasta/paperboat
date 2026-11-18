@@ -9,8 +9,9 @@ export type StatusProvider = {
   /** False when the panel has no status page connected: the section says so and never errors. */
   configured(): boolean
   state(): Promise<unknown>
-  createIncident(input: unknown): Promise<unknown>
-  updateIncident(id: string, input: unknown): Promise<unknown>
+  /** `key` makes a retried write a no-op: the same key returns the first result instead of a second incident and a second mail. */
+  createIncident(input: unknown, key?: string): Promise<unknown>
+  updateIncident(id: string, input: unknown, key?: string): Promise<unknown>
   createMaintenance(input: unknown): Promise<unknown>
   cancelMaintenance(id: string): Promise<unknown>
 }
@@ -25,12 +26,12 @@ export class StatusProviderError extends Error {
 export const ownStatusProvider: StatusProvider = (() => {
   const base = () => process.env.STATUS_API_URL
   const token = () => process.env.STATUS_ADMIN_TOKEN
-  async function call(path: string, method: "GET" | "POST", body?: unknown) {
+  async function call(path: string, method: "GET" | "POST", body?: unknown, key?: string) {
     let res: Response
     try {
       res = await fetch(new URL(`/api/admin/${path}`, base()), {
         method,
-        headers: { authorization: `Bearer ${token()}`, "content-type": "application/json" },
+        headers: { authorization: `Bearer ${token()}`, "content-type": "application/json", ...(key ? { "idempotency-key": key } : {}) },
         body: body === undefined ? undefined : JSON.stringify(body),
         cache: "no-store",
         signal: AbortSignal.timeout(15_000),
@@ -45,8 +46,8 @@ export const ownStatusProvider: StatusProvider = (() => {
   return {
     configured: () => Boolean(base() && token()),
     state: () => call("state", "GET"),
-    createIncident: (input) => call("incidents", "POST", input),
-    updateIncident: (id, input) => call(`incidents/${encodeURIComponent(id)}/updates`, "POST", input),
+    createIncident: (input, key) => call("incidents", "POST", input, key),
+    updateIncident: (id, input, key) => call(`incidents/${encodeURIComponent(id)}/updates`, "POST", input, key),
     createMaintenance: (input) => call("maintenance", "POST", input),
     cancelMaintenance: (id) => call(`maintenance/${encodeURIComponent(id)}/cancel`, "POST", {}),
   }
