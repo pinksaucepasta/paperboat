@@ -190,7 +190,7 @@ function Plan({
       {resets && resets !== billing.period_end && billing.product_code && (
         <Row label="Bandwidth resets">{time.date(resets, "date")}</Row>
       )}
-      <Row label="Hosted allowance">{formatAllowance(billing)}</Row>
+      <Row label="Fair-use bandwidth">{formatAllowance(billing)}</Row>
       {billing.limits && (
         <>
           <Row label="Machines">{formatLimit(billing.limits.machines)}</Row>
@@ -349,7 +349,7 @@ function BillingSkeleton() {
   return (
     <div className="flex flex-col gap-10">
       <Section title="Plan" action={<Skeleton className="h-8 w-28" />}>
-        {["Plan", "Renews", "Hosted allowance", "Machines", "Previews & tunnels", "Browser terminals", "Public TCP tunnels"].map(
+        {["Plan", "Renews", "Fair-use bandwidth", "Machines", "Previews & tunnels", "Browser terminals", "Public TCP tunnels"].map(
           (label) => (
             <Row key={label} label={label}>
               {value("w-24")}

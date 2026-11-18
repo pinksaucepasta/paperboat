@@ -16,6 +16,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { LoadError } from "@/components/load-error"
 import { TableRowsSkeleton } from "@/components/skeletons"
 import { SectionHeading } from "@/components/section"
+import { FairUse } from "@/components/usage/fair-use"
 import { useTimeFormat } from "@/lib/use-time-format"
 import { useLastCount } from "@/lib/last-count"
 import { useWorkspaceId } from "@/lib/workspace"
@@ -23,7 +24,7 @@ import { useWorkspaceId } from "@/lib/workspace"
 /*
  * How much traffic Paperboat carried and which way it went: directly between machines, through a
  * relay, or through an edge (tunnels and previews). From `GET /v1/usage`; these are measurements,
- * not a bill.
+ * not a bill. Above them (workspace-wide only) the fair-use panel says what edge traffic is allowed.
  */
 
 /** The machine page's Usage tab. */
@@ -98,6 +99,7 @@ export function UsagePage({ machine: tabMachine }: { machine?: Machine }) {
 
   return (
     <section className="flex flex-col gap-6">
+      {!scope && <FairUse />}
       <div className="flex items-center gap-2">
         <ViewToggle
           value={period}

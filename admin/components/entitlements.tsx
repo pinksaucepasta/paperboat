@@ -23,10 +23,10 @@ const kinds: Record<string, { label: string; team?: boolean }> = {
   seats: { label: "Seats", team: true },
   viewers_per_terminal: { label: "Viewers per shared terminal" },
 }
-const label = (kind: string) => (kind === "bandwidth" ? "Bandwidth" : kinds[kind]?.label ?? kind)
+const label = (kind: string) => (kind === "bandwidth" ? "Bandwidth" : kind === "throttle_lift" ? "Throttle lift" : kinds[kind]?.label ?? kind)
 /** 1234567 as "1,234,567" (not toLocaleString: its output depends on the viewer's locale). */
 const count = (v: number) => String(v).replace(/\B(?=(\d{3})+(?!\d))/g, ",")
-const amount = (g: Grant) => (g.kind === "bandwidth" ? formatBytes(g.amount) : count(g.amount))
+const amount = (g: Grant) => (g.kind === "bandwidth" ? formatBytes(g.amount) : g.kind === "throttle_lift" ? "Full speed" : count(g.amount))
 
 /** An <input type=datetime-local> value to RFC 3339 UTC, "" when empty, undefined when it is not a future time. */
 const endsAt = (local: string, now: number): string | undefined => {
@@ -38,7 +38,8 @@ const endsAt = (local: string, now: number): string | undefined => {
 /**
  * What a customer can use beyond (or below) their plan: the bandwidth allowance with what operators granted, every counted limit
  * with the plan's value and any override, and the grants themselves. Writes: grant bandwidth (GB, optional end), override a limit
- * (a value, optional end), revoke a grant. Enforcement reads the same grants, so what is shown here is what is enforced.
+ * (a value, optional end), lift the bandwidth throttle (full speed while it runs), revoke a grant. Enforcement reads the same grants, so
+ * what is shown here is what is enforced.
  */
 export function Entitlements({ workspaceId, scope }: { workspaceId: string; scope: "personal" | "team" }) {
   const admin = useOperator()?.role === "admin"
@@ -75,6 +76,20 @@ export function Entitlements({ workspaceId, scope }: { workspaceId: string; scop
           <TextField label="Amount (GB)" value={gb} onChange={setGb} inputMode="decimal" hint="Decimal gigabytes: 100 = 100 GB, as the console counts them." />
           <TextField label="Ends" optional type="datetime-local" value={ends} onChange={setEnds} hint={ending === undefined ? "Pick a time in the future." : "Empty keeps it until you revoke it."} />
         </ActionDialog>
+        {e.bandwidth.throttled && (
+          <ActionDialog
+            title={`Lift the throttle of ${workspaceId}`}
+            description="Edge traffic of this workspace runs at full speed until the date, or until you revoke the lift. It is recorded with your reference."
+            target={workspaceId}
+            submitLabel="Lift throttle"
+            valid={ending !== undefined}
+            trigger={(open) => <Button size="lg" onClick={open} data-action="lift-throttle">Lift throttle</Button>}
+            run={(h) => operatorAction("POST", path, h, { entitlement: "throttle_lift", amount: 1, ...(ending ? { ends_at: ending } : {}) })}
+            onDone={() => setEnds("")}
+          >
+            <TextField label="Ends" optional type="datetime-local" value={ends} onChange={setEnds} hint={ending === undefined ? "Pick a time in the future." : "Empty keeps it until you revoke it."} />
+          </ActionDialog>
+        )}
         <ActionDialog
           title={`Override a limit of ${workspaceId}`}
           description="Replaces the plan's value for this workspace, higher or lower, and a newer override of the same limit replaces this one."
@@ -100,6 +115,18 @@ export function Entitlements({ workspaceId, scope }: { workspaceId: string; scop
             <span key="b" className="tabular-nums" data-entitlement-bandwidth>
               {plan === null ? `${formatBytes(e.bandwidth.usage_bytes)} used · no limit` : `${formatBytes(e.bandwidth.usage_bytes)} of ${formatBytes(plan + e.bandwidth.granted_bytes)}`}
               {plan !== null && e.bandwidth.granted_bytes > 0 && <span className="text-muted-foreground"> · {formatBytes(e.bandwidth.granted_bytes)} granted</span>}
+            </span>,
+          ],
+          [
+            "Edge speed",
+            <span key="t" data-entitlement-throttle={e.bandwidth.throttled ? "throttled" : e.bandwidth.throttle_lifted ? "lifted" : "full"}>
+              {e.bandwidth.throttled ? (
+                <>Throttled{e.bandwidth.resets_at && <> until <Time iso={e.bandwidth.resets_at} /></>}</>
+              ) : e.bandwidth.throttle_lifted ? (
+                "Full speed · throttle lifted by an operator"
+              ) : (
+                "Full speed"
+              )}
             </span>,
           ],
           ...e.limits.map((l): [string, React.ReactNode] => [
