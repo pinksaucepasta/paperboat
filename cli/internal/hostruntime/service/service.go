@@ -543,9 +543,10 @@ func renderLaunchd(config Config) ([]byte, error) {
 const UpdateNice = "10"
 const UpdateIOClass = "idle"
 
-// restartBackoff is every Paperboat unit's restart pacing. RestartSec=5s is the floor every systemd honours (a
-// fixed, sane delay, as tailscaled.service's Restart=on-failure is plain): it must stay above 2 s, because 5
-// starts in 10 s (systemd's default start limit) would leave a crash-looping unit failed for good. systemd >= 254
+// restartBackoff is every Paperboat unit's restart pacing. RestartSec=5s is the floor every systemd honours
+// (tailscaled.service sets only Restart=on-failure; we add a multi-second floor so a crash loop cannot spin). Units
+// that keep systemd's default start limit (the activation helper) need it above 2 s: 5 starts in 10 s would leave
+// the unit failed for good. systemd >= 254
 // also knows RestartSteps and RestartMaxDelaySec, which grow the delay from RestartSec to the maximum over the
 // steps (src/core/service.c service_restart_usec_nth); older systemd (Ubuntu 22.04 has 249, Debian 12 has 252)
 // ignores those two keys and keeps the fixed delay. Only keys 249 already parses may differ in meaning there.
