@@ -44,8 +44,8 @@ export default function AnnouncementsPage() {
               <span className="text-xs text-muted-foreground">{a.kind === "banner" ? `Banner · ${a.severity}` : "Notice"}</span>
             </span>
           ) },
-          { header: "Audience", className: "hidden md:table-cell", cell: (a) => <Mono>{audienceLabel(a)}</Mono> },
-          { header: "Time", className: "hidden lg:table-cell", cell: (a) => (
+          { header: "Audience", className: "hidden md:table-cell max-w-56", cell: (a) => <span className="block truncate"><Mono>{audienceLabel(a)}</Mono></span> },
+          { header: "Time", className: "hidden 2xl:table-cell", cell: (a) => (
             <span className="text-muted-foreground"><Time iso={a.starts_at} />{a.ends_at ? <> – <Time iso={a.ends_at} /></> : " – no end"}</span>
           ) },
           { header: "Seen", className: "hidden md:table-cell", cell: (a) => <span className="tabular-nums">{a.kind === "banner" ? `${a.dismissals} dismissed` : `${a.reads} read`}</span> },
