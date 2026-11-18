@@ -16,7 +16,7 @@ import (
 )
 
 // An account's first Team starts a 14-day trial: Checkout collects the card, the trialing
-// subscription is a paid team, the reminder mails owners, and a second team has no trial.
+// subscription is a paid team, the start is confirmed by mail (Stripe sends the reminders), and a second team has no trial.
 func TestTeamTrialFirstTeamOnlyWithCardAndReminder(t *testing.T) {
 	store := testStore(t)
 	ctx := context.Background()
@@ -33,7 +33,7 @@ func TestTeamTrialFirstTeamOnlyWithCardAndReminder(t *testing.T) {
 	t.Cleanup(func() {
 		c := context.Background()
 		for _, q := range []string{
-			`DELETE FROM paperboat.transactional_mail_outbox WHERE mail_id LIKE 'team-trial-ending:` + subscription + `:%' OR mail_id LIKE 'team-trial-started:` + subscription + `:%'`,
+			`DELETE FROM paperboat.transactional_mail_outbox WHERE mail_id LIKE 'team-trial-started:` + subscription + `:%'`,
 			`DELETE FROM paperboat.billing_terms_consents WHERE operation_id='` + key + `'`,
 			`DELETE FROM paperboat.stripe_events WHERE subscription_id='` + subscription + `'`,
 			`DELETE FROM paperboat.billing_workspaces WHERE provider_subscription_id='` + subscription + `'`,
@@ -113,17 +113,6 @@ func TestTeamTrialFirstTeamOnlyWithCardAndReminder(t *testing.T) {
 		if !strings.Contains(started, want) {
 			t.Errorf("trial-start confirmation lacks %q: %s", want, started)
 		}
-	}
-	reminder := billing.StripeWebhook{ID: "evt_tw" + suffix, Type: billing.TrialWillEndEvent}
-	reminder.Data.Object.Object, reminder.Data.Object.ID = "subscription", subscription
-	for range 2 {
-		if _, err := s.HandleWebhook(ctx, reminder); err != nil {
-			t.Fatalf("trial reminder: %v", err)
-		}
-	}
-	var mails int
-	if err := store.SQL().QueryRowContext(ctx, `SELECT count(*) FROM paperboat.transactional_mail_outbox WHERE mail_id=$1`, "team-trial-ending:"+subscription+":"+actor).Scan(&mails); err != nil || mails != 1 {
-		t.Fatalf("trial reminder mails=%d err=%v", mails, err)
 	}
 	second := in
 	second.OperationID, second.TeamID = key+"-2", team+"-2"
