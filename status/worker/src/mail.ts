@@ -2,6 +2,7 @@ import type { Env, Incident } from "./types.ts"
 
 export const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!)
 const origin = (env: Env) => (env.PUBLIC_ORIGIN ?? "").replace(/\/$/, "")
+const pageOrigin = (env: Env) => (env.PAGE_ORIGIN ?? env.PUBLIC_ORIGIN ?? "").replace(/\/$/, "")
 export const mailEnabled = (env: Env) => Boolean(env.MAIL_ENDPOINT && env.MAIL_KEY && env.MAIL_FROM && env.PUBLIC_ORIGIN)
 
 async function send(env: Env, to: string, subject: string, html: string, key: string) {
@@ -26,7 +27,7 @@ export async function sendIncident(env: Env, subs: { email: string; token: strin
     const done = await Promise.allSettled(subs.slice(i, i + 10).map((s) =>
       send(env, s.email, `[${update.status}] ${incident.title}`,
         `<h2>${esc(incident.title)}</h2><p><b>${esc(update.status)}</b></p><p>${esc(update.body).replace(/\n/g, "<br>")}</p>` +
-        `<p><a href="${origin(env)}">${origin(env)}</a> · <a href="${origin(env)}/api/unsubscribe?t=${s.token}">Unsubscribe</a></p>`,
+        `<p><a href="${pageOrigin(env)}">${pageOrigin(env)}</a> · <a href="${origin(env)}/api/unsubscribe?t=${s.token}">Unsubscribe</a></p>`,
         `${key}-${s.token}`)))
     failed += done.filter((d) => d.status === "rejected").length
   }

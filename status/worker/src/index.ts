@@ -120,7 +120,7 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
   }
   if (path === "/api/feed.xml" && request.method === "GET") {
     const snap = await readSnapshot(env.DB)
-    return new Response(feed(env.PUBLIC_ORIGIN ?? "", snap?.public.incidents ?? []), { headers: { "content-type": "application/rss+xml; charset=utf-8", "cache-control": "public, max-age=60" } })
+    return new Response(feed(env.PAGE_ORIGIN ?? env.PUBLIC_ORIGIN ?? "", snap?.public.incidents ?? []), { headers: { "content-type": "application/rss+xml; charset=utf-8", "cache-control": "public, max-age=60" } })
   }
   if (path === "/api/probe" && request.method === "POST") {
     const body = await request.text()
@@ -142,9 +142,22 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
   return fail(404, "not found")
 }
 
+/** The page is a separate Pages origin: it may read the status and subscribe, nothing else (admin and probe use bearer/HMAC, not cookies). */
+const PUBLIC_PATHS = new Set(["/api/status", "/api/feed.xml", "/api/subscribe"])
+function cors(env: Env, request: Request, path: string, res: Response): Response {
+  if (!env.PAGE_ORIGIN || !PUBLIC_PATHS.has(path)) return res
+  const out = new Response(res.body, res)
+  out.headers.set("access-control-allow-origin", env.PAGE_ORIGIN)
+  out.headers.set("vary", "origin")
+  return out
+}
+
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-    try { return await route(request, env, ctx) } catch (e) {
+    const path = new URL(request.url).pathname
+    if (request.method === "OPTIONS" && PUBLIC_PATHS.has(path) && env.PAGE_ORIGIN)
+      return cors(env, request, path, new Response(null, { status: 204, headers: { "access-control-allow-methods": "GET, POST", "access-control-allow-headers": "content-type", "access-control-max-age": "600" } }))
+    try { return cors(env, request, path, await route(request, env, ctx)) } catch (e) {
       console.error("status worker", e instanceof Error ? e.message : e)
       return fail(500, "internal error")
     }
@@ -152,8 +165,10 @@ export default {
   /** Every minute: the Worker's own vantage point reports, then every unit is decided again and the snapshot rebuilt. */
   async scheduled(_event: ScheduledController, env: Env): Promise<void> {
     const now = Date.now()
-    const own = await cloudflareReport(env)
-    await saveReport(env.DB, own.vantage, now, own.netOk, own.build, own.results)
+    if (env.NET_CHECK_URL) { // a deployment without NET_CHECK_URL (the staging drill) has no Worker vantage point
+      const own = await cloudflareReport(env)
+      await saveReport(env.DB, own.vantage, now, own.netOk, own.build, own.results)
+    }
     await evaluate(env.DB, now)
     await buildSnapshot(env.DB, now)
   },
