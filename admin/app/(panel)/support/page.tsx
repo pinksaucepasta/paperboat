@@ -3,7 +3,7 @@
 import { useRouter, useSearchParams } from "next/navigation"
 import { Suspense, useState } from "react"
 import { ErrorBlock } from "@/components/error-block"
-import { Mono, StatusBadge } from "@/components/filters"
+import { Copyable, Mono, StatusBadge } from "@/components/filters"
 import { MachinesOf } from "@/components/machines-of"
 import { Facts, Page, Panel } from "@/components/page"
 import { Time } from "@/components/time"
@@ -19,7 +19,7 @@ const pattern = /^support_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}
 
 export default function SupportPage() {
   return (
-    <Page title="Support lookup" description="One page for a support reference: the stored fault, its Sentry links, and the owner's account and machines.">
+    <Page title="Lookup">
       <Suspense>
         <Lookup />
       </Suspense>
@@ -44,10 +44,10 @@ function Lookup() {
           router.push(`/support?reference=${encodeURIComponent(text.trim())}`)
         }}
       >
-        <Input aria-label="Support reference" className="w-96 max-w-full font-mono" placeholder="support_xxxxxxxx-xxxx-4xxx-xxxx-xxxxxxxxxxxx" value={text} onChange={(e) => setText(e.target.value)} />
-        <Button type="submit">Look up</Button>
+        <Input aria-label="Support reference" className="h-8 w-full max-w-md border-transparent bg-surface font-mono md:text-sm dark:bg-surface" placeholder="support_…" value={text} onChange={(e) => setText(e.target.value)} spellCheck={false} />
+        <Button type="submit" size="lg">Look up</Button>
       </form>
-      {reference && !valid && <p role="alert" className="text-sm text-destructive" data-lookup-invalid>That is not a support reference. They look like support_ followed by a UUID.</p>}
+      {reference && !valid && <p role="alert" className="text-sm text-destructive" data-lookup-invalid>Not a support reference. It starts with support_ and a UUID.</p>}
       {valid && lookup.isError && <ErrorBlock what="this reference" error={lookup.error} retry={() => lookup.refetch()} />}
       {valid && lookup.isPending && <Skeleton className="h-40 w-full" />}
       {lookup.data && <Result data={lookup.data} />}
@@ -62,55 +62,55 @@ function Result({ data }: { data: Lookup }) {
     <div className="flex flex-col gap-6" data-lookup-result>
       <Facts
         rows={[
-          ["Reference", <Mono key="r">{data.support_reference}</Mono>],
+          ["Reference", <Copyable key="r" value={data.support_reference} />],
           ["Status", <StatusBadge key="s" state={data.status} />],
           ["Note", data.message],
-          ["Records dropped by this server", data.dropped_records],
-          ["Sentry", data.sentry_search_url ? <a key="u" className="underline" href={data.sentry_search_url} target="_blank" rel="noopener noreferrer">Search this reference in Sentry</a> : "—"],
+          ["Dropped records", data.dropped_records],
+          ["Sentry", data.sentry_search_url ? <a key="u" className="underline-offset-2 hover:underline" href={data.sentry_search_url} target="_blank" rel="noopener noreferrer">Open in Sentry</a> : "—"],
         ]}
       />
       {links.length > 0 && (
         <Panel title="Sentry events">
-          <ul className="border-t border-divider text-sm">
+          <ul className="text-sm">
             {links.map(([event, url]) => (
-              <li key={event} className="border-b border-divider py-2">
-                <a className="underline" href={url} target="_blank" rel="noopener noreferrer"><Mono>{event}</Mono></a>
+              <li key={event} className="border-b border-divider py-2.5">
+                <a className="underline-offset-2 hover:underline" href={url} target="_blank" rel="noopener noreferrer"><Mono>{event}</Mono></a>
               </li>
             ))}
           </ul>
         </Panel>
       )}
-      {owners.length === 0 && <p className="text-sm text-muted-foreground">No stored record carries this reference (records expire after seven days).</p>}
+      {owners.length === 0 && <p className="py-12 text-center text-sm text-muted-foreground">No records. They expire after 7 days.</p>}
       {owners.map(([owner, records]) => (
-        <Panel key={owner || "unattributed"} title={owner ? `Owner ${owner}` : "Not attributed to an account"}>
+        <Panel key={owner || "unattributed"} title={owner ? `Owner ${owner}` : "No owner"}>
           {records.map((r) => (
             <Facts
               key={r.id}
               rows={[
                 ["When", <Time key="t" iso={r.at} />],
                 [
-                  "This failure",
+                  "Occurrences",
                   r.group_occurrences ? (
                     <span key="g" data-failure-group>
-                      {r.group_occurrences} occurrence{r.group_occurrences === 1 ? "" : "s"}, first <Time iso={r.group_first_seen as string} />, latest <Time iso={r.group_last_seen as string} relative />
+                      {r.group_occurrences} occurrence{r.group_occurrences === 1 ? "" : "s"} · first <Time iso={r.group_first_seen as string} /> · latest <Time iso={r.group_last_seen as string} relative />
                     </span>
                   ) : (
                     "—"
                   ),
                 ],
                 ["Operation", `${r.component} · ${r.operation} · ${r.stage}`],
-                ["Outcome", `${r.outcome} (${r.severity}), code ${r.code}, cause ${r.cause}`],
+                ["Outcome", `${r.outcome} · ${r.severity} · ${r.code} · ${r.cause}`],
                 ["Release", r.release],
-                ["HTTP status", r.http_status ?? "—"],
-                ["Request id", r.request_id ? <Mono key="q">{r.request_id}</Mono> : "—"],
-                ["Sentry event", r.sentry_event_id ? <Mono key="e">{r.sentry_event_id}</Mono> : `not sent (${r.reporting})`],
+                ["HTTP", r.http_status ?? "—"],
+                ["Request", r.request_id ? <Mono key="q">{r.request_id}</Mono> : "—"],
+                ["Sentry event", r.sentry_event_id ? <Mono key="e">{r.sentry_event_id}</Mono> : `Not sent (${r.reporting})`],
               ]}
             />
           ))}
           {owner && <Owner id={owner} />}
         </Panel>
       ))}
-      {data.truncated && <p className="text-sm text-muted-foreground">More records exist than shown; narrow by owner.</p>}
+      {data.truncated && <p className="text-sm text-muted-foreground">Showing the first records only.</p>}
     </div>
   )
 }
@@ -123,7 +123,7 @@ function Owner({ id }: { id: string }) {
   return (
     <div className="flex flex-col gap-3" data-owner-card>
       <p className="text-sm">
-        <Link className="underline" href={`/users/${encodeURIComponent(id)}`}>{account.data.primary_email}</Link> · <StatusBadge state={account.data.status} />
+        <Link className="font-medium underline-offset-2 hover:underline" href={`/users/${encodeURIComponent(id)}`}>{account.data.primary_email}</Link> · <StatusBadge state={account.data.status} />
       </p>
       <MachinesOf owner={{ account: id }} />
     </div>

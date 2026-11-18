@@ -9,7 +9,7 @@ export function CopyReference({ reference }: { reference: string }) {
   const [copied, setCopied] = useState(false)
   return (
     <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
-      Reference <code className="font-mono" data-reference>{reference}</code>
+      Reference: <code className="font-mono break-all" data-reference>{reference}</code>
       <Button
         variant="ghost"
         size="icon-xs"

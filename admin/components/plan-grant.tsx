@@ -34,41 +34,46 @@ export function PlanGrant({ scope, id }: { scope: "personal" | "team"; id: strin
   const daysOk = /^\d{1,3}$/.test(days) && +days >= 1 && +days <= 366
   const seatsOk = scope === "personal" || (/^\d{1,4}$/.test(seats) && +seats >= 1 && +seats <= 128)
   return (
-    <Panel title="Plan" action={workspace.isError && !missing ? <span className="text-xs text-destructive">The plan could not be read.</span> : undefined}>
-      <Facts
-        rows={[
-          ["Plan", w?.product_code ? <>{w.product_code} <StatusBadge state={w.state} />{w.granted && <span className="ml-2 text-xs text-muted-foreground" data-plan-granted>Support grant (no Stripe subscription)</span>}</> : "Free"],
-          ["Ends", w?.period_end ? <Time iso={w.period_end} /> : "—"],
-          ...(scope === "team" && w ? [["Seats", w.quantity] as [string, React.ReactNode]] : []),
-        ]}
-      />
-      <div className="flex flex-wrap gap-2" data-plan-actions>
+    <Panel
+      title="Plan"
+      action={
+        <div className="flex items-center gap-2" data-plan-actions>
+          {workspace.isError && !missing && <span className="text-xs text-destructive">Couldn’t load the plan.</span>}
         <ActionDialog
           title={`Grant a plan to ${workspaceId}`}
-          description="Gives the workspace a plan without Stripe for a number of days; it ends by itself. It replaces an earlier grant and is refused while the workspace has a live Stripe subscription or a checkout in progress. If the customer subscribes later, their subscription replaces it."
+          description="A plan without Stripe that ends by itself. Refused while a Stripe subscription or checkout is live."
           target={workspaceId}
           submitLabel="Grant plan"
           valid={product !== "" && daysOk && seatsOk}
-          trigger={(open) => <Button variant="outline" onClick={open} data-action="grant-plan">Grant a plan</Button>}
+          trigger={(open) => <Button variant="outline" size="lg" onClick={open} data-action="grant-plan">Grant a plan</Button>}
           run={(h) => operatorAction("POST", `/v1/admin/billing/workspaces/${encodeURIComponent(workspaceId)}/grant`, h, { revision, product_code: product, days: +days, ...(scope === "team" ? { quantity: +seats } : {}) })}
         >
-          <SelectField label="Plan" value={product} onChange={setCode} options={choices.length ? choices.map((p): [string, string] => [p.code, `${p.display_name} (${p.code})`]) : [["", "No active plan in the catalog"]]} />
-          <TextField label="Days" value={days} onChange={setDays} inputMode="numeric" hint="1 to 366." />
-          {scope === "team" && <TextField label="Seats" value={seats} onChange={setSeats} inputMode="numeric" hint="1 to 128." />}
+          <SelectField label="Plan" value={product} onChange={setCode} options={choices.length ? choices.map((p): [string, string] => [p.code, `${p.display_name} (${p.code})`]) : [["", "No active plan"]]} />
+          <TextField label="Days" value={days} onChange={setDays} inputMode="numeric" hint="1–366" />
+          {scope === "team" && <TextField label="Seats" value={seats} onChange={setSeats} inputMode="numeric" hint="1–128" />}
         </ActionDialog>
         {w?.granted && (
           <ActionDialog
             title={`Revoke the grant of ${workspaceId}`}
-            description="Ends the granted plan now (the workspace has no plan after it). Only a grant can be revoked here; a Stripe subscription is cancelled in Stripe."
+            description="Ends the granted plan now. Stripe subscriptions are cancelled in Stripe."
             target={workspaceId}
             destructive
             confirmWord={workspaceId}
             submitLabel="Revoke grant"
-            trigger={(open) => <Button variant="destructive" onClick={open} data-action="revoke-grant">Revoke grant</Button>}
+            trigger={(open) => <Button variant="outline" size="lg" onClick={open} data-action="revoke-grant">Revoke grant</Button>}
             run={(h) => operatorAction("POST", `/v1/admin/billing/workspaces/${encodeURIComponent(workspaceId)}/revoke`, h, { revision })}
           />
         )}
-      </div>
+        </div>
+      }
+    >
+      <Facts
+        rows={[
+          ["Plan", w?.product_code ? <span className="inline-flex items-center gap-3">{w.product_code}<StatusBadge state={w.state} />{w.granted && <span className="text-xs text-muted-foreground" data-plan-granted>Granted</span>}</span> : "Free"],
+          ["Ends", w?.period_end ? <Time iso={w.period_end} /> : "—"],
+          ...(scope === "team" && w ? [["Seats", w.quantity] as [string, React.ReactNode]] : []),
+        ]}
+      />
     </Panel>
   )
 }

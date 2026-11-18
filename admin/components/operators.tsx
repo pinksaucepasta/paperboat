@@ -3,6 +3,7 @@
 import { useState } from "react"
 import { ActionDialog } from "@/components/action-dialog"
 import { ErrorBlock } from "@/components/error-block"
+import { RowMenu, type RowAction } from "@/components/row-menu"
 import { SelectField, TextField } from "@/components/fields"
 import { StatusBadge } from "@/components/filters"
 import { Button } from "@/components/ui/button"
@@ -24,17 +25,17 @@ export function CreateOperator() {
   return (
     <ActionDialog<Created>
       title="Invite an operator"
-      description="Creates the operator with no password and shows a setup token once, valid for 72 hours. Send it to them in person or over a private channel. They open this panel, enter their email, then the token, choose a password and set up an authenticator."
+      description="You get a setup token, shown once and valid for 72 hours. Send it to them privately."
       target="operators"
       submitLabel="Create invitation"
       valid={/^[^@\s]+@[^@\s]+$/.test(email.trim())}
-      trigger={(open) => <Button onClick={open} data-operator-action="create">Invite an operator</Button>}
+      trigger={(open) => <Button size="lg" onClick={open} data-operator-action="create">Invite operator</Button>}
       run={(h) => operatorAction<Created>("POST", "/v1/admin/operators", h, { email: email.trim(), role })}
       secrets={(r) => (r.setup_token ? [{ label: `Setup token for ${email.trim()}`, value: r.setup_token }] : [])}
       onDone={() => setEmail("")}
     >
-      <TextField label="Email" type="email" value={email} onChange={setEmail} autoComplete="off" hint="Inviting an email whose setup is not finished replaces the old token." />
-      <SelectField label="Role" value={role} onChange={setRole} options={roles} hint="Admins can manage operators, accounts, billing policy and infrastructure." />
+      <TextField label="Email" type="email" value={email} onChange={setEmail} autoComplete="off" />
+      <SelectField label="Role" value={role} onChange={setRole} options={roles} />
     </ActionDialog>
   )
 }
@@ -52,7 +53,7 @@ function SessionPicker({ id, value, onChange }: { id: string; value: string; onC
         label="Session"
         value={value}
         onChange={onChange}
-        options={[["all", `All live sessions (${rows.length})`], ...rows.map((s): [string, string] => [s.id, `${s.mfa_pending ? "Signing in" : "Signed in"} · started ${time.dateTime(s.created_at)} · ends ${time.dateTime(s.expires_at)}`])]}
+        options={[["all", `All (${rows.length})`], ...rows.map((s): [string, string] => [s.id, `${s.mfa_pending ? "Signing in" : "Signed in"} · ${time.dateTime(s.created_at)}`])]}
       />
       {rows.length === 0 && <span className="text-xs text-muted-foreground">No live sessions.</span>}
     </div>
@@ -62,58 +63,73 @@ function SessionPicker({ id, value, onChange }: { id: string; value: string; onC
 export function OperatorRowActions({ op }: { op: OperatorRow }) {
   const [session, setSession] = useState("all")
   const disabled = op.status === "disabled"
-  return (
-    <div className="flex flex-wrap gap-1.5" data-operator-row={op.email}>
-      <ActionDialog
-        title={`Sessions of ${op.email}`}
-        description="Ends one or all of this operator's live sessions. They can sign in again with their password and authenticator."
-        target={op.id}
-        submitLabel="End session"
-        valid={op.live_sessions > 0}
-        trigger={(open) => <Button size="xs" variant="outline" onClick={open} data-operator-action="sessions">Sessions ({op.live_sessions})</Button>}
-        run={(h) => operatorAction("POST", path(op.id, "sessions/revoke"), h, { session_id: session })}
-        onDone={() => setSession("all")}
-      >
-        <SessionPicker id={op.id} value={session} onChange={setSession} />
-      </ActionDialog>
-      <ActionDialog
-        title={`Reset the authenticator of ${op.email}`}
-        description="Deletes their authenticator and recovery codes and ends all their sessions. At their next sign-in they set up a new authenticator with just their password, so confirm the person out of band first."
-        target={op.id}
-        destructive
-        confirmWord={op.email}
-        submitLabel="Reset authenticator"
-        trigger={(open) => <Button size="xs" variant="outline" onClick={open} data-operator-action="mfa-reset">Reset MFA</Button>}
-        run={(h) => operatorAction("POST", path(op.id, "mfa-reset"), h, {})}
-      />
-      {disabled ? (
+  const actions: RowAction[] = [
+    {
+      key: "sessions",
+      label: "End sessions",
+      dialog: (c) => (
         <ActionDialog
-          title={`Enable ${op.email}`}
-          description="They can sign in again. Their earlier sessions stay ended."
+          {...c}
+          title={`Sessions of ${op.email}`}
+          description="They can sign in again with their password and authenticator."
           target={op.id}
-          submitLabel="Enable operator"
-          trigger={(open) => <Button size="xs" variant="outline" onClick={open} data-operator-action="enable">Enable</Button>}
-          run={(h) => operatorAction("POST", path(op.id, "enable"), h, {})}
-        />
-      ) : (
+          submitLabel="End session"
+          valid={op.live_sessions > 0}
+          run={(h) => operatorAction("POST", path(op.id, "sessions/revoke"), h, { session_id: session })}
+          onDone={() => setSession("all")}
+        >
+          {c.open && <SessionPicker id={op.id} value={session} onChange={setSession} />}
+        </ActionDialog>
+      ),
+    },
+    {
+      key: "mfa-reset",
+      label: "Reset MFA",
+      dialog: (c) => (
         <ActionDialog
-          title={`Disable ${op.email}`}
-          description="Blocks every sign-in and ends all their sessions now. Reversible. The last active admin cannot be disabled."
+          {...c}
+          title={`Reset the authenticator of ${op.email}`}
+          description="Deletes their authenticator and recovery codes and ends their sessions. Confirm who they are first."
           target={op.id}
           destructive
           confirmWord={op.email}
-          submitLabel="Disable operator"
-          trigger={(open) => <Button size="xs" variant="destructive" onClick={open} data-operator-action="disable">Disable</Button>}
-          run={(h) => operatorAction("POST", path(op.id, "disable"), h, {})}
+          submitLabel="Reset authenticator"
+          run={(h) => operatorAction("POST", path(op.id, "mfa-reset"), h, {})}
         />
-      )}
-    </div>
-  )
+      ),
+    },
+    disabled
+      ? {
+          key: "enable",
+          label: "Enable",
+          dialog: (c) => (
+            <ActionDialog {...c} title={`Enable ${op.email}`} description="They can sign in again." target={op.id} submitLabel="Enable operator" run={(h) => operatorAction("POST", path(op.id, "enable"), h, {})} />
+          ),
+        }
+      : {
+          key: "disable",
+          label: "Disable",
+          destructive: true,
+          dialog: (c) => (
+            <ActionDialog
+              {...c}
+              title={`Disable ${op.email}`}
+              description="Blocks sign-in and ends their sessions. Reversible."
+              target={op.id}
+              destructive
+              confirmWord={op.email}
+              submitLabel="Disable operator"
+              run={(h) => operatorAction("POST", path(op.id, "disable"), h, {})}
+            />
+          ),
+        },
+  ]
+  return <RowMenu label={op.email} actions={actions} data-operator-row={op.email} />
 }
 
 export function OperatorStatus({ op }: { op: OperatorRow }) {
-  if (op.invited && op.status === "active") return <span className="text-xs text-muted-foreground">Invited, not set up</span>
+  if (op.invited && op.status === "active") return <span className="inline-flex items-center gap-1.5 whitespace-nowrap" data-state-word="invited"><span className="size-1.5 rounded-full bg-muted-foreground/35" aria-hidden />Invited</span>
   return <StatusBadge state={op.status} />
 }
 
-export const operatorMfa = (op: OperatorRow) => (op.mfa_enrolled ? "Authenticator set" : op.invited ? "—" : "Not set up")
+export const operatorMfa = (op: OperatorRow) => (op.mfa_enrolled ? "Set" : op.invited ? "—" : "Not set up")

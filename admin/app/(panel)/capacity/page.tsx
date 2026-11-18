@@ -4,7 +4,6 @@ import { ErrorBlock } from "@/components/error-block"
 import { Mono } from "@/components/filters"
 import { Page, Stat } from "@/components/page"
 import { Time } from "@/components/time"
-import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useApiQuery, type Data } from "@/lib/api"
 import { formatBytes } from "@/lib/format"
@@ -28,10 +27,7 @@ export default function CapacityPage() {
   const data = capacity.data
   const flagged = data?.items.filter((n) => ["critical", "warning"].includes(worst(n) ?? "")) ?? []
   return (
-    <Page
-      title="Capacity"
-      description="CPU, memory, connections and traffic of every edge, relay and control-plane server, from their own heartbeats. Today and this month are UTC days; the monthly allowance applies to each VPS."
-    >
+    <Page title="Capacity">
       {capacity.isError ? (
         <ErrorBlock what="node capacity" error={capacity.error} retry={() => capacity.refetch()} />
       ) : !data ? (
@@ -40,27 +36,27 @@ export default function CapacityPage() {
         <div className="flex flex-col gap-4" data-capacity-ready>
           <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
             <Stat label="Nodes" value={data.total} note={`${data.items.filter((n) => n.kind === "edge").length} edges · ${data.items.filter((n) => n.kind === "relay").length} relays · ${data.items.filter((n) => n.kind === "server").length} servers`} />
-            <Stat label="Need attention" value={flagged.length} note={flagged.length === 0 ? "No warnings" : "See the highlighted rows"} />
-            <Stat label="Monthly allowance" value={formatBytes(data.thresholds.monthly_traffic_bytes)} note={`Warn at ${Math.round(data.thresholds.traffic_warn_fraction * 100)}%`} />
-            <Stat label="Thresholds" value={`${data.thresholds.edge_cpu_warn_percent}% CPU`} note={`Edge CPU over ${Math.round(data.thresholds.cpu_sustained_seconds / 60)} min · relay memory ${memory(data.thresholds.relay_rss_warn_bytes)}`} />
+            <Stat label="Need attention" value={flagged.length} />
+            <Stat label="Monthly allowance per server" value={formatBytes(data.thresholds.monthly_traffic_bytes)} note={`Warns at ${Math.round(data.thresholds.traffic_warn_fraction * 100)}%`} />
+            <Stat label="Edge CPU warning" value={`${data.thresholds.edge_cpu_warn_percent}%`} note={`For ${Math.round(data.thresholds.cpu_sustained_seconds / 60)} min · relay memory ${memory(data.thresholds.relay_rss_warn_bytes)}`} />
           </div>
           <div className="overflow-x-auto">
             <table className="w-full min-w-[64rem] border-collapse text-sm" data-table="capacity" data-state={data.items.length === 0 ? "empty" : "ready"}>
               <thead>
                 <tr className="border-b border-divider text-left text-xs text-muted-foreground">
-                  {["Node", "Where", "Version", "CPU now / sustained", "Memory", "Connections", "Today", "This month", "Last heartbeat"].map((h) => (
-                    <th key={h} scope="col" className="h-9 px-3 font-medium">{h}</th>
+                  {["Node", "Where", "Version", "CPU", "Memory", "Connections", "Today", "Month", "Seen"].map((h) => (
+                    <th key={h} scope="col" className="h-9 px-3 font-normal">{h}</th>
                   ))}
                 </tr>
               </thead>
-              <tbody>
+              <tbody className="divide-y divide-divider">
                 {data.items.map((n) => {
                   const level = worst(n)
                   return (
-                    <tr key={n.id} data-node={n.id} data-level={level ?? "ok"} className={cn("border-b border-divider align-top [&>td]:px-3 [&>td]:py-2", level === "critical" && "bg-destructive/10", level === "warning" && "bg-amber-500/10")}>
+                    <tr key={n.id} data-node={n.id} data-level={level ?? "ok"} className={cn("align-top [&>td]:px-3 [&>td]:py-3", level === "critical" && "bg-destructive/10", level === "warning" && "bg-amber-500/10")}>
                       <td>
                         <div className="flex flex-col gap-1">
-                          <span className="flex items-center gap-2"><Mono>{n.id}</Mono><Badge variant="outline">{n.kind}</Badge></span>
+                          <span className="flex items-baseline gap-2"><span className="font-medium">{n.id}</span><span className="text-xs text-muted-foreground">{n.kind}</span></span>
                           {n.warnings.map((w) => (
                             <span key={w.code} data-warning={w.code} className={cn("text-xs", w.severity === "critical" ? "text-destructive" : w.severity === "warning" ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground")}>
                               {w.message}
@@ -93,9 +89,9 @@ export default function CapacityPage() {
               </tbody>
             </table>
           </div>
-          {data.truncated && <p role="alert" className="text-sm text-destructive">More nodes exist than this page lists (the first {data.items.length}).</p>}
-          {data.items.length === 0 && <p className="py-12 text-center text-sm text-muted-foreground">No edge, relay or server has reported yet.</p>}
-          <p className="text-xs text-muted-foreground">Observed <Time iso={data.observed_at} relative />. Today is {data.today} (UTC); this month started {data.month_start}. Nodes of older builds show their heartbeat but no CPU, memory or traffic.</p>
+          {data.truncated && <p role="alert" className="text-sm text-destructive">Showing the first {data.items.length} nodes.</p>}
+          {data.items.length === 0 && <p className="py-12 text-center text-sm text-muted-foreground">No server has reported yet.</p>}
+          <p className="text-xs text-muted-foreground">Observed <Time iso={data.observed_at} relative /> · days in UTC, month from {data.month_start}</p>
         </div>
       )}
     </Page>

@@ -29,29 +29,29 @@ export default function AuditPage() {
   )
   const list = useCursorList<Data<"/v1/admin/audit">>("/v1/admin/audit", filters)
   return (
-    <Page title="Audit log" description="Every audited action, newest first. Exact filters; times are in your time zone.">
+    <Page title="Audit log">
       <div className="flex flex-wrap items-center gap-2">
         <SearchBox label="Actor id" placeholder="Actor id" value={actor} onChange={setActor} />
-        <SearchBox label="Event type" placeholder="Event type, e.g. operator.request" value={eventType} onChange={setEventType} />
+        <SearchBox label="Event type" placeholder="Event type" value={eventType} onChange={setEventType} />
         <SearchBox label="Resource type" placeholder="Resource type" value={resourceType} onChange={setResourceType} />
         <SearchBox label="Resource id" placeholder="Resource id" value={resourceId} onChange={setResourceId} />
         <FilterSelect label="Outcome" value={outcome} onChange={setOutcome} options={[["", "Any outcome"], ["changed", "Changed"], ["unchanged", "Unchanged"], ["uncertain", "Uncertain"]]} />
-        <Input aria-label="From" type="datetime-local" className="w-48" value={since} onChange={(e) => setSince(e.target.value)} />
-        <Input aria-label="Until" type="datetime-local" className="w-48" value={until} onChange={(e) => setUntil(e.target.value)} />
+        <Input aria-label="From date" type="datetime-local" className="w-48" value={since} onChange={(e) => setSince(e.target.value)} />
+        <Input aria-label="Until date" type="datetime-local" className="w-48" value={until} onChange={(e) => setUntil(e.target.value)} />
       </div>
       <DataTable
         what="audit events"
         list={list}
         rows={(d) => d.events}
         rowKey={(e) => e.id}
-        empty="No audit event matches these filters."
+        empty="No events match."
         columns={[
           { header: "When", cell: (e) => <Time iso={e.created_at} /> },
-          { header: "Actor", cell: (e) => (e.actor_user_id ? <Mono>{e.actor_user_id}</Mono> : e.actor_type) },
+          { header: "Actor", className: "hidden md:table-cell", cell: (e) => (e.actor_user_id ? <Mono>{e.actor_user_id}</Mono> : e.actor_type) },
           { header: "Event", cell: (e) => <Mono>{e.event_type}</Mono> },
-          { header: "Resource", cell: (e) => <Mono>{`${e.resource_type}${e.resource_id ? `: ${e.resource_id}` : ""}`}</Mono> },
+          { header: "Resource", className: "hidden md:table-cell", cell: (e) => <Mono>{`${e.resource_type}${e.resource_id ? `: ${e.resource_id}` : ""}`}</Mono> },
           { header: "Outcome", cell: (e) => (e.outcome ? <StatusBadge state={e.outcome} /> : "—") },
-          { header: "Request", cell: (e) => (e.request_id ? <Mono>{e.request_id}</Mono> : "—") },
+          { header: "Request", className: "hidden lg:table-cell", cell: (e) => (e.request_id ? <Mono>{e.request_id}</Mono> : "—") },
         ]}
       />
     </Page>

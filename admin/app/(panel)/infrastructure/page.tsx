@@ -15,12 +15,12 @@ type View = "selfhost" | "managed" | "regions" | "servers" | "relays" | "tunnels
 export default function InfrastructurePage() {
   const [view, setView] = useState<View>("selfhost")
   return (
-    <Page title="Relays & edges" description="Enrol and manage relays, edges and control-plane servers: enrolment, regions, drain, removal, tunnels, hostnames, keys and stuck operations. A stale observation is never shown as ready. Every change asks for a reference and is audited.">
+    <Page title="Servers">
       <Tabs
         value={view}
         onChange={setView}
         options={[
-          ["selfhost", "Enrol & fleet (pbh)"],
+          ["selfhost", "Self-hosted"],
           ["managed", "Managed nodes"],
           ["regions", "Regions"],
           ["servers", "Server nodes"],

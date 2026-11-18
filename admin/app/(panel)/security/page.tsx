@@ -6,6 +6,7 @@ import { Page, Panel } from "@/components/page"
 import { RecoveryCodes } from "@/components/recovery-codes"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import { ApiError, post } from "@/lib/api"
 
 export default function SecurityPage() {
@@ -14,10 +15,10 @@ export default function SecurityPage() {
   const [error, setError] = useState<Error>()
   const [busy, setBusy] = useState(false)
   return (
-    <Page title="Security" description="Your sign-in uses a password and an authenticator app. Recovery codes get you in if you lose the authenticator.">
-      <Panel title="Replace recovery codes">
+    <Page title="Security">
+      <Panel title="Recovery codes">
         <form
-          className="flex max-w-sm flex-col gap-2"
+          className="flex max-w-sm flex-col gap-1.5"
           onSubmit={async (e) => {
             e.preventDefault()
             setBusy(true)
@@ -32,15 +33,16 @@ export default function SecurityPage() {
             }
           }}
         >
-          <p className="text-sm text-muted-foreground">Enter the current code from your authenticator. The old recovery codes stop working.</p>
-          <Input aria-label="Authenticator code" inputMode="numeric" autoComplete="one-time-code" required value={code} onChange={(e) => setCode(e.target.value)} />
+          <Label htmlFor="mfa-code">Authenticator code</Label>
+          <Input id="mfa-code" aria-label="Authenticator code" inputMode="numeric" autoComplete="one-time-code" required value={code} onChange={(e) => setCode(e.target.value)} />
           {error && (
             <div role="alert" className="flex flex-col gap-1 text-sm text-destructive" data-security-error>
               <span>{error.message}</span>
               {error instanceof ApiError && error.reference && <CopyReference reference={error.reference} />}
             </div>
           )}
-          <Button type="submit" disabled={busy}>Replace recovery codes</Button>
+          <span className="text-xs text-muted-foreground">Your current codes stop working.</span>
+          <Button type="submit" size="lg" className="self-start" disabled={busy}>Replace recovery codes</Button>
         </form>
         {codes && <RecoveryCodes codes={codes} />}
       </Panel>

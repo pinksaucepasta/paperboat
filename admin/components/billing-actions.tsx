@@ -4,7 +4,7 @@ import { useState } from "react"
 import { ActionDialog } from "@/components/action-dialog"
 import { ErrorBlock } from "@/components/error-block"
 import { SelectField, TextField } from "@/components/fields"
-import { Mono } from "@/components/filters"
+import { Facts, Panel } from "@/components/page"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -34,11 +34,11 @@ export function ProductEditor({ product }: { product?: Product }) {
   return (
     <ActionDialog
       title={product ? `Edit ${product.code}` : "Add a product"}
-      description={product ? "The Stripe price is verified live before saving. The price id and type cannot change: add a new product for a new price." : "The Stripe price is verified live (amount, currency, interval, active) before the product is saved."}
+      description="The Stripe price is checked live before saving."
       target={code || "-"}
       submitLabel={product ? "Save product" : "Add product"}
       valid={valid}
-      trigger={(open) => <Button size={product ? "xs" : "default"} variant={product ? "outline" : "default"} onClick={open} data-product-action={product?.code ?? "new"}>{product ? "Edit" : "Add a product"}</Button>}
+      trigger={(open) => <Button size={product ? "default" : "lg"} variant="outline" onClick={open} data-product-action={product?.code ?? "new"}>{product ? "Edit" : "Add product"}</Button>}
       run={(h) =>
         operatorAction("PUT", `/v1/admin/billing/products/${encodeURIComponent(code)}`, h, {
           version: product?.version ?? 0,
@@ -51,15 +51,15 @@ export function ProductEditor({ product }: { product?: Product }) {
         })
       }
     >
-      <TextField label="Code" value={code} onChange={setCode} disabled={Boolean(product)} hint="Lowercase letters, digits, _ and -. Cannot change." />
+      <TextField label="Code" value={code} onChange={setCode} disabled={Boolean(product)} hint={product ? undefined : "Lowercase letters, digits, _ and -. Can’t change later."} />
       <TextField label="Display name" value={name} onChange={setName} maxLength={120} />
-      <TextField label="Stripe price id" value={price} onChange={setPrice} disabled={Boolean(product)} placeholder="price_…" />
+      <TextField label="Stripe price id" value={price} onChange={setPrice} disabled={Boolean(product)} placeholder="price_…" hint={product ? undefined : "Can’t change later: add a new plan for a new price."} />
       <SelectField label="Type" value={type} onChange={setType} options={catalogTypes} disabled={Boolean(product)} />
-      {!topUp && <TextField label="Allowance (bytes)" value={allowance} onChange={setAllowance} inputMode="numeric" hint={`Empty means none. ${bytesValid(allowance) && allowance.trim() ? `= ${formatBytes(Number(allowance))}` : ""}`} />}
-      {topUp && <p className="text-xs text-muted-foreground">Each unit adds {formatBytes(topUpUnitBytes)}; this is fixed.</p>}
+      {!topUp && <TextField label="Allowance (bytes)" value={allowance} onChange={setAllowance} inputMode="numeric" hint={bytesValid(allowance) && allowance.trim() ? formatBytes(Number(allowance)) : "Empty for none"} />}
+      {topUp && <p className="text-xs text-muted-foreground">Adds {formatBytes(topUpUnitBytes)} per unit.</p>}
       <label className="flex items-center gap-2 text-sm">
         <Checkbox checked={active} onCheckedChange={(v) => setActive(v === true)} />
-        Active (customers can buy it)
+        On sale
       </label>
     </ActionDialog>
   )
@@ -74,24 +74,22 @@ export function BillingPolicy() {
   if (q.isError) return <ErrorBlock what="the billing policy" error={q.error} retry={() => q.refetch()} />
   if (!q.data) return <Skeleton className="h-16 w-full" />
   const policy = q.data
-  const show = (v: number | null) => (v === null ? "not set" : formatBytes(v))
+  const show = (v: number | null) => (v === null ? "None" : formatBytes(v))
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border p-3 text-sm" data-billing-policy>
-      <div>
-        <div className="font-medium">Monthly allowances</div>
-        <div className="text-muted-foreground">Personal: {show(policy.personal_allowance_bytes)} · Team: {show(policy.team_allowance_bytes)} · revision {policy.revision}</div>
-      </div>
-      {admin && (
+    <div data-billing-policy data-revision={policy.revision}>
+    <Panel
+      title="Monthly allowances"
+      action={admin && (
         <ActionDialog
           title="Change the monthly allowances"
-          description="Applies to every workspace of that kind from the next allowance month. Empty means no allowance is set for that kind."
+          description="Applies from the next allowance month. Empty for none."
           target="billing-policy"
           submitLabel="Save allowances"
           valid={bytesValid(personal) && bytesValid(team)}
           trigger={(open) => (
             <Button
               variant="outline"
-              size="sm"
+              size="lg"
               onClick={() => {
                 setPersonal(policy.personal_allowance_bytes === null ? "" : String(policy.personal_allowance_bytes))
                 setTeam(policy.team_allowance_bytes === null ? "" : String(policy.team_allowance_bytes))
@@ -107,6 +105,15 @@ export function BillingPolicy() {
           <TextField label="Team allowance (bytes)" value={team} onChange={setTeam} inputMode="numeric" />
         </ActionDialog>
       )}
+    >
+      <Facts
+        rows={[
+          ["Personal", show(policy.personal_allowance_bytes)],
+          ["Team", show(policy.team_allowance_bytes)],
+          ["Revision", policy.revision],
+        ]}
+      />
+    </Panel>
     </div>
   )
 }
@@ -123,31 +130,31 @@ export function OperationActions({ id, state }: { id: string; state: string }) {
   const role = useOperator()?.role
   const [evidence, setEvidence] = useState("")
   const [session, setSession] = useState("")
-  if (state !== "uncertain" || (role !== "admin" && role !== "billing")) return <span className="text-xs text-muted-foreground">—</span>
+  if (state !== "uncertain" || (role !== "admin" && role !== "billing")) return null
   const path = (a: string) => `/v1/admin/billing/workspace-operations/${encodeURIComponent(id)}/${a}`
-  const evidenceField = <TextField label="Evidence reference" value={evidence} onChange={setEvidence} maxLength={256} hint="Stripe event or incident id that proves the outcome (8–256 characters: letters, digits and : . _ / -). No credentials or payment data." />
+  const evidenceField = <TextField label="Evidence reference" value={evidence} onChange={setEvidence} maxLength={256} hint="Stripe event or incident id. No payment data." />
   return (
-    <div className="flex flex-wrap gap-1" data-operation-actions={id}>
+    <div className="flex flex-wrap justify-end gap-1.5" data-operation-actions={id}>
       <ActionDialog
         title="Retire as not applied"
-        description={<>Declares that <Mono>{id}</Mono> did not happen at Stripe, so the workspace can start a new one. Only do this after checking Stripe shows nothing was charged or changed.</>}
+        description="Marks it as not applied at Stripe. Check Stripe shows no charge first."
         target={id}
         destructive
         confirmWord={id}
         submitLabel="Retire operation"
         valid={evidenceOk(evidence)}
-        trigger={(open) => <Button size="xs" variant="destructive" onClick={open}>Retire</Button>}
+        trigger={(open) => <Button variant="outline" onClick={open}>Retire</Button>}
         run={(h) => operatorAction("POST", path("retire"), h, { outcome: "not_applied", evidence_reference: evidence })}
       >
         {evidenceField}
       </ActionDialog>
       <ActionDialog
         title="Reconcile checkout"
-        description={<>Binds the Stripe checkout session that completed <Mono>{id}</Mono>, so the workspace receives what was bought.</>}
+        description="Binds the completed Stripe checkout so the workspace gets what was bought."
         target={id}
         submitLabel="Reconcile"
         valid={evidenceOk(evidence) && session.trim() !== ""}
-        trigger={(open) => <Button size="xs" variant="outline" onClick={open}>Reconcile</Button>}
+        trigger={(open) => <Button variant="outline" onClick={open}>Reconcile</Button>}
         run={(h) => operatorAction("POST", path("reconcile-checkout"), h, { provider_session_id: session.trim(), evidence_reference: evidence })}
       >
         <TextField label="Stripe checkout session id" value={session} onChange={setSession} placeholder="cs_…" />
@@ -155,13 +162,13 @@ export function OperationActions({ id, state }: { id: string; state: string }) {
       </ActionDialog>
       <ActionDialog
         title="Supersede billing portal link"
-        description={<>Invalidates the portal link of <Mono>{id}</Mono>; the customer opens a new one.</>}
+        description="Invalidates the portal link; the customer opens a new one."
         target={id}
         destructive
         confirmWord={id}
         submitLabel="Supersede"
         valid={evidenceOk(evidence)}
-        trigger={(open) => <Button size="xs" variant="outline" onClick={open}>Supersede portal</Button>}
+        trigger={(open) => <Button variant="outline" onClick={open}>Supersede portal</Button>}
         run={(h) => operatorAction("POST", path("supersede-portal"), h, { evidence_reference: evidence })}
       >
         {evidenceField}

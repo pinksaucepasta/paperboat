@@ -9,5 +9,5 @@ import type { Data } from "@/lib/api"
 export function MachinesOf({ owner }: { owner: { account: string } | { team: string } }) {
   const filters = useMemo(() => ({ ...owner, deleted: "true" }) as Record<string, string>, [owner])
   const list = useCursorList<Data<"/v1/admin/machines">>("/v1/admin/machines", filters)
-  return <MachinesTable list={list} empty="This owner has no machines." />
+  return <MachinesTable list={list} empty="No machines." />
 }

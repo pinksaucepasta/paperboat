@@ -6,6 +6,7 @@ import { DataTable } from "@/components/data-table"
 import { ErrorBlock } from "@/components/error-block"
 import { SelectField, TextField } from "@/components/fields"
 import { Mono, StatusBadge } from "@/components/filters"
+import { Facts, Panel } from "@/components/page"
 import { Time } from "@/components/time"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -35,32 +36,36 @@ export function ClientFloor() {
   const clearing = version.trim() === ""
   const valid = (clearing || dateVersion(version.trim())) && (clearing || (reason.trim() !== "" && new TextEncoder().encode(reason).length <= 256)) && (enforceAt === "" || !Number.isNaN(Date.parse(enforceAt)))
   return (
-    <div className="flex flex-col gap-3" data-client-floor>
-      <div className="rounded-md border p-3 text-sm">
-        <div className="font-medium">{policy.minimum_version ? `Minimum CLI version ${policy.minimum_version}` : "No minimum CLI version"}</div>
-        <div className="text-muted-foreground">
-          Revision {policy.revision}
-          {policy.reason && <> · {policy.reason}</>}
-          {policy.enforce_at && <> · enforced from <Time iso={policy.enforce_at} /></>}
-        </div>
-      </div>
-      <div>
+    <div data-client-floor>
+      <Panel
+        title="Minimum CLI version"
+        action={
         <ActionDialog
           title="Change the minimum CLI version"
-          description="Every CLI older than this version is refused with an update-required answer on its next request. The version must already be published for every platform. Leave it empty to remove the minimum."
+          description="Older CLIs are told to update on their next request. The version must be published for every platform."
           target="client-update-policy"
           destructive
           confirmWord="update-policy"
           submitLabel={clearing ? "Remove minimum" : "Set minimum"}
           valid={valid}
-          trigger={(open) => <Button onClick={() => { setVersion(policy.minimum_version); setReason(""); setEnforceAt(""); open() }}>Change minimum version</Button>}
+          trigger={(open) => <Button variant="outline" size="lg" onClick={() => { setVersion(policy.minimum_version); setReason(""); setEnforceAt(""); open() }}>Change minimum version</Button>}
           run={(h) => operatorAction("PUT", "/v1/admin/client-update-policy", h, { expected_revision: policy.revision, minimum_version: version.trim(), reason: clearing ? "" : reason.trim(), enforce_at: enforceAt ? new Date(enforceAt).toISOString() : null })}
         >
-          <TextField label="Minimum version" value={version} onChange={setVersion} placeholder="2026.11.18.1" hint="YYYY.M.D.build. Empty removes the minimum." />
-          {!clearing && <TextField label="Reason shown to users" value={reason} onChange={setReason} maxLength={256} hint="Public and non-secret; up to 256 bytes." />}
-          {!clearing && <TextField label="Enforce from (optional)" type="datetime-local" value={enforceAt} onChange={setEnforceAt} hint="Empty enforces at once. Shown in your time zone." />}
+          <TextField label="Minimum version" value={version} onChange={setVersion} placeholder="2026.11.18.1" hint="YYYY.M.D.build. Empty for none." />
+          {!clearing && <TextField label="Reason shown to users" value={reason} onChange={setReason} maxLength={256} hint="Public. Up to 256 bytes." />}
+          {!clearing && <TextField label="Enforce from" optional type="datetime-local" value={enforceAt} onChange={setEnforceAt} hint="Empty for now." />}
         </ActionDialog>
-      </div>
+        }
+      >
+        <Facts
+          rows={[
+            ["Version", policy.minimum_version || "None"],
+            ["Reason", policy.reason || "—"],
+            ["Enforced from", policy.enforce_at ? <Time key="e" iso={policy.enforce_at} /> : "—"],
+            ["Revision", policy.revision],
+          ]}
+        />
+      </Panel>
     </div>
   )
 }
@@ -79,18 +84,18 @@ function RequestRelease() {
   return (
     <ActionDialog
       title="Request a release decision"
-      description="Writes a request that the external release authority must sign. Nothing changes for users until the signed bundle is imported."
+      description="The release authority must sign it. Nothing changes until the signed bundle is imported."
       target={release || "-"}
       submitLabel="Create request"
       valid={valid}
-      trigger={(open) => <Button onClick={open}>Request a release decision</Button>}
+      trigger={(open) => <Button variant="outline" size="lg" onClick={open}>Request a release decision</Button>}
       run={(h) => operatorAction("POST", "/v1/admin/release-authority/requests", h, { action, release_id: release.trim(), version, platform, architecture, policy_revision: Number(revision), rollout_percentage: promote ? pct : 0 })}
     >
       <SelectField label="Action" value={action} onChange={setAction} options={actions} />
       <TextField label="Release id" value={release} onChange={setRelease} maxLength={128} />
       <TextField label="Version" value={version} onChange={setVersion} placeholder="2026.11.18.1" hint="YYYY.M.D.build" />
       <SelectField label="Platform" value={target} onChange={setTarget} options={platforms} />
-      <TextField label="Policy revision" value={revision} onChange={setRevision} inputMode="numeric" hint="The revision the signed bundle will carry; it must be higher than the last imported one." />
+      <TextField label="Policy revision" value={revision} onChange={setRevision} inputMode="numeric" hint="Higher than the last imported one." />
       {promote && <TextField label="Rollout percentage" value={percent} onChange={setPercent} inputMode="numeric" hint="1–100" />}
     </ActionDialog>
   )
@@ -119,20 +124,20 @@ function ImportBundle() {
   return (
     <ActionDialog
       title="Import a signed release bundle"
-      description="A release decision. Once imported, updaters act on it and it cannot be taken back; only a newer signed decision replaces it. The server checks the signatures against the configured threshold."
+      description="Updaters act on it at once. It can’t be taken back; only a newer signed decision replaces it."
       target={release || "-"}
       destructive
       confirmWord={release || "release"}
       submitLabel="Import bundle"
       valid={release !== ""}
-      trigger={(open) => <Button variant="outline" onClick={open}>Import a signed bundle</Button>}
+      trigger={(open) => <Button variant="outline" size="lg" onClick={open}>Import a signed bundle</Button>}
       run={(h) => operatorAction("POST", "/v1/admin/release-authority/bundles", h, parsed)}
       onDone={() => setText("")}
     >
       <div className="flex flex-col gap-1.5">
-        <label htmlFor="bundle-json" className="text-sm font-medium">Signed bundle (JSON, up to 64 KiB)</label>
+        <label htmlFor="bundle-json" className="text-sm font-medium">Signed bundle</label>
         <Textarea id="bundle-json" rows={8} className="font-mono text-xs" value={text} onChange={(e) => setText(e.target.value)} />
-        <span className="text-xs text-muted-foreground">{text.trim() === "" ? "Paste the bundle the release authority signed." : release ? `Release ${release}` : "Not a JSON object with a release_id, or larger than 64 KiB."}</span>
+        <span className="text-xs text-muted-foreground">{text.trim() === "" ? "JSON, up to 64 KiB." : release ? `Release ${release}` : "Not a bundle: needs a JSON object with release_id, up to 64 KiB."}</span>
       </div>
     </ActionDialog>
   )
@@ -144,44 +149,41 @@ export function ReleaseAuthority() {
   const requests = useCursorList<Requests>("/v1/admin/release-authority/requests", filters, "offset")
   const bundles = useCursorList<Bundles>("/v1/admin/release-authority/bundles", filters, "offset")
   return (
-    <div className="flex flex-col gap-6" data-release-authority>
-      <div className="flex flex-wrap gap-2"><RequestRelease /><ImportBundle /></div>
-      <section className="flex flex-col gap-2">
-        <h2 className="text-sm font-medium">Requests</h2>
+    <div className="flex flex-col gap-8" data-release-authority>
+      <Panel title="Requests" action={<RequestRelease />}>
         <DataTable
           what="release requests"
           list={requests}
           rows={(d) => d.requests}
           rowKey={(r) => r.id}
-          empty="No release decision has been requested."
+          empty="No requests yet."
           columns={[
             { header: "Release", cell: (r) => <Mono>{r.release_id}</Mono> },
             { header: "Action", cell: (r) => (r.action === "promote" ? `promote ${r.rollout_percentage}%` : r.action) },
             { header: "Version", cell: (r) => `${r.version} · ${r.platform}/${r.architecture}` },
-            { header: "Policy revision", cell: (r) => r.policy_revision, className: "tabular-nums" },
+            { header: "Revision", cell: (r) => r.policy_revision, className: "tabular-nums" },
             { header: "Status", cell: (r) => <StatusBadge state={r.status} /> },
             { header: "Created", cell: (r) => <Time iso={r.created_at} relative /> },
           ]}
         />
-      </section>
-      <section className="flex flex-col gap-2">
-        <h2 className="text-sm font-medium">Imported decisions</h2>
+      </Panel>
+      <Panel title="Imported decisions" action={<ImportBundle />}>
         <DataTable
           what="release decisions"
           list={bundles}
           rows={(d) => d.bundles}
           rowKey={(b) => b.id}
-          empty="No signed bundle has been imported."
+          empty="No decisions imported yet."
           columns={[
             { header: "Release", cell: (b) => <Mono>{b.release_id}</Mono> },
             { header: "Action", cell: (b) => (b.action === "promote" ? `promote ${b.rollout_percentage}%` : b.action) },
             { header: "Version", cell: (b) => `${b.version} · ${b.platform}/${b.architecture}` },
-            { header: "Policy revision", cell: (b) => b.policy_revision, className: "tabular-nums" },
+            { header: "Revision", cell: (b) => b.policy_revision, className: "tabular-nums" },
             { header: "Imported", cell: (b) => <Time iso={b.imported_at} relative /> },
             { header: "Expires", cell: (b) => <Time iso={b.expires_at} /> },
           ]}
         />
-      </section>
+      </Panel>
     </div>
   )
 }

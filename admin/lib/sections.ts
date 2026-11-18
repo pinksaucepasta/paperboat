@@ -25,14 +25,28 @@ export const sections: Section[] = [
   { href: "/users", title: "Users", icon: UserIcon, roles: ["admin", "support", "billing"] },
   { href: "/teams", title: "Teams", icon: UsersThreeIcon, roles: ["admin", "support", "billing"] },
   { href: "/machines", title: "Machines", icon: LaptopIcon, roles: all },
-  { href: "/support", title: "Support lookup", icon: LifebuoyIcon, roles: ["admin", "support", "billing"] },
-  { href: "/sentry", title: "Sentry issues", icon: BugIcon, roles: ["admin", "support", "billing"] },
+  { href: "/support", title: "Lookup", icon: LifebuoyIcon, roles: ["admin", "support", "billing"] },
+  { href: "/sentry", title: "Errors", icon: BugIcon, roles: ["admin", "support", "billing"] },
   { href: "/capacity", title: "Capacity", icon: GaugeIcon, roles: ["admin", "operations"] },
-  { href: "/infrastructure", title: "Relays & edges", icon: HardDrivesIcon, roles: ["admin", "operations"] },
-  { href: "/billing", title: "Billing & plans", icon: CreditCardIcon, roles: ["admin", "support", "billing"] },
+  { href: "/infrastructure", title: "Servers", icon: HardDrivesIcon, roles: ["admin", "operations"] },
+  { href: "/billing", title: "Billing", icon: CreditCardIcon, roles: ["admin", "support", "billing"] },
   { href: "/releases", title: "Releases", icon: RocketLaunchIcon, roles: ["admin"] },
   { href: "/operators", title: "Operators", icon: UserGearIcon, roles: ["admin"] },
   { href: "/audit", title: "Audit log", icon: ClockCounterClockwiseIcon, roles: ["admin"] },
 ]
 
 export const sectionsFor = (role: Operator["role"]) => sections.filter((s) => s.roles.includes(role))
+
+const groups: { label?: string; hrefs: Section["href"][] }[] = [
+  { hrefs: ["/overview"] },
+  { label: "Customers", hrefs: ["/users", "/teams", "/machines", "/billing"] },
+  { label: "Support", hrefs: ["/support", "/sentry"] },
+  { label: "Infrastructure", hrefs: ["/infrastructure", "/capacity", "/releases"] },
+  { label: "Admin", hrefs: ["/operators", "/audit"] },
+]
+
+/** The sidebar's groups, each holding only the pages this role can open. */
+export const navigationFor = (role: Operator["role"]) =>
+  groups
+    .map((group) => ({ label: group.label, items: group.hrefs.map((href) => sections.find((s) => s.href === href)!).filter((s) => s.roles.includes(role)) }))
+    .filter((group) => group.items.length > 0)

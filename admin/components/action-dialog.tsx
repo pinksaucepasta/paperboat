@@ -1,6 +1,7 @@
 "use client"
 
 import { useQueryClient } from "@tanstack/react-query"
+import { CopyIcon } from "@phosphor-icons/react"
 import { useId, useState } from "react"
 import { CopyReference } from "@/components/copy-reference"
 import { Button } from "@/components/ui/button"
@@ -14,8 +15,10 @@ import { ApiError, referencePattern, type ActionHeaders } from "@/lib/api"
 export type OneTimeSecret = { label: string; value: string }
 
 type Props<R> = {
-  /** The button the operator presses to start the action. */
-  trigger: (open: () => void) => React.ReactNode
+  /** The button the operator presses to start the action; leave it out and pass `open` to open it from a menu. */
+  trigger?: (open: () => void) => React.ReactNode
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
   title: string
   /** What happens, to whom, and what it affects (shown before the form). */
   description: React.ReactNode
@@ -44,7 +47,9 @@ type Props<R> = {
  */
 export function ActionDialog<R>(props: Props<R>) {
   const client = useQueryClient()
-  const [open, setOpen] = useState(false)
+  const [own, setOwn] = useState(false)
+  const open = props.open ?? own
+  const setOpen = (next: boolean) => (props.onOpenChange ?? setOwn)(next)
   const [reason, setReason] = useState("")
   const [typed, setTyped] = useState("")
   const [key, setKey] = useState(() => crypto.randomUUID())
@@ -103,22 +108,24 @@ export function ActionDialog<R>(props: Props<R>) {
 
   return (
     <>
-      {props.trigger(() => setOpen(true))}
+      {props.trigger?.(() => setOpen(true))}
       <Dialog open={open} onOpenChange={(next) => (next ? setOpen(true) : close())}>
-        <DialogContent className="max-h-[90svh] overflow-y-auto sm:max-w-lg" showCloseButton={!busy && (!secrets || saved)}>
+        <DialogContent className="max-h-[90svh] gap-4 overflow-y-auto sm:max-w-md" showCloseButton={!busy && (!secrets || saved)}>
           <DialogHeader>
             <DialogTitle>{secrets ? "Save this now" : props.title}</DialogTitle>
-            <DialogDescription>{secrets ? "These values are shown once and cannot be read again." : props.description}</DialogDescription>
+            <DialogDescription>{secrets ? "It won’t be shown again." : props.description}</DialogDescription>
           </DialogHeader>
           {secrets ? (
             <div className="flex flex-col gap-3" data-one-time-secrets>
               {secrets.map((s) => (
-                <div key={s.label} className="flex flex-col gap-1">
+                <div key={s.label} className="flex flex-col gap-1.5">
                   <Label>{s.label}</Label>
-                  <code className="break-all rounded-md border p-2 font-mono text-xs" data-secret>{s.value}</code>
-                  <Button variant="outline" size="sm" onClick={() => navigator.clipboard?.writeText(s.value).catch(() => {})}>
-                    Copy
-                  </Button>
+                  <div className="surface flex items-start gap-2 p-3">
+                    <code className="min-w-0 flex-1 break-all font-mono text-xs" data-secret>{s.value}</code>
+                    <Button variant="ghost" size="icon-xs" aria-label={`Copy ${s.label}`} onClick={() => navigator.clipboard?.writeText(s.value).catch(() => {})}>
+                      <CopyIcon />
+                    </Button>
+                  </div>
                 </div>
               ))}
               <label className="flex items-center gap-2 text-sm">
@@ -126,7 +133,7 @@ export function ActionDialog<R>(props: Props<R>) {
                 I saved it
               </label>
               <DialogFooter>
-                <Button disabled={!saved} onClick={close}>Done</Button>
+                <Button size="lg" disabled={!saved} onClick={close}>Done</Button>
               </DialogFooter>
             </div>
           ) : (
@@ -135,14 +142,14 @@ export function ActionDialog<R>(props: Props<R>) {
               // Changed input after a failure is a different action: it needs its own key (the server refuses one key for two inputs).
               onChange={() => error && setKey(crypto.randomUUID())}
               aria-busy={busy}
-              className="flex flex-col gap-3"
+              className="flex flex-col gap-4"
               data-action-dialog={props.title}
             >
               {props.children}
               <div className="flex flex-col gap-1.5">
-                <Label htmlFor={`${id}-reason`}>Reference for the audit log</Label>
-                <Input id={`${id}-reason`} placeholder="ticket or note id" value={reason} onChange={(e) => setReason(e.target.value.trim())} maxLength={128} required />
-                <span className="text-xs text-muted-foreground">Letters, digits and _ . : - only. Recorded with who did this and when.</span>
+                <Label htmlFor={`${id}-reason`}>Reference</Label>
+                <Input id={`${id}-reason`} aria-describedby={`${id}-reason-hint`} placeholder="Ticket or note id" value={reason} onChange={(e) => setReason(e.target.value.trim())} maxLength={128} required />
+                <span id={`${id}-reason-hint`} className="text-xs text-muted-foreground">For the audit log. Letters, digits and _ . : -</span>
               </div>
               {props.confirmWord && (
                 <div className="flex flex-col gap-1.5">
@@ -154,13 +161,13 @@ export function ActionDialog<R>(props: Props<R>) {
                 <div role="alert" className="flex flex-col gap-1 text-sm text-destructive" data-action-error>
                   <span>{error.message}</span>
                   {error instanceof ApiError && error.reference && <CopyReference reference={error.reference} />}
-                  {error instanceof ApiError && error.status === 409 && <span className="text-xs text-muted-foreground">The server has the current state: close this, reload the page and check before trying again.</span>}
-                  {error instanceof ApiError && (error.status === 0 || error.status >= 500) && <span className="text-xs text-muted-foreground">Check the current state before retrying; retrying keeps the same key so it is applied once.</span>}
+                  {error instanceof ApiError && error.status === 409 && <span className="text-xs text-muted-foreground">Reload and check the current state first.</span>}
+                  {error instanceof ApiError && (error.status === 0 || error.status >= 500) && <span className="text-xs text-muted-foreground">Check the current state, then retry. A retry applies once.</span>}
                 </div>
               )}
               <DialogFooter>
-                <Button type="button" variant="outline" disabled={busy} onClick={close}>Cancel</Button>
-                <Button type="submit" variant={props.destructive ? "destructive" : "default"} disabled={!canSubmit}>
+                <Button type="button" size="lg" variant="outline" disabled={busy} onClick={close}>Cancel</Button>
+                <Button type="submit" size="lg" variant={props.destructive ? "destructive" : "default"} disabled={!canSubmit}>
                   {busy ? "Working…" : props.submitLabel}
                 </Button>
               </DialogFooter>

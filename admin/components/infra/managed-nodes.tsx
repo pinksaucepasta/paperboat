@@ -2,6 +2,7 @@
 
 import { useMemo, useRef, useState } from "react"
 import { ActionDialog } from "@/components/action-dialog"
+import { RowMenu, type RowAction } from "@/components/row-menu"
 import { DataTable } from "@/components/data-table"
 import { Mono, StatusBadge } from "@/components/filters"
 import { SelectField, TextField } from "@/components/fields"
@@ -37,10 +38,10 @@ function ConfigFields({ c, set, regions, keyHint, onSeed, lockKind }: { c: Confi
   const [generated, setGenerated] = useState(false)
   return (
     <>
-      <SelectField label="Kind" value={c.kind} onChange={(kind) => set({ ...c, kind })} options={kinds} disabled={lockKind} hint={lockKind ? "A relay cannot become an edge: an edge needs a usage key at enrolment. Retire it and enrol an edge." : undefined} />
-      <SelectField label="Region" value={c.region} onChange={(region) => set({ ...c, region })} options={[["", "Choose a region"], ...regions.map((r): [string, string] => [r, r])]} hint="Create the region first on the Regions tab." />
-      <TextField label="Pool" value={c.pool} onChange={(pool) => set({ ...c, pool })} hint="Edge pool or relay pool name." />
-      <TextField label="Failure domain" value={c.domain} onChange={(domain) => set({ ...c, domain })} hint="A name for what fails together (a rack, a provider zone)." />
+      <SelectField label="Kind" value={c.kind} onChange={(kind) => set({ ...c, kind })} options={kinds} disabled={lockKind} hint={lockKind ? "A relay can’t become an edge. Retire it and enrol an edge." : undefined} />
+      <SelectField label="Region" value={c.region} onChange={(region) => set({ ...c, region })} options={[["", "Choose a region"], ...regions.map((r): [string, string] => [r, r])]} />
+      <TextField label="Pool" value={c.pool} onChange={(pool) => set({ ...c, pool })} />
+      <TextField label="Failure domain" value={c.domain} onChange={(domain) => set({ ...c, domain })} hint="What fails together: a rack, a provider zone." />
       <TextField label="Public hostname" value={c.host} onChange={(host) => set({ ...c, host })} />
       <div className="grid grid-cols-3 gap-2">
         <TextField label="TCP port" inputMode="numeric" value={c.tcp} onChange={(tcp) => set({ ...c, tcp })} />
@@ -49,7 +50,7 @@ function ConfigFields({ c, set, regions, keyHint, onSeed, lockKind }: { c: Confi
       </div>
       {c.kind !== "relay" && (
         <>
-          {!keyHint && <TextField label="Usage public key (base64, 32 bytes)" value={c.usageKey} onChange={(usageKey) => set({ ...c, usageKey })} hint="Signs the edge's traffic reports. Immutable after enrolment." />}
+          {!keyHint && <TextField label="Usage public key" value={c.usageKey} onChange={(usageKey) => set({ ...c, usageKey })} hint="Base64, 32 bytes. Can’t change after enrolment." />}
           {keyHint ?? (
             <Button
               type="button"
@@ -63,10 +64,10 @@ function ConfigFields({ c, set, regions, keyHint, onSeed, lockKind }: { c: Confi
                 onSeed?.(pair.seed, pair.publicKey)
               }}
             >
-              Generate a key pair here
+              Generate key pair
             </Button>
           )}
-          {generated && <span className="text-xs text-muted-foreground" data-key-generated>Key pair generated; the private key is shown once after enrolling.</span>}
+          {generated && <span className="text-xs text-muted-foreground" data-key-generated>Generated. The private key is shown once after enrolling.</span>}
         </>
       )}
     </>
@@ -82,11 +83,11 @@ export function EnrolManagedNode({ regions }: { regions: string[] }) {
   return (
     <ActionDialog
       title="Enrol a managed node"
-      description="Registers the node in the fleet and mints its runtime credential. The credential goes into the node's control-plane credential file; it is shown once."
+      description="You get its runtime credential, shown once."
       target={id || "-"}
       submitLabel="Enrol node"
       valid={/^[A-Za-z0-9_.:-]{1,128}$/.test(id) && configValid(c)}
-      trigger={(open) => <Button onClick={open}>Enrol a managed node</Button>}
+      trigger={(open) => <Button size="lg" onClick={open}>Enrol a managed node</Button>}
       run={(h) => operatorAction<Data<"/v1/admin/nodes/{node_id}/enroll">>("POST", `/v1/admin/nodes/${encodeURIComponent(id)}/enroll`, h, body(c, 0, true))}
       secrets={(r) => {
         // The private seed is shown only for the public key that was actually enrolled.
@@ -96,7 +97,7 @@ export function EnrolManagedNode({ regions }: { regions: string[] }) {
       }}
       onDone={() => { setC(empty); setId("") }}
     >
-      <TextField label="Node id" value={id} onChange={setId} hint="A stable name, e.g. edge-hel-1." />
+      <TextField label="Node id" value={id} onChange={setId} placeholder="edge-hel-1" />
       <ConfigFields c={c} set={setC} regions={regions} onSeed={(v, key) => (seed.current = { key, seed: v })} />
     </ActionDialog>
   )
@@ -108,63 +109,85 @@ function nodeKind(n: Node): string {
 
 function NodeActions({ node, regions, admin }: { node: Node; regions: string[]; admin: boolean }) {
   const path = (action: string) => `/v1/admin/nodes/${encodeURIComponent(node.id)}/${action}`
-  const simple = (action: string, label: string, title: string, description: string, destructive = false) => (
-    <ActionDialog
-      key={action}
-      title={title}
-      description={description}
-      target={node.id}
-      destructive={destructive}
-      confirmWord={destructive ? node.id : undefined}
-      submitLabel={label}
-      trigger={(open) => <Button size="xs" variant={destructive ? "destructive" : "outline"} onClick={open}>{label}</Button>}
-      run={(h) => operatorAction("POST", path(action), h, { revision: node.revision })}
-    />
-  )
+  const simple = (action: string, label: string, title: string, description: string, destructive = false): RowAction => ({
+    key: action,
+    label,
+    destructive,
+    dialog: (c) => (
+      <ActionDialog
+        {...c}
+        title={title}
+        description={description}
+        target={node.id}
+        destructive={destructive}
+        confirmWord={destructive ? node.id : undefined}
+        submitLabel={label}
+        run={(h) => operatorAction("POST", path(action), h, { revision: node.revision })}
+      />
+    ),
+  })
   const [site, setSite] = useState("")
   const [c, setC] = useState<Config>({ region: node.region_id, pool: node.edge_pool, domain: node.failure_domain, host: node.endpoint_host, tcp: String(node.endpoint_tcp_port), quic: String(node.endpoint_quic_port), capacity: String(node.capacity_limit), kind: nodeKind(node), usageKey: "" })
-  if (!admin) return <span className="text-xs text-muted-foreground">Admin only</span>
-  return (
-    <div className="flex flex-wrap gap-1" data-node-actions={node.id}>
-      {simple("drain", "Drain", `Drain ${node.id}`, "The node stops taking new work and is drained; held connections finish. Reversible with Resume.")}
-      {simple("resume", "Resume", `Resume ${node.id}`, "Lets a drained node take work again once it reports fresh observations.")}
-      {node.ready && simple("verify-ingress", "Verify ingress", `Verify public ingress of ${node.id}`, "Probes the node's public address and records the result.")}
-      <ActionDialog
-        title={`Set the site of ${node.id}`}
-        description="The city or site shown next to the region. Takes effect without restarting the node."
-        target={node.id}
-        submitLabel="Save site"
-        valid={site.length >= 1 && site.length <= 80}
-        trigger={(open) => <Button size="xs" variant="outline" onClick={open}>Site</Button>}
-        run={(h) => operatorAction("POST", path("site"), h, { site })}
-      >
-        <TextField label="Site" value={site} onChange={setSite} maxLength={80} />
-      </ActionDialog>
-      <ActionDialog
-        title={`Update ${node.id}`}
-        description="Changes the approved configuration. The old process epoch is fenced: deploy the new configuration with the returned generation. The usage key is kept and cannot change."
-        target={node.id}
-        submitLabel="Save configuration"
-        valid={configValid(c, false)}
-        trigger={(open) => <Button size="xs" variant="outline" onClick={open}>Edit</Button>}
-        run={(h) => operatorAction("POST", path("update"), h, body(c, node.revision, false))}
-      >
-        <ConfigFields c={c} set={setC} regions={regions} lockKind={nodeKind(node) === "relay"} keyHint={<span className="text-xs text-muted-foreground">The enrolled usage public key is kept: nothing to paste. It cannot change.</span>} />
-      </ActionDialog>
-      <ActionDialog
-        title={`Rotate the credential of ${node.id}`}
-        description="Mints a new runtime credential and invalidates the old one immediately: the node stops working until it is redeployed with the new one."
-        target={node.id}
-        destructive
-        confirmWord={node.id}
-        submitLabel="Rotate credential"
-        trigger={(open) => <Button size="xs" variant="destructive" onClick={open}>Rotate credential</Button>}
-        run={(h) => operatorAction<{ runtime_credential: string }>("POST", path("rotate"), h, { revision: node.revision })}
-        secrets={(r) => [{ label: "New runtime credential", value: r.runtime_credential }]}
-      />
-      {simple("retire", "Retire", `Retire ${node.id}`, "Removes the node from the fleet for good: it can no longer make runtime requests. This cannot be undone.", true)}
-    </div>
-  )
+  if (!admin) return null
+  const actions: RowAction[] = [
+    {
+      key: "edit",
+      label: "Edit",
+      dialog: (d) => (
+        <ActionDialog
+          {...d}
+          title={`Update ${node.id}`}
+          description="Deploy the new configuration with the returned generation; the old process is fenced."
+          target={node.id}
+          submitLabel="Save configuration"
+          valid={configValid(c, false)}
+          run={(h) => operatorAction("POST", path("update"), h, body(c, node.revision, false))}
+        >
+          <ConfigFields c={c} set={setC} regions={regions} lockKind={nodeKind(node) === "relay"} keyHint={<span className="text-xs text-muted-foreground">Usage key: kept from enrolment.</span>} />
+        </ActionDialog>
+      ),
+    },
+    {
+      key: "site",
+      label: "Set site",
+      dialog: (d) => (
+        <ActionDialog
+          {...d}
+          title={`Set the site of ${node.id}`}
+          description="The city or site shown next to the region."
+          target={node.id}
+          submitLabel="Save site"
+          valid={site.length >= 1 && site.length <= 80}
+          run={(h) => operatorAction("POST", path("site"), h, { site })}
+        >
+          <TextField label="Site" value={site} onChange={setSite} maxLength={80} />
+        </ActionDialog>
+      ),
+    },
+    ...(node.ready ? [simple("verify-ingress", "Verify ingress", `Verify public ingress of ${node.id}`, "Probes the node’s public address and records the result.")] : []),
+    simple("drain", "Drain", `Drain ${node.id}`, "It stops taking new work; held connections finish."),
+    simple("resume", "Resume", `Resume ${node.id}`, "It takes work again once it reports fresh observations."),
+    {
+      key: "rotate",
+      label: "Rotate credential",
+      destructive: true,
+      dialog: (d) => (
+        <ActionDialog
+          {...d}
+          title={`Rotate the credential of ${node.id}`}
+          description="The old credential stops working now. Redeploy the node with the new one."
+          target={node.id}
+          destructive
+          confirmWord={node.id}
+          submitLabel="Rotate credential"
+          run={(h) => operatorAction<{ runtime_credential: string }>("POST", path("rotate"), h, { revision: node.revision })}
+          secrets={(r) => [{ label: "New runtime credential", value: r.runtime_credential }]}
+        />
+      ),
+    },
+    simple("retire", "Retire", `Retire ${node.id}`, "Removes the node from the fleet for good.", true),
+  ]
+  return <RowMenu label={node.id} actions={actions} data-node-actions={node.id} />
 }
 
 export function ManagedNodes() {
@@ -175,21 +198,21 @@ export function ManagedNodes() {
   const regions = (regionList.data?.items ?? []).filter((r) => r.enabled).map((r) => r.id)
   return (
     <div className="flex flex-col gap-3">
-      {admin && <div><EnrolManagedNode regions={regions} /></div>}
+      {admin && <div className="flex justify-end"><EnrolManagedNode regions={regions} /></div>}
       <DataTable
         what="nodes"
         list={list}
         rows={(d) => d.items}
         rowKey={(n) => n.id}
-        empty="No managed node is enrolled."
+        empty="No managed nodes yet."
         columns={[
-          { header: "Node", cell: (n) => <Mono>{n.id}</Mono> },
+          { header: "Node", cell: (n) => <span className="font-medium">{n.id}</span> },
           { header: "Region", cell: (n) => n.region_id },
           { header: "Roles", cell: (n) => n.roles.join(", ") },
           { header: "Protocol", cell: (n) => <Mono>{n.protocol_version}</Mono> },
-          { header: "State", cell: (n) => <span className="flex gap-1"><StatusBadge state={n.state} /><StatusBadge state={n.ready ? "ready" : "stale"} /></span> },
-          { header: "Last heartbeat", cell: (n) => (n.observed_at ? <Time iso={n.observed_at} relative /> : "waiting") },
-          { header: "Actions", cell: (n) => <NodeActions node={n} regions={regions} admin={admin} />, className: "min-w-[18rem] whitespace-normal" },
+          { header: "State", cell: (n) => <StatusBadge state={n.ready ? n.state : "stale"} /> },
+          { header: "Seen", cell: (n) => (n.observed_at ? <Time iso={n.observed_at} relative /> : "Waiting") },
+          { header: "", className: "w-12", cell: (n) => <NodeActions node={n} regions={regions} admin={admin} /> },
         ]}
       />
     </div>

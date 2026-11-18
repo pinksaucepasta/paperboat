@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react"
 import { ActionDialog } from "@/components/action-dialog"
+import { RowMenu, type RowAction } from "@/components/row-menu"
 import { DataTable } from "@/components/data-table"
 import { FilterSelect, Mono, StatusBadge } from "@/components/filters"
 import { TextField } from "@/components/fields"
@@ -24,14 +25,14 @@ export function Health({ kind }: { kind: "relay" | "tunnel" }) {
       list={list}
       rows={(d) => d.items}
       rowKey={(i) => i.id}
-      empty={kind === "relay" ? "No relay has registered." : "No durable tunnel exists."}
+      empty={kind === "relay" ? "No relays yet." : "No tunnels yet."}
       columns={[
-        { header: kind === "relay" ? "Relay" : "Tunnel", cell: (i) => <Mono>{i.id}</Mono> },
-        { header: "Observed", cell: (i) => <StatusBadge state={i.observed_status === "not_ready" ? "failed" : i.observed_status === "unknown" ? "uncertain" : i.observed_status} /> },
-        { header: "Desired", cell: (i) => i.desired_state ?? i.state },
-        { header: "Last observed", cell: (i) => (i.observed_at ? <Time iso={i.observed_at} relative /> : "never") },
+        { header: kind === "relay" ? "Relay" : "Tunnel", cell: (i) => <span className="font-medium">{i.id}</span> },
+        { header: "Observed", cell: (i) => <StatusBadge state={i.observed_status === "not_ready" ? "failed" : i.observed_status} /> },
+        { header: "Desired", cell: (i) => <span className="inline-block first-letter:uppercase">{i.desired_state ?? i.state}</span> },
+        { header: "Seen", cell: (i) => (i.observed_at ? <Time iso={i.observed_at} relative /> : "Never") },
         { header: "Revision", cell: (i) => i.revision, className: "text-right tabular-nums" },
-        { header: "Actions", cell: (i) => <RowActions item={i} kind={kind} />, className: "min-w-[10rem] whitespace-normal" },
+        { header: "", className: "w-12", cell: (i) => <RowActions item={i} kind={kind} /> },
       ]}
     />
   )
@@ -40,29 +41,35 @@ export function Health({ kind }: { kind: "relay" | "tunnel" }) {
 function RowActions({ item, kind }: { item: Item; kind: "relay" | "tunnel" }) {
   const base = kind === "relay" ? `/v1/admin/relays/${encodeURIComponent(item.id)}` : `/v1/admin/tunnels/${encodeURIComponent(item.id)}`
   const [stop, go] = kind === "relay" ? (["drain", "resume"] as const) : (["disable", "enable"] as const)
-  const noun = kind === "relay" ? "relay" : "tunnel"
   const body = { revision: item.revision }
-  if (!useCanOperate()) return <span className="text-xs text-muted-foreground">Operations role only</span>
-  return (
-    <div className="flex flex-wrap gap-1" data-row-actions={item.id}>
-      <ActionDialog
-        title={`${stop === "drain" ? "Drain" : "Disable"} ${item.id}`}
-        description={kind === "relay" ? "The relay stops taking new sessions; held ones finish. Reversible with Resume." : "Pauses the tunnel: it stops serving traffic. Reversible with Enable."}
-        target={item.id}
-        submitLabel={stop === "drain" ? "Drain relay" : "Disable tunnel"}
-        trigger={(open) => <Button size="xs" variant="outline" onClick={open}>{stop === "drain" ? "Drain" : "Disable"}</Button>}
-        run={(h) => operatorAction("POST", `${base}/${stop}`, h, body)}
-      />
-      <ActionDialog
-        title={`${go === "resume" ? "Resume" : "Enable"} ${item.id}`}
-        description={`Puts the ${noun} back in service.`}
-        target={item.id}
-        submitLabel={go === "resume" ? "Resume relay" : "Enable tunnel"}
-        trigger={(open) => <Button size="xs" variant="outline" onClick={open}>{go === "resume" ? "Resume" : "Enable"}</Button>}
-        run={(h) => operatorAction("POST", `${base}/${go}`, h, body)}
-      />
-    </div>
-  )
+  const stopLabel = stop === "drain" ? "Drain" : "Disable"
+  const goLabel = go === "resume" ? "Resume" : "Enable"
+  if (!useCanOperate()) return null
+  const actions: RowAction[] = [
+    {
+      key: go,
+      label: goLabel,
+      dialog: (c) => (
+        <ActionDialog {...c} title={`${goLabel} ${item.id}`} description="Puts it back in service." target={item.id} submitLabel={go === "resume" ? "Resume relay" : "Enable tunnel"} run={(h) => operatorAction("POST", `${base}/${go}`, h, body)} />
+      ),
+    },
+    {
+      key: stop,
+      label: stopLabel,
+      destructive: true,
+      dialog: (c) => (
+        <ActionDialog
+          {...c}
+          title={`${stopLabel} ${item.id}`}
+          description={kind === "relay" ? "It stops taking new sessions; held ones finish." : "It stops serving traffic."}
+          target={item.id}
+          submitLabel={stop === "drain" ? "Drain relay" : "Disable tunnel"}
+          run={(h) => operatorAction("POST", `${base}/${stop}`, h, body)}
+        />
+      ),
+    },
+  ]
+  return <RowMenu label={item.id} actions={actions} data-row-actions={item.id} />
 }
 
 /** Block or unblock a published hostname (abuse, legal takedown). There is no list of publications: name the host. */
@@ -73,34 +80,33 @@ export function Publications() {
   const hostOk = /^[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?$/.test(host)
   const revisionOk = Number.isInteger(+revision) && +revision >= 1
   const can = useCanOperate()
-  if (!can) return <p className="text-sm text-muted-foreground">Blocking or unblocking a hostname needs the operations role.</p>
+  if (!can) return <p className="py-12 text-center text-sm text-muted-foreground">Operations role only.</p>
   return (
-    <section className="flex flex-col gap-3" data-publications>
-      <p className="text-sm text-muted-foreground">Block a published hostname so the edge refuses it, or lift a block. The revision is 1 for a name that was never blocked, otherwise its current block version.</p>
-      <div className="grid max-w-xl gap-3">
+    <section className="flex max-w-md flex-col gap-4" data-publications>
+      <div className="grid gap-3">
         <TextField label="Hostname" value={host} onChange={(v) => setHost(v.trim().toLowerCase())} placeholder="demo.pub.example.test" />
-        <TextField label="Revision" inputMode="numeric" value={revision} onChange={setRevision} />
-        <label className="flex items-center gap-2 text-sm"><Checkbox checked={legal} onCheckedChange={(v) => setLegal(v === true)} />Legal takedown (answered 451, the owner is notified)</label>
+        <TextField label="Revision" inputMode="numeric" value={revision} onChange={setRevision} hint="1 for a name never blocked, else its current block version." />
+        <label className="flex items-center gap-2 text-sm"><Checkbox checked={legal} onCheckedChange={(v) => setLegal(v === true)} />Legal takedown (the owner is notified)</label>
       </div>
       <div className="flex gap-2">
         <ActionDialog
           title={`Block ${host}`}
-          description={legal ? "The edge answers 451 for this hostname and the owner receives a legal notice. Reversible with Unblock." : "The edge refuses this hostname (403). Reversible with Unblock."}
+          description={legal ? "The edge refuses it with a legal notice, and the owner is told. Reversible." : "The edge refuses this hostname. Reversible."}
           target={host}
           destructive
           confirmWord={host}
           submitLabel="Block hostname"
           valid={hostOk && revisionOk}
-          trigger={(open) => <Button variant="destructive" disabled={!hostOk || !revisionOk} onClick={open}>Block</Button>}
+          trigger={(open) => <Button size="lg" disabled={!hostOk || !revisionOk} onClick={open}>Block</Button>}
           run={(h) => operatorAction("POST", `/v1/admin/publications/${encodeURIComponent(host)}/block`, h, { revision: +revision, ...(legal ? { legal: true } : {}) })}
         />
         <ActionDialog
           title={`Unblock ${host}`}
-          description="Lets the edge serve this hostname again. The block and its evidence stay in the history."
+          description="The edge serves it again. The block stays in the history."
           target={host}
           submitLabel="Unblock hostname"
           valid={hostOk && revisionOk}
-          trigger={(open) => <Button variant="outline" disabled={!hostOk || !revisionOk} onClick={open}>Unblock</Button>}
+          trigger={(open) => <Button size="lg" variant="outline" disabled={!hostOk || !revisionOk} onClick={open}>Unblock</Button>}
           run={(h) => operatorAction("POST", `/v1/admin/publications/${encodeURIComponent(host)}/unblock`, h, { revision: +revision })}
         />
       </div>
@@ -124,7 +130,7 @@ export function ControlOperations() {
         list={list}
         rows={(d) => d.operations}
         rowKey={(o) => o.id}
-        empty="No control operation matches this state."
+        empty="No operations match."
         columns={[
           { header: "Operation", cell: (o) => <Mono>{o.id}</Mono> },
           { header: "Type", cell: (o) => o.type },
@@ -132,20 +138,19 @@ export function ControlOperations() {
           { header: "Attempts", cell: (o) => o.attempts, className: "text-right tabular-nums" },
           { header: "Updated", cell: (o) => <Time iso={o.updated_at} relative /> },
           {
-            header: "Actions",
+            header: "",
+            className: "text-right",
             cell: (o) =>
               o.state === "dead_letter" && can ? (
                 <ActionDialog
                   title={`Recover ${o.id}`}
-                  description="Puts this dead-lettered operation back in the queue to run again."
+                  description="Puts it back in the queue to run again."
                   target={o.id}
                   submitLabel="Recover operation"
-                  trigger={(open) => <Button size="xs" variant="outline" onClick={open}>Recover</Button>}
+                  trigger={(open) => <Button variant="outline" onClick={open}>Recover</Button>}
                   run={(h) => operatorAction("POST", `/v1/admin/control-operations/${encodeURIComponent(o.id)}/recover`, h)}
                 />
-              ) : (
-                "—"
-              ),
+              ) : null,
           },
         ]}
       />

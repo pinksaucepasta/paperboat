@@ -18,11 +18,11 @@ export function MachinesTable({ list, empty }: { list: CursorList<Machines>; emp
       rowKey={(m) => m.id}
       empty={empty}
       columns={[
-        { header: "Machine", cell: (m) => <Link className="underline-offset-2 hover:underline" href={`/machines/${encodeURIComponent(m.id)}`}>{m.alias}</Link> },
-        { header: "State", cell: (m) => <span className="flex gap-1"><StatusBadge state={m.state} />{m.deleted_at ? <StatusBadge state="deleted" /> : m.stale ? <StatusBadge state="stale" /> : m.ready ? <StatusBadge state="ready" /> : null}</span> },
-        { header: "Platform", cell: (m) => `${m.platform}/${m.architecture}` },
-        { header: "Owner", cell: (m) => <Mono>{m.team_id || m.account_id}</Mono> },
-        { header: "Last seen", cell: (m) => (m.last_seen_at ? <Time iso={m.last_seen_at} relative /> : "never") },
+        { header: "Machine", cell: (m) => <Link className="font-medium underline-offset-2 hover:underline" href={`/machines/${encodeURIComponent(m.id)}`}>{m.alias}</Link> },
+        { header: "State", cell: (m) => <StatusBadge state={m.deleted_at ? "removed" : m.stale ? "stale" : m.state} /> },
+        { header: "Platform", className: "hidden md:table-cell", cell: (m) => `${m.platform}/${m.architecture}` },
+        { header: "Owner", className: "hidden md:table-cell", cell: (m) => <Mono>{m.team_id || m.account_id}</Mono> },
+        { header: "Seen", cell: (m) => (m.last_seen_at ? <Time iso={m.last_seen_at} relative /> : "Never") },
       ]}
     />
   )

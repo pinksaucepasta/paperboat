@@ -3,8 +3,8 @@
 import Link from "next/link"
 import { use } from "react"
 import { ErrorBlock } from "@/components/error-block"
-import { Mono, StatusBadge } from "@/components/filters"
-import { Facts, Page } from "@/components/page"
+import { Copyable, StatusBadge } from "@/components/filters"
+import { Facts, ObjectTitle, Page } from "@/components/page"
 import { Time } from "@/components/time"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useApiQuery, type Data } from "@/lib/api"
@@ -17,32 +17,46 @@ export default function MachinePage({ params }: { params: Promise<{ id: string }
   const m = machine.data
   const when = (iso?: string | null) => (iso ? <Time iso={iso} /> : "—")
   return (
-    <Page title={m?.alias ?? "Machine"}>
+    <Page parent={{ href: "/machines", title: "Machines" }} title={m?.alias ?? id}>
       {machine.isError ? (
         <ErrorBlock what="this machine" error={machine.error} retry={() => machine.refetch()} />
       ) : !m ? (
         <Skeleton className="h-60 w-full" />
       ) : (
+        <>
+        <ObjectTitle
+          detail={
+            <>
+              <StatusBadge state={m.deleted_at ? "removed" : m.stale ? "stale" : m.state} />
+              <span>{`${m.platform}/${m.architecture}`}</span>
+              {m.last_seen_at && (
+                <span>
+                  Seen <Time iso={m.last_seen_at} relative />
+                </span>
+              )}
+            </>
+          }
+        >
+          {m.alias}
+        </ObjectTitle>
         <Facts
           rows={[
-            ["Name", m.alias],
-            ["Machine id", <Mono key="i">{m.id}</Mono>],
-            ["State", <span key="s" className="flex gap-1"><StatusBadge state={m.state} />{m.deleted_at ? <StatusBadge state="deleted" /> : m.stale ? <StatusBadge state="stale" /> : m.ready ? <StatusBadge state="ready" /> : null}</span>],
-            ["Owner account", <Link key="a" className="underline" href={`/users/${encodeURIComponent(m.account_id)}`}><Mono>{m.account_id}</Mono></Link>],
-            ["Owner team", m.team_id ? <Link key="t" className="underline" href={`/teams/${encodeURIComponent(m.team_id)}`}><Mono>{m.team_id}</Mono></Link> : "—"],
-            ["Platform", `${m.platform}/${m.architecture}`],
+            ["Machine id", <Copyable key="i" value={m.id} />],
+            ["Owner", <Link key="a" className="font-mono text-xs underline-offset-2 hover:underline" href={`/users/${encodeURIComponent(m.account_id)}`}>{m.account_id}</Link>],
+            ["Team", m.team_id ? <Link key="t" className="font-mono text-xs underline-offset-2 hover:underline" href={`/teams/${encodeURIComponent(m.team_id)}`}>{m.team_id}</Link> : "—"],
+            ["Ready", m.ready ? "Yes" : "No"],
             ["Host service", m.host_service_version ?? "—"],
             ["Connector", m.connector_state],
             ["Update health", m.update_health],
-            ["Capabilities", m.observed_capabilities.join(", ") || "none observed"],
+            ["Capabilities", m.observed_capabilities.join(", ") || "None"],
             ["Install generation", m.installation_generation],
-            ["Last seen", when(m.last_seen_at)],
             ["Enrolled", when(m.enrolled_at)],
             ["Revoked", when(m.revoked_at)],
             ["Removed", when(m.deleted_at)],
             ["Created", when(m.created_at)],
           ]}
         />
+        </>
       )}
     </Page>
   )

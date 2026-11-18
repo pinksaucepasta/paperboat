@@ -4,7 +4,7 @@ import { useState } from "react"
 import { ErrorBlock } from "@/components/error-block"
 import { Mono, StatusBadge } from "@/components/filters"
 import { Page, Panel, Stat } from "@/components/page"
-import { Tabs } from "@/components/tabs"
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { Time } from "@/components/time"
 import { Skeleton } from "@/components/ui/skeleton"
 import { ApiError, useApiQuery, type Data } from "@/lib/api"
@@ -20,37 +20,30 @@ export default function OverviewPage() {
   const overview = useApiQuery<Overview>(["overview"], "/v1/admin/overview", 30_000)
   const status = useApiQuery<Status>(["status"], "/v1/admin/status", 30_000)
   return (
-    <Page title="Overview" description="Right now: accounts, machines, relays and the control plane.">
+    <Page title="Overview">
       {overview.isError ? (
         <ErrorBlock what="the overview" error={overview.error} retry={() => overview.refetch()} />
-      ) : !overview.data ? (
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">{Array.from({ length: 4 }, (_, i) => <Skeleton key={i} className="h-24" />)}</div>
       ) : (
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-4" data-overview-ready>
-          <Stat label="Accounts" value={sum(overview.data.accounts)} note={states(overview.data.accounts)} />
-          <Stat label="Machines" value={overview.data.hosts} note={`${overview.data.hosts_ready} ready · ${overview.data.hosts_stale} stale`} />
-          <Stat label="Relays" value={overview.data.relays} note={`${overview.data.relays_ready} ready · ${overview.data.relays_stale} stale`} />
-          <Stat label="Billing workspaces" value={sum(overview.data.billing_workspaces)} note={states(overview.data.billing_workspaces)} />
-          <Stat label="Control operations" value={sum(overview.data.control_operations)} note={states(overview.data.control_operations)} />
-        </div>
+        <OverviewStats data={overview.data} />
       )}
       <Panel title="Control plane">
         {status.isError ? (
           <ErrorBlock what="the server status" error={status.error} retry={() => status.refetch()} />
         ) : !status.data ? (
-          <Skeleton className="h-16 w-full" />
+          <Skeleton className="h-24 w-full" />
         ) : (
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
-            <span>Readiness <StatusBadge state={status.data.readiness === "ready" ? "ready" : "failed"} /></span>
-            {Object.entries(status.data.dimensions).map(([name, d]) => (
-              <span key={name} className="flex items-center gap-1"><Mono>{name}</Mono> <StatusBadge state={d.status === "healthy" || d.status === "ok" ? "ready" : (d.status ?? "unknown")} /></span>
+          <div className="grid grid-cols-2 gap-x-6 text-sm sm:grid-cols-3 lg:grid-cols-5">
+            {[["readiness", status.data.readiness === "ready" ? "ready" : "failed"] as const, ...Object.entries(status.data.dimensions).map(([name, d]) => [name, d.status === "healthy" || d.status === "ok" ? "ready" : (d.status ?? "unknown")] as const)].map(([name, state]) => (
+              <div key={name} className="flex items-center justify-between gap-2 border-b border-divider py-2">
+                <span className="truncate inline-block first-letter:uppercase">{name}</span>
+                <StatusBadge state={state} />
+              </div>
             ))}
-            <span className="text-muted-foreground">Observed <Time iso={status.data.observed_at} relative /></span>
           </div>
         )}
         {status.data && (
-          <p className="text-sm text-muted-foreground" data-build>
-            Server build <Mono>{status.data.build.version}</Mono> <Mono>{status.data.build.commit.slice(0, 12)}</Mono>. Runtime nodes report a protocol version, not a software version: see Relays &amp; edges. Deployment history is not available yet.
+          <p className="text-xs text-muted-foreground" data-build>
+            Build <Mono>{status.data.build.version}</Mono> <Mono>{status.data.build.commit.slice(0, 12)}</Mono> · observed <Time iso={status.data.observed_at} relative />
           </p>
         )}
       </Panel>
@@ -59,20 +52,46 @@ export default function OverviewPage() {
   )
 }
 
+function OverviewStats({ data }: { data?: Overview }) {
+  const v = (value: (d: Overview) => React.ReactNode) => (data ? value(data) : <Skeleton className="my-1.5 h-5 w-12" />)
+  const n = (value: (d: Overview) => string) => (data ? value(data) : <Skeleton className="my-0.5 h-3 w-24" />)
+  return (
+    <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-5" data-overview-ready={data ? "" : undefined}>
+      <Stat label="Accounts" value={v((d) => sum(d.accounts))} note={n((d) => states(d.accounts))} />
+      <Stat label="Machines" value={v((d) => d.hosts)} note={n((d) => `${d.hosts_ready} ready · ${d.hosts_stale} stale`)} />
+      <Stat label="Relays" value={v((d) => d.relays)} note={n((d) => `${d.relays_ready} ready · ${d.relays_stale} stale`)} />
+      <Stat label="Billing workspaces" value={v((d) => sum(d.billing_workspaces))} note={n((d) => states(d.billing_workspaces))} />
+      <Stat label="Control operations" value={v((d) => sum(d.control_operations))} note={n((d) => states(d.control_operations))} />
+    </div>
+  )
+}
+
 function Insights() {
   const [days, setDays] = useState<"7" | "30" | "90">("30")
   const analytics = useApiQuery<Analytics>(["analytics", days], `/v1/admin/analytics/overview?days=${days}`)
   const notConfigured = analytics.error instanceof ApiError && analytics.error.code === "analytics_not_configured"
   return (
-    <Panel title="Visitors and activation (PostHog)" action={<Tabs value={days} onChange={setDays} options={[["7", "7 days"], ["30", "30 days"], ["90", "90 days"]]} />}>
+    <Panel title="Visitors" action={
+        <ToggleGroup value={[days]} onValueChange={(next) => next[0] && setDays(next[0] as typeof days)} variant="outline" spacing={0}>
+          {(["7", "30", "90"] as const).map((d) => (
+            <ToggleGroupItem key={d} value={d}>
+              {d} days
+            </ToggleGroupItem>
+          ))}
+        </ToggleGroup>
+      }>
       {notConfigured ? (
-        <p className="text-sm text-muted-foreground" data-analytics-state="not-configured">
-          Product analytics is not configured on this server. Set PAPERBOAT_POSTHOG_HOST, PAPERBOAT_POSTHOG_PROJECT_ID and PAPERBOAT_POSTHOG_PERSONAL_API_KEY (or its _FILE) to show visitors, funnel, top pages, referrers, countries and devices.
+        <p className="py-12 text-center text-sm text-muted-foreground" data-analytics-state="not-configured">
+          PostHog isn’t set up on this server (PAPERBOAT_POSTHOG_*).
         </p>
       ) : analytics.isError ? (
         <ErrorBlock what="analytics" error={analytics.error} retry={() => analytics.refetch()} />
       ) : !analytics.data ? (
-        <Skeleton className="h-48 w-full" />
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+          {["Site visits", "Page views", "Active console users", "Machines paired"].map((label) => (
+            <Stat key={label} label={label} value={<Skeleton className="my-1.5 h-5 w-12" />} />
+          ))}
+        </div>
       ) : (
         <AnalyticsView data={analytics.data} />
       )}
@@ -85,20 +104,20 @@ function AnalyticsView({ data }: { data: Analytics }) {
   const peak = Math.max(1, ...data.daily.map((d) => d.page_views))
   return (
     <div className="flex flex-col gap-6" data-analytics-state="ready">
-      {failed.length > 0 && <p role="alert" className="text-sm text-destructive">Some insights did not load: {failed.map((k) => `${k} (${data.errors?.[k]})`).join(", ")}.</p>}
+      {failed.length > 0 && <p role="alert" className="text-sm text-destructive">Couldn’t load {failed.map((k) => `${k} (${data.errors?.[k]})`).join(", ")}.</p>}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <Stat label="Site visits" value={data.totals.visitors} note="Browser tabs on the marketing site" />
+        <Stat label="Site visits" value={data.totals.visitors} />
         <Stat label="Page views" value={data.totals.page_views} />
-        <Stat label="Console users" value={data.totals.console_users} note="Accounts that did something" />
-        <Stat label="Machines paired" value={data.totals.machines_paired} note="Activation: accounts with a first machine" />
+        <Stat label="Active console users" value={data.totals.console_users} />
+        <Stat label="Machines paired" value={data.totals.machines_paired} />
       </div>
       <div className="grid gap-6 md:grid-cols-2">
         <Panel title="Funnel">
-          <ol className="border-t border-divider text-sm">
+          <ol className="text-sm">
             {data.funnel.map((s, i) => (
-              <li key={s.step} className="flex items-center justify-between border-b border-divider py-2">
+              <li key={s.step} className="flex items-center justify-between border-b border-divider py-2.5">
                 <span>{s.step}</span>
-                <span className="tabular-nums">{s.count}{i > 0 && data.funnel[i - 1].count > 0 ? <span className="ml-2 text-xs text-muted-foreground">{Math.round((s.count / data.funnel[i - 1].count) * 100)}% of previous</span> : null}</span>
+                <span className="tabular-nums">{s.count}{i > 0 && data.funnel[i - 1].count > 0 ? <span className="ml-2 inline-block w-10 text-right text-xs text-muted-foreground">{Math.round((s.count / data.funnel[i - 1].count) * 100)}%</span> : null}</span>
               </li>
             ))}
           </ol>
@@ -115,10 +134,10 @@ function AnalyticsView({ data }: { data: Analytics }) {
       <div className="grid gap-6 md:grid-cols-2">
         <Breakdown title="Top pages" rows={data.top_pages} />
         <Breakdown title="Referrers" rows={data.referrers} />
-        <Breakdown title="Countries" rows={data.countries} note="Marketing site only; console events carry no location." />
-        <Breakdown title="Devices" rows={data.devices.filter((r) => r.name !== "(none)")} note="The sites do not send browser or device details yet." />
+        <Breakdown title="Countries" rows={data.countries} />
+        <Breakdown title="Devices" rows={data.devices.filter((r) => r.name !== "(none)")} />
       </div>
-      <p className="text-xs text-muted-foreground">Observed <Time iso={data.observed_at} relative />. Aggregates only; people who opt out or send Do Not Track are not counted. Retention needs a recurring event the sites do not send yet.</p>
+      <p className="text-xs text-muted-foreground">Observed <Time iso={data.observed_at} relative /></p>
     </div>
   )
 }
@@ -129,25 +148,25 @@ function Retention({ cohorts }: { cohorts: Analytics["retention"] }) {
   return (
     <Panel title="Retention">
       {!any ? (
-        <p className="text-sm text-muted-foreground" data-retention-state="not-configured">
-          Not available yet: retention needs the console to send a daily activity event (console_active_day), which it does not send today.
+        <p className="py-6 text-center text-sm text-muted-foreground" data-retention-state="not-configured">
+          No data yet.
         </p>
       ) : (
         <div className="overflow-x-auto" data-retention-state="ready">
           <table className="w-full border-collapse text-sm">
             <thead>
               <tr className="border-b border-divider text-left text-xs text-muted-foreground">
-                <th className="h-8 px-2 font-medium">First paired in week of</th>
-                <th className="px-2 text-right font-medium">Accounts</th>
+                <th className="h-9 px-2 font-normal">Week</th>
+                <th className="px-2 text-right font-normal">Accounts</th>
                 {cohorts[0].active.map((_, week) => (
-                  <th key={week} className="px-2 text-right font-medium">Week {week}</th>
+                  <th key={week} className="px-2 text-right font-normal">+{week}w</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {cohorts.map((c) => (
                 <tr key={c.week} className="border-b border-divider">
-                  <td className="h-8 px-2">{c.week.slice(0, 10)}</td>
+                  <td className="h-10 px-2">{c.week.slice(0, 10)}</td>
                   <td className="px-2 text-right tabular-nums">{c.size}</td>
                   {c.active.map((n, week) => (
                     <td key={week} className="px-2 text-right tabular-nums">{c.size > 0 ? `${Math.round((n / c.size) * 100)}%` : "—"}</td>
@@ -162,15 +181,15 @@ function Retention({ cohorts }: { cohorts: Analytics["retention"] }) {
   )
 }
 
-function Breakdown({ title, rows, note }: { title: string; rows: { name: string; count: number }[]; note?: string }) {
+function Breakdown({ title, rows }: { title: string; rows: { name: string; count: number }[] }) {
   return (
     <Panel title={title}>
       {rows.length === 0 ? (
-        <p className="text-sm text-muted-foreground">No data in this range.{note ? ` ${note}` : ""}</p>
+        <p className="py-6 text-center text-sm text-muted-foreground">No data</p>
       ) : (
-        <ul className="border-t border-divider text-sm">
+        <ul className="text-sm">
           {rows.map((r) => (
-            <li key={r.name} className="flex items-center justify-between gap-3 border-b border-divider py-1.5">
+            <li key={r.name} className="flex items-center justify-between gap-3 border-b border-divider py-2.5">
               <span className="min-w-0 truncate">{r.name}</span>
               <span className="tabular-nums">{r.count}</span>
             </li>

@@ -1,7 +1,6 @@
 "use client"
 
 import { Button } from "@/components/ui/button"
-import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
 import { Skeleton } from "@/components/ui/skeleton"
 import { ErrorBlock } from "@/components/error-block"
 import { pageSize, type CursorList } from "@/lib/paging"
@@ -56,20 +55,20 @@ export function DataTable<P extends Page, R>({
   return (
     <div data-table={what} data-state={list.isPending ? "loading" : items.length === 0 ? "empty" : "ready"}>
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[40rem] border-collapse text-sm">
+        <table className="w-full border-collapse md:min-w-[40rem] text-sm">
           <thead>
             <tr className="border-b border-divider text-left text-xs text-muted-foreground">
               {columns.map((c) => (
-                <th key={c.header} scope="col" className={cn("h-9 px-3 font-medium", c.className)}>
+                <th key={c.header} scope="col" className={cn("h-9 px-3 font-normal", c.className)}>
                   {c.header}
                 </th>
               ))}
             </tr>
           </thead>
-          <tbody>
+          <tbody className="divide-y divide-divider">
             {list.isPending
               ? Array.from({ length: 8 }, (_, i) => (
-                  <tr key={i} className="border-b border-divider [&>td]:h-12 [&>td]:px-3">
+                  <tr key={i} className="[&>td]:h-14 [&>td]:px-3">
                     {columns.map((c) => (
                       <td key={c.header} className={c.className}>
                         <Skeleton className="h-3 w-24 max-w-full" />
@@ -78,7 +77,7 @@ export function DataTable<P extends Page, R>({
                   </tr>
                 ))
               : items.map((row) => (
-                  <tr key={rowKey(row)} className="border-b border-divider hover:bg-muted/40 [&>td]:h-12 [&>td]:px-3">
+                  <tr key={rowKey(row)} className="hover:bg-muted/40 [&>td]:h-14 [&>td]:px-3">
                     {columns.map((c) => (
                       <td key={c.header} className={cn("max-w-[24rem] truncate", c.className)}>
                         {c.cell(row)}
@@ -89,14 +88,7 @@ export function DataTable<P extends Page, R>({
           </tbody>
         </table>
       </div>
-      {!list.isPending && items.length === 0 && (
-        <Empty className="py-16">
-          <EmptyHeader>
-            <EmptyTitle>Nothing here</EmptyTitle>
-            <EmptyDescription>{empty}</EmptyDescription>
-          </EmptyHeader>
-        </Empty>
-      )}
+      {!list.isPending && items.length === 0 && <p className="py-12 text-center text-sm text-muted-foreground">{empty}</p>}
       {list.data && (
         <PagerBar page={list.page} count={items.length} total={list.data.total ?? list.data.pagination?.total} capped={list.data.total_capped} hasNext={list.hasNext} go={list.go} />
       )}
