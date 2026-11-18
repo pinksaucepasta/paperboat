@@ -14166,7 +14166,7 @@ export interface components {
             /** @enum {string} */
             transfer_state?: "sending" | "paused" | "done" | "failed";
             /** @enum {string} */
-            pause_reason?: "no_eligible_path" | "destination_offline" | "relay_quota_exhausted";
+            pause_reason?: "no_eligible_path" | "destination_offline";
             total_bytes: number;
             committed_bytes: number;
         };
@@ -34664,7 +34664,7 @@ export interface operations {
                     /** @enum {string} */
                     transfer_state: "sending" | "paused" | "done" | "failed";
                     /** @enum {string} */
-                    pause_reason?: "no_eligible_path" | "destination_offline" | "relay_quota_exhausted";
+                    pause_reason?: "no_eligible_path" | "destination_offline";
                     committed_bytes: number;
                 };
             };

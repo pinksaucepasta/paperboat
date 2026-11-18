@@ -78,7 +78,7 @@ func (o *Owner) Dial(ctx context.Context, descriptor mesh.Addr, peerID string, c
 	}
 	// The admission/caller context bounds setup; silent handshakes each expire
 	// after one second. Do not return an intermediate 503 while recovery runs.
-	dialCtx, cancel := relayWithheldDeadline(ctx, o.authority)
+	dialCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	for {
 		session, err := o.dialAttempt(dialCtx, descriptor, peerID, class)
@@ -89,7 +89,7 @@ func (o *Owner) Dial(ctx context.Context, descriptor mesh.Addr, peerID string, c
 			return nil, ctx.Err()
 		}
 		if dialCtx.Err() != nil || !retryablePeerDial(err) {
-			return nil, relayQuotaFailure(o.authority, err)
+			return nil, err
 		}
 		descriptor, err = o.authority.Descriptor(peerID)
 		if err != nil {

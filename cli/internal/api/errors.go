@@ -73,10 +73,6 @@ func apiErrorMessageFor(code string, status int, details map[string]any) string 
 	}
 	billing := billingURL(details)
 	switch code {
-	case "bandwidth_quota_exhausted":
-		if billing != "" {
-			return apiErrorMessage(code, status) + " Add bandwidth: " + billing
-		}
 	case "machine_limit_reached", "preview_limit_reached", "browser_terminal_limit_reached", "public_tcp_limit_reached":
 		return planLimitMessage(code, details, billing)
 	case "update_required":
@@ -202,7 +198,6 @@ var publicAPIMessages = map[string]string{
 	"browser_terminal_limit_reached":  "This workspace's plan limit for open browser terminals is reached. Close one you no longer need, or upgrade under Billing in the Paperboat console.",
 	"public_tcp_limit_reached":        "This workspace's plan limit for public TCP tunnels is reached. Stop one you no longer need, upgrade under Billing in the Paperboat console, or run your own tunnel edge (self-hosted tunnels are not limited).",
 	"preview_limit_reached":           "This workspace's plan limit for running previews and tunnels is reached. Stop one you no longer need, or upgrade under Billing in the Paperboat console.",
-	"bandwidth_quota_exhausted":       "This workspace's hosted relay and edge bandwidth is used up. Direct machine-to-machine access still works. Add bandwidth or upgrade under Billing in the Paperboat console, or wait for the next allowance period.",
 	"conflict":                        "The resource state changed. Refresh it and try again.",
 	"route_conflict":                  "The route conflicts with an existing route on this hostname (one hostname serves either HTTP or TLS passthrough, and its TCP route once). Remove that route, or create a separate tunnel with `pb tunnel create <name> --from tcp://<host:port>`.",
 	"config_compare_stale":            "The conflict changed before it could be compared. Run `pb config conflict list` and compare the current conflict.",

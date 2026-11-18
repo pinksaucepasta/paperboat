@@ -276,11 +276,6 @@ func classifyCLIJSONFailure(err error, failure commandFailure) cliJSONError {
 			result.Code, result.Category, result.StateChanged, result.Retryable = localapi.RecipeReachCode, "authorization_or_entitlement", false, false
 			result.Recovery = "Add this machine and action to the recipe's [[reach]] and run `pb recipe update`."
 		}
-		if typed.Code == localapi.RelayQuotaCode {
-			// The connection was refused before anything was sent or started.
-			result.Code, result.Category, result.StateChanged = localapi.RelayQuotaCode, "authorization_or_entitlement", false
-			result.Recovery = "Add bandwidth or upgrade under Billing in the Paperboat console, or wait for the next allowance period."
-		}
 	case commandRejection:
 		if failure.kind == commandRejected && typed.valid() {
 			result.Code, result.Category, result.Message = "operation_refused", "conflict", typed.Error()

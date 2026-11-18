@@ -953,7 +953,7 @@ func friendlyAPIError(err error) string {
 		return "An active team subscription is required. " + teamSubscriptionRecovery + " No resource was created."
 	case "team_suspended":
 		return apiErr.Error()
-	case "bandwidth_quota_exhausted", "machine_limit_reached", "preview_limit_reached", "browser_terminal_limit_reached", "public_tcp_limit_reached", "account_deletion_console_only", "transfer_too_large", "team_limit",
+	case "machine_limit_reached", "preview_limit_reached", "browser_terminal_limit_reached", "public_tcp_limit_reached", "account_deletion_console_only", "transfer_too_large", "team_limit",
 		"invalid_recipe", "invalid_recipe_reach", "unknown_vault", "unknown_repository", "vault_key_missing", "recipe_name_taken", "recipe_token_taken",
 		"confirmation_required", "recipe_invalid", "recipe_expired", "recipe_replaced", "recipe_full", "vault_in_use", "vault_name_taken":
 		// The authored message plus the vetted billing or console link from the response (apiErrorMessageFor).
