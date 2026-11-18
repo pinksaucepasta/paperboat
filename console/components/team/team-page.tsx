@@ -23,6 +23,7 @@ import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Field, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
+import { CheckoutConsent } from "@/components/billing/checkout-consent"
 import { Skeleton } from "@/components/ui/skeleton"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { SectionHeading } from "@/components/section"
@@ -248,6 +249,7 @@ function CreateTeamForm() {
   const [id, setId] = useState("")
   const [seats, setSeats] = useState(1)
   const [period, setPeriod] = useState<"month" | "year">("month")
+  const [agreed, setAgreed] = useState(false)
   const paid = billingLive.paidTeamCreate
   const personal = useApiQuery(workspacesQuery).data?.find((workspace) => workspace.kind === "personal")
   const trial = teamTrialDays(useApiQuery(billingQuery(personal)).data)
@@ -267,7 +269,7 @@ function CreateTeamForm() {
       className="flex flex-col gap-4"
       onSubmit={(event) => {
         event.preventDefault()
-        if (valid) create.mutate()
+        if (valid && (!paid || agreed)) create.mutate()
       }}
     >
       <Field className="gap-1.5">
@@ -330,13 +332,14 @@ function CreateTeamForm() {
             : `${notLiveTitle}: teams are created free for now.`}
         </span>
       </Field>
+      {paid && <CheckoutConsent checked={agreed} onChange={setAgreed} />}
       {create.isError && (
         <p className="text-sm text-destructive">
           <ErrorMessage error={create.error} />
         </p>
       )}
       <DialogFooter>
-        <Button type="submit" size="lg" disabled={!valid || create.isPending}>
+        <Button type="submit" size="lg" disabled={!valid || (paid && !agreed) || create.isPending}>
           {create.isPending
             ? "Creating…"
             : paid && trial
