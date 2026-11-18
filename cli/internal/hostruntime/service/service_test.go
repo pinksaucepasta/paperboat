@@ -56,8 +56,8 @@ func TestSystemdDefinitionSignalsWorkerBeforeForceCleaningCgroup(t *testing.T) {
 }
 
 // A crash-looping unit restarts with a growing delay capped at 30 s (systemd >= 254; older systemd keeps the fixed
-// 5 s), and never fast enough to reach systemd's default start limit (5 starts in 10 s), which would leave it failed
-// until someone restarts it. Only keys that systemd 249 parses or ignores appear: a key none of our systemd knows
+// 5 s). The schedule below is the pacing that matters for units under systemd's default start limit (5 starts in 10 s,
+// which would leave a unit failed until someone restarts it); the main units also set StartLimitIntervalSec=0. Only keys that systemd 249 parses or ignores appear: a key none of our systemd knows
 // (RestartRandomizedDelaySec) would be logged as unknown on every start.
 func TestSystemdRestartBacksOffWithinTheStartLimit(t *testing.T) {
 	for _, kind := range []string{HostdKind, WorkerKind, UpdaterKind, CarrierKind, SessionOwnerKind, HostKind} {
