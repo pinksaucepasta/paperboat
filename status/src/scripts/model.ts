@@ -55,6 +55,26 @@ export function lastDays(days: Day[], now: number, n = 90): Day[] {
 
 export const kindOf = (d: Day): DayKind => uptimeBar(d)
 
+/** The days to draw: from the first day that has measured minutes to today, at most `n`, oldest first. Nothing is drawn for days before tracking started. */
+export function trackedDays(days: Day[], now: number, n = 90): { days: Day[]; since: string | null; full: boolean } {
+  const first = days.filter((d) => d.up + d.degraded + d.down + d.delayed > 0).map((d) => d.day).sort()[0]
+  if (!first) return { days: [], since: null, full: false }
+  const shown = lastDays(days, now, n).filter((d) => d.day >= first)
+  return { days: shown, since: first, full: shown.length >= n }
+}
+
+export const todayUtc = (now: number) => new Date(now).toISOString().slice(0, 10)
+
+/** "Updated 20 s ago": ticks in the browser between polls; `ms` is how old the last decision is. */
+export function ago(ms: number): string {
+  const s = Math.max(0, Math.round(ms / 1000))
+  if (s < 5) return "just now"
+  if (s < 60) return `${s} s ago`
+  const m = Math.floor(s / 60)
+  if (m < 60) return `${m} min ago`
+  return `${Math.floor(m / 60)} h ago`
+}
+
 /** Incidents touching a component on a UTC day (from creation to resolution, or to now while open). */
 export function incidentsOn(day: string, component: string, incidents: Incident[], now: number): Incident[] {
   const from = dayStart(day), to = from + DAY
