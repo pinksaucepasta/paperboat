@@ -174,6 +174,19 @@ VALUES(sha256(convert_to($1,'UTF8')),$1,'machine_'||$1,'machine',1,1,decode(repe
 	if n := count(`SELECT count(*) FROM paperboat.bans WHERE subject_kind='team' AND subject_id=$1 AND lifted_at IS NULL`, team); n != 0 {
 		t.Fatalf("%d team bans running after the unban", n)
 	}
+
+	// A provider job that gave up (failed) is queued again by a later ban of the same subscription; a done one is left alone.
+	exec(`UPDATE paperboat.account_deletion_jobs SET state='failed',attempts=12 WHERE user_id=$1 AND kind='stripe_cancel_at_period_end' AND target='sub_p_'||$1`, user)
+	exec(`UPDATE paperboat.account_deletion_jobs SET state='done',completed_at=now() WHERE user_id=$1 AND kind='stripe_cancel_at_period_end' AND target='sub_t_'||$2`, user, team)
+	if res, err = run(admin, "ban-again-"+x, "account_ban", user, Input{Revision: version(), Subscriptions: "period_end"}); err != nil || res.State != "suspended" {
+		t.Fatalf("a ban after the unban: %+v %v", res, err)
+	}
+	if n := count(`SELECT count(*) FROM paperboat.account_deletion_jobs WHERE user_id=$1 AND kind='stripe_cancel_at_period_end' AND target='sub_p_'||$1 AND state='queued' AND attempts=0`, user); n != 1 {
+		t.Fatalf("the failed job was not queued again (%d)", n)
+	}
+	if n := count(`SELECT count(*) FROM paperboat.account_deletion_jobs WHERE user_id=$1 AND kind='stripe_cancel_at_period_end' AND target='sub_t_'||$2 AND state='done'`, user, team); n != 1 {
+		t.Fatalf("a finished job was disturbed (%d)", n)
+	}
 }
 
 // An operator blocks a network by address or range with a reference and an optional end, and lifts it; only an admin;

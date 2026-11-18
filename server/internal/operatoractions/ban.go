@@ -206,6 +206,6 @@ func scheduleSubscriptionsTx(ctx context.Context, tx *db.Tx, account string, tea
 	_, err := tx.Exec(ctx, `INSERT INTO account_deletion_jobs(id,user_id,kind,target)
  SELECT 'adj_'||gen_random_uuid()::text,$1,$3,s.id FROM (SELECT DISTINCT provider_subscription_id id FROM billing_workspaces
   WHERE (user_id=$1 OR team_id=ANY($2::text[])) AND provider_subscription_id IS NOT NULL AND state NOT IN ('canceled','incomplete_expired')) s
- ON CONFLICT (user_id,kind,target) DO NOTHING`, account, teamIDs, kind)
+ ON CONFLICT (user_id,kind,target) DO UPDATE SET state='queued',attempts=0,last_error='',next_attempt_at=now(),lease_until=NULL,completed_at=NULL WHERE account_deletion_jobs.state='failed'`, account, teamIDs, kind)
 	return err
 }
