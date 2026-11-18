@@ -886,6 +886,16 @@ func New(opts Options) (*App, error) {
 	if analyticsCapture != nil {
 		serverWorkers = append(serverWorkers, analyticsCapture.Run, func(ctx context.Context) error { return posthogcapture.Tail(ctx, analyticsCapture, store.Pool()) })
 	}
+	// Owners (and operators, for global nodes) hear in the bell when a self-hosted node is outdated or below its floor.
+	serverWorkers = append(serverWorkers, observedWorker(supportService, "worker_node_update_notices", periodicPreviewTunnelWorker(10*time.Minute, func(ctx context.Context) error {
+		return selfhostService.NotifyNodeUpdates(ctx, func(ctx context.Context, component, version string) (string, string) {
+			release, ok := nodeFloors[component]
+			if !ok {
+				return "", ""
+			}
+			return controlplane.NodeUpdateState(ctx, release, component, version, time.Now())
+		})
+	}), progress))
 	serverWorkers = append(serverWorkers, observedWorker(supportService, "worker_recipe_machines", periodicPreviewTunnelWorker(time.Minute, recipeService.CollectMachines), progress))
 	serverWorkers = append(serverWorkers, observedWorker(supportService, "worker_team_retention", periodicPreviewTunnelWorker(time.Minute, func(ctx context.Context) error {
 		pruneContext, cancel := context.WithTimeout(ctx, opts.Config.Retention.Budget+opts.Config.HTTP.RequestTimeout)

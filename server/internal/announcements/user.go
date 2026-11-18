@@ -117,3 +117,23 @@ func (s *Service) Dismiss(ctx context.Context, userID, id string) error {
 	}
 	return nil
 }
+
+// ForOperators is the admin bell: system notices about our global nodes, newest first. Operators have no read
+// receipts (they are not users); admin remembers what it has shown.
+func (s *Service) ForOperators(ctx context.Context) ([]Notice, error) {
+	rows, err := s.store.Pool().Query(ctx, `SELECT a.id,a.title,a.body,coalesce(a.link_url,''),a.starts_at FROM paperboat.announcements a
+ WHERE a.kind='notice' AND a.audience_kind='operators' AND `+live+` ORDER BY a.starts_at DESC, a.seq DESC LIMIT $1`, MaxNotices)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	notices := []Notice{}
+	for rows.Next() {
+		var n Notice
+		if err = rows.Scan(&n.ID, &n.Title, &n.Body, &n.LinkURL, &n.SentAt); err != nil {
+			return nil, err
+		}
+		notices = append(notices, n)
+	}
+	return notices, rows.Err()
+}
