@@ -74,7 +74,7 @@ func TestRegionalRecoveryRenewalSurvivesTheAppliedConfigurationWake(t *testing.T
 	<-refreshed
 	select {
 	case <-refreshed:
-	case <-time.After(7 * time.Second):
+	case <-time.After(15 * time.Second): // due at 4 s; the regular cadence it must not fall back to is 24-36 s, so 15 s still tells them apart on a slow -race runner
 		t.Fatal("no renewal before the relays' observations ended; the applied configuration's wake re-armed the regular cadence")
 	}
 }
