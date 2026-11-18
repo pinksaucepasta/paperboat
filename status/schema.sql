@@ -17,7 +17,8 @@ CREATE INDEX IF NOT EXISTS incident_updates_incident ON incident_updates (incide
 CREATE TABLE IF NOT EXISTS maintenance (
   id TEXT PRIMARY KEY, title TEXT NOT NULL, body TEXT NOT NULL DEFAULT '', components TEXT NOT NULL,
   starts INTEGER NOT NULL, ends INTEGER NOT NULL, created INTEGER NOT NULL);
-CREATE TABLE IF NOT EXISTS snapshot (id INTEGER PRIMARY KEY CHECK (id = 1), at INTEGER NOT NULL, body TEXT NOT NULL);
+-- snapshot: at is the last evaluation time; built is when the build started, so an older read can never overwrite a newer one.
+CREATE TABLE IF NOT EXISTS snapshot (id INTEGER PRIMARY KEY CHECK (id = 1), at INTEGER NOT NULL, built INTEGER NOT NULL DEFAULT 0, body TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS subscribers (
   email TEXT PRIMARY KEY, token TEXT NOT NULL UNIQUE, confirmed INTEGER NOT NULL DEFAULT 0,
   created INTEGER NOT NULL, last_mail INTEGER NOT NULL DEFAULT 0);
