@@ -3,7 +3,7 @@
 import Link from "next/link"
 import { useMemo, useState } from "react"
 import { DataTable } from "@/components/data-table"
-import { FilterSelect, Mono, SearchBox, StatusBadge } from "@/components/filters"
+import { Filters, Mono, SearchBox, StatusBadge } from "@/components/filters"
 import { Page } from "@/components/page"
 import type { Data } from "@/lib/api"
 import { useCursorList } from "@/lib/paging"
@@ -17,7 +17,7 @@ export default function TeamsPage() {
     <Page title="Teams">
       <div className="flex flex-wrap items-center gap-2">
         <SearchBox label="Search teams" placeholder="Team or owner id" value={q} onChange={setQ} />
-        <FilterSelect label="Suspension" value={suspended} onChange={setSuspended} options={[["", "Any"], ["false", "Not suspended"], ["true", "Suspended"]]} />
+        <Filters items={[{ label: "Suspension", value: suspended, onChange: setSuspended, options: [["false", "Not suspended"], ["true", "Suspended"]] }]} />
       </div>
       <DataTable
         what="teams"

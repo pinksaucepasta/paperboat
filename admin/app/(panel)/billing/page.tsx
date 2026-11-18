@@ -4,7 +4,7 @@ import { Suspense, useMemo, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import { BillingPolicy, OperationActions, ProductEditor } from "@/components/billing-actions"
 import { DataTable } from "@/components/data-table"
-import { FilterSelect, Mono, StatusBadge } from "@/components/filters"
+import { Filters, Mono, StatusBadge } from "@/components/filters"
 import { Page, Panel } from "@/components/page"
 import { Tabs } from "@/components/tabs"
 import { Time } from "@/components/time"
@@ -12,7 +12,7 @@ import { useOperator, type Data } from "@/lib/api"
 import { useCursorList } from "@/lib/paging"
 
 type View = "workspaces" | "operations" | "products"
-const billingStates: [string, string][] = [["", "Any state"], ...["free", "trialing", "active", "past_due", "unpaid", "canceled", "paused", "incomplete"].map((s): [string, string] => [s, s.replace("_", " ")])]
+const billingStates: [string, string][] = ["free", "trialing", "active", "past_due", "unpaid", "canceled", "paused", "incomplete"].map((s) => [s, s[0].toUpperCase() + s.slice(1).replace("_", " ")])
 
 export default function BillingPage() {
   const [view, setView] = useState<View>("workspaces")
@@ -35,7 +35,7 @@ function Workspaces() {
   const list = useCursorList<Data<"/v1/admin/billing/workspaces">>("/v1/admin/billing/workspaces", filters)
   return (
     <>
-      <FilterSelect label="State" value={state} onChange={setState} options={billingStates} />
+      <div className="flex flex-wrap items-center gap-2"><Filters items={[{ label: "State", value: state, onChange: setState, options: billingStates }]} /></div>
       <DataTable
         what="billing workspaces"
         list={list}
@@ -61,7 +61,7 @@ function Operations() {
   const list = useCursorList<Data<"/v1/admin/billing/workspace-operations">>("/v1/admin/billing/workspace-operations", filters)
   return (
     <>
-      <FilterSelect label="Operation state" value={state} onChange={setState} options={[["", "Any state"], ["pending", "Pending"], ["succeeded", "Succeeded"], ["failed", "Failed"], ["uncertain", "Uncertain"]]} />
+      <div className="flex flex-wrap items-center gap-2"><Filters items={[{ label: "Operation state", value: state, onChange: setState, options: [["pending", "Pending"], ["succeeded", "Succeeded"], ["failed", "Failed"], ["uncertain", "Uncertain"]] }]} /></div>
       <DataTable
         what="billing operations"
         list={list}

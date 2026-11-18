@@ -3,7 +3,7 @@
 import Link from "next/link"
 import { useMemo, useState } from "react"
 import { DataTable } from "@/components/data-table"
-import { FilterSelect, Mono, SearchBox, StatusBadge } from "@/components/filters"
+import { Filters, Mono, SearchBox, StatusBadge } from "@/components/filters"
 import { Page } from "@/components/page"
 import { Time } from "@/components/time"
 import type { Data } from "@/lib/api"
@@ -20,7 +20,7 @@ export default function UsersPage() {
     <Page title="Users">
       <div className="flex flex-wrap items-center gap-2">
         <SearchBox label="Search users" placeholder="Email, name or id" value={q} onChange={setQ} />
-        <FilterSelect label="Status" value={status} onChange={setStatus} options={[["", "Any status"], ["active", "Active"], ["suspended", "Suspended"]]} />
+        <Filters items={[{ label: "Status", value: status, onChange: setStatus, options: [["active", "Active"], ["suspended", "Suspended"]] }]} />
       </div>
       <DataTable
         what="users"

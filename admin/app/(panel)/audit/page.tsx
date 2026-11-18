@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react"
 import { DataTable } from "@/components/data-table"
-import { FilterSelect, Mono, SearchBox, StatusBadge } from "@/components/filters"
+import { Filters, Mono, SearchBox, StatusBadge } from "@/components/filters"
 import { Page } from "@/components/page"
 import { Time } from "@/components/time"
 import { Input } from "@/components/ui/input"
@@ -35,7 +35,7 @@ export default function AuditPage() {
         <SearchBox label="Event type" placeholder="Event type" value={eventType} onChange={setEventType} />
         <SearchBox label="Resource type" placeholder="Resource type" value={resourceType} onChange={setResourceType} />
         <SearchBox label="Resource id" placeholder="Resource id" value={resourceId} onChange={setResourceId} />
-        <FilterSelect label="Outcome" value={outcome} onChange={setOutcome} options={[["", "Any outcome"], ["changed", "Changed"], ["unchanged", "Unchanged"], ["uncertain", "Uncertain"]]} />
+        <Filters items={[{ label: "Outcome", value: outcome, onChange: setOutcome, options: [["changed", "Changed"], ["unchanged", "Unchanged"], ["uncertain", "Uncertain"]] }]} />
         <Input aria-label="From date" type="datetime-local" className="w-48" value={since} onChange={(e) => setSince(e.target.value)} />
         <Input aria-label="Until date" type="datetime-local" className="w-48" value={until} onChange={(e) => setUntil(e.target.value)} />
       </div>

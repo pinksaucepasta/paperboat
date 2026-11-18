@@ -4,7 +4,7 @@ import { useMemo, useState } from "react"
 import { ActionDialog } from "@/components/action-dialog"
 import { RowMenu, type RowAction } from "@/components/row-menu"
 import { DataTable } from "@/components/data-table"
-import { FilterSelect, Mono, StatusBadge } from "@/components/filters"
+import { Filters, Mono, StatusBadge } from "@/components/filters"
 import { TextField } from "@/components/fields"
 import { Time } from "@/components/time"
 import { Button } from "@/components/ui/button"
@@ -124,7 +124,7 @@ export function ControlOperations() {
   const list = useCursorList<Operations>("/v1/admin/control-operations", filters)
   return (
     <div className="flex flex-col gap-3">
-      <FilterSelect label="Operation state" value={state} onChange={setState} options={[["", "Any state"], ["pending", "Pending"], ["running", "Running"], ["succeeded", "Succeeded"], ["failed", "Failed"], ["uncertain", "Uncertain"], ["dead_letter", "Dead-lettered"]]} />
+      <div className="flex flex-wrap items-center gap-2"><Filters items={[{ label: "Operation state", value: state, onChange: setState, options: [["pending", "Pending"], ["running", "Running"], ["succeeded", "Succeeded"], ["failed", "Failed"], ["uncertain", "Uncertain"], ["dead_letter", "Dead-lettered"]] }]} /></div>
       <DataTable
         what="control operations"
         list={list}

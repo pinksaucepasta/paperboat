@@ -1,7 +1,17 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { CheckIcon, CopyIcon, MagnifyingGlassIcon, XIcon } from "@phosphor-icons/react"
+import { CaretDownIcon, CheckIcon, CopyIcon, FunnelSimpleIcon, MagnifyingGlassIcon, XIcon } from "@phosphor-icons/react"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group"
 import { useDebounced } from "@/hooks/use-debounced"
 import { cn } from "@/lib/utils"
@@ -31,21 +41,74 @@ export function SearchBox({ value, onChange, placeholder, label }: { value: stri
   )
 }
 
-/** A native select: the options are a short fixed list, and it works on every phone. */
-export function FilterSelect({ label, value, onChange, options }: { label: string; value: string; onChange: (v: string) => void; options: [string, string][] }) {
+export type Filter = { label: string; value: string; onChange: (v: string) => void; options: [string, string][] }
+
+const control =
+  "flex h-8 items-center gap-1.5 rounded-md bg-surface px-2.5 text-sm text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/30"
+
+function Options({ filter }: { filter: Filter }) {
   return (
-    <select
-      aria-label={label}
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      className="h-8 rounded-lg border-transparent bg-surface px-2.5 text-sm text-foreground outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring/30"
-    >
-      {options.map(([v, text]) => (
-        <option key={v} value={v}>
-          {text}
-        </option>
+    <DropdownMenuRadioGroup value={filter.value} onValueChange={(next) => filter.onChange(String(next))}>
+      {filter.options.map(([value, label]) => (
+        <DropdownMenuRadioItem key={value} value={value}>
+          {label}
+        </DropdownMenuRadioItem>
       ))}
-    </select>
+    </DropdownMenuRadioGroup>
+  )
+}
+
+/**
+ * The console's "Filter ⌄" button and chips (console/components/machine-filters.tsx): unset filters are offered in the
+ * button's submenus; a set one becomes a chip whose value changes in place and whose × clears it.
+ */
+export function Filters({ items }: { items: Filter[] }) {
+  const unset = items.filter((f) => !f.value)
+  return (
+    <>
+      {unset.length > 0 && (
+        <DropdownMenu>
+          <DropdownMenuTrigger className={control} data-filter-button>
+            <FunnelSimpleIcon className="size-4" />
+            Filter
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="min-w-40">
+            {unset.map((f) => (
+              <DropdownMenuSub key={f.label}>
+                <DropdownMenuSubTrigger>{f.label}</DropdownMenuSubTrigger>
+                <DropdownMenuSubContent className="min-w-40">
+                  <Options filter={f} />
+                </DropdownMenuSubContent>
+              </DropdownMenuSub>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      )}
+      {items
+        .filter((f) => f.value)
+        .map((f) => (
+          <span key={f.label} className="flex h-8 items-center rounded-md bg-surface text-sm" data-filter-chip={f.label}>
+            <DropdownMenu>
+              <DropdownMenuTrigger className="flex h-full items-center gap-1.5 rounded-l-md pr-1.5 pl-2.5 outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring/30">
+                <span className="text-muted-foreground">{f.label}</span>
+                {f.options.find(([v]) => v === f.value)?.[1] ?? f.value}
+                <CaretDownIcon className="size-3.5 text-muted-foreground" />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="min-w-40">
+                <Options filter={f} />
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <button
+              type="button"
+              aria-label={`Remove ${f.label} filter`}
+              onClick={() => f.onChange("")}
+              className="flex h-full items-center rounded-r-md px-2 text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/30"
+            >
+              <XIcon className="size-3.5" />
+            </button>
+          </span>
+        ))}
+    </>
   )
 }
 
