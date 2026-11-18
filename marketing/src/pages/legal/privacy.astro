@@ -1,0 +1,229 @@
+---
+import Legal from "../../layouts/Legal.astro"
+import Fact from "../../components/Fact.astro"
+import { auditRetention } from "../../site"
+
+const sections: [string, string][] = [
+  ["who", "Who we are"],
+  ["cannot-see", "What we cannot see"],
+  ["collect", "What we hold, and why"],
+  ["public-links", "Public previews and tunnels"],
+  ["analytics", "Analytics and cookies"],
+  ["share", "Who we share it with"],
+  ["retention", "How long we keep it"],
+  ["deletion", "Deleting your account"],
+  ["rights", "Your rights"],
+  ["transfers", "Where it is processed"],
+  ["security", "Security and breaches"],
+  ["children", "Children"],
+  ["changes", "Changes"],
+  ["contact", "Contact"],
+]
+const held = [
+  ["Account", "Email address, name, how you signed in (email, social login or single sign-on), your role", "To run your account and send you service email", "Contract"],
+  ["Teams", "Team name, members, roles, invitations, who may reach which machine", "To run the team its owner set up", "Contract; for members, the owner's legitimate interest"],
+  ["Machines", "Machine name, operating system, version, public keys and certificates, online state, last seen", "To connect your machines and show their state", "Contract"],
+  ["Connections", "Which machine connected to which, when, by which path; network addresses while two machines are introduced", "To set up connections, prevent abuse and fix faults", "Contract; legitimate interest (security)"],
+  ["Sign-in sessions", "Session and refresh tokens (stored hashed), device type and operating system of each signed-in pb", "To keep you signed in and let you sign out other devices", "Contract"],
+  ["Audit events", "Who did what to which machine or setting, allowed or denied, and from which device", "So you and your team can see what happened", "Contract; legitimate interest (security)"],
+  ["ENV", "Names of variables and who may receive them; values only as ciphertext we cannot decrypt", "To deliver encrypted values to the machines you choose", "Contract"],
+  ["Recordings index", "That a terminal was recorded, on which machine, by whom; never the recording itself", "To list recordings that stay on your machine", "Contract"],
+  ["Usage", "Bytes through our relays and edges per workspace and month", "To apply plan limits, fair use and billing", "Contract"],
+  ["Billing", "Plan, seats, billing state, Stripe customer and subscription ids; never card numbers", "To charge, invoice and meet tax law", "Contract; legal obligation"],
+  ["Support and diagnostics", "Error reports and diagnostic bundles you choose to send, with secrets and content removed", "To fix the problem you reported", "Legitimate interest; your request"],
+  ["Abuse reports", "The reported address, the reason, details, and the reporter's email if given; never the reporter's network address", "To stop abuse", "Legitimate interest; legal obligation"],
+]
+---
+
+<Legal slug="privacy" description="What personal data Paperboat holds, why, for how long, who processes it, and what end-to-end encryption keeps from us." {sections}>
+  <p slot="intro">
+    Paperboat is built so that we hold as little as possible. Traffic between your machines is end-to-end encrypted and we cannot read it. This
+    policy says exactly what we do hold, why, how long, and what you can do about it.
+  </p>
+
+  <section id="who">
+    <h2>Who we are</h2>
+    <div class="prose">
+      <p>
+        <Fact name="name" />, <Fact name="address" /> (“Paperboat”, “we”) is the controller of the personal data described here. For data that a
+        team owner puts into a team, such as members' accounts and their audit events, the team is the controller and we process it for them
+        under the <a href="/legal/dpa/">Data Processing Addendum</a>. Contact: <Fact name="privacyEmail" />.
+      </p>
+    </div>
+  </section>
+
+  <section id="cannot-see">
+    <h2>What we cannot see</h2>
+    <div class="prose">
+      <p>
+        Terminals, remote commands, SSH, file transfers and private access to ports run end-to-end encrypted between your machines, directly
+        or through a relay that forwards ciphertext. Terminals in the web console are encrypted in your browser. ENV values are encrypted on
+        your device. Recordings stay on the machine that made them. So we never receive what you type, the output, your files, your commands,
+        your ENV values, your master password or recovery code, or any machine's private key. <a href="/security/">Security</a> explains how.
+      </p>
+      <p>We do not sell personal data, show ads, or use your data or content to train AI models.</p>
+    </div>
+  </section>
+
+  <section id="collect">
+    <h2>What we hold, and why</h2>
+    <div class="prose">
+      <p>To authorise, route and bill, our servers need metadata. The legal bases are those of the EU and UK GDPR.</p>
+    </div>
+    <div class="scroll">
+      <table class="facts">
+        <thead><tr><th scope="col">What</th><th scope="col">Details</th><th scope="col">Why</th><th scope="col">Legal basis</th></tr></thead>
+        <tbody>
+          {held.map(([what, details, why, basis]) => <tr><th scope="row">{what}</th><td>{details}</td><td>{why}</td><td>{basis}</td></tr>)}
+        </tbody>
+      </table>
+    </div>
+    <div class="prose">
+      <p>
+        We get this from you, from <code>pb</code> on your machines, from your team's owner when they invite you, and from our identity
+        provider when you sign in. When you sign in with single sign-on or a social login, we receive your email address, name and an
+        identifier from that provider.
+      </p>
+    </div>
+  </section>
+
+  <section id="public-links">
+    <h2>Public previews and tunnels</h2>
+    <div class="prose">
+      <p>
+        A public preview or tunnel is the one place our servers handle content. HTTPS from the visitor ends at our edge, which reads each request
+        to route it to your machine and forwards it encrypted. We do not store request or response bodies. To protect the service we briefly log
+        refused requests (seven days), and we count bytes for fair use. The request inspector keeps its captures on your machine, never on our
+        servers.
+      </p>
+      <p>
+        For visitors to someone's public link, the person who published it decides what their application does with your data. Report misuse on
+        the <a href="/report-abuse/">abuse page</a>.
+      </p>
+    </div>
+  </section>
+
+  <section id="analytics">
+    <h2>Analytics and cookies</h2>
+    <div class="prose">
+      <p>
+        We measure how the website and console are used with PostHog, hosted in the EU, sending only events we chose: page views, and a few
+        actions such as copying the install command. No autocapture, no session recording, no advertising trackers, and no cookies for
+        analytics: a random visit id lives in your browser tab and disappears when you close it. PostHog derives a country from your network
+        address and then discards the address. Nothing is sent if your browser sends Do Not Track or Global Privacy Control. In the console,
+        events are tied to a random account id, never your email or name. The legal basis is our legitimate interest in improving Paperboat.
+      </p>
+      <p>
+        The console uses only cookies it needs to work: a sign-in session and a protection against cross-site requests, plus a short-lived
+        cookie when you open a shared terminal or a protected preview. The website sets no cookies.
+      </p>
+    </div>
+  </section>
+
+  <section id="share">
+    <h2>Who we share it with</h2>
+    <div class="prose">
+      <p>
+        Only with the service providers that run parts of Paperboat for us, under contracts that limit them to that work. They are listed, with
+        what each receives, on the <a href="/legal/subprocessors/">Subprocessors</a> page. Inside a team, the owner and admins see the team's
+        members, machines and audit events.
+      </p>
+      <p>
+        We disclose data to authorities only when the law requires it, and only what the request legally covers. We tell the affected customer
+        first, unless the law forbids it or someone is in danger. Because of end-to-end encryption, we have no traffic content to give. If
+        Paperboat is sold or merged, your data passes to the new owner under this policy, and we tell you first.
+      </p>
+    </div>
+  </section>
+
+  <section id="retention">
+    <h2>How long we keep it</h2>
+    <div class="prose">
+      <ul>
+        <li>Account, team and machine data: while the account exists. Deleting the account erases it (see below).</li>
+        <li>Audit events: {auditRetention[0]} on Free, {auditRetention[1]} on Pro and {auditRetention[2]} on Team.</li>
+        <li>Records of ended sessions, stopped previews and tunnels, and deleted custom domains: 30 days.</li>
+        <li>Refused requests at the edge and tunnel logs: 7 days.</li>
+        <li>The index of terminal recordings: 90 days.</li>
+        <li>Abuse reports: 180 days.</li>
+        <li>Payment events from Stripe: 30 days. Invoices and billing records: as long as tax law requires.</li>
+        <li>Expired sign-in credentials: about an hour after they expire.</li>
+        <li>
+          Removed machines and deleted teams stop working at once. A record that they existed, with their name, stays so history and audit
+          events still make sense, until the account is deleted.
+        </li>
+      </ul>
+    </div>
+  </section>
+
+  <section id="deletion">
+    <h2>Deleting your account</h2>
+    <div class="prose">
+      <p>
+        Delete your account yourself in the console; <code>pb account delete</code> prints the link. It takes effect at once. We erase your
+        email, name, sign-in identities, machines' keys and certificates, ENV data, favourites and links, and cancel your subscription. What
+        stays: an anonymous placeholder for the account, so references to it do not break; billing records that tax law makes us keep; and
+        audit events in teams you belonged to, with your name removed. You cannot delete an account while it owns a team with other members:
+        hand the team over or remove them first.
+      </p>
+    </div>
+  </section>
+
+  <section id="rights">
+    <h2>Your rights</h2>
+    <div class="prose">
+      <p>
+        Depending on where you live, you may ask us to give you a copy of your data, correct it, delete it, restrict or object to how we use it,
+        or move it to another service, and you may withdraw consent you gave. Much of it you can do yourself in the console. Otherwise write to
+        <Fact name="privacyEmail" />; we answer within one month. If you are in the EU or UK, you may also complain to your data protection
+        authority. In India, you may contact our grievance officer, <Fact name="grievanceOfficer" />, at the same address. California residents:
+        we do not sell or share personal information for advertising.
+      </p>
+      <p>If you are a member of a team, requests about the team's data go to the team's owner, and we help them answer.</p>
+    </div>
+  </section>
+
+  <section id="transfers">
+    <h2>Where it is processed</h2>
+    <div class="prose">
+      <p>
+        Our control plane and database run in the European Union. Some service providers process data in other countries, including the United
+        States; each is named with its location on the <a href="/legal/subprocessors/">Subprocessors</a> page. Where data leaves the EU or UK
+        for a country without an adequacy decision, we rely on the European Commission's Standard Contractual Clauses or the provider's
+        certification under the EU–US Data Privacy Framework.
+      </p>
+    </div>
+  </section>
+
+  <section id="security">
+    <h2>Security and breaches</h2>
+    <div class="prose">
+      <p>
+        We protect what we hold with encryption in transit, hashed tokens, least-privilege access for our staff, and an audit trail of
+        operator actions. If a breach puts your personal data at risk, we tell you and, where the law requires, the authorities, without undue
+        delay and within 72 hours of learning of it.
+      </p>
+    </div>
+  </section>
+
+  <section id="children">
+    <h2>Children</h2>
+    <div class="prose">
+      <p>Paperboat is not meant for anyone under 16, and we do not knowingly hold their data. If you think we do, tell us and we delete it.</p>
+    </div>
+  </section>
+
+  <section id="changes">
+    <h2>Changes</h2>
+    <div class="prose">
+      <p>We email account holders before a change that affects them takes effect. The date at the top shows the latest version.</p>
+    </div>
+  </section>
+
+  <section id="contact">
+    <h2>Contact</h2>
+    <div class="prose">
+      <p><Fact name="name" />, <Fact name="address" />. Privacy questions: <Fact name="privacyEmail" />.</p>
+    </div>
+  </section>
+</Legal>

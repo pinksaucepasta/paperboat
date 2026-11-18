@@ -1,0 +1,82 @@
+---
+import Legal from "../../layouts/Legal.astro"
+import Fact from "../../components/Fact.astro"
+
+const sections: [string, string][] = [
+  ["list", "Current list"],
+  ["not-used", "What we do not use"],
+  ["changes", "Changes to this list"],
+]
+// [provider, purpose, data it receives, location]. A TODO-USER cell is a fact only the company can confirm.
+const providers = [
+  ["Hetzner Online GmbH", "Hosting of the control plane, its database and the private diagnostics store", "All data the control plane holds (see the Privacy Policy); diagnostic bundles users send", "Germany (EU)"],
+  ["TODO-USER: provider of the hosted relays and edges at launch", "Hosting of relays and edges", "Ciphertext of relayed traffic; requests to public previews and tunnels while they pass; network addresses", "TODO-USER: locations"],
+  ["WorkOS, Inc.", "Sign-in, single sign-on and directory sync", "Email address, name, sign-in identifiers and sessions", "United States"],
+  ["Stripe, Inc. / Stripe Payments Europe, Ltd.", "Payments, invoices and tax", "Billing name, email, address, tax id and payment card (Stripe holds the card; we never see it)", "United States, Ireland (EU)"],
+  ["Resend, Inc.", "Service email: invitations, notices and receipts", "Recipient email address and the content of the email", "United States"],
+  ["PostHog, Inc.", "Product analytics for the website and console", "Pseudonymous events: random visit or account id, page, coarse browser, operating system and country (network address discarded)", "EU (Frankfurt)"],
+  ["Cloudflare, Inc.", "DNS records that prove domain ownership for certificates", "Domain names; no personal data about users", "United States, global network"],
+  ["GitHub, Inc. (Microsoft)", "Hosting of pb release downloads", "The network address and user agent of whoever downloads a release", "United States"],
+  ["TODO-USER: Sentry (Functional Software, Inc.) or self-hosted GlitchTip, if enabled at launch", "Error reports from our servers", "Error messages and stack traces, scrubbed of content, tokens and secrets", "TODO-USER: region"],
+]
+---
+
+<Legal slug="subprocessors" description="The service providers that process personal data for Paperboat: what each one does, what it receives and where." {sections}>
+  <p slot="intro">
+    These are the companies that process personal data on our behalf to run Paperboat. Each is bound by a contract that limits it to that
+    work and requires data protection at least as strict as ours. None of them can read your end-to-end encrypted traffic or ENV values.
+  </p>
+
+  <section id="list">
+    <h2>Current list</h2>
+    <div class="scroll">
+      <table class="facts">
+        <thead><tr><th scope="col">Provider</th><th scope="col">Purpose</th><th scope="col">Data</th><th scope="col">Location</th></tr></thead>
+        <tbody>
+          {
+            providers.map((row) => (
+              <tr>
+                {row.map((cell, i) =>
+                  i === 0 ? (
+                    <th scope="row">{cell.startsWith("TODO-USER") ? <mark class="todo">{cell}</mark> : cell}</th>
+                  ) : (
+                    <td>{cell.startsWith("TODO-USER") ? <mark class="todo">{cell}</mark> : cell}</td>
+                  ),
+                )}
+              </tr>
+            ))
+          }
+        </tbody>
+      </table>
+    </div>
+    <div class="prose">
+      <p>
+        Certificates for preview, tunnel and custom domains come from Let's Encrypt (Internet Security Research Group, United States), which
+        receives the domain names only. A team that connects its own storage bucket for recordings chooses that provider itself; it receives
+        only ciphertext.
+      </p>
+    </div>
+  </section>
+
+  <section id="not-used">
+    <h2>What we do not use</h2>
+    <div class="prose">
+      <p>
+        No advertising networks, no data brokers, no session-recording tools, no CAPTCHA services, no SMS providers and no AI model providers.
+        Nothing you send through Paperboat is passed to an AI service.
+      </p>
+    </div>
+  </section>
+
+  <section id="changes">
+    <h2>Changes to this list</h2>
+    <div class="prose">
+      <p>
+        We update this page at least 30 days before a new subprocessor starts processing personal data, and we email the owners of paid
+        workspaces. A customer under the <a href="/legal/dpa/">Data Processing Addendum</a> may object within those 30 days on reasonable data
+        protection grounds by writing to <Fact name="privacyEmail" />. If we cannot resolve it, the customer may end the affected service and
+        we refund the unused part of any period paid in advance.
+      </p>
+    </div>
+  </section>
+</Legal>
