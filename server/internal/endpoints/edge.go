@@ -144,7 +144,7 @@ func scanEdgeAdmissionsWithRemovals(rows pgx.Rows, expiresAt time.Time) ([]runti
 // last pull); such observations are dropped, never an error, so they cannot fail the observations
 // of other routes in the same report.
 //
-// routeRevision, when not zero, is the revision of the route the edge observed: an observation of another revision
+// routeRevision, when not zero (a tunnel route, whose edge report carries it; previews and the agent's own pulls pass 0), is the revision of the route the edge observed: an observation of another revision
 // (the edge still serves the route as it was before a change) is dropped, so a changed route counts as ready only
 // once an edge serves the new revision.
 //

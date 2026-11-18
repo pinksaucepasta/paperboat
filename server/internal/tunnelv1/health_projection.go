@@ -53,7 +53,7 @@ func RefreshHealth(ctx context.Context, executor healthExecutor, accountID strin
  AND o.state IN ('pending','running') AND (
  ((t.summary_code='expired' OR t.summary_code IN ('ready','origin_unreachable')
  -- An address change is done when the old name stops serving: SettleAddressMoves drops the hold, the next probe settles it.
- AND NOT EXISTS(SELECT 1 FROM paperboat.tunnel_address_holds h WHERE h.tunnel_id=t.id AND h.kind='incoming')) AND o.operation_type IN ('tunnel.create',$4::text,'tunnel.patch'))
+ AND NOT EXISTS(SELECT 1 FROM paperboat.tunnel_address_holds h WHERE h.tunnel_id=t.id AND h.kind='incoming' AND h.operation_id=o.id)) AND o.operation_type IN ('tunnel.create',$4::text,'tunnel.patch'))
  OR (t.desired_state IN ('paused','deleted') AND o.operation_type=CASE t.desired_state WHEN 'paused' THEN $5::text ELSE $6::text END
  AND NOT EXISTS (SELECT 1 FROM endpoint_edge_assignments x JOIN endpoints e ON e.id=x.endpoint_id WHERE e.tunnel_id=t.id AND x.desired='active')
  -- The edges have dropped the route: every live edge fetched a route snapshot that began after the change (the

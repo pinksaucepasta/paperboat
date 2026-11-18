@@ -125,7 +125,7 @@ func finishAddressMoveTx(ctx context.Context, tx *db.Tx, tunnel dbsqlc.Tunnel, n
 		return tunnel, translate(err)
 	}
 	if newBlocked {
-		return tunnel, ErrSubdomainTaken // an operator blocked the name while the move was in progress
+		return tunnel, ErrAddressBlocked // an operator blocked the name while the move was in progress
 	}
 	moved, err := tx.Exec(ctx, `UPDATE paperboat.managed_hostnames SET hostname=$2 WHERE hostname=$1 AND resource_kind='tunnel' AND resource_id=$3`, oldHost, newHost, tunnel.ID)
 	if err != nil {
