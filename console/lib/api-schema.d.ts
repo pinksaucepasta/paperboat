@@ -11794,6 +11794,8 @@ export interface components {
                     limit: number | null;
                     /** @description The limit is an operator's override, not the plan's. */
                     granted?: boolean;
+                    /** @description The workspace runs its own edges, so what goes through them is not limited (limit is null). */
+                    self_hosted?: boolean;
                 };
                 publications: {
                     used: number;
@@ -11801,6 +11803,8 @@ export interface components {
                     limit: number | null;
                     /** @description The limit is an operator's override, not the plan's. */
                     granted?: boolean;
+                    /** @description The workspace runs its own edges, so what goes through them is not limited (limit is null). */
+                    self_hosted?: boolean;
                 };
                 browser_terminals: {
                     used: number;
@@ -11808,6 +11812,8 @@ export interface components {
                     limit: number | null;
                     /** @description The limit is an operator's override, not the plan's. */
                     granted?: boolean;
+                    /** @description The workspace runs its own edges, so what goes through them is not limited (limit is null). */
+                    self_hosted?: boolean;
                 };
                 public_tcp: {
                     used: number;
@@ -11815,6 +11821,8 @@ export interface components {
                     limit: number | null;
                     /** @description The limit is an operator's override, not the plan's. */
                     granted?: boolean;
+                    /** @description The workspace runs its own edges, so what goes through them is not limited (limit is null). */
+                    self_hosted?: boolean;
                 };
             };
             /** @description Personal overview only: the Team trial a new team would get (0 once used). */

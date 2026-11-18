@@ -42,6 +42,14 @@ func (s *WorkspaceService) throttleMbit(paid bool) float64 {
 	return float64(s.throttle.EdgeFreeBytesPerSecond) * 8 / 1e6
 }
 
+// speed words a speed for people: "512 kbit/s", "1 Mbit/s".
+func speed(mbit float64) string {
+	if mbit < 1 {
+		return fmt.Sprintf("%g kbit/s", mbit*1000)
+	}
+	return fmt.Sprintf("%g Mbit/s", mbit)
+}
+
 func gigabytes(bytes int64) string { return fmt.Sprintf("%g GB", float64(bytes)/1e9) }
 
 // workspaceAudience is who the bell and the mail of a workspace's notices go to: the account (personal) or the team's
@@ -66,8 +74,8 @@ func (s *WorkspaceService) noticeBandwidthWarningTx(ctx context.Context, tx *db.
 		return nil
 	}
 	return announcements.SystemNoticeTx(ctx, tx, audience, id, "bandwidth-80:"+workspaceID+":"+window.budget.UTC().Format(time.RFC3339),
-		"80% of fair-use traffic used",
-		fmt.Sprintf("After %s a month, public traffic through Paperboat's edges slows to %g Mbit/s. Add bandwidth to keep full speed.", gigabytes(allowance), mbit),
+		"80% of included traffic used",
+		fmt.Sprintf("After %s a month, public traffic through Paperboat's edges is reduced to %s. Add bandwidth to keep full speed.", gigabytes(allowance), speed(mbit)),
 		"/billing", &window.end)
 }
 
@@ -107,8 +115,8 @@ func (s *WorkspaceService) noticeBandwidthThrottledTx(ctx context.Context, tx *d
 	period := window.budget.UTC().Format(time.RFC3339)
 	audience, _, _ := workspaceAudience(workspaceID)
 	if err := announcements.SystemNoticeTx(ctx, tx, audience, id, "bandwidth-throttled:"+workspaceID+":"+period,
-		fmt.Sprintf("Public traffic slowed to %g Mbit/s", mbit),
-		fmt.Sprintf("This workspace used its %s fair-use amount. Full speed returns on %s, or sooner if you add bandwidth.", gigabytes(allowance), window.end.UTC().Format("2 Jan")),
+		fmt.Sprintf("Public traffic reduced to %s", speed(mbit)),
+		fmt.Sprintf("This workspace used its %s of included traffic. Full speed returns on %s, or sooner if you add bandwidth. Nothing is cut off.", gigabytes(allowance), window.end.UTC().Format("2 Jan")),
 		"/billing", &window.end); err != nil {
 		return err
 	}
@@ -153,9 +161,9 @@ AND u.status='active' AND u.email_verified AND u.primary_email<>'' ORDER BY u.id
 	billing := strings.TrimRight(s.mail.ConsoleOrigin, "/") + "/billing"
 	for _, r := range recipients {
 		message := transactionalmail.Message{
-			From: s.mail.From, To: []string{r.address}, Subject: "Paperboat: public traffic slowed down",
-			HTML: fmt.Sprintf("<p>Public traffic through Paperboat's edges for %s now runs at %g Mbit/s because its fair-use bandwidth is used up. Nothing is stopped. Direct machine-to-machine traffic, relays, and your own edges and relays are not slowed.</p><p>Full speed returns on %s (UTC), or as soon as you add bandwidth.</p><p><a href=\"%s\">Add bandwidth or upgrade</a></p>",
-				html.EscapeString(r.name), mbit, window.end.UTC().Format("2 Jan 2006"), html.EscapeString(billing)),
+			From: s.mail.From, To: []string{r.address}, Subject: "Paperboat: public traffic reduced",
+			HTML: fmt.Sprintf("<p>Public traffic through Paperboat's edges for %s is reduced to %s because its included traffic is used up. It is never cut off and never billed extra. Direct machine-to-machine traffic, relays, and your own edges and relays are not slowed.</p><p>Full speed returns on %s (UTC), or as soon as you add bandwidth.</p><p><a href=\"%s\">Add bandwidth or upgrade</a></p>",
+				html.EscapeString(r.name), speed(mbit), window.end.UTC().Format("2 Jan 2006"), html.EscapeString(billing)),
 		}
 		if _, err := transactionalmail.EnqueueOnceTx(ctx, tx, "bandwidth-throttled:"+workspaceID+":"+period+":"+r.account, message); err != nil {
 			return err
