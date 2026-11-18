@@ -77,32 +77,75 @@ func TestReaderOutputCrossesBothHopsAsRawFrames(t *testing.T) {
 	}
 }
 
-// The header cap equals the bridge's body cap, so it can never refuse a legitimate message; the largest list and
-// start requests the validation allows must also leave room well under it.
-func TestWorstCaseListAndStartMessagesFitTheMessageCap(t *testing.T) {
-	started := time.Now()
-	worst := Snapshot{OperationID: strings.Repeat("a", 128), State: StateRunning, StartedAt: &started, Result: &Result{Code: -1, Signal: "SIGKILL", ExitedAt: started}, ErrorCode: strings.Repeat("e", 64), NextSequence: 1<<64 - 1}
-	snapshots := make([]Snapshot, 1024) // MaximumActive is validated to at most 1024 per owner
-	for i := range snapshots {
-		snapshots[i] = worst
+// The header cap equals the bridge's body cap, so it can never refuse a legitimate message. The largest valid start
+// request (arguments and environment at their validated maximum, every byte a control byte that JSON escapes six-fold,
+// plus the largest managed environment) must still leave room under it.
+func TestWorstCaseStartMessageFitsTheMessageCap(t *testing.T) {
+	argv := make([]string, 16) // validated: each <= 4096 bytes, 64 KiB in total
+	for i := range argv {
+		argv[i] = strings.Repeat("\x01", 4096)
 	}
-	list, err := EncodeMessage(remoteResponse{Snapshots: snapshots}, nil)
-	if err != nil || len(list) > MaxMessageBytes/8 {
-		t.Fatalf("a list of 1024 snapshots is %d bytes (err %v), want room for 8 owners under %d", len(list), err, MaxMessageBytes)
-	}
-	argv := []string{strings.Repeat("\x01", 64<<10-1)} // validated total 64 KiB; JSON escapes each byte to 6
 	environment := map[string]string{}
-	for i := 0; i < 16; i++ {
-		environment[fmt.Sprintf("K%03d", i)] = strings.Repeat("\x01", 4096)
+	for i := 0; i < 16; i++ { // validated: key+value bytes <= 64 KiB in total
+		environment[fmt.Sprintf("K%03d", i)] = strings.Repeat("\x01", 4092)
 	}
-	start, err := EncodeMessage(remoteRequest{Request: &Request{OperationID: strings.Repeat("o", 128), Argv: argv, CWD: strings.Repeat("c", 4096), Environment: environment}}, nil)
-	if err != nil || len(start) > MaxMessageBytes/4 {
-		t.Fatalf("the largest start request is %d bytes (err %v), want under %d", len(start), err, MaxMessageBytes/4)
+	managed := make([]string, 272) // validBaseEnvironment: 272 entries, 320 KiB
+	for i := range managed {
+		managed[i] = fmt.Sprintf("M%03d=", i) + strings.Repeat("\x01", 320<<10/272-5)
+	}
+	start, err := EncodeMessage(remoteRequest{ManagedEnvironment: managed, Request: &Request{OperationID: strings.Repeat("o", 128), Argv: argv, CWD: strings.Repeat("c", 4096), Environment: environment}}, nil)
+	if err != nil || len(start) > MaxMessageBytes*2/5 {
+		t.Fatalf("the largest start request is %d bytes (err %v), want under %d of %d", len(start), err, MaxMessageBytes*2/5, MaxMessageBytes)
 	}
 }
 
+// A list is answered in pages, so no number of owners or active commands can outgrow one message.
+func TestListIsPagedAndRemoteManagerReadsEveryPage(t *testing.T) {
+	var all []Snapshot
+	for i := 0; i < 2*listPageSnapshots+17; i++ {
+		all = append(all, Snapshot{OperationID: fmt.Sprintf("operation_%06d", i), State: StateRunning})
+	}
+	server := &RemoteServer{Manager: listing{snapshots: all}}
+	pages := 0
+	remote, _ := NewRemoteManager(func(ctx context.Context, op string, body []byte) ([]byte, error) {
+		if op == "list" {
+			pages++
+		}
+		return server.Call(ctx, op, body)
+	})
+	got := remote.ActiveSnapshots()
+	if len(got) != len(all) || pages != 3 {
+		t.Fatalf("got %d of %d snapshots in %d pages, want all in 3", len(got), len(all), pages)
+	}
+	for i := range got {
+		if got[i].OperationID != all[i].OperationID {
+			t.Fatalf("snapshot %d is %s, want %s", i, got[i].OperationID, all[i].OperationID)
+		}
+	}
+	page, more := ListPage(all, uint64(len(all)+5))
+	if len(page) != 0 || more {
+		t.Fatalf("a page past the end holds %d, more=%v", len(page), more)
+	}
+	// Whatever fills the pages, one answer stays far under the cap even for the largest snapshots.
+	worst := Snapshot{OperationID: strings.Repeat("a", 128), State: StateRunning, StartedAt: &time.Time{}, Result: &Result{Signal: "SIGKILL"}, ErrorCode: strings.Repeat("e", 64), NextSequence: 1<<64 - 1}
+	page = make([]Snapshot, listPageSnapshots)
+	for i := range page {
+		page[i] = worst
+	}
+	if message, err := EncodeMessage(remoteResponse{Snapshots: page, More: true}, nil); err != nil || len(message) > MaxMessageBytes/4 {
+		t.Fatalf("a full page is %d bytes (err %v)", len(message), err)
+	}
+}
+
+type listing struct {
+	Service
+	snapshots []Snapshot
+}
+
+func (l listing) ActiveSnapshots() []Snapshot { return l.snapshots }
+
 func TestMessageBeyondTheCapIsRefusedOnBothSides(t *testing.T) {
-	if _, err := EncodeMessage(struct{}{}, make([]byte, MaxMessageBytes)); !errors.Is(err, ErrCapacity) {
+	if _, err := EncodeMessage(struct{}{}, make([]byte, MaxMessageBytes)); !errors.Is(err, ErrMessageTooLarge) || errors.Is(err, ErrCapacity) {
 		t.Fatalf("oversized message encoded: %v", err)
 	}
 	huge := make([]byte, 8)
@@ -112,12 +155,5 @@ func TestMessageBeyondTheCapIsRefusedOnBothSides(t *testing.T) {
 	}
 	if _, err := DecodeMessage([]byte{0, 0, 0, 9, '{'}, &struct{}{}); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("header longer than the frame accepted: %v", err)
-	}
-}
-
-// MaximumActive is what bounds a list answer: a configuration above the tested worst case never starts.
-func TestMaximumActiveAboveTheListBoundIsRefused(t *testing.T) {
-	if _, err := New(Config{WorkspaceRoot: t.TempDir(), BaseEnvironment: []string{"PATH=/usr/bin:/bin"}, MaximumActive: 1025, MaximumOperations: 2048}); err == nil {
-		t.Fatal("MaximumActive 1025 accepted: a list could outgrow the message cap")
 	}
 }

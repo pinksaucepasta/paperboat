@@ -413,10 +413,7 @@ func writeResponse(ctx context.Context, w http.ResponseWriter, data json.RawMess
 // writeFrame answers an exec call with its raw framed message: output bytes are never wrapped in a JSON string.
 // Failures keep the JSON error envelope, told apart by the content type.
 func writeFrame(w http.ResponseWriter, frame []byte) {
-	if len(frame) > MaxBodyBytes {
-		w.WriteHeader(500)
-		return
-	}
+	// EncodeMessage already refused anything over MaxBodyBytes.
 	w.Header().Set("Content-Type", frameContentType)
 	_, _ = w.Write(frame)
 }

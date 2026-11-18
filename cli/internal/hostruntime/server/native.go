@@ -136,7 +136,7 @@ func (m *NativeAssociationManager) serveAuxiliary(conn net.Conn, p nativeproto.P
 
 type nativeConnection struct {
 	control  net.Conn
-	compress protocol.CompressionGate // backs compression off while the output does not compress
+	compress protocol.CompressionGate // shared by the connection's streams: backs compression off while the output does not compress
 	id       [nativeproto.ConnectionIDSize]byte
 	binding  [nativeproto.BindingSize]byte
 	expiry   time.Duration

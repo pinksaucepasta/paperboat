@@ -14,8 +14,10 @@ import (
 //
 // MaxMessageBytes bounds one message, header and payload, and is the owner bridge's body limit. The header may use all
 // of it, so the cap can never refuse a message the bridge would have taken. What fills a header is bounded below it:
-// a list holds at most MaximumActive (validated <= 1024) snapshots of ~0.5 KiB, a start the validated request
-// (arguments and environment <= 64 KiB each, 6x when escaped).
+// a list answer is paged (listPageSnapshots of ~0.5 KiB), a start is the validated request (arguments and environment
+// <= 64 KiB each) plus the managed environment (<= 320 KiB), at worst 6x larger when every byte is a JSON-escaped control
+// byte: ~2.7 MiB. Decoding refuses a header longer than the cap or than the frame (ErrInvalid: that is corruption);
+// encoding refuses an oversized message (ErrMessageTooLarge).
 const MaxMessageBytes = 8 << 20
 
 // EncodeMessage frames header (as JSON) and payload.
@@ -25,7 +27,7 @@ func EncodeMessage(header any, payload []byte) ([]byte, error) {
 		return nil, err
 	}
 	if 4+len(head)+len(payload) > MaxMessageBytes {
-		return nil, ErrCapacity
+		return nil, ErrMessageTooLarge
 	}
 	frame := make([]byte, 4, 4+len(head)+len(payload))
 	binary.BigEndian.PutUint32(frame, uint32(len(head)))

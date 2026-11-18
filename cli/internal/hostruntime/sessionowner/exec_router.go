@@ -100,24 +100,31 @@ func (c *Connections) execOwner(ctx context.Context, id string) *workloadbridge.
 	return nil
 }
 
+// execList answers one page of every live owner's active commands, active owner first. Each owner's own list is read
+// whole (it pages itself), so the aggregate never has to fit one message.
 func (c *Connections) execList(ctx context.Context, body []byte) ([]byte, error) {
-	var all struct{ Snapshots []execprocess.Snapshot }
+	var request struct{ From uint64 }
+	if _, err := execprocess.DecodeMessage(body, &request); err != nil {
+		return nil, execprocess.ErrInvalid
+	}
+	var all []execprocess.Snapshot
 	for _, generation := range c.liveGenerations(ctx) {
 		client, err := c.execClient(c.probeContext(ctx, generation), generation)
 		if err != nil {
 			continue
 		}
-		result, err := client.Call(ctx, "exec", "list", body)
-		var part struct{ Snapshots []execprocess.Snapshot }
+		owner, err := client.Executions()
 		if err != nil {
 			continue
 		}
-		if _, err := execprocess.DecodeMessage(result, &part); err != nil {
-			continue
-		}
-		all.Snapshots = append(all.Snapshots, part.Snapshots...)
+		all = append(all, owner.ActiveSnapshots()...)
 	}
-	return execprocess.EncodeMessage(all, nil)
+	var page struct {
+		Snapshots []execprocess.Snapshot
+		More      bool
+	}
+	page.Snapshots, page.More = execprocess.ListPage(all, request.From)
+	return execprocess.EncodeMessage(page, nil)
 }
 
 // execClient connects to a running owner without starting archived ones.

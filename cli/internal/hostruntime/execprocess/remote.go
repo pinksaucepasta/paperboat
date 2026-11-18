@@ -36,7 +36,12 @@ type remoteResponse struct {
 	ReaderID  uint64
 	Written   int
 	Snapshots []Snapshot
+	More      bool // a list page: more snapshots follow from From + len(Snapshots)
 }
+
+// listPageSnapshots bounds one list answer (~0.5 KiB each), so a host with many owners and many active commands never
+// outgrows MaxMessageBytes: ActiveSnapshots reads pages until More is false.
+const listPageSnapshots = 2048
 
 // frame encodes the answer; an event's data travels as the payload, not inside the JSON header.
 func (r remoteResponse) frame() ([]byte, error) {
@@ -96,8 +101,25 @@ func (m *RemoteManager) Get(id string) (ExecutionService, error) {
 	return &remoteExecution{manager: m, id: id, snapshot: out.Snapshot}, nil
 }
 func (m *RemoteManager) ActiveSnapshots() []Snapshot {
-	out, _ := m.invokeBounded("list", remoteRequest{})
-	return out.Snapshots
+	var all []Snapshot
+	for {
+		out, err := m.invokeBounded("list", remoteRequest{From: uint64(len(all))})
+		if err != nil {
+			return all
+		}
+		all = append(all, out.Snapshots...)
+		if !out.More || len(out.Snapshots) == 0 {
+			return all
+		}
+	}
+}
+
+// ListPage returns the page of snapshots starting at from, and whether more follow: the one paging rule of the "list"
+// operation, shared by every server of it.
+func ListPage(all []Snapshot, from uint64) ([]Snapshot, bool) {
+	start := int(min(from, uint64(len(all))))
+	end := min(start+listPageSnapshots, len(all))
+	return all[start:end], end < len(all)
 }
 
 func (m *RemoteManager) BeginUpdate(ctx context.Context, transactionID string) error {
@@ -310,7 +332,7 @@ func (s *RemoteServer) Call(ctx context.Context, op string, body []byte) ([]byte
 		return out.frame()
 	}
 	if op == "list" {
-		out.Snapshots = s.Manager.ActiveSnapshots()
+		out.Snapshots, out.More = ListPage(s.Manager.ActiveSnapshots(), request.From)
 		return out.frame()
 	}
 	if op == "reader_open" {

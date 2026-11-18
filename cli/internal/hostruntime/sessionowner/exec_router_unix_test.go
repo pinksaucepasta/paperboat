@@ -6,12 +6,10 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
-	"strings"
 	"sync"
 	"testing"
 	"time"
 
-	runtimeconfig "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/config"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/execprocess"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hostdproto"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/pty"
@@ -23,6 +21,18 @@ import (
 // execOwnerBridge serves one owner's executions on a real bridge socket and returns the manager behind it and a client.
 func execOwnerBridge(t *testing.T, ctx context.Context, root, generation string) (*execprocess.Manager, *workloadbridge.Client) {
 	t.Helper()
+	manager, err := execprocess.New(execprocess.Config{WorkspaceRoot: root, BaseEnvironment: []string{"PATH=/usr/bin:/bin"}, MaximumActive: 4, MaximumOperations: 16})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = manager.Shutdown(context.Background()) })
+	_, client := execOwnerBridgeFor(t, ctx, root, generation, manager)
+	return manager, client
+}
+
+// execOwnerBridgeFor serves executions on a real bridge socket under root and returns a client for it.
+func execOwnerBridgeFor(t *testing.T, ctx context.Context, root, generation string, executions execprocess.Service) (execprocess.Service, *workloadbridge.Client) {
+	t.Helper()
 	adapter, err := pty.NewShellAdapter(root)
 	if err != nil {
 		t.Fatal(err)
@@ -32,16 +42,11 @@ func execOwnerBridge(t *testing.T, ctx context.Context, root, generation string)
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = sessions.Shutdown(context.Background()) })
-	manager, err := execprocess.New(execprocess.Config{WorkspaceRoot: root, BaseEnvironment: []string{"PATH=/usr/bin:/bin"}, MaximumActive: 4, MaximumOperations: 16})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = manager.Shutdown(context.Background()) })
 	token := make([]byte, 32)
 	token[0] = 5
 	var mu sync.Mutex
 	fence := hostdproto.Status{State: hostdproto.StateActive, WorkerID: "worker", Epoch: 1, APIVersion: 1}
-	server := &workloadbridge.Server{Endpoint: filepath.Join(root, generation, "owner.sock"), Token: token, Sessions: sessions, Executions: &execprocess.RemoteServer{Manager: manager, MaximumReaders: 4}, MaximumConcurrent: 8, Ready: make(chan error, 1), Fence: func() hostdproto.Status { mu.Lock(); defer mu.Unlock(); return fence }, AcquireActive: func(string, uint64) (func(), error) { return func() {}, nil }}
+	server := &workloadbridge.Server{Endpoint: filepath.Join(root, generation, "owner.sock"), Token: token, Sessions: sessions, Executions: &execprocess.RemoteServer{Manager: executions, MaximumReaders: 4}, MaximumConcurrent: 8, Ready: make(chan error, 1), Fence: func() hostdproto.Status { mu.Lock(); defer mu.Unlock(); return fence }, AcquireActive: func(string, uint64) (func(), error) { return func() {}, nil }}
 	done := make(chan error, 1)
 	go func() { done <- server.Run(ctx) }()
 	if err := <-server.Ready; err != nil {
@@ -52,7 +57,7 @@ func execOwnerBridge(t *testing.T, ctx context.Context, root, generation string)
 		t.Fatal(err)
 	}
 	t.Cleanup(client.Close)
-	return manager, client
+	return executions, client
 }
 
 func execRequest(t *testing.T, id string, root string) execprocess.Request {
@@ -149,7 +154,42 @@ func TestExecRouterListsAcrossOwnersAndRefusesWhatIsNotAFrame(t *testing.T) {
 		t.Fatalf("list %+v, want the active owner's one command", listed)
 	}
 
-	if _, err := connections.execCall(ctx, "get", []byte(`{"OperationID":"operation_listed_new"}`)); !errors.Is(err, execprocess.ErrInvalid) {
+	unknown, _ := execprocess.EncodeMessage(map[string]string{"OperationID": "operation_nowhere"}, nil)
+	if _, err := connections.execCall(ctx, "get", unknown); !errors.Is(err, execprocess.ErrNotFound) {
+		t.Fatalf("a command no owner holds: %v", err)
+	}
+}
+
+// failIfCalled is an owner behind a real bridge that fails the test when the router lets a call through.
+type failIfCalled struct {
+	execprocess.Service
+	t *testing.T
+}
+
+func (f failIfCalled) Get(id string) (execprocess.ExecutionService, error) {
+	f.t.Errorf("the router forwarded get %q to an owner", id)
+	return nil, execprocess.ErrNotFound
+}
+
+func (f failIfCalled) Start(context.Context, execprocess.Request) (execprocess.ExecutionService, bool, error) {
+	f.t.Error("the router forwarded start to an owner")
+	return nil, false, execprocess.ErrInvalid
+}
+
+// The router answers what it can by itself: a body that is not a frame, a start without a request and the update
+// fence never reach an owner.
+func TestExecRouterRefusesMalformedCallsWithoutAskingAnOwner(t *testing.T) {
+	root := shorttemp.Dir(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	_, client := execOwnerBridgeFor(t, ctx, root, "guarded", failIfCalled{t: t})
+	connections := &Connections{
+		active:      Descriptor{Generation: "only_generation"},
+		clients:     map[string]*workloadbridge.Client{"only_generation": client},
+		descriptors: map[string]Descriptor{},
+		execs:       map[string]string{"operation_guarded": "only_generation"},
+	}
+	if _, err := connections.execCall(ctx, "get", []byte(`{"OperationID":"operation_guarded"}`)); !errors.Is(err, execprocess.ErrInvalid) {
 		t.Fatalf("a JSON body is not a frame: %v", err)
 	}
 	empty, _ := execprocess.EncodeMessage(struct{}{}, nil)
@@ -159,23 +199,7 @@ func TestExecRouterListsAcrossOwnersAndRefusesWhatIsNotAFrame(t *testing.T) {
 	if _, err := connections.execCall(ctx, "begin_update", empty); !errors.Is(err, execprocess.ErrUpdateUnavailable) {
 		t.Fatalf("owner-held commands survive updates, nothing to fence: %v", err)
 	}
-	unknown, _ := execprocess.EncodeMessage(map[string]string{"OperationID": "operation_nowhere"}, nil)
-	if _, err := connections.execCall(ctx, "get", unknown); !errors.Is(err, execprocess.ErrNotFound) {
-		t.Fatalf("a command no owner holds: %v", err)
-	}
-}
-
-// execList joins every catalogued owner's active commands into one message: at the catalogue's size and the default
-// per-owner command limit it must fit the message cap with room to spare.
-func TestExecListAcrossAFullCatalogueFitsTheMessageCap(t *testing.T) {
-	started := time.Now()
-	worst := execprocess.Snapshot{OperationID: strings.Repeat("a", 128), State: execprocess.StateRunning, StartedAt: &started, ErrorCode: "e", NextSequence: 1<<64 - 1}
-	var all struct{ Snapshots []execprocess.Snapshot }
-	for range MaxCatalogEntries * runtimeconfig.DefaultResources.MaxConcurrentOps {
-		all.Snapshots = append(all.Snapshots, worst)
-	}
-	message, err := execprocess.EncodeMessage(all, nil)
-	if err != nil || len(message) > execprocess.MaxMessageBytes*3/4 {
-		t.Fatalf("a full catalogue lists %d bytes (err %v), want under %d", len(message), err, execprocess.MaxMessageBytes*3/4)
+	if _, err := connections.execCall(ctx, "list", []byte(`{`)); !errors.Is(err, execprocess.ErrInvalid) {
+		t.Fatalf("list with a broken body: %v", err)
 	}
 }

@@ -49,7 +49,7 @@ func bridgeTo(t testing.TB, ctx context.Context, root, name string, executions e
 }
 
 // BenchmarkExecOutputThroughTwoBridgeHops is the worker -> hostd -> session owner relay of `pb exec` output with no
-// QUIC and no network: one reader, one ack per event, 128 KiB events, exactly as the worker drains them.
+// QUIC and no network: one reader, one piggybacked ack per event, 128 KiB events, exactly as the worker drains them.
 func BenchmarkExecOutputThroughTwoBridgeHops(b *testing.B) {
 	root := shorttemp.Dir(b)
 	ctx, cancel := context.WithCancel(context.Background())

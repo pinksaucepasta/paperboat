@@ -51,6 +51,7 @@ var errorCodes = map[string]error{
 	"execprocess.ErrWorkingDirectory":  execprocess.ErrWorkingDirectory,
 	"execprocess.ErrConflict":          execprocess.ErrConflict,
 	"execprocess.ErrCapacity":          execprocess.ErrCapacity,
+	"execprocess.ErrMessageTooLarge":   execprocess.ErrMessageTooLarge,
 	"execprocess.ErrUpdateInProgress":  execprocess.ErrUpdateInProgress,
 	"execprocess.ErrUpdateUnavailable": execprocess.ErrUpdateUnavailable,
 	"execprocess.ErrNotFound":          execprocess.ErrNotFound,
