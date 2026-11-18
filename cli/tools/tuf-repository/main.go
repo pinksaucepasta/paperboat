@@ -151,6 +151,15 @@ func run(args []string) error {
 			return fmt.Errorf("usage: paperboat-tuf %s -repository DIR -rollout-revision N%s", args[0], map[bool]string{true: " -percentage 0..100"}[args[0] == "promote"])
 		}
 		return mutateRollout(*repo, args[0], *revision, uint8(*percentage))
+	case "add-selfhost":
+		fs := flag.NewFlagSet("add-selfhost", flag.ContinueOnError)
+		repo := fs.String("repository", "", "repository directory")
+		version := fs.String("version", "", "self-host release version")
+		artifacts := fs.String("artifacts", "", "directory holding paperboat-selfhost-linux-{amd64,arm64}.tar.gz")
+		if err := fs.Parse(args[1:]); err != nil || fs.NArg() != 0 || *repo == "" || *version == "" || *artifacts == "" {
+			return errors.New("usage: paperboat-tuf add-selfhost -repository DIR -version VERSION -artifacts DIR")
+		}
+		return addSelfhost(*repo, *version, *artifacts)
 	case "status":
 		fs := flag.NewFlagSet("status", flag.ContinueOnError)
 		repo := fs.String("repository", "", "repository directory")
@@ -297,6 +306,11 @@ func publishWithPolicy(repo, version, artifacts string, qualificationEvidencePat
 	}
 	// Validate every prior target before withdrawing products from the new set.
 	currentTargets := make(map[string]*metadata.TargetFiles)
+	for name, prior := range targets.Signed.Targets {
+		if strings.HasPrefix(name, selfhostTargetPrefix) {
+			currentTargets[name] = prior // a pb release keeps the published self-host bundle
+		}
+	}
 	for _, target := range supportedReleaseTargets() {
 		name := releaseAssetName(target.platform, target.architecture)
 		if prior := targets.Signed.Targets[name]; prior != nil {
@@ -615,6 +629,9 @@ func mutateRollout(repo, operation string, revision uint64, percentage uint8) er
 	}
 	updates := make([]update, 0, len(supportedReleaseTargets()))
 	for name, info := range targets.Signed.Targets {
+		if strings.HasPrefix(name, selfhostTargetPrefix) {
+			continue // the self-host bundle has no rollout policy
+		}
 		if info == nil || len(info.Hashes["sha256"]) != sha256.Size || info.Custom == nil {
 			return fmt.Errorf("signed release asset %s is unavailable", name)
 		}
