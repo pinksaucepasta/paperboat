@@ -1,5 +1,6 @@
 import {
   ChartBarIcon,
+  ChartLineUpIcon,
   ClockCounterClockwiseIcon,
   CreditCardIcon,
   GaugeIcon,
@@ -22,6 +23,7 @@ const all: Operator["role"][] = ["admin", "support", "billing", "operations"]
 /** The server decides every read; the roles here only hide pages that role would be refused (403). */
 export const sections: Section[] = [
   { href: "/overview", title: "Overview", icon: ChartBarIcon, roles: ["admin"] },
+  { href: "/analytics", title: "Analytics", icon: ChartLineUpIcon, roles: ["admin"] },
   { href: "/users", title: "Users", icon: UserIcon, roles: ["admin", "support", "billing"] },
   { href: "/teams", title: "Teams", icon: UsersThreeIcon, roles: ["admin", "support", "billing"] },
   { href: "/machines", title: "Machines", icon: LaptopIcon, roles: all },
@@ -38,7 +40,7 @@ export const sections: Section[] = [
 export const sectionsFor = (role: Operator["role"]) => sections.filter((s) => s.roles.includes(role))
 
 const groups: { label?: string; hrefs: Section["href"][] }[] = [
-  { hrefs: ["/overview"] },
+  { hrefs: ["/overview", "/analytics"] },
   { label: "Customers", hrefs: ["/users", "/teams", "/machines", "/billing"] },
   { label: "Support", hrefs: ["/support", "/sentry"] },
   { label: "Infrastructure", hrefs: ["/infrastructure", "/capacity", "/releases"] },

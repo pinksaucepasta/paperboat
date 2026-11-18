@@ -18907,188 +18907,13 @@
           },
           "host": {
             "type": "string"
+          },
+          "url": {
+            "type": "string"
           }
         },
         "required": [
           "configured"
-        ]
-      },
-      "OperatorAnalyticsOverview": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "observed_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "days": {
-            "type": "integer",
-            "enum": [
-              7,
-              30,
-              90
-            ]
-          },
-          "totals": {
-            "type": "object",
-            "additionalProperties": false,
-            "properties": {
-              "visitors": {
-                "type": "integer",
-                "format": "int64"
-              },
-              "page_views": {
-                "type": "integer",
-                "format": "int64"
-              },
-              "console_users": {
-                "type": "integer",
-                "format": "int64"
-              },
-              "signup_clicks": {
-                "type": "integer",
-                "format": "int64"
-              },
-              "add_machine_started": {
-                "type": "integer",
-                "format": "int64"
-              },
-              "machines_paired": {
-                "type": "integer",
-                "format": "int64"
-              },
-              "checkouts": {
-                "type": "integer",
-                "format": "int64"
-              }
-            },
-            "required": [
-              "visitors",
-              "page_views",
-              "console_users",
-              "signup_clicks",
-              "add_machine_started",
-              "machines_paired",
-              "checkouts"
-            ]
-          },
-          "daily": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "additionalProperties": false,
-              "properties": {
-                "day": {
-                  "type": "string"
-                },
-                "page_views": {
-                  "type": "integer",
-                  "format": "int64"
-                },
-                "visitors": {
-                  "type": "integer",
-                  "format": "int64"
-                }
-              },
-              "required": [
-                "day",
-                "page_views",
-                "visitors"
-              ]
-            }
-          },
-          "top_pages": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/OperatorAnalyticsCount"
-            }
-          },
-          "referrers": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/OperatorAnalyticsCount"
-            }
-          },
-          "countries": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/OperatorAnalyticsCount"
-            }
-          },
-          "devices": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/OperatorAnalyticsCount"
-            }
-          },
-          "funnel": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "additionalProperties": false,
-              "properties": {
-                "step": {
-                  "type": "string"
-                },
-                "count": {
-                  "type": "integer",
-                  "format": "int64"
-                }
-              },
-              "required": [
-                "step",
-                "count"
-              ]
-            }
-          },
-          "errors": {
-            "type": "object",
-            "additionalProperties": {
-              "type": "string"
-            },
-            "description": "Insights that failed, by name; the rest are still returned."
-          },
-          "retention": {
-            "type": "array",
-            "description": "Weekly cohorts by first machine pairing; active[n] is how many were active n weeks later (empty until the console sends console_active_day).",
-            "items": {
-              "type": "object",
-              "additionalProperties": false,
-              "required": [
-                "week",
-                "size",
-                "active"
-              ],
-              "properties": {
-                "week": {
-                  "type": "string"
-                },
-                "size": {
-                  "type": "integer",
-                  "format": "int64"
-                },
-                "active": {
-                  "type": "array",
-                  "items": {
-                    "type": "integer",
-                    "format": "int64"
-                  }
-                }
-              }
-            }
-          }
-        },
-        "required": [
-          "observed_at",
-          "days",
-          "totals",
-          "daily",
-          "top_pages",
-          "referrers",
-          "countries",
-          "devices",
-          "funnel",
-          "retention"
         ]
       },
       "OperatorMfaState": {
@@ -19537,6 +19362,248 @@
             }
           }
         }
+      },
+      "OperatorAnalyticsPair": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "value": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "previous": {
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "required": [
+          "value",
+          "previous"
+        ]
+      },
+      "OperatorAnalyticsDay": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "day": {
+            "type": "string"
+          },
+          "visitors": {
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "required": [
+          "day",
+          "visitors"
+        ]
+      },
+      "OperatorAnalyticsSource": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "visitors": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "signup_clicks": {
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "required": [
+          "name",
+          "visitors",
+          "signup_clicks"
+        ]
+      },
+      "OperatorAnalyticsFunnelStep": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "step": {
+            "type": "string"
+          },
+          "count": {
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "required": [
+          "step",
+          "count"
+        ]
+      },
+      "OperatorAnalyticsRetention": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "size": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "retained": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "previous_size": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "previous_retained": {
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "required": [
+          "size",
+          "retained",
+          "previous_size",
+          "previous_retained"
+        ]
+      },
+      "OperatorAnalyticsSite": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "observed_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "days": {
+            "type": "integer"
+          },
+          "url": {
+            "type": "string"
+          },
+          "online": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "visitors": {
+            "$ref": "#/components/schemas/OperatorAnalyticsPair"
+          },
+          "signups": {
+            "$ref": "#/components/schemas/OperatorAnalyticsPair"
+          },
+          "daily": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OperatorAnalyticsDay"
+            }
+          },
+          "referrers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OperatorAnalyticsSource"
+            }
+          },
+          "campaigns": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OperatorAnalyticsSource"
+            }
+          },
+          "pages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OperatorAnalyticsCount"
+            }
+          },
+          "countries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OperatorAnalyticsCount"
+            }
+          },
+          "errors": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "observed_at",
+          "days",
+          "online",
+          "visitors",
+          "signups",
+          "daily",
+          "referrers",
+          "campaigns",
+          "pages",
+          "countries"
+        ]
+      },
+      "OperatorAnalyticsConsole": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "observed_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "days": {
+            "type": "integer"
+          },
+          "url": {
+            "type": "string"
+          },
+          "online": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "daily_active": {
+            "$ref": "#/components/schemas/OperatorAnalyticsPair"
+          },
+          "weekly_active": {
+            "$ref": "#/components/schemas/OperatorAnalyticsPair"
+          },
+          "paid": {
+            "$ref": "#/components/schemas/OperatorAnalyticsPair"
+          },
+          "active_accounts": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "funnel": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OperatorAnalyticsFunnelStep"
+            }
+          },
+          "retention": {
+            "$ref": "#/components/schemas/OperatorAnalyticsRetention"
+          },
+          "adoption": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OperatorAnalyticsCount"
+            }
+          },
+          "errors": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "observed_at",
+          "days",
+          "online",
+          "daily_active",
+          "weekly_active",
+          "paid",
+          "active_accounts",
+          "funnel",
+          "retention",
+          "adoption"
+        ]
       }
     },
     "responses": {
@@ -59883,95 +59950,6 @@
         "description": "Current active operator account and separate operator session required. See docs/runbooks/operator-admin.md. Audited before disclosure; unavailable auditing fails closed."
       }
     },
-    "/v1/admin/analytics/overview": {
-      "get": {
-        "operationId": "get_v1_admin_analytics_overview",
-        "summary": "Operator analytics overview (PostHog, aggregates only)",
-        "responses": {
-          "400": {
-            "description": "Invalid target, body, pagination or confirmation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Browser authentication required",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Operator session or capability required",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "Analytics not configured (analytics_not_configured) or provider unavailable (analytics_unavailable); evidence, provider or audit unavailable",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "200": {
-            "description": "Audited result. Cache-Control: no-store.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": [
-                    "data"
-                  ],
-                  "properties": {
-                    "data": {
-                      "$ref": "#/components/schemas/OperatorAnalyticsOverview"
-                    }
-                  }
-                }
-              }
-            }
-          }
-        },
-        "parameters": [
-          {
-            "name": "days",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "enum": [
-                7,
-                30,
-                90
-              ],
-              "default": 30
-            }
-          }
-        ],
-        "security": [
-          {
-            "operatorCookie": []
-          }
-        ],
-        "x-operator-capability": "admin",
-        "description": "Current active operator account and separate operator session required. See docs/runbooks/operator-admin.md. Audited before disclosure; unavailable auditing fails closed."
-      }
-    },
     "/v1/operator/mfa/enroll": {
       "post": {
         "operationId": "operator_mfa_enroll",
@@ -60359,6 +60337,184 @@
           }
         ],
         "x-operator-capability": "operations",
+        "description": "Current active operator account and separate operator session required. See docs/runbooks/operator-admin.md. Audited before disclosure; unavailable auditing fails closed."
+      }
+    },
+    "/v1/admin/analytics/site": {
+      "get": {
+        "operationId": "get_v1_admin_analytics_site",
+        "summary": "Operator analytics for the marketing site (PostHog, aggregates only)",
+        "responses": {
+          "400": {
+            "description": "Invalid target, body, pagination or confirmation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Browser authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Operator session or capability required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Analytics not configured (analytics_not_configured) or provider unavailable (analytics_unavailable); evidence, provider or audit unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Audited result. Cache-Control: no-store.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/OperatorAnalyticsSite"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "days",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "enum": [
+                7,
+                30,
+                90
+              ],
+              "default": 30
+            }
+          }
+        ],
+        "security": [
+          {
+            "operatorCookie": []
+          }
+        ],
+        "x-operator-capability": "admin",
+        "description": "Current active operator account and separate operator session required. See docs/runbooks/operator-admin.md. Audited before disclosure; unavailable auditing fails closed."
+      }
+    },
+    "/v1/admin/analytics/console": {
+      "get": {
+        "operationId": "get_v1_admin_analytics_console",
+        "summary": "Operator analytics for the console and product (PostHog, aggregates only)",
+        "responses": {
+          "400": {
+            "description": "Invalid target, body, pagination or confirmation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Browser authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Operator session or capability required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Analytics not configured (analytics_not_configured) or provider unavailable (analytics_unavailable); evidence, provider or audit unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Audited result. Cache-Control: no-store.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/OperatorAnalyticsConsole"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "days",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "enum": [
+                7,
+                30,
+                90
+              ],
+              "default": 30
+            }
+          }
+        ],
+        "security": [
+          {
+            "operatorCookie": []
+          }
+        ],
+        "x-operator-capability": "admin",
         "description": "Current active operator account and separate operator session required. See docs/runbooks/operator-admin.md. Audited before disclosure; unavailable auditing fails closed."
       }
     }

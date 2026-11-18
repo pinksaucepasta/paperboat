@@ -1,16 +1,17 @@
 "use client"
 
-import { useState } from "react"
+import Link from "next/link"
+import { Headline } from "@/components/analytics"
 import { ErrorBlock } from "@/components/error-block"
 import { Mono, StatusBadge } from "@/components/filters"
 import { Page, Panel, Stat } from "@/components/page"
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { Time } from "@/components/time"
 import { Skeleton } from "@/components/ui/skeleton"
 import { ApiError, useApiQuery, type Data } from "@/lib/api"
 
 type Overview = Data<"/v1/admin/overview">
-type Analytics = Data<"/v1/admin/analytics/overview">
+type Site = Data<"/v1/admin/analytics/site">
+type Console = Data<"/v1/admin/analytics/console">
 type Status = Data<"/v1/admin/status">
 
 const sum = (rows: { count: number }[]) => rows.reduce((n, r) => n + r.count, 0)
@@ -66,152 +67,31 @@ function OverviewStats({ data }: { data?: Overview }) {
   )
 }
 
+/** The last week in three numbers; the Analytics page has the rest. */
 function Insights() {
-  const [days, setDays] = useState<"7" | "30" | "90">("30")
-  const analytics = useApiQuery<Analytics>(["analytics", days], `/v1/admin/analytics/overview?days=${days}`)
-  const notConfigured = analytics.error instanceof ApiError && analytics.error.code === "analytics_not_configured"
+  const site = useApiQuery<Site>(["analytics", "site", "7"], "/v1/admin/analytics/site?days=7", 30_000)
+  const product = useApiQuery<Console>(["analytics", "console", "7"], "/v1/admin/analytics/console?days=7", 30_000)
+  const notConfigured = site.error instanceof ApiError && site.error.code === "analytics_not_configured"
   return (
-    <Panel title="Visitors" action={
-        <ToggleGroup value={[days]} onValueChange={(next) => next[0] && setDays(next[0] as typeof days)} variant="outline" spacing={0}>
-          {(["7", "30", "90"] as const).map((d) => (
-            <ToggleGroupItem key={d} value={d}>
-              {d} days
-            </ToggleGroupItem>
-          ))}
-        </ToggleGroup>
-      }>
+    <Panel title="Last 7 days" action={<Link href="/analytics" className="text-sm text-muted-foreground underline-offset-4 hover:underline">Analytics</Link>}>
       {notConfigured ? (
-        <p className="py-12 text-center text-sm text-muted-foreground" data-analytics-state="not-configured">
+        <p className="py-6 text-center text-sm text-muted-foreground" data-analytics-state="not-configured">
           PostHog isn’t set up on this server (PAPERBOAT_POSTHOG_*).
         </p>
-      ) : analytics.isError ? (
-        <ErrorBlock what="analytics" error={analytics.error} retry={() => analytics.refetch()} />
-      ) : !analytics.data ? (
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-          {["Site visits", "Page views", "Active console users", "Machines paired"].map((label) => (
+      ) : site.isError ? (
+        <ErrorBlock what="analytics" error={site.error} retry={() => site.refetch()} />
+      ) : !site.data || !product.data ? (
+        <div className="grid grid-cols-3 gap-3">
+          {["Visitors", "Signups", "Weekly active"].map((label) => (
             <Stat key={label} label={label} value={<Skeleton className="my-1.5 h-5 w-12" />} />
           ))}
         </div>
       ) : (
-        <AnalyticsView data={analytics.data} />
-      )}
-    </Panel>
-  )
-}
-
-/** posthogquery's errorCode values, in words; the code stays visible below for support. */
-const insightFailure: Record<string, string> = {
-  unauthorized: "PostHog refused the API key.",
-  rate_limited: "PostHog is rate limiting; try again in a minute.",
-  provider_unavailable: "PostHog is down; try again later.",
-  rejected: "PostHog rejected the query.",
-  timeout: "PostHog took too long; try again.",
-  unexpected_response: "PostHog sent an answer the server couldn’t read.",
-}
-
-function AnalyticsView({ data }: { data: Analytics }) {
-  const failed = Object.keys(data.errors ?? {})
-  const peak = Math.max(1, ...data.daily.map((d) => d.page_views))
-  return (
-    <div className="flex flex-col gap-6" data-analytics-state="ready">
-      {failed.map((k) => (
-        <p key={k} role="alert" className="flex flex-col text-sm text-destructive" data-insight-error={k}>
-          Couldn’t load {k}. {insightFailure[data.errors?.[k] ?? ""] ?? "Try again later."}
-          <span className="text-xs text-muted-foreground">
-            Code: <code className="font-mono">{data.errors?.[k]}</code>
-          </span>
-        </p>
-      ))}
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <Stat label="Site visits" value={data.totals.visitors} />
-        <Stat label="Page views" value={data.totals.page_views} />
-        <Stat label="Active console users" value={data.totals.console_users} />
-        <Stat label="Machines paired" value={data.totals.machines_paired} />
-      </div>
-      <div className="grid gap-6 md:grid-cols-2">
-        <Panel title="Funnel">
-          <ol className="text-sm">
-            {data.funnel.map((s, i) => (
-              <li key={s.step} className="flex items-center justify-between border-b border-divider py-2.5">
-                <span>{s.step}</span>
-                <span className="tabular-nums">{s.count}{i > 0 && data.funnel[i - 1].count > 0 ? <span className="ml-2 inline-block w-10 text-right text-xs text-muted-foreground">{Math.round((s.count / data.funnel[i - 1].count) * 100)}%</span> : null}</span>
-              </li>
-            ))}
-          </ol>
-        </Panel>
-        <Panel title="Page views per day">
-          <ul className="flex h-32 items-end gap-0.5 border-b border-divider" aria-label="Page views per day">
-            {data.daily.map((d) => (
-              <li key={d.day} title={`${d.day}: ${d.page_views} views, ${d.visitors} visits`} className="flex-1 rounded-t-sm bg-primary/70" style={{ height: `${Math.max(2, (d.page_views / peak) * 100)}%` }} />
-            ))}
-          </ul>
-        </Panel>
-      </div>
-      <Retention cohorts={data.retention} />
-      <div className="grid gap-6 md:grid-cols-2">
-        <Breakdown title="Top pages" rows={data.top_pages} />
-        <Breakdown title="Referrers" rows={data.referrers} />
-        <Breakdown title="Countries" rows={data.countries} />
-        <Breakdown title="Devices" rows={data.devices.filter((r) => r.name !== "(none)")} />
-      </div>
-      <p className="text-xs text-muted-foreground">Observed <Time iso={data.observed_at} relative /></p>
-    </div>
-  )
-}
-
-/** Weekly cohorts by first machine pairing: the share still active n weeks later. */
-function Retention({ cohorts }: { cohorts: Analytics["retention"] }) {
-  const any = cohorts.some((c) => c.active.length > 0)
-  return (
-    <Panel title="Retention">
-      {!any ? (
-        <p className="py-6 text-center text-sm text-muted-foreground" data-retention-state="not-configured">
-          No data yet.
-        </p>
-      ) : (
-        <div className="overflow-x-auto" data-retention-state="ready">
-          <table className="w-full border-collapse text-sm">
-            <thead>
-              <tr className="border-b border-divider text-left text-xs text-muted-foreground">
-                <th className="h-9 px-2 font-normal">Week</th>
-                <th className="px-2 text-right font-normal">Accounts</th>
-                {cohorts[0].active.map((_, week) => (
-                  <th key={week} className="px-2 text-right font-normal">+{week}w</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {cohorts.map((c) => (
-                <tr key={c.week} className="border-b border-divider">
-                  <td className="h-10 px-2">{c.week.slice(0, 10)}</td>
-                  <td className="px-2 text-right tabular-nums">{c.size}</td>
-                  {c.active.map((n, week) => (
-                    <td key={week} className="px-2 text-right tabular-nums">{c.size > 0 ? `${Math.round((n / c.size) * 100)}%` : "—"}</td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className="grid grid-cols-3 gap-3" data-analytics-state="ready">
+          <Headline label="Visitors" value={site.data.visitors.value} previous={site.data.visitors.previous} />
+          <Headline label="Signups" value={site.data.signups.value} previous={site.data.signups.previous} />
+          <Headline label="Weekly active" value={product.data.weekly_active.value} previous={product.data.weekly_active.previous} />
         </div>
-      )}
-    </Panel>
-  )
-}
-
-function Breakdown({ title, rows }: { title: string; rows: { name: string; count: number }[] }) {
-  return (
-    <Panel title={title}>
-      {rows.length === 0 ? (
-        <p className="py-6 text-center text-sm text-muted-foreground">No data</p>
-      ) : (
-        <ul className="text-sm">
-          {rows.map((r) => (
-            <li key={r.name} className="flex items-center justify-between gap-3 border-b border-divider py-2.5">
-              <span className="min-w-0 truncate">{r.name}</span>
-              <span className="tabular-nums">{r.count}</span>
-            </li>
-          ))}
-        </ul>
       )}
     </Panel>
   )

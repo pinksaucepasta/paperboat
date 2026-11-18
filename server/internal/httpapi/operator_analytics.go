@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strconv"
@@ -8,11 +9,20 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/posthogquery"
 )
 
-// registerOperatorAnalytics serves the product-analytics read proxy. Both routes sit behind the operator guard, so
-// every read is audited; the PostHog key never leaves the server and callers pick only a day range.
+// registerOperatorAnalytics serves the product-analytics read proxy. All routes sit behind the operator guard, so
+// every read is audited; the PostHog key never leaves the server and callers pick only an app and a day range.
 func registerOperatorAnalytics(mux *http.ServeMux, opts Options) {
 	mux.Handle("GET /v1/admin/analytics/status", operatorRoute(opts, analyticsStatus(opts.OperatorAnalytics)))
-	mux.Handle("GET /v1/admin/analytics/overview", operatorRoute(opts, analyticsOverview(opts.OperatorAnalytics)))
+	mux.Handle("GET /v1/admin/analytics/site", operatorRoute(opts, analyticsRead(opts.OperatorAnalytics, siteRead)))
+	mux.Handle("GET /v1/admin/analytics/console", operatorRoute(opts, analyticsRead(opts.OperatorAnalytics, consoleRead)))
+}
+
+func siteRead(ctx context.Context, s *posthogquery.Service, days int) (any, error) {
+	return s.Site(ctx, days)
+}
+
+func consoleRead(ctx context.Context, s *posthogquery.Service, days int) (any, error) {
+	return s.Console(ctx, days)
 }
 
 func analyticsStatus(service *posthogquery.Service) http.Handler {
@@ -21,7 +31,7 @@ func analyticsStatus(service *posthogquery.Service) http.Handler {
 	})
 }
 
-func analyticsOverview(service *posthogquery.Service) http.Handler {
+func analyticsRead(service *posthogquery.Service, read func(context.Context, *posthogquery.Service, int) (any, error)) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		days := 0
 		if raw := r.URL.Query().Get("days"); raw != "" {
@@ -32,7 +42,7 @@ func analyticsOverview(service *posthogquery.Service) http.Handler {
 			}
 			days = n
 		}
-		out, err := service.Overview(r.Context(), days)
+		out, err := read(r.Context(), service, days)
 		switch {
 		case err == nil:
 			writeJSON(w, 200, SuccessResponse{Data: out})

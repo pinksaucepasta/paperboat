@@ -415,7 +415,7 @@ func TestMachinesCapabilityIsForSupportBillingAndOperationsStaff(t *testing.T) {
 }
 
 func TestAnalyticsRoutesAreAdminOnlyAndSayWhenNotConfigured(t *testing.T) {
-	for _, route := range []string{"GET /v1/admin/analytics/status", "GET /v1/admin/analytics/overview"} {
+	for _, route := range []string{"GET /v1/admin/analytics/status", "GET /v1/admin/analytics/site", "GET /v1/admin/analytics/console"} {
 		if operatorPolicies[route].capability != "admin" {
 			t.Errorf("%s must be admin only", route)
 		}
@@ -427,9 +427,10 @@ func TestAnalyticsRoutesAreAdminOnlyAndSayWhenNotConfigured(t *testing.T) {
 		body    string
 	}{
 		{analyticsStatus(nil), "/x", 200, `"configured":false`},
-		{analyticsOverview(nil), "/x", 503, `analytics_not_configured`},
-		{analyticsOverview(nil), "/x?days=nope", 400, `invalid_request`},
-		{analyticsOverview(posthogquery.New(posthogquery.Config{Host: "https://posthog.example.test", ProjectID: "1", Key: "k"})), "/x?days=5", 400, `invalid_request`},
+		{analyticsRead(nil, siteRead), "/x", 503, `analytics_not_configured`},
+		{analyticsRead(nil, consoleRead), "/x", 503, `analytics_not_configured`},
+		{analyticsRead(nil, siteRead), "/x?days=nope", 400, `invalid_request`},
+		{analyticsRead(posthogquery.New(posthogquery.Config{Host: "https://posthog.example.test", ProjectID: "1", Key: "k"}), consoleRead), "/x?days=5", 400, `invalid_request`},
 	} {
 		w := httptest.NewRecorder()
 		tc.handler.ServeHTTP(w, httptest.NewRequest("GET", tc.path, nil))

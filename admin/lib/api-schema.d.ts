@@ -8829,26 +8829,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/admin/analytics/overview": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Operator analytics overview (PostHog, aggregates only)
-         * @description Current active operator account and separate operator session required. See docs/runbooks/operator-admin.md. Audited before disclosure; unavailable auditing fails closed.
-         */
-        get: operations["get_v1_admin_analytics_overview"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/v1/operator/mfa/enroll": {
         parameters: {
             query?: never;
@@ -8929,6 +8909,46 @@ export interface paths {
          * @description Current active operator account and separate operator session required. See docs/runbooks/operator-admin.md. Audited before disclosure; unavailable auditing fails closed.
          */
         get: operations["get_v1_admin_infrastructure_capacity"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/analytics/site": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Operator analytics for the marketing site (PostHog, aggregates only)
+         * @description Current active operator account and separate operator session required. See docs/runbooks/operator-admin.md. Audited before disclosure; unavailable auditing fails closed.
+         */
+        get: operations["get_v1_admin_analytics_site"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/analytics/console": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Operator analytics for the console and product (PostHog, aggregates only)
+         * @description Current active operator account and separate operator session required. See docs/runbooks/operator-admin.md. Audited before disclosure; unavailable auditing fails closed.
+         */
+        get: operations["get_v1_admin_analytics_console"];
         put?: never;
         post?: never;
         delete?: never;
@@ -13816,55 +13836,7 @@ export interface components {
         OperatorAnalyticsStatus: {
             configured: boolean;
             host?: string;
-        };
-        OperatorAnalyticsOverview: {
-            /** Format: date-time */
-            observed_at: string;
-            /** @enum {integer} */
-            days: 7 | 30 | 90;
-            totals: {
-                /** Format: int64 */
-                visitors: number;
-                /** Format: int64 */
-                page_views: number;
-                /** Format: int64 */
-                console_users: number;
-                /** Format: int64 */
-                signup_clicks: number;
-                /** Format: int64 */
-                add_machine_started: number;
-                /** Format: int64 */
-                machines_paired: number;
-                /** Format: int64 */
-                checkouts: number;
-            };
-            daily: {
-                day: string;
-                /** Format: int64 */
-                page_views: number;
-                /** Format: int64 */
-                visitors: number;
-            }[];
-            top_pages: components["schemas"]["OperatorAnalyticsCount"][];
-            referrers: components["schemas"]["OperatorAnalyticsCount"][];
-            countries: components["schemas"]["OperatorAnalyticsCount"][];
-            devices: components["schemas"]["OperatorAnalyticsCount"][];
-            funnel: {
-                step: string;
-                /** Format: int64 */
-                count: number;
-            }[];
-            /** @description Insights that failed, by name; the rest are still returned. */
-            errors?: {
-                [key: string]: string;
-            };
-            /** @description Weekly cohorts by first machine pairing; active[n] is how many were active n weeks later (empty until the console sends console_active_day). */
-            retention: {
-                week: string;
-                /** Format: int64 */
-                size: number;
-                active: number[];
-            }[];
+            url?: string;
         };
         /**
          * @description What the operator's session still needs: enroll an authenticator, enter a code, or nothing.
@@ -14006,6 +13978,76 @@ export interface components {
             operator_id: string;
             email: string;
             sessions: components["schemas"]["OperatorSession"][];
+        };
+        OperatorAnalyticsPair: {
+            /** Format: int64 */
+            value: number;
+            /** Format: int64 */
+            previous: number;
+        };
+        OperatorAnalyticsDay: {
+            day: string;
+            /** Format: int64 */
+            visitors: number;
+        };
+        OperatorAnalyticsSource: {
+            name: string;
+            /** Format: int64 */
+            visitors: number;
+            /** Format: int64 */
+            signup_clicks: number;
+        };
+        OperatorAnalyticsFunnelStep: {
+            step: string;
+            /** Format: int64 */
+            count: number;
+        };
+        OperatorAnalyticsRetention: {
+            /** Format: int64 */
+            size: number;
+            /** Format: int64 */
+            retained: number;
+            /** Format: int64 */
+            previous_size: number;
+            /** Format: int64 */
+            previous_retained: number;
+        };
+        OperatorAnalyticsSite: {
+            /** Format: date-time */
+            observed_at: string;
+            days: number;
+            url?: string;
+            /** Format: int64 */
+            online: number;
+            visitors: components["schemas"]["OperatorAnalyticsPair"];
+            signups: components["schemas"]["OperatorAnalyticsPair"];
+            daily: components["schemas"]["OperatorAnalyticsDay"][];
+            referrers: components["schemas"]["OperatorAnalyticsSource"][];
+            campaigns: components["schemas"]["OperatorAnalyticsSource"][];
+            pages: components["schemas"]["OperatorAnalyticsCount"][];
+            countries: components["schemas"]["OperatorAnalyticsCount"][];
+            errors?: {
+                [key: string]: string;
+            };
+        };
+        OperatorAnalyticsConsole: {
+            /** Format: date-time */
+            observed_at: string;
+            days: number;
+            url?: string;
+            /** Format: int64 */
+            online: number;
+            daily_active: components["schemas"]["OperatorAnalyticsPair"];
+            weekly_active: components["schemas"]["OperatorAnalyticsPair"];
+            paid: components["schemas"]["OperatorAnalyticsPair"];
+            /** Format: int64 */
+            active_accounts: number;
+            funnel: components["schemas"]["OperatorAnalyticsFunnelStep"][];
+            retention: components["schemas"]["OperatorAnalyticsRetention"];
+            adoption: components["schemas"]["OperatorAnalyticsCount"][];
+            errors?: {
+                [key: string]: string;
+            };
         };
     };
     responses: {
@@ -34813,66 +34855,6 @@ export interface operations {
             };
         };
     };
-    get_v1_admin_analytics_overview: {
-        parameters: {
-            query?: {
-                days?: 7 | 30 | 90;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Audited result. Cache-Control: no-store. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        data: components["schemas"]["OperatorAnalyticsOverview"];
-                    };
-                };
-            };
-            /** @description Invalid target, body, pagination or confirmation */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Browser authentication required */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Operator session or capability required */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Analytics not configured (analytics_not_configured) or provider unavailable (analytics_unavailable); evidence, provider or audit unavailable */
-            503: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
     operator_mfa_enroll: {
         parameters: {
             query?: never;
@@ -35183,6 +35165,126 @@ export interface operations {
                 };
             };
             /** @description Evidence, provider or audit unavailable; outcome may require checking target state */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_v1_admin_analytics_site: {
+        parameters: {
+            query?: {
+                days?: 7 | 30 | 90;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Audited result. Cache-Control: no-store. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["OperatorAnalyticsSite"];
+                    };
+                };
+            };
+            /** @description Invalid target, body, pagination or confirmation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Browser authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Operator session or capability required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Analytics not configured (analytics_not_configured) or provider unavailable (analytics_unavailable); evidence, provider or audit unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_v1_admin_analytics_console: {
+        parameters: {
+            query?: {
+                days?: 7 | 30 | 90;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Audited result. Cache-Control: no-store. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["OperatorAnalyticsConsole"];
+                    };
+                };
+            };
+            /** @description Invalid target, body, pagination or confirmation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Browser authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Operator session or capability required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Analytics not configured (analytics_not_configured) or provider unavailable (analytics_unavailable); evidence, provider or audit unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;

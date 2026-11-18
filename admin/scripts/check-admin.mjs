@@ -180,16 +180,20 @@ function route(req, url) {
   if (p === "/v1/admin/overview")
     return { accounts: [{ state: "active", count: 110 }, { state: "suspended", count: 10 }], billing_workspaces: [{ state: "active", count: 4 }], control_operations: [{ state: "succeeded", count: 9 }], hosts: 7, hosts_ready: 5, hosts_stale: 2, relays: 2, relays_ready: 2, relays_stale: 0 }
   if (p === "/v1/admin/status") return { observed_at: "2026-11-17T09:00:00Z", build: { version: "dev-abc1234", commit: "abc1234def5678abc1234def5678abc1234def56" }, readiness: "ready", dimensions: { database: { status: "healthy" } } }
-  if (p === "/v1/admin/analytics/overview") {
+  if (p === "/v1/admin/analytics/site" || p === "/v1/admin/analytics/console") {
     if (process.env.__FIXTURE_ANALYTICS === "off") return { __status: 503, code: "analytics_not_configured", message: "Product analytics is not configured on this server." }
+    const base = { observed_at: "2026-11-17T09:00:00Z", days: Number(url.searchParams.get("days") ?? 30), url: "https://posthog.example.test/project/1/web", online: 3 }
+    if (p.endsWith("/site"))
+      return {
+        ...base, visitors: { value: 120, previous: 100 }, signups: { value: 12, previous: 15 },
+        daily: [{ day: "2026-11-16", visitors: 30 }, { day: "2026-11-17", visitors: 90 }],
+        referrers: [{ name: "news.example.test", visitors: 60, signup_clicks: 5 }, { name: "$direct", visitors: 40, signup_clicks: 2 }], campaigns: [],
+        pages: [{ name: "/pricing", count: 90 }], countries: [], errors: { countries: "provider_unavailable" },
+      }
     return {
-      observed_at: "2026-11-17T09:00:00Z", days: Number(url.searchParams.get("days") ?? 30),
-      totals: { visitors: 120, page_views: 400, console_users: 30, signup_clicks: 20, add_machine_started: 15, machines_paired: 12, checkouts: 2 },
-      daily: [{ day: "2026-11-16", page_views: 100, visitors: 30 }, { day: "2026-11-17", page_views: 300, visitors: 90 }],
-      top_pages: [{ name: "/pricing", count: 90 }], referrers: [{ name: "(none)", count: 60 }], countries: [], devices: [{ name: "Desktop", count: 100 }],
-      funnel: [{ step: "Site visits", count: 120 }, { step: "Sign-up clicks", count: 20 }, { step: "Add-machine started", count: 15 }, { step: "Machine paired", count: 12 }],
-      retention: Number(url.searchParams.get("days")) === 7 ? [{ week: "2026-11-09", size: 5, active: [] }] : [{ week: "2026-11-09", size: 5, active: [4, 3] }, { week: "2026-11-16", size: 2, active: [2] }],
-      errors: { countries: "provider_unavailable" },
+      ...base, daily_active: { value: 4, previous: 3 }, weekly_active: { value: 9, previous: 6 }, paid: { value: 2, previous: 0 }, active_accounts: 20,
+      funnel: [{ step: "Signed up", count: 10 }, { step: "Added a machine", count: 6 }, { step: "Used a terminal, command, transfer or tunnel", count: 2 }],
+      retention: { size: 8, retained: 5, previous_size: 6, previous_retained: 2 }, adoption: [{ name: "terminal", count: 7 }, { name: "tunnel", count: 2 }],
     }
   }
   if (p === "/v1/admin/sentry/issues") return { issues: [{ project: "go", id: "1", short_id: "GO-1", level: "error", status: "unresolved", count: 5, first_seen: "2026-11-16T00:00:00Z", last_seen: "2026-11-17T08:00:00Z" }] }
@@ -410,20 +414,32 @@ try {
     await p.waitForSelector("[data-recovery-codes]")
     expect((await text("[data-recovery-codes]")).includes("wxyz"), "new codes not shown")
   })
-  await step("overview shows key numbers, control plane status and PostHog insights", async () => {
+  await step("overview shows key numbers, control plane status and the week's analytics", async () => {
     await p.goto(`${ORIGIN}/overview`)
     await p.waitForSelector("[data-overview-ready]")
     expect((await text('[data-stat="Accounts"]')).includes("120"), "accounts total")
     await p.waitForSelector('[data-analytics-state="ready"]')
-    expect((await text('[data-analytics-state="ready"]')).includes("/pricing"), "top pages")
-    expect((await text('[data-insight-error="countries"]')).includes("Couldn’t load countries. PostHog is down") && (await text('[data-insight-error="countries"]')).includes("provider_unavailable"), "partial insight failure is named in words with its code")
+    expect((await text('[data-stat="Visitors"]')).includes("↑ 20%"), "visitors change against the previous range")
     expect((await text("[data-build]")).includes("dev-abc1234"), "server build version not shown")
-    expect((await text('[data-retention-state="ready"]')).includes("80%"), "retention percentage")
-    await p.getByRole("button", { name: "7 days" }).click()
-    await p.waitForSelector('[data-retention-state="not-configured"]')
-    await p.getByRole("button", { name: "30 days" }).click()
-    await p.waitForSelector('[data-retention-state="ready"]')
     await p.screenshot({ path: `${shots}/overview-light.png`, fullPage: true })
+  })
+  await step("analytics: website numbers with changes, hidden empty widgets, then console funnel, retention and feature use", async () => {
+    await p.goto(`${ORIGIN}/analytics`)
+    await p.waitForSelector('[data-analytics-app="site"]')
+    const site = await text('[data-analytics-app="site"]')
+    expect(site.includes("↓ 20%") && site.includes("10.0% of visitors"), "signups change and conversion")
+    expect(site.includes("news.example.test") && site.includes("Direct") && site.includes("/pricing"), "referrers and pages")
+    expect(!site.includes("Campaigns") && !site.includes("Countries"), "empty widgets are hidden")
+    expect((await text('[data-insight-error="countries"]')).includes("Couldn’t load countries. PostHog is down") && (await text('[data-insight-error="countries"]')).includes("provider_unavailable"), "partial insight failure is named in words with its code")
+    expect(site.includes("3 online now") && site.includes("Open in PostHog"), "online count, PostHog link")
+    await p.screenshot({ path: `${shots}/analytics-site-light.png`, fullPage: true })
+    await p.getByRole("button", { name: "Console" }).click()
+    await p.waitForSelector('[data-analytics-app="console"]')
+    const product = await text('[data-analytics-app="console"]')
+    expect(product.includes("Weekly active") && product.includes("↑ 50%") && product.includes("63%"), "active accounts and week-1 retention")
+    expect((await text("[data-dropoff]")).includes("Used a terminal, command, transfer or tunnel"), "the step with the largest loss is highlighted")
+    expect((await text("[data-adoption]")).includes("Terminals") && (await text("[data-adoption]")).includes("35%"), "feature use as a share of active accounts")
+    await p.screenshot({ path: `${shots}/analytics-console-light.png`, fullPage: true })
   })
   await step("users: real total, page 1 of 3, Next shows 51-100, Previous comes back", async () => {
     await p.goto(`${ORIGIN}/users`)
