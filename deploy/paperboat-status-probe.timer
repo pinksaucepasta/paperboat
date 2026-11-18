@@ -1,0 +1,9 @@
+[Unit]
+Description=Run the Paperboat status page probe every minute
+
+[Timer]
+OnCalendar=minutely
+AccuracySec=5s
+
+[Install]
+WantedBy=timers.target
