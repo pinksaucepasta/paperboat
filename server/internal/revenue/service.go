@@ -138,6 +138,14 @@ func (s *Service) load(ctx context.Context) (*state, error) {
 	return s.st, nil
 }
 
+func (st *state) discounts() map[string][]Discount {
+	out := make(map[string][]Discount, len(st.subs))
+	for _, sub := range st.subs {
+		out[sub.ID] = sub.Discounts
+	}
+	return out
+}
+
 func (st *state) plan(sub Sub) string {
 	if len(sub.Items) == 0 {
 		return ""
@@ -526,7 +534,7 @@ func (s *Service) period(ctx context.Context, st *state, days int, now time.Time
 	if !p.hasPrevious {
 		eventsSince = from
 	}
-	if p.up, p.upPrev, cut, err = ChangesSince(ctx, s.g, st.currency, eventsSince, from, now.Unix()); err != nil {
+	if p.up, p.upPrev, cut, err = ChangesSince(ctx, s.g, st.currency, st.discounts(), eventsSince, from, now.Unix()); err != nil {
 		p.changesErr = failureCode(err)
 	}
 	p.partial = p.partial || cut

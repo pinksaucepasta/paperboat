@@ -362,3 +362,22 @@ func TestABareCouponIdIsUnknownNotAParseFailure(t *testing.T) {
 		t.Fatalf("a discount we cannot value must mark the report as a floor: %v partial=%v", err, r.Partial)
 	}
 }
+
+// Real events carry discount ids, not objects: a discounted subscription is valued with the discounts the list returned.
+func TestUpgradeOfADiscountedSubscriptionUsesItsListedDiscount(t *testing.T) {
+	d := int64(86400)
+	listed := sub("sub_d", "cus_d", "active", testNow-90*d, "price_pro", 2000, 2, "month", obj("discounts", []any{obj("end", nil, "source", obj("type", "coupon", "coupon", obj("percent_off", 50, "duration", "forever")))}))
+	event := sub("sub_d", "cus_d", "active", testNow-90*d, "price_pro", 2000, 2, "month", obj("discounts", []any{"di_1"}))
+	f := baseFixture()
+	f["/v1/subscriptions"] = lst(listed)
+	f["/v1/events"] = lst(obj("id", "evt_1", "type", "customer.subscription.updated", "created", testNow-d,
+		"data", obj("object", event, "previous_attributes", obj("items", obj("data", []any{obj("id", "si_sub_d", "quantity", 1)})))))
+	r, err := newService(f).Report(context.Background(), 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 1 -> 2 seats of 2000 at 50% off is +1000, not +2000.
+	if u := r.Movement.Upgraded; u.Count != 1 || u.MRR != 1000 {
+		t.Fatalf("upgraded %+v", u)
+	}
+}

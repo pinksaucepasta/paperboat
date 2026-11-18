@@ -122,7 +122,9 @@ func previous(cur Sub, curWire wireSub, prev []wireItem) Sub {
 
 // ChangesSince classifies subscription updates by whether they raised or lowered MRR. Stripe lists events for 30 days
 // only, so the caller asks for a window it can cover.
-func ChangesSince(ctx context.Context, g Getter, currency string, since, from, now int64) (current, prior Change, partial bool, err error) {
+// known are the discounts the subscription list returned, by subscription id: an event carries only discount ids, so a
+// discounted subscription is valued with its listed discounts (a canceled one is gone from the list and unknown).
+func ChangesSince(ctx context.Context, g Getter, currency string, known map[string][]Discount, since, from, now int64) (current, prior Change, partial bool, err error) {
 	q := url.Values{"type": {"customer.subscription.updated"}, "created[gte]": {strconv.FormatInt(since, 10)}}
 	partial, err = walk(ctx, g, "/v1/events", q, maxEvents, func(raw json.RawMessage) (string, error) {
 		var e wireEvent
@@ -137,6 +139,9 @@ func ChangesSince(ctx context.Context, g Getter, currency string, since, from, n
 			return "", err
 		}
 		cur := w.sub()
+		if cur.DiscountUnknown {
+			cur.Discounts = known[cur.ID]
+		}
 		if !counts(cur.Status) || cur.Currency != currency {
 			return e.ID, nil
 		}
