@@ -1,58 +1,52 @@
 #!/usr/bin/env bash
-# Deploy the status Worker (API + cron + D1) to Cloudflare with an account-scoped token (no zone permissions; Workers Builds needs a
-# permission this token lacks, so the Worker is deployed from here). The page is a git-connected Pages project (see below).
-# Secrets and the host come from files and the environment, never from this repo:
-#   ~/.config/paperboat-status/cloudflare.env   CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID
-#   ~/.config/paperboat-status/deploy.env       STATUS_HOST (the page's hostname), NET_CHECK_URL, MAIL_ENDPOINT, MAIL_FROM
-#   ~/.config/paperboat-status/probe-<vantage>.key  one signing key per probe host (oracle, anvit)
-#   ~/.config/paperboat-status/admin.token      the admin panel's bearer token
-#   ~/.config/paperboat-status/checks.json      the Worker's own checks: [{"unit","url","expect"?}]
-#   ~/.config/paperboat-status/mail.key         the mail provider key (optional; without it subscribe and incident mail are off)
-# Needs the account's workers.dev subdomain to exist (Workers & Pages > Overview > Subdomain, one click, once).
+# Set up and update the status page's Cloudflare side with an account-scoped token (no zone permissions):
+#   D1 database paperboat-status (schema), the cron Worker paperboat-status-cron (decides every minute), and the Pages project
+#   paperboat-status (git-connected: every push that touches status/ builds the page and the Pages Functions API; this script only
+#   sets the project's build settings, D1 binding, secrets and custom domain). Workers Builds needs a token permission we do not
+#   have, so the cron Worker is deployed from here (it rarely changes).
+# Inputs, all outside the repo, mode 0600, in ~/.config/paperboat-status (override with STATUS_CONFIG_DIR):
+#   cloudflare.env  CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID
+#   deploy.env      STATUS_HOST (the page's hostname), NET_CHECK_URL (the cron vantage's own-internet URL), MAIL_ENDPOINT, MAIL_FROM
+#   probe-<vantage>.key  one signing key per probe host      admin.token  the admin panel's bearer token
+#   checks.json     the cron Worker's own checks [{unit,url,expect?,redirect?}]      mail.key  mail provider key (optional)
 # usage: status/deploy.sh
 set -euo pipefail
 cfg=${STATUS_CONFIG_DIR:-$HOME/.config/paperboat-status}
 set -a; . "$cfg/cloudflare.env"; . "$cfg/deploy.env"; set +a
-here=$(cd "$(dirname "$0")" && pwd); w=$here/worker
+here=$(cd "$(dirname "$0")" && pwd)
 : "${CLOUDFLARE_API_TOKEN:?}" "${CLOUDFLARE_ACCOUNT_ID:?}" "${STATUS_HOST:?}" "${NET_CHECK_URL:?}"
-wr() { (cd "$w" && npx --no-install wrangler "$@"); }
+wr() { (cd "$here" && npx --no-install wrangler "$@"); }
 cf() { curl -fsS -H "authorization: Bearer $CLOUDFLARE_API_TOKEN" -H 'content-type: application/json' "$@"; }
 acct=https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID
-sub=$(cf "$acct/workers/subdomain" | python3 -c 'import json,sys; print(json.load(sys.stdin)["result"].get("subdomain") or "")')
-[ -n "$sub" ] || { echo "the account has no workers.dev subdomain yet: create it in the dashboard (Workers & Pages > Overview)" >&2; exit 1; }
-api=https://paperboat-status.$sub.workers.dev
-{
-  wr d1 info paperboat-status >/dev/null 2>&1 || wr d1 create paperboat-status >/dev/null
-  id=$(wr d1 info paperboat-status --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["uuid"])')
-  python3 - "$w" "$id" <<'PY'
-import re, sys
-w, i = sys.argv[1:]
-s = open(f"{w}/wrangler.jsonc").read()
-open(f"{w}/wrangler.deploy.jsonc", "w").write(s.replace('"database_id": "local"', f'"database_id": "{i}"'))
-PY
-  wr d1 execute paperboat-status --remote --file schema.sql >/dev/null
-  keys=$(python3 - "$cfg" <<'PY'
+
+wr d1 info paperboat-status >/dev/null 2>&1 || wr d1 create paperboat-status >/dev/null
+id=$(wr d1 info paperboat-status --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["uuid"])')
+wr d1 execute paperboat-status --remote --file schema.sql >/dev/null
+
+# The cron Worker: database id filled in a temporary config, its secret in one private bulk file, nothing echoed.
+tmp=$(umask 077; mktemp -d); trap 'rm -rf "$tmp"' EXIT
+sed "s/\"database_id\": \"local\"/\"database_id\": \"$id\"/" "$here/cron/wrangler.jsonc" >"$here/cron/wrangler.deploy.jsonc"
+trap 'rm -rf "$tmp" "$here/cron/wrangler.deploy.jsonc"' EXIT
+wr deploy --config cron/wrangler.deploy.jsonc --var "NET_CHECK_URL:$NET_CHECK_URL" >/dev/null
+python3 -c 'import json,sys; print(json.dumps({"CHECKS": open(sys.argv[1]).read()}))' "$cfg/checks.json" >"$tmp/cron-secrets.json"
+wr secret bulk "$tmp/cron-secrets.json" --config cron/wrangler.deploy.jsonc >/dev/null
+
+# The Pages project: build settings, the D1 binding, secrets and vars of the Functions API.
+python3 - "$cfg" "$id" "$STATUS_HOST" "${MAIL_ENDPOINT:-}" "${MAIL_FROM:-}" >"$tmp/pages.json" <<'PY'
 import glob, json, os, sys
-print(json.dumps({os.path.basename(p)[6:-4]: open(p).read().strip() for p in glob.glob(sys.argv[1] + "/probe-*.key")}))
-PY
-)
-  mail=(); [ ! -f "$cfg/mail.key" ] || mail=(--var "MAIL_ENDPOINT:$MAIL_ENDPOINT" --var "MAIL_FROM:$MAIL_FROM")
-  wr deploy --config wrangler.deploy.jsonc --var "NET_CHECK_URL:$NET_CHECK_URL" \
-    --var "PUBLIC_ORIGIN:$api" --var "PAGE_ORIGIN:https://$STATUS_HOST" ${mail[@]+"${mail[@]}"}
-  # All secrets in one bulk call from a private temp file; nothing is echoed.
-  secrets=$(umask 077; mktemp); trap 'rm -f "$secrets" "$w/wrangler.deploy.jsonc"' EXIT
-  python3 - "$cfg" "$keys" >"$secrets" <<'PY'
-import json, os, sys
-cfg, keys = sys.argv[1:]
+cfg, db, host, endpoint, sender = sys.argv[1:]
 read = lambda n: open(f"{cfg}/{n}").read().strip()
-out = {"PROBE_KEYS": keys, "ADMIN_TOKEN": read("admin.token"), "CHECKS": read("checks.json")}
-if os.path.exists(f"{cfg}/mail.key"):
-    out["MAIL_KEY"] = read("mail.key")
-print(json.dumps(out))
+secret = lambda v: {"type": "secret_text", "value": v}
+plain = lambda v: {"type": "plain_text", "value": v}
+keys = {os.path.basename(p)[6:-4]: open(p).read().strip() for p in glob.glob(f"{cfg}/probe-*.key")}
+env = {"PROBE_KEYS": secret(json.dumps(keys)), "ADMIN_TOKEN": secret(read("admin.token")), "PUBLIC_ORIGIN": plain(f"https://{host}"), "STATUS_API_BASE": None}
+if os.path.exists(f"{cfg}/mail.key") and endpoint and sender:
+    env |= {"MAIL_KEY": secret(read("mail.key")), "MAIL_ENDPOINT": plain(endpoint), "MAIL_FROM": plain(sender)}
+print(json.dumps({
+    "build_config": {"build_command": "bun run build", "destination_dir": "dist", "root_dir": "status"},
+    "deployment_configs": {"production": {"d1_databases": {"DB": {"id": db}}, "compatibility_date": "2026-11-01", "env_vars": env}},
+}))
 PY
-  wr secret bulk "$secrets" --config wrangler.deploy.jsonc >/dev/null
-  rm -f "$w/wrangler.deploy.jsonc"
-}
-# The page itself is not deployed from here: the Pages project paperboat-status is connected to the GitHub repo and builds status/ on every push
-# that touches status/site or status/build.sh (build.sh, STATUS_API_BASE is a Pages environment variable). This only (re)attaches its domain.
+cf -X PATCH "$acct/pages/projects/paperboat-status" --data @"$tmp/pages.json" >/dev/null
 cf -X POST "$acct/pages/projects/paperboat-status/domains" --data "{\"name\":\"$STATUS_HOST\"}" >/dev/null 2>&1 || true
+echo "Done. Push to main to build the page; check the domain: GET $acct/pages/projects/paperboat-status/domains"

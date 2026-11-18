@@ -3,6 +3,7 @@
  * (`GET /v1/client-configuration`), read when the site builds or the dev server starts; the only
  * setting is the API address, `PAPERBOAT_API_URL` (see .env.example). No domain is written in code.
  */
+import { statusUrl as resolveStatusUrl } from "./status-url.mjs"
 const apiUrl = import.meta.env.PAPERBOAT_API_URL
 if (!apiUrl) throw new Error("PAPERBOAT_API_URL is required (see marketing/.env.example)")
 
@@ -21,8 +22,8 @@ export const apiBaseUrl = apiUrl
 /** Where abuse is reported by email; undefined when the server publishes none. */
 export const abuseMailbox = config.abuse_mailbox
 export const consoleUrl = config.console_url
-/** The status page's address (PAPERBOAT_STATUS_URL), when this deployment has one. */
-export const statusUrl: string | undefined = import.meta.env.PAPERBOAT_STATUS_URL || undefined
+/** The status page's address (PAPERBOAT_STATUS_URL, else status.<site domain> for an https site), when this deployment has one. */
+export const statusUrl: string | undefined = resolveStatusUrl(import.meta.env.PAPERBOAT_SITE_URL, import.meta.env.PAPERBOAT_STATUS_URL)
 export const installUrl = `${config.installer_base_url}/install`
 export const selfhostInstallUrl = `${config.installer_base_url}/selfhost/install`
 export const localDomain = config.local_access_base_domain
