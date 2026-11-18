@@ -17,4 +17,6 @@ export default defineConfig({
   // a link that starts the next line, which glues the two words together.
   compressHTML: true,
   build: { inlineStylesheets: "always" },
+  // The brand package (../brand) is imported, not copied.
+  vite: { server: { fs: { allow: [".."] } } },
 })

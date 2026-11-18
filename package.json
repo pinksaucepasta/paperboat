@@ -1,0 +1,5 @@
+{
+  "name": "paperboat-web",
+  "private": true,
+  "workspaces": ["brand", "marketing", "status"]
+}
