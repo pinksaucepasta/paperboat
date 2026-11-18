@@ -31,6 +31,34 @@ requests, or the workspace.
 5. Search redacted audit events for `mint.signing_key_revoked`, correlating the request and
    operation IDs. Verify no private key, token, or credential body appears in the event.
 
+## After a server breach: break-glass
+
+Admin panel, Security, Break glass (`internal/breakglass`). It rotates what the server can rotate in one staged run
+and signs everyone out. Keys held in server configuration are deployed ahead, by the steps above and below; the
+preview refuses to start until they are, and says which are missing:
+
+- mint signing keys: the new key as the active one beside the old one (Planned rotation, steps 1-3);
+- `PAPERBOAT_SESSION_KEYS`: the new key first, the old one kept;
+- `PAPERBOAT_ENCRYPTION_KEY`: a ring, `new,old`. New values are sealed under the first key and every stored
+  ciphertext names its key; any key of the ring opens one.
+
+Confirmation is the phrase `BREAK GLASS`, a reason and a current authenticator code, all checked when the run
+starts. The stages, in order, each audited (`breakglass.stage_started`, `breakglass.stage_finished`):
+
+1. publish: a pending SSH CA is added beside the active one for every account (managed SSH `AdvanceUserCA`);
+2. pickup: wait until 90% of the machines that fetched their CAs recently fetched them again, or 20 minutes
+   (`break_glass` in the server configuration); the panel lists each machine. Offline machines fetch on reconnect;
+3. switch: the pending CAs sign, the old ones become retiring and stay trusted (certificates still verify);
+4. revoke: every browser session, CLI session and token, API token, recipe, device grant, machine access session and
+   other operator session ends, except the operator who started the run;
+5. reseal: every stored ciphertext moves to the newest encryption key (rows no key opens are counted, not fatal);
+6. floor (optional): the client update floor is raised;
+7. retire: the old CAs are removed at once, old mint keys are withdrawn (`mint_withdrawn_keys`), and the stage ends
+   when machines fetched the CA set without them.
+
+The run is one database row advanced by a worker, so a crash resumes it. When it is done, remove the old mint, session
+and encryption keys from the server configuration and deploy, and rotate the third-party credentials the panel lists.
+
 ## Recovery
 
 - If the server is unavailable, restore it before changing consumer trust files. Consumers

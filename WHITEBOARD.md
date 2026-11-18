@@ -306,6 +306,8 @@ the useful set for tunnels and custom domains.
   apt, yum/dnf and Homebrew repositories so `apt install paperboat` and `brew install paperboat` work and update with the
   system. At launch first install is the fixed installer verified with the release key (`cli/tools/install.sh`).
   Prior art: Tailscale `scripts/installer.sh` (GPG-signed apt/yum repos) and NetBird `release_files/install.sh`.
+- **KMS/HSM for CA and signing keys** (decided 2026-11-18): when revenue allows, hold the CA and signing keys in a KMS/HSM so a
+  breach cannot copy them.
 - **Status page:** move to a hosted provider (incident.io / Atlassian Statuspage) when revenue allows; swap the adapter.
 - **Shared contracts not merged yet** (skipped on purpose by the dedup lane; code health only, no user-visible gain):
   release index (move release policy to `shared/`, validate at the release gate and in the client), terminal attach
