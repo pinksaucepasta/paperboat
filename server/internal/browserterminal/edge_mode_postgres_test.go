@@ -172,7 +172,11 @@ VALUES($1,'default','1.0',$2,'ready',true,now(),$3,$3,ARRAY['edge']::text[],ARRA
 	answer := attachAndObserve()
 	attachAndObserve()
 	if answer.Binding.EdgeNodeID != managed || answer.Backup == nil || answer.Backup.Binding.EdgeNodeID != customer || answer.ActiveEdgeNodeID != managed {
-		t.Fatalf("self-hosted-only attach = %+v, want the managed edge first and active and its own server second", answer)
+		backup := ""
+		if answer.Backup != nil {
+			backup = answer.Backup.Binding.EdgeNodeID
+		}
+		t.Fatalf("self-hosted-only attach: primary=%s backup=%q active=%s, want the managed edge %s first and active and its own server %s second", answer.Binding.EdgeNodeID, backup, answer.ActiveEdgeNodeID, managed, customer)
 	}
 	after, err := authorizer.ResolveRole(ctx, account, session)
 	if err != nil || after.EdgeNodeID != managed || after.HostWSSURL != before.HostWSSURL {
