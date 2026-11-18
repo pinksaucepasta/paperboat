@@ -1,6 +1,7 @@
 import { esc, mailEnabled, sendConfirmation, sendIncident } from "./mail.ts"
 import { verifyProbe } from "./probe.ts"
 import { feed } from "./rss.ts"
+import { fanout, subscribeWebhook, unsubscribeWebhook } from "./webhook.ts"
 import { FRESH_MS } from "./decide.ts"
 import { admitProbe, buildSnapshot, catalog, readSnapshot, saveReport } from "./store.ts"
 import { INCIDENT_STATUSES, type Env, type Incident } from "./types.ts"
@@ -75,7 +76,7 @@ async function admin(request: Request, env: Env, path: string, now: number): Pro
     ])
     await buildSnapshot(db, now)
     const incident = (await incidentRow(db, id))!
-    return json({ ...incident, mail: await notify(env, incident, { status, body: message }) }, 201)
+    return json({ ...incident, mail: await notify(env, incident, { status, body: message }), webhooks: await fanout(env, { type: `incident.${status === "resolved" ? "resolved" : "created"}`, data: incident }, now) }, 201)
     })
   }
   const update = path.match(/^\/api\/admin\/incidents\/([\w-]+)\/updates$/)
@@ -92,7 +93,7 @@ async function admin(request: Request, env: Env, path: string, now: number): Pro
     ])
     await buildSnapshot(db, now)
     const next = (await incidentRow(db, incident.id))!
-    return json({ ...next, mail: await notify(env, next, { status, body: message }) })
+    return json({ ...next, mail: await notify(env, next, { status, body: message }), webhooks: await fanout(env, { type: `incident.${status === "resolved" ? "resolved" : "updated"}`, data: next }, now) })
     })
   }
   if (path === "/api/admin/maintenance") {
@@ -102,7 +103,7 @@ async function admin(request: Request, env: Env, path: string, now: number): Pro
     const id = crypto.randomUUID(), message = typeof body.body === "string" ? body.body.slice(0, 2000) : ""
     await db.prepare("INSERT INTO maintenance (id, title, body, components, starts, ends, created) VALUES (?, ?, ?, ?, ?, ?, ?)").bind(id, title, message, JSON.stringify(components), starts, ends, now).run()
     await buildSnapshot(db, now)
-    return json({ id }, 201)
+    return json({ id, webhooks: await fanout(env, { type: "maintenance.created", data: { id, title, body: message, components, starts, ends } }, now) }, 201)
   }
   const cancel = path.match(/^\/api\/admin\/maintenance\/([\w-]+)\/cancel$/)
   if (cancel) {
@@ -157,6 +158,13 @@ async function route(request: Request, env: Env, ctx: Ctx): Promise<Response> {
     return json({ ok: true })
   }
   if (path === "/api/subscribe" && request.method === "POST") return subscribe(request, env, now)
+  if (path === "/api/webhook/subscribe" && request.method === "POST") {
+    const out = await subscribeWebhook(env, ((await request.json().catch(() => null)) as { url?: unknown } | null)?.url, now)
+    return json(out.body, out.status)
+  }
+  if (path === "/api/webhook/unsubscribe" && request.method === "POST") {
+    return (await unsubscribeWebhook(env, ((await request.json().catch(() => null)) as { token?: unknown } | null)?.token)) ? json({ ok: true }) : fail(404, "no such subscription")
+  }
   if (path === "/api/confirm" || path === "/api/unsubscribe") {
     // A GET only shows a button: mailbox scanners and link prefetchers GET every link, and must not confirm or unsubscribe anyone.
     const confirm = path === "/api/confirm"

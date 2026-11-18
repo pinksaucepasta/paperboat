@@ -1,5 +1,6 @@
 import { cloudflareReport } from "./probe.ts"
 import { buildSnapshot, evaluate, saveReport } from "./store.ts"
+import { deliverDue } from "./webhook.ts"
 import type { Env } from "./types.ts"
 
 /**
@@ -17,4 +18,5 @@ export async function tick(env: Env, now = Date.now()): Promise<void> {
   }
   await evaluate(env.DB, now) // if this throws the cron run fails visibly and the page goes 'delayed' by itself; nothing refreshes `at`
   await buildSnapshot(env.DB, now)
+  try { await deliverDue(env, now) } catch (e) { console.error("status webhook retries", e instanceof Error ? e.message : e) }
 }
