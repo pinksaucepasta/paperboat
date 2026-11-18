@@ -267,6 +267,9 @@ func chainTx(ctx context.Context, tx *db.Tx, team string, from, top int64) ([]re
 		if err := rows.Scan(&l.Generation, &l.SealedPrevious); err != nil {
 			return nil, err
 		}
+		if len(l.SealedPrevious) == 0 {
+			return nil, ErrKeyUnavailable // a reset generation carries no bundle: older recordings cannot be opened
+		}
 		out = append(out, l)
 	}
 	if err := rows.Err(); err != nil {
