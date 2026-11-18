@@ -37,7 +37,9 @@ export function BillingPage() {
   const billing = useApiQuery(billingQuery(workspace))
   const confirming = useConfirmingCheckout(workspace, billing.data)
 
-  if (!workspace || billing.isPending) return <BillingSkeleton />
+  // The clock is 0 until the page has hydrated. Whether a plan has ended depends on it (an ended grant), and so does the return
+  // from Checkout, so until then the page shows no plan at all rather than one it may have to take back.
+  if (!workspace || billing.isPending || !time.now) return <BillingSkeleton />
   if (billing.isError)
     return (
       <p className="text-sm text-muted-foreground">
@@ -365,10 +367,11 @@ function BillingSkeleton() {
             <Skeleton className="h-7 w-12" />
           </span>
         </div>
-        <p className="py-2 text-xs text-muted-foreground">
+        {/* A div: a skeleton is a div, and one inside a <p> is invalid HTML (a hydration error now that this renders on the server). */}
+        <div className="py-2 text-xs text-muted-foreground">
           Adds to this billing period. Unused bandwidth ends when your plan renews on{" "}
           <Skeleton className="inline-block h-3 w-20 align-middle" />.
-        </p>
+        </div>
       </Section>
     </div>
   )
