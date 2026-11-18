@@ -82,11 +82,19 @@ func (s *Server) SetPeerContacts(contacts map[key.NodePublic]PeerContact) error 
 	for k, c := range next {
 		// Only a changed report moves the peer: an unchanged one must not undo a region learned since from an
 		// answer (setPeerRelayRegion), which is newer.
-		if c.Home != previous[k].Home && b.dm.Regions[c.Home].HasDERP() {
-			if b.peerRegions == nil {
-				b.peerRegions = make(map[key.NodePublic]tailcfg.DERPRegionID)
+		cleared := false
+		if c.Home != previous[k].Home {
+			if b.dm.Regions[c.Home].HasDERP() {
+				if b.peerRegions == nil {
+					b.peerRegions = make(map[key.NodePublic]tailcfg.DERPRegionID)
+				}
+				b.peerRegions[k] = c.Home
+			} else if c.Home == 0 && b.peerRegions[k] == previous[k].Home {
+				// The machine is homed on none: its signed pin goes (magicsock clears derpAddr on HomeDERP 0); a region
+				// learned or pinned since, which differs from it, stays.
+				delete(b.peerRegions, k)
+				cleared = true
 			}
-			b.peerRegions[k] = c.Home
 		}
 		addr, allowed := b.allowedPeers[k]
 		if !allowed {
@@ -96,13 +104,15 @@ func (s *Server) SetPeerContacts(contacts map[key.NodePublic]PeerContact) error 
 		if n == nil {
 			b.addClientLocked(k, c.Disco, addr)
 			changed = true
-		} else if home := b.signedRegionLocked(k); n.DiscoKey != c.Disco || !slices.Equal(n.Endpoints, c.Endpoints) || (home != 0 && n.HomeDERP != home) {
+		} else if home := b.signedRegionLocked(k); n.DiscoKey != c.Disco || !slices.Equal(n.Endpoints, c.Endpoints) || (home != 0 && n.HomeDERP != home) || (cleared && n.HomeDERP != 0) {
 			// Update a live peer in place, as magicsock's updateFromNode does.
 			updated := n.Clone()
 			updated.DiscoKey = c.Disco
 			updated.Endpoints = slices.Clone(c.Endpoints)
 			if home != 0 {
 				updated.HomeDERP = home
+			} else if cleared {
+				updated.HomeDERP = 0 // peerDERPRegion then answers with this engine's own home
 			}
 			b.setClientLocked(k, updated)
 			changed = true

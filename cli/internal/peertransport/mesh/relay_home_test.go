@@ -263,6 +263,49 @@ func TestAnsweredRegionRacingASignedHomeNeverOverwritesIt(t *testing.T) {
 	}
 }
 
+// A machine that reports no home (it lost its relays) drops the signed pin its peers held; a region pinned since stays.
+func TestSignedHomeClearedByTheServerDropsThePin(t *testing.T) {
+	regions := integration.RunDERPAndSTUN(t, logger.Discard, "127.0.0.1")
+	one, two, three := regions.Regions[1], relayRegionCopy(regions.Regions[1], 2), relayRegionCopy(regions.Regions[1], 3)
+	peer, pinned := key.NewNode().Public(), key.NewNode().Public()
+	s := &Server{Key: key.NewNode(), LocalAddr: netip.MustParseAddr("fd7a:115c:a1e0::90"),
+		AllowedPeers: map[key.NodePublic]netip.Addr{peer: netip.MustParseAddr("fd7a:115c:a1e0::91"), pinned: netip.MustParseAddr("fd7a:115c:a1e0::92")}}
+	if err := s.SetRelayRegions([]*tailcfg.DERPRegion{two, one, three}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	disco := map[key.NodePublic]key.DiscoPublic{peer: key.NewDisco().Public(), pinned: key.NewDisco().Public()}
+	renew := func(home tailcfg.DERPRegionID) {
+		t.Helper()
+		if err := s.SetPeerContacts(map[key.NodePublic]PeerContact{peer: {Disco: disco[peer], Home: home}, pinned: {Disco: disco[pinned], Home: home}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	renew(one.RegionID)
+	if got := s.lb.peerDERPRegion(peer); got != one.RegionID {
+		t.Fatalf("signed home not applied: %d", got)
+	}
+	if err := s.SetPeerRelayRegion(pinned, three.RegionID); err != nil { // an explicit pin newer than the signed home
+		t.Fatal(err)
+	}
+	renew(0)
+	s.lb.mu.Lock()
+	signed := s.lb.signedRegionLocked(peer)
+	s.lb.mu.Unlock()
+	if signed != 0 {
+		t.Fatalf("a cleared signed home %d is still pinned", signed)
+	}
+	if got := s.lb.peerDERPRegion(peer); got != two.RegionID { // this engine's own home answers
+		t.Fatalf("handshakes go to region %d after the home cleared, want the engine's own %d", got, two.RegionID)
+	}
+	if got := s.lb.peerDERPRegion(pinned); got != three.RegionID {
+		t.Fatalf("a region pinned since was dropped: %d", got)
+	}
+}
+
 // A signed home whose relay this engine no longer has is not reinstalled on a peer by later renewals (the server keeps
 // naming a decommissioned relay): signedRegionLocked drops it with the region.
 func TestSignedHomeOfAWithdrawnRelayIsNotReinstalled(t *testing.T) {
