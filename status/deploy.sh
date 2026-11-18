@@ -19,7 +19,7 @@ acct=https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID
 
 wr d1 info paperboat-status >/dev/null 2>&1 || { wr d1 create paperboat-status >/dev/null; echo "created the D1 database: put its id in wrangler.jsonc and rerun" >&2; exit 1; }
 wr d1 execute paperboat-status --remote --file schema.sql >/dev/null
-(cd "$here/../marketing" && bun install --frozen-lockfile >/dev/null) && (cd "$here" && bun install --frozen-lockfile >/dev/null && bun run build >/dev/null)
+(cd "$here/.." && bun install --frozen-lockfile >/dev/null) && (cd "$here" && bun run build >/dev/null)
 
 mail=(); [ ! -f "$cfg/mail.key" ] || mail=(--var "MAIL_ENDPOINT:$MAIL_ENDPOINT" --var "MAIL_FROM:$MAIL_FROM")
 wr deploy --var "PUBLIC_ORIGIN:https://$STATUS_HOST" --var "NET_CHECK_URL:$NET_CHECK_URL" ${mail[@]+"${mail[@]}"} >/dev/null

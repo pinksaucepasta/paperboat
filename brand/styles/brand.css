@@ -1,0 +1,192 @@
+@import "@fontsource-variable/figtree";
+@import "@fontsource-variable/geist";
+@import "@fontsource-variable/jetbrains-mono";
+
+/*
+ * Paperboat brand: tokens, fonts and base styles shared by the marketing site and the status page. Brand values follow console/DESIGN.md (Brand): pure-grey neutrals,
+ * one blue that means something, Figtree for headings, Geist for reading, JetBrains Mono for
+ * anything you might type. Every font size, line height and space on the site is one of the
+ * tokens below; components never set their own.
+ */
+:root {
+  --sky: #4275f8;
+  --cobalt: #1d52eb;
+  --deep: #0f3dd8;
+  --hull: #eaf0ff;
+  --brand-gradient: linear-gradient(to bottom, var(--sky) 0%, var(--cobalt) 55%, var(--deep) 100%);
+
+  /* Warm off-white ground, white panels on it, pure-grey text (console neutrals). */
+  --ground: #fafaf9;
+  --paper: #ffffff;
+  --ink: #141414;
+  --text: #2a2a2a;
+  --fog: #6b6b6b;
+  --rule: #e8e8e6;
+  --surface: #f6f6f5;
+  --surface-strong: #ececea;
+
+  --good: #12805c;
+  --warn: #9a5b00;
+
+  --text-tiny: 0.75rem; /* 12 */
+  --text-small: 0.8125rem; /* 13 */
+  --text-code: 0.875rem; /* 14 */
+  --text-ui: 0.9375rem; /* 15 */
+  --text-body: 1rem; /* 16 */
+  --text-lede: clamp(1.0625rem, 1rem + 0.35vw, 1.25rem);
+  --text-card: 1.125rem;
+  --text-price: 2.5rem; /* 40: plan prices */
+  --text-h3: 1.25rem;
+  --text-h2: clamp(2rem, 1.35rem + 2.2vw, 3.25rem);
+  --text-h1: clamp(2.5rem, 1.5rem + 3.4vw, 4rem);
+  --text-h1-split: clamp(2.25rem, 1.4rem + 2.6vw, 3.25rem);
+
+  --leading-tight: 1.05;
+  --leading-heading: 1.15;
+  --leading-body: 1.6;
+  --leading-code: 1.7;
+
+  --s1: 4px;
+  --s2: 8px;
+  --s3: 12px;
+  --s4: 16px;
+  --s5: 24px;
+  --s6: 32px;
+  --s7: 48px;
+  --s8: 64px;
+  --section: clamp(64px, 7vw, 100px);
+
+  --font-brand: "Figtree Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Geist Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Geist Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono Variable", ui-monospace, "SF Mono", Menlo, monospace;
+
+  --radius: 8px;
+  --radius-lg: 14px;
+  --header: 64px;
+  --gutter: 20px;
+  --max: 1200px;
+  --shadow-panel: 0 1px 2px rgb(20 20 20 / 0.04), 0 12px 32px -16px rgb(20 20 20 / 0.12);
+
+  color-scheme: light;
+}
+
+@media (min-width: 720px) {
+  :root {
+    --gutter: 32px;
+  }
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  scroll-padding-top: calc(var(--header) + 24px);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  html {
+    scroll-behavior: smooth;
+  }
+}
+
+body {
+  margin: 0;
+  background: var(--ground);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: var(--text-body);
+  line-height: var(--leading-body);
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow-x: clip;
+}
+
+h1,
+h2,
+h3,
+h4,
+p,
+ul,
+ol,
+dl,
+dd,
+figure,
+pre {
+  margin: 0;
+}
+
+ul,
+ol {
+  padding: 0;
+  list-style: none;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+
+code,
+kbd,
+pre {
+  font-family: var(--font-mono);
+  font-size: var(--text-code);
+  /* "->" stays two characters, as pb prints it. */
+  font-variant-ligatures: none;
+}
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+th {
+  text-align: left;
+  font-weight: 500;
+}
+
+svg {
+  display: block;
+}
+
+:focus-visible {
+  outline: 2px solid var(--cobalt);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--sky) 24%, transparent);
+}
+
+.skip {
+  position: absolute;
+  left: var(--gutter);
+  top: -80px;
+  z-index: 100;
+  padding: var(--s3) var(--s4);
+  border-radius: 8px;
+  background: var(--ink);
+  color: #fff;
+  font-size: var(--text-ui);
+}
+
+.skip:focus {
+  top: var(--s2);
+}
