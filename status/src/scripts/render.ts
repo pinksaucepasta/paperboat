@@ -1,7 +1,7 @@
 // DOM builders for the status page. Every dynamic string goes through textContent, never innerHTML.
 import { BANNER, PHASES, PHASE_WORD, STATE_WORD, byMonth, dayLines, duration, incidentsOn, kindOf, phaseIndex, shownState, todayUtc, trackedDays } from "./model.ts"
 import type { Component, Incident, Maintenance, Overall, Payload, State } from "./model.ts"
-import { attachBars } from "./tooltip.ts"
+import { attachBars, attachInfo } from "./tooltip.ts"
 
 export const el = <K extends keyof HTMLElementTagNameMap>(tag: K, cls = "", text?: string): HTMLElementTagNameMap[K] => {
   const e = document.createElement(tag)
@@ -28,6 +28,7 @@ export function icon(state: string): SVGSVGElement {
   svg.innerHTML = paths // a constant above, no data
   return svg
 }
+const info = () => { const s = document.createElementNS(NS, "svg"); s.setAttribute("viewBox", "0 0 16 16"); s.setAttribute("aria-hidden", "true"); s.innerHTML = '<circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M8 7.2v3.6M8 5.2v.1" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>'; return s }
 const chevron = () => { const s = document.createElementNS(NS, "svg"); s.setAttribute("viewBox", "0 0 14 14"); s.setAttribute("aria-hidden", "true"); s.innerHTML = '<path d="M5 3l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>'; return s }
 
 const tone = (s: string) => ({ operational: "", degraded: "warn", major: "bad", maintenance: "maint", delayed: "none", unknown: "none" })[s] ?? "none"
@@ -101,6 +102,7 @@ function row(c: Component, o: Overall, p: Payload, ix: number): HTMLElement {
   const panel = el("div", "units"); panel.id = `units-${c.id}`; panel.hidden = true
   head.setAttribute("aria-expanded", "false"); head.setAttribute("aria-controls", panel.id)
   head.append(icon(shown), el("span", "comp-name", c.name))
+  const hint = el("span", "comp-info"); hint.setAttribute("aria-hidden", "true"); hint.append(info()); attachInfo(hint, c.note); head.append(hint)
   if (shown === "operational") { head.append(Object.assign(el("span", "visually-hidden", "Operational"))) }
   else head.append(el("span", `comp-state ${tone(shown)}`, STATE_WORD[shown]))
   const more = el("span", "comp-more"); more.append(chevron())
@@ -108,7 +110,7 @@ function row(c: Component, o: Overall, p: Payload, ix: number): HTMLElement {
   head.append(more)
   head.append(el("span", "comp-up", shown === "unknown" ? "—" : c.uptime === null ? "Collecting data" : `${c.uptime}% uptime`))
   head.addEventListener("click", () => { const open = head.getAttribute("aria-expanded") !== "true"; head.setAttribute("aria-expanded", String(open)); panel.hidden = !open })
-  box.append(head, el("p", "comp-note", c.note))
+  box.append(head)
   const tracked = trackedDays(c.days, p.now)
   const days = tracked.days
   const today = todayUtc(p.now)
@@ -130,9 +132,8 @@ function row(c: Component, o: Overall, p: Payload, ix: number): HTMLElement {
     bars.append(b)
   })
   if (days.length) attachBars(bars)
-  const axis = el("div", "bars-axis")
-  axis.append(el("span", "", tracked.since === null ? "" : tracked.full ? "90 days ago" : `Since ${sinceFmt.format(Date.parse(`${tracked.since}T00:00:00Z`))}`), el("span", "", "Today"))
-  box.append(bars, axis)
+  box.append(bars)
+  panel.append(el("p", "comp-note", c.note))
   for (const u of c.units) {
     const us = shownState(o, u)
     const li = el("div", "unit"); li.append(icon(us), el("span", "", u.name), el("span", "unit-state", STATE_WORD[us]))
@@ -148,7 +149,10 @@ export function renderSystem(root: HTMLElement, o: Overall, p: Payload | null) {
   root.replaceChildren()
   if (!p?.public || o === "unavailable") return
   const card = el("div", "card")
-  const head = el("div", "card-head"); head.append(el("h2", "card-title", "System status"))
+  const sinces = p.public.components.map((c) => trackedDays(c.days, p.now)).filter((t) => t.since !== null)
+  const earliest = sinces.map((t) => t.since as string).sort()[0]
+  const range = !earliest ? "" : sinces.every((t) => t.full) ? "Last 90 days" : `Since ${sinceFmt.format(Date.parse(`${earliest}T00:00:00Z`))}`
+  const head = el("div", "card-head"); const title = el("div", "card-title-row"); title.append(el("h2", "card-title", "System status"), el("span", "card-range", range)); head.append(title)
   const live = el("span", "updated"); live.id = "updated"; live.append(el("span", "live-dot"), el("span", "updated-text", "")); head.append(live)
   card.append(head)
   p.public.components.forEach((c, i) => card.append(row(c, o, p, i)))

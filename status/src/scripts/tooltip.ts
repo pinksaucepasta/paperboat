@@ -23,6 +23,21 @@ function show(bar: HTMLElement) {
 }
 const hide = () => { if (tip) tip.hidden = true }
 
+/** A short text tooltip on an info icon (decorative: the same text is in the row's expanded view, which is the keyboard and touch path). */
+export function attachInfo(icon: HTMLElement, text: string) {
+  icon.addEventListener("pointerenter", () => {
+    tip ??= Object.assign(document.createElement("div"), { className: "tip", hidden: true })
+    tip.hidden = false
+    tip.replaceChildren(document.createTextNode(text))
+    if (!tip.isConnected) document.body.append(tip)
+    const r = icon.getBoundingClientRect(), w = tip.offsetWidth
+    tip.style.left = `${Math.max(8, Math.min(innerWidth - w - 8, r.left + r.width / 2 - w / 2))}px`
+    tip.style.top = `${Math.max(8, r.top - tip.offsetHeight - 8)}px`
+  })
+  icon.addEventListener("pointerleave", hide)
+}
+
+
 export function attachBars(strip: HTMLElement) {
   const bars = () => [...strip.querySelectorAll<HTMLElement>(".bar")]
   strip.addEventListener("pointerover", (e) => { const b = (e.target as HTMLElement).closest<HTMLElement>(".bar"); if (b) show(b) })
