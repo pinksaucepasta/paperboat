@@ -49,6 +49,8 @@ func (e *engine) recordingOperation(r request) (any, error) {
 		return e.recordingKeyCreate(r)
 	case "recording-key-grant":
 		return e.recordingKeyGrant(r)
+	case "recording-key-rotate":
+		return e.recordingKeyRotate(r)
 	case "recording-open":
 		return e.recordingOpen(r)
 	case "recording-segment":
@@ -118,6 +120,41 @@ func (e *engine) recordingKeyGrant(r request) (any, error) {
 		return nil, err
 	}
 	return map[string]any{"grants": grants}, nil
+}
+
+// recordingKeyRotate replaces the team's recording key: this account opens its copy of the current generation,
+// makes generation+1, signs it with the current signing key (the only thing machines accept it for), seals the old
+// bundle to the new key (so older recordings stay readable) and the new bundle to every viewer. The private halves
+// never leave the worker.
+func (e *engine) recordingKeyRotate(r request) (any, error) {
+	if len(e.raw) == 0 {
+		return nil, errRecordingLocked
+	}
+	sealed, err := decode(r.Sealed)
+	if err != nil || r.TeamID == "" || r.Generation < 1 || len(r.Viewers) == 0 || len(r.Viewers) > maxRecordingViewers {
+		return nil, env.ErrInvalid
+	}
+	old, err := recording.OpenBundle(e.keys.SharingPrivate, r.TeamID, r.Generation, sealed)
+	if err != nil {
+		return nil, errors.New("This browser's ENV keys cannot open the team recording key.")
+	}
+	defer clear(old.Private)
+	defer clear(old.Signing)
+	rotation, err := recording.Rotate(r.TeamID, r.Generation, old)
+	if err != nil {
+		return nil, err
+	}
+	defer clear(rotation.Bundle.Private)
+	defer clear(rotation.Bundle.Signing)
+	grants, err := sealRecordingGrants(r.TeamID, r.Generation+1, rotation.Bundle, r.Viewers)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{
+		"key":             map[string]any{"generation": r.Generation + 1, "public_key": encoded(rotation.PublicKey), "signing_public_key": encoded(rotation.SigningPublicKey), "rotation_signature": encoded(rotation.RotationSignature)},
+		"sealed_previous": encoded(rotation.SealedPrevious),
+		"grants":          grants,
+	}, nil
 }
 
 func sealRecordingGrants(teamID string, generation int64, bundle recording.Bundle, viewers []recordingViewer) ([]recordingGrant, error) {

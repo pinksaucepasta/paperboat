@@ -1,6 +1,7 @@
 package recordingcontrol
 
 import (
+	"crypto/ecdh"
 	"crypto/ed25519"
 	"crypto/rand"
 	"errors"
@@ -13,6 +14,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/offlineaudit"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/recordings"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/session"
+	"github.com/pinksaucepasta/paperboat/cli/internal/recording"
 	wire "github.com/pinksaucepasta/paperboat/shared/recording"
 )
 
@@ -315,5 +317,46 @@ func TestPolicyPollRunsOnlyWithoutAHealthyEventStream(t *testing.T) {
 		if got := (&Controller{config: Config{Events: test.events}}).pollDue(); got != test.due {
 			t.Errorf("%s: pollDue = %v, want %v", test.name, got, test.due)
 		}
+	}
+}
+
+// A member replaces the team key in the console or the CLI (recording.Rotate): a machine that pinned generation 1
+// follows the new generation only because it is signed by the generation it pinned, also after being offline for
+// two replacements; a replacement the server makes up (signed by no member's key) is never followed.
+func TestMachineFollowsAReplacementMadeByAMemberAndRefusesOneMadeByTheServer(t *testing.T) {
+	store, err := OpenPolicyStore(filepath.Join(t.TempDir(), "policy.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	private, err := ecdh.X25519().GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signingPublic, signing, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := wire.Key{Generation: 1, PublicKey: private.PublicKey().Bytes(), SigningPublicKey: signingPublic}
+	bundle := recording.Bundle{Private: private.Bytes(), Signing: signing}
+	if got, err := store.Replace(policyWith(1, first)); err != nil || got.Key == nil || got.Key.Generation != 1 {
+		t.Fatalf("pin %+v %v", got.Key, err)
+	}
+	replace := func(current int64, from recording.Bundle, previous wire.Key) (wire.Key, recording.Bundle) {
+		t.Helper()
+		rotation, err := recording.Rotate("team_1", current, from)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return wire.Key{Generation: current + 1, PublicKey: rotation.PublicKey, SigningPublicKey: rotation.SigningPublicKey, RotationSignature: rotation.RotationSignature}, rotation.Bundle
+	}
+	second, secondBundle := replace(1, bundle, first)
+	third, _ := replace(2, secondBundle, second)
+	if got, err := store.Replace(policyWith(2, first, second, third)); err != nil || got.Key == nil || got.Key.Generation != 3 || !got.Usable() {
+		t.Fatalf("a machine that missed two replacements must catch up through the signed chain: %+v %v", got.Key, err)
+	}
+	// The server's own generation 4, signed with a key no member holds: not followed, nothing records.
+	serverMade := newKey(t, "team_1", 4, &keyPair{signing: newKey(t, "team_1", 1, nil).signing})
+	if got, err := store.Replace(policyWith(3, first, second, third, serverMade.key)); !errors.Is(err, ErrKeyUnverified) || got.Key != nil || got.Usable() {
+		t.Fatalf("a replacement the server made up was accepted: %+v %v", got.Key, err)
 	}
 }

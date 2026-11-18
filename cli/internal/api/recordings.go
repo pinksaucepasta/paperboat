@@ -42,3 +42,22 @@ func (c *Client) ReplayRecording(ctx context.Context, recordingID, cliClientSess
 	}
 	return out, nil
 }
+
+// RecordingKeyState reads the team's recording key: its public chain head, who can replay and this account's own copy.
+func (c *Client) RecordingKeyState(ctx context.Context, team string) (recording.KeyState, error) {
+	var out recording.KeyState
+	if err := c.do(ctx, http.MethodGet, "/v1/teams/"+url.PathEscape(team)+"/recording-key", nil, &out); err != nil {
+		return recording.KeyState{}, err
+	}
+	return out, nil
+}
+
+// ReplaceRecordingKey posts the next generation of the team's recording key (recording.ReplaceKey). The server stores
+// it only when its rotation signature verifies under the current generation's signing key.
+func (c *Client) ReplaceRecordingKey(ctx context.Context, team string, request recording.KeyCreate) (recording.Key, error) {
+	var out recording.Key
+	if err := c.do(ctx, http.MethodPost, "/v1/teams/"+url.PathEscape(team)+"/recording-key", request, &out); err != nil {
+		return recording.Key{}, err
+	}
+	return out, nil
+}

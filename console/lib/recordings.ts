@@ -157,6 +157,32 @@ export async function grantRecordingKey(teamId: string, state: RecordingKeyState
   })
 }
 
+/**
+ * Replaces the recording key (generation N+1) from a member's own copy of generation N: the vault worker opens the copy,
+ * makes the new key pair, signs it with generation N's signing key, seals the old bundle to the new key (older
+ * recordings stay readable) and the new one to every viewer with a vault. Machines accept the new key only because
+ * that signature verifies under the key they pinned. Only public keys, the signature and sealed copies reach the server.
+ */
+export async function rotateRecordingKey(teamId: string, state: RecordingKeyState, vault: typeof recordingVault = recordingVault) {
+  if (!state.key || !state.my_key) throw new Error(recordingSentences.recording_key_pending)
+  // A copy of an older generation cannot sign the next one.
+  if (state.my_key.generation !== state.key.generation) throw new ApiError(409, "recording_key_conflict", recordingSentences.recording_key_conflict)
+  const viewers = state.viewers.filter((viewer): viewer is Required<RecordingViewer> => Boolean(viewer.sharing_public_key))
+  if (viewers.length === 0) throw new Error(recordingSentences.recording_key_conflict)
+  const made = await vault<{ key: RecordingKey; sealed_previous: string; grants: RecordingGrant[] }>({
+    action: "recording-key-rotate",
+    team_id: recordingScope(teamId, state.viewers),
+    generation: state.my_key.generation,
+    sealed: state.my_key.sealed,
+    viewers: viewers.map(({ account_id, sharing_public_key }) => ({ account_id, sharing_public_key })),
+  })
+  return api<RecordingKey>(`${team(teamId)}/recording-key`, {
+    method: "POST",
+    headers: json,
+    body: JSON.stringify({ key: made.key, sealed_previous: made.sealed_previous, grants: made.grants }),
+  })
+}
+
 // ---- Rules: ordinary policy rules allowing `record` or `recording_view` (shared/policy RecordingActions) ----
 
 export type RecordingAction = "record" | "recording_view"
