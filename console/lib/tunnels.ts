@@ -325,6 +325,12 @@ export const resourceId = (result: OperationOrResource) =>
 
 /** The host a resource answers on, without the scheme, for display. */
 export const hostOf = (url: string) => url.replace(/^[a-z]+:\/\//, "").replace(/\/$/, "")
+/** A tunnel's address split into its label and its base domain, whatever domain the server serves: "calm-summer-3476.example.test" → "calm-summer-3476" and ".example.test". */
+export function addressParts(endpoint: string) {
+  const host = hostOf(endpoint)
+  const dot = Math.max(host.indexOf("."), 0)
+  return { label: host.slice(0, dot), base: host.slice(dot) }
+}
 export const urlOf = (host: string) => (/^[a-z]+:\/\//.test(host) ? host : `https://${host}`)
 
 /** Where traffic goes on the machine, written the way people type it: `localhost:3000`. */

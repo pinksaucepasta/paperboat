@@ -49,6 +49,8 @@ const eslintConfig = defineConfig([
   globalIgnores([
     // Default ignores of eslint-config-next:
     ".next/**",
+    // Alternate build outputs: the live slots (.next-a/-b) and scripted-check builds (.next-check).
+    ".next-*/**",
     "out/**",
     "build/**",
     "next-env.d.ts",
