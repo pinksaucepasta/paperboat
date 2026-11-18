@@ -27,7 +27,7 @@ CREATE OR REPLACE FUNCTION paperboat.claim_managed_hostname(host text, kind text
 LANGUAGE plpgsql SET search_path TO paperboat,pg_catalog AS $$
 DECLARE claimed text;
 BEGIN
- IF EXISTS (SELECT 1 FROM tunnel_address_holds h WHERE h.hostname=host AND h.until>now() AND NOT (kind='tunnel' AND h.tunnel_id=resource)) THEN
+ IF EXISTS (SELECT 1 FROM tunnel_address_holds h WHERE h.hostname=host AND h.until>now() AND NOT (claim_managed_hostname.kind='tunnel' AND h.tunnel_id=resource)) THEN
   RAISE EXCEPTION 'managed hostname is already allocated' USING ERRCODE='23505',CONSTRAINT='managed_hostname_reserved';
  END IF;
  INSERT INTO managed_hostnames(hostname,resource_kind,resource_id,port,domain,machine_id)
