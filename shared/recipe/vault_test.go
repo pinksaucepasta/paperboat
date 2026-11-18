@@ -2,6 +2,7 @@ package recipe
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 )
 
@@ -53,5 +54,18 @@ func TestVaultKeyWrapsAndValues(t *testing.T) {
 	}
 	if v, err := OpenValues(key, "canary-env", 1, nil); err != nil || len(v) != 0 {
 		t.Fatalf("empty envelope: %v %v", v, err)
+	}
+}
+
+// The server only sees a vault's sealed envelope, so sealing is where the ENV name rule is enforced.
+func TestSealValuesRefusesNamesOutsideTheEnvNameRule(t *testing.T) {
+	key, _ := NewVaultKey()
+	for _, name := range []string{strings.Repeat("A", 129), "LD_PRELOAD", "1ABC", "A-B", ""} {
+		if _, err := SealValues(key, "canary-env", 1, map[string]string{"OK": "x", name: "y"}); err == nil {
+			t.Errorf("SealValues sealed the name %q", name)
+		}
+	}
+	if _, err := SealValues(key, "canary-env", 1, map[string]string{strings.Repeat("A", 128): "y"}); err != nil {
+		t.Fatalf("a 128-character name was refused: %v", err)
 	}
 }

@@ -9,6 +9,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+
+	"github.com/pinksaucepasta/paperboat/shared/envname"
 )
 
 // Named ENV vault crypto (PLAN F26 section 6), one implementation for the CLI, the daemon and the
@@ -137,6 +139,12 @@ func valuesAAD(vault string, keyEpoch int) []byte {
 func SealValues(vaultKey []byte, vault string, keyEpoch int, values map[string]string) ([]byte, error) {
 	if values == nil {
 		values = map[string]string{}
+	}
+	// The server only sees the sealed envelope, so this is where a vault's names are checked.
+	for name := range values {
+		if err := envname.Check(name); err != nil {
+			return nil, fmt.Errorf("%s: %w", name, err)
+		}
 	}
 	plain, err := json.Marshal(values)
 	if err != nil {

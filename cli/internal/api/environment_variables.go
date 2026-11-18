@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/shared/envname"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -45,7 +46,7 @@ const (
 	// These limits are part of the runtime injection contract. Keeping the
 	// client-side check here avoids sending a value that the host could never
 	// apply, while the server remains authoritative.
-	MaximumEnvironmentVariableNameBytes  = 128
+	MaximumEnvironmentVariableNameBytes  = envname.MaxBytes
 	MaximumEnvironmentVariableValueBytes = 32_767
 	MaximumEnvironmentVariables          = 128
 )
@@ -122,16 +123,7 @@ func (c *Client) ListEnvironmentVariables(ctx context.Context, machineID string)
 	return out, nil
 }
 
-func validateEnvironmentVariableName(name string) error {
-	if name == "" || len(name) > MaximumEnvironmentVariableNameBytes || !environmentVariableNamePattern.MatchString(name) {
-		return errors.New("environment variable name must be 1-128 ASCII letters, numbers, or underscores and start with a letter or underscore")
-	}
-	upperName := strings.ToUpper(name)
-	if strings.HasPrefix(upperName, "PAPERBOAT_") || strings.HasPrefix(upperName, "LD_") || strings.HasPrefix(upperName, "DYLD_") || upperName == "NODE_OPTIONS" || upperName == "PYTHONPATH" || upperName == "PYTHONHOME" || upperName == "GOTRACEBACK" {
-		return errors.New("environment variable name is reserved")
-	}
-	return nil
-}
+func validateEnvironmentVariableName(name string) error { return envname.Check(name) }
 
 func validateEnvironmentVariableMetadata(value EnvironmentVariable, machineID, requestedName string, expectedVersion int64) error {
 	if err := validateEnvironmentVariableName(value.Name); err != nil || !strings.EqualFold(value.Name, requestedName) {
@@ -261,10 +253,5 @@ func environmentVariableETag(machineID string, version int64) string {
 	return fmt.Sprintf(`"environment-machine-%s-%d"`, machineID, version)
 }
 
-var environmentVariableNamePattern = mustEnvironmentVariableNamePattern()
 var environmentVariableErrorCodePattern = regexp.MustCompile(`^[a-z0-9_]{1,64}$`)
 var environmentVariableDocumentIDPattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
-
-func mustEnvironmentVariableNamePattern() *regexp.Regexp {
-	return regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
-}

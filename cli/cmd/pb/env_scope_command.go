@@ -192,8 +192,8 @@ func addVaultScopeCommands(root *cobra.Command) {
 }
 
 func setEnvironmentVariableForScope(command *cobra.Command, team, requestedMachine, name string, valueStdin bool, valueFile string) error {
-	if err := validateEnvironmentVariableNameForCLI(name); err != nil {
-		return invocationError(err)
+	if err := environmentVariableNameError(name); err != nil {
+		return err
 	}
 	if err := validateVaultScopeFlags(team, requestedMachine); err != nil {
 		return err
@@ -232,8 +232,8 @@ func setEnvironmentVariableForScope(command *cobra.Command, team, requestedMachi
 }
 
 func unsetEnvironmentVariableForScope(command *cobra.Command, team, requestedMachine, name string) error {
-	if err := validateEnvironmentVariableNameForCLI(name); err != nil {
-		return invocationError(err)
+	if err := environmentVariableNameError(name); err != nil {
+		return err
 	}
 	if err := validateVaultScopeFlags(team, requestedMachine); err != nil {
 		return err

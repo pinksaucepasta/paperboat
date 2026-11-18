@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/runtime"
+	"github.com/pinksaucepasta/paperboat/shared/envname"
 	"github.com/spf13/cobra"
 )
 
@@ -227,17 +228,7 @@ func workerLocalEndpoint() (string, string, error) {
 	return "http://" + local.ListenAddress, strings.TrimSpace(string(token)), nil
 }
 
-func envHookName(name string) bool {
-	if name == "" {
-		return false
-	}
-	for i, r := range name {
-		if r != '_' && (r < 'A' || r > 'Z') && (r < 'a' || r > 'z') && (i == 0 || r < '0' || r > '9') {
-			return false
-		}
-	}
-	return true
-}
+func envHookName(name string) bool { return envname.Valid(name) }
 
 func shellSingleQuote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", `'\''`) + "'"

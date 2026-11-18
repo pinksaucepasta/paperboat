@@ -1,0 +1,122 @@
+[
+ {
+  "name": "A",
+  "valid": true
+ },
+ {
+  "name": "a",
+  "valid": true
+ },
+ {
+  "name": "_",
+  "valid": true
+ },
+ {
+  "name": "_1",
+  "valid": true
+ },
+ {
+  "name": "TOKEN_2",
+  "valid": true
+ },
+ {
+  "name": "a1b2",
+  "valid": true
+ },
+ {
+  "name": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+  "valid": true
+ },
+ {
+  "name": "",
+  "valid": false
+ },
+ {
+  "name": "1",
+  "valid": false
+ },
+ {
+  "name": "1A",
+  "valid": false
+ },
+ {
+  "name": "A-B",
+  "valid": false
+ },
+ {
+  "name": "A B",
+  "valid": false
+ },
+ {
+  "name": "A.B",
+  "valid": false
+ },
+ {
+  "name": "É",
+  "valid": false
+ },
+ {
+  "name": "A\n",
+  "valid": false
+ },
+ {
+  "name": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+  "valid": false
+ },
+ {
+  "name": "PAPERBOAT_TOKEN",
+  "valid": false
+ },
+ {
+  "name": "paperboat_x",
+  "valid": false
+ },
+ {
+  "name": "LD_PRELOAD",
+  "valid": false
+ },
+ {
+  "name": "ld_library_path",
+  "valid": false
+ },
+ {
+  "name": "DYLD_INSERT_LIBRARIES",
+  "valid": false
+ },
+ {
+  "name": "NODE_OPTIONS",
+  "valid": false
+ },
+ {
+  "name": "node_options",
+  "valid": false
+ },
+ {
+  "name": "PYTHONPATH",
+  "valid": false
+ },
+ {
+  "name": "PYTHONHOME",
+  "valid": false
+ },
+ {
+  "name": "GOTRACEBACK",
+  "valid": false
+ },
+ {
+  "name": "PAPERBOAT",
+  "valid": true
+ },
+ {
+  "name": "LDAP_URL",
+  "valid": true
+ },
+ {
+  "name": "NODE_ENV",
+  "valid": true
+ },
+ {
+  "name": "PYTHONUNBUFFERED",
+  "valid": true
+ }
+]

@@ -17,6 +17,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/environmentmanager"
 	"github.com/pinksaucepasta/paperboat/cli/internal/prompt"
 	"github.com/pinksaucepasta/paperboat/cli/internal/selector"
+	"github.com/pinksaucepasta/paperboat/shared/envname"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
@@ -248,6 +249,9 @@ func environmentVariablesCobraCommand() *cobra.Command {
 			if vault, _ := command.Flags().GetString("vault"); vault != "" {
 				if team != "" || machine != "" {
 					return localArgumentError("--vault cannot be combined with --team or --machine")
+				}
+				if err := environmentVariableNameError(args[0]); err != nil {
+					return err
 				}
 				value, err := readEnvironmentVariableValueFile(command, valueStdin, valueFile)
 				if err != nil {
@@ -800,7 +804,7 @@ func runEnvironmentVariableScopeTUI(command *cobra.Command, client *api.Client, 
 				Stdin:       os.Stdin,
 				Output:      command.ErrOrStderr(),
 				Validate: func(value string) error {
-					return validateEnvironmentVariableNameForCLI(value)
+					return envname.Check(value)
 				},
 			})
 			if errors.Is(promptErr, prompt.ErrCanceled) {
@@ -852,21 +856,11 @@ func runEnvironmentVariableScopeTUI(command *cobra.Command, client *api.Client, 
 	}
 }
 
-func validateEnvironmentVariableNameForCLI(name string) error {
-	if name == "" || len(name) > api.MaximumEnvironmentVariableNameBytes {
-		return errors.New("environment variable name must be 1-128 characters")
-	}
-	for index, char := range name {
-		if index == 0 && (char < 'A' || char > 'Z') && (char < 'a' || char > 'z') && char != '_' {
-			return errors.New("environment variable name must start with a letter or underscore")
-		}
-		if (char < 'A' || char > 'Z') && (char < 'a' || char > 'z') && (char < '0' || char > '9') && char != '_' {
-			return errors.New("environment variable name may contain only letters, numbers, and underscores")
-		}
-	}
-	upperName := strings.ToUpper(name)
-	if strings.HasPrefix(upperName, "PAPERBOAT_") || strings.HasPrefix(upperName, "LD_") || strings.HasPrefix(upperName, "DYLD_") || upperName == "NODE_OPTIONS" || upperName == "PYTHONPATH" || upperName == "PYTHONHOME" || upperName == "GOTRACEBACK" {
-		return errors.New("environment variable name is reserved")
+// environmentVariableNameError is the one name rule (shared/envname) as a command argument error that tells the
+// person what is wrong; the sentences hold no input.
+func environmentVariableNameError(name string) error {
+	if err := envname.Check(name); err != nil {
+		return localArgumentError(err.Error())
 	}
 	return nil
 }

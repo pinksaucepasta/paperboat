@@ -4,11 +4,15 @@
 // their own variables, the variable is removed, the vault is deleted after its name is typed. Nothing secret is printed.
 //   ORIGIN=<console origin> STATE=<storage state> PW_CHROMIUM=<chromium> [PW_MODULE=<playwright-core index.mjs>] \
 //     [PASSWORD_FILE=<mode 600 file keeping the ENV password for reruns>] [SHOT_DIR=<dir>] node check-named-vaults.mjs
+// TEAM=<team id> runs it in that team's workspace instead: the account must own the team (final_fixtures.py makes one with the
+// paid entitlement); the check creates the team's ENV vault first when it has none, so the new vault is wrapped for the team too.
+// That team vault is left in place (the fixture's team is removed with its account); the check's own named vault is deleted.
 import { randomBytes } from "node:crypto"
 import { existsSync, readFileSync, writeFileSync } from "node:fs"
 
 const { chromium } = await import(process.env.PW_MODULE ?? "playwright-core")
-const { ORIGIN: origin, STATE, PW_CHROMIUM: executablePath, PASSWORD_FILE } = process.env
+const { ORIGIN: origin, STATE, PW_CHROMIUM: executablePath, PASSWORD_FILE, TEAM } = process.env
+const ws = TEAM ?? "personal"
 for (const [name, value] of Object.entries({ ORIGIN: origin, STATE, PW_CHROMIUM: executablePath }))
   if (!value) throw new Error(`${name} is not set; see the header of check-named-vaults.mjs`)
 const long = { timeout: Number(process.env.LONG_MS ?? 90000) } // vault cryptography runs in WASM
@@ -22,6 +26,7 @@ const secret = `value-${randomBytes(9).toString("hex")}`
 
 const browser = await chromium.launch({ executablePath })
 const context = await browser.newContext({ storageState: STATE, viewport: { width: 1280, height: 1000 } })
+if (TEAM) await context.addCookies([{ name: "pb-workspace", value: TEAM, url: origin }])
 const page = await context.newPage()
 const sent = []
 page.on("request", (request) => sent.push(`${request.url()}\n${request.postData() ?? ""}`))
@@ -82,6 +87,26 @@ try {
     }
     await button("Add variable").waitFor(long)
   })
+  if (TEAM) {
+    await step(
+      "the team has its ENV vault (made here when missing), so a vault can be wrapped for the team",
+      async () => {
+        // The Team vaults section of the Environment page has one row per team, labelled with the team's name.
+        const team = (await (await api("workspaces")).json()).data.items.find((w) => w.id === TEAM)
+        if (!team) throw new Error(`TEAM ${TEAM} is not a workspace of this account`)
+        const exactly = new RegExp(`^${team.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`)
+        const row = page.locator("div.border-b", { has: page.locator("label", { hasText: exactly }) })
+        const create = row.getByRole("button", { name: "Create…", exact: true })
+        await create.or(row.getByText("Key in use.")).first().waitFor(long)
+        if (await create.isVisible()) {
+          await create.click()
+          await dialog().getByRole("button", { name: "Create", exact: true }).click()
+          await row.getByText("Key in use.").waitFor(long)
+          return "created"
+        }
+      },
+    )
+  }
   await step("the switcher shows Default selected and New vault", async () => {
     check((await pressed("Default")) === "true", "Default is not selected")
     await button("New vault").waitFor()
@@ -95,8 +120,13 @@ try {
     check((await pressed(vault)) === "true", "the new vault is not selected")
     await page.getByText("No variables yet.").waitFor(long)
     await page.getByText("No recipe reads this vault.").waitFor()
-    const made = await api(`workspaces/personal/env-vaults/${vault}`)
+    const made = await api(`workspaces/${ws}/env-vaults/${vault}`)
     check(made.status() === 200, `the server answers ${made.status()} for the vault`)
+    const kinds = (await made.json()).data.vault.wraps.map((w) => w.recipient_kind)
+    check(
+      kinds.includes("account") && (!TEAM || kinds.includes("team")),
+      `the vault is wrapped for: ${kinds.join(", ")}`,
+    )
   })
   await step("a variable added to the vault is listed, and its value never reaches the server", async () => {
     await button("Add variable").click()
@@ -105,7 +135,7 @@ try {
     await button("Save").click()
     await page.locator("code", { hasText: variable }).waitFor(long)
     check(!sent.some((request) => request.includes(secret)), "the value was sent in the clear")
-    const stored = await (await api(`workspaces/personal/env-vaults/${vault}`)).json()
+    const stored = await (await api(`workspaces/${ws}/env-vaults/${vault}`)).json()
     check(
       stored.data.vault.revision >= 1 && !JSON.stringify(stored).includes(secret),
       "the server's copy is not sealed",
@@ -132,10 +162,10 @@ try {
     await dialog().waitFor({ state: "detached", ...long })
     await button(vault).waitFor({ state: "detached", ...long })
     check((await pressed("Default")) === "true", "Default is not selected after the delete")
-    check((await api(`workspaces/personal/env-vaults/${vault}`)).status() === 404, "the server still has the vault")
+    check((await api(`workspaces/${ws}/env-vaults/${vault}`)).status() === 404, "the server still has the vault")
   })
 } finally {
-  await api(`workspaces/personal/env-vaults/${vault}`, { method: "DELETE" }).catch(() => {})
+  await api(`workspaces/${ws}/env-vaults/${vault}`, { method: "DELETE" }).catch(() => {})
   await browser.close()
 }
 console.log(failed ? `${failed} failed` : "all passed")

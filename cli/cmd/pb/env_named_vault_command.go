@@ -156,8 +156,11 @@ remove it from the recipe's [env] vaults and run pb recipe update first.`, Args:
 // changeNamedVaultValue sets (value != nil) or removes one name in a named vault: the vault key is
 // opened with this account's keys, the values are decrypted, changed and sealed again here.
 func changeNamedVaultValue(command *cobra.Command, vaultName, name string, value []byte) error {
-	if !envHookName(name) {
-		return localArgumentError("an ENV name uses letters, digits and _, and does not start with a digit")
+	// A name already in the vault can always be removed, as in the browser; only a name being set is checked.
+	if value != nil {
+		if err := environmentVariableNameError(name); err != nil {
+			return err
+		}
 	}
 	s, err := namedVaultSessionFor(command)
 	if err != nil {

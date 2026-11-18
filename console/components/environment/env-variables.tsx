@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
 import { toast } from "sonner"
 import { DeliveryPending, deleteValue, listNames, setValue, type EnvScope } from "@/lib/envvault/vault"
+import { validVariableName } from "@/lib/envvault/names"
 import { namedVaultNames } from "@/lib/recipe-vaults"
 import { ConfirmAction } from "@/components/list-toolbar"
 import { Button } from "@/components/ui/button"
@@ -13,8 +14,6 @@ import { Field, FieldError, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import { ErrorMessage, errorToastOf } from "@/components/error-reference"
-
-const namePattern = /^[A-Za-z_][A-Za-z0-9_]*$/
 
 /** Where the variables live: the account's or a team's own records, or one named vault. */
 export type VariableStore = {
@@ -165,7 +164,7 @@ function SetDialog({
     onSuccess: onSaved,
     onError,
   })
-  const valid = namePattern.test(name) && name.length <= 128
+  const valid = validVariableName(name)
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="gap-4 sm:max-w-md">
@@ -192,9 +191,16 @@ function SetDialog({
                 spellCheck={false}
                 autoFocus
               />
-              <p className="text-xs text-muted-foreground">
-                Letters, digits and underscores, not starting with a digit.
-              </p>
+              {name && !valid ? (
+                <FieldError>
+                  Not allowed. LD_, DYLD_ and PAPERBOAT_ names, NODE_OPTIONS, PYTHONPATH, PYTHONHOME and GOTRACEBACK are
+                  reserved.
+                </FieldError>
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  Letters, digits and underscores, not starting with a digit. Up to 128.
+                </p>
+              )}
             </Field>
           )}
           <Field className="gap-1.5">

@@ -4,6 +4,7 @@ import (
 	"sort"
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/environmente2ee"
+	"github.com/pinksaucepasta/paperboat/shared/envname"
 	"github.com/pinksaucepasta/paperboat/shared/recipe"
 )
 
@@ -51,8 +52,10 @@ func (e *engine) namedVault(r request) (any, error) {
 }
 
 func (e *engine) namedVaultValues(r request) (any, error) {
-	if r.Variable != "" && !validVariableName(r.Variable) {
-		return nil, environmente2ee.ErrInvalid
+	if r.Variable != "" && !r.Delete {
+		if err := envname.Check(r.Variable); err != nil {
+			return nil, err
+		}
 	}
 	key, err := environmente2ee.OpenNamedVaultKey(&e.keys, e.head.AccountID, r.Name, r.VaultWraps)
 	if err != nil {
@@ -82,15 +85,4 @@ func (e *engine) namedVaultValues(r request) (any, error) {
 	sort.Strings(names)
 	out["names"] = names
 	return out, nil
-}
-
-// validVariableName is the ENV name rule of pb env set: letters, digits and _, not starting with a digit.
-func validVariableName(name string) bool {
-	for i, c := range name {
-		if c == '_' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || i > 0 && c >= '0' && c <= '9' {
-			continue
-		}
-		return false
-	}
-	return name != "" && len(name) <= 128
 }

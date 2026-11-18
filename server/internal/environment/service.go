@@ -21,6 +21,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/audit"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/peeridentity"
+	"github.com/pinksaucepasta/paperboat/shared/envname"
 )
 
 const (
@@ -29,7 +30,7 @@ const (
 	ObservationSchema = "paperboat.environment-observation/v2"
 	BundleSchema      = "paperboat.environment-bundle/v2"
 	MaxVariables      = 128
-	MaxNameBytes      = 128
+	MaxNameBytes      = envname.MaxBytes
 	MaxErrorCodeBytes = 64
 )
 
@@ -51,7 +52,6 @@ var (
 	ErrObservationInvalid            = errors.New("environment observation is invalid")
 	ErrAuthorityFork                 = errors.New("environment authority cursor is missing or forked")
 	ErrRootSetChanged                = errors.New("environment root set changed")
-	portableName                     = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 	safeErrorCode                    = regexp.MustCompile(`^[a-z0-9_]{1,64}$`)
 	digestExpression                 = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 )
@@ -293,19 +293,12 @@ func (s *Service) AuthorizeManager(ctx context.Context, accountID, subjectKind, 
 }
 
 func ValidateName(name string) error {
-	if len(name) == 0 || len([]byte(name)) > MaxNameBytes || !portableName.MatchString(name) {
-		return ErrInvalidName
-	}
-	upper := strings.ToUpper(name)
-	if strings.HasPrefix(upper, "PAPERBOAT_") || strings.HasPrefix(upper, "LD_") || strings.HasPrefix(upper, "DYLD_") {
-		return ErrInvalidName
-	}
-	switch upper {
-	case "NODE_OPTIONS", "PYTHONPATH", "PYTHONHOME", "GOTRACEBACK":
+	if !envname.Valid(name) {
 		return ErrInvalidName
 	}
 	return nil
 }
+
 func ValidateObservation(o Observation) error {
 	if o.Schema != ObservationSchema || o.ObservationSeq <= 0 || !strings.HasPrefix(o.HostRecipientKeyID, "envk_") || !keyIDExpression.MatchString(o.HostRecipientKeyID) || o.ObservedAt.IsZero() {
 		return ErrObservationInvalid

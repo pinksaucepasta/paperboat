@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/environmente2ee"
@@ -80,7 +81,9 @@ func TestBrowserNamedVaultValues(t *testing.T) {
 	if _, err := e.run(context.Background(), request{Action: "named-vault-values", Vault: v, Name: "canary-env", VaultWraps: wraps, KeyEpoch: 2, ValuesEnvelope: envelope}); err == nil {
 		t.Fatal("an envelope of another key epoch opened")
 	}
-	if _, err := e.run(context.Background(), request{Action: "named-vault-values", Vault: v, Name: "canary-env", VaultWraps: wraps, KeyEpoch: 1, Variable: "1BAD"}); err == nil {
-		t.Fatal("a bad variable name was accepted")
+	for _, bad := range []string{"1BAD", "LD_PRELOAD", strings.Repeat("A", 129)} {
+		if _, err := e.run(context.Background(), request{Action: "named-vault-values", Vault: v, Name: "canary-env", VaultWraps: wraps, KeyEpoch: 1, Variable: bad}); err == nil {
+			t.Fatalf("the variable name %q was accepted", bad)
+		}
 	}
 }

@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/pinksaucepasta/paperboat/shared/envname"
 	"github.com/pinksaucepasta/paperboat/shared/peertransport/endpointidentity"
 )
 
@@ -19,7 +20,7 @@ const (
 	MaximumManagers        = 32
 	MaximumHosts           = 512
 	MaximumVariables       = 128
-	MaximumNameBytes       = 128
+	MaximumNameBytes       = envname.MaxBytes
 	MaximumValueBytes      = 32767
 	MaximumScopeBytes      = 256 << 10
 	MaximumEnrollmentBytes = 8 << 10
@@ -97,31 +98,7 @@ func ParseDocumentID(value string) (DocumentID, error) {
 
 func validIdentifier(value string) bool { return endpointidentity.ValidIdentifier(value) }
 
-// validVariableSyntax is ^[A-Za-z_][A-Za-z0-9_]*$ as a plain scan (see endpointidentity.ValidIdentifier).
-func validVariableSyntax(value string) bool {
-	for i := 0; i < len(value); i++ {
-		c := value[i]
-		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c == '_' || i > 0 && c >= '0' && c <= '9') {
-			return false
-		}
-	}
-	return len(value) > 0
-}
-
-func validVariableName(value string) bool {
-	if len(value) == 0 || len(value) > MaximumNameBytes || !validVariableSyntax(value) {
-		return false
-	}
-	upper := strings.ToUpper(value)
-	if strings.HasPrefix(upper, "PAPERBOAT_") || strings.HasPrefix(upper, "LD_") || strings.HasPrefix(upper, "DYLD_") {
-		return false
-	}
-	switch upper {
-	case "NODE_OPTIONS", "PYTHONPATH", "PYTHONHOME", "GOTRACEBACK":
-		return false
-	}
-	return true
-}
+func validVariableName(value string) bool { return envname.Valid(value) }
 
 // ValidateVariableName applies the same bounds and reserved startup-name policy
 // used when sealing and decoding ENV scopes, with an actionable browser error.
