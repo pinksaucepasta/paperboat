@@ -83,7 +83,7 @@ func (h *floodHarness) send(index, start uint64, data []byte) {
 }
 
 func (h *floodHarness) seal(index, start uint64, data []byte) []byte {
-	record, err := browserbroadcast.Seal(browserbroadcast.Record{SessionID: "session_test", Generation: 1, EpochID: h.epoch.ID, Index: index, Channel: protocol.TerminalStdout, StartSequence: start, Data: data}, h.epoch, h.private)
+	record, err := browserbroadcast.Seal(browserbroadcast.Record{SessionID: "session_test", Generation: 1, EpochID: h.epoch.ID, Index: index, Channel: protocol.TerminalStdout, StartSequence: start, Data: data}, h.epoch, h.private, nil)
 	if err != nil {
 		h.t.Fatal(err)
 	}

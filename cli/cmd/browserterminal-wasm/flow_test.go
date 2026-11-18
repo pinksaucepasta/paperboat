@@ -161,7 +161,7 @@ func TestTerminalReceiveAcceptsMoreThan256ValidTinyRecords(t *testing.T) {
 	q := newTerminalReceiveQueue()
 	defer q.close()
 	for i := 0; i < 512; i++ {
-		raw, err := browserbroadcast.Seal(browserbroadcast.Record{SessionID: "umts_burst", Generation: 1, EpochID: epoch.ID, Index: uint64(i + 1), Channel: protocol.TerminalStdout, StartSequence: uint64(i), Data: []byte("x")}, epoch, private)
+		raw, err := browserbroadcast.Seal(browserbroadcast.Record{SessionID: "umts_burst", Generation: 1, EpochID: epoch.ID, Index: uint64(i + 1), Channel: protocol.TerminalStdout, StartSequence: uint64(i), Data: []byte("x")}, epoch, private, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
