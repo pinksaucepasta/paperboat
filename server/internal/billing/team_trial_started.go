@@ -29,7 +29,10 @@ func (s *WorkspaceService) noticeTeamTrialStartedTx(ctx context.Context, tx *db.
 	}
 	var amount int64
 	var currency string
-	if err = tx.QueryRow(ctx, `SELECT verified_unit_amount,verified_currency FROM billing_products WHERE provider='stripe' AND provider_price_id=$1 AND active`, req.PriceID).Scan(&amount, &currency); err != nil {
+	// A confirmation must never stop the team being created: without a price row there is no mail.
+	if err = tx.QueryRow(ctx, `SELECT verified_unit_amount,verified_currency FROM billing_products WHERE provider='stripe' AND provider_price_id=$1`, req.PriceID).Scan(&amount, &currency); err == pgx.ErrNoRows {
+		return nil
+	} else if err != nil {
 		return err
 	}
 	var version string

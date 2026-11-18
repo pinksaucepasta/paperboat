@@ -44,8 +44,9 @@ func TestBanMailsTheBannedPersonOnce(t *testing.T) {
 	reason := "abuse-" + x
 	ban := func(id string) {
 		t.Helper()
+		revision := version(id)
 		for range 2 { // the second call replays the same receipt
-			if _, err := s.Execute(ctx, admin, "ban-key-"+id, "account_ban", id, reason, Input{Revision: version(id)}); err != nil {
+			if _, err := s.Execute(ctx, admin, "ban-key-"+id, "account_ban", id, reason, Input{Revision: revision}); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -64,7 +65,7 @@ func TestBanMailsTheBannedPersonOnce(t *testing.T) {
 			t.Fatal(err)
 		}
 		n++
-		if to != user+"@example.test" || !strings.Contains(body, reason) || !strings.Contains(body, "abuse@mail.example.test") || !strings.Contains(body, "A person reviews every appeal") {
+		if to != user+"@example.test" || !strings.Contains(body, reason) || !strings.Contains(body, "Reference for an appeal: ban_") || !strings.Contains(body, "abuse@mail.example.test") || !strings.Contains(body, "A person reviews every appeal") {
 			t.Fatalf("ban mail to=%s subject=%q body=%s", to, subject, body)
 		}
 	}
