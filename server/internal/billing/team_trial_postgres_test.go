@@ -12,6 +12,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/server/internal/billing"
 	"github.com/pinksaucepasta/paperboat/server/internal/config"
+	"github.com/pinksaucepasta/paperboat/server/internal/legalconsent"
 )
 
 // An account's first Team starts a 14-day trial: Checkout collects the card, the trialing
@@ -32,7 +33,8 @@ func TestTeamTrialFirstTeamOnlyWithCardAndReminder(t *testing.T) {
 	t.Cleanup(func() {
 		c := context.Background()
 		for _, q := range []string{
-			`DELETE FROM paperboat.transactional_mail_outbox WHERE mail_id LIKE 'team-trial-ending:` + subscription + `:%'`,
+			`DELETE FROM paperboat.transactional_mail_outbox WHERE mail_id LIKE 'team-trial-ending:` + subscription + `:%' OR mail_id LIKE 'team-trial-started:` + subscription + `:%'`,
+			`DELETE FROM paperboat.billing_terms_consents WHERE operation_id='` + key + `'`,
 			`DELETE FROM paperboat.stripe_events WHERE subscription_id='` + subscription + `'`,
 			`DELETE FROM paperboat.billing_workspaces WHERE provider_subscription_id='` + subscription + `'`,
 			`DELETE FROM paperboat.billing_team_orders WHERE actor_user_id='` + actor + `'`,
@@ -83,6 +85,9 @@ func TestTeamTrialFirstTeamOnlyWithCardAndReminder(t *testing.T) {
 	if got := trialDays(); got != 14 {
 		t.Fatalf("new account trial days=%d", got)
 	}
+	if err := s.RecordTerms(ctx, key, actor, "team_create"); err != nil {
+		t.Fatal(err)
+	}
 	in := billing.TeamCreationInput{OperationID: key, TeamID: team, Seats: 2, Interval: "month", SuccessURL: "https://console.example.test/ok", CancelURL: "https://console.example.test/no"}
 	if _, err := s.CreatePaidTeam(ctx, actor, actor+"@example.test", in); err != nil {
 		t.Fatal(err)
@@ -99,6 +104,15 @@ func TestTeamTrialFirstTeamOnlyWithCardAndReminder(t *testing.T) {
 	}
 	if got := trialDays(); got != 0 {
 		t.Fatalf("trial offered twice: %d", got)
+	}
+	var started string
+	if err := store.SQL().QueryRowContext(ctx, `SELECT payload->>'html' FROM paperboat.transactional_mail_outbox WHERE mail_id=$1`, "team-trial-started:"+subscription+":"+actor).Scan(&started); err != nil {
+		t.Fatalf("no trial-start confirmation: %v", err)
+	}
+	for _, want := range []string{"30.00 USD per month", "2 seat(s)", "https://console.example.test/billing", "To cancel", "consent version " + legalconsent.Version, "payments are not refunded"} {
+		if !strings.Contains(started, want) {
+			t.Errorf("trial-start confirmation lacks %q: %s", want, started)
+		}
 	}
 	reminder := billing.StripeWebhook{ID: "evt_tw" + suffix, Type: billing.TrialWillEndEvent}
 	reminder.Data.Object.Object, reminder.Data.Object.ID = "subscription", subscription
