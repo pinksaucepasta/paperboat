@@ -30,7 +30,7 @@ func deviceAuthorize(service *auth.DeviceService, requestNetwork func(*http.Requ
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
 		var body request
-		if !decodeStrictJSON(w, r, &body) {
+		if !decodeClientJSON(w, r, &body) {
 			return
 		}
 		out, err := service.Authorize(r.Context(), auth.DeviceAuthorizationInput{ClientID: body.ClientID, ClientLabel: body.ClientLabel, DeviceType: body.DeviceType, OS: body.OS, Scopes: body.Scopes, Network: requestNetwork(r), Enroll: body.Enroll, EnrolledMachineID: body.EnrolledMachineID, Workspace: body.Workspace})
@@ -49,7 +49,7 @@ func deviceToken(service *auth.DeviceService, requestNetwork func(*http.Request)
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
 		var body request
-		if !decodeStrictJSON(w, r, &body) {
+		if !decodeClientJSON(w, r, &body) {
 			return
 		}
 		out, err := service.Poll(r.Context(), auth.DeviceTokenInput{ClientID: body.ClientID, DeviceCode: body.DeviceCode, Network: requestNetwork(r)})
@@ -66,7 +66,7 @@ func deviceCancel(service *auth.DeviceService, requestNetwork func(*http.Request
 			ClientID   string `json:"client_id"`
 			DeviceCode string `json:"device_code"`
 		}
-		if !decodeStrictJSON(w, r, &body) {
+		if !decodeClientJSON(w, r, &body) {
 			return
 		}
 		if err := service.Cancel(r.Context(), auth.DeviceTokenInput{ClientID: body.ClientID, DeviceCode: body.DeviceCode, Network: requestNetwork(r)}); writeDeviceError(w, r, err) {
@@ -151,7 +151,7 @@ func tokenRefresh(service *auth.DeviceService) http.HandlerFunc {
 		var input struct {
 			AttemptID string `json:"attempt_id"`
 		}
-		if !decodeStrictJSON(w, r, &input) {
+		if !decodeClientJSON(w, r, &input) {
 			return
 		}
 		out, err := service.Refresh(r.Context(), token, input.AttemptID)
@@ -294,9 +294,25 @@ func writeDeviceError(w http.ResponseWriter, r *http.Request, err error) bool {
 	writeErrorDetails(w, r, status, e.Code, message, details)
 	return true
 }
+
+// decodeStrictJSON decodes a body that refuses unknown fields: bodies of our web apps (always current) and
+// E2EE/identity tripwires (a plaintext or a client-chosen account must fail loudly). The server is always the
+// newest party, so this only breaks a released client if the server drops a field that client still sends:
+// never drop one while the previous release sends it.
 func decodeStrictJSON(w http.ResponseWriter, r *http.Request, out any) bool {
+	return decodeBody(w, r, out, true)
+}
+
+// decodeClientJSON decodes a body released pb/pbh builds send: fields a newer build adds are ignored.
+func decodeClientJSON(w http.ResponseWriter, r *http.Request, out any) bool {
+	return decodeBody(w, r, out, false)
+}
+
+func decodeBody(w http.ResponseWriter, r *http.Request, out any, strict bool) bool {
 	dec := json.NewDecoder(r.Body)
-	dec.DisallowUnknownFields()
+	if strict {
+		dec.DisallowUnknownFields()
+	}
 	if err := dec.Decode(out); err != nil {
 		writeError(w, r, http.StatusBadRequest, "validation_failed", "Request body must match the documented schema.")
 		return false

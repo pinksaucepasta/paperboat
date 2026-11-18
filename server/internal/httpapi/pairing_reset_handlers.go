@@ -13,7 +13,6 @@ func userMachinePairingReset(service *usermachines.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var body usermachines.PairingResetInput
 		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10))
-		decoder.DisallowUnknownFields()
 		if err := decoder.Decode(&body); err != nil {
 			writeError(w, r, 400, "pairing_reset_invalid", "Reset details are invalid. Retry the original command.")
 			return

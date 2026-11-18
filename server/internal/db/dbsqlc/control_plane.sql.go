@@ -4458,9 +4458,11 @@ ON CONFLICT (id) DO UPDATE
 SET edge_pool = EXCLUDED.edge_pool,
     protocol_version = EXCLUDED.protocol_version, process_epoch = EXCLUDED.process_epoch,
     endpoint_host = EXCLUDED.endpoint_host, endpoint_tcp_port = EXCLUDED.endpoint_tcp_port, endpoint_quic_port = EXCLUDED.endpoint_quic_port,
-    carrier_endpoint_host = EXCLUDED.carrier_endpoint_host, carrier_endpoint_tcp_port = EXCLUDED.carrier_endpoint_tcp_port, carrier_endpoint_quic_port = EXCLUDED.carrier_endpoint_quic_port,
-    carrier_server_spki_sha256 = EXCLUDED.carrier_server_spki_sha256,
-    carrier_server_certificate_chain_pem = EXCLUDED.carrier_server_certificate_chain_pem,
+    carrier_endpoint_host = coalesce(EXCLUDED.carrier_endpoint_host, control_tunnel_nodes.carrier_endpoint_host),
+    carrier_endpoint_tcp_port = coalesce(EXCLUDED.carrier_endpoint_tcp_port, control_tunnel_nodes.carrier_endpoint_tcp_port),
+    carrier_endpoint_quic_port = coalesce(EXCLUDED.carrier_endpoint_quic_port, control_tunnel_nodes.carrier_endpoint_quic_port),
+    carrier_server_spki_sha256 = coalesce(EXCLUDED.carrier_server_spki_sha256, control_tunnel_nodes.carrier_server_spki_sha256),
+    carrier_server_certificate_chain_pem = coalesce(EXCLUDED.carrier_server_certificate_chain_pem, control_tunnel_nodes.carrier_server_certificate_chain_pem),
     public_https_port = EXCLUDED.public_https_port,
     state = 'registered', ready = false, capacity = EXCLUDED.capacity,
     observation = '{}'::jsonb, last_heartbeat_at = EXCLUDED.last_heartbeat_at,
@@ -4475,21 +4477,21 @@ WHERE (NOT EXISTS (SELECT 1 FROM selfhost_installations i WHERE i.node_id=contro
          AND EXCLUDED.endpoint_host=control_tunnel_nodes.endpoint_host
          AND EXCLUDED.endpoint_tcp_port=control_tunnel_nodes.endpoint_tcp_port
          AND EXCLUDED.endpoint_quic_port=control_tunnel_nodes.endpoint_quic_port
-         AND EXCLUDED.carrier_endpoint_host=control_tunnel_nodes.carrier_endpoint_host
-         AND EXCLUDED.carrier_endpoint_tcp_port=control_tunnel_nodes.carrier_endpoint_tcp_port
-         AND EXCLUDED.carrier_endpoint_quic_port=control_tunnel_nodes.carrier_endpoint_quic_port)
+         AND coalesce(EXCLUDED.carrier_endpoint_host, control_tunnel_nodes.carrier_endpoint_host) IS NOT DISTINCT FROM control_tunnel_nodes.carrier_endpoint_host
+         AND coalesce(EXCLUDED.carrier_endpoint_tcp_port, control_tunnel_nodes.carrier_endpoint_tcp_port) IS NOT DISTINCT FROM control_tunnel_nodes.carrier_endpoint_tcp_port
+         AND coalesce(EXCLUDED.carrier_endpoint_quic_port, control_tunnel_nodes.carrier_endpoint_quic_port) IS NOT DISTINCT FROM control_tunnel_nodes.carrier_endpoint_quic_port)
    OR EXISTS (SELECT 1 FROM selfhost_installations i
        WHERE i.node_id=control_tunnel_nodes.id AND i.state='active' AND i.capability='tunnel'
          AND i.claim_complete AND octet_length(control_tunnel_nodes.tls_spki_sha256)=32
-         AND EXCLUDED.carrier_server_spki_sha256='sha256:'||encode(control_tunnel_nodes.tls_spki_sha256,'hex')
+         AND coalesce(EXCLUDED.carrier_server_spki_sha256, control_tunnel_nodes.carrier_server_spki_sha256)='sha256:'||encode(control_tunnel_nodes.tls_spki_sha256,'hex')
          AND (i.expires_at IS NULL OR i.expires_at>EXCLUDED.last_heartbeat_at)
          AND EXCLUDED.edge_pool=i.id
          AND EXCLUDED.endpoint_host=control_tunnel_nodes.endpoint_host
          AND EXCLUDED.endpoint_tcp_port=control_tunnel_nodes.endpoint_tcp_port
          AND EXCLUDED.endpoint_quic_port=control_tunnel_nodes.endpoint_quic_port
-         AND EXCLUDED.carrier_endpoint_host=control_tunnel_nodes.endpoint_host
-         AND EXCLUDED.carrier_endpoint_tcp_port=control_tunnel_nodes.endpoint_tcp_port
-         AND EXCLUDED.carrier_endpoint_quic_port=control_tunnel_nodes.endpoint_quic_port)
+         AND coalesce(EXCLUDED.carrier_endpoint_host, control_tunnel_nodes.endpoint_host)=control_tunnel_nodes.endpoint_host
+         AND coalesce(EXCLUDED.carrier_endpoint_tcp_port, control_tunnel_nodes.endpoint_tcp_port)=control_tunnel_nodes.endpoint_tcp_port
+         AND coalesce(EXCLUDED.carrier_endpoint_quic_port, control_tunnel_nodes.endpoint_quic_port)=control_tunnel_nodes.endpoint_quic_port)
 RETURNING id, edge_pool, protocol_version, process_epoch, endpoint_host, endpoint_tcp_port, endpoint_quic_port, state, ready, capacity, observation, last_heartbeat_at, drain_deadline, version, created_at, updated_at, carrier_endpoint_host, carrier_endpoint_tcp_port, carrier_endpoint_quic_port, carrier_server_spki_sha256, carrier_server_certificate_chain_pem, node_generation, region, failure_domain, roles, transports, capacity_limit, capacity_used, capacity_observed_at, registry_expires_at, allowed_account_ids, peer_relay_wireguard_public_key, peer_relay_disco_public_key, peer_relay_virtual_address, public_ingress_ipv4, public_ingress_ipv6, public_ingress_verified_at, tls_spki_sha256, endpoints_epoch, tunnel_endpoints_epoch, tunnel_snapshot_at, site, public_https_port
 `
 
@@ -4511,6 +4513,7 @@ type RegisterControlTunnelNodeParams struct {
 	Now                              sql.NullTime
 }
 
+// Carrier fields are optional: an edge that sends none keeps the carrier identity it registered before.
 func (q *Queries) RegisterControlTunnelNode(ctx context.Context, arg RegisterControlTunnelNodeParams) (ControlTunnelNode, error) {
 	row := q.db.QueryRow(ctx, registerControlTunnelNode,
 		arg.ID,

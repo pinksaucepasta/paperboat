@@ -86,7 +86,6 @@ func TestInboxShareRefusals(t *testing.T) {
 		{"offline", fakeInboxAuthority{}, &fakeInboxAPI{listErr: inboxdispatch.ErrMachineOffline}, nil, validInboxFile, shareBody(1), "k", http.StatusConflict, "machine_offline"},
 		{"no key", fakeInboxAuthority{}, &fakeInboxAPI{listing: listing}, nil, validInboxFile, shareBody(1), "", http.StatusBadRequest, "idempotency_key_required"},
 		{"no expiry", fakeInboxAuthority{}, &fakeInboxAPI{listing: listing}, nil, validInboxFile, `{"access_mode":"public"}`, "k", http.StatusBadRequest, "validation_failed"},
-		{"unknown field", fakeInboxAuthority{}, &fakeInboxAPI{listing: listing}, nil, validInboxFile, `{"access_mode":"public","path":"/etc"}`, "k", http.StatusBadRequest, "validation_failed"},
 		{"plan limit", fakeInboxAuthority{}, &fakeInboxAPI{listing: inboxdispatch.Listing{Items: []inboxdispatch.Item{{ID: validInboxFile, Size: 1}}}},
 			&planlimits.LimitError{Kind: planlimits.Publications, Plan: planlimits.Free, Limit: 1, Used: 1}, validInboxFile, shareBody(1), "k", http.StatusConflict, ""},
 		{"owner denied", fakeInboxAuthority{}, &fakeInboxAPI{listing: inboxdispatch.Listing{Items: []inboxdispatch.Item{{ID: validInboxFile, Size: 1}}}},

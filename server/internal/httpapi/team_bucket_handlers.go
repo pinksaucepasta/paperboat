@@ -117,7 +117,6 @@ func machineArchive(identities machineRequestVerifier, s *recordings.Service, ac
 
 func strictBody(body []byte, into any) bool {
 	d := json.NewDecoder(bytes.NewReader(body))
-	d.DisallowUnknownFields()
 	return d.Decode(into) == nil && d.Decode(&struct{}{}) == io.EOF
 }
 

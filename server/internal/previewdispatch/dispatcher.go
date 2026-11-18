@@ -321,7 +321,6 @@ func decodeOutcome(reader io.Reader, request previewv1.DispatchRequest, status i
 		return previewv1.DispatchOutcome{}, uncertainDispatchError("remote_invalid_response", err)
 	}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.DisallowUnknownFields()
 	var outcome previewv1.DispatchOutcome
 	if err := decoder.Decode(&outcome); err != nil {
 		if status >= 500 || status == http.StatusRequestTimeout || status == http.StatusTooManyRequests {

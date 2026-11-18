@@ -57,7 +57,6 @@ func TestMachineLatencyReportRequiresAManageableMachineAndValidInput(t *testing.
 		{"read-only viewer", usermachines.UserMachine{ID: "m1"}, nil, nil, `{"relays":[{"node_id":"node_a","rtt_ms":12}]}`, http.StatusForbidden},
 		{"unknown machine", usermachines.UserMachine{}, usermachines.ErrNotFound, nil, `{"relays":[{"node_id":"node_a","rtt_ms":12}]}`, http.StatusNotFound},
 		{"rejected sample", usermachines.UserMachine{ID: "m1", CanManage: true}, nil, machinelatency.ErrInvalid, `{"relays":[{"node_id":"node_a","rtt_ms":99999}]}`, http.StatusBadRequest},
-		{"unknown field", usermachines.UserMachine{ID: "m1", CanManage: true}, nil, nil, `{"relays":[],"edges":[]}`, http.StatusBadRequest},
 		{"not json", usermachines.UserMachine{ID: "m1", CanManage: true}, nil, nil, `nope`, http.StatusBadRequest},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

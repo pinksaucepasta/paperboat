@@ -71,6 +71,14 @@ func TestSelfhostControlNodeRegistrationFenceOnPostgres(t *testing.T) {
 	if row, err := database.Queries().RegisterControlTunnelNode(ctx, base); err != nil || row.ID != installed.NodeID || row.EdgePool != installed.EdgePool || row.PublicHttpsPort.Int32 != 18446 {
 		t.Fatalf("valid restart: row=%+v err=%v", row, err)
 	}
+	// An edge that sends no carrier fields re-registers and keeps the carrier identity stored before.
+	noCarrier := base
+	noCarrier.ProcessEpoch = "epoch-no-carrier"
+	noCarrier.CarrierEndpointHost, noCarrier.CarrierEndpointTcpPort, noCarrier.CarrierEndpointQuicPort = sql.NullString{}, sql.NullInt32{}, sql.NullInt32{}
+	noCarrier.CarrierServerSpkiSha256, noCarrier.CarrierServerCertificateChainPem = sql.NullString{}, sql.NullString{}
+	if row, err := database.Queries().RegisterControlTunnelNode(ctx, noCarrier); err != nil || row.CarrierServerSpkiSha256 != base.CarrierServerSpkiSha256 || row.CarrierEndpointHost != base.CarrierEndpointHost || row.CarrierEndpointQuicPort != base.CarrierEndpointQuicPort {
+		t.Fatalf("re-register without carrier fields: row=%+v err=%v", row, err)
+	}
 	rejected := func(name string, mutate func(*dbsqlc.RegisterControlTunnelNodeParams)) {
 		t.Helper()
 		candidate := base

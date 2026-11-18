@@ -108,7 +108,6 @@ func resourceUsageNative(identities machineRequestVerifier, service *resourceusa
 		}
 		var batch resourceusage.NativeBatch
 		decoder := json.NewDecoder(bytes.NewReader(body))
-		decoder.DisallowUnknownFields()
 		if decoder.Decode(&batch) != nil || decoder.Decode(&struct{}{}) != io.EOF {
 			writeError(w, r, 400, "invalid_usage_report", "Bandwidth report is invalid.")
 			return
@@ -161,7 +160,6 @@ func machineOfflineTerminalSession(identities machineRequestVerifier, machines o
 			AccountID string `json:"account_id"`
 		}
 		decoder := json.NewDecoder(bytes.NewReader(body))
-		decoder.DisallowUnknownFields()
 		if len(body) > 4<<10 || decoder.Decode(&request) != nil || decoder.Decode(&struct{}{}) != io.EOF || request.SessionID == "" || request.AccountID == "" {
 			writeError(w, r, 400, "invalid_request", "A session id and an account id are required.")
 			return
@@ -203,7 +201,6 @@ func machineAuditBacklog(identities machineRequestVerifier, machines *usermachin
 			Events []usermachines.OfflineAuditEvent `json:"events"`
 		}
 		decoder := json.NewDecoder(bytes.NewReader(body))
-		decoder.DisallowUnknownFields()
 		if len(body) > 1<<20 || decoder.Decode(&request) != nil || decoder.Decode(&struct{}{}) != io.EOF {
 			writeError(w, r, 400, "invalid_request", "Audit backlog is invalid.")
 			return

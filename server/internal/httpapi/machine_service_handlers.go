@@ -40,7 +40,6 @@ func machineServicePolicy(s *machineservices.Service) http.HandlerFunc {
 		if r.Method == http.MethodPut {
 			var in wire.PolicyUpdate
 			d := json.NewDecoder(io.LimitReader(r.Body, 4097))
-			d.DisallowUnknownFields()
 			if d.Decode(&in) != nil || d.Decode(&struct{}{}) != io.EOF {
 				machineServiceError(w, r, wire.ErrInvalid)
 				return
@@ -102,7 +101,6 @@ func runtimeMachineServiceAuthorize(identities machineRequestVerifier, s *native
 		}
 		body, e := io.ReadAll(io.LimitReader(r.Body, 8193))
 		d := json.NewDecoder(bytes.NewReader(body))
-		d.DisallowUnknownFields()
 		if e != nil || len(body) > 8192 || d.Decode(&in) != nil || d.Decode(&struct{}{}) != io.EOF {
 			machineServiceError(w, r, wire.ErrInvalid)
 			return

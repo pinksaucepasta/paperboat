@@ -81,6 +81,34 @@ type AccountTopicGeneration struct {
 	UpdatedAt  time.Time
 }
 
+type Announcement struct {
+	ID             string
+	Seq            sql.NullInt64
+	Kind           string
+	Title          string
+	Body           string
+	LinkUrl        sql.NullString
+	Severity       string
+	Dismissible    bool
+	AudienceKind   string
+	AudienceValue  string
+	StartsAt       time.Time
+	EndsAt         sql.NullTime
+	CreatedBy      string
+	IdempotencyKey string
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+	RetractedAt    sql.NullTime
+	RetractedBy    sql.NullString
+}
+
+type AnnouncementReceipt struct {
+	AnnouncementID string
+	UserID         string
+	ReadAt         sql.NullTime
+	DismissedAt    sql.NullTime
+}
+
 type ApiToken struct {
 	ID         string
 	AccountID  string

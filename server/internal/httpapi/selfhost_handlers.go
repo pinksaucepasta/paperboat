@@ -61,7 +61,6 @@ func selfhostRead(w http.ResponseWriter, r *http.Request) ([]byte, error) {
 }
 func selfhostDecode(body []byte, v any) error {
 	d := json.NewDecoder(bytes.NewReader(body))
-	d.DisallowUnknownFields()
 	if d.Decode(v) != nil || d.Decode(&struct{}{}) != io.EOF {
 		return selfhost.ErrInvalid
 	}

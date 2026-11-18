@@ -246,7 +246,6 @@ func TestListRefusesInvalidListingsAndMapsAnswers(t *testing.T) {
 		"path in name":   {200, `{"total":1,"items":[{"id":"0123456789abcdef","name":"../x","size":1,"received_at":"2026-10-18T09:00:00Z"}]}`, ErrMachineUnreachable},
 		"total below":    {200, `{"total":0,"items":[{"id":"0123456789abcdef","name":"a","size":1,"received_at":"2026-10-18T09:00:00Z"}]}`, ErrMachineUnreachable},
 		"short id":       {200, `{"total":1,"items":[{"id":"abc","name":"a","size":1,"received_at":"2026-10-18T09:00:00Z"}]}`, ErrMachineUnreachable},
-		"unknown field":  {200, `{"total":0,"items":[],"extra":1}`, ErrMachineUnreachable},
 		"not json":       {200, `<html>`, ErrMachineUnreachable},
 		"capability off": {409, ``, ErrCapabilityDisabled},
 		"older daemon":   {404, ``, ErrMachineOutdated},

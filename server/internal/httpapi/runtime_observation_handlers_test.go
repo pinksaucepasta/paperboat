@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -78,7 +79,7 @@ func (f *fakeRuntimeObservationRepository) RecordRuntimeObservation(_ context.Co
 	return f.recordErr
 }
 
-func TestRuntimeObservationRejectsObsoleteConfigStatus(t *testing.T) {
+func TestRuntimeObservationIgnoresObsoleteConfigStatus(t *testing.T) {
 	repository := &fakeRuntimeObservationRepository{}
 	body := `{
 		"environment_id":"prj_test","resource_id":"machine_test",
@@ -93,7 +94,8 @@ func TestRuntimeObservationRejectsObsoleteConfigStatus(t *testing.T) {
 	request := httptest.NewRequest(http.MethodPost, "/v1/runtime-observations", strings.NewReader(body))
 	request.Header.Set("Authorization", "Bearer machine-token")
 	runtimeObservation(repository, nil, 2).ServeHTTP(recorder, request)
-	if recorder.Code != http.StatusBadRequest {
+	// An older build's obsolete config_sync field is ignored, never recorded; without a signed identity it is refused.
+	if recorder.Code < 400 || strings.Contains(recorder.Body.String(), "secret") {
 		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
 	}
 	if repository.recorded != nil {
@@ -294,8 +296,9 @@ func TestRuntimeObservationRejectsUnsafeSummaryAndWrongCredential(t *testing.T) 
 	request.Header.Set("Authorization", "Bearer machine-token")
 	addRuntimeProof(request)
 	runtimeObservation(repository, &fakeRuntimeIdentity{}, 10).ServeHTTP(recorder, request)
-	if recorder.Code != http.StatusBadRequest || repository.recorded != nil {
-		t.Fatalf("missing status timestamp = %d recorded=%v", recorder.Code, repository.recorded != nil)
+	// config_sync is an obsolete field an older build may still send: ignored, the heartbeat itself is recorded.
+	if recorder.Code != http.StatusAccepted || repository.recorded == nil {
+		t.Fatalf("obsolete config_sync = %d recorded=%v", recorder.Code, repository.recorded != nil)
 	}
 
 	unsafe := validPrefix + `{"state":"warning","pending_path_count":1,"skipped":[{"path":"../secret","reason":"unsafe"}],"conflicts":[],"max_file_bytes":10,"max_batch_bytes":20,"policy_revision":"1","updated_at":"2026-07-14T01:00:00Z"}}`
@@ -304,7 +307,7 @@ func TestRuntimeObservationRejectsUnsafeSummaryAndWrongCredential(t *testing.T) 
 	request = httptest.NewRequest(http.MethodPost, "/v1/runtime-observations", strings.NewReader(unsafe))
 	request.Header.Set("Authorization", "Bearer machine-token")
 	runtimeObservation(repository, nil, 10).ServeHTTP(recorder, request)
-	if recorder.Code != http.StatusBadRequest || repository.recorded != nil {
+	if recorder.Code < 400 || repository.recorded != nil || strings.Contains(recorder.Body.String(), "../secret") {
 		t.Fatalf("unsafe summary status = %d recorded=%v", recorder.Code, repository.recorded != nil)
 	}
 
@@ -517,7 +520,7 @@ func TestRuntimeEnvironmentCapabilityUsesSeparateLayerObservationEndpoint(t *tes
 		t.Fatal("heartbeat returned obsolete projection")
 	}
 }
-func TestRuntimeObservationRejectsRemovedProjectionFieldWithoutLeakingValues(t *testing.T) {
+func TestRuntimeObservationIgnoresRemovedProjectionFieldWithoutLeakingValues(t *testing.T) {
 	const canary = "ENV_CANARY_RUNTIME_PLAINTEXT_MUST_NOT_CROSS"
 	body := `{"environment_id":"prj_test","resource_id":"machine_test","sampled_at":"2026-10-08T12:00:01Z","environment":{"value":"` + canary + `"}}`
 	repository := &fakeRuntimeObservationRepository{}
@@ -526,7 +529,8 @@ func TestRuntimeObservationRejectsRemovedProjectionFieldWithoutLeakingValues(t *
 	addRuntimeProof(request)
 	response := httptest.NewRecorder()
 	runtimeObservation(repository, &fakeRuntimeIdentity{}, 10).ServeHTTP(response, request)
-	if response.Code != http.StatusBadRequest || repository.recorded != nil || strings.Contains(response.Body.String(), canary) {
-		t.Fatalf("obsolete private projection field accepted or leaked: status=%d", response.Code)
+	// An older build's removed field is ignored: the heartbeat counts, and the value is neither stored nor echoed.
+	if response.Code != http.StatusAccepted || strings.Contains(response.Body.String(), canary) || strings.Contains(fmt.Sprintf("%+v", *repository.recorded), canary) {
+		t.Fatalf("obsolete private projection field stored or leaked: status=%d", response.Code)
 	}
 }

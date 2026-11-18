@@ -205,7 +205,6 @@ func (d *Dispatcher) List(ctx context.Context, request Request) (Listing, error)
 	}
 	var listing Listing
 	decoder := json.NewDecoder(bytes.NewReader(body))
-	decoder.DisallowUnknownFields()
 	if readErr != nil || len(body) > maxListBody || decoder.Decode(&listing) != nil || !validListing(listing) {
 		return Listing{}, errors.Join(ErrMachineUnreachable, errors.New("inbox listing is invalid"))
 	}

@@ -128,7 +128,6 @@ func machineControlRequest(w http.ResponseWriter, r *http.Request) ([]byte, stri
 		OperationID string `json:"operation_id"`
 	}
 	decoder := json.NewDecoder(bytes.NewReader(body))
-	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&request); err != nil || len(request.OperationID) < 8 || len(request.OperationID) > 128 {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "A valid operation_id is required.")
 		return nil, "", nil, false

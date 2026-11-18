@@ -166,11 +166,6 @@ func TestDiagnosticUploadHandlerRejectsLooseInput(t *testing.T) {
 			r.Body = io.NopCloser(bytes.NewReader(changed))
 			r.ContentLength = int64(len(changed))
 		},
-		"unknown field": func(r *http.Request) {
-			changed := append(append([]byte(nil), valid[:len(valid)-1]...), []byte(`,"token":"secret"}`)...)
-			r.Body = io.NopCloser(bytes.NewReader(changed))
-			r.ContentLength = int64(len(changed))
-		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			request := authenticatedDiagnosticRequest(http.MethodPost, "/v1/diagnostic-upload-intents", valid)
