@@ -87,7 +87,9 @@ func TestWindowsPromptIdentification(t *testing.T) {
 
 func awaitWindowsMetadata(t *testing.T, manager *session.Manager, id string, ready func(session.Snapshot) bool) {
 	t.Helper()
-	deadline := time.Now().Add(8 * time.Second)
+	// A cold PowerShell on a hosted runner took over 8 s to draw its first prompt (2026-11-18: only the ConPTY
+	// handshake had arrived). The wait ends as soon as the metadata is there, so the bound only costs a real failure.
+	deadline := time.Now().Add(30 * time.Second)
 	for time.Now().Before(deadline) {
 		snap, err := manager.Snapshot(id)
 		if err != nil {
