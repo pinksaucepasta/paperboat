@@ -10,6 +10,8 @@ WorkingDirectory=/opt/paperboat-admin
 EnvironmentFile=/etc/paperboat-admin/admin.env
 EnvironmentFile=/opt/paperboat-admin/slot.env
 Environment=NODE_ENV=production
+# bun keeps its node shim in /tmp/bun-node-*, owned by whichever service user ran first (the console): a private /tmp keeps the panel its own.
+PrivateTmp=yes
 # The proxy container reaches the host through the compose network's gateway; nothing listens publicly.
 ExecStart=/usr/local/bin/bun run start -p 3101 -H 172.18.0.1
 Restart=always
