@@ -8,6 +8,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+
+	"github.com/pinksaucepasta/paperboat/shared/strictjson"
 )
 
 const networkFingerprintSecretSize = 32
@@ -55,7 +57,7 @@ func (s *Store) NetworkFingerprintSecret() ([]byte, error) {
 
 func decodeNetworkFingerprintSecret(encoded []byte) ([]byte, error) {
 	decoder := json.NewDecoder(bytes.NewReader(encoded))
-	decoder.DisallowUnknownFields()
+	// A file this or another release wrote: fields it does not know are ignored, so an update or a rollback still loads it.
 	var document struct {
 		Version int    `json:"version"`
 		Secret  string `json:"secret_base64url"`
@@ -65,8 +67,7 @@ func decodeNetworkFingerprintSecret(encoded []byte) ([]byte, error) {
 		return nil, ErrInvalidStore
 	}
 	secret, err := base64.RawURLEncoding.Strict().DecodeString(document.Secret)
-	canonical, marshalErr := json.Marshal(document)
-	if err != nil || len(secret) != networkFingerprintSecretSize || base64.RawURLEncoding.EncodeToString(secret) != document.Secret || marshalErr != nil || !bytes.Equal(canonical, encoded) {
+	if err != nil || len(secret) != networkFingerprintSecretSize || base64.RawURLEncoding.EncodeToString(secret) != document.Secret || strictjson.Validate(encoded, 8) != nil {
 		clear(secret)
 		return nil, ErrInvalidStore
 	}

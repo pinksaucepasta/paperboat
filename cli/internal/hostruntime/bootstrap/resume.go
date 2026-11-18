@@ -284,7 +284,7 @@ func loadResumeDocument(stateRoot string) (ResumeRecord, error) {
 	}
 	var record ResumeRecord
 	decoder := json.NewDecoder(bytes.NewReader(body))
-	decoder.DisallowUnknownFields()
+	// A file this or another release wrote: fields it does not know are ignored, so an update or a rollback still loads it.
 	if err := decoder.Decode(&record); err != nil {
 		return ResumeRecord{}, resumeBindingError(err)
 	}

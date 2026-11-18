@@ -81,7 +81,7 @@ func (s *Directory) Load() (Session, error) {
 		return Session{}, err
 	}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.DisallowUnknownFields()
+	// A file this or another release wrote: fields it does not know are ignored, so an update or a rollback still loads it.
 	var value Session
 	if err = decoder.Decode(&value); err != nil {
 		return Session{}, errors.New("SDK session state is invalid")

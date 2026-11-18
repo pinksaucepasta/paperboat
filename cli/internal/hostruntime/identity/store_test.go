@@ -162,7 +162,8 @@ func TestRegistrationRejectsIncompleteSSHConfiguration(t *testing.T) {
 	}
 }
 
-func TestRegistrationRejectsObsoleteFieldsWithoutChangingIdentity(t *testing.T) {
+// A field another release wrote (an obsolete one too) is ignored: the registration still loads, unchanged.
+func TestRegistrationIgnoresObsoleteFieldsWithoutChangingIdentity(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "identity")
 	store, err := Open(Config{StateRoot: root, Random: bytes.NewReader(bytes.Repeat([]byte{9}, 32))})
 	if err != nil {
@@ -183,12 +184,12 @@ func TestRegistrationRejectsObsoleteFieldsWithoutChangingIdentity(t *testing.T) 
 		if err := os.WriteFile(path, input, 0600); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := store.Registration(); !errors.Is(err, ErrInvalidStore) {
-			t.Fatalf("obsolete field accepted: %v", err)
+		if loaded, err := store.Registration(); err != nil || loaded.MachineID != registration.MachineID {
+			t.Fatalf("registration with an obsolete field = %+v, %v", loaded, err)
 		}
 		retained, err := os.ReadFile(path)
 		if err != nil || !bytes.Equal(retained, input) {
-			t.Fatal("rejected registration was rewritten")
+			t.Fatal("loading rewrote the registration")
 		}
 		if store.Current().ID != key.ID || !bytes.Equal(store.Current().Public(), key.Public()) {
 			t.Fatal("rejected registration changed identity")

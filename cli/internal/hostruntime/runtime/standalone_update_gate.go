@@ -370,7 +370,7 @@ func (g *standaloneUpdateGate) load() error {
 		return errStandaloneUpdateGate
 	}
 	decoder := json.NewDecoder(strings.NewReader(string(body)))
-	decoder.DisallowUnknownFields()
+	// A file this or another release wrote: fields it does not know are ignored, so an update or a rollback still loads it.
 	var disk standaloneUpdateGateDisk
 	if decoder.Decode(&disk) != nil || decoder.Decode(&struct{}{}) != io.EOF || disk.Schema != standaloneUpdateGateSchema || len(disk.Transactions) > 128 {
 		return errStandaloneUpdateGate

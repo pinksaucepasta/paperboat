@@ -165,7 +165,7 @@ func Load(path string) (document Document, resultErr error) {
 	}
 	var doc Document
 	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
+	// A file this or another release wrote: fields it does not know are ignored, so an update or a rollback still loads it.
 	if err := decoder.Decode(&doc); err != nil {
 		return Document{}, &InvalidError{cause: err}
 	}

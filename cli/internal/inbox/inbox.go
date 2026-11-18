@@ -657,7 +657,7 @@ func loadJournal(root string) (journal, error) {
 		return result, err
 	}
 	decoder := json.NewDecoder(strings.NewReader(string(data)))
-	decoder.DisallowUnknownFields()
+	// A file this or another release wrote: fields it does not know are ignored, so an update or a rollback still loads it.
 	if err := decoder.Decode(&result); err != nil || result.Version != 1 || result.Entries == nil {
 		// A journal this build cannot read (a newer version, or damage) must not fail every delivery for good.
 		// Keep it aside (each one under its own name) for diagnosis and start a new one; the cost is that an old transfer replayed later is

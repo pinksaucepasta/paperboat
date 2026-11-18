@@ -400,11 +400,11 @@ func TestResumeRejectsObsoleteFieldsAndSchemasWithoutWrite(t *testing.T) {
 		t.Fatal(err)
 	}
 	for name, mutate := range map[string]func(map[string]json.RawMessage){
-		"retired mode":      func(d map[string]json.RawMessage) { d["setup_mode"] = json.RawMessage(`"host"`) },
-		"old schema":        func(d map[string]json.RawMessage) { d["schema"] = json.RawMessage(`"paperboat.byod-resume/v1"`) },
-		"unknown authority": func(d map[string]json.RawMessage) { d["unexpected_authority"] = json.RawMessage(`true`) },
-		"material mode":     func(d map[string]json.RawMessage) { d["material"] = json.RawMessage(`{"setup_mode":"host"}`) },
-		"material roles":    func(d map[string]json.RawMessage) { d["material"] = json.RawMessage(`{"setup_roles":["host"]}`) },
+		// A top-level field another release wrote is ignored (TestLoadsResumeWrittenByPreviousRelease); a retired
+		// schema and retired material are still refused.
+		"old schema":     func(d map[string]json.RawMessage) { d["schema"] = json.RawMessage(`"paperboat.byod-resume/v1"`) },
+		"material mode":  func(d map[string]json.RawMessage) { d["material"] = json.RawMessage(`{"setup_mode":"host"}`) },
+		"material roles": func(d map[string]json.RawMessage) { d["material"] = json.RawMessage(`{"setup_roles":["host"]}`) },
 	} {
 		t.Run(name, func(t *testing.T) {
 			var document map[string]json.RawMessage

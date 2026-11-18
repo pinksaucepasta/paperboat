@@ -55,7 +55,7 @@ func loadBrowserDomains(state string) (browserDomains, error) {
 func decodeBrowserDomains(data []byte) (browserDomains, error) {
 	result := browserDomains{}
 	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
+	// A file this or another release wrote: fields it does not know are ignored, so an update or a rollback still loads it.
 	if err := decoder.Decode(&result); err != nil {
 		return result, errors.New("invalid protected browser domain selection; reinstall Paperboat")
 	}
