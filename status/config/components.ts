@@ -9,7 +9,7 @@ export default {
     {
       "id": "api",
       "name": "Sign-in & API",
-      "note": "New connections, pairing and the console sign-in. Machines that are already connected keep working.",
+      "note": "New connections and sign-in. Connected machines keep working.",
       "units": [
         {
           "id": "api_health",
@@ -45,7 +45,7 @@ export default {
     {
       "id": "coordination",
       "name": "Machine connections",
-      "note": "Starting new terminal, exec and ssh sessions. Sessions that are already open keep running.",
+      "note": "New terminal, exec and ssh sessions. Open ones keep running.",
       "units": [
         {
           "id": "exec",
@@ -70,7 +70,7 @@ export default {
     {
       "id": "relays",
       "name": "Relays",
-      "note": "Only machines that cannot connect directly use a relay. Everyone else is not affected.",
+      "note": "Only used when machines can't connect directly.",
       "units": [
         {
           "id": "relay_india_1",
@@ -95,7 +95,7 @@ export default {
     {
       "id": "edges",
       "name": "Edges",
-      "note": "Previews, tunnels, the browser terminal and private-tunnel sign-in.",
+      "note": "Previews, tunnels and the browser terminal.",
       "units": [
         {
           "id": "edge_india_1",
@@ -162,7 +162,7 @@ export default {
     {
       "id": "updates",
       "name": "Updates & releases",
-      "note": "Downloading and verifying new versions.",
+      "note": "Downloading new versions.",
       "units": [
         {
           "id": "release_meta",
@@ -179,7 +179,7 @@ export default {
     {
       "id": "website",
       "name": "Website",
-      "note": "The Paperboat website and docs.",
+      "note": "The website and docs.",
       "units": [
         {
           "id": "website_home",
