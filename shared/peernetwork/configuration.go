@@ -102,7 +102,7 @@ func (c Configuration) Check(now time.Time) error {
 	scopes := 0
 	for _, p := range c.Peers {
 		b := p.Identity
-		if !b.Valid() || s.Role == RoleCLI && b.Role == RoleCLI || ids[b.EndpointID] || addresses[b.VirtualAddress] || keys[b.WireGuardPublicKey] || len(p.Scopes) == 0 || !ValidPeerEndpoints(p.Endpoints) || len(p.HomeRelay) > MaxHomeRelayLength {
+		if !b.Valid() || s.Role == RoleCLI && b.Role == RoleCLI || ids[b.EndpointID] || addresses[b.VirtualAddress] || keys[b.WireGuardPublicKey] || len(p.Scopes) == 0 || !ValidPeerEndpoints(p.Endpoints) || len(p.HomeRelay) > MaxHomeRelayLength || p.HomeRelay != "" && !ValidID(p.HomeRelay) {
 			return invalid("configuration peer")
 		}
 		ids[b.EndpointID], addresses[b.VirtualAddress], keys[b.WireGuardPublicKey] = true, true, true

@@ -40,6 +40,7 @@ func TestConfigurationCheckRefusesEachBrokenRule(t *testing.T) {
 		"scope direction": func(c *Configuration) { c.Peers[0].Scopes[0].Direction = "accept" },
 		"scope port":      func(c *Configuration) { c.Peers[0].Scopes[0].Port = 80 },
 		"scope id":        func(c *Configuration) { c.Peers[0].Scopes[0].ResourceID = "bad id" },
+		"home relay id":   func(c *Configuration) { c.Peers[0].HomeRelay = "bad relay/id" },
 		"standing timed":  func(c *Configuration) { c.Peers[0].Scopes[0].ExpiresAt = 0 },
 		"duplicate scope": func(c *Configuration) { c.Peers[0].Scopes = append(c.Peers[0].Scopes, c.Peers[0].Scopes[0]) },
 		"foreign mesh scope": func(c *Configuration) {

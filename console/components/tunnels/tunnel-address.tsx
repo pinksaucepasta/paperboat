@@ -67,7 +67,7 @@ function ChangeAddressDialog({ tunnel, onClose }: { tunnel: Tunnel; onClose: () 
       await queryClient.invalidateQueries({ queryKey: ["tunnel", tunnel.id] })
       // A move nothing serves finishes while the request answers; a running one is followed on the tunnel page.
       const moved = (result as { stable_endpoint?: string } | undefined)?.stable_endpoint
-      if (moved && hostOf(moved) === `${label}.${base}`) toast.success("Address changed", { description: `The tunnel is now at ${hostOf(moved)}.` })
+      if (moved && hostOf(moved) === `${label}${base}`) toast.success("Address changed", { description: `The tunnel is now at ${hostOf(moved)}.` })
       onClose()
     },
   })
