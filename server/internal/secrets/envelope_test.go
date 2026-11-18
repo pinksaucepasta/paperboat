@@ -100,3 +100,11 @@ func TestCiphertextWithoutAStampIsOpenedByAnyKeyOfTheRing(t *testing.T) {
 		t.Fatal("an unstamped ciphertext must need resealing")
 	}
 }
+
+func TestValidRingRefusesEmptyKeys(t *testing.T) {
+	for ring, want := range map[string]bool{"a": true, "new,old": true, "": false, ",old": false, "new,": false, "new,,old": false} {
+		if got := ValidRing(ring); got != want {
+			t.Errorf("ValidRing(%q) = %v, want %v", ring, got, want)
+		}
+	}
+}
