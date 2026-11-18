@@ -50,6 +50,7 @@ type Source struct {
 	SHA256   [sha256.Size]byte
 	Reader   io.ReadSeeker
 	Folder   *Folder // set when the source is a folder: Reader streams its tar
+	guard    *sourceGuard
 }
 type Manifest struct {
 	TransferID           string    `json:"transfer_id"`

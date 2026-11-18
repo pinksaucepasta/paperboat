@@ -1,7 +1,9 @@
 package filetransfer
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -88,5 +90,27 @@ func TestNativePatchContentLengthIsTheSegmentWhenTheFileIsLonger(t *testing.T) {
 	}
 	if gotLength.Load() != nativeSegmentBytes {
 		t.Fatalf("ContentLength = %d, want the %d byte segment", gotLength.Load(), nativeSegmentBytes)
+	}
+}
+
+// A body the transport still reads after a newer attempt began must fail, never read the source at the new position.
+func TestSupersededSegmentBodyCannotReadTheSource(t *testing.T) {
+	guard := &sourceGuard{reader: bytes.NewReader([]byte("0123456789"))}
+	first, err := guard.begin(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stale := &segmentReader{guard: guard, generation: first, remaining: 10, total: 10, onRead: func(int64) {}}
+	second, err := guard.begin(5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n, err := stale.Read(make([]byte, 4)); n != 0 || !errors.Is(err, errSegmentSuperseded) {
+		t.Fatalf("stale body read %d bytes, err=%v", n, err)
+	}
+	current := &segmentReader{guard: guard, generation: second, remaining: 5, total: 5, onRead: func(int64) {}}
+	got, err := io.ReadAll(current)
+	if err != nil || string(got) != "56789" {
+		t.Fatalf("current body read %q err=%v", got, err)
 	}
 }

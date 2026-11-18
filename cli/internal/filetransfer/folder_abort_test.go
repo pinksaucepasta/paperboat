@@ -90,6 +90,10 @@ func TestFolderAbandonedStreamReleasesWriter(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("Close did not release a blocked Read")
 	}
+	// A read that only started after the first Close (a loaded machine) restarts the stream by design; end that too.
+	if err := stream.Close(); err != nil {
+		t.Fatal(err)
+	}
 	waitFor(t, "writer goroutine to exit", 5*time.Second, func() bool {
 		return !tarWriterRunning()
 	})

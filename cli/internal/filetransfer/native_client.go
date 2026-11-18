@@ -12,7 +12,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -54,6 +53,7 @@ func (c *Client) uploadNative(ctx context.Context, manifest Manifest, source Sou
 	// A folder streams from a tar-writer goroutine; a terminal outcome releases it (and the in-flight file fd) now
 	// instead of holding both until PreparedBatch.Close at batch end.
 	defer closeFolderSource(source)
+	source.guard = &sourceGuard{reader: source.Reader}
 	// A successful PATCH returns the committed offset, so the next chunk follows
 	// without a HEAD; the offset is asked again only after a failure.
 	var previous, committed int64 = -1, -1
@@ -169,31 +169,15 @@ func (c *Client) patchNative(ctx context.Context, id string, offset int64, sourc
 	stall := time.AfterFunc(time.Hour, func() { cancel(errNativeStalled) })
 	stall.Stop()
 	defer stall.Stop()
-	var body *segmentReader
-	// The transport may still be reading a body after it has answered (an early refusal) and only then closes it, and
-	// the source is shared by every attempt: the next attempt, and this call's return, wait for that Close.
-	defer func() {
-		if body == nil {
-			return
-		}
-		select {
-		case <-body.done:
-		default:
-			cancel(nil) // still being written after the answer: end the request, which makes the transport close the body
-		}
-		// A body the transport still holds after a minute is reported by the next attempt's own wait, never by
-		// overwriting the answer already in hand.
-		_ = body.wait()
-	}()
+	if source.guard == nil {
+		source.guard = &sourceGuard{reader: source.Reader}
+	}
 	newBody := func() (io.Reader, error) {
-		if err := body.wait(); err != nil {
+		generation, err := source.guard.begin(offset)
+		if err != nil {
 			return nil, &nativeSourceFailure{err}
 		}
-		if _, err := source.Reader.Seek(offset, io.SeekStart); err != nil {
-			return nil, &nativeSourceFailure{err}
-		}
-		b := &segmentReader{reader: source.Reader, remaining: length, total: length, lastReset: -nativeStallStep, done: make(chan struct{})}
-		body = b
+		b := &segmentReader{guard: source.guard, generation: generation, remaining: length, total: length, lastReset: -nativeStallStep}
 		b.onRead = func(sent int64) {
 			// Once the last byte is handed over, the receiver's answer is bounded by the response-header timeout. Until
 			// then the stall timer restarts only for real movement, so a trickle cannot hold the stream open.
@@ -228,47 +212,61 @@ func (c *Client) patchNative(ctx context.Context, id string, offset int64, sourc
 	return committed, nil
 }
 
+// sourceGuard serialises the attempts that read one source. The transport may keep reading an abandoned request's
+// body after the answer came back (an early refusal ends a request that way), concurrently with the next attempt:
+// two readers of one file position would send wrong bytes. Every attempt takes a new generation under the lock and a
+// body of an older generation fails its next read, so only the newest body ever reads the source.
+type sourceGuard struct {
+	mu         sync.Mutex
+	reader     io.ReadSeeker
+	generation uint64
+}
+
+// begin makes the source the next attempt's, positioned at offset.
+func (g *sourceGuard) begin(offset int64) (uint64, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.generation++
+	if _, err := g.reader.Seek(offset, io.SeekStart); err != nil {
+		return 0, err
+	}
+	return g.generation, nil
+}
+
+func (g *sourceGuard) read(generation uint64, p []byte) (int, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.generation != generation {
+		return 0, errSegmentSuperseded
+	}
+	return g.reader.Read(p)
+}
+
+// errSegmentSuperseded ends the body of an attempt that a newer one replaced; nobody waits for its answer.
+var errSegmentSuperseded = errors.New("file transfer segment superseded by a newer attempt")
+
 // segmentReader hands out exactly remaining bytes of the source. A source that ends early or fails is a source
 // failure, never a transport one, so the send does not retry a file that changed under it. onRead gets the bytes
 // handed out so far after every read.
 type segmentReader struct {
-	reader                 io.Reader
+	guard                  *sourceGuard
+	generation             uint64
 	remaining, sent, total int64
 	lastReset, lastReport  int64
 	onRead                 func(sent int64)
-	started                atomic.Bool
-	done                   chan struct{} // closed by the transport when it has finished with the body
-	once                   sync.Once
 }
 
 // Length reports the bytes this body will hand out, so HTTP sends a Content-Length instead of chunked.
 func (r *segmentReader) Length() int64 { return r.total }
 
-// Close is the transport's signal that it will not read the body again.
-func (r *segmentReader) Close() error {
-	r.once.Do(func() { close(r.done) })
-	return nil
-}
-
-// wait returns once the transport has closed a body it started reading; a body it never read needs no wait.
-func (r *segmentReader) wait() error {
-	if r == nil || !r.started.Load() {
-		return nil
-	}
-	select {
-	case <-r.done:
-		return nil
-	case <-time.After(time.Minute):
-		return errors.New("the previous transfer request still holds the file")
-	}
-}
-
 func (r *segmentReader) Read(p []byte) (int, error) {
-	r.started.Store(true)
 	if r.remaining == 0 {
 		return 0, io.EOF
 	}
-	n, err := r.reader.Read(p[:min(int64(len(p)), r.remaining)])
+	n, err := r.guard.read(r.generation, p[:min(int64(len(p)), r.remaining)])
+	if errors.Is(err, errSegmentSuperseded) {
+		return 0, err
+	}
 	r.remaining -= int64(n)
 	r.sent += int64(n)
 	if err == io.EOF && r.remaining > 0 {
