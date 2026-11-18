@@ -3,6 +3,7 @@ package reporting
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -68,7 +69,7 @@ func TestFloodGuardStateSurvivesRestartAndBadFiles(t *testing.T) {
 	if sent != floodBurst {
 		t.Fatalf("crash-loop sent %d, want %d", sent, floodBurst)
 	}
-	if info, err := os.Stat(path); err != nil || info.Mode().Perm() != 0o600 {
+	if info, err := os.Stat(path); err != nil || (runtime.GOOS != "windows" && info.Mode().Perm() != 0o600) { // Windows has no 0600
 		t.Fatalf("state file: %v %v", info, err)
 	}
 	for _, bad := range []string{"not json", `{"keys":{"x":null}}`} {
