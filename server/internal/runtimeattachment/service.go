@@ -314,9 +314,9 @@ previous_until=CASE WHEN runtime_carrier_attachments.session_id<>EXCLUDED.sessio
 				return err
 			}
 			// An active carrier on an edge that cannot carry terminals (a customer-run one) is retired too.
-			terminalEdge := false
-			for _, edge := range selected {
-				terminalEdge = terminalEdge || edge.terminal && edge.node == activeNode
+			var terminalEdge bool
+			if err = tx.QueryRow(ctx, `SELECT paperboat.node_managed_edge_eligible($1,$2,$3)`, activeNode, proof.UserID, teamID).Scan(&terminalEdge); err != nil {
+				return err
 			}
 			if !valid || !terminalEdge {
 				if _, err = tx.Exec(ctx, `UPDATE runtime_carrier_attachments SET active=false WHERE route_id=$1 AND active`, route); err != nil {
