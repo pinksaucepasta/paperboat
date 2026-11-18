@@ -1,0 +1,123 @@
+---
+/**
+ * A small terminal window: what you type and what pb answers, cut to what matters. "$ ..." is a
+ * command, "# ..." a quiet remark, "✓ ..." a success line, anything else output. Lines are kept
+ * short enough to fit the narrowest column the window sits in; the build stops on a longer one.
+ */
+interface Props {
+  lines: string[]
+  /** The window's title, e.g. "studio" for a shell on that machine. Defaults to "Terminal". */
+  title?: string
+  class?: string
+}
+const MAX = 44
+const { lines, title = "Terminal", class: className } = Astro.props
+for (const text of lines) {
+  if ([...text].length > MAX) throw new Error(`Term: line longer than ${MAX} characters: ${text}`)
+}
+const escape = (value: string) => value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+const render = (text: string) => {
+  if (text === "") return " "
+  const command = text.match(/^(\$|[\w.-]+@[\w.-]+:\S*[$#]) (.*)$/)
+  if (command) return `<span class="p">${escape(command[1])}</span> <span class="r">${escape(command[2])}</span>`
+  if (text.startsWith("#")) return `<span class="c">${escape(text)}</span>`
+  if (text.startsWith("✓")) return `<span class="ok">✓</span>${escape(text.slice(1))}`
+  return escape(text).replace(/https:\/\/[^\s)]+/g, (url) => `<span class="u">${url}</span>`)
+}
+/** Each line in its own box, so a line that must wrap on a phone continues indented under itself. */
+const html = lines.map((text) => `<span class="ln">${render(text)}</span>`).join("\n")
+---
+
+<figure class:list={["term", className]}>
+  <div class="term-bar" aria-hidden="true"><i></i><i></i><i></i><span>{title}</span></div>
+  <pre class="term-body"><code set:html={html} /></pre>
+</figure>
+
+<style>
+  .term {
+    min-width: 0;
+    border-radius: 12px;
+    background: #16171a;
+    box-shadow:
+      0 0 0 1px rgb(0 0 0 / 0.06),
+      0 24px 48px -28px rgb(20 20 20 / 0.35);
+    overflow: hidden;
+  }
+
+  .term-bar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    height: 36px;
+    padding-inline: 14px;
+    border-bottom: 1px solid rgb(255 255 255 / 0.06);
+  }
+
+  .term-bar i {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: rgb(255 255 255 / 0.14);
+  }
+
+  .term-bar span {
+    flex: 1;
+    margin-right: 44px;
+    text-align: center;
+    font-family: var(--font-mono);
+    font-size: var(--text-tiny);
+    color: rgb(255 255 255 / 0.45);
+  }
+
+  .term-body {
+    padding: 18px 20px 20px;
+    font-size: var(--text-small);
+    line-height: 1.8;
+    color: rgb(255 255 255 / 0.72);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  .term-body :global(code) {
+    white-space: inherit;
+    font: inherit;
+    color: inherit;
+    background: none;
+    padding: 0;
+  }
+
+  .term-body :global(.ln) {
+    display: inline-block;
+    width: 100%;
+    padding-left: 2ch;
+    text-indent: -2ch;
+  }
+
+  @media (max-width: 639px) {
+    .term-body {
+      padding-inline: 16px;
+      font-size: var(--text-tiny);
+    }
+  }
+
+  .term-body :global(.p) {
+    color: #7d9cff;
+    user-select: none;
+  }
+
+  .term-body :global(.r) {
+    color: #fff;
+  }
+
+  .term-body :global(.c) {
+    color: rgb(255 255 255 / 0.38);
+  }
+
+  .term-body :global(.ok) {
+    color: #4ad295;
+  }
+
+  .term-body :global(.u) {
+    color: #9db4ff;
+  }
+</style>

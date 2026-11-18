@@ -1,7 +1,7 @@
 ---
 import Page from "../layouts/Page.astro"
 import Head from "../components/Head.astro"
-import Sheet from "../components/Sheet.astro"
+import Term from "../components/Term.astro"
 import Install from "../components/Install.astro"
 import Closing from "../components/Closing.astro"
 import { features } from "../features"
@@ -17,37 +17,27 @@ const steps = [
   {
     title: "Check that it is healthy",
     text: "<code>pb doctor</code> checks sign-in, the background service and connectivity, and says what to do about anything that is wrong.",
-    sheet: [{ lines: ["$ pb doctor", "$ pb auth status"] }],
+    term: ["$ pb doctor", "$ pb auth status"],
   },
   {
     title: "Add a second machine",
     text: "Run the same install line there. On a server with no browser, pb prints a link and a short code; open the link on any device and approve. Or create a ready-made install line that needs no approval:",
-    sheet: [{ lines: ["$ pb machine add --name studio"], note: "Prints install commands for Linux, macOS and Windows with a one-time token. Run it on the new machine within ten minutes." }],
+    term: ["$ pb machine add --name studio", "# prints a one-time install line"],
   },
   {
     title: "See your machines",
     text: "Names are what you type everywhere else. Rename one with <code>pb machine rename</code>.",
-    sheet: [
-      {
-        lines: [
-          "$ pb environments",
-          "NAME    STATE   PLATFORM      ID",
-          "laptop  online  darwin/arm64  machine_2f6c0b1e-77a4-4c1d-b0f3-5d9a41c8e2a7",
-          "studio  online  linux/amd64   machine_8a1d5c2e-3b47-4f0e-9d62-1c7e5b0a4f93",
-        ],
-      },
-    ],
-    table: true,
+    term: ["$ pb environments", "NAME    STATE   PLATFORM", "laptop  online  darwin/arm64", "studio  online  linux/amd64"],
   },
   {
     title: "Open a terminal on the other one",
     text: "You are in a shell on studio. Close the window whenever you like; run the same command to come back to it.",
-    sheet: [{ lines: ["$ pb connect studio"] }],
+    term: ["$ pb connect studio", "ana@studio:~$"],
   },
   {
     title: "Share something",
     text: "Start any web server and give it a public address. Press Ctrl+C to take it down.",
-    sheet: [{ lines: ["$ pb preview 3000", "Preview ready", `https://quiet-river-lantern-4821.${previewDomain} -> http://127.0.0.1:3000`, "", "Press Ctrl+C to stop"] }],
+    term: ["$ pb preview 3000", "Preview ready", `https://quiet-river-lantern-4821.${previewDomain}`, "", "Press Ctrl+C to stop"],
   },
 ]
 
@@ -68,7 +58,7 @@ const help = [
   description="Install Paperboat, add a second machine and open a terminal on it, then find the docs for every command."
   schema={[breadcrumbSchema(Astro.site, [["Docs", "/docs/"]])]}
 >
-  <Head title="Quickstart">
+  <Head title="Quickstart" eyebrow="Docs">
     <p>
       Install <code>pb</code>, add a second machine and open a terminal on it. The full reference is built into <code>pb</code>.
     </p>
@@ -86,7 +76,7 @@ const help = [
               </div>
               <div class="step-show">
                 {step.install && <Install />}
-                {step.sheet && <Sheet steps={step.sheet} table={step.table} />}
+                {step.term && <Term lines={step.term} />}
               </div>
             </li>
           ))
@@ -99,7 +89,7 @@ const help = [
     <div class="wrap">
       <header class="section-head">
         <h2 class="h2" id="next-title">What to read next</h2>
-        <p class="lede">Each feature has a page with its commands, real output and limits.</p>
+        <p class="lede">Each feature has its own page, with the commands to start.</p>
       </header>
       <ul class="next">
         {

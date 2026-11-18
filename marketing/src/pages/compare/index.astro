@@ -6,77 +6,27 @@ import Closing from "../../components/Closing.astro"
 import { checked, defaultPicks, products } from "../../compare-data"
 import { breadcrumbSchema } from "../../schema"
 
-/** What people come looking for, and the tool we would pick for it, ours or not. */
-const guide = [
-  ["A terminal on my machines that survives a closed laptop, plus SSH and files", "Paperboat", "/features/terminal/"],
-  ["A public HTTPS link to localhost, now", "Paperboat or ngrok. Cloudflare's quick tunnels if you want no account at all", "/compare/ngrok/"],
-  ["One private network for every device I own, phones included", "Tailscale. NetBird if you want to host all of it yourself", "/compare/tailscale/"],
-  ["A production site behind a CDN and a firewall", "Cloudflare Tunnel", "/compare/cloudflare-tunnel/"],
-  ["An API gateway: traffic policies, OAuth and rate limits in front of my app", "ngrok", "/compare/ngrok/"],
-  ["Recorded sessions and access requests for compliance; Kubernetes and database access", "Teleport", "/compare/teleport/"],
-  ["Company-wide access with device posture checks", "Twingate or Cloudflare Zero Trust", "/compare/twingate/"],
-  ["Devices that must share one Ethernet-like network", "ZeroTier", "/compare/zerotier/"],
-  ["Terminals, tunnels and shared secrets for a small team, in one tool", "Paperboat", "/use-cases/small-teams/"],
-]
 ---
 
 <Page
   title="Paperboat vs Tailscale, ngrok, Cloudflare Tunnel and more"
-  description="Which tool fits which job, side by side with Tailscale, ngrok, Cloudflare Tunnel, Teleport and more."
+  description="See what changes when you move to Paperboat from Tailscale, ngrok, Cloudflare Tunnel, Teleport and more."
   schema={[breadcrumbSchema(Astro.site, [["Compare", "/compare/"]])]}
 >
-  <Head title="Paperboat compared">
-    <p>
-      Paperboat overlaps with mesh VPNs, tunnels and SSH. Here is which tool we would pick, and why.
-    </p>
-    <p class="small">Claims about other products link to their own documentation and were checked in {checked}.</p>
+  <Head title="Coming from another tool?">
+    <p>Most people arrive with a VPN, a tunnel tool or a bastion host. Here's what you keep, what you gain, and how to move over.</p>
   </Head>
 
-  <section class="section guide" aria-labelledby="guide-title">
+  <section class="section list-section" aria-labelledby="pages-title">
     <div class="wrap">
-      <h2 class="visually-hidden" id="guide-title">Our pick, by need</h2>
-      <div class="scroll">
-        <table class="facts picks">
-          <thead><tr><th scope="col">If you need</th><th scope="col">We would use</th><th scope="col"><span class="visually-hidden">Read more</span></th></tr></thead>
-          <tbody>
-            {
-              guide.map(([need, pick, href]) => (
-                <tr>
-                  <th scope="row">{need}</th>
-                  <td class:list={{ ours: pick === "Paperboat" }}>{pick}</td>
-                  <td><a class="link" href={href}>{href.startsWith("/compare/") ? "Compare" : "Details"}</a></td>
-                </tr>
-              ))
-            }
-          </tbody>
-        </table>
-      </div>
-    </div>
-  </section>
-
-  <section class="section section-tint compare-tint" aria-labelledby="table-title">
-    <div class="wrap">
-      <header class="section-head">
-        <h2 class="h2" id="table-title">Side by side</h2>
-        <p class="lede">Choose up to two tools to stand beside Paperboat. The choice is kept in the address, so you can send the link.</p>
-      </header>
-      <CompareTable products={products} picked={defaultPicks} picker />
-    </div>
-  </section>
-
-  <section class="section" aria-labelledby="pages-title">
-    <div class="wrap">
-      <header class="section-head">
-        <h2 class="h2" id="pages-title">Each comparison</h2>
-        <p class="lede">What differs, what each costs, when to choose the other one, and how to move.</p>
-      </header>
+      <h2 class="visually-hidden" id="pages-title">Comparisons</h2>
       <ul class="pages">
         {
           products.map((product) => (
             <li>
               <a href={`/compare/${product.slug}/`}>
                 <span class="page-name">Paperboat vs {product.label}</span>
-                <span class="page-line">{product.summary.split(". ")[0]}.</span>
+                <span class="page-line">{product.tagline}</span>
               </a>
             </li>
           ))
@@ -85,31 +35,22 @@ const guide = [
     </div>
   </section>
 
+  <section class="section section-tint compare-tint" aria-labelledby="table-title">
+    <div class="wrap">
+      <header class="section-head">
+        <h2 class="h2" id="table-title">Side by side</h2>
+        <p class="lede">Pick up to two tools to see beside Paperboat. Every answer about them links to its source, checked {checked}.</p>
+      </header>
+      <CompareTable products={products} picked={defaultPicks} picker />
+    </div>
+  </section>
+
   <Closing />
 </Page>
 
 <style>
-  .guide {
+  .list-section {
     padding-top: 0;
-  }
-
-  .picks {
-    min-width: 640px;
-  }
-
-  .picks tbody th {
-    width: 50%;
-    font-weight: 400;
-    color: var(--text);
-  }
-
-  .picks td {
-    color: var(--ink);
-  }
-
-  .picks .ours {
-    color: var(--cobalt);
-    font-weight: 500;
   }
 
   .pages {

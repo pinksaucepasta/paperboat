@@ -93,7 +93,7 @@ for (const [path, html] of pages) {
 
 // Every feature and use-case page shows a real command.
 for (const [path, html] of pages)
-  if (/^\/(features|use-cases)\/[^/]+\/$/.test(path) && !/class="[^"]*\bsheet\b/.test(html)) fail(path, "no command example")
+  if (/^\/(features|use-cases)\/[^/]+\/$/.test(path) && !/class="[^"]*\b(sheet|term)\b/.test(html)) fail(path, "no command example")
 
 // Claims that must match the server's configuration and the plan table (PLAN 1.3).
 const home = pages.get("/")
@@ -148,7 +148,7 @@ if (serverConfig) {
   expect("/pricing/", `From ${number(business, /SSOMinSeats: (\d+)/)} seats`, "SSO seat minimum")
   expect("/pricing/", `per ${number(source("server/internal/billing/workspace_topups.go"), /TopupUnitBytes int64 = ([\d_]+)/) / 1e9} GB`, "top-up size")
   expect("/features/files/", `Up to ${number(serverConfig, /AutomaticMaxBatchBytes: ([\d_]+)/) / 1e9} GB per send`, "file size limit")
-  expect("/features/files/", `Files per send Up to ${number(serverConfig, /MaxBatchFiles: (\d+)/)}.`, "files per send")
+  expect("/features/files/", `Up to ${number(serverConfig, /MaxBatchFiles: (\d+)/)} per send`, "files per send")
 }
 
 // One type scale: every font size in the source is a token (the lockup follows the brand's mark-height rule).

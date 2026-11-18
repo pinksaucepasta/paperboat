@@ -1,0 +1,92 @@
+---
+/**
+ * One idea of a page: a short heading and a sentence or two on one side, the thing itself (a
+ * terminal, a screenshot, a list) on the other. `flip` puts the visual first on wide screens, so
+ * consecutive beats alternate.
+ */
+interface Props {
+  title: string
+  id: string
+  flip?: boolean
+  /** The visual is wide (a screenshot): the text goes above it instead of beside it. */
+  wide?: boolean
+}
+const { title, id, flip = false, wide = false } = Astro.props
+---
+
+<section class="section section-rule beat-section" aria-labelledby={id}>
+  <div class:list={["wrap", "beat", { "beat-flip": flip, "beat-wide": wide }]}>
+    <div class="beat-text">
+      <h2 class="h2" id={id}>{title}</h2>
+      <div class="beat-body"><slot /></div>
+    </div>
+    <div class="beat-visual"><slot name="visual" /></div>
+  </div>
+</section>
+
+<style>
+  .beat {
+    display: grid;
+    gap: var(--s6);
+    align-items: center;
+  }
+
+  .beat-text {
+    display: grid;
+    gap: var(--s4);
+    align-content: start;
+  }
+
+  .beat-text .h2 {
+    max-width: 16ch;
+  }
+
+  .beat-body {
+    display: grid;
+    gap: var(--s3);
+    max-width: 44ch;
+    font-size: var(--text-lede);
+    line-height: 1.5;
+    color: var(--fog);
+  }
+
+  .beat-body :global(a) {
+    color: var(--ink);
+    text-decoration: underline;
+    text-decoration-color: var(--rule);
+    text-underline-offset: 3px;
+  }
+
+  .beat-body :global(a:hover) {
+    text-decoration-color: currentColor;
+  }
+
+  .beat-visual {
+    min-width: 0;
+  }
+
+  @media (min-width: 960px) {
+    .beat:not(.beat-wide) {
+      grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
+      column-gap: var(--s8);
+    }
+
+    .beat-flip:not(.beat-wide) > .beat-visual {
+      order: -1;
+    }
+
+    .beat-wide {
+      gap: var(--s7);
+    }
+
+    .beat-wide .beat-text {
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      column-gap: var(--s8);
+      align-items: end;
+    }
+
+    .beat-wide .beat-text .h2 {
+      max-width: 18ch;
+    }
+  }
+</style>

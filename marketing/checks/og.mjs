@@ -57,7 +57,10 @@ for (const path of paths) {
   const html = readFileSync(`${root}dist${path}index.html`, "utf8")
   const headline = unescape(html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/)[1]).replace(/\s+/g, " ").trim()
   const first = path.split("/")[1]
-  await page.setContent(`<!doctype html>${path === "/" ? home(headline) : inner(path.split("/").length > 3 ? sections[first] : "", headline)}`)
+  // The page's own label above its title (a feature's name, "Paperboat vs Tailscale"), else its section.
+  const eyebrow = html.match(/class="eyebrow"[^>]*>([^<]*)</)?.[1]
+  const label = eyebrow ? unescape(eyebrow).trim() : path.split("/").length > 3 ? sections[first] : ""
+  await page.setContent(`<!doctype html>${path === "/" ? home(headline) : inner(label, headline)}`)
   await page.evaluate(() => Promise.all([document.fonts.ready, ...[...document.images].map((img) => img.decode())]))
   const name = path.replace(/^\/|\/$/g, "").replace(/\//g, "-") || "home"
   await page.screenshot({ path: `${root}public/og/${name}.png` })

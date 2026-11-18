@@ -23,10 +23,8 @@ const lanes = [
   description="Every feature is free for personal use. Pro is $8 a month; Team is $15 a seat with roles, audit log and SSO."
   schema={[breadcrumbSchema(Astro.site, [["Pricing", "/pricing/"]]), faqSchema(faq)]}
 >
-  <Head title="Pricing">
-    <p>
-      Every feature is free for personal use. Pro adds relay and edge traffic; Team adds people.
-    </p>
+  <Head title="Free for personal use" eyebrow="Pricing">
+    <p>Every feature is on every plan. Pro adds more traffic through our servers, and Team adds people.</p>
   </Head>
 
   <section class="section plans-section" aria-label="Plans">

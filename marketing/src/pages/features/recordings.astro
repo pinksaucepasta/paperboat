@@ -1,0 +1,76 @@
+---
+import Feature from "../../layouts/Feature.astro"
+import Beat from "../../components/Beat.astro"
+import Term from "../../components/Term.astro"
+
+const faq = [
+  {
+    q: "What gets recorded?",
+    a: 'Paperboat <a href="/features/terminal/">terminals</a>, whether opened with <code>pb connect</code> or in the web console: everything shown on screen, with its timing.',
+  },
+  {
+    q: "Where are recordings kept?",
+    a: "On the machine that was recorded, encrypted. A team can also keep an archived copy in its own S3-compatible bucket, which holds only the encrypted form.",
+  },
+  {
+    q: "Who can watch a recording?",
+    a: "On a personal machine, its owner. In a team, the people the team allows. Every replay and export is written to the audit log.",
+  },
+  {
+    q: "Can a session be recorded without people knowing?",
+    a: "No. Everyone attached to a recorded session sees a REC mark for as long as it records.",
+  },
+  {
+    q: "Which plans include recordings?",
+    a: "Every plan, Free included. The Team plan adds an archive in your own bucket and recording by rule.",
+  },
+]
+---
+
+<Feature
+  slug="recordings"
+  title="Terminal session recordings | Paperboat"
+  description="Record a terminal session and play it back later, in your terminal or a browser. Kept encrypted on your own machine."
+  headline="Play back any terminal session"
+  faq={faq}
+  related={["terminal", "teams", "console"]}
+  compare={["teleport", "ssh-bastion"]}
+>
+  <p slot="lede">Record a session while you work, then watch it again: in your terminal, in the browser, or at twice the speed.</p>
+  <Term slot="aside" lines={["$ pb recordings start", "Recording session S12. Everyone sees REC.", "", "$ pb recordings play rec_7k2 --speed 2"]} />
+
+  <Beat id="why-title" title="See exactly what happened">
+    <p>The fix that worked at 2 a.m., the deploy that didn't, the steps a new teammate needs. Play it back instead of guessing.</p>
+    <Term slot="visual" title="Recordings" lines={["$ pb recordings list", "rec_7k2  studio   today 02:14   manual", "rec_6m9  staging  yesterday     rule"]} />
+  </Beat>
+
+  <Beat id="share-title" title="Keep it, share it" flip>
+    <p>Export a recording as an asciicast file and play it anywhere asciinema runs.</p>
+    <Term slot="visual" lines={["$ pb recordings export rec_7k2 -o fix.cast", "✓ Saved fix.cast"]} />
+  </Beat>
+
+  <Beat id="team-title" title="For teams: record by rule">
+    <p>One rule records every session on the machines you tag, and a copy can go to your own S3 bucket.</p>
+    <Term slot="visual" title="policy.json" lines={['{', '  "src": ["group:engineering"],', '  "dst": ["tag:prod"],', '  "allow": ["record"]', '}']} />
+  </Beat>
+
+  <section class="section section-rule" aria-labelledby="details-title">
+    <div class="wrap">
+      <h2 class="visually-hidden" id="details-title">Details</h2>
+      <div class="points points-3">
+        <div>
+          <h3 class="h3">Encrypted at rest</h3>
+          <p>Recordings are encrypted on the machine and decrypted only on the computer that plays them.</p>
+        </div>
+        <div>
+          <h3 class="h3">Always visible</h3>
+          <p>Everyone in the session sees the REC mark while it records.</p>
+        </div>
+        <div>
+          <h3 class="h3">Every replay logged</h3>
+          <p>Who watched or exported which recording, and when, is in the audit log.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+</Feature>

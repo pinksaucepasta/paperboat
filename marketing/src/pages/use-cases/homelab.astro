@@ -1,50 +1,33 @@
 ---
 import UseCase from "../../layouts/UseCase.astro"
-import Sheet from "../../components/Sheet.astro"
+import Beat from "../../components/Beat.astro"
+import Term from "../../components/Term.astro"
+import Addresses from "../../components/Addresses.astro"
 import { localDomain, plans, tunnelDomain } from "../../site"
 
-const hero = [
-  { lines: ["$ pb ssh homelab"], note: "From a café, a hotel, your phone's hotspot. No port forwarded on the router at home." },
-  { lines: [`# browser: https://jellyfin.homelab.${localDomain}`], note: "A service on the home server, by name, with HTTPS your browser trusts. Only your machines can open it." },
-]
-
-const publish = [
-  { lines: ["$ pb tunnel create blog --port 8080 --wait", "Created tunnel blog (tunnel_7c2m9xqa)", `https://amber-quiet-harbor-5120.${tunnelDomain} -> http://127.0.0.1:8080`, "Status: ready"], note: "The one thing you do want public." },
-  {
-    lines: ["$ pb domain add home.example.com", "$ pb tunnel route list blog", "$ pb tunnel domain add blog blog.home.example.com --route <route>"],
-    note: "On your own domain, on the Free plan too: add the domain, find the tunnel's route, point a name at it.",
-  },
-]
-
-const jobs = [
-  ["SSH in from outside", "pb ssh homelab", "Works behind NAT and carrier-grade NAT. Your router's admin page stays closed."],
-  ["Open a web UI", `https://<port>.homelab.${localDomain}`, "Grafana, Home Assistant, the router's own page. Private to your machines."],
-  ["Reach apps behind a reverse proxy", `https://<app>.homelab.${localDomain}`, "Works with Coolify's default proxy and others. No public certificates to manage."],
-  ["Use a database or other TCP service", "pb access machine homelab --port 5432", "The port appears on your laptop for as long as the command runs."],
-  ["Copy a backup off the box", "pb rsync -a homelab:/srv/backups/ ./backups/", "Plain rsync, through the same private path."],
-  ["Leave a job running", "pb connect homelab", "A terminal that is still there next weekend."],
+const addresses: [string, string][] = [
+  [`grafana.homelab.${localDomain}`, "Grafana"],
+  [`jellyfin.homelab.${localDomain}`, "Jellyfin, behind Coolify"],
+  [`8123.homelab.${localDomain}`, "Home Assistant"],
+  [`homelab.${localDomain}`, "Everything it serves"],
 ]
 
 const faq = [
   {
     q: "Does this work behind CGNAT, without a public IP?",
-    a: "Yes. Both machines connect outward, so nothing needs to be reachable from the internet. If the two networks will not allow a direct connection, traffic goes through a relay, still encrypted end to end.",
+    a: "Yes. Both machines connect outward, so nothing at home needs to be reachable from the internet. When the two networks can't connect directly, a relay passes the encrypted traffic along.",
   },
   {
     q: "Is the free plan enough for a home lab?",
-    a: `Usually. Free has every feature and ${plans[0].machines} machines. The ${plans[0].bandwidth} a month applies only to relayed traffic and to public tunnels; direct traffic between your machines is unlimited. If you publish something busy, Pro is ${plans[1].price} a month for ${plans[1].bandwidth}, or you can run the relay and tunnel server on a small VPS and count nothing.`,
+    a: `Usually. Free has every feature and ${plans[0].machines} machines. Direct traffic between your machines is never counted; the ${plans[0].bandwidth} a month is for relayed traffic and public tunnels. You can also run your own relay on a small VPS and count nothing.`,
   },
   {
-    q: "Can I reach my home lab from my phone?",
-    a: "A terminal, yes, through the web console in the phone's browser. Private names and ports, no: those need pb on the device, and there is no mobile app. If phone access to services matters most to you, Tailscale is the better fit.",
+    q: "Does it work with Coolify, Traefik or Caddy?",
+    a: `Yes. Give each app a domain like <code>jellyfin.homelab.${localDomain}</code> and it opens from your other machines with real HTTPS.`,
   },
   {
-    q: "Can my family use a service I host without installing anything?",
-    a: "Publish it with a tunnel and they open a normal HTTPS link. That link is public, so put a login in the app itself.",
-  },
-  {
-    q: "Is it safe to stream media through it?",
-    a: "It works, but mind the path. Between your own machines on a direct connection it costs nothing. Through a public tunnel, every byte is edge bandwidth, and video adds up fast.",
+    q: "Can my family use a service I host?",
+    a: "Publish it with a tunnel and they open a normal HTTPS link, with nothing to install.",
   },
   {
     q: "Which machines can I install it on?",
@@ -58,72 +41,26 @@ const faq = [
   name="Home lab"
   title="Reach your home lab from anywhere | Paperboat"
   description="Reach your home server and its apps from anywhere, even behind CGNAT. No port forwarding, no dynamic DNS."
-  headline="Reach your home lab from anywhere"
+  headline="Your home lab, from anywhere"
   faq={faq}
   related={["private-access", "ssh", "tunnels", "self-hosting"]}
   compare={["tailscale", "cloudflare-tunnel", "zerotier"]}
 >
-  <p slot="lede">
-    No port forwarding, no dynamic DNS. Install Paperboat on the server and your laptop, and it is one name away.
-  </p>
-  <Sheet slot="aside" steps={hero} />
+  <p slot="lede">Install Paperboat on the server at home and on your laptop. From any café or hotel, every app on it is one name away.</p>
+  <Addresses slot="aside" rows={addresses} />
 
-  <section class="section section-tint" aria-labelledby="jobs-title">
-    <div class="wrap">
-      <header class="section-head">
-        <h2 class="h2" id="jobs-title">Common home lab tasks</h2>
-        <p class="lede">Each of these is one line, and none of them changes your router, your DNS or your firewall.</p>
-      </header>
-      <div class="scroll">
-        <table class="facts wide">
-          <thead><tr><th scope="col">You want to</th><th scope="col">You type</th><th scope="col">Worth knowing</th></tr></thead>
-          <tbody>
-            {jobs.map(([job, command, note]) => <tr><th scope="row">{job}</th><td><code>{command}</code></td><td>{note}</td></tr>)}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  </section>
+  <Beat id="router-title" title="Leave the router alone">
+    <p>No port forwarding, no dynamic DNS, nothing open on the internet. It works behind any NAT, including your ISP's.</p>
+    <Term slot="visual" lines={["$ pb ssh homelab", "ana@homelab:~$ docker ps", "CONTAINER   IMAGE        STATUS", "a41f        jellyfin     Up 3 days"]} />
+  </Beat>
 
-  <section class="section" aria-labelledby="public-title">
-    <div class="wrap cols">
-      <div class="stack">
-        <h2 class="h2" id="public-title">Publish one service</h2>
-        <div class="prose">
-          <p>
-            For the one thing that should be public, a tunnel gives it a permanent HTTPS address and keeps the machine hidden.
-          </p>
-          <p>It comes back by itself after a power cut, and a new home IP changes nothing.</p>
-        </div>
-      </div>
-      <Sheet steps={publish} />
-    </div>
-  </section>
+  <Beat id="jobs-title" title="Leave a job running" flip>
+    <p>Start a long copy or a build, close the laptop, check on it from your phone's browser in the console.</p>
+    <Term slot="visual" lines={["$ pb connect homelab", "ana@homelab:~$ rsync -a /srv/ /backup/", "# close the laptop; it keeps going"]} />
+  </Beat>
 
-  <section class="section section-tint" aria-labelledby="not-title">
-    <div class="wrap cols">
-      <h2 class="h2" id="not-title">What it does not do</h2>
-      <div class="prose">
-        <p>
-          Paperboat is not a network. It will not put your TV, your phone or a whole subnet behind one address, act as an exit node, or carry
-          UDP for a game server.
-        </p>
-        <p>
-          It connects the computers you install it on, port by port. If you want every device at home on one private network,
-          <a href="/compare/tailscale/">Tailscale</a>, <a href="/compare/zerotier/">ZeroTier</a> or
-          <a href="/compare/netbird/">NetBird</a> is the right tool. Paperboat leaves DNS, routes and VPN settings alone, so it can run on the same machines.
-        </p>
-      </div>
-    </div>
-  </section>
+  <Beat id="public-title" title="Share the one public thing">
+    <p>Your blog or a photo album for the family gets a permanent HTTPS address, even when your home IP changes.</p>
+    <Term slot="visual" lines={["$ pb tunnel create blog --port 8080", "✓ Created tunnel blog", `https://amber-quiet-harbor-5120.${tunnelDomain}`]} />
+  </Beat>
 </UseCase>
-
-<style>
-  .wide {
-    min-width: 760px;
-  }
-
-  .wide tbody th {
-    width: 24%;
-  }
-</style>

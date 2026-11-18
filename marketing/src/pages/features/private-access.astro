@@ -1,117 +1,88 @@
 ---
 import Feature from "../../layouts/Feature.astro"
-import Sheet from "../../components/Sheet.astro"
-import Lanes from "../../components/Lanes.astro"
+import Beat from "../../components/Beat.astro"
+import Term from "../../components/Term.astro"
+import Addresses from "../../components/Addresses.astro"
 import { localDomain } from "../../site"
-import { directLane, relayLane } from "../../diagrams"
 
-const hero = [
-  { lines: ["$ pb access machine studio --port 5432 --listen 127.0.0.1:5432"], note: "Port 5432 on studio is now port 5432 on this laptop, until you stop the command." },
-  { lines: ["$ psql -h 127.0.0.1 -p 5432 app"], note: "Any TCP client. It thinks the database is local." },
-]
-
-const reach = [
-  [`https://3000.studio.${localDomain}`, "Port 3000 on studio over HTTPS and WebSocket, with a certificate your browser trusts"],
-  [`https://studio.${localDomain}:3000`, "The same service, with the port after the name"],
-  [`https://studio.${localDomain}`, "A page listing the ports studio is serving to you"],
-  ["studio's own 127.100.x.y address, any port", "Raw TCP of any kind: a database, Redis, a game server"],
-]
-
-const names = [
-  { lines: ["$ pb port name set grafana 3000 --machine studio"], note: `Now <code>https://grafana.studio.${localDomain}</code> opens port 3000.` },
-  { lines: ["$ pb resolve studio"], note: "Shows the local address this computer uses for studio, and which ports are open to you." },
-  { lines: ["$ pb ping studio", "sample 1: path=direct connect=18.42ms", "sample 2: path=direct connect=11.07ms", "sample 3: path=direct connect=10.88ms", "sample 4: path=direct connect=11.31ms", "summary: sent=4 received=4 loss=0.0% connect min/avg/max=10.88/12.92/18.42ms"], note: "Direct or relayed, and how long a connection takes." },
+const addresses: [string, string][] = [
+  [`3000.studio.${localDomain}`, "Port 3000 on studio"],
+  [`studio.${localDomain}:3000`, "The same, port last"],
+  [`grafana.homelab.${localDomain}`, "A port you named"],
+  [`studio.${localDomain}`, "Everything studio serves"],
 ]
 
 const faq = [
   {
-    q: "Is Paperboat a VPN?",
-    a: 'No. It does not give your devices a network interface, route subnets or act as an exit node. It forwards TCP ports between machines that run pb. If you need a full private network, including phones, <a href="/compare/tailscale/">Tailscale</a> or <a href="/compare/netbird/">NetBird</a> is the better tool.',
-  },
-  {
-    q: "Does it change my DNS, hosts file or VPN settings?",
-    a: `No. The ${localDomain} names resolve to a loopback address on your own computer, where pb listens. Nothing on the network changes, so it does not fight with a VPN you already run.`,
+    q: "Who can open these addresses?",
+    a: "Only you, from your own machines. A teammate can open them only if a rule gives them that machine and those ports.",
   },
   {
     q: "Which ports can I reach?",
-    a: "On your own machines, the ports your user is listening on from 1024 upward are found automatically, and so are ports 80 and 443 whoever listens on them (Traefik, Caddy or Coolify run as root or in Docker). Ports of other users or of Docker above 1024, and other ports below 1024 such as 22 or 5432, need to be allowed explicitly.",
+    a: "On your own machines, the ports your user listens on from 1024 up, plus 80 and 443, are found by themselves. Any other port is one rule away.",
   },
   {
-    q: "Can teammates reach ports on my machine?",
-    a: "Only if the team has private access turned on, which is off by default, and a rule grants them that machine and those ports. Removing the rule cuts connections that are open.",
+    q: "Does it change my DNS, hosts file or VPN?",
+    a: `No. The ${localDomain} names point at your own computer, where Paperboat answers. Nothing on your network changes, and it runs next to any VPN.`,
   },
   {
-    q: "Does UDP work?",
-    a: "No. Private access carries TCP, which covers HTTP, databases and most developer tools.",
+    q: "How do I reach an app behind Coolify, Traefik or Caddy?",
+    a: `Give the app a domain like <code>jellyfin.homelab.${localDomain}</code>. Paperboat sends names it doesn't know to the machine's reverse proxy on port 80, and the proxy picks the app. <code>pb port front-desk homelab 443 https</code> changes the port.`,
   },
   {
-    q: "How do I reach a service behind a reverse proxy such as Coolify?",
-    a: `Set the app's domain to a name like <code>jellyfin.homelab.${localDomain}</code>. pb sends the request to the proxy on port 80 with that host name, and the proxy picks the app. <code>pb port front-desk homelab 443 https</code> changes the port and scheme.`,
+    q: "What about databases and other TCP services?",
+    a: "Each machine also has its own local address. Point any client at it, on any port: psql, redis-cli, a game client.",
   },
 ]
 ---
 
 <Feature
   slug="private-access"
-  title="Private ports on your other machines | Paperboat"
+  title="Private HTTPS addresses for every port | Paperboat"
   description="Open a database or dev server on another machine as if it were local. Nothing is published to the internet."
-  headline="Private ports on your other machines"
+  headline="Every port, its own private address"
   faq={faq}
-  related={["tunnels", "ssh", "teams"]}
+  related={["previews", "ssh", "teams"]}
   compare={["tailscale", "netbird", "zerotier"]}
 >
   <p slot="lede">
-    The staging database, the admin page on the home server, the dev server on your desktop. Private access brings one port to the machine you
-    are on, for you alone.
+    The dev server on your desktop, Grafana on the box at home, the admin page on staging. Open any of them by name, with real HTTPS, from any of
+    your machines.
   </p>
-  <Sheet slot="aside" steps={hero} />
+  <Addresses slot="aside" rows={addresses} />
 
-  <section class="section section-tint" aria-labelledby="reach-title">
+  <Beat id="names-title" title="Give a port a name">
+    <p>Name a port once and the name works on every computer you and your team use.</p>
+    <Term slot="visual" lines={["$ pb port name set grafana 3000 \\", "    --machine homelab", `✓ grafana.homelab.${localDomain}`]} />
+  </Beat>
+
+  <Beat id="proxy-title" title="Apps behind Coolify too" flip>
+    <p>Running Coolify, Traefik or Caddy? Give each app a name under your machine and it opens like any other.</p>
+    <Term slot="visual" title="Coolify, app settings" lines={[`Domain  https://jellyfin.homelab.${localDomain}`]} />
+  </Beat>
+
+  <Beat id="tcp-title" title="Databases as if they were local">
+    <p>Anything that speaks TCP works too: a database, Redis, SSH. Your client never knows the server is somewhere else.</p>
+    <Term slot="visual" lines={["$ pb access machine staging --port 5432 \\", "    --listen 127.0.0.1:5432", "$ psql -h 127.0.0.1 app", "app=>"]} />
+  </Beat>
+
+  <section class="section section-rule" aria-labelledby="details-title">
     <div class="wrap">
-      <header class="section-head">
-        <h2 class="h2" id="reach-title">Reach a port by name</h2>
-        <p class="lede">
-          For web services there is nothing to run. Every machine has a name that works only on your own machines, with HTTPS your browser
-          accepts.
-        </p>
-      </header>
-      <table class="facts">
-        <thead><tr><th scope="col">You type</th><th scope="col">You reach</th></tr></thead>
-        <tbody>
-          {reach.map(([what, where]) => <tr><th scope="row">{what.startsWith("https") ? <code>{what}</code> : what}</th><td>{where}</td></tr>)}
-        </tbody>
-      </table>
-    </div>
-  </section>
-
-  <section class="section" aria-labelledby="paths-title">
-    <div class="wrap">
-      <header class="section-head">
-        <h2 class="h2" id="paths-title">End-to-end encryption</h2>
-        <p class="lede">
-          Encrypted between the two machines: direct when it can be, through a relay that cannot read it when not.
-        </p>
-      </header>
-      <Lanes
-        lanes={[directLane, relayLane]}
-        caption="Direct: laptop to studio, end-to-end encrypted. Relayed: laptop to relay to studio, still end-to-end encrypted."
-      />
-    </div>
-  </section>
-
-  <section class="section section-tint" aria-labelledby="names-title">
-    <div class="wrap cols">
-      <div class="stack">
-        <h2 class="h2" id="names-title">Names and certificates</h2>
-        <div class="prose">
-          <p>Give a port a name you will remember. The name grants nothing by itself; it only works while you are allowed to reach that port.</p>
-          <p>
-            When something is slow, <code>pb ping</code> tells you whether the two machines found a direct path. <code>pb relay list</code> shows
-            the relays you can use; the console's Network page adds their latency.
-          </p>
+      <h2 class="visually-hidden" id="details-title">Details</h2>
+      <div class="points points-3">
+        <div>
+          <h3 class="h3">Real HTTPS</h3>
+          <p>Your browser trusts the certificate, so cookies, logins and service workers behave.</p>
+        </div>
+        <div>
+          <h3 class="h3">Nothing published</h3>
+          <p>No port opens on the internet. The traffic is encrypted between your two machines.</p>
+        </div>
+        <div>
+          <h3 class="h3">Works next to your VPN</h3>
+          <p>No network adapter and no DNS change, so it never gets in the way of anything else.</p>
         </div>
       </div>
-      <Sheet steps={names} />
     </div>
   </section>
 </Feature>

@@ -1,67 +1,35 @@
 ---
+import { Image } from "astro:assets"
 import Feature from "../../layouts/Feature.astro"
-import Sheet from "../../components/Sheet.astro"
-import Lanes from "../../components/Lanes.astro"
+import Beat from "../../components/Beat.astro"
+import Term from "../../components/Term.astro"
+import previews from "../../assets/console/previews.png"
 import { previewDomain } from "../../site"
-import { publicLane } from "../../diagrams"
-
-const hero = [
-  {
-    lines: ["$ pb preview 3000", "Preview ready", `https://quiet-river-lantern-4821.${previewDomain} -> http://127.0.0.1:3000`, "", "Press Ctrl+C to stop"],
-    note: "The link works at once: until your app answers on port 3000 it shows “App not responding”.",
-  },
-]
-
-const targets = [
-  { lines: ["$ pb preview 3000"], note: "A port on this machine." },
-  { lines: ["$ pb preview http://127.0.0.1:8080"], note: "A full origin URL." },
-  { lines: ["$ pb preview ./dist"], note: "A folder of static files. Dotfiles and directory listings are not served." },
-  { lines: ["$ pb preview unix:///tmp/app.sock"], note: "A Unix socket." },
-]
-
-const who = [
-  ["pb preview 3000", "Anyone with the link. No account, no Paperboat on their side."],
-  ["pb preview 3000 --private", "Only you, from machines signed in to your account. Everyone else is refused."],
-  ["pb preview 3000 --team", "Teammates you granted this preview to, from their own signed-in machines."],
-]
-
-const life = [
-  ["In the foreground", "Until you press Ctrl+C. Press <kbd>b</kbd> to hand it to the background, or <kbd>t</kbd> to turn it into a tunnel."],
-  ["--ttl 2h", "Stops by itself after the time you give."],
-  ["--background", "Returns your prompt. Lasts 30 minutes unless you set <code>--ttl</code>, up to 24 hours. Keeps its address through a Paperboat restart or update."],
-  ["After a reboot", "Gone. A preview is never restored after a reboot; that is what a <a href=\"/features/tunnels/\">tunnel</a> is for."],
-]
-
-const inspect = [
-  { lines: ["$ pb preview inspect <preview> --enable --body"], note: "Start recording requests, with bodies." },
-  { lines: ["$ pb preview inspect <preview>"], note: "List what came in: method, path, status, how long it took." },
-  { lines: ["$ pb preview replay <preview> <capture-id>"], note: "Send one recorded request to your app again." },
-]
 
 const faq = [
   {
-    q: "Is this an ngrok alternative?",
-    a: 'For sharing a local port over HTTPS, yes: one command, a stable generated address, request inspection and replay. ngrok does much more on the gateway side (traffic policies, OAuth in front of your app, load balancing). The <a href="/compare/ngrok/">comparison</a> has the feature table and both price lists.',
+    q: "What does the address look like?",
+    a: `Three words and four digits under ${previewDomain}, made for you and never given to anyone else. It stays the same while the preview runs. For a name of your own, add <code>--domain demo.example.com</code> on a domain you added.`,
   },
   {
-    q: "Is a preview end-to-end encrypted?",
-    a: "No, and it cannot be: visitors use a normal browser, so their HTTPS ends at our edge, which then forwards the request to your machine over an encrypted connection. Use private access when both ends are your own machines.",
-  },
-  {
-    q: "What does the address look like, and does it change?",
-    a: `Three words and four digits under ${previewDomain}, generated for you and never reused for anyone else. It stays the same for the life of the preview. For a name of your own, add <code>--domain demo.example.com</code> under a domain you verified.`,
+    q: "How long does a preview last?",
+    a: "Until you press Ctrl+C, or for the time you give with <code>--ttl 2h</code>. In the background it lasts up to 24 hours. For an address that stays, turn it into a <a href=\"/features/tunnels/\">tunnel</a>: press <kbd>t</kbd> while it runs.",
   },
   {
     q: "Do WebSockets and HTTP/3 work?",
     a: "Yes. Previews carry HTTP/1.1, HTTP/2, HTTP/3 and WebSocket, including large uploads and downloads.",
   },
   {
-    q: "How many previews can I run?",
-    a: "100 previews and tunnels at once on Free, 1,000 on Pro, no limit on Team. Stopped ones do not count. Requests through our edge use your plan's bandwidth: 5 GB a month on Free.",
+    q: "My dev server refuses the public name. What now?",
+    a: 'Vite, Next.js, Django and most proxies check the host name. <a href="/docs/put-any-server-behind-paperboat/">Put any server behind Paperboat</a> has the one setting each needs.',
   },
   {
-    q: "Where are inspected requests stored?",
-    a: "On your machine, in a bounded buffer. The console reads them from your machine over an end-to-end encrypted channel; our servers never hold them.",
+    q: "How many previews can I run?",
+    a: "100 previews and tunnels at once on Free, 1,000 on Pro, and no limit on Team.",
+  },
+  {
+    q: "Where are inspected requests kept?",
+    a: "On your own machine. The console reads them from there over an encrypted connection.",
   },
 ]
 ---
@@ -70,81 +38,68 @@ const faq = [
   slug="previews"
   title="Share localhost over HTTPS | Paperboat"
   description="Give localhost a public HTTPS link in one command, with an inspector to see and replay every request."
-  headline="Share a local port over HTTPS"
+  headline="Put localhost on a public link"
   faq={faq}
   related={["tunnels", "private-access", "self-hosting"]}
   compare={["ngrok", "cloudflare-tunnel", "vscode-tunnels"]}
 >
-  <p slot="lede">
-    One command puts the app on your machine at a public address. Stop the command and the link is gone.
-    A dev server that refuses the public name? <a href="/docs/put-any-server-behind-paperboat/">Put any server behind Paperboat</a>.
-  </p>
-  <Sheet slot="aside" steps={hero} />
+  <p slot="lede">One command gives the app on your machine a public HTTPS address. Send the link, get feedback, press Ctrl+C when you're done.</p>
+  <Term
+    slot="aside"
+    lines={["$ pb preview 3000", "Preview ready", `https://quiet-river-lantern-4821.${previewDomain}`, "", "Press Ctrl+C to stop"]}
+  />
 
-  <section class="section section-tint" aria-labelledby="who-title">
+  <Beat id="see-title" title="See every request" wide>
+    <p>Every request that reaches your app is kept on your machine. Look inside one, or send it again while you fix the bug.</p>
+    <figure slot="visual" class="shot">
+      <Image src={previews} alt="The console's Previews page: three live previews on macbook, studio and staging, one visible only to its owner." widths={[1136, 2272]} sizes="1136px" format="png" />
+    </figure>
+  </Beat>
+
+  <Beat id="who-title" title="Public, private or team">
+    <p>Share with anyone who has the link, or only with yourself or your team, signed in on their own machines.</p>
+    <Term slot="visual" lines={["$ pb preview 3000", "# anyone with the link", "$ pb preview 3000 --private", "# only you", "$ pb preview 3000 --team", "# you and your teammates"]} />
+  </Beat>
+
+  <Beat id="what-title" title="A port, a folder or a socket" flip>
+    <p>Share a running app, a folder of static files from a build, or a Unix socket.</p>
+    <Term slot="visual" lines={["$ pb preview 8080", "$ pb preview ./dist", "$ pb preview unix:///tmp/app.sock"]} />
+  </Beat>
+
+  <section class="section section-rule" aria-labelledby="details-title">
     <div class="wrap">
-      <header class="section-head">
-        <h2 class="h2" id="who-title">Access and expiry</h2>
-        <p class="lede">A link is public unless you say otherwise. Both choices are a flag on the same command.</p>
-      </header>
-      <div class="cols cols-even">
-        <table class="facts">
-          <thead><tr><th scope="col">You run</th><th scope="col">Who gets in</th></tr></thead>
-          <tbody>
-            {who.map(([command, text]) => <tr><th scope="row"><code>{command}</code></th><td>{text}</td></tr>)}
-          </tbody>
-        </table>
-        <table class="facts">
-          <thead><tr><th scope="col">How you run it</th><th scope="col">How long it lives</th></tr></thead>
-          <tbody>
-            {life.map(([name, text]) => <tr><th scope="row">{name.startsWith("--") ? <code>{name}</code> : name}</th><td set:html={text} /></tr>)}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  </section>
-
-  <section class="section" aria-labelledby="targets-title">
-    <div class="wrap cols">
-      <div class="stack">
-        <h2 class="h2" id="targets-title">What a preview can serve</h2>
-        <div class="prose">
-          <p>A dev server, a built site, a socket. Run <code>pb preview</code> with no argument and it walks you through the choices.</p>
-          <p>
-            <code>pb preview list</code> shows what is running and <code>pb preview stop</code> ends one. The console shows the same list, with
-            each preview's expiry time.
-          </p>
+      <h2 class="visually-hidden" id="details-title">Details</h2>
+      <div class="points points-3">
+        <div>
+          <h3 class="h3">Live at once</h3>
+          <p>The link works at once, even before your app has started.</p>
+        </div>
+        <div>
+          <h3 class="h3">Stops on its own</h3>
+          <p><code>--ttl 2h</code> ends the preview after two hours, so nothing stays open by mistake.</p>
+        </div>
+        <div>
+          <h3 class="h3">Becomes a tunnel</h3>
+          <p>Press <kbd>t</kbd> and the preview becomes a <a href="/features/tunnels/">permanent address</a>.</p>
         </div>
       </div>
-      <Sheet steps={targets} />
-    </div>
-  </section>
-
-  <section class="section section-tint" aria-labelledby="inspect-title">
-    <div class="wrap cols cols-flip">
-      <div class="stack">
-        <h2 class="h2" id="inspect-title">Request inspector</h2>
-        <div class="prose">
-          <p>
-            Turn on capture and every request is kept on your machine, headers and bodies included. Replay one after you fix the handler.
-          </p>
-          <p>The <a href="/features/console/">web console</a> shows the same list live. Free on every plan.</p>
-        </div>
-      </div>
-      <Sheet steps={inspect} />
-    </div>
-  </section>
-
-  <section class="section" aria-labelledby="path-title">
-    <div class="wrap">
-      <header class="section-head">
-        <h2 class="h2" id="path-title">Where the encryption ends</h2>
-        <p class="lede">
-          HTTPS ends at our edge, which routes the request to your machine, encrypted.
-          <a href="/features/self-hosting/">Run your own edge</a> to own that step.
-        </p>
-      </header>
-      <Lanes lanes={[publicLane]} caption="Any browser connects over HTTPS to the edge. The edge forwards the request to your machine over an encrypted connection." />
     </div>
   </section>
 </Feature>
+
+<style>
+  .shot {
+    border-radius: 12px;
+    overflow: hidden;
+    background: var(--paper);
+    box-shadow:
+      0 0 0 1px rgb(20 20 20 / 0.08),
+      0 24px 48px -32px rgb(20 20 20 / 0.18);
+  }
+
+  .shot :global(img) {
+    display: block;
+    width: 100%;
+    height: auto;
+  }
+</style>

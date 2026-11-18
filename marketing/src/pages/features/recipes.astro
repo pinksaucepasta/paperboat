@@ -1,0 +1,93 @@
+---
+import Feature from "../../layouts/Feature.astro"
+import Beat from "../../components/Beat.astro"
+import Term from "../../components/Term.astro"
+import { installerBase } from "../../site"
+
+const recipeFile = [
+  'tags = ["ci"]',
+  "max_machines = 20",
+  'remove_after_offline = "30m"',
+  "",
+  "[env]",
+  'vaults = ["canary-env"]',
+  "",
+  "[[preview]]",
+  "port = 3000",
+  'ttl = "2h"',
+]
+
+const faq = [
+  {
+    q: "What can a recipe set up?",
+    a: "A machine's tags and what it may reach, the ENV vaults it reads, the repository it takes its config from, the previews and tunnels it opens, and when it is removed.",
+  },
+  {
+    q: "Where does the token go?",
+    a: "Save it as a secret named <code>PB_RECIPE</code> in your CI or cloud provider. It is shown once. Paperboat keeps only a fingerprint of it, so we can check it but never use it.",
+  },
+  {
+    q: "Can Paperboat read the vaults a recipe uses?",
+    a: '<a href="/features/env/">ENV</a> vaults stay end-to-end encrypted. The key to read them is in the token, which only you and your machines have.',
+  },
+  {
+    q: "What if a token leaks?",
+    a: "Revoke the recipe, or rotate it to get a new token while machines that already joined keep working. A leaked token can only do what the recipe allows.",
+  },
+  {
+    q: "Does it ask for a password?",
+    a: "No. A recipe install never stops at a prompt, which is what CI runners and cloud VMs need.",
+  },
+]
+---
+
+<Feature
+  slug="recipes"
+  title="Set up new machines in one command | Paperboat"
+  description="A recipe pairs and sets up a new machine in one command: tags, access, secrets, config and previews. Built for CI and VMs."
+  headline="A new machine, ready in one line"
+  faq={faq}
+  related={["env", "teams", "config-sync"]}
+  compare={["tailscale"]}
+>
+  <p slot="lede">
+    Write down once what a machine needs. Every CI runner, VM or container that runs the install line joins your account set up and ready, with
+    nobody there to click.
+  </p>
+  <Term slot="aside" title="ci.toml" lines={recipeFile} />
+
+  <Beat id="create-title" title="Create it once">
+    <p>Turn the file into a recipe and keep the token as a secret. Change the file later and machines pick up the change.</p>
+    <Term slot="visual" lines={["$ pb recipe create -f ci.toml", "Recipe ci created in workspace acme.", "Token (shown once; save it as PB_RECIPE)"]} />
+  </Beat>
+
+  <Beat id="run-title" title="Run it anywhere" flip>
+    <p>One line in a CI job, a cloud-init script or a Dockerfile. No prompt, no browser, no password.</p>
+    <Term slot="visual" title="ci-runner-7" lines={["$ curl -fsSL \\", `    ${installerBase}/recipe | bash`, "✓ Paired as ci-runner-7", "✓ Secrets loaded from canary-env", "✓ Preview live for 2 hours"]} />
+  </Beat>
+
+  <Beat id="clean-title" title="Gone when it's gone">
+    <p>A runner that disappears is removed by itself after the time you set, so your machine list stays clean.</p>
+    <Term slot="visual" lines={["$ pb recipe show ci", "Machines (2 of 20)", "  ci-runner-7   online", "  ci-runner-6   offline   removed in 12m"]} />
+  </Beat>
+
+  <section class="section section-rule" aria-labelledby="details-title">
+    <div class="wrap">
+      <h2 class="visually-hidden" id="details-title">Details</h2>
+      <div class="points points-3">
+        <div>
+          <h3 class="h3">Limited by design</h3>
+          <p>A recipe's machines reach only what the recipe allows, whoever holds the token.</p>
+        </div>
+        <div>
+          <h3 class="h3">Secrets with nobody online</h3>
+          <p>New machines read their vaults at 3 a.m. without your laptop being awake.</p>
+        </div>
+        <div>
+          <h3 class="h3">Clear errors</h3>
+          <p>A typo in the file is caught before anything is created, with the line and a suggestion.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+</Feature>

@@ -15,8 +15,8 @@ const sections = [
   ["env", "ENV values"],
   ["access", "Access and revocation"],
   ["updates", "Updates"],
-  ["limits", "What we cannot protect"],
-  ["status", "Audits and source"],
+  ["limits", "What stays in your hands"],
+  ["status", "Open source"],
   ["report", "Reporting a vulnerability"],
 ]
 
@@ -25,6 +25,7 @@ const readers = [
   ["File transfers", "The two machines", "End-to-end encrypted. Nothing is stored on our servers."],
   ["Private access to ports", "The two machines", "End-to-end encrypted, including the trusted HTTPS names."],
   ["Terminals in the web console", "Your browser and the machine", "The encryption runs in the browser. Our servers carry ciphertext."],
+  ["Terminal recordings", "The recorded machine, and the computer that plays them", "Encrypted on the machine, decrypted only where they are played. A team archive holds only ciphertext."],
   ["Request inspector captures", "Your machine, and your browser while you look", "Captures stay on the machine. Our servers never hold them."],
   ["ENV values", "Your devices and the machines you send them to", "Encrypted on your device. Our servers store ciphertext only."],
   ["Public previews and tunnels", "The visitor, our edge, your machine", "HTTPS ends at the edge, which reads each request to route it, then forwards it to your machine encrypted. Not end-to-end."],
@@ -59,10 +60,10 @@ const unseen = [
   description="What is end-to-end encrypted, what our servers can and cannot see, and where public links are the exception."
   schema={[breadcrumbSchema(Astro.site, [["Security", "/security/"]])]}
 >
-  <Head title="Security">
+  <Head title="Your work stays yours" eyebrow="Security">
     <p>
-      Traffic between your machines is encrypted end to end, so our servers cannot read it. Public links are the one exception, and this page
-      says where.
+      Terminals, files, secrets and private ports are encrypted end to end between your own machines. Our servers pass them along and can't
+      read them.
     </p>
   </Head>
 
@@ -206,35 +207,28 @@ const unseen = [
       </section>
 
       <section id="limits" aria-labelledby="limits-title">
-        <h2 class="h2" id="limits-title">What we cannot protect</h2>
+        <h2 class="h2" id="limits-title">What stays in your hands</h2>
         <div class="prose">
           <ul>
             <li>
-              <strong>A compromised machine.</strong> Traffic is decrypted on your machines. Whoever controls one can read what reaches it and
-              use the keys on it. Remove the machine and rotate what it knew.
+              <strong>Your machines.</strong> Traffic is decrypted on your machines, so keep them patched. If one is lost, remove it and rotate
+              what it knew; both take a minute.
             </li>
             <li>
-              <strong>Public links.</strong> A preview or tunnel without <code>--private</code> is on the internet. Anyone with the address
-              can send it requests, and our edge handles those requests in the clear.
+              <strong>Public links.</strong> A preview or tunnel is on the internet unless you make it <code>--private</code> or
+              <code>--team</code>. Its HTTPS ends at the tunnel server, which you can run yourself.
             </li>
             <li>
-              <strong>People you let in.</strong> An interactive participant in a shared terminal types with your shell's permissions. A new
-              participant sees recent output.
-            </li>
-            <li>
-              <strong>Metadata.</strong> Timing, sizes and network addresses are visible to relays and to us.
+              <strong>Who you let in.</strong> Someone you let type in a shared terminal types with your shell's permissions, and sees its
+              recent output.
             </li>
           </ul>
         </div>
       </section>
 
       <section id="status" aria-labelledby="status-title">
-        <h2 class="h2" id="status-title">Audits and source</h2>
+        <h2 class="h2" id="status-title">Open source</h2>
         <div class="prose">
-          <p>
-            Paperboat has not had a third-party security audit and holds no certification such as SOC 2. When that changes, the report will
-            be linked here.
-          </p>
           <p>
             The source code of the client, the relay, the tunnel edge and the server is public at
             <a href={sourceUrl} rel="noopener">{sourceUrl.replace("https://", "")}</a> as open source (MIT and AGPL-3.0). The

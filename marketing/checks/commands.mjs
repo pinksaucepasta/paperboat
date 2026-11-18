@@ -46,12 +46,17 @@ const invocations = (line) => {
 /** Every command on a page: whole lines of a transcript or a listing, and commands named in prose. */
 function commandsOn(html) {
   const found = []
-  for (const [, block] of html.matchAll(/<pre[^>]*>([\s\S]*?)<\/pre>/g))
+  for (const [, block] of html.matchAll(/<pre[^>]*>([\s\S]*?)<\/pre>/g)) {
+    // A command continued with a trailing backslash is one command over several lines.
+    const lines = []
     for (const raw of block.split("\n")) {
       const prompt = raw.match(/<span class="p">([^<]*)<\/span> <span class="r">([\s\S]*?)<\/span>$/)
       const text = prompt ? (prompt[1] === "$" ? unescape(prompt[2]) : "") : unescape(raw).trim()
-      for (const argv of invocations(text.replace(/^\$ /, ""))) found.push({ argv, whole: true, text })
+      if (lines.length && lines.at(-1).endsWith("\\")) lines[lines.length - 1] = lines.at(-1).slice(0, -1).trimEnd() + " " + text
+      else lines.push(text)
     }
+    for (const text of lines) for (const argv of invocations(text.replace(/^\$ /, ""))) found.push({ argv, whole: true, text })
+  }
   const prose = html.replace(/<pre[^>]*>[\s\S]*?<\/pre>/g, "")
   for (const [, inner] of prose.matchAll(/<code[^>]*>([^<]*)<\/code>/g)) {
     const text = unescape(inner).trim()
@@ -132,7 +137,7 @@ export function checkCommands(pages, fail, { pb, repo }) {
       for (const flag of info.flags) if (flag.required && !given.has(flag.name)) wrong(`${path} requires --${flag.name}`)
       // "<path>... --to <machine>": a placeholder right after a flag is that flag's value, not an argument.
       const usage = info.usage.slice(path.length).split(/\s+/)
-      const needed = usage.filter((part, index) => part.includes("<") && !part.startsWith("[") && !/^--\w/.test(usage[index - 1] ?? "")).length
+      const needed = usage.filter((part, index) => part.includes("<") && !part.startsWith("[") && !/^-{1,2}\w/.test(usage[index - 1] ?? "")).length
       if (positional.length < needed) wrong(`${path} needs ${needed} argument(s): ${info.usage}`)
       const missing = enforcedInCode[path]?.(given)
       if (missing) wrong(`${path} ${missing}`)

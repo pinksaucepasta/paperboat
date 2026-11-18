@@ -1,51 +1,29 @@
 ---
 import Feature from "../../layouts/Feature.astro"
-import Sheet from "../../components/Sheet.astro"
+import Beat from "../../components/Beat.astro"
+import Term from "../../components/Term.astro"
 import { localDomain } from "../../site"
-
-const hero = [
-  { lines: ["$ pb ssh studio"], note: "OpenSSH, to the machine's own sshd. No key was copied anywhere by hand." },
-  { lines: [`$ ssh studio.${localDomain}`], note: "Plain ssh works too, through a host name pb adds to your SSH config." },
-  { lines: ["$ pb rsync -a ./site/ studio:/srv/site/", "$ pb scp studio:/var/log/app.log .", "$ pb sftp studio"], note: "The usual tools, with machine names where host names go." },
-]
-
-const tools = [
-  { lines: [`$ code --remote ssh-remote+studio.${localDomain} /srv/api`], note: "VS Code Remote-SSH. Cursor works the same way." },
-  { lines: [`$ git clone studio.${localDomain}:repos/app.git`], note: "Git over SSH, from a machine with no public address." },
-  { lines: [`$ rsync -a ./site/ studio.${localDomain}:/srv/site/`], note: "Plain rsync in a cron job or a Makefile." },
-]
-
-const details = [
-  ["What runs on the machine", "The system's own sshd. Paperboat carries the connection and manages one key for it; it is not a replacement SSH server."],
-  ["Open ports", "None. sshd does not need to listen on a public address, and the machine needs no public IP."],
-  ["Host keys", "Verified as usual. If a machine's key changes, pb stops and tells you; <code>pb ssh trust-host</code> accepts the new one on purpose."],
-  ["Other users on the machine", "<code>pb ssh bob@studio</code> works under the same access rules. Paperboat provides the path; bob's own authentication still applies."],
-  ["Port and agent forwarding", "Whatever the machine's sshd allows. X11 forwarding is never requested."],
-  ["When our servers are unreachable", "Machines that already know each other still open new SSH sessions. A user removed before the outage stays refused."],
-  ["Revoking access", "Removing a person's access ends their open SSH sessions within seconds, and their client says access was revoked."],
-  ["Audit", "Each session's start and end, with who, which machine and how many bytes, appears in the audit log."],
-]
 
 const faq = [
   {
     q: "Do I still need SSH keys?",
-    a: "Not to manage. Paperboat creates and rotates the key it uses and installs it on machines you may reach. You never edit authorized_keys or hand a public key to a colleague.",
+    a: "Not to manage. Paperboat creates and rotates the key it uses and installs it on the machines you may reach. You never edit authorized_keys or send a public key to a colleague.",
   },
   {
     q: "Does VS Code Remote-SSH work?",
-    a: `Yes. Connect to the generated host name, for example <code>studio.${localDomain}</code>. Cursor, Zed and anything else that reads your SSH config work the same way.`,
+    a: `Yes. Connect to the machine's host name, for example <code>studio.${localDomain}</code>. Cursor, Zed and anything else that reads your SSH config work the same way.`,
   },
   {
-    q: "How is this different from Tailscale SSH?",
-    a: 'With Tailscale SSH, Tailscale itself answers SSH on your tailnet, and it has clients for phones. Paperboat keeps your machine\'s sshd and adds terminals that survive disconnects. The <a href="/compare/tailscale/">comparison</a> has the details.',
+    q: "Does it replace my SSH server?",
+    a: "No, it uses it. Paperboat carries the connection to the machine's own sshd, which never needs to listen on a public address.",
   },
   {
-    q: "What do I see when it fails?",
-    a: "A reason in plain words instead of OpenSSH's \"Connection closed\": no access, machine offline, SSH not set up, Paperboat unreachable, or the machine's sshd refusing. <code>pb ssh doctor studio</code> checks each step.",
+    q: "What do I see when something is wrong?",
+    a: "The reason in plain words: no access, machine offline, SSH not set up, or sshd refusing. <code>pb ssh doctor studio</code> checks each step for you.",
   },
   {
-    q: "How fast is it to connect?",
-    a: "Between two machines that have talked before, a shell is ready in under a second in our device checks. No request to our servers is needed per connection.",
+    q: "How fast does it connect?",
+    a: "Between two machines that have talked before, a shell is ready in under a second.",
   },
 ]
 ---
@@ -53,44 +31,42 @@ const faq = [
 <Feature
   slug="ssh"
   title="SSH without keys or open ports | Paperboat"
-  description="SSH into any of your machines, even behind NAT. Works with ssh, scp, rsync and VS Code. No keys, no open ports."
-  headline="SSH without keys or open ports"
+  description="ssh, scp, sftp and rsync to every machine, with the keys handled for you and no port open on the internet."
+  headline="SSH without the keys"
   faq={faq}
   related={["terminal", "files", "teams"]}
-  compare={["tailscale", "teleport", "ssh-bastion"]}
+  compare={["ssh-bastion", "teleport", "tailscale"]}
 >
-  <p slot="lede">
-    Your machines keep their own sshd. Paperboat gets you to it from anywhere, through NAT, and takes over the key chores. Every tool built on SSH
-    keeps working.
-  </p>
-  <Sheet slot="aside" steps={hero} />
+  <p slot="lede">ssh, scp, sftp and rsync to every machine you own. Paperboat handles the keys, and no port is open to the internet.</p>
+  <Term slot="aside" lines={["$ pb ssh studio", "ana@studio:~$", "", "$ pb rsync -a ./site/ studio:/srv/site/", "$ pb scp studio:app.log ."]} />
 
-  <section class="section section-tint" aria-labelledby="details-title">
+  <Beat id="tools-title" title="Your tools just work">
+    <p>Every machine gets an SSH host name. VS Code, Cursor, Git and plain rsync use it like any other server.</p>
+    <Term slot="visual" lines={[`$ ssh studio.${localDomain}`, `$ git clone studio.${localDomain}:app.git`, "# VS Code: Remote-SSH, then studio"]} />
+  </Beat>
+
+  <Beat id="access-title" title="Access you can take back" flip>
+    <p>Give a teammate SSH to one machine. Take it away, and their open sessions end within seconds.</p>
+    <Term slot="visual" lines={["$ pb ssh maya@staging", "Connected to staging", "# later: access removed", "Connection closed: access revoked"]} />
+  </Beat>
+
+  <section class="section section-rule" aria-labelledby="details-title">
     <div class="wrap">
-      <header class="section-head">
-        <h2 class="h2" id="details-title">What changes from plain SSH</h2>
-        <p class="lede">SSH is something you already trust. This is exactly where Paperboat sits in it.</p>
-      </header>
-      <table class="facts">
-        <tbody>
-          {details.map(([name, text]) => <tr><th scope="row">{name}</th><td set:html={text} /></tr>)}
-        </tbody>
-      </table>
-    </div>
-  </section>
-
-  <section class="section" aria-labelledby="editor-title">
-    <div class="wrap cols">
-      <div class="stack">
-        <h2 class="h2" id="editor-title">Works with your editor</h2>
-        <div class="prose">
-          <p>
-            Paperboat adds your machines to your SSH config, so VS Code and Cursor Remote-SSH, Zed, Git, Ansible and <code>rsync</code> reach them.
-          </p>
-          <p>With the <a href="/features/env/">ENV</a> hook installed, those sessions get your secrets too.</p>
+      <h2 class="visually-hidden" id="details-title">Details</h2>
+      <div class="points points-3">
+        <div>
+          <h3 class="h3">No open ports</h3>
+          <p>sshd stays off the internet. The machine needs no public address.</p>
+        </div>
+        <div>
+          <h3 class="h3">Host keys checked</h3>
+          <p>If a machine's key changes, pb stops and tells you before anything is sent.</p>
+        </div>
+        <div>
+          <h3 class="h3">In the audit log</h3>
+          <p>Every session's start and end, with who and which machine.</p>
         </div>
       </div>
-      <Sheet steps={tools} />
     </div>
   </section>
 </Feature>

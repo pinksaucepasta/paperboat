@@ -11,55 +11,63 @@ export type Feature = {
   command: string
   /** Phosphor icon name, shown beside the feature in lists. */
   icon: string
-  group: "Reach your machines" | "Put things online" | "Keep it together"
+  group: "Work on your machines" | "Put things online" | "Set up and share"
 }
 
 export const features: Feature[] = [
   {
     slug: "terminal",
     icon: "terminal-window",
-    name: "Terminal",
-    line: "A shell on the machine that keeps running when you disconnect, and shows what you missed.",
+    name: "Terminals",
+    line: "A shell on any machine that keeps running when you close the laptop.",
     command: "pb connect studio",
-    group: "Reach your machines",
+    group: "Work on your machines",
   },
   {
     slug: "exec",
     icon: "lightning",
     name: "Remote commands",
-    line: "Run one command on another machine and get its output and exit code.",
+    line: "Run a command on another machine and get the result back.",
     command: "pb exec studio -- git status",
-    group: "Reach your machines",
+    group: "Work on your machines",
   },
   {
     slug: "ssh",
     icon: "key",
     name: "SSH",
-    line: "ssh, scp, sftp and rsync with no keys to hand out and no port to open.",
+    line: "ssh, scp and rsync to every machine, with no keys to copy.",
     command: "pb ssh studio",
-    group: "Reach your machines",
+    group: "Work on your machines",
   },
   {
     slug: "files",
     icon: "paper-plane-tilt",
     name: "Files",
-    line: "Send files straight into another machine's Inbox. Interrupted sends resume.",
+    line: "Send files to any machine. They land in its Inbox.",
     command: "pb send ./build.tar.gz --to studio",
-    group: "Reach your machines",
+    group: "Work on your machines",
   },
   {
     slug: "private-access",
     icon: "lock-key",
     name: "Private access",
-    line: "Open a port on another machine as if it were local, without publishing it.",
-    command: "pb access machine studio --port 5432",
-    group: "Reach your machines",
+    line: "An HTTPS address for every port on every machine, just for you.",
+    command: "pb resolve studio",
+    group: "Work on your machines",
+  },
+  {
+    slug: "recordings",
+    icon: "record",
+    name: "Recordings",
+    line: "Record a terminal session and play it back later.",
+    command: "pb recordings play rec_abc123",
+    group: "Work on your machines",
   },
   {
     slug: "previews",
     icon: "globe-simple",
     name: "Previews",
-    line: "A public HTTPS link to a local port, with an inspector to see and replay each request.",
+    line: "Put localhost on a public link in one command.",
     command: "pb preview 3000",
     group: "Put things online",
   },
@@ -67,7 +75,7 @@ export const features: Feature[] = [
     slug: "tunnels",
     icon: "plugs-connected",
     name: "Tunnels and domains",
-    line: "A permanent public address for a service, on your own domain if you want.",
+    line: "A permanent public address for a service, on your own domain.",
     command: "pb tunnel create api --port 8080",
     group: "Put things online",
   },
@@ -75,7 +83,7 @@ export const features: Feature[] = [
     slug: "self-hosting",
     icon: "hard-drives",
     name: "Self-hosting",
-    line: "Run the relay and the tunnel server on your own Linux box.",
+    line: "Run your own relay and tunnel server.",
     command: "pbh status",
     group: "Put things online",
   },
@@ -83,37 +91,45 @@ export const features: Feature[] = [
     slug: "env",
     icon: "vault",
     name: "ENV",
-    line: "Environment variables encrypted on your device and delivered to your machines.",
+    line: "Secrets on every machine, encrypted so only you can read them.",
     command: "pb env run -- npm test",
-    group: "Keep it together",
+    group: "Set up and share",
   },
   {
     slug: "config-sync",
     icon: "arrows-clockwise",
     name: "Config sync",
-    line: "The same dotfiles on every machine, from a Git repository you own.",
+    line: "The same dotfiles on every machine, from your own Git repository.",
     command: "pb config sync apply",
-    group: "Keep it together",
+    group: "Set up and share",
+  },
+  {
+    slug: "recipes",
+    icon: "list-checks",
+    name: "Recipes",
+    line: "Set up a new machine with one command: paired, tagged, ready.",
+    command: "pb recipe create -f ci.toml",
+    group: "Set up and share",
   },
   {
     slug: "teams",
     icon: "users-three",
     name: "Teams and access",
-    line: "Share a machine with people, one capability at a time, with a policy file and an audit log.",
+    line: "Share machines with your team, one permission at a time.",
     command: "pb policy explain",
-    group: "Keep it together",
+    group: "Set up and share",
   },
   {
     slug: "console",
     icon: "browser",
     name: "Web console",
-    line: "Your machines in a browser: terminals, files, previews, access rules and billing.",
+    line: "All your machines, terminals and links in a browser tab.",
     command: "pb machine add",
-    group: "Keep it together",
+    group: "Set up and share",
   },
 ]
 
-export const featureGroups = ["Reach your machines", "Put things online", "Keep it together"] as const
+export const featureGroups = ["Work on your machines", "Put things online", "Set up and share"] as const
 export const feature = (slug: string) => {
   const found = features.find((item) => item.slug === slug)
   if (!found) throw new Error(`features: unknown feature ${slug}`)
@@ -124,16 +140,16 @@ export const useCases = [
   {
     slug: "ai-agents",
     name: "AI agents",
-    line: "Let a coding agent run commands on your other machines, with a token that can do only that.",
+    line: "Give a coding agent your other machines, with a token that can do only what you allow.",
   },
   {
     slug: "homelab",
     name: "Home lab",
-    line: "Reach the server at home from anywhere without forwarding a port on your router.",
+    line: "Reach the server at home from anywhere, with nothing opened on your router.",
   },
   {
     slug: "small-teams",
     name: "Small teams",
-    line: "A shared staging box, review links and team secrets, without running a VPN.",
+    line: "Shared machines, review links and team secrets, in one place.",
   },
 ] as const

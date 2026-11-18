@@ -1,36 +1,24 @@
 ---
 import UseCase from "../../layouts/UseCase.astro"
-import Sheet from "../../components/Sheet.astro"
-
-const hero = [
-  { lines: ["$ pb connect gpu-box", "ana@gpu-box:~/repo$ claude"], note: "Start the agent in a Paperboat terminal on the machine with the code and the GPU." },
-  { lines: ["# close the laptop; the agent keeps working"], note: "The session lives on gpu-box." },
-  { lines: ["$ pb connect gpu-box"], note: "Check on it from another computer, or from the console in a browser." },
-]
-
-const token = [
-  { lines: ["$ pb machine tag build-01 add agents", "$ pb machine tag build-02 add agents"], note: "Mark the machines an agent may touch." },
-  { lines: [`$ pb api-token create agent --expires 7d --scope '[{"dst":["tag:agents"],"allow":["exec","files"]}]'`], note: "A token for exec and files on those machines, for a week. The secret prints once." },
-  { lines: ["$ PAPERBOAT_API_TOKEN=pbat_… pb login"], note: "Where the agent runs. No browser needed." },
-  { lines: ["$ pb policy explain --dst machine:db --action exec --api-token agent"], note: "Confirm what it cannot do before you hand it over." },
-]
+import Beat from "../../components/Beat.astro"
+import Term from "../../components/Term.astro"
 
 const faq = [
   {
-    q: "Does Paperboat sandbox what the agent runs?",
-    a: "No. Paperboat decides which machines and which actions a token can reach. Once a command runs, it has the permissions of the operating-system user it runs as. Use a dedicated user or a container on the target machine for real isolation.",
+    q: "What can an agent's token do?",
+    a: "Only what you put in it: which machines, which actions, for how long. Ask <code>pb policy explain</code> before you hand it over.",
   },
   {
-    q: "Can the agent read my secrets?",
-    a: "It can run commands that receive them, and a command could print its environment, so scope the token and choose the machines with that in mind. What Paperboat adds is that the agent never needs the value in its prompt, its arguments or a file. A workspace owner can also stop commands from listing ENV names.",
+    q: "Does the agent see my secrets?",
+    a: "It never needs a value in its prompt, its arguments or a file. <code>pb env run -- cmd</code> puts the values in that one command's environment.",
   },
   {
     q: "How do I see what an agent did?",
-    a: "The audit log records each action with the token that performed it, the machine, and whether it was allowed. It does not record command output or file contents.",
+    a: "The audit log records each action with the token that did it, the machine, and whether it was allowed. Record its terminal to see every step.",
   },
   {
-    q: "Is there an SDK?",
-    a: "Not yet. Today the interface is the pb command with <code>--json</code>, which is stable enough to build on.",
+    q: "How does an agent learn the commands?",
+    a: "<code>pb COMMAND --help --json</code> describes any command in a form a model can read, and most commands take <code>--json</code>.",
   },
 ]
 ---
@@ -40,60 +28,25 @@ const faq = [
   name="AI agents"
   title="Remote machines for AI coding agents | Paperboat"
   description="Keep coding agents running on your other machines, with scoped, expiring access and secrets they never see."
-  headline="Remote machines for coding agents"
+  headline="Let your agents work on any machine"
   faq={faq}
-  related={["exec", "env", "teams", "terminal"]}
+  related={["exec", "env", "teams", "recordings"]}
 >
-  <p slot="lede">
-    Agents run for hours. Paperboat keeps them running where the work is, with exactly the access you give them.
-  </p>
-  <Sheet slot="aside" steps={hero} />
+  <p slot="lede">Run Claude Code or Codex on the machine with the code and the GPU. It keeps working when you close the laptop, with exactly the access you give it.</p>
+  <Term slot="aside" lines={["$ pb connect gpu-box", "ana@gpu-box:~/repo$ claude", "# close the laptop; the agent keeps going", "$ pb connect gpu-box"]} />
 
-  <section class="section" aria-labelledby="token-title">
-    <div class="wrap">
-      <header class="section-head">
-        <h2 class="h2" id="token-title">Scoped API tokens</h2>
-        <p class="lede">
-          An agent should not inherit everything you can do. Tag the machines, create a token for those tags and those actions, and give it an
-          expiry.
-        </p>
-      </header>
-      <Sheet steps={token} />
-    </div>
-  </section>
+  <Beat id="token-title" title="A token that does one job">
+    <p>Tag the machines an agent may use, give it a token for those machines and those actions, and let it expire in a week.</p>
+    <Term slot="visual" lines={["$ pb machine tag build-01 add agents", "$ pb api-token create agent --expires 7d \\", "    --scope-file agent-scope.json"]} />
+  </Beat>
 
-  <section class="section section-tint" aria-labelledby="shape-title">
-    <div class="wrap">
-      <header class="section-head">
-        <h2 class="h2" id="shape-title">Commands for programs</h2>
-        <p class="lede">The same properties that make pb safe in a shell script make it predictable for a model.</p>
-      </header>
-      <div class="points points-3">
-        <div>
-          <h3 class="h3">No shell in between</h3>
-          <p><code>pb exec studio -- git status</code> runs that argument list exactly. Nothing a model writes is expanded or split a second time.</p>
-        </div>
-        <div>
-          <h3 class="h3">JSON in, exit code out</h3>
-          <p>Commands that return data take <code>--json</code>; <code>pb exec --json</code> streams events and ends with the remote exit status.</p>
-        </div>
-        <div>
-          <h3 class="h3">Says when it does not know</h3>
-          <p>If a connection dies mid-command, the result says the outcome is unknown, so the agent can check before trying again.</p>
-        </div>
-        <div>
-          <h3 class="h3">Secrets by name</h3>
-          <p><code>pb env names</code> lists what exists. <code>pb env run -- cmd</code> puts the values in that command's environment and nowhere else.</p>
-        </div>
-        <div>
-          <h3 class="h3">Help it can read</h3>
-          <p><code>pb COMMAND --help --json</code> describes any command in a structured form, so an agent can discover the interface.</p>
-        </div>
-        <div>
-          <h3 class="h3">You can watch</h3>
-          <p>Share the agent's terminal session and a teammate sees it live. Make them interactive and they can step in.</p>
-        </div>
-      </div>
-    </div>
-  </section>
+  <Beat id="exec-title" title="Commands a model can't get wrong" flip>
+    <p>Arguments arrive exactly as written, the exit code is the real one, and <code>--json</code> turns it all into events a program can read.</p>
+    <Term slot="visual" lines={["$ pb exec build-01 -- make test", "ok   128 tests passed", "$ echo $?", "0"]} />
+  </Beat>
+
+  <Beat id="watch-title" title="Watch it, or step in">
+    <p>Share the agent's terminal and a teammate sees it live. Record it, and replay every step later.</p>
+    <Term slot="visual" lines={["$ pb recordings start", "$ pb session share S12 --team acme --all"]} />
+  </Beat>
 </UseCase>

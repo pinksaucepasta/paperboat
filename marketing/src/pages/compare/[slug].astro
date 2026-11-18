@@ -1,7 +1,8 @@
 ---
 import Page from "../../layouts/Page.astro"
 import Head from "../../components/Head.astro"
-import Sheet from "../../components/Sheet.astro"
+import Term from "../../components/Term.astro"
+import Icon from "../../components/Icon.astro"
 import CompareTable from "../../components/CompareTable.astro"
 import Faq from "../../components/Faq.astro"
 import Closing from "../../components/Closing.astro"
@@ -14,7 +15,6 @@ export function getStaticPaths() {
 const { product } = Astro.props
 const title = `Paperboat vs ${product.label}`
 const others = products.filter((item) => item.slug !== product.slug)
-const sheet = (text: string) => [{ lines: text.split("\n") }]
 const schema = [
   breadcrumbSchema(Astro.site, [["Compare", "/compare/"], [product.label, `/compare/${product.slug}/`]]),
   faqSchema(product.faq),
@@ -23,27 +23,29 @@ const schema = [
 
 <Page
   title={`${title}: differences and pricing`}
-  description={`How Paperboat and ${product.label} differ, what each costs and when to pick which, sourced from their own docs.`}
+  description={`What changes when you move from ${product.label} to Paperboat, and what each costs, with sources.`}
   schema={schema}
 >
-  <Head title={title} trail={[["Compare", "/compare/"]]} here={product.label}>
+  <Head title={product.headline} eyebrow={title} eyebrowHref="/compare/" actions>
     <p>{product.summary}</p>
-    <p class="small">Checked against {product.label}'s own documentation and pricing, {checked}. Sources are listed under the table.</p>
-    <div class="verdict" slot="aside">
-      <div>
-        <h2 class="h3">Choose {product.label} when</h2>
-        <ul>{product.chooseThem.map((point) => <li>{point}</li>)}</ul>
-      </div>
-      <div>
-        <h2 class="h3">Choose Paperboat when</h2>
-        <ul>{product.chooseUs.map((point) => <li>{point}</li>)}</ul>
-      </div>
+    <div class="gains" slot="aside">
+      <h2 class="gains-title">What you get with Paperboat</h2>
+      <ul>
+        {
+          product.gains.map((gain) => (
+            <li>
+              <Icon name="check" size={16} class="gain-icon" />
+              {gain}
+            </li>
+          ))
+        }
+      </ul>
     </div>
   </Head>
 
   <section class="section section-tint" aria-labelledby="differences-title">
     <div class="wrap">
-      <h2 class="h2 differences-title" id="differences-title">Where they differ</h2>
+      <h2 class="h2 differences-title" id="differences-title">What changes when you move</h2>
       <div class="differences">
         {
           product.differences.map((difference) => (
@@ -58,8 +60,8 @@ const schema = [
               </div>
               {(difference.them || difference.us) && (
                 <div class="stack">
-                  {difference.them && <Sheet steps={sheet(difference.them)} where={product.label} />}
-                  {difference.us && <Sheet steps={sheet(difference.us)} where="Paperboat" />}
+                  {difference.them && <Term lines={difference.them.split("\n")} title={product.label} />}
+                  {difference.us && <Term lines={difference.us.split("\n")} title="Paperboat" />}
                 </div>
               )}
             </article>
@@ -74,8 +76,8 @@ const schema = [
       <header class="section-head">
         <h2 class="h2" id="table-title">Feature by feature</h2>
         <p class="lede">
-          Every answer in the {product.label} column carries a number that links to the page of theirs that says it.
-          <a href={`/compare/?vs=${product.slug}`}>Put a second tool beside it</a>
+          Every answer about {product.label} links to its source, checked {checked}.
+          <a href={`/compare/?vs=${product.slug}`}>Add a second tool</a>
         </p>
       </header>
       <CompareTable products={[product]} picked={[product.slug]} />
@@ -104,7 +106,7 @@ const schema = [
 
   <section class="section" aria-labelledby="switching-title">
     <div class="wrap cols">
-      <h2 class="h2" id="switching-title">Switching</h2>
+      <h2 class="h2" id="switching-title">Moving to Paperboat</h2>
       <ol class="steps">{product.switching.map((step) => <li>{step}</li>)}</ol>
     </div>
   </section>
@@ -124,21 +126,45 @@ const schema = [
 </Page>
 
 <style>
-  .verdict {
+  .gains {
     display: grid;
-    gap: var(--s6);
-    padding: clamp(20px, 3vw, 32px);
-    border-radius: var(--radius);
+    gap: var(--s4);
+    padding: clamp(24px, 3vw, 36px);
+    border-radius: var(--radius-lg);
     background: var(--paper);
-    box-shadow: 0 0 0 1px var(--rule);
+    box-shadow:
+      0 0 0 1px var(--rule),
+      0 24px 48px -32px rgb(20 20 20 / 0.18);
   }
 
-  .verdict > div {
+  .gains-title {
+    font-size: var(--text-ui);
+    font-weight: 500;
+    color: var(--fog);
+  }
+
+  .gains ul {
     display: grid;
-    gap: var(--s3);
+    border-top: 1px solid var(--rule);
   }
 
-  .verdict ul,
+  .gains li {
+    display: flex;
+    gap: var(--s3);
+    align-items: baseline;
+    padding-block: var(--s4);
+    border-bottom: 1px solid var(--rule);
+    font-size: var(--text-body);
+    color: var(--ink);
+  }
+
+  .gains li :global(.gain-icon) {
+    flex-shrink: 0;
+    position: relative;
+    top: 2px;
+    color: var(--cobalt);
+  }
+
   .lines {
     display: grid;
     font-size: var(--text-ui);
@@ -147,7 +173,6 @@ const schema = [
     border-top: 1px solid var(--rule);
   }
 
-  .verdict li,
   .lines li {
     padding-block: var(--s3);
     border-bottom: 1px solid var(--rule);

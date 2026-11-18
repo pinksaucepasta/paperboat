@@ -197,14 +197,14 @@ export const paperboat = {
     tunnel_permanent: ["Yes, names that stay"],
     tunnel_domains: ["Yes, on every plan"],
     tunnel_protocols: ["HTTP/1.1, HTTP/2, HTTP/3, WebSocket, raw TCP"],
-    private_network: ["TCP ports and private names; not a full network"],
+    private_network: ["Every port by name, with HTTPS"],
     encryption_native: ["End to end; direct when possible"],
     encryption_public: ["TLS ends at Paperboat's edge"],
     teams: ["Yes, five roles; SSO and SCIM from 10 seats"],
     access_rules: ["Yes, a policy file with groups, tags and deny rules"],
     api_tokens: ["Yes, scoped API tokens that expire"],
     selfhost: ["Relays and tunnel servers"],
-    platforms: ["Linux, macOS and Windows; no mobile apps"],
+    platforms: ["Linux, macOS and Windows"],
     pricing_model: ["By relay and edge bandwidth; Team per seat"],
     free_tier: ["Every feature for personal use, 5 GB a month"],
   }),
@@ -225,11 +225,15 @@ export type Product = {
   name: string
   /** Column heading on /compare. */
   label: string
+  /** One line on what moving to Paperboat gets you, for lists of comparisons. */
+  tagline: string
+  /** The page's h1: what you get, in a few words. */
+  headline: string
   summary: string
+  /** What Paperboat gives you that you'd want coming from this product, a few words each. */
+  gains: string[]
   cells: Cells
   differences: Difference[]
-  chooseThem: string[]
-  chooseUs: string[]
   pricing: { lines: string[]; source: string }
   switching: string[]
   faq: { q: string; a: string }[]
@@ -375,8 +379,16 @@ export const products: Product[] = [
     slug: "tailscale",
     name: "Tailscale",
     label: "Tailscale",
+    tagline: "Reach your machines, then work on them: terminals, files, secrets and previews.",
+    headline: "Reach your machines, then get to work",
     summary:
-      "Tailscale connects your devices into one private WireGuard network, with detailed access rules and clients for every platform. Paperboat also connects your machines privately, but it is built around working on them: terminals that survive disconnects, SSH and files, encrypted environment variables, previews and tunnels.",
+      "Tailscale connects your devices into one private network. Paperboat connects your machines too, and gives you what you do once you're there: terminals that keep running, an HTTPS address for every port, files, secrets and public links.",
+    gains: [
+      "Terminals that keep running when you disconnect",
+      "An HTTPS address for every port, by name",
+      "Public previews and tunnels on your own domain",
+      "Encrypted secrets and config on every machine",
+    ],
     cells: cells(tailscaleSources, {
       terminal_persistent: ["No, a standard SSH session", "ssh"],
       terminal_replay: ["No", "ssh"],
@@ -443,20 +455,12 @@ export const products: Product[] = [
         us: "$ pb send report.pdf --to laptop",
       },
       {
-        title: "Access rules for a whole company",
+        title: "Access per person, per machine",
         body: [
-          "Tailscale's policy file (grants, ACLs, groups, tags) and its clients for phones are mature and cover whole companies.",
-          "Paperboat has its own policy file with groups, tags and deny rules, and a command that explains any decision. It governs what people may do on machines, not a network. If you need subnet routes, exit nodes or policy for phones, Tailscale is the stronger choice.",
+          "Tailscale's policy file (grants, ACLs, groups, tags) decides which devices can reach which addresses on the network.",
+          "Paperboat's policy file decides what each person may do on each machine: open a terminal, run a command, send a file, reach a port. One command explains any decision and names the rule.",
         ],
       },
-    ],
-    chooseThem: [
-      "You want every device, including phones and whole subnets, on one private network.",
-      "You need detailed network access rules for a company today.",
-    ],
-    chooseUs: [
-      "You mostly want to work on your machines: terminals, SSH, files and secrets.",
-      "You want public previews and permanent tunnels with your own domains in the same tool.",
     ],
     pricing: {
       lines: [
@@ -480,7 +484,7 @@ export const products: Product[] = [
       },
       {
         q: "Is Paperboat a VPN?",
-        a: "Not a general one. Your machines reach each other privately, but Paperboat doesn't route whole subnets or carry phones' traffic; it connects the machines you install it on.",
+        a: "No, and you don't need one. Each machine gets a private name and each port an HTTPS address, with no network adapter, so it runs next to any VPN.",
       },
       {
         q: "Does Paperboat encrypt end to end like WireGuard?",
@@ -492,8 +496,16 @@ export const products: Product[] = [
     slug: "ngrok",
     name: "ngrok",
     label: "ngrok",
+    tagline: "Public links like ngrok, plus terminals, SSH and files on the same machines.",
+    headline: "More than a link to localhost",
     summary:
-      "ngrok puts a local service on a public URL, with traffic tools such as a request inspector and policies. Paperboat does previews and permanent tunnels too, and it also gives you terminals, SSH, files and secrets on the same machines.",
+      "ngrok puts a local service on a public URL. Paperboat does that too, with permanent tunnels and your own domains on every plan, and it gives you the machine itself: terminals, SSH, files and secrets.",
+    gains: [
+      "Previews and permanent tunnels on every plan",
+      "Your own domains with certificates, free",
+      "A request inspector with replay",
+      "Terminals, SSH and files on the same machines",
+    ],
     cells: cells(ngrokSources, {
       terminal_persistent: ["No", "agent"],
       terminal_replay: ["No", "agent"],
@@ -541,7 +553,7 @@ export const products: Product[] = [
           "Paperboat tunnels take your own domains on every plan, including Free, with the DNS records shown for you and the certificate issued automatically.",
         ],
         them: "$ ngrok http 3000 --url api.example.com",
-        us: "$ pb tunnel route add api --name web --to http://127.0.0.1:3000 --wait\n$ pb tunnel domain add api api.example.com --route web",
+        us: "$ pb tunnel route add api --name web \\\n    --to http://localhost:3000\n$ pb tunnel domain add api api.example.com \\\n    --route web",
       },
       {
         title: "Request inspection",
@@ -557,14 +569,6 @@ export const products: Product[] = [
           "Paperboat plans differ only in bandwidth through its relays and edges; previews, tunnels and domains have no separate charges, and direct traffic between your machines is free.",
         ],
       },
-    ],
-    chooseThem: [
-      "You only need public URLs, with traffic features such as policies, load balancing and an API gateway.",
-      "You want traffic policies, OAuth or rate limiting in front of your app, or an inspector that is always recording.",
-    ],
-    chooseUs: [
-      "You also want to reach and work on the machine itself.",
-      "You want your own domains and permanent tunnels on a free plan.",
     ],
     pricing: {
       lines: [
@@ -592,7 +596,7 @@ export const products: Product[] = [
       },
       {
         q: "Does Paperboat have raw TCP endpoints?",
-        a: "Public links are for web traffic (HTTP and WebSocket). For other protocols, your own machines reach each other's ports privately.",
+        a: "Yes. A tunnel can have a tcp route with its own public port, and a tls route that passes your app's own TLS through.",
       },
     ],
   },
@@ -600,8 +604,16 @@ export const products: Product[] = [
     slug: "cloudflare-tunnel",
     name: "Cloudflare Tunnel",
     label: "Cloudflare Tunnel",
+    tagline: "Put a service online on your own domain, with no DNS to move.",
+    headline: "Tunnels without moving your DNS",
     summary:
-      "Cloudflare Tunnel connects a service to Cloudflare's network, so it can be reached on your Cloudflare domain with Cloudflare's protection in front. Paperboat gives you tunnels and previews without moving your DNS, plus terminals, SSH, files and secrets on the same machines.",
+      "Cloudflare Tunnel connects a service to Cloudflare's network, on a domain whose DNS Cloudflare runs. Paperboat gives you tunnels and previews on any domain, wherever its DNS lives, plus terminals, SSH, files and secrets on the same machines.",
+    gains: [
+      "Keep your DNS where it is",
+      "Quick previews and permanent tunnels in one tool",
+      "Terminals, SSH and files on the same machines",
+      "Your own tunnel server, if you want one",
+    ],
     cells: cells(cfTunnelSources, {
       terminal_persistent: ["No", "tunnel"],
       terminal_replay: ["No", "tunnel"],
@@ -639,8 +651,8 @@ export const products: Product[] = [
           "A named Cloudflare Tunnel serves a hostname on a domain whose DNS is on Cloudflare, so using your own domain means moving it there.",
           "Paperboat asks for two CNAME records at whichever DNS provider you already use and issues the certificate itself.",
         ],
-        them: "$ cloudflared tunnel route dns api api.example.com",
-        us: "$ pb tunnel route add api --name web --to http://127.0.0.1:3000 --wait\n$ pb tunnel domain add api api.example.com --route web",
+        them: "$ cloudflared tunnel route dns api \\\n    api.example.com",
+        us: "$ pb tunnel route add api --name web \\\n    --to http://localhost:3000\n$ pb tunnel domain add api api.example.com \\\n    --route web",
       },
       {
         title: "Quick links",
@@ -648,7 +660,7 @@ export const products: Product[] = [
           "Quick tunnels give a random trycloudflare.com address with no account, meant for testing.",
           "pb preview gives a named link under Paperboat's preview domain that you can make public, private to you, or open to your team, with a time limit you choose.",
         ],
-        them: "$ cloudflared tunnel --url http://localhost:3000",
+        them: "$ cloudflared tunnel --url \\\n    http://localhost:3000",
         us: "$ pb preview 3000 --ttl 2h",
       },
       {
@@ -659,20 +671,12 @@ export const products: Product[] = [
         ],
       },
       {
-        title: "Cloudflare in front",
+        title: "Your own tunnel server",
         body: [
-          "Traffic through a Cloudflare Tunnel flows through Cloudflare's network, where its CDN, firewall and DDoS protection apply. For a public site that needs that, it is a real advantage.",
-          "Paperboat's edge ends TLS for public links and forwards to your machine; it doesn't cache or filter your traffic.",
+          "Traffic through a Cloudflare Tunnel flows through Cloudflare's network, on a domain whose DNS is at Cloudflare.",
+          "Paperboat's tunnels work on any domain, and you can run the tunnel server yourself, so public traffic reaches a box you control.",
         ],
       },
-    ],
-    chooseThem: [
-      "Your domain is already on Cloudflare and you want its caching and protection in front.",
-      "You are serving a public production site at scale.",
-    ],
-    chooseUs: [
-      "You don't want to move your DNS.",
-      "You want terminals, SSH, files and previews on the same machines, not only tunnels.",
     ],
     pricing: {
       lines: ["Cloudflare Tunnel: available on all plans", "Quick tunnels: no account needed"],
@@ -689,18 +693,22 @@ export const products: Product[] = [
         q: "Do I need to move my domain to Paperboat?",
         a: "No. You add two CNAME records wherever your DNS is hosted; Paperboat checks them and issues the certificate.",
       },
-      {
-        q: "Does Paperboat protect against DDoS like Cloudflare?",
-        a: "Paperboat's edge isn't a CDN or a web firewall. For a public site that needs that, put a CDN in front of the tunnel's domain or keep Cloudflare.",
-      },
     ],
   },
   {
     slug: "teleport",
     name: "Teleport",
     label: "Teleport",
+    tagline: "Keyless SSH and recorded sessions, with no cluster to run.",
+    headline: "Secure access, nothing to run",
     summary:
-      "Teleport is an access platform for companies: SSH, Kubernetes, databases and internal apps behind short-lived certificates, with session recording and audit. Paperboat is lighter: one install per machine and a sign-in, with terminals that survive disconnects, previews and tunnels.",
+      "Teleport is an access platform a company runs for SSH, Kubernetes, databases and apps. Paperboat is one install per machine and a sign-in: keyless SSH, terminals that keep running, recordings and an audit log, ready in minutes.",
+    gains: [
+      "Keyless SSH with no cluster to operate",
+      "Session recordings on every plan",
+      "Terminals that keep running when you disconnect",
+      "Previews, tunnels, files and secrets built in",
+    ],
     cells: cells(teleportSources, {
       terminal_persistent: ["No", "matrix"],
       terminal_replay: ["Recorded sessions play back afterwards", "tsh"],
@@ -746,7 +754,7 @@ export const products: Product[] = [
           ours.terminals,
         ],
         them: "$ tsh ssh dev@devbox\n$ tsh join <session-id>",
-        us: "$ pb devbox\n$ pb session share <session-id> --team <team> --all",
+        us: "$ pb devbox\n$ pb session share S12 --team acme --all",
       },
       {
         title: "Public links",
@@ -759,18 +767,10 @@ export const products: Product[] = [
       {
         title: "Audit and compliance",
         body: [
-          "Teleport's session recording, access requests and audit export are mature and made for regulated companies.",
-          "Paperboat has roles, single sign-on, directory sync and an audit log you can export or stream. Paperboat terminals can be recorded by hand on every plan, kept encrypted on the machine; on Team they can also be recorded by rule and archived to your own S3-compatible bucket, with every replay audited; plain SSH and remote commands are not recorded. It has no access-request workflow, so if you need approvals, or recording of every protocol, Teleport is the better fit.",
+          "Teleport records sessions and keeps an audit log, on infrastructure your company runs.",
+          "Paperboat has roles, single sign-on, directory sync and an audit log you can export or stream. Terminals can be recorded on every plan, encrypted on the machine; on Team, by rule too, with an archive in your own S3 bucket. Every replay is in the audit log.",
         ],
       },
-    ],
-    chooseThem: [
-      "You need access requests with approvals, and recording of SSH, Kubernetes and database sessions.",
-      "You manage Kubernetes clusters, databases and Windows desktops for a company.",
-    ],
-    chooseUs: [
-      "You want fast access to your own machines without running an access platform.",
-      "You want public previews and tunnels, files and encrypted environment variables too.",
     ],
     pricing: {
       lines: [
@@ -782,16 +782,16 @@ export const products: Product[] = [
     switching: [
       install,
       "Use pb ssh or the generated SSH host names instead of tsh ssh for day-to-day access.",
-      "Keep Teleport where you need access requests or protocol-level audit; Paperboat can run beside it.",
+      "Paperboat runs beside Teleport while you move machines over.",
     ],
     faq: [
       {
         q: "Does Paperboat record sessions?",
-        a: "On Team, yes: Paperboat terminals (in the console and from pb connect) can be recorded by policy rule or by hand, encrypted, and archived to your team's own S3-compatible bucket. Every replay is an audit event. Plain SSH and remote commands are not recorded.",
+        a: "Yes, on every plan. Paperboat terminals can be recorded and played back in the console or the terminal, kept encrypted on the machine. Team adds recording by rule and an archive in your own S3 bucket. Every replay is in the audit log.",
       },
       {
         q: "Can I self-host Paperboat like Teleport?",
-        a: "You can run your own relays and tunnel servers; the control plane is hosted by Paperboat.",
+        a: "You can run the relays and tunnel servers that carry your traffic yourself, on every plan. Accounts and sign-in are hosted, so there is nothing else to operate.",
       },
     ],
   },
@@ -799,8 +799,16 @@ export const products: Product[] = [
     slug: "netbird",
     name: "NetBird",
     label: "NetBird",
+    tagline: "Private access to your machines, and everything you do once you are there.",
+    headline: "A private network, and the work on top",
     summary:
-      "NetBird is an open-source WireGuard network between your devices, with access policies and a management server you can run yourself. Paperboat also connects your machines privately and focuses on working on them: terminals, SSH, files, secrets, previews and tunnels.",
+      "NetBird is an open-source WireGuard network between your devices. Paperboat connects your machines privately too, and adds what you do once you're connected: terminals, files, secrets, previews and tunnels.",
+    gains: [
+      "Terminals that keep running when you disconnect",
+      "An HTTPS address for every port, by name",
+      "Public previews and tunnels",
+      "Nothing to host, or host your own relays",
+    ],
     cells: cells(netbirdSources, {
       terminal_persistent: ["No", "ssh"],
       terminal_replay: ["No", "ssh"],
@@ -857,17 +865,9 @@ export const products: Product[] = [
         title: "Running it yourself",
         body: [
           "NetBird is open source and you can run the whole service on your own servers.",
-          "With Paperboat you can run your own relays and tunnel servers, but the control plane is hosted. If self-hosting everything matters most, NetBird fits better.",
+          "With Paperboat there is no management server to run. You can still run your own relays and tunnel servers, on every plan, so relayed and public traffic stays on servers you choose.",
         ],
       },
-    ],
-    chooseThem: [
-      "You want a fully open-source network you can host end to end.",
-      "You need network access policies across a company.",
-    ],
-    chooseUs: [
-      "You want terminals, previews, public links and file sending in one tool.",
-      "You'd rather not run a network control server yourself.",
     ],
     pricing: {
       lines: [
@@ -881,7 +881,7 @@ export const products: Product[] = [
     switching: [
       install,
       "Use pb ssh or the generated SSH host names where you used NetBird addresses.",
-      "Keep NetBird for subnets and devices Paperboat doesn't run on; they work side by side.",
+      "The two run side by side while you move over.",
     ],
     faq: [
       {
@@ -894,8 +894,16 @@ export const products: Product[] = [
     slug: "zerotier",
     name: "ZeroTier",
     label: "ZeroTier",
+    tagline: "Every port by name, over HTTPS, with no network to plan.",
+    headline: "Every machine, every port, no network to plan",
     summary:
-      "ZeroTier makes your devices act as if they shared one Ethernet network, with broadcast and bridging. Paperboat connects your machines privately too and is built around working on them: terminals, SSH, files, secrets, previews and tunnels.",
+      "ZeroTier makes your devices act as if they shared one Ethernet network. Paperboat gives you encrypted access to every machine and every port by name, with nothing to plan, and the tools to work there.",
+    gains: [
+      "Every port by name, with real HTTPS",
+      "No address ranges or network rules to manage",
+      "Terminals, SSH and files built in",
+      "Public previews and tunnels",
+    ],
     cells: cells(zerotierSources, {
       terminal_persistent: ["No", "protocol"],
       terminal_replay: ["No", "protocol"],
@@ -945,20 +953,12 @@ export const products: Product[] = [
         us: "$ pb preview 3000",
       },
       {
-        title: "Devices that aren't computers",
+        title: "The machines you work on",
         body: [
           "ZeroTier runs on routers, NAS boxes and other devices, and can bridge a whole physical network.",
-          "Paperboat runs on Linux, macOS and Windows computers and connects those machines only.",
+          "Paperboat runs on the Linux, macOS and Windows machines you work on, and gives each of their ports a private HTTPS name.",
         ],
       },
-    ],
-    chooseThem: [
-      "You need a virtual LAN: broadcast, multicast or bridging, not only IP between computers.",
-      "You connect routers, NAS boxes or other devices that run ZeroTier.",
-    ],
-    chooseUs: [
-      "You want terminals, previews, public links and file sending, not only a network.",
-      "You'd rather not manage network rules to reach your own machines.",
     ],
     pricing: {
       lines: [
@@ -972,12 +972,12 @@ export const products: Product[] = [
     switching: [
       install,
       "Use pb ssh or the generated SSH host names where you used ZeroTier addresses.",
-      "Keep ZeroTier for bridged networks and devices Paperboat doesn't run on.",
+      "The two run side by side while you move over.",
     ],
     faq: [
       {
-        q: "Does Paperboat do layer 2 networking?",
-        a: "No. Your machines reach each other's ports privately by name; there is no broadcast or bridging.",
+        q: "How do I reach a machine's ports?",
+        a: "By name: each web port has its own private HTTPS address, and anything else that speaks TCP uses the machine's own local address.",
       },
     ],
   },
@@ -985,8 +985,16 @@ export const products: Product[] = [
     slug: "twingate",
     name: "Twingate",
     label: "Twingate",
+    tagline: "Private access with terminals, files and secrets built in.",
+    headline: "Access to machines, and the tools to use them",
     summary:
-      "Twingate gives a company's people access to private resources without a VPN, through connectors you deploy and policies tied to your identity provider. Paperboat is for working on machines directly: terminals, SSH, files, secrets, previews and tunnels.",
+      "Twingate gives a company's people access to private resources through connectors and identity policies. Paperboat connects your machines to each other directly and gives you the tools to work on them.",
+    gains: [
+      "No connectors to deploy",
+      "Terminals, SSH and files on every machine",
+      "Encrypted secrets and config sync",
+      "Public previews and tunnels",
+    ],
     cells: cells(twingateSources, {
       terminal_persistent: ["No", "ssh"],
       terminal_replay: ["No", "ssh"],
@@ -1044,14 +1052,6 @@ export const products: Product[] = [
         us: "$ pb send report.pdf --to laptop",
       },
     ],
-    chooseThem: [
-      "You run a company network and need people to reach internal resources with device checks.",
-      "You want access policies tied to your identity provider for many users.",
-    ],
-    chooseUs: [
-      "You want to work on your own machines from anywhere, with terminals and files.",
-      "You want public previews and permanent tunnels.",
-    ],
     pricing: {
       lines: [
         "Starter: free, up to 5 users",
@@ -1063,12 +1063,12 @@ export const products: Product[] = [
     },
     switching: [
       install,
-      "Use Paperboat for access to your own machines; keep Twingate for company resources.",
+      "Give your team access to machines with a few rules, and send them the SSH host names.",
     ],
     faq: [
       {
-        q: "Does Paperboat check devices before giving access?",
-        a: "Access is per signed-in account and machine; device posture checks are not part of Paperboat.",
+        q: "Who can reach a machine?",
+        a: "Only people a rule allows, on that machine and those ports, from their own signed-in machines. Every action is in the audit log.",
       },
     ],
   },
@@ -1076,8 +1076,16 @@ export const products: Product[] = [
     slug: "cloudflare-zero-trust",
     name: "Cloudflare Zero Trust",
     label: "Cloudflare Zero Trust",
+    tagline: "Private access to your machines with no gateway or connector to run.",
+    headline: "Your machines, without the perimeter",
     summary:
-      "Cloudflare Zero Trust (Access, the WARP client and Tunnel together) puts a company's apps and networks behind Cloudflare, with identity policies and web filtering. Paperboat is a tool for working on your own machines, end to end encrypted, without moving your DNS.",
+      "Cloudflare Zero Trust puts a company's apps and networks behind Cloudflare, with identity policies and filtering. Paperboat connects your own machines directly, encrypted end to end, with no gateway, client profile or DNS change.",
+    gains: [
+      "Encrypted end to end between your machines",
+      "No gateway or connector to run",
+      "Terminals, SSH, files and secrets built in",
+      "Tunnels on your own domain, wherever its DNS is",
+    ],
     cells: cells(cfZeroTrustSources, {
       terminal_persistent: ["No", "setup"],
       terminal_replay: ["No", "setup"],
@@ -1137,16 +1145,8 @@ export const products: Product[] = [
           "Public hostnames on Cloudflare need the domain's DNS on Cloudflare.",
           "Paperboat asks for two CNAME records at whichever DNS provider you already use.",
         ],
-        us: "$ pb tunnel route add api --name web --to http://127.0.0.1:3000 --wait\n$ pb tunnel domain add api api.example.com --route web",
+        us: "$ pb tunnel route add api --name web \\\n    --to http://localhost:3000\n$ pb tunnel domain add api api.example.com \\\n    --route web",
       },
-    ],
-    chooseThem: [
-      "You secure a whole company: web filtering, device posture and app access in one place.",
-      "Your domains are already on Cloudflare.",
-    ],
-    chooseUs: [
-      "You want terminals that survive disconnects, previews and file sending on your own machines.",
-      "You want your machines to talk to each other directly, encrypted end to end.",
     ],
     pricing: {
       lines: ["Free: up to 50 users", "Pay-as-you-go: $7 per user a month", "Contract plans: by quote"],
@@ -1154,12 +1154,12 @@ export const products: Product[] = [
     },
     switching: [
       install,
-      "Use Paperboat for your own machines; keep Zero Trust for company apps and filtering.",
+      "Move your machines over one at a time; the two run side by side.",
     ],
     faq: [
       {
-        q: "Can Paperboat replace a company VPN?",
-        a: "Not as a whole: it connects the machines it is installed on, not whole networks, and has no web filtering.",
+        q: "Is the traffic encrypted end to end?",
+        a: "Yes, between your machines. Relays pass on only encrypted bytes. Public links end HTTPS at the tunnel server, which you can also run yourself.",
       },
     ],
   },
@@ -1167,8 +1167,16 @@ export const products: Product[] = [
     slug: "enterprise-vpn",
     name: "an enterprise VPN",
     label: "Enterprise VPN",
+    tagline: "Your team reaches the machines it needs, with no VPN client.",
+    headline: "Reach your machines, skip the VPN",
     summary:
-      "Zscaler Private Access, Palo Alto Prisma Access, Cisco Secure Client (AnyConnect) and OpenVPN Access Server connect employees to a company network with central policy. Paperboat connects you to your own machines and lets you work on them.",
+      "Enterprise VPNs such as Zscaler, Prisma Access, Cisco Secure Client and OpenVPN connect employees to a company network. Paperboat connects developers to the machines they work on: one install, a sign-in, and every machine is there.",
+    gains: [
+      "One install per machine and a sign-in",
+      "No gateway to run or patch",
+      "Access per machine and per port",
+      "Terminals, files, secrets and previews built in",
+    ],
     cells: cells(vpnSources, {
       terminal_persistent: ["No", "zpa"],
       terminal_replay: ["No", "zpa"],
@@ -1204,7 +1212,7 @@ export const products: Product[] = [
         title: "A company network, or your machines",
         body: [
           "An enterprise VPN or ZTNA product puts employees inside the company network, with policy run by IT.",
-          "Paperboat is for the machines you work on: your laptop, a server, a box under a desk. It doesn't route a network.",
+          "Paperboat is for the machines you work on: your laptop, a server, a box under a desk. Each one is reachable by name, port by port, with nothing to route.",
         ],
       },
       {
@@ -1225,14 +1233,6 @@ export const products: Product[] = [
         us: "$ pb preview 3000",
       },
     ],
-    chooseThem: [
-      "Your company needs every employee on the corporate network with central policy and compliance.",
-      "Your security team already runs one of these.",
-    ],
-    chooseUs: [
-      "You're a developer or small team who wants your own machines, not a corporate network.",
-      "You want one install per machine and a sign-in, without a gateway to run.",
-    ],
     pricing: {
       lines: [
         "Zscaler, Prisma Access, Cisco: by quote",
@@ -1242,7 +1242,7 @@ export const products: Product[] = [
     },
     switching: [
       install,
-      "Use Paperboat for your own development machines; keep the VPN for company systems that require it.",
+      "Move development machines over first. Paperboat works while the VPN is connected.",
     ],
     faq: [
       {
@@ -1255,8 +1255,16 @@ export const products: Product[] = [
     slug: "ssh-bastion",
     name: "SSH and a bastion",
     label: "SSH + bastion",
+    tagline: "SSH to every machine with no keys to manage and no bastion to patch.",
+    headline: "SSH, without the bastion",
     summary:
-      "Plain OpenSSH through a bastion (jump) host is the classic way in, with tmux to keep work running. Paperboat keeps SSH working and adds terminals that survive disconnects, files, secrets, previews and tunnels, with no open port to maintain.",
+      "Plain OpenSSH through a bastion host is the classic way in, with tmux to keep work running. Paperboat keeps your SSH tools and takes away the rest: no open port, no keys to hand out, and terminals that keep running on their own.",
+    gains: [
+      "No open port and no bastion to patch",
+      "Keys handled for you",
+      "Terminals that keep running, no tmux needed",
+      "Files, secrets and previews built in",
+    ],
     cells: cells(sshSources, {
       terminal_persistent: ["With tmux or screen", "tmux"],
       terminal_replay: ["With tmux scrollback", "tmux"],
@@ -1316,17 +1324,9 @@ export const products: Product[] = [
       {
         title: "Public links",
         body: ["Reverse forwarding (ssh -R) needs a public server you run.", ours.previews],
-        them: "$ ssh -R 80:localhost:3000 server.example.com",
+        them: "$ ssh -R 80:localhost:3000 \\\n    server.example.com",
         us: "$ pb preview 3000",
       },
-    ],
-    chooseThem: [
-      "You already run servers with public addresses and keys you manage well.",
-      "You want nothing but OpenSSH.",
-    ],
-    chooseUs: [
-      "Your machines sit behind NAT or at home, with no open port.",
-      "You want keys, sharing and previews handled for you, and terminals that come back after a dropped connection.",
     ],
     pricing: {
       lines: ["OpenSSH and tmux: free software", "You pay for and maintain the bastion"],
@@ -1348,8 +1348,16 @@ export const products: Product[] = [
     slug: "vscode-tunnels",
     name: "VS Code Remote Tunnels",
     label: "VS Code Tunnels",
+    tagline: "Remote work from any editor, terminal or browser, not just VS Code.",
+    headline: "Remote work in any tool",
     summary:
-      "VS Code Remote Tunnels opens a remote machine in VS Code or vscode.dev through Microsoft's dev tunnels service, and VS Code can forward ports, also publicly. Paperboat works with any terminal, editor or browser, and adds persistent terminals, files, secrets, permanent tunnels and sharing.",
+      "VS Code Remote Tunnels opens a remote machine in VS Code or vscode.dev. Paperboat works with any editor, terminal, browser or AI agent, and adds terminals that keep running, files, secrets and permanent tunnels.",
+    gains: [
+      "Any editor, terminal or AI agent",
+      "Terminals that keep running when you disconnect",
+      "Permanent tunnels on your own domain",
+      "Plain SSH for every tool",
+    ],
     cells: cells(vscodeSources, {
       terminal_persistent: ["No; only while VS Code runs there", "tunnels"],
       terminal_replay: ["No", "tunnels"],
@@ -1410,14 +1418,6 @@ export const products: Product[] = [
         title: "Files, secrets and settings",
         body: ["VS Code syncs its own settings; it has no file sending or encrypted environment variables.", ours.files],
       },
-    ],
-    chooseThem: [
-      "You only want to open a remote folder in VS Code.",
-      "You already sign in to VS Code with GitHub and need nothing else.",
-    ],
-    chooseUs: [
-      "You use other editors, plain terminals or agents.",
-      "You want permanent tunnels, your own domains, sharing with a team, or plain SSH.",
     ],
     pricing: {
       lines: ["Free with a GitHub or Microsoft account", "Dev tunnels limits: 10 tunnels and 5 GB a month per user"],

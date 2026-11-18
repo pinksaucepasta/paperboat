@@ -9,18 +9,33 @@ import Icon from "../components/Icon.astro"
 import Plans from "../components/Plans.astro"
 import Closing from "../components/Closing.astro"
 import FeatureIndex from "../components/FeatureIndex.astro"
+import Addresses from "../components/Addresses.astro"
+import Term from "../components/Term.astro"
 import { softwareSchema } from "../schema"
-import { previewDomain } from "../site"
+import { features } from "../features"
+import { compares } from "../compare-data"
+import { installerBase, localDomain, previewDomain } from "../site"
 
 const description =
   "Persistent terminals, keyless SSH, public previews and encrypted secrets for all your machines. Free for personal use."
 
-const versus = [
-  ["tailscale", "Tailscale", "A network for every device. Paperboat is for working on your machines."],
-  ["ngrok", "ngrok", "The full tunnel product. Paperboat adds terminals, SSH and files."],
-  ["cloudflare-tunnel", "Cloudflare Tunnel", "Fast if your domain is on Cloudflare. Paperboat needs none."],
-  ["teleport", "Teleport", "Audited access at company scale. Paperboat is one install."],
+const addresses: [string, string][] = [
+  [`3000.studio.${localDomain}`, "The dev server on studio"],
+  [`grafana.homelab.${localDomain}`, "Grafana, by name"],
+  [`jellyfin.homelab.${localDomain}`, "An app behind Coolify"],
+  [`studio.${localDomain}`, "Everything studio serves"],
 ]
+
+const recipe = [
+  "# PB_RECIPE is saved as a CI secret",
+  "$ curl -fsSL \\",
+  `    ${installerBase}/recipe | bash`,
+  "✓ Paired as ci-runner-7",
+  "✓ Secrets loaded from canary-env",
+  `✓ Preview live for 2 hours`,
+]
+
+const versus = compares.filter((item) => ["tailscale", "ngrok", "cloudflare-tunnel", "teleport"].includes(item.slug))
 ---
 
 <Page
@@ -50,20 +65,20 @@ const versus = [
     </figure>
   </section>
 
-  <section class="section" aria-label="What changes">
+  <section class="section" aria-label="Why Paperboat">
     <div class="wrap">
       <ul class="three">
         <li>
-          <h2 class="h3">Close the lid. Keep the shell.</h2>
-          <p>Terminals live on the machine, not on your laptop. Come back hours later, from any computer, to the same shell.</p>
+          <h2 class="h3">Nothing to open</h2>
+          <p>No port forwarding, no public IP, no VPN. Your machines find each other from any network.</p>
         </li>
         <li>
-          <h2 class="h3">localhost, now with a link</h2>
-          <p>One command gives a local port a public HTTPS address, with every request kept to inspect and replay.</p>
+          <h2 class="h3">Encrypted end to end</h2>
+          <p>Terminals, files and secrets are encrypted between your own machines. We can't read them.</p>
         </li>
         <li>
-          <h2 class="h3">Your firewall stays shut</h2>
-          <p>SSH, files and private ports reach your machines through any NAT, encrypted end to end.</p>
+          <h2 class="h3">One install, every system</h2>
+          <p>The same Paperboat on Linux, macOS and Windows. Install it, sign in, and the machine is there.</p>
         </li>
       </ul>
     </div>
@@ -72,10 +87,10 @@ const versus = [
   <section class="section section-rule" aria-labelledby="terminal-title">
     <div class="wrap">
       <header class="split-head">
-        <h2 class="h2" id="terminal-title">Terminals that outlive the connection</h2>
+        <h2 class="h2" id="terminal-title">Close the laptop. Keep the shell.</h2>
         <div class="split-side">
-          <p>Close the laptop, change networks, come back hours later. The shell kept running and shows what you missed.</p>
-          <a class="more" href="/features/terminal/">How terminals work <span aria-hidden="true">→</span></a>
+          <p>Your terminals run on the machine, not on your laptop. Come back hours later, from any computer, and pick up where you left off.</p>
+          <a class="more" href="/features/terminal/">Terminals <span aria-hidden="true">→</span></a>
         </div>
       </header>
       <figure class="shot">
@@ -84,13 +99,26 @@ const versus = [
     </div>
   </section>
 
+  <section class="section section-rule" aria-labelledby="private-title">
+    <div class="wrap pair">
+      <div class="pair-text">
+        <h2 class="h2" id="private-title">Every port gets its own address</h2>
+        <p>
+          Open the dev server on your desktop, or Grafana on the box at home, by name. Real HTTPS, and only you can reach it.
+        </p>
+        <a class="more" href="/features/private-access/">Private access <span aria-hidden="true">→</span></a>
+      </div>
+      <Addresses rows={addresses} />
+    </div>
+  </section>
+
   <section class="section section-rule" aria-labelledby="preview-title">
     <div class="wrap">
       <header class="split-head">
         <h2 class="h2" id="preview-title">Share what you're building</h2>
         <div class="split-side">
-          <p>One command puts localhost on a link like <code>quiet-river-4821.{previewDomain}</code>, with every request kept to replay.</p>
-          <a class="more" href="/features/previews/">Previews and tunnels <span aria-hidden="true">→</span></a>
+          <p>One command puts localhost on a public link like <code>quiet-river-4821.{previewDomain}</code>. Every request is kept, so you can see and replay it.</p>
+          <a class="more" href="/features/previews/">Previews <span aria-hidden="true">→</span></a>
         </div>
       </header>
       <figure class="shot">
@@ -99,12 +127,25 @@ const versus = [
     </div>
   </section>
 
+  <section class="section section-rule" aria-labelledby="recipe-title">
+    <div class="wrap pair pair-flip">
+      <div class="pair-text">
+        <h2 class="h2" id="recipe-title">A new machine, ready in one line</h2>
+        <p>
+          Write down once what a machine needs: its tags, its secrets, a preview. Then every CI runner or new VM is set up with one command.
+        </p>
+        <a class="more" href="/features/recipes/">Recipes <span aria-hidden="true">→</span></a>
+      </div>
+      <Term lines={recipe} title="ci-runner-7" />
+    </div>
+  </section>
+
   <section class="section section-rule" aria-labelledby="all-title">
     <div class="wrap">
       <header class="split-head">
         <h2 class="h2" id="all-title">Everything in one install</h2>
         <div class="split-side">
-          <p>Twelve features for Linux, macOS and Windows, and every one of them is on the free plan.</p>
+          <p>{features.length} features on Linux, macOS and Windows, and every one of them is on the free plan.</p>
           <a class="more" href="/features/">All features <span aria-hidden="true">→</span></a>
         </div>
       </header>
@@ -118,7 +159,7 @@ const versus = [
         <h2 class="h2" id="price-title">Free for personal use</h2>
         <div class="split-side">
           <p>Every feature is free for personal use. Pay for more relay and edge traffic, or for a team.</p>
-          <a class="more" href="/pricing/">Pricing in full <span aria-hidden="true">→</span></a>
+          <a class="more" href="/pricing/">Pricing <span aria-hidden="true">→</span></a>
         </div>
       </header>
       <Plans />
@@ -128,19 +169,19 @@ const versus = [
   <section class="section section-rule" aria-labelledby="versus-title">
     <div class="wrap">
       <header class="split-head">
-        <h2 class="h2" id="versus-title">How it compares</h2>
+        <h2 class="h2" id="versus-title">Coming from another tool?</h2>
         <div class="split-side">
-          <p>Some of these tools do their one job better. Each comparison says where.</p>
+          <p>See what you keep, what you gain, and how to move over.</p>
           <a class="more" href="/compare/">All comparisons <span aria-hidden="true">→</span></a>
         </div>
       </header>
       <ul class="versus">
         {
-          versus.map(([slug, name, line]) => (
+          versus.map((item) => (
             <li>
-              <a href={`/compare/${slug}/`}>
-                <span class="versus-name">Paperboat and {name}</span>
-                <span class="versus-line">{line}</span>
+              <a href={`/compare/${item.slug}/`}>
+                <span class="versus-name">Paperboat vs {item.label}</span>
+                <span class="versus-line">{item.tagline}</span>
                 <Icon name="arrow-right" size={16} class="versus-arrow" />
               </a>
             </li>
@@ -154,6 +195,40 @@ const versus = [
 </Page>
 
 <style>
+  .pair {
+    display: grid;
+    gap: var(--s7);
+    align-items: center;
+  }
+
+  .pair-text {
+    display: grid;
+    gap: var(--s4);
+    justify-items: start;
+  }
+
+  .pair-text .h2 {
+    max-width: 16ch;
+  }
+
+  .pair-text p {
+    max-width: 44ch;
+    font-size: var(--text-lede);
+    line-height: 1.5;
+    color: var(--fog);
+  }
+
+  @media (min-width: 960px) {
+    .pair {
+      grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
+      column-gap: var(--s8);
+    }
+
+    .pair-flip > :first-child {
+      order: 1;
+    }
+  }
+
   .hero {
     padding-top: clamp(56px, 8vw, 112px);
   }

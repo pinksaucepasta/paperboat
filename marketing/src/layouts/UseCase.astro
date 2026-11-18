@@ -21,7 +21,7 @@ const schema = [breadcrumbSchema(Astro.site, [["Features", "/features/"], [name,
 ---
 
 <Page title={title} description={description} schema={schema}>
-  <Head title={headline} trail={[["Features", "/features/"]]} here={name}>
+  <Head title={headline} eyebrow={name} actions>
     <slot name="lede" />
     <slot name="aside" slot="aside" />
   </Head>

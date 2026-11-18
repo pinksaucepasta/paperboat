@@ -11,7 +11,7 @@ const items = slugs.map(feature)
 const versus = compares.filter((item) => compare.includes(item.slug))
 ---
 
-<section class="section section-tint" aria-labelledby="related-title">
+<section class="section section-rule" aria-labelledby="related-title">
   <div class="wrap cols">
     <h2 class="h2" id="related-title">Related</h2>
     <ul class="related">
@@ -29,8 +29,8 @@ const versus = compares.filter((item) => compare.includes(item.slug))
         versus.map((item) => (
           <li>
             <a href={`/compare/${item.slug}/`}>
-              <span class="name">Paperboat and {item.name}, compared</span>
-              <span class="line">What each does, what each costs, and when to pick which.</span>
+              <span class="name">Paperboat vs {item.label}</span>
+              <span class="line">{item.tagline}</span>
             </a>
           </li>
         ))

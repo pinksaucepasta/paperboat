@@ -21,6 +21,8 @@ export const apiBaseUrl = apiUrl
 /** Where abuse is reported by email; undefined when the server publishes none. */
 export const abuseMailbox = config.abuse_mailbox
 export const consoleUrl = config.console_url
+/** Where the installers are served, e.g. https://get.example.test. */
+export const installerBase = config.installer_base_url
 export const installUrl = `${config.installer_base_url}/install`
 export const selfhostInstallUrl = `${config.installer_base_url}/selfhost/install`
 export const localDomain = config.local_access_base_domain

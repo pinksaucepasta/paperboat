@@ -1,77 +1,79 @@
 ---
-/** Every feature in one hairline grid: its icon, its name and what it gets you, linking to its page. */
+/** Every feature, in its group: an icon, the name and what it gets you, linking to its page. */
 import Icon from "./Icon.astro"
-import { features } from "../features"
+import { featureGroups, features } from "../features"
 ---
 
-<ul class="grid">
+<div class="groups">
   {
-    features.map((item) => (
-      <li>
-        <a href={`/features/${item.slug}/`}>
-          <Icon name={item.icon} size={22} class="icon" />
-          <span class="name">{item.name}</span>
-          <span class="line">{item.line}</span>
-        </a>
-      </li>
+    featureGroups.map((group) => (
+      <section class="group" aria-label={group}>
+        <h3 class="group-title">{group}</h3>
+        <ul>
+          {features
+            .filter((item) => item.group === group)
+            .map((item) => (
+              <li>
+                <a href={`/features/${item.slug}/`}>
+                  <Icon name={item.icon} size={20} class="icon" />
+                  <span class="name">{item.name}</span>
+                  <span class="line">{item.line}</span>
+                </a>
+              </li>
+            ))}
+        </ul>
+      </section>
     ))
   }
-</ul>
+</div>
 
 <style>
-  .grid {
+  .groups {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr));
-    border-radius: var(--radius-lg);
-    box-shadow: 0 0 0 1px var(--rule);
-    background: var(--paper);
-    overflow: hidden;
+    gap: var(--s7) var(--s7);
   }
 
-  @media (min-width: 1100px) {
-    .grid {
-      grid-template-columns: repeat(4, minmax(0, 1fr));
+  @media (min-width: 900px) {
+    .groups {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
     }
   }
 
-  li {
-    display: grid;
-    min-width: 0;
-    /* Every cell draws its right and bottom line; the frame's own edge hides the outer ones. */
-    box-shadow:
-      1px 0 0 var(--rule),
-      0 1px 0 var(--rule);
+  .group-title {
+    padding-bottom: var(--s3);
+    border-bottom: 1px solid var(--rule);
+    font-size: var(--text-small);
+    font-weight: 500;
+    color: var(--fog);
   }
 
   a {
     display: grid;
-    align-content: start;
-    gap: var(--s2);
-    padding: var(--s6) var(--s5) var(--s6) var(--s6);
-    transition: background-color 0.15s ease;
-  }
-
-  a:hover {
-    background: var(--surface);
+    grid-template-columns: 20px minmax(0, 1fr);
+    column-gap: var(--s3);
+    row-gap: 2px;
+    padding-block: var(--s4);
+    border-bottom: 1px solid var(--rule);
   }
 
   a :global(.icon) {
-    margin-bottom: var(--s3);
+    grid-row: 1 / span 2;
+    margin-top: 2px;
     color: var(--cobalt);
   }
 
   .name {
-    font-size: var(--text-card);
     font-weight: 500;
-    letter-spacing: -0.01em;
     color: var(--ink);
-    white-space: nowrap;
+  }
+
+  a:hover .name {
+    color: var(--cobalt);
   }
 
   .line {
     font-size: var(--text-ui);
-    line-height: 1.55;
+    line-height: 1.5;
     color: var(--fog);
-    text-wrap: pretty;
   }
 </style>

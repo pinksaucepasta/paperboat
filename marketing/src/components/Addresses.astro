@@ -1,0 +1,82 @@
+---
+/** Private addresses as you would type them, each with what it opens. */
+import Icon from "./Icon.astro"
+interface Props {
+  rows: [address: string, opens: string][]
+}
+const { rows } = Astro.props
+---
+
+<ul class="addresses">
+  {
+    rows.map(([address, opens]) => (
+      <li>
+        <Icon name="lock-simple" size={15} class="lock" />
+        <span class="address">
+          <span class="scheme">https://</span>
+          {address}
+        </span>
+        <span class="opens">{opens}</span>
+      </li>
+    ))
+  }
+</ul>
+
+<style>
+  .addresses {
+    border-radius: 12px;
+    background: var(--paper);
+    box-shadow:
+      0 0 0 1px var(--rule),
+      0 24px 48px -32px rgb(20 20 20 / 0.18);
+    overflow: hidden;
+  }
+
+  li {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    column-gap: var(--s3);
+    row-gap: 2px;
+    align-items: center;
+    padding: 14px var(--s5);
+    border-top: 1px solid var(--rule);
+  }
+
+  li:first-child {
+    border-top: 0;
+  }
+
+  li :global(.lock) {
+    color: var(--good);
+  }
+
+  .address {
+    font-family: var(--font-mono);
+    font-size: var(--text-small);
+    color: var(--ink);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .scheme {
+    color: var(--fog);
+  }
+
+  .opens {
+    grid-column: 2;
+    font-size: var(--text-ui);
+    color: var(--fog);
+  }
+
+  @media (min-width: 640px) {
+    li {
+      grid-template-columns: auto minmax(0, 1fr) auto;
+    }
+
+    .opens {
+      grid-column: 3;
+      text-align: right;
+    }
+  }
+</style>

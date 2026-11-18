@@ -1,38 +1,35 @@
 ---
 /**
- * The top of an inner page: where you are, the page's one h1, a short introduction, and beside
- * them (slot "aside") the thing itself: a command, a table, a diagram.
+ * The top of an inner page: a small label naming where you are, the page's one h1, one or two
+ * sentences, optional buttons, and beside them (slot "aside") the thing itself.
  */
 interface Props {
   title: string
-  /** The path from the home page, without the page itself: [["Features", "/features/"]]. */
-  trail?: [string, string][]
-  /** Name of the page in the breadcrumb. */
-  here?: string
+  /** A short label above the title: the feature or section the page belongs to. */
+  eyebrow?: string
+  /** Where the eyebrow links, e.g. "/features/". */
+  eyebrowHref?: string
+  /** Show the "Get started" and docs buttons under the introduction. */
+  actions?: boolean
 }
-const { title, trail = [], here } = Astro.props
+const { title, eyebrow, eyebrowHref, actions = false } = Astro.props
 const hasAside = Astro.slots.has("aside")
 ---
 
 <section class="head">
   <div class:list={["wrap", "head-inner", { "head-split": hasAside }]}>
     <div class="head-text">
-      {
-        here && (
-          <nav class="crumbs" aria-label="Breadcrumb">
-            <ol>
-              {trail.map(([label, href]) => (
-                <li>
-                  <a href={href}>{label}</a>
-                </li>
-              ))}
-              <li aria-current="page">{here}</li>
-            </ol>
-          </nav>
-        )
-      }
+      {eyebrow && (eyebrowHref ? <a class="eyebrow" href={eyebrowHref}>{eyebrow}</a> : <p class="eyebrow">{eyebrow}</p>)}
       <h1 class="h1">{title}</h1>
       <div class="lede head-lede"><slot /></div>
+      {
+        actions && (
+          <div class="head-actions">
+            <a class="button button-primary" href="#get-started">Get started free</a>
+            <a class="button button-quiet" href="/docs/">Read the docs</a>
+          </div>
+        )
+      }
       <slot name="actions" />
     </div>
     {hasAside && <div class="head-aside"><slot name="aside" /></div>}
@@ -41,7 +38,7 @@ const hasAside = Astro.slots.has("aside")
 
 <style>
   .head {
-    padding-block: clamp(64px, 8vw, 120px) clamp(64px, 7vw, 104px);
+    padding-block: clamp(56px, 7vw, 104px) clamp(64px, 7vw, 104px);
   }
 
   .head-inner {
@@ -55,6 +52,7 @@ const hasAside = Astro.slots.has("aside")
     grid-template-columns: minmax(0, 1fr);
     gap: var(--s5);
     align-content: start;
+    justify-items: start;
     max-width: 46rem;
   }
 
@@ -63,40 +61,30 @@ const hasAside = Astro.slots.has("aside")
     gap: var(--s3);
   }
 
-  .crumbs ol {
+  .eyebrow {
+    font-size: var(--text-ui);
+    font-weight: 500;
+    color: var(--cobalt);
+  }
+
+  a.eyebrow:hover {
+    color: var(--deep);
+  }
+
+  .head-actions {
     display: flex;
     flex-wrap: wrap;
-    font-size: var(--text-ui);
-    color: var(--fog);
-  }
-
-  .crumbs li + li::before {
-    content: "/";
-    margin-inline: var(--s2);
-    color: var(--rule);
-  }
-
-  .crumbs a {
-    display: inline-block;
-    padding-block: var(--s2);
-  }
-
-  .crumbs a:hover {
-    color: var(--ink);
-  }
-
-  .crumbs [aria-current] {
-    padding-block: var(--s2);
-    color: var(--ink);
+    gap: var(--s3);
+    margin-top: var(--s2);
   }
 
   .head-aside {
     min-width: 0;
   }
 
-  @media (min-width: 1200px) {
+  @media (min-width: 1100px) {
     .head-split {
-      grid-template-columns: minmax(0, 6fr) minmax(0, 6fr);
+      grid-template-columns: minmax(0, 11fr) minmax(0, 12fr);
       column-gap: var(--s8);
       align-items: center;
     }
