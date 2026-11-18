@@ -9377,8 +9377,12 @@ export interface components {
             public_key: string;
             /** @description Ed25519 public key, 32 bytes. */
             signing_public_key: string;
-            /** @description Ed25519 signature by the previous generation's signing key, 64 bytes. Absent at generation 1. */
+            /** @description Ed25519 signature by the previous generation's signing key, 64 bytes. Absent at generation 1 and on a reset. */
             rotation_signature?: string;
+            /** @description Ed25519 public key, 32 bytes: the team owner's ENV vault writer key when generation 1 was made (the server sets it). Machines pin it with generation 1 and accept a reset only when it is signed by it. */
+            reset_public_key?: string;
+            /** @description Ed25519 signature by the previous generation's reset_public_key, 64 bytes. Present instead of rotation_signature on a reset: a new key made by the team owner when nobody holds the current one. */
+            reset_signature?: string;
         };
         /** @description A viewer's copy of one generation's private bundle, sealed to the viewer's vault sharing key. */
         RecordingSealedKey: {
@@ -9419,10 +9423,10 @@ export interface components {
             /** @description The caller's own copy of the current generation, to seal for viewers added later. Absent when the caller has no copy or it is not sealed to their current vault (reset since). */
             my_key?: components["schemas"]["RecordingSealedKey"];
         };
-        /** @description Generation 1, or a rotation signed by the current generation's signing key. */
+        /** @description Generation 1, a rotation signed by the current generation's signing key, or a reset (team owner only) signed by the reset key generation 1 pinned. */
         RecordingKeyCreate: {
             key: components["schemas"]["RecordingKey"];
-            /** @description Required for a rotation (generation > 1): the current private bundle sealed to the new key. Absent at generation 1. */
+            /** @description Required for a rotation (generation > 1): the current private bundle sealed to the new key. Absent at generation 1 and on a reset (older recordings become unreadable). */
             sealed_previous?: string;
             grants: components["schemas"]["RecordingGrant"][];
         };

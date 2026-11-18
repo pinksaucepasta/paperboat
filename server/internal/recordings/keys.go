@@ -6,6 +6,7 @@ import (
 	"errors"
 	"slices"
 	"strconv"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
@@ -142,17 +143,20 @@ func (s *Service) KeyState(ctx context.Context, account, workspace string) (reco
 	return out, err
 }
 
-// CreateKey is POST /v1/teams/{team}/recording-key (security admins): generation 1, or a rotation signed by the
+// CreateKey is POST /v1/teams/{team}/recording-key (security admins): generation 1, a reset (the team owner, for a key nobody
+// holds any more: signed by the owner's pinned reset key, no previous bundle, so older recordings stay unreadable), or a rotation signed by the
 // current generation's signing key that carries the current private bundle sealed to the new key. It must seal
 // for at least one viewer, so the key is never created with nobody holding it.
 func (s *Service) CreateKey(ctx context.Context, account, workspace string, in recording.KeyCreate) (recording.Key, error) {
 	k := in.Key
+	reset := len(k.ResetSignature) != 0
+	// A rotation carries the previous bundle sealed to the new key; a reset carries none (nobody holds it).
 	if !k.ValidKey() || k.Generation > s.cfg.MaxKeyGenerations || len(in.Grants) == 0 || len(in.Grants) > 1000 ||
-		(k.Generation == 1) != (len(in.SealedPrevious) == 0) || (k.Generation > 1 && !recording.ValidSealed(in.SealedPrevious)) {
+		(k.Generation == 1 || reset) != (len(in.SealedPrevious) == 0) || (k.Generation > 1 && !reset && !recording.ValidSealed(in.SealedPrevious)) {
 		return recording.Key{}, ErrInvalid
 	}
 	err := s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-		team, _, err := scopeTx(ctx, tx, account, workspace, teams.PermissionSecurityManage)
+		team, role, err := scopeTx(ctx, tx, account, workspace, teams.PermissionSecurityManage)
 		if err != nil {
 			return err
 		}
@@ -163,21 +167,51 @@ func (s *Service) CreateKey(ctx context.Context, account, workspace string, in r
 		if err != nil {
 			return err
 		}
-		if current == nil && k.Generation != 1 || current != nil && !recording.VerifyRotation(team, *current, k) {
+		owner, err := s.ownerWriterKey(ctx, tx, team)
+		if err != nil {
+			return err
+		}
+		switch {
+		case current == nil && k.Generation != 1:
 			return ErrKeyConflict
+		case current == nil:
+			// Generation 1 pins the owner's ENV writer key as the reset authority: what machines trust for a reset is the
+			// key the ENV team-vault reset already trusts (the server's record of the owner's vault), pinned with the
+			// first key exactly as generation 1 itself is. The server sets it; a client cannot name another.
+			k.ResetPublicKey = owner
+		case reset:
+			// Only the team owner resets, and only with the key the previous generation pinned: the same signature a
+			// machine checks, so what the server stores is what machines accept.
+			if role != "owner" || isPersonalScope(team) {
+				return ErrForbidden
+			}
+			if !recording.VerifyReset(team, *current, k) || owner == nil || !bytes.Equal(k.ResetPublicKey, current.ResetPublicKey) {
+				return ErrKeyConflict
+			}
+		default:
+			// A holder replaces the key; the reset authority it carries is signed over, and must stay what it was.
+			if !recording.VerifyRotation(team, *current, k) || !bytes.Equal(k.ResetPublicKey, current.ResetPublicKey) {
+				return ErrKeyConflict
+			}
 		}
 		var previous []byte
-		if k.Generation > 1 {
+		if k.Generation > 1 && !reset {
 			previous = in.SealedPrevious
 		}
-		if _, err := tx.Exec(ctx, `INSERT INTO recording_keys(team_id, generation, public_key, signing_public_key, rotation_signature, sealed_previous, created_by)
- VALUES ($1, $2, $3, $4, $5, $6, $7)`, team, k.Generation, k.PublicKey, k.SigningPublicKey, nilIfEmpty(k.RotationSignature), previous, account); err != nil {
+		if _, err := tx.Exec(ctx, `INSERT INTO recording_keys(team_id, generation, public_key, signing_public_key, rotation_signature, sealed_previous, reset_public_key, reset_signature, created_by)
+ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`, team, k.Generation, k.PublicKey, k.SigningPublicKey, nilIfEmpty(k.RotationSignature), previous, nilIfEmpty(k.ResetPublicKey), nilIfEmpty(k.ResetSignature), account); err != nil {
 			return err
 		}
 		if err := s.grantTx(ctx, tx, account, team, k.Generation, in.Grants, true); err != nil {
 			return err
 		}
-		action := map[bool]string{true: "recording_key_created", false: "recording_key_rotated"}[k.Generation == 1]
+		action := "recording_key_rotated"
+		switch {
+		case k.Generation == 1:
+			action = "recording_key_created"
+		case reset:
+			action = "recording_key_reset"
+		}
 		if err := auditTx(ctx, tx, account, team, action, "recording-key-"+strconv.FormatInt(k.Generation, 10), map[string]any{"generation": k.Generation, "rows": len(in.Grants)}); err != nil {
 			return err
 		}
@@ -293,4 +327,32 @@ func nilIfEmpty(b []byte) []byte {
 		return nil
 	}
 	return b
+}
+
+// ownerWriterKey is the team owner's ENV vault writer public key as the server records it (nil: the owner has no vault
+// yet, so the key cannot be reset). A personal scope's owner is its account.
+func (s *Service) ownerWriterKey(ctx context.Context, tx *db.Tx, team string) ([]byte, error) {
+	owner := strings.TrimPrefix(team, personalPrefix)
+	if !isPersonalScope(team) {
+		if err := tx.QueryRow(ctx, `SELECT owner_account FROM teams WHERE team_id = $1`, team).Scan(&owner); err != nil {
+			return nil, err
+		}
+	}
+	return s.writerKey(ctx, tx, owner)
+}
+
+func (s *Service) vaultWriterKey(ctx context.Context, tx *db.Tx, account string) ([]byte, error) {
+	var raw []byte
+	err := tx.QueryRow(ctx, `SELECT envelope FROM environment_password_vaults WHERE account_id = $1`, account).Scan(&raw)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	metadata, err := environment.ParsePasswordVaultMetadata(raw, s.issuer, account)
+	if err != nil {
+		return nil, err
+	}
+	return metadata.WriterPublicKey[:], nil
 }

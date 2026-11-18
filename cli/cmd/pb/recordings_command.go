@@ -58,11 +58,68 @@ func recordingsCobraCommand() *cobra.Command {
 	keyGroup := &cobra.Command{Use: "key", Short: "Manage a team's recording key", Long: "Manage the team recording key that terminal recordings are sealed to. A team member who holds a copy of the current key can replace it with `pb recordings key replace`: the new key is made and signed on this computer, and machines accept it only through that signature.", Args: commandArgs(cobra.NoArgs), RunE: func(command *cobra.Command, _ []string) error { return command.Help() }}
 	replace := &cobra.Command{Use: "replace", Short: "Replace the team's recording key with a new one signed by your copy of the current key", Long: "Replace the team's recording key.\n\nThe new key is made and signed here with your ENV vault: only a member who holds a copy of the current key can sign the next one, so machines follow it through the signed chain and never because the server says so. Everyone who can replay gets a copy of the new key, and older recordings stay readable through a link sealed to it. The key and its private halves never leave this computer in plaintext.\n\nNeeds the security permission on the team and an unlocked ENV vault (`pb env unlock`).", Args: commandArgs(cobra.NoArgs), RunE: actionRun(recordingsKeyReplace)}
 	replace.Flags().String("team", "", "team whose key to replace; defaults to the active workspace")
-	replace.Flags().String("confirm", "", "must be `REPLACE RECORDING KEY <team>`")
+	replace.Flags().String("confirm", "", "the team id, typed to confirm")
 	replace.Flags().Bool("json", false, "print JSON")
-	keyGroup.AddCommand(replace)
+	reset := &cobra.Command{Use: "reset", Short: "Replace a recording key nobody holds any more; older recordings become unreadable", Long: "Reset the team's recording key when nobody holds it any more.\n\nOnly the team owner can. The new key is made here and signed with your ENV vault's writer key, the identity the ENV team-vault reset uses; machines accept it only because that signature verifies under the key they pinned for the team, never because the server says so. Everyone who can replay gets a copy of the new key. Recordings made before cannot be opened by anyone, you included: use `pb recordings key replace` instead while any member still holds the key.\n\nNeeds an unlocked ENV vault (`pb env unlock`).", Args: commandArgs(cobra.NoArgs), RunE: actionRun(recordingsKeyReset)}
+	reset.Flags().String("team", "", "team whose key to reset; defaults to the active workspace")
+	reset.Flags().String("confirm", "", "the team id, typed to confirm")
+	reset.Flags().Bool("json", false, "print JSON")
+	keyGroup.AddCommand(replace, reset)
 	group.AddCommand(list, play, export, keyGroup)
 	return group
+}
+
+// recordingsKeyReset replaces a recording key nobody holds with one signed by the owner's ENV writer key
+// (recording.ResetKey); the server stores it only for the team owner, and machines accept it only on that signature.
+func recordingsKeyReset(c *command.Context) error {
+	client, err := backendClient(c)
+	if err != nil {
+		return err
+	}
+	team := strings.TrimSpace(c.String("team"))
+	if team == "" {
+		team = client.Workspace()
+	}
+	if team == "" || team == wire.PersonalWorkspace {
+		return localArgumentError("name the team with --team <team-id>; resetting is for teams")
+	}
+	if c.String("confirm") != team {
+		return localArgumentError("resetting the key makes every recording made before it unreadable; type the team to confirm: --confirm " + team)
+	}
+	parent, ok := c.Context.Value(confirmationCommandKey{}).(*cobra.Command)
+	if !ok {
+		return errors.New("resetting the key requires CLI command context")
+	}
+	vault, err := passwordVaultForCommand(parent)
+	if err != nil {
+		return err
+	}
+	state, err := client.RecordingKeyState(c.Context, team)
+	if err != nil {
+		return err
+	}
+	var request wire.KeyCreate
+	err = vault.WithUnlockedKeys(c.Context, func(keys *environmente2ee.VaultKeys) (makeErr error) {
+		request, makeErr = recording.ResetKey(keys.WriterSeed, team, state)
+		return makeErr
+	})
+	switch {
+	case errors.Is(err, environmentmanager.ErrVaultLocked):
+		return localArgumentError("your ENV vault is locked on this computer; run `pb env unlock`, then retry")
+	case errors.Is(err, recording.ErrNotResetAuthority):
+		return localArgumentError("only the team owner's ENV key can reset this team's recording key")
+	case err != nil:
+		return err
+	}
+	key, err := client.ReplaceRecordingKey(c.Context, team, request)
+	if err != nil {
+		return err
+	}
+	if c.Bool("json") {
+		return json.NewEncoder(c.Writer).Encode(map[string]any{"team": team, "generation": key.Generation, "copies": len(request.Grants), "older_recordings_readable": false})
+	}
+	_, err = fmt.Fprintf(c.Writer, "Reset the recording key of %s: generation %d, %d members got a copy. Recordings made before cannot be opened by anyone.\n", team, key.Generation, len(request.Grants))
+	return err
 }
 
 // recordingsKeyReplace makes the next generation of a team's recording key with this account's unlocked vault
@@ -79,8 +136,8 @@ func recordingsKeyReplace(c *command.Context) error {
 	if team == "" || team == wire.PersonalWorkspace {
 		return localArgumentError("name the team with --team <team-id>; a personal workspace's key is replaced in the console")
 	}
-	if c.String("confirm") != "REPLACE RECORDING KEY "+team {
-		return localArgumentError("replacing the key requires --confirm `REPLACE RECORDING KEY " + team + "`")
+	if c.String("confirm") != team {
+		return localArgumentError("replacing the key requires --confirm " + team)
 	}
 	parent, ok := c.Context.Value(confirmationCommandKey{}).(*cobra.Command)
 	if !ok {

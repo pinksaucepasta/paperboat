@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/ecdh"
+	"crypto/ed25519"
 	"testing"
 	"time"
 
@@ -166,6 +167,9 @@ func TestRecordingKeyRotateKeepsOldRecordingsReadable(t *testing.T) {
 		out := wire.Key{Generation: generation}
 		out.PublicKey, _ = decode(key["public_key"].(string))
 		out.SigningPublicKey, _ = decode(key["signing_public_key"].(string))
+		if reset, ok := key["reset_public_key"].(string); ok && reset != "" {
+			out.ResetPublicKey, _ = decode(reset)
+		}
 		if signature, ok := key["rotation_signature"].(string); ok {
 			out.RotationSignature, _ = decode(signature)
 		}
@@ -199,5 +203,48 @@ func TestRecordingKeyRotateKeepsOldRecordingsReadable(t *testing.T) {
 	open.Chain = nil
 	if _, err := bob.run(ctx, open); err == nil {
 		t.Fatal("generation 1 opened without the chain link")
+	}
+}
+
+// The team owner resets a key nobody holds, in the browser worker: the worker's ENV writer key signs the next
+// generation, which verifies under the reset key the old generation carries; another account's worker cannot, and
+// no link to the old generation is made.
+func TestRecordingKeyResetIsSignedByTheOwnersWriterKey(t *testing.T) {
+	ctx := context.Background()
+	owner, a := initialized(t)
+	defer owner.clear()
+	other, b := secondVault(t, "account-other")
+	defer other.clear()
+	resetPublic := ed25519.NewKeyFromSeed(owner.keys.WriterSeed).Public().(ed25519.PublicKey)
+	viewers := []recordingViewer{{AccountID: a.Account, SharingPublicKey: sharingPublic(t, owner)}, {AccountID: b.Account, SharingPublicKey: sharingPublic(t, other)}}
+	request := request{Action: "recording-key-reset", TeamID: "team-one", Generation: 1, ResetPublicKey: encoded(resetPublic), Viewers: viewers}
+
+	out, err := owner.run(ctx, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reset := out.(map[string]any)
+	key := reset["key"].(map[string]any)
+	next := wire.Key{Generation: 2}
+	next.PublicKey, _ = decode(key["public_key"].(string))
+	next.SigningPublicKey, _ = decode(key["signing_public_key"].(string))
+	next.ResetPublicKey, _ = decode(key["reset_public_key"].(string))
+	next.ResetSignature, _ = decode(key["reset_signature"].(string))
+	previous := wire.Key{Generation: 1, PublicKey: make([]byte, 32), SigningPublicKey: make([]byte, 32), ResetPublicKey: resetPublic}
+	if key["generation"] != int64(2) || !wire.VerifyReset("team-one", previous, next) || wire.VerifyRotation("team-one", previous, next) {
+		t.Fatalf("the reset is not a reset successor signed by the owner's writer key: %+v", key)
+	}
+	if grants := reset["grants"].([]recordingGrant); len(grants) != 2 {
+		t.Fatalf("every viewer gets a copy of the new generation: %d", len(grants))
+	}
+	if _, ok := reset["sealed_previous"]; ok {
+		t.Fatal("a reset has no previous bundle to seal")
+	}
+	if _, err := other.run(ctx, request); err == nil {
+		t.Fatal("another account's worker reset the team's key")
+	}
+	request.Generation = 0
+	if _, err := owner.run(ctx, request); err == nil {
+		t.Fatal("a reset without a generation was made")
 	}
 }

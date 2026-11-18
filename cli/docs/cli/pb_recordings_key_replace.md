@@ -19,10 +19,10 @@ pb recordings key replace [flags]
 ### Options
 
 ```
-      --confirm REPLACE RECORDING KEY <team>   must be REPLACE RECORDING KEY <team>
-  -h, --help                                   help for replace
-      --json                                   print JSON
-      --team string                            team whose key to replace; defaults to the active workspace
+      --confirm string   the team id, typed to confirm
+  -h, --help             help for replace
+      --json             print JSON
+      --team string      team whose key to replace; defaults to the active workspace
 ```
 
 ### Options inherited from parent commands

@@ -156,7 +156,7 @@ func newKey(t *testing.T, team string, gen int64, previous ed25519.PrivateKey) (
 	}
 	k := recording.Key{Generation: gen, PublicKey: random(t, 32), SigningPublicKey: pub}
 	if previous != nil {
-		k.RotationSignature = ed25519.Sign(previous, recording.RotationMessage(team, gen, k.PublicKey, k.SigningPublicKey))
+		k.RotationSignature = ed25519.Sign(previous, recording.RotationMessage(team, gen, k.PublicKey, k.SigningPublicKey, k.ResetPublicKey))
 	}
 	return k, priv
 }
@@ -538,5 +538,82 @@ func TestPostgresPersonalRecordings(t *testing.T) {
 	}
 	if _, err := f.s.Replay(f.ctx, f.member, recID, recording.ReplayRequest{Source: recording.SourceBucket}); !errors.Is(err, ErrNoBucket) && !errors.Is(err, ErrNotArchived) {
 		t.Fatalf("bucket replay of a personal recording = %v, want no bucket", err)
+	}
+}
+
+// Replacing a key nobody holds: the team owner's reset, signed by the reset key generation 1 pinned (the owner's ENV
+// vault writer key, as the server records it), is stored and machines can follow it; an admin's, one signed by anyone
+// else, or one that carries a previous bundle is refused. Without a sealed previous bundle the recordings made before
+// can no longer be opened by anyone: replay says the key is unavailable.
+func TestPostgresRecordingKeyResetIsTheOwnersAndLeavesOldRecordingsUnreadable(t *testing.T) {
+	f := newFixture(t)
+	ownerPub, owner, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.s.writerKey = func(_ context.Context, _ *db.Tx, account string) ([]byte, error) {
+		if account == f.owner {
+			return ownerPub, nil
+		}
+		return nil, nil
+	}
+	f.paid()
+	source := `{"tags": {"tag:prod": ["machine:prod"]}, "rules": [
+		{"src": ["role:member"], "dst": ["tag:prod"], "allow": ["record"]},
+		{"src": ["user:` + f.member + `@example.test"], "dst": ["machine:prod"], "allow": ["recording_view"]}]}`
+	if err := f.policy(source); err != nil {
+		t.Fatal(err)
+	}
+	k1, _ := newKey(t, f.team, 1, nil)
+	k1.ResetPublicKey = random(t, 32) // a client cannot name the reset authority: the server pins the owner's
+	if _, err := f.s.CreateKey(f.ctx, f.owner, f.team, recording.KeyCreate{Key: k1, Grants: []recording.Grant{f.grant(f.member)}}); err != nil {
+		t.Fatal(err)
+	}
+	pinned := f.machinePolicy(f.prod).Keys
+	if len(pinned) != 1 || !bytes.Equal(pinned[0].ResetPublicKey, ownerPub) {
+		t.Fatalf("generation 1 must pin the owner's writer key as the reset key: %+v", pinned)
+	}
+	now := time.Now().UTC()
+	started := recording.Report{RecordingID: recID, SessionID: "sess_1", Trigger: recording.TriggerRule, KeyGeneration: 1, Accounts: []string{f.member}, StartedAt: now}
+	if err := f.store.InTx(f.ctx, func(ctx context.Context, tx *db.Tx) error {
+		return ApplyReportTx(ctx, tx, f.prod, recording.KindStarted, started)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	reset := func(signer ed25519.PrivateKey) recording.Key {
+		pub, _, _ := ed25519.GenerateKey(rand.Reader)
+		k := recording.Key{Generation: 2, PublicKey: random(t, 32), SigningPublicKey: pub, ResetPublicKey: ownerPub}
+		k.ResetSignature = ed25519.Sign(signer, recording.ResetMessage(f.team, 2, k.PublicKey, k.SigningPublicKey, k.ResetPublicKey))
+		return k
+	}
+	request := func(k recording.Key) recording.KeyCreate {
+		return recording.KeyCreate{Key: k, Grants: []recording.Grant{f.grant(f.member)}}
+	}
+	if _, err := f.s.CreateKey(f.ctx, f.admin, f.team, request(reset(owner))); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("an admin's reset = %v", err)
+	}
+	_, other, _ := ed25519.GenerateKey(rand.Reader)
+	if _, err := f.s.CreateKey(f.ctx, f.owner, f.team, request(reset(other))); !errors.Is(err, ErrKeyConflict) {
+		t.Fatalf("a reset signed by another key = %v", err)
+	}
+	withPrevious := request(reset(owner))
+	withPrevious.SealedPrevious = sealed("a previous bundle nobody can open")
+	if _, err := f.s.CreateKey(f.ctx, f.owner, f.team, withPrevious); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("a reset that carries a previous bundle = %v", err)
+	}
+	if _, err := f.s.CreateKey(f.ctx, f.owner, f.team, request(reset(owner))); err != nil {
+		t.Fatal(err)
+	}
+	keys := f.machinePolicy(f.prod).Keys
+	if len(keys) != 2 || !recording.VerifyLink(f.team, keys[0], keys[1]) || recording.VerifyRotation(f.team, keys[0], keys[1]) {
+		t.Fatalf("a machine must follow the reset as a reset: %+v", keys)
+	}
+	// Nobody can open the recording made under generation 1: there is no chain link to it.
+	if _, err := f.s.Replay(f.ctx, f.member, recID, f.native()); !errors.Is(err, ErrKeyUnavailable) {
+		t.Fatalf("replay of a recording made before the reset = %v, want ErrKeyUnavailable", err)
+	}
+	var audited int
+	if err := f.store.SQL().QueryRowContext(f.ctx, `SELECT count(*) FROM paperboat.audit_events WHERE event_type LIKE '%recording_key_reset%'`).Scan(&audited); err != nil || audited < 1 {
+		t.Fatalf("the reset must be audited: %d %v", audited, err)
 	}
 }

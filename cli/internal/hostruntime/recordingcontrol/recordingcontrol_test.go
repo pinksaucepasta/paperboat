@@ -33,7 +33,7 @@ func newKey(t *testing.T, team string, generation int64, previous *keyPair) keyP
 	}
 	key := wire.Key{Generation: generation, PublicKey: public, SigningPublicKey: signingPublic}
 	if previous != nil {
-		key.RotationSignature = ed25519.Sign(previous.signing, wire.RotationMessage(team, generation, public, signingPublic))
+		key.RotationSignature = ed25519.Sign(previous.signing, wire.RotationMessage(team, generation, public, signingPublic, nil))
 	}
 	return keyPair{key: key, signing: signing}
 }
@@ -343,7 +343,7 @@ func TestMachineFollowsAReplacementMadeByAMemberAndRefusesOneMadeByTheServer(t *
 	}
 	replace := func(current int64, from recording.Bundle, previous wire.Key) (wire.Key, recording.Bundle) {
 		t.Helper()
-		rotation, err := recording.Rotate("team_1", current, from)
+		rotation, err := recording.Rotate("team_1", current, from, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -358,5 +358,49 @@ func TestMachineFollowsAReplacementMadeByAMemberAndRefusesOneMadeByTheServer(t *
 	serverMade := newKey(t, "team_1", 4, &keyPair{signing: newKey(t, "team_1", 1, nil).signing})
 	if got, err := store.Replace(policyWith(3, first, second, third, serverMade.key)); !errors.Is(err, ErrKeyUnverified) || got.Key != nil || got.Usable() {
 		t.Fatalf("a replacement the server made up was accepted: %+v %v", got.Key, err)
+	}
+}
+
+// The team owner resets a key nobody holds: a machine that pinned generation 1 (carrying the owner's ENV writer key as
+// its reset key) follows the reset because that key signed it, and refuses the same reset signed by any other key or
+// made by the server alone.
+func TestMachineFollowsAResetSignedByThePinnedOwnerKeyOnly(t *testing.T) {
+	store, err := OpenPolicyStore(filepath.Join(t.TempDir(), "policy.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	seed := make([]byte, ed25519.SeedSize)
+	_, _ = rand.Read(seed)
+	ownerPub := ed25519.NewKeyFromSeed(seed).Public().(ed25519.PublicKey)
+	first := newKey(t, "team_1", 1, nil)
+	first.key.ResetPublicKey = ownerPub
+	if got, err := store.Replace(policyWith(1, first.key)); err != nil || got.Key == nil || got.Key.Generation != 1 {
+		t.Fatalf("pin %+v %v", got.Key, err)
+	}
+	viewer, err := ecdh.X25519().GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := wire.KeyState{Key: &first.key, Viewers: []wire.Viewer{{AccountID: "owner", SharingPublicKey: viewer.PublicKey().Bytes()}}}
+	request, err := recording.ResetKey(seed, "team_1", state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := store.Replace(policyWith(2, first.key, request.Key)); err != nil || got.Key == nil || got.Key.Generation != 2 || !got.Usable() {
+		t.Fatalf("a reset signed by the pinned owner key must be followed: %+v %v", got.Key, err)
+	}
+	// The same reset signed by another key, and one the server made with no signature at all, are not followed.
+	other := make([]byte, ed25519.SeedSize)
+	_, _ = rand.Read(other)
+	forged := request.Key
+	forged.ResetSignature = ed25519.Sign(ed25519.NewKeyFromSeed(other), wire.ResetMessage("team_1", 2, forged.PublicKey, forged.SigningPublicKey, forged.ResetPublicKey))
+	again, _ := OpenPolicyStore(filepath.Join(t.TempDir(), "again.json"))
+	_, _ = again.Replace(policyWith(1, first.key))
+	if got, err := again.Replace(policyWith(2, first.key, forged)); !errors.Is(err, ErrKeyUnverified) || got.Key != nil || got.Usable() {
+		t.Fatalf("a reset signed by another key was followed: %+v %v", got.Key, err)
+	}
+	serverMade := newKey(t, "team_1", 2, &keyPair{signing: newKey(t, "team_1", 1, nil).signing})
+	if got, err := again.Replace(policyWith(3, first.key, serverMade.key)); !errors.Is(err, ErrKeyUnverified) || got.Key != nil {
+		t.Fatalf("a generation the server made up was followed: %+v %v", got.Key, err)
 	}
 }

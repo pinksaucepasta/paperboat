@@ -32,4 +32,5 @@ pb recordings key [flags]
 
 * [pb recordings](pb_recordings.md)	 - List and replay terminal recordings
 * [pb recordings key replace](pb_recordings_key_replace.md)	 - Replace the team's recording key with a new one signed by your copy of the current key
+* [pb recordings key reset](pb_recordings_key_reset.md)	 - Replace a recording key nobody holds any more; older recordings become unreadable
 
