@@ -49,11 +49,14 @@ func TestParseHonorsWithdrawnKeysAndBounds(t *testing.T) {
 
 func TestParseRefusesWhatTheStrictTunnelParserRefused(t *testing.T) {
 	good := key(t, "good")
+	// RFC 7517 section 4: a member a newer server adds is ignored, so released edges and relays keep trusting.
+	if _, err := Parse([]byte(`{"keys":[` + good + `],"extra":1}`)); err != nil {
+		t.Fatalf("unknown member refused: %v", err)
+	}
 	for name, doc := range map[string]string{
 		"empty":            ``,
 		"not json":         `not json`,
 		"trailing value":   `{"keys":[` + good + `]}{}`,
-		"unknown field":    `{"keys":[` + good + `],"extra":1}`,
 		"too deep":         `{"keys":[` + good + `],"withdrawn_key_ids":` + strings.Repeat("[", 70) + strings.Repeat("]", 70) + `}`,
 		"no keys":          `{"keys":[]}`,
 		"missing use":      `{"keys":[` + strings.Replace(good, `"use":"sig",`, "", 1) + `]}`,

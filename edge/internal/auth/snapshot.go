@@ -104,7 +104,7 @@ func (s *Snapshot) ReplaceRevocations(data []byte) error {
 		return ErrSnapshotInvalid
 	}
 	var document RevocationDocument
-	if strictSnapshotJSON(data, &document) != nil || len(document.JTIs)+len(document.Environments)+len(document.Connectors)+len(document.KeyIDs) > 10000 {
+	if snapshotJSON(data, &document) != nil || len(document.JTIs)+len(document.Environments)+len(document.Connectors)+len(document.KeyIDs) > 10000 {
 		return ErrSnapshotInvalid
 	}
 	jtis, environments, connectors, keys := map[string]struct{}{}, map[string]struct{}{}, map[connectorGeneration]struct{}{}, map[string]struct{}{}
@@ -206,8 +206,13 @@ func (s *Snapshot) revokedLocked(claims admission.Claims) bool {
 	_, d := s.revokedKey[claims.KeyID]
 	return a || b || c || d
 }
-func strictSnapshotJSON(data []byte, target any) error {
-	if strictjson.Decode(data, target, maxSnapshotJSONDepth) != nil {
+
+// snapshotJSON ignores fields a newer server adds to a revocation document; a released edge must
+// keep applying revocations from every later server (AGENTS.md). The document replaces every set, so
+// a server keeps writing each revocation into these fields for every edge whose capability version
+// (shared/capver) predates a new field: a revocation only in a new field would be lost here.
+func snapshotJSON(data []byte, target any) error {
+	if strictjson.DecodeResponse(data, target, maxSnapshotJSONDepth) != nil {
 		return ErrSnapshotInvalid
 	}
 	return nil

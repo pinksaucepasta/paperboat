@@ -86,7 +86,8 @@ func decode(raw []byte) (map[string]ed25519.PublicKey, []string, error) {
 		return nil, nil, ErrInvalid
 	}
 	var doc document
-	if strictjson.Decode(raw, &doc, maxDepth) != nil || len(doc.Keys) == 0 || len(doc.Keys) > MaxKeys || len(doc.WithdrawnKeyIDs) > MaxKeys {
+	// Unknown members are ignored as RFC 7517 section 4 requires; each key is still checked exactly.
+	if strictjson.DecodeResponse(raw, &doc, maxDepth) != nil || len(doc.Keys) == 0 || len(doc.Keys) > MaxKeys || len(doc.WithdrawnKeyIDs) > MaxKeys {
 		return nil, nil, ErrInvalid
 	}
 	keys := make(map[string]ed25519.PublicKey, len(doc.Keys))

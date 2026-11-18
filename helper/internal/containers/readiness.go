@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/relay/selfhost"
+	"github.com/pinksaucepasta/paperboat/shared/capver"
 )
 
 type NodeReadiness struct {
@@ -111,7 +112,7 @@ func newNodeClient(capability, dir string) (*nodeClient, error) {
 		}
 		transport.TLSClientConfig.RootCAs = pool
 	}
-	node.http = &http.Client{Transport: transport, Timeout: 5 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	node.http = &http.Client{Transport: capver.Transport(transport), Timeout: 5 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	return node, nil
 }
 

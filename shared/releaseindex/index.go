@@ -77,7 +77,16 @@ type indexDecodeFailure struct{ cause error }
 func (indexDecodeFailure) Error() string     { return "signed release index is invalid" }
 func (e indexDecodeFailure) Unwrap() []error { return []error{ErrInvalid, e.cause} }
 
-func Decode(reader io.Reader, now time.Time) (Index, error) {
+// Decode reads an index as an updater does: fields a later publication adds are ignored.
+func Decode(reader io.Reader, now time.Time) (Index, error) { return decode(reader, now, false) }
+
+// DecodePublished reads an index as its publisher and the server check it: strictly, because
+// released updaters before the tolerant Decode (2026.11.16.2 and older) refuse unknown fields.
+func DecodePublished(reader io.Reader, now time.Time) (Index, error) {
+	return decode(reader, now, true)
+}
+
+func decode(reader io.Reader, now time.Time, strict bool) (Index, error) {
 	if reader == nil {
 		return Index{}, ErrInvalid
 	}
@@ -89,8 +98,13 @@ func Decode(reader io.Reader, now time.Time) (Index, error) {
 	if len(body) > maxBytes {
 		return Index{}, ErrInvalid
 	}
+	// Unknown fields are ignored, as TUF does with unrecognized metadata fields: a released updater
+	// must read every later index. Enum values (severity, rollout state, triggers) stay checked, so the
+	// publisher adds a value only once the update floor has passed every release that lacks it.
 	decoder := json.NewDecoder(bytes.NewReader(body))
-	decoder.DisallowUnknownFields()
+	if strict {
+		decoder.DisallowUnknownFields()
+	}
 	var index Index
 	if err := decoder.Decode(&index); err != nil {
 		return Index{}, indexDecodeFailure{cause: err}

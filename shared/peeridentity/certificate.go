@@ -20,11 +20,13 @@ const (
 )
 
 var (
-	ErrInvalid     = errors.New("endpoint certificate is invalid")
-	ErrSignature   = errors.New("endpoint certificate signature is invalid")
-	ErrIdentity    = errors.New("endpoint certificate identity does not match")
-	ErrNotCurrent  = errors.New("endpoint certificate is not currently valid")
-	identifierExpr = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$`)
+	ErrInvalid    = errors.New("endpoint certificate is invalid")
+	ErrSignature  = errors.New("endpoint certificate signature is invalid")
+	ErrIdentity   = errors.New("endpoint certificate identity does not match")
+	ErrNotCurrent = errors.New("endpoint certificate is not currently valid")
+	// ErrUnsupportedVersion: the certificate uses a layout newer than this build; update Paperboat.
+	ErrUnsupportedVersion = errors.New("endpoint certificate uses a newer format; update Paperboat on this machine")
+	identifierExpr        = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$`)
 )
 
 type Role uint8
@@ -106,8 +108,14 @@ func parse(raw []byte) (Certificate, []byte, []byte, error) {
 		return Certificate{}, nil, nil, ErrInvalid
 	}
 	payload := raw[:len(raw)-ed25519.SignatureSize]
-	if len(payload) < 5 || string(payload[:4]) != "PBEC" || payload[4] != ProtocolVersion {
+	if len(payload) < 5 || string(payload[:4]) != "PBEC" {
 		return Certificate{}, nil, nil, ErrInvalid
+	}
+	// One case per layout this build reads; a later layout is added as a new case, never in place.
+	switch payload[4] {
+	case ProtocolVersion:
+	default:
+		return Certificate{}, nil, nil, ErrUnsupportedVersion
 	}
 	offset := 5
 	accountID, err := readString(payload, &offset)

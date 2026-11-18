@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strconv"
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/buildinfo"
 	"github.com/pinksaucepasta/paperboat/cli/internal/errorreport"
+	"github.com/pinksaucepasta/paperboat/shared/capver"
 	clientapi "github.com/pinksaucepasta/paperboat/shared/client/api"
 	"github.com/pinksaucepasta/paperboat/shared/recipe"
 )
@@ -68,7 +70,7 @@ func publicCallOptions(hc *http.Client) clientapi.CallOptions {
 	}
 	options := clientapi.CallOptions{
 		HTTPClient:      hc,
-		Headers:         http.Header{"User-Agent": {"paperboat/" + buildinfo.Version}, "X-Paperboat-Client": {ClientID}, "X-Paperboat-Protocol": {buildinfo.ProtocolVersion}},
+		Headers:         http.Header{"User-Agent": {"paperboat/" + buildinfo.Version}, "X-Paperboat-Client": {ClientID}, "X-Paperboat-Protocol": {buildinfo.ProtocolVersion}, capver.Header: {strconv.Itoa(capver.Version)}},
 		DecodeError:     func(err error) error { return &ResponseDecodeError{Err: err} },
 		StatusFailure:   errorreport.HTTPStatusFailure,
 		AttemptObserved: errorreport.HTTPAttemptObserved,

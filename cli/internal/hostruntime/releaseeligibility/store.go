@@ -291,8 +291,8 @@ func decode(body []byte) (releasepolicy.Deferral, error) {
 		}
 		return releasepolicy.Deferral{}, safeStoreFailure("release eligibility record is invalid", ErrInvalidRecord, err)
 	}
+	// A newer build may have written this before an update rolled back to this one: ignore its fields.
 	decoder := json.NewDecoder(bytes.NewReader(body))
-	decoder.DisallowUnknownFields()
 	var deferral releasepolicy.Deferral
 	var extra any
 	if err := decoder.Decode(&deferral); err != nil {

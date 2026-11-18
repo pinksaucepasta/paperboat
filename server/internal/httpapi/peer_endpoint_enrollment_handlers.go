@@ -92,7 +92,7 @@ func machineEndpointRequest(service machineEndpointRequester, verifier machineEn
 			// machine row of a pairing that is still completing, which the runtime retries (transientNativePeerStart).
 			case expectedHTTPErrorOnly(err, wire.ErrNotCurrent):
 				status, code = http.StatusBadRequest, "certificate_expired"
-			case expectedHTTPErrorOnly(err, wire.ErrIdentity, wire.ErrSignature):
+			case expectedHTTPErrorOnly(err, wire.ErrIdentity, wire.ErrSignature, wire.ErrUnsupportedVersion):
 				status, code = http.StatusBadRequest, "invalid_certificate"
 			}
 			logIdentityRejection(r, status, err)

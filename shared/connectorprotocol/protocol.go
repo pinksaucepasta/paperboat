@@ -24,8 +24,14 @@ import (
 )
 
 const (
-	ProtocolName    = "paperboat.connector"
-	ProtocolVersion = "1.0"
+	ProtocolName = "paperboat.connector"
+	// ProtocolVersion is the highest version this build speaks and MinProtocolVersion the lowest.
+	// Peers negotiate inside both ranges (NegotiateVersion), never require equality.
+	ProtocolVersion    = "1.0"
+	MinProtocolVersion = "1.0"
+	// transcriptVersion is fixed in signed proof transcripts; their domain string versions them,
+	// so a protocol bump never changes what an older signer signed.
+	transcriptVersion = "1.0"
 
 	// A frame carries one complete configuration snapshot. The envelope is
 	// intentionally larger than MaxSnapshotBytes so the snapshot limit is
@@ -403,23 +409,40 @@ func NegotiateCapabilities(offered, supported []string) ([]string, error) {
 	return selected, nil
 }
 
+// NegotiateVersion returns the highest version inside both the peer's [minVersion, maxVersion]
+// and this build's [MinProtocolVersion, ProtocolVersion].
 func NegotiateVersion(minVersion, maxVersion string) (string, error) {
-	if !versionPattern.MatchString(minVersion) || !versionPattern.MatchString(maxVersion) {
+	peerMin, okMin := versionKey(minVersion)
+	peerMax, okMax := versionKey(maxVersion)
+	ownMin, _ := versionKey(MinProtocolVersion)
+	ownMax, _ := versionKey(ProtocolVersion)
+	if !okMin || !okMax || peerMin > peerMax || peerMax < ownMin || peerMin > ownMax {
 		return "", CodeError(ErrProtocolIncompatible, ReasonProtocolMismatch, false, nil)
 	}
-	minMajor, minMinor, minOK := parseVersion(minVersion)
-	maxMajor, maxMinor, maxOK := parseVersion(maxVersion)
-	selectedMajor, selectedMinor, selectedOK := parseVersion(ProtocolVersion)
-	if !maxOK || !selectedOK {
-		return "", CodeError(ErrProtocolIncompatible, ReasonProtocolMismatch, false, nil)
-	}
-	if !minOK {
-		return "", CodeError(ErrProtocolIncompatible, ReasonProtocolMismatch, false, nil)
-	}
-	if minMajor > maxMajor || minMajor > selectedMajor || maxMajor < selectedMajor || minMajor == selectedMajor && minMinor > selectedMinor || maxMajor == selectedMajor && maxMinor < selectedMinor {
-		return "", CodeError(ErrProtocolIncompatible, ReasonProtocolMismatch, false, nil)
+	if peerMax < ownMax {
+		return maxVersion, nil
 	}
 	return ProtocolVersion, nil
+}
+
+// versionInRange reports whether version lies inside [minVersion, maxVersion].
+func versionInRange(version, minVersion, maxVersion string) bool {
+	v, ok := versionKey(version)
+	low, okLow := versionKey(minVersion)
+	high, okHigh := versionKey(maxVersion)
+	return ok && okLow && okHigh && low <= v && v <= high
+}
+
+// versionKey orders "major.minor" versions; components are capped so the key cannot overflow.
+func versionKey(value string) (uint64, bool) {
+	if !versionPattern.MatchString(value) {
+		return 0, false
+	}
+	major, minor, ok := parseVersion(value)
+	if !ok || major > 1<<20 || minor > 1<<20 {
+		return 0, false
+	}
+	return uint64(major)<<32 | uint64(minor), true
 }
 
 func parseVersion(value string) (int, int, bool) {
@@ -469,6 +492,8 @@ const (
 	MessageRotationAck       = MessageCredentialRotationAck
 )
 
+// A released peer refuses message types, codes and reasons it does not know. So a new one is sent
+// only to a peer whose hello offered the capability that introduced it (NegotiateCapabilities).
 var allowedMessageTypes = map[MessageType]struct{}{
 	MessageHello: {}, MessageWelcome: {}, MessageSnapshot: {}, MessageDelta: {},
 	MessageAck: {}, MessageReady: {}, MessageHeartbeat: {}, MessageHeartbeatAck: {},
@@ -839,12 +864,12 @@ func decodeWire(data []byte, target any, exact bool) error {
 	return nil
 }
 
-// compatibleVersion accepts any minor of the supported major. The hello exchange (NegotiateVersion)
-// is the protocol gate; per-frame stamps only need to belong to the same major.
+// compatibleVersion accepts any well-formed version. The hello exchange (NegotiateVersion) is the
+// protocol gate; a per-frame stamp is the sender's build version, which may be newer than the one
+// negotiated, so refusing it would cut released peers off from every later release.
 func compatibleVersion(value string) bool {
-	major, _, ok := parseVersion(value)
-	want, _, _ := parseVersion(ProtocolVersion)
-	return ok && major == want
+	_, ok := versionKey(value)
+	return ok
 }
 
 func validatePayloadJSON(data []byte) error {

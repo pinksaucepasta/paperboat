@@ -57,6 +57,7 @@ func TestMachineEndpointRequestMapsEachRegistrationFailureToItsStatus(t *testing
 		{"not current", wire.ErrNotCurrent, http.StatusBadRequest, "certificate_expired"},
 		{"identity", wire.ErrIdentity, http.StatusBadRequest, "invalid_certificate"},
 		{"signature", wire.ErrSignature, http.StatusBadRequest, "invalid_certificate"},
+		{"newer layout", wire.ErrUnsupportedVersion, http.StatusBadRequest, "invalid_certificate"},
 		{"wrapped signature", fmt.Errorf("verify: %w", wire.ErrSignature), http.StatusBadRequest, "invalid_certificate"},
 		{"no machine row", peeridentity.ErrUnavailable, http.StatusServiceUnavailable, "temporarily_unavailable"},
 		{"unexpected", errors.New("database unavailable"), http.StatusServiceUnavailable, "temporarily_unavailable"},

@@ -8,6 +8,7 @@ import (
 	"errors"
 	clientapi "github.com/pinksaucepasta/paperboat/shared/client/api"
 	"github.com/pinksaucepasta/paperboat/shared/peerconsumer"
+	"github.com/pinksaucepasta/paperboat/shared/strictjson"
 	"strings"
 	"time"
 )
@@ -133,8 +134,13 @@ func Parse(encoded []byte, now time.Time) (Header, error) {
 	if len(encoded) == 0 || len(encoded) > MaximumHeaderSize {
 		return Header{}, ErrInvalid
 	}
+	// The header is a request; the authority is its Credential, which the host verifies. A field a newer
+	// client adds is ignored, so a released host keeps serving later clients (AGENTS.md); duplicate keys
+	// stay refused so one header cannot name two credentials or targets.
+	if strictjson.Validate(encoded, 8) != nil {
+		return Header{}, ErrInvalid
+	}
 	decoder := json.NewDecoder(bytes.NewReader(encoded))
-	decoder.DisallowUnknownFields()
 	var value Header
 	if err := decoder.Decode(&value); err != nil {
 		return Header{}, ErrInvalid
@@ -144,10 +150,6 @@ func Parse(encoded []byte, now time.Time) (Header, error) {
 	}
 	var extra any
 	if decoder.Decode(&extra) == nil {
-		return Header{}, ErrInvalid
-	}
-	canonical, err := value.MarshalBinary()
-	if err != nil || !bytes.Equal(canonical, encoded) {
 		return Header{}, ErrInvalid
 	}
 	return value, nil

@@ -652,9 +652,8 @@ func (c *Client) jsonRequestHeader(ctx context.Context, method, url, operation, 
 	}
 	var decodeErr error
 	if target != nil {
-		decoder := json.NewDecoder(io.LimitReader(response.Body, 1<<20))
-		decoder.DisallowUnknownFields()
-		decodeErr = decoder.Decode(target)
+		// An answer from the destination peer: a field a newer peer adds is ignored (AGENTS.md).
+		decodeErr = json.NewDecoder(io.LimitReader(response.Body, 1<<20)).Decode(target)
 	}
 	if cause := errors.Join(decodeErr, response.Body.Close()); cause != nil {
 		return header, responseFailure(cause)
