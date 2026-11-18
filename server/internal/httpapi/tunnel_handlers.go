@@ -450,7 +450,6 @@ func readTunnelRequestBody(w http.ResponseWriter, r *http.Request) ([]byte, bool
 
 func decodeTunnelJSON(body []byte, target any) bool {
 	decoder := json.NewDecoder(bytes.NewReader(body))
-	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(target); err != nil {
 		return false
 	}

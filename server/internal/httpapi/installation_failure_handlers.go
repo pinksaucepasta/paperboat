@@ -27,7 +27,6 @@ func helperInstallationFailure(enrollments *controlplane.EnrollmentService, mach
 			Stage              string `json:"stage"`
 		}
 		decoder := json.NewDecoder(bytes.NewReader(body))
-		decoder.DisallowUnknownFields()
 		var extra any
 		if decoder.Decode(&input) != nil || decoder.Decode(&extra) != io.EOF || strings.TrimSpace(input.PairingID) == "" {
 			writeError(w, r, http.StatusBadRequest, "validation_failed", "Request body must match the documented schema.")

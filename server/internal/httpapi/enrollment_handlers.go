@@ -24,7 +24,6 @@ func helperIdentityRenew(service *controlplane.EnrollmentService) http.HandlerFu
 			OperationID string `json:"operation_id"`
 		}
 		decoder := json.NewDecoder(bytes.NewReader(body))
-		decoder.DisallowUnknownFields()
 		var extra any
 		if decoder.Decode(&input) != nil || decoder.Decode(&extra) != io.EOF || len(input.OperationID) < 8 || len(input.OperationID) > 128 {
 			writeError(w, r, http.StatusBadRequest, "validation_failed", "Request body must match the documented schema.")
@@ -110,7 +109,7 @@ func helperReplacement(service *controlplane.EnrollmentService) http.Handler {
 		var input struct {
 			EdgePool string `json:"edge_pool"`
 		}
-		if !decodeStrictJSON(w, r, &input) {
+		if !decodeClientJSON(w, r, &input) {
 			return
 		}
 		replacement, err := service.ReplaceHelper(r.Context(), principal.User.ID, operationKey, r.PathValue("environment_id"), r.PathValue("helper_id"), input.EdgePool)
@@ -136,7 +135,7 @@ func helperEnrollmentExchange(service *controlplane.EnrollmentService) http.Hand
 			Credential string `json:"credential"`
 			PublicKey  string `json:"public_key"`
 		}
-		if !decodeStrictJSON(w, r, &input) {
+		if !decodeClientJSON(w, r, &input) {
 			return
 		}
 		publicKey, decodeErr := base64.RawURLEncoding.DecodeString(input.PublicKey)

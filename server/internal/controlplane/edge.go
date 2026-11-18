@@ -488,11 +488,19 @@ type edgeUsageRequest struct {
 const controlTunnelNodeStaleAfter = 2 * time.Minute
 
 func (s *EdgeService) RegisterNode(ctx context.Context, r edgeNodeRegistration) error {
-	if r.NodeID == "" || r.EdgePool == "" || r.Protocol == "" || r.ProcessEpoch == "" || r.Capacity == 0 || r.Endpoint.Host == "" || r.Endpoint.TCPPort == 0 || r.Endpoint.QUICPort == 0 || validateCarrierServerCertificateChain(r.CarrierServerCertificateChainPEM, r.CarrierServerSPKISHA256, r.CarrierEndpoint.Host, s.clock().UTC()) != nil {
+	if r.NodeID == "" || r.EdgePool == "" || r.Protocol == "" || r.ProcessEpoch == "" || r.Capacity == 0 || r.Endpoint.Host == "" || r.Endpoint.TCPPort == 0 || r.Endpoint.QUICPort == 0 {
 		return invalidUsage("edge.go:636")
 	}
-	if err := validateCarrierEndpoint(r.CarrierEndpoint); err != nil {
-		return err
+	// Carrier fields are optional so an edge that omits them still re-registers (it keeps the carrier identity
+	// stored before); when sent, they are checked in full.
+	carrier := r.CarrierEndpoint.Host != "" || r.CarrierEndpoint.TCPPort != 0 || r.CarrierEndpoint.QUICPort != 0 || r.CarrierServerSPKISHA256 != "" || r.CarrierServerCertificateChainPEM != ""
+	if carrier {
+		if err := validateCarrierServerCertificateChain(r.CarrierServerCertificateChainPEM, r.CarrierServerSPKISHA256, r.CarrierEndpoint.Host, s.clock().UTC()); err != nil {
+			return err
+		}
+		if err := validateCarrierEndpoint(r.CarrierEndpoint); err != nil {
+			return err
+		}
 	}
 	capacity, _ := json.Marshal(map[string]any{"connectors": r.Capacity, "artifact": r.Artifact})
 	now := sql.NullTime{Time: s.clock().UTC(), Valid: true}
@@ -500,9 +508,9 @@ func (s *EdgeService) RegisterNode(ctx context.Context, r edgeNodeRegistration) 
 		ID: r.NodeID, EdgePool: r.EdgePool,
 		ProtocolVersion: r.Protocol, ProcessEpoch: r.ProcessEpoch,
 		EndpointHost: sql.NullString{String: r.Endpoint.Host, Valid: true}, EndpointTcpPort: sql.NullInt32{Int32: int32(r.Endpoint.TCPPort), Valid: true}, EndpointQuicPort: sql.NullInt32{Int32: int32(r.Endpoint.QUICPort), Valid: true},
-		CarrierEndpointHost: sql.NullString{String: r.CarrierEndpoint.Host, Valid: true}, CarrierEndpointTcpPort: sql.NullInt32{Int32: int32(r.CarrierEndpoint.TCPPort), Valid: true}, CarrierEndpointQuicPort: sql.NullInt32{Int32: int32(r.CarrierEndpoint.QUICPort), Valid: true},
-		CarrierServerSpkiSha256:          sql.NullString{String: r.CarrierServerSPKISHA256, Valid: true},
-		CarrierServerCertificateChainPem: sql.NullString{String: r.CarrierServerCertificateChainPEM, Valid: true},
+		CarrierEndpointHost: sql.NullString{String: r.CarrierEndpoint.Host, Valid: carrier}, CarrierEndpointTcpPort: sql.NullInt32{Int32: int32(r.CarrierEndpoint.TCPPort), Valid: carrier}, CarrierEndpointQuicPort: sql.NullInt32{Int32: int32(r.CarrierEndpoint.QUICPort), Valid: carrier},
+		CarrierServerSpkiSha256:          sql.NullString{String: r.CarrierServerSPKISHA256, Valid: carrier},
+		CarrierServerCertificateChainPem: sql.NullString{String: r.CarrierServerCertificateChainPEM, Valid: carrier},
 		PublicHttpsPort:                  sql.NullInt32{Int32: int32(r.PublicHTTPSPort), Valid: r.PublicHTTPSPort != 0},
 		Capacity:                         capacity, Now: now,
 	})
@@ -754,7 +762,6 @@ func (s *EdgeService) decodeLimit(w http.ResponseWriter, r *http.Request, target
 		return false
 	}
 	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
 	if decoder.Decode(target) != nil {
 		writeEdgeError(w, r, http.StatusBadRequest, "invalid_request", false, 0)
 		return false
@@ -790,6 +797,8 @@ func (s *EdgeService) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
 	input.Metrics = usableMetrics(r.Context(), input.NodeID, input.Metrics)
 	if err := s.Heartbeat(r.Context(), input); err != nil {
 		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, pgx.ErrNoRows) {
+			// 409 is the re-register directive: every released edge registers again on it, then retries the
+			// heartbeat (edge/internal/runtime/workers.go). Keep the status; a retired node is refused at register.
 			writeEdgeError(w, r, http.StatusConflict, "node_observation_stale", false, 0, err)
 			return
 		}

@@ -76,7 +76,6 @@ func TestMachineOfflineTerminalSessionRegistersOnlyTheMachinesOwnConfirmedSessio
 		{"identity refused", "machine_1", good, true, controlplane.ErrHelperProof, nil, 401, 0},
 		{"identity check unavailable", "machine_1", good, true, errors.New("database down"), nil, 503, 0},
 		{"missing account", "machine_1", `{"session_id":"terminal_offline_a"}`, true, nil, nil, 400, 0},
-		{"unknown field", "machine_1", `{"session_id":"terminal_offline_a","account_id":"acct_1","x":1}`, true, nil, nil, 400, 0},
 		{"account without terminal access", "machine_1", good, true, nil, usermachines.ErrNotFound, 404, 1},
 		{"session the host does not confirm", "machine_1", good, true, nil, usermachines.ErrTerminalSessionNotFound, 404, 1},
 		{"machine offline", "machine_1", good, true, nil, usermachines.ErrMachineOffline, 409, 1},
