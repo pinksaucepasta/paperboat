@@ -171,6 +171,8 @@ func runObserved(ctx context.Context, args []string, out io.Writer, observe func
 		return cmd.Run()
 	case "doctor":
 		return doctor(ctx, args[1:], out)
+	case "update-apply":
+		return updateApply(ctx, args[1:], out)
 	case "uninstall":
 		return uninstall(ctx, args[1:], out)
 	default:
@@ -308,6 +310,7 @@ func install(ctx context.Context, args []string, out io.Writer) (err error) {
 // name, because the service journal is the only place the operator will look.
 func serve(ctx context.Context, dir string, out io.Writer, observe func(context.Context, string, error)) error {
 	reapplyHostFirewall(ctx, execCommander, defaultHostPaths(dir), out)
+	go updateLoop(ctx, dir, out)
 	err := containers.Serve(ctx, dir, version, out, observe)
 	if errors.Is(err, syscall.EADDRINUSE) {
 		if c, readErr := selfhost.ReadConfig(dir); readErr == nil {

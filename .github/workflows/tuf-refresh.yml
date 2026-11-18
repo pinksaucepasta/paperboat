@@ -91,7 +91,7 @@ jobs:
             'tar -C /opt/paperboat/releases/current/tuf -cf - metadata' | tar -C "$repository" -xf -
           go run ./tools/tuf-repository validate-signers \
             -repository "$repository" \
-            -trusted-root "$GITHUB_WORKSPACE/cli/internal/hostruntime/bootstrap/trusted-root.json"
+            -trusted-root "$GITHUB_WORKSPACE/shared/tufroot/trusted-root.json"
           go run ./tools/tuf-repository verify-published -repository "$repository"
           printf 'PAPERBOAT_TUF_REPOSITORY=%s\n' "$repository" >> "$GITHUB_ENV"
       - name: Refresh snapshot and timestamp metadata
