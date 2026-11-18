@@ -30,6 +30,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/buildinfo"
 	"github.com/pinksaucepasta/paperboat/server/internal/config"
 	"github.com/pinksaucepasta/paperboat/server/internal/controlplane"
+	"github.com/pinksaucepasta/paperboat/server/internal/customernotices"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	serverdiagnostics "github.com/pinksaucepasta/paperboat/server/internal/diagnostics"
 	"github.com/pinksaucepasta/paperboat/server/internal/diagnosticuploads"
@@ -144,6 +145,7 @@ type Options struct {
 	AccountDeletion          *accountdeletion.Service
 	AccountPreferences       *accountprefs.Service
 	Announcements            *announcements.Service
+	CustomerNotices          *customernotices.Service
 	ControlDiagnostics       *controlplane.DiagnosticsService
 	OperationRecovery        *controlplane.OperationRecoveryService
 	PeerIdentity             *peeridentity.Service
