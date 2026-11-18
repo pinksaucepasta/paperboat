@@ -8,7 +8,9 @@ repository=${PB_REPO:-pinksaucepasta/paperboat}
 # The release signing key (ssh-keygen -Y verify allowed_signers line); the private half is only in CI.
 allowed_signers='paperboat-release namespaces="paperboat-release" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAonuBw7PaD+214NxAVb1UwkLzJYWq0VRmpbM2EXsBhg'
 docker_install_url='https://get.docker.com'
-case $repository in */*/*|*[!A-Za-z0-9_./-]*|/*|*/) echo 'PB_REPO must look like owner/repo.' >&2; exit 2;; esac
+case $repository in */*) ;; *) echo 'PB_REPO must look like owner/repo.' >&2; exit 2;; esac
+case /$repository/ in *//*|*/./*|*/../*|*[!A-Za-z0-9_./-]*) echo 'PB_REPO must look like owner/repo.' >&2; exit 2;; esac
+case $repository in */*/*) echo 'PB_REPO must look like owner/repo.' >&2; exit 2;; esac
 case "$(uname -s)" in Linux) ;; *) echo 'Paperboat self-host currently requires Linux with systemd.' >&2; exit 1;; esac
 case "$(uname -m)" in
  x86_64) package_arch=amd64;;

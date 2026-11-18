@@ -24,7 +24,7 @@ const log = (ok, step, detail = "") => {
 }
 const scripts = new URL("./", import.meta.url)
 
-// The Add machine dialog sends its pairing command here; the token is read from the install script and handed to PAIR_CMD in a file.
+// The Add machine dialog sends its pairing command here; the token is read from the command (PB_TOKEN) and handed to PAIR_CMD in a file.
 const dir = mkdtempSync(join(tmpdir(), "analytics-"))
 const sink = createServer((request, response) => {
   let body = ""
@@ -32,8 +32,7 @@ const sink = createServer((request, response) => {
   request.on("end", async () => {
     response.writeHead(204, { "access-control-allow-origin": "*" }).end()
     try {
-      const url = body.match(/'(https?:\/\/[^']+)'/)[1]
-      const token = (await (await fetch(url)).text()).match(/PAPERBOAT_ENROLLMENT_TOKEN='([A-Za-z0-9]+)'/)[1]
+      const token = body.match(/PB_TOKEN='([A-Za-z0-9]+)'/)[1]
       const file = join(dir, "token")
       writeFileSync(file, token, { mode: 0o600 })
       chmodSync(file, 0o600)

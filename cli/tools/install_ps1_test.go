@@ -71,8 +71,14 @@ func runWindowsInstaller(t *testing.T, r *fakeRelease, noSshKeygen bool, env ...
 	if err := os.MkdirAll(filepath.Join(r.root, "empty"), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	// The installer verifies through cmd.exe /c "<command line>"; on this host a wrapper runs the line with sh, stripping the
+	// outer quotes the way cmd does.
+	comspec := filepath.Join(r.root, "cmd")
+	if err := os.WriteFile(comspec, []byte("#!/bin/sh\nshift\nline=\"$*\"\nline=${line#\\\"}\nline=${line%\\\"}\nexec sh -c \"$line\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	command := exec.Command(shell, "-NoLogo", "-NoProfile", "-NonInteractive", "-File", harness)
-	command.Env = append(os.Environ(), "FAKE_LOG="+log, "FAKE_PB="+pb, "FAKE_RELEASES="+r.releases, "FAKE_LATEST="+r.version, "PB_REPO="+fakeRepo,
+	command.Env = append(os.Environ(), "ComSpec="+comspec, "FAKE_LOG="+log, "FAKE_PB="+pb, "FAKE_RELEASES="+r.releases, "FAKE_LATEST="+r.version, "PB_REPO="+fakeRepo,
 		"PB_TOKEN=", "PB_RECIPE=", "PB_VERSION=", "PB_NAME=", "TMPDIR="+r.root)
 	command.Env = append(command.Env, env...)
 	out, err := command.CombinedOutput()
