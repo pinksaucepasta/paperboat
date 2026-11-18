@@ -46,7 +46,7 @@ func LoadTrust(jwksPath, revocationsPath, usageKeyPath string) (Trust, error) {
 		EdgeNodeID string `json:"edge_node_id"`
 		PrivateKey string `json:"private_key"`
 	}
-	if err := strictjson.Decode(keyDocument, &key, 64); err != nil {
+	if err := strictjson.DecodeResponse(keyDocument, &key, 64); err != nil { // another release's pbh may add fields
 		return Trust{}, errors.Join(ErrProcessInvalid, err)
 	}
 	if key.KeyID == "" || len(key.KeyID) > 128 || key.EdgeNodeID == "" || len(key.EdgeNodeID) > 128 {

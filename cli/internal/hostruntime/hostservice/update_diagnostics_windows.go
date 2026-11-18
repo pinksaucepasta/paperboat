@@ -56,7 +56,7 @@ func (d *windowsUpdateDiagnostics) validState() bool {
 		return false
 	}
 	decoder := json.NewDecoder(bytes.NewReader(body))
-	decoder.DisallowUnknownFields()
+	// A file this or another release wrote: fields it does not know are ignored, so an update or a rollback still loads it.
 	var state struct {
 		Schema      string    `json:"schema"`
 		MachineID   string    `json:"machine_id"`

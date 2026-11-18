@@ -171,7 +171,7 @@ func (s *Store) load() (Key, error) {
 		return Key{}, ErrInvalidStore
 	}
 	decoder := json.NewDecoder(bytes.NewReader(encoded))
-	decoder.DisallowUnknownFields()
+	// A file this or another release wrote: fields it does not know are ignored, so an update or a rollback still loads it.
 	var value document
 	if err := decoder.Decode(&value); err != nil {
 		return Key{}, ErrInvalidStore

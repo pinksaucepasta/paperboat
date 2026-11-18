@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "port_action": "preview",
+  "tui": {
+    "theme": "terminal",
+    "density": "comfortable",
+    "keys": {
+      "back": "esc",
+      "down": "down",
+      "preview_background": "b",
+      "preview_open": "o",
+      "preview_stop": "s",
+      "preview_tunnel": "t",
+      "select": "enter",
+      "up": "up"
+    },
+    "columns": {
+      "machines": [
+        "status",
+        "platform"
+      ],
+      "previews": [
+        "state",
+        "access"
+      ],
+      "sessions": [
+        "machine",
+        "state"
+      ],
+      "tunnels": [
+        "state",
+        "access",
+        "endpoint"
+      ]
+    },
+    "preview_panels": [
+      "target",
+      "access",
+      "expiry",
+      "domains"
+    ]
+  }
+}
