@@ -208,6 +208,9 @@ func TestSQLRepositoryAddressClaimsRaceToOneWinnerOnPostgres(t *testing.T) {
 	if _, err := f.changeAddress(t, accountB, b.Tunnel.ID, other, bGeneration); !errors.Is(err, ErrSubdomainTaken) {
 		t.Fatalf("claiming a name another tunnel's expired move still holds = %v, want ErrSubdomainTaken", err)
 	}
+	if c, err := f.repository.CheckAddress(ctx, accountB, b.Tunnel.ID, other); err != nil || c.Free {
+		t.Fatalf("availability of a name an expired move still holds = %+v, %v; want not free", c, err)
+	}
 	if err := f.repository.SettleAddressMoves(ctx, AddressSettleRecord{Now: time.Now().UTC(), Limit: 10, Policy: AddressPolicy{MoveTimeout: time.Minute, Cooldown: time.Hour}, ActorID: "settler", ActorType: "system", RequestID: "req_race", CorrelationID: "corr_race"}); err != nil {
 		t.Fatal(err)
 	}

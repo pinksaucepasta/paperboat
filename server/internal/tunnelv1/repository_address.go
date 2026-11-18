@@ -33,7 +33,7 @@ func (r *SQLRepository) CheckAddress(ctx context.Context, accountID, tunnelID, l
 	err := r.db.Pool().QueryRow(ctx, `SELECT h.host, h.host=substring(t.stable_endpoint from 9),
  NOT EXISTS(SELECT 1 FROM paperboat.managed_hostnames WHERE hostname=h.host AND NOT (resource_kind='tunnel' AND resource_id=t.id))
  AND NOT EXISTS(SELECT 1 FROM paperboat.publication_blocks WHERE hostname=h.host AND blocked)
- AND NOT EXISTS(SELECT 1 FROM paperboat.tunnel_address_holds WHERE hostname=h.host AND until>now() AND (tunnel_id<>t.id OR kind='incoming')),
+ AND NOT EXISTS(SELECT 1 FROM paperboat.tunnel_address_holds WHERE hostname=h.host AND (kind='incoming' OR (until>now() AND tunnel_id<>t.id))),
  paperboat.workspace_edge_mode(t.account_id,paperboat.publication_workspace_team('tunnel',t.id))='self-hosted-only'
 FROM paperboat.tunnels t, LATERAL (SELECT $3::text||substring(t.stable_endpoint from position('.' in t.stable_endpoint)) AS host) h
 WHERE t.id=$2 AND t.account_id=$1`, accountID, tunnelID, label).Scan(&check.Host, &check.Current, &check.Free, &check.SelfHosted)
@@ -216,7 +216,8 @@ func (r *SQLRepository) SettleAddressMoves(ctx context.Context, input AddressSet
 		failures = errors.Join(failures, r.settleAddressMove(ctx, host, input))
 	}
 	if _, err := r.db.Pool().Exec(ctx, `DELETE FROM paperboat.tunnel_address_holds WHERE hostname IN
-(SELECT hostname FROM paperboat.tunnel_address_holds WHERE kind='retired' AND until<$1 LIMIT 100)`, input.Now); err != nil {
+(SELECT h.hostname FROM paperboat.tunnel_address_holds h WHERE (h.kind='retired' AND h.until<$1)
+ OR NOT EXISTS(SELECT 1 FROM paperboat.tunnels t WHERE t.id=h.tunnel_id) LIMIT 100)`, input.Now); err != nil {
 		failures = errors.Join(failures, translate(err))
 	}
 	return failures

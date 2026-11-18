@@ -58,7 +58,7 @@ func reservedSet(labels []string) (map[string]struct{}, error) {
 }
 
 // SubdomainCheck answers whether a tunnel could take an address now. Reason is empty when Available;
-// otherwise one of invalid, reserved, taken or current.
+// otherwise one of invalid, reserved, taken, current or unavailable (a self-hosted workspace has no Paperboat address).
 type SubdomainCheck struct {
 	Subdomain string `json:"subdomain"`
 	Available bool   `json:"available"`

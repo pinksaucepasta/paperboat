@@ -284,7 +284,7 @@ function AddressValue({ tunnel }: { tunnel: Tunnel }) {
       </div>
       {change?.state === "moving" && (
         <p className="flex items-center gap-1.5 text-sm text-muted-foreground" role="status">
-          <CircleNotchIcon className="size-3.5 shrink-0 animate-spin" />
+          <CircleNotchIcon className="size-3.5 shrink-0 animate-spin" aria-hidden />
           <span className="min-w-0 break-words">
             Moving to <span className="font-mono text-code">{change.hostname}</span>… The current address keeps
             working until every edge serves the new one.
@@ -293,7 +293,7 @@ function AddressValue({ tunnel }: { tunnel: Tunnel }) {
       )}
       {change?.state === "failed" && (
         <p className="flex items-start gap-1.5 text-sm text-destructive" role="alert">
-          <WarningCircleIcon className="mt-0.5 size-3.5 shrink-0" />
+          <WarningCircleIcon className="mt-0.5 size-3.5 shrink-0" aria-hidden />
           <span className="min-w-0 break-words">
             Moving to <span className="font-mono text-code">{change.hostname}</span> failed.{" "}
             {addressChangeReason(change.reason_code)} The address is unchanged.
