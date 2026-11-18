@@ -179,9 +179,9 @@ type admission struct {
 	EdgeCandidates []edgeplacement.Candidate `json:"edge_candidates"`
 	Backup         *admissionBinding         `json:"backup,omitempty"`
 	// More are the carriers after the backup; TerminalEdgeNodeIDs the edges whose carriers may carry browser
-	// terminals (Paperboat's managed edges). Empty means every carrier may.
+	// terminals (Paperboat's managed edges). Absent means every carrier may, empty none.
 	More                   []admissionBinding `json:"more,omitempty"`
-	TerminalEdgeNodeIDs    []string           `json:"terminal_edge_node_ids,omitempty"`
+	TerminalEdgeNodeIDs    []string           `json:"terminal_edge_node_ids"`
 	ActiveEdgeNodeID       string             `json:"active_edge_node_id,omitempty"`
 	ActiveEdgeProcessEpoch string             `json:"active_edge_process_epoch,omitempty"`
 	EndpointsServed        bool               `json:"endpoints_served,omitempty"`
@@ -775,9 +775,9 @@ func (a admission) carriers() []admissionBinding {
 }
 
 // terminalCapable reports whether browser terminals may use the carrier to this edge: only Paperboat's managed
-// edges, never a customer-run one. A server that names none (the workspace uses managed edges) allows every carrier.
+// edges, never a customer-run one. An answer without the list (nil) allows every carrier; an empty list allows none.
 func (a admission) terminalCapable(edgeNodeID string) bool {
-	return len(a.TerminalEdgeNodeIDs) == 0 || slices.Contains(a.TerminalEdgeNodeIDs, edgeNodeID)
+	return a.TerminalEdgeNodeIDs == nil || slices.Contains(a.TerminalEdgeNodeIDs, edgeNodeID)
 }
 
 func carrierKey(a admissionBinding) string {

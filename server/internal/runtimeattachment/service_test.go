@@ -640,7 +640,7 @@ WHERE r.id=$1 AND r.public_host=$2 AND r.applied_node_id IS NOT NULL AND r.appli
 	// The managed edge down: terminals are unavailable, and the customer's server never becomes the terminal edge.
 	exec(`UPDATE control_tunnel_nodes SET ready=false WHERE id=$1`, node)
 	noTerminal, err := service.Attach(ctx, proof, request)
-	if err != nil || noTerminal.Binding.EdgeNodeID != backupNode || noTerminal.ActiveEdgeNodeID != "" || len(noTerminal.TerminalEdgeNodeIDs) != 0 {
+	if err != nil || noTerminal.Binding.EdgeNodeID != backupNode || noTerminal.ActiveEdgeNodeID != "" || noTerminal.TerminalEdgeNodeIDs == nil || len(noTerminal.TerminalEdgeNodeIDs) != 0 {
 		t.Fatalf("managed outage made a customer edge the terminal edge: %#v err=%v", noTerminal, err)
 	}
 	exec(`UPDATE control_tunnel_nodes SET ready=true,last_heartbeat_at=now() WHERE id=$1`, node)

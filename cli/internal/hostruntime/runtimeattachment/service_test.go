@@ -1134,6 +1134,9 @@ func TestAdmissionNamesTheCarriersThatMayCarryTerminals(t *testing.T) {
 		t.Fatal("only the managed edge may carry terminals")
 	}
 	if !(admission{}).terminalCapable("any") {
-		t.Fatal("an answer naming no terminal edges allows every carrier")
+		t.Fatal("an answer without the list allows every carrier")
+	}
+	if (admission{TerminalEdgeNodeIDs: []string{}}).terminalCapable("any") {
+		t.Fatal("an empty list (no managed edge ready) allows no carrier")
 	}
 }

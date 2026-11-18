@@ -251,6 +251,7 @@ WHEN n.id=$2 THEN 2 ELSE 3 END,n.id LIMIT 32 FOR SHARE OF n`, proof.UserID, acti
 		digest := sha256.Sum256(key)
 		thumb := "sha256:" + base64.RawURLEncoding.EncodeToString(digest[:])
 		out.EdgeCandidates = candidates
+		out.TerminalEdgeNodeIDs = []string{}
 		for i, edge := range selected {
 			if edge.terminal {
 				out.TerminalEdgeNodeIDs = append(out.TerminalEdgeNodeIDs, edge.node)
