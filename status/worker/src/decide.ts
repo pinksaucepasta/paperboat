@@ -61,11 +61,14 @@ export function decideUnit(prev: State, now: number, series: Series[], slowMs: n
   const bad = failing + count("slow")
   if (failing >= CONFIRM) return { state: "major", evidence }
   if (bad >= CONFIRM) return { state: "degraded", evidence }
-  // Not confirmed bad. A healthy unit stays healthy; a bad one needs the pass run before it is green again (rule 3).
-  if (prev === "operational" || prev === "delayed") return { state: "operational", evidence }
+  // One witness alone cannot make a unit red, but it must not leave it green either: with the corroborating vantage point
+  // silent, a failing or slow witness is "degraded".
+  if (fresh.length < CONFIRM && bad >= 1) return { state: "degraded", evidence }
   const recovered = count("pass") >= Math.min(CONFIRM, fresh.length)
-  if (recovered) return { state: "operational", evidence }
-  return { state: "degraded", evidence } // no longer confirmed red, not yet green
+  // A healthy unit stays healthy. A bad or delayed one needs the pass run before it is green (rule 3); until then a delayed
+  // unit stays delayed (not enough data to say anything) and a bad one is no longer confirmed red but not yet green.
+  if (prev === "operational" || recovered) return { state: "operational", evidence }
+  return { state: prev === "delayed" ? "delayed" : "degraded", evidence }
 }
 
 /** A component from its units (regions or checks): all down is major, some down or slow is degraded. */

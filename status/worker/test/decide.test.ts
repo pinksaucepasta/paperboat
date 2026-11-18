@@ -27,8 +27,9 @@ test("two failures in a row are not enough", () => {
 test("three failures from vantages that are not consecutive samples do not count", () => {
   assert.equal(decide("operational", series("oracle", "x.x.x"), series("anvit", "x.x.x")), "operational")
 })
-test("a vantage with no result for 3 minutes does not count towards red", () => {
-  assert.equal(decide("operational", series("oracle", "xxx"), series("anvit", "xxx", 200_000)), "operational")
+test("a vantage with no result for 3 minutes does not count towards red, and its lone witness is degraded, not green", () => {
+  assert.equal(decide("operational", series("oracle", "xxx"), series("anvit", "xxx", 200_000)), "degraded")
+  assert.equal(decide("operational", series("oracle", "....."), series("anvit", "xxx", 200_000)), "operational")
 })
 test("latency over the threshold on two vantages is degraded", () => {
   assert.equal(decide("operational", series("oracle", "sss"), series("anvit", "sss")), "degraded")
@@ -53,11 +54,17 @@ test("degraded needs five passes too", () => {
   assert.equal(decide("degraded", series("oracle", "....."), series("anvit", ".....")), "operational")
 })
 test("a single covering vantage can recover alone but can never make a unit red", () => {
-  assert.equal(decide("operational", series("cf", "xxxxx")), "operational")
+  assert.equal(decide("operational", series("cf", "xxxxx")), "degraded")
   assert.equal(decide("degraded", series("cf", ".....")), "operational")
 })
 test("a delayed unit that returns healthy is green only after its first view is healthy", () => {
   assert.equal(decide("delayed", series("oracle", "....."), series("anvit", ".....")), "operational")
+})
+test("a delayed unit is not green on unconfirmed data: it stays delayed until five passes, or is degraded when a witness fails", () => {
+  assert.equal(decide("delayed", series("oracle", "x"), series("anvit", "x")), "delayed")
+  assert.equal(decide("delayed", series("oracle", "..."), series("anvit", "...")), "delayed")
+  assert.equal(decide("delayed", series("oracle", "xxx"), series("anvit", "xxx")), "major")
+  assert.equal(decide("delayed", series("oracle", "xxx"), series("anvit", "xxx", 400_000)), "degraded")
 })
 test("component: all units down is major, some down is degraded", () => {
   assert.equal(decideComponent(["major", "major"]), "major")
