@@ -68,7 +68,9 @@ func TestBandwidthThrottleNoticeGoesOnceToOwnerAndAdminsPostgres(t *testing.T) {
 
 	s := billing.NewWorkspaceService(store, nil, "")
 	s.ConfigureNotificationMail(config.TransactionalMail{From: "Paperboat <noreply@example.test>", ConsoleOrigin: "https://console.example.test"}, true)
-	s.SetThrottleRates(config.Default().Billing.FairUse)
+	fair := config.Default().Billing.FairUse
+	fair.TeamPerSeatBytes = 100 // a team of one seat has 100 bytes, as the product does for the personal workspace below
+	s.SetThrottleRates(fair)
 	debit := func(workspace string, n int64) bool {
 		t.Helper()
 		var exhausted bool
