@@ -4,19 +4,12 @@ import { toast } from "sonner"
 import { CheckIcon, PencilSimpleIcon, WarningIcon } from "@phosphor-icons/react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useState } from "react"
-import { hostOf, patchTunnel, subdomainAvailabilityQuery, subdomainPattern, type Tunnel } from "@/lib/tunnels"
+import { addressParts, hostOf, patchTunnel, subdomainAvailabilityQuery, subdomainPattern, type Tunnel } from "@/lib/tunnels"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Field, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { ErrorMessage } from "@/components/error-reference"
-
-/** The tunnel's address under its base domain: "calm-summer-beach-3476.example.test" → label and ".example.test". */
-const split = (tunnel: Tunnel) => {
-  const host = hostOf(tunnel.stable_endpoint)
-  const dot = Math.max(host.indexOf("."), 0)
-  return { label: host.slice(0, dot), base: host.slice(dot) }
-}
 
 /** The pencil next to a tunnel's address; opens the dialog that picks a new one. */
 export function ChangeAddress({ tunnel, disabled }: { tunnel: Tunnel; disabled?: boolean }) {
@@ -50,7 +43,7 @@ function useSettled(value: string) {
 
 function ChangeAddressDialog({ tunnel, onClose }: { tunnel: Tunnel; onClose: () => void }) {
   const queryClient = useQueryClient()
-  const { label: current, base } = split(tunnel)
+  const { label: current, base } = addressParts(tunnel.stable_endpoint)
   const [typed, setTyped] = useState(current)
   const label = typed.trim()
   const settled = useSettled(label)
