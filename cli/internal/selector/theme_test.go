@@ -5,6 +5,7 @@ import (
 	"image/color"
 	"io"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -142,6 +143,9 @@ func resetBackground(t *testing.T) {
 }
 
 func TestBackgroundIsQueriedOncePerSession(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows terminals are never asked (TestBackgroundIsNotQueriedOnWindows)")
+	}
 	resetBackground(t)
 	if RequestBackground() == nil {
 		t.Fatal("the first program of a session must ask for the background")
