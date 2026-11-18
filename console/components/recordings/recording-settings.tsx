@@ -13,6 +13,7 @@ import {
   recordingKeyQuery,
   recordingMessage,
   recordingRules,
+  rotateRecordingKey,
   subjectLabel,
   type RecordingAction,
   type RecordingKeyState,
@@ -20,6 +21,7 @@ import {
 } from "@/lib/recordings"
 import type { Team } from "@/lib/teams"
 import { ChangesDialog } from "@/components/access/changes-dialog"
+import { ConfirmAction } from "@/components/list-toolbar"
 import { RecordingAccess } from "@/components/recordings/recording-access"
 import { Row, Section, SettingRow } from "@/components/section"
 import { Button } from "@/components/ui/button"
@@ -78,13 +80,21 @@ function KeySection({
     mutationFn: () => createRecordingKey(teamId, sealable),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: recordingKeyQuery(teamId).queryKey }),
   })
+  const [replacing, setReplacing] = useState(false)
   const setUp = admin && state && !state.key && (
     <Button size="lg" disabled={create.isPending || sealable.length === 0} onClick={() => create.mutate()}>
       {create.isPending ? "Setting up…" : "Set up"}
     </Button>
   )
+  // Replacing needs this person's own copy of the current key: it signs the new one.
+  const replaceable = admin && state?.key && state.my_key?.generation === state.key.generation
+  const replace = replaceable && (
+    <Button variant="outline" size="lg" onClick={() => setReplacing(true)} data-recording-key-replace>
+      Replace key
+    </Button>
+  )
   return (
-    <Section title="Recording key" action={setUp || undefined}>
+    <Section title="Recording key" action={setUp || replace || undefined}>
       <Row label="Status">
         {!state ? (
           <Skeleton className="my-0.5 h-4 w-24" />
@@ -98,6 +108,18 @@ function KeySection({
         <p className="border-b border-divider py-3 text-sm text-muted-foreground">
           Add a replay rule first. The key is encrypted for each person who can replay.
         </p>
+      )}
+      {replacing && state && (
+        <ConfirmAction
+          open
+          onOpenChange={(open) => !open && setReplacing(false)}
+          title="Replace the recording key?"
+          description="New recordings are sealed to a new key, made and signed in this browser. Everyone who can replay keeps access and older recordings stay readable. Machines accept the new key only because your current key signed it."
+          action="Replace key"
+          pending="Replacing…"
+          confirmName={`REPLACE ${teamId}`}
+          mutation={{ mutationFn: () => rotateRecordingKey(teamId, state), onSuccess: () => queryClient.invalidateQueries({ queryKey: recordingKeyQuery(teamId).queryKey }) }}
+        />
       )}
       {create.isError && <p className="border-b border-divider py-3 text-sm text-destructive">{<ErrorMessage error={create.error} message={recordingMessage(create.error)} />}</p>}
       {state?.viewers.map((viewer) => (
