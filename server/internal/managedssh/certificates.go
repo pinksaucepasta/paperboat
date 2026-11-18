@@ -187,14 +187,21 @@ func (s *Service) TrustedUserCAs(ctx context.Context, request UserCAsRequest) (T
 // (3) once the retiring one is older than the certificate validity, every certificate it signed has expired and it
 // is removed. An operator calls it until only one active CA is left.
 func (s *Service) RotateUserCA(ctx context.Context, accountID string, now time.Time) ([]UserCA, error) {
-	if s == nil || s.repository == nil || ctx == nil || !bounded(accountID) || now.IsZero() {
+	return s.AdvanceUserCA(ctx, accountID, now, CAPropagation, s.certificates.Validity+time.Minute)
+}
+
+// AdvanceUserCA is RotateUserCA with the waits given: propagation is how long a pending CA must have been trusted
+// before it signs, validity how long a retiring CA is kept. Break-glass passes 0 for both after it has seen hosts
+// fetch the pending CA (breakglass), so a compromised CA is removed at once instead of when its certificates expire.
+func (s *Service) AdvanceUserCA(ctx context.Context, accountID string, now time.Time, propagation, validity time.Duration) ([]UserCA, error) {
+	if s == nil || s.repository == nil || ctx == nil || !bounded(accountID) || now.IsZero() || propagation < 0 || validity < 0 {
 		return nil, ErrRotationInvalid
 	}
 	candidate, err := s.newUserCA()
 	if err != nil {
 		return nil, err
 	}
-	return s.repository.RotateUserCA(ctx, RotateUserCARequest{AccountID: accountID, Now: now.UTC(), Propagation: CAPropagation, Validity: s.certificates.Validity + time.Minute}, candidate)
+	return s.repository.RotateUserCA(ctx, RotateUserCARequest{AccountID: accountID, Now: now.UTC(), Propagation: propagation, Validity: validity}, candidate)
 }
 
 func (s *Service) newUserCA() (NewUserCA, error) {

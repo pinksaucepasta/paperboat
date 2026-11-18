@@ -57,6 +57,10 @@ var operatorPolicies = map[string]operatorPolicy{
 	"POST /v1/admin/nodes/{node_id}/verify-ingress":                   {"admin", "node_id", ""},
 	"POST /v1/admin/nodes/{node_id}/site":                             {"admin", "node_id", ""},
 	"POST /v1/admin/managed-ssh/accounts/{account_id}/rotate-user-ca": {"admin", "account_id", ""},
+	"GET /v1/admin/breakglass/preview":                                {"admin", "", "breakglass"},
+	"POST /v1/admin/breakglass/runs":                                  {"admin", "", "breakglass"},
+	"GET /v1/admin/breakglass/runs/{run_id}":                          {"admin", "run_id", ""},
+	"POST /v1/admin/breakglass/runs/{run_id}/cancel":                  {"admin", "run_id", ""},
 
 	"GET /v1/admin/backups":                                                         {"operations", "", "backups"},
 	"GET /v1/admin/backups/runs":                                                    {"operations", "", "backup-runs"},

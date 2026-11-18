@@ -400,3 +400,31 @@ func TOTPCode(secretBase32 string, at time.Time) (string, error) {
 	}
 	return totpAt(secret, at.Unix()/totpPeriod), nil
 }
+
+// CheckTOTP spends one authenticator code of the operator, at this moment: the same ±1 step tolerance and replay
+// refusal as sign-in, and a wrong code counts against the same lockout. Recovery codes are not accepted: a guarded
+// action needs the authenticator itself. It returns ErrMFAInvalid for a wrong, expired or already used code.
+func (s *Service) CheckTOTP(ctx context.Context, operatorID, code string) error {
+	code = normalizeCode(code)
+	if !isTOTPCode(code) {
+		return ErrMFAInvalid
+	}
+	var invalid bool
+	err := s.Store.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+		secret, lastUsed, err := s.lockedSecret(ctx, tx, operatorID, true)
+		if err != nil {
+			return err
+		}
+		step := matchTOTP(secret, code, s.clock(), lastUsed)
+		if step == 0 {
+			invalid = true
+			return fail(ctx, tx, operatorID, s.audit(), "operator.mfa.verify_failed")
+		}
+		_, err = tx.Exec(ctx, `UPDATE paperboat.operator_totp SET last_used_step=$2 WHERE operator_id=$1`, operatorID, step)
+		return err
+	})
+	if err == nil && invalid {
+		return ErrMFAInvalid
+	}
+	return err
+}
