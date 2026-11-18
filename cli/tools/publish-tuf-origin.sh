@@ -399,7 +399,7 @@ except (OSError, ValueError) as error:
 refresh = not fresh and targets_path.read_bytes() == live_targets_path.read_bytes()
 requested_version_parts = version_parts(version, "candidate")
 candidate_repositories = set()
-live_metadata = {name: validate_target(name, target) for name, target in live_targets.items()}
+live_metadata = {name: validate_target(name, target) for name, target in live_targets.items() if not name.startswith("selfhost/")}
 live_repositories = {value[2] for value in live_metadata.values()}
 selected = []
 for name in expected:
