@@ -1,0 +1,18 @@
+// The status page: one Worker with static assets (the Astro build in dist/), the /api routes, the D1 binding and the cron trigger.
+// Deployed by Workers Builds from git (root directory status/; build: install marketing's packages, bun run build; deploy: npx wrangler deploy).
+// Secrets (set once, kept across deploys): PROBE_KEYS, ADMIN_TOKEN, CHECKS, MAIL_KEY. Vars (kept across deploys, set by deploy.sh):
+// PUBLIC_ORIGIN, NET_CHECK_URL, MAIL_ENDPOINT, MAIL_FROM.
+{
+  "name": "paperboat-status",
+  "main": "worker.ts",
+  "compatibility_date": "2026-11-01",
+  "keep_vars": true,
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "html_handling": "auto-trailing-slash",
+    "not_found_handling": "none"
+  },
+  "triggers": { "crons": ["* * * * *"] },
+  "d1_databases": [{ "binding": "DB", "database_name": "paperboat-status", "database_id": "954e58a7-a08b-4160-a234-ac0c317e6297" }]
+}
