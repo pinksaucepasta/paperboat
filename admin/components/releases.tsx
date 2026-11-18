@@ -4,6 +4,7 @@ import { useMemo, useState } from "react"
 import { ActionDialog } from "@/components/action-dialog"
 import { DataTable } from "@/components/data-table"
 import { ErrorBlock } from "@/components/error-block"
+import { integrationState, notConfiguredLine } from "@/lib/integrations"
 import { SelectField, TextField } from "@/components/fields"
 import { Mono, StatusBadge } from "@/components/filters"
 import { Facts, Panel } from "@/components/page"
@@ -148,6 +149,10 @@ export function ReleaseAuthority() {
   const filters = useMemo(() => ({}), [])
   const requests = useCursorList<Requests>("/v1/admin/release-authority/requests", filters, "offset")
   const bundles = useCursorList<Bundles>("/v1/admin/release-authority/bundles", filters, "offset")
+  // Unset is one line, not two error panels and two buttons that would be refused.
+  if (requests.error && integrationState(requests.error.code).kind === "not_configured") {
+    return <p className="py-12 text-center text-sm text-muted-foreground" data-release-authority-state="not-configured">{notConfiguredLine.release_authority_not_configured}</p>
+  }
   return (
     <div className="flex flex-col gap-8" data-release-authority>
       <Panel title="Requests" action={<RequestRelease />}>

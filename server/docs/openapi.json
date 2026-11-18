@@ -20072,6 +20072,444 @@
             }
           }
         }
+      },
+      "OperatorMoneyPair": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "value": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "previous": {
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "required": [
+          "value",
+          "previous"
+        ]
+      },
+      "OperatorMoneyFlow": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "count": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "mrr": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "previous_count": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "previous_mrr": {
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "required": [
+          "count",
+          "mrr"
+        ]
+      },
+      "OperatorMoneyRow": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "customer": {
+            "type": "string"
+          },
+          "workspace": {
+            "type": "string"
+          },
+          "plan": {
+            "type": "string"
+          },
+          "seats": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "mrr": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "state": {
+            "type": "string"
+          },
+          "amount": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "attempts": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "at": {
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "required": [
+          "customer",
+          "seats",
+          "mrr"
+        ]
+      },
+      "OperatorMoneyRowList": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "total": {
+            "type": "integer"
+          },
+          "rows": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OperatorMoneyRow"
+            }
+          }
+        },
+        "required": [
+          "total",
+          "rows"
+        ]
+      },
+      "OperatorMoneyRowPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "rows": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OperatorMoneyRow"
+            }
+          },
+          "total": {
+            "type": "integer"
+          },
+          "next_after": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "rows",
+          "total"
+        ]
+      },
+      "OperatorMoneyReport": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "observed_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "days": {
+            "type": "integer"
+          },
+          "currency": {
+            "type": "string",
+            "description": "Lower-case ISO code the sums are in; amounts are in its smallest unit."
+          },
+          "partial": {
+            "type": "boolean"
+          },
+          "skipped_currency": {
+            "type": "integer"
+          },
+          "mrr": {
+            "$ref": "#/components/schemas/OperatorMoneyPair"
+          },
+          "arr": {
+            "$ref": "#/components/schemas/OperatorMoneyPair"
+          },
+          "subscribers": {
+            "$ref": "#/components/schemas/OperatorMoneyPair"
+          },
+          "trend": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "day": {
+                  "type": "string"
+                },
+                "mrr": {
+                  "type": "integer",
+                  "format": "int64"
+                }
+              },
+              "required": [
+                "day",
+                "mrr"
+              ]
+            }
+          },
+          "plans": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "plan": {
+                  "type": "string"
+                },
+                "subscriptions": {
+                  "type": "integer",
+                  "format": "int64"
+                },
+                "seats": {
+                  "type": "integer",
+                  "format": "int64"
+                },
+                "mrr": {
+                  "type": "integer",
+                  "format": "int64"
+                }
+              },
+              "required": [
+                "plan",
+                "subscriptions",
+                "seats",
+                "mrr"
+              ]
+            }
+          },
+          "movement": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "new": {
+                "$ref": "#/components/schemas/OperatorMoneyFlow"
+              },
+              "churned": {
+                "$ref": "#/components/schemas/OperatorMoneyFlow"
+              },
+              "upgraded": {
+                "$ref": "#/components/schemas/OperatorMoneyFlow"
+              },
+              "downgraded": {
+                "$ref": "#/components/schemas/OperatorMoneyFlow"
+              },
+              "logo_churn_percent": {
+                "type": "number"
+              },
+              "previous_logo_churn_percent": {
+                "type": "number"
+              },
+              "revenue_churn_percent": {
+                "type": "number"
+              },
+              "previous_revenue_churn_percent": {
+                "type": "number"
+              },
+              "changes_unavailable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "new",
+              "churned",
+              "upgraded",
+              "downgraded",
+              "logo_churn_percent",
+              "previous_logo_churn_percent",
+              "revenue_churn_percent",
+              "previous_revenue_churn_percent",
+              "changes_unavailable"
+            ]
+          },
+          "trials": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "active": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "ending_soon": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "started": {
+                "$ref": "#/components/schemas/OperatorMoneyPair"
+              }
+            },
+            "required": [
+              "active",
+              "ending_soon",
+              "started"
+            ]
+          },
+          "cash": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "collected": {
+                "$ref": "#/components/schemas/OperatorMoneyPair"
+              },
+              "refunds": {
+                "$ref": "#/components/schemas/OperatorMoneyPair"
+              },
+              "net": {
+                "$ref": "#/components/schemas/OperatorMoneyPair"
+              },
+              "failed_payments": {
+                "$ref": "#/components/schemas/OperatorMoneyPair"
+              }
+            },
+            "required": [
+              "collected",
+              "refunds",
+              "net",
+              "failed_payments"
+            ]
+          },
+          "dunning": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "count": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "at_risk_mrr": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "rows": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/OperatorMoneyRow"
+                }
+              }
+            },
+            "required": [
+              "count",
+              "at_risk_mrr",
+              "rows"
+            ]
+          },
+          "customers": {
+            "$ref": "#/components/schemas/OperatorMoneyRowList"
+          },
+          "renewals": {
+            "$ref": "#/components/schemas/OperatorMoneyRowList"
+          },
+          "ending": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "balance": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "available": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "pending": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "next_payout": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "amount": {
+                    "type": "integer",
+                    "format": "int64"
+                  },
+                  "arrival": {
+                    "type": "integer",
+                    "format": "int64"
+                  },
+                  "status": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "amount",
+                  "arrival",
+                  "status"
+                ]
+              }
+            },
+            "required": [
+              "available",
+              "pending"
+            ]
+          },
+          "errors": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "observed_at",
+          "days",
+          "currency",
+          "partial",
+          "skipped_currency",
+          "mrr",
+          "arr",
+          "subscribers",
+          "trend",
+          "plans",
+          "movement",
+          "trials",
+          "dunning",
+          "customers",
+          "renewals",
+          "ending"
+        ]
+      },
+      "OperatorMoneyEventPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "events": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "type": {
+                  "type": "string"
+                },
+                "created": {
+                  "type": "integer",
+                  "format": "int64"
+                },
+                "object_id": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "type",
+                "created"
+              ]
+            }
+          },
+          "next_cursor": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "events"
+        ]
       }
     },
     "responses": {
@@ -61973,6 +62411,298 @@
         ],
         "x-operator-capability": "admin",
         "description": "Current active operator account and separate operator session required. See docs/runbooks/operator-admin.md. Audited before disclosure; unavailable auditing fails closed."
+      }
+    },
+    "/v1/admin/money": {
+      "get": {
+        "operationId": "get_v1_admin_money",
+        "summary": "Founders money report from Stripe: MRR, ARR, movement, revenue, dunning, balance",
+        "responses": {
+          "400": {
+            "description": "Invalid target, body, pagination or confirmation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Browser authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Operator session or capability required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Stripe not configured (money_not_configured) or Stripe unavailable (money_unavailable); evidence, provider or audit unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Audited result. Cache-Control: no-store.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/OperatorMoneyReport"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "days",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "enum": [
+                7,
+                30
+              ],
+              "default": 30
+            }
+          }
+        ],
+        "security": [
+          {
+            "operatorCookie": []
+          }
+        ],
+        "x-operator-capability": "billing",
+        "description": "Current active operator account and separate operator session required. See docs/runbooks/operator-admin.md. Audited before disclosure; unavailable auditing fails closed. MRR follows Stripe's definition (active and past_due subscriptions, normalised to a month, after running discounts). Cached two minutes. Amounts are in the smallest unit of `currency`."
+      }
+    },
+    "/v1/admin/money/lists/{list}": {
+      "get": {
+        "operationId": "get_v1_admin_money_lists_list",
+        "summary": "A full list behind a money card",
+        "responses": {
+          "400": {
+            "description": "Invalid target, body, pagination or confirmation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Browser authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Operator session or capability required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Stripe not configured (money_not_configured) or Stripe unavailable (money_unavailable); evidence, provider or audit unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Audited result. Cache-Control: no-store.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/OperatorMoneyRowPage"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "list",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "customers",
+                "past_due",
+                "renewals",
+                "trials"
+              ]
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 16
+            }
+          }
+        ],
+        "security": [
+          {
+            "operatorCookie": []
+          }
+        ],
+        "x-operator-capability": "billing",
+        "description": "Current active operator account and separate operator session required. See docs/runbooks/operator-admin.md. Audited before disclosure; unavailable auditing fails closed. customers: by MRR, `at` is the first subscription start. past_due: by amount due; `amount` is what is owed, `attempts` the tries so far, `at` the next retry. renewals: next 30 days, `amount` is the renewal charge, `at` the renewal time. trials: `at` is the trial end, `mrr` what it becomes."
+      }
+    },
+    "/v1/admin/money/events": {
+      "get": {
+        "operationId": "get_v1_admin_money_events",
+        "summary": "Recent Stripe events",
+        "responses": {
+          "400": {
+            "description": "Invalid target, body, pagination or confirmation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Browser authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Operator session or capability required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Stripe not configured (money_not_configured) or Stripe unavailable (money_unavailable); evidence, provider or audit unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Audited result. Cache-Control: no-store.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/OperatorMoneyEventPage"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "security": [
+          {
+            "operatorCookie": []
+          }
+        ],
+        "x-operator-capability": "billing",
+        "description": "Current active operator account and separate operator session required. See docs/runbooks/operator-admin.md. Audited before disclosure; unavailable auditing fails closed. Newest first; follow next_cursor."
       }
     }
   }

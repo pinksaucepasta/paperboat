@@ -54,6 +54,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/recordings"
 	"github.com/pinksaucepasta/paperboat/server/internal/releaseauthority"
 	"github.com/pinksaucepasta/paperboat/server/internal/resourceusage"
+	"github.com/pinksaucepasta/paperboat/server/internal/revenue"
 	"github.com/pinksaucepasta/paperboat/server/internal/servernodes"
 	"github.com/pinksaucepasta/paperboat/server/internal/supportreport"
 	"github.com/pinksaucepasta/paperboat/server/internal/teambucket"
@@ -91,6 +92,7 @@ type Options struct {
 	TestFixtures             *testfixtures.Service
 	OperatorReporting        *operatorreporting.Service
 	OperatorAnalytics        *posthogquery.Service
+	OperatorMoney            *revenue.Service
 	OperatorHealth           *health.HealthTracker
 	OperatorActions          *operatoractions.Service
 	AbuseReports             *abusereports.Service

@@ -2,20 +2,22 @@
 
 import { Panel, Stat } from "@/components/page"
 import { Time } from "@/components/time"
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { cn } from "@/lib/utils"
 
 /** ↑/↓ percent against the range before, "new" when there was nothing before, nothing when both are zero. */
-export function Delta({ value, previous, points }: { value: number; previous: number; points?: boolean }) {
+export function Delta({ value, previous, points, worseUp }: { value: number; previous: number; points?: boolean; worseUp?: boolean }) {
+  const good = (up: boolean) => (up !== Boolean(worseUp) ? "text-emerald-600 dark:text-emerald-400" : "text-destructive")
   if (value === 0 && previous === 0) return null
   if (points) {
-    const diff = value - previous
+    const diff = Math.round((value - previous) * 10) / 10
     if (diff === 0) return <span className="text-muted-foreground">no change</span>
-    return <span className={diff > 0 ? "text-emerald-600 dark:text-emerald-400" : "text-destructive"}>{diff > 0 ? "↑" : "↓"} {Math.abs(diff)} pts</span>
+    return <span className={good(diff > 0)}>{diff > 0 ? "↑" : "↓"} {Math.round(Math.abs(diff) * 10) / 10} pts</span>
   }
   if (previous === 0) return <span className="text-muted-foreground">new</span>
   const change = Math.round(((value - previous) / previous) * 100)
   if (change === 0) return <span className="text-muted-foreground">no change</span>
-  return <span className={change > 0 ? "text-emerald-600 dark:text-emerald-400" : "text-destructive"}>{change > 0 ? "↑" : "↓"} {Math.abs(change)}%</span>
+  return <span className={good(change > 0)}>{change > 0 ? "↑" : "↓"} {Math.abs(change)}%</span>
 }
 
 /** A headline number with its change against the previous range (and an optional extra line). */
@@ -46,14 +48,14 @@ export function TopList({ title, rows }: { title: string; rows: { name: string; 
 }
 
 /** Bars per day; hidden for fewer than two days (one bar says nothing). */
-export function Trend({ title, days }: { title: string; days: { day: string; visitors: number }[] }) {
+export function Trend({ title, days, format = String }: { title: string; days: { day: string; visitors: number }[]; format?: (n: number) => string }) {
   if (days.length < 2) return null
   const peak = Math.max(1, ...days.map((d) => d.visitors))
   return (
     <Panel title={title}>
-      <ul role="img" className="flex h-32 items-end gap-0.5 border-b border-divider" aria-label={`${title}: ${days.map((d) => `${d.day} ${d.visitors}`).join(", ")}`}>
+      <ul role="img" className="flex h-32 items-end gap-0.5 border-b border-divider" aria-label={`${title}: ${days.map((d) => `${d.day} ${format(d.visitors)}`).join(", ")}`}>
         {days.map((d) => (
-          <li key={d.day} title={`${d.day}: ${d.visitors}`} className="flex-1 rounded-t-sm bg-primary/70" style={{ height: `${Math.max(2, (d.visitors / peak) * 100)}%` }} />
+          <li key={d.day} title={`${d.day}: ${format(d.visitors)}`} className="flex-1 rounded-t-sm bg-primary/70" style={{ height: `${Math.max(2, (d.visitors / peak) * 100)}%` }} />
         ))}
       </ul>
     </Panel>
@@ -71,22 +73,23 @@ export const countryName = (code: string) => {
   }
 }
 
-/** posthogquery's errorCode values, in words; the code stays visible below for support. */
-const insightFailure: Record<string, string> = {
-  unauthorized: "PostHog refused the API key.",
-  rate_limited: "PostHog is rate limiting; try again in a minute.",
-  provider_unavailable: "PostHog is down; try again later.",
-  rejected: "PostHog rejected the query.",
-  timeout: "PostHog took too long; try again.",
-  unexpected_response: "PostHog sent an answer the server couldn’t read.",
-}
+/** The server's section error codes (posthogquery, revenue), in words; the code stays visible below for support. */
+const insightFailure = (provider: string): Record<string, string> => ({
+  unauthorized: `${provider} refused the API key.`,
+  rate_limited: `${provider} is rate limiting; try again in a minute.`,
+  provider_unavailable: `${provider} is down; try again later.`,
+  rejected: `${provider} rejected the query.`,
+  timeout: `${provider} took too long; try again.`,
+  unexpected_response: `${provider} sent an answer the server couldn’t read.`,
+})
 
-export function Failures({ errors }: { errors?: Record<string, string> }) {
+/** The sections of a page whose provider failed while the rest loaded, each in words with its code. */
+export function Failures({ errors, provider = "PostHog" }: { errors?: Record<string, string>; provider?: string }) {
   return (
     <>
       {Object.entries(errors ?? {}).map(([k, code]) => (
         <p key={k} role="alert" className="flex flex-col text-sm text-destructive" data-insight-error={k}>
-          Couldn’t load {k.replaceAll("_", " ")}. {insightFailure[code] ?? "Try again later."}
+          Couldn’t load {k.replaceAll("_", " ")}. {insightFailure(provider)[code] ?? "Try again later."}
           <span className="text-xs text-muted-foreground">
             Code: <code className="font-mono">{code}</code>
           </span>
@@ -106,5 +109,16 @@ export function Observed({ at, online, url }: { at: string; online: number; url?
       <span>Updated <Time iso={at} relative /></span>
       {url && <a href={url} target="_blank" rel="noreferrer" className="underline-offset-4 hover:underline">Open in PostHog</a>}
     </p>
+  )
+}
+
+/** A two- or three-way choice shown as joined buttons (a range, an app). */
+export function Toggle<T extends string>({ values, value, onChange }: { values: [T, string][]; value: T; onChange: (next: T) => void }) {
+  return (
+    <ToggleGroup value={[value]} onValueChange={(next) => next[0] && onChange(next[0] as T)} variant="outline" spacing={0}>
+      {values.map(([v, label]) => (
+        <ToggleGroupItem key={v} value={v}>{label}</ToggleGroupItem>
+      ))}
+    </ToggleGroup>
   )
 }

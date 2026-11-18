@@ -166,3 +166,10 @@ export function placeName(region: string): string {
   if (parts.length > 1 && /^\d+$/.test(parts[parts.length - 1])) parts.pop()
   return parts.map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(" ") || region
 }
+
+/** An amount in a currency's smallest unit ("usd", 123456 -> "$1,234.56"; yen have no minor unit). */
+export function formatMoney(minor: number, currency: string): string {
+  const format = new Intl.NumberFormat("en", { style: "currency", currency: currency.toUpperCase() })
+  const digits = format.resolvedOptions().maximumFractionDigits ?? 2
+  return format.format(minor / 10 ** digits)
+}

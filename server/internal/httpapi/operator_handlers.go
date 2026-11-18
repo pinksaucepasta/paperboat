@@ -82,6 +82,9 @@ var operatorPolicies = map[string]operatorPolicy{
 	"GET /v1/admin/analytics/status":                                                {"admin", "", "analytics"},
 	"GET /v1/admin/analytics/site":                                                  {"admin", "", "analytics"},
 	"GET /v1/admin/analytics/console":                                               {"admin", "", "analytics"},
+	"GET /v1/admin/money":                                                           {"billing", "", "money"},
+	"GET /v1/admin/money/lists/{list}":                                              {"billing", "list", ""},
+	"GET /v1/admin/money/events":                                                    {"billing", "", "money-events"},
 	"GET /v1/admin/teams":                                                           {"support", "", "teams"},
 	"GET /v1/admin/billing/workspaces":                                              {"support", "", "workspaces"},
 	"GET /v1/admin/billing/workspace-operations":                                    {"billing", "", "billing-operations"},
@@ -313,6 +316,7 @@ func registerOperatorRoutes(mux *http.ServeMux, opts Options) {
 	registerOperatorMutations(mux, opts)
 	registerOperatorDiagnostics(mux, opts)
 	registerOperatorAnalytics(mux, opts)
+	registerOperatorMoney(mux, opts)
 	registerOperatorInfrastructure(mux, opts)
 	registerServerNodes(mux, opts)
 	if opts.Operator == nil {

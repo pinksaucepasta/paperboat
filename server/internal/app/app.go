@@ -78,6 +78,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/releaseauthority"
 	"github.com/pinksaucepasta/paperboat/server/internal/resourceusage"
 	"github.com/pinksaucepasta/paperboat/server/internal/retention"
+	"github.com/pinksaucepasta/paperboat/server/internal/revenue"
 	"github.com/pinksaucepasta/paperboat/server/internal/runtimeattachment"
 	"github.com/pinksaucepasta/paperboat/server/internal/selfhost"
 	"github.com/pinksaucepasta/paperboat/server/internal/servernodes"
@@ -759,6 +760,7 @@ func New(opts Options) (*App, error) {
 		OperatorBackups:          backupService,
 		TestFixtures:             fixturesService,
 		OperatorReporting:        reportingService,
+		OperatorMoney:            moneyService(stripeClient, store),
 		OperatorAnalytics:        posthogquery.New(posthogquery.Config{Host: opts.Config.Analytics.PostHogHost, ProjectID: opts.Config.Analytics.PostHogProjectID, Key: opts.Config.Secrets.PostHogPersonalKey}),
 		Operator:                 operatorService,
 		OperatorAuth:             &operatorauth.Service{Store: store, BootstrapEmail: opts.Config.OperatorBootstrapEmail, SecretKey: opts.Config.Secrets.EncryptionKey},
@@ -1081,4 +1083,13 @@ func newServerNodeEnroller(store *db.DB, cfg config.Config) *servernodes.Enrolle
 		e.Dial = func(_ context.Context, address string) (string, error) { return address, nil }
 	}
 	return e
+}
+
+// moneyService reads Stripe for the operator money page; with no Stripe key it is the unconfigured service.
+func moneyService(client billing.StripeClient, store *db.DB) *revenue.Service {
+	getter, ok := client.(revenue.Getter)
+	if !ok {
+		return revenue.New(nil, nil)
+	}
+	return revenue.New(getter, revenue.Records{Store: store})
 }

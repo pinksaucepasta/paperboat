@@ -321,6 +321,12 @@ func (r stripeSubscriptionResponse) subscription() (StripeSubscription, error) {
 	return result, nil
 }
 
+// Get reads one Stripe resource or list; path carries the query string. Operator reports use it, so they share the
+// client's live-key refusal, version pin, size limit and error type with every other Stripe call.
+func (c HTTPStripeClient) Get(ctx context.Context, path string, out any) error {
+	return c.do(ctx, http.MethodGet, path, "", nil, out)
+}
+
 func (c HTTPStripeClient) do(ctx context.Context, method, path, key string, values url.Values, out any) error {
 	if !c.AllowLive && (strings.HasPrefix(c.APIKey, "sk_live_") || strings.HasPrefix(c.APIKey, "rk_live_")) {
 		return errors.New("live Stripe credentials are disabled")

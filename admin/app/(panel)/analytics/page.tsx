@@ -1,13 +1,13 @@
 "use client"
 
 import { useState } from "react"
-import { Failures, Headline, Observed, TopList, Trend, countryName, sourceName } from "@/components/analytics"
+import { Failures, Headline, Observed, Toggle, TopList, Trend, countryName, sourceName } from "@/components/analytics"
 import { ErrorBlock } from "@/components/error-block"
 import { Page, Panel } from "@/components/page"
 import { Skeleton } from "@/components/ui/skeleton"
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { dropoff } from "@/lib/analytics"
 import { ApiError, useApiQuery, type Data } from "@/lib/api"
+import { notConfiguredLine } from "@/lib/integrations"
 
 type Site = Data<"/v1/admin/analytics/site">
 type Console = Data<"/v1/admin/analytics/console">
@@ -30,19 +30,9 @@ export default function AnalyticsPage() {
   )
 }
 
-function Toggle<T extends string>({ values, value, onChange }: { values: [T, string][]; value: T; onChange: (next: T) => void }) {
-  return (
-    <ToggleGroup value={[value]} onValueChange={(next) => next[0] && onChange(next[0] as T)} variant="outline" spacing={0}>
-      {values.map(([v, label]) => (
-        <ToggleGroupItem key={v} value={v}>{label}</ToggleGroupItem>
-      ))}
-    </ToggleGroup>
-  )
-}
-
 function Unavailable({ error, retry }: { error: Error; retry: () => void }) {
   if (error instanceof ApiError && error.code === "analytics_not_configured") {
-    return <p className="py-12 text-center text-sm text-muted-foreground" data-analytics-state="not-configured">PostHog isn’t set up on this server (PAPERBOAT_POSTHOG_*).</p>
+    return <p className="py-12 text-center text-sm text-muted-foreground" data-analytics-state="not-configured">{notConfiguredLine.analytics_not_configured}</p>
   }
   return <ErrorBlock what="analytics" error={error} retry={retry} />
 }

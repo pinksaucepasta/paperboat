@@ -8,6 +8,7 @@ import { Page, Panel, Stat } from "@/components/page"
 import { Time } from "@/components/time"
 import { Skeleton } from "@/components/ui/skeleton"
 import { ApiError, useApiQuery, type Data } from "@/lib/api"
+import { notConfiguredLine } from "@/lib/integrations"
 
 type Overview = Data<"/v1/admin/overview">
 type Site = Data<"/v1/admin/analytics/site">
@@ -76,7 +77,7 @@ function Insights() {
     <Panel title="Last 7 days" action={<Link href="/analytics" className="text-sm text-muted-foreground underline-offset-4 hover:underline">Analytics</Link>}>
       {notConfigured ? (
         <p className="py-6 text-center text-sm text-muted-foreground" data-analytics-state="not-configured">
-          PostHog isn’t set up on this server (PAPERBOAT_POSTHOG_*).
+          {notConfiguredLine.analytics_not_configured}
         </p>
       ) : site.isError || product.isError ? (
         <ErrorBlock what="analytics" error={(site.error ?? product.error)!} retry={() => { site.refetch(); product.refetch() }} />

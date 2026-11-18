@@ -9085,6 +9085,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/money": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Founders money report from Stripe: MRR, ARR, movement, revenue, dunning, balance
+         * @description Current active operator account and separate operator session required. See docs/runbooks/operator-admin.md. Audited before disclosure; unavailable auditing fails closed. MRR follows Stripe's definition (active and past_due subscriptions, normalised to a month, after running discounts). Cached two minutes. Amounts are in the smallest unit of `currency`.
+         */
+        get: operations["get_v1_admin_money"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/money/lists/{list}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * A full list behind a money card
+         * @description Current active operator account and separate operator session required. See docs/runbooks/operator-admin.md. Audited before disclosure; unavailable auditing fails closed. customers: by MRR, `at` is the first subscription start. past_due: by amount due; `amount` is what is owed, `attempts` the tries so far, `at` the next retry. renewals: next 30 days, `amount` is the renewal charge, `at` the renewal time. trials: `at` is the trial end, `mrr` what it becomes.
+         */
+        get: operations["get_v1_admin_money_lists_list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/money/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Recent Stripe events
+         * @description Current active operator account and separate operator session required. See docs/runbooks/operator-admin.md. Audited before disclosure; unavailable auditing fails closed. Newest first; follow next_cursor.
+         */
+        get: operations["get_v1_admin_money_events"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -14350,6 +14410,134 @@ export interface components {
                 override?: number;
             };
             grants: components["schemas"]["OperatorEntitlementGrant"][];
+        };
+        OperatorMoneyPair: {
+            /** Format: int64 */
+            value: number;
+            /** Format: int64 */
+            previous: number;
+        };
+        OperatorMoneyFlow: {
+            /** Format: int64 */
+            count: number;
+            /** Format: int64 */
+            mrr: number;
+            /** Format: int64 */
+            previous_count?: number;
+            /** Format: int64 */
+            previous_mrr?: number;
+        };
+        OperatorMoneyRow: {
+            customer: string;
+            workspace?: string;
+            plan?: string;
+            /** Format: int64 */
+            seats: number;
+            /** Format: int64 */
+            mrr: number;
+            state?: string;
+            /** Format: int64 */
+            amount?: number;
+            /** Format: int64 */
+            attempts?: number;
+            /** Format: int64 */
+            at?: number;
+        };
+        OperatorMoneyRowList: {
+            total: number;
+            rows: components["schemas"]["OperatorMoneyRow"][];
+        };
+        OperatorMoneyRowPage: {
+            rows: components["schemas"]["OperatorMoneyRow"][];
+            total: number;
+            next_after?: string;
+        };
+        OperatorMoneyReport: {
+            /** Format: date-time */
+            observed_at: string;
+            days: number;
+            /** @description Lower-case ISO code the sums are in; amounts are in its smallest unit. */
+            currency: string;
+            partial: boolean;
+            skipped_currency: number;
+            mrr: components["schemas"]["OperatorMoneyPair"];
+            arr: components["schemas"]["OperatorMoneyPair"];
+            subscribers: components["schemas"]["OperatorMoneyPair"];
+            trend: {
+                day: string;
+                /** Format: int64 */
+                mrr: number;
+            }[];
+            plans: {
+                plan: string;
+                /** Format: int64 */
+                subscriptions: number;
+                /** Format: int64 */
+                seats: number;
+                /** Format: int64 */
+                mrr: number;
+            }[];
+            movement: {
+                new: components["schemas"]["OperatorMoneyFlow"];
+                churned: components["schemas"]["OperatorMoneyFlow"];
+                upgraded: components["schemas"]["OperatorMoneyFlow"];
+                downgraded: components["schemas"]["OperatorMoneyFlow"];
+                logo_churn_percent: number;
+                previous_logo_churn_percent: number;
+                revenue_churn_percent: number;
+                previous_revenue_churn_percent: number;
+                changes_unavailable: boolean;
+            };
+            trials: {
+                /** Format: int64 */
+                active: number;
+                /** Format: int64 */
+                ending_soon: number;
+                started: components["schemas"]["OperatorMoneyPair"];
+            };
+            cash?: {
+                collected: components["schemas"]["OperatorMoneyPair"];
+                refunds: components["schemas"]["OperatorMoneyPair"];
+                net: components["schemas"]["OperatorMoneyPair"];
+                failed_payments: components["schemas"]["OperatorMoneyPair"];
+            };
+            dunning: {
+                /** Format: int64 */
+                count: number;
+                /** Format: int64 */
+                at_risk_mrr: number;
+                rows: components["schemas"]["OperatorMoneyRow"][];
+            };
+            customers: components["schemas"]["OperatorMoneyRowList"];
+            renewals: components["schemas"]["OperatorMoneyRowList"];
+            /** Format: int64 */
+            ending: number;
+            balance?: {
+                /** Format: int64 */
+                available: number;
+                /** Format: int64 */
+                pending: number;
+                next_payout?: {
+                    /** Format: int64 */
+                    amount: number;
+                    /** Format: int64 */
+                    arrival: number;
+                    status: string;
+                };
+            };
+            errors?: {
+                [key: string]: string;
+            };
+        };
+        OperatorMoneyEventPage: {
+            events: {
+                id: string;
+                type: string;
+                /** Format: int64 */
+                created: number;
+                object_id?: string;
+            }[];
+            next_cursor?: string;
         };
     };
     responses: {
@@ -36163,6 +36351,190 @@ export interface operations {
                 };
             };
             /** @description Analytics not configured (analytics_not_configured) or provider unavailable (analytics_unavailable); evidence, provider or audit unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_v1_admin_money: {
+        parameters: {
+            query?: {
+                days?: 7 | 30;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Audited result. Cache-Control: no-store. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["OperatorMoneyReport"];
+                    };
+                };
+            };
+            /** @description Invalid target, body, pagination or confirmation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Browser authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Operator session or capability required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Stripe not configured (money_not_configured) or Stripe unavailable (money_unavailable); evidence, provider or audit unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_v1_admin_money_lists_list: {
+        parameters: {
+            query?: {
+                limit?: number;
+                after?: string;
+            };
+            header?: never;
+            path: {
+                list: "customers" | "past_due" | "renewals" | "trials";
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Audited result. Cache-Control: no-store. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["OperatorMoneyRowPage"];
+                    };
+                };
+            };
+            /** @description Invalid target, body, pagination or confirmation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Browser authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Operator session or capability required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Stripe not configured (money_not_configured) or Stripe unavailable (money_unavailable); evidence, provider or audit unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_v1_admin_money_events: {
+        parameters: {
+            query?: {
+                limit?: number;
+                cursor?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Audited result. Cache-Control: no-store. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["OperatorMoneyEventPage"];
+                    };
+                };
+            };
+            /** @description Invalid target, body, pagination or confirmation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Browser authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Operator session or capability required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Stripe not configured (money_not_configured) or Stripe unavailable (money_unavailable); evidence, provider or audit unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;

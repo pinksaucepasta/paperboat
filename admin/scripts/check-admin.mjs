@@ -232,6 +232,7 @@ function route(req, url) {
     return { accounts: [{ state: "active", count: 110 }, { state: "suspended", count: 10 }], billing_workspaces: [{ state: "active", count: 4 }], control_operations: [{ state: "succeeded", count: 9 }], hosts: 7, hosts_ready: 5, hosts_stale: 2, relays: 2, relays_ready: 2, relays_stale: 0 }
   if (p === "/v1/admin/status") return { observed_at: "2026-11-17T09:00:00Z", build: { version: "dev-abc1234", commit: "abc1234def5678abc1234def5678abc1234def56" }, readiness: "ready", dimensions: { database: { status: "healthy" } } }
   if (p === "/v1/admin/analytics/site" || p === "/v1/admin/analytics/console") {
+    if (process.env.__FIXTURE_ANALYTICS === "down") return { __status: 503, code: "analytics_unavailable", message: "The analytics provider did not answer.", reference: "support_fixture_posthog" }
     if (process.env.__FIXTURE_ANALYTICS === "off") return { __status: 503, code: "analytics_not_configured", message: "Product analytics is not configured on this server." }
     const base = { observed_at: "2026-11-17T09:00:00Z", days: Number(url.searchParams.get("days") ?? 30), url: "https://posthog.example.test/project/1/web", online: 3 }
     if (p.endsWith("/site"))
@@ -247,6 +248,29 @@ function route(req, url) {
       retention: { size: 8, retained: 5, previous_size: 6, previous_retained: 2 }, adoption: [{ name: "terminal", count: 7 }, { name: "tunnel", count: 2 }],
     }
   }
+  if (p.startsWith("/v1/admin/money")) {
+    if (process.env.__FIXTURE_MONEY === "off") return { __status: 503, code: "money_not_configured", message: "Stripe is not configured on this server." }
+    if (process.env.__FIXTURE_MONEY === "down") return { __status: 503, code: "money_unavailable", message: "Stripe did not answer. Try again in a minute.", reference: "support_fixture_money" }
+    const row = (i, extra = {}) => ({ customer: `cus_${i}`, ...(i % 3 ? { workspace: `bw_${i}` } : {}), plan: i % 2 ? "pro" : "team", seats: i, mrr: 1000 * (10 - i), ...extra })
+    const rows = { customers: Array.from({ length: 7 }, (_, i) => row(i + 1)), past_due: [row(2, { amount: 2000, attempts: 2, at: 1795000000, state: "past_due" })], renewals: [row(1, { amount: 12000, at: 1795000000 })], trials: [row(4, { at: 1795000000, state: "trialing" })] }
+    if (p === "/v1/admin/money/events") return { events: [{ id: "evt_1", type: "invoice.paid", created: 1795000000, object_id: "in_1" }, { id: "evt_2", type: "charge.failed", created: 1794990000 }] }
+    if (p.startsWith("/v1/admin/money/lists/")) {
+      const all = rows[p.split("/").pop()]
+      return { rows: all, total: all.length }
+    }
+    return {
+      observed_at: "2026-11-17T09:00:00Z", days: Number(url.searchParams.get("days") ?? 30), currency: "usd", partial: false, skipped_currency: 0,
+      mrr: { value: 123456, previous: 100000 }, arr: { value: 1481472, previous: 1200000 }, subscribers: { value: 12, previous: 10 },
+      trend: [{ day: "2026-11-16", mrr: 100000 }, { day: "2026-11-17", mrr: 123456 }],
+      plans: [{ plan: "team", subscriptions: 4, seats: 14, mrr: 90000 }, { plan: "pro", subscriptions: 8, seats: 8, mrr: 33456 }],
+      movement: { new: { count: 3, mrr: 30000, previous_count: 1, previous_mrr: 5000 }, churned: { count: 1, mrr: 4000, previous_count: 2, previous_mrr: 9000 }, upgraded: { count: 2, mrr: 6000 }, downgraded: { count: 0, mrr: 0 }, logo_churn_percent: 8.3, previous_logo_churn_percent: 20, revenue_churn_percent: 3.2, previous_revenue_churn_percent: 9, changes_unavailable: false },
+      trials: { active: 1, ending_soon: 1, started: { value: 2, previous: 1 } },
+      cash: { collected: { value: 150000, previous: 120000 }, refunds: { value: 5000, previous: 0 }, net: { value: 145000, previous: 120000 }, failed_payments: { value: 2, previous: 1 } },
+      dunning: { count: 1, at_risk_mrr: 8000, rows: rows.past_due }, customers: { total: 7, rows: rows.customers.slice(0, 5) }, renewals: { total: 1, rows: rows.renewals }, ending: 1,
+      errors: { balance_and_payouts: "unauthorized" },
+    }
+  }
+  if (p === "/v1/admin/sentry/issues" && process.env.__FIXTURE_SENTRY === "down") return { __status: 503, code: "operator_evidence_unavailable", message: "Evidence could not be retrieved or recorded.", reference: "support_fixture_sentry" }
   if (p === "/v1/admin/sentry/issues" && process.env.__FIXTURE_SENTRY === "off") return { __status: 503, code: "sentry_not_configured", message: "The Sentry admin API has not been configured." }
   if (p === "/v1/admin/sentry/issues") return { issues: [{ project: "go", id: "1", short_id: "GO-1", level: "error", status: "unresolved", count: 5, first_seen: "2026-11-16T00:00:00Z", last_seen: "2026-11-17T08:00:00Z" }] }
   if (p === "/v1/admin/nodes") return { items: world.nodes, total: world.nodes.length }
@@ -290,6 +314,7 @@ function route(req, url) {
   if (p === "/v1/admin/server-nodes") return { nodes: world.serverNodes, total: world.serverNodes.length }
   if (p === "/v1/admin/config/billing") return world.policy
   if (p === "/v1/admin/client-update-policy") return world.floor
+  if (p.startsWith("/v1/admin/release-authority/") && process.env.__FIXTURE_RELEASE === "off") return { __status: 503, code: "release_authority_not_configured", message: "Release authority has not been configured on this server." }
   if (p === "/v1/admin/release-authority/requests") return { requests: world.requests, pagination: { limit: 50, offset: 0, total: world.requests.length, next_offset: null } }
   if (p === "/v1/admin/release-authority/bundles") return { bundles: [], pagination: { limit: 50, offset: 0, total: 0, next_offset: null } }
   if (p === "/v1/admin/infrastructure") return { items: [{ kind: url.searchParams.get("kind"), id: "relay_1", state: "ready", desired_state: "", observed_status: "ready", ready: true, stale: false, revision: 3 }], total: 1 }
@@ -509,6 +534,27 @@ try {
     expect((await text("[data-build]")).includes("dev-abc1234"), "server build version not shown")
     await p.screenshot({ path: `${shots}/overview-light.png`, fullPage: true })
   })
+  await step("money: MRR, movement, cash, lists with View all, a failing section named, events paged", async () => {
+    await p.goto(`${ORIGIN}/money`)
+    await p.waitForSelector('[data-money-state="ready"]')
+    expect((await text('[data-stat="MRR"]')).includes("$1,234.56") && (await text('[data-stat="MRR"]')).includes("↑ 23%"), "MRR with its change")
+    expect((await text('[data-stat="ARR"]')).includes("$14,814.72"), "ARR")
+    const movement = await text("[data-money-movement]")
+    expect(movement.includes("Churn rate") && movement.includes("8.3%") && movement.includes("↓ 11.7 pts") && !movement.includes("changes_unavailable"), `movement: ${JSON.stringify(movement)}`)
+    expect((await text("[data-money-cash]")).includes("$1,450.00"), "net revenue")
+    expect((await text("[data-insight-error=\"balance_and_payouts\"]")).includes("Stripe refused the API key"), "failing section named in words")
+    expect(await p.locator('[data-money-list="customers"] tbody tr').count() === 5, "top customers shows five rows")
+    expect((await text('[data-money-list="past_due"]')).includes("$20.00"), "failed payment amount")
+    await p.screenshot({ path: `${shots}/money-light.png`, fullPage: true })
+    await p.getByRole("button", { name: "View all 7" }).click()
+    await p.waitForSelector('[data-table="the list"][data-state="ready"]')
+    expect(await p.locator('[data-table="the list"] tbody tr').count() === 7, "view all lists every customer")
+    await p.screenshot({ path: `${shots}/money-view-all-light.png`, fullPage: true })
+    await p.keyboard.press("Escape")
+    await p.getByRole("tab", { name: "Stripe events" }).click()
+    await waitReady("Stripe events")
+    expect(await p.locator('[data-table="Stripe events"] tbody tr').count() === 2, "events listed")
+  })
   await step("analytics: website numbers with changes, hidden empty widgets, then console funnel, retention and feature use", async () => {
     await p.goto(`${ORIGIN}/analytics`)
     await p.waitForSelector('[data-analytics-app="site"]')
@@ -578,6 +624,41 @@ try {
       expect(shown.includes("has not been configured") && !shown.includes("Retry"), `shown: ${shown}`)
     } finally {
       delete process.env.__FIXTURE_SENTRY
+    }
+  })
+  // Every optional integration in both states: unset says so in one line (no Retry); down names the provider with its reference and a Retry.
+  for (const [name, path, env, down, unset, ref] of [
+    ["Stripe", "/money", "__FIXTURE_MONEY", "Stripe isn’t answering.", "Stripe isn’t set up on this server", "support_fixture_money"],
+    ["PostHog", "/analytics", "__FIXTURE_ANALYTICS", "PostHog isn’t answering.", "PostHog isn’t set up on this server", "support_fixture_posthog"],
+    ["Sentry", "/sentry", "__FIXTURE_SENTRY", "Sentry isn’t answering.", "has not been configured", "support_fixture_sentry"],
+  ]) {
+    await step(`${name}: down shows a short error with its reference; not configured says so in one line`, async () => {
+      try {
+        process.env[env] = "down"
+        await p.goto(`${ORIGIN}${path}`)
+        await p.waitForSelector("[data-error-block]")
+        const shown = await text("[data-error-block]")
+        expect(shown.includes(down) && shown.includes(ref) && shown.includes("Retry") && !shown.includes("Couldn’t load"), `down shown: ${shown}`)
+        process.env[env] = "off"
+        await p.goto(`${ORIGIN}${path}`)
+        await p.waitForSelector(`[data-error-block], [data-money-state="not-configured"], [data-analytics-state="not-configured"]`)
+        const line = await text("main")
+        expect(line.includes(unset) && !line.includes("Retry") && !line.includes("Couldn’t load"), `unset shown: ${line}`)
+      } finally {
+        delete process.env[env]
+      }
+    })
+  }
+  await step("release authority not configured: one line, no buttons, no error panels", async () => {
+    process.env.__FIXTURE_RELEASE = "off"
+    try {
+      await p.goto(`${ORIGIN}/releases`)
+      await p.getByRole("tab", { name: "Release authority" }).click()
+      await p.waitForSelector('[data-release-authority-state="not-configured"]')
+      expect(await p.locator("[data-error-block]").count() === 0, "error panels shown for an unset integration")
+      expect((await text("main")).includes("Release authority isn’t set up"), "line missing")
+    } finally {
+      delete process.env.__FIXTURE_RELEASE
     }
   })
   await step("audit: a filter with no events shows the empty state", async () => {
