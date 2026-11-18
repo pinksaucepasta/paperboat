@@ -8,7 +8,7 @@
 #   carrier   refused host carriers (carrier_connection_failed: data-carrier TLS handshake failures)
 #   attach    host route attach refusals (runtime_route_attach_refused)
 #   edge5xx   5xx pages the edge answered itself, dispatch failures included (edge_http_5xx)
-#   server5xx support_reports rows with HTTP status >= 500 (every server component)
+#   server5xx support_report_groups seen since the start with HTTP status >= 500 (every server component)
 #   offline   machines enrolled STABLE_MIN (30) minutes before the deploy, online at its start and still offline
 #             SETTLE seconds after it (a lane's fresh throwaway or a machine that blips and comes back does not count;
 #             presence has no history, so 'still offline at the end' is what separates a blip from a stranded host)
@@ -123,7 +123,7 @@ for edge in "$@"; do
 	grep 'edge_http_5xx' "$log" >"$work/5xx-$target" || true
 	refs=$(grep -o '"reference":"support_[0-9a-f-]*"' "$work/5xx-$target" | cut -d'"' -f4 | sort -u | sed "s/.*/'&'/" | paste -sd, -)
 	: >"$work/pages-$target"
-	[ -z "$refs" ] || sql "select support_reference from paperboat.support_reports where support_reference in ($refs) and code = 'edge_error_page';" >"$work/pages-$target"
+	[ -z "$refs" ] || sql "select o.support_reference from paperboat.support_report_occurrences o join paperboat.support_report_groups g on g.owner_id=o.owner_id and g.fingerprint=o.fingerprint where o.support_reference in ($refs) and g.code = 'edge_error_page';" >"$work/pages-$target"
 	edge5xx=$(grep -c . "$work/5xx-$target" || true)
 	[ -s "$work/pages-$target" ] && edge5xx=$(grep -v -F -f "$work/pages-$target" "$work/5xx-$target" | grep -c . || true)
 	echo "edge $target: preview failures=$probes control=$control carrier=$carrier attach=$attach edge5xx=$edge5xx"
@@ -131,7 +131,7 @@ for edge in "$@"; do
 	[ "$probes$control$carrier$attach$edge5xx" = 00000 ] || fail=1
 done
 # Edge error pages (a visitor's app refused/timed out) are counted from the edge logs above, not as server failures.
-server5xx=$(sql "select count(*) from paperboat.support_reports where created_at >= '$start' and http_status >= 500 and code <> 'edge_error_page';")
+server5xx=$(sql "select count(*) from paperboat.support_report_groups where last_seen >= '$start' and http_status >= 500 and code <> 'edge_error_page';")
 offline=$(sort -u "$work/offline" | grep -c . || true)
 echo "server: 5xx=$server5xx; machines online before and still offline after the deploy=$offline"
 sort -u "$work/offline" | sed 's/^/  offline: /'

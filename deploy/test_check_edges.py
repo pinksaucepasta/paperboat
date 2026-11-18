@@ -27,9 +27,9 @@ case "$s" in
 *"state = 'online'"*) printf 'machine_1\\nmachine_2\\nmachine_new\\n' ;;
 *"updated_at >="*"not online"*) printf 'machine_2\\n' ;;  # machine_2 blipped offline during the deploy
 *"not online"*"deleted_at is null"*) cat "$T/offline" 2>/dev/null ;;
-*support_reports*"code <> 'edge_error_page'"*) cat "$T/server5xx" ;;
-*"select support_reference"*"code = 'edge_error_page'"*) echo support_aaaa ;;  # only support_aaaa is a visitor app error page
-*support_reports*) echo 99 ;;  # a count that includes visitors' edge error pages fails every case
+*support_report_groups*"code <> 'edge_error_page'"*) cat "$T/server5xx" ;;
+*"select o.support_reference"*"code = 'edge_error_page'"*) echo support_aaaa ;;  # only support_aaaa is a visitor app error page
+*support_report_groups*) echo 99 ;;  # a count that includes visitors' edge error pages fails every case
 esac
 ''',
     'sudo': '#!/bin/sh\n[ "$1" = -n ] && shift\nexec "$@"\n',

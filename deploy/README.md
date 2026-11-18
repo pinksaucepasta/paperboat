@@ -230,7 +230,7 @@ The probe machine must run a `pb` built from `main` (`pb update --from <build>`)
 follows the log of every edge container that runs in the window, the replaced one included. It fails unless
 all of these are 0: preview failures, edge control failures, refused host carriers
 (`carrier_connection_failed`), host route attach refusals, edge-made 5xx (`edge_http_5xx`), server 5xx
-(`support_reports`), and machines that were enrolled more than `STABLE_MIN` (30) minutes before the deploy, online at its
+(`support_report_groups`), and machines that were enrolled more than `STABLE_MIN` (30) minutes before the deploy, online at its
 start and still offline after it settles (a lane's fresh throwaway container or a machine that blips and returns does
 not count; such false positives rolled back edge .30 on 2026-11-16 22:53). A failure means roll
 back (step 5). A failure prints each failed request (time, edge, status, duration, path) and keeps the edge logs of the window
