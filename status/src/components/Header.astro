@@ -1,0 +1,16 @@
+---
+import Lockup from "../../../marketing/src/components/Lockup.astro"
+// The Paperboat site, when this deployment knows it (PAPERBOAT_SITE_URL, a build setting); the page itself does not need it.
+const site = import.meta.env.PAPERBOAT_SITE_URL || "/"
+---
+
+<header class="top">
+  <div class="col top-row">
+    <div class="brand">
+      <Lockup href={site} />
+      <span class="brand-sep" aria-hidden="true">/</span>
+      <span class="brand-page">Status</span>
+    </div>
+    <button type="button" class="btn btn-dark" data-subscribe-open>Subscribe to updates</button>
+  </div>
+</header>

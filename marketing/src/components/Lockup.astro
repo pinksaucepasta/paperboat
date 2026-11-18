@@ -3,11 +3,13 @@ import Mark from "./Mark.astro"
 /** Full-colour lockup: Cobalt mark, ink wordmark in Figtree 600, gap ⅔ of the mark (brand guidelines 03, 04). */
 interface Props {
   size?: number
+  /** Where the lockup links; the marketing site's home by default. */
+  href?: string
 }
-const { size = 18 } = Astro.props
+const { size = 18, href = "/" } = Astro.props
 ---
 
-<a href="/" class="lockup" aria-label="Paperboat home" style={`--h: ${size}px`}>
+<a href={href} class="lockup" aria-label="Paperboat home" style={`--h: ${size}px`}>
   <Mark height={size} class="lockup-mark" />
   <span class="lockup-name">paperboat</span>
 </a>
