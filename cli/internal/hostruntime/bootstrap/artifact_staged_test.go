@@ -159,6 +159,11 @@ func readStagedProductPins(t *testing.T, path string) map[string]stagedProductPi
 	if err := json.Unmarshal(readStagedRegularFile(t, path), &document); err != nil {
 		t.Fatalf("decode staged product target metadata: %v", err)
 	}
+	for name := range document.Signed.Targets {
+		if strings.HasPrefix(name, "selfhost/") { // the self-host bundle's targets are not pb products
+			delete(document.Signed.Targets, name)
+		}
+	}
 	assets := canonicalProductAssetNames()
 	if len(document.Signed.Targets) != len(assets) {
 		t.Fatalf("staged product target count=%d, want %d canonical products", len(document.Signed.Targets), len(assets))
