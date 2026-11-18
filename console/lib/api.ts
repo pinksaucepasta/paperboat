@@ -36,9 +36,8 @@ export class ApiError extends Error {
 
 type ErrorBody = { code?: string; message?: string; details?: unknown; support_reference?: string; request_id?: string }
 
-/** A refusal retrying cannot fix, whose sentence the page shows instead of "Couldn't load": a 403 or the quota 409. */
-export const isFinalRefusal = (error: unknown): error is ApiError =>
-  error instanceof ApiError && (error.status === 403 || (error.status === 409 && error.code === "bandwidth_quota_exhausted"))
+/** A refusal retrying cannot fix, whose sentence the page shows instead of "Couldn't load": a 403. */
+export const isFinalRefusal = (error: unknown): error is ApiError => error instanceof ApiError && error.status === 403
 
 /** Retry-After in milliseconds (seconds or an HTTP date), bounded to 10 minutes. */
 export function retryAfterMs(response: Response, now = Date.now()): number | undefined {
@@ -147,8 +146,6 @@ export function checked<T>(method: string | undefined, path: string, data: T): T
 
 /** Errors the console words itself, because it knows what the person can do next. */
 const sentences: Record<string, string> = {
-  bandwidth_quota_exhausted:
-    "This workspace's hosted bandwidth is used up. Direct machine-to-machine access still works. Add bandwidth or change plan under Billing, or wait for the next allowance period.",
   team_private_access_off:
     "The team has not allowed private access to its shared machines. Ask a team owner or admin to turn it on.",
   github_connection_in_use:

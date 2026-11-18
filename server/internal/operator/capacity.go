@@ -78,6 +78,9 @@ type CapacitySummary struct {
 	Relays    int64 `json:"relays"`
 	Servers   int64 `json:"servers"`
 	Attention int64 `json:"attention"`
+	// ThrottledWorkspaces counts the workspaces whose edge traffic is throttled now (fair-use bandwidth used, no operator
+	// lift): the same rule as bandwidthgate.Lookup and the workspace's entitlements view.
+	ThrottledWorkspaces int64 `json:"throttled_workspaces"`
 }
 
 // readCapacitySummary is nodeWarnings' warning and critical rules in one aggregate over every node; info-only nodes
@@ -95,6 +98,14 @@ func (s *Service) readCapacitySummary(ctx context.Context, tx *db.Tx, now time.T
      OR (reports AND ((kind='edge' AND cpu >= $4::float8) OR (kind='relay' AND rss >= $5::bigint) OR (kind<>'server' AND month >= $6::float8))))
  FROM x`, monthStart, now.Add(-serverStaleAfter), now.Add(-s.nodeStaleAfter), s.capacity.EdgeCPUWarnPercent, s.capacity.RelayRSSWarnBytes,
 		float64(s.capacity.MonthlyTrafficBytes)*s.capacity.TrafficWarnFraction).Scan(&out.Edges, &out.Relays, &out.Servers, &out.Attention)
+	if err != nil {
+		return out, err
+	}
+	err = tx.QueryRow(ctx, `SELECT count(*) FROM paperboat.billing_workspace_usage_periods p
+WHERE p.period_start<=$1 AND p.period_end>$1 AND p.included_bytes IS NOT NULL AND NOT paperboat.workspace_throttle_lifted(p.workspace_id)
+ AND (SELECT coalesce(sum(q.consumed_bytes),0) FROM paperboat.billing_workspace_usage_periods q
+      WHERE q.workspace_id=p.workspace_id AND q.paid=p.paid AND coalesce(q.budget_start,q.period_start)=coalesce(p.budget_start,p.period_start)) >= p.included_bytes+paperboat.workspace_granted_bytes(p.workspace_id)
+ AND (NOT p.paid OR coalesce((SELECT sum(t.remaining_bytes) FROM paperboat.billing_workspace_topups t WHERE t.workspace_id=p.workspace_id AND t.purchased_at<=$1 AND t.expires_at>$1),0)=0)`, now).Scan(&out.ThrottledWorkspaces)
 	return out, err
 }
 

@@ -16,7 +16,6 @@ export type CloseCode =
   | "revoked"
   | "expired"
   | "limit"
-  | "bandwidth_quota_exhausted"
   | "too_many_pending"
   | "machine_unavailable"
   | "edge_unavailable"
@@ -35,10 +34,6 @@ export const terminalCloseCodes: Readonly<Record<CloseCode, CloseOutcome>> = {
   ended: { phase: "closed", message: "This terminal has ended." },
   expired: { phase: "reconnect", message: "", silent: true },
   limit: { phase: "limit", message: "Your plan's browser terminal limit is reached. Close one or change plan." },
-  bandwidth_quota_exhausted: {
-    phase: "quota",
-    message: "This workspace's hosted bandwidth is used up. Add bandwidth or change plan under Billing.",
-  },
   too_many_pending: { phase: "reconnect", message: "Too many terminals are opening at once. Waiting as the server asks." },
   machine_unavailable: {
     phase: "reconnect",
@@ -111,7 +106,6 @@ const ticketCodes: Readonly<Record<string, CloseCode>> = {
   terminal_session_closed: "ended",
   too_many_pending_tickets: "too_many_pending",
   browser_terminal_limit_reached: "limit",
-  bandwidth_quota_exhausted: "bandwidth_quota_exhausted",
 }
 
 /** The code of a failed ticket request; null when it was not an API refusal. */

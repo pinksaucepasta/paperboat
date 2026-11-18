@@ -40,7 +40,6 @@ func TestEdgeClosesMapToTypedOutcomes(t *testing.T) {
 		reason       string
 		state, typed string
 	}{
-		{4403, "bandwidth_quota_exhausted", "denied", "bandwidth_quota_exhausted"},
 		{4404, "no_access", "denied", "no_access"},
 		{4401, "", "denied", "revoked"},
 		{4402, "limit", "denied", "limit"},
@@ -58,18 +57,14 @@ func TestEdgeClosesMapToTypedOutcomes(t *testing.T) {
 			t.Fatalf("close %d %q: got %#v, want state %s code %s", c.code, c.reason, got, c.state, c.typed)
 		}
 	}
-	var quota *terminalConnectError
-	if errors.As(closeFailure(4403, "bandwidth_quota_exhausted", true), &quota) && !strings.Contains(quota.message, "Billing") {
-		t.Fatal("the bandwidth denial lost its wording")
-	}
 	if closeFailure(1006, "", false) != io.EOF || closeFailure(0, "", false) != io.EOF || closeFailure(1000, "", true) != io.EOF {
 		t.Fatal("a dropped network or a plain close is not a plain end of stream")
 	}
 }
 
 func TestAPlanLimitDenialInsideATransportFailureWins(t *testing.T) {
-	outer := &terminalConnectError{state: "transport-error", code: "connection_failed", cause: closeFailure(4403, "bandwidth_quota_exhausted", true)}
-	if got := innermostConnectError(outer); got.code != "bandwidth_quota_exhausted" || got.state != "denied" {
+	outer := &terminalConnectError{state: "transport-error", code: "connection_failed", cause: closeFailure(4402, "limit", true)}
+	if got := innermostConnectError(outer); got.code != "limit" || got.state != "denied" {
 		t.Fatalf("got %#v", got)
 	}
 }

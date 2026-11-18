@@ -58,8 +58,6 @@ export type TerminalPhase =
   | "denied"
   | "closed"
   | "transport-error"
-  /** The workspace's hosted bandwidth is used up: retrying can't help until it renews or is added to. */
-  | "quota"
   /** The plan's browser-terminal limit is reached: `limit` holds the server's refusal. */
   | "limit"
 
