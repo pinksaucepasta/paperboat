@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net"
 	"net/http"
 	"slices"
@@ -510,6 +511,13 @@ func (p *Provider) Withdraw(ids []string) error {
 		p.withdrawn[id] = struct{}{}
 	}
 	return nil
+}
+
+// KeyIDs are the signing key ids this mint publishes (not withdrawn) and the one it signs with.
+func (p *Provider) KeyIDs() (active string, published []string) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.activeID, slices.Sorted(maps.Keys(p.keys))
 }
 
 // CheckRevocable says whether an operator may revoke id: it must be a key this mint publishes or already

@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/pinksaucepasta/paperboat/server/internal/admission"
+	"github.com/pinksaucepasta/paperboat/server/internal/secrets"
 	"github.com/pinksaucepasta/paperboat/shared/edgelimits"
 	"github.com/pinksaucepasta/paperboat/shared/terminalprotocol"
 	"net"
@@ -17,6 +18,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 )
@@ -95,6 +97,7 @@ type Config struct {
 	RateLimits           RateLimits       `json:"rate_limits"`
 	UserMachines         UserMachines     `json:"user_machines"`
 	ManagedSSH           ManagedSSH       `json:"managed_ssh"`
+	BreakGlass           BreakGlass       `json:"break_glass"`
 	TerminalSessions     TerminalSessions `json:"terminal_sessions"`
 	Preview              Preview          `json:"preview"`
 	Tunnel               Tunnel           `json:"tunnel"`
@@ -309,6 +312,16 @@ func (l PlanLimit) valid() bool {
 // (the machine refuses revoked certificates by key ID), not at expiry.
 type ManagedSSH struct {
 	CertificateValidity time.Duration `json:"certificate_validity"`
+}
+
+// BreakGlass tunes the guarded recovery run (internal/breakglass). The pickup timeout is longer than the managed SSH
+// CA propagation (15 minutes), which is longer than a host's fallback refresh of its CAs (10 minutes).
+type BreakGlass struct {
+	PickupThreshold float64       `json:"pickup_threshold"`
+	PickupTimeout   time.Duration `json:"pickup_timeout"`
+	OnlineWindow    time.Duration `json:"online_window"`
+	Batch           int           `json:"batch"`
+	Interval        time.Duration `json:"interval"`
 }
 
 type UserMachines struct {
@@ -613,6 +626,7 @@ func Default() Config {
 		WorkspacePolicy:   defaultWorkspacePolicy(),
 		RuntimeBaseDomain: "localhost",
 		ManagedSSH:        ManagedSSH{CertificateValidity: 12 * time.Hour},
+		BreakGlass:        BreakGlass{PickupThreshold: 0.9, PickupTimeout: 20 * time.Minute, OnlineWindow: 30 * time.Minute, Batch: 500, Interval: 2 * time.Second},
 		UserMachines:      UserMachines{PairingLifetime: 10 * time.Minute, OfflineAfter: 90 * time.Second, ExpiredAccessSessionRetention: 7 * 24 * time.Hour, AllowedPlatforms: []string{"darwin", "linux", "windows"}, RuntimeListenPort: 38080},
 		TerminalSessions:  TerminalSessions{OperationTimeout: 15 * time.Second, RetryBackoff: time.Second, WorkerInterval: time.Second, MaxAttemptsBeforeAlert: 10, OperationMaxAge: 30 * 24 * time.Hour},
 		Preview:           Preview{BaseDomain: "preview.localhost", SharedFileMaxBytes: 2 << 30},
@@ -1020,7 +1034,8 @@ func (c Config) Validate() error {
 		if strings.TrimSpace(c.CLIAuth.MintActiveKeyID) == "" || len(c.Secrets.MintSigningKeys) == 0 {
 			errs = append(errs, fmt.Errorf("production mint active key id and signing keys are required"))
 		}
-		for _, secret := range append(c.Secrets.SessionKeys, c.Secrets.EncryptionKey) {
+		// The encryption key is a ring ("newest,older"): every key in it must be strong.
+		for _, secret := range append(slices.Clone(c.Secrets.SessionKeys), secrets.Split(c.Secrets.EncryptionKey)...) {
 			if strings.Contains(secret, "development") || len(secret) < 32 {
 				errs = append(errs, fmt.Errorf("production secrets must be strong and non-development"))
 				break

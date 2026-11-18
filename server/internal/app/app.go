@@ -30,6 +30,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/backupreport"
 	"github.com/pinksaucepasta/paperboat/server/internal/bandwidthgate"
 	"github.com/pinksaucepasta/paperboat/server/internal/billing"
+	"github.com/pinksaucepasta/paperboat/server/internal/breakglass"
 	"github.com/pinksaucepasta/paperboat/server/internal/browseraccess"
 	"github.com/pinksaucepasta/paperboat/server/internal/browseringress"
 	"github.com/pinksaucepasta/paperboat/server/internal/browserterminal"
@@ -81,6 +82,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/retention"
 	"github.com/pinksaucepasta/paperboat/server/internal/revenue"
 	"github.com/pinksaucepasta/paperboat/server/internal/runtimeattachment"
+	"github.com/pinksaucepasta/paperboat/server/internal/secrets"
 	"github.com/pinksaucepasta/paperboat/server/internal/selfhost"
 	"github.com/pinksaucepasta/paperboat/server/internal/servernodes"
 	"github.com/pinksaucepasta/paperboat/server/internal/supportreport"
@@ -147,7 +149,7 @@ func New(opts Options) (*App, error) {
 		_ = store.Close()
 		return nil, fmt.Errorf("configure atomic preview domains: %w", err)
 	}
-	cursorKey := sha256.Sum256([]byte("paperboat.preview-tunnel.cursor\x00" + opts.Config.Secrets.EncryptionKey))
+	cursorKey := sha256.Sum256([]byte("paperboat.preview-tunnel.cursor\x00" + secrets.Split(opts.Config.Secrets.EncryptionKey)[0]))
 	previewDomainService, err := previewdomain.NewService(previewDomainRepository, previewdomain.Config{
 		CursorKey: cursorKey[:],
 	})
@@ -761,8 +763,21 @@ func New(opts Options) (*App, error) {
 	// A nil Stripe client leaves subscription jobs failing until Stripe is configured.
 	subscriptionCanceller, _ := stripeClient.(accountdeletion.Subscriptions)
 	accountDeletionOutbox := accountDeletion.Worker(workOSVerifier(opts.Config), subscriptionCanceller)
+	clientUpdatePolicy := clientupdate.New(store, auditWriter, opts.Config.ReleaseDirectory)
+	operatorAuthService := &operatorauth.Service{Store: store, BootstrapEmail: opts.Config.OperatorBootstrapEmail, SecretKey: opts.Config.Secrets.EncryptionKey}
+	breakGlass, err := breakglass.New(breakglass.Config{
+		Store: store, SSH: managedSSHService, Mint: mintKeys, Floor: clientUpdatePolicy, TOTP: operatorAuthService,
+		EncryptionKey: opts.Config.Secrets.EncryptionKey, SessionKeys: opts.Config.Secrets.SessionKeys,
+		PickupThreshold: opts.Config.BreakGlass.PickupThreshold, PickupTimeout: opts.Config.BreakGlass.PickupTimeout,
+		OnlineWindow: opts.Config.BreakGlass.OnlineWindow, Batch: opts.Config.BreakGlass.Batch,
+	})
+	if err != nil {
+		_ = store.Close()
+		return nil, err
+	}
 	router := httpapi.NewRouter(httpapi.Options{
-		ClientUpdatePolicy:       clientupdate.New(store, auditWriter, opts.Config.ReleaseDirectory),
+		BreakGlass:               breakGlass,
+		ClientUpdatePolicy:       clientUpdatePolicy,
 		NodeUpdatePolicies:       nodeFloorAPIs,
 		SupportReports:           supportService,
 		OperatorInfrastructure:   infrastructureService,
@@ -774,7 +789,7 @@ func New(opts Options) (*App, error) {
 		OperatorMoney:            moneyService(stripeClient, store),
 		OperatorAnalytics:        posthogquery.New(posthogquery.Config{Host: opts.Config.Analytics.PostHogHost, ProjectID: opts.Config.Analytics.PostHogProjectID, Key: opts.Config.Secrets.PostHogPersonalKey}),
 		Operator:                 operatorService,
-		OperatorAuth:             &operatorauth.Service{Store: store, BootstrapEmail: opts.Config.OperatorBootstrapEmail, SecretKey: opts.Config.Secrets.EncryptionKey},
+		OperatorAuth:             operatorAuthService,
 		OperatorHealth:           telemetryHealth,
 		OperatorActions:          operatorActions,
 		AbuseReports:             abuseReports,
@@ -867,6 +882,7 @@ func New(opts Options) (*App, error) {
 		observedWorker(supportService, "worker_transactional_mail", mailService.Run, progress),
 		observedWorker(supportService, "worker_account_deletion", accountDeletionOutbox.Run, progress),
 		observedWorker(supportService, "worker_operational_health", operationalHealthWorker(backupService, supportService, healthMonitor, progress), progress),
+		observedWorker(supportService, "worker_breakglass", func(ctx context.Context) error { return breakGlass.Run(ctx, opts.Config.BreakGlass.Interval) }, progress),
 		observedWorker(supportService, "worker_machines", userMachineService.Worker(opts.Config.TerminalSessions.WorkerInterval), progress),
 		observedWorker(supportService, "worker_config_warnings", configAssignmentService.WarningReconciliationWorker(opts.Config.TerminalSessions.WorkerInterval), progress),
 		observedWorker(supportService, "worker_config_revocation", configRepositoryAccessService.RevocationWorker(opts.Config.TerminalSessions.WorkerInterval, 25), progress),

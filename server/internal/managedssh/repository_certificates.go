@@ -72,6 +72,11 @@ func (r *SQLRepository) UserCAs(ctx context.Context, request UserCAsRequest, can
 		if result, err = listUserCAs(ctx, q, machine.UserID); err != nil {
 			return err
 		}
+		// Break-glass reads this to see which hosts hold the CA set it published (breakglass pickup).
+		if _, err := tx.Exec(ctx, `INSERT INTO paperboat.managed_ssh_ca_fetches (machine_id, fetched_at) VALUES ($1, $2)
+			ON CONFLICT (machine_id) DO UPDATE SET fetched_at = EXCLUDED.fetched_at`, request.UserMachineID, request.Now); err != nil {
+			return err
+		}
 		if err := q.DeleteExpiredManagedSSHCertificateHolders(ctx, dbsqlc.DeleteExpiredManagedSSHCertificateHoldersParams{MachineID: request.UserMachineID, Now: request.Now}); err != nil {
 			return err
 		}
