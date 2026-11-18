@@ -60,7 +60,7 @@ function Report({ days }: { days: Days }) {
     <div className="flex flex-col gap-8" data-money-state="ready">
       {(r.partial || r.skipped_currency > 0) && (
         <p className="text-sm text-muted-foreground" data-money-note>
-          {r.partial && "More subscriptions than this page reads: every total is a floor. "}
+          {r.partial && "More data than this page reads: totals are a floor. "}
           {r.skipped_currency > 0 && `${r.skipped_currency} subscription${r.skipped_currency === 1 ? "" : "s"} in other currencies are left out. `}
         </p>
       )}

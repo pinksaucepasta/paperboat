@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/url"
 	"strconv"
 	"strings"
@@ -46,6 +47,9 @@ func walk(ctx context.Context, g Getter, path string, q url.Values, max int, fn 
 			id, err := fn(raw)
 			if err != nil {
 				return false, err
+			}
+			if id == "" {
+				return false, errors.New("stripe list object without an id")
 			}
 			after = id
 			seen++
@@ -164,7 +168,7 @@ func (w wireSub) sub() Sub {
 		if item, ok := it.item(); ok {
 			s.Items = append(s.Items, item)
 		}
-		if s.PeriodEnd == 0 || it.CurrentPeriodEnd != 0 && it.CurrentPeriodEnd < s.PeriodEnd {
+		if it.CurrentPeriodEnd != 0 && (s.PeriodEnd == 0 || it.CurrentPeriodEnd < s.PeriodEnd) {
 			s.PeriodEnd = it.CurrentPeriodEnd
 		}
 	}

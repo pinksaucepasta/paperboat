@@ -6,13 +6,13 @@ const down: Record<string, string> = {
   analytics_unavailable: "PostHog",
   money_unavailable: "Stripe",
   operator_evidence_unavailable: "Sentry",
-  sentry_rate_limited: "Sentry",
 }
 
-export type IntegrationState = { kind: "not_configured" } | { kind: "down"; provider: string } | { kind: "other" }
+export type IntegrationState = { kind: "not_configured" } | { kind: "down"; provider: string } | { kind: "rate_limited"; provider: string } | { kind: "other" }
 
 export function integrationState(code: string): IntegrationState {
   if (code.endsWith("_not_configured")) return { kind: "not_configured" }
+  if (code === "sentry_rate_limited") return { kind: "rate_limited", provider: "Sentry" }
   const provider = down[code]
   return provider ? { kind: "down", provider } : { kind: "other" }
 }

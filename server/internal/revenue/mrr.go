@@ -119,8 +119,9 @@ func (s Sub) CycleAmount(now int64) int64 {
 	return int64(math.Round(s.monthly(now) * s.period()))
 }
 
-// mrrAt rebuilds the subscription's MRR at a past instant from its start, trial and end dates. It values the
-// subscription at today's price: a plan change since then is not replayed (Stripe's own chart has history; we do not).
+// mrrAt rebuilds the subscription's MRR at a past instant from its start, trial and end dates, with the discounts that
+// ran then. It values the subscription at today's price and status: a plan or pause since then is not replayed
+// (Stripe's own chart has history; we do not).
 func (s Sub) mrrAt(t, now int64) int64 {
 	switch s.Status {
 	case "incomplete", "incomplete_expired", "paused", "unpaid":
@@ -131,7 +132,7 @@ func (s Sub) mrrAt(t, now int64) int64 {
 	if s.Start == 0 || s.Start > t || s.Ended != 0 && s.Ended <= t || s.TrialEnd > t {
 		return 0
 	}
-	return int64(math.Round(s.monthly(now)))
+	return int64(math.Round(s.monthly(t)))
 }
 
 // payingStart is when the subscription began to pay: its start, or the end of its trial.
@@ -153,7 +154,9 @@ type TrendPoint struct {
 func PrimaryCurrency(subs []Sub, now int64) string {
 	by := map[string]int64{}
 	for _, s := range subs {
-		by[s.Currency] += s.MRR(now)
+		if s.Currency != "" {
+			by[s.Currency] += s.MRR(now)
+		}
 	}
 	best, bestMRR := "usd", int64(0)
 	for c, v := range by {
@@ -167,7 +170,7 @@ func PrimaryCurrency(subs []Sub, now int64) string {
 // SplitCurrency keeps the subscriptions in currency and counts the others.
 func SplitCurrency(subs []Sub, currency string) (kept []Sub, skipped int) {
 	for _, s := range subs {
-		if s.Currency == currency || s.Currency == "" {
+		if s.Currency == currency {
 			kept = append(kept, s)
 		} else {
 			skipped++

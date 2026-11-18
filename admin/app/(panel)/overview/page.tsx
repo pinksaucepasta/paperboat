@@ -72,7 +72,7 @@ function OverviewStats({ data }: { data?: Overview }) {
 function Insights() {
   const site = useApiQuery<Site>(["analytics", "site", "7"], "/v1/admin/analytics/site?days=7", 30_000)
   const product = useApiQuery<Console>(["analytics", "console", "7"], "/v1/admin/analytics/console?days=7", 30_000)
-  const notConfigured = site.error instanceof ApiError && site.error.code === "analytics_not_configured"
+  const notConfigured = [site.error, product.error].some((e) => e instanceof ApiError && e.code === "analytics_not_configured")
   return (
     <Panel title="Last 7 days" action={<Link href="/analytics" className="text-sm text-muted-foreground underline-offset-4 hover:underline">Analytics</Link>}>
       {notConfigured ? (

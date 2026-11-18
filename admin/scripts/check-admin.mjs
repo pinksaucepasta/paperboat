@@ -270,6 +270,7 @@ function route(req, url) {
       errors: { balance_and_payouts: "unauthorized" },
     }
   }
+  if (p === "/v1/admin/sentry/issues" && process.env.__FIXTURE_SENTRY === "limited") return { __status: 429, code: "sentry_rate_limited", message: "Sentry is rate limiting requests. Retry later.", reference: "support_fixture_sentry" }
   if (p === "/v1/admin/sentry/issues" && process.env.__FIXTURE_SENTRY === "down") return { __status: 503, code: "operator_evidence_unavailable", message: "Evidence could not be retrieved or recorded.", reference: "support_fixture_sentry" }
   if (p === "/v1/admin/sentry/issues" && process.env.__FIXTURE_SENTRY === "off") return { __status: 503, code: "sentry_not_configured", message: "The Sentry admin API has not been configured." }
   if (p === "/v1/admin/sentry/issues") return { issues: [{ project: "go", id: "1", short_id: "GO-1", level: "error", status: "unresolved", count: 5, first_seen: "2026-11-16T00:00:00Z", last_seen: "2026-11-17T08:00:00Z" }] }
@@ -649,6 +650,17 @@ try {
       }
     })
   }
+  await step("Sentry rate limited: says so (not an outage), with Retry and its reference", async () => {
+    process.env.__FIXTURE_SENTRY = "limited"
+    try {
+      await p.goto(`${ORIGIN}/sentry`)
+      await p.waitForSelector("[data-error-block]")
+      const shown = await text("[data-error-block]")
+      expect(shown.includes("rate limiting") && !shown.includes("isn’t answering") && shown.includes("Retry") && shown.includes("support_fixture_sentry"), `shown: ${shown}`)
+    } finally {
+      delete process.env.__FIXTURE_SENTRY
+    }
+  })
   await step("release authority not configured: one line, no buttons, no error panels", async () => {
     process.env.__FIXTURE_RELEASE = "off"
     try {

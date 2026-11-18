@@ -20,6 +20,10 @@ test("release authority is only ever set or unset", () => {
   expect(integrationState("release_authority_not_configured").kind).toBe("not_configured")
 })
 
+test("a rate limit is told apart from an outage", () => {
+  expect(integrationState("sentry_rate_limited")).toEqual({ kind: "rate_limited", provider: "Sentry" })
+})
+
 test("an ordinary failure is neither", () => {
   expect(integrationState("forbidden")).toEqual({ kind: "other" })
   expect(integrationState("timeout")).toEqual({ kind: "other" })

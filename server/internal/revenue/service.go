@@ -49,8 +49,11 @@ type Service struct {
 	bal *balance
 }
 
-// New returns a service; a nil getter makes every call answer ErrNotConfigured.
+// New returns a service; a nil getter makes every call answer ErrNotConfigured, a nil directory knows no plans or workspaces.
 func New(g Getter, dir Directory) *Service {
+	if dir == nil {
+		dir = noRecords{}
+	}
 	return &Service{g: g, dir: dir, now: time.Now, per: map[int]*period{}}
 }
 
@@ -87,12 +90,15 @@ type period struct {
 	up, upPrev  Change
 	changesErr  string
 	hasPrevious bool
+	partial     bool // charges, refunds or events beyond the read bound: the sums are a floor
+	currency    string
 }
 
 type balance struct {
-	at  time.Time
-	val Balance
-	err string
+	at       time.Time
+	currency string
+	val      Balance
+	err      string
 }
 
 func (s *Service) fresh(at time.Time) bool { return s.now().Sub(at) < cacheTTL }
@@ -284,7 +290,7 @@ type Report struct {
 	ObservedAt      time.Time         `json:"observed_at"`
 	Days            int               `json:"days"`
 	Currency        string            `json:"currency"`
-	Partial         bool              `json:"partial"`          // more subscriptions than the read bound: every sum is a floor
+	Partial         bool              `json:"partial"`          // more data than the read bound: sums are a floor
 	SkippedCurrency int               `json:"skipped_currency"` // subscriptions in other currencies, left out of every sum
 	MRR             Pair              `json:"mrr"`
 	ARR             Pair              `json:"arr"`
@@ -413,6 +419,7 @@ func (s *Service) Report(ctx context.Context, days int) (Report, error) {
 	}
 
 	p := s.period(ctx, st, days, now)
+	r.Partial = r.Partial || p.partial
 	r.Movement.Upgraded = Flow{Count: p.up.Upgraded, MRR: p.up.UpgradedMRR}
 	r.Movement.Downgraded = Flow{Count: p.up.Downgraded, MRR: p.up.DowngradedMRR}
 	if p.changesErr != "" {
@@ -498,34 +505,37 @@ func plans(st *state, now int64) []PlanRow {
 
 // period reads the cash and the plan changes of a window, each section failing on its own.
 func (s *Service) period(ctx context.Context, st *state, days int, now time.Time) *period {
-	if p := s.per[days]; p != nil && s.fresh(p.at) {
+	if p := s.per[days]; p != nil && s.fresh(p.at) && p.currency == st.currency {
 		return p
 	}
 	span := int64(days) * 86400
 	from, since := now.Unix()-span, now.Unix()-2*span
-	p := &period{at: now}
+	p := &period{at: now, currency: st.currency}
 	var err error
-	if p.cur, p.prev, err = CashSince(ctx, s.g, st.currency, since, from); err != nil {
+	var cut bool
+	if p.cur, p.prev, cut, err = CashSince(ctx, s.g, st.currency, since, from); err != nil {
 		p.cashErr = failureCode(err)
 	}
+	p.partial = cut
 	// Events reach back 30 days: a window of 7 compares with the 7 before; a window of 30 has nothing to compare with.
 	eventsSince := since
 	p.hasPrevious = 2*span <= 30*86400
 	if !p.hasPrevious {
 		eventsSince = from
 	}
-	if p.up, p.upPrev, err = ChangesSince(ctx, s.g, eventsSince, from, now.Unix()); err != nil {
+	if p.up, p.upPrev, cut, err = ChangesSince(ctx, s.g, st.currency, eventsSince, from, now.Unix()); err != nil {
 		p.changesErr = failureCode(err)
 	}
+	p.partial = p.partial || cut
 	s.per[days] = p
 	return p
 }
 
 func (s *Service) balance(ctx context.Context, currency string, now time.Time) *balance {
-	if s.bal != nil && s.fresh(s.bal.at) {
+	if s.bal != nil && s.fresh(s.bal.at) && s.bal.currency == currency {
 		return s.bal
 	}
-	b := &balance{at: now}
+	b := &balance{at: now, currency: currency}
 	val, err := ReadBalance(ctx, s.g, currency)
 	if err != nil {
 		b.err = failureCode(err)
@@ -533,4 +543,11 @@ func (s *Service) balance(ctx context.Context, currency string, now time.Time) *
 	b.val = val
 	s.bal = b
 	return b
+}
+
+type noRecords struct{}
+
+func (noRecords) PlanCodes(context.Context) (map[string]string, error) { return nil, nil }
+func (noRecords) Workspaces(context.Context, []string) (map[string]string, error) {
+	return nil, nil
 }

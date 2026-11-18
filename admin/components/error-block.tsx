@@ -20,7 +20,7 @@ export function ErrorBlock({ what, error, retry }: { what: string; error: Error;
         <span className="text-center">{error.message}</span>
       ) : (
         <span className="flex items-center gap-3">
-          {state.kind === "down" ? `${state.provider} isn’t answering.` : `Couldn’t load ${what}.`}
+          {state.kind === "down" ? `${state.provider} isn’t answering.` : state.kind === "rate_limited" ? `${state.provider} is rate limiting; try again in a minute.` : `Couldn’t load ${what}.`}
           {retry && (
             <Button variant="outline" size="sm" onClick={retry}>
               Retry

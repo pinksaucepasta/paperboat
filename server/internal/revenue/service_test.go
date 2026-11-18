@@ -293,3 +293,52 @@ func TestParsesUnexpandedAndExpandedObjects(t *testing.T) {
 		t.Fatalf("MRR %d, want 1800 (2 x 1000 less 10%%; the tiered line has no unit amount)", got)
 	}
 }
+
+func TestUpgradesInOtherCurrenciesAreNotSummed(t *testing.T) {
+	f := baseFixture()
+	eur := sub("sub_eur", "cus_eur", "active", testNow-90*86400, "price_pro", 2000, 3, "month", obj("currency", "eur"))
+	f["/v1/events"] = lst(obj("id", "evt_eur", "type", "customer.subscription.updated", "created", testNow-86400,
+		"data", obj("object", eur, "previous_attributes", obj("items", obj("data", []any{obj("id", "si_sub_eur", "quantity", 1)})))))
+	r, err := newService(f).Report(context.Background(), 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Movement.Upgraded.Count != 0 || r.Movement.Upgraded.MRR != 0 {
+		t.Fatalf("a EUR upgrade leaked into the USD report: %+v", r.Movement.Upgraded)
+	}
+}
+
+func TestAListObjectWithoutAnIdIsAProviderErrorNotALoop(t *testing.T) {
+	f := baseFixture()
+	f["/v1/charges"] = obj("has_more", true, "data", []any{obj("amount", 1, "currency", "usd", "status", "succeeded", "created", testNow)})
+	r, err := newService(f).Report(context.Background(), 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Cash != nil || r.Errors["revenue"] == "" {
+		t.Fatalf("cash %+v errors %v", r.Cash, r.Errors)
+	}
+}
+
+func TestACutOffReadMarksTheReportPartial(t *testing.T) {
+	f := baseFixture()
+	page := func(url.Values) any {
+		return obj("has_more", true, "data", []any{obj("id", "ch_x", "amount", 1, "currency", "usd", "status", "succeeded", "created", testNow-86400)})
+	}
+	f["/v1/charges"] = page
+	r, err := newService(f).Report(context.Background(), 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !r.Partial {
+		t.Fatal("charges ran past the read bound: the report must say its sums are a floor")
+	}
+}
+
+func TestNilDirectoryKnowsNothingInsteadOfPanicking(t *testing.T) {
+	s := New(baseFixture(), nil)
+	s.now = func() time.Time { return time.Unix(testNow, 0) }
+	if _, err := s.Report(context.Background(), 7); err != nil {
+		t.Fatal(err)
+	}
+}

@@ -133,3 +133,23 @@ func TestMovementBetween(t *testing.T) {
 		t.Errorf("churn = %v%% logos, %v%% revenue; want 33.3, 50", m.LogoChurnPercent, m.RevenueChurnPercent)
 	}
 }
+
+func TestHistoryUsesTheDiscountsThatRanThen(t *testing.T) {
+	s := Sub{ID: "a", Status: "active", Start: now - 90*day0, Items: []Item{monthlyItem(1000, 1)},
+		Discounts: []Discount{{Percent: 50, Duration: "repeating", End: now - 2*day0}}}
+	if got, _ := MRRAt([]Sub{s}, now-10*day0, now); got != 500 {
+		t.Fatalf("10 days ago the coupon still ran: MRR %d, want 500", got)
+	}
+	if got, _ := MRRAt([]Sub{s}, now-1*day0, now); got != 1000 {
+		t.Fatalf("yesterday it had ended: MRR %d, want 1000", got)
+	}
+}
+
+func TestNoCurrencyIsNeverTheReportCurrency(t *testing.T) {
+	subs := []Sub{{Status: "active", Items: []Item{monthlyItem(9000, 1)}}, {Status: "active", Currency: "usd", Items: []Item{monthlyItem(1000, 1)}}}
+	cur := PrimaryCurrency(subs, now)
+	kept, skipped := SplitCurrency(subs, cur)
+	if cur != "usd" || len(kept) != 1 || skipped != 1 {
+		t.Fatalf("%q kept %d skipped %d", cur, len(kept), skipped)
+	}
+}

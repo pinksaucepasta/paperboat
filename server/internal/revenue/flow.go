@@ -36,7 +36,7 @@ type wireRefund struct {
 
 // CashSince reads charges and refunds created since `since` (twice the window, so the caller can split it) and
 // returns the totals of the window [from, now) and of [since, from).
-func CashSince(ctx context.Context, g Getter, currency string, since, from int64) (current, previous Cash, err error) {
+func CashSince(ctx context.Context, g Getter, currency string, since, from int64) (current, previous Cash, partial bool, err error) {
 	q := url.Values{"created[gte]": {strconv.FormatInt(since, 10)}}
 	bucket := func(at int64) *Cash {
 		if at >= from {
@@ -44,7 +44,7 @@ func CashSince(ctx context.Context, g Getter, currency string, since, from int64
 		}
 		return &previous
 	}
-	if _, err = walk(ctx, g, "/v1/charges", q, maxPages*pageLimit, func(raw json.RawMessage) (string, error) {
+	cut, err := walk(ctx, g, "/v1/charges", q, maxPages*pageLimit, func(raw json.RawMessage) (string, error) {
 		var c wireCharge
 		if err := decodeStrict(raw, &c); err != nil {
 			return "", err
@@ -58,10 +58,11 @@ func CashSince(ctx context.Context, g Getter, currency string, since, from int64
 			}
 		}
 		return c.ID, nil
-	}); err != nil {
-		return Cash{}, Cash{}, err
+	})
+	if err != nil {
+		return Cash{}, Cash{}, false, err
 	}
-	_, err = walk(ctx, g, "/v1/refunds", q, maxPages*pageLimit, func(raw json.RawMessage) (string, error) {
+	cutRefunds, err := walk(ctx, g, "/v1/refunds", q, maxPages*pageLimit, func(raw json.RawMessage) (string, error) {
 		var r wireRefund
 		if err := decodeStrict(raw, &r); err != nil {
 			return "", err
@@ -71,7 +72,7 @@ func CashSince(ctx context.Context, g Getter, currency string, since, from int64
 		}
 		return r.ID, nil
 	})
-	return current, previous, err
+	return current, previous, cut || cutRefunds, err
 }
 
 // Change is the upgrades and downgrades seen in the window: how many subscriptions and how much MRR moved.
@@ -121,9 +122,9 @@ func previous(cur Sub, curWire wireSub, prev []wireItem) Sub {
 
 // ChangesSince classifies subscription updates by whether they raised or lowered MRR. Stripe lists events for 30 days
 // only, so the caller asks for a window it can cover.
-func ChangesSince(ctx context.Context, g Getter, since, from, now int64) (current, prior Change, err error) {
+func ChangesSince(ctx context.Context, g Getter, currency string, since, from, now int64) (current, prior Change, partial bool, err error) {
 	q := url.Values{"type": {"customer.subscription.updated"}, "created[gte]": {strconv.FormatInt(since, 10)}}
-	_, err = walk(ctx, g, "/v1/events", q, maxEvents, func(raw json.RawMessage) (string, error) {
+	partial, err = walk(ctx, g, "/v1/events", q, maxEvents, func(raw json.RawMessage) (string, error) {
 		var e wireEvent
 		if err := decodeStrict(raw, &e); err != nil {
 			return "", err
@@ -136,7 +137,7 @@ func ChangesSince(ctx context.Context, g Getter, since, from, now int64) (curren
 			return "", err
 		}
 		cur := w.sub()
-		if !counts(cur.Status) {
+		if !counts(cur.Status) || cur.Currency != currency {
 			return e.ID, nil
 		}
 		delta := cur.MRR(now) - previous(cur, w, e.Data.PreviousAttributes.Items.Data).MRR(now)
@@ -154,7 +155,7 @@ func ChangesSince(ctx context.Context, g Getter, since, from, now int64) (curren
 		}
 		return e.ID, nil
 	})
-	return current, prior, err
+	return current, prior, partial, err
 }
 
 // Balance is the Stripe balance in the report currency and the next payout on its way.
