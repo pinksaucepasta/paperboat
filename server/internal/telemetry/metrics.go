@@ -36,8 +36,8 @@ const (
 	MetricHTTPDuration             = "paperboat_server_http_request_duration_seconds"
 	// Per matched route template (a registered mux pattern without its method, never a raw path or id). The route
 	// label values are added as routes are first seen, see AllowLabelValue; unmatched requests count as "unmatched".
-	MetricHTTPRouteRequests = "paperboat_server_http_route_requests_total"
-	MetricHTTPRouteDuration = "paperboat_server_http_route_duration_seconds"
+	MetricHTTPRouteRequests        = "paperboat_server_http_route_requests_total"
+	MetricHTTPRouteDuration        = "paperboat_server_http_route_duration_seconds"
 	MetricRelaySubjectObservations = "paperboat_server_relay_subject_observations_total"
 )
 

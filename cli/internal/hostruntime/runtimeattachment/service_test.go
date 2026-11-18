@@ -861,6 +861,7 @@ func TestGoawayCarrierServesUntilTheEdgeStopsOpeningStreams(t *testing.T) {
 	// The edge has not moved yet: it keeps sending requests for longer than handoverQuiet.
 	request.Kind = "http"
 	until := time.Now().Add(handoverQuiet + time.Second)
+	var lastRequest time.Time // the quiet period runs from the last request, not from the pause after it
 	for index := 0; time.Now().Before(until); index++ {
 		request.RequestID = fmt.Sprintf("request-%d", index)
 		stream, err := edge.OpenStream(ctx)
@@ -871,16 +872,16 @@ func TestGoawayCarrierServesUntilTheEdgeStopsOpeningStreams(t *testing.T) {
 		if err != nil {
 			t.Fatalf("the draining worker stopped serving while the edge still sent it requests: %v", err)
 		}
+		lastRequest = time.Now()
 		select {
 		case <-shutdown:
 			t.Fatal("the worker closed while the edge still sent it requests")
 		case <-time.After(200 * time.Millisecond):
 		}
 	}
-	moved := time.Now()
 	select {
 	case <-shutdown:
-		if waited := time.Since(moved); waited < handoverQuiet-200*time.Millisecond {
+		if waited := time.Since(lastRequest); waited < handoverQuiet-100*time.Millisecond {
 			t.Fatalf("closed %v after the last request, want about %v", waited, handoverQuiet)
 		}
 	case <-time.After(carrierDrainGrace):

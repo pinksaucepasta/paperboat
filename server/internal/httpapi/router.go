@@ -173,8 +173,8 @@ type Options struct {
 	TelemetryHTTP          *telemetry.HTTPObserver
 	TelemetryMetrics       *sharedmetrics.Metrics
 	// TelemetryRouteMetrics is the per-route-template registry of TelemetryHTTP (HTTPObserver.Routes), listed by /metrics.
-	TelemetryRouteMetrics  *sharedmetrics.Metrics
-	TelemetryDiagnostics   *telemetry.Diagnostics
+	TelemetryRouteMetrics *sharedmetrics.Metrics
+	TelemetryDiagnostics  *telemetry.Diagnostics
 }
 
 // tunnelMachineAuth mirrors the preview machine-auth boundary: machine
