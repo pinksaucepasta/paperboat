@@ -251,7 +251,13 @@ export async function pauseTunnelById(id: string) {
     if (error instanceof ApiError && error.status === 404) return
     throw error
   }
-  if (tunnel.desired_state === "active") await pauseTunnel(tunnel)
+  if (tunnel.desired_state !== "active") return
+  try {
+    await pauseTunnel(tunnel)
+  } catch (error) {
+    // Deleted or changed since it was read: no longer running as it was, which is all a switch needs.
+    if (!(error instanceof ApiError && (error.status === 404 || error.status === 412))) throw error
+  }
 }
 
 export const pauseTunnel = (tunnel: Tunnel) => change(`${tunnelPath(tunnel.id)}/pause`, "POST", { etag: tunnel.etag })

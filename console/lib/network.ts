@@ -183,13 +183,14 @@ export function liveOf(error: unknown): { count: number; items: LiveItem[] } | u
   return { count: Number(details.count ?? items.length), items }
 }
 
-/** Ends what is running: previews stop, tunnels pause (they keep their routes). */
-const stopLive = (items: LiveItem[]) =>
-  Promise.all(
-    items.map((item) =>
-      item.kind === "preview" ? stopPreview(item.id) : pauseTunnelById(item.id),
-    ),
+/** Ends what is running: previews stop, tunnels pause (they keep their routes). Every item is tried; the first failure is thrown after. */
+async function stopLive(items: LiveItem[]) {
+  const results = await Promise.allSettled(
+    items.map((item) => (item.kind === "preview" ? stopPreview(item.id) : pauseTunnelById(item.id))),
   )
+  const failed = results.find((result) => result.status === "rejected")
+  if (failed) throw failed.reason
+}
 
 /**
  * Switches the pair, stopping whatever the server names as running first and asking again. The server names at
@@ -204,6 +205,7 @@ export async function switchEdgesStoppingLive(workspace: string, primaryId: stri
     } catch (error) {
       const live = liveOf(error)
       if (!live || live.items.length === 0 || round >= 10) throw error
+      // shortcut: items stopped before a failed round are not remembered for the cutover text, only what a later round stops.
       await stopLive(live.items)
       stopped.push(...live.items)
     }
