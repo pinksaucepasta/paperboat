@@ -276,7 +276,7 @@ minutes.`,
 		Example: `
   pb preview 3000
   pb preview https://127.0.0.1:8443 --private --ttl 2h
-  pb preview unix:///run/app.sock --host-header myapp.test
+  pb preview 3000 --host-header myapp.test
   pb preview 3000 --background --json`},
 	"pb preview list": {
 		Long: `List previews: ID, access, target and state. Only active previews are shown by default;
