@@ -9,7 +9,7 @@ so a broken probe host can never make a service look down. Config (JSON, path in
               pin? (sha256//<base64 public key hash>: for a relay, whose certificate is private; without it the certificate is verified normally)}]  steps     {probe.sh step name: unit} for canary steps run on this host
 Used by canary.py (oracle, with its steps) and status_run.py (anvit and staging).
 """
-import hashlib, hmac, json, os, socket, subprocess, sys, time, urllib.request
+import hashlib, hmac, json, os, re, socket, subprocess, sys, time, urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
@@ -44,7 +44,8 @@ def one(check):
             ok = code == 401 and "relay authorization required" in body
             return ok, ms, "" if ok else f"relay answered {code}"
         if kind == "tuf":
-            expires = datetime.fromisoformat(json.loads(body)["signed"]["expires"].replace("Z", "+00:00"))
+            stamp = re.sub(r"(\.\d{6})\d+", r"\1", json.loads(body)["signed"]["expires"].replace("Z", "+00:00"))  # older Pythons read at most 6 fraction digits
+            expires = datetime.fromisoformat(stamp)
             expires = expires if expires.tzinfo else expires.replace(tzinfo=timezone.utc)
             ok = code == 200 and expires > datetime.now(timezone.utc)
             return ok, ms, "" if ok else "release metadata expired or not served"
@@ -110,7 +111,8 @@ def post(cfg, results, net_ok):
         print(f"status key file unreadable: {error}", file=sys.stderr)
         return False
     request = urllib.request.Request(cfg["url"], data=body.encode(), method="POST",
-                                     headers={"content-type": "application/json", "x-status-signature": sig})
+                                     headers={"content-type": "application/json", "x-status-signature": sig,
+                                              "user-agent": "paperboat-status-probe/1"})  # Cloudflare refuses the default Python agent (error 1010)
     for attempt in range(2):
         try:
             with urllib.request.urlopen(request, timeout=10) as res:
