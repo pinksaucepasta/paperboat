@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -954,5 +955,34 @@ func TestRecordingStateTellsALateObserverAndOnlyChanges(t *testing.T) {
 	state.report(false)
 	if len(seen) != 2 || !seen[0] || seen[1] {
 		t.Fatalf("seen=%v", seen)
+	}
+}
+
+type failingReadConn struct {
+	net.Conn
+	err error
+}
+
+func (c failingReadConn) Read([]byte) (int, error) { return 0, c.err }
+
+// A daemon link that fails to read ends the exec as a lost transport whatever errno the platform gives (Windows names
+// a closed pipe several ways): the exec recovery decides on the cause tree, and an errno it does not know must not
+// veto resuming a started operation (TestExecRecoveryKeepsItsBudgetAfterTransientReplacementHandshake failed on it).
+func TestLocalPeerReadFailureIsALostTransportWhateverTheErrno(t *testing.T) {
+	unknown := syscall.Errno(4242)
+	local, peer := net.Pipe()
+	defer peer.Close()
+	go func() { _, _ = io.Copy(io.Discard, peer) }() // the daemon end takes what the client writes
+	connection, err := NewLocalExecPeerConn(failingReadConn{Conn: local, err: &net.OpError{Op: "read", Net: "pipe", Err: unknown}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer connection.Close()
+	_, waitErr := connection.Wait()
+	if !errors.Is(waitErr, ErrTransportLost) || !errors.Is(waitErr, ErrLocalDaemonLost) {
+		t.Fatalf("Wait = %v, want a lost local daemon", waitErr)
+	}
+	if errors.Is(waitErr, unknown) {
+		t.Fatalf("the unrecognised errno stayed in the cause tree: %v", waitErr)
 	}
 }

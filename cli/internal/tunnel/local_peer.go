@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"sync"
@@ -696,6 +697,17 @@ func (c *localBasicPeerConn) MarkTransportLost(err error) { c.inner.MarkTranspor
 
 func (c *localBasicPeerConn) TerminalRuntimeVersion() string { return c.inner.runtimeVersion }
 
+// localDaemonLost reports a failed read or write on the daemon link as a lost local daemon. A plain end of the stream
+// stays in the cause tree; any other error is kept as text only, because the link is gone whatever the platform calls
+// it (Windows names a closed pipe by several errnos) and a caller that decides on the cause tree must not refuse to
+// resume a started operation over an errno it does not know.
+func localDaemonLost(err error) error {
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, io.ErrClosedPipe) || errors.Is(err, net.ErrClosed) {
+		return errors.Join(ErrLocalDaemonLost, err)
+	}
+	return fmt.Errorf("%w: %v", ErrLocalDaemonLost, err)
+}
+
 func (c *localPeerConn) readLoop() {
 	defer close(c.done)
 	defer close(c.data)
@@ -708,7 +720,7 @@ func (c *localPeerConn) readLoop() {
 		}
 		if err != nil {
 			if !errors.Is(err, ErrPeerTerminalInvalid) {
-				err = errors.Join(ErrLocalDaemonLost, err)
+				err = localDaemonLost(err)
 			}
 			select {
 			case c.result <- localPeerWaitResult{err: err}:
@@ -992,7 +1004,7 @@ func (c *localPeerConn) Wait() (int, error) {
 		}
 		// The daemon closed the link (it restarted): the exec may still run, so say it was lost, not that the write failed.
 		if !errors.Is(err, ErrPeerTerminalInvalid) {
-			err = errors.Join(ErrLocalDaemonLost, err)
+			err = localDaemonLost(err)
 		}
 		return 1, err
 	}
