@@ -14,7 +14,7 @@ func TestLoadsIdentityWrittenByPreviousRelease(t *testing.T) {
 	if err := os.Mkdir(root, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"machine-identity.json", "machine-registration.json", "network-fingerprint-secret.json"} {
+	for _, name := range []string{"machine-identity.json", "machine-registration.json", "network-fingerprint-secret.json", "peer-endpoint.json"} {
 		raw, err := os.ReadFile(filepath.Join("testdata", "2026.11.16.2-"+name))
 		if err != nil {
 			t.Fatal(err)
@@ -38,5 +38,12 @@ func TestLoadsIdentityWrittenByPreviousRelease(t *testing.T) {
 	}
 	if got, err := store.NetworkFingerprintSecret(); err != nil || !bytes.Equal(got, want) {
 		t.Fatalf("network secret regenerated or refused: %v", err)
+	}
+	before, _ := os.ReadFile(filepath.Join(root, "peer-endpoint.json"))
+	if _, err := store.PeerEndpoint(); err != nil {
+		t.Fatalf("previous release's peer endpoint: %v", err)
+	}
+	if after, _ := os.ReadFile(filepath.Join(root, "peer-endpoint.json")); !bytes.Equal(before, after) {
+		t.Fatal("previous release's peer endpoint was regenerated")
 	}
 }
