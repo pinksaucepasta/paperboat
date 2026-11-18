@@ -6,7 +6,7 @@
   --st-ok: #12805c;
   --st-ok-bar: #1f9d6e;
   --st-warn: #9a5b00;
-  --st-warn-bar: #d98a00;
+  --st-warn-bar: #b06a00;
   --st-bad: #b42318;
   --st-bad-bar: #d64545;
   --st-maint: var(--cobalt);
@@ -76,7 +76,7 @@ main.col { padding-block: var(--s5) var(--s8); display: grid; gap: var(--s5); }
 .comp { padding: var(--s4) var(--s5); }
 .comp + .comp { border-top: 1px solid var(--rule); }
 .comp-head { display: flex; align-items: center; gap: var(--s3); width: 100%; min-height: 44px; text-align: left; border-radius: var(--radius); }
-.comp-name { font-weight: 600; color: var(--ink); }
+.comp-name { font-weight: 600; color: var(--ink); min-width: 0; overflow-wrap: anywhere; }
 .comp-state { font-size: var(--text-small); font-weight: 500; }
 .comp-state.warn { color: var(--st-warn); } .comp-state.bad { color: var(--st-bad); } .comp-state.maint { color: var(--st-maint); } .comp-state.none { color: var(--fog); }
 .comp-more { color: var(--fog); font-size: var(--text-small); display: inline-flex; align-items: center; gap: 2px; }
@@ -108,7 +108,6 @@ main.col { padding-block: var(--s5) var(--s8); display: grid; gap: var(--s5); }
 
 /* Maintenance, incidents, history */
 .pill { display: inline-flex; padding: 2px 10px; border-radius: 999px; font-size: var(--text-small); font-weight: 500; background: var(--st-maint-tint); color: var(--st-maint); }
-.pill.is-done { background: var(--st-ok-tint); color: var(--st-ok); } .pill.is-open { background: var(--st-warn-tint); color: var(--st-warn); }
 .item { padding: var(--s4) var(--s5); display: grid; gap: var(--s2); }
 .item + .item { border-top: 1px solid var(--rule); }
 .item-title { font-weight: 600; color: var(--ink); }
@@ -133,6 +132,8 @@ details.incident > summary::-webkit-details-marker { display: none; }
 .phases li + li::before { content: "›"; color: var(--rule); margin-right: 2px; }
 .phases li.is-current { color: var(--ink); font-weight: 600; }
 .phases li.is-done { color: var(--st-ok); }
+
+@media (prefers-reduced-motion: reduce) { .btn, .comp-more svg { transition: none; } }
 
 /* Skeleton while the first fetch is out */
 .skeleton { height: 64px; border-radius: var(--radius-lg); background: linear-gradient(90deg, var(--surface) 0%, var(--surface-strong) 50%, var(--surface) 100%); background-size: 200% 100%; }
