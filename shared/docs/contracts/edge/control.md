@@ -28,9 +28,13 @@ alone never changes the payer. A report retry cannot change its authority.
 The operational delivery window is seven days. Metered streams reconnect after
 at most seven days, and the minimal admission-to-payer mapping survives that
 stream lifetime plus the delivery window (fourteen days after admission expiry).
-Configured non-null workspace allowances deny new admission when their current
-period is exhausted; an unset allowance imposes no quota. Existing stream pacing
-and connection protections continue to apply.
+A workspace whose configured allowance (its fair-use amount) is used up in the current
+period is never refused: its bindings are admitted and recorded like any other, and the
+ingress snapshot lists its hostnames in `throttled` (hostname, workspace, period end) next
+to their decisions. The edge paces all routes of one workspace through one shared token
+bucket at the throttled rate (`edge_ingress_limits.throttled`, delivered in the heartbeat)
+until the period end or until the server stops listing the workspace. An unset allowance
+imposes no throttle. Existing stream pacing and connection protections continue to apply.
 Mapping admission and producer counter identities are bounded at 4096 per edge
 node, matching the existing durable report queue. Capacity exhaustion applies
 backpressure; retained billable reports are not silently discarded. Scoped epochs
@@ -43,15 +47,10 @@ has expired. The counter still advances, preventing later cumulative reports
 from charging those bytes again. Exact retries return the original disposition.
 The producer removes a pending report only after the server acknowledgement;
 reconnection therefore drains expired reports and restores fresh reporting.
-An ordinary accepted report returns `accounted`, with persisted
-`quota_exhausted` feedback. On exhaustion the edge closes active streams using
-that immutable authority. Other grants/workspaces sharing the route remain
-unaffected. Streams admitted after the reported interval ignore delayed old
-feedback, allowing recovery after an allowance or period change. This is
-post-usage enforcement, not a hard byte ceiling: in-flight traffic, queued reports
-and unavailable control connectivity can produce overshoot before acknowledgement.
- Self-hosted nodes retain their
-existing no-debit boundary. Native direct traffic introduces no new byte charge.
+An ordinary accepted report returns `accounted`. Usage never closes a stream: past
+the fair-use amount the edge slows the workspace (above), so a delayed or lost
+report only delays the throttle. Self-hosted nodes retain their existing no-debit
+boundary and are never throttled. Native direct traffic introduces no new byte charge.
 
 All decisions return a stable request ID. Logs and metrics may contain environment, node,
 generation, route revision, result, and bounded byte counts, but never credentials, public

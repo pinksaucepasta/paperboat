@@ -21,10 +21,15 @@ type Entitlements struct {
 
 // BandwidthEntitlement is one workspace's bandwidth allowance: PlanBytes is the allowance of the current usage period before grants (null: unlimited, or no period
 // has started yet); GrantedBytes what running grants add; UsageBytes what the workspace used in the period.
+// Throttled: the fair-use amount is used up, so the workspace's edge traffic runs at the throttled rate until ResetsAt;
+// ThrottleLifted: an operator's lift (grant kind throttle_lift) is running.
 type BandwidthEntitlement struct {
-	PlanBytes    *int64 `json:"plan_bytes"`
-	GrantedBytes int64  `json:"granted_bytes"`
-	UsageBytes   int64  `json:"usage_bytes"`
+	PlanBytes      *int64     `json:"plan_bytes"`
+	GrantedBytes   int64      `json:"granted_bytes"`
+	UsageBytes     int64      `json:"usage_bytes"`
+	Throttled      bool       `json:"throttled"`
+	ThrottleLifted bool       `json:"throttle_lifted"`
+	ResetsAt       *time.Time `json:"resets_at,omitempty"`
 }
 
 type SeatsEntitlement struct {
@@ -58,12 +63,22 @@ func readEntitlements(ctx context.Context, tx *db.Tx, workspaceID string) (Entit
 		return out, err
 	}
 	now := time.Now().UTC()
-	if err = tx.QueryRow(ctx, `SELECT workspace_granted_bytes($1),
+	var consumed, topups int64
+	var paid bool
+	if err = tx.QueryRow(ctx, `SELECT workspace_granted_bytes($1),workspace_throttle_lifted($1),
  coalesce((SELECT sum(u.observed_bytes) FROM billing_workspace_usage_periods p JOIN billing_workspace_usage_periods u ON u.workspace_id=p.workspace_id AND u.paid=p.paid
    AND coalesce(u.budget_start,u.period_start)=coalesce(p.budget_start,p.period_start) WHERE p.workspace_id=$1 AND p.period_start<=$2 AND p.period_end>$2),0),
- (SELECT max(p.included_bytes) FROM billing_workspace_usage_periods p WHERE p.workspace_id=$1 AND p.period_start<=$2 AND p.period_end>$2)`, workspaceID, now).
-		Scan(&out.Bandwidth.GrantedBytes, &out.Bandwidth.UsageBytes, &out.Bandwidth.PlanBytes); err != nil {
+ coalesce((SELECT sum(u.consumed_bytes) FROM billing_workspace_usage_periods p JOIN billing_workspace_usage_periods u ON u.workspace_id=p.workspace_id AND u.paid=p.paid
+   AND coalesce(u.budget_start,u.period_start)=coalesce(p.budget_start,p.period_start) WHERE p.workspace_id=$1 AND p.period_start<=$2 AND p.period_end>$2),0),
+ (SELECT max(p.included_bytes) FROM billing_workspace_usage_periods p WHERE p.workspace_id=$1 AND p.period_start<=$2 AND p.period_end>$2),
+ (SELECT max(p.period_end) FROM billing_workspace_usage_periods p WHERE p.workspace_id=$1 AND p.period_start<=$2 AND p.period_end>$2),
+ coalesce((SELECT bool_or(p.paid) FROM billing_workspace_usage_periods p WHERE p.workspace_id=$1 AND p.period_start<=$2 AND p.period_end>$2),false),
+ coalesce((SELECT sum(remaining_bytes) FROM billing_workspace_topups WHERE workspace_id=$1 AND purchased_at<=$2 AND expires_at>$2),0)`, workspaceID, now).
+		Scan(&out.Bandwidth.GrantedBytes, &out.Bandwidth.ThrottleLifted, &out.Bandwidth.UsageBytes, &consumed, &out.Bandwidth.PlanBytes, &out.Bandwidth.ResetsAt, &paid, &topups); err != nil {
 		return out, err
+	}
+	if out.Bandwidth.PlanBytes != nil {
+		out.Bandwidth.Throttled = consumed >= *out.Bandwidth.PlanBytes+out.Bandwidth.GrantedBytes && !out.Bandwidth.ThrottleLifted && !(paid && topups > 0)
 	}
 	if out.Bandwidth.PlanBytes == nil {
 		out.Bandwidth.GrantedBytes = 0 // an unlimited allowance stays unlimited: the customer's overview shows no grant either

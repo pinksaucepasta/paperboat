@@ -6,7 +6,6 @@ import type { TerminalConnection } from "@/lib/terminal/use-terminal-connection"
 import type { MobileKey } from "@/lib/terminal/mobile-keys"
 import { terminalThemeStyle, type TerminalTheme } from "@/lib/terminal/themes"
 import { LimitReached } from "@/components/limit-reached"
-import { QuotaMessage } from "@/components/quota-banner"
 import { Button } from "@/components/ui/button"
 
 const mobileKeys: { label: string; key: MobileKey | "CTRL" | "ALT"; description: string }[] = [
@@ -49,7 +48,7 @@ export function TerminalSurface({
 }) {
   const { phase, error, upload, role, mobile, paste } = connection
   const busy = phase === "connecting" || phase === "reconnecting"
-  const stopped = phase === "denied" || phase === "closed" || phase === "transport-error" || phase === "quota" || phase === "limit"
+  const stopped = phase === "denied" || phase === "closed" || phase === "transport-error" || phase === "limit"
   // Overlays take the theme's colours, so they belong to the terminal rather than the page.
   const overlay = {
     background: `color-mix(in oklab, ${theme.background} 92%, transparent)`,
@@ -109,17 +108,11 @@ export function TerminalSurface({
                   ? "Terminal closed"
                   : phase === "denied"
                     ? "No access"
-                    : phase === "quota"
-                      ? "Bandwidth used up"
-                      : phase === "limit"
-                        ? "Browser terminal limit reached"
-                        : "Connection lost"}
+                    : phase === "limit"
+                      ? "Browser terminal limit reached"
+                      : "Connection lost"}
               </p>
-              {phase === "quota" ? (
-                <div className="mt-1.5" style={muted}>
-                  <QuotaMessage />
-                </div>
-              ) : phase === "limit" && connection.limit ? (
+              {phase === "limit" && connection.limit ? (
                 <div className="mt-1.5">
                   <LimitReached error={connection.limit} />
                 </div>

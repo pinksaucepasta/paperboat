@@ -16,13 +16,32 @@ export const formatLimit = ({ used, limit, granted }: Limit) =>
     ? `${used.toLocaleString("en-US")} · Unlimited`
     : `${used.toLocaleString("en-US")} of ${limit.toLocaleString("en-US")}${granted ? " · Granted" : ""}`
 
-/** The allowance sentence: "5.0 GB of 1.0 TB used", with what support granted when some of it is. */
+/** The fair-use sentence: "5.0 GB of 100 GB used", with what support granted when some of it is. */
 export const formatAllowance = (billing: BillingWorkspace) =>
   billing.allowance_bytes === null
     ? `${formatBytes(billing.usage_bytes)} used`
     : `${formatBytes(billing.usage_bytes)} of ${formatBytes(billing.allowance_bytes)} used${
         billing.allowance_granted_bytes ? ` · ${formatBytes(billing.allowance_granted_bytes)} granted` : ""
       }`
+
+/**
+ * Edge traffic (public previews, tunnels, browser terminals) is "Unlimited*": past the fair-use amount it is slowed to
+ * `mbit` Mbit/s until the period ends, never stopped. The amount is the plan's plus what support granted and what was
+ * topped up. Undefined when the workspace has no fair-use amount.
+ */
+export function fairUse(billing: BillingWorkspace) {
+  if (billing.allowance_bytes === null) return undefined
+  const amount = billing.allowance_bytes + billing.topup_bytes_purchased
+  const used = billing.usage_bytes
+  return {
+    amount,
+    used,
+    share: amount > 0 ? Math.min(1, used / amount) : 1,
+    throttled: billing.throttled,
+    mbit: billing.throttle_mbit,
+    ends: allowanceWindow(billing).end,
+  }
+}
 export type BillingProduct = components["schemas"]["WorkspaceBillingProduct"]
 export type BillingInterval = "month" | "year"
 

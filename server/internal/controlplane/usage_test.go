@@ -208,8 +208,8 @@ func TestReconcileUsageDebitsMachineBandwidthAndKeepsTheEnvironmentAtExhaustion(
 	if err := store.SQL().QueryRowContext(ctx, `SELECT desired_state FROM paperboat.control_environments WHERE id=$1`, "env_"+suffix).Scan(&desired); err != nil {
 		t.Fatal(err)
 	}
-	// At the cap only hosted relay and edge traffic is refused (bandwidth_quota_exhausted);
-	// the environment itself is not suspended, so direct machine-to-machine access continues.
+	// At the cap hosted edge traffic is throttled, never refused; the environment itself is not
+	// suspended, so direct machine-to-machine access continues.
 	if desired != "active" {
 		t.Fatalf("environment desired state = %q, want active (exhaustion must not suspend the environment)", desired)
 	}

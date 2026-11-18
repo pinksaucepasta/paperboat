@@ -131,6 +131,11 @@ func TestScopedUsageSharedRouteDelayedCredentialAndReplay(t *testing.T) {
 		if !errors.As(err, &quota) || !errors.Is(err, accountingauthority.ErrThrottled) || !quota.ResetsAt.Equal(periodEnd) {
 			t.Fatalf("throttled admission=%v (period end %v)", err, periodEnd)
 		}
+		// A throttled binding is admitted and recorded like any other: its bytes are still counted and billed.
+		var retained int
+		if e := store.SQL().QueryRowContext(ctx, `SELECT count(*) FROM usage_accounting_authorities WHERE authority_id=$1`, quotaBinding.ID).Scan(&retained); e != nil || retained != 1 || quota.Workspace != "team:"+team {
+			t.Fatalf("throttled binding retained=%d workspace=%q err=%v", retained, quota.Workspace, e)
+		}
 		if _, err = store.SQL().ExecContext(ctx, `UPDATE billing_workspace_usage_periods SET included_bytes=1000 WHERE workspace_id=$1`, "team:"+team); err != nil {
 			t.Fatal(err)
 		}

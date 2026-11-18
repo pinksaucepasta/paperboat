@@ -59,7 +59,7 @@ func TestWithholdBlockedRemovesTakenDownNames(t *testing.T) {
 		d.Binding.Hostname = host
 		return d
 	}
-	decisions := []wire.IngressDecision{decision(taken), decision(open), decision(restored)}
+	decisions := []wire.IngressDecision{decision(taken), decision(open), decision(restored), decision(quota)}
 	throttled := []wire.IngressThrottle{{Hostname: quota}}
 	blocked, err := withholdBlocked(ctx, store, &decisions, &throttled)
 	if err != nil {

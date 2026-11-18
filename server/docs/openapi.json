@@ -9888,7 +9888,10 @@
           "topup_bytes_purchased",
           "topups",
           "limits",
-          "granted"
+          "granted",
+          "throttled",
+          "throttle_lifted",
+          "throttle_mbit"
         ],
         "properties": {
           "limits": {
@@ -10165,6 +10168,18 @@
             "type": "integer",
             "format": "int64",
             "description": "The part of allowance_bytes an operator granted."
+          },
+          "throttled": {
+            "type": "boolean",
+            "description": "The fair-use amount is used up: edge traffic runs at the throttled rate until allowance_period_end. Nothing is stopped."
+          },
+          "throttle_lifted": {
+            "type": "boolean",
+            "description": "An operator lifted the throttle; the workspace runs at full speed meanwhile."
+          },
+          "throttle_mbit": {
+            "type": "number",
+            "description": "The speed in Mbit/s a throttled workspace's edge traffic runs at."
           },
           "seats_granted": {
             "type": "integer",
@@ -19367,7 +19382,8 @@
           "edges",
           "relays",
           "servers",
-          "attention"
+          "attention",
+          "throttled_workspaces"
         ],
         "properties": {
           "edges": {
@@ -19382,6 +19398,10 @@
           "attention": {
             "type": "integer",
             "description": "Nodes with a warning or critical warning."
+          },
+          "throttled_workspaces": {
+            "type": "integer",
+            "description": "Workspaces whose edge traffic is throttled now: fair-use bandwidth used and no operator lift."
           }
         }
       },
@@ -20030,6 +20050,7 @@
             "type": "string",
             "enum": [
               "bandwidth",
+              "throttle_lift",
               "machines",
               "publications",
               "browser_terminals",
@@ -20126,7 +20147,9 @@
             "required": [
               "plan_bytes",
               "granted_bytes",
-              "usage_bytes"
+              "usage_bytes",
+              "throttled",
+              "throttle_lifted"
             ],
             "properties": {
               "plan_bytes": {
@@ -20147,6 +20170,19 @@
               "usage_bytes": {
                 "type": "integer",
                 "format": "int64"
+              },
+              "throttled": {
+                "type": "boolean",
+                "description": "The fair-use amount is used up: the workspace's edge traffic runs at the throttled rate until resets_at."
+              },
+              "throttle_lifted": {
+                "type": "boolean",
+                "description": "An operator's throttle_lift grant is running."
+              },
+              "resets_at": {
+                "type": "string",
+                "format": "date-time",
+                "description": "End of the current allowance period, when full speed returns."
               }
             }
           },
@@ -46833,7 +46869,7 @@
           }
         ],
         "x-operator-capability": "admin",
-        "description": "Current active operator account and separate operator session required. See docs/runbooks/operator-admin.md. Mutations require explicit target confirmation, an opaque evidence reference and stable idempotency key. Read current state before retrying an uncertain result. Operator-Target is the workspace id (`personal:<account>` or `team:<team>`). `entitlement` is `bandwidth` (amount in bytes, added to the allowance together with other running bandwidth grants) or one of machines, publications, browser_terminals, public_tcp, seats (teams), viewers_per_terminal (amount is the limit; it replaces the plan's value and an earlier override of that kind). `ends_at` (RFC 3339, in the future) ends it by itself; without it the grant runs until revoked. Enforcement reads the grants table: no other change is needed.",
+        "description": "Current active operator account and separate operator session required. See docs/runbooks/operator-admin.md. Mutations require explicit target confirmation, an opaque evidence reference and stable idempotency key. Read current state before retrying an uncertain result. Operator-Target is the workspace id (`personal:<account>` or `team:<team>`). `entitlement` is `bandwidth` (amount in bytes, added to the allowance together with other running bandwidth grants), `throttle_lift` (amount 1: lifts the workspace's bandwidth throttle while it runs) or one of machines, publications, browser_terminals, public_tcp, seats (teams), viewers_per_terminal (amount is the limit; it replaces the plan's value and an earlier override of that kind). `ends_at` (RFC 3339, in the future) ends it by itself; without it the grant runs until revoked. Enforcement reads the grants table: no other change is needed.",
         "requestBody": {
           "required": true,
           "content": {
