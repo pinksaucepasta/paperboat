@@ -1,5 +1,6 @@
-// Package clientupdate owns the supported CLI protocol floor. It does not
-// select artifacts or override the updater's signed activation/recovery floor.
+// Package clientupdate owns the update floor: the minimum supported version of pb (the CLI) and of the
+// node components pbh, edge and relay. It does not select artifacts or override the updater's signed
+// activation/recovery floor.
 package clientupdate
 
 import (
@@ -8,6 +9,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -46,7 +49,12 @@ type Input struct {
 	Reason           string     `json:"reason"`
 	EnforceAt        *time.Time `json:"enforce_at"`
 }
+
+// Components are the binaries an update floor covers: pb and the node components.
+var Components = []string{"pb", "pbh", "edge", "relay"}
+
 type Service struct {
+	component  string
 	db         *db.DB
 	audit      *audit.Writer
 	ceiling    func() (string, error)
@@ -57,14 +65,53 @@ type Service struct {
 	checkedAt  time.Time
 }
 
+// New serves pb's floor; the ceiling is the release published for every pb platform.
 func New(store *db.DB, writer *audit.Writer, directory string) *Service {
-	return &Service{db: store, audit: writer, ceiling: func() (string, error) {
+	return &Service{component: "pb", db: store, audit: writer, ceiling: func() (string, error) {
 		current, err := releases.ReadCurrent(directory)
 		if err != nil {
 			return "", err
 		}
 		return publishedCeiling(current)
 	}}
+}
+
+// NewNode serves the floor of pbh, edge or relay. They ship together in the self-host release, so the
+// ceiling is the newest self-host version published for every Linux architecture.
+func NewNode(store *db.DB, writer *audit.Writer, directory, component string) *Service {
+	return &Service{component: component, db: store, audit: writer, ceiling: func() (string, error) { return publishedSelfhostCeiling(directory) }}
+}
+
+// Latest is the newest release published for this component (every platform of it).
+func (s *Service) Latest() (string, error) { return s.ceiling() }
+
+// publishedSelfhostCeiling is the newest selfhost/versions/<v> holding the package of every architecture.
+func publishedSelfhostCeiling(directory string) (string, error) {
+	entries, err := os.ReadDir(filepath.Join(directory, "selfhost", "versions"))
+	if err != nil {
+		return "", releaseUnavailableFailure{cause: err}
+	}
+	var newest string
+	var value [4]uint64
+	for _, entry := range entries {
+		version, ok := ParseVersion(entry.Name())
+		if !ok || newest != "" && Compare(version, value) <= 0 {
+			continue
+		}
+		complete := true
+		for _, arch := range []string{"amd64", "arm64"} {
+			if _, err := os.Stat(filepath.Join(directory, "selfhost", "versions", entry.Name(), "paperboat-selfhost-linux-"+arch+".tar.gz")); err != nil {
+				complete = false
+			}
+		}
+		if complete {
+			newest, value = entry.Name(), version
+		}
+	}
+	if newest == "" {
+		return "", ErrReleaseUnavailable
+	}
+	return newest, nil
 }
 
 // publishedCeiling requires an installable candidate on every published platform.
@@ -169,7 +216,7 @@ func validate(in Input) error {
 	return nil
 }
 
-const selectPolicy = `SELECT revision, minimum_version, reason, enforce_at FROM paperboat.client_update_policy WHERE singleton = true`
+const selectPolicy = `SELECT revision, minimum_version, reason, enforce_at FROM paperboat.client_update_policy WHERE component = $1`
 
 func scanPolicy(row pgx.Row) (Policy, error) {
 	p := Policy{Schema: Schema}
@@ -222,7 +269,7 @@ func (s *Service) refresh() {
 func (s *Service) read(ctx context.Context) (Policy, error) {
 	read, cancel := context.WithTimeout(ctx, policyReadTimeout)
 	defer cancel()
-	p, err := scanPolicy(s.db.Pool().QueryRow(read, selectPolicy))
+	p, err := scanPolicy(s.db.Pool().QueryRow(read, selectPolicy, s.component))
 	if err != nil {
 		return Policy{}, err
 	}
@@ -237,16 +284,17 @@ func (s *Service) Put(ctx context.Context, actor, key, evidence string, in Input
 	}
 	// Include the evidence reference: a retry cannot silently rewrite operator intent.
 	raw, _ := json.Marshal(struct {
-		Input    Input
-		Evidence string
-	}{in, evidence})
+		Component string
+		Input     Input
+		Evidence  string
+	}{s.component, in, evidence})
 	sum := sha256.Sum256(raw)
 	digest := hex.EncodeToString(sum[:])
 	keySum := sha256.Sum256([]byte(key))
 	keyDigest := hex.EncodeToString(keySum[:])
 	var out Policy
 	err := s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-		p, e := scanPolicy(tx.QueryRow(ctx, selectPolicy+` FOR UPDATE`))
+		p, e := scanPolicy(tx.QueryRow(ctx, selectPolicy+` FOR UPDATE`, s.component))
 		if e != nil {
 			return e
 		}
@@ -287,13 +335,13 @@ func (s *Service) Put(ctx context.Context, actor, key, evidence string, in Input
 			}
 		}
 		out = Policy{Schema: Schema, Revision: p.Revision + 1, MinimumVersion: in.MinimumVersion, Reason: in.Reason, EnforceAt: in.EnforceAt}
-		if _, e = tx.Exec(ctx, `UPDATE paperboat.client_update_policy SET revision=$1, minimum_version=$2, reason=$3, enforce_at=$4 WHERE singleton=true`, out.Revision, out.MinimumVersion, out.Reason, out.EnforceAt); e != nil {
+		if _, e = tx.Exec(ctx, `UPDATE paperboat.client_update_policy SET revision=$1, minimum_version=$2, reason=$3, enforce_at=$4 WHERE component=$5`, out.Revision, out.MinimumVersion, out.Reason, out.EnforceAt, s.component); e != nil {
 			return e
 		}
 		if s.audit == nil {
 			return errors.New("policy mutation audit unavailable")
 		}
-		if e = s.audit.WriteTx(ctx, tx, audit.Event{ActorUserID: actor, ActorType: audit.ActorAdmin, EventType: "client_update_policy.changed", ResourceType: "client_update_policy", ResourceID: "client-update-policy", Metadata: map[string]any{"revision": out.Revision, "minimum_version": out.MinimumVersion, "reason": out.Reason, "enforce_at": out.EnforceAt, "evidence_reference": evidence, "idempotency_digest": keyDigest}}); e != nil {
+		if e = s.audit.WriteTx(ctx, tx, audit.Event{ActorUserID: actor, ActorType: audit.ActorAdmin, EventType: "client_update_policy.changed", ResourceType: "client_update_policy", ResourceID: "client-update-policy", Metadata: map[string]any{"component": s.component, "revision": out.Revision, "minimum_version": out.MinimumVersion, "reason": out.Reason, "enforce_at": out.EnforceAt, "evidence_reference": evidence, "idempotency_digest": keyDigest}}); e != nil {
 			return e
 		}
 		response, e = json.Marshal(out)

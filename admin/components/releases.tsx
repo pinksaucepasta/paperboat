@@ -25,32 +25,42 @@ export function dateVersion(value: string): boolean {
 const platforms: [string, string][] = [["darwin/arm64", "macOS (Apple silicon)"], ["linux/amd64", "Linux x86-64"], ["linux/arm64", "Linux ARM64"], ["windows/amd64", "Windows x86-64"], ["windows/arm64", "Windows ARM64"]]
 const actions: [string, string][] = [["promote", "Promote (roll out)"], ["pause", "Pause"], ["quarantine", "Quarantine"], ["revoke", "Revoke"]]
 
-/** The oldest CLI version the server still serves; older CLIs are told to update. A fleet-wide gate. */
-export function ClientFloor() {
-  const q = useApiQuery<Data<"/v1/admin/client-update-policy">>(["client-update-policy"], "/v1/admin/client-update-policy")
+const floorNames: Record<string, string> = { pb: "CLI", pbh: "pbh", edge: "edge", relay: "relay" }
+const floorAudience: Record<string, string> = {
+  pb: "Older CLIs are told to update on their next request. The version must be published for every platform.",
+  pbh: "Older pbh hosts are told to update. The version must be published in the self-host release.",
+  edge: "Edges below it are refused at their next heartbeat and told how to update. The version must be published in the self-host release.",
+  relay: "Relays below it are refused at their next check-in and told how to update. The version must be published in the self-host release.",
+}
+
+/** The oldest version of pb (or of a node component) the server still serves; older ones are told to update. A fleet-wide gate. */
+export function ClientFloor({ component = "pb" }: { component?: "pb" | "pbh" | "edge" | "relay" }) {
+  const name = floorNames[component]
+  const path = component === "pb" ? "/v1/admin/client-update-policy" : `/v1/admin/client-update-policy?component=${component}`
+  const q = useApiQuery<Data<"/v1/admin/client-update-policy">>(["client-update-policy", component], path)
   const [version, setVersion] = useState("")
   const [reason, setReason] = useState("")
   const [enforceAt, setEnforceAt] = useState("")
-  if (q.isError) return <ErrorBlock what="the client update policy" error={q.error} retry={() => q.refetch()} />
+  if (q.isError) return <ErrorBlock what={`the ${name} update policy`} error={q.error} retry={() => q.refetch()} />
   if (!q.data) return <Skeleton className="h-24 w-full" />
   const policy = q.data
   const clearing = version.trim() === ""
   const valid = (clearing || dateVersion(version.trim())) && (clearing || (reason.trim() !== "" && new TextEncoder().encode(reason).length <= 256)) && (enforceAt === "" || !Number.isNaN(Date.parse(enforceAt)))
   return (
-    <div data-client-floor>
+    <div data-client-floor={component === "pb" ? "" : undefined} data-node-floor={component === "pb" ? undefined : component}>
       <Panel
-        title="Minimum CLI version"
+        title={`Minimum ${name} version`}
         action={
         <ActionDialog
-          title="Change the minimum CLI version"
-          description="Older CLIs are told to update on their next request. The version must be published for every platform."
+          title={`Change the minimum ${name} version`}
+          description={floorAudience[component]}
           target="client-update-policy"
           destructive
           confirmWord="update-policy"
           submitLabel={clearing ? "Remove minimum" : "Set minimum"}
           valid={valid}
-          trigger={(open) => <Button variant="outline" size="lg" onClick={() => { setVersion(policy.minimum_version); setReason(""); setEnforceAt(""); open() }}>Change minimum version</Button>}
-          run={(h) => operatorAction("PUT", "/v1/admin/client-update-policy", h, { expected_revision: policy.revision, minimum_version: version.trim(), reason: clearing ? "" : reason.trim(), enforce_at: enforceAt ? new Date(enforceAt).toISOString() : null })}
+          trigger={(open) => <Button variant="outline" size="lg" onClick={() => { setVersion(policy.minimum_version); setReason(""); setEnforceAt(""); open() }}>{component === "pb" ? "Change minimum version" : `Change minimum ${name} version`}</Button>}
+          run={(h) => operatorAction("PUT", path, h, { expected_revision: policy.revision, minimum_version: version.trim(), reason: clearing ? "" : reason.trim(), enforce_at: enforceAt ? new Date(enforceAt).toISOString() : null })}
         >
           <TextField label="Minimum version" value={version} onChange={setVersion} placeholder="2026.11.18.1" hint="YYYY.M.D.build. Empty for none." />
           {!clearing && <TextField label="Reason shown to users" value={reason} onChange={setReason} maxLength={256} hint="Public. Up to 256 bytes." />}
@@ -61,6 +71,7 @@ export function ClientFloor() {
         <Facts
           rows={[
             ["Version", policy.minimum_version || "None"],
+            ["Latest published", policy.latest_version || "—"],
             ["Reason", policy.reason || "—"],
             ["Enforced from", policy.enforce_at ? <Time key="e" iso={policy.enforce_at} /> : "—"],
             ["Revision", policy.revision],
