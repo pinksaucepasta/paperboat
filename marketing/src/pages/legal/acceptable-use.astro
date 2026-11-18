@@ -1,6 +1,7 @@
 ---
 import Legal from "../../layouts/Legal.astro"
 import { fairUse } from "../../legal-data"
+import Fact from "../../components/Fact.astro"
 import { abuseMailbox } from "../../site"
 
 const sections: [string, string][] = [
@@ -13,6 +14,7 @@ const sections: [string, string][] = [
   ["fair-use", "Fair use of bandwidth"],
   ["enforcement", "What we do about it"],
   ["report", "Reporting abuse"],
+  ["copyright", "Copyright complaints"],
   ["appeal", "If we acted on your account"],
 ]
 ---
@@ -175,7 +177,23 @@ const sections: [string, string][] = [
       <p>
         Use the <a href="/report-abuse/">abuse report form</a>. It needs no account. Give the full address and what is wrong with it. We
         review every report{abuseMailbox && <>, and you can also write to <a href={`mailto:${abuseMailbox}`}>{abuseMailbox}</a></>}.
-        Copyright owners can use the same form; include what the work is and why you own it.
+      </p>
+    </div>
+  </section>
+
+  <section id="copyright">
+    <h2>Copyright complaints</h2>
+    <div class="prose">
+      <p>
+        Send copyright notices to our designated agent: Paperboat, attn. Copyright Agent, <Fact name="address" />, <Fact name="legalEmail" />. A
+        notice under the US Digital Millennium Copyright Act must identify the work, the address of the material on Paperboat, your contact
+        details, a statement that you believe in good faith the use is not authorised, a statement under penalty of perjury that the notice is
+        accurate and that you own or act for the owner of the right, and your signature.
+      </p>
+      <p>
+        We take down or block the material and forward the notice to the account holder. The account holder may send a counter-notice with the
+        same details and a statement under penalty of perjury that the material was removed by mistake; we then restore it after 10 to 14
+        business days unless the complainant tells us they have started a court action. We close the accounts of repeat infringers.
       </p>
     </div>
   </section>
