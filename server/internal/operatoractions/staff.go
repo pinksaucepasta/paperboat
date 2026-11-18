@@ -6,6 +6,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/operatorauth"
+	"github.com/pinksaucepasta/paperboat/server/internal/teams"
 )
 
 // Operator management kinds act on operator accounts, not customer resources: they take no revision (operators
@@ -24,7 +25,14 @@ func auditResource(kind, target string, result Result) string {
 // fields of its own kind; every other kind needs a revision and none of the operator fields.
 func inputFits(kind string, in Input) bool {
 	if !isStaffKind(kind) {
-		return in.Revision >= 1 && in.Email == "" && in.Role == "" && in.SessionID == ""
+		noOperatorFields := in.Email == "" && in.Role == "" && in.SessionID == ""
+		grant := in.ProductCode != "" || in.Days != 0 || in.Quantity != 0
+		switch kind {
+		case "plan_grant":
+			return in.Revision >= 1 && noOperatorFields && in.ProductCode != "" && in.Days >= 1 && in.Days <= maxGrantDays && in.Quantity >= 0 && in.Quantity <= teams.MaximumMembers
+		default:
+			return in.Revision >= 1 && noOperatorFields && !grant
+		}
 	}
 	create, revoke := kind == "operator_create", kind == "operator_sessions_revoke"
 	return in.Revision == 0 && !in.Legal && (create || (in.Email == "" && in.Role == "")) && (revoke || in.SessionID == "") && (!revoke || in.SessionID != "") && (!create || (in.Email != "" && in.Role != ""))

@@ -40,7 +40,7 @@ export function UserActions({ id, email, status, version }: { id: string; email:
       {status === "active" && (
         <ActionDialog
           title={`Sign ${email} out everywhere`}
-          description="Ends every browser session, CLI login and token, API token and open SSH session of this account now. The account stays active: the customer can sign in again at once. Use it when credentials may have leaked; use Suspend to block the account."
+          description="Ends every browser session, CLI login and token, API token, recipe and open SSH session of this account now. The account stays active: the customer can sign in again at once. Use it when credentials may have leaked; use Suspend to block the account."
           target={id}
           destructive
           confirmWord={id}

@@ -79,6 +79,7 @@ const world = {
     { id: "operator_agent", email: "agent@example.test", role: "support", status: "active", mfa_enrolled: true, invited: false, live_sessions: 2, created_at: "2026-11-05T08:00:00Z" },
   ],
   operatorSessions: { operator_agent: ["a", "b"].map((c) => fixtureSession(c)) },
+  grants: {},
   floor: { schema: "paperboat.client-update-policy/v1", revision: 2, minimum_version: "", reason: "" },
   requests: [],
 }
@@ -92,6 +93,13 @@ const page = (items, key, total, url) => {
 }
 function mutate(method, p, json) {
   const [, , , area, id, action] = p.split("/").map(decodeURIComponent)
+  const grantRoute = /^\/v1\/admin\/billing\/workspaces\/([^/]+)\/(grant|revoke)$/.exec(p)
+  if (grantRoute) {
+    const workspace = decodeURIComponent(grantRoute[1])
+    if (grantRoute[2] === "grant") world.grants[workspace] = { id: workspace, scope: "account", scope_id: workspace.split(":")[1], product_code: json.product_code, state: "active", quantity: json.quantity ?? 0, period_end: new Date(Date.now() + json.days * 864e5).toISOString(), cancel_at_period_end: true, granted: true, revision: json.revision + 1, observed_at: new Date().toISOString() }
+    else delete world.grants[workspace]
+    return { resource_id: workspace, state: grantRoute[2] === "grant" ? "granted" : "revoked", version: json.revision + 1 }
+  }
   if (p === "/v1/admin/operators") {
     world.operators.push({ id: "operator_new", email: json.email, role: json.role, status: "active", mfa_enrolled: false, invited: true, live_sessions: 0, created_at: new Date().toISOString() })
     return { resource_id: "operator_new", state: "invited", setup_token: "setup-FIXTURE-token", expires_at: "2026-11-20T00:00:00Z" }
@@ -213,9 +221,14 @@ function route(req, url) {
         { id: "server-main", kind: "server", version: "dev-abc1234", cpu_percent: 3, cpu_sustained_percent: 3, rss_bytes: 500e6, last_heartbeat_at: "2026-11-18T08:59:40Z", metrics_at: "2026-11-18T08:59:40Z", warnings: [] },
       ],
     }
+  if (p.startsWith("/v1/admin/billing/workspaces/")) {
+    const workspace = decodeURIComponent(p.split("/").pop())
+    if (workspace === "team:team_a") return { id: workspace, scope: "team", scope_id: "team_a", product_code: "team_monthly", state: "active", quantity: 3, period_end: "2026-12-01T00:00:00Z", cancel_at_period_end: false, granted: false, revision: 1, observed_at: "2026-11-17T09:00:00Z" }
+    return world.grants[workspace] ?? 404
+  }
   if (p === "/v1/admin/billing/workspaces") return { workspaces: [{ id: "bw_t", scope: "team", scope_id: "team_a", product_code: "team_monthly", state: "active", quantity: 3, period_end: "2026-12-01T00:00:00Z", cancel_at_period_end: false, revision: 1, observed_at: "2026-11-17T09:00:00Z" }], total: 1 }
   if (p === "/v1/admin/billing/workspace-operations") return { operations: [{ id: "op_u1", kind: "checkout", workspace_id: "bw_t", state: "uncertain", updated_at: "2026-11-17T09:00:00Z" }, { id: "op_ok", kind: "checkout", workspace_id: "bw_t", state: "succeeded", updated_at: "2026-11-17T09:00:00Z" }], total: 2 }
-  if (p === "/v1/admin/billing/products") return { products: [{ code: "team_monthly", display_name: "Team", catalog_type: "team_subscription", bytes_amount: null, price_id: "price_1", product_id: "prod_1", unit_amount: 1500, currency: "usd", interval: "month", allowance_bytes: null, active: true, version: 1, price_verified: true }] }
+  if (p === "/v1/admin/billing/products") return { products: [{ code: "pro_monthly", display_name: "Pro", catalog_type: "personal_subscription", bytes_amount: null, price_id: "price_2", product_id: "prod_2", unit_amount: 900, currency: "usd", interval: "month", allowance_bytes: null, active: true, version: 1, price_verified: true }, { code: "team_monthly", display_name: "Team", catalog_type: "team_subscription", bytes_amount: null, price_id: "price_1", product_id: "prod_1", unit_amount: 1500, currency: "usd", interval: "month", allowance_bytes: null, active: true, version: 1, price_verified: true }] }
   if (p === `/v1/admin/support/${ref}`)
     return { support_reference: ref, status: "available", records_by_owner: { usr_001: [{ id: "rec_1", owner_id: "usr_001", component: "cli", operation: "install", release: "dev-1", stage: "download", code: "network", cause: "dns_failure", error_type: "net.DNSError", outcome: "failed", severity: "error", at: "2026-11-17T08:00:00Z", expires_at: "2026-11-24T08:00:00Z", reporting: "unconfirmed", support_reference: ref, group_first_seen: "2026-11-15T08:00:00Z", group_last_seen: "2026-11-17T08:00:00Z", group_occurrences: 14 }] }, truncated: false, sentry_links: { evt1: "https://sentry.example.test/e/evt1" }, sentry_search_url: "https://sentry.example.test/s", dropped_records: 0, message: "Evidence available." }
   return 404
@@ -726,7 +739,7 @@ try {
     expect((await text("[data-failure-group]")).includes("14 occurrences"), "failure group statistics not shown")
     await p.screenshot({ path: `${shots}/support-light.png`, fullPage: true })
   })
-  await step("user: sign out everywhere needs the id typed and sends the account version", async () => {
+  await step("user: sign out everywhere needs the id typed and sends the account version; a grant gives a plan that can be revoked", async () => {
     await p.goto(`${ORIGIN}/users/usr_001`)
     await p.waitForSelector("[data-user-actions]")
     await p.getByRole("button", { name: "Sign out everywhere" }).click()
@@ -738,6 +751,32 @@ try {
     await p.waitForFunction(() => !document.querySelector('[data-action-dialog="Sign person1@example.test out everywhere"]'))
     const w = lastWrite()
     expect(w.path === "/v1/admin/accounts/usr_001/sessions/revoke" && w.target === "usr_001" && w.body.revision === 1, `sessions revoke ${JSON.stringify(w)}`)
+    await p.waitForSelector("[data-plan-actions]")
+    expect((await p.locator("[data-plan-actions]").getByRole("button", { name: "Revoke grant" }).count()) === 0, "no grant to revoke yet")
+    await p.getByRole("button", { name: "Grant a plan" }).click()
+    const g = dialog("Grant a plan to personal:usr_001")
+    await g.getByLabel("Days").fill("45")
+    await submit(g, "Grant plan")
+    await p.waitForSelector("[data-plan-granted]")
+    const grant = lastWrite()
+    expect(grant.path === "/v1/admin/billing/workspaces/personal%3Ausr_001/grant" && grant.target === "personal:usr_001" && grant.body.revision === 1 && grant.body.product_code === "pro_monthly" && grant.body.days === 45 && !("quantity" in grant.body), `grant write ${JSON.stringify(grant)}`)
+    await p.getByRole("button", { name: "Revoke grant" }).click()
+    const r = dialog("Revoke the grant of personal:usr_001")
+    await r.getByLabel("Reference for the audit log").fill("TICKET-61")
+    await r.getByLabel(/Type/).fill("personal:usr_001")
+    await r.getByRole("button", { name: "Revoke grant" }).click()
+    await p.waitForFunction(() => !document.querySelector("[data-plan-granted]") && !document.querySelector('[data-action-dialog="Revoke the grant of personal:usr_001"]'))
+    expect(lastWrite().path === "/v1/admin/billing/workspaces/personal%3Ausr_001/revoke" && lastWrite().body.revision === 2, "revoke write")
+  })
+  await step("team: the plan shows its seats, a team grant asks for seats, and a paid team has nothing to revoke", async () => {
+    await p.goto(`${ORIGIN}/teams/team_a`)
+    await p.waitForSelector("[data-plan-actions]")
+    expect((await text("main")).includes("team_monthly"), "the team plan is not shown")
+    expect((await p.locator("[data-plan-actions]").getByRole("button", { name: "Revoke grant" }).count()) === 0, "a Stripe team offers revoke")
+    await p.getByRole("button", { name: "Grant a plan" }).click()
+    const g = dialog("Grant a plan to team:team_a")
+    expect((await g.getByLabel("Seats").count()) === 1, "a team grant needs seats")
+    await g.getByRole("button", { name: "Cancel" }).click()
   })
   await step("operators: you are marked and have no buttons on your own row; inviting shows the setup token once and lists the invitation", async () => {
     await p.goto(`${ORIGIN}/operators`)
@@ -862,7 +901,7 @@ try {
   await step("a support-role operator sees no write buttons", async () => {
     await p.goto(`${ORIGIN}/users/usr_001`)
     await p.waitForSelector('[data-table="machines"][data-state="ready"]')
-    expect((await p.getByRole("button", { name: /Suspend account|Rotate SSH user CA|Sign out everywhere/ }).count()) === 0, "support sees account writes")
+    expect((await p.getByRole("button", { name: /Suspend account|Rotate SSH user CA|Sign out everywhere|Grant a plan/ }).count()) === 0, "support sees account writes")
     await p.goto(`${ORIGIN}/billing`)
     await p.getByRole("tab", { name: "Plans & prices" }).click()
     await waitReady("plans and prices")

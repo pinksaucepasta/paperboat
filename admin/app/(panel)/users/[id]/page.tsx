@@ -10,6 +10,7 @@ import { Time } from "@/components/time"
 import { useApiQuery, type Data } from "@/lib/api"
 import { MachinesOf } from "@/components/machines-of"
 import { UserActions } from "@/components/account-actions"
+import { PlanGrant } from "@/components/plan-grant"
 
 type Account = Data<"/v1/admin/accounts/{account_id}">
 
@@ -36,6 +37,7 @@ export default function UserPage({ params }: { params: Promise<{ id: string }> }
             ]}
           />
           <UserActions id={account.data.id} email={account.data.primary_email} status={account.data.status} version={account.data.version} />
+          <PlanGrant scope="personal" id={account.data.id} />
           <Panel title="Machines">
             <MachinesOf owner={{ account: account.data.id }} />
           </Panel>

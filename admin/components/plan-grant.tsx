@@ -1,0 +1,74 @@
+"use client"
+
+import { useState } from "react"
+import { ActionDialog } from "@/components/action-dialog"
+import { SelectField, TextField } from "@/components/fields"
+import { Facts, Panel } from "@/components/page"
+import { StatusBadge } from "@/components/filters"
+import { Time } from "@/components/time"
+import { Button } from "@/components/ui/button"
+import { ApiError, operatorAction, useApiQuery, useOperator, type Data } from "@/lib/api"
+
+type Workspace = Data<"/v1/admin/billing/workspaces/{workspace_id}">
+type Products = Data<"/v1/admin/billing/products">
+
+/**
+ * The plan of one account or team, and the support comp: grant a plan for a number of days (it ends by itself) or
+ * revoke a grant. The workspace id is personal:<account> or team:<team>. A workspace the billing page has never
+ * opened has no row yet (404): it is a free workspace at revision 1.
+ */
+export function PlanGrant({ scope, id }: { scope: "personal" | "team"; id: string }) {
+  const admin = useOperator()?.role === "admin"
+  const workspaceId = `${scope}:${id}`
+  const workspace = useApiQuery<Workspace>(["workspace", workspaceId], admin ? `/v1/admin/billing/workspaces/${encodeURIComponent(workspaceId)}` : null)
+  const products = useApiQuery<Products>(["grant-products"], admin ? "/v1/admin/billing/products?limit=100" : null)
+  const choices = (products.data?.products ?? []).filter((p) => p.active && p.catalog_type === `${scope}_subscription`)
+  const [code, setCode] = useState("")
+  const [days, setDays] = useState("30")
+  const [seats, setSeats] = useState("5")
+  if (!admin) return null
+  const missing = workspace.error instanceof ApiError && workspace.error.status === 404
+  const w = missing ? undefined : workspace.data
+  const revision = w?.revision ?? 1
+  const product = code || choices[0]?.code || ""
+  const daysOk = /^\d{1,3}$/.test(days) && +days >= 1 && +days <= 366
+  const seatsOk = scope === "personal" || (/^\d{1,4}$/.test(seats) && +seats >= 1 && +seats <= 128)
+  return (
+    <Panel title="Plan" action={workspace.isError && !missing ? <span className="text-xs text-destructive">The plan could not be read.</span> : undefined}>
+      <Facts
+        rows={[
+          ["Plan", w?.product_code ? <>{w.product_code} <StatusBadge state={w.state} />{w.granted && <span className="ml-2 text-xs text-muted-foreground" data-plan-granted>Support grant (no Stripe subscription)</span>}</> : "Free"],
+          ["Ends", w?.period_end ? <Time iso={w.period_end} /> : "—"],
+          ...(scope === "team" && w ? [["Seats", w.quantity] as [string, React.ReactNode]] : []),
+        ]}
+      />
+      <div className="flex flex-wrap gap-2" data-plan-actions>
+        <ActionDialog
+          title={`Grant a plan to ${workspaceId}`}
+          description="Gives the workspace a plan without Stripe for a number of days; it ends by itself. It replaces an earlier grant and is refused while the workspace has a live Stripe subscription or a checkout in progress, and for 72 hours after a Stripe subscription was cancelled. If the customer subscribes later, their subscription replaces it."
+          target={workspaceId}
+          submitLabel="Grant plan"
+          valid={product !== "" && daysOk && seatsOk}
+          trigger={(open) => <Button variant="outline" onClick={open} data-action="grant-plan">Grant a plan</Button>}
+          run={(h) => operatorAction("POST", `/v1/admin/billing/workspaces/${encodeURIComponent(workspaceId)}/grant`, h, { revision, product_code: product, days: +days, ...(scope === "team" ? { quantity: +seats } : {}) })}
+        >
+          <SelectField label="Plan" value={product} onChange={setCode} options={choices.length ? choices.map((p): [string, string] => [p.code, `${p.display_name} (${p.code})`]) : [["", "No active plan in the catalog"]]} />
+          <TextField label="Days" value={days} onChange={setDays} inputMode="numeric" hint="1 to 366." />
+          {scope === "team" && <TextField label="Seats" value={seats} onChange={setSeats} inputMode="numeric" hint="1 to 128." />}
+        </ActionDialog>
+        {w?.granted && (
+          <ActionDialog
+            title={`Revoke the grant of ${workspaceId}`}
+            description="Ends the granted plan now (the workspace has no plan after it). Only a grant can be revoked here; a Stripe subscription is cancelled in Stripe."
+            target={workspaceId}
+            destructive
+            confirmWord={workspaceId}
+            submitLabel="Revoke grant"
+            trigger={(open) => <Button variant="destructive" onClick={open} data-action="revoke-grant">Revoke grant</Button>}
+            run={(h) => operatorAction("POST", `/v1/admin/billing/workspaces/${encodeURIComponent(workspaceId)}/revoke`, h, { revision })}
+          />
+        )}
+      </div>
+    </Panel>
+  )
+}

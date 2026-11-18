@@ -35,6 +35,10 @@ type Input struct {
 	Email     string `json:"email,omitempty"`
 	Role      string `json:"role,omitempty"`
 	SessionID string `json:"session_id,omitempty"`
+	// Plan grants: plan_grant takes ProductCode, Days and (team plans) Quantity seats.
+	ProductCode string `json:"product_code,omitempty"`
+	Days        int    `json:"days,omitempty"`
+	Quantity    int    `json:"quantity,omitempty"`
 }
 type Result struct {
 	ResourceID string `json:"resource_id"`
@@ -103,6 +107,10 @@ func (s *Service) Execute(ctx context.Context, actorID, key, kind, target, reaso
 			if err = accountAction(ctx, tx, actorID, target, kind == "account_ban", input.Revision, &result); err != nil {
 				return err
 			}
+		case "plan_grant", "plan_revoke":
+			if err = grantAction(ctx, tx, kind, target, input, &result); err != nil {
+				return err
+			}
 		case "account_sessions_revoke":
 			if err = sessionsRevokeAction(ctx, tx, target, input.Revision, &result); err != nil {
 				return err
@@ -146,7 +154,7 @@ func (s *Service) Execute(ctx context.Context, actorID, key, kind, target, reaso
 		if _, err = tx.Exec(ctx, `INSERT INTO operator_actions(actor_user_id,idempotency_key,kind,target,request_hash,result) VALUES($1,$2,$3,$4,$5,$6)`, actorID, key, kind, target, hash[:], raw); err != nil {
 			return err
 		}
-		return s.audit.WriteTx(ctx, tx, audit.Event{ActorUserID: actorID, ActorType: audit.ActorAdmin, EventType: "operator." + kind, ResourceType: resourceType(kind), ResourceID: auditResource(kind, target, result), IdempotencyKey: key, Metadata: map[string]any{"reason": reason, "state": result.State, "version": result.Version}})
+		return s.audit.WriteTx(ctx, tx, audit.Event{ActorUserID: actorID, ActorType: audit.ActorAdmin, EventType: "operator." + kind, ResourceType: resourceType(kind), ResourceID: auditResource(kind, target, result), IdempotencyKey: key, Metadata: auditMetadata(kind, reason, input, result)})
 	})
 	return result, err
 }
@@ -354,7 +362,7 @@ func relayAction(ctx context.Context, tx *db.Tx, target string, drain bool, revi
 
 func validKind(v string) bool {
 	switch v {
-	case "account_ban", "account_unban", "account_sessions_revoke", "team_ban", "team_unban", "relay_drain", "relay_resume", "tunnel_disable", "tunnel_enable", "publication_block", "publication_unblock", "operator_create", "operator_disable", "operator_enable", "operator_mfa_reset", "operator_sessions_revoke":
+	case "account_ban", "account_unban", "account_sessions_revoke", "plan_grant", "plan_revoke", "team_ban", "team_unban", "relay_drain", "relay_resume", "tunnel_disable", "tunnel_enable", "publication_block", "publication_unblock", "operator_create", "operator_disable", "operator_enable", "operator_mfa_reset", "operator_sessions_revoke":
 		return true
 	}
 	return false
@@ -363,7 +371,7 @@ func allowed(role, kind string) bool {
 	if isStaffKind(kind) {
 		return role == "admin"
 	}
-	if kind == "account_ban" || kind == "account_unban" || kind == "account_sessions_revoke" || kind == "team_ban" || kind == "team_unban" {
+	if kind == "account_ban" || kind == "account_unban" || kind == "account_sessions_revoke" || isGrantKind(kind) || kind == "team_ban" || kind == "team_unban" {
 		return role == "admin"
 	}
 	return role == "admin" || role == "operations"
@@ -377,6 +385,9 @@ func resourceType(kind string) string {
 	}
 	if strings.HasPrefix(kind, "account_") {
 		return "account"
+	}
+	if isGrantKind(kind) {
+		return "billing_workspace"
 	}
 	if strings.HasPrefix(kind, "team_") {
 		return "team"

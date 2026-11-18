@@ -5429,6 +5429,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/billing/workspaces/{workspace_id}/grant": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Operator grant a plan (support comp)
+         * @description Current active operator account and separate operator session required. See docs/runbooks/operator-admin.md. Mutations require explicit target confirmation, an opaque evidence reference and stable idempotency key. Read current state before retrying an uncertain result. Operator-Target is the workspace id (`personal:<account>` or `team:<team>`). Gives the workspace an active plan with no Stripe subscription for `days` days (1 to 366; team plans also `quantity` seats); it ends by itself at expires_at. It replaces an earlier grant, is refused (409) while the workspace has a Stripe subscription or a checkout in flight, and is replaced if the customer later subscribes. The revision is the workspace revision (1 for a workspace not yet created).
+         */
+        post: operations["post_v1_admin_billing_workspaces_workspace_id_grant"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/billing/workspaces/{workspace_id}/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Operator revoke a plan grant
+         * @description Current active operator account and separate operator session required. See docs/runbooks/operator-admin.md. Mutations require explicit target confirmation, an opaque evidence reference and stable idempotency key. Read current state before retrying an uncertain result. Ends a plan grant now. Refused (409) for a workspace whose plan is a Stripe subscription: cancel that in Stripe.
+         */
+        post: operations["post_v1_admin_billing_workspaces_workspace_id_revoke"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/infrastructure": {
         parameters: {
             query?: never;
@@ -11629,6 +11669,8 @@ export interface components {
             revision: number;
             /** Format: date-time */
             observed_at: string;
+            /** @description A support comp: an active plan with no Stripe subscription behind it. */
+            granted: boolean;
         };
         OperatorControlOperation: {
             id: string;
@@ -11827,6 +11869,12 @@ export interface components {
             revision: number;
             /** @description publication_block only: a legal takedown, answered 451 instead of 403. */
             legal?: boolean;
+            /** @description plan_grant only: the catalog product to grant (an active personal_subscription product for a personal workspace, a team_subscription product for a team). */
+            product_code?: string;
+            /** @description plan_grant only: how long the grant lasts. */
+            days?: number;
+            /** @description plan_grant for a team plan only: the seats. */
+            quantity?: number;
         };
         OperatorActionResult: {
             resource_id: string;
@@ -26930,6 +26978,160 @@ export interface operations {
             };
             /** @description Operator session or capability required */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Evidence, provider or audit unavailable; outcome may require checking target state */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    post_v1_admin_billing_workspaces_workspace_id_grant: {
+        parameters: {
+            query?: never;
+            header: {
+                "Operator-Target": string;
+                "Operator-Reason": string;
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OperatorActionInput"];
+            };
+        };
+        responses: {
+            /** @description Audited result. Cache-Control: no-store. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["OperatorActionResult"];
+                    };
+                };
+            };
+            /** @description Invalid target, body, pagination or confirmation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Browser authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Operator session or capability required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Stale resource revision or conflicting idempotency request */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Evidence, provider or audit unavailable; outcome may require checking target state */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    post_v1_admin_billing_workspaces_workspace_id_revoke: {
+        parameters: {
+            query?: never;
+            header: {
+                "Operator-Target": string;
+                "Operator-Reason": string;
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OperatorActionInput"];
+            };
+        };
+        responses: {
+            /** @description Audited result. Cache-Control: no-store. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["OperatorActionResult"];
+                    };
+                };
+            };
+            /** @description Invalid target, body, pagination or confirmation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Browser authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Operator session or capability required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Stale resource revision or conflicting idempotency request */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

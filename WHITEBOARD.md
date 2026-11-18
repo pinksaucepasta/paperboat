@@ -323,3 +323,17 @@ usage-key and mint-key lists (the panel asks for ids today); release-authority a
 list and revoke; a server API to pre-mint or cancel a `pbh` enrolment code (today `pbh selfhost code` mints it on the
 node, 15 min). Launch-day operator needs (operator management and MFA reset, session revoke, plan grants, server-node
 resume) are being built before launch.
+
+## Plan grants in the customer console — after launch (2026-11-18)
+
+A support plan grant (admin panel, `plan_grant`) is a workspace row with a product but no Stripe customer or subscription, and the
+customer billing API does not say so. The console therefore shows a granted workspace like a paid one: Manage billing (the portal
+needs a Stripe customer), seat changes (need a subscription) and top-ups (need a customer) are offered and fail, and Upgrade is
+hidden while the product code is set. Add a `granted` flag to the customer workspace answer, hide those controls and show "Plan
+granted until <date>" with Upgrade still available (a checkout replaces the grant). Revoking a grant on a workspace that never had a
+customer resets it to Free, so only the running grant is affected.
+
+Decided for plan grants (2026-11-18): a grant keeps the workspace's `bandwidth_anchor`, as any cancelled-and-repurchased Stripe
+workspace does; seats are capped at the team member maximum (128) with no floor against current members; a grant over a cancelled
+Stripe record waits 72 hours after its last change (Stripe's webhook retry window); a revoke that races a succeeded checkout whose
+webhook has not arrived loses to the payment.

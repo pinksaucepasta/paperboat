@@ -5,6 +5,7 @@ import { use } from "react"
 import { ErrorBlock } from "@/components/error-block"
 import { MachinesOf } from "@/components/machines-of"
 import { TeamActions } from "@/components/account-actions"
+import { PlanGrant } from "@/components/plan-grant"
 import { Mono, StatusBadge } from "@/components/filters"
 import { Facts, Page, Panel } from "@/components/page"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -45,6 +46,7 @@ export default function TeamPage({ params }: { params: Promise<{ id: string }> }
               ))}
             </ul>
           </Panel>
+          <PlanGrant scope="team" id={t.id} />
           <Panel title="Machines">
             <MachinesOf owner={{ team: t.id }} />
           </Panel>

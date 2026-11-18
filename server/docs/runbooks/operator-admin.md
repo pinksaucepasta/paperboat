@@ -168,6 +168,15 @@ customer account does not change an operator account.
 credentials (browser sessions and access grants, CLI sessions and tokens, API tokens, device grants,
 machine access sessions) without suspending: use it when an account may be compromised but the
 customer should simply sign in again. Hosts are woken, so open SSH sessions end within seconds.
+
+Plan grants (support comps): `POST /v1/admin/billing/workspaces/{workspace_id}/grant` with target `personal:<account>`
+or `team:<team>` and `{"revision","product_code","days"[,"quantity"]}` (days 1 to 366; seats 1 to 128 for a team plan) gives
+the workspace an active plan with no Stripe subscription; `.../revoke` ends it. The grant is the workspace's own
+subscription row, so the plan limits, team entitlement and bandwidth allowance follow the product like a paid plan, it ends
+by itself at `expires_at`, and the Stripe webhook never touches it (it matches workspaces by their Stripe ids). A grant
+is refused (409) while the workspace has a live Stripe subscription or a checkout in flight, and within 72 hours of a Stripe
+cancellation (Stripe may still retry events for it); a later checkout replaces it.
+Revoke only ends a grant; a paid plan is cancelled in Stripe. The audit event records product, days and seats.
 Relay drain stops new scheduling; resume requires a new heartbeat before ready.
 Tunnel disable/enable uses the normal configuration-generation and operation
 pipeline, so acceptance is distinct from runtime convergence. Team suspension
