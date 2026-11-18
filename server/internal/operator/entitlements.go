@@ -19,7 +19,7 @@ type Entitlements struct {
 	Grants      []planlimits.Grant    `json:"grants"`
 }
 
-// BandwidthEntitlement: PlanBytes is the allowance of the current usage period before grants (null: unlimited, or no period
+// BandwidthEntitlement is one workspace's bandwidth allowance: PlanBytes is the allowance of the current usage period before grants (null: unlimited, or no period
 // has started yet); GrantedBytes what running grants add; UsageBytes what the workspace used in the period.
 type BandwidthEntitlement struct {
 	PlanBytes    *int64 `json:"plan_bytes"`

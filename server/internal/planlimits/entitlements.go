@@ -189,7 +189,7 @@ func scopeOf(workspaceID string) (Scope, bool) {
 	return Scope{}, false
 }
 
-// Limits is every counted kind for the workspace with its plan value and the override that replaces it; the operator's view.
+// LimitRow is one counted kind of a workspace with its plan value and the override that replaces it; the operator's view.
 type LimitRow struct {
 	Kind     Kind `json:"kind"`
 	Used     int  `json:"used"`

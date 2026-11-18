@@ -130,12 +130,18 @@ func TestBanFieldsRecentAddressesAndBlockList(t *testing.T) {
 		t.Fatalf("running flags %v", ours)
 	}
 	running, err := service.Read(ctx, admin, "ip_blocks", "running", "", 100)
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, b := range running.(IPBlockPage).Blocks {
 		if !b.Running {
 			t.Fatalf("an ended block in the running list: %+v", b)
 		}
 	}
 	ended, err := service.Read(ctx, admin, "ip_blocks", "ended", "", 100)
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, b := range ended.(IPBlockPage).Blocks {
 		if b.Running {
 			t.Fatalf("a running block in the ended list: %+v", b)

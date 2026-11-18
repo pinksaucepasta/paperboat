@@ -11,7 +11,7 @@ import (
 // payload (output bytes or stdin bytes). Bytes cross the session owner, hostd and worker hops as they are, never as
 // base64 inside JSON (which cost two string scans and a base64 pass per hop and capped exec output near 17 MB/s).
 // Terminal-output limits and the per-event acknowledgement are unchanged: this only replaces the encoding.
-//
+
 // MaxMessageBytes bounds one message, header and payload, and is the owner bridge's body limit. The header may use all
 // of it, so the cap can never refuse a message the bridge would have taken. What fills a header is bounded below it:
 // a list answer is paged (listPageSnapshots of ~0.5 KiB), a start is the validated request (arguments and environment

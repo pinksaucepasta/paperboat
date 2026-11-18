@@ -11,7 +11,7 @@ import { Field, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { ErrorMessage } from "@/components/error-reference"
 
-/** The tunnel's address under its base domain: "calm-summer-beach-3476.pprbt.app" → label and ".pprbt.app". */
+/** The tunnel's address under its base domain: "calm-summer-beach-3476.example.test" → label and ".example.test". */
 const split = (tunnel: Tunnel) => {
   const host = hostOf(tunnel.stable_endpoint)
   const dot = Math.max(host.indexOf("."), 0)

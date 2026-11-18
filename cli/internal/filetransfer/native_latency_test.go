@@ -297,7 +297,7 @@ func (r *failingReader) Read(p []byte) (int, error) {
 func TestNativeSendDoesNotRetryASourceThatFailsMidStream(t *testing.T) {
 	data := make([]byte, 4<<20)
 	item := source(data)
-	item.Reader = &failingReader{ReadSeeker: item.Reader.(io.ReadSeeker), after: 1 << 20, err: io.ErrClosedPipe}
+	item.Reader = &failingReader{ReadSeeker: item.Reader, after: 1 << 20, err: io.ErrClosedPipe}
 	server, state := streamServer(t, latencyManifest(item), nil)
 	_, err := nativeClientFor(t, server).SendBatch(t.Context(), "batch_stream", "", []Source{item})
 	var failure *nativeSourceFailure
