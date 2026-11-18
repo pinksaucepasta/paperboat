@@ -27,11 +27,11 @@ def without_env_notice(errors):
     return b''.join(line for line in errors.splitlines(keepends=True) if not line.startswith(ENV_NOTICE))
 
 
-def run(binary, *arguments, input=b'', expected=0):
+def run(binary, *arguments, input=b'', expected=0, timeout=90):
     command = [str(binary), *arguments]
     if hasattr(binary, 'run_remote'):  # pb.exe on the Windows device, output bounded after the fact
         try:
-            result = binary.run_remote(arguments, input=input, timeout=90, text=False)
+            result = binary.run_remote(arguments, input=input, timeout=timeout, text=False)
         except subprocess.TimeoutExpired as error:
             raise RuntimeError('exec fixture command exceeded90s') from error
         if len(result.stdout) > OUTPUT_BYTES + (1 << 20) or len(result.stderr) > 1 << 20:
@@ -41,7 +41,7 @@ def run(binary, *arguments, input=b'', expected=0):
         # Bound output on disk rather than retaining an unbounded communicate buffer.
         with tempfile.TemporaryFile() as stdout, tempfile.TemporaryFile() as stderr:
             try:
-                result = subprocess.run(command, input=input, stdout=stdout, stderr=stderr, timeout=90)
+                result = subprocess.run(command, input=input, stdout=stdout, stderr=stderr, timeout=timeout)
             except subprocess.TimeoutExpired as error:
                 raise RuntimeError('exec fixture command exceeded90s') from error
             if stdout.tell() > OUTPUT_BYTES + (1 << 20) or stderr.tell() > 1 << 20:

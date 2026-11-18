@@ -2,9 +2,11 @@ package filetransfer
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"sync/atomic"
 	"testing"
 )
 
@@ -35,10 +37,10 @@ func TestNativePatchSendsContentLength(t *testing.T) {
 			if tc.name == "folder" {
 				want = min(item.Size, nativeSegmentBytes)
 			}
-			var gotLength int64 = -2
-			var gotBody int64
+			var gotLength, gotBody atomic.Int64
+			gotLength.Store(-2)
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				gotLength = r.ContentLength
+				gotLength.Store(r.ContentLength)
 				// Drain to mirror a real receiver; the assertion is on the declared length.
 				n := int64(0)
 				buf := make([]byte, 32<<10)
@@ -49,7 +51,7 @@ func TestNativePatchSendsContentLength(t *testing.T) {
 						break
 					}
 				}
-				gotBody = n
+				gotBody.Store(n)
 				w.Header().Set("Upload-Offset", strconv.FormatInt(n, 10))
 				w.WriteHeader(http.StatusNoContent)
 			}))
@@ -58,12 +60,33 @@ func TestNativePatchSendsContentLength(t *testing.T) {
 			if _, err := client.patchNative(context.Background(), "ft_1", 0, item, func(int64) {}); err != nil {
 				t.Fatal(err)
 			}
-			if gotLength != want {
-				t.Fatalf("ContentLength = %d, want %d", gotLength, want)
+			if gotLength.Load() != want {
+				t.Fatalf("ContentLength = %d, want %d", gotLength.Load(), want)
 			}
-			if gotBody != want {
-				t.Fatalf("body bytes = %d, want %d", gotBody, want)
+			if gotBody.Load() != want {
+				t.Fatalf("body bytes = %d, want %d", gotBody.Load(), want)
 			}
 		})
+	}
+}
+
+// A file longer than one segment sends the segment's length, not the file's, and the rest in the next request.
+func TestNativePatchContentLengthIsTheSegmentWhenTheFileIsLonger(t *testing.T) {
+	shortSegments(t)
+	item := source(make([]byte, 3<<20))
+	var gotLength atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotLength.Store(r.ContentLength)
+		n, _ := io.Copy(io.Discard, r.Body)
+		w.Header().Set("Upload-Offset", strconv.FormatInt(1<<20+n, 10))
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+	client := NewClient(server.URL+"/v1/file-transfers", Auth{Token: "token"}, testBinding(), server.Client())
+	if _, err := client.patchNative(context.Background(), "ft_1", 1<<20, item, func(int64) {}); err != nil {
+		t.Fatal(err)
+	}
+	if gotLength.Load() != nativeSegmentBytes {
+		t.Fatalf("ContentLength = %d, want the %d byte segment", gotLength.Load(), nativeSegmentBytes)
 	}
 }

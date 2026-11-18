@@ -57,7 +57,7 @@ def send_timed(binary, source, target):
 
 
 def on_receiver(binary, target, script):
-    output, errors = run(binary, 'exec', target, '--', 'python3', '-c', script)
+    output, errors = run(binary, 'exec', target, '--timeout', '600s', '--', 'python3', '-c', script, timeout=660)
     if errors or not output.strip().endswith(b'VERIFIED'):
         raise RuntimeError('receiver verification failed: ' + (output + errors).decode(errors='replace')[-300:])
 
@@ -80,6 +80,7 @@ print("VERIFIED")
 '''
 
 CLEAN = '''
+import shutil
 from pathlib import Path
 root = Path.home() / "Paperboat" / "Inbox"
 for name in %r:
@@ -127,7 +128,7 @@ def main():
                 cases.append({'case': 'folder', 'bytes': tree_bytes, 'files': len(TREE), 'seconds': round(seconds, 1), 'MBps': round(tree_bytes / seconds / 1e6, 2)})
         finally:
             try:
-                run(binary, 'exec', args.target, '--', 'python3', '-c', CLEAN % ([big.name, tree.name],))
+                run(binary, 'exec', args.target, '--timeout', '120s', '--', 'python3', '-c', CLEAN % ([big.name, tree.name],), timeout=180)
             except Exception as error:  # the verification result matters more than a leftover test file
                 print('cleanup failed:', error, flush=True)
     if registration() != before:

@@ -529,6 +529,12 @@ test_application_pairs() {
       esac
       id="$kind:$source-$target"
       skipped "$id" && continue
+      case "$kind" in transfer-large)
+        if [ "$source" = victus ] || [ "$target" = victus ]; then
+          record "$id" SKIP 0 "transfer_large.py verifies on Unix receivers only; the Windows form is not written yet"
+          continue
+        fi ;;
+      esac
       case "$kind" in transfer-manage|transfer-resume)
         if same_ct_host "$source" "$target"; then
           record "$id" SKIP 0 "two containers on one Docker host: the transfer ends before the check can interrupt it; judged on two real hosts"
@@ -545,7 +551,7 @@ test_application_pairs() {
       out=$(device_py "$source" "$script" $arguments 2>&1); status=$?
       if [ "$status" = 0 ] && python3 -c '
 import json,sys
-r=json.loads(sys.argv[1]); assert r["status"]=="PASS" and r["target"]==sys.argv[2]
+r=json.loads(sys.argv[1].splitlines()[-1]); assert r["status"]=="PASS" and r["target"]==sys.argv[2]
 assert r["check"]==sys.argv[3] and r["enrollment_unchanged"] is True
 ' "$out" "$target" "$kind" 2>/dev/null; then
         record "$id" PASS $(( $(now)-t0 ))

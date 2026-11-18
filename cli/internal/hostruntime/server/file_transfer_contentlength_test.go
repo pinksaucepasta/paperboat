@@ -14,7 +14,7 @@ func createSizedTransfer(t *testing.T, h *FileTransferHandler, size int64, body 
 	created, err := h.config.Service.Create(t.Context(), filetransfer.CreateRequest{
 		BatchID: "fb_len", SourceMachineID: "machine_client", DestinationMachineID: "machine_host",
 		InitiatingUserID: "user_1", SessionID: "ses_1",
-		Files: []filetransfer.File{{Basename: "data.bin", Size: size, SHA256: transferDigest(body[:size])}},
+		Files: []filetransfer.File{{Basename: "data.bin", Size: size, SHA256: transferDigest(body)}},
 	})
 	if err != nil {
 		t.Fatal(err)

@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -30,7 +29,12 @@ func openFDCount(t *testing.T) (int, bool) {
 // (HTTP servers and transports keep their own).
 func tarWriterRunning() bool {
 	buf := make([]byte, 1<<20)
-	return strings.Contains(string(buf[:runtime.Stack(buf, true)]), "writeFolderTar")
+	for {
+		if n := runtime.Stack(buf, true); n < len(buf) {
+			return strings.Contains(string(buf[:n]), "writeFolderTar")
+		}
+		buf = make([]byte, len(buf)*2) // truncated: a missed writer would read as "exited"
+	}
 }
 
 func waitFor(t *testing.T, what string, timeout time.Duration, cond func() bool) {
@@ -70,6 +74,10 @@ func TestFolderAbandonedStreamReleasesWriter(t *testing.T) {
 	if _, err := io.CopyN(io.Discard, stream, 1<<20); err != nil {
 		t.Fatal(err)
 	}
+	// A read blocked on the writer when the abort comes (the transport still reading an abandoned body).
+	blocked := make(chan error, 1)
+	go func() { _, err := io.CopyN(io.Discard, stream, 4<<20); blocked <- err }()
+	time.Sleep(20 * time.Millisecond)
 	// Simulate abort: nobody will Seek again; Close must stop the writer.
 	if err := stream.Close(); err != nil {
 		t.Fatal(err)
@@ -77,13 +85,18 @@ func TestFolderAbandonedStreamReleasesWriter(t *testing.T) {
 	if err := stream.Close(); err != nil {
 		t.Fatal("Close is not idempotent")
 	}
+	select {
+	case <-blocked: // the reader was released by Close, with an error or what had already arrived
+	case <-time.After(5 * time.Second):
+		t.Fatal("Close did not release a blocked Read")
+	}
 	waitFor(t, "writer goroutine to exit", 5*time.Second, func() bool {
 		return !tarWriterRunning()
 	})
 	if haveFDs {
 		waitFor(t, "fds to return to baseline", 5*time.Second, func() bool {
 			n, _ := os.ReadDir("/proc/self/fd")
-			return len(n) <= baseFDs+1
+			return len(n) <= baseFDs
 		})
 	}
 	// The stream restarts from zero after an abort Close.
@@ -149,5 +162,4 @@ func TestUploadNativeFolderAbortClosesStream(t *testing.T) {
 	if _, err := io.ReadFull(item.Reader, head); err != nil {
 		t.Fatalf("read after abort: %v", err)
 	}
-	_ = strconv.Itoa(0)
 }

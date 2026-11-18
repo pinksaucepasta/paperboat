@@ -140,6 +140,9 @@ func TestNativeCreateStaysResumableWhenReceiverStaysBusy(t *testing.T) {
 	if !errors.As(err, &resume) || resume.BatchID != "batch_stream" || state.deletes != 0 || state.waiting.Load() == 0 {
 		t.Fatalf("err=%v deletes=%d waiting=%d", err, state.deletes, state.waiting.Load())
 	}
+	if state.creates < 2 {
+		t.Fatalf("create was not retried: creates=%d", state.creates)
+	}
 }
 
 func TestNativeCompleteRetriesWhileReceiverBusy(t *testing.T) {
@@ -177,5 +180,8 @@ func TestNativeCompleteStaysResumableWhenReceiverStaysBusy(t *testing.T) {
 	defer state.mu.Unlock()
 	if !errors.As(err, &resume) || resume.BatchID != "batch_stream" || state.deletes != 0 || state.waiting.Load() == 0 {
 		t.Fatalf("err=%v deletes=%d waiting=%d", err, state.deletes, state.waiting.Load())
+	}
+	if state.completes < 2 {
+		t.Fatalf("complete was not retried: completes=%d", state.completes)
 	}
 }

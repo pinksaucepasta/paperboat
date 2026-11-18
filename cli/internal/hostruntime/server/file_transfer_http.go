@@ -433,7 +433,7 @@ func (h *FileTransferHandler) serveContent(writer http.ResponseWriter, request *
 		// Declared-length pre-reject: fail before AppendSegment opens the spool, so nothing is written.
 		// Chunked/unknown bodies (ContentLength < 0) skip this and rely on the streaming cap in Service.append.
 		if offset == transfer.CommittedOffset && request.ContentLength >= 0 {
-			if request.ContentLength > protocol.FileTransferSegmentBytes || offset+request.ContentLength > transfer.Size {
+			if request.ContentLength > protocol.FileTransferSegmentBytes || request.ContentLength > transfer.Size-offset {
 				writeFileTransferError(request.Context(), "delivery", writer, requestID, &filetransfer.Error{Code: filetransfer.InvalidSize})
 				return
 			}
