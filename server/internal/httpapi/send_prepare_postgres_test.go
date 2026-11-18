@@ -497,6 +497,22 @@ func TestSendPrepareTransferTooLargePostgres(t *testing.T) {
 	}
 }
 
+func TestSendPrepareRefusesUnknownTransferModePostgres(t *testing.T) {
+	f := newSendPrepareFixture(t)
+	sender, token := f.actor("badmode")
+	f.machine("prepare_badmode_source_"+f.suffix, sender, "badsrc", false, true)
+	dest := "prepare_badmode_dest_" + f.suffix
+	f.machine(dest, sender, "badhn", true, true)
+	f.route("env_"+dest, dest)
+
+	call := f.baseCall(dest, "prepare_badmode_source_"+f.suffix)
+	call.TransferMode = "garbage"
+	got := f.post(token, "/v1/sends/prepare", call)
+	if got.Status != http.StatusBadRequest || got.ErrorCode != "invalid_transfer_intent" {
+		t.Fatalf("garbage mode prepare status=%d code=%s", got.Status, got.ErrorCode)
+	}
+}
+
 func TestSendPrepareIdempotentRetryPostgres(t *testing.T) {
 	f := newSendPrepareFixture(t)
 	owner, _ := f.actor("idemowner")
@@ -578,10 +594,11 @@ func TestSendPrepareAuthFailuresMatchDescriptorRoutePostgres(t *testing.T) {
 }
 
 func TestSendPrepareRouteRegistration(t *testing.T) {
-	if !scopedTokenRoute(httptest.NewRequest(http.MethodPost, "/v1/sends/prepare", nil)) {
-		t.Fatal("a scoped token cannot prepare a send like it can mint the descriptor")
+	// The folded inbox route is refused for both, so prepare must not widen what they can create.
+	if scopedTokenRoute(httptest.NewRequest(http.MethodPost, "/v1/sends/prepare", nil)) {
+		t.Fatal("a scoped token can prepare a send, but it cannot create the inbox request it folds")
 	}
-	if !recipeRoute(httptest.NewRequest(http.MethodPost, "/v1/sends/prepare", nil), "") {
-		t.Fatal("a recipe session cannot prepare a send like it can mint the descriptor")
+	if recipeRoute(httptest.NewRequest(http.MethodPost, "/v1/sends/prepare", nil), "") {
+		t.Fatal("a recipe session can prepare a send, but it cannot create the inbox request it folds")
 	}
 }

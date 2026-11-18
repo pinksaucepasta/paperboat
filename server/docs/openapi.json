@@ -18389,7 +18389,7 @@
         "type": "object",
         "additionalProperties": false,
         "required": [
-          "destination_ref",
+          "destination_machine_id",
           "source_machine_id",
           "request_id",
           "operation_id",
@@ -18399,10 +18399,10 @@
           "declared_bytes"
         ],
         "properties": {
-          "destination_ref": {
+          "destination_machine_id": {
             "type": "string",
             "minLength": 1,
-            "description": "Exact machine ID or alias, resolved against the selected workspace inventory."
+            "description": "Exact machine ID. Alias resolution is the client's."
           },
           "source_machine_id": {
             "type": "string"
@@ -18467,15 +18467,11 @@
         "type": "object",
         "additionalProperties": false,
         "required": [
-          "machine",
           "request",
           "file_transfer_mode",
           "descriptor"
         ],
         "properties": {
-          "machine": {
-            "$ref": "#/components/schemas/Machine"
-          },
           "request": {
             "$ref": "#/components/schemas/TeamInboxRequest"
           },
@@ -32929,7 +32925,7 @@
     "/v1/sends/prepare": {
       "post": {
         "summary": "Prepare a file send in one call",
-        "description": "Resolves destination_ref (exact machine ID or alias), defaults an empty transfer_mode from the sender's account preferences, creates the Team Inbox request, and mints the file-transfer descriptor inline when the request is approved or needs no approval. Pending requests return 202 without a descriptor: poll GET /v1/team-inbox/requests/{request_id} and then POST /v1/machines/{machine_id}/file-transfer-descriptor. Stored requests return 201 without a descriptor and use the existing stored upload branch.",
+        "description": "Takes the destination machine ID, defaults an empty transfer_mode from the sender's account preferences, creates the Team Inbox request, and mints the file-transfer descriptor inline when the request is approved or needs no approval. Pending and stored requests return 202 without a descriptor: pending ones poll GET /v1/team-inbox/requests/{request_id} and then POST /v1/machines/{machine_id}/file-transfer-descriptor. Stored requests use the existing stored upload branch.",
         "security": [
           {
             "bearerAccess": []
@@ -32950,7 +32946,7 @@
         },
         "responses": {
           "201": {
-            "description": "Approved or no-approval send: request plus inline file-transfer descriptor. Stored sends omit the descriptor.",
+            "description": "Approved or no-approval send: request plus inline file-transfer descriptor.",
             "content": {
               "application/json": {
                 "schema": {
@@ -32960,7 +32956,7 @@
             }
           },
           "202": {
-            "description": "Pending manual approval: request without a descriptor.",
+            "description": "Pending manual approval or stored send: request without a descriptor.",
             "content": {
               "application/json": {
                 "schema": {

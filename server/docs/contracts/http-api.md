@@ -317,10 +317,9 @@ changes the original session or directory, and launch failure never falls back.
 
 Every enrolled machine can initiate authorized access and serve its enabled capabilities.
 
-`POST /v1/sends/prepare` is the one-call `pb send` setup. It resolves
-`destination_ref` (exact machine ID wins; one equal alias resolves; several
-equal aliases return `409 machine_ambiguous`; anything else returns `404` in
-the selected workspace), reads the sender's account preferences when
+`POST /v1/sends/prepare` is the one-call `pb send` setup. It takes
+`destination_machine_id` (an exact machine ID; alias resolution is the
+client's), validates `transfer_mode` (`automatic` or `unlimited`), reads the sender's account preferences when
 `transfer_mode` is empty, creates the Team Inbox request with the existing
 `(sender, operation_id)` idempotency target, and mints the file-transfer
 descriptor inline when the request is `approved` or `not_required` (own
@@ -328,13 +327,15 @@ machine, which skips request binding like the descriptor route). `pending`
 returns `202` with a null descriptor; the client polls
 `GET /v1/team-inbox/requests/{request_id}` and then calls the existing
 `POST /v1/machines/{machine_id}/file-transfer-descriptor` once approved.
-`stored` returns `201` with `stored:true` and a null descriptor. An offline
+`stored` returns `202` with `stored:true` and a null descriptor. An offline
 destination without a team bucket returns `409 machine_offline`, keeping the
 send's existing offline grace; every other error code is the inbox or
 descriptor route's own code (`transfer_too_large`, `team_inbox_*`,
 `invalid_transfer_intent`, `outside_token_scope`, `outside_recipe_reach`).
 Authentication, scopes and workspace selection are the descriptor route's:
-device bearer, `machines:connect`, no new scope.
+device bearer, `machines:connect`, no new scope. Scoped API tokens and recipe
+sessions are refused, as for the inbox route; the workspace selector is
+validated but does not scope the inbox request.
 Incoming terminal/exec, managed SSH, file receiving, preview/tunnel serving, keep-awake and
 ENV injection default on. Disabling an incoming capability does not disable outgoing
 access. Capabilities never replace exact-resource authorization, revocation or readiness.
