@@ -119,6 +119,23 @@ func TestProcessNotifierResetsRestartBackoffOnlyAfterStayingReady(t *testing.T) 
 	}
 }
 
+func TestProcessNotifierDoesNotArmTheBackoffResetWhenReadyWasNotDelivered(t *testing.T) {
+	t.Setenv("NOTIFY_SOCKET", filepath.Join(t.TempDir(), "nobody-listens.sock"))
+	t.Setenv("WATCHDOG_USEC", "2000000")
+	t.Setenv("WATCHDOG_PID", "")
+	resetServiceManager(t)
+	notifier, err := NewProcessNotifier()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := notifier.Ready(); err == nil {
+		t.Fatal("READY to a missing socket reported success")
+	}
+	if !notifier.readyAt.IsZero() {
+		t.Fatal("the restart backoff reset was armed for a service systemd never saw ready")
+	}
+}
+
 func resetServiceManager(t *testing.T) {
 	t.Helper()
 	serviceManager = sync.OnceValues(captureServiceManager)
