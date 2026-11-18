@@ -2,3 +2,4 @@
 .dev.vars
 dist/
 .astro/
+cron/wrangler.deploy.jsonc
