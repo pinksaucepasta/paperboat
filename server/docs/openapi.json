@@ -11812,6 +11812,9 @@
           },
           "next_before_id": {
             "type": "string"
+          },
+          "next_cursor": {
+            "type": "string"
           }
         }
       },
@@ -19116,10 +19119,37 @@
           }
         }
       },
+      "OperatorCapacitySummary": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Counts over the whole fleet, not the page.",
+        "required": [
+          "edges",
+          "relays",
+          "servers",
+          "attention"
+        ],
+        "properties": {
+          "edges": {
+            "type": "integer"
+          },
+          "relays": {
+            "type": "integer"
+          },
+          "servers": {
+            "type": "integer"
+          },
+          "attention": {
+            "type": "integer",
+            "description": "Nodes with a warning or critical warning."
+          }
+        }
+      },
       "OperatorCapacityPage": {
         "type": "object",
         "additionalProperties": false,
         "required": [
+          "summary",
           "observed_at",
           "today",
           "month_start",
@@ -19128,6 +19158,9 @@
           "items"
         ],
         "properties": {
+          "summary": {
+            "$ref": "#/components/schemas/OperatorCapacitySummary"
+          },
           "observed_at": {
             "type": "string",
             "format": "date-time"
@@ -43612,6 +43645,31 @@
             "schema": {
               "type": "string",
               "format": "date-time"
+            }
+          },
+          {
+            "name": "reason",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "phishing",
+                "malware",
+                "spam",
+                "illegal",
+                "other"
+              ]
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "next_cursor of the previous page (replaces before and before_id).",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
             }
           },
           {

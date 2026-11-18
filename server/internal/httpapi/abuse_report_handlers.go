@@ -40,7 +40,8 @@ func abuseReportSubmit(service *abusereports.Service, limiter *ratelimit.Limiter
 	}
 }
 
-// abuseReportList is the operators' queue: newest first, optionally one hostname, paged by created_at.
+// abuseReportList is the operators' queue: newest first, optionally one hostname and one reason, paged by
+// (created_at, id): the cursor, or before and before_id.
 func abuseReportList(service *abusereports.Service) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		limit := 50
@@ -61,9 +62,17 @@ func abuseReportList(service *abusereports.Service) http.Handler {
 			}
 			before = parsed
 		}
-		reports, err := service.List(r.Context(), r.URL.Query().Get("hostname"), before, r.URL.Query().Get("before_id"), limit)
+		beforeID := r.URL.Query().Get("before_id")
+		if raw := r.URL.Query().Get("cursor"); raw != "" {
+			var err error
+			if before, beforeID, err = abusereports.ParseCursor(raw); err != nil {
+				writeError(w, r, http.StatusBadRequest, "invalid_request", "Use the cursor from the previous page.")
+				return
+			}
+		}
+		reports, err := service.List(r.Context(), r.URL.Query().Get("hostname"), r.URL.Query().Get("reason"), before, beforeID, limit)
 		if errors.Is(err, abusereports.ErrInvalid) {
-			writeError(w, r, http.StatusBadRequest, "invalid_request", "Use before and before_id from the previous page.")
+			writeError(w, r, http.StatusBadRequest, "invalid_request", "Use a known reason, and the cursor (or before and before_id) from the previous page.")
 			return
 		}
 		if err != nil {

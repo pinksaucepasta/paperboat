@@ -52,6 +52,7 @@ type CapacityPage struct {
 	MonthStart string             `json:"month_start"` // the first UTC day of the month "this month" means
 	Thresholds CapacityThresholds `json:"thresholds"`
 	Total      int64              `json:"total"` // every node the page could list
+	Summary    CapacitySummary    `json:"summary"`
 	Items      []NodeCapacity     `json:"items"`
 	NextAfter  string             `json:"next_after,omitempty"`
 }
@@ -71,6 +72,32 @@ const capacityNodes = ` FROM paperboat.control_tunnel_nodes n
  FULL JOIN paperboat.node_capacity c ON c.node_id=n.id
  WHERE ((n.id IS NOT NULL AND n.state<>'retired' AND (cardinality(n.roles)=0 OR n.roles && ARRAY['edge','relay']::text[])) OR (n.id IS NULL AND c.role='server'))`
 
+// CapacitySummary counts the whole fleet, not the page: nodes by kind, and those with a warning or critical warning.
+type CapacitySummary struct {
+	Edges     int64 `json:"edges"`
+	Relays    int64 `json:"relays"`
+	Servers   int64 `json:"servers"`
+	Attention int64 `json:"attention"`
+}
+
+// readCapacitySummary is nodeWarnings' warning and critical rules in one aggregate over every node; info-only nodes
+// (no metrics yet) do not need attention. Keep the two in step: TestCapacityPageJoinsRegistryReportsAndDayTotalsOnPostgres
+// compares them.
+func (s *Service) readCapacitySummary(ctx context.Context, tx *db.Tx, now time.Time, monthStart string) (CapacitySummary, error) {
+	var out CapacitySummary
+	err := tx.QueryRow(ctx, `WITH x AS (SELECT
+   CASE WHEN coalesce(c.role,'')<>'' THEN c.role WHEN 'relay'=ANY(coalesce(n.roles,'{}'::text[])) THEN 'relay' ELSE 'edge' END AS kind,
+   CASE WHEN coalesce(c.role,'')='server' THEN c.reported_at ELSE n.last_heartbeat_at END AS heartbeat,
+   (c.node_id IS NOT NULL) AS reports, c.cpu_sustained_percent::float8 AS cpu, c.rss_bytes AS rss,
+   (SELECT coalesce(sum(bytes_in+bytes_out),0)::float8 FROM paperboat.node_capacity_daily WHERE node_id=coalesce(n.id,c.node_id) AND day>=$1::date) AS month`+capacityNodes+`)
+ SELECT count(*) FILTER (WHERE kind='edge'), count(*) FILTER (WHERE kind='relay'), count(*) FILTER (WHERE kind='server'),
+   count(*) FILTER (WHERE heartbeat IS NULL OR heartbeat < CASE WHEN kind='server' THEN $2::timestamptz ELSE $3::timestamptz END
+     OR (reports AND ((kind='edge' AND cpu >= $4::float8) OR (kind='relay' AND rss >= $5::bigint) OR (kind<>'server' AND month >= $6::float8))))
+ FROM x`, monthStart, now.Add(-serverStaleAfter), now.Add(-s.nodeStaleAfter), s.capacity.EdgeCPUWarnPercent, s.capacity.RelayRSSWarnBytes,
+		float64(s.capacity.MonthlyTrafficBytes)*s.capacity.TrafficWarnFraction).Scan(&out.Edges, &out.Relays, &out.Servers, &out.Attention)
+	return out, err
+}
+
 // readCapacity pages those nodes by id (after the id `after`), with their latest report, today's and this month's
 // bytes, and the warnings the thresholds produce.
 func (s *Service) readCapacity(ctx context.Context, tx *db.Tx, after string, limit int) (CapacityPage, error) {
@@ -81,6 +108,11 @@ func (s *Service) readCapacity(ctx context.Context, tx *db.Tx, after string, lim
 	if err := tx.QueryRow(ctx, `SELECT count(*)`+capacityNodes).Scan(&page.Total); err != nil {
 		return page, err
 	}
+	summary, err := s.readCapacitySummary(ctx, tx, now, monthStart)
+	if err != nil {
+		return page, err
+	}
+	page.Summary = summary
 	// The day totals are summed for this page's nodes only (the (node_id, day) primary key serves the lookup).
 	rows, err := tx.Query(ctx, `WITH p AS (SELECT coalesce(n.id,c.node_id) AS id`+capacityNodes+` AND coalesce(n.id,c.node_id)>$3 ORDER BY 1 LIMIT $4),
  d AS (SELECT node_id,

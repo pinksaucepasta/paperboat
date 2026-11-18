@@ -143,6 +143,27 @@ func TestCapacityPageJoinsRegistryReportsAndDayTotalsOnPostgres(t *testing.T) {
 			byID[n.ID] = n
 		}
 		if page.NextAfter == "" {
+			// The summary counts the whole fleet with SQL; it must agree with nodeWarnings over every row walked.
+			var want CapacitySummary
+			for _, n := range byID {
+				switch n.Kind {
+				case "edge":
+					want.Edges++
+				case "relay":
+					want.Relays++
+				case "server":
+					want.Servers++
+				}
+				for _, w := range n.Warnings {
+					if w.Severity != "info" {
+						want.Attention++
+						break
+					}
+				}
+			}
+			if page.Summary != want || page.Total != want.Edges+want.Relays+want.Servers {
+				t.Fatalf("summary %+v, nodeWarnings over every page %+v", page.Summary, want)
+			}
 			break
 		}
 		after = page.NextAfter

@@ -29,7 +29,6 @@ export default function CapacityPage() {
   const filters = useMemo(() => ({}), [])
   const capacity = useCursorList<Capacity>("/v1/admin/infrastructure/capacity", filters, "after", 15_000)
   const data = capacity.data
-  const flagged = data?.items.filter((n) => ["critical", "warning"].includes(worst(n) ?? "")) ?? []
   return (
     <Page title="Capacity">
       {capacity.isError ? (
@@ -39,8 +38,8 @@ export default function CapacityPage() {
       ) : (
         <div className="flex flex-col gap-4" data-capacity-ready>
           <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-            <Stat label="Nodes" value={data.total} note={`${data.total > data.items.length ? "This page: " : ""}${data.items.filter((n) => n.kind === "edge").length} edges · ${data.items.filter((n) => n.kind === "relay").length} relays · ${data.items.filter((n) => n.kind === "server").length} servers`} />
-            <Stat label={data.total > data.items.length ? "Need attention (this page)" : "Need attention"} value={flagged.length} />
+            <Stat label="Nodes" value={data.total} note={`${data.summary.edges} edges · ${data.summary.relays} relays · ${data.summary.servers} servers`} />
+            <Stat label="Need attention" value={data.summary.attention} />
             <Stat label="Monthly allowance per server" value={formatBytes(data.thresholds.monthly_traffic_bytes)} note={`Warns at ${Math.round(data.thresholds.traffic_warn_fraction * 100)}%`} />
             <Stat label="Edge CPU warning" value={`${data.thresholds.edge_cpu_warn_percent}%`} note={`For ${Math.round(data.thresholds.cpu_sustained_seconds / 60)} min · relay memory ${memory(data.thresholds.relay_rss_warn_bytes)}`} />
           </div>

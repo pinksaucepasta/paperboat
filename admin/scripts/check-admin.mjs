@@ -199,6 +199,22 @@ function route(req, url) {
   }
   if (p === "/v1/admin/sentry/issues") return { issues: [{ project: "go", id: "1", short_id: "GO-1", level: "error", status: "unresolved", count: 5, first_seen: "2026-11-16T00:00:00Z", last_seen: "2026-11-17T08:00:00Z" }] }
   if (p === "/v1/admin/nodes") return { items: world.nodes, total: world.nodes.length }
+  if (p === "/v1/admin/abuse-reports") {
+    const all = [
+      { id: "abuse_00000000-0000-4000-8000-000000000002", hostname: "bad.example.test", url: "https://bad.example.test/login", reason: "phishing", details: "Asks for bank passwords", reporter_email: "r@example.test", created_at: "2026-11-17T10:00:00Z" },
+      { id: "abuse_00000000-0000-4000-8000-000000000001", hostname: "spam.example.test", url: "https://spam.example.test/", reason: "spam", details: "", reporter_email: "", created_at: "2026-11-16T10:00:00Z" },
+    ]
+    const reports = all.filter((r) => (!url.searchParams.get("reason") || r.reason === url.searchParams.get("reason")) && (!url.searchParams.get("hostname") || r.hostname === url.searchParams.get("hostname")))
+    return { total: reports.length, reports }
+  }
+  if (p === "/v1/admin/backups")
+    return { database_id: "main", reporting_configured: true, backup_state: "current", restore_state: "stale", observed_at: "2026-11-18T09:00:00Z", max_age_seconds: 93600, restore_max_age_seconds: 691200, evidence_retention_days: 90, latest_backup_restore_verified: false, storage_durability: "deployment_owned_unverified",
+      latest_backup: { database_id: "main", run_id: "run-b2", kind: "backup", started_at: "2026-11-18T01:00:00Z", completed_at: "2026-11-18T01:05:00Z", outcome: "succeeded", bytes: 5e9, retained_until: "2026-12-18T00:00:00Z", received_at: "2026-11-18T01:05:01Z" },
+      latest_restore: { database_id: "main", run_id: "run-r1", kind: "restore", backup_run_id: "run-b1", started_at: "2026-11-09T02:00:00Z", completed_at: "2026-11-09T02:30:00Z", outcome: "succeeded", bytes: 0, retained_until: "2026-12-09T00:00:00Z", received_at: "2026-11-09T02:30:01Z" } }
+  if (p === "/v1/admin/backups/runs")
+    return { total: 2, runs: [
+      { database_id: "main", run_id: "run-b2", kind: "backup", started_at: "2026-11-18T01:00:00Z", completed_at: "2026-11-18T01:05:00Z", outcome: "succeeded", bytes: 5e9, retained_until: "2026-12-18T00:00:00Z", received_at: "2026-11-18T01:05:01Z" },
+      { database_id: "main", run_id: "run-r1", kind: "restore", backup_run_id: "run-b1", started_at: "2026-11-09T02:00:00Z", completed_at: "2026-11-09T02:30:00Z", outcome: "succeeded", bytes: 0, retained_until: "2026-12-09T00:00:00Z", received_at: "2026-11-09T02:30:01Z" } ] }
   if (p === "/v1/admin/publications") {
     const want = url.searchParams.get("blocked")
     const items = [{ hostname: "blk.example.test", blocked: true, legal: false, reason: "TICKET-9", version: 3, created_at: "2026-11-16T00:00:00Z", updated_at: "2026-11-17T00:00:00Z" }, { hostname: "old.example.test", blocked: false, legal: false, reason: "TICKET-8", version: 2, created_at: "2026-11-10T00:00:00Z", updated_at: "2026-11-11T00:00:00Z" }].filter((b) => !want || b.blocked === (want === "true"))
@@ -227,7 +243,7 @@ function route(req, url) {
   if (p === "/v1/admin/infrastructure") return { items: [{ kind: url.searchParams.get("kind"), id: "relay_1", state: "ready", desired_state: "", observed_status: "ready", ready: true, stale: false, revision: 3 }], total: 1 }
   if (p === "/v1/admin/infrastructure/capacity")
     return {
-      observed_at: "2026-11-18T09:00:00Z", today: "2026-11-18", month_start: "2026-11-01", total: 4,
+      observed_at: "2026-11-18T09:00:00Z", today: "2026-11-18", month_start: "2026-11-01", total: 4, summary: { edges: 2, relays: 1, servers: 1, attention: 2 },
       thresholds: { monthly_traffic_bytes: 20e12, traffic_warn_fraction: 0.8, edge_cpu_warn_percent: 50, relay_rss_warn_bytes: 1 << 30, cpu_sustained_seconds: 300 },
       items: [
         { id: "edge-hel-1", kind: "edge", state: "ready", region: "hel", site: "Helsinki", version: "dev-abc1234", cpu_percent: 80, cpu_sustained_percent: 65, rss_bytes: 300e6, connections: 120, connection_limit: 5000, bytes_today: 3e12, bytes_month: 17e12, allowance_used: 0.85, last_heartbeat_at: "2026-11-18T08:59:55Z", metrics_at: "2026-11-18T08:59:55Z",
@@ -614,7 +630,36 @@ try {
     await p.waitForFunction(() => document.querySelector('[data-table="installed nodes"] [data-list-range]')?.textContent?.startsWith("51"))
     world.installs = saved
   })
+  await step("abuse reports filter on the server, open in full, and take a hostname down", async () => {
+    await p.goto(`${ORIGIN}/abuse`)
+    await waitReady("abuse reports")
+    expect((await p.locator('[data-table="abuse reports"] tbody tr').count()) === 2, "two reports listed")
+    await p.click("[data-filter-button]")
+    await p.getByRole("menuitem", { name: "Reason" }).click()
+    await p.getByRole("menuitemradio", { name: "Spam", exact: true }).click()
+    await p.waitForFunction(() => document.querySelectorAll('[data-table="abuse reports"] tbody tr').length === 1)
+    await p.getByRole("button", { name: "Remove Reason filter" }).click()
+    await p.waitForFunction(() => document.querySelectorAll('[data-table="abuse reports"] tbody tr').length === 2)
+    await rowAction('[data-abuse-actions="abuse_00000000-0000-4000-8000-000000000002"]', "View")
+    await p.waitForFunction(() => document.querySelector('[role="dialog"]')?.textContent?.includes("Asks for bank passwords"))
+    await p.keyboard.press("Escape")
+    await rowAction('[data-abuse-actions="abuse_00000000-0000-4000-8000-000000000002"]', "Block hostname")
+    const d = dialog("Block bad.example.test")
+    await d.getByLabel(/Type/).fill("bad.example.test")
+    await submit(d, "Block hostname", "abuse_00000000-0000-4000-8000-000000000002")
+    await p.waitForFunction(() => !document.querySelector('[data-action-dialog="Block bad.example.test"]'))
+    expect(lastWrite().path === "/v1/admin/publications/bad.example.test/block" && lastWrite().body.revision === 1 && lastWrite().target === "bad.example.test" && lastWrite().reason === "abuse_00000000-0000-4000-8000-000000000002", `takedown write ${JSON.stringify(lastWrite())}`)
+  })
+  await step("backups show the evidence state, the latest restore test and every run", async () => {
+    await p.goto(`${ORIGIN}/backups`)
+    await p.waitForSelector("[data-backup-status]")
+    expect((await p.locator('[data-backup-state="current"]').count()) === 1 && (await p.locator('[data-backup-state="stale"]').count()) === 1, "backup and restore states")
+    expect((await text("[data-backup-status]")).includes("run-r1"), "the latest restore test is shown")
+    await waitReady("backup runs")
+    expect((await p.locator('[data-table="backup runs"] tbody tr').count()) === 2, "two runs listed")
+  })
   await step("keys and hostname blocks are lists: rows revoke or unblock with their own id and revision", async () => {
+    await p.goto(`${ORIGIN}/infrastructure`)
     await p.getByRole("tab", { name: "Keys" }).click()
     await waitReady("usage keys")
     await p.waitForSelector('[data-table="signing keys"] [data-signing-key-actions="mk_old"]')

@@ -9,6 +9,8 @@ import {
   LaptopIcon,
   LifebuoyIcon,
   BugIcon,
+  DatabaseIcon,
+  WarningIcon,
   UserIcon,
   UserGearIcon,
   UsersThreeIcon,
@@ -29,7 +31,9 @@ export const sections: Section[] = [
   { href: "/machines", title: "Machines", icon: LaptopIcon, roles: all },
   { href: "/support", title: "Lookup", icon: LifebuoyIcon, roles: ["admin", "support", "billing"] },
   { href: "/sentry", title: "Errors", icon: BugIcon, roles: ["admin", "support", "billing"] },
+  { href: "/abuse", title: "Abuse reports", icon: WarningIcon, roles: ["admin", "operations"] },
   { href: "/capacity", title: "Capacity", icon: GaugeIcon, roles: ["admin", "operations"] },
+  { href: "/backups", title: "Backups", icon: DatabaseIcon, roles: ["admin", "operations"] },
   { href: "/infrastructure", title: "Servers", icon: HardDrivesIcon, roles: ["admin", "operations"] },
   { href: "/billing", title: "Billing", icon: CreditCardIcon, roles: ["admin", "support", "billing"] },
   { href: "/releases", title: "Releases", icon: RocketLaunchIcon, roles: ["admin"] },
@@ -42,8 +46,8 @@ export const sectionsFor = (role: Operator["role"]) => sections.filter((s) => s.
 const groups: { label?: string; hrefs: Section["href"][] }[] = [
   { hrefs: ["/overview", "/analytics"] },
   { label: "Customers", hrefs: ["/users", "/teams", "/machines", "/billing"] },
-  { label: "Support", hrefs: ["/support", "/sentry"] },
-  { label: "Infrastructure", hrefs: ["/infrastructure", "/capacity", "/releases"] },
+  { label: "Support", hrefs: ["/support", "/sentry", "/abuse"] },
+  { label: "Infrastructure", hrefs: ["/infrastructure", "/capacity", "/backups", "/releases"] },
   { label: "Admin", hrefs: ["/operators", "/audit"] },
 ]
 

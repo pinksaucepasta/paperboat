@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"html"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 	"unicode"
@@ -28,6 +29,8 @@ const Retention = 180 * 24 * time.Hour
 
 // Reasons are the report categories, in the order a form lists them.
 var Reasons = []string{"phishing", "malware", "spam", "illegal", "other"}
+
+func validReason(r string) bool { return slices.Contains(Reasons, r) }
 
 type Input struct {
 	URL           string `json:"url"`
@@ -131,11 +134,23 @@ type Page struct {
 	Reports      []Report   `json:"reports"`
 	NextBefore   *time.Time `json:"next_before,omitempty"`
 	NextBeforeID string     `json:"next_before_id,omitempty"`
+	// NextCursor is (NextBefore, NextBeforeID) in one opaque value, for pagers that carry a single cursor.
+	NextCursor string `json:"next_cursor,omitempty"`
 }
 
-// List returns reports newest first, optionally for one hostname, older than (before, beforeID) (zero: now).
-func (s *Service) List(ctx context.Context, hostname string, before time.Time, beforeID string, limit int) (Page, error) {
-	if limit < 1 || limit > 100 || len(beforeID) > 64 {
+// ParseCursor reads a NextCursor back into its time and id.
+func ParseCursor(cursor string) (time.Time, string, error) {
+	at, id, ok := strings.Cut(cursor, ",")
+	parsed, err := time.Parse(time.RFC3339Nano, at)
+	if !ok || err != nil || id == "" || len(id) > 64 {
+		return time.Time{}, "", ErrInvalid
+	}
+	return parsed, id, nil
+}
+
+// List returns reports newest first, optionally for one hostname and one reason, older than (before, beforeID) (zero: now).
+func (s *Service) List(ctx context.Context, hostname, reason string, before time.Time, beforeID string, limit int) (Page, error) {
+	if limit < 1 || limit > 100 || len(beforeID) > 64 || (reason != "" && !validReason(reason)) {
 		return Page{}, ErrInvalid
 	}
 	if before.IsZero() {
@@ -143,11 +158,11 @@ func (s *Service) List(ctx context.Context, hostname string, before time.Time, b
 	}
 	host := strings.ToLower(strings.TrimSpace(hostname))
 	out := Page{Reports: []Report{}}
-	if err := s.store.Pool().QueryRow(ctx, `SELECT count(*) FROM abuse_reports WHERE ($1='' OR hostname=$1)`, host).Scan(&out.Total); err != nil {
+	if err := s.store.Pool().QueryRow(ctx, `SELECT count(*) FROM abuse_reports WHERE ($1='' OR hostname=$1) AND ($2='' OR reason=$2)`, host, reason).Scan(&out.Total); err != nil {
 		return Page{}, err
 	}
 	rows, err := s.store.Pool().Query(ctx, `SELECT id,hostname,url,reason,details,reporter_email,created_at FROM abuse_reports
-WHERE ($1='' OR hostname=$1) AND (created_at<$2 OR ($3<>'' AND created_at=$2 AND id<$3)) ORDER BY created_at DESC, id DESC LIMIT $4`, host, before, beforeID, limit+1)
+WHERE ($1='' OR hostname=$1) AND ($5='' OR reason=$5) AND (created_at<$2 OR ($3<>'' AND created_at=$2 AND id<$3)) ORDER BY created_at DESC, id DESC LIMIT $4`, host, before, beforeID, limit+1, reason)
 	if err != nil {
 		return Page{}, err
 	}
@@ -160,6 +175,7 @@ WHERE ($1='' OR hostname=$1) AND (created_at<$2 OR ($3<>'' AND created_at=$2 AND
 		if len(out.Reports) == limit {
 			last := out.Reports[limit-1]
 			out.NextBefore, out.NextBeforeID = &last.CreatedAt, last.ID
+			out.NextCursor = last.CreatedAt.UTC().Format(time.RFC3339Nano) + "," + last.ID
 			break
 		}
 		r.CreatedAt = r.CreatedAt.UTC()

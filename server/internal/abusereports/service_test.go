@@ -76,7 +76,7 @@ func TestSubmitListAndRetentionOnPostgres(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	page, err := s.List(ctx, strings.ToUpper(host), time.Time{}, "", 10)
+	page, err := s.List(ctx, strings.ToUpper(host), "", time.Time{}, "", 10)
 	reports := page.Reports
 	if err != nil || page.Total != 2 || len(reports) != 2 || reports[0].ID != second.ID || reports[1].ID != first.ID || reports[0].Details != "drops an exe" {
 		t.Fatalf("reports=%+v err=%v (the expired one must be gone)", reports, err)
@@ -89,18 +89,30 @@ func TestSubmitListAndRetentionOnPostgres(t *testing.T) {
 	if err := store.SQL().QueryRowContext(ctx, `SELECT count(*) FROM paperboat.transactional_mail_outbox WHERE mail_id = ANY($1) AND payload->'to'->>0='abuse@mail.example.test'`, []string{"abuse-report:" + first.ID, "abuse-report:" + second.ID}).Scan(&alerts); err != nil || alerts != 2 {
 		t.Fatalf("alerts=%d err=%v", alerts, err)
 	}
-	older, err := s.List(ctx, host, reports[0].CreatedAt, "", 10)
+	older, err := s.List(ctx, host, "", reports[0].CreatedAt, "", 10)
 	if err != nil || len(older.Reports) != 1 || older.Reports[0].ID != first.ID {
 		t.Fatalf("page before the newest=%+v err=%v", older, err)
 	}
 	// One report a page: the cursor carries the id, so the next page resumes exactly after the last row.
-	one, err := s.List(ctx, host, time.Time{}, "", 1)
+	one, err := s.List(ctx, host, "", time.Time{}, "", 1)
 	if err != nil || len(one.Reports) != 1 || one.Reports[0].ID != second.ID || one.NextBefore == nil || one.NextBeforeID != second.ID {
 		t.Fatalf("first single page=%+v err=%v", one, err)
 	}
-	rest, err := s.List(ctx, host, *one.NextBefore, one.NextBeforeID, 1)
+	at, id, err := ParseCursor(one.NextCursor)
+	if err != nil || !at.Equal(*one.NextBefore) || id != one.NextBeforeID {
+		t.Fatalf("cursor %q = %v %q %v", one.NextCursor, at, id, err)
+	}
+	rest, err := s.List(ctx, host, "", *one.NextBefore, one.NextBeforeID, 1)
 	if err != nil || len(rest.Reports) != 1 || rest.Reports[0].ID != first.ID || rest.NextBefore != nil {
 		t.Fatalf("second single page=%+v err=%v", rest, err)
+	}
+	// The reason filter is applied in the query, total included.
+	malware, err := s.List(ctx, host, "malware", time.Time{}, "", 10)
+	if err != nil || malware.Total != 1 || len(malware.Reports) != 1 || malware.Reports[0].ID != second.ID {
+		t.Fatalf("malware only=%+v err=%v", malware, err)
+	}
+	if _, err := s.List(ctx, host, "nonsense", time.Time{}, "", 10); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("unknown reason err=%v", err)
 	}
 }
 

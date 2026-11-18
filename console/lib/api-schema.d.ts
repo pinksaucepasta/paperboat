@@ -11922,6 +11922,7 @@ export interface components {
             /** Format: date-time */
             next_before?: string;
             next_before_id?: string;
+            next_cursor?: string;
         };
         AbuseReport: {
             id: string;
@@ -13906,7 +13907,16 @@ export interface components {
             metrics_at?: string;
             warnings: components["schemas"]["OperatorNodeWarning"][];
         };
+        /** @description Counts over the whole fleet, not the page. */
+        OperatorCapacitySummary: {
+            edges: number;
+            relays: number;
+            servers: number;
+            /** @description Nodes with a warning or critical warning. */
+            attention: number;
+        };
         OperatorCapacityPage: {
+            summary: components["schemas"]["OperatorCapacitySummary"];
             /** Format: date-time */
             observed_at: string;
             today: string;
@@ -26793,6 +26803,9 @@ export interface operations {
                 limit?: number;
                 hostname?: string;
                 before?: string;
+                reason?: "phishing" | "malware" | "spam" | "illegal" | "other";
+                /** @description next_cursor of the previous page (replaces before and before_id). */
+                cursor?: string;
                 before_id?: string;
             };
             header?: never;

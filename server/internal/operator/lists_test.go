@@ -1,9 +1,9 @@
 package operator
 
 import (
-	"fmt"
 	"context"
 	"errors"
+	"fmt"
 	"net/url"
 	"os"
 	"strings"
