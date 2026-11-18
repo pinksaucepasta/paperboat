@@ -15,6 +15,7 @@ import {
   formatPrice,
   notLiveTitle,
   openPortal,
+  planEnded,
   seatPreviewQuery,
   setSeats,
   type BillingWorkspace,
@@ -63,6 +64,14 @@ export function Seats({ workspace, billing }: { workspace: Workspace; billing: B
   const preview = useApiQuery({ ...seatPreviewQuery(workspace, quantity), enabled: billingLive.seats && changed })
   const save = useMutation({ mutationFn: () => setSeats(workspace, quantity), onSuccess: refresh })
   const live = billingLive.seats && billing.can_manage
+  // Granted seats are fixed by the grant; changing them needs a subscription.
+  if (billing.granted)
+    return (
+      <Section title="Seats">
+        <Row label="Seats">{`${bought} granted · ${used} used`}</Row>
+        <p className="py-2 text-sm text-muted-foreground">Subscribe to change seats.</p>
+      </Section>
+    )
   return (
     <Section title="Seats">
       <div className="flex min-h-12 flex-wrap items-center justify-between gap-x-6 gap-y-2 border-b border-divider py-2 text-sm">
@@ -124,6 +133,7 @@ export function Seats({ workspace, billing }: { workspace: Workspace; billing: B
  * confirms the change; the webhook updates the plan here when the user returns.
  */
 export function PlanActions({ workspace, billing }: { workspace: Workspace; billing: BillingWorkspace }) {
+  const time = useTimeFormat()
   const products = useApiQuery(billingProductsQuery(workspace))
   const portal = useMutation({
     mutationFn: () => openPortal(workspace, idempotencyKey()),
@@ -131,7 +141,7 @@ export function PlanActions({ workspace, billing }: { workspace: Workspace; bill
   })
   const current = billing.product
   const other = current && products.data?.find((p) => p.interval !== current.interval && p.price_verified)
-  if (!current || !billing.can_manage) return null
+  if (!current || !billing.can_manage || billing.granted || planEnded(billing, time.now)) return null
   return (
     <>
       {other && (
@@ -177,7 +187,7 @@ export function TopUps({ workspace, billing }: { workspace: Workspace; billing: 
     },
   })
   // Top-ups extend a paid plan's allowance; Free upgrades first (server: 409 paid_plan_required).
-  if (!billing.product_code) return null
+  if (!billing.product_code || billing.granted || planEnded(billing, time.now)) return null
   const live = billingLive.topups && Boolean(product) && billing.can_manage
   // The server gives each top-up its own expiry; before the first one, the month's end.
   const expiry = billing.topups?.at(-1)?.expires_at ?? allowanceWindow(billing).end

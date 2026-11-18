@@ -60,6 +60,9 @@ type Workspace struct {
 	PeriodStart          *time.Time        `json:"period_start,omitempty"`
 	PeriodEnd            *time.Time        `json:"period_end,omitempty"`
 	CancelAtPeriodEnd    bool              `json:"cancel_at_period_end"`
+	// Granted is a running support grant: an active plan with no Stripe subscription behind it, ending at GrantedUntil.
+	Granted      bool       `json:"granted"`
+	GrantedUntil *time.Time `json:"granted_until,omitempty"`
 	// Limits are the plan's count limits with current use (machines, publications = previews and
 	// tunnels, browser_terminals); a Teams limit is null (advertised unlimited).
 	Limits map[planlimits.Kind]planlimits.Usage `json:"limits"`
@@ -114,7 +117,8 @@ func WorkspaceTx(ctx context.Context, tx *db.Tx, account, team string, manage bo
 	var customer, subscription, item, product sql.NullString
 	var start, end, grace, paidUntil, scheduledAt sql.NullTime
 	var scheduled sql.NullInt32
-	err := tx.QueryRow(ctx, `SELECT id,provider_customer_id,provider_subscription_id,provider_item_id,product_code,state,quantity,period_start,period_end,cancel_at_period_end,revision,renewal_grace_until,billing_workspace_paid_until(billing_workspaces),scheduled_quantity,scheduled_quantity_at FROM billing_workspaces WHERE (team_id=$1 AND $1<>'' AND user_id IS NULL) OR (user_id=$2 AND $1='' AND team_id IS NULL)`+lockClause(manage), out.TeamID, out.UserID).Scan(&out.ID, &customer, &subscription, &item, &product, &out.State, &out.Quantity, &start, &end, &out.CancelAtPeriodEnd, &out.Revision, &grace, &paidUntil, &scheduled, &scheduledAt)
+	var grantedUntil sql.NullTime
+	err := tx.QueryRow(ctx, `SELECT id,provider_customer_id,provider_subscription_id,provider_item_id,product_code,state,quantity,period_start,period_end,cancel_at_period_end,revision,renewal_grace_until,billing_workspace_paid_until(billing_workspaces),scheduled_quantity,scheduled_quantity_at,CASE WHEN grant_until>now() AND state='active' AND provider_subscription_id IS NULL THEN grant_until END FROM billing_workspaces WHERE (team_id=$1 AND $1<>'' AND user_id IS NULL) OR (user_id=$2 AND $1='' AND team_id IS NULL)`+lockClause(manage), out.TeamID, out.UserID).Scan(&out.ID, &customer, &subscription, &item, &product, &out.State, &out.Quantity, &start, &end, &out.CancelAtPeriodEnd, &out.Revision, &grace, &paidUntil, &scheduled, &scheduledAt, &grantedUntil)
 	out.CustomerID, out.SubscriptionID, out.ItemID, out.ProductCode = customer.String, subscription.String, item.String, product.String
 	if start.Valid {
 		out.PeriodStart = &start.Time
@@ -127,6 +131,9 @@ func WorkspaceTx(ctx context.Context, tx *db.Tx, account, team string, manage bo
 	}
 	if paidUntil.Valid {
 		out.PaidBenefitsUntil = &paidUntil.Time
+	}
+	if grantedUntil.Valid {
+		out.Granted, out.GrantedUntil = true, &grantedUntil.Time
 	}
 	if err != nil {
 		return out, err

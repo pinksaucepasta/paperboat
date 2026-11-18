@@ -46,11 +46,13 @@ export function QuotaMessage({ fallbackName }: { fallbackName?: string }) {
       </span>
       {canBuy && (
         <span className="ml-3 inline-flex items-center gap-3">
+          {!data.granted && (
+            <Link href="/billing" className="font-medium underline-offset-4 hover:underline">
+              Add bandwidth
+            </Link>
+          )}
           <Link href="/billing" className="font-medium underline-offset-4 hover:underline">
-            Add bandwidth
-          </Link>
-          <Link href="/billing" className="font-medium underline-offset-4 hover:underline">
-            Change plan
+            {data.granted ? "Subscribe" : "Change plan"}
           </Link>
         </span>
       )}

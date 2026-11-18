@@ -67,6 +67,21 @@ export const billingQuery = (workspace: Workspace | undefined) =>
  * The bandwidth window: the server's when it sends one; else the plan period for monthly plans and
  * Free. A yearly period is not the bandwidth window, so then only its start is known (as "since").
  */
+/**
+ * A plan whose period has ended while it still reads as active: a grant that ran out, or a cancelled plan whose
+ * webhook has not landed yet. It no longer gives paid features, so the console shows it as ended, not as the plan.
+ */
+export function planEnded(billing: BillingWorkspace, now: number | undefined): boolean {
+  return Boolean(
+    billing.product_code &&
+      billing.state === "active" &&
+      billing.cancel_at_period_end &&
+      billing.period_end &&
+      now &&
+      Date.parse(billing.period_end) < now,
+  )
+}
+
 export function allowanceWindow(billing: BillingWorkspace): { start?: string; end?: string } {
   if (billing.allowance_period_end) return { start: billing.allowance_period_start, end: billing.allowance_period_end }
   if (billing.product?.interval === "year") return {}

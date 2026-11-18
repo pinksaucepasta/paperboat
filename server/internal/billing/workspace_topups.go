@@ -33,7 +33,8 @@ type topupRequest struct {
 }
 
 func paidTopupWorkspace(w Workspace, at time.Time) bool {
-	return w.ProductCode != "" && w.CustomerID != "" && w.PeriodStart != nil && !at.Before(*w.PeriodStart) && w.PaidBenefitsUntil != nil && at.Before(*w.PaidBenefitsUntil)
+	// A support grant has no payer: top-ups need a paid plan, so the customer subscribes first.
+	return !w.Granted && w.ProductCode != "" && w.CustomerID != "" && w.PeriodStart != nil && !at.Before(*w.PeriodStart) && w.PaidBenefitsUntil != nil && at.Before(*w.PaidBenefitsUntil)
 }
 
 // topupWorkspaceBought reports that the workspace held a paid plan: Checkout was opened only while

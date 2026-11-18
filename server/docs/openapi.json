@@ -9867,7 +9867,8 @@
           "topup_bytes_remaining",
           "topup_bytes_purchased",
           "topups",
-          "limits"
+          "limits",
+          "granted"
         ],
         "properties": {
           "limits": {
@@ -10114,6 +10115,15 @@
                 }
               }
             }
+          },
+          "granted": {
+            "type": "boolean",
+            "description": "A running support grant: an active plan with no Stripe subscription behind it. Seats are fixed and billing is not managed in Stripe while it runs."
+          },
+          "granted_until": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the running grant ends."
           }
         }
       },

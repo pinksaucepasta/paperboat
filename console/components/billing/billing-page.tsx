@@ -7,6 +7,7 @@ import { ApiError, idempotencyKey, useApiQuery, useWorkspace, type Workspace } f
 import {
   billingProductsQuery,
   allowanceWindow,
+  planEnded,
   billingQuery,
   formatPrice,
   openPortal,
@@ -31,6 +32,7 @@ const intervals: Record<BillingInterval, string> = { month: "Monthly", year: "Ye
 const confirmFor = 60_000
 
 export function BillingPage() {
+  const time = useTimeFormat()
   const workspace = useWorkspace()
   const billing = useApiQuery(billingQuery(workspace))
   const confirming = useConfirmingCheckout(workspace, billing.data)
@@ -42,11 +44,11 @@ export function BillingPage() {
         <ErrorMessage error={billing.error} />
       </p>
     )
-  const subscribed = Boolean(billing.data.product_code)
+  const subscribed = Boolean(billing.data.product_code) && !planEnded(billing.data, time.now)
   return (
     <div className="flex flex-col gap-10">
       <Plan workspace={workspace} billing={billing.data} confirming={confirming} />
-      {!subscribed && !confirming && <Plans workspace={workspace} billing={billing.data} />}
+      {(!subscribed || billing.data.granted) && !confirming && <Plans workspace={workspace} billing={billing.data} />}
       {subscribed && workspace.kind === "team" && <Seats workspace={workspace} billing={billing.data} />}
       <TopUps workspace={workspace} billing={billing.data} />
     </div>
@@ -72,7 +74,8 @@ function useConfirmingCheckout(workspace: Workspace | undefined, billing: Billin
     url.searchParams.delete("checkout")
     window.history.replaceState(null, "", url)
   }, [])
-  const active = since !== null && !billing?.product_code
+  // A granted workspace has its plan already: the payment is confirmed once the grant has gone.
+  const active = since !== null && (!billing?.product_code || Boolean(billing.granted))
   const track = useTrack()
   const product = billing?.product_code
   const waited = useRef(false)
@@ -117,7 +120,10 @@ function Plan({
   // Yearly plans renew once a year but their bandwidth resets monthly.
   const resets = allowanceWindow(billing).end
   const end = billing.period_end && time.date(billing.period_end, "date")
-  const manage = billing.product_code && billing.can_manage && (
+  // A support grant has no Stripe subscription, so there is nothing to manage in Stripe until the customer subscribes.
+  const grantEnd = billing.granted && billing.granted_until && time.date(billing.granted_until, "date")
+  const ended = planEnded(billing, time.now)
+  const manage = billing.product_code && billing.can_manage && !billing.granted && !ended && (
     <Button variant="outline" size="lg" disabled={portal.isPending} onClick={() => portal.mutate()}>
       {portal.isPending && <CircleNotchIcon className="animate-spin" />}
       Manage billing
@@ -130,6 +136,10 @@ function Plan({
           <span className="flex items-center gap-1.5 text-muted-foreground">
             <CircleNotchIcon className="size-3.5 animate-spin" /> Confirming payment…
           </span>
+        ) : ended ? (
+          "Free"
+        ) : billing.product && billing.granted ? (
+          `${planName(billing.product)} · Granted`
         ) : billing.product ? (
           `${planName(billing.product)} · ${formatPrice(billing.product)}/${billing.product.interval}`
         ) : (
@@ -167,7 +177,9 @@ function Plan({
       ) : (
         stateLabel(billing.state) && <Row label="Status">{stateLabel(billing.state)}</Row>
       )}
-      {end && !trialing && (
+      {ended && end && <Row label="Plan ended">{end}</Row>}
+      {grantEnd && <Row label="Granted until">{grantEnd}</Row>}
+      {end && !trialing && !billing.granted && !ended && (
         <Row label={billing.cancel_at_period_end ? "Ends" : billing.product_code ? "Renews" : "Bandwidth resets"}>
           {end}
         </Row>
@@ -190,7 +202,7 @@ function Plan({
           </Row>
         </>
       )}
-      <PlanActions workspace={workspace} billing={billing} />
+      {!ended && <PlanActions workspace={workspace} billing={billing} />}
       {portal.isError && (
         <p className="py-2 text-sm text-destructive">
           <ErrorMessage error={portal.error} />
@@ -202,6 +214,7 @@ function Plan({
 
 /** The plans this workspace can buy, monthly or yearly, each straight to Checkout. */
 function Plans({ workspace, billing }: { workspace: Workspace; billing: BillingWorkspace }) {
+  const subscribe = billing.granted
   const products = useApiQuery(billingProductsQuery(workspace))
   const [interval, setPeriod] = useState<BillingInterval>("month")
   if (products.isPending) return <Skeleton className="h-24 w-full" />
@@ -215,7 +228,7 @@ function Plans({ workspace, billing }: { workspace: Workspace; billing: BillingW
   if (!products.data.length) return null
   return (
     <Section
-      title="Upgrade"
+      title={subscribe ? "Subscribe" : "Upgrade"}
       action={
         <ToggleGroup
           value={[interval]}
@@ -232,7 +245,7 @@ function Plans({ workspace, billing }: { workspace: Workspace; billing: BillingW
       }
     >
       {shown.map((product) => (
-        <PlanOffer key={product.code} workspace={workspace} product={product} canManage={billing.can_manage} />
+        <PlanOffer key={product.code} workspace={workspace} product={product} canManage={billing.can_manage} verb={subscribe ? "Subscribe" : "Upgrade"} />
       ))}
     </Section>
   )
@@ -242,10 +255,12 @@ function PlanOffer({
   workspace,
   product,
   canManage,
+  verb,
 }: {
   workspace: Workspace
   product: BillingProduct
   canManage: boolean
+  verb: string
 }) {
   const queryClient = useQueryClient()
   // One key per purchase attempt. A 503 "outcome unknown" keeps it so a retry cannot buy twice;
@@ -282,7 +297,7 @@ function PlanOffer({
           {checkout.isPending && <CircleNotchIcon className="animate-spin" />}
           {checkout.isError && (checkout.error as ApiError).code === "provider_outcome_unknown"
             ? "Try again"
-            : "Upgrade"}
+            : verb}
         </Button>
       </div>
       {checkout.isError && (

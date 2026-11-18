@@ -11445,6 +11445,13 @@ export interface components {
                  */
                 expires_at: string;
             }[];
+            /** @description A running support grant: an active plan with no Stripe subscription behind it. Seats are fixed and billing is not managed in Stripe while it runs. */
+            granted: boolean;
+            /**
+             * Format: date-time
+             * @description When the running grant ends.
+             */
+            granted_until?: string;
         };
         WorkspaceBillingProduct: {
             code: string;

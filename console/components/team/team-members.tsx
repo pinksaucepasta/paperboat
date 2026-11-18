@@ -432,7 +432,7 @@ function MemberRow({
         open={confirm === "remove"}
         onOpenChange={(open) => !open && setConfirm(null)}
         title={`Remove ${who}?`}
-        description={`${who} loses access to the team's machines, ENV and config now. The seat stays paid until the billing date and can be reused.`}
+        description={`${who} loses access to the team's machines, ENV and config now. The seat stays in the plan until its end date and can be reused.`}
         action="Remove"
         pending="Removing…"
         mutation={{
