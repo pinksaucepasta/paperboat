@@ -4,7 +4,6 @@ package execprocess
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -20,7 +19,7 @@ func TestRemoteReaderLostAcknowledgementBoundsAndEpochCleanupPreserveExec(t *tes
 	server := &RemoteServer{Manager: owner, MaximumReaders: 1}
 	defer server.ResetReaders()
 	lost := false
-	remote, _ := NewRemoteManager(func(ctx context.Context, op string, body json.RawMessage) (json.RawMessage, error) {
+	remote, _ := NewRemoteManager(func(ctx context.Context, op string, body []byte) ([]byte, error) {
 		result, err := server.Call(ctx, op, body)
 		if op == "reader_ack" && !lost && err == nil {
 			lost = true

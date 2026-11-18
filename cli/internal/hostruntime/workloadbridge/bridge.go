@@ -239,6 +239,7 @@ func (s *Server) handler() http.Handler {
 			return
 		}
 		var result json.RawMessage
+		var execResult []byte
 		if len(parts) != 2 {
 			writeResponse(ctx, w, nil, session.ErrInvalidSession)
 			return
@@ -284,7 +285,7 @@ func (s *Server) handler() http.Handler {
 			if s.Executions == nil {
 				err = session.ErrOwnerUnavailable
 			} else {
-				result, err = s.Executions.Call(ctx, parts[1], body)
+				execResult, err = s.Executions.Call(ctx, parts[1], body)
 			}
 		case "owner":
 			if parts[1] == "archive-metadata" && s.SessionOnly && s.ArchiveMetadata != nil {
@@ -325,6 +326,10 @@ func (s *Server) handler() http.Handler {
 			}
 		default:
 			err = session.ErrInvalidSession
+		}
+		if parts[0] == "exec" && err == nil {
+			writeFrame(w, execResult)
+			return
 		}
 		writeResponse(ctx, w, result, err)
 	})
@@ -405,6 +410,19 @@ func writeResponse(ctx context.Context, w http.ResponseWriter, data json.RawMess
 	}
 }
 
+// writeFrame answers an exec call with its raw framed message: output bytes are never wrapped in a JSON string.
+// Failures keep the JSON error envelope, told apart by the content type.
+func writeFrame(w http.ResponseWriter, frame []byte) {
+	if len(frame) > MaxBodyBytes {
+		w.WriteHeader(500)
+		return
+	}
+	w.Header().Set("Content-Type", frameContentType)
+	_, _ = w.Write(frame)
+}
+
+const frameContentType = "application/x-paperboat-exec-frame"
+
 type Client struct {
 	endpoint  string
 	token     string
@@ -435,6 +453,9 @@ func NewClient(endpoint string, token []byte, worker string, epoch uint64, owner
 	return &Client{endpoint: endpoint, token: base64.RawURLEncoding.EncodeToString(token), worker: worker, epoch: epoch, transport: transport, http: &http.Client{Transport: transport}}, nil
 }
 func (c *Client) Close() { c.transport.CloseIdleConnections() }
+
+// Call sends one request. For kind "exec" body and result are execprocess frames (EncodeMessage), not JSON: do not
+// validate, marshal or log them as JSON.
 func (c *Client) Call(ctx context.Context, kind, op string, body json.RawMessage) (json.RawMessage, error) {
 	for {
 		data, err := c.callOnce(ctx, kind, op, body)
@@ -504,6 +525,9 @@ func (c *Client) callOnce(ctx context.Context, kind, op string, body json.RawMes
 	if len(raw) > MaxBodyBytes {
 		return nil, ownerResponseLimitFailure{}
 	}
+	if response.Header.Get("Content-Type") == frameContentType {
+		return raw, nil
+	}
 	var out wireResponse
 	if err := json.Unmarshal(raw, &out); err != nil {
 		return nil, ownerTransportFailure{cause: err}
@@ -541,7 +565,7 @@ func (c *Client) Sessions() (*session.RemoteManager, error) {
 	})
 }
 func (c *Client) Executions() (*execprocess.RemoteManager, error) {
-	return execprocess.NewRemoteManager(func(ctx context.Context, op string, body json.RawMessage) (json.RawMessage, error) {
+	return execprocess.NewRemoteManager(func(ctx context.Context, op string, body []byte) ([]byte, error) {
 		return c.Call(ctx, "exec", op, body)
 	})
 }

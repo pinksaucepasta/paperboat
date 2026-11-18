@@ -2,7 +2,6 @@ package execprocess
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -15,7 +14,7 @@ func TestRemoteCallsWithoutACallerContextAreBounded(t *testing.T) {
 	previous := remoteCallBound
 	remoteCallBound = 50 * time.Millisecond
 	t.Cleanup(func() { remoteCallBound = previous })
-	manager, err := NewRemoteManager(func(ctx context.Context, _ string, _ json.RawMessage) (json.RawMessage, error) {
+	manager, err := NewRemoteManager(func(ctx context.Context, _ string, _ []byte) ([]byte, error) {
 		<-ctx.Done()
 		return nil, ctx.Err()
 	})

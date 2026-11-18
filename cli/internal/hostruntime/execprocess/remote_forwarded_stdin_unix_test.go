@@ -6,7 +6,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
-	"encoding/json"
 	"testing"
 	"time"
 )
@@ -33,7 +32,7 @@ func TestForwardedExecutionDeliversStdinThroughBothHops(t *testing.T) {
 		t.Fatal(err)
 	}
 	hostd := &RemoteServer{Manager: forwarded, MaximumReaders: 8}
-	client, err := NewRemoteManager(func(ctx context.Context, op string, body json.RawMessage) (json.RawMessage, error) {
+	client, err := NewRemoteManager(func(ctx context.Context, op string, body []byte) ([]byte, error) {
 		return hostd.Call(ctx, op, body) // the worker, as it reaches hostd
 	})
 	if err != nil {

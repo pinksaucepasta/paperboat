@@ -2,7 +2,6 @@ package sessionowner
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"path/filepath"
 	"sort"
@@ -32,9 +31,9 @@ type execRouting struct {
 	}
 }
 
-func (c *Connections) execCall(ctx context.Context, op string, body json.RawMessage) (json.RawMessage, error) {
+func (c *Connections) execCall(ctx context.Context, op string, body []byte) ([]byte, error) {
 	var routing execRouting
-	if err := json.Unmarshal(body, &routing); err != nil {
+	if _, err := execprocess.DecodeMessage(body, &routing); err != nil {
 		return nil, execprocess.ErrInvalid
 	}
 	switch op {
@@ -83,7 +82,7 @@ func (c *Connections) execOwner(ctx context.Context, id string) *workloadbridge.
 			return client
 		}
 	}
-	probe, _ := json.Marshal(map[string]string{"OperationID": id})
+	probe, _ := execprocess.EncodeMessage(map[string]string{"OperationID": id}, nil)
 	for _, generation := range c.liveGenerations(ctx) {
 		client, err := c.execClient(c.probeContext(ctx, generation), generation)
 		if err != nil {
@@ -101,7 +100,7 @@ func (c *Connections) execOwner(ctx context.Context, id string) *workloadbridge.
 	return nil
 }
 
-func (c *Connections) execList(ctx context.Context, body json.RawMessage) (json.RawMessage, error) {
+func (c *Connections) execList(ctx context.Context, body []byte) ([]byte, error) {
 	var all struct{ Snapshots []execprocess.Snapshot }
 	for _, generation := range c.liveGenerations(ctx) {
 		client, err := c.execClient(c.probeContext(ctx, generation), generation)
@@ -110,12 +109,15 @@ func (c *Connections) execList(ctx context.Context, body json.RawMessage) (json.
 		}
 		result, err := client.Call(ctx, "exec", "list", body)
 		var part struct{ Snapshots []execprocess.Snapshot }
-		if err != nil || json.Unmarshal(result, &part) != nil {
+		if err != nil {
+			continue
+		}
+		if _, err := execprocess.DecodeMessage(result, &part); err != nil {
 			continue
 		}
 		all.Snapshots = append(all.Snapshots, part.Snapshots...)
 	}
-	return json.Marshal(all)
+	return execprocess.EncodeMessage(all, nil)
 }
 
 // execClient connects to a running owner without starting archived ones.

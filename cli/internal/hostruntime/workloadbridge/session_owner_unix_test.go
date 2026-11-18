@@ -4,7 +4,6 @@ package workloadbridge
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"github.com/pinksaucepasta/paperboat/cli/internal/diagnostics"
 	"github.com/pinksaucepasta/paperboat/cli/internal/shorttemp"
@@ -13,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/execprocess"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hostdproto"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/pty"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/session"
@@ -68,7 +68,11 @@ func TestIndependentOwnerRetirementOverPrivateWire(t *testing.T) {
 	if _, err := untrusted.OwnerIdentity(ctx); !errors.Is(err, session.ErrOwnerUnavailable) {
 		t.Fatalf("unauthenticated readiness: %v", err)
 	}
-	if _, err := client.Call(ctx, "exec", "list", json.RawMessage(`{}`)); !errors.Is(err, session.ErrOwnerUnavailable) {
+	listFrame, err := execprocess.EncodeMessage(struct{}{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.Call(ctx, "exec", "list", listFrame); !errors.Is(err, session.ErrOwnerUnavailable) {
 		t.Fatalf("exec admitted: %v", err)
 	}
 	remote, _ := client.Sessions()

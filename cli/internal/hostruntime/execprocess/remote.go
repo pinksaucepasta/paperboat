@@ -1,9 +1,7 @@
 package execprocess
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/pty"
 	"io"
@@ -11,7 +9,8 @@ import (
 	"time"
 )
 
-type RemoteCall func(context.Context, string, json.RawMessage) (json.RawMessage, error)
+// RemoteCall carries one framed message (EncodeMessage) to the owner of an execution and returns its framed answer.
+type RemoteCall func(context.Context, string, []byte) ([]byte, error)
 type RemoteManager struct {
 	call RemoteCall
 	mu   sync.Mutex
@@ -23,7 +22,7 @@ type remoteRequest struct {
 	OperationID        string
 	Request            *Request
 	From               uint64
-	Data               []byte
+	Data               []byte `json:"-"` // the frame payload
 	Offset             uint64 // stdin byte offset of Data (write_at) or of the end of stdin (close_input_at)
 	Signal             pty.Signal
 	Dimensions         pty.Dimensions
@@ -39,6 +38,13 @@ type remoteResponse struct {
 	Snapshots []Snapshot
 }
 
+// frame encodes the answer; an event's data travels as the payload, not inside the JSON header.
+func (r remoteResponse) frame() ([]byte, error) {
+	payload := r.Event.Data
+	r.Event.Data = nil
+	return EncodeMessage(r, payload)
+}
+
 func NewRemoteManager(call RemoteCall) (*RemoteManager, error) {
 	if call == nil {
 		return nil, ErrInvalid
@@ -48,12 +54,15 @@ func NewRemoteManager(call RemoteCall) (*RemoteManager, error) {
 func (m *RemoteManager) LastError() error { m.mu.Lock(); defer m.mu.Unlock(); return m.last }
 func (m *RemoteManager) invoke(ctx context.Context, op string, request remoteRequest) (remoteResponse, error) {
 	var out remoteResponse
-	body, err := json.Marshal(request)
+	body, err := EncodeMessage(request, request.Data)
 	if err == nil {
 		body, err = m.call(ctx, op, body)
 	}
 	if err == nil {
-		err = json.Unmarshal(body, &out)
+		var payload []byte
+		if payload, err = decodeMessage(body, &out, false); err == nil && len(payload) > 0 {
+			out.Event.Data = payload
+		}
 	}
 	m.mu.Lock()
 	m.last = err
@@ -266,16 +275,13 @@ func (s *RemoteServer) ResetReaders() error {
 	}
 	return result
 }
-func (s *RemoteServer) Call(ctx context.Context, op string, body json.RawMessage) (json.RawMessage, error) {
+func (s *RemoteServer) Call(ctx context.Context, op string, body []byte) ([]byte, error) {
 	var request remoteRequest
-	decoder := json.NewDecoder(bytes.NewReader(body))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&request); err != nil {
-		return nil, ErrInvalid
+	payload, err := decodeMessage(body, &request, true)
+	if err != nil {
+		return nil, err
 	}
-	if decoder.Decode(new(any)) != io.EOF {
-		return nil, ErrInvalid
-	}
+	request.Data = payload
 	var out remoteResponse
 	if op == "begin_update" || op == "end_update" {
 		admission, ok := s.Manager.(UpdateAdmission)
@@ -289,7 +295,7 @@ func (s *RemoteServer) Call(ctx context.Context, op string, body json.RawMessage
 		} else if err := admission.EndUpdate(request.TransactionID); err != nil {
 			return nil, err
 		}
-		return json.Marshal(out)
+		return out.frame()
 	}
 	if op == "start" {
 		if request.Request == nil {
@@ -300,11 +306,11 @@ func (s *RemoteServer) Call(ctx context.Context, op string, body json.RawMessage
 			return nil, err
 		}
 		out.Snapshot, out.Replay = e.Snapshot(), replay
-		return json.Marshal(out)
+		return out.frame()
 	}
 	if op == "list" {
 		out.Snapshots = s.Manager.ActiveSnapshots()
-		return json.Marshal(out)
+		return out.frame()
 	}
 	if op == "reader_open" {
 		s.mu.Lock()
@@ -331,7 +337,7 @@ func (s *RemoteServer) Call(ctx context.Context, op string, body json.RawMessage
 		readerContext, cancel := context.WithCancel(context.Background())
 		s.readers[s.next] = &remoteReaderOwner{operationID: request.OperationID, reader: reader, cancel: cancel, readerContext: readerContext}
 		out.ReaderID = s.next
-		return json.Marshal(out)
+		return out.frame()
 	}
 	if op == "reader_next" || op == "reader_ack" || op == "reader_close" {
 		s.mu.Lock()
@@ -342,7 +348,7 @@ func (s *RemoteServer) Call(ctx context.Context, op string, body json.RawMessage
 		s.mu.Unlock()
 		if r == nil {
 			if op == "reader_close" {
-				return json.Marshal(out)
+				return out.frame()
 			}
 			return nil, ErrNotFound
 		}
@@ -390,7 +396,7 @@ func (s *RemoteServer) Call(ctx context.Context, op string, body json.RawMessage
 			}
 			out.Event = *r.event
 		}
-		return json.Marshal(out)
+		return out.frame()
 	}
 	e, err := s.Manager.Get(request.OperationID)
 	if err != nil {
@@ -431,5 +437,5 @@ func (s *RemoteServer) Call(ctx context.Context, op string, body json.RawMessage
 	if err != nil {
 		return nil, err
 	}
-	return json.Marshal(out)
+	return out.frame()
 }
