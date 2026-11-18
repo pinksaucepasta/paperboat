@@ -413,8 +413,9 @@ func readTeam(ctx context.Context, tx *db.Tx, id, after string, limit int) (_ Te
 	return v, rows.Err()
 }
 
-// grantedSQL is a support grant that is still running (reconcileSubscription protects it while it does).
-const grantedSQL = `(grant_until>now() AND state='active' AND provider_subscription_id IS NULL)`
+// grantedSQL is a support grant that is still running (reconcileSubscription protects it while it does). It must never be
+// NULL: an active plan without grant_until scanned NULL into a bool and failed the whole workspace list.
+const grantedSQL = `(grant_until IS NOT NULL AND grant_until>now() AND state='active' AND provider_subscription_id IS NULL)`
 
 func readBilling(ctx context.Context, tx *db.Tx, id string) (Billing, error) {
 	var v Billing

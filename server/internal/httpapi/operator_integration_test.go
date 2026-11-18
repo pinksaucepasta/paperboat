@@ -346,6 +346,9 @@ func TestOperatorConnectedAuthenticationDisclosureAndRevocation(t *testing.T) {
 	if response := request("GET", "/v1/admin/sentry/issues", "", false); response.Code != 503 || !strings.Contains(response.Body.String(), "sentry_not_configured") {
 		t.Fatalf("Sentry disabled state %d", response.Code)
 	}
+	if response := request("GET", "/v1/admin/release-authority/requests", "", false); response.Code != 503 || !strings.Contains(response.Body.String(), "release_authority_not_configured") {
+		t.Fatalf("release authority disabled state %d %s", response.Code, response.Body.String())
+	}
 	report := backupreport.Report{DatabaseID: "http-" + user.ID, RunID: "run-" + user.ID, Kind: "backup", StartedAt: time.Now().Add(-time.Minute), CompletedAt: time.Now().Add(-time.Second), Outcome: "succeeded", Bytes: 100, SHA256: strings.Repeat("a", 64), RetainedUntil: time.Now().Add(24 * time.Hour)}
 	reportBody, _ := json.Marshal(report)
 	if response := request("POST", "/v1/operations/backups/reports", string(reportBody), true); response.Code != 401 {

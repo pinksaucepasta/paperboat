@@ -439,6 +439,14 @@ func NewRouter(opts Options) http.Handler {
 			mux.Handle("POST /v1/admin/release-authority/bundles", operatorRoute(opts, releaseAuthorityBundleImport(opts.ReleaseAuthority)))
 			mux.Handle("GET /v1/admin/release-authority/requests", operatorRoute(opts, releaseAuthorityRequests(opts.ReleaseAuthority)))
 			mux.Handle("POST /v1/admin/release-authority/requests", operatorRoute(opts, releaseAuthorityRequestCreate(opts.ReleaseAuthority)))
+		} else {
+			// Unregistered, these fell through to the edge handler and answered a misleading 401.
+			notConfigured := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				writeError(w, r, 503, "release_authority_not_configured", "Release authority has not been configured on this server.")
+			})
+			for _, route := range []string{"GET /v1/admin/release-authority/bundles", "POST /v1/admin/release-authority/bundles", "GET /v1/admin/release-authority/requests", "POST /v1/admin/release-authority/requests"} {
+				mux.Handle(route, operatorRoute(opts, notConfigured))
+			}
 		}
 		if opts.ConfigCredentials != nil {
 			mux.HandleFunc("POST /v1/config/credentials", configCredentialIssue(opts.ConfigCredentials))

@@ -218,6 +218,19 @@ func TestReadUsesCurrentDatabaseRoleAndAuditsAvailability(t *testing.T) {
 	if value, err = service.Read(ctx, actor, "workspaces", "past_due", "team:operator_", 1); err != nil || len(value.(BillingPage).Workspaces) != 1 || value.(BillingPage).Workspaces[0].ID != workspaceID {
 		t.Fatalf("workspaces=%#v err=%v", value, err)
 	}
+	// An active plan with no grant_until and no subscription is not granted (the expression was NULL and broke the list).
+	if _, err := store.Pool().Exec(ctx, `UPDATE billing_workspaces SET state='active' WHERE id=$1`, workspaceID); err != nil {
+		t.Fatal(err)
+	}
+	if value, err = service.Read(ctx, actor, "workspaces", "active", "team:operator_", 1); err != nil || len(value.(BillingPage).Workspaces) != 1 || value.(BillingPage).Workspaces[0].Granted {
+		t.Fatalf("active workspaces=%#v err=%v", value, err)
+	}
+	if value, err = service.Read(ctx, actor, "billing", workspaceID, "", 1); err != nil || value.(Billing).Granted {
+		t.Fatalf("active billing=%#v err=%v", value, err)
+	}
+	if _, err := store.Pool().Exec(ctx, `UPDATE billing_workspaces SET state='past_due' WHERE id=$1`, workspaceID); err != nil {
+		t.Fatal(err)
+	}
 	if value, err = service.Read(ctx, actor, "billing_operations", "uncertain", "billop_operator_", 1); err != nil || len(value.(BillingOperationPage).Operations) != 1 || value.(BillingOperationPage).Operations[0].ID != billingOpID {
 		t.Fatalf("billing operations=%#v err=%v", value, err)
 	}
