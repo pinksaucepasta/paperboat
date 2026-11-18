@@ -258,8 +258,8 @@ type Billing struct {
 }
 
 // FairUse holds the slowdown speeds and relay tiers (user decisions 2026-11-19: edge Free 5 GB then 512 kbit/s, Pro and Team 100 GB
-// then 1 Mbit/s; relay Free 10 GB then 512 kbit/s, paid 100 GB then 1 Mbit/s, 10 Mbit/s before). The edge included amounts are the
-// plans' allowances (PersonalAllowanceBytes, the products' allowance_bytes).
+// then 1 Mbit/s; relay Free 5 GB then 512 kbit/s, paid 100 GB then 1 Mbit/s, 10 Mbit/s before; relay and edge are counted separately). The edge
+// included amounts are the plans' allowances (PersonalAllowanceBytes, the products' allowance_bytes).
 type FairUse struct {
 	// EdgeFreeBytesPerSecond and EdgeBytesPerSecond are the speed of a Free, and of a Pro or Team, workspace's public traffic
 	// across all its Paperboat edges together once its included amount is used up, until its next billing date. The edges
@@ -300,8 +300,8 @@ type PlanLimits struct {
 	// ViewersPerSharedTerminal caps one shared terminal's viewers (abuse protection; the shared
 	// terminal itself counts as one session, its viewers do not).
 	ViewersPerSharedTerminal int `json:"viewers_per_shared_terminal"`
-	// SelfHostedCeiling is the internal anti-abuse ceiling on live previews and tunnels, and on open console terminals, of a
-	// workspace whose edges are all self-hosted. It protects the database and the projections, is never shown as a plan limit,
+	// SelfHostedCeiling is the internal anti-abuse ceiling on live previews and tunnels of a workspace whose edges are all
+	// self-hosted (console browser terminals always go through Paperboat's edges and keep the plan limit). It protects the database and the projections, is never shown as a plan limit,
 	// and is the only limit such a workspace meets (user decision 2026-11-19).
 	SelfHostedCeiling int `json:"self_hosted_ceiling"`
 	// PublicTCP bounds concurrent public raw-TCP tunnels (user decision 2026-10-27).
@@ -637,7 +637,7 @@ func Default() Config {
 		},
 		RateLimits:        RateLimits{SDKSessionPerMinute: 30, SDKSessionBurst: 10, SDKDescriptorPerMinute: 120, SDKDescriptorBurst: 32, SignInPerMinute: 30, SignInBurst: 10, TokenFailuresPerMinute: 20, TokenFailuresBurst: 10, MachinePeerNetworkConfigPerMinute: 30, MachinePeerNetworkConfigBurst: 20, AbuseReportsPerMinute: 5, AbuseReportsBurst: 10, BrowserBeginPerMinute: 60, BrowserBeginBurst: 20, BrowserBeginGlobalPerMinute: 3000, BrowserBeginGlobalBurst: 500, BrowserBeginMaxLive: 20000, TunnelAddressPerMinute: 6, TunnelAddressBurst: 10, MaxClients: 100000},
 		APITokens:         APITokens{MaxLifetimeDays: 365, DefaultLifetimeDays: 90, MaxPerMember: 100, RetrySeconds: 600},
-		Billing:           Billing{FairUse: FairUse{EdgeFreeBytesPerSecond: 64_000, EdgeBytesPerSecond: 125_000, RelayMbit: 10, RelayFreeIncludedBytes: 10_000_000_000, RelayIncludedBytes: 100_000_000_000, RelayFreeSlowMbit: 0.512, RelaySlowMbit: 1}, TopupMaxQuantity: 100, TeamTrialDays: 14, PersonalAllowanceBytes: new(int64(5_000_000_000)), Limits: PlanLimits{SDK: SDKLimits{SessionsPerToken: 10, SessionsPerAccount: 100, OperationsPerToken: 32, OperationsPerAccount: 128}, Machines: PlanLimit{Free: 100, Pro: 1000, TeamCeiling: 10000}, Publications: PlanLimit{Free: 100, Pro: 1000, TeamCeiling: 10000}, BrowserTerminals: PlanLimit{Free: 10, Pro: 100, TeamCeiling: 1000}, ViewersPerSharedTerminal: 50, SelfHostedCeiling: 10000, PublicTCP: PublicTCPLimit{Free: 1, Pro: 10, TeamPerSeat: 10}}},
+		Billing:           Billing{FairUse: FairUse{EdgeFreeBytesPerSecond: 64_000, EdgeBytesPerSecond: 125_000, RelayMbit: 10, RelayFreeIncludedBytes: 5_000_000_000, RelayIncludedBytes: 100_000_000_000, RelayFreeSlowMbit: 0.512, RelaySlowMbit: 1}, TopupMaxQuantity: 100, TeamTrialDays: 14, PersonalAllowanceBytes: new(int64(5_000_000_000)), Limits: PlanLimits{SDK: SDKLimits{SessionsPerToken: 10, SessionsPerAccount: 100, OperationsPerToken: 32, OperationsPerAccount: 128}, Machines: PlanLimit{Free: 100, Pro: 1000, TeamCeiling: 10000}, Publications: PlanLimit{Free: 100, Pro: 1000, TeamCeiling: 10000}, BrowserTerminals: PlanLimit{Free: 10, Pro: 100, TeamCeiling: 1000}, ViewersPerSharedTerminal: 50, SelfHostedCeiling: 10000, PublicTCP: PublicTCPLimit{Free: 1, Pro: 10, TeamPerSeat: 10}}},
 		Business:          defaultBusiness(),
 		WorkspacePolicy:   defaultWorkspacePolicy(),
 		RuntimeBaseDomain: "localhost",
