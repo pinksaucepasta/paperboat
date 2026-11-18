@@ -210,7 +210,7 @@ func (s *Service) Preview(ctx context.Context, keepSessionHash []byte) (Preview,
 func (s *Service) keyChecks(ctx context.Context, p Preview) (Preview, error) {
 	var published []string
 	p.MintActive, published = s.cfg.Mint.KeyIDs()
-	p.MintKeys = published
+	p.MintKeys, p.MintToWithdraw, p.SessionKeys = published, []string{}, []string{}
 	for _, id := range published {
 		if id != p.MintActive {
 			p.MintToWithdraw = append(p.MintToWithdraw, id)
