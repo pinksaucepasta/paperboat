@@ -106,7 +106,7 @@ func validateRotationPlanFields(p RotationPlan) error {
 }
 
 func rotationPlanHash(plan RotationPlan) (string, error) {
-	payload, err := json.Marshal(rotationPlanDocument{Protocol: ProtocolName, Version: ProtocolVersion, AccountID: plan.AccountID, TunnelID: plan.TunnelID, OperationID: plan.OperationID, Targets: plan.Targets})
+	payload, err := json.Marshal(rotationPlanDocument{Protocol: ProtocolName, Version: transcriptVersion, AccountID: plan.AccountID, TunnelID: plan.TunnelID, OperationID: plan.OperationID, Targets: plan.Targets})
 	if err != nil {
 		return "", err
 	}
@@ -243,7 +243,7 @@ func CredentialRotationProofPayload(proof CredentialRotationProof) ([]byte, erro
 		return nil, err
 	}
 	return json.Marshal(rotationProofTranscript{
-		Domain: "paperboat.connector.credential-rotation.v1", Protocol: ProtocolName, Version: ProtocolVersion,
+		Domain: "paperboat.connector.credential-rotation.v1", Protocol: ProtocolName, Version: transcriptVersion,
 		AccountID: proof.AccountID, TunnelID: proof.TunnelID, OperationID: proof.OperationID, ConnectorID: proof.ConnectorID, HostID: proof.HostID,
 		SessionID: proof.SessionID, ProcessGeneration: proof.ProcessGeneration, TargetSetHash: proof.TargetSetHash,
 		OldCredentialGeneration: proof.OldCredentialGeneration, NewCredentialGeneration: proof.NewCredentialGeneration,

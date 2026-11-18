@@ -98,7 +98,7 @@ func decodeAndValidateAssetTargetCustom(body []byte, now time.Time) (assetTarget
 	if err != nil {
 		return assetTargetCustom{}, fmt.Errorf("encode signed release index: %w", err)
 	}
-	index, err := releaseindex.Decode(bytes.NewReader(indexBody), now)
+	index, err := releaseindex.DecodePublished(bytes.NewReader(indexBody), now)
 	if err != nil {
 		return assetTargetCustom{}, fmt.Errorf("signed release index is invalid: %w", err)
 	}

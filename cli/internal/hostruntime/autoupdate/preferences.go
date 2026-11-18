@@ -186,8 +186,8 @@ func readPrivateJSON(path string, out any) (result error) {
 	if len(raw) > 4096 {
 		return ErrInvalidConfig
 	}
+	// A newer build may have written this before an update rolled back to this one: ignore its fields.
 	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(out); err != nil {
 		return updateFailure("automatic update state is invalid", ErrInvalidConfig, err)
 	}

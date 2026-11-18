@@ -51,8 +51,16 @@ func TestFrameRejectsOversizeBeforeAllocation(t *testing.T) {
 	}
 }
 
-func TestFrameRejectsUnknownFieldsAndInvalidUTF8(t *testing.T) {
-	for _, payload := range [][]byte{[]byte(`{"type":"heartbeat","request_id":"r","version":"1.0","wat":1}`), {0xff}} {
+// A frame from a newer peer (an added field, a newer version stamp) is read; invalid bytes are not.
+func TestFrameToleratesNewerPeerAndRejectsInvalidUTF8(t *testing.T) {
+	newer := []byte(`{"type":"heartbeat","request_id":"r","version":"1.4","wat":1}`)
+	var newerWire bytes.Buffer
+	_ = binary.Write(&newerWire, binary.BigEndian, uint32(len(newer)))
+	newerWire.Write(newer)
+	if _, err := ReadFrame(&newerWire); err != nil {
+		t.Fatalf("frame from a newer peer refused: %v", err)
+	}
+	for _, payload := range [][]byte{{0xff}} {
 		var wire bytes.Buffer
 		var p [4]byte
 		binary.BigEndian.PutUint32(p[:], uint32(len(payload)))

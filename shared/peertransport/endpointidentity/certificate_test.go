@@ -8,6 +8,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/hex"
+	"errors"
 	"testing"
 	"time"
 
@@ -61,6 +62,11 @@ func TestCertificateRejectsTamperingSubstitutionAndExpiry(t *testing.T) {
 		t.Fatal(err)
 	}
 	raw, _ := certificate.MarshalBinary()
+	newer := append([]byte(nil), raw...)
+	newer[4] = ProtocolVersion + 1
+	if _, err := Parse(newer); !errors.Is(err, ErrUnsupportedVersion) {
+		t.Fatalf("newer layout error=%v, want ErrUnsupportedVersion", err)
+	}
 	checks := []struct {
 		name     string
 		raw      []byte

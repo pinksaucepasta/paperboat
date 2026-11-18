@@ -58,6 +58,11 @@ func TestVerifyCanonicalEndpointCertificate(t *testing.T) {
 	if certificate.Fingerprint != sha256.Sum256(raw) || certificate.Role.String() != "machine" || len(certificate.Raw) != len(raw) {
 		t.Fatalf("certificate=%+v", certificate)
 	}
+	newer := append([]byte(nil), raw...)
+	newer[4] = ProtocolVersion + 1
+	if _, err := Verify(newer, rootPublic, Expected{}, now); !errors.Is(err, ErrUnsupportedVersion) {
+		t.Fatalf("newer layout error=%v, want ErrUnsupportedVersion", err)
+	}
 	raw[10] ^= 1
 	if _, err := Verify(raw, rootPublic, Expected{}, now); !errors.Is(err, ErrSignature) {
 		t.Fatalf("tamper error=%v", err)

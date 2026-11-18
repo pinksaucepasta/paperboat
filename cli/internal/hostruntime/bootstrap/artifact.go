@@ -186,8 +186,9 @@ func fetchVerifiedReleaseComponentWithRoot(ctx context.Context, repositoryURL, s
 
 func decodeTUFAssetCustom(raw json.RawMessage) (tufAssetCustom, bool) {
 	var custom tufAssetCustom
+	// Signed by TUF; unknown fields are ignored like TUF's own unrecognized fields, so a released
+	// updater reads every later publication (shared/releaseindex.Decode states the enum rule).
 	decoder := json.NewDecoder(strings.NewReader(string(raw)))
-	decoder.DisallowUnknownFields()
 	var extra any
 	if decoder.Decode(&custom) != nil || decoder.Decode(&extra) != io.EOF {
 		return tufAssetCustom{}, false

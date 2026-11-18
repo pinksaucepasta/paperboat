@@ -30,7 +30,9 @@ func AvailableCapabilities(providers ...CapabilityProvider) (map[string]bool, er
 	return available, nil
 }
 
+// ProtocolVersion is the highest version this build speaks and MinProtocolVersion the lowest.
 const ProtocolVersion = "1.0"
+const MinProtocolVersion = "1.0"
 
 const ProtocolIncompatible Code = "protocol_incompatible"
 
@@ -52,11 +54,27 @@ type Welcome struct {
 	Capabilities []string
 }
 
+// CompatibleVersion accepts any well-formed frame version stamp. The hello exchange (Negotiate) is the
+// protocol gate; a newer peer stamps its own build's version, and refusing it would cut released
+// peers off from every later release.
+func CompatibleVersion(version string) bool {
+	_, ok := versionKey(version)
+	return ok
+}
+
+// Negotiate answers the highest version inside both the peer's [minVersion, maxVersion] and this
+// build's [MinProtocolVersion, ProtocolVersion].
 func (n Negotiator) Negotiate(minVersion, maxVersion string, offered []string) (Welcome, error) {
-	minMajor, minMinor, minOK := parseVersion(minVersion)
-	maxMajor, maxMinor, maxOK := parseVersion(maxVersion)
-	if !minOK || !maxOK || minMajor != 1 || maxMajor != 1 || minMinor > 0 || maxMinor < 0 || minMinor > maxMinor {
+	peerMin, okMin := versionKey(minVersion)
+	peerMax, okMax := versionKey(maxVersion)
+	ownMin, _ := versionKey(MinProtocolVersion)
+	ownMax, _ := versionKey(ProtocolVersion)
+	if !okMin || !okMax || peerMin > peerMax || peerMax < ownMin || peerMin > ownMax {
 		return Welcome{}, &Error{Code: ProtocolIncompatible}
+	}
+	version := ProtocolVersion
+	if peerMax < ownMax {
+		version = maxVersion
 	}
 	offeredSet := make(map[string]bool, len(offered))
 	for _, capability := range offered {
@@ -78,15 +96,17 @@ func (n Negotiator) Negotiate(minVersion, maxVersion string, offered []string) (
 		selected = append(selected, capability)
 	}
 	sort.Strings(selected)
-	return Welcome{Version: ProtocolVersion, Capabilities: selected}, nil
+	return Welcome{Version: version, Capabilities: selected}, nil
 }
 
-func parseVersion(version string) (int, int, bool) {
+// versionKey orders canonical "major.minor" versions; components are capped so the key cannot overflow.
+func versionKey(version string) (uint64, bool) {
 	majorText, minorText, ok := strings.Cut(version, ".")
-	if !ok || majorText == "" || minorText == "" || strings.Contains(minorText, ".") {
-		return 0, 0, false
-	}
 	major, errMajor := strconv.Atoi(majorText)
 	minor, errMinor := strconv.Atoi(minorText)
-	return major, minor, errMajor == nil && errMinor == nil && major >= 0 && minor >= 0
+	if !ok || errMajor != nil || errMinor != nil || strconv.Itoa(major) != majorText || strconv.Itoa(minor) != minorText ||
+		major < 0 || minor < 0 || major > 1<<20 || minor > 1<<20 {
+		return 0, false
+	}
+	return uint64(major)<<32 | uint64(minor), true
 }

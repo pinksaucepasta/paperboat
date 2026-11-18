@@ -290,7 +290,7 @@ func validAssetTargetCustom(raw json.RawMessage, version, repository, name strin
 }
 
 func decodePublishedReleaseIndex(raw json.RawMessage, now time.Time) (publishedReleaseIndex, bool) {
-	index, err := releaseindex.Decode(bytes.NewReader(raw), now)
+	index, err := releaseindex.DecodePublished(bytes.NewReader(raw), now)
 	if err != nil || !SupportedPlatformArchitecture(index.Platform, index.Architecture) {
 		return publishedReleaseIndex{}, false
 	}

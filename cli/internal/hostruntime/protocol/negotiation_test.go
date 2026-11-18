@@ -30,8 +30,21 @@ func TestNegotiationRequiresVersionAndRequiredCapabilities(t *testing.T) {
 			t.Fatalf("err=%v want=%s", err, tc.code)
 		}
 	}
-	if _, err := n.Negotiate("1.0", "1.1", []string{"terminal.v1", "health.v1"}); err != nil {
-		t.Fatalf("compatible minor range: %v", err)
+	// A newer client offering a wider range (another major included) still meets this host.
+	for _, r := range [][2]string{{"1.0", "1.1"}, {"1.0", "2.0"}, {"0.5", "3.4"}} {
+		if w, err := n.Negotiate(r[0], r[1], []string{"terminal.v1", "health.v1"}); err != nil || w.Version != ProtocolVersion {
+			t.Fatalf("range %v: welcome=%+v err=%v", r, w, err)
+		}
+	}
+	for _, r := range [][2]string{{"1.1", "2.0"}, {"2.0", "2.3"}} {
+		if _, err := n.Negotiate(r[0], r[1], []string{"terminal.v1", "health.v1"}); err == nil {
+			t.Fatalf("range %v without %s accepted", r, ProtocolVersion)
+		}
+	}
+	for v, want := range map[string]bool{"1.0": true, "1.3": true, "2.0": true, "1": false, "": false, "a.b": false} {
+		if CompatibleVersion(v) != want {
+			t.Errorf("CompatibleVersion(%q) != %v", v, want)
+		}
 	}
 }
 

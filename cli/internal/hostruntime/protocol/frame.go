@@ -58,7 +58,7 @@ func (f Frame) Validate() error {
 	if !allowedTypes[f.Type] {
 		return &Error{Code: UnsupportedMessage}
 	}
-	if len(f.RequestID) < 1 || len(f.RequestID) > 128 || f.Version != ProtocolVersion {
+	if len(f.RequestID) < 1 || len(f.RequestID) > 128 || !CompatibleVersion(f.Version) {
 		return &Error{Code: InvalidFrame}
 	}
 	if f.OperationID != "" && (len(f.OperationID) < 8 || len(f.OperationID) > 128) {
@@ -177,8 +177,8 @@ func ReadFrameLimit(r io.Reader, limit uint32) (Frame, error) {
 		return Frame{}, &Error{Code: Malformed, Cause: err}
 	}
 	var f Frame
+	// Frames are not authorization claims: a field a newer peer adds is ignored (AGENTS.md).
 	dec := json.NewDecoder(bytesReader(b))
-	dec.DisallowUnknownFields()
 	if err := dec.Decode(&f); err != nil {
 		return Frame{}, &Error{Code: Malformed, Cause: err}
 	}
