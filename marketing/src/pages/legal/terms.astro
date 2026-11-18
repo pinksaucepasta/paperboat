@@ -4,18 +4,15 @@ import Fact from "../../components/Fact.astro"
 import { sourceUrl } from "../../site"
 
 const sections: [string, string][] = [
-  ["agreement", "This agreement"],
-  ["accounts", "Accounts and teams"],
+  ["agreement", "Agreement"],
+  ["accounts", "Accounts"],
   ["service", "The service"],
-  ["your-content", "Your machines and your content"],
-  ["rules", "Rules of use"],
-  ["plans", "Plans, payment and renewal"],
-  ["limits", "Limits and fair use"],
-  ["suspension", "Suspension and termination"],
-  ["data", "Your data, privacy and deletion"],
-  ["open-source", "Open source and self-hosting"],
+  ["content", "Your content"],
+  ["payment", "Plans and payment"],
+  ["termination", "Suspension and termination"],
+  ["open-source", "Open source"],
   ["warranty", "No warranty"],
-  ["liability", "Limitation of liability"],
+  ["liability", "Liability"],
   ["indemnity", "Indemnity"],
   ["law", "Law and disputes"],
   ["changes", "Changes"],
@@ -24,50 +21,34 @@ const sections: [string, string][] = [
 ]
 ---
 
-<Legal slug="terms" description="The agreement between you and Paperboat for the hosted service: accounts, plans, payment, fair use, suspension and liability." {sections}>
+<Legal slug="terms" description="The agreement between you and Paperboat for the hosted service: accounts, plans, payment, suspension and liability." {sections}>
   <p slot="intro">
-    These terms are the agreement between you and Paperboat (“Paperboat”, “we”, “us”) for using the hosted Paperboat service. Paperboat is
-    operated by <Fact name="operators" /> until Paperboat, Inc., a Delaware C corporation, is formed (section 16). They are
-    written to be read. Where a word matters legally, we say what we mean by it.
+    These terms are the agreement between you and Paperboat (“we”, “us”) for the hosted Paperboat service. Paperboat is operated by
+    <Fact name="operators" /> until Paperboat, Inc., a Delaware C corporation, is formed.
   </p>
 
   <section id="agreement">
-    <h2>1. This agreement</h2>
+    <h2>1. Agreement</h2>
     <div class="prose">
       <p>
-        By creating an account, connecting a machine, or paying for a plan, you agree to these terms, the
-        <a href="/legal/acceptable-use/">Acceptable Use Policy</a> and the <a href="/legal/refunds/">Refund Policy</a>, which are part of them.
-        The <a href="/legal/privacy/">Privacy Policy</a> says how we handle personal data. For a team that needs it, the
-        <a href="/legal/dpa/">Data Processing Addendum</a> also applies. These terms take effect on <Fact name="effective" />.
-      </p>
-      <p>
-        If you use Paperboat for an organisation, for example with a work email or a team, you agree for that organisation and confirm you
-        may do so. “You” then means both you and the organisation.
+        By creating an account or paying for a plan, you accept these terms, the <a href="/legal/acceptable-use/">Acceptable Use Policy</a>
+        and the <a href="/legal/refunds/">Refund Policy</a>. The <a href="/legal/privacy/">Privacy Policy</a> covers personal data, and the
+        <a href="/legal/dpa/">Data Processing Addendum</a> applies where data protection law requires one. These terms take effect on
+        <Fact name="effective" />. If you accept them for an organisation, you confirm you may bind it.
       </p>
     </div>
   </section>
 
   <section id="accounts">
-    <h2>2. Accounts and teams</h2>
+    <h2>2. Accounts</h2>
     <div class="prose">
       <ul>
-        <li>You must be at least 16 years old, and old enough to make a binding contract where you live to buy a paid plan.</li>
+        <li>You must be at least 16, and an adult to buy a paid plan.</li>
+        <li>One account is for one person. People who work together use a team; its owner manages members, access and seats.</li>
+        <li>You are responsible for everything done with your account, machines, tokens and keys. Tell us at once if someone else has access.</li>
         <li>
-          You sign in through our identity provider with an email address, a social login or your organisation's single sign-on. Keep the
-          email current: it is where we send notices.
-        </li>
-        <li>
-          You are responsible for everything done with your account, its machines, tokens and keys. Tell us at once if you think someone else
-          has access. Removing a machine or revoking a token in the console stops it from connecting.
-        </li>
-        <li>
-          One account is for one person. People who work together use a team. The team's owner decides who is a member, what each member can
-          reach, and pays for the team's seats. Members' machines in a team can be reached by other members as the owner configures.
-        </li>
-        <li>
-          You may not use Paperboat if you are subject to sanctions of the United Nations, the European Union, the United Kingdom, or the United
-          States, or from a place those sanctions cover, and you may not use it in breach of export or sanctions law. Breaking this
-          is a material breach of these terms.
+          You may not use Paperboat if you are subject to UN, EU, UK or US sanctions, or are in a sanctioned place. Breaking this is a material
+          breach.
         </li>
       </ul>
     </div>
@@ -77,238 +58,138 @@ const sections: [string, string][] = [
     <h2>3. The service</h2>
     <div class="prose">
       <p>
-        Paperboat connects machines you control and gives you access to them: terminals, remote commands, SSH, file transfers, private access to
-        ports, public previews and tunnels, encrypted environment variables (ENV), teams, and a web console. The hosted service is our control
-        plane, our relays and our edges. The <code>pb</code> program runs on your machines.
+        Traffic between your machines is end-to-end encrypted. Public previews and tunnels are not: HTTPS ends at our edge. See
+        <a href="/security/">Security</a>. We do not guarantee availability. We may change features; if a change removes something you pay
+        for, we tell you first and you may cancel. Beta features may change or end without notice.
       </p>
       <p>
-        Traffic between your machines is end-to-end encrypted, and goes directly between them where the network allows or through a relay that
-        forwards it without being able to read it. Public previews and tunnels are different: HTTPS ends at our edge, which reads each request
-        to route it. <a href="/security/">Security</a> describes exactly who can read what.
-      </p>
-      <p>
-        We work to keep the service available, but we do not promise a level of availability, and we may change, add or remove features. We
-        tell you in advance by email or in the console when a change takes away something you pay for, and you may cancel if it does.
-        Features marked as preview or beta are offered as they are and may change or end without notice.
+        Plans have limits, and traffic through our relays and edges has a monthly fair-use amount, then a slower rate. Both are on the
+        <a href="/pricing/">pricing page</a> and in the <a href="/legal/acceptable-use/#fair-use">Acceptable Use Policy</a>.
       </p>
     </div>
   </section>
 
-  <section id="your-content">
-    <h2>4. Your machines and your content</h2>
+  <section id="content">
+    <h2>4. Your content</h2>
     <div class="prose">
       <p>
-        Everything on your machines, everything you send through Paperboat, and everything you publish stays yours. We claim no rights in it.
-        You give us only the permission we need to run the service for you: to carry your traffic, to route and serve requests to your public
-        links, to store the data the service needs (such as machine names, ENV ciphertext and audit events), and to act on abuse.
-      </p>
-      <p>
-        You are responsible for what runs on your machines and what your previews and tunnels serve, for having the right to publish it, and
-        for securing the applications you expose. A public link without access control can be opened by anyone with its address.
-      </p>
-      <p>
-        If you send us feedback or ideas, we may use them without owing you anything. We do not use your content to train AI models.
+        What is on your machines and what you send or publish stays yours. You give us only the permission needed to run the service and act on
+        abuse. You are responsible for what you run and publish, and for having the right to publish it. We do not use your content to train AI
+        models. We may use feedback you give us freely.
       </p>
     </div>
   </section>
 
-  <section id="rules">
-    <h2>5. Rules of use</h2>
-    <div class="prose">
-      <p>
-        Follow the <a href="/legal/acceptable-use/">Acceptable Use Policy</a> and the law. In short: nothing illegal or harmful, no attacks on
-        others or on us, no gaming the free plan, and no using previews and tunnels as a content-delivery network or file host. Do not get
-        around plan limits, fair-use limits, rate limits, blocks or suspensions, and do not resell the hosted service without our written
-        agreement.
-      </p>
-    </div>
-  </section>
-
-  <section id="plans">
-    <h2>6. Plans, payment and renewal</h2>
+  <section id="payment">
+    <h2>5. Plans and payment</h2>
     <div class="prose">
       <ul>
-        <li>The Free plan costs nothing. Paid plans, seats and extra bandwidth are priced on the <a href="/pricing/">pricing page</a> and in the console at the time you buy.</li>
-        <li>
-          Payment is taken by our payment processor, Stripe. Prices exclude taxes unless shown otherwise; we add the taxes the law requires.
-          Receipts and invoices are in the console.
-        </li>
-        <li>
-          Paid plans renew automatically, monthly or yearly, at the then-current price, until you cancel. Cancel any time in the console:
-          cancelling stops the next renewal, and the plan keeps working until the end of the paid period. We give at least 30 days' notice by
-          email of a price increase, and it applies from your next renewal.
-        </li>
-        <li>Seats added to a team are charged at once for the rest of the period. Seats removed stay paid until the next billing date.</li>
-        <li>
-          The service starts as soon as you pay. Payments are not refunded, as the <a href="/legal/refunds/">Refund Policy</a> describes,
-          subject to the rights consumer law gives you there.
-        </li>
-        <li>
-          If a payment fails, we tell you and retry. If it stays unpaid after a 7-day grace period, the workspace moves to the
-          Free plan's limits.
-        </li>
+        <li>Prices are on the pricing page and in the console. Stripe takes payment. Taxes are added where required.</li>
+        <li>Paid plans renew automatically until you cancel. Cancelling in the console stops the next renewal; the plan runs to the end of the paid period.</li>
+        <li>We email you at least 30 days before a price increase, which applies from your next renewal.</li>
+        <li>Added seats are charged at once for the rest of the period. Removed seats stay paid until the next billing date.</li>
+        <li>Payments are not refunded; see the <a href="/legal/refunds/">Refund Policy</a>.</li>
+        <li>If a payment stays unpaid 7 days after it fails, the workspace moves to the Free plan's limits.</li>
       </ul>
     </div>
   </section>
 
-  <section id="limits">
-    <h2>7. Limits and fair use</h2>
+  <section id="termination">
+    <h2>6. Suspension and termination</h2>
     <div class="prose">
+      <p>You can cancel, remove machines or delete your account at any time in the console. Deletion is immediate and final.</p>
       <p>
-        Each plan has limits on machines, previews and tunnels, terminals in the browser, and other resources, shown on the pricing page.
-        Traffic through our relays and edges has a monthly fair-use amount at full speed and a slower rate after it, set out in the
-        <a href="/legal/acceptable-use/#fair-use">Acceptable Use Policy</a>. Traffic directly between your machines, and through relays or
-        edges you run yourself, is not limited by us.
+        We may block a link, suspend or close an account if you break these terms or the Acceptable Use Policy, put others at risk, dispute a
+        valid charge, or the law requires it. We warn you first where we can. We may also close an account or stop the service without cause on
+        30 days' notice, and then refund the unused prepaid part.
       </p>
-    </div>
-  </section>
-
-  <section id="suspension">
-    <h2>8. Suspension and termination</h2>
-    <div class="prose">
-      <p>
-        <strong>By you.</strong> You can stop using Paperboat, cancel a plan, remove machines or delete your account at any time in the console.
-        Deleting your account takes effect at once and cannot be undone.
-      </p>
-      <p>
-        <strong>By us.</strong> We may block a preview or tunnel, suspend an account or team, or close it, if you seriously or repeatedly break
-        these terms or the Acceptable Use Policy, if your use puts other people, the service or us at risk, if a payment is disputed, or if the
-        law requires it. Where we can, we warn you first and give you time to fix the problem; where the harm is serious or ongoing, we act first
-        and tell you afterwards. The <a href="/legal/acceptable-use/#enforcement">Acceptable Use Policy</a> describes the steps and how to
-        appeal.
-      </p>
-      <p>
-        We may also close an account without a breach on your part, or stop offering the hosted service, with at least 30 days' notice. In that
-        case we refund the unused part of any period you paid for in advance.
-      </p>
-      <p>
-        When an account closes, access ends and we delete its data as described in the <a href="/legal/privacy/#retention">Privacy Policy</a>.
-        Payments already due, and sections 4, 6, 9, 11, 12, 13 and 14, continue to apply.
-      </p>
-    </div>
-  </section>
-
-  <section id="data">
-    <h2>9. Your data, privacy and deletion</h2>
-    <div class="prose">
-      <p>
-        We handle personal data as the <a href="/legal/privacy/">Privacy Policy</a> says. For data about other people that you or your team put
-        into Paperboat, such as team members' accounts and audit events, we act as your processor under the
-        <a href="/legal/dpa/">Data Processing Addendum</a>, which is part of these terms for every team and for any customer subject to data
-        protection law that requires one.
-      </p>
-      <p>
-        Back up what matters to you. Paperboat does not back up your machines. ENV values are encrypted with keys only you
-        hold: if you lose your master password and your recovery code, we cannot recover them.
-      </p>
+      <p>Sections 4 to 11, and payments already due, survive termination.</p>
     </div>
   </section>
 
   <section id="open-source">
-    <h2>10. Open source and self-hosting</h2>
+    <h2>7. Open source</h2>
     <div class="prose">
       <p>
-        Paperboat's source code is public at <a href={sourceUrl} rel="noopener">{sourceUrl.replace("https://", "")}</a>. Your use of the code
-        itself, including running your own relay, edge or server, is governed by its licences (MIT for the client, relay and edge; AGPL-3.0 for
-        the server and console), not by these terms. These terms govern the hosted service and your account. The Paperboat name and logo are
-        ours; the licences do not grant rights to them.
+        The source code at <a href={sourceUrl} rel="noopener">{sourceUrl.replace("https://", "")}</a> is governed by its licences (MIT and
+        AGPL-3.0), not these terms. The Paperboat name and logo are ours.
       </p>
     </div>
   </section>
 
   <section id="warranty">
-    <h2>11. No warranty</h2>
+    <h2>8. No warranty</h2>
     <div class="prose">
       <p>
-        To the extent the law allows, the service is provided “as is” and “as available”, without warranties of any kind, express or implied,
-        including that it is fit for a particular purpose, uninterrupted, error-free or secure against every attack. Nothing in these terms
-        excludes a guarantee or right that consumer law gives you and that cannot be excluded.
+        To the extent the law allows, the service is provided “as is” and “as available”, without warranties of any kind, including fitness for
+        a purpose or uninterrupted, error-free or secure operation. Back up what matters to you. If you lose your ENV master password and
+        recovery code, we cannot recover your values.
       </p>
     </div>
   </section>
 
   <section id="liability">
-    <h2>12. Limitation of liability</h2>
+    <h2>9. Liability</h2>
     <div class="prose">
       <p>To the extent the law allows:</p>
       <ol>
-        <li>
-          Neither side is liable to the other for indirect or consequential loss, or for lost profits, revenue, data or goodwill, even if it was
-          told the loss was possible.
-        </li>
-        <li>
-          Each side's total liability arising from these terms or the service is limited to the greater of the amount you paid us in the 12
-          months before the event that caused it, and 100 US dollars.
-        </li>
-        <li>
-          These limits do not apply to your payment obligations, to your liability under section 13, or to liability that the law does not
-          allow to be limited, such as for death or personal injury caused by negligence, for fraud, or for intent or gross negligence.
-        </li>
+        <li>Neither side is liable for indirect or consequential loss, or for lost profits, revenue, data or goodwill.</li>
+        <li>Each side's total liability is limited to the greater of what you paid us in the 12 months before the claim and US $100.</li>
+        <li>These limits do not apply to your payment obligations, your indemnity, fraud, gross negligence, intent, or death or injury caused by negligence.</li>
       </ol>
     </div>
   </section>
 
   <section id="indemnity">
-    <h2>13. Indemnity</h2>
+    <h2>10. Indemnity</h2>
     <div class="prose">
       <p>
-        If someone makes a claim against us because of what you ran, sent or published through Paperboat, or because you broke these terms or
-        the law, you will cover our reasonable costs and any amount we must pay as a result. We will tell you about the claim promptly and let
-        you take part in the defence. This section does not apply to you as a consumer to the extent consumer law does not allow it.
+        You will cover our reasonable costs and liabilities from third-party claims about what you ran or published through Paperboat, or about
+        your breach of these terms. This does not apply to consumers where the law forbids it.
       </p>
     </div>
   </section>
 
   <section id="law">
-    <h2>14. Law and disputes</h2>
+    <h2>11. Law and disputes</h2>
     <div class="prose">
       <p>
-        These terms are governed by the law of <Fact name="law" />, and disputes go to <Fact name="courts" />. If you are a consumer, you also
-        keep the protection of the mandatory law of the country where you live, and may bring a claim in its courts. Please write to us first;
-        most problems are solved by a conversation.
+        These terms are governed by the law of <Fact name="law" />. Disputes go to <Fact name="courts" />. Consumers keep the mandatory
+        protections and courts of the country where they live.
       </p>
     </div>
   </section>
 
   <section id="changes">
-    <h2>15. Changes</h2>
+    <h2>12. Changes</h2>
     <div class="prose">
       <p>
-        We may change these terms. For a change that matters to you, we email you and show it in the console at least 30 days before it takes
-        effect, unless the law or a security problem requires it sooner. If you do not agree, cancel and stop using the service before the
-        change takes effect; a payment you already made for the current period is not affected. The date at the top shows the latest version.
+        We email you at least 30 days before a material change takes effect, unless law or security requires sooner. If you do not agree,
+        cancel before then.
       </p>
     </div>
   </section>
 
   <section id="general">
-    <h2>16. General</h2>
+    <h2>13. General</h2>
     <div class="prose">
       <ul>
-        <li>These terms, with the policies they name, are the whole agreement between you and us about the hosted service.</li>
-        <li>If a part of them cannot be enforced, the rest still applies.</li>
-        <li>If we do not enforce a right at once, we have not given it up.</li>
         <li>
-          <strong>Operator and successor.</strong> Paperboat is operated by <Fact name="operators" />, who are together the party to these
-          terms, until Paperboat, Inc., a Delaware C corporation, is formed. When it is, these terms, the Data Processing Addendum, your account
-          and any subscription transfer automatically to Paperboat, Inc., which takes on all our rights and obligations under them from that day.
-          You agree to that transfer now; we tell you by email when it happens, and nothing else changes for you.
+          <strong>Successor.</strong> When Paperboat, Inc. is formed, these terms, the Data Processing Addendum, your account and any
+          subscription transfer to it automatically. You agree to that now. We will email you when it happens.
         </li>
-        <li>You may not transfer these terms without our agreement. We may transfer them to a company that takes over the service, and will tell you.</li>
-        <li>Neither side is responsible for a delay or failure caused by events outside its reasonable control.</li>
-        <li>
-          You agree to receive notices, receipts and other communications about the service electronically, by email to your account's
-          address or in the console; they count as written. You send notices to the address in section 17.
-        </li>
+        <li>You may not transfer these terms without our consent. We may transfer them to a successor of the service.</li>
+        <li>These terms and the policies they name are the whole agreement. An unenforceable part does not affect the rest. Not enforcing a right is not a waiver.</li>
+        <li>Neither side is responsible for events outside its reasonable control.</li>
+        <li>You agree to receive notices electronically, by email or in the console.</li>
       </ul>
     </div>
   </section>
 
   <section id="contact">
-    <h2>17. Contact</h2>
+    <h2>14. Contact</h2>
     <div class="prose">
-      <p>Paperboat, operated by <Fact name="operators" />. Postal address for legal notices: <Fact name="address" />. Email: <Fact name="legalEmail" />.</p>
-      <p>Abuse: <a href="/report-abuse/">report it here</a>. Security vulnerabilities: see <a href="/security/#report">Security</a>.</p>
+      <p>Paperboat, operated by <Fact name="operators" />. <Fact name="address" />. <Fact name="legalEmail" />.</p>
     </div>
   </section>
 </Legal>

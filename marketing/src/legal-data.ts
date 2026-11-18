@@ -29,8 +29,6 @@ export const company = {
   courts: "the state and federal courts located in California",
   legalEmail: "legal@mail.paperboat.cloud",
   privacyEmail: "privacy@mail.paperboat.cloud",
-  /** GDPR art. 27 (and UK GDPR): a controller outside the EU/UK that serves people there names a representative in each. */
-  euRepresentative: "TODO-USER: EU and UK representative (name and address)",
   /** The user's final answer (2026-11-19). */
   effective: "14 November 2026",
 }

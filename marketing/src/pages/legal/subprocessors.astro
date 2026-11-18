@@ -4,66 +4,48 @@ import Fact from "../../components/Fact.astro"
 
 const sections: [string, string][] = [
   ["list", "Current list"],
-  ["not-used", "What we do not use"],
-  ["changes", "Changes to this list"],
+  ["changes", "Changes"],
 ]
-// [provider, purpose, data it receives, location] (user-confirmed 2026-11-19). Self-hosted GlitchTip runs on our own server and is not a subprocessor.
+// [provider, purpose, data] (confirmed 2026-11-19). Self-hosted GlitchTip runs on our own server and is not a subprocessor.
 const providers = [
-  ["Hetzner Online GmbH", "Hosting of the control plane, the hosted relays and edges, and the private diagnostics store", "Data the control plane works with (see the Privacy Policy); ciphertext of relayed traffic; requests to public previews and tunnels while they pass; network addresses; diagnostic bundles users send", "Germany and Finland (EU)"],
-  ["PlanetScale, Inc.", "The control plane's database", "All data the control plane stores (see the Privacy Policy)", "Germany (EU, Frankfurt)"],
-  ["WorkOS, Inc.", "Sign-in, single sign-on and directory sync", "Email address, name, sign-in identifiers and sessions", "United States"],
-  ["Stripe, Inc. / Stripe Payments Europe, Ltd.", "Payments, invoices and tax", "Billing name, email, address, tax id and payment card (Stripe holds the card; we never see it)", "United States, Ireland (EU)"],
-  ["Resend, Inc.", "Service email: invitations, notices and receipts", "Recipient email address and the content of the email", "United States"],
-  ["PostHog, Inc.", "Product analytics for the website and console", "Pseudonymous events: random visit or account id, page, coarse browser, operating system and country (network address discarded)", "EU (Frankfurt)"],
-  ["Functional Software, Inc. (Sentry)", "Error reports from our servers, from about 2 December 2026", "Error messages and stack traces, scrubbed of content, tokens and secrets", "EU (Germany)"],
-  ["Cloudflare, Inc.", "DNS records that prove domain ownership for certificates", "Domain names; no personal data about users", "United States, global network"],
-  ["GitHub, Inc. (Microsoft)", "Hosting of pb release downloads", "The network address and user agent of whoever downloads a release", "United States"],
+  ["Hetzner Online GmbH", "Hosting: control plane, relays, edges, diagnostics", "Data the service holds; relayed ciphertext; public link requests in transit"],
+  ["PlanetScale, Inc.", "Database", "Data the service stores"],
+  ["WorkOS, Inc.", "Sign-in and single sign-on", "Email, name, sign-in identifiers"],
+  ["Stripe, Inc.", "Payments and tax", "Billing details and payment card"],
+  ["Resend, Inc.", "Service email", "Recipient address and message"],
+  ["PostHog, Inc.", "Product analytics", "Pseudonymous usage events"],
+  ["Functional Software, Inc. (Sentry)", "Error reports, from about 2 December 2026", "Error details with content and secrets removed"],
+  ["Cloudflare, Inc.", "DNS for certificates", "Domain names"],
+  ["GitHub, Inc.", "pb downloads", "Network address of downloaders"],
 ]
 ---
 
-<Legal slug="subprocessors" description="The service providers that process personal data for Paperboat: what each one does, what it receives and where." {sections}>
+<Legal slug="subprocessors" description="The service providers that process personal data for Paperboat, and what each one does and receives." {sections}>
   <p slot="intro">
-    These are the companies that process personal data on our behalf to run Paperboat. Each is bound by a contract that limits it to that
-    work and requires data protection at least as strict as ours. None of them can read your end-to-end encrypted traffic or ENV values.
+    These providers process personal data for us under contracts at least as protective as ours. None can read end-to-end encrypted traffic or
+    ENV values. We run servers in several regions around the world.
   </p>
 
   <section id="list">
     <h2>Current list</h2>
     <div class="scroll">
       <table class="facts">
-        <thead><tr><th scope="col">Provider</th><th scope="col">Purpose</th><th scope="col">Data</th><th scope="col">Location</th></tr></thead>
+        <thead><tr><th scope="col">Provider</th><th scope="col">Purpose</th><th scope="col">Data</th></tr></thead>
         <tbody>
           {providers.map(([provider, ...cells]) => <tr><th scope="row">{provider}</th>{cells.map((cell) => <td>{cell}</td>)}</tr>)}
         </tbody>
       </table>
     </div>
     <div class="prose">
-      <p>
-        Certificates for preview, tunnel and custom domains come from Let's Encrypt (Internet Security Research Group, United States), which
-        receives the domain names only. A team that connects its own storage bucket for recordings chooses that provider itself; it receives
-        only ciphertext. Our own error tracker runs on our own servers and shares nothing with a third party.
-      </p>
-    </div>
-  </section>
-
-  <section id="not-used">
-    <h2>What we do not use</h2>
-    <div class="prose">
-      <p>
-        No advertising networks, no data brokers, no session-recording tools, no CAPTCHA services, no SMS providers and no AI model providers.
-        Nothing you send through Paperboat is passed to an AI service.
-      </p>
+      <p>We use no advertising networks, data brokers or AI providers.</p>
     </div>
   </section>
 
   <section id="changes">
-    <h2>Changes to this list</h2>
+    <h2>Changes</h2>
     <div class="prose">
       <p>
-        We update this page at least 30 days before a new subprocessor starts processing personal data, and we email the owners of paid
-        workspaces. A customer under the <a href="/legal/dpa/">Data Processing Addendum</a> may object within those 30 days on reasonable data
-        protection grounds by writing to <Fact name="privacyEmail" />. If we cannot resolve it, the customer may end the affected service and
-        we refund the unused part of any period paid in advance.
+        We update this page 30 days before a new provider starts and email paid workspace owners. Objections go to <Fact name="privacyEmail" />.
       </p>
     </div>
   </section>
