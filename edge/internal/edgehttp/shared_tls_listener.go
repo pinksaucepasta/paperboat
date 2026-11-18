@@ -195,9 +195,13 @@ func (l *SharedTLSListener) run() {
 			l.dispatching.Add(1)
 			go func() {
 				defer l.workers.Done()
-				defer func() { <-l.slots }()
+				// The slot is freed once, and before a refused connection is closed: the client sees the close first, so a
+				// slot still held then would refuse the client's immediate retry (a dropped connection, no dispatch).
+				var free sync.Once
+				freeSlot := func() { free.Do(func() { <-l.slots }) }
+				defer freeSlot()
 				defer l.dispatching.Done()
-				l.dispatch(conn)
+				l.dispatch(conn, freeSlot)
 			}()
 		default:
 			_ = conn.Close()
@@ -205,10 +209,11 @@ func (l *SharedTLSListener) run() {
 	}
 }
 
-func (l *SharedTLSListener) dispatch(conn net.Conn) {
+func (l *SharedTLSListener) dispatch(conn net.Conn, freeSlot func()) {
 	owned := true
 	defer func() {
 		if owned {
+			freeSlot()
 			_ = conn.Close()
 		}
 	}()

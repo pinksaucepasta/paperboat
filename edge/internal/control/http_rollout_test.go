@@ -29,16 +29,23 @@ import (
 // is signed again for each send, so no nonce reaches the server twice. The requests a user waits on
 // (browser access, private access, the browser terminal handshake) survive the same cuts.
 func TestHTTPClientRequestsSurviveRolloutCut(t *testing.T) {
-	now := time.Now().UTC()
-	privateInput := testPrivateAccessGrantRequest(now)
-	privateDecision, _ := json.Marshal(PrivateAccessGrantDecision{
-		Schema: connectorprotocol.PrivateAccessSchema, Kind: "private_access_authorization", DecisionID: "decision_1", Allowed: true, Reason: "allowed",
-		ExpiresAt: now.Add(30 * time.Second), RequestID: privateInput.RequestID, CorrelationID: privateInput.CorrelationID,
-		ResourceKind: privateInput.ResourceKind, ResourceID: privateInput.ResourceID, RouteID: privateInput.RouteID,
-		ConnectorID: privateInput.ConnectorID, CarrierSessionID: privateInput.CarrierSessionID, RouteGeneration: privateInput.RouteGeneration,
-		SessionGeneration: privateInput.SessionGeneration, ProcessGeneration: privateInput.ProcessGeneration, ConfigGeneration: privateInput.ConfigGeneration,
-		AssignmentGeneration: privateInput.AssignmentGeneration, Protocol: privateInput.Protocol,
-	})
+	// The private-access grant and its decision expire 1 min and 30 s after they are minted. The table runs for far longer
+	// under load, so every subtest mints its own pair (a grant minted once for the whole table was expired by row 15).
+	var privateInput connectorprotocol.PrivateAccessRequest
+	var privateDecision string
+	mintPrivateGrant := func() {
+		now := time.Now().UTC()
+		privateInput = testPrivateAccessGrantRequest(now)
+		body, _ := json.Marshal(PrivateAccessGrantDecision{
+			Schema: connectorprotocol.PrivateAccessSchema, Kind: "private_access_authorization", DecisionID: "decision_1", Allowed: true, Reason: "allowed",
+			ExpiresAt: now.Add(30 * time.Second), RequestID: privateInput.RequestID, CorrelationID: privateInput.CorrelationID,
+			ResourceKind: privateInput.ResourceKind, ResourceID: privateInput.ResourceID, RouteID: privateInput.RouteID,
+			ConnectorID: privateInput.ConnectorID, CarrierSessionID: privateInput.CarrierSessionID, RouteGeneration: privateInput.RouteGeneration,
+			SessionGeneration: privateInput.SessionGeneration, ProcessGeneration: privateInput.ProcessGeneration, ConfigGeneration: privateInput.ConfigGeneration,
+			AssignmentGeneration: privateInput.AssignmentGeneration, Protocol: privateInput.Protocol,
+		})
+		privateDecision = string(body)
+	}
 	browser := func(c *HTTPClient) *BrowserAccessClient {
 		return &BrowserAccessClient{HTTP: c, NodeID: "edge_1", ProcessEpoch: "edge_epoch_1"}
 	}
@@ -123,14 +130,17 @@ func TestHTTPClientRequestsSurviveRolloutCut(t *testing.T) {
 			_, err := browser(c).Activate(ctx, BrowserAuthorizeRequest{Host: "app.example.test", Token: "credential", ResourceKind: "lazy_policy"})
 			return err
 		}, true, 0, nil},
-		{"private access authorize", PrivateAccessGrantAuthorizePath, string(privateDecision), func(ctx context.Context, c *HTTPClient) error {
+		{"private access authorize", PrivateAccessGrantAuthorizePath, ``, func(ctx context.Context, c *HTTPClient) error {
 			authorizer, err := NewPrivateAccessGrantClient(c, "edge_1", "edge_epoch_1")
 			if err != nil {
 				return err
 			}
 			_, err = authorizer.AuthorizePrivateAccessGrant(ctx, "signed-grant", privateInput)
 			return err
-		}, true, 0, nil},
+		}, true, 0, func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, privateDecision)
+		}},
 		{"browser terminal handshake", "/v1/edge/browser-terminal/control", ``, func(ctx context.Context, c *HTTPClient) error {
 			admission, err := (&BrowserTerminalClient{HTTP: c, NodeID: "edge_1", ProcessEpoch: "edge_epoch_1"}).Admit(ctx, "one-use", "https://dashboard.example.test", "machine.runtime.example.test")
 			if err == nil {
@@ -148,6 +158,7 @@ func TestHTTPClientRequestsSurviveRolloutCut(t *testing.T) {
 	} {
 		for cuts := 1; cuts <= controlAttempts+tc.replayable; cuts++ {
 			t.Run(fmt.Sprintf("%s/%d cuts", tc.name, cuts), func(t *testing.T) {
+				mintPrivateGrant()
 				var requests atomic.Int32
 				var noncesMu sync.Mutex
 				nonces := map[string]bool{}

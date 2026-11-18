@@ -474,6 +474,13 @@ func TestSharedTLSHTTPSConnectionsAreCapped(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("first HTTPS connection not handed off")
 	}
+	// The first connection's dispatch slot is freed just after its hand-off; wait for that, so the excess one reaches
+	// dispatch (and the name cap) instead of meeting a slot that is still full.
+	for deadline := time.Now().Add(2 * time.Second); len(manager.slots) != 0; time.Sleep(time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("the first HTTPS connection's dispatch slot was not freed at hand-off")
+		}
+	}
 	excess := hello()
 	defer excess.Close()
 	_ = excess.SetReadDeadline(time.Now().Add(2 * time.Second))
@@ -481,6 +488,10 @@ func TestSharedTLSHTTPSConnectionsAreCapped(t *testing.T) {
 		t.Fatal("excess HTTPS connection served")
 	} else if timeout, ok := err.(net.Error); ok && timeout.Timeout() {
 		t.Fatal("excess HTTPS connection held instead of refused")
+	}
+	// The refusal is seen only after the dispatch slot is free: a retry sent on seeing it must not meet a full slot.
+	if n := len(manager.slots); n != 0 {
+		t.Fatalf("a refused connection was closed with its dispatch slot still held (%d held)", n)
 	}
 	select {
 	case <-accepted:
